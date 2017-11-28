@@ -82,7 +82,9 @@ impl Tracer {
     /// # Example
     ///
     /// ```
-    /// Tracer.new().trace_filename("mytrace.ptt").data_bufsize(1024).target_pid(666);
+    /// use traceme::Tracer;
+    ///
+    /// Tracer::new().trace_filename("mytrace.ptt").data_bufsize(1024).target_pid(666);
     /// ```
     pub fn new() -> Self {
         Tracer {
