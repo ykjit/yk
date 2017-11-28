@@ -101,16 +101,20 @@ struct tracer_conf {
 };
 
 // Private prototypes.
+#ifndef TRAVIS
 static void stash_maps(pid_t, const char *);
 static void write_buf_to_disk(int, void *, __u64);
 static void read_circular_buf(void *, __u64, __u64, __u64 *, int);
 static void poll_loop(struct tracer_ctx *);
 static void *tracer_thread(void *);
+#endif
 
 // Exposed Prototypes.
 struct tracer_ctx *traceme_start_tracer(struct tracer_conf *);
 void traceme_stop_tracer(struct tracer_ctx *tr_ctx);
 
+
+#ifndef TRAVIS
 /*
  * Save linker relocation decisions so that you can later recover the
  * instruction stream from an on-disk binary.
@@ -317,6 +321,7 @@ tracer_thread(void *arg)
     DEBUG("tracer thread exit");
     pthread_exit(NULL);
 }
+#endif // TRAVIS
 
 /*
  * --------------------------------------
@@ -338,6 +343,10 @@ traceme_start_tracer(struct tracer_conf *tr_conf)
         tr_conf->trace_filename, tr_conf->map_filename,
         tr_conf->data_bufsize, tr_conf->aux_bufsize);
 
+#ifdef TRAVIS
+    DEBUG("Travis mode. Not starting tracing");
+    return NULL;
+#else
     /*
      * Dump process map to disk so that we can relate virtual addresses to the
      * on-disk instruction stream.
@@ -386,6 +395,7 @@ traceme_start_tracer(struct tracer_conf *tr_conf)
 
     DEBUG("resume");
     return tr_ctx;
+#endif
 }
 
 /*
@@ -396,8 +406,11 @@ traceme_start_tracer(struct tracer_conf *tr_conf)
  */
 void
 traceme_stop_tracer(struct tracer_ctx *tr_ctx) {
+#ifdef TRAVIS
+    (void) tr_ctx;
+    DEBUG("Travis mode. Not stopping tracing");
+#else
     DEBUG("stopping tracer");
-
     // Turn off tracer hardware.
     if (ioctl(tr_ctx->perf_fd, PERF_EVENT_IOC_DISABLE, 0) < 0) {
         err(EXIT_FAILURE, "ioctl");
@@ -424,4 +437,5 @@ traceme_stop_tracer(struct tracer_ctx *tr_ctx) {
     free(tr_ctx);
 
     DEBUG("tracing complete");
+#endif
 }

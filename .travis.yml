@@ -1,0 +1,12 @@
+language: rust
+rust: nightly
+cache: cargo
+
+before_script:
+    - export PATH="$PATH:$HOME/.cargo/bin"
+
+script:
+    - cargo build --examples
+    - cargo doc --no-deps
+    - cargo test
+    - ./target/debug/examples/simple_example

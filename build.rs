@@ -36,10 +36,41 @@
 // SOFTWARE.
 
 extern crate gcc;
+use std::env;
+use std::process::Command;
+use std::collections::HashMap;
+
+fn run_lsb_release(args: Vec<&str>) -> HashMap<String, String> {
+    let output = Command::new("lsb_release")
+                         .args(args)
+                         .output()
+                         .unwrap();
+    assert!(output.status.success());
+    let output_s = String::from_utf8(output.stdout).unwrap();
+
+    let mut res = HashMap::new();
+    for line in output_s.lines() {
+        let parts: Vec<&str> = line.split(":").collect();
+        assert!(parts.len() == 2);
+        res.insert(String::from(parts[0].trim()), String::from(parts[1].trim()));
+    }
+    res
+}
 
 fn main() {
-    gcc::Build::new()
-               .file("src/traceme.c")
-               .include("src")
-               .compile("traceme");
+    let mut c_build = gcc::Build::new();
+    c_build.file("src/traceme.c").include("src");
+
+    // Travis' Linux setup is too old for what we do with linux-perf.
+    if env::var("TRAVIS").is_ok() {
+        // Crash out when Travis updates to a newer Ubuntu or a different OS.
+        // When this fires, travis may have a new enough linux-perf to test properly.
+        let lsb_rel = run_lsb_release(vec!["-ir"]);
+        assert!(lsb_rel["Distributor ID"] == "Ubuntu");
+        assert!(lsb_rel["Release"] == "14.04");
+        // Setting -DTRAVIS causes the C API to be stubbed.
+        c_build.define("TRAVIS", None);
+    }
+
+    c_build.compile("traceme");
 }
