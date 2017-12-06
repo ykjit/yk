@@ -40,7 +40,7 @@
 
 extern crate libc;
 
-use libc::{pid_t, c_char, c_void, getpid, size_t};
+use libc::{pid_t, c_char, c_void, getpid, size_t, c_int};
 use std::ffi::CString;
 use std::path::PathBuf;
 
@@ -48,7 +48,7 @@ use std::path::PathBuf;
 #[link(name = "traceme")]
 extern "C" {
     fn traceme_start_tracer(conf: *const TracerConf) -> *const c_void;
-    fn traceme_stop_tracer(tr_ctx: *const c_void);
+    fn traceme_stop_tracer(tr_ctx: *const c_void) -> c_int;
 }
 
 // Struct used to communicate a tracing configuration to C. Must stay in sync with the C code.
@@ -170,6 +170,9 @@ impl Tracer {
         let opq_ptr = unsafe {
             traceme_start_tracer(conf_ptr as *const TracerConf)
         };
+        if cfg!(not(travis)) {
+            assert!(opq_ptr != std::ptr::null(), "traceme_start_tracer failed");
+        }
         self.tracer_ctx = Some(opq_ptr);
     }
 
@@ -177,8 +180,11 @@ impl Tracer {
     ///
     /// [start_tracing](struct.Tracer.html#method.start_tracing) must have been called prior.
     pub fn stop_tracing(&self) {
-        unsafe {
-            traceme_stop_tracer(self.tracer_ctx.expect("tracer wasn't started"));
+        let rc = unsafe {
+            traceme_stop_tracer(self.tracer_ctx.expect("tracer wasn't started"))
+        };
+        if cfg!(not(travis)) {
+            assert!(rc == 0, "traceme_stop_tracer failed");
         }
     }
 }
