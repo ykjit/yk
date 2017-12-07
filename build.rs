@@ -70,6 +70,7 @@ fn main() {
         assert!(lsb_rel["Release"] == "14.04");
         // Setting -DTRAVIS causes the C API to be stubbed.
         c_build.define("TRAVIS", None);
+        println!("cargo:rustc-cfg=travis");
     }
 
     c_build.compile("traceme");
