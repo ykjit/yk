@@ -48,12 +48,17 @@ fn main() {
     let mut res = 0;
     let pid = unsafe { getpid() };
 
-    let mut tracer = Tracer::new().trace_filename("simple_example.ptt");
-    tracer.start_tracing();
+    let mut tracer = Tracer::new()
+                            .trace_filename("simple_example.ptt")
+                            .unwrap();
+    tracer.start_tracing().unwrap_or_else(|e| {
+        panic!(format!("Failed to start tracer: {}", e));
+    });
+
     for i in 1..10 {
         res += i + pid;
     }
-    tracer.stop_tracing();
 
+    tracer.stop_tracing().unwrap();
     println!("result: {}", res);
 }

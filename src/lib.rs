@@ -40,9 +40,12 @@
 
 extern crate libc;
 
+mod errors;
+
 use libc::{pid_t, c_char, c_void, getpid, size_t, c_int};
 use std::ffi::CString;
 use std::path::PathBuf;
+use errors::TraceMeError;
 
 // FFI stubs
 #[link(name = "traceme")]
@@ -84,7 +87,7 @@ impl Tracer {
     /// ```
     /// use traceme::Tracer;
     ///
-    /// Tracer::new().trace_filename("mytrace.ptt").data_bufsize(1024).target_pid(666);
+    /// Tracer::new().trace_filename("mytrace.ptt").unwrap().data_bufsize(1024).target_pid(666);
     /// ```
     pub fn new() -> Self {
         Tracer {
@@ -101,9 +104,9 @@ impl Tracer {
     /// # Arguments
     ///
     /// * `filename` - The filename in which to store trace packets.
-    pub fn trace_filename(mut self, filename: &str) -> Self {
-        self.trace_filename = CString::new(filename).expect("bad trace filename");
-        self
+    pub fn trace_filename(mut self, filename: &str) -> Result<Self, TraceMeError> {
+        self.trace_filename = CString::new(filename)?;
+        Ok(self)
     }
 
     /// Select which PID to trace.
@@ -139,24 +142,27 @@ impl Tracer {
     }
 
     // Make the map filename by setting/adding a ".map" extension to the trace filename
-    fn make_map_filename(&self, trace_filename: &CString) -> CString {
-        let map_string = trace_filename.clone().into_string().unwrap();
-        let mut map_path = PathBuf::from(map_string);
-        if !map_path.set_extension("map") {
-            panic!("failed to construct map filename");
+    fn make_map_filename(&self, trace_filename: &CString) -> Result<CString, TraceMeError> {
+        let fn_str = trace_filename.clone().into_string()?;
+        let mut pb = PathBuf::from(fn_str);
+        if !pb.set_extension("map") {
+            return Err(TraceMeError::EmptyFileName);
         }
-        let map_string = map_path.to_str().and_then(|ms| CString::new(ms).ok());
-        map_string.expect("failed to construct map filename")
+        let map_fn_str = pb.to_str().ok_or(TraceMeError::EmptyFileName)?;
+        let ret = CString::new(map_fn_str)?;
+        Ok(ret)
     }
 
     /// Records execution of the selected PID into the chosen output file.
     ///
     /// Tracing continues until [stop_tracing](struct.Tracer.html#method.stop_tracing) is called.
-    pub fn start_tracing(&mut self) {
-        assert!(self.tracer_ctx.is_none(), "This tracer has already been started");
+    pub fn start_tracing(&mut self) -> Result<(), TraceMeError> {
+        if self.tracer_ctx.is_some() {
+            return Err(TraceMeError::TracerAlreadyStarted);
+        }
 
         // Build the C configuration struct
-        let map_filename_c = self.make_map_filename(&self.trace_filename);
+        let map_filename_c = self.make_map_filename(&self.trace_filename)?;
         let tr_conf = TracerConf {
             target_pid: self.target_pid,
             trace_filename: self.trace_filename.as_ptr(),
@@ -170,21 +176,24 @@ impl Tracer {
         let opq_ptr = unsafe {
             traceme_start_tracer(conf_ptr as *const TracerConf)
         };
-        if cfg!(not(travis)) {
-            assert!(opq_ptr != std::ptr::null(), "traceme_start_tracer failed");
+        if cfg!(not(travis)) && opq_ptr == std::ptr::null() {
+           return Err(TraceMeError::CFailure);
         }
         self.tracer_ctx = Some(opq_ptr);
+        Ok(())
     }
 
     /// Turns off the tracer.
     ///
     /// [start_tracing](struct.Tracer.html#method.start_tracing) must have been called prior.
-    pub fn stop_tracing(&self) {
+    pub fn stop_tracing(&self) -> Result<(), TraceMeError> {
+        let tr_ctx = self.tracer_ctx.ok_or(TraceMeError::TracerNotStarted)?;
         let rc = unsafe {
-            traceme_stop_tracer(self.tracer_ctx.expect("tracer wasn't started"))
+            traceme_stop_tracer(tr_ctx)
         };
-        if cfg!(not(travis)) {
-            assert!(rc == 0, "traceme_stop_tracer failed");
+        if cfg!(not(travis))  && rc == -1 {
+           return Err(TraceMeError::CFailure);
         }
+        Ok(())
     }
 }
