@@ -8,7 +8,7 @@ pub enum TraceMeError {
     FFINul(ffi::NulError),
     // Our own errors.
     CFailure,
-    EmptyFileName,
+    InvalidFileName(String),
     TracerAlreadyStarted,
     TracerNotStarted,
 }
@@ -31,7 +31,7 @@ impl Display for TraceMeError {
             &TraceMeError::FFIIntoString(ref e) => write!(f, "{}", e),
             &TraceMeError::FFINul(ref e) => write!(f, "{}", e),
             &TraceMeError::CFailure => write!(f, "Calling to C failed"),
-            &TraceMeError::EmptyFileName => write!(f, "Empty file name"),
+            &TraceMeError::InvalidFileName(ref n) => write!(f, "Invalid file name: `{}'", n),
             &TraceMeError::TracerAlreadyStarted => write!(f, "Tracer already started"),
             &TraceMeError::TracerNotStarted => write!(f, "Tracer not started"),
         }

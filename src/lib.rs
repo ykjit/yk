@@ -68,7 +68,7 @@ struct TracerConf {
 #[derive(Default)]
 pub struct Tracer {
     /// Filename to store the trace to.
-    trace_filename: CString,
+    trace_filename: String,
     /// PID to trace.
     target_pid: pid_t,
     /// Data buffer size, in pages. Must be a power of 2.
@@ -87,11 +87,11 @@ impl Tracer {
     /// ```
     /// use traceme::Tracer;
     ///
-    /// Tracer::new().trace_filename("mytrace.ptt").unwrap().data_bufsize(1024).target_pid(666);
+    /// Tracer::new().trace_filename("mytrace.ptt").data_bufsize(1024).target_pid(666);
     /// ```
     pub fn new() -> Self {
         Tracer {
-            trace_filename: CString::new("traceme.ptt").unwrap(),
+            trace_filename: String::from("traceme.ptt"),
             target_pid: unsafe { getpid() },
             tracer_ctx: None,
             data_bufsize: 64,
@@ -104,9 +104,9 @@ impl Tracer {
     /// # Arguments
     ///
     /// * `filename` - The filename in which to store trace packets.
-    pub fn trace_filename(mut self, filename: &str) -> Result<Self, TraceMeError> {
-        self.trace_filename = CString::new(filename)?;
-        Ok(self)
+    pub fn trace_filename(mut self, filename: &str) -> Self {
+        self.trace_filename = String::from(filename);
+        self
     }
 
     /// Select which PID to trace.
@@ -141,16 +141,14 @@ impl Tracer {
         self
     }
 
-    // Make the map filename by setting/adding a ".map" extension to the trace filename
-    fn make_map_filename(&self, trace_filename: &CString) -> Result<CString, TraceMeError> {
-        let fn_str = trace_filename.clone().into_string()?;
-        let mut pb = PathBuf::from(fn_str);
+    /// Make the map filename by setting/adding a ".map" extension to `trace_filename`.
+    fn make_map_filename(trace_filename: &str) -> Result<String, TraceMeError> {
+        let mut pb = PathBuf::from(trace_filename);
         if !pb.set_extension("map") {
-            return Err(TraceMeError::EmptyFileName);
+            return Err(TraceMeError::InvalidFileName("".to_string()));
         }
-        let map_fn_str = pb.to_str().ok_or(TraceMeError::EmptyFileName)?;
-        let ret = CString::new(map_fn_str)?;
-        Ok(ret)
+        let map_filename = pb.to_str().ok_or(TraceMeError::InvalidFileName("".to_string()))?;
+        Ok(String::from(map_filename))
     }
 
     /// Records execution of the selected PID into the chosen output file.
@@ -160,12 +158,16 @@ impl Tracer {
         if self.tracer_ctx.is_some() {
             return Err(TraceMeError::TracerAlreadyStarted);
         }
+        if !self.trace_filename.ends_with(".ptt") {
+            return Err(TraceMeError::InvalidFileName(String::from(self.trace_filename.clone())));
+        }
 
         // Build the C configuration struct
-        let map_filename_c = self.make_map_filename(&self.trace_filename)?;
+        let map_filename_c = CString::new(Tracer::make_map_filename(&self.trace_filename)?)?;
+        let trace_filename_c = CString::new(self.trace_filename.clone())?;
         let tr_conf = TracerConf {
             target_pid: self.target_pid,
-            trace_filename: self.trace_filename.as_ptr(),
+            trace_filename: trace_filename_c.as_ptr(),
             map_filename: map_filename_c.as_ptr(),
             data_bufsize: self.data_bufsize,
             aux_bufsize: self.aux_bufsize,
@@ -196,4 +198,9 @@ impl Tracer {
         }
         Ok(())
     }
+}
+
+#[test]
+fn test_make_map_filename_0000() {
+    assert!(Tracer::make_map_filename("trace.ptt").unwrap() == "trace.map");
 }
