@@ -604,7 +604,7 @@ traceme_stop_tracer(struct tracer_ctx *tr_ctx) {
     if (pthread_join(tr_ctx->tracer_thread, &thr_exit) != 0) {
         ret = -1;
     }
-    if ((bool) thr_exit != 0) {
+    if ((bool) thr_exit != true) {
         ret = -1;
     }
 
