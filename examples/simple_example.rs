@@ -48,9 +48,7 @@ fn main() {
     let mut res = 0;
     let pid = unsafe { getpid() };
 
-    let mut tracer = Tracer::new()
-                            .trace_filename("simple_example.ptt")
-                            .unwrap();
+    let mut tracer = Tracer::new().trace_filename("simple_example.ptt");
     tracer.start_tracing().unwrap_or_else(|e| {
         panic!(format!("Failed to start tracer: {}", e));
     });
