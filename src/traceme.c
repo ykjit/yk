@@ -55,10 +55,13 @@
 #include <semaphore.h>
 #include <assert.h>
 #include <stdbool.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 
 #define TRACE_OUTPUT    "trace.data"
 #define SYSFS_PT_TYPE   "/sys/bus/event_source/devices/intel_pt/type"
 #define MAX_PT_TYPE_STR 8
+#define MAPS_MODE       S_IRUSR | S_IWUSR
 
 #ifndef INFTIM
 #define INFTIM -1
@@ -137,6 +140,8 @@ stash_maps(pid_t pid, const char *map_filename)
     DEBUG("saving map to %s", map_filename);
     bool ret = true;
 
+    mode_t old_mode = umask(MAPS_MODE);
+
     char *cmd = NULL;
     int res = asprintf(&cmd, "cp /proc/%d/maps %s", pid, map_filename);
     if (res == -1) {
@@ -155,6 +160,8 @@ clean:
     if (cmd) {
         free(cmd);
     }
+    umask(old_mode);
+
     return ret;
 }
 
@@ -491,7 +498,7 @@ traceme_start_tracer(struct tracer_conf *tr_conf)
     clean_sem = 1;
 
     // Open the trace output file.
-    out_fd = open(tr_conf->trace_filename, O_WRONLY | O_CREAT);
+    out_fd = open(tr_conf->trace_filename, O_WRONLY | O_CREAT, 0600);
     if (out_fd < 0) {
         failing = true;
         goto clean;
