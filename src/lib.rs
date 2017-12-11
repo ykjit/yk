@@ -42,10 +42,14 @@ extern crate libc;
 
 mod errors;
 
-use libc::{pid_t, c_char, c_void, getpid, size_t, c_int};
+use libc::{pid_t, c_char, c_void, getpid, size_t, c_int, geteuid};
 use std::ffi::CString;
 use std::path::PathBuf;
 use errors::TraceMeError;
+use std::fs::File;
+use std::io::Read;
+
+const PERF_PERMS_PATH: &'static str = "/proc/sys/kernel/perf_event_paranoid";
 
 // FFI stubs
 #[link(name = "traceme")]
@@ -151,10 +155,30 @@ impl Tracer {
         Ok(String::from(map_filename))
     }
 
+    fn check_perf_perms() -> Result<(), TraceMeError> {
+        if unsafe { geteuid() } == 0 {
+            // Root can always trace.
+            return Ok(());
+        }
+
+        let mut f = File::open(&PERF_PERMS_PATH)?;
+        let mut buf = String::new();
+        f.read_to_string(&mut buf)?;
+        let perm = buf.trim().parse::<i8>()?;
+        if perm != -1 {
+            return Err(TraceMeError::TracingNotPermitted);
+        }
+
+        Ok(())
+    }
+
     /// Records execution of the selected PID into the chosen output file.
     ///
     /// Tracing continues until [stop_tracing](struct.Tracer.html#method.stop_tracing) is called.
     pub fn start_tracing(&mut self) -> Result<(), TraceMeError> {
+        if cfg!(not(travis)) {
+            Tracer::check_perf_perms()?;
+        }
         if self.tracer_ctx.is_some() {
             return Err(TraceMeError::TracerAlreadyStarted);
         }
