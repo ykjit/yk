@@ -491,7 +491,7 @@ traceme_start_tracer(struct tracer_conf *tr_conf)
     clean_sem = 1;
 
     // Open the trace output file.
-    out_fd = open(tr_conf->trace_filename, O_WRONLY | O_CREAT);
+    out_fd = open(tr_conf->trace_filename, O_WRONLY | O_CREAT, 0600);
     if (out_fd < 0) {
         failing = true;
         goto clean;
