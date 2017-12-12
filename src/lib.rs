@@ -49,6 +49,7 @@ use errors::TraceMeError;
 use std::fs::File;
 use std::io::Read;
 
+#[cfg(target_os="linux")]
 const PERF_PERMS_PATH: &'static str = "/proc/sys/kernel/perf_event_paranoid";
 
 // FFI stubs
