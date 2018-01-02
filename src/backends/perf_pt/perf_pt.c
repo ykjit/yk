@@ -331,7 +331,7 @@ open_perf(pid_t target_pid) {
     ret = syscall(SYS_perf_event_open, &attr, target_pid, -1, -1, 0);
 
 clean:
-    if (fclose(pt_type_file) == -1) {
+    if ((pt_type_file != NULL) && (fclose(pt_type_file) == -1)) {
         ret = -1;
     }
 
