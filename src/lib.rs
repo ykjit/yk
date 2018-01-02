@@ -30,6 +30,11 @@
 // DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+#![feature(integer_atomics)]
+#![feature(test)]
+
+extern crate test;
+
 pub mod metatracer;
 
-pub use metatracer::MetaTracer;
+pub use metatracer::{Location, MetaTracer};

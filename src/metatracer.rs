@@ -30,57 +30,90 @@
 // DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use std::collections::hash_map::{Entry, HashMap};
-use std::hash::Hash;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
 
-const HOT_THRESHOLD: u16 = 10;
+pub type HotThreshold = u32;
+const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
 
-/// The current meta-tracing state of a given location in the end-user's code.
-#[derive(Debug, PartialEq)]
-enum LocPhase {
-    /// Below `HOT_THRESHOLD`, but counting up towards it.
-    Counting(u16),
-    /// A trace is being collected.
-    Tracing,
-    /// A compiled trace is available.
-    Compiled
+// The current meta-tracing phase of a given location in the end-user's code. Consists of a tag and
+// (optionally) a value.
+const PHASE_TAG     : u32 = 0b11; // All of the other PHASE_ tags must fit in this.
+const PHASE_COUNTING: u32 = 0b00; // The value specifies the current hot count.
+const PHASE_TRACING : u32 = 0b01;
+const PHASE_COMPILED: u32 = 0b10;
+
+/// A `Location` uniquely identifies a control point position in the end-user's program (and is
+/// used by the `MetaTracer` to store data about that location). In other words, every position
+/// that can be a control point also needs to have one `Location` value associated with it, and
+/// that same `Location` value must always be used to identify that control point.
+///
+/// As this may suggest, program positions that can't be control points don't need an associated
+/// `Location`. For interpreters that can't (or don't want) to be as selective, a simple (if
+/// moderately wasteful) mechanism is for every bytecode or AST node to have its own `Location`
+/// (even for bytecodes or nodes that can't be control points).
+pub struct Location {
+    pack: AtomicU32
+}
+
+impl Location {
+    /// Create a fresh Location suitable for passing to `MetaTracer::control_point`.
+    pub fn new() -> Self {
+        Self { pack: AtomicU32::new(PHASE_COUNTING) }
+    }
 }
 
 /// A meta-tracer.
-pub struct MetaTracer<Loc> {
-    counts: Mutex<HashMap<Loc, LocPhase>>
+pub struct MetaTracer {
+    hot_threshold: HotThreshold
 }
 
-impl<Loc: Eq + Hash> MetaTracer<Loc> {
+impl MetaTracer {
+    /// Create a new `MetaTracer` with default settings.
     pub fn new() -> Self {
+        Self::new_with_hot_threshold(DEFAULT_HOT_THRESHOLD)
+    }
+
+    /// Create a new `MetaTracer` with a specific hot threshold.
+    pub fn new_with_hot_threshold(hot_threshold: HotThreshold) -> Self {
         Self {
-            counts: Mutex::new(HashMap::new())
+            hot_threshold: hot_threshold
         }
     }
 
     /// Attempt to execute a compiled trace for location `loc`: return a `ControlOutcome` to allow
     /// the end user to determine whether a trace was executed or not.
-    pub fn control_point(&self, loc: Loc) {
-        let mut cnts = self.counts.lock().unwrap();
-        match cnts.entry(loc) {
-            Entry::Occupied(mut v) => {
-                match *v.get() {
-                    LocPhase::Counting(x) => {
-                        if x >= HOT_THRESHOLD {
-                            v.insert(LocPhase::Tracing);
-                        } else {
-                            v.insert(LocPhase::Counting(x + 1));
-                        }
-                    },
-                    LocPhase::Tracing => {
-                        v.insert(LocPhase::Compiled);
-                    },
-                    LocPhase::Compiled => ()
-                }
-            },
-            Entry::Vacant(v) => {
-                v.insert(LocPhase::Counting(1));
+    pub fn control_point(&self, loc: &Location)
+    {
+        // Since we don't hold an explicit lock, updating a Location is tricky: we might read a
+        // Location, work out what we'd like to update it to, and try updating it, only to find
+        // that another thread interrupted us part way through. We therefore use compare_and_swap
+        // to update values, allowing us to detect if we were interrupted. If we were interrupted,
+        // we simply retry the whole operation.
+        loop {
+            let pack = &loc.pack;
+            // We need Acquire ordering, as PHASE_COMPILED will need to read information written to
+            // external data as a result of the PHASE_TRACING -> PHASE_COMPILED transition.
+            let lp = pack.load(Ordering::Acquire);
+            match lp & PHASE_TAG {
+                PHASE_COUNTING => {
+                    let count = (lp & !PHASE_TAG) >> PHASE_TAG;
+                    let new_pack;
+                    if count >= self.hot_threshold {
+                        new_pack = PHASE_TRACING;
+                    } else {
+                        new_pack = PHASE_COUNTING | ((count + 1) << PHASE_TAG);
+                    }
+                    if pack.compare_and_swap(lp, new_pack, Ordering::Release) == lp {
+                        break;
+                    }
+                },
+                PHASE_TRACING => {
+                    if pack.compare_and_swap(lp, PHASE_COMPILED, Ordering::Release) == lp {
+                        break;
+                    }
+                },
+                PHASE_COMPILED => break,
+                _ => unreachable!()
             }
         }
     }
@@ -90,36 +123,54 @@ impl<Loc: Eq + Hash> MetaTracer<Loc> {
 mod tests {
     use std::sync::Arc;
     use std::thread;
+    use test::{Bencher, black_box};
     use super::*;
 
     #[test]
     fn threshold_passed() {
-        let mt = MetaTracer::new();
-        for i in 0..HOT_THRESHOLD {
-            mt.control_point(0);
-            assert_eq!(*mt.counts.lock().unwrap().get(&0).unwrap(), LocPhase::Counting(i + 1));
+        let hot_thrsh = 1500;
+        let mt = MetaTracer::new_with_hot_threshold(hot_thrsh);
+        let lp = Location::new();
+        for i in 0..hot_thrsh {
+            mt.control_point(&lp);
+            assert_eq!(lp.pack.load(Ordering::Relaxed), PHASE_COUNTING | ((i + 1) << PHASE_TAG));
         }
-        mt.control_point(0);
-        assert_eq!(*mt.counts.lock().unwrap().get(&0).unwrap(), LocPhase::Tracing);
-        mt.control_point(0);
-        assert_eq!(*mt.counts.lock().unwrap().get(&0).unwrap(), LocPhase::Compiled);
+        mt.control_point(&lp);
+        assert_eq!(lp.pack.load(Ordering::Relaxed), PHASE_TRACING);
+        mt.control_point(&lp);
+        assert_eq!(lp.pack.load(Ordering::Relaxed), PHASE_COMPILED);
     }
 
     #[test]
     fn threaded_threshold_passed() {
-        let mt = Arc::new(MetaTracer::new());
+        let hot_thrsh = 4000;
+        let mt_arc;
+        {
+            let mt = MetaTracer::new_with_hot_threshold(hot_thrsh);
+            mt_arc = Arc::new(mt);
+        }
+        let lp_arc = Arc::new(Location::new());
         let mut thrs = vec![];
-        for _ in 0..HOT_THRESHOLD {
-            let mt_cl = Arc::clone(&mt);
+        for _ in 0..hot_thrsh / 4 {
+            let mt_arc_cl = Arc::clone(&mt_arc);
+            let lp_arc_cl = Arc::clone(&lp_arc);
             let t = thread::Builder::new()
                 .spawn(move || {
-                    mt_cl.control_point(0);
-                    let l = mt_cl.counts.lock().unwrap();
-                    let v = l.get(&0).unwrap(); 
-                    match v {
-                        &LocPhase::Counting(_) => (),
-                        _ => panic!("Read {:?} instead of ControlOutcome::Counting(_)", v)
-                    }
+                    mt_arc_cl.control_point(&*lp_arc_cl);
+                    let c1 = lp_arc_cl.pack.load(Ordering::Relaxed);
+                    assert_eq!(c1 & PHASE_TAG, PHASE_COUNTING);
+                    mt_arc_cl.control_point(&*lp_arc_cl);
+                    let c2 = lp_arc_cl.pack.load(Ordering::Relaxed);
+                    assert_eq!(c2 & PHASE_TAG, PHASE_COUNTING);
+                    mt_arc_cl.control_point(&*lp_arc_cl);
+                    let c3 = lp_arc_cl.pack.load(Ordering::Relaxed);
+                    assert_eq!(c3 & PHASE_TAG, PHASE_COUNTING);
+                    mt_arc_cl.control_point(&*lp_arc_cl);
+                    let c4 = lp_arc_cl.pack.load(Ordering::Relaxed);
+                    assert_eq!(c4 & PHASE_TAG, PHASE_COUNTING);
+                    assert!(c4 > c3);
+                    assert!(c3 > c2);
+                    assert!(c2 > c1);
                 })
                 .unwrap();
             thrs.push(t);
@@ -127,9 +178,44 @@ mod tests {
         for t in thrs {
             t.join().unwrap();
         }
-        mt.control_point(0);
-        assert_eq!(*mt.counts.lock().unwrap().get(&0).unwrap(), LocPhase::Tracing);
-        mt.control_point(0);
-        assert_eq!(*mt.counts.lock().unwrap().get(&0).unwrap(), LocPhase::Compiled);
+        mt_arc.control_point(&lp_arc);
+        assert_eq!(lp_arc.pack.load(Ordering::Relaxed), PHASE_TRACING);
+        mt_arc.control_point(&lp_arc);
+        assert_eq!(lp_arc.pack.load(Ordering::Relaxed), PHASE_COMPILED);
+    }
+
+    #[bench]
+    fn bench_single_threaded_control_point(b: &mut Bencher) {
+        let mt = MetaTracer::new();
+        let lp = Location::new();
+        b.iter(|| {
+            for _ in 0..100000 {
+                black_box(mt.control_point(&lp));
+            }
+        });
+    }
+
+    #[bench]
+    fn bench_multi_threaded_control_point(b: &mut Bencher) {
+        let mt_arc = Arc::new(MetaTracer::new());
+        let lp_arc = Arc::new(Location::new());
+        b.iter(|| {
+            let mut thrs = vec![];
+            for _ in 0..4 {
+                let mt_arc_cl = Arc::clone(&mt_arc);
+                let lp_arc_cl = Arc::clone(&lp_arc);
+                let t = thread::Builder::new()
+                    .spawn(move || {
+                        for _ in 0..100000 {
+                            black_box(mt_arc_cl.control_point(&*lp_arc_cl));
+                        }
+                    })
+                    .unwrap();
+                thrs.push(t);
+            }
+            for t in thrs {
+                t.join().unwrap();
+            }
+        });
     }
 }
