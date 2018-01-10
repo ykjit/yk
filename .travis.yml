@@ -8,5 +8,5 @@ before_script:
 script:
     - cargo build --examples
     - cargo doc --no-deps
-    - cargo test
+    - RUST_TEST_THREADS=1 cargo test
     - ./target/debug/examples/simple_example
