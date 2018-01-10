@@ -137,10 +137,9 @@ stash_maps(pid_t pid, const char *map_filename)
     DEBUG("saving map to %s", map_filename);
     bool ret = true;
 
-    mode_t old_mode = umask(MAPS_MODE);
-
     char *cmd = NULL;
-    int res = asprintf(&cmd, "cp /proc/%d/maps %s", pid, map_filename);
+    int res = asprintf(&cmd, "cp /proc/%d/maps %s && chmod 600 %s",
+                       pid, map_filename, map_filename);
     if (res == -1) {
         cmd = NULL; // cmd undefined after error.
         ret = false;
@@ -157,7 +156,6 @@ clean:
     if (cmd) {
         free(cmd);
     }
-    umask(old_mode);
 
     return ret;
 }
