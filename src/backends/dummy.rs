@@ -35,52 +35,56 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-extern crate traceme;
-extern crate libc;
+use Tracer;
+use errors::TraceMeError;
 
-use traceme::Tracer;
-use libc::getpid;
+/// A tracer which doesn't really do anything.
+pub struct DummyTracer {
+    started: bool,
+}
 
-use traceme::backends::DummyTracer;
-#[cfg(all(perf_pt, target_arch = "x86_64"))]
-use traceme::backends::PerfPTTracer;
-
-/// Instantiate a tracer suitable for the current platform.
-fn tracer() -> Box<Tracer> {
-    if cfg!(target_os = "linux") {
-        #[cfg(all(perf_pt, target_arch = "x86_64"))] {
-            let res = PerfPTTracer::new();
-            if res.is_ok() {
-                return Box::new(res.unwrap().trace_filename("simple_example.ptt"));
-            } else {
-                // CPU doesn't have Intel PT support.
-                return Box::new(DummyTracer::new());
-            }
-        }
-        #[cfg(not(all(perf_pt, target_arch = "x86_64")))] {
-            return Box::new(DummyTracer::new());
-        }
-    } else {
-        return Box::new(DummyTracer::new());
+impl DummyTracer {
+    /// Create a dummy tracer.
+    pub fn new() -> Self {
+        Self {started: false}
     }
 }
 
-/// Trace a simple computation loop.
-///
-/// The result is printed to discourage the compiler from optimising the computation out.
-fn main() {
-    let mut res = 0;
-    let pid = unsafe { getpid() };
-
-    let mut tracer = tracer();
-    tracer.start_tracing().unwrap_or_else(|e| {
-        panic!(format!("Failed to start tracer: {}", e));
-    });
-
-    for i in 1..10 {
-        res += i + pid;
+impl Tracer for DummyTracer {
+    fn start_tracing(&mut self) -> Result<(), TraceMeError> {
+        if self.started {
+            return Err(TraceMeError::TracerAlreadyStarted);
+        }
+        self.started = true;
+        Ok(())
     }
 
-    tracer.stop_tracing().unwrap();
-    println!("result: {}", res);
+    fn stop_tracing(&mut self) -> Result<(), TraceMeError> {
+        if !self.started {
+            return Err(TraceMeError::TracerNotStarted);
+        }
+        self.started = false;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DummyTracer;
+    use ::test_helpers;
+
+    #[test]
+    fn test_basic_usage() {
+        test_helpers::test_basic_usage(DummyTracer::new());
+    }
+
+    #[test]
+    fn test_already_started() {
+        test_helpers::test_already_started(DummyTracer::new());
+    }
+
+    #[test]
+    fn test_not_started() {
+        test_helpers::test_not_started(DummyTracer::new());
+    }
 }

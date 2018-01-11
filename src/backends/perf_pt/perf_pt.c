@@ -113,21 +113,18 @@ struct tracer_thread_args {
 
 
 // Private prototypes.
-#ifndef TRAVIS
 static bool stash_maps(pid_t, const char *);
 static bool write_buf_to_disk(int, void *, __u64);
 static bool read_circular_buf(void *, __u64, __u64, __u64 *, int);
 static bool poll_loop(int, int, int, struct perf_event_mmap_page *, void *);
 static void *tracer_thread(void *);
 static int open_perf(pid_t target_pid);
-#endif
 
 // Exposed Prototypes.
-struct tracer_ctx *traceme_start_tracer(struct tracer_conf *);
-int traceme_stop_tracer(struct tracer_ctx *tr_ctx);
+struct tracer_ctx *perf_pt_start_tracer(struct tracer_conf *);
+int perf_pt_stop_tracer(struct tracer_ctx *tr_ctx);
 
 
-#ifndef TRAVIS
 /*
  * Save linker relocation decisions so that you can later recover the
  * instruction stream from an on-disk binary.
@@ -140,10 +137,9 @@ stash_maps(pid_t pid, const char *map_filename)
     DEBUG("saving map to %s", map_filename);
     bool ret = true;
 
-    mode_t old_mode = umask(MAPS_MODE);
-
     char *cmd = NULL;
-    int res = asprintf(&cmd, "cp /proc/%d/maps %s", pid, map_filename);
+    int res = asprintf(&cmd, "cp /proc/%d/maps %s && chmod 600 %s",
+                       pid, map_filename, map_filename);
     if (res == -1) {
         cmd = NULL; // cmd undefined after error.
         ret = false;
@@ -160,7 +156,6 @@ clean:
     if (cmd) {
         free(cmd);
     }
-    umask(old_mode);
 
     return ret;
 }
@@ -334,7 +329,7 @@ open_perf(pid_t target_pid) {
     ret = syscall(SYS_perf_event_open, &attr, target_pid, -1, -1, 0);
 
 clean:
-    if (fclose(pt_type_file) == -1) {
+    if ((pt_type_file != NULL) && (fclose(pt_type_file) == -1)) {
         ret = -1;
     }
 
@@ -425,7 +420,6 @@ clean:
     }
     return (void *) ret;
 }
-#endif // TRAVIS.
 
 /*
  * --------------------------------------
@@ -442,17 +436,13 @@ clean:
  * Returns a pointer to a tracer context, or NULL on error.
  */
 struct tracer_ctx *
-traceme_start_tracer(struct tracer_conf *tr_conf)
+perf_pt_start_tracer(struct tracer_conf *tr_conf)
 {
     DEBUG("target_pid=%d, trace_filename=%s, map_filename=%s, "
         "data_bufsize=%zd, aux_bufsize=%zd", tr_conf->target_pid,
         tr_conf->trace_filename, tr_conf->map_filename,
         tr_conf->data_bufsize, tr_conf->aux_bufsize);
 
-#ifdef TRAVIS
-    DEBUG("Travis mode. Not starting tracing");
-    return NULL;
-#else
     bool failing = false;
     struct tracer_ctx *tr_ctx = NULL;
     int perf_fd = -1, out_fd = -1;
@@ -573,7 +563,6 @@ clean:
         DEBUG("failure");
     }
     return ret;
-#endif
 }
 
 /*
@@ -585,12 +574,7 @@ clean:
  * Returns 0 on success and -1 on failure.
  */
 int
-traceme_stop_tracer(struct tracer_ctx *tr_ctx) {
-#ifdef TRAVIS
-    (void) tr_ctx;
-    DEBUG("Travis mode. Not stopping tracing");
-    return -1;
-#else
+perf_pt_stop_tracer(struct tracer_ctx *tr_ctx) {
     DEBUG("stopping tracer");
 
     int ret = 0;
@@ -633,5 +617,4 @@ traceme_stop_tracer(struct tracer_ctx *tr_ctx) {
         DEBUG("failure");
     }
     return ret;
-#endif
 }

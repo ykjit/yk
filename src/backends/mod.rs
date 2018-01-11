@@ -35,52 +35,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-extern crate traceme;
-extern crate libc;
-
-use traceme::Tracer;
-use libc::getpid;
-
-use traceme::backends::DummyTracer;
 #[cfg(all(perf_pt, target_arch = "x86_64"))]
-use traceme::backends::PerfPTTracer;
+mod perf_pt;
+#[cfg(all(perf_pt, target_arch = "x86_64"))]
+pub use self::perf_pt::PerfPTTracer;
 
-/// Instantiate a tracer suitable for the current platform.
-fn tracer() -> Box<Tracer> {
-    if cfg!(target_os = "linux") {
-        #[cfg(all(perf_pt, target_arch = "x86_64"))] {
-            let res = PerfPTTracer::new();
-            if res.is_ok() {
-                return Box::new(res.unwrap().trace_filename("simple_example.ptt"));
-            } else {
-                // CPU doesn't have Intel PT support.
-                return Box::new(DummyTracer::new());
-            }
-        }
-        #[cfg(not(all(perf_pt, target_arch = "x86_64")))] {
-            return Box::new(DummyTracer::new());
-        }
-    } else {
-        return Box::new(DummyTracer::new());
-    }
-}
-
-/// Trace a simple computation loop.
-///
-/// The result is printed to discourage the compiler from optimising the computation out.
-fn main() {
-    let mut res = 0;
-    let pid = unsafe { getpid() };
-
-    let mut tracer = tracer();
-    tracer.start_tracing().unwrap_or_else(|e| {
-        panic!(format!("Failed to start tracer: {}", e));
-    });
-
-    for i in 1..10 {
-        res += i + pid;
-    }
-
-    tracer.stop_tracing().unwrap();
-    println!("result: {}", res);
-}
+mod dummy;
+pub use self::dummy::DummyTracer;

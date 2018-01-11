@@ -1,6 +1,5 @@
 use std::{io, ffi, num};
 use std::fmt::{self, Formatter, Display};
-use ::PERF_PERMS_PATH;
 
 #[derive(Debug)]
 pub enum TraceMeError {
@@ -11,10 +10,11 @@ pub enum TraceMeError {
     NumParseInt(num::ParseIntError),
     // Our own errors.
     CFailure,
+    HardwareSupport(String),
     InvalidFileName(String),
     TracerAlreadyStarted,
     TracerNotStarted,
-    TracingNotPermitted,
+    TracingNotPermitted(String),
 }
 
 impl From<ffi::IntoStringError> for TraceMeError {
@@ -48,13 +48,12 @@ impl Display for TraceMeError {
             &TraceMeError::FFINul(ref e) => write!(f, "{}", e),
             &TraceMeError::IO(ref e) => write!(f, "{}", e),
             &TraceMeError::NumParseInt(ref e) => write!(f, "{}", e),
+            &TraceMeError::HardwareSupport(ref m) => write!(f, "Hardware support: {}", m),
             &TraceMeError::CFailure => write!(f, "Calling to C failed"),
             &TraceMeError::InvalidFileName(ref n) => write!(f, "Invalid file name: `{}'", n),
             &TraceMeError::TracerAlreadyStarted => write!(f, "Tracer already started"),
             &TraceMeError::TracerNotStarted => write!(f, "Tracer not started"),
-            &TraceMeError::TracingNotPermitted =>
-                write!(f, "Tracing not permitted: you must be root or {} must contain -1",
-                       PERF_PERMS_PATH),
+            &TraceMeError::TracingNotPermitted(ref m) => write!(f, "{}", m),
         }
     }
 }
