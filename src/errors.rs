@@ -10,6 +10,7 @@ pub enum TraceMeError {
     NumParseInt(num::ParseIntError),
     // Our own errors.
     CFailure,
+    ElfError(String),
     HardwareSupport(String),
     InvalidFileName(String),
     TracerAlreadyStarted,
@@ -50,6 +51,7 @@ impl Display for TraceMeError {
             &TraceMeError::NumParseInt(ref e) => write!(f, "{}", e),
             &TraceMeError::HardwareSupport(ref m) => write!(f, "Hardware support: {}", m),
             &TraceMeError::CFailure => write!(f, "Calling to C failed"),
+            &TraceMeError::ElfError(ref m) => write!(f, "ELF error: {}", m),
             &TraceMeError::InvalidFileName(ref n) => write!(f, "Invalid file name: `{}'", n),
             &TraceMeError::TracerAlreadyStarted => write!(f, "Tracer already started"),
             &TraceMeError::TracerNotStarted => write!(f, "Tracer not started"),

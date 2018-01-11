@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2018 King's College London
+// Copyright (c) 2018 King's College London
 // created by the Software Development Team <http://soft-dev.org/>
 //
 // The Universal Permissive License (UPL), Version 1.0
@@ -35,38 +35,78 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-extern crate gcc;
+#define _GNU_SOURCE
 
-#[cfg(target_os = "linux")]
-use std::path::PathBuf;
+#include <link.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <libgen.h>
 
-#[cfg(target_os = "linux")]
-const FEATURE_CHECKS_PATH: &str = "feature_checks";
+// Private prototypes.
+static int dl_iterate_phdr_cb(struct dl_phdr_info *, size_t, void *);
 
-/// Simple feature check, returning `true` if we have the feature.
-///
-/// The checks themselves are in files under `FEATURE_CHECKS_PATH`.
-#[cfg(target_os = "linux")]
-fn feature_check(filename: &str) -> bool {
-    let mut path = PathBuf::new();
-    path.push(FEATURE_CHECKS_PATH);
-    path.push(filename);
+// Exposed prototypes.
+int traceme_exec_base(uintptr_t *);
 
-    let mut check_build = gcc::Build::new();
-    check_build.file(path).try_compile("check_perf_pt").is_ok()
+/*
+ * Search program headers for the relocated start address of the current
+ * program's executable code.
+ *
+ * Returns 1 if the address is found, or 0 otherwise. If found, the address is
+ * written into `*addr`.
+ */
+int
+traceme_exec_base(uintptr_t *addr)
+{
+    return dl_iterate_phdr(dl_iterate_phdr_cb, addr);
 }
 
-fn main() {
-    let mut c_build = gcc::Build::new();
+/*
+ * The callback for `dl_iterate_phdr`, called once for each program header.
+ *
+ * We are looking for the start address of the program's executable
+ * instructions.
+ *
+ * We must return 1 to stop iteration (i.e. we found what we needed), or 0 to
+ * continue. See dl_iterate_phdr(3) for details.
+ */
+static int
+dl_iterate_phdr_cb(struct dl_phdr_info *info, size_t size, void *data)
+{
+#ifdef __OpenBSD__
+    Elf_Phdr phdr;
+    Elf_Half i;
+#else
+    ElfW(Phdr) phdr;
+    ElfW(Half) i;
+#endif
+    (void) size;
 
-    // Check for a new enough Perf to support Intel PT.
-    #[cfg(target_os = "linux")] {
-        if feature_check("check_perf_pt.c") {
-            c_build.file("src/backends/perf_pt/perf_pt.c");
-            println!("cargo:rustc-cfg=perf_pt");
+    // Check if this is the entry for the binary itself (not a shared object).
+#if defined(__linux__)
+    // On Linux the main binary has no name.
+    if (info->dlpi_name[0] != '\0') {
+        return 0;
+    }
+#elif defined(__OpenBSD__)
+    // On OpenBSD the name is that of the binary.
+    if (strcmp(basename(info->dlpi_name), getprogname()) != 0) {
+        return 0;
+    }
+#else
+#error "dl_iterate_phdr_cb(): unknown platform"
+#endif
+
+    // Now we have the header for the binary, search its segments for the code.
+    for (i = 0; i < info->dlpi_phnum; i++) {
+        phdr = info->dlpi_phdr[i];
+        if ((phdr.p_type == PT_LOAD) && (phdr.p_flags == (PF_R | PF_X))) {
+            *((uintptr_t *) data) = info->dlpi_addr + phdr.p_vaddr;
+            return 1;
         }
     }
-
-    c_build.file("src/util/util.c");
-    c_build.compile("traceme");
+    return 0;
 }
+
