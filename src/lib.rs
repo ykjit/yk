@@ -1,4 +1,4 @@
-// Copyright (c) 2017 King's College London
+// Copyright (c) 2017-2018 King's College London
 // created by the Software Development Team <http://soft-dev.org/>
 //
 // The Universal Permissive License (UPL), Version 1.0
@@ -35,14 +35,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#![cfg_attr(all(perf_pt, target_arch = "x86_64"), feature(asm))]
 #![cfg_attr(feature="clippy", feature(plugin))]
 #![cfg_attr(feature="clippy", plugin(clippy))]
-#![feature(asm)]
 
 extern crate libc;
 
 pub mod errors;
 pub mod backends;
+pub mod util;
 
 use errors::TraceMeError;
 

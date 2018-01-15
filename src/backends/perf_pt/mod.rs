@@ -1,4 +1,4 @@
-// Copyright (c) 2017 King's College London
+// Copyright (c) 2017-2018 King's College London
 // created by the Software Development Team <http://soft-dev.org/>
 //
 // The Universal Permissive License (UPL), Version 1.0
@@ -37,7 +37,6 @@
 
 use libc::{pid_t, c_char, c_void, getpid, size_t, c_int, geteuid};
 use std::ffi::CString;
-use std::path::PathBuf;
 use errors::TraceMeError;
 use std::fs::File;
 use std::io::Read;
@@ -58,7 +57,6 @@ extern "C" {
 struct PerfPTConf {
     target_pid: pid_t,
     trace_filename: *const c_char,
-    map_filename: *const c_char,
     data_bufsize: size_t,
     aux_bufsize: size_t,
 }
@@ -150,16 +148,6 @@ impl PerfPTTracer {
         self
     }
 
-    /// Make the map filename by setting/adding a ".map" extension to `trace_filename`.
-    fn make_map_filename(trace_filename: &str) -> Result<String, TraceMeError> {
-        let mut pb = PathBuf::from(trace_filename);
-        if !pb.set_extension("map") {
-            return Err(TraceMeError::InvalidFileName("".to_string()));
-        }
-        let map_filename = pb.to_str().ok_or(TraceMeError::InvalidFileName("".to_string()))?;
-        Ok(String::from(map_filename))
-    }
-
     fn check_perf_perms() -> Result<(), TraceMeError> {
         if unsafe { geteuid() } == 0 {
             // Root can always trace.
@@ -215,12 +203,10 @@ impl Tracer for PerfPTTracer {
         }
 
         // Build the C configuration struct
-        let map_filename_c = CString::new(PerfPTTracer::make_map_filename(&self.trace_filename)?)?;
         let trace_filename_c = CString::new(self.trace_filename.clone())?;
         let tr_conf = PerfPTConf {
             target_pid: self.target_pid,
             trace_filename: trace_filename_c.as_ptr(),
-            map_filename: map_filename_c.as_ptr(),
             data_bufsize: self.data_bufsize,
             aux_bufsize: self.aux_bufsize,
         };
@@ -275,10 +261,5 @@ mod tests {
     #[test]
     fn test_not_started() {
         run_test_helper(test_helpers::test_not_started);
-    }
-
-    #[test]
-    fn test_map_filename() {
-        assert!(PerfPTTracer::make_map_filename("trace.ptt").unwrap() == "trace.map");
     }
 }

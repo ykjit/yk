@@ -1,4 +1,4 @@
-// Copyright (c) 2017 King's College London
+// Copyright (c) 2017-2018 King's College London
 // created by the Software Development Team <http://soft-dev.org/>
 //
 // The Universal Permissive License (UPL), Version 1.0
@@ -94,7 +94,6 @@ struct tracer_ctx {
 struct tracer_conf {
     pid_t       target_pid;         // PID to trace.
     const char  *trace_filename;    // Filename to store trace into.
-    const char  *map_filename;      // Filename to copy linker map to.
     size_t      data_bufsize;       // Data buf size (in pages).
     size_t      aux_bufsize;        // Aux buf size (in pages).
 };
@@ -113,7 +112,6 @@ struct tracer_thread_args {
 
 
 // Private prototypes.
-static bool stash_maps(pid_t, const char *);
 static bool write_buf_to_disk(int, void *, __u64);
 static bool read_circular_buf(void *, __u64, __u64, __u64 *, int);
 static bool poll_loop(int, int, int, struct perf_event_mmap_page *, void *);
@@ -124,41 +122,6 @@ static int open_perf(pid_t target_pid);
 struct tracer_ctx *perf_pt_start_tracer(struct tracer_conf *);
 int perf_pt_stop_tracer(struct tracer_ctx *tr_ctx);
 
-
-/*
- * Save linker relocation decisions so that you can later recover the
- * instruction stream from an on-disk binary.
- *
- * Returns true on success or false otherwise.
- */
-static bool
-stash_maps(pid_t pid, const char *map_filename)
-{
-    DEBUG("saving map to %s", map_filename);
-    bool ret = true;
-
-    char *cmd = NULL;
-    int res = asprintf(&cmd, "cp /proc/%d/maps %s && chmod 600 %s",
-                       pid, map_filename, map_filename);
-    if (res == -1) {
-        cmd = NULL; // cmd undefined after error.
-        ret = false;
-        goto clean;
-    }
-
-    res = system(cmd);
-    if (res != 0) {
-        ret = false;
-        goto clean;
-    }
-
-clean:
-    if (cmd) {
-        free(cmd);
-    }
-
-    return ret;
-}
 
 /*
  * Write part of a buffer to a file descriptor.
@@ -438,9 +401,8 @@ clean:
 struct tracer_ctx *
 perf_pt_start_tracer(struct tracer_conf *tr_conf)
 {
-    DEBUG("target_pid=%d, trace_filename=%s, map_filename=%s, "
-        "data_bufsize=%zd, aux_bufsize=%zd", tr_conf->target_pid,
-        tr_conf->trace_filename, tr_conf->map_filename,
+    DEBUG("target_pid=%d, trace_filename=%s, data_bufsize=%zd, "
+        "aux_bufsize=%zd", tr_conf->target_pid, tr_conf->trace_filename,
         tr_conf->data_bufsize, tr_conf->aux_bufsize);
 
     bool failing = false;
@@ -448,13 +410,6 @@ perf_pt_start_tracer(struct tracer_conf *tr_conf)
     int perf_fd = -1, out_fd = -1;
     int clean_sem = 0, clean_thread = 0;
     struct tracer_ctx *ret = NULL;
-
-    // Dump process map to disk so that we can relate virtual addresses to the
-    // on-disk instruction stream.
-    if (!stash_maps(tr_conf->target_pid, tr_conf->map_filename)) {
-        failing = true;
-        goto clean;
-    }
 
     // Allocate and initialise tracer context.
     tr_ctx = malloc(sizeof(*tr_ctx));
