@@ -199,7 +199,7 @@ impl Tracer for PerfPTTracer {
             return Err(TraceMeError::TracerAlreadyStarted);
         }
         if !self.trace_filename.ends_with(".ptt") {
-            return Err(TraceMeError::InvalidFileName(String::from(self.trace_filename.clone())));
+            return Err(TraceMeError::InvalidFileName(self.trace_filename.clone()));
         }
 
         // Build the C configuration struct
