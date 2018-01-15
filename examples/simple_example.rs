@@ -51,17 +51,17 @@ fn tracer() -> Box<Tracer> {
         #[cfg(all(perf_pt, target_arch = "x86_64"))] {
             let res = PerfPTTracer::new();
             if res.is_ok() {
-                return Box::new(res.unwrap().trace_filename("simple_example.ptt"));
+                Box::new(res.unwrap().trace_filename("simple_example.ptt"))
             } else {
                 // CPU doesn't have Intel PT support.
-                return Box::new(DummyTracer::new());
+                Box::new(DummyTracer::new())
             }
         }
         #[cfg(not(all(perf_pt, target_arch = "x86_64")))] {
-            return Box::new(DummyTracer::new());
+            Box::new(DummyTracer::new())
         }
     } else {
-        return Box::new(DummyTracer::new());
+        Box::new(DummyTracer::new())
     }
 }
 

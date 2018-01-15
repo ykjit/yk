@@ -81,18 +81,18 @@ impl From<num::ParseIntError> for TraceMeError {
 
 impl Display for TraceMeError {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        match self {
-            &TraceMeError::FFIIntoString(ref e) => write!(f, "{}", e),
-            &TraceMeError::FFINul(ref e) => write!(f, "{}", e),
-            &TraceMeError::IO(ref e) => write!(f, "{}", e),
-            &TraceMeError::NumParseInt(ref e) => write!(f, "{}", e),
-            &TraceMeError::HardwareSupport(ref m) => write!(f, "Hardware support: {}", m),
-            &TraceMeError::CFailure => write!(f, "Calling to C failed"),
-            &TraceMeError::ElfError(ref m) => write!(f, "ELF error: {}", m),
-            &TraceMeError::InvalidFileName(ref n) => write!(f, "Invalid file name: `{}'", n),
-            &TraceMeError::TracerAlreadyStarted => write!(f, "Tracer already started"),
-            &TraceMeError::TracerNotStarted => write!(f, "Tracer not started"),
-            &TraceMeError::TracingNotPermitted(ref m) => write!(f, "{}", m),
+        match *self {
+            TraceMeError::FFIIntoString(ref e) => write!(f, "{}", e),
+            TraceMeError::FFINul(ref e) => write!(f, "{}", e),
+            TraceMeError::IO(ref e) => write!(f, "{}", e),
+            TraceMeError::NumParseInt(ref e) => write!(f, "{}", e),
+            TraceMeError::HardwareSupport(ref m) => write!(f, "Hardware support: {}", m),
+            TraceMeError::CFailure => write!(f, "Calling to C failed"),
+            TraceMeError::ElfError(ref m) => write!(f, "ELF error: {}", m),
+            TraceMeError::InvalidFileName(ref n) => write!(f, "Invalid file name: `{}'", n),
+            TraceMeError::TracerAlreadyStarted => write!(f, "Tracer already started"),
+            TraceMeError::TracerNotStarted => write!(f, "Tracer not started"),
+            TraceMeError::TracingNotPermitted(ref m) => write!(f, "{}", m),
         }
     }
 }

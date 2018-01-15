@@ -43,7 +43,7 @@ use std::io::Read;
 use Tracer;
 
 // The sysfs path used to set perf permissions.
-const PERF_PERMS_PATH: &'static str = "/proc/sys/kernel/perf_event_paranoid";
+const PERF_PERMS_PATH: &str = "/proc/sys/kernel/perf_event_paranoid";
 
 // FFI prototypes.
 extern "C" {
@@ -199,7 +199,7 @@ impl Tracer for PerfPTTracer {
             return Err(TraceMeError::TracerAlreadyStarted);
         }
         if !self.trace_filename.ends_with(".ptt") {
-            return Err(TraceMeError::InvalidFileName(String::from(self.trace_filename.clone())));
+            return Err(TraceMeError::InvalidFileName(self.trace_filename.clone()));
         }
 
         // Build the C configuration struct
