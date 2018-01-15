@@ -43,7 +43,7 @@ use std::io::Read;
 use Tracer;
 
 // The sysfs path used to set perf permissions.
-const PERF_PERMS_PATH: &'static str = "/proc/sys/kernel/perf_event_paranoid";
+const PERF_PERMS_PATH: &str = "/proc/sys/kernel/perf_event_paranoid";
 
 // FFI prototypes.
 extern "C" {
