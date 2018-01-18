@@ -37,18 +37,21 @@
 
 #define _GNU_SOURCE
 
+#include <sys/syscall.h>
 #include <link.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <libgen.h>
+#include <unistd.h>
 
 // Private prototypes.
 static int dl_iterate_phdr_cb(struct dl_phdr_info *, size_t, void *);
 
 // Exposed prototypes.
 int traceme_exec_base(uintptr_t *);
+pid_t traceme_linux_gettid(void);
 
 /*
  * Search program headers for the relocated start address of the current
@@ -110,3 +113,18 @@ dl_iterate_phdr_cb(struct dl_phdr_info *info, size_t size, void *data)
     return 0;
 }
 
+/*
+ * Get the thread ID of the current thread.
+ *
+ * This is a Linux specific notion. The pid_t type is overloaded to also refer
+ * to individual threads.
+ *
+ * At the time of writing, there is no glibc stub for this.
+ */
+#ifdef __linux__
+pid_t
+traceme_linux_gettid(void)
+{
+    return syscall(__NR_gettid);
+}
+#endif

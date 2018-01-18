@@ -36,11 +36,15 @@
 // SOFTWARE.
 
 use libc::{c_int, uintptr_t};
+#[cfg(target_os = "linux")]
+use libc::pid_t;
 use ::errors::TraceMeError;
 
 // FFI prototypes.
 extern "C" {
     fn traceme_exec_base(addr: *const uintptr_t) -> c_int;
+    #[cfg(target_os = "linux")]
+    fn traceme_linux_gettid() -> pid_t;
 }
 
 /// Get the relocated virtual start address of the executable code for the current program.
@@ -51,6 +55,12 @@ pub fn exec_base() -> Result<usize, TraceMeError> {
         1 => Ok(addr as usize),
         _ => unreachable!(),
     }
+}
+
+/// Get the thread ID of the current thread.
+#[cfg(target_os = "linux")]
+pub fn linux_gettid() -> pid_t {
+    unsafe { traceme_linux_gettid() }
 }
 
 #[cfg(all(test, target_os = "linux"))]
