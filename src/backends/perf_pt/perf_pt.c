@@ -92,7 +92,7 @@ struct tracer_ctx {
  * Must stay in sync with the Rust-side.
  */
 struct tracer_conf {
-    pid_t       target_pid;         // PID to trace.
+    pid_t       target_tid;         // Thread ID to trace.
     const char  *trace_filename;    // Filename to store trace into.
     size_t      data_bufsize;       // Data buf size (in pages).
     size_t      aux_bufsize;        // Aux buf size (in pages).
@@ -116,7 +116,7 @@ static bool write_buf_to_disk(int, void *, __u64);
 static bool read_circular_buf(void *, __u64, __u64, __u64 *, int);
 static bool poll_loop(int, int, int, struct perf_event_mmap_page *, void *);
 static void *tracer_thread(void *);
-static int open_perf(pid_t target_pid);
+static int open_perf(pid_t target_tid);
 
 // Exposed Prototypes.
 struct tracer_ctx *perf_pt_start_tracer(struct tracer_conf *);
@@ -253,7 +253,7 @@ done:
  * Returns a file descriptor, or -1 on error.
  */
 static int
-open_perf(pid_t target_pid) {
+open_perf(pid_t target_tid) {
     DEBUG("open perf");
 
     struct perf_event_attr attr;
@@ -289,7 +289,7 @@ open_perf(pid_t target_pid) {
     attr.precise_ip = 3;
 
     // Acquire file descriptor through which to talk to Intel PT.
-    ret = syscall(SYS_perf_event_open, &attr, target_pid, -1, -1, 0);
+    ret = syscall(SYS_perf_event_open, &attr, target_tid, -1, -1, 0);
 
 clean:
     if ((pt_type_file != NULL) && (fclose(pt_type_file) == -1)) {
@@ -401,8 +401,8 @@ clean:
 struct tracer_ctx *
 perf_pt_start_tracer(struct tracer_conf *tr_conf)
 {
-    DEBUG("target_pid=%d, trace_filename=%s, data_bufsize=%zd, "
-        "aux_bufsize=%zd", tr_conf->target_pid, tr_conf->trace_filename,
+    DEBUG("target_tid=%d, trace_filename=%s, data_bufsize=%zd, "
+        "aux_bufsize=%zd", tr_conf->target_tid, tr_conf->trace_filename,
         tr_conf->data_bufsize, tr_conf->aux_bufsize);
 
     bool failing = false;
@@ -418,7 +418,7 @@ perf_pt_start_tracer(struct tracer_conf *tr_conf)
     }
 
     // Get the perf fd
-    perf_fd = open_perf(tr_conf->target_pid);
+    perf_fd = open_perf(tr_conf->target_tid);
     if (perf_fd == -1) {
         failing = true;
         goto clean;

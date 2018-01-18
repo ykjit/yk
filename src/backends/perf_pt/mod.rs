@@ -35,12 +35,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use libc::{pid_t, c_char, c_void, getpid, size_t, c_int, geteuid};
+use libc::{pid_t, c_char, c_void, size_t, c_int, geteuid};
 use std::ffi::CString;
 use errors::TraceMeError;
 use std::fs::File;
 use std::io::Read;
 use Tracer;
+use util::linux_gettid;
 
 // The sysfs path used to set perf permissions.
 const PERF_PERMS_PATH: &str = "/proc/sys/kernel/perf_event_paranoid";
@@ -55,7 +56,7 @@ extern "C" {
 // stay in sync with the C code.
 #[repr(C)]
 struct PerfPTConf {
-    target_pid: pid_t,
+    target_tid: pid_t,
     trace_filename: *const c_char,
     data_bufsize: size_t,
     aux_bufsize: size_t,
@@ -66,8 +67,8 @@ struct PerfPTConf {
 pub struct PerfPTTracer {
     /// Filename to store the trace to.
     trace_filename: String,
-    /// PID to trace.
-    target_pid: pid_t,
+    /// Thread ID to trace.
+    target_tid: pid_t,
     /// Data buffer size, in pages. Must be a power of 2.
     data_bufsize: size_t,
     /// Aux buffer size, in pages. Must be a power of 2.
@@ -88,7 +89,7 @@ impl PerfPTTracer {
     ///
     /// let res = PerfPTTracer::new();
     /// if res.is_ok() {
-    ///     let tracer = res.unwrap().trace_filename("mytrace.ptt").data_bufsize(1024).target_pid(666);
+    ///     let tracer = res.unwrap().trace_filename("mytrace.ptt").data_bufsize(1024).target_tid(666);
     /// } else {
     ///     // CPU doesn't support Intel Processor Trace.
     /// }
@@ -97,7 +98,7 @@ impl PerfPTTracer {
         if Self::pt_supported() {
             return Ok(Self {
                 trace_filename: String::from("traceme.ptt"),
-                target_pid: unsafe { getpid() },
+                target_tid: linux_gettid(),
                 tracer_ctx: None,
                 data_bufsize: 64,
                 aux_bufsize: 1024,
@@ -116,15 +117,14 @@ impl PerfPTTracer {
         self
     }
 
-    /// Select which PID to trace.
+    /// Select which thread to trace.
     ///
-    /// By default, the current PID is traced.
+    /// By default, the current thread is traced.
     ///
-    /// # Arguments
-    ///
-    /// * `pid` - The PID to trace.
-    pub fn target_pid(mut self, pid: pid_t) -> Self {
-        self.target_pid = pid;
+    /// The `tid` argument is a Linux thread ID. Note that Linux re-uses the `pid_t` type, but that
+    /// PIDs are distinct from TIDs.
+    pub fn target_tid(mut self, pid: pid_t) -> Self {
+        self.target_tid = pid;
         self
     }
 
@@ -205,7 +205,7 @@ impl Tracer for PerfPTTracer {
         // Build the C configuration struct
         let trace_filename_c = CString::new(self.trace_filename.clone())?;
         let tr_conf = PerfPTConf {
-            target_pid: self.target_pid,
+            target_tid: self.target_tid,
             trace_filename: trace_filename_c.as_ptr(),
             data_bufsize: self.data_bufsize,
             aux_bufsize: self.aux_bufsize,
