@@ -51,7 +51,7 @@ fn tracer() -> Box<Tracer> {
         #[cfg(all(perf_pt, target_arch = "x86_64"))] {
             let res = PerfPTTracer::new();
             if res.is_ok() {
-                Box::new(res.unwrap().trace_filename("simple_example.ptt"))
+                Box::new(res.unwrap())
             } else {
                 // CPU doesn't have Intel PT support.
                 Box::new(DummyTracer::new())
@@ -77,10 +77,10 @@ fn main() {
         panic!(format!("Failed to start tracer: {}", e));
     });
 
-    for i in 1..10 {
+    for i in 1..10000 {
         res += i + pid;
     }
 
     tracer.stop_tracing().unwrap();
-    println!("result: {}", res);
+    println!("program result: {}", res);
 }

@@ -37,6 +37,8 @@
 
 use Tracer;
 use errors::TraceMeError;
+use HWTrace;
+use std::ptr;
 
 /// A tracer which doesn't really do anything.
 pub struct DummyTracer {
@@ -59,12 +61,12 @@ impl Tracer for DummyTracer {
         Ok(())
     }
 
-    fn stop_tracing(&mut self) -> Result<(), TraceMeError> {
+    fn stop_tracing(&mut self) -> Result<HWTrace, TraceMeError> {
         if !self.started {
             return Err(TraceMeError::TracerNotStarted);
         }
         self.started = false;
-        Ok(())
+        Ok(HWTrace::from_buf(ptr::null(), 0)) // An empty trace.
     }
 }
 
