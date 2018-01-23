@@ -225,11 +225,11 @@ mod tests {
     use super::PerfPTTracer;
     use ::test_helpers;
 
-    fn run_test_helper<F>(f: F)  where F: Fn(PerfPTTracer) {
+    fn run_test_helper<F>(f: F) where F: Fn(PerfPTTracer) {
         let res = PerfPTTracer::new();
         // Only run the test if the CPU supports Intel PT.
-        if res.is_ok() {
-            f(res.unwrap());
+        if let Ok(tracer) = res {
+            f(tracer);
         }
     }
 
