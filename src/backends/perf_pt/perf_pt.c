@@ -176,7 +176,6 @@ poll_loop(int perf_fd, int stop_fd, struct perf_event_mmap_page *mmap_hdr,
 {
     int n_events = 0;
     bool ret = true;
-    size_t num_wakes = 0;
     struct pollfd pfds[2] = {
         {perf_fd,   POLLIN | POLLHUP,   0},
         {stop_fd,   POLLHUP,            0}
@@ -193,14 +192,6 @@ poll_loop(int perf_fd, int stop_fd, struct perf_event_mmap_page *mmap_hdr,
             // See <linux/perf_event.h> for why we need the asm block.
             __u64 head = mmap_hdr->aux_head;
             asm volatile ("" : : : "memory");
-
-            // We were awoken to read out trace info, or we tracing stopped.
-            num_wakes++;
-            DEBUG("wake");
-            DEBUG("aux_head=  0x%010llu", head);
-            DEBUG("aux_tail=  0x%010llu", mmap_hdr->aux_tail);
-            DEBUG("aux_offset=0x%010llu", mmap_hdr->aux_offset);
-            DEBUG("aux_size=  0x%010llu", mmap_hdr->aux_size);
 
             if (!read_aux(aux, mmap_hdr->aux_size, head, &mmap_hdr->aux_tail,
                           trace_buf, trace_bufsize, trace_len)) {
@@ -219,10 +210,6 @@ poll_loop(int perf_fd, int stop_fd, struct perf_event_mmap_page *mmap_hdr,
     }
 
 done:
-    DEBUG("poll loop exit: awoke %zu times", num_wakes);
-    if (!ret) {
-        DEBUG("failure");
-    }
     return ret;
 }
 
@@ -233,8 +220,6 @@ done:
  */
 static int
 open_perf(pid_t target_tid) {
-    DEBUG("open perf");
-
     struct perf_event_attr attr;
     memset(&attr, 0, sizeof(attr));
     attr.size = sizeof(attr);
@@ -286,8 +271,6 @@ clean:
 static void *
 tracer_thread(void *arg)
 {
-    DEBUG("tracer init");
-
     int page_size = getpagesize();
     struct tracer_thread_args *thr_args = (struct tracer_thread_args *) arg;
     int base_size = (1 + thr_args->data_bufsize) * page_size;
@@ -328,7 +311,6 @@ tracer_thread(void *arg)
     __u64 *trace_len = thr_args->trace_len;
 
     // Resume the interpreter loop.
-    DEBUG("resume main thread");
     if (sem_post(thr_args->tracer_init_sem) != 0) {
         ret = false;
         goto clean;
@@ -358,11 +340,6 @@ clean:
         sem_post(thr_args->tracer_init_sem);
     }
 
-    if (ret) {
-        DEBUG("tracer thread exit");
-    } else {
-        DEBUG("failure");
-    }
     return (void *) ret;
 }
 
@@ -383,9 +360,6 @@ clean:
 struct tracer_ctx *
 perf_pt_start_tracer(struct tracer_conf *tr_conf)
 {
-    DEBUG("target_tid=%d, data_bufsize=%zd, aux_bufsize=%zd",
-          tr_conf->target_tid, tr_conf->data_bufsize, tr_conf->aux_bufsize);
-
     bool failing = false;
     struct tracer_ctx *tr_ctx = NULL;
     int perf_fd = -1;
@@ -453,7 +427,6 @@ perf_pt_start_tracer(struct tracer_conf *tr_conf)
     }
 
     // Wait for the tracer to initialise, and check it didn't fail.
-    DEBUG("wait for tracer to init");
     rc = -1;
     while (rc == -1) {
         rc = sem_wait(&tracer_init_sem);
@@ -497,11 +470,6 @@ clean:
         }
     }
 
-    if (ret != NULL) {
-        DEBUG("resume");
-    } else {
-        DEBUG("failure");
-    }
     return ret;
 }
 
@@ -515,8 +483,6 @@ clean:
  */
 int
 perf_pt_stop_tracer(struct tracer_ctx *tr_ctx, uint8_t **buf, __u64 *len) {
-    DEBUG("stopping tracer");
-
     int ret = 0;
 
     // Turn off tracer hardware.
@@ -530,7 +496,6 @@ perf_pt_stop_tracer(struct tracer_ctx *tr_ctx, uint8_t **buf, __u64 *len) {
     }
 
     // Wait for poll loop to exit.
-    DEBUG("wait for trace thread to exit");
     void *thr_exit;
     if (pthread_join(tr_ctx->tracer_thread, &thr_exit) != 0) {
         ret = -1;
@@ -551,11 +516,9 @@ perf_pt_stop_tracer(struct tracer_ctx *tr_ctx, uint8_t **buf, __u64 *len) {
     tr_ctx->perf_fd = -1;
 
     if (ret != -1) {
-        DEBUG("tracing complete");
         *buf = tr_ctx->trace_buf;
         *len = tr_ctx->trace_len;
     } else {
-        DEBUG("failure");
         if (tr_ctx->trace_buf != NULL) {
             free(tr_ctx->trace_buf);
         }
