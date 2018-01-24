@@ -93,7 +93,7 @@ struct tracer_ctx {
 struct tracer_conf {
     pid_t       target_tid;         // Thread ID to trace.
     size_t      data_bufsize;       // Data buf size (in pages).
-    size_t      aux_bufsize;        // Aux buf size (in pages).
+    size_t      aux_bufsize;        // AUX buf size (in pages).
 };
 
 /*
@@ -104,7 +104,7 @@ struct tracer_thread_args {
     int                 stop_fd_rd;         // Polled for "stop" event.
     sem_t               *tracer_init_sem;   // Tracer init sync.
     size_t              data_bufsize;       // Data buf size (in pages).
-    size_t              aux_bufsize;        // Aux buf size (in pages).
+    size_t              aux_bufsize;        // AUX buf size (in pages).
     void                **trace_buf;        // Pointer to the buffer to copy the trace into.
     __u64               trace_bufsize;      // Initial capacity of the trace buffer (in bytes).
     __u64               *trace_len;         // Pointer to the trace length (in bytes).
@@ -315,7 +315,7 @@ tracer_thread(void *arg)
     }
     sem_posted = 1;
 
-    // Start reading out of the aux buffer.
+    // Start reading out of the AUX buffer.
     if (!poll_loop(perf_fd, stop_fd_rd, header, aux, trace_buf,
                    trace_bufsize, trace_len)) {
         ret = false;
@@ -417,7 +417,7 @@ perf_pt_start_tracer(struct tracer_conf *tr_conf)
         &tr_ctx->trace_len,
     };
 
-    // Spawn a thread to deal with copying out of the PT aux buffer.
+    // Spawn a thread to deal with copying out of the PT AUX buffer.
     int rc = pthread_create(&tr_ctx->tracer_thread, NULL, tracer_thread, &thr_args);
     if (rc) {
         failing = true;

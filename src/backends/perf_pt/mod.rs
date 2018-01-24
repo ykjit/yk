@@ -69,7 +69,7 @@ pub struct PerfPTTracer {
     target_tid: pid_t,
     /// Data buffer size, in pages. Must be a power of 2.
     data_bufsize: size_t,
-    /// Aux buffer size, in pages. Must be a power of 2.
+    /// AUX buffer size, in pages. Must be a power of 2.
     aux_bufsize: size_t,
     /// Opaque C pointer representing the tracer context.
     tracer_ctx: Option<*const c_void>,
@@ -125,11 +125,11 @@ impl PerfPTTracer {
         self
     }
 
-    /// Set the PT aux buffer size.
+    /// Set the PT AUX buffer size.
     ///
     /// # Arguments
     ///
-    /// * `size` - The aux buffer size to use.
+    /// * `size` - The AUX buffer size to use.
     pub fn aux_bufsize(mut self, size: usize) -> Self {
         self.aux_bufsize = size;
         self
