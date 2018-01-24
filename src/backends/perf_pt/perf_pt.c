@@ -58,10 +58,8 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
-#define TRACE_OUTPUT    "trace.data"
 #define SYSFS_PT_TYPE   "/sys/bus/event_source/devices/intel_pt/type"
 #define MAX_PT_TYPE_STR 8
-#define MAPS_MODE       S_IRUSR | S_IWUSR
 
 #ifndef INFTIM
 #define INFTIM -1
