@@ -43,65 +43,42 @@ use Tracer;
 use HWTrace;
 use util::linux_gettid;
 use std::ptr;
+#[cfg(debug_assertions)]
+use std::ops::Drop;
+use TracerState;
 
 // The sysfs path used to set perf permissions.
 const PERF_PERMS_PATH: &str = "/proc/sys/kernel/perf_event_paranoid";
 
 // FFI prototypes.
 extern "C" {
-    fn perf_pt_start_tracer(conf: *const PerfPTConf) -> *const c_void;
+    fn perf_pt_init_tracer(conf: *const PerfPTConf) -> *const c_void;
+    fn perf_pt_start_tracer(tr_ctx: *const c_void) -> c_int;
     fn perf_pt_stop_tracer(tr_ctx: *const c_void, buf: *const *const u8, len: &u64) -> c_int;
+    fn perf_pt_free_tracer(tr_ctx: *const c_void) -> c_int;
 }
 
 // Struct used to communicate a tracing configuration to the C code. Must
 // stay in sync with the C code.
 #[repr(C)]
-struct PerfPTConf {
-    target_tid: pid_t,
-    data_bufsize: size_t,
-    aux_bufsize: size_t,
-}
-
-/// A tracer that uses the Linux Perf interface to Intel Processor Trace.
-#[derive(Default)]
-pub struct PerfPTTracer {
+pub struct PerfPTConf {
     /// Thread ID to trace.
     target_tid: pid_t,
     /// Data buffer size, in pages. Must be a power of 2.
     data_bufsize: size_t,
     /// AUX buffer size, in pages. Must be a power of 2.
     aux_bufsize: size_t,
-    /// Opaque C pointer representing the tracer context.
-    tracer_ctx: Option<*const c_void>,
 }
 
-impl PerfPTTracer {
-    /// Create a new tracer.
-    ///
-    /// Returns `Err` if the CPU doesn't support Intel Processor Trace.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use hwtracer::backends::PerfPTTracer;
-    ///
-    /// let res = PerfPTTracer::new();
-    /// if res.is_ok() {
-    ///     let tracer = res.unwrap().data_bufsize(1024).target_tid(666);
-    /// } else {
-    ///     // CPU doesn't support Intel Processor Trace.
-    /// }
-    /// ```
-    pub fn new() -> Result<Self, HWTracerError> {
-        if Self::pt_supported() {
-            return Ok(Self {
-                target_tid: linux_gettid(),
-                tracer_ctx: None,
-                data_bufsize: 64,
-                aux_bufsize: 1024,
-            });
+/// Configures a PerfPTTracer.
+impl PerfPTConf {
+    /// Creates a new configuration with defaults.
+    pub fn new() -> Self {
+        Self {
+            target_tid: linux_gettid(),
+            data_bufsize: 64,
+            aux_bufsize: 1024,
         }
-        Err(HWTracerError::HardwareSupport("Intel PT not supported by CPU".into()))
     }
 
     /// Select which thread to trace.
@@ -115,24 +92,67 @@ impl PerfPTTracer {
         self
     }
 
-    /// Set the PT data buffer size.
-    ///
-    /// # Arguments
-    ///
-    /// * `size` - The data buffer size to use.
+    /// Set the PT data buffer size (in pages).
     pub fn data_bufsize(mut self, size: usize) -> Self {
-        self.data_bufsize = size;
+        self.data_bufsize = size as size_t;
         self
     }
 
-    /// Set the PT AUX buffer size.
-    ///
-    /// # Arguments
-    ///
-    /// * `size` - The AUX buffer size to use.
+    /// Set the PT AUX buffer size (in pages).
     pub fn aux_bufsize(mut self, size: usize) -> Self {
-        self.aux_bufsize = size;
+        self.aux_bufsize = size as size_t;
         self
+    }
+
+}
+
+/// A tracer that uses the Linux Perf interface to Intel Processor Trace.
+pub struct PerfPTTracer {
+    /// Opaque C pointer representing the tracer context.
+    tracer_ctx: *const c_void,
+    /// The state of the tracer.
+    state: TracerState,
+}
+
+impl PerfPTTracer {
+    /// Create a new tracer using the specified `PerfPTConf`.
+    ///
+    /// Returns `Err` if the CPU doesn't support Intel Processor Trace.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use hwtracer::backends::PerfPTTracer;
+    ///
+    /// let config = PerfPTTracer::config().data_bufsize(1024).target_tid(12345);
+    /// let res = PerfPTTracer::new(config);
+    /// if res.is_ok() {
+    ///     let tracer = res.unwrap();
+    ///     // Use the tracer...
+    /// } else {
+    ///     // CPU doesn't support Intel Processor Trace.
+    /// }
+    /// ```
+    pub fn new(config: PerfPTConf) -> Result<Self, HWTracerError> {
+        PerfPTTracer::check_perf_perms()?;
+        if !Self::pt_supported() {
+            return Err(HWTracerError::HardwareSupport("Intel PT not supported by CPU".into()));
+        }
+
+        let ctx = unsafe { perf_pt_init_tracer(&config as *const PerfPTConf) };
+        if ctx == ptr::null() {
+            return Err(HWTracerError::CFailure);
+        }
+
+        Ok(Self {
+            tracer_ctx: ctx,
+            state: TracerState::Stopped,
+        })
+    }
+
+    /// Utility function to get a default config.
+    pub fn config() -> PerfPTConf {
+        PerfPTConf::new()
     }
 
     fn check_perf_perms() -> Result<(), HWTracerError> {
@@ -177,46 +197,65 @@ impl PerfPTTracer {
         }
         false
     }
+
+    fn err_if_destroyed(&self) -> Result<(), HWTracerError> {
+        if self.state == TracerState::Destroyed {
+            return Err(HWTracerError::TracerDestroyed);
+        }
+        Ok(())
+    }
 }
 
 impl Tracer for PerfPTTracer {
     fn start_tracing(&mut self) -> Result<(), HWTracerError> {
-        PerfPTTracer::check_perf_perms()?;
-        if self.tracer_ctx.is_some() {
+        self.err_if_destroyed()?;
+        if self.state == TracerState::Started {
             return Err(HWTracerError::TracerAlreadyStarted);
         }
 
-        // Build the C configuration struct
-        let tr_conf = PerfPTConf {
-            target_tid: self.target_tid,
-            data_bufsize: self.data_bufsize,
-            aux_bufsize: self.aux_bufsize,
-        };
-
-        // Call C
-        let conf_ptr = &tr_conf as *const PerfPTConf;
-        let opq_ptr = unsafe {
-            perf_pt_start_tracer(conf_ptr)
-        };
-        if opq_ptr.is_null() {
+        if unsafe { perf_pt_start_tracer(self.tracer_ctx) } == -1 {
             return Err(HWTracerError::CFailure);
         }
-        self.tracer_ctx = Some(opq_ptr);
+        self.state = TracerState::Started;
         Ok(())
     }
 
     fn stop_tracing(&mut self) -> Result<HWTrace, HWTracerError> {
-        let tr_ctx = self.tracer_ctx.ok_or(HWTracerError::TracerNotStarted)?;
+        self.err_if_destroyed()?;
+        if self.state == TracerState::Stopped {
+            return Err(HWTracerError::TracerNotStarted);
+        }
+
         let buf = ptr::null() as *const u8;
         let len = 0;
         let rc = unsafe {
-            perf_pt_stop_tracer(tr_ctx, &buf, &len)
+            perf_pt_stop_tracer(self.tracer_ctx, &buf, &len)
         };
+        self.state = TracerState::Stopped;
         if rc == -1 {
             return Err(HWTracerError::CFailure);
         }
         let trace = HWTrace::from_buf(buf, len);
         Ok(trace)
+    }
+
+    fn destroy(&mut self) -> Result<(), HWTracerError> {
+        self.err_if_destroyed()?;
+        self.state = TracerState::Destroyed;
+        let res = unsafe { perf_pt_free_tracer(self.tracer_ctx) };
+        if res != 0 {
+            return Err(HWTracerError::CFailure);
+        }
+        Ok(())
+    }
+}
+
+#[cfg(debug_assertions)]
+impl Drop for PerfPTTracer {
+    fn drop(&mut self) {
+        if self.state != TracerState::Destroyed {
+            panic!("PerfPTTracer dropped with no call to destroy()");
+        }
     }
 }
 
@@ -226,7 +265,7 @@ mod tests {
     use ::test_helpers;
 
     fn run_test_helper<F>(f: F) where F: Fn(PerfPTTracer) {
-        let res = PerfPTTracer::new();
+        let res = PerfPTTracer::new(PerfPTTracer::config());
         // Only run the test if the CPU supports Intel PT.
         if let Ok(tracer) = res {
             f(tracer);
@@ -239,6 +278,11 @@ mod tests {
     }
 
     #[test]
+    fn test_repeated_tracing() {
+        run_test_helper(test_helpers::test_repeated_tracing);
+    }
+
+    #[test]
     fn test_already_started() {
         run_test_helper(test_helpers::test_already_started);
     }
@@ -246,5 +290,27 @@ mod tests {
     #[test]
     fn test_not_started() {
         run_test_helper(test_helpers::test_not_started);
+    }
+
+    #[test]
+    fn test_use_tracer_after_destroy1() {
+        run_test_helper(test_helpers::test_use_tracer_after_destroy1);
+    }
+
+    #[test]
+    fn test_use_tracer_after_destroy2() {
+        run_test_helper(test_helpers::test_use_tracer_after_destroy1);
+    }
+
+    #[test]
+    fn test_use_tracer_after_destroy3() {
+        run_test_helper(test_helpers::test_use_tracer_after_destroy1);
+    }
+
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    #[test]
+    fn test_drop_without_destroy() {
+        run_test_helper(test_helpers::test_drop_without_destroy);
     }
 }

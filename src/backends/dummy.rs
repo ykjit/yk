@@ -39,34 +39,61 @@ use Tracer;
 use errors::HWTracerError;
 use HWTrace;
 use std::ptr;
+#[cfg(debug_assertions)]
+use std::ops::Drop;
+use TracerState;
 
 /// A tracer which doesn't really do anything.
 pub struct DummyTracer {
-    started: bool,
+    state: TracerState,
 }
 
 impl DummyTracer {
     /// Create a dummy tracer.
     pub fn new() -> Self {
-        Self {started: false}
+        Self { state: TracerState::Stopped }
+    }
+
+    fn err_if_destroyed(&self) -> Result<(), HWTracerError> {
+        if self.state == TracerState::Destroyed {
+            return Err(HWTracerError::TracerDestroyed);
+        }
+        Ok(())
     }
 }
 
 impl Tracer for DummyTracer {
     fn start_tracing(&mut self) -> Result<(), HWTracerError> {
-        if self.started {
+        self.err_if_destroyed()?;
+        if self.state != TracerState::Stopped {
             return Err(HWTracerError::TracerAlreadyStarted);
         }
-        self.started = true;
+        self.state = TracerState::Started;
         Ok(())
     }
 
     fn stop_tracing(&mut self) -> Result<HWTrace, HWTracerError> {
-        if !self.started {
+        self.err_if_destroyed()?;
+        if self.state != TracerState::Started {
             return Err(HWTracerError::TracerNotStarted);
         }
-        self.started = false;
+        self.state = TracerState::Stopped;
         Ok(HWTrace::from_buf(ptr::null(), 0)) // An empty trace.
+    }
+
+    fn destroy(&mut self) -> Result<(), HWTracerError> {
+        self.err_if_destroyed()?;
+        self.state = TracerState::Destroyed;
+        Ok(())
+    }
+}
+
+#[cfg(debug_assertions)]
+impl Drop for DummyTracer {
+    fn drop(&mut self) {
+        if self.state != TracerState::Destroyed {
+            panic!("DummyTracer dropped without destroy()");
+        }
     }
 }
 
@@ -81,6 +108,11 @@ mod tests {
     }
 
     #[test]
+    fn test_repeated_tracing() {
+        test_helpers::test_repeated_tracing(DummyTracer::new());
+    }
+
+    #[test]
     fn test_already_started() {
         test_helpers::test_already_started(DummyTracer::new());
     }
@@ -88,5 +120,27 @@ mod tests {
     #[test]
     fn test_not_started() {
         test_helpers::test_not_started(DummyTracer::new());
+    }
+
+    #[test]
+    fn test_use_tracer_after_destroy1() {
+        test_helpers::test_use_tracer_after_destroy1(DummyTracer::new());
+    }
+
+    #[test]
+    fn test_use_tracer_after_destroy2() {
+        test_helpers::test_use_tracer_after_destroy2(DummyTracer::new());
+    }
+
+    #[test]
+    fn test_use_tracer_after_destroy3() {
+        test_helpers::test_use_tracer_after_destroy3(DummyTracer::new());
+    }
+
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    #[test]
+    fn test_drop_without_destroy() {
+        test_helpers::test_drop_without_destroy(DummyTracer::new());
     }
 }
