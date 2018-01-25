@@ -35,13 +35,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use libc::{pid_t, c_char, c_void, size_t, c_int, geteuid};
-use std::ffi::CString;
+use libc::{pid_t, c_void, size_t, c_int, geteuid};
 use errors::TraceMeError;
 use std::fs::File;
 use std::io::Read;
 use Tracer;
+use HWTrace;
 use util::linux_gettid;
+use std::ptr;
 
 // The sysfs path used to set perf permissions.
 const PERF_PERMS_PATH: &str = "/proc/sys/kernel/perf_event_paranoid";
@@ -49,7 +50,7 @@ const PERF_PERMS_PATH: &str = "/proc/sys/kernel/perf_event_paranoid";
 // FFI prototypes.
 extern "C" {
     fn perf_pt_start_tracer(conf: *const PerfPTConf) -> *const c_void;
-    fn perf_pt_stop_tracer(tr_ctx: *const c_void) -> c_int;
+    fn perf_pt_stop_tracer(tr_ctx: *const c_void, buf: *const *const u8, len: &u64) -> c_int;
 }
 
 // Struct used to communicate a tracing configuration to the C code. Must
@@ -57,7 +58,6 @@ extern "C" {
 #[repr(C)]
 struct PerfPTConf {
     target_tid: pid_t,
-    trace_filename: *const c_char,
     data_bufsize: size_t,
     aux_bufsize: size_t,
 }
@@ -65,13 +65,11 @@ struct PerfPTConf {
 /// A tracer that uses the Linux Perf interface to Intel Processor Trace.
 #[derive(Default)]
 pub struct PerfPTTracer {
-    /// Filename to store the trace to.
-    trace_filename: String,
     /// Thread ID to trace.
     target_tid: pid_t,
     /// Data buffer size, in pages. Must be a power of 2.
     data_bufsize: size_t,
-    /// Aux buffer size, in pages. Must be a power of 2.
+    /// AUX buffer size, in pages. Must be a power of 2.
     aux_bufsize: size_t,
     /// Opaque C pointer representing the tracer context.
     tracer_ctx: Option<*const c_void>,
@@ -89,7 +87,7 @@ impl PerfPTTracer {
     ///
     /// let res = PerfPTTracer::new();
     /// if res.is_ok() {
-    ///     let tracer = res.unwrap().trace_filename("mytrace.ptt").data_bufsize(1024).target_tid(666);
+    ///     let tracer = res.unwrap().data_bufsize(1024).target_tid(666);
     /// } else {
     ///     // CPU doesn't support Intel Processor Trace.
     /// }
@@ -97,7 +95,6 @@ impl PerfPTTracer {
     pub fn new() -> Result<Self, TraceMeError> {
         if Self::pt_supported() {
             return Ok(Self {
-                trace_filename: String::from("traceme.ptt"),
                 target_tid: linux_gettid(),
                 tracer_ctx: None,
                 data_bufsize: 64,
@@ -105,16 +102,6 @@ impl PerfPTTracer {
             });
         }
         Err(TraceMeError::HardwareSupport("Intel PT not supported by CPU".into()))
-    }
-
-    /// Set where to write the trace.
-    ///
-    /// # Arguments
-    ///
-    /// * `filename` - The filename in which to store trace packets.
-    pub fn trace_filename(mut self, filename: &str) -> Self {
-        self.trace_filename = String::from(filename);
-        self
     }
 
     /// Select which thread to trace.
@@ -138,11 +125,11 @@ impl PerfPTTracer {
         self
     }
 
-    /// Set the PT aux buffer size.
+    /// Set the PT AUX buffer size.
     ///
     /// # Arguments
     ///
-    /// * `size` - The aux buffer size to use.
+    /// * `size` - The AUX buffer size to use.
     pub fn aux_bufsize(mut self, size: usize) -> Self {
         self.aux_bufsize = size;
         self
@@ -198,15 +185,10 @@ impl Tracer for PerfPTTracer {
         if self.tracer_ctx.is_some() {
             return Err(TraceMeError::TracerAlreadyStarted);
         }
-        if !self.trace_filename.ends_with(".ptt") {
-            return Err(TraceMeError::InvalidFileName(self.trace_filename.clone()));
-        }
 
         // Build the C configuration struct
-        let trace_filename_c = CString::new(self.trace_filename.clone())?;
         let tr_conf = PerfPTConf {
             target_tid: self.target_tid,
-            trace_filename: trace_filename_c.as_ptr(),
             data_bufsize: self.data_bufsize,
             aux_bufsize: self.aux_bufsize,
         };
@@ -223,15 +205,18 @@ impl Tracer for PerfPTTracer {
         Ok(())
     }
 
-    fn stop_tracing(&mut self) -> Result<(), TraceMeError> {
+    fn stop_tracing(&mut self) -> Result<HWTrace, TraceMeError> {
         let tr_ctx = self.tracer_ctx.ok_or(TraceMeError::TracerNotStarted)?;
+        let buf = ptr::null() as *const u8;
+        let len = 0;
         let rc = unsafe {
-            perf_pt_stop_tracer(tr_ctx)
+            perf_pt_stop_tracer(tr_ctx, &buf, &len)
         };
         if rc == -1 {
             return Err(TraceMeError::CFailure);
         }
-        Ok(())
+        let trace = HWTrace::from_buf(buf, len);
+        Ok(trace)
     }
 }
 
@@ -240,11 +225,11 @@ mod tests {
     use super::PerfPTTracer;
     use ::test_helpers;
 
-    fn run_test_helper<F>(f: F)  where F: Fn(PerfPTTracer) {
+    fn run_test_helper<F>(f: F) where F: Fn(PerfPTTracer) {
         let res = PerfPTTracer::new();
         // Only run the test if the CPU supports Intel PT.
-        if res.is_ok() {
-            f(res.unwrap());
+        if let Ok(tracer) = res {
+            f(tracer);
         }
     }
 

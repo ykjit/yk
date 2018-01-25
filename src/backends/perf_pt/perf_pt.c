@@ -58,10 +58,8 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
-#define TRACE_OUTPUT    "trace.data"
 #define SYSFS_PT_TYPE   "/sys/bus/event_source/devices/intel_pt/type"
 #define MAX_PT_TYPE_STR 8
-#define MAPS_MODE       S_IRUSR | S_IWUSR
 
 #ifndef INFTIM
 #define INFTIM -1
@@ -84,7 +82,8 @@ struct tracer_ctx {
     int                 stop_fd_wr;         // Close to halt trace thread.
     int                 stop_fd_rd;         // Read end of stop_fd_wr pipe.
     int                 perf_fd;            // FD used to talk to the perf API.
-    int                 out_fd;             // Trace packets written here.
+    void                *trace_buf;         // The trace copied from the AUX buffer.
+    __u64               trace_len;          // The length of the trace (in bytes).
 };
 
 /*
@@ -93,9 +92,8 @@ struct tracer_ctx {
  */
 struct tracer_conf {
     pid_t       target_tid;         // Thread ID to trace.
-    const char  *trace_filename;    // Filename to store trace into.
     size_t      data_bufsize;       // Data buf size (in pages).
-    size_t      aux_bufsize;        // Aux buf size (in pages).
+    size_t      aux_bufsize;        // AUX buf size (in pages).
 };
 
 /*
@@ -105,81 +103,60 @@ struct tracer_thread_args {
     int                 perf_fd;            // Perf notification fd.
     int                 stop_fd_rd;         // Polled for "stop" event.
     sem_t               *tracer_init_sem;   // Tracer init sync.
-    int                 out_fd;             // Trace packets written here.
     size_t              data_bufsize;       // Data buf size (in pages).
-    size_t              aux_bufsize;        // Aux buf size (in pages).
+    size_t              aux_bufsize;        // AUX buf size (in pages).
+    void                **trace_buf;        // Pointer to the buffer to copy the trace into.
+    __u64               trace_bufsize;      // Initial capacity of the trace buffer (in bytes).
+    __u64               *trace_len;         // Pointer to the trace length (in bytes).
 };
 
 
 // Private prototypes.
-static bool write_buf_to_disk(int, void *, __u64);
-static bool read_circular_buf(void *, __u64, __u64, __u64 *, int);
-static bool poll_loop(int, int, int, struct perf_event_mmap_page *, void *);
+static bool read_aux(void *, __u64, __u64, __u64 *, void **, __u64, __u64 *);
+static bool poll_loop(int, int, struct perf_event_mmap_page *, void *, void **,
+                      __u64, __u64 *);
 static void *tracer_thread(void *);
 static int open_perf(pid_t target_tid);
 
 // Exposed Prototypes.
 struct tracer_ctx *perf_pt_start_tracer(struct tracer_conf *);
-int perf_pt_stop_tracer(struct tracer_ctx *tr_ctx);
-
-
-/*
- * Write part of a buffer to a file descriptor.
- *
- * The implementation is a little convoluted due to friction between ssize_t
- * and __u64.
- *
- * Returns true on success or false otherwise.
- */
-static bool
-write_buf_to_disk(int fd, void *buf, __u64 size) {
-    char *buf_c = (char *) buf;
-    size_t block_size = SSIZE_MAX;
-
-    while (size > 0) {
-        if (block_size > size) {
-            block_size = size;
-        }
-        ssize_t res = write(fd, buf, block_size);
-        if (res == -1) {
-            if (errno == EINTR) {
-                // Write interrupted before anything written.
-                continue;
-            }
-            return false;
-        }
-        size -= res;
-        buf_c += res;
-    }
-    return true;
-}
+int perf_pt_stop_tracer(struct tracer_ctx *tr_ctx, uint8_t **, __u64 *);
+void *perf_pt_trace_buf(struct tracer_ctx *tr_ctx, uint32_t *len);
 
 /*
- * Read data out of a circular buffer.
+ * Read data out of the AUX buffer.
+ *
+ * Reads `size` bytes from `aux_buf` into `trace_buf`, updating `*trace_len`.
  *
  * Returns true on success and false otherwise.
  */
 static bool
-read_circular_buf(void *buf, __u64 size, __u64 head_monotonic, __u64 *tail_p, int out_fd) {
+read_aux(void *aux_buf, __u64 size, __u64 head_monotonic, __u64 *tail_p,
+         void **trace_buf, __u64 trace_bufsize, __u64 *trace_len) {
     __u64 head = head_monotonic % size; // Head must be manually wrapped.
     __u64 tail = *tail_p;
 
+    // First check we won't overflow the (destination) trace buffer.
+    __u64 new_data_size;
     if (tail <= head) {
         // No wrap-around.
-        DEBUG("read with no wrap");
-        if (!write_buf_to_disk(out_fd, buf + tail, head - tail)) {
-            return false;
-        }
+        new_data_size = head - tail;
     } else {
         // Wrap-around.
-        DEBUG("read with wrap");
-        if (!write_buf_to_disk(out_fd, buf + tail, size - tail)) {
-            return false;
-        }
-        if (!write_buf_to_disk(out_fd, buf, head)) {
-            return false;
-        }
+        new_data_size = (size - tail) + head;
     }
+
+    // For now we simply crash out if we exhaust the buffer.
+    assert(*trace_len + new_data_size <= trace_bufsize);
+
+    // Finally copy the AUX buffer into the trace buffer.
+    if (tail <= head) {
+        memcpy(*trace_buf, aux_buf + tail, head - tail);
+    } else {
+        memcpy(*trace_buf, aux_buf + tail, size - tail);
+        memcpy(*trace_buf, aux_buf, head);
+    }
+    *trace_len += new_data_size;
 
     // Update buffer tail, thus marking the space we just read as re-usable.
     *tail_p = head;
@@ -192,12 +169,11 @@ read_circular_buf(void *buf, __u64 size, __u64 head_monotonic, __u64 *tail_p, in
  * Returns true on success and false otherwise.
  */
 static bool
-poll_loop(int perf_fd, int stop_fd, int out_fd,
-          struct perf_event_mmap_page *mmap_hdr, void *aux)
+poll_loop(int perf_fd, int stop_fd, struct perf_event_mmap_page *mmap_hdr,
+          void *aux, void **trace_buf, __u64 trace_bufsize, __u64 *trace_len)
 {
     int n_events = 0;
     bool ret = true;
-    size_t num_wakes = 0;
     struct pollfd pfds[2] = {
         {perf_fd,   POLLIN | POLLHUP,   0},
         {stop_fd,   POLLHUP,            0}
@@ -215,16 +191,8 @@ poll_loop(int perf_fd, int stop_fd, int out_fd,
             __u64 head = mmap_hdr->aux_head;
             asm volatile ("" : : : "memory");
 
-            // We were awoken to read out trace info, or we tracing stopped.
-            num_wakes++;
-            DEBUG("wake");
-            DEBUG("aux_head=  0x%010llu", head);
-            DEBUG("aux_tail=  0x%010llu", mmap_hdr->aux_tail);
-            DEBUG("aux_offset=0x%010llu", mmap_hdr->aux_offset);
-            DEBUG("aux_size=  0x%010llu", mmap_hdr->aux_size);
-
-            if (!read_circular_buf(aux, mmap_hdr->aux_size, head,
-                                   &mmap_hdr->aux_tail, out_fd)) {
+            if (!read_aux(aux, mmap_hdr->aux_size, head, &mmap_hdr->aux_tail,
+                          trace_buf, trace_bufsize, trace_len)) {
                 ret = false;
                 goto done;
             }
@@ -240,10 +208,6 @@ poll_loop(int perf_fd, int stop_fd, int out_fd,
     }
 
 done:
-    DEBUG("poll loop exit: awoke %zu times", num_wakes);
-    if (!ret) {
-        DEBUG("failure");
-    }
     return ret;
 }
 
@@ -254,8 +218,6 @@ done:
  */
 static int
 open_perf(pid_t target_tid) {
-    DEBUG("open perf");
-
     struct perf_event_attr attr;
     memset(&attr, 0, sizeof(attr));
     attr.size = sizeof(attr);
@@ -307,8 +269,6 @@ clean:
 static void *
 tracer_thread(void *arg)
 {
-    DEBUG("tracer init");
-
     int page_size = getpagesize();
     struct tracer_thread_args *thr_args = (struct tracer_thread_args *) arg;
     int base_size = (1 + thr_args->data_bufsize) * page_size;
@@ -344,18 +304,20 @@ tracer_thread(void *arg)
     // `thr_args', which is on the parent thread's stack, will become unusable.
     int perf_fd = thr_args->perf_fd;
     int stop_fd_rd = thr_args->stop_fd_rd;
-    int out_fd = thr_args->out_fd;
+    void **trace_buf = thr_args->trace_buf;
+    __u64 trace_bufsize = thr_args->trace_bufsize;
+    __u64 *trace_len = thr_args->trace_len;
 
     // Resume the interpreter loop.
-    DEBUG("resume main thread");
     if (sem_post(thr_args->tracer_init_sem) != 0) {
         ret = false;
         goto clean;
     }
     sem_posted = 1;
 
-    // Start reading out of the aux buffer.
-    if (!poll_loop(perf_fd, stop_fd_rd, out_fd, header, aux)) {
+    // Start reading out of the AUX buffer.
+    if (!poll_loop(perf_fd, stop_fd_rd, header, aux, trace_buf,
+                   trace_bufsize, trace_len)) {
         ret = false;
         goto clean;
     }
@@ -376,11 +338,6 @@ clean:
         sem_post(thr_args->tracer_init_sem);
     }
 
-    if (ret) {
-        DEBUG("tracer thread exit");
-    } else {
-        DEBUG("failure");
-    }
     return (void *) ret;
 }
 
@@ -401,13 +358,9 @@ clean:
 struct tracer_ctx *
 perf_pt_start_tracer(struct tracer_conf *tr_conf)
 {
-    DEBUG("target_tid=%d, trace_filename=%s, data_bufsize=%zd, "
-        "aux_bufsize=%zd", tr_conf->target_tid, tr_conf->trace_filename,
-        tr_conf->data_bufsize, tr_conf->aux_bufsize);
-
     bool failing = false;
     struct tracer_ctx *tr_ctx = NULL;
-    int perf_fd = -1, out_fd = -1;
+    int perf_fd = -1;
     int clean_sem = 0, clean_thread = 0;
     struct tracer_ctx *ret = NULL;
 
@@ -416,6 +369,8 @@ perf_pt_start_tracer(struct tracer_conf *tr_conf)
     if (tr_ctx == NULL) {
         goto clean;
     }
+    tr_ctx->trace_buf = NULL;
+    tr_ctx->trace_len = 0;
 
     // Get the perf fd
     perf_fd = open_perf(tr_conf->target_tid);
@@ -434,6 +389,14 @@ perf_pt_start_tracer(struct tracer_conf *tr_conf)
     tr_ctx->stop_fd_rd = stop_fds[0];
     tr_ctx->stop_fd_wr = stop_fds[1];
 
+    // Allocate buffer to copy the trace into (currently the same size as the AUX buffer).
+    __u64 trace_bufsize = tr_conf->aux_bufsize * getpagesize();
+    tr_ctx->trace_buf = malloc(trace_bufsize);
+    if (tr_ctx->trace_buf == NULL) {
+        failing = true;
+        goto clean;
+    }
+
     // Use a semaphore to wait for the tracer to be ready.
     sem_t tracer_init_sem;
     if (sem_init(&tracer_init_sem, 0, 0) == -1) {
@@ -442,26 +405,19 @@ perf_pt_start_tracer(struct tracer_conf *tr_conf)
     }
     clean_sem = 1;
 
-    // Open the trace output file.
-    out_fd = open(tr_conf->trace_filename, O_WRONLY | O_CREAT, 0600);
-    if (out_fd < 0) {
-        failing = true;
-        goto clean;
-    }
-
-    tr_ctx->out_fd = out_fd;
-
-    // Builld the arguments struct for the tracer thread.
+    // Build the arguments struct for the tracer thread.
     struct tracer_thread_args thr_args = {
         perf_fd,
         stop_fds[0],
         &tracer_init_sem,
-        out_fd,
         tr_conf->data_bufsize,
         tr_conf->aux_bufsize,
+        &tr_ctx->trace_buf,
+        trace_bufsize,
+        &tr_ctx->trace_len,
     };
 
-    // Spawn a thread to deal with copying out of the PT aux buffer.
+    // Spawn a thread to deal with copying out of the PT AUX buffer.
     int rc = pthread_create(&tr_ctx->tracer_thread, NULL, tracer_thread, &thr_args);
     if (rc) {
         failing = true;
@@ -469,7 +425,6 @@ perf_pt_start_tracer(struct tracer_conf *tr_conf)
     }
 
     // Wait for the tracer to initialise, and check it didn't fail.
-    DEBUG("wait for tracer to init");
     rc = -1;
     while (rc == -1) {
         rc = sem_wait(&tracer_init_sem);
@@ -498,11 +453,12 @@ clean:
         if (perf_fd) {
             close(perf_fd);
         }
+        if (tr_ctx->trace_buf != NULL) {
+            free(tr_ctx->trace_buf);
+            tr_ctx->trace_buf = NULL;
+        }
         if (tr_ctx != NULL) {
             free(tr_ctx);
-        }
-        if (out_fd) {
-            close(out_fd);
         }
     }
 
@@ -512,11 +468,6 @@ clean:
         }
     }
 
-    if (ret != NULL) {
-        DEBUG("resume");
-    } else {
-        DEBUG("failure");
-    }
     return ret;
 }
 
@@ -529,9 +480,7 @@ clean:
  * Returns 0 on success and -1 on failure.
  */
 int
-perf_pt_stop_tracer(struct tracer_ctx *tr_ctx) {
-    DEBUG("stopping tracer");
-
+perf_pt_stop_tracer(struct tracer_ctx *tr_ctx, uint8_t **buf, __u64 *len) {
     int ret = 0;
 
     // Turn off tracer hardware.
@@ -545,7 +494,6 @@ perf_pt_stop_tracer(struct tracer_ctx *tr_ctx) {
     }
 
     // Wait for poll loop to exit.
-    DEBUG("wait for trace thread to exit");
     void *thr_exit;
     if (pthread_join(tr_ctx->tracer_thread, &thr_exit) != 0) {
         ret = -1;
@@ -558,18 +506,22 @@ perf_pt_stop_tracer(struct tracer_ctx *tr_ctx) {
     if (close(tr_ctx->stop_fd_rd) == -1) {
         ret = -1;
     }
+    tr_ctx->stop_fd_rd = -1;
+
     if (close(tr_ctx->perf_fd) != 0) {
         ret = -1;
     }
-    if (close(tr_ctx->out_fd) == -1) {
-        ret = -1;
-    }
-    free(tr_ctx);
+    tr_ctx->perf_fd = -1;
 
     if (ret != -1) {
-        DEBUG("tracing complete");
+        *buf = tr_ctx->trace_buf;
+        *len = tr_ctx->trace_len;
     } else {
-        DEBUG("failure");
+        if (tr_ctx->trace_buf != NULL) {
+            free(tr_ctx->trace_buf);
+        }
+        *buf = NULL;
+        *len = 0;
     }
     return ret;
 }
