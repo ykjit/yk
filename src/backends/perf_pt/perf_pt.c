@@ -475,7 +475,7 @@ clean:
  * Turn off the tracer.
  *
  * Arguments:
- *   tr_ctx: The tracer context returned by traceme_start_tracer.
+ *   tr_ctx: The tracer context returned by perf_pt_start_tracer.
  *
  * Returns 0 on success and -1 on failure.
  */

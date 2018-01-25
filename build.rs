@@ -68,5 +68,5 @@ fn main() {
     }
 
     c_build.file("src/util/util.c");
-    c_build.compile("traceme");
+    c_build.compile("hwtracer_c");
 }

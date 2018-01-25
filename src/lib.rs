@@ -46,7 +46,7 @@ pub mod errors;
 pub mod backends;
 pub mod util;
 
-use errors::TraceMeError;
+use errors::HWTracerError;
 use std::ops::Drop;
 use std::ptr;
 use libc::{free, c_void};
@@ -108,11 +108,11 @@ pub trait Tracer {
     /// Start recording a trace.
     ///
     /// Tracing continues until [stop_tracing](trait.Tracer.html#method.stop_tracing) is called.
-    fn start_tracing(&mut self) -> Result<(), TraceMeError>;
+    fn start_tracing(&mut self) -> Result<(), HWTracerError>;
     /// Turns off the tracer.
     ///
     /// [start_tracing](trait.Tracer.html#method.start_tracing) must have been called prior.
-    fn stop_tracing(&mut self) -> Result<HWTrace, TraceMeError>;
+    fn stop_tracing(&mut self) -> Result<HWTrace, HWTracerError>;
 }
 
 /// XXX test to_file()
@@ -157,7 +157,7 @@ mod tests {
 /// following helpers.
 #[cfg(test)]
 mod test_helpers {
-    use super::{TraceMeError, Tracer};
+    use super::{HWTracerError, Tracer};
     use libc::getpid;
 
     // A loop that does some work, that we can use to build a trace.
@@ -180,7 +180,7 @@ mod test_helpers {
     pub fn test_already_started<T>(mut tracer: T) where T: Tracer {
         tracer.start_tracing().unwrap();
         match tracer.start_tracing() {
-            Err(TraceMeError::TracerAlreadyStarted) => (),
+            Err(HWTracerError::TracerAlreadyStarted) => (),
             _ => panic!(),
         };
         tracer.stop_tracing().unwrap();
@@ -189,7 +189,7 @@ mod test_helpers {
     /// Check that stopping an unstarted tracer makes an appropriate error.
     pub fn test_not_started<T>(mut tracer: T) where T: Tracer {
         match tracer.stop_tracing() {
-            Err(TraceMeError::TracerNotStarted) => (),
+            Err(HWTracerError::TracerNotStarted) => (),
             _ => panic!(),
         };
     }
