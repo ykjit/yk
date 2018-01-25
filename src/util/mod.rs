@@ -38,20 +38,20 @@
 use libc::{c_int, uintptr_t};
 #[cfg(target_os = "linux")]
 use libc::pid_t;
-use ::errors::TraceMeError;
+use ::errors::HWTracerError;
 
 // FFI prototypes.
 extern "C" {
-    fn traceme_exec_base(addr: *const uintptr_t) -> c_int;
+    fn hwtracer_exec_base(addr: *const uintptr_t) -> c_int;
     #[cfg(target_os = "linux")]
-    fn traceme_linux_gettid() -> pid_t;
+    fn hwtracer_linux_gettid() -> pid_t;
 }
 
 /// Get the relocated virtual start address of the executable code for the current program.
-pub fn exec_base() -> Result<usize, TraceMeError> {
+pub fn exec_base() -> Result<usize, HWTracerError> {
     let mut addr: uintptr_t = 0;
-    match unsafe {traceme_exec_base(&mut addr as *const uintptr_t)} {
-        0 => Err(TraceMeError::ElfError(String::from("Failed to get executable base address"))),
+    match unsafe { hwtracer_exec_base(&mut addr as *const uintptr_t) } {
+        0 => Err(HWTracerError::ElfError(String::from("Failed to get executable base address"))),
         1 => Ok(addr as usize),
         _ => unreachable!(),
     }
@@ -60,7 +60,7 @@ pub fn exec_base() -> Result<usize, TraceMeError> {
 /// Get the thread ID of the current thread.
 #[cfg(target_os = "linux")]
 pub fn linux_gettid() -> pid_t {
-    unsafe { traceme_linux_gettid() }
+    unsafe { hwtracer_linux_gettid() }
 }
 
 #[cfg(all(test, target_os = "linux"))]

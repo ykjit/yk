@@ -39,7 +39,7 @@ use std::{io, ffi, num};
 use std::fmt::{self, Formatter, Display};
 
 #[derive(Debug)]
-pub enum TraceMeError {
+pub enum HWTracerError {
     // Wrapped errors from elsewhere.
     FFIIntoString(ffi::IntoStringError),
     FFINul(ffi::NulError),
@@ -55,44 +55,44 @@ pub enum TraceMeError {
     TracingNotPermitted(String),
 }
 
-impl From<ffi::IntoStringError> for TraceMeError {
+impl From<ffi::IntoStringError> for HWTracerError {
     fn from(err: ffi::IntoStringError) -> Self {
-        TraceMeError::FFIIntoString(err)
+        HWTracerError::FFIIntoString(err)
     }
 }
 
-impl From<ffi::NulError> for TraceMeError {
+impl From<ffi::NulError> for HWTracerError {
     fn from(err: ffi::NulError) -> Self {
-        TraceMeError::FFINul(err)
+        HWTracerError::FFINul(err)
     }
 }
 
-impl From<io::Error> for TraceMeError {
+impl From<io::Error> for HWTracerError {
     fn from(err: io::Error) -> Self {
-        TraceMeError::IO(err)
+        HWTracerError::IO(err)
     }
 }
 
-impl From<num::ParseIntError> for TraceMeError {
+impl From<num::ParseIntError> for HWTracerError {
     fn from(err: num::ParseIntError) -> Self {
-        TraceMeError::NumParseInt(err)
+        HWTracerError::NumParseInt(err)
     }
 }
 
-impl Display for TraceMeError {
+impl Display for HWTracerError {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match *self {
-            TraceMeError::FFIIntoString(ref e) => write!(f, "{}", e),
-            TraceMeError::FFINul(ref e) => write!(f, "{}", e),
-            TraceMeError::IO(ref e) => write!(f, "{}", e),
-            TraceMeError::NumParseInt(ref e) => write!(f, "{}", e),
-            TraceMeError::HardwareSupport(ref m) => write!(f, "Hardware support: {}", m),
-            TraceMeError::CFailure => write!(f, "Calling to C failed"),
-            TraceMeError::ElfError(ref m) => write!(f, "ELF error: {}", m),
-            TraceMeError::InvalidFileName(ref n) => write!(f, "Invalid file name: `{}'", n),
-            TraceMeError::TracerAlreadyStarted => write!(f, "Tracer already started"),
-            TraceMeError::TracerNotStarted => write!(f, "Tracer not started"),
-            TraceMeError::TracingNotPermitted(ref m) => write!(f, "{}", m),
+            HWTracerError::FFIIntoString(ref e) => write!(f, "{}", e),
+            HWTracerError::FFINul(ref e) => write!(f, "{}", e),
+            HWTracerError::IO(ref e) => write!(f, "{}", e),
+            HWTracerError::NumParseInt(ref e) => write!(f, "{}", e),
+            HWTracerError::HardwareSupport(ref m) => write!(f, "Hardware support: {}", m),
+            HWTracerError::CFailure => write!(f, "Calling to C failed"),
+            HWTracerError::ElfError(ref m) => write!(f, "ELF error: {}", m),
+            HWTracerError::InvalidFileName(ref n) => write!(f, "Invalid file name: `{}'", n),
+            HWTracerError::TracerAlreadyStarted => write!(f, "Tracer already started"),
+            HWTracerError::TracerNotStarted => write!(f, "Tracer not started"),
+            HWTracerError::TracingNotPermitted(ref m) => write!(f, "{}", m),
         }
     }
 }

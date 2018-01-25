@@ -35,15 +35,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-extern crate traceme;
+extern crate hwtracer;
 extern crate libc;
 
-use traceme::Tracer;
+use hwtracer::Tracer;
 use libc::getpid;
 
-use traceme::backends::DummyTracer;
+use hwtracer::backends::DummyTracer;
 #[cfg(all(perf_pt, target_arch = "x86_64"))]
-use traceme::backends::PerfPTTracer;
+use hwtracer::backends::PerfPTTracer;
 
 /// Instantiate a tracer suitable for the current platform.
 fn tracer() -> Box<Tracer> {

@@ -36,7 +36,7 @@
 // SOFTWARE.
 
 use libc::{pid_t, c_void, size_t, c_int, geteuid};
-use errors::TraceMeError;
+use errors::HWTracerError;
 use std::fs::File;
 use std::io::Read;
 use Tracer;
@@ -83,7 +83,7 @@ impl PerfPTTracer {
     /// # Example
     ///
     /// ```
-    /// use traceme::backends::PerfPTTracer;
+    /// use hwtracer::backends::PerfPTTracer;
     ///
     /// let res = PerfPTTracer::new();
     /// if res.is_ok() {
@@ -92,7 +92,7 @@ impl PerfPTTracer {
     ///     // CPU doesn't support Intel Processor Trace.
     /// }
     /// ```
-    pub fn new() -> Result<Self, TraceMeError> {
+    pub fn new() -> Result<Self, HWTracerError> {
         if Self::pt_supported() {
             return Ok(Self {
                 target_tid: linux_gettid(),
@@ -101,7 +101,7 @@ impl PerfPTTracer {
                 aux_bufsize: 1024,
             });
         }
-        Err(TraceMeError::HardwareSupport("Intel PT not supported by CPU".into()))
+        Err(HWTracerError::HardwareSupport("Intel PT not supported by CPU".into()))
     }
 
     /// Select which thread to trace.
@@ -135,7 +135,7 @@ impl PerfPTTracer {
         self
     }
 
-    fn check_perf_perms() -> Result<(), TraceMeError> {
+    fn check_perf_perms() -> Result<(), HWTracerError> {
         if unsafe { geteuid() } == 0 {
             // Root can always trace.
             return Ok(());
@@ -148,7 +148,7 @@ impl PerfPTTracer {
         if perm != -1 {
             let msg = format!("Tracing not permitted: you must be root or {} must contain -1",
                            PERF_PERMS_PATH);
-            return Err(TraceMeError::TracingNotPermitted(msg));
+            return Err(HWTracerError::TracingNotPermitted(msg));
         }
 
         Ok(())
@@ -180,10 +180,10 @@ impl PerfPTTracer {
 }
 
 impl Tracer for PerfPTTracer {
-    fn start_tracing(&mut self) -> Result<(), TraceMeError> {
+    fn start_tracing(&mut self) -> Result<(), HWTracerError> {
         PerfPTTracer::check_perf_perms()?;
         if self.tracer_ctx.is_some() {
-            return Err(TraceMeError::TracerAlreadyStarted);
+            return Err(HWTracerError::TracerAlreadyStarted);
         }
 
         // Build the C configuration struct
@@ -199,21 +199,21 @@ impl Tracer for PerfPTTracer {
             perf_pt_start_tracer(conf_ptr)
         };
         if opq_ptr.is_null() {
-            return Err(TraceMeError::CFailure);
+            return Err(HWTracerError::CFailure);
         }
         self.tracer_ctx = Some(opq_ptr);
         Ok(())
     }
 
-    fn stop_tracing(&mut self) -> Result<HWTrace, TraceMeError> {
-        let tr_ctx = self.tracer_ctx.ok_or(TraceMeError::TracerNotStarted)?;
+    fn stop_tracing(&mut self) -> Result<HWTrace, HWTracerError> {
+        let tr_ctx = self.tracer_ctx.ok_or(HWTracerError::TracerNotStarted)?;
         let buf = ptr::null() as *const u8;
         let len = 0;
         let rc = unsafe {
             perf_pt_stop_tracer(tr_ctx, &buf, &len)
         };
         if rc == -1 {
-            return Err(TraceMeError::CFailure);
+            return Err(HWTracerError::CFailure);
         }
         let trace = HWTrace::from_buf(buf, len);
         Ok(trace)

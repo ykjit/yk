@@ -36,7 +36,7 @@
 // SOFTWARE.
 
 use Tracer;
-use errors::TraceMeError;
+use errors::HWTracerError;
 use HWTrace;
 use std::ptr;
 
@@ -53,17 +53,17 @@ impl DummyTracer {
 }
 
 impl Tracer for DummyTracer {
-    fn start_tracing(&mut self) -> Result<(), TraceMeError> {
+    fn start_tracing(&mut self) -> Result<(), HWTracerError> {
         if self.started {
-            return Err(TraceMeError::TracerAlreadyStarted);
+            return Err(HWTracerError::TracerAlreadyStarted);
         }
         self.started = true;
         Ok(())
     }
 
-    fn stop_tracing(&mut self) -> Result<HWTrace, TraceMeError> {
+    fn stop_tracing(&mut self) -> Result<HWTrace, HWTracerError> {
         if !self.started {
-            return Err(TraceMeError::TracerNotStarted);
+            return Err(HWTracerError::TracerNotStarted);
         }
         self.started = false;
         Ok(HWTrace::from_buf(ptr::null(), 0)) // An empty trace.

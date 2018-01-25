@@ -50,8 +50,8 @@
 static int dl_iterate_phdr_cb(struct dl_phdr_info *, size_t, void *);
 
 // Exposed prototypes.
-int traceme_exec_base(uintptr_t *);
-pid_t traceme_linux_gettid(void);
+int hwtracer_exec_base(uintptr_t *);
+pid_t hwtracer_linux_gettid(void);
 
 /*
  * Search program headers for the relocated start address of the current
@@ -61,7 +61,7 @@ pid_t traceme_linux_gettid(void);
  * written into `*addr`.
  */
 int
-traceme_exec_base(uintptr_t *addr)
+hwtracer_exec_base(uintptr_t *addr)
 {
     return dl_iterate_phdr(dl_iterate_phdr_cb, addr);
 }
@@ -123,7 +123,7 @@ dl_iterate_phdr_cb(struct dl_phdr_info *info, size_t size, void *data)
  */
 #ifdef __linux__
 pid_t
-traceme_linux_gettid(void)
+hwtracer_linux_gettid(void)
 {
     return syscall(__NR_gettid);
 }
