@@ -36,11 +36,14 @@ pub type HotThreshold = u32;
 const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
 
 // The current meta-tracing phase of a given location in the end-user's code. Consists of a tag and
-// (optionally) a value.
-const PHASE_TAG     : u32 = 0b11; // All of the other PHASE_ tags must fit in this.
-const PHASE_COUNTING: u32 = 0b00; // The value specifies the current hot count.
-const PHASE_TRACING : u32 = 0b01;
-const PHASE_COMPILED: u32 = 0b10;
+// (optionally) a value. The tags are in the high order bits since we expect the most common tag is
+// PHASE_COMPILED which (one day) will have an index associated with it. By also making that tag
+// 0b00, we allow that index to be accessed without any further operations after the initial
+// tag check.
+const PHASE_TAG     : u32 = 0b11 << 30; // All of the other PHASE_ tags must fit in this.
+const PHASE_COMPILED: u32 = 0b00 << 30;
+const PHASE_TRACING : u32 = 0b01 << 30;
+const PHASE_COUNTING: u32 = 0b10 << 30; // The value specifies the current hot count.
 
 /// A `Location` uniquely identifies a control point position in the end-user's program (and is
 /// used by the `MetaTracer` to store data about that location). In other words, every position
@@ -96,12 +99,12 @@ impl MetaTracer {
             let lp = pack.load(Ordering::Acquire);
             match lp & PHASE_TAG {
                 PHASE_COUNTING => {
-                    let count = (lp & !PHASE_TAG) >> PHASE_TAG;
+                    let count = lp & !PHASE_TAG;
                     let new_pack;
                     if count >= self.hot_threshold {
                         new_pack = PHASE_TRACING;
                     } else {
-                        new_pack = PHASE_COUNTING | ((count + 1) << PHASE_TAG);
+                        new_pack = PHASE_COUNTING | (count + 1);
                     }
                     if pack.compare_and_swap(lp, new_pack, Ordering::Release) == lp {
                         break;
@@ -133,7 +136,7 @@ mod tests {
         let lp = Location::new();
         for i in 0..hot_thrsh {
             mt.control_point(&lp);
-            assert_eq!(lp.pack.load(Ordering::Relaxed), PHASE_COUNTING | ((i + 1) << PHASE_TAG));
+            assert_eq!(lp.pack.load(Ordering::Relaxed), PHASE_COUNTING | (i + 1));
         }
         mt.control_point(&lp);
         assert_eq!(lp.pack.load(Ordering::Relaxed), PHASE_TRACING);
