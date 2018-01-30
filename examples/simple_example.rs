@@ -49,7 +49,7 @@ use hwtracer::backends::PerfPTTracer;
 fn tracer() -> Box<Tracer> {
     if cfg!(target_os = "linux") {
         #[cfg(all(perf_pt, target_arch = "x86_64"))] {
-            let res = PerfPTTracer::new();
+            let res = PerfPTTracer::new(PerfPTTracer::config());
             if res.is_ok() {
                 Box::new(res.unwrap())
             } else {
@@ -67,7 +67,7 @@ fn tracer() -> Box<Tracer> {
 
 /// Trace a simple computation loop.
 ///
-/// The result is printed to discourage the compiler from optimising the computation out.
+/// The results are printed to discourage the compiler from optimising the computation out.
 fn main() {
     let mut res = 0;
     let pid = unsafe { getpid() };
@@ -80,7 +80,19 @@ fn main() {
     for i in 1..10000 {
         res += i + pid;
     }
-
     tracer.stop_tracing().unwrap();
-    println!("program result: {}", res);
+    println!("result1: {}", res);
+
+    // Tracer instances can be re-used.
+    tracer.start_tracing().unwrap_or_else(|e| {
+        panic!(format!("Failed to start tracer: {}", e));
+    });
+    for i in 1..10000 {
+        res -= i + pid;
+    }
+    tracer.stop_tracing().unwrap();
+    println!("result2: {}", res);
+
+    // Tracers require manual clean up (since clean up could fail).
+    tracer.destroy().unwrap();
 }

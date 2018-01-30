@@ -113,6 +113,18 @@ pub trait Tracer {
     ///
     /// [start_tracing](trait.Tracer.html#method.start_tracing) must have been called prior.
     fn stop_tracing(&mut self) -> Result<HWTrace, HWTracerError>;
+    /// Destroy a tracer.
+    ///
+    /// This is explicit because it might fail.
+    fn destroy(&mut self) -> Result<(), HWTracerError>;
+}
+
+/// Keeps track of the internal state of a tracer.
+#[derive(PartialEq, Eq)]
+enum TracerState {
+    Stopped,
+    Started,
+    Destroyed,
 }
 
 /// XXX test to_file()
@@ -174,6 +186,17 @@ mod test_helpers {
         tracer.start_tracing().unwrap();
         work_loop();
         tracer.stop_tracing().unwrap();
+        tracer.destroy().unwrap();
+    }
+
+    /// Check that repeated usage of the same tracer works.
+    pub fn test_repeated_tracing<T>(mut tracer: T) where T: Tracer {
+        for _ in 0..10 {
+            tracer.start_tracing().unwrap();
+            work_loop();
+            tracer.stop_tracing().unwrap();
+        }
+        tracer.destroy().unwrap();
     }
 
     /// Check that starting a tracer twice makes an appropriate error.
@@ -184,6 +207,7 @@ mod test_helpers {
             _ => panic!(),
         };
         tracer.stop_tracing().unwrap();
+        tracer.destroy().unwrap();
     }
 
     /// Check that stopping an unstarted tracer makes an appropriate error.
@@ -192,5 +216,39 @@ mod test_helpers {
             Err(HWTracerError::TracerNotStarted) => (),
             _ => panic!(),
         };
+        tracer.destroy().unwrap();
+    }
+
+    pub fn test_use_tracer_after_destroy1<T>(mut tracer: T) where T: Tracer {
+        tracer.destroy().unwrap();
+        match tracer.start_tracing() {
+            Err(HWTracerError::TracerDestroyed) => (),
+            _ => panic!(),
+        };
+    }
+
+    pub fn test_use_tracer_after_destroy2<T>(mut tracer: T) where T: Tracer {
+        tracer.start_tracing().unwrap();
+        tracer.destroy().unwrap();
+        match tracer.stop_tracing() {
+            Err(HWTracerError::TracerDestroyed) => (),
+            _ => panic!(),
+        };
+    }
+
+    pub fn test_use_tracer_after_destroy3<T>(mut tracer: T) where T: Tracer {
+        tracer.destroy().unwrap();
+        match tracer.destroy() {
+            Err(HWTracerError::TracerDestroyed) => (),
+            _ => panic!(),
+        };
+    }
+
+    /// Check that in a debug build, a dropped, non-destroyed tracer causes a panic.
+    ///
+    /// Tests calling this helper should be marked: #[cfg(debug_assertions)] and #[should_panic].
+    #[cfg(debug_assertions)]
+    pub fn test_drop_without_destroy<T>(tracer: T) where T: Tracer {
+        drop(tracer);
     }
 }

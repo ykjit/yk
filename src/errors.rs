@@ -51,6 +51,7 @@ pub enum HWTracerError {
     HardwareSupport(String),
     InvalidFileName(String),
     TracerAlreadyStarted,
+    TracerDestroyed,
     TracerNotStarted,
     TracingNotPermitted(String),
 }
@@ -91,6 +92,7 @@ impl Display for HWTracerError {
             HWTracerError::ElfError(ref m) => write!(f, "ELF error: {}", m),
             HWTracerError::InvalidFileName(ref n) => write!(f, "Invalid file name: `{}'", n),
             HWTracerError::TracerAlreadyStarted => write!(f, "Tracer already started"),
+            HWTracerError::TracerDestroyed => write!(f, "Tracer destroyed"),
             HWTracerError::TracerNotStarted => write!(f, "Tracer not started"),
             HWTracerError::TracingNotPermitted(ref m) => write!(f, "{}", m),
         }
