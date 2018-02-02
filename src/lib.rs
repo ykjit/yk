@@ -47,57 +47,16 @@ pub mod backends;
 pub mod util;
 
 use errors::HWTracerError;
-use std::ops::Drop;
-use std::ptr;
-use libc::{free, c_void};
 
-#[cfg(debug_assertions)]
-use std::convert::AsRef;
-#[cfg(debug_assertions)]
-use std::path::Path;
-
-#[allow(dead_code)]
-pub struct HWTrace {
-    buf: *const u8,
-    len: u64,
-}
-
-impl HWTrace {
-    /// Makes a new trace from a raw pointer and a size.
+/// Represents a generic trace.
+///
+/// Each backend has its own concrete implementation.
+pub trait Trace {
+    /// Dump the trace to the specified filename.
     ///
-    /// The `buf` argument is assumed to have been allocated on the heap using malloc(3). `len`
-    /// must be less than or equal to the allocated size.
-    ///
-    /// Once an instance is constructed, underlying allocation and it's freeing is the
-    /// responsibility of the instance.
-    fn from_buf(buf: *const u8, len: u64) -> Self {
-        Self {buf: buf, len: len}
-    }
-
-    /// Write the raw trace packets into the specified file.
-    ///
-    /// This can be useful for developers who want to use (e.g.) the pt utility to inspect the raw
-    /// packet stream.
+    /// The exact format varies per-backend.
     #[cfg(debug_assertions)]
-    pub fn to_file<T>(&self, filename: T) where T: AsRef<Path> {
-        use std::slice;
-        use std::fs::File;
-        use std::io::prelude::*;
-
-        let mut f = File::create(filename).unwrap();
-        let slice = unsafe { slice::from_raw_parts(self.buf, self.len as usize) };
-        f.write(slice).unwrap();
-    }
-}
-
-/// Once a HWTrace is brought into existence, we say the instance owns the C-level allocation. When
-/// the HWTrace falls out of scope, free up the memory.
-impl Drop for HWTrace {
-    fn drop(&mut self) {
-        if self.buf != ptr::null() {
-            unsafe { free(self.buf as *mut c_void) };
-        }
-    }
+    fn to_file(&self, filename: &str);
 }
 
 /// The interface offered by all tracer types.
@@ -112,7 +71,7 @@ pub trait Tracer {
     /// Turns off the tracer.
     ///
     /// [start_tracing](trait.Tracer.html#method.start_tracing) must have been called prior.
-    fn stop_tracing(&mut self) -> Result<HWTrace, HWTracerError>;
+    fn stop_tracing(&mut self) -> Result<Box<Trace>, HWTracerError>;
     /// Destroy a tracer.
     ///
     /// This is explicit because it might fail.
@@ -125,42 +84,6 @@ enum TracerState {
     Stopped,
     Started,
     Destroyed,
-}
-
-/// XXX test to_file()
-#[cfg(all(test, debug_assertions))]
-mod tests {
-    use std::fs::File;
-    use std::slice;
-    use std::io::prelude::*;
-    use libc::malloc;
-    use super::HWTrace;
-
-    /// Test writing a trace to file.
-    #[test]
-    fn test_to_file() {
-        // Allocate and fill a buffer to make a "trace" from.
-        let size = 33;
-        let buf = unsafe { malloc(size) as *mut u8 };
-        let sl = unsafe { slice::from_raw_parts_mut(buf, size) };
-        for (i, byte) in sl.iter_mut().enumerate() {
-            *byte = i as u8;
-        }
-
-        // Make the trace and Write it to a file.
-        let filename = String::from("test_to_file.ptt");
-        let trace = HWTrace::from_buf(buf, size as u64);
-        trace.to_file(&filename);
-
-        // Check the resulting file makes sense.
-        let file = File::open(&filename).unwrap();
-        let mut total_bytes = 0;
-        for (i, byte) in file.bytes().enumerate() {
-            assert_eq!(i as u8, byte.unwrap());
-            total_bytes += 1;
-        }
-        assert_eq!(total_bytes, size);
-    }
 }
 
 /// Test helpers.
