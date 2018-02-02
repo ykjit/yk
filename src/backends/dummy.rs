@@ -37,11 +37,18 @@
 
 use Tracer;
 use errors::HWTracerError;
-use HWTrace;
-use std::ptr;
+use Trace;
 #[cfg(debug_assertions)]
 use std::ops::Drop;
 use TracerState;
+
+/// An empty dummy trace.
+struct DummyTrace {}
+
+impl Trace for DummyTrace {
+    #[cfg(debug_assertions)]
+    fn to_file(&self, _: &str) {}
+}
 
 /// A tracer which doesn't really do anything.
 pub struct DummyTracer {
@@ -72,13 +79,13 @@ impl Tracer for DummyTracer {
         Ok(())
     }
 
-    fn stop_tracing(&mut self) -> Result<HWTrace, HWTracerError> {
+    fn stop_tracing(&mut self) -> Result<Box<Trace>, HWTracerError> {
         self.err_if_destroyed()?;
         if self.state != TracerState::Started {
             return Err(HWTracerError::TracerNotStarted);
         }
         self.state = TracerState::Stopped;
-        Ok(HWTrace::from_buf(ptr::null(), 0)) // An empty trace.
+        Ok(Box::new(DummyTrace{}))
     }
 
     fn destroy(&mut self) -> Result<(), HWTracerError> {

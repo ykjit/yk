@@ -35,17 +35,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use libc::{pid_t, c_void, size_t, c_int, geteuid};
+use libc::{pid_t, c_void, size_t, c_int, geteuid, free};
 use errors::HWTracerError;
 use std::fs::File;
 use std::io::Read;
 use Tracer;
-use HWTrace;
 use util::linux_gettid;
 use std::ptr;
 #[cfg(debug_assertions)]
 use std::ops::Drop;
-use TracerState;
+use {TracerState, Trace};
 
 // The sysfs path used to set perf permissions.
 const PERF_PERMS_PATH: &str = "/proc/sys/kernel/perf_event_paranoid";
@@ -57,6 +56,54 @@ extern "C" {
     fn perf_pt_stop_tracer(tr_ctx: *const c_void, buf: *const *const u8, len: &u64) -> c_int;
     fn perf_pt_free_tracer(tr_ctx: *const c_void) -> c_int;
 }
+
+/// A raw Intel PT trace, obtained via Linux perf.
+pub struct PerfPTTrace {
+    buf: *const u8,
+    #[allow(dead_code)]
+    len: u64,
+}
+
+impl PerfPTTrace {
+    /// Makes a new trace from a raw pointer and a size.
+    ///
+    /// The `buf` argument is assumed to have been allocated on the heap using malloc(3). `len`
+    /// must be less than or equal to the allocated size.
+    ///
+    /// The allocation is automatically freed by Rust when the struct falls out of scope.
+    fn from_buf(buf: *const u8, len: u64) -> Self {
+        Self {buf: buf, len: len}
+    }
+}
+
+impl Trace for PerfPTTrace {
+    /// Write the raw trace packets into the specified file.
+    ///
+    /// This can be useful for developers who want to use (e.g.) the pt utility to inspect the raw
+    /// packet stream.
+    #[cfg(debug_assertions)]
+    fn to_file(&self, filename: &str) {
+        use std::slice;
+        use std::fs::File;
+        use std::io::prelude::*;
+
+        let mut f = File::create(filename).unwrap();
+        let slice = unsafe { slice::from_raw_parts(self.buf, self.len as usize) };
+        f.write(slice).unwrap();
+    }
+}
+
+
+/// Once a PerfPTTrace is brought into existence, we say the instance owns the C-level allocation.
+/// When the it falls out of scope, free up the memory.
+impl Drop for PerfPTTrace {
+    fn drop(&mut self) {
+        if self.buf != ptr::null() {
+            unsafe { free(self.buf as *mut c_void) };
+        }
+    }
+}
+
 
 // Struct used to communicate a tracing configuration to the C code. Must
 // stay in sync with the C code.
@@ -220,7 +267,7 @@ impl Tracer for PerfPTTracer {
         Ok(())
     }
 
-    fn stop_tracing(&mut self) -> Result<HWTrace, HWTracerError> {
+    fn stop_tracing(&mut self) -> Result<Box<Trace>, HWTracerError> {
         self.err_if_destroyed()?;
         if self.state == TracerState::Stopped {
             return Err(HWTracerError::TracerNotStarted);
@@ -235,8 +282,8 @@ impl Tracer for PerfPTTracer {
         if rc == -1 {
             return Err(HWTracerError::CFailure);
         }
-        let trace = HWTrace::from_buf(buf, len);
-        Ok(trace)
+        let trace = PerfPTTrace::from_buf(buf, len);
+        Ok(Box::new(trace) as Box<Trace>)
     }
 
     fn destroy(&mut self) -> Result<(), HWTracerError> {
@@ -312,5 +359,39 @@ mod tests {
     #[test]
     fn test_drop_without_destroy() {
         run_test_helper(test_helpers::test_drop_without_destroy);
+    }
+
+    /// Test writing a trace to file.
+    #[cfg(debug_assertions)]
+    #[test]
+    fn test_to_file() {
+        use std::fs::File;
+        use std::slice;
+        use std::io::prelude::*;
+        use libc::malloc;
+        use super::PerfPTTrace;
+        use Trace;
+
+        // Allocate and fill a buffer to make a "trace" from.
+        let size = 33;
+        let buf = unsafe { malloc(size) as *mut u8 };
+        let sl = unsafe { slice::from_raw_parts_mut(buf, size) };
+        for (i, byte) in sl.iter_mut().enumerate() {
+            *byte = i as u8;
+        }
+
+        // Make the trace and write it to a file.
+        let filename = String::from("test_to_file.ptt");
+        let trace = PerfPTTrace::from_buf(buf, size as u64);
+        trace.to_file(&filename);
+
+        // Check the resulting file makes sense.
+        let file = File::open(&filename).unwrap();
+        let mut total_bytes = 0;
+        for (i, byte) in file.bytes().enumerate() {
+            assert_eq!(i as u8, byte.unwrap());
+            total_bytes += 1;
+        }
+        assert_eq!(total_bytes, size);
     }
 }
