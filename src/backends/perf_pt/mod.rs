@@ -35,7 +35,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use libc::{pid_t, c_void, size_t, c_int, geteuid, free};
+use libc::{pid_t, c_void, size_t, c_int, geteuid, malloc, free};
 use errors::HWTracerError;
 use std::fs::File;
 use std::io::Read;
@@ -52,27 +52,32 @@ const PERF_PERMS_PATH: &str = "/proc/sys/kernel/perf_event_paranoid";
 // FFI prototypes.
 extern "C" {
     fn perf_pt_init_tracer(conf: *const PerfPTConf) -> *const c_void;
-    fn perf_pt_start_tracer(tr_ctx: *const c_void) -> c_int;
-    fn perf_pt_stop_tracer(tr_ctx: *const c_void, buf: *const *const u8, len: &u64) -> c_int;
+    fn perf_pt_start_tracer(tr_ctx: *const c_void, trace: *mut PerfPTTrace) -> c_int;
+    fn perf_pt_stop_tracer(tr_ctx: *const c_void) -> c_int;
     fn perf_pt_free_tracer(tr_ctx: *const c_void) -> c_int;
 }
 
 /// A raw Intel PT trace, obtained via Linux perf.
+#[repr(C)]
 pub struct PerfPTTrace {
-    buf: *const u8,
+    buf: *mut u8,
     #[allow(dead_code)]
     len: u64,
+    #[allow(dead_code)]
+    capacity: u64,
 }
 
 impl PerfPTTrace {
-    /// Makes a new trace from a raw pointer and a size.
-    ///
-    /// The `buf` argument is assumed to have been allocated on the heap using malloc(3). `len`
-    /// must be less than or equal to the allocated size.
+    /// Makes a new trace, initially allocating the specified number of bytes for the PT trace
+    /// packet buffer.
     ///
     /// The allocation is automatically freed by Rust when the struct falls out of scope.
-    fn from_buf(buf: *const u8, len: u64) -> Self {
-        Self {buf: buf, len: len}
+    fn new(capacity: size_t) -> Result<Self, HWTracerError> {
+        let buf = unsafe { malloc(capacity) as *mut u8 };
+        if buf == ptr::null_mut() {
+            return Err(HWTracerError::CFailure);
+        }
+        Ok(Self {buf: buf, len: 0, capacity: capacity as u64})
     }
 }
 
@@ -88,22 +93,19 @@ impl Trace for PerfPTTrace {
         use std::io::prelude::*;
 
         let mut f = File::create(filename).unwrap();
-        let slice = unsafe { slice::from_raw_parts(self.buf, self.len as usize) };
+        let slice = unsafe { slice::from_raw_parts(self.buf as *const u8, self.len as usize) };
         f.write(slice).unwrap();
     }
 }
 
 
-/// Once a PerfPTTrace is brought into existence, we say the instance owns the C-level allocation.
-/// When the it falls out of scope, free up the memory.
 impl Drop for PerfPTTrace {
     fn drop(&mut self) {
-        if self.buf != ptr::null() {
+        if self.buf != ptr::null_mut() {
             unsafe { free(self.buf as *mut c_void) };
         }
     }
 }
-
 
 // Struct used to communicate a tracing configuration to the C code. Must
 // stay in sync with the C code.
@@ -115,6 +117,9 @@ pub struct PerfPTConf {
     data_bufsize: size_t,
     /// AUX buffer size, in pages. Must be a power of 2.
     aux_bufsize: size_t,
+    /// The initial trace buffer size (in bytes) for new [PerfPTTrace](struct.PerfPTTracer.html)
+    /// instances.
+    new_trace_bufsize: size_t,
 }
 
 /// Configures a PerfPTTracer.
@@ -125,6 +130,7 @@ impl PerfPTConf {
             target_tid: linux_gettid(),
             data_bufsize: 64,
             aux_bufsize: 1024,
+            new_trace_bufsize: 1024 * 1024, // 1MiB
         }
     }
 
@@ -151,6 +157,12 @@ impl PerfPTConf {
         self
     }
 
+    /// Set the initial trace buffer size (in bytes) for new
+    /// [PerfPTTrace](struct.PerfPTTracer.html) instances.
+    pub fn new_trace_bufsize(mut self, size: usize) -> Self {
+        self.new_trace_bufsize = size as size_t;
+        self
+    }
 }
 
 /// A tracer that uses the Linux Perf interface to Intel Processor Trace.
@@ -159,6 +171,10 @@ pub struct PerfPTTracer {
     tracer_ctx: *const c_void,
     /// The state of the tracer.
     state: TracerState,
+    /// The trace currently being collected, or `None`.
+    trace: Option<Box<PerfPTTrace>>,
+    /// The starting trace buffer size for new [PerfPTTrace](struct.PerfPTTracer.html) instances.
+    new_trace_bufsize: size_t,
 }
 
 impl PerfPTTracer {
@@ -194,6 +210,8 @@ impl PerfPTTracer {
         Ok(Self {
             tracer_ctx: ctx,
             state: TracerState::Stopped,
+            trace: None,
+            new_trace_bufsize: config.new_trace_bufsize,
         })
     }
 
@@ -260,10 +278,18 @@ impl Tracer for PerfPTTracer {
             return Err(HWTracerError::TracerAlreadyStarted);
         }
 
-        if unsafe { perf_pt_start_tracer(self.tracer_ctx) } == -1 {
+        // It is essential we box the trace now to stop it from moving. If it were to move, then
+        // the reference which we pass to C here would become invalid. The interface to
+        // `stop_tracing` needs to return a Box<Tracer> anyway, so it's no big deal.
+        let mut trace = Box::new(PerfPTTrace::new(self.new_trace_bufsize)?);
+        if unsafe {
+            // C code will mutate trace's members directly.
+            perf_pt_start_tracer(self.tracer_ctx, &mut *trace)
+        } == -1 {
             return Err(HWTracerError::CFailure);
         }
         self.state = TracerState::Started;
+        self.trace = Some(trace);
         Ok(())
     }
 
@@ -273,17 +299,15 @@ impl Tracer for PerfPTTracer {
             return Err(HWTracerError::TracerNotStarted);
         }
 
-        let buf = ptr::null() as *const u8;
-        let len = 0;
-        let rc = unsafe {
-            perf_pt_stop_tracer(self.tracer_ctx, &buf, &len)
-        };
+        let rc = unsafe { perf_pt_stop_tracer(self.tracer_ctx) };
         self.state = TracerState::Stopped;
         if rc == -1 {
             return Err(HWTracerError::CFailure);
         }
-        let trace = PerfPTTrace::from_buf(buf, len);
-        Ok(Box::new(trace) as Box<Trace>)
+
+        let ret = self.trace.take().unwrap();
+        self.trace = None;
+        Ok(ret as Box<Trace>)
     }
 
     fn destroy(&mut self) -> Result<(), HWTracerError> {
@@ -368,21 +392,20 @@ mod tests {
         use std::fs::File;
         use std::slice;
         use std::io::prelude::*;
-        use libc::malloc;
         use super::PerfPTTrace;
         use Trace;
 
         // Allocate and fill a buffer to make a "trace" from.
-        let size = 33;
-        let buf = unsafe { malloc(size) as *mut u8 };
-        let sl = unsafe { slice::from_raw_parts_mut(buf, size) };
+        let capacity = 1024;
+        let mut trace = PerfPTTrace::new(capacity).unwrap();
+        trace.len = capacity as u64;
+        let sl = unsafe { slice::from_raw_parts_mut(trace.buf as *mut u8, capacity) };
         for (i, byte) in sl.iter_mut().enumerate() {
             *byte = i as u8;
         }
 
         // Make the trace and write it to a file.
         let filename = String::from("test_to_file.ptt");
-        let trace = PerfPTTrace::from_buf(buf, size as u64);
         trace.to_file(&filename);
 
         // Check the resulting file makes sense.
@@ -392,6 +415,6 @@ mod tests {
             assert_eq!(i as u8, byte.unwrap());
             total_bytes += 1;
         }
-        assert_eq!(total_bytes, size);
+        assert_eq!(total_bytes, capacity);
     }
 }
