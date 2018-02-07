@@ -77,7 +77,8 @@ fn main() {
         panic!(format!("Failed to start tracer: {}", e));
     });
 
-    for i in 1..10000 {
+    let iters = 10_000;
+    for i in 1..iters {
         res += i + pid;
     }
     let trace1 = tracer.stop_tracing().unwrap();
@@ -88,7 +89,7 @@ fn main() {
     tracer.start_tracing().unwrap_or_else(|e| {
         panic!(format!("Failed to start tracer: {}", e));
     });
-    for i in 1..10000 {
+    for i in 1..iters {
         res -= i + pid;
     }
     let trace2 = tracer.stop_tracing().unwrap();
