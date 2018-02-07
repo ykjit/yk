@@ -41,7 +41,6 @@ use std::fs::File;
 use std::io::Read;
 use Tracer;
 use util::linux_gettid;
-use std::ptr;
 #[cfg(debug_assertions)]
 use std::ops::Drop;
 use {TracerState, Trace};
@@ -73,7 +72,7 @@ impl PerfPTTrace {
     /// The allocation is automatically freed by Rust when the struct falls out of scope.
     fn new(capacity: size_t) -> Result<Self, HWTracerError> {
         let buf = unsafe { malloc(capacity) as *mut u8 };
-        if buf == ptr::null_mut() {
+        if buf.is_null() {
             return Err(HWTracerError::CFailure);
         }
         Ok(Self {buf: buf, len: 0, capacity: capacity as u64})
@@ -99,7 +98,7 @@ impl Trace for PerfPTTrace {
 
 impl Drop for PerfPTTrace {
     fn drop(&mut self) {
-        if self.buf != ptr::null_mut() {
+        if !self.buf.is_null() {
             unsafe { free(self.buf as *mut c_void) };
         }
     }
@@ -201,7 +200,7 @@ impl PerfPTTracer {
         }
 
         let ctx = unsafe { perf_pt_init_tracer(&config as *const PerfPTConf) };
-        if ctx == ptr::null_mut() {
+        if ctx.is_null() {
             return Err(HWTracerError::CFailure);
         }
 
