@@ -97,7 +97,6 @@ impl Trace for PerfPTTrace {
     }
 }
 
-
 impl Drop for PerfPTTrace {
     fn drop(&mut self) {
         if self.buf != ptr::null_mut() {
