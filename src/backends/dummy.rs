@@ -53,6 +53,7 @@ impl Trace for DummyTrace {
 
 /// A tracer which doesn't really do anything.
 pub struct DummyTracer {
+    // Keeps track of the state of the tracer.
     state: TracerState,
 }
 

@@ -60,8 +60,11 @@ extern "C" {
 #[repr(C)]
 #[derive(Debug)]
 pub struct PerfPTTrace {
+    // The trace buffer.
     buf: *mut u8,
+    // The length of the trace (in bytes).
     len: u64,
+    // `buf`'s allocation size (in bytes), <= `len`.
     capacity: u64,
 }
 
@@ -104,22 +107,21 @@ impl Drop for PerfPTTrace {
     }
 }
 
-// Struct used to communicate a tracing configuration to the C code. Must
-// stay in sync with the C code.
+/// Configures a [`PerfPTTracer`](struct.PerfPTTracer.html).
+///
+// Must stay in sync with the C code.
 #[repr(C)]
 pub struct PerfPTConf {
-    /// Thread ID to trace.
+    // Thread ID to trace.
     target_tid: pid_t,
-    /// Data buffer size, in pages. Must be a power of 2.
+    // Data buffer size, in pages. Must be a power of 2.
     data_bufsize: size_t,
-    /// AUX buffer size, in pages. Must be a power of 2.
+    // AUX buffer size, in pages. Must be a power of 2.
     aux_bufsize: size_t,
-    /// The initial trace buffer size (in bytes) for new [PerfPTTrace](struct.PerfPTTracer.html)
-    /// instances.
+    // The initial trace buffer size (in bytes) for new traces.
     new_trace_bufsize: size_t,
 }
 
-/// Configures a PerfPTTracer.
 impl PerfPTConf {
     /// Creates a new configuration with defaults.
     pub fn new() -> Self {
@@ -155,7 +157,7 @@ impl PerfPTConf {
     }
 
     /// Set the initial trace buffer size (in bytes) for new
-    /// [PerfPTTrace](struct.PerfPTTracer.html) instances.
+    /// [`PerfPTTrace`](struct.PerfPTTrace.html) instances.
     pub fn new_trace_bufsize(mut self, size: usize) -> Self {
         self.new_trace_bufsize = size as size_t;
         self
@@ -164,13 +166,13 @@ impl PerfPTConf {
 
 /// A tracer that uses the Linux Perf interface to Intel Processor Trace.
 pub struct PerfPTTracer {
-    /// Opaque C pointer representing the tracer context.
+    // Opaque C pointer representing the tracer context.
     tracer_ctx: *mut c_void,
-    /// The state of the tracer.
+    // The state of the tracer.
     state: TracerState,
-    /// The trace currently being collected, or `None`.
+    // The trace currently being collected, or `None`.
     trace: Option<Box<PerfPTTrace>>,
-    /// The starting trace buffer size for new [PerfPTTrace](struct.PerfPTTracer.html) instances.
+    // The starting trace buffer size for new traces.
     new_trace_bufsize: size_t,
 }
 
@@ -382,7 +384,7 @@ mod tests {
         run_test_helper(test_helpers::test_drop_without_destroy);
     }
 
-    /// Test writing a trace to file.
+    // Test writing a trace to file.
     #[cfg(debug_assertions)]
     #[test]
     fn test_to_file() {

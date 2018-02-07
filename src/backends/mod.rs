@@ -36,9 +36,9 @@
 // SOFTWARE.
 
 #[cfg(all(perf_pt, target_arch = "x86_64"))]
-mod perf_pt;
+pub mod perf_pt;
 #[cfg(all(perf_pt, target_arch = "x86_64"))]
 pub use self::perf_pt::PerfPTTracer;
 
-mod dummy;
+pub mod dummy;
 pub use self::dummy::DummyTracer;
