@@ -47,11 +47,12 @@ pub mod backends;
 pub mod util;
 
 use errors::HWTracerError;
+use std::fmt::Debug;
 
 /// Represents a generic trace.
 ///
 /// Each backend has its own concrete implementation.
-pub trait Trace {
+pub trait Trace: Debug {
     /// Dump the trace to the specified filename.
     ///
     /// The exact format varies per-backend.

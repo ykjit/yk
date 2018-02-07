@@ -59,11 +59,10 @@ extern "C" {
 
 /// A raw Intel PT trace, obtained via Linux perf.
 #[repr(C)]
+#[derive(Debug)]
 pub struct PerfPTTrace {
     buf: *mut u8,
-    #[allow(dead_code)]
     len: u64,
-    #[allow(dead_code)]
     capacity: u64,
 }
 

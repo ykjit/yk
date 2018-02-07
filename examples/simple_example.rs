@@ -80,7 +80,8 @@ fn main() {
     for i in 1..10000 {
         res += i + pid;
     }
-    tracer.stop_tracing().unwrap();
+    let trace1 = tracer.stop_tracing().unwrap();
+    println!("Trace #1 = {:?}", trace1);
     println!("result1: {}", res);
 
     // Tracer instances can be re-used.
@@ -90,7 +91,8 @@ fn main() {
     for i in 1..10000 {
         res -= i + pid;
     }
-    tracer.stop_tracing().unwrap();
+    let trace2 = tracer.stop_tracing().unwrap();
+    println!("Trace #2 = {:?}", trace2);
     println!("result2: {}", res);
 
     // Tracers require manual clean up (since clean up could fail).

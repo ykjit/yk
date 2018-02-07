@@ -43,6 +43,7 @@ use std::ops::Drop;
 use TracerState;
 
 /// An empty dummy trace.
+#[derive(Debug)]
 struct DummyTrace {}
 
 impl Trace for DummyTrace {
