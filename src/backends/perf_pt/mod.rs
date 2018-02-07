@@ -92,7 +92,7 @@ impl Trace for PerfPTTrace {
 
         let mut f = File::create(filename).unwrap();
         let slice = unsafe { slice::from_raw_parts(self.buf as *const u8, self.len as usize) };
-        f.write(slice).unwrap();
+        f.write_all(slice).unwrap();
     }
 }
 
