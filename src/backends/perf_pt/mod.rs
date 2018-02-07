@@ -51,10 +51,10 @@ const PERF_PERMS_PATH: &str = "/proc/sys/kernel/perf_event_paranoid";
 
 // FFI prototypes.
 extern "C" {
-    fn perf_pt_init_tracer(conf: *const PerfPTConf) -> *const c_void;
-    fn perf_pt_start_tracer(tr_ctx: *const c_void, trace: *mut PerfPTTrace) -> c_int;
-    fn perf_pt_stop_tracer(tr_ctx: *const c_void) -> c_int;
-    fn perf_pt_free_tracer(tr_ctx: *const c_void) -> c_int;
+    fn perf_pt_init_tracer(conf: *const PerfPTConf) -> *mut c_void;
+    fn perf_pt_start_tracer(tr_ctx: *mut c_void, trace: *mut PerfPTTrace) -> c_int;
+    fn perf_pt_stop_tracer(tr_ctx: *mut c_void) -> c_int;
+    fn perf_pt_free_tracer(tr_ctx: *mut c_void) -> c_int;
 }
 
 /// A raw Intel PT trace, obtained via Linux perf.
@@ -166,7 +166,7 @@ impl PerfPTConf {
 /// A tracer that uses the Linux Perf interface to Intel Processor Trace.
 pub struct PerfPTTracer {
     /// Opaque C pointer representing the tracer context.
-    tracer_ctx: *const c_void,
+    tracer_ctx: *mut c_void,
     /// The state of the tracer.
     state: TracerState,
     /// The trace currently being collected, or `None`.
@@ -201,7 +201,7 @@ impl PerfPTTracer {
         }
 
         let ctx = unsafe { perf_pt_init_tracer(&config as *const PerfPTConf) };
-        if ctx == ptr::null() {
+        if ctx == ptr::null_mut() {
             return Err(HWTracerError::CFailure);
         }
 
