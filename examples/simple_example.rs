@@ -77,20 +77,23 @@ fn main() {
         panic!(format!("Failed to start tracer: {}", e));
     });
 
-    for i in 1..10000 {
+    let iters = 10_000;
+    for i in 1..iters {
         res += i + pid;
     }
-    tracer.stop_tracing().unwrap();
+    let trace1 = tracer.stop_tracing().unwrap();
+    println!("Trace #1 = {:?}", trace1);
     println!("result1: {}", res);
 
     // Tracer instances can be re-used.
     tracer.start_tracing().unwrap_or_else(|e| {
         panic!(format!("Failed to start tracer: {}", e));
     });
-    for i in 1..10000 {
+    for i in 1..iters {
         res -= i + pid;
     }
-    tracer.stop_tracing().unwrap();
+    let trace2 = tracer.stop_tracing().unwrap();
+    println!("Trace #2 = {:?}", trace2);
     println!("result2: {}", res);
 
     // Tracers require manual clean up (since clean up could fail).

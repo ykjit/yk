@@ -41,7 +41,6 @@ use std::fs::File;
 use std::io::Read;
 use Tracer;
 use util::linux_gettid;
-use std::ptr;
 #[cfg(debug_assertions)]
 use std::ops::Drop;
 use {TracerState, Trace};
@@ -51,19 +50,21 @@ const PERF_PERMS_PATH: &str = "/proc/sys/kernel/perf_event_paranoid";
 
 // FFI prototypes.
 extern "C" {
-    fn perf_pt_init_tracer(conf: *const PerfPTConf) -> *const c_void;
-    fn perf_pt_start_tracer(tr_ctx: *const c_void, trace: *mut PerfPTTrace) -> c_int;
-    fn perf_pt_stop_tracer(tr_ctx: *const c_void) -> c_int;
-    fn perf_pt_free_tracer(tr_ctx: *const c_void) -> c_int;
+    fn perf_pt_init_tracer(conf: *const PerfPTConf) -> *mut c_void;
+    fn perf_pt_start_tracer(tr_ctx: *mut c_void, trace: *mut PerfPTTrace) -> c_int;
+    fn perf_pt_stop_tracer(tr_ctx: *mut c_void) -> c_int;
+    fn perf_pt_free_tracer(tr_ctx: *mut c_void) -> c_int;
 }
 
 /// A raw Intel PT trace, obtained via Linux perf.
 #[repr(C)]
+#[derive(Debug)]
 pub struct PerfPTTrace {
+    // The trace buffer.
     buf: *mut u8,
-    #[allow(dead_code)]
+    // The length of the trace (in bytes).
     len: u64,
-    #[allow(dead_code)]
+    // `buf`'s allocation size (in bytes), <= `len`.
     capacity: u64,
 }
 
@@ -74,7 +75,7 @@ impl PerfPTTrace {
     /// The allocation is automatically freed by Rust when the struct falls out of scope.
     fn new(capacity: size_t) -> Result<Self, HWTracerError> {
         let buf = unsafe { malloc(capacity) as *mut u8 };
-        if buf == ptr::null_mut() {
+        if buf.is_null() {
             return Err(HWTracerError::CFailure);
         }
         Ok(Self {buf: buf, len: 0, capacity: capacity as u64})
@@ -94,35 +95,33 @@ impl Trace for PerfPTTrace {
 
         let mut f = File::create(filename).unwrap();
         let slice = unsafe { slice::from_raw_parts(self.buf as *const u8, self.len as usize) };
-        f.write(slice).unwrap();
+        f.write_all(slice).unwrap();
     }
 }
 
-
 impl Drop for PerfPTTrace {
     fn drop(&mut self) {
-        if self.buf != ptr::null_mut() {
+        if !self.buf.is_null() {
             unsafe { free(self.buf as *mut c_void) };
         }
     }
 }
 
-// Struct used to communicate a tracing configuration to the C code. Must
-// stay in sync with the C code.
+/// Configures a [`PerfPTTracer`](struct.PerfPTTracer.html).
+///
+// Must stay in sync with the C code.
 #[repr(C)]
 pub struct PerfPTConf {
-    /// Thread ID to trace.
+    // Thread ID to trace.
     target_tid: pid_t,
-    /// Data buffer size, in pages. Must be a power of 2.
+    // Data buffer size, in pages. Must be a power of 2.
     data_bufsize: size_t,
-    /// AUX buffer size, in pages. Must be a power of 2.
+    // AUX buffer size, in pages. Must be a power of 2.
     aux_bufsize: size_t,
-    /// The initial trace buffer size (in bytes) for new [PerfPTTrace](struct.PerfPTTracer.html)
-    /// instances.
+    // The initial trace buffer size (in bytes) for new traces.
     new_trace_bufsize: size_t,
 }
 
-/// Configures a PerfPTTracer.
 impl PerfPTConf {
     /// Creates a new configuration with defaults.
     pub fn new() -> Self {
@@ -158,7 +157,7 @@ impl PerfPTConf {
     }
 
     /// Set the initial trace buffer size (in bytes) for new
-    /// [PerfPTTrace](struct.PerfPTTracer.html) instances.
+    /// [`PerfPTTrace`](struct.PerfPTTrace.html) instances.
     pub fn new_trace_bufsize(mut self, size: usize) -> Self {
         self.new_trace_bufsize = size as size_t;
         self
@@ -167,13 +166,13 @@ impl PerfPTConf {
 
 /// A tracer that uses the Linux Perf interface to Intel Processor Trace.
 pub struct PerfPTTracer {
-    /// Opaque C pointer representing the tracer context.
-    tracer_ctx: *const c_void,
-    /// The state of the tracer.
+    // Opaque C pointer representing the tracer context.
+    tracer_ctx: *mut c_void,
+    // The state of the tracer.
     state: TracerState,
-    /// The trace currently being collected, or `None`.
+    // The trace currently being collected, or `None`.
     trace: Option<Box<PerfPTTrace>>,
-    /// The starting trace buffer size for new [PerfPTTrace](struct.PerfPTTracer.html) instances.
+    // The starting trace buffer size for new traces.
     new_trace_bufsize: size_t,
 }
 
@@ -203,7 +202,7 @@ impl PerfPTTracer {
         }
 
         let ctx = unsafe { perf_pt_init_tracer(&config as *const PerfPTConf) };
-        if ctx == ptr::null() {
+        if ctx.is_null() {
             return Err(HWTracerError::CFailure);
         }
 
@@ -385,7 +384,7 @@ mod tests {
         run_test_helper(test_helpers::test_drop_without_destroy);
     }
 
-    /// Test writing a trace to file.
+    // Test writing a trace to file.
     #[cfg(debug_assertions)]
     #[test]
     fn test_to_file() {
