@@ -132,9 +132,9 @@ static int open_perf(pid_t target_tid);
 
 // Exposed Prototypes.
 struct tracer_ctx *perf_pt_init_tracer(struct tracer_conf *);
-int perf_pt_start_tracer(struct tracer_ctx *, struct perf_pt_trace *);
-int perf_pt_stop_tracer(struct tracer_ctx *tr_ctx);
-int perf_pt_free_tracer(struct tracer_ctx *tr_ctx);
+bool perf_pt_start_tracer(struct tracer_ctx *, struct perf_pt_trace *);
+bool perf_pt_stop_tracer(struct tracer_ctx *tr_ctx);
+bool perf_pt_free_tracer(struct tracer_ctx *tr_ctx);
 
 /*
  * Read data out of the AUX buffer.
@@ -411,26 +411,26 @@ clean:
  * The trace is written into `*trace_buf` which may be realloc(3)d. The trace
  * length is written into `*trace_len`.
  *
- * Returns zero on success, or -1 otherwise.
+ * Returns true on success or false otherwise.
  */
-int
+bool
 perf_pt_start_tracer(struct tracer_ctx *tr_ctx, struct perf_pt_trace *trace)
 {
     int clean_sem = 0, clean_thread = 0;
-    int ret = 0;
+    int ret = true;
 
     // A pipe to signal the trace thread to stop.
     //
     // It has to be a pipe becuase it needs to be used in a poll(6) loop later.
     if (pipe(tr_ctx->stop_fds) != 0) {
-        ret = -1;
+        ret = false;
         goto clean;
     }
 
     // Use a semaphore to wait for the tracer to be ready.
     sem_t tracer_init_sem;
     if (sem_init(&tracer_init_sem, 0, 0) == -1) {
-        ret = -1;
+        ret = false;
         goto clean;
     }
     clean_sem = 1;
@@ -448,7 +448,7 @@ perf_pt_start_tracer(struct tracer_ctx *tr_ctx, struct perf_pt_trace *trace)
     // Spawn a thread to deal with copying out of the PT AUX buffer.
     int rc = pthread_create(&tr_ctx->tracer_thread, NULL, tracer_thread, &thr_args);
     if (rc) {
-        ret = -1;
+        ret = false;
         goto clean;
     }
     clean_thread = 1;
@@ -458,23 +458,23 @@ perf_pt_start_tracer(struct tracer_ctx *tr_ctx, struct perf_pt_trace *trace)
     while (rc == -1) {
         rc = sem_wait(&tracer_init_sem);
         if ((rc == -1) && (errno != EINTR)) {
-            ret = -1;
+            ret = false;
             goto clean;
         }
     }
 
     // Turn on tracing hardware.
     if (ioctl(tr_ctx->perf_fd, PERF_EVENT_IOC_ENABLE, 0) < 0) {
-        ret = -1;
+        ret = false;
         goto clean;
     }
 
 clean:
     if ((clean_sem) && (sem_destroy(&tracer_init_sem) == -1)) {
-        ret = -1;
+        ret = false;
     }
 
-    if (ret != 0) {
+    if (!ret) {
         if (clean_thread) {
             close(tr_ctx->stop_fds[1]); // signals thread to stop.
             tr_ctx->stop_fds[1] = -1;
@@ -493,36 +493,36 @@ clean:
  * Arguments:
  *   tr_ctx: The tracer context returned by perf_pt_start_tracer.
  *
- * Returns 0 on success and -1 on failure.
+ * Returns true on success or false otherwise.
  */
-int
+bool
 perf_pt_stop_tracer(struct tracer_ctx *tr_ctx)
 {
-    int ret = 0;
+    int ret = true;
 
     // Turn off tracer hardware.
     if (ioctl(tr_ctx->perf_fd, PERF_EVENT_IOC_DISABLE, 0) < 0) {
-        ret = -1;
+        ret = false;
     }
 
     // Signal poll loop to end.
     if (close(tr_ctx->stop_fds[1]) == -1) {
-        ret = -1;
+        ret = false;
     }
     tr_ctx->stop_fds[1] = -1;
 
     // Wait for poll loop to exit.
     void *thr_exit;
     if (pthread_join(tr_ctx->tracer_thread, &thr_exit) != 0) {
-        ret = -1;
+        ret = false;
     }
     if ((bool) thr_exit != true) {
-        ret = -1;
+        ret = false;
     }
 
     // Clean up
     if (close(tr_ctx->stop_fds[0]) == -1) {
-        ret = -1;
+        ret = false;
     }
     tr_ctx->stop_fds[0] = -1;
 
@@ -532,25 +532,25 @@ perf_pt_stop_tracer(struct tracer_ctx *tr_ctx)
 /*
  * Clean up and free a tracer_ctx and its contents.
  *
- * Returns 0 on success, or -1 otherwise.
+ * Returns true on success or false otherwise.
  */
-int
+bool
 perf_pt_free_tracer(struct tracer_ctx *tr_ctx) {
-    int ret = 0;
+    int ret = true;
 
     if ((tr_ctx->aux_buf) &&
         (munmap(tr_ctx->aux_buf, tr_ctx->aux_bufsize) == -1)) {
-        ret = -1;
+        ret = false;
     }
     if ((tr_ctx->base_buf) &&
         (munmap(tr_ctx->base_buf, tr_ctx->base_bufsize) == -1)) {
-        ret = -1;
+        ret = false;
     }
     if (tr_ctx->stop_fds[1] != -1) {
         // If the write end of the pipe is still open, the thread is still running.
         close(tr_ctx->stop_fds[1]); // signals thread to stop.
         if (pthread_join(tr_ctx->tracer_thread, NULL) != 0) {
-            ret = -1;
+            ret = false;
         }
     }
     if (tr_ctx->stop_fds[0] != -1) {

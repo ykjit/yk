@@ -35,7 +35,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use libc::{pid_t, c_void, size_t, c_int, geteuid, malloc, free};
+use libc::{pid_t, c_void, size_t, geteuid, malloc, free};
 use errors::HWTracerError;
 use std::fs::File;
 use std::io::Read;
@@ -51,9 +51,9 @@ const PERF_PERMS_PATH: &str = "/proc/sys/kernel/perf_event_paranoid";
 // FFI prototypes.
 extern "C" {
     fn perf_pt_init_tracer(conf: *const PerfPTConf) -> *mut c_void;
-    fn perf_pt_start_tracer(tr_ctx: *mut c_void, trace: *mut PerfPTTrace) -> c_int;
-    fn perf_pt_stop_tracer(tr_ctx: *mut c_void) -> c_int;
-    fn perf_pt_free_tracer(tr_ctx: *mut c_void) -> c_int;
+    fn perf_pt_start_tracer(tr_ctx: *mut c_void, trace: *mut PerfPTTrace) -> bool;
+    fn perf_pt_stop_tracer(tr_ctx: *mut c_void) -> bool;
+    fn perf_pt_free_tracer(tr_ctx: *mut c_void) -> bool;
 }
 
 /// A raw Intel PT trace, obtained via Linux perf.
@@ -280,11 +280,10 @@ impl Tracer for PerfPTTracer {
         // It is essential we box the trace now to stop it from moving. If it were to move, then
         // the reference which we pass to C here would become invalid. The interface to
         // `stop_tracing` needs to return a Box<Tracer> anyway, so it's no big deal.
+        //
+        // Note that the C code will mutate the trace's members directly.
         let mut trace = Box::new(PerfPTTrace::new(self.new_trace_bufsize)?);
-        if unsafe {
-            // C code will mutate trace's members directly.
-            perf_pt_start_tracer(self.tracer_ctx, &mut *trace)
-        } == -1 {
+        if !unsafe { perf_pt_start_tracer(self.tracer_ctx, &mut *trace) } {
             return Err(HWTracerError::CFailure);
         }
         self.state = TracerState::Started;
@@ -297,10 +296,9 @@ impl Tracer for PerfPTTracer {
         if self.state == TracerState::Stopped {
             return Err(HWTracerError::TracerNotStarted);
         }
-
         let rc = unsafe { perf_pt_stop_tracer(self.tracer_ctx) };
         self.state = TracerState::Stopped;
-        if rc == -1 {
+        if !rc {
             return Err(HWTracerError::CFailure);
         }
 
@@ -312,8 +310,7 @@ impl Tracer for PerfPTTracer {
     fn destroy(&mut self) -> Result<(), HWTracerError> {
         self.err_if_destroyed()?;
         self.state = TracerState::Destroyed;
-        let res = unsafe { perf_pt_free_tracer(self.tracer_ctx) };
-        if res != 0 {
+        if !unsafe { perf_pt_free_tracer(self.tracer_ctx) } {
             return Err(HWTracerError::CFailure);
         }
         Ok(())
