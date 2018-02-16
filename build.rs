@@ -84,7 +84,7 @@ fn main() {
     // Check for a new enough Perf to support Intel PT.
     #[cfg(target_os = "linux")] {
         if feature_check("check_perf_pt.c") {
-            c_build.file("src/backends/perf_pt/perf_pt.c");
+            c_build.file("src/backends/perf_pt/collect.c");
             c_build.file("src/backends/perf_pt/decode.c");
 
             // Decide whether to build our own libipt.
