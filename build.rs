@@ -38,10 +38,14 @@
 extern crate gcc;
 
 #[cfg(target_os = "linux")]
-use std::path::PathBuf;
+use std::path::{PathBuf, Path};
+use std::env;
+use std::process::Command;
 
 #[cfg(target_os = "linux")]
 const FEATURE_CHECKS_PATH: &str = "feature_checks";
+
+const C_DEPS_PATH: &str = "c_deps";
 
 /// Simple feature check, returning `true` if we have the feature.
 ///
@@ -56,6 +60,24 @@ fn feature_check(filename: &str) -> bool {
     check_build.file(path).try_compile("check_perf_pt").is_ok()
 }
 
+fn build_libipt() {
+    eprintln!("Building libipt...");
+    env::set_current_dir(&Path::new(C_DEPS_PATH)).unwrap();
+    let res = Command::new("make")
+        .arg("libipt")
+        .output()
+        .unwrap_or_else(|_| panic!("Fatal error when building libipt"));
+    if !res.status.success() {
+        eprintln!("libipt build failed\n>>> stdout");
+        eprintln!("stdout: {}", String::from_utf8_lossy(&res.stdout));
+        eprintln!("\n>>> stderr");
+        eprintln!("stderr: {}", String::from_utf8_lossy(&res.stderr));
+        panic!();
+    }
+    env::set_current_dir(&Path::new("..")).unwrap();
+}
+
+
 fn main() {
     let mut c_build = gcc::Build::new();
 
@@ -63,10 +85,25 @@ fn main() {
     #[cfg(target_os = "linux")] {
         if feature_check("check_perf_pt.c") {
             c_build.file("src/backends/perf_pt/perf_pt.c");
+            c_build.file("src/backends/perf_pt/decode.c");
+
+            // Decide whether to build our own libipt.
+            println!("cargo:rerun-if-env-changed=IPT_PATH");
+            println!("cargo:rerun-changed={}", C_DEPS_PATH);
+            if let Ok(val) = env::var("IPT_PATH") {
+                let mut inc_path = PathBuf::from(val.clone());
+                inc_path.push("include");
+                c_build.include(inc_path);
+                c_build.flag(&format!("-L{}/lib", val));
+            } else {
+                build_libipt();
+                c_build.include(&format!("{}/inst/include/", C_DEPS_PATH));
+                c_build.flag(&format!("-L{}/inst/lib", C_DEPS_PATH));
+            }
+            c_build.flag("-lipt");
             println!("cargo:rustc-cfg=perf_pt");
         }
     }
-
     c_build.file("src/util/util.c");
     c_build.compile("hwtracer_c");
 }
