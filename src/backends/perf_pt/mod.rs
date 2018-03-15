@@ -39,6 +39,7 @@ use libc::{pid_t, c_void, size_t, geteuid, malloc, free};
 use errors::HWTracerError;
 use std::fs::File;
 use std::io::Read;
+use std::ptr;
 use Tracer;
 use util::linux_gettid;
 #[cfg(debug_assertions)]
@@ -166,14 +167,14 @@ impl PerfPTConf {
 
 /// A tracer that uses the Linux Perf interface to Intel Processor Trace.
 pub struct PerfPTTracer {
+    // The configuration for this tracer.
+    config: PerfPTConf,
     // Opaque C pointer representing the tracer context.
     tracer_ctx: *mut c_void,
     // The state of the tracer.
     state: TracerState,
     // The trace currently being collected, or `None`.
     trace: Option<Box<PerfPTTrace>>,
-    // The starting trace buffer size for new traces.
-    new_trace_bufsize: size_t,
 }
 
 impl PerfPTTracer {
@@ -185,12 +186,14 @@ impl PerfPTTracer {
     ///
     /// ```
     /// use hwtracer::backends::PerfPTTracer;
+    /// use hwtracer::Tracer;
     ///
     /// let config = PerfPTTracer::config().data_bufsize(1024).target_tid(12345);
     /// let res = PerfPTTracer::new(config);
     /// if res.is_ok() {
-    ///     let tracer = res.unwrap();
+    ///     let mut tracer = res.unwrap();
     ///     // Use the tracer...
+    ///     tracer.destroy().unwrap();
     /// } else {
     ///     // CPU doesn't support Intel Processor Trace.
     /// }
@@ -201,16 +204,11 @@ impl PerfPTTracer {
             return Err(HWTracerError::HardwareSupport("Intel PT not supported by CPU".into()));
         }
 
-        let ctx = unsafe { perf_pt_init_tracer(&config as *const PerfPTConf) };
-        if ctx.is_null() {
-            return Err(HWTracerError::CFailure);
-        }
-
         Ok(Self {
-            tracer_ctx: ctx,
+            config: config,
+            tracer_ctx: ptr::null_mut(),
             state: TracerState::Stopped,
             trace: None,
-            new_trace_bufsize: config.new_trace_bufsize,
         })
     }
 
@@ -277,12 +275,20 @@ impl Tracer for PerfPTTracer {
             return Err(HWTracerError::TracerAlreadyStarted);
         }
 
+        // At the time of writing, we have to use a fresh Perf file descriptor to ensure traces
+        // start with a `PSB+` packet sequence. This is required for correct instruction-level and
+        // block-level decoding. Therefore we have to re-initialise for each new tracing session.
+        self.tracer_ctx = unsafe { perf_pt_init_tracer(&self.config as *const PerfPTConf) };
+        if self.tracer_ctx.is_null() {
+            return Err(HWTracerError::CFailure);
+        }
+
         // It is essential we box the trace now to stop it from moving. If it were to move, then
         // the reference which we pass to C here would become invalid. The interface to
         // `stop_tracing` needs to return a Box<Tracer> anyway, so it's no big deal.
         //
         // Note that the C code will mutate the trace's members directly.
-        let mut trace = Box::new(PerfPTTrace::new(self.new_trace_bufsize)?);
+        let mut trace = Box::new(PerfPTTrace::new(self.config.new_trace_bufsize)?);
         if !unsafe { perf_pt_start_tracer(self.tracer_ctx, &mut *trace) } {
             return Err(HWTracerError::CFailure);
         }
@@ -302,6 +308,11 @@ impl Tracer for PerfPTTracer {
             return Err(HWTracerError::CFailure);
         }
 
+        if !unsafe { perf_pt_free_tracer(self.tracer_ctx) } {
+            return Err(HWTracerError::CFailure);
+        }
+        self.tracer_ctx = ptr::null_mut();
+
         let ret = self.trace.take().unwrap();
         self.trace = None;
         Ok(ret as Box<Trace>)
@@ -310,9 +321,6 @@ impl Tracer for PerfPTTracer {
     fn destroy(&mut self) -> Result<(), HWTracerError> {
         self.err_if_destroyed()?;
         self.state = TracerState::Destroyed;
-        if !unsafe { perf_pt_free_tracer(self.tracer_ctx) } {
-            return Err(HWTracerError::CFailure);
-        }
         Ok(())
     }
 }
