@@ -60,6 +60,9 @@ fn feature_check(filename: &str) -> bool {
     check_build.file(path).try_compile("check_perf_pt").is_ok()
 }
 
+// XXX Currently no way to clean the c_deps dir at `cargo clean` time:
+// https://github.com/rust-lang/cargo/issues/572
+
 fn build_libipt() {
     eprintln!("Building libipt...");
     env::set_current_dir(&Path::new(C_DEPS_PATH)).unwrap();
@@ -81,29 +84,43 @@ fn build_libipt() {
 fn main() {
     let mut c_build = gcc::Build::new();
 
-    // Check for a new enough Perf to support Intel PT.
+    // Check if we should build the perf_pt backend.
     #[cfg(target_os = "linux")] {
         if feature_check("check_perf_pt.c") {
             c_build.file("src/backends/perf_pt/collect.c");
             c_build.file("src/backends/perf_pt/decode.c");
 
             // Decide whether to build our own libipt.
-            println!("cargo:rerun-if-env-changed=IPT_PATH");
-            println!("cargo:rerun-changed={}", C_DEPS_PATH);
             if let Ok(val) = env::var("IPT_PATH") {
                 let mut inc_path = PathBuf::from(val.clone());
                 inc_path.push("include");
                 c_build.include(inc_path);
                 c_build.flag(&format!("-L{}/lib", val));
+                println!("cargo:rustc-link-search={}/lib", val);
             } else {
                 build_libipt();
                 c_build.include(&format!("{}/inst/include/", C_DEPS_PATH));
                 c_build.flag(&format!("-L{}/inst/lib", C_DEPS_PATH));
+                println!("cargo:rustc-link-search={}/inst/lib", C_DEPS_PATH);
             }
             c_build.flag("-lipt");
             println!("cargo:rustc-cfg=perf_pt");
+            println!("cargo:rustc-link-lib=ipt");
+
+            // XXX Cargo bug: no way to encode an rpath, otherwise we would do that here:
+            // https://github.com/rust-lang/cargo/issues/5077
+            //
+            // Until this is implemented, the user will need to add c_deps/inst/lib to
+            // LD_LIBRARY_PATH if the build process compiles its own libipt.
         }
     }
     c_build.file("src/util/util.c");
     c_build.compile("hwtracer_c");
+
+    // Additional circumstances under which to re-run this build.rs.
+    println!("cargo:rerun-if-env-changed=IPT_PATH");
+    println!("cargo:rerun-if-env-changed=WITHOUT_IPT");
+    println!("cargo:rerun-if-changed=src/util");
+    println!("cargo:rerun-if-changed={}", C_DEPS_PATH);
+    println!("cargo:rerun-if-changed=src/backends/perf_pt");
 }
