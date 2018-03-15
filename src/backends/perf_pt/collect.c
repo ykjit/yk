@@ -57,9 +57,13 @@
 #include <stdbool.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #define SYSFS_PT_TYPE   "/sys/bus/event_source/devices/intel_pt/type"
 #define MAX_PT_TYPE_STR 8
+
+#define MAX_OPEN_PERF_TRIES  500
+#define OPEN_PERF_WAIT_NSECS 1000 * 20
 
 #ifndef INFTIM
 #define INFTIM -1
@@ -264,8 +268,18 @@ open_perf(pid_t target_tid) {
     // No skid.
     attr.precise_ip = 3;
 
-    // Acquire file descriptor through which to talk to Intel PT.
-    ret = syscall(SYS_perf_event_open, &attr, target_tid, -1, -1, 0);
+    // Acquire file descriptor through which to talk to Intel PT. This syscall
+    // could return EBUSY, meaning another process or thread has locked the
+    // Perf device.
+    struct timespec wait_time = {0, OPEN_PERF_WAIT_NSECS};
+    for (int tries = MAX_OPEN_PERF_TRIES; tries > 0; tries--) {
+        ret = syscall(SYS_perf_event_open, &attr, target_tid, -1, -1, 0);
+        if ((ret == -1) && (errno == EBUSY)) {
+            nanosleep(&wait_time, NULL); // Doesn't matter if this is interrupted.
+        } else {
+            break;
+        }
+    }
 
 clean:
     if ((pt_type_file != NULL) && (fclose(pt_type_file) == -1)) {
