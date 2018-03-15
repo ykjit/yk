@@ -570,8 +570,9 @@ perf_pt_free_tracer(struct tracer_ctx *tr_ctx) {
     if (tr_ctx->stop_fds[0] != -1) {
         close(tr_ctx->stop_fds[0]);
     }
-    if (tr_ctx->perf_fd) {
+    if (tr_ctx->perf_fd >= 0) {
         close(tr_ctx->perf_fd);
+        tr_ctx->perf_fd = -1;
     }
     if (tr_ctx != NULL) {
         free(tr_ctx);
