@@ -186,12 +186,14 @@ impl PerfPTTracer {
     ///
     /// ```
     /// use hwtracer::backends::PerfPTTracer;
+    /// use hwtracer::Tracer;
     ///
     /// let config = PerfPTTracer::config().data_bufsize(1024).target_tid(12345);
     /// let res = PerfPTTracer::new(config);
     /// if res.is_ok() {
-    ///     let tracer = res.unwrap();
+    ///     let mut tracer = res.unwrap();
     ///     // Use the tracer...
+    ///     tracer.destroy().unwrap();
     /// } else {
     ///     // CPU doesn't support Intel Processor Trace.
     /// }
