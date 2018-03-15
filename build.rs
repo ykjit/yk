@@ -85,7 +85,7 @@ fn main() {
     let mut c_build = gcc::Build::new();
 
     // Check if we should build the perf_pt backend.
-    #[cfg(target_os = "linux")] {
+    if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
         if feature_check("check_perf_pt.c") {
             c_build.file("src/backends/perf_pt/collect.c");
             c_build.file("src/backends/perf_pt/decode.c");
