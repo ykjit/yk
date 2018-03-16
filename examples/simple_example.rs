@@ -42,13 +42,13 @@ use hwtracer::Tracer;
 use libc::getpid;
 
 use hwtracer::backends::DummyTracer;
-#[cfg(all(perf_pt, target_arch = "x86_64"))]
+#[cfg(perf_pt)]
 use hwtracer::backends::PerfPTTracer;
 
 /// Instantiate a tracer suitable for the current platform.
 fn tracer() -> Box<Tracer> {
     if cfg!(target_os = "linux") {
-        #[cfg(all(perf_pt, target_arch = "x86_64"))] {
+        #[cfg(perf_pt)] {
             let res = PerfPTTracer::new(PerfPTTracer::config());
             if res.is_ok() {
                 Box::new(res.unwrap())
@@ -57,7 +57,7 @@ fn tracer() -> Box<Tracer> {
                 Box::new(DummyTracer::new())
             }
         }
-        #[cfg(not(all(perf_pt, target_arch = "x86_64")))] {
+        #[cfg(not(perf_pt))] {
             Box::new(DummyTracer::new())
         }
     } else {

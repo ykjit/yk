@@ -58,6 +58,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <stdatomic.h>
 
 #define SYSFS_PT_TYPE   "/sys/bus/event_source/devices/intel_pt/type"
 #define MAX_PT_TYPE_STR 8
@@ -128,7 +129,7 @@ struct tracer_thread_args {
 
 
 // Private prototypes.
-static bool read_aux(void *, __u64, __u64, __u64 *, struct perf_pt_trace *);
+static bool read_aux(void *, struct perf_event_mmap_page *, struct perf_pt_trace *);
 static bool poll_loop(int, int, struct perf_event_mmap_page *, void *,
                       struct perf_pt_trace *);
 static void *tracer_thread(void *);
@@ -143,16 +144,24 @@ bool perf_pt_free_tracer(struct tracer_ctx *tr_ctx);
 /*
  * Read data out of the AUX buffer.
  *
- * Reads `size` bytes from `aux_buf` into `trace_buf`, updating `*trace_len`.
+ * Reads from `aux_buf` (whose meta-data is in `hdr`) into `trace`.
  *
  * Returns true on success and false otherwise.
  */
 static bool
-read_aux(void *aux_buf, __u64 size, __u64 head_monotonic, __u64 *tail_p,
-         struct perf_pt_trace *trace)
+read_aux(void *aux_buf, struct perf_event_mmap_page *hdr, struct perf_pt_trace *trace)
 {
+    // We use atomic loads and stores with orderings to avoid concurrency
+    // issues on the AUX state mutably shared between us and the kernel.
+    // Without these, for example the compiler might be able to load data
+    // from `aux_buf` before reading from the `hdr->aux_head`.
+    __u64 head_monotonic =
+            atomic_load_explicit((_Atomic __u64 *) &hdr->aux_head,
+                                 memory_order_acquire);
+    __u64 size = hdr->aux_size; // No atomic load. Not mutated in-kernel.
     __u64 head = head_monotonic % size; // Head must be manually wrapped.
-    __u64 tail = *tail_p;
+    __u64 tail = atomic_load_explicit((_Atomic __u64 *) &hdr->aux_tail,
+                                 memory_order_acquire);
 
     // First check we won't overflow the (destination) trace buffer.
     __u64 new_data_size;
@@ -175,9 +184,7 @@ read_aux(void *aux_buf, __u64 size, __u64 head_monotonic, __u64 *tail_p,
         memcpy(trace->buf, aux_buf, head);
     }
     trace->len += new_data_size;
-
-    // Update buffer tail, thus marking the space we just read as re-usable.
-    *tail_p = head;
+    atomic_store_explicit((_Atomic __u64 *) &hdr->aux_tail, head, memory_order_release);
     return true;
 }
 
@@ -205,12 +212,7 @@ poll_loop(int perf_fd, int stop_fd, struct perf_event_mmap_page *mmap_hdr,
         }
 
         if ((pfds[0].revents & POLLIN) || (pfds[1].revents & POLLHUP)) {
-            // See <linux/perf_event.h> for why we need the asm block.
-            __u64 head = mmap_hdr->aux_head;
-            asm volatile ("" : : : "memory");
-
-            if (!read_aux(aux, mmap_hdr->aux_size, head, &mmap_hdr->aux_tail,
-                          trace)) {
+            if (!read_aux(aux, mmap_hdr, trace)) {
                 ret = false;
                 goto done;
             }

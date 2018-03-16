@@ -35,9 +35,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#[cfg(all(perf_pt, target_arch = "x86_64"))]
+#[cfg(perf_pt)]
 pub mod perf_pt;
-#[cfg(all(perf_pt, target_arch = "x86_64"))]
+#[cfg(perf_pt)]
 pub use self::perf_pt::PerfPTTracer;
 
 pub mod dummy;
