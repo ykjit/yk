@@ -119,7 +119,6 @@ fn main() {
 
     // Additional circumstances under which to re-run this build.rs.
     println!("cargo:rerun-if-env-changed=IPT_PATH");
-    println!("cargo:rerun-if-env-changed=WITHOUT_IPT");
     println!("cargo:rerun-if-changed=src/util");
     println!("cargo:rerun-if-changed={}", C_DEPS_PATH);
     println!("cargo:rerun-if-changed=src/backends/perf_pt");
