@@ -3,7 +3,7 @@ INST_DIR = ${DIR}/inst
 PYTHON=python2.7
 
 PROCESSOR_TRACE_REPO = https://github.com/01org/processor-trace.git
-PROCESSOR_TRACE_V = 0ff8b29b2fd2ebfcc47a747862e948e8b638a020
+PROCESSOR_TRACE_V = 24982c1a6fce48f1e416461d42899805f74fbb26
 PROCESSOR_TRACE_SOURCE = processor-trace
 
 XED_REPO = https://github.com/intelxed/xed
