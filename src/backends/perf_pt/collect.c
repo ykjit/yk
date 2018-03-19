@@ -63,7 +63,7 @@
 #define SYSFS_PT_TYPE   "/sys/bus/event_source/devices/intel_pt/type"
 #define MAX_PT_TYPE_STR 8
 
-#define MAX_OPEN_PERF_TRIES  500
+#define MAX_OPEN_PERF_TRIES  5000
 #define OPEN_PERF_WAIT_NSECS 1000 * 20
 
 #ifndef INFTIM
