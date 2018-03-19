@@ -38,9 +38,11 @@
 #![cfg_attr(perf_pt, feature(asm))]
 #![cfg_attr(feature="clippy", feature(plugin))]
 #![cfg_attr(feature="clippy", plugin(clippy))]
+#![feature(link_args)]
 
 extern crate libc;
 extern crate time;
+extern crate tempfile;
 
 pub mod errors;
 pub mod backends;
@@ -48,6 +50,51 @@ pub mod util;
 
 use errors::HWTracerError;
 use std::fmt::Debug;
+use std::iter::Iterator;
+#[cfg(test)]
+use std::fs::File;
+
+
+/// Information about a basic block.
+#[derive(Debug, Eq, PartialEq)]
+pub struct BlockInfo {
+    start_vaddr: u64,
+}
+
+impl BlockInfo {
+    pub fn new(start_vaddr: u64) -> Self {
+        Self { start_vaddr: start_vaddr }
+    }
+
+    pub fn start_vaddr(&self) -> u64 {
+        self.start_vaddr
+    }
+}
+
+/// Type returned by block iterators.
+///
+/// This is required because getting the next element from block iterator may fail.
+#[derive(Debug)]
+pub struct Block {
+    res: Result<BlockInfo, HWTracerError>,
+}
+
+impl Block {
+    #[cfg(perf_pt)]
+    fn from_block_info(start_vaddr: u64) -> Self {
+        let info = BlockInfo {start_vaddr: start_vaddr};
+        Self {res: Ok(info)}
+    }
+
+    #[cfg(perf_pt)]
+    fn from_err(err: HWTracerError) -> Self {
+        Self {res: Err(err)}
+    }
+
+    pub fn unwrap(self) -> BlockInfo {
+        self.res.unwrap()
+    }
+}
 
 /// Represents a generic trace.
 ///
@@ -56,8 +103,12 @@ pub trait Trace: Debug {
     /// Dump the trace to the specified filename.
     ///
     /// The exact format varies per-backend.
-    #[cfg(debug_assertions)]
-    fn to_file(&self, filename: &str);
+    #[cfg(test)]
+    fn to_file(&self, file: &mut File);
+
+    /// Iterate over the blocks of the trace.
+    /// XXX if this were to return a `Result` then the `Block` type could disappear?
+    fn iter_blocks<'t: 'i, 'i>(&'t self) -> Box<Iterator<Item=Block> + 'i>;
 }
 
 /// The interface offered by all tracer types.
@@ -94,31 +145,40 @@ enum TracerState {
 #[cfg(test)]
 mod test_helpers {
     use super::{HWTracerError, Tracer};
-    use libc::getpid;
+    use ::{BlockInfo, Trace};
+    use std::slice::Iter;
+    use std::time::SystemTime;
 
-    // A loop that does some work, that we can use to build a trace.
-    fn work_loop() {
-        let mut res = unsafe { getpid() };
-        for _ in 0..100 {
-            res += 33;
+    // A loop that does some work that we can use to build a trace.
+    #[inline(never)]
+    pub fn work_loop(iters: u64) -> u64 {
+        let mut res = 0;
+        for _ in 0..iters {
+            // Computation which stops the compiler from eliminating the loop.
+            res += SystemTime::now().elapsed().unwrap().subsec_nanos() as u64;
         }
-        println!("{}", res); // Ensure the loop isn't optimised out.
+        res
+    }
+
+    // Trace a closure that returns a u64.
+    pub fn trace_closure<F>(tracer: &mut Tracer, f: F) -> Box<Trace> where F: FnOnce() -> u64 {
+        tracer.start_tracing().unwrap();
+        let res = f();
+        let trace = tracer.stop_tracing().unwrap();
+        println!("traced closure with result: {}", res); // To avoid over-optimisation.
+        trace
     }
 
     // Check that starting and stopping a tracer works.
     pub fn test_basic_usage<T>(mut tracer: T) where T: Tracer {
-        tracer.start_tracing().unwrap();
-        work_loop();
-        tracer.stop_tracing().unwrap();
+        trace_closure(&mut tracer, || work_loop(500));
         tracer.destroy().unwrap();
     }
 
     // Check that repeated usage of the same tracer works.
     pub fn test_repeated_tracing<T>(mut tracer: T) where T: Tracer {
         for _ in 0..10 {
-            tracer.start_tracing().unwrap();
-            work_loop();
-            tracer.stop_tracing().unwrap();
+            trace_closure(&mut tracer, || work_loop(500));
         }
         tracer.destroy().unwrap();
     }
@@ -175,5 +235,39 @@ mod test_helpers {
     #[cfg(debug_assertions)]
     pub fn test_drop_without_destroy<T>(tracer: T) where T: Tracer {
         drop(tracer);
+    }
+
+    // Helper to check an expected list of blocks matches what we actually got.
+    pub fn test_expected_blocks<T>(mut tracer: T, trace: Box<Trace>,
+                                  mut expect_iter: Iter<BlockInfo>)
+        where T: Tracer {
+        let mut got_iter = trace.iter_blocks();
+        loop {
+            let expect = expect_iter.next();
+            let got = got_iter.next();
+            if expect.is_none() || got.is_none() {
+                break;
+            }
+            assert_eq!(&got.unwrap().unwrap(), expect.unwrap());
+        }
+        // Check that both iterators were the same length.
+        assert!(expect_iter.next().is_none());
+        assert!(got_iter.next().is_none());
+        tracer.destroy().unwrap();
+    }
+
+    // Trace two loops, one 10x larger than the other, then check the proportions match the number
+    // of block the trace passes through.
+    pub fn test_ten_times_as_many_blocks<T>(mut tracer1: T, mut tracer2: T)  where T: Tracer {
+        let trace1 = trace_closure(&mut tracer1, || work_loop(10));
+        let trace2 = trace_closure(&mut tracer2, || work_loop(100));
+
+        // Should be roughly 10x more blocks in trace2. It won't be exactly 10x, due to the stuff
+        // we trace either side of the loop itself. On a smallish trace, that will be significant.
+        let (ct1, ct2) = (trace1.iter_blocks().count(), trace2.iter_blocks().count());
+        assert!(ct2 > ct1 * 9);
+
+        tracer1.destroy().unwrap();
+        tracer2.destroy().unwrap();
     }
 }

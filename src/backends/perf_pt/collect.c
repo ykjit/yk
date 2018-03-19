@@ -60,6 +60,8 @@
 #include <time.h>
 #include <stdatomic.h>
 
+#include "perf_pt_private.h"
+
 #define SYSFS_PT_TYPE   "/sys/bus/event_source/devices/intel_pt/type"
 #define MAX_PT_TYPE_STR 8
 
@@ -69,14 +71,6 @@
 #ifndef INFTIM
 #define INFTIM -1
 #endif
-
-#define DEBUG(x...)                       \
-    do {                                  \
-        fprintf(stderr, "%s:%d [%s]: ",   \
-           __FILE__, __LINE__, __func__); \
-        fprintf(stderr, x);               \
-        fprintf(stderr, "\n");            \
-    } while (0)
 
 /*
  * Stores all information about the tracer.

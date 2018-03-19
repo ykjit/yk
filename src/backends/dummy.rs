@@ -35,20 +35,28 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use Tracer;
+use {Tracer, Block};
 use errors::HWTracerError;
+use std::iter::Iterator;
 use Trace;
+use TracerState;
+
 #[cfg(debug_assertions)]
 use std::ops::Drop;
-use TracerState;
+#[cfg(test)]
+use std::fs::File;
 
 /// An empty dummy trace.
 #[derive(Debug)]
 struct DummyTrace {}
 
 impl Trace for DummyTrace {
-    #[cfg(debug_assertions)]
-    fn to_file(&self, _: &str) {}
+    #[cfg(test)]
+    fn to_file(&self, _: &mut File) {}
+
+    fn iter_blocks<'t: 'i, 'i>(&'t self) -> Box<Iterator<Item=Block> + 'i> {
+       Box::new(DummyBlockIterator{})
+    }
 }
 
 /// A tracer which doesn't really do anything.
@@ -106,6 +114,19 @@ impl Drop for DummyTracer {
     }
 }
 
+// Iterate over the blocks of a DummyTrace.
+//
+// Note: there will never be any blocks, but we have to implement the interface.
+struct DummyBlockIterator {}
+
+impl Iterator for DummyBlockIterator {
+    type Item = Block;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::DummyTracer;
@@ -144,6 +165,18 @@ mod tests {
     #[test]
     fn test_use_tracer_after_destroy3() {
         test_helpers::test_use_tracer_after_destroy3(DummyTracer::new());
+    }
+
+    #[test]
+    fn test_block_iterator() {
+        use ::Tracer;
+        let mut tracer = DummyTracer::new();
+        tracer.start_tracing().unwrap();
+        let trace = tracer.stop_tracing().unwrap();
+
+        // We expect exactly 0 blocks.
+        let expects =  Vec::new();
+        test_helpers::test_expected_blocks(tracer, trace, expects.iter());
     }
 
     #[cfg(debug_assertions)]
