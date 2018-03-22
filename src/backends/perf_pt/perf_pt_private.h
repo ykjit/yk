@@ -35,32 +35,28 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#define _GNU_SOURCE
-
-#include <sys/syscall.h>
-#include <link.h>
-#include <stdio.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
-#include <libgen.h>
-#include <unistd.h>
-
-// Exposed prototypes.
-pid_t hwtracer_linux_gettid(void);
-
 /*
- * Get the thread ID of the current thread.
- *
- * This is a Linux specific notion. The pid_t type is overloaded to also refer
- * to individual threads.
- *
- * At the time of writing, there is no glibc stub for this.
+ * This header contains items which are shared amongst multiple C files in the
+ * perf_pt backend.
  */
-#ifdef __linux__
-pid_t
-hwtracer_linux_gettid(void)
-{
-    return syscall(__NR_gettid);
-}
+
+#ifndef __PERF_PT_PRIVATE_H
+#define __PERF_PT_PRIVATE_H
+
+#include <stddef.h>
+#include <inttypes.h>
+#include <stdbool.h>
+
+#define DEBUG(x...)                       \
+    do {                                  \
+        fprintf(stderr, "%s:%d [%s]: ",   \
+           __FILE__, __LINE__, __func__); \
+        fprintf(stderr, x);               \
+        fprintf(stderr, "\n");            \
+    } while (0)
+
+bool dump_vdso(int, uint64_t, size_t);
+
+#define VDSO_NAME "linux-vdso.so.1"
+
 #endif

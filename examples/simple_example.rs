@@ -38,9 +38,8 @@
 extern crate hwtracer;
 extern crate libc;
 
-use hwtracer::Tracer;
-use libc::getpid;
-
+use std::time::SystemTime;
+use hwtracer::{Tracer, Trace};
 use hwtracer::backends::DummyTracer;
 #[cfg(perf_pt)]
 use hwtracer::backends::PerfPTTracer;
@@ -65,36 +64,48 @@ fn tracer() -> Box<Tracer> {
     }
 }
 
+/// Prints the addresses of the first `qty` blocks in a trace along with it's name and
+/// computation result.
+fn print_trace(trace: &Box<Trace>, name: &str, result: u32, qty: usize) {
+    let count = trace.iter_blocks().count();
+    println!("{}: num_blocks={}, result={}", name, count, result);
+
+    for (i, blk) in trace.iter_blocks().take(qty) .enumerate() {
+       println!("  block {}: 0x{:x}", i, blk.unwrap().start_vaddr());
+    }
+    if count > qty {
+        println!("  ... {} more", count - qty);
+    }
+    println!("");
+}
+
+/// It's up to you to ensure the compiler doesn't move or optimise out the computation you intend
+/// to trace. Here we've used an uninlinable function. See also `test::black_box`.
+#[inline(never)]
+fn work() -> u32 {
+    let mut res = 0;
+    for _ in 0..50 {
+        // Computation which stops the compiler from eliminating the loop.
+        res += SystemTime::now().elapsed().unwrap().subsec_nanos();
+    }
+    res
+}
+
 /// Trace a simple computation loop.
 ///
 /// The results are printed to discourage the compiler from optimising the computation out.
 fn main() {
-    let mut res = 0;
-    let pid = unsafe { getpid() };
-
     let mut tracer = tracer();
-    tracer.start_tracing().unwrap_or_else(|e| {
-        panic!(format!("Failed to start tracer: {}", e));
-    });
 
-    let iters = 10_000;
-    for i in 1..iters {
-        res += i + pid;
+    for i in 1..4 {
+        tracer.start_tracing().unwrap_or_else(|e| {
+            panic!(format!("Failed to start tracer: {}", e));
+        });
+        let res = work();
+        let trace = tracer.stop_tracing().unwrap();
+        let name = format!("trace{}", i);
+        print_trace(&trace, &name, res, 10);
     }
-    let trace1 = tracer.stop_tracing().unwrap();
-    println!("Trace #1 = {:?}", trace1);
-    println!("result1: {}", res);
-
-    // Tracer instances can be re-used.
-    tracer.start_tracing().unwrap_or_else(|e| {
-        panic!(format!("Failed to start tracer: {}", e));
-    });
-    for i in 1..iters {
-        res -= i + pid;
-    }
-    let trace2 = tracer.stop_tracing().unwrap();
-    println!("Trace #2 = {:?}", trace2);
-    println!("result2: {}", res);
 
     // Tracers require manual clean up (since clean up could fail).
     tracer.destroy().unwrap();

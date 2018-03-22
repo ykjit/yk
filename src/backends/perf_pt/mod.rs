@@ -35,26 +35,108 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use libc::{pid_t, c_void, size_t, geteuid, malloc, free};
-use errors::HWTracerError;
+use libc::{pid_t, c_void, size_t, geteuid, malloc, free, c_char, c_int};
 use std::fs::File;
+use std::iter::Iterator;
 use std::io::Read;
+use std::ffi::CString;
+use std::os::unix::io::AsRawFd;
 use std::ptr;
-use Tracer;
-use util::linux_gettid;
 #[cfg(debug_assertions)]
 use std::ops::Drop;
-use {TracerState, Trace};
+use util::linux_gettid;
+use tempfile::NamedTempFile;
+use {Tracer, Block, TracerState, Trace};
+use errors::HWTracerError;
 
 // The sysfs path used to set perf permissions.
 const PERF_PERMS_PATH: &str = "/proc/sys/kernel/perf_event_paranoid";
 
 // FFI prototypes.
+//
+// XXX Rust bug. link_args always reported unused.
+// https://github.com/rust-lang/rust/issues/29596#issuecomment-310288094
+//
+// XXX Cargo bug(?).
+// Linker flags in build.rs ignored for the testing target. We must use `link_args` instead.
+#[allow(unused_attributes)]
+#[link_args="-lipt"]
 extern "C" {
+    // collect.c
     fn perf_pt_init_tracer(conf: *const PerfPTConf) -> *mut c_void;
     fn perf_pt_start_tracer(tr_ctx: *mut c_void, trace: *mut PerfPTTrace) -> bool;
     fn perf_pt_stop_tracer(tr_ctx: *mut c_void) -> bool;
     fn perf_pt_free_tracer(tr_ctx: *mut c_void) -> bool;
+    // decode.c
+    fn perf_pt_init_block_decoder(buf: *const c_void, len: u64, vdso_fd: c_int,
+                                  vdso_filename: *const c_char,
+                                  decoder_status: *mut c_int) -> *mut c_void;
+    fn perf_pt_next_block(decoder: *mut c_void, decoder_status: *mut c_int, addr: *mut u64) -> bool;
+    fn perf_pt_free_block_decoder(decoder: *mut c_void);
+}
+
+// Iterate over the blocks of a PerfPTTrace.
+struct PerfPTBlockIterator<'t> {
+    decoder: *mut c_void,   // C-level libipt block decoder.
+    decoder_status: c_int,  // Stores the current libipt-level status of the above decoder.
+    #[allow(dead_code)]     // Rust doesn't know that this exists only to keep the file long enough.
+    vdso_tempfile: Option<NamedTempFile>, // VDSO code stored temporarily.
+    trace: &'t PerfPTTrace, // The trace we are iterating.
+}
+
+impl<'t> PerfPTBlockIterator<'t> {
+    // Initialise the block decoder.
+    fn init_decoder(&mut self) -> Result<(), HWTracerError> {
+        // Make a temp file for the C code to write the VDSO code into.
+        //
+        // We have to do this because libipt lazily reads the code from the files you load into the
+        // image. We store it into `self` to ensure the file lives as long as the iterator.
+        let vdso_tempfile = NamedTempFile::new()?;
+        // File name of a NamedTempFile should always be valid UTF-8, unwrap() below can't fail.
+        let vdso_filename = CString::new(vdso_tempfile.path().to_str().unwrap())?;
+        let decoder = unsafe {
+            perf_pt_init_block_decoder(self.trace.buf as *const c_void, self.trace.len,
+                                 vdso_tempfile.as_raw_fd(), vdso_filename.as_ptr(),
+                                 &mut self.decoder_status)
+        };
+        vdso_tempfile.sync_all().unwrap();
+
+        if decoder.is_null() {
+            return Err(HWTracerError::CFailure);
+        }
+
+        self.decoder = decoder;
+        self.vdso_tempfile = Some(vdso_tempfile);
+        Ok(())
+    }
+}
+
+impl<'t> Drop for PerfPTBlockIterator<'t> {
+    fn drop(&mut self) {
+        unsafe { perf_pt_free_block_decoder(self.decoder) };
+    }
+}
+
+impl<'t> Iterator for PerfPTBlockIterator<'t> {
+    type Item = Block;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.decoder.is_null() {
+            if let Err(e) = self.init_decoder() {
+                return Some(Block::from_err(e));
+            }
+        }
+
+        let mut addr = 0;
+        if !unsafe { perf_pt_next_block(self.decoder, &mut self.decoder_status, &mut addr) } {
+            return Some(Block::from_err(HWTracerError::CFailure));
+        }
+        if addr == 0 {
+            None // End of packet stream.
+        } else {
+            Some(Block::from_block_info(addr))
+        }
+    }
 }
 
 /// A raw Intel PT trace, obtained via Linux perf.
@@ -85,18 +167,23 @@ impl PerfPTTrace {
 
 impl Trace for PerfPTTrace {
     /// Write the raw trace packets into the specified file.
-    ///
-    /// This can be useful for developers who want to use (e.g.) the pt utility to inspect the raw
-    /// packet stream.
-    #[cfg(debug_assertions)]
-    fn to_file(&self, filename: &str) {
+    #[cfg(test)]
+    fn to_file(&self, file: &mut File) {
         use std::slice;
-        use std::fs::File;
         use std::io::prelude::*;
 
-        let mut f = File::create(filename).unwrap();
         let slice = unsafe { slice::from_raw_parts(self.buf as *const u8, self.len as usize) };
-        f.write_all(slice).unwrap();
+        file.write_all(slice).unwrap();
+    }
+
+    fn iter_blocks<'t: 'i, 'i>(&'t self) -> Box<Iterator<Item=Block> + 'i> {
+        let itr = PerfPTBlockIterator {
+            decoder: ptr::null_mut(),
+            decoder_status: 0,
+            vdso_tempfile: None,
+            trace: self
+        };
+        Box::new(itr)
     }
 }
 
@@ -334,11 +421,131 @@ impl Drop for PerfPTTracer {
     }
 }
 
+// Called by C to store a ptxed argument into a Rust Vec.
+#[cfg(test)]
+#[no_mangle]
+pub unsafe extern "C" fn push_ptxed_arg(args: &mut Vec<String>, new_arg: *const c_char) {
+    use std::ffi::CStr;
+    let new_arg = CStr::from_ptr(new_arg).to_owned().to_str().unwrap().to_owned();
+    args.push(new_arg);
+}
+
 #[cfg(test)]
 mod tests {
-    use super::PerfPTTracer;
-    use ::test_helpers;
+    use super::{PerfPTTracer, Trace, NamedTempFile, c_int, c_char, AsRawFd, CString, c_void};
+    use ::{test_helpers, BlockInfo};
+    use std::process::Command;
 
+    // Arguments for calling perf_pt_append_self_ptxed_raw_args.
+    #[repr(C)]
+    struct AppendSelfPtxedArgs {
+        vdso_fd: c_int,
+        vdso_filename: *const c_char,
+        ptxed_args: *mut Vec<String>,
+    }
+
+    extern "C" {
+        fn perf_pt_append_self_ptxed_raw_args(args: *mut c_void) -> bool;
+    }
+
+    // Gets the ptxed arguments required to decode a trace for the current process.
+    //
+    // Returns a vector of arguments and a handle to a temproary file containing the VDSO code. The
+    // caller must make sure that this file lives long enough for ptxed to run (temp files are
+    // removed when they fall out of scope).
+    pub fn self_ptxed_args(trace_filename: &str) -> (Vec<String>, NamedTempFile) {
+        let ptxed_args = vec![
+            "--cpu", "auto", "--block-decoder", "--block:end-on-call", "--block:end-on-jump",
+            "--block:show-blocks", "--pt", trace_filename];
+        let mut ptxed_args = ptxed_args.into_iter().map(|e| String::from(e)).collect();
+
+        // Make a temp file for the VDSO to live in.
+        let vdso_tempfile = NamedTempFile::new().unwrap();
+        let vdso_filename = CString::new(vdso_tempfile.path().to_str().unwrap()).unwrap();
+
+        // Call C to fill in the rest of the arguments and dump the VDSO to disk.
+        let mut call_args = AppendSelfPtxedArgs {
+            vdso_fd: vdso_tempfile.as_raw_fd(),
+            vdso_filename: vdso_filename.as_ptr(),
+            ptxed_args: &mut ptxed_args as *mut Vec<String>,
+        };
+
+        let rv = unsafe {
+            perf_pt_append_self_ptxed_raw_args(&mut call_args as *mut _ as *mut c_void)
+        };
+        assert!(rv);
+        (ptxed_args, vdso_tempfile)
+    }
+
+    // Given a trace, use ptxed to get a vector of block start vaddrs.
+    //
+    // Returns `Err` when a block is interrupted.
+    fn get_expected_blocks(trace: &Box<Trace>) ->Result<Vec<BlockInfo>, ()> {
+        // Write the trace out to a temp file so ptxed can decode it.
+        let mut fh = NamedTempFile::new().unwrap();
+        trace.to_file(&mut fh);
+        let (args, _vdso_tempfile) = self_ptxed_args(fh.path().to_str().unwrap());
+
+        let out = Command::new(env!("PTXED"))
+                          .args(&args)
+                          .output()
+                          .unwrap();
+        let outstr = String::from_utf8(out.stdout).unwrap();
+        if !out.status.success() {
+            let errstr = String::from_utf8(out.stderr).unwrap();
+            panic!("ptxed failed:\nInvocation----------\n{:?}\n \
+                   Stdout\n------\n{}Stderr\n------\n{}",
+                   args, outstr, errstr);
+        }
+
+        let mut block_start = false;
+        let mut block_vaddrs = Vec::new();
+        for line in outstr.lines() {
+            if line.contains("error") {
+                panic!("error line in ptxed output:\n{}", line);
+            }
+            if block_start {
+                // We are expecting an instruction at the start of a block.
+                let vaddr_s = line.split_whitespace().next().unwrap();
+                let vaddr = u64::from_str_radix(vaddr_s, 16).unwrap();
+                block_vaddrs.push(BlockInfo::new(vaddr));
+                block_start = false;
+            } else if line.trim() == "[block]" {
+                // The next line will be a block start.
+                block_start = true;
+                continue;
+            } else if line.trim() == "[resumed]" {
+                // The block was interrupted and we can't deal with that yet.
+                return Err(());
+            }
+        }
+
+        Ok(block_vaddrs)
+    }
+
+    // Like `test_helpers::trace_closure` but only accepts a trace if no blocks were interrupted.
+    // Returns `None` if the CPU doesn't support PT.
+    fn trace_closure_no_interrupt<F>(f: F) -> Option<(PerfPTTracer, Box<Trace>, Vec<BlockInfo>)>
+                                              where F: Fn() -> u64 {
+        let mut tracer = match PerfPTTracer::new(PerfPTTracer::config()) {
+            Ok(t) => t,
+            Err(_) => return None, // No PT support on CPU.
+        };
+        let mut expects;
+        let mut trace;
+        loop {
+            trace = test_helpers::trace_closure(&mut tracer, &f);
+            expects = get_expected_blocks(&trace);
+            if expects.is_ok() {
+                break;
+            }
+        }
+        Some((tracer, trace, expects.unwrap()))
+    }
+
+    // XXX This isn't very flexible, as it only allows us to call test helpers with that one
+    // signature. It would be better to have a macro which either makes a `PerfPTTracer`, or
+    // returns (skipping the test) if PT is not supported on the CPU.
     fn run_test_helper<F>(f: F) where F: Fn(PerfPTTracer) {
         let res = PerfPTTracer::new(PerfPTTracer::config());
         // Only run the test if the CPU supports Intel PT.
@@ -386,7 +593,11 @@ mod tests {
     #[should_panic]
     #[test]
     fn test_drop_without_destroy() {
-        run_test_helper(test_helpers::test_drop_without_destroy);
+        if PerfPTTracer::pt_supported() {
+            run_test_helper(test_helpers::test_drop_without_destroy);
+        } else {
+            panic!("ok"); // Because this test expects a panic.
+        }
     }
 
     // Test writing a trace to file.
@@ -409,16 +620,69 @@ mod tests {
         }
 
         // Make the trace and write it to a file.
-        let filename = String::from("test_to_file.ptt");
-        trace.to_file(&filename);
+        let mut fh = NamedTempFile::new().unwrap();
+        trace.to_file(&mut fh);
+        fh.sync_all().unwrap();
 
         // Check the resulting file makes sense.
-        let file = File::open(&filename).unwrap();
+        let file = File::open(fh.path().to_str().unwrap()).unwrap();
         let mut total_bytes = 0;
         for (i, byte) in file.bytes().enumerate() {
             assert_eq!(i as u8, byte.unwrap());
             total_bytes += 1;
         }
         assert_eq!(total_bytes, capacity);
+    }
+
+    // Check that our block decoder agrees with the reference implementation in ptxed.
+    #[test]
+    fn test_block_iterator1() {
+        let res = trace_closure_no_interrupt(|| test_helpers::work_loop(10));
+        if let Some((tracer, trace, expects)) = res {
+            test_helpers::test_expected_blocks(tracer, trace, expects.iter());
+        }
+    }
+
+    // Check that our block decoder agrees ptxed on a (likely) empty trace;
+    #[test]
+    fn test_block_iterator2() {
+        let res = trace_closure_no_interrupt(|| test_helpers::work_loop(0));
+        if let Some((tracer, trace, expects)) = res {
+            test_helpers::test_expected_blocks(tracer, trace, expects.iter());
+        }
+    }
+
+    // Check that our block decoder deals with traces involving the VDSO correctly.
+    #[test]
+    fn test_block_iterator3() {
+        use libc::{timespec, CLOCK_MONOTONIC, clock_gettime};
+
+        let res = trace_closure_no_interrupt(|| {
+            let mut res = 0;
+            let mut tv = timespec { tv_sec: 0, tv_nsec: 0 };
+            for _ in 1..100 {
+                // clock_gettime(2) is in the Linux VDSO.
+                let rv = unsafe { clock_gettime(CLOCK_MONOTONIC, &mut tv) };
+                assert_eq!(rv, 0);
+                res += tv.tv_sec;
+            }
+            res as u64
+        });
+
+        if let Some((tracer, trace, expects)) = res {
+            test_helpers::test_expected_blocks(tracer, trace, expects.iter());
+        }
+    }
+
+    // Check that a shorter trace yields fewer blocks.
+    #[test]
+    fn test_block_iterator4() {
+        let tracer1 = PerfPTTracer::new(PerfPTTracer::config());
+        let tracer2 = PerfPTTracer::new(PerfPTTracer::config());
+        if tracer1.is_err() || tracer2.is_err() {
+            return; // CPU has no PT support.
+        }
+        let (tracer1, tracer2) = (tracer1.unwrap(), tracer2.unwrap());
+        test_helpers::test_ten_times_as_many_blocks(tracer1, tracer2);
     }
 }

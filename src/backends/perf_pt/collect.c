@@ -60,23 +60,17 @@
 #include <time.h>
 #include <stdatomic.h>
 
+#include "perf_pt_private.h"
+
 #define SYSFS_PT_TYPE   "/sys/bus/event_source/devices/intel_pt/type"
 #define MAX_PT_TYPE_STR 8
 
-#define MAX_OPEN_PERF_TRIES  500
+#define MAX_OPEN_PERF_TRIES  5000
 #define OPEN_PERF_WAIT_NSECS 1000 * 20
 
 #ifndef INFTIM
 #define INFTIM -1
 #endif
-
-#define DEBUG(x...)                       \
-    do {                                  \
-        fprintf(stderr, "%s:%d [%s]: ",   \
-           __FILE__, __LINE__, __func__); \
-        fprintf(stderr, x);               \
-        fprintf(stderr, "\n");            \
-    } while (0)
 
 /*
  * Stores all information about the tracer.

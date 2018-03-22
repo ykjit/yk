@@ -80,6 +80,24 @@ fn build_libipt() {
     env::set_current_dir(&Path::new("..")).unwrap();
 }
 
+// We always fetch libipt regardless of if we will build our own libipt. This is becuase there are
+// a couple of private CPU configuration files that we need to borrow from libipt.
+fn fetch_libipt() {
+    eprintln!("Fetch libipt...");
+    env::set_current_dir(&Path::new(C_DEPS_PATH)).unwrap();
+    let res = Command::new("make")
+        .arg("processor-trace") // target just fetches the code.
+        .output()
+        .unwrap_or_else(|_| panic!("Fatal error when fetching libipt"));
+    if !res.status.success() {
+        eprintln!("libipt fetch failed\n>>> stdout");
+        eprintln!("stdout: {}", String::from_utf8_lossy(&res.stdout));
+        eprintln!("\n>>> stderr");
+        eprintln!("stderr: {}", String::from_utf8_lossy(&res.stderr));
+        panic!();
+    }
+    env::set_current_dir(&Path::new("..")).unwrap();
+}
 
 fn main() {
     let mut c_build = gcc::Build::new();
@@ -90,6 +108,10 @@ fn main() {
             c_build.file("src/backends/perf_pt/collect.c");
             c_build.file("src/backends/perf_pt/decode.c");
 
+            // XXX At the time of writing you can't conditionally build C code for tests in a build
+            // script: https://github.com/rust-lang/cargo/issues/1581
+            c_build.file("src/backends/perf_pt/test_helpers.c");
+
             // Decide whether to build our own libipt.
             if let Ok(val) = env::var("IPT_PATH") {
                 let mut inc_path = PathBuf::from(val.clone());
@@ -97,13 +119,22 @@ fn main() {
                 c_build.include(inc_path);
                 c_build.flag(&format!("-L{}/lib", val));
                 println!("cargo:rustc-link-search={}/lib", val);
+                println!("cargo:rustc-env=PTXED={}/bin/ptxed", val);
             } else {
                 build_libipt();
                 c_build.include(&format!("{}/inst/include/", C_DEPS_PATH));
                 c_build.flag(&format!("-L{}/inst/lib", C_DEPS_PATH));
                 println!("cargo:rustc-link-search={}/inst/lib", C_DEPS_PATH);
+                println!("cargo:rustc-env=PTXED={}/inst/bin/ptxed", C_DEPS_PATH);
             }
-            c_build.flag("-lipt");
+
+            // We borrow the CPU detection functions from libipt (they are not exposed publicly).
+            // If we built our own libipt above, then the fetch is a no-op.
+            fetch_libipt();
+            c_build.include(&format!("{}/processor-trace/libipt/internal/include", C_DEPS_PATH));
+            c_build.file(&format!("{}/processor-trace/libipt/src/pt_cpu.c", C_DEPS_PATH));
+            c_build.file(&format!("{}/processor-trace/libipt/src/posix/pt_cpuid.c", C_DEPS_PATH));
+
             println!("cargo:rustc-cfg=perf_pt");
             println!("cargo:rustc-link-lib=ipt");
 
@@ -122,4 +153,6 @@ fn main() {
     println!("cargo:rerun-if-changed=src/util");
     println!("cargo:rerun-if-changed={}", C_DEPS_PATH);
     println!("cargo:rerun-if-changed=src/backends/perf_pt");
+    println!("cargo:rerun-if-changed={}/processor-trace/libipt/src/pt_cpu.c", C_DEPS_PATH);
+    println!("cargo:rerun-if-changed={}/processor-trace/libipt/src/posix/pt_cpuid.c", C_DEPS_PATH);
 }
