@@ -54,7 +54,7 @@ impl Trace for DummyTrace {
     #[cfg(test)]
     fn to_file(&self, _: &mut File) {}
 
-    fn iter_blocks<'t: 'i, 'i>(&'t self) -> Box<Iterator<Item=Block> + 'i> {
+    fn iter_blocks<'t: 'i, 'i>(&'t self) -> Box<Iterator<Item=Result<Block, HWTracerError>> + 'i> {
        Box::new(DummyBlockIterator{})
     }
 }
@@ -120,7 +120,7 @@ impl Drop for DummyTracer {
 struct DummyBlockIterator {}
 
 impl Iterator for DummyBlockIterator {
-    type Item = Block;
+    type Item = Result<Block, HWTracerError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         None
