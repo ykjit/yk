@@ -46,7 +46,7 @@ use std::ptr;
 use std::ops::Drop;
 use util::linux_gettid;
 use tempfile::NamedTempFile;
-use {Tracer, Block, TracerState, Trace};
+use {Tracer, TracerState, Trace, Block};
 use errors::HWTracerError;
 
 // The sysfs path used to set perf permissions.
@@ -118,23 +118,24 @@ impl<'t> Drop for PerfPTBlockIterator<'t> {
 }
 
 impl<'t> Iterator for PerfPTBlockIterator<'t> {
-    type Item = Block;
+    type Item = Result<Block, HWTracerError>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // Lazily initialise the block decoder.
         if self.decoder.is_null() {
             if let Err(e) = self.init_decoder() {
-                return Some(Block::from_err(e));
+                return Some(Err(e));
             }
         }
 
         let mut addr = 0;
         if !unsafe { perf_pt_next_block(self.decoder, &mut self.decoder_status, &mut addr) } {
-            return Some(Block::from_err(HWTracerError::CFailure));
+            return Some(Err(HWTracerError::CFailure));
         }
         if addr == 0 {
             None // End of packet stream.
         } else {
-            Some(Block::from_block_info(addr))
+            Some(Ok(Block::new(addr)))
         }
     }
 }
@@ -176,7 +177,7 @@ impl Trace for PerfPTTrace {
         file.write_all(slice).unwrap();
     }
 
-    fn iter_blocks<'t: 'i, 'i>(&'t self) -> Box<Iterator<Item=Block> + 'i> {
+    fn iter_blocks<'t: 'i, 'i>(&'t self) -> Box<Iterator<Item=Result<Block, HWTracerError>> + 'i> {
         let itr = PerfPTBlockIterator {
             decoder: ptr::null_mut(),
             decoder_status: 0,
@@ -433,7 +434,7 @@ pub unsafe extern "C" fn push_ptxed_arg(args: &mut Vec<String>, new_arg: *const 
 #[cfg(test)]
 mod tests {
     use super::{PerfPTTracer, Trace, NamedTempFile, c_int, c_char, AsRawFd, CString, c_void};
-    use ::{test_helpers, BlockInfo};
+    use ::{test_helpers, Block};
     use std::process::Command;
 
     // Arguments for calling perf_pt_append_self_ptxed_raw_args.
@@ -480,7 +481,7 @@ mod tests {
     // Given a trace, use ptxed to get a vector of block start vaddrs.
     //
     // Returns `Err` when a block is interrupted.
-    fn get_expected_blocks(trace: &Box<Trace>) ->Result<Vec<BlockInfo>, ()> {
+    fn get_expected_blocks(trace: &Box<Trace>) ->Result<Vec<Block>, ()> {
         // Write the trace out to a temp file so ptxed can decode it.
         let mut fh = NamedTempFile::new().unwrap();
         trace.to_file(&mut fh);
@@ -508,7 +509,7 @@ mod tests {
                 // We are expecting an instruction at the start of a block.
                 let vaddr_s = line.split_whitespace().next().unwrap();
                 let vaddr = u64::from_str_radix(vaddr_s, 16).unwrap();
-                block_vaddrs.push(BlockInfo::new(vaddr));
+                block_vaddrs.push(Block::new(vaddr));
                 block_start = false;
             } else if line.trim() == "[block]" {
                 // The next line will be a block start.
@@ -525,7 +526,7 @@ mod tests {
 
     // Like `test_helpers::trace_closure` but only accepts a trace if no blocks were interrupted.
     // Returns `None` if the CPU doesn't support PT.
-    fn trace_closure_no_interrupt<F>(f: F) -> Option<(PerfPTTracer, Box<Trace>, Vec<BlockInfo>)>
+    fn trace_closure_no_interrupt<F>(f: F) -> Option<(PerfPTTracer, Box<Trace>, Vec<Block>)>
                                               where F: Fn() -> u64 {
         let mut tracer = match PerfPTTracer::new(PerfPTTracer::config()) {
             Ok(t) => t,

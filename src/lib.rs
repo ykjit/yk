@@ -57,42 +57,17 @@ use std::fs::File;
 
 /// Information about a basic block.
 #[derive(Debug, Eq, PartialEq)]
-pub struct BlockInfo {
+pub struct Block {
     start_vaddr: u64,
 }
 
-impl BlockInfo {
+impl Block {
     pub fn new(start_vaddr: u64) -> Self {
         Self { start_vaddr: start_vaddr }
     }
 
     pub fn start_vaddr(&self) -> u64 {
         self.start_vaddr
-    }
-}
-
-/// Type returned by block iterators.
-///
-/// This is required because getting the next element from block iterator may fail.
-#[derive(Debug)]
-pub struct Block {
-    res: Result<BlockInfo, HWTracerError>,
-}
-
-impl Block {
-    #[cfg(perf_pt)]
-    fn from_block_info(start_vaddr: u64) -> Self {
-        let info = BlockInfo {start_vaddr: start_vaddr};
-        Self {res: Ok(info)}
-    }
-
-    #[cfg(perf_pt)]
-    fn from_err(err: HWTracerError) -> Self {
-        Self {res: Err(err)}
-    }
-
-    pub fn unwrap(self) -> BlockInfo {
-        self.res.unwrap()
     }
 }
 
@@ -107,8 +82,7 @@ pub trait Trace: Debug {
     fn to_file(&self, file: &mut File);
 
     /// Iterate over the blocks of the trace.
-    /// XXX if this were to return a `Result` then the `Block` type could disappear?
-    fn iter_blocks<'t: 'i, 'i>(&'t self) -> Box<Iterator<Item=Block> + 'i>;
+    fn iter_blocks<'t: 'i, 'i>(&'t self) -> Box<Iterator<Item=Result<Block, HWTracerError>> + 'i>;
 }
 
 /// The interface offered by all tracer types.
@@ -144,8 +118,8 @@ enum TracerState {
 // following helpers.
 #[cfg(test)]
 mod test_helpers {
-    use super::{HWTracerError, Tracer};
-    use ::{BlockInfo, Trace};
+    use super::{HWTracerError, Tracer, Block};
+    use Trace;
     use std::slice::Iter;
     use std::time::SystemTime;
 
@@ -239,7 +213,7 @@ mod test_helpers {
 
     // Helper to check an expected list of blocks matches what we actually got.
     pub fn test_expected_blocks<T>(mut tracer: T, trace: Box<Trace>,
-                                  mut expect_iter: Iter<BlockInfo>)
+                                  mut expect_iter: Iter<Block>)
         where T: Tracer {
         let mut got_iter = trace.iter_blocks();
         loop {
