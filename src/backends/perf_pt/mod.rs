@@ -341,11 +341,7 @@ impl PerfPTTracer {
                 : "eax", "ecx", "edx"
                 : "volatile");
         }
-
-        if ebx_out & (EBX_BIT) != 0 {
-            return true;
-        }
-        false
+        ebx_out & EBX_BIT != 0
     }
 
     fn err_if_destroyed(&self) -> Result<(), HWTracerError> {
