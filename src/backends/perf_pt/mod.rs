@@ -341,11 +341,7 @@ impl PerfPTTracer {
                 : "eax", "ecx", "edx"
                 : "volatile");
         }
-
-        if ebx_out & (EBX_BIT) != 0 {
-            return true;
-        }
-        false
+        ebx_out & EBX_BIT != 0
     }
 
     fn err_if_destroyed(&self) -> Result<(), HWTracerError> {
@@ -431,11 +427,16 @@ pub unsafe extern "C" fn push_ptxed_arg(args: &mut Vec<String>, new_arg: *const 
     args.push(new_arg);
 }
 
-#[cfg(test)]
+#[cfg(all(perf_pt_test,test))]
 mod tests {
     use super::{PerfPTTracer, Trace, NamedTempFile, c_int, c_char, AsRawFd, CString, c_void};
     use ::{test_helpers, Block};
     use std::process::Command;
+
+    // Makes a `PerfPTTracer` with the default config.
+    pub fn default_tracer() -> PerfPTTracer {
+        PerfPTTracer::new(PerfPTTracer::config()).unwrap()
+    }
 
     // Arguments for calling perf_pt_append_self_ptxed_raw_args.
     #[repr(C)]
@@ -525,13 +526,9 @@ mod tests {
     }
 
     // Like `test_helpers::trace_closure` but only accepts a trace if no blocks were interrupted.
-    // Returns `None` if the CPU doesn't support PT.
-    fn trace_closure_no_interrupt<F>(f: F) -> Option<(PerfPTTracer, Box<Trace>, Vec<Block>)>
-                                              where F: Fn() -> u64 {
-        let mut tracer = match PerfPTTracer::new(PerfPTTracer::config()) {
-            Ok(t) => t,
-            Err(_) => return None, // No PT support on CPU.
-        };
+    fn trace_closure_no_interrupt<F>(mut tracer: PerfPTTracer, f: F)
+                                    -> Option<(PerfPTTracer, Box<Trace>, Vec<Block>)>
+                                    where F: Fn() -> u64 {
         let mut expects;
         let mut trace;
         loop {
@@ -544,50 +541,39 @@ mod tests {
         Some((tracer, trace, expects.unwrap()))
     }
 
-    // XXX This isn't very flexible, as it only allows us to call test helpers with that one
-    // signature. It would be better to have a macro which either makes a `PerfPTTracer`, or
-    // returns (skipping the test) if PT is not supported on the CPU.
-    fn run_test_helper<F>(f: F) where F: Fn(PerfPTTracer) {
-        let res = PerfPTTracer::new(PerfPTTracer::config());
-        // Only run the test if the CPU supports Intel PT.
-        if let Ok(tracer) = res {
-            f(tracer);
-        }
-    }
-
     #[test]
     fn test_basic_usage() {
-        run_test_helper(test_helpers::test_basic_usage);
+        test_helpers::test_basic_usage(default_tracer());
     }
 
     #[test]
     fn test_repeated_tracing() {
-        run_test_helper(test_helpers::test_repeated_tracing);
+        test_helpers::test_repeated_tracing(default_tracer());
     }
 
     #[test]
     fn test_already_started() {
-        run_test_helper(test_helpers::test_already_started);
+        test_helpers::test_already_started(default_tracer());
     }
 
     #[test]
     fn test_not_started() {
-        run_test_helper(test_helpers::test_not_started);
+        test_helpers::test_not_started(default_tracer());
     }
 
     #[test]
     fn test_use_tracer_after_destroy1() {
-        run_test_helper(test_helpers::test_use_tracer_after_destroy1);
+        test_helpers::test_use_tracer_after_destroy1(default_tracer());
     }
 
     #[test]
     fn test_use_tracer_after_destroy2() {
-        run_test_helper(test_helpers::test_use_tracer_after_destroy1);
+        test_helpers::test_use_tracer_after_destroy2(default_tracer());
     }
 
     #[test]
     fn test_use_tracer_after_destroy3() {
-        run_test_helper(test_helpers::test_use_tracer_after_destroy1);
+        test_helpers::test_use_tracer_after_destroy3(default_tracer());
     }
 
     #[cfg(debug_assertions)]
@@ -595,7 +581,8 @@ mod tests {
     #[test]
     fn test_drop_without_destroy() {
         if PerfPTTracer::pt_supported() {
-            run_test_helper(test_helpers::test_drop_without_destroy);
+            let tracer = PerfPTTracer::new(PerfPTTracer::config()).unwrap();
+            test_helpers::test_drop_without_destroy(tracer);
         } else {
             panic!("ok"); // Because this test expects a panic.
         }
@@ -638,7 +625,8 @@ mod tests {
     // Check that our block decoder agrees with the reference implementation in ptxed.
     #[test]
     fn test_block_iterator1() {
-        let res = trace_closure_no_interrupt(|| test_helpers::work_loop(10));
+        let tracer = default_tracer();
+        let res = trace_closure_no_interrupt(tracer, || test_helpers::work_loop(10));
         if let Some((tracer, trace, expects)) = res {
             test_helpers::test_expected_blocks(tracer, trace, expects.iter());
         }
@@ -647,7 +635,8 @@ mod tests {
     // Check that our block decoder agrees ptxed on a (likely) empty trace;
     #[test]
     fn test_block_iterator2() {
-        let res = trace_closure_no_interrupt(|| test_helpers::work_loop(0));
+        let tracer = default_tracer();
+        let res = trace_closure_no_interrupt(tracer, || test_helpers::work_loop(0));
         if let Some((tracer, trace, expects)) = res {
             test_helpers::test_expected_blocks(tracer, trace, expects.iter());
         }
@@ -658,7 +647,8 @@ mod tests {
     fn test_block_iterator3() {
         use libc::{timespec, CLOCK_MONOTONIC, clock_gettime};
 
-        let res = trace_closure_no_interrupt(|| {
+        let tracer = default_tracer();
+        let res = trace_closure_no_interrupt(tracer, || {
             let mut res = 0;
             let mut tv = timespec { tv_sec: 0, tv_nsec: 0 };
             for _ in 1..100 {
@@ -678,12 +668,8 @@ mod tests {
     // Check that a shorter trace yields fewer blocks.
     #[test]
     fn test_block_iterator4() {
-        let tracer1 = PerfPTTracer::new(PerfPTTracer::config());
-        let tracer2 = PerfPTTracer::new(PerfPTTracer::config());
-        if tracer1.is_err() || tracer2.is_err() {
-            return; // CPU has no PT support.
-        }
-        let (tracer1, tracer2) = (tracer1.unwrap(), tracer2.unwrap());
+        let tracer1 = default_tracer();
+        let tracer2 = default_tracer();
         test_helpers::test_ten_times_as_many_blocks(tracer1, tracer2);
     }
 }

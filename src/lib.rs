@@ -232,6 +232,7 @@ mod test_helpers {
 
     // Trace two loops, one 10x larger than the other, then check the proportions match the number
     // of block the trace passes through.
+    #[cfg(perf_pt_test)]
     pub fn test_ten_times_as_many_blocks<T>(mut tracer1: T, mut tracer2: T)  where T: Tracer {
         let trace1 = trace_closure(&mut tracer1, || work_loop(10));
         let trace2 = trace_closure(&mut tracer2, || work_loop(100));

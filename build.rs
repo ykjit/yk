@@ -35,6 +35,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#![feature(asm)]
+
 extern crate gcc;
 
 #[cfg(target_os = "linux")]
@@ -99,6 +101,28 @@ fn fetch_libipt() {
     env::set_current_dir(&Path::new("..")).unwrap();
 }
 
+// Checks if the CPU supports Intel Processor Trace.
+// We use this to decide whether to run the perf_pt backend tests. Although this would be better as
+// a runtime check, it's OK since we won't distribute the test binary.
+fn cpu_supports_pt() -> bool {
+    const LEAF: u32 = 0x07;
+    const SUBPAGE: u32 = 0x0;
+    const EBX_BIT: u32 = 1 << 25;
+    let ebx_out: u32;
+
+    unsafe {
+        asm!(r"
+              mov $1, %eax;
+              mov $2, %ecx;
+              cpuid;"
+            : "={ebx}" (ebx_out)
+            : "i" (LEAF), "i" (SUBPAGE)
+            : "eax", "ecx", "edx"
+            : "volatile");
+    }
+    ebx_out & EBX_BIT != 0
+}
+
 fn main() {
     let mut c_build = gcc::Build::new();
 
@@ -136,6 +160,9 @@ fn main() {
             c_build.file(&format!("{}/processor-trace/libipt/src/posix/pt_cpuid.c", C_DEPS_PATH));
 
             println!("cargo:rustc-cfg=perf_pt");
+            if cpu_supports_pt() {
+                println!("cargo:rustc-cfg=perf_pt_test");
+            }
             println!("cargo:rustc-link-lib=ipt");
 
             // XXX Cargo bug: no way to encode an rpath, otherwise we would do that here:
