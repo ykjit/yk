@@ -58,7 +58,7 @@ struct load_self_image_args {
 };
 
 // Private prototypes.
-static int drain_events(struct pt_block_decoder *, int);
+static bool handle_events(struct pt_block_decoder *, int *);
 static bool load_self_image(struct load_self_image_args *);
 static int load_self_image_cb(struct dl_phdr_info *, size_t, void *);
 
@@ -169,8 +169,10 @@ clean:
 bool
 perf_pt_next_block(struct pt_block_decoder *decoder, int *decoder_status,
                    uint64_t *addr) {
-    // If there are events pending, drain them first.
-    *decoder_status = drain_events(decoder, *decoder_status);
+    // If there are events pending, look at those first.
+    if (handle_events(decoder, decoder_status) != true) {
+        return false;
+    }
     if (*decoder_status < 0) {
         // Error.
         return false;
@@ -185,7 +187,7 @@ perf_pt_next_block(struct pt_block_decoder *decoder, int *decoder_status,
     struct pt_block block;
     *decoder_status = pt_blk_next(decoder, &block, sizeof(block));
     // Other +ve decoder status codes can arise here. We ignore them for now,
-    // and let them be detected by drain_events() above when we are next
+    // and let them be detected by handle_events() above when we are next
     // called.
     if (*decoder_status < 0) {
         if (*decoder_status == -pte_eos) {
@@ -213,21 +215,96 @@ perf_pt_next_block(struct pt_block_decoder *decoder, int *decoder_status,
 }
 
 /*
- * Given a decoder and the last decoder status, drains events in the PT packet
- * stream.
+ * Given a decoder and pointer to the decoder status, handle any pending events in
+ * the PT packet stream and update the decoder status.
  *
- * The new decoder status is returned.
+ * Returns true on success, or false if an error occurred (e.g.) trace buffer
+ * overflow.
  */
-static int
-drain_events(struct pt_block_decoder *decoder, int decoder_status) {
-    while(decoder_status & pts_event_pending) {
+static bool
+handle_events(struct pt_block_decoder *decoder, int *decoder_status) {
+    bool ret = true;
+
+    while(*decoder_status & pts_event_pending) {
         struct pt_event event;
-        decoder_status = pt_blk_event(decoder, &event, sizeof(event));
-        if (decoder_status < 0) {
-            return decoder_status;
+        *decoder_status = pt_blk_event(decoder, &event, sizeof(event));
+        if (*decoder_status < 0) {
+            return *decoder_status;
+        }
+
+        switch (event.type) {
+            // Tracing enabled/disabled packets (TIP.PGE/TIP.PGD).
+            // These tell us the chip has enabled or disabled tracing. We
+            // expect to see an enabled packet at the start of a trace as part
+            // of a PSB+ sequence, and a disabled packet at the end of our
+            // trace. Additional enable/disable packets may appear in the
+            // middle of the trace in the event of e.g. a context switch.
+            case ptev_enabled:
+            case ptev_disabled:
+            case ptev_async_disabled:
+                break;
+            // Trace overflow packet (OVF).
+            // This happens when the head of the ring buffer being used to
+            // store trace packets catches up with the tail. In such a
+            // scenario, packets were probably lost.
+            // XXX Once we have proper error handling, we could signal this as
+            // a "retryable" error. For now it's a failure. Kill the fprintf at
+            // that time.
+            case ptev_overflow:
+                fprintf(stderr, "Packet buffer overflow\n");
+                ret = false;
+                break;
+            // Execution mode packet (MODE.Exec).
+            // We expect one of these at the start of our trace and every time
+            // the CPU changes between 16/32/64-bit execution modes.
+            case ptev_exec_mode:
+                break;
+            // Transaction mode packet (MODE.TSX).
+            // This is Intel TSX hardware transactional memory event notifying
+            // us of the start, commit or abort of a transaction. These can
+            // appear in the PSB+ sequence at the start of a trace.
+            case ptev_tsx:
+                break;
+            // Execution stop packet (EXSTOP).
+            // Indicates that the core has gone to sleep, e.g. if a deep
+            // C-state is entered. The core may wake up later.
+            case ptev_exstop:
+                break;
+            // MWAIT packet.
+            // Intel chips have hardware support for concurrency primitives in
+            // the form of `MONITOR`/`MWAIT`. This packet indicates that a
+            // `MWAIT` instruction woke up a hardware thread.
+            case ptev_mwait:
+                break;
+            // Power entry packet (PWRE).
+            // Indicates the entry of a C-state region.
+            case ptev_pwre:
+                break;
+            // Power exit packet (PWRX).
+            // Indicates the entry of a C-state region, thus returning the core
+            // back to C0.
+            case ptev_pwrx:
+                break;
+            // Core Bus Ratio (CBR) packet.
+            // We expect one of these at the start of the trace and every time
+            // the core clock speed changes.
+            case ptev_cbr:
+                break;
+            // Maintenance packet.
+            // This is a model-specific packet which we are explicitly told to
+            // ignore in the Intel manual.
+            case ptev_mnt:
+                break;
+            // We conservatively crash when receiving any other kind of packet.
+            // This includes packets which we don't expect to see because we
+            // didn't ask them to be emitted, e.g. TSC, STOP and CYC packets.
+            // We print what packet crashed us before dying to aid debugging.
+            default:
+                fprintf(stderr, "Unhandled packet event type %d\n", event.type);
+                assert(false);
         }
     }
-    return decoder_status;
+    return ret;
 }
 
 /*
