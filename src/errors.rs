@@ -47,7 +47,6 @@ pub enum HWTracerError {
     NumParseInt(num::ParseIntError),
     // Our own errors.
     CFailure,
-    ElfError(String),
     HardwareSupport(String),
     InvalidFileName(String),
     TracerAlreadyStarted,
@@ -89,7 +88,6 @@ impl Display for HWTracerError {
             HWTracerError::NumParseInt(ref e) => write!(f, "{}", e),
             HWTracerError::HardwareSupport(ref m) => write!(f, "Hardware support: {}", m),
             HWTracerError::CFailure => write!(f, "Calling to C failed"),
-            HWTracerError::ElfError(ref m) => write!(f, "ELF error: {}", m),
             HWTracerError::InvalidFileName(ref n) => write!(f, "Invalid file name: `{}'", n),
             HWTracerError::TracerAlreadyStarted => write!(f, "Tracer already started"),
             HWTracerError::TracerDestroyed => write!(f, "Tracer destroyed"),
