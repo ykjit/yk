@@ -51,6 +51,7 @@ pub mod util;
 use errors::HWTracerError;
 use std::fmt::Debug;
 use std::iter::Iterator;
+use std::fmt::{self, Display, Formatter};
 #[cfg(test)]
 use std::fs::File;
 
@@ -105,11 +106,28 @@ pub trait Tracer {
 }
 
 // Keeps track of the internal state of a tracer.
-#[derive(PartialEq, Eq)]
-enum TracerState {
+#[derive(PartialEq, Eq, Debug)]
+pub enum TracerState {
     Stopped,
     Started,
     Destroyed,
+}
+
+impl TracerState {
+    /// Returns the error corresponding with the `TracerState`.
+    pub fn as_error(self) -> HWTracerError {
+        HWTracerError::TracerState(self)
+    }
+}
+
+impl Display for TracerState {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match *self {
+            TracerState::Started => write!(f, "started"),
+            TracerState::Stopped => write!(f, "stopped"),
+            TracerState::Destroyed => write!(f, "destroyed"),
+        }
+    }
 }
 
 // Test helpers.
@@ -118,7 +136,7 @@ enum TracerState {
 // following helpers.
 #[cfg(test)]
 mod test_helpers {
-    use super::{HWTracerError, Tracer, Block};
+    use super::{HWTracerError, Tracer, Block, TracerState};
     use Trace;
     use std::slice::Iter;
     use std::time::SystemTime;
@@ -161,7 +179,7 @@ mod test_helpers {
     pub fn test_already_started<T>(mut tracer: T) where T: Tracer {
         tracer.start_tracing().unwrap();
         match tracer.start_tracing() {
-            Err(HWTracerError::TracerAlreadyStarted) => (),
+            Err(HWTracerError::TracerState(TracerState::Started)) => (),
             _ => panic!(),
         };
         tracer.stop_tracing().unwrap();
@@ -171,7 +189,7 @@ mod test_helpers {
     // Check that stopping an unstarted tracer makes an appropriate error.
     pub fn test_not_started<T>(mut tracer: T) where T: Tracer {
         match tracer.stop_tracing() {
-            Err(HWTracerError::TracerNotStarted) => (),
+            Err(HWTracerError::TracerState(TracerState::Stopped)) => (),
             _ => panic!(),
         };
         tracer.destroy().unwrap();
@@ -181,7 +199,7 @@ mod test_helpers {
     pub fn test_use_tracer_after_destroy1<T>(mut tracer: T) where T: Tracer {
         tracer.destroy().unwrap();
         match tracer.start_tracing() {
-            Err(HWTracerError::TracerDestroyed) => (),
+            Err(HWTracerError::TracerState(TracerState::Destroyed)) => (),
             _ => panic!(),
         };
     }
@@ -190,7 +208,7 @@ mod test_helpers {
         tracer.start_tracing().unwrap();
         tracer.destroy().unwrap();
         match tracer.stop_tracing() {
-            Err(HWTracerError::TracerDestroyed) => (),
+            Err(HWTracerError::TracerState(TracerState::Destroyed)) => (),
             _ => panic!(),
         };
     }
@@ -198,7 +216,7 @@ mod test_helpers {
     pub fn test_use_tracer_after_destroy3<T>(mut tracer: T) where T: Tracer {
         tracer.destroy().unwrap();
         match tracer.destroy() {
-            Err(HWTracerError::TracerDestroyed) => (),
+            Err(HWTracerError::TracerState(TracerState::Destroyed)) => (),
             _ => panic!(),
         };
     }
