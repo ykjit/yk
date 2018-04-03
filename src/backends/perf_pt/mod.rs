@@ -38,8 +38,8 @@
 use libc::{pid_t, c_void, size_t, geteuid, malloc, free, c_char, c_int};
 use std::fs::File;
 use std::iter::Iterator;
-use std::io::Read;
-use std::ffi::CString;
+use std::io::{self, Read};
+use std::ffi::{self, CString};
 use std::os::unix::io::AsRawFd;
 use std::ptr;
 #[cfg(debug_assertions)]
@@ -48,6 +48,7 @@ use util::linux_gettid;
 use tempfile::NamedTempFile;
 use {Tracer, TracerState, Trace, Block};
 use errors::HWTracerError;
+use std::num::ParseIntError;
 
 // The sysfs path used to set perf permissions.
 const PERF_PERMS_PATH: &str = "/proc/sys/kernel/perf_event_paranoid";
@@ -84,6 +85,24 @@ struct PerfPTBlockIterator<'t> {
     trace: &'t PerfPTTrace, // The trace we are iterating.
 }
 
+impl From<io::Error> for HWTracerError {
+    fn from(err: io::Error) -> Self {
+        HWTracerError::Custom(Box::new(err))
+    }
+}
+
+impl From<ffi::NulError> for HWTracerError {
+    fn from(err: ffi::NulError) -> Self {
+        HWTracerError::Custom(Box::new(err))
+    }
+}
+
+impl From<ParseIntError> for HWTracerError {
+    fn from(err: ParseIntError) -> Self {
+        HWTracerError::Custom(Box::new(err))
+    }
+}
+
 impl<'t> PerfPTBlockIterator<'t> {
     // Initialise the block decoder.
     fn init_decoder(&mut self) -> Result<(), HWTracerError> {
@@ -99,7 +118,7 @@ impl<'t> PerfPTBlockIterator<'t> {
                                  vdso_tempfile.as_raw_fd(), vdso_filename.as_ptr(),
                                  &mut self.decoder_status)
         };
-        vdso_tempfile.sync_all().unwrap();
+        vdso_tempfile.sync_all()?;
 
         if decoder.is_null() {
             return Err(HWTracerError::CFailure);
@@ -289,7 +308,7 @@ impl PerfPTTracer {
     pub fn new(config: PerfPTConf) -> Result<Self, HWTracerError> {
         PerfPTTracer::check_perf_perms()?;
         if !Self::pt_supported() {
-            return Err(HWTracerError::HardwareSupport("Intel PT not supported by CPU".into()));
+            return Err(HWTracerError::NoHWSupport("Intel PT not supported by CPU".into()));
         }
 
         Ok(Self {
@@ -318,7 +337,7 @@ impl PerfPTTracer {
         if perm != -1 {
             let msg = format!("Tracing not permitted: you must be root or {} must contain -1",
                            PERF_PERMS_PATH);
-            return Err(HWTracerError::TracingNotPermitted(msg));
+            return Err(HWTracerError::Permissions(msg));
         }
 
         Ok(())
@@ -346,7 +365,7 @@ impl PerfPTTracer {
 
     fn err_if_destroyed(&self) -> Result<(), HWTracerError> {
         if self.state == TracerState::Destroyed {
-            return Err(HWTracerError::TracerDestroyed);
+            return Err(TracerState::Destroyed.as_error());
         }
         Ok(())
     }
@@ -356,7 +375,7 @@ impl Tracer for PerfPTTracer {
     fn start_tracing(&mut self) -> Result<(), HWTracerError> {
         self.err_if_destroyed()?;
         if self.state == TracerState::Started {
-            return Err(HWTracerError::TracerAlreadyStarted);
+            return Err(TracerState::Started.as_error());
         }
 
         // At the time of writing, we have to use a fresh Perf file descriptor to ensure traces
@@ -384,7 +403,7 @@ impl Tracer for PerfPTTracer {
     fn stop_tracing(&mut self) -> Result<Box<Trace>, HWTracerError> {
         self.err_if_destroyed()?;
         if self.state == TracerState::Stopped {
-            return Err(HWTracerError::TracerNotStarted);
+            return Err(TracerState::Stopped.as_error());
         }
         let rc = unsafe { perf_pt_stop_tracer(self.tracer_ctx) };
         self.state = TracerState::Stopped;

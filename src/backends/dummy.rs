@@ -73,7 +73,7 @@ impl DummyTracer {
 
     fn err_if_destroyed(&self) -> Result<(), HWTracerError> {
         if self.state == TracerState::Destroyed {
-            return Err(HWTracerError::TracerDestroyed);
+            return Err(TracerState::Destroyed.as_error());
         }
         Ok(())
     }
@@ -83,7 +83,7 @@ impl Tracer for DummyTracer {
     fn start_tracing(&mut self) -> Result<(), HWTracerError> {
         self.err_if_destroyed()?;
         if self.state != TracerState::Stopped {
-            return Err(HWTracerError::TracerAlreadyStarted);
+            return Err(TracerState::Started.as_error());
         }
         self.state = TracerState::Started;
         Ok(())
@@ -92,7 +92,7 @@ impl Tracer for DummyTracer {
     fn stop_tracing(&mut self) -> Result<Box<Trace>, HWTracerError> {
         self.err_if_destroyed()?;
         if self.state != TracerState::Started {
-            return Err(HWTracerError::TracerNotStarted);
+            return Err(TracerState::Stopped.as_error());
         }
         self.state = TracerState::Stopped;
         Ok(Box::new(DummyTrace{}))

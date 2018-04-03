@@ -35,66 +35,52 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::{io, ffi, num};
 use std::fmt::{self, Formatter, Display};
+use std::error::Error;
+use TracerState;
 
 #[derive(Debug)]
 pub enum HWTracerError {
-    // Wrapped errors from elsewhere.
-    FFIIntoString(ffi::IntoStringError),
-    FFINul(ffi::NulError),
-    IO(io::Error),
-    NumParseInt(num::ParseIntError),
-    // Our own errors.
-    CFailure,
-    ElfError(String),
-    HardwareSupport(String),
-    InvalidFileName(String),
-    TracerAlreadyStarted,
-    TracerDestroyed,
-    TracerNotStarted,
-    TracingNotPermitted(String),
-}
-
-impl From<ffi::IntoStringError> for HWTracerError {
-    fn from(err: ffi::IntoStringError) -> Self {
-        HWTracerError::FFIIntoString(err)
-    }
-}
-
-impl From<ffi::NulError> for HWTracerError {
-    fn from(err: ffi::NulError) -> Self {
-        HWTracerError::FFINul(err)
-    }
-}
-
-impl From<io::Error> for HWTracerError {
-    fn from(err: io::Error) -> Self {
-        HWTracerError::IO(err)
-    }
-}
-
-impl From<num::ParseIntError> for HWTracerError {
-    fn from(err: num::ParseIntError) -> Self {
-        HWTracerError::NumParseInt(err)
-    }
+    HWBufferOverflow,         // The trace buffer being used by the hardware overflowed.
+                              // This is considered a non-fatal error since retrying the tracing
+                              // may succeed.
+    NoHWSupport(String),      // The hardware doesn't support a required feature. Not fatal for the
+                              // same reason as `Permissions`. This may be non-fatal depending
+                              // upon whether the consumer could (e.g.) try a different backend.
+    Permissions(String),      // Tracing is not permitted using this backend.
+    CFailure,                 // Something went wrong in C code.
+                              // ^ XXX will be replaced with an errno mechanism.
+    TracerState(TracerState), // The tracer is in the wrong state to do the requested task.
+    Custom(Box<Error>),       // All other errors can be nested here, however, don't rely on this
+                              // for performance since the `Box` incurs a runtime cost.
 }
 
 impl Display for HWTracerError {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match *self {
-            HWTracerError::FFIIntoString(ref e) => write!(f, "{}", e),
-            HWTracerError::FFINul(ref e) => write!(f, "{}", e),
-            HWTracerError::IO(ref e) => write!(f, "{}", e),
-            HWTracerError::NumParseInt(ref e) => write!(f, "{}", e),
-            HWTracerError::HardwareSupport(ref m) => write!(f, "Hardware support: {}", m),
-            HWTracerError::CFailure => write!(f, "Calling to C failed"),
-            HWTracerError::ElfError(ref m) => write!(f, "ELF error: {}", m),
-            HWTracerError::InvalidFileName(ref n) => write!(f, "Invalid file name: `{}'", n),
-            HWTracerError::TracerAlreadyStarted => write!(f, "Tracer already started"),
-            HWTracerError::TracerDestroyed => write!(f, "Tracer destroyed"),
-            HWTracerError::TracerNotStarted => write!(f, "Tracer not started"),
-            HWTracerError::TracingNotPermitted(ref m) => write!(f, "{}", m),
+            HWTracerError::HWBufferOverflow => write!(f, "Hardware trace buffer overflow"),
+            HWTracerError::NoHWSupport(ref s) => write!(f, "{}", s),
+            HWTracerError::Permissions(ref s) => write!(f, "{}", s),
+            HWTracerError::CFailure => write!(f, "C failure"),
+            HWTracerError::TracerState(ref s) => write!(f, "Tracer in wrong state: {}", s),
+            HWTracerError::Custom(ref bx) => write!(f, "{}", bx),
+        }
+    }
+}
+
+impl Error for HWTracerError {
+    fn description(&self) -> &str {
+        "hwtracer error"
+    }
+
+    fn cause(&self) -> Option<&Error> {
+        match *self {
+            HWTracerError::HWBufferOverflow => None,
+            HWTracerError::NoHWSupport(_) => None,
+            HWTracerError::Permissions(_) => None,
+            HWTracerError::TracerState(_) => None,
+            HWTracerError::CFailure => None,
+            HWTracerError::Custom(ref bx) => Some(bx.as_ref()),
         }
     }
 }
