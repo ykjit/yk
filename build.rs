@@ -131,6 +131,7 @@ fn main() {
         if feature_check("check_perf_pt.c") {
             c_build.file("src/backends/perf_pt/collect.c");
             c_build.file("src/backends/perf_pt/decode.c");
+            c_build.file("src/backends/perf_pt/util.c");
 
             // XXX At the time of writing you can't conditionally build C code for tests in a build
             // script: https://github.com/rust-lang/cargo/issues/1581

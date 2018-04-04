@@ -55,16 +55,18 @@ struct load_self_image_args {
     struct pt_image *image;
     int vdso_fd;
     char *vdso_filename;
+    struct perf_pt_cerror *err;
 };
 
 // Private prototypes.
-static bool handle_events(struct pt_block_decoder *, int *);
+static bool handle_events(struct pt_block_decoder *, int *, struct perf_pt_cerror *);
 static bool load_self_image(struct load_self_image_args *);
 static int load_self_image_cb(struct dl_phdr_info *, size_t, void *);
 
 // Public prototypes.
-void *perf_pt_init_block_decoder(void *, uint64_t, int, char *, int *);
-bool perf_pt_next_block(struct pt_block_decoder *, int *, uint64_t *);
+void *perf_pt_init_block_decoder(void *, uint64_t, int, char *, int *,
+                                 struct perf_pt_cerror *);
+bool perf_pt_next_block(struct pt_block_decoder *, int *, uint64_t *, struct perf_pt_cerror *);
 void perf_pt_free_block_decoder(struct pt_block_decoder *);
 
 /*
@@ -85,7 +87,7 @@ void perf_pt_free_block_decoder(struct pt_block_decoder *);
  */
 void *
 perf_pt_init_block_decoder(void *buf, uint64_t len, int vdso_fd, char *vdso_filename,
-                           int *decoder_status) {
+                           int *decoder_status, struct perf_pt_cerror *err) {
     bool failing = false;
 
     // Make a block decoder configuration.
@@ -99,20 +101,27 @@ perf_pt_init_block_decoder(void *buf, uint64_t len, int vdso_fd, char *vdso_file
 
     // Decode for the current CPU.
     struct pt_block_decoder *decoder = NULL;
-    if (pt_cpu_read(&config.cpu) != 0) {
+    int rv = pt_cpu_read(&config.cpu);
+    if (rv != pte_ok) {
+        perf_pt_set_err(err, perf_pt_cerror_ipt, -rv);
         failing = true;
         goto clean;
     }
 
     // Work around CPU bugs.
-    if ((config.cpu.vendor) && (pt_cpu_errata(&config.errata, &config.cpu) < 0)) {
-        failing = true;
-        goto clean;
+    if (config.cpu.vendor) {
+        rv = pt_cpu_errata(&config.errata, &config.cpu);
+        if (rv < 0) {
+            perf_pt_set_err(err, perf_pt_cerror_ipt, -rv);
+            failing = true;
+            goto clean;
+        }
     }
 
     // Instantiate a decoder.
     decoder = pt_blk_alloc_decoder(&config);
     if (decoder == NULL) {
+        perf_pt_set_err(err, perf_pt_cerror_unknown, 0);
         failing = true;
         goto clean;
     }
@@ -124,6 +133,7 @@ perf_pt_init_block_decoder(void *buf, uint64_t len, int vdso_fd, char *vdso_file
         // call to perf_pt_next_block().
         goto clean;
     } else if (*decoder_status < 0) {
+        perf_pt_set_err(err, perf_pt_cerror_ipt, -*decoder_status);
         failing = true;
         goto clean;
     }
@@ -131,17 +141,20 @@ perf_pt_init_block_decoder(void *buf, uint64_t len, int vdso_fd, char *vdso_file
     // Build and load a memory image from which to recover control flow.
     struct pt_image *image = pt_image_alloc(NULL);
     if (image == NULL) {
+        perf_pt_set_err(err, perf_pt_cerror_unknown, 0);
         failing = true;
         goto clean;
     }
 
-    struct load_self_image_args load_args = {image, vdso_fd, vdso_filename};
+    struct load_self_image_args load_args = {image, vdso_fd, vdso_filename, err};
     if (!load_self_image(&load_args)) {
         failing = true;
         goto clean;
     }
 
-    if (pt_blk_set_image(decoder, image) < 0) {
+    rv = pt_blk_set_image(decoder, image);
+    if (rv < 0) {
+        perf_pt_set_err(err, perf_pt_cerror_ipt, -rv);
         failing = true;
         goto clean;
     }
@@ -168,13 +181,10 @@ clean:
  */
 bool
 perf_pt_next_block(struct pt_block_decoder *decoder, int *decoder_status,
-                   uint64_t *addr) {
+                   uint64_t *addr, struct perf_pt_cerror *err) {
     // If there are events pending, look at those first.
-    if (handle_events(decoder, decoder_status) != true) {
-        return false;
-    }
-    if (*decoder_status < 0) {
-        // Error.
+    if (handle_events(decoder, decoder_status, err) != true) {
+        // handle_events will have already called perf_pt_set_err().
         return false;
     } else if (*decoder_status & pts_eos) {
         // End of stream.
@@ -196,6 +206,7 @@ perf_pt_next_block(struct pt_block_decoder *decoder, int *decoder_status,
             return true;
         } else {
             // A real error.
+            perf_pt_set_err(err, perf_pt_cerror_ipt, -*decoder_status);
             return false;
         }
     }
@@ -222,14 +233,15 @@ perf_pt_next_block(struct pt_block_decoder *decoder, int *decoder_status,
  * overflow.
  */
 static bool
-handle_events(struct pt_block_decoder *decoder, int *decoder_status) {
+handle_events(struct pt_block_decoder *decoder, int *decoder_status, struct perf_pt_cerror *err) {
     bool ret = true;
 
     while(*decoder_status & pts_event_pending) {
         struct pt_event event;
         *decoder_status = pt_blk_event(decoder, &event, sizeof(event));
         if (*decoder_status < 0) {
-            return *decoder_status;
+            perf_pt_set_err(err, perf_pt_cerror_ipt, -*decoder_status);
+            return false;
         }
 
         switch (event.type) {
@@ -247,11 +259,10 @@ handle_events(struct pt_block_decoder *decoder, int *decoder_status) {
             // This happens when the head of the ring buffer being used to
             // store trace packets catches up with the tail. In such a
             // scenario, packets were probably lost.
-            // XXX Once we have proper error handling, we could signal this as
-            // a "retryable" error. For now it's a failure. Kill the fprintf at
-            // that time.
             case ptev_overflow:
-                fprintf(stderr, "Packet buffer overflow\n");
+                // We translate the overflow event to an overflow error for
+                // Rust to detect later.
+                perf_pt_set_err(err, perf_pt_cerror_ipt, pte_overflow);
                 ret = false;
                 break;
             // Execution mode packet (MODE.Exec).
@@ -315,8 +326,16 @@ handle_events(struct pt_block_decoder *decoder, int *decoder_status) {
 static bool
 load_self_image(struct load_self_image_args *args)
 {
-    return ((dl_iterate_phdr(load_self_image_cb, args) == 0) &&
-            (fsync(args->vdso_fd) == 0));
+    if (dl_iterate_phdr(load_self_image_cb, args) != 0) {
+        return false;
+    }
+
+    if (fsync(args->vdso_fd) == -1) {
+        perf_pt_set_err(args->err, perf_pt_cerror_errno, errno);
+        return false;
+    }
+
+    return true;
 }
 
 /*
@@ -334,6 +353,7 @@ load_self_image_cb(struct dl_phdr_info *info, size_t size, void *data)
 
     (void) size; // Unused. Silence warning.
     struct load_self_image_args *args = data;
+    struct perf_pt_cerror *err = args->err;
 
     const char *filename = info->dlpi_name;
     bool vdso = false;
@@ -365,7 +385,7 @@ load_self_image_cb(struct dl_phdr_info *info, size_t size, void *data)
         // Discussion on adding libipt support for loading from memory here:
         // https://github.com/01org/processor-trace/issues/37
         if (vdso) {
-            int rv = dump_vdso(args->vdso_fd, vaddr, phdr.p_filesz);
+            int rv = dump_vdso(args->vdso_fd, vaddr, phdr.p_filesz, err);
             if (!rv) {
                 return 1;
             }
@@ -379,6 +399,7 @@ load_self_image_cb(struct dl_phdr_info *info, size_t size, void *data)
         int rv = pt_image_add_file(args->image, filename, offset,
                                    phdr.p_filesz, NULL, vaddr);
         if (rv < 0) {
+            perf_pt_set_err(err, perf_pt_cerror_ipt, -rv);
             return 1;
         }
     }
@@ -393,12 +414,13 @@ load_self_image_cb(struct dl_phdr_info *info, size_t size, void *data)
  * Returns true on success or false otherwise.
  */
 bool
-dump_vdso(int fd, uint64_t vaddr, size_t len)
+dump_vdso(int fd, uint64_t vaddr, size_t len, struct perf_pt_cerror *err)
 {
     size_t written = 0;
     while (written != len) {
         int wrote = write(fd, (void *) vaddr + written, len - written);
         if (wrote == -1) {
+            perf_pt_set_err(err, perf_pt_cerror_errno, errno);
             return false;
         }
         written += wrote;

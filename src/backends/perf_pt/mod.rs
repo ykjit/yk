@@ -39,7 +39,7 @@ use libc::{pid_t, c_void, size_t, geteuid, malloc, free, c_char, c_int};
 use std::fs::File;
 use std::iter::Iterator;
 use std::io::{self, Read};
-use std::ffi::{self, CString};
+use std::ffi::{self, CString, CStr};
 use std::os::unix::io::AsRawFd;
 use std::ptr;
 #[cfg(debug_assertions)]
@@ -49,9 +49,81 @@ use tempfile::NamedTempFile;
 use {Tracer, TracerState, Trace, Block};
 use errors::HWTracerError;
 use std::num::ParseIntError;
+use std::error::Error;
+use std::fmt::{self, Formatter, Display};
 
 // The sysfs path used to set perf permissions.
 const PERF_PERMS_PATH: &str = "/proc/sys/kernel/perf_event_paranoid";
+
+/// An error indicated by a C-level libipt error code.
+#[derive(Debug)]
+struct LibIPTError(c_int);
+
+impl Display for LibIPTError {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        // Ask libipt for a string representation of the error code.
+        let err_str = unsafe { CStr::from_ptr(pt_errstr(self.0)) };
+        write!(f, "libipt error: {}", err_str.to_str().unwrap())
+    }
+}
+
+impl Error for LibIPTError {
+    fn description(&self) -> &str {
+        "libipt error"
+    }
+
+    fn cause(&self) -> Option<&Error> {
+        None
+    }
+}
+
+
+#[repr(C)]
+#[allow(dead_code)] // Only C constructs these.
+#[derive(PartialEq)]
+enum PerfPTCErrorKind {
+    Unused,
+    Unknown,
+    Errno,
+    IPT,
+}
+
+/// Represents an error occurring in the C code in this backend.
+/// Rust code calling C inspects one of these if the return value of a call indicates error.
+#[repr(C)]
+struct PerfPTCError {
+    typ: PerfPTCErrorKind,
+    code: c_int,
+}
+
+impl PerfPTCError {
+    // Creates a new error struct defaulting to an unknown error.
+    fn new() -> Self {
+        Self {
+            typ: PerfPTCErrorKind::Unknown,
+            code: 0,
+        }
+    }
+}
+
+impl From<PerfPTCError> for HWTracerError {
+    fn from(err: PerfPTCError) -> HWTracerError {
+        // If this assert crashes out, then we forgot a perf_pt_set_err() somewhere in C code.
+        debug_assert!(err.typ != PerfPTCErrorKind::Unused);
+        match err.typ {
+            PerfPTCErrorKind::Unused => HWTracerError::Unknown,
+            PerfPTCErrorKind::Unknown => HWTracerError::Unknown,
+            PerfPTCErrorKind::Errno => HWTracerError::Errno(err.code),
+            PerfPTCErrorKind::IPT => {
+                // Overflow is a special case with its own error type.
+                match unsafe {perf_pt_is_overflow_err(err.code)} {
+                    true => HWTracerError::HWBufferOverflow,
+                    false => HWTracerError::Custom(Box::new(LibIPTError(err.code))),
+                }
+            }
+        }
+    }
+}
 
 // FFI prototypes.
 //
@@ -64,16 +136,22 @@ const PERF_PERMS_PATH: &str = "/proc/sys/kernel/perf_event_paranoid";
 #[link_args="-lipt"]
 extern "C" {
     // collect.c
-    fn perf_pt_init_tracer(conf: *const PerfPTConf) -> *mut c_void;
-    fn perf_pt_start_tracer(tr_ctx: *mut c_void, trace: *mut PerfPTTrace) -> bool;
-    fn perf_pt_stop_tracer(tr_ctx: *mut c_void) -> bool;
-    fn perf_pt_free_tracer(tr_ctx: *mut c_void) -> bool;
+    fn perf_pt_init_tracer(conf: *const PerfPTConf, err: *mut PerfPTCError) -> *mut c_void;
+    fn perf_pt_start_tracer(tr_ctx: *mut c_void, trace: *mut PerfPTTrace, err: *mut PerfPTCError) -> bool;
+    fn perf_pt_stop_tracer(tr_ctx: *mut c_void, err: *mut PerfPTCError) -> bool;
+    fn perf_pt_free_tracer(tr_ctx: *mut c_void, err: *mut PerfPTCError) -> bool;
     // decode.c
     fn perf_pt_init_block_decoder(buf: *const c_void, len: u64, vdso_fd: c_int,
                                   vdso_filename: *const c_char,
-                                  decoder_status: *mut c_int) -> *mut c_void;
-    fn perf_pt_next_block(decoder: *mut c_void, decoder_status: *mut c_int, addr: *mut u64) -> bool;
+                                  decoder_status: *mut c_int,
+                                  err: *mut PerfPTCError) -> *mut c_void;
+    fn perf_pt_next_block(decoder: *mut c_void, decoder_status: *mut c_int,
+                          addr: *mut u64, err: *mut PerfPTCError) -> bool;
     fn perf_pt_free_block_decoder(decoder: *mut c_void);
+    // util.c
+    fn perf_pt_is_overflow_err(err: c_int) -> bool;
+    // libipt
+    fn pt_errstr(error_code: c_int) -> *const c_char;
 }
 
 // Iterate over the blocks of a PerfPTTrace.
@@ -113,17 +191,17 @@ impl<'t> PerfPTBlockIterator<'t> {
         let vdso_tempfile = NamedTempFile::new()?;
         // File name of a NamedTempFile should always be valid UTF-8, unwrap() below can't fail.
         let vdso_filename = CString::new(vdso_tempfile.path().to_str().unwrap())?;
+        let mut cerr = PerfPTCError::new();
         let decoder = unsafe {
             perf_pt_init_block_decoder(self.trace.buf as *const c_void, self.trace.len,
                                  vdso_tempfile.as_raw_fd(), vdso_filename.as_ptr(),
-                                 &mut self.decoder_status)
+                                 &mut self.decoder_status, &mut cerr)
         };
-        vdso_tempfile.sync_all()?;
-
         if decoder.is_null() {
-            return Err(HWTracerError::CFailure);
+            Err(cerr)?
         }
 
+        vdso_tempfile.sync_all()?;
         self.decoder = decoder;
         self.vdso_tempfile = Some(vdso_tempfile);
         Ok(())
@@ -148,8 +226,12 @@ impl<'t> Iterator for PerfPTBlockIterator<'t> {
         }
 
         let mut addr = 0;
-        if !unsafe { perf_pt_next_block(self.decoder, &mut self.decoder_status, &mut addr) } {
-            return Some(Err(HWTracerError::CFailure));
+        let mut cerr = PerfPTCError::new();
+        let rv = unsafe {
+            perf_pt_next_block(self.decoder, &mut self.decoder_status, &mut addr, &mut cerr)
+        };
+        if !rv {
+            return Some(Err(HWTracerError::from(cerr)));
         }
         if addr == 0 {
             None // End of packet stream.
@@ -179,7 +261,7 @@ impl PerfPTTrace {
     fn new(capacity: size_t) -> Result<Self, HWTracerError> {
         let buf = unsafe { malloc(capacity) as *mut u8 };
         if buf.is_null() {
-            return Err(HWTracerError::CFailure);
+            return Err(HWTracerError::Unknown);
         }
         Ok(Self {buf: buf, len: 0, capacity: capacity as u64})
     }
@@ -381,9 +463,12 @@ impl Tracer for PerfPTTracer {
         // At the time of writing, we have to use a fresh Perf file descriptor to ensure traces
         // start with a `PSB+` packet sequence. This is required for correct instruction-level and
         // block-level decoding. Therefore we have to re-initialise for each new tracing session.
-        self.tracer_ctx = unsafe { perf_pt_init_tracer(&self.config as *const PerfPTConf) };
+        let mut cerr = PerfPTCError::new();
+        self.tracer_ctx = unsafe {
+            perf_pt_init_tracer(&self.config as *const PerfPTConf, &mut cerr)
+        };
         if self.tracer_ctx.is_null() {
-            return Err(HWTracerError::CFailure);
+            Err(cerr)?
         }
 
         // It is essential we box the trace now to stop it from moving. If it were to move, then
@@ -392,8 +477,9 @@ impl Tracer for PerfPTTracer {
         //
         // Note that the C code will mutate the trace's members directly.
         let mut trace = Box::new(PerfPTTrace::new(self.config.new_trace_bufsize)?);
-        if !unsafe { perf_pt_start_tracer(self.tracer_ctx, &mut *trace) } {
-            return Err(HWTracerError::CFailure);
+        let mut cerr = PerfPTCError::new();
+        if !unsafe { perf_pt_start_tracer(self.tracer_ctx, &mut *trace, &mut cerr) } {
+            Err(cerr)?
         }
         self.state = TracerState::Started;
         self.trace = Some(trace);
@@ -405,14 +491,16 @@ impl Tracer for PerfPTTracer {
         if self.state == TracerState::Stopped {
             return Err(TracerState::Stopped.as_error());
         }
-        let rc = unsafe { perf_pt_stop_tracer(self.tracer_ctx) };
+        let mut cerr = PerfPTCError::new();
+        let rc = unsafe { perf_pt_stop_tracer(self.tracer_ctx, &mut cerr) };
         self.state = TracerState::Stopped;
         if !rc {
-            return Err(HWTracerError::CFailure);
+            Err(cerr)?
         }
 
-        if !unsafe { perf_pt_free_tracer(self.tracer_ctx) } {
-            return Err(HWTracerError::CFailure);
+        let mut cerr = PerfPTCError::new();
+        if !unsafe { perf_pt_free_tracer(self.tracer_ctx, &mut cerr) } {
+            Err(cerr)?
         }
         self.tracer_ctx = ptr::null_mut();
 
