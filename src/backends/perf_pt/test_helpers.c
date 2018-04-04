@@ -114,7 +114,10 @@ append_self_ptxed_raw_args_cb(struct dl_phdr_info *info, size_t size, void *data
         uint64_t offset;
 
         if (vdso) {
-            if (!dump_vdso(args->vdso_fd, vaddr, phdr.p_memsz)) {
+            // Since this is testing code, we don't worry too much about the
+            // exact error, but we do have to pass down an error struct.
+            struct perf_pt_cerror err;
+            if (!dump_vdso(args->vdso_fd, vaddr, phdr.p_memsz, &err)) {
                 return 1;
             }
             filename = args->vdso_filename;

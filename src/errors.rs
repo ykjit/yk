@@ -38,6 +38,8 @@
 use std::fmt::{self, Formatter, Display};
 use std::error::Error;
 use TracerState;
+use libc::{c_int, strerror};
+use std::ffi::CStr;
 
 #[derive(Debug)]
 pub enum HWTracerError {
@@ -48,11 +50,11 @@ pub enum HWTracerError {
                               // same reason as `Permissions`. This may be non-fatal depending
                               // upon whether the consumer could (e.g.) try a different backend.
     Permissions(String),      // Tracing is not permitted using this backend.
-    CFailure,                 // Something went wrong in C code.
-                              // ^ XXX will be replaced with an errno mechanism.
+    Errno(c_int),             // Something went wrong in C code.
     TracerState(TracerState), // The tracer is in the wrong state to do the requested task.
     Custom(Box<Error>),       // All other errors can be nested here, however, don't rely on this
                               // for performance since the `Box` incurs a runtime cost.
+    Unknown,                  // An unknown error. Used sparingly in C code which doesn't set errno.
 }
 
 impl Display for HWTracerError {
@@ -61,9 +63,14 @@ impl Display for HWTracerError {
             HWTracerError::HWBufferOverflow => write!(f, "Hardware trace buffer overflow"),
             HWTracerError::NoHWSupport(ref s) => write!(f, "{}", s),
             HWTracerError::Permissions(ref s) => write!(f, "{}", s),
-            HWTracerError::CFailure => write!(f, "C failure"),
+            HWTracerError::Errno(n) => {
+                // Ask libc for a string representation of the error code.
+                let err_str = unsafe { CStr::from_ptr(strerror(n)) };
+                write!(f, "{}", err_str.to_str().unwrap())
+            },
             HWTracerError::TracerState(ref s) => write!(f, "Tracer in wrong state: {}", s),
             HWTracerError::Custom(ref bx) => write!(f, "{}", bx),
+            HWTracerError::Unknown => write!(f, "Unknown error"),
         }
     }
 }
@@ -79,8 +86,9 @@ impl Error for HWTracerError {
             HWTracerError::NoHWSupport(_) => None,
             HWTracerError::Permissions(_) => None,
             HWTracerError::TracerState(_) => None,
-            HWTracerError::CFailure => None,
+            HWTracerError::Errno(_) => None,
             HWTracerError::Custom(ref bx) => Some(bx.as_ref()),
+            HWTracerError::Unknown => None,
         }
     }
 }
