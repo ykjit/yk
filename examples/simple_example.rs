@@ -70,7 +70,7 @@ fn print_trace(trace: &Box<Trace>, name: &str, result: u32, qty: usize) {
     let count = trace.iter_blocks().count();
     println!("{}: num_blocks={}, result={}", name, count, result);
 
-    for (i, blk) in trace.iter_blocks().take(qty) .enumerate() {
+    for (i, blk) in trace.iter_blocks().take(qty).enumerate() {
        println!("  block {}: 0x{:x}", i, blk.unwrap().start_vaddr());
     }
     if count > qty {
