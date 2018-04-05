@@ -100,7 +100,7 @@ impl PerfPTCError {
     // Creates a new error struct defaulting to an unknown error.
     fn new() -> Self {
         Self {
-            typ: PerfPTCErrorKind::Unknown,
+            typ: PerfPTCErrorKind::Unused,
             code: 0,
         }
     }
