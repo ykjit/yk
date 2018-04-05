@@ -161,6 +161,7 @@ struct PerfPTBlockIterator<'t> {
     #[allow(dead_code)]     // Rust doesn't know that this exists only to keep the file long enough.
     vdso_tempfile: Option<NamedTempFile>, // VDSO code stored temporarily.
     trace: &'t PerfPTTrace, // The trace we are iterating.
+    errored: bool,          // Set to true when an error occurs, thus invalidating the iterator.
 }
 
 impl From<io::Error> for HWTracerError {
@@ -218,6 +219,11 @@ impl<'t> Iterator for PerfPTBlockIterator<'t> {
     type Item = Result<Block, HWTracerError>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // There was an error in a previous iteration.
+        if self.errored {
+            return None;
+        }
+
         // Lazily initialise the block decoder.
         if self.decoder.is_null() {
             if let Err(e) = self.init_decoder() {
@@ -231,6 +237,7 @@ impl<'t> Iterator for PerfPTBlockIterator<'t> {
             perf_pt_next_block(self.decoder, &mut self.decoder_status, &mut addr, &mut cerr)
         };
         if !rv {
+            self.errored = true; // This iterator is unusable now.
             return Some(Err(HWTracerError::from(cerr)));
         }
         if addr == 0 {
@@ -283,7 +290,8 @@ impl Trace for PerfPTTrace {
             decoder: ptr::null_mut(),
             decoder_status: 0,
             vdso_tempfile: None,
-            trace: self
+            trace: self,
+            errored: false,
         };
         Box::new(itr)
     }
@@ -536,7 +544,8 @@ pub unsafe extern "C" fn push_ptxed_arg(args: &mut Vec<String>, new_arg: *const 
 
 #[cfg(all(perf_pt_test,test))]
 mod tests {
-    use super::{PerfPTTracer, Trace, NamedTempFile, c_int, c_char, AsRawFd, CString, c_void};
+    use super::{PerfPTTracer, Trace, NamedTempFile, c_int, c_char, AsRawFd, CString, c_void,
+                PerfPTTrace, PerfPTBlockIterator, ptr, HWTracerError};
     use ::{test_helpers, Block};
     use std::process::Command;
 
@@ -702,7 +711,6 @@ mod tests {
         use std::fs::File;
         use std::slice;
         use std::io::prelude::*;
-        use super::PerfPTTrace;
         use Trace;
 
         // Allocate and fill a buffer to make a "trace" from.
@@ -778,5 +786,29 @@ mod tests {
         let tracer1 = default_tracer();
         let tracer2 = default_tracer();
         test_helpers::test_ten_times_as_many_blocks(tracer1, tracer2);
+    }
+
+    // Check that a block iterator returns none after an error.
+    #[test]
+    fn test_error_stops_block_iter1() {
+        // A zero-sized trace will lead to an error.
+        let trace = PerfPTTrace::new(0).unwrap();
+        let mut itr = PerfPTBlockIterator {
+            decoder: ptr::null_mut(),
+            decoder_status: 0,
+            vdso_tempfile: None,
+            trace: &trace,
+            errored: false,
+        };
+
+        // First we expect a libipt error.
+        match itr.next() {
+            Some(Err(HWTracerError::Custom(e))) => assert_eq!(e.description(), "libipt error"),
+            _ => panic!(),
+        }
+        // And now the iterator is invalid, and should return None.
+        for _ in 0..128 {
+            assert!(itr.next().is_none());
+        }
     }
 }
