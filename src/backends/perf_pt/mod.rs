@@ -295,6 +295,11 @@ impl Trace for PerfPTTrace {
         };
         Box::new(itr)
     }
+
+    #[cfg(test)]
+    fn capacity(&self) -> usize {
+        self.capacity as usize
+    }
 }
 
 impl Drop for PerfPTTrace {
@@ -778,6 +783,24 @@ mod tests {
         if let Some((tracer, trace, expects)) = res {
             test_helpers::test_expected_blocks(tracer, trace, expects.iter());
         }
+    }
+
+    // Check that a long trace causes the trace buffer to reallocate.
+    #[test]
+    fn test_relloc_trace_buf1() {
+        let start_bufsize = 512;
+        let config = PerfPTTracer::config().new_trace_bufsize(start_bufsize);
+        let mut tracer = PerfPTTracer::new(config).unwrap();
+        use Tracer;
+
+        tracer.start_tracing().unwrap();
+        let res = test_helpers::work_loop(10000);
+        let trace = tracer.stop_tracing().unwrap();
+
+        println!("res: {}", res); // Stop over-optimisation.
+        assert!(trace.capacity() > start_bufsize);
+        println!("CAP: {}", trace.capacity());
+        tracer.destroy().unwrap();
     }
 
     // Check that a shorter trace yields fewer blocks.

@@ -127,8 +127,8 @@ struct tracer_thread_args {
 
 
 // Private prototypes.
-static void read_aux(void *, struct perf_event_mmap_page *,
-                     struct perf_pt_trace *);
+static bool read_aux(void *, struct perf_event_mmap_page *,
+                     struct perf_pt_trace *, struct perf_pt_cerror *);
 static bool poll_loop(int, int, struct perf_event_mmap_page *, void *,
                       struct perf_pt_trace *, struct perf_pt_cerror *);
 static void *tracer_thread(void *);
@@ -145,9 +145,9 @@ bool perf_pt_free_tracer(struct tracer_ctx *tr_ctx, struct perf_pt_cerror *);
  *
  * Reads from `aux_buf` (whose meta-data is in `hdr`) into `trace`.
  */
-void
+bool
 read_aux(void *aux_buf, struct perf_event_mmap_page *hdr,
-         struct perf_pt_trace *trace)
+         struct perf_pt_trace *trace, struct perf_pt_cerror *err)
 {
     // We use atomic loads and stores with orderings to avoid concurrency
     // issues on the AUX state mutably shared between us and the kernel.
@@ -161,7 +161,7 @@ read_aux(void *aux_buf, struct perf_event_mmap_page *hdr,
     __u64 tail = atomic_load_explicit((_Atomic __u64 *) &hdr->aux_tail,
                                  memory_order_acquire);
 
-    // First check we won't overflow the (destination) trace buffer.
+    // Figure out how much more space we need in the trace storage buffer.
     __u64 new_data_size;
     if (tail <= head) {
         // No wrap-around.
@@ -171,8 +171,22 @@ read_aux(void *aux_buf, struct perf_event_mmap_page *hdr,
         new_data_size = (size - tail) + head;
     }
 
-    // For now we simply crash out if we exhaust the buffer.
-    assert(trace->len + new_data_size <= trace->capacity);
+    // Reallocate the trace storage buffer if more space is required.
+    __u64 required_capacity = trace->len + new_data_size;
+    if (required_capacity > trace->capacity) {
+        // Over-allocate to 2x what we need, checking that the result fits in
+        // the size_t argument of realloc(3).
+        // XXX replace assertion with a "trace too long" error kind.
+        assert(required_capacity < SIZE_MAX / 2);
+        size_t new_capacity = required_capacity * 2;
+        void *new_buf = realloc(trace->buf, new_capacity);
+        if (new_buf == NULL) {
+            perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+            return false;
+        }
+        trace->capacity = new_capacity;
+        trace->buf = new_buf;
+    }
 
     // Finally copy the AUX buffer into the trace buffer.
     if (tail <= head) {
@@ -183,6 +197,7 @@ read_aux(void *aux_buf, struct perf_event_mmap_page *hdr,
     }
     trace->len += new_data_size;
     atomic_store_explicit((_Atomic __u64 *) &hdr->aux_tail, head, memory_order_release);
+    return true;
 }
 
 /*
@@ -210,7 +225,7 @@ poll_loop(int perf_fd, int stop_fd, struct perf_event_mmap_page *mmap_hdr,
         }
 
         if ((pfds[0].revents & POLLIN) || (pfds[1].revents & POLLHUP)) {
-            read_aux(aux, mmap_hdr, trace);
+            read_aux(aux, mmap_hdr, trace, err);
 
             if (pfds[1].revents & POLLHUP) {
                 break;

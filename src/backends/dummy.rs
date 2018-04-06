@@ -57,6 +57,11 @@ impl Trace for DummyTrace {
     fn iter_blocks<'t: 'i, 'i>(&'t self) -> Box<Iterator<Item=Result<Block, HWTracerError>> + 'i> {
        Box::new(DummyBlockIterator{})
     }
+
+    #[cfg(test)]
+    fn capacity(&self) -> usize {
+        0
+    }
 }
 
 /// A tracer which doesn't really do anything.

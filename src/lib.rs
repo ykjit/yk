@@ -84,6 +84,10 @@ pub trait Trace: Debug {
 
     /// Iterate over the blocks of the trace.
     fn iter_blocks<'t: 'i, 'i>(&'t self) -> Box<Iterator<Item=Result<Block, HWTracerError>> + 'i>;
+
+    /// Get the capacity of the trace in bytes.
+    #[cfg(test)]
+    fn capacity(&self) -> usize;
 }
 
 /// The interface offered by all tracer types.
