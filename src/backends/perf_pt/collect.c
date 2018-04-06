@@ -226,6 +226,8 @@ poll_loop(int perf_fd, int stop_fd, struct perf_event_mmap_page *mmap_hdr,
             goto done;
         }
 
+        // POLLIN on pfds[0]: Overflow event on either the Perf AUX or data buffer.
+        // POLLHUP on pfds[1]: Tracer stopped by parent.
         if ((pfds[0].revents & POLLIN) || (pfds[1].revents & POLLHUP)) {
             read_aux(aux, mmap_hdr, trace, err);
 
@@ -234,6 +236,7 @@ poll_loop(int perf_fd, int stop_fd, struct perf_event_mmap_page *mmap_hdr,
             }
         }
 
+        // The traced thread exited.
         if (pfds[0].revents & POLLHUP) {
             break;
         }
