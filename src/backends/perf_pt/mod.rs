@@ -406,6 +406,18 @@ impl PerfPTTracer {
             return Err(HWTracerError::NoHWSupport("Intel PT not supported by CPU".into()));
         }
 
+        // Check for inavlid configuration.
+        fn power_of_2(v: size_t) -> bool {
+            !(v <= 0) && ((v & (v - 1)) == 0)
+        }
+        if !power_of_2(config.data_bufsize) {
+            return Err(HWTracerError::BadConfig(String::from("data_bufsize must be a positive power of 2")));
+        }
+        if !power_of_2(config.aux_bufsize) {
+            return Err(HWTracerError::BadConfig(String::from("aux_bufsize must be a positive power of 2")));
+        }
+
+
         Ok(Self {
             config: config,
             tracer_ctx: ptr::null_mut(),
@@ -832,6 +844,26 @@ mod tests {
         // And now the iterator is invalid, and should return None.
         for _ in 0..128 {
             assert!(itr.next().is_none());
+        }
+    }
+
+    #[test]
+    fn test_config_bad_data_bufsize() {
+        match PerfPTTracer::new(PerfPTTracer::config().data_bufsize(3)) {
+            Err(HWTracerError::BadConfig(s)) => {
+                assert_eq!(s, "data_bufsize must be a positive power of 2");
+            },
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn test_config_bad_aux_bufsize() {
+        match PerfPTTracer::new(PerfPTTracer::config().aux_bufsize(3)) {
+            Err(HWTracerError::BadConfig(s)) => {
+                assert_eq!(s, "aux_bufsize must be a positive power of 2");
+            },
+            _ => panic!(),
         }
     }
 }

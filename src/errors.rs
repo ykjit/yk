@@ -52,6 +52,7 @@ pub enum HWTracerError {
     Permissions(String),      // Tracing is not permitted using this backend.
     Errno(c_int),             // Something went wrong in C code.
     TracerState(TracerState), // The tracer is in the wrong state to do the requested task.
+    BadConfig(String),        // The tracer configuration was invalid.
     Custom(Box<Error>),       // All other errors can be nested here, however, don't rely on this
                               // for performance since the `Box` incurs a runtime cost.
     Unknown,                  // An unknown error. Used sparingly in C code which doesn't set errno.
@@ -69,6 +70,7 @@ impl Display for HWTracerError {
                 write!(f, "{}", err_str.to_str().unwrap())
             },
             HWTracerError::TracerState(ref s) => write!(f, "Tracer in wrong state: {}", s),
+            HWTracerError::BadConfig(ref s) => write!(f, "{}", s),
             HWTracerError::Custom(ref bx) => write!(f, "{}", bx),
             HWTracerError::Unknown => write!(f, "Unknown error"),
         }
@@ -86,6 +88,7 @@ impl Error for HWTracerError {
             HWTracerError::NoHWSupport(_) => None,
             HWTracerError::Permissions(_) => None,
             HWTracerError::TracerState(_) => None,
+            HWTracerError::BadConfig(_) => None,
             HWTracerError::Errno(_) => None,
             HWTracerError::Custom(ref bx) => Some(bx.as_ref()),
             HWTracerError::Unknown => None,
