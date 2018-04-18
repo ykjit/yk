@@ -59,6 +59,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <stdatomic.h>
+#include <intel-pt.h>
 
 #include "perf_pt_private.h"
 
@@ -127,8 +128,28 @@ struct tracer_thread_args {
                         *err;               // Errors generated inside the thread.
 };
 
+// A data buffer sample indicating that new data is available in the AUX
+// buffer. This struct is not defined in a perf header, so we have to define it
+// ourselves.
+struct perf_record_aux_sample {
+    struct perf_event_header header;
+    __u64    aux_offset;
+    __u64    aux_size;
+    __u64    flags;
+    // ...
+    // More variable-sized data follows, but we don't use it.
+};
+
+// The format of the data returned by read(2) on a Perf file descriptor.
+// Note that the size of this will change if you change the Perf `read_format`
+// config field (more fields become available).
+struct read_format {
+    __u64 value;
+};
 
 // Private prototypes.
+static bool handle_sample(void *, struct perf_event_mmap_page *, struct
+                          perf_pt_trace *, void *, struct perf_pt_cerror *);
 static bool read_aux(void *, struct perf_event_mmap_page *,
                      struct perf_pt_trace *, struct perf_pt_cerror *);
 static bool poll_loop(int, int, struct perf_event_mmap_page *, void *,
@@ -141,6 +162,92 @@ struct tracer_ctx *perf_pt_init_tracer(struct tracer_conf *, struct perf_pt_cerr
 bool perf_pt_start_tracer(struct tracer_ctx *, struct perf_pt_trace *, struct perf_pt_cerror *);
 bool perf_pt_stop_tracer(struct tracer_ctx *tr_ctx, struct perf_pt_cerror *);
 bool perf_pt_free_tracer(struct tracer_ctx *tr_ctx, struct perf_pt_cerror *);
+
+
+/*
+ * Called when the poll(2) loop is woken up with a POLL_IN. Samples are read
+ * from the Perf data buffer and an action is invoked for each depending its
+ * type.
+ *
+ * Returns true on success, or false otherwise.
+ */
+static bool
+handle_sample(void *aux_buf, struct perf_event_mmap_page *hdr,
+              struct perf_pt_trace *trace, void *data_tmp,
+              struct perf_pt_cerror *err)
+{
+    // We need to use atomics with orderings to protect against 2 cases.
+    //
+    // 1) It must not be possible to read the data buffer before the most
+    //    recent head is obtained. This would mean that we may read nothing when
+    //    there is really data available.
+    //
+    // 2) We must ensure that we have already copied out of the data buffer
+    //    before we update the tail. Failure to do so would allow the kernel to
+    //    re-use the space we have just "marked free" before we copied it.
+    //
+    // The initial load of the tail is relaxed since we are the only thread
+    // mutating it and we don't mind variations on the ordering.
+    //
+    // See the following comment in the Linux kernel sources for more:
+    // https://github.com/torvalds/linux/blob/3be4aaf4e2d3eb95cce7835e8df797ae65ae5ac1/kernel/events/ring_buffer.c#L60-L85
+    void *data = (void *) hdr + hdr->data_offset;
+    __u64 head_monotonic =
+            atomic_load_explicit((_Atomic __u64 *) &hdr->data_head,
+                                 memory_order_acquire);
+    __u64 size = hdr->data_size; // No atomic load. Constant value.
+    __u64 head = head_monotonic % size; // Head must be manually wrapped.
+    __u64 tail = atomic_load_explicit((_Atomic __u64 *) &hdr->data_tail,
+                                      memory_order_relaxed);
+
+    // Copy samples out, removing wrap in the process.
+    void *data_tmp_end = data_tmp;
+    if (tail <= head) {
+        // Not wrapped.
+        memcpy(data_tmp, data + tail, head - tail);
+        data_tmp_end += head - tail;
+    } else {
+        // Wrapped.
+        memcpy(data_tmp, data + tail, size - tail);
+        data_tmp_end += size - tail;
+        memcpy(data_tmp + size - tail, data, head);
+        data_tmp_end += head;
+    }
+    atomic_store_explicit((_Atomic __u64 *) &hdr->data_tail, head, memory_order_relaxed);
+
+    void *next_sample = data_tmp;
+    while (next_sample != data_tmp_end) {
+        struct perf_event_header *sample_hdr = next_sample;
+        struct perf_record_aux_sample *rec_aux_sample;
+        switch (sample_hdr->type) {
+        case PERF_RECORD_AUX:
+                // Data was written to the AUX buffer.
+                rec_aux_sample = next_sample;
+                // Check that the data written into the AUX buffer was not
+                // truncated. If it was, then we didn't read out of the data buffer
+                // quickly/frequently enough.
+                if (rec_aux_sample->flags & PERF_AUX_FLAG_TRUNCATED) {
+                    perf_pt_set_err(err, perf_pt_cerror_ipt, pte_overflow);
+                    return false;
+                }
+                if (read_aux(aux_buf, hdr, trace, err) == false) {
+                    return false;
+                }
+                break;
+            case PERF_RECORD_LOST:
+                perf_pt_set_err(err, perf_pt_cerror_ipt, pte_overflow);
+                return false;
+                break;
+            case PERF_RECORD_LOST_SAMPLES:
+                // Shouldn't happen with PT.
+                errx(EXIT_FAILURE, "Unexpected PERF_RECORD_LOST_SAMPLES sample");
+                break;
+        }
+        next_sample += sample_hdr->size;
+    }
+
+    return true;
+}
 
 /*
  * Read data out of the AUX buffer.
@@ -221,6 +328,14 @@ poll_loop(int perf_fd, int stop_fd, struct perf_event_mmap_page *mmap_hdr,
         {stop_fd,   POLLHUP,            0}
     };
 
+    // Temporary space for new samples in the data buffer.
+    void *data_tmp = malloc(mmap_hdr->data_size);
+    if (data_tmp == NULL) {
+        perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+        ret = false;
+        goto done;
+    }
+
     while (1) {
         n_events = poll(pfds, 2, INFTIM);
         if (n_events == -1) {
@@ -232,7 +347,22 @@ poll_loop(int perf_fd, int stop_fd, struct perf_event_mmap_page *mmap_hdr,
         // POLLIN on pfds[0]: Overflow event on either the Perf AUX or data buffer.
         // POLLHUP on pfds[1]: Tracer stopped by parent.
         if ((pfds[0].revents & POLLIN) || (pfds[1].revents & POLLHUP)) {
-            read_aux(aux, mmap_hdr, trace, err);
+            // Read from the Perf file descriptor.
+            // We don't actually use any of what we read, but it's probably
+            // best that we drain the fd anyway.
+            struct read_format fd_data;
+            if (pfds[0].revents & POLLIN) {
+                if (read(perf_fd, &fd_data, sizeof(fd_data)) == -1) {
+                    perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+                    ret = false;
+                    break;
+                }
+            }
+
+            if (!handle_sample(aux, mmap_hdr, trace, data_tmp, err)) {
+                ret = false;
+                break;
+            }
 
             if (pfds[1].revents & POLLHUP) {
                 break;
@@ -246,6 +376,10 @@ poll_loop(int perf_fd, int stop_fd, struct perf_event_mmap_page *mmap_hdr,
     }
 
 done:
+    if (data_tmp != NULL) {
+        free(data_tmp);
+    }
+
     return ret;
 }
 
@@ -290,8 +424,11 @@ open_perf(pid_t target_tid, size_t aux_bufsize, struct perf_pt_cerror *err) {
     // No skid.
     attr.precise_ip = 3;
 
-    attr.watermark = 0;
-    attr.wakeup_events = 1;
+    // Notify for every sample.
+    attr.watermark = 1;
+    attr.wakeup_watermark = 1;
+
+    // Generate a PERF_RECORD_AUX sample when the AUX buffer is almost full.
     attr.aux_watermark = (size_t) ((double) aux_bufsize * getpagesize()) * AUX_BUF_WAKE_RATIO;
 
     // Acquire file descriptor through which to talk to Intel PT. This syscall
