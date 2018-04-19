@@ -178,8 +178,11 @@ read_aux(void *aux_buf, struct perf_event_mmap_page *hdr,
     if (required_capacity > trace->capacity) {
         // Over-allocate to 2x what we need, checking that the result fits in
         // the size_t argument of realloc(3).
-        // XXX replace assertion with a "trace too long" error kind.
-        assert(required_capacity < SIZE_MAX / 2);
+        if (required_capacity >= SIZE_MAX / 2) {
+            // We would overflow the size_t argument of realloc(3).
+            perf_pt_set_err(err, perf_pt_cerror_errno, ENOMEM);
+            return false;
+        }
         size_t new_capacity = required_capacity * 2;
         void *new_buf = realloc(trace->buf, new_capacity);
         if (new_buf == NULL) {
