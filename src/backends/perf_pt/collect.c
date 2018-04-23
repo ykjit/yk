@@ -258,17 +258,14 @@ bool
 read_aux(void *aux_buf, struct perf_event_mmap_page *hdr,
          struct perf_pt_trace *trace, struct perf_pt_cerror *err)
 {
-    // We use atomic loads and stores with orderings to avoid concurrency
-    // issues on the AUX state mutably shared between us and the kernel.
-    // Without these, for example the compiler might be able to load data
-    // from `aux_buf` before reading from the `hdr->aux_head`.
+    // Use of atomics here for the same reasons as for handle_sample().
     __u64 head_monotonic =
             atomic_load_explicit((_Atomic __u64 *) &hdr->aux_head,
                                  memory_order_acquire);
-    __u64 size = hdr->aux_size; // No atomic load. Not mutated in-kernel.
+    __u64 size = hdr->aux_size; // No atomic load. Constant value.
     __u64 head = head_monotonic % size; // Head must be manually wrapped.
     __u64 tail = atomic_load_explicit((_Atomic __u64 *) &hdr->aux_tail,
-                                 memory_order_acquire);
+                                 memory_order_relaxed);
 
     // Figure out how much more space we need in the trace storage buffer.
     __u64 new_data_size;
@@ -300,14 +297,16 @@ read_aux(void *aux_buf, struct perf_event_mmap_page *hdr,
         trace->buf = new_buf;
     }
 
-    // Finally copy the AUX buffer into the trace buffer.
+    // Finally append the new AUX data to the end of the trace storage buffer.
     if (tail <= head) {
-        memcpy(trace->buf, aux_buf + tail, head - tail);
+        memcpy(trace->buf + trace->len, aux_buf + tail, head - tail);
+        trace->len += head - tail;
     } else {
-        memcpy(trace->buf, aux_buf + tail, size - tail);
-        memcpy(trace->buf, aux_buf, head);
+        memcpy(trace->buf + trace->len, aux_buf + tail, size - tail);
+        trace->len += size - tail;
+        memcpy(trace->buf + trace->len, aux_buf, head);
+        trace->len += size + head;
     }
-    trace->len += new_data_size;
     atomic_store_explicit((_Atomic __u64 *) &hdr->aux_tail, head, memory_order_release);
     return true;
 }
