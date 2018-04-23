@@ -191,7 +191,7 @@ perf_pt_next_block(struct pt_block_decoder *decoder, int *decoder_status,
         *addr = 0;
         return true;
     }
-    assert(*decoder_status == 0);
+    assert((*decoder_status == 0) || (*decoder_status == pts_ip_suppressed));
 
     // Now fetch the block information.
     struct pt_block block;
