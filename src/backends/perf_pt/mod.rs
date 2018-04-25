@@ -797,6 +797,14 @@ mod tests {
         }
     }
 
+    // Check that a shorter trace yields fewer blocks.
+    #[test]
+    fn test_block_iterator4() {
+        let tracer1 = default_tracer();
+        let tracer2 = default_tracer();
+        test_helpers::test_ten_times_as_many_blocks(tracer1, tracer2);
+    }
+
     // Check that a long trace causes the trace buffer to reallocate.
     #[test]
     fn test_relloc_trace_buf1() {
@@ -813,14 +821,6 @@ mod tests {
         assert!(trace.capacity() > start_bufsize);
         println!("CAP: {}", trace.capacity());
         tracer.destroy().unwrap();
-    }
-
-    // Check that a shorter trace yields fewer blocks.
-    #[test]
-    fn test_block_iterator4() {
-        let tracer1 = default_tracer();
-        let tracer2 = default_tracer();
-        test_helpers::test_ten_times_as_many_blocks(tracer1, tracer2);
     }
 
     // Check that a block iterator returns none after an error.
