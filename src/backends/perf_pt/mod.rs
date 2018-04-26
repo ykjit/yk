@@ -808,7 +808,6 @@ mod tests {
 
         println!("res: {}", res); // Stop over-optimisation.
         assert!(trace.capacity() > start_bufsize);
-        println!("CAP: {}", trace.capacity());
         tracer.destroy().unwrap();
     }
 
