@@ -562,7 +562,7 @@ pub unsafe extern "C" fn push_ptxed_arg(args: &mut Vec<String>, new_arg: *const 
 #[cfg(all(perf_pt_test,test))]
 mod tests {
     use super::{PerfPTTracer, Trace, NamedTempFile, c_int, c_char, AsRawFd, CString, c_void,
-                PerfPTTrace, PerfPTBlockIterator, ptr, HWTracerError};
+                PerfPTTrace, PerfPTBlockIterator, ptr, HWTracerError, Tracer};
     use ::{test_helpers, Block};
     use std::process::Command;
 
@@ -588,10 +588,14 @@ mod tests {
     // Returns a vector of arguments and a handle to a temproary file containing the VDSO code. The
     // caller must make sure that this file lives long enough for ptxed to run (temp files are
     // removed when they fall out of scope).
+    //
+    // See https://github.com/01org/processor-trace/issues/43 for why we append the --iscache-limit
+    // argument. Depending on the outcome of that issue, we may be able to remove this later (we
+    // should if we can, because it slows tests down).
     pub fn self_ptxed_args(trace_filename: &str) -> (Vec<String>, NamedTempFile) {
         let ptxed_args = vec![
             "--cpu", "auto", "--block-decoder", "--block:end-on-call", "--block:end-on-jump",
-            "--block:show-blocks", "--pt", trace_filename];
+            "--block:show-blocks", "--iscache-limit", "0", "--pt", trace_filename];
         let mut ptxed_args = ptxed_args.into_iter().map(|e| String::from(e)).collect();
 
         // Make a temp file for the VDSO to live in.
@@ -613,9 +617,7 @@ mod tests {
     }
 
     // Given a trace, use ptxed to get a vector of block start vaddrs.
-    //
-    // Returns `Err` when a block is interrupted.
-    fn get_expected_blocks(trace: &Box<Trace>) ->Result<Vec<Block>, ()> {
+    fn get_expected_blocks(trace: &Box<Trace>) -> Vec<Block> {
         // Write the trace out to a temp file so ptxed can decode it.
         let mut fh = NamedTempFile::new().unwrap();
         trace.to_file(&mut fh);
@@ -649,29 +651,17 @@ mod tests {
                 // The next line will be a block start.
                 block_start = true;
                 continue;
-            } else if line.trim() == "[resumed]" {
-                // The block was interrupted and we can't deal with that yet.
-                return Err(());
             }
         }
 
-        Ok(block_vaddrs)
+        block_vaddrs
     }
 
-    // Like `test_helpers::trace_closure` but only accepts a trace if no blocks were interrupted.
-    fn trace_closure_no_interrupt<F>(mut tracer: PerfPTTracer, f: F)
-                                    -> Option<(PerfPTTracer, Box<Trace>, Vec<Block>)>
-                                    where F: Fn() -> u64 {
-        let mut expects;
-        let mut trace;
-        loop {
-            trace = test_helpers::trace_closure(&mut tracer, &f);
-            expects = get_expected_blocks(&trace);
-            if expects.is_ok() {
-                break;
-            }
-        }
-        Some((tracer, trace, expects.unwrap()))
+    // Trace a closure and then decode it and check the block iterator agrees with ptxed.
+    fn trace_and_check_blocks<T, F>(mut tracer: T, f: F) where T: Tracer, F: FnOnce() -> u64 {
+        let trace = test_helpers::trace_closure(&mut tracer, f);
+        let expects = get_expected_blocks(&trace);
+        test_helpers::test_expected_blocks(tracer, trace, expects.iter());
     }
 
     #[test]
@@ -758,20 +748,14 @@ mod tests {
     #[test]
     fn test_block_iterator1() {
         let tracer = default_tracer();
-        let res = trace_closure_no_interrupt(tracer, || test_helpers::work_loop(10));
-        if let Some((tracer, trace, expects)) = res {
-            test_helpers::test_expected_blocks(tracer, trace, expects.iter());
-        }
+        trace_and_check_blocks(tracer, || test_helpers::work_loop(10));
     }
 
     // Check that our block decoder agrees ptxed on a (likely) empty trace;
     #[test]
     fn test_block_iterator2() {
         let tracer = default_tracer();
-        let res = trace_closure_no_interrupt(tracer, || test_helpers::work_loop(0));
-        if let Some((tracer, trace, expects)) = res {
-            test_helpers::test_expected_blocks(tracer, trace, expects.iter());
-        }
+        trace_and_check_blocks(tracer, || test_helpers::work_loop(0));
     }
 
     // Check that our block decoder deals with traces involving the VDSO correctly.
@@ -780,7 +764,7 @@ mod tests {
         use libc::{timespec, CLOCK_MONOTONIC, clock_gettime};
 
         let tracer = default_tracer();
-        let res = trace_closure_no_interrupt(tracer, || {
+        trace_and_check_blocks(tracer, || {
             let mut res = 0;
             let mut tv = timespec { tv_sec: 0, tv_nsec: 0 };
             for _ in 1..100 {
@@ -791,10 +775,6 @@ mod tests {
             }
             res as u64
         });
-
-        if let Some((tracer, trace, expects)) = res {
-            test_helpers::test_expected_blocks(tracer, trace, expects.iter());
-        }
     }
 
     // Check that a shorter trace yields fewer blocks.
@@ -803,6 +783,15 @@ mod tests {
         let tracer1 = default_tracer();
         let tracer2 = default_tracer();
         test_helpers::test_ten_times_as_many_blocks(tracer1, tracer2);
+    }
+
+    // Check that our block decoder agrees ptxed on long trace.
+    // XXX We use an even higher iteration count once our decoder uses a libipt image cache.
+    #[ignore] // Decoding long traces is slow.
+    #[test]
+    fn test_block_iterator5() {
+        let tracer = default_tracer();
+        trace_and_check_blocks(tracer, || test_helpers::work_loop(3000));
     }
 
     // Check that a long trace causes the trace buffer to reallocate.
@@ -819,7 +808,6 @@ mod tests {
 
         println!("res: {}", res); // Stop over-optimisation.
         assert!(trace.capacity() > start_bufsize);
-        println!("CAP: {}", trace.capacity());
         tracer.destroy().unwrap();
     }
 

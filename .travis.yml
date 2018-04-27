@@ -9,4 +9,5 @@ script:
     - cargo build --examples
     - cargo doc --no-deps
     - cargo test
+    - cargo test -- --ignored
     - ./target/debug/examples/simple_example
