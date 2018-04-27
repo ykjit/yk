@@ -59,14 +59,6 @@ struct perf_pt_cerror {
     int code;                      // The error code itself.
 };
 
-#define DEBUG(x...)                       \
-    do {                                  \
-        fprintf(stderr, "%s:%d [%s]: ",   \
-           __FILE__, __LINE__, __func__); \
-        fprintf(stderr, x);               \
-        fprintf(stderr, "\n");            \
-    } while (0)
-
 bool dump_vdso(int, uint64_t, size_t, struct perf_pt_cerror *);
 void perf_pt_set_err(struct perf_pt_cerror *, int, int);
 
