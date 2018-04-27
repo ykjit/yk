@@ -47,7 +47,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <assert.h>
+#include <hwtracer_util.h>
 
 #include "perf_pt_private.h"
 
@@ -191,7 +191,9 @@ perf_pt_next_block(struct pt_block_decoder *decoder, int *decoder_status,
         *addr = 0;
         return true;
     }
-    assert((*decoder_status == 0) || (*decoder_status == pts_ip_suppressed));
+    if ((*decoder_status != 0) && (*decoder_status != pts_ip_suppressed)) {
+        panic("Unexpected decoder status: %d", *decoder_status);
+    }
 
     // Now fetch the block information.
     struct pt_block block;
@@ -212,14 +214,20 @@ perf_pt_next_block(struct pt_block_decoder *decoder, int *decoder_status,
     }
     // It's possible at this point that we get notified of an event in the
     // stream. This will be handled in the next call to `perf_pt_next_block`.
-    assert((*decoder_status == 0) || (*decoder_status == pts_event_pending));
+    if ((*decoder_status != 0) && (*decoder_status != pts_event_pending)) {
+        panic("Unexpected decoder status: %d", *decoder_status);
+    }
 
     // XXX A truncated block occurs when a block straddles a section boundary.
     // In this case we may need some extra logic, but this should be rare.
-    assert(block.truncated == 0);
+    if (block.truncated != 0) {
+        panic("Truncated blocks are not implemented");
+    }
 
     // A block should have at least one instruction.
-    assert(block.ninsn > 0);
+    if (block.ninsn == 0) {
+        panic("Detected a block with 0 instructions");
+    }
 
     *addr = block.ip;
     return true;
@@ -311,8 +319,7 @@ handle_events(struct pt_block_decoder *decoder, int *decoder_status, struct perf
             // didn't ask them to be emitted, e.g. TSC, STOP and CYC packets.
             // We print what packet crashed us before dying to aid debugging.
             default:
-                fprintf(stderr, "Unhandled packet event type %d\n", event.type);
-                assert(false);
+                panic("Unhandled packet event type %d", event.type);
         }
     }
     return ret;

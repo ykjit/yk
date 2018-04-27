@@ -53,7 +53,7 @@
 #include <linux/perf_event.h>
 #include <sys/ioctl.h>
 #include <semaphore.h>
-#include <assert.h>
+#include <hwtracer_util.h>
 #include <stdbool.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -493,7 +493,6 @@ tracer_thread(void *arg)
 
 clean:
     if (!sem_posted) {
-        assert(!ret);
         sem_post(thr_args->tracer_init_sem);
     }
 
