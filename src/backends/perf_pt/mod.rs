@@ -588,14 +588,10 @@ mod tests {
     // Returns a vector of arguments and a handle to a temproary file containing the VDSO code. The
     // caller must make sure that this file lives long enough for ptxed to run (temp files are
     // removed when they fall out of scope).
-    //
-    // See https://github.com/01org/processor-trace/issues/43 for why we append the --iscache-limit
-    // argument. Depending on the outcome of that issue, we may be able to remove this later (we
-    // should if we can, because it slows tests down).
     pub fn self_ptxed_args(trace_filename: &str) -> (Vec<String>, NamedTempFile) {
         let ptxed_args = vec![
             "--cpu", "auto", "--block-decoder", "--block:end-on-call", "--block:end-on-jump",
-            "--block:show-blocks", "--iscache-limit", "0", "--pt", trace_filename];
+            "--block:show-blocks", "--pt", trace_filename];
         let mut ptxed_args = ptxed_args.into_iter().map(|e| String::from(e)).collect();
 
         // Make a temp file for the VDSO to live in.
@@ -614,6 +610,22 @@ mod tests {
         };
         assert!(rv);
         (ptxed_args, vdso_tempfile)
+    }
+
+    /*
+     * Determine if the given x86_64 assembler mnemonic should terminate a block.
+     *
+     * Mnemonic assumed to be lower case.
+     */
+    fn instr_terminates_block(instr: &str) -> bool {
+        assert!(instr.find(|c: char| !c.is_lowercase()).is_none());
+        match instr {
+            // JMP or Jcc are the only instructions beginning with 'j'.
+            m if m.starts_with("j") => true,
+            "call" | "ret" | "loop" | "loope" | "loopne" | "syscall" | "sysenter" | "sysexit"
+                | "sysret" | "xabort" => true,
+            _ => false,
+        }
     }
 
     // Given a trace, use ptxed to get a vector of block start vaddrs.
@@ -637,20 +649,28 @@ mod tests {
 
         let mut block_start = false;
         let mut block_vaddrs = Vec::new();
+        let mut last_instr: Option<&str> = None;
         for line in outstr.lines() {
+            let line = line.trim();
             if line.contains("error") {
                 panic!("error line in ptxed output:\n{}", line);
-            }
-            if block_start {
-                // We are expecting an instruction at the start of a block.
-                let vaddr_s = line.split_whitespace().next().unwrap();
-                let vaddr = u64::from_str_radix(vaddr_s, 16).unwrap();
-                block_vaddrs.push(Block::new(vaddr));
-                block_start = false;
-            } else if line.trim() == "[block]" {
-                // The next line will be a block start.
-                block_start = true;
-                continue;
+            } else if line.starts_with("[") {
+                // It's a special line, e.g. [enabled], [disabled], [block]...
+                if line == "[block]" && (last_instr.is_none() ||
+                                         instr_terminates_block(last_instr.unwrap())) {
+                    // The next insruction we see will be the start of a block.
+                    block_start = true;
+                }
+            } else {
+                // It's a regular instruction line.
+                if block_start {
+                    // This instruction is the start of a block.
+                    let vaddr_s = line.split_whitespace().next().unwrap();
+                    let vaddr = u64::from_str_radix(vaddr_s, 16).unwrap();
+                    block_vaddrs.push(Block::new(vaddr));
+                    block_start = false;
+                }
+                last_instr = Some(line.split_whitespace().nth(1).unwrap());
             }
         }
 
