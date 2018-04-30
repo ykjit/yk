@@ -35,33 +35,29 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#ifndef __HWTRACER_UTIL_H
+#define __HWTRACER_UTIL_H
+
+#include <err.h>
+
+
 /*
- * This header contains items which are shared amongst multiple C files in the
- * perf_pt backend.
+ * Crash out with a formatted message.
  */
+#define panic(...)                                              \
+    fprintf(stderr, "Panic at %s:%d: ", __FILE__, __LINE__);    \
+    errx(EXIT_FAILURE, __VA_ARGS__);
 
-#ifndef __PERF_PT_PRIVATE_H
-#define __PERF_PT_PRIVATE_H
-
-#include <stddef.h>
-#include <inttypes.h>
-#include <stdbool.h>
-
-enum perf_pt_cerror_kind {
-    perf_pt_cerror_unused,
-    perf_pt_cerror_unknown,
-    perf_pt_cerror_errno,
-    perf_pt_cerror_ipt,
-};
-
-struct perf_pt_cerror {
-    enum perf_pt_cerror_kind kind; // What sort of error is this?
-    int code;                      // The error code itself.
-};
-
-bool dump_vdso(int, uint64_t, size_t, struct perf_pt_cerror *);
-void perf_pt_set_err(struct perf_pt_cerror *, int, int);
-
-#define VDSO_NAME "linux-vdso.so.1"
+/*
+ * Print debug messages to stderr.
+ * For development only.
+ */
+#define DEBUG(x...)                       \
+    do {                                  \
+        fprintf(stderr, "%s:%d [%s]: ",   \
+           __FILE__, __LINE__, __func__); \
+        fprintf(stderr, x);               \
+        fprintf(stderr, "\n");            \
+    } while (0)
 
 #endif

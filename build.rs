@@ -173,6 +173,7 @@ fn main() {
             // LD_LIBRARY_PATH if the build process compiles its own libipt.
         }
     }
+    c_build.include("src/util");
     c_build.file("src/util/util.c");
     c_build.compile("hwtracer_c");
 

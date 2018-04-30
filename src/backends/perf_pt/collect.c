@@ -53,7 +53,7 @@
 #include <linux/perf_event.h>
 #include <sys/ioctl.h>
 #include <semaphore.h>
-#include <assert.h>
+#include <hwtracer_util.h>
 #include <stdbool.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -465,7 +465,7 @@ static void *
 tracer_thread(void *arg)
 {
     struct tracer_thread_args *thr_args = (struct tracer_thread_args *) arg;
-    int sem_posted = 0;
+    int sem_posted = false;
     bool ret = true;
 
     // Copy arguments for the poll loop, as when we resume the parent thread,
@@ -483,7 +483,7 @@ tracer_thread(void *arg)
         ret = false;
         goto clean;
     }
-    sem_posted = 1;
+    sem_posted = true;
 
     // Start reading out of the AUX buffer.
     if (!poll_loop(perf_fd, stop_fd_rd, base_header, aux_buf, trace, err)) {
@@ -493,7 +493,6 @@ tracer_thread(void *arg)
 
 clean:
     if (!sem_posted) {
-        assert(!ret);
         sem_post(thr_args->tracer_init_sem);
     }
 
