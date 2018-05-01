@@ -99,6 +99,8 @@ struct tracer_conf {
     pid_t       target_tid;         // Thread ID to trace.
     size_t      data_bufsize;       // Data buf size (in pages).
     size_t      aux_bufsize;        // AUX buf size (in pages).
+    size_t      new_trace_bufsize;  // Initial capacity (in bytes) of a
+                                    // trace storage buffer.
 };
 
 /*
