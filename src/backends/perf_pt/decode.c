@@ -62,6 +62,7 @@ struct load_self_image_args {
 static bool handle_events(struct pt_block_decoder *, int *, struct perf_pt_cerror *);
 static bool load_self_image(struct load_self_image_args *);
 static int load_self_image_cb(struct dl_phdr_info *, size_t, void *);
+static bool block_is_terminated(struct pt_block *);
 
 // Public prototypes.
 void *perf_pt_init_block_decoder(void *, uint64_t, int, char *, int *,
@@ -195,41 +196,60 @@ perf_pt_next_block(struct pt_block_decoder *decoder, int *decoder_status,
         panic("Unexpected decoder status: %d", *decoder_status);
     }
 
-    // Now fetch the block information.
+    // The libipt block decoder may return a partial block (it could have been
+    // interrupted for example). We abstract this detail away. Using a loop we
+    // record (and eventually return) the address of the first block we see,
+    // then keep decoding more blocks until we see a properly terminated block.
     struct pt_block block;
-    *decoder_status = pt_blk_next(decoder, &block, sizeof(block));
-    // Other +ve decoder status codes can arise here. We ignore them for now,
-    // and let them be detected by handle_events() above when we are next
-    // called.
-    if (*decoder_status < 0) {
+    block.iclass = ptic_other;
+    bool first_block = true;
+    while (!block_is_terminated(&block)) {
+        if (handle_events(decoder, decoder_status, err) != true) {
+            // handle_events will have already called perf_pt_set_err().
+            return false;
+        } else if (*decoder_status & pts_eos) {
+            // End of stream.
+            *addr = 0;
+            return true;
+        }
+        // It's possible at this point that we get notified of an event in the
+        // stream. This will be handled in the next call to `perf_pt_next_block`.
+        if ((*decoder_status != 0) && (*decoder_status != pts_event_pending)) {
+            panic("Unexpected decoder status: %d", *decoder_status);
+        }
+
+        *decoder_status = pt_blk_next(decoder, &block, sizeof(block));
+        // Other +ve decoder status codes can arise here. We ignore them for now,
+        // and let them be detected by handle_events() above when we are next
+        // called.
         if (*decoder_status == -pte_eos) {
             // End of stream is flagged as an error in the case of pt_blk_next().
             *addr = 0;
             return true;
-        } else {
+        } else if (*decoder_status < 0) {
             // A real error.
             perf_pt_set_err(err, perf_pt_cerror_ipt, -*decoder_status);
             return false;
         }
-    }
-    // It's possible at this point that we get notified of an event in the
-    // stream. This will be handled in the next call to `perf_pt_next_block`.
-    if ((*decoder_status != 0) && (*decoder_status != pts_event_pending)) {
-        panic("Unexpected decoder status: %d", *decoder_status);
+
+        // XXX A truncated block occurs when a block straddles a section boundary.
+        // In this case we may need some extra logic, but this should be rare.
+        if (block.truncated != 0) {
+            panic("Truncated blocks are not implemented");
+        }
+
+        // A block should have at least one instruction.
+        if (block.ninsn == 0) {
+            panic("Detected a block with 0 instructions");
+        }
+
+        if (first_block) {
+            // The block start address we report back to the user.
+            *addr = block.ip;
+            first_block = false;
+        }
     }
 
-    // XXX A truncated block occurs when a block straddles a section boundary.
-    // In this case we may need some extra logic, but this should be rare.
-    if (block.truncated != 0) {
-        panic("Truncated blocks are not implemented");
-    }
-
-    // A block should have at least one instruction.
-    if (block.ninsn == 0) {
-        panic("Detected a block with 0 instructions");
-    }
-
-    *addr = block.ip;
     return true;
 }
 
@@ -321,6 +341,36 @@ handle_events(struct pt_block_decoder *decoder, int *decoder_status, struct perf
             default:
                 panic("Unhandled packet event type %d", event.type);
         }
+    }
+    return ret;
+}
+
+/*
+ * Decides if a block is terminated by a control flow dispatch.
+ *
+ * This is used to decide if libipt gave us a partial block or not.
+ */
+static bool
+block_is_terminated(struct pt_block *blk)
+{
+    bool ret;
+
+    switch (blk->iclass) {
+        case ptic_call:
+        case ptic_return:
+        case ptic_jump:
+        case ptic_cond_jump:
+        case ptic_far_call:
+        case ptic_far_return:
+        case ptic_far_jump:
+            ret = true;
+            break;
+        case ptic_other:
+        case ptic_ptwrite:
+            ret = false;
+            break;
+        default:
+            panic("Unexpected instruction class: %d", blk->iclass);
     }
     return ret;
 }
