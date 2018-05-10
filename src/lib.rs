@@ -48,7 +48,7 @@ pub mod errors;
 pub mod backends;
 pub mod util;
 
-use errors::HWTracerError;
+pub use errors::HWTracerError;
 use std::fmt::Debug;
 use std::iter::Iterator;
 use std::fmt::{self, Display, Formatter};
