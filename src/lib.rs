@@ -75,7 +75,7 @@ impl Block {
 /// Represents a generic trace.
 ///
 /// Each backend has its own concrete implementation.
-pub trait Trace: Debug {
+pub trait Trace: Debug + Send {
     /// Dump the trace to the specified filename.
     ///
     /// The exact format varies per-backend.

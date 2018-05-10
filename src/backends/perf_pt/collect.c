@@ -104,12 +104,21 @@ struct tracer_conf {
 };
 
 /*
+ * The manually malloc/free'd buffer managed by the Rust side.
+ * To understand why this is split out from `struct perf_pt_trace`, see the
+ * corresponding struct in the Rust side.
+ */
+struct perf_pt_trace_buf {
+    void *p;
+};
+
+/*
  * Storage for a trace.
  *
  * Shared with Rust code. Must stay in sync.
  */
 struct perf_pt_trace {
-    void *buf;
+    struct perf_pt_trace_buf buf;
     __u64 len;
     __u64 capacity;
 };
@@ -290,23 +299,23 @@ read_aux(void *aux_buf, struct perf_event_mmap_page *hdr,
             return false;
         }
         size_t new_capacity = required_capacity * 2;
-        void *new_buf = realloc(trace->buf, new_capacity);
+        void *new_buf = realloc(trace->buf.p, new_capacity);
         if (new_buf == NULL) {
             perf_pt_set_err(err, perf_pt_cerror_errno, errno);
             return false;
         }
         trace->capacity = new_capacity;
-        trace->buf = new_buf;
+        trace->buf.p = new_buf;
     }
 
     // Finally append the new AUX data to the end of the trace storage buffer.
     if (tail <= head) {
-        memcpy(trace->buf + trace->len, aux_buf + tail, head - tail);
+        memcpy(trace->buf.p + trace->len, aux_buf + tail, head - tail);
         trace->len += head - tail;
     } else {
-        memcpy(trace->buf + trace->len, aux_buf + tail, size - tail);
+        memcpy(trace->buf.p + trace->len, aux_buf + tail, size - tail);
         trace->len += size - tail;
-        memcpy(trace->buf + trace->len, aux_buf, head);
+        memcpy(trace->buf.p + trace->len, aux_buf, head);
         trace->len += size + head;
     }
     atomic_store_explicit((_Atomic __u64 *) &hdr->aux_tail, head, memory_order_release);
