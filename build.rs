@@ -126,6 +126,11 @@ fn cpu_supports_pt() -> bool {
 fn main() {
     let mut c_build = gcc::Build::new();
 
+    // We need the C_DEPS_PATH to be absolute so that our consumers inherit correct linker paths.
+    let mut c_deps_path_abs = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    c_deps_path_abs.push(C_DEPS_PATH);
+    let c_deps_str = c_deps_path_abs.display();
+
     // Check if we should build the perf_pt backend.
     if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
         if feature_check("check_perf_pt.c") {
@@ -147,10 +152,10 @@ fn main() {
                 println!("cargo:rustc-env=PTXED={}/bin/ptxed", val);
             } else {
                 build_libipt();
-                c_build.include(&format!("{}/inst/include/", C_DEPS_PATH));
-                c_build.flag(&format!("-L{}/inst/lib", C_DEPS_PATH));
-                println!("cargo:rustc-link-search={}/inst/lib", C_DEPS_PATH);
-                println!("cargo:rustc-env=PTXED={}/inst/bin/ptxed", C_DEPS_PATH);
+                c_build.include(&format!("{}/inst/include/", c_deps_str));
+                c_build.flag(&format!("-L{}/inst/lib", c_deps_str));
+                println!("cargo:rustc-link-search={}/inst/lib", c_deps_str);
+                println!("cargo:rustc-env=PTXED={}/inst/bin/ptxed", c_deps_str);
             }
 
             // We borrow the CPU detection functions from libipt (they are not exposed publicly).
