@@ -103,10 +103,6 @@ pub trait Tracer {
     ///
     /// [start_tracing](trait.Tracer.html#method.start_tracing) must have been called prior.
     fn stop_tracing(&mut self) -> Result<Box<Trace>, HWTracerError>;
-    /// Destroy a tracer.
-    ///
-    /// This is explicit because it might fail.
-    fn destroy(&mut self) -> Result<(), HWTracerError>;
 }
 
 // Keeps track of the internal state of a tracer.
@@ -114,7 +110,6 @@ pub trait Tracer {
 pub enum TracerState {
     Stopped,
     Started,
-    Destroyed,
 }
 
 impl TracerState {
@@ -129,7 +124,6 @@ impl Display for TracerState {
         match *self {
             TracerState::Started => write!(f, "started"),
             TracerState::Stopped => write!(f, "stopped"),
-            TracerState::Destroyed => write!(f, "destroyed"),
         }
     }
 }
@@ -168,7 +162,6 @@ mod test_helpers {
     // Check that starting and stopping a tracer works.
     pub fn test_basic_usage<T>(mut tracer: T) where T: Tracer {
         trace_closure(&mut tracer, || work_loop(500));
-        tracer.destroy().unwrap();
     }
 
     // Check that repeated usage of the same tracer works.
@@ -176,7 +169,6 @@ mod test_helpers {
         for _ in 0..10 {
             trace_closure(&mut tracer, || work_loop(500));
         }
-        tracer.destroy().unwrap();
     }
 
     // Check that starting a tracer twice makes an appropriate error.
@@ -187,7 +179,6 @@ mod test_helpers {
             _ => panic!(),
         };
         tracer.stop_tracing().unwrap();
-        tracer.destroy().unwrap();
     }
 
     // Check that stopping an unstarted tracer makes an appropriate error.
@@ -196,47 +187,10 @@ mod test_helpers {
             Err(HWTracerError::TracerState(TracerState::Stopped)) => (),
             _ => panic!(),
         };
-        tracer.destroy().unwrap();
-    }
-
-    // Check that using a tracer after it has been destroyed causes a panic.
-    pub fn test_use_tracer_after_destroy1<T>(mut tracer: T) where T: Tracer {
-        tracer.destroy().unwrap();
-        match tracer.start_tracing() {
-            Err(HWTracerError::TracerState(TracerState::Destroyed)) => (),
-            _ => panic!(),
-        };
-    }
-
-    pub fn test_use_tracer_after_destroy2<T>(mut tracer: T) where T: Tracer {
-        tracer.start_tracing().unwrap();
-        tracer.destroy().unwrap();
-        match tracer.stop_tracing() {
-            Err(HWTracerError::TracerState(TracerState::Destroyed)) => (),
-            _ => panic!(),
-        };
-    }
-
-    pub fn test_use_tracer_after_destroy3<T>(mut tracer: T) where T: Tracer {
-        tracer.destroy().unwrap();
-        match tracer.destroy() {
-            Err(HWTracerError::TracerState(TracerState::Destroyed)) => (),
-            _ => panic!(),
-        };
-    }
-
-    // Check that in a debug build, a dropped, non-destroyed tracer causes a panic.
-    //
-    // Tests calling this helper should be marked: #[cfg(debug_assertions)] and #[should_panic].
-    #[cfg(debug_assertions)]
-    pub fn test_drop_without_destroy<T>(tracer: T) where T: Tracer {
-        drop(tracer);
     }
 
     // Helper to check an expected list of blocks matches what we actually got.
-    pub fn test_expected_blocks<T>(mut tracer: T, trace: Box<Trace>,
-                                  mut expect_iter: Iter<Block>)
-        where T: Tracer {
+    pub fn test_expected_blocks(trace: Box<Trace>, mut expect_iter: Iter<Block>) {
         let mut got_iter = trace.iter_blocks();
         loop {
             let expect = expect_iter.next();
@@ -249,7 +203,6 @@ mod test_helpers {
         // Check that both iterators were the same length.
         assert!(expect_iter.next().is_none());
         assert!(got_iter.next().is_none());
-        tracer.destroy().unwrap();
     }
 
     // Trace two loops, one 10x larger than the other, then check the proportions match the number
@@ -263,8 +216,5 @@ mod test_helpers {
         // we trace either side of the loop itself. On a smallish trace, that will be significant.
         let (ct1, ct2) = (trace1.iter_blocks().count(), trace2.iter_blocks().count());
         assert!(ct2 > ct1 * 9);
-
-        tracer1.destroy().unwrap();
-        tracer2.destroy().unwrap();
     }
 }

@@ -106,7 +106,4 @@ fn main() {
         let name = format!("trace{}", i);
         print_trace(&trace, &name, res, 10);
     }
-
-    // Tracers require manual clean up (since clean up could fail).
-    tracer.destroy().unwrap();
 }
