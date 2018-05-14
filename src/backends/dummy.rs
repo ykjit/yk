@@ -40,9 +40,6 @@ use errors::HWTracerError;
 use std::iter::Iterator;
 use Trace;
 use TracerState;
-
-#[cfg(debug_assertions)]
-use std::ops::Drop;
 #[cfg(test)]
 use std::fs::File;
 
@@ -75,18 +72,10 @@ impl DummyTracer {
     pub fn new() -> Self {
         Self { state: TracerState::Stopped }
     }
-
-    fn err_if_destroyed(&self) -> Result<(), HWTracerError> {
-        if self.state == TracerState::Destroyed {
-            return Err(TracerState::Destroyed.as_error());
-        }
-        Ok(())
-    }
 }
 
 impl Tracer for DummyTracer {
     fn start_tracing(&mut self) -> Result<(), HWTracerError> {
-        self.err_if_destroyed()?;
         if self.state != TracerState::Stopped {
             return Err(TracerState::Started.as_error());
         }
@@ -95,27 +84,11 @@ impl Tracer for DummyTracer {
     }
 
     fn stop_tracing(&mut self) -> Result<Box<Trace>, HWTracerError> {
-        self.err_if_destroyed()?;
         if self.state != TracerState::Started {
             return Err(TracerState::Stopped.as_error());
         }
         self.state = TracerState::Stopped;
         Ok(Box::new(DummyTrace{}))
-    }
-
-    fn destroy(&mut self) -> Result<(), HWTracerError> {
-        self.err_if_destroyed()?;
-        self.state = TracerState::Destroyed;
-        Ok(())
-    }
-}
-
-#[cfg(debug_assertions)]
-impl Drop for DummyTracer {
-    fn drop(&mut self) {
-        if self.state != TracerState::Destroyed {
-            panic!("DummyTracer dropped without destroy()");
-        }
     }
 }
 
@@ -158,21 +131,6 @@ mod tests {
     }
 
     #[test]
-    fn test_use_tracer_after_destroy1() {
-        test_helpers::test_use_tracer_after_destroy1(DummyTracer::new());
-    }
-
-    #[test]
-    fn test_use_tracer_after_destroy2() {
-        test_helpers::test_use_tracer_after_destroy2(DummyTracer::new());
-    }
-
-    #[test]
-    fn test_use_tracer_after_destroy3() {
-        test_helpers::test_use_tracer_after_destroy3(DummyTracer::new());
-    }
-
-    #[test]
     fn test_block_iterator() {
         use ::Tracer;
         let mut tracer = DummyTracer::new();
@@ -181,13 +139,6 @@ mod tests {
 
         // We expect exactly 0 blocks.
         let expects =  Vec::new();
-        test_helpers::test_expected_blocks(tracer, trace, expects.iter());
-    }
-
-    #[cfg(debug_assertions)]
-    #[should_panic]
-    #[test]
-    fn test_drop_without_destroy() {
-        test_helpers::test_drop_without_destroy(DummyTracer::new());
+        test_helpers::test_expected_blocks(trace, expects.iter());
     }
 }

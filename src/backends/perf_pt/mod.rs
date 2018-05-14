@@ -395,7 +395,6 @@ impl PerfPTTracer {
     /// if res.is_ok() {
     ///     let mut tracer = res.unwrap();
     ///     // Use the tracer...
-    ///     tracer.destroy().unwrap();
     /// } else {
     ///     // CPU doesn't support Intel Processor Trace.
     /// }
@@ -469,18 +468,10 @@ impl PerfPTTracer {
         }
         ebx_out & EBX_BIT != 0
     }
-
-    fn err_if_destroyed(&self) -> Result<(), HWTracerError> {
-        if self.state == TracerState::Destroyed {
-            return Err(TracerState::Destroyed.as_error());
-        }
-        Ok(())
-    }
 }
 
 impl Tracer for PerfPTTracer {
     fn start_tracing(&mut self) -> Result<(), HWTracerError> {
-        self.err_if_destroyed()?;
         if self.state == TracerState::Started {
             return Err(TracerState::Started.as_error());
         }
@@ -512,7 +503,6 @@ impl Tracer for PerfPTTracer {
     }
 
     fn stop_tracing(&mut self) -> Result<Box<Trace>, HWTracerError> {
-        self.err_if_destroyed()?;
         if self.state == TracerState::Stopped {
             return Err(TracerState::Stopped.as_error());
         }
@@ -532,21 +522,6 @@ impl Tracer for PerfPTTracer {
         let ret = self.trace.take().unwrap();
         self.trace = None;
         Ok(ret as Box<Trace>)
-    }
-
-    fn destroy(&mut self) -> Result<(), HWTracerError> {
-        self.err_if_destroyed()?;
-        self.state = TracerState::Destroyed;
-        Ok(())
-    }
-}
-
-#[cfg(debug_assertions)]
-impl Drop for PerfPTTracer {
-    fn drop(&mut self) {
-        if self.state != TracerState::Destroyed {
-            panic!("PerfPTTracer dropped with no call to destroy()");
-        }
     }
 }
 
@@ -681,7 +656,7 @@ mod tests {
     fn trace_and_check_blocks<T, F>(mut tracer: T, f: F) where T: Tracer, F: FnOnce() -> u64 {
         let trace = test_helpers::trace_closure(&mut tracer, f);
         let expects = get_expected_blocks(&trace);
-        test_helpers::test_expected_blocks(tracer, trace, expects.iter());
+        test_helpers::test_expected_blocks(trace, expects.iter());
     }
 
     #[test]
@@ -702,33 +677,6 @@ mod tests {
     #[test]
     fn test_not_started() {
         test_helpers::test_not_started(default_tracer());
-    }
-
-    #[test]
-    fn test_use_tracer_after_destroy1() {
-        test_helpers::test_use_tracer_after_destroy1(default_tracer());
-    }
-
-    #[test]
-    fn test_use_tracer_after_destroy2() {
-        test_helpers::test_use_tracer_after_destroy2(default_tracer());
-    }
-
-    #[test]
-    fn test_use_tracer_after_destroy3() {
-        test_helpers::test_use_tracer_after_destroy3(default_tracer());
-    }
-
-    #[cfg(debug_assertions)]
-    #[should_panic]
-    #[test]
-    fn test_drop_without_destroy() {
-        if PerfPTTracer::pt_supported() {
-            let tracer = PerfPTTracer::new(PerfPTTracer::config()).unwrap();
-            test_helpers::test_drop_without_destroy(tracer);
-        } else {
-            panic!("ok"); // Because this test expects a panic.
-        }
     }
 
     // Test writing a trace to file.
@@ -828,7 +776,6 @@ mod tests {
 
         println!("res: {}", res); // Stop over-optimisation.
         assert!(trace.capacity() > start_bufsize);
-        tracer.destroy().unwrap();
     }
 
     // Check that a block iterator returns none after an error.
