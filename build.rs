@@ -47,7 +47,7 @@ use std::process::Command;
 #[cfg(target_os = "linux")]
 const FEATURE_CHECKS_PATH: &str = "feature_checks";
 
-const C_DEPS_PATH: &str = "c_deps";
+const C_DEPS_DIR: &str = "c_deps";
 
 /// Simple feature check, returning `true` if we have the feature.
 ///
@@ -67,7 +67,7 @@ fn feature_check(filename: &str) -> bool {
 
 fn build_libipt() {
     eprintln!("Building libipt...");
-    env::set_current_dir(&Path::new(C_DEPS_PATH)).unwrap();
+    env::set_current_dir(&Path::new(C_DEPS_DIR)).unwrap();
     let res = Command::new("make")
         .arg("libipt")
         .output()
@@ -86,7 +86,7 @@ fn build_libipt() {
 // a couple of private CPU configuration files that we need to borrow from libipt.
 fn fetch_libipt() {
     eprintln!("Fetch libipt...");
-    env::set_current_dir(&Path::new(C_DEPS_PATH)).unwrap();
+    env::set_current_dir(&Path::new(C_DEPS_DIR)).unwrap();
     let res = Command::new("make")
         .arg("processor-trace") // target just fetches the code.
         .output()
@@ -126,6 +126,11 @@ fn cpu_supports_pt() -> bool {
 fn main() {
     let mut c_build = gcc::Build::new();
 
+    // We need the C_DEPS_DIR to be absolute so that our consumers inherit correct linker paths.
+    let mut c_deps_path_abs = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    c_deps_path_abs.push(C_DEPS_DIR);
+    let c_deps_str = c_deps_path_abs.display();
+
     // Check if we should build the perf_pt backend.
     if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
         if feature_check("check_perf_pt.c") {
@@ -147,18 +152,18 @@ fn main() {
                 println!("cargo:rustc-env=PTXED={}/bin/ptxed", val);
             } else {
                 build_libipt();
-                c_build.include(&format!("{}/inst/include/", C_DEPS_PATH));
-                c_build.flag(&format!("-L{}/inst/lib", C_DEPS_PATH));
-                println!("cargo:rustc-link-search={}/inst/lib", C_DEPS_PATH);
-                println!("cargo:rustc-env=PTXED={}/inst/bin/ptxed", C_DEPS_PATH);
+                c_build.include(&format!("{}/inst/include/", c_deps_str));
+                c_build.flag(&format!("-L{}/inst/lib", c_deps_str));
+                println!("cargo:rustc-link-search={}/inst/lib", c_deps_str);
+                println!("cargo:rustc-env=PTXED={}/inst/bin/ptxed", c_deps_str);
             }
 
             // We borrow the CPU detection functions from libipt (they are not exposed publicly).
             // If we built our own libipt above, then the fetch is a no-op.
             fetch_libipt();
-            c_build.include(&format!("{}/processor-trace/libipt/internal/include", C_DEPS_PATH));
-            c_build.file(&format!("{}/processor-trace/libipt/src/pt_cpu.c", C_DEPS_PATH));
-            c_build.file(&format!("{}/processor-trace/libipt/src/posix/pt_cpuid.c", C_DEPS_PATH));
+            c_build.include(&format!("{}/processor-trace/libipt/internal/include", C_DEPS_DIR));
+            c_build.file(&format!("{}/processor-trace/libipt/src/pt_cpu.c", C_DEPS_DIR));
+            c_build.file(&format!("{}/processor-trace/libipt/src/posix/pt_cpuid.c", C_DEPS_DIR));
 
             println!("cargo:rustc-cfg=perf_pt");
             if cpu_supports_pt() {
@@ -180,8 +185,8 @@ fn main() {
     // Additional circumstances under which to re-run this build.rs.
     println!("cargo:rerun-if-env-changed=IPT_PATH");
     println!("cargo:rerun-if-changed=src/util");
-    println!("cargo:rerun-if-changed={}", C_DEPS_PATH);
+    println!("cargo:rerun-if-changed={}", C_DEPS_DIR);
     println!("cargo:rerun-if-changed=src/backends/perf_pt");
-    println!("cargo:rerun-if-changed={}/processor-trace/libipt/src/pt_cpu.c", C_DEPS_PATH);
-    println!("cargo:rerun-if-changed={}/processor-trace/libipt/src/posix/pt_cpuid.c", C_DEPS_PATH);
+    println!("cargo:rerun-if-changed={}/processor-trace/libipt/src/pt_cpu.c", C_DEPS_DIR);
+    println!("cargo:rerun-if-changed={}/processor-trace/libipt/src/posix/pt_cpuid.c", C_DEPS_DIR);
 }
