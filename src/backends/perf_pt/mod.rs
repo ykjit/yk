@@ -194,7 +194,7 @@ impl<'t> PerfPTBlockIterator<'t> {
         let vdso_filename = CString::new(vdso_tempfile.path().to_str().unwrap())?;
         let mut cerr = PerfPTCError::new();
         let decoder = unsafe {
-            perf_pt_init_block_decoder(self.trace.buf as *const c_void, self.trace.len,
+            perf_pt_init_block_decoder(self.trace.buf.0 as *const c_void, self.trace.len,
                                  vdso_tempfile.as_raw_fd(), vdso_filename.as_ptr(),
                                  &mut self.decoder_status, &mut cerr)
         };
@@ -248,12 +248,25 @@ impl<'t> Iterator for PerfPTBlockIterator<'t> {
     }
 }
 
-/// A raw Intel PT trace, obtained via Linux perf.
+/// A wrapper around a manually malloc/free'd buffer for holding an Intel PT trace. We've split
+/// this out from PerfPTTrace so that we can mark just this raw pointer as `unsafe Send`.
+#[repr(C)]
+#[derive(Debug)]
+struct PerfPTTraceBuf(*mut u8);
+
+/// We need to be able to transfer `PerfPTTraceBuf`s between threads to allow background
+/// compilation. However, `PerfPTTraceBuf` wraps a raw pointer, which is not `Send`, so nor is
+/// `PerfPTTraceBuf`. As long as we take great care to never: a) give out copies of the pointer to
+/// the wider world, or b) dereference the pointer when we shouldn't, then we can manually (and
+/// unsafely) mark the struct as being Send.
+unsafe impl Send for PerfPTTrace {}
+
+/// An Intel PT trace, obtained via Linux perf.
 #[repr(C)]
 #[derive(Debug)]
 pub struct PerfPTTrace {
     // The trace buffer.
-    buf: *mut u8,
+    buf: PerfPTTraceBuf,
     // The length of the trace (in bytes).
     len: u64,
     // `buf`'s allocation size (in bytes), <= `len`.
@@ -270,7 +283,7 @@ impl PerfPTTrace {
         if buf.is_null() {
             return Err(HWTracerError::Unknown);
         }
-        Ok(Self {buf: buf, len: 0, capacity: capacity as u64})
+        Ok(Self {buf: PerfPTTraceBuf(buf), len: 0, capacity: capacity as u64})
     }
 }
 
@@ -281,7 +294,7 @@ impl Trace for PerfPTTrace {
         use std::slice;
         use std::io::prelude::*;
 
-        let slice = unsafe { slice::from_raw_parts(self.buf as *const u8, self.len as usize) };
+        let slice = unsafe { slice::from_raw_parts(self.buf.0 as *const u8, self.len as usize) };
         file.write_all(slice).unwrap();
     }
 
@@ -304,8 +317,8 @@ impl Trace for PerfPTTrace {
 
 impl Drop for PerfPTTrace {
     fn drop(&mut self) {
-        if !self.buf.is_null() {
-            unsafe { free(self.buf as *mut c_void) };
+        if !self.buf.0.is_null() {
+            unsafe { free(self.buf.0 as *mut c_void) };
         }
     }
 }
@@ -692,7 +705,7 @@ mod tests {
         let capacity = 1024;
         let mut trace = PerfPTTrace::new(capacity).unwrap();
         trace.len = capacity as u64;
-        let sl = unsafe { slice::from_raw_parts_mut(trace.buf as *mut u8, capacity) };
+        let sl = unsafe { slice::from_raw_parts_mut(trace.buf.0 as *mut u8, capacity) };
         for (i, byte) in sl.iter_mut().enumerate() {
             *byte = i as u8;
         }

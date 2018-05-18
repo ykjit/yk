@@ -48,7 +48,7 @@ pub mod errors;
 pub mod backends;
 pub mod util;
 
-use errors::HWTracerError;
+pub use errors::HWTracerError;
 use std::fmt::Debug;
 use std::iter::Iterator;
 use std::fmt::{self, Display, Formatter};
@@ -75,7 +75,7 @@ impl Block {
 /// Represents a generic trace.
 ///
 /// Each backend has its own concrete implementation.
-pub trait Trace: Debug {
+pub trait Trace: Debug + Send {
     /// Dump the trace to the specified filename.
     ///
     /// The exact format varies per-backend.
