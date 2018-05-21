@@ -38,6 +38,7 @@
 #![cfg_attr(perf_pt, feature(asm))]
 #![cfg_attr(feature="clippy", feature(plugin))]
 #![cfg_attr(feature="clippy", plugin(clippy))]
+#![feature(optin_builtin_traits)]
 #![feature(link_args)]
 
 extern crate libc;
@@ -91,17 +92,19 @@ pub trait Trace: Debug + Send {
 }
 
 /// The interface offered by all tracer types.
-///
-/// It is the job of the consumer of this library to decide which specific tracer type to
-/// instantiate, and to set it up using its type-specific configuration methods.
-pub trait Tracer {
+pub trait Tracer: Send + Sync  {
+    /// Return a `ThreadTracer` for tracing the current thread.
+    fn thread_tracer(&self) -> Box<ThreadTracer>;
+}
+
+pub trait ThreadTracer {
     /// Start recording a trace.
     ///
-    /// Tracing continues until [stop_tracing](trait.Tracer.html#method.stop_tracing) is called.
+    /// Tracing continues until [stop_tracing](trait.ThreadTracer.html#method.stop_tracing) is called.
     fn start_tracing(&mut self) -> Result<(), HWTracerError>;
     /// Turns off the tracer.
     ///
-    /// [start_tracing](trait.Tracer.html#method.start_tracing) must have been called prior.
+    /// [start_tracing](trait.ThreadTracer.html#method.start_tracing) must have been called prior.
     fn stop_tracing(&mut self) -> Result<Box<Trace>, HWTracerError>;
 }
 
@@ -130,11 +133,11 @@ impl Display for TracerState {
 
 // Test helpers.
 //
-// Each struct implementing the [Tracer](trait.Tracer.html) trait should include tests calling the
-// following helpers.
+// Each struct implementing the [ThreadTracer](trait.ThreadTracer.html) trait should include tests
+// calling the following helpers.
 #[cfg(test)]
 mod test_helpers {
-    use super::{HWTracerError, Tracer, Block, TracerState};
+    use super::{HWTracerError, ThreadTracer, Block, TracerState};
     use Trace;
     use std::slice::Iter;
     use std::time::SystemTime;
@@ -151,7 +154,7 @@ mod test_helpers {
     }
 
     // Trace a closure that returns a u64.
-    pub fn trace_closure<F>(tracer: &mut Tracer, f: F) -> Box<Trace> where F: FnOnce() -> u64 {
+    pub fn trace_closure<F>(tracer: &mut ThreadTracer, f: F) -> Box<Trace> where F: FnOnce() -> u64 {
         tracer.start_tracing().unwrap();
         let res = f();
         let trace = tracer.stop_tracing().unwrap();
@@ -160,19 +163,19 @@ mod test_helpers {
     }
 
     // Check that starting and stopping a tracer works.
-    pub fn test_basic_usage<T>(mut tracer: T) where T: Tracer {
+    pub fn test_basic_usage<T>(mut tracer: T) where T: ThreadTracer {
         trace_closure(&mut tracer, || work_loop(500));
     }
 
     // Check that repeated usage of the same tracer works.
-    pub fn test_repeated_tracing<T>(mut tracer: T) where T: Tracer {
+    pub fn test_repeated_tracing<T>(mut tracer: T) where T: ThreadTracer {
         for _ in 0..10 {
             trace_closure(&mut tracer, || work_loop(500));
         }
     }
 
     // Check that starting a tracer twice makes an appropriate error.
-    pub fn test_already_started<T>(mut tracer: T) where T: Tracer {
+    pub fn test_already_started<T>(mut tracer: T) where T: ThreadTracer {
         tracer.start_tracing().unwrap();
         match tracer.start_tracing() {
             Err(HWTracerError::TracerState(TracerState::Started)) => (),
@@ -182,7 +185,7 @@ mod test_helpers {
     }
 
     // Check that stopping an unstarted tracer makes an appropriate error.
-    pub fn test_not_started<T>(mut tracer: T) where T: Tracer {
+    pub fn test_not_started<T>(mut tracer: T) where T: ThreadTracer {
         match tracer.stop_tracing() {
             Err(HWTracerError::TracerState(TracerState::Stopped)) => (),
             _ => panic!(),
@@ -208,7 +211,7 @@ mod test_helpers {
     // Trace two loops, one 10x larger than the other, then check the proportions match the number
     // of block the trace passes through.
     #[cfg(perf_pt_test)]
-    pub fn test_ten_times_as_many_blocks<T>(mut tracer1: T, mut tracer2: T)  where T: Tracer {
+    pub fn test_ten_times_as_many_blocks<T>(mut tracer1: T, mut tracer2: T)  where T: ThreadTracer {
         let trace1 = trace_closure(&mut tracer1, || work_loop(10));
         let trace2 = trace_closure(&mut tracer2, || work_loop(100));
 
