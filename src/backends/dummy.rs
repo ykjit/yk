@@ -35,7 +35,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use {Tracer, Block};
+use {Tracer, ThreadTracer, Block};
 use errors::HWTracerError;
 use std::iter::Iterator;
 use Trace;
@@ -61,20 +61,35 @@ impl Trace for DummyTrace {
     }
 }
 
-/// A tracer which doesn't really do anything.
-pub struct DummyTracer {
-    // Keeps track of the state of the tracer.
-    state: TracerState,
-}
+#[derive(Debug)]
+pub struct DummyTracer {}
 
 impl DummyTracer {
-    /// Create a dummy tracer.
-    pub fn new() -> Self {
-        Self { state: TracerState::Stopped }
+    pub (super) fn new() -> Self {
+        DummyTracer{}
     }
 }
 
 impl Tracer for DummyTracer {
+    fn thread_tracer(&self) -> Box<ThreadTracer> {
+        Box::new(DummyThreadTracer::new())
+    }
+}
+
+/// A tracer which doesn't really do anything.
+pub struct DummyThreadTracer {
+    // Keeps track of the state of the tracer.
+    state: TracerState,
+}
+
+impl DummyThreadTracer {
+    /// Create a dummy tracer.
+    fn new() -> Self {
+        Self { state: TracerState::Stopped }
+    }
+}
+
+impl ThreadTracer for DummyThreadTracer {
     fn start_tracing(&mut self) -> Result<(), HWTracerError> {
         if self.state != TracerState::Stopped {
             return Err(TracerState::Started.as_error());
@@ -107,33 +122,33 @@ impl Iterator for DummyBlockIterator {
 
 #[cfg(test)]
 mod tests {
-    use super::DummyTracer;
+    use super::DummyThreadTracer;
     use ::test_helpers;
 
     #[test]
     fn test_basic_usage() {
-        test_helpers::test_basic_usage(DummyTracer::new());
+        test_helpers::test_basic_usage(DummyThreadTracer::new());
     }
 
     #[test]
     fn test_repeated_tracing() {
-        test_helpers::test_repeated_tracing(DummyTracer::new());
+        test_helpers::test_repeated_tracing(DummyThreadTracer::new());
     }
 
     #[test]
     fn test_already_started() {
-        test_helpers::test_already_started(DummyTracer::new());
+        test_helpers::test_already_started(DummyThreadTracer::new());
     }
 
     #[test]
     fn test_not_started() {
-        test_helpers::test_not_started(DummyTracer::new());
+        test_helpers::test_not_started(DummyThreadTracer::new());
     }
 
     #[test]
     fn test_block_iterator() {
-        use ::Tracer;
-        let mut tracer = DummyTracer::new();
+        use ::ThreadTracer;
+        let mut tracer = DummyThreadTracer::new();
         tracer.start_tracing().unwrap();
         let trace = tracer.stop_tracing().unwrap();
 

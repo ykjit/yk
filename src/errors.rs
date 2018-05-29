@@ -37,7 +37,7 @@
 
 use std::fmt::{self, Formatter, Display};
 use std::error::Error;
-use TracerState;
+use {TracerState, backends::BackendKind};
 use libc::{c_int, strerror};
 use std::ffi::CStr;
 
@@ -49,6 +49,7 @@ pub enum HWTracerError {
     NoHWSupport(String),      // The hardware doesn't support a required feature. Not fatal for the
                               // same reason as `Permissions`. This may be non-fatal depending
                               // upon whether the consumer could (e.g.) try a different backend.
+    BackendUnavailable(BackendKind), // This backend was not compiled in to hwtracer.
     Permissions(String),      // Tracing is not permitted using this backend.
     Errno(c_int),             // Something went wrong in C code.
     TracerState(TracerState), // The tracer is in the wrong state to do the requested task.
@@ -62,6 +63,7 @@ impl Display for HWTracerError {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match *self {
             HWTracerError::HWBufferOverflow => write!(f, "Hardware trace buffer overflow"),
+            HWTracerError::BackendUnavailable(ref s) => write!(f, "Backend unavailble: {:?}", s),
             HWTracerError::NoHWSupport(ref s) => write!(f, "{}", s),
             HWTracerError::Permissions(ref s) => write!(f, "{}", s),
             HWTracerError::Errno(n) => {
@@ -85,6 +87,7 @@ impl Error for HWTracerError {
     fn cause(&self) -> Option<&Error> {
         match *self {
             HWTracerError::HWBufferOverflow => None,
+            HWTracerError::BackendUnavailable(_) => None,
             HWTracerError::NoHWSupport(_) => None,
             HWTracerError::Permissions(_) => None,
             HWTracerError::TracerState(_) => None,

@@ -35,7 +35,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use libc::{pid_t, c_void, size_t, geteuid, malloc, free, c_char, c_int};
+use libc::{c_void, size_t, geteuid, malloc, free, c_char, c_int};
 use std::fs::File;
 use std::iter::Iterator;
 use std::io::{self, Read};
@@ -44,9 +44,9 @@ use std::os::unix::io::AsRawFd;
 use std::ptr;
 #[cfg(debug_assertions)]
 use std::ops::Drop;
-use util::linux_gettid;
 use tempfile::NamedTempFile;
-use {Tracer, TracerState, Trace, Block};
+use {Tracer, ThreadTracer, TracerState, Trace, Block};
+use super::PerfPTConfig;
 use errors::HWTracerError;
 use std::num::ParseIntError;
 use std::error::Error;
@@ -76,7 +76,6 @@ impl Error for LibIPTError {
         None
     }
 }
-
 
 #[repr(C)]
 #[allow(dead_code)] // Only C constructs these.
@@ -136,7 +135,7 @@ impl From<PerfPTCError> for HWTracerError {
 #[link_args="-lipt"]
 extern "C" {
     // collect.c
-    fn perf_pt_init_tracer(conf: *const PerfPTConf, err: *mut PerfPTCError) -> *mut c_void;
+    fn perf_pt_init_tracer(conf: *const PerfPTConfig, err: *mut PerfPTCError) -> *mut c_void;
     fn perf_pt_start_tracer(tr_ctx: *mut c_void, trace: *mut PerfPTTrace, err: *mut PerfPTCError) -> bool;
     fn perf_pt_stop_tracer(tr_ctx: *mut c_void, err: *mut PerfPTCError) -> bool;
     fn perf_pt_free_tracer(tr_ctx: *mut c_void, err: *mut PerfPTCError) -> bool;
@@ -323,104 +322,16 @@ impl Drop for PerfPTTrace {
     }
 }
 
-/// Configures a [`PerfPTTracer`](struct.PerfPTTracer.html).
-///
-// Must stay in sync with the C code.
-#[repr(C)]
-pub struct PerfPTConf {
-    // Thread ID to trace.
-    target_tid: pid_t,
-    // Data buffer size, in pages. Must be a power of 2.
-    data_bufsize: size_t,
-    // AUX buffer size, in pages. Must be a power of 2.
-    aux_bufsize: size_t,
-    // The initial trace buffer size (in bytes) for new traces.
-    new_trace_bufsize: size_t,
-}
-
-impl PerfPTConf {
-    /// Creates a new configuration with defaults.
-    pub fn new() -> Self {
-        Self {
-            target_tid: linux_gettid(),
-            data_bufsize: 64,
-            aux_bufsize: 1024,
-            new_trace_bufsize: 1024 * 1024, // 1MiB
-        }
-    }
-
-    /// Select which thread to trace.
-    ///
-    /// By default, the current thread is traced.
-    ///
-    /// The `tid` argument is a Linux thread ID. Note that Linux re-uses the `pid_t` type, but that
-    /// PIDs are distinct from TIDs.
-    pub fn target_tid(mut self, pid: pid_t) -> Self {
-        self.target_tid = pid;
-        self
-    }
-
-    /// Set the PT data buffer size (in pages).
-    pub fn data_bufsize(mut self, size: usize) -> Self {
-        self.data_bufsize = size as size_t;
-        self
-    }
-
-    /// Set the PT AUX buffer size (in pages).
-    pub fn aux_bufsize(mut self, size: usize) -> Self {
-        self.aux_bufsize = size as size_t;
-        self
-    }
-
-    /// Set the initial trace buffer size (in bytes) for new
-    /// [`PerfPTTrace`](struct.PerfPTTrace.html) instances.
-    pub fn new_trace_bufsize(mut self, size: usize) -> Self {
-        self.new_trace_bufsize = size as size_t;
-        self
-    }
-}
-
-/// A tracer that uses the Linux Perf interface to Intel Processor Trace.
+#[derive(Debug)]
 pub struct PerfPTTracer {
-    // The configuration for this tracer.
-    config: PerfPTConf,
-    // Opaque C pointer representing the tracer context.
-    tracer_ctx: *mut c_void,
-    // The state of the tracer.
-    state: TracerState,
-    // The trace currently being collected, or `None`.
-    trace: Option<Box<PerfPTTrace>>,
+    config: PerfPTConfig,
 }
 
 impl PerfPTTracer {
-    /// Create a new tracer using the specified `PerfPTConf`.
-    ///
-    /// Returns `Err` if the CPU doesn't support Intel Processor Trace.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use hwtracer::backends::PerfPTTracer;
-    /// use hwtracer::Tracer;
-    ///
-    /// let config = PerfPTTracer::config().data_bufsize(1024).target_tid(12345);
-    /// let res = PerfPTTracer::new(config);
-    /// if res.is_ok() {
-    ///     let mut tracer = res.unwrap();
-    ///     // Use the tracer...
-    /// } else {
-    ///     // CPU doesn't support Intel Processor Trace.
-    /// }
-    /// ```
-    pub fn new(config: PerfPTConf) -> Result<Self, HWTracerError> {
-        PerfPTTracer::check_perf_perms()?;
-        if !Self::pt_supported() {
-            return Err(HWTracerError::NoHWSupport("Intel PT not supported by CPU".into()));
-        }
-
+    pub (super) fn new(config: PerfPTConfig) -> Result<Self, HWTracerError> where Self: Sized {
         // Check for inavlid configuration.
         fn power_of_2(v: size_t) -> bool {
-            !(v <= 0) && ((v & (v - 1)) == 0)
+            ((v & (v - 1)) == 0)
         }
         if !power_of_2(config.data_bufsize) {
             return Err(HWTracerError::BadConfig(String::from("data_bufsize must be a positive power of 2")));
@@ -429,18 +340,8 @@ impl PerfPTTracer {
             return Err(HWTracerError::BadConfig(String::from("aux_bufsize must be a positive power of 2")));
         }
 
-
-        Ok(Self {
-            config: config,
-            tracer_ctx: ptr::null_mut(),
-            state: TracerState::Stopped,
-            trace: None,
-        })
-    }
-
-    /// Utility function to get a default config.
-    pub fn config() -> PerfPTConf {
-        PerfPTConf::new()
+        Self::check_perf_perms()?;
+        Ok(Self{config})
     }
 
     fn check_perf_perms() -> Result<(), HWTracerError> {
@@ -461,29 +362,39 @@ impl PerfPTTracer {
 
         Ok(())
     }
-
-    /// Checks if the CPU supports Intel Processor Trace.
-    fn pt_supported() -> bool {
-        const LEAF: u32 = 0x07;
-        const SUBPAGE: u32 = 0x0;
-        const EBX_BIT: u32 = 1 << 25;
-        let ebx_out: u32;
-
-        unsafe {
-            asm!(r"
-                  mov $1, %eax;
-                  mov $2, %ecx;
-                  cpuid;"
-                : "={ebx}" (ebx_out)
-                : "i" (LEAF), "i" (SUBPAGE)
-                : "eax", "ecx", "edx"
-                : "volatile");
-        }
-        ebx_out & EBX_BIT != 0
-    }
 }
 
 impl Tracer for PerfPTTracer {
+    fn thread_tracer(&self) -> Box<ThreadTracer> {
+        Box::new(PerfPTThreadTracer::new(self.config.clone()))
+    }
+
+}
+
+/// A tracer that uses the Linux Perf interface to Intel Processor Trace.
+pub struct PerfPTThreadTracer {
+    // The configuration for this tracer.
+    config: PerfPTConfig,
+    // Opaque C pointer representing the tracer context.
+    tracer_ctx: *mut c_void,
+    // The state of the tracer.
+    state: TracerState,
+    // The trace currently being collected, or `None`.
+    trace: Option<Box<PerfPTTrace>>,
+}
+
+impl PerfPTThreadTracer {
+    fn new(config: PerfPTConfig) -> Self {
+        Self {
+            config: config,
+            tracer_ctx: ptr::null_mut(),
+            state: TracerState::Stopped,
+            trace: None,
+        }
+    }
+}
+
+impl ThreadTracer for PerfPTThreadTracer {
     fn start_tracing(&mut self) -> Result<(), HWTracerError> {
         if self.state == TracerState::Started {
             return Err(TracerState::Started.as_error());
@@ -494,7 +405,7 @@ impl Tracer for PerfPTTracer {
         // block-level decoding. Therefore we have to re-initialise for each new tracing session.
         let mut cerr = PerfPTCError::new();
         self.tracer_ctx = unsafe {
-            perf_pt_init_tracer(&self.config as *const PerfPTConf, &mut cerr)
+            perf_pt_init_tracer(&self.config as *const PerfPTConfig, &mut cerr)
         };
         if self.tracer_ctx.is_null() {
             Err(cerr)?
@@ -505,7 +416,7 @@ impl Tracer for PerfPTTracer {
         // `stop_tracing` needs to return a Box<Tracer> anyway, so it's no big deal.
         //
         // Note that the C code will mutate the trace's members directly.
-        let mut trace = Box::new(PerfPTTrace::new(self.config.new_trace_bufsize)?);
+        let mut trace = Box::new(PerfPTTrace::new(self.config.initial_trace_bufsize)?);
         let mut cerr = PerfPTCError::new();
         if !unsafe { perf_pt_start_tracer(self.tracer_ctx, &mut *trace, &mut cerr) } {
             Err(cerr)?
@@ -549,14 +460,14 @@ pub unsafe extern "C" fn push_ptxed_arg(args: &mut Vec<String>, new_arg: *const 
 
 #[cfg(all(perf_pt_test,test))]
 mod tests {
-    use super::{PerfPTTracer, Trace, NamedTempFile, c_int, c_char, AsRawFd, CString, c_void,
-                PerfPTTrace, PerfPTBlockIterator, ptr, HWTracerError, Tracer};
-    use ::{test_helpers, Block};
+    use super::{PerfPTThreadTracer, Trace, NamedTempFile, c_int, c_char, AsRawFd, CString, c_void,
+                PerfPTConfig, PerfPTTrace, PerfPTBlockIterator, ptr, HWTracerError, ThreadTracer};
+    use ::{test_helpers, Block, backends::{TracerBuilder, BackendConfig}};
     use std::process::Command;
 
-    // Makes a `PerfPTTracer` with the default config.
-    pub fn default_tracer() -> PerfPTTracer {
-        PerfPTTracer::new(PerfPTTracer::config()).unwrap()
+    // Makes a `PerfPTThreadTracer` with the default config.
+    fn default_tracer() -> PerfPTThreadTracer {
+        PerfPTThreadTracer::new(PerfPTConfig::default())
     }
 
     // Arguments for calling perf_pt_append_self_ptxed_raw_args.
@@ -576,7 +487,7 @@ mod tests {
     // Returns a vector of arguments and a handle to a temproary file containing the VDSO code. The
     // caller must make sure that this file lives long enough for ptxed to run (temp files are
     // removed when they fall out of scope).
-    pub fn self_ptxed_args(trace_filename: &str) -> (Vec<String>, NamedTempFile) {
+    fn self_ptxed_args(trace_filename: &str) -> (Vec<String>, NamedTempFile) {
         let ptxed_args = vec![
             "--cpu", "auto", "--block-decoder", "--block:end-on-call", "--block:end-on-jump",
             "--block:show-blocks", "--pt", trace_filename];
@@ -666,7 +577,7 @@ mod tests {
     }
 
     // Trace a closure and then decode it and check the block iterator agrees with ptxed.
-    fn trace_and_check_blocks<T, F>(mut tracer: T, f: F) where T: Tracer, F: FnOnce() -> u64 {
+    fn trace_and_check_blocks<T, F>(mut tracer: T, f: F) where T: ThreadTracer, F: FnOnce() -> u64 {
         let trace = test_helpers::trace_closure(&mut tracer, f);
         let expects = get_expected_blocks(&trace);
         test_helpers::test_expected_blocks(trace, expects.iter());
@@ -779,9 +690,9 @@ mod tests {
     #[test]
     fn test_relloc_trace_buf1() {
         let start_bufsize = 512;
-        let config = PerfPTTracer::config().new_trace_bufsize(start_bufsize);
-        let mut tracer = PerfPTTracer::new(config).unwrap();
-        use Tracer;
+        let mut config = PerfPTConfig::default();
+        config.initial_trace_bufsize = start_bufsize;
+        let mut tracer = PerfPTThreadTracer::new(config);
 
         tracer.start_tracing().unwrap();
         let res = test_helpers::work_loop(10000);
@@ -817,7 +728,12 @@ mod tests {
 
     #[test]
     fn test_config_bad_data_bufsize() {
-        match PerfPTTracer::new(PerfPTTracer::config().data_bufsize(3)) {
+        let mut bldr = TracerBuilder::new().perf_pt();
+        match bldr.config() {
+            BackendConfig::PerfPT(ref mut ppt_conf) => ppt_conf.data_bufsize = 3,
+            _ => panic!(),
+        }
+        match bldr.build() {
             Err(HWTracerError::BadConfig(s)) => {
                 assert_eq!(s, "data_bufsize must be a positive power of 2");
             },
@@ -827,7 +743,12 @@ mod tests {
 
     #[test]
     fn test_config_bad_aux_bufsize() {
-        match PerfPTTracer::new(PerfPTTracer::config().aux_bufsize(3)) {
+        let mut bldr = TracerBuilder::new().perf_pt();
+        match bldr.config() {
+            BackendConfig::PerfPT(ref mut ppt_conf) => ppt_conf.aux_bufsize = 3,
+            _ => panic!(),
+        }
+        match bldr.build() {
             Err(HWTracerError::BadConfig(s)) => {
                 assert_eq!(s, "aux_bufsize must be a positive power of 2");
             },

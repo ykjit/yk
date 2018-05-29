@@ -95,12 +95,11 @@ struct tracer_ctx {
  * Passed from Rust to C to configure tracing.
  * Must stay in sync with the Rust-side.
  */
-struct tracer_conf {
-    pid_t       target_tid;         // Thread ID to trace.
-    size_t      data_bufsize;       // Data buf size (in pages).
-    size_t      aux_bufsize;        // AUX buf size (in pages).
-    size_t      new_trace_bufsize;  // Initial capacity (in bytes) of a
-                                    // trace storage buffer.
+struct perf_pt_config {
+    size_t      data_bufsize;          // Data buf size (in pages).
+    size_t      aux_bufsize;           // AUX buf size (in pages).
+    size_t      initial_trace_bufsize; // Initial capacity (in bytes) of a
+                                       // trace storage buffer.
 };
 
 /*
@@ -166,10 +165,10 @@ static bool read_aux(void *, struct perf_event_mmap_page *,
 static bool poll_loop(int, int, struct perf_event_mmap_page *, void *,
                       struct perf_pt_trace *, struct perf_pt_cerror *);
 static void *tracer_thread(void *);
-static int open_perf(pid_t, size_t, struct perf_pt_cerror *);
+static int open_perf(size_t, struct perf_pt_cerror *);
 
 // Exposed Prototypes.
-struct tracer_ctx *perf_pt_init_tracer(struct tracer_conf *, struct perf_pt_cerror *);
+struct tracer_ctx *perf_pt_init_tracer(struct perf_pt_config *, struct perf_pt_cerror *);
 bool perf_pt_start_tracer(struct tracer_ctx *, struct perf_pt_trace *, struct perf_pt_cerror *);
 bool perf_pt_stop_tracer(struct tracer_ctx *tr_ctx, struct perf_pt_cerror *);
 bool perf_pt_free_tracer(struct tracer_ctx *tr_ctx, struct perf_pt_cerror *);
@@ -399,7 +398,7 @@ done:
  * Returns a file descriptor, or -1 on error.
  */
 static int
-open_perf(pid_t target_tid, size_t aux_bufsize, struct perf_pt_cerror *err) {
+open_perf(size_t aux_bufsize, struct perf_pt_cerror *err) {
     struct perf_event_attr attr;
     memset(&attr, 0, sizeof(attr));
     attr.size = sizeof(attr);
@@ -445,6 +444,7 @@ open_perf(pid_t target_tid, size_t aux_bufsize, struct perf_pt_cerror *err) {
     // could return EBUSY, meaning another process or thread has locked the
     // Perf device.
     struct timespec wait_time = {0, OPEN_PERF_WAIT_NSECS};
+    pid_t target_tid = syscall(__NR_gettid);
     for (int tries = MAX_OPEN_PERF_TRIES; tries > 0; tries--) {
         ret = syscall(SYS_perf_event_open, &attr, target_tid, -1, -1, 0);
         if ((ret == -1) && (errno == EBUSY)) {
@@ -520,7 +520,7 @@ clean:
  * Initialise a tracer context.
  */
 struct tracer_ctx *
-perf_pt_init_tracer(struct tracer_conf *tr_conf, struct perf_pt_cerror *err)
+perf_pt_init_tracer(struct perf_pt_config *tr_conf, struct perf_pt_cerror *err)
 {
     struct tracer_ctx *tr_ctx = NULL;
     bool failing = false;
@@ -539,7 +539,7 @@ perf_pt_init_tracer(struct tracer_conf *tr_conf, struct perf_pt_cerror *err)
     tr_ctx->perf_fd = -1;
 
     // Obtain a file descriptor through which to speak to perf.
-    tr_ctx->perf_fd = open_perf(tr_conf->target_tid, tr_conf->aux_bufsize, err);
+    tr_ctx->perf_fd = open_perf(tr_conf->aux_bufsize, err);
     if (tr_ctx->perf_fd == -1) {
         perf_pt_set_err(err, perf_pt_cerror_errno, errno);
         failing = true;

@@ -39,30 +39,8 @@ extern crate hwtracer;
 extern crate libc;
 
 use std::time::SystemTime;
-use hwtracer::{Tracer, Trace};
-use hwtracer::backends::DummyTracer;
-#[cfg(perf_pt)]
-use hwtracer::backends::PerfPTTracer;
-
-/// Instantiate a tracer suitable for the current platform.
-fn tracer() -> Box<Tracer> {
-    if cfg!(target_os = "linux") {
-        #[cfg(perf_pt)] {
-            let res = PerfPTTracer::new(PerfPTTracer::config());
-            if res.is_ok() {
-                Box::new(res.unwrap())
-            } else {
-                // CPU doesn't have Intel PT support.
-                Box::new(DummyTracer::new())
-            }
-        }
-        #[cfg(not(perf_pt))] {
-            Box::new(DummyTracer::new())
-        }
-    } else {
-        Box::new(DummyTracer::new())
-    }
-}
+use hwtracer::Trace;
+use hwtracer::backends::TracerBuilder;
 
 /// Prints the addresses of the first `qty` blocks in a trace along with it's name and
 /// computation result.
@@ -95,14 +73,16 @@ fn work() -> u32 {
 ///
 /// The results are printed to discourage the compiler from optimising the computation out.
 fn main() {
-    let mut tracer = tracer();
+    let mut bldr = TracerBuilder::new();
+    println!("Backend configuration: {:?}", bldr.config());
+    let mut thr_tracer = bldr.build().unwrap().thread_tracer();
 
     for i in 1..4 {
-        tracer.start_tracing().unwrap_or_else(|e| {
+        thr_tracer.start_tracing().unwrap_or_else(|e| {
             panic!(format!("Failed to start tracer: {}", e));
         });
         let res = work();
-        let trace = tracer.stop_tracing().unwrap();
+        let trace = thr_tracer.stop_tracing().unwrap();
         let name = format!("trace{}", i);
         print_trace(&trace, &name, res, 10);
     }
