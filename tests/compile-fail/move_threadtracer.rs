@@ -7,5 +7,6 @@ use std::thread;
 fn main() {
     let thr_tracer = TracerBuilder::new().build().unwrap().thread_tracer();
     thread::spawn(move || thr_tracer).join().unwrap();
-    //~^ ERROR the trait bound `hwtracer::ThreadTracer: std::marker::Send` is not satisfied
+    //~^ ERROR cannot be sent between threads safely [E0277]
+    //| ERROR cannot be shared between threads safely [E0277]
 }
