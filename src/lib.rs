@@ -60,15 +60,20 @@ use std::fs::File;
 #[derive(Debug, Eq, PartialEq)]
 pub struct Block {
     start_vaddr: u64,
+    len: u64,
 }
 
 impl Block {
-    pub fn new(start_vaddr: u64) -> Self {
-        Self { start_vaddr: start_vaddr }
+    pub fn new(start_vaddr: u64, len: u64) -> Self {
+        Self {start_vaddr, len}
     }
 
     pub fn start_vaddr(&self) -> u64 {
         self.start_vaddr
+    }
+
+    pub fn len(&self) -> u64 {
+        self.len
     }
 }
 
@@ -200,7 +205,7 @@ mod test_helpers {
             if expect.is_none() || got.is_none() {
                 break;
             }
-            assert_eq!(&got.unwrap().unwrap(), expect.unwrap());
+            assert_eq!(got.unwrap().unwrap().start_vaddr(), expect.unwrap().start_vaddr());
         }
         // Check that both iterators were the same length.
         assert!(expect_iter.next().is_none());
