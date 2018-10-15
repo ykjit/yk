@@ -145,7 +145,7 @@ extern "C" {
                                   decoder_status: *mut c_int,
                                   err: *mut PerfPTCError) -> *mut c_void;
     fn perf_pt_next_block(decoder: *mut c_void, decoder_status: *mut c_int,
-                          addr: *mut u64, err: *mut PerfPTCError) -> bool;
+                          addr: *mut u64, len: *mut u64, err: *mut PerfPTCError) -> bool;
     fn perf_pt_free_block_decoder(decoder: *mut c_void);
     // util.c
     fn perf_pt_is_overflow_err(err: c_int) -> bool;
@@ -231,9 +231,11 @@ impl<'t> Iterator for PerfPTBlockIterator<'t> {
         }
 
         let mut addr = 0;
+        let mut len = 0;
         let mut cerr = PerfPTCError::new();
         let rv = unsafe {
-            perf_pt_next_block(self.decoder, &mut self.decoder_status, &mut addr, &mut cerr)
+            perf_pt_next_block(self.decoder, &mut self.decoder_status, &mut addr, &mut len,
+                               &mut cerr)
         };
         if !rv {
             self.errored = true; // This iterator is unusable now.
@@ -242,7 +244,7 @@ impl<'t> Iterator for PerfPTBlockIterator<'t> {
         if addr == 0 {
             None // End of packet stream.
         } else {
-            Some(Ok(Block::new(addr)))
+            Some(Ok(Block::new(addr, len)))
         }
     }
 }
@@ -566,7 +568,7 @@ mod tests {
                     // This instruction is the start of a block.
                     let vaddr_s = line.split_whitespace().next().unwrap();
                     let vaddr = u64::from_str_radix(vaddr_s, 16).unwrap();
-                    block_vaddrs.push(Block::new(vaddr));
+                    block_vaddrs.push(Block::new(vaddr, 0));
                     block_start = false;
                 }
                 last_instr = Some(line.split_whitespace().nth(1).unwrap());

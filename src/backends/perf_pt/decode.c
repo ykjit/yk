@@ -67,7 +67,8 @@ static bool block_is_terminated(struct pt_block *);
 // Public prototypes.
 void *perf_pt_init_block_decoder(void *, uint64_t, int, char *, int *,
                                  struct perf_pt_cerror *);
-bool perf_pt_next_block(struct pt_block_decoder *, int *, uint64_t *, struct perf_pt_cerror *);
+bool perf_pt_next_block(struct pt_block_decoder *, int *, uint64_t *,
+                        uint64_t *, struct perf_pt_cerror *);
 void perf_pt_free_block_decoder(struct pt_block_decoder *);
 
 /*
@@ -169,20 +170,20 @@ clean:
 }
 
 /*
- * Updates `*addr' with the start address of the next block in the instruction
- * stream.
+ * Updates `*addr` and `*len` with the start address and the length of the next
+ * block in the instruction stream.
  *
  * A start address of 0 indicates that the end of the instruction stream has
  * been reached.
  *
  * `*decoder_status` will be updated with the new decoder status after the operation.
  *
- * Returns true on success or false otherwise. Upon failure, the start address
- * is undefined.
+ * Returns true on success or false otherwise. Upon failure, `*addr` and `*len`
+ * are undefined.
  */
 bool
 perf_pt_next_block(struct pt_block_decoder *decoder, int *decoder_status,
-                   uint64_t *addr, struct perf_pt_cerror *err) {
+                   uint64_t *addr, uint64_t *len, struct perf_pt_cerror *err) {
     // If there are events pending, look at those first.
     if (handle_events(decoder, decoder_status, err) != true) {
         // handle_events will have already called perf_pt_set_err().
@@ -203,6 +204,7 @@ perf_pt_next_block(struct pt_block_decoder *decoder, int *decoder_status,
     struct pt_block block;
     block.iclass = ptic_other;
     bool first_block = true;
+    *len = 0;
     while (!block_is_terminated(&block)) {
         if (handle_events(decoder, decoder_status, err) != true) {
             // handle_events will have already called perf_pt_set_err().
@@ -248,6 +250,9 @@ perf_pt_next_block(struct pt_block_decoder *decoder, int *decoder_status,
             *addr = block.ip;
             first_block = false;
         }
+
+        // Update the length.
+        *len += block.end_ip - block.ip;
     }
 
     return true;
