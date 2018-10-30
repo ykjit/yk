@@ -37,7 +37,7 @@
 
 #![feature(asm)]
 
-extern crate gcc;
+extern crate cc;
 
 use std::path::{PathBuf, Path};
 use std::env;
@@ -55,7 +55,7 @@ fn feature_check(filename: &str) -> bool {
     path.push(FEATURE_CHECKS_PATH);
     path.push(filename);
 
-    let mut check_build = gcc::Build::new();
+    let mut check_build = cc::Build::new();
     check_build.file(path).try_compile("check_perf_pt").is_ok()
 }
 
@@ -121,7 +121,7 @@ fn cpu_supports_pt() -> bool {
 }
 
 fn main() {
-    let mut c_build = gcc::Build::new();
+    let mut c_build = cc::Build::new();
 
     // We need the C_DEPS_DIR to be absolute so that our consumers inherit correct linker paths.
     let mut c_deps_path_abs = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
