@@ -39,12 +39,10 @@
 
 extern crate gcc;
 
-#[cfg(target_os = "linux")]
 use std::path::{PathBuf, Path};
 use std::env;
 use std::process::Command;
 
-#[cfg(target_os = "linux")]
 const FEATURE_CHECKS_PATH: &str = "feature_checks";
 
 const C_DEPS_DIR: &str = "c_deps";
@@ -52,7 +50,6 @@ const C_DEPS_DIR: &str = "c_deps";
 /// Simple feature check, returning `true` if we have the feature.
 ///
 /// The checks themselves are in files under `FEATURE_CHECKS_PATH`.
-#[cfg(target_os = "linux")]
 fn feature_check(filename: &str) -> bool {
     let mut path = PathBuf::new();
     path.push(FEATURE_CHECKS_PATH);
