@@ -35,6 +35,6 @@
 
 extern crate test;
 
-pub mod metatracer;
+pub mod mt;
 
-pub use metatracer::{Location, MT};
+pub use mt::{Location, MT};
