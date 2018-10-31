@@ -201,7 +201,7 @@ impl<'t> PerfPTBlockIterator<'t> {
             Err(cerr)?
         }
 
-        vdso_tempfile.sync_all()?;
+        vdso_tempfile.as_file().sync_all()?;
         self.decoder = decoder;
         self.vdso_tempfile = Some(vdso_tempfile);
         Ok(())
@@ -532,9 +532,9 @@ mod tests {
     // Given a trace, use ptxed to get a vector of block start vaddrs.
     fn get_expected_blocks(trace: &Box<Trace>) -> Vec<Block> {
         // Write the trace out to a temp file so ptxed can decode it.
-        let mut fh = NamedTempFile::new().unwrap();
-        trace.to_file(&mut fh);
-        let (args, _vdso_tempfile) = self_ptxed_args(fh.path().to_str().unwrap());
+        let mut tmpf = NamedTempFile::new().unwrap();
+        trace.to_file(&mut tmpf.as_file_mut());
+        let (args, _vdso_tempfile) = self_ptxed_args(tmpf.path().to_str().unwrap());
 
         let out = Command::new(env!("PTXED"))
                           .args(&args)
@@ -624,12 +624,12 @@ mod tests {
         }
 
         // Make the trace and write it to a file.
-        let mut fh = NamedTempFile::new().unwrap();
-        trace.to_file(&mut fh);
-        fh.sync_all().unwrap();
+        let mut tmpf = NamedTempFile::new().unwrap();
+        trace.to_file(&mut tmpf.as_file_mut());
+        tmpf.as_file().sync_all().unwrap();
 
         // Check the resulting file makes sense.
-        let file = File::open(fh.path().to_str().unwrap()).unwrap();
+        let file = File::open(tmpf.path().to_str().unwrap()).unwrap();
         let mut total_bytes = 0;
         for (i, byte) in file.bytes().enumerate() {
             assert_eq!(i as u8, byte.unwrap());

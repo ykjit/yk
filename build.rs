@@ -37,14 +37,12 @@
 
 #![feature(asm)]
 
-extern crate gcc;
+extern crate cc;
 
-#[cfg(target_os = "linux")]
 use std::path::{PathBuf, Path};
 use std::env;
 use std::process::Command;
 
-#[cfg(target_os = "linux")]
 const FEATURE_CHECKS_PATH: &str = "feature_checks";
 
 const C_DEPS_DIR: &str = "c_deps";
@@ -52,13 +50,12 @@ const C_DEPS_DIR: &str = "c_deps";
 /// Simple feature check, returning `true` if we have the feature.
 ///
 /// The checks themselves are in files under `FEATURE_CHECKS_PATH`.
-#[cfg(target_os = "linux")]
 fn feature_check(filename: &str) -> bool {
     let mut path = PathBuf::new();
     path.push(FEATURE_CHECKS_PATH);
     path.push(filename);
 
-    let mut check_build = gcc::Build::new();
+    let mut check_build = cc::Build::new();
     check_build.file(path).try_compile("check_perf_pt").is_ok()
 }
 
@@ -124,7 +121,7 @@ fn cpu_supports_pt() -> bool {
 }
 
 fn main() {
-    let mut c_build = gcc::Build::new();
+    let mut c_build = cc::Build::new();
 
     // We need the C_DEPS_DIR to be absolute so that our consumers inherit correct linker paths.
     let mut c_deps_path_abs = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
