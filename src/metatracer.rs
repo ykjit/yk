@@ -46,7 +46,7 @@ const PHASE_TRACING : u32 = 0b01 << 30;
 const PHASE_COUNTING: u32 = 0b10 << 30; // The value specifies the current hot count.
 
 /// A `Location` uniquely identifies a control point position in the end-user's program (and is
-/// used by the `MetaTracer` to store data about that location). In other words, every position
+/// used by the `MT` to store data about that location). In other words, every position
 /// that can be a control point also needs to have one `Location` value associated with it, and
 /// that same `Location` value must always be used to identify that control point.
 ///
@@ -59,24 +59,24 @@ pub struct Location {
 }
 
 impl Location {
-    /// Create a fresh Location suitable for passing to `MetaTracer::control_point`.
+    /// Create a fresh Location suitable for passing to `MT::control_point`.
     pub fn new() -> Self {
         Self { pack: AtomicU32::new(PHASE_COUNTING) }
     }
 }
 
 /// A meta-tracer.
-pub struct MetaTracer {
+pub struct MT {
     hot_threshold: HotThreshold
 }
 
-impl MetaTracer {
-    /// Create a new `MetaTracer` with default settings.
+impl MT {
+    /// Create a new `MT` with default settings.
     pub fn new() -> Self {
         Self::new_with_hot_threshold(DEFAULT_HOT_THRESHOLD)
     }
 
-    /// Create a new `MetaTracer` with a specific hot threshold.
+    /// Create a new `MT` with a specific hot threshold.
     pub fn new_with_hot_threshold(hot_threshold: HotThreshold) -> Self {
         Self {
             hot_threshold: hot_threshold
@@ -131,7 +131,7 @@ mod tests {
     #[test]
     fn threshold_passed() {
         let hot_thrsh = 1500;
-        let mt = MetaTracer::new_with_hot_threshold(hot_thrsh);
+        let mt = MT::new_with_hot_threshold(hot_thrsh);
         let lp = Location::new();
         for i in 0..hot_thrsh {
             mt.control_point(&lp);
@@ -148,7 +148,7 @@ mod tests {
         let hot_thrsh = 4000;
         let mt_arc;
         {
-            let mt = MetaTracer::new_with_hot_threshold(hot_thrsh);
+            let mt = MT::new_with_hot_threshold(hot_thrsh);
             mt_arc = Arc::new(mt);
         }
         let lp_arc = Arc::new(Location::new());
@@ -188,7 +188,7 @@ mod tests {
 
     #[bench]
     fn bench_single_threaded_control_point(b: &mut Bencher) {
-        let mt = MetaTracer::new();
+        let mt = MT::new();
         let lp = Location::new();
         b.iter(|| {
             for _ in 0..100000 {
@@ -199,7 +199,7 @@ mod tests {
 
     #[bench]
     fn bench_multi_threaded_control_point(b: &mut Bencher) {
-        let mt_arc = Arc::new(MetaTracer::new());
+        let mt_arc = Arc::new(MT::new());
         let lp_arc = Arc::new(Location::new());
         b.iter(|| {
             let mut thrs = vec![];
