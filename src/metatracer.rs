@@ -83,8 +83,7 @@ impl MetaTracer {
         }
     }
 
-    /// Attempt to execute a compiled trace for location `loc`: return a `ControlOutcome` to allow
-    /// the end user to determine whether a trace was executed or not.
+    /// Attempt to execute a compiled trace for location `loc`.
     pub fn control_point(&self, loc: &Location)
     {
         // Since we don't hold an explicit lock, updating a Location is tricky: we might read a
