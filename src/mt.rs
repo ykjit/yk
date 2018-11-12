@@ -40,9 +40,9 @@ const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
 // PHASE_COMPILED which (one day) will have an index associated with it. By also making that tag
 // 0b00, we allow that index to be accessed without any further operations after the initial
 // tag check.
-const PHASE_TAG     : u32 = 0b11 << 30; // All of the other PHASE_ tags must fit in this.
+const PHASE_TAG: u32 = 0b11 << 30; // All of the other PHASE_ tags must fit in this.
 const PHASE_COMPILED: u32 = 0b00 << 30;
-const PHASE_TRACING : u32 = 0b01 << 30;
+const PHASE_TRACING: u32 = 0b01 << 30;
 const PHASE_COUNTING: u32 = 0b10 << 30; // The value specifies the current hot count.
 
 /// A `Location` uniquely identifies a control point position in the end-user's program (and is
@@ -55,19 +55,21 @@ const PHASE_COUNTING: u32 = 0b10 << 30; // The value specifies the current hot c
 /// moderately wasteful) mechanism is for every bytecode or AST node to have its own `Location`
 /// (even for bytecodes or nodes that can't be control points).
 pub struct Location {
-    pack: AtomicU32
+    pack: AtomicU32,
 }
 
 impl Location {
     /// Create a fresh Location suitable for passing to `MT::control_point`.
     pub fn new() -> Self {
-        Self { pack: AtomicU32::new(PHASE_COUNTING) }
+        Self {
+            pack: AtomicU32::new(PHASE_COUNTING),
+        }
     }
 }
 
 /// A meta-tracer.
 pub struct MT {
-    hot_threshold: HotThreshold
+    hot_threshold: HotThreshold,
 }
 
 impl MT {
@@ -78,14 +80,11 @@ impl MT {
 
     /// Create a new `MT` with a specific hot threshold.
     pub fn new_with_hot_threshold(hot_threshold: HotThreshold) -> Self {
-        Self {
-            hot_threshold: hot_threshold
-        }
+        Self { hot_threshold }
     }
 
     /// Attempt to execute a compiled trace for location `loc`.
-    pub fn control_point(&self, loc: &Location)
-    {
+    pub fn control_point(&self, loc: &Location) {
         // Since we don't hold an explicit lock, updating a Location is tricky: we might read a
         // Location, work out what we'd like to update it to, and try updating it, only to find
         // that another thread interrupted us part way through. We therefore use compare_and_swap
@@ -108,14 +107,14 @@ impl MT {
                     if pack.compare_and_swap(lp, new_pack, Ordering::Release) == lp {
                         break;
                     }
-                },
+                }
                 PHASE_TRACING => {
                     if pack.compare_and_swap(lp, PHASE_COMPILED, Ordering::Release) == lp {
                         break;
                     }
-                },
+                }
                 PHASE_COMPILED => break,
-                _ => unreachable!()
+                _ => unreachable!(),
             }
         }
     }
@@ -123,10 +122,9 @@ impl MT {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use std::thread;
-    use test::{Bencher, black_box};
     use super::*;
+    use std::{sync::Arc, thread};
+    use test::{black_box, Bencher};
 
     #[test]
     fn threshold_passed() {
