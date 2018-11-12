@@ -33,8 +33,6 @@
 #![feature(integer_atomics)]
 #![feature(test)]
 
-extern crate test;
-
 pub mod mt;
 
-pub use mt::{Location, MT};
+pub use self::mt::{Location, MT};

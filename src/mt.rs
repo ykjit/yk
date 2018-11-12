@@ -30,7 +30,18 @@
 // DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use std::sync::atomic::{AtomicU32, Ordering};
+#[cfg(test)]
+use std::time::Duration;
+use std::{
+    io,
+    panic::{catch_unwind, resume_unwind, UnwindSafe},
+    rc::Rc,
+    sync::{
+        atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
+        Arc,
+    },
+    thread::{self, JoinHandle},
+};
 
 pub type HotThreshold = u32;
 const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
@@ -67,20 +78,130 @@ impl Location {
     }
 }
 
-/// A meta-tracer.
-pub struct MT {
+/// Configure a meta-tracer. Note that a process can only have one meta-tracer active at one point.
+pub struct MTBuilder {
     hot_threshold: HotThreshold,
 }
 
-impl MT {
-    /// Create a new `MT` with default settings.
+impl MTBuilder {
+    /// Create a meta-tracer with default parameters.
     pub fn new() -> Self {
-        Self::new_with_hot_threshold(DEFAULT_HOT_THRESHOLD)
+        Self {
+            hot_threshold: DEFAULT_HOT_THRESHOLD,
+        }
     }
 
-    /// Create a new `MT` with a specific hot threshold.
-    pub fn new_with_hot_threshold(hot_threshold: HotThreshold) -> Self {
-        Self { hot_threshold }
+    /// Consume the `MTBuilder` and create a meta-tracer, returning the
+    /// [`MTThread`](struct.MTThread.html) representing the current thread.
+    pub fn init(self) -> MTThread {
+        MTInner::init(self.hot_threshold)
+    }
+
+    /// Change this meta-tracer builder's `hot_threshold` value.
+    pub fn hot_threshold(mut self, hot_threshold: HotThreshold) -> Self {
+        self.hot_threshold = hot_threshold;
+        self
+    }
+}
+
+#[derive(Clone)]
+/// A meta-tracer. Note that this is conceptually a "front-end" to the actual meta-tracer akin to
+/// an `Rc`: this struct can be freely `clone()`d without duplicating the underlying meta-tracer.
+pub struct MT {
+    inner: Arc<MTInner>,
+}
+
+impl MT {
+    /// Return this meta-tracer's hot threshold.
+    pub fn hot_threshold(&self) -> HotThreshold {
+        self.inner.hot_threshold.load(Ordering::Relaxed)
+    }
+
+    /// Create a new thread that can be used in the meta-tracer: the new thread that is created is
+    /// handed a [`MTThread`](struct.MTThread.html) from which the `MT` itself can be accessed.
+    pub fn spawn<F, T>(&self, f: F) -> io::Result<JoinHandle<T>>
+    where
+        F: FnOnce(MTThread) -> T,
+        F: Send + UnwindSafe + 'static,
+        T: Send + 'static,
+    {
+        let mt_cl = self.clone();
+        thread::Builder::new().spawn(move || {
+            mt_cl.inner.active_threads.fetch_add(1, Ordering::Relaxed);
+            let r = catch_unwind(|| f(MTThreadInner::init(mt_cl.clone())));
+            mt_cl.inner.active_threads.fetch_sub(1, Ordering::Relaxed);
+            match r {
+                Ok(r) => r,
+                Err(e) => resume_unwind(e),
+            }
+        })
+    }
+}
+
+impl Drop for MT {
+    fn drop(&mut self) {
+        MT_ACTIVE.store(false, Ordering::Relaxed);
+    }
+}
+
+/// The innards of a meta-tracer.
+struct MTInner {
+    hot_threshold: AtomicU32,
+    active_threads: AtomicUsize,
+}
+
+/// It's only safe to have one `MT` instance active at a time.
+static MT_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+impl MTInner {
+    /// Create a new `MT`, wrapped immediately in an [`MTThread`](struct.MTThread.html).
+    fn init(hot_threshold: HotThreshold) -> MTThread {
+        // A process can only have a single MT instance.
+
+        // In non-testing, we panic if the user calls this method while an MT instance is active.
+        #[cfg(not(test))]
+        {
+            if MT_ACTIVE.swap(true, Ordering::Relaxed) {
+                panic!("Only one MT can be active at once.");
+            }
+        }
+
+        // In testing, we simply sleep until the other MT instance has gone away: this has the
+        // effect of serialising tests which use MT (but allowing other tests to run in parallel).
+        #[cfg(test)]
+        {
+            loop {
+                if !MT_ACTIVE.swap(true, Ordering::Relaxed) {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+
+        let mtc = Self {
+            hot_threshold: AtomicU32::new(hot_threshold),
+            active_threads: AtomicUsize::new(1),
+        };
+        let mt = MT {
+            inner: Arc::new(mtc),
+        };
+        MTThreadInner::init(mt)
+    }
+}
+
+/// A meta-tracer aware thread. Note that this is conceptually a "front-end" to the actual
+/// meta-tracer thread akin to an `Rc`: this struct can be freely `clone()`d without duplicating
+/// the underlying meta-tracer thread. Note that this struct is neither `Send` nor `Sync`: it
+/// can only be accessed from within a single thread.
+#[derive(Clone)]
+pub struct MTThread {
+    inner: Rc<MTThreadInner>,
+}
+
+impl MTThread {
+    /// Return a meta-tracer [`MT`](struct.MT.html) struct.
+    pub fn mt(&self) -> &MT {
+        &self.inner.mt
     }
 
     /// Attempt to execute a compiled trace for location `loc`.
@@ -99,7 +220,7 @@ impl MT {
                 PHASE_COUNTING => {
                     let count = lp & !PHASE_TAG;
                     let new_pack;
-                    if count >= self.hot_threshold {
+                    if count >= self.inner.hot_threshold {
                         new_pack = PHASE_TRACING;
                     } else {
                         new_pack = PHASE_COUNTING | (count + 1);
@@ -120,53 +241,66 @@ impl MT {
     }
 }
 
+/// The innards of a meta-tracer thread.
+struct MTThreadInner {
+    mt: MT,
+    hot_threshold: HotThreshold,
+}
+
+impl MTThreadInner {
+    fn init(mt: MT) -> MTThread {
+        let hot_threshold = mt.hot_threshold();
+        let inner = MTThreadInner { mt, hot_threshold };
+        MTThread {
+            inner: Rc::new(inner),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    extern crate test;
+    use self::test::{black_box, Bencher};
     use super::*;
-    use std::{sync::Arc, thread};
-    use test::{black_box, Bencher};
+    use std::sync::Arc;
 
     #[test]
     fn threshold_passed() {
         let hot_thrsh = 1500;
-        let mt = MT::new_with_hot_threshold(hot_thrsh);
+        let mtt = MTBuilder::new().hot_threshold(hot_thrsh).init();
         let lp = Location::new();
         for i in 0..hot_thrsh {
-            mt.control_point(&lp);
+            mtt.control_point(&lp);
             assert_eq!(lp.pack.load(Ordering::Relaxed), PHASE_COUNTING | (i + 1));
         }
-        mt.control_point(&lp);
+        mtt.control_point(&lp);
         assert_eq!(lp.pack.load(Ordering::Relaxed), PHASE_TRACING);
-        mt.control_point(&lp);
+        mtt.control_point(&lp);
         assert_eq!(lp.pack.load(Ordering::Relaxed), PHASE_COMPILED);
     }
 
     #[test]
     fn threaded_threshold_passed() {
         let hot_thrsh = 4000;
-        let mt_arc;
-        {
-            let mt = MT::new_with_hot_threshold(hot_thrsh);
-            mt_arc = Arc::new(mt);
-        }
-        let lp_arc = Arc::new(Location::new());
+        let mtt = MTBuilder::new().hot_threshold(hot_thrsh).init();
+        let l_arc = Arc::new(Location::new());
         let mut thrs = vec![];
         for _ in 0..hot_thrsh / 4 {
-            let mt_arc_cl = Arc::clone(&mt_arc);
-            let lp_arc_cl = Arc::clone(&lp_arc);
-            let t = thread::Builder::new()
-                .spawn(move || {
-                    mt_arc_cl.control_point(&*lp_arc_cl);
-                    let c1 = lp_arc_cl.pack.load(Ordering::Relaxed);
+            let l_arc_cl = l_arc.clone();
+            let t = mtt
+                .mt()
+                .spawn(move |mtt| {
+                    mtt.control_point(&*l_arc_cl);
+                    let c1 = l_arc_cl.pack.load(Ordering::Relaxed);
                     assert_eq!(c1 & PHASE_TAG, PHASE_COUNTING);
-                    mt_arc_cl.control_point(&*lp_arc_cl);
-                    let c2 = lp_arc_cl.pack.load(Ordering::Relaxed);
+                    mtt.control_point(&*l_arc_cl);
+                    let c2 = l_arc_cl.pack.load(Ordering::Relaxed);
                     assert_eq!(c2 & PHASE_TAG, PHASE_COUNTING);
-                    mt_arc_cl.control_point(&*lp_arc_cl);
-                    let c3 = lp_arc_cl.pack.load(Ordering::Relaxed);
+                    mtt.control_point(&*l_arc_cl);
+                    let c3 = l_arc_cl.pack.load(Ordering::Relaxed);
                     assert_eq!(c3 & PHASE_TAG, PHASE_COUNTING);
-                    mt_arc_cl.control_point(&*lp_arc_cl);
-                    let c4 = lp_arc_cl.pack.load(Ordering::Relaxed);
+                    mtt.control_point(&*l_arc_cl);
+                    let c4 = l_arc_cl.pack.load(Ordering::Relaxed);
                     assert_eq!(c4 & PHASE_TAG, PHASE_COUNTING);
                     assert!(c4 > c3);
                     assert!(c3 > c2);
@@ -178,36 +312,38 @@ mod tests {
         for t in thrs {
             t.join().unwrap();
         }
-        mt_arc.control_point(&lp_arc);
-        assert_eq!(lp_arc.pack.load(Ordering::Relaxed), PHASE_TRACING);
-        mt_arc.control_point(&lp_arc);
-        assert_eq!(lp_arc.pack.load(Ordering::Relaxed), PHASE_COMPILED);
+        {
+            mtt.control_point(&l_arc);
+            assert_eq!(l_arc.pack.load(Ordering::Relaxed), PHASE_TRACING);
+            mtt.control_point(&l_arc);
+            assert_eq!(l_arc.pack.load(Ordering::Relaxed), PHASE_COMPILED);
+        }
     }
 
     #[bench]
     fn bench_single_threaded_control_point(b: &mut Bencher) {
-        let mt = MT::new();
+        let mtt = MTBuilder::new().init();
         let lp = Location::new();
         b.iter(|| {
             for _ in 0..100000 {
-                black_box(mt.control_point(&lp));
+                black_box(mtt.control_point(&lp));
             }
         });
     }
 
     #[bench]
     fn bench_multi_threaded_control_point(b: &mut Bencher) {
-        let mt_arc = Arc::new(MT::new());
-        let lp_arc = Arc::new(Location::new());
+        let mtt = MTBuilder::new().init();
+        let l_arc = Arc::new(Location::new());
         b.iter(|| {
             let mut thrs = vec![];
             for _ in 0..4 {
-                let mt_arc_cl = Arc::clone(&mt_arc);
-                let lp_arc_cl = Arc::clone(&lp_arc);
-                let t = thread::Builder::new()
-                    .spawn(move || {
+                let l_arc_cl = Arc::clone(&l_arc);
+                let t = mtt
+                    .mt()
+                    .spawn(move |mtt| {
                         for _ in 0..100000 {
-                            black_box(mt_arc_cl.control_point(&*lp_arc_cl));
+                            black_box(mtt.control_point(&*l_arc_cl));
                         }
                     })
                     .unwrap();
