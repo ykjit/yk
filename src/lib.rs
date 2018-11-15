@@ -33,8 +33,6 @@
 #![feature(integer_atomics)]
 #![feature(test)]
 
-extern crate test;
+pub mod mt;
 
-pub mod metatracer;
-
-pub use metatracer::{Location, MetaTracer};
+pub use self::mt::{Location, MT};
