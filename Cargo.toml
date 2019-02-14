@@ -1,0 +1,16 @@
+[package]
+name = "ykmir"
+version = "0.1.0"
+authors = ["Edd Barrett <vext01@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+serde = "1.0"
+serde_derive = "1.0"
+fallible-iterator = "0.1"
+
+# We are using a git version to work around a bug:
+# https://github.com/3Hren/msgpack-rust/issues/183
+[dependencies.rmp-serde]
+git = "https://github.com/3Hren/msgpack-rust"
+rev = "40b3d480b20961e6eeceb416b32bcd0a3383846a"
