@@ -29,9 +29,7 @@
 ///
 ///  The version field is automatically written and checked by the `Encoder` and `Decoder`
 ///  respectively.
-
-#[macro_use]
-extern crate serde_derive;
+use serde::{Deserialize, Serialize};
 
 mod decode;
 mod encode;
