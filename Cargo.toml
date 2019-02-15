@@ -1,12 +1,11 @@
 [package]
-name = "ykmir"
+name = "ykpack"
 version = "0.1.0"
 authors = ["Edd Barrett <vext01@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-serde = "1.0"
-serde_derive = "1.0"
+serde = { version = "1.0", features = ["derive"] }
 fallible-iterator = "0.1"
 
 # We are using a git version to work around a bug:
