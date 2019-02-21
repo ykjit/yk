@@ -125,6 +125,7 @@ pub enum Terminator {
     Call {
         operand: CallOperand,
         cleanup_bb: Option<BasicBlockIndex>,
+        ret_bb: Option<BasicBlockIndex>,
     },
     Assert {
         target_bb: BasicBlockIndex,
