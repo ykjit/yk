@@ -44,8 +44,8 @@ pub type BasicBlockIndex = u32;
 /// A mirror of the compiler's notion of a "definition ID".
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct DefId {
-    crate_hash: CrateHash,
-    def_idx: DefIndex,
+    pub crate_hash: CrateHash,
+    pub def_idx: DefIndex,
 }
 
 impl DefId {
@@ -60,8 +60,8 @@ impl DefId {
 /// A MIR.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct Mir {
-    def_id: DefId,
-    blocks: Vec<BasicBlock>,
+    pub def_id: DefId,
+    pub blocks: Vec<BasicBlock>,
 }
 
 impl Mir {
@@ -74,8 +74,8 @@ impl Mir {
 /// A MIR block.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct BasicBlock {
-    stmts: Vec<Statement>,
-    term: Terminator,
+    pub stmts: Vec<Statement>,
+    pub term: Terminator,
 }
 
 impl BasicBlock {
