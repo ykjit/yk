@@ -7,28 +7,28 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-/// ykpack -- Serialiser and deserialiser for carrying data from compile-time to run-time.
-///
-/// This crate allows ykrustc to serialise various compile-time information for later
-/// deserialisation by the Yorick runtime.
-///
-/// The encoder and decoder API is structured in such a way that each item -- or "Pack" -- can be
-/// streamed to/from the serialised format one item at a time. This helps to reduce memory
-/// consumption.
-///
-/// The MIR data is serialised in the msgpack format in the following form:
-///
-///  -----------
-///  pack_0:             \
-///  ...                  - Packs.
-///  pack_n              /
-///  sentinel           -- End of packs marker.
-///  -----------
-///
-///  Where each pack_i is an instance of `Some(Pack)` and the sentinel is a `None`.
-///
-///  The version field is automatically written and checked by the `Encoder` and `Decoder`
-///  respectively.
+//! ykpack -- Serialiser and deserialiser for carrying data from compile-time to run-time.
+//!
+//! This crate allows ykrustc to serialise various compile-time information for later
+//! deserialisation by the Yorick runtime.
+//!
+//! The encoder and decoder API is structured in such a way that each item -- or "Pack" -- can be
+//! streamed to/from the serialised format one item at a time. This helps to reduce memory
+//! consumption.
+//!
+//! The MIR data is serialised in the msgpack format in the following form:
+//!
+//!  -----------
+//!  pack_0:             \
+//!  ...                  - Packs.
+//!  pack_n              /
+//!  sentinel           -- End of packs marker.
+//!  -----------
+//!
+//!  Where each pack_i is an instance of `Some(Pack)` and the sentinel is a `None`.
+//!
+//!  The version field is automatically written and checked by the `Encoder` and `Decoder`
+//!  respectively.
 
 mod decode;
 mod encode;

@@ -31,7 +31,6 @@ impl DefId {
     }
 }
 
-/// A MIR.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct Mir {
     pub def_id: DefId,
@@ -39,13 +38,11 @@ pub struct Mir {
 }
 
 impl Mir {
-    /// Create a new MIR.
     pub fn new(def_id: DefId, blocks: Vec<BasicBlock>) -> Self {
         Self { def_id, blocks }
     }
 }
 
-/// A MIR block.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct BasicBlock {
     pub stmts: Vec<Statement>,
@@ -53,13 +50,11 @@ pub struct BasicBlock {
 }
 
 impl BasicBlock {
-    /// Create a new MIR block.
     pub fn new(stmts: Vec<Statement>, term: Terminator) -> Self {
         Self { stmts, term }
     }
 }
 
-/// A Statement.
 /// FIXME to be populated.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Statement {
@@ -75,7 +70,7 @@ pub enum CallOperand {
     Unknown, // FIXME -- Find out what else. Closures jump to mind.
 }
 
-/// A MIR block terminator.
+/// A basic block terminator.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Terminator {
     Goto {
