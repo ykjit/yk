@@ -85,7 +85,7 @@ impl BasicBlock {
     }
 }
 
-/// A MIR statement.
+/// A Statement.
 /// FIXME to be populated.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Statement {
