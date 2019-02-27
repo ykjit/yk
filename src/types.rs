@@ -105,12 +105,6 @@ pub enum Terminator {
         drop_bb: Option<BasicBlockIndex>,
     },
     GeneratorDrop,
-    FalseEdges {
-        real_target_bb: BasicBlockIndex,
-    },
-    FalseUnwind {
-        real_target_bb: BasicBlockIndex,
-    },
 }
 
 /// The top-level pack type.
