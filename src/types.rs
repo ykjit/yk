@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 pub type CrateHash = u64;
 pub type DefIndex = u32;
 pub type BasicBlockIndex = u32;
+pub type LocalIndex = u32;
 
 /// A mirror of the compiler's notion of a "definition ID".
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
@@ -55,10 +56,24 @@ impl BasicBlock {
     }
 }
 
-/// FIXME to be populated.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Statement {
     Nop,
+    Assign(Place, Rvalue),
+    Unimplemented, // FIXME
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+pub enum Place {
+    Local(LocalIndex),
+    Unimplemented, // FIXME
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+pub enum Rvalue {
+    Place(Place),
+    Phi(Vec<Place>),
+    Unimplemented, // FIXME
 }
 
 /// A call target.
