@@ -10,6 +10,7 @@
 //! Types for the Yorick intermediate language.
 
 use serde::{Deserialize, Serialize};
+use std::fmt::{self, Display};
 
 pub type CrateHash = u64;
 pub type DefIndex = u32;
@@ -32,15 +33,38 @@ impl DefId {
     }
 }
 
+impl Display for DefId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "DefId({}, {})", self.crate_hash, self.def_idx)
+    }
+}
+
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct Mir {
     pub def_id: DefId,
+    pub item_path_str: String,
     pub blocks: Vec<BasicBlock>,
 }
 
 impl Mir {
-    pub fn new(def_id: DefId, blocks: Vec<BasicBlock>) -> Self {
-        Self { def_id, blocks }
+    pub fn new(def_id: DefId, item_path_str: String, blocks: Vec<BasicBlock>) -> Self {
+        Self {
+            def_id,
+            item_path_str,
+            blocks,
+        }
+    }
+}
+
+impl Display for Mir {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "[Begin TIR for {}]", self.item_path_str)?;
+        writeln!(f, "    {}:", self.def_id)?;
+        for (i, b) in self.blocks.iter().enumerate() {
+            write!(f, "    bb{}:\n{}", i, b)?;
+        }
+        writeln!(f, "[End TIR for {}]", self.item_path_str)?;
+        Ok(())
     }
 }
 
@@ -56,11 +80,26 @@ impl BasicBlock {
     }
 }
 
+impl Display for BasicBlock {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for s in self.stmts.iter() {
+            write!(f, "        {}", s)?;
+        }
+        writeln!(f, "        term: {}\n", self.term)
+    }
+}
+
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Statement {
     Nop,
     Assign(Place, Rvalue),
     Unimplemented, // FIXME
+}
+
+impl Display for Statement {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "{:?}", self)
+    }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
@@ -122,8 +161,21 @@ pub enum Terminator {
     GeneratorDrop,
 }
 
+impl Display for Terminator {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 /// The top-level pack type.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Pack {
     Mir(Mir),
+}
+
+impl Display for Pack {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let Pack::Mir(mir) = self;
+        write!(f, "{}", mir)
+    }
 }
