@@ -40,7 +40,9 @@ pub use types::*;
 
 #[cfg(test)]
 mod tests {
-    use super::{BasicBlock, Decoder, DefId, Encoder, Mir, Pack, Statement, Terminator};
+    use super::{
+        BasicBlock, Decoder, DefId, Encoder, Mir, Pack, Place, Rvalue, Statement, Terminator,
+    };
     use fallible_iterator::{self, FallibleIterator};
     use std::io::{Cursor, Seek, SeekFrom};
 
@@ -66,7 +68,7 @@ mod tests {
             BasicBlock::new(stmts1_b1, dummy_term.clone()),
             BasicBlock::new(stmts1_b2, dummy_term.clone()),
         ];
-        let mir1 = Pack::Mir(Mir::new(DefId::new(1, 2), blocks1));
+        let mir1 = Pack::Mir(Mir::new(DefId::new(1, 2), String::from("item1"), blocks1));
 
         let stmts2_b1 = vec![Statement::Nop; 7];
         let stmts2_b2 = vec![Statement::Nop; 200];
@@ -76,7 +78,7 @@ mod tests {
             BasicBlock::new(stmts2_b2, dummy_term.clone()),
             BasicBlock::new(stmts2_b3, dummy_term.clone()),
         ];
-        let mir2 = Pack::Mir(Mir::new(DefId::new(4, 5), blocks2));
+        let mir2 = Pack::Mir(Mir::new(DefId::new(4, 5), String::from("item2"), blocks2));
 
         vec![mir1, mir2]
     }
@@ -129,5 +131,64 @@ mod tests {
             enc.serialise(md.clone()).unwrap();
         }
         // We expect this to panic, as the encoder wasn't finalised with a call to `enc.done()`.
+    }
+
+    #[test]
+    fn test_text_dump() {
+        let stmts_t1_b0 = vec![
+            Statement::Nop,
+            Statement::Assign(Place::Local(42), Rvalue::Place(Place::Local(43))),
+            Statement::Assign(
+                Place::Local(44),
+                Rvalue::Phi(vec![Place::Local(100), Place::Local(200)]),
+            ),
+        ];
+        let term_t1_b0 = Terminator::Abort;
+        let stmts_t1_b1 = vec![Statement::Unimplemented];
+        let term_t1_b1 = Terminator::Goto { target_bb: 50 };
+
+        let blocks_t1 = vec![
+            BasicBlock::new(stmts_t1_b0, term_t1_b0),
+            BasicBlock::new(stmts_t1_b1, term_t1_b1),
+        ];
+
+        let tirs = vec![
+            Pack::Mir(Mir::new(DefId::new(1, 2), String::from("item1"), blocks_t1)),
+            Pack::Mir(Mir::new(
+                DefId::new(3, 4),
+                String::from("item2"),
+                Vec::new(),
+            )),
+        ];
+
+        let mut got = String::new();
+        for pack in tirs {
+            got.push_str(&format!("{}", pack));
+        }
+        let got_lines = got.split("\n");
+
+        let expect = "[Begin TIR for item1]\n\
+	    DefId(1, 2):
+	    bb0:
+		Nop
+		Assign(Local(42), Place(Local(43)))
+		Assign(Local(44), Phi([Local(100), Local(200)]))
+		term: Abort
+
+	    bb1:
+		Unimplemented
+		term: Goto { target_bb: 50 }
+
+	[End TIR for item1]
+	[Begin TIR for item2]
+	    DefId(3, 4):
+	[End TIR for item2]\n";
+
+        let expect_lines = expect.split("\n");
+
+        assert_eq!(got_lines.clone().count(), expect_lines.clone().count());
+        for (got, expect) in got_lines.zip(expect_lines) {
+            assert_eq!(got.trim(), expect.trim());
+        }
     }
 }
