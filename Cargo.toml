@@ -1,0 +1,6 @@
+[workspace]
+members=[
+    "ykpack",
+    "ykrt",
+    "yktrace"
+]
