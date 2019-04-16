@@ -1,0 +1,8 @@
+[package]
+name = "yktrace"
+version = "0.1.0"
+authors = ["Edd Barrett <vext01@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+libc = "0.2"
