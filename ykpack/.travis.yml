@@ -1,0 +1,15 @@
+language: rust
+
+rust:
+    - stable
+    - nightly
+
+before_script:
+    - "[ \"$TRAVIS_RUST_VERSION\" == 'nightly' ] || rustup component add rustfmt"
+
+script:
+    - cargo build --tests
+    - cargo test
+    - "[ \"$TRAVIS_RUST_VERSION\" == 'nightly' ] || cargo fmt --all -- --check"
+
+cache: cargo
