@@ -120,14 +120,6 @@ impl Statement {
         }
     }
 
-    pub fn defs_vars(&self) -> Vec<LocalIndex> {
-        match self {
-            Statement::Nop | Statement::Unimplemented => vec![],
-            Statement::Assign(p, _) => p.defs_vars(),
-            Statement::SsaEntryDefs(vs) => vs.clone(),
-        }
-    }
-
     pub fn is_phi(&self) -> bool {
         if let Statement::Assign(_, Rvalue::Phi(..)) = self {
             return true;
@@ -162,13 +154,6 @@ impl Place {
     fn defs_vars_mut(&mut self) -> Vec<&mut LocalIndex> {
         match self {
             Place::Local(l) => vec![l],
-            Place::Unimplemented => vec![],
-        }
-    }
-
-    fn defs_vars(&self) -> Vec<LocalIndex> {
-        match self {
-            Place::Local(l) => vec![*l],
             Place::Unimplemented => vec![],
         }
     }
