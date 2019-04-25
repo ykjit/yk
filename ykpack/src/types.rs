@@ -203,7 +203,10 @@ pub enum Terminator {
     },
     Resume,
     Abort,
-    Return(LocalIndex), // Because TIR is in SSA, we have to say which SSA variable to return.
+    Return {
+        // Because TIR is in SSA, we have to say which SSA variable to return.
+        local: LocalIndex
+    },
     Unreachable,
     Drop {
         target_bb: BasicBlockIndex,
@@ -246,7 +249,7 @@ impl Terminator {
             | Terminator::Resume
             | Terminator::Abort => Vec::new(),
             Terminator::SwitchInt { .. } => Vec::new(), // FIXME has a condition which will use.
-            Terminator::Return(ref mut v) => vec![v],
+            Terminator::Return { local: ref mut v } => vec![v],
             Terminator::Call { .. } => Vec::new(), // FIXME, may use a local variable.
             Terminator::Assert { .. } => Vec::new(), // FIXME has a condition var.
             Terminator::Yield { .. } => Vec::new(), // FIXME check semantics of this terminator.
