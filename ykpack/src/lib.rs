@@ -41,7 +41,8 @@ pub use types::*;
 #[cfg(test)]
 mod tests {
     use super::{
-        BasicBlock, Decoder, DefId, Encoder, Mir, Pack, Place, Rvalue, Statement, Terminator,
+        BasicBlock, Decoder, DefId, Encoder, Mir, Operand, Pack, Place, PlaceBase, Rvalue,
+        Statement, Terminator,
     };
     use fallible_iterator::{self, FallibleIterator};
     use std::io::{Cursor, Seek, SeekFrom};
@@ -137,10 +138,13 @@ mod tests {
     fn test_text_dump() {
         let stmts_t1_b0 = vec![
             Statement::Nop,
-            Statement::Assign(Place::Local(42), Rvalue::Place(Place::Local(43))),
             Statement::Assign(
-                Place::Local(44),
-                Rvalue::Phi(vec![Place::Local(100), Place::Local(200)]),
+                Place::Base(PlaceBase::Local(42)),
+                Rvalue::Use(Operand::Place(Place::Base(PlaceBase::Local(43)))),
+            ),
+            Statement::Assign(
+                Place::Base(PlaceBase::Local(44)),
+                Rvalue::Use(Operand::Place(Place::Base(PlaceBase::Local(300)))),
             ),
         ];
         let term_t1_b0 = Terminator::Abort;
@@ -171,8 +175,8 @@ mod tests {
 	    DefId(1, 2):
 	    bb0:
 		Nop
-		Assign(Local(42), Place(Local(43)))
-		Assign(Local(44), Phi([Local(100), Local(200)]))
+		Assign(Base(Local(42)), Use(Place(Base(Local(43)))))
+                Assign(Base(Local(44)), Use(Place(Base(Local(300)))))
 		term: Abort
 
 	    bb1:

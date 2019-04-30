@@ -10,12 +10,17 @@
 //! Types for the Yorick intermediate language.
 
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
+use std::{
+    fmt::{self, Display},
+    marker::PhantomData,
+};
 
 pub type CrateHash = u64;
 pub type DefIndex = u32;
 pub type BasicBlockIndex = u32;
 pub type LocalIndex = u32;
+pub type VariantIndex = u32;
+pub type PromotedIndex = u32;
 
 /// A mirror of the compiler's notion of a "definition ID".
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
@@ -93,7 +98,8 @@ impl Display for BasicBlock {
 pub enum Statement {
     Nop,
     Assign(Place, Rvalue),
-    Unimplemented, // FIXME
+    SetDiscriminant(Place, VariantIndex),
+    Unimplemented,
 }
 
 impl Display for Statement {
@@ -102,17 +108,110 @@ impl Display for Statement {
     }
 }
 
+/// A place for storing things.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Place {
+    Base(PlaceBase),
+    Projection(PlaceProjection),
+}
+
+/// The "base" of a place projection.
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+pub enum PlaceBase {
     Local(LocalIndex),
-    Unimplemented, // FIXME
+    Static(DefId),
+    Promoted(PromotedIndex),
+}
+
+/// A projection (deref, index, field access, ...).
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+pub struct PlaceProjection {
+    pub base: Box<Place>,
+    pub elem: ProjectionElem<LocalIndex>,
+}
+
+/// Describes a projection operation upon a projection base.
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+pub enum ProjectionElem<V> {
+    Unimplemented(PhantomData<V>), // FIXME
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub enum Rvalue {
+pub enum Operand {
+    /// In MIR this is either Move or Copy.
     Place(Place),
-    Phi(Vec<Place>),
+    Unimplemented, // FIXME constants
+}
+
+/// Borrow descriptions.
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+pub enum BorrowKind {
+    Shared,
+    Shallow,
+    Unique,
+    Mut, // FIXME two_phase borrow.
+}
+
+/// Things that can appear on the right-hand side of an assignment.
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+pub enum Rvalue {
+    Use(Operand),
+    Repeat(Operand, u64),
+    Ref(BorrowKind, Place), // We do not store the region.
+    Len(Place),
+    BinaryOp(BinOp, Operand, Operand),
+    CheckedBinaryOp(BinOp, Operand, Operand),
+    NullaryOp(NullOp),
+    UnaryOp(UnOp, Operand),
+    Discriminant(Place),
+    Aggregate(AggregateKind, Vec<Operand>),
     Unimplemented, // FIXME
+}
+
+/// Kinds of aggregate types.
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+pub enum AggregateKind {
+    Array,
+    Tuple,
+    Closure(DefId),
+    Generator(DefId),
+    Unimplemented,
+}
+
+/// Binary operations.
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+pub enum BinOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+    BitXor,
+    BitAnd,
+    BitOr,
+    Shl,
+    Shr,
+    Eq,
+    Lt,
+    Le,
+    Ne,
+    Ge,
+    Gt,
+    Offset,
+}
+
+// Operations with no arguments.
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+pub enum NullOp {
+    SizeOf,
+    Box,
+}
+
+// Unary operations.
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+pub enum UnOp {
+    Not,
+    Neg,
 }
 
 /// A call target.
