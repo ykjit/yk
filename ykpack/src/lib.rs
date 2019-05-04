@@ -172,21 +172,21 @@ mod tests {
         let got_lines = got.split("\n");
 
         let expect = "[Begin TIR for item1]\n\
-	    DefId(1, 2):
-	    bb0:
-		Nop
-		Assign(Base(Local(42)), Use(Place(Base(Local(43)))))
+            DefId(1, 2):
+            bb0:
+                Nop
+                Assign(Base(Local(42)), Use(Place(Base(Local(43)))))
                 Assign(Base(Local(44)), Use(Place(Base(Local(300)))))
-		term: Abort
+                term: Abort
 
-	    bb1:
-		Unimplemented
-		term: Goto { target_bb: 50 }
+            bb1:
+                Unimplemented
+                term: Goto { target_bb: 50 }
 
-	[End TIR for item1]
-	[Begin TIR for item2]
-	    DefId(3, 4):
-	[End TIR for item2]\n";
+        [End TIR for item1]
+        [Begin TIR for item2]
+            DefId(3, 4):
+        [End TIR for item2]\n";
 
         let expect_lines = expect.split("\n");
 
