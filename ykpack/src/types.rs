@@ -10,10 +10,7 @@
 //! Types for the Yorick intermediate language.
 
 use serde::{Deserialize, Serialize};
-use std::{
-    fmt::{self, Display},
-    marker::PhantomData,
-};
+use std::fmt::{self, Display};
 
 pub type CrateHash = u64;
 pub type DefIndex = u32;
@@ -21,6 +18,7 @@ pub type BasicBlockIndex = u32;
 pub type LocalIndex = u32;
 pub type VariantIndex = u32;
 pub type PromotedIndex = u32;
+pub type FieldIndex = u32;
 
 /// A mirror of the compiler's notion of a "definition ID".
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
@@ -112,7 +110,7 @@ impl Display for Statement {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Place {
     Base(PlaceBase),
-    Projection(PlaceProjection),
+    Projection(Projection),
 }
 
 /// The "base" of a place projection.
@@ -125,22 +123,94 @@ pub enum PlaceBase {
 
 /// A projection (deref, index, field access, ...).
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub struct PlaceProjection {
-    pub base: Box<Place>,
-    pub elem: ProjectionElem<LocalIndex>,
-}
+pub struct Projection(pub Box<Place>, pub ProjectionElem);
 
 /// Describes a projection operation upon a projection base.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub enum ProjectionElem<V> {
-    Unimplemented(PhantomData<V>), // FIXME
+pub enum ProjectionElem {
+    Deref,
+    Field(FieldIndex),
+    Index(LocalIndex),
+    ConstantIndex {
+        offset: u32,
+        min_length: u32,
+        from_end: bool,
+    },
+    Subslice {
+        from: u32,
+        to: u32,
+    },
+    Downcast(VariantIndex),
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Operand {
     /// In MIR this is either Move or Copy.
     Place(Place),
-    Unimplemented, // FIXME constants
+    Constant(Constant),
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+pub enum Constant {
+    UnsignedInt(UnsignedInt),
+    SignedInt(SignedInt),
+    Unimplemented,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+pub enum UnsignedInt {
+    Usize(usize),
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
+    U128 { hi: u64, lo: u64 },
+    Unimplemented,
+}
+
+impl UnsignedInt {
+    pub fn from_u128(val: u128) -> Self {
+        UnsignedInt::U128 {
+            hi: (val >> 64) as u64,
+            lo: val as u64,
+        }
+    }
+
+    /// Returns the u128 value from a `Integer::U128`. Errors if the enum is a different variant.
+    pub fn u128(&self) -> Result<u128, ()> {
+        match self {
+            UnsignedInt::U128 { hi, lo } => Ok((*hi as u128) << 64 | *lo as u128),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+pub enum SignedInt {
+    Isize(isize),
+    I8(i8),
+    I16(i16),
+    I32(i32),
+    I64(i64),
+    I128 { hi: u64, lo: u64 },
+    Unimplemented,
+}
+
+impl SignedInt {
+    pub fn from_i128(val: i128) -> Self {
+        SignedInt::I128 {
+            hi: (val >> 64) as u64,
+            lo: val as u64,
+        }
+    }
+
+    /// Returns the i128 value from a `Integer::U128`. Errors if the enum is a different variant.
+    pub fn i128(&self) -> Result<i128, ()> {
+        match self {
+            SignedInt::I128 { hi, lo } => Ok((*hi as i128) << 64 | *lo as i128),
+            _ => Err(()),
+        }
+    }
 }
 
 /// Borrow descriptions.
@@ -276,5 +346,22 @@ impl Display for Pack {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let Pack::Mir(mir) = self;
         write!(f, "{}", mir)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SignedInt, UnsignedInt};
+
+    #[test]
+    fn u128_round_trip() {
+        let val = std::u128::MAX - 427819;
+        assert_eq!(UnsignedInt::from_u128(val).u128().unwrap(), val);
+    }
+
+    #[test]
+    fn i128_round_trip() {
+        let val = std::i128::MIN + 77;
+        assert_eq!(SignedInt::from_i128(val).i128().unwrap(), val);
     }
 }
