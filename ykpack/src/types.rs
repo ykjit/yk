@@ -16,9 +16,6 @@ pub type CrateHash = u64;
 pub type DefIndex = u32;
 pub type BasicBlockIndex = u32;
 pub type LocalIndex = u32;
-pub type VariantIndex = u32;
-pub type PromotedIndex = u32;
-pub type FieldIndex = u32;
 
 /// A mirror of the compiler's notion of a "definition ID".
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
@@ -95,8 +92,6 @@ impl Display for BasicBlock {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Statement {
     Nop,
-    Assign(Place, Rvalue),
-    SetDiscriminant(Place, VariantIndex),
     Unimplemented,
 }
 
@@ -104,50 +99,6 @@ impl Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "{:?}", self)
     }
-}
-
-/// A place for storing things.
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub enum Place {
-    Base(PlaceBase),
-    Projection(Projection),
-}
-
-/// The "base" of a place projection.
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub enum PlaceBase {
-    Local(LocalIndex),
-    Static(DefId),
-    Promoted(PromotedIndex),
-}
-
-/// A projection (deref, index, field access, ...).
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub struct Projection(pub Box<Place>, pub ProjectionElem);
-
-/// Describes a projection operation upon a projection base.
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub enum ProjectionElem {
-    Deref,
-    Field(FieldIndex),
-    Index(LocalIndex),
-    ConstantIndex {
-        offset: u32,
-        min_length: u32,
-        from_end: bool,
-    },
-    Subslice {
-        from: u32,
-        to: u32,
-    },
-    Downcast(VariantIndex),
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub enum Operand {
-    /// In MIR this is either Move or Copy.
-    Place(Place),
-    Constant(Constant),
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
@@ -211,77 +162,6 @@ impl SignedInt {
             _ => Err(()),
         }
     }
-}
-
-/// Borrow descriptions.
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub enum BorrowKind {
-    Shared,
-    Shallow,
-    Unique,
-    Mut, // FIXME two_phase borrow.
-}
-
-/// Things that can appear on the right-hand side of an assignment.
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub enum Rvalue {
-    Use(Operand),
-    Repeat(Operand, u64),
-    Ref(BorrowKind, Place), // We do not store the region.
-    Len(Place),
-    BinaryOp(BinOp, Operand, Operand),
-    CheckedBinaryOp(BinOp, Operand, Operand),
-    NullaryOp(NullOp),
-    UnaryOp(UnOp, Operand),
-    Discriminant(Place),
-    Aggregate(AggregateKind, Vec<Operand>),
-    Unimplemented, // FIXME
-}
-
-/// Kinds of aggregate types.
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub enum AggregateKind {
-    Array,
-    Tuple,
-    Closure(DefId),
-    Generator(DefId),
-    Unimplemented,
-}
-
-/// Binary operations.
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub enum BinOp {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Rem,
-    BitXor,
-    BitAnd,
-    BitOr,
-    Shl,
-    Shr,
-    Eq,
-    Lt,
-    Le,
-    Ne,
-    Ge,
-    Gt,
-    Offset,
-}
-
-// Operations with no arguments.
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub enum NullOp {
-    SizeOf,
-    Box,
-}
-
-// Unary operations.
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub enum UnOp {
-    Not,
-    Neg,
 }
 
 /// A call target.
