@@ -39,14 +39,16 @@ impl Display for DefId {
     }
 }
 
+/// A tracing IR pack.
+/// Each TIR instance maps to exactly one MIR instance.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub struct Mir {
+pub struct Tir {
     pub def_id: DefId,
     pub item_path_str: String,
     pub blocks: Vec<BasicBlock>,
 }
 
-impl Mir {
+impl Tir {
     pub fn new(def_id: DefId, item_path_str: String, blocks: Vec<BasicBlock>) -> Self {
         Self {
             def_id,
@@ -56,7 +58,7 @@ impl Mir {
     }
 }
 
-impl Display for Mir {
+impl Display for Tir {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "[Begin TIR for {}]", self.item_path_str)?;
         writeln!(f, "    {}:", self.def_id)?;
@@ -219,13 +221,13 @@ impl Display for Terminator {
 /// The top-level pack type.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Pack {
-    Mir(Mir),
+    Tir(Tir),
 }
 
 impl Display for Pack {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let Pack::Mir(mir) = self;
-        write!(f, "{}", mir)
+        let Pack::Tir(tir) = self;
+        write!(f, "{}", tir)
     }
 }
 
