@@ -40,10 +40,7 @@ pub use types::*;
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        BasicBlock, Decoder, DefId, Encoder, Mir, Operand, Pack, Place, PlaceBase, Rvalue,
-        Statement, Terminator,
-    };
+    use super::{BasicBlock, Decoder, DefId, Encoder, Pack, Statement, Terminator, Tir};
     use fallible_iterator::{self, FallibleIterator};
     use std::io::{Cursor, Seek, SeekFrom};
 
@@ -69,7 +66,7 @@ mod tests {
             BasicBlock::new(stmts1_b1, dummy_term.clone()),
             BasicBlock::new(stmts1_b2, dummy_term.clone()),
         ];
-        let mir1 = Pack::Mir(Mir::new(DefId::new(1, 2), String::from("item1"), blocks1));
+        let tir1 = Pack::Tir(Tir::new(DefId::new(1, 2), String::from("item1"), blocks1));
 
         let stmts2_b1 = vec![Statement::Nop; 7];
         let stmts2_b2 = vec![Statement::Nop; 200];
@@ -79,9 +76,9 @@ mod tests {
             BasicBlock::new(stmts2_b2, dummy_term.clone()),
             BasicBlock::new(stmts2_b3, dummy_term.clone()),
         ];
-        let mir2 = Pack::Mir(Mir::new(DefId::new(4, 5), String::from("item2"), blocks2));
+        let tir2 = Pack::Tir(Tir::new(DefId::new(4, 5), String::from("item2"), blocks2));
 
-        vec![mir1, mir2]
+        vec![tir1, tir2]
     }
 
     // Check serialising and deserialising works for zero packs.
@@ -136,17 +133,7 @@ mod tests {
 
     #[test]
     fn test_text_dump() {
-        let stmts_t1_b0 = vec![
-            Statement::Nop,
-            Statement::Assign(
-                Place::Base(PlaceBase::Local(42)),
-                Rvalue::Use(Operand::Place(Place::Base(PlaceBase::Local(43)))),
-            ),
-            Statement::Assign(
-                Place::Base(PlaceBase::Local(44)),
-                Rvalue::Use(Operand::Place(Place::Base(PlaceBase::Local(300)))),
-            ),
-        ];
+        let stmts_t1_b0 = vec![Statement::Nop];
         let term_t1_b0 = Terminator::Abort;
         let stmts_t1_b1 = vec![Statement::Unimplemented];
         let term_t1_b1 = Terminator::Goto { target_bb: 50 };
@@ -157,8 +144,8 @@ mod tests {
         ];
 
         let tirs = vec![
-            Pack::Mir(Mir::new(DefId::new(1, 2), String::from("item1"), blocks_t1)),
-            Pack::Mir(Mir::new(
+            Pack::Tir(Tir::new(DefId::new(1, 2), String::from("item1"), blocks_t1)),
+            Pack::Tir(Tir::new(
                 DefId::new(3, 4),
                 String::from("item2"),
                 Vec::new(),
@@ -175,8 +162,6 @@ mod tests {
             DefId(1, 2):
             bb0:
                 Nop
-                Assign(Base(Local(42)), Use(Place(Base(Local(43)))))
-                Assign(Base(Local(44)), Use(Place(Base(Local(300)))))
                 term: Abort
 
             bb1:
