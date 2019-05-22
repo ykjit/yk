@@ -44,7 +44,7 @@ macro_rules! new_ser128 {
 
         impl Display for $n {
             fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                write!(f, "$n({})", self.val())
+                write!(f, "{}({})", stringify!($n), self.val())
             }
         }
     };
@@ -281,13 +281,22 @@ pub enum CallOperand {
     Unknown, // FIXME -- Find out what else. Closures jump to mind.
 }
 
+impl Display for CallOperand {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            CallOperand::Fn(def_id) => write!(f, "{}", def_id),
+            CallOperand::Unknown => write!(f, "unknown"),
+        }
+    }
+}
+
 /// A basic block terminator.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Terminator {
-    Goto {
-        target_bb: BasicBlockIndex,
-    },
+    Goto(BasicBlockIndex),
     SwitchInt {
+        local: Local,
+        values: Vec<SerU128>,
         target_bbs: Vec<BasicBlockIndex>,
     },
     Resume,
@@ -316,11 +325,90 @@ pub enum Terminator {
         drop_bb: Option<BasicBlockIndex>,
     },
     GeneratorDrop,
+    Unimplemented, // FIXME will eventually disappear.
 }
 
 impl Display for Terminator {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self)
+        match self {
+            Terminator::Goto(bb) => write!(f, "goto bb{}", bb),
+            Terminator::SwitchInt {
+                local,
+                values,
+                target_bbs,
+            } => write!(
+                f,
+                "switch_int local={}, vals=[{}], targets=[{}]",
+                local,
+                values
+                    .iter()
+                    .map(|b| format!("{}", b))
+                    .collect::<Vec<String>>()
+                    .join(", "),
+                target_bbs
+                    .iter()
+                    .map(|b| format!("{}", b))
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            ),
+            Terminator::Resume => write!(f, "resume"),
+            Terminator::Abort => write!(f, "abort"),
+            Terminator::Return => write!(f, "return"),
+            Terminator::Unreachable => write!(f, "unreachable"),
+            Terminator::Drop {
+                target_bb,
+                unwind_bb,
+            } => write!(
+                f,
+                "drop target=bb{}, unwind={}",
+                target_bb,
+                opt_bb_as_str(unwind_bb)
+            ),
+            Terminator::DropAndReplace {
+                target_bb,
+                unwind_bb,
+            } => write!(
+                f,
+                "drop_and_replace target=bb{}, unwind={}",
+                target_bb,
+                opt_bb_as_str(unwind_bb)
+            ),
+            Terminator::Call {
+                operand,
+                cleanup_bb,
+                ret_bb,
+            } => write!(
+                f,
+                "call target={}, cleanup={}, return_to={}",
+                operand,
+                opt_bb_as_str(cleanup_bb),
+                opt_bb_as_str(ret_bb)
+            ),
+            Terminator::Assert {
+                target_bb,
+                cleanup_bb,
+            } => write!(
+                f,
+                "assert target=bb{}, cleanup={}",
+                target_bb,
+                opt_bb_as_str(cleanup_bb)
+            ),
+            Terminator::Yield { resume_bb, drop_bb } => write!(
+                f,
+                "yield resume=bb{}, drop={}",
+                resume_bb,
+                opt_bb_as_str(drop_bb)
+            ),
+            Terminator::GeneratorDrop => write!(f, "generator_drop"),
+            Terminator::Unimplemented => write!(f, "unimplemented"),
+        }
+    }
+}
+
+fn opt_bb_as_str(opt_bb: &Option<BasicBlockIndex>) -> String {
+    match opt_bb {
+        Some(bb) => format!("bb{}", bb),
+        _ => String::from("none"),
     }
 }
 
