@@ -19,6 +19,40 @@ pub type LocalIndex = u32;
 pub type TyIndex = u32;
 pub type FieldIndex = u32;
 
+/// rmp-serde serialisable 128-bit numeric types, to work around:
+/// https://github.com/3Hren/msgpack-rust/issues/169
+macro_rules! new_ser128 {
+    ($n: ident, $t: ty) => {
+        #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+        pub struct $n {
+            hi: u64,
+            lo: u64,
+        }
+
+        impl $n {
+            pub fn new(val: $t) -> Self {
+                Self {
+                    hi: (val >> 64) as u64,
+                    lo: val as u64,
+                }
+            }
+
+            pub fn val(&self) -> $t {
+                (self.hi as $t) << 64 | self.lo as $t
+            }
+        }
+
+        impl Display for $n {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, "$n({})", self.val())
+            }
+        }
+    };
+}
+
+new_ser128!(SerU128, u128);
+new_ser128!(SerI128, i128);
+
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Copy)]
 pub struct Local {
     idx: LocalIndex,
@@ -213,29 +247,12 @@ pub enum UnsignedInt {
     U16(u16),
     U32(u32),
     U64(u64),
-    U128 { hi: u64, lo: u64 },
+    U128(SerU128),
 }
 
 impl Display for UnsignedInt {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?}", self)
-    }
-}
-
-impl UnsignedInt {
-    pub fn from_u128(val: u128) -> Self {
-        UnsignedInt::U128 {
-            hi: (val >> 64) as u64,
-            lo: val as u64,
-        }
-    }
-
-    /// Returns the u128 value from a `Integer::U128`. Errors if the enum is a different variant.
-    pub fn u128(&self) -> Result<u128, ()> {
-        match self {
-            UnsignedInt::U128 { hi, lo } => Ok((*hi as u128) << 64 | *lo as u128),
-            _ => Err(()),
-        }
     }
 }
 
@@ -246,29 +263,12 @@ pub enum SignedInt {
     I16(i16),
     I32(i32),
     I64(i64),
-    I128 { hi: u64, lo: u64 },
+    I128(SerI128),
 }
 
 impl Display for SignedInt {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?}", self)
-    }
-}
-
-impl SignedInt {
-    pub fn from_i128(val: i128) -> Self {
-        SignedInt::I128 {
-            hi: (val >> 64) as u64,
-            lo: val as u64,
-        }
-    }
-
-    /// Returns the i128 value from a `Integer::U128`. Errors if the enum is a different variant.
-    pub fn i128(&self) -> Result<i128, ()> {
-        match self {
-            SignedInt::I128 { hi, lo } => Ok((*hi as i128) << 64 | *lo as i128),
-            _ => Err(()),
-        }
     }
 }
 
@@ -339,17 +339,17 @@ impl Display for Pack {
 
 #[cfg(test)]
 mod tests {
-    use super::{SignedInt, UnsignedInt};
+    use super::{SerI128, SerU128};
 
     #[test]
-    fn u128_round_trip() {
-        let val = std::u128::MAX - 427819;
-        assert_eq!(UnsignedInt::from_u128(val).u128().unwrap(), val);
+    fn seru128_round_trip() {
+        let val: u128 = std::u128::MAX - 427819;
+        assert_eq!(SerU128::new(val).val(), val);
     }
 
     #[test]
-    fn i128_round_trip() {
+    fn seri128_round_trip() {
         let val = std::i128::MIN + 77;
-        assert_eq!(SignedInt::from_i128(val).i128().unwrap(), val);
+        assert_eq!(SerI128::new(val).val(), val);
     }
 }
