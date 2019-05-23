@@ -122,19 +122,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "not marked done")]
-    fn test_encode_not_done() {
-        let inputs = get_sample_packs();
-        let mut curs = get_curs();
-
-        let mut enc = Encoder::from(&mut curs);
-        for md in &inputs {
-            enc.serialise(md.clone()).unwrap();
-        }
-        // We expect this to panic, as the encoder wasn't finalised with a call to `enc.done()`.
-    }
-
-    #[test]
     fn test_text_dump() {
         let stmts_t1_b0 = vec![
             Statement::Assign(
