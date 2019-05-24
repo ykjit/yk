@@ -10,7 +10,7 @@
 use crate::Pack;
 use rmp_serde::{encode, Serializer};
 use serde::Serialize;
-use std::{io::prelude::*, ops::Drop};
+use std::io::prelude::*;
 
 /// The pack encoder.
 ///
@@ -38,13 +38,5 @@ impl<'a> Encoder<'a> {
         None::<Option<Pack>>.serialize(&mut self.ser)?;
         self.done = true;
         Ok(())
-    }
-}
-
-impl<'a> Drop for Encoder<'a> {
-    fn drop(&mut self) {
-        if !self.done {
-            panic!("Encoder not marked done()");
-        }
     }
 }

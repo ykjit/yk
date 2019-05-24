@@ -122,19 +122,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "not marked done")]
-    fn test_encode_not_done() {
-        let inputs = get_sample_packs();
-        let mut curs = get_curs();
-
-        let mut enc = Encoder::from(&mut curs);
-        for md in &inputs {
-            enc.serialise(md.clone()).unwrap();
-        }
-        // We expect this to panic, as the encoder wasn't finalised with a call to `enc.done()`.
-    }
-
-    #[test]
     fn test_text_dump() {
         let stmts_t1_b0 = vec![
             Statement::Assign(
@@ -170,7 +157,7 @@ mod tests {
             ),
             Statement::Assign(Local::new(11, 0), Rvalue::Alloca(0)),
         ];
-        let term_t1_b1 = Terminator::Goto { target_bb: 50 };
+        let term_t1_b1 = Terminator::Goto(50);
 
         let blocks_t1 = vec![
             BasicBlock::new(stmts_t1_b0, term_t1_b0),
@@ -202,20 +189,20 @@ mod tests {
         $2: t0 = get_field($3: t0, 4)
         $4: t0 = U8(10)
         nop
-        Abort
+        abort
     bb1:
         $5: t0 = load($6: t0)
         store($5: t0, $4: t0)
         $7: t0 = int_add($8: t0, $9: t0)
         $7: t0 = int_sub($9: t0, $10: t0)
         $11: t0 = alloca(0)
-        Goto { target_bb: 50 }
+        goto bb50
 [End TIR for item1]
 [Begin TIR for item2]
     DefId(3, 4):
     bb0:
         unimplemented
-        Unreachable
+        unreachable
 [End TIR for item2]\n";
 
         let expect_lines = expect.split("\n");

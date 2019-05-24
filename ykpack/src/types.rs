@@ -19,6 +19,40 @@ pub type LocalIndex = u32;
 pub type TyIndex = u32;
 pub type FieldIndex = u32;
 
+/// rmp-serde serialisable 128-bit numeric types, to work around:
+/// https://github.com/3Hren/msgpack-rust/issues/169
+macro_rules! new_ser128 {
+    ($n: ident, $t: ty) => {
+        #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+        pub struct $n {
+            hi: u64,
+            lo: u64,
+        }
+
+        impl $n {
+            pub fn new(val: $t) -> Self {
+                Self {
+                    hi: (val >> 64) as u64,
+                    lo: val as u64,
+                }
+            }
+
+            pub fn val(&self) -> $t {
+                (self.hi as $t) << 64 | self.lo as $t
+            }
+        }
+
+        impl Display for $n {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, "{}({})", stringify!($n), self.val())
+            }
+        }
+    };
+}
+
+new_ser128!(SerU128, u128);
+new_ser128!(SerI128, i128);
+
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Copy)]
 pub struct Local {
     idx: LocalIndex,
@@ -213,29 +247,12 @@ pub enum UnsignedInt {
     U16(u16),
     U32(u32),
     U64(u64),
-    U128 { hi: u64, lo: u64 },
+    U128(SerU128),
 }
 
 impl Display for UnsignedInt {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?}", self)
-    }
-}
-
-impl UnsignedInt {
-    pub fn from_u128(val: u128) -> Self {
-        UnsignedInt::U128 {
-            hi: (val >> 64) as u64,
-            lo: val as u64,
-        }
-    }
-
-    /// Returns the u128 value from a `Integer::U128`. Errors if the enum is a different variant.
-    pub fn u128(&self) -> Result<u128, ()> {
-        match self {
-            UnsignedInt::U128 { hi, lo } => Ok((*hi as u128) << 64 | *lo as u128),
-            _ => Err(()),
-        }
     }
 }
 
@@ -246,29 +263,12 @@ pub enum SignedInt {
     I16(i16),
     I32(i32),
     I64(i64),
-    I128 { hi: u64, lo: u64 },
+    I128(SerI128),
 }
 
 impl Display for SignedInt {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?}", self)
-    }
-}
-
-impl SignedInt {
-    pub fn from_i128(val: i128) -> Self {
-        SignedInt::I128 {
-            hi: (val >> 64) as u64,
-            lo: val as u64,
-        }
-    }
-
-    /// Returns the i128 value from a `Integer::U128`. Errors if the enum is a different variant.
-    pub fn i128(&self) -> Result<i128, ()> {
-        match self {
-            SignedInt::I128 { hi, lo } => Ok((*hi as i128) << 64 | *lo as i128),
-            _ => Err(()),
-        }
     }
 }
 
@@ -281,13 +281,22 @@ pub enum CallOperand {
     Unknown, // FIXME -- Find out what else. Closures jump to mind.
 }
 
+impl Display for CallOperand {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            CallOperand::Fn(def_id) => write!(f, "{}", def_id),
+            CallOperand::Unknown => write!(f, "unknown"),
+        }
+    }
+}
+
 /// A basic block terminator.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Terminator {
-    Goto {
-        target_bb: BasicBlockIndex,
-    },
+    Goto(BasicBlockIndex),
     SwitchInt {
+        local: Local,
+        values: Vec<SerU128>,
         target_bbs: Vec<BasicBlockIndex>,
     },
     Resume,
@@ -316,11 +325,90 @@ pub enum Terminator {
         drop_bb: Option<BasicBlockIndex>,
     },
     GeneratorDrop,
+    Unimplemented, // FIXME will eventually disappear.
 }
 
 impl Display for Terminator {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self)
+        match self {
+            Terminator::Goto(bb) => write!(f, "goto bb{}", bb),
+            Terminator::SwitchInt {
+                local,
+                values,
+                target_bbs,
+            } => write!(
+                f,
+                "switch_int local={}, vals=[{}], targets=[{}]",
+                local,
+                values
+                    .iter()
+                    .map(|b| format!("{}", b))
+                    .collect::<Vec<String>>()
+                    .join(", "),
+                target_bbs
+                    .iter()
+                    .map(|b| format!("{}", b))
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            ),
+            Terminator::Resume => write!(f, "resume"),
+            Terminator::Abort => write!(f, "abort"),
+            Terminator::Return => write!(f, "return"),
+            Terminator::Unreachable => write!(f, "unreachable"),
+            Terminator::Drop {
+                target_bb,
+                unwind_bb,
+            } => write!(
+                f,
+                "drop target=bb{}, unwind={}",
+                target_bb,
+                opt_bb_as_str(unwind_bb)
+            ),
+            Terminator::DropAndReplace {
+                target_bb,
+                unwind_bb,
+            } => write!(
+                f,
+                "drop_and_replace target=bb{}, unwind={}",
+                target_bb,
+                opt_bb_as_str(unwind_bb)
+            ),
+            Terminator::Call {
+                operand,
+                cleanup_bb,
+                ret_bb,
+            } => write!(
+                f,
+                "call target={}, cleanup={}, return_to={}",
+                operand,
+                opt_bb_as_str(cleanup_bb),
+                opt_bb_as_str(ret_bb)
+            ),
+            Terminator::Assert {
+                target_bb,
+                cleanup_bb,
+            } => write!(
+                f,
+                "assert target=bb{}, cleanup={}",
+                target_bb,
+                opt_bb_as_str(cleanup_bb)
+            ),
+            Terminator::Yield { resume_bb, drop_bb } => write!(
+                f,
+                "yield resume=bb{}, drop={}",
+                resume_bb,
+                opt_bb_as_str(drop_bb)
+            ),
+            Terminator::GeneratorDrop => write!(f, "generator_drop"),
+            Terminator::Unimplemented => write!(f, "unimplemented"),
+        }
+    }
+}
+
+fn opt_bb_as_str(opt_bb: &Option<BasicBlockIndex>) -> String {
+    match opt_bb {
+        Some(bb) => format!("bb{}", bb),
+        _ => String::from("none"),
     }
 }
 
@@ -339,17 +427,17 @@ impl Display for Pack {
 
 #[cfg(test)]
 mod tests {
-    use super::{SignedInt, UnsignedInt};
+    use super::{SerI128, SerU128};
 
     #[test]
-    fn u128_round_trip() {
-        let val = std::u128::MAX - 427819;
-        assert_eq!(UnsignedInt::from_u128(val).u128().unwrap(), val);
+    fn seru128_round_trip() {
+        let val: u128 = std::u128::MAX - 427819;
+        assert_eq!(SerU128::new(val).val(), val);
     }
 
     #[test]
-    fn i128_round_trip() {
+    fn seri128_round_trip() {
         let val = std::i128::MIN + 77;
-        assert_eq!(SignedInt::from_i128(val).i128().unwrap(), val);
+        assert_eq!(SerI128::new(val).val(), val);
     }
 }
