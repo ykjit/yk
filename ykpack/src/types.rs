@@ -320,11 +320,6 @@ pub enum Terminator {
         target_bb: BasicBlockIndex,
         cleanup_bb: Option<BasicBlockIndex>,
     },
-    Yield {
-        resume_bb: BasicBlockIndex,
-        drop_bb: Option<BasicBlockIndex>,
-    },
-    GeneratorDrop,
     Unimplemented, // FIXME will eventually disappear.
 }
 
@@ -393,13 +388,6 @@ impl Display for Terminator {
                 target_bb,
                 opt_bb_as_str(cleanup_bb)
             ),
-            Terminator::Yield { resume_bb, drop_bb } => write!(
-                f,
-                "yield resume=bb{}, drop={}",
-                resume_bb,
-                opt_bb_as_str(drop_bb)
-            ),
-            Terminator::GeneratorDrop => write!(f, "generator_drop"),
             Terminator::Unimplemented => write!(f, "unimplemented"),
         }
     }
