@@ -165,7 +165,8 @@ pub enum Statement {
     /// Store into the memory.
     Store(Local, Operand),
     /// Any unimplemented lowering maps to this variant.
-    Unimplemented,
+    /// The string inside is the stringified MIR statement.
+    Unimplemented(String),
 }
 
 impl Display for Statement {
@@ -174,7 +175,7 @@ impl Display for Statement {
             Statement::Nop => write!(f, "nop"),
             Statement::Assign(l, r) => write!(f, "{} = {}", l, r),
             Statement::Store(ptr, val) => write!(f, "store({}, {})", ptr, val),
-            _ => write!(f, "unimplemented"),
+            Statement::Unimplemented(mir_stmt) => write!(f, "unimplemented_stmt: {}", mir_stmt),
         }
     }
 }
@@ -183,14 +184,15 @@ impl Display for Statement {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Rvalue {
     /// Another local variable.
-    Operand(Operand),
+    Local(Local),
+    /// A constant value.
+    Constant(Constant),
     /// Get a pointer to a field.
     GetField(Local, FieldIndex),
     /// Load a value of specified type from a pointer.
     Load(Local),
-    /// Binary Ops.
-    Add(Operand, Operand),
-    Sub(Operand, Operand),
+    /// Nullary, Unary and Binary Ops.
+    BinaryOp(BinOp, Operand, Operand),
     /// Allocate space for the specified type on the stack and return a pointer to it.
     Alloca(TyIndex),
 }
@@ -198,11 +200,11 @@ pub enum Rvalue {
 impl Display for Rvalue {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Rvalue::Operand(o) => write!(f, "{}", o),
+            Rvalue::Local(l) => write!(f, "{}", l),
+            Rvalue::Constant(c) => write!(f, "{}", c),
             Rvalue::GetField(ptr, fidx) => write!(f, "get_field({}, {})", ptr, fidx),
             Rvalue::Load(l) => write!(f, "load({})", l),
-            Rvalue::Add(l, r) => write!(f, "int_add({}, {})", l, r),
-            Rvalue::Sub(l, r) => write!(f, "int_sub({}, {})", l, r),
+            Rvalue::BinaryOp(oper, o1, o2) => write!(f, "{}({}, {})", oper, o1, o2),
             Rvalue::Alloca(t) => write!(f, "alloca({})", t),
         }
     }
@@ -225,17 +227,62 @@ impl Display for Operand {
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Constant {
-    UnsignedInt(UnsignedInt),
-    SignedInt(SignedInt),
+    Int(ConstantInt),
     Unimplemented,
 }
 
 impl Display for Constant {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Constant::UnsignedInt(u) => write!(f, "{}", u),
-            Constant::SignedInt(s) => write!(f, "{}", s),
+            Constant::Int(i) => write!(f, "{}", i),
             Constant::Unimplemented => write!(f, "Unimplemented Constant"),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+pub enum ConstantInt {
+    UnsignedInt(UnsignedInt),
+    SignedInt(SignedInt),
+}
+
+/// Generate a method that constructs a ConstantInt variant from bits in u128 form.
+/// This can't be used to generate methods for 128-bit integers due to SerU128/SerI128.
+macro_rules! const_int_from_bits {
+    ($fn_name: ident, $rs_t: ident, $yk_t: ident, $yk_variant: ident) => {
+        pub fn $fn_name(bits: u128) -> Self {
+            ConstantInt::$yk_t($yk_t::$yk_variant(bits as $rs_t))
+        }
+    };
+}
+
+impl ConstantInt {
+    const_int_from_bits!(u8_from_bits, u8, UnsignedInt, U8);
+    const_int_from_bits!(u16_from_bits, u16, UnsignedInt, U16);
+    const_int_from_bits!(u32_from_bits, u32, UnsignedInt, U32);
+    const_int_from_bits!(u64_from_bits, u64, UnsignedInt, U64);
+    const_int_from_bits!(usize_from_bits, usize, UnsignedInt, Usize);
+
+    pub fn u128_from_bits(bits: u128) -> Self {
+        ConstantInt::UnsignedInt(UnsignedInt::U128(SerU128::new(bits)))
+    }
+
+    const_int_from_bits!(i8_from_bits, i8, SignedInt, I8);
+    const_int_from_bits!(i16_from_bits, i16, SignedInt, I16);
+    const_int_from_bits!(i32_from_bits, i32, SignedInt, I32);
+    const_int_from_bits!(i64_from_bits, i64, SignedInt, I64);
+    const_int_from_bits!(isize_from_bits, isize, SignedInt, Isize);
+
+    pub fn i128_from_bits(bits: u128) -> Self {
+        ConstantInt::SignedInt(SignedInt::I128(SerI128::new(bits as i128)))
+    }
+}
+
+impl Display for ConstantInt {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ConstantInt::UnsignedInt(u) => write!(f, "{}", u),
+            ConstantInt::SignedInt(s) => write!(f, "{}", s),
         }
     }
 }
@@ -400,6 +447,53 @@ fn opt_bb_as_str(opt_bb: &Option<BasicBlockIndex>) -> String {
     }
 }
 
+/// Binary operations.
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+pub enum BinOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+    BitXor,
+    BitAnd,
+    BitOr,
+    Shl,
+    Shr,
+    Eq,
+    Lt,
+    Le,
+    Ne,
+    Ge,
+    Gt,
+    Offset,
+}
+
+impl Display for BinOp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let s = match self {
+            BinOp::Add => "add",
+            BinOp::Sub => "sub",
+            BinOp::Mul => "mul",
+            BinOp::Div => "div",
+            BinOp::Rem => "rem",
+            BinOp::BitXor => "bit_xor",
+            BinOp::BitAnd => "bit_and",
+            BinOp::BitOr => "bit_or",
+            BinOp::Shl => "shl",
+            BinOp::Shr => "shr",
+            BinOp::Eq => "eq",
+            BinOp::Lt => "lt",
+            BinOp::Le => "le",
+            BinOp::Ne => "ne",
+            BinOp::Ge => "ge",
+            BinOp::Gt => "gt",
+            BinOp::Offset => "offset",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 /// The top-level pack type.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Pack {
@@ -415,7 +509,7 @@ impl Display for Pack {
 
 #[cfg(test)]
 mod tests {
-    use super::{SerI128, SerU128};
+    use super::{ConstantInt, SerI128, SerU128, SignedInt, UnsignedInt};
 
     #[test]
     fn seru128_round_trip() {
@@ -427,5 +521,35 @@ mod tests {
     fn seri128_round_trip() {
         let val = std::i128::MIN + 77;
         assert_eq!(SerI128::new(val).val(), val);
+    }
+
+    #[test]
+    fn const_u8_from_bits() {
+        let v = 233;
+        let cst = ConstantInt::u8_from_bits(v as u128);
+        assert_eq!(cst, ConstantInt::UnsignedInt(UnsignedInt::U8(v)));
+    }
+
+    #[test]
+    fn const_i32_from_bits() {
+        let v = -42i32;
+        let cst = ConstantInt::i32_from_bits(v as u128);
+        assert_eq!(cst, ConstantInt::SignedInt(SignedInt::I32(v)));
+    }
+
+    #[test]
+    fn const_u64_from_bits() {
+        let v = std::u64::MAX;
+        let cst = ConstantInt::u64_from_bits(v as u128);
+        assert_eq!(cst, ConstantInt::UnsignedInt(UnsignedInt::U64(v)));
+    }
+
+    #[test]
+    fn const_i128_from_bits() {
+        let v = -100001i128;
+        match ConstantInt::i128_from_bits(v as u128) {
+            ConstantInt::SignedInt(SignedInt::I128(seri128)) => assert_eq!(seri128.val(), v),
+            _ => panic!(),
+        }
     }
 }
