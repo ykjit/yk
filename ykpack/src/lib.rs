@@ -41,8 +41,8 @@ pub use types::*;
 #[cfg(test)]
 mod tests {
     use super::{
-        BasicBlock, Constant, Decoder, DefId, Encoder, Local, Operand, Pack, Rvalue, Statement,
-        Terminator, Tir, UnsignedInt,
+        BasicBlock, BinOp, Constant, ConstantInt, Decoder, DefId, Encoder, Local, Operand, Pack,
+        Rvalue, Statement, Terminator, Tir, UnsignedInt,
     };
     use fallible_iterator::{self, FallibleIterator};
     use std::io::{Cursor, Seek, SeekFrom};
@@ -124,16 +124,11 @@ mod tests {
     #[test]
     fn test_text_dump() {
         let stmts_t1_b0 = vec![
-            Statement::Assign(
-                Local::new(0, 0),
-                Rvalue::Operand(Operand::Local(Local::new(1, 0))),
-            ),
+            Statement::Assign(Local::new(0, 0), Rvalue::Local(Local::new(1, 0))),
             Statement::Assign(Local::new(2, 0), Rvalue::GetField(Local::new(3, 0), 4)),
             Statement::Assign(
                 Local::new(4, 0),
-                Rvalue::Operand(Operand::Constant(Constant::UnsignedInt(UnsignedInt::U8(
-                    10,
-                )))),
+                Rvalue::Constant(Constant::Int(ConstantInt::UnsignedInt(UnsignedInt::U8(10)))),
             ),
             Statement::Nop,
         ];
@@ -143,14 +138,16 @@ mod tests {
             Statement::Store(Local::new(5, 0), Operand::Local(Local::new(4, 0))),
             Statement::Assign(
                 Local::new(7, 0),
-                Rvalue::Add(
+                Rvalue::BinaryOp(
+                    BinOp::Add,
                     Operand::Local(Local::new(8, 0)),
                     Operand::Local(Local::new(9, 0)),
                 ),
             ),
             Statement::Assign(
                 Local::new(7, 0),
-                Rvalue::Sub(
+                Rvalue::BinaryOp(
+                    BinOp::Sub,
                     Operand::Local(Local::new(9, 0)),
                     Operand::Local(Local::new(10, 0)),
                 ),
@@ -170,7 +167,7 @@ mod tests {
                 DefId::new(3, 4),
                 String::from("item2"),
                 vec![BasicBlock::new(
-                    vec![Statement::Unimplemented],
+                    vec![Statement::Unimplemented(String::from("abc"))],
                     Terminator::Unreachable,
                 )],
             )),
@@ -193,15 +190,15 @@ mod tests {
     bb1:
         $5: t0 = load($6: t0)
         store($5: t0, $4: t0)
-        $7: t0 = int_add($8: t0, $9: t0)
-        $7: t0 = int_sub($9: t0, $10: t0)
+        $7: t0 = add($8: t0, $9: t0)
+        $7: t0 = sub($9: t0, $10: t0)
         $11: t0 = alloca(0)
         goto bb50
 [End TIR for item1]
 [Begin TIR for item2]
     DefId(3, 4):
     bb0:
-        unimplemented
+        unimplemented_stmt: abc
         unreachable
 [End TIR for item2]\n";
 
