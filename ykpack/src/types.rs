@@ -106,15 +106,15 @@ impl Display for DefId {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct Tir {
     pub def_id: DefId,
-    pub item_path_str: String,
+    pub def_path_str: String,
     pub blocks: Vec<BasicBlock>,
 }
 
 impl Tir {
-    pub fn new(def_id: DefId, item_path_str: String, blocks: Vec<BasicBlock>) -> Self {
+    pub fn new(def_id: DefId, def_path_str: String, blocks: Vec<BasicBlock>) -> Self {
         Self {
             def_id,
-            item_path_str,
+            def_path_str,
             blocks,
         }
     }
@@ -122,7 +122,7 @@ impl Tir {
 
 impl Display for Tir {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "[Begin TIR for {}]", self.item_path_str)?;
+        writeln!(f, "[Begin TIR for {}]", self.def_path_str)?;
         writeln!(f, "    {}:", self.def_id)?;
         let mut block_strs = Vec::new();
         for (i, b) in self.blocks.iter().enumerate() {
@@ -130,7 +130,7 @@ impl Display for Tir {
         }
         println!("{:?}", block_strs);
         writeln!(f, "{}", block_strs.join("\n"))?;
-        writeln!(f, "[End TIR for {}]", self.item_path_str)?;
+        writeln!(f, "[End TIR for {}]", self.def_path_str)?;
         Ok(())
     }
 }
