@@ -43,7 +43,7 @@ macro_rules! new_ser128 {
         }
 
         impl Display for $n {
-            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 write!(f, "{}({})", stringify!($n), self.val())
             }
         }
@@ -74,7 +74,7 @@ impl Local {
 }
 
 impl Display for Local {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "${}: t{}", self.idx, self.ty)
     }
 }
@@ -96,7 +96,7 @@ impl DefId {
 }
 
 impl Display for DefId {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "DefId({}, {})", self.crate_hash, self.def_idx)
     }
 }
@@ -104,25 +104,25 @@ impl Display for DefId {
 /// A tracing IR pack.
 /// Each TIR instance maps to exactly one MIR instance.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub struct Tir {
+pub struct Body {
     pub def_id: DefId,
-    pub item_path_str: String,
+    pub def_path_str: String,
     pub blocks: Vec<BasicBlock>,
 }
 
-impl Tir {
-    pub fn new(def_id: DefId, item_path_str: String, blocks: Vec<BasicBlock>) -> Self {
+impl Body {
+    pub fn new(def_id: DefId, def_path_str: String, blocks: Vec<BasicBlock>) -> Self {
         Self {
             def_id,
-            item_path_str,
+            def_path_str,
             blocks,
         }
     }
 }
 
-impl Display for Tir {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "[Begin TIR for {}]", self.item_path_str)?;
+impl Display for Body {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "[Begin TIR for {}]", self.def_path_str)?;
         writeln!(f, "    {}:", self.def_id)?;
         let mut block_strs = Vec::new();
         for (i, b) in self.blocks.iter().enumerate() {
@@ -130,7 +130,7 @@ impl Display for Tir {
         }
         println!("{:?}", block_strs);
         writeln!(f, "{}", block_strs.join("\n"))?;
-        writeln!(f, "[End TIR for {}]", self.item_path_str)?;
+        writeln!(f, "[End TIR for {}]", self.def_path_str)?;
         Ok(())
     }
 }
@@ -148,7 +148,7 @@ impl BasicBlock {
 }
 
 impl Display for BasicBlock {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for s in self.stmts.iter() {
             write!(f, "        {}\n", s)?;
         }
@@ -170,7 +170,7 @@ pub enum Statement {
 }
 
 impl Display for Statement {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Statement::Nop => write!(f, "nop"),
             Statement::Assign(l, r) => write!(f, "{} = {}", l, r),
@@ -198,7 +198,7 @@ pub enum Rvalue {
 }
 
 impl Display for Rvalue {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Rvalue::Local(l) => write!(f, "{}", l),
             Rvalue::Constant(c) => write!(f, "{}", c),
@@ -217,7 +217,7 @@ pub enum Operand {
 }
 
 impl Display for Operand {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Operand::Local(l) => write!(f, "{}", l),
             Operand::Constant(c) => write!(f, "{}", c),
@@ -232,7 +232,7 @@ pub enum Constant {
 }
 
 impl Display for Constant {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Constant::Int(i) => write!(f, "{}", i),
             Constant::Unimplemented => write!(f, "Unimplemented Constant"),
@@ -279,7 +279,7 @@ impl ConstantInt {
 }
 
 impl Display for ConstantInt {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ConstantInt::UnsignedInt(u) => write!(f, "{}", u),
             ConstantInt::SignedInt(s) => write!(f, "{}", s),
@@ -298,7 +298,7 @@ pub enum UnsignedInt {
 }
 
 impl Display for UnsignedInt {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self)
     }
 }
@@ -314,7 +314,7 @@ pub enum SignedInt {
 }
 
 impl Display for SignedInt {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self)
     }
 }
@@ -329,7 +329,7 @@ pub enum CallOperand {
 }
 
 impl Display for CallOperand {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             CallOperand::Fn(def_id) => write!(f, "{}", def_id),
             CallOperand::Unknown => write!(f, "unknown"),
@@ -371,7 +371,7 @@ pub enum Terminator {
 }
 
 impl Display for Terminator {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Terminator::Goto(bb) => write!(f, "goto bb{}", bb),
             Terminator::SwitchInt {
@@ -470,7 +470,7 @@ pub enum BinOp {
 }
 
 impl Display for BinOp {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
             BinOp::Add => "add",
             BinOp::Sub => "sub",
@@ -497,12 +497,12 @@ impl Display for BinOp {
 /// The top-level pack type.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Pack {
-    Tir(Tir),
+    Body(Body),
 }
 
 impl Display for Pack {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let Pack::Tir(tir) = self;
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Pack::Body(tir) = self;
         write!(f, "{}", tir)
     }
 }
