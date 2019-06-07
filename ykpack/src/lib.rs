@@ -41,8 +41,8 @@ pub use types::*;
 #[cfg(test)]
 mod tests {
     use super::{
-        BasicBlock, BinOp, Constant, ConstantInt, Decoder, DefId, Encoder, Local, Operand, Pack,
-        Rvalue, Statement, Terminator, Tir, UnsignedInt,
+        BasicBlock, BinOp, Body, Constant, ConstantInt, Decoder, DefId, Encoder, Local, Operand,
+        Pack, Rvalue, Statement, Terminator, UnsignedInt,
     };
     use fallible_iterator::{self, FallibleIterator};
     use std::io::{Cursor, Seek, SeekFrom};
@@ -69,7 +69,7 @@ mod tests {
             BasicBlock::new(stmts1_b1, dummy_term.clone()),
             BasicBlock::new(stmts1_b2, dummy_term.clone()),
         ];
-        let tir1 = Pack::Tir(Tir::new(DefId::new(1, 2), String::from("item1"), blocks1));
+        let tir1 = Pack::Body(Body::new(DefId::new(1, 2), String::from("item1"), blocks1));
 
         let stmts2_b1 = vec![Statement::Nop; 7];
         let stmts2_b2 = vec![Statement::Nop; 200];
@@ -79,7 +79,7 @@ mod tests {
             BasicBlock::new(stmts2_b2, dummy_term.clone()),
             BasicBlock::new(stmts2_b3, dummy_term.clone()),
         ];
-        let tir2 = Pack::Tir(Tir::new(DefId::new(4, 5), String::from("item2"), blocks2));
+        let tir2 = Pack::Body(Body::new(DefId::new(4, 5), String::from("item2"), blocks2));
 
         vec![tir1, tir2]
     }
@@ -162,8 +162,12 @@ mod tests {
         ];
 
         let tirs = vec![
-            Pack::Tir(Tir::new(DefId::new(1, 2), String::from("item1"), blocks_t1)),
-            Pack::Tir(Tir::new(
+            Pack::Body(Body::new(
+                DefId::new(1, 2),
+                String::from("item1"),
+                blocks_t1,
+            )),
+            Pack::Body(Body::new(
                 DefId::new(3, 4),
                 String::from("item2"),
                 vec![BasicBlock::new(
