@@ -323,7 +323,9 @@ impl Display for SignedInt {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum CallOperand {
     /// A statically known function identified by its DefId.
-    Fn(DefId),
+    /// A pair: the definition ID and the binary symbol name, if known. If the callee doeesn't have
+    /// all of its type parameters instantiated, then there will be no symbol.
+    Fn(DefId, Option<String>),
     /// An unknown or unhandled callable.
     Unknown, // FIXME -- Find out what else. Closures jump to mind.
 }
@@ -331,7 +333,13 @@ pub enum CallOperand {
 impl Display for CallOperand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CallOperand::Fn(def_id) => write!(f, "{}", def_id),
+            CallOperand::Fn(def_id, sym_name) => {
+                let sym_name_str = match sym_name {
+                    Some(n) => n,
+                    None => "<unknown>",
+                };
+                write!(f, "def_id={}, sym_name={}", def_id, sym_name_str)
+            }
             CallOperand::Unknown => write!(f, "unknown"),
         }
     }
