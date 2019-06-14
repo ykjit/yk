@@ -1,0 +1,10 @@
+[package]
+name = "tiri"
+version = "0.1.0"
+authors = ["Edd Barrett <vext01@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+ykpack = { path = "../ykpack" }
+elf = "0.0"
+fallible-iterator = "0.2"
