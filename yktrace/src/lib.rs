@@ -27,7 +27,7 @@ pub trait MirTrace {
 
 /// An iterator over a MIR trace.
 pub struct MirTraceIntoIter<'a> {
-    trace: &'a MirTrace,
+    trace: &'a dyn MirTrace,
     next_idx: usize
 }
 
