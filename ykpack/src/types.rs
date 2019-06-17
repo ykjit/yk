@@ -15,6 +15,7 @@ use std::fmt::{self, Display};
 pub type CrateHash = u64;
 pub type DefIndex = u32;
 pub type BasicBlockIndex = u32;
+pub type StatementIndex = usize;
 pub type LocalIndex = u32;
 pub type TyIndex = u32;
 pub type FieldIndex = u32;
@@ -80,7 +81,7 @@ impl Display for Local {
 }
 
 /// A mirror of the compiler's notion of a "definition ID".
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
 pub struct DefId {
     pub crate_hash: CrateHash,
     pub def_idx: DefIndex,

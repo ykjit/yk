@@ -2,5 +2,6 @@
 members=[
     "ykpack",
     "ykrt",
-    "yktrace"
+    "yktrace",
+    "tiri",
 ]

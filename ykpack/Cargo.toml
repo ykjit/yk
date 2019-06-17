@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
-fallible-iterator = "0.1"
+fallible-iterator = "0.2"
 
 # We are using a git version to work around a bug:
 # https://github.com/3Hren/msgpack-rust/issues/183
