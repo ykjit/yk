@@ -7,8 +7,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+//! Software tracing via ykrustc.
+
 use super::{MirTrace, ThreadTracer};
-/// Software tracing via ykrustc.
 use core::yk_swt::{self, MirLoc};
 use libc;
 use std::ops::Drop;
