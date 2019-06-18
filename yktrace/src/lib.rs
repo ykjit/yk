@@ -86,7 +86,7 @@ impl ThreadTracer {
 }
 
 // An generic interface which tracing backends must fulfill.
-pub trait ThreadTracerImpl {
+trait ThreadTracerImpl {
     /// Stops tracing on the current thread, returning the MIR trace on success. `None` is returned
     /// on error or if the trace was invalidated.
     fn stop_tracing(&self) -> Option<Box<dyn MirTrace>>;
