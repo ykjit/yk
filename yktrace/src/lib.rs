@@ -14,8 +14,13 @@ extern crate test;
 
 use core::yk_swt::MirLoc;
 use std::iter::{IntoIterator, Iterator};
+#[macro_use]
+extern crate lazy_static;
 
 mod swt;
+mod tir_specialise;
+
+use tir_specialise::{TirSpecialiser, TirFrag};
 
 /// Generic representation of a trace of MIR block locations.
 pub trait MirTrace {
@@ -68,9 +73,14 @@ pub enum TracingKind {
 
 /// Represents a thread which is currently tracing.
 pub trait ThreadTracer {
-    /// Stops tracing on the current thread, returning the trace on success. `None` is returned on
-    /// error or if the trace was invalidated.
-    fn stop_tracing(self: Box<Self>) -> Option<Box<dyn MirTrace>>;
+    /// Stops tracing on the current thread, returning the MIR trace on success. `None` is returned
+    /// on error or if the trace was invalidated. **The consumers should not call this**.
+    fn stop_tracing_impl(self: Box<Self>) -> Option<Box<dyn MirTrace>>;
+    /// Stops tracing on the current thread, returning a specialised TIR fragment on success.
+    /// Returns `None` if the trace was invalidated. **Do not override this**.
+    fn stop_tracing(self: Box<Self>) -> Option<TirFrag> {
+        self.stop_tracing_impl().map(|mir_trace| TirSpecialiser::new(&*mir_trace).specialise())
+    }
 }
 
 /// Start tracing on the current thread using the specified tracing kind.
@@ -89,7 +99,6 @@ pub fn start_tracing(kind: Option<TracingKind>) -> Box<dyn ThreadTracer> {
 #[cfg(test)]
 mod test_helpers {
     use super::{start_tracing, TracingKind};
-    use core;
     use std::thread;
     use test::black_box;
 
@@ -110,7 +119,7 @@ mod test_helpers {
     pub(crate) fn test_trace(kind: TracingKind) {
         let th = start_tracing(Some(kind));
         black_box(work(100));
-        let trace = th.stop_tracing().unwrap();
+        let trace = th.stop_tracing_impl().unwrap();
         assert!(trace.len() > 0);
     }
 
@@ -118,11 +127,11 @@ mod test_helpers {
     pub(crate) fn test_trace_twice(kind: TracingKind) {
         let th1 = start_tracing(Some(kind));
         black_box(work(100));
-        let trace1 = th1.stop_tracing().unwrap();
+        let trace1 = th1.stop_tracing_impl().unwrap();
 
         let th2 = start_tracing(Some(kind));
         black_box(work(1000));
-        let trace2 = th2.stop_tracing().unwrap();
+        let trace2 = th2.stop_tracing_impl().unwrap();
 
         assert!(trace1.len() < trace2.len());
     }
@@ -132,12 +141,12 @@ mod test_helpers {
         let thr = thread::spawn(move || {
             let th1 = start_tracing(Some(kind));
             black_box(work(100));
-            th1.stop_tracing().unwrap().len()
+            th1.stop_tracing_impl().unwrap().len()
         });
 
         let th2 = start_tracing(Some(kind));
         black_box(work(1000));
-        let len2 = th2.stop_tracing().unwrap().len();
+        let len2 = th2.stop_tracing_impl().unwrap().len();
 
         let len1 = thr.join().unwrap();
 
@@ -160,7 +169,7 @@ mod test_helpers {
     pub(crate) fn test_oob_trace_index(kind: TracingKind) {
         // Construct a really short trace.
         let th = start_tracing(Some(kind));
-        let trace = th.stop_tracing().unwrap();
+        let trace = th.stop_tracing_impl().unwrap();
         trace.loc(100000);
     }
 
@@ -169,7 +178,7 @@ mod test_helpers {
         // Construct a really short trace.
         let th = start_tracing(Some(kind));
         black_box(work(100));
-        let trace = th.stop_tracing().unwrap();
+        let trace = th.stop_tracing_impl().unwrap();
 
         for i in 0..trace.len() {
             trace.loc(i);
@@ -180,7 +189,7 @@ mod test_helpers {
     pub(crate) fn test_trace_iterator(kind: TracingKind) {
         let th = start_tracing(Some(kind));
         black_box(work(100));
-        let trace = th.stop_tracing().unwrap();
+        let trace = th.stop_tracing_impl().unwrap();
 
         let mut num_elems = 0;
         for _ in trace.as_ref() {

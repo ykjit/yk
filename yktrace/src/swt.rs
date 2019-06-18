@@ -41,7 +41,7 @@ impl Drop for SWTMirTrace {
 struct SWTThreadTracer;
 
 impl ThreadTracer for SWTThreadTracer {
-    fn stop_tracing(self: Box<Self>) -> Option<Box<dyn MirTrace>> {
+    fn stop_tracing_impl(self: Box<Self>) -> Option<Box<dyn MirTrace>> {
         yk_swt::stop_tracing()
             .map(|(buf, len)| Box::new(SWTMirTrace { buf, len }) as Box<dyn MirTrace>)
     }

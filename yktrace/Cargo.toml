@@ -6,3 +6,7 @@ edition = "2018"
 
 [dependencies]
 libc = "0.2"
+elf = "0.0"
+fallible-iterator = "0.2"
+ykpack = { path = "../ykpack" }
+lazy_static = "1.3"
