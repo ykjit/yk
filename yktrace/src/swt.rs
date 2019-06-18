@@ -9,30 +9,30 @@
 
 //! Software tracing via ykrustc.
 
-use super::{MirTrace, ThreadTracer};
-use core::yk_swt::{self, MirLoc};
+use super::{SirTrace, ThreadTracer, ThreadTracerImpl};
+use core::yk_swt::{self, SirLoc};
 use libc;
 use std::ops::Drop;
 
 /// A trace collected via software tracing.
 /// Since the trace is a heap-allocated C buffer, we represent it as a pointer and a length.
-struct SWTMirTrace {
-    buf: *mut MirLoc,
+struct SWTSirTrace {
+    buf: *mut SirLoc,
     len: usize
 }
 
-impl MirTrace for SWTMirTrace {
+impl SirTrace for SWTSirTrace {
     fn len(&self) -> usize {
         self.len
     }
 
-    fn loc(&self, idx: usize) -> &MirLoc {
+    fn loc(&self, idx: usize) -> &SirLoc {
         assert!(idx < self.len, "out of bounds index");
         unsafe { &*self.buf.add(idx) }
     }
 }
 
-impl Drop for SWTMirTrace {
+impl Drop for SWTSirTrace {
     fn drop(&mut self) {
         unsafe { libc::free(self.buf as *mut libc::c_void) };
     }
@@ -41,16 +41,18 @@ impl Drop for SWTMirTrace {
 /// Softare thread tracer.
 struct SWTThreadTracer;
 
-impl ThreadTracer for SWTThreadTracer {
-    fn stop_tracing(self: Box<Self>) -> Option<Box<dyn MirTrace>> {
+impl ThreadTracerImpl for SWTThreadTracer {
+    fn stop_tracing(&self) -> Option<Box<dyn SirTrace>> {
         yk_swt::stop_tracing()
-            .map(|(buf, len)| Box::new(SWTMirTrace { buf, len }) as Box<dyn MirTrace>)
+            .map(|(buf, len)| Box::new(SWTSirTrace { buf, len }) as Box<dyn SirTrace>)
     }
 }
 
-pub fn start_tracing() -> Box<dyn ThreadTracer> {
+pub fn start_tracing() -> ThreadTracer {
     yk_swt::start_tracing();
-    Box::new(SWTThreadTracer {})
+    ThreadTracer {
+        t_impl: Box::new(SWTThreadTracer {})
+    }
 }
 
 #[cfg(test)]
