@@ -103,7 +103,7 @@ impl Display for DefId {
 }
 
 /// A tracing IR pack.
-/// Each TIR instance maps to exactly one MIR instance.
+/// Each Body maps to exactly one MIR Body.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct Body {
     pub def_id: DefId,
@@ -123,7 +123,7 @@ impl Body {
 
 impl Display for Body {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "[Begin TIR for {}]", self.def_path_str)?;
+        writeln!(f, "[Begin SIR for {}]", self.def_path_str)?;
         writeln!(f, "    {}:", self.def_id)?;
         let mut block_strs = Vec::new();
         for (i, b) in self.blocks.iter().enumerate() {
@@ -131,7 +131,7 @@ impl Display for Body {
         }
         println!("{:?}", block_strs);
         writeln!(f, "{}", block_strs.join("\n"))?;
-        writeln!(f, "[End TIR for {}]", self.def_path_str)?;
+        writeln!(f, "[End SIR for {}]", self.def_path_str)?;
         Ok(())
     }
 }
@@ -511,8 +511,8 @@ pub enum Pack {
 
 impl Display for Pack {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Pack::Body(tir) = self;
-        write!(f, "{}", tir)
+        let Pack::Body(sir) = self;
+        write!(f, "{}", sir)
     }
 }
 

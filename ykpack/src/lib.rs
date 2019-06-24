@@ -69,7 +69,7 @@ mod tests {
             BasicBlock::new(stmts1_b1, dummy_term.clone()),
             BasicBlock::new(stmts1_b2, dummy_term.clone()),
         ];
-        let tir1 = Pack::Body(Body::new(DefId::new(1, 2), String::from("item1"), blocks1));
+        let sir1 = Pack::Body(Body::new(DefId::new(1, 2), String::from("item1"), blocks1));
 
         let stmts2_b1 = vec![Statement::Nop; 7];
         let stmts2_b2 = vec![Statement::Nop; 200];
@@ -79,9 +79,9 @@ mod tests {
             BasicBlock::new(stmts2_b2, dummy_term.clone()),
             BasicBlock::new(stmts2_b3, dummy_term.clone()),
         ];
-        let tir2 = Pack::Body(Body::new(DefId::new(4, 5), String::from("item2"), blocks2));
+        let sir2 = Pack::Body(Body::new(DefId::new(4, 5), String::from("item2"), blocks2));
 
-        vec![tir1, tir2]
+        vec![sir1, sir2]
     }
 
     // Check serialising and deserialising works for zero packs.
@@ -161,7 +161,7 @@ mod tests {
             BasicBlock::new(stmts_t1_b1, term_t1_b1),
         ];
 
-        let tirs = vec![
+        let sirs = vec![
             Pack::Body(Body::new(
                 DefId::new(1, 2),
                 String::from("item1"),
@@ -178,12 +178,12 @@ mod tests {
         ];
 
         let mut got = String::new();
-        for pack in tirs {
+        for pack in sirs {
             got.push_str(&format!("{}", pack));
         }
         let got_lines = got.split("\n");
 
-        let expect = "[Begin TIR for item1]\n\
+        let expect = "[Begin SIR for item1]\n\
     DefId(1, 2):
     bb0:
         $0: t0 = $1: t0
@@ -198,13 +198,13 @@ mod tests {
         $7: t0 = sub($9: t0, $10: t0)
         $11: t0 = alloca(0)
         goto bb50
-[End TIR for item1]
-[Begin TIR for item2]
+[End SIR for item1]
+[Begin SIR for item2]
     DefId(3, 4):
     bb0:
         unimplemented_stmt: abc
         unreachable
-[End TIR for item2]\n";
+[End SIR for item2]\n";
 
         let expect_lines = expect.split("\n");
 
