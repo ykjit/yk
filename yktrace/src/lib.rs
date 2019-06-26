@@ -12,39 +12,44 @@
 
 extern crate test;
 
-use core::yk_swt::MirLoc;
+use core::yk_swt::SirLoc;
 use std::iter::{IntoIterator, Iterator};
+#[macro_use]
+extern crate lazy_static;
 
 mod swt;
+mod tir;
 
-/// Generic representation of a trace of MIR block locations.
-pub trait MirTrace {
-    /// Returns the length of the trace, measured in MIR locations.
+use tir::TirTrace;
+
+/// Generic representation of a trace of SIR block locations.
+pub trait SirTrace {
+    /// Returns the length of the trace, measured in SIR locations.
     fn len(&self) -> usize;
-    /// Returns the MIR location and index `idx`.
-    fn loc(&self, idx: usize) -> &MirLoc;
+    /// Returns the SIR location and index `idx`.
+    fn loc(&self, idx: usize) -> &SirLoc;
 }
 
-/// An iterator over a MIR trace.
-pub struct MirTraceIntoIter<'a> {
-    trace: &'a MirTrace,
+/// An iterator over a SIR trace.
+pub struct SirTraceIntoIter<'a> {
+    trace: &'a dyn SirTrace,
     next_idx: usize
 }
 
-impl<'a> IntoIterator for &'a dyn MirTrace {
-    type Item = &'a MirLoc;
-    type IntoIter = MirTraceIntoIter<'a>;
+impl<'a> IntoIterator for &'a dyn SirTrace {
+    type Item = &'a SirLoc;
+    type IntoIter = SirTraceIntoIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
-        MirTraceIntoIter {
+        SirTraceIntoIter {
             trace: self,
             next_idx: 0
         }
     }
 }
 
-impl<'a> Iterator for MirTraceIntoIter<'a> {
-    type Item = &'a MirLoc;
+impl<'a> Iterator for SirTraceIntoIter<'a> {
+    type Item = &'a SirLoc;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.next_idx < self.trace.len() {
@@ -67,10 +72,26 @@ pub enum TracingKind {
 }
 
 /// Represents a thread which is currently tracing.
-pub trait ThreadTracer {
-    /// Stops tracing on the current thread, returning the trace on success. `None` is returned on
-    /// error or if the trace was invalidated.
-    fn stop_tracing(self: Box<Self>) -> Option<Box<dyn MirTrace>>;
+pub struct ThreadTracer {
+    /// The tracing implementation.
+    t_impl: Box<dyn ThreadTracerImpl>
+}
+
+impl ThreadTracer {
+    /// Stops tracing on the current thread, returning a TIR trace on success. Returns `None` if
+    /// the trace was invalidated.
+    pub fn stop_tracing(self) -> Option<TirTrace> {
+        self.t_impl
+            .stop_tracing()
+            .map(|mir_trace| TirTrace::new(&*mir_trace))
+    }
+}
+
+// An generic interface which tracing backends must fulfill.
+trait ThreadTracerImpl {
+    /// Stops tracing on the current thread, returning the SIR trace on success. Returns `None` is
+    /// if the trace was invalidated.
+    fn stop_tracing(&self) -> Option<Box<dyn SirTrace>>;
 }
 
 /// Start tracing on the current thread using the specified tracing kind.
@@ -78,7 +99,7 @@ pub trait ThreadTracer {
 /// a specific kind can be chosen. Any given thread can at most one active tracer; calling
 /// `start_tracing()` on a thread where there is already an active tracer leads to undefined
 /// behaviour.
-pub fn start_tracing(kind: Option<TracingKind>) -> Box<dyn ThreadTracer> {
+pub fn start_tracing(kind: Option<TracingKind>) -> ThreadTracer {
     match kind {
         None | Some(TracingKind::SoftwareTracing) => swt::start_tracing(),
         _ => unimplemented!("tracing kind not implemented")
@@ -89,7 +110,6 @@ pub fn start_tracing(kind: Option<TracingKind>) -> Box<dyn ThreadTracer> {
 #[cfg(test)]
 mod test_helpers {
     use super::{start_tracing, TracingKind};
-    use core;
     use std::thread;
     use test::black_box;
 
@@ -110,7 +130,7 @@ mod test_helpers {
     pub(crate) fn test_trace(kind: TracingKind) {
         let th = start_tracing(Some(kind));
         black_box(work(100));
-        let trace = th.stop_tracing().unwrap();
+        let trace = th.t_impl.stop_tracing().unwrap();
         assert!(trace.len() > 0);
     }
 
@@ -118,11 +138,11 @@ mod test_helpers {
     pub(crate) fn test_trace_twice(kind: TracingKind) {
         let th1 = start_tracing(Some(kind));
         black_box(work(100));
-        let trace1 = th1.stop_tracing().unwrap();
+        let trace1 = th1.t_impl.stop_tracing().unwrap();
 
         let th2 = start_tracing(Some(kind));
         black_box(work(1000));
-        let trace2 = th2.stop_tracing().unwrap();
+        let trace2 = th2.t_impl.stop_tracing().unwrap();
 
         assert!(trace1.len() < trace2.len());
     }
@@ -132,12 +152,12 @@ mod test_helpers {
         let thr = thread::spawn(move || {
             let th1 = start_tracing(Some(kind));
             black_box(work(100));
-            th1.stop_tracing().unwrap().len()
+            th1.t_impl.stop_tracing().unwrap().len()
         });
 
         let th2 = start_tracing(Some(kind));
         black_box(work(1000));
-        let len2 = th2.stop_tracing().unwrap().len();
+        let len2 = th2.t_impl.stop_tracing().unwrap().len();
 
         let len1 = thr.join().unwrap();
 
@@ -150,7 +170,7 @@ mod test_helpers {
         let th = start_tracing(Some(kind));
         black_box(work(100));
         inv_fn();
-        let trace = th.stop_tracing();
+        let trace = th.t_impl.stop_tracing();
 
         assert!(trace.is_none());
     }
@@ -160,7 +180,7 @@ mod test_helpers {
     pub(crate) fn test_oob_trace_index(kind: TracingKind) {
         // Construct a really short trace.
         let th = start_tracing(Some(kind));
-        let trace = th.stop_tracing().unwrap();
+        let trace = th.t_impl.stop_tracing().unwrap();
         trace.loc(100000);
     }
 
@@ -169,7 +189,7 @@ mod test_helpers {
         // Construct a really short trace.
         let th = start_tracing(Some(kind));
         black_box(work(100));
-        let trace = th.stop_tracing().unwrap();
+        let trace = th.t_impl.stop_tracing().unwrap();
 
         for i in 0..trace.len() {
             trace.loc(i);
@@ -180,7 +200,7 @@ mod test_helpers {
     pub(crate) fn test_trace_iterator(kind: TracingKind) {
         let th = start_tracing(Some(kind));
         black_box(work(100));
-        let trace = th.stop_tracing().unwrap();
+        let trace = th.t_impl.stop_tracing().unwrap();
 
         let mut num_elems = 0;
         for _ in trace.as_ref() {
