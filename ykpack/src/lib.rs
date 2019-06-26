@@ -61,7 +61,7 @@ mod tests {
 
     // Makes some sample stuff to round trip test.
     fn get_sample_packs() -> Vec<Pack> {
-        let dummy_term = Terminator::Abort;
+        let dummy_term = Terminator::Goto(10);
 
         let stmts1_b1 = vec![Statement::Nop; 16];
         let stmts1_b2 = vec![Statement::Nop; 3];
@@ -132,7 +132,7 @@ mod tests {
             ),
             Statement::Nop,
         ];
-        let term_t1_b0 = Terminator::Abort;
+        let term_t1_b0 = Terminator::Goto(20);
         let stmts_t1_b1 = vec![
             Statement::Assign(Local::new(5, 0), Rvalue::Load(Local::new(6, 0))),
             Statement::Store(Local::new(5, 0), Operand::Local(Local::new(4, 0))),
@@ -190,7 +190,7 @@ mod tests {
         $2: t0 = get_field($3: t0, 4)
         $4: t0 = U8(10)
         nop
-        abort
+        goto bb20
     bb1:
         $5: t0 = load($6: t0)
         store($5: t0, $4: t0)

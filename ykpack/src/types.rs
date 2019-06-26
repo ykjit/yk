@@ -347,6 +347,7 @@ impl Display for CallOperand {
 }
 
 /// A basic block terminator.
+/// Note that we assume an the abort strategy, so there are no unwind or cleanup edges present.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Terminator {
     Goto(BasicBlockIndex),
@@ -355,28 +356,26 @@ pub enum Terminator {
         values: Vec<SerU128>,
         target_bbs: Vec<BasicBlockIndex>,
     },
-    Resume,
-    Abort,
     Return,
     Unreachable,
     Drop {
+        location: Local,
         target_bb: BasicBlockIndex,
-        unwind_bb: Option<BasicBlockIndex>,
     },
     DropAndReplace {
+        location: Local,
         target_bb: BasicBlockIndex,
-        unwind_bb: Option<BasicBlockIndex>,
+        value: Operand,
     },
     Call {
         operand: CallOperand,
-        cleanup_bb: Option<BasicBlockIndex>,
         ret_bb: Option<BasicBlockIndex>,
     },
     Assert {
+        cond: Operand,
         target_bb: BasicBlockIndex,
-        cleanup_bb: Option<BasicBlockIndex>,
     },
-    Unimplemented, // FIXME will eventually disappear.
+    Unimplemented(String), // FIXME will eventually disappear.
 }
 
 impl Display for Terminator {
@@ -402,49 +401,31 @@ impl Display for Terminator {
                     .collect::<Vec<String>>()
                     .join(", ")
             ),
-            Terminator::Resume => write!(f, "resume"),
-            Terminator::Abort => write!(f, "abort"),
             Terminator::Return => write!(f, "return"),
             Terminator::Unreachable => write!(f, "unreachable"),
             Terminator::Drop {
+                location,
                 target_bb,
-                unwind_bb,
-            } => write!(
-                f,
-                "drop target=bb{}, unwind={}",
-                target_bb,
-                opt_bb_as_str(unwind_bb)
-            ),
+            } => write!(f, "drop loc={}, target=bb{}", target_bb, location,),
             Terminator::DropAndReplace {
+                location,
+                value,
                 target_bb,
-                unwind_bb,
             } => write!(
                 f,
-                "drop_and_replace target=bb{}, unwind={}",
-                target_bb,
-                opt_bb_as_str(unwind_bb)
+                "drop_and_replace loc={}, value={}, target=bb{}",
+                location, value, target_bb,
             ),
-            Terminator::Call {
-                operand,
-                cleanup_bb,
-                ret_bb,
-            } => write!(
+            Terminator::Call { operand, ret_bb } => write!(
                 f,
-                "call target={}, cleanup={}, return_to={}",
+                "call operand={}, ret_bb={}",
                 operand,
-                opt_bb_as_str(cleanup_bb),
                 opt_bb_as_str(ret_bb)
             ),
-            Terminator::Assert {
-                target_bb,
-                cleanup_bb,
-            } => write!(
-                f,
-                "assert target=bb{}, cleanup={}",
-                target_bb,
-                opt_bb_as_str(cleanup_bb)
-            ),
-            Terminator::Unimplemented => write!(f, "unimplemented"),
+            Terminator::Assert { cond, target_bb } => {
+                write!(f, "assert cond={}, target=bb{}", cond, target_bb,)
+            }
+            Terminator::Unimplemented(s) => write!(f, "unimplemented: {}", s),
         }
     }
 }
