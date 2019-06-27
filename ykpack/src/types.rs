@@ -9,6 +9,7 @@
 
 //! Types for the Yorick intermediate language.
 
+use core::yk_swt::SirLoc;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
@@ -93,6 +94,11 @@ impl DefId {
             crate_hash,
             def_idx,
         }
+    }
+
+    /// Creates a DefId from an SirLoc, discarding the block index.
+    pub fn from_sir_loc(loc: &SirLoc) -> Self {
+        Self::new(loc.crate_hash(), loc.def_idx())
     }
 }
 
