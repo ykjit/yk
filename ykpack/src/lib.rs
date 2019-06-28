@@ -30,6 +30,8 @@
 //!  The version field is automatically written and checked by the `Encoder` and `Decoder`
 //!  respectively.
 
+#![feature(yk_swt)]
+
 mod decode;
 mod encode;
 mod types;
