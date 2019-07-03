@@ -361,6 +361,7 @@ pub enum Terminator {
         local: Local,
         values: Vec<SerU128>,
         target_bbs: Vec<BasicBlockIndex>,
+        otherwise_bb: BasicBlockIndex,
     },
     Return,
     Unreachable,
@@ -377,8 +378,10 @@ pub enum Terminator {
         operand: CallOperand,
         ret_bb: Option<BasicBlockIndex>,
     },
+    /// The value in `cond` must equal to `expected` to advance to `target_bb`.
     Assert {
-        cond: Operand,
+        cond: Local,
+        expected: bool,
         target_bb: BasicBlockIndex,
     },
     Unimplemented(String), // FIXME will eventually disappear.
@@ -392,9 +395,10 @@ impl Display for Terminator {
                 local,
                 values,
                 target_bbs,
+                otherwise_bb,
             } => write!(
                 f,
-                "switch_int local={}, vals=[{}], targets=[{}]",
+                "switch_int local={}, vals=[{}], targets=[{}], otherwise={}",
                 local,
                 values
                     .iter()
@@ -405,7 +409,8 @@ impl Display for Terminator {
                     .iter()
                     .map(|b| format!("{}", b))
                     .collect::<Vec<String>>()
-                    .join(", ")
+                    .join(", "),
+                otherwise_bb
             ),
             Terminator::Return => write!(f, "return"),
             Terminator::Unreachable => write!(f, "unreachable"),
@@ -428,9 +433,15 @@ impl Display for Terminator {
                 operand,
                 opt_bb_as_str(ret_bb)
             ),
-            Terminator::Assert { cond, target_bb } => {
-                write!(f, "assert cond={}, target=bb{}", cond, target_bb,)
-            }
+            Terminator::Assert {
+                cond,
+                target_bb,
+                expected,
+            } => write!(
+                f,
+                "assert cond={}, expected={}, target=bb{}",
+                cond, target_bb, expected
+            ),
             Terminator::Unimplemented(s) => write!(f, "unimplemented: {}", s),
         }
     }

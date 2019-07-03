@@ -16,7 +16,7 @@ use elf;
 use fallible_iterator::FallibleIterator;
 use std::{collections::HashMap, convert::TryFrom, env, io::Cursor};
 #[cfg(debug_assertions)]
-use ykpack::{BasicBlockIndex, Terminator};
+use ykpack::{BasicBlockIndex, Local, SerU128, Terminator};
 use ykpack::{Body, Decoder, DefId, Pack, Statement};
 
 // The SIR Map lets us look up a SIR body from the SIR DefId.
@@ -87,7 +87,41 @@ impl TirTrace {
                     .map(TirOp::Statement)
             );
 
-            // FIXME: Convert the block terminator to a guard if necessary.
+            // Convert the block terminator to a guard if necessary.
+            let guard = match body.blocks[user_bb_idx_usize].term {
+                Terminator::Goto(_)
+                | Terminator::Return
+                | Terminator::Drop { .. }
+                | Terminator::DropAndReplace { .. }
+                | Terminator::Call { .. }
+                | Terminator::Unimplemented(_) => None,
+                Terminator::Unreachable => panic!("Traced unreachable code"),
+                Terminator::SwitchInt {
+                    local,
+                    ref values,
+                    ref target_bbs,
+                    otherwise_bb
+                } => {
+                    // Peek at the next block in the trace to see which outgoing edge was taken and
+                    // infer which value we must guard upon. We are working on the assumption that
+                    // a trace can't end on a SwitchInt. i.e. that another block follows.
+                    debug_assert!(num_locs >= blk_idx + 1, "invalid next block assumption");
+                    let next_blk = trace.loc(blk_idx + 1).bb_idx();
+                    let edge_idx = target_bbs.iter().position(|e| *e == next_blk);
+                    match edge_idx {
+                        Some(idx) => Some(Guard::Integer(local, values[idx].to_owned())),
+                        None => {
+                            debug_assert!(next_blk == otherwise_bb);
+                            Some(Guard::OtherInteger(local, values.clone()))
+                        }
+                    }
+                }
+                Terminator::Assert { ref cond, .. } => Some(Guard::Boolean(*cond))
+            };
+
+            if guard.is_some() {
+                ops.push(TirOp::Guard(guard.unwrap()));
+            }
         }
         Ok(Self { ops })
     }
@@ -98,10 +132,23 @@ impl TirTrace {
     }
 }
 
+/// A guard states the assumptions from its position in a trace onward.
+#[derive(Debug)]
+pub enum Guard {
+    /// The Local must be equal to the integer constant.
+    Integer(Local, SerU128),
+    /// The local must not be a member of the specified collection of integers.
+    /// This is necessary due to the "otherwise" semantics of the SwitchInt terminator in MIR.
+    OtherInteger(Local, Vec<SerU128>),
+    /// The value held in the Local must be true.
+    Boolean(Local)
+}
+
 /// A TIR operation. A collection of these makes a TIR trace.
 #[derive(Debug)]
 pub enum TirOp {
-    Statement(Statement) // FIXME guards
+    Statement(Statement),
+    Guard(Guard)
 }
 
 #[cfg(test)]
@@ -126,7 +173,6 @@ mod tests {
         let sir_trace = tracer.t_impl.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
         assert_eq!(res, 15);
-        dbg!(tir_trace.len());
         assert!(tir_trace.len() > 0);
     }
 }
