@@ -18,7 +18,7 @@ use std::iter::{IntoIterator, Iterator};
 extern crate lazy_static;
 
 mod swt;
-mod tir;
+pub mod tir;
 
 use tir::TirTrace;
 

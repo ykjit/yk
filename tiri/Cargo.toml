@@ -5,6 +5,4 @@ authors = ["Edd Barrett <vext01@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-ykpack = { path = "../ykpack" }
-elf = "0.0"
-fallible-iterator = "0.2"
+yktrace = { path = "../yktrace" }
