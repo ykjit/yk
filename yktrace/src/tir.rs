@@ -12,6 +12,7 @@
 //! running executable.
 
 use super::SirTrace;
+use crate::errors::InvalidTraceError;
 use elf;
 use fallible_iterator::FallibleIterator;
 use std::{collections::HashMap, convert::TryFrom, env, io::Cursor};
@@ -46,14 +47,8 @@ pub struct TirTrace {
 
 impl TirTrace {
     /// Create a TirTrace from a SirTrace.
-    /// Returns Err if a DefId is encountered for which no SIR is available. In the error case, the
-    /// trace built thus-far is returned inside the error.
-    ///
-    /// FIXME: This is not the final "intended" API. Normally we wouldn't care about the trace
-    /// built thus-far in an error case, but since we have no sensible way to stop the tracer at
-    /// the right time, inevitably traces can shoot off into code which has no SIR. In turn this
-    /// invalidates the trace. We only return the trace built so far in the interim.
-    pub(crate) fn new(trace: &'_ dyn SirTrace) -> Result<Self, Self> {
+    /// Returns Err if a DefId is encountered for which no SIR is available.
+    pub(crate) fn new<'s>(trace: &'s dyn SirTrace) -> Result<Self, InvalidTraceError> {
         let mut ops = Vec::new();
         let num_locs = trace.len();
 
@@ -61,7 +56,7 @@ impl TirTrace {
             let loc = trace.loc(blk_idx);
             let body = match SIR_MAP.get(&DefId::from_sir_loc(loc)) {
                 Some(b) => b,
-                None => return Err(Self { ops })
+                None => return Err(InvalidTraceError::NoSir(DefId::from_sir_loc(loc)))
             };
 
             let shadow_bb_idx_usize = usize::try_from(loc.bb_idx()).unwrap();

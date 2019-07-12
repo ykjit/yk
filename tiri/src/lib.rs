@@ -11,6 +11,9 @@
 //!
 //! No effort has been made to make this fast.
 
+#![feature(test)]
+extern crate test;
+
 use yktrace::tir::{Guard, Statement, TirOp, TirTrace};
 
 /// Storage space for one local variable.
@@ -68,5 +71,35 @@ impl<'t> Interp<'t> {
     /// Interpret the specified terminator.
     fn interp_guard(&self, _guard: &Guard) {
         unimplemented!();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Interp;
+    use test::black_box;
+    use yktrace::{start_tracing, TracingKind};
+
+    // Some work to trace.
+    #[inline(never)]
+    fn work(x: usize, y: usize) -> usize {
+        let mut res = 0;
+        while res < y {
+            res += x;
+        }
+        res
+    }
+
+    #[test]
+    #[ignore] // FIXME -- This will fail until we investigate why SIR is missing.
+    fn interp_simple_trace() {
+        let tracer = start_tracing(Some(TracingKind::SoftwareTracing));
+        let res = work(black_box(3), black_box(13));
+        let tir_trace = tracer.stop_tracing().unwrap();
+        assert_eq!(res, 15);
+        assert!(tir_trace.len() > 0);
+
+        let interp = Interp::new(&tir_trace);
+        interp.run();
     }
 }
