@@ -156,6 +156,9 @@ pub enum TirOp {
 
 #[cfg(test)]
 mod tests {
+    use crate::{start_tracing, TirTrace, TracingKind};
+    use test::black_box;
+
     // Some work to trace.
     #[inline(never)]
     fn work(x: usize, y: usize) -> usize {
@@ -165,9 +168,6 @@ mod tests {
         }
         res
     }
-
-    use crate::{start_tracing, TirTrace, TracingKind};
-    use test::black_box;
 
     #[test]
     fn nonempty_tir_trace() {
