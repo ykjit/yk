@@ -10,12 +10,14 @@
 //! Software tracing via ykrustc.
 
 use super::{SirTrace, ThreadTracer, ThreadTracerImpl};
+use crate::errors::InvalidTraceError;
 use core::yk_swt::{self, SirLoc};
 use libc;
 use std::ops::Drop;
 
 /// A trace collected via software tracing.
 /// Since the trace is a heap-allocated C buffer, we represent it as a pointer and a length.
+#[derive(Debug)]
 struct SWTSirTrace {
     buf: *mut SirLoc,
     len: usize
@@ -42,9 +44,11 @@ impl Drop for SWTSirTrace {
 struct SWTThreadTracer;
 
 impl ThreadTracerImpl for SWTThreadTracer {
-    fn stop_tracing(&self) -> Option<Box<dyn SirTrace>> {
-        yk_swt::stop_tracing()
-            .map(|(buf, len)| Box::new(SWTSirTrace { buf, len }) as Box<dyn SirTrace>)
+    fn stop_tracing(&self) -> Result<Box<dyn SirTrace>, InvalidTraceError> {
+        match yk_swt::stop_tracing() {
+            None => Err(InvalidTraceError::InternalError),
+            Some((buf, len)) => Ok(Box::new(SWTSirTrace { buf, len }) as Box<dyn SirTrace>)
+        }
     }
 }
 

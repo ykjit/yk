@@ -13,17 +13,22 @@
 extern crate test;
 
 use core::yk_swt::SirLoc;
-use std::iter::{IntoIterator, Iterator};
+use std::{
+    fmt::Debug,
+    iter::{IntoIterator, Iterator}
+};
 #[macro_use]
 extern crate lazy_static;
 
+mod errors;
 mod swt;
 pub mod tir;
 
+use errors::InvalidTraceError;
 use tir::TirTrace;
 
 /// Generic representation of a trace of SIR block locations.
-pub trait SirTrace {
+pub trait SirTrace: Debug {
     /// Returns the length of the trace, measured in SIR locations.
     fn len(&self) -> usize;
     /// Returns the SIR location at index `idx`.
@@ -78,20 +83,20 @@ pub struct ThreadTracer {
 }
 
 impl ThreadTracer {
-    /// Stops tracing on the current thread, returning a TIR trace on success. Returns `None` if
+    /// Stops tracing on the current thread, returning a TIR trace on success. Returns an error if
     /// the trace was invalidated.
-    pub fn stop_tracing(self) -> Option<TirTrace> {
+    pub fn stop_tracing(self) -> Result<TirTrace, InvalidTraceError> {
         self.t_impl
             .stop_tracing()
-            .map(|mir_trace| TirTrace::new(&*mir_trace).ok().unwrap())
+            .and_then(|sir_trace| TirTrace::new(&*sir_trace))
     }
 }
 
 // An generic interface which tracing backends must fulfill.
 trait ThreadTracerImpl {
-    /// Stops tracing on the current thread, returning the SIR trace on success. Returns `None` is
+    /// Stops tracing on the current thread, returning the SIR trace on success. Returns an error
     /// if the trace was invalidated.
-    fn stop_tracing(&self) -> Option<Box<dyn SirTrace>>;
+    fn stop_tracing(&self) -> Result<Box<dyn SirTrace>, InvalidTraceError>;
 }
 
 /// Start tracing on the current thread using the specified tracing kind.
@@ -172,7 +177,7 @@ mod test_helpers {
         inv_fn();
         let trace = th.t_impl.stop_tracing();
 
-        assert!(trace.is_none());
+        assert!(trace.is_err());
     }
 
     /// Test that accessing an out of bounds index fails.
