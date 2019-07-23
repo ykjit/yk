@@ -20,6 +20,7 @@ use std::{
 #[macro_use]
 extern crate lazy_static;
 
+pub mod debug;
 mod errors;
 mod swt;
 pub mod tir;
