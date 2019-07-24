@@ -16,10 +16,10 @@ use crate::errors::InvalidTraceError;
 use elf;
 use fallible_iterator::FallibleIterator;
 use std::{collections::HashMap, convert::TryFrom, env, io::Cursor};
-pub use ykpack::Statement;
 #[cfg(debug_assertions)]
-use ykpack::{BasicBlockIndex, Local, SerU128, Terminator};
-use ykpack::{Body, Decoder, DefId, Pack};
+use ykpack::BasicBlockIndex;
+pub use ykpack::Statement;
+use ykpack::{Body, Decoder, DefId, Local, Pack, SerU128, Terminator};
 
 // The SIR Map lets us look up a SIR body from the SIR DefId.
 // The map is unique to the executable binary being traced (i.e. shared for all threads).
@@ -32,8 +32,13 @@ lazy_static! {
 
         let mut sir_map = HashMap::new();
         while let Some(pack) = dec.next().unwrap() {
-            let Pack::Body(body) = pack;
-            sir_map.insert(body.def_id.clone(), body);
+            match pack {
+                Pack::Body(body) => {
+                    let old = sir_map.insert(body.def_id.clone(), body);
+                    debug_assert!(old.is_none()); // should be no duplicates.
+                },
+                Pack::Debug(_) => (),
+            }
         }
         sir_map
     };
@@ -56,7 +61,10 @@ impl TirTrace {
             let loc = trace.loc(blk_idx);
             let body = match SIR_MAP.get(&DefId::from_sir_loc(loc)) {
                 Some(b) => b,
-                None => return Err(InvalidTraceError::NoSir(DefId::from_sir_loc(loc)))
+                None => {
+                    let def_id = DefId::from_sir_loc(loc);
+                    return Err(InvalidTraceError::no_sir(&def_id));
+                }
             };
 
             let shadow_bb_idx_usize = usize::try_from(loc.bb_idx()).unwrap();

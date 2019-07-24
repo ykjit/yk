@@ -501,16 +501,50 @@ impl Display for BinOp {
     }
 }
 
+/// A debugging entry, mapping a DefId to its definition path string.
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+pub struct SirDebug {
+    def_id: DefId,
+    def_path: String,
+}
+
+impl SirDebug {
+    pub fn new(def_id: DefId, def_path: String) -> Self {
+        Self { def_id, def_path }
+    }
+
+    pub fn def_id(&self) -> &DefId {
+        &self.def_id
+    }
+
+    pub fn def_path(&self) -> &str {
+        &self.def_path
+    }
+}
+
 /// The top-level pack type.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Pack {
     Body(Body),
+    Debug(SirDebug),
+}
+
+impl Display for SirDebug {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "<debug: def_id={}, def_path_str={}>",
+            self.def_id, self.def_path
+        )
+    }
 }
 
 impl Display for Pack {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Pack::Body(sir) = self;
-        write!(f, "{}", sir)
+        match self {
+            Pack::Body(sir) => write!(f, "{}", sir),
+            Pack::Debug(dbg) => write!(f, "{}", dbg),
+        }
     }
 }
 

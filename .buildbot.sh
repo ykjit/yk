@@ -8,3 +8,4 @@ export PATH=`pwd`/ykrustc-stage2-latest/bin:${PATH}
 
 cargo fmt --all -- --check
 cargo test
+cargo test --release
