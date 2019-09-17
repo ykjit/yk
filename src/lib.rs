@@ -88,7 +88,7 @@ pub trait Trace: Debug + Send {
     fn to_file(&self, file: &mut File);
 
     /// Iterate over the blocks of the trace.
-    fn iter_blocks<'t: 'i, 'i>(&'t self) -> Box<Iterator<Item=Result<Block, HWTracerError>> + 'i>;
+    fn iter_blocks<'t: 'i, 'i>(&'t self) -> Box<dyn Iterator<Item=Result<Block, HWTracerError>> + 'i>;
 
     /// Get the capacity of the trace in bytes.
     #[cfg(test)]
@@ -98,7 +98,7 @@ pub trait Trace: Debug + Send {
 /// The interface offered by all tracer types.
 pub trait Tracer: Send + Sync  {
     /// Return a `ThreadTracer` for tracing the current thread.
-    fn thread_tracer(&self) -> Box<ThreadTracer>;
+    fn thread_tracer(&self) -> Box<dyn ThreadTracer>;
 }
 
 pub trait ThreadTracer {
@@ -109,7 +109,7 @@ pub trait ThreadTracer {
     /// Turns off the tracer.
     ///
     /// [start_tracing](trait.ThreadTracer.html#method.start_tracing) must have been called prior.
-    fn stop_tracing(&mut self) -> Result<Box<Trace>, HWTracerError>;
+    fn stop_tracing(&mut self) -> Result<Box<dyn Trace>, HWTracerError>;
 }
 
 // Keeps track of the internal state of a tracer.
@@ -158,7 +158,7 @@ mod test_helpers {
     }
 
     // Trace a closure that returns a u64.
-    pub fn trace_closure<F>(tracer: &mut ThreadTracer, f: F) -> Box<Trace> where F: FnOnce() -> u64 {
+    pub fn trace_closure<F>(tracer: &mut dyn ThreadTracer, f: F) -> Box<dyn Trace> where F: FnOnce() -> u64 {
         tracer.start_tracing().unwrap();
         let res = f();
         let trace = tracer.stop_tracing().unwrap();
@@ -197,7 +197,7 @@ mod test_helpers {
     }
 
     // Helper to check an expected list of blocks matches what we actually got.
-    pub fn test_expected_blocks(trace: Box<Trace>, mut expect_iter: Iter<Block>) {
+    pub fn test_expected_blocks(trace: Box<dyn Trace>, mut expect_iter: Iter<Block>) {
         let mut got_iter = trace.iter_blocks();
         loop {
             let expect = expect_iter.next();
