@@ -4,6 +4,7 @@ cache: cargo
 
 before_script:
     - export PATH="$PATH:$HOME/.cargo/bin"
+    - export LD_LIBRARY_PATH=c_deps/inst/lib/
 
 script:
     - cargo build --examples
