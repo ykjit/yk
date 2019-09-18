@@ -226,6 +226,7 @@ impl<'t> Iterator for PerfPTBlockIterator<'t> {
         // Lazily initialise the block decoder.
         if self.decoder.is_null() {
             if let Err(e) = self.init_decoder() {
+                self.errored = true;
                 return Some(Err(e));
             }
         }
