@@ -72,7 +72,7 @@ impl Error for LibIPTError {
         "libipt error"
     }
 
-    fn cause(&self) -> Option<&Error> {
+    fn cause(&self) -> Option<&dyn Error> {
         None
     }
 }
@@ -226,6 +226,7 @@ impl<'t> Iterator for PerfPTBlockIterator<'t> {
         // Lazily initialise the block decoder.
         if self.decoder.is_null() {
             if let Err(e) = self.init_decoder() {
+                self.errored = true;
                 return Some(Err(e));
             }
         }
@@ -299,7 +300,7 @@ impl Trace for PerfPTTrace {
         file.write_all(slice).unwrap();
     }
 
-    fn iter_blocks<'t: 'i, 'i>(&'t self) -> Box<Iterator<Item=Result<Block, HWTracerError>> + 'i> {
+    fn iter_blocks<'t: 'i, 'i>(&'t self) -> Box<dyn Iterator<Item=Result<Block, HWTracerError>> + 'i> {
         let itr = PerfPTBlockIterator {
             decoder: ptr::null_mut(),
             decoder_status: 0,
@@ -367,7 +368,7 @@ impl PerfPTTracer {
 }
 
 impl Tracer for PerfPTTracer {
-    fn thread_tracer(&self) -> Box<ThreadTracer> {
+    fn thread_tracer(&self) -> Box<dyn ThreadTracer> {
         Box::new(PerfPTThreadTracer::new(self.config.clone()))
     }
 
@@ -428,7 +429,7 @@ impl ThreadTracer for PerfPTThreadTracer {
         Ok(())
     }
 
-    fn stop_tracing(&mut self) -> Result<Box<Trace>, HWTracerError> {
+    fn stop_tracing(&mut self) -> Result<Box<dyn Trace>, HWTracerError> {
         if self.state == TracerState::Stopped {
             return Err(TracerState::Stopped.as_error());
         }
@@ -447,7 +448,7 @@ impl ThreadTracer for PerfPTThreadTracer {
 
         let ret = self.trace.take().unwrap();
         self.trace = None;
-        Ok(ret as Box<Trace>)
+        Ok(ret as Box<dyn Trace>)
     }
 }
 
@@ -455,7 +456,6 @@ impl ThreadTracer for PerfPTThreadTracer {
 #[cfg(test)]
 #[no_mangle]
 pub unsafe extern "C" fn push_ptxed_arg(args: &mut Vec<String>, new_arg: *const c_char) {
-    use std::ffi::CStr;
     let new_arg = CStr::from_ptr(new_arg).to_owned().to_str().unwrap().to_owned();
     args.push(new_arg);
 }
@@ -530,7 +530,7 @@ mod tests {
     }
 
     // Given a trace, use ptxed to get a vector of block start vaddrs.
-    fn get_expected_blocks(trace: &Box<Trace>) -> Vec<Block> {
+    fn get_expected_blocks(trace: &Box<dyn Trace>) -> Vec<Block> {
         // Write the trace out to a temp file so ptxed can decode it.
         let mut tmpf = NamedTempFile::new().unwrap();
         trace.to_file(&mut tmpf.as_file_mut());

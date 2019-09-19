@@ -1,17 +1,17 @@
 DIR != pwd
 INST_DIR = ${DIR}/inst
-PYTHON=python2.7
+PYTHON=python3
 
 PROCESSOR_TRACE_REPO = https://github.com/01org/processor-trace.git
-PROCESSOR_TRACE_V = 24982c1a6fce48f1e416461d42899805f74fbb26
+PROCESSOR_TRACE_V = 892e12c5a27bda5806d1e63269986bb4171b5a8b
 PROCESSOR_TRACE_SOURCE = processor-trace
 
 XED_REPO = https://github.com/intelxed/xed
-XED_V = bd73bdb2eefac1896b886e6a39e1794ae5267f7f
+XED_V = b4109c0823ff35df7416a157178c87f77421994b
 XED_SOURCE = xed
 
 MBUILD_REPO = https://github.com/intelxed/mbuild
-MBUILD_V = bb9123152a330c7fa1ff1a502950dc199c83e177
+MBUILD_V = f2de5e93ac318e223f6ec61c41f541171db0ada7
 MBUILD_SOURCE = mbuild
 
 .PHONY: libipt

@@ -214,7 +214,7 @@ impl TracerBuilder {
     /// Build a tracer from the specified configuration.
     /// An error is returned if the requested backend is inappropriate for the platform or the
     /// requested backend was not compiled in to hwtracer.
-    pub fn build(self) -> Result<Box<Tracer>, HWTracerError> {
+    pub fn build(self) -> Result<Box<dyn Tracer>, HWTracerError> {
         let backend_kind = self.config.backend_kind();
         backend_kind.match_platform()?;
         match self.config {

@@ -51,7 +51,7 @@ impl Trace for DummyTrace {
     #[cfg(test)]
     fn to_file(&self, _: &mut File) {}
 
-    fn iter_blocks<'t: 'i, 'i>(&'t self) -> Box<Iterator<Item=Result<Block, HWTracerError>> + 'i> {
+    fn iter_blocks<'t: 'i, 'i>(&'t self) -> Box<dyn Iterator<Item=Result<Block, HWTracerError>> + 'i> {
        Box::new(DummyBlockIterator{})
     }
 
@@ -71,7 +71,7 @@ impl DummyTracer {
 }
 
 impl Tracer for DummyTracer {
-    fn thread_tracer(&self) -> Box<ThreadTracer> {
+    fn thread_tracer(&self) -> Box<dyn ThreadTracer> {
         Box::new(DummyThreadTracer::new())
     }
 }
@@ -98,7 +98,7 @@ impl ThreadTracer for DummyThreadTracer {
         Ok(())
     }
 
-    fn stop_tracing(&mut self) -> Result<Box<Trace>, HWTracerError> {
+    fn stop_tracing(&mut self) -> Result<Box<dyn Trace>, HWTracerError> {
         if self.state != TracerState::Started {
             return Err(TracerState::Stopped.as_error());
         }

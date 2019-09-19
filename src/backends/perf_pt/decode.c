@@ -497,9 +497,6 @@ dump_vdso(int fd, uint64_t vaddr, size_t len, struct perf_pt_cerror *err)
 void
 perf_pt_free_block_decoder(struct pt_block_decoder *decoder) {
     if (decoder != NULL) {
-        struct pt_image *img = pt_blk_get_image(decoder);
-        if (img != NULL) {
-            pt_image_free(img);
-        }
+        pt_blk_free_decoder(decoder);
     }
 }

@@ -44,7 +44,7 @@ use hwtracer::backends::TracerBuilder;
 
 /// Prints the addresses of the first `qty` blocks in a trace along with it's name and
 /// computation result.
-fn print_trace(trace: &Box<Trace>, name: &str, result: u32, qty: usize) {
+fn print_trace(trace: &Box<dyn Trace>, name: &str, result: u32, qty: usize) {
     let count = trace.iter_blocks().count();
     println!("{}: num_blocks={}, result={}", name, count, result);
 

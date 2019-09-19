@@ -54,7 +54,7 @@ pub enum HWTracerError {
     Errno(c_int),             // Something went wrong in C code.
     TracerState(TracerState), // The tracer is in the wrong state to do the requested task.
     BadConfig(String),        // The tracer configuration was invalid.
-    Custom(Box<Error>),       // All other errors can be nested here, however, don't rely on this
+    Custom(Box<dyn Error>),       // All other errors can be nested here, however, don't rely on this
                               // for performance since the `Box` incurs a runtime cost.
     Unknown,                  // An unknown error. Used sparingly in C code which doesn't set errno.
 }
@@ -84,7 +84,7 @@ impl Error for HWTracerError {
         "hwtracer error"
     }
 
-    fn cause(&self) -> Option<&Error> {
+    fn cause(&self) -> Option<&dyn Error> {
         match *self {
             HWTracerError::HWBufferOverflow => None,
             HWTracerError::BackendUnavailable(_) => None,
