@@ -24,11 +24,11 @@ struct SWTSirTrace {
 }
 
 impl SirTrace for SWTSirTrace {
-    fn len(&self) -> usize {
+    fn raw_len(&self) -> usize {
         self.len
     }
 
-    fn loc(&self, idx: usize) -> &SirLoc {
+    fn raw_loc(&self, idx: usize) -> &SirLoc {
         assert!(idx < self.len, "out of bounds index");
         unsafe { &*self.buf.add(idx) }
     }
@@ -44,6 +44,7 @@ impl Drop for SWTSirTrace {
 struct SWTThreadTracer;
 
 impl ThreadTracerImpl for SWTThreadTracer {
+    #[trace_tail]
     fn stop_tracing(&self) -> Result<Box<dyn SirTrace>, InvalidTraceError> {
         match yk_swt::stop_tracing() {
             None => Err(InvalidTraceError::InternalError),
