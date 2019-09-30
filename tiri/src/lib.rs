@@ -78,7 +78,7 @@ impl<'t> Interp<'t> {
 mod tests {
     use super::Interp;
     use test::black_box;
-    use yktrace::{start_tracing, TracingKind};
+    use yktrace::{start_tracing, tir::TirTrace, TracingKind};
 
     // Some work to trace.
     #[inline(never)]
@@ -95,8 +95,9 @@ mod tests {
     fn interp_simple_trace() {
         let tracer = start_tracing(Some(TracingKind::SoftwareTracing));
         let res = work(black_box(3), black_box(13));
-        let tir_trace = tracer.stop_tracing().unwrap();
+        let sir_trace = tracer.stop_tracing().unwrap();
         assert_eq!(res, 15);
+        let tir_trace = TirTrace::new(sir_trace.as_ref()).unwrap();
         assert!(tir_trace.len() > 0);
 
         let interp = Interp::new(&tir_trace);

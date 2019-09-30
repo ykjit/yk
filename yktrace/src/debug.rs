@@ -9,11 +9,11 @@
 
 //! Debugging utilities.
 
-use crate::SirTrace;
+use crate::{tir::SIR, SirLoc, SirTrace};
 use elf;
 use fallible_iterator::FallibleIterator;
-use std::{collections::HashMap, env, io::Cursor};
-pub use ykpack::Statement;
+use std::{collections::HashMap, env, io::Cursor, iter::IntoIterator};
+pub use ykpack::{bodyflags, Statement};
 use ykpack::{Decoder, DefId, Pack};
 
 // The SIR Debug Map lets us map a DefId to a definition path.
@@ -48,21 +48,38 @@ pub fn def_path(def_id: &DefId) -> Option<&str> {
 }
 
 /// Prints a SIR trace to stdout for debugging purposes.
-pub fn print_sir_trace(trace: &dyn SirTrace) {
+pub fn print_sir_trace(trace: &dyn SirTrace, trimmed: bool) {
+    let locs: Vec<&SirLoc> = match trimmed {
+        false => (0..(trace.raw_len())).map(|i| trace.raw_loc(i)).collect(),
+        true => trace.into_iter().collect()
+    };
+
     println!("---[ BEGIN SIR TRACE DUMP ]---");
-    for loc in trace {
+    for loc in locs {
         let def_id = DefId::from_sir_loc(&loc);
         let def_path_s = match def_path(&def_id) {
             Some(s) => s,
             None => "<unknown>"
         };
+
         println!(
-            "[{}] crate={}, index={}, bb={}",
+            "[{}] crate={}, index={}, bb={}, flags=[",
             def_path_s,
             loc.crate_hash(),
             loc.def_idx(),
-            loc.bb_idx()
+            loc.bb_idx(),
         );
+
+        let body = SIR.bodies.get(&def_id);
+        if let Some(body) = body {
+            if body.flags & bodyflags::TRACE_HEAD != 0 {
+                print!("HEAD ");
+            }
+            if body.flags & bodyflags::TRACE_TAIL != 0 {
+                print!("TAIL ");
+            }
+        }
+        println!("]");
     }
     println!("---[ END SIR TRACE DUMP ]---");
 }

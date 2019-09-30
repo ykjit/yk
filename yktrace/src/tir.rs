@@ -19,29 +19,73 @@ use std::{collections::HashMap, convert::TryFrom, env, io::Cursor};
 #[cfg(debug_assertions)]
 use ykpack::BasicBlockIndex;
 pub use ykpack::Statement;
-use ykpack::{Body, Decoder, DefId, Local, Pack, SerU128, Terminator};
+use ykpack::{bodyflags, Body, Decoder, DefId, Local, Pack, SerU128, Terminator};
 
-// The SIR Map lets us look up a SIR body from the SIR DefId.
-// The map is unique to the executable binary being traced (i.e. shared for all threads).
 lazy_static! {
-    static ref SIR_MAP: HashMap<DefId, Body> = {
+    pub static ref SIR: Sir = {
         let ef = elf::File::open_path(env::current_exe().unwrap()).unwrap();
         let sec = ef.get_section(".yk_sir").expect("Can't find SIR section");
         let mut curs = Cursor::new(&sec.data);
         let mut dec = Decoder::from(&mut curs);
 
-        let mut sir_map = HashMap::new();
+        let mut bodies = HashMap::new();
+        let mut trace_head = None;
+        let mut trace_tails = Vec::new();
         while let Some(pack) = dec.next().unwrap() {
             match pack {
                 Pack::Body(body) => {
-                    let old = sir_map.insert(body.def_id.clone(), body);
+                    // Cache some locations that we need quick access to.
+                    if body.flags & bodyflags::TRACE_HEAD != 0 {
+                        assert_eq!(trace_head, None);
+                        trace_head = Some(body.def_id.clone());
+                    }
+
+                    if body.flags & bodyflags::TRACE_TAIL != 0 {
+                        trace_tails.push(body.def_id.clone());
+                    }
+
+                    let old = bodies.insert(body.def_id.clone(), body);
                     debug_assert!(old.is_none()); // should be no duplicates.
                 },
                 Pack::Debug(_) => (),
             }
         }
-        sir_map
+
+        assert!(trace_head.is_some());
+        assert_eq!(trace_tails.is_empty(), false);
+        let markers = SirMarkers { trace_head: trace_head.unwrap(), trace_tails };
+
+        Sir {bodies, markers}
     };
+}
+
+/// The serialised IR loaded in from disk. One of these structures is generated in the above
+/// `lazy_static` and is shared immutably for all threads.
+pub struct Sir {
+    /// Lets us map a DefId from a trace to a SIR body.
+    pub bodies: HashMap<DefId, Body>,
+    // Interesting locations that we need quick access to.
+    pub markers: SirMarkers
+}
+
+/// Contains the DefIds of interesting locations required for trace manipulation.
+pub struct SirMarkers {
+    /// The function which starts tracing and whose suffix gets trimmed off the top of traces.
+    /// There is only one such function (i.e. `yktrace::start_tracing()`) and we will only see the
+    /// suffix of this function in traces, as trace recording will start somewhere in the middle of
+    /// the function.
+    ///
+    /// The compiler is made aware of this location by the `#[trace_head]` annotation.
+    pub trace_head: DefId,
+    /// Functions which stop tracing and whose prefix gets trimmed off the bottom of traces.
+    /// Although you'd expect only one such function, (i.e. `ThreadTracer::stop_tracing`), in fact
+    /// the inner implementation (of which there may be many) is the location which appears in the
+    /// trace (this happens even if `ThreadTracer::stop_tracing()` is marked `#[inline(never)]`).
+    /// This may be due to the fact that only one concrete struct implements `ThreadTracerImpl` at
+    /// the moment.
+    ///
+    /// The compiler is made aware of these locations by the `#[trace_tail]` annotation.
+    pub trace_tails: Vec<DefId>
 }
 
 /// A TIR trace is conceptually a straight-line path through the SIR with guarded speculation.
@@ -51,18 +95,17 @@ pub struct TirTrace {
 }
 
 impl TirTrace {
-    /// Create a TirTrace from a SirTrace.
-    /// Returns Err if a DefId is encountered for which no SIR is available.
-    pub(crate) fn new<'s>(trace: &'s dyn SirTrace) -> Result<Self, InvalidTraceError> {
+    /// Create a TirTrace from a SirTrace, trimming remnants of the code which starts/stops the
+    /// tracer. Returns a TIR trace and the bounds the SIR trace was trimmed to, or Err if a DefId
+    /// is encountered for which no SIR is available.
+    pub fn new<'s>(trace: &'s dyn SirTrace) -> Result<Self, InvalidTraceError> {
         let mut ops = Vec::new();
-        let num_locs = trace.len();
-
-        for blk_idx in 0..num_locs {
-            let loc = trace.loc(blk_idx);
-            let body = match SIR_MAP.get(&DefId::from_sir_loc(loc)) {
+        let mut itr = trace.into_iter().peekable();
+        while let Some(loc) = itr.next() {
+            let body = match SIR.bodies.get(&DefId::from_sir_loc(&loc)) {
                 Some(b) => b,
                 None => {
-                    let def_id = DefId::from_sir_loc(loc);
+                    let def_id = DefId::from_sir_loc(&loc);
                     return Err(InvalidTraceError::no_sir(&def_id));
                 }
             };
@@ -82,7 +125,7 @@ impl TirTrace {
             }
 
             // When adding statements to the trace, we clone them (rather than referencing the
-            // statements in the SIR_MAP) so that we have the freedom to mutate them later.
+            // statements in the SIR) so that we have the freedom to mutate them later.
             ops.extend(
                 body.blocks[user_bb_idx_usize]
                     .stmts
@@ -109,8 +152,7 @@ impl TirTrace {
                     // Peek at the next block in the trace to see which outgoing edge was taken and
                     // infer which value we must guard upon. We are working on the assumption that
                     // a trace can't end on a SwitchInt. i.e. that another block follows.
-                    debug_assert!(num_locs >= blk_idx + 1, "invalid next block assumption");
-                    let next_blk = trace.loc(blk_idx + 1).bb_idx();
+                    let next_blk = itr.peek().expect("no block to peek at").bb_idx();
                     let edge_idx = target_bbs.iter().position(|e| *e == next_blk);
                     match edge_idx {
                         Some(idx) => Some(Guard::Integer(local, values[idx].to_owned())),
@@ -127,6 +169,7 @@ impl TirTrace {
                 ops.push(TirOp::Guard(guard.unwrap()));
             }
         }
+
         Ok(Self { ops })
     }
 
@@ -164,7 +207,8 @@ pub enum TirOp {
 
 #[cfg(test)]
 mod tests {
-    use crate::{start_tracing, TirTrace, TracingKind};
+    use super::TirTrace;
+    use crate::{start_tracing, TracingKind};
     use test::black_box;
 
     // Some work to trace.

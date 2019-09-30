@@ -108,6 +108,12 @@ impl Display for DefId {
     }
 }
 
+/// Bits in the `flags` bitfield in `Body`.
+pub mod bodyflags {
+    pub const TRACE_HEAD: u8 = 1;
+    pub const TRACE_TAIL: u8 = 1 << 1;
+}
+
 /// A tracing IR pack.
 /// Each Body maps to exactly one MIR Body.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
@@ -115,14 +121,16 @@ pub struct Body {
     pub def_id: DefId,
     pub def_path_str: String,
     pub blocks: Vec<BasicBlock>,
+    pub flags: u8,
 }
 
 impl Body {
-    pub fn new(def_id: DefId, def_path_str: String, blocks: Vec<BasicBlock>) -> Self {
+    pub fn new(def_id: DefId, def_path_str: String, blocks: Vec<BasicBlock>, flags: u8) -> Self {
         Self {
             def_id,
             def_path_str,
             blocks,
+            flags,
         }
     }
 }
