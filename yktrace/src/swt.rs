@@ -53,6 +53,7 @@ impl ThreadTracerImpl for SWTThreadTracer {
     }
 }
 
+#[trace_head]
 pub fn start_tracing() -> ThreadTracer {
     yk_swt::start_tracing();
     ThreadTracer {
