@@ -57,7 +57,7 @@ impl<'a> SirTraceIterator<'a> {
         let mut begin_idx = None;
         for blk_idx in (0..trace.raw_len()).rev() {
             let def_id = DefId::from_sir_loc(trace.raw_loc(blk_idx));
-            if SIR.markers.trace_head == def_id {
+            if SIR.markers.trace_heads.contains(&def_id) {
                 begin_idx = Some(blk_idx + 1);
                 break;
             }

@@ -29,15 +29,14 @@ lazy_static! {
         let mut dec = Decoder::from(&mut curs);
 
         let mut bodies = HashMap::new();
-        let mut trace_head = None;
+        let mut trace_heads = Vec::new();
         let mut trace_tails = Vec::new();
         while let Some(pack) = dec.next().unwrap() {
             match pack {
                 Pack::Body(body) => {
                     // Cache some locations that we need quick access to.
                     if body.flags & bodyflags::TRACE_HEAD != 0 {
-                        assert_eq!(trace_head, None);
-                        trace_head = Some(body.def_id.clone());
+                        trace_heads.push(body.def_id.clone());
                     }
 
                     if body.flags & bodyflags::TRACE_TAIL != 0 {
@@ -51,9 +50,9 @@ lazy_static! {
             }
         }
 
-        assert!(trace_head.is_some());
+        assert_eq!(trace_heads.is_empty(), false);
         assert_eq!(trace_tails.is_empty(), false);
-        let markers = SirMarkers { trace_head: trace_head.unwrap(), trace_tails };
+        let markers = SirMarkers { trace_heads, trace_tails };
 
         Sir {bodies, markers}
     };
@@ -70,19 +69,19 @@ pub struct Sir {
 
 /// Contains the DefIds of interesting locations required for trace manipulation.
 pub struct SirMarkers {
-    /// The function which starts tracing and whose suffix gets trimmed off the top of traces.
-    /// There is only one such function (i.e. `yktrace::start_tracing()`) and we will only see the
-    /// suffix of this function in traces, as trace recording will start somewhere in the middle of
-    /// the function.
+    /// Functions which start tracing and whose suffix gets trimmed off the top of traces.
+    /// Although you'd expect only one such function, (i.e. `yktrace::start_tracing`), in fact
+    /// the location which appears in the trace can vary according to how Rust compiles the
+    /// program (this happens even if `yktracer::start_tracing()` is marked `#[inline(never)]`).
+    /// For this reason, we mark few different places as potential heads.
+    ///
+    /// We will only see the suffix of these functions in traces, as trace recording will start
+    /// somewhere in the middle of them.
     ///
     /// The compiler is made aware of this location by the `#[trace_head]` annotation.
-    pub trace_head: DefId,
-    /// Functions which stop tracing and whose prefix gets trimmed off the bottom of traces.
-    /// Although you'd expect only one such function, (i.e. `ThreadTracer::stop_tracing`), in fact
-    /// the inner implementation (of which there may be many) is the location which appears in the
-    /// trace (this happens even if `ThreadTracer::stop_tracing()` is marked `#[inline(never)]`).
-    /// This may be due to the fact that only one concrete struct implements `ThreadTracerImpl` at
-    /// the moment.
+    pub trace_heads: Vec<DefId>,
+    /// Similar to `trace_heads`, functions which stop tracing and whose prefix gets trimmed off
+    /// the bottom of traces.
     ///
     /// The compiler is made aware of these locations by the `#[trace_tail]` annotation.
     pub trace_tails: Vec<DefId>
