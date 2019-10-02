@@ -62,7 +62,7 @@ pub fn print_sir_trace(trace: &dyn SirTrace, trimmed: bool) {
             None => "<unknown>"
         };
 
-        println!(
+        print!(
             "[{}] crate={}, index={}, bb={}, flags=[",
             def_path_s,
             loc.crate_hash(),
