@@ -121,18 +121,12 @@ pub struct Body {
     pub def_id: DefId,
     pub def_path_str: String,
     pub blocks: Vec<BasicBlock>,
+    /// The number of arguments to the function.
+    pub num_args: usize,
+    /// The number of local variables used by the function, including the return value and
+    /// arguments.
+    pub num_locals: usize,
     pub flags: u8,
-}
-
-impl Body {
-    pub fn new(def_id: DefId, def_path_str: String, blocks: Vec<BasicBlock>, flags: u8) -> Self {
-        Self {
-            def_id,
-            def_path_str,
-            blocks,
-            flags,
-        }
-    }
 }
 
 impl Display for Body {
