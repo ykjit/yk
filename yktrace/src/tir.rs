@@ -16,8 +16,6 @@ use crate::errors::InvalidTraceError;
 use elf;
 use fallible_iterator::FallibleIterator;
 use std::{collections::HashMap, convert::TryFrom, env, io::Cursor};
-#[cfg(debug_assertions)]
-use ykpack::BasicBlockIndex;
 pub use ykpack::Statement;
 use ykpack::{bodyflags, Body, Decoder, DefId, Local, Pack, SerU128, Terminator};
 
@@ -109,22 +107,9 @@ impl TirTrace {
                 }
             };
 
-            let shadow_bb_idx_usize = usize::try_from(loc.bb_idx()).unwrap();
-            // Here we use an invariant of the MIR transform to find the user block for a shadow
-            // block. In the blocks vector, first come N shadow blocks, then come N corresponding
-            // user blocks. The debug assertion checks the invariant holds by looking at where the
-            // shadow block returns to after the call to the trace recorder.
-            let user_bb_idx_usize = body.blocks.len() / 2 + shadow_bb_idx_usize;
-            #[cfg(debug_assertions)]
-            match body.blocks[shadow_bb_idx_usize].term {
-                Terminator::Call { ret_bb, .. } => debug_assert!(
-                    ret_bb == Some(BasicBlockIndex::try_from(user_bb_idx_usize).unwrap())
-                ),
-                _ => panic!("shadow invariant doesn't hold")
-            }
-
             // When adding statements to the trace, we clone them (rather than referencing the
             // statements in the SIR) so that we have the freedom to mutate them later.
+            let user_bb_idx_usize = usize::try_from(loc.bb_idx()).unwrap();
             ops.extend(
                 body.blocks[user_bb_idx_usize]
                     .stmts
