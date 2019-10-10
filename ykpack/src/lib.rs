@@ -71,12 +71,14 @@ mod tests {
             BasicBlock::new(stmts1_b1, dummy_term.clone()),
             BasicBlock::new(stmts1_b2, dummy_term.clone()),
         ];
-        let sir1 = Pack::Body(Body::new(
-            DefId::new(1, 2),
-            String::from("item1"),
-            blocks1,
-            0,
-        ));
+        let sir1 = Pack::Body(Body {
+            def_id: DefId::new(1, 2),
+            def_path_str: String::from("item1"),
+            blocks: blocks1,
+            num_args: 3,
+            num_locals: 4,
+            flags: 0,
+        });
 
         let stmts2_b1 = vec![Statement::Nop; 7];
         let stmts2_b2 = vec![Statement::Nop; 200];
@@ -86,12 +88,14 @@ mod tests {
             BasicBlock::new(stmts2_b2, dummy_term.clone()),
             BasicBlock::new(stmts2_b3, dummy_term.clone()),
         ];
-        let sir2 = Pack::Body(Body::new(
-            DefId::new(4, 5),
-            String::from("item2"),
-            blocks2,
-            0,
-        ));
+        let sir2 = Pack::Body(Body {
+            def_id: DefId::new(4, 5),
+            def_path_str: String::from("item2"),
+            blocks: blocks2,
+            num_args: 8,
+            num_locals: 9,
+            flags: 0,
+        });
 
         vec![sir1, sir2]
     }
@@ -174,21 +178,25 @@ mod tests {
         ];
 
         let sirs = vec![
-            Pack::Body(Body::new(
-                DefId::new(1, 2),
-                String::from("item1"),
-                blocks_t1,
-                0,
-            )),
-            Pack::Body(Body::new(
-                DefId::new(3, 4),
-                String::from("item2"),
-                vec![BasicBlock::new(
+            Pack::Body(Body {
+                def_id: DefId::new(1, 2),
+                def_path_str: String::from("item1"),
+                blocks: blocks_t1,
+                num_args: 100,
+                num_locals: 200,
+                flags: 0,
+            }),
+            Pack::Body(Body {
+                def_id: DefId::new(3, 4),
+                def_path_str: String::from("item2"),
+                blocks: vec![BasicBlock::new(
                     vec![Statement::Unimplemented(String::from("abc"))],
                     Terminator::Unreachable,
                 )],
-                0,
-            )),
+                num_args: 9,
+                num_locals: 15,
+                flags: 0,
+            }),
         ];
 
         let mut got = String::new();
