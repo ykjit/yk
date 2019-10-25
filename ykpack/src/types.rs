@@ -196,7 +196,6 @@ impl Display for Body {
         for (i, b) in self.blocks.iter().enumerate() {
             block_strs.push(format!("    bb{}:\n{}", i, b));
         }
-        println!("{:?}", block_strs);
         writeln!(f, "{}", block_strs.join("\n"))?;
         writeln!(f, "[End SIR for {}]", self.def_path_str)?;
         Ok(())
