@@ -17,7 +17,7 @@ use elf;
 use fallible_iterator::FallibleIterator;
 use std::{collections::HashMap, convert::TryFrom, env, io::Cursor};
 pub use ykpack::Statement;
-use ykpack::{bodyflags, Body, Decoder, DefId, Local, Pack, SerU128, Terminator};
+use ykpack::{bodyflags, Body, Decoder, DefId, Pack, Place, SerU128, Terminator};
 
 lazy_static! {
     pub static ref SIR: Sir = {
@@ -128,7 +128,7 @@ impl TirTrace {
                 | Terminator::Unimplemented(_) => None,
                 Terminator::Unreachable => panic!("Traced unreachable code"),
                 Terminator::SwitchInt {
-                    local,
+                    ref discr,
                     ref values,
                     ref target_bbs,
                     otherwise_bb
@@ -139,14 +139,14 @@ impl TirTrace {
                     let next_blk = itr.peek().expect("no block to peek at").bb_idx();
                     let edge_idx = target_bbs.iter().position(|e| *e == next_blk);
                     match edge_idx {
-                        Some(idx) => Some(Guard::Integer(local, values[idx].to_owned())),
+                        Some(idx) => Some(Guard::Integer(discr.clone(), values[idx].to_owned())),
                         None => {
                             debug_assert!(next_blk == otherwise_bb);
-                            Some(Guard::OtherInteger(local, values.clone()))
+                            Some(Guard::OtherInteger(discr.clone(), values.clone()))
                         }
                     }
                 }
-                Terminator::Assert { ref cond, .. } => Some(Guard::Boolean(*cond))
+                Terminator::Assert { ref cond, .. } => Some(Guard::Boolean(cond.clone()))
             };
 
             if guard.is_some() {
@@ -174,12 +174,12 @@ impl TirTrace {
 #[derive(Debug)]
 pub enum Guard {
     /// The Local must be equal to the integer constant.
-    Integer(Local, SerU128),
+    Integer(Place, SerU128),
     /// The local must not be a member of the specified collection of integers.
     /// This is necessary due to the "otherwise" semantics of the SwitchInt terminator in MIR.
-    OtherInteger(Local, Vec<SerU128>),
+    OtherInteger(Place, Vec<SerU128>),
     /// The value held in the Local must be true.
-    Boolean(Local)
+    Boolean(Place)
 }
 
 /// A TIR operation. A collection of these makes a TIR trace.
