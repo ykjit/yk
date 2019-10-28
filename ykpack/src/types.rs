@@ -55,7 +55,7 @@ macro_rules! new_ser128 {
 new_ser128!(SerU128, u128);
 new_ser128!(SerI128, i128);
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Copy, Hash)]
 pub struct Local {
     idx: LocalIndex,
     ty: TyIndex,
@@ -78,6 +78,65 @@ impl Local {
 impl Display for Local {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "${}: t{}", self.idx, self.ty)
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
+pub struct Place {
+    pub base: PlaceBase,
+    pub projections: Vec<PlaceProjection>,
+}
+
+impl Display for Place {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.projections.is_empty() {
+            write!(f, "{}", self.base)?;
+        } else {
+            write!(f, "({})", self.base)?;
+            for p in &self.projections {
+                write!(f, "{}", p)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl From<Local> for Place {
+    fn from(l: Local) -> Self {
+        Self {
+            base: PlaceBase::Local(l),
+            projections: Vec::new(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
+pub enum PlaceBase {
+    Local(Local),
+    Static, // FIXME not implemented
+}
+
+impl Display for PlaceBase {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Local(l) => write!(f, "{}", l),
+            Self::Static => write!(f, "Static"),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
+pub enum PlaceProjection {
+    Field(FieldIndex),
+    Unimplemented,
+}
+
+impl Display for PlaceProjection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Field(fld) => write!(f, ".{}", fld),
+            Self::Unimplemented => write!(f, "!"),
+        }
     }
 }
 
@@ -137,7 +196,6 @@ impl Display for Body {
         for (i, b) in self.blocks.iter().enumerate() {
             block_strs.push(format!("    bb{}:\n{}", i, b));
         }
-        println!("{:?}", block_strs);
         writeln!(f, "{}", block_strs.join("\n"))?;
         writeln!(f, "[End SIR for {}]", self.def_path_str)?;
         Ok(())
@@ -169,10 +227,8 @@ impl Display for BasicBlock {
 pub enum Statement {
     /// Do nothing.
     Nop,
-    /// An assignment to a local variable.
-    Assign(Local, Rvalue),
-    /// Store into the memory.
-    Store(Local, Operand),
+    /// An assignment.
+    Assign(Place, Rvalue),
     /// Any unimplemented lowering maps to this variant.
     /// The string inside is the stringified MIR statement.
     Unimplemented(String),
@@ -183,7 +239,6 @@ impl Display for Statement {
         match self {
             Statement::Nop => write!(f, "nop"),
             Statement::Assign(l, r) => write!(f, "{} = {}", l, r),
-            Statement::Store(ptr, val) => write!(f, "store({}, {})", ptr, val),
             Statement::Unimplemented(mir_stmt) => write!(f, "unimplemented_stmt: {}", mir_stmt),
         }
     }
@@ -192,45 +247,50 @@ impl Display for Statement {
 /// The right-hand side of an assignment.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Rvalue {
-    /// Another local variable.
-    Local(Local),
-    /// A constant value.
-    Constant(Constant),
-    /// Get a pointer to a field.
-    GetField(Local, FieldIndex),
-    /// Load a value of specified type from a pointer.
-    Load(Local),
-    /// Nullary, Unary and Binary Ops.
+    Use(Operand),
     BinaryOp(BinOp, Operand, Operand),
-    /// Allocate space for the specified type on the stack and return a pointer to it.
-    Alloca(TyIndex),
+    CheckedBinaryOp(BinOp, Operand, Operand),
+    Unimplemented,
 }
 
 impl Display for Rvalue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Rvalue::Local(l) => write!(f, "{}", l),
-            Rvalue::Constant(c) => write!(f, "{}", c),
-            Rvalue::GetField(ptr, fidx) => write!(f, "get_field({}, {})", ptr, fidx),
-            Rvalue::Load(l) => write!(f, "load({})", l),
-            Rvalue::BinaryOp(oper, o1, o2) => write!(f, "{}({}, {})", oper, o1, o2),
-            Rvalue::Alloca(t) => write!(f, "alloca({})", t),
+            Self::Use(p) => write!(f, "{}", p),
+            Self::BinaryOp(op, oper1, oper2) => write!(f, "{}({}, {})", op, oper1, oper2),
+            Self::CheckedBinaryOp(op, oper1, oper2) => {
+                write!(f, "checked_{}({}, {})", op, oper1, oper2)
+            }
+            Self::Unimplemented => write!(f, "unimplemented rvalue"),
         }
     }
 }
 
+impl From<Local> for Rvalue {
+    fn from(l: Local) -> Self {
+        Self::Use(Operand::from(l))
+    }
+}
+
+/// Unlike in MIR, we don't track move/copy semantics in operands.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Operand {
-    Local(Local),
+    Place(Place),
     Constant(Constant),
 }
 
 impl Display for Operand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Operand::Local(l) => write!(f, "{}", l),
+            Operand::Place(p) => write!(f, "{}", p),
             Operand::Constant(c) => write!(f, "{}", c),
         }
+    }
+}
+
+impl From<Local> for Operand {
+    fn from(l: Local) -> Self {
+        Operand::Place(Place::from(l))
     }
 }
 
@@ -253,6 +313,16 @@ impl Display for Constant {
 pub enum ConstantInt {
     UnsignedInt(UnsignedInt),
     SignedInt(SignedInt),
+}
+
+impl From<bool> for ConstantInt {
+    fn from(b: bool) -> Self {
+        if b {
+            ConstantInt::UnsignedInt(UnsignedInt::Usize(1))
+        } else {
+            ConstantInt::UnsignedInt(UnsignedInt::Usize(0))
+        }
+    }
 }
 
 /// Generate a method that constructs a ConstantInt variant from bits in u128 form.
@@ -360,7 +430,7 @@ impl Display for CallOperand {
 pub enum Terminator {
     Goto(BasicBlockIndex),
     SwitchInt {
-        local: Local,
+        discr: Place,
         values: Vec<SerU128>,
         target_bbs: Vec<BasicBlockIndex>,
         otherwise_bb: BasicBlockIndex,
@@ -368,11 +438,11 @@ pub enum Terminator {
     Return,
     Unreachable,
     Drop {
-        location: Local,
+        location: Place,
         target_bb: BasicBlockIndex,
     },
     DropAndReplace {
-        location: Local,
+        location: Place,
         target_bb: BasicBlockIndex,
         value: Operand,
     },
@@ -382,7 +452,7 @@ pub enum Terminator {
     },
     /// The value in `cond` must equal to `expected` to advance to `target_bb`.
     Assert {
-        cond: Local,
+        cond: Place,
         expected: bool,
         target_bb: BasicBlockIndex,
     },
@@ -394,14 +464,14 @@ impl Display for Terminator {
         match self {
             Terminator::Goto(bb) => write!(f, "goto bb{}", bb),
             Terminator::SwitchInt {
-                local,
+                discr,
                 values,
                 target_bbs,
                 otherwise_bb,
             } => write!(
                 f,
                 "switch_int local={}, vals=[{}], targets=[{}], otherwise={}",
-                local,
+                discr,
                 values
                     .iter()
                     .map(|b| format!("{}", b))
@@ -590,7 +660,8 @@ mod tests {
     #[test]
     fn const_i128_from_bits() {
         let v = -100001i128;
-        match ConstantInt::i128_from_bits(v as u128) {
+        let cst = ConstantInt::i128_from_bits(v as u128);
+        match &cst {
             ConstantInt::SignedInt(SignedInt::I128(seri128)) => assert_eq!(seri128.val(), v),
             _ => panic!(),
         }
