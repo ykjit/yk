@@ -37,6 +37,10 @@ use yktrace::tir::{
     SignedInt, Statement, TirOp, TirTrace, UnsignedInt,
 };
 
+/// The number of Tir statements to print either side of the PC when dumping the interpreter state.
+#[allow(dead_code)]
+const DUMP_CONTEXT: usize = 4;
+
 /// A `Value` represents the contents of a local variable.
 #[derive(Debug, Clone, Eq, PartialEq)]
 enum Value {
@@ -164,6 +168,34 @@ impl<'t> Interp<'t> {
         }
 
         state
+    }
+
+    /// Prints diagnostic information about the interpreter state.
+    /// Used during development/debugging only.
+    #[allow(dead_code)]
+    fn dump(&self, state: &InterpState) {
+        // Dump the code.
+        let start = match state.pc {
+            0..DUMP_CONTEXT => 0,
+            _ => state.pc - DUMP_CONTEXT,
+        };
+        let end = (self.trace.len() - 1).min(state.pc + DUMP_CONTEXT);
+
+        eprintln!("[Begin Interpreter State Dump]");
+        eprintln!("     pc: {}\n", state.pc);
+        for idx in start..end {
+            let op = self.trace.op(idx);
+            let pc_str = if idx == state.pc { "->" } else { "  " };
+
+            eprintln!("  {} {}: {}", pc_str, idx, op);
+        }
+        eprintln!();
+
+        // Dump the locals.
+        for (idx, val) in &state.locals {
+            eprintln!("     ${}: {:?}", idx, val);
+        }
+        eprintln!("[End Interpreter State Dump]\n");
     }
 
     /// Interpret the specified statement.
