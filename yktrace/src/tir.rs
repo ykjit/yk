@@ -15,9 +15,12 @@ use super::SirTrace;
 use crate::errors::InvalidTraceError;
 use elf;
 use fallible_iterator::FallibleIterator;
-use std::{collections::HashMap, convert::TryFrom, env, io::Cursor};
-pub use ykpack::Statement;
-use ykpack::{bodyflags, Body, Decoder, DefId, Pack, Place, SerU128, Terminator};
+use std::{collections::HashMap, convert::TryFrom, env, fmt, io::Cursor};
+use ykpack::{bodyflags, Body, Decoder, DefId, Pack, SerU128, Terminator};
+pub use ykpack::{
+    BinOp, Constant, ConstantInt, Local, LocalIndex, Operand, Place, PlaceBase, PlaceProjection,
+    Rvalue, SignedInt, Statement, UnsignedInt
+};
 
 lazy_static! {
     pub static ref SIR: Sir = {
@@ -142,11 +145,18 @@ impl TirTrace {
                         Some(idx) => Some(Guard::Integer(discr.clone(), values[idx].to_owned())),
                         None => {
                             debug_assert!(next_blk == otherwise_bb);
-                            Some(Guard::OtherInteger(discr.clone(), values.clone()))
+                            Some(Guard::OtherInteger(
+                                discr.clone(),
+                                values.iter().map(|v| v.val()).collect()
+                            ))
                         }
                     }
                 }
-                Terminator::Assert { ref cond, .. } => Some(Guard::Boolean(cond.clone()))
+                Terminator::Assert {
+                    ref cond,
+                    ref expected,
+                    ..
+                } => Some(Guard::Boolean(cond.clone(), *expected))
             };
 
             if guard.is_some() {
@@ -177,9 +187,19 @@ pub enum Guard {
     Integer(Place, SerU128),
     /// The local must not be a member of the specified collection of integers.
     /// This is necessary due to the "otherwise" semantics of the SwitchInt terminator in MIR.
-    OtherInteger(Place, Vec<SerU128>),
+    OtherInteger(Place, Vec<u128>),
     /// The value held in the Local must be true.
-    Boolean(Place)
+    Boolean(Place, bool)
+}
+
+impl fmt::Display for Guard {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Guard::Integer(plc, u128v) => write!(f, "guard_eq({}, {})", plc, u128v),
+            Guard::OtherInteger(plc, u128vs) => write!(f, "guard_other({}, {:?})", plc, u128vs),
+            Guard::Boolean(plc, expect) => write!(f, "guard_bool({}, {})", plc, expect)
+        }
+    }
 }
 
 /// A TIR operation. A collection of these makes a TIR trace.
@@ -187,6 +207,15 @@ pub enum Guard {
 pub enum TirOp {
     Statement(Statement),
     Guard(Guard)
+}
+
+impl fmt::Display for TirOp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            TirOp::Statement(st) => write!(f, "{}", st),
+            TirOp::Guard(gd) => write!(f, "{}", gd)
+        }
+    }
 }
 
 #[cfg(test)]
