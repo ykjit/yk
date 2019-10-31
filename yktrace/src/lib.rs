@@ -56,7 +56,7 @@ impl<'a> SirTraceIterator<'a> {
         // of the code that starts the tracer.
         let mut begin_idx = None;
         for blk_idx in (0..trace.raw_len()).rev() {
-            let def_id = DefId::from_sir_loc(trace.raw_loc(blk_idx));
+            let def_id = DefId::from_sir_loc(&trace.raw_loc(blk_idx));
             if SIR.markers.trace_heads.contains(&def_id) {
                 begin_idx = Some(blk_idx + 1);
                 break;
@@ -75,7 +75,7 @@ impl<'a> Iterator for SirTraceIterator<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.next_idx < self.trace.raw_len() {
-            let def_id = DefId::from_sir_loc(self.trace.raw_loc(self.next_idx));
+            let def_id = DefId::from_sir_loc(&self.trace.raw_loc(self.next_idx));
             if SIR.markers.trace_tails.contains(&def_id) {
                 // Stop when we find the start of the code that stops the tracer, thus trimming the
                 // end of the trace. By setting the next index to one above the last one in the
@@ -111,6 +111,7 @@ pub struct ThreadTracer {
 impl ThreadTracer {
     /// Stops tracing on the current thread, returning a TIR trace on success. Returns an error if
     /// the trace was invalidated.
+    #[trace_tail]
     pub fn stop_tracing(self) -> Result<Box<dyn SirTrace>, InvalidTraceError> {
         self.t_impl.stop_tracing()
     }

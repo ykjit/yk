@@ -12,7 +12,7 @@
 use crate::{tir::SIR, SirLoc, SirTrace};
 use elf;
 use fallible_iterator::FallibleIterator;
-use std::{collections::HashMap, env, io::Cursor, iter::IntoIterator};
+use std::{collections::HashMap, convert::TryFrom, env, io::Cursor, iter::IntoIterator};
 pub use ykpack::{bodyflags, Statement};
 use ykpack::{Decoder, DefId, Pack};
 
@@ -48,7 +48,7 @@ pub fn def_path(def_id: &DefId) -> Option<&str> {
 }
 
 /// Prints a SIR trace to stdout for debugging purposes.
-pub fn print_sir_trace(trace: &dyn SirTrace, trimmed: bool) {
+pub fn print_sir_trace(trace: &dyn SirTrace, trimmed: bool, show_blocks: bool) {
     let locs: Vec<&SirLoc> = match trimmed {
         false => (0..(trace.raw_len())).map(|i| trace.raw_loc(i)).collect(),
         true => trace.into_iter().collect()
@@ -80,6 +80,14 @@ pub fn print_sir_trace(trace: &dyn SirTrace, trimmed: bool) {
             }
         }
         println!("]");
+
+        if show_blocks {
+            if let Some(body) = body {
+                println!("{}:", body.blocks[usize::try_from(loc.bb_idx()).unwrap()]);
+            } else {
+                println!("    <no sir>");
+            }
+        }
     }
     println!("---[ END SIR TRACE DUMP ]---");
 }

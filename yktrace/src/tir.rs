@@ -15,9 +15,12 @@ use super::SirTrace;
 use crate::errors::InvalidTraceError;
 use elf;
 use fallible_iterator::FallibleIterator;
-use std::{collections::HashMap, convert::TryFrom, env, io::Cursor};
-pub use ykpack::Statement;
-use ykpack::{bodyflags, Body, Decoder, DefId, Pack, Place, SerU128, Terminator};
+use std::{collections::HashMap, convert::TryFrom, env, fmt, io::Cursor};
+use ykpack::{bodyflags, Body, Decoder, DefId, Pack, Terminator};
+pub use ykpack::{
+    BinOp, Constant, ConstantInt, Local, LocalIndex, Operand, Place, PlaceBase, PlaceProjection,
+    Rvalue, SignedInt, Statement, UnsignedInt
+};
 
 lazy_static! {
     pub static ref SIR: Sir = {
@@ -139,14 +142,29 @@ impl TirTrace {
                     let next_blk = itr.peek().expect("no block to peek at").bb_idx();
                     let edge_idx = target_bbs.iter().position(|e| *e == next_blk);
                     match edge_idx {
-                        Some(idx) => Some(Guard::Integer(discr.clone(), values[idx].to_owned())),
+                        Some(idx) => Some(Guard {
+                            val: discr.clone(),
+                            kind: GuardKind::Integer(values[idx].val())
+                        }),
                         None => {
                             debug_assert!(next_blk == otherwise_bb);
-                            Some(Guard::OtherInteger(discr.clone(), values.clone()))
+                            Some(Guard {
+                                val: discr.clone(),
+                                kind: GuardKind::OtherInteger(
+                                    values.iter().map(|v| v.val()).collect()
+                                )
+                            })
                         }
                     }
                 }
-                Terminator::Assert { ref cond, .. } => Some(Guard::Boolean(cond.clone()))
+                Terminator::Assert {
+                    ref cond,
+                    ref expected,
+                    ..
+                } => Some(Guard {
+                    val: cond.clone(),
+                    kind: GuardKind::Boolean(*expected)
+                })
             };
 
             if guard.is_some() {
@@ -172,14 +190,39 @@ impl TirTrace {
 
 /// A guard states the assumptions from its position in a trace onward.
 #[derive(Debug)]
-pub enum Guard {
-    /// The Local must be equal to the integer constant.
-    Integer(Place, SerU128),
-    /// The local must not be a member of the specified collection of integers.
-    /// This is necessary due to the "otherwise" semantics of the SwitchInt terminator in MIR.
-    OtherInteger(Place, Vec<SerU128>),
-    /// The value held in the Local must be true.
-    Boolean(Place)
+pub struct Guard {
+    /// The value to be checked if the guard is to pass.
+    pub val: Place,
+    /// The requirement upon `val` for the guard to pass.
+    pub kind: GuardKind
+}
+
+/// A guard states the assumptions from its position in a trace onward.
+#[derive(Debug)]
+pub enum GuardKind {
+    /// The value must be equal to an integer constant.
+    Integer(u128),
+    /// The value must not be a member of the specified collection of integers. This is necessary
+    /// due to the "otherwise" semantics of the `SwitchInt` terminator in SIR.
+    OtherInteger(Vec<u128>),
+    /// The value must equal a Boolean constant.
+    Boolean(bool)
+}
+
+impl fmt::Display for Guard {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "guard({}, {})", self.val, self.kind)
+    }
+}
+
+impl fmt::Display for GuardKind {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Integer(u128v) => write!(f, "integer({})", u128v),
+            Self::OtherInteger(u128vs) => write!(f, "other_integer({:?})", u128vs),
+            Self::Boolean(expect) => write!(f, "bool({})", expect)
+        }
+    }
 }
 
 /// A TIR operation. A collection of these makes a TIR trace.
@@ -187,6 +230,15 @@ pub enum Guard {
 pub enum TirOp {
     Statement(Statement),
     Guard(Guard)
+}
+
+impl fmt::Display for TirOp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            TirOp::Statement(st) => write!(f, "{}", st),
+            TirOp::Guard(gd) => write!(f, "{}", gd)
+        }
+    }
 }
 
 #[cfg(test)]
