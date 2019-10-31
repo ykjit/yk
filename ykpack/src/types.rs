@@ -56,28 +56,11 @@ new_ser128!(SerU128, u128);
 new_ser128!(SerI128, i128);
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Copy, Hash)]
-pub struct Local {
-    idx: LocalIndex,
-    ty: TyIndex,
-}
-
-impl Local {
-    pub fn new(idx: LocalIndex, ty: TyIndex) -> Self {
-        Self { idx, ty }
-    }
-
-    pub fn idx(&self) -> LocalIndex {
-        self.idx
-    }
-
-    pub fn ty(&self) -> TyIndex {
-        self.ty
-    }
-}
+pub struct Local(pub LocalIndex);
 
 impl Display for Local {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "${}: t{}", self.idx, self.ty)
+        write!(f, "${}", self.0)
     }
 }
 
