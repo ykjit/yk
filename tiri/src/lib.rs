@@ -33,8 +33,8 @@ extern crate test;
 
 use std::collections::HashMap;
 use yktrace::tir::{
-    BinOp, Constant, ConstantInt, Guard, Local, Operand, Place, PlaceBase, PlaceProjection, Rvalue,
-    SignedInt, Statement, TirOp, TirTrace, UnsignedInt,
+    BinOp, Constant, ConstantInt, Guard, GuardKind, Local, Operand, Place, PlaceBase,
+    PlaceProjection, Rvalue, SignedInt, Statement, TirOp, TirTrace, UnsignedInt,
 };
 
 /// The number of Tir statements to print either side of the PC when dumping the interpreter state.
@@ -328,27 +328,28 @@ impl<'t> Interp<'t> {
 
     /// Interpret the specified terminator.
     fn interp_guard(&self, state: &mut InterpState, guard: &Guard) {
-        match guard {
-            Guard::OtherInteger(plc, vals) => {
-                if let Value::Scalar(Scalar::Raw { data, .. }) = self.eval_place(state, plc) {
-                    if vals.iter().find(|x| **x == data).is_some() {
+        match &guard.kind {
+            GuardKind::OtherInteger(members) => {
+                if let Value::Scalar(Scalar::Raw { data, .. }) = self.eval_place(state, &guard.val)
+                {
+                    if members.contains(&data) {
                         state.abort = true;
                         return;
                     }
                     state.pc += 1;
                 } else {
-                    panic!("invalid Guard::OtherInteger");
+                    panic!("invalid guard: OtherInteger");
                 }
             }
-            Guard::Boolean(plc, expected) => {
-                if self.eval_place(state, plc).as_bool() != *expected {
+            GuardKind::Boolean(must_eq) => {
+                if self.eval_place(state, &guard.val).as_bool() != *must_eq {
                     state.abort = true;
                     return;
                 }
                 state.pc += 1;
             }
-            Guard::Integer(plc, ser_u128) => {
-                if self.eval_place(state, plc).as_u128() != ser_u128.val() {
+            GuardKind::Integer(must_eq) => {
+                if self.eval_place(state, &guard.val).as_u128() != *must_eq {
                     state.abort = true;
                     return;
                 }

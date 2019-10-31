@@ -16,7 +16,7 @@ use crate::errors::InvalidTraceError;
 use elf;
 use fallible_iterator::FallibleIterator;
 use std::{collections::HashMap, convert::TryFrom, env, fmt, io::Cursor};
-use ykpack::{bodyflags, Body, Decoder, DefId, Pack, SerU128, Terminator};
+use ykpack::{bodyflags, Body, Decoder, DefId, Pack, Terminator};
 pub use ykpack::{
     BinOp, Constant, ConstantInt, Local, LocalIndex, Operand, Place, PlaceBase, PlaceProjection,
     Rvalue, SignedInt, Statement, UnsignedInt
@@ -142,13 +142,18 @@ impl TirTrace {
                     let next_blk = itr.peek().expect("no block to peek at").bb_idx();
                     let edge_idx = target_bbs.iter().position(|e| *e == next_blk);
                     match edge_idx {
-                        Some(idx) => Some(Guard::Integer(discr.clone(), values[idx].to_owned())),
+                        Some(idx) => Some(Guard {
+                            val: discr.clone(),
+                            kind: GuardKind::Integer(values[idx].val())
+                        }),
                         None => {
                             debug_assert!(next_blk == otherwise_bb);
-                            Some(Guard::OtherInteger(
-                                discr.clone(),
-                                values.iter().map(|v| v.val()).collect()
-                            ))
+                            Some(Guard {
+                                val: discr.clone(),
+                                kind: GuardKind::OtherInteger(
+                                    values.iter().map(|v| v.val()).collect()
+                                )
+                            })
                         }
                     }
                 }
@@ -156,7 +161,10 @@ impl TirTrace {
                     ref cond,
                     ref expected,
                     ..
-                } => Some(Guard::Boolean(cond.clone(), *expected))
+                } => Some(Guard {
+                    val: cond.clone(),
+                    kind: GuardKind::Boolean(*expected)
+                })
             };
 
             if guard.is_some() {
@@ -182,22 +190,37 @@ impl TirTrace {
 
 /// A guard states the assumptions from its position in a trace onward.
 #[derive(Debug)]
-pub enum Guard {
-    /// The Local must be equal to the integer constant.
-    Integer(Place, SerU128),
-    /// The local must not be a member of the specified collection of integers.
-    /// This is necessary due to the "otherwise" semantics of the SwitchInt terminator in MIR.
-    OtherInteger(Place, Vec<u128>),
-    /// The value held in the Local must be true.
-    Boolean(Place, bool)
+pub struct Guard {
+    /// The value to be checked if the guard is to pass.
+    pub val: Place,
+    /// The requirement upon `val` for the guard to pass.
+    pub kind: GuardKind
+}
+
+/// A guard states the assumptions from its position in a trace onward.
+#[derive(Debug)]
+pub enum GuardKind {
+    /// The value must be equal to an integer constant.
+    Integer(u128),
+    /// The value must not be a member of the specified collection of integers. This is necessary
+    /// due to the "otherwise" semantics of the `SwitchInt` terminator in SIR.
+    OtherInteger(Vec<u128>),
+    /// The value must equal a Boolean constant.
+    Boolean(bool)
 }
 
 impl fmt::Display for Guard {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "guard({}, {})", self.val, self.kind)
+    }
+}
+
+impl fmt::Display for GuardKind {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Guard::Integer(plc, u128v) => write!(f, "guard_eq({}, {})", plc, u128v),
-            Guard::OtherInteger(plc, u128vs) => write!(f, "guard_other({}, {:?})", plc, u128vs),
-            Guard::Boolean(plc, expect) => write!(f, "guard_bool({}, {})", plc, expect)
+            Self::Integer(u128v) => write!(f, "integer({})", u128v),
+            Self::OtherInteger(u128vs) => write!(f, "other_integer({:?})", u128vs),
+            Self::Boolean(expect) => write!(f, "bool({})", expect)
         }
     }
 }
