@@ -130,14 +130,14 @@ impl InterpState {
 }
 
 impl InterpState {
-    fn store_local(&mut self, local: &Local, val: Value) {
-        self.locals.insert(local.idx(), val);
+    fn store_local(&mut self, local: Local, val: Value) {
+        self.locals.insert(local.0, val);
     }
 
-    fn local(&self, l: &Local) -> Value {
-        match self.locals.get(&l.idx()) {
+    fn local(&self, l: Local) -> Value {
+        match self.locals.get(&l.0) {
             Some(v) => v.clone(),
-            None => panic!("uninitialised read from ${}", l.idx()),
+            None => panic!("uninitialised read from ${}", l.0),
         }
     }
 }
@@ -203,7 +203,7 @@ impl<'t> Interp<'t> {
         match stmt {
             Statement::Assign(plc, rval) => match (&plc.base, &plc.projections.len()) {
                 (PlaceBase::Local(l), 0) => {
-                    state.store_local(&l, self.eval_rvalue(state, rval).clone());
+                    state.store_local(*l, self.eval_rvalue(state, rval).clone());
                     state.pc += 1;
                 }
                 _ => unimplemented!("unhandled assignment"),
@@ -224,7 +224,7 @@ impl<'t> Interp<'t> {
     /// Evaluate the left-hand side of an assignment.
     fn eval_place(&self, state: &InterpState, place: &Place) -> Value {
         let mut val = match place.base {
-            PlaceBase::Local(l) => state.local(&l),
+            PlaceBase::Local(l) => state.local(l),
             PlaceBase::Static => unimplemented!("static place eval"),
         };
 
@@ -388,11 +388,11 @@ mod tests {
 
         let interp = Interp::new(&tir_trace);
         let mut state = InterpState::new();
-        state.store_local(&Local::new(1, 0), Value::raw_scalar(3, 8));
-        state.store_local(&Local::new(2, 0), Value::raw_scalar(13, 8));
+        state.store_local(Local(1), Value::raw_scalar(3, 8));
+        state.store_local(Local(2), Value::raw_scalar(13, 8));
         let state = interp.run(state);
 
         assert!(!state.abort); // i.e. normal exit via end of trace.
-        assert_eq!(state.local(&Local::new(0, 0)), Value::raw_scalar(15, 8));
+        assert_eq!(state.local(Local(0)), Value::raw_scalar(15, 8));
     }
 }
