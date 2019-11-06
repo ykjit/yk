@@ -1,0 +1,6 @@
+status = ["buildbot/buildbot-build-script"]
+
+timeout_sec = 1200 # 20 minutes
+
+# Have bors delete auto-merged branches
+delete_merged_branches = true
