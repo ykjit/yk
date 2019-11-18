@@ -12,7 +12,7 @@
 
 extern crate test;
 
-use core::yk_swt::SirLoc;
+use core::yk::SirLoc;
 use std::{fmt::Debug, iter::Iterator};
 #[macro_use]
 extern crate lazy_static;
