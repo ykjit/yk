@@ -9,7 +9,7 @@
 
 //! Types for the Yorick intermediate language.
 
-use core::yk_swt::SirLoc;
+use core::yk::SirLoc;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 

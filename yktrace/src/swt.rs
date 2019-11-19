@@ -11,7 +11,7 @@
 
 use super::{SirTrace, ThreadTracer, ThreadTracerImpl};
 use crate::errors::InvalidTraceError;
-use core::yk_swt::{self, SirLoc};
+use core::yk::{swt, SirLoc};
 use libc;
 use std::ops::Drop;
 
@@ -46,7 +46,7 @@ struct SWTThreadTracer;
 impl ThreadTracerImpl for SWTThreadTracer {
     #[trace_tail]
     fn stop_tracing(&self) -> Result<Box<dyn SirTrace>, InvalidTraceError> {
-        match yk_swt::stop_tracing() {
+        match swt::stop_tracing() {
             None => Err(InvalidTraceError::InternalError),
             Some((buf, len)) => Ok(Box::new(SWTSirTrace { buf, len }) as Box<dyn SirTrace>)
         }
@@ -55,7 +55,7 @@ impl ThreadTracerImpl for SWTThreadTracer {
 
 #[trace_head]
 pub fn start_tracing() -> ThreadTracer {
-    yk_swt::start_tracing();
+    swt::start_tracing();
     ThreadTracer {
         t_impl: Box::new(SWTThreadTracer {})
     }
@@ -64,7 +64,7 @@ pub fn start_tracing() -> ThreadTracer {
 #[cfg(test)]
 mod tests {
     use crate::{test_helpers, TracingKind};
-    use core::yk_swt;
+    use core::yk::swt;
 
     const TRACING_KIND: TracingKind = TracingKind::SoftwareTracing;
 
@@ -85,7 +85,7 @@ mod tests {
 
     #[test]
     fn test_trace_invalidated() {
-        test_helpers::test_trace_invalidated(TRACING_KIND, yk_swt::invalidate_trace);
+        test_helpers::test_trace_invalidated(TRACING_KIND, swt::invalidate_trace);
     }
 
     #[test]
