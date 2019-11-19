@@ -64,7 +64,6 @@ pub fn start_tracing() -> ThreadTracer {
 #[cfg(test)]
 mod tests {
     use crate::{test_helpers, TracingKind};
-    use core::yk::swt;
 
     const TRACING_KIND: TracingKind = TracingKind::SoftwareTracing;
 
@@ -81,11 +80,6 @@ mod tests {
     #[test]
     fn test_trace_concurrent() {
         test_helpers::test_trace_concurrent(TRACING_KIND);
-    }
-
-    #[test]
-    fn test_trace_invalidated() {
-        test_helpers::test_trace_invalidated(TRACING_KIND, swt::invalidate_trace);
     }
 
     #[test]
