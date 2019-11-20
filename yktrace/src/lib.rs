@@ -109,8 +109,7 @@ pub struct ThreadTracer {
 }
 
 impl ThreadTracer {
-    /// Stops tracing on the current thread, returning a TIR trace on success. Returns an error if
-    /// the trace was invalidated.
+    /// Stops tracing on the current thread, returning a TIR trace on success.
     #[trace_tail]
     pub fn stop_tracing(self) -> Result<Box<dyn SirTrace>, InvalidTraceError> {
         self.t_impl.stop_tracing()
@@ -119,8 +118,7 @@ impl ThreadTracer {
 
 // An generic interface which tracing backends must fulfill.
 trait ThreadTracerImpl {
-    /// Stops tracing on the current thread, returning the SIR trace on success. Returns an error
-    /// if the trace was invalidated.
+    /// Stops tracing on the current thread, returning the SIR trace on success.
     fn stop_tracing(&self) -> Result<Box<dyn SirTrace>, InvalidTraceError>;
 }
 
@@ -195,17 +193,6 @@ mod test_helpers {
         let len1 = thr.join().unwrap();
 
         assert!(len1 < len2);
-    }
-
-    /// Test that invalidating a trace works.
-    /// `inv_fn` is a backend-specific function that invalidates the current thread's trace.
-    pub(crate) fn test_trace_invalidated(kind: TracingKind, inv_fn: fn()) {
-        let th = start_tracing(Some(kind));
-        black_box(work(100));
-        inv_fn();
-        let trace = th.t_impl.stop_tracing();
-
-        assert!(trace.is_err());
     }
 
     /// Test that accessing an out of bounds index fails.
