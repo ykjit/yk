@@ -1,12 +1,3 @@
-// Copyright 2019 King's College London.
-// Created by the Software Development Team <http://soft-dev.org/>.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! Conceptually this module takes an ordered collection of SIR block locations and converts it
 //! into a Tracing IR (TIR) Trace using the SIR found in the `.yk_sir` section of the currently
 //! running executable.
