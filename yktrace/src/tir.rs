@@ -250,7 +250,10 @@ mod tests {
 
     #[test]
     fn nonempty_tir_trace() {
-        let tracer = start_tracing(Some(TracingKind::SoftwareTracing));
+        #[cfg(tracermode = "sw")]
+        let mut tracer = start_tracing(Some(TracingKind::SoftwareTracing));
+        #[cfg(tracermode = "hw")]
+        let mut tracer = start_tracing(Some(TracingKind::HardwareTracing));
         let res = black_box(work(black_box(3), black_box(13)));
         let sir_trace = tracer.t_impl.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();

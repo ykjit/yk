@@ -1,63 +1,63 @@
-//! Software tracing via ykrustc.
+//! Hardware tracing via ykrustc.
 
 use super::{SirTrace, ThreadTracer, ThreadTracerImpl};
 use crate::errors::InvalidTraceError;
-use core::yk::{swt, SirLoc};
-use libc;
-use std::ops::Drop;
+use core::yk::SirLoc;
+use hwtracer::backends::TracerBuilder;
 
-/// A trace collected via software tracing.
-/// Since the trace is a heap-allocated C buffer, we represent it as a pointer and a length.
+pub mod mapper;
+use mapper::HWTMapper;
+
+/// A trace collected via hardware tracing.
 #[derive(Debug)]
-struct SWTSirTrace {
-    buf: *mut SirLoc,
-    len: usize
+struct HWTSirTrace {
+    sirtrace: Vec<SirLoc>
 }
 
-impl SirTrace for SWTSirTrace {
+impl SirTrace for HWTSirTrace {
     fn raw_len(&self) -> usize {
-        self.len
+        self.sirtrace.len()
     }
 
     fn raw_loc(&self, idx: usize) -> &SirLoc {
-        assert!(idx < self.len, "out of bounds index");
-        unsafe { &*self.buf.add(idx) }
+        &self.sirtrace[idx]
     }
 }
 
-impl Drop for SWTSirTrace {
-    fn drop(&mut self) {
-        unsafe { libc::free(self.buf as *mut libc::c_void) };
-    }
+/// Hardware thread tracer.
+struct HWTThreadTracer {
+    ttracer: Box<dyn hwtracer::ThreadTracer>
 }
 
-/// Softare thread tracer.
-struct SWTThreadTracer;
-
-impl ThreadTracerImpl for SWTThreadTracer {
+impl ThreadTracerImpl for HWTThreadTracer {
     #[trace_tail]
     fn stop_tracing(&mut self) -> Result<Box<dyn SirTrace>, InvalidTraceError> {
-        match swt::stop_tracing() {
-            None => Err(InvalidTraceError::InternalError),
-            Some((buf, len)) => Ok(Box::new(SWTSirTrace { buf, len }) as Box<dyn SirTrace>)
+        let hwtrace = self.ttracer.stop_tracing().unwrap();
+        let mt = HWTMapper::new();
+        if let Some(sirtrace) = mt.map(hwtrace) {
+            Ok(Box::new(HWTSirTrace { sirtrace }) as Box<dyn SirTrace>)
+        } else {
+            Err(InvalidTraceError::InternalError)
         }
     }
 }
 
 #[trace_head]
 pub fn start_tracing() -> ThreadTracer {
-    swt::start_tracing();
+    let tracer = TracerBuilder::new().build().unwrap();
+    let mut ttracer = (*tracer).thread_tracer();
+    ttracer.start_tracing().expect("Failed to start tracer.");
     ThreadTracer {
-        t_impl: Box::new(SWTThreadTracer {})
+        t_impl: Box::new(HWTThreadTracer { ttracer })
     }
 }
 
 #[cfg(test)]
-#[cfg(tracermode = "sw")]
+#[cfg(tracermode = "hw")]
 mod tests {
     use crate::{test_helpers, TracingKind};
 
-    const TRACING_KIND: TracingKind = TracingKind::SoftwareTracing;
+    const TRACING_KIND: TracingKind = TracingKind::HardwareTracing;
 
     #[test]
     fn test_trace() {
