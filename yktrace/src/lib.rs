@@ -111,6 +111,7 @@ impl ThreadTracer {
 // An generic interface which tracing backends must fulfill.
 trait ThreadTracerImpl {
     /// Stops tracing on the current thread, returning the SIR trace on success.
+    #[trace_tail]
     fn stop_tracing(&mut self) -> Result<Box<dyn SirTrace>, InvalidTraceError>;
 }
 
