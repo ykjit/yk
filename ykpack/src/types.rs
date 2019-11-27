@@ -379,20 +379,32 @@ pub enum CallOperand {
     /// A pair: the definition ID and the binary symbol name, if known. If the callee doeesn't have
     /// all of its type parameters instantiated, then there will be no symbol.
     Fn(DefId, Option<String>),
+    /// A dynamic call via a vtable,
+    /// A pair like the Fn variant.
+    Virtual(DefId, Option<String>),
     /// An unknown or unhandled callable.
     Unknown, // FIXME -- Find out what else. Closures jump to mind.
+}
+
+fn sym_name_str(maybe_name: Option<&str>) -> &str {
+    maybe_name.map_or_else(|| "<unknown>", |n| n)
 }
 
 impl Display for CallOperand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CallOperand::Fn(def_id, sym_name) => {
-                let sym_name_str = match sym_name {
-                    Some(n) => n,
-                    None => "<unknown>",
-                };
-                write!(f, "def_id={}, sym_name={}", def_id, sym_name_str)
-            }
+            CallOperand::Fn(def_id, sym_name) => write!(
+                f,
+                "Fn(def_id={}, sym_name={})",
+                def_id,
+                sym_name_str(sym_name.as_ref().map(|s| &**s)),
+            ),
+            CallOperand::Virtual(def_id, sym_name) => write!(
+                f,
+                "Virtual(def_id={}, sym_name={})",
+                def_id,
+                sym_name_str(sym_name.as_ref().map(|s| &**s)),
+            ),
             CallOperand::Unknown => write!(f, "unknown"),
         }
     }
