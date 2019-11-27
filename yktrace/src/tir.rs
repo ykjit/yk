@@ -118,7 +118,7 @@ impl TirTrace {
                 | Terminator::Return
                 | Terminator::Drop { .. }
                 | Terminator::DropAndReplace { .. }
-                | Terminator::Call { .. }
+                | Terminator::Call { .. } // FIXME virtual calls will need to become a guard.
                 | Terminator::Unimplemented(_) => None,
                 Terminator::Unreachable => panic!("Traced unreachable code"),
                 Terminator::SwitchInt {
