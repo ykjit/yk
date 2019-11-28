@@ -368,6 +368,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(tracermode = "sw")] // https://github.com/softdevteam/yk/issues/38
     fn interp_simple_trace() {
         let tracer = start_tracing(Some(TracingKind::SoftwareTracing));
         let res = work(black_box(3), black_box(13));
