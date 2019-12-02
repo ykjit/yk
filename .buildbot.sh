@@ -2,9 +2,6 @@
 
 set -e
 
-# FIXME - This doesn't work with the hardware tracer yet.
-export STD_TRACER_MODE=sw
-
 case ${STD_TRACER_MODE} in
     "sw") export RUSTFLAGS="-C tracer=sw";;
     "hw") export RUSTFLAGS="-C tracer=hw";;
