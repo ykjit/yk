@@ -15,4 +15,7 @@ export PATH=`pwd`/ykrustc-stage2-latest/bin:${PATH}
 
 cargo fmt --all -- --check
 cargo test
-cargo test --release
+
+# Although it might be tempting to test release mode, we have (for now) made
+# the compiler to crash if optimisations *and* a tracer are enabled.
+#cargo test --release

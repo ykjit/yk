@@ -1,8 +1,7 @@
 //! Hardware tracing via ykrustc.
 
 use super::{SirTrace, ThreadTracer, ThreadTracerImpl};
-use crate::errors::InvalidTraceError;
-use core::yk::SirLoc;
+use crate::{errors::InvalidTraceError, SirLoc};
 use hwtracer::backends::TracerBuilder;
 
 pub mod mapper;

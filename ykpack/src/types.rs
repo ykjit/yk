@@ -1,6 +1,5 @@
 //! Types for the Yorick intermediate language.
 
-use core::yk::SirLoc;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
@@ -114,33 +113,6 @@ impl Display for PlaceProjection {
     }
 }
 
-/// A mirror of the compiler's notion of a "definition ID".
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
-pub struct DefId {
-    pub crate_hash: CrateHash,
-    pub def_idx: DefIndex,
-}
-
-impl DefId {
-    pub fn new(crate_hash: CrateHash, def_idx: DefIndex) -> Self {
-        Self {
-            crate_hash,
-            def_idx,
-        }
-    }
-
-    /// Creates a DefId from an SirLoc, discarding the block index.
-    pub fn from_sir_loc(loc: &SirLoc) -> Self {
-        Self::new(loc.crate_hash(), loc.def_idx())
-    }
-}
-
-impl Display for DefId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "DefId({}, {})", self.crate_hash, self.def_idx)
-    }
-}
-
 /// Bits in the `flags` bitfield in `Body`.
 pub mod bodyflags {
     pub const TRACE_HEAD: u8 = 1;
@@ -151,27 +123,22 @@ pub mod bodyflags {
 /// Each Body maps to exactly one MIR Body.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct Body {
-    pub def_id: DefId,
-    pub def_path_str: String,
+    pub symbol_name: String,
     pub blocks: Vec<BasicBlock>,
-    /// The number of arguments to the function.
-    pub num_args: usize,
-    /// The number of local variables used by the function, including the return value and
-    /// arguments.
-    pub num_locals: usize,
     pub flags: u8,
 }
 
 impl Display for Body {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "[Begin SIR for {}]", self.def_path_str)?;
-        writeln!(f, "    {}:", self.def_id)?;
+        writeln!(f, "[Begin SIR for {}]", self.symbol_name)?;
+        writeln!(f, "  flags: {}", self.flags)?;
+
         let mut block_strs = Vec::new();
         for (i, b) in self.blocks.iter().enumerate() {
             block_strs.push(format!("    bb{}:\n{}", i, b));
         }
         writeln!(f, "{}", block_strs.join("\n"))?;
-        writeln!(f, "[End SIR for {}]", self.def_path_str)?;
+        writeln!(f, "[End SIR for {}]", self.symbol_name)?;
         Ok(())
     }
 }
@@ -375,10 +342,8 @@ impl Display for SignedInt {
 /// A call target.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum CallOperand {
-    /// A statically known function identified by its DefId.
-    /// A pair: the definition ID and the binary symbol name, if known. If the callee doeesn't have
-    /// all of its type parameters instantiated, then there will be no symbol.
-    Fn(DefId, Option<String>),
+    /// A call to a binary symbol by name.
+    Fn(String),
     /// An unknown or unhandled callable.
     Unknown, // FIXME -- Find out what else. Closures jump to mind.
 }
@@ -386,13 +351,7 @@ pub enum CallOperand {
 impl Display for CallOperand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CallOperand::Fn(def_id, sym_name) => {
-                let sym_name_str = match sym_name {
-                    Some(n) => n,
-                    None => "<unknown>",
-                };
-                write!(f, "def_id={}, sym_name={}", def_id, sym_name_str)
-            }
+            CallOperand::Fn(sym_name) => write!(f, "sym_name={}", sym_name),
             CallOperand::Unknown => write!(f, "unknown"),
         }
     }
@@ -547,49 +506,16 @@ impl Display for BinOp {
     }
 }
 
-/// A debugging entry, mapping a DefId to its definition path string.
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub struct SirDebug {
-    def_id: DefId,
-    def_path: String,
-}
-
-impl SirDebug {
-    pub fn new(def_id: DefId, def_path: String) -> Self {
-        Self { def_id, def_path }
-    }
-
-    pub fn def_id(&self) -> &DefId {
-        &self.def_id
-    }
-
-    pub fn def_path(&self) -> &str {
-        &self.def_path
-    }
-}
-
 /// The top-level pack type.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Pack {
     Body(Body),
-    Debug(SirDebug),
-}
-
-impl Display for SirDebug {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "<debug: def_id={}, def_path_str={}>",
-            self.def_id, self.def_path
-        )
-    }
 }
 
 impl Display for Pack {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Pack::Body(sir) => write!(f, "{}", sir),
-            Pack::Debug(dbg) => write!(f, "{}", dbg),
         }
     }
 }

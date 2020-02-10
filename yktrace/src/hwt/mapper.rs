@@ -1,7 +1,7 @@
 use object::Object;
 use phdrs::objects;
 
-use core::yk::SirLoc;
+use crate::SirLoc;
 use hwtracer::Trace;
 use std::{borrow, collections::HashMap, env, fs};
 
@@ -36,11 +36,12 @@ impl HWTMapper {
                     let addr = block.start_vaddr() - self.phdr_offset;
                     match labels.get(&addr) {
                         Some(l) => {
-                            let data: Vec<&str> = l[9..].split('_').collect();
-                            let crate_hash = u64::from_str_radix(data[0], 16).unwrap();
-                            let def_idx = data[1].parse::<u32>().unwrap();
+                            // FIXME Do the splitting at the time we load from DWARF.
+                            let data: Vec<&str> = l.split(':').collect();
+                            debug_assert!(data.len() == 3);
+                            let sym = String::from(data[1]);
                             let bb_idx = data[2].parse::<u32>().unwrap();
-                            annotrace.push(SirLoc::new(crate_hash, def_idx, bb_idx))
+                            annotrace.push(SirLoc::new(sym, bb_idx))
                         }
                         None => {}
                     };
@@ -127,7 +128,7 @@ fn extract_labels() -> Result<HashMap<u64, String>, gimli::Error> {
                                     labels.insert(addr, s.to_string());
                                 }
                             } else {
-                                // Ignore labels that have now address
+                                // Ignore labels that have no address.
                             }
                         }
                     }

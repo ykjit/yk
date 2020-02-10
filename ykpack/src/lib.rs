@@ -31,11 +31,17 @@ pub use decode::Decoder;
 pub use encode::Encoder;
 pub use types::*;
 
+/// The prefix used in `DILabel` names for blocks.
+pub const BLOCK_LABEL_PREFIX: &str = "__YK_BLK";
+
+// ELF sections with this prefix contain SIR.
+pub const SIR_SECTION_PREFIX: &str = ".yksir_";
+
 #[cfg(test)]
 mod tests {
     use super::{
-        BasicBlock, BinOp, Body, Constant, ConstantInt, Decoder, DefId, Encoder, Local, Operand,
-        Pack, Place, PlaceBase, PlaceProjection, Rvalue, Statement, Terminator, UnsignedInt,
+        BasicBlock, BinOp, Body, Constant, ConstantInt, Decoder, Encoder, Local, Operand, Pack,
+        Place, PlaceBase, PlaceProjection, Rvalue, Statement, Terminator, UnsignedInt,
     };
     use fallible_iterator::{self, FallibleIterator};
     use std::io::{Cursor, Seek, SeekFrom};
@@ -63,11 +69,8 @@ mod tests {
             BasicBlock::new(stmts1_b2, dummy_term.clone()),
         ];
         let sir1 = Pack::Body(Body {
-            def_id: DefId::new(1, 2),
-            def_path_str: String::from("item1"),
+            symbol_name: String::from("symbol1"),
             blocks: blocks1,
-            num_args: 3,
-            num_locals: 4,
             flags: 0,
         });
 
@@ -80,11 +83,8 @@ mod tests {
             BasicBlock::new(stmts2_b3, dummy_term.clone()),
         ];
         let sir2 = Pack::Body(Body {
-            def_id: DefId::new(4, 5),
-            def_path_str: String::from("item2"),
+            symbol_name: String::from("symbol2"),
             blocks: blocks2,
-            num_args: 8,
-            num_locals: 9,
             flags: 0,
         });
 
@@ -179,22 +179,16 @@ mod tests {
 
         let sirs = vec![
             Pack::Body(Body {
-                def_id: DefId::new(1, 2),
-                def_path_str: String::from("item1"),
+                symbol_name: String::from("symbol1"),
                 blocks: blocks_t1,
-                num_args: 100,
-                num_locals: 200,
                 flags: 0,
             }),
             Pack::Body(Body {
-                def_id: DefId::new(3, 4),
-                def_path_str: String::from("item2"),
+                symbol_name: String::from("symbol2"),
                 blocks: vec![BasicBlock::new(
                     vec![Statement::Unimplemented(String::from("abc"))],
                     Terminator::Unreachable,
                 )],
-                num_args: 9,
-                num_locals: 15,
                 flags: 0,
             }),
         ];
@@ -205,8 +199,8 @@ mod tests {
         }
         let got_lines = got.split("\n");
 
-        let expect = "[Begin SIR for item1]\n\
-    DefId(1, 2):
+        let expect = "[Begin SIR for symbol1]\n\
+  flags: 0
     bb0:
         $0 = $1
         $2 = ($3).4
@@ -220,13 +214,13 @@ mod tests {
         $7 = sub($9, $10)
         $11 = U8(0)
         goto bb50
-[End SIR for item1]
-[Begin SIR for item2]
-    DefId(3, 4):
+[End SIR for symbol1]
+[Begin SIR for symbol2]
+  flags: 0
     bb0:
         unimplemented_stmt: abc
         unreachable
-[End SIR for item2]\n";
+[End SIR for symbol2]\n";
 
         let expect_lines = expect.split("\n");
 

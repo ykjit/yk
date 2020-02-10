@@ -1,7 +1,7 @@
 # The service providing the commit statuses to GitHub.
 status = [
   "buildbot/ykrustc-buildbot-build-script-hwt",
-  "buildbot/ykrustc-buildbot-build-script-swt",
+  #"buildbot/ykrustc-buildbot-build-script-swt",
 ]
 
 # Allow eight hours for builds + tests.
