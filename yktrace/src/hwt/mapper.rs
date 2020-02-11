@@ -7,7 +7,7 @@ use std::{borrow, collections::HashMap, env, fs};
 
 pub struct HWTMapper {
     phdr_offset: u64,
-    labels: Option<HashMap<u64, String>>
+    labels: Option<HashMap<u64, (String, u32)>>
 }
 
 impl HWTMapper {
@@ -33,18 +33,27 @@ impl HWTMapper {
         for b in trace.iter_blocks() {
             match b {
                 Ok(block) => {
-                    let addr = block.start_vaddr() - self.phdr_offset;
-                    match labels.get(&addr) {
-                        Some(l) => {
-                            // FIXME Do the splitting at the time we load from DWARF.
-                            let data: Vec<&str> = l.split(':').collect();
-                            debug_assert!(data.len() == 3);
-                            let sym = String::from(data[1]);
-                            let bb_idx = data[2].parse::<u32>().unwrap();
-                            annotrace.push(SirLoc::new(sym, bb_idx))
+                    let start_addr = block.start_vaddr() - self.phdr_offset;
+                    let end_addr = start_addr + block.len();
+                    // XXX check if there exists a label that is within addr and addr + block.len()
+                    for (addr, (sym, bb_idx)) in labels {
+                        if addr >= &start_addr && addr < &end_addr {
+                            // found matching label
+                            annotrace.push(SirLoc::new(sym.to_string(), *bb_idx));
+                            break
                         }
-                        None => {}
-                    };
+                    }
+                    //match labels.get(&start_addr) {
+                    //    Some(l) => {
+                    //        // FIXME Do the splitting at the time we load from DWARF.
+                    //        let data: Vec<&str> = l.split(':').collect();
+                    //        debug_assert!(data.len() == 3);
+                    //        let sym = String::from(data[1]);
+                    //        let bb_idx = data[2].parse::<u32>().unwrap();
+                    //        annotrace.push(SirLoc::new(sym, bb_idx))
+                    //    }
+                    //    None => {}
+                    //};
                 }
                 Err(_) => {}
             }
@@ -60,7 +69,7 @@ fn get_phdr_offset() -> u64 {
 }
 
 /// Extracts YK debug labels and their addresses from the executable.
-fn extract_labels() -> Result<HashMap<u64, String>, gimli::Error> {
+fn extract_labels() -> Result<HashMap<u64, (String, u32)>, gimli::Error> {
     // Load executable
     let pathb = env::current_exe().unwrap();
     let file = fs::File::open(&pathb.as_path()).unwrap();
@@ -122,10 +131,10 @@ fn extract_labels() -> Result<HashMap<u64, String>, gimli::Error> {
                                 if subaddr.is_some() && s.ends_with("_0") {
                                     // This is the first block of the subprogram. Assign its label
                                     // to the subprogram's address.
-                                    labels.insert(subaddr.unwrap(), s.to_string());
+                                    labels.insert(subaddr.unwrap(), split_symbol(s));
                                     subaddr = None;
                                 } else {
-                                    labels.insert(addr, s.to_string());
+                                    labels.insert(addr, split_symbol(s));
                                 }
                             } else {
                                 // Ignore labels that have no address.
@@ -137,4 +146,12 @@ fn extract_labels() -> Result<HashMap<u64, String>, gimli::Error> {
         }
     }
     Ok(labels)
+}
+
+fn split_symbol(s: &str) -> (String, u32) {
+    let data: Vec<&str> = s.split(':').collect();
+    debug_assert!(data.len() == 3);
+    let sym = String::from(data[1]);
+    let bb_idx = data[2].parse::<u32>().unwrap();
+    (sym, bb_idx)
 }
