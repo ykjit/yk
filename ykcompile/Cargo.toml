@@ -1,0 +1,18 @@
+[package]
+name = "ykcompile"
+version = "0.1.0"
+authors = ["Lukas Diekmann <lukas.diekmann@gmail.com>"]
+edition = "2018"
+license = "Apache-2.0 OR MIT"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+yktrace = { path = "../yktrace" }
+ykpack = { path = "../ykpack" }
+assembler = "0.10.1"
+dynasmrt = "0.6"
+dynasm = "0.6"
+
+[profile.dev]
+panic = "abort"

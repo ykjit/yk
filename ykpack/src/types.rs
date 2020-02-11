@@ -245,6 +245,7 @@ impl From<Place> for Operand {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Constant {
     Int(ConstantInt),
+    Bool(bool),
     Unimplemented(String),
 }
 
@@ -252,6 +253,7 @@ impl Display for Constant {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Constant::Int(i) => write!(f, "{}", i),
+            Constant::Bool(b) => write!(f, "{}", b),
             Constant::Unimplemented(s) => write!(f, "unimplemented constant: {:?}", s),
         }
     }

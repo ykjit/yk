@@ -5,4 +5,5 @@ members=[
     "yktrace",
     # Disabled for now to focus on code-gen.
     #"tiri",
+    "ykcompile"
 ]
