@@ -8,23 +8,30 @@ already found in rustc:
 
 ## Serialised IR (SIR)
 
-During compilation the Rust's Middle Intermediat Representation (MIR) is
-traversed and serialised into a simpler
-representation called SIR. SIR is a flow-graph IR very similar to MIR. It
-mostly exists so that high-level program information can be reconstructed at
-runtime without a need for an instance of the compiler (and its `tcx` struct).
-
-The resulting SIR is serialised using serde and linked into the `.yk_sir` ELF
-section of binaries compiled with `ykrustc`. At runtime, the tracer will
-collect SIR traces, which can then be mapped back to the serialised SIR
-information.
+During LLVM codegen, ykrustc generates SIR. SIR exists so that high-level
+program information can be reconstructed at runtime without a need for an
+instance of the compiler (and its `tcx` struct). SIR is serialised using serde
+and linked into special ELF sections in the resulting binary (one section per
+crate, whose names are prefixed `.yksir_`).
 
 The SIR data structures are in an
 [externally maintained crate](https://github.com/softdevteam/yk/tree/master/ykpack)
 so that they can be shared by the compiler and the JIT runtime.
 
-SIR lowering
-[is performed here](https://github.com/softdevteam/ykrustc/blob/master/src/librustc_yk_sections/emit_sir.rs).
+The
+[SirCx](https://github.com/softdevteam/ykrustc/blob/master/src/librustc/sir.rs)
+is a per-codegen-unit structure that holds all state related to SIR.
+
+Often we have to lookup SIR constructs (functions, blocks, etc.) identified in
+the codegen only by an opaque LLVM pointer. For this reason the `SirCx` has to
+hold a cache that maps these pointers back to corresponding Sir structures.
+
+### Why is SIR Implemented in the LLVM Codegen?
+
+Initially SIR was generated from Rust's Middle Intermediate Representation
+(MIR). This was much simpler and was backend agnostic, but it meant that we
+were unable to resolve monomorphised call targets, as monomorphisation happens
+later in the codegen.
 
 ## Tracing IR (TIR)
 
