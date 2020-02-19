@@ -170,6 +170,8 @@ pub enum Statement {
     Nop,
     /// An assignment.
     Assign(Place, Rvalue),
+    /// A return instruction
+    Return,
     /// Any unimplemented lowering maps to this variant.
     /// The string inside is the stringified MIR statement.
     Unimplemented(String),
@@ -180,6 +182,7 @@ impl Display for Statement {
         match self {
             Statement::Nop => write!(f, "nop"),
             Statement::Assign(l, r) => write!(f, "{} = {}", l, r),
+            Statement::Return => write!(f, "return"),
             Statement::Unimplemented(mir_stmt) => write!(f, "unimplemented_stmt: {}", mir_stmt),
         }
     }
