@@ -11,7 +11,8 @@ extern crate lazy_static;
 pub mod debug;
 mod errors;
 mod hwt;
-mod swt;
+// FIXME: Software tracing is currently broken. Not just here, but in ykrustc too.
+//mod swt;
 pub mod tir;
 
 use errors::InvalidTraceError;
@@ -148,8 +149,8 @@ trait ThreadTracerImpl {
 #[trace_head]
 pub fn start_tracing(kind: Option<TracingKind>) -> ThreadTracer {
     match kind {
-        None | Some(TracingKind::SoftwareTracing) => swt::start_tracing(),
-        Some(TracingKind::HardwareTracing) => hwt::start_tracing()
+        Some(TracingKind::SoftwareTracing) => unimplemented!("software tracing is broken"),
+        None | Some(TracingKind::HardwareTracing) => hwt::start_tracing()
     }
 }
 
