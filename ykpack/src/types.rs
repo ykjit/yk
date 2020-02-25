@@ -169,9 +169,10 @@ pub enum Statement {
     /// Do nothing.
     Nop,
     /// An assignment.
-    Assign(Place, Rvalue),
+    Assign(Local, Rvalue),
     /// A return instruction
     Return,
+    Store,
     /// Any unimplemented lowering maps to this variant.
     /// The string inside is the stringified MIR statement.
     Unimplemented(String),
@@ -183,6 +184,7 @@ impl Display for Statement {
             Statement::Nop => write!(f, "nop"),
             Statement::Assign(l, r) => write!(f, "{} = {}", l, r),
             Statement::Return => write!(f, "return"),
+            Statement::Store => write!(f, "store"),
             Statement::Unimplemented(mir_stmt) => write!(f, "unimplemented_stmt: {}", mir_stmt),
         }
     }
@@ -195,6 +197,7 @@ pub enum Rvalue {
     BinaryOp(BinOp, Operand, Operand),
     CheckedBinaryOp(BinOp, Operand, Operand),
     Unimplemented,
+    Load(LocalIndex), // FIXME arg may not be local.
 }
 
 impl Display for Rvalue {
@@ -206,6 +209,7 @@ impl Display for Rvalue {
                 write!(f, "checked_{}({}, {})", op, oper1, oper2)
             }
             Self::Unimplemented => write!(f, "unimplemented rvalue"),
+            Self::Load(l) => write!(f, "load({})", l),
         }
     }
 }

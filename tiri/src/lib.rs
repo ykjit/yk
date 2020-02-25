@@ -192,13 +192,10 @@ impl<'t> Interp<'t> {
     /// Interpret the specified statement.
     fn interp_stmt(&self, state: &mut InterpState, stmt: &Statement) {
         match stmt {
-            Statement::Assign(plc, rval) => match (&plc.base, &plc.projections.len()) {
-                (PlaceBase::Local(l), 0) => {
-                    state.store_local(*l, self.eval_rvalue(state, rval).clone());
-                    state.pc += 1;
-                }
-                _ => unimplemented!("unhandled assignment"),
-            },
+            Statement::Assign(l, rval) => {
+                state.store_local(*l, self.eval_rvalue(state, rval).clone());
+                state.pc += 1;
+            }
             _ => panic!("unhandled statement: {}", stmt),
         }
     }

@@ -131,16 +131,16 @@ mod tests {
     #[test]
     fn test_text_dump() {
         let stmts_t1_b0 = vec![
-            Statement::Assign(Place::from(Local(0)), Rvalue::from(Local(1))),
+            Statement::Assign(Local(0), Rvalue::from(Local(1))),
             Statement::Assign(
-                Place::from(Local(2)),
+                Local(2),
                 Rvalue::Use(Operand::Place(Place {
                     base: PlaceBase::Local(Local(3)),
                     projections: vec![PlaceProjection::Field(4)],
                 })),
             ),
             Statement::Assign(
-                Place::from(Local(4)),
+                Local(4),
                 Rvalue::Use(Operand::Constant(Constant::Int(ConstantInt::UnsignedInt(
                     UnsignedInt::U8(10),
                 )))),
@@ -149,14 +149,14 @@ mod tests {
         ];
         let term_t1_b0 = Terminator::Goto(20);
         let stmts_t1_b1 = vec![
-            Statement::Assign(Place::from(Local(5)), Rvalue::from(Local(6))),
-            Statement::Assign(Place::from(Local(5)), Rvalue::from(Local(4))),
+            Statement::Assign(Local(5), Rvalue::from(Local(6))),
+            Statement::Assign(Local(5), Rvalue::from(Local(4))),
             Statement::Assign(
-                Place::from(Local(7)),
+                Local(7),
                 Rvalue::BinaryOp(BinOp::Add, Operand::from(Local(8)), Operand::from(Local(9))),
             ),
             Statement::Assign(
-                Place::from(Local(7)),
+                Local(7),
                 Rvalue::BinaryOp(
                     BinOp::Sub,
                     Operand::from(Local(9)),
@@ -164,7 +164,7 @@ mod tests {
                 ),
             ),
             Statement::Assign(
-                Place::from(Local(11)),
+                Local(11),
                 Rvalue::Use(Operand::Constant(Constant::Int(ConstantInt::u8_from_bits(
                     0,
                 )))),
