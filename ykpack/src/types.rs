@@ -194,7 +194,7 @@ pub enum Rvalue {
     Use(Operand),
     BinaryOp(BinOp, Operand, Operand),
     CheckedBinaryOp(BinOp, Operand, Operand),
-    Unimplemented,
+    Unimplemented(String),
 }
 
 impl Display for Rvalue {
@@ -205,7 +205,7 @@ impl Display for Rvalue {
             Self::CheckedBinaryOp(op, oper1, oper2) => {
                 write!(f, "checked_{}({}, {})", op, oper1, oper2)
             }
-            Self::Unimplemented => write!(f, "unimplemented rvalue"),
+            Self::Unimplemented(s) => write!(f, "unimplemented rvalue: {}", s),
         }
     }
 }
