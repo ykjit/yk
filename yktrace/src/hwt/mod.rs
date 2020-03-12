@@ -85,6 +85,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_trace_iterator() {
         test_helpers::test_trace_iterator(TRACING_KIND);
     }
