@@ -354,8 +354,8 @@ pub enum CallOperand {
 impl Display for CallOperand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CallOperand::Fn(sym_name) => write!(f, "sym_name={}", sym_name),
-            CallOperand::Unknown => write!(f, "unknown"),
+            CallOperand::Fn(sym_name) => write!(f, "{}", sym_name),
+            CallOperand::Unknown => write!(f, "<unknown>"),
         }
     }
 }
