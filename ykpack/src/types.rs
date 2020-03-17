@@ -56,17 +56,17 @@ impl Display for Local {
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
 pub struct Place {
-    pub base: PlaceBase,
-    pub projections: Vec<PlaceProjection>,
+    pub local: Local,
+    pub projection: Vec<PlaceElem>,
 }
 
 impl Display for Place {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.projections.is_empty() {
-            write!(f, "{}", self.base)?;
+        if self.projection.is_empty() {
+            write!(f, "{}", self.local)?;
         } else {
-            write!(f, "({})", self.base)?;
-            for p in &self.projections {
+            write!(f, "({})", self.local)?;
+            for p in &self.projection {
                 write!(f, "{}", p)?;
             }
         }
@@ -75,10 +75,10 @@ impl Display for Place {
 }
 
 impl From<Local> for Place {
-    fn from(l: Local) -> Self {
+    fn from(local: Local) -> Self {
         Self {
-            base: PlaceBase::Local(l),
-            projections: Vec::new(),
+            local,
+            projection: Vec::new(),
         }
     }
 }
@@ -99,16 +99,14 @@ impl Display for PlaceBase {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
-pub enum PlaceProjection {
-    Field(FieldIndex),
-    Unimplemented,
+pub enum PlaceElem {
+    Unimplemented(String),
 }
 
-impl Display for PlaceProjection {
+impl Display for PlaceElem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Field(fld) => write!(f, ".{}", fld),
-            Self::Unimplemented => write!(f, "!"),
+            Self::Unimplemented(s) => write!(f, "unimplemented projection: {:?}", s),
         }
     }
 }
@@ -238,17 +236,23 @@ impl From<Local> for Operand {
     }
 }
 
+impl From<Place> for Operand {
+    fn from(p: Place) -> Self {
+        Operand::Place(p)
+    }
+}
+
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Constant {
     Int(ConstantInt),
-    Unimplemented,
+    Unimplemented(String),
 }
 
 impl Display for Constant {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Constant::Int(i) => write!(f, "{}", i),
-            Constant::Unimplemented => write!(f, "Unimplemented Constant"),
+            Constant::Unimplemented(s) => write!(f, "unimplemented constant: {:?}", s),
         }
     }
 }
@@ -384,7 +388,9 @@ pub enum Terminator {
     },
     Call {
         operand: CallOperand,
-        ret_bb: Option<BasicBlockIndex>,
+        args: Vec<Operand>,
+        /// The return value and basic block to continue at, if the call converges.
+        destination: Option<(Place, BasicBlockIndex)>,
     },
     /// The value in `cond` must equal to `expected` to advance to `target_bb`.
     Assert {
@@ -435,12 +441,24 @@ impl Display for Terminator {
                 "drop_and_replace loc={}, value={}, target=bb{}",
                 location, value, target_bb,
             ),
-            Terminator::Call { operand, ret_bb } => write!(
-                f,
-                "call operand={}, ret_bb={}",
+            Terminator::Call {
                 operand,
-                opt_bb_as_str(ret_bb)
-            ),
+                args,
+                destination,
+            } => {
+                let ret_bb = if let Some((ret_val, bb)) = destination {
+                    write!(f, "{} = ", ret_val)?;
+                    format!(" -> bb{}", bb)
+                } else {
+                    String::from("")
+                };
+                let args_str = args
+                    .iter()
+                    .map(|a| format!("{}", a))
+                    .collect::<Vec<String>>()
+                    .join(", ");
+                write!(f, "call {}({}){}", operand, args_str, ret_bb)
+            }
             Terminator::Assert {
                 cond,
                 target_bb,
@@ -452,13 +470,6 @@ impl Display for Terminator {
             ),
             Terminator::Unimplemented(s) => write!(f, "unimplemented: {}", s),
         }
-    }
-}
-
-fn opt_bb_as_str(opt_bb: &Option<BasicBlockIndex>) -> String {
-    match opt_bb {
-        Some(bb) => format!("bb{}", bb),
-        _ => String::from("none"),
     }
 }
 

@@ -3,5 +3,6 @@ members=[
     "ykpack",
     "ykrt",
     "yktrace",
-    "tiri",
+    # Disabled for now to focus on code-gen.
+    #"tiri",
 ]

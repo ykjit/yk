@@ -41,7 +41,7 @@ pub const SIR_SECTION_PREFIX: &str = ".yksir_";
 mod tests {
     use super::{
         BasicBlock, BinOp, Body, Constant, ConstantInt, Decoder, Encoder, Local, Operand, Pack,
-        Place, PlaceBase, PlaceProjection, Rvalue, Statement, Terminator, UnsignedInt,
+        Place, Rvalue, Statement, Terminator, UnsignedInt,
     };
     use fallible_iterator::{self, FallibleIterator};
     use std::io::{Cursor, Seek, SeekFrom};
@@ -135,8 +135,8 @@ mod tests {
             Statement::Assign(
                 Place::from(Local(2)),
                 Rvalue::Use(Operand::Place(Place {
-                    base: PlaceBase::Local(Local(3)),
-                    projections: vec![PlaceProjection::Field(4)],
+                    local: Local(3),
+                    projection: Vec::new(),
                 })),
             ),
             Statement::Assign(
@@ -203,7 +203,7 @@ mod tests {
   flags: 0
     bb0:
         $0 = $1
-        $2 = ($3).4
+        $2 = $3
         $4 = U8(10)
         nop
         goto bb20

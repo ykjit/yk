@@ -9,8 +9,8 @@ use fallible_iterator::FallibleIterator;
 use std::{collections::HashMap, convert::TryFrom, env, fmt, io::Cursor};
 use ykpack::{bodyflags, Body, Decoder, Pack, Terminator};
 pub use ykpack::{
-    BinOp, Constant, ConstantInt, Local, LocalIndex, Operand, Place, PlaceBase, PlaceProjection,
-    Rvalue, SignedInt, Statement, UnsignedInt
+    BinOp, Constant, ConstantInt, Local, LocalIndex, Operand, Place, PlaceBase, PlaceElem, Rvalue,
+    SignedInt, Statement, UnsignedInt
 };
 
 lazy_static! {
