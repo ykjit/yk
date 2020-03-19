@@ -1,3 +1,5 @@
+mod backend;
+
 use libc;
 use std::mem;
 use std::process::Command;
@@ -18,11 +20,9 @@ impl Assembler {
             let mut page: *mut libc::c_void = mem::MaybeUninit::uninit().as_mut_ptr();
             libc::posix_memalign(&mut page, PAGE_SIZE, PAGE_SIZE);
             libc::mprotect(page, PAGE_SIZE, libc::PROT_WRITE);
-
-            // XXX correct use of assume_init()?
-
             // Transmute to raw u8 pointer
             let memmap: *mut u8 = mem::transmute(page);
+            // TODO correct use of MaybeUninit::assume_init()
             memmap
         };
 
@@ -33,17 +33,12 @@ impl Assembler {
     }
 
     pub fn add_instruction(&mut self, instr: &str) {
-        let output = Command::new("/usr/bin/rasm2")
-            .arg("-B")
-            .arg(instr)
-            .output()
-            .expect("failed to execute process");
-        let instr = output.stdout.as_ptr();
+        let mc = backend::encode(backend::EncoderBackend::RasmBackend, instr);
         unsafe {
             let off = self.memmap.offset(self.instrptr as isize);
-            libc::memcpy(off as *mut _, instr as *const _, output.stdout.len());
+            libc::memcpy(off as *mut _, mc.as_ptr() as *const _, mc.len());
         }
-        self.instrptr += output.stdout.len();
+        self.instrptr += mc.len();
     }
 
     fn make_executable(&self) {
