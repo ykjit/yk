@@ -3,5 +3,6 @@ name = "ykrt"
 version = "0.1.0"
 authors = ["Edd Barrett <vext01@gmail.com>", "Laurence Tratt <laurie@tratt.net>"]
 edition = "2018"
+license = "Apache-2.0 OR MIT"
 
 [dependencies]
