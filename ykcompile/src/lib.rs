@@ -226,13 +226,12 @@ impl TraceCompiler {
     }
 
     pub fn compile(tt: TirTrace) -> CompiledTrace {
-        // Set available registers to R11-R8, RDX, RCX
-        let regs = vec![11, 10, 9, 8, 2, 1];
         let assembler = dynasmrt::x64::Assembler::new().unwrap();
 
         let mut tc = TraceCompiler {
             asm: assembler,
-            available_regs: regs,
+            // Use all the 64-bit registers we can (R15-R8, RDX, RCX).
+            available_regs: vec![15, 14, 13, 12, 11, 10, 9, 8, 2, 1],
             assigned_regs: HashMap::new(),
         };
 
