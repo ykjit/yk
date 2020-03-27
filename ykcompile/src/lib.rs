@@ -12,7 +12,7 @@ use std::mem;
 use std::process::Command;
 
 use yktrace::tir::{
-    Constant, ConstantInt, Guard, Operand, Rvalue, Statement, TirOp, TirTrace, UnsignedInt,
+    Constant, ConstantInt, Guard, Local, Operand, Rvalue, Statement, TirOp, TirTrace, UnsignedInt,
 };
 
 use dynasmrt::DynasmApi;
@@ -77,17 +77,17 @@ pub struct TraceCompiler {
     /// Contains the list of currently available registers.
     available_regs: Vec<u8>,
     /// Maps locals to their assigned registers.
-    assigned_regs: HashMap<u32, u8>,
+    assigned_regs: HashMap<Local, u8>,
 }
 
 impl TraceCompiler {
-    fn local_to_reg(&mut self, l: u32) -> Result<u8, CompileError> {
+    fn local_to_reg(&mut self, l: Local) -> Result<u8, CompileError> {
         // This is a really dumb register allocator, which runs out of available registers after 7
         // locals. We can do better than this by using StorageLive/StorageDead from the MIR to free
         // up registers again, and allocate additional locals on the stack. Though, ultimately we
         // probably want to implement a proper register allocator, e.g. linear scan.
 
-        if l == 0 {
+        if l == Local(0) {
             // In SIR, `Local` zero is the (implicit) return value, so it makes sense to allocate
             // it to the return register of the underlying X86_64 calling convention.
             Ok(0)
@@ -106,7 +106,7 @@ impl TraceCompiler {
     }
 
     /// Move constant `c` of type `usize` into local `a`.
-    pub fn mov_local_usize(&mut self, local: u32, cnst: usize) -> Result<(), CompileError> {
+    pub fn mov_local_usize(&mut self, local: Local, cnst: usize) -> Result<(), CompileError> {
         let reg = self.local_to_reg(local)?;
         dynasm!(self.asm
             ; mov Rq(reg), cnst as i32
@@ -115,7 +115,7 @@ impl TraceCompiler {
     }
 
     /// Move constant `c` of type `u8` into local `a`.
-    pub fn mov_local_u8(&mut self, local: u32, cnst: u8) -> Result<(), CompileError> {
+    pub fn mov_local_u8(&mut self, local: Local, cnst: u8) -> Result<(), CompileError> {
         let reg = self.local_to_reg(local)?;
         dynasm!(self.asm
             ; mov Rq(reg), cnst as i32
@@ -124,7 +124,7 @@ impl TraceCompiler {
     }
 
     /// Move local `var2` into local `var1`.
-    fn mov_local_local(&mut self, l1: u32, l2: u32) -> Result<(), CompileError> {
+    fn mov_local_local(&mut self, l1: Local, l2: Local) -> Result<(), CompileError> {
         let lreg = self.local_to_reg(l1)?;
         let rreg = self.local_to_reg(l2)?;
         dynasm!(self.asm
@@ -139,7 +139,7 @@ impl TraceCompiler {
         );
     }
 
-    fn c_mov_int(&mut self, local: u32, constant: &ConstantInt) -> Result<(), CompileError> {
+    fn c_mov_int(&mut self, local: Local, constant: &ConstantInt) -> Result<(), CompileError> {
         let reg = self.local_to_reg(local)?;
         let val = match constant {
             ConstantInt::UnsignedInt(UnsignedInt::U8(i)) => *i as i64,
@@ -152,7 +152,7 @@ impl TraceCompiler {
         Ok(())
     }
 
-    fn c_mov_bool(&mut self, local: u32, b: bool) -> Result<(), CompileError> {
+    fn c_mov_bool(&mut self, local: Local, b: bool) -> Result<(), CompileError> {
         let reg = self.local_to_reg(local)?;
         dynasm!(self.asm
             ; mov Rq(reg), QWORD b as i64
@@ -163,16 +163,15 @@ impl TraceCompiler {
     fn statement(&mut self, stmt: &Statement) -> Result<(), CompileError> {
         match stmt {
             Statement::Assign(l, r) => {
-                let local = l.local.0;
                 match r {
-                    Rvalue::Use(Operand::Place(p)) => self.mov_local_local(local, p.local.0)?,
+                    Rvalue::Use(Operand::Place(p)) => self.mov_local_local(l.local, p.local),
                     Rvalue::Use(Operand::Constant(c)) => match c {
-                        Constant::Int(ci) => self.c_mov_int(local, ci)?,
-                        Constant::Bool(b) => self.c_mov_bool(local, *b)?,
+                        Constant::Int(ci) => self.c_mov_int(l.local, ci),
+                        Constant::Bool(b) => self.c_mov_bool(l.local, *b),
                         c => todo!("Not implemented: {}", c),
                     },
                     unimpl => todo!("Not implemented: {:?}", unimpl),
-                };
+                }?;
             }
             Statement::Return => {}
             Statement::Nop => {}
@@ -260,7 +259,7 @@ impl TraceCompiler {
 
 #[cfg(test)]
 mod tests {
-    use super::{HashMap, TraceCompiler};
+    use super::{HashMap, Local, TraceCompiler};
     use yktrace::tir::TirTrace;
     use yktrace::{start_tracing, TracingKind};
 
@@ -291,7 +290,10 @@ mod tests {
         };
 
         for _ in 0..32 {
-            assert_eq!(tc.local_to_reg(1).unwrap(), tc.local_to_reg(1).unwrap());
+            assert_eq!(
+                tc.local_to_reg(Local(1)).unwrap(),
+                tc.local_to_reg(Local(1)).unwrap()
+            );
         }
     }
 }
