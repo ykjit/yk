@@ -17,7 +17,7 @@ use yktrace::tir::{
 
 use dynasmrt::DynasmApi;
 
-#[derive(Debug)]
+#[derive(Debug, Hash, Eq, PartialEq)]
 pub enum CompileError {
     /// We ran out of registers.
     /// In the long-run, when we have a proper register allocator, this won't be needed.
@@ -268,6 +268,7 @@ impl TraceCompiler {
 #[cfg(test)]
 mod tests {
     use super::{HashMap, Local, TraceCompiler};
+    use std::collections::HashSet;
     use yktrace::tir::TirTrace;
     use yktrace::{start_tracing, TracingKind};
 
@@ -302,6 +303,23 @@ mod tests {
                 tc.local_to_reg(Local(1)).unwrap(),
                 tc.local_to_reg(Local(1)).unwrap()
             );
+        }
+    }
+
+    // Locals should be allocated to different registers.
+    #[test]
+    pub fn reg_alloc() {
+        let mut tc = TraceCompiler {
+            asm: dynasmrt::x64::Assembler::new().unwrap(),
+            available_regs: vec![15, 14, 13, 12, 11, 10, 9, 8, 2, 1],
+            assigned_regs: HashMap::new(),
+        };
+
+        let mut seen = HashSet::new();
+        for l in 0..7 {
+            let reg = tc.local_to_reg(Local(l));
+            assert!(!seen.contains(&reg));
+            seen.insert(reg);
         }
     }
 }
