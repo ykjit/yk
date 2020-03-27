@@ -86,7 +86,10 @@ impl TraceCompiler {
         // locals. We can do better than this by using StorageLive/StorageDead from the MIR to free
         // up registers again, and allocate additional locals on the stack. Though, ultimately we
         // probably want to implement a proper register allocator, e.g. linear scan.
+
         if l == 0 {
+            // In SIR, `Local` zero is the (implicit) return value, so it makes sense to allocate
+            // it to the return register of the underlying X86_64 calling convention.
             Ok(0)
         } else {
             if self.assigned_regs.contains_key(&l) {
