@@ -163,15 +163,23 @@ impl TraceCompiler {
     fn statement(&mut self, stmt: &Statement) -> Result<(), CompileError> {
         match stmt {
             Statement::Assign(l, r) => {
+                if !l.projection.is_empty() {
+                    todo!("projection in assignment");
+                }
                 match r {
-                    Rvalue::Use(Operand::Place(p)) => self.mov_local_local(l.local, p.local),
+                    Rvalue::Use(Operand::Place(p)) => {
+                        if !p.projection.is_empty() {
+                            todo!("projection in assignment");
+                        }
+                        self.mov_local_local(l.local, p.local)?;
+                    }
                     Rvalue::Use(Operand::Constant(c)) => match c {
-                        Constant::Int(ci) => self.c_mov_int(l.local, ci),
-                        Constant::Bool(b) => self.c_mov_bool(l.local, *b),
+                        Constant::Int(ci) => self.c_mov_int(l.local, ci)?,
+                        Constant::Bool(b) => self.c_mov_bool(l.local, *b)?,
                         c => todo!("Not implemented: {}", c),
                     },
                     unimpl => todo!("Not implemented: {:?}", unimpl),
-                }?;
+                };
             }
             Statement::Return => {}
             Statement::Nop => {}
