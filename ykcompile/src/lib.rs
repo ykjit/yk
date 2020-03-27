@@ -89,10 +89,15 @@ impl TraceCompiler {
         if l == 0 {
             Ok(0)
         } else {
-            if let Some(reg) = self.available_regs.pop() {
-                Ok(*self.assigned_regs.entry(l).or_insert(reg))
+            if self.assigned_regs.contains_key(&l) {
+                Ok(self.assigned_regs[&l])
             } else {
-                Err(CompileError::OutOfRegisters)
+                if let Some(reg) = self.available_regs.pop() {
+                    self.assigned_regs.insert(l, reg);
+                    Ok(reg)
+                } else {
+                    Err(CompileError::OutOfRegisters)
+                }
             }
         }
     }
@@ -252,8 +257,7 @@ impl TraceCompiler {
 
 #[cfg(test)]
 mod tests {
-
-    use super::TraceCompiler;
+    use super::{HashMap, TraceCompiler};
     use yktrace::tir::TirTrace;
     use yktrace::{start_tracing, TracingKind};
 
@@ -271,5 +275,20 @@ mod tests {
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
         let ct = TraceCompiler::compile(tir_trace);
         assert_eq!(ct.execute(), 13);
+    }
+
+    // Repeatedly fetching the register for the same local should yield the same register and
+    // should not exhaust the allocator.
+    #[test]
+    pub fn reg_alloc_same_local() {
+        let mut tc = TraceCompiler {
+            asm: dynasmrt::x64::Assembler::new().unwrap(),
+            available_regs: vec![15, 14, 13, 12, 11, 10, 9, 8, 2, 1],
+            assigned_regs: HashMap::new(),
+        };
+
+        for _ in 0..32 {
+            assert_eq!(tc.local_to_reg(1).unwrap(), tc.local_to_reg(1).unwrap());
+        }
     }
 }
