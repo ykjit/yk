@@ -10,9 +10,9 @@ license = "Apache-2.0 OR MIT"
 [dependencies]
 yktrace = { path = "../yktrace" }
 ykpack = { path = "../ykpack" }
-assembler = "0.10.1"
 dynasmrt = "0.6"
 dynasm = "0.6"
+hex = "0.4"
 
 [profile.dev]
 panic = "abort"
