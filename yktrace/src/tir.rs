@@ -6,7 +6,13 @@ use super::SirTrace;
 use crate::errors::InvalidTraceError;
 use elf;
 use fallible_iterator::FallibleIterator;
-use std::{collections::HashMap, convert::TryFrom, env, fmt, io::Cursor};
+use std::{
+    collections::HashMap,
+    convert::TryFrom,
+    env,
+    fmt::{self, Display},
+    io::Cursor
+};
 use ykpack::{bodyflags, Body, Decoder, Pack, Terminator};
 pub use ykpack::{
     BinOp, Constant, ConstantInt, Local, LocalIndex, Operand, Place, PlaceBase, PlaceElem, Rvalue,
@@ -185,6 +191,16 @@ impl TirTrace {
     /// Return the length of the trace measure in operations.
     pub fn len(&self) -> usize {
         self.ops.len()
+    }
+}
+
+impl Display for TirTrace {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "[Start TIR Trace]")?;
+        for op in &self.ops {
+            writeln!(f, "  {}", op)?;
+        }
+        writeln!(f, "[End TIR Trace]")
     }
 }
 
