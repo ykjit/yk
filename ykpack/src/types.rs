@@ -170,6 +170,9 @@ pub enum Statement {
     Assign(Place, Rvalue),
     /// A return instruction
     Return,
+    /// A call terminator forwarding arguments to the next block and storing the call result in the
+    /// destination local.
+    Call(CallOperand, Vec<Operand>, Option<Place>),
     /// Any unimplemented lowering maps to this variant.
     /// The string inside is the stringified MIR statement.
     Unimplemented(String),
@@ -181,6 +184,7 @@ impl Display for Statement {
             Statement::Nop => write!(f, "nop"),
             Statement::Assign(l, r) => write!(f, "{} = {}", l, r),
             Statement::Return => write!(f, "return"),
+            Statement::Call(op, args, dest) => write!(f, "call({:?}, {:?}, {:?})", op, args, dest),
             Statement::Unimplemented(mir_stmt) => write!(f, "unimplemented_stmt: {}", mir_stmt),
         }
     }

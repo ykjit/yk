@@ -15,8 +15,8 @@ use std::{
 };
 use ykpack::{bodyflags, Body, Decoder, Pack, Terminator};
 pub use ykpack::{
-    BinOp, Constant, ConstantInt, Local, LocalIndex, Operand, Place, PlaceBase, PlaceElem, Rvalue,
-    SignedInt, Statement, UnsignedInt
+    BinOp, CallOperand, Constant, ConstantInt, Local, LocalIndex, Operand, Place, PlaceBase,
+    PlaceElem, Rvalue, SignedInt, Statement, UnsignedInt
 };
 
 lazy_static! {
@@ -126,6 +126,23 @@ impl TirTrace {
                     .cloned()
                     .map(TirOp::Statement)
             );
+
+            match &body.blocks[user_bb_idx_usize].term {
+                Terminator::Call {
+                    operand: op,
+                    args,
+                    destination: dest
+                } => {
+                    let op = TirOp::Statement(Statement::Call(
+                        op.clone(),
+                        args.to_vec(),
+                        dest.as_ref().map(|(ret_val, _ret_bb)| ret_val.clone())
+                    ));
+                    ops.push(op);
+                }
+                Terminator::Return => ops.push(TirOp::Statement(Statement::Return)),
+                _ => {}
+            }
 
             // Convert the block terminator to a guard if necessary.
             let guard = match body.blocks[user_bb_idx_usize].term {

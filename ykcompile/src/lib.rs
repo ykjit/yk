@@ -12,7 +12,8 @@ use std::mem;
 use std::process::Command;
 
 use yktrace::tir::{
-    Constant, ConstantInt, Guard, Local, Operand, Rvalue, Statement, TirOp, TirTrace, UnsignedInt,
+    CallOperand, Constant, ConstantInt, Guard, Local, Operand, Place, Rvalue, Statement, TirOp,
+    TirTrace, UnsignedInt,
 };
 
 use dynasmrt::DynasmApi;
@@ -78,6 +79,8 @@ pub struct TraceCompiler {
     available_regs: Vec<u8>,
     /// Maps locals to their assigned registers.
     assigned_regs: HashMap<Local, u8>,
+    /// Stores the destination locals to which we copy RAX to after returning from a call.
+    returns: Vec<Option<Place>>,
 }
 
 impl TraceCompiler {
@@ -160,6 +163,41 @@ impl TraceCompiler {
         Ok(())
     }
 
+    fn c_call(
+        &mut self,
+        _op: &CallOperand,
+        args: &Vec<Operand>,
+        dest: &Option<Place>,
+    ) -> Result<(), CompileError> {
+        // Move call arguments into registers.
+        for (i, op) in args.iter().enumerate() {
+            let argidx = Local((i + 1) as u32);
+            match op {
+                Operand::Place(p) => self.mov_local_local(argidx, p.local)?,
+                Operand::Constant(c) => match c {
+                    Constant::Int(ci) => self.c_mov_int(argidx, ci)?,
+                    Constant::Bool(b) => self.c_mov_bool(argidx, *b)?,
+                    c => todo!("Not implemented: {}", c),
+                },
+            }
+        }
+        // Remember the return destination.
+        self.returns.push(dest.as_ref().cloned());
+        Ok(())
+    }
+
+    fn c_return(&mut self) -> Result<(), CompileError> {
+        let dest = self.returns.pop();
+        if let Some(d) = dest {
+            if let Some(d) = d {
+                // When we see a return terminator move whatever's left in RAX into the destination
+                // local.
+                self.mov_local_local(d.local, Local(0))?;
+            }
+        }
+        Ok(())
+    }
+
     fn statement(&mut self, stmt: &Statement) -> Result<(), CompileError> {
         match stmt {
             Statement::Assign(l, r) => {
@@ -181,7 +219,8 @@ impl TraceCompiler {
                     unimpl => todo!("Not implemented: {:?}", unimpl),
                 };
             }
-            Statement::Return => {}
+            Statement::Return => self.c_return()?,
+            Statement::Call(op, args, dest) => self.c_call(op, args, dest)?,
             Statement::Nop => {}
             Statement::Unimplemented(mir_stmt) => todo!("Can't compile: {}", mir_stmt),
         }
@@ -248,6 +287,7 @@ impl TraceCompiler {
             // Use all the 64-bit registers we can (R15-R8, RDX, RCX).
             available_regs: vec![15, 14, 13, 12, 11, 10, 9, 8, 2, 1],
             assigned_regs: HashMap::new(),
+            returns: Vec::new(),
         };
 
         for i in 0..tt.len() {
@@ -296,6 +336,7 @@ mod tests {
             asm: dynasmrt::x64::Assembler::new().unwrap(),
             available_regs: vec![15, 14, 13, 12, 11, 10, 9, 8, 2, 1],
             assigned_regs: HashMap::new(),
+            returns: Vec::new(),
         };
 
         for _ in 0..32 {
@@ -313,6 +354,7 @@ mod tests {
             asm: dynasmrt::x64::Assembler::new().unwrap(),
             available_regs: vec![15, 14, 13, 12, 11, 10, 9, 8, 2, 1],
             assigned_regs: HashMap::new(),
+            returns: Vec::new(),
         };
 
         let mut seen = HashSet::new();
@@ -321,5 +363,26 @@ mod tests {
             assert!(!seen.contains(&reg));
             seen.insert(reg);
         }
+    }
+
+    #[inline(never)]
+    fn farg(i: u8) -> u8 {
+        i
+    }
+
+    #[inline(never)]
+    fn fcall() -> u8 {
+        let y = farg(13);
+        y
+    }
+
+    #[test]
+    pub(crate) fn test_function_call() {
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        fcall();
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let ct = TraceCompiler::compile(tir_trace);
+        assert_eq!(ct.execute(), 13);
     }
 }
