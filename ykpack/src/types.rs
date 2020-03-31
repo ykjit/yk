@@ -106,7 +106,7 @@ pub enum PlaceElem {
 impl Display for PlaceElem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Unimplemented(s) => write!(f, "unimplemented projection: {:?}", s),
+            Self::Unimplemented(s) => write!(f, ".(unimplemented projection: {:?})", s),
         }
     }
 }
