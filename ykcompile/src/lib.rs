@@ -12,12 +12,12 @@ use std::mem;
 use std::process::Command;
 
 use yktrace::tir::{
-    Constant, ConstantInt, Guard, Operand, Rvalue, Statement, TirOp, TirTrace, UnsignedInt,
+    Constant, ConstantInt, Guard, Local, Operand, Rvalue, Statement, TirOp, TirTrace, UnsignedInt,
 };
 
 use dynasmrt::DynasmApi;
 
-#[derive(Debug)]
+#[derive(Debug, Hash, Eq, PartialEq)]
 pub enum CompileError {
     /// We ran out of registers.
     /// In the long-run, when we have a proper register allocator, this won't be needed.
@@ -77,28 +77,36 @@ pub struct TraceCompiler {
     /// Contains the list of currently available registers.
     available_regs: Vec<u8>,
     /// Maps locals to their assigned registers.
-    assigned_regs: HashMap<u32, u8>,
+    assigned_regs: HashMap<Local, u8>,
 }
 
 impl TraceCompiler {
-    fn local_to_reg(&mut self, l: u32) -> Result<u8, CompileError> {
+    fn local_to_reg(&mut self, l: Local) -> Result<u8, CompileError> {
         // This is a really dumb register allocator, which runs out of available registers after 7
         // locals. We can do better than this by using StorageLive/StorageDead from the MIR to free
         // up registers again, and allocate additional locals on the stack. Though, ultimately we
         // probably want to implement a proper register allocator, e.g. linear scan.
-        if l == 0 {
+
+        if l == Local(0) {
+            // In SIR, `Local` zero is the (implicit) return value, so it makes sense to allocate
+            // it to the return register of the underlying X86_64 calling convention.
             Ok(0)
         } else {
-            if let Some(reg) = self.available_regs.pop() {
-                Ok(*self.assigned_regs.entry(l).or_insert(reg))
+            if self.assigned_regs.contains_key(&l) {
+                Ok(self.assigned_regs[&l])
             } else {
-                Err(CompileError::OutOfRegisters)
+                if let Some(reg) = self.available_regs.pop() {
+                    self.assigned_regs.insert(l, reg);
+                    Ok(reg)
+                } else {
+                    Err(CompileError::OutOfRegisters)
+                }
             }
         }
     }
 
     /// Move constant `c` of type `usize` into local `a`.
-    pub fn mov_local_usize(&mut self, local: u32, cnst: usize) -> Result<(), CompileError> {
+    pub fn mov_local_usize(&mut self, local: Local, cnst: usize) -> Result<(), CompileError> {
         let reg = self.local_to_reg(local)?;
         dynasm!(self.asm
             ; mov Rq(reg), cnst as i32
@@ -107,7 +115,7 @@ impl TraceCompiler {
     }
 
     /// Move constant `c` of type `u8` into local `a`.
-    pub fn mov_local_u8(&mut self, local: u32, cnst: u8) -> Result<(), CompileError> {
+    pub fn mov_local_u8(&mut self, local: Local, cnst: u8) -> Result<(), CompileError> {
         let reg = self.local_to_reg(local)?;
         dynasm!(self.asm
             ; mov Rq(reg), cnst as i32
@@ -116,7 +124,7 @@ impl TraceCompiler {
     }
 
     /// Move local `var2` into local `var1`.
-    fn mov_local_local(&mut self, l1: u32, l2: u32) -> Result<(), CompileError> {
+    fn mov_local_local(&mut self, l1: Local, l2: Local) -> Result<(), CompileError> {
         let lreg = self.local_to_reg(l1)?;
         let rreg = self.local_to_reg(l2)?;
         dynasm!(self.asm
@@ -131,7 +139,7 @@ impl TraceCompiler {
         );
     }
 
-    fn c_mov_int(&mut self, local: u32, constant: &ConstantInt) -> Result<(), CompileError> {
+    fn c_mov_int(&mut self, local: Local, constant: &ConstantInt) -> Result<(), CompileError> {
         let reg = self.local_to_reg(local)?;
         let val = match constant {
             ConstantInt::UnsignedInt(UnsignedInt::U8(i)) => *i as i64,
@@ -144,7 +152,7 @@ impl TraceCompiler {
         Ok(())
     }
 
-    fn c_mov_bool(&mut self, local: u32, b: bool) -> Result<(), CompileError> {
+    fn c_mov_bool(&mut self, local: Local, b: bool) -> Result<(), CompileError> {
         let reg = self.local_to_reg(local)?;
         dynasm!(self.asm
             ; mov Rq(reg), QWORD b as i64
@@ -155,12 +163,19 @@ impl TraceCompiler {
     fn statement(&mut self, stmt: &Statement) -> Result<(), CompileError> {
         match stmt {
             Statement::Assign(l, r) => {
-                let local = l.local.0;
+                if !l.projection.is_empty() {
+                    todo!("projection in assignment");
+                }
                 match r {
-                    Rvalue::Use(Operand::Place(p)) => self.mov_local_local(local, p.local.0)?,
+                    Rvalue::Use(Operand::Place(p)) => {
+                        if !p.projection.is_empty() {
+                            todo!("projection in assignment");
+                        }
+                        self.mov_local_local(l.local, p.local)?;
+                    }
                     Rvalue::Use(Operand::Constant(c)) => match c {
-                        Constant::Int(ci) => self.c_mov_int(local, ci)?,
-                        Constant::Bool(b) => self.c_mov_bool(local, *b)?,
+                        Constant::Int(ci) => self.c_mov_int(l.local, ci)?,
+                        Constant::Bool(b) => self.c_mov_bool(l.local, *b)?,
                         c => todo!("Not implemented: {}", c),
                     },
                     unimpl => todo!("Not implemented: {:?}", unimpl),
@@ -252,8 +267,8 @@ impl TraceCompiler {
 
 #[cfg(test)]
 mod tests {
-
-    use super::TraceCompiler;
+    use super::{HashMap, Local, TraceCompiler};
+    use std::collections::HashSet;
     use yktrace::tir::TirTrace;
     use yktrace::{start_tracing, TracingKind};
 
@@ -271,5 +286,40 @@ mod tests {
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
         let ct = TraceCompiler::compile(tir_trace);
         assert_eq!(ct.execute(), 13);
+    }
+
+    // Repeatedly fetching the register for the same local should yield the same register and
+    // should not exhaust the allocator.
+    #[test]
+    pub fn reg_alloc_same_local() {
+        let mut tc = TraceCompiler {
+            asm: dynasmrt::x64::Assembler::new().unwrap(),
+            available_regs: vec![15, 14, 13, 12, 11, 10, 9, 8, 2, 1],
+            assigned_regs: HashMap::new(),
+        };
+
+        for _ in 0..32 {
+            assert_eq!(
+                tc.local_to_reg(Local(1)).unwrap(),
+                tc.local_to_reg(Local(1)).unwrap()
+            );
+        }
+    }
+
+    // Locals should be allocated to different registers.
+    #[test]
+    pub fn reg_alloc() {
+        let mut tc = TraceCompiler {
+            asm: dynasmrt::x64::Assembler::new().unwrap(),
+            available_regs: vec![15, 14, 13, 12, 11, 10, 9, 8, 2, 1],
+            assigned_regs: HashMap::new(),
+        };
+
+        let mut seen = HashSet::new();
+        for l in 0..7 {
+            let reg = tc.local_to_reg(Local(l));
+            assert!(!seen.contains(&reg));
+            seen.insert(reg);
+        }
     }
 }
