@@ -108,6 +108,22 @@ impl TraceCompiler {
         }
     }
 
+    fn store_registers(&mut self) {
+        for reg in &[15, 14, 13, 12, 11, 10, 9, 8, 2, 1] {
+            dynasm!(self.asm
+                ; push Rq(reg)
+            );
+        }
+    }
+
+    fn restore_registers(&mut self) {
+        for reg in &[1, 2, 8, 9, 10, 11, 12, 13, 14, 15] {
+            dynasm!(self.asm
+                ; pop Rq(reg)
+            );
+        }
+    }
+
     /// Move constant `c` of type `usize` into local `a`.
     pub fn mov_local_usize(&mut self, local: Local, cnst: usize) -> Result<(), CompileError> {
         let reg = self.local_to_reg(local)?;
@@ -165,10 +181,24 @@ impl TraceCompiler {
 
     fn c_call(
         &mut self,
-        _op: &CallOperand,
+        op: &CallOperand,
         args: &Vec<Operand>,
         dest: &Option<Place>,
     ) -> Result<(), CompileError> {
+        // FIXME Currently, we still get a call to `stop_tracing` here, since the call is part of
+        // the last block in the trace. We may be able to always skip the last n instructions of the
+        // trace, but this requires some looking into to make sure we don't accidentally skip other
+        // things. So for now, let's just skip the call here to get the tests working.
+        match op {
+            ykpack::CallOperand::Fn(s) => {
+                if s.contains("stop_tracing") {
+                    return Ok(());
+                }
+            }
+            ykpack::CallOperand::Unknown => {}
+        };
+        // Save all registers to the stack.
+        self.store_registers();
         // Move call arguments into registers.
         for (i, op) in args.iter().enumerate() {
             let argidx = Local((i + 1) as u32);
@@ -187,6 +217,7 @@ impl TraceCompiler {
     }
 
     fn c_return(&mut self) -> Result<(), CompileError> {
+        self.restore_registers();
         let dest = self.returns.pop();
         if let Some(d) = dest {
             if let Some(d) = d {
@@ -272,10 +303,13 @@ impl TraceCompiler {
         panic!("stopped due to trace compilation error");
     }
 
-    fn finish(mut self) -> dynasmrt::ExecutableBuffer {
+    fn ret(&mut self) {
         dynasm!(self.asm
             ; ret
         );
+    }
+
+    fn finish(self) -> dynasmrt::ExecutableBuffer {
         self.asm.finalize().unwrap()
     }
 
@@ -301,6 +335,7 @@ impl TraceCompiler {
             }
         }
 
+        tc.ret();
         CompiledTrace { mc: tc.finish() }
     }
 }
@@ -372,8 +407,9 @@ mod tests {
 
     #[inline(never)]
     fn fcall() -> u8 {
-        let y = farg(13);
-        y
+        let y = farg(13); // assigns 13 to $1
+        let _z = farg(14); // overwrites $1 within the call
+        y // returns $1
     }
 
     #[test]
