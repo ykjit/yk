@@ -36,7 +36,7 @@ impl HWTMapper {
                     let start_addr = block.start_vaddr() - self.phdr_offset;
                     let end_addr = start_addr + block.len();
                     for (addr, (sym, bb_idx)) in labels {
-                        if *addr >= start_addr && *addr < end_addr {
+                        if *addr >= start_addr && *addr <= end_addr {
                             // found matching label
                             annotrace.push(SirLoc::new(sym.to_string(), *bb_idx));
                             break;
