@@ -170,27 +170,27 @@ clean:
 }
 
 /*
- * Updates `*addr` and `*len` with the start address and the length of the next
- * block in the instruction stream.
+ * Updates `*first_instr` and `*last_instr` with the address of the first and last
+ * instructions of the next block in the instruction stream.
  *
- * A start address of 0 indicates that the end of the instruction stream has
- * been reached.
+ * If first instruction address is 0, this indicates that the end of
+ * the instruction stream has been reached.
  *
  * `*decoder_status` will be updated with the new decoder status after the operation.
  *
- * Returns true on success or false otherwise. Upon failure, `*addr` and `*len`
- * are undefined.
+ * Returns true on success or false otherwise. Upon failure, `*first_instr` and
+ * `*last_instr` are undefined.
  */
 bool
 perf_pt_next_block(struct pt_block_decoder *decoder, int *decoder_status,
-                   uint64_t *addr, uint64_t *len, struct perf_pt_cerror *err) {
+        uint64_t *first_instr, uint64_t *last_instr, struct perf_pt_cerror *err) {
     // If there are events pending, look at those first.
     if (handle_events(decoder, decoder_status, err) != true) {
         // handle_events will have already called perf_pt_set_err().
         return false;
     } else if (*decoder_status & pts_eos) {
         // End of stream.
-        *addr = 0;
+        *first_instr = 0;
         return true;
     }
     if ((*decoder_status != 0) && (*decoder_status != pts_ip_suppressed)) {
@@ -204,14 +204,14 @@ perf_pt_next_block(struct pt_block_decoder *decoder, int *decoder_status,
     struct pt_block block;
     block.iclass = ptic_other;
     bool first_block = true;
-    *len = 0;
+    *last_instr = 0;
     while (!block_is_terminated(&block)) {
         if (handle_events(decoder, decoder_status, err) != true) {
             // handle_events will have already called perf_pt_set_err().
             return false;
         } else if (*decoder_status & pts_eos) {
             // End of stream.
-            *addr = 0;
+            *first_instr = 0;
             return true;
         }
         // It's possible at this point that we get notified of an event in the
@@ -226,7 +226,7 @@ perf_pt_next_block(struct pt_block_decoder *decoder, int *decoder_status,
         // called.
         if (*decoder_status == -pte_eos) {
             // End of stream is flagged as an error in the case of pt_blk_next().
-            *addr = 0;
+            *first_instr = 0;
             return true;
         } else if (*decoder_status < 0) {
             // A real error.
@@ -246,14 +246,15 @@ perf_pt_next_block(struct pt_block_decoder *decoder, int *decoder_status,
         }
 
         if (first_block) {
-            // The block start address we report back to the user.
-            *addr = block.ip;
+            // The address of the block's first instruction that we report back
+            // to the user.
+            *first_instr = block.ip;
             first_block = false;
         }
 
-        // Update the length.
-        *len += block.end_ip - block.ip;
     }
+    // The address of the block's last instruction.
+    *last_instr = block.end_ip;
 
     return true;
 }
