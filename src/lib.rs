@@ -22,21 +22,26 @@ use std::fs::File;
 /// Information about a basic block.
 #[derive(Debug, Eq, PartialEq)]
 pub struct Block {
-    start_vaddr: u64,
-    len: u64,
+    /// Virtual address of the first instruction in this block.
+    first_instr: u64,
+    /// Virtual address of the last instruction in this block.
+    last_instr: u64,
 }
 
 impl Block {
-    pub fn new(start_vaddr: u64, len: u64) -> Self {
-        Self {start_vaddr, len}
+    /// Creates a new basic block from a start address and a length in bytes.
+    pub fn new(first_instr: u64, last_instr: u64) -> Self {
+        Self {first_instr, last_instr}
     }
 
-    pub fn start_vaddr(&self) -> u64 {
-        self.start_vaddr
+    /// Returns the virtual address of the first instruction in this block.
+    pub fn first_instr(&self) -> u64 {
+        self.first_instr
     }
 
-    pub fn len(&self) -> u64 {
-        self.len
+    /// Returns the virtual address of the last instruction in this block.
+    pub fn last_instr(&self) -> u64 {
+        self.last_instr
     }
 }
 
@@ -168,7 +173,7 @@ mod test_helpers {
             if expect.is_none() || got.is_none() {
                 break;
             }
-            assert_eq!(got.unwrap().unwrap().start_vaddr(), expect.unwrap().start_vaddr());
+            assert_eq!(got.unwrap().unwrap().first_instr(), expect.unwrap().first_instr());
         }
         // Check that both iterators were the same length.
         assert!(expect_iter.next().is_none());

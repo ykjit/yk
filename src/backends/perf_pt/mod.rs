@@ -194,21 +194,21 @@ impl<'t> Iterator for PerfPTBlockIterator<'t> {
             }
         }
 
-        let mut addr = 0;
-        let mut len = 0;
+        let mut first_instr = 0;
+        let mut last_instr = 0;
         let mut cerr = PerfPTCError::new();
         let rv = unsafe {
-            perf_pt_next_block(self.decoder, &mut self.decoder_status, &mut addr, &mut len,
-                               &mut cerr)
+            perf_pt_next_block(self.decoder, &mut self.decoder_status,
+                               &mut first_instr, &mut last_instr, &mut cerr)
         };
         if !rv {
             self.errored = true; // This iterator is unusable now.
             return Some(Err(HWTracerError::from(cerr)));
         }
-        if addr == 0 {
+        if first_instr == 0 {
             None // End of packet stream.
         } else {
-            Some(Ok(Block::new(addr, len)))
+            Some(Ok(Block::new(first_instr, last_instr)))
         }
     }
 }
@@ -297,7 +297,7 @@ impl PerfPTTracer {
     pub (super) fn new(config: PerfPTConfig) -> Result<Self, HWTracerError> where Self: Sized {
         // Check for inavlid configuration.
         fn power_of_2(v: size_t) -> bool {
-            ((v & (v - 1)) == 0)
+            (v & (v - 1)) == 0
         }
         if !power_of_2(config.data_bufsize) {
             return Err(HWTracerError::BadConfig(String::from("data_bufsize must be a positive power of 2")));
