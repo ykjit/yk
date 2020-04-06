@@ -33,8 +33,8 @@ impl HWTMapper {
         for b in trace.iter_blocks() {
             match b {
                 Ok(block) => {
-                    let start_addr = block.start_vaddr() - self.phdr_offset;
-                    let end_addr = start_addr + block.len();
+                    let start_addr = block.first_instr() - self.phdr_offset;
+                    let end_addr = block.last_instr() - self.phdr_offset;
                     for (addr, (sym, bb_idx)) in labels {
                         if *addr >= start_addr && *addr <= end_addr {
                             // found matching label
