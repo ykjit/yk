@@ -109,6 +109,12 @@ impl TraceCompiler {
         }
     }
 
+    fn free_register(&mut self, local: &Local) {
+        if let Some(reg) = self.assigned_regs.remove(local) {
+            self.available_regs.push(reg);
+        }
+    }
+
     fn store_registers(&mut self) {
         for reg in &[15, 14, 13, 12, 11, 10, 9, 8, 2, 1] {
             dynasm!(self.asm
@@ -253,6 +259,8 @@ impl TraceCompiler {
             }
             Statement::Return => self.c_return()?,
             Statement::Call(op, args, dest) => self.c_call(op, args, dest)?,
+            Statement::StorageLive(_) => {}
+            Statement::StorageDead(l) => self.free_register(l),
             Statement::Nop => {}
             Statement::Unimplemented(mir_stmt) => todo!("Can't compile: {}", mir_stmt),
         }
