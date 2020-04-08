@@ -133,14 +133,14 @@ impl TirTrace {
                     args,
                     destination: dest
                 } => {
-                    let op = TirOp::Statement(Statement::Call(
+                    let op = TirOp::Statement(Statement::Enter(
                         op.clone(),
                         args.to_vec(),
                         dest.as_ref().map(|(ret_val, _ret_bb)| ret_val.clone())
                     ));
                     ops.push(op);
                 }
-                Terminator::Return => ops.push(TirOp::Statement(Statement::Return)),
+                Terminator::Return => ops.push(TirOp::Statement(Statement::Leave)),
                 _ => {}
             }
 

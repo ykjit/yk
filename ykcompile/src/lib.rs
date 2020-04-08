@@ -80,8 +80,8 @@ pub struct TraceCompiler {
     available_regs: Vec<u8>,
     /// Maps locals to their assigned registers.
     assigned_regs: HashMap<Local, u8>,
-    /// Stores the destination locals to which we copy RAX to after returning from a call.
-    returns: Vec<Option<Place>>,
+    /// Stores the destination locals to which we copy RAX to after leaving an inlined call.
+    leaves: Vec<Option<Place>>,
 }
 
 impl TraceCompiler {
@@ -186,7 +186,7 @@ impl TraceCompiler {
         Ok(())
     }
 
-    fn c_call(
+    fn c_enter(
         &mut self,
         op: &CallOperand,
         args: &Vec<Operand>,
@@ -219,16 +219,16 @@ impl TraceCompiler {
             }
         }
         // Remember the return destination.
-        self.returns.push(dest.as_ref().cloned());
+        self.leaves.push(dest.as_ref().cloned());
         Ok(())
     }
 
-    fn c_return(&mut self) -> Result<(), CompileError> {
+    fn c_leave(&mut self) -> Result<(), CompileError> {
         self.restore_registers();
-        let dest = self.returns.pop();
+        let dest = self.leaves.pop();
         if let Some(d) = dest {
             if let Some(d) = d {
-                // When we see a return terminator move whatever's left in RAX into the destination
+                // When we see a leave statement move whatever's left in RAX into the destination
                 // local.
                 self.mov_local_local(d.local, Local(0))?;
             }
@@ -257,8 +257,8 @@ impl TraceCompiler {
                     unimpl => todo!("Not implemented: {:?}", unimpl),
                 };
             }
-            Statement::Return => self.c_return()?,
-            Statement::Call(op, args, dest) => self.c_call(op, args, dest)?,
+            Statement::Enter(op, args, dest) => self.c_enter(op, args, dest)?,
+            Statement::Leave => self.c_leave()?,
             Statement::StorageLive(_) => {}
             Statement::StorageDead(l) => self.free_register(l),
             Statement::Nop => {}
@@ -330,7 +330,7 @@ impl TraceCompiler {
             // Use all the 64-bit registers we can (R15-R8, RDX, RCX).
             available_regs: vec![15, 14, 13, 12, 11, 10, 9, 8, 2, 1],
             assigned_regs: HashMap::new(),
-            returns: Vec::new(),
+            leaves: Vec::new(),
         };
 
         for i in 0..tt.len() {
@@ -395,7 +395,7 @@ mod tests {
             asm: dynasmrt::x64::Assembler::new().unwrap(),
             available_regs: vec![15, 14, 13, 12, 11, 10, 9, 8, 2, 1],
             assigned_regs: HashMap::new(),
-            returns: Vec::new(),
+            leaves: Vec::new(),
         };
 
         for _ in 0..32 {
@@ -413,7 +413,7 @@ mod tests {
             asm: dynasmrt::x64::Assembler::new().unwrap(),
             available_regs: vec![15, 14, 13, 12, 11, 10, 9, 8, 2, 1],
             assigned_regs: HashMap::new(),
-            returns: Vec::new(),
+            leaves: Vec::new(),
         };
 
         let mut seen = HashSet::new();
