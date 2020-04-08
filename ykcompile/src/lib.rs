@@ -1,5 +1,6 @@
 #![feature(proc_macro_hygiene)]
 #![feature(test)]
+#![feature(core_intrinsics)]
 
 #[macro_use]
 extern crate dynasm;
@@ -24,14 +25,17 @@ pub enum CompileError {
     /// We ran out of registers.
     /// In the long-run, when we have a proper register allocator, this won't be needed.
     OutOfRegisters,
+    /// Compiling this statement is not yet implemented.
+    /// The string inside is a hint as to what kind of statement needs to be implemented.
+    Unimplemented(String),
 }
 
 impl Display for CompileError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let msg = match self {
-            Self::OutOfRegisters => "Ran out of registers",
-        };
-        write!(f, "{}", msg)
+        match self {
+            Self::OutOfRegisters => write!(f, "Ran out of registers"),
+            Self::Unimplemented(s) => write!(f, "Unimplemented compilation: {}", s),
+        }
     }
 }
 
@@ -261,6 +265,7 @@ impl TraceCompiler {
             Statement::Leave => self.c_leave()?,
             Statement::StorageLive(_) => {}
             Statement::StorageDead(l) => self.free_register(l),
+            c @ Statement::Call(..) => Err(CompileError::Unimplemented(format!("{:?}", c)))?,
             Statement::Nop => {}
             Statement::Unimplemented(mir_stmt) => todo!("Can't compile: {}", mir_stmt),
         }
@@ -368,7 +373,7 @@ mod tests {
     use super::{HashMap, Local, TraceCompiler};
     use libc::c_void;
     use std::collections::HashSet;
-    use yktrace::tir::TirTrace;
+    use yktrace::tir::{CallOperand, Statement, TirOp, TirTrace};
     use yktrace::{start_tracing, TracingKind};
 
     #[inline(never)]
@@ -467,5 +472,27 @@ mod tests {
     #[test]
     fn find_nonexistent_symbol() {
         assert!(TraceCompiler::find_symbol("__xxxyyyzzz__").is_none());
+    }
+
+    // A trace which contains a call to something which we don't have SIR for should emit a TIR
+    // call operation.
+    #[test]
+    #[ignore]
+    pub fn call_symbol() {
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let g = core::intrinsics::wrapping_add(10u64, 40u64);
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+
+        let mut found_call = false;
+        for i in 0..tir_trace.len() {
+            if let TirOp::Statement(Statement::Call(CallOperand::Fn(sym), ..)) = tir_trace.op(i) {
+                if sym.contains("wrapping_add") {
+                    found_call = true;
+                }
+                break;
+            }
+        }
+        assert!(found_call);
     }
 }

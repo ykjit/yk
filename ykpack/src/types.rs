@@ -175,6 +175,9 @@ pub enum Statement {
     /// Information about which locals are currently live/dead.
     StorageLive(Local),
     StorageDead(Local),
+    /// A (non-inlined) call from a TIR trace to a binary symbol using the system ABI. This does
+    /// not appear in SIR.
+    Call(CallOperand, Vec<Operand>, Option<Place>),
     /// Any unimplemented lowering maps to this variant.
     /// The string inside is the stringified MIR statement.
     Unimplemented(String),
@@ -191,6 +194,7 @@ impl Display for Statement {
             Statement::Leave => write!(f, "leave"),
             Statement::StorageLive(local) => write!(f, "StorageLive({:?})", local),
             Statement::StorageDead(local) => write!(f, "StorageDead({:?})", local),
+            Statement::Call(op, args, dest) => write!(f, "call({:?}, {:?}, {:?})", op, args, dest),
             Statement::Unimplemented(mir_stmt) => write!(f, "unimplemented_stmt: {}", mir_stmt),
         }
     }
@@ -365,6 +369,16 @@ pub enum CallOperand {
     Fn(String),
     /// An unknown or unhandled callable.
     Unknown, // FIXME -- Find out what else. Closures jump to mind.
+}
+
+impl CallOperand {
+    pub fn symbol(&self) -> Option<&str> {
+        if let Self::Fn(sym) = self {
+            Some(sym)
+        } else {
+            None
+        }
+    }
 }
 
 impl Display for CallOperand {
