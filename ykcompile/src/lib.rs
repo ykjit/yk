@@ -6,6 +6,7 @@ extern crate dynasm;
 extern crate dynasmrt;
 extern crate test;
 
+use libc::{c_void, dlsym, RTLD_DEFAULT};
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 use std::mem;
@@ -338,11 +339,26 @@ impl TraceCompiler {
         tc.ret();
         CompiledTrace { mc: tc.finish() }
     }
+
+    #[allow(dead_code)] // Not used just yet.
+    fn find_symbol(sym: &str) -> Option<*mut c_void> {
+        use std::ffi::CString;
+
+        let sym_arg = CString::new(sym).unwrap();
+        let addr = unsafe { dlsym(RTLD_DEFAULT, sym_arg.into_raw()) };
+
+        if addr == 0 as *mut c_void {
+            None
+        } else {
+            Some(addr)
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{HashMap, Local, TraceCompiler};
+    use libc::c_void;
     use std::collections::HashSet;
     use yktrace::tir::TirTrace;
     use yktrace::{start_tracing, TracingKind};
@@ -420,5 +436,28 @@ mod tests {
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
         let ct = TraceCompiler::compile(tir_trace);
         assert_eq!(ct.execute(), 13);
+    }
+
+    // Test finding a symbol in a shared object.
+    #[test]
+    fn find_symbol_shared() {
+        assert!(TraceCompiler::find_symbol("printf") == Some(libc::printf as *mut c_void));
+    }
+
+    // Test finding a symbol in the main binary.
+    // For this to work the binary must have been linked with `--export-dynamic`, which ykrustc
+    // appends to the linker command line.
+    #[test]
+    #[no_mangle]
+    fn find_symbol_main() {
+        assert!(
+            TraceCompiler::find_symbol("find_symbol_main") == Some(find_symbol_main as *mut c_void)
+        );
+    }
+
+    // Check that a non-existent symbol cannot be found.
+    #[test]
+    fn find_nonexistent_symbol() {
+        assert!(TraceCompiler::find_symbol("__xxxyyyzzz__").is_none());
     }
 }
