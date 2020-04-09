@@ -3,11 +3,15 @@ use phdrs::objects;
 
 use crate::SirLoc;
 use hwtracer::Trace;
-use std::{borrow, collections::HashMap, env, fs};
+use std::{borrow, env, fs};
 
 pub struct HWTMapper {
     phdr_offset: u64,
-    labels: Option<HashMap<u64, (String, u32)>>
+    /// Maps a label address to its symbol name and block index.
+    ///
+    /// We use a vector here since we never actually look up entries by address; we only iterate
+    /// over the labels checking if each address is within the range of a block.
+    labels: Option<Vec<(u64, (String, u32))>>
 }
 
 impl HWTMapper {
@@ -35,13 +39,31 @@ impl HWTMapper {
                 Ok(block) => {
                     let start_addr = block.first_instr() - self.phdr_offset;
                     let end_addr = block.last_instr() - self.phdr_offset;
+                    // Each block reported by the hardware tracer corresponds to one or more SIR
+                    // blocks, so we collect them in a vector here. This is safe because:
+                    //
+                    // a) We know that the SIR blocks were compiled (by LLVM) to straight-line
+                    // code, otherwise a control-flow instruction would have split the code into
+                    // multiple PT blocks.
+                    //
+                    // b) `labels` is sorted, so the blocks will be appended to the trace in the
+                    // correct order.
+                    let mut locs = Vec::new();
                     for (addr, (sym, bb_idx)) in labels {
                         if *addr >= start_addr && *addr <= end_addr {
-                            // found matching label
-                            annotrace.push(SirLoc::new(sym.to_string(), *bb_idx));
+                            // Found matching label.
+                            locs.push((addr, SirLoc::new(sym.to_string(), *bb_idx)));
+                        } else if *addr > end_addr {
+                            // `labels` is sorted by address, so once we see one with an address
+                            // higher than `end_addr`, we know there can be no further hits.
                             break;
                         }
                     }
+                    annotrace.extend(
+                        locs.into_iter()
+                            .map(|(_, loc)| loc)
+                            .collect::<Vec<SirLoc>>()
+                    );
                 }
                 Err(_) => {}
             }
@@ -57,7 +79,9 @@ fn get_phdr_offset() -> u64 {
 }
 
 /// Extracts YK debug labels and their addresses from the executable.
-fn extract_labels() -> Result<HashMap<u64, (String, u32)>, gimli::Error> {
+///
+/// The returned vector is sorted by label address ascending.
+fn extract_labels() -> Result<Vec<(u64, (String, u32))>, gimli::Error> {
     // Load executable
     let pathb = env::current_exe().unwrap();
     let file = fs::File::open(&pathb.as_path()).unwrap();
@@ -70,7 +94,7 @@ fn extract_labels() -> Result<HashMap<u64, (String, u32)>, gimli::Error> {
     };
 
     // Extract labels
-    let mut labels = HashMap::new();
+    let mut labels = Vec::new();
 
     let loader = |id: gimli::SectionId| -> Result<borrow::Cow<[u8]>, gimli::Error> {
         Ok(object
@@ -119,10 +143,10 @@ fn extract_labels() -> Result<HashMap<u64, (String, u32)>, gimli::Error> {
                                 if subaddr.is_some() && s.ends_with("_0") {
                                     // This is the first block of the subprogram. Assign its label
                                     // to the subprogram's address.
-                                    labels.insert(subaddr.unwrap(), split_symbol(s));
+                                    labels.push((subaddr.unwrap(), split_symbol(s)));
                                     subaddr = None;
                                 } else {
-                                    labels.insert(addr, split_symbol(s));
+                                    labels.push((addr, split_symbol(s)));
                                 }
                             } else {
                                 // Ignore labels that have no address.
@@ -133,6 +157,8 @@ fn extract_labels() -> Result<HashMap<u64, (String, u32)>, gimli::Error> {
             }
         }
     }
+
+    labels.sort_by_key(|k| k.0);
     Ok(labels)
 }
 

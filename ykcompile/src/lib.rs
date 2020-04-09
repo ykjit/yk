@@ -477,7 +477,6 @@ mod tests {
     // A trace which contains a call to something which we don't have SIR for should emit a TIR
     // call operation.
     #[test]
-    #[ignore]
     pub fn call_symbol() {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         let g = core::intrinsics::wrapping_add(10u64, 40u64);
