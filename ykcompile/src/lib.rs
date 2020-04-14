@@ -1,5 +1,6 @@
 #![feature(proc_macro_hygiene)]
 #![feature(test)]
+#![feature(core_intrinsics)]
 
 #[macro_use]
 extern crate dynasm;
@@ -24,14 +25,17 @@ pub enum CompileError {
     /// We ran out of registers.
     /// In the long-run, when we have a proper register allocator, this won't be needed.
     OutOfRegisters,
+    /// Compiling this statement is not yet implemented.
+    /// The string inside is a hint as to what kind of statement needs to be implemented.
+    Unimplemented(String),
 }
 
 impl Display for CompileError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let msg = match self {
-            Self::OutOfRegisters => "Ran out of registers",
-        };
-        write!(f, "{}", msg)
+        match self {
+            Self::OutOfRegisters => write!(f, "Ran out of registers"),
+            Self::Unimplemented(s) => write!(f, "Unimplemented compilation: {}", s),
+        }
     }
 }
 
@@ -80,8 +84,8 @@ pub struct TraceCompiler {
     available_regs: Vec<u8>,
     /// Maps locals to their assigned registers.
     assigned_regs: HashMap<Local, u8>,
-    /// Stores the destination locals to which we copy RAX to after returning from a call.
-    returns: Vec<Option<Place>>,
+    /// Stores the destination locals to which we copy RAX to after leaving an inlined call.
+    leaves: Vec<Option<Place>>,
 }
 
 impl TraceCompiler {
@@ -170,7 +174,7 @@ impl TraceCompiler {
         let val = match constant {
             ConstantInt::UnsignedInt(UnsignedInt::U8(i)) => *i as i64,
             ConstantInt::UnsignedInt(UnsignedInt::Usize(i)) => *i as i64,
-            e => todo!("SignedInt, etc: {}", e),
+            e => return Err(CompileError::Unimplemented(format!("{}", e))),
         };
         dynasm!(self.asm
             ; mov Rq(reg), QWORD val
@@ -186,7 +190,7 @@ impl TraceCompiler {
         Ok(())
     }
 
-    fn c_call(
+    fn c_enter(
         &mut self,
         op: &CallOperand,
         args: &Vec<Operand>,
@@ -214,21 +218,21 @@ impl TraceCompiler {
                 Operand::Constant(c) => match c {
                     Constant::Int(ci) => self.c_mov_int(argidx, ci)?,
                     Constant::Bool(b) => self.c_mov_bool(argidx, *b)?,
-                    c => todo!("Not implemented: {}", c),
+                    c => return Err(CompileError::Unimplemented(format!("{}", c))),
                 },
             }
         }
         // Remember the return destination.
-        self.returns.push(dest.as_ref().cloned());
+        self.leaves.push(dest.as_ref().cloned());
         Ok(())
     }
 
-    fn c_return(&mut self) -> Result<(), CompileError> {
+    fn c_leave(&mut self) -> Result<(), CompileError> {
         self.restore_registers();
-        let dest = self.returns.pop();
+        let dest = self.leaves.pop();
         if let Some(d) = dest {
             if let Some(d) = d {
-                // When we see a return terminator move whatever's left in RAX into the destination
+                // When we see a leave statement move whatever's left in RAX into the destination
                 // local.
                 self.mov_local_local(d.local, Local(0))?;
             }
@@ -240,29 +244,32 @@ impl TraceCompiler {
         match stmt {
             Statement::Assign(l, r) => {
                 if !l.projection.is_empty() {
-                    todo!("projection in assignment");
+                    return Err(CompileError::Unimplemented(format!("{}", l)));
                 }
                 match r {
                     Rvalue::Use(Operand::Place(p)) => {
                         if !p.projection.is_empty() {
-                            todo!("projection in assignment");
+                            return Err(CompileError::Unimplemented(format!("{}", r)));
                         }
                         self.mov_local_local(l.local, p.local)?;
                     }
                     Rvalue::Use(Operand::Constant(c)) => match c {
                         Constant::Int(ci) => self.c_mov_int(l.local, ci)?,
                         Constant::Bool(b) => self.c_mov_bool(l.local, *b)?,
-                        c => todo!("Not implemented: {}", c),
+                        c => return Err(CompileError::Unimplemented(format!("{}", c))),
                     },
-                    unimpl => todo!("Not implemented: {:?}", unimpl),
+                    unimpl => return Err(CompileError::Unimplemented(format!("{}", unimpl))),
                 };
             }
-            Statement::Return => self.c_return()?,
-            Statement::Call(op, args, dest) => self.c_call(op, args, dest)?,
+            Statement::Enter(op, args, dest) => self.c_enter(op, args, dest)?,
+            Statement::Leave => self.c_leave()?,
             Statement::StorageLive(_) => {}
             Statement::StorageDead(l) => self.free_register(l),
+            c @ Statement::Call(..) => return Err(CompileError::Unimplemented(format!("{:?}", c))),
             Statement::Nop => {}
-            Statement::Unimplemented(mir_stmt) => todo!("Can't compile: {}", mir_stmt),
+            Statement::Unimplemented(s) => {
+                return Err(CompileError::Unimplemented(format!("{:?}", s)))
+            }
         }
 
         Ok(())
@@ -330,7 +337,7 @@ impl TraceCompiler {
             // Use all the 64-bit registers we can (R15-R8, RDX, RCX).
             available_regs: vec![15, 14, 13, 12, 11, 10, 9, 8, 2, 1],
             assigned_regs: HashMap::new(),
-            returns: Vec::new(),
+            leaves: Vec::new(),
         };
 
         for i in 0..tt.len() {
@@ -368,7 +375,7 @@ mod tests {
     use super::{HashMap, Local, TraceCompiler};
     use libc::c_void;
     use std::collections::HashSet;
-    use yktrace::tir::TirTrace;
+    use yktrace::tir::{CallOperand, Statement, TirOp, TirTrace};
     use yktrace::{start_tracing, TracingKind};
 
     #[inline(never)]
@@ -395,7 +402,7 @@ mod tests {
             asm: dynasmrt::x64::Assembler::new().unwrap(),
             available_regs: vec![15, 14, 13, 12, 11, 10, 9, 8, 2, 1],
             assigned_regs: HashMap::new(),
-            returns: Vec::new(),
+            leaves: Vec::new(),
         };
 
         for _ in 0..32 {
@@ -413,7 +420,7 @@ mod tests {
             asm: dynasmrt::x64::Assembler::new().unwrap(),
             available_regs: vec![15, 14, 13, 12, 11, 10, 9, 8, 2, 1],
             assigned_regs: HashMap::new(),
-            returns: Vec::new(),
+            leaves: Vec::new(),
         };
 
         let mut seen = HashSet::new();
@@ -467,5 +474,26 @@ mod tests {
     #[test]
     fn find_nonexistent_symbol() {
         assert!(TraceCompiler::find_symbol("__xxxyyyzzz__").is_none());
+    }
+
+    // A trace which contains a call to something which we don't have SIR for should emit a TIR
+    // call operation.
+    #[test]
+    pub fn call_symbol() {
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let g = core::intrinsics::wrapping_add(10u64, 40u64);
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+
+        let mut found_call = false;
+        for i in 0..tir_trace.len() {
+            if let TirOp::Statement(Statement::Call(CallOperand::Fn(sym), ..)) = tir_trace.op(i) {
+                if sym.contains("wrapping_add") {
+                    found_call = true;
+                }
+                break;
+            }
+        }
+        assert!(found_call);
     }
 }

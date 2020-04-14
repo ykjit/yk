@@ -168,14 +168,16 @@ pub enum Statement {
     Nop,
     /// An assignment.
     Assign(Place, Rvalue),
-    /// A return instruction
-    Return,
-    /// A call terminator forwarding arguments to the next block and storing the call result in the
-    /// destination local.
-    Call(CallOperand, Vec<Operand>, Option<Place>),
+    /// Marks the entry of an inlined function call in a TIR trace. This does not appear in SIR.
+    Enter(CallOperand, Vec<Operand>, Option<Place>),
+    /// Marks the exit of an inlined function call in a TIR trace. This does not appear in SIR.
+    Leave,
     /// Information about which locals are currently live/dead.
     StorageLive(Local),
     StorageDead(Local),
+    /// A (non-inlined) call from a TIR trace to a binary symbol using the system ABI. This does
+    /// not appear in SIR.
+    Call(CallOperand, Vec<Operand>, Option<Place>),
     /// Any unimplemented lowering maps to this variant.
     /// The string inside is the stringified MIR statement.
     Unimplemented(String),
@@ -186,10 +188,13 @@ impl Display for Statement {
         match self {
             Statement::Nop => write!(f, "nop"),
             Statement::Assign(l, r) => write!(f, "{} = {}", l, r),
-            Statement::Return => write!(f, "return"),
-            Statement::Call(op, args, dest) => write!(f, "call({:?}, {:?}, {:?})", op, args, dest),
+            Statement::Enter(op, args, dest) => {
+                write!(f, "enter({:?}, {:?}, {:?})", op, args, dest)
+            }
+            Statement::Leave => write!(f, "leave"),
             Statement::StorageLive(local) => write!(f, "StorageLive({:?})", local),
             Statement::StorageDead(local) => write!(f, "StorageDead({:?})", local),
+            Statement::Call(op, args, dest) => write!(f, "call({:?}, {:?}, {:?})", op, args, dest),
             Statement::Unimplemented(mir_stmt) => write!(f, "unimplemented_stmt: {}", mir_stmt),
         }
     }
@@ -364,6 +369,16 @@ pub enum CallOperand {
     Fn(String),
     /// An unknown or unhandled callable.
     Unknown, // FIXME -- Find out what else. Closures jump to mind.
+}
+
+impl CallOperand {
+    pub fn symbol(&self) -> Option<&str> {
+        if let Self::Fn(sym) = self {
+            Some(sym)
+        } else {
+            None
+        }
+    }
 }
 
 impl Display for CallOperand {

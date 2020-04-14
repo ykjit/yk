@@ -133,14 +133,32 @@ impl TirTrace {
                     args,
                     destination: dest
                 } => {
-                    let op = TirOp::Statement(Statement::Call(
-                        op.clone(),
-                        args.to_vec(),
-                        dest.as_ref().map(|(ret_val, _ret_bb)| ret_val.clone())
-                    ));
-                    ops.push(op);
+                    if let Some(callee_sym) = op.symbol() {
+                        // We know the symbol name of the callee at least.
+                        let op = if SIR.bodies.contains_key(callee_sym) {
+                            // We have SIR for the callee, so it will appear inlined in the trace
+                            // and we only need to emit Enter/Leave statements.
+                            TirOp::Statement(Statement::Enter(
+                                op.clone(),
+                                args.to_vec(),
+                                dest.as_ref().map(|(ret_val, _ret_bb)| ret_val.clone())
+                            ))
+                        } else {
+                            // We have a symbol name but no SIR. Without SIR the callee can't
+                            // appear inlined in the trace, so we should emit a native call to the
+                            // symbol instead.
+                            TirOp::Statement(Statement::Call(
+                                op.clone(),
+                                args.to_vec(),
+                                dest.as_ref().map(|(ret_val, _ret_bb)| ret_val.clone())
+                            ))
+                        };
+                        ops.push(op);
+                    } else {
+                        todo!("Unknown callee encountered");
+                    }
                 }
-                Terminator::Return => ops.push(TirOp::Statement(Statement::Return)),
+                Terminator::Return => ops.push(TirOp::Statement(Statement::Leave)),
                 _ => {}
             }
 
