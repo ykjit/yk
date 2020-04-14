@@ -174,7 +174,7 @@ impl TraceCompiler {
         let val = match constant {
             ConstantInt::UnsignedInt(UnsignedInt::U8(i)) => *i as i64,
             ConstantInt::UnsignedInt(UnsignedInt::Usize(i)) => *i as i64,
-            e => todo!("SignedInt, etc: {}", e),
+            e => return Err(CompileError::Unimplemented(format!("{}", e))),
         };
         dynasm!(self.asm
             ; mov Rq(reg), QWORD val
@@ -218,7 +218,7 @@ impl TraceCompiler {
                 Operand::Constant(c) => match c {
                     Constant::Int(ci) => self.c_mov_int(argidx, ci)?,
                     Constant::Bool(b) => self.c_mov_bool(argidx, *b)?,
-                    c => todo!("Not implemented: {}", c),
+                    c => return Err(CompileError::Unimplemented(format!("{}", c))),
                 },
             }
         }
@@ -244,30 +244,32 @@ impl TraceCompiler {
         match stmt {
             Statement::Assign(l, r) => {
                 if !l.projection.is_empty() {
-                    todo!("projection in assignment");
+                    return Err(CompileError::Unimplemented(format!("{}", l)));
                 }
                 match r {
                     Rvalue::Use(Operand::Place(p)) => {
                         if !p.projection.is_empty() {
-                            todo!("projection in assignment");
+                            return Err(CompileError::Unimplemented(format!("{}", r)));
                         }
                         self.mov_local_local(l.local, p.local)?;
                     }
                     Rvalue::Use(Operand::Constant(c)) => match c {
                         Constant::Int(ci) => self.c_mov_int(l.local, ci)?,
                         Constant::Bool(b) => self.c_mov_bool(l.local, *b)?,
-                        c => todo!("Not implemented: {}", c),
+                        c => return Err(CompileError::Unimplemented(format!("{}", c))),
                     },
-                    unimpl => todo!("Not implemented: {:?}", unimpl),
+                    unimpl => return Err(CompileError::Unimplemented(format!("{}", unimpl))),
                 };
             }
             Statement::Enter(op, args, dest) => self.c_enter(op, args, dest)?,
             Statement::Leave => self.c_leave()?,
             Statement::StorageLive(_) => {}
             Statement::StorageDead(l) => self.free_register(l),
-            c @ Statement::Call(..) => Err(CompileError::Unimplemented(format!("{:?}", c)))?,
+            c @ Statement::Call(..) => return Err(CompileError::Unimplemented(format!("{:?}", c))),
             Statement::Nop => {}
-            Statement::Unimplemented(mir_stmt) => todo!("Can't compile: {}", mir_stmt),
+            Statement::Unimplemented(s) => {
+                return Err(CompileError::Unimplemented(format!("{:?}", s)))
+            }
         }
 
         Ok(())
