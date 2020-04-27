@@ -119,22 +119,6 @@ impl TraceCompiler {
         }
     }
 
-    fn store_registers(&mut self) {
-        for reg in &[15, 14, 13, 12, 11, 10, 9, 8, 2, 1] {
-            dynasm!(self.asm
-                ; push Rq(reg)
-            );
-        }
-    }
-
-    fn restore_registers(&mut self) {
-        for reg in &[1, 2, 8, 9, 10, 11, 12, 13, 14, 15] {
-            dynasm!(self.asm
-                ; pop Rq(reg)
-            );
-        }
-    }
-
     /// Move constant `c` of type `usize` into local `a`.
     pub fn mov_local_usize(&mut self, local: Local, cnst: usize) -> Result<(), CompileError> {
         let reg = self.local_to_reg(local)?;
@@ -208,16 +192,15 @@ impl TraceCompiler {
             }
             ykpack::CallOperand::Unknown => {}
         };
-        // Save all registers to the stack.
-        self.store_registers();
         // Move call arguments into registers.
-        for (i, op) in args.iter().enumerate() {
-            let argidx = Local((i + 1) as u32);
+        let vars_off = dest.as_ref().unwrap().local;
+        for (op, i) in args.iter().zip(1..) {
+            let arg_idx = Local(i + vars_off.0);
             match op {
-                Operand::Place(p) => self.mov_local_local(argidx, p.local)?,
+                Operand::Place(p) => self.mov_local_local(arg_idx, p.local)?,
                 Operand::Constant(c) => match c {
-                    Constant::Int(ci) => self.c_mov_int(argidx, ci)?,
-                    Constant::Bool(b) => self.c_mov_bool(argidx, *b)?,
+                    Constant::Int(ci) => self.c_mov_int(arg_idx, ci)?,
+                    Constant::Bool(b) => self.c_mov_bool(arg_idx, *b)?,
                     c => return Err(CompileError::Unimplemented(format!("{}", c))),
                 },
             }
@@ -228,7 +211,6 @@ impl TraceCompiler {
     }
 
     fn c_leave(&mut self) -> Result<(), CompileError> {
-        self.restore_registers();
         let dest = self.leaves.pop();
         if let Some(d) = dest {
             if let Some(d) = d {

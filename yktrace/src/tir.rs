@@ -8,7 +8,7 @@ use elf;
 use fallible_iterator::FallibleIterator;
 use std::{
     collections::HashMap,
-    convert::TryFrom,
+    convert::{From, TryFrom},
     env,
     fmt::{self, Display},
     io::Cursor
@@ -108,6 +108,9 @@ impl TirTrace {
     pub fn new<'s>(trace: &'s dyn SirTrace) -> Result<Self, InvalidTraceError> {
         let mut ops = Vec::new();
         let mut itr = trace.into_iter().peekable();
+        let mut rename_map: HashMap<Local, Vec<Local>> = HashMap::new();
+        let mut var_len = 1;
+        let mut cur_call_args: Vec<u32> = Vec::new();
         while let Some(loc) = itr.next() {
             let body = match SIR.bodies.get(&loc.symbol_name) {
                 Some(b) => b,
@@ -119,13 +122,51 @@ impl TirTrace {
             // When adding statements to the trace, we clone them (rather than referencing the
             // statements in the SIR) so that we have the freedom to mutate them later.
             let user_bb_idx_usize = usize::try_from(loc.bb_idx).unwrap();
-            ops.extend(
-                body.blocks[user_bb_idx_usize]
-                    .stmts
-                    .iter()
-                    .cloned()
-                    .map(TirOp::Statement)
-            );
+            // When converting the SIR trace into a TIR trace we turn it into SSA form by alpha
+            // renaming all `Local`s and storing a mapping from old to new name in `rename_map`.
+            // This is a bit tricky when it comes to inlined function calls, which assume arguments
+            // start at `Local(1)`, which may have already been used. We thus need to store
+            // multiple levels in `rename_map` and have an additional variable `cur_call_args`,
+            // which provides information about which `Local`s we need to remove again from
+            // `rename_map` once we leave the inlined function call again (since we won't get
+            // `StorageDead` statements for arguments).
+            for stmt in body.blocks[user_bb_idx_usize].stmts.iter() {
+                let op = match stmt {
+                    Statement::StorageLive(local) => {
+                        let newlocal = Local(var_len);
+                        match rename_map.get_mut(local) {
+                            Some(v) => v.push(newlocal),
+                            None => {
+                                rename_map.insert(local.clone(), vec![newlocal]);
+                            }
+                        };
+                        var_len += 1;
+                        Statement::StorageLive(newlocal)
+                    }
+                    Statement::StorageDead(local) => {
+                        if let Some(v) = rename_map.get_mut(local) {
+                            let l = v.pop();
+                            Statement::StorageDead(l.unwrap())
+                        } else {
+                            stmt.clone()
+                        }
+                    }
+                    Statement::Assign(place, rvalue) => {
+                        let newplace = TirTrace::rename_place(&rename_map, &place);
+                        let newrvalue = TirTrace::rename_rvalue(&rename_map, &rvalue);
+                        Statement::Assign(newplace, newrvalue)
+                    }
+                    Statement::Call(_, _, _) => {
+                        // Statement::Call is a terminator and thus should never appear here.
+                        unreachable!();
+                    }
+                    Statement::Nop => stmt.clone(),
+                    Statement::Enter(_, _, _) => unreachable!(),
+                    Statement::Leave => stmt.clone(),
+                    Statement::Unimplemented(_) => stmt.clone()
+                };
+                ops.push(TirOp::Statement(op));
+            }
 
             match &body.blocks[user_bb_idx_usize].term {
                 Terminator::Call {
@@ -138,11 +179,31 @@ impl TirTrace {
                         let op = if SIR.bodies.contains_key(callee_sym) {
                             // We have SIR for the callee, so it will appear inlined in the trace
                             // and we only need to emit Enter/Leave statements.
-                            TirOp::Statement(Statement::Enter(
-                                op.clone(),
-                                args.to_vec(),
-                                dest.as_ref().map(|(ret_val, _ret_bb)| ret_val.clone())
-                            ))
+
+                            // Rename the destination if there is one.
+                            let newdest = dest.as_ref().map(|(ret_val, _ret_bb)| {
+                                TirTrace::rename_place(&rename_map, &ret_val)
+                            });
+                            // Rename all `Local`s within the arguments.
+                            let mut newargs = Vec::new();
+                            for (i, op) in args.iter().enumerate() {
+                                newargs.push(TirTrace::rename_operand(&rename_map, &op));
+                                let oldlocal = Local(i as u32 + 1);
+                                let newlocal = Local(var_len);
+                                if let Some(v) = rename_map.get_mut(&oldlocal) {
+                                    v.push(newlocal);
+                                } else {
+                                    rename_map.insert(oldlocal, vec![newlocal]);
+                                }
+                                var_len += 1;
+                            }
+                            cur_call_args.push(newargs.len() as u32);
+                            // FIXME It seems that calls always have a destination despite it being
+                            // an `Option`. If this is not always the case, we may want add the
+                            // `Local` offset (`var_len`) to this statement so we can assign the
+                            // arguments to the correct `Local`s during trace compilation.
+                            assert!(newdest.is_some());
+                            TirOp::Statement(Statement::Enter(op.clone(), newargs, newdest))
                         } else {
                             // We have a symbol name but no SIR. Without SIR the callee can't
                             // appear inlined in the trace, so we should emit a native call to the
@@ -158,7 +219,18 @@ impl TirTrace {
                         todo!("Unknown callee encountered");
                     }
                 }
-                Terminator::Return => ops.push(TirOp::Statement(Statement::Leave)),
+                Terminator::Return => {
+                    // After leaving an inlined function call we need to clean up any renaming
+                    // mappings we have added manually, because we don't get `StorageDead`
+                    // statements for call arguments. Which mappings we need to remove depends on
+                    // the number of arguments the function call had, which we keep track of in
+                    // `cur_call_args`.
+                    let call_args = cur_call_args.pop().unwrap();
+                    for i in 1..(call_args + 1u32) {
+                        rename_map.get_mut(&Local(i)).unwrap().pop();
+                    }
+                    ops.push(TirOp::Statement(Statement::Leave))
+                }
                 _ => {}
             }
 
@@ -214,6 +286,60 @@ impl TirTrace {
         }
 
         Ok(Self { ops })
+    }
+
+    fn rename_rvalue(rename_map: &HashMap<Local, Vec<Local>>, rvalue: &Rvalue) -> Rvalue {
+        match rvalue {
+            Rvalue::Use(op) => {
+                let newop = TirTrace::rename_operand(rename_map, op);
+                Rvalue::Use(newop)
+            }
+            Rvalue::BinaryOp(binop, op1, op2) => {
+                let newop1 = TirTrace::rename_operand(rename_map, op1);
+                let newop2 = TirTrace::rename_operand(rename_map, op2);
+                Rvalue::BinaryOp(binop.clone(), newop1, newop2)
+            }
+            Rvalue::CheckedBinaryOp(binop, op1, op2) => {
+                let newop1 = TirTrace::rename_operand(rename_map, op1);
+                let newop2 = TirTrace::rename_operand(rename_map, op2);
+                Rvalue::CheckedBinaryOp(binop.clone(), newop1, newop2)
+            }
+            Rvalue::Unimplemented(_) => rvalue.clone()
+        }
+    }
+    fn rename_operand(rename_map: &HashMap<Local, Vec<Local>>, operand: &Operand) -> Operand {
+        match operand {
+            Operand::Place(p) => Operand::Place(TirTrace::rename_place(rename_map, p)),
+            Operand::Constant(_) => operand.clone()
+        }
+    }
+
+    fn rename_place(rename_map: &HashMap<Local, Vec<Local>>, place: &Place) -> Place {
+        // In the future there should always be a mapping for any local in the trace.
+        // Unfortunately, since we are still getting remnants of the trace header and tail in our
+        // trace, this is not always the case. So for now print warnings and don't attempt to
+        // rename those locals.
+        match rename_map.get(&place.local) {
+            Some(v) => match v.last() {
+                Some(l) => {
+                    let mut p = place.clone();
+                    p.local = l.clone();
+                    p
+                }
+                None => {
+                    eprintln!("warning: mapping for {} already empty", &place.local);
+                    place.clone()
+                }
+            },
+            None => {
+                if &place.local != &Local(0) {
+                    // Local(0) is used for function returns and is thus never
+                    // renamed, so we don't need to print a warning for it.
+                    eprintln!("warning: could not find mapping for {}", &place.local);
+                }
+                place.clone()
+            }
+        }
     }
 
     /// Return the TIR operation at index `idx` in the trace.
