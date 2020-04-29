@@ -108,9 +108,7 @@ impl TirTrace {
     pub fn new<'s>(trace: &'s dyn SirTrace) -> Result<Self, InvalidTraceError> {
         let mut ops = Vec::new();
         let mut itr = trace.into_iter().peekable();
-        let mut rename_map: HashMap<Local, Vec<Local>> = HashMap::new();
-        let mut var_len = 1;
-        let mut cur_call_args: Vec<u32> = Vec::new();
+        let mut rnm = VarRenamer::new();
         while let Some(loc) = itr.next() {
             let body = match SIR.bodies.get(&loc.symbol_name) {
                 Some(b) => b,
@@ -133,27 +131,18 @@ impl TirTrace {
             for stmt in body.blocks[user_bb_idx_usize].stmts.iter() {
                 let op = match stmt {
                     Statement::StorageLive(local) => {
-                        let newlocal = Local(var_len);
-                        match rename_map.get_mut(local) {
-                            Some(v) => v.push(newlocal),
-                            None => {
-                                rename_map.insert(local.clone(), vec![newlocal]);
-                            }
-                        };
-                        var_len += 1;
+                        let newlocal = rnm.allocate(local);
                         Statement::StorageLive(newlocal)
                     }
                     Statement::StorageDead(local) => {
-                        if let Some(v) = rename_map.get_mut(local) {
-                            let l = v.pop();
-                            Statement::StorageDead(l.unwrap())
-                        } else {
-                            stmt.clone()
+                        match rnm.free(local) {
+                            Some(l) => Statement::StorageDead(l),
+                            None => stmt.clone()
                         }
                     }
                     Statement::Assign(place, rvalue) => {
-                        let newplace = TirTrace::rename_place(&rename_map, &place);
-                        let newrvalue = TirTrace::rename_rvalue(&rename_map, &rvalue);
+                        let newplace = rnm.rename_place(&place);
+                        let newrvalue = rnm.rename_rvalue(&rvalue);
                         Statement::Assign(newplace, newrvalue)
                     }
                     Statement::Call(_, _, _) => {
@@ -182,22 +171,10 @@ impl TirTrace {
 
                             // Rename the destination if there is one.
                             let newdest = dest.as_ref().map(|(ret_val, _ret_bb)| {
-                                TirTrace::rename_place(&rename_map, &ret_val)
+                                rnm.rename_place(&ret_val)
                             });
                             // Rename all `Local`s within the arguments.
-                            let mut newargs = Vec::new();
-                            for (i, op) in args.iter().enumerate() {
-                                newargs.push(TirTrace::rename_operand(&rename_map, &op));
-                                let oldlocal = Local(i as u32 + 1);
-                                let newlocal = Local(var_len);
-                                if let Some(v) = rename_map.get_mut(&oldlocal) {
-                                    v.push(newlocal);
-                                } else {
-                                    rename_map.insert(oldlocal, vec![newlocal]);
-                                }
-                                var_len += 1;
-                            }
-                            cur_call_args.push(newargs.len() as u32);
+                            let newargs = rnm.rename_args(&args);
                             // FIXME It seems that calls always have a destination despite it being
                             // an `Option`. If this is not always the case, we may want add the
                             // `Local` offset (`var_len`) to this statement so we can assign the
@@ -225,10 +202,7 @@ impl TirTrace {
                     // statements for call arguments. Which mappings we need to remove depends on
                     // the number of arguments the function call had, which we keep track of in
                     // `cur_call_args`.
-                    let call_args = cur_call_args.pop().unwrap();
-                    for i in 1..(call_args + 1u32) {
-                        rename_map.get_mut(&Local(i)).unwrap().pop();
-                    }
+                    rnm.cleanup_args();
                     ops.push(TirOp::Statement(Statement::Leave))
                 }
                 _ => {}
@@ -321,33 +295,107 @@ impl TirTrace {
         Ok(Self { ops })
     }
 
-    fn rename_rvalue(rename_map: &HashMap<Local, Vec<Local>>, rvalue: &Rvalue) -> Rvalue {
+    /// Return the TIR operation at index `idx` in the trace.
+    /// The index must not be out of bounds.
+    pub fn op(&self, idx: usize) -> &TirOp {
+        debug_assert!(idx <= self.ops.len() - 1, "bogus trace index");
+        unsafe { &self.ops.get_unchecked(idx) }
+    }
+
+    /// Return the length of the trace measure in operations.
+    pub fn len(&self) -> usize {
+        self.ops.len()
+    }
+}
+
+struct VarRenamer {
+    /// Number of arguments for all currently active function calls.
+    cur_call_args: Vec<u32>,
+    /// Mappings for renamed locals.
+    rename_map: HashMap<Local, Vec<Local>>,
+    /// Number of variables renamed so far. The next variable is renamed to this value.
+    var_len: u32,
+}
+
+impl VarRenamer {
+    fn new() -> Self {
+        VarRenamer {
+            cur_call_args: Vec::new(),
+            rename_map: HashMap::new(),
+            var_len: 1,
+        }
+    }
+
+    fn allocate(&mut self, local: &Local) -> Local {
+        let newlocal = Local(self.var_len);
+        match self.rename_map.get_mut(local) {
+            Some(v) => v.push(newlocal),
+            None => {
+                self.rename_map.insert(local.clone(), vec![newlocal]);
+            }
+        };
+        self.var_len += 1;
+        newlocal
+    }
+
+    fn free(&mut self, local: &Local) -> Option<Local> {
+        match self.rename_map.get_mut(local) {
+            Some(v) => v.pop(),
+            None => None
+        }
+    }
+
+    fn rename_args(&mut self, args: &Vec<Operand>) -> Vec<Operand> {
+        let mut newargs = Vec::new();
+        for (i, op) in args.iter().enumerate() {
+            newargs.push(self.rename_operand(&op));
+            let oldlocal = Local(i as u32 + 1);
+            let newlocal = Local(self.var_len);
+            if let Some(v) = self.rename_map.get_mut(&oldlocal) {
+                v.push(newlocal);
+            } else {
+                self.rename_map.insert(oldlocal, vec![newlocal]);
+            }
+            self.var_len += 1;
+        }
+        self.cur_call_args.push(newargs.len() as u32);
+        newargs
+    }
+
+    fn cleanup_args(&mut self) {
+        let call_args = self.cur_call_args.pop().unwrap();
+        for i in 1..(call_args + 1u32) {
+            self.rename_map.get_mut(&Local(i)).unwrap().pop();
+        }
+    }
+
+    fn rename_rvalue(&self, rvalue: &Rvalue) -> Rvalue {
         match rvalue {
             Rvalue::Use(op) => {
-                let newop = TirTrace::rename_operand(rename_map, op);
+                let newop = self.rename_operand(op);
                 Rvalue::Use(newop)
             }
             Rvalue::BinaryOp(binop, op1, op2) => {
-                let newop1 = TirTrace::rename_operand(rename_map, op1);
-                let newop2 = TirTrace::rename_operand(rename_map, op2);
+                let newop1 = self.rename_operand(op1);
+                let newop2 = self.rename_operand(op2);
                 Rvalue::BinaryOp(binop.clone(), newop1, newop2)
             }
             Rvalue::CheckedBinaryOp(binop, op1, op2) => {
-                let newop1 = TirTrace::rename_operand(rename_map, op1);
-                let newop2 = TirTrace::rename_operand(rename_map, op2);
+                let newop1 = self.rename_operand(op1);
+                let newop2 = self.rename_operand(op2);
                 Rvalue::CheckedBinaryOp(binop.clone(), newop1, newop2)
             }
             Rvalue::Unimplemented(_) => rvalue.clone()
         }
     }
-    fn rename_operand(rename_map: &HashMap<Local, Vec<Local>>, operand: &Operand) -> Operand {
+    fn rename_operand(&self, operand: &Operand) -> Operand {
         match operand {
-            Operand::Place(p) => Operand::Place(TirTrace::rename_place(rename_map, p)),
+            Operand::Place(p) => Operand::Place(self.rename_place(p)),
             Operand::Constant(_) => operand.clone()
         }
     }
 
-    fn rename_place(rename_map: &HashMap<Local, Vec<Local>>, place: &Place) -> Place {
+    fn rename_place(place: &Place) -> Place {
         // Local(0) is always used for returning values from calls, so they don't need to be
         // renamed.
         if &place.local == &Local(0) {
@@ -355,7 +403,7 @@ impl TirTrace {
         }
         // While the TIR trace still contains remnants of the trace header and tail, they will be
         // removed later, so we can savely ignore them here.
-        match rename_map.get(&place.local) {
+        match self.rename_map.get(&place.local) {
             Some(v) => match v.last() {
                 Some(l) => {
                     let mut p = place.clone();
@@ -370,18 +418,6 @@ impl TirTrace {
                 place.clone()
             }
         }
-    }
-
-    /// Return the TIR operation at index `idx` in the trace.
-    /// The index must not be out of bounds.
-    pub fn op(&self, idx: usize) -> &TirOp {
-        debug_assert!(idx <= self.ops.len() - 1, "bogus trace index");
-        unsafe { &self.ops.get_unchecked(idx) }
-    }
-
-    /// Return the length of the trace measure in operations.
-    pub fn len(&self) -> usize {
-        self.ops.len()
     }
 }
 
