@@ -285,6 +285,39 @@ impl TirTrace {
             }
         }
 
+        // Remove the remnants of the `start_tracing` (1 instruction) and `stop_tracing` (5
+        // instructions) calls at the beginning and end of the trace.  To be sure we don't remove
+        // something important, let's put some asserts in to check these instructions are always
+        // roughly the same.
+        match ops.pop() {
+            Some(TirOp::Statement(Statement::Enter(CallOperand::Fn(s),_,_))) => {
+                debug_assert!(s.contains("stop_tracing"))
+            }
+            e => panic!("Expected call to `stop_tracing` here, instead got {:?}.", e)
+        }
+        match ops.pop() {
+            Some(TirOp::Statement(Statement::Assign(_, _))) => {
+            }
+            e => panic!("Expected `Assign` here, instead got {:?}.", e)
+        }
+        match ops.pop() {
+            Some(TirOp::Statement(Statement::Assign(_, Rvalue::Use(Operand::Constant(Constant::Bool(false)))))) => {
+            }
+            e => panic!("Expected `Assign(_, false)` here, instead got {:?}.", e)
+        }
+        for _ in 0..3 {
+            match ops.pop() {
+                Some(TirOp::Statement(Statement::StorageLive(_))) => {
+                }
+                e => panic!("Expected `StorageLive` here, instead got {:?}.", e)
+            }
+        }
+        match ops.remove(0) {
+            TirOp::Statement(Statement::StorageDead(_)) => {
+            }
+            e => panic!("Expected `StorageDead` here, instead got {:?}.", e)
+        }
+
         Ok(Self { ops })
     }
 
@@ -315,10 +348,13 @@ impl TirTrace {
     }
 
     fn rename_place(rename_map: &HashMap<Local, Vec<Local>>, place: &Place) -> Place {
-        // In the future there should always be a mapping for any local in the trace.
-        // Unfortunately, since we are still getting remnants of the trace header and tail in our
-        // trace, this is not always the case. So for now print warnings and don't attempt to
-        // rename those locals.
+        // Local(0) is always used for returning values from calls, so they don't need to be
+        // renamed.
+        if &place.local == &Local(0) {
+            return place.clone();
+        }
+        // While the TIR trace still contains remnants of the trace header and tail, they will be
+        // removed later, so we can savely ignore them here.
         match rename_map.get(&place.local) {
             Some(v) => match v.last() {
                 Some(l) => {
@@ -327,16 +363,10 @@ impl TirTrace {
                     p
                 }
                 None => {
-                    eprintln!("warning: mapping for {} already empty", &place.local);
                     place.clone()
                 }
             },
             None => {
-                if &place.local != &Local(0) {
-                    // Local(0) is used for function returns and is thus never
-                    // renamed, so we don't need to print a warning for it.
-                    eprintln!("warning: could not find mapping for {}", &place.local);
-                }
                 place.clone()
             }
         }
