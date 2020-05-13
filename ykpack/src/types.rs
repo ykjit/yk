@@ -124,6 +124,7 @@ pub struct Body {
     pub symbol_name: String,
     pub blocks: Vec<BasicBlock>,
     pub flags: u8,
+    pub num_locals: usize,
 }
 
 impl Display for Body {
@@ -169,7 +170,7 @@ pub enum Statement {
     /// An assignment.
     Assign(Place, Rvalue),
     /// Marks the entry of an inlined function call in a TIR trace. This does not appear in SIR.
-    Enter(CallOperand, Vec<Operand>, Option<Place>),
+    Enter(CallOperand, Vec<Operand>, Option<Place>, u32),
     /// Marks the exit of an inlined function call in a TIR trace. This does not appear in SIR.
     Leave,
     /// Information about which locals are currently live/dead.
@@ -188,8 +189,8 @@ impl Display for Statement {
         match self {
             Statement::Nop => write!(f, "nop"),
             Statement::Assign(l, r) => write!(f, "{} = {}", l, r),
-            Statement::Enter(op, args, dest) => {
-                write!(f, "enter({:?}, {:?}, {:?})", op, args, dest)
+            Statement::Enter(op, args, dest, off) => {
+                write!(f, "enter({:?}, {:?}, {:?}, {})", op, args, dest, off)
             }
             Statement::Leave => write!(f, "leave"),
             Statement::StorageLive(local) => write!(f, "StorageLive({:?})", local),

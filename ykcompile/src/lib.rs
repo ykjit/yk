@@ -179,6 +179,7 @@ impl TraceCompiler {
         op: &CallOperand,
         args: &Vec<Operand>,
         dest: &Option<Place>,
+        off: u32,
     ) -> Result<(), CompileError> {
         // FIXME Currently, we still get a call to `stop_tracing` here, since the call is part of
         // the last block in the trace. We may be able to always skip the last n instructions of the
@@ -193,9 +194,8 @@ impl TraceCompiler {
             ykpack::CallOperand::Unknown => {}
         };
         // Move call arguments into registers.
-        let vars_off = dest.as_ref().unwrap().local;
         for (op, i) in args.iter().zip(1..) {
-            let arg_idx = Local(i + vars_off.0);
+            let arg_idx = Local(i + off);
             match op {
                 Operand::Place(p) => self.mov_local_local(arg_idx, p.local)?,
                 Operand::Constant(c) => match c {
@@ -243,7 +243,7 @@ impl TraceCompiler {
                     unimpl => return Err(CompileError::Unimplemented(format!("{}", unimpl))),
                 };
             }
-            Statement::Enter(op, args, dest) => self.c_enter(op, args, dest)?,
+            Statement::Enter(op, args, dest, off) => self.c_enter(op, args, dest, *off)?,
             Statement::Leave => self.c_leave()?,
             Statement::StorageLive(_) => {}
             Statement::StorageDead(l) => self.free_register(l),
@@ -433,6 +433,30 @@ mod tests {
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
         let ct = TraceCompiler::compile(tir_trace);
         assert_eq!(ct.execute(), 13);
+    }
+
+    fn fnested3(i: u8, j: u8) -> u8 {
+        let c = i;
+        c
+    }
+
+    fn fnested2(i: u8) -> u8 {
+        fnested3(i, 10)
+    }
+
+    fn fnested() -> u8 {
+        let a = fnested2(20);
+        a
+    }
+
+    #[test]
+    pub(crate) fn test_function_call_nested() {
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        fnested();
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let ct = TraceCompiler::compile(tir_trace);
+        assert_eq!(ct.execute(), 20);
     }
 
     // Test finding a symbol in a shared object.

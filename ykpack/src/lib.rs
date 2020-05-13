@@ -72,6 +72,7 @@ mod tests {
             symbol_name: String::from("symbol1"),
             blocks: blocks1,
             flags: 0,
+            num_locals: 0,
         });
 
         let stmts2_b1 = vec![Statement::Nop; 7];
@@ -86,6 +87,7 @@ mod tests {
             symbol_name: String::from("symbol2"),
             blocks: blocks2,
             flags: 0,
+            num_locals: 0,
         });
 
         vec![sir1, sir2]
@@ -182,6 +184,7 @@ mod tests {
                 symbol_name: String::from("symbol1"),
                 blocks: blocks_t1,
                 flags: 0,
+                num_locals: 3,
             }),
             Pack::Body(Body {
                 symbol_name: String::from("symbol2"),
@@ -190,6 +193,7 @@ mod tests {
                     Terminator::Unreachable,
                 )],
                 flags: 0,
+                num_locals: 5,
             }),
         ];
 
