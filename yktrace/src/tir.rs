@@ -8,7 +8,7 @@ use elf;
 use fallible_iterator::FallibleIterator;
 use std::{
     collections::HashMap,
-    convert::{From, TryFrom},
+    convert::TryFrom,
     env,
     fmt::{self, Display},
     io::Cursor
@@ -108,9 +108,7 @@ impl TirTrace {
     pub fn new<'s>(trace: &'s dyn SirTrace) -> Result<Self, InvalidTraceError> {
         let mut ops = Vec::new();
         let mut itr = trace.into_iter().peekable();
-        let mut rename_map: HashMap<Local, Vec<Local>> = HashMap::new();
-        let mut var_len = 1;
-        let mut cur_call_args: Vec<u32> = Vec::new();
+        let mut rnm = VarRenamer::new();
         while let Some(loc) = itr.next() {
             let body = match SIR.bodies.get(&loc.symbol_name) {
                 Some(b) => b,
@@ -122,38 +120,22 @@ impl TirTrace {
             // When adding statements to the trace, we clone them (rather than referencing the
             // statements in the SIR) so that we have the freedom to mutate them later.
             let user_bb_idx_usize = usize::try_from(loc.bb_idx).unwrap();
-            // When converting the SIR trace into a TIR trace we turn it into SSA form by alpha
-            // renaming all `Local`s and storing a mapping from old to new name in `rename_map`.
-            // This is a bit tricky when it comes to inlined function calls, which assume arguments
-            // start at `Local(1)`, which may have already been used. We thus need to store
-            // multiple levels in `rename_map` and have an additional variable `cur_call_args`,
-            // which provides information about which `Local`s we need to remove again from
-            // `rename_map` once we leave the inlined function call again (since we won't get
-            // `StorageDead` statements for arguments).
+            // When converting the SIR trace into a TIR trace we alpha-rename the `Local`s from
+            // inlined functions by adding an offset to each. This offset is derived from the
+            // number of assigned variables in the functions outer context. For example, if a
+            // function `bar` is inlined into a function `foo`, and `foo` used 5 variables, then
+            // all variables in `bar` are offset by 5.
             for stmt in body.blocks[user_bb_idx_usize].stmts.iter() {
                 let op = match stmt {
                     Statement::StorageLive(local) => {
-                        let newlocal = Local(var_len);
-                        match rename_map.get_mut(local) {
-                            Some(v) => v.push(newlocal),
-                            None => {
-                                rename_map.insert(local.clone(), vec![newlocal]);
-                            }
-                        };
-                        var_len += 1;
-                        Statement::StorageLive(newlocal)
+                        Statement::StorageLive(rnm.rename_local(local))
                     }
                     Statement::StorageDead(local) => {
-                        if let Some(v) = rename_map.get_mut(local) {
-                            let l = v.pop();
-                            Statement::StorageDead(l.unwrap())
-                        } else {
-                            stmt.clone()
-                        }
+                        Statement::StorageDead(rnm.rename_local(local))
                     }
                     Statement::Assign(place, rvalue) => {
-                        let newplace = TirTrace::rename_place(&rename_map, &place);
-                        let newrvalue = TirTrace::rename_rvalue(&rename_map, &rvalue);
+                        let newplace = rnm.rename_place(&place);
+                        let newrvalue = rnm.rename_rvalue(&rvalue);
                         Statement::Assign(newplace, newrvalue)
                     }
                     Statement::Call(_, _, _) => {
@@ -161,7 +143,7 @@ impl TirTrace {
                         unreachable!();
                     }
                     Statement::Nop => stmt.clone(),
-                    Statement::Enter(_, _, _) => unreachable!(),
+                    Statement::Enter(_, _, _, _) => unreachable!(),
                     Statement::Leave => stmt.clone(),
                     Statement::Unimplemented(_) => stmt.clone()
                 };
@@ -181,29 +163,25 @@ impl TirTrace {
                             // and we only need to emit Enter/Leave statements.
 
                             // Rename the destination if there is one.
-                            let newdest = dest.as_ref().map(|(ret_val, _ret_bb)| {
-                                TirTrace::rename_place(&rename_map, &ret_val)
-                            });
+                            let newdest = dest
+                                .as_ref()
+                                .map(|(ret_val, _ret_bb)| rnm.rename_place(&ret_val));
                             // Rename all `Local`s within the arguments.
-                            let mut newargs = Vec::new();
-                            for (i, op) in args.iter().enumerate() {
-                                newargs.push(TirTrace::rename_operand(&rename_map, &op));
-                                let oldlocal = Local(i as u32 + 1);
-                                let newlocal = Local(var_len);
-                                if let Some(v) = rename_map.get_mut(&oldlocal) {
-                                    v.push(newlocal);
-                                } else {
-                                    rename_map.insert(oldlocal, vec![newlocal]);
-                                }
-                                var_len += 1;
-                            }
-                            cur_call_args.push(newargs.len() as u32);
+                            let newargs = rnm.rename_args(&args);
+                            // Inform VarRenamer about this function's offset, which is equal to the
+                            // number of variables assigned in the outer body.
+                            rnm.enter(body.num_locals);
                             // FIXME It seems that calls always have a destination despite it being
                             // an `Option`. If this is not always the case, we may want add the
                             // `Local` offset (`var_len`) to this statement so we can assign the
                             // arguments to the correct `Local`s during trace compilation.
                             assert!(newdest.is_some());
-                            TirOp::Statement(Statement::Enter(op.clone(), newargs, newdest))
+                            TirOp::Statement(Statement::Enter(
+                                op.clone(),
+                                newargs,
+                                newdest,
+                                rnm.offset()
+                            ))
                         } else {
                             // We have a symbol name but no SIR. Without SIR the callee can't
                             // appear inlined in the trace, so we should emit a native call to the
@@ -225,10 +203,7 @@ impl TirTrace {
                     // statements for call arguments. Which mappings we need to remove depends on
                     // the number of arguments the function call had, which we keep track of in
                     // `cur_call_args`.
-                    let call_args = cur_call_args.pop().unwrap();
-                    for i in 1..(call_args + 1u32) {
-                        rename_map.get_mut(&Local(i)).unwrap().pop();
-                    }
+                    rnm.leave();
                     ops.push(TirOp::Statement(Statement::Leave))
                 }
                 _ => {}
@@ -285,61 +260,39 @@ impl TirTrace {
             }
         }
 
+        // Remove the remnants of the `start_tracing` (1 instruction) and `stop_tracing` (5
+        // instructions) calls at the beginning and end of the trace.  To be sure we don't remove
+        // something important, let's put some asserts in to check these instructions are always
+        // roughly the same.
+        match ops.pop() {
+            Some(TirOp::Statement(Statement::Enter(CallOperand::Fn(s), _, _, _))) => {
+                debug_assert!(s.contains("stop_tracing"))
+            }
+            e => panic!("Expected call to `stop_tracing` here, instead got {:?}.", e)
+        }
+        match ops.pop() {
+            Some(TirOp::Statement(Statement::Assign(_, _))) => {}
+            e => panic!("Expected `Assign` here, instead got {:?}.", e)
+        }
+        match ops.pop() {
+            Some(TirOp::Statement(Statement::Assign(
+                _,
+                Rvalue::Use(Operand::Constant(Constant::Bool(false)))
+            ))) => {}
+            e => panic!("Expected `Assign(_, false)` here, instead got {:?}.", e)
+        }
+        for _ in 0..3 {
+            match ops.pop() {
+                Some(TirOp::Statement(Statement::StorageLive(_))) => {}
+                e => panic!("Expected `StorageLive` here, instead got {:?}.", e)
+            }
+        }
+        match ops.remove(0) {
+            TirOp::Statement(Statement::StorageDead(_)) => {}
+            e => panic!("Expected `StorageDead` here, instead got {:?}.", e)
+        }
+
         Ok(Self { ops })
-    }
-
-    fn rename_rvalue(rename_map: &HashMap<Local, Vec<Local>>, rvalue: &Rvalue) -> Rvalue {
-        match rvalue {
-            Rvalue::Use(op) => {
-                let newop = TirTrace::rename_operand(rename_map, op);
-                Rvalue::Use(newop)
-            }
-            Rvalue::BinaryOp(binop, op1, op2) => {
-                let newop1 = TirTrace::rename_operand(rename_map, op1);
-                let newop2 = TirTrace::rename_operand(rename_map, op2);
-                Rvalue::BinaryOp(binop.clone(), newop1, newop2)
-            }
-            Rvalue::CheckedBinaryOp(binop, op1, op2) => {
-                let newop1 = TirTrace::rename_operand(rename_map, op1);
-                let newop2 = TirTrace::rename_operand(rename_map, op2);
-                Rvalue::CheckedBinaryOp(binop.clone(), newop1, newop2)
-            }
-            Rvalue::Unimplemented(_) => rvalue.clone()
-        }
-    }
-    fn rename_operand(rename_map: &HashMap<Local, Vec<Local>>, operand: &Operand) -> Operand {
-        match operand {
-            Operand::Place(p) => Operand::Place(TirTrace::rename_place(rename_map, p)),
-            Operand::Constant(_) => operand.clone()
-        }
-    }
-
-    fn rename_place(rename_map: &HashMap<Local, Vec<Local>>, place: &Place) -> Place {
-        // In the future there should always be a mapping for any local in the trace.
-        // Unfortunately, since we are still getting remnants of the trace header and tail in our
-        // trace, this is not always the case. So for now print warnings and don't attempt to
-        // rename those locals.
-        match rename_map.get(&place.local) {
-            Some(v) => match v.last() {
-                Some(l) => {
-                    let mut p = place.clone();
-                    p.local = l.clone();
-                    p
-                }
-                None => {
-                    eprintln!("warning: mapping for {} already empty", &place.local);
-                    place.clone()
-                }
-            },
-            None => {
-                if &place.local != &Local(0) {
-                    // Local(0) is used for function returns and is thus never
-                    // renamed, so we don't need to print a warning for it.
-                    eprintln!("warning: could not find mapping for {}", &place.local);
-                }
-                place.clone()
-            }
-        }
     }
 
     /// Return the TIR operation at index `idx` in the trace.
@@ -352,6 +305,92 @@ impl TirTrace {
     /// Return the length of the trace measure in operations.
     pub fn len(&self) -> usize {
         self.ops.len()
+    }
+}
+
+struct VarRenamer {
+    /// Stores the offset before entering an inlined call, so that the correct offset can be
+    /// restored again after leaving that call.
+    stack: Vec<u32>,
+    /// Current offset used to rename variables.
+    offset: u32
+}
+
+impl VarRenamer {
+    fn new() -> Self {
+        VarRenamer {
+            stack: vec![0],
+            offset: 0
+        }
+    }
+
+    fn offset(&self) -> u32 {
+        self.offset
+    }
+
+    fn enter(&mut self, num_locals: usize) {
+        // When entering an inlined function call update the current offset by adding the number of
+        // assigned variables in the outer context. Also add this offset to the stack, so we can
+        // restore it once we leave the inlined function call again.
+        self.offset += num_locals as u32;
+        self.stack.push(self.offset);
+    }
+
+    fn leave(&mut self) {
+        // When we leave an inlined function call, we pop the previous offset from the stack,
+        // reverting the offset to what it was before the function was entered.
+        self.stack.pop();
+        if let Some(v) = self.stack.last() {
+            self.offset = *v;
+        } else {
+            panic!("Unbalanced enter/leave statements!")
+        }
+    }
+
+    fn rename_args(&mut self, args: &Vec<Operand>) -> Vec<Operand> {
+        args.iter().map(|op| self.rename_operand(&op)).collect()
+    }
+
+    fn rename_rvalue(&self, rvalue: &Rvalue) -> Rvalue {
+        match rvalue {
+            Rvalue::Use(op) => {
+                let newop = self.rename_operand(op);
+                Rvalue::Use(newop)
+            }
+            Rvalue::BinaryOp(binop, op1, op2) => {
+                let newop1 = self.rename_operand(op1);
+                let newop2 = self.rename_operand(op2);
+                Rvalue::BinaryOp(binop.clone(), newop1, newop2)
+            }
+            Rvalue::CheckedBinaryOp(binop, op1, op2) => {
+                let newop1 = self.rename_operand(op1);
+                let newop2 = self.rename_operand(op2);
+                Rvalue::CheckedBinaryOp(binop.clone(), newop1, newop2)
+            }
+            Rvalue::Unimplemented(_) => rvalue.clone()
+        }
+    }
+
+    fn rename_operand(&self, operand: &Operand) -> Operand {
+        match operand {
+            Operand::Place(p) => Operand::Place(self.rename_place(p)),
+            Operand::Constant(_) => operand.clone()
+        }
+    }
+
+    fn rename_place(&self, place: &Place) -> Place {
+        if &place.local == &Local(0) {
+            // Local(0) is used for returning values from calls, so it doesn't need to be renamed.
+            place.clone()
+        } else {
+            let mut p = place.clone();
+            p.local = self.rename_local(&p.local);
+            p
+        }
+    }
+
+    fn rename_local(&self, local: &Local) -> Local {
+        Local(local.0 + self.offset)
     }
 }
 
