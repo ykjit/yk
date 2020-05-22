@@ -503,7 +503,7 @@ mod tests {
         assert_eq!(ct.execute(), 13);
     }
 
-    fn fnested3(i: u8, j: u8) -> u8 {
+    fn fnested3(i: u8, _j: u8) -> u8 {
         let c = i;
         c
     }
@@ -558,7 +558,7 @@ mod tests {
     #[test]
     pub fn call_symbol() {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
-        let g = core::intrinsics::wrapping_add(10u64, 40u64);
+        let _ = core::intrinsics::wrapping_add(10u64, 40u64);
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
 
