@@ -166,16 +166,16 @@ impl TirTrace {
                             let newdest = dest
                                 .as_ref()
                                 .map(|(ret_val, _ret_bb)| rnm.rename_place(&ret_val));
-                            // Rename all `Local`s within the arguments.
-                            let newargs = rnm.rename_args(&args);
-                            // Inform VarRenamer about this function's offset, which is equal to the
-                            // number of variables assigned in the outer body.
-                            rnm.enter(body.num_locals);
                             // FIXME It seems that calls always have a destination despite it being
                             // an `Option`. If this is not always the case, we may want add the
                             // `Local` offset (`var_len`) to this statement so we can assign the
                             // arguments to the correct `Local`s during trace compilation.
                             assert!(newdest.is_some());
+                            // Rename all `Local`s within the arguments.
+                            let newargs = rnm.rename_args(&args);
+                            // Inform VarRenamer about this function's offset, which is equal to the
+                            // number of variables assigned in the outer body.
+                            rnm.enter(body.num_locals, newdest.as_ref().unwrap().clone());
                             TirOp::Statement(Statement::Enter(
                                 op.clone(),
                                 newargs,
@@ -313,14 +313,16 @@ struct VarRenamer {
     /// restored again after leaving that call.
     stack: Vec<u32>,
     /// Current offset used to rename variables.
-    offset: u32
+    offset: u32,
+    returns: Vec<Place>
 }
 
 impl VarRenamer {
     fn new() -> Self {
         VarRenamer {
             stack: vec![0],
-            offset: 0
+            offset: 0,
+            returns: Vec::new()
         }
     }
 
@@ -328,18 +330,20 @@ impl VarRenamer {
         self.offset
     }
 
-    fn enter(&mut self, num_locals: usize) {
+    fn enter(&mut self, num_locals: usize, dest: Place) {
         // When entering an inlined function call update the current offset by adding the number of
         // assigned variables in the outer context. Also add this offset to the stack, so we can
         // restore it once we leave the inlined function call again.
         self.offset += num_locals as u32;
         self.stack.push(self.offset);
+        self.returns.push(dest);
     }
 
     fn leave(&mut self) {
         // When we leave an inlined function call, we pop the previous offset from the stack,
         // reverting the offset to what it was before the function was entered.
         self.stack.pop();
+        self.returns.pop();
         if let Some(v) = self.stack.last() {
             self.offset = *v;
         } else {
@@ -380,8 +384,14 @@ impl VarRenamer {
 
     fn rename_place(&self, place: &Place) -> Place {
         if &place.local == &Local(0) {
-            // Local(0) is used for returning values from calls, so it doesn't need to be renamed.
-            place.clone()
+            // Replace the default return variable $0 with the variable in the outer context where
+            // the return value will end up after leaving the function. This saves us an
+            // instruction when we compile the trace.
+            if let Some(v) = self.returns.last() {
+                v.clone()
+            } else {
+                panic!("Expected return value!")
+            }
         } else {
             let mut p = place.clone();
             p.local = self.rename_local(&p.local);
