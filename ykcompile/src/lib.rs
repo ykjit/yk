@@ -20,6 +20,8 @@ use yktrace::tir::{
 
 use dynasmrt::DynasmApi;
 
+const X86_86_NUM_REGS: u8 = 16;
+
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub enum CompileError {
     /// We ran out of registers.
@@ -28,6 +30,8 @@ pub enum CompileError {
     /// Compiling this statement is not yet implemented.
     /// The string inside is a hint as to what kind of statement needs to be implemented.
     Unimplemented(String),
+    /// The binary symbol could not be found.
+    UnknownSymbol(String),
 }
 
 impl Display for CompileError {
@@ -35,6 +39,7 @@ impl Display for CompileError {
         match self {
             Self::OutOfRegisters => write!(f, "Ran out of registers"),
             Self::Unimplemented(s) => write!(f, "Unimplemented compilation: {}", s),
+            Self::UnknownSymbol(s) => write!(f, "Unknown symbol: {}", s),
         }
     }
 }
@@ -73,7 +78,14 @@ impl CompiledTrace {
         // For now a compiled trace always returns whatever has been left in register RAX. We also
         // assume for now that this will be a `u64`.
         let func: fn() -> u64 = unsafe { mem::transmute(self.mc.ptr(dynasmrt::AssemblyOffset(0))) };
-        func()
+        self.exec_trace(func)
+    }
+
+    /// Jump to JITted code. This is a separate unmangled function to make it easy to set a
+    /// debugger breakpoint right before entering the trace.
+    #[no_mangle]
+    fn exec_trace(&self, t_fn: fn() -> u64) -> u64 {
+        t_fn()
     }
 }
 
@@ -222,6 +234,63 @@ impl TraceCompiler {
         Ok(())
     }
 
+    /// Compile a call to a native symbol. This is used for occasions where you don't want the
+    /// callee inlined, or cannot inline it (e.g. it's a foreign function).
+    fn c_call(
+        &mut self,
+        opnd: &CallOperand,
+        args: &Vec<Operand>,
+        dest: &Option<Place>,
+    ) -> Result<(), CompileError> {
+        let sym = if let CallOperand::Fn(sym) = opnd {
+            sym
+        } else {
+            return Err(CompileError::Unimplemented(
+                "unknown call target".to_owned(),
+            ));
+        };
+
+        // FIXME implement support for arguments.
+        if !args.is_empty() {
+            return Err(CompileError::Unimplemented("call with args".to_owned()));
+        }
+
+        // Generally speaking, we don't know what the callee will clobber, so we save our registers
+        // before doing the call. For now we assume that the caller is OK with RAX being clobbered
+        // though.
+        for reg in 1..X86_86_NUM_REGS {
+            dynasm!(self.asm
+                ; push Rq(reg)
+            );
+        }
+
+        let sym_addr = TraceCompiler::find_symbol(sym)? as i64;
+        dynasm!(self.asm
+            // In Sys-V ABI, `al` is a hidden argument used to specify the number of vector args
+            // for a vararg call. We don't support this right now, so set it to zero. FIXME.
+            ; xor rax, rax
+            ; mov r11, QWORD sym_addr
+            ; call r11
+        );
+
+        // Restore registers.
+        for reg in (1..X86_86_NUM_REGS).rev() {
+            dynasm!(self.asm
+                ; pop Rq(reg)
+            );
+        }
+
+        // Put return value in place.
+        if let Some(dest) = dest {
+            let dest_reg = self.local_to_reg(dest.local)?;
+            dynasm!(self.asm
+                ; mov Rq(dest_reg), rax
+            );
+        }
+
+        Ok(())
+    }
+
     fn statement(&mut self, stmt: &Statement) -> Result<(), CompileError> {
         match stmt {
             Statement::Assign(l, r) => {
@@ -247,7 +316,7 @@ impl TraceCompiler {
             Statement::Leave => self.c_leave()?,
             Statement::StorageLive(_) => {}
             Statement::StorageDead(l) => self.free_register(l),
-            c @ Statement::Call(..) => return Err(CompileError::Unimplemented(format!("{:?}", c))),
+            Statement::Call(target, args, dest) => self.c_call(target, args, dest)?,
             Statement::Nop => {}
             Statement::Unimplemented(s) => {
                 return Err(CompileError::Unimplemented(format!("{:?}", s)))
@@ -337,25 +406,24 @@ impl TraceCompiler {
         CompiledTrace { mc: tc.finish() }
     }
 
-    #[allow(dead_code)] // Not used just yet.
-    fn find_symbol(sym: &str) -> Option<*mut c_void> {
+    fn find_symbol(sym: &str) -> Result<*mut c_void, CompileError> {
         use std::ffi::CString;
 
         let sym_arg = CString::new(sym).unwrap();
         let addr = unsafe { dlsym(RTLD_DEFAULT, sym_arg.into_raw()) };
 
         if addr == 0 as *mut c_void {
-            None
+            Err(CompileError::UnknownSymbol(sym.to_owned()))
         } else {
-            Some(addr)
+            Ok(addr)
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{HashMap, Local, TraceCompiler};
-    use libc::c_void;
+    use super::{CompileError, HashMap, Local, TraceCompiler};
+    use libc::{c_void, getuid};
     use std::collections::HashSet;
     use yktrace::tir::{CallOperand, Statement, TirOp, TirTrace};
     use yktrace::{start_tracing, TracingKind};
@@ -435,7 +503,7 @@ mod tests {
         assert_eq!(ct.execute(), 13);
     }
 
-    fn fnested3(i: u8, j: u8) -> u8 {
+    fn fnested3(i: u8, _j: u8) -> u8 {
         let c = i;
         c
     }
@@ -462,7 +530,7 @@ mod tests {
     // Test finding a symbol in a shared object.
     #[test]
     fn find_symbol_shared() {
-        assert!(TraceCompiler::find_symbol("printf") == Some(libc::printf as *mut c_void));
+        assert!(TraceCompiler::find_symbol("printf") == Ok(libc::printf as *mut c_void));
     }
 
     // Test finding a symbol in the main binary.
@@ -472,14 +540,17 @@ mod tests {
     #[no_mangle]
     fn find_symbol_main() {
         assert!(
-            TraceCompiler::find_symbol("find_symbol_main") == Some(find_symbol_main as *mut c_void)
+            TraceCompiler::find_symbol("find_symbol_main") == Ok(find_symbol_main as *mut c_void)
         );
     }
 
     // Check that a non-existent symbol cannot be found.
     #[test]
     fn find_nonexistent_symbol() {
-        assert!(TraceCompiler::find_symbol("__xxxyyyzzz__").is_none());
+        assert_eq!(
+            TraceCompiler::find_symbol("__xxxyyyzzz__"),
+            Err(CompileError::UnknownSymbol("__xxxyyyzzz__".to_owned()))
+        );
     }
 
     // A trace which contains a call to something which we don't have SIR for should emit a TIR
@@ -487,7 +558,7 @@ mod tests {
     #[test]
     pub fn call_symbol() {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
-        let g = core::intrinsics::wrapping_add(10u64, 40u64);
+        let _ = core::intrinsics::wrapping_add(10u64, 40u64);
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
 
@@ -501,5 +572,16 @@ mod tests {
             }
         }
         assert!(found_call);
+    }
+
+    /// Execute a trace which calls a symbol accepting no arguments, but which does return a value.
+    #[test]
+    pub fn exec_call_symbol_no_args_with_rv() {
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let expect = unsafe { getuid() };
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let got = TraceCompiler::compile(tir_trace).execute();
+        assert_eq!(expect as u64, got);
     }
 }
