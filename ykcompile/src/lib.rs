@@ -9,18 +9,17 @@ extern crate test;
 
 use libc::{c_void, dlsym, RTLD_DEFAULT};
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::fmt::{self, Display, Formatter};
 use std::mem;
 use std::process::Command;
 
 use yktrace::tir::{
     CallOperand, Constant, ConstantInt, Guard, Local, Operand, Place, Rvalue, Statement, TirOp,
-    TirTrace, UnsignedInt,
+    TirTrace,
 };
 
 use dynasmrt::DynasmApi;
-
-const X86_86_NUM_REGS: u8 = 16;
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub enum CompileError {
@@ -177,13 +176,9 @@ impl TraceCompiler {
 
     fn c_mov_int(&mut self, local: Local, constant: &ConstantInt) -> Result<(), CompileError> {
         let reg = self.local_to_reg(local)?;
-        let val = match constant {
-            ConstantInt::UnsignedInt(UnsignedInt::U8(i)) => *i as i64,
-            ConstantInt::UnsignedInt(UnsignedInt::Usize(i)) => *i as i64,
-            e => return Err(CompileError::Unimplemented(format!("{}", e))),
-        };
+        let c_val = constant.i64_cast();
         dynasm!(self.asm
-            ; mov Rq(reg), QWORD val
+            ; mov Rq(reg), QWORD c_val
         );
         Ok(())
     }
@@ -234,8 +229,21 @@ impl TraceCompiler {
         Ok(())
     }
 
-    /// Compile a call to a native symbol. This is used for occasions where you don't want the
-    /// callee inlined, or cannot inline it (e.g. it's a foreign function).
+    /// Compile a call to a native symbol using the Sys-V ABI. This is used for occasions where you
+    /// don't want to, or cannot, inline the callee (e.g. it's a foreign function).
+    ///
+    /// For now we do something very simple. There are limitations (FIXME):
+    ///
+    ///  - We assume there are no more than 6 arguments (spilling is not yet implemented).
+    ///
+    ///  - We push all of the callee save registers on the stack, and local variable arguments are
+    ///    then loaded back from the stack into the correct ABI-specified registers. We can
+    ///    optimise this later by only loading an argument from the stack if it cannot be loaded
+    ///    from its original register location (because another argument overwrote it already).
+    ///
+    ///  - We assume the return value fits in rax. 128-bit return values are not yet supported.
+    ///
+    ///  - We don't support varags calls.
     fn c_call(
         &mut self,
         opnd: &CallOperand,
@@ -250,41 +258,97 @@ impl TraceCompiler {
             ));
         };
 
-        // FIXME implement support for arguments.
-        if !args.is_empty() {
-            return Err(CompileError::Unimplemented("call with args".to_owned()));
+        if args.len() > 6 {
+            return Err(CompileError::Unimplemented(
+                "call with spilled args".to_owned(),
+            ));
         }
 
-        // Generally speaking, we don't know what the callee will clobber, so we save our registers
-        // before doing the call. For now we assume that the caller is OK with RAX being clobbered
-        // though.
-        for reg in 1..X86_86_NUM_REGS {
+        // Figure out where the return value (if there is one) is going.
+        let dest_reg: Option<u8> = if let Some(d) = dest {
+            Some(self.local_to_reg(d.local)?)
+        } else {
+            None
+        };
+
+        // Save Sys-V caller save registers to the stack, but skip the one (if there is one) that
+        // will store the return value. It's safe to assume the caller expects this to be
+        // clobbered.
+        //
+        // FIXME: Note that we don't save rax. Although this is a caller save register, the way the
+        // tests currently work is they check the last value returned at the end of the trace. This
+        // value is assumed to remain in rax. If we were to restore rax, we'd break that. Note that
+        // the register allocator never gives out rax for this precise reason.
+        //
+        // rdi, rsi, rdx, rcx, r8, r9, r10, r11.
+        let save_regs = [7, 6, 2, 1, 8, 9, 10, 11]
+            .iter()
+            .filter(|r| Some(**r) != dest_reg)
+            .map(|r| *r)
+            .collect::<Vec<u8>>();
+        for reg in &save_regs {
             dynasm!(self.asm
                 ; push Rq(reg)
             );
         }
 
+        // Helper function to find the index of a caller-save register previously pushed to the stack.
+        // The first register pushed is at the highest stack offset (from the stack pointer), hence
+        // reversing the order of `save_regs`.
+        let stack_index = |reg: u8| -> i32 {
+            i32::try_from(save_regs.iter().rev().position(|&r| r == reg).unwrap()).unwrap()
+        };
+
+        // Sys-V ABI dictates the first 6 arguments are passed in: rdi, rsi, rdx, rcx, r8, r9.
+        let mut arg_regs = vec![9, 8, 1, 2, 6, 7]; // reversed so they pop() in the right order.
+        for arg in args {
+            // `unwrap()` must succeed, as we checked there are no more than 6 args above.
+            let arg_reg = arg_regs.pop().unwrap();
+
+            match arg {
+                Operand::Place(Place { local, projection }) => {
+                    if !projection.is_empty() {
+                        return Err(CompileError::Unimplemented("projected argument".to_owned()));
+                    }
+                    // Load argument back from the stack.
+                    let idx = stack_index(self.local_to_reg(*local)?);
+                    dynasm!(self.asm
+                        ; mov Rq(arg_reg), [rsp + idx * 8]
+                    );
+                }
+                Operand::Constant(c) => {
+                    dynasm!(self.asm
+                        ; mov Rq(arg_reg), QWORD c.i64_cast()
+                    );
+                }
+            };
+        }
+
         let sym_addr = TraceCompiler::find_symbol(sym)? as i64;
         dynasm!(self.asm
             // In Sys-V ABI, `al` is a hidden argument used to specify the number of vector args
-            // for a vararg call. We don't support this right now, so set it to zero. FIXME.
+            // for a vararg call. We don't support this right now, so set it to zero.
             ; xor rax, rax
             ; mov r11, QWORD sym_addr
             ; call r11
         );
 
-        // Restore registers.
-        for reg in (1..X86_86_NUM_REGS).rev() {
+        // Put return value in place.
+        if let Some(dest_reg) = dest_reg {
             dynasm!(self.asm
-                ; pop Rq(reg)
+                ; mov Rq(dest_reg), rax
             );
         }
 
-        // Put return value in place.
-        if let Some(dest) = dest {
-            let dest_reg = self.local_to_reg(dest.local)?;
+        // To avoid breaking tests we need the same hack as `c_enter()` uses for now.
+        if self.rtn_var.is_none() {
+            self.rtn_var = dest.as_ref().cloned();
+        }
+
+        // Restore caller-save registers.
+        for reg in save_regs.iter().rev() {
             dynasm!(self.asm
-                ; mov Rq(dest_reg), rax
+                ; pop Rq(reg)
             );
         }
 
@@ -423,7 +487,7 @@ impl TraceCompiler {
 #[cfg(test)]
 mod tests {
     use super::{CompileError, HashMap, Local, TraceCompiler};
-    use libc::{c_void, getuid};
+    use libc::{abs, c_void, getuid};
     use std::collections::HashSet;
     use yktrace::tir::{CallOperand, Statement, TirOp, TirTrace};
     use yktrace::{start_tracing, TracingKind};
@@ -576,12 +640,65 @@ mod tests {
 
     /// Execute a trace which calls a symbol accepting no arguments, but which does return a value.
     #[test]
-    pub fn exec_call_symbol_no_args_with_rv() {
+    pub fn exec_call_symbol_no_args() {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         let expect = unsafe { getuid() };
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
         let got = TraceCompiler::compile(tir_trace).execute();
         assert_eq!(expect as u64, got);
+    }
+
+    /// Execute a trace which calls a symbol accepting arguments and returns a value.
+    #[test]
+    pub fn exec_call_symbol_with_arg() {
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let v = -56;
+        let expect = unsafe { abs(v) };
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let got = TraceCompiler::compile(tir_trace).execute();
+        assert_eq!(expect as u64, got);
+    }
+
+    /// The same as `exec_call_symbol_args_with_rv`, just using a constant argument.
+    #[test]
+    pub fn exec_call_symbol_with_const_arg() {
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let expect = unsafe { abs(-123) };
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let got = TraceCompiler::compile(tir_trace).execute();
+        assert_eq!(expect as u64, got);
+    }
+
+    #[test]
+    pub fn exec_call_symbol_with_many_args() {
+        extern "C" {
+            fn add6(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64) -> u64;
+        }
+
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let expect = unsafe { add6(1, 2, 3, 4, 5, 6) };
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let got = TraceCompiler::compile(tir_trace).execute();
+        assert_eq!(expect, 21);
+        assert_eq!(expect, got);
+    }
+
+    #[test]
+    pub fn exec_call_symbol_with_many_args_some_ignored() {
+        extern "C" {
+            fn add_some(a: u64, b: u64, c: u64, d: u64, e: u64) -> u64;
+        }
+
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let expect = unsafe { add_some(1, 2, 3, 4, 5) };
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let got = TraceCompiler::compile(tir_trace).execute();
+        assert_eq!(expect, 7);
+        assert_eq!(expect, got);
     }
 }

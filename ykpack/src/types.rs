@@ -264,6 +264,16 @@ pub enum Constant {
     Unimplemented(String),
 }
 
+impl Constant {
+    pub fn i64_cast(&self) -> i64 {
+        match self {
+            Self::Int(ci) => ci.i64_cast(),
+            Self::Bool(b) => *b as i64,
+            Self::Unimplemented(_) => unreachable!(),
+        }
+    }
+}
+
 impl Display for Constant {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -286,6 +296,33 @@ impl From<bool> for ConstantInt {
             ConstantInt::UnsignedInt(UnsignedInt::Usize(1))
         } else {
             ConstantInt::UnsignedInt(UnsignedInt::Usize(0))
+        }
+    }
+}
+
+impl ConstantInt {
+    /// Returns an i64 value suitable for loading into a register.
+    /// If the constant is signed, then it will be sign-extended.
+    pub fn i64_cast(&self) -> i64 {
+        match self {
+            ConstantInt::UnsignedInt(ui) => match ui {
+                UnsignedInt::U8(i) => *i as i64,
+                UnsignedInt::U16(i) => *i as i64,
+                UnsignedInt::U32(i) => *i as i64,
+                UnsignedInt::U64(i) => *i as i64,
+                #[cfg(target_pointer_width = "64")]
+                UnsignedInt::Usize(i) => *i as i64,
+                UnsignedInt::U128(_) => panic!("i64_cast: u128 to isize"),
+            },
+            ConstantInt::SignedInt(si) => match si {
+                SignedInt::I8(i) => *i as i64,
+                SignedInt::I16(i) => *i as i64,
+                SignedInt::I32(i) => *i as i64,
+                SignedInt::I64(i) => *i as i64,
+                #[cfg(target_pointer_width = "64")]
+                SignedInt::Isize(i) => *i as i64,
+                SignedInt::I128(_) => panic!("i64_cast: i128 to isize"),
+            },
         }
     }
 }
