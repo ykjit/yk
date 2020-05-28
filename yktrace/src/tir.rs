@@ -117,6 +117,10 @@ impl TirTrace {
                 }
             };
 
+            // Initialise VarRenamer's accumulator (and thus also set the first offset) to the
+            // traces most outer number of locals.
+            rnm.init_acc(body.num_locals);
+
             // When adding statements to the trace, we clone them (rather than referencing the
             // statements in the SIR) so that we have the freedom to mutate them later.
             let user_bb_idx_usize = usize::try_from(loc.bb_idx).unwrap();
@@ -158,7 +162,7 @@ impl TirTrace {
                 } => {
                     if let Some(callee_sym) = op.symbol() {
                         // We know the symbol name of the callee at least.
-                        let op = if SIR.bodies.contains_key(callee_sym) {
+                        let op = if let Some(callbody) = SIR.bodies.get(callee_sym) {
                             // We have SIR for the callee, so it will appear inlined in the trace
                             // and we only need to emit Enter/Leave statements.
 
@@ -175,7 +179,7 @@ impl TirTrace {
                             let newargs = rnm.rename_args(&args);
                             // Inform VarRenamer about this function's offset, which is equal to the
                             // number of variables assigned in the outer body.
-                            rnm.enter(body.num_locals, newdest.as_ref().unwrap().clone());
+                            rnm.enter(callbody.num_locals, newdest.as_ref().unwrap().clone());
                             TirOp::Statement(Statement::Enter(
                                 op.clone(),
                                 newargs,
@@ -314,6 +318,11 @@ struct VarRenamer {
     stack: Vec<u32>,
     /// Current offset used to rename variables.
     offset: u32,
+    /// Accumulator keeping track of total number of variables used. Needed to use different
+    /// offsets for consecutive inlined function calls.
+    acc: Option<u32>,
+    /// Stores the return variables of inlined function calls. Used to replace `$0` during
+    /// renaming.
     returns: Vec<Place>
 }
 
@@ -322,6 +331,7 @@ impl VarRenamer {
         VarRenamer {
             stack: vec![0],
             offset: 0,
+            acc: None,
             returns: Vec::new()
         }
     }
@@ -330,12 +340,22 @@ impl VarRenamer {
         self.offset
     }
 
+    fn init_acc(&mut self, num_locals: usize) {
+        if self.acc.is_none() {
+            self.acc.replace(num_locals as u32);
+        }
+    }
+
     fn enter(&mut self, num_locals: usize, dest: Place) {
-        // When entering an inlined function call update the current offset by adding the number of
-        // assigned variables in the outer context. Also add this offset to the stack, so we can
-        // restore it once we leave the inlined function call again.
-        self.offset += num_locals as u32;
+        // When entering an inlined function call set the offset to the current accumulator. Then
+        // increment the accumulator by the number of locals in the current function. Also add the
+        // offset to the stack, so we can restore it once we leave the inlined function call again.
+        self.offset = self.acc.unwrap();
         self.stack.push(self.offset);
+        match self.acc.as_mut() {
+            Some(v) => *v += num_locals as u32,
+            None => {}
+        }
         self.returns.push(dest);
     }
 
