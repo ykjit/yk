@@ -23,6 +23,8 @@ use dynasmrt::DynasmApi;
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub enum CompileError {
+    /// No return local found.
+    NoReturnLocal,
     /// We ran out of registers.
     /// In the long-run, when we have a proper register allocator, this won't be needed.
     OutOfRegisters,
@@ -36,6 +38,7 @@ pub enum CompileError {
 impl Display for CompileError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
+            Self::NoReturnLocal => write!(f, "No return local found"),
             Self::OutOfRegisters => write!(f, "Ran out of registers"),
             Self::Unimplemented(s) => write!(f, "Unimplemented compilation: {}", s),
             Self::UnknownSymbol(s) => write!(f, "Unknown symbol: {}", s),
@@ -125,9 +128,15 @@ impl TraceCompiler {
         }
     }
 
-    fn free_register(&mut self, local: &Local) {
+    fn free_register(&mut self, local: &Local) -> Result<(), CompileError> {
         if let Some(reg) = self.assigned_regs.remove(local) {
-            if local == &self.rtn_var.as_ref().unwrap().local {
+            if local
+                == &self
+                    .rtn_var
+                    .as_ref()
+                    .ok_or_else(|| CompileError::NoReturnLocal)?
+                    .local
+            {
                 // We currently assume that we only trace a single function which leaves its return
                 // value in RAX. Since we now inline a function's return variable this won't happen
                 // automatically anymore. To keep things working, we thus copy the return value of
@@ -138,6 +147,8 @@ impl TraceCompiler {
             }
             self.available_regs.push(reg);
         }
+
+        Ok(())
     }
 
     /// Move constant `c` of type `usize` into local `a`.
@@ -379,7 +390,7 @@ impl TraceCompiler {
             Statement::Enter(op, args, dest, off) => self.c_enter(op, args, dest, *off)?,
             Statement::Leave => {}
             Statement::StorageLive(_) => {}
-            Statement::StorageDead(l) => self.free_register(l),
+            Statement::StorageDead(l) => self.free_register(l)?,
             Statement::Call(target, args, dest) => self.c_call(target, args, dest)?,
             Statement::Nop => {}
             Statement::Unimplemented(s) => {
