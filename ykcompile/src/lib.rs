@@ -96,8 +96,9 @@ pub struct TraceCompiler {
     available_regs: Vec<u8>,
     /// Maps locals to their assigned registers.
     assigned_regs: HashMap<Local, u8>,
-    /// Stores the destination locals to which we copy RAX to after leaving an inlined call.
-    leaves: Vec<Option<Place>>,
+    /// Stores the destination local of the outermost function and moves its content into RAX at
+    /// the end of the trace.
+    rtn_var: Option<Place>,
 }
 
 impl TraceCompiler {
@@ -127,6 +128,15 @@ impl TraceCompiler {
 
     fn free_register(&mut self, local: &Local) {
         if let Some(reg) = self.assigned_regs.remove(local) {
+            if local == &self.rtn_var.as_ref().unwrap().local {
+                // We currently assume that we only trace a single function which leaves its return
+                // value in RAX. Since we now inline a function's return variable this won't happen
+                // automatically anymore. To keep things working, we thus copy the return value of
+                // the most outer function into RAX at the end of the trace.
+                dynasm!(self.asm
+                    ; mov rax, Rq(reg)
+                );
+            }
             self.available_regs.push(reg);
         }
     }
@@ -217,19 +227,9 @@ impl TraceCompiler {
                 },
             }
         }
-        // Remember the return destination.
-        self.leaves.push(dest.as_ref().cloned());
-        Ok(())
-    }
-
-    fn c_leave(&mut self) -> Result<(), CompileError> {
-        let dest = self.leaves.pop();
-        if let Some(d) = dest {
-            if let Some(d) = d {
-                // When we see a leave statement move whatever's left in RAX into the destination
-                // local.
-                self.mov_local_local(d.local, Local(0))?;
-            }
+        if self.rtn_var.is_none() {
+            // Remember the return variable of the most outer function.
+            self.rtn_var = dest.as_ref().cloned();
         }
         Ok(())
     }
@@ -313,7 +313,7 @@ impl TraceCompiler {
                 };
             }
             Statement::Enter(op, args, dest, off) => self.c_enter(op, args, dest, *off)?,
-            Statement::Leave => self.c_leave()?,
+            Statement::Leave => {}
             Statement::StorageLive(_) => {}
             Statement::StorageDead(l) => self.free_register(l),
             Statement::Call(target, args, dest) => self.c_call(target, args, dest)?,
@@ -388,7 +388,7 @@ impl TraceCompiler {
             // Use all the 64-bit registers we can (R15-R8, RDX, RCX).
             available_regs: vec![15, 14, 13, 12, 11, 10, 9, 8, 2, 1],
             assigned_regs: HashMap::new(),
-            leaves: Vec::new(),
+            rtn_var: None,
         };
 
         for i in 0..tt.len() {
@@ -452,7 +452,7 @@ mod tests {
             asm: dynasmrt::x64::Assembler::new().unwrap(),
             available_regs: vec![15, 14, 13, 12, 11, 10, 9, 8, 2, 1],
             assigned_regs: HashMap::new(),
-            leaves: Vec::new(),
+            rtn_var: None,
         };
 
         for _ in 0..32 {
@@ -470,7 +470,7 @@ mod tests {
             asm: dynasmrt::x64::Assembler::new().unwrap(),
             available_regs: vec![15, 14, 13, 12, 11, 10, 9, 8, 2, 1],
             assigned_regs: HashMap::new(),
-            leaves: Vec::new(),
+            rtn_var: None,
         };
 
         let mut seen = HashSet::new();
