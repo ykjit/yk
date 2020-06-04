@@ -1,3 +1,5 @@
+//! The Yorick TIR trace compiler.
+
 #![feature(proc_macro_hygiene)]
 #![feature(test)]
 #![feature(core_intrinsics)]
@@ -69,13 +71,14 @@ fn reg_num_to_name(r: u8) -> &'static str {
     }
 }
 
-/// A compiled SIRTrace.
+/// A compiled `SIRTrace`.
 pub struct CompiledTrace {
     /// A compiled trace.
     mc: dynasmrt::ExecutableBuffer,
 }
 
 impl CompiledTrace {
+    /// Execute the trace by calling (not jumping to) the first instruction's address.
     pub fn execute(&self) -> u64 {
         // For now a compiled trace always returns whatever has been left in register RAX. We also
         // assume for now that this will be a `u64`.
@@ -83,7 +86,7 @@ impl CompiledTrace {
         self.exec_trace(func)
     }
 
-    /// Jump to JITted code. This is a separate unmangled function to make it easy to set a
+    /// Actually call the code. This is a separate unmangled function to make it easy to set a
     /// debugger breakpoint right before entering the trace.
     #[no_mangle]
     fn exec_trace(&self, t_fn: fn() -> u64) -> u64 {
@@ -93,10 +96,11 @@ impl CompiledTrace {
 
 /// The `TraceCompiler` takes a `SIRTrace` and compiles it to machine code. Returns a `CompiledTrace`.
 pub struct TraceCompiler {
+    /// The dynasm assembler which will do all of the heavy lifting of the assembly.
     asm: dynasmrt::x64::Assembler,
-    /// Contains the list of currently available registers.
+    /// A list of currently available registers.
     available_regs: Vec<u8>,
-    /// Maps locals to their assigned registers.
+    /// Maps trace locals to their assigned registers.
     assigned_regs: HashMap<Local, u8>,
     /// Stores the destination local of the outermost function and moves its content into RAX at
     /// the end of the trace.
@@ -104,6 +108,8 @@ pub struct TraceCompiler {
 }
 
 impl TraceCompiler {
+    /// Given a local, returns the register allocation for it, or, if there is no allocation yet,
+    /// performs one.
     fn local_to_reg(&mut self, l: Local) -> Result<u8, CompileError> {
         // This is a really dumb register allocator, which runs out of available registers after 7
         // locals. We can do better than this by using StorageLive/StorageDead from the MIR to free
@@ -128,6 +134,7 @@ impl TraceCompiler {
         }
     }
 
+    /// Notifies the register allocator that the register allocated to `local` may now be re-used.
     fn free_register(&mut self, local: &Local) -> Result<(), CompileError> {
         if let Some(reg) = self.assigned_regs.remove(local) {
             if local
@@ -151,7 +158,7 @@ impl TraceCompiler {
         Ok(())
     }
 
-    /// Move local `var2` into local `var1`.
+    /// Copy the contents of the local `l2` into  `l1`.
     fn mov_local_local(&mut self, l1: Local, l2: Local) -> Result<(), CompileError> {
         let lreg = self.local_to_reg(l1)?;
         let rreg = self.local_to_reg(l2)?;
@@ -161,12 +168,14 @@ impl TraceCompiler {
         Ok(())
     }
 
+    /// Emit a NOP operation.
     fn nop(&mut self) {
         dynasm!(self.asm
             ; nop
         );
     }
 
+    /// Move a constant integer into a `Local`.
     fn mov_local_constint(
         &mut self,
         local: Local,
@@ -180,6 +189,7 @@ impl TraceCompiler {
         Ok(())
     }
 
+    /// Move a Boolean into a `Local`.
     fn mov_local_bool(&mut self, local: Local, b: bool) -> Result<(), CompileError> {
         let reg = self.local_to_reg(local)?;
         dynasm!(self.asm
@@ -188,6 +198,7 @@ impl TraceCompiler {
         Ok(())
     }
 
+    /// Compile the entry into an inlined function call.
     fn c_enter(
         &mut self,
         op: &CallOperand,
@@ -352,6 +363,7 @@ impl TraceCompiler {
         Ok(())
     }
 
+    /// Compile a TIR statement.
     fn statement(&mut self, stmt: &Statement) -> Result<(), CompileError> {
         match stmt {
             Statement::Assign(l, r) => {
@@ -387,11 +399,14 @@ impl TraceCompiler {
         Ok(())
     }
 
+    /// Compile a guard in the trace, emitting code to abort execution in case the guard fails.
     fn guard(&mut self, _grd: &Guard) -> Result<(), CompileError> {
         self.nop(); // FIXME compile guards
         Ok(())
     }
 
+    /// Print information about the state of the compiler in the hope that it can help with
+    /// debugging efforts.
     fn crash_dump(self, e: CompileError) -> ! {
         eprintln!("\nThe trace compiler crashed!\n");
         eprintln!("Reason: {}.\n", e);
@@ -431,16 +446,19 @@ impl TraceCompiler {
         panic!("stopped due to trace compilation error");
     }
 
+    /// Emit a return instruction.
     fn ret(&mut self) {
         dynasm!(self.asm
             ; ret
         );
     }
 
+    /// Finish compilation and return the executable code that was assembled.
     fn finish(self) -> dynasmrt::ExecutableBuffer {
         self.asm.finalize().unwrap()
     }
 
+    /// Compile a TIR trace, returning executable code.
     pub fn compile(tt: TirTrace) -> CompiledTrace {
         let assembler = dynasmrt::x64::Assembler::new().unwrap();
 
@@ -467,6 +485,7 @@ impl TraceCompiler {
         CompiledTrace { mc: tc.finish() }
     }
 
+    /// Returns a pointer to the static symbol `sym`, or an error if it cannot be found.
     fn find_symbol(sym: &str) -> Result<*mut c_void, CompileError> {
         use std::ffi::CString;
 
