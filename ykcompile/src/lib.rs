@@ -185,7 +185,11 @@ impl TraceCompiler {
         );
     }
 
-    fn c_mov_int(&mut self, local: Local, constant: &ConstantInt) -> Result<(), CompileError> {
+    fn mov_local_constint(
+        &mut self,
+        local: Local,
+        constant: &ConstantInt,
+    ) -> Result<(), CompileError> {
         let reg = self.local_to_reg(local)?;
         let c_val = constant.i64_cast();
         dynasm!(self.asm
@@ -194,7 +198,7 @@ impl TraceCompiler {
         Ok(())
     }
 
-    fn c_mov_bool(&mut self, local: Local, b: bool) -> Result<(), CompileError> {
+    fn mov_local_bool(&mut self, local: Local, b: bool) -> Result<(), CompileError> {
         let reg = self.local_to_reg(local)?;
         dynasm!(self.asm
             ; mov Rq(reg), QWORD b as i64
@@ -227,8 +231,8 @@ impl TraceCompiler {
             match op {
                 Operand::Place(p) => self.mov_local_local(arg_idx, p.local)?,
                 Operand::Constant(c) => match c {
-                    Constant::Int(ci) => self.c_mov_int(arg_idx, ci)?,
-                    Constant::Bool(b) => self.c_mov_bool(arg_idx, *b)?,
+                    Constant::Int(ci) => self.mov_local_constint(arg_idx, ci)?,
+                    Constant::Bool(b) => self.mov_local_bool(arg_idx, *b)?,
                     c => return Err(CompileError::Unimplemented(format!("{}", c))),
                 },
             }
@@ -380,8 +384,8 @@ impl TraceCompiler {
                         self.mov_local_local(l.local, p.local)?;
                     }
                     Rvalue::Use(Operand::Constant(c)) => match c {
-                        Constant::Int(ci) => self.c_mov_int(l.local, ci)?,
-                        Constant::Bool(b) => self.c_mov_bool(l.local, *b)?,
+                        Constant::Int(ci) => self.mov_local_constint(l.local, ci)?,
+                        Constant::Bool(b) => self.mov_local_bool(l.local, *b)?,
                         c => return Err(CompileError::Unimplemented(format!("{}", c))),
                     },
                     unimpl => return Err(CompileError::Unimplemented(format!("{}", unimpl))),
