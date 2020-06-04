@@ -151,24 +151,6 @@ impl TraceCompiler {
         Ok(())
     }
 
-    /// Move constant `c` of type `usize` into local `a`.
-    pub fn mov_local_usize(&mut self, local: Local, cnst: usize) -> Result<(), CompileError> {
-        let reg = self.local_to_reg(local)?;
-        dynasm!(self.asm
-            ; mov Rq(reg), cnst as i32
-        );
-        Ok(())
-    }
-
-    /// Move constant `c` of type `u8` into local `a`.
-    pub fn mov_local_u8(&mut self, local: Local, cnst: u8) -> Result<(), CompileError> {
-        let reg = self.local_to_reg(local)?;
-        dynasm!(self.asm
-            ; mov Rq(reg), cnst as i32
-        );
-        Ok(())
-    }
-
     /// Move local `var2` into local `var1`.
     fn mov_local_local(&mut self, l1: Local, l2: Local) -> Result<(), CompileError> {
         let lreg = self.local_to_reg(l1)?;
@@ -514,7 +496,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn test_simple() {
+    fn test_simple() {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         simple();
         let sir_trace = th.stop_tracing().unwrap();
@@ -526,7 +508,7 @@ mod tests {
     // Repeatedly fetching the register for the same local should yield the same register and
     // should not exhaust the allocator.
     #[test]
-    pub fn reg_alloc_same_local() {
+    fn reg_alloc_same_local() {
         let mut tc = TraceCompiler {
             asm: dynasmrt::x64::Assembler::new().unwrap(),
             available_regs: vec![15, 14, 13, 12, 11, 10, 9, 8, 2, 1],
@@ -544,7 +526,7 @@ mod tests {
 
     // Locals should be allocated to different registers.
     #[test]
-    pub fn reg_alloc() {
+    fn reg_alloc() {
         let mut tc = TraceCompiler {
             asm: dynasmrt::x64::Assembler::new().unwrap(),
             available_regs: vec![15, 14, 13, 12, 11, 10, 9, 8, 2, 1],
@@ -573,7 +555,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn test_function_call() {
+    fn test_function_call() {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         fcall();
         let sir_trace = th.stop_tracing().unwrap();
@@ -597,7 +579,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn test_function_call_nested() {
+    fn test_function_call_nested() {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         fnested();
         let sir_trace = th.stop_tracing().unwrap();
@@ -635,7 +617,7 @@ mod tests {
     // A trace which contains a call to something which we don't have SIR for should emit a TIR
     // call operation.
     #[test]
-    pub fn call_symbol() {
+    fn call_symbol() {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         let _ = core::intrinsics::wrapping_add(10u64, 40u64);
         let sir_trace = th.stop_tracing().unwrap();
@@ -655,7 +637,7 @@ mod tests {
 
     /// Execute a trace which calls a symbol accepting no arguments, but which does return a value.
     #[test]
-    pub fn exec_call_symbol_no_args() {
+    fn exec_call_symbol_no_args() {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         let expect = unsafe { getuid() };
         let sir_trace = th.stop_tracing().unwrap();
@@ -666,7 +648,7 @@ mod tests {
 
     /// Execute a trace which calls a symbol accepting arguments and returns a value.
     #[test]
-    pub fn exec_call_symbol_with_arg() {
+    fn exec_call_symbol_with_arg() {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         let v = -56;
         let expect = unsafe { abs(v) };
@@ -678,7 +660,7 @@ mod tests {
 
     /// The same as `exec_call_symbol_args_with_rv`, just using a constant argument.
     #[test]
-    pub fn exec_call_symbol_with_const_arg() {
+    fn exec_call_symbol_with_const_arg() {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         let expect = unsafe { abs(-123) };
         let sir_trace = th.stop_tracing().unwrap();
@@ -688,7 +670,7 @@ mod tests {
     }
 
     #[test]
-    pub fn exec_call_symbol_with_many_args() {
+    fn exec_call_symbol_with_many_args() {
         extern "C" {
             fn add6(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64) -> u64;
         }
@@ -703,7 +685,7 @@ mod tests {
     }
 
     #[test]
-    pub fn exec_call_symbol_with_many_args_some_ignored() {
+    fn exec_call_symbol_with_many_args_some_ignored() {
         extern "C" {
             fn add_some(a: u64, b: u64, c: u64, d: u64, e: u64) -> u64;
         }
