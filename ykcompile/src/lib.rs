@@ -1,3 +1,5 @@
+//! The Yorick TIR trace compiler.
+
 #![feature(proc_macro_hygiene)]
 #![feature(test)]
 #![feature(core_intrinsics)]
@@ -69,13 +71,14 @@ fn reg_num_to_name(r: u8) -> &'static str {
     }
 }
 
-/// A compiled SIRTrace.
+/// A compiled `SIRTrace`.
 pub struct CompiledTrace {
     /// A compiled trace.
     mc: dynasmrt::ExecutableBuffer,
 }
 
 impl CompiledTrace {
+    /// Execute the trace by calling (not jumping to) the first instruction's address.
     pub fn execute(&self) -> u64 {
         // For now a compiled trace always returns whatever has been left in register RAX. We also
         // assume for now that this will be a `u64`.
@@ -83,7 +86,7 @@ impl CompiledTrace {
         self.exec_trace(func)
     }
 
-    /// Jump to JITted code. This is a separate unmangled function to make it easy to set a
+    /// Actually call the code. This is a separate unmangled function to make it easy to set a
     /// debugger breakpoint right before entering the trace.
     #[no_mangle]
     fn exec_trace(&self, t_fn: fn() -> u64) -> u64 {
@@ -93,10 +96,11 @@ impl CompiledTrace {
 
 /// The `TraceCompiler` takes a `SIRTrace` and compiles it to machine code. Returns a `CompiledTrace`.
 pub struct TraceCompiler {
+    /// The dynasm assembler which will do all of the heavy lifting of the assembly.
     asm: dynasmrt::x64::Assembler,
-    /// Contains the list of currently available registers.
+    /// A list of currently available registers.
     available_regs: Vec<u8>,
-    /// Maps locals to their assigned registers.
+    /// Maps trace locals to their assigned registers.
     assigned_regs: HashMap<Local, u8>,
     /// Stores the destination local of the outermost function and moves its content into RAX at
     /// the end of the trace.
@@ -104,6 +108,8 @@ pub struct TraceCompiler {
 }
 
 impl TraceCompiler {
+    /// Given a local, returns the register allocation for it, or, if there is no allocation yet,
+    /// performs one.
     fn local_to_reg(&mut self, l: Local) -> Result<u8, CompileError> {
         // This is a really dumb register allocator, which runs out of available registers after 7
         // locals. We can do better than this by using StorageLive/StorageDead from the MIR to free
@@ -128,6 +134,7 @@ impl TraceCompiler {
         }
     }
 
+    /// Notifies the register allocator that the register allocated to `local` may now be re-used.
     fn free_register(&mut self, local: &Local) -> Result<(), CompileError> {
         if let Some(reg) = self.assigned_regs.remove(local) {
             if local
@@ -151,25 +158,7 @@ impl TraceCompiler {
         Ok(())
     }
 
-    /// Move constant `c` of type `usize` into local `a`.
-    pub fn mov_local_usize(&mut self, local: Local, cnst: usize) -> Result<(), CompileError> {
-        let reg = self.local_to_reg(local)?;
-        dynasm!(self.asm
-            ; mov Rq(reg), cnst as i32
-        );
-        Ok(())
-    }
-
-    /// Move constant `c` of type `u8` into local `a`.
-    pub fn mov_local_u8(&mut self, local: Local, cnst: u8) -> Result<(), CompileError> {
-        let reg = self.local_to_reg(local)?;
-        dynasm!(self.asm
-            ; mov Rq(reg), cnst as i32
-        );
-        Ok(())
-    }
-
-    /// Move local `var2` into local `var1`.
+    /// Copy the contents of the local `l2` into  `l1`.
     fn mov_local_local(&mut self, l1: Local, l2: Local) -> Result<(), CompileError> {
         let lreg = self.local_to_reg(l1)?;
         let rreg = self.local_to_reg(l2)?;
@@ -179,13 +168,19 @@ impl TraceCompiler {
         Ok(())
     }
 
+    /// Emit a NOP operation.
     fn nop(&mut self) {
         dynasm!(self.asm
             ; nop
         );
     }
 
-    fn c_mov_int(&mut self, local: Local, constant: &ConstantInt) -> Result<(), CompileError> {
+    /// Move a constant integer into a `Local`.
+    fn mov_local_constint(
+        &mut self,
+        local: Local,
+        constant: &ConstantInt,
+    ) -> Result<(), CompileError> {
         let reg = self.local_to_reg(local)?;
         let c_val = constant.i64_cast();
         dynasm!(self.asm
@@ -194,7 +189,8 @@ impl TraceCompiler {
         Ok(())
     }
 
-    fn c_mov_bool(&mut self, local: Local, b: bool) -> Result<(), CompileError> {
+    /// Move a Boolean into a `Local`.
+    fn mov_local_bool(&mut self, local: Local, b: bool) -> Result<(), CompileError> {
         let reg = self.local_to_reg(local)?;
         dynasm!(self.asm
             ; mov Rq(reg), QWORD b as i64
@@ -202,6 +198,7 @@ impl TraceCompiler {
         Ok(())
     }
 
+    /// Compile the entry into an inlined function call.
     fn c_enter(
         &mut self,
         op: &CallOperand,
@@ -227,8 +224,8 @@ impl TraceCompiler {
             match op {
                 Operand::Place(p) => self.mov_local_local(arg_idx, p.local)?,
                 Operand::Constant(c) => match c {
-                    Constant::Int(ci) => self.c_mov_int(arg_idx, ci)?,
-                    Constant::Bool(b) => self.c_mov_bool(arg_idx, *b)?,
+                    Constant::Int(ci) => self.mov_local_constint(arg_idx, ci)?,
+                    Constant::Bool(b) => self.mov_local_bool(arg_idx, *b)?,
                     c => return Err(CompileError::Unimplemented(format!("{}", c))),
                 },
             }
@@ -366,6 +363,7 @@ impl TraceCompiler {
         Ok(())
     }
 
+    /// Compile a TIR statement.
     fn statement(&mut self, stmt: &Statement) -> Result<(), CompileError> {
         match stmt {
             Statement::Assign(l, r) => {
@@ -380,8 +378,8 @@ impl TraceCompiler {
                         self.mov_local_local(l.local, p.local)?;
                     }
                     Rvalue::Use(Operand::Constant(c)) => match c {
-                        Constant::Int(ci) => self.c_mov_int(l.local, ci)?,
-                        Constant::Bool(b) => self.c_mov_bool(l.local, *b)?,
+                        Constant::Int(ci) => self.mov_local_constint(l.local, ci)?,
+                        Constant::Bool(b) => self.mov_local_bool(l.local, *b)?,
                         c => return Err(CompileError::Unimplemented(format!("{}", c))),
                     },
                     unimpl => return Err(CompileError::Unimplemented(format!("{}", unimpl))),
@@ -401,11 +399,14 @@ impl TraceCompiler {
         Ok(())
     }
 
+    /// Compile a guard in the trace, emitting code to abort execution in case the guard fails.
     fn guard(&mut self, _grd: &Guard) -> Result<(), CompileError> {
         self.nop(); // FIXME compile guards
         Ok(())
     }
 
+    /// Print information about the state of the compiler in the hope that it can help with
+    /// debugging efforts.
     fn crash_dump(self, e: CompileError) -> ! {
         eprintln!("\nThe trace compiler crashed!\n");
         eprintln!("Reason: {}.\n", e);
@@ -445,16 +446,19 @@ impl TraceCompiler {
         panic!("stopped due to trace compilation error");
     }
 
+    /// Emit a return instruction.
     fn ret(&mut self) {
         dynasm!(self.asm
             ; ret
         );
     }
 
+    /// Finish compilation and return the executable code that was assembled.
     fn finish(self) -> dynasmrt::ExecutableBuffer {
         self.asm.finalize().unwrap()
     }
 
+    /// Compile a TIR trace, returning executable code.
     pub fn compile(tt: TirTrace) -> CompiledTrace {
         let assembler = dynasmrt::x64::Assembler::new().unwrap();
 
@@ -481,6 +485,7 @@ impl TraceCompiler {
         CompiledTrace { mc: tc.finish() }
     }
 
+    /// Returns a pointer to the static symbol `sym`, or an error if it cannot be found.
     fn find_symbol(sym: &str) -> Result<*mut c_void, CompileError> {
         use std::ffi::CString;
 
@@ -510,7 +515,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn test_simple() {
+    fn test_simple() {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         simple();
         let sir_trace = th.stop_tracing().unwrap();
@@ -522,7 +527,7 @@ mod tests {
     // Repeatedly fetching the register for the same local should yield the same register and
     // should not exhaust the allocator.
     #[test]
-    pub fn reg_alloc_same_local() {
+    fn reg_alloc_same_local() {
         let mut tc = TraceCompiler {
             asm: dynasmrt::x64::Assembler::new().unwrap(),
             available_regs: vec![15, 14, 13, 12, 11, 10, 9, 8, 2, 1],
@@ -540,7 +545,7 @@ mod tests {
 
     // Locals should be allocated to different registers.
     #[test]
-    pub fn reg_alloc() {
+    fn reg_alloc() {
         let mut tc = TraceCompiler {
             asm: dynasmrt::x64::Assembler::new().unwrap(),
             available_regs: vec![15, 14, 13, 12, 11, 10, 9, 8, 2, 1],
@@ -569,7 +574,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn test_function_call() {
+    fn test_function_call() {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         fcall();
         let sir_trace = th.stop_tracing().unwrap();
@@ -593,7 +598,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn test_function_call_nested() {
+    fn test_function_call_nested() {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         fnested();
         let sir_trace = th.stop_tracing().unwrap();
@@ -631,7 +636,7 @@ mod tests {
     // A trace which contains a call to something which we don't have SIR for should emit a TIR
     // call operation.
     #[test]
-    pub fn call_symbol() {
+    fn call_symbol() {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         let _ = core::intrinsics::wrapping_add(10u64, 40u64);
         let sir_trace = th.stop_tracing().unwrap();
@@ -651,7 +656,7 @@ mod tests {
 
     /// Execute a trace which calls a symbol accepting no arguments, but which does return a value.
     #[test]
-    pub fn exec_call_symbol_no_args() {
+    fn exec_call_symbol_no_args() {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         let expect = unsafe { getuid() };
         let sir_trace = th.stop_tracing().unwrap();
@@ -662,7 +667,7 @@ mod tests {
 
     /// Execute a trace which calls a symbol accepting arguments and returns a value.
     #[test]
-    pub fn exec_call_symbol_with_arg() {
+    fn exec_call_symbol_with_arg() {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         let v = -56;
         let expect = unsafe { abs(v) };
@@ -674,7 +679,7 @@ mod tests {
 
     /// The same as `exec_call_symbol_args_with_rv`, just using a constant argument.
     #[test]
-    pub fn exec_call_symbol_with_const_arg() {
+    fn exec_call_symbol_with_const_arg() {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         let expect = unsafe { abs(-123) };
         let sir_trace = th.stop_tracing().unwrap();
@@ -684,7 +689,7 @@ mod tests {
     }
 
     #[test]
-    pub fn exec_call_symbol_with_many_args() {
+    fn exec_call_symbol_with_many_args() {
         extern "C" {
             fn add6(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64) -> u64;
         }
@@ -699,7 +704,7 @@ mod tests {
     }
 
     #[test]
-    pub fn exec_call_symbol_with_many_args_some_ignored() {
+    fn exec_call_symbol_with_many_args_some_ignored() {
         extern "C" {
             fn add_some(a: u64, b: u64, c: u64, d: u64, e: u64) -> u64;
         }
