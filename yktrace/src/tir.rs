@@ -505,16 +505,15 @@ mod tests {
         res
     }
 
-    #[ignore] // FIXME Fails becuase we have not properly populated terminators yet.
     #[test]
     fn nonempty_tir_trace() {
         #[cfg(tracermode = "sw")]
-        let mut tracer = start_tracing(Some(TracingKind::SoftwareTracing));
+        let tracer = start_tracing(Some(TracingKind::SoftwareTracing));
         #[cfg(tracermode = "hw")]
-        let mut tracer = start_tracing(Some(TracingKind::HardwareTracing));
+        let tracer = start_tracing(Some(TracingKind::HardwareTracing));
 
         let res = black_box(work(black_box(3), black_box(13)));
-        let sir_trace = tracer.t_impl.stop_tracing().unwrap();
+        let sir_trace = tracer.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
         assert_eq!(res, 15);
         assert!(tir_trace.len() > 0);

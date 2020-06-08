@@ -244,9 +244,6 @@ mod test_helpers {
         assert!(trace.into_iter().count() < trace.raw_len());
     }
 
-    // FIXME Fails because it fails to see the trace tail.
-    // This is presumably an issue with the mapper since the labelling scheme changed for new SIR.
-    #[ignore]
     #[test]
     fn trim_trace() {
         #[cfg(tracermode = "sw")]
@@ -254,7 +251,7 @@ mod test_helpers {
         #[cfg(tracermode = "hw")]
         let mut tracer = start_tracing(Some(TracingKind::HardwareTracing));
         work(black_box(100));
-        let sir_trace = tracer.t_impl.stop_tracing().unwrap();
+        let sir_trace = tracer.stop_tracing().unwrap();
 
         let contains_tracer_start_stop = |locs: Vec<&SirLoc>| {
             let mut found_start_code = false;
