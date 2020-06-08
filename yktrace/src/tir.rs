@@ -160,30 +160,32 @@ impl TirTrace {
                     args,
                     destination: dest
                 } => {
+                    // Rename the return value.
+                    //
+                    // FIXME It seems that calls always have a destination despite the field being
+                    // `Option`. If this is not always the case, we may want add the `Local` offset
+                    // (`var_len`) to this statement so we can assign the arguments to the correct
+                    // `Local`s during trace compilation.
+                    let ret_val = dest
+                        .as_ref()
+                        .map(|(ret_val, _)| rnm.rename_place(&ret_val))
+                        .unwrap();
+
                     if let Some(callee_sym) = op.symbol() {
                         // We know the symbol name of the callee at least.
                         let op = if let Some(callbody) = SIR.bodies.get(callee_sym) {
                             // We have SIR for the callee, so it will appear inlined in the trace
                             // and we only need to emit Enter/Leave statements.
 
-                            // Rename the destination if there is one.
-                            let newdest = dest
-                                .as_ref()
-                                .map(|(ret_val, _ret_bb)| rnm.rename_place(&ret_val));
-                            // FIXME It seems that calls always have a destination despite it being
-                            // an `Option`. If this is not always the case, we may want add the
-                            // `Local` offset (`var_len`) to this statement so we can assign the
-                            // arguments to the correct `Local`s during trace compilation.
-                            assert!(newdest.is_some());
                             // Rename all `Local`s within the arguments.
                             let newargs = rnm.rename_args(&args);
                             // Inform VarRenamer about this function's offset, which is equal to the
                             // number of variables assigned in the outer body.
-                            rnm.enter(callbody.num_locals, newdest.as_ref().unwrap().clone());
+                            rnm.enter(callbody.num_locals, ret_val.clone());
                             TirOp::Statement(Statement::Enter(
                                 op.clone(),
                                 newargs,
-                                newdest,
+                                Some(ret_val),
                                 rnm.offset()
                             ))
                         } else {
@@ -193,7 +195,7 @@ impl TirTrace {
                             TirOp::Statement(Statement::Call(
                                 op.clone(),
                                 args.to_vec(),
-                                dest.as_ref().map(|(ret_val, _ret_bb)| ret_val.clone())
+                                Some(ret_val)
                             ))
                         };
                         ops.push(op);
