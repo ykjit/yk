@@ -428,11 +428,10 @@ impl VarRenamer {
 
 impl Display for TirTrace {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "[Start TIR Trace]")?;
         for op in &self.ops {
             writeln!(f, "  {}", op)?;
         }
-        writeln!(f, "[End TIR Trace]")
+        Ok(())
     }
 }
 

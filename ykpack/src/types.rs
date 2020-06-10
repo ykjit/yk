@@ -36,7 +36,7 @@ macro_rules! new_ser128 {
 
         impl Display for $n {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "{}({})", stringify!($n), self.val())
+                write!(f, "{}{}", self.val(), stringify!($t))
             }
         }
     };
@@ -190,12 +190,34 @@ impl Display for Statement {
             Statement::Nop => write!(f, "nop"),
             Statement::Assign(l, r) => write!(f, "{} = {}", l, r),
             Statement::Enter(op, args, dest, off) => {
-                write!(f, "enter({:?}, {:?}, {:?}, {})", op, args, dest, off)
+                let args_s = args
+                    .iter()
+                    .map(|a| format!("{}", a))
+                    .collect::<Vec<String>>()
+                    .join(", ");
+                let dest_s = if let Some(dest) = dest {
+                    format!("{}", dest)
+                } else {
+                    String::from("none")
+                };
+                write!(f, "enter({}, [{}], {}, {})", op, args_s, dest_s, off)
             }
             Statement::Leave => write!(f, "leave"),
-            Statement::StorageLive(local) => write!(f, "StorageLive({:?})", local),
-            Statement::StorageDead(local) => write!(f, "StorageDead({:?})", local),
-            Statement::Call(op, args, dest) => write!(f, "call({:?}, {:?}, {:?})", op, args, dest),
+            Statement::StorageLive(local) => write!(f, "live({})", local),
+            Statement::StorageDead(local) => write!(f, "dead({})", local),
+            Statement::Call(op, args, dest) => {
+                let args_s = args
+                    .iter()
+                    .map(|a| format!("{}", a))
+                    .collect::<Vec<String>>()
+                    .join(", ");
+                let dest_s = if let Some(dest) = dest {
+                    format!("{}", dest)
+                } else {
+                    String::from("none")
+                };
+                write!(f, "call({}, [{}], {})", op, args_s, dest_s)
+            }
             Statement::Unimplemented(mir_stmt) => write!(f, "unimplemented_stmt: {}", mir_stmt),
         }
     }
@@ -380,7 +402,14 @@ pub enum UnsignedInt {
 
 impl Display for UnsignedInt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
+        match self {
+            Self::Usize(v) => write!(f, "{}usize", v),
+            Self::U8(v) => write!(f, "{}u8", v),
+            Self::U16(v) => write!(f, "{}u16", v),
+            Self::U32(v) => write!(f, "{}u32", v),
+            Self::U64(v) => write!(f, "{}u64", v),
+            Self::U128(v) => write!(f, "{}u128", v),
+        }
     }
 }
 
@@ -396,7 +425,14 @@ pub enum SignedInt {
 
 impl Display for SignedInt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
+        match self {
+            Self::Isize(v) => write!(f, "{}isize", v),
+            Self::I8(v) => write!(f, "{}i8", v),
+            Self::I16(v) => write!(f, "{}i16", v),
+            Self::I32(v) => write!(f, "{}i32", v),
+            Self::I64(v) => write!(f, "{}i64", v),
+            Self::I128(v) => write!(f, "{}i128", v),
+        }
     }
 }
 
@@ -476,7 +512,7 @@ impl Display for Terminator {
                 otherwise_bb,
             } => write!(
                 f,
-                "switch_int local={}, vals=[{}], targets=[{}], otherwise={}",
+                "switch_int {}, [{}], [{}], {}",
                 discr,
                 values
                     .iter()
@@ -495,14 +531,14 @@ impl Display for Terminator {
             Terminator::Drop {
                 location,
                 target_bb,
-            } => write!(f, "drop loc={}, target=bb{}", target_bb, location,),
+            } => write!(f, "drop {}, bb{}", target_bb, location,),
             Terminator::DropAndReplace {
                 location,
                 value,
                 target_bb,
             } => write!(
                 f,
-                "drop_and_replace loc={}, value={}, target=bb{}",
+                "drop_and_replace {}, {}, bb{}",
                 location, value, target_bb,
             ),
             Terminator::Call {
@@ -527,11 +563,7 @@ impl Display for Terminator {
                 cond,
                 target_bb,
                 expected,
-            } => write!(
-                f,
-                "assert cond={}, expected={}, target=bb{}",
-                cond, target_bb, expected
-            ),
+            } => write!(f, "assert {}, {}, bb{}", cond, target_bb, expected),
             Terminator::Unimplemented(s) => write!(f, "unimplemented: {}", s),
         }
     }
