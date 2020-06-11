@@ -247,9 +247,9 @@ mod test_helpers {
     #[test]
     fn trim_trace() {
         #[cfg(tracermode = "sw")]
-        let mut tracer = start_tracing(Some(TracingKind::SoftwareTracing));
+        let tracer = start_tracing(Some(TracingKind::SoftwareTracing));
         #[cfg(tracermode = "hw")]
-        let mut tracer = start_tracing(Some(TracingKind::HardwareTracing));
+        let tracer = start_tracing(Some(TracingKind::HardwareTracing));
         work(black_box(100));
         let sir_trace = tracer.stop_tracing().unwrap();
 
