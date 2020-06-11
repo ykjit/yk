@@ -208,7 +208,7 @@ mod tests {
     bb0:
         $0 = $1
         $2 = $3
-        $4 = U8(10)
+        $4 = 10u8
         nop
         goto bb20
     bb1:
@@ -216,7 +216,7 @@ mod tests {
         $5 = $4
         $7 = add($8, $9)
         $7 = sub($9, $10)
-        $11 = U8(0)
+        $11 = 0u8
         goto bb50
 [End SIR for symbol1]
 [Begin SIR for symbol2]
