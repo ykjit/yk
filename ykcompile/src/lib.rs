@@ -49,25 +49,28 @@ impl Display for CompileError {
 }
 
 /// Converts a register number into it's string name.
-fn reg_num_to_name(r: u8) -> &'static str {
-    match r {
-        0 => "rax",
-        1 => "rcx",
-        2 => "rdx",
-        3 => "rbx",
-        4 => "rsp",
-        5 => "rbp",
-        6 => "rsi",
-        7 => "rdi",
-        8 => "r8",
-        9 => "r9",
-        10 => "r10",
-        11 => "r11",
-        12 => "r12",
-        13 => "r13",
-        14 => "r14",
-        15 => "r15",
-        _ => unimplemented!(),
+fn local_to_reg_name(loc: &Location) -> &'static str {
+    match loc {
+        Location::Register(r) => match r {
+            0 => "rax",
+            1 => "rcx",
+            2 => "rdx",
+            3 => "rbx",
+            4 => "rsp",
+            5 => "rbp",
+            6 => "rsi",
+            7 => "rdi",
+            8 => "r8",
+            9 => "r9",
+            10 => "r10",
+            11 => "r11",
+            12 => "r12",
+            13 => "r13",
+            14 => "r14",
+            15 => "r15",
+            _ => unimplemented!(),
+        },
+        _ => "",
     }
 }
 
@@ -94,14 +97,21 @@ impl CompiledTrace {
     }
 }
 
+#[derive(Debug)]
+enum Location {
+    Register(u8),
+    Stack(u8),
+    NotLive,
+}
+
 /// The `TraceCompiler` takes a `SIRTrace` and compiles it to machine code. Returns a `CompiledTrace`.
 pub struct TraceCompiler {
     /// The dynasm assembler which will do all of the heavy lifting of the assembly.
     asm: dynasmrt::x64::Assembler,
-    /// A list of currently available registers.
-    available_regs: Vec<u8>,
-    /// Maps trace locals to their assigned registers.
-    assigned_regs: HashMap<Local, u8>,
+    /// Stores the content of each register.
+    register_content_map: HashMap<u8, Option<Local>>,
+    /// Maps trace locals to their location (register, stack).
+    variable_location_map: HashMap<Local, Location>,
     /// Stores the destination local of the outermost function and moves its content into RAX at
     /// the end of the trace.
     rtn_var: Option<Place>,
@@ -121,14 +131,28 @@ impl TraceCompiler {
             // it to the return register of the underlying X86_64 calling convention.
             Ok(0)
         } else {
-            if self.assigned_regs.contains_key(&l) {
-                Ok(self.assigned_regs[&l])
-            } else {
-                if let Some(reg) = self.available_regs.pop() {
-                    self.assigned_regs.insert(l, reg);
-                    Ok(reg)
-                } else {
-                    Err(CompileError::OutOfRegisters)
+            //if self.variable_location_map.contains_key(&l) {
+            match self.variable_location_map.get(&l) {
+                Some(Location::Register(reg)) => Ok(*reg),
+                Some(Location::Stack(_offset)) => todo!(),
+                Some(Location::NotLive) => unreachable!(),
+                None => {
+                    // Find a free register to store this Local
+                    if let Some(reg) = self.register_content_map.iter().find_map(|(k, v)| {
+                        if v == &None {
+                            Some(*k)
+                        } else {
+                            None
+                        }
+                    }) {
+                        self.register_content_map.insert(reg, Some(l));
+                        self.variable_location_map
+                            .insert(l, Location::Register(reg));
+                        Ok(reg)
+                    } else {
+                        // All registers are occupied. In the future we need to spill here.
+                        Err(CompileError::OutOfRegisters)
+                    }
                 }
             }
         }
@@ -136,25 +160,30 @@ impl TraceCompiler {
 
     /// Notifies the register allocator that the register allocated to `local` may now be re-used.
     fn free_register(&mut self, local: &Local) -> Result<(), CompileError> {
-        if let Some(reg) = self.assigned_regs.remove(local) {
-            if local
-                == &self
-                    .rtn_var
-                    .as_ref()
-                    .ok_or_else(|| CompileError::NoReturnLocal)?
-                    .local
-            {
-                // We currently assume that we only trace a single function which leaves its return
-                // value in RAX. Since we now inline a function's return variable this won't happen
-                // automatically anymore. To keep things working, we thus copy the return value of
-                // the most outer function into RAX at the end of the trace.
-                dynasm!(self.asm
-                    ; mov rax, Rq(reg)
-                );
+        match self.variable_location_map.get(local) {
+            Some(Location::Register(reg)) => {
+                // If this local is currently stored in a register, free it.
+                self.register_content_map.insert(*reg, None);
+                if local
+                    == &self
+                        .rtn_var
+                        .as_ref()
+                        .ok_or_else(|| CompileError::NoReturnLocal)?
+                        .local
+                {
+                    // We currently assume that we only trace a single function which leaves its return
+                    // value in RAX. Since we now inline a function's return variable this won't happen
+                    // automatically anymore. To keep things working, we thus copy the return value of
+                    // the outer-most function into RAX at the end of the trace.
+                    dynasm!(self.asm
+                        ; mov rax, Rq(reg)
+                    );
+                }
             }
-            self.available_regs.push(reg);
+            Some(Location::Stack(_offset)) => {}
+            Some(Location::NotLive) => {}
+            None => {}
         }
-
         Ok(())
     }
 
@@ -438,8 +467,13 @@ impl TraceCompiler {
 
         // Print the register allocation.
         eprintln!("\nRegister allocation (local -> reg):");
-        for (local, reg) in &self.assigned_regs {
-            eprintln!("  {:2} -> {:3} ({})", local, reg, reg_num_to_name(*reg));
+        for (local, location) in &self.variable_location_map {
+            eprintln!(
+                "  {:2} -> {:?} ({})",
+                local,
+                location,
+                local_to_reg_name(location)
+            );
         }
         eprintln!();
 
@@ -464,9 +498,14 @@ impl TraceCompiler {
 
         let mut tc = TraceCompiler {
             asm: assembler,
-            // Use all the 64-bit registers we can (R15-R8, RDX, RCX).
-            available_regs: vec![15, 14, 13, 12, 11, 10, 9, 8, 2, 1],
-            assigned_regs: HashMap::new(),
+            // Use all the 64-bit registers we can (R11-R8, RDX, RCX). We probably also want to use the
+            // callee-saved registers R15-R12 here in the future.
+            register_content_map: [11, 10, 9, 8, 2, 1]
+                .iter()
+                .cloned()
+                .map(|r| (r, None))
+                .collect(),
+            variable_location_map: HashMap::new(),
             rtn_var: None,
         };
 
@@ -530,8 +569,12 @@ mod tests {
     fn reg_alloc_same_local() {
         let mut tc = TraceCompiler {
             asm: dynasmrt::x64::Assembler::new().unwrap(),
-            available_regs: vec![15, 14, 13, 12, 11, 10, 9, 8, 2, 1],
-            assigned_regs: HashMap::new(),
+            register_content_map: [15, 14, 13, 12, 11, 10, 9, 8, 2, 1]
+                .iter()
+                .cloned()
+                .map(|r| (r, None))
+                .collect(),
+            variable_location_map: HashMap::new(),
             rtn_var: None,
         };
 
@@ -548,8 +591,12 @@ mod tests {
     fn reg_alloc() {
         let mut tc = TraceCompiler {
             asm: dynasmrt::x64::Assembler::new().unwrap(),
-            available_regs: vec![15, 14, 13, 12, 11, 10, 9, 8, 2, 1],
-            assigned_regs: HashMap::new(),
+            register_content_map: [15, 14, 13, 12, 11, 10, 9, 8, 2, 1]
+                .iter()
+                .cloned()
+                .map(|r| (r, None))
+                .collect(),
+            variable_location_map: HashMap::new(),
             rtn_var: None,
         };
 
@@ -574,7 +621,7 @@ mod tests {
     }
 
     #[test]
-    fn test_function_call() {
+    fn test_function_call_simple() {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         fcall();
         let sir_trace = th.stop_tracing().unwrap();
