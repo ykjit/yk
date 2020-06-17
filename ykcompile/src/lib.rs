@@ -145,8 +145,9 @@ impl TraceCompiler {
                 } else {
                     // All registers are occupied, so we need to spill the local to the stack. For
                     // now we assume that all spilled locals are 8 bytes big.
+                    let loc = Location::Stack(self.cur_stack_offset);
                     self.cur_stack_offset += 8;
-                    Location::Stack(self.cur_stack_offset)
+                    loc
                 };
                 let ret = loc.clone();
                 self.variable_location_map.insert(l, loc);
@@ -157,17 +158,17 @@ impl TraceCompiler {
 
     /// Notifies the register allocator that the register allocated to `local` may now be re-used.
     fn free_register(&mut self, local: &Local) -> Result<(), CompileError> {
+        let is_rtn_var = local
+            == &self
+                .rtn_var
+                .as_ref()
+                .ok_or_else(|| CompileError::NoReturnLocal)?
+                .local;
         match self.variable_location_map.get(local) {
             Some(Location::Register(reg)) => {
                 // If this local is currently stored in a register, free it.
                 self.register_content_map.insert(*reg, None);
-                if local
-                    == &self
-                        .rtn_var
-                        .as_ref()
-                        .ok_or_else(|| CompileError::NoReturnLocal)?
-                        .local
-                {
+                if is_rtn_var {
                     // We currently assume that we only trace a single function which leaves its return
                     // value in RAX. Since we now inline a function's return variable this won't happen
                     // automatically anymore. To keep things working, we thus copy the return value of
@@ -177,7 +178,13 @@ impl TraceCompiler {
                     );
                 }
             }
-            Some(Location::Stack(_offset)) => {}
+            Some(Location::Stack(offset)) => {
+                if is_rtn_var {
+                    dynasm!(self.asm
+                        ; mov rax, [rsp + *offset]
+                    );
+                }
+            }
             Some(Location::NotLive) => {}
             None => {}
         }
@@ -231,7 +238,18 @@ impl TraceCompiler {
                 );
             }
             Location::Stack(offset) => {
-                todo!();
+                if c_val <= u32::MAX.into() {
+                    let val = c_val as u32 as i32;
+                    dynasm!(self.asm
+                        ; mov QWORD [rsp+offset], val
+                    );
+                } else {
+                    // TODO If value > 32bit, split into two parts and move each part seperately
+                    // e.g.
+                    // mov dword [rdi], lower part
+                    // mov dword [rdi+4], higher part
+                    todo!()
+                }
             }
             Location::NotLive => unreachable!(),
         }
@@ -524,7 +542,15 @@ impl TraceCompiler {
     /// Emit a return instruction.
     fn ret(&mut self) {
         dynasm!(self.asm
+            ; add rsp, 80
             ; ret
+        );
+    }
+
+    fn init(&mut self) {
+        // For now just reserve stack space for 10 locals.
+        dynasm!(self.asm
+            ; sub rsp, 80
         );
     }
 
@@ -548,8 +574,10 @@ impl TraceCompiler {
                 .collect(),
             variable_location_map: HashMap::new(),
             rtn_var: None,
-            cur_stack_offset: 8,
+            cur_stack_offset: 0,
         };
+
+        tc.init();
 
         for i in 0..tt.len() {
             let res = match tt.op(i) {
@@ -640,7 +668,7 @@ mod tests {
                 .collect(),
             variable_location_map: HashMap::new(),
             rtn_var: None,
-            cur_stack_offset: 8,
+            cur_stack_offset: 0,
         };
 
         let mut seen: Vec<Result<Location, CompileError>> = Vec::new();
@@ -806,5 +834,26 @@ mod tests {
         let got = TraceCompiler::compile(tir_trace).execute();
         assert_eq!(expect, 7);
         assert_eq!(expect, got);
+    }
+
+    fn many_locals() -> u8 {
+        let _a = 1;
+        let _b = 2;
+        let _c = 3;
+        let _d = 4;
+        let _e = 5;
+        let _f = 6;
+        let h = 7;
+        h
+    }
+
+    #[test]
+    fn test_spilling_simple() {
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        many_locals();
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let ct = TraceCompiler::compile(tir_trace);
+        assert_eq!(ct.execute(), 7);
     }
 }
