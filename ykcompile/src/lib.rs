@@ -97,10 +97,10 @@ impl CompiledTrace {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 enum Location {
     Register(u8),
-    Stack(u8),
+    Stack(i32),
     NotLive,
 }
 
@@ -115,45 +115,42 @@ pub struct TraceCompiler {
     /// Stores the destination local of the outermost function and moves its content into RAX at
     /// the end of the trace.
     rtn_var: Option<Place>,
+    /// The amount of stack space in bytes used so far by spilled variables.
+    cur_stack_offset: i32,
 }
 
 impl TraceCompiler {
     /// Given a local, returns the register allocation for it, or, if there is no allocation yet,
     /// performs one.
-    fn local_to_reg(&mut self, l: Local) -> Result<u8, CompileError> {
-        // This is a really dumb register allocator, which runs out of available registers after 7
-        // locals. We can do better than this by using StorageLive/StorageDead from the MIR to free
-        // up registers again, and allocate additional locals on the stack. Though, ultimately we
-        // probably want to implement a proper register allocator, e.g. linear scan.
-
+    fn local_to_location(&mut self, l: Local) -> Result<Location, CompileError> {
         if l == Local(0) {
             // In SIR, `Local` zero is the (implicit) return value, so it makes sense to allocate
             // it to the return register of the underlying X86_64 calling convention.
-            Ok(0)
+            Ok(Location::Register(0))
         } else {
-            //if self.variable_location_map.contains_key(&l) {
-            match self.variable_location_map.get(&l) {
-                Some(Location::Register(reg)) => Ok(*reg),
-                Some(Location::Stack(_offset)) => todo!(),
-                Some(Location::NotLive) => unreachable!(),
-                None => {
-                    // Find a free register to store this Local
-                    if let Some(reg) = self.register_content_map.iter().find_map(|(k, v)| {
-                        if v == &None {
-                            Some(*k)
-                        } else {
-                            None
-                        }
-                    }) {
-                        self.register_content_map.insert(reg, Some(l));
-                        self.variable_location_map
-                            .insert(l, Location::Register(reg));
-                        Ok(reg)
+            if let Some(location) = self.variable_location_map.get(&l) {
+                // We already have a location for this local.
+                Ok(location.clone())
+            } else {
+                // Find a free register to store this local.
+                let loc = if let Some(reg) = self.register_content_map.iter().find_map(|(k, v)| {
+                    if v == &None {
+                        Some(*k)
                     } else {
-                        // All registers are occupied. In the future we need to spill here.
-                        Err(CompileError::OutOfRegisters)
+                        None
                     }
-                }
+                }) {
+                    self.register_content_map.insert(reg, Some(l));
+                    Location::Register(reg)
+                } else {
+                    // All registers are occupied, so we need to spill the local to the stack. For
+                    // now we assume that all spilled locals are 8 bytes big.
+                    self.cur_stack_offset += 8;
+                    Location::Stack(self.cur_stack_offset)
+                };
+                let ret = loc.clone();
+                self.variable_location_map.insert(l, loc);
+                Ok(ret)
             }
         }
     }
@@ -184,16 +181,31 @@ impl TraceCompiler {
             Some(Location::NotLive) => {}
             None => {}
         }
+        self.variable_location_map.insert(*local, Location::NotLive);
         Ok(())
     }
 
     /// Copy the contents of the local `l2` into  `l1`.
     fn mov_local_local(&mut self, l1: Local, l2: Local) -> Result<(), CompileError> {
-        let lreg = self.local_to_reg(l1)?;
-        let rreg = self.local_to_reg(l2)?;
-        dynasm!(self.asm
-            ; mov Rq(lreg), Rq(rreg)
-        );
+        let lloc = self.local_to_location(l1)?;
+        let rloc = self.local_to_location(l2)?;
+        match (lloc, rloc) {
+            (Location::Register(lreg), Location::Register(rreg)) => {
+                dynasm!(self.asm
+                    ; mov Rq(lreg), Rq(rreg)
+                );
+            }
+            (Location::Register(_reg), Location::Stack(_off)) => {
+                todo!();
+            }
+            (Location::Stack(_off), Location::Register(_reg)) => {
+                todo!();
+            }
+            (Location::Stack(_off1), Location::Stack(_off2)) => {
+                todo!();
+            }
+            _ => unreachable!(),
+        }
         Ok(())
     }
 
@@ -210,20 +222,35 @@ impl TraceCompiler {
         local: Local,
         constant: &ConstantInt,
     ) -> Result<(), CompileError> {
-        let reg = self.local_to_reg(local)?;
+        let loc = self.local_to_location(local)?;
         let c_val = constant.i64_cast();
-        dynasm!(self.asm
-            ; mov Rq(reg), QWORD c_val
-        );
+        match loc {
+            Location::Register(reg) => {
+                dynasm!(self.asm
+                    ; mov Rq(reg), QWORD c_val
+                );
+            }
+            Location::Stack(offset) => {
+                todo!();
+            }
+            Location::NotLive => unreachable!(),
+        }
         Ok(())
     }
 
     /// Move a Boolean into a `Local`.
     fn mov_local_bool(&mut self, local: Local, b: bool) -> Result<(), CompileError> {
-        let reg = self.local_to_reg(local)?;
-        dynasm!(self.asm
-            ; mov Rq(reg), QWORD b as i64
-        );
+        match self.local_to_location(local)? {
+            Location::Register(reg) => {
+                dynasm!(self.asm
+                    ; mov Rq(reg), QWORD b as i64
+                );
+            }
+            Location::Stack(_offset) => {
+                todo!();
+            }
+            Location::NotLive => unreachable!(),
+        }
         Ok(())
     }
 
@@ -302,10 +329,15 @@ impl TraceCompiler {
         }
 
         // Figure out where the return value (if there is one) is going.
-        let dest_reg: Option<u8> = if let Some(d) = dest {
-            Some(self.local_to_reg(d.local)?)
+        let dest_location: Option<Location> = if let Some(d) = dest {
+            Some(self.local_to_location(d.local)?)
         } else {
             None
+        };
+
+        let dest_reg: Option<u8> = match dest_location {
+            Some(Location::Register(reg)) => Some(reg),
+            _ => None,
         };
 
         // Save Sys-V caller save registers to the stack, but skip the one (if there is one) that
@@ -348,7 +380,10 @@ impl TraceCompiler {
                         return Err(CompileError::Unimplemented("projected argument".to_owned()));
                     }
                     // Load argument back from the stack.
-                    let idx = stack_index(self.local_to_reg(*local)?);
+                    let idx = match self.local_to_location(*local)? {
+                        Location::Register(reg) => stack_index(reg),
+                        _ => unreachable!(), // Is this true?
+                    };
                     dynasm!(self.asm
                         ; mov Rq(arg_reg), [rsp + idx * 8]
                     );
@@ -371,10 +406,16 @@ impl TraceCompiler {
         );
 
         // Put return value in place.
-        if let Some(dest_reg) = dest_reg {
-            dynasm!(self.asm
-                ; mov Rq(dest_reg), rax
-            );
+        match dest_location {
+            Some(Location::Register(reg)) => {
+                dynasm!(self.asm
+                    ; mov Rq(reg), rax
+                );
+            }
+            Some(Location::Stack(_off)) => {
+                todo!();
+            }
+            _ => {}
         }
 
         // To avoid breaking tests we need the same hack as `c_enter()` uses for now.
@@ -507,6 +548,7 @@ impl TraceCompiler {
                 .collect(),
             variable_location_map: HashMap::new(),
             rtn_var: None,
+            cur_stack_offset: 8,
         };
 
         for i in 0..tt.len() {
@@ -541,9 +583,8 @@ impl TraceCompiler {
 
 #[cfg(test)]
 mod tests {
-    use super::{CompileError, HashMap, Local, TraceCompiler};
+    use super::{CompileError, HashMap, Local, Location, TraceCompiler};
     use libc::{abs, c_void, getuid};
-    use std::collections::HashSet;
     use yktrace::tir::{CallOperand, Statement, TirOp, TirTrace};
     use yktrace::{start_tracing, TracingKind};
 
@@ -576,12 +617,13 @@ mod tests {
                 .collect(),
             variable_location_map: HashMap::new(),
             rtn_var: None,
+            cur_stack_offset: 8,
         };
 
         for _ in 0..32 {
             assert_eq!(
-                tc.local_to_reg(Local(1)).unwrap(),
-                tc.local_to_reg(Local(1)).unwrap()
+                tc.local_to_location(Local(1)).unwrap(),
+                tc.local_to_location(Local(1)).unwrap()
             );
         }
     }
@@ -598,13 +640,14 @@ mod tests {
                 .collect(),
             variable_location_map: HashMap::new(),
             rtn_var: None,
+            cur_stack_offset: 8,
         };
 
-        let mut seen = HashSet::new();
+        let mut seen: Vec<Result<Location, CompileError>> = Vec::new();
         for l in 0..7 {
-            let reg = tc.local_to_reg(Local(l));
+            let reg = tc.local_to_location(Local(l));
             assert!(!seen.contains(&reg));
-            seen.insert(reg);
+            seen.push(reg);
         }
     }
 
