@@ -202,14 +202,25 @@ impl TraceCompiler {
                     ; mov Rq(lreg), Rq(rreg)
                 );
             }
-            (Location::Register(_reg), Location::Stack(_off)) => {
-                todo!();
+            (Location::Register(reg), Location::Stack(off)) => {
+                dynasm!(self.asm
+                    ; mov Rq(reg), [rsp + off]
+                );
             }
-            (Location::Stack(_off), Location::Register(_reg)) => {
-                todo!();
+            (Location::Stack(off), Location::Register(reg)) => {
+                dynasm!(self.asm
+                    ; mov [rsp + off], Rq(reg)
+                );
             }
-            (Location::Stack(_off1), Location::Stack(_off2)) => {
-                todo!();
+            (Location::Stack(off1), Location::Stack(off2)) => {
+                // Since RAX is currently not available to the register allocator, we can use it
+                // here to simplify moving values from the stack back onto the stack (which x86
+                // does not support). Otherwise, we would have to free up a register via spilling,
+                // making this operation more complicated and costly.
+                dynasm!(self.asm
+                    ; mov rax, [rsp + off2]
+                    ; mov [rsp + off1], rax
+                );
             }
             _ => unreachable!(),
         }
@@ -264,8 +275,11 @@ impl TraceCompiler {
                     ; mov Rq(reg), QWORD b as i64
                 );
             }
-            Location::Stack(_offset) => {
-                todo!();
+            Location::Stack(offset) => {
+                let val = b as i32;
+                dynasm!(self.asm
+                    ; mov QWORD [rsp+offset], val
+                );
             }
             Location::NotLive => unreachable!(),
         }
@@ -400,7 +414,8 @@ impl TraceCompiler {
                     // Load argument back from the stack.
                     let idx = match self.local_to_location(*local)? {
                         Location::Register(reg) => stack_index(reg),
-                        _ => unreachable!(), // Is this true?
+                        Location::Stack(_off) => todo!(),
+                        Location::NotLive => unreachable!(),
                     };
                     dynasm!(self.asm
                         ; mov Rq(arg_reg), [rsp + idx * 8]
@@ -559,8 +574,25 @@ impl TraceCompiler {
         self.asm.finalize().unwrap()
     }
 
+    #[cfg(test)]
+    fn test_compile(tt: TirTrace) -> (CompiledTrace, i32) {
+        // Changing the registers available to the register allocator affects the number of spills,
+        // and thus also some tests. To make sure we notice when this happens we also check the
+        // number of spills in those tests. We thus need a slightly different version of the
+        // `compile` function that provides this information to the test.
+        let tc = TraceCompiler::_compile(tt);
+        let spills = tc.cur_stack_offset;
+        let ct = CompiledTrace { mc: tc.finish() };
+        (ct, spills)
+    }
+
     /// Compile a TIR trace, returning executable code.
     pub fn compile(tt: TirTrace) -> CompiledTrace {
+        let tc = TraceCompiler::_compile(tt);
+        CompiledTrace { mc: tc.finish() }
+    }
+
+    fn _compile(tt: TirTrace) -> TraceCompiler {
         let assembler = dynasmrt::x64::Assembler::new().unwrap();
 
         let mut tc = TraceCompiler {
@@ -591,7 +623,7 @@ impl TraceCompiler {
         }
 
         tc.ret();
-        CompiledTrace { mc: tc.finish() }
+        tc
     }
 
     /// Returns a pointer to the static symbol `sym`, or an error if it cannot be found.
@@ -844,6 +876,7 @@ mod tests {
         let _e = 5;
         let _f = 6;
         let h = 7;
+        let _g = true;
         h
     }
 
@@ -853,7 +886,54 @@ mod tests {
         many_locals();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
-        let ct = TraceCompiler::compile(tir_trace);
+        let (ct, spills) = TraceCompiler::test_compile(tir_trace);
         assert_eq!(ct.execute(), 7);
+        assert_eq!(spills, 3 * 8);
+    }
+
+    fn register_to_stack(arg: u8) -> u8 {
+        let _a = 1;
+        let _b = 2;
+        let _c = 3;
+        let _d = 4;
+        let _e = 5;
+        let _f = 6;
+        let h = arg;
+        h
+    }
+
+    #[test]
+    fn test_mov_register_to_stack() {
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        register_to_stack(8);
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let (ct, spills) = TraceCompiler::test_compile(tir_trace);
+        assert_eq!(ct.execute(), 8);
+        assert_eq!(spills, 3 * 8);
+    }
+
+    fn stack_to_register() -> u8 {
+        let _a = 1;
+        let _b = 2;
+        let c = 3;
+        let _d = 4;
+        // When returning from `farg` all registers are full, so `e` needs to be allocated on the
+        // stack. However, after we have returned, anything allocated during `farg` is freed. Thus
+        // returning `e` will allocate a new local in a (newly freed) register, resulting in a `mov
+        // reg, [rsp]` instruction.
+        let e = farg(c);
+        e
+    }
+
+    #[test]
+    fn test_mov_stack_to_register() {
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        stack_to_register();
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let (ct, spills) = TraceCompiler::test_compile(tir_trace);
+        assert_eq!(ct.execute(), 3);
+        assert_eq!(spills, 1 * 8);
     }
 }
