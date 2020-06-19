@@ -21,7 +21,7 @@ use yktrace::tir::{
     TirTrace,
 };
 
-use dynasmrt::DynasmApi;
+use dynasmrt::{DynasmApi, DynasmLabelApi};
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub enum CompileError {
@@ -556,16 +556,23 @@ impl TraceCompiler {
 
     /// Emit a return instruction.
     fn ret(&mut self) {
+        // Reset the stack pointer and return from the trace. We also need to generate the code
+        // that reserves stack space for spilled locals here, since we don't know at the beginning
+        // of the trace how many locals are going to be spilled.
         dynasm!(self.asm
-            ; add rsp, 80
+            ; add rsp, self.cur_stack_offset
             ; ret
+            ; ->reserve:
+            ; sub rsp, self.cur_stack_offset
+            ; jmp ->main
         );
     }
 
     fn init(&mut self) {
-        // For now just reserve stack space for 10 locals.
+        // Jump to the label that reserves stack space for spilled locals.
         dynasm!(self.asm
-            ; sub rsp, 80
+            ; jmp ->reserve
+            ; ->main:
         );
     }
 
