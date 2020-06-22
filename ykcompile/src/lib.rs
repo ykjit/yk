@@ -393,6 +393,10 @@ impl TraceCompiler {
             );
         }
 
+        // The offset of the saved registers pushed to the stack. We need to add this value to the
+        // offset of spilled registers when loading them.
+        let push_sz: i32 = save_regs.len() as i32 * 8;
+
         // Helper function to find the index of a caller-save register previously pushed to the stack.
         // The first register pushed is at the highest stack offset (from the stack pointer), hence
         // reversing the order of `save_regs`.
@@ -412,13 +416,13 @@ impl TraceCompiler {
                         return Err(CompileError::Unimplemented("projected argument".to_owned()));
                     }
                     // Load argument back from the stack.
-                    let idx = match self.local_to_location(*local)? {
-                        Location::Register(reg) => stack_index(reg),
-                        Location::Stack(_off) => todo!(),
+                    let offs = match self.local_to_location(*local)? {
+                        Location::Register(reg) => stack_index(reg) * 8,
+                        Location::Stack(off) => off + push_sz,
                         Location::NotLive => unreachable!(),
                     };
                     dynasm!(self.asm
-                        ; mov Rq(arg_reg), [rsp + idx * 8]
+                        ; mov Rq(arg_reg), [rsp + offs]
                     );
                 }
                 Operand::Constant(c) => {
@@ -445,10 +449,12 @@ impl TraceCompiler {
                     ; mov Rq(reg), rax
                 );
             }
-            Some(Location::Stack(_off)) => {
-                todo!();
+            Some(Location::Stack(off)) => {
+                dynasm!(self.asm
+                    ; mov QWORD [rsp+off], rax
+                );
             }
-            _ => {}
+            _ => unreachable!(),
         }
 
         // To avoid breaking tests we need the same hack as `c_enter()` uses for now.
@@ -942,5 +948,31 @@ mod tests {
         let (ct, spills) = TraceCompiler::test_compile(tir_trace);
         assert_eq!(ct.execute(), 3);
         assert_eq!(spills, 1 * 8);
+    }
+
+    fn ext_call() -> u64 {
+        extern "C" {
+            fn add_some(a: u64, b: u64, c: u64, d: u64, e: u64) -> u64;
+        }
+        let a = 1;
+        let b = 2;
+        let c = 3;
+        let d = 4;
+        let e = 5;
+        // When calling `add_some` argument `a` is loaded from a register, while the remaining
+        // arguments are loaded from the stack.
+        let expect = unsafe { add_some(a, b, c, d, e) };
+        expect
+    }
+
+    #[test]
+    fn ext_call_and_spilling() {
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let expect = ext_call();
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let got = TraceCompiler::compile(tir_trace).execute();
+        assert_eq!(expect, 7);
+        assert_eq!(expect, got);
     }
 }
