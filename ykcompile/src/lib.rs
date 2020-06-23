@@ -255,11 +255,15 @@ impl TraceCompiler {
                         ; mov QWORD [rsp+offset], val
                     );
                 } else {
-                    // TODO If value > 32bit, split into two parts and move each part seperately
-                    // e.g.
-                    // mov dword [rdi], lower part
-                    // mov dword [rdi+4], higher part
-                    todo!()
+                    // x86 doesn't allow writing 64bit immediates directly to the stack. We thus
+                    // have to split up the immediate into two 32bit values and write them one at a
+                    // time.
+                    let v1 = c_val as u32 as i32;
+                    let v2 = (c_val >> 32) as u32 as i32;
+                    dynasm!(self.asm
+                        ; mov DWORD [rsp+offset], v1
+                        ; mov DWORD [rsp+offset+4], v2
+                    );
                 }
             }
             Location::NotLive => unreachable!(),
@@ -902,6 +906,36 @@ mod tests {
         let (ct, spills) = TraceCompiler::test_compile(tir_trace);
         assert_eq!(ct.execute(), 7);
         assert_eq!(spills, 3 * 8);
+    }
+
+    fn u64value() -> u64 {
+        // We need an extra function here to avoid SIR optimising this by assigning assigning the
+        // constant directly to the return value (which is a register).
+        4294967296 + 8
+    }
+
+    #[inline(never)]
+    fn spill_u64() -> u64 {
+        let _a = 1;
+        let _b = 2;
+        let _c = 3;
+        let _d = 4;
+        let _e = 5;
+        let _f = 6;
+        let h: u64 = u64value();
+        h
+    }
+
+    #[test]
+    fn test_spilling_u64() {
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        spill_u64();
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let (ct, spills) = TraceCompiler::test_compile(tir_trace);
+        let got = ct.execute();
+        assert_eq!(got, 4294967296 + 8);
+        assert_eq!(spills, 2 * 8);
     }
 
     fn register_to_stack(arg: u8) -> u8 {
