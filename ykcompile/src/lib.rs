@@ -9,6 +9,8 @@ extern crate dynasm;
 extern crate dynasmrt;
 extern crate test;
 
+mod stack_builder;
+
 use libc::{c_void, dlsym, RTLD_DEFAULT};
 use std::collections::HashMap;
 use std::convert::TryFrom;
