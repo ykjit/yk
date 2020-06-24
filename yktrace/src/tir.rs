@@ -173,12 +173,12 @@ impl TirTrace {
 
                     if let Some(callee_sym) = op.symbol() {
                         // We know the symbol name of the callee at least.
+                        // Rename all `Local`s within the arguments.
+                        let newargs = rnm.rename_args(&args);
                         let op = if let Some(callbody) = SIR.bodies.get(callee_sym) {
                             // We have SIR for the callee, so it will appear inlined in the trace
                             // and we only need to emit Enter/Leave statements.
 
-                            // Rename all `Local`s within the arguments.
-                            let newargs = rnm.rename_args(&args);
                             // Inform VarRenamer about this function's offset, which is equal to the
                             // number of variables assigned in the outer body.
                             rnm.enter(callbody.num_locals, ret_val.clone());
@@ -192,11 +192,7 @@ impl TirTrace {
                             // We have a symbol name but no SIR. Without SIR the callee can't
                             // appear inlined in the trace, so we should emit a native call to the
                             // symbol instead.
-                            TirOp::Statement(Statement::Call(
-                                op.clone(),
-                                args.to_vec(),
-                                Some(ret_val)
-                            ))
+                            TirOp::Statement(Statement::Call(op.clone(), newargs, Some(ret_val)))
                         };
                         ops.push(op);
                     } else {
