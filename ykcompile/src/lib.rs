@@ -147,8 +147,8 @@ impl TraceCompiler {
                 } else {
                     // All registers are occupied, so we need to spill the local to the stack. For
                     // now we assume that all spilled locals are 8 bytes big.
-                    let loc = Location::Stack(self.cur_stack_offset);
                     self.cur_stack_offset += 8;
+                    let loc = Location::Stack(self.cur_stack_offset);
                     loc
                 };
                 let ret = loc.clone();
@@ -183,7 +183,7 @@ impl TraceCompiler {
             Some(Location::Stack(offset)) => {
                 if is_rtn_var {
                     dynasm!(self.asm
-                        ; mov rax, [rsp + *offset]
+                        ; mov rax, [rbp - *offset]
                     );
                 }
             }
@@ -206,12 +206,12 @@ impl TraceCompiler {
             }
             (Location::Register(reg), Location::Stack(off)) => {
                 dynasm!(self.asm
-                    ; mov Rq(reg), [rsp + off]
+                    ; mov Rq(reg), [rbp - off]
                 );
             }
             (Location::Stack(off), Location::Register(reg)) => {
                 dynasm!(self.asm
-                    ; mov [rsp + off], Rq(reg)
+                    ; mov [rbp - off], Rq(reg)
                 );
             }
             (Location::Stack(off1), Location::Stack(off2)) => {
@@ -220,8 +220,8 @@ impl TraceCompiler {
                 // does not support). Otherwise, we would have to free up a register via spilling,
                 // making this operation more complicated and costly.
                 dynasm!(self.asm
-                    ; mov rax, [rsp + off2]
-                    ; mov [rsp + off1], rax
+                    ; mov rax, [rbp - off2]
+                    ; mov [rbp - off1], rax
                 );
             }
             _ => unreachable!(),
@@ -254,7 +254,7 @@ impl TraceCompiler {
                 if c_val <= u32::MAX.into() {
                     let val = c_val as u32 as i32;
                     dynasm!(self.asm
-                        ; mov QWORD [rsp+offset], val
+                        ; mov QWORD [rbp-offset], val
                     );
                 } else {
                     // x86 doesn't allow writing 64bit immediates directly to the stack. We thus
@@ -263,8 +263,8 @@ impl TraceCompiler {
                     let v1 = c_val as u32 as i32;
                     let v2 = (c_val >> 32) as u32 as i32;
                     dynasm!(self.asm
-                        ; mov DWORD [rsp+offset], v1
-                        ; mov DWORD [rsp+offset+4], v2
+                        ; mov DWORD [rbp-offset], v1
+                        ; mov DWORD [rbp-offset+4], v2
                     );
                 }
             }
@@ -284,7 +284,7 @@ impl TraceCompiler {
             Location::Stack(offset) => {
                 let val = b as i32;
                 dynasm!(self.asm
-                    ; mov QWORD [rsp+offset], val
+                    ; mov QWORD [rbp-offset], val
                 );
             }
             Location::NotLive => unreachable!(),
@@ -399,10 +399,6 @@ impl TraceCompiler {
             );
         }
 
-        // The offset of the saved registers pushed to the stack. We need to add this value to the
-        // offset of spilled registers when loading them.
-        let push_sz: i32 = save_regs.len() as i32 * 8;
-
         // Helper function to find the index of a caller-save register previously pushed to the stack.
         // The first register pushed is at the highest stack offset (from the stack pointer), hence
         // reversing the order of `save_regs`.
@@ -422,14 +418,20 @@ impl TraceCompiler {
                         return Err(CompileError::Unimplemented("projected argument".to_owned()));
                     }
                     // Load argument back from the stack.
-                    let offs = match self.local_to_location(*local)? {
-                        Location::Register(reg) => stack_index(reg) * 8,
-                        Location::Stack(off) => off + push_sz,
+                    match self.local_to_location(*local)? {
+                        Location::Register(reg) => {
+                            let off = stack_index(reg) * 8;
+                            dynasm!(self.asm
+                                ; mov Rq(arg_reg), [rsp + off]
+                            );
+                        }
+                        Location::Stack(off) => {
+                            dynasm!(self.asm
+                                ; mov Rq(arg_reg), [rbp - off]
+                            );
+                        }
                         Location::NotLive => unreachable!(),
                     };
-                    dynasm!(self.asm
-                        ; mov Rq(arg_reg), [rsp + offs]
-                    );
                 }
                 Operand::Constant(c) => {
                     dynasm!(self.asm
@@ -457,7 +459,7 @@ impl TraceCompiler {
             }
             Some(Location::Stack(off)) => {
                 dynasm!(self.asm
-                    ; mov QWORD [rsp+off], rax
+                    ; mov QWORD [rbp-off], rax
                 );
             }
             _ => unreachable!(),
@@ -568,13 +570,16 @@ impl TraceCompiler {
 
     /// Emit a return instruction.
     fn ret(&mut self) {
-        // Reset the stack pointer and return from the trace. We also need to generate the code
-        // that reserves stack space for spilled locals here, since we don't know at the beginning
-        // of the trace how many locals are going to be spilled.
+        // Reset the stack/base pointers and return from the trace. We also need to generate the
+        // code that reserves stack space for spilled locals here, since we don't know at the
+        // beginning of the trace how many locals are going to be spilled.
         dynasm!(self.asm
             ; add rsp, self.cur_stack_offset
+            ; pop rbp
             ; ret
             ; ->reserve:
+            ; push rbp
+            ; mov rbp, rsp
             ; sub rsp, self.cur_stack_offset
             ; jmp ->main
         );
@@ -970,7 +975,7 @@ mod tests {
         // When returning from `farg` all registers are full, so `e` needs to be allocated on the
         // stack. However, after we have returned, anything allocated during `farg` is freed. Thus
         // returning `e` will allocate a new local in a (newly freed) register, resulting in a `mov
-        // reg, [rsp]` instruction.
+        // reg, [rbp]` instruction.
         let e = farg(c);
         e
     }
