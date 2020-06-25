@@ -18,6 +18,7 @@ use std::fmt::{self, Display, Formatter};
 use std::mem;
 use std::process::Command;
 
+use stack_builder::StackBuilder;
 use yktrace::tir::{
     CallOperand, Constant, ConstantInt, Guard, Local, Operand, Place, Rvalue, Statement, TirOp,
     TirTrace,
@@ -117,8 +118,8 @@ pub struct TraceCompiler {
     /// Stores the destination local of the outermost function and moves its content into RAX at
     /// the end of the trace.
     rtn_var: Option<Place>,
-    /// The amount of stack space in bytes used so far by spilled variables.
-    cur_stack_offset: i32,
+    /// Stack builder for allocating objects on the stack.
+    stack_builder: StackBuilder,
 }
 
 impl TraceCompiler {
@@ -147,8 +148,7 @@ impl TraceCompiler {
                 } else {
                     // All registers are occupied, so we need to spill the local to the stack. For
                     // now we assume that all spilled locals are 8 bytes big.
-                    self.cur_stack_offset += 8;
-                    let loc = Location::Stack(self.cur_stack_offset);
+                    let loc = Location::Stack(self.stack_builder.alloc(8, 8) as i32);
                     loc
                 };
                 let ret = loc.clone();
@@ -573,14 +573,15 @@ impl TraceCompiler {
         // Reset the stack/base pointers and return from the trace. We also need to generate the
         // code that reserves stack space for spilled locals here, since we don't know at the
         // beginning of the trace how many locals are going to be spilled.
+        let soff = self.stack_builder.size();
         dynasm!(self.asm
-            ; add rsp, self.cur_stack_offset
+            ; add rsp, soff as i32
             ; pop rbp
             ; ret
             ; ->reserve:
             ; push rbp
             ; mov rbp, rsp
-            ; sub rsp, self.cur_stack_offset
+            ; sub rsp, soff as i32
             ; jmp ->main
         );
     }
@@ -599,13 +600,13 @@ impl TraceCompiler {
     }
 
     #[cfg(test)]
-    fn test_compile(tt: TirTrace) -> (CompiledTrace, i32) {
+    fn test_compile(tt: TirTrace) -> (CompiledTrace, u32) {
         // Changing the registers available to the register allocator affects the number of spills,
         // and thus also some tests. To make sure we notice when this happens we also check the
         // number of spills in those tests. We thus need a slightly different version of the
         // `compile` function that provides this information to the test.
         let tc = TraceCompiler::_compile(tt);
-        let spills = tc.cur_stack_offset;
+        let spills = tc.stack_builder.size();
         let ct = CompiledTrace { mc: tc.finish() };
         (ct, spills)
     }
@@ -630,7 +631,7 @@ impl TraceCompiler {
                 .collect(),
             variable_location_map: HashMap::new(),
             rtn_var: None,
-            cur_stack_offset: 0,
+            stack_builder: StackBuilder::default(),
         };
 
         tc.init();
@@ -668,6 +669,7 @@ impl TraceCompiler {
 #[cfg(test)]
 mod tests {
     use super::{CompileError, HashMap, Local, Location, TraceCompiler};
+    use crate::stack_builder::StackBuilder;
     use libc::{abs, c_void, getuid};
     use yktrace::tir::{CallOperand, Statement, TirOp, TirTrace};
     use yktrace::{start_tracing, TracingKind};
@@ -701,7 +703,7 @@ mod tests {
                 .collect(),
             variable_location_map: HashMap::new(),
             rtn_var: None,
-            cur_stack_offset: 8,
+            stack_builder: StackBuilder::default(),
         };
 
         for _ in 0..32 {
@@ -724,7 +726,7 @@ mod tests {
                 .collect(),
             variable_location_map: HashMap::new(),
             rtn_var: None,
-            cur_stack_offset: 0,
+            stack_builder: StackBuilder::default(),
         };
 
         let mut seen: Vec<Result<Location, CompileError>> = Vec::new();
