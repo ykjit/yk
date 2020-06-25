@@ -16,6 +16,7 @@ mod hwt;
 pub mod tir;
 
 use errors::InvalidTraceError;
+use std::fmt::{self, Display};
 use tir::SIR;
 
 /// The same as core::SirLoc, just with a String representation of the symbol name and with the
@@ -59,6 +60,12 @@ impl<'a> IntoIterator for &'a dyn SirTrace {
 
     fn into_iter(self) -> Self::IntoIter {
         SirTraceIterator::new(self)
+    }
+}
+
+impl Display for dyn SirTrace {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", debug::sir_trace_str(self, true, true))
     }
 }
 
