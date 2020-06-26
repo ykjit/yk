@@ -1,3 +1,5 @@
+use std::convert::TryInto;
+
 #[derive(Default, Debug)]
 pub struct StackBuilder {
     stack_top: u64,
@@ -12,16 +14,21 @@ pub struct StackBuilder {
 impl StackBuilder {
     /// Allocate an object of given size and alignment on the stack, returning an offset which
     /// is intended to be subtracted from the base pointer.
-    pub fn alloc(&mut self, size: u64, align: u64) -> u64 {
+    pub fn alloc(&mut self, size: u64, align: u64) -> u32 {
         self.align(align);
         self.stack_top += size;
-        self.stack_top
+        self.stack_top.try_into().unwrap()
     }
 
     /// Aligns `offset` to `align` bytes.
     fn align(&mut self, align: u64) {
         let mask = align - 1;
         self.stack_top = (self.stack_top + mask) & !mask
+    }
+
+    /// Total allocated stack size in bytes.
+    pub fn size(&self) -> u32 {
+        self.stack_top.try_into().unwrap()
     }
 }
 
