@@ -670,9 +670,33 @@ impl TraceCompiler {
 mod tests {
     use super::{CompileError, HashMap, Local, Location, TraceCompiler};
     use crate::stack_builder::StackBuilder;
+    use fm::FMBuilder;
     use libc::{abs, c_void, getuid};
-    use yktrace::tir::{CallOperand, Statement, TirOp, TirTrace};
+    use regex::Regex;
+    use yktrace::tir::TirTrace;
     use yktrace::{start_tracing, TracingKind};
+
+    extern "C" {
+        fn add6(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64) -> u64;
+    }
+
+    /// Fuzzy matches the textual TIR for the trace `tt` with the pattern `ptn`.
+    fn assert_tir(ptn: &str, tt: &TirTrace) {
+        let ptn_re = Regex::new(r"%.+?\b").unwrap(); // Names are words prefixed with `%`.
+        let text_re = Regex::new(r"\$?.+?\b").unwrap(); // Any word optionally prefixed with `$`.
+        let matcher = FMBuilder::new(ptn)
+            .unwrap()
+            .name_matcher(Some((ptn_re, text_re)))
+            .distinct_name_matching(true)
+            .build()
+            .unwrap();
+
+        let res = matcher.matches(&format!("{}", tt));
+        if let Err(e) = res {
+            eprintln!("{}", e); // Visible when tests run with --nocapture.
+            panic!(e);
+        }
+    }
 
     #[inline(never)]
     fn simple() -> u8 {
@@ -812,22 +836,17 @@ mod tests {
     // A trace which contains a call to something which we don't have SIR for should emit a TIR
     // call operation.
     #[test]
-    fn call_symbol() {
+    fn call_symbol_tir() {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
-        let _ = core::intrinsics::wrapping_add(10u64, 40u64);
+        let _ = unsafe { add6(1, 1, 1, 1, 1, 1) };
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
-
-        let mut found_call = false;
-        for i in 0..tir_trace.len() {
-            if let TirOp::Statement(Statement::Call(CallOperand::Fn(sym), ..)) = tir_trace.op(i) {
-                if sym.contains("wrapping_add") {
-                    found_call = true;
-                }
-                break;
-            }
-        }
-        assert!(found_call);
+        assert_tir(
+            "live(%a)\n\
+            %a = call(add6, [1u64, 1u64, 1u64, 1u64, 1u64, 1u64])\n\
+            dead(%a)",
+            &tir_trace,
+        );
     }
 
     /// Execute a trace which calls a symbol accepting no arguments, but which does return a value.
@@ -866,10 +885,6 @@ mod tests {
 
     #[test]
     fn exec_call_symbol_with_many_args() {
-        extern "C" {
-            fn add6(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64) -> u64;
-        }
-
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         let expect = unsafe { add6(1, 2, 3, 4, 5, 6) };
         let sir_trace = th.stop_tracing().unwrap();
