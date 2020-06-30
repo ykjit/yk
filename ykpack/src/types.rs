@@ -216,7 +216,7 @@ impl Display for Statement {
                 } else {
                     String::from("none")
                 };
-                write!(f, "call({}, [{}], {})", op, args_s, dest_s)
+                write!(f, "{} = call({}, [{}])", dest_s, op, args_s)
             }
             Statement::Unimplemented(mir_stmt) => write!(f, "unimplemented_stmt: {}", mir_stmt),
         }
