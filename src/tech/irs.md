@@ -39,3 +39,16 @@ TIR is basically SIR with guards instead of branches. TIR is the basis for a
 compiled trace.
 
 TIR [lives in yktrace](https://github.com/softdevteam/yk/tree/master/yktrace).
+
+## Local Variables
+
+MIR, SIR and TIR all have the notion of local variables. Each local variable is
+identified by an integer (its *index*). These indices are unique only within
+the scope of a function.
+
+At the time of writing, there is a one-to-one relationship between the variable
+indices in MIR and SIR, however this may change in the future.
+
+Before a TIR trace is compiled, variables are renamed so that (e.g.) variable
+index `1` from function `f()` does not clash with variable index `1` from
+function `g()`.
