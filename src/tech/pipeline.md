@@ -30,6 +30,10 @@ the SIR.
 For this mapping to be correct we rely on LLVM not re-ordering blocks, thus for
 now, ykrustc compiles programs without optimisations.
 
+SIR traces are "trimmed", to remove unnecessary blocks. These blocks correspond
+with the routines used to start and stop tracing, which themselves get
+partially traced.
+
 ## TIR Traces
 
 Once Yorick has a SIR trace, it converts it to a TIR trace by:
