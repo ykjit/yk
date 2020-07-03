@@ -14,6 +14,8 @@ instance of the compiler (and its `tcx` struct). SIR is serialised using serde
 and linked into special ELF sections in the resulting binary (one section per
 crate, whose names are prefixed `.yksir_`).
 
+SIR is not in SSA form, but this may change in the future.
+
 The SIR data structures are in an
 [externally maintained crate](https://github.com/softdevteam/yk/tree/master/ykpack)
 so that they can be shared by the compiler and the JIT runtime.
