@@ -73,6 +73,7 @@ mod tests {
             blocks: blocks1,
             flags: 0,
             num_locals: 0,
+            trace_inputs_local: None,
         });
 
         let stmts2_b1 = vec![Statement::Nop; 7];
@@ -88,6 +89,7 @@ mod tests {
             blocks: blocks2,
             flags: 0,
             num_locals: 0,
+            trace_inputs_local: None,
         });
 
         vec![sir1, sir2]
@@ -185,6 +187,7 @@ mod tests {
                 blocks: blocks_t1,
                 flags: 0,
                 num_locals: 3,
+                trace_inputs_local: None,
             }),
             Pack::Body(Body {
                 symbol_name: String::from("symbol2"),
@@ -194,6 +197,7 @@ mod tests {
                 )],
                 flags: 0,
                 num_locals: 5,
+                trace_inputs_local: None,
             }),
         ];
 

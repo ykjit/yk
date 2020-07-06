@@ -125,6 +125,7 @@ pub struct Body {
     pub blocks: Vec<BasicBlock>,
     pub flags: u8,
     pub num_locals: usize,
+    pub trace_inputs_local: Option<Local>,
 }
 
 impl Display for Body {

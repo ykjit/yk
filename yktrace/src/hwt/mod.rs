@@ -1,8 +1,9 @@
 //! Hardware tracing via ykrustc.
 
 use super::{SirTrace, ThreadTracer, ThreadTracerImpl};
-use crate::{errors::InvalidTraceError, SirLoc};
+use crate::{errors::InvalidTraceError, tir::SIR, SirLoc};
 use hwtracer::backends::TracerBuilder;
+use ykpack::Local;
 
 pub mod mapper;
 use mapper::HWTMapper;
@@ -20,6 +21,12 @@ impl SirTrace for HWTSirTrace {
 
     fn raw_loc(&self, idx: usize) -> &SirLoc {
         &self.sirtrace[idx]
+    }
+
+    fn input(&self) -> Local {
+        let blk = (self as &dyn SirTrace).into_iter().next().unwrap();
+        let body = &SIR.bodies[&blk.symbol_name];
+        body.trace_inputs_local.unwrap()
     }
 }
 
