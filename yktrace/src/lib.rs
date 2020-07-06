@@ -7,6 +7,7 @@ use core::yk::SirLoc as CoreSirLoc;
 use std::{fmt::Debug, iter::Iterator};
 #[macro_use]
 extern crate lazy_static;
+use ykpack::Local;
 
 pub mod debug;
 mod errors;
@@ -52,6 +53,9 @@ pub trait SirTrace: Debug {
 
     /// Returns the SIR location at index `idx` in the *raw* (untrimmed) trace.
     fn raw_loc(&self, idx: usize) -> &SirLoc;
+
+    /// Returns the local variable containing the trace inputs tuple.
+    fn input(&self) -> Local;
 }
 
 impl<'a> IntoIterator for &'a dyn SirTrace {

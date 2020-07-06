@@ -13,6 +13,8 @@ pub fn sir_trace_str<'a>(trace: &'a dyn SirTrace, trimmed: bool, show_blocks: bo
 
     let mut res = String::new();
     let res_r = &mut res;
+
+    write!(res_r, "Trace input local: {}\n\n", trace.input()).unwrap();
     for loc in locs {
         write!(res_r, "[{}] bb={}, flags=[", loc.symbol_name, loc.bb_idx).unwrap();
 
