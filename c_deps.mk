@@ -1,3 +1,6 @@
+# This Makefile deals with building libipt. It is symlinked into OUT_DIR at
+# build time by build.rs.
+
 DIR != pwd
 INST_DIR = ${DIR}/inst
 PYTHON=python3
