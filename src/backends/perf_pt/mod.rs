@@ -682,7 +682,7 @@ mod tests {
 
         // First we expect a libipt error.
         match itr.next() {
-            Some(Err(HWTracerError::Custom(e))) => assert_eq!(e.to_string(), "libipt error"),
+            Some(Err(HWTracerError::Custom(e))) => assert!(e.to_string().starts_with("libipt error: ")),
             _ => panic!(),
         }
         // And now the iterator is invalid, and should return None.

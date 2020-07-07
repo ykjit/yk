@@ -3,15 +3,15 @@ INST_DIR = ${DIR}/inst
 PYTHON=python3
 
 PROCESSOR_TRACE_REPO = https://github.com/01org/processor-trace.git
-PROCESSOR_TRACE_V = 892e12c5a27bda5806d1e63269986bb4171b5a8b
+PROCESSOR_TRACE_V = 890e5406a37621f851846b99fc381753b57463d1
 PROCESSOR_TRACE_SOURCE = processor-trace
 
 XED_REPO = https://github.com/intelxed/xed
-XED_V = b4109c0823ff35df7416a157178c87f77421994b
+XED_V = afbb851b5f2f2ac6cdb6e6d9bebbaf2d4e77286d
 XED_SOURCE = xed
 
 MBUILD_REPO = https://github.com/intelxed/mbuild
-MBUILD_V = f2de5e93ac318e223f6ec61c41f541171db0ada7
+MBUILD_V = 5304b94361fccd830c0e2417535a866b79c1c297
 MBUILD_SOURCE = mbuild
 
 .PHONY: libipt
