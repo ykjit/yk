@@ -5,12 +5,12 @@
 #![feature(core_intrinsics)]
 
 #[macro_use]
-extern crate dynasm;
 extern crate dynasmrt;
 extern crate test;
 
 mod stack_builder;
 
+use dynasmrt::{x64::Rq::*, Register};
 use libc::{c_void, dlsym, RTLD_DEFAULT};
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -129,7 +129,7 @@ impl TraceCompiler {
         if l == Local(0) {
             // In SIR, `Local` zero is the (implicit) return value, so it makes sense to allocate
             // it to the return register of the underlying X86_64 calling convention.
-            Ok(Location::Register(0))
+            Ok(Location::Register(RAX.code()))
         } else {
             if let Some(location) = self.variable_location_map.get(&l) {
                 // We already have a location for this local.
@@ -386,12 +386,11 @@ impl TraceCompiler {
         // tests currently work is they check the last value returned at the end of the trace. This
         // value is assumed to remain in rax. If we were to restore rax, we'd break that. Note that
         // the register allocator never gives out rax for this precise reason.
-        //
-        // rdi, rsi, rdx, rcx, r8, r9, r10, r11.
-        let save_regs = [7, 6, 2, 1, 8, 9, 10, 11]
+        let save_regs = [RDI, RSI, RDX, RCX, R8, R9, R10, R11]
             .iter()
-            .filter(|r| Some(**r) != dest_reg)
-            .map(|r| *r)
+            .map(|r| r.code())
+            .filter(|r| Some(*r) != dest_reg)
+            .map(|r| r)
             .collect::<Vec<u8>>();
         for reg in &save_regs {
             dynasm!(self.asm
@@ -406,8 +405,13 @@ impl TraceCompiler {
             i32::try_from(save_regs.iter().rev().position(|&r| r == reg).unwrap()).unwrap()
         };
 
-        // Sys-V ABI dictates the first 6 arguments are passed in: rdi, rsi, rdx, rcx, r8, r9.
-        let mut arg_regs = vec![9, 8, 1, 2, 6, 7]; // reversed so they pop() in the right order.
+        // Sys-V ABI dictates the first 6 arguments are passed in these registers.
+        // The order is reversed so they pop() in the right order.
+        let mut arg_regs = vec![R9, R8, RCX, RDX, RSI, RDI]
+            .iter()
+            .map(|r| r.code())
+            .collect::<Vec<u8>>();
+
         for arg in args {
             // `unwrap()` must succeed, as we checked there are no more than 6 args above.
             let arg_reg = arg_regs.pop().unwrap();
@@ -624,10 +628,10 @@ impl TraceCompiler {
             asm: assembler,
             // Use all the 64-bit registers we can (R11-R8, RDX, RCX). We probably also want to use the
             // callee-saved registers R15-R12 here in the future.
-            register_content_map: [11, 10, 9, 8, 2, 1]
+            register_content_map: [R11, R10, R9, R8, RDX, RCX]
                 .iter()
                 .cloned()
-                .map(|r| (r, None))
+                .map(|r| (r.code(), None))
                 .collect(),
             variable_location_map: HashMap::new(),
             rtn_var: None,
@@ -670,6 +674,7 @@ impl TraceCompiler {
 mod tests {
     use super::{CompileError, HashMap, Local, Location, TraceCompiler};
     use crate::stack_builder::StackBuilder;
+    use dynasmrt::{x64::Rq::*, Register};
     use fm::FMBuilder;
     use libc::{abs, c_void, getuid};
     use regex::Regex;
@@ -720,10 +725,10 @@ mod tests {
     fn reg_alloc_same_local() {
         let mut tc = TraceCompiler {
             asm: dynasmrt::x64::Assembler::new().unwrap(),
-            register_content_map: [15, 14, 13, 12, 11, 10, 9, 8, 2, 1]
+            register_content_map: [R15, R14, R13, R12, R11, R10, R9, R8, RDX, RCX]
                 .iter()
                 .cloned()
-                .map(|r| (r, None))
+                .map(|r| (r.code(), None))
                 .collect(),
             variable_location_map: HashMap::new(),
             rtn_var: None,
@@ -743,10 +748,10 @@ mod tests {
     fn reg_alloc() {
         let mut tc = TraceCompiler {
             asm: dynasmrt::x64::Assembler::new().unwrap(),
-            register_content_map: [15, 14, 13, 12, 11, 10, 9, 8, 2, 1]
+            register_content_map: [R15, R14, R13, R12, R11, R10, R9, R8, RDX, RCX]
                 .iter()
                 .cloned()
-                .map(|r| (r, None))
+                .map(|r| (r.code(), None))
                 .collect(),
             variable_location_map: HashMap::new(),
             rtn_var: None,
