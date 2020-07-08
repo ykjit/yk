@@ -36,7 +36,7 @@ fn make_c_deps_dir() -> PathBuf {
         let mut dest = c_deps_dir.clone();
         dest.push(C_DEPS_MAKEFILE);
 
-        let mut src = env::current_dir().unwrap().clone();
+        let mut src = env::current_dir().unwrap();
         src.push(C_DEPS_MAKEFILE);
 
         unix_fs::symlink(src, dest).unwrap();
@@ -117,55 +117,53 @@ fn main() {
     let c_deps_dir_s = c_deps_dir.display();
 
     // Check if we should build the perf_pt backend.
-    if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-        if feature_check("check_perf_pt.c") {
-            c_build.file("src/backends/perf_pt/collect.c");
-            c_build.file("src/backends/perf_pt/decode.c");
-            c_build.file("src/backends/perf_pt/util.c");
+    if cfg!(all(target_os = "linux", target_arch = "x86_64")) && feature_check("check_perf_pt.c") {
+        c_build.file("src/backends/perf_pt/collect.c");
+        c_build.file("src/backends/perf_pt/decode.c");
+        c_build.file("src/backends/perf_pt/util.c");
 
-            // XXX At the time of writing you can't conditionally build C code for tests in a build
-            // script: https://github.com/rust-lang/cargo/issues/1581
-            c_build.file("src/backends/perf_pt/test_helpers.c");
+        // XXX At the time of writing you can't conditionally build C code for tests in a build
+        // script: https://github.com/rust-lang/cargo/issues/1581
+        c_build.file("src/backends/perf_pt/test_helpers.c");
 
-            // Decide whether to build our own libipt.
-            if let Ok(val) = env::var("IPT_PATH") {
-                let mut inc_path = PathBuf::from(val.clone());
-                inc_path.push("include");
-                c_build.include(inc_path);
-                c_build.flag(&format!("-L{}/lib", val));
-                println!("cargo:rustc-link-search={}/lib", val);
-                println!("cargo:rustc-env=PTXED={}/bin/ptxed", val);
-            } else {
-                build_libipt(&c_deps_dir);
-                c_build.include(&format!("{}/inst/include/", c_deps_dir_s));
-                c_build.flag(&format!("-L{}/inst/lib", c_deps_dir_s));
-                println!("cargo:rustc-link-search={}/inst/lib", c_deps_dir_s);
-                println!("cargo:rustc-env=PTXED={}/inst/bin/ptxed", c_deps_dir_s);
-            }
-
-            // We borrow the CPU detection functions from libipt (they are not exposed publicly).
-            // If we built our own libipt above, then the fetch is a no-op.
-            fetch_libipt(&c_deps_dir);
-
-            c_build.include(&format!(
-                "{}/processor-trace/libipt/internal/include",
-                c_deps_dir_s
-            ));
-            c_build.file(&format!(
-                "{}/processor-trace/libipt/src/pt_cpu.c",
-                c_deps_dir_s
-            ));
-            c_build.file(&format!(
-                "{}/processor-trace/libipt/src/posix/pt_cpuid.c",
-                c_deps_dir_s
-            ));
-
-            println!("cargo:rustc-cfg=perf_pt");
-            if cpu_supports_pt() {
-                println!("cargo:rustc-cfg=perf_pt_test");
-            }
-            println!("cargo:rustc-link-lib=static=ipt");
+        // Decide whether to build our own libipt.
+        if let Ok(val) = env::var("IPT_PATH") {
+            let mut inc_path = PathBuf::from(val.clone());
+            inc_path.push("include");
+            c_build.include(inc_path);
+            c_build.flag(&format!("-L{}/lib", val));
+            println!("cargo:rustc-link-search={}/lib", val);
+            println!("cargo:rustc-env=PTXED={}/bin/ptxed", val);
+        } else {
+            build_libipt(&c_deps_dir);
+            c_build.include(&format!("{}/inst/include/", c_deps_dir_s));
+            c_build.flag(&format!("-L{}/inst/lib", c_deps_dir_s));
+            println!("cargo:rustc-link-search={}/inst/lib", c_deps_dir_s);
+            println!("cargo:rustc-env=PTXED={}/inst/bin/ptxed", c_deps_dir_s);
         }
+
+        // We borrow the CPU detection functions from libipt (they are not exposed publicly).
+        // If we built our own libipt above, then the fetch is a no-op.
+        fetch_libipt(&c_deps_dir);
+
+        c_build.include(&format!(
+            "{}/processor-trace/libipt/internal/include",
+            c_deps_dir_s
+        ));
+        c_build.file(&format!(
+            "{}/processor-trace/libipt/src/pt_cpu.c",
+            c_deps_dir_s
+        ));
+        c_build.file(&format!(
+            "{}/processor-trace/libipt/src/posix/pt_cpuid.c",
+            c_deps_dir_s
+        ));
+
+        println!("cargo:rustc-cfg=perf_pt");
+        if cpu_supports_pt() {
+            println!("cargo:rustc-cfg=perf_pt_test");
+        }
+        println!("cargo:rustc-link-lib=static=ipt");
     }
     c_build.include("src/util");
     c_build.compile("hwtracer_c");

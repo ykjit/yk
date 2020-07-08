@@ -186,7 +186,7 @@ impl TracerBuilder {
                 #[cfg(not(perf_pt))]
                 unreachable!();
             },
-            BackendConfig::Dummy => return Ok(Box::new(DummyTracer::new())),
+            BackendConfig::Dummy => Ok(Box::new(DummyTracer::new())),
         }
     }
 }
