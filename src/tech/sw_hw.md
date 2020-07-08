@@ -7,21 +7,10 @@ Yorick has two tracing modes:
 
 ## Software Tracing
 
-In software tracing mode, `ykrustc` inserts calls to a trace recorder at the
-beginning of each basic block. The arguments to the call identify the
-(statically known) location of the call-site. At runtime, when tracing is
-enabled the trace recorder stores each location into a trace buffer.
+Note that for now we have stopped development on software tracing, as we are
+focussing on hardware tracing.
 
-### Further Reading
-
- * A
-   [MIR pass](https://github.com/softdevteam/ykrustc/blob/master/src/librustc_mir/transform/add_yk_swt_calls.rs)
-   adds calls to the trace recorder.
-
- * The
-   [trace recorder](https://github.com/softdevteam/ykrustc/blob/master/src/libcore/yk_swt.rs)
-   lives in `libcore` and is implemented in C so that its contents are not
-   recursively traced.
+We hope to re-visit software tracing later.
 
 ## Hardware Tracing
 
