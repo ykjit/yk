@@ -164,13 +164,7 @@ fn main() {
             if cpu_supports_pt() {
                 println!("cargo:rustc-cfg=perf_pt_test");
             }
-            println!("cargo:rustc-link-lib=ipt");
-
-            // XXX Cargo bug: no way to encode an rpath, otherwise we would do that here:
-            // https://github.com/rust-lang/cargo/issues/5077
-            //
-            // Until this is implemented, the user will need to add `c_deps_dir` to
-            // LD_LIBRARY_PATH if the build process compiles its own libipt.
+            println!("cargo:rustc-link-lib=static=ipt");
         }
     }
     c_build.include("src/util");
