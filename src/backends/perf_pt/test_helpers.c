@@ -68,9 +68,6 @@ static int append_self_ptxed_raw_args_cb(struct dl_phdr_info *, size_t, void *);
 // Rust functions.
 extern void push_ptxed_arg(void *, const char *);
 
-// More than enough space for a ptxed `--raw` argument parameter.
-#define MAX_RAW_ARG 128
-
 /*
  * Walks the program headers pushing ptxed `--raw` arguments for the current
  * process into the supplied (pointer to a) Rust `AppendSelfPtxedArgs`
@@ -127,9 +124,8 @@ append_self_ptxed_raw_args_cb(struct dl_phdr_info *info, size_t size, void *data
         }
 
         // Push arguments of the form: --raw <filename>:<start>-<end>:<vaddr>
-        char raw_arg[MAX_RAW_ARG];
-        int rv = snprintf(raw_arg, MAX_RAW_ARG,
-                          "%s:0x%" PRIx64 "-0x%" PRIx64 ":0x%" PRIx64,
+        char *raw_arg = NULL;
+        int rv = asprintf(&raw_arg, "%s:0x%" PRIx64 "-0x%" PRIx64 ":0x%" PRIx64,
                           filename, offset, phdr.p_offset + phdr.p_filesz, vaddr);
         if (rv < 0) {
             return 1;
@@ -138,6 +134,8 @@ append_self_ptxed_raw_args_cb(struct dl_phdr_info *info, size_t size, void *data
         // Call to Rust to do the stores.
         push_ptxed_arg(args->rs_args_vec, "--raw");
         push_ptxed_arg(args->rs_args_vec, raw_arg);
+
+        free(raw_arg); // Safe because push_ptxed_arg() copies.
     }
 
     return 0;
