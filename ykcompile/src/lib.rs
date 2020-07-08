@@ -390,7 +390,6 @@ impl TraceCompiler {
             .iter()
             .map(|r| r.code())
             .filter(|r| Some(*r) != dest_reg)
-            .map(|r| r)
             .collect::<Vec<u8>>();
         for reg in &save_regs {
             dynasm!(self.asm
