@@ -123,6 +123,13 @@ pub struct TraceCompiler {
 }
 
 impl TraceCompiler {
+    fn place_to_location(&mut self, p: &Place) -> Result<Location, CompileError> {
+        if !p.projection.is_empty() {
+            return Err(CompileError::Unimplemented(format!("{}", p)));
+        }
+        self.local_to_location(p.local)
+    }
+
     /// Given a local, returns the register allocation for it, or, if there is no allocation yet,
     /// performs one.
     fn local_to_location(&mut self, l: Local) -> Result<Location, CompileError> {
@@ -194,10 +201,10 @@ impl TraceCompiler {
         Ok(())
     }
 
-    /// Copy the contents of the local `l2` into  `l1`.
-    fn mov_local_local(&mut self, l1: Local, l2: Local) -> Result<(), CompileError> {
-        let lloc = self.local_to_location(l1)?;
-        let rloc = self.local_to_location(l2)?;
+    /// Copy the contents of the place `p2` into `p1`.
+    fn mov_place_place(&mut self, p1: &Place, p2: &Place) -> Result<(), CompileError> {
+        let lloc = self.place_to_location(p1)?;
+        let rloc = self.place_to_location(p2)?;
         match (lloc, rloc) {
             (Location::Register(lreg), Location::Register(rreg)) => {
                 dynasm!(self.asm
@@ -236,13 +243,13 @@ impl TraceCompiler {
         );
     }
 
-    /// Move a constant integer into a `Local`.
-    fn mov_local_constint(
+    /// Move a constant integer into a `Place`.
+    fn mov_place_constint(
         &mut self,
-        local: Local,
+        place: &Place,
         constant: &ConstantInt,
     ) -> Result<(), CompileError> {
-        let loc = self.local_to_location(local)?;
+        let loc = self.place_to_location(place)?;
         let c_val = constant.i64_cast();
         match loc {
             Location::Register(reg) => {
@@ -273,9 +280,9 @@ impl TraceCompiler {
         Ok(())
     }
 
-    /// Move a Boolean into a `Local`.
-    fn mov_local_bool(&mut self, local: Local, b: bool) -> Result<(), CompileError> {
-        match self.local_to_location(local)? {
+    /// Move a Boolean into a `Place`.
+    fn mov_place_bool(&mut self, place: &Place, b: bool) -> Result<(), CompileError> {
+        match self.place_to_location(place)? {
             Location::Register(reg) => {
                 dynasm!(self.asm
                     ; mov Rq(reg), QWORD b as i64
@@ -314,12 +321,12 @@ impl TraceCompiler {
         };
         // Move call arguments into registers.
         for (op, i) in args.iter().zip(1..) {
-            let arg_idx = Local(i + off);
+            let arg_idx = Place::from(Local(i + off));
             match op {
-                Operand::Place(p) => self.mov_local_local(arg_idx, p.local)?,
+                Operand::Place(p) => self.mov_place_place(&arg_idx, p)?,
                 Operand::Constant(c) => match c {
-                    Constant::Int(ci) => self.mov_local_constint(arg_idx, ci)?,
-                    Constant::Bool(b) => self.mov_local_bool(arg_idx, *b)?,
+                    Constant::Int(ci) => self.mov_place_constint(&arg_idx, ci)?,
+                    Constant::Bool(b) => self.mov_place_bool(&arg_idx, *b)?,
                     c => return Err(CompileError::Unimplemented(format!("{}", c))),
                 },
             }
@@ -368,7 +375,7 @@ impl TraceCompiler {
 
         // Figure out where the return value (if there is one) is going.
         let dest_location: Option<Location> = if let Some(d) = dest {
-            Some(self.local_to_location(d.local)?)
+            Some(self.place_to_location(d)?)
         } else {
             None
         };
@@ -416,12 +423,9 @@ impl TraceCompiler {
             let arg_reg = arg_regs.pop().unwrap();
 
             match arg {
-                Operand::Place(Place { local, projection }) => {
-                    if !projection.is_empty() {
-                        return Err(CompileError::Unimplemented("projected argument".to_owned()));
-                    }
+                Operand::Place(place) => {
                     // Load argument back from the stack.
-                    match self.local_to_location(*local)? {
+                    match self.place_to_location(place)? {
                         Location::Register(reg) => {
                             let off = stack_index(reg) * 8;
                             dynasm!(self.asm
@@ -487,19 +491,13 @@ impl TraceCompiler {
     fn statement(&mut self, stmt: &Statement) -> Result<(), CompileError> {
         match stmt {
             Statement::Assign(l, r) => {
-                if !l.projection.is_empty() {
-                    return Err(CompileError::Unimplemented(format!("{}", l)));
-                }
                 match r {
                     Rvalue::Use(Operand::Place(p)) => {
-                        if !p.projection.is_empty() {
-                            return Err(CompileError::Unimplemented(format!("{}", r)));
-                        }
-                        self.mov_local_local(l.local, p.local)?;
+                        self.mov_place_place(l, p)?;
                     }
                     Rvalue::Use(Operand::Constant(c)) => match c {
-                        Constant::Int(ci) => self.mov_local_constint(l.local, ci)?,
-                        Constant::Bool(b) => self.mov_local_bool(l.local, *b)?,
+                        Constant::Int(ci) => self.mov_place_constint(l, ci)?,
+                        Constant::Bool(b) => self.mov_place_bool(l, *b)?,
                         c => return Err(CompileError::Unimplemented(format!("{}", c))),
                     },
                     unimpl => return Err(CompileError::Unimplemented(format!("{}", unimpl))),
@@ -557,11 +555,11 @@ impl TraceCompiler {
         }
 
         // Print the register allocation.
-        eprintln!("\nRegister allocation (local -> reg):");
-        for (local, location) in &self.variable_location_map {
+        eprintln!("\nRegister allocation (place -> reg):");
+        for (place, location) in &self.variable_location_map {
             eprintln!(
                 "  {:2} -> {:?} ({})",
-                local,
+                place,
                 location,
                 local_to_reg_name(location)
             );
