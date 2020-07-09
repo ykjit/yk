@@ -57,7 +57,7 @@ impl Display for Local {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
 pub struct Place {
     pub local: Local,
-    pub projection: Vec<PlaceElem>,
+    pub projection: Vec<Projection>,
 }
 
 impl Display for Place {
@@ -99,13 +99,15 @@ impl Display for PlaceBase {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
-pub enum PlaceElem {
+pub enum Projection {
+    Field(FieldIndex),
     Unimplemented(String),
 }
 
-impl Display for PlaceElem {
+impl Display for Projection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Field(idx) => write!(f, ".{}", idx),
             Self::Unimplemented(s) => write!(f, ".(unimplemented projection: {:?})", s),
         }
     }
