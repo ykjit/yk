@@ -1,6 +1,4 @@
-extern crate cc;
-extern crate core;
-
+use cc;
 use core::arch::x86_64::__cpuid_count;
 use std::env;
 use std::fs;

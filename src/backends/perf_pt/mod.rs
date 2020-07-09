@@ -1,5 +1,6 @@
 use super::PerfPTConfig;
-use errors::HWTracerError;
+use crate::errors::HWTracerError;
+use crate::{Block, ThreadTracer, Trace, Tracer, TracerState};
 use libc::{c_char, c_int, c_void, free, geteuid, malloc, size_t};
 use std::error::Error;
 use std::ffi::{self, CStr, CString};
@@ -13,7 +14,6 @@ use std::ops::Drop;
 use std::os::unix::io::AsRawFd;
 use std::ptr;
 use tempfile::NamedTempFile;
-use {Block, ThreadTracer, Trace, Tracer, TracerState};
 
 // The sysfs path used to set perf permissions.
 const PERF_PERMS_PATH: &str = "/proc/sys/kernel/perf_event_paranoid";
@@ -469,11 +469,9 @@ mod tests {
         c_char, c_int, c_void, ptr, AsRawFd, CString, HWTracerError, NamedTempFile,
         PerfPTBlockIterator, PerfPTConfig, PerfPTThreadTracer, PerfPTTrace, ThreadTracer, Trace,
     };
+    use crate::backends::{BackendConfig, TracerBuilder};
+    use crate::{test_helpers, Block};
     use std::process::Command;
-    use {
-        backends::{BackendConfig, TracerBuilder},
-        test_helpers, Block,
-    };
 
     // Makes a `PerfPTThreadTracer` with the default config.
     fn default_tracer() -> PerfPTThreadTracer {
