@@ -7,6 +7,7 @@
 extern crate libc;
 extern crate time;
 extern crate tempfile;
+extern crate core;
 
 pub mod errors;
 pub mod backends;

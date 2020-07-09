@@ -1,12 +1,12 @@
-#![feature(asm)]
-
 extern crate cc;
+extern crate core;
 
 use std::fs;
 use std::path::{PathBuf, Path};
 use std::env;
 use std::process::Command;
 use std::os::unix::fs as unix_fs;
+use core::arch::x86_64::__cpuid_count;
 
 const FEATURE_CHECKS_PATH: &str = "feature_checks";
 
@@ -90,24 +90,9 @@ fn fetch_libipt(c_deps_dir: &Path) {
 }
 
 // Checks if the CPU supports Intel Processor Trace.
-// We use this to decide whether to run the perf_pt backend tests. Although this would be better as
-// a runtime check, it's OK since we won't distribute the test binary.
 fn cpu_supports_pt() -> bool {
-    const LEAF: u32 = 0x07;
-    const SUBPAGE: u32 = 0x0;
-    const EBX_BIT: u32 = 1 << 25;
-    let ebx_out: u32;
-
-    unsafe {
-        asm!(
-              "cpuid",
-              inout("eax") LEAF => _,
-              inout("ecx") SUBPAGE => _,
-              lateout("ebx") ebx_out,
-              lateout("edx") _,
-        );
-    }
-    ebx_out & EBX_BIT != 0
+    let res = unsafe { __cpuid_count(0x7, 0x0) };
+    (res.ebx & (1 << 25)) != 0
 }
 
 fn main() {
