@@ -950,6 +950,7 @@ mod tests {
         let _d = 4;
         let _e = 5;
         let _f = 6;
+        let _g = 7;
         let h: u64 = u64value();
         h
     }
@@ -973,6 +974,7 @@ mod tests {
         let _d = 4;
         let _e = 5;
         let _f = 6;
+        let _g = 7;
         let h = arg;
         h
     }
