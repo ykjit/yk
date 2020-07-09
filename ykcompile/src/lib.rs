@@ -3,6 +3,7 @@
 #![feature(proc_macro_hygiene)]
 #![feature(test)]
 #![feature(core_intrinsics)]
+#![feature(yk_swt)]
 
 #[macro_use]
 extern crate dynasmrt;
@@ -20,8 +21,8 @@ use std::process::Command;
 
 use stack_builder::StackBuilder;
 use yktrace::tir::{
-    CallOperand, Constant, ConstantInt, Guard, Local, Operand, Place, Rvalue, Statement, TirOp,
-    TirTrace,
+    CallOperand, Constant, ConstantInt, Guard, Local, Operand, Place, Projection, Rvalue,
+    Statement, TirOp, TirTrace,
 };
 
 use dynasmrt::{DynasmApi, DynasmLabelApi};
@@ -78,25 +79,27 @@ fn local_to_reg_name(loc: &Location) -> &'static str {
 }
 
 /// A compiled `SIRTrace`.
-pub struct CompiledTrace {
+pub struct CompiledTrace<TT> {
     /// A compiled trace.
     mc: dynasmrt::ExecutableBuffer,
+    _pd: PhantomData<TT>,
 }
 
-impl CompiledTrace {
+impl<TT> CompiledTrace<TT> {
     /// Execute the trace by calling (not jumping to) the first instruction's address.
-    pub fn execute(&self) -> u64 {
+    pub fn execute(&self, args: TT) -> TT {
         // For now a compiled trace always returns whatever has been left in register RAX. We also
         // assume for now that this will be a `u64`.
-        let func: fn() -> u64 = unsafe { mem::transmute(self.mc.ptr(dynasmrt::AssemblyOffset(0))) };
-        self.exec_trace(func)
+        let func: fn(TT) -> TT =
+            unsafe { mem::transmute(self.mc.ptr(dynasmrt::AssemblyOffset(0))) };
+        self.exec_trace(func, args)
     }
 
     /// Actually call the code. This is a separate unmangled function to make it easy to set a
     /// debugger breakpoint right before entering the trace.
     #[no_mangle]
-    fn exec_trace(&self, t_fn: fn() -> u64) -> u64 {
-        t_fn()
+    fn exec_trace(&self, t_fn: fn(TT) -> TT, args: TT) -> TT {
+        t_fn(args)
     }
 }
 
@@ -104,11 +107,14 @@ impl CompiledTrace {
 enum Location {
     Register(u8),
     Stack(i32),
+    Arg(i32),
     NotLive,
 }
 
+use std::marker::PhantomData;
+
 /// The `TraceCompiler` takes a `SIRTrace` and compiles it to machine code. Returns a `CompiledTrace`.
-pub struct TraceCompiler {
+pub struct TraceCompiler<TT> {
     /// The dynasm assembler which will do all of the heavy lifting of the assembly.
     asm: dynasmrt::x64::Assembler,
     /// Stores the content of each register.
@@ -118,16 +124,29 @@ pub struct TraceCompiler {
     /// Stores the destination local of the outermost function and moves its content into RAX at
     /// the end of the trace.
     rtn_var: Option<Place>,
+    /// Local referencing the input arguments to the trace.
+    trace_inputs_local: Option<Local>,
     /// Stack builder for allocating objects on the stack.
     stack_builder: StackBuilder,
+    _pd: PhantomData<TT>,
 }
 
-impl TraceCompiler {
+impl<TT> TraceCompiler<TT> {
     fn place_to_location(&mut self, p: &Place) -> Result<Location, CompileError> {
         if !p.projection.is_empty() {
-            return Err(CompileError::Unimplemented(format!("{}", p)));
+            if Some(p.local) == self.trace_inputs_local {
+                match &p.projection[0] {
+                    Projection::Field(idx) => Ok(Location::Arg((idx * 8) as i32)),
+                    Projection::Unimplemented(s) => {
+                        Err(CompileError::Unimplemented(format!("{}", s)))
+                    }
+                }
+            } else {
+                Err(CompileError::Unimplemented(format!("{}", p)))
+            }
+        } else {
+            self.local_to_location(p.local)
         }
-        self.local_to_location(p.local)
     }
 
     /// Given a local, returns the register allocation for it, or, if there is no allocation yet,
@@ -194,8 +213,9 @@ impl TraceCompiler {
                     );
                 }
             }
-            Some(Location::NotLive) => {}
-            None => {}
+            Some(Location::Arg(_)) => unreachable!(),
+            Some(Location::NotLive) => unreachable!(),
+            None => unreachable!(),
         }
         self.variable_location_map.insert(*local, Location::NotLive);
         Ok(())
@@ -229,6 +249,28 @@ impl TraceCompiler {
                 dynasm!(self.asm
                     ; mov rax, [rbp - off2]
                     ; mov [rbp - off1], rax
+                );
+            }
+            (Location::Register(reg), Location::Arg(off)) => {
+                dynasm!(self.asm
+                    ; mov Rq(reg), [rdi + off]
+                );
+            }
+            (Location::Stack(soff), Location::Arg(aoff)) => {
+                dynasm!(self.asm
+                    ; mov rax, [rdi + aoff]
+                    ; mov [rbp - soff], rax
+                );
+            }
+            (Location::Arg(off), Location::Register(reg)) => {
+                dynasm!(self.asm
+                    ; mov [rdi + off], Rq(reg)
+                );
+            }
+            (Location::Arg(aoff), Location::Stack(soff)) => {
+                dynasm!(self.asm
+                    ; mov rax, [rbp - soff]
+                    ; mov [rdi + aoff], rax
                 );
             }
             _ => unreachable!(),
@@ -275,6 +317,12 @@ impl TraceCompiler {
                     );
                 }
             }
+            Location::Arg(off) => {
+                dynasm!(self.asm
+                    ; mov rax, QWORD c_val
+                    ; mov [rdi + off], rax
+                );
+            }
             Location::NotLive => unreachable!(),
         }
         Ok(())
@@ -294,6 +342,7 @@ impl TraceCompiler {
                     ; mov QWORD [rbp-offset], val
                 );
             }
+            Location::Arg(_) => todo!(),
             Location::NotLive => unreachable!(),
         }
         Ok(())
@@ -437,6 +486,7 @@ impl TraceCompiler {
                                 ; mov Rq(arg_reg), [rbp - off]
                             );
                         }
+                        Location::Arg(_) => todo!(),
                         Location::NotLive => unreachable!(),
                     };
                 }
@@ -448,7 +498,7 @@ impl TraceCompiler {
             };
         }
 
-        let sym_addr = TraceCompiler::find_symbol(sym)? as i64;
+        let sym_addr = TraceCompiler::<TT>::find_symbol(sym)? as i64;
         dynasm!(self.asm
             // In Sys-V ABI, `al` is a hidden argument used to specify the number of vector args
             // for a vararg call. We don't support this right now, so set it to zero.
@@ -601,27 +651,33 @@ impl TraceCompiler {
     }
 
     #[cfg(test)]
-    fn test_compile(tt: TirTrace) -> (CompiledTrace, u32) {
+    fn test_compile(tt: TirTrace) -> (CompiledTrace<TT>, u32) {
         // Changing the registers available to the register allocator affects the number of spills,
         // and thus also some tests. To make sure we notice when this happens we also check the
         // number of spills in those tests. We thus need a slightly different version of the
         // `compile` function that provides this information to the test.
-        let tc = TraceCompiler::_compile(tt);
+        let tc = TraceCompiler::<TT>::_compile(tt);
         let spills = tc.stack_builder.size();
-        let ct = CompiledTrace { mc: tc.finish() };
+        let ct = CompiledTrace::<TT> {
+            mc: tc.finish(),
+            _pd: PhantomData,
+        };
         (ct, spills)
     }
 
     /// Compile a TIR trace, returning executable code.
-    pub fn compile(tt: TirTrace) -> CompiledTrace {
-        let tc = TraceCompiler::_compile(tt);
-        CompiledTrace { mc: tc.finish() }
+    pub fn compile(tt: TirTrace) -> CompiledTrace<TT> {
+        let tc = TraceCompiler::<TT>::_compile(tt);
+        CompiledTrace::<TT> {
+            mc: tc.finish(),
+            _pd: PhantomData,
+        }
     }
 
-    fn _compile(tt: TirTrace) -> TraceCompiler {
+    fn _compile(tt: TirTrace) -> Self {
         let assembler = dynasmrt::x64::Assembler::new().unwrap();
 
-        let mut tc = TraceCompiler {
+        let mut tc = TraceCompiler::<TT> {
             asm: assembler,
             // Use all the 64-bit registers we can (R11-R8, RDX, RCX). We probably also want to use the
             // callee-saved registers R15-R12 here in the future.
@@ -632,7 +688,9 @@ impl TraceCompiler {
                 .collect(),
             variable_location_map: HashMap::new(),
             rtn_var: None,
+            trace_inputs_local: tt.inputs().map(|t| t.clone()),
             stack_builder: StackBuilder::default(),
+            _pd: PhantomData,
         };
 
         tc.init();
@@ -671,10 +729,12 @@ impl TraceCompiler {
 mod tests {
     use super::{CompileError, HashMap, Local, Location, TraceCompiler};
     use crate::stack_builder::StackBuilder;
+    use core::yk::trace_inputs;
     use dynasmrt::{x64::Rq::*, Register};
     use fm::FMBuilder;
     use libc::{abs, c_void, getuid};
     use regex::Regex;
+    use std::marker::PhantomData;
     use yktrace::tir::TirTrace;
     use yktrace::{start_tracing, TracingKind};
 
@@ -708,19 +768,22 @@ mod tests {
 
     #[test]
     fn test_simple() {
+        let mut inputs = trace_inputs((0,));
         let th = start_tracing(Some(TracingKind::HardwareTracing));
-        simple();
+        inputs.0 = simple();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
-        let ct = TraceCompiler::compile(tir_trace);
-        assert_eq!(ct.execute(), 13);
+        let ct = TraceCompiler::<&(u64,)>::compile(tir_trace);
+        let mut args = (0,);
+        ct.execute(&mut args);
+        assert_eq!(args.0, 13);
     }
 
     // Repeatedly fetching the register for the same local should yield the same register and
     // should not exhaust the allocator.
     #[test]
     fn reg_alloc_same_local() {
-        let mut tc = TraceCompiler {
+        let mut tc = TraceCompiler::<u8> {
             asm: dynasmrt::x64::Assembler::new().unwrap(),
             register_content_map: [R15, R14, R13, R12, R11, R10, R9, R8, RDX, RCX]
                 .iter()
@@ -729,7 +792,9 @@ mod tests {
                 .collect(),
             variable_location_map: HashMap::new(),
             rtn_var: None,
+            trace_inputs_local: None,
             stack_builder: StackBuilder::default(),
+            _pd: PhantomData,
         };
 
         for _ in 0..32 {
@@ -743,7 +808,7 @@ mod tests {
     // Locals should be allocated to different registers.
     #[test]
     fn reg_alloc() {
-        let mut tc = TraceCompiler {
+        let mut tc = TraceCompiler::<u8> {
             asm: dynasmrt::x64::Assembler::new().unwrap(),
             register_content_map: [R15, R14, R13, R12, R11, R10, R9, R8, RDX, RCX]
                 .iter()
@@ -752,7 +817,9 @@ mod tests {
                 .collect(),
             variable_location_map: HashMap::new(),
             rtn_var: None,
+            trace_inputs_local: None,
             stack_builder: StackBuilder::default(),
+            _pd: PhantomData,
         };
 
         let mut seen: Vec<Result<Location, CompileError>> = Vec::new();
@@ -777,12 +844,15 @@ mod tests {
 
     #[test]
     fn test_function_call_simple() {
+        let mut inputs = trace_inputs((0,));
         let th = start_tracing(Some(TracingKind::HardwareTracing));
-        fcall();
+        inputs.0 = fcall();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
-        let ct = TraceCompiler::compile(tir_trace);
-        assert_eq!(ct.execute(), 13);
+        let ct = TraceCompiler::<&(u64,)>::compile(tir_trace);
+        let mut args = (0,);
+        ct.execute(&mut args);
+        assert_eq!(args.0, 13);
     }
 
     fn fnested3(i: u8, _j: u8) -> u8 {
@@ -801,18 +871,21 @@ mod tests {
 
     #[test]
     fn test_function_call_nested() {
+        let mut inputs = trace_inputs((0,));
         let th = start_tracing(Some(TracingKind::HardwareTracing));
-        fnested();
+        inputs.0 = fnested();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
-        let ct = TraceCompiler::compile(tir_trace);
-        assert_eq!(ct.execute(), 20);
+        let ct = TraceCompiler::<&(u64,)>::compile(tir_trace);
+        let mut args = (0,);
+        ct.execute(&mut args);
+        assert_eq!(args.0, 20);
     }
 
     // Test finding a symbol in a shared object.
     #[test]
     fn find_symbol_shared() {
-        assert!(TraceCompiler::find_symbol("printf") == Ok(libc::printf as *mut c_void));
+        assert!(TraceCompiler::<u8>::find_symbol("printf") == Ok(libc::printf as *mut c_void));
     }
 
     // Test finding a symbol in the main binary.
@@ -822,7 +895,8 @@ mod tests {
     #[no_mangle]
     fn find_symbol_main() {
         assert!(
-            TraceCompiler::find_symbol("find_symbol_main") == Ok(find_symbol_main as *mut c_void)
+            TraceCompiler::<u8>::find_symbol("find_symbol_main")
+                == Ok(find_symbol_main as *mut c_void)
         );
     }
 
@@ -830,7 +904,7 @@ mod tests {
     #[test]
     fn find_nonexistent_symbol() {
         assert_eq!(
-            TraceCompiler::find_symbol("__xxxyyyzzz__"),
+            TraceCompiler::<u8>::find_symbol("__xxxyyyzzz__"),
             Err(CompileError::UnknownSymbol("__xxxyyyzzz__".to_owned()))
         );
     }
@@ -854,46 +928,54 @@ mod tests {
     /// Execute a trace which calls a symbol accepting no arguments, but which does return a value.
     #[test]
     fn exec_call_symbol_no_args() {
+        let mut inputs = trace_inputs((0,));
         let th = start_tracing(Some(TracingKind::HardwareTracing));
-        let expect = unsafe { getuid() };
+        inputs.0 = unsafe { getuid() };
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
-        let got = TraceCompiler::compile(tir_trace).execute();
-        assert_eq!(expect as u64, got);
+        let mut args = (0,);
+        TraceCompiler::<&(u64,)>::compile(tir_trace).execute(&mut args);
+        assert_eq!(inputs.0 as u64, args.0);
     }
 
     /// Execute a trace which calls a symbol accepting arguments and returns a value.
     #[test]
     fn exec_call_symbol_with_arg() {
+        let mut inputs = trace_inputs((0,));
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         let v = -56;
-        let expect = unsafe { abs(v) };
+        inputs.0 = unsafe { abs(v) };
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
-        let got = TraceCompiler::compile(tir_trace).execute();
-        assert_eq!(expect as u64, got);
+        let mut args = (0,);
+        TraceCompiler::<&(u64,)>::compile(tir_trace).execute(&mut args);
+        assert_eq!(inputs.0 as u64, args.0);
     }
 
     /// The same as `exec_call_symbol_args_with_rv`, just using a constant argument.
     #[test]
     fn exec_call_symbol_with_const_arg() {
+        let mut inputs = trace_inputs((0,));
         let th = start_tracing(Some(TracingKind::HardwareTracing));
-        let expect = unsafe { abs(-123) };
+        inputs.0 = unsafe { abs(-123) };
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
-        let got = TraceCompiler::compile(tir_trace).execute();
-        assert_eq!(expect as u64, got);
+        let mut args = (0,);
+        TraceCompiler::<&(u64,)>::compile(tir_trace).execute(&mut args);
+        assert_eq!(inputs.0 as u64, args.0);
     }
 
     #[test]
     fn exec_call_symbol_with_many_args() {
+        let mut inputs = trace_inputs((0,));
         let th = start_tracing(Some(TracingKind::HardwareTracing));
-        let expect = unsafe { add6(1, 2, 3, 4, 5, 6) };
+        inputs.0 = unsafe { add6(1, 2, 3, 4, 5, 6) };
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
-        let got = TraceCompiler::compile(tir_trace).execute();
-        assert_eq!(expect, 21);
-        assert_eq!(expect, got);
+        let mut args = (0,);
+        TraceCompiler::<&(u64,)>::compile(tir_trace).execute(&mut args);
+        assert_eq!(inputs.0, 21);
+        assert_eq!(inputs.0, args.0);
     }
 
     #[test]
@@ -902,13 +984,15 @@ mod tests {
             fn add_some(a: u64, b: u64, c: u64, d: u64, e: u64) -> u64;
         }
 
+        let mut inputs = trace_inputs((0,));
         let th = start_tracing(Some(TracingKind::HardwareTracing));
-        let expect = unsafe { add_some(1, 2, 3, 4, 5) };
+        inputs.0 = unsafe { add_some(1, 2, 3, 4, 5) };
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
-        let got = TraceCompiler::compile(tir_trace).execute();
-        assert_eq!(expect, 7);
-        assert_eq!(expect, got);
+        let mut args = (0,);
+        TraceCompiler::<&(u64,)>::compile(tir_trace).execute(&mut args);
+        assert_eq!(args.0, 7);
+        assert_eq!(args.0, inputs.0);
     }
 
     fn many_locals() -> u8 {
@@ -925,12 +1009,15 @@ mod tests {
 
     #[test]
     fn test_spilling_simple() {
+        let mut inputs = trace_inputs((0,));
         let th = start_tracing(Some(TracingKind::HardwareTracing));
-        many_locals();
+        inputs.0 = many_locals();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
-        let (ct, spills) = TraceCompiler::test_compile(tir_trace);
-        assert_eq!(ct.execute(), 7);
+        let (ct, spills) = TraceCompiler::<&(u64,)>::test_compile(tir_trace);
+        let mut args = (0,);
+        ct.execute(&mut args);
+        assert_eq!(args.0, 7);
         assert_eq!(spills, 3 * 8);
     }
 
@@ -955,13 +1042,15 @@ mod tests {
 
     #[test]
     fn test_spilling_u64() {
+        let mut inputs = trace_inputs((0,));
         let th = start_tracing(Some(TracingKind::HardwareTracing));
-        spill_u64();
+        inputs.0 = spill_u64();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
-        let (ct, spills) = TraceCompiler::test_compile(tir_trace);
-        let got = ct.execute();
-        assert_eq!(got, 4294967296 + 8);
+        let (ct, spills) = TraceCompiler::<&(u64,)>::test_compile(tir_trace);
+        let mut args = (0,);
+        ct.execute(&mut args);
+        assert_eq!(args.0, 4294967296 + 8);
         assert_eq!(spills, 2 * 8);
     }
 
@@ -979,12 +1068,15 @@ mod tests {
 
     #[test]
     fn test_mov_register_to_stack() {
+        let mut inputs = trace_inputs((0,));
         let th = start_tracing(Some(TracingKind::HardwareTracing));
-        register_to_stack(8);
+        inputs.0 = register_to_stack(8);
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
-        let (ct, spills) = TraceCompiler::test_compile(tir_trace);
-        assert_eq!(ct.execute(), 8);
+        let (ct, spills) = TraceCompiler::<&(u64,)>::test_compile(tir_trace);
+        let mut args = (0,);
+        ct.execute(&mut args);
+        assert_eq!(args.0, 8);
         assert_eq!(spills, 3 * 8);
     }
 
@@ -1003,12 +1095,15 @@ mod tests {
 
     #[test]
     fn test_mov_stack_to_register() {
+        let mut inputs = trace_inputs((0,));
         let th = start_tracing(Some(TracingKind::HardwareTracing));
-        stack_to_register();
+        inputs.0 = stack_to_register();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
-        let (ct, spills) = TraceCompiler::test_compile(tir_trace);
-        assert_eq!(ct.execute(), 3);
+        let (ct, spills) = TraceCompiler::<&(u64,)>::test_compile(tir_trace);
+        let mut args = (0,);
+        ct.execute(&mut args);
+        assert_eq!(args.0, 3);
         assert_eq!(spills, 1 * 8);
     }
 
@@ -1029,12 +1124,14 @@ mod tests {
 
     #[test]
     fn ext_call_and_spilling() {
+        let mut inputs = trace_inputs((0,));
         let th = start_tracing(Some(TracingKind::HardwareTracing));
-        let expect = ext_call();
+        inputs.0 = ext_call();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
-        let got = TraceCompiler::compile(tir_trace).execute();
-        assert_eq!(expect, 7);
-        assert_eq!(expect, got);
+        let mut args = (0,);
+        TraceCompiler::<&(u64,)>::compile(tir_trace).execute(&mut args);
+        assert_eq!(inputs.0, 7);
+        assert_eq!(inputs.0, args.0);
     }
 }
