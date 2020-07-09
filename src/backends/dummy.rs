@@ -1,10 +1,10 @@
-use {Tracer, ThreadTracer, Block};
 use errors::HWTracerError;
+#[cfg(test)]
+use std::fs::File;
 use std::iter::Iterator;
 use Trace;
 use TracerState;
-#[cfg(test)]
-use std::fs::File;
+use {Block, ThreadTracer, Tracer};
 
 /// An empty dummy trace.
 #[derive(Debug)]
@@ -14,8 +14,10 @@ impl Trace for DummyTrace {
     #[cfg(test)]
     fn to_file(&self, _: &mut File) {}
 
-    fn iter_blocks<'t: 'i, 'i>(&'t self) -> Box<dyn Iterator<Item=Result<Block, HWTracerError>> + 'i> {
-       Box::new(DummyBlockIterator{})
+    fn iter_blocks<'t: 'i, 'i>(
+        &'t self,
+    ) -> Box<dyn Iterator<Item = Result<Block, HWTracerError>> + 'i> {
+        Box::new(DummyBlockIterator {})
     }
 
     #[cfg(test)]
@@ -28,8 +30,8 @@ impl Trace for DummyTrace {
 pub struct DummyTracer {}
 
 impl DummyTracer {
-    pub (super) fn new() -> Self {
-        DummyTracer{}
+    pub(super) fn new() -> Self {
+        DummyTracer {}
     }
 }
 
@@ -48,7 +50,9 @@ pub struct DummyThreadTracer {
 impl DummyThreadTracer {
     /// Create a dummy tracer.
     fn new() -> Self {
-        Self { state: TracerState::Stopped }
+        Self {
+            state: TracerState::Stopped,
+        }
     }
 }
 
@@ -66,7 +70,7 @@ impl ThreadTracer for DummyThreadTracer {
             return Err(TracerState::Stopped.as_error());
         }
         self.state = TracerState::Stopped;
-        Ok(Box::new(DummyTrace{}))
+        Ok(Box::new(DummyTrace {}))
     }
 }
 
@@ -86,7 +90,7 @@ impl Iterator for DummyBlockIterator {
 #[cfg(test)]
 mod tests {
     use super::DummyThreadTracer;
-    use ::test_helpers;
+    use test_helpers;
 
     #[test]
     fn test_basic_usage() {
@@ -110,13 +114,13 @@ mod tests {
 
     #[test]
     fn test_block_iterator() {
-        use ::ThreadTracer;
+        use ThreadTracer;
         let mut tracer = DummyThreadTracer::new();
         tracer.start_tracing().unwrap();
         let trace = tracer.stop_tracing().unwrap();
 
         // We expect exactly 0 blocks.
-        let expects =  Vec::new();
+        let expects = Vec::new();
         test_helpers::test_expected_blocks(trace, expects.iter());
     }
 }

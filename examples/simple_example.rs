@@ -1,9 +1,9 @@
 extern crate hwtracer;
 extern crate libc;
 
-use std::time::SystemTime;
-use hwtracer::Trace;
 use hwtracer::backends::TracerBuilder;
+use hwtracer::Trace;
+use std::time::SystemTime;
 
 /// Prints the addresses of the first `qty` blocks in a trace along with it's name and
 /// computation result.
@@ -12,7 +12,7 @@ fn print_trace(trace: &Box<dyn Trace>, name: &str, result: u32, qty: usize) {
     println!("{}: num_blocks={}, result={}", name, count, result);
 
     for (i, blk) in trace.iter_blocks().take(qty).enumerate() {
-       println!("  block {}: 0x{:x}", i, blk.unwrap().first_instr());
+        println!("  block {}: 0x{:x}", i, blk.unwrap().first_instr());
     }
     if count > qty {
         println!("  ... {} more", count - qty);

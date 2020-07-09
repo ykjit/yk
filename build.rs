@@ -1,12 +1,12 @@
 extern crate cc;
 extern crate core;
 
-use std::fs;
-use std::path::{PathBuf, Path};
-use std::env;
-use std::process::Command;
-use std::os::unix::fs as unix_fs;
 use core::arch::x86_64::__cpuid_count;
+use std::env;
+use std::fs;
+use std::os::unix::fs as unix_fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 const FEATURE_CHECKS_PATH: &str = "feature_checks";
 

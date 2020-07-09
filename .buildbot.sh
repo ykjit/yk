@@ -10,8 +10,7 @@ sh rustup.sh --default-host x86_64-unknown-linux-gnu --default-toolchain nightly
 
 export PATH=`pwd`/.cargo/bin/:$PATH
 
-# FIXME in a later PR.
-#cargo fmt --all -- --check
+cargo fmt --all -- --check
 
 cargo test
 cargo test --release

@@ -1,19 +1,19 @@
-use libc::{c_void, size_t, geteuid, malloc, free, c_char, c_int};
-use std::fs::File;
-use std::iter::Iterator;
-use std::io::{self, Read};
-use std::ffi::{self, CString, CStr};
-use std::os::unix::io::AsRawFd;
-use std::ptr;
-#[cfg(debug_assertions)]
-use std::ops::Drop;
-use tempfile::NamedTempFile;
-use {Tracer, ThreadTracer, TracerState, Trace, Block};
 use super::PerfPTConfig;
 use errors::HWTracerError;
-use std::num::ParseIntError;
+use libc::{c_char, c_int, c_void, free, geteuid, malloc, size_t};
 use std::error::Error;
-use std::fmt::{self, Formatter, Display};
+use std::ffi::{self, CStr, CString};
+use std::fmt::{self, Display, Formatter};
+use std::fs::File;
+use std::io::{self, Read};
+use std::iter::Iterator;
+use std::num::ParseIntError;
+#[cfg(debug_assertions)]
+use std::ops::Drop;
+use std::os::unix::io::AsRawFd;
+use std::ptr;
+use tempfile::NamedTempFile;
+use {Block, ThreadTracer, Trace, Tracer, TracerState};
 
 // The sysfs path used to set perf permissions.
 const PERF_PERMS_PATH: &str = "/proc/sys/kernel/perf_event_paranoid";
@@ -78,7 +78,7 @@ impl From<PerfPTCError> for HWTracerError {
             PerfPTCErrorKind::Errno => HWTracerError::Errno(err.code),
             PerfPTCErrorKind::IPT => {
                 // Overflow is a special case with its own error type.
-                match unsafe {perf_pt_is_overflow_err(err.code)} {
+                match unsafe { perf_pt_is_overflow_err(err.code) } {
                     true => HWTracerError::HWBufferOverflow,
                     false => HWTracerError::Custom(Box::new(LibIPTError(err.code))),
                 }
@@ -95,20 +95,33 @@ impl From<PerfPTCError> for HWTracerError {
 // XXX Cargo bug(?).
 // Linker flags in build.rs ignored for the testing target. We must use `link_args` instead.
 #[allow(unused_attributes)]
-#[link_args="-lipt"]
+#[link_args = "-lipt"]
 extern "C" {
     // collect.c
     fn perf_pt_init_tracer(conf: *const PerfPTConfig, err: *mut PerfPTCError) -> *mut c_void;
-    fn perf_pt_start_tracer(tr_ctx: *mut c_void, trace: *mut PerfPTTrace, err: *mut PerfPTCError) -> bool;
+    fn perf_pt_start_tracer(
+        tr_ctx: *mut c_void,
+        trace: *mut PerfPTTrace,
+        err: *mut PerfPTCError,
+    ) -> bool;
     fn perf_pt_stop_tracer(tr_ctx: *mut c_void, err: *mut PerfPTCError) -> bool;
     fn perf_pt_free_tracer(tr_ctx: *mut c_void, err: *mut PerfPTCError) -> bool;
     // decode.c
-    fn perf_pt_init_block_decoder(buf: *const c_void, len: u64, vdso_fd: c_int,
-                                  vdso_filename: *const c_char,
-                                  decoder_status: *mut c_int,
-                                  err: *mut PerfPTCError) -> *mut c_void;
-    fn perf_pt_next_block(decoder: *mut c_void, decoder_status: *mut c_int,
-                          addr: *mut u64, len: *mut u64, err: *mut PerfPTCError) -> bool;
+    fn perf_pt_init_block_decoder(
+        buf: *const c_void,
+        len: u64,
+        vdso_fd: c_int,
+        vdso_filename: *const c_char,
+        decoder_status: *mut c_int,
+        err: *mut PerfPTCError,
+    ) -> *mut c_void;
+    fn perf_pt_next_block(
+        decoder: *mut c_void,
+        decoder_status: *mut c_int,
+        addr: *mut u64,
+        len: *mut u64,
+        err: *mut PerfPTCError,
+    ) -> bool;
     fn perf_pt_free_block_decoder(decoder: *mut c_void);
     // util.c
     fn perf_pt_is_overflow_err(err: c_int) -> bool;
@@ -118,12 +131,12 @@ extern "C" {
 
 // Iterate over the blocks of a PerfPTTrace.
 struct PerfPTBlockIterator<'t> {
-    decoder: *mut c_void,   // C-level libipt block decoder.
-    decoder_status: c_int,  // Stores the current libipt-level status of the above decoder.
-    #[allow(dead_code)]     // Rust doesn't know that this exists only to keep the file long enough.
+    decoder: *mut c_void,  // C-level libipt block decoder.
+    decoder_status: c_int, // Stores the current libipt-level status of the above decoder.
+    #[allow(dead_code)] // Rust doesn't know that this exists only to keep the file long enough.
     vdso_tempfile: Option<NamedTempFile>, // VDSO code stored temporarily.
     trace: &'t PerfPTTrace, // The trace we are iterating.
-    errored: bool,          // Set to true when an error occurs, thus invalidating the iterator.
+    errored: bool,         // Set to true when an error occurs, thus invalidating the iterator.
 }
 
 impl From<io::Error> for HWTracerError {
@@ -156,12 +169,17 @@ impl<'t> PerfPTBlockIterator<'t> {
         let vdso_filename = CString::new(vdso_tempfile.path().to_str().unwrap())?;
         let mut cerr = PerfPTCError::new();
         let decoder = unsafe {
-            perf_pt_init_block_decoder(self.trace.buf.0 as *const c_void, self.trace.len,
-                                 vdso_tempfile.as_raw_fd(), vdso_filename.as_ptr(),
-                                 &mut self.decoder_status, &mut cerr)
+            perf_pt_init_block_decoder(
+                self.trace.buf.0 as *const c_void,
+                self.trace.len,
+                vdso_tempfile.as_raw_fd(),
+                vdso_filename.as_ptr(),
+                &mut self.decoder_status,
+                &mut cerr,
+            )
         };
         if decoder.is_null() {
-            return Err(cerr.into())
+            return Err(cerr.into());
         }
 
         vdso_tempfile.as_file().sync_all()?;
@@ -198,8 +216,13 @@ impl<'t> Iterator for PerfPTBlockIterator<'t> {
         let mut last_instr = 0;
         let mut cerr = PerfPTCError::new();
         let rv = unsafe {
-            perf_pt_next_block(self.decoder, &mut self.decoder_status,
-                               &mut first_instr, &mut last_instr, &mut cerr)
+            perf_pt_next_block(
+                self.decoder,
+                &mut self.decoder_status,
+                &mut first_instr,
+                &mut last_instr,
+                &mut cerr,
+            )
         };
         if !rv {
             self.errored = true; // This iterator is unusable now.
@@ -248,7 +271,11 @@ impl PerfPTTrace {
         if buf.is_null() {
             return Err(HWTracerError::Unknown);
         }
-        Ok(Self {buf: PerfPTTraceBuf(buf), len: 0, capacity: capacity as u64})
+        Ok(Self {
+            buf: PerfPTTraceBuf(buf),
+            len: 0,
+            capacity: capacity as u64,
+        })
     }
 }
 
@@ -256,14 +283,16 @@ impl Trace for PerfPTTrace {
     /// Write the raw trace packets into the specified file.
     #[cfg(test)]
     fn to_file(&self, file: &mut File) {
-        use std::slice;
         use std::io::prelude::*;
+        use std::slice;
 
         let slice = unsafe { slice::from_raw_parts(self.buf.0 as *const u8, self.len as usize) };
         file.write_all(slice).unwrap();
     }
 
-    fn iter_blocks<'t: 'i, 'i>(&'t self) -> Box<dyn Iterator<Item=Result<Block, HWTracerError>> + 'i> {
+    fn iter_blocks<'t: 'i, 'i>(
+        &'t self,
+    ) -> Box<dyn Iterator<Item = Result<Block, HWTracerError>> + 'i> {
         let itr = PerfPTBlockIterator {
             decoder: ptr::null_mut(),
             decoder_status: 0,
@@ -294,20 +323,27 @@ pub struct PerfPTTracer {
 }
 
 impl PerfPTTracer {
-    pub (super) fn new(config: PerfPTConfig) -> Result<Self, HWTracerError> where Self: Sized {
+    pub(super) fn new(config: PerfPTConfig) -> Result<Self, HWTracerError>
+    where
+        Self: Sized,
+    {
         // Check for inavlid configuration.
         fn power_of_2(v: size_t) -> bool {
             (v & (v - 1)) == 0
         }
         if !power_of_2(config.data_bufsize) {
-            return Err(HWTracerError::BadConfig(String::from("data_bufsize must be a positive power of 2")));
+            return Err(HWTracerError::BadConfig(String::from(
+                "data_bufsize must be a positive power of 2",
+            )));
         }
         if !power_of_2(config.aux_bufsize) {
-            return Err(HWTracerError::BadConfig(String::from("aux_bufsize must be a positive power of 2")));
+            return Err(HWTracerError::BadConfig(String::from(
+                "aux_bufsize must be a positive power of 2",
+            )));
         }
 
         Self::check_perf_perms()?;
-        Ok(Self{config})
+        Ok(Self { config })
     }
 
     fn check_perf_perms() -> Result<(), HWTracerError> {
@@ -321,8 +357,10 @@ impl PerfPTTracer {
         f.read_to_string(&mut buf)?;
         let perm = buf.trim().parse::<i8>()?;
         if perm != -1 {
-            let msg = format!("Tracing not permitted: you must be root or {} must contain -1",
-                           PERF_PERMS_PATH);
+            let msg = format!(
+                "Tracing not permitted: you must be root or {} must contain -1",
+                PERF_PERMS_PATH
+            );
             return Err(HWTracerError::Permissions(msg));
         }
 
@@ -334,7 +372,6 @@ impl Tracer for PerfPTTracer {
     fn thread_tracer(&self) -> Box<dyn ThreadTracer> {
         Box::new(PerfPTThreadTracer::new(self.config.clone()))
     }
-
 }
 
 /// A tracer that uses the Linux Perf interface to Intel Processor Trace.
@@ -370,9 +407,8 @@ impl ThreadTracer for PerfPTThreadTracer {
         // start with a `PSB+` packet sequence. This is required for correct instruction-level and
         // block-level decoding. Therefore we have to re-initialise for each new tracing session.
         let mut cerr = PerfPTCError::new();
-        self.tracer_ctx = unsafe {
-            perf_pt_init_tracer(&self.config as *const PerfPTConfig, &mut cerr)
-        };
+        self.tracer_ctx =
+            unsafe { perf_pt_init_tracer(&self.config as *const PerfPTConfig, &mut cerr) };
         if self.tracer_ctx.is_null() {
             return Err(cerr.into());
         }
@@ -419,16 +455,25 @@ impl ThreadTracer for PerfPTThreadTracer {
 #[cfg(test)]
 #[no_mangle]
 pub unsafe extern "C" fn push_ptxed_arg(args: &mut Vec<String>, new_arg: *const c_char) {
-    let new_arg = CStr::from_ptr(new_arg).to_owned().to_str().unwrap().to_owned();
+    let new_arg = CStr::from_ptr(new_arg)
+        .to_owned()
+        .to_str()
+        .unwrap()
+        .to_owned();
     args.push(new_arg);
 }
 
-#[cfg(all(perf_pt_test,test))]
+#[cfg(all(perf_pt_test, test))]
 mod tests {
-    use super::{PerfPTThreadTracer, Trace, NamedTempFile, c_int, c_char, AsRawFd, CString, c_void,
-                PerfPTConfig, PerfPTTrace, PerfPTBlockIterator, ptr, HWTracerError, ThreadTracer};
-    use ::{test_helpers, Block, backends::{TracerBuilder, BackendConfig}};
+    use super::{
+        c_char, c_int, c_void, ptr, AsRawFd, CString, HWTracerError, NamedTempFile,
+        PerfPTBlockIterator, PerfPTConfig, PerfPTThreadTracer, PerfPTTrace, ThreadTracer, Trace,
+    };
     use std::process::Command;
+    use {
+        backends::{BackendConfig, TracerBuilder},
+        test_helpers, Block,
+    };
 
     // Makes a `PerfPTThreadTracer` with the default config.
     fn default_tracer() -> PerfPTThreadTracer {
@@ -454,8 +499,15 @@ mod tests {
     // removed when they fall out of scope).
     fn self_ptxed_args(trace_filename: &str) -> (Vec<String>, NamedTempFile) {
         let ptxed_args = vec![
-            "--cpu", "auto", "--block-decoder", "--block:end-on-call", "--block:end-on-jump",
-            "--block:show-blocks", "--pt", trace_filename];
+            "--cpu",
+            "auto",
+            "--block-decoder",
+            "--block:end-on-call",
+            "--block:end-on-jump",
+            "--block:show-blocks",
+            "--pt",
+            trace_filename,
+        ];
         let mut ptxed_args = ptxed_args.into_iter().map(|e| String::from(e)).collect();
 
         // Make a temp file for the VDSO to live in.
@@ -469,9 +521,8 @@ mod tests {
             ptxed_args: &mut ptxed_args as *mut Vec<String>,
         };
 
-        let rv = unsafe {
-            perf_pt_append_self_ptxed_raw_args(&mut call_args as *mut _ as *mut c_void)
-        };
+        let rv =
+            unsafe { perf_pt_append_self_ptxed_raw_args(&mut call_args as *mut _ as *mut c_void) };
         assert!(rv);
         (ptxed_args, vdso_tempfile)
     }
@@ -487,7 +538,7 @@ mod tests {
             // JMP or Jcc are the only instructions beginning with 'j'.
             m if m.starts_with("j") => true,
             "call" | "ret" | "loop" | "loope" | "loopne" | "syscall" | "sysenter" | "sysexit"
-                | "sysret" | "xabort" => true,
+            | "sysret" | "xabort" => true,
             _ => false,
         }
     }
@@ -499,16 +550,15 @@ mod tests {
         trace.to_file(&mut tmpf.as_file_mut());
         let (args, _vdso_tempfile) = self_ptxed_args(tmpf.path().to_str().unwrap());
 
-        let out = Command::new(env!("PTXED"))
-                          .args(&args)
-                          .output()
-                          .unwrap();
+        let out = Command::new(env!("PTXED")).args(&args).output().unwrap();
         let outstr = String::from_utf8(out.stdout).unwrap();
         if !out.status.success() {
             let errstr = String::from_utf8(out.stderr).unwrap();
-            panic!("ptxed failed:\nInvocation----------\n{:?}\n \
+            panic!(
+                "ptxed failed:\nInvocation----------\n{:?}\n \
                    Stdout\n------\n{}Stderr\n------\n{}",
-                   args, outstr, errstr);
+                args, outstr, errstr
+            );
         }
 
         let mut block_start = false;
@@ -520,8 +570,9 @@ mod tests {
                 panic!("error line in ptxed output:\n{}", line);
             } else if line.starts_with("[") {
                 // It's a special line, e.g. [enabled], [disabled], [block]...
-                if line == "[block]" && (last_instr.is_none() ||
-                                         instr_terminates_block(last_instr.unwrap())) {
+                if line == "[block]"
+                    && (last_instr.is_none() || instr_terminates_block(last_instr.unwrap()))
+                {
                     // The next insruction we see will be the start of a block.
                     block_start = true;
                 }
@@ -542,7 +593,11 @@ mod tests {
     }
 
     // Trace a closure and then decode it and check the block iterator agrees with ptxed.
-    fn trace_and_check_blocks<T, F>(mut tracer: T, f: F) where T: ThreadTracer, F: FnOnce() -> u64 {
+    fn trace_and_check_blocks<T, F>(mut tracer: T, f: F)
+    where
+        T: ThreadTracer,
+        F: FnOnce() -> u64,
+    {
         let trace = test_helpers::trace_closure(&mut tracer, f);
         let expects = get_expected_blocks(&trace);
         test_helpers::test_expected_blocks(trace, expects.iter());
@@ -573,8 +628,8 @@ mod tests {
     #[test]
     fn test_to_file() {
         use std::fs::File;
-        use std::slice;
         use std::io::prelude::*;
+        use std::slice;
         use Trace;
 
         // Allocate and fill a buffer to make a "trace" from.
@@ -618,12 +673,15 @@ mod tests {
     // Check that our block decoder deals with traces involving the VDSO correctly.
     #[test]
     fn test_block_iterator3() {
-        use libc::{timespec, CLOCK_MONOTONIC, clock_gettime};
+        use libc::{clock_gettime, timespec, CLOCK_MONOTONIC};
 
         let tracer = default_tracer();
         trace_and_check_blocks(tracer, || {
             let mut res = 0;
-            let mut tv = timespec { tv_sec: 0, tv_nsec: 0 };
+            let mut tv = timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            };
             for _ in 1..100 {
                 // clock_gettime(2) is in the Linux VDSO.
                 let rv = unsafe { clock_gettime(CLOCK_MONOTONIC, &mut tv) };
@@ -682,7 +740,9 @@ mod tests {
 
         // First we expect a libipt error.
         match itr.next() {
-            Some(Err(HWTracerError::Custom(e))) => assert!(e.to_string().starts_with("libipt error: ")),
+            Some(Err(HWTracerError::Custom(e))) => {
+                assert!(e.to_string().starts_with("libipt error: "))
+            }
             _ => panic!(),
         }
         // And now the iterator is invalid, and should return None.
@@ -701,7 +761,7 @@ mod tests {
         match bldr.build() {
             Err(HWTracerError::BadConfig(s)) => {
                 assert_eq!(s, "data_bufsize must be a positive power of 2");
-            },
+            }
             _ => panic!(),
         }
     }
@@ -716,7 +776,7 @@ mod tests {
         match bldr.build() {
             Err(HWTracerError::BadConfig(s)) => {
                 assert_eq!(s, "aux_bufsize must be a positive power of 2");
-            },
+            }
             _ => panic!(),
         }
     }
