@@ -1,6 +1,3 @@
-extern crate hwtracer;
-extern crate libc;
-
 use hwtracer::backends::TracerBuilder;
 use hwtracer::Trace;
 use std::time::SystemTime;

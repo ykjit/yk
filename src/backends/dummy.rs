@@ -1,10 +1,8 @@
-use errors::HWTracerError;
+use crate::errors::HWTracerError;
+use crate::{Block, ThreadTracer, Trace, Tracer, TracerState};
 #[cfg(test)]
 use std::fs::File;
 use std::iter::Iterator;
-use Trace;
-use TracerState;
-use {Block, ThreadTracer, Tracer};
 
 /// An empty dummy trace.
 #[derive(Debug)]
@@ -90,7 +88,7 @@ impl Iterator for DummyBlockIterator {
 #[cfg(test)]
 mod tests {
     use super::DummyThreadTracer;
-    use test_helpers;
+    use crate::{test_helpers, ThreadTracer};
 
     #[test]
     fn test_basic_usage() {
@@ -114,7 +112,6 @@ mod tests {
 
     #[test]
     fn test_block_iterator() {
-        use ThreadTracer;
         let mut tracer = DummyThreadTracer::new();
         tracer.start_tracing().unwrap();
         let trace = tracer.stop_tracing().unwrap();

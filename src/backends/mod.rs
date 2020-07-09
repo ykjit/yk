@@ -1,11 +1,11 @@
-use backends::dummy::DummyTracer;
-use errors::HWTracerError;
-use Tracer;
+use crate::backends::dummy::DummyTracer;
+use crate::errors::HWTracerError;
+use crate::Tracer;
 
 #[cfg(perf_pt)]
 pub mod perf_pt;
 #[cfg(perf_pt)]
-use backends::perf_pt::PerfPTTracer;
+use crate::backends::perf_pt::PerfPTTracer;
 #[cfg(perf_pt)]
 use core::arch::x86_64::__cpuid_count;
 use libc::size_t;

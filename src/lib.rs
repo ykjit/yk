@@ -4,11 +4,6 @@
 #![feature(optin_builtin_traits)]
 #![feature(link_args)]
 
-extern crate core;
-extern crate libc;
-extern crate tempfile;
-extern crate time;
-
 pub mod backends;
 pub mod errors;
 
@@ -115,9 +110,9 @@ impl Display for TracerState {
 #[cfg(test)]
 mod test_helpers {
     use super::{Block, HWTracerError, ThreadTracer, TracerState};
+    use crate::Trace;
     use std::slice::Iter;
     use std::time::SystemTime;
-    use Trace;
 
     // A loop that does some work that we can use to build a trace.
     #[inline(never)]

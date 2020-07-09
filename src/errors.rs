@@ -1,8 +1,8 @@
+use crate::{backends::BackendKind, TracerState};
 use libc::{c_int, strerror};
 use std::error::Error;
 use std::ffi::CStr;
 use std::fmt::{self, Display, Formatter};
-use {backends::BackendKind, TracerState};
 
 #[derive(Debug)]
 pub enum HWTracerError {
