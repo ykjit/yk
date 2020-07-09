@@ -58,14 +58,13 @@ impl BackendKind {
         let ebx_out: u32;
 
         unsafe {
-            asm!(r"
-                  mov $1, %eax;
-                  mov $2, %ecx;
-                  cpuid;"
-                : "={ebx}" (ebx_out)
-                : "i" (LEAF), "i" (SUBPAGE)
-                : "eax", "ecx", "edx"
-                : "volatile");
+            asm!(
+                  "cpuid",
+                  inout("eax") LEAF => _,
+                  inout("ecx") SUBPAGE => _,
+                  lateout("ebx") ebx_out,
+                  lateout("edx") _,
+            );
         }
         ebx_out & EBX_BIT != 0
     }
@@ -187,7 +186,7 @@ impl TracerBuilder {
                 #[cfg(not(perf_pt))]
                 unreachable!();
             },
-            BackendConfig::Dummy => return Ok(Box::new(DummyTracer::new())),
+            BackendConfig::Dummy => Ok(Box::new(DummyTracer::new())),
         }
     }
 }

@@ -161,7 +161,7 @@ impl<'t> PerfPTBlockIterator<'t> {
                                  &mut self.decoder_status, &mut cerr)
         };
         if decoder.is_null() {
-            Err(cerr)?
+            return Err(cerr.into())
         }
 
         vdso_tempfile.as_file().sync_all()?;
@@ -352,7 +352,7 @@ pub struct PerfPTThreadTracer {
 impl PerfPTThreadTracer {
     fn new(config: PerfPTConfig) -> Self {
         Self {
-            config: config,
+            config,
             tracer_ctx: ptr::null_mut(),
             state: TracerState::Stopped,
             trace: None,
@@ -374,7 +374,7 @@ impl ThreadTracer for PerfPTThreadTracer {
             perf_pt_init_tracer(&self.config as *const PerfPTConfig, &mut cerr)
         };
         if self.tracer_ctx.is_null() {
-            Err(cerr)?
+            return Err(cerr.into());
         }
 
         // It is essential we box the trace now to stop it from moving. If it were to move, then
@@ -385,7 +385,7 @@ impl ThreadTracer for PerfPTThreadTracer {
         let mut trace = Box::new(PerfPTTrace::new(self.config.initial_trace_bufsize)?);
         let mut cerr = PerfPTCError::new();
         if !unsafe { perf_pt_start_tracer(self.tracer_ctx, &mut *trace, &mut cerr) } {
-            Err(cerr)?
+            return Err(cerr.into());
         }
         self.state = TracerState::Started;
         self.trace = Some(trace);
@@ -400,12 +400,12 @@ impl ThreadTracer for PerfPTThreadTracer {
         let rc = unsafe { perf_pt_stop_tracer(self.tracer_ctx, &mut cerr) };
         self.state = TracerState::Stopped;
         if !rc {
-            Err(cerr)?
+            return Err(cerr.into());
         }
 
         let mut cerr = PerfPTCError::new();
         if !unsafe { perf_pt_free_tracer(self.tracer_ctx, &mut cerr) } {
-            Err(cerr)?
+            return Err(cerr.into());
         }
         self.tracer_ctx = ptr::null_mut();
 
@@ -682,7 +682,7 @@ mod tests {
 
         // First we expect a libipt error.
         match itr.next() {
-            Some(Err(HWTracerError::Custom(e))) => assert_eq!(e.description(), "libipt error"),
+            Some(Err(HWTracerError::Custom(e))) => assert!(e.to_string().starts_with("libipt error: ")),
             _ => panic!(),
         }
         // And now the iterator is invalid, and should return None.
