@@ -6,6 +6,8 @@ use backends::dummy::DummyTracer;
 pub mod perf_pt;
 #[cfg(perf_pt)]
 use backends::perf_pt::PerfPTTracer;
+#[cfg(perf_pt)]
+use core::arch::x86_64::__cpuid_count;
 use libc::size_t;
 pub mod dummy;
 
@@ -52,21 +54,8 @@ impl BackendKind {
     /// Checks if the CPU supports Intel Processor Trace.
     #[cfg(perf_pt)]
     fn pt_supported() -> bool {
-        const LEAF: u32 = 0x07;
-        const SUBPAGE: u32 = 0x0;
-        const EBX_BIT: u32 = 1 << 25;
-        let ebx_out: u32;
-
-        unsafe {
-            asm!(
-                  "cpuid",
-                  inout("eax") LEAF => _,
-                  inout("ecx") SUBPAGE => _,
-                  lateout("ebx") ebx_out,
-                  lateout("edx") _,
-            );
-        }
-        ebx_out & EBX_BIT != 0
+        let res = unsafe { __cpuid_count(0x7, 0x0) };
+        (res.ebx & (1 << 25)) != 0
     }
 }
 
