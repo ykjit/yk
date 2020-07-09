@@ -1,25 +1,25 @@
-use std::fmt::{self, Formatter, Display};
-use std::error::Error;
-use {TracerState, backends::BackendKind};
 use libc::{c_int, strerror};
+use std::error::Error;
 use std::ffi::CStr;
+use std::fmt::{self, Display, Formatter};
+use {backends::BackendKind, TracerState};
 
 #[derive(Debug)]
 pub enum HWTracerError {
-    HWBufferOverflow,         // The trace buffer being used by the hardware overflowed.
-                              // This is considered a non-fatal error since retrying the tracing
-                              // may succeed.
-    NoHWSupport(String),      // The hardware doesn't support a required feature. Not fatal for the
-                              // same reason as `Permissions`. This may be non-fatal depending
-                              // upon whether the consumer could (e.g.) try a different backend.
+    HWBufferOverflow, // The trace buffer being used by the hardware overflowed.
+    // This is considered a non-fatal error since retrying the tracing
+    // may succeed.
+    NoHWSupport(String), // The hardware doesn't support a required feature. Not fatal for the
+    // same reason as `Permissions`. This may be non-fatal depending
+    // upon whether the consumer could (e.g.) try a different backend.
     BackendUnavailable(BackendKind), // This backend was not compiled in to hwtracer.
-    Permissions(String),      // Tracing is not permitted using this backend.
-    Errno(c_int),             // Something went wrong in C code.
-    TracerState(TracerState), // The tracer is in the wrong state to do the requested task.
-    BadConfig(String),        // The tracer configuration was invalid.
-    Custom(Box<dyn Error>),       // All other errors can be nested here, however, don't rely on this
-                              // for performance since the `Box` incurs a runtime cost.
-    Unknown,                  // An unknown error. Used sparingly in C code which doesn't set errno.
+    Permissions(String),             // Tracing is not permitted using this backend.
+    Errno(c_int),                    // Something went wrong in C code.
+    TracerState(TracerState),        // The tracer is in the wrong state to do the requested task.
+    BadConfig(String),               // The tracer configuration was invalid.
+    Custom(Box<dyn Error>), // All other errors can be nested here, however, don't rely on this
+    // for performance since the `Box` incurs a runtime cost.
+    Unknown, // An unknown error. Used sparingly in C code which doesn't set errno.
 }
 
 impl Display for HWTracerError {
@@ -33,7 +33,7 @@ impl Display for HWTracerError {
                 // Ask libc for a string representation of the error code.
                 let err_str = unsafe { CStr::from_ptr(strerror(n)) };
                 write!(f, "{}", err_str.to_str().unwrap())
-            },
+            }
             HWTracerError::TracerState(ref s) => write!(f, "Tracer in wrong state: {}", s),
             HWTracerError::BadConfig(ref s) => write!(f, "{}", s),
             HWTracerError::Custom(ref bx) => write!(f, "{}", bx),

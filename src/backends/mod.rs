@@ -1,6 +1,6 @@
+use backends::dummy::DummyTracer;
 use errors::HWTracerError;
 use Tracer;
-use backends::dummy::DummyTracer;
 
 #[cfg(perf_pt)]
 pub mod perf_pt;
@@ -41,9 +41,12 @@ impl BackendKind {
             BackendKind::PerfPT => {
                 #[cfg(not(perf_pt))]
                 return Err(HWTracerError::BackendUnavailable(BackendKind::PerfPT));
-                #[cfg(perf_pt)] {
+                #[cfg(perf_pt)]
+                {
                     if !Self::pt_supported() {
-                        return Err(HWTracerError::NoHWSupport("Intel PT not supported by CPU".into()));
+                        return Err(HWTracerError::NoHWSupport(
+                            "Intel PT not supported by CPU".into(),
+                        ));
                     }
                     Ok(())
                 }
@@ -67,7 +70,6 @@ pub enum BackendConfig {
     Dummy,
     PerfPT(PerfPTConfig),
 }
-
 
 /// Configures the PerfPT backend.
 ///
@@ -97,7 +99,7 @@ impl BackendConfig {
     fn backend_kind(&self) -> BackendKind {
         match self {
             BackendConfig::Dummy => BackendKind::Dummy,
-            BackendConfig::PerfPT{..} => BackendKind::PerfPT,
+            BackendConfig::PerfPT { .. } => BackendKind::PerfPT,
         }
     }
 }
@@ -142,7 +144,7 @@ impl TracerBuilder {
             BackendKind::Dummy => BackendConfig::Dummy,
             BackendKind::PerfPT => BackendConfig::PerfPT(PerfPTConfig::default()),
         };
-        Self{config}
+        Self { config }
     }
 
     /// Choose to use the PerfPT backend wth default options.
@@ -169,12 +171,13 @@ impl TracerBuilder {
         let backend_kind = self.config.backend_kind();
         backend_kind.match_platform()?;
         match self.config {
-            BackendConfig::PerfPT(_pt_conf) => {  // _pt_conf will be unused if perf_pt wasn't built in.
+            BackendConfig::PerfPT(_pt_conf) => {
+                // _pt_conf will be unused if perf_pt wasn't built in.
                 #[cfg(perf_pt)]
                 return Ok(Box::new(PerfPTTracer::new(_pt_conf)?));
                 #[cfg(not(perf_pt))]
                 unreachable!();
-            },
+            }
             BackendConfig::Dummy => Ok(Box::new(DummyTracer::new())),
         }
     }
@@ -182,7 +185,7 @@ impl TracerBuilder {
 
 #[cfg(test)]
 mod tests {
-    use super::{TracerBuilder, BackendConfig};
+    use super::{BackendConfig, TracerBuilder};
 
     // Check that building a default Tracer works.
     #[test]
@@ -220,6 +223,8 @@ mod tests {
 
         thread::spawn(move || {
             let _ = arc2;
-        }).join().unwrap();
+        })
+        .join()
+        .unwrap();
     }
 }

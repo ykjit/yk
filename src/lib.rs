@@ -1,24 +1,23 @@
 #![cfg_attr(perf_pt, feature(asm))]
-#![cfg_attr(feature="clippy", feature(plugin))]
-#![cfg_attr(feature="clippy", plugin(clippy))]
+#![cfg_attr(feature = "clippy", feature(plugin))]
+#![cfg_attr(feature = "clippy", plugin(clippy))]
 #![feature(optin_builtin_traits)]
 #![feature(link_args)]
 
-extern crate libc;
-extern crate time;
-extern crate tempfile;
 extern crate core;
+extern crate libc;
+extern crate tempfile;
+extern crate time;
 
-pub mod errors;
 pub mod backends;
+pub mod errors;
 
 pub use errors::HWTracerError;
 use std::fmt::Debug;
-use std::iter::Iterator;
 use std::fmt::{self, Display, Formatter};
 #[cfg(test)]
 use std::fs::File;
-
+use std::iter::Iterator;
 
 /// Information about a basic block.
 #[derive(Debug, Eq, PartialEq)]
@@ -32,7 +31,10 @@ pub struct Block {
 impl Block {
     /// Creates a new basic block from a start address and a length in bytes.
     pub fn new(first_instr: u64, last_instr: u64) -> Self {
-        Self {first_instr, last_instr}
+        Self {
+            first_instr,
+            last_instr,
+        }
     }
 
     /// Returns the virtual address of the first instruction in this block.
@@ -57,7 +59,9 @@ pub trait Trace: Debug + Send {
     fn to_file(&self, file: &mut File);
 
     /// Iterate over the blocks of the trace.
-    fn iter_blocks<'t: 'i, 'i>(&'t self) -> Box<dyn Iterator<Item=Result<Block, HWTracerError>> + 'i>;
+    fn iter_blocks<'t: 'i, 'i>(
+        &'t self,
+    ) -> Box<dyn Iterator<Item = Result<Block, HWTracerError>> + 'i>;
 
     /// Get the capacity of the trace in bytes.
     #[cfg(test)]
@@ -65,7 +69,7 @@ pub trait Trace: Debug + Send {
 }
 
 /// The interface offered by all tracer types.
-pub trait Tracer: Send + Sync  {
+pub trait Tracer: Send + Sync {
     /// Return a `ThreadTracer` for tracing the current thread.
     fn thread_tracer(&self) -> Box<dyn ThreadTracer>;
 }
@@ -110,10 +114,10 @@ impl Display for TracerState {
 // calling the following helpers.
 #[cfg(test)]
 mod test_helpers {
-    use super::{HWTracerError, ThreadTracer, Block, TracerState};
-    use Trace;
+    use super::{Block, HWTracerError, ThreadTracer, TracerState};
     use std::slice::Iter;
     use std::time::SystemTime;
+    use Trace;
 
     // A loop that does some work that we can use to build a trace.
     #[inline(never)]
@@ -127,7 +131,10 @@ mod test_helpers {
     }
 
     // Trace a closure that returns a u64.
-    pub fn trace_closure<F>(tracer: &mut dyn ThreadTracer, f: F) -> Box<dyn Trace> where F: FnOnce() -> u64 {
+    pub fn trace_closure<F>(tracer: &mut dyn ThreadTracer, f: F) -> Box<dyn Trace>
+    where
+        F: FnOnce() -> u64,
+    {
         tracer.start_tracing().unwrap();
         let res = f();
         let trace = tracer.stop_tracing().unwrap();
@@ -136,19 +143,28 @@ mod test_helpers {
     }
 
     // Check that starting and stopping a tracer works.
-    pub fn test_basic_usage<T>(mut tracer: T) where T: ThreadTracer {
+    pub fn test_basic_usage<T>(mut tracer: T)
+    where
+        T: ThreadTracer,
+    {
         trace_closure(&mut tracer, || work_loop(500));
     }
 
     // Check that repeated usage of the same tracer works.
-    pub fn test_repeated_tracing<T>(mut tracer: T) where T: ThreadTracer {
+    pub fn test_repeated_tracing<T>(mut tracer: T)
+    where
+        T: ThreadTracer,
+    {
         for _ in 0..10 {
             trace_closure(&mut tracer, || work_loop(500));
         }
     }
 
     // Check that starting a tracer twice makes an appropriate error.
-    pub fn test_already_started<T>(mut tracer: T) where T: ThreadTracer {
+    pub fn test_already_started<T>(mut tracer: T)
+    where
+        T: ThreadTracer,
+    {
         tracer.start_tracing().unwrap();
         match tracer.start_tracing() {
             Err(HWTracerError::TracerState(TracerState::Started)) => (),
@@ -158,7 +174,10 @@ mod test_helpers {
     }
 
     // Check that stopping an unstarted tracer makes an appropriate error.
-    pub fn test_not_started<T>(mut tracer: T) where T: ThreadTracer {
+    pub fn test_not_started<T>(mut tracer: T)
+    where
+        T: ThreadTracer,
+    {
         match tracer.stop_tracing() {
             Err(HWTracerError::TracerState(TracerState::Stopped)) => (),
             _ => panic!(),
@@ -174,7 +193,10 @@ mod test_helpers {
             if expect.is_none() || got.is_none() {
                 break;
             }
-            assert_eq!(got.unwrap().unwrap().first_instr(), expect.unwrap().first_instr());
+            assert_eq!(
+                got.unwrap().unwrap().first_instr(),
+                expect.unwrap().first_instr()
+            );
         }
         // Check that both iterators were the same length.
         assert!(expect_iter.next().is_none());
@@ -184,7 +206,10 @@ mod test_helpers {
     // Trace two loops, one 10x larger than the other, then check the proportions match the number
     // of block the trace passes through.
     #[cfg(perf_pt_test)]
-    pub fn test_ten_times_as_many_blocks<T>(mut tracer1: T, mut tracer2: T)  where T: ThreadTracer {
+    pub fn test_ten_times_as_many_blocks<T>(mut tracer1: T, mut tracer2: T)
+    where
+        T: ThreadTracer,
+    {
         let trace1 = trace_closure(&mut tracer1, || work_loop(10));
         let trace2 = trace_closure(&mut tracer2, || work_loop(100));
 
