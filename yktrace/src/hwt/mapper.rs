@@ -3,36 +3,32 @@ use phdrs::objects;
 
 use crate::SirLoc;
 use hwtracer::Trace;
+use lazy_static::lazy_static;
 use std::{borrow, env, fs};
 
-pub struct HWTMapper {
-    phdr_offset: u64,
+lazy_static! {
     /// Maps a label address to its symbol name and block index.
     ///
     /// We use a vector here since we never actually look up entries by address; we only iterate
     /// over the labels checking if each address is within the range of a block.
-    labels: Option<Vec<(u64, (String, u32))>>
+    ///
+    /// The labels are the same for each trace, and they are immutable, so it makes sense for this
+    /// to be a lazy static, loaded only once and shared.
+   static ref LABELS: Vec<(u64, (String, u32))> = extract_labels().unwrap();
+}
+
+pub struct HWTMapper {
+    phdr_offset: u64
 }
 
 impl HWTMapper {
     pub fn new() -> HWTMapper {
         let phdr_offset = get_phdr_offset();
-        let labels = match extract_labels() {
-            Ok(l) => Some(l),
-            Err(_) => None
-        };
-        HWTMapper {
-            phdr_offset,
-            labels
-        }
+        HWTMapper { phdr_offset }
     }
 
     /// Maps each entry of a hardware trace to the appropriate SirLoc.
     pub fn map(&self, trace: Box<dyn Trace>) -> Option<Vec<SirLoc>> {
-        if !self.labels.is_some() {
-            return None;
-        }
-        let labels = self.labels.as_ref().unwrap();
         let mut annotrace = Vec::new();
         for b in trace.iter_blocks() {
             match b {
@@ -49,7 +45,7 @@ impl HWTMapper {
                     // b) `labels` is sorted, so the blocks will be appended to the trace in the
                     // correct order.
                     let mut locs = Vec::new();
-                    for (addr, (sym, bb_idx)) in labels {
+                    for (addr, (sym, bb_idx)) in &*LABELS {
                         if *addr >= start_addr && *addr <= end_addr {
                             // Found matching label.
                             locs.push((addr, SirLoc::new(sym.to_string(), *bb_idx)));
