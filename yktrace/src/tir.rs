@@ -16,7 +16,7 @@ use std::{
 use ykpack::{bodyflags, Body, Decoder, Pack, Terminator};
 pub use ykpack::{
     BinOp, CallOperand, Constant, ConstantInt, Local, LocalIndex, Operand, Place, PlaceBase,
-    PlaceElem, Rvalue, SignedInt, Statement, UnsignedInt
+    Rvalue, SignedInt, Statement, UnsignedInt
 };
 
 lazy_static! {
