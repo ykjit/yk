@@ -397,6 +397,12 @@ impl PerfPTThreadTracer {
     }
 }
 
+impl Default for PerfPTThreadTracer {
+    fn default() -> Self {
+        PerfPTThreadTracer::new(PerfPTConfig::default())
+    }
+}
+
 impl ThreadTracer for PerfPTThreadTracer {
     fn start_tracing(&mut self) -> Result<(), HWTracerError> {
         if self.state == TracerState::Started {
@@ -482,11 +488,6 @@ mod tests {
     }
 
     const VDSO_FILENAME: &str = "linux-vdso.so.1";
-
-    // Makes a `PerfPTThreadTracer` with the default config.
-    fn default_tracer() -> PerfPTThreadTracer {
-        PerfPTThreadTracer::new(PerfPTConfig::default())
-    }
 
     // Gets the ptxed arguments required to decode a trace for the current process.
     //
@@ -638,22 +639,22 @@ mod tests {
 
     #[test]
     fn test_basic_usage() {
-        test_helpers::test_basic_usage(default_tracer());
+        test_helpers::test_basic_usage(PerfPTThreadTracer::default());
     }
 
     #[test]
     fn test_repeated_tracing() {
-        test_helpers::test_repeated_tracing(default_tracer());
+        test_helpers::test_repeated_tracing(PerfPTThreadTracer::default());
     }
 
     #[test]
     fn test_already_started() {
-        test_helpers::test_already_started(default_tracer());
+        test_helpers::test_already_started(PerfPTThreadTracer::default());
     }
 
     #[test]
     fn test_not_started() {
-        test_helpers::test_not_started(default_tracer());
+        test_helpers::test_not_started(PerfPTThreadTracer::default());
     }
 
     // Test writing a trace to file.
@@ -692,14 +693,14 @@ mod tests {
     // Check that our block decoder agrees with the reference implementation in ptxed.
     #[test]
     fn test_block_iterator1() {
-        let tracer = default_tracer();
+        let tracer = PerfPTThreadTracer::default();
         trace_and_check_blocks(tracer, || test_helpers::work_loop(10));
     }
 
     // Check that our block decoder agrees ptxed on a (likely) empty trace;
     #[test]
     fn test_block_iterator2() {
-        let tracer = default_tracer();
+        let tracer = PerfPTThreadTracer::default();
         trace_and_check_blocks(tracer, || test_helpers::work_loop(0));
     }
 
@@ -708,7 +709,7 @@ mod tests {
     fn test_block_iterator3() {
         use libc::{clock_gettime, timespec, CLOCK_MONOTONIC};
 
-        let tracer = default_tracer();
+        let tracer = PerfPTThreadTracer::default();
         trace_and_check_blocks(tracer, || {
             let mut res = 0;
             let mut tv = timespec {
@@ -728,8 +729,8 @@ mod tests {
     // Check that a shorter trace yields fewer blocks.
     #[test]
     fn test_block_iterator4() {
-        let tracer1 = default_tracer();
-        let tracer2 = default_tracer();
+        let tracer1 = PerfPTThreadTracer::default();
+        let tracer2 = PerfPTThreadTracer::default();
         test_helpers::test_ten_times_as_many_blocks(tracer1, tracer2);
     }
 
@@ -738,7 +739,7 @@ mod tests {
     #[ignore] // Decoding long traces is slow.
     #[test]
     fn test_block_iterator5() {
-        let tracer = default_tracer();
+        let tracer = PerfPTThreadTracer::default();
         trace_and_check_blocks(tracer, || test_helpers::work_loop(3000));
     }
 
