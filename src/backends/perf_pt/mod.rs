@@ -465,29 +465,27 @@ pub unsafe extern "C" fn push_ptxed_arg(args: &mut Vec<String>, new_arg: *const 
 
 #[cfg(all(perf_pt_test, test))]
 mod tests {
+    use super::PerfPTCError;
     use super::{
-        c_char, c_int, c_void, ptr, AsRawFd, CString, HWTracerError, NamedTempFile,
-        PerfPTBlockIterator, PerfPTConfig, PerfPTThreadTracer, PerfPTTrace, ThreadTracer, Trace,
+        c_int, ptr, size_t, AsRawFd, HWTracerError, NamedTempFile, PerfPTBlockIterator,
+        PerfPTConfig, PerfPTThreadTracer, PerfPTTrace, ThreadTracer, Trace,
     };
     use crate::backends::{BackendConfig, TracerBuilder};
     use crate::{test_helpers, Block};
+    use phdrs::{PF_X, PT_LOAD};
+    use std::convert::TryFrom;
+    use std::env;
     use std::process::Command;
+
+    extern "C" {
+        fn dump_vdso(fd: c_int, vaddr: u64, len: size_t, err: &PerfPTCError) -> bool;
+    }
+
+    const VDSO_FILENAME: &str = "linux-vdso.so.1";
 
     // Makes a `PerfPTThreadTracer` with the default config.
     fn default_tracer() -> PerfPTThreadTracer {
         PerfPTThreadTracer::new(PerfPTConfig::default())
-    }
-
-    // Arguments for calling perf_pt_append_self_ptxed_raw_args.
-    #[repr(C)]
-    struct AppendSelfPtxedArgs {
-        vdso_fd: c_int,
-        vdso_filename: *const c_char,
-        ptxed_args: *mut Vec<String>,
-    }
-
-    extern "C" {
-        fn perf_pt_append_self_ptxed_raw_args(args: *mut c_void) -> bool;
     }
 
     // Gets the ptxed arguments required to decode a trace for the current process.
@@ -506,22 +504,59 @@ mod tests {
             "--pt",
             trace_filename,
         ];
-        let mut ptxed_args = ptxed_args.into_iter().map(|e| String::from(e)).collect();
+        let mut ptxed_args: Vec<String> = ptxed_args.into_iter().map(|e| String::from(e)).collect();
 
-        // Make a temp file for the VDSO to live in.
+        // Make a temp file to dump the VDSO code into. This is necessary because ptxed cannot read
+        // code from a virtual address: it can only load from file.
         let vdso_tempfile = NamedTempFile::new().unwrap();
-        let vdso_filename = CString::new(vdso_tempfile.path().to_str().unwrap()).unwrap();
 
-        // Call C to fill in the rest of the arguments and dump the VDSO to disk.
-        let mut call_args = AppendSelfPtxedArgs {
-            vdso_fd: vdso_tempfile.as_raw_fd(),
-            vdso_filename: vdso_filename.as_ptr(),
-            ptxed_args: &mut ptxed_args as *mut Vec<String>,
-        };
+        let exe = env::current_exe().unwrap();
+        for obj in phdrs::objects() {
+            let obj_name = obj.name().to_str().unwrap();
+            let mut filename = if cfg!(target_os = "linux") && obj_name == "" {
+                exe.to_str().unwrap()
+            } else {
+                obj_name
+            };
 
-        let rv =
-            unsafe { perf_pt_append_self_ptxed_raw_args(&mut call_args as *mut _ as *mut c_void) };
-        assert!(rv);
+            for hdr in obj.iter_phdrs() {
+                if hdr.type_() != PT_LOAD || hdr.flags() & PF_X == 0 {
+                    continue; // Only look at loadable and executable segments.
+                }
+
+                let vaddr = obj.addr() + hdr.vaddr();
+                let offset;
+
+                if filename == VDSO_FILENAME {
+                    let cerr = PerfPTCError::new();
+                    if !unsafe {
+                        dump_vdso(
+                            vdso_tempfile.as_raw_fd(),
+                            vaddr,
+                            size_t::try_from(hdr.memsz()).unwrap(),
+                            &cerr,
+                        )
+                    } {
+                        panic!("failed to dump vdso");
+                    }
+                    filename = vdso_tempfile.path().to_str().unwrap();
+                    offset = 0;
+                } else {
+                    offset = hdr.offset();
+                }
+
+                let raw_arg = format!(
+                    "{}:0x{:x}-0x{:x}:0x{:x}",
+                    filename,
+                    offset,
+                    hdr.offset() + hdr.filesz(),
+                    vaddr
+                );
+                ptxed_args.push("--raw".to_owned());
+                ptxed_args.push(raw_arg);
+            }
+        }
+
         (ptxed_args, vdso_tempfile)
     }
 

@@ -105,10 +105,6 @@ fn main() {
         c_build.file("src/backends/perf_pt/decode.c");
         c_build.file("src/backends/perf_pt/util.c");
 
-        // XXX At the time of writing you can't conditionally build C code for tests in a build
-        // script: https://github.com/rust-lang/cargo/issues/1581
-        c_build.file("src/backends/perf_pt/test_helpers.c");
-
         // Decide whether to build our own libipt.
         if let Ok(val) = env::var("IPT_PATH") {
             let mut inc_path = PathBuf::from(val.clone());
