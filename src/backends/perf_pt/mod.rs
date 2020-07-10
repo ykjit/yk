@@ -397,6 +397,12 @@ impl PerfPTThreadTracer {
     }
 }
 
+impl Default for PerfPTThreadTracer {
+    fn default() -> Self {
+        PerfPTThreadTracer::new(PerfPTConfig::default())
+    }
+}
+
 impl ThreadTracer for PerfPTThreadTracer {
     fn start_tracing(&mut self) -> Result<(), HWTracerError> {
         if self.state == TracerState::Started {
@@ -465,30 +471,23 @@ pub unsafe extern "C" fn push_ptxed_arg(args: &mut Vec<String>, new_arg: *const 
 
 #[cfg(all(perf_pt_test, test))]
 mod tests {
+    use super::PerfPTCError;
     use super::{
-        c_char, c_int, c_void, ptr, AsRawFd, CString, HWTracerError, NamedTempFile,
-        PerfPTBlockIterator, PerfPTConfig, PerfPTThreadTracer, PerfPTTrace, ThreadTracer, Trace,
+        c_int, ptr, size_t, AsRawFd, HWTracerError, NamedTempFile, PerfPTBlockIterator,
+        PerfPTConfig, PerfPTThreadTracer, PerfPTTrace, ThreadTracer, Trace,
     };
     use crate::backends::{BackendConfig, TracerBuilder};
     use crate::{test_helpers, Block};
+    use phdrs::{PF_X, PT_LOAD};
+    use std::convert::TryFrom;
+    use std::env;
     use std::process::Command;
 
-    // Makes a `PerfPTThreadTracer` with the default config.
-    fn default_tracer() -> PerfPTThreadTracer {
-        PerfPTThreadTracer::new(PerfPTConfig::default())
-    }
-
-    // Arguments for calling perf_pt_append_self_ptxed_raw_args.
-    #[repr(C)]
-    struct AppendSelfPtxedArgs {
-        vdso_fd: c_int,
-        vdso_filename: *const c_char,
-        ptxed_args: *mut Vec<String>,
-    }
-
     extern "C" {
-        fn perf_pt_append_self_ptxed_raw_args(args: *mut c_void) -> bool;
+        fn dump_vdso(fd: c_int, vaddr: u64, len: size_t, err: &PerfPTCError) -> bool;
     }
+
+    const VDSO_FILENAME: &str = "linux-vdso.so.1";
 
     // Gets the ptxed arguments required to decode a trace for the current process.
     //
@@ -506,22 +505,59 @@ mod tests {
             "--pt",
             trace_filename,
         ];
-        let mut ptxed_args = ptxed_args.into_iter().map(|e| String::from(e)).collect();
+        let mut ptxed_args: Vec<String> = ptxed_args.into_iter().map(|e| String::from(e)).collect();
 
-        // Make a temp file for the VDSO to live in.
+        // Make a temp file to dump the VDSO code into. This is necessary because ptxed cannot read
+        // code from a virtual address: it can only load from file.
         let vdso_tempfile = NamedTempFile::new().unwrap();
-        let vdso_filename = CString::new(vdso_tempfile.path().to_str().unwrap()).unwrap();
 
-        // Call C to fill in the rest of the arguments and dump the VDSO to disk.
-        let mut call_args = AppendSelfPtxedArgs {
-            vdso_fd: vdso_tempfile.as_raw_fd(),
-            vdso_filename: vdso_filename.as_ptr(),
-            ptxed_args: &mut ptxed_args as *mut Vec<String>,
-        };
+        let exe = env::current_exe().unwrap();
+        for obj in phdrs::objects() {
+            let obj_name = obj.name().to_str().unwrap();
+            let mut filename = if cfg!(target_os = "linux") && obj_name == "" {
+                exe.to_str().unwrap()
+            } else {
+                obj_name
+            };
 
-        let rv =
-            unsafe { perf_pt_append_self_ptxed_raw_args(&mut call_args as *mut _ as *mut c_void) };
-        assert!(rv);
+            for hdr in obj.iter_phdrs() {
+                if hdr.type_() != PT_LOAD || hdr.flags() & PF_X == 0 {
+                    continue; // Only look at loadable and executable segments.
+                }
+
+                let vaddr = obj.addr() + hdr.vaddr();
+                let offset;
+
+                if filename == VDSO_FILENAME {
+                    let cerr = PerfPTCError::new();
+                    if !unsafe {
+                        dump_vdso(
+                            vdso_tempfile.as_raw_fd(),
+                            vaddr,
+                            size_t::try_from(hdr.memsz()).unwrap(),
+                            &cerr,
+                        )
+                    } {
+                        panic!("failed to dump vdso");
+                    }
+                    filename = vdso_tempfile.path().to_str().unwrap();
+                    offset = 0;
+                } else {
+                    offset = hdr.offset();
+                }
+
+                let raw_arg = format!(
+                    "{}:0x{:x}-0x{:x}:0x{:x}",
+                    filename,
+                    offset,
+                    hdr.offset() + hdr.filesz(),
+                    vaddr
+                );
+                ptxed_args.push("--raw".to_owned());
+                ptxed_args.push(raw_arg);
+            }
+        }
+
         (ptxed_args, vdso_tempfile)
     }
 
@@ -603,22 +639,22 @@ mod tests {
 
     #[test]
     fn test_basic_usage() {
-        test_helpers::test_basic_usage(default_tracer());
+        test_helpers::test_basic_usage(PerfPTThreadTracer::default());
     }
 
     #[test]
     fn test_repeated_tracing() {
-        test_helpers::test_repeated_tracing(default_tracer());
+        test_helpers::test_repeated_tracing(PerfPTThreadTracer::default());
     }
 
     #[test]
     fn test_already_started() {
-        test_helpers::test_already_started(default_tracer());
+        test_helpers::test_already_started(PerfPTThreadTracer::default());
     }
 
     #[test]
     fn test_not_started() {
-        test_helpers::test_not_started(default_tracer());
+        test_helpers::test_not_started(PerfPTThreadTracer::default());
     }
 
     // Test writing a trace to file.
@@ -657,14 +693,14 @@ mod tests {
     // Check that our block decoder agrees with the reference implementation in ptxed.
     #[test]
     fn test_block_iterator1() {
-        let tracer = default_tracer();
+        let tracer = PerfPTThreadTracer::default();
         trace_and_check_blocks(tracer, || test_helpers::work_loop(10));
     }
 
     // Check that our block decoder agrees ptxed on a (likely) empty trace;
     #[test]
     fn test_block_iterator2() {
-        let tracer = default_tracer();
+        let tracer = PerfPTThreadTracer::default();
         trace_and_check_blocks(tracer, || test_helpers::work_loop(0));
     }
 
@@ -673,7 +709,7 @@ mod tests {
     fn test_block_iterator3() {
         use libc::{clock_gettime, timespec, CLOCK_MONOTONIC};
 
-        let tracer = default_tracer();
+        let tracer = PerfPTThreadTracer::default();
         trace_and_check_blocks(tracer, || {
             let mut res = 0;
             let mut tv = timespec {
@@ -693,8 +729,8 @@ mod tests {
     // Check that a shorter trace yields fewer blocks.
     #[test]
     fn test_block_iterator4() {
-        let tracer1 = default_tracer();
-        let tracer2 = default_tracer();
+        let tracer1 = PerfPTThreadTracer::default();
+        let tracer2 = PerfPTThreadTracer::default();
         test_helpers::test_ten_times_as_many_blocks(tracer1, tracer2);
     }
 
@@ -703,7 +739,7 @@ mod tests {
     #[ignore] // Decoding long traces is slow.
     #[test]
     fn test_block_iterator5() {
-        let tracer = default_tracer();
+        let tracer = PerfPTThreadTracer::default();
         trace_and_check_blocks(tracer, || test_helpers::work_loop(3000));
     }
 
