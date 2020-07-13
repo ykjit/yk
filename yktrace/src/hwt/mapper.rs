@@ -14,6 +14,8 @@ lazy_static! {
     ///
     /// The labels are the same for each trace, and they are immutable, so it makes sense for this
     /// to be a lazy static, loaded only once and shared.
+    ///
+    /// FIXME if we want to support dlopen(), we will have to rethink this.
     static ref LABELS: Vec<(u64, (String, u32))> = extract_labels().unwrap();
 }
 
