@@ -2,7 +2,7 @@ use object::Object;
 use phdrs::objects;
 
 use crate::SirLoc;
-use hwtracer::Trace;
+use hwtracer::{HWTracerError, Trace};
 use lazy_static::lazy_static;
 use std::{borrow, env, fs};
 
@@ -28,43 +28,40 @@ impl HWTMapper {
     }
 
     /// Maps each entry of a hardware trace to the appropriate SirLoc.
-    pub fn map(&self, trace: Box<dyn Trace>) -> Option<Vec<SirLoc>> {
+    pub fn map(&self, trace: Box<dyn Trace>) -> Result<Vec<SirLoc>, HWTracerError> {
         let mut annotrace = Vec::new();
-        for b in trace.iter_blocks() {
-            match b {
-                Ok(block) => {
-                    let start_addr = block.first_instr() - self.phdr_offset;
-                    let end_addr = block.last_instr() - self.phdr_offset;
-                    // Each block reported by the hardware tracer corresponds to one or more SIR
-                    // blocks, so we collect them in a vector here. This is safe because:
-                    //
-                    // a) We know that the SIR blocks were compiled (by LLVM) to straight-line
-                    // code, otherwise a control-flow instruction would have split the code into
-                    // multiple PT blocks.
-                    //
-                    // b) `labels` is sorted, so the blocks will be appended to the trace in the
-                    // correct order.
-                    let mut locs = Vec::new();
-                    for (addr, (sym, bb_idx)) in &*LABELS {
-                        if *addr >= start_addr && *addr <= end_addr {
-                            // Found matching label.
-                            locs.push((addr, SirLoc::new(sym.to_string(), *bb_idx)));
-                        } else if *addr > end_addr {
-                            // `labels` is sorted by address, so once we see one with an address
-                            // higher than `end_addr`, we know there can be no further hits.
-                            break;
-                        }
-                    }
-                    annotrace.extend(
-                        locs.into_iter()
-                            .map(|(_, loc)| loc)
-                            .collect::<Vec<SirLoc>>()
-                    );
+        for block in trace.iter_blocks() {
+            let block = block?;
+
+            let start_addr = block.first_instr() - self.phdr_offset;
+            let end_addr = block.last_instr() - self.phdr_offset;
+            // Each block reported by the hardware tracer corresponds to one or more SIR
+            // blocks, so we collect them in a vector here. This is safe because:
+            //
+            // a) We know that the SIR blocks were compiled (by LLVM) to straight-line
+            // code, otherwise a control-flow instruction would have split the code into
+            // multiple PT blocks.
+            //
+            // b) `labels` is sorted, so the blocks will be appended to the trace in the
+            // correct order.
+            let mut locs = Vec::new();
+            for (addr, (sym, bb_idx)) in &*LABELS {
+                if *addr >= start_addr && *addr <= end_addr {
+                    // Found matching label.
+                    locs.push((addr, SirLoc::new(sym.to_string(), *bb_idx)));
+                } else if *addr > end_addr {
+                    // `labels` is sorted by address, so once we see one with an address
+                    // higher than `end_addr`, we know there can be no further hits.
+                    break;
                 }
-                Err(_) => {}
             }
+            annotrace.extend(
+                locs.into_iter()
+                    .map(|(_, loc)| loc)
+                    .collect::<Vec<SirLoc>>()
+            );
         }
-        Some(annotrace)
+        Ok(annotrace)
     }
 }
 
