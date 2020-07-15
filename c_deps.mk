@@ -27,16 +27,31 @@ ${INST_DIR}:
 	install -d ${INST_DIR}/bin
 
 # Fetch targets
+.PHONY: ${PROCESSOR_TRACE_SOURCE}
 ${PROCESSOR_TRACE_SOURCE}:
-	git clone ${PROCESSOR_TRACE_REPO}
+	if ! [ -d ${PROCESSOR_TRACE_SOURCE} ]; then \
+		git clone ${PROCESSOR_TRACE_REPO}; \
+	else \
+		cd ${PROCESSOR_TRACE_SOURCE} && git fetch; \
+	fi
 	cd ${PROCESSOR_TRACE_SOURCE} && git checkout ${PROCESSOR_TRACE_V}
 
+.PHONY: ${XED_SOURCE}
 ${XED_SOURCE}:
-	git clone ${XED_REPO}
+	if ! [ -d ${XED_SOURCE} ]; then \
+		git clone ${XED_REPO}; \
+	else \
+		cd ${XED_SOURCE} && git fetch; \
+	fi
 	cd ${XED_SOURCE} && git checkout ${XED_V}
 
+.PHONY: ${MBUILD_SOURCE}
 ${MBUILD_SOURCE}:
-	git clone ${MBUILD_REPO}
+	if ! [ -d ${MBUILD_SOURCE} ]; then \
+		git clone ${MBUILD_REPO}; \
+	else \
+		cd ${MBUILD_SOURCE} && git fetch; \
+	fi
 	cd ${MBUILD_SOURCE} && git checkout ${MBUILD_V}
 
 # Build targets

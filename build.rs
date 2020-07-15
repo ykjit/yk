@@ -1,5 +1,6 @@
 use cc;
 use core::arch::x86_64::__cpuid_count;
+use rerun_except::rerun_except;
 use std::env;
 use std::fs;
 use std::os::unix::fs as unix_fs;
@@ -14,13 +15,13 @@ const C_DEPS_MAKEFILE: &str = "c_deps.mk";
 /// Simple feature check, returning `true` if we have the feature.
 ///
 /// The checks themselves are in files under `FEATURE_CHECKS_PATH`.
-fn feature_check(filename: &str) -> bool {
+fn feature_check(filename: &str, output_file: &str) -> bool {
     let mut path = PathBuf::new();
     path.push(FEATURE_CHECKS_PATH);
     path.push(filename);
 
     let mut check_build = cc::Build::new();
-    check_build.file(path).try_compile("check_perf_pt").is_ok()
+    check_build.file(path).try_compile(output_file).is_ok()
 }
 
 fn make_c_deps_dir() -> PathBuf {
@@ -100,7 +101,9 @@ fn main() {
     let c_deps_dir_s = c_deps_dir.display();
 
     // Check if we should build the perf_pt backend.
-    if cfg!(all(target_os = "linux", target_arch = "x86_64")) && feature_check("check_perf_pt.c") {
+    if cfg!(all(target_os = "linux", target_arch = "x86_64"))
+        && feature_check("check_perf_pt.c", "check_perf_pt")
+    {
         c_build.file("src/backends/perf_pt/collect.c");
         c_build.file("src/backends/perf_pt/decode.c");
         c_build.file("src/backends/perf_pt/util.c");
@@ -149,15 +152,13 @@ fn main() {
 
     // Additional circumstances under which to re-run this build.rs.
     println!("cargo:rerun-if-env-changed=IPT_PATH");
-    println!("cargo:rerun-if-changed=src/util");
-    println!("cargo:rerun-if-changed={}", c_deps_dir_s);
-    println!("cargo:rerun-if-changed=src/backends/perf_pt");
-    println!(
-        "cargo:rerun-if-changed={}/processor-trace/libipt/src/pt_cpu.c",
-        c_deps_dir_s
-    );
-    println!(
-        "cargo:rerun-if-changed={}/processor-trace/libipt/src/posix/pt_cpuid.c",
-        c_deps_dir_s
-    );
+    rerun_except(&[
+        "README.md",
+        "deny.toml",
+        "LICENSE-*",
+        "COPYRIGHT",
+        "bors.toml",
+        ".buildbot.sh",
+    ])
+    .unwrap();
 }
