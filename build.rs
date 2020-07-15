@@ -1,5 +1,6 @@
 use cc;
 use core::arch::x86_64::__cpuid_count;
+use rerun_except::rerun_except;
 use std::env;
 use std::fs;
 use std::os::unix::fs as unix_fs;
@@ -149,15 +150,13 @@ fn main() {
 
     // Additional circumstances under which to re-run this build.rs.
     println!("cargo:rerun-if-env-changed=IPT_PATH");
-    println!("cargo:rerun-if-changed=src/util");
-    println!("cargo:rerun-if-changed={}", c_deps_dir_s);
-    println!("cargo:rerun-if-changed=src/backends/perf_pt");
-    println!(
-        "cargo:rerun-if-changed={}/processor-trace/libipt/src/pt_cpu.c",
-        c_deps_dir_s
-    );
-    println!(
-        "cargo:rerun-if-changed={}/processor-trace/libipt/src/posix/pt_cpuid.c",
-        c_deps_dir_s
-    );
+    rerun_except(&[
+        "README.md",
+        "deny.toml",
+        "LICENSE-*",
+        "COPYRIGHT",
+        "bors.toml",
+        ".buildbot.sh",
+    ])
+    .unwrap();
 }
