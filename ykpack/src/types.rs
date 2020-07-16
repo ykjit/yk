@@ -10,6 +10,37 @@ pub type StatementIndex = usize;
 pub type LocalIndex = u32;
 pub type TyIndex = u32;
 pub type FieldIndex = u32;
+pub type TypeId = (u64, TyIndex); // Crate hash and vector index.
+
+/// The type of a local variable.
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
+pub enum Ty {
+    /// A structure type.
+    Struct(StructTy),
+    /// Anything that we've not yet defined a lowering for.
+    Unimplemented(String),
+}
+
+impl Display for Ty {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Ty::Struct(sty) => write!(f, "{:?}", sty),
+            Ty::Unimplemented(m) => write!(f, "Unimplemented: {}", m),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
+pub struct StructTy {
+    /// Field offsets.
+    pub offsets: Vec<u64>,
+    /// The type of each field.
+    pub tys: Vec<TypeId>,
+    /// The alignment of the struct (in bytes).
+    pub align: i32, // i32 for use as a dynasm operand.
+    /// The size of the struct (in bytes).
+    pub size: i32, // Also i32 for dynasm.
+}
 
 /// rmp-serde serialisable 128-bit numeric types, to work around:
 /// https://github.com/3Hren/msgpack-rust/issues/169
@@ -45,7 +76,7 @@ macro_rules! new_ser128 {
 new_ser128!(SerU128, u128);
 new_ser128!(SerI128, i128);
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Copy, Hash)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Copy, Hash, Ord, PartialOrd)]
 pub struct Local(pub LocalIndex);
 
 impl Display for Local {
@@ -119,6 +150,18 @@ pub mod bodyflags {
     pub const TRACE_TAIL: u8 = 1 << 1;
 }
 
+/// The definition of a local variable, including its type.
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+pub struct LocalDecl {
+    pub ty: TypeId,
+}
+
+impl Display for LocalDecl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.ty)
+    }
+}
+
 /// A tracing IR pack.
 /// Each Body maps to exactly one MIR Body.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
@@ -128,19 +171,26 @@ pub struct Body {
     pub flags: u8,
     pub num_locals: usize,
     pub trace_inputs_local: Option<Local>,
+    pub local_decls: Vec<LocalDecl>,
 }
 
 impl Display for Body {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "[Begin SIR for {}]", self.symbol_name)?;
+        writeln!(f, "symbol: {}", self.symbol_name)?;
         writeln!(f, "  flags: {}", self.flags)?;
+
+        writeln!(f, "  local_decls:")?;
+        for (di, d) in self.local_decls.iter().enumerate() {
+            writeln!(f, "    {}: {}", di, d)?;
+        }
 
         let mut block_strs = Vec::new();
         for (i, b) in self.blocks.iter().enumerate() {
             block_strs.push(format!("    bb{}:\n{}", i, b));
         }
+
+        writeln!(f, "  blocks:")?;
         writeln!(f, "{}", block_strs.join("\n"))?;
-        writeln!(f, "[End SIR for {}]", self.symbol_name)?;
         Ok(())
     }
 }
@@ -623,14 +673,24 @@ impl Display for BinOp {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Pack {
     Body(Body),
+    Types(Types),
 }
 
 impl Display for Pack {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Pack::Body(sir) => write!(f, "{}", sir),
+            Pack::Types(tys) => write!(f, "{:?}", tys),
         }
     }
+}
+
+/// The types used in the SIR for one specific crate.
+/// Types of SIR locals reference these types using (crate-hash, array-index) pairs.
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
+pub struct Types {
+    pub crate_hash: u64,
+    pub types: Vec<Ty>,
 }
 
 #[cfg(test)]

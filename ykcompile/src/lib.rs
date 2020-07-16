@@ -13,13 +13,12 @@ mod stack_builder;
 
 use dynasmrt::{x64::Rq::*, Register};
 use libc::{c_void, dlsym, RTLD_DEFAULT};
+use stack_builder::StackBuilder;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::{self, Display, Formatter};
 use std::mem;
 use std::process::Command;
-
-use stack_builder::StackBuilder;
 use yktrace::tir::{
     BinOp, CallOperand, Constant, ConstantInt, Guard, Local, Operand, Place, Projection, Rvalue,
     Statement, TirOp, TirTrace,
@@ -997,9 +996,11 @@ mod tests {
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
         assert_tir(
-            "live(%a)\n\
-            %a = call(add6, [1u64, 1u64, 1u64, 1u64, 1u64, 1u64])\n\
-            dead(%a)",
+            "...\n\
+            ops:\n\
+              live(%a)\n\
+              %a = call(add6, [1u64, 1u64, 1u64, 1u64, 1u64, 1u64])\n\
+              dead(%a)",
             &tir_trace,
         );
     }
@@ -1284,5 +1285,42 @@ mod tests {
         ct.execute(&mut args);
         assert_eq!(args.0, 29);
         assert_eq!(args.1, 8589934593);
+    }
+
+    #[test]
+    fn field_projection() {
+        struct S {
+            _x: u64,
+            y: u64,
+        }
+
+        fn get_y(s: S) -> u64 {
+            s.y
+        }
+
+        let _ = trace_inputs(());
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let s = S { _x: 100, y: 200 };
+        let _expect = get_y(s);
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+
+        // %s1 is s in the outer function, and %s2 is s in get_y().
+        assert_tir("
+            local_decls:
+              ...
+              %s1: (%crate, %tid1) => StructTy { offsets: [0, 8], tys: [(%crate, %tid2), (%crate, %tid2)], align: 8, size: 16 }
+              ...
+              %s2: (%crate, %tid1)...
+              ...
+            ops:
+              ...
+              (%s1).0 = 100u64
+              (%s1).1 = 200u64
+              ...
+              enter(...
+              %res = (%s2).1
+              leave
+              ...", &tir_trace);
     }
 }
