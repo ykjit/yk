@@ -95,9 +95,8 @@ impl<TT> CompiledTrace<TT> {
         self.exec_trace(func, args)
     }
 
-    /// Actually call the code. This is a separate unmangled function to make it easy to set a
-    /// debugger breakpoint right before entering the trace.
-    #[no_mangle]
+    /// Actually call the code. This is a separate function making it easier to set a debugger
+    /// breakpoint right before entering the trace.
     fn exec_trace(&self, t_fn: fn(TT) -> TT, args: TT) -> TT {
         t_fn(args)
     }
@@ -1133,5 +1132,23 @@ mod tests {
         TraceCompiler::<&(u64,)>::compile(tir_trace).execute(&mut args);
         assert_eq!(inputs.0, 7);
         assert_eq!(inputs.0, args.0);
+    }
+
+    #[test]
+    fn test_trace_inputs() {
+        let mut inputs = trace_inputs((1, 2, 3));
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        inputs.0 = unsafe { add6(inputs.0, inputs.1, inputs.2, 4, 5, 6) };
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let ct = TraceCompiler::<&(u64, u64, u64)>::compile(tir_trace);
+        let mut args = (1, 2, 3);
+        ct.execute(&mut args);
+        assert_eq!(inputs.0, 21);
+        assert_eq!(inputs.0, args.0);
+        // Execute once more with different arguments.
+        let mut args2 = (7, 8, 9);
+        ct.execute(&mut args2);
+        assert_eq!(args2.0, 39);
     }
 }
