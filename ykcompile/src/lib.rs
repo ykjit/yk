@@ -120,9 +120,6 @@ pub struct TraceCompiler<TT> {
     register_content_map: HashMap<u8, Option<Local>>,
     /// Maps trace locals to their location (register, stack).
     variable_location_map: HashMap<Local, Location>,
-    /// Stores the destination local of the outermost function and moves its content into RAX at
-    /// the end of the trace.
-    rtn_var: Option<Place>,
     /// Local referencing the input arguments to the trace.
     trace_inputs_local: Option<Local>,
     /// Stack builder for allocating objects on the stack.
@@ -185,33 +182,12 @@ impl<TT> TraceCompiler<TT> {
 
     /// Notifies the register allocator that the register allocated to `local` may now be re-used.
     fn free_register(&mut self, local: &Local) -> Result<(), CompileError> {
-        let is_rtn_var = local
-            == &self
-                .rtn_var
-                .as_ref()
-                .ok_or_else(|| CompileError::NoReturnLocal)?
-                .local;
         match self.variable_location_map.get(local) {
             Some(Location::Register(reg)) => {
                 // If this local is currently stored in a register, free it.
                 self.register_content_map.insert(*reg, None);
-                if is_rtn_var {
-                    // We currently assume that we only trace a single function which leaves its return
-                    // value in RAX. Since we now inline a function's return variable this won't happen
-                    // automatically anymore. To keep things working, we thus copy the return value of
-                    // the outer-most function into RAX at the end of the trace.
-                    dynasm!(self.asm
-                        ; mov rax, Rq(reg)
-                    );
-                }
             }
-            Some(Location::Stack(offset)) => {
-                if is_rtn_var {
-                    dynasm!(self.asm
-                        ; mov rax, [rbp - *offset]
-                    );
-                }
-            }
+            Some(Location::Stack(_)) => {}
             Some(Location::Arg(_)) => unreachable!(),
             Some(Location::NotLive) => unreachable!(),
             None => unreachable!(),
@@ -352,7 +328,7 @@ impl<TT> TraceCompiler<TT> {
         &mut self,
         op: &CallOperand,
         args: &Vec<Operand>,
-        dest: &Option<Place>,
+        _dest: &Option<Place>,
         off: u32,
     ) -> Result<(), CompileError> {
         // FIXME Currently, we still get a call to `stop_tracing` here, since the call is part of
@@ -378,10 +354,6 @@ impl<TT> TraceCompiler<TT> {
                     c => return Err(CompileError::Unimplemented(format!("{}", c))),
                 },
             }
-        }
-        if self.rtn_var.is_none() {
-            // Remember the return variable of the most outer function.
-            self.rtn_var = dest.as_ref().cloned();
         }
         Ok(())
     }
@@ -519,11 +491,6 @@ impl<TT> TraceCompiler<TT> {
                 );
             }
             _ => unreachable!(),
-        }
-
-        // To avoid breaking tests we need the same hack as `c_enter()` uses for now.
-        if self.rtn_var.is_none() {
-            self.rtn_var = dest.as_ref().cloned();
         }
 
         // Restore caller-save registers.
@@ -686,7 +653,6 @@ impl<TT> TraceCompiler<TT> {
                 .map(|r| (r.code(), None))
                 .collect(),
             variable_location_map: HashMap::new(),
-            rtn_var: None,
             trace_inputs_local: tt.inputs().map(|t| t.clone()),
             stack_builder: StackBuilder::default(),
             _pd: PhantomData,
@@ -790,7 +756,6 @@ mod tests {
                 .map(|r| (r.code(), None))
                 .collect(),
             variable_location_map: HashMap::new(),
-            rtn_var: None,
             trace_inputs_local: None,
             stack_builder: StackBuilder::default(),
             _pd: PhantomData,
@@ -815,7 +780,6 @@ mod tests {
                 .map(|r| (r.code(), None))
                 .collect(),
             variable_location_map: HashMap::new(),
-            rtn_var: None,
             trace_inputs_local: None,
             stack_builder: StackBuilder::default(),
             _pd: PhantomData,
