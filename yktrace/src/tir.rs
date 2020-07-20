@@ -16,7 +16,7 @@ use std::{
 use ykpack::{bodyflags, Body, Decoder, Pack, Terminator};
 pub use ykpack::{
     BinOp, CallOperand, Constant, ConstantInt, Local, LocalIndex, Operand, Place, PlaceBase,
-    Rvalue, SignedInt, Statement, UnsignedInt
+    Projection, Rvalue, SignedInt, Statement, UnsignedInt
 };
 
 lazy_static! {
@@ -98,7 +98,8 @@ pub struct SirMarkers {
 /// A TIR trace is conceptually a straight-line path through the SIR with guarded speculation.
 #[derive(Debug)]
 pub struct TirTrace {
-    ops: Vec<TirOp>
+    ops: Vec<TirOp>,
+    trace_inputs_local: Option<Local>
 }
 
 impl TirTrace {
@@ -109,6 +110,7 @@ impl TirTrace {
         let mut ops = Vec::new();
         let mut itr = trace.into_iter().peekable();
         let mut rnm = VarRenamer::new();
+        let mut trace_inputs_local: Option<Local> = None;
         while let Some(loc) = itr.next() {
             let body = match SIR.bodies.get(&loc.symbol_name) {
                 Some(b) => b,
@@ -116,6 +118,9 @@ impl TirTrace {
                     return Err(InvalidTraceError::no_sir(&loc.symbol_name));
                 }
             };
+
+            // Store trace inputs local and forward it to the TIR trace.
+            trace_inputs_local = body.trace_inputs_local;
 
             // Initialise VarRenamer's accumulator (and thus also set the first offset) to the
             // traces most outer number of locals.
@@ -294,7 +299,10 @@ impl TirTrace {
             e => panic!("Expected `StorageDead` here, instead got {:?}.", e)
         }
 
-        Ok(Self { ops })
+        Ok(Self {
+            ops,
+            trace_inputs_local
+        })
     }
 
     /// Return the TIR operation at index `idx` in the trace.
@@ -302,6 +310,10 @@ impl TirTrace {
     pub fn op(&self, idx: usize) -> &TirOp {
         debug_assert!(idx <= self.ops.len() - 1, "bogus trace index");
         unsafe { &self.ops.get_unchecked(idx) }
+    }
+
+    pub fn inputs(&self) -> &Option<Local> {
+        &self.trace_inputs_local
     }
 
     /// Return the length of the trace measure in operations.
