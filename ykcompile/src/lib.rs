@@ -21,7 +21,7 @@ use std::process::Command;
 
 use stack_builder::StackBuilder;
 use yktrace::tir::{
-    CallOperand, Constant, ConstantInt, Guard, Local, Operand, Place, Projection, Rvalue,
+    BinOp, CallOperand, Constant, ConstantInt, Guard, Local, Operand, Place, Projection, Rvalue,
     Statement, TirOp, TirTrace,
 };
 
@@ -138,7 +138,11 @@ impl<TT> TraceCompiler<TT> {
                     }
                 }
             } else {
-                Err(CompileError::Unimplemented(format!("{}", p)))
+                // TODO deal with remaining projections
+                match &p.projection[0] {
+                    Projection::Field(0) => self.local_to_location(p.local),
+                    _ => Err(CompileError::Unimplemented(format!("{}", p))),
+                }
             }
         } else {
             self.local_to_location(p.local)
@@ -503,6 +507,113 @@ impl<TT> TraceCompiler<TT> {
         Ok(())
     }
 
+    fn c_checked_binop(
+        &mut self,
+        dest: &Place,
+        binop: &BinOp,
+        op1: &Operand,
+        op2: &Operand,
+    ) -> Result<(), CompileError> {
+        // Move `op1` into `dest`.
+        match op1 {
+            Operand::Place(p) => self.mov_place_place(dest, &p)?,
+            Operand::Constant(Constant::Int(ci)) => self.mov_place_constint(dest, &ci)?,
+            Operand::Constant(Constant::Bool(_b)) => unreachable!(),
+            Operand::Constant(c) => return Err(CompileError::Unimplemented(format!("{}", c))),
+        };
+        // Add together `dest` and `op2`.
+        let lloc = self.place_to_location(dest)?;
+        match op2 {
+            Operand::Place(p) => {
+                let rloc = self.place_to_location(&p)?;
+                match binop {
+                    BinOp::Add => self.checked_add_place(lloc, rloc),
+                    _ => todo!(),
+                }
+            }
+            Operand::Constant(Constant::Int(ci)) => match binop {
+                BinOp::Add => self.checked_add_const(lloc, ci),
+                _ => todo!(),
+            },
+            Operand::Constant(Constant::Bool(_b)) => todo!(),
+            Operand::Constant(c) => return Err(CompileError::Unimplemented(format!("{}", c))),
+        };
+        // In the future this will set the overflow flag of the tuple in `lloc`, which will be
+        // checked by a guard, allowing us to return from the trace more gracefully.
+        dynasm!(self.asm
+            ; jc ->crash
+        );
+        Ok(())
+    }
+
+    fn checked_add_place(&mut self, l1: Location, l2: Location) {
+        match (l1, l2) {
+            (Location::Register(lreg), Location::Register(rreg)) => {
+                dynasm!(self.asm
+                    ; add Rq(lreg), Rq(rreg)
+                );
+            }
+            (Location::Register(reg), Location::Stack(off)) => {
+                dynasm!(self.asm
+                    ; add Rq(reg), [rbp - off]
+                );
+            }
+            (Location::Stack(off), Location::Register(reg)) => {
+                dynasm!(self.asm
+                    ; add [rbp - off], Rq(reg)
+                );
+            }
+            (Location::Stack(off1), Location::Stack(off2)) => {
+                dynasm!(self.asm
+                    ; mov rax, [rbp - off2]
+                    ; add [rbp - off1], rax
+                );
+            }
+            (Location::Arg(_), _) => {
+                // It seems SIR doesn't directly assign binary operations to projections and
+                // instead computes the operation in a separate variable first. This means we
+                // shouldn't be able to reach this point.
+                unreachable!()
+            }
+            (_, _) => todo!(),
+        };
+    }
+
+    fn checked_add_const(&mut self, l: Location, c: &ConstantInt) {
+        let c_val = c.i64_cast();
+        match l {
+            Location::Register(reg) => {
+                if c_val <= u32::MAX.into() {
+                    dynasm!(self.asm
+                        ; add Rq(reg), c_val as u32 as i32
+                    );
+                } else {
+                    dynasm!(self.asm
+                        ; mov rax, QWORD c_val
+                        ; add Rq(reg), rax
+                    );
+                }
+            }
+            Location::Stack(off) => {
+                if c_val <= u32::MAX.into() {
+                    dynasm!(self.asm
+                        ; add QWORD [rbp - off], c_val as u32 as i32
+                    );
+                } else {
+                    dynasm!(self.asm
+                        ; mov rax, QWORD c_val
+                        ; add [rbp - off], rax
+                    );
+                }
+            }
+            Location::Arg(_) => {
+                // Same explanation as in checked_add_place.
+                unreachable!()
+            }
+            _ => todo!(),
+        }
+    }
+
     /// Compile a TIR statement.
     fn statement(&mut self, stmt: &Statement) -> Result<(), CompileError> {
         match stmt {
@@ -516,6 +627,9 @@ impl<TT> TraceCompiler<TT> {
                         Constant::Bool(b) => self.mov_place_bool(l, *b)?,
                         c => return Err(CompileError::Unimplemented(format!("{}", c))),
                     },
+                    Rvalue::CheckedBinaryOp(binop, op1, op2) => {
+                        self.c_checked_binop(l, binop, op1, op2)?
+                    }
                     unimpl => return Err(CompileError::Unimplemented(format!("{}", unimpl))),
                 };
             }
@@ -607,6 +721,8 @@ impl<TT> TraceCompiler<TT> {
         // Jump to the label that reserves stack space for spilled locals.
         dynasm!(self.asm
             ; jmp ->reserve
+            ; ->crash:
+            ; ud2
             ; ->main:
         );
     }
@@ -1114,5 +1230,59 @@ mod tests {
         let mut args2 = (7, 8, 9);
         ct.execute(&mut args2);
         assert_eq!(args2.0, 39);
+    }
+
+    #[inline(never)]
+    fn add(a: u8) -> u8 {
+        let x = a + 3;
+        let y = a + x;
+        y
+    }
+
+    fn add64(a: u64) -> u64 {
+        let x = a + 8589934592;
+        x
+    }
+
+    #[test]
+    fn test_binop_add() {
+        let mut inputs = trace_inputs((0, 0, 0, 0));
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        inputs.0 = add(13);
+        inputs.1 = add64(1);
+        inputs.2 = inputs.0 + 2;
+        inputs.3 = inputs.0 + inputs.0;
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let ct = TraceCompiler::<&(u64, u64, u64, u64)>::compile(tir_trace);
+        let mut args = (0, 0, 0, 0);
+        ct.execute(&mut args);
+        assert_eq!(args.0, 29);
+        assert_eq!(args.1, 8589934593);
+        assert_eq!(args.2, 31);
+        assert_eq!(args.3, 58);
+    }
+
+    // Similar test to the above, but makes sure the operations will be executed on the stack by
+    // filling up all registers first.
+    #[test]
+    fn test_binop_add_stack() {
+        let mut inputs = trace_inputs((0, 0));
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let _a = 1;
+        let _b = 2;
+        let _c = 3;
+        let _d = 4;
+        let _e = 5;
+        let _d = 6;
+        inputs.0 = add(13);
+        inputs.1 = add64(1);
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let ct = TraceCompiler::<&(u64, u64)>::compile(tir_trace);
+        let mut args = (0, 0);
+        ct.execute(&mut args);
+        assert_eq!(args.0, 29);
+        assert_eq!(args.1, 8589934593);
     }
 }
