@@ -138,7 +138,11 @@ impl<TT> TraceCompiler<TT> {
                     }
                 }
             } else {
-                Err(CompileError::Unimplemented(format!("{}", p)))
+                // TODO deal with remaining projections
+                match &p.projection[0] {
+                    Projection::Field(0) => self.local_to_location(p.local),
+                    _ => Err(CompileError::Unimplemented(format!("{}", p))),
+                }
             }
         } else {
             self.local_to_location(p.local)
