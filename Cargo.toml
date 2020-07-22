@@ -7,3 +7,6 @@ members=[
     #"tiri",
     "ykcompile"
 ]
+
+[profile.dev]
+panic = "abort"
