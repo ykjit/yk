@@ -40,8 +40,8 @@ pub const SIR_SECTION_PREFIX: &str = ".yksir_";
 #[cfg(test)]
 mod tests {
     use super::{
-        BasicBlock, BinOp, Body, Constant, ConstantInt, Decoder, Encoder, Local, Operand, Pack,
-        Place, Rvalue, Statement, Terminator, UnsignedInt,
+        BasicBlock, BinOp, Body, Constant, ConstantInt, Decoder, Encoder, Local, LocalDecl,
+        Operand, Pack, Place, Rvalue, Statement, Terminator, UnsignedInt,
     };
     use fallible_iterator::{self, FallibleIterator};
     use std::io::{Cursor, Seek, SeekFrom};
@@ -74,6 +74,7 @@ mod tests {
             flags: 0,
             num_locals: 0,
             trace_inputs_local: None,
+            local_decls: Vec::new(),
         });
 
         let stmts2_b1 = vec![Statement::Nop; 7];
@@ -90,6 +91,7 @@ mod tests {
             flags: 0,
             num_locals: 0,
             trace_inputs_local: None,
+            local_decls: Vec::new(),
         });
 
         vec![sir1, sir2]
@@ -132,6 +134,7 @@ mod tests {
         }
     }
 
+    // FIXME convert this test to using fm.
     #[test]
     fn test_text_dump() {
         let stmts_t1_b0 = vec![
@@ -181,6 +184,7 @@ mod tests {
             BasicBlock::new(stmts_t1_b1, term_t1_b1),
         ];
 
+        let lcl = LocalDecl { ty: (0, 0) };
         let sirs = vec![
             Pack::Body(Body {
                 symbol_name: String::from("symbol1"),
@@ -188,6 +192,7 @@ mod tests {
                 flags: 0,
                 num_locals: 3,
                 trace_inputs_local: None,
+                local_decls: vec![lcl.clone(); 3],
             }),
             Pack::Body(Body {
                 symbol_name: String::from("symbol2"),
@@ -198,6 +203,7 @@ mod tests {
                 flags: 0,
                 num_locals: 5,
                 trace_inputs_local: None,
+                local_decls: vec![lcl; 5],
             }),
         ];
 
@@ -207,8 +213,13 @@ mod tests {
         }
         let got_lines = got.split("\n");
 
-        let expect = "[Begin SIR for symbol1]\n\
+        let expect = "symbol: symbol1
   flags: 0
+  local_decls:
+    0: (0, 0)
+    1: (0, 0)
+    2: (0, 0)
+  blocks:
     bb0:
         $0 = $1
         $2 = $3
@@ -222,16 +233,20 @@ mod tests {
         $7 = sub($9, $10)
         $11 = 0u8
         goto bb50
-[End SIR for symbol1]
-[Begin SIR for symbol2]
+symbol: symbol2
   flags: 0
+  local_decls:
+    0: (0, 0)
+    1: (0, 0)
+    2: (0, 0)
+    3: (0, 0)
+    4: (0, 0)
+  blocks:
     bb0:
         unimplemented_stmt: abc
-        unreachable
-[End SIR for symbol2]\n";
+        unreachable\n";
 
         let expect_lines = expect.split("\n");
-
         assert_eq!(got_lines.clone().count(), expect_lines.clone().count());
         for (got, expect) in got_lines.zip(expect_lines) {
             assert_eq!(got.trim(), expect.trim());

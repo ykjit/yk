@@ -13,11 +13,8 @@ ykpack = { path = "../ykpack" }
 dynasmrt = "0.7"
 hex = "0.4"
 libc = "0.2"
-fm = { git = "https://github.com/softdevteam/fm", rev = "12dcee1ee75f625942ffa889ef4d4e1fcf850832" }
+fm = "0.1.4"
 regex = "1"
 
 [build-dependencies]
 cc = "1.0"
-
-[profile.dev]
-panic = "abort"

@@ -18,7 +18,7 @@ pub mod tir;
 
 use errors::InvalidTraceError;
 use std::fmt::{self, Display};
-use tir::SIR;
+pub use tir::SIR;
 
 /// The same as core::SirLoc, just with a String representation of the symbol name and with the
 /// traits we were disallowed from using in libcore.

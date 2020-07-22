@@ -13,10 +13,10 @@ use std::{
     fmt::{self, Display},
     io::Cursor
 };
-use ykpack::{bodyflags, Body, Decoder, Pack, Terminator};
+use ykpack::{bodyflags, Body, Decoder, Pack, Terminator, Ty};
 pub use ykpack::{
-    BinOp, CallOperand, Constant, ConstantInt, Local, LocalIndex, Operand, Place, PlaceBase,
-    Projection, Rvalue, SignedInt, Statement, UnsignedInt
+    BinOp, CallOperand, Constant, ConstantInt, Local, LocalDecl, LocalIndex, Operand, Place,
+    PlaceBase, Projection, Rvalue, SignedInt, Statement, UnsignedInt
 };
 
 lazy_static! {
@@ -26,6 +26,7 @@ lazy_static! {
         // We iterate over ELF sections, looking for ones which contain SIR and loading it into
         // memory.
         let mut bodies = HashMap::new();
+        let mut types = HashMap::new();
         let mut trace_heads = Vec::new();
         let mut trace_tails = Vec::new();
         for sec in &ef.sections {
@@ -46,12 +47,14 @@ lazy_static! {
                             }
 
                             // Due to the way Rust compiles stuff, duplicates may exist. Where
-                            // duplicates exist, the functions will be identical.
-                            if let Some(old) = bodies.get(&body.symbol_name) {
-                                debug_assert!(old == &body);
-                            } else {
-                                bodies.insert(body.symbol_name.clone(), body);
-                            }
+                            // duplicates exist, the functions will be identical, but may have
+                            // different (but equivalent) types. This is because types too may be
+                            // duplicated using a different crate hash.
+                            bodies.entry(body.symbol_name.clone()).or_insert_with(|| body);
+                        },
+                        Pack::Types(ts) => {
+                            let old = types.insert(ts.crate_hash, ts.types);
+                            debug_assert!(old.is_none()); // There's one `Types` pack per crate.
                         },
                     }
                 }
@@ -62,7 +65,7 @@ lazy_static! {
         assert!(!trace_tails.is_empty(), "no trace tails found!");
         let markers = SirMarkers { trace_heads, trace_tails };
 
-        Sir {bodies, markers}
+        Sir {bodies, markers, types}
     };
 }
 
@@ -72,7 +75,15 @@ pub struct Sir {
     /// Lets us map a symbol name to a SIR body.
     pub bodies: HashMap<String, Body>,
     // Interesting locations that we need quick access to.
-    pub markers: SirMarkers
+    pub markers: SirMarkers,
+    /// SIR Local variable types, keyed by crate hash.
+    pub types: HashMap<u64, Vec<Ty>>
+}
+
+impl Sir {
+    fn ty(&self, id: &ykpack::TypeId) -> &ykpack::Ty {
+        &self.types[&id.0][usize::try_from(id.1).unwrap()]
+    }
 }
 
 /// Records interesting locations required for trace manipulation.
@@ -99,7 +110,9 @@ pub struct SirMarkers {
 #[derive(Debug)]
 pub struct TirTrace {
     ops: Vec<TirOp>,
-    trace_inputs_local: Option<Local>
+    trace_inputs_local: Option<Local>,
+    /// Maps each local variable to its declaration, including type.
+    pub local_decls: HashMap<Local, LocalDecl>
 }
 
 impl TirTrace {
@@ -111,6 +124,8 @@ impl TirTrace {
         let mut itr = trace.into_iter().peekable();
         let mut rnm = VarRenamer::new();
         let mut trace_inputs_local: Option<Local> = None;
+        let mut local_decls = HashMap::new();
+
         while let Some(loc) = itr.next() {
             let body = match SIR.bodies.get(&loc.symbol_name) {
                 Some(b) => b,
@@ -137,7 +152,13 @@ impl TirTrace {
             for stmt in body.blocks[user_bb_idx_usize].stmts.iter() {
                 let op = match stmt {
                     Statement::StorageLive(local) => {
-                        Statement::StorageLive(rnm.rename_local(local))
+                        let renamed = rnm.rename_local(local);
+
+                        // Carry the variable declarations through to TIR as well.
+                        let decl = &body.local_decls[usize::try_from(local.0).unwrap()];
+                        local_decls.insert(renamed, decl.clone());
+
+                        Statement::StorageLive(renamed)
                     }
                     Statement::StorageDead(local) => {
                         Statement::StorageDead(rnm.rename_local(local))
@@ -187,6 +208,19 @@ impl TirTrace {
                             // Inform VarRenamer about this function's offset, which is equal to the
                             // number of variables assigned in the outer body.
                             rnm.enter(callbody.num_locals, ret_val.clone());
+
+                            // Ensure the callee's arguments get TIR local decls. This is required
+                            // because arguments are implicitly live at the start of each function,
+                            // and we usually instantiate local decls when we see a StorageLive.
+                            //
+                            // This must happen after rnm.enter() so that self.offset is up-to-date.
+                            for lidx in 0..newargs.len() {
+                                let lidx = lidx + 1; // Skipping the return local.
+                                let decl = &callbody.local_decls[usize::try_from(lidx).unwrap()];
+                                let arg_loc = Local(u32::try_from(lidx).unwrap());
+                                local_decls.insert(rnm.rename_local(&arg_loc), decl.clone());
+                            }
+
                             TirOp::Statement(Statement::Enter(
                                 op.clone(),
                                 newargs,
@@ -301,7 +335,8 @@ impl TirTrace {
 
         Ok(Self {
             ops,
-            trace_inputs_local
+            trace_inputs_local,
+            local_decls
         })
     }
 
@@ -436,6 +471,24 @@ impl VarRenamer {
 
 impl Display for TirTrace {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "local_decls:")?;
+        let mut sort_decls = self
+            .local_decls
+            .iter()
+            .collect::<Vec<(&Local, &LocalDecl)>>();
+        sort_decls.sort_by(|l, r| l.0.partial_cmp(r.0).unwrap());
+        for (l, dcl) in sort_decls {
+            writeln!(
+                f,
+                "  {}: ({}, {}) => {}",
+                l,
+                dcl.ty.0,
+                dcl.ty.1,
+                SIR.ty(&dcl.ty)
+            )?;
+        }
+
+        writeln!(f, "ops:")?;
         for op in &self.ops {
             writeln!(f, "  {}", op)?;
         }
