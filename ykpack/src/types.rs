@@ -15,6 +15,10 @@ pub type TypeId = (u64, TyIndex); // Crate hash and vector index.
 /// The type of a local variable.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
 pub enum Ty {
+    /// Signed integers.
+    SignedInt(SignedIntTy),
+    /// Unsigned integers.
+    UnsignedInt(UnsignedIntTy),
     /// A structure type.
     Struct(StructTy),
     /// Anything that we've not yet defined a lowering for.
@@ -24,9 +28,61 @@ pub enum Ty {
 impl Display for Ty {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Ty::SignedInt(si) => write!(f, "{}", si),
+            Ty::UnsignedInt(ui) => write!(f, "{}", ui),
             Ty::Struct(sty) => write!(f, "{:?}", sty),
             Ty::Unimplemented(m) => write!(f, "Unimplemented: {}", m),
         }
+    }
+}
+
+/// Describes the various signed integer types.
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
+pub enum SignedIntTy {
+    Isize,
+    I8,
+    I16,
+    I32,
+    I64,
+    I128,
+}
+
+impl Display for SignedIntTy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Self::Isize => "isize",
+            Self::I8 => "i8",
+            Self::I16 => "i16",
+            Self::I32 => "i32",
+            Self::I64 => "i64",
+            Self::I128 => "i128",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+/// Describes the various unsigned integer types.
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
+pub enum UnsignedIntTy {
+    Usize,
+    U8,
+    U16,
+    U32,
+    U64,
+    U128,
+}
+
+impl Display for UnsignedIntTy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Self::Usize => "usize",
+            Self::U8 => "u8",
+            Self::U16 => "u16",
+            Self::U32 => "u32",
+            Self::U64 => "u64",
+            Self::U128 => "u128",
+        };
+        write!(f, "{}", s)
     }
 }
 
