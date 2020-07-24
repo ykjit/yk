@@ -84,7 +84,7 @@ mod test_helpers {
     /// Test that basic tracing works.
     pub(crate) fn test_trace(kind: TracingKind) {
         let mut th = start_tracing(Some(kind));
-        black_box(work(100));
+        black_box(work(10));
         let trace = th.t_impl.stop_tracing().unwrap();
         assert!(trace.raw_len() > 0);
     }
@@ -92,11 +92,11 @@ mod test_helpers {
     /// Test that tracing twice sequentially in the same thread works.
     pub(crate) fn test_trace_twice(kind: TracingKind) {
         let mut th1 = start_tracing(Some(kind));
-        black_box(work(100));
+        black_box(work(10));
         let trace1 = th1.t_impl.stop_tracing().unwrap();
 
         let mut th2 = start_tracing(Some(kind));
-        black_box(work(1000));
+        black_box(work(20));
         let trace2 = th2.t_impl.stop_tracing().unwrap();
 
         assert!(trace1.raw_len() < trace2.raw_len());
@@ -106,12 +106,12 @@ mod test_helpers {
     pub(crate) fn test_trace_concurrent(kind: TracingKind) {
         let thr = thread::spawn(move || {
             let mut th1 = start_tracing(Some(kind));
-            black_box(work(100));
+            black_box(work(10));
             th1.t_impl.stop_tracing().unwrap().raw_len()
         });
 
         let mut th2 = start_tracing(Some(kind));
-        black_box(work(1000));
+        black_box(work(20));
         let len2 = th2.t_impl.stop_tracing().unwrap().raw_len();
 
         let len1 = thr.join().unwrap();
@@ -132,7 +132,7 @@ mod test_helpers {
     pub(crate) fn test_in_bounds_trace_indices(kind: TracingKind) {
         // Construct a really short trace.
         let mut th = start_tracing(Some(kind));
-        black_box(work(100));
+        black_box(work(10));
         let trace = th.t_impl.stop_tracing().unwrap();
 
         for i in 0..trace.raw_len() {
@@ -143,7 +143,7 @@ mod test_helpers {
     /// Test iteration over a trace.
     pub(crate) fn test_trace_iterator(kind: TracingKind) {
         let mut th = start_tracing(Some(kind));
-        black_box(work(100));
+        black_box(work(10));
         let trace = th.t_impl.stop_tracing().unwrap();
         // The length of the iterator will be shorter due to trimming.
         assert!(trace.into_iter().count() < trace.raw_len());
