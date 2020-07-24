@@ -614,7 +614,7 @@ impl<TT> TraceCompiler<TT> {
     }
 
     /// Compile a TIR statement.
-    fn statement(&mut self, stmt: &Statement) -> Result<(), CompileError> {
+    fn c_statement(&mut self, stmt: &Statement) -> Result<(), CompileError> {
         match stmt {
             Statement::Assign(l, r) => {
                 match r {
@@ -647,7 +647,7 @@ impl<TT> TraceCompiler<TT> {
     }
 
     /// Compile a guard in the trace, emitting code to abort execution in case the guard fails.
-    fn guard(&mut self, _grd: &Guard) -> Result<(), CompileError> {
+    fn c_guard(&mut self, _grd: &Guard) -> Result<(), CompileError> {
         self.nop(); // FIXME compile guards
         Ok(())
     }
@@ -777,8 +777,8 @@ impl<TT> TraceCompiler<TT> {
 
         for i in 0..tt.len() {
             let res = match tt.op(i) {
-                TirOp::Statement(st) => tc.statement(st),
-                TirOp::Guard(g) => tc.guard(g),
+                TirOp::Statement(st) => tc.c_statement(st),
+                TirOp::Guard(g) => tc.c_guard(g),
             };
 
             if let Err(e) = res {
