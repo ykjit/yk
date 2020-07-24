@@ -3,108 +3,17 @@
 //! running executable.
 
 use super::SirTrace;
-use crate::errors::InvalidTraceError;
-use elf;
-use fallible_iterator::FallibleIterator;
+use crate::{errors::InvalidTraceError, sir::SIR};
 use std::{
     collections::HashMap,
     convert::TryFrom,
-    env,
-    fmt::{self, Display},
-    io::Cursor
+    fmt::{self, Display}
 };
-use ykpack::{bodyflags, Body, Decoder, Pack, Terminator, Ty};
+use ykpack::Terminator;
 pub use ykpack::{
     BinOp, CallOperand, Constant, ConstantInt, Local, LocalDecl, LocalIndex, Operand, Place,
     PlaceBase, Projection, Rvalue, SignedInt, Statement, UnsignedInt
 };
-
-lazy_static! {
-    pub static ref SIR: Sir = {
-        let ef = elf::File::open_path(env::current_exe().unwrap()).unwrap();
-
-        // We iterate over ELF sections, looking for ones which contain SIR and loading it into
-        // memory.
-        let mut bodies = HashMap::new();
-        let mut types = HashMap::new();
-        let mut trace_heads = Vec::new();
-        let mut trace_tails = Vec::new();
-        for sec in &ef.sections {
-            if sec.shdr.name.starts_with(".yksir_") {
-                let mut curs = Cursor::new(&sec.data);
-                let mut dec = Decoder::from(&mut curs);
-
-                while let Some(pack) = dec.next().unwrap() {
-                    match pack {
-                        Pack::Body(body) => {
-                            // Cache some locations that we need quick access to.
-                            if body.flags & bodyflags::TRACE_HEAD != 0 {
-                                trace_heads.push(body.symbol_name.clone());
-                            }
-
-                            if body.flags & bodyflags::TRACE_TAIL != 0 {
-                                trace_tails.push(body.symbol_name.clone());
-                            }
-
-                            // Due to the way Rust compiles stuff, duplicates may exist. Where
-                            // duplicates exist, the functions will be identical, but may have
-                            // different (but equivalent) types. This is because types too may be
-                            // duplicated using a different crate hash.
-                            bodies.entry(body.symbol_name.clone()).or_insert_with(|| body);
-                        },
-                        Pack::Types(ts) => {
-                            let old = types.insert(ts.crate_hash, ts.types);
-                            debug_assert!(old.is_none()); // There's one `Types` pack per crate.
-                        },
-                    }
-                }
-            }
-        }
-
-        assert!(!trace_heads.is_empty(), "no trace heads found!");
-        assert!(!trace_tails.is_empty(), "no trace tails found!");
-        let markers = SirMarkers { trace_heads, trace_tails };
-
-        Sir {bodies, markers, types}
-    };
-}
-
-/// The serialised IR loaded in from disk. One of these structures is generated in the above
-/// `lazy_static` and is shared immutably for all threads.
-pub struct Sir {
-    /// Lets us map a symbol name to a SIR body.
-    pub bodies: HashMap<String, Body>,
-    // Interesting locations that we need quick access to.
-    pub markers: SirMarkers,
-    /// SIR Local variable types, keyed by crate hash.
-    pub types: HashMap<u64, Vec<Ty>>
-}
-
-impl Sir {
-    fn ty(&self, id: &ykpack::TypeId) -> &ykpack::Ty {
-        &self.types[&id.0][usize::try_from(id.1).unwrap()]
-    }
-}
-
-/// Records interesting locations required for trace manipulation.
-pub struct SirMarkers {
-    /// Functions which start tracing and whose suffix gets trimmed off the top of traces.
-    /// Although you'd expect only one such function, (i.e. `yktrace::start_tracing`), in fact
-    /// the location which appears in the trace can vary according to how Rust compiles the
-    /// program (this happens even if `yktracer::start_tracing()` is marked `#[inline(never)]`).
-    /// For this reason, we mark few different places as potential heads.
-    ///
-    /// We will only see the suffix of these functions in traces, as trace recording will start
-    /// somewhere in the middle of them.
-    ///
-    /// The compiler is made aware of this location by the `#[trace_head]` annotation.
-    pub trace_heads: Vec<String>,
-    /// Similar to `trace_heads`, functions which stop tracing and whose prefix gets trimmed off
-    /// the bottom of traces.
-    ///
-    /// The compiler is made aware of these locations by the `#[trace_tail]` annotation.
-    pub trace_tails: Vec<String>
-}
 
 /// A TIR trace is conceptually a straight-line path through the SIR with guarded speculation.
 #[derive(Debug)]
@@ -139,7 +48,7 @@ impl TirTrace {
 
             // Initialise VarRenamer's accumulator (and thus also set the first offset) to the
             // traces most outer number of locals.
-            rnm.init_acc(body.num_locals);
+            rnm.init_acc(body.local_decls.len());
 
             // When adding statements to the trace, we clone them (rather than referencing the
             // statements in the SIR) so that we have the freedom to mutate them later.
@@ -168,14 +77,10 @@ impl TirTrace {
                         let newrvalue = rnm.rename_rvalue(&rvalue);
                         Statement::Assign(newplace, newrvalue)
                     }
-                    Statement::Call(_, _, _) => {
-                        // Statement::Call is a terminator and thus should never appear here.
-                        unreachable!();
-                    }
                     Statement::Nop => stmt.clone(),
-                    Statement::Enter(_, _, _, _) => unreachable!(),
-                    Statement::Leave => stmt.clone(),
-                    Statement::Unimplemented(_) => stmt.clone()
+                    Statement::Unimplemented(_) => stmt.clone(),
+                    // The following statements kinds are specific to TIR and cannot appear in SIR.
+                    Statement::Call(..) | Statement::Enter(..) | Statement::Leave => unreachable!()
                 };
                 ops.push(TirOp::Statement(op));
             }
@@ -207,7 +112,7 @@ impl TirTrace {
 
                             // Inform VarRenamer about this function's offset, which is equal to the
                             // number of variables assigned in the outer body.
-                            rnm.enter(callbody.num_locals, ret_val.clone());
+                            rnm.enter(callbody.local_decls.len(), ret_val.clone());
 
                             // Ensure the callee's arguments get TIR local decls. This is required
                             // because arguments are implicitly live at the start of each function,

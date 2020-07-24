@@ -1,7 +1,7 @@
 use object::Object;
 use phdrs::objects;
 
-use crate::SirLoc;
+use crate::sir::SirLoc;
 use hwtracer::{HWTracerError, Trace};
 use lazy_static::lazy_static;
 use std::{borrow, env, fs};

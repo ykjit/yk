@@ -1,126 +1,20 @@
-#![feature(yk_swt)]
+#![feature(yk)]
 #![feature(test)]
 
 extern crate test;
 
-use core::yk::SirLoc as CoreSirLoc;
-use std::{fmt::Debug, iter::Iterator};
 #[macro_use]
 extern crate lazy_static;
-use ykpack::Local;
 
-pub mod debug;
 mod errors;
 mod hwt;
 // FIXME: Software tracing is currently broken. Not just here, but in ykrustc too.
 //mod swt;
+pub mod sir;
 pub mod tir;
 
 use errors::InvalidTraceError;
-use std::fmt::{self, Display};
-pub use tir::SIR;
-
-/// The same as core::SirLoc, just with a String representation of the symbol name and with the
-/// traits we were disallowed from using in libcore.
-#[derive(Debug, Hash, Eq, PartialEq)]
-pub struct SirLoc {
-    pub symbol_name: String,
-    pub bb_idx: u32
-}
-
-impl From<&CoreSirLoc> for SirLoc {
-    fn from(core_loc: &CoreSirLoc) -> SirLoc {
-        SirLoc {
-            symbol_name: String::from_utf8(core_loc.symbol_name().to_vec()).unwrap(),
-            bb_idx: core_loc.bb_idx()
-        }
-    }
-}
-
-impl SirLoc {
-    fn new(symbol_name: String, bb_idx: u32) -> Self {
-        Self {
-            symbol_name,
-            bb_idx
-        }
-    }
-}
-
-/// Generic representation of a trace of SIR block locations.
-pub trait SirTrace: Debug {
-    /// Returns the length of the *raw* (untrimmed) trace, measured in SIR locations.
-    fn raw_len(&self) -> usize;
-
-    /// Returns the SIR location at index `idx` in the *raw* (untrimmed) trace.
-    fn raw_loc(&self, idx: usize) -> &SirLoc;
-
-    /// Returns the local variable containing the trace inputs tuple.
-    fn input(&self) -> Local;
-}
-
-impl<'a> IntoIterator for &'a dyn SirTrace {
-    type Item = &'a SirLoc;
-    type IntoIter = SirTraceIterator<'a>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        SirTraceIterator::new(self)
-    }
-}
-
-impl Display for dyn SirTrace {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", debug::sir_trace_str(self, true, true))
-    }
-}
-
-/// An iterator over a trimmed SIR trace.
-pub struct SirTraceIterator<'a> {
-    trace: &'a dyn SirTrace,
-    next_idx: usize
-}
-
-impl<'a> SirTraceIterator<'a> {
-    fn new(trace: &'a dyn SirTrace) -> Self {
-        // We are going to present a "trimmed trace", so we do a backwards scan looking for the end
-        // of the code that starts the tracer.
-        let mut begin_idx = None;
-        for blk_idx in (0..trace.raw_len()).rev() {
-            let sym = &trace.raw_loc(blk_idx).symbol_name;
-            if SIR.markers.trace_heads.contains(sym) {
-                begin_idx = Some(blk_idx + 1);
-                break;
-            }
-        }
-
-        SirTraceIterator {
-            trace,
-            next_idx: begin_idx.expect("Couldn't find the end of the code that starts the tracer")
-        }
-    }
-}
-
-impl<'a> Iterator for SirTraceIterator<'a> {
-    type Item = &'a SirLoc;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.next_idx < self.trace.raw_len() {
-            let sym = &self.trace.raw_loc(self.next_idx).symbol_name;
-            if SIR.markers.trace_tails.contains(sym) {
-                // Stop when we find the start of the code that stops the tracer, thus trimming the
-                // end of the trace. By setting the next index to one above the last one in the
-                // trace, we ensure the iterator will return `None` forever more.
-                self.next_idx = self.trace.raw_len();
-                None
-            } else {
-                let ret = self.trace.raw_loc(self.next_idx);
-                self.next_idx += 1;
-                Some(ret)
-            }
-        } else {
-            None // No more locations.
-        }
-    }
-}
+use sir::{SirLoc, SirTrace};
 
 /// The different ways by which we can collect a trace.
 #[derive(Clone, Copy)]
@@ -169,7 +63,7 @@ pub fn start_tracing(kind: Option<TracingKind>) -> ThreadTracer {
 #[cfg(test)]
 mod test_helpers {
     use super::{start_tracing, SirLoc, TracingKind};
-    use crate::tir::SIR;
+    use crate::sir::SIR;
     use std::thread;
     use test::black_box;
     use ykpack::bodyflags;
@@ -190,7 +84,7 @@ mod test_helpers {
     /// Test that basic tracing works.
     pub(crate) fn test_trace(kind: TracingKind) {
         let mut th = start_tracing(Some(kind));
-        black_box(work(100));
+        black_box(work(10));
         let trace = th.t_impl.stop_tracing().unwrap();
         assert!(trace.raw_len() > 0);
     }
@@ -198,11 +92,11 @@ mod test_helpers {
     /// Test that tracing twice sequentially in the same thread works.
     pub(crate) fn test_trace_twice(kind: TracingKind) {
         let mut th1 = start_tracing(Some(kind));
-        black_box(work(100));
+        black_box(work(10));
         let trace1 = th1.t_impl.stop_tracing().unwrap();
 
         let mut th2 = start_tracing(Some(kind));
-        black_box(work(1000));
+        black_box(work(20));
         let trace2 = th2.t_impl.stop_tracing().unwrap();
 
         assert!(trace1.raw_len() < trace2.raw_len());
@@ -212,12 +106,12 @@ mod test_helpers {
     pub(crate) fn test_trace_concurrent(kind: TracingKind) {
         let thr = thread::spawn(move || {
             let mut th1 = start_tracing(Some(kind));
-            black_box(work(100));
+            black_box(work(10));
             th1.t_impl.stop_tracing().unwrap().raw_len()
         });
 
         let mut th2 = start_tracing(Some(kind));
-        black_box(work(1000));
+        black_box(work(20));
         let len2 = th2.t_impl.stop_tracing().unwrap().raw_len();
 
         let len1 = thr.join().unwrap();
@@ -238,7 +132,7 @@ mod test_helpers {
     pub(crate) fn test_in_bounds_trace_indices(kind: TracingKind) {
         // Construct a really short trace.
         let mut th = start_tracing(Some(kind));
-        black_box(work(100));
+        black_box(work(10));
         let trace = th.t_impl.stop_tracing().unwrap();
 
         for i in 0..trace.raw_len() {
@@ -249,7 +143,7 @@ mod test_helpers {
     /// Test iteration over a trace.
     pub(crate) fn test_trace_iterator(kind: TracingKind) {
         let mut th = start_tracing(Some(kind));
-        black_box(work(100));
+        black_box(work(10));
         let trace = th.t_impl.stop_tracing().unwrap();
         // The length of the iterator will be shorter due to trimming.
         assert!(trace.into_iter().count() < trace.raw_len());
