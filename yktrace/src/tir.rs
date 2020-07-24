@@ -77,14 +77,10 @@ impl TirTrace {
                         let newrvalue = rnm.rename_rvalue(&rvalue);
                         Statement::Assign(newplace, newrvalue)
                     }
-                    Statement::Call(_, _, _) => {
-                        // Statement::Call is a terminator and thus should never appear here.
-                        unreachable!();
-                    }
                     Statement::Nop => stmt.clone(),
-                    Statement::Enter(_, _, _, _) => unreachable!(),
-                    Statement::Leave => stmt.clone(),
-                    Statement::Unimplemented(_) => stmt.clone()
+                    Statement::Unimplemented(_) => stmt.clone(),
+                    // The following statements kinds are specific to TIR and cannot appear in SIR.
+                    Statement::Call(..) | Statement::Enter(..) | Statement::Leave => unreachable!()
                 };
                 ops.push(TirOp::Statement(op));
             }
