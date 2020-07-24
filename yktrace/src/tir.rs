@@ -139,7 +139,7 @@ impl TirTrace {
 
             // Initialise VarRenamer's accumulator (and thus also set the first offset) to the
             // traces most outer number of locals.
-            rnm.init_acc(body.num_locals);
+            rnm.init_acc(body.local_decls.len());
 
             // When adding statements to the trace, we clone them (rather than referencing the
             // statements in the SIR) so that we have the freedom to mutate them later.
@@ -207,7 +207,7 @@ impl TirTrace {
 
                             // Inform VarRenamer about this function's offset, which is equal to the
                             // number of variables assigned in the outer body.
-                            rnm.enter(callbody.num_locals, ret_val.clone());
+                            rnm.enter(callbody.local_decls.len(), ret_val.clone());
 
                             // Ensure the callee's arguments get TIR local decls. This is required
                             // because arguments are implicitly live at the start of each function,

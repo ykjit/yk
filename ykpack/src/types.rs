@@ -225,7 +225,6 @@ pub struct Body {
     pub symbol_name: String,
     pub blocks: Vec<BasicBlock>,
     pub flags: u8,
-    pub num_locals: usize,
     pub trace_inputs_local: Option<Local>,
     pub local_decls: Vec<LocalDecl>,
 }

@@ -72,7 +72,6 @@ mod tests {
             symbol_name: String::from("symbol1"),
             blocks: blocks1,
             flags: 0,
-            num_locals: 0,
             trace_inputs_local: None,
             local_decls: Vec::new(),
         });
@@ -89,7 +88,6 @@ mod tests {
             symbol_name: String::from("symbol2"),
             blocks: blocks2,
             flags: 0,
-            num_locals: 0,
             trace_inputs_local: None,
             local_decls: Vec::new(),
         });
@@ -190,7 +188,6 @@ mod tests {
                 symbol_name: String::from("symbol1"),
                 blocks: blocks_t1,
                 flags: 0,
-                num_locals: 3,
                 trace_inputs_local: None,
                 local_decls: vec![lcl.clone(); 3],
             }),
@@ -201,7 +198,6 @@ mod tests {
                     Terminator::Unreachable,
                 )],
                 flags: 0,
-                num_locals: 5,
                 trace_inputs_local: None,
                 local_decls: vec![lcl; 5],
             }),
