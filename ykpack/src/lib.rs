@@ -21,7 +21,7 @@
 //!  The version field is automatically written and checked by the `Encoder` and `Decoder`
 //!  respectively.
 
-#![feature(yk_swt)]
+#![feature(yk)]
 
 mod decode;
 mod encode;

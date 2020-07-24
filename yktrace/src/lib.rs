@@ -1,4 +1,4 @@
-#![feature(yk_swt)]
+#![feature(yk)]
 #![feature(test)]
 
 extern crate test;
