@@ -152,10 +152,18 @@ impl Display for Place {
         if self.projection.is_empty() {
             write!(f, "{}", self.local)?;
         } else {
-            write!(f, "({})", self.local)?;
+            let mut s = format!("({})", self.local);
             for p in &self.projection {
-                write!(f, "{}", p)?;
+                match p {
+                    Projection::Deref => {
+                        s = format!("*({})", s);
+                    }
+                    _ => {
+                        s.push_str(&format!("{}", p));
+                    }
+                }
             }
+            write!(f, "{}", s)?;
         }
         Ok(())
     }
@@ -188,6 +196,7 @@ impl Display for PlaceBase {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
 pub enum Projection {
     Field(FieldIndex),
+    Deref,
     Unimplemented(String),
 }
 
@@ -195,6 +204,7 @@ impl Display for Projection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Field(idx) => write!(f, ".{}", idx),
+            Self::Deref => write!(f, ""),
             Self::Unimplemented(s) => write!(f, ".(unimplemented projection: {:?})", s),
         }
     }
@@ -337,6 +347,7 @@ pub enum Rvalue {
     Use(Operand),
     BinaryOp(BinOp, Operand, Operand),
     CheckedBinaryOp(BinOp, Operand, Operand),
+    Ref(Place),
     Unimplemented(String),
 }
 
@@ -348,6 +359,7 @@ impl Display for Rvalue {
             Self::CheckedBinaryOp(op, oper1, oper2) => {
                 write!(f, "checked_{}({}, {})", op, oper1, oper2)
             }
+            Self::Ref(p) => write!(f, "&{}", p),
             Self::Unimplemented(s) => write!(f, "unimplemented rvalue: {}", s),
         }
     }

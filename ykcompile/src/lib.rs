@@ -106,6 +106,7 @@ enum Location {
     Register(u8),
     Stack(i32),
     Arg(i32),
+    Deref(Box<Location>),
     NotLive,
 }
 
@@ -132,6 +133,7 @@ impl<TT> TraceCompiler<TT> {
             if Some(p.local) == self.trace_inputs_local {
                 match &p.projection[0] {
                     Projection::Field(idx) => Ok(Location::Arg((idx * 8) as i32)),
+                    Projection::Deref => unreachable!(),
                     Projection::Unimplemented(s) => {
                         Err(CompileError::Unimplemented(format!("{}", s)))
                     }
@@ -140,6 +142,9 @@ impl<TT> TraceCompiler<TT> {
                 // TODO deal with remaining projections
                 match &p.projection[0] {
                     Projection::Field(0) => self.local_to_location(p.local),
+                    Projection::Deref => self
+                        .local_to_location(p.local)
+                        .map(|l| Location::Deref(Box::new(l))),
                     _ => Err(CompileError::Unimplemented(format!("{}", p))),
                 }
             }
@@ -192,6 +197,7 @@ impl<TT> TraceCompiler<TT> {
             }
             Some(Location::Stack(_)) => {}
             Some(Location::Arg(_)) => unreachable!(),
+            Some(Location::Deref(_)) => unreachable!(),
             Some(Location::NotLive) => unreachable!(),
             None => unreachable!(),
         }
@@ -251,8 +257,74 @@ impl<TT> TraceCompiler<TT> {
                     ; mov [rdi + aoff], rax
                 );
             }
+            (Location::Register(reg), Location::Deref(boxed)) => match *boxed {
+                Location::Stack(off) => {
+                    dynasm!(self.asm
+                        ; mov Rq(reg), [rbp - off]
+                        ; mov Rq(reg), [Rq(reg)]
+                    );
+                }
+                Location::Register(reg2) => {
+                    dynasm!(self.asm
+                        ; mov Rq(reg), [Rq(reg2)]
+                    );
+                }
+                _ => todo!(),
+            },
+            (Location::Stack(off1), Location::Deref(boxed)) => match *boxed {
+                Location::Stack(off2) => {
+                    dynasm!(self.asm
+                        ; mov rax, [rbp - off2]
+                        ; mov rax, [rax]
+                        ; mov [rbp - off1], rax
+                    );
+                }
+                Location::Register(reg) => {
+                    dynasm!(self.asm
+                        ; mov rax, [Rq(reg)]
+                        ; mov [rbp - off1], rax
+                    );
+                }
+                _ => todo!(),
+            },
             _ => unreachable!(),
         }
+        Ok(())
+    }
+
+    fn mov_place_ref(&mut self, p1: &Place, p2: &Place) -> Result<(), CompileError> {
+        let lloc = self.place_to_location(p1)?;
+        // We can only reference Locals living on the stack. So move it there if it doesn't.
+        let rloc = match self.place_to_location(p2)? {
+            Location::Register(reg) => {
+                let offset = self.stack_builder.alloc(8, 8) as i32;
+                let loc = Location::Stack(offset);
+                dynasm!(self.asm
+                    ; mov [rbp - offset], Rq(reg)
+                );
+                // This Local lives now on the stack...
+                self.variable_location_map.insert(p2.local, loc.clone());
+                // ...so we can free its old register.
+                self.register_content_map.insert(reg, None);
+                loc
+            }
+            loc => loc,
+        };
+        // Now create the reference.
+        match (lloc, rloc) {
+            (Location::Register(reg), Location::Stack(off)) => {
+                dynasm!(self.asm
+                    ; lea Rq(reg), [rbp - off]
+                );
+            }
+            (Location::Stack(off1), Location::Stack(off2)) => {
+                dynasm!(self.asm
+                    ; lea rax, [rbp - off2]
+                    ; mov [rbp - off1], rax
+                );
+            }
+            (_, _) => todo!(),
+        };
         Ok(())
     }
 
@@ -301,6 +373,25 @@ impl<TT> TraceCompiler<TT> {
                     ; mov [rdi + off], rax
                 );
             }
+            Location::Deref(boxed) => match *boxed {
+                Location::Stack(off) => {
+                    if c_val <= u32::MAX.into() {
+                        dynasm!(self.asm
+                            ; mov rax, [rbp - off]
+                            ; mov QWORD [rax], c_val as u32 as i32
+                        );
+                    } else {
+                        todo!()
+                    }
+                }
+                Location::Register(reg) => {
+                    dynasm!(self.asm
+                        ; mov rax, QWORD c_val
+                        ; mov [Rq(reg)], rax
+                    );
+                }
+                _ => todo!(),
+            },
             Location::NotLive => unreachable!(),
         }
         Ok(())
@@ -321,6 +412,7 @@ impl<TT> TraceCompiler<TT> {
                 );
             }
             Location::Arg(_) => todo!(),
+            Location::Deref(_) => todo!(),
             Location::NotLive => unreachable!(),
         }
         Ok(())
@@ -461,6 +553,7 @@ impl<TT> TraceCompiler<TT> {
                             );
                         }
                         Location::Arg(_) => todo!(),
+                        Location::Deref(_) => todo!(),
                         Location::NotLive => unreachable!(),
                     };
                 }
@@ -628,6 +721,9 @@ impl<TT> TraceCompiler<TT> {
                     },
                     Rvalue::CheckedBinaryOp(binop, op1, op2) => {
                         self.c_checked_binop(l, binop, op1, op2)?
+                    }
+                    Rvalue::Ref(p) => {
+                        self.mov_place_ref(l, p)?;
                     }
                     unimpl => return Err(CompileError::Unimplemented(format!("{}", unimpl))),
                 };
@@ -1330,5 +1426,91 @@ mod tests {
               %res = (%s3).1
               leave
               ...", &tir_trace);
+    }
+
+    fn ref_deref() -> u64 {
+        let mut x = 9;
+        let y = &mut x;
+        *y = 10;
+        let z = *y;
+        z
+    }
+
+    #[test]
+    fn test_ref_deref() {
+        let mut inputs = trace_inputs((0,));
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        inputs.0 = ref_deref();
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let ct = TraceCompiler::<&(u64,)>::compile(tir_trace);
+        let mut args = (0,);
+        ct.execute(&mut args);
+        assert_eq!(args.0, 10);
+    }
+
+    #[test]
+    fn test_ref_deref_stack() {
+        let mut inputs = trace_inputs((0,));
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let _a = 1;
+        let _b = 2;
+        let _c = 3;
+        let _d = 4;
+        let _e = 5;
+        let _f = 6;
+        inputs.0 = ref_deref();
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let ct = TraceCompiler::<&(u64,)>::compile(tir_trace);
+        let mut args = (0,);
+        ct.execute(&mut args);
+        assert_eq!(args.0, 10);
+    }
+
+    fn deref1(arg: u64) -> u64 {
+        let a = &arg;
+        return *a;
+    }
+
+    #[test]
+    fn test_deref_stack_to_register() {
+        // This test dereferences a variable that lives on the stack and stores it in a register.
+        let mut inputs = trace_inputs((0,));
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let _a = 1;
+        let _b = 2;
+        let _c = 3;
+        let f = 6;
+        inputs.0 = deref1(f);
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let ct = TraceCompiler::<&(u64,)>::compile(tir_trace);
+        let mut args = (0,);
+        ct.execute(&mut args);
+        assert_eq!(args.0, 6);
+    }
+
+    fn deref2(arg: u64) -> u64 {
+        let a = &arg;
+        let _b = 2;
+        let _c = 3;
+        let _d = 4;
+        return *a;
+    }
+
+    #[test]
+    fn test_deref_register_to_stack() {
+        // This test dereferences a variable that lives on the stack and stores it in a register.
+        let mut inputs = trace_inputs((0,));
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let f = 6;
+        inputs.0 = deref2(f);
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let ct = TraceCompiler::<&(u64,)>::compile(tir_trace);
+        let mut args = (0,);
+        ct.execute(&mut args);
+        assert_eq!(args.0, 6);
     }
 }
