@@ -341,6 +341,10 @@ impl VarRenamer {
                 let newop2 = self.rename_operand(op2);
                 Rvalue::CheckedBinaryOp(binop.clone(), newop1, newop2)
             }
+            Rvalue::Ref(place) => {
+                let newplace = self.rename_place(place);
+                Rvalue::Ref(newplace)
+            }
             Rvalue::Unimplemented(_) => rvalue.clone()
         }
     }
