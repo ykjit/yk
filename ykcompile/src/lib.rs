@@ -9,6 +9,8 @@
 extern crate dynasmrt;
 extern crate test;
 
+#[macro_use]
+mod asm_helpers;
 mod stack_builder;
 
 use dynasmrt::{x64::Rq::*, Register};
@@ -25,6 +27,10 @@ use yktrace::tir::{
 };
 
 use dynasmrt::{DynasmApi, DynasmLabelApi};
+
+// FIXME: this is a lie. I'm using this only to identify areas that need proper size lookups from
+// SIR types.
+const SIZE_ALL: i32 = 8;
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub enum CompileError {
@@ -221,9 +227,7 @@ impl<TT> TraceCompiler<TT> {
                 );
             }
             (Location::Stack(off), Location::Register(reg)) => {
-                dynasm!(self.asm
-                    ; mov [rbp - off], Rq(reg)
-                );
+                asm_mem_reg!(&mut self.asm, SIZE_ALL, mov, [rbp - off], reg);
             }
             (Location::Stack(off1), Location::Stack(off2)) => {
                 // Since RAX is currently not available to the register allocator, we can use it
@@ -232,8 +236,8 @@ impl<TT> TraceCompiler<TT> {
                 // making this operation more complicated and costly.
                 dynasm!(self.asm
                     ; mov rax, [rbp - off2]
-                    ; mov [rbp - off1], rax
                 );
+                asm_mem_reg!(&mut self.asm, SIZE_ALL, mov, [rbp - off1], RAX.code());
             }
             (Location::Register(reg), Location::Arg(off)) => {
                 dynasm!(self.asm
@@ -243,19 +247,17 @@ impl<TT> TraceCompiler<TT> {
             (Location::Stack(soff), Location::Arg(aoff)) => {
                 dynasm!(self.asm
                     ; mov rax, [rdi + aoff]
-                    ; mov [rbp - soff], rax
                 );
+                asm_mem_reg!(&mut self.asm, SIZE_ALL, mov, [rbp - soff], RAX.code());
             }
             (Location::Arg(off), Location::Register(reg)) => {
-                dynasm!(self.asm
-                    ; mov [rdi + off], Rq(reg)
-                );
+                asm_mem_reg!(&mut self.asm, SIZE_ALL, mov, [rdi + off], reg);
             }
             (Location::Arg(aoff), Location::Stack(soff)) => {
                 dynasm!(self.asm
                     ; mov rax, [rbp - soff]
-                    ; mov [rdi + aoff], rax
                 );
+                asm_mem_reg!(&mut self.asm, SIZE_ALL, mov, [rdi + aoff], RAX.code());
             }
             (Location::Register(reg), Location::Deref(boxed)) => match *boxed {
                 Location::Stack(off) => {
@@ -276,14 +278,14 @@ impl<TT> TraceCompiler<TT> {
                     dynasm!(self.asm
                         ; mov rax, [rbp - off2]
                         ; mov rax, [rax]
-                        ; mov [rbp - off1], rax
                     );
+                    asm_mem_reg!(&mut self.asm, SIZE_ALL, mov, [rbp - off1], RAX.code());
                 }
                 Location::Register(reg) => {
                     dynasm!(self.asm
                         ; mov rax, [Rq(reg)]
-                        ; mov [rbp - off1], rax
                     );
+                    asm_mem_reg!(&mut self.asm, SIZE_ALL, mov, [rbp - off1], RAX.code());
                 }
                 _ => todo!(),
             },
@@ -299,9 +301,7 @@ impl<TT> TraceCompiler<TT> {
             Location::Register(reg) => {
                 let offset = self.stack_builder.alloc(8, 8) as i32;
                 let loc = Location::Stack(offset);
-                dynasm!(self.asm
-                    ; mov [rbp - offset], Rq(reg)
-                );
+                asm_mem_reg!(&mut self.asm, SIZE_ALL, mov, [rbp - offset], reg);
                 // This Local lives now on the stack...
                 self.variable_location_map.insert(p2.local, loc.clone());
                 // ...so we can free its old register.
@@ -320,8 +320,8 @@ impl<TT> TraceCompiler<TT> {
             (Location::Stack(off1), Location::Stack(off2)) => {
                 dynasm!(self.asm
                     ; lea rax, [rbp - off2]
-                    ; mov [rbp - off1], rax
                 );
+                asm_mem_reg!(&mut self.asm, SIZE_ALL, mov, [rbp - off1], RAX.code());
             }
             (_, _) => todo!(),
         };
@@ -370,8 +370,8 @@ impl<TT> TraceCompiler<TT> {
             Location::Arg(off) => {
                 dynasm!(self.asm
                     ; mov rax, QWORD c_val
-                    ; mov [rdi + off], rax
                 );
+                asm_mem_reg!(&mut self.asm, SIZE_ALL, mov, [rdi + off], RAX.code());
             }
             Location::Deref(boxed) => match *boxed {
                 Location::Stack(off) => {
@@ -387,8 +387,8 @@ impl<TT> TraceCompiler<TT> {
                 Location::Register(reg) => {
                     dynasm!(self.asm
                         ; mov rax, QWORD c_val
-                        ; mov [Rq(reg)], rax
                     );
+                    asm_mem_reg!(&mut self.asm, SIZE_ALL, mov, [Rq(reg)], RAX.code());
                 }
                 _ => todo!(),
             },
@@ -582,9 +582,7 @@ impl<TT> TraceCompiler<TT> {
                 );
             }
             Some(Location::Stack(off)) => {
-                dynasm!(self.asm
-                    ; mov QWORD [rbp-off], rax
-                );
+                asm_mem_reg!(&mut self.asm, SIZE_ALL, mov, [rbp - off], RAX.code());
             }
             _ => unreachable!(),
         }
