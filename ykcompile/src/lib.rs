@@ -103,13 +103,13 @@ impl<TT> CompiledTrace<TT> {
 
 /// Represents a memory location using a register and an offset.
 #[derive(Debug, Clone, PartialEq)]
-struct RegAndOffset {
+pub struct RegAndOffset {
     reg: u8,
     offs: i32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum Location {
+pub enum Location {
     Register(u8),
     Mem(RegAndOffset),
     Deref(Box<Location>),
@@ -120,6 +120,15 @@ impl Location {
     /// Creates a new memory location from a register and an offset.
     fn new_mem(reg: u8, offs: i32) -> Self {
         Self::Mem(RegAndOffset { reg, offs })
+    }
+
+    /// If `self` is a `Mem` then unwrap it, otherwise panic.
+    fn unwrap_mem(&self) -> &RegAndOffset {
+        if let Location::Mem(ro) = self {
+            ro
+        } else {
+            panic!("tried to unwrap a Mem location when it wasn't a Mem");
+        }
     }
 }
 
@@ -191,10 +200,7 @@ impl<TT> TraceCompiler<TT> {
                 } else {
                     // All registers are occupied, so we need to spill the local to the stack. For
                     // now we assume that all spilled locals are 8 bytes big.
-                    Location::new_mem(
-                        RBP.code(),
-                        -i32::try_from(self.stack_builder.alloc(8, 8)).unwrap(),
-                    )
+                    self.stack_builder.alloc(8, 8)
                 };
                 let ret = loc.clone();
                 self.variable_location_map.insert(l, loc);
@@ -289,10 +295,10 @@ impl<TT> TraceCompiler<TT> {
         // We can only reference Locals living on the stack. So move it there if it doesn't.
         let rloc = match self.place_to_location(p2)? {
             Location::Register(reg) => {
-                let offset = -i32::try_from(self.stack_builder.alloc(8, 8)).unwrap();
-                let loc = Location::new_mem(RBP.code(), offset);
+                let loc = self.stack_builder.alloc(8, 8);
+                let ro = loc.unwrap_mem();
                 dynasm!(self.asm
-                    ; mov [rbp + offset], Rq(reg)
+                    ; mov [Rq(ro.reg) + ro.offs], Rq(reg)
                 );
                 // This Local lives now on the stack...
                 self.variable_location_map.insert(p2.local, loc.clone());
