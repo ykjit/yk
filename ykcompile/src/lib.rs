@@ -101,13 +101,26 @@ impl<TT> CompiledTrace<TT> {
     }
 }
 
+/// Represents a memory location using a register and an offset.
+#[derive(Debug, Clone, PartialEq)]
+struct RegAndOffset {
+    reg: u8,
+    offs: i32,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum Location {
     Register(u8),
-    Stack(i32),
-    Arg(i32),
+    Mem(RegAndOffset),
     Deref(Box<Location>),
     NotLive,
+}
+
+impl Location {
+    /// Creates a new memory location from a register and an offset.
+    fn new_mem(reg: u8, offs: i32) -> Self {
+        Self::Mem(RegAndOffset { reg, offs })
+    }
 }
 
 use std::marker::PhantomData;
@@ -132,7 +145,7 @@ impl<TT> TraceCompiler<TT> {
         if !p.projection.is_empty() {
             if Some(p.local) == self.trace_inputs_local {
                 match &p.projection[0] {
-                    Projection::Field(idx) => Ok(Location::Arg((idx * 8) as i32)),
+                    Projection::Field(idx) => Ok(Location::new_mem(RDI.code(), (idx * 8) as i32)),
                     Projection::Deref => unreachable!(),
                     Projection::Unimplemented(s) => {
                         Err(CompileError::Unimplemented(format!("{}", s)))
@@ -178,8 +191,10 @@ impl<TT> TraceCompiler<TT> {
                 } else {
                     // All registers are occupied, so we need to spill the local to the stack. For
                     // now we assume that all spilled locals are 8 bytes big.
-                    let loc = Location::Stack(self.stack_builder.alloc(8, 8) as i32);
-                    loc
+                    Location::new_mem(
+                        RBP.code(),
+                        -i32::try_from(self.stack_builder.alloc(8, 8)).unwrap(),
+                    )
                 };
                 let ret = loc.clone();
                 self.variable_location_map.insert(l, loc);
@@ -195,8 +210,7 @@ impl<TT> TraceCompiler<TT> {
                 // If this local is currently stored in a register, free it.
                 self.register_content_map.insert(*reg, None);
             }
-            Some(Location::Stack(_)) => {}
-            Some(Location::Arg(_)) => unreachable!(),
+            Some(Location::Mem { .. }) => {}
             Some(Location::Deref(_)) => unreachable!(),
             Some(Location::NotLive) => unreachable!(),
             None => unreachable!(),
@@ -215,52 +229,30 @@ impl<TT> TraceCompiler<TT> {
                     ; mov Rq(lreg), Rq(rreg)
                 );
             }
-            (Location::Register(reg), Location::Stack(off)) => {
+            (Location::Register(reg), Location::Mem(ro)) => {
                 dynasm!(self.asm
-                    ; mov Rq(reg), [rbp - off]
+                    ; mov Rq(reg), [Rq(ro.reg) + ro.offs]
                 );
             }
-            (Location::Stack(off), Location::Register(reg)) => {
+            (Location::Mem(ro), Location::Register(reg)) => {
                 dynasm!(self.asm
-                    ; mov [rbp - off], Rq(reg)
+                    ; mov [Rq(ro.reg) + ro.offs], Rq(reg)
                 );
             }
-            (Location::Stack(off1), Location::Stack(off2)) => {
+            (Location::Mem(ro1), Location::Mem(ro2)) => {
                 // Since RAX is currently not available to the register allocator, we can use it
                 // here to simplify moving values from the stack back onto the stack (which x86
                 // does not support). Otherwise, we would have to free up a register via spilling,
                 // making this operation more complicated and costly.
                 dynasm!(self.asm
-                    ; mov rax, [rbp - off2]
-                    ; mov [rbp - off1], rax
-                );
-            }
-            (Location::Register(reg), Location::Arg(off)) => {
-                dynasm!(self.asm
-                    ; mov Rq(reg), [rdi + off]
-                );
-            }
-            (Location::Stack(soff), Location::Arg(aoff)) => {
-                dynasm!(self.asm
-                    ; mov rax, [rdi + aoff]
-                    ; mov [rbp - soff], rax
-                );
-            }
-            (Location::Arg(off), Location::Register(reg)) => {
-                dynasm!(self.asm
-                    ; mov [rdi + off], Rq(reg)
-                );
-            }
-            (Location::Arg(aoff), Location::Stack(soff)) => {
-                dynasm!(self.asm
-                    ; mov rax, [rbp - soff]
-                    ; mov [rdi + aoff], rax
+                    ; mov rax, [Rq(ro2.reg) + ro2.offs]
+                    ; mov [Rq(ro1.reg) + ro1.offs], rax
                 );
             }
             (Location::Register(reg), Location::Deref(boxed)) => match *boxed {
-                Location::Stack(off) => {
+                Location::Mem(ro) => {
                     dynasm!(self.asm
-                        ; mov Rq(reg), [rbp - off]
+                        ; mov Rq(reg), [Rq(ro.reg) + ro.offs]
                         ; mov Rq(reg), [Rq(reg)]
                     );
                 }
@@ -271,18 +263,18 @@ impl<TT> TraceCompiler<TT> {
                 }
                 _ => todo!(),
             },
-            (Location::Stack(off1), Location::Deref(boxed)) => match *boxed {
-                Location::Stack(off2) => {
+            (Location::Mem(ro1), Location::Deref(boxed)) => match *boxed {
+                Location::Mem(ro2) => {
                     dynasm!(self.asm
-                        ; mov rax, [rbp - off2]
+                        ; mov rax, [Rq(ro2.reg) + ro2.offs]
                         ; mov rax, [rax]
-                        ; mov [rbp - off1], rax
+                        ; mov [Rq(ro1.reg) + ro1.offs], rax
                     );
                 }
                 Location::Register(reg) => {
                     dynasm!(self.asm
                         ; mov rax, [Rq(reg)]
-                        ; mov [rbp - off1], rax
+                        ; mov [Rq(ro1.reg) + ro1.offs], rax
                     );
                 }
                 _ => todo!(),
@@ -297,10 +289,10 @@ impl<TT> TraceCompiler<TT> {
         // We can only reference Locals living on the stack. So move it there if it doesn't.
         let rloc = match self.place_to_location(p2)? {
             Location::Register(reg) => {
-                let offset = self.stack_builder.alloc(8, 8) as i32;
-                let loc = Location::Stack(offset);
+                let offset = -i32::try_from(self.stack_builder.alloc(8, 8)).unwrap();
+                let loc = Location::new_mem(RBP.code(), offset);
                 dynasm!(self.asm
-                    ; mov [rbp - offset], Rq(reg)
+                    ; mov [rbp + offset], Rq(reg)
                 );
                 // This Local lives now on the stack...
                 self.variable_location_map.insert(p2.local, loc.clone());
@@ -312,15 +304,15 @@ impl<TT> TraceCompiler<TT> {
         };
         // Now create the reference.
         match (lloc, rloc) {
-            (Location::Register(reg), Location::Stack(off)) => {
+            (Location::Register(reg), Location::Mem(ro)) => {
                 dynasm!(self.asm
-                    ; lea Rq(reg), [rbp - off]
+                    ; lea Rq(reg), [Rq(ro.reg) + ro.offs]
                 );
             }
-            (Location::Stack(off1), Location::Stack(off2)) => {
+            (Location::Mem(ro1), Location::Mem(ro2)) => {
                 dynasm!(self.asm
-                    ; lea rax, [rbp - off2]
-                    ; mov [rbp - off1], rax
+                    ; lea rax, [Rq(ro2.reg) + ro2.offs]
+                    ; mov [Rq(ro1.reg) + ro1.offs], rax
                 );
             }
             (_, _) => todo!(),
@@ -349,11 +341,11 @@ impl<TT> TraceCompiler<TT> {
                     ; mov Rq(reg), QWORD c_val
                 );
             }
-            Location::Stack(offset) => {
+            Location::Mem(ro) => {
                 if c_val <= u32::MAX.into() {
                     let val = c_val as u32 as i32;
                     dynasm!(self.asm
-                        ; mov QWORD [rbp-offset], val
+                        ; mov QWORD [Rq(ro.reg) + ro.offs], val
                     );
                 } else {
                     // x86 doesn't allow writing 64bit immediates directly to the stack. We thus
@@ -362,22 +354,16 @@ impl<TT> TraceCompiler<TT> {
                     let v1 = c_val as u32 as i32;
                     let v2 = (c_val >> 32) as u32 as i32;
                     dynasm!(self.asm
-                        ; mov DWORD [rbp-offset], v1
-                        ; mov DWORD [rbp-offset+4], v2
+                        ; mov DWORD [Rq(ro.reg) + ro.offs], v1
+                        ; mov DWORD [Rq(ro.reg) + ro.offs + 4], v2
                     );
                 }
             }
-            Location::Arg(off) => {
-                dynasm!(self.asm
-                    ; mov rax, QWORD c_val
-                    ; mov [rdi + off], rax
-                );
-            }
             Location::Deref(boxed) => match *boxed {
-                Location::Stack(off) => {
+                Location::Mem(ro) => {
                     if c_val <= u32::MAX.into() {
                         dynasm!(self.asm
-                            ; mov rax, [rbp - off]
+                            ; mov rax, [Rq(ro.reg) + ro.offs]
                             ; mov QWORD [rax], c_val as u32 as i32
                         );
                     } else {
@@ -405,13 +391,12 @@ impl<TT> TraceCompiler<TT> {
                     ; mov Rq(reg), QWORD b as i64
                 );
             }
-            Location::Stack(offset) => {
+            Location::Mem(ro) => {
                 let val = b as i32;
                 dynasm!(self.asm
-                    ; mov QWORD [rbp-offset], val
+                    ; mov QWORD [Rq(ro.reg) + ro.offs], val
                 );
             }
-            Location::Arg(_) => todo!(),
             Location::Deref(_) => todo!(),
             Location::NotLive => unreachable!(),
         }
@@ -547,12 +532,11 @@ impl<TT> TraceCompiler<TT> {
                                 ; mov Rq(arg_reg), [rsp + off]
                             );
                         }
-                        Location::Stack(off) => {
+                        Location::Mem(ro) => {
                             dynasm!(self.asm
-                                ; mov Rq(arg_reg), [rbp - off]
+                                ; mov Rq(arg_reg), [Rq(ro.reg) + ro.offs]
                             );
                         }
-                        Location::Arg(_) => todo!(),
                         Location::Deref(_) => todo!(),
                         Location::NotLive => unreachable!(),
                     };
@@ -581,9 +565,9 @@ impl<TT> TraceCompiler<TT> {
                     ; mov Rq(reg), rax
                 );
             }
-            Some(Location::Stack(off)) => {
+            Some(Location::Mem(ro)) => {
                 dynasm!(self.asm
-                    ; mov QWORD [rbp-off], rax
+                    ; mov QWORD [Rq(ro.reg) + ro.offs], rax
                 );
             }
             _ => unreachable!(),
@@ -645,27 +629,21 @@ impl<TT> TraceCompiler<TT> {
                     ; add Rq(lreg), Rq(rreg)
                 );
             }
-            (Location::Register(reg), Location::Stack(off)) => {
+            (Location::Register(reg), Location::Mem(ro)) => {
                 dynasm!(self.asm
-                    ; add Rq(reg), [rbp - off]
+                    ; add Rq(reg), [Rq(ro.reg) + ro.offs]
                 );
             }
-            (Location::Stack(off), Location::Register(reg)) => {
+            (Location::Mem(ro), Location::Register(reg)) => {
                 dynasm!(self.asm
-                    ; add [rbp - off], Rq(reg)
+                    ; add [Rq(ro.reg) + ro.offs], Rq(reg)
                 );
             }
-            (Location::Stack(off1), Location::Stack(off2)) => {
+            (Location::Mem(ro1), Location::Mem(ro2)) => {
                 dynasm!(self.asm
-                    ; mov rax, [rbp - off2]
-                    ; add [rbp - off1], rax
+                    ; mov rax, [Rq(ro2.reg) + ro2.offs]
+                    ; add [Rq(ro1.reg) + ro1.offs], rax
                 );
-            }
-            (Location::Arg(_), _) => {
-                // It seems SIR doesn't directly assign binary operations to projections and
-                // instead computes the operation in a separate variable first. This means we
-                // shouldn't be able to reach this point.
-                unreachable!()
             }
             (_, _) => todo!(),
         };
@@ -686,21 +664,17 @@ impl<TT> TraceCompiler<TT> {
                     );
                 }
             }
-            Location::Stack(off) => {
+            Location::Mem(ro) => {
                 if c_val <= u32::MAX.into() {
                     dynasm!(self.asm
-                        ; add QWORD [rbp - off], c_val as u32 as i32
+                        ; add QWORD [Rq(ro.reg) + ro.offs], c_val as u32 as i32
                     );
                 } else {
                     dynasm!(self.asm
                         ; mov rax, QWORD c_val
-                        ; add [rbp - off], rax
+                        ; add [Rq(ro.reg) + ro.offs], rax
                     );
                 }
-            }
-            Location::Arg(_) => {
-                // Same explanation as in checked_add_place.
-                unreachable!()
             }
             _ => todo!(),
         }
