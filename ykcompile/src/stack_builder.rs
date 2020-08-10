@@ -1,7 +1,10 @@
-use std::convert::TryInto;
+use crate::Location;
+use dynasmrt::{x64::Rq::RBP, Register};
+use std::convert::{TryFrom, TryInto};
 
 #[derive(Default, Debug)]
 pub struct StackBuilder {
+    /// Keeps track of how many bytes have been allocated.
     stack_top: u64,
 }
 
@@ -12,12 +15,12 @@ pub struct StackBuilder {
 ///
 /// The top of the stack, before any calls to `alloc()` is assumed to be appropriately aligned.
 impl StackBuilder {
-    /// Allocate an object of given size and alignment on the stack, returning an offset which
-    /// is intended to be subtracted from the base pointer.
-    pub fn alloc(&mut self, size: u64, align: u64) -> u32 {
+    /// Allocate an object of given size and alignment on the stack, returning a `Location::Mem`
+    /// describing the position of the allocation. The stack is assumed to grow down.
+    pub fn alloc(&mut self, size: u64, align: u64) -> Location {
         self.align(align);
         self.stack_top += size;
-        self.stack_top.try_into().unwrap()
+        Location::new_mem(RBP.code(), -1 * i32::try_from(self.stack_top).unwrap())
     }
 
     /// Aligns `offset` to `align` bytes.
@@ -40,10 +43,10 @@ mod tests {
     fn test_stackbuilder() {
         let mut sb = StackBuilder::default();
 
-        assert_eq!(sb.alloc(8, 8), 8);
-        assert_eq!(sb.alloc(1, 1), 9);
-        assert_eq!(sb.alloc(8, 8), 24);
-        assert_eq!(sb.alloc(1, 1), 25);
-        assert_eq!(sb.alloc(4, 2), 30);
+        assert_eq!(sb.alloc(8, 8).unwrap_mem().offs, -8);
+        assert_eq!(sb.alloc(1, 1).unwrap_mem().offs, -9);
+        assert_eq!(sb.alloc(8, 8).unwrap_mem().offs, -24);
+        assert_eq!(sb.alloc(1, 1).unwrap_mem().offs, -25);
+        assert_eq!(sb.alloc(4, 2).unwrap_mem().offs, -30);
     }
 }
