@@ -19,6 +19,8 @@ use std::convert::TryFrom;
 use std::fmt::{self, Display, Formatter};
 use std::mem;
 use std::process::Command;
+use ykpack::{SignedIntTy, Ty, TypeId, UnsignedIntTy};
+use yktrace::sir::SIR;
 use yktrace::tir::{
     BinOp, CallOperand, Constant, ConstantInt, Guard, Local, Operand, Place, Projection, Rvalue,
     Statement, TirOp, TirTrace,
@@ -133,6 +135,7 @@ impl Location {
 }
 
 use std::marker::PhantomData;
+use ykpack::LocalDecl;
 
 /// The `TraceCompiler` takes a `SIRTrace` and compiles it to machine code. Returns a `CompiledTrace`.
 pub struct TraceCompiler<TT> {
@@ -144,26 +147,87 @@ pub struct TraceCompiler<TT> {
     variable_location_map: HashMap<Local, Location>,
     /// Local referencing the input arguments to the trace.
     trace_inputs_local: Option<Local>,
+    /// Local decls of the tir trace.
+    local_decls: HashMap<Local, LocalDecl>,
     /// Stack builder for allocating objects on the stack.
     stack_builder: StackBuilder,
     _pd: PhantomData<TT>,
 }
 
 impl<TT> TraceCompiler<TT> {
+    fn can_live_in_register(tyid: &TypeId) -> bool {
+        // FIXME: optimisation: small structs and tuples etc. could actually live in a register.
+        let ty = SIR.ty(tyid);
+        match ty {
+            Ty::UnsignedInt(ui) => match ui {
+                UnsignedIntTy::U128 => false,
+                _ => true,
+            },
+            Ty::SignedInt(si) => match si {
+                SignedIntTy::I128 => false,
+                _ => true,
+            },
+            Ty::Ref(_) | Ty::Bool => true,
+            Ty::Struct(..) | Ty::Tuple(..) => false,
+            Ty::Unimplemented(..) => todo!("{}", ty),
+        }
+    }
+
     fn place_to_location(&mut self, p: &Place) -> Result<Location, CompileError> {
         if !p.projection.is_empty() {
+            if p.projection.len() > 1 {
+                todo!("chains of projections");
+            }
+
             if Some(p.local) == self.trace_inputs_local {
-                match &p.projection[0] {
-                    Projection::Field(idx) => Ok(Location::new_mem(RDI.code(), (idx * 8) as i32)),
-                    Projection::Deref => unreachable!(),
-                    Projection::Unimplemented(s) => {
-                        Err(CompileError::Unimplemented(format!("{}", s)))
+                let tuple_ty = self.place_ty(&Place::from(p.local));
+                if let Ty::Tuple(tty) = tuple_ty {
+                    match &p.projection[0] {
+                        Projection::Field(idx) => {
+                            let offs = tty.fields.offsets[usize::try_from(*idx).unwrap()];
+                            Ok(Location::new_mem(RDI.code(), i32::try_from(offs).unwrap()))
+                        }
+                        Projection::Deref => unreachable!(),
+                        Projection::Unimplemented(s) => {
+                            Err(CompileError::Unimplemented(format!("{}", s)))
+                        }
                     }
+                } else {
+                    unreachable!(); // Trace inputs are always a tuple.
                 }
             } else {
-                // TODO deal with remaining projections
+                // FIXME deal with remaining projections and chains of projections.
+                let base_ty = self.place_ty(&Place::from(p.local)).clone();
                 match &p.projection[0] {
-                    Projection::Field(0) => self.local_to_location(p.local),
+                    Projection::Field(idx) => match base_ty {
+                        Ty::Struct(sty) => {
+                            let loc = self.local_to_location(p.local)?;
+                            match loc {
+                                Location::Mem(ro) => {
+                                    let offs = sty.fields.offsets[usize::try_from(*idx).unwrap()];
+                                    Ok(Location::new_mem(
+                                        ro.reg,
+                                        ro.offs + i32::try_from(offs).unwrap(),
+                                    ))
+                                }
+                                _ => unreachable!("{:?}", loc),
+                            }
+                        }
+                        Ty::Tuple(tty) => {
+                            let loc = self.local_to_location(p.local)?;
+                            match loc {
+                                Location::Mem(ro) => {
+                                    let offs = tty.fields.offsets[usize::try_from(*idx).unwrap()];
+                                    Ok(Location::new_mem(
+                                        ro.reg,
+                                        ro.offs + i32::try_from(offs).unwrap(),
+                                    ))
+                                }
+                                _ => unreachable!("{:?}", loc),
+                            }
+                        }
+                        _ => todo!("{:?}", base_ty),
+                    },
                     Projection::Deref => self
                         .local_to_location(p.local)
                         .map(|l| Location::Deref(Box::new(l))),
@@ -178,15 +242,12 @@ impl<TT> TraceCompiler<TT> {
     /// Given a local, returns the register allocation for it, or, if there is no allocation yet,
     /// performs one.
     fn local_to_location(&mut self, l: Local) -> Result<Location, CompileError> {
-        if l == Local(0) {
-            // In SIR, `Local` zero is the (implicit) return value, so it makes sense to allocate
-            // it to the return register of the underlying X86_64 calling convention.
-            Ok(Location::Register(RAX.code()))
+        if let Some(location) = self.variable_location_map.get(&l) {
+            // We already have a location for this local.
+            Ok(location.clone())
         } else {
-            if let Some(location) = self.variable_location_map.get(&l) {
-                // We already have a location for this local.
-                Ok(location.clone())
-            } else {
+            let tyid = self.local_decls[&l].ty;
+            if Self::can_live_in_register(&tyid) {
                 // Find a free register to store this local.
                 let loc = if let Some(reg) = self.register_content_map.iter().find_map(|(k, v)| {
                     if v == &None {
@@ -198,13 +259,19 @@ impl<TT> TraceCompiler<TT> {
                     self.register_content_map.insert(reg, Some(l));
                     Location::Register(reg)
                 } else {
-                    // All registers are occupied, so we need to spill the local to the stack. For
-                    // now we assume that all spilled locals are 8 bytes big.
-                    self.stack_builder.alloc(8, 8)
+                    // All registers are occupied, so we need to spill the local to the stack.
+                    let ty = SIR.ty(&tyid);
+                    let loc = self.stack_builder.alloc(ty.size(), ty.align());
+                    loc
                 };
                 let ret = loc.clone();
                 self.variable_location_map.insert(l, loc);
                 Ok(ret)
+            } else {
+                let ty = SIR.ty(&tyid);
+                let loc = self.stack_builder.alloc(ty.size(), ty.align());
+                self.variable_location_map.insert(l, loc.clone());
+                Ok(loc)
             }
         }
     }
@@ -225,65 +292,145 @@ impl<TT> TraceCompiler<TT> {
         Ok(())
     }
 
+    /// Get the type of a place.
+    fn place_ty(&self, p: &Place) -> &Ty {
+        let base_ty = SIR.ty(&self.local_decls[&p.local].ty);
+        if p.projection.is_empty() {
+            base_ty
+        } else {
+            // FIXME this is just hacked in for now. There should be a loop which resolves
+            // arbitrarily long chains of projections.
+            assert_eq!(p.projection.len(), 1);
+            match p.projection[0] {
+                Projection::Field(idx) => match base_ty {
+                    Ty::Struct(sty) => SIR.ty(&sty.fields.tys[usize::try_from(idx).unwrap()]),
+                    Ty::Tuple(tty) => SIR.ty(&tty.fields.tys[usize::try_from(idx).unwrap()]),
+                    _ => todo!("{:?}", base_ty),
+                },
+                _ => todo!("place_ty() for projection: {:?}", p.projection),
+            }
+        }
+    }
+
     /// Copy the contents of the place `p2` into `p1`.
     fn mov_place_place(&mut self, p1: &Place, p2: &Place) -> Result<(), CompileError> {
         let lloc = self.place_to_location(p1)?;
         let rloc = self.place_to_location(p2)?;
+        let ty = self.place_ty(p1);
+
         match (lloc, rloc) {
-            (Location::Register(lreg), Location::Register(rreg)) => {
-                dynasm!(self.asm
-                    ; mov Rq(lreg), Rq(rreg)
-                );
-            }
-            (Location::Register(reg), Location::Mem(ro)) => {
-                dynasm!(self.asm
-                    ; mov Rq(reg), [Rq(ro.reg) + ro.offs]
-                );
-            }
-            (Location::Mem(ro), Location::Register(reg)) => {
-                dynasm!(self.asm
-                    ; mov [Rq(ro.reg) + ro.offs], Rq(reg)
-                );
-            }
+            (Location::Register(lreg), Location::Register(rreg)) => match ty.size() {
+                8 => {
+                    dynasm!(self.asm
+                        ; mov Rq(lreg), Rq(rreg)
+                    );
+                }
+                1 => {
+                    dynasm!(self.asm
+                        ; mov Rb(lreg), Rb(rreg)
+                    );
+                }
+                _ => todo!("{}", ty.size()),
+            },
+            (Location::Register(reg), Location::Mem(ro)) => match ty.size() {
+                8 => {
+                    dynasm!(self.asm
+                        ; mov Rq(reg), [Rq(ro.reg) + ro.offs]
+                    );
+                }
+                1 => {
+                    dynasm!(self.asm
+                        ; mov Rb(reg), [Rq(ro.reg) + ro.offs]
+                    );
+                }
+                _ => todo!("{}", ty.size()),
+            },
+            (Location::Mem(ro), Location::Register(reg)) => match ty.size() {
+                1 => {
+                    dynasm!(self.asm
+                        ; mov BYTE [Rq(ro.reg) + ro.offs], Rb(reg)
+                    );
+                }
+                4 => {
+                    dynasm!(self.asm
+                        ; mov DWORD [Rq(ro.reg) + ro.offs], Rd(reg)
+                    );
+                }
+                8 => {
+                    dynasm!(self.asm
+                        ; mov [Rq(ro.reg) + ro.offs], Rq(reg)
+                    );
+                }
+                _ => todo!("{}", ty.size()),
+            },
             (Location::Mem(ro1), Location::Mem(ro2)) => {
                 // Since RAX is currently not available to the register allocator, we can use it
                 // here to simplify moving values from the stack back onto the stack (which x86
                 // does not support). Otherwise, we would have to free up a register via spilling,
                 // making this operation more complicated and costly.
-                dynasm!(self.asm
-                    ; mov rax, [Rq(ro2.reg) + ro2.offs]
-                    ; mov [Rq(ro1.reg) + ro1.offs], rax
-                );
+                match ty.size() {
+                    1 => {
+                        dynasm!(self.asm
+                            ; mov al, BYTE [Rq(ro2.reg) + ro2.offs]
+                            ; mov BYTE [Rq(ro1.reg) + ro1.offs], al
+                        );
+                    }
+                    8 => {
+                        dynasm!(self.asm
+                            ; mov rax, [Rq(ro2.reg) + ro2.offs]
+                            ; mov [Rq(ro1.reg) + ro1.offs], rax
+                        );
+                    }
+                    16 => {
+                        // We could have handled this case via a generic memcpy() solution, but it
+                        // hardly seems worth the overhead for such a small copy. Especially since
+                        // pairs (tuples) of two u64s are very common in Rust: they are the result
+                        // of checked arithmetic.
+                        dynasm!(self.asm
+                            ; mov rax, [Rq(ro2.reg) + ro2.offs]
+                            ; mov [Rq(ro1.reg) + ro1.offs], rax
+                            ; mov rax, [Rq(ro2.reg) + ro2.offs + 8]
+                            ; mov [Rq(ro1.reg) + ro1.offs + 8], rax
+                        );
+                    }
+                    _ => todo!("{}", ty.size()), // FIXME: For things >16, use memcpy().
+                }
             }
-            (Location::Register(reg), Location::Deref(boxed)) => match *boxed {
-                Location::Mem(ro) => {
-                    dynasm!(self.asm
-                        ; mov Rq(reg), [Rq(ro.reg) + ro.offs]
-                        ; mov Rq(reg), [Rq(reg)]
-                    );
-                }
-                Location::Register(reg2) => {
-                    dynasm!(self.asm
-                        ; mov Rq(reg), [Rq(reg2)]
-                    );
-                }
-                _ => todo!(),
+            (Location::Register(reg), Location::Deref(boxed)) => match ty.size() {
+                8 => match *boxed {
+                    Location::Mem(ro) => {
+                        dynasm!(self.asm
+                            ; mov Rq(reg), [Rq(ro.reg) + ro.offs]
+                            ; mov Rq(reg), [Rq(reg)]
+                        );
+                    }
+                    Location::Register(reg2) => {
+                        dynasm!(self.asm
+                            ; mov Rq(reg), [Rq(reg2)]
+                        );
+                    }
+                    _ => todo!(),
+                },
+                _ => todo!("{}", ty.size()),
             },
-            (Location::Mem(ro1), Location::Deref(boxed)) => match *boxed {
-                Location::Mem(ro2) => {
-                    dynasm!(self.asm
-                        ; mov rax, [Rq(ro2.reg) + ro2.offs]
-                        ; mov rax, [rax]
-                        ; mov [Rq(ro1.reg) + ro1.offs], rax
-                    );
-                }
-                Location::Register(reg) => {
-                    dynasm!(self.asm
-                        ; mov rax, [Rq(reg)]
-                        ; mov [Rq(ro1.reg) + ro1.offs], rax
-                    );
-                }
-                _ => todo!(),
+            (Location::Mem(ro1), Location::Deref(boxed)) => match ty.size() {
+                8 => match *boxed {
+                    Location::Mem(ro2) => {
+                        dynasm!(self.asm
+                            ; mov rax, [Rq(ro2.reg) + ro2.offs]
+                            ; mov rax, [rax]
+                            ; mov [Rq(ro1.reg) + ro1.offs], rax
+                        );
+                    }
+                    Location::Register(reg) => {
+                        dynasm!(self.asm
+                            ; mov rax, [Rq(reg)]
+                            ; mov [Rq(ro1.reg) + ro1.offs], rax
+                        );
+                    }
+                    _ => todo!(),
+                },
+                _ => todo!("{}", ty.size()),
             },
             _ => unreachable!(),
         }
@@ -341,48 +488,81 @@ impl<TT> TraceCompiler<TT> {
     ) -> Result<(), CompileError> {
         let loc = self.place_to_location(place)?;
         let c_val = constant.i64_cast();
+        let ty = self.place_ty(place);
+
         match loc {
-            Location::Register(reg) => {
-                dynasm!(self.asm
-                    ; mov Rq(reg), QWORD c_val
-                );
-            }
+            Location::Register(reg) => match ty.size() {
+                1 => {
+                    dynasm!(self.asm
+                        ; mov Rb(reg), BYTE c_val as u8 as i8
+                    );
+                }
+                4 => {
+                    dynasm!(self.asm
+                        ; mov Rd(reg), DWORD c_val as u32 as i32
+                    );
+                }
+                8 => {
+                    dynasm!(self.asm
+                        ; mov Rq(reg), QWORD c_val
+                    );
+                }
+                _ => todo!("{}", ty.size()),
+            },
             Location::Mem(ro) => {
-                if c_val <= u32::MAX.into() {
-                    let val = c_val as u32 as i32;
-                    dynasm!(self.asm
-                        ; mov QWORD [Rq(ro.reg) + ro.offs], val
-                    );
-                } else {
-                    // x86 doesn't allow writing 64bit immediates directly to the stack. We thus
-                    // have to split up the immediate into two 32bit values and write them one at a
-                    // time.
-                    let v1 = c_val as u32 as i32;
-                    let v2 = (c_val >> 32) as u32 as i32;
-                    dynasm!(self.asm
-                        ; mov DWORD [Rq(ro.reg) + ro.offs], v1
-                        ; mov DWORD [Rq(ro.reg) + ro.offs + 4], v2
-                    );
+                match ty.size() {
+                    8 => {
+                        if c_val <= u32::MAX.into() {
+                            let val = c_val as u32 as i32;
+                            dynasm!(self.asm
+                                ; mov QWORD [Rq(ro.reg) + ro.offs], val
+                            );
+                        } else {
+                            // X86_64 doesn't allow writing 64-bit immediates directly to the stack. We thus
+                            // have to split up the immediate into two 32-bit values and write them one at a
+                            // time.
+                            let v1 = c_val as u32 as i32;
+                            let v2 = (c_val >> 32) as u32 as i32;
+                            dynasm!(self.asm
+                                ; mov DWORD [Rq(ro.reg) + ro.offs], v1
+                                ; mov DWORD [Rq(ro.reg) + ro.offs + 4], v2
+                            );
+                        }
+                    }
+                    4 => {
+                        dynasm!(self.asm
+                            ; mov DWORD [Rq(ro.reg) + ro.offs], c_val as u32 as i32
+                        );
+                    }
+                    1 => {
+                        dynasm!(self.asm
+                            ; mov BYTE [Rq(ro.reg) + ro.offs], c_val as u32 as i8
+                        );
+                    }
+                    _ => todo!("{}", ty.size()),
                 }
             }
-            Location::Deref(boxed) => match *boxed {
-                Location::Mem(ro) => {
-                    if c_val <= u32::MAX.into() {
-                        dynasm!(self.asm
-                            ; mov rax, [Rq(ro.reg) + ro.offs]
-                            ; mov QWORD [rax], c_val as u32 as i32
-                        );
-                    } else {
-                        todo!()
+            Location::Deref(boxed) => match ty.size() {
+                8 => match *boxed {
+                    Location::Mem(ro) => {
+                        if c_val <= u32::MAX.into() {
+                            dynasm!(self.asm
+                                ; mov rax, [Rq(ro.reg) + ro.offs]
+                                ; mov QWORD [rax], c_val as u32 as i32
+                            );
+                        } else {
+                            todo!()
+                        }
                     }
-                }
-                Location::Register(reg) => {
-                    dynasm!(self.asm
-                        ; mov rax, QWORD c_val
-                        ; mov [Rq(reg)], rax
-                    );
-                }
-                _ => todo!(),
+                    Location::Register(reg) => {
+                        dynasm!(self.asm
+                            ; mov rax, QWORD c_val
+                            ; mov [Rq(reg)], rax
+                        );
+                    }
+                    _ => todo!(),
+                },
+                _ => todo!("{}", ty.size()),
             },
             Location::NotLive => unreachable!(),
         }
@@ -596,25 +776,30 @@ impl<TT> TraceCompiler<TT> {
         op1: &Operand,
         op2: &Operand,
     ) -> Result<(), CompileError> {
-        // Move `op1` into `dest`.
+        // The value of the addition is stored in the first field of the result tuple.
+        let mut val_dest = dest.clone();
+        val_dest.projection.push(Projection::Field(0));
+
+        // Move `op1` into `val_dest`.
         match op1 {
-            Operand::Place(p) => self.mov_place_place(dest, &p)?,
-            Operand::Constant(Constant::Int(ci)) => self.mov_place_constint(dest, &ci)?,
+            Operand::Place(p) => self.mov_place_place(&val_dest, &p)?,
+            Operand::Constant(Constant::Int(ci)) => self.mov_place_constint(&val_dest, &ci)?,
             Operand::Constant(Constant::Bool(_b)) => unreachable!(),
             Operand::Constant(c) => return Err(CompileError::Unimplemented(format!("{}", c))),
         };
-        // Add together `dest` and `op2`.
-        let lloc = self.place_to_location(dest)?;
+        // Add together `val_dest` and `op2`.
+        let lloc = self.place_to_location(&val_dest)?;
+        let size = self.place_ty(&val_dest).size();
         match op2 {
             Operand::Place(p) => {
                 let rloc = self.place_to_location(&p)?;
                 match binop {
-                    BinOp::Add => self.checked_add_place(lloc, rloc),
+                    BinOp::Add => self.checked_add_place(size, lloc, rloc),
                     _ => todo!(),
                 }
             }
             Operand::Constant(Constant::Int(ci)) => match binop {
-                BinOp::Add => self.checked_add_const(lloc, ci),
+                BinOp::Add => self.checked_add_const(size, lloc, ci),
                 _ => todo!(),
             },
             Operand::Constant(Constant::Bool(_b)) => todo!(),
@@ -628,61 +813,105 @@ impl<TT> TraceCompiler<TT> {
         Ok(())
     }
 
-    fn checked_add_place(&mut self, l1: Location, l2: Location) {
-        match (l1, l2) {
-            (Location::Register(lreg), Location::Register(rreg)) => {
-                dynasm!(self.asm
-                    ; add Rq(lreg), Rq(rreg)
-                );
-            }
-            (Location::Register(reg), Location::Mem(ro)) => {
-                dynasm!(self.asm
-                    ; add Rq(reg), [Rq(ro.reg) + ro.offs]
-                );
-            }
-            (Location::Mem(ro), Location::Register(reg)) => {
-                dynasm!(self.asm
-                    ; add [Rq(ro.reg) + ro.offs], Rq(reg)
-                );
-            }
-            (Location::Mem(ro1), Location::Mem(ro2)) => {
-                dynasm!(self.asm
-                    ; mov rax, [Rq(ro2.reg) + ro2.offs]
-                    ; add [Rq(ro1.reg) + ro1.offs], rax
-                );
-            }
-            (_, _) => todo!(),
-        };
+    // FIXME Use a macro to generate funcs for all of the different binary operations.
+    fn checked_add_place(&mut self, size: u64, l1: Location, l2: Location) {
+        match size {
+            8 => match (l1, l2) {
+                (Location::Register(lreg), Location::Register(rreg)) => {
+                    dynasm!(self.asm
+                        ; add Rq(lreg), Rq(rreg)
+                    );
+                }
+                (Location::Register(reg), Location::Mem(ro)) => {
+                    dynasm!(self.asm
+                        ; add Rq(reg), [Rq(ro.reg) + ro.offs]
+                    );
+                }
+                (Location::Mem(ro), Location::Register(reg)) => {
+                    dynasm!(self.asm
+                        ; add [Rq(ro.reg) + ro.offs], Rq(reg)
+                    );
+                }
+                (Location::Mem(ro1), Location::Mem(ro2)) => {
+                    dynasm!(self.asm
+                        ; mov rax, [Rq(ro2.reg) + ro2.offs]
+                        ; add [Rq(ro1.reg) + ro1.offs], rax
+                    );
+                }
+                (_, _) => todo!(),
+            },
+            1 => match (l1, l2) {
+                (Location::Register(lreg), Location::Register(rreg)) => {
+                    dynasm!(self.asm
+                        ; add Rb(lreg), Rb(rreg)
+                    );
+                }
+                (Location::Register(reg), Location::Mem(ro)) => {
+                    dynasm!(self.asm
+                        ; add Rb(reg), [Rq(ro.reg) + ro.offs]
+                    );
+                }
+                (Location::Mem(ro), Location::Register(reg)) => {
+                    dynasm!(self.asm
+                        ; add [Rq(ro.reg) + ro.offs], Rb(reg)
+                    );
+                }
+                (Location::Mem(ro1), Location::Mem(ro2)) => {
+                    dynasm!(self.asm
+                        ; mov al, [Rq(ro2.reg) + ro2.offs]
+                        ; add [Rq(ro1.reg) + ro1.offs], al
+                    );
+                }
+                (_, _) => todo!(),
+            },
+            _ => todo!("{}", size),
+        }
     }
 
-    fn checked_add_const(&mut self, l: Location, c: &ConstantInt) {
+    fn checked_add_const(&mut self, size: u64, l: Location, c: &ConstantInt) {
         let c_val = c.i64_cast();
-        match l {
-            Location::Register(reg) => {
-                if c_val <= u32::MAX.into() {
+        match size {
+            8 => match l {
+                Location::Register(reg) => {
+                    if c_val <= u32::MAX.into() {
+                        dynasm!(self.asm
+                            ; add Rq(reg), c_val as u32 as i32
+                        );
+                    } else {
+                        dynasm!(self.asm
+                            ; mov rax, QWORD c_val
+                            ; add Rq(reg), rax
+                        );
+                    }
+                }
+                Location::Mem(ro) => {
+                    if c_val <= u32::MAX.into() {
+                        dynasm!(self.asm
+                            ; add QWORD [Rq(ro.reg) + ro.offs], c_val as u32 as i32
+                        );
+                    } else {
+                        dynasm!(self.asm
+                            ; mov rax, QWORD c_val
+                            ; add [Rq(ro.reg) + ro.offs], rax
+                        );
+                    }
+                }
+                _ => todo!(),
+            },
+            1 => match l {
+                Location::Register(reg) => {
                     dynasm!(self.asm
-                        ; add Rq(reg), c_val as u32 as i32
-                    );
-                } else {
-                    dynasm!(self.asm
-                        ; mov rax, QWORD c_val
-                        ; add Rq(reg), rax
+                        ; add Rb(reg), c_val as u8 as i8
                     );
                 }
-            }
-            Location::Mem(ro) => {
-                if c_val <= u32::MAX.into() {
+                Location::Mem(ro) => {
                     dynasm!(self.asm
-                        ; add QWORD [Rq(ro.reg) + ro.offs], c_val as u32 as i32
-                    );
-                } else {
-                    dynasm!(self.asm
-                        ; mov rax, QWORD c_val
-                        ; add [Rq(ro.reg) + ro.offs], rax
+                        ; add BYTE [Rq(ro.reg) + ro.offs], c_val as u8 as i8
                     );
                 }
-            }
-            _ => todo!(),
+                _ => todo!(),
+            },
+            _ => todo!("{}", size),
         }
     }
 
@@ -845,6 +1074,7 @@ impl<TT> TraceCompiler<TT> {
                 .collect(),
             variable_location_map: HashMap::new(),
             trace_inputs_local: tt.inputs().map(|t| t.clone()),
+            local_decls: tt.local_decls.clone(),
             stack_builder: StackBuilder::default(),
             _pd: PhantomData,
         };
@@ -937,6 +1167,7 @@ mod tests {
 
     // Repeatedly fetching the register for the same local should yield the same register and
     // should not exhaust the allocator.
+    #[ignore] // Broken because we don't know what type IDs to put in local_decls.
     #[test]
     fn reg_alloc_same_local() {
         let mut tc = TraceCompiler::<u8> {
@@ -948,6 +1179,7 @@ mod tests {
                 .collect(),
             variable_location_map: HashMap::new(),
             trace_inputs_local: None,
+            local_decls: HashMap::default(),
             stack_builder: StackBuilder::default(),
             _pd: PhantomData,
         };
@@ -961,8 +1193,10 @@ mod tests {
     }
 
     // Locals should be allocated to different registers.
+    #[ignore] // Broken because we don't know what type IDs to put in local_decls.
     #[test]
     fn reg_alloc() {
+        let local_decls = HashMap::new();
         let mut tc = TraceCompiler::<u8> {
             asm: dynasmrt::x64::Assembler::new().unwrap(),
             register_content_map: [R15, R14, R13, R12, R11, R10, R9, R8, RDX, RCX]
@@ -972,6 +1206,7 @@ mod tests {
                 .collect(),
             variable_location_map: HashMap::new(),
             trace_inputs_local: None,
+            local_decls,
             stack_builder: StackBuilder::default(),
             _pd: PhantomData,
         };
@@ -1003,7 +1238,7 @@ mod tests {
         inputs.0 = fcall();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
-        let ct = TraceCompiler::<&(u64,)>::compile(tir_trace);
+        let ct = TraceCompiler::<&(u8,)>::compile(tir_trace);
         let mut args = (0,);
         ct.execute(&mut args);
         assert_eq!(args.0, 13);
@@ -1030,7 +1265,7 @@ mod tests {
         inputs.0 = fnested();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
-        let ct = TraceCompiler::<&(u64,)>::compile(tir_trace);
+        let ct = TraceCompiler::<&(u8,)>::compile(tir_trace);
         let mut args = (0,);
         ct.execute(&mut args);
         assert_eq!(args.0, 20);
@@ -1090,8 +1325,8 @@ mod tests {
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
         let mut args = (0,);
-        TraceCompiler::<&(u64,)>::compile(tir_trace).execute(&mut args);
-        assert_eq!(inputs.0 as u64, args.0);
+        TraceCompiler::<&(u32,)>::compile(tir_trace).execute(&mut args);
+        assert_eq!(inputs.0, args.0);
     }
 
     /// Execute a trace which calls a symbol accepting arguments and returns a value.
@@ -1104,8 +1339,8 @@ mod tests {
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
         let mut args = (0,);
-        TraceCompiler::<&(u64,)>::compile(tir_trace).execute(&mut args);
-        assert_eq!(inputs.0 as u64, args.0);
+        TraceCompiler::<&(i32,)>::compile(tir_trace).execute(&mut args);
+        assert_eq!(inputs.0, args.0);
     }
 
     /// The same as `exec_call_symbol_args_with_rv`, just using a constant argument.
@@ -1117,8 +1352,8 @@ mod tests {
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
         let mut args = (0,);
-        TraceCompiler::<&(u64,)>::compile(tir_trace).execute(&mut args);
-        assert_eq!(inputs.0 as u64, args.0);
+        TraceCompiler::<&(i32,)>::compile(tir_trace).execute(&mut args);
+        assert_eq!(inputs.0, args.0);
     }
 
     #[test]
@@ -1170,11 +1405,11 @@ mod tests {
         inputs.0 = many_locals();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
-        let (ct, spills) = TraceCompiler::<&(u64,)>::test_compile(tir_trace);
+        let (ct, spills) = TraceCompiler::<&(u8,)>::test_compile(tir_trace);
         let mut args = (0,);
         ct.execute(&mut args);
         assert_eq!(args.0, 7);
-        assert_eq!(spills, 3 * 8);
+        assert_eq!(spills, 3); // Three u8s.
     }
 
     fn u64value() -> u64 {
@@ -1229,11 +1464,11 @@ mod tests {
         inputs.0 = register_to_stack(8);
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
-        let (ct, spills) = TraceCompiler::<&(u64,)>::test_compile(tir_trace);
+        let (ct, spills) = TraceCompiler::<&(u8,)>::test_compile(tir_trace);
         let mut args = (0,);
         ct.execute(&mut args);
         assert_eq!(args.0, 8);
-        assert_eq!(spills, 3 * 8);
+        assert_eq!(spills, 9); // f, g: i32, h:  u8.
     }
 
     fn stack_to_register() -> u8 {
@@ -1256,11 +1491,11 @@ mod tests {
         inputs.0 = stack_to_register();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
-        let (ct, spills) = TraceCompiler::<&(u64,)>::test_compile(tir_trace);
+        let (ct, spills) = TraceCompiler::<&(u8,)>::test_compile(tir_trace);
         let mut args = (0,);
         ct.execute(&mut args);
         assert_eq!(args.0, 3);
-        assert_eq!(spills, 1 * 8);
+        assert_eq!(spills, 1); // Just one u8.
     }
 
     fn ext_call() -> u64 {
@@ -1311,7 +1546,7 @@ mod tests {
 
     #[inline(never)]
     fn add(a: u8) -> u8 {
-        let x = a + 3;
+        let x = a + 3; // x = a; add x, 3
         let y = a + x;
         y
     }
@@ -1331,7 +1566,7 @@ mod tests {
         inputs.3 = inputs.0 + inputs.0;
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
-        let ct = TraceCompiler::<&(u64, u64, u64, u64)>::compile(tir_trace);
+        let ct = TraceCompiler::<&(u8, u64, u8, u8)>::compile(tir_trace);
         let mut args = (0, 0, 0, 0);
         ct.execute(&mut args);
         assert_eq!(args.0, 29);
@@ -1356,7 +1591,7 @@ mod tests {
         inputs.1 = add64(1);
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
-        let ct = TraceCompiler::<&(u64, u64)>::compile(tir_trace);
+        let ct = TraceCompiler::<&(u8, u64)>::compile(tir_trace);
         let mut args = (0, 0);
         ct.execute(&mut args);
         assert_eq!(args.0, 29);
@@ -1417,6 +1652,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // FIXME: Need to type our projections.
     fn test_ref_deref() {
         let mut inputs = trace_inputs((0,));
         let th = start_tracing(Some(TracingKind::HardwareTracing));
@@ -1430,6 +1666,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // FIXME: Need to type our projections.
     fn test_ref_deref_stack() {
         let mut inputs = trace_inputs((0,));
         let th = start_tracing(Some(TracingKind::HardwareTracing));

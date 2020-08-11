@@ -33,7 +33,6 @@ impl TirTrace {
         let mut itr = trace.into_iter().peekable();
         let mut rnm = VarRenamer::new();
         let mut trace_inputs_local: Option<Local> = None;
-        let mut local_decls = HashMap::new();
 
         while let Some(loc) = itr.next() {
             let body = match SIR.bodies.get(&loc.symbol_name) {
@@ -61,20 +60,15 @@ impl TirTrace {
             for stmt in body.blocks[user_bb_idx_usize].stmts.iter() {
                 let op = match stmt {
                     Statement::StorageLive(local) => {
-                        let renamed = rnm.rename_local(local);
-
-                        // Carry the variable declarations through to TIR as well.
-                        let decl = &body.local_decls[usize::try_from(local.0).unwrap()];
-                        local_decls.insert(renamed, decl.clone());
-
+                        let renamed = rnm.rename_local(local, body);
                         Statement::StorageLive(renamed)
                     }
                     Statement::StorageDead(local) => {
-                        Statement::StorageDead(rnm.rename_local(local))
+                        Statement::StorageDead(rnm.rename_local(local, body))
                     }
                     Statement::Assign(place, rvalue) => {
-                        let newplace = rnm.rename_place(&place);
-                        let newrvalue = rnm.rename_rvalue(&rvalue);
+                        let newplace = rnm.rename_place(&place, body);
+                        let newrvalue = rnm.rename_rvalue(&rvalue, body);
                         Statement::Assign(newplace, newrvalue)
                     }
                     Statement::Nop => stmt.clone(),
@@ -99,13 +93,13 @@ impl TirTrace {
                     // `Local`s during trace compilation.
                     let ret_val = dest
                         .as_ref()
-                        .map(|(ret_val, _)| rnm.rename_place(&ret_val))
+                        .map(|(ret_val, _)| rnm.rename_place(&ret_val, body))
                         .unwrap();
 
                     if let Some(callee_sym) = op.symbol() {
                         // We know the symbol name of the callee at least.
                         // Rename all `Local`s within the arguments.
-                        let newargs = rnm.rename_args(&args);
+                        let newargs = rnm.rename_args(&args, body);
                         let op = if let Some(callbody) = SIR.bodies.get(callee_sym) {
                             // We have SIR for the callee, so it will appear inlined in the trace
                             // and we only need to emit Enter/Leave statements.
@@ -122,8 +116,10 @@ impl TirTrace {
                             for lidx in 0..newargs.len() {
                                 let lidx = lidx + 1; // Skipping the return local.
                                 let decl = &callbody.local_decls[usize::try_from(lidx).unwrap()];
-                                let arg_loc = Local(u32::try_from(lidx).unwrap());
-                                local_decls.insert(rnm.rename_local(&arg_loc), decl.clone());
+                                rnm.used_decl(
+                                    Local(rnm.offset + u32::try_from(lidx).unwrap()),
+                                    decl.clone()
+                                );
                             }
 
                             TirOp::Statement(Statement::Enter(
@@ -241,7 +237,7 @@ impl TirTrace {
         Ok(Self {
             ops,
             trace_inputs_local,
-            local_decls
+            local_decls: rnm.done()
         })
     }
 
@@ -273,7 +269,15 @@ struct VarRenamer {
     acc: Option<u32>,
     /// Stores the return variables of inlined function calls. Used to replace `$0` during
     /// renaming.
-    returns: Vec<Place>
+    returns: Vec<Place>,
+    /// Used local declarations.
+    /// Used to keep track of only the local declarations that are actually used in the trace.
+    ///
+    /// FIXME Hopefully in the future there will be a better mechanism for finding the used locals
+    /// in a trace. We had planned to use `StorageLive` as a mechanism to identify them, but sadly
+    /// temporary variables and variables in cleanup code are never marked live (they are assumed
+    /// to live the whole function).
+    used_decls: HashMap<Local, LocalDecl>
 }
 
 impl VarRenamer {
@@ -282,8 +286,19 @@ impl VarRenamer {
             stack: vec![0],
             offset: 0,
             acc: None,
-            returns: Vec::new()
+            returns: Vec::new(),
+            used_decls: HashMap::new()
         }
+    }
+
+    /// Register a used local declaration.
+    fn used_decl(&mut self, l: Local, decl: LocalDecl) {
+        self.used_decls.insert(l, decl);
+    }
+
+    /// Finalises the renamer, returning the local decls for the trace.
+    fn done(self) -> HashMap<Local, LocalDecl> {
+        self.used_decls
     }
 
     fn offset(&self) -> u32 {
@@ -321,42 +336,44 @@ impl VarRenamer {
         }
     }
 
-    fn rename_args(&mut self, args: &Vec<Operand>) -> Vec<Operand> {
-        args.iter().map(|op| self.rename_operand(&op)).collect()
+    fn rename_args(&mut self, args: &Vec<Operand>, body: &ykpack::Body) -> Vec<Operand> {
+        args.iter()
+            .map(|op| self.rename_operand(&op, body))
+            .collect()
     }
 
-    fn rename_rvalue(&self, rvalue: &Rvalue) -> Rvalue {
+    fn rename_rvalue(&mut self, rvalue: &Rvalue, body: &ykpack::Body) -> Rvalue {
         match rvalue {
             Rvalue::Use(op) => {
-                let newop = self.rename_operand(op);
+                let newop = self.rename_operand(op, body);
                 Rvalue::Use(newop)
             }
             Rvalue::BinaryOp(binop, op1, op2) => {
-                let newop1 = self.rename_operand(op1);
-                let newop2 = self.rename_operand(op2);
+                let newop1 = self.rename_operand(op1, body);
+                let newop2 = self.rename_operand(op2, body);
                 Rvalue::BinaryOp(binop.clone(), newop1, newop2)
             }
             Rvalue::CheckedBinaryOp(binop, op1, op2) => {
-                let newop1 = self.rename_operand(op1);
-                let newop2 = self.rename_operand(op2);
+                let newop1 = self.rename_operand(op1, body);
+                let newop2 = self.rename_operand(op2, body);
                 Rvalue::CheckedBinaryOp(binop.clone(), newop1, newop2)
             }
             Rvalue::Ref(place) => {
-                let newplace = self.rename_place(place);
+                let newplace = self.rename_place(place, body);
                 Rvalue::Ref(newplace)
             }
             Rvalue::Unimplemented(_) => rvalue.clone()
         }
     }
 
-    fn rename_operand(&self, operand: &Operand) -> Operand {
+    fn rename_operand(&mut self, operand: &Operand, body: &ykpack::Body) -> Operand {
         match operand {
-            Operand::Place(p) => Operand::Place(self.rename_place(p)),
+            Operand::Place(p) => Operand::Place(self.rename_place(p, body)),
             Operand::Constant(_) => operand.clone()
         }
     }
 
-    fn rename_place(&self, place: &Place) -> Place {
+    fn rename_place(&mut self, place: &Place, body: &ykpack::Body) -> Place {
         if &place.local == &Local(0) {
             // Replace the default return variable $0 with the variable in the outer context where
             // the return value will end up after leaving the function. This saves us an
@@ -368,13 +385,18 @@ impl VarRenamer {
             }
         } else {
             let mut p = place.clone();
-            p.local = self.rename_local(&p.local);
+            p.local = self.rename_local(&p.local, body);
             p
         }
     }
 
-    fn rename_local(&self, local: &Local) -> Local {
-        Local(local.0 + self.offset)
+    fn rename_local(&mut self, local: &Local, body: &ykpack::Body) -> Local {
+        let renamed = Local(local.0 + self.offset);
+        self.used_decl(
+            renamed.clone(),
+            body.local_decls[usize::try_from(local.0).unwrap()].clone()
+        );
+        renamed
     }
 }
 
