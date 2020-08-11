@@ -21,7 +21,8 @@ pub struct TirTrace {
     ops: Vec<TirOp>,
     trace_inputs_local: Option<Local>,
     /// Maps each local variable to its declaration, including type.
-    pub local_decls: HashMap<Local, LocalDecl>
+    pub local_decls: HashMap<Local, LocalDecl>,
+    pub addr_map: HashMap<String, u64>
 }
 
 impl TirTrace {
@@ -33,6 +34,10 @@ impl TirTrace {
         let mut itr = trace.into_iter().peekable();
         let mut rnm = VarRenamer::new();
         let mut trace_inputs_local: Option<Local> = None;
+        // Symbol name of the function currently being ignored during tracing.
+        let mut ignore: Option<String> = None;
+        // Maps symbol names to their virtual addresses.
+        let mut addr_map: HashMap<String, u64> = HashMap::new();
 
         while let Some(loc) = itr.next() {
             let body = match SIR.bodies.get(&loc.symbol_name) {
@@ -52,6 +57,28 @@ impl TirTrace {
             // When adding statements to the trace, we clone them (rather than referencing the
             // statements in the SIR) so that we have the freedom to mutate them later.
             let user_bb_idx_usize = usize::try_from(loc.bb_idx).unwrap();
+
+            // When we see the first block of a SirFunc, store its virtual address so we can turn
+            // this function into a `Call` if the user decides not to trace it.
+            let addr = &loc.addr;
+            if user_bb_idx_usize == 0 {
+                addr_map.insert(loc.symbol_name.to_string(), addr.unwrap());
+            }
+
+            // If a function was annotated with `do_not_trace`, skip all instructions within it as
+            // well. FIXME: recursion.
+            if let Some(sym) = &ignore {
+                if sym == &loc.symbol_name {
+                    match &body.blocks[user_bb_idx_usize].term {
+                        Terminator::Return => {
+                            ignore = None;
+                        }
+                        _ => {}
+                    }
+                }
+                continue;
+            }
+
             // When converting the SIR trace into a TIR trace we alpha-rename the `Local`s from
             // inlined functions by adding an offset to each. This offset is derived from the
             // number of assigned variables in the functions outer context. For example, if a
@@ -104,30 +131,42 @@ impl TirTrace {
                             // We have SIR for the callee, so it will appear inlined in the trace
                             // and we only need to emit Enter/Leave statements.
 
-                            // Inform VarRenamer about this function's offset, which is equal to the
-                            // number of variables assigned in the outer body.
-                            rnm.enter(callbody.local_decls.len(), ret_val.clone());
+                            // If the function has been annotated with do_not_trace, turn it into a
+                            // call.
+                            if callbody.flags & ykpack::bodyflags::DO_NOT_TRACE != 0 {
+                                ignore = Some(callee_sym.to_string());
+                                TirOp::Statement(Statement::Call(
+                                    op.clone(),
+                                    newargs,
+                                    Some(ret_val)
+                                ))
+                            } else {
+                                // Inform VarRenamer about this function's offset, which is equal to the
+                                // number of variables assigned in the outer body.
+                                rnm.enter(callbody.local_decls.len(), ret_val.clone());
 
-                            // Ensure the callee's arguments get TIR local decls. This is required
-                            // because arguments are implicitly live at the start of each function,
-                            // and we usually instantiate local decls when we see a StorageLive.
-                            //
-                            // This must happen after rnm.enter() so that self.offset is up-to-date.
-                            for lidx in 0..newargs.len() {
-                                let lidx = lidx + 1; // Skipping the return local.
-                                let decl = &callbody.local_decls[usize::try_from(lidx).unwrap()];
-                                rnm.used_decl(
-                                    Local(rnm.offset + u32::try_from(lidx).unwrap()),
-                                    decl.clone()
-                                );
+                                // Ensure the callee's arguments get TIR local decls. This is required
+                                // because arguments are implicitly live at the start of each function,
+                                // and we usually instantiate local decls when we see a StorageLive.
+                                //
+                                // This must happen after rnm.enter() so that self.offset is up-to-date.
+                                for lidx in 0..newargs.len() {
+                                    let lidx = lidx + 1; // Skipping the return local.
+                                    let decl =
+                                        &callbody.local_decls[usize::try_from(lidx).unwrap()];
+                                    rnm.used_decl(
+                                        Local(rnm.offset + u32::try_from(lidx).unwrap()),
+                                        decl.clone()
+                                    );
+                                }
+
+                                TirOp::Statement(Statement::Enter(
+                                    op.clone(),
+                                    newargs,
+                                    Some(ret_val),
+                                    rnm.offset()
+                                ))
                             }
-
-                            TirOp::Statement(Statement::Enter(
-                                op.clone(),
-                                newargs,
-                                Some(ret_val),
-                                rnm.offset()
-                            ))
                         } else {
                             // We have a symbol name but no SIR. Without SIR the callee can't
                             // appear inlined in the trace, so we should emit a native call to the
@@ -229,15 +268,32 @@ impl TirTrace {
                 e => panic!("Expected `StorageLive` here, instead got {:?}.", e)
             }
         }
+        let mut removed_dead = false;
         match ops.remove(0) {
-            TirOp::Statement(Statement::StorageDead(_)) => {}
-            e => panic!("Expected `StorageDead` here, instead got {:?}.", e)
+            TirOp::Statement(Statement::Assign(
+                _,
+                Rvalue::Use(Operand::Constant(Constant::Bool(true)))
+            )) => {}
+            TirOp::Statement(Statement::StorageDead(_)) => {
+                removed_dead = true;
+            }
+            e => panic!(
+                "Expected `Assign(false)/StorageDead` here, instead got {:?}.",
+                e
+            )
+        }
+        if !removed_dead {
+            match ops.remove(0) {
+                TirOp::Statement(Statement::StorageDead(_)) => {}
+                e => panic!("Expected `StorageDead` here, instead got {:?}.", e)
+            }
         }
 
         Ok(Self {
             ops,
             trace_inputs_local,
-            local_decls: rnm.done()
+            local_decls: rnm.done(),
+            addr_map
         })
     }
 

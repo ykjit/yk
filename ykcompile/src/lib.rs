@@ -140,6 +140,7 @@ pub struct TraceCompiler<TT> {
     local_decls: HashMap<Local, LocalDecl>,
     /// Stack builder for allocating objects on the stack.
     stack_builder: StackBuilder,
+    addr_map: HashMap<String, u64>,
     _pd: PhantomData<TT>,
 }
 
@@ -292,7 +293,7 @@ impl<TT> TraceCompiler<TT> {
                 Projection::Field(idx) => match base_ty {
                     Ty::Struct(sty) => SIR.ty(&sty.fields.tys[usize::try_from(idx).unwrap()]),
                     Ty::Tuple(tty) => SIR.ty(&tty.fields.tys[usize::try_from(idx).unwrap()]),
-                    _ => todo!("{:?}", base_ty),
+                    t => todo!("{:?}", t),
                 },
                 _ => todo!("place_ty() for projection: {:?}", p.projection),
             }
@@ -718,7 +719,11 @@ impl<TT> TraceCompiler<TT> {
             };
         }
 
-        let sym_addr = TraceCompiler::<TT>::find_symbol(sym)? as i64;
+        let sym_addr = if let Some(addr) = self.addr_map.get(sym) {
+            *addr as i64
+        } else {
+            TraceCompiler::<TT>::find_symbol(sym)? as i64
+        };
         dynasm!(self.asm
             // In Sys-V ABI, `al` is a hidden argument used to specify the number of vector args
             // for a vararg call. We don't support this right now, so set it to zero.
@@ -1048,6 +1053,8 @@ impl<TT> TraceCompiler<TT> {
     fn _compile(tt: TirTrace) -> Self {
         let assembler = dynasmrt::x64::Assembler::new().unwrap();
 
+        // Make the TirTrace mutable so we can drain it into the TraceCompiler.
+        let mut tt = tt;
         let mut tc = TraceCompiler::<TT> {
             asm: assembler,
             // Use all the 64-bit registers we can (R11-R8, RDX, RCX). We probably also want to use the
@@ -1061,6 +1068,7 @@ impl<TT> TraceCompiler<TT> {
             trace_inputs_local: tt.inputs().map(|t| t.clone()),
             local_decls: tt.local_decls.clone(),
             stack_builder: StackBuilder::default(),
+            addr_map: tt.addr_map.drain().into_iter().collect(),
             _pd: PhantomData,
         };
 
@@ -1168,6 +1176,7 @@ mod tests {
             trace_inputs_local: None,
             local_decls: HashMap::default(),
             stack_builder: StackBuilder::default(),
+            addr_map: HashMap::new(),
             _pd: PhantomData,
         };
 
@@ -1195,6 +1204,7 @@ mod tests {
             trace_inputs_local: None,
             local_decls,
             stack_builder: StackBuilder::default(),
+            addr_map: HashMap::new(),
             _pd: PhantomData,
         };
 
@@ -1716,5 +1726,37 @@ mod tests {
         let mut args = (0,);
         ct.execute(&mut args);
         assert_eq!(args.0, 6);
+    }
+
+    #[do_not_trace]
+    fn dont_trace_this(a: u8) -> u8 {
+        let b = 2;
+        let c = a + b;
+        c
+    }
+
+    #[test]
+    fn test_do_not_trace() {
+        let mut inputs = trace_inputs((0,));
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        inputs.0 = dont_trace_this(1);
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+
+        assert_tir(
+            "
+            local_decls:
+              ...
+            ops:
+              ...
+              %s1 = call(...
+              ...",
+            &tir_trace,
+        );
+
+        let ct = TraceCompiler::<&(u64,)>::compile(tir_trace);
+        let mut args = (0,);
+        ct.execute(&mut args);
+        assert_eq!(args.0, 3);
     }
 }

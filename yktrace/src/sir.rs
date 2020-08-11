@@ -105,23 +105,27 @@ lazy_static! {
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct SirLoc {
     pub symbol_name: String,
-    pub bb_idx: u32
+    pub bb_idx: u32,
+    // Virtual address of this location.
+    pub addr: Option<u64>
 }
 
 impl From<&CoreSirLoc> for SirLoc {
     fn from(core_loc: &CoreSirLoc) -> SirLoc {
         SirLoc {
             symbol_name: String::from_utf8(core_loc.symbol_name().to_vec()).unwrap(),
-            bb_idx: core_loc.bb_idx()
+            bb_idx: core_loc.bb_idx(),
+            addr: None
         }
     }
 }
 
 impl SirLoc {
-    pub fn new(symbol_name: String, bb_idx: u32) -> Self {
+    pub fn new(symbol_name: String, bb_idx: u32, addr: Option<u64>) -> Self {
         Self {
             symbol_name,
-            bb_idx
+            bb_idx,
+            addr
         }
     }
 }
