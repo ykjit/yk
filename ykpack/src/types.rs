@@ -1,7 +1,10 @@
 //! Types for the Yorick intermediate language.
 
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
+use std::{
+    convert::TryFrom,
+    fmt::{self, Display},
+};
 
 pub type CrateHash = u64;
 pub type DefIndex = u32;
@@ -21,6 +24,12 @@ pub enum Ty {
     UnsignedInt(UnsignedIntTy),
     /// A structure type.
     Struct(StructTy),
+    /// A tuple type.
+    Tuple(TupleTy),
+    /// A reference to something.
+    Ref(TypeId),
+    /// A Boolean.
+    Bool,
     /// Anything that we've not yet defined a lowering for.
     Unimplemented(String),
 }
@@ -30,8 +39,79 @@ impl Display for Ty {
         match self {
             Ty::SignedInt(si) => write!(f, "{}", si),
             Ty::UnsignedInt(ui) => write!(f, "{}", ui),
-            Ty::Struct(sty) => write!(f, "{:?}", sty),
+            Ty::Struct(sty) => write!(f, "{}", sty),
+            Ty::Tuple(tty) => write!(f, "{}", tty),
+            Ty::Ref(rty) => write!(f, "&{:?}", rty),
+            Ty::Bool => write!(f, "bool"),
             Ty::Unimplemented(m) => write!(f, "Unimplemented: {}", m),
+        }
+    }
+}
+
+use std::mem;
+
+impl Ty {
+    pub fn size(&self) -> u64 {
+        match self {
+            Ty::UnsignedInt(ui) => match ui {
+                UnsignedIntTy::U8 => 1,
+                UnsignedIntTy::U16 => 2,
+                UnsignedIntTy::U32 => 4,
+                UnsignedIntTy::U64 => 8,
+                UnsignedIntTy::Usize => u64::try_from(mem::size_of::<usize>()).unwrap(),
+                UnsignedIntTy::U128 => 16,
+            },
+            Ty::SignedInt(ui) => match ui {
+                SignedIntTy::I8 => 1,
+                SignedIntTy::I16 => 2,
+                SignedIntTy::I32 => 4,
+                SignedIntTy::I64 => 8,
+                SignedIntTy::Isize => u64::try_from(mem::size_of::<isize>()).unwrap(),
+                SignedIntTy::I128 => 16,
+            },
+            Ty::Struct(sty) => u64::try_from(sty.size_align.size).unwrap(),
+            Ty::Tuple(tty) => u64::try_from(tty.size_align.size).unwrap(),
+            Ty::Ref(_) => u64::try_from(mem::size_of::<usize>()).unwrap(),
+            Ty::Bool => u64::try_from(mem::size_of::<bool>()).unwrap(),
+            _ => todo!("{:?}", self),
+        }
+    }
+
+    pub fn align(&self) -> u64 {
+        match self {
+            Ty::UnsignedInt(ui) => match ui {
+                UnsignedIntTy::U8 => 1,
+                UnsignedIntTy::U16 => 2,
+                UnsignedIntTy::U32 => 4,
+                UnsignedIntTy::U64 => 8,
+                UnsignedIntTy::Usize =>
+                {
+                    #[cfg(target_arch = "x86_64")]
+                    8
+                }
+                UnsignedIntTy::U128 => 16,
+            },
+            Ty::SignedInt(ui) => match ui {
+                SignedIntTy::I8 => 1,
+                SignedIntTy::I16 => 2,
+                SignedIntTy::I32 => 4,
+                SignedIntTy::I64 => 8,
+                SignedIntTy::Isize =>
+                {
+                    #[cfg(target_arch = "x86_64")]
+                    8
+                }
+                SignedIntTy::I128 => 16,
+            },
+            Ty::Struct(sty) => u64::try_from(sty.size_align.align).unwrap(),
+            Ty::Tuple(tty) => u64::try_from(tty.size_align.align).unwrap(),
+            Ty::Ref(_) =>
+            {
+                #[cfg(target_arch = "x86_64")]
+                8
+            }
+            Ty::Bool => u64::try_from(mem::size_of::<bool>()).unwrap(),
+            _ => todo!("{:?}", self),
         }
     }
 }
@@ -87,15 +167,72 @@ impl Display for UnsignedIntTy {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
-pub struct StructTy {
+pub struct Fields {
     /// Field offsets.
     pub offsets: Vec<u64>,
     /// The type of each field.
     pub tys: Vec<TypeId>,
-    /// The alignment of the struct (in bytes).
+}
+
+impl Display for Fields {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "offsets: [{}], tys: [{}]",
+            self.offsets
+                .iter()
+                .map(|o| o.to_string())
+                .collect::<Vec<String>>()
+                .join(", "),
+            self.tys
+                .iter()
+                .map(|t| format!("{:?}", t))
+                .collect::<Vec<String>>()
+                .join(", ")
+        )
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
+pub struct SizeAndAlign {
+    /// The alignment, in bytes.
     pub align: i32, // i32 for use as a dynasm operand.
-    /// The size of the struct (in bytes).
+    /// The size, in bytes.
     pub size: i32, // Also i32 for dynasm.
+}
+
+impl Display for SizeAndAlign {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "align: {}, size: {}", self.align, self.size)
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
+pub struct TupleTy {
+    /// The fields of the tuple.
+    pub fields: Fields,
+    /// The size and alignment of the tuple.
+    pub size_align: SizeAndAlign,
+}
+
+impl Display for TupleTy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "TupleTy {{ {}, {} }}", self.fields, self.size_align)
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
+pub struct StructTy {
+    /// The fields of the struct.
+    pub fields: Fields,
+    /// The size and alignment of the struct.
+    pub size_align: SizeAndAlign,
+}
+
+impl Display for StructTy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "StructTy {{ {}, {} }}", self.fields, self.size_align)
+    }
 }
 
 /// rmp-serde serialisable 128-bit numeric types, to work around:
