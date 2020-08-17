@@ -456,6 +456,16 @@ impl<TT> TraceCompiler<TT> {
                     ; mov [Rq(ro1.reg) + ro1.offs], rax
                 );
             }
+            (Location::Register(reg1), Location::Deref(boxed)) => match *boxed {
+                // For now, referencing a dereference is the same as copying the original pointer.
+                // FIXME: custom Deref implementations.
+                Location::Register(reg2) => {
+                    dynasm!(self.asm
+                        ; mov Rq(reg1), Rq(reg2)
+                    );
+                }
+                _ => todo!(),
+            },
             (_, _) => todo!(),
         };
         Ok(())
@@ -1766,5 +1776,27 @@ mod tests {
         let mut args = (0,);
         ct.execute(&mut args);
         assert_eq!(args.0, 3);
+    }
+
+    fn dont_trace_stdlib(a: &mut Vec<u64>) -> u64 {
+        a.push(3);
+        3
+    }
+
+    #[test]
+    fn test_do_not_trace_stdlib() {
+        let mut vec: Vec<u64> = Vec::new();
+        let inputs = trace_inputs((&mut vec,));
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let v = inputs.0;
+        dont_trace_stdlib(v);
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let ct = TraceCompiler::<&(&mut Vec<u64>,)>::compile(tir_trace);
+        let mut argv: Vec<u64> = Vec::new();
+        let mut args = (&mut argv,);
+        ct.execute(&mut args);
+        assert_eq!(argv.len(), 1);
+        assert_eq!(argv[0], 3);
     }
 }
