@@ -140,6 +140,7 @@ pub struct TraceCompiler<TT> {
     local_decls: HashMap<Local, LocalDecl>,
     /// Stack builder for allocating objects on the stack.
     stack_builder: StackBuilder,
+    addr_map: HashMap<String, u64>,
     _pd: PhantomData<TT>,
 }
 
@@ -292,7 +293,7 @@ impl<TT> TraceCompiler<TT> {
                 Projection::Field(idx) => match base_ty {
                     Ty::Struct(sty) => SIR.ty(&sty.fields.tys[usize::try_from(idx).unwrap()]),
                     Ty::Tuple(tty) => SIR.ty(&tty.fields.tys[usize::try_from(idx).unwrap()]),
-                    _ => todo!("{:?}", base_ty),
+                    t => todo!("{:?}", t),
                 },
                 _ => todo!("place_ty() for projection: {:?}", p.projection),
             }
@@ -455,6 +456,16 @@ impl<TT> TraceCompiler<TT> {
                     ; mov [Rq(ro1.reg) + ro1.offs], rax
                 );
             }
+            (Location::Register(reg1), Location::Deref(boxed)) => match *boxed {
+                // For now, referencing a dereference is the same as copying the original pointer.
+                // FIXME: custom Deref implementations.
+                Location::Register(reg2) => {
+                    dynasm!(self.asm
+                        ; mov Rq(reg1), Rq(reg2)
+                    );
+                }
+                _ => todo!(),
+            },
             (_, _) => todo!(),
         };
         Ok(())
@@ -718,7 +729,11 @@ impl<TT> TraceCompiler<TT> {
             };
         }
 
-        let sym_addr = TraceCompiler::<TT>::find_symbol(sym)? as i64;
+        let sym_addr = if let Some(addr) = self.addr_map.get(sym) {
+            *addr as i64
+        } else {
+            TraceCompiler::<TT>::find_symbol(sym)? as i64
+        };
         dynasm!(self.asm
             // In Sys-V ABI, `al` is a hidden argument used to specify the number of vector args
             // for a vararg call. We don't support this right now, so set it to zero.
@@ -735,9 +750,17 @@ impl<TT> TraceCompiler<TT> {
                 );
             }
             Some(Location::Mem(ro)) => {
-                dynasm!(self.asm
-                    ; mov QWORD [Rq(ro.reg) + ro.offs], rax
-                );
+                match self.place_ty(dest.as_ref().unwrap()).size() {
+                    0 => {
+                        // The return destination is a ZST (zero-sized type). Do nothing.
+                    }
+                    8 => {
+                        dynasm!(self.asm
+                            ; mov QWORD [Rq(ro.reg) + ro.offs], rax
+                        );
+                    }
+                    _ => todo!(),
+                }
             }
             _ => unreachable!(),
         }
@@ -1048,6 +1071,8 @@ impl<TT> TraceCompiler<TT> {
     fn _compile(tt: TirTrace) -> Self {
         let assembler = dynasmrt::x64::Assembler::new().unwrap();
 
+        // Make the TirTrace mutable so we can drain it into the TraceCompiler.
+        let mut tt = tt;
         let mut tc = TraceCompiler::<TT> {
             asm: assembler,
             // Use all the 64-bit registers we can (R11-R8, RDX, RCX). We probably also want to use the
@@ -1061,6 +1086,7 @@ impl<TT> TraceCompiler<TT> {
             trace_inputs_local: tt.inputs().map(|t| t.clone()),
             local_decls: tt.local_decls.clone(),
             stack_builder: StackBuilder::default(),
+            addr_map: tt.addr_map.drain().into_iter().collect(),
             _pd: PhantomData,
         };
 
@@ -1168,6 +1194,7 @@ mod tests {
             trace_inputs_local: None,
             local_decls: HashMap::default(),
             stack_builder: StackBuilder::default(),
+            addr_map: HashMap::new(),
             _pd: PhantomData,
         };
 
@@ -1195,6 +1222,7 @@ mod tests {
             trace_inputs_local: None,
             local_decls,
             stack_builder: StackBuilder::default(),
+            addr_map: HashMap::new(),
             _pd: PhantomData,
         };
 
@@ -1716,5 +1744,59 @@ mod tests {
         let mut args = (0,);
         ct.execute(&mut args);
         assert_eq!(args.0, 6);
+    }
+
+    #[do_not_trace]
+    fn dont_trace_this(a: u8) -> u8 {
+        let b = 2;
+        let c = a + b;
+        c
+    }
+
+    #[test]
+    fn test_do_not_trace() {
+        let mut inputs = trace_inputs((0,));
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        inputs.0 = dont_trace_this(1);
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+
+        assert_tir(
+            "
+            local_decls:
+              ...
+            ops:
+              ...
+              %s1 = call(...
+              ...",
+            &tir_trace,
+        );
+
+        let ct = TraceCompiler::<&(u64,)>::compile(tir_trace);
+        let mut args = (0,);
+        ct.execute(&mut args);
+        assert_eq!(args.0, 3);
+    }
+
+    fn dont_trace_stdlib(a: &mut Vec<u64>) -> u64 {
+        a.push(3);
+        3
+    }
+
+    #[test]
+    fn test_do_not_trace_stdlib() {
+        let mut vec: Vec<u64> = Vec::new();
+        let inputs = trace_inputs((&mut vec,));
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let v = inputs.0;
+        dont_trace_stdlib(v);
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let ct = TraceCompiler::<&(&mut Vec<u64>,)>::compile(tir_trace);
+        let mut argv: Vec<u64> = Vec::new();
+        let mut args = (&mut argv,);
+        ct.execute(&mut args);
+        assert_eq!(argv.len(), 1);
+        assert_eq!(argv[0], 3);
     }
 }

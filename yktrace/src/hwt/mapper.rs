@@ -50,18 +50,21 @@ impl HWTMapper {
             for (addr, (sym, bb_idx)) in &*LABELS {
                 if *addr >= start_addr && *addr <= end_addr {
                     // Found matching label.
-                    locs.push((addr, SirLoc::new(sym.to_string(), *bb_idx)));
+                    // Store the virtual address alongside the first basic block, so we can turn
+                    // inlined functions into calls during tracing.
+                    let vaddr = if bb_idx == &0 {
+                        Some(block.first_instr())
+                    } else {
+                        None
+                    };
+                    locs.push(SirLoc::new(sym.to_string(), *bb_idx, vaddr));
                 } else if *addr > end_addr {
                     // `labels` is sorted by address, so once we see one with an address
                     // higher than `end_addr`, we know there can be no further hits.
                     break;
                 }
             }
-            annotrace.extend(
-                locs.into_iter()
-                    .map(|(_, loc)| loc)
-                    .collect::<Vec<SirLoc>>()
-            );
+            annotrace.extend(locs);
         }
         Ok(annotrace)
     }
