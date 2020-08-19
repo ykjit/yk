@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     convert::TryFrom,
     fmt::{self, Display},
+    mem,
 };
 
 pub type CrateHash = u64;
@@ -47,8 +48,6 @@ impl Display for Ty {
         }
     }
 }
-
-use std::mem;
 
 impl Ty {
     pub fn size(&self) -> u64 {

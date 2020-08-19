@@ -30,14 +30,6 @@ use dynasmrt::{DynasmApi, DynasmLabelApi};
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub enum CompileError {
-    /// No return local found.
-    NoReturnLocal,
-    /// We ran out of registers.
-    /// In the long-run, when we have a proper register allocator, this won't be needed.
-    OutOfRegisters,
-    /// Compiling this statement is not yet implemented.
-    /// The string inside is a hint as to what kind of statement needs to be implemented.
-    Unimplemented(String),
     /// The binary symbol could not be found.
     UnknownSymbol(String),
 }
@@ -45,9 +37,6 @@ pub enum CompileError {
 impl Display for CompileError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NoReturnLocal => write!(f, "No return local found"),
-            Self::OutOfRegisters => write!(f, "Ran out of registers"),
-            Self::Unimplemented(s) => write!(f, "Unimplemented compilation: {}", s),
             Self::UnknownSymbol(s) => write!(f, "Unknown symbol: {}", s),
         }
     }
@@ -188,9 +177,7 @@ impl<TT> TraceCompiler<TT> {
                             Ok(Location::new_mem(RDI.code(), i32::try_from(offs).unwrap()))
                         }
                         Projection::Deref => unreachable!(),
-                        Projection::Unimplemented(s) => {
-                            Err(CompileError::Unimplemented(format!("{}", s)))
-                        }
+                        Projection::Unimplemented(s) => todo!("{}", s),
                     }
                 } else {
                     unreachable!(); // Trace inputs are always a tuple.
@@ -231,7 +218,7 @@ impl<TT> TraceCompiler<TT> {
                     Projection::Deref => self
                         .local_to_location(p.local)
                         .map(|l| Location::Deref(Box::new(l))),
-                    _ => Err(CompileError::Unimplemented(format!("{}", p))),
+                    _ => todo!("{}", p),
                 }
             }
         } else {
@@ -617,7 +604,7 @@ impl<TT> TraceCompiler<TT> {
                 Operand::Constant(c) => match c {
                     Constant::Int(ci) => self.mov_place_constint(&arg_idx, ci)?,
                     Constant::Bool(b) => self.mov_place_bool(&arg_idx, *b)?,
-                    c => return Err(CompileError::Unimplemented(format!("{}", c))),
+                    c => todo!("{}", c),
                 },
             }
         }
@@ -648,15 +635,11 @@ impl<TT> TraceCompiler<TT> {
         let sym = if let CallOperand::Fn(sym) = opnd {
             sym
         } else {
-            return Err(CompileError::Unimplemented(
-                "unknown call target".to_owned(),
-            ));
+            todo!("unknown call target");
         };
 
         if args.len() > 6 {
-            return Err(CompileError::Unimplemented(
-                "call with spilled args".to_owned(),
-            ));
+            todo!("call with spilled args");
         }
 
         // Figure out where the return value (if there is one) is going.
@@ -785,7 +768,7 @@ impl<TT> TraceCompiler<TT> {
             Operand::Place(p) => self.mov_place_place(&val_dest, &p)?,
             Operand::Constant(Constant::Int(ci)) => self.mov_place_constint(&val_dest, &ci)?,
             Operand::Constant(Constant::Bool(_b)) => unreachable!(),
-            Operand::Constant(c) => return Err(CompileError::Unimplemented(format!("{}", c))),
+            Operand::Constant(c) => todo!("{}", c),
         };
         // Add together `val_dest` and `op2`.
         let lloc = self.place_to_location(&val_dest)?;
@@ -803,7 +786,7 @@ impl<TT> TraceCompiler<TT> {
                 _ => todo!(),
             },
             Operand::Constant(Constant::Bool(_b)) => todo!(),
-            Operand::Constant(c) => return Err(CompileError::Unimplemented(format!("{}", c))),
+            Operand::Constant(c) => todo!("{}", c),
         };
         // In the future this will set the overflow flag of the tuple in `lloc`, which will be
         // checked by a guard, allowing us to return from the trace more gracefully.
@@ -926,7 +909,7 @@ impl<TT> TraceCompiler<TT> {
                     Rvalue::Use(Operand::Constant(c)) => match c {
                         Constant::Int(ci) => self.mov_place_constint(l, ci)?,
                         Constant::Bool(b) => self.mov_place_bool(l, *b)?,
-                        c => return Err(CompileError::Unimplemented(format!("{}", c))),
+                        c => todo!("{}", c),
                     },
                     Rvalue::CheckedBinaryOp(binop, op1, op2) => {
                         self.c_checked_binop(l, binop, op1, op2)?
@@ -934,7 +917,7 @@ impl<TT> TraceCompiler<TT> {
                     Rvalue::Ref(p) => {
                         self.mov_place_ref(l, p)?;
                     }
-                    unimpl => return Err(CompileError::Unimplemented(format!("{}", unimpl))),
+                    unimpl => todo!("{}", unimpl),
                 };
             }
             Statement::Enter(op, args, dest, off) => self.c_enter(op, args, dest, *off)?,
@@ -943,9 +926,7 @@ impl<TT> TraceCompiler<TT> {
             Statement::StorageDead(l) => self.free_register(l)?,
             Statement::Call(target, args, dest) => self.c_call(target, args, dest)?,
             Statement::Nop => {}
-            Statement::Unimplemented(s) => {
-                return Err(CompileError::Unimplemented(format!("{:?}", s)))
-            }
+            Statement::Unimplemented(s) => todo!("{:?}", s),
         }
 
         Ok(())
@@ -957,11 +938,15 @@ impl<TT> TraceCompiler<TT> {
         Ok(())
     }
 
-    /// Print information about the state of the compiler in the hope that it can help with
-    /// debugging efforts.
-    fn crash_dump(self, e: CompileError) -> ! {
+    /// Print information about the state of the compiler and exit.
+    fn crash_dump(self, e: Option<CompileError>) -> ! {
         eprintln!("\nThe trace compiler crashed!\n");
-        eprintln!("Reason: {}.\n", e);
+
+        if let Some(e) = e {
+            eprintln!("Reason: {}.\n", e);
+        } else {
+            eprintln!("Reason: unknown");
+        }
 
         // To help us figure out what has gone wrong, we can print the disassembled instruction
         // stream with the help of `rasm2`.
@@ -1087,8 +1072,10 @@ impl<TT> TraceCompiler<TT> {
                 TirOp::Guard(g) => tc.c_guard(g),
             };
 
+            // FIXME -- Later errors should not be fatal. We should be able to abort trace
+            // compilation and carry on.
             if let Err(e) = res {
-                tc.crash_dump(e);
+                tc.crash_dump(Some(e));
             }
         }
 
