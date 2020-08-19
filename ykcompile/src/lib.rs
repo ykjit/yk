@@ -740,9 +740,17 @@ impl<TT> TraceCompiler<TT> {
                 );
             }
             Some(Location::Mem(ro)) => {
-                dynasm!(self.asm
-                    ; mov QWORD [Rq(ro.reg) + ro.offs], rax
-                );
+                match self.place_ty(dest.as_ref().unwrap()).size() {
+                    0 => {
+                        // The return destination is a ZST (zero-sized type). Do nothing.
+                    }
+                    8 => {
+                        dynasm!(self.asm
+                            ; mov QWORD [Rq(ro.reg) + ro.offs], rax
+                        );
+                    }
+                    _ => todo!(),
+                }
             }
             _ => unreachable!(),
         }
