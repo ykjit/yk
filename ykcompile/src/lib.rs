@@ -938,11 +938,15 @@ impl<TT> TraceCompiler<TT> {
         Ok(())
     }
 
-    /// Print information about the state of the compiler in the hope that it can help with
-    /// debugging efforts.
-    fn crash_dump(self, e: CompileError) -> ! {
+    /// Print information about the state of the compiler and exit.
+    fn crash_dump(self, e: Option<CompileError>) -> ! {
         eprintln!("\nThe trace compiler crashed!\n");
-        eprintln!("Reason: {}.\n", e);
+
+        if let Some(e) = e {
+            eprintln!("Reason: {}.\n", e);
+        } else {
+            eprintln!("Reason: unknown");
+        }
 
         // To help us figure out what has gone wrong, we can print the disassembled instruction
         // stream with the help of `rasm2`.
@@ -1068,8 +1072,10 @@ impl<TT> TraceCompiler<TT> {
                 TirOp::Guard(g) => tc.c_guard(g),
             };
 
+            // FIXME -- Later errors should not be fatal. We should be able to abort trace
+            // compilation and carry on.
             if let Err(e) = res {
-                tc.crash_dump(e);
+                tc.crash_dump(Some(e));
             }
         }
 
