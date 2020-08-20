@@ -428,8 +428,8 @@ pub enum Statement {
     Enter(CallOperand, Vec<Operand>, Option<Place>, u32),
     /// Marks the exit of an inlined function call in a TIR trace. This does not appear in SIR.
     Leave,
-    /// Information about which locals are currently live/dead.
-    StorageLive(Local),
+    /// Marks a local variable dead.
+    /// Note that locals are implicitly live at first use.
     StorageDead(Local),
     /// A (non-inlined) call from a TIR trace to a binary symbol using the system ABI. This does
     /// not appear in SIR.
@@ -458,7 +458,6 @@ impl Display for Statement {
                 write!(f, "enter({}, [{}], {}, {})", op, args_s, dest_s, off)
             }
             Statement::Leave => write!(f, "leave"),
-            Statement::StorageLive(local) => write!(f, "live({})", local),
             Statement::StorageDead(local) => write!(f, "dead({})", local),
             Statement::Call(op, args, dest) => {
                 let args_s = args
@@ -895,6 +894,8 @@ impl Display for Pack {
 pub struct Types {
     pub crate_hash: u64,
     pub types: Vec<Ty>,
+    /// Indices of `types` which are thread tracers.
+    pub thread_tracers: Vec<u32>,
 }
 
 #[cfg(test)]

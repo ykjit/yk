@@ -26,6 +26,7 @@ pub enum TracingKind {
 }
 
 /// Represents a thread which is currently tracing.
+#[thread_tracer]
 pub struct ThreadTracer {
     /// The tracing implementation.
     t_impl: Box<dyn ThreadTracerImpl>
