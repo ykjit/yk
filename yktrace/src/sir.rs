@@ -4,7 +4,7 @@ use core::yk::SirLoc as CoreSirLoc;
 use elf;
 use fallible_iterator::FallibleIterator;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     convert::TryFrom,
     env,
     fmt::{self, Debug, Display, Write},
@@ -21,12 +21,18 @@ pub struct Sir {
     // Interesting locations that we need quick access to.
     pub markers: SirMarkers,
     /// SIR Local variable types, keyed by crate hash.
-    pub types: HashMap<u64, Vec<Ty>>
+    pub types: HashMap<u64, Vec<Ty>>,
+    /// Thread tracer type IDs.
+    pub thread_tracers: HashSet<ykpack::TypeId>
 }
 
 impl Sir {
     pub fn ty(&self, id: &ykpack::TypeId) -> &ykpack::Ty {
         &self.types[&id.0][usize::try_from(id.1).unwrap()]
+    }
+
+    pub fn is_thread_tracer_ty(&self, id: &ykpack::TypeId) -> bool {
+        self.thread_tracers.contains(id)
     }
 }
 
@@ -60,6 +66,7 @@ lazy_static! {
         let mut types = HashMap::new();
         let mut trace_heads = Vec::new();
         let mut trace_tails = Vec::new();
+        let mut thread_tracers = HashSet::new();
         for sec in &ef.sections {
             if sec.shdr.name.starts_with(".yksir_") {
                 let mut curs = Cursor::new(&sec.data);
@@ -86,6 +93,9 @@ lazy_static! {
                         Pack::Types(ts) => {
                             let old = types.insert(ts.crate_hash, ts.types);
                             debug_assert!(old.is_none()); // There's one `Types` pack per crate.
+                            for idx in ts.thread_tracers {
+                                thread_tracers.insert((ts.crate_hash, idx));
+                            }
                         },
                     }
                 }
@@ -96,7 +106,7 @@ lazy_static! {
         assert!(!trace_tails.is_empty(), "no trace tails found!");
         let markers = SirMarkers { trace_heads, trace_tails };
 
-        Sir {bodies, markers, types}
+        Sir {bodies, markers, types, thread_tracers}
     };
 }
 
