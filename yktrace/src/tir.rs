@@ -210,7 +210,7 @@ impl TirTrace {
                                     let lidx = lidx + 1; // Skipping the return local.
                                     let decl =
                                         &callbody.local_decls[usize::try_from(lidx).unwrap()];
-                                    rnm.used_decl(
+                                    rnm.local_decls.insert(
                                         Local(rnm.offset + u32::try_from(lidx).unwrap()),
                                         decl.clone()
                                     );
@@ -350,9 +350,8 @@ struct VarRenamer {
     /// Stores the return variables of inlined function calls. Used to replace `$0` during
     /// renaming.
     returns: Vec<Place>,
-    /// Used local declarations.
-    /// Used to keep track of only the local declarations that are actually used in the trace.
-    used_decls: HashMap<Local, LocalDecl>,
+    /// Maps a renamed local to its local declaration.
+    local_decls: HashMap<Local, LocalDecl>,
     /// The renamed trace input local, if it is known yet.
     trace_inputs_local: Option<Local>
 }
@@ -364,19 +363,14 @@ impl VarRenamer {
             offset: 0,
             acc: None,
             returns: Vec::new(),
-            used_decls: HashMap::new(),
+            local_decls: HashMap::new(),
             trace_inputs_local: None
         }
     }
 
-    /// Register a used local declaration.
-    fn used_decl(&mut self, l: Local, decl: LocalDecl) {
-        self.used_decls.insert(l, decl);
-    }
-
     /// Finalises the renamer, returning the local decls.
     fn done(self) -> HashMap<Local, LocalDecl> {
-        self.used_decls
+        self.local_decls
     }
 
     fn offset(&self) -> u32 {
@@ -462,7 +456,7 @@ impl VarRenamer {
                 panic!("Expected return value!")
             };
 
-            self.used_decl(
+            self.local_decls.insert(
                 ret.local,
                 body.local_decls[usize::try_from(place.local.0).unwrap()].clone()
             );
@@ -476,7 +470,7 @@ impl VarRenamer {
 
     fn rename_local(&mut self, local: &Local, body: &ykpack::Body) -> Local {
         let renamed = Local(local.0 + self.offset);
-        self.used_decl(
+        self.local_decls.insert(
             renamed.clone(),
             body.local_decls[usize::try_from(local.0).unwrap()].clone()
         );
