@@ -32,16 +32,12 @@ use dynasmrt::{DynasmApi, DynasmLabelApi};
 pub enum CompileError {
     /// The binary symbol could not be found.
     UnknownSymbol(String),
-    /// Skip compilation of all further statements.
-    /// We use this when we see the call to `ThreadTracer:stop_tracing()`.
-    NoFurtherStatements,
 }
 
 impl Display for CompileError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnknownSymbol(s) => write!(f, "Unknown symbol: {}", s),
-            Self::NoFurtherStatements => write!(f, "No further statements"),
         }
     }
 }
@@ -594,18 +590,10 @@ impl<TT> TraceCompiler<TT> {
     /// Compile the entry into an inlined function call.
     fn c_enter(
         &mut self,
-        target: &CallOperand,
         args: &Vec<Operand>,
         _dest: &Option<Place>,
         off: u32,
     ) -> Result<(), CompileError> {
-        // If we are calling a function that would turn off the tracer, then we are done compiling.
-        if let CallOperand::Fn(sym) = target {
-            if SIR.markers.trace_tails.contains(sym) {
-                return Err(CompileError::NoFurtherStatements);
-            }
-        }
-
         // Move call arguments into registers.
         for (op, i) in args.iter().zip(1..) {
             let arg_idx = Place::from(Local(i + off));
@@ -942,7 +930,7 @@ impl<TT> TraceCompiler<TT> {
                     unimpl => todo!("{}", unimpl),
                 };
             }
-            Statement::Enter(op, args, dest, off) => self.c_enter(op, args, dest, *off)?,
+            Statement::Enter(_, args, dest, off) => self.c_enter(args, dest, *off)?,
             Statement::Leave => {}
             Statement::StorageDead(l) => self.free_register(l)?,
             Statement::Call(target, args, dest) => self.c_call(target, args, dest)?,
@@ -1100,7 +1088,6 @@ impl<TT> TraceCompiler<TT> {
             // compilation and carry on.
             match res {
                 Ok(_) => (),
-                Err(CompileError::NoFurtherStatements) => break,
                 Err(e) => tc.crash_dump(Some(e)),
             }
         }
@@ -1325,6 +1312,7 @@ mod tests {
             "...\n\
             ops:\n\
               %a = call(add6, [1u64, 1u64, 1u64, 1u64, 1u64, 1u64])\n\
+              ...
               dead(%a)\n\
               ...",
             &tir_trace,
