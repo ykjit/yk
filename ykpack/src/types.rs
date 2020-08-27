@@ -283,6 +283,16 @@ pub struct Place {
     pub projection: Vec<Projection>,
 }
 
+impl Place {
+    fn push_maybe_defined_locals(&self, locals: &mut Vec<Local>) {
+        locals.push(self.local);
+    }
+
+    fn push_used_locals(&self, locals: &mut Vec<Local>) {
+        locals.push(self.local);
+    }
+}
+
 impl Display for Place {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.projection.is_empty() {
@@ -439,6 +449,67 @@ pub enum Statement {
     Unimplemented(String),
 }
 
+impl Statement {
+    /// Returns a vector of locals that this SIR statement *may* define.
+    /// Whether or not the local is actually defined depends upon whether this is the first write
+    /// into the local (there is no explicit liveness marker in SIR/TIR).
+    pub fn maybe_defined_locals(&self) -> Vec<Local> {
+        let mut ret = Vec::new();
+
+        match self {
+            Statement::Nop => (),
+            Statement::Assign(place, _rval) => place.push_maybe_defined_locals(&mut ret),
+            // `Enter` doesn't define the destination, as that will be defined by an inlined assignment.
+            Statement::Enter(_target, args, _dest_place, start_idx) => {
+                for idx in 0..args.len() {
+                    // + 1 to skip return value.
+                    ret.push(Local(start_idx + u32::try_from(idx).unwrap() + 1));
+                }
+            }
+            Statement::Leave => (),
+            Statement::StorageDead(_) => (),
+            Statement::Call(_target, _args, dest) => {
+                if let Some(dest) = dest {
+                    dest.push_maybe_defined_locals(&mut ret);
+                }
+            }
+            Statement::Unimplemented(_) => (),
+        }
+        ret
+    }
+
+    /// Returns a vector of locals that this SIR statement uses but does not define.
+    pub fn used_locals(&self) -> Vec<Local> {
+        let mut ret = Vec::new();
+
+        match self {
+            Statement::Nop => (),
+            Statement::Assign(place, rval) => {
+                rval.push_used_locals(&mut ret);
+                place.push_used_locals(&mut ret);
+            }
+            // `Enter` doesn't use the callee args. Inlined statements will use them instead.
+            Statement::Enter(_target, _args, _opt_place, _idx) => (),
+            Statement::Leave => (),
+            Statement::StorageDead(_) => (),
+            Statement::Call(_target, args, _dest) => {
+                for a in args {
+                    a.push_used_locals(&mut ret);
+                }
+            }
+            Statement::Unimplemented(_) => (),
+        }
+        ret
+    }
+
+    /// Returns a vector of locals either used or defined by this statement.
+    pub fn referenced_locals(&self) -> Vec<Local> {
+        let mut ret = self.maybe_defined_locals();
+        ret.extend(self.used_locals());
+        ret
+    }
+}
+
 impl Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -487,6 +558,24 @@ pub enum Rvalue {
     Unimplemented(String),
 }
 
+impl Rvalue {
+    pub fn push_used_locals(&self, locals: &mut Vec<Local>) {
+        match self {
+            Rvalue::Use(opnd) => opnd.push_used_locals(locals),
+            Rvalue::BinaryOp(_op, opnd1, opnd2) => {
+                opnd1.push_used_locals(locals);
+                opnd2.push_used_locals(locals);
+            }
+            Rvalue::CheckedBinaryOp(_op, opnd1, opnd2) => {
+                opnd1.push_used_locals(locals);
+                opnd2.push_used_locals(locals);
+            }
+            Rvalue::Ref(plc) => plc.push_used_locals(locals),
+            Rvalue::Unimplemented(_) => (),
+        }
+    }
+}
+
 impl Display for Rvalue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -512,6 +601,15 @@ impl From<Local> for Rvalue {
 pub enum Operand {
     Place(Place),
     Constant(Constant),
+}
+
+impl Operand {
+    fn push_used_locals(&self, locals: &mut Vec<Local>) {
+        match self {
+            Operand::Place(plc) => plc.push_used_locals(locals),
+            Operand::Constant(_) => (),
+        }
+    }
 }
 
 impl Display for Operand {
