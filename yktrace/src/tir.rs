@@ -5,14 +5,13 @@
 use super::SirTrace;
 use crate::{errors::InvalidTraceError, sir::SIR};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     convert::TryFrom,
     fmt::{self, Display}
 };
-use ykpack::Terminator;
 pub use ykpack::{
     BinOp, CallOperand, Constant, ConstantInt, Local, LocalDecl, LocalIndex, Operand, Place,
-    PlaceBase, Projection, Rvalue, SignedInt, Statement, UnsignedInt
+    PlaceBase, Projection, Rvalue, SignedInt, Statement, Terminator, UnsignedInt
 };
 
 /// A TIR trace is conceptually a straight-line path through the SIR with guarded speculation.
@@ -38,6 +37,45 @@ impl TirTrace {
         let mut ignore: Option<String> = None;
         // Maps symbol names to their virtual addresses.
         let mut addr_map: HashMap<String, u64> = HashMap::new();
+
+        // As we compile, we are going to check the define-use (DU) chain of our local
+        // variables. No local should be used without first being defined. If that happens it's
+        // likely that the user used a variable from outside the scope of the trace without
+        // introducing it via `trace_locals()`.
+        let mut defined_locals = HashSet::new();
+
+        let mut update_defined_locals = |renamer: &mut VarRenamer, op: &Statement| {
+            // Locals reported by `maybe_defined_locals()` are only defined if they are not already
+            // defined.
+            //
+            // FIXME: Note that we are unable to detect variables which are defined outside of the
+            // traced code and which are not introduced as trace inputs. The user should not do
+            // this, but it would be nice to detect that somehow and panic.
+            let newly_defined = op
+                .maybe_defined_locals()
+                .iter()
+                .filter_map(|l| {
+                    if !defined_locals.contains(l) {
+                        Some(*l)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<Local>>();
+            defined_locals.extend(newly_defined);
+
+            for lcl in op.used_locals() {
+                // The trace inputs local is regarded as being live for the whole trace.
+                if let Some(til) = renamer.trace_inputs_local {
+                    if lcl == til {
+                        continue;
+                    }
+                }
+                if !defined_locals.contains(&lcl) {
+                    panic!("undefined local: {}", lcl);
+                }
+            }
+        };
 
         while let Some(loc) = itr.next() {
             let body = match SIR.bodies.get(&loc.symbol_name) {
@@ -85,6 +123,20 @@ impl TirTrace {
             // function `bar` is inlined into a function `foo`, and `foo` used 5 variables, then
             // all variables in `bar` are offset by 5.
             for stmt in body.blocks[user_bb_idx_usize].stmts.iter() {
+                // If the statement references a thread tracer local then discard the statement.
+                let mut skip = false;
+                for lcl in stmt.referenced_locals() {
+                    if SIR
+                        .is_thread_tracer_ty(&body.local_decls[usize::try_from(lcl.0).unwrap()].ty)
+                    {
+                        skip = true;
+                        break;
+                    }
+                }
+                if skip {
+                    continue;
+                }
+
                 let op = match stmt {
                     // StorageDead can't appear in SIR, only TIR.
                     Statement::StorageDead(_) => unreachable!(),
@@ -98,10 +150,12 @@ impl TirTrace {
                     // The following statements kinds are specific to TIR and cannot appear in SIR.
                     Statement::Call(..) | Statement::Enter(..) | Statement::Leave => unreachable!()
                 };
+
+                update_defined_locals(&mut rnm, &op);
                 ops.push(TirOp::Statement(op));
             }
 
-            match &body.blocks[user_bb_idx_usize].term {
+            let stmt = match &body.blocks[user_bb_idx_usize].term {
                 Terminator::Call {
                     operand: op,
                     args,
@@ -130,11 +184,7 @@ impl TirTrace {
                             // call.
                             if callbody.flags & ykpack::bodyflags::DO_NOT_TRACE != 0 {
                                 ignore = Some(callee_sym.to_string());
-                                TirOp::Statement(Statement::Call(
-                                    op.clone(),
-                                    newargs,
-                                    Some(ret_val)
-                                ))
+                                Statement::Call(op.clone(), newargs, Some(ret_val))
                             } else {
                                 // Inform VarRenamer about this function's offset, which is equal to the
                                 // number of variables assigned in the outer body.
@@ -156,20 +206,15 @@ impl TirTrace {
                                     );
                                 }
 
-                                TirOp::Statement(Statement::Enter(
-                                    op.clone(),
-                                    newargs,
-                                    Some(ret_val),
-                                    rnm.offset()
-                                ))
+                                Statement::Enter(op.clone(), newargs, Some(ret_val), rnm.offset())
                             }
                         } else {
                             // We have a symbol name but no SIR. Without SIR the callee can't
                             // appear inlined in the trace, so we should emit a native call to the
                             // symbol instead.
-                            TirOp::Statement(Statement::Call(op.clone(), newargs, Some(ret_val)))
+                            Statement::Call(op.clone(), newargs, Some(ret_val))
                         };
-                        ops.push(op);
+                        Some(op)
                     } else {
                         todo!("Unknown callee encountered");
                     }
@@ -181,9 +226,13 @@ impl TirTrace {
                     // the number of arguments the function call had, which we keep track of in
                     // `cur_call_args`.
                     rnm.leave();
-                    ops.push(TirOp::Statement(Statement::Leave))
+                    Some(Statement::Leave)
                 }
-                _ => {}
+                _ => None
+            };
+            if let Some(stmt) = stmt {
+                update_defined_locals(&mut rnm, &stmt);
+                ops.push(TirOp::Statement(stmt));
             }
 
             // Convert the block terminator to a guard if necessary.
@@ -300,7 +349,9 @@ struct VarRenamer {
     /// to live the whole function).
     used_decls: HashMap<Local, LocalDecl>,
     /// Maps locals to their last use in the ops vector.
-    last_local_uses: HashMap<Local, usize>
+    last_local_uses: HashMap<Local, usize>,
+    /// The renamed trace input local, if it is known yet.
+    trace_inputs_local: Option<Local>
 }
 
 impl VarRenamer {
@@ -311,7 +362,8 @@ impl VarRenamer {
             acc: None,
             returns: Vec::new(),
             used_decls: HashMap::new(),
-            last_local_uses: HashMap::new()
+            last_local_uses: HashMap::new(),
+            trace_inputs_local: None
         }
     }
 
@@ -434,6 +486,13 @@ impl VarRenamer {
             body.local_decls[usize::try_from(local.0).unwrap()].clone(),
             op_num
         );
+
+        if let Some(til) = body.trace_inputs_local {
+            if local == &til {
+                self.trace_inputs_local = Some(renamed);
+            }
+        }
+
         renamed
     }
 }
@@ -553,5 +612,19 @@ mod tests {
         let tir_trace = TirTrace::new(&*sir_trace).unwrap();
         assert_eq!(res, 15);
         assert!(tir_trace.len() > 0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn use_undefined_var() {
+        let outside_var = 100;
+
+        #[cfg(tracermode = "sw")]
+        let tracer = start_tracing(Some(TracingKind::SoftwareTracing));
+        #[cfg(tracermode = "hw")]
+        let tracer = start_tracing(Some(TracingKind::HardwareTracing));
+        let _x = outside_var + 1; // Use of an undefined variable in trace.
+        let sir_trace = tracer.stop_tracing().unwrap();
+        let _tir_trace = TirTrace::new(&*sir_trace).unwrap();
     }
 }

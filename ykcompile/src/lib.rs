@@ -32,9 +32,6 @@ use dynasmrt::{DynasmApi, DynasmLabelApi};
 pub enum CompileError {
     /// The binary symbol could not be found.
     UnknownSymbol(String),
-    /// Skip compilation of this statement.
-    /// This is used to discard operations involving the thread tracer.
-    SkipStatement,
     /// Skip compilation of all further statements.
     /// We use this when we see the call to `ThreadTracer:stop_tracing()`.
     NoFurtherStatements,
@@ -44,7 +41,6 @@ impl Display for CompileError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnknownSymbol(s) => write!(f, "Unknown symbol: {}", s),
-            Self::SkipStatement => write!(f, "Skip statement"),
             Self::NoFurtherStatements => write!(f, "No further statements"),
         }
     }
@@ -286,20 +282,6 @@ impl<TT> TraceCompiler<TT> {
         }
         self.variable_location_map.insert(*local, Location::NotLive);
         Ok(())
-    }
-
-    // FIXME these `*_references_thread_tracer` are kind of fragile. It relies on us calling them
-    // at the right places in the `c_*` functions below. It would be better to have a
-    // `references_locals()` method on `ykpack::Statement` which returns a set of variables used in
-    // the statement. Then we can check if each statement references the thread tracer in just one
-    // place.
-
-    fn local_references_thread_tracer(&self, l: &Local) -> bool {
-        SIR.is_thread_tracer_ty(&self.local_decls[l].ty)
-    }
-
-    fn place_references_thread_tracer(&self, p: &Place) -> bool {
-        self.local_references_thread_tracer(&p.local)
     }
 
     /// Get the type of a place.
@@ -944,10 +926,6 @@ impl<TT> TraceCompiler<TT> {
             Statement::Assign(l, r) => {
                 match r {
                     Rvalue::Use(Operand::Place(p)) => {
-                        // Skip moves of the thread tracer.
-                        if self.place_references_thread_tracer(p) {
-                            return Err(CompileError::SkipStatement);
-                        }
                         self.mov_place_place(l, p)?;
                     }
                     Rvalue::Use(Operand::Constant(c)) => match c {
@@ -966,13 +944,7 @@ impl<TT> TraceCompiler<TT> {
             }
             Statement::Enter(op, args, dest, off) => self.c_enter(op, args, dest, *off)?,
             Statement::Leave => {}
-            Statement::StorageDead(l) => {
-                // We don't care when the tracer itself dies. Skip.
-                if self.local_references_thread_tracer(l) {
-                    return Err(CompileError::SkipStatement);
-                }
-                self.free_register(l)?
-            }
+            Statement::StorageDead(l) => self.free_register(l)?,
             Statement::Call(target, args, dest) => self.c_call(target, args, dest)?,
             Statement::Nop => {}
             Statement::Unimplemented(s) => todo!("{:?}", s),
@@ -1127,7 +1099,7 @@ impl<TT> TraceCompiler<TT> {
             // FIXME -- Later errors should not be fatal. We should be able to abort trace
             // compilation and carry on.
             match res {
-                Err(CompileError::SkipStatement) | Ok(_) => (),
+                Ok(_) => (),
                 Err(CompileError::NoFurtherStatements) => break,
                 Err(e) => tc.crash_dump(Some(e)),
             }
