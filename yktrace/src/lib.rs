@@ -60,6 +60,12 @@ pub fn start_tracing(kind: Option<TracingKind>) -> ThreadTracer {
     }
 }
 
+#[inline(never)]
+#[trace_inputs]
+pub fn trace_inputs<T>(tup: T) -> T {
+    tup
+}
+
 /// The bodies of tests that we want to run on all tracing kinds live in here.
 #[cfg(test)]
 mod test_helpers {

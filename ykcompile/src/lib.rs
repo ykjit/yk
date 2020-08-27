@@ -1115,14 +1115,13 @@ impl<TT> TraceCompiler<TT> {
 mod tests {
     use super::{CompileError, HashMap, Local, Location, TraceCompiler};
     use crate::stack_builder::StackBuilder;
-    use core::yk::trace_inputs;
     use dynasmrt::{x64::Rq::*, Register};
     use fm::FMBuilder;
     use libc::{abs, c_void, getuid};
     use regex::Regex;
     use std::marker::PhantomData;
     use yktrace::tir::TirTrace;
-    use yktrace::{start_tracing, TracingKind};
+    use yktrace::{start_tracing, trace_inputs, TracingKind};
 
     extern "C" {
         fn add6(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64) -> u64;
