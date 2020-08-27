@@ -1,7 +1,8 @@
 //! Software tracing via ykrustc.
 
 use super::{SirTrace, ThreadTracer, ThreadTracerImpl};
-use crate::{errors::InvalidTraceError, SirLoc};
+use crate::{errors::InvalidTraceError, sir::SIR, SirLoc};
+use ykpack::Local;
 use core::yk::{swt, SirLoc as CoreSirLoc};
 use libc;
 use std::convert::TryFrom;
@@ -39,6 +40,12 @@ impl SirTrace for SWTSirTrace {
 
     fn raw_loc(&self, idx: usize) -> &SirLoc {
         &self.locs[idx]
+    }
+
+    fn input(&self) -> Local {
+        let blk = (self as &dyn SirTrace).into_iter().next().unwrap();
+        let body = &SIR.bodies[&blk.symbol_name];
+        body.trace_inputs_local.unwrap()
     }
 }
 
