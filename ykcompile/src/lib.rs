@@ -3,7 +3,6 @@
 #![feature(proc_macro_hygiene)]
 #![feature(test)]
 #![feature(core_intrinsics)]
-#![feature(yk)]
 
 #[macro_use]
 extern crate dynasmrt;

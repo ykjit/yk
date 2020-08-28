@@ -1,4 +1,3 @@
-#![feature(yk)]
 #![feature(test)]
 
 extern crate test;
