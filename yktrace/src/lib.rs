@@ -1,4 +1,3 @@
-#![feature(yk)]
 #![feature(test)]
 
 extern crate test;
@@ -58,6 +57,12 @@ pub fn start_tracing(kind: Option<TracingKind>) -> ThreadTracer {
         Some(TracingKind::SoftwareTracing) => unimplemented!("software tracing is broken"),
         None | Some(TracingKind::HardwareTracing) => hwt::start_tracing()
     }
+}
+
+#[inline(never)]
+#[trace_inputs]
+pub fn trace_inputs<T>(tup: T) -> T {
+    tup
 }
 
 /// The bodies of tests that we want to run on all tracing kinds live in here.

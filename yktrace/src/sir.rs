@@ -1,6 +1,5 @@
 //! Loading and tracing of Serialised Intermediate Representation (SIR).
 
-use core::yk::SirLoc as CoreSirLoc;
 use elf;
 use fallible_iterator::FallibleIterator;
 use std::{
@@ -118,16 +117,6 @@ pub struct SirLoc {
     pub bb_idx: u32,
     // Virtual address of this location.
     pub addr: Option<u64>
-}
-
-impl From<&CoreSirLoc> for SirLoc {
-    fn from(core_loc: &CoreSirLoc) -> SirLoc {
-        SirLoc {
-            symbol_name: String::from_utf8(core_loc.symbol_name().to_vec()).unwrap(),
-            bb_idx: core_loc.bb_idx(),
-            addr: None
-        }
-    }
 }
 
 impl SirLoc {
