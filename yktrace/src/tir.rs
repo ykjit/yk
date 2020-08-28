@@ -43,39 +43,42 @@ impl TirTrace {
         // likely that the user used a variable from outside the scope of the trace without
         // introducing it via `trace_locals()`.
         let mut defined_locals = HashSet::new();
+        let mut last_use_sites = HashMap::new();
 
-        let mut update_defined_locals = |renamer: &mut VarRenamer, op: &Statement| {
-            // Locals reported by `maybe_defined_locals()` are only defined if they are not already
-            // defined.
-            //
-            // FIXME: Note that we are unable to detect variables which are defined outside of the
-            // traced code and which are not introduced as trace inputs. The user should not do
-            // this, but it would be nice to detect that somehow and panic.
-            let newly_defined = op
-                .maybe_defined_locals()
-                .iter()
-                .filter_map(|l| {
-                    if !defined_locals.contains(l) {
-                        Some(*l)
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<Local>>();
-            defined_locals.extend(newly_defined);
+        let mut update_defined_locals =
+            |renamer: &mut VarRenamer, op: &Statement, op_idx: usize| {
+                // Locals reported by `maybe_defined_locals()` are only defined if they are not already
+                // defined.
+                //
+                // FIXME: Note that we are unable to detect variables which are defined outside of the
+                // traced code and which are not introduced as trace inputs. The user should not do
+                // this, but it would be nice to detect that somehow and panic.
+                let newly_defined = op
+                    .maybe_defined_locals()
+                    .iter()
+                    .filter_map(|l| {
+                        if !defined_locals.contains(l) {
+                            Some(*l)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<Local>>();
+                defined_locals.extend(newly_defined);
 
-            for lcl in op.used_locals() {
-                // The trace inputs local is regarded as being live for the whole trace.
-                if let Some(til) = renamer.trace_inputs_local {
-                    if lcl == til {
-                        continue;
+                for lcl in op.used_locals() {
+                    // The trace inputs local is regarded as being live for the whole trace.
+                    if let Some(til) = renamer.trace_inputs_local {
+                        if lcl == til {
+                            continue;
+                        }
                     }
+                    if !defined_locals.contains(&lcl) {
+                        panic!("undefined local: {}", lcl);
+                    }
+                    last_use_sites.insert(lcl, op_idx);
                 }
-                if !defined_locals.contains(&lcl) {
-                    panic!("undefined local: {}", lcl);
-                }
-            }
-        };
+            };
 
         while let Some(loc) = itr.next() {
             let body = match SIR.bodies.get(&loc.symbol_name) {
@@ -125,7 +128,7 @@ impl TirTrace {
             for stmt in body.blocks[user_bb_idx_usize].stmts.iter() {
                 // If the statement references a thread tracer local then discard the statement.
                 let mut skip = false;
-                for lcl in stmt.referenced_locals() {
+                for lcl in stmt.used_locals() {
                     if SIR
                         .is_thread_tracer_ty(&body.local_decls[usize::try_from(lcl.0).unwrap()].ty)
                     {
@@ -141,8 +144,8 @@ impl TirTrace {
                     // StorageDead can't appear in SIR, only TIR.
                     Statement::StorageDead(_) => unreachable!(),
                     Statement::Assign(place, rvalue) => {
-                        let newplace = rnm.rename_place(&place, body, ops.len());
-                        let newrvalue = rnm.rename_rvalue(&rvalue, body, ops.len());
+                        let newplace = rnm.rename_place(&place, body);
+                        let newrvalue = rnm.rename_rvalue(&rvalue, body);
                         Statement::Assign(newplace, newrvalue)
                     }
                     Statement::Nop => stmt.clone(),
@@ -151,7 +154,7 @@ impl TirTrace {
                     Statement::Call(..) | Statement::Enter(..) | Statement::Leave => unreachable!()
                 };
 
-                update_defined_locals(&mut rnm, &op);
+                update_defined_locals(&mut rnm, &op, ops.len());
                 ops.push(TirOp::Statement(op));
             }
 
@@ -161,6 +164,14 @@ impl TirTrace {
                     args,
                     destination: dest
                 } => {
+                    if let Some(callee_sym) = op.symbol() {
+                        if let Some(callee_body) = SIR.bodies.get(callee_sym) {
+                            if callee_body.flags & ykpack::bodyflags::TRACE_TAIL != 0 {
+                                break;
+                            }
+                        }
+                    }
+
                     // Rename the return value.
                     //
                     // FIXME It seems that calls always have a destination despite the field being
@@ -169,13 +180,13 @@ impl TirTrace {
                     // `Local`s during trace compilation.
                     let ret_val = dest
                         .as_ref()
-                        .map(|(ret_val, _)| rnm.rename_place(&ret_val, body, ops.len()))
+                        .map(|(ret_val, _)| rnm.rename_place(&ret_val, body))
                         .unwrap();
 
                     if let Some(callee_sym) = op.symbol() {
                         // We know the symbol name of the callee at least.
                         // Rename all `Local`s within the arguments.
-                        let newargs = rnm.rename_args(&args, body, ops.len());
+                        let newargs = rnm.rename_args(&args, body);
                         let op = if let Some(callbody) = SIR.bodies.get(callee_sym) {
                             // We have SIR for the callee, so it will appear inlined in the trace
                             // and we only need to emit Enter/Leave statements.
@@ -199,10 +210,9 @@ impl TirTrace {
                                     let lidx = lidx + 1; // Skipping the return local.
                                     let decl =
                                         &callbody.local_decls[usize::try_from(lidx).unwrap()];
-                                    rnm.used_decl(
+                                    rnm.local_decls.insert(
                                         Local(rnm.offset + u32::try_from(lidx).unwrap()),
-                                        decl.clone(),
-                                        ops.len()
+                                        decl.clone()
                                     );
                                 }
 
@@ -231,7 +241,7 @@ impl TirTrace {
                 _ => None
             };
             if let Some(stmt) = stmt {
-                update_defined_locals(&mut rnm, &stmt);
+                update_defined_locals(&mut rnm, &stmt, ops.len());
                 ops.push(TirOp::Statement(stmt));
             }
 
@@ -286,7 +296,7 @@ impl TirTrace {
             }
         }
 
-        let (local_decls, last_use_sites) = rnm.done();
+        let local_decls = rnm.done();
 
         // Insert `StorageDead` statements after the last use of each local variable. We process
         // the locals in reverse order of death site, so that inserting a statement cannot not skew
@@ -340,16 +350,8 @@ struct VarRenamer {
     /// Stores the return variables of inlined function calls. Used to replace `$0` during
     /// renaming.
     returns: Vec<Place>,
-    /// Used local declarations.
-    /// Used to keep track of only the local declarations that are actually used in the trace.
-    ///
-    /// FIXME Hopefully in the future there will be a better mechanism for finding the used locals
-    /// in a trace. We had planned to use `StorageLive` as a mechanism to identify them, but sadly
-    /// temporary variables and variables in cleanup code are never marked live (they are assumed
-    /// to live the whole function).
-    used_decls: HashMap<Local, LocalDecl>,
-    /// Maps locals to their last use in the ops vector.
-    last_local_uses: HashMap<Local, usize>,
+    /// Maps a renamed local to its local declaration.
+    local_decls: HashMap<Local, LocalDecl>,
     /// The renamed trace input local, if it is known yet.
     trace_inputs_local: Option<Local>
 }
@@ -361,21 +363,14 @@ impl VarRenamer {
             offset: 0,
             acc: None,
             returns: Vec::new(),
-            used_decls: HashMap::new(),
-            last_local_uses: HashMap::new(),
+            local_decls: HashMap::new(),
             trace_inputs_local: None
         }
     }
 
-    /// Register a used local declaration.
-    fn used_decl(&mut self, l: Local, decl: LocalDecl, op_num: usize) {
-        self.used_decls.insert(l, decl);
-        self.last_local_uses.insert(l, op_num);
-    }
-
-    /// Finalises the renamer, returning the local decls and final variable use sites.
-    fn done(self) -> (HashMap<Local, LocalDecl>, HashMap<Local, usize>) {
-        (self.used_decls, self.last_local_uses)
+    /// Finalises the renamer, returning the local decls.
+    fn done(self) -> HashMap<Local, LocalDecl> {
+        self.local_decls
     }
 
     fn offset(&self) -> u32 {
@@ -413,49 +408,44 @@ impl VarRenamer {
         }
     }
 
-    fn rename_args(
-        &mut self,
-        args: &Vec<Operand>,
-        body: &ykpack::Body,
-        op_num: usize
-    ) -> Vec<Operand> {
+    fn rename_args(&mut self, args: &Vec<Operand>, body: &ykpack::Body) -> Vec<Operand> {
         args.iter()
-            .map(|op| self.rename_operand(&op, body, op_num))
+            .map(|op| self.rename_operand(&op, body))
             .collect()
     }
 
-    fn rename_rvalue(&mut self, rvalue: &Rvalue, body: &ykpack::Body, op_num: usize) -> Rvalue {
+    fn rename_rvalue(&mut self, rvalue: &Rvalue, body: &ykpack::Body) -> Rvalue {
         match rvalue {
             Rvalue::Use(op) => {
-                let newop = self.rename_operand(op, body, op_num);
+                let newop = self.rename_operand(op, body);
                 Rvalue::Use(newop)
             }
             Rvalue::BinaryOp(binop, op1, op2) => {
-                let newop1 = self.rename_operand(op1, body, op_num);
-                let newop2 = self.rename_operand(op2, body, op_num);
+                let newop1 = self.rename_operand(op1, body);
+                let newop2 = self.rename_operand(op2, body);
                 Rvalue::BinaryOp(binop.clone(), newop1, newop2)
             }
             Rvalue::CheckedBinaryOp(binop, op1, op2) => {
-                let newop1 = self.rename_operand(op1, body, op_num);
-                let newop2 = self.rename_operand(op2, body, op_num);
+                let newop1 = self.rename_operand(op1, body);
+                let newop2 = self.rename_operand(op2, body);
                 Rvalue::CheckedBinaryOp(binop.clone(), newop1, newop2)
             }
             Rvalue::Ref(place) => {
-                let newplace = self.rename_place(place, body, op_num);
+                let newplace = self.rename_place(place, body);
                 Rvalue::Ref(newplace)
             }
             Rvalue::Unimplemented(_) => rvalue.clone()
         }
     }
 
-    fn rename_operand(&mut self, operand: &Operand, body: &ykpack::Body, op_num: usize) -> Operand {
+    fn rename_operand(&mut self, operand: &Operand, body: &ykpack::Body) -> Operand {
         match operand {
-            Operand::Place(p) => Operand::Place(self.rename_place(p, body, op_num)),
+            Operand::Place(p) => Operand::Place(self.rename_place(p, body)),
             Operand::Constant(_) => operand.clone()
         }
     }
 
-    fn rename_place(&mut self, place: &Place, body: &ykpack::Body, op_num: usize) -> Place {
+    fn rename_place(&mut self, place: &Place, body: &ykpack::Body) -> Place {
         if &place.local == &Local(0) {
             // Replace the default return variable $0 with the variable in the outer context where
             // the return value will end up after leaving the function. This saves us an
@@ -466,25 +456,23 @@ impl VarRenamer {
                 panic!("Expected return value!")
             };
 
-            self.used_decl(
+            self.local_decls.insert(
                 ret.local,
-                body.local_decls[usize::try_from(place.local.0).unwrap()].clone(),
-                op_num
+                body.local_decls[usize::try_from(place.local.0).unwrap()].clone()
             );
             ret
         } else {
             let mut p = place.clone();
-            p.local = self.rename_local(&p.local, body, op_num);
+            p.local = self.rename_local(&p.local, body);
             p
         }
     }
 
-    fn rename_local(&mut self, local: &Local, body: &ykpack::Body, op_num: usize) -> Local {
+    fn rename_local(&mut self, local: &Local, body: &ykpack::Body) -> Local {
         let renamed = Local(local.0 + self.offset);
-        self.used_decl(
+        self.local_decls.insert(
             renamed.clone(),
-            body.local_decls[usize::try_from(local.0).unwrap()].clone(),
-            op_num
+            body.local_decls[usize::try_from(local.0).unwrap()].clone()
         );
 
         if let Some(til) = body.trace_inputs_local {

@@ -459,8 +459,10 @@ impl Statement {
         match self {
             Statement::Nop => (),
             Statement::Assign(place, _rval) => place.push_maybe_defined_locals(&mut ret),
-            // `Enter` doesn't define the destination, as that will be defined by an inlined assignment.
-            Statement::Enter(_target, args, _dest_place, start_idx) => {
+            Statement::Enter(_target, args, dest, start_idx) => {
+                if let Some(dest) = dest {
+                    dest.push_maybe_defined_locals(&mut ret);
+                }
                 for idx in 0..args.len() {
                     // + 1 to skip return value.
                     ret.push(Local(start_idx + u32::try_from(idx).unwrap() + 1));
@@ -478,7 +480,9 @@ impl Statement {
         ret
     }
 
-    /// Returns a vector of locals that this SIR statement uses but does not define.
+    /// Returns a vector of locals that this SIR statement uses.
+    /// A definition is considered a use, so this returns a superset of what
+    /// `maybe_defined_locals()` does.
     pub fn used_locals(&self) -> Vec<Local> {
         let mut ret = Vec::new();
 
@@ -488,24 +492,30 @@ impl Statement {
                 rval.push_used_locals(&mut ret);
                 place.push_used_locals(&mut ret);
             }
-            // `Enter` doesn't use the callee args. Inlined statements will use them instead.
-            Statement::Enter(_target, _args, _opt_place, _idx) => (),
+            Statement::Enter(_target, args, dest, start_idx) => {
+                if let Some(dest) = dest {
+                    dest.push_used_locals(&mut ret);
+                }
+                for a in args {
+                    a.push_used_locals(&mut ret);
+                }
+                for idx in 0..args.len() {
+                    // + 1 to skip return value.
+                    ret.push(Local(start_idx + u32::try_from(idx).unwrap() + 1));
+                }
+            }
             Statement::Leave => (),
             Statement::StorageDead(_) => (),
-            Statement::Call(_target, args, _dest) => {
+            Statement::Call(_target, args, dest) => {
+                if let Some(dest) = dest {
+                    dest.push_used_locals(&mut ret);
+                }
                 for a in args {
                     a.push_used_locals(&mut ret);
                 }
             }
             Statement::Unimplemented(_) => (),
         }
-        ret
-    }
-
-    /// Returns a vector of locals either used or defined by this statement.
-    pub fn referenced_locals(&self) -> Vec<Local> {
-        let mut ret = self.maybe_defined_locals();
-        ret.extend(self.used_locals());
         ret
     }
 }
