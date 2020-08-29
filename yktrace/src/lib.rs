@@ -1,4 +1,7 @@
 #![feature(test)]
+#![feature(thread_local)]
+#![feature(core_intrinsics)]
+#![feature(global_asm)]
 
 extern crate test;
 
@@ -7,9 +10,8 @@ extern crate lazy_static;
 
 mod errors;
 mod hwt;
-// FIXME: Software tracing is currently broken. Not just here, but in ykrustc too.
-//mod swt;
 pub mod sir;
+mod swt;
 pub mod tir;
 
 use errors::InvalidTraceError;
@@ -54,7 +56,7 @@ trait ThreadTracerImpl {
 #[trace_head]
 pub fn start_tracing(kind: Option<TracingKind>) -> ThreadTracer {
     match kind {
-        Some(TracingKind::SoftwareTracing) => unimplemented!("software tracing is broken"),
+        Some(TracingKind::SoftwareTracing) => swt::start_tracing(),
         None | Some(TracingKind::HardwareTracing) => hwt::start_tracing()
     }
 }
