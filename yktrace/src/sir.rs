@@ -124,6 +124,35 @@ impl Sir {
     }
 }
 
+impl Display for Sir {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for body in self.bodies.values() {
+            writeln!(f, "{}", body)?;
+        }
+
+        for head in &self.markers.trace_heads {
+            writeln!(f, "HEAD {}", head)?;
+        }
+
+        for tail in &self.markers.trace_tails {
+            writeln!(f, "TAIL {}", tail)?;
+        }
+
+        for (crate_hash, types) in self.types.iter() {
+            writeln!(f, "TYPES OF {}", crate_hash)?;
+            for ty in types {
+                writeln!(f, "{}", ty)?;
+            }
+        }
+
+        for thread_tracer in self.thread_tracers.iter() {
+            writeln!(f, "THREAD TRACER {}:{}", thread_tracer.0, thread_tracer.1)?;
+        }
+
+        Ok(())
+    }
+}
+
 /// The same as core::SirLoc, just with a String representation of the symbol name and with the
 /// traits we were disallowed from using in libcore.
 #[derive(Debug, Hash, Eq, PartialEq)]
