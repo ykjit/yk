@@ -27,7 +27,7 @@ fn main() {
             std::fs::read(trace_file).unwrap()
         };
         let trace_text = String::from_utf8(trace_text).unwrap();
-        let mut trace = VecSirTrace(vec![]);
+        let mut trace = VecSirTrace(vec![], ykpack::Local(0) /*FIXME*/);
         for line in trace_text.lines() {
             let mut parts = line.trim().split(" ");
             let symbol_name = parts.next().unwrap().to_string();
@@ -42,13 +42,15 @@ fn main() {
         for loc in yktrace::sir::SirTraceIterator::new(&sir, &trace) {
             println!("{:?}", loc);
         }
+        let tir = yktrace::tir::TirTrace::new(&sir, &trace).unwrap();
+        println!("{}", tir);
     } else {
         println!("{}", sir);
     }
 }
 
 #[derive(Debug)]
-struct VecSirTrace(Vec<yktrace::sir::SirLoc>);
+struct VecSirTrace(Vec<yktrace::sir::SirLoc>, ykpack::Local);
 
 impl yktrace::sir::SirTrace for VecSirTrace {
     fn raw_len(&self) -> usize {
@@ -60,6 +62,6 @@ impl yktrace::sir::SirTrace for VecSirTrace {
     }
 
     fn input(&self) -> ykpack::Local {
-        todo!()
+        self.1
     }
 }

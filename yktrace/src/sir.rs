@@ -15,6 +15,7 @@ use ykpack::{bodyflags, Body, Decoder, Local, Pack, Ty}; // FIXME kill.
 
 /// The serialised IR loaded in from disk. One of these structures is generated in the above
 /// `lazy_static` and is shared immutably for all threads.
+#[derive(Debug)]
 pub struct Sir {
     /// Lets us map a symbol name to a SIR body.
     pub bodies: HashMap<String, Body>,
@@ -37,6 +38,7 @@ impl Sir {
 }
 
 /// Records interesting locations required for trace manipulation.
+#[derive(Debug)]
 pub struct SirMarkers {
     /// Functions which start tracing and whose suffix gets trimmed off the top of traces.
     /// Although you'd expect only one such function, (i.e. `yktrace::start_tracing`), in fact

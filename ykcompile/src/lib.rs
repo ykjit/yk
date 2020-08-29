@@ -1078,7 +1078,7 @@ impl<TT> TraceCompiler<TT> {
         tc.init();
 
         for i in 0..tt.len() {
-            let res = match tt.op(i) {
+            let res = match unsafe { tt.op(i) } {
                 TirOp::Statement(st) => tc.c_statement(st),
                 TirOp::Guard(g) => tc.c_guard(g),
             };
@@ -1119,6 +1119,7 @@ mod tests {
     use libc::{abs, c_void, getuid};
     use regex::Regex;
     use std::marker::PhantomData;
+    use yktrace::sir::SIR;
     use yktrace::tir::TirTrace;
     use yktrace::{start_tracing, trace_inputs, TracingKind};
 
@@ -1156,7 +1157,7 @@ mod tests {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         inputs.0 = simple();
         let sir_trace = th.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let ct = TraceCompiler::<&(u64,)>::compile(tir_trace);
         let mut args = (0,);
         ct.execute(&mut args);
@@ -1237,7 +1238,7 @@ mod tests {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         inputs.0 = fcall();
         let sir_trace = th.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let ct = TraceCompiler::<&(u8,)>::compile(tir_trace);
         let mut args = (0,);
         ct.execute(&mut args);
@@ -1264,7 +1265,7 @@ mod tests {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         inputs.0 = fnested();
         let sir_trace = th.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let ct = TraceCompiler::<&(u8,)>::compile(tir_trace);
         let mut args = (0,);
         ct.execute(&mut args);
@@ -1305,7 +1306,7 @@ mod tests {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         let _ = unsafe { add6(1, 1, 1, 1, 1, 1) };
         let sir_trace = th.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         assert_tir(
             "...\n\
             ops:\n\
@@ -1324,7 +1325,7 @@ mod tests {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         inputs.0 = unsafe { getuid() };
         let sir_trace = th.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let mut args = (0,);
         TraceCompiler::<&(u32,)>::compile(tir_trace).execute(&mut args);
         assert_eq!(inputs.0, args.0);
@@ -1338,7 +1339,7 @@ mod tests {
         let v = -56;
         inputs.0 = unsafe { abs(v) };
         let sir_trace = th.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let mut args = (0,);
         TraceCompiler::<&(i32,)>::compile(tir_trace).execute(&mut args);
         assert_eq!(inputs.0, args.0);
@@ -1351,7 +1352,7 @@ mod tests {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         inputs.0 = unsafe { abs(-123) };
         let sir_trace = th.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let mut args = (0,);
         TraceCompiler::<&(i32,)>::compile(tir_trace).execute(&mut args);
         assert_eq!(inputs.0, args.0);
@@ -1363,7 +1364,7 @@ mod tests {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         inputs.0 = unsafe { add6(1, 2, 3, 4, 5, 6) };
         let sir_trace = th.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let mut args = (0,);
         TraceCompiler::<&(u64,)>::compile(tir_trace).execute(&mut args);
         assert_eq!(inputs.0, 21);
@@ -1380,7 +1381,7 @@ mod tests {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         inputs.0 = unsafe { add_some(1, 2, 3, 4, 5) };
         let sir_trace = th.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let mut args = (0,);
         TraceCompiler::<&(u64,)>::compile(tir_trace).execute(&mut args);
         assert_eq!(args.0, 7);
@@ -1406,7 +1407,7 @@ mod tests {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         inputs.0 = many_locals();
         let sir_trace = th.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let (ct, spills) = TraceCompiler::<&(u8,)>::test_compile(tir_trace);
         let mut args = (0,);
         ct.execute(&mut args);
@@ -1440,7 +1441,7 @@ mod tests {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         inputs.0 = spill_u64();
         let sir_trace = th.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let (ct, spills) = TraceCompiler::<&(u64,)>::test_compile(tir_trace);
         let mut args = (0,);
         ct.execute(&mut args);
@@ -1467,7 +1468,7 @@ mod tests {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         inputs.0 = register_to_stack(8);
         let sir_trace = th.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let (ct, spills) = TraceCompiler::<&(u8,)>::test_compile(tir_trace);
         let mut args = (0,);
         ct.execute(&mut args);
@@ -1495,7 +1496,7 @@ mod tests {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         inputs.0 = stack_to_register();
         let sir_trace = th.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let (ct, spills) = TraceCompiler::<&(u8,)>::test_compile(tir_trace);
         let mut args = (0,);
         ct.execute(&mut args);
@@ -1524,7 +1525,7 @@ mod tests {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         inputs.0 = ext_call();
         let sir_trace = th.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let mut args = (0,);
         TraceCompiler::<&(u64,)>::compile(tir_trace).execute(&mut args);
         assert_eq!(inputs.0, 7);
@@ -1537,7 +1538,7 @@ mod tests {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         inputs.0 = unsafe { add6(inputs.0, inputs.1, inputs.2, 4, 5, 6) };
         let sir_trace = th.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let ct = TraceCompiler::<&(u64, u64, u64)>::compile(tir_trace);
         let mut args = (1, 2, 3);
         ct.execute(&mut args);
@@ -1570,7 +1571,7 @@ mod tests {
         inputs.2 = inputs.0 + 2;
         inputs.3 = inputs.0 + inputs.0;
         let sir_trace = th.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let ct = TraceCompiler::<&(u8, u64, u8, u8)>::compile(tir_trace);
         let mut args = (0, 0, 0, 0);
         ct.execute(&mut args);
@@ -1595,7 +1596,7 @@ mod tests {
         inputs.0 = add(13);
         inputs.1 = add64(1);
         let sir_trace = th.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let ct = TraceCompiler::<&(u8, u64)>::compile(tir_trace);
         let mut args = (0, 0);
         ct.execute(&mut args);
@@ -1619,7 +1620,7 @@ mod tests {
         let s = S { _x: 100, y: 200 };
         let _expect = get_y(s);
         let sir_trace = th.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
 
         // %s1: Initial s in the outer function
         // %s2: A copy of s. Uninteresting.
@@ -1666,7 +1667,7 @@ mod tests {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         inputs.0 = ref_deref();
         let sir_trace = th.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let ct = TraceCompiler::<&(u64,)>::compile(tir_trace);
         let mut args = (0,);
         ct.execute(&mut args);
@@ -1686,7 +1687,7 @@ mod tests {
         let _f = 6;
         inputs.0 = ref_deref();
         let sir_trace = th.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let ct = TraceCompiler::<&(u64,)>::compile(tir_trace);
         let mut args = (0,);
         ct.execute(&mut args);
@@ -1709,7 +1710,7 @@ mod tests {
         let f = 6;
         inputs.0 = deref1(f);
         let sir_trace = th.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let ct = TraceCompiler::<&(u64,)>::compile(tir_trace);
         let mut args = (0,);
         ct.execute(&mut args);
@@ -1732,7 +1733,7 @@ mod tests {
         let f = 6;
         inputs.0 = deref2(f);
         let sir_trace = th.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let ct = TraceCompiler::<&(u64,)>::compile(tir_trace);
         let mut args = (0,);
         ct.execute(&mut args);
@@ -1752,7 +1753,7 @@ mod tests {
         let th = start_tracing(Some(TracingKind::HardwareTracing));
         inputs.0 = dont_trace_this(1);
         let sir_trace = th.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
 
         assert_tir(
             "
@@ -1784,7 +1785,7 @@ mod tests {
         let v = inputs.0;
         dont_trace_stdlib(v);
         let sir_trace = th.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let ct = TraceCompiler::<&(&mut Vec<u64>,)>::compile(tir_trace);
         let mut argv: Vec<u64> = Vec::new();
         let mut args = (&mut argv,);
