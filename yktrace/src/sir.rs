@@ -8,7 +8,8 @@ use std::{
     env,
     fmt::{self, Debug, Display, Write},
     io::Cursor,
-    iter::Iterator
+    iter::Iterator,
+    path::Path
 };
 use ykpack::{bodyflags, Body, Decoder, Local, Pack, Ty}; // FIXME kill.
 
@@ -56,8 +57,12 @@ pub struct SirMarkers {
 }
 
 lazy_static! {
-    pub static ref SIR: Sir = {
-        let ef = elf::File::open_path(env::current_exe().unwrap()).unwrap();
+    pub static ref SIR: Sir = { Sir::read_file(&env::current_exe().unwrap()).unwrap() };
+}
+
+impl Sir {
+    pub fn read_file(file: &Path) -> Result<Sir, ()> {
+        let ef = elf::File::open_path(file).unwrap();
 
         // We iterate over ELF sections, looking for ones which contain SIR and loading it into
         // memory.
@@ -87,15 +92,17 @@ lazy_static! {
                             // duplicates exist, the functions will be identical, but may have
                             // different (but equivalent) types. This is because types too may be
                             // duplicated using a different crate hash.
-                            bodies.entry(body.symbol_name.clone()).or_insert_with(|| body);
-                        },
+                            bodies
+                                .entry(body.symbol_name.clone())
+                                .or_insert_with(|| body);
+                        }
                         Pack::Types(ts) => {
                             let old = types.insert(ts.crate_hash, ts.types);
                             debug_assert!(old.is_none()); // There's one `Types` pack per crate.
                             for idx in ts.thread_tracers {
                                 thread_tracers.insert((ts.crate_hash, idx));
                             }
-                        },
+                        }
                     }
                 }
             }
@@ -103,10 +110,18 @@ lazy_static! {
 
         assert!(!trace_heads.is_empty(), "no trace heads found!");
         assert!(!trace_tails.is_empty(), "no trace tails found!");
-        let markers = SirMarkers { trace_heads, trace_tails };
+        let markers = SirMarkers {
+            trace_heads,
+            trace_tails
+        };
 
-        Sir {bodies, markers, types, thread_tracers}
-    };
+        Ok(Sir {
+            bodies,
+            markers,
+            types,
+            thread_tracers
+        })
+    }
 }
 
 /// The same as core::SirLoc, just with a String representation of the symbol name and with the
@@ -146,12 +161,12 @@ impl<'a> IntoIterator for &'a dyn SirTrace {
     type IntoIter = SirTraceIterator<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
-        SirTraceIterator::new(self)
+        SirTraceIterator::new(&*SIR, self)
     }
 }
 
 /// Returns a string containing the textual representation of a SIR trace.
-pub fn sir_trace_str<'a>(trace: &'a dyn SirTrace, trimmed: bool, show_blocks: bool) -> String {
+pub fn sir_trace_str(sir: &Sir, trace: &dyn SirTrace, trimmed: bool, show_blocks: bool) -> String {
     let locs: Vec<&SirLoc> = match trimmed {
         false => (0..(trace.raw_len())).map(|i| trace.raw_loc(i)).collect(),
         true => trace.into_iter().collect()
@@ -164,7 +179,7 @@ pub fn sir_trace_str<'a>(trace: &'a dyn SirTrace, trimmed: bool, show_blocks: bo
     for loc in locs {
         write!(res_r, "[{}] bb={}, flags=[", loc.symbol_name, loc.bb_idx).unwrap();
 
-        let body = SIR.bodies.get(&loc.symbol_name);
+        let body = sir.bodies.get(&loc.symbol_name);
         if let Some(body) = body {
             if body.flags & bodyflags::TRACE_HEAD != 0 {
                 write!(res_r, "HEAD ").unwrap();
@@ -193,30 +208,32 @@ pub fn sir_trace_str<'a>(trace: &'a dyn SirTrace, trimmed: bool, show_blocks: bo
 
 impl Display for dyn SirTrace {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", sir_trace_str(self, true, true))
+        write!(f, "{}", sir_trace_str(&*SIR, self, false, true))
     }
 }
 
 /// An iterator over a trimmed SIR trace.
 pub struct SirTraceIterator<'a> {
+    sir: &'a Sir,
     trace: &'a dyn SirTrace,
     next_idx: usize
 }
 
 impl<'a> SirTraceIterator<'a> {
-    fn new(trace: &'a dyn SirTrace) -> Self {
+    pub fn new(sir: &'a Sir, trace: &'a dyn SirTrace) -> Self {
         // We are going to present a "trimmed trace", so we do a backwards scan looking for the end
         // of the code that starts the tracer.
         let mut begin_idx = None;
         for blk_idx in (0..trace.raw_len()).rev() {
             let sym = &trace.raw_loc(blk_idx).symbol_name;
-            if SIR.markers.trace_heads.contains(sym) {
+            if sir.markers.trace_heads.contains(sym) {
                 begin_idx = Some(blk_idx + 1);
                 break;
             }
         }
 
         SirTraceIterator {
+            sir,
             trace,
             next_idx: begin_idx.expect("Couldn't find the end of the code that starts the tracer")
         }
@@ -229,7 +246,7 @@ impl<'a> Iterator for SirTraceIterator<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         if self.next_idx < self.trace.raw_len() {
             let sym = &self.trace.raw_loc(self.next_idx).symbol_name;
-            if SIR.markers.trace_tails.contains(sym) {
+            if self.sir.markers.trace_tails.contains(sym) {
                 // Stop when we find the start of the code that stops the tracer, thus trimming the
                 // end of the trace. By setting the next index to one above the last one in the
                 // trace, we ensure the iterator will return `None` forever more.
