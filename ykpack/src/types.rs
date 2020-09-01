@@ -384,12 +384,14 @@ pub struct Body {
     pub flags: u8,
     pub trace_inputs_local: Option<Local>,
     pub local_decls: Vec<LocalDecl>,
+    pub num_args: usize,
 }
 
 impl Display for Body {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "symbol: {}", self.symbol_name)?;
         writeln!(f, "  flags: {}", self.flags)?;
+        writeln!(f, "  num_args: {}", self.num_args)?;
 
         writeln!(f, "  local_decls:")?;
         for (di, d) in self.local_decls.iter().enumerate() {
