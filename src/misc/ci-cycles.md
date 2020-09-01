@@ -42,12 +42,12 @@ invoking bors.
 4. **Prime the CI**
 
 Next the reviewer should ask the PR author to "prime the CI". A commit should
-be pushed which overrides the yk dependency to the branch reviewed in stage 2
-of this document. This commit should override the compiler's dependencies on
-`ykpack`.
+be pushed to the ykrustc PR which overrides the yk dependency to the branch
+reviewed in stage 2 of this document. This dependency can be overridden in the
+top-level `Cargo.toml`.
 
-The PR author then logs in to the CI server's web interface and manually starts a
-build of the ykrustc branch, including the commit pushed in the last step.
+The PR author then issues a `bors try` on the PR, thus caching the new compiler
+in the CI.
 
 5. **Merge the ykpack change**
 
