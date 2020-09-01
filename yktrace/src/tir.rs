@@ -3,7 +3,10 @@
 //! running executable.
 
 use super::SirTrace;
-use crate::{errors::InvalidTraceError, sir::SIR};
+use crate::{
+    errors::InvalidTraceError,
+    sir::{Sir, SirTraceIterator}
+};
 use std::{
     collections::{HashMap, HashSet},
     convert::TryFrom,
@@ -16,21 +19,22 @@ pub use ykpack::{
 
 /// A TIR trace is conceptually a straight-line path through the SIR with guarded speculation.
 #[derive(Debug)]
-pub struct TirTrace {
+pub struct TirTrace<'a> {
     ops: Vec<TirOp>,
     trace_inputs_local: Option<Local>,
     /// Maps each local variable to its declaration, including type.
     pub local_decls: HashMap<Local, LocalDecl>,
-    pub addr_map: HashMap<String, u64>
+    pub addr_map: HashMap<String, u64>,
+    sir: &'a Sir
 }
 
-impl TirTrace {
+impl<'a> TirTrace<'a> {
     /// Create a TirTrace from a SirTrace, trimming remnants of the code which starts/stops the
     /// tracer. Returns a TIR trace and the bounds the SIR trace was trimmed to, or Err if a symbol
     /// is encountered for which no SIR is available.
-    pub fn new<'s>(trace: &'s dyn SirTrace) -> Result<Self, InvalidTraceError> {
+    pub fn new<'s>(sir: &'a Sir, trace: &'s dyn SirTrace) -> Result<Self, InvalidTraceError> {
         let mut ops = Vec::new();
-        let mut itr = trace.into_iter().peekable();
+        let mut itr = SirTraceIterator::new(sir, trace).peekable();
         let mut rnm = VarRenamer::new();
         let mut trace_inputs_local: Option<Local> = None;
         // Symbol name of the function currently being ignored during tracing.
@@ -81,7 +85,7 @@ impl TirTrace {
             };
 
         while let Some(loc) = itr.next() {
-            let body = match SIR.bodies.get(&loc.symbol_name) {
+            let body = match sir.bodies.get(&loc.symbol_name) {
                 Some(b) => b,
                 None => {
                     return Err(InvalidTraceError::no_sir(&loc.symbol_name));
@@ -129,7 +133,7 @@ impl TirTrace {
                 // If the statement references a thread tracer local then discard the statement.
                 let mut skip = false;
                 for lcl in stmt.used_locals() {
-                    if SIR
+                    if sir
                         .is_thread_tracer_ty(&body.local_decls[usize::try_from(lcl.0).unwrap()].ty)
                     {
                         skip = true;
@@ -165,7 +169,7 @@ impl TirTrace {
                     destination: dest
                 } => {
                     if let Some(callee_sym) = op.symbol() {
-                        if let Some(callee_body) = SIR.bodies.get(callee_sym) {
+                        if let Some(callee_body) = sir.bodies.get(callee_sym) {
                             if callee_body.flags & ykpack::bodyflags::TRACE_TAIL != 0 {
                                 break;
                             }
@@ -187,7 +191,7 @@ impl TirTrace {
                         // We know the symbol name of the callee at least.
                         // Rename all `Local`s within the arguments.
                         let newargs = rnm.rename_args(&args, body);
-                        let op = if let Some(callbody) = SIR.bodies.get(callee_sym) {
+                        let op = if let Some(callbody) = sir.bodies.get(callee_sym) {
                             // We have SIR for the callee, so it will appear inlined in the trace
                             // and we only need to emit Enter/Leave statements.
 
@@ -317,15 +321,16 @@ impl TirTrace {
             ops,
             trace_inputs_local,
             local_decls,
-            addr_map
+            addr_map,
+            sir
         })
     }
 
     /// Return the TIR operation at index `idx` in the trace.
     /// The index must not be out of bounds.
-    pub fn op(&self, idx: usize) -> &TirOp {
+    pub unsafe fn op(&self, idx: usize) -> &TirOp {
         debug_assert!(idx <= self.ops.len() - 1, "bogus trace index");
-        unsafe { &self.ops.get_unchecked(idx) }
+        &self.ops.get_unchecked(idx)
     }
 
     pub fn inputs(&self) -> &Option<Local> {
@@ -485,7 +490,7 @@ impl VarRenamer {
     }
 }
 
-impl Display for TirTrace {
+impl Display for TirTrace<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "local_decls:")?;
         let mut sort_decls = self
@@ -494,7 +499,7 @@ impl Display for TirTrace {
             .collect::<Vec<(&Local, &LocalDecl)>>();
         sort_decls.sort_by(|l, r| l.0.partial_cmp(r.0).unwrap());
         for (l, dcl) in sort_decls {
-            let thread_tracer = if SIR.is_thread_tracer_ty(&dcl.ty) {
+            let thread_tracer = if self.sir.is_thread_tracer_ty(&dcl.ty) {
                 "[THREAD TRACER] "
             } else {
                 ""
@@ -507,7 +512,7 @@ impl Display for TirTrace {
                 dcl.ty.0,
                 dcl.ty.1,
                 thread_tracer,
-                SIR.ty(&dcl.ty)
+                self.sir.ty(&dcl.ty)
             )?;
         }
 
@@ -575,7 +580,7 @@ impl fmt::Display for TirOp {
 #[cfg(test)]
 mod tests {
     use super::TirTrace;
-    use crate::{start_tracing, TracingKind};
+    use crate::{sir::SIR, start_tracing, TracingKind};
     use test::black_box;
 
     // Some work to trace.
@@ -597,7 +602,7 @@ mod tests {
 
         let res = black_box(work(black_box(3), black_box(13)));
         let sir_trace = tracer.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         assert_eq!(res, 15);
         assert!(tir_trace.len() > 0);
     }
@@ -613,6 +618,6 @@ mod tests {
         let tracer = start_tracing(Some(TracingKind::HardwareTracing));
         let _x = outside_var + 1; // Use of an undefined variable in trace.
         let sir_trace = tracer.stop_tracing().unwrap();
-        let _tir_trace = TirTrace::new(&*sir_trace).unwrap();
+        let _tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
     }
 }
