@@ -72,6 +72,7 @@ mod tests {
             flags: 0,
             trace_inputs_local: None,
             local_decls: Vec::new(),
+            num_args: 0,
         });
 
         let stmts2_b1 = vec![Statement::Nop; 7];
@@ -88,6 +89,7 @@ mod tests {
             flags: 0,
             trace_inputs_local: None,
             local_decls: Vec::new(),
+            num_args: 0,
         });
 
         vec![sir1, sir2]
@@ -188,6 +190,7 @@ mod tests {
                 flags: 0,
                 trace_inputs_local: None,
                 local_decls: vec![lcl.clone(); 3],
+                num_args: 0,
             }),
             Pack::Body(Body {
                 symbol_name: String::from("symbol2"),
@@ -198,6 +201,7 @@ mod tests {
                 flags: 0,
                 trace_inputs_local: None,
                 local_decls: vec![lcl; 5],
+                num_args: 0,
             }),
         ];
 
@@ -209,6 +213,7 @@ mod tests {
 
         let expect = "symbol: symbol1
   flags: 0
+  num_args: 0
   local_decls:
     0: (0, 0)
     1: (0, 0)
@@ -229,6 +234,7 @@ mod tests {
         goto bb50
 symbol: symbol2
   flags: 0
+  num_args: 0
   local_decls:
     0: (0, 0)
     1: (0, 0)
