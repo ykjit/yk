@@ -1,12 +1,14 @@
 //! Loading and tracing of Serialised Intermediate Representation (SIR).
 
-use elf;
 use fallible_iterator::FallibleIterator;
+use memmap::Mmap;
+use object::{Object, ObjectSection};
 use std::{
     collections::{HashMap, HashSet},
     convert::TryFrom,
     env,
     fmt::{self, Debug, Display, Write},
+    fs::File,
     io::Cursor,
     iter::Iterator,
     path::Path
@@ -64,7 +66,9 @@ lazy_static! {
 
 impl Sir {
     pub fn read_file(file: &Path) -> Result<Sir, ()> {
-        let ef = elf::File::open_path(file).unwrap();
+        // SAFETY: Not really, we hope that nobody changes the file underneath our feet.
+        let data = unsafe { Mmap::map(&File::open(file).unwrap()).unwrap() };
+        let object = object::File::parse(&*data).unwrap();
 
         // We iterate over ELF sections, looking for ones which contain SIR and loading them into
         // memory.
@@ -73,9 +77,9 @@ impl Sir {
         let mut trace_heads = Vec::new();
         let mut trace_tails = Vec::new();
         let mut thread_tracers = HashSet::new();
-        for sec in &ef.sections {
-            if sec.shdr.name.starts_with(".yksir_") {
-                let mut curs = Cursor::new(&sec.data);
+        for sec in object.sections() {
+            if sec.name().unwrap().starts_with(".yksir_") {
+                let mut curs = Cursor::new(sec.data().unwrap());
                 let mut dec = Decoder::from(&mut curs);
 
                 while let Some(pack) = dec.next().unwrap() {
