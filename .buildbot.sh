@@ -21,8 +21,8 @@ unset CARGO_HOME
 unset RUSTUP_HOME
 
 case ${STD_TRACER_MODE} in
-    "sw") export RUSTFLAGS="-C tracer=sw";;
-    "hw") export RUSTFLAGS="-C tracer=hw";;
+    "sw") export RUSTFLAGS="-C tracer=sw -Dwarnings";;
+    "hw") export RUSTFLAGS="-C tracer=hw -Dwarnings";;
     *) echo "STD_TRACER_MODE must be set to either 'hw' or 'sw'"
        exit 1;;
 esac

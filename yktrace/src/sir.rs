@@ -59,7 +59,7 @@ pub struct SirMarkers {
 }
 
 lazy_static! {
-    pub static ref SIR: Sir = { Sir::read_file(&env::current_exe().unwrap()).unwrap() };
+    pub static ref SIR: Sir = Sir::read_file(&env::current_exe().unwrap()).unwrap();
 }
 
 impl Sir {
