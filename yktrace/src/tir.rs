@@ -46,7 +46,8 @@ impl<'a> TirTrace<'a> {
         // variables. No local should be used without first being defined. If that happens it's
         // likely that the user used a variable from outside the scope of the trace without
         // introducing it via `trace_locals()`.
-        let mut defined_locals = HashSet::new();
+        let mut defined_locals: HashSet<Local> = HashSet::new();
+        let mut def_sites: HashMap<Local, usize> = HashMap::new();
         let mut last_use_sites = HashMap::new();
 
         let mut update_defined_locals =
@@ -68,7 +69,10 @@ impl<'a> TirTrace<'a> {
                         }
                     })
                     .collect::<Vec<Local>>();
-                defined_locals.extend(newly_defined);
+                defined_locals.extend(&newly_defined);
+                for d in newly_defined {
+                    def_sites.insert(d, op_idx);
+                }
 
                 for lcl in op.used_locals() {
                     // The trace inputs local is regarded as being live for the whole trace.
@@ -300,7 +304,7 @@ impl<'a> TirTrace<'a> {
             }
         }
 
-        let local_decls = rnm.done();
+        let mut local_decls = rnm.done();
 
         // Insert `StorageDead` statements after the last use of each local variable. We process
         // the locals in reverse order of death site, so that inserting a statement cannot not skew
@@ -310,10 +314,23 @@ impl<'a> TirTrace<'a> {
         for (local, idx) in deads {
             // The trace inputs local is always live.
             if trace_inputs_local.is_none() || *local != trace_inputs_local.unwrap() {
-                ops.insert(
-                    *idx + 1,
-                    TirOp::Statement(ykpack::Statement::StorageDead(local.clone()))
-                );
+                if def_sites[local] == *idx && !ops[*idx].may_have_side_effects() {
+                    // If a defined local is never used, and the statement that defines it isn't
+                    // side-effecting, then we can remove the statement and local's decl entirely.
+                    //
+                    // FIXME This is not perfect. Consider `x.0 = 0; x.1 = 1` and then x is not
+                    // used after. The first operation will be seen to define `x`, the second will
+                    // be seen as a use of `x`, and thus neither of these statements will be
+                    // removed.
+                    ops.remove(*idx);
+                    let prev = local_decls.remove(&local);
+                    debug_assert!(prev.is_some());
+                } else {
+                    ops.insert(
+                        *idx + 1,
+                        TirOp::Statement(ykpack::Statement::StorageDead(local.clone()))
+                    );
+                }
             }
         }
 
@@ -573,6 +590,17 @@ impl fmt::Display for TirOp {
         match self {
             TirOp::Statement(st) => write!(f, "{}", st),
             TirOp::Guard(gd) => write!(f, "{}", gd)
+        }
+    }
+}
+
+impl TirOp {
+    /// Returns true if the operation may affect locals besides those appearing in the operation.
+    fn may_have_side_effects(&self) -> bool {
+        if let TirOp::Statement(s) = self {
+            s.may_have_side_effects()
+        } else {
+            false
         }
     }
 }

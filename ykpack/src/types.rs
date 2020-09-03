@@ -520,6 +520,14 @@ impl Statement {
         }
         ret
     }
+
+    /// Returns true if the statement may affect locals besides those appearing in the statement.
+    pub fn may_have_side_effects(&self) -> bool {
+        match self {
+            Statement::Call(..) | Statement::Enter(..) => true,
+            _ => false,
+        }
+    }
 }
 
 impl Display for Statement {
