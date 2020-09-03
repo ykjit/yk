@@ -102,7 +102,6 @@ pub struct RegAndOffset {
 pub enum Location {
     Register(u8),
     Mem(RegAndOffset),
-    Deref(Box<Location>),
     NotLive,
 }
 
@@ -122,6 +121,12 @@ impl Location {
     }
 }
 
+enum RegAlloc {
+    Local(Local),
+    Temp,
+    Free,
+}
+
 use std::marker::PhantomData;
 use ykpack::LocalDecl;
 
@@ -130,7 +135,7 @@ pub struct TraceCompiler<TT> {
     /// The dynasm assembler which will do all of the heavy lifting of the assembly.
     asm: dynasmrt::x64::Assembler,
     /// Stores the content of each register.
-    register_content_map: HashMap<u8, Option<Local>>,
+    register_content_map: HashMap<u8, RegAlloc>,
     /// Maps trace locals to their location (register, stack).
     variable_location_map: HashMap<Local, Location>,
     /// Local referencing the input arguments to the trace.
@@ -164,92 +169,87 @@ impl<TT> TraceCompiler<TT> {
 
     fn place_to_location(&mut self, p: &Place) -> Result<Location, CompileError> {
         if !p.projection.is_empty() {
-            if p.projection.len() > 1 {
-                todo!("chains of projections");
-            }
-
-            if Some(p.local) == self.trace_inputs_local {
-                let tuple_ty = self.place_ty(&Place::from(p.local));
-                if let Ty::Tuple(tty) = tuple_ty {
-                    match &p.projection[0] {
-                        Projection::Field(idx) => {
-                            let offs = tty.fields.offsets[usize::try_from(*idx).unwrap()];
-                            Ok(Location::new_mem(RDI.code(), i32::try_from(offs).unwrap()))
-                        }
-                        Projection::Deref => unreachable!(),
-                        Projection::Unimplemented(s) => todo!("{}", s),
-                    }
-                } else {
-                    unreachable!(); // Trace inputs are always a tuple.
-                }
-            } else {
-                // FIXME deal with remaining projections and chains of projections.
-                let base_ty = self.place_ty(&Place::from(p.local)).clone();
-                match &p.projection[0] {
-                    Projection::Field(idx) => match base_ty {
-                        Ty::Struct(sty) => {
-                            let loc = self.local_to_location(p.local)?;
-                            match loc {
-                                Location::Mem(ro) => {
-                                    let offs = sty.fields.offsets[usize::try_from(*idx).unwrap()];
-                                    Ok(Location::new_mem(
-                                        ro.reg,
-                                        ro.offs + i32::try_from(offs).unwrap(),
-                                    ))
-                                }
-                                _ => unreachable!("{:?}", loc),
-                            }
-                        }
-                        Ty::Tuple(tty) => {
-                            let loc = self.local_to_location(p.local)?;
-                            match loc {
-                                Location::Mem(ro) => {
-                                    let offs = tty.fields.offsets[usize::try_from(*idx).unwrap()];
-                                    Ok(Location::new_mem(
-                                        ro.reg,
-                                        ro.offs + i32::try_from(offs).unwrap(),
-                                    ))
-                                }
-                                _ => unreachable!("{:?}", loc),
-                            }
-                        }
-                        _ => todo!("{:?}", base_ty),
-                    },
-                    Projection::Deref => self
-                        .local_to_location(p.local)
-                        .map(|l| Location::Deref(Box::new(l))),
-                    _ => todo!("{}", p),
-                }
-            }
+            self.resolve_projection(p)
         } else {
             self.local_to_location(p.local)
         }
     }
 
+    /// Takes a `Place`, resolves all projections, and returns a `Location` containing the result.
+    fn resolve_projection(&mut self, p: &Place) -> Result<Location, CompileError> {
+        let mut curloc = self.local_to_location(p.local)?;
+        if p.projection.len() > 1 {
+            todo!("Deal with remaining projections");
+        }
+        for proj in &p.projection {
+            // FIXME Get the type of a projection.
+            let base_ty = self.place_ty(&Place::from(p.local)).clone();
+            match proj {
+                Projection::Field(idx) => match base_ty {
+                    Ty::Struct(sty) => match curloc {
+                        Location::Mem(ro) => {
+                            let offs = sty.fields.offsets[usize::try_from(*idx).unwrap()];
+                            curloc =
+                                Location::new_mem(ro.reg, ro.offs + i32::try_from(offs).unwrap());
+                        }
+                        _ => unreachable!("{:?}", curloc),
+                    },
+                    Ty::Tuple(tty) => match curloc {
+                        Location::Mem(ro) => {
+                            let offs = tty.fields.offsets[usize::try_from(*idx).unwrap()];
+                            curloc =
+                                Location::new_mem(ro.reg, ro.offs + i32::try_from(offs).unwrap());
+                        }
+                        _ => unreachable!("{:?}", curloc),
+                    },
+                    _ => todo!("{:?}", base_ty),
+                },
+                Projection::Deref => {
+                    // FIXME Dereferencing a reference to a copyable struct/tuple copies it to the
+                    // stack. So this may also return a memory location.
+                    let temp = self.create_temporary();
+                    match curloc {
+                        Location::Mem(ro) => {
+                            dynasm!(self.asm
+                                ; mov Rq(temp), [Rq(ro.reg) + ro.offs]
+                                ; mov Rq(temp), [Rq(temp)]
+                            );
+                        }
+                        Location::Register(reg) => {
+                            dynasm!(self.asm
+                                ; mov Rq(temp), [Rq(reg)]
+                            );
+                        }
+                        _ => unreachable!(),
+                    }
+                    curloc = Location::Register(temp);
+                }
+                _ => todo!("{}", p),
+            }
+        }
+        Ok(curloc)
+    }
+
     /// Given a local, returns the register allocation for it, or, if there is no allocation yet,
     /// performs one.
     fn local_to_location(&mut self, l: Local) -> Result<Location, CompileError> {
-        if let Some(location) = self.variable_location_map.get(&l) {
+        if Some(l) == self.trace_inputs_local {
+            // If the local references `trace_inputs` return its location on the stack, which is
+            // stored in the first argument of the executed trace.
+            Ok(Location::new_mem(RDI.code(), 0 as i32))
+        } else if let Some(location) = self.variable_location_map.get(&l) {
             // We already have a location for this local.
             Ok(location.clone())
         } else {
             let tyid = self.local_decls[&l].ty;
             if Self::can_live_in_register(&tyid) {
                 // Find a free register to store this local.
-                let loc = if let Some(reg) = self.register_content_map.iter().find_map(|(k, v)| {
-                    if v == &None {
-                        Some(*k)
-                    } else {
-                        None
-                    }
-                }) {
-                    self.register_content_map.insert(reg, Some(l));
+                let loc = if let Some(reg) = self.get_free_register() {
+                    self.register_content_map.insert(reg, RegAlloc::Local(l));
                     Location::Register(reg)
                 } else {
                     // All registers are occupied, so we need to spill the local to the stack.
-                    let ty = SIR.ty(&tyid);
-                    let loc = self.stack_builder.alloc(ty.size(), ty.align());
-                    loc
+                    self.spill_local_to_stack(&l)
                 };
                 let ret = loc.clone();
                 self.variable_location_map.insert(l, loc);
@@ -263,20 +263,87 @@ impl<TT> TraceCompiler<TT> {
         }
     }
 
+    /// Returns a free register or `None` if all registers are occupied.
+    fn get_free_register(&self) -> Option<u8> {
+        self.register_content_map.iter().find_map(|(k, v)| match v {
+            RegAlloc::Free => Some(*k),
+            _ => None,
+        })
+    }
+
+    /// Spill a local to the stack and return its location. Note: This does not update the
+    /// `variable_location_map`.
+    fn spill_local_to_stack(&mut self, local: &Local) -> Location {
+        let tyid = self.local_decls[&local].ty;
+        let ty = SIR.ty(&tyid);
+        self.stack_builder.alloc(ty.size(), ty.align())
+    }
+
+    /// Find a free register to be used as a temporary. If no free register can be found, a
+    /// register containing a Local is selected and its content spilled to the stack.
+    fn create_temporary(&mut self) -> u8 {
+        // Find a free register to store this local.
+        if let Some(r) = self.get_free_register() {
+            self.register_content_map.insert(r, RegAlloc::Temp);
+            r
+        } else {
+            // All registers are occupied. Spill the first local we can find to the stack to free
+            // one up. FIXME: Be smarter about which local to spill.
+            let result = self.register_content_map.iter().find_map(|(k, v)| match v {
+                RegAlloc::Local(l) => Some((*k, *l)),
+                _ => None,
+            });
+            if let Some((reg, local)) = result {
+                let loc = self.spill_local_to_stack(&local);
+                self.variable_location_map.insert(local, loc);
+                // Assign temporary register.
+                self.register_content_map.insert(reg, RegAlloc::Temp);
+                reg
+            } else {
+                panic!("Temporaries exceed available registers.")
+            }
+        }
+    }
+
+    /// Free the temporary register so it can be re-used.
+    fn free_if_temp(&mut self, loc: Location) {
+        match loc {
+            Location::Register(reg) => {
+                if matches!(self.register_content_map[&reg], RegAlloc::Temp) {
+                    self.register_content_map.insert(reg, RegAlloc::Free);
+                }
+            }
+            Location::Mem { .. } => {}
+            _ => unreachable!(),
+        }
+    }
+
     /// Notifies the register allocator that the register allocated to `local` may now be re-used.
     fn free_register(&mut self, local: &Local) -> Result<(), CompileError> {
         match self.variable_location_map.get(local) {
             Some(Location::Register(reg)) => {
                 // If this local is currently stored in a register, free it.
-                self.register_content_map.insert(*reg, None);
+                self.register_content_map.insert(*reg, RegAlloc::Free);
             }
             Some(Location::Mem { .. }) => {}
-            Some(Location::Deref(_)) => unreachable!(),
             Some(Location::NotLive) => unreachable!(),
             None => unreachable!("freeing unallocated register"),
         }
         self.variable_location_map.insert(*local, Location::NotLive);
         Ok(())
+    }
+
+    /// Returns whether the register content map contains any temporaries. This is used as a sanity
+    /// check at the end of a trace to make sure we haven't forgotten to free temporaries at the
+    /// end of an operation.
+    fn check_temporaries(&self) -> bool {
+        for (_, v) in self.register_content_map.iter() {
+            match v {
+                RegAlloc::Temp => return false,
+                _ => {}
+            }
+        }
+        true
     }
 
     /// Get the type of a place.
@@ -305,7 +372,7 @@ impl<TT> TraceCompiler<TT> {
         let rloc = self.place_to_location(p2)?;
         let ty = self.place_ty(p1);
 
-        match (lloc, rloc) {
+        match (&lloc, &rloc) {
             (Location::Register(lreg), Location::Register(rreg)) => match ty.size() {
                 8 => {
                     dynasm!(self.asm
@@ -383,49 +450,45 @@ impl<TT> TraceCompiler<TT> {
                     _ => todo!("{}", ty.size()), // FIXME: For things >16, use memcpy().
                 }
             }
-            (Location::Register(reg), Location::Deref(boxed)) => match ty.size() {
-                8 => match *boxed {
-                    Location::Mem(ro) => {
-                        dynasm!(self.asm
-                            ; mov Rq(reg), [Rq(ro.reg) + ro.offs]
-                            ; mov Rq(reg), [Rq(reg)]
-                        );
-                    }
-                    Location::Register(reg2) => {
-                        dynasm!(self.asm
-                            ; mov Rq(reg), [Rq(reg2)]
-                        );
-                    }
-                    _ => todo!(),
-                },
-                _ => todo!("{}", ty.size()),
-            },
-            (Location::Mem(ro1), Location::Deref(boxed)) => match ty.size() {
-                8 => match *boxed {
-                    Location::Mem(ro2) => {
-                        dynasm!(self.asm
-                            ; mov rax, [Rq(ro2.reg) + ro2.offs]
-                            ; mov rax, [rax]
-                            ; mov [Rq(ro1.reg) + ro1.offs], rax
-                        );
-                    }
-                    Location::Register(reg) => {
-                        dynasm!(self.asm
-                            ; mov rax, [Rq(reg)]
-                            ; mov [Rq(ro1.reg) + ro1.offs], rax
-                        );
-                    }
-                    _ => todo!(),
-                },
-                _ => todo!("{}", ty.size()),
-            },
             _ => unreachable!(),
         }
+
+        // Free temporary if one was created.
+        self.free_if_temp(rloc);
         Ok(())
     }
 
     fn mov_place_ref(&mut self, p1: &Place, p2: &Place) -> Result<(), CompileError> {
         let lloc = self.place_to_location(p1)?;
+
+        // Deal with the special case `&*`, i.e. referencing a `Deref` on a reference just returns
+        // the reference.
+        if let Some(pj) = p2.projection.get(0) {
+            if matches!(pj, Projection::Deref)
+                && matches!(SIR.ty(&self.local_decls[&p2.local].ty), Ty::Ref(_))
+            {
+                // Clone the projection while removing the `Deref` from the end.
+                let mut newproj = Vec::new();
+                for p in p2.projection.iter().take(p2.projection.len() - 1) {
+                    newproj.push(p.clone());
+                }
+                let np = Place {
+                    local: p2.local,
+                    projection: newproj,
+                };
+                let rloc = self.place_to_location(&np)?;
+                match (lloc, rloc) {
+                    (Location::Register(reg1), Location::Register(reg2)) => {
+                        dynasm!(self.asm
+                            ; mov Rq(reg1), Rq(reg2)
+                        );
+                    }
+                    _ => todo!(),
+                }
+                return Ok(());
+            }
+        }
+
         // We can only reference Locals living on the stack. So move it there if it doesn't.
         let rloc = match self.place_to_location(p2)? {
             Location::Register(reg) => {
@@ -437,13 +500,13 @@ impl<TT> TraceCompiler<TT> {
                 // This Local lives now on the stack...
                 self.variable_location_map.insert(p2.local, loc.clone());
                 // ...so we can free its old register.
-                self.register_content_map.insert(reg, None);
+                self.register_content_map.insert(reg, RegAlloc::Free);
                 loc
             }
             loc => loc,
         };
         // Now create the reference.
-        match (lloc, rloc) {
+        match (&lloc, &rloc) {
             (Location::Register(reg), Location::Mem(ro)) => {
                 dynasm!(self.asm
                     ; lea Rq(reg), [Rq(ro.reg) + ro.offs]
@@ -455,18 +518,9 @@ impl<TT> TraceCompiler<TT> {
                     ; mov [Rq(ro1.reg) + ro1.offs], rax
                 );
             }
-            (Location::Register(reg1), Location::Deref(boxed)) => match *boxed {
-                // For now, referencing a dereference is the same as copying the original pointer.
-                // FIXME: custom Deref implementations.
-                Location::Register(reg2) => {
-                    dynasm!(self.asm
-                        ; mov Rq(reg1), Rq(reg2)
-                    );
-                }
-                _ => todo!(),
-            },
             (_, _) => todo!(),
         };
+        self.free_if_temp(rloc);
         Ok(())
     }
 
@@ -539,28 +593,6 @@ impl<TT> TraceCompiler<TT> {
                     _ => todo!("{}", ty.size()),
                 }
             }
-            Location::Deref(boxed) => match ty.size() {
-                8 => match *boxed {
-                    Location::Mem(ro) => {
-                        if c_val <= u32::MAX.into() {
-                            dynasm!(self.asm
-                                ; mov rax, [Rq(ro.reg) + ro.offs]
-                                ; mov QWORD [rax], c_val as u32 as i32
-                            );
-                        } else {
-                            todo!()
-                        }
-                    }
-                    Location::Register(reg) => {
-                        dynasm!(self.asm
-                            ; mov rax, QWORD c_val
-                            ; mov [Rq(reg)], rax
-                        );
-                    }
-                    _ => todo!(),
-                },
-                _ => todo!("{}", ty.size()),
-            },
             Location::NotLive => unreachable!(),
         }
         Ok(())
@@ -580,7 +612,6 @@ impl<TT> TraceCompiler<TT> {
                     ; mov QWORD [Rq(ro.reg) + ro.offs], val
                 );
             }
-            Location::Deref(_) => todo!(),
             Location::NotLive => unreachable!(),
         }
         Ok(())
@@ -703,7 +734,6 @@ impl<TT> TraceCompiler<TT> {
                                 ; mov Rq(arg_reg), [Rq(ro.reg) + ro.offs]
                             );
                         }
-                        Location::Deref(_) => todo!(),
                         Location::NotLive => unreachable!(),
                     };
                 }
@@ -786,9 +816,10 @@ impl<TT> TraceCompiler<TT> {
             Operand::Place(p) => {
                 let rloc = self.place_to_location(&p)?;
                 match binop {
-                    BinOp::Add => self.checked_add_place(size, lloc, rloc),
+                    BinOp::Add => self.checked_add_place(size, &lloc, &rloc),
                     _ => todo!(),
                 }
+                self.free_if_temp(rloc);
             }
             Operand::Constant(Constant::Int(ci)) => match binop {
                 BinOp::Add => self.checked_add_const(size, lloc, ci),
@@ -806,7 +837,7 @@ impl<TT> TraceCompiler<TT> {
     }
 
     // FIXME Use a macro to generate funcs for all of the different binary operations.
-    fn checked_add_place(&mut self, size: u64, l1: Location, l2: Location) {
+    fn checked_add_place(&mut self, size: u64, l1: &Location, l2: &Location) {
         match size {
             8 => match (l1, l2) {
                 (Location::Register(lreg), Location::Register(rreg)) => {
@@ -1065,7 +1096,7 @@ impl<TT> TraceCompiler<TT> {
             register_content_map: [R11, R10, R9, R8, RDX, RCX]
                 .iter()
                 .cloned()
-                .map(|r| (r.code(), None))
+                .map(|r| (r.code(), RegAlloc::Free))
                 .collect(),
             variable_location_map: HashMap::new(),
             trace_inputs_local: tt.inputs().map(|t| t.clone()),
@@ -1091,6 +1122,8 @@ impl<TT> TraceCompiler<TT> {
             }
         }
 
+        // Make sure we didn't forget to free some temporaries.
+        assert!(tc.check_temporaries());
         tc.ret();
         tc
     }
@@ -1112,7 +1145,7 @@ impl<TT> TraceCompiler<TT> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CompileError, HashMap, Local, Location, TraceCompiler};
+    use super::{CompileError, HashMap, Local, Location, RegAlloc, TraceCompiler};
     use crate::stack_builder::StackBuilder;
     use dynasmrt::{x64::Rq::*, Register};
     use fm::FMBuilder;
@@ -1174,7 +1207,7 @@ mod tests {
             register_content_map: [R15, R14, R13, R12, R11, R10, R9, R8, RDX, RCX]
                 .iter()
                 .cloned()
-                .map(|r| (r.code(), None))
+                .map(|r| (r.code(), RegAlloc::Free))
                 .collect(),
             variable_location_map: HashMap::new(),
             trace_inputs_local: None,
@@ -1202,7 +1235,7 @@ mod tests {
             register_content_map: [R15, R14, R13, R12, R11, R10, R9, R8, RDX, RCX]
                 .iter()
                 .cloned()
-                .map(|r| (r.code(), None))
+                .map(|r| (r.code(), RegAlloc::Free))
                 .collect(),
             variable_location_map: HashMap::new(),
             trace_inputs_local: None,
