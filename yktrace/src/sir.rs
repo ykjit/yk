@@ -11,7 +11,7 @@ use std::{
     iter::Iterator,
     path::Path
 };
-use ykpack::{bodyflags, Body, Decoder, Local, Pack, Ty}; // FIXME kill.
+use ykpack::{bodyflags, Body, Decoder, Local, Pack, Ty};
 
 /// The serialised IR loaded in from disk. One of these structures is generated in the above
 /// `lazy_static` and is shared immutably for all threads.
