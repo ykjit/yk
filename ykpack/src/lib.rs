@@ -38,8 +38,8 @@ pub const SIR_SECTION_PREFIX: &str = ".yksir_";
 #[cfg(test)]
 mod tests {
     use super::{
-        BasicBlock, BinOp, Body, Constant, ConstantInt, Decoder, Encoder, Local, LocalDecl,
-        Operand, Pack, Place, Rvalue, Statement, Terminator, UnsignedInt,
+        BasicBlock, BinOp, Body, CguHash, Constant, ConstantInt, Decoder, Encoder, Local,
+        LocalDecl, Operand, Pack, Place, Rvalue, Statement, Terminator, UnsignedInt,
     };
     use fallible_iterator::{self, FallibleIterator};
     use std::io::{Cursor, Seek, SeekFrom};
@@ -182,7 +182,9 @@ mod tests {
             BasicBlock::new(stmts_t1_b1, term_t1_b1),
         ];
 
-        let lcl = LocalDecl { ty: (0, 0) };
+        let lcl = LocalDecl {
+            ty: (CguHash(0), 0),
+        };
         let sirs = vec![
             Pack::Body(Body {
                 symbol_name: String::from("symbol1"),

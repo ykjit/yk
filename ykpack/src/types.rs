@@ -7,14 +7,23 @@ use std::{
     mem,
 };
 
-pub type CrateHash = u64;
+// FIXME these should probably all be tuple structs, as type aliases offer little type safety.
 pub type DefIndex = u32;
 pub type BasicBlockIndex = u32;
 pub type StatementIndex = usize;
 pub type LocalIndex = u32;
 pub type TyIndex = u32;
 pub type FieldIndex = u32;
-pub type TypeId = (u64, TyIndex); // Crate hash and vector index.
+pub type TypeId = (CguHash, TyIndex); // CGU hash and vector index.
+
+#[derive(Debug, Hash, Eq, PartialEq, Copy, Clone, Serialize, Deserialize)]
+pub struct CguHash(pub u64);
+
+impl Display for CguHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:x}", self.0)
+    }
+}
 
 /// The type of a local variable.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
@@ -185,7 +194,7 @@ impl Display for Fields {
                 .join(", "),
             self.tys
                 .iter()
-                .map(|t| format!("{:?}", t))
+                .map(|t| format!("({}, {})", t.0, t.1))
                 .collect::<Vec<String>>()
                 .join(", ")
         )
@@ -371,7 +380,7 @@ pub struct LocalDecl {
 
 impl Display for LocalDecl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.ty)
+        write!(f, "({}, {})", self.ty.0, self.ty.1)
     }
 }
 
@@ -1006,11 +1015,13 @@ impl Display for Pack {
     }
 }
 
-/// The types used in the SIR for one specific crate.
-/// Types of SIR locals reference these types using (crate-hash, array-index) pairs.
+/// The types used in the SIR for one specific codegen unit.
+/// SIR locals reference their type using "type IDs" which are (cgu-hash, array-index) pairs.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
 pub struct Types {
-    pub crate_hash: u64,
+    /// A unique identifier for the codegen unit that built these types.
+    pub cgu_hash: CguHash,
+    /// The types themselves. Combine `cgu_hash` with an index into this to make a type ID.
     pub types: Vec<Ty>,
     /// Indices of `types` which are thread tracers.
     pub thread_tracers: Vec<u32>,
