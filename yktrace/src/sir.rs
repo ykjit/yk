@@ -11,7 +11,7 @@ use std::{
     iter::Iterator,
     path::Path
 };
-use ykpack::{bodyflags, Body, Decoder, Local, Pack, Ty}; // FIXME kill.
+use ykpack::{self, bodyflags, Body, CguHash, Decoder, Local, Pack, Ty};
 
 /// The serialised IR loaded in from disk. One of these structures is generated in the above
 /// `lazy_static` and is shared immutably for all threads.
@@ -21,8 +21,8 @@ pub struct Sir {
     pub bodies: HashMap<String, Body>,
     // Interesting locations that we need quick access to.
     pub markers: SirMarkers,
-    /// SIR Local variable types, keyed by crate hash.
-    pub types: HashMap<u64, Vec<Ty>>,
+    /// SIR Local variable types, keyed by codegen unit hash.
+    pub types: HashMap<CguHash, Vec<Ty>>,
     /// Thread tracer type IDs.
     pub thread_tracers: HashSet<ykpack::TypeId>
 }
@@ -66,7 +66,7 @@ impl Sir {
     pub fn read_file(file: &Path) -> Result<Sir, ()> {
         let ef = elf::File::open_path(file).unwrap();
 
-        // We iterate over ELF sections, looking for ones which contain SIR and loading it into
+        // We iterate over ELF sections, looking for ones which contain SIR and loading them into
         // memory.
         let mut bodies = HashMap::new();
         let mut types = HashMap::new();
@@ -93,16 +93,16 @@ impl Sir {
                             // Due to the way Rust compiles stuff, duplicates may exist. Where
                             // duplicates exist, the functions will be identical, but may have
                             // different (but equivalent) types. This is because types too may be
-                            // duplicated using a different crate hash.
+                            // duplicated (for example in a different crate).
                             bodies
                                 .entry(body.symbol_name.clone())
                                 .or_insert_with(|| body);
                         }
                         Pack::Types(ts) => {
-                            let old = types.insert(ts.crate_hash, ts.types);
-                            debug_assert!(old.is_none()); // There's one `Types` pack per crate.
+                            let old = types.insert(ts.cgu_hash, ts.types);
+                            debug_assert!(old.is_none()); // There's one `Types` pack per codegen unit.
                             for idx in ts.thread_tracers {
-                                thread_tracers.insert((ts.crate_hash, idx));
+                                thread_tracers.insert((ts.cgu_hash, idx));
                             }
                         }
                     }
@@ -140,8 +140,8 @@ impl Display for Sir {
             writeln!(f, "TAIL {}", tail)?;
         }
 
-        for (crate_hash, types) in self.types.iter() {
-            writeln!(f, "TYPES OF {}", crate_hash)?;
+        for (cgu_hash, types) in self.types.iter() {
+            writeln!(f, "TYPES OF {}", cgu_hash)?;
             for ty in types {
                 writeln!(f, "{}", ty)?;
             }
