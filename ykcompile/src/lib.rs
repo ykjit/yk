@@ -167,18 +167,18 @@ impl<TT> TraceCompiler<TT> {
         }
     }
 
-    fn place_to_location(&mut self, p: &Place) -> Result<(Location, Ty), CompileError> {
+    fn place_to_location(&mut self, p: &Place) -> (Location, Ty) {
         if !p.projection.is_empty() {
             self.resolve_projection(p)
         } else {
             let ty = self.place_ty(&Place::from(p.local)).clone();
-            self.local_to_location(p.local).map(|loc| (loc, ty))
+            (self.local_to_location(p.local), ty)
         }
     }
 
     /// Takes a `Place`, resolves all projections, and returns a `Location` containing the result.
-    fn resolve_projection(&mut self, p: &Place) -> Result<(Location, Ty), CompileError> {
-        let mut curloc = self.local_to_location(p.local)?;
+    fn resolve_projection(&mut self, p: &Place) -> (Location, Ty) {
+        let mut curloc = self.local_to_location(p.local);
         let mut ty = self.place_ty(&Place::from(p.local)).clone();
         for proj in &p.projection {
             match proj {
@@ -230,19 +230,19 @@ impl<TT> TraceCompiler<TT> {
                 _ => todo!("{}", p),
             }
         }
-        Ok((curloc, ty))
+        (curloc, ty)
     }
 
     /// Given a local, returns the register allocation for it, or, if there is no allocation yet,
     /// performs one.
-    fn local_to_location(&mut self, l: Local) -> Result<Location, CompileError> {
+    fn local_to_location(&mut self, l: Local) -> Location {
         if Some(l) == self.trace_inputs_local {
             // If the local references `trace_inputs` return its location on the stack, which is
             // stored in the first argument of the executed trace.
-            Ok(Location::new_mem(RDI.code(), 0 as i32))
+            Location::new_mem(RDI.code(), 0 as i32)
         } else if let Some(location) = self.variable_location_map.get(&l) {
             // We already have a location for this local.
-            Ok(location.clone())
+            location.clone()
         } else {
             let tyid = self.local_decls[&l].ty;
             if Self::can_live_in_register(&tyid) {
@@ -256,12 +256,12 @@ impl<TT> TraceCompiler<TT> {
                 };
                 let ret = loc.clone();
                 self.variable_location_map.insert(l, loc);
-                Ok(ret)
+                ret
             } else {
                 let ty = SIR.ty(&tyid);
                 let loc = self.stack_builder.alloc(ty.size(), ty.align());
                 self.variable_location_map.insert(l, loc.clone());
-                Ok(loc)
+                loc
             }
         }
     }
@@ -355,9 +355,9 @@ impl<TT> TraceCompiler<TT> {
     }
 
     /// Copy the contents of the place `p2` into `p1`.
-    fn mov_place_place(&mut self, p1: &Place, p2: &Place) -> Result<(), CompileError> {
-        let (lloc, ty) = self.place_to_location(p1)?;
-        let (rloc, _) = self.place_to_location(p2)?;
+    fn mov_place_place(&mut self, p1: &Place, p2: &Place) {
+        let (lloc, ty) = self.place_to_location(p1);
+        let (rloc, _) = self.place_to_location(p2);
 
         match (&lloc, &rloc) {
             (Location::Register(lreg), Location::Register(rreg)) => match ty.size() {
@@ -443,11 +443,10 @@ impl<TT> TraceCompiler<TT> {
         // Free temporary if one was created.
         self.free_if_temp(lloc);
         self.free_if_temp(rloc);
-        Ok(())
     }
 
-    fn mov_place_ref(&mut self, p1: &Place, p2: &Place) -> Result<(), CompileError> {
-        let (lloc, _) = self.place_to_location(p1)?;
+    fn mov_place_ref(&mut self, p1: &Place, p2: &Place) {
+        let (lloc, _) = self.place_to_location(p1);
 
         // Deal with the special case `&*`, i.e. referencing a `Deref` on a reference just returns
         // the reference.
@@ -464,7 +463,7 @@ impl<TT> TraceCompiler<TT> {
                     local: p2.local,
                     projection: newproj,
                 };
-                let (rloc, _) = self.place_to_location(&np)?;
+                let (rloc, _) = self.place_to_location(&np);
                 match (lloc, rloc) {
                     (Location::Register(reg1), Location::Register(reg2)) => {
                         dynasm!(self.asm
@@ -473,12 +472,12 @@ impl<TT> TraceCompiler<TT> {
                     }
                     _ => todo!(),
                 }
-                return Ok(());
+                return;
             }
         }
 
         // We can only reference Locals living on the stack. So move it there if it doesn't.
-        let rloc = match self.place_to_location(p2)? {
+        let rloc = match self.place_to_location(p2) {
             (Location::Register(reg), _) => {
                 let loc = self.stack_builder.alloc(8, 8);
                 let ro = loc.unwrap_mem();
@@ -510,7 +509,6 @@ impl<TT> TraceCompiler<TT> {
         };
         self.free_if_temp(lloc);
         self.free_if_temp(rloc);
-        Ok(())
     }
 
     /// Emit a NOP operation.
@@ -521,12 +519,8 @@ impl<TT> TraceCompiler<TT> {
     }
 
     /// Move a constant integer into a `Place`.
-    fn mov_place_constint(
-        &mut self,
-        place: &Place,
-        constant: &ConstantInt,
-    ) -> Result<(), CompileError> {
-        let (loc, ty) = self.place_to_location(place)?;
+    fn mov_place_constint(&mut self, place: &Place, constant: &ConstantInt) {
+        let (loc, ty) = self.place_to_location(place);
         let c_val = constant.i64_cast();
 
         match &loc {
@@ -584,12 +578,11 @@ impl<TT> TraceCompiler<TT> {
             Location::NotLive => unreachable!(),
         }
         self.free_if_temp(loc);
-        Ok(())
     }
 
     /// Move a Boolean into a `Place`.
-    fn mov_place_bool(&mut self, place: &Place, b: bool) -> Result<(), CompileError> {
-        let (loc, _) = self.place_to_location(place)?;
+    fn mov_place_bool(&mut self, place: &Place, b: bool) {
+        let (loc, _) = self.place_to_location(place);
         match &loc {
             Location::Register(reg) => {
                 dynasm!(self.asm
@@ -605,29 +598,22 @@ impl<TT> TraceCompiler<TT> {
             Location::NotLive => unreachable!(),
         }
         self.free_if_temp(loc);
-        Ok(())
     }
 
     /// Compile the entry into an inlined function call.
-    fn c_enter(
-        &mut self,
-        args: &Vec<Operand>,
-        _dest: &Option<Place>,
-        off: u32,
-    ) -> Result<(), CompileError> {
+    fn c_enter(&mut self, args: &Vec<Operand>, _dest: &Option<Place>, off: u32) {
         // Move call arguments into registers.
         for (op, i) in args.iter().zip(1..) {
             let arg_idx = Place::from(Local(i + off));
             match op {
-                Operand::Place(p) => self.mov_place_place(&arg_idx, p)?,
+                Operand::Place(p) => self.mov_place_place(&arg_idx, p),
                 Operand::Constant(c) => match c {
-                    Constant::Int(ci) => self.mov_place_constint(&arg_idx, ci)?,
-                    Constant::Bool(b) => self.mov_place_bool(&arg_idx, *b)?,
+                    Constant::Int(ci) => self.mov_place_constint(&arg_idx, ci),
+                    Constant::Bool(b) => self.mov_place_bool(&arg_idx, *b),
                     c => todo!("{}", c),
                 },
             }
         }
-        Ok(())
     }
 
     /// Compile a call to a native symbol using the Sys-V ABI. This is used for occasions where you
@@ -663,7 +649,7 @@ impl<TT> TraceCompiler<TT> {
 
         // Figure out where the return value (if there is one) is going.
         let dest_location: Option<(Location, Ty)> = if let Some(d) = dest {
-            Some(self.place_to_location(d)?)
+            Some(self.place_to_location(d))
         } else {
             None
         };
@@ -713,7 +699,7 @@ impl<TT> TraceCompiler<TT> {
             match arg {
                 Operand::Place(place) => {
                     // Load argument back from the stack.
-                    let (loc, _) = self.place_to_location(place)?;
+                    let (loc, _) = self.place_to_location(place);
                     match &loc {
                         Location::Register(reg) => {
                             let off = stack_index(*reg) * 8;
@@ -790,30 +776,24 @@ impl<TT> TraceCompiler<TT> {
         Ok(())
     }
 
-    fn c_checked_binop(
-        &mut self,
-        dest: &Place,
-        binop: &BinOp,
-        op1: &Operand,
-        op2: &Operand,
-    ) -> Result<(), CompileError> {
+    fn c_checked_binop(&mut self, dest: &Place, binop: &BinOp, op1: &Operand, op2: &Operand) {
         // The value of the addition is stored in the first field of the result tuple.
         let mut val_dest = dest.clone();
         val_dest.projection.push(Projection::Field(0));
 
         // Move `op1` into `val_dest`.
         match op1 {
-            Operand::Place(p) => self.mov_place_place(&val_dest, &p)?,
-            Operand::Constant(Constant::Int(ci)) => self.mov_place_constint(&val_dest, &ci)?,
+            Operand::Place(p) => self.mov_place_place(&val_dest, &p),
+            Operand::Constant(Constant::Int(ci)) => self.mov_place_constint(&val_dest, &ci),
             Operand::Constant(Constant::Bool(_b)) => unreachable!(),
             Operand::Constant(c) => todo!("{}", c),
         };
         // Add together `val_dest` and `op2`.
-        let (lloc, ty) = self.place_to_location(&val_dest)?;
+        let (lloc, ty) = self.place_to_location(&val_dest);
         let size = ty.size();
         match op2 {
             Operand::Place(p) => {
-                let (rloc, _) = self.place_to_location(&p)?;
+                let (rloc, _) = self.place_to_location(&p);
                 match binop {
                     BinOp::Add => self.checked_add_place(size, &lloc, &rloc),
                     _ => todo!(),
@@ -833,7 +813,6 @@ impl<TT> TraceCompiler<TT> {
         dynasm!(self.asm
             ; jc ->crash
         );
-        Ok(())
     }
 
     // FIXME Use a macro to generate funcs for all of the different binary operations.
@@ -944,23 +923,23 @@ impl<TT> TraceCompiler<TT> {
             Statement::Assign(l, r) => {
                 match r {
                     Rvalue::Use(Operand::Place(p)) => {
-                        self.mov_place_place(l, p)?;
+                        self.mov_place_place(l, p);
                     }
                     Rvalue::Use(Operand::Constant(c)) => match c {
-                        Constant::Int(ci) => self.mov_place_constint(l, ci)?,
-                        Constant::Bool(b) => self.mov_place_bool(l, *b)?,
+                        Constant::Int(ci) => self.mov_place_constint(l, ci),
+                        Constant::Bool(b) => self.mov_place_bool(l, *b),
                         c => todo!("{}", c),
                     },
                     Rvalue::CheckedBinaryOp(binop, op1, op2) => {
-                        self.c_checked_binop(l, binop, op1, op2)?
+                        self.c_checked_binop(l, binop, op1, op2)
                     }
                     Rvalue::Ref(p) => {
-                        self.mov_place_ref(l, p)?;
+                        self.mov_place_ref(l, p);
                     }
                     unimpl => todo!("{}", unimpl),
                 };
             }
-            Statement::Enter(_, args, dest, off) => self.c_enter(args, dest, *off)?,
+            Statement::Enter(_, args, dest, off) => self.c_enter(args, dest, *off),
             Statement::Leave => {}
             Statement::StorageDead(l) => self.free_register(l)?,
             Statement::Call(target, args, dest) => self.c_call(target, args, dest)?,
@@ -972,9 +951,8 @@ impl<TT> TraceCompiler<TT> {
     }
 
     /// Compile a guard in the trace, emitting code to abort execution in case the guard fails.
-    fn c_guard(&mut self, _grd: &Guard) -> Result<(), CompileError> {
+    fn c_guard(&mut self, _grd: &Guard) {
         self.nop(); // FIXME compile guards
-        Ok(())
     }
 
     /// Print information about the state of the compiler and exit.
@@ -1111,7 +1089,7 @@ impl<TT> TraceCompiler<TT> {
         for i in 0..tt.len() {
             let res = match unsafe { tt.op(i) } {
                 TirOp::Statement(st) => tc.c_statement(st),
-                TirOp::Guard(g) => tc.c_guard(g),
+                TirOp::Guard(g) => Ok(tc.c_guard(g)),
             };
 
             // FIXME -- Later errors should not be fatal. We should be able to abort trace
@@ -1219,8 +1197,8 @@ mod tests {
 
         for _ in 0..32 {
             assert_eq!(
-                tc.local_to_location(Local(1)).unwrap(),
-                tc.local_to_location(Local(1)).unwrap()
+                tc.local_to_location(Local(1)),
+                tc.local_to_location(Local(1))
             );
         }
     }
@@ -1245,7 +1223,7 @@ mod tests {
             _pd: PhantomData,
         };
 
-        let mut seen: Vec<Result<Location, CompileError>> = Vec::new();
+        let mut seen: Vec<Location> = Vec::new();
         for l in 0..7 {
             let reg = tc.local_to_location(Local(l));
             assert!(!seen.contains(&reg));
