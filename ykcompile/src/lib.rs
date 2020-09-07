@@ -178,17 +178,16 @@ impl<TT> TraceCompiler<TT> {
     /// Takes a `Place`, resolves all projections, and returns a `Location` containing the result.
     fn resolve_projection(&mut self, p: &Place) -> Result<Location, CompileError> {
         let mut curloc = self.local_to_location(p.local)?;
-        if p.projection.len() > 1 {
-            todo!("Deal with remaining projections");
-        }
+        let mut base_ty = self.place_ty(&Place::from(p.local)).clone();
         for proj in &p.projection {
-            // FIXME Get the type of a projection.
-            let base_ty = self.place_ty(&Place::from(p.local)).clone();
             match proj {
                 Projection::Field(idx) => match base_ty {
                     Ty::Struct(sty) => match curloc {
                         Location::Mem(ro) => {
                             let offs = sty.fields.offsets[usize::try_from(*idx).unwrap()];
+                            base_ty = SIR
+                                .ty(&sty.fields.tys[usize::try_from(*idx).unwrap()])
+                                .clone();
                             curloc =
                                 Location::new_mem(ro.reg, ro.offs + i32::try_from(offs).unwrap());
                         }
@@ -197,6 +196,9 @@ impl<TT> TraceCompiler<TT> {
                     Ty::Tuple(tty) => match curloc {
                         Location::Mem(ro) => {
                             let offs = tty.fields.offsets[usize::try_from(*idx).unwrap()];
+                            base_ty = SIR
+                                .ty(&tty.fields.tys[usize::try_from(*idx).unwrap()])
+                                .clone();
                             curloc =
                                 Location::new_mem(ro.reg, ro.offs + i32::try_from(offs).unwrap());
                         }
@@ -1825,5 +1827,32 @@ mod tests {
         ct.execute(&mut args);
         assert_eq!(argv.len(), 1);
         assert_eq!(argv[0], 3);
+    }
+
+    #[test]
+    fn test_projection_chain() {
+        #[derive(Debug, PartialEq)]
+        struct S {
+            x: usize,
+            y: usize,
+        }
+        let s = S { x: 5, y: 6 };
+        let t = (1usize, 2u8, 3usize);
+        let mut inputs = trace_inputs((t, 0u8, s, 0usize));
+        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        inputs.1 = (inputs.0).1;
+        inputs.3 = inputs.2.y;
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
+        let ct = TraceCompiler::<&((usize, u8, usize), u8, S, usize)>::compile(tir_trace);
+
+        let t2 = (1usize, 2u8, 3usize);
+        let s2 = S { x: 5, y: 6 };
+        let mut args = (t2, 0u8, s2, 0usize);
+        ct.execute(&mut args);
+        assert_eq!(args.0, (1usize, 2u8, 3usize));
+        assert_eq!(args.1, 2u8);
+        assert_eq!(args.2, S { x: 5, y: 6 });
+        assert_eq!(args.3, 6);
     }
 }
