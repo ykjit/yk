@@ -7,13 +7,12 @@ license = "Apache-2.0 OR MIT"
 
 [dependencies]
 libc = "0.2"
-elf = "0.0"
 fallible-iterator = "0.2"
 ykpack = { path = "../ykpack" }
 lazy_static = "1.4"
 hwtracer = { git = "https://github.com/softdevteam/hwtracer" }
 phdrs = { git = "https://github.com/softdevteam/phdrs" }
 gimli = "0.19.0"
-object = "0.17.0"
+object = "0.21.1"
 memmap = "0.7.0"
 fxhash = "0.2"
