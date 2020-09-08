@@ -1,8 +1,11 @@
+use std::cmp::{Eq, PartialEq};
 #[cfg(test)]
 use std::time::Duration;
 use std::{
     io,
+    ops::Deref,
     panic::{catch_unwind, resume_unwind, UnwindSafe},
+    ptr,
     rc::Rc,
     sync::{
         atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
@@ -10,7 +13,7 @@ use std::{
     },
     thread::{self, JoinHandle},
 };
-use yktrace::TracingKind;
+use yktrace::{start_tracing, ThreadTracer, TracingKind};
 
 pub type HotThreshold = u32;
 const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
@@ -25,20 +28,50 @@ const PHASE_COMPILED: u32 = 0b00 << 30;
 const PHASE_TRACING: u32 = 0b01 << 30;
 const PHASE_COUNTING: u32 = 0b10 << 30; // The value specifies the current hot count.
 
-/// A `Location` uniquely identifies a control point position in the end-user's program (and is
-/// used by the `MT` to store data about that location). In other words, every position
-/// that can be a control point also needs to have one `Location` value associated with it, and
-/// that same `Location` value must always be used to identify that control point.
+/// A `Location` is a handle on a unique identifier for control point position in the end-user's
+/// program (and is used by the `MT` to store data about that location). In other words, every
+/// position that can be a control point also needs to have one `Location` value associated with
+/// it. Note however that instances of `Location` may be freely cloned and shared across threads.
 ///
-/// As this may suggest, program positions that can't be control points don't need an associated
-/// `Location`. For interpreters that can't (or don't want) to be as selective, a simple (if
-/// moderately wasteful) mechanism is for every bytecode or AST node to have its own `Location`
-/// (even for bytecodes or nodes that can't be control points).
+/// Program positions that can't be control points don't need an associated `Location`. For
+/// interpreters that can't (or don't want) to be as selective, a simple (if moderately wasteful)
+/// mechanism is for every bytecode or AST node to have its own `Location` (even for bytecodes or
+/// nodes that can't be control points).
+#[derive(Debug, Clone)]
 pub struct Location {
-    pack: AtomicU32,
+    inner: Arc<LocationInner>,
 }
 
 impl Location {
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(LocationInner::new()),
+        }
+    }
+}
+
+impl PartialEq for Location {
+    fn eq(&self, other: &Location) -> bool {
+        ptr::eq(Arc::as_ptr(&self.inner), Arc::as_ptr(&other.inner))
+    }
+}
+
+impl Eq for Location {}
+
+impl Deref for Location {
+    type Target = LocationInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+#[derive(Debug)]
+pub struct LocationInner {
+    pack: AtomicU32,
+}
+
+impl LocationInner {
     /// Create a fresh Location suitable for passing to `MT::control_point`.
     pub fn new() -> Self {
         Self {
@@ -190,14 +223,27 @@ impl MTThread {
     }
 
     /// Attempt to execute a compiled trace for location `loc`.
-    pub fn control_point(&self, loc: &Location) {
+    pub fn control_point<'l, S, I>(&mut self, loc: Option<&'l Location>, step_fn: S, inputs: I) -> I
+    where
+        S: Fn(I) -> I,
+    {
+        // If a loop can start at this position then update the location and potentially start/stop
+        // this thread's tracer.
+        if let Some(loc) = loc {
+            self._control_point(loc);
+        }
+
+        step_fn(inputs)
+    }
+
+    pub fn _control_point(&mut self, loc: &Location) {
         // Since we don't hold an explicit lock, updating a Location is tricky: we might read a
         // Location, work out what we'd like to update it to, and try updating it, only to find
         // that another thread interrupted us part way through. We therefore use compare_and_swap
         // to update values, allowing us to detect if we were interrupted. If we were interrupted,
         // we simply retry the whole operation.
         loop {
-            let pack = &loc.pack;
+            let pack = &loc.inner.pack;
             // We need Acquire ordering, as PHASE_COMPILED will need to read information written to
             // external data as a result of the PHASE_TRACING -> PHASE_COMPILED transition.
             let lp = pack.load(Ordering::Acquire);
@@ -206,20 +252,53 @@ impl MTThread {
                     let count = lp & !PHASE_TAG;
                     let new_pack;
                     if count >= self.inner.hot_threshold {
-                        new_pack = PHASE_TRACING;
+                        if self.inner.tracer.is_some() {
+                            // This thread is already tracing. Note that we don't increment the hot
+                            // count further.
+                            break;
+                        }
+                        if pack.compare_and_swap(lp, PHASE_TRACING, Ordering::Release) == lp {
+                            Rc::get_mut(&mut self.inner).unwrap().tracer =
+                                Some((start_tracing(self.inner.tracing_kind), loc.clone()));
+                            break;
+                        }
                     } else {
                         new_pack = PHASE_COUNTING | (count + 1);
-                    }
-                    if pack.compare_and_swap(lp, new_pack, Ordering::Release) == lp {
-                        break;
+                        if pack.compare_and_swap(lp, new_pack, Ordering::Release) == lp {
+                            break;
+                        }
                     }
                 }
                 PHASE_TRACING => {
-                    if pack.compare_and_swap(lp, PHASE_COMPILED, Ordering::Release) == lp {
+                    // If this location is being traced by the current thread then we've finished a
+                    // loop in the user program. In that case we can stop the tracer and compile
+                    // code for the collected trace.
+                    let stop_tracer = match self.inner.tracer {
+                        // This thread isn't tracing, so another thread must be tracing this location.
+                        None => false,
+                        // We are tracing, but not this location. Another thread must be.
+                        Some((_, ref tloc)) if tloc != loc => false,
+                        // We are tracing this very location, so stop tracing.
+                        Some(_) => true,
+                    };
+
+                    if stop_tracer {
+                        if pack.compare_and_swap(lp, PHASE_COMPILED, Ordering::Release) == lp {
+                            let _sir_trace = Rc::get_mut(&mut self.inner)
+                                .unwrap()
+                                .tracer
+                                .take()
+                                .unwrap()
+                                .0
+                                .stop_tracing();
+                            // FIXME build TIR and compile. Eventually in a background thread?
+                            break;
+                        }
+                    } else {
                         break;
                     }
                 }
-                PHASE_COMPILED => break,
+                PHASE_COMPILED => break, // FIXME call compiled trace, but don't call step_fn().
                 _ => unreachable!(),
             }
         }
@@ -232,6 +311,10 @@ struct MTThreadInner {
     hot_threshold: HotThreshold,
     #[allow(dead_code)]
     tracing_kind: TracingKind,
+    /// The active tracer and the location it started tracing from.
+    /// The latter is a raw pointer to avoid lifetime issues. This is safe as the pointer is never
+    /// dereferenced. It is only used as an identifier for a location.
+    tracer: Option<(ThreadTracer, Location)>,
 }
 
 impl MTThreadInner {
@@ -242,6 +325,7 @@ impl MTThreadInner {
             mt,
             hot_threshold,
             tracing_kind,
+            tracer: None,
         };
         MTThread {
             inner: Rc::new(inner),
@@ -254,45 +338,48 @@ mod tests {
     extern crate test;
     use self::test::{black_box, Bencher};
     use super::*;
-    use std::sync::Arc;
+
+    fn dummy_step(inputs: ()) -> () {
+        inputs
+    }
 
     #[test]
     fn threshold_passed() {
         let hot_thrsh = 1500;
-        let mtt = MTBuilder::new().hot_threshold(hot_thrsh).init();
+        let mut mtt = MTBuilder::new().hot_threshold(hot_thrsh).init();
         let lp = Location::new();
         for i in 0..hot_thrsh {
-            mtt.control_point(&lp);
+            mtt.control_point(Some(&lp), dummy_step, ());
             assert_eq!(lp.pack.load(Ordering::Relaxed), PHASE_COUNTING | (i + 1));
         }
-        mtt.control_point(&lp);
+        mtt.control_point(Some(&lp), dummy_step, ());
         assert_eq!(lp.pack.load(Ordering::Relaxed), PHASE_TRACING);
-        mtt.control_point(&lp);
+        mtt.control_point(Some(&lp), dummy_step, ());
         assert_eq!(lp.pack.load(Ordering::Relaxed), PHASE_COMPILED);
     }
 
     #[test]
     fn threaded_threshold_passed() {
         let hot_thrsh = 4000;
-        let mtt = MTBuilder::new().hot_threshold(hot_thrsh).init();
-        let l_arc = Arc::new(Location::new());
+        let mut mtt = MTBuilder::new().hot_threshold(hot_thrsh).init();
+        let loc = Location::new();
         let mut thrs = vec![];
         for _ in 0..hot_thrsh / 4 {
-            let l_arc_cl = l_arc.clone();
+            let loc = loc.clone();
             let t = mtt
                 .mt()
-                .spawn(move |mtt| {
-                    mtt.control_point(&*l_arc_cl);
-                    let c1 = l_arc_cl.pack.load(Ordering::Relaxed);
+                .spawn(move |mut mtt| {
+                    mtt.control_point(Some(&loc), dummy_step, ());
+                    let c1 = loc.pack.load(Ordering::Relaxed);
                     assert_eq!(c1 & PHASE_TAG, PHASE_COUNTING);
-                    mtt.control_point(&*l_arc_cl);
-                    let c2 = l_arc_cl.pack.load(Ordering::Relaxed);
+                    mtt.control_point(Some(&loc), dummy_step, ());
+                    let c2 = loc.pack.load(Ordering::Relaxed);
                     assert_eq!(c2 & PHASE_TAG, PHASE_COUNTING);
-                    mtt.control_point(&*l_arc_cl);
-                    let c3 = l_arc_cl.pack.load(Ordering::Relaxed);
+                    mtt.control_point(Some(&loc), dummy_step, ());
+                    let c3 = loc.pack.load(Ordering::Relaxed);
                     assert_eq!(c3 & PHASE_TAG, PHASE_COUNTING);
-                    mtt.control_point(&*l_arc_cl);
-                    let c4 = l_arc_cl.pack.load(Ordering::Relaxed);
+                    mtt.control_point(Some(&loc), dummy_step, ());
+                    let c4 = loc.pack.load(Ordering::Relaxed);
                     assert_eq!(c4 & PHASE_TAG, PHASE_COUNTING);
                     assert!(c4 > c3);
                     assert!(c3 > c2);
@@ -305,20 +392,58 @@ mod tests {
             t.join().unwrap();
         }
         {
-            mtt.control_point(&l_arc);
-            assert_eq!(l_arc.pack.load(Ordering::Relaxed), PHASE_TRACING);
-            mtt.control_point(&l_arc);
-            assert_eq!(l_arc.pack.load(Ordering::Relaxed), PHASE_COMPILED);
+            mtt.control_point(Some(&loc), dummy_step, ());
+            assert_eq!(loc.pack.load(Ordering::Relaxed), PHASE_TRACING);
+            mtt.control_point(Some(&loc), dummy_step, ());
+            assert_eq!(loc.pack.load(Ordering::Relaxed), PHASE_COMPILED);
         }
+    }
+
+    #[test]
+    fn dumb_interpreter() {
+        let mut mtt = MTBuilder::new().hot_threshold(2).init();
+
+        // The program is silly. Do nothing twice, then start again.
+        enum ByteCode {
+            Nop,
+            Restart,
+        }
+        let prog = vec![ByteCode::Nop, ByteCode::Nop, ByteCode::Restart];
+
+        // Suppose the bytecode compiler for this imaginary language knows that the first bytecode
+        // is the only place a loop can start.
+        let locs = vec![Some(Location::new()), None, None];
+
+        let interp_step = |mut inputs: (Vec<ByteCode>, usize)| {
+            // FIXME make `inputs` a struct. Named fields would be much nicer.
+            match inputs.0[inputs.1] {
+                ByteCode::Nop => inputs.1 += 1,
+                ByteCode::Restart => inputs.1 = 0,
+            }
+            inputs
+        };
+
+        let mut inputs = (prog, 0); // bytecode, program counter.
+
+        // The interpreter loop. In reality this would (syntactically) be an infinite loop.
+        for _ in 0..10 {
+            let loc = locs[inputs.1].as_ref();
+            inputs = mtt.control_point(loc, interp_step, inputs);
+        }
+
+        assert_eq!(
+            locs[0].as_ref().unwrap().pack.load(Ordering::Relaxed),
+            PHASE_COMPILED
+        );
     }
 
     #[bench]
     fn bench_single_threaded_control_point(b: &mut Bencher) {
-        let mtt = MTBuilder::new().init();
+        let mut mtt = MTBuilder::new().init();
         let lp = Location::new();
         b.iter(|| {
             for _ in 0..100000 {
-                black_box(mtt.control_point(&lp));
+                black_box(mtt.control_point(Some(&lp), dummy_step, ()));
             }
         });
     }
@@ -326,16 +451,16 @@ mod tests {
     #[bench]
     fn bench_multi_threaded_control_point(b: &mut Bencher) {
         let mtt = MTBuilder::new().init();
-        let l_arc = Arc::new(Location::new());
+        let loc = Location::new();
         b.iter(|| {
             let mut thrs = vec![];
             for _ in 0..4 {
-                let l_arc_cl = Arc::clone(&l_arc);
+                let loc = loc.clone();
                 let t = mtt
                     .mt()
-                    .spawn(move |mtt| {
-                        for _ in 0..100000 {
-                            black_box(mtt.control_point(&*l_arc_cl));
+                    .spawn(move |mut mtt| {
+                        for _ in 0..100 {
+                            black_box(mtt.control_point(Some(&loc), dummy_step, ()));
                         }
                     })
                     .unwrap();
@@ -345,5 +470,21 @@ mod tests {
                 t.join().unwrap();
             }
         });
+    }
+
+    #[test]
+    fn clone_loc_ptr_ident() {
+        let l = Location::new();
+        for _ in 1..1000 {
+            let c1 = l.clone();
+            let c2 = l.clone();
+            let c3 = l.clone();
+            let c4 = l.clone();
+
+            assert!(ptr::eq(Arc::as_ptr(&l.inner), Arc::as_ptr(&c1.inner)));
+            assert!(ptr::eq(Arc::as_ptr(&l.inner), Arc::as_ptr(&c2.inner)));
+            assert!(ptr::eq(Arc::as_ptr(&l.inner), Arc::as_ptr(&c3.inner)));
+            assert!(ptr::eq(Arc::as_ptr(&l.inner), Arc::as_ptr(&c4.inner)));
+        }
     }
 }
