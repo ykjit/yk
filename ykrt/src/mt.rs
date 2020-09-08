@@ -10,6 +10,7 @@ use std::{
     },
     thread::{self, JoinHandle},
 };
+use yktrace::TracingKind;
 
 pub type HotThreshold = u32;
 const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
@@ -49,6 +50,8 @@ impl Location {
 /// Configure a meta-tracer. Note that a process can only have one meta-tracer active at one point.
 pub struct MTBuilder {
     hot_threshold: HotThreshold,
+    /// The kind of tracer to use.
+    tracing_kind: TracingKind,
 }
 
 impl MTBuilder {
@@ -56,18 +59,25 @@ impl MTBuilder {
     pub fn new() -> Self {
         Self {
             hot_threshold: DEFAULT_HOT_THRESHOLD,
+            tracing_kind: TracingKind::default(),
         }
     }
 
     /// Consume the `MTBuilder` and create a meta-tracer, returning the
     /// [`MTThread`](struct.MTThread.html) representing the current thread.
     pub fn init(self) -> MTThread {
-        MTInner::init(self.hot_threshold)
+        MTInner::init(self.hot_threshold, self.tracing_kind)
     }
 
     /// Change this meta-tracer builder's `hot_threshold` value.
     pub fn hot_threshold(mut self, hot_threshold: HotThreshold) -> Self {
         self.hot_threshold = hot_threshold;
+        self
+    }
+
+    /// Select the kind of tracing to use.
+    pub fn tracing_kind(mut self, tracing_kind: TracingKind) -> Self {
+        self.tracing_kind = tracing_kind;
         self
     }
 }
@@ -83,6 +93,11 @@ impl MT {
     /// Return this meta-tracer's hot threshold.
     pub fn hot_threshold(&self) -> HotThreshold {
         self.inner.hot_threshold.load(Ordering::Relaxed)
+    }
+
+    /// Return the kind of tracing that this meta-tracer is using.
+    pub fn tracing_kind(&self) -> TracingKind {
+        self.inner.tracing_kind
     }
 
     /// Create a new thread that can be used in the meta-tracer: the new thread that is created is
@@ -116,6 +131,7 @@ impl Drop for MT {
 struct MTInner {
     hot_threshold: AtomicU32,
     active_threads: AtomicUsize,
+    tracing_kind: TracingKind,
 }
 
 /// It's only safe to have one `MT` instance active at a time.
@@ -123,7 +139,7 @@ static MT_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 impl MTInner {
     /// Create a new `MT`, wrapped immediately in an [`MTThread`](struct.MTThread.html).
-    fn init(hot_threshold: HotThreshold) -> MTThread {
+    fn init(hot_threshold: HotThreshold, tracing_kind: TracingKind) -> MTThread {
         // A process can only have a single MT instance.
 
         // In non-testing, we panic if the user calls this method while an MT instance is active.
@@ -149,6 +165,7 @@ impl MTInner {
         let mtc = Self {
             hot_threshold: AtomicU32::new(hot_threshold),
             active_threads: AtomicUsize::new(1),
+            tracing_kind,
         };
         let mt = MT {
             inner: Arc::new(mtc),
@@ -213,12 +230,19 @@ impl MTThread {
 struct MTThreadInner {
     mt: MT,
     hot_threshold: HotThreshold,
+    #[allow(dead_code)]
+    tracing_kind: TracingKind,
 }
 
 impl MTThreadInner {
     fn init(mt: MT) -> MTThread {
         let hot_threshold = mt.hot_threshold();
-        let inner = MTThreadInner { mt, hot_threshold };
+        let tracing_kind = mt.tracing_kind();
+        let inner = MTThreadInner {
+            mt,
+            hot_threshold,
+            tracing_kind,
+        };
         MTThread {
             inner: Rc::new(inner),
         }

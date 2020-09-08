@@ -370,10 +370,7 @@ mod tests {
     #[ignore] // FIXME Fails becuase we have not properly populated terminators yet.
     #[test]
     fn interp_simple_trace() {
-        #[cfg(tracermode = "sw")]
-        let tracer = start_tracing(Some(TracingKind::SoftwareTracing));
-        #[cfg(tracermode = "hw")]
-        let tracer = start_tracing(Some(TracingKind::HardwareTracing));
+        let tracer = start_tracing(TracingKind::default());
 
         let res = work(black_box(3), black_box(13));
         let sir_trace = tracer.stop_tracing().unwrap();

@@ -1165,7 +1165,7 @@ mod tests {
     #[test]
     fn test_simple() {
         let mut inputs = trace_inputs((0,));
-        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = simple();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
@@ -1246,7 +1246,7 @@ mod tests {
     #[test]
     fn test_function_call_simple() {
         let mut inputs = trace_inputs((0,));
-        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = fcall();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
@@ -1273,7 +1273,7 @@ mod tests {
     #[test]
     fn test_function_call_nested() {
         let mut inputs = trace_inputs((0,));
-        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = fnested();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
@@ -1314,7 +1314,7 @@ mod tests {
     // call operation.
     #[test]
     fn call_symbol_tir() {
-        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let th = start_tracing(TracingKind::HardwareTracing);
         let _ = unsafe { add6(1, 1, 1, 1, 1, 1) };
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
@@ -1333,7 +1333,7 @@ mod tests {
     #[test]
     fn exec_call_symbol_no_args() {
         let mut inputs = trace_inputs((0,));
-        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = unsafe { getuid() };
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
@@ -1346,7 +1346,7 @@ mod tests {
     #[test]
     fn exec_call_symbol_with_arg() {
         let mut inputs = trace_inputs((0,));
-        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let th = start_tracing(TracingKind::HardwareTracing);
         let v = -56;
         inputs.0 = unsafe { abs(v) };
         let sir_trace = th.stop_tracing().unwrap();
@@ -1360,7 +1360,7 @@ mod tests {
     #[test]
     fn exec_call_symbol_with_const_arg() {
         let mut inputs = trace_inputs((0,));
-        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = unsafe { abs(-123) };
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
@@ -1372,7 +1372,7 @@ mod tests {
     #[test]
     fn exec_call_symbol_with_many_args() {
         let mut inputs = trace_inputs((0,));
-        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = unsafe { add6(1, 2, 3, 4, 5, 6) };
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
@@ -1389,7 +1389,7 @@ mod tests {
         }
 
         let mut inputs = trace_inputs((0,));
-        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = unsafe { add_some(1, 2, 3, 4, 5) };
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
@@ -1415,7 +1415,7 @@ mod tests {
     #[test]
     fn test_spilling_simple() {
         let mut inputs = trace_inputs((0,));
-        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = many_locals();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
@@ -1449,7 +1449,7 @@ mod tests {
     #[test]
     fn test_spilling_u64() {
         let mut inputs = trace_inputs((0,));
-        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = spill_u64();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
@@ -1476,7 +1476,7 @@ mod tests {
     #[test]
     fn test_mov_register_to_stack() {
         let mut inputs = trace_inputs((0,));
-        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = register_to_stack(8);
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
@@ -1504,7 +1504,7 @@ mod tests {
     #[test]
     fn test_mov_stack_to_register() {
         let mut inputs = trace_inputs((0,));
-        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = stack_to_register();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
@@ -1533,7 +1533,7 @@ mod tests {
     #[test]
     fn ext_call_and_spilling() {
         let mut inputs = trace_inputs((0,));
-        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = ext_call();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
@@ -1546,7 +1546,7 @@ mod tests {
     #[test]
     fn test_trace_inputs() {
         let mut inputs = trace_inputs((1, 2, 3));
-        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = unsafe { add6(inputs.0, inputs.1, inputs.2, 4, 5, 6) };
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
@@ -1576,7 +1576,7 @@ mod tests {
     #[test]
     fn test_binop_add() {
         let mut inputs = trace_inputs((0, 0, 0, 0));
-        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = add(13);
         inputs.1 = add64(1);
         inputs.2 = inputs.0 + 2;
@@ -1597,7 +1597,7 @@ mod tests {
     #[test]
     fn test_binop_add_stack() {
         let mut inputs = trace_inputs((0, 0));
-        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let th = start_tracing(TracingKind::HardwareTracing);
         let _a = 1;
         let _b = 2;
         let _c = 3;
@@ -1627,7 +1627,7 @@ mod tests {
         }
 
         let _ = trace_inputs(());
-        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let th = start_tracing(TracingKind::HardwareTracing);
         let s = S { _x: 100, y: 200 };
         let _expect = get_y(s);
         let sir_trace = th.stop_tracing().unwrap();
@@ -1675,7 +1675,7 @@ mod tests {
     #[ignore] // FIXME: Need to type our projections.
     fn test_ref_deref() {
         let mut inputs = trace_inputs((0,));
-        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = ref_deref();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
@@ -1689,7 +1689,7 @@ mod tests {
     #[ignore] // FIXME: Need to type our projections.
     fn test_ref_deref_stack() {
         let mut inputs = trace_inputs((0,));
-        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let th = start_tracing(TracingKind::HardwareTracing);
         let _a = 1;
         let _b = 2;
         let _c = 3;
@@ -1714,7 +1714,7 @@ mod tests {
     fn test_deref_stack_to_register() {
         // This test dereferences a variable that lives on the stack and stores it in a register.
         let mut inputs = trace_inputs((0,));
-        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let th = start_tracing(TracingKind::HardwareTracing);
         let _a = 1;
         let _b = 2;
         let _c = 3;
@@ -1740,7 +1740,7 @@ mod tests {
     fn test_deref_register_to_stack() {
         // This test dereferences a variable that lives on the stack and stores it in a register.
         let mut inputs = trace_inputs((0,));
-        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let th = start_tracing(TracingKind::HardwareTracing);
         let f = 6;
         inputs.0 = deref2(f);
         let sir_trace = th.stop_tracing().unwrap();
@@ -1761,7 +1761,7 @@ mod tests {
     #[test]
     fn test_do_not_trace() {
         let mut inputs = trace_inputs((0,));
-        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = dont_trace_this(1);
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
@@ -1792,7 +1792,7 @@ mod tests {
     fn test_do_not_trace_stdlib() {
         let mut vec: Vec<u64> = Vec::new();
         let inputs = trace_inputs((&mut vec,));
-        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let th = start_tracing(TracingKind::HardwareTracing);
         let v = inputs.0;
         dont_trace_stdlib(v);
         let sir_trace = th.stop_tracing().unwrap();
@@ -1815,7 +1815,7 @@ mod tests {
         let s = S { x: 5, y: 6 };
         let t = (1usize, 2u8, 3usize);
         let mut inputs = trace_inputs((t, 0u8, s, 0usize));
-        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let th = start_tracing(TracingKind::HardwareTracing);
         inputs.1 = (inputs.0).1;
         inputs.3 = inputs.2.y;
         let sir_trace = th.stop_tracing().unwrap();
@@ -1836,7 +1836,7 @@ mod tests {
     fn test_projection_lhs() {
         let t = (1u8, 2u8);
         let mut inputs = trace_inputs((t, 3u8));
-        let th = start_tracing(Some(TracingKind::HardwareTracing));
+        let th = start_tracing(TracingKind::HardwareTracing);
         (inputs.0).1 = inputs.1;
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();

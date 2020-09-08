@@ -623,11 +623,7 @@ mod tests {
 
     #[test]
     fn nonempty_tir_trace() {
-        #[cfg(tracermode = "sw")]
-        let tracer = start_tracing(Some(TracingKind::SoftwareTracing));
-        #[cfg(tracermode = "hw")]
-        let tracer = start_tracing(Some(TracingKind::HardwareTracing));
-
+        let tracer = start_tracing(TracingKind::default());
         let res = black_box(work(black_box(3), black_box(13)));
         let sir_trace = tracer.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
@@ -639,11 +635,7 @@ mod tests {
     #[should_panic]
     fn use_undefined_var() {
         let outside_var = 100;
-
-        #[cfg(tracermode = "sw")]
-        let tracer = start_tracing(Some(TracingKind::SoftwareTracing));
-        #[cfg(tracermode = "hw")]
-        let tracer = start_tracing(Some(TracingKind::HardwareTracing));
+        let tracer = start_tracing(TracingKind::default());
         let _x = outside_var + 1; // Use of an undefined variable in trace.
         let sir_trace = tracer.stop_tracing().unwrap();
         let _tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
