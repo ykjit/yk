@@ -18,6 +18,7 @@ cargo test
 # the compiler crash if optimisations *and* a tracer are enabled.
 #cargo test --release
 
+unset RUSTFLAGS
 export CARGO_HOME="`pwd`/.cargo"
 export RUSTUP_HOME="`pwd`/.rustup"
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > rustup.sh
