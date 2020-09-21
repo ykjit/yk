@@ -9,10 +9,13 @@ extern crate test;
 extern crate lazy_static;
 
 mod errors;
-mod hwt;
 pub mod sir;
-mod swt;
 pub mod tir;
+
+#[cfg(tracermode = "hw")]
+mod hwt;
+#[cfg(tracermode = "sw")]
+mod swt;
 
 use errors::InvalidTraceError;
 use sir::{SirLoc, SirTrace};
@@ -24,6 +27,16 @@ pub enum TracingKind {
     SoftwareTracing,
     /// Hardware tracing via ykrustc + hwtracer.
     HardwareTracing
+}
+
+impl Default for TracingKind {
+    /// Returns the default tracing kind.
+    fn default() -> Self {
+        #[cfg(tracermode = "hw")]
+        return TracingKind::HardwareTracing;
+        #[cfg(tracermode = "sw")]
+        return TracingKind::SoftwareTracing;
+    }
 }
 
 /// Represents a thread which is currently tracing.
@@ -49,15 +62,26 @@ trait ThreadTracerImpl {
 }
 
 /// Start tracing on the current thread using the specified tracing kind.
-/// If `None` is passed, then an appropriate tracing kind will be selected; by passing `Some(...)`,
-/// a specific kind can be chosen. Any given thread can at most one active tracer; calling
-/// `start_tracing()` on a thread where there is already an active tracer leads to undefined
-/// behaviour.
+/// Each thread can have at most one active tracer; calling `start_tracing()` on a thread where
+/// there is already an active tracer leads to undefined behaviour.
 #[trace_head]
-pub fn start_tracing(kind: Option<TracingKind>) -> ThreadTracer {
+pub fn start_tracing(kind: TracingKind) -> ThreadTracer {
+    #[cfg(not(any(doctest, tracermode = "hw", tracermode = "sw")))]
+    compile_error!("Please compile with `-C tracer=T`, where T is one of 'hw' or 'sw'");
+
     match kind {
-        Some(TracingKind::SoftwareTracing) => swt::start_tracing(),
-        None | Some(TracingKind::HardwareTracing) => hwt::start_tracing()
+        TracingKind::SoftwareTracing => {
+            #[cfg(tracermode = "hw")]
+            panic!("requested software tracing, but `-C tracer=hw`");
+            #[cfg(tracermode = "sw")]
+            swt::start_tracing()
+        }
+        TracingKind::HardwareTracing => {
+            #[cfg(tracermode = "sw")]
+            panic!("requested hardware tracing, but `-C tracer=sw`");
+            #[cfg(tracermode = "hw")]
+            hwt::start_tracing()
+        }
     }
 }
 
@@ -91,7 +115,7 @@ mod test_helpers {
 
     /// Test that basic tracing works.
     pub(crate) fn test_trace(kind: TracingKind) {
-        let mut th = start_tracing(Some(kind));
+        let mut th = start_tracing(kind);
         black_box(work(10));
         let trace = th.t_impl.stop_tracing().unwrap();
         assert!(trace.raw_len() > 0);
@@ -99,11 +123,11 @@ mod test_helpers {
 
     /// Test that tracing twice sequentially in the same thread works.
     pub(crate) fn test_trace_twice(kind: TracingKind) {
-        let mut th1 = start_tracing(Some(kind));
+        let mut th1 = start_tracing(kind);
         black_box(work(10));
         let trace1 = th1.t_impl.stop_tracing().unwrap();
 
-        let mut th2 = start_tracing(Some(kind));
+        let mut th2 = start_tracing(kind);
         black_box(work(20));
         let trace2 = th2.t_impl.stop_tracing().unwrap();
 
@@ -113,12 +137,12 @@ mod test_helpers {
     /// Test that tracing in different threads works.
     pub(crate) fn test_trace_concurrent(kind: TracingKind) {
         let thr = thread::spawn(move || {
-            let mut th1 = start_tracing(Some(kind));
+            let mut th1 = start_tracing(kind);
             black_box(work(10));
             th1.t_impl.stop_tracing().unwrap().raw_len()
         });
 
-        let mut th2 = start_tracing(Some(kind));
+        let mut th2 = start_tracing(kind);
         black_box(work(20));
         let len2 = th2.t_impl.stop_tracing().unwrap().raw_len();
 
@@ -131,7 +155,7 @@ mod test_helpers {
     /// Tests calling this should be marked `#[should_panic]`.
     pub(crate) fn test_oob_trace_index(kind: TracingKind) {
         // Construct a really short trace.
-        let mut th = start_tracing(Some(kind));
+        let mut th = start_tracing(kind);
         let trace = th.t_impl.stop_tracing().unwrap();
         trace.raw_loc(100000);
     }
@@ -139,7 +163,7 @@ mod test_helpers {
     /// Test that accessing locations 0 through trace.raw_len() -1 does not panic.
     pub(crate) fn test_in_bounds_trace_indices(kind: TracingKind) {
         // Construct a really short trace.
-        let mut th = start_tracing(Some(kind));
+        let mut th = start_tracing(kind);
         black_box(work(10));
         let trace = th.t_impl.stop_tracing().unwrap();
 
@@ -150,7 +174,7 @@ mod test_helpers {
 
     /// Test iteration over a trace.
     pub(crate) fn test_trace_iterator(kind: TracingKind) {
-        let mut th = start_tracing(Some(kind));
+        let mut th = start_tracing(kind);
         black_box(work(10));
         let trace = th.t_impl.stop_tracing().unwrap();
         // The length of the iterator will be shorter due to trimming.
@@ -159,10 +183,7 @@ mod test_helpers {
 
     #[test]
     fn trim_trace() {
-        #[cfg(tracermode = "sw")]
-        let tracer = start_tracing(Some(TracingKind::SoftwareTracing));
-        #[cfg(tracermode = "hw")]
-        let tracer = start_tracing(Some(TracingKind::HardwareTracing));
+        let tracer = start_tracing(TracingKind::default());
         work(black_box(100));
         let sir_trace = tracer.stop_tracing().unwrap();
 
