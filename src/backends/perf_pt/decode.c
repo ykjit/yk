@@ -375,6 +375,11 @@ block_is_terminated(struct pt_block *blk)
         case ptic_ptwrite:
             ret = false;
             break;
+        case ptic_error:
+            // This is not correct, but is blocked on:
+            // https://github.com/intel/libipt/issues/73
+            ret = true;
+            break;
         default:
             panic("Unexpected instruction class: %d", blk->iclass);
     }
