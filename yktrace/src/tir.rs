@@ -468,11 +468,13 @@ impl VarRenamer {
     }
 
     fn rename_place(&mut self, place: &Place, body: &ykpack::Body) -> Place {
+        let newproj = self.rename_projection(&place.projection, body);
+
         if &place.local == &Local(0) {
             // Replace the default return variable $0 with the variable in the outer context where
             // the return value will end up after leaving the function. This saves us an
             // instruction when we compile the trace.
-            let ret = if let Some(v) = self.returns.last() {
+            let mut ret = if let Some(v) = self.returns.last() {
                 v.clone()
             } else {
                 panic!("Expected return value!")
@@ -482,12 +484,31 @@ impl VarRenamer {
                 ret.local,
                 body.local_decls[usize::try_from(place.local.0).unwrap()].clone()
             );
+            ret.projection = newproj;
             ret
         } else {
             let mut p = place.clone();
             p.local = self.rename_local(&p.local, body);
+            p.projection = newproj;
             p
         }
+    }
+
+    fn rename_projection(
+        &mut self,
+        projection: &Vec<Projection>,
+        body: &ykpack::Body
+    ) -> Vec<Projection> {
+        let mut v = Vec::new();
+        for p in projection {
+            match p {
+                Projection::Index(local) => {
+                    v.push(Projection::Index(self.rename_local(&local, body)))
+                }
+                _ => v.push(p.clone())
+            }
+        }
+        v
     }
 
     fn rename_local(&mut self, local: &Local, body: &ykpack::Body) -> Local {

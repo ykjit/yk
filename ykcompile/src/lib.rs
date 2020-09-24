@@ -161,6 +161,30 @@ impl<TT> TraceCompiler<TT> {
                 SignedIntTy::I128 => false,
                 _ => true,
             },
+            Ty::Array(_) => false,
+            Ty::Ref(_) | Ty::Bool => true,
+            Ty::Struct(..) | Ty::Tuple(..) => false,
+            Ty::Unimplemented(..) => todo!("{}", ty),
+        }
+    }
+
+    /// Determine if the type needs to be copied when it is being dereferenced.
+    fn is_copyable(tyid: &TypeId) -> bool {
+        // FIXME For now let's do the dumbest thing and disallow copying of arrays/tuples/structs.
+        // This means that dereferencing an &Array just returns the reference, which is incorrect
+        // if the element types are copyable too.  Once we've implemented copying of
+        // arrays/tuples/structs we will update this function.
+        let ty = SIR.ty(tyid);
+        match ty {
+            Ty::UnsignedInt(ui) => match ui {
+                UnsignedIntTy::U128 => false,
+                _ => true,
+            },
+            Ty::SignedInt(si) => match si {
+                SignedIntTy::I128 => false,
+                _ => true,
+            },
+            Ty::Array(_) => false,
             Ty::Ref(_) | Ty::Bool => true,
             Ty::Struct(..) | Ty::Tuple(..) => false,
             Ty::Unimplemented(..) => todo!("{}", ty),
@@ -208,23 +232,87 @@ impl<TT> TraceCompiler<TT> {
                     _ => todo!("{:?}", ty),
                 },
                 Projection::Deref => {
-                    // FIXME Dereferencing a reference to a copyable struct/tuple copies it to the
-                    // stack. So this may also return a memory location.
+                    // FIXME We currently assume Deref is only called on Refs.
+
+                    // Are we dereferencing a reference, if so, what's its type.
+                    let tyid = match ty {
+                        Ty::Ref(rty) => rty.clone(),
+                        _ => todo!(),
+                    };
+
+                    if Self::is_copyable(&tyid) {
+                        // Copy referenced value into a temporary.
+                        let temp = self.create_temporary();
+                        match curloc {
+                            Location::Mem(ro) => {
+                                // Deref value and copy it.
+                                dynasm!(self.asm
+                                    ; mov Rq(temp), [Rq(ro.reg) + ro.offs]
+                                    ; mov Rq(temp), [Rq(temp)]
+                                );
+                            }
+                            Location::Register(reg) => {
+                                dynasm!(self.asm
+                                    ; mov Rq(temp), [Rq(reg)]
+                                );
+                            }
+                            _ => unreachable!(),
+                        };
+                        ty = SIR.ty(&tyid).clone();
+                        curloc = Location::Register(temp)
+                    } else {
+                        // FIXME If the `Deref` is followed by an `Index` or `Field` projection, we
+                        // just let them handle this reference. Otherwise, we need to copy the
+                        // array/struct/tuple to the stack.
+                    }
+                }
+                Projection::Index(local) => {
+                    // Get the type of the array elements.
+                    let elemsize = match ty {
+                        Ty::Array(_) => {
+                            // FIXME Since we can't compile array construction yet, we can assume
+                            // we are always dealing with references here. Once we can, the
+                            // assembler instructions below also need updating.
+                            todo!()
+                        }
+                        Ty::Ref(tyid) => match SIR.ty(&tyid) {
+                            Ty::Array(ety) => SIR.ty(&ety).size(),
+                            _ => unreachable!(),
+                        },
+                        _ => unreachable!(),
+                    };
+                    // Compute the offset of this index.
                     let temp = self.create_temporary();
-                    match curloc {
+                    match self.local_to_location(*local) {
+                        Location::Register(reg) => {
+                            dynasm!(self.asm
+                                ; imul Rq(temp), Rq(reg), elemsize as i32
+                            );
+                        }
                         Location::Mem(ro) => {
                             dynasm!(self.asm
-                                ; mov Rq(temp), [Rq(ro.reg) + ro.offs]
+                                ; imul Rq(temp), [Rq(ro.reg) + ro.offs], elemsize as i32
+                            );
+                        }
+                        _ => todo!(),
+                    }
+                    // Add together the index and the array address and retrieve its value.
+                    match &curloc {
+                        Location::Mem(ro) => {
+                            dynasm!(self.asm
+                                ; add Rq(temp), [Rq(ro.reg) + ro.offs]
                                 ; mov Rq(temp), [Rq(temp)]
                             );
                         }
                         Location::Register(reg) => {
                             dynasm!(self.asm
-                                ; mov Rq(temp), [Rq(reg)]
+                                ; add Rq(temp), Rq(reg)
+                                ; mov Rq(temp), [Rq(temp)]
                             );
                         }
                         _ => unreachable!(),
                     }
+                    self.free_if_temp(curloc);
                     curloc = Location::Register(temp);
                 }
                 _ => todo!("{}", p),
@@ -1845,5 +1933,27 @@ mod tests {
         let mut args = (t2, 3u8);
         ct.execute(&mut args);
         assert_eq!((args.0).1, 3);
+    }
+
+    #[inline(never)]
+    fn array(a: &mut [u8; 3]) -> u8 {
+        let z = a[1];
+        z
+    }
+
+    #[test]
+    fn test_array() {
+        let mut a = [3u8, 4u8, 5u8];
+        let mut inputs = trace_inputs((&mut a, 0));
+        let th = start_tracing(TracingKind::HardwareTracing);
+        let tmp = inputs.0;
+        inputs.1 = array(tmp);
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
+        let ct = TraceCompiler::<&(&[u8; 3], u8)>::compile(tir_trace);
+        let a2 = [3u8, 4u8, 5u8];
+        let mut args = (&a2, 0);
+        ct.execute(&mut args);
+        assert_eq!(args.1, 4);
     }
 }

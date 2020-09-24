@@ -14,6 +14,7 @@ pub type StatementIndex = usize;
 pub type LocalIndex = u32;
 pub type TyIndex = u32;
 pub type FieldIndex = u32;
+pub type ArrayIndex = u32;
 pub type TypeId = (CguHash, TyIndex); // CGU hash and vector index.
 
 #[derive(Debug, Hash, Eq, PartialEq, Copy, Clone, Serialize, Deserialize)]
@@ -36,6 +37,8 @@ pub enum Ty {
     Struct(StructTy),
     /// A tuple type.
     Tuple(TupleTy),
+    /// An array type.
+    Array(TypeId),
     /// A reference to something.
     Ref(TypeId),
     /// A Boolean.
@@ -51,6 +54,7 @@ impl Display for Ty {
             Ty::UnsignedInt(ui) => write!(f, "{}", ui),
             Ty::Struct(sty) => write!(f, "{}", sty),
             Ty::Tuple(tty) => write!(f, "{}", tty),
+            Ty::Array(aty) => write!(f, "&{:?}", aty),
             Ty::Ref(rty) => write!(f, "&{:?}", rty),
             Ty::Bool => write!(f, "bool"),
             Ty::Unimplemented(m) => write!(f, "Unimplemented: {}", m),
@@ -299,6 +303,12 @@ impl Place {
 
     fn push_used_locals(&self, locals: &mut Vec<Local>) {
         locals.push(self.local);
+        for p in &self.projection {
+            match p {
+                Projection::Index(local) => locals.push(*local),
+                _ => {}
+            }
+        }
     }
 }
 
@@ -352,6 +362,7 @@ impl Display for PlaceBase {
 pub enum Projection {
     Field(FieldIndex),
     Deref,
+    Index(Local),
     Unimplemented(String),
 }
 
@@ -360,6 +371,7 @@ impl Display for Projection {
         match self {
             Self::Field(idx) => write!(f, ".{}", idx),
             Self::Deref => write!(f, ""),
+            Self::Index(local) => write!(f, "[{}]", local),
             Self::Unimplemented(s) => write!(f, ".(unimplemented projection: {:?})", s),
         }
     }
