@@ -76,18 +76,15 @@ pub struct CompiledTrace<TT> {
 
 impl<TT> CompiledTrace<TT> {
     /// Execute the trace by calling (not jumping to) the first instruction's address.
-    pub fn execute(&self, args: TT) -> TT {
-        // For now a compiled trace always returns whatever has been left in register RAX. We also
-        // assume for now that this will be a `u64`.
-        let func: fn(TT) -> TT =
-            unsafe { mem::transmute(self.mc.ptr(dynasmrt::AssemblyOffset(0))) };
-        self.exec_trace(func, args)
+    pub fn execute(&self, args: &mut TT) {
+        let func: fn(&mut TT) = unsafe { mem::transmute(self.mc.ptr(dynasmrt::AssemblyOffset(0))) };
+        self.exec_trace(func, args);
     }
 
     /// Actually call the code. This is a separate function making it easier to set a debugger
     /// breakpoint right before entering the trace.
-    fn exec_trace(&self, t_fn: fn(TT) -> TT, args: TT) -> TT {
-        t_fn(args)
+    fn exec_trace(&self, t_fn: fn(&mut TT), args: &mut TT) {
+        t_fn(args);
     }
 }
 
@@ -1258,7 +1255,7 @@ mod tests {
         inputs.0 = simple();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&IO>::compile(tir_trace);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
         let mut args = IO(0);
         ct.execute(&mut args);
         assert_eq!(args.0, 13);
@@ -1342,7 +1339,7 @@ mod tests {
         inputs.0 = fcall();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&IO>::compile(tir_trace);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
         let mut args = IO(0);
         ct.execute(&mut args);
         assert_eq!(args.0, 13);
@@ -1370,7 +1367,7 @@ mod tests {
         inputs.0 = fnested();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&IO>::compile(tir_trace);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
         let mut args = IO(0);
         ct.execute(&mut args);
         assert_eq!(args.0, 20);
@@ -1380,7 +1377,7 @@ mod tests {
     #[test]
     fn find_symbol_shared() {
         struct IO(());
-        assert!(TraceCompiler::<&IO>::find_symbol("printf") == Ok(libc::printf as *mut c_void));
+        assert!(TraceCompiler::<IO>::find_symbol("printf") == Ok(libc::printf as *mut c_void));
     }
 
     // Test finding a symbol in the main binary.
@@ -1391,7 +1388,7 @@ mod tests {
     fn find_symbol_main() {
         struct IO(());
         assert!(
-            TraceCompiler::<&IO>::find_symbol("find_symbol_main")
+            TraceCompiler::<IO>::find_symbol("find_symbol_main")
                 == Ok(find_symbol_main as *mut c_void)
         );
     }
@@ -1401,7 +1398,7 @@ mod tests {
     fn find_nonexistent_symbol() {
         struct IO(());
         assert_eq!(
-            TraceCompiler::<&IO>::find_symbol("__xxxyyyzzz__"),
+            TraceCompiler::<IO>::find_symbol("__xxxyyyzzz__"),
             Err(CompileError::UnknownSymbol("__xxxyyyzzz__".to_owned()))
         );
     }
@@ -1435,7 +1432,7 @@ mod tests {
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let mut args = IO(0);
-        TraceCompiler::<&IO>::compile(tir_trace).execute(&mut args);
+        TraceCompiler::<IO>::compile(tir_trace).execute(&mut args);
         assert_eq!(inputs.0, args.0);
     }
 
@@ -1450,7 +1447,7 @@ mod tests {
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let mut args = IO(0);
-        TraceCompiler::<&IO>::compile(tir_trace).execute(&mut args);
+        TraceCompiler::<IO>::compile(tir_trace).execute(&mut args);
         assert_eq!(inputs.0, args.0);
     }
 
@@ -1464,7 +1461,7 @@ mod tests {
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let mut args = IO(0);
-        TraceCompiler::<&IO>::compile(tir_trace).execute(&mut args);
+        TraceCompiler::<IO>::compile(tir_trace).execute(&mut args);
         assert_eq!(inputs.0, args.0);
     }
 
@@ -1477,7 +1474,7 @@ mod tests {
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let mut args = IO(0);
-        TraceCompiler::<&IO>::compile(tir_trace).execute(&mut args);
+        TraceCompiler::<IO>::compile(tir_trace).execute(&mut args);
         assert_eq!(inputs.0, 21);
         assert_eq!(inputs.0, args.0);
     }
@@ -1495,7 +1492,7 @@ mod tests {
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let mut args = IO(0);
-        TraceCompiler::<&IO>::compile(tir_trace).execute(&mut args);
+        TraceCompiler::<IO>::compile(tir_trace).execute(&mut args);
         assert_eq!(args.0, 7);
         assert_eq!(args.0, inputs.0);
     }
@@ -1521,7 +1518,7 @@ mod tests {
         inputs.0 = many_locals();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let (ct, spills) = TraceCompiler::<&IO>::test_compile(tir_trace);
+        let (ct, spills) = TraceCompiler::<IO>::test_compile(tir_trace);
         let mut args = IO(0);
         ct.execute(&mut args);
         assert_eq!(args.0, 7);
@@ -1556,7 +1553,7 @@ mod tests {
         inputs.0 = spill_u64();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let (ct, spills) = TraceCompiler::<&IO>::test_compile(tir_trace);
+        let (ct, spills) = TraceCompiler::<IO>::test_compile(tir_trace);
         let mut args = IO(0);
         ct.execute(&mut args);
         assert_eq!(args.0, 4294967296 + 8);
@@ -1584,7 +1581,7 @@ mod tests {
         inputs.0 = register_to_stack(8);
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let (ct, spills) = TraceCompiler::<&IO>::test_compile(tir_trace);
+        let (ct, spills) = TraceCompiler::<IO>::test_compile(tir_trace);
         let mut args = IO(0);
         ct.execute(&mut args);
         assert_eq!(args.0, 8);
@@ -1613,7 +1610,7 @@ mod tests {
         inputs.0 = stack_to_register();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let (ct, spills) = TraceCompiler::<&IO>::test_compile(tir_trace);
+        let (ct, spills) = TraceCompiler::<IO>::test_compile(tir_trace);
         let mut args = IO(0);
         ct.execute(&mut args);
         assert_eq!(args.0, 3);
@@ -1644,7 +1641,7 @@ mod tests {
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         let mut args = IO(0);
-        TraceCompiler::<&IO>::compile(tir_trace).execute(&mut args);
+        TraceCompiler::<IO>::compile(tir_trace).execute(&mut args);
         assert_eq!(inputs.0, 7);
         assert_eq!(inputs.0, args.0);
     }
@@ -1657,7 +1654,7 @@ mod tests {
         inputs.0 = unsafe { add6(inputs.0, inputs.1, inputs.2, 4, 5, 6) };
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&IO>::compile(tir_trace);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
         let mut args = IO(1, 2, 3);
         ct.execute(&mut args);
         assert_eq!(inputs.0, 21);
@@ -1691,7 +1688,7 @@ mod tests {
         inputs.3 = inputs.0 + inputs.0;
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&IO>::compile(tir_trace);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
         let mut args = IO(0, 0, 0, 0);
         ct.execute(&mut args);
         assert_eq!(args.0, 29);
@@ -1717,7 +1714,7 @@ mod tests {
         inputs.1 = add64(1);
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&IO>::compile(tir_trace);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
         let mut args = IO(0, 0);
         ct.execute(&mut args);
         assert_eq!(args.0, 29);
@@ -1790,7 +1787,7 @@ mod tests {
         inputs.0 = ref_deref();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&IO>::compile(tir_trace);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
         let mut args = IO(0);
         ct.execute(&mut args);
         assert_eq!(args.0, 10);
@@ -1811,7 +1808,7 @@ mod tests {
         inputs.0 = ref_deref();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&IO>::compile(tir_trace);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
         let mut args = IO(0);
         ct.execute(&mut args);
         assert_eq!(args.0, 10);
@@ -1835,7 +1832,7 @@ mod tests {
         inputs.0 = deref1(f);
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&IO>::compile(tir_trace);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
         let mut args = IO(0);
         ct.execute(&mut args);
         assert_eq!(args.0, 6);
@@ -1859,7 +1856,7 @@ mod tests {
         inputs.0 = deref2(f);
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&IO>::compile(tir_trace);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
         let mut args = IO(0);
         ct.execute(&mut args);
         assert_eq!(args.0, 6);
@@ -1892,7 +1889,7 @@ mod tests {
             &tir_trace,
         );
 
-        let ct = TraceCompiler::<&IO>::compile(tir_trace);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
         let mut args = IO(0);
         ct.execute(&mut args);
         assert_eq!(args.0, 3);
@@ -1913,9 +1910,9 @@ mod tests {
         dont_trace_stdlib(v);
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&(&mut Vec<u64>,)>::compile(tir_trace);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
         let mut argv: Vec<u64> = Vec::new();
-        let mut args = (&mut argv,);
+        let mut args = IO(&mut argv);
         ct.execute(&mut args);
         assert_eq!(argv.len(), 1);
         assert_eq!(argv[0], 3);
@@ -1937,7 +1934,7 @@ mod tests {
         inputs.3 = inputs.2.y;
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&IO>::compile(tir_trace);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
 
         let t2 = (1usize, 2u8, 3usize);
         let s2 = S { x: 5, y: 6 };
@@ -1958,9 +1955,9 @@ mod tests {
         (inputs.0).1 = inputs.1;
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&((u8, u8), u8)>::compile(tir_trace);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
         let t2 = (1u8, 2u8);
-        let mut args = (t2, 3u8);
+        let mut args = IO(t2, 3u8);
         ct.execute(&mut args);
         assert_eq!((args.0).1, 3);
     }
@@ -1981,7 +1978,7 @@ mod tests {
         inputs.1 = array(tmp);
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&IO>::compile(tir_trace);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
         let mut a2 = [3u8, 4u8, 5u8];
         let mut args = IO(&mut a2, 0);
         ct.execute(&mut args);
