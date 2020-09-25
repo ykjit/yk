@@ -414,21 +414,26 @@ mod tests {
         // is the only place a loop can start.
         let locs = vec![Some(Location::new()), None, None];
 
-        let interp_step = |mut inputs: (Vec<ByteCode>, usize)| {
+        struct IO {
+            prog: Vec<ByteCode>,
+            pc: usize,
+        }
+
+        let interp_step = |mut tio: IO| {
             // FIXME make `inputs` a struct. Named fields would be much nicer.
-            match inputs.0[inputs.1] {
-                ByteCode::Nop => inputs.1 += 1,
-                ByteCode::Restart => inputs.1 = 0,
+            match tio.prog[tio.pc] {
+                ByteCode::Nop => tio.pc += 1,
+                ByteCode::Restart => tio.pc = 0,
             }
-            inputs
+            tio
         };
 
-        let mut inputs = (prog, 0); // bytecode, program counter.
+        let mut tio = IO { prog, pc: 0 }; // bytecode, program counter.
 
         // The interpreter loop. In reality this would (syntactically) be an infinite loop.
         for _ in 0..10 {
-            let loc = locs[inputs.1].as_ref();
-            inputs = mtt.control_point(loc, interp_step, inputs);
+            let loc = locs[tio.pc].as_ref();
+            tio = mtt.control_point(loc, interp_step, tio);
         }
 
         assert_eq!(
