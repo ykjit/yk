@@ -170,10 +170,6 @@ impl<TT> TraceCompiler<TT> {
 
     /// Determine if the type needs to be copied when it is being dereferenced.
     fn is_copyable(tyid: &TypeId) -> bool {
-        // FIXME For now let's do the dumbest thing and disallow copying of arrays/tuples/structs.
-        // This means that dereferencing an &Array just returns the reference, which is incorrect
-        // if the element types are copyable too.  Once we've implemented copying of
-        // arrays/tuples/structs we will update this function.
         let ty = SIR.ty(tyid);
         match ty {
             Ty::UnsignedInt(ui) => match ui {
@@ -184,9 +180,13 @@ impl<TT> TraceCompiler<TT> {
                 SignedIntTy::I128 => false,
                 _ => true,
             },
-            Ty::Array(_) => false,
+            // An array is copyable if its elements are.
+            Ty::Array(ety) => Self::is_copyable(ety),
             Ty::Ref(_) | Ty::Bool => true,
-            Ty::Struct(..) | Ty::Tuple(..) => false,
+            // FIXME A struct is copyable if it implements the Copy trait.
+            Ty::Struct(..) => false,
+            // FIXME A tuple is copyable if all its elements are.
+            Ty::Tuple(..) => false,
             Ty::Unimplemented(..) => todo!("{}", ty),
         }
     }
@@ -204,7 +204,8 @@ impl<TT> TraceCompiler<TT> {
     fn resolve_projection(&mut self, p: &Place) -> (Location, Ty) {
         let mut curloc = self.local_to_location(p.local);
         let mut ty = self.place_ty(&Place::from(p.local)).clone();
-        for proj in &p.projection {
+        let mut iter = p.projection.iter().peekable();
+        while let Some(proj) = iter.next() {
             match proj {
                 Projection::Field(idx) => match ty {
                     Ty::Struct(sty) => match curloc {
@@ -240,7 +241,19 @@ impl<TT> TraceCompiler<TT> {
                         _ => todo!(),
                     };
 
-                    if Self::is_copyable(&tyid) {
+                    // Special case: If the `Deref` is followed by an `Index` or `Field`
+                    // projection, we defer resolution to them and don't copy the value.
+                    // FIXME Do we need to check all remaining projections?
+                    let copy = match iter.peek() {
+                        Some(Projection::Index(_)) => false,
+                        Some(Projection::Field(_)) => false,
+                        _ => true,
+                    };
+                    if Self::is_copyable(&tyid) && copy {
+                        match SIR.ty(&tyid) {
+                            Ty::Array(_) | Ty::Tuple(_) | Ty::Struct(_) => todo!(),
+                            _ => {}
+                        }
                         // Copy referenced value into a temporary.
                         let temp = self.create_temporary();
                         match curloc {
@@ -260,10 +273,6 @@ impl<TT> TraceCompiler<TT> {
                         };
                         ty = SIR.ty(&tyid).clone();
                         curloc = Location::Register(temp)
-                    } else {
-                        // FIXME If the `Deref` is followed by an `Index` or `Field` projection, we
-                        // just let them handle this reference. Otherwise, we need to copy the
-                        // array/struct/tuple to the stack.
                     }
                 }
                 Projection::Index(local) => {
