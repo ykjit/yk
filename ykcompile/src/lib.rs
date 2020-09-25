@@ -76,18 +76,15 @@ pub struct CompiledTrace<TT> {
 
 impl<TT> CompiledTrace<TT> {
     /// Execute the trace by calling (not jumping to) the first instruction's address.
-    pub fn execute(&self, args: TT) -> TT {
-        // For now a compiled trace always returns whatever has been left in register RAX. We also
-        // assume for now that this will be a `u64`.
-        let func: fn(TT) -> TT =
-            unsafe { mem::transmute(self.mc.ptr(dynasmrt::AssemblyOffset(0))) };
-        self.exec_trace(func, args)
+    pub fn execute(&self, args: &mut TT) {
+        let func: fn(&mut TT) = unsafe { mem::transmute(self.mc.ptr(dynasmrt::AssemblyOffset(0))) };
+        self.exec_trace(func, args);
     }
 
     /// Actually call the code. This is a separate function making it easier to set a debugger
     /// breakpoint right before entering the trace.
-    fn exec_trace(&self, t_fn: fn(TT) -> TT, args: TT) -> TT {
-        t_fn(args)
+    fn exec_trace(&self, t_fn: fn(&mut TT), args: &mut TT) {
+        t_fn(args);
     }
 }
 
@@ -1261,13 +1258,14 @@ mod tests {
 
     #[test]
     fn test_simple() {
-        let mut inputs = trace_inputs((0,));
+        struct IO(u8);
+        let mut inputs = trace_inputs(IO(0));
         let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = simple();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&(u64,)>::compile(tir_trace);
-        let mut args = (0,);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
+        let mut args = IO(0);
         ct.execute(&mut args);
         assert_eq!(args.0, 13);
     }
@@ -1277,7 +1275,8 @@ mod tests {
     #[ignore] // Broken because we don't know what type IDs to put in local_decls.
     #[test]
     fn reg_alloc_same_local() {
-        let mut tc = TraceCompiler::<u8> {
+        struct IO(u8);
+        let mut tc = TraceCompiler::<IO> {
             asm: dynasmrt::x64::Assembler::new().unwrap(),
             register_content_map: [R15, R14, R13, R12, R11, R10, R9, R8, RDX, RCX]
                 .iter()
@@ -1305,7 +1304,8 @@ mod tests {
     #[test]
     fn reg_alloc() {
         let local_decls = HashMap::new();
-        let mut tc = TraceCompiler::<u8> {
+        struct IO(u8);
+        let mut tc = TraceCompiler::<IO> {
             asm: dynasmrt::x64::Assembler::new().unwrap(),
             register_content_map: [R15, R14, R13, R12, R11, R10, R9, R8, RDX, RCX]
                 .iter()
@@ -1342,13 +1342,14 @@ mod tests {
 
     #[test]
     fn test_function_call_simple() {
-        let mut inputs = trace_inputs((0,));
+        struct IO(u8);
+        let mut inputs = trace_inputs(IO(0));
         let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = fcall();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&(u8,)>::compile(tir_trace);
-        let mut args = (0,);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
+        let mut args = IO(0);
         ct.execute(&mut args);
         assert_eq!(args.0, 13);
     }
@@ -1369,13 +1370,14 @@ mod tests {
 
     #[test]
     fn test_function_call_nested() {
-        let mut inputs = trace_inputs((0,));
+        struct IO(u8);
+        let mut inputs = trace_inputs(IO(0));
         let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = fnested();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&(u8,)>::compile(tir_trace);
-        let mut args = (0,);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
+        let mut args = IO(0);
         ct.execute(&mut args);
         assert_eq!(args.0, 20);
     }
@@ -1383,7 +1385,8 @@ mod tests {
     // Test finding a symbol in a shared object.
     #[test]
     fn find_symbol_shared() {
-        assert!(TraceCompiler::<u8>::find_symbol("printf") == Ok(libc::printf as *mut c_void));
+        struct IO(());
+        assert!(TraceCompiler::<IO>::find_symbol("printf") == Ok(libc::printf as *mut c_void));
     }
 
     // Test finding a symbol in the main binary.
@@ -1392,8 +1395,9 @@ mod tests {
     #[test]
     #[no_mangle]
     fn find_symbol_main() {
+        struct IO(());
         assert!(
-            TraceCompiler::<u8>::find_symbol("find_symbol_main")
+            TraceCompiler::<IO>::find_symbol("find_symbol_main")
                 == Ok(find_symbol_main as *mut c_void)
         );
     }
@@ -1401,8 +1405,9 @@ mod tests {
     // Check that a non-existent symbol cannot be found.
     #[test]
     fn find_nonexistent_symbol() {
+        struct IO(());
         assert_eq!(
-            TraceCompiler::<u8>::find_symbol("__xxxyyyzzz__"),
+            TraceCompiler::<IO>::find_symbol("__xxxyyyzzz__"),
             Err(CompileError::UnknownSymbol("__xxxyyyzzz__".to_owned()))
         );
     }
@@ -1429,52 +1434,56 @@ mod tests {
     /// Execute a trace which calls a symbol accepting no arguments, but which does return a value.
     #[test]
     fn exec_call_symbol_no_args() {
-        let mut inputs = trace_inputs((0,));
+        struct IO(u32);
+        let mut inputs = trace_inputs(IO(0));
         let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = unsafe { getuid() };
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let mut args = (0,);
-        TraceCompiler::<&(u32,)>::compile(tir_trace).execute(&mut args);
+        let mut args = IO(0);
+        TraceCompiler::<IO>::compile(tir_trace).execute(&mut args);
         assert_eq!(inputs.0, args.0);
     }
 
     /// Execute a trace which calls a symbol accepting arguments and returns a value.
     #[test]
     fn exec_call_symbol_with_arg() {
-        let mut inputs = trace_inputs((0,));
+        struct IO(i32);
+        let mut inputs = trace_inputs(IO(0));
         let th = start_tracing(TracingKind::HardwareTracing);
         let v = -56;
         inputs.0 = unsafe { abs(v) };
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let mut args = (0,);
-        TraceCompiler::<&(i32,)>::compile(tir_trace).execute(&mut args);
+        let mut args = IO(0);
+        TraceCompiler::<IO>::compile(tir_trace).execute(&mut args);
         assert_eq!(inputs.0, args.0);
     }
 
     /// The same as `exec_call_symbol_args_with_rv`, just using a constant argument.
     #[test]
     fn exec_call_symbol_with_const_arg() {
-        let mut inputs = trace_inputs((0,));
+        struct IO(i32);
+        let mut inputs = trace_inputs(IO(0));
         let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = unsafe { abs(-123) };
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let mut args = (0,);
-        TraceCompiler::<&(i32,)>::compile(tir_trace).execute(&mut args);
+        let mut args = IO(0);
+        TraceCompiler::<IO>::compile(tir_trace).execute(&mut args);
         assert_eq!(inputs.0, args.0);
     }
 
     #[test]
     fn exec_call_symbol_with_many_args() {
-        let mut inputs = trace_inputs((0,));
+        struct IO(u64);
+        let mut inputs = trace_inputs(IO(0));
         let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = unsafe { add6(1, 2, 3, 4, 5, 6) };
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let mut args = (0,);
-        TraceCompiler::<&(u64,)>::compile(tir_trace).execute(&mut args);
+        let mut args = IO(0);
+        TraceCompiler::<IO>::compile(tir_trace).execute(&mut args);
         assert_eq!(inputs.0, 21);
         assert_eq!(inputs.0, args.0);
     }
@@ -1485,13 +1494,14 @@ mod tests {
             fn add_some(a: u64, b: u64, c: u64, d: u64, e: u64) -> u64;
         }
 
-        let mut inputs = trace_inputs((0,));
+        struct IO(u64);
+        let mut inputs = trace_inputs(IO(0));
         let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = unsafe { add_some(1, 2, 3, 4, 5) };
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let mut args = (0,);
-        TraceCompiler::<&(u64,)>::compile(tir_trace).execute(&mut args);
+        let mut args = IO(0);
+        TraceCompiler::<IO>::compile(tir_trace).execute(&mut args);
         assert_eq!(args.0, 7);
         assert_eq!(args.0, inputs.0);
     }
@@ -1511,13 +1521,14 @@ mod tests {
     #[ignore] // FIXME: It has become hard to test spilling.
     #[test]
     fn test_spilling_simple() {
-        let mut inputs = trace_inputs((0,));
+        struct IO(u8);
+        let mut inputs = trace_inputs(IO(0));
         let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = many_locals();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let (ct, spills) = TraceCompiler::<&(u8,)>::test_compile(tir_trace);
-        let mut args = (0,);
+        let (ct, spills) = TraceCompiler::<IO>::test_compile(tir_trace);
+        let mut args = IO(0);
         ct.execute(&mut args);
         assert_eq!(args.0, 7);
         assert_eq!(spills, 3); // Three u8s.
@@ -1545,13 +1556,14 @@ mod tests {
     #[ignore] // FIXME: It has become hard to test spilling.
     #[test]
     fn test_spilling_u64() {
-        let mut inputs = trace_inputs((0,));
+        struct IO(u64);
+        let mut inputs = trace_inputs(IO(0));
         let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = spill_u64();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let (ct, spills) = TraceCompiler::<&(u64,)>::test_compile(tir_trace);
-        let mut args = (0,);
+        let (ct, spills) = TraceCompiler::<IO>::test_compile(tir_trace);
+        let mut args = IO(0);
         ct.execute(&mut args);
         assert_eq!(args.0, 4294967296 + 8);
         assert_eq!(spills, 2 * 8);
@@ -1572,13 +1584,14 @@ mod tests {
     #[ignore] // FIXME: It has become hard to test spilling.
     #[test]
     fn test_mov_register_to_stack() {
-        let mut inputs = trace_inputs((0,));
+        struct IO(u8);
+        let mut inputs = trace_inputs(IO(0));
         let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = register_to_stack(8);
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let (ct, spills) = TraceCompiler::<&(u8,)>::test_compile(tir_trace);
-        let mut args = (0,);
+        let (ct, spills) = TraceCompiler::<IO>::test_compile(tir_trace);
+        let mut args = IO(0);
         ct.execute(&mut args);
         assert_eq!(args.0, 8);
         assert_eq!(spills, 9); // f, g: i32, h:  u8.
@@ -1600,13 +1613,14 @@ mod tests {
     #[ignore] // FIXME: It has become hard to test spilling.
     #[test]
     fn test_mov_stack_to_register() {
-        let mut inputs = trace_inputs((0,));
+        struct IO(u8);
+        let mut inputs = trace_inputs(IO(0));
         let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = stack_to_register();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let (ct, spills) = TraceCompiler::<&(u8,)>::test_compile(tir_trace);
-        let mut args = (0,);
+        let (ct, spills) = TraceCompiler::<IO>::test_compile(tir_trace);
+        let mut args = IO(0);
         ct.execute(&mut args);
         assert_eq!(args.0, 3);
         assert_eq!(spills, 1); // Just one u8.
@@ -1629,31 +1643,33 @@ mod tests {
 
     #[test]
     fn ext_call_and_spilling() {
-        let mut inputs = trace_inputs((0,));
+        struct IO(u64);
+        let mut inputs = trace_inputs(IO(0));
         let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = ext_call();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let mut args = (0,);
-        TraceCompiler::<&(u64,)>::compile(tir_trace).execute(&mut args);
+        let mut args = IO(0);
+        TraceCompiler::<IO>::compile(tir_trace).execute(&mut args);
         assert_eq!(inputs.0, 7);
         assert_eq!(inputs.0, args.0);
     }
 
     #[test]
     fn test_trace_inputs() {
-        let mut inputs = trace_inputs((1, 2, 3));
+        struct IO(u64, u64, u64);
+        let mut inputs = trace_inputs(IO(1, 2, 3));
         let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = unsafe { add6(inputs.0, inputs.1, inputs.2, 4, 5, 6) };
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&(u64, u64, u64)>::compile(tir_trace);
-        let mut args = (1, 2, 3);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
+        let mut args = IO(1, 2, 3);
         ct.execute(&mut args);
         assert_eq!(inputs.0, 21);
         assert_eq!(inputs.0, args.0);
         // Execute once more with different arguments.
-        let mut args2 = (7, 8, 9);
+        let mut args2 = IO(7, 8, 9);
         ct.execute(&mut args2);
         assert_eq!(args2.0, 39);
     }
@@ -1672,7 +1688,8 @@ mod tests {
 
     #[test]
     fn test_binop_add() {
-        let mut inputs = trace_inputs((0, 0, 0, 0));
+        struct IO(u8, u64, u8, u8);
+        let mut inputs = trace_inputs(IO(0, 0, 0, 0));
         let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = add(13);
         inputs.1 = add64(1);
@@ -1680,8 +1697,8 @@ mod tests {
         inputs.3 = inputs.0 + inputs.0;
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&(u8, u64, u8, u8)>::compile(tir_trace);
-        let mut args = (0, 0, 0, 0);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
+        let mut args = IO(0, 0, 0, 0);
         ct.execute(&mut args);
         assert_eq!(args.0, 29);
         assert_eq!(args.1, 8589934593);
@@ -1693,7 +1710,8 @@ mod tests {
     // filling up all registers first.
     #[test]
     fn test_binop_add_stack() {
-        let mut inputs = trace_inputs((0, 0));
+        struct IO(u8, u64);
+        let mut inputs = trace_inputs(IO(0, 0));
         let th = start_tracing(TracingKind::HardwareTracing);
         let _a = 1;
         let _b = 2;
@@ -1705,8 +1723,8 @@ mod tests {
         inputs.1 = add64(1);
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&(u8, u64)>::compile(tir_trace);
-        let mut args = (0, 0);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
+        let mut args = IO(0, 0);
         ct.execute(&mut args);
         assert_eq!(args.0, 29);
         assert_eq!(args.1, 8589934593);
@@ -1723,7 +1741,8 @@ mod tests {
             s.y
         }
 
-        let _ = trace_inputs(());
+        struct IO(());
+        let _ = trace_inputs(IO(()));
         let th = start_tracing(TracingKind::HardwareTracing);
         let s = S { _x: 100, y: 200 };
         let _expect = get_y(s);
@@ -1771,13 +1790,14 @@ mod tests {
     #[test]
     #[ignore] // FIXME: Need to type our projections.
     fn test_ref_deref() {
-        let mut inputs = trace_inputs((0,));
+        struct IO(u64);
+        let mut inputs = trace_inputs(IO(0));
         let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = ref_deref();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&(u64,)>::compile(tir_trace);
-        let mut args = (0,);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
+        let mut args = IO(0);
         ct.execute(&mut args);
         assert_eq!(args.0, 10);
     }
@@ -1785,7 +1805,8 @@ mod tests {
     #[test]
     #[ignore] // FIXME: Need to type our projections.
     fn test_ref_deref_stack() {
-        let mut inputs = trace_inputs((0,));
+        struct IO(u64);
+        let mut inputs = trace_inputs(IO(0));
         let th = start_tracing(TracingKind::HardwareTracing);
         let _a = 1;
         let _b = 2;
@@ -1796,8 +1817,8 @@ mod tests {
         inputs.0 = ref_deref();
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&(u64,)>::compile(tir_trace);
-        let mut args = (0,);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
+        let mut args = IO(0);
         ct.execute(&mut args);
         assert_eq!(args.0, 10);
     }
@@ -1810,7 +1831,8 @@ mod tests {
     #[test]
     fn test_deref_stack_to_register() {
         // This test dereferences a variable that lives on the stack and stores it in a register.
-        let mut inputs = trace_inputs((0,));
+        struct IO(u64);
+        let mut inputs = trace_inputs(IO(0));
         let th = start_tracing(TracingKind::HardwareTracing);
         let _a = 1;
         let _b = 2;
@@ -1819,8 +1841,8 @@ mod tests {
         inputs.0 = deref1(f);
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&(u64,)>::compile(tir_trace);
-        let mut args = (0,);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
+        let mut args = IO(0);
         ct.execute(&mut args);
         assert_eq!(args.0, 6);
     }
@@ -1836,14 +1858,15 @@ mod tests {
     #[test]
     fn test_deref_register_to_stack() {
         // This test dereferences a variable that lives on the stack and stores it in a register.
-        let mut inputs = trace_inputs((0,));
+        struct IO(u64);
+        let mut inputs = trace_inputs(IO(0));
         let th = start_tracing(TracingKind::HardwareTracing);
         let f = 6;
         inputs.0 = deref2(f);
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&(u64,)>::compile(tir_trace);
-        let mut args = (0,);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
+        let mut args = IO(0);
         ct.execute(&mut args);
         assert_eq!(args.0, 6);
     }
@@ -1857,7 +1880,8 @@ mod tests {
 
     #[test]
     fn test_do_not_trace() {
-        let mut inputs = trace_inputs((0,));
+        struct IO(u8);
+        let mut inputs = trace_inputs(IO(0));
         let th = start_tracing(TracingKind::HardwareTracing);
         inputs.0 = dont_trace_this(1);
         let sir_trace = th.stop_tracing().unwrap();
@@ -1874,8 +1898,8 @@ mod tests {
             &tir_trace,
         );
 
-        let ct = TraceCompiler::<&(u64,)>::compile(tir_trace);
-        let mut args = (0,);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
+        let mut args = IO(0);
         ct.execute(&mut args);
         assert_eq!(args.0, 3);
     }
@@ -1888,15 +1912,16 @@ mod tests {
     #[test]
     fn test_do_not_trace_stdlib() {
         let mut vec: Vec<u64> = Vec::new();
-        let inputs = trace_inputs((&mut vec,));
+        struct IO<'a>(&'a mut Vec<u64>);
+        let inputs = trace_inputs(IO(&mut vec));
         let th = start_tracing(TracingKind::HardwareTracing);
         let v = inputs.0;
         dont_trace_stdlib(v);
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&(&mut Vec<u64>,)>::compile(tir_trace);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
         let mut argv: Vec<u64> = Vec::new();
-        let mut args = (&mut argv,);
+        let mut args = IO(&mut argv);
         ct.execute(&mut args);
         assert_eq!(argv.len(), 1);
         assert_eq!(argv[0], 3);
@@ -1911,17 +1936,18 @@ mod tests {
         }
         let s = S { x: 5, y: 6 };
         let t = (1usize, 2u8, 3usize);
-        let mut inputs = trace_inputs((t, 0u8, s, 0usize));
+        struct IO((usize, u8, usize), u8, S, usize);
+        let mut inputs = trace_inputs(IO(t, 0u8, s, 0usize));
         let th = start_tracing(TracingKind::HardwareTracing);
         inputs.1 = (inputs.0).1;
         inputs.3 = inputs.2.y;
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&((usize, u8, usize), u8, S, usize)>::compile(tir_trace);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
 
         let t2 = (1usize, 2u8, 3usize);
         let s2 = S { x: 5, y: 6 };
-        let mut args = (t2, 0u8, s2, 0usize);
+        let mut args = IO(t2, 0u8, s2, 0usize);
         ct.execute(&mut args);
         assert_eq!(args.0, (1usize, 2u8, 3usize));
         assert_eq!(args.1, 2u8);
@@ -1932,14 +1958,15 @@ mod tests {
     #[test]
     fn test_projection_lhs() {
         let t = (1u8, 2u8);
-        let mut inputs = trace_inputs((t, 3u8));
+        struct IO((u8, u8), u8);
+        let mut inputs = trace_inputs(IO(t, 3u8));
         let th = start_tracing(TracingKind::HardwareTracing);
         (inputs.0).1 = inputs.1;
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&((u8, u8), u8)>::compile(tir_trace);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
         let t2 = (1u8, 2u8);
-        let mut args = (t2, 3u8);
+        let mut args = IO(t2, 3u8);
         ct.execute(&mut args);
         assert_eq!((args.0).1, 3);
     }
@@ -1952,16 +1979,17 @@ mod tests {
 
     #[test]
     fn test_array() {
+        struct IO<'a>(&'a mut [u8; 3], u8);
         let mut a = [3u8, 4u8, 5u8];
-        let mut inputs = trace_inputs((&mut a, 0));
+        let mut inputs = trace_inputs(IO(&mut a, 0));
         let th = start_tracing(TracingKind::HardwareTracing);
         let tmp = inputs.0;
         inputs.1 = array(tmp);
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let ct = TraceCompiler::<&(&[u8; 3], u8)>::compile(tir_trace);
-        let a2 = [3u8, 4u8, 5u8];
-        let mut args = (&a2, 0);
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
+        let mut a2 = [3u8, 4u8, 5u8];
+        let mut args = IO(&mut a2, 0);
         ct.execute(&mut args);
         assert_eq!(args.1, 4);
     }
