@@ -19,6 +19,10 @@ mod swt;
 
 use errors::InvalidTraceError;
 use sir::{SirLoc, SirTrace};
+use ykpack::Local;
+
+// In TIR traces, the argument to the interp_step is always local #1.
+pub const INTERP_STEP_ARG: Local = Local(1);
 
 /// The different ways by which we can collect a trace.
 #[derive(Clone, Copy)]
@@ -94,29 +98,30 @@ pub fn trace_inputs<T>(tup: T) -> T {
 /// The bodies of tests that we want to run on all tracing kinds live in here.
 #[cfg(test)]
 mod test_helpers {
-    use super::{start_tracing, SirLoc, TracingKind};
-    use crate::sir::SIR;
+    use super::{start_tracing, TracingKind};
     use std::thread;
     use test::black_box;
-    use ykpack::bodyflags;
 
     // Some work to trace.
-    fn work(loops: usize) -> usize {
+    #[interp_step]
+    fn work(io: &mut WorkIO) {
         let mut res = 0;
-        for i in 0..loops {
+        for i in 0..(io.0) {
             if i % 2 == 0 {
                 res += 5;
             } else {
                 res += 10 / i;
             }
         }
-        res
+        println!("{}", res); // prevents the above from being optimised out.
     }
+
+    struct WorkIO(usize);
 
     /// Test that basic tracing works.
     pub(crate) fn test_trace(kind: TracingKind) {
         let mut th = start_tracing(kind);
-        black_box(work(10));
+        black_box(work(&mut WorkIO(10)));
         let trace = th.t_impl.stop_tracing().unwrap();
         assert!(trace.raw_len() > 0);
     }
@@ -124,11 +129,11 @@ mod test_helpers {
     /// Test that tracing twice sequentially in the same thread works.
     pub(crate) fn test_trace_twice(kind: TracingKind) {
         let mut th1 = start_tracing(kind);
-        black_box(work(10));
+        black_box(work(&mut WorkIO(10)));
         let trace1 = th1.t_impl.stop_tracing().unwrap();
 
         let mut th2 = start_tracing(kind);
-        black_box(work(20));
+        black_box(work(&mut WorkIO(20)));
         let trace2 = th2.t_impl.stop_tracing().unwrap();
 
         assert!(trace1.raw_len() < trace2.raw_len());
@@ -138,12 +143,12 @@ mod test_helpers {
     pub(crate) fn test_trace_concurrent(kind: TracingKind) {
         let thr = thread::spawn(move || {
             let mut th1 = start_tracing(kind);
-            black_box(work(10));
+            black_box(work(&mut WorkIO(10)));
             th1.t_impl.stop_tracing().unwrap().raw_len()
         });
 
         let mut th2 = start_tracing(kind);
-        black_box(work(20));
+        black_box(work(&mut WorkIO(20)));
         let len2 = th2.t_impl.stop_tracing().unwrap().raw_len();
 
         let len1 = thr.join().unwrap();
@@ -156,6 +161,7 @@ mod test_helpers {
     pub(crate) fn test_oob_trace_index(kind: TracingKind) {
         // Construct a really short trace.
         let mut th = start_tracing(kind);
+        // Empty trace -- no call to an interp_step.
         let trace = th.t_impl.stop_tracing().unwrap();
         trace.raw_loc(100000);
     }
@@ -164,7 +170,7 @@ mod test_helpers {
     pub(crate) fn test_in_bounds_trace_indices(kind: TracingKind) {
         // Construct a really short trace.
         let mut th = start_tracing(kind);
-        black_box(work(10));
+        black_box(work(&mut WorkIO(10)));
         let trace = th.t_impl.stop_tracing().unwrap();
 
         for i in 0..trace.raw_len() {
@@ -175,45 +181,9 @@ mod test_helpers {
     /// Test iteration over a trace.
     pub(crate) fn test_trace_iterator(kind: TracingKind) {
         let mut th = start_tracing(kind);
-        black_box(work(10));
+        black_box(work(&mut WorkIO(10)));
         let trace = th.t_impl.stop_tracing().unwrap();
         // The length of the iterator will be shorter due to trimming.
         assert!(trace.into_iter().count() < trace.raw_len());
-    }
-
-    #[test]
-    fn trim_trace() {
-        let tracer = start_tracing(TracingKind::default());
-        work(black_box(100));
-        let sir_trace = tracer.stop_tracing().unwrap();
-
-        let contains_tracer_start_stop = |locs: Vec<&SirLoc>| {
-            let mut found_start_code = false;
-            let mut found_stop_code = false;
-            for loc in locs {
-                let body = SIR
-                    .bodies
-                    .get(&loc.symbol_name)
-                    .expect("No SIR for the location");
-
-                if body.flags & bodyflags::TRACE_HEAD != 0 {
-                    found_start_code = true;
-                }
-                if body.flags & bodyflags::TRACE_TAIL != 0 {
-                    found_stop_code = true;
-                }
-            }
-            (found_start_code, found_stop_code)
-        };
-
-        // The raw SIR trace will contain the end of the code which starts tracing, and the start
-        // of the code which stops tracing. The trimmed SIR trace will contain neither.
-        let raw_locs = (0..(sir_trace.raw_len()))
-            .map(|i| sir_trace.raw_loc(i))
-            .collect();
-        assert_eq!(contains_tracer_start_stop(raw_locs), (true, true));
-
-        let trimmed_locs = sir_trace.into_iter().collect();
-        assert_eq!(contains_tracer_start_stop(trimmed_locs), (false, false));
     }
 }

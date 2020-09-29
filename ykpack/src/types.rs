@@ -390,6 +390,7 @@ pub mod bodyflags {
     pub const TRACE_HEAD: u8 = 1;
     pub const TRACE_TAIL: u8 = 1 << 1;
     pub const DO_NOT_TRACE: u8 = 1 << 2;
+    pub const INTERP_STEP: u8 = 1 << 3;
 }
 
 /// The definition of a local variable, including its type.
