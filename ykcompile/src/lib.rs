@@ -227,6 +227,31 @@ impl<TT> TraceCompiler<TT> {
                         }
                         _ => unreachable!("{:?}", curloc),
                     },
+                    Ty::Ref(tyid) => match SIR.ty(&tyid) {
+                        Ty::Struct(sty) => {
+                            let offs = sty.fields.offsets[usize::try_from(*idx).unwrap()];
+                            let temp = self.create_temporary();
+                            match &curloc {
+                                Location::Mem(ro) => {
+                                    dynasm!(self.asm
+                                        ; lea Rq(temp), [Rq(ro.reg) + ro.offs + i32::try_from(offs).unwrap()]
+                                        ; mov Rq(temp), [Rq(temp)]
+                                    );
+                                }
+                                Location::Register(reg) => {
+                                    dynasm!(self.asm
+                                        ; lea Rq(temp), [Rq(reg) + i32::try_from(offs).unwrap()]
+                                        ; mov Rq(temp), [Rq(temp)]
+                                    );
+                                }
+                                _ => unreachable!(),
+                            }
+                            self.free_if_temp(curloc);
+                            curloc = Location::Register(temp);
+                        }
+                        Ty::Tuple(_tty) => todo!(),
+                        _ => unreachable!(),
+                    },
                     _ => todo!("{:?}", ty),
                 },
                 Projection::Deref => {
@@ -1992,5 +2017,26 @@ mod tests {
         let mut args = IO(&mut a2, 0);
         ct.execute(&mut args);
         assert_eq!(args.1, 4);
+    }
+
+    /// Test codegen of field access on a struct ref on the right-hand side.
+    #[test]
+    fn rhs_struct_ref_field() {
+        fn add1(io: &mut IO) -> u8 {
+            io.0 + 1
+        }
+
+        struct IO(u8);
+        let mut inputs = trace_inputs(IO(0));
+        let th = start_tracing(TracingKind::HardwareTracing);
+        let x = add1(&mut inputs);
+        inputs.0 = x;
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
+
+        let mut args = IO(10);
+        ct.execute(&mut args);
+        assert_eq!(args.0, 11);
     }
 }
