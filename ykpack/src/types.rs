@@ -310,6 +310,11 @@ impl Place {
             }
         }
     }
+
+    /// Returns true if the place is a "plain local" (there are no projections).
+    pub fn is_plain_local(&self) -> bool {
+        self.projection.is_empty()
+    }
 }
 
 impl Display for Place {
