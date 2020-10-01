@@ -15,6 +15,7 @@ use libc::{c_void, dlsym, RTLD_DEFAULT};
 use stack_builder::StackBuilder;
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::ffi::CString;
 use std::fmt::{self, Display, Formatter};
 use std::mem;
 use std::process::Command;
@@ -1206,8 +1207,6 @@ impl<TT> TraceCompiler<TT> {
 
     /// Returns a pointer to the static symbol `sym`, or an error if it cannot be found.
     fn find_symbol(sym: &str) -> Result<*mut c_void, CompileError> {
-        use std::ffi::CString;
-
         let sym_arg = CString::new(sym).unwrap();
         let addr = unsafe { dlsym(RTLD_DEFAULT, sym_arg.into_raw()) };
 
