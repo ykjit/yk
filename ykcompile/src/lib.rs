@@ -176,6 +176,7 @@ impl<TT> TraceCompiler<TT> {
                 _ => true,
             },
             Ty::Array(_) => false,
+            Ty::Slice(_) => false,
             Ty::Ref(_) | Ty::Bool => true,
             Ty::Struct(..) | Ty::Tuple(..) => false,
             Ty::Unimplemented(..) => todo!("{}", ty),
@@ -196,6 +197,7 @@ impl<TT> TraceCompiler<TT> {
             },
             // An array is copyable if its elements are.
             Ty::Array(ety) => Self::is_copyable(ety),
+            Ty::Slice(ety) => Self::is_copyable(ety),
             Ty::Ref(_) | Ty::Bool => true,
             // FIXME A struct is copyable if it implements the Copy trait.
             Ty::Struct(..) => false,
@@ -310,7 +312,7 @@ impl<TT> TraceCompiler<TT> {
                                     ; mov Rq(temp), [Rq(ro.reg) + ro.offs]
                                 );
                             }
-                            Location::Register(reg) => {
+                            Location::Register(reg) | Location::Addr(reg) => {
                                 dynasm!(self.asm
                                     ; mov Rq(temp), Rq(reg)
                                 );
@@ -598,6 +600,23 @@ impl<TT> TraceCompiler<TT> {
         Location::Register(reg)
     }
 
+    fn c_len(&mut self, p: &Place) -> Location {
+        let dst = self.create_temporary();
+        let (loc, _) = self.place_to_location(p, true);
+        match loc {
+            Location::Addr(src) => {
+                // A slice &[T] is a fat pointer with its length in the last 8 bytes.
+                dynasm!(self.asm
+                    ; mov Rq(dst), [Rq(src) + 8]
+                );
+            }
+            // FIXME Can `Len` be called on non-references?
+            _ => unreachable!(),
+        }
+        self.free_if_temp(loc);
+        Location::Register(dst)
+    }
+
     /// Emit a NOP operation.
     fn nop(&mut self) {
         dynasm!(self.asm
@@ -869,6 +888,7 @@ impl<TT> TraceCompiler<TT> {
                         return Ok(());
                     }
                     Rvalue::Ref(p) => self.c_ref(p),
+                    Rvalue::Len(p) => self.c_len(p),
                     unimpl => todo!("{}", unimpl),
                 };
                 self.store(&l, rloc.clone());
@@ -2073,5 +2093,32 @@ mod tests {
         let mut args = IO(S(1, 1, 1));
         ct.execute(&mut args);
         assert_eq!(args.0, S(10, 10, 10));
+    }
+
+    #[test]
+    fn test_rvalue_len() {
+        struct IO<'a>(&'a [u8], u8);
+
+        fn matchthis(inputs: &IO, pc: usize) -> u8 {
+            let x = match inputs.0[pc] as char {
+                'a' => 1,
+                'b' => 2,
+                _ => 0,
+            };
+            x
+        }
+
+        let a = "abc".as_bytes();
+        let mut inputs = trace_inputs(IO(&a, 0));
+        let th = start_tracing(TracingKind::HardwareTracing);
+        let x = matchthis(&inputs, 0);
+        inputs.1 = x;
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
+        let mut a2 = "abc".as_bytes();
+        let mut args = IO(&mut a2, 0);
+        ct.execute(&mut args);
+        assert_eq!(args.1, 1);
     }
 }
