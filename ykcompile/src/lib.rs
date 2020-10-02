@@ -47,7 +47,7 @@ impl Display for CompileError {
 /// Converts a register number into it's string name.
 fn local_to_reg_name(loc: &Location) -> &'static str {
     match loc {
-        Location::Register(r, _) => match r {
+        Location::Register(r) => match r {
             0 => "rax",
             1 => "rcx",
             2 => "rdx",
@@ -100,9 +100,13 @@ pub struct RegAndOffset {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Location {
-    /// Register number, and if it contains a pointer.
-    Register(u8, bool),
+    /// A value in a register.
+    Register(u8),
+    /// A statically known memory location relative to a register.
     Mem(RegAndOffset),
+    /// A runtime memory location stored in a register.
+    Addr(u8),
+    /// A non-live location. Used by the register allocator.
     NotLive,
 }
 
@@ -122,9 +126,9 @@ impl Location {
     }
 
     /// If `self` is a `Register` then unwrap it, otherwise panic.
-    fn unwrap_reg(&self) -> (u8, bool) {
-        if let Location::Register(reg, is_ptr) = self {
-            (*reg, *is_ptr)
+    fn unwrap_reg(&self) -> u8 {
+        if let Location::Register(reg) = self {
+            *reg
         } else {
             panic!("tried to unwrap a Register location when it wasn't a Register");
         }
@@ -253,20 +257,22 @@ impl<TT> TraceCompiler<TT> {
                                         ; lea Rq(temp), [Rq(ro.reg) + ro.offs + i32::try_from(offs).unwrap()]
                                     );
                                 }
-                                Location::Register(reg, _) => {
+                                Location::Register(reg) => {
                                     dynasm!(self.asm
                                         ; lea Rq(temp), [Rq(reg) + i32::try_from(offs).unwrap()]
                                     );
                                 }
                                 _ => unreachable!(),
                             }
-                            if !store {
+                            self.free_if_temp(curloc);
+                            curloc = if store {
+                                Location::Addr(temp)
+                            } else {
                                 dynasm!(self.asm
                                     ; mov Rq(temp), [Rq(temp)]
                                 );
-                            }
-                            self.free_if_temp(curloc);
-                            curloc = Location::Register(temp, store);
+                                Location::Register(temp)
+                            };
                         }
                         Ty::Tuple(_tty) => todo!(),
                         _ => unreachable!(),
@@ -304,21 +310,23 @@ impl<TT> TraceCompiler<TT> {
                                     ; mov Rq(temp), [Rq(ro.reg) + ro.offs]
                                 );
                             }
-                            Location::Register(reg, _) => {
+                            Location::Register(reg) => {
                                 dynasm!(self.asm
                                     ; mov Rq(temp), Rq(reg)
                                 );
                             }
                             _ => unreachable!(),
                         };
-                        if !store {
+                        self.free_if_temp(curloc);
+                        curloc = if store {
+                            Location::Addr(temp)
+                        } else {
                             dynasm!(self.asm
                                 ; mov Rq(temp), [Rq(temp)]
                             );
-                        }
+                            Location::Register(temp)
+                        };
                         ty = SIR.ty(&tyid).clone();
-                        self.free_if_temp(curloc);
-                        curloc = Location::Register(temp, store)
                     }
                 }
                 Projection::Index(local) => {
@@ -339,7 +347,7 @@ impl<TT> TraceCompiler<TT> {
                     // Compute the offset of this index.
                     let temp = self.create_temporary();
                     match self.local_to_location(*local) {
-                        Location::Register(reg, _) => {
+                        Location::Register(reg) => {
                             dynasm!(self.asm
                                 ; imul Rq(temp), Rq(reg), elemsize as i32
                             );
@@ -358,20 +366,22 @@ impl<TT> TraceCompiler<TT> {
                                 ; add Rq(temp), [Rq(ro.reg) + ro.offs]
                             );
                         }
-                        Location::Register(reg, _) => {
+                        Location::Register(reg) => {
                             dynasm!(self.asm
                                 ; add Rq(temp), Rq(reg)
                             );
                         }
                         _ => unreachable!(),
                     }
-                    if !store {
+                    self.free_if_temp(curloc);
+                    curloc = if store {
+                        Location::Addr(temp)
+                    } else {
                         dynasm!(self.asm
                             ; mov Rq(temp), [Rq(temp)]
                         );
-                    }
-                    self.free_if_temp(curloc);
-                    curloc = Location::Register(temp, store);
+                        Location::Register(temp)
+                    };
                 }
                 _ => todo!("{}", p),
             }
@@ -395,7 +405,7 @@ impl<TT> TraceCompiler<TT> {
                 // Find a free register to store this local.
                 let loc = if let Some(reg) = self.get_free_register() {
                     self.register_content_map.insert(reg, RegAlloc::Local(l));
-                    Location::Register(reg, false)
+                    Location::Register(reg)
                 } else {
                     // All registers are occupied, so we need to spill the local to the stack.
                     self.spill_local_to_stack(&l)
@@ -457,7 +467,7 @@ impl<TT> TraceCompiler<TT> {
     /// Free the temporary register so it can be re-used.
     fn free_if_temp(&mut self, loc: Location) {
         match loc {
-            Location::Register(reg, _) => {
+            Location::Register(reg) | Location::Addr(reg) => {
                 if matches!(self.register_content_map[&reg], RegAlloc::Temp) {
                     self.register_content_map.insert(reg, RegAlloc::Free);
                 }
@@ -470,7 +480,7 @@ impl<TT> TraceCompiler<TT> {
     /// Notifies the register allocator that the register allocated to `local` may now be re-used.
     fn free_register(&mut self, local: &Local) -> Result<(), CompileError> {
         match self.variable_location_map.get(local) {
-            Some(Location::Register(reg, _)) => {
+            Some(Location::Register(reg)) | Some(Location::Addr(reg)) => {
                 // If this local is currently stored in a register, free it.
                 self.register_content_map.insert(*reg, RegAlloc::Free);
             }
@@ -546,21 +556,21 @@ impl<TT> TraceCompiler<TT> {
                 let (rloc, _) = self.place_to_location(&np, false);
                 let reg = self.create_temporary();
                 match rloc {
-                    Location::Register(reg2, _) => {
+                    Location::Register(reg2) => {
                         dynasm!(self.asm
                             ; mov Rq(reg), Rq(reg2)
                         );
                     }
                     _ => todo!(),
                 }
-                return Location::Register(reg, false);
+                return Location::Register(reg);
             }
         }
 
         // We can only reference Locals living on the stack. So move it there if it doesn't.
         let reg = self.create_temporary();
         let rloc = match self.place_to_location(p, false) {
-            (Location::Register(reg2, _), _) => {
+            (Location::Register(reg2), _) => {
                 let loc = self.stack_builder.alloc(8, 8);
                 let ro = loc.unwrap_mem();
                 dynasm!(self.asm
@@ -584,7 +594,7 @@ impl<TT> TraceCompiler<TT> {
             _ => unreachable!(),
         };
         self.free_if_temp(rloc);
-        Location::Register(reg, false)
+        Location::Register(reg)
     }
 
     /// Emit a NOP operation.
@@ -601,7 +611,7 @@ impl<TT> TraceCompiler<TT> {
         dynasm!(self.asm
             ; mov Rq(reg), QWORD c_val
         );
-        Location::Register(reg, false)
+        Location::Register(reg)
     }
 
     /// Codegen a Boolean into a `Location`.
@@ -610,7 +620,7 @@ impl<TT> TraceCompiler<TT> {
         dynasm!(self.asm
             ; mov Rq(reg), QWORD b as i64
         );
-        Location::Register(reg, false)
+        Location::Register(reg)
     }
 
     /// Compile the entry into an inlined function call.
@@ -722,7 +732,7 @@ impl<TT> TraceCompiler<TT> {
                     // Load argument back from the stack.
                     let (loc, _) = self.place_to_location(place, false);
                     match &loc {
-                        Location::Register(reg, _) => {
+                        Location::Register(reg) => {
                             let off = stack_index(*reg) * 8;
                             dynasm!(self.asm
                                 ; mov Rq(arg_reg), [rsp + off]
@@ -733,7 +743,7 @@ impl<TT> TraceCompiler<TT> {
                                 ; mov Rq(arg_reg), [Rq(ro.reg) + ro.offs]
                             );
                         }
-                        Location::NotLive => unreachable!(),
+                        Location::Addr(_) | Location::NotLive => unreachable!(),
                     };
                     self.free_if_temp(loc);
                 }
@@ -762,7 +772,7 @@ impl<TT> TraceCompiler<TT> {
         self.caller_save_restore();
 
         if let Some(d) = dest {
-            self.store(d, Location::Register(RAX.code(), false));
+            self.store(d, Location::Register(RAX.code()));
         }
 
         Ok(())
@@ -777,7 +787,7 @@ impl<TT> TraceCompiler<TT> {
             Operand::Constant(Constant::Bool(_b)) => unreachable!(),
             Operand::Constant(c) => todo!("{}", c),
         };
-        let dest = dest_loc.unwrap_reg().0;
+        let dest = dest_loc.unwrap_reg();
         // Add together `dest` and `op2`.
         match op2 {
             Operand::Place(p) => {
@@ -807,7 +817,7 @@ impl<TT> TraceCompiler<TT> {
     // Code-gen the addition of a `Location` to the value in the register `dest_reg`.
     fn c_checked_add_place(&mut self, dest_reg: u8, src_loc: &Location) {
         match src_loc {
-            Location::Register(reg, _) => {
+            Location::Register(reg) => {
                 dynasm!(self.asm
                     ; add Rq(dest_reg), Rq(reg)
                 );
@@ -878,41 +888,40 @@ impl<TT> TraceCompiler<TT> {
     fn store(&mut self, dest_plc: &Place, src_loc: Location) {
         let (dest_loc, ty) = self.place_to_location(dest_plc, true);
         match (&dest_loc, &src_loc) {
-            (Location::Register(dest_reg, dest_is_ptr), Location::Register(src_reg, _)) => {
-                if *dest_is_ptr {
-                    // If the lhs is a projection that results in a memory address (e.g.
-                    // `(*$1).0`), then the value in `dest_reg` is a pointer to store into.
-                    match ty.size() {
-                        0 => (), // ZST.
-                        1 => {
-                            dynasm!(self.asm
+            (Location::Addr(dest_reg), Location::Register(src_reg)) => {
+                // If the lhs is a projection that results in a memory address (e.g.
+                // `(*$1).0`), then the value in `dest_reg` is a pointer to store into.
+                match ty.size() {
+                    0 => (), // ZST.
+                    1 => {
+                        dynasm!(self.asm
                             ; mov [Rq(dest_reg)], Rb(src_reg)
-                            );
-                        }
-                        2 => {
-                            dynasm!(self.asm
-                            ; mov [Rq(dest_reg)], Rw(src_reg)
-                            );
-                        }
-                        4 => {
-                            dynasm!(self.asm
-                            ; mov [Rq(dest_reg)], Rd(src_reg)
-                            );
-                        }
-                        8 => {
-                            dynasm!(self.asm
-                            ; mov [Rq(dest_reg)], Rq(src_reg)
-                            );
-                        }
-                        _ => unreachable!(),
+                        );
                     }
-                } else {
-                    dynasm!(self.asm
-                        ; mov Rq(dest_reg), Rq(src_reg)
-                    );
+                    2 => {
+                        dynasm!(self.asm
+                            ; mov [Rq(dest_reg)], Rw(src_reg)
+                        );
+                    }
+                    4 => {
+                        dynasm!(self.asm
+                            ; mov [Rq(dest_reg)], Rd(src_reg)
+                        );
+                    }
+                    8 => {
+                        dynasm!(self.asm
+                            ; mov [Rq(dest_reg)], Rq(src_reg)
+                        );
+                    }
+                    _ => unreachable!(),
                 }
             }
-            (Location::Mem(dest_ro), Location::Register(src_reg, _)) => {
+            (Location::Register(dest_reg), Location::Register(src_reg)) => {
+                dynasm!(self.asm
+                    ; mov Rq(dest_reg), Rq(src_reg)
+                );
+            }
+            (Location::Mem(dest_ro), Location::Register(src_reg)) => {
                 match ty.size() {
                     0 => (), // ZST.
                     1 => {
@@ -969,79 +978,79 @@ impl<TT> TraceCompiler<TT> {
                         }
                         _ => unreachable!(),
                     }
-                    self.free_if_temp(Location::Register(temp, false));
+                    self.free_if_temp(Location::Register(temp));
                 } else {
                     self.copy_memory(dest_ro, src_ro, ty.size());
                 }
             }
-            (Location::Register(dest_reg, dest_is_ptr), Location::Mem(src_ro)) => {
-                if *dest_is_ptr {
-                    if ty.size() <= 8 {
-                        let temp = self.create_temporary();
-                        match ty.size() {
-                            0 => (), // ZST.
-                            1 => {
-                                dynasm!(self.asm
-                                    ; mov Rb(temp), BYTE [Rq(src_ro.reg) + src_ro.offs]
-                                    ; mov BYTE [Rq(dest_reg)], Rb(temp)
-                                );
-                            }
-                            2 => {
-                                dynasm!(self.asm
-                                    ; mov Rw(temp), WORD [Rq(src_ro.reg) + src_ro.offs]
-                                    ; mov WORD [Rq(dest_reg)], Rw(temp)
-                                );
-                            }
-                            4 => {
-                                dynasm!(self.asm
-                                    ; mov Rd(temp), DWORD [Rq(src_ro.reg) + src_ro.offs]
-                                    ; mov DWORD [Rq(dest_reg)], Rd(temp)
-                                );
-                            }
-                            8 => {
-                                dynasm!(self.asm
-                                    ; mov Rq(temp), QWORD [Rq(src_ro.reg) + src_ro.offs]
-                                    ; mov QWORD [Rq(dest_reg)], Rq(temp)
-                                );
-                            }
-                            _ => unreachable!(),
-                        }
-                        self.free_if_temp(Location::Register(temp, false));
-                    } else {
-                        self.copy_memory(
-                            &RegAndOffset {
-                                reg: *dest_reg,
-                                offs: 0,
-                            },
-                            src_ro,
-                            ty.size(),
-                        );
-                    }
-                } else {
+            //(Location::Register(dest_reg, dest_is_ptr), Location::Mem(src_ro)) => {
+            (Location::Addr(dest_reg), Location::Mem(src_ro)) => {
+                if ty.size() <= 8 {
+                    let temp = self.create_temporary();
                     match ty.size() {
                         0 => (), // ZST.
                         1 => {
                             dynasm!(self.asm
-                                ; mov Rb(dest_reg), BYTE [Rq(src_ro.reg) + src_ro.offs]
+                                ; mov Rb(temp), BYTE [Rq(src_ro.reg) + src_ro.offs]
+                                ; mov BYTE [Rq(dest_reg)], Rb(temp)
                             );
                         }
                         2 => {
                             dynasm!(self.asm
-                                ; mov Rw(dest_reg), WORD [Rq(src_ro.reg) + src_ro.offs]
+                                ; mov Rw(temp), WORD [Rq(src_ro.reg) + src_ro.offs]
+                                ; mov WORD [Rq(dest_reg)], Rw(temp)
                             );
                         }
                         4 => {
                             dynasm!(self.asm
-                                ; mov Rd(dest_reg), DWORD [Rq(src_ro.reg) + src_ro.offs]
+                                ; mov Rd(temp), DWORD [Rq(src_ro.reg) + src_ro.offs]
+                                ; mov DWORD [Rq(dest_reg)], Rd(temp)
                             );
                         }
                         8 => {
                             dynasm!(self.asm
-                                ; mov Rq(dest_reg), QWORD [Rq(src_ro.reg) + src_ro.offs]
+                                ; mov Rq(temp), QWORD [Rq(src_ro.reg) + src_ro.offs]
+                                ; mov QWORD [Rq(dest_reg)], Rq(temp)
                             );
                         }
                         _ => unreachable!(),
                     }
+                    self.free_if_temp(Location::Register(temp));
+                } else {
+                    self.copy_memory(
+                        &RegAndOffset {
+                            reg: *dest_reg,
+                            offs: 0,
+                        },
+                        src_ro,
+                        ty.size(),
+                    );
+                }
+            }
+            (Location::Register(dest_reg), Location::Mem(src_ro)) => {
+                match ty.size() {
+                    0 => (), // ZST.
+                    1 => {
+                        dynasm!(self.asm
+                            ; mov Rb(dest_reg), BYTE [Rq(src_ro.reg) + src_ro.offs]
+                        );
+                    }
+                    2 => {
+                        dynasm!(self.asm
+                            ; mov Rw(dest_reg), WORD [Rq(src_ro.reg) + src_ro.offs]
+                        );
+                    }
+                    4 => {
+                        dynasm!(self.asm
+                            ; mov Rd(dest_reg), DWORD [Rq(src_ro.reg) + src_ro.offs]
+                        );
+                    }
+                    8 => {
+                        dynasm!(self.asm
+                            ; mov Rq(dest_reg), QWORD [Rq(src_ro.reg) + src_ro.offs]
+                        );
+                    }
+                    _ => unreachable!(),
                 }
             }
             _ => unreachable!(),
