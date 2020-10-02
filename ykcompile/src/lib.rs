@@ -331,7 +331,7 @@ impl<TT> TraceCompiler<TT> {
                 }
                 Projection::Index(local) => {
                     // Get the type of the array elements.
-                    let elemsize = match ty {
+                    let elem_ty = match ty {
                         Ty::Array(_) => {
                             // FIXME Since we can't compile array construction yet, we can assume
                             // we are always dealing with references here. Once we can, the
@@ -339,7 +339,7 @@ impl<TT> TraceCompiler<TT> {
                             todo!()
                         }
                         Ty::Ref(tyid) => match SIR.ty(&tyid) {
-                            Ty::Array(ety) => SIR.ty(&ety).size(),
+                            Ty::Array(ety) => SIR.ty(&ety),
                             _ => unreachable!(),
                         },
                         _ => unreachable!(),
@@ -349,12 +349,12 @@ impl<TT> TraceCompiler<TT> {
                     match self.local_to_location(*local) {
                         Location::Register(reg) => {
                             dynasm!(self.asm
-                                ; imul Rq(temp), Rq(reg), elemsize as i32
+                                ; imul Rq(temp), Rq(reg), elem_ty.size() as i32
                             );
                         }
                         Location::Mem(ro) => {
                             dynasm!(self.asm
-                                ; imul Rq(temp), [Rq(ro.reg) + ro.offs], elemsize as i32
+                                ; imul Rq(temp), [Rq(ro.reg) + ro.offs], elem_ty.size() as i32
                             );
                         }
                         _ => todo!(),
@@ -382,6 +382,7 @@ impl<TT> TraceCompiler<TT> {
                         );
                         Location::Register(temp)
                     };
+                    ty = elem_ty.clone();
                 }
                 _ => todo!("{}", p),
             }
