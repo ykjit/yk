@@ -456,6 +456,10 @@ impl VarRenamer {
                 let newplace = self.rename_place(place, body);
                 Rvalue::Ref(newplace)
             }
+            Rvalue::Len(place) => {
+                let newplace = self.rename_place(place, body);
+                Rvalue::Len(newplace)
+            }
             Rvalue::Unimplemented(_) => rvalue.clone()
         }
     }

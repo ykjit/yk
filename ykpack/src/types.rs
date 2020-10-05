@@ -39,6 +39,8 @@ pub enum Ty {
     Tuple(TupleTy),
     /// An array type.
     Array(TypeId),
+    /// A slice type.
+    Slice(TypeId),
     /// A reference to something.
     Ref(TypeId),
     /// A Boolean.
@@ -55,6 +57,7 @@ impl Display for Ty {
             Ty::Struct(sty) => write!(f, "{}", sty),
             Ty::Tuple(tty) => write!(f, "{}", tty),
             Ty::Array(aty) => write!(f, "&{:?}", aty),
+            Ty::Slice(sty) => write!(f, "&{:?}", sty),
             Ty::Ref(rty) => write!(f, "&{:?}", rty),
             Ty::Bool => write!(f, "bool"),
             Ty::Unimplemented(m) => write!(f, "Unimplemented: {}", m),
@@ -601,6 +604,7 @@ pub enum Rvalue {
     BinaryOp(BinOp, Operand, Operand),
     CheckedBinaryOp(BinOp, Operand, Operand),
     Ref(Place),
+    Len(Place),
     Unimplemented(String),
 }
 
@@ -617,6 +621,7 @@ impl Rvalue {
                 opnd2.push_used_locals(locals);
             }
             Rvalue::Ref(plc) => plc.push_used_locals(locals),
+            Rvalue::Len(plc) => plc.push_used_locals(locals),
             Rvalue::Unimplemented(_) => (),
         }
     }
@@ -631,6 +636,7 @@ impl Display for Rvalue {
                 write!(f, "checked_{}({}, {})", op, oper1, oper2)
             }
             Self::Ref(p) => write!(f, "&{}", p),
+            Self::Len(p) => write!(f, "Len({})", p),
             Self::Unimplemented(s) => write!(f, "unimplemented rvalue: {}", s),
         }
     }
