@@ -566,6 +566,7 @@ impl<TT> TraceCompiler<TT> {
                     }
                     _ => todo!(),
                 }
+                self.free_if_temp(rloc);
                 return Location::Register(reg);
             }
         }
