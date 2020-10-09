@@ -44,7 +44,6 @@ impl Default for TracingKind {
 }
 
 /// Represents a thread which is currently tracing.
-#[thread_tracer]
 pub struct ThreadTracer {
     /// The tracing implementation.
     t_impl: Box<dyn ThreadTracerImpl>
@@ -52,7 +51,6 @@ pub struct ThreadTracer {
 
 impl ThreadTracer {
     /// Stops tracing on the current thread, returning a TIR trace on success.
-    #[trace_tail]
     pub fn stop_tracing(mut self) -> Result<Box<dyn SirTrace>, InvalidTraceError> {
         self.t_impl.stop_tracing()
     }
@@ -61,14 +59,12 @@ impl ThreadTracer {
 // An generic interface which tracing backends must fulfill.
 trait ThreadTracerImpl {
     /// Stops tracing on the current thread, returning the SIR trace on success.
-    #[trace_tail]
     fn stop_tracing(&mut self) -> Result<Box<dyn SirTrace>, InvalidTraceError>;
 }
 
 /// Start tracing on the current thread using the specified tracing kind.
 /// Each thread can have at most one active tracer; calling `start_tracing()` on a thread where
 /// there is already an active tracer leads to undefined behaviour.
-#[trace_head]
 pub fn start_tracing(kind: TracingKind) -> ThreadTracer {
     #[cfg(not(any(doctest, tracermode = "hw", tracermode = "sw")))]
     compile_error!("Please compile with `-C tracer=T`, where T is one of 'hw' or 'sw'");
@@ -87,12 +83,6 @@ pub fn start_tracing(kind: TracingKind) -> ThreadTracer {
             hwt::start_tracing()
         }
     }
-}
-
-#[inline(never)]
-#[trace_inputs]
-pub fn trace_inputs<T>(tup: T) -> T {
-    tup
 }
 
 /// The bodies of tests that we want to run on all tracing kinds live in here.
@@ -176,14 +166,5 @@ mod test_helpers {
         for i in 0..trace.raw_len() {
             trace.raw_loc(i);
         }
-    }
-
-    /// Test iteration over a trace.
-    pub(crate) fn test_trace_iterator(kind: TracingKind) {
-        let mut th = start_tracing(kind);
-        black_box(work(&mut WorkIO(10)));
-        let trace = th.t_impl.stop_tracing().unwrap();
-        // The length of the iterator will be shorter due to trimming.
-        assert!(trace.into_iter().count() < trace.raw_len());
     }
 }

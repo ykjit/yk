@@ -1,9 +1,8 @@
 //! Hardware tracing via ykrustc.
 
 use super::{SirTrace, ThreadTracer, ThreadTracerImpl};
-use crate::{errors::InvalidTraceError, sir::SIR, SirLoc};
+use crate::{errors::InvalidTraceError, SirLoc};
 use hwtracer::backends::TracerBuilder;
-use ykpack::Local;
 
 pub mod mapper;
 use mapper::HWTMapper;
@@ -22,12 +21,6 @@ impl SirTrace for HWTSirTrace {
     fn raw_loc(&self, idx: usize) -> &SirLoc {
         &self.sirtrace[idx]
     }
-
-    fn input(&self) -> Local {
-        let blk = (self as &dyn SirTrace).into_iter().next().unwrap();
-        let body = &SIR.bodies[&blk.symbol_name];
-        body.trace_inputs_local.unwrap()
-    }
 }
 
 /// Hardware thread tracer.
@@ -36,7 +29,6 @@ struct HWTThreadTracer {
 }
 
 impl ThreadTracerImpl for HWTThreadTracer {
-    #[trace_tail]
     fn stop_tracing(&mut self) -> Result<Box<dyn SirTrace>, InvalidTraceError> {
         let hwtrace = self.ttracer.stop_tracing().unwrap();
         let mt = HWTMapper::new();
@@ -46,7 +38,6 @@ impl ThreadTracerImpl for HWTThreadTracer {
     }
 }
 
-#[trace_head]
 pub fn start_tracing() -> ThreadTracer {
     let tracer = TracerBuilder::new().build().unwrap();
     let mut ttracer = (*tracer).thread_tracer();
@@ -87,10 +78,5 @@ mod tests {
     #[test]
     fn test_in_bounds_trace_indices() {
         test_helpers::test_in_bounds_trace_indices(TRACING_KIND);
-    }
-
-    #[test]
-    fn test_trace_iterator() {
-        test_helpers::test_trace_iterator(TRACING_KIND);
     }
 }

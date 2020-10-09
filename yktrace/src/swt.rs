@@ -46,19 +46,12 @@ impl SirTrace for SWTSirTrace {
     fn raw_loc(&self, idx: usize) -> &SirLoc {
         &self.locs[idx]
     }
-
-    fn input(&self) -> Local {
-        let blk = (self as &dyn SirTrace).into_iter().next().unwrap();
-        let body = &SIR.bodies[&blk.symbol_name];
-        body.trace_inputs_local.unwrap()
-    }
 }
 
 /// Softare thread tracer.
 struct SWTThreadTracer;
 
 impl ThreadTracerImpl for SWTThreadTracer {
-    #[trace_tail]
     fn stop_tracing(&mut self) -> Result<Box<dyn SirTrace>, InvalidTraceError> {
         let mut len = 0;
         let buf = unsafe { yk_swt_stop_tracing_impl(&mut len) };
@@ -70,7 +63,6 @@ impl ThreadTracerImpl for SWTThreadTracer {
     }
 }
 
-#[trace_head]
 pub fn start_tracing() -> ThreadTracer {
     unsafe {
         yk_swt_start_tracing_impl();
@@ -283,10 +275,5 @@ mod tests {
     #[test]
     fn test_in_bounds_trace_indices() {
         test_helpers::test_in_bounds_trace_indices(TRACING_KIND);
-    }
-
-    #[test]
-    fn test_trace_iterator() {
-        test_helpers::test_trace_iterator(TRACING_KIND);
     }
 }

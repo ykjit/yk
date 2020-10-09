@@ -356,7 +356,7 @@ impl<TT> TraceCompiler<TT> {
                                 ; add Rq(temp), [Rq(ro.reg) + ro.offs]
                             );
                         }
-                        Location::Register(reg) => todo!(),
+                        Location::Register(_) => todo!(),
                         Location::Addr(reg) => {
                             dynasm!(self.asm
                                 ; add Rq(temp), Rq(reg)
@@ -423,9 +423,7 @@ impl<TT> TraceCompiler<TT> {
     /// performs one.
     fn local_to_location(&mut self, l: Local) -> Location {
         if l == INTERP_STEP_ARG {
-            // If the local references `trace_inputs` return its location on the stack, which is
-            // stored in the first argument of the executed trace.
-            Location::Register(RDI.code())
+            Location::Register(RDI.code()) // i.e. the first arg register.
         } else if let Some(location) = self.variable_location_map.get(&l) {
             // We already have a location for this local.
             location.clone()
@@ -1290,7 +1288,7 @@ mod tests {
     use std::marker::PhantomData;
     use yktrace::sir::SIR;
     use yktrace::tir::TirTrace;
-    use yktrace::{start_tracing, trace_inputs, TracingKind};
+    use yktrace::{start_tracing, TracingKind};
 
     extern "C" {
         fn add6(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64) -> u64;
@@ -1953,7 +1951,7 @@ mod tests {
         }
 
         struct IO(u64);
-        let mut inputs = trace_inputs(IO(0));
+        let mut inputs = IO(0);
         let th = start_tracing(TracingKind::HardwareTracing);
         interp_step(&mut inputs);
         let sir_trace = th.stop_tracing().unwrap();

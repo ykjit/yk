@@ -22,7 +22,6 @@ pub use ykpack::{
 #[derive(Debug)]
 pub struct TirTrace<'a> {
     ops: Vec<TirOp>,
-    trace_inputs_local: Option<Local>,
     /// Maps each local variable to its declaration, including type.
     pub local_decls: HashMap<Local, LocalDecl>,
     pub addr_map: HashMap<String, u64>,
@@ -35,9 +34,8 @@ impl<'a> TirTrace<'a> {
     /// is encountered for which no SIR is available.
     pub fn new<'s>(sir: &'a Sir, trace: &'s dyn SirTrace) -> Result<Self, InvalidTraceError> {
         let mut ops = Vec::new();
-        let mut itr = SirTraceIterator::new(sir, trace).peekable();
+        let mut itr = SirTraceIterator::new(trace).peekable();
         let mut rnm = VarRenamer::new();
-        let mut trace_inputs_local: Option<Local> = None;
         // Symbol name of the function currently being ignored during tracing.
         let mut ignore: Option<String> = None;
         // Maps symbol names to their virtual addresses.
@@ -100,9 +98,6 @@ impl<'a> TirTrace<'a> {
                 }
             };
 
-            // Store trace inputs local and forward it to the TIR trace.
-            trace_inputs_local = body.trace_inputs_local;
-
             // Initialise VarRenamer's accumulator (and thus also set the first offset) to the
             // traces most outer number of locals.
             rnm.init_acc(body.local_decls.len());
@@ -140,20 +135,6 @@ impl<'a> TirTrace<'a> {
                 // function `bar` is inlined into a function `foo`, and `foo` used 5 variables, then
                 // all variables in `bar` are offset by 5.
                 for stmt in body.blocks[user_bb_idx_usize].stmts.iter() {
-                    // If the statement references a thread tracer local then discard the statement.
-                    let mut skip = false;
-                    for lcl in stmt.used_locals() {
-                        if sir.is_thread_tracer_ty(
-                            &body.local_decls[usize::try_from(lcl.0).unwrap()].ty
-                        ) {
-                            skip = true;
-                            break;
-                        }
-                    }
-                    if skip {
-                        continue;
-                    }
-
                     let op = match stmt {
                         // StorageDead can't appear in SIR, only TIR.
                         Statement::StorageDead(_) => unreachable!(),
@@ -349,31 +330,27 @@ impl<'a> TirTrace<'a> {
         let mut deads = last_use_sites.iter().collect::<Vec<(&Local, &usize)>>();
         deads.sort_by(|a, b| b.1.cmp(a.1));
         for (local, idx) in deads {
-            // The trace inputs local is always live.
-            if trace_inputs_local.is_none() || *local != trace_inputs_local.unwrap() {
-                if def_sites[local] == *idx && !ops[*idx].may_have_side_effects() {
-                    // If a defined local is never used, and the statement that defines it isn't
-                    // side-effecting, then we can remove the statement and local's decl entirely.
-                    //
-                    // FIXME This is not perfect. Consider `x.0 = 0; x.1 = 1` and then x is not
-                    // used after. The first operation will be seen to define `x`, the second will
-                    // be seen as a use of `x`, and thus neither of these statements will be
-                    // removed.
-                    ops.remove(*idx);
-                    let prev = local_decls.remove(&local);
-                    debug_assert!(prev.is_some());
-                } else {
-                    ops.insert(
-                        *idx + 1,
-                        TirOp::Statement(ykpack::Statement::StorageDead(local.clone()))
-                    );
-                }
+            if def_sites[local] == *idx && !ops[*idx].may_have_side_effects() {
+                // If a defined local is never used, and the statement that defines it isn't
+                // side-effecting, then we can remove the statement and local's decl entirely.
+                //
+                // FIXME This is not perfect. Consider `x.0 = 0; x.1 = 1` and then x is not
+                // used after. The first operation will be seen to define `x`, the second will
+                // be seen as a use of `x`, and thus neither of these statements will be
+                // removed.
+                ops.remove(*idx);
+                let prev = local_decls.remove(&local);
+                debug_assert!(prev.is_some());
+            } else {
+                ops.insert(
+                    *idx + 1,
+                    TirOp::Statement(ykpack::Statement::StorageDead(local.clone()))
+                );
             }
         }
 
         Ok(Self {
             ops,
-            trace_inputs_local,
             local_decls,
             addr_map,
             sir
@@ -385,10 +362,6 @@ impl<'a> TirTrace<'a> {
     pub unsafe fn op(&self, idx: usize) -> &TirOp {
         debug_assert!(idx <= self.ops.len() - 1, "bogus trace index");
         &self.ops.get_unchecked(idx)
-    }
-
-    pub fn inputs(&self) -> &Option<Local> {
-        &self.trace_inputs_local
     }
 
     /// Return the length of the trace measure in operations.
@@ -410,9 +383,7 @@ struct VarRenamer {
     /// renaming.
     returns: Vec<Place>,
     /// Maps a renamed local to its local declaration.
-    local_decls: HashMap<Local, LocalDecl>,
-    /// The renamed trace input local, if it is known yet.
-    trace_inputs_local: Option<Local>
+    local_decls: HashMap<Local, LocalDecl>
 }
 
 impl VarRenamer {
@@ -422,8 +393,7 @@ impl VarRenamer {
             offset: 0,
             acc: None,
             returns: Vec::new(),
-            local_decls: HashMap::new(),
-            trace_inputs_local: None
+            local_decls: HashMap::new()
         }
     }
 
@@ -559,12 +529,6 @@ impl VarRenamer {
             body.local_decls[usize::try_from(local.0).unwrap()].clone()
         );
 
-        if let Some(til) = body.trace_inputs_local {
-            if local == &til {
-                self.trace_inputs_local = Some(renamed);
-            }
-        }
-
         renamed
     }
 }
@@ -578,19 +542,12 @@ impl Display for TirTrace<'_> {
             .collect::<Vec<(&Local, &LocalDecl)>>();
         sort_decls.sort_by(|l, r| l.0.partial_cmp(r.0).unwrap());
         for (l, dcl) in sort_decls {
-            let thread_tracer = if self.sir.is_thread_tracer_ty(&dcl.ty) {
-                "[THREAD TRACER] "
-            } else {
-                ""
-            };
-
             writeln!(
                 f,
-                "  {}: ({}, {}) => {}{}",
+                "  {}: ({}, {}) => {}",
                 l,
                 dcl.ty.0,
                 dcl.ty.1,
-                thread_tracer,
                 self.sir.ty(&dcl.ty)
             )?;
         }
