@@ -30,6 +30,11 @@ use dynasmrt::{DynasmApi, DynasmLabelApi};
 
 const CALLER_SAVE_REGS: [dynasmrt::x64::Rq; 8] = [RDI, RSI, RDX, RCX, R8, R9, R10, R11];
 
+// Register partitioning. These arrays must not overlap.
+// FIXME add callee save registers to the pool. Trace code will need to save/restore them.
+const TEMP_REGS: [dynasmrt::x64::Rq; 2] = [R10, R11];
+const LOCAL_REGS: [dynasmrt::x64::Rq; 4] = [R9, R8, RDX, RCX];
+
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub enum CompileError {
     /// The binary symbol could not be found.
@@ -135,9 +140,9 @@ impl Location {
     }
 }
 
+/// Allocation of one of the LOCAL_REGS. Temporary registers are tracked separately.
 enum RegAlloc {
     Local(Local),
-    Temp,
     Free,
 }
 
@@ -152,6 +157,8 @@ pub struct TraceCompiler<TT> {
     register_content_map: HashMap<u8, RegAlloc>,
     /// Maps trace locals to their location (register, stack).
     variable_location_map: HashMap<Local, Location>,
+    /// Available temproary registers.
+    temp_regs: Vec<u8>,
     /// Local referencing the input arguments to the trace.
     trace_inputs_local: Option<Local>,
     /// Local decls of the tir trace.
@@ -444,35 +451,24 @@ impl<TT> TraceCompiler<TT> {
     /// Find a free register to be used as a temporary. If no free register can be found, a
     /// register containing a Local is selected and its content spilled to the stack.
     fn create_temporary(&mut self) -> u8 {
-        // Find a free register to store this local.
-        if let Some(r) = self.get_free_register() {
-            self.register_content_map.insert(r, RegAlloc::Temp);
-            r
-        } else {
-            // All registers are occupied. Spill the first local we can find to the stack to free
-            // one up. FIXME: Be smarter about which local to spill.
-            let result = self.register_content_map.iter().find_map(|(k, v)| match v {
-                RegAlloc::Local(l) => Some((*k, *l)),
-                _ => None,
-            });
-            if let Some((reg, local)) = result {
-                let loc = self.spill_local_to_stack(&local);
-                self.variable_location_map.insert(local, loc);
-                // Assign temporary register.
-                self.register_content_map.insert(reg, RegAlloc::Temp);
-                reg
-            } else {
-                panic!("Temporaries exceed available registers.")
-            }
-        }
+        self.temp_regs
+            .pop()
+            .unwrap_or_else(|| panic!("Exhausted temporary registers!"))
     }
 
     /// Free the temporary register so it can be re-used.
     fn free_if_temp(&mut self, loc: Location) {
         match loc {
             Location::Register(reg) | Location::Addr(reg) => {
-                if matches!(self.register_content_map[&reg], RegAlloc::Temp) {
-                    self.register_content_map.insert(reg, RegAlloc::Free);
+                // FIXME cache the collected list we are searching here.
+                if TEMP_REGS
+                    .iter()
+                    .map(|r| r.code())
+                    .collect::<Vec<u8>>()
+                    .contains(&reg)
+                {
+                    debug_assert!(!self.temp_regs.contains(&reg), "double free temp reg");
+                    self.temp_regs.push(reg);
                 }
             }
             Location::Mem { .. } => {}
@@ -484,6 +480,11 @@ impl<TT> TraceCompiler<TT> {
     fn free_register(&mut self, local: &Local) -> Result<(), CompileError> {
         match self.variable_location_map.get(local) {
             Some(Location::Register(reg)) | Some(Location::Addr(reg)) => {
+                debug_assert!(!TEMP_REGS
+                    .iter()
+                    .map(|r| r.code())
+                    .collect::<Vec<u8>>()
+                    .contains(reg));
                 // If this local is currently stored in a register, free it.
                 self.register_content_map.insert(*reg, RegAlloc::Free);
             }
@@ -499,13 +500,7 @@ impl<TT> TraceCompiler<TT> {
     /// check at the end of a trace to make sure we haven't forgotten to free temporaries at the
     /// end of an operation.
     fn check_temporaries(&self) -> bool {
-        for (_, v) in self.register_content_map.iter() {
-            match v {
-                RegAlloc::Temp => return false,
-                _ => {}
-            }
-        }
-        true
+        self.temp_regs.len() == TEMP_REGS.len()
     }
 
     /// Copy bytes from one memory location to another.
@@ -583,7 +578,12 @@ impl<TT> TraceCompiler<TT> {
                 // This Local lives now on the stack...
                 self.variable_location_map.insert(p.local, loc.clone());
                 // ...so we can free its old register.
-                self.register_content_map.insert(reg, RegAlloc::Free);
+                debug_assert!(!TEMP_REGS
+                    .iter()
+                    .map(|r| r.code())
+                    .collect::<Vec<u8>>()
+                    .contains(&reg2));
+                self.register_content_map.insert(reg2, RegAlloc::Free);
                 loc
             }
             (loc, _) => loc,
@@ -602,8 +602,8 @@ impl<TT> TraceCompiler<TT> {
     }
 
     fn c_len(&mut self, p: &Place) -> Location {
-        let dst = self.create_temporary();
         let (loc, _) = self.place_to_location(p, true);
+        let dst = self.create_temporary();
         match loc {
             Location::Addr(src) => {
                 // A slice &[T] is a fat pointer with its length in the last 8 bytes.
@@ -1199,11 +1199,9 @@ impl<TT> TraceCompiler<TT> {
         let mut tt = tt;
         let mut tc = TraceCompiler::<TT> {
             asm: assembler,
-            // Use all the 64-bit registers we can (R11-R8, RDX, RCX). We probably also want to use the
-            // callee-saved registers R15-R12 here in the future.
-            register_content_map: [R11, R10, R9, R8, RDX, RCX]
+            temp_regs: TEMP_REGS.iter().map(|r| r.code()).collect::<Vec<u8>>(),
+            register_content_map: LOCAL_REGS
                 .iter()
-                .cloned()
                 .map(|r| (r.code(), RegAlloc::Free))
                 .collect(),
             variable_location_map: HashMap::new(),
@@ -1251,9 +1249,11 @@ impl<TT> TraceCompiler<TT> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CompileError, HashMap, Local, Location, RegAlloc, TraceCompiler};
+    use super::{
+        CompileError, HashMap, Local, Location, RegAlloc, TraceCompiler, LOCAL_REGS, TEMP_REGS,
+    };
     use crate::stack_builder::StackBuilder;
-    use dynasmrt::{x64::Rq::*, Register};
+    use dynasmrt::Register;
     use fm::FMBuilder;
     use libc::{abs, c_void, getuid};
     use regex::Regex;
@@ -1312,11 +1312,12 @@ mod tests {
         struct IO(u8);
         let mut tc = TraceCompiler::<IO> {
             asm: dynasmrt::x64::Assembler::new().unwrap(),
-            register_content_map: [R15, R14, R13, R12, R11, R10, R9, R8, RDX, RCX]
+            register_content_map: LOCAL_REGS
                 .iter()
                 .cloned()
                 .map(|r| (r.code(), RegAlloc::Free))
                 .collect(),
+            temp_regs: TEMP_REGS.iter().map(|r| r.code()).collect::<Vec<u8>>(),
             variable_location_map: HashMap::new(),
             trace_inputs_local: None,
             local_decls: HashMap::default(),
@@ -1341,11 +1342,12 @@ mod tests {
         struct IO(u8);
         let mut tc = TraceCompiler::<IO> {
             asm: dynasmrt::x64::Assembler::new().unwrap(),
-            register_content_map: [R15, R14, R13, R12, R11, R10, R9, R8, RDX, RCX]
+            register_content_map: LOCAL_REGS
                 .iter()
                 .cloned()
                 .map(|r| (r.code(), RegAlloc::Free))
                 .collect(),
+            temp_regs: TEMP_REGS.iter().map(|r| r.code()).collect::<Vec<u8>>(),
             variable_location_map: HashMap::new(),
             trace_inputs_local: None,
             local_decls,
