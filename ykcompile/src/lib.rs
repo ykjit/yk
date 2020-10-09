@@ -6,6 +6,8 @@
 
 #[macro_use]
 extern crate dynasmrt;
+#[macro_use]
+extern crate lazy_static;
 extern crate test;
 
 mod stack_builder;
@@ -28,12 +30,20 @@ use yktrace::tir::{
 
 use dynasmrt::{DynasmApi, DynasmLabelApi};
 
-const CALLER_SAVE_REGS: [dynasmrt::x64::Rq; 8] = [RDI, RSI, RDX, RCX, R8, R9, R10, R11];
+lazy_static! {
+    // Registers that are caller-save as per the Sys-V ABI.
+    static ref CALLER_SAVE_REGS: [u8; 8] = [RDI.code(), RSI.code(), RDX.code(), RCX.code(),
+                                            R8.code(), R9.code(), R10.code(), R11.code()];
 
-// Register partitioning. These arrays must not overlap.
-// FIXME add callee save registers to the pool. Trace code will need to save/restore them.
-const TEMP_REGS: [dynasmrt::x64::Rq; 2] = [R10, R11];
-const LOCAL_REGS: [dynasmrt::x64::Rq; 4] = [R9, R8, RDX, RCX];
+    // Register partitioning. These arrays must not overlap.
+    // FIXME add callee save registers to the pool. Trace code will need to save/restore them.
+    static ref TEMP_REGS: [u8; 2] = [R10.code(), R11.code()];
+    static ref LOCAL_REGS: [u8; 4] = [R9.code(), R8.code(), RDX.code(), RCX.code()];
+}
+
+fn is_temp_reg(reg: u8) -> bool {
+    TEMP_REGS.contains(&reg)
+}
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub enum CompileError {
@@ -460,13 +470,7 @@ impl<TT> TraceCompiler<TT> {
     fn free_if_temp(&mut self, loc: Location) {
         match loc {
             Location::Register(reg) | Location::Addr(reg) => {
-                // FIXME cache the collected list we are searching here.
-                if TEMP_REGS
-                    .iter()
-                    .map(|r| r.code())
-                    .collect::<Vec<u8>>()
-                    .contains(&reg)
-                {
+                if is_temp_reg(reg) {
                     debug_assert!(!self.temp_regs.contains(&reg), "double free temp reg");
                     self.temp_regs.push(reg);
                 }
@@ -480,11 +484,7 @@ impl<TT> TraceCompiler<TT> {
     fn free_register(&mut self, local: &Local) -> Result<(), CompileError> {
         match self.variable_location_map.get(local) {
             Some(Location::Register(reg)) | Some(Location::Addr(reg)) => {
-                debug_assert!(!TEMP_REGS
-                    .iter()
-                    .map(|r| r.code())
-                    .collect::<Vec<u8>>()
-                    .contains(reg));
+                debug_assert!(!is_temp_reg(*reg));
                 // If this local is currently stored in a register, free it.
                 self.register_content_map.insert(*reg, RegAlloc::Free);
             }
@@ -578,11 +578,7 @@ impl<TT> TraceCompiler<TT> {
                 // This Local lives now on the stack...
                 self.variable_location_map.insert(p.local, loc.clone());
                 // ...so we can free its old register.
-                debug_assert!(!TEMP_REGS
-                    .iter()
-                    .map(|r| r.code())
-                    .collect::<Vec<u8>>()
-                    .contains(&reg2));
+                debug_assert!(!is_temp_reg(reg2));
                 self.register_content_map.insert(reg2, RegAlloc::Free);
                 loc
             }
@@ -666,7 +662,7 @@ impl<TT> TraceCompiler<TT> {
     fn caller_save(&mut self) {
         for reg in CALLER_SAVE_REGS.iter() {
             dynasm!(self.asm
-                ; push Rq(reg.code())
+                ; push Rq(reg)
             );
         }
     }
@@ -675,7 +671,7 @@ impl<TT> TraceCompiler<TT> {
     fn caller_save_restore(&mut self) {
         for reg in CALLER_SAVE_REGS.iter().rev() {
             dynasm!(self.asm
-                ; pop Rq(reg.code())
+                ; pop Rq(reg)
             );
         }
     }
@@ -731,7 +727,7 @@ impl<TT> TraceCompiler<TT> {
                 CALLER_SAVE_REGS
                     .iter()
                     .rev()
-                    .position(|&r| r.code() == reg)
+                    .position(|&r| r == reg)
                     .unwrap(),
             )
             .unwrap()
@@ -1199,11 +1195,8 @@ impl<TT> TraceCompiler<TT> {
         let mut tt = tt;
         let mut tc = TraceCompiler::<TT> {
             asm: assembler,
-            temp_regs: TEMP_REGS.iter().map(|r| r.code()).collect::<Vec<u8>>(),
-            register_content_map: LOCAL_REGS
-                .iter()
-                .map(|r| (r.code(), RegAlloc::Free))
-                .collect(),
+            temp_regs: Vec::from(*TEMP_REGS),
+            register_content_map: LOCAL_REGS.iter().map(|r| (*r, RegAlloc::Free)).collect(),
             variable_location_map: HashMap::new(),
             trace_inputs_local: tt.inputs().map(|t| t.clone()),
             local_decls: tt.local_decls.clone(),
@@ -1253,7 +1246,6 @@ mod tests {
         CompileError, HashMap, Local, Location, RegAlloc, TraceCompiler, LOCAL_REGS, TEMP_REGS,
     };
     use crate::stack_builder::StackBuilder;
-    use dynasmrt::Register;
     use fm::FMBuilder;
     use libc::{abs, c_void, getuid};
     use regex::Regex;
@@ -1315,9 +1307,9 @@ mod tests {
             register_content_map: LOCAL_REGS
                 .iter()
                 .cloned()
-                .map(|r| (r.code(), RegAlloc::Free))
+                .map(|r| (r, RegAlloc::Free))
                 .collect(),
-            temp_regs: TEMP_REGS.iter().map(|r| r.code()).collect::<Vec<u8>>(),
+            temp_regs: Vec::from(*TEMP_REGS),
             variable_location_map: HashMap::new(),
             trace_inputs_local: None,
             local_decls: HashMap::default(),
@@ -1345,9 +1337,9 @@ mod tests {
             register_content_map: LOCAL_REGS
                 .iter()
                 .cloned()
-                .map(|r| (r.code(), RegAlloc::Free))
+                .map(|r| (r, RegAlloc::Free))
                 .collect(),
-            temp_regs: TEMP_REGS.iter().map(|r| r.code()).collect::<Vec<u8>>(),
+            temp_regs: Vec::from(*TEMP_REGS),
             variable_location_map: HashMap::new(),
             trace_inputs_local: None,
             local_decls,
