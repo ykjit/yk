@@ -39,7 +39,7 @@ fn main() {
                 addr: None,
             });
         }
-        for loc in yktrace::sir::SirTraceIterator::new(&sir, &trace) {
+        for loc in yktrace::sir::SirTraceIterator::new(&trace) {
             println!("{:?}", loc);
         }
         let tir = yktrace::tir::TirTrace::new(&sir, &trace).unwrap();
@@ -59,9 +59,5 @@ impl yktrace::sir::SirTrace for VecSirTrace {
 
     fn raw_loc(&self, idx: usize) -> &yktrace::sir::SirLoc {
         &self.0[idx]
-    }
-
-    fn input(&self) -> ykpack::Local {
-        self.1
     }
 }

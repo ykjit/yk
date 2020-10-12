@@ -387,9 +387,8 @@ impl Display for Projection {
 
 /// Bits in the `flags` bitfield in `Body`.
 pub mod bodyflags {
-    pub const TRACE_HEAD: u8 = 1;
-    pub const TRACE_TAIL: u8 = 1 << 1;
-    pub const DO_NOT_TRACE: u8 = 1 << 2;
+    pub const DO_NOT_TRACE: u8 = 1;
+    pub const INTERP_STEP: u8 = 1 << 1;
 }
 
 /// The definition of a local variable, including its type.
@@ -411,7 +410,6 @@ pub struct Body {
     pub symbol_name: String,
     pub blocks: Vec<BasicBlock>,
     pub flags: u8,
-    pub trace_inputs_local: Option<Local>,
     pub local_decls: Vec<LocalDecl>,
     pub num_args: usize,
 }
@@ -1046,8 +1044,6 @@ pub struct Types {
     pub cgu_hash: CguHash,
     /// The types themselves. Combine `cgu_hash` with an index into this to make a type ID.
     pub types: Vec<Ty>,
-    /// Indices of `types` which are thread tracers.
-    pub thread_tracers: Vec<u32>,
 }
 
 #[cfg(test)]
