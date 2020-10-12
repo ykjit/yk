@@ -16,6 +16,7 @@ pub type TyIndex = u32;
 pub type FieldIndex = u32;
 pub type ArrayIndex = u32;
 pub type TypeId = (CguHash, TyIndex); // CGU hash and vector index.
+pub type OffT = i32;
 
 #[derive(Debug, Hash, Eq, PartialEq, Copy, Clone, Serialize, Deserialize)]
 pub struct CguHash(pub u64);
@@ -38,7 +39,12 @@ pub enum Ty {
     /// A tuple type.
     Tuple(TupleTy),
     /// An array type.
-    Array(TypeId),
+    /// FIXME size_align can be computed from elem_ty and len, but requires some refactoring.
+    Array {
+        elem_ty: TypeId,
+        len: usize,
+        size_align: SizeAndAlign,
+    },
     /// A slice type.
     Slice(TypeId),
     /// A reference to something.
@@ -58,8 +64,10 @@ impl Display for Ty {
             Ty::UnsignedInt(ui) => write!(f, "{}", ui),
             Ty::Struct(sty) => write!(f, "{}", sty),
             Ty::Tuple(tty) => write!(f, "{}", tty),
-            Ty::Array(aty) => write!(f, "&{:?}", aty),
-            Ty::Slice(sty) => write!(f, "&{:?}", sty),
+            Ty::Array { elem_ty, len, .. } => {
+                write!(f, "[({}, {}); {}]", elem_ty.0, elem_ty.1, len)
+            }
+            Ty::Slice(sty) => write!(f, "&[{:?}]", sty),
             Ty::Ref(rty) => write!(f, "&{:?}", rty),
             Ty::Bool => write!(f, "bool"),
             Ty::Char => write!(f, "char"),
@@ -92,7 +100,11 @@ impl Ty {
             Ty::Ref(_) => u64::try_from(mem::size_of::<usize>()).unwrap(),
             Ty::Bool => u64::try_from(mem::size_of::<bool>()).unwrap(),
             Ty::Char => u64::try_from(mem::size_of::<char>()).unwrap(),
-            _ => todo!("{:?}", self),
+            Ty::Array {
+                size_align: SizeAndAlign { size, .. },
+                ..
+            } => u64::try_from(*size).unwrap(),
+            _ => todo!(),
         }
     }
 
@@ -130,6 +142,10 @@ impl Ty {
                 8
             }
             Ty::Bool => u64::try_from(mem::size_of::<bool>()).unwrap(),
+            Ty::Array {
+                size_align: SizeAndAlign { align, .. },
+                ..
+            } => u64::try_from(*align).unwrap(),
             _ => todo!("{:?}", self),
         }
     }
@@ -188,7 +204,7 @@ impl Display for UnsignedIntTy {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
 pub struct Fields {
     /// Field offsets.
-    pub offsets: Vec<u64>,
+    pub offsets: Vec<OffT>,
     /// The type of each field.
     pub tys: Vec<TypeId>,
 }
@@ -297,98 +313,6 @@ impl Display for Local {
     }
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
-pub struct Place {
-    pub local: Local,
-    pub projection: Vec<Projection>,
-}
-
-impl Place {
-    fn push_maybe_defined_locals(&self, locals: &mut Vec<Local>) {
-        locals.push(self.local);
-    }
-
-    fn push_used_locals(&self, locals: &mut Vec<Local>) {
-        locals.push(self.local);
-        for p in &self.projection {
-            match p {
-                Projection::Index(local) => locals.push(*local),
-                _ => {}
-            }
-        }
-    }
-
-    /// Returns true if the place is a "plain local" (there are no projections).
-    pub fn is_plain_local(&self) -> bool {
-        self.projection.is_empty()
-    }
-}
-
-impl Display for Place {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.projection.is_empty() {
-            write!(f, "{}", self.local)?;
-        } else {
-            let mut s = format!("({})", self.local);
-            for p in &self.projection {
-                match p {
-                    Projection::Deref => {
-                        s = format!("*({})", s);
-                    }
-                    _ => {
-                        s.push_str(&format!("{}", p));
-                    }
-                }
-            }
-            write!(f, "{}", s)?;
-        }
-        Ok(())
-    }
-}
-
-impl From<Local> for Place {
-    fn from(local: Local) -> Self {
-        Self {
-            local,
-            projection: Vec::new(),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
-pub enum PlaceBase {
-    Local(Local),
-    Static, // FIXME not implemented
-}
-
-impl Display for PlaceBase {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Local(l) => write!(f, "{}", l),
-            Self::Static => write!(f, "Static"),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
-pub enum Projection {
-    Field(FieldIndex),
-    Deref,
-    Index(Local),
-    Unimplemented(String),
-}
-
-impl Display for Projection {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Field(idx) => write!(f, ".{}", idx),
-            Self::Deref => write!(f, ""),
-            Self::Index(local) => write!(f, "[{}]", local),
-            Self::Unimplemented(s) => write!(f, ".(unimplemented projection: {:?})", s),
-        }
-    }
-}
-
 /// Bits in the `flags` bitfield in `Body`.
 pub mod bodyflags {
     pub const DO_NOT_TRACE: u8 = 1;
@@ -399,6 +323,9 @@ pub mod bodyflags {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct LocalDecl {
     pub ty: TypeId,
+    /// If true this local variable is at some point referenced, and thus should be allocated on
+    /// the stack and never in a register.
+    pub referenced: bool,
 }
 
 impl Display for LocalDecl {
@@ -455,9 +382,113 @@ impl BasicBlock {
 impl Display for BasicBlock {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for s in self.stmts.iter() {
-            write!(f, "        {}\n", s)?;
+            writeln!(f, "        {}", s)?;
         }
         write!(f, "        {}", self.term)
+    }
+}
+
+/// Represents a pointer to be dereferenced at runtime.
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+pub struct Ptr {
+    pub local: Local,
+    pub off: OffT,
+}
+
+impl Display for Ptr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}+{}", self.local, self.off)
+    }
+}
+
+/// An IR place. This is used in SIR and TIR to describe the (abstract) address of a piece of data.
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+pub enum IPlace {
+    /// The IPlace describes a value as a Local+offset pair.
+    Val { local: Local, off: OffT, ty: TypeId },
+    /// An indirect place behind a pointer. ykrustc uses these for deref and (dynamic) index
+    /// projections (which cannot be resolved statically and thus depend on a runtime pointer).
+    Indirect {
+        /// The location of the pointer to be dereferenced at runtime.
+        ptr: Ptr,
+        /// The offset to apply to the above pointer.
+        off: OffT,
+        /// The type of the resulting place.
+        ty: TypeId,
+    },
+    /// The IPlace describes a constant.
+    Const { val: Constant, ty: TypeId },
+    /// A construct which we have no lowering for yet.
+    Unimplemented(String),
+}
+
+impl Display for IPlace {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Val {
+                local,
+                off,
+                ty: _ty,
+            } => {
+                if *off != 0 {
+                    write!(f, "{}+{}", local, off)
+                } else {
+                    write!(f, "{}", local)
+                }
+            }
+            Self::Indirect { ptr, off, ty: _ty } => {
+                if *off != 0 {
+                    write!(f, "*({})+{}", ptr, off)
+                } else {
+                    write!(f, "*{}", ptr)
+                }
+            }
+            Self::Const { val, ty: _ty } => write!(f, "{}", val),
+            Self::Unimplemented(c) => write!(f, "{}", c),
+        }
+    }
+}
+
+impl IPlace {
+    /// Returns the local used (if any) in the place.
+    pub fn local(&self) -> Option<Local> {
+        match self {
+            Self::Val { local, .. }
+            | Self::Indirect {
+                ptr: Ptr { local, .. },
+                ..
+            } => Some(*local),
+            Self::Const { .. } | Self::Unimplemented(_) => None,
+        }
+    }
+
+    /// Returns the type of the place.
+    pub fn ty(&self) -> TypeId {
+        match self {
+            Self::Val { ty, .. } | Self::Indirect { ty, .. } | Self::Const { ty, .. } => *ty,
+            Self::Unimplemented(_) => unreachable!(),
+        }
+    }
+
+    /// Converts a direct place into an indirect one, forcing a dereference when read from or
+    /// stored to.
+    pub fn to_indirect(&self, new_ty: TypeId) -> IPlace {
+        match self {
+            Self::Val { local, off, ty: _ } => {
+                let ptr = Ptr {
+                    local: *local,
+                    off: *off,
+                };
+                IPlace::Indirect {
+                    ptr,
+                    off: 0,
+                    ty: new_ty,
+                }
+            }
+            Self::Const { .. } => unreachable!("const to indirect"),
+            Self::Indirect { .. } => unreachable!("indirect to indirect"),
+            Self::Unimplemented(_) => self.clone(),
+        }
     }
 }
 
@@ -465,24 +496,50 @@ impl Display for BasicBlock {
 pub enum Statement {
     /// Do nothing.
     Nop,
-    /// An assignment.
-    Assign(Place, Rvalue),
-    /// Marks the entry of an inlined function call in a TIR trace. This does not appear in SIR.
-    Enter(CallOperand, Vec<Operand>, Option<Place>, u32),
-    /// Marks the exit of an inlined function call in a TIR trace. This does not appear in SIR.
-    Leave,
+    /// Stores the content addressed by the right hand side into the left hand side.
+    Store(IPlace, IPlace),
+    /// Binary operations. FIXME dest should be a local?
+    BinaryOp {
+        dest: IPlace,
+        op: BinOp,
+        opnd1: IPlace,
+        opnd2: IPlace,
+        checked: bool,
+    },
+    /// Makes a reference.
+    MkRef(IPlace, IPlace),
+    /// Computes a pointer address at runtime.
+    DynOffs {
+        /// Where to store the result.
+        dest: IPlace,
+        /// The base address. `idx` * `scale` are added to this at runtime to give the result.
+        base: IPlace,
+        /// The index to multiply with `scale`.
+        idx: IPlace,
+        /// The scaling factor for `idx`.
+        scale: u32,
+    },
     /// Marks a local variable dead.
     /// Note that locals are implicitly live at first use.
     StorageDead(Local),
     /// A (non-inlined) call from a TIR trace to a binary symbol using the system ABI. This does
     /// not appear in SIR.
-    Call(CallOperand, Vec<Operand>, Option<Place>),
+    Call(CallOperand, Vec<IPlace>, Option<IPlace>),
+    /// Cast a value into another. Since the cast type and the destination type are the same, we
+    /// only need the latter.
+    Cast(IPlace, IPlace),
     /// Any unimplemented lowering maps to this variant.
     /// The string inside is the stringified MIR statement.
     Unimplemented(String),
 }
 
 impl Statement {
+    fn maybe_push_local(v: &mut Vec<Local>, l: Option<Local>) {
+        if let Some(l) = l {
+            v.push(l);
+        }
+    }
+
     /// Returns a vector of locals that this SIR statement *may* define.
     /// Whether or not the local is actually defined depends upon whether this is the first write
     /// into the local (there is no explicit liveness marker in SIR/TIR).
@@ -491,24 +548,17 @@ impl Statement {
 
         match self {
             Statement::Nop => (),
-            Statement::Assign(place, _rval) => place.push_maybe_defined_locals(&mut ret),
-            Statement::Enter(_target, args, dest, start_idx) => {
+            Statement::Store(dest, ..)
+            | Statement::MkRef(dest, ..)
+            | Statement::DynOffs { dest, .. }
+            | Statement::Cast(dest, ..)
+            | Statement::BinaryOp { dest, .. } => Self::maybe_push_local(&mut ret, dest.local()),
+            Statement::Call(_, _, dest) => {
                 if let Some(dest) = dest {
-                    dest.push_maybe_defined_locals(&mut ret);
-                }
-                for idx in 0..args.len() {
-                    // + 1 to skip return value.
-                    ret.push(Local(start_idx + u32::try_from(idx).unwrap() + 1));
+                    Self::maybe_push_local(&mut ret, dest.local());
                 }
             }
-            Statement::Leave => (),
-            Statement::StorageDead(_) => (),
-            Statement::Call(_target, _args, dest) => {
-                if let Some(dest) = dest {
-                    dest.push_maybe_defined_locals(&mut ret);
-                }
-            }
-            Statement::Unimplemented(_) => (),
+            Statement::StorageDead(_) | Statement::Unimplemented(_) => (),
         }
         ret
     }
@@ -521,31 +571,40 @@ impl Statement {
 
         match self {
             Statement::Nop => (),
-            Statement::Assign(place, rval) => {
-                rval.push_used_locals(&mut ret);
-                place.push_used_locals(&mut ret);
+            Statement::MkRef(dest, src) => {
+                Self::maybe_push_local(&mut ret, dest.local());
+                Self::maybe_push_local(&mut ret, src.local());
             }
-            Statement::Enter(_target, args, dest, start_idx) => {
-                if let Some(dest) = dest {
-                    dest.push_used_locals(&mut ret);
-                }
-                for a in args {
-                    a.push_used_locals(&mut ret);
-                }
-                for idx in 0..args.len() {
-                    // + 1 to skip return value.
-                    ret.push(Local(start_idx + u32::try_from(idx).unwrap() + 1));
-                }
+            Statement::DynOffs {
+                dest, base, idx, ..
+            } => {
+                Self::maybe_push_local(&mut ret, dest.local());
+                Self::maybe_push_local(&mut ret, base.local());
+                Self::maybe_push_local(&mut ret, idx.local());
             }
-            Statement::Leave => (),
+            Statement::BinaryOp {
+                dest, opnd1, opnd2, ..
+            } => {
+                Self::maybe_push_local(&mut ret, opnd1.local());
+                Self::maybe_push_local(&mut ret, opnd2.local());
+                Self::maybe_push_local(&mut ret, dest.local());
+            }
+            Statement::Store(dest, src) => {
+                Self::maybe_push_local(&mut ret, dest.local());
+                Self::maybe_push_local(&mut ret, src.local());
+            }
             Statement::StorageDead(_) => (),
             Statement::Call(_target, args, dest) => {
                 if let Some(dest) = dest {
-                    dest.push_used_locals(&mut ret);
+                    Self::maybe_push_local(&mut ret, dest.local());
                 }
                 for a in args {
-                    a.push_used_locals(&mut ret);
+                    Self::maybe_push_local(&mut ret, a.local());
                 }
+            }
+            Statement::Cast(dest, src) => {
+                Self::maybe_push_local(&mut ret, dest.local());
+                Self::maybe_push_local(&mut ret, src.local());
             }
             Statement::Unimplemented(_) => (),
         }
@@ -555,7 +614,7 @@ impl Statement {
     /// Returns true if the statement may affect locals besides those appearing in the statement.
     pub fn may_have_side_effects(&self) -> bool {
         match self {
-            Statement::Call(..) | Statement::Enter(..) => true,
+            Statement::Call(..) => true,
             _ => false,
         }
     }
@@ -565,21 +624,25 @@ impl Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Statement::Nop => write!(f, "nop"),
-            Statement::Assign(l, r) => write!(f, "{} = {}", l, r),
-            Statement::Enter(op, args, dest, off) => {
-                let args_s = args
-                    .iter()
-                    .map(|a| format!("{}", a))
-                    .collect::<Vec<String>>()
-                    .join(", ");
-                let dest_s = if let Some(dest) = dest {
-                    format!("{}", dest)
-                } else {
-                    String::from("none")
-                };
-                write!(f, "enter({}, [{}], {}, {})", op, args_s, dest_s, off)
+            Statement::MkRef(l, r) => write!(f, "{} = &({})", l, r),
+            Statement::DynOffs {
+                dest,
+                base,
+                idx,
+                scale,
+                ..
+            } => write!(f, "{} = dynoffs({}, {}, {})", dest, base, idx, scale),
+            Statement::Store(l, r) => write!(f, "{} = {}", l, r),
+            Statement::BinaryOp {
+                dest,
+                op,
+                opnd1,
+                opnd2,
+                checked,
+            } => {
+                let c = if *checked { " (checked)" } else { "" };
+                write!(f, "{} = {} {} {}{}", dest, opnd1, op, opnd2, c)
             }
-            Statement::Leave => write!(f, "leave"),
             Statement::StorageDead(local) => write!(f, "dead({})", local),
             Statement::Call(op, args, dest) => {
                 let args_s = args
@@ -594,99 +657,9 @@ impl Display for Statement {
                 };
                 write!(f, "{} = call({}, [{}])", dest_s, op, args_s)
             }
+            Statement::Cast(d, s) => write!(f, "Cast({}, {})", d, s),
             Statement::Unimplemented(mir_stmt) => write!(f, "unimplemented_stmt: {}", mir_stmt),
         }
-    }
-}
-
-/// The right-hand side of an assignment.
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub enum Rvalue {
-    Use(Operand),
-    BinaryOp(BinOp, Operand, Operand),
-    CheckedBinaryOp(BinOp, Operand, Operand),
-    Ref(Place),
-    Len(Place),
-    Cast(Operand, Ty),
-    Unimplemented(String),
-}
-
-impl Rvalue {
-    pub fn push_used_locals(&self, locals: &mut Vec<Local>) {
-        match self {
-            Rvalue::Use(opnd) => opnd.push_used_locals(locals),
-            Rvalue::BinaryOp(_op, opnd1, opnd2) => {
-                opnd1.push_used_locals(locals);
-                opnd2.push_used_locals(locals);
-            }
-            Rvalue::CheckedBinaryOp(_op, opnd1, opnd2) => {
-                opnd1.push_used_locals(locals);
-                opnd2.push_used_locals(locals);
-            }
-            Rvalue::Ref(plc) => plc.push_used_locals(locals),
-            Rvalue::Len(plc) => plc.push_used_locals(locals),
-            Rvalue::Cast(opnd, _ty) => opnd.push_used_locals(locals),
-            Rvalue::Unimplemented(_) => (),
-        }
-    }
-}
-
-impl Display for Rvalue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Use(p) => write!(f, "{}", p),
-            Self::BinaryOp(op, oper1, oper2) => write!(f, "{}({}, {})", op, oper1, oper2),
-            Self::CheckedBinaryOp(op, oper1, oper2) => {
-                write!(f, "checked_{}({}, {})", op, oper1, oper2)
-            }
-            Self::Ref(p) => write!(f, "&{}", p),
-            Self::Len(p) => write!(f, "Len({})", p),
-            Self::Cast(op, ty) => write!(f, "Cast({}, {})", op, ty),
-            Self::Unimplemented(s) => write!(f, "unimplemented rvalue: {}", s),
-        }
-    }
-}
-
-impl From<Local> for Rvalue {
-    fn from(l: Local) -> Self {
-        Self::Use(Operand::from(l))
-    }
-}
-
-/// Unlike in MIR, we don't track move/copy semantics in operands.
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub enum Operand {
-    Place(Place),
-    Constant(Constant),
-}
-
-impl Operand {
-    fn push_used_locals(&self, locals: &mut Vec<Local>) {
-        match self {
-            Operand::Place(plc) => plc.push_used_locals(locals),
-            Operand::Constant(_) => (),
-        }
-    }
-}
-
-impl Display for Operand {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Operand::Place(p) => write!(f, "{}", p),
-            Operand::Constant(c) => write!(f, "{}", c),
-        }
-    }
-}
-
-impl From<Local> for Operand {
-    fn from(l: Local) -> Self {
-        Operand::Place(Place::from(l))
-    }
-}
-
-impl From<Place> for Operand {
-    fn from(p: Place) -> Self {
-        Operand::Place(p)
     }
 }
 
@@ -694,6 +667,7 @@ impl From<Place> for Operand {
 pub enum Constant {
     Int(ConstantInt),
     Bool(bool),
+    Tuple(TypeId), // FIXME assumed to be unit for now. Needs a value in here.
     Unimplemented(String),
 }
 
@@ -702,6 +676,7 @@ impl Constant {
         match self {
             Self::Int(ci) => ci.i64_cast(),
             Self::Bool(b) => *b as i64,
+            Self::Tuple(..) => unreachable!(),
             Self::Unimplemented(_) => unreachable!(),
         }
     }
@@ -712,6 +687,7 @@ impl Display for Constant {
         match self {
             Constant::Int(i) => write!(f, "{}", i),
             Constant::Bool(b) => write!(f, "{}", b),
+            Constant::Tuple(..) => write!(f, "()"), // FIXME assumed unit.
             Constant::Unimplemented(s) => write!(f, "unimplemented constant: {:?}", s),
         }
     }
@@ -881,7 +857,7 @@ impl Display for CallOperand {
 pub enum Terminator {
     Goto(BasicBlockIndex),
     SwitchInt {
-        discr: Operand,
+        discr: IPlace,
         values: Vec<SerU128>,
         target_bbs: Vec<BasicBlockIndex>,
         otherwise_bb: BasicBlockIndex,
@@ -889,23 +865,23 @@ pub enum Terminator {
     Return,
     Unreachable,
     Drop {
-        location: Place,
+        location: IPlace,
         target_bb: BasicBlockIndex,
     },
     DropAndReplace {
-        location: Place,
+        location: IPlace,
         target_bb: BasicBlockIndex,
-        value: Operand,
+        value: IPlace,
     },
     Call {
         operand: CallOperand,
-        args: Vec<Operand>,
+        args: Vec<IPlace>,
         /// The return value and basic block to continue at, if the call converges.
-        destination: Option<(Place, BasicBlockIndex)>,
+        destination: Option<(IPlace, BasicBlockIndex)>,
     },
     /// The value in `cond` must equal to `expected` to advance to `target_bb`.
     Assert {
-        cond: Operand,
+        cond: IPlace,
         expected: bool,
         target_bb: BasicBlockIndex,
     },
@@ -981,7 +957,7 @@ impl Display for Terminator {
 }
 
 /// Binary operations.
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Copy)]
 pub enum BinOp {
     Add,
     Sub,
@@ -1005,23 +981,23 @@ pub enum BinOp {
 impl Display for BinOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            BinOp::Add => "add",
-            BinOp::Sub => "sub",
-            BinOp::Mul => "mul",
-            BinOp::Div => "div",
-            BinOp::Rem => "rem",
-            BinOp::BitXor => "bit_xor",
-            BinOp::BitAnd => "bit_and",
-            BinOp::BitOr => "bit_or",
-            BinOp::Shl => "shl",
-            BinOp::Shr => "shr",
-            BinOp::Eq => "eq",
-            BinOp::Lt => "lt",
-            BinOp::Le => "le",
-            BinOp::Ne => "ne",
-            BinOp::Ge => "ge",
-            BinOp::Gt => "gt",
-            BinOp::Offset => "offset",
+            BinOp::Add => "+",
+            BinOp::Sub => "-",
+            BinOp::Mul => "*",
+            BinOp::Div => "/",
+            BinOp::Rem => "%",
+            BinOp::BitXor => "^",
+            BinOp::BitAnd => "&",
+            BinOp::BitOr => "|",
+            BinOp::Shl => "<<",
+            BinOp::Shr => ">>",
+            BinOp::Eq => "==",
+            BinOp::Lt => "<",
+            BinOp::Le => "<=",
+            BinOp::Ne => "!=",
+            BinOp::Ge => ">=",
+            BinOp::Gt => ">",
+            BinOp::Offset => "off",
         };
         write!(f, "{}", s)
     }

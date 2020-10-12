@@ -43,10 +43,10 @@ mod tests {
     fn test_stackbuilder() {
         let mut sb = StackBuilder::default();
 
-        assert_eq!(sb.alloc(8, 8).unwrap_mem().offs, -8);
-        assert_eq!(sb.alloc(1, 1).unwrap_mem().offs, -9);
-        assert_eq!(sb.alloc(8, 8).unwrap_mem().offs, -24);
-        assert_eq!(sb.alloc(1, 1).unwrap_mem().offs, -25);
-        assert_eq!(sb.alloc(4, 2).unwrap_mem().offs, -30);
+        assert_eq!(sb.alloc(8, 8).unwrap_mem().off, -8);
+        assert_eq!(sb.alloc(1, 1).unwrap_mem().off, -9);
+        assert_eq!(sb.alloc(8, 8).unwrap_mem().off, -24);
+        assert_eq!(sb.alloc(1, 1).unwrap_mem().off, -25);
+        assert_eq!(sb.alloc(4, 2).unwrap_mem().off, -30);
     }
 }

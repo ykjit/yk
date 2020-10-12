@@ -45,6 +45,7 @@ fn main() {
         let tir = yktrace::tir::TirTrace::new(&sir, &trace).unwrap();
         println!("{}", tir);
     } else {
+        println!("SIR:");
         println!("{}", sir);
     }
 }

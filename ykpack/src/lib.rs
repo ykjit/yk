@@ -37,10 +37,7 @@ pub const SIR_SECTION_PREFIX: &str = ".yksir_";
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        BasicBlock, BinOp, Body, CguHash, Constant, ConstantInt, Decoder, Encoder, Local,
-        LocalDecl, Operand, Pack, Place, Rvalue, Statement, Terminator, UnsignedInt,
-    };
+    use super::{BasicBlock, Body, Decoder, Encoder, Pack, Statement, Terminator};
     use fallible_iterator::{self, FallibleIterator};
     use std::io::{Cursor, Seek, SeekFrom};
 
@@ -127,127 +124,6 @@ mod tests {
         let mut itr = dec.zip(expect_iter);
         while let Some((got, expect)) = itr.next().unwrap() {
             assert_eq!(expect, got);
-        }
-    }
-
-    // FIXME convert this test to using fm.
-    #[test]
-    fn test_text_dump() {
-        let stmts_t1_b0 = vec![
-            Statement::Assign(Place::from(Local(0)), Rvalue::from(Local(1))),
-            Statement::Assign(
-                Place::from(Local(2)),
-                Rvalue::Use(Operand::Place(Place {
-                    local: Local(3),
-                    projection: Vec::new(),
-                })),
-            ),
-            Statement::Assign(
-                Place::from(Local(4)),
-                Rvalue::Use(Operand::Constant(Constant::Int(ConstantInt::UnsignedInt(
-                    UnsignedInt::U8(10),
-                )))),
-            ),
-            Statement::Nop,
-        ];
-        let term_t1_b0 = Terminator::Goto(20);
-        let stmts_t1_b1 = vec![
-            Statement::Assign(Place::from(Local(5)), Rvalue::from(Local(6))),
-            Statement::Assign(Place::from(Local(5)), Rvalue::from(Local(4))),
-            Statement::Assign(
-                Place::from(Local(7)),
-                Rvalue::BinaryOp(BinOp::Add, Operand::from(Local(8)), Operand::from(Local(9))),
-            ),
-            Statement::Assign(
-                Place::from(Local(7)),
-                Rvalue::BinaryOp(
-                    BinOp::Sub,
-                    Operand::from(Local(9)),
-                    Operand::from(Local(10)),
-                ),
-            ),
-            Statement::Assign(
-                Place::from(Local(11)),
-                Rvalue::Use(Operand::Constant(Constant::Int(ConstantInt::u8_from_bits(
-                    0,
-                )))),
-            ),
-        ];
-        let term_t1_b1 = Terminator::Goto(50);
-
-        let blocks_t1 = vec![
-            BasicBlock::new(stmts_t1_b0, term_t1_b0),
-            BasicBlock::new(stmts_t1_b1, term_t1_b1),
-        ];
-
-        let lcl = LocalDecl {
-            ty: (CguHash(0), 0),
-        };
-        let sirs = vec![
-            Pack::Body(Body {
-                symbol_name: String::from("symbol1"),
-                blocks: blocks_t1,
-                flags: 0,
-                local_decls: vec![lcl.clone(); 3],
-                num_args: 0,
-            }),
-            Pack::Body(Body {
-                symbol_name: String::from("symbol2"),
-                blocks: vec![BasicBlock::new(
-                    vec![Statement::Unimplemented(String::from("abc"))],
-                    Terminator::Unreachable,
-                )],
-                flags: 0,
-                local_decls: vec![lcl; 5],
-                num_args: 0,
-            }),
-        ];
-
-        let mut got = String::new();
-        for pack in sirs {
-            got.push_str(&format!("{}", pack));
-        }
-        let got_lines = got.split("\n");
-
-        let expect = "symbol: symbol1
-  flags: 0
-  num_args: 0
-  local_decls:
-    0: (0, 0)
-    1: (0, 0)
-    2: (0, 0)
-  blocks:
-    bb0:
-        $0 = $1
-        $2 = $3
-        $4 = 10u8
-        nop
-        goto bb20
-    bb1:
-        $5 = $6
-        $5 = $4
-        $7 = add($8, $9)
-        $7 = sub($9, $10)
-        $11 = 0u8
-        goto bb50
-symbol: symbol2
-  flags: 0
-  num_args: 0
-  local_decls:
-    0: (0, 0)
-    1: (0, 0)
-    2: (0, 0)
-    3: (0, 0)
-    4: (0, 0)
-  blocks:
-    bb0:
-        unimplemented_stmt: abc
-        unreachable\n";
-
-        let expect_lines = expect.split("\n");
-        assert_eq!(got_lines.clone().count(), expect_lines.clone().count());
-        for (got, expect) in got_lines.zip(expect_lines) {
-            assert_eq!(got.trim(), expect.trim());
         }
     }
 }
