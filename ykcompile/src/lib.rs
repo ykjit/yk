@@ -803,6 +803,148 @@ impl<TT> TraceCompiler<TT> {
         Ok(())
     }
 
+    fn c_binop(&mut self, binop: &BinOp, op1: &Operand, op2: &Operand) -> Location {
+        match binop {
+            BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+                self.c_condition(binop, op1, op2)
+            }
+            _ => todo!(),
+        }
+    }
+
+    fn c_condition(&mut self, binop: &BinOp, op1: &Operand, op2: &Operand) -> Location {
+        let (src1, ty) = match op1 {
+            Operand::Place(p) => self.place_to_location(&p, false),
+            Operand::Constant(Constant::Int(_)) => todo!(),
+            Operand::Constant(Constant::Bool(_b)) => todo!(),
+            Operand::Constant(c) => todo!("{}", c),
+        };
+        let src2 = match op2 {
+            Operand::Place(p) => self.c_place(&p),
+            Operand::Constant(Constant::Int(ci)) => self.c_constint(&ci),
+            Operand::Constant(Constant::Bool(_b)) => todo!(),
+            Operand::Constant(c) => todo!("{}", c),
+        };
+
+        match (&src1, &src2) {
+            (Location::Register(reg1), Location::Register(reg2)) => match ty.size() {
+                1 => {
+                    dynasm!(self.asm
+                        ; cmp Rb(reg1), Rb(reg2)
+                    );
+                }
+                2 => {
+                    dynasm!(self.asm
+                        ; cmp Rw(reg1), Rw(reg2)
+                    );
+                }
+                4 => {
+                    dynasm!(self.asm
+                        ; cmp Rd(reg1), Rd(reg2)
+                    );
+                }
+                8 => {
+                    dynasm!(self.asm
+                        ; cmp Rq(reg1), Rq(reg2)
+                    );
+                }
+                _ => unreachable!(),
+            },
+            (Location::Register(reg), Location::Mem(ro)) => match ty.size() {
+                1 => {
+                    dynasm!(self.asm
+                        ; cmp Rb(reg), BYTE [Rq(ro.reg) + ro.offs]
+                    );
+                }
+                2 => {
+                    dynasm!(self.asm
+                        ; cmp Rw(reg), WORD [Rq(ro.reg) + ro.offs]
+                    );
+                }
+                4 => {
+                    dynasm!(self.asm
+                        ; cmp Rd(reg), DWORD [Rq(ro.reg) + ro.offs]
+                    );
+                }
+                8 => {
+                    dynasm!(self.asm
+                        ; cmp Rq(reg), QWORD [Rq(ro.reg) + ro.offs]
+                    );
+                }
+                _ => unreachable!(),
+            },
+            (Location::Mem(ro), Location::Register(reg)) => match ty.size() {
+                1 => {
+                    dynasm!(self.asm
+                        ; cmp BYTE [Rq(ro.reg) + ro.offs], Rb(reg)
+                    );
+                }
+                2 => {
+                    dynasm!(self.asm
+                        ; cmp WORD [Rq(ro.reg) + ro.offs], Rw(reg)
+                    );
+                }
+                4 => {
+                    dynasm!(self.asm
+                        ; cmp DWORD [Rq(ro.reg) + ro.offs], Rd(reg)
+                    );
+                }
+                8 => {
+                    dynasm!(self.asm
+                        ; cmp QWORD [Rq(ro.reg) + ro.offs], Rq(reg)
+                    );
+                }
+                _ => unreachable!(),
+            },
+            (Location::Mem(_), Location::Mem(_)) => todo!(),
+            _ => unreachable!(),
+        }
+        self.free_if_temp(src1);
+        self.free_if_temp(src2);
+        let result = self.create_temporary();
+        dynasm!(self.asm
+            ; mov Rq(result), 1
+        );
+        match binop {
+            BinOp::Eq => {
+                dynasm!(self.asm
+                    ; je >skip
+                );
+            }
+            BinOp::Ne => {
+                dynasm!(self.asm
+                    ; jne >skip
+                );
+            }
+            BinOp::Lt => {
+                dynasm!(self.asm
+                    ; jl >skip
+                );
+            }
+            BinOp::Le => {
+                dynasm!(self.asm
+                    ; jle >skip
+                );
+            }
+            BinOp::Gt => {
+                dynasm!(self.asm
+                    ; jg >skip
+                );
+            }
+            BinOp::Ge => {
+                dynasm!(self.asm
+                    ; jge >skip
+                );
+            }
+            _ => unreachable!(),
+        }
+        dynasm!(self.asm
+            ; mov Rq(result), 0
+            ; skip:
+        );
+        Location::Register(result)
+    }
+
     /// Compile a checked binary operation into a `Location`.
     fn c_checked_binop(&mut self, binop: &BinOp, op1: &Operand, op2: &Operand) -> Location {
         // Move `op1` into `dest`.
@@ -911,6 +1053,7 @@ impl<TT> TraceCompiler<TT> {
                         Constant::Bool(b) => self.c_bool(*b),
                         c => todo!("{}", c),
                     },
+                    Rvalue::BinaryOp(binop, op1, op2) => self.c_binop(binop, op1, op2),
                     Rvalue::CheckedBinaryOp(binop, op1, op2) => {
                         let rloc = self.c_checked_binop(binop, op1, op2);
                         // FIXME deal with overflow
@@ -1031,7 +1174,7 @@ impl<TT> TraceCompiler<TT> {
                                 ; mov QWORD [Rq(dest_ro.reg) + dest_ro.offs], Rq(temp)
                             );
                         }
-                        _ => unreachable!(),
+                        _ => unreachable!("{}", ty.size()),
                     }
                     self.free_if_temp(Location::Register(temp));
                 } else {
@@ -2263,5 +2406,37 @@ mod tests {
         let mut args = IO(0);
         ct.execute(&mut args);
         assert_eq!(args.0, 3);
+    }
+
+    #[test]
+    fn test_comparison() {
+        struct IO(u8, bool);
+
+        fn checks(i: u8) -> bool {
+            let a = i == 0;
+            let b = i > 1;
+            let c = i < 1;
+            if a && b || c {
+                true
+            } else {
+                false
+            }
+        }
+
+        #[interp_step]
+        fn interp_step(io: &mut IO) {
+            let x = checks(io.0);
+            io.1 = x;
+        }
+
+        let mut inputs = IO(0, false);
+        let th = start_tracing(TracingKind::HardwareTracing);
+        interp_step(&mut inputs);
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
+        let mut args = IO(0, false);
+        ct.execute(&mut args);
+        assert_eq!(args.1, true);
     }
 }
