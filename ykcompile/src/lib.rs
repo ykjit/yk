@@ -23,8 +23,8 @@ use std::mem;
 use std::process::Command;
 use ykpack::{SignedIntTy, Ty, TypeId, UnsignedIntTy};
 use yktrace::tir::{
-    BinOp, CallOperand, Constant, ConstantInt, Guard, Local, Operand, Place, Projection, Rvalue,
-    Statement, TirOp, TirTrace,
+    BinOp, CallOperand, Constant, ConstantInt, Guard, GuardKind, Local, Operand, Place, Projection,
+    Rvalue, Statement, TirOp, TirTrace,
 };
 use yktrace::{sir::SIR, INTERP_STEP_ARG};
 
@@ -94,15 +94,16 @@ pub struct CompiledTrace<TT> {
 
 impl<TT> CompiledTrace<TT> {
     /// Execute the trace by calling (not jumping to) the first instruction's address.
-    pub fn execute(&self, args: &mut TT) {
-        let func: fn(&mut TT) = unsafe { mem::transmute(self.mc.ptr(dynasmrt::AssemblyOffset(0))) };
-        self.exec_trace(func, args);
+    pub fn execute(&self, args: &mut TT) -> bool {
+        let func: fn(&mut TT) -> bool =
+            unsafe { mem::transmute(self.mc.ptr(dynasmrt::AssemblyOffset(0))) };
+        self.exec_trace(func, args)
     }
 
     /// Actually call the code. This is a separate function making it easier to set a debugger
     /// breakpoint right before entering the trace.
-    fn exec_trace(&self, t_fn: fn(&mut TT), args: &mut TT) {
-        t_fn(args);
+    fn exec_trace(&self, t_fn: fn(&mut TT) -> bool, args: &mut TT) -> bool {
+        t_fn(args)
     }
 }
 
@@ -561,8 +562,18 @@ impl<TT> TraceCompiler<TT> {
                 };
                 let (rloc, _) = self.place_to_location(&np, false);
                 let reg = self.create_temporary();
-                match rloc {
+                match &rloc {
                     Location::Register(reg2) => {
+                        dynasm!(self.asm
+                            ; mov Rq(reg), Rq(reg2)
+                        );
+                    }
+                    Location::Mem(ro) => {
+                        dynasm!(self.asm
+                            ; mov Rq(reg), [Rq(ro.reg) + ro.offs]
+                        );
+                    }
+                    Location::Addr(reg2) => {
                         dynasm!(self.asm
                             ; mov Rq(reg), Rq(reg2)
                         );
@@ -623,7 +634,7 @@ impl<TT> TraceCompiler<TT> {
     }
 
     /// Emit a NOP operation.
-    fn nop(&mut self) {
+    fn _nop(&mut self) {
         dynasm!(self.asm
             ; nop
         );
@@ -803,6 +814,148 @@ impl<TT> TraceCompiler<TT> {
         Ok(())
     }
 
+    fn c_binop(&mut self, binop: &BinOp, op1: &Operand, op2: &Operand) -> Location {
+        match binop {
+            BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+                self.c_condition(binop, op1, op2)
+            }
+            _ => todo!(),
+        }
+    }
+
+    fn c_condition(&mut self, binop: &BinOp, op1: &Operand, op2: &Operand) -> Location {
+        let (src1, ty) = match op1 {
+            Operand::Place(p) => self.place_to_location(&p, false),
+            Operand::Constant(Constant::Int(_)) => todo!(),
+            Operand::Constant(Constant::Bool(_b)) => todo!(),
+            Operand::Constant(c) => todo!("{}", c),
+        };
+        let src2 = match op2 {
+            Operand::Place(p) => self.c_place(&p),
+            Operand::Constant(Constant::Int(ci)) => self.c_constint(&ci),
+            Operand::Constant(Constant::Bool(_b)) => todo!(),
+            Operand::Constant(c) => todo!("{}", c),
+        };
+
+        match (&src1, &src2) {
+            (Location::Register(reg1), Location::Register(reg2)) => match ty.size() {
+                1 => {
+                    dynasm!(self.asm
+                        ; cmp Rb(reg1), Rb(reg2)
+                    );
+                }
+                2 => {
+                    dynasm!(self.asm
+                        ; cmp Rw(reg1), Rw(reg2)
+                    );
+                }
+                4 => {
+                    dynasm!(self.asm
+                        ; cmp Rd(reg1), Rd(reg2)
+                    );
+                }
+                8 => {
+                    dynasm!(self.asm
+                        ; cmp Rq(reg1), Rq(reg2)
+                    );
+                }
+                _ => unreachable!(),
+            },
+            (Location::Register(reg), Location::Mem(ro)) => match ty.size() {
+                1 => {
+                    dynasm!(self.asm
+                        ; cmp Rb(reg), BYTE [Rq(ro.reg) + ro.offs]
+                    );
+                }
+                2 => {
+                    dynasm!(self.asm
+                        ; cmp Rw(reg), WORD [Rq(ro.reg) + ro.offs]
+                    );
+                }
+                4 => {
+                    dynasm!(self.asm
+                        ; cmp Rd(reg), DWORD [Rq(ro.reg) + ro.offs]
+                    );
+                }
+                8 => {
+                    dynasm!(self.asm
+                        ; cmp Rq(reg), QWORD [Rq(ro.reg) + ro.offs]
+                    );
+                }
+                _ => unreachable!(),
+            },
+            (Location::Mem(ro), Location::Register(reg)) => match ty.size() {
+                1 => {
+                    dynasm!(self.asm
+                        ; cmp BYTE [Rq(ro.reg) + ro.offs], Rb(reg)
+                    );
+                }
+                2 => {
+                    dynasm!(self.asm
+                        ; cmp WORD [Rq(ro.reg) + ro.offs], Rw(reg)
+                    );
+                }
+                4 => {
+                    dynasm!(self.asm
+                        ; cmp DWORD [Rq(ro.reg) + ro.offs], Rd(reg)
+                    );
+                }
+                8 => {
+                    dynasm!(self.asm
+                        ; cmp QWORD [Rq(ro.reg) + ro.offs], Rq(reg)
+                    );
+                }
+                _ => unreachable!(),
+            },
+            (Location::Mem(_), Location::Mem(_)) => todo!(),
+            _ => unreachable!(),
+        }
+        self.free_if_temp(src1);
+        self.free_if_temp(src2);
+        let result = self.create_temporary();
+        dynasm!(self.asm
+            ; mov Rq(result), 1
+        );
+        match binop {
+            BinOp::Eq => {
+                dynasm!(self.asm
+                    ; je >skip
+                );
+            }
+            BinOp::Ne => {
+                dynasm!(self.asm
+                    ; jne >skip
+                );
+            }
+            BinOp::Lt => {
+                dynasm!(self.asm
+                    ; jl >skip
+                );
+            }
+            BinOp::Le => {
+                dynasm!(self.asm
+                    ; jle >skip
+                );
+            }
+            BinOp::Gt => {
+                dynasm!(self.asm
+                    ; jg >skip
+                );
+            }
+            BinOp::Ge => {
+                dynasm!(self.asm
+                    ; jge >skip
+                );
+            }
+            _ => unreachable!(),
+        }
+        dynasm!(self.asm
+            ; mov Rq(result), 0
+            ; skip:
+        );
+        Location::Register(result)
+    }
+
     /// Compile a checked binary operation into a `Location`.
     fn c_checked_binop(&mut self, binop: &BinOp, op1: &Operand, op2: &Operand) -> Location {
         // Move `op1` into `dest`.
@@ -911,6 +1064,7 @@ impl<TT> TraceCompiler<TT> {
                         Constant::Bool(b) => self.c_bool(*b),
                         c => todo!("{}", c),
                     },
+                    Rvalue::BinaryOp(binop, op1, op2) => self.c_binop(binop, op1, op2),
                     Rvalue::CheckedBinaryOp(binop, op1, op2) => {
                         let rloc = self.c_checked_binop(binop, op1, op2);
                         // FIXME deal with overflow
@@ -1031,7 +1185,7 @@ impl<TT> TraceCompiler<TT> {
                                 ; mov QWORD [Rq(dest_ro.reg) + dest_ro.offs], Rq(temp)
                             );
                         }
-                        _ => unreachable!(),
+                        _ => unreachable!("{}", ty.size()),
                     }
                     self.free_if_temp(Location::Register(temp));
                 } else {
@@ -1114,8 +1268,68 @@ impl<TT> TraceCompiler<TT> {
     }
 
     /// Compile a guard in the trace, emitting code to abort execution in case the guard fails.
-    fn c_guard(&mut self, _grd: &Guard) {
-        self.nop(); // FIXME compile guards
+    fn c_guard(&mut self, guard: &Guard) {
+        match guard {
+            Guard {
+                val: Operand::Place(p),
+                kind: GuardKind::OtherInteger(v),
+            } => {
+                let (loc, ty) = self.place_to_location(&p, false);
+                match loc {
+                    Location::Register(reg) => {
+                        for c in v {
+                            self.cmp_reg_const(reg, *c, ty.size());
+                            dynasm!(self.asm
+                                ; je ->guardfail
+                            );
+                        }
+                    }
+                    _ => todo!(),
+                }
+            }
+            Guard {
+                val: Operand::Place(p),
+                kind: GuardKind::Integer(c),
+            } => {
+                let (loc, ty) = self.place_to_location(&p, false);
+                match loc {
+                    Location::Register(reg) => {
+                        self.cmp_reg_const(reg, *c, ty.size());
+                        dynasm!(self.asm
+                            ; jne ->guardfail
+                        );
+                    }
+                    _ => todo!(),
+                }
+            }
+            _ => todo!(),
+        }
+    }
+
+    fn cmp_reg_const(&mut self, reg: u8, c: u128, size: u64) {
+        match size {
+            1 => {
+                dynasm!(self.asm
+                    ; cmp Rb(reg), i8::try_from(c).unwrap()
+                );
+            }
+            2 => {
+                dynasm!(self.asm
+                    ; cmp Rw(reg), i16::try_from(c).unwrap()
+                );
+            }
+            4 => {
+                dynasm!(self.asm
+                    ; cmp Rd(reg), i32::try_from(c).unwrap()
+                );
+            }
+            8 => {
+                dynasm!(self.asm
+                    ; cmp Rq(reg), i32::try_from(c).unwrap()
+                );
+            }
+            _ => todo!(),
+        }
     }
 
     /// Print information about the state of the compiler and exit.
@@ -1175,9 +1389,14 @@ impl<TT> TraceCompiler<TT> {
         // beginning of the trace how many locals are going to be spilled.
         let soff = self.stack_builder.size();
         dynasm!(self.asm
+            ; mov rax, 1
+            ; ->cleanup:
             ; add rsp, soff as i32
             ; pop rbp
             ; ret
+            ; ->guardfail:
+            ; mov rax, 0
+            ; jmp ->cleanup
             ; ->reserve:
             ; push rbp
             ; mov rbp, rsp
@@ -2263,5 +2482,71 @@ mod tests {
         let mut args = IO(0);
         ct.execute(&mut args);
         assert_eq!(args.0, 3);
+    }
+
+    #[test]
+    fn test_comparison() {
+        struct IO(u8, bool);
+
+        fn checks(i: u8) -> bool {
+            let a = i == 0;
+            let b = i > 1;
+            let c = i < 1;
+            if a && b || c {
+                true
+            } else {
+                false
+            }
+        }
+
+        #[interp_step]
+        fn interp_step(io: &mut IO) {
+            let x = checks(io.0);
+            io.1 = x;
+        }
+
+        let mut inputs = IO(0, false);
+        let th = start_tracing(TracingKind::HardwareTracing);
+        interp_step(&mut inputs);
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
+        let mut args = IO(0, false);
+        ct.execute(&mut args);
+        assert_eq!(args.1, true);
+    }
+
+    #[test]
+    fn test_guard() {
+        struct IO(u8, u8);
+
+        fn guard(i: u8) -> u8 {
+            if i != 3 {
+                9
+            } else {
+                10
+            }
+        }
+
+        #[interp_step]
+        fn interp_step(io: &mut IO) {
+            let x = guard(io.0);
+            io.1 = x;
+        }
+
+        let mut inputs = IO(std::hint::black_box(|i| i)(0), 0);
+        let th = start_tracing(TracingKind::HardwareTracing);
+        interp_step(&mut inputs);
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
+        let mut args = IO(0, 0);
+        let cr = ct.execute(&mut args);
+        assert_eq!(cr, true);
+        assert_eq!(args.1, 9);
+        // Execute trace with input that fails the guard.
+        let mut args = IO(3, 0);
+        let cr = ct.execute(&mut args);
+        assert_eq!(cr, false);
     }
 }

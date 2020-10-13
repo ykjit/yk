@@ -54,7 +54,7 @@ impl<'a> TirTrace<'a> {
         defined_locals.insert(INTERP_STEP_ARG);
         def_sites.insert(INTERP_STEP_ARG, 0);
 
-        let mut update_defined_locals = |op: &Statement, op_idx: usize| {
+        let mut update_defined_locals = |op: &TirOp, op_idx: usize| {
             // Locals reported by `maybe_defined_locals()` are only defined if they are not already
             // defined.
             //
@@ -159,8 +159,9 @@ impl<'a> TirTrace<'a> {
                         }
                     };
 
+                    let op = TirOp::Statement(op);
                     update_defined_locals(&op, ops.len());
-                    ops.push(TirOp::Statement(op));
+                    ops.push(op);
                 }
             }
 
@@ -267,8 +268,9 @@ impl<'a> TirTrace<'a> {
                 _ => None
             };
             if let Some(stmt) = stmt {
-                update_defined_locals(&stmt, ops.len());
-                ops.push(TirOp::Statement(stmt));
+                let op = TirOp::Statement(stmt);
+                update_defined_locals(&op, ops.len());
+                ops.push(op);
             }
 
             // Convert the block terminator to a guard if necessary.
@@ -293,13 +295,13 @@ impl<'a> TirTrace<'a> {
                     let edge_idx = target_bbs.iter().position(|e| *e == next_blk);
                     match edge_idx {
                         Some(idx) => Some(Guard {
-                            val: discr.clone(),
+                            val: rnm.rename_operand(discr, body),
                             kind: GuardKind::Integer(values[idx].val())
                         }),
                         None => {
                             debug_assert!(next_blk == otherwise_bb);
                             Some(Guard {
-                                val: discr.clone(),
+                                val: rnm.rename_operand(discr, body),
                                 kind: GuardKind::OtherInteger(
                                     values.iter().map(|v| v.val()).collect()
                                 )
@@ -317,8 +319,10 @@ impl<'a> TirTrace<'a> {
                 })
             };
 
-            if guard.is_some() {
-                ops.push(TirOp::Guard(guard.unwrap()));
+            if let Some(g) = guard {
+                let op = TirOp::Guard(g);
+                update_defined_locals(&op, ops.len());
+                ops.push(op);
             }
         }
 
@@ -564,9 +568,24 @@ impl Display for TirTrace<'_> {
 #[derive(Debug)]
 pub struct Guard {
     /// The value to be checked if the guard is to pass.
-    pub val: Place,
+    pub val: Operand,
     /// The requirement upon `val` for the guard to pass.
     pub kind: GuardKind
+}
+
+impl Guard {
+    pub fn maybe_defined_locals(&self) -> Vec<Local> {
+        Vec::new()
+    }
+
+    pub fn used_locals(&self) -> Vec<Local> {
+        let mut ret = Vec::new();
+        match &self.val {
+            Operand::Place(place) => ret.push(place.local),
+            Operand::Constant(_) => {}
+        }
+        ret
+    }
 }
 
 /// A guard states the assumptions from its position in a trace onward.
@@ -620,6 +639,20 @@ impl TirOp {
             s.may_have_side_effects()
         } else {
             false
+        }
+    }
+
+    fn maybe_defined_locals(&self) -> Vec<Local> {
+        match &self {
+            TirOp::Statement(stmt) => stmt.maybe_defined_locals(),
+            TirOp::Guard(guard) => guard.maybe_defined_locals()
+        }
+    }
+
+    pub fn used_locals(&self) -> Vec<Local> {
+        match &self {
+            TirOp::Statement(stmt) => stmt.used_locals(),
+            TirOp::Guard(guard) => guard.used_locals()
         }
     }
 }

@@ -874,7 +874,7 @@ impl Display for CallOperand {
 pub enum Terminator {
     Goto(BasicBlockIndex),
     SwitchInt {
-        discr: Place,
+        discr: Operand,
         values: Vec<SerU128>,
         target_bbs: Vec<BasicBlockIndex>,
         otherwise_bb: BasicBlockIndex,
@@ -898,7 +898,7 @@ pub enum Terminator {
     },
     /// The value in `cond` must equal to `expected` to advance to `target_bb`.
     Assert {
-        cond: Place,
+        cond: Operand,
         expected: bool,
         target_bb: BasicBlockIndex,
     },
