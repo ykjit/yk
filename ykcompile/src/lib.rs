@@ -1286,6 +1286,7 @@ impl<TT> TraceCompiler<TT> {
                     }
                     _ => todo!(),
                 }
+                self.free_if_temp(loc);
             }
             Guard {
                 val: Operand::Place(p),
@@ -1301,6 +1302,7 @@ impl<TT> TraceCompiler<TT> {
                     }
                     _ => todo!(),
                 }
+                self.free_if_temp(loc);
             }
             _ => todo!(),
         }
@@ -2548,5 +2550,31 @@ mod tests {
         let mut args = IO(3, 0);
         let cr = ct.execute(&mut args);
         assert_eq!(cr, false);
+    }
+
+    #[test]
+    fn test_match() {
+        struct IO(u8);
+
+        #[interp_step]
+        #[inline(never)]
+        fn matchthis(io: &mut IO) {
+            let x = match io.0 {
+                1 => 2,
+                2 => 3,
+                _ => 0,
+            };
+            io.0 = x;
+        }
+
+        let th = start_tracing(TracingKind::HardwareTracing);
+        matchthis(&mut IO(1));
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
+        let mut args = IO(1);
+        let cr = ct.execute(&mut args);
+        assert_eq!(cr, true);
+        assert_eq!(args.0, 2);
     }
 }
