@@ -471,6 +471,10 @@ impl VarRenamer {
                 let newplace = self.rename_place(place, body);
                 Rvalue::Len(newplace)
             }
+            Rvalue::Cast(op, ty) => {
+                let newop = self.rename_operand(op, body);
+                Rvalue::Cast(newop, ty.clone())
+            }
             Rvalue::Unimplemented(_) => rvalue.clone()
         }
     }

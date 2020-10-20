@@ -45,6 +45,8 @@ pub enum Ty {
     Ref(TypeId),
     /// A Boolean.
     Bool,
+    /// A char.
+    Char,
     /// Anything that we've not yet defined a lowering for.
     Unimplemented(String),
 }
@@ -60,6 +62,7 @@ impl Display for Ty {
             Ty::Slice(sty) => write!(f, "&{:?}", sty),
             Ty::Ref(rty) => write!(f, "&{:?}", rty),
             Ty::Bool => write!(f, "bool"),
+            Ty::Char => write!(f, "char"),
             Ty::Unimplemented(m) => write!(f, "Unimplemented: {}", m),
         }
     }
@@ -88,6 +91,7 @@ impl Ty {
             Ty::Tuple(tty) => u64::try_from(tty.size_align.size).unwrap(),
             Ty::Ref(_) => u64::try_from(mem::size_of::<usize>()).unwrap(),
             Ty::Bool => u64::try_from(mem::size_of::<bool>()).unwrap(),
+            Ty::Char => u64::try_from(mem::size_of::<char>()).unwrap(),
             _ => todo!("{:?}", self),
         }
     }
@@ -603,6 +607,7 @@ pub enum Rvalue {
     CheckedBinaryOp(BinOp, Operand, Operand),
     Ref(Place),
     Len(Place),
+    Cast(Operand, Ty),
     Unimplemented(String),
 }
 
@@ -620,6 +625,7 @@ impl Rvalue {
             }
             Rvalue::Ref(plc) => plc.push_used_locals(locals),
             Rvalue::Len(plc) => plc.push_used_locals(locals),
+            Rvalue::Cast(opnd, _ty) => opnd.push_used_locals(locals),
             Rvalue::Unimplemented(_) => (),
         }
     }
@@ -635,6 +641,7 @@ impl Display for Rvalue {
             }
             Self::Ref(p) => write!(f, "&{}", p),
             Self::Len(p) => write!(f, "Len({})", p),
+            Self::Cast(op, ty) => write!(f, "Cast({}, {})", op, ty),
             Self::Unimplemented(s) => write!(f, "unimplemented rvalue: {}", s),
         }
     }
