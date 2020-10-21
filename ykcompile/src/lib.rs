@@ -193,7 +193,7 @@ impl<TT> TraceCompiler<TT> {
             },
             Ty::Array(_) => false,
             Ty::Slice(_) => false,
-            Ty::Ref(_) | Ty::Bool => true,
+            Ty::Ref(_) | Ty::Bool | Ty::Char => true,
             Ty::Struct(..) | Ty::Tuple(..) => false,
             Ty::Unimplemented(..) => todo!("{}", ty),
         }
@@ -214,7 +214,7 @@ impl<TT> TraceCompiler<TT> {
             // An array is copyable if its elements are.
             Ty::Array(ety) => Self::is_copyable(ety),
             Ty::Slice(ety) => Self::is_copyable(ety),
-            Ty::Ref(_) | Ty::Bool => true,
+            Ty::Ref(_) | Ty::Bool | Ty::Char => true,
             // FIXME A struct is copyable if it implements the Copy trait.
             Ty::Struct(..) => false,
             // FIXME A tuple is copyable if all its elements are.
@@ -631,6 +631,98 @@ impl<TT> TraceCompiler<TT> {
         }
         self.free_if_temp(loc);
         Location::Register(dst)
+    }
+
+    fn c_cast(&mut self, op: &Operand, cty: &Ty) -> Location {
+        match op {
+            Operand::Place(p) => {
+                let (loc, ty) = self.place_to_location(p, false);
+                match ty {
+                    Ty::UnsignedInt(_) => self.c_cast_uint(loc, &ty, cty),
+                    _ => todo!(),
+                }
+            }
+            Operand::Constant(_c) => todo!(),
+        }
+    }
+
+    fn c_cast_uint(&mut self, loc: Location, ty: &Ty, cty: &Ty) -> Location {
+        let temp = self.create_temporary();
+        match loc {
+            Location::Register(reg) => {
+                match cty.size() {
+                    1 => {
+                        dynasm!(self.asm
+                            ; mov Rb(temp), Rb(reg)
+                        );
+                    }
+                    2 => match ty.size() {
+                        1 => {
+                            dynasm!(self.asm
+                                ; movzx Rw(temp), Rb(reg)
+                            );
+                        }
+                        2 | 4 | 8 => {
+                            dynasm!(self.asm
+                                ; mov Rw(temp), Rw(reg)
+                            );
+                        }
+                        _ => todo!("{}", ty.size()),
+                    },
+                    4 => match ty.size() {
+                        1 => {
+                            dynasm!(self.asm
+                                ; movzx Rd(temp), Rb(reg)
+                            );
+                        }
+                        2 => {
+                            dynasm!(self.asm
+                                ; movzx Rd(temp), Rw(reg)
+                            );
+                        }
+                        4 | 8 => {
+                            dynasm!(self.asm
+                                ; mov Rd(temp), Rd(reg)
+                            );
+                        }
+                        _ => todo!("{}", ty.size()),
+                    },
+                    8 => {
+                        match ty.size() {
+                            1 => {
+                                dynasm!(self.asm
+                                    ; movzx Rq(temp), Rb(reg)
+                                );
+                            }
+                            2 => {
+                                dynasm!(self.asm
+                                    ; movzx Rq(temp), Rw(reg)
+                                );
+                            }
+                            4 => {
+                                // mov reg32, reg32 in x64 automatically zero-extends to
+                                // reg64.
+                                dynasm!(self.asm
+                                    ; mov Rd(temp), Rd(reg)
+                                );
+                            }
+                            8 => {
+                                dynasm!(self.asm
+                                    ; mov Rq(temp), Rq(reg)
+                                );
+                            }
+                            _ => todo!("{}", ty.size()),
+                        }
+                    }
+                    _ => todo!("{}", ty.size()),
+                }
+            }
+            Location::Mem(_ro) => todo!(),
+            Location::Addr(_reg) => todo!(),
+            Location::NotLive => unreachable!(),
+        }
+        self.free_if_temp(loc);
+        Location::Register(temp)
     }
 
     /// Emit a NOP operation.
@@ -1077,6 +1169,7 @@ impl<TT> TraceCompiler<TT> {
                     }
                     Rvalue::Ref(p) => self.c_ref(p),
                     Rvalue::Len(p) => self.c_len(p),
+                    Rvalue::Cast(p, ty) => self.c_cast(p, ty),
                     unimpl => todo!("{}", unimpl),
                 };
                 self.store(&l, rloc.clone());
@@ -1286,6 +1379,7 @@ impl<TT> TraceCompiler<TT> {
                     }
                     _ => todo!(),
                 }
+                self.free_if_temp(loc);
             }
             Guard {
                 val: Operand::Place(p),
@@ -1301,6 +1395,7 @@ impl<TT> TraceCompiler<TT> {
                     }
                     _ => todo!(),
                 }
+                self.free_if_temp(loc);
             }
             _ => todo!(),
         }
@@ -2548,5 +2643,59 @@ mod tests {
         let mut args = IO(3, 0);
         let cr = ct.execute(&mut args);
         assert_eq!(cr, false);
+    }
+
+    #[test]
+    fn test_match() {
+        struct IO(u8);
+
+        #[interp_step]
+        #[inline(never)]
+        fn matchthis(io: &mut IO) {
+            let x = match io.0 {
+                1 => 2,
+                2 => 3,
+                _ => 0,
+            };
+            io.0 = x;
+        }
+
+        let th = start_tracing(TracingKind::HardwareTracing);
+        matchthis(&mut IO(1));
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
+        let mut args = IO(1);
+        let cr = ct.execute(&mut args);
+        assert_eq!(cr, true);
+        assert_eq!(args.0, 2);
+    }
+
+    #[test]
+    fn test_cast() {
+        struct IO(u16, u8);
+
+        #[interp_step]
+        #[inline(never)]
+        fn matchthis(io: &mut IO) {
+            let y = match io.1 as char {
+                'a' => 1,
+                'b' => 2,
+                _ => 3,
+            };
+            io.0 = y;
+        }
+
+        let mut io = IO(0, 97);
+        let th = start_tracing(TracingKind::HardwareTracing);
+        matchthis(&mut io);
+        let sir_trace = th.stop_tracing().unwrap();
+        assert_eq!(io.0, 1);
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
+        let mut args = IO(0, 97);
+        let cr = ct.execute(&mut args);
+        assert_eq!(cr, true);
+        assert_eq!(args.0, 1);
     }
 }
