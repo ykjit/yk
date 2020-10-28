@@ -1093,12 +1093,14 @@ impl<TT> TraceCompiler<TT> {
                 let (rloc, _) = self.place_to_location(&p, false);
                 match binop {
                     BinOp::Add => self.c_checked_add_place(dest, &rloc),
+                    BinOp::Sub => self.c_checked_sub_place(dest, &rloc),
                     _ => todo!(),
                 }
                 self.free_if_temp(rloc);
             }
             Operand::Constant(Constant::Int(ci)) => match binop {
                 BinOp::Add => self.c_checked_add_const(dest, ci),
+                BinOp::Sub => self.c_checked_sub_const(dest, ci),
                 _ => todo!(),
             },
             Operand::Constant(Constant::Bool(_b)) => todo!(),
@@ -1141,6 +1143,36 @@ impl<TT> TraceCompiler<TT> {
             dynasm!(self.asm
                 ; mov rax, QWORD c_val
                 ; add Rq(dest_reg), rax
+            );
+        }
+    }
+
+    fn c_checked_sub_place(&mut self, dest_reg: u8, src_loc: &Location) {
+        match src_loc {
+            Location::Register(reg) => {
+                dynasm!(self.asm
+                    ; sub Rq(dest_reg), Rq(reg)
+                );
+            }
+            Location::Mem(ro) => {
+                dynasm!(self.asm
+                    ; sub Rq(dest_reg), [Rq(ro.reg) + ro.offs]
+                );
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn c_checked_sub_const(&mut self, dest_reg: u8, src_const: &ConstantInt) {
+        let c_val = src_const.i64_cast();
+        if c_val <= u32::MAX.into() {
+            dynasm!(self.asm
+                ; sub Rq(dest_reg), c_val as u32 as i32
+            );
+        } else {
+            dynasm!(self.asm
+                ; mov rax, QWORD c_val
+                ; sub Rq(dest_reg), rax
             );
         }
     }
