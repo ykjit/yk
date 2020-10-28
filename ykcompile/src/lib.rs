@@ -551,9 +551,17 @@ impl<TT> TraceCompiler<TT> {
             if matches!(pj, Projection::Deref)
                 && matches!(SIR.ty(&self.local_decls[&p.local].ty), Ty::Ref(_))
             {
+                if let Some(pj) = p.projection.get(1) {
+                    if matches!(pj, Projection::Field(_)) {
+                        return match self.place_to_location(p, false) {
+                            (Location::Addr(reg), _) => Location::Register(reg),
+                            (l, _) => l,
+                        };
+                    }
+                }
                 // Clone the projection while removing the `Deref` from the end.
                 let mut newproj = Vec::new();
-                for p in p.projection.iter().take(p.projection.len() - 1) {
+                for p in p.projection.iter().skip(1) {
                     newproj.push(p.clone());
                 }
                 let np = Place {
@@ -1093,12 +1101,14 @@ impl<TT> TraceCompiler<TT> {
                 let (rloc, _) = self.place_to_location(&p, false);
                 match binop {
                     BinOp::Add => self.c_checked_add_place(dest, &rloc),
+                    BinOp::Sub => self.c_checked_sub_place(dest, &rloc),
                     _ => todo!(),
                 }
                 self.free_if_temp(rloc);
             }
             Operand::Constant(Constant::Int(ci)) => match binop {
                 BinOp::Add => self.c_checked_add_const(dest, ci),
+                BinOp::Sub => self.c_checked_sub_const(dest, ci),
                 _ => todo!(),
             },
             Operand::Constant(Constant::Bool(_b)) => todo!(),
@@ -1141,6 +1151,36 @@ impl<TT> TraceCompiler<TT> {
             dynasm!(self.asm
                 ; mov rax, QWORD c_val
                 ; add Rq(dest_reg), rax
+            );
+        }
+    }
+
+    fn c_checked_sub_place(&mut self, dest_reg: u8, src_loc: &Location) {
+        match src_loc {
+            Location::Register(reg) => {
+                dynasm!(self.asm
+                    ; sub Rq(dest_reg), Rq(reg)
+                );
+            }
+            Location::Mem(ro) => {
+                dynasm!(self.asm
+                    ; sub Rq(dest_reg), [Rq(ro.reg) + ro.offs]
+                );
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn c_checked_sub_const(&mut self, dest_reg: u8, src_const: &ConstantInt) {
+        let c_val = src_const.i64_cast();
+        if c_val <= u32::MAX.into() {
+            dynasm!(self.asm
+                ; sub Rq(dest_reg), c_val as u32 as i32
+            );
+        } else {
+            dynasm!(self.asm
+                ; mov rax, QWORD c_val
+                ; sub Rq(dest_reg), rax
             );
         }
     }
@@ -1511,8 +1551,21 @@ impl<TT> TraceCompiler<TT> {
     }
 
     /// Finish compilation and return the executable code that was assembled.
-    fn finish(self) -> dynasmrt::ExecutableBuffer {
-        self.asm.finalize().unwrap()
+    fn finish(self, debug: bool) -> dynasmrt::ExecutableBuffer {
+        let buf = self.asm.finalize().unwrap();
+        if debug {
+            // In debug mode the memory section which contains the compiled trace is marked as
+            // writeable, which enables gdb/lldb to set breakpoints within the compiled code.
+            unsafe {
+                let ptr = buf.ptr(dynasmrt::AssemblyOffset(0)) as *mut libc::c_void;
+                let len = buf.len();
+                let alignment = ptr as usize % libc::sysconf(libc::_SC_PAGESIZE) as usize;
+                let ptr = ptr.offset(-(alignment as isize));
+                let len = len + alignment;
+                libc::mprotect(ptr, len, libc::PROT_EXEC | libc::PROT_WRITE);
+            }
+        }
+        buf
     }
 
     #[cfg(test)]
@@ -1524,7 +1577,7 @@ impl<TT> TraceCompiler<TT> {
         let tc = TraceCompiler::<TT>::_compile(tt);
         let spills = tc.stack_builder.size();
         let ct = CompiledTrace::<TT> {
-            mc: tc.finish(),
+            mc: tc.finish(false),
             _pd: PhantomData,
         };
         (ct, spills)
@@ -1534,7 +1587,7 @@ impl<TT> TraceCompiler<TT> {
     pub fn compile(tt: TirTrace) -> CompiledTrace<TT> {
         let tc = TraceCompiler::<TT>::_compile(tt);
         CompiledTrace::<TT> {
-            mc: tc.finish(),
+            mc: tc.finish(false),
             _pd: PhantomData,
         }
     }
@@ -2697,5 +2750,35 @@ mod tests {
         let cr = ct.execute(&mut args);
         assert_eq!(cr, true);
         assert_eq!(args.0, 1);
+    }
+
+    #[test]
+    fn test_vec_add() {
+        struct IO {
+            ptr: usize,
+            cells: Vec<u8>,
+        }
+
+        #[interp_step]
+        #[inline(never)]
+        fn vec_add(io: &mut IO) {
+            io.cells[io.ptr] = io.cells[io.ptr].wrapping_add(1);
+        }
+
+        let cells = vec![0, 1, 2];
+        let mut io = IO { ptr: 1, cells };
+        let th = start_tracing(TracingKind::HardwareTracing);
+        vec_add(&mut io);
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
+        let cells = vec![1, 2, 3];
+        let mut args = IO { ptr: 1, cells };
+        let cr = ct.execute(&mut args);
+        assert_eq!(cr, true);
+        assert_eq!(args.cells, vec![1, 3, 3]);
+        let cr = ct.execute(&mut args);
+        assert_eq!(cr, true);
+        assert_eq!(args.cells, vec![1, 4, 3]);
     }
 }
