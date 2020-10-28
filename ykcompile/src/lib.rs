@@ -1543,8 +1543,21 @@ impl<TT> TraceCompiler<TT> {
     }
 
     /// Finish compilation and return the executable code that was assembled.
-    fn finish(self) -> dynasmrt::ExecutableBuffer {
-        self.asm.finalize().unwrap()
+    fn finish(self, debug: bool) -> dynasmrt::ExecutableBuffer {
+        let buf = self.asm.finalize().unwrap();
+        if debug {
+            // In debug mode the memory section which contains the compiled trace is marked as
+            // writeable, which enables gdb/lldb to set breakpoints within the compiled code.
+            unsafe {
+                let ptr = buf.ptr(dynasmrt::AssemblyOffset(0)) as *mut libc::c_void;
+                let len = buf.len();
+                let alignment = ptr as usize % libc::sysconf(libc::_SC_PAGESIZE) as usize;
+                let ptr = ptr.offset(-(alignment as isize));
+                let len = len + alignment;
+                libc::mprotect(ptr, len, libc::PROT_EXEC | libc::PROT_WRITE);
+            }
+        }
+        buf
     }
 
     #[cfg(test)]
@@ -1556,7 +1569,7 @@ impl<TT> TraceCompiler<TT> {
         let tc = TraceCompiler::<TT>::_compile(tt);
         let spills = tc.stack_builder.size();
         let ct = CompiledTrace::<TT> {
-            mc: tc.finish(),
+            mc: tc.finish(false),
             _pd: PhantomData,
         };
         (ct, spills)
@@ -1566,7 +1579,7 @@ impl<TT> TraceCompiler<TT> {
     pub fn compile(tt: TirTrace) -> CompiledTrace<TT> {
         let tc = TraceCompiler::<TT>::_compile(tt);
         CompiledTrace::<TT> {
-            mc: tc.finish(),
+            mc: tc.finish(false),
             _pd: PhantomData,
         }
     }
