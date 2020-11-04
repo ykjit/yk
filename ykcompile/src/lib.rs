@@ -43,6 +43,160 @@ lazy_static! {
     static ref PTR_SIZE: u64 = u64::try_from(mem::size_of::<usize>()).unwrap();
 }
 
+macro_rules! binop_add_sub {
+    ($name: ident, $op:expr) => {
+        fn $name(&mut self, dest: &IPlace, size: u64, opnd2: &IPlace, temp_reg: u8) {
+            let src_loc = self.iplace_to_location(opnd2);
+            match src_loc {
+                Location::Register(r) => match size {
+                    1 => {
+                        dynasm!(self.asm
+                            ; $op Rb(temp_reg), Rb(r)
+                        );
+                    }
+                    2 => {
+                        dynasm!(self.asm
+                            ; $op Rw(temp_reg), Rw(r)
+                        );
+                    }
+                    4 => {
+                        dynasm!(self.asm
+                            ; $op Rd(temp_reg), Rd(r)
+                        );
+                    }
+                    8 => {
+                        dynasm!(self.asm
+                            ; $op Rq(temp_reg), Rq(r)
+                        );
+                    }
+                    _ => unreachable!(format!("{}", SIR.ty(&dest.ty()))),
+                },
+                Location::Mem(..) => todo!(),
+                Location::Const { val, .. } => {
+                    let val = val.i64_cast();
+                    match size {
+                        1 => {
+                            dynasm!(self.asm
+                                ; $op Rb(temp_reg), val as i8
+                            );
+                        }
+                        2 => {
+                            dynasm!(self.asm
+                                ; $op Rw(temp_reg), val as i16
+                            );
+                        }
+                        4 => {
+                            dynasm!(self.asm
+                                ; $op Rd(temp_reg), val as i32
+                            );
+                        }
+                        8 => {
+                            if i32::try_from(val).is_err() {
+                                // FIXME Work around x86_64 encoding limitations (no imm64 operands).
+                                todo!();
+                            } else {
+                                dynasm!(self.asm
+                                    ; $op Rq(temp_reg), val as i32
+                                );
+                            }
+                        }
+                        _ => unreachable!(format!("{}", SIR.ty(&dest.ty()))),
+                    }
+                }
+                Location::Indirect { .. } => todo!(),
+                Location::NotLive => todo!(),
+            }
+        }
+    }
+}
+
+macro_rules! binop_mul_div {
+    ($name: ident, $op:expr) => {
+        fn $name(&mut self, dest: &IPlace, size: u64, opnd2: &IPlace, temp_reg: u8) {
+            // mul and div overwrite RAX, RDX, so save them first.
+            dynasm!(self.asm
+                ; push rax
+                ; push rdx
+                ; xor rdx, rdx
+            );
+            dynasm!(self.asm
+                ; mov rax, Rq(temp_reg)
+            );
+            let src_loc = self.iplace_to_location(opnd2);
+            match src_loc {
+                Location::Register(r) => match size {
+                    1 => {
+                        dynasm!(self.asm
+                            ; $op Rb(r)
+                        );
+                    }
+                    2 => {
+                        dynasm!(self.asm
+                            ; $op Rw(r)
+                        );
+                    }
+                    4 => {
+                        dynasm!(self.asm
+                            ; $op Rd(r)
+                        );
+                    }
+                    8 => {
+                        dynasm!(self.asm
+                            ; $op Rq(r)
+                        );
+                    }
+                    _ => unreachable!(format!("{}", SIR.ty(&dest.ty()))),
+                },
+                Location::Mem(..) => todo!(),
+                Location::Const { val, .. } => {
+                    let val = val.i64_cast();
+                    match size {
+                        1 => {
+                            dynasm!(self.asm
+                                ; mov Rb(temp_reg), val as i8
+                                ; $op Rb(temp_reg)
+                            );
+                        }
+                        2 => {
+                            dynasm!(self.asm
+                                ; mov Rw(temp_reg), val as i16
+                                ; $op Rw(temp_reg)
+                            );
+                        }
+                        4 => {
+                            dynasm!(self.asm
+                                ; mov Rd(temp_reg), val as i32
+                                ; $op Rd(temp_reg)
+                            );
+                        }
+                        8 => {
+                            if i32::try_from(val).is_err() {
+                                // FIXME Work around x86_64 encoding limitations (no imm64 operands).
+                                todo!();
+                            } else {
+                                dynasm!(self.asm
+                                    ; mov Rq(temp_reg), val as i32
+                                    ; $op Rq(temp_reg)
+                                );
+                            }
+                        }
+                        _ => unreachable!(format!("{}", SIR.ty(&dest.ty()))),
+                    }
+                }
+                Location::Indirect { .. } => todo!(),
+                Location::NotLive => todo!(),
+            }
+
+            // Restore RAX, RDX
+            dynasm!(self.asm
+                ; mov Rq(*TEMP_REG), rax
+                ; pop rax
+                ; pop rdx
+            );
+        }
+    }
+}
+
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub enum CompileError {
     /// The binary symbol could not be found.
@@ -538,12 +692,13 @@ impl<TT> TraceCompiler<TT> {
         // 1) Copy the first operand into the temp register.
         self.load_reg_iplace(*TEMP_REG, opnd1);
 
-        // 2) Add the second operand.
-        // FIXME replace with macro
+        // 2) Apply the second operand.
         let size = SIR.ty(&opnd1.ty()).size();
         match op {
-            BinOp::Add => self.c_binop_add(dest, size, opnd2),
-            BinOp::Sub => self.c_binop_sub(dest, size, opnd2),
+            BinOp::Add => self.c_binop_add(dest, size, opnd2, *TEMP_REG),
+            BinOp::Sub => self.c_binop_sub(dest, size, opnd2, *TEMP_REG),
+            BinOp::Mul => self.c_binop_mul(dest, size, opnd2, *TEMP_REG),
+            BinOp::Div => self.c_binop_div(dest, size, opnd2, *TEMP_REG),
             _ => todo!(),
         }
 
@@ -564,101 +719,10 @@ impl<TT> TraceCompiler<TT> {
         }
     }
 
-    fn c_binop_add(&mut self, dest: &IPlace, size: u64, opnd2: &IPlace) {
-        let src_loc = self.iplace_to_location(opnd2);
-        match src_loc {
-            Location::Register(r) => match size {
-                1 | 2 | 4 => todo!(),
-                8 => {
-                    dynasm!(self.asm
-                        ; add Rq(*TEMP_REG), Rq(r)
-                    );
-                }
-                _ => unreachable!(SIR.ty(&dest.ty())),
-            },
-            Location::Mem(..) => todo!(),
-            Location::Const { val, .. } => {
-                let val = val.i64_cast();
-                if val > i64::from(u32::MAX) {
-                    // FIXME Work around x86_64 encoding limitations (no imm64 operands).
-                    todo!();
-                }
-                match size {
-                    1 => {
-                        dynasm!(self.asm
-                            ; add Rb(*TEMP_REG), val as i8
-                        );
-                    }
-                    2 => {
-                        dynasm!(self.asm
-                            ; add Rw(*TEMP_REG), val as i16
-                        );
-                    }
-                    4 => {
-                        dynasm!(self.asm
-                            ; add Rd(*TEMP_REG), val as i32
-                        );
-                    }
-                    8 => {
-                        dynasm!(self.asm
-                            ; add Rq(*TEMP_REG), val as i32
-                        );
-                    }
-                    _ => unreachable!(format!("{}", SIR.ty(&dest.ty()))),
-                }
-            }
-            Location::Indirect { .. } => todo!(),
-            Location::NotLive => todo!(),
-        }
-    }
-
-    fn c_binop_sub(&mut self, dest: &IPlace, size: u64, opnd2: &IPlace) {
-        let src_loc = self.iplace_to_location(opnd2);
-        match src_loc {
-            Location::Register(r) => match size {
-                1 | 2 | 4 => todo!(),
-                8 => {
-                    dynasm!(self.asm
-                        ; sub Rq(*TEMP_REG), Rq(r)
-                    );
-                }
-                _ => unreachable!(format!("{}", SIR.ty(&dest.ty()))),
-            },
-            Location::Mem(..) => todo!(),
-            Location::Const { val, .. } => {
-                let val = val.i64_cast();
-                if val > i64::from(u32::MAX) {
-                    // FIXME Work around x86_64 encoding limitations (no imm64 operands).
-                    todo!();
-                }
-                match size {
-                    1 => {
-                        dynasm!(self.asm
-                            ; sub Rb(*TEMP_REG), val as i8
-                        );
-                    }
-                    2 => {
-                        dynasm!(self.asm
-                            ; sub Rw(*TEMP_REG), val as i16
-                        );
-                    }
-                    4 => {
-                        dynasm!(self.asm
-                            ; sub Rd(*TEMP_REG), val as i32
-                        );
-                    }
-                    8 => {
-                        dynasm!(self.asm
-                            ; sub Rq(*TEMP_REG), val as i32
-                        );
-                    }
-                    _ => unreachable!(format!("{}", SIR.ty(&dest.ty()))),
-                }
-            }
-            Location::Indirect { .. } => todo!(),
-            Location::NotLive => todo!(),
-        }
-    }
+    binop_add_sub!(c_binop_add, add);
+    binop_add_sub!(c_binop_sub, sub);
+    binop_mul_div!(c_binop_mul, mul);
+    binop_mul_div!(c_binop_div, div);
 
     fn c_condition(&mut self, dest: &IPlace, binop: &BinOp, op1: &IPlace, op2: &IPlace) {
         let src1 = self.iplace_to_location(op1);
@@ -2080,6 +2144,28 @@ mod tests {
         let mut args = IO(5, 2, 0);
         ct.execute(&mut args);
         assert_eq!(args, IO(5, 2, 10));
+    }
+
+    #[test]
+    fn test_binop_other() {
+        #[derive(Eq, PartialEq, Debug)]
+        struct IO(u64, u64, u64);
+
+        #[interp_step]
+        fn interp_stepx(io: &mut IO) {
+            io.2 = io.0 * 3 - 5;
+            io.1 = io.2 / 2;
+        }
+
+        let mut inputs = IO(5, 2, 0);
+        let th = start_tracing(TracingKind::HardwareTracing);
+        interp_stepx(&mut inputs);
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
+        let mut args = IO(5, 2, 0);
+        ct.execute(&mut args);
+        assert_eq!(args, IO(5, 5, 10));
     }
 
     #[test]
