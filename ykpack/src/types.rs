@@ -613,10 +613,7 @@ impl Statement {
 
     /// Returns true if the statement may affect locals besides those appearing in the statement.
     pub fn may_have_side_effects(&self) -> bool {
-        match self {
-            Statement::Call(..) => true,
-            _ => false,
-        }
+        matches!(self, Statement::Call(..))
     }
 }
 

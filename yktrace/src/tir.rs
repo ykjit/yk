@@ -114,13 +114,10 @@ impl<'a> TirTrace<'a> {
             // If a function was annotated with `do_not_trace`, skip all instructions within it as
             // well. FIXME: recursion.
             if let Some(sym) = &ignore {
-                if sym == &loc.symbol_name {
-                    match &body.blocks[user_bb_idx_usize].term {
-                        Terminator::Return => {
-                            ignore = None;
-                        }
-                        _ => {}
-                    }
+                if sym == &loc.symbol_name
+                    && body.blocks[user_bb_idx_usize].term == Terminator::Return
+                {
+                    ignore = None;
                 }
                 continue;
             }
@@ -163,7 +160,7 @@ impl<'a> TirTrace<'a> {
                             checked
                         } => Statement::BinaryOp {
                             dest: rnm.rename_iplace(dest, body),
-                            op: op.clone(),
+                            op: *op,
                             opnd1: rnm.rename_iplace(opnd1, body),
                             opnd2: rnm.rename_iplace(opnd2, body),
                             checked: *checked
@@ -377,7 +374,7 @@ impl<'a> TirTrace<'a> {
             } else {
                 ops.insert(
                     *idx + 1,
-                    TirOp::Statement(ykpack::Statement::StorageDead(local.clone()))
+                    TirOp::Statement(ykpack::Statement::StorageDead(*local))
                 );
             }
         }
@@ -391,9 +388,12 @@ impl<'a> TirTrace<'a> {
     }
 
     /// Return the TIR operation at index `idx` in the trace.
-    /// The index must not be out of bounds.
+    ///
+    /// # Safety
+    ///
+    /// Undefined behaviour will result if the index is out of bounds.
     pub unsafe fn op(&self, idx: usize) -> &TirOp {
-        debug_assert!(idx <= self.ops.len() - 1, "bogus trace index");
+        debug_assert!(idx < self.ops.len(), "bogus trace index");
         &self.ops.get_unchecked(idx)
     }
 
@@ -443,9 +443,8 @@ impl VarRenamer {
         // offset to the stack, so we can restore it once we leave the inlined function call again.
         self.offset = self.acc.unwrap();
         self.stack.push(self.offset);
-        match self.acc.as_mut() {
-            Some(v) => *v += num_locals as u32,
-            None => {}
+        if let Some(v) = self.acc.as_mut() {
+            *v += num_locals as u32;
         }
     }
 
@@ -480,7 +479,7 @@ impl VarRenamer {
         }
     }
 
-    fn rename_args(&mut self, args: &Vec<IPlace>, body: &ykpack::Body) -> Vec<IPlace> {
+    fn rename_args(&mut self, args: &[IPlace], body: &ykpack::Body) -> Vec<IPlace> {
         args.iter()
             .map(|op| self.rename_iplace(&op, body))
             .collect()
@@ -489,7 +488,7 @@ impl VarRenamer {
     fn rename_local(&mut self, local: &Local, body: &ykpack::Body) -> Local {
         let renamed = Local(local.0 + self.offset);
         self.local_decls.insert(
-            renamed.clone(),
+            renamed,
             body.local_decls[usize::try_from(local.0).unwrap()].clone()
         );
         renamed
@@ -539,9 +538,8 @@ impl Guard {
 
     pub fn used_locals(&self) -> Vec<Local> {
         let mut ret = Vec::new();
-        match &self.val {
-            IPlace::Val { local, .. } => ret.push(*local),
-            _ => {}
+        if let IPlace::Val { local, .. } = self.val {
+            ret.push(local);
         }
         ret
     }

@@ -34,7 +34,7 @@ impl ThreadTracerImpl for HWTThreadTracer {
         let mt = HWTMapper::new();
         mt.map(hwtrace)
             .map_err(|_| InvalidTraceError::InternalError)
-            .and_then(|sirtrace| Ok(Box::new(HWTSirTrace { sirtrace }) as Box<dyn SirTrace>))
+            .map(|sirtrace| Box::new(HWTSirTrace { sirtrace }) as Box<dyn SirTrace>)
     }
 }
 

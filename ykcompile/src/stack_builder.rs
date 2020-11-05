@@ -20,7 +20,7 @@ impl StackBuilder {
     pub fn alloc(&mut self, size: u64, align: u64) -> Location {
         self.align(align);
         self.stack_top += size;
-        Location::new_mem(RBP.code(), -1 * i32::try_from(self.stack_top).unwrap())
+        Location::new_mem(RBP.code(), -i32::try_from(self.stack_top).unwrap())
     }
 
     /// Aligns `offset` to `align` bytes.
