@@ -398,14 +398,8 @@ impl<TT> TraceCompiler<TT> {
         // FIXME: optimisation: small structs and tuples etc. could actually live in a register.
         let ty = SIR.ty(&decl.ty);
         match ty {
-            Ty::UnsignedInt(ui) => match ui {
-                UnsignedIntTy::U128 => false,
-                _ => true,
-            },
-            Ty::SignedInt(si) => match si {
-                SignedIntTy::I128 => false,
-                _ => true,
-            },
+            Ty::UnsignedInt(ui) => !matches!(ui, UnsignedIntTy::U128),
+            Ty::SignedInt(si) => !matches!(si, SignedIntTy::I128),
             Ty::Array { .. } => false,
             Ty::Slice(_) => false,
             Ty::Ref(_) | Ty::Bool | Ty::Char => true,
@@ -415,25 +409,19 @@ impl<TT> TraceCompiler<TT> {
     }
 
     fn iplace_to_location(&mut self, ip: &IPlace) -> Location {
-        let ret = match ip {
-            IPlace::Val { local, off, .. } => {
-                let off = i32::try_from(*off).unwrap();
-                self.local_to_location(*local).offset(off)
-            }
-            IPlace::Indirect { ptr, off, .. } => {
-                let ptr_off = i32::try_from(ptr.off).unwrap();
-                self.local_to_location(ptr.local)
-                    .offset(ptr_off)
-                    .to_indirect()
-                    .offset(*off)
-            }
+        match ip {
+            IPlace::Val { local, off, .. } => self.local_to_location(*local).offset(*off),
+            IPlace::Indirect { ptr, off, .. } => self
+                .local_to_location(ptr.local)
+                .offset(ptr.off)
+                .to_indirect()
+                .offset(*off),
             IPlace::Const { val, ty } => Location::Const {
                 val: val.clone(),
                 ty: *ty,
             },
             _ => todo!(),
-        };
-        ret
+        }
     }
 
     /// Given a local, returns the register allocation for it, or, if there is no allocation yet,
@@ -566,7 +554,7 @@ impl<TT> TraceCompiler<TT> {
     fn c_call(
         &mut self,
         opnd: &CallOperand,
-        args: &Vec<IPlace>,
+        args: &[IPlace],
         dest: &Option<IPlace>,
     ) -> Result<(), CompileError> {
         let sym = if let CallOperand::Fn(sym) = opnd {
@@ -1621,7 +1609,10 @@ impl<TT> TraceCompiler<TT> {
         for i in 0..tt.len() {
             let res = match unsafe { tt.op(i) } {
                 TirOp::Statement(st) => tc.c_statement(st),
-                TirOp::Guard(g) => Ok(tc.c_guard(g)),
+                TirOp::Guard(g) => {
+                    tc.c_guard(g);
+                    Ok(())
+                }
             };
 
             // FIXME -- Later errors should not be fatal. We should be able to abort trace
@@ -1640,7 +1631,7 @@ impl<TT> TraceCompiler<TT> {
         let sym_arg = CString::new(sym).unwrap();
         let addr = unsafe { dlsym(RTLD_DEFAULT, sym_arg.into_raw()) };
 
-        if addr == 0 as *mut c_void {
+        if addr.is_null() {
             Err(CompileError::UnknownSymbol(sym.to_owned()))
         } else {
             Ok(addr)

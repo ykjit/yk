@@ -223,7 +223,7 @@ impl MTThread {
     }
 
     /// Attempt to execute a compiled trace for location `loc`.
-    pub fn control_point<'l, S, I>(&mut self, loc: Option<&'l Location>, step_fn: S, inputs: I) -> I
+    pub fn control_point<S, I>(&mut self, loc: Option<&Location>, step_fn: S, inputs: I) -> I
     where
         S: Fn(I) -> I,
     {

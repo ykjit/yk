@@ -29,7 +29,7 @@ fn main() {
         let trace_text = String::from_utf8(trace_text).unwrap();
         let mut trace = VecSirTrace(vec![], ykpack::Local(0) /*FIXME*/);
         for line in trace_text.lines() {
-            let mut parts = line.trim().split(" ");
+            let mut parts = line.trim().split(' ');
             let symbol_name = parts.next().unwrap().to_string();
             let bb_idx = parts.next().unwrap().parse::<u32>().unwrap();
             assert!(parts.next().is_none());
