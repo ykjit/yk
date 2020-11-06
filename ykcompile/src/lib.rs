@@ -43,33 +43,36 @@ lazy_static! {
     static ref PTR_SIZE: u64 = u64::try_from(mem::size_of::<usize>()).unwrap();
 }
 
+/// Generates functions for add/sub-style operations.
+/// The first operand must be in a register.
 macro_rules! binop_add_sub {
     ($name: ident, $op:expr) => {
-        fn $name(&mut self, dest: &IPlace, size: u64, opnd2: &IPlace, temp_reg: u8) {
-            let src_loc = self.iplace_to_location(opnd2);
-            match src_loc {
+        fn $name(&mut self, opnd1_reg: u8, opnd2: &IPlace) {
+            let size = SIR.ty(&opnd2.ty()).size();
+            let opnd2_loc = self.iplace_to_location(opnd2);
+            match opnd2_loc {
                 Location::Register(r) => match size {
                     1 => {
                         dynasm!(self.asm
-                            ; $op Rb(temp_reg), Rb(r)
+                            ; $op Rb(opnd1_reg), Rb(r)
                         );
                     }
                     2 => {
                         dynasm!(self.asm
-                            ; $op Rw(temp_reg), Rw(r)
+                            ; $op Rw(opnd1_reg), Rw(r)
                         );
                     }
                     4 => {
                         dynasm!(self.asm
-                            ; $op Rd(temp_reg), Rd(r)
+                            ; $op Rd(opnd1_reg), Rd(r)
                         );
                     }
                     8 => {
                         dynasm!(self.asm
-                            ; $op Rq(temp_reg), Rq(r)
+                            ; $op Rq(opnd1_reg), Rq(r)
                         );
                     }
-                    _ => unreachable!(format!("{}", SIR.ty(&dest.ty()))),
+                    _ => unreachable!(format!("{}", SIR.ty(&opnd2.ty()))),
                 },
                 Location::Mem(..) => todo!(),
                 Location::Const { val, .. } => {
@@ -77,17 +80,17 @@ macro_rules! binop_add_sub {
                     match size {
                         1 => {
                             dynasm!(self.asm
-                                ; $op Rb(temp_reg), val as i8
+                                ; $op Rb(opnd1_reg), val as i8
                             );
                         }
                         2 => {
                             dynasm!(self.asm
-                                ; $op Rw(temp_reg), val as i16
+                                ; $op Rw(opnd1_reg), val as i16
                             );
                         }
                         4 => {
                             dynasm!(self.asm
-                                ; $op Rd(temp_reg), val as i32
+                                ; $op Rd(opnd1_reg), val as i32
                             );
                         }
                         8 => {
@@ -96,11 +99,11 @@ macro_rules! binop_add_sub {
                                 todo!();
                             } else {
                                 dynasm!(self.asm
-                                    ; $op Rq(temp_reg), val as i32
+                                    ; $op Rq(opnd1_reg), val as i32
                                 );
                             }
                         }
-                        _ => unreachable!(format!("{}", SIR.ty(&dest.ty()))),
+                        _ => unreachable!(format!("{}", SIR.ty(&opnd2.ty()))),
                     }
                 }
                 Location::Indirect { .. } => todo!(),
@@ -110,9 +113,11 @@ macro_rules! binop_add_sub {
     }
 }
 
+/// Generates functions for mul/div-style operations.
+/// The first operand must be in a register.
 macro_rules! binop_mul_div {
     ($name: ident, $op:expr) => {
-        fn $name(&mut self, dest: &IPlace, size: u64, opnd2: &IPlace, temp_reg: u8) {
+        fn $name(&mut self, opnd1_reg: u8, opnd2: &IPlace) {
             // mul and div overwrite RAX, RDX, so save them first.
             dynasm!(self.asm
                 ; push rax
@@ -120,8 +125,9 @@ macro_rules! binop_mul_div {
                 ; xor rdx, rdx
             );
             dynasm!(self.asm
-                ; mov rax, Rq(temp_reg)
+                ; mov rax, Rq(opnd1_reg)
             );
+            let size = SIR.ty(&opnd2.ty()).size();
             let src_loc = self.iplace_to_location(opnd2);
             match src_loc {
                 Location::Register(r) => match size {
@@ -145,28 +151,30 @@ macro_rules! binop_mul_div {
                             ; $op Rq(r)
                         );
                     }
-                    _ => unreachable!(format!("{}", SIR.ty(&dest.ty()))),
+                    _ => unreachable!(format!("{}", SIR.ty(&opnd2.ty()))),
                 },
                 Location::Mem(..) => todo!(),
                 Location::Const { val, .. } => {
+                    // It's safe to use TEMP_REG here, because opnd2 isn't in a register and if
+                    // opnd1_reg was TEMP_REG then we've already moved it into RAX.
                     let val = val.i64_cast();
                     match size {
                         1 => {
                             dynasm!(self.asm
-                                ; mov Rb(temp_reg), val as i8
-                                ; $op Rb(temp_reg)
+                                ; mov Rb(*TEMP_REG), val as i8
+                                ; $op Rb(*TEMP_REG)
                             );
                         }
                         2 => {
                             dynasm!(self.asm
-                                ; mov Rw(temp_reg), val as i16
-                                ; $op Rw(temp_reg)
+                                ; mov Rw(*TEMP_REG), val as i16
+                                ; $op Rw(*TEMP_REG)
                             );
                         }
                         4 => {
                             dynasm!(self.asm
-                                ; mov Rd(temp_reg), val as i32
-                                ; $op Rd(temp_reg)
+                                ; mov Rd(*TEMP_REG), val as i32
+                                ; $op Rd(*TEMP_REG)
                             );
                         }
                         8 => {
@@ -175,12 +183,12 @@ macro_rules! binop_mul_div {
                                 todo!();
                             } else {
                                 dynasm!(self.asm
-                                    ; mov Rq(temp_reg), val as i32
-                                    ; $op Rq(temp_reg)
+                                    ; mov Rq(*TEMP_REG), val as i32
+                                    ; $op Rq(*TEMP_REG)
                                 );
                             }
                         }
-                        _ => unreachable!(format!("{}", SIR.ty(&dest.ty()))),
+                        _ => unreachable!(format!("{}", SIR.ty(&opnd2.ty()))),
                     }
                 }
                 Location::Indirect { .. } => todo!(),
@@ -189,7 +197,7 @@ macro_rules! binop_mul_div {
 
             // Restore RAX, RDX
             dynasm!(self.asm
-                ; mov Rq(*TEMP_REG), rax
+                ; mov Rq(opnd1_reg), rax
                 ; pop rax
                 ; pop rdx
             );
@@ -669,6 +677,14 @@ impl<TT> TraceCompiler<TT> {
     }
 
     fn c_binop(&mut self, dest: &IPlace, op: BinOp, opnd1: &IPlace, opnd2: &IPlace, checked: bool) {
+        let opnd1_ty = SIR.ty(&opnd1.ty());
+        debug_assert!(opnd1_ty == SIR.ty(&opnd2.ty()));
+
+        // For now this whole function assumes we are operating on integers.
+        if !opnd1_ty.is_int() {
+            todo!("binops for non-integers");
+        }
+
         match op {
             BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
                 return self.c_condition(dest, &op, opnd1, opnd2);
@@ -680,13 +696,24 @@ impl<TT> TraceCompiler<TT> {
         // 1) Copy the first operand into the temp register.
         self.load_reg_iplace(*TEMP_REG, opnd1);
 
-        // 2) Apply the second operand.
-        let size = SIR.ty(&opnd1.ty()).size();
+        // 2) Perform arithmetic.
         match op {
-            BinOp::Add => self.c_binop_add(dest, size, opnd2, *TEMP_REG),
-            BinOp::Sub => self.c_binop_sub(dest, size, opnd2, *TEMP_REG),
-            BinOp::Mul => self.c_binop_mul(dest, size, opnd2, *TEMP_REG),
-            BinOp::Div => self.c_binop_div(dest, size, opnd2, *TEMP_REG),
+            BinOp::Add => self.c_binop_add(*TEMP_REG, opnd2),
+            BinOp::Sub => self.c_binop_sub(*TEMP_REG, opnd2),
+            BinOp::Mul => {
+                if opnd1_ty.is_signed_int() {
+                    todo!("signed mul"); // use IMUL
+                } else {
+                    self.c_binop_mul(*TEMP_REG, opnd2);
+                }
+            }
+            BinOp::Div => {
+                if opnd1_ty.is_signed_int() {
+                    todo!("signed div"); // use IDIV
+                } else {
+                    self.c_binop_div(*TEMP_REG, opnd2);
+                }
+            }
             _ => todo!(),
         }
 
@@ -695,12 +722,14 @@ impl<TT> TraceCompiler<TT> {
         // 3) Move the result to where it is supposed to live.
         // If it is a checked operation, then we have to build a (value, overflow-flag) tuple.
         let mut dest_loc = self.iplace_to_location(dest);
+        let size = opnd1_ty.size();
         self.store_raw(&dest_loc, &*TEMP_LOC, size);
         if checked {
             // Set overflow flag.
             dynasm!(self.asm
                 ; mov Rq(*TEMP_REG), 0
             );
+            // FIXME lookup flag offset from type. More robust to ABI changes.
             let ro = dest_loc.unwrap_mem_mut();
             ro.off += i32::try_from(size).unwrap();
             self.store_raw(&dest_loc, &*TEMP_LOC, 1);

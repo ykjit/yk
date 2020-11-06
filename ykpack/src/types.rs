@@ -149,6 +149,14 @@ impl Ty {
             _ => todo!("{:?}", self),
         }
     }
+
+    pub fn is_signed_int(&self) -> bool {
+        matches!(self, Self::SignedInt(..))
+    }
+
+    pub fn is_int(&self) -> bool {
+        matches!(self, Self::SignedInt(..)) || matches!(self, Self::UnsignedInt(..))
+    }
 }
 
 /// Describes the various signed integer types.
