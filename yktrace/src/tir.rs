@@ -355,7 +355,7 @@ impl<'a> TirTrace<'a> {
         let mut local_decls = rnm.done();
 
         // Insert `StorageDead` statements after the last use of each local variable. We process
-        // the locals in reverse order of death site, so that inserting a statement cannot not skew
+        // the locals in reverse order of death site, so that inserting a statement cannot skew
         // the indices for subsequent insertions.
         let mut deads = last_use_sites.iter().collect::<Vec<(&Local, &usize)>>();
         deads.sort_by(|a, b| b.1.cmp(a.1));
@@ -372,10 +372,12 @@ impl<'a> TirTrace<'a> {
                 let prev = local_decls.remove(&local);
                 debug_assert!(prev.is_some());
             } else {
-                ops.insert(
-                    *idx + 1,
-                    TirOp::Statement(ykpack::Statement::StorageDead(*local))
-                );
+                let ds = TirOp::Statement(ykpack::Statement::StorageDead(*local));
+                if *idx == ops.len() {
+                    ops.push(ds);
+                } else {
+                    ops.insert(*idx + 1, ds);
+                }
             }
         }
 
