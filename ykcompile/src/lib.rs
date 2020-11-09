@@ -303,18 +303,8 @@ impl Location {
         Self::Mem(RegAndOffset { reg, off })
     }
 
-    #[cfg(test)]
     /// If `self` is a `Mem` then unwrap it, otherwise panic.
     fn unwrap_mem(&self) -> &RegAndOffset {
-        if let Location::Mem(ro) = self {
-            ro
-        } else {
-            panic!("tried to unwrap a Mem location when it wasn't a Mem");
-        }
-    }
-
-    /// If `self` is a `Mem` then return a mutable reference to its innards, otherwise panic.
-    fn unwrap_mem_mut(&mut self) -> &mut RegAndOffset {
         if let Location::Mem(ro) = self {
             ro
         } else {
@@ -717,23 +707,34 @@ impl<TT> TraceCompiler<TT> {
             _ => todo!(),
         }
 
-        // FIXME. Check for overflow here. Examine either CF or OF depending on signedness.
-
         // 3) Move the result to where it is supposed to live.
-        // If it is a checked operation, then we have to build a (value, overflow-flag) tuple.
-        let mut dest_loc = self.iplace_to_location(dest);
+        let dest_loc = self.iplace_to_location(dest);
         let size = opnd1_ty.size();
-        self.store_raw(&dest_loc, &*TEMP_LOC, size);
         if checked {
-            // Set overflow flag.
+            // If it is a checked operation, then we have to build a (value, overflow-flag) tuple.
+            // Let's do the flag first, so as to read EFLAGS closest to where they are set.
+            let dest_ro = dest_loc.unwrap_mem();
+            let tty = SIR.ty(&dest.ty()).unwrap_tuple();
+            let flag_off = i32::try_from(tty.fields.offsets[1]).unwrap();
+
+            if opnd1_ty.is_signed_int() {
+                dynasm!(self.asm
+                    ; jo >overflow
+                );
+            } else {
+                dynasm!(self.asm
+                    ; jc >overflow
+                );
+            }
             dynasm!(self.asm
-                ; mov Rq(*TEMP_REG), 0
+                ; mov BYTE [Rq(dest_ro.reg) + dest_ro.off + flag_off], 0
+                ; jmp >done
+                ; overflow:
+                ; mov BYTE [Rq(dest_ro.reg) + dest_ro.off + flag_off], 1
+                ; done:
             );
-            // FIXME lookup flag offset from type. More robust to ABI changes.
-            let ro = dest_loc.unwrap_mem_mut();
-            ro.off += i32::try_from(size).unwrap();
-            self.store_raw(&dest_loc, &*TEMP_LOC, 1);
         }
+        self.store_raw(&dest_loc, &*TEMP_LOC, size);
     }
 
     binop_add_sub!(c_binop_add, add);
@@ -1423,6 +1424,8 @@ impl<TT> TraceCompiler<TT> {
 
     /// Compile a guard in the trace, emitting code to abort execution in case the guard fails.
     fn c_guard(&mut self, guard: &Guard) {
+        // FIXME some of the terminators from which we build these guards can have cleanup blocks.
+        // Currently we don't run any cleanup, but should we?
         match guard {
             Guard {
                 val,
@@ -1463,7 +1466,24 @@ impl<TT> TraceCompiler<TT> {
                 },
                 _ => todo!(),
             },
-            _ => todo!(),
+            Guard {
+                val,
+                kind: GuardKind::Boolean(expect),
+            } => match self.iplace_to_location(val) {
+                Location::Register(reg) => {
+                    dynasm!(self.asm
+                        ; cmp Rb(reg), *expect as i8
+                        ; jne ->guardfail
+                    );
+                }
+                Location::Mem(ro) => {
+                    dynasm!(self.asm
+                        ; cmp BYTE [Rq(ro.reg) + ro.off], *expect as i8
+                        ; jne ->guardfail
+                    );
+                }
+                _ => todo!(),
+            },
         }
     }
 
@@ -2164,6 +2184,34 @@ mod tests {
         let mut args = IO(5, 2, 0);
         ct.execute(&mut args);
         assert_eq!(args, IO(5, 2, 10));
+    }
+
+    #[test]
+    fn test_binop_add_overflow() {
+        #[derive(Eq, PartialEq, Debug)]
+        struct IO(u8, u8);
+
+        #[interp_step]
+        fn interp_stepx(io: &mut IO) {
+            io.1 = io.0 + 1;
+        }
+
+        let mut inputs = IO(254, 0);
+        let th = start_tracing(TracingKind::HardwareTracing);
+        interp_stepx(&mut inputs);
+        let sir_trace = th.stop_tracing().unwrap();
+        assert_eq!(inputs.1, 255);
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
+
+        // Executing a trace with no overflow shouldn't fail any guards.
+        let mut args = IO(10, 0);
+        assert!(ct.execute(&mut args));
+        assert_eq!(args, IO(10, 11));
+
+        // Executing a trace *with* overflow will fail a guard.
+        let mut args = IO(255, 5);
+        assert!(!ct.execute(&mut args));
     }
 
     #[test]

@@ -157,6 +157,14 @@ impl Ty {
     pub fn is_int(&self) -> bool {
         matches!(self, Self::SignedInt(..)) || matches!(self, Self::UnsignedInt(..))
     }
+
+    pub fn unwrap_tuple(&self) -> &TupleTy {
+        if let Self::Tuple(tty) = self {
+            tty
+        } else {
+            panic!("tried to unwrap a non-tuple");
+        }
+    }
 }
 
 /// Describes the various signed integer types.
