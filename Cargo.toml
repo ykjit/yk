@@ -5,12 +5,11 @@ authors = ["Edd Barrett <vext01@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-libc = "0.2.71"
+libc = "0.2.80"
 lazy_static = "1.4.0"
-time = "0.2.16"
 tempfile = "3.1.0"
 phdrs = { git = "https://github.com/softdevteam/phdrs" }
 
 [build-dependencies]
-cc = "1.0.57"
+cc = "1.0.62"
 rerun_except = "0.1.2"
