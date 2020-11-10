@@ -8,25 +8,25 @@ use std::{
     ptr,
     rc::Rc,
     sync::{
-        atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
     thread::{self, JoinHandle},
 };
 use yktrace::{start_tracing, ThreadTracer, TracingKind};
 
-pub type HotThreshold = u32;
+pub type HotThreshold = usize;
 const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
+const PHASE_NUM_BITS: usize = 2;
 
 // The current meta-tracing phase of a given location in the end-user's code. Consists of a tag and
-// (optionally) a value. The tags are in the high order bits since we expect the most common tag is
-// PHASE_COMPILED which (one day) will have an index associated with it. By also making that tag
-// 0b00, we allow that index to be accessed without any further operations after the initial
-// tag check.
-const PHASE_TAG: u32 = 0b11 << 30; // All of the other PHASE_ tags must fit in this.
-const PHASE_COMPILED: u32 = 0b00 << 30;
-const PHASE_TRACING: u32 = 0b01 << 30;
-const PHASE_COUNTING: u32 = 0b10 << 30; // The value specifies the current hot count.
+// (optionally) a value. We expect the most commonly encountered tag at run-time is PHASE_COMPILED
+// whose value is a pointer to memory. By also making that tag 0b00, we allow that index to be
+// accessed without any further operations after the initial tag check.
+const PHASE_TAG: usize = 0b11; // All of the other PHASE_ tags must fit in this.
+const PHASE_COMPILED: usize = 0b00;
+const PHASE_TRACING: usize = 0b01;
+const PHASE_COUNTING: usize = 0b10; // The value specifies the current hot count.
 
 /// A `Location` is a handle on a unique identifier for control point position in the end-user's
 /// program (and is used by the `MT` to store data about that location). In other words, every
@@ -68,14 +68,14 @@ impl Deref for Location {
 
 #[derive(Debug)]
 pub struct LocationInner {
-    pack: AtomicU32,
+    pack: AtomicUsize,
 }
 
 impl LocationInner {
     /// Create a fresh Location suitable for passing to `MT::control_point`.
     pub fn new() -> Self {
         Self {
-            pack: AtomicU32::new(PHASE_COUNTING),
+            pack: AtomicUsize::new(PHASE_COUNTING),
         }
     }
 }
@@ -162,7 +162,7 @@ impl Drop for MT {
 
 /// The innards of a meta-tracer.
 struct MTInner {
-    hot_threshold: AtomicU32,
+    hot_threshold: AtomicUsize,
     active_threads: AtomicUsize,
     tracing_kind: TracingKind,
 }
@@ -196,7 +196,7 @@ impl MTInner {
         }
 
         let mtc = Self {
-            hot_threshold: AtomicU32::new(hot_threshold),
+            hot_threshold: AtomicUsize::new(hot_threshold),
             active_threads: AtomicUsize::new(1),
             tracing_kind,
         };
@@ -249,7 +249,7 @@ impl MTThread {
             let lp = pack.load(Ordering::Acquire);
             match lp & PHASE_TAG {
                 PHASE_COUNTING => {
-                    let count = lp & !PHASE_TAG;
+                    let count = (lp & !PHASE_TAG) >> 2;
                     let new_pack;
                     if count >= self.inner.hot_threshold {
                         if self.inner.tracer.is_some() {
@@ -263,7 +263,7 @@ impl MTThread {
                             break;
                         }
                     } else {
-                        new_pack = PHASE_COUNTING | (count + 1);
+                        new_pack = PHASE_COUNTING | ((count + 1) << PHASE_NUM_BITS);
                         if pack.compare_and_swap(lp, new_pack, Ordering::Release) == lp {
                             break;
                         }
@@ -350,7 +350,10 @@ mod tests {
         let lp = Location::new();
         for i in 0..hot_thrsh {
             mtt.control_point(Some(&lp), dummy_step, ());
-            assert_eq!(lp.pack.load(Ordering::Relaxed), PHASE_COUNTING | (i + 1));
+            assert_eq!(
+                lp.pack.load(Ordering::Relaxed),
+                PHASE_COUNTING | ((i + 1) << PHASE_NUM_BITS)
+            );
         }
         mtt.control_point(Some(&lp), dummy_step, ());
         assert_eq!(lp.pack.load(Ordering::Relaxed), PHASE_TRACING);
