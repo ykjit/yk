@@ -501,7 +501,7 @@ impl<TT> TraceCompiler<TT> {
         // We use memmove(3), as it's not clear if MIR (and therefore SIR) could cause copies
         // involving overlapping buffers.
         let sym = Self::find_symbol("memmove").unwrap();
-        self.caller_save();
+        self.save_regs(&*CALLER_SAVE_REGS);
         dynasm!(self.asm
             ; push rax
             ; xor rax, rax
@@ -512,7 +512,7 @@ impl<TT> TraceCompiler<TT> {
             ; call r11
             ; pop rax
         );
-        self.caller_save_restore();
+        self.restore_regs(&*CALLER_SAVE_REGS);
     }
 
     /// Emit a NOP operation.
@@ -522,37 +522,17 @@ impl<TT> TraceCompiler<TT> {
         );
     }
 
-    /// Push all of the caller-save registers to the stack.
-    fn caller_save(&mut self) {
-        for reg in CALLER_SAVE_REGS.iter() {
+    /// Push the specified registers to the stack in order.
+    fn save_regs(&mut self, regs: &[u8]) {
+        for reg in regs.iter() {
             dynasm!(self.asm
                 ; push Rq(reg)
             );
         }
     }
-
-    /// Restore caller-save registers from the stack.
-    fn caller_save_restore(&mut self) {
-        for reg in CALLER_SAVE_REGS.iter().rev() {
-            dynasm!(self.asm
-                ; pop Rq(reg)
-            );
-        }
-    }
-
-    /// Push all of the callee-save registers to the stack.
-    fn callee_save(&mut self) {
-        // OPTIMISE: only save registers actually used.
-        for reg in CALLEE_SAVE_REGS.iter() {
-            dynasm!(self.asm
-                ; push Rq(reg)
-            );
-        }
-    }
-
-    /// Restore callee-save registers from the stack.
-    fn callee_save_restore(&mut self) {
-        for reg in CALLEE_SAVE_REGS.iter().rev() {
+    /// Pop the specified registers from the stack in reverse order.
+    fn restore_regs(&mut self, regs: &[u8]) {
+        for reg in regs.iter().rev() {
             dynasm!(self.asm
                 ; pop Rq(reg)
             );
@@ -593,7 +573,7 @@ impl<TT> TraceCompiler<TT> {
         // Save Sys-V caller save registers to the stack, but skip the one (if there is one) that
         // will store the return value. It's safe to assume the caller expects this to be
         // clobbered.
-        self.caller_save();
+        self.save_regs(&*CALLER_SAVE_REGS);
 
         // Helper function to find the index of a caller-save register previously pushed to the
         // stack. The first register pushed is at the highest stack offset (from the stack
@@ -667,7 +647,7 @@ impl<TT> TraceCompiler<TT> {
         );
 
         // Restore caller-save registers.
-        self.caller_save_restore();
+        self.restore_regs(&*CALLER_SAVE_REGS);
 
         if let Some(d) = dest {
             let dest_loc = self.iplace_to_location(d);
@@ -1596,7 +1576,7 @@ impl<TT> TraceCompiler<TT> {
             ; mov rax, 1 // Signifies that there were no guard failures.
             ; ->cleanup:
         );
-        self.callee_save_restore();
+        self.restore_regs(&*CALLEE_SAVE_REGS);
         dynasm!(self.asm
             ; add rsp, soff as i32
             ; pop rbp
@@ -1609,7 +1589,7 @@ impl<TT> TraceCompiler<TT> {
             ; mov rbp, rsp
             ; sub rsp, soff as i32
         );
-        self.callee_save();
+        self.save_regs(&*CALLEE_SAVE_REGS);
         dynasm!(self.asm
             ; jmp ->main
         );
