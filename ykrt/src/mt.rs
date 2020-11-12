@@ -423,7 +423,6 @@ mod tests {
         }
 
         let interp_step = |mut tio: IO| {
-            // FIXME make `inputs` a struct. Named fields would be much nicer.
             match tio.prog[tio.pc] {
                 ByteCode::Nop => tio.pc += 1,
                 ByteCode::Restart => tio.pc = 0,
