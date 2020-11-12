@@ -573,14 +573,24 @@ impl<TT> TraceCompiler<TT> {
         // Save Sys-V caller save registers to the stack, but skip the one (if there is one) that
         // will store the return value. It's safe to assume the caller expects this to be
         // clobbered.
-        self.save_regs(&*CALLER_SAVE_REGS);
+        // OPTIMISE: Only save registers in use by the register allocator.
+        let mut save_regs = CALLER_SAVE_REGS.iter().cloned().collect::<Vec<u8>>();
+        if let Some(d) = dest {
+            let dest_loc = self.iplace_to_location(d);
+            if let Location::Register(dest_reg) = dest_loc {
+                // If the result of the call is destined for one of the caller-save registers, then
+                // there's no point in saving the register.
+                save_regs.retain(|r| *r != dest_reg);
+            }
+        }
+        self.save_regs(&*save_regs);
 
         // Helper function to find the index of a caller-save register previously pushed to the
         // stack. The first register pushed is at the highest stack offset (from the stack
         // pointer), hence reversing the order of `save_regs`. Returns `None` if `reg` was never
         // saved during caller-save.
         let saved_stack_index = |reg: u8| -> Option<i32> {
-            CALLER_SAVE_REGS
+            save_regs
                 .iter()
                 .rev()
                 .position(|&r| r == reg)
@@ -611,7 +621,7 @@ impl<TT> TraceCompiler<TT> {
                             ; mov Rq(arg_reg), [rsp + idx * 8]
                         );
                     } else {
-                        // The register isn't caller-save, so it couldn't have been overwritten.
+                        // We didn't save this register, so it remains intact.
                         dynasm!(self.asm
                             ; mov Rq(arg_reg), Rq(reg)
                         );
@@ -647,7 +657,7 @@ impl<TT> TraceCompiler<TT> {
         );
 
         // Restore caller-save registers.
-        self.restore_regs(&*CALLER_SAVE_REGS);
+        self.restore_regs(&save_regs);
 
         if let Some(d) = dest {
             let dest_loc = self.iplace_to_location(d);
