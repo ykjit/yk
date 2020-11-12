@@ -37,7 +37,7 @@ lazy_static! {
     // The register partitioning. These arrays must not overlap.
     // FIXME add callee save registers to the pool. Trace code will need to save/restore them.
     static ref TEMP_REG: u8 = R11.code();
-    static ref REG_POOL: [u8; 5] = [R10.code(), R9.code(), R8.code(), RDX.code(), RCX.code()];
+    static ref REG_POOL: [u8; 5] = [RCX.code(), RDX.code(), R8.code(), R9.code(), R10.code()];
 
     static ref TEMP_LOC: Location = Location::Register(*TEMP_REG);
     static ref PTR_SIZE: u64 = u64::try_from(mem::size_of::<usize>()).unwrap();
