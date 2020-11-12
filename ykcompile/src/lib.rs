@@ -34,10 +34,15 @@ lazy_static! {
     static ref CALLER_SAVE_REGS: [u8; 8] = [RDI.code(), RSI.code(), RDX.code(), RCX.code(),
                                             R8.code(), R9.code(), R10.code(), R11.code()];
 
+    // Registers that are callee-save as per the Sys-V ABI.
+    // Note that RBP is also callee-save, but is handled specially.
+    static ref CALLEE_SAVE_REGS: [u8; 5] = [RBX.code(), R12.code(), R13.code(),
+                                            R14.code(), R15.code()];
+
     // The register partitioning. These arrays must not overlap.
-    // FIXME add callee save registers to the pool. Trace code will need to save/restore them.
     static ref TEMP_REG: u8 = R11.code();
-    static ref REG_POOL: [u8; 5] = [RCX.code(), RDX.code(), R8.code(), R9.code(), R10.code()];
+    static ref REG_POOL: [u8; 10] = [RCX.code(), RDX.code(), R8.code(), R9.code(), R10.code(),
+                                     RBX.code(), R12.code(), R13.code(), R14.code(), R15.code()];
 
     static ref TEMP_LOC: Location = Location::Register(*TEMP_REG);
     static ref PTR_SIZE: u64 = u64::try_from(mem::size_of::<usize>()).unwrap();
@@ -532,6 +537,25 @@ impl<TT> TraceCompiler<TT> {
         }
     }
 
+    /// Push all of the callee-save registers to the stack.
+    fn callee_save(&mut self) {
+        // OPTIMISE: only save registers actually used.
+        for reg in CALLEE_SAVE_REGS.iter() {
+            dynasm!(self.asm
+                ; push Rq(reg)
+            );
+        }
+    }
+
+    /// Restore callee-save registers from the stack.
+    fn callee_save_restore(&mut self) {
+        for reg in CALLEE_SAVE_REGS.iter().rev() {
+            dynasm!(self.asm
+                ; pop Rq(reg)
+            );
+        }
+    }
+
     /// Compile a call to a native symbol using the Sys-V ABI. This is used for occasions where you
     /// don't want to, or cannot, inline the callee (e.g. it's a foreign function).
     ///
@@ -575,18 +599,16 @@ impl<TT> TraceCompiler<TT> {
         // call in its destination, so we must not override it when returning from the call.
         self.caller_save();
 
-        // Helper function to find the index of a caller-save register previously pushed to the stack.
-        // The first register pushed is at the highest stack offset (from the stack pointer), hence
-        // reversing the order of `save_regs`.
-        let stack_index = |reg: u8| -> i32 {
-            i32::try_from(
-                CALLER_SAVE_REGS
-                    .iter()
-                    .rev()
-                    .position(|&r| r == reg)
-                    .unwrap(),
-            )
-            .unwrap()
+        // Helper function to find the index of a caller-save register previously pushed to the
+        // stack. The first register pushed is at the highest stack offset (from the stack
+        // pointer), hence reversing the order of `save_regs`. Returns `None` if `reg` was never
+        // saved during caller-save.
+        let saved_stack_index = |reg: u8| -> Option<i32> {
+            CALLER_SAVE_REGS
+                .iter()
+                .rev()
+                .position(|&r| r == reg)
+                .map(|i| i32::try_from(i).unwrap())
         };
 
         // Sys-V ABI dictates the first 6 arguments are passed in these registers.
@@ -604,17 +626,20 @@ impl<TT> TraceCompiler<TT> {
             // Now load the argument into the correct argument register.
             match self.iplace_to_location(arg) {
                 Location::Register(reg) => {
-                    // The value *was* in a register before we pushed it with caller_save().
-                    // We load it back from the stack now.
-                    //
-                    // FIXME The following code assumes that arguments will all have previously
-                    // been in caller save registers and that we will need to load them back off
-                    // the stack. In reality any given argument may not have been in a caller save
-                    // register in the first place. stack_index() will panic if this is the case.
-                    let off = stack_index(reg) * 8;
-                    dynasm!(self.asm
-                        ; mov Rq(arg_reg), [rsp + off]
-                    );
+                    if let Some(idx) = saved_stack_index(reg) {
+                        // We saved this register to the stack during caller-save. Since there is
+                        // overlap between caller-save registers and argument registers, we may
+                        // have overwritten the value in the meantime. So we should load the value
+                        // back from the stack.
+                        dynasm!(self.asm
+                            ; mov Rq(arg_reg), [rsp + idx * 8]
+                        );
+                    } else {
+                        // The register isn't caller-save, so it couldn't have been overwritten.
+                        dynasm!(self.asm
+                            ; mov Rq(arg_reg), Rq(reg)
+                        );
+                    }
                 }
                 Location::Mem(ro) => dynasm!(self.asm
                     ; mov Rq(arg_reg), [Rq(ro.reg) + ro.off]
@@ -1570,8 +1595,11 @@ impl<TT> TraceCompiler<TT> {
         // beginning of the trace how many locals are going to be spilled.
         let soff = self.stack_builder.size();
         dynasm!(self.asm
-            ; mov rax, 1
+            ; mov rax, 1 // Signifies that there were no guard failures.
             ; ->cleanup:
+        );
+        self.callee_save_restore();
+        dynasm!(self.asm
             ; add rsp, soff as i32
             ; pop rbp
             ; ret
@@ -1582,6 +1610,9 @@ impl<TT> TraceCompiler<TT> {
             ; push rbp
             ; mov rbp, rsp
             ; sub rsp, soff as i32
+        );
+        self.callee_save();
+        dynasm!(self.asm
             ; jmp ->main
         );
     }
