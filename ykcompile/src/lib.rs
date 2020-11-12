@@ -31,8 +31,10 @@ use dynasmrt::{DynasmApi, DynasmLabelApi};
 
 lazy_static! {
     // Registers that are caller-save as per the Sys-V ABI.
-    static ref CALLER_SAVE_REGS: [u8; 8] = [RDI.code(), RSI.code(), RDX.code(), RCX.code(),
-                                            R8.code(), R9.code(), R10.code(), R11.code()];
+    // Note that R11 is also caller-save, but it's our temproary register and we never want to
+    // preserve its value across calls.
+    static ref CALLER_SAVE_REGS: [u8; 8] = [RAX.code(), RDI.code(), RSI.code(), RDX.code(),
+                                            RCX.code(), R8.code(), R9.code(), R10.code()];
 
     // Registers that are callee-save as per the Sys-V ABI.
     // Note that RBP is also callee-save, but is handled specially.
@@ -41,8 +43,9 @@ lazy_static! {
 
     // The register partitioning. These arrays must not overlap.
     static ref TEMP_REG: u8 = R11.code();
-    static ref REG_POOL: [u8; 10] = [RCX.code(), RDX.code(), R8.code(), R9.code(), R10.code(),
-                                     RBX.code(), R12.code(), R13.code(), R14.code(), R15.code()];
+    static ref REG_POOL: [u8; 11] = [RAX.code(), RCX.code(), RDX.code(), R8.code(), R9.code(),
+                                     R10.code(), RBX.code(), R12.code(), R13.code(), R14.code(),
+                                     R15.code()];
 
     static ref TEMP_LOC: Location = Location::Register(*TEMP_REG);
     static ref PTR_SIZE: u64 = u64::try_from(mem::size_of::<usize>()).unwrap();
@@ -571,8 +574,6 @@ impl<TT> TraceCompiler<TT> {
     ///  - We assume the return value fits in rax. 128-bit return values are not yet supported.
     ///
     ///  - We don't support varags calls.
-    ///
-    ///  - RAX is clobbered.
     fn c_call(
         &mut self,
         opnd: &CallOperand,
@@ -592,11 +593,6 @@ impl<TT> TraceCompiler<TT> {
         // Save Sys-V caller save registers to the stack, but skip the one (if there is one) that
         // will store the return value. It's safe to assume the caller expects this to be
         // clobbered.
-        //
-        // FIXME: Note that we don't save RAX. Although this is a caller save register, we are
-        // currently using RAX as a general purpose register in parts of the compiler (the register
-        // allocator thus never gives out RAX). In this case we use it to store the result from the
-        // call in its destination, so we must not override it when returning from the call.
         self.caller_save();
 
         // Helper function to find the index of a caller-save register previously pushed to the
@@ -664,8 +660,10 @@ impl<TT> TraceCompiler<TT> {
             // In Sys-V ABI, `al` is a hidden argument used to specify the number of vector args
             // for a vararg call. We don't support this right now, so set it to zero.
             ; xor rax, rax
-            ; mov r11, QWORD sym_addr
-            ; call r11
+            ; mov Rq(*TEMP_REG), QWORD sym_addr
+            ; call Rq(*TEMP_REG)
+            // Stash return value. We do this because restore_regs() below may clobber RAX.
+            ; mov Rq(*TEMP_REG), rax
         );
 
         // Restore caller-save registers.
@@ -675,7 +673,7 @@ impl<TT> TraceCompiler<TT> {
             let dest_loc = self.iplace_to_location(d);
             self.store_raw(
                 &dest_loc,
-                &Location::Register(RAX.code()),
+                &Location::Register(*TEMP_REG),
                 SIR.ty(&d.ty()).size(),
             );
         }
