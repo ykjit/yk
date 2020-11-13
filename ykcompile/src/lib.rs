@@ -33,12 +33,12 @@ lazy_static! {
     // Registers that are caller-save as per the Sys-V ABI.
     // Note that R11 is also caller-save, but it's our temproary register and we never want to
     // preserve its value across calls.
-    static ref CALLER_SAVE_REGS: [u8; 8] = [RAX.code(), RDI.code(), RSI.code(), RDX.code(),
+    static ref CALLER_SAVED_REGS: [u8; 8] = [RAX.code(), RDI.code(), RSI.code(), RDX.code(),
                                             RCX.code(), R8.code(), R9.code(), R10.code()];
 
     // Registers that are callee-save as per the Sys-V ABI.
     // Note that RBP is also callee-save, but is handled specially.
-    static ref CALLEE_SAVE_REGS: [u8; 5] = [RBX.code(), R12.code(), R13.code(),
+    static ref CALLEE_SAVED_REGS: [u8; 5] = [RBX.code(), R12.code(), R13.code(),
                                             R14.code(), R15.code()];
 
     // The register partitioning. These arrays must not overlap.
@@ -501,7 +501,7 @@ impl<TT> TraceCompiler<TT> {
         // We use memmove(3), as it's not clear if MIR (and therefore SIR) could cause copies
         // involving overlapping buffers.
         let sym = Self::find_symbol("memmove").unwrap();
-        self.save_regs(&*CALLER_SAVE_REGS);
+        self.save_regs(&*CALLER_SAVED_REGS);
         dynasm!(self.asm
             ; push rax
             ; xor rax, rax
@@ -512,7 +512,7 @@ impl<TT> TraceCompiler<TT> {
             ; call r11
             ; pop rax
         );
-        self.restore_regs(&*CALLER_SAVE_REGS);
+        self.restore_regs(&*CALLER_SAVED_REGS);
     }
 
     /// Emit a NOP operation.
@@ -574,7 +574,7 @@ impl<TT> TraceCompiler<TT> {
         // will store the return value. It's safe to assume the caller expects this to be
         // clobbered.
         // OPTIMISE: Only save registers in use by the register allocator.
-        let mut save_regs = CALLER_SAVE_REGS.iter().cloned().collect::<Vec<u8>>();
+        let mut save_regs = CALLER_SAVED_REGS.iter().cloned().collect::<Vec<u8>>();
         if let Some(d) = dest {
             let dest_loc = self.iplace_to_location(d);
             if let Location::Register(dest_reg) = dest_loc {
@@ -1586,7 +1586,7 @@ impl<TT> TraceCompiler<TT> {
             ; mov rax, 1 // Signifies that there were no guard failures.
             ; ->cleanup:
         );
-        self.restore_regs(&*CALLEE_SAVE_REGS);
+        self.restore_regs(&*CALLEE_SAVED_REGS);
         dynasm!(self.asm
             ; add rsp, soff as i32
             ; pop rbp
@@ -1599,7 +1599,7 @@ impl<TT> TraceCompiler<TT> {
             ; mov rbp, rsp
             ; sub rsp, soff as i32
         );
-        self.save_regs(&*CALLEE_SAVE_REGS);
+        self.save_regs(&*CALLEE_SAVED_REGS);
         dynasm!(self.asm
             ; jmp ->main
         );
