@@ -47,7 +47,7 @@ lazy_static! {
                                      R10.code(), RBX.code(), R12.code(), R13.code(), R14.code(),
                                      R15.code()];
 
-    static ref TEMP_LOC: Location = Location::Register(*TEMP_REG);
+    static ref TEMP_LOC: Location = Location::Reg(*TEMP_REG);
     static ref PTR_SIZE: u64 = u64::try_from(mem::size_of::<usize>()).unwrap();
 }
 
@@ -59,7 +59,7 @@ macro_rules! binop_add_sub {
             let size = SIR.ty(&opnd2.ty()).size();
             let opnd2_loc = self.iplace_to_location(opnd2);
             match opnd2_loc {
-                Location::Register(r) => match size {
+                Location::Reg(r) => match size {
                     1 => {
                         dynasm!(self.asm
                             ; $op Rb(opnd1_reg), Rb(r)
@@ -138,7 +138,7 @@ macro_rules! binop_mul_div {
             let size = SIR.ty(&opnd2.ty()).size();
             let src_loc = self.iplace_to_location(opnd2);
             match src_loc {
-                Location::Register(r) => match size {
+                Location::Reg(r) => match size {
                     1 => {
                         dynasm!(self.asm
                             ; $op Rb(r)
@@ -230,7 +230,7 @@ impl Display for CompileError {
 /// Converts a register number into it's string name.
 fn local_to_reg_name(loc: &Location) -> &'static str {
     match loc {
-        Location::Register(r) => match r {
+        Location::Reg(r) => match r {
             0 => "rax",
             1 => "rcx",
             2 => "rdx",
@@ -286,7 +286,7 @@ pub struct RegAndOffset {
 #[derive(Debug, Clone, PartialEq)]
 pub enum IndirectLoc {
     /// There's a pointer in this register.
-    Register(u8),
+    Reg(u8),
     /// There's a pointer in memory somewhere.
     Mem(RegAndOffset),
 }
@@ -294,7 +294,7 @@ pub enum IndirectLoc {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Location {
     /// A value in a register.
-    Register(u8),
+    Reg(u8),
     /// A statically known memory location relative to a register.
     Mem(RegAndOffset),
     /// A location that contains a pointer to some underlying storage.
@@ -323,10 +323,10 @@ impl Location {
     /// Returns which register (if any) is used in addressing this location.
     fn uses_reg(&self) -> Option<u8> {
         match self {
-            Location::Register(reg) => Some(*reg),
+            Location::Reg(reg) => Some(*reg),
             Location::Mem(RegAndOffset { reg, .. }) => Some(*reg),
             Location::Indirect {
-                ptr: IndirectLoc::Register(reg),
+                ptr: IndirectLoc::Reg(reg),
                 ..
             }
             | Location::Indirect {
@@ -352,7 +352,7 @@ impl Location {
                 ptr,
                 off: ind_off + off,
             },
-            Location::Register(..) | Location::Const { .. } => todo!("offsetting a constant"),
+            Location::Reg(..) | Location::Const { .. } => todo!("offsetting a constant"),
             Location::NotLive => unreachable!(),
         }
     }
@@ -360,7 +360,7 @@ impl Location {
     /// Converts a direct place to an indirect place for use as a pointer.
     fn to_indirect(&self) -> Self {
         let ptr = match self {
-            Location::Register(r) => IndirectLoc::Register(*r),
+            Location::Reg(r) => IndirectLoc::Reg(*r),
             Location::Mem(ro) => IndirectLoc::Mem(ro.clone()),
             _ => unreachable!(),
         };
@@ -435,7 +435,7 @@ impl<TT> TraceCompiler<TT> {
     fn local_to_location(&mut self, l: Local) -> Location {
         if l == INTERP_STEP_ARG {
             // The argument is a mutable reference in RDI.
-            Location::Register(RDI.code())
+            Location::Reg(RDI.code())
         } else if let Some(location) = self.variable_location_map.get(&l) {
             // We already have a location for this local.
             location.clone()
@@ -445,7 +445,7 @@ impl<TT> TraceCompiler<TT> {
                 // Find a free register to store this local.
                 let loc = if let Some(reg) = self.get_free_register() {
                     self.register_content_map.insert(reg, RegAlloc::Local(l));
-                    Location::Register(reg)
+                    Location::Reg(reg)
                 } else {
                     // All registers are occupied, so we need to spill the local to the stack.
                     self.spill_local_to_stack(&l)
@@ -481,7 +481,7 @@ impl<TT> TraceCompiler<TT> {
     /// Notifies the register allocator that the register allocated to `local` may now be re-used.
     fn free_register(&mut self, local: &Local) -> Result<(), CompileError> {
         match self.variable_location_map.get(local) {
-            Some(Location::Register(reg)) => {
+            Some(Location::Reg(reg)) => {
                 // If this local is currently stored in a register, free it.
                 self.register_content_map.insert(*reg, RegAlloc::Free);
             }
@@ -577,7 +577,7 @@ impl<TT> TraceCompiler<TT> {
         let mut save_regs = CALLER_SAVED_REGS.iter().cloned().collect::<Vec<u8>>();
         if let Some(d) = dest {
             let dest_loc = self.iplace_to_location(d);
-            if let Location::Register(dest_reg) = dest_loc {
+            if let Location::Reg(dest_reg) = dest_loc {
                 // If the result of the call is destined for one of the caller-save registers, then
                 // there's no point in saving the register.
                 save_regs.retain(|r| *r != dest_reg);
@@ -611,7 +611,7 @@ impl<TT> TraceCompiler<TT> {
 
             // Now load the argument into the correct argument register.
             match self.iplace_to_location(arg) {
-                Location::Register(reg) => {
+                Location::Reg(reg) => {
                     if let Some(idx) = saved_stack_index(reg) {
                         // We saved this register to the stack during caller-save. Since there is
                         // overlap between caller-save registers and argument registers, we may
@@ -661,11 +661,7 @@ impl<TT> TraceCompiler<TT> {
 
         if let Some(d) = dest {
             let dest_loc = self.iplace_to_location(d);
-            self.store_raw(
-                &dest_loc,
-                &Location::Register(*TEMP_REG),
-                SIR.ty(&d.ty()).size(),
-            );
+            self.store_raw(&dest_loc, &Location::Reg(*TEMP_REG), SIR.ty(&d.ty()).size());
         }
 
         Ok(())
@@ -673,7 +669,7 @@ impl<TT> TraceCompiler<TT> {
 
     /// Load an IPlace into the given register. Panic if it doesn't fit.
     fn load_reg_iplace(&mut self, reg: u8, src_ip: &IPlace) -> Location {
-        let dest_loc = Location::Register(reg);
+        let dest_loc = Location::Reg(reg);
         let src_loc = self.iplace_to_location(src_ip);
         self.store_raw(&dest_loc, &src_loc, SIR.ty(&src_ip.ty()).size());
         dest_loc
@@ -762,7 +758,7 @@ impl<TT> TraceCompiler<TT> {
         self.load_reg_iplace(*TEMP_REG, op2);
 
         match &src1 {
-            Location::Register(reg) => match ty.size() {
+            Location::Reg(reg) => match ty.size() {
                 1 => {
                     dynasm!(self.asm
                         ; cmp Rb(reg), Rb(*TEMP_REG)
@@ -875,10 +871,10 @@ impl<TT> TraceCompiler<TT> {
         // 2) Get the address of the thing we want to offset into a register.
         let base_loc = self.iplace_to_location(base);
         match base_loc {
-            Location::Register(..) => todo!(),
+            Location::Reg(..) => todo!(),
             Location::Mem(..) => todo!(),
             Location::Indirect { ptr, off } => match ptr {
-                IndirectLoc::Register(..) => todo!(),
+                IndirectLoc::Reg(..) => todo!(),
                 IndirectLoc::Mem(ind_ro) => {
                     dynasm!(self.asm
                         ; mov Rq(*TEMP_REG), [Rq(ind_ro.reg) + ind_ro.off]
@@ -941,7 +937,7 @@ impl<TT> TraceCompiler<TT> {
     fn c_mkref(&mut self, dest: &IPlace, src: &IPlace) {
         let src_loc = self.iplace_to_location(src);
         match src_loc {
-            Location::Register(..) => {
+            Location::Reg(..) => {
                 // This isn't possible as the allocator explicitely puts things which are
                 // referenced onto the stack and never in registers.
                 unreachable!()
@@ -956,7 +952,7 @@ impl<TT> TraceCompiler<TT> {
             Location::Indirect { ref ptr, off } => {
                 debug_assert!(src_loc.uses_reg() != Some(*TEMP_REG));
                 match ptr {
-                    IndirectLoc::Register(reg) => {
+                    IndirectLoc::Reg(reg) => {
                         dynasm!(self.asm
                             ; lea Rq(*TEMP_REG), [Rq(reg) + off]
                         );
@@ -990,7 +986,7 @@ impl<TT> TraceCompiler<TT> {
 
     fn c_cast_uint(&mut self, src: Location, ty: &Ty, cty: &Ty) {
         match src {
-            Location::Register(reg) => {
+            Location::Reg(reg) => {
                 match cty.size() {
                     1 => {
                         dynasm!(self.asm
@@ -1098,12 +1094,12 @@ impl<TT> TraceCompiler<TT> {
         }
 
         match (&dest_loc, &src_loc) {
-            (Location::Register(dest_reg), Location::Register(src_reg)) => {
+            (Location::Reg(dest_reg), Location::Reg(src_reg)) => {
                 dynasm!(self.asm
                     ; mov Rq(dest_reg), Rq(src_reg)
                 );
             }
-            (Location::Mem(dest_ro), Location::Register(src_reg)) => match size {
+            (Location::Mem(dest_ro), Location::Reg(src_reg)) => match size {
                 1 => dynasm!(self.asm
                     ; mov BYTE [Rq(dest_ro.reg) + dest_ro.off], Rb(src_reg)
                 ),
@@ -1145,7 +1141,7 @@ impl<TT> TraceCompiler<TT> {
                     self.copy_memory(dest_ro, src_ro, size);
                 }
             }
-            (Location::Register(dest_reg), Location::Mem(src_ro)) => match size {
+            (Location::Reg(dest_reg), Location::Mem(src_ro)) => match size {
                 1 => dynasm!(self.asm
                     ; mov Rb(dest_reg), BYTE [Rq(src_ro.reg) + src_ro.off]
                 ),
@@ -1160,7 +1156,7 @@ impl<TT> TraceCompiler<TT> {
                 ),
                 _ => unreachable!(),
             },
-            (Location::Register(dest_reg), Location::Const { val: c_val, .. }) => {
+            (Location::Reg(dest_reg), Location::Const { val: c_val, .. }) => {
                 let i64_c = c_val.i64_cast();
                 if i64_c <= i64::from(u32::MAX) {
                     dynasm!(self.asm
@@ -1201,13 +1197,13 @@ impl<TT> TraceCompiler<TT> {
                 }
             }
             (
-                Location::Register(dest_reg),
+                Location::Reg(dest_reg),
                 Location::Indirect {
                     ptr: src_indloc,
                     off: src_off,
                 },
             ) => match src_indloc {
-                IndirectLoc::Register(src_reg) => match size {
+                IndirectLoc::Reg(src_reg) => match size {
                     1 => dynasm!(self.asm
                             ; mov Rb(dest_reg), BYTE [Rq(src_reg) + *src_off]
                     ),
@@ -1251,7 +1247,7 @@ impl<TT> TraceCompiler<TT> {
             ) => {
                 let src_i64 = src_cval.i64_cast();
                 match dest_indloc {
-                    IndirectLoc::Register(dest_reg) => match size {
+                    IndirectLoc::Reg(dest_reg) => match size {
                         1 => dynasm!(self.asm
                             ; mov BYTE [Rq(dest_reg) + *dest_off], src_i64 as i8
                         ),
@@ -1309,9 +1305,9 @@ impl<TT> TraceCompiler<TT> {
                     ptr: dest_indloc,
                     off: dest_off,
                 },
-                Location::Register(src_reg),
+                Location::Reg(src_reg),
             ) => match dest_indloc {
-                IndirectLoc::Register(dest_reg) => match size {
+                IndirectLoc::Reg(dest_reg) => match size {
                     1 => dynasm!(self.asm
                         ; mov BYTE [Rq(dest_reg) + *dest_off], Rb(src_reg)
                     ),
@@ -1382,7 +1378,7 @@ impl<TT> TraceCompiler<TT> {
                         _ => todo!(),
                     }
                 }
-                IndirectLoc::Register(src_reg) => {
+                IndirectLoc::Reg(src_reg) => {
                     debug_assert!(*src_reg != *TEMP_REG);
                     match size {
                         8 => dynasm!(self.asm
@@ -1402,7 +1398,7 @@ impl<TT> TraceCompiler<TT> {
             ) => {
                 debug_assert!(src_ro.reg != *TEMP_REG);
                 match dest_ind {
-                    IndirectLoc::Register(dest_reg) => match size {
+                    IndirectLoc::Reg(dest_reg) => match size {
                         1 => dynasm!(self.asm
                             ; mov Rq(*TEMP_REG), QWORD [Rq(src_ro.reg) + src_ro.off]
                             ; mov BYTE [Rq(dest_reg) + *dest_off], Rb(*TEMP_REG)
@@ -1444,7 +1440,7 @@ impl<TT> TraceCompiler<TT> {
                 val,
                 kind: GuardKind::OtherInteger(v),
             } => match self.iplace_to_location(val) {
-                Location::Register(reg) => {
+                Location::Reg(reg) => {
                     for c in v {
                         self.cmp_reg_const(reg, *c, SIR.ty(&val.ty()).size());
                         dynasm!(self.asm
@@ -1458,7 +1454,7 @@ impl<TT> TraceCompiler<TT> {
                 val,
                 kind: GuardKind::Integer(c),
             } => match self.iplace_to_location(val) {
-                Location::Register(reg) => {
+                Location::Reg(reg) => {
                     self.cmp_reg_const(reg, *c, SIR.ty(&val.ty()).size());
                     dynasm!(self.asm
                         ; jne ->guardfail
@@ -1466,7 +1462,7 @@ impl<TT> TraceCompiler<TT> {
                 }
                 Location::Mem(..) => todo!(),
                 Location::Indirect { ptr, off } => match ptr {
-                    IndirectLoc::Register(reg) => {
+                    IndirectLoc::Reg(reg) => {
                         dynasm!(self.asm
                             ; mov Rq(*TEMP_REG), QWORD [Rq(reg) + off]
                         );
@@ -1483,7 +1479,7 @@ impl<TT> TraceCompiler<TT> {
                 val,
                 kind: GuardKind::Boolean(expect),
             } => match self.iplace_to_location(val) {
-                Location::Register(reg) => {
+                Location::Reg(reg) => {
                     dynasm!(self.asm
                         ; cmp Rb(reg), *expect as i8
                         ; jne ->guardfail
