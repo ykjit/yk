@@ -331,8 +331,12 @@ impl Display for Local {
 
 /// Bits in the `flags` bitfield in `Body`.
 pub mod bodyflags {
+    /// This function is annotated #[do_not_trace].
     pub const DO_NOT_TRACE: u8 = 1;
+    /// This function is annotated #[interp_step].
     pub const INTERP_STEP: u8 = 1 << 1;
+    /// This function is yktrace::trace_debug.
+    pub const TRACE_DEBUG: u8 = 1 << 2;
 }
 
 /// The definition of a local variable, including its type.
@@ -539,11 +543,13 @@ pub enum Statement {
     /// Note that locals are implicitly live at first use.
     StorageDead(Local),
     /// A (non-inlined) call from a TIR trace to a binary symbol using the system ABI. This does
-    /// not appear in SIR.
+    /// not appear in SIR. Not to be confused with Terminator::Call in SIR.
     Call(CallOperand, Vec<IPlace>, Option<IPlace>),
     /// Cast a value into another. Since the cast type and the destination type are the same, we
     /// only need the latter.
     Cast(IPlace, IPlace),
+    /// A debug marker. This does not appear in SIR.
+    Debug(String),
     /// Any unimplemented lowering maps to this variant.
     /// The string inside is the stringified MIR statement.
     Unimplemented(String),
@@ -574,7 +580,7 @@ impl Statement {
                     Self::maybe_push_local(&mut ret, dest.local());
                 }
             }
-            Statement::StorageDead(_) | Statement::Unimplemented(_) => (),
+            Statement::StorageDead(_) | Statement::Debug(_) | Statement::Unimplemented(_) => (),
         }
         ret
     }
@@ -622,7 +628,7 @@ impl Statement {
                 Self::maybe_push_local(&mut ret, dest.local());
                 Self::maybe_push_local(&mut ret, src.local());
             }
-            Statement::Unimplemented(_) => (),
+            Statement::Unimplemented(_) | Statement::Debug(_) => (),
         }
         ret
     }
@@ -671,6 +677,7 @@ impl Display for Statement {
                 write!(f, "{} = call({}, [{}])", dest_s, op, args_s)
             }
             Statement::Cast(d, s) => write!(f, "Cast({}, {})", d, s),
+            Statement::Debug(s) => write!(f, "// {}", s),
             Statement::Unimplemented(mir_stmt) => write!(f, "unimplemented_stmt: {}", mir_stmt),
         }
     }
@@ -892,6 +899,12 @@ pub enum Terminator {
         /// The return value and basic block to continue at, if the call converges.
         destination: Option<(IPlace, BasicBlockIndex)>,
     },
+    /// A call to yktrace::trace_debug. This is converted into a Statement::Debug at TIR
+    /// compilation time.
+    TraceDebugCall {
+        msg: String,
+        destination: BasicBlockIndex,
+    },
     /// The value in `cond` must equal to `expected` to advance to `target_bb`.
     Assert {
         cond: IPlace,
@@ -958,6 +971,9 @@ impl Display for Terminator {
                     .collect::<Vec<String>>()
                     .join(", ");
                 write!(f, "call {}({}){}", operand, args_str, ret_bb)
+            }
+            Terminator::TraceDebugCall { msg, destination } => {
+                write!(f, "// {} ->  {}", msg, destination)
             }
             Terminator::Assert {
                 cond,
