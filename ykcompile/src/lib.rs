@@ -273,6 +273,12 @@ impl<TT> CompiledTrace<TT> {
     fn exec_trace(&self, t_fn: fn(&mut TT) -> bool, args: &mut TT) -> bool {
         t_fn(args)
     }
+
+    /// Return a pointer to the mmap'd block of memory containing the trace. The underlying data is
+    /// guaranteed never to move in memory.
+    pub fn ptr(&self) -> *const u8 {
+        self.mc.ptr(dynasmrt::AssemblyOffset(0))
+    }
 }
 
 /// Represents a memory location using a register and an offset.
@@ -426,7 +432,7 @@ impl<TT> TraceCompiler<TT> {
                 val: val.clone(),
                 ty: *ty,
             },
-            _ => todo!(),
+            e => todo!("{}", e),
         }
     }
 
@@ -1461,18 +1467,25 @@ impl<TT> TraceCompiler<TT> {
                     );
                 }
                 Location::Mem(..) => todo!(),
-                Location::Indirect { ptr, off } => match ptr {
-                    IndirectLoc::Reg(reg) => {
-                        dynasm!(self.asm
-                            ; mov Rq(*TEMP_REG), QWORD [Rq(reg) + off]
-                        );
-                        self.cmp_reg_const(*TEMP_REG, *c, SIR.ty(&val.ty()).size());
-                        dynasm!(self.asm
-                            ; jne ->guardfail
-                        );
+                Location::Indirect { ptr, off } => {
+                    match ptr {
+                        IndirectLoc::Reg(reg) => {
+                            dynasm!(self.asm
+                                ; mov Rq(*TEMP_REG), QWORD [Rq(reg) + off]
+                            );
+                        }
+                        IndirectLoc::Mem(src_ro) => {
+                            dynasm!(self.asm
+                                ; mov Rq(*TEMP_REG), QWORD [Rq(src_ro.reg) + src_ro.off]
+                                ; mov Rq(*TEMP_REG), QWORD [Rq(*TEMP_REG) + off]
+                            );
+                        }
                     }
-                    IndirectLoc::Mem(_ro) => todo!(),
-                },
+                    self.cmp_reg_const(*TEMP_REG, *c, SIR.ty(&val.ty()).size());
+                    dynasm!(self.asm
+                        ; jne ->guardfail
+                    );
+                }
                 _ => todo!(),
             },
             Guard {

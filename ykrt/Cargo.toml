@@ -7,3 +7,4 @@ license = "Apache-2.0 OR MIT"
 
 [dependencies]
 yktrace = { path = "../yktrace" }
+ykcompile = { path = "../ykcompile" }

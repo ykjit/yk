@@ -2,7 +2,7 @@ use std::cmp::{Eq, PartialEq};
 #[cfg(test)]
 use std::time::Duration;
 use std::{
-    io,
+    io, mem,
     ops::Deref,
     panic::{catch_unwind, resume_unwind, UnwindSafe},
     ptr,
@@ -13,7 +13,8 @@ use std::{
     },
     thread::{self, JoinHandle},
 };
-use yktrace::{start_tracing, ThreadTracer, TracingKind};
+use ykcompile::{CompiledTrace, TraceCompiler};
+use yktrace::{sir::SIR, start_tracing, tir::TirTrace, ThreadTracer, TracingKind};
 
 pub type HotThreshold = usize;
 const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
@@ -223,20 +224,31 @@ impl MTThread {
     }
 
     /// Attempt to execute a compiled trace for location `loc`.
-    pub fn control_point<S, I>(&mut self, loc: Option<&Location>, step_fn: S, inputs: I) -> I
+    pub fn control_point<S, I>(&mut self, loc: Option<&Location>, step_fn: S, inputs: &mut I)
     where
-        S: Fn(I) -> I,
+        S: Fn(&mut I),
     {
         // If a loop can start at this position then update the location and potentially start/stop
         // this thread's tracer.
         if let Some(loc) = loc {
-            self._control_point(loc);
+            if let Some(func) = self._control_point::<I>(loc) {
+                if self.exec_trace(func, inputs) {
+                    // Trace succesfully executed.
+                    return;
+                } else {
+                    // FIXME blackholing
+                    todo!("Guard failure!")
+                }
+            }
         }
-
         step_fn(inputs)
     }
 
-    pub fn _control_point(&mut self, loc: &Location) {
+    fn exec_trace<I>(&mut self, func: fn(&mut I) -> bool, inputs: &mut I) -> bool {
+        func(inputs)
+    }
+
+    pub fn _control_point<I>(&mut self, loc: &Location) -> Option<fn(&mut I) -> bool> {
         // Since we don't hold an explicit lock, updating a Location is tricky: we might read a
         // Location, work out what we'd like to update it to, and try updating it, only to find
         // that another thread interrupted us part way through. We therefore use compare_and_swap
@@ -283,25 +295,42 @@ impl MTThread {
                     };
 
                     if stop_tracer {
-                        if pack.compare_and_swap(lp, PHASE_COMPILED, Ordering::Release) == lp {
-                            let _sir_trace = Rc::get_mut(&mut self.inner)
-                                .unwrap()
-                                .tracer
-                                .take()
-                                .unwrap()
-                                .0
-                                .stop_tracing();
-                            // FIXME build TIR and compile. Eventually in a background thread?
-                            break;
-                        }
+                        let sir_trace = Rc::get_mut(&mut self.inner)
+                            .unwrap()
+                            .tracer
+                            .take()
+                            .unwrap()
+                            .0
+                            .stop_tracing()
+                            .unwrap();
+                        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
+                        let ct = TraceCompiler::<I>::compile(tir_trace);
+                        // Now that we have a compiled trace, we need to put a pointer to it inside
+                        // the corresponding Location's pack. To inhibit ExecutableBuffer's Drop,
+                        // we move it into a box and forget it: the pointer in the pack is now the
+                        // sole handle on the trace.
+                        // FIXME: free up the memory when the trace is no longer used.
+                        let ptr = Box::into_raw(Box::new(ct)) as usize;
+
+                        let new_pack = PHASE_COMPILED | (ptr << PHASE_NUM_BITS);
+                        pack.store(new_pack, Ordering::Release);
+                        break;
                     } else {
                         break;
                     }
                 }
-                PHASE_COMPILED => break, // FIXME call compiled trace, but don't call step_fn().
+                PHASE_COMPILED => {
+                    let ptr = (lp >> PHASE_NUM_BITS) as *const u8;
+                    let bct = unsafe { Box::from_raw(ptr as *mut CompiledTrace<I>) };
+                    let tptr = bct.ptr();
+                    let func: fn(&mut I) -> bool = unsafe { mem::transmute(tptr) };
+                    let _raw = Box::into_raw(bct);
+                    return Some(func);
+                }
                 _ => unreachable!(),
             }
         }
+        None
     }
 }
 
@@ -339,26 +368,28 @@ mod tests {
     use self::test::{black_box, Bencher};
     use super::*;
 
-    fn dummy_step(inputs: ()) -> () {
-        inputs
-    }
+    struct DummyIO {}
+
+    #[interp_step]
+    fn dummy_step(_inputs: &mut DummyIO) {}
 
     #[test]
     fn threshold_passed() {
         let hot_thrsh = 1500;
         let mut mtt = MTBuilder::new().hot_threshold(hot_thrsh).init();
         let lp = Location::new();
+        let mut io = DummyIO {};
         for i in 0..hot_thrsh {
-            mtt.control_point(Some(&lp), dummy_step, ());
+            mtt.control_point(Some(&lp), dummy_step, &mut io);
             assert_eq!(
                 lp.pack.load(Ordering::Relaxed),
                 PHASE_COUNTING | ((i + 1) << PHASE_NUM_BITS)
             );
         }
-        mtt.control_point(Some(&lp), dummy_step, ());
-        assert_eq!(lp.pack.load(Ordering::Relaxed), PHASE_TRACING);
-        mtt.control_point(Some(&lp), dummy_step, ());
-        assert_eq!(lp.pack.load(Ordering::Relaxed), PHASE_COMPILED);
+        mtt.control_point(Some(&lp), dummy_step, &mut io);
+        assert_eq!(lp.pack.load(Ordering::Relaxed) & PHASE_TAG, PHASE_TRACING);
+        mtt.control_point(Some(&lp), dummy_step, &mut io);
+        assert_eq!(lp.pack.load(Ordering::Relaxed) & PHASE_TAG, PHASE_COMPILED);
     }
 
     #[test]
@@ -372,16 +403,17 @@ mod tests {
             let t = mtt
                 .mt()
                 .spawn(move |mut mtt| {
-                    mtt.control_point(Some(&loc), dummy_step, ());
+                    let mut io = DummyIO {};
+                    mtt.control_point(Some(&loc), dummy_step, &mut io);
                     let c1 = loc.pack.load(Ordering::Relaxed);
                     assert_eq!(c1 & PHASE_TAG, PHASE_COUNTING);
-                    mtt.control_point(Some(&loc), dummy_step, ());
+                    mtt.control_point(Some(&loc), dummy_step, &mut io);
                     let c2 = loc.pack.load(Ordering::Relaxed);
                     assert_eq!(c2 & PHASE_TAG, PHASE_COUNTING);
-                    mtt.control_point(Some(&loc), dummy_step, ());
+                    mtt.control_point(Some(&loc), dummy_step, &mut io);
                     let c3 = loc.pack.load(Ordering::Relaxed);
                     assert_eq!(c3 & PHASE_TAG, PHASE_COUNTING);
-                    mtt.control_point(Some(&loc), dummy_step, ());
+                    mtt.control_point(Some(&loc), dummy_step, &mut io);
                     let c4 = loc.pack.load(Ordering::Relaxed);
                     assert_eq!(c4 & PHASE_TAG, PHASE_COUNTING);
                     assert!(c4 > c3);
@@ -395,10 +427,11 @@ mod tests {
             t.join().unwrap();
         }
         {
-            mtt.control_point(Some(&loc), dummy_step, ());
-            assert_eq!(loc.pack.load(Ordering::Relaxed), PHASE_TRACING);
-            mtt.control_point(Some(&loc), dummy_step, ());
-            assert_eq!(loc.pack.load(Ordering::Relaxed), PHASE_COMPILED);
+            let mut io = DummyIO {};
+            mtt.control_point(Some(&loc), dummy_step, &mut io);
+            assert_eq!(loc.pack.load(Ordering::Relaxed) & PHASE_TAG, PHASE_TRACING);
+            mtt.control_point(Some(&loc), dummy_step, &mut io);
+            assert_eq!(loc.pack.load(Ordering::Relaxed) & PHASE_TAG, PHASE_COMPILED);
         }
     }
 
@@ -407,50 +440,68 @@ mod tests {
         let mut mtt = MTBuilder::new().hot_threshold(2).init();
 
         // The program is silly. Do nothing twice, then start again.
-        enum ByteCode {
-            Nop,
-            Restart,
-        }
-        let prog = vec![ByteCode::Nop, ByteCode::Nop, ByteCode::Restart];
+        const NOP: u8 = 0;
+        const RESTART: u8 = 1;
+        let prog = vec![NOP, NOP, RESTART];
 
         // Suppose the bytecode compiler for this imaginary language knows that the first bytecode
         // is the only place a loop can start.
         let locs = vec![Some(Location::new()), None, None];
 
         struct IO {
-            prog: Vec<ByteCode>,
+            prog: Vec<u8>,
             pc: usize,
+            count: usize,
         }
 
-        let interp_step = |mut tio: IO| {
+        #[interp_step]
+        fn dumb_interp_step(tio: &mut IO) {
             match tio.prog[tio.pc] {
-                ByteCode::Nop => tio.pc += 1,
-                ByteCode::Restart => tio.pc = 0,
+                NOP => {
+                    tio.pc += 1;
+                    tio.count += 1;
+                }
+                RESTART => tio.pc = 0,
+                _ => unreachable!(),
             }
-            tio
+        }
+
+        let mut tio = IO {
+            prog,
+            pc: 0,
+            count: 0,
         };
 
-        let mut tio = IO { prog, pc: 0 }; // bytecode, program counter.
-
         // The interpreter loop. In reality this would (syntactically) be an infinite loop.
-        for _ in 0..10 {
+        for _ in 0..12 {
             let loc = locs[tio.pc].as_ref();
-            tio = mtt.control_point(loc, interp_step, tio);
+            mtt.control_point(loc, dumb_interp_step, &mut tio);
         }
 
         assert_eq!(
-            locs[0].as_ref().unwrap().pack.load(Ordering::Relaxed),
+            locs[0].as_ref().unwrap().pack.load(Ordering::Relaxed) & PHASE_TAG,
             PHASE_COMPILED
         );
+
+        assert_eq!(tio.pc, 0);
+        assert_eq!(tio.count, 8);
+
+        // A trace was just compiled. Running it should execute NOP twice.
+        for i in 0..10 {
+            let loc = locs[tio.pc].as_ref();
+            mtt.control_point(loc, dumb_interp_step, &mut tio);
+            assert_eq!(tio.count, 10 + i * 2);
+        }
     }
 
     #[bench]
     fn bench_single_threaded_control_point(b: &mut Bencher) {
         let mut mtt = MTBuilder::new().init();
         let lp = Location::new();
+        let mut io = DummyIO {};
         b.iter(|| {
             for _ in 0..100000 {
-                black_box(mtt.control_point(Some(&lp), dummy_step, ()));
+                black_box(mtt.control_point(Some(&lp), dummy_step, &mut io));
             }
         });
     }
@@ -467,7 +518,8 @@ mod tests {
                     .mt()
                     .spawn(move |mut mtt| {
                         for _ in 0..100 {
-                            black_box(mtt.control_point(Some(&loc), dummy_step, ()));
+                            let mut io = DummyIO {};
+                            black_box(mtt.control_point(Some(&loc), dummy_step, &mut io));
                         }
                     })
                     .unwrap();

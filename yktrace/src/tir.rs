@@ -540,8 +540,10 @@ impl Guard {
 
     pub fn used_locals(&self) -> Vec<Local> {
         let mut ret = Vec::new();
-        if let IPlace::Val { local, .. } = self.val {
-            ret.push(local);
+        match &self.val {
+            IPlace::Val { local, .. } => ret.push(*local),
+            IPlace::Indirect { ptr, .. } => ret.push(ptr.local),
+            _ => {}
         }
         ret
     }
