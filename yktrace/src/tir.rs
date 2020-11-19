@@ -96,6 +96,13 @@ impl<'a> TirTrace<'a> {
                 }
             };
 
+            // Ignore yktrace::trace_debug.
+            // We don't use the 'ignore' machinery below, as that would require the TraceDebugCall
+            // terminator to contain the symbol name, which would be wasteful.
+            if body.flags & ykpack::bodyflags::TRACE_DEBUG != 0 {
+                continue;
+            }
+
             // Initialise VarRenamer's accumulator (and thus also set the first offset) to the
             // traces most outer number of locals.
             rnm.init_acc(body.local_decls.len());
@@ -131,8 +138,6 @@ impl<'a> TirTrace<'a> {
                 // all variables in `bar` are offset by 5.
                 for stmt in body.blocks[user_bb_idx_usize].stmts.iter() {
                     let op = match stmt {
-                        // StorageDead can't appear in SIR, only TIR.
-                        Statement::StorageDead(_) => unreachable!(),
                         Statement::MkRef(dest, src) => Statement::MkRef(
                             rnm.rename_iplace(dest, body),
                             rnm.rename_iplace(src, body)
@@ -166,13 +171,13 @@ impl<'a> TirTrace<'a> {
                             checked: *checked
                         },
                         Statement::Nop => stmt.clone(),
-                        Statement::Unimplemented(_) => stmt.clone(),
-                        // The following statements kinds are specific to TIR and cannot appear in SIR.
-                        Statement::Call(..) => unreachable!(),
+                        Statement::Unimplemented(_) | Statement::Debug(_) => stmt.clone(),
                         Statement::Cast(dest, src) => Statement::Cast(
                             rnm.rename_iplace(dest, body),
                             rnm.rename_iplace(src, body)
-                        )
+                        ),
+                        // The following statements are specific to TIR and cannot appear in SIR.
+                        Statement::Call(..) | Statement::StorageDead(_) => unreachable!()
                     };
                     let op = TirOp::Statement(op);
 
@@ -342,7 +347,12 @@ impl<'a> TirTrace<'a> {
                 } => Some(Guard {
                     val: cond.clone(),
                     kind: GuardKind::Boolean(*expected)
-                })
+                }),
+                Terminator::TraceDebugCall { ref msg, .. } => {
+                    // No guard, but we do add a debug statement.
+                    ops.push(TirOp::Statement(Statement::Debug(msg.to_owned())));
+                    None
+                }
             };
 
             if let Some(g) = guard {
@@ -619,10 +629,32 @@ impl TirOp {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod test_helpers {}
+
+#[cfg(test)]
+pub mod tests {
     use super::TirTrace;
-    use crate::{sir::SIR, start_tracing, TracingKind};
+    use crate::{sir::SIR, start_tracing, trace_debug, TracingKind};
+    use fm::FMBuilder;
+    use regex::Regex;
     use test::black_box;
+
+    /// Fuzzy matches the textual TIR for the trace `tt` with the pattern `ptn`.
+    pub fn assert_tir(ptn: &str, tt: &TirTrace) {
+        let ptn_re = Regex::new(r"%.+?\b").unwrap(); // Names are words prefixed with `%`.
+        let text_re = Regex::new(r"\$?.+?\b").unwrap(); // Any word optionally prefixed with `$`.
+        let matcher = FMBuilder::new(ptn)
+            .unwrap()
+            .name_matcher(Some((ptn_re, text_re)))
+            .distinct_name_matching(true)
+            .build()
+            .unwrap();
+
+        let res = matcher.matches(&format!("{}", tt));
+        if let Err(e) = res {
+            panic!("{}", e);
+        }
+    }
 
     #[test]
     fn nonempty_tir_trace() {
@@ -642,7 +674,66 @@ mod tests {
         black_box(work(&mut io));
         let sir_trace = tracer.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
+        println!("{}", tir_trace);
         assert_eq!(io.2, 15);
         assert!(tir_trace.len() > 0);
+    }
+
+    #[test]
+    fn trace_debug_tir() {
+        #[inline(never)]
+        #[interp_step]
+        fn work(io: &mut IO) {
+            match io.0 {
+                0 => {
+                    trace_debug("Add 10");
+                    io.1 += 10;
+                }
+                1 => {
+                    trace_debug("Minus 2");
+                    io.1 -= 2;
+                }
+                2 => {
+                    trace_debug("Multiply 2");
+                    io.1 *= 2;
+                }
+                _ => unreachable!()
+            }
+        }
+
+        struct IO(usize, usize);
+        let mut io = IO(0, 0);
+        let tracer = start_tracing(TracingKind::default());
+        black_box(work(&mut io)); // +10
+        black_box(work(&mut io)); // +10
+        io.0 = 2;
+        black_box(work(&mut io)); // *2
+        io.0 = 1;
+        black_box(work(&mut io)); // -2
+        let sir_trace = tracer.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
+        assert_eq!(io.1, 38);
+        assert_tir(
+            "...\n\
+            ops:\n\
+              ...
+              // Add 10
+              ...
+              ... + 10usize (checked)
+              ...
+              // Add 10
+              ...
+              ... + 10usize (checked)
+              ...
+              // Multiply 2
+              ...
+              ... * 2usize (checked)
+              ...
+              // Minus 2
+              ...
+              ... - 2usize (checked)
+              ...",
+            &tir_trace
+        );
     }
 }

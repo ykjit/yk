@@ -85,6 +85,14 @@ pub fn start_tracing(kind: TracingKind) -> ThreadTracer {
     }
 }
 
+/// A debugging aid for traces.
+/// Calls to this function are recognised by Yorick and a special debug TIR statement is inserted
+/// into the trace. Interpreter writers should compile-time guard calls to this so as to only emit
+/// the extra bytecodes when explicitely turned on.
+#[inline(never)]
+#[trace_debug]
+pub fn trace_debug(_msg: &'static str) {}
+
 /// The bodies of tests that we want to run on all tracing kinds live in here.
 #[cfg(test)]
 mod test_helpers {

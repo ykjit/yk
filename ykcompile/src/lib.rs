@@ -933,7 +933,7 @@ impl<TT> TraceCompiler<TT> {
             Statement::StorageDead(l) => self.free_register(l)?,
             Statement::Call(target, args, dest) => self.c_call(target, args, dest)?,
             Statement::Cast(dest, src) => self.c_cast(dest, src),
-            Statement::Nop => {}
+            Statement::Nop | Statement::Debug(..) => {}
             Statement::Unimplemented(s) => todo!("{:?}", s),
         }
 
@@ -1736,7 +1736,8 @@ mod tests {
     }
 
     /// Fuzzy matches the textual TIR for the trace `tt` with the pattern `ptn`.
-    fn assert_tir(ptn: &str, tt: &TirTrace) {
+    /// Duplicated from yktrace, since you can't share things inside #[cfg(test)] between crates.
+    pub fn assert_tir(ptn: &str, tt: &TirTrace) {
         let ptn_re = Regex::new(r"%.+?\b").unwrap(); // Names are words prefixed with `%`.
         let text_re = Regex::new(r"\$?.+?\b").unwrap(); // Any word optionally prefixed with `$`.
         let matcher = FMBuilder::new(ptn)
@@ -1748,8 +1749,7 @@ mod tests {
 
         let res = matcher.matches(&format!("{}", tt));
         if let Err(e) = res {
-            eprintln!("{}", e); // Visible when tests run with --nocapture.
-            panic!(e);
+            panic!("{}", e);
         }
     }
 
