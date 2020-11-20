@@ -975,7 +975,8 @@ impl<TT> TraceCompiler<TT> {
             Location::NotLive => unreachable!(),
         }
         let dest_loc = self.iplace_to_location(dest);
-        self.store_raw(&dest_loc, &*TEMP_LOC, SIR.ty(&src.ty()).size());
+        debug_assert_eq!(SIR.ty(&dest.ty()).size(), *PTR_SIZE);
+        self.store_raw(&dest_loc, &*TEMP_LOC, *PTR_SIZE);
     }
 
     fn c_cast(&mut self, dest: &IPlace, src: &IPlace) {
@@ -1075,6 +1076,7 @@ impl<TT> TraceCompiler<TT> {
     fn store(&mut self, dest_ip: &IPlace, src_ip: &IPlace) {
         let dest_loc = self.iplace_to_location(dest_ip);
         let src_loc = self.iplace_to_location(src_ip);
+        debug_assert!(SIR.ty(&dest_ip.ty()).size() == SIR.ty(&src_ip.ty()).size());
         self.store_raw(&dest_loc, &src_loc, SIR.ty(&dest_ip.ty()).size());
     }
 
