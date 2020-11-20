@@ -1431,7 +1431,37 @@ impl<TT> TraceCompiler<TT> {
                             self.copy_memory(&dest_ro, src_ro, size);
                         }
                     },
-                    IndirectLoc::Mem(_) => todo!(),
+                    IndirectLoc::Mem(dest_ro) => match size {
+                        1 => dynasm!(self.asm
+                            ; mov Rq(*TEMP_REG), QWORD [Rq(src_ro.reg) + src_ro.off]
+                            ; push Rq(src_ro.reg)
+                            ; mov Rq(src_ro.reg), QWORD [Rq(dest_ro.reg) + dest_ro.off]
+                            ; mov BYTE [Rq(src_ro.reg) + *dest_off], Rb(*TEMP_REG)
+                            ; pop Rq(src_ro.reg)
+                        ),
+                        2 => dynasm!(self.asm
+                            ; mov Rq(*TEMP_REG), QWORD [Rq(src_ro.reg) + src_ro.off]
+                            ; push Rq(src_ro.reg)
+                            ; mov Rq(src_ro.reg), QWORD [Rq(dest_ro.reg) + dest_ro.off]
+                            ; mov WORD [Rq(src_ro.reg) + *dest_off], Rw(*TEMP_REG)
+                            ; pop Rq(src_ro.reg)
+                        ),
+                        4 => dynasm!(self.asm
+                            ; mov Rq(*TEMP_REG), QWORD [Rq(src_ro.reg) + src_ro.off]
+                            ; push Rq(src_ro.reg)
+                            ; mov Rq(src_ro.reg), QWORD [Rq(dest_ro.reg) + dest_ro.off]
+                            ; mov DWORD [Rq(src_ro.reg) + *dest_off], Rd(*TEMP_REG)
+                            ; pop Rq(src_ro.reg)
+                        ),
+                        8 => dynasm!(self.asm
+                            ; mov Rq(*TEMP_REG), QWORD [Rq(src_ro.reg) + src_ro.off]
+                            ; push Rq(src_ro.reg)
+                            ; mov Rq(src_ro.reg), QWORD [Rq(dest_ro.reg) + dest_ro.off]
+                            ; mov QWORD [Rq(src_ro.reg) + *dest_off], Rq(*TEMP_REG)
+                            ; pop Rq(src_ro.reg)
+                        ),
+                        _ => todo!(),
+                    },
                 }
             }
             (Location::NotLive, _) | (_, Location::NotLive) => unreachable!(),
@@ -1468,7 +1498,15 @@ impl<TT> TraceCompiler<TT> {
                         ; jne ->guardfail
                     );
                 }
-                Location::Mem(..) => todo!(),
+                Location::Mem(ro) => {
+                    dynasm!(self.asm
+                        ; mov Rq(*TEMP_REG), QWORD [Rq(ro.reg) + ro.off]
+                    );
+                    self.cmp_reg_const(*TEMP_REG, *c, SIR.ty(&val.ty()).size());
+                    dynasm!(self.asm
+                        ; jne ->guardfail
+                    );
+                }
                 Location::Indirect { ptr, off } => {
                     match ptr {
                         IndirectLoc::Reg(reg) => {
