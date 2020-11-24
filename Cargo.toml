@@ -5,6 +5,7 @@ members=[
     "yktrace",
     "ykcompile",
     "ykview",
+    "ykbh",
 ]
 
 [profile.dev]
