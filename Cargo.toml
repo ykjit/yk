@@ -5,6 +5,7 @@ members=[
     "ykrt",
     "yktrace",
     "ykview",
+    "ykbh",
 ]
 
 [profile.dev]
