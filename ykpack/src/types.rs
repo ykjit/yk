@@ -158,6 +158,14 @@ impl Ty {
         matches!(self, Self::SignedInt(..)) || matches!(self, Self::UnsignedInt(..))
     }
 
+    pub fn is_unit(&self) -> bool {
+        if let Self::Tuple(tty) = self {
+            tty.is_unit()
+        } else {
+            false
+        }
+    }
+
     pub fn unwrap_tuple(&self) -> &TupleTy {
         if let Self::Tuple(tty) = self {
             tty
@@ -264,6 +272,12 @@ pub struct TupleTy {
     pub fields: Fields,
     /// The size and alignment of the tuple.
     pub size_align: SizeAndAlign,
+}
+
+impl TupleTy {
+    pub fn is_unit(&self) -> bool {
+        self.fields.offsets.len() == 0
+    }
 }
 
 impl Display for TupleTy {

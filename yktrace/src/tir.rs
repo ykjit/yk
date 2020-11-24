@@ -5,7 +5,7 @@
 use super::SirTrace;
 use crate::{
     errors::InvalidTraceError,
-    sir::{Sir, SirTraceIterator},
+    sir::{Sir, SirTraceIterator, SIR},
     INTERP_STEP_ARG
 };
 use std::{
@@ -17,6 +17,8 @@ pub use ykpack::{
     BinOp, CallOperand, Constant, ConstantInt, IPlace, Local, LocalDecl, LocalIndex, Ptr,
     SignedInt, Statement, Terminator, UnsignedInt
 };
+
+const RETURN_LOCAL: Local = Local(0);
 
 /// A TIR trace is conceptually a straight-line path through the SIR with guarded speculation.
 #[derive(Debug)]
@@ -179,6 +181,21 @@ impl<'a> TirTrace<'a> {
                         // The following statements are specific to TIR and cannot appear in SIR.
                         Statement::Call(..) | Statement::StorageDead(_) => unreachable!()
                     };
+
+                    // In TIR, stores to local number zero are always to the return value of the
+                    // #[interp_step] function. We know this is unit so we can ignore it.
+                    if let Statement::Store(
+                        IPlace::Val {
+                            local: RETURN_LOCAL,
+                            ..
+                        },
+                        _
+                    ) = op
+                    {
+                        debug_assert!(SIR.ty(&rnm.local_decls[&RETURN_LOCAL].ty).is_unit());
+                        continue;
+                    }
+
                     let op = TirOp::Statement(op);
 
                     update_defined_locals(&op, ops.len());
@@ -284,7 +301,7 @@ impl<'a> TirTrace<'a> {
                     let dest_ip = return_iplaces.pop().unwrap();
                     let src_ip = rnm.rename_iplace(
                         &IPlace::Val {
-                            local: Local(0),
+                            local: RETURN_LOCAL,
                             off: 0,
                             ty: dest_ip.ty()
                         },
@@ -633,7 +650,7 @@ pub mod test_helpers {}
 
 #[cfg(test)]
 pub mod tests {
-    use super::TirTrace;
+    use super::{TirTrace, RETURN_LOCAL};
     use crate::{sir::SIR, start_tracing, trace_debug, TracingKind};
     use fm::FMBuilder;
     use regex::Regex;
@@ -674,42 +691,42 @@ pub mod tests {
         black_box(work(&mut io));
         let sir_trace = tracer.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        println!("{}", tir_trace);
         assert_eq!(io.2, 15);
         assert!(tir_trace.len() > 0);
     }
 
+    struct DebugTirIO(usize, usize);
+
+    #[inline(never)]
+    #[interp_step]
+    fn debug_tir_work(io: &mut DebugTirIO) {
+        match io.0 {
+            0 => {
+                trace_debug("Add 10");
+                io.1 += 10;
+            }
+            1 => {
+                trace_debug("Minus 2");
+                io.1 -= 2;
+            }
+            2 => {
+                trace_debug("Multiply 2");
+                io.1 *= 2;
+            }
+            _ => unreachable!()
+        }
+    }
+
     #[test]
     fn trace_debug_tir() {
-        #[inline(never)]
-        #[interp_step]
-        fn work(io: &mut IO) {
-            match io.0 {
-                0 => {
-                    trace_debug("Add 10");
-                    io.1 += 10;
-                }
-                1 => {
-                    trace_debug("Minus 2");
-                    io.1 -= 2;
-                }
-                2 => {
-                    trace_debug("Multiply 2");
-                    io.1 *= 2;
-                }
-                _ => unreachable!()
-            }
-        }
-
-        struct IO(usize, usize);
-        let mut io = IO(0, 0);
+        let mut io = DebugTirIO(0, 0);
         let tracer = start_tracing(TracingKind::default());
-        black_box(work(&mut io)); // +10
-        black_box(work(&mut io)); // +10
+        black_box(debug_tir_work(&mut io)); // +10
+        black_box(debug_tir_work(&mut io)); // +10
         io.0 = 2;
-        black_box(work(&mut io)); // *2
+        black_box(debug_tir_work(&mut io)); // *2
         io.0 = 1;
-        black_box(work(&mut io)); // -2
+        black_box(debug_tir_work(&mut io)); // -2
         let sir_trace = tracer.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         assert_eq!(io.1, 38);
@@ -735,5 +752,21 @@ pub mod tests {
               ...",
             &tir_trace
         );
+    }
+
+    #[test]
+    fn no_zero_locals() {
+        let mut io = DebugTirIO(0, 0);
+        let tracer = start_tracing(TracingKind::default());
+        black_box(debug_tir_work(&mut io));
+        io.0 = 1;
+        black_box(debug_tir_work(&mut io));
+        io.0 = 2;
+        let sir_trace = tracer.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
+        for idx in 0..tir_trace.len() {
+            let op = unsafe { tir_trace.op(idx) };
+            assert!(!op.used_locals().contains(&RETURN_LOCAL));
+        }
     }
 }
