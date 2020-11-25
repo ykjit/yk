@@ -1477,6 +1477,7 @@ impl<TT> TraceCompiler<TT> {
             Guard {
                 val,
                 kind: GuardKind::OtherInteger(v),
+                ..
             } => match self.iplace_to_location(val) {
                 Location::Reg(reg) => {
                     for c in v {
@@ -1491,6 +1492,7 @@ impl<TT> TraceCompiler<TT> {
             Guard {
                 val,
                 kind: GuardKind::Integer(c),
+                ..
             } => match self.iplace_to_location(val) {
                 Location::Reg(reg) => {
                     self.cmp_reg_const(reg, *c, SIR.ty(&val.ty()).size());
@@ -1531,6 +1533,7 @@ impl<TT> TraceCompiler<TT> {
             Guard {
                 val,
                 kind: GuardKind::Boolean(expect),
+                ..
             } => match self.iplace_to_location(val) {
                 Location::Reg(reg) => {
                     dynasm!(self.asm

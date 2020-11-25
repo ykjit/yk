@@ -11,7 +11,7 @@ use crate::{
 use std::{
     collections::{HashMap, HashSet},
     convert::TryFrom,
-    fmt::{self, Display}
+    fmt::{self, Display, Write}
 };
 pub use ykpack::{
     BinOp, CallOperand, Constant, ConstantInt, IPlace, Local, LocalDecl, LocalIndex, Ptr,
@@ -344,7 +344,12 @@ impl<'a> TirTrace<'a> {
                     match edge_idx {
                         Some(idx) => Some(Guard {
                             val: rnm.rename_iplace(discr, body),
-                            kind: GuardKind::Integer(values[idx].val())
+                            kind: GuardKind::Integer(values[idx].val()),
+                            block: GuardBlock {
+                                symbol_name: loc.symbol_name.clone(),
+                                bb_idx: loc.bb_idx
+                            },
+                            live_locals: Vec::new()
                         }),
                         None => {
                             debug_assert!(next_blk == otherwise_bb);
@@ -352,7 +357,12 @@ impl<'a> TirTrace<'a> {
                                 val: rnm.rename_iplace(discr, body),
                                 kind: GuardKind::OtherInteger(
                                     values.iter().map(|v| v.val()).collect()
-                                )
+                                ),
+                                block: GuardBlock {
+                                    symbol_name: loc.symbol_name.clone(),
+                                    bb_idx: loc.bb_idx
+                                },
+                                live_locals: Vec::new()
                             })
                         }
                     }
@@ -363,7 +373,12 @@ impl<'a> TirTrace<'a> {
                     ..
                 } => Some(Guard {
                     val: cond.clone(),
-                    kind: GuardKind::Boolean(*expected)
+                    kind: GuardKind::Boolean(*expected),
+                    block: GuardBlock {
+                        symbol_name: loc.symbol_name.clone(),
+                        bb_idx: loc.bb_idx
+                    },
+                    live_locals: Vec::new()
                 }),
                 Terminator::TraceDebugCall { ref msg, .. } => {
                     // No guard, but we do add a debug statement.
@@ -404,6 +419,14 @@ impl<'a> TirTrace<'a> {
                     ops.push(ds);
                 } else {
                     ops.insert(*idx + 1, ds);
+                }
+
+                // Scan the live range of `local`, adding the variable to the live list of any
+                // guards we find.
+                for op_idx in def_sites[local]..*idx {
+                    if let TirOp::Guard(g) = &mut ops[op_idx] {
+                        g.live_locals.push(*local);
+                    }
                 }
             }
         }
@@ -551,13 +574,32 @@ impl Display for TirTrace<'_> {
     }
 }
 
+#[derive(Debug)]
+pub struct GuardBlock {
+    pub symbol_name: String,
+    pub bb_idx: ykpack::BasicBlockIndex
+}
+
+impl Display for GuardBlock {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "<{}, {}>", self.symbol_name, self.bb_idx)
+    }
+}
+
 /// A guard states the assumptions from its position in a trace onward.
 #[derive(Debug)]
 pub struct Guard {
     /// The value to be checked if the guard is to pass.
     pub val: IPlace,
     /// The requirement upon `val` for the guard to pass.
-    pub kind: GuardKind
+    pub kind: GuardKind,
+    /// The block whose terminator was the basis for this guard. This is here so that, in the event
+    /// that the guard fails, we know where to start the blackhole interpreter.
+    pub block: GuardBlock,
+    /// The TIR locals that are live at the time of the guard (in addition to the trace I/O
+    /// variable, $1, which is assumed to be live throughout the entirety of the trace). This is
+    /// needed so that we can initialise the blackhole interpreter with the correct state.
+    pub live_locals: Vec<Local>
 }
 
 impl Guard {
@@ -576,6 +618,26 @@ impl Guard {
     }
 }
 
+impl fmt::Display for Guard {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut live = String::from("");
+        write!(
+            live,
+            "{}",
+            self.live_locals
+                .iter()
+                .map(|l| l.to_string())
+                .collect::<Vec<String>>()
+                .join(", ")
+        )?;
+        write!(
+            f,
+            "guard({}, {}, {}, [{}])",
+            self.val, self.kind, self.block, live
+        )
+    }
+}
+
 /// A guard states the assumptions from its position in a trace onward.
 #[derive(Debug)]
 pub enum GuardKind {
@@ -586,12 +648,6 @@ pub enum GuardKind {
     OtherInteger(Vec<u128>),
     /// The value must equal a Boolean constant.
     Boolean(bool)
-}
-
-impl fmt::Display for Guard {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "guard({}, {})", self.val, self.kind)
-    }
 }
 
 impl fmt::Display for GuardKind {
