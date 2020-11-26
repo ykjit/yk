@@ -221,10 +221,7 @@ mod tests {
     use yktrace::sir::SIR;
 
     fn interp(fname: &str, tio: usize) {
-        let body = match SIR.bodies.get(fname) {
-            Some(b) => b,
-            None => panic!("No SIR")
-        };
+        let body = SIR.bodies.get(fname).expect("No SIR");
         let mut vars: Vec<Option<Object>> = vec![None; body.local_decls.len()];
         vars[1] = Some(Object::from_usize(tio));
         let mut si = SIRInterpreter::new(vars);
