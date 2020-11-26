@@ -1,11 +1,10 @@
-use std::io::Read;
+use memmap::Mmap;
+use std::{fs::File, io::Read};
 
 fn main() {
     let mut args = std::env::args();
     args.next().unwrap(); // command name
-    let sir = if let Some(file) = args.next() {
-        yktrace::sir::Sir::read_file(file.as_ref()).unwrap()
-    } else {
+    let path = args.next().unwrap_or_else(|| {
         println!(
             "No executable provided\n\
             Usage: ykview <executable> [<trace file>]\n\
@@ -16,7 +15,11 @@ fn main() {
             ..."
         );
         std::process::exit(1);
-    };
+    });
+
+    let file = File::open(path).unwrap();
+    let mmap = unsafe { Mmap::map(&file).unwrap() };
+    let sir = yktrace::sir::Sir::new(&mmap).unwrap();
 
     if let Some(trace_file) = args.next() {
         let trace_text = if trace_file == "-" {
@@ -45,7 +48,6 @@ fn main() {
         let tir = yktrace::tir::TirTrace::new(&sir, &trace).unwrap();
         println!("{}", tir);
     } else {
-        println!("SIR:");
         println!("{}", sir);
     }
 }

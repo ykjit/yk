@@ -729,7 +729,8 @@ impl<TT> TraceCompiler<TT> {
             // If it is a checked operation, then we have to build a (value, overflow-flag) tuple.
             // Let's do the flag first, so as to read EFLAGS closest to where they are set.
             let dest_ro = dest_loc.unwrap_mem();
-            let tty = SIR.ty(&dest.ty()).unwrap_tuple();
+            let sir_ty = SIR.ty(&dest.ty());
+            let tty = sir_ty.unwrap_tuple();
             let flag_off = i32::try_from(tty.fields.offsets[1]).unwrap();
 
             if opnd1_ty.is_signed_int() {
@@ -984,7 +985,7 @@ impl<TT> TraceCompiler<TT> {
         let ty = SIR.ty(&src.ty()); // Type of the source.
         let cty = SIR.ty(&dest.ty()); // Type of the cast (same as dest type).
         match ty {
-            Ty::UnsignedInt(_) => self.c_cast_uint(src_loc, &ty, cty),
+            Ty::UnsignedInt(_) => self.c_cast_uint(src_loc, &ty, &cty),
             _ => todo!(),
         }
         let dest_loc = self.iplace_to_location(dest);

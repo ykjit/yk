@@ -1,14 +1,17 @@
 //! Types for the Yorick intermediate language.
 
 use bitflags::bitflags;
+use fxhash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use std::{
     convert::TryFrom,
+    default::Default,
     fmt::{self, Display},
     mem,
 };
 
 // FIXME these should probably all be tuple structs, as type aliases offer little type safety.
+pub type SirOffset = usize;
 pub type DefIndex = u32;
 pub type BasicBlockIndex = u32;
 pub type StatementIndex = usize;
@@ -1050,30 +1053,46 @@ impl Display for BinOp {
     }
 }
 
+/// This serves as a table of contents for the section, and is required to allow lazy loading of
+/// only selected parts of SIR (rather than loading the whole lot in, which is very slow).
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+pub struct SirHeader {
+    /// Codegen unit hash.
+    pub cgu_hash: CguHash,
+    /// Maps type indices to their offsets. The offsets are relative to the end of the end of the
+    /// SIR header.
+    pub types: Vec<SirOffset>,
+    /// Maps a symbol name to the offset of the corresponding SIR body. The offsets are relative to
+    /// the end of the SIR header.
+    pub bodies: FxHashMap<String, SirOffset>,
+}
+
+impl SirHeader {
+    pub fn new(cgu_hash: CguHash) -> Self {
+        Self {
+            cgu_hash,
+            types: Default::default(),
+            bodies: Default::default(),
+        }
+    }
+}
+
 /// The top-level pack type.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Pack {
+    Header(SirHeader),
     Body(Body),
-    Types(Types),
+    Type(Ty),
 }
 
 impl Display for Pack {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Pack::Header(_) => write!(f, "<sir-header>"),
             Pack::Body(sir) => write!(f, "{}", sir),
-            Pack::Types(tys) => write!(f, "{:?}", tys),
+            Pack::Type(t) => write!(f, "{}", t),
         }
     }
-}
-
-/// The types used in the SIR for one specific codegen unit.
-/// SIR locals reference their type using "type IDs" which are (cgu-hash, array-index) pairs.
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
-pub struct Types {
-    /// A unique identifier for the codegen unit that built these types.
-    pub cgu_hash: CguHash,
-    /// The types themselves. Combine `cgu_hash` with an index into this to make a type ID.
-    pub types: Vec<Ty>,
 }
 
 #[cfg(test)]

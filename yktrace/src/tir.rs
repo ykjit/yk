@@ -5,7 +5,7 @@
 use super::SirTrace;
 use crate::{
     errors::InvalidTraceError,
-    sir::{Sir, SirTraceIterator, SIR},
+    sir::{Sir, SirTraceIterator},
     INTERP_STEP_ARG
 };
 use std::{
@@ -22,19 +22,19 @@ const RETURN_LOCAL: Local = Local(0);
 
 /// A TIR trace is conceptually a straight-line path through the SIR with guarded speculation.
 #[derive(Debug)]
-pub struct TirTrace<'a> {
+pub struct TirTrace<'a, 'm> {
     ops: Vec<TirOp>,
     /// Maps each local variable to its declaration, including type.
     pub local_decls: HashMap<Local, LocalDecl>,
     pub addr_map: HashMap<String, u64>,
-    sir: &'a Sir
+    sir: &'a Sir<'m>
 }
 
-impl<'a> TirTrace<'a> {
+impl<'a, 'm> TirTrace<'a, 'm> {
     /// Create a TirTrace from a SirTrace, trimming remnants of the code which starts/stops the
     /// tracer. Returns a TIR trace and the bounds the SIR trace was trimmed to, or Err if a symbol
     /// is encountered for which no SIR is available.
-    pub fn new<'s>(sir: &'a Sir, trace: &'s dyn SirTrace) -> Result<Self, InvalidTraceError> {
+    pub fn new<'s>(sir: &'a Sir<'m>, trace: &'s dyn SirTrace) -> Result<Self, InvalidTraceError> {
         let mut ops = Vec::new();
         let mut itr = SirTraceIterator::new(trace).peekable();
         let mut rnm = VarRenamer::new();
@@ -91,7 +91,7 @@ impl<'a> TirTrace<'a> {
 
         let mut in_interp_step = false;
         while let Some(loc) = itr.next() {
-            let body = match sir.bodies.get(&loc.symbol_name) {
+            let body = match sir.body(&loc.symbol_name) {
                 Some(b) => b,
                 None => {
                     return Err(InvalidTraceError::no_sir(&loc.symbol_name));
@@ -141,8 +141,8 @@ impl<'a> TirTrace<'a> {
                 for stmt in body.blocks[user_bb_idx_usize].stmts.iter() {
                     let op = match stmt {
                         Statement::MkRef(dest, src) => Statement::MkRef(
-                            rnm.rename_iplace(dest, body),
-                            rnm.rename_iplace(src, body)
+                            rnm.rename_iplace(dest, &body),
+                            rnm.rename_iplace(src, &body)
                         ),
                         Statement::DynOffs {
                             dest,
@@ -150,14 +150,14 @@ impl<'a> TirTrace<'a> {
                             idx,
                             scale
                         } => Statement::DynOffs {
-                            dest: rnm.rename_iplace(dest, body),
-                            base: rnm.rename_iplace(base, body),
-                            idx: rnm.rename_iplace(idx, body),
+                            dest: rnm.rename_iplace(dest, &body),
+                            base: rnm.rename_iplace(base, &body),
+                            idx: rnm.rename_iplace(idx, &body),
                             scale: *scale
                         },
                         Statement::Store(dest, src) => Statement::Store(
-                            rnm.rename_iplace(dest, body),
-                            rnm.rename_iplace(src, body)
+                            rnm.rename_iplace(dest, &body),
+                            rnm.rename_iplace(src, &body)
                         ),
                         Statement::BinaryOp {
                             dest,
@@ -166,17 +166,17 @@ impl<'a> TirTrace<'a> {
                             opnd2,
                             checked
                         } => Statement::BinaryOp {
-                            dest: rnm.rename_iplace(dest, body),
+                            dest: rnm.rename_iplace(dest, &body),
                             op: *op,
-                            opnd1: rnm.rename_iplace(opnd1, body),
-                            opnd2: rnm.rename_iplace(opnd2, body),
+                            opnd1: rnm.rename_iplace(opnd1, &body),
+                            opnd2: rnm.rename_iplace(opnd2, &body),
                             checked: *checked
                         },
                         Statement::Nop => stmt.clone(),
                         Statement::Unimplemented(_) | Statement::Debug(_) => stmt.clone(),
                         Statement::Cast(dest, src) => Statement::Cast(
-                            rnm.rename_iplace(dest, body),
-                            rnm.rename_iplace(src, body)
+                            rnm.rename_iplace(dest, &body),
+                            rnm.rename_iplace(src, &body)
                         ),
                         // The following statements are specific to TIR and cannot appear in SIR.
                         Statement::Call(..) | Statement::StorageDead(_) => unreachable!()
@@ -192,7 +192,7 @@ impl<'a> TirTrace<'a> {
                         _
                     ) = op
                     {
-                        debug_assert!(SIR.ty(&rnm.local_decls[&RETURN_LOCAL].ty).is_unit());
+                        debug_assert!(sir.ty(&rnm.local_decls[&RETURN_LOCAL].ty).is_unit());
                         continue;
                     }
 
@@ -210,7 +210,7 @@ impl<'a> TirTrace<'a> {
             } = &body.blocks[user_bb_idx_usize].term
             {
                 if let Some(callee_sym) = op.symbol() {
-                    if let Some(callee_body) = sir.bodies.get(callee_sym) {
+                    if let Some(callee_body) = sir.body(callee_sym) {
                         if callee_body.flags.contains(BodyFlags::INTERP_STEP) {
                             if in_interp_step {
                                 panic!("recursion into interp_step detected");
@@ -242,15 +242,15 @@ impl<'a> TirTrace<'a> {
                     // `Local`s during trace compilation.
                     let ret_val = dest
                         .as_ref()
-                        .map(|(ret_val, _)| rnm.rename_iplace(&ret_val, body))
+                        .map(|(ret_val, _)| rnm.rename_iplace(&ret_val, &body))
                         .unwrap();
                     return_iplaces.push(ret_val.clone());
 
                     if let Some(callee_sym) = op.symbol() {
                         // We know the symbol name of the callee at least.
                         // Rename all `Local`s within the arguments.
-                        let newargs = rnm.rename_args(args, body);
-                        if let Some(callbody) = sir.bodies.get(callee_sym) {
+                        let newargs = rnm.rename_args(args, &body);
+                        if let Some(callbody) = sir.body(callee_sym) {
                             // We have SIR for the callee, so it will appear inlined in the trace.
 
                             // If the function has been annotated with do_not_trace, turn it into a
@@ -267,7 +267,7 @@ impl<'a> TirTrace<'a> {
                                 for (arg_idx, arg) in newargs.iter().enumerate() {
                                     let dest_local = rnm.rename_local(
                                         &Local(u32::try_from(arg_idx).unwrap() + 1),
-                                        body
+                                        &body
                                     );
                                     let dest_ip = IPlace::Val {
                                         local: dest_local,
@@ -305,7 +305,7 @@ impl<'a> TirTrace<'a> {
                             off: 0,
                             ty: dest_ip.ty()
                         },
-                        body
+                        &body
                     );
                     rnm.leave();
 
@@ -343,7 +343,7 @@ impl<'a> TirTrace<'a> {
                     let edge_idx = target_bbs.iter().position(|e| *e == next_blk);
                     match edge_idx {
                         Some(idx) => Some(Guard {
-                            val: rnm.rename_iplace(discr, body),
+                            val: rnm.rename_iplace(discr, &body),
                             kind: GuardKind::Integer(values[idx].val()),
                             block: GuardBlock {
                                 symbol_name: loc.symbol_name.clone(),
@@ -354,7 +354,7 @@ impl<'a> TirTrace<'a> {
                         None => {
                             debug_assert!(next_blk == otherwise_bb);
                             Some(Guard {
-                                val: rnm.rename_iplace(discr, body),
+                                val: rnm.rename_iplace(discr, &body),
                                 kind: GuardKind::OtherInteger(
                                     values.iter().map(|v| v.val()).collect()
                                 ),
@@ -547,7 +547,7 @@ impl VarRenamer {
     }
 }
 
-impl Display for TirTrace<'_> {
+impl Display for TirTrace<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "local_decls:")?;
         let mut sort_decls = self
