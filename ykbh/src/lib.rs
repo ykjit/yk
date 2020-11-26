@@ -1,6 +1,6 @@
 use ykpack::{self, Local, Terminator, Statement, IPlace, Constant, ConstantInt, UnsignedInt};
 use yktrace::sir::SIR;
-use std::convert::TryInto;
+use std::convert::{TryInto, TryFrom};
 
 const ZST: Object = Object { data: Vec::new() };
 
@@ -91,7 +91,7 @@ impl SIRInterpreter {
 
     /// Get the Object referenced by a Local.
     fn get_var(&self, local: &Local) -> &Option<Object> {
-        &self.vars[local.0 as usize]
+        &self.vars[usize::try_from(local.0).expect("Can't convert local to usize.")]
     }
 
     /// Implements the Store statement.
@@ -106,7 +106,7 @@ impl SIRInterpreter {
             IPlace::Val { local, off, ty: _ty } => {
                 // Store into a local.
                 if *off == 0 {
-                    self.vars[local.0 as usize] = Some(src);
+                    self.vars[usize::try_from(local.0).expect("Can't convert local to usize.")] = Some(src);
                 } else {
                     todo!()
                 }
@@ -114,7 +114,7 @@ impl SIRInterpreter {
             IPlace::Indirect { ptr, off, ty: _ty } => {
                 // Write to a pointer.
                 if let Some(obj) = self.get_var(&ptr.local) {
-                    let dstptr = obj.to_usize() + ptr.off as usize + *off as usize;
+                    let dstptr = obj.to_usize() + usize::try_from(ptr.off).expect("Can't convert offset to usize.") + usize::try_from(*off).expect("Can't convert offset to usize.");
                     self.store_raw(dstptr, src);
                 }
             }
@@ -141,9 +141,9 @@ impl SIRInterpreter {
                 } else {
                     // Copy data from an offset, e.g. $1 = $2+2.
                     if let Some(obj) = self.get_var(local) {
-                        let ptr = obj.data.as_ptr() as usize + *off as usize;
+                        let ptr = obj.data.as_ptr() as usize + usize::try_from(*off).expect("Can't convert offset to usize.");
                         let size = SIR.ty(ty).size();
-                        Object::from_ptr(ptr, size as usize)
+                        Object::from_ptr(ptr, usize::try_from(size).expect("Can't convert size to usize."))
                     } else {
                         unreachable!()
                     }
@@ -152,9 +152,9 @@ impl SIRInterpreter {
             IPlace::Indirect { ptr, off, ty } => {
                 // Dereference a pointer and copy the data it points to.
                 if let Some(obj) = self.get_var(&ptr.local) {
-                    let dstptr = obj.to_usize() + ptr.off as usize + *off as usize;
+                    let dstptr = obj.to_usize() + usize::try_from(ptr.off).expect("Can't offset to usize.") + usize::try_from(*off).expect("Can't convert offset to usize.");
                     let size = SIR.ty(ty).size();
-                    Object::from_ptr(dstptr, size as usize)
+                    Object::from_ptr(dstptr, usize::try_from(size).expect("Can't convert size to usize."))
                 } else {
                     unreachable!()
                 }
@@ -195,7 +195,7 @@ impl SIRInterpreter {
                     // The pointer to the vector should remain valid, since no changes to the
                     // vector later on will change its size, and so it won't be reallocated.
                     // FIXME: Check this is true!
-                    let ptr = obj.data.as_ptr() as usize + *off as usize;
+                    let ptr = obj.data.as_ptr() as usize + usize::try_from(*off).expect("Can't convert offset to usize.");
                     Object::from_usize(ptr)
                 } else {
                     unreachable!()
@@ -203,7 +203,7 @@ impl SIRInterpreter {
             }
             IPlace::Indirect { ptr, off, ty: _ty } => {
                 if let Some(obj) = self.get_var(&ptr.local) {
-                    let ptr = obj.to_usize() + ptr.off as usize + *off as usize;
+                    let ptr = obj.to_usize() + usize::try_from(ptr.off).expect("Can't convert offset to usize.") + usize::try_from(*off).expect("Can't convert offset to usize.");
                     Object::from_usize(ptr)
                 } else {
                     unreachable!()
