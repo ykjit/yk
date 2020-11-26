@@ -1,6 +1,3 @@
-#![feature(test)]
-extern crate test;
-
 use ykpack::{self, Local, Terminator, Statement, IPlace, Constant, ConstantInt, UnsignedInt};
 use yktrace::sir::SIR;
 use std::convert::TryInto;
@@ -17,7 +14,7 @@ impl Object {
 
     /// Creates a new Object from a `usize`.
     fn from_usize(ptr: usize) -> Object {
-        let data = ptr.to_be_bytes();
+        let data = ptr.to_ne_bytes();
         Object {
             data: Vec::from(data)
         }
@@ -32,7 +29,7 @@ impl Object {
 
     /// Converts the objects data back to a `usize`.
     fn to_usize(&self) -> usize {
-        usize::from_be_bytes(self.data.as_slice().try_into().expect("Unexpected data length."))
+        usize::from_ne_bytes(self.data.as_slice().try_into().expect("Unexpected data length."))
     }
 
     /// Given a pointer and size, creates a new object by copying `size` data from `ptr`.
@@ -153,7 +150,6 @@ impl SIRInterpreter {
                 }
             }
             IPlace::Indirect { ptr, off, ty } => {
-                // FIXME copy only depending on type?
                 // Dereference a pointer and copy the data it points to.
                 if let Some(obj) = self.get_var(&ptr.local) {
                     let dstptr = obj.to_usize() + ptr.off as usize + *off as usize;
