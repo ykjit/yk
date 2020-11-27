@@ -6,16 +6,16 @@ edition = "2018"
 license = "Apache-2.0 OR MIT"
 
 [dependencies]
-libc = "0.2.80"
 fallible-iterator = "0.2.0"
-ykpack = { path = "../ykpack" }
-lazy_static = "1.4.0"
-hwtracer = { git = "https://github.com/softdevteam/hwtracer" }
-phdrs = { git = "https://github.com/softdevteam/phdrs" }
-gimli = "0.23.0"
-object = "0.22.0"
-memmap = "0.7.0"
 fxhash = "0.2.1"
+gimli = "0.23.0"
+hwtracer = { git = "https://github.com/softdevteam/hwtracer" }
+lazy_static = "1.4.0"
+libc = "0.2.80"
+memmap = "0.7.0"
+object = "0.22.0"
+phdrs = { git = "https://github.com/softdevteam/phdrs" }
+ykpack = { path = "../ykpack" }
 
 [dev-dependencies]
 fm = "0.1.4"
