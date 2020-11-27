@@ -14,8 +14,8 @@ use std::{
     fmt::{self, Display, Write}
 };
 pub use ykpack::{
-    BinOp, CallOperand, Constant, ConstantInt, IPlace, Local, LocalDecl, LocalIndex, Ptr,
-    SignedInt, Statement, Terminator, UnsignedInt
+    BinOp, BodyFlags, CallOperand, Constant, ConstantInt, IPlace, Local, LocalDecl, LocalIndex,
+    Ptr, SignedInt, Statement, Terminator, UnsignedInt
 };
 
 const RETURN_LOCAL: Local = Local(0);
@@ -101,7 +101,7 @@ impl<'a> TirTrace<'a> {
             // Ignore yktrace::trace_debug.
             // We don't use the 'ignore' machinery below, as that would require the TraceDebugCall
             // terminator to contain the symbol name, which would be wasteful.
-            if body.flags & ykpack::bodyflags::TRACE_DEBUG != 0 {
+            if body.flags.contains(BodyFlags::TRACE_DEBUG) {
                 continue;
             }
 
@@ -211,7 +211,7 @@ impl<'a> TirTrace<'a> {
             {
                 if let Some(callee_sym) = op.symbol() {
                     if let Some(callee_body) = sir.bodies.get(callee_sym) {
-                        if callee_body.flags & ykpack::bodyflags::INTERP_STEP != 0 {
+                        if callee_body.flags.contains(BodyFlags::INTERP_STEP) {
                             if in_interp_step {
                                 panic!("recursion into interp_step detected");
                             }
@@ -255,7 +255,7 @@ impl<'a> TirTrace<'a> {
 
                             // If the function has been annotated with do_not_trace, turn it into a
                             // call.
-                            if callbody.flags & ykpack::bodyflags::DO_NOT_TRACE != 0 {
+                            if callbody.flags.contains(BodyFlags::DO_NOT_TRACE) {
                                 ignore = Some(callee_sym.to_string());
                                 term_stmts.push(Statement::Call(op.clone(), newargs, Some(ret_val)))
                             } else {
@@ -288,7 +288,7 @@ impl<'a> TirTrace<'a> {
                     }
                 }
                 Terminator::Return => {
-                    if body.flags & ykpack::bodyflags::INTERP_STEP != 0 {
+                    if body.flags.contains(BodyFlags::INTERP_STEP) {
                         debug_assert!(in_interp_step);
                         in_interp_step = false;
                         continue;

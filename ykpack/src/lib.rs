@@ -37,7 +37,7 @@ pub const SIR_SECTION_PREFIX: &str = ".yksir_";
 
 #[cfg(test)]
 mod tests {
-    use super::{BasicBlock, Body, Decoder, Encoder, Pack, Statement, Terminator};
+    use super::{BasicBlock, Body, BodyFlags, Decoder, Encoder, Pack, Statement, Terminator};
     use fallible_iterator::{self, FallibleIterator};
     use std::io::{Cursor, Seek, SeekFrom};
 
@@ -66,7 +66,7 @@ mod tests {
         let sir1 = Pack::Body(Body {
             symbol_name: String::from("symbol1"),
             blocks: blocks1,
-            flags: 0,
+            flags: BodyFlags::empty(),
             local_decls: Vec::new(),
             num_args: 0,
         });
@@ -82,7 +82,7 @@ mod tests {
         let sir2 = Pack::Body(Body {
             symbol_name: String::from("symbol2"),
             blocks: blocks2,
-            flags: 0,
+            flags: BodyFlags::empty(),
             local_decls: Vec::new(),
             num_args: 0,
         });
