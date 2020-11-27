@@ -13,7 +13,7 @@ use std::{
     iter::Iterator,
     path::Path
 };
-use ykpack::{self, bodyflags, Body, CguHash, Decoder, Pack, Ty};
+use ykpack::{self, Body, BodyFlags, CguHash, Decoder, Pack, Ty};
 
 /// The serialised IR loaded in from disk. One of these structures is generated in the above
 /// `lazy_static` and is shared immutably for all threads.
@@ -144,7 +144,7 @@ pub fn sir_trace_str(sir: &Sir, trace: &dyn SirTrace, trimmed: bool, show_blocks
 
         let body = sir.bodies.get(&loc.symbol_name);
         if let Some(body) = body {
-            if body.flags & bodyflags::INTERP_STEP != 0 {
+            if body.flags.contains(BodyFlags::INTERP_STEP) {
                 write!(res_r, "INTERP_STEP ").unwrap();
             }
         }

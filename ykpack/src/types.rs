@@ -1,5 +1,6 @@
 //! Types for the Yorick intermediate language.
 
+use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
 use std::{
     convert::TryFrom,
@@ -343,14 +344,17 @@ impl Display for Local {
     }
 }
 
-/// Bits in the `flags` bitfield in `Body`.
-pub mod bodyflags {
-    /// This function is annotated #[do_not_trace].
-    pub const DO_NOT_TRACE: u8 = 1;
-    /// This function is annotated #[interp_step].
-    pub const INTERP_STEP: u8 = 1 << 1;
-    /// This function is yktrace::trace_debug.
-    pub const TRACE_DEBUG: u8 = 1 << 2;
+bitflags! {
+    /// Bits in the `flags` bitfield in `Body`.
+    #[derive(Serialize, Deserialize)]
+    pub struct BodyFlags: u8 {
+        /// This function is annotated #[do_not_trace].
+        const DO_NOT_TRACE = 0b00000001;
+        /// This function is annotated #[interp_step].
+        const INTERP_STEP = 0b00000010;
+        /// This function is yktrace::trace_debug.
+        const TRACE_DEBUG = 0b00000100;
+    }
 }
 
 /// The definition of a local variable, including its type.
@@ -374,7 +378,7 @@ impl Display for LocalDecl {
 pub struct Body {
     pub symbol_name: String,
     pub blocks: Vec<BasicBlock>,
-    pub flags: u8,
+    pub flags: BodyFlags,
     pub local_decls: Vec<LocalDecl>,
     pub num_args: usize,
 }
@@ -382,7 +386,7 @@ pub struct Body {
 impl Display for Body {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "symbol: {}", self.symbol_name)?;
-        writeln!(f, "  flags: {}", self.flags)?;
+        writeln!(f, "  flags: {:?}", self.flags)?;
         writeln!(f, "  num_args: {}", self.num_args)?;
 
         writeln!(f, "  local_decls:")?;
