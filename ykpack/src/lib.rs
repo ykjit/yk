@@ -39,19 +39,7 @@ pub const SIR_SECTION_PREFIX: &str = ".yksir_";
 mod tests {
     use super::{BasicBlock, Body, BodyFlags, Decoder, Encoder, Pack, Statement, Terminator};
     use fallible_iterator::{self, FallibleIterator};
-    use std::io::{Cursor, Seek, SeekFrom};
-
-    // Get a cursor to serialise to and deserialise from. For real, we'd be reading from a file,
-    // but for tests we use a vector of bytes.
-    fn get_curs() -> Cursor<Vec<u8>> {
-        let buf: Vec<u8> = Vec::new();
-        Cursor::new(buf)
-    }
-
-    // Rewind a cursor to the beginning.
-    fn rewind_curs(curs: &mut Cursor<Vec<u8>>) {
-        curs.seek(SeekFrom::Start(0)).unwrap();
-    }
+    use std::io::Cursor;
 
     // Makes some sample stuff to round trip test.
     fn get_sample_packs() -> Vec<Pack> {
@@ -90,40 +78,30 @@ mod tests {
         vec![sir1, sir2]
     }
 
-    // Check serialising and deserialising works for zero packs.
-    #[test]
-    fn test_empty() {
-        let mut curs = get_curs();
-
-        let enc = Encoder::from(&mut curs);
-        enc.done().unwrap();
-
-        rewind_curs(&mut curs);
-        let mut dec = Decoder::from(&mut curs);
-        assert!(dec.next().unwrap().is_none());
-    }
-
     // Check a typical serialising and deserialising session.
     #[test]
     fn test_basic() {
         let inputs = get_sample_packs();
-        let mut curs = get_curs();
-
-        let mut enc = Encoder::from(&mut curs);
+        let num_packs = inputs.len();
+        let mut buf = Vec::new();
+        let mut enc = Encoder::from(&mut buf);
         for md in &inputs {
             enc.serialise(md.clone()).unwrap();
         }
-        enc.done().unwrap();
 
-        rewind_curs(&mut curs);
+        let mut curs = Cursor::new(&mut buf);
         let dec = Decoder::from(&mut curs);
 
         // Obtain two fallible iterators, so we can zip them.
         let expect_iter = fallible_iterator::convert(inputs.into_iter().map(|e| Ok(e)));
 
         let mut itr = dec.zip(expect_iter);
-        while let Some((got, expect)) = itr.next().unwrap() {
+        for _ in 0..num_packs {
+            let (got, expect) = itr.next().unwrap().unwrap();
             assert_eq!(expect, got);
         }
+
+        // We've consumed everything, so attempting to decode another pack should fail.
+        assert!(itr.next().is_err());
     }
 }

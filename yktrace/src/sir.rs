@@ -1,92 +1,144 @@
 //! Loading and tracing of Serialised Intermediate Representation (SIR).
 
 use fallible_iterator::FallibleIterator;
+use fxhash::FxHashMap;
 use memmap::Mmap;
 use object::{Object, ObjectSection};
 use std::{
-    collections::HashMap,
     convert::TryFrom,
     env,
     fmt::{self, Debug, Display, Write},
     fs::File,
-    io::Cursor,
-    iter::Iterator,
-    path::Path
+    io::{Cursor, Seek, SeekFrom},
+    iter::Iterator
 };
-use ykpack::{self, Body, BodyFlags, CguHash, Decoder, Pack, Ty};
-
-/// The serialised IR loaded in from disk. One of these structures is generated in the above
-/// `lazy_static` and is shared immutably for all threads.
-#[derive(Debug)]
-pub struct Sir {
-    /// Lets us map a symbol name to a SIR body.
-    pub bodies: HashMap<String, Body>,
-    /// SIR Local variable types, keyed by codegen unit hash.
-    pub types: HashMap<CguHash, Vec<Ty>>
-}
-
-impl Sir {
-    pub fn ty(&self, id: &ykpack::TypeId) -> &ykpack::Ty {
-        &self.types[&id.0][usize::try_from(id.1).unwrap()]
-    }
-}
+use ykpack::{self, Body, BodyFlags, CguHash, Decoder, Pack, SirHeader, SirOffset};
 
 lazy_static! {
-    pub static ref SIR: Sir = Sir::read_file(&env::current_exe().unwrap()).unwrap();
+    pub static ref EXE_MMAP: Mmap =
+        unsafe { Mmap::map(&File::open(&env::current_exe().unwrap()).unwrap()).unwrap() };
+    pub static ref SIR: Sir<'static> = Sir::new(&*EXE_MMAP).unwrap();
 }
 
-impl Sir {
-    pub fn read_file(file: &Path) -> Result<Sir, ()> {
-        // SAFETY: Not really, we hope that nobody changes the file underneath our feet.
-        let data = unsafe { Mmap::map(&File::open(file).unwrap()).unwrap() };
-        let object = object::File::parse(&*data).unwrap();
+/// An interface to the serialised IR of an executable.
+///
+/// One of these structures is generated in the above `lazy_static` and is then shared immutably
+/// across all threads. Only the headers of each SIR section are eagerly loaded. For performance
+/// reasons, the actual IR is loaded on-demand.
+#[derive(Debug)]
+pub struct Sir<'m> {
+    /// The SIR section headers.
+    /// Maps a codegen unit hash to a `(section-name, header, header-size)` tuple.
+    hdrs: FxHashMap<CguHash, (String, SirHeader, SirOffset)>,
+    /// The current executable's ELF information.
+    exe_obj: object::File<'m>
+}
 
-        // We iterate over ELF sections, looking for ones which contain SIR and loading them into
-        // memory.
-        let mut bodies = HashMap::new();
-        let mut types = HashMap::new();
-        for sec in object.sections() {
-            if sec.name().unwrap().starts_with(".yksir_") {
+impl<'m> Sir<'m> {
+    pub fn new(mmap: &'m Mmap) -> Result<Self, ()> {
+        // SAFETY: Not really, we hope that nobody changes the file underneath our feet.
+        let mut hdrs = FxHashMap::default();
+        let exe_obj = object::File::parse(&*mmap).unwrap();
+        for sec in exe_obj.sections() {
+            if sec.name().unwrap().starts_with(ykpack::SIR_SECTION_PREFIX) {
                 let mut curs = Cursor::new(sec.data().unwrap());
                 let mut dec = Decoder::from(&mut curs);
-
-                while let Some(pack) = dec.next().unwrap() {
-                    match pack {
-                        Pack::Body(body) => {
-                            // Due to the way Rust compiles stuff, duplicates may exist. Where
-                            // duplicates exist, the functions will be identical, but may have
-                            // different (but equivalent) types. This is because types too may be
-                            // duplicated (for example in a different crate).
-                            bodies
-                                .entry(body.symbol_name.clone())
-                                .or_insert_with(|| body);
-                        }
-                        Pack::Types(ts) => {
-                            let old = types.insert(ts.cgu_hash, ts.types);
-                            debug_assert!(old.is_none()); // There's one `Types` pack per codegen unit.
-                        }
-                    }
-                }
+                let hdr = if let Pack::Header(hdr) = dec.next().unwrap().unwrap() {
+                    hdr
+                } else {
+                    panic!("missing sir header");
+                };
+                let hdr_size = usize::try_from(curs.seek(SeekFrom::Current(0)).unwrap()).unwrap();
+                hdrs.insert(
+                    hdr.cgu_hash,
+                    (sec.name().unwrap().to_owned(), hdr, hdr_size)
+                );
             }
         }
+        Ok(Self { hdrs, exe_obj })
+    }
 
-        Ok(Sir { bodies, types })
+    fn cursor_for_section(&self, sec_name: &str) -> Cursor<&[u8]> {
+        let sec = self.exe_obj.section_by_name(&sec_name).unwrap();
+        Cursor::new(sec.data().unwrap())
+    }
+
+    /// Decode a type in a named section, at an absolute offset from the beginning of that section.
+    fn decode_ty(&self, sec_name: &str, off: SirOffset) -> ykpack::Ty {
+        let mut curs = self.cursor_for_section(&sec_name);
+        curs.seek(SeekFrom::Start(u64::try_from(off).unwrap()))
+            .unwrap();
+        let mut dec = Decoder::from(&mut curs);
+        if let Ok(Some(Pack::Type(t))) = dec.next() {
+            t
+        } else {
+            panic!("Failed to deserialize SIR type");
+        }
+    }
+
+    /// Get the type data for the given type ID.
+    pub fn ty(&self, tyid: &ykpack::TypeId) -> ykpack::Ty {
+        let (cgu, tidx) = tyid;
+        let (ref sec_name, ref hdr, hdr_size) = SIR.hdrs[cgu];
+        let off = hdr.types[usize::try_from(*tidx).unwrap()];
+        self.decode_ty(sec_name, hdr_size + off)
+    }
+
+    /// Decode a body in a named section, at an absolute offset from the beginning of that section.
+    fn decode_body(&self, sec_name: &str, off: SirOffset) -> ykpack::Body {
+        let mut curs = self.cursor_for_section(&sec_name);
+        curs.seek(SeekFrom::Start(u64::try_from(off).unwrap()))
+            .unwrap();
+        let mut dec = Decoder::from(&mut curs);
+        if let Ok(Some(Pack::Body(body))) = dec.next() {
+            body
+        } else {
+            panic!("Failed to deserialize SIR body");
+        }
+    }
+
+    /// Get the body data for the given symbol name.
+    /// Returns None if not found.
+    pub fn body(&self, body_sym: &str) -> Option<Body> {
+        for (sec_name, hdr, hdr_size) in SIR.hdrs.values() {
+            if let Some(off) = hdr.bodies.get(body_sym) {
+                return Some(self.decode_body(sec_name, hdr_size + off));
+            }
+        }
+        None
     }
 }
 
-impl Display for Sir {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for body in self.bodies.values() {
-            writeln!(f, "{}", body)?;
-        }
-
-        for (cgu_hash, types) in self.types.iter() {
-            writeln!(f, "TYPES OF {}", cgu_hash)?;
-            for ty in types {
-                writeln!(f, "{}", ty)?;
+impl<'m> Display for Sir<'m> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (sec_name, hdr, hdr_size) in self.hdrs.values() {
+            writeln!(
+                f,
+                "# Types for CGU {} in section {}:",
+                hdr.cgu_hash, sec_name
+            )?;
+            for (idx, off) in hdr.types.iter().enumerate() {
+                writeln!(
+                    f,
+                    "  {} => {}",
+                    idx,
+                    self.decode_ty(sec_name, hdr_size + off)
+                )?;
             }
+            writeln!(
+                f,
+                "# Bodies for CGU {} in section {}",
+                hdr.cgu_hash, sec_name
+            )?;
+            for off in hdr.bodies.values() {
+                let txt = format!("{}\n", self.decode_body(sec_name, hdr_size + off));
+                let lines = txt.lines();
+                for line in lines {
+                    writeln!(f, "  {}", line)?;
+                }
+            }
+            writeln!(f, "\n")?;
         }
-
         Ok(())
     }
 }
@@ -142,8 +194,8 @@ pub fn sir_trace_str(sir: &Sir, trace: &dyn SirTrace, trimmed: bool, show_blocks
     for loc in locs {
         write!(res_r, "[{}] bb={}, flags=[", loc.symbol_name, loc.bb_idx).unwrap();
 
-        let body = sir.bodies.get(&loc.symbol_name);
-        if let Some(body) = body {
+        let body = sir.body(&loc.symbol_name);
+        if let Some(ref body) = body {
             if body.flags.contains(BodyFlags::INTERP_STEP) {
                 write!(res_r, "INTERP_STEP ").unwrap();
             }
