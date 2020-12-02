@@ -1,6 +1,5 @@
 #![cfg_attr(feature = "clippy", feature(plugin))]
 #![cfg_attr(feature = "clippy", plugin(clippy))]
-#![feature(optin_builtin_traits)]
 #![feature(link_args)]
 
 pub mod backends;
