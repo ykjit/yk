@@ -1142,3 +1142,11 @@ mod tests {
         }
     }
 }
+
+/// A SIR mapping label.
+#[derive(Debug, Hash, Eq, PartialEq, Clone, Serialize, Deserialize)]
+pub struct SirLabel {
+    pub off: SirOffset,
+    pub symbol_name: String,
+    pub bb: BasicBlockIndex,
+}

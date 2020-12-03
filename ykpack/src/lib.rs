@@ -35,6 +35,9 @@ pub const BLOCK_LABEL_PREFIX: &str = "__YK_BLK";
 // ELF sections with this prefix contain SIR.
 pub const SIR_SECTION_PREFIX: &str = ".yksir_";
 
+// The ELF section with this name contains label mapping information derived from DWARF DILabels.
+pub const YKLABELS_SECTION: &str = ".yklabels";
+
 #[cfg(test)]
 mod tests {
     use super::{BasicBlock, Body, BodyFlags, Decoder, Encoder, Pack, Statement, Terminator};
