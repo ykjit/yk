@@ -228,10 +228,10 @@ impl MTThread {
         loop {
             // We need Acquire ordering, as PHASE_COMPILED will need to read information written to
             // external data as a result of the PHASE_TRACING -> PHASE_COMPILED transition.
-            let lp = loc.pack.load(Ordering::Acquire);
+            let mut lp = loc.pack.load(Ordering::Acquire);
             match lp & PHASE_TAG {
                 PHASE_COUNTING => {
-                    let count = (lp & !PHASE_TAG) >> 2;
+                    let mut count = (lp & !PHASE_TAG) >> 2;
                     if count >= self.inner.hot_threshold {
                         if self.inner.tracer.is_some() {
                             // This thread is already tracing. Note that we don't increment the hot
@@ -244,11 +244,24 @@ impl MTThread {
                             Rc::get_mut(&mut self.inner).unwrap().tracer =
                                 Some((start_tracing(self.inner.tracing_kind), loc_id));
                             return None;
+                        } else {
+                            // We raced with another thread that's also trying to trace this
+                            // Location, so free the malloc'd block.
+                            unsafe { Box::from_raw(loc_id) };
                         }
                     } else {
-                        let new_pack = PHASE_COUNTING | ((count + 1) << PHASE_NUM_BITS);
-                        if loc.pack.compare_and_swap(lp, new_pack, Ordering::Release) == lp {
-                            return None;
+                        loop {
+                            let new_pack = PHASE_COUNTING | ((count + 1) << PHASE_NUM_BITS);
+                            if loc.pack.compare_and_swap(lp, new_pack, Ordering::Release) == lp {
+                                return None;
+                            }
+                            // We raced with another thread, but we'd still like to try
+                            // incrementing the count if possible, so we try again.
+                            lp = loc.pack.load(Ordering::Acquire);
+                            count = (lp & !PHASE_TAG) >> 2;
+                            if count >= self.inner.hot_threshold {
+                                break;
+                            }
                         }
                     }
                 }
@@ -283,7 +296,7 @@ impl MTThread {
                     // FIXME: free up the memory when the trace is no longer used.
                     let ptr = Box::into_raw(Box::new(ct)) as usize;
 
-                    let new_pack = PHASE_COMPILED | (ptr << PHASE_NUM_BITS);
+                    let new_pack = ptr | PHASE_COMPILED;
                     loc.pack.store(new_pack, Ordering::Release);
                     // Free the small block of memory we used as a Location ID.
                     unsafe { Box::from_raw(loc_id) };
@@ -291,12 +304,15 @@ impl MTThread {
                     return None;
                 }
                 PHASE_COMPILED => {
-                    let ptr = (lp >> PHASE_NUM_BITS) as *const u8;
-                    let bct = unsafe { Box::from_raw(ptr as *mut CompiledTrace<I>) };
-                    let tptr = bct.ptr();
-                    let func: fn(&mut I) -> bool = unsafe { mem::transmute(tptr) };
-                    let _raw = Box::into_raw(bct);
-                    return Some(func);
+                    let p = (lp & !PHASE_TAG) as *const ();
+                    // Retrieve the CompiledTrace to gain access to the memory containing the
+                    // trace.
+                    let bct = unsafe { Box::from_raw(p as *mut CompiledTrace<I>) };
+                    let f = unsafe { mem::transmute::<_, fn(&mut I) -> bool>(bct.ptr()) };
+                    // Forget the CompiledTrace again to make sure it isn't dropped before we had a
+                    // chance to execute it.
+                    mem::forget(bct);
+                    return Some(f);
                 }
                 _ => unreachable!(),
             }
