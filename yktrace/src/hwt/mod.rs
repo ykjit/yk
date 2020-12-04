@@ -38,6 +38,14 @@ impl ThreadTracerImpl for HWTThreadTracer {
     }
 }
 
+impl Drop for HWTThreadTracer {
+    fn drop(&mut self) {
+        // If we haven't stopped the tracer yet, do it now. This might return an error if the
+        // tracer was already stopped, but we don't care as long as it's stopped.
+        let _ = self.ttracer.stop_tracing();
+    }
+}
+
 pub fn start_tracing() -> ThreadTracer {
     let tracer = TracerBuilder::new().build().unwrap();
     let mut ttracer = (*tracer).thread_tracer();
