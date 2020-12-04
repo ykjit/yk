@@ -299,7 +299,7 @@ impl MTThread {
                     let bct = unsafe { Box::from_raw(ptr as *mut CompiledTrace<I>) };
                     let tptr = bct.ptr();
                     let func: fn(&mut I) -> bool = unsafe { mem::transmute(tptr) };
-                    let _raw = Box::into_raw(bct);
+                    mem::forget(bct);
                     return Some(func);
                 }
                 _ => unreachable!(),
