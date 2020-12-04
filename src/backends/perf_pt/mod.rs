@@ -403,6 +403,15 @@ impl Default for PerfPTThreadTracer {
     }
 }
 
+impl Drop for PerfPTThreadTracer {
+    fn drop(&mut self) {
+        if self.state == TracerState::Started {
+            // If we haven't stopped the tracer already, stop it now.
+            self.stop_tracing().unwrap();
+        }
+    }
+}
+
 impl ThreadTracer for PerfPTThreadTracer {
     fn start_tracing(&mut self) -> Result<(), HWTracerError> {
         if self.state == TracerState::Started {
