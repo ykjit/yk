@@ -244,6 +244,10 @@ impl MTThread {
                             Rc::get_mut(&mut self.inner).unwrap().tracer =
                                 Some((start_tracing(self.inner.tracing_kind), loc_id));
                             return None;
+                        } else {
+                            // We raced with another thread that's also trying to trace this
+                            // Location, so free the malloc'd block.
+                            unsafe { Box::from_raw(loc_id) };
                         }
                     } else {
                         let new_pack = PHASE_COUNTING | ((count + 1) << PHASE_NUM_BITS);
