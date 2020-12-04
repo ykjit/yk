@@ -228,10 +228,10 @@ impl MTThread {
         loop {
             // We need Acquire ordering, as PHASE_COMPILED will need to read information written to
             // external data as a result of the PHASE_TRACING -> PHASE_COMPILED transition.
-            let mut lp = loc.pack.load(Ordering::Acquire);
+            let lp = loc.pack.load(Ordering::Acquire);
             match lp & PHASE_TAG {
                 PHASE_COUNTING => {
-                    let mut count = (lp & !PHASE_TAG) >> 2;
+                    let count = (lp & !PHASE_TAG) >> 2;
                     if count >= self.inner.hot_threshold {
                         if self.inner.tracer.is_some() {
                             // This thread is already tracing. Note that we don't increment the hot
@@ -250,19 +250,12 @@ impl MTThread {
                             unsafe { Box::from_raw(loc_id) };
                         }
                     } else {
-                        loop {
-                            let new_pack = PHASE_COUNTING | ((count + 1) << PHASE_NUM_BITS);
-                            if loc.pack.compare_and_swap(lp, new_pack, Ordering::Release) == lp {
-                                return None;
-                            }
-                            // We raced with another thread, but we'd still like to try
-                            // incrementing the count if possible, so we try again.
-                            lp = loc.pack.load(Ordering::Acquire);
-                            count = (lp & !PHASE_TAG) >> 2;
-                            if count >= self.inner.hot_threshold {
-                                break;
-                            }
+                        let new_pack = PHASE_COUNTING | ((count + 1) << PHASE_NUM_BITS);
+                        if loc.pack.compare_and_swap(lp, new_pack, Ordering::Release) == lp {
+                            return None;
                         }
+                        // We raced with another thread, but we'd still like to try incrementing
+                        // the count if possible, so go around the loop again.
                     }
                 }
                 PHASE_TRACING => {
