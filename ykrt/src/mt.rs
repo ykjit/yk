@@ -296,7 +296,7 @@ impl MTThread {
                     // FIXME: free up the memory when the trace is no longer used.
                     let ptr = Box::into_raw(Box::new(ct)) as usize;
 
-                    let new_pack = PHASE_COMPILED | (ptr << PHASE_NUM_BITS);
+                    let new_pack = ptr | PHASE_COMPILED;
                     loc.pack.store(new_pack, Ordering::Release);
                     // Free the small block of memory we used as a Location ID.
                     unsafe { Box::from_raw(loc_id) };
@@ -304,12 +304,15 @@ impl MTThread {
                     return None;
                 }
                 PHASE_COMPILED => {
-                    let ptr = (lp >> PHASE_NUM_BITS) as *const u8;
-                    let bct = unsafe { Box::from_raw(ptr as *mut CompiledTrace<I>) };
-                    let tptr = bct.ptr();
-                    let func: fn(&mut I) -> bool = unsafe { mem::transmute(tptr) };
+                    let p = (lp & !PHASE_TAG) as *const ();
+                    // Retrieve the CompiledTrace to gain access to the memory containing the
+                    // trace.
+                    let bct = unsafe { Box::from_raw(p as *mut CompiledTrace<I>) };
+                    let f = unsafe { mem::transmute::<_, fn(&mut I) -> bool>(bct.ptr()) };
+                    // Forget the CompiledTrace again to make sure it isn't dropped before we had a
+                    // chance to execute it.
                     mem::forget(bct);
-                    return Some(func);
+                    return Some(f);
                 }
                 _ => unreachable!(),
             }
