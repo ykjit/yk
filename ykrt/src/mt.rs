@@ -1,6 +1,7 @@
 #[cfg(test)]
 use std::time::Duration;
 use std::{
+    alloc::{alloc, dealloc, Layout},
     io, mem,
     panic::{catch_unwind, resume_unwind, UnwindSafe},
     rc::Rc,
@@ -238,17 +239,15 @@ impl MTThread {
                             // count further.
                             return None;
                         }
-                        let loc_id = Box::into_raw(Box::new(0u8));
-                        let new_pack = loc_id as usize | PHASE_TRACING;
+                        let new_pack = self.inner.tid as usize | PHASE_TRACING;
                         if loc.pack.compare_and_swap(lp, new_pack, Ordering::Release) == lp {
                             Rc::get_mut(&mut self.inner).unwrap().tracer =
-                                Some((start_tracing(self.inner.tracing_kind), loc_id));
+                                Some((start_tracing(self.inner.tracing_kind), self.inner.tid));
                             return None;
-                        } else {
-                            // We raced with another thread that's also trying to trace this
-                            // Location, so free the malloc'd block.
-                            unsafe { Box::from_raw(loc_id) };
                         }
+                    // We raced with another thread that's (probably) trying to trace this
+                    // Location or (less likely) has already compiled it so we go around the
+                    // loop again to see what we should do.
                     } else {
                         let new_pack = PHASE_COUNTING | ((count + 1) << PHASE_NUM_BITS);
                         if loc.pack.compare_and_swap(lp, new_pack, Ordering::Release) == lp {
@@ -259,18 +258,17 @@ impl MTThread {
                     }
                 }
                 PHASE_TRACING => {
-                    let loc_id = if let Some((_, loc_id)) = self.inner.tracer {
+                    if let Some((_, tid)) = self.inner.tracer {
                         // This thread is tracing something...
-                        if loc_id != ((lp & !PHASE_TAG) as *mut u8) {
+                        if tid != ((lp & !PHASE_TAG) as *mut u8) {
                             // ...but we didn't start at the current Location.
                             return None;
                         }
-                        // ...and we started at this Location, so we've got a complete loop!
-                        loc_id
+                    // ...and we started at this Location, so we've got a complete loop!
                     } else {
                         // Another thread is tracing this location.
                         return None;
-                    };
+                    }
 
                     let sir_trace = Rc::get_mut(&mut self.inner)
                         .unwrap()
@@ -291,8 +289,6 @@ impl MTThread {
 
                     let new_pack = ptr | PHASE_COMPILED;
                     loc.pack.store(new_pack, Ordering::Release);
-                    // Free the small block of memory we used as a Location ID.
-                    unsafe { Box::from_raw(loc_id) };
                     Rc::get_mut(&mut self.inner).unwrap().tracer = None;
                     return None;
                 }
@@ -316,6 +312,11 @@ impl MTThread {
 /// The innards of a meta-tracer thread.
 struct MTThreadInner {
     mt: MT,
+    /// A value that uniquely identifies a thread. Since this ID needs to be ORable with PHASE_TAG,
+    /// we use a pointer to a malloc'd chunk of memory. We guarantee a) that chunk is aligned to a
+    /// machine word b) that it is a non-zero chunk of memory (and thus guaranteed to be a unique
+    /// pointer).
+    tid: *mut u8,
     hot_threshold: HotThreshold,
     #[allow(dead_code)]
     tracing_kind: TracingKind,
@@ -329,8 +330,14 @@ impl MTThreadInner {
     fn init(mt: MT) -> MTThread {
         let hot_threshold = mt.hot_threshold();
         let tracing_kind = mt.tracing_kind();
+        let tid = {
+            let layout =
+                Layout::from_size_align(mem::size_of::<usize>(), mem::size_of::<usize>()).unwrap();
+            unsafe { alloc(layout) }
+        };
         let inner = MTThreadInner {
             mt,
+            tid,
             hot_threshold,
             tracing_kind,
             tracer: None,
@@ -343,10 +350,9 @@ impl MTThreadInner {
 
 impl Drop for MTThreadInner {
     fn drop(&mut self) {
-        if let Some((_, loc_id)) = self.tracer {
-            // We were trying to trace something.
-            unsafe { Box::from_raw(loc_id) };
-        }
+        let layout =
+            Layout::from_size_align(mem::size_of::<usize>(), mem::size_of::<usize>()).unwrap();
+        unsafe { dealloc(self.tid, layout) };
     }
 }
 
