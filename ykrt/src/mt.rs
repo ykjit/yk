@@ -318,7 +318,6 @@ struct MTThreadInner {
     /// pointer).
     tid: *mut u8,
     hot_threshold: HotThreshold,
-    #[allow(dead_code)]
     tracing_kind: TracingKind,
     /// The active tracer and the unique identifier of the [Location] that is being traced. We use
     /// a pointer to a 1 byte malloc'd chunk of memory since the resulting address is guaranteed to
