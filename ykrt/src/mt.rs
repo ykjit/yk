@@ -220,7 +220,7 @@ impl MTThread {
         func(inputs)
     }
 
-    pub fn _control_point<I>(&mut self, loc: &Location) -> Option<fn(&mut I) -> bool> {
+    fn _control_point<I>(&mut self, loc: &Location) -> Option<fn(&mut I) -> bool> {
         // Since we don't hold an explicit lock, updating a Location is tricky: we might read a
         // Location, work out what we'd like to update it to, and try updating it, only to find
         // that another thread interrupted us part way through. We therefore use compare_and_swap
