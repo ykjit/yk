@@ -203,7 +203,7 @@ impl MTThread {
         // If a loop can start at this position then update the location and potentially start/stop
         // this thread's tracer.
         if let Some(loc) = loc {
-            if let Some(func) = self._control_point::<I>(loc) {
+            if let Some(func) = self.transition_location::<I>(loc) {
                 if self.exec_trace(func, inputs) {
                     // Trace succesfully executed.
                     return;
@@ -220,7 +220,10 @@ impl MTThread {
         func(inputs)
     }
 
-    pub fn _control_point<I>(&mut self, loc: &Location) -> Option<fn(&mut I) -> bool> {
+    /// `Location`s represent a statemachine: this function transitions to the next state (which
+    /// may be the same as the previous state!). If this results in a compiled trace, it returns
+    /// `Some(pointer_to_trace_function)`.
+    fn transition_location<I>(&mut self, loc: &Location) -> Option<fn(&mut I) -> bool> {
         // Since we don't hold an explicit lock, updating a Location is tricky: we might read a
         // Location, work out what we'd like to update it to, and try updating it, only to find
         // that another thread interrupted us part way through. We therefore use compare_and_swap
@@ -318,7 +321,6 @@ struct MTThreadInner {
     /// pointer).
     tid: *mut u8,
     hot_threshold: HotThreshold,
-    #[allow(dead_code)]
     tracing_kind: TracingKind,
     /// The active tracer and the unique identifier of the [Location] that is being traced. We use
     /// a pointer to a 1 byte malloc'd chunk of memory since the resulting address is guaranteed to
