@@ -4,7 +4,8 @@ use phdrs::objects;
 use crate::sir::SirLoc;
 use hwtracer::{HWTracerError, Trace};
 use lazy_static::lazy_static;
-use std::{env, fs};
+use std::{convert::TryFrom, env, fs};
+use ykpack::SirLabel;
 
 lazy_static! {
     /// Maps a label address to its symbol name and block index.
@@ -16,7 +17,7 @@ lazy_static! {
     /// to be a lazy static, loaded only once and shared.
     ///
     /// FIXME if we want to support dlopen(), we will have to rethink this.
-    static ref LABELS: Vec<(u64, (String, u32))> = extract_labels().unwrap();
+    static ref LABELS: Vec<SirLabel> = load_labels();
 }
 
 pub struct HWTMapper {
@@ -35,8 +36,8 @@ impl HWTMapper {
         for block in trace.iter_blocks() {
             let block = block?;
 
-            let start_addr = block.first_instr() - self.phdr_offset;
-            let end_addr = block.last_instr() - self.phdr_offset;
+            let start_addr = usize::try_from(block.first_instr() - self.phdr_offset).unwrap();
+            let end_addr = usize::try_from(block.last_instr() - self.phdr_offset).unwrap();
             // Each block reported by the hardware tracer corresponds to one or more SIR
             // blocks, so we collect them in a vector here. This is safe because:
             //
@@ -47,18 +48,18 @@ impl HWTMapper {
             // b) `labels` is sorted, so the blocks will be appended to the trace in the
             // correct order.
             let mut locs = Vec::new();
-            for (addr, (sym, bb_idx)) in &*LABELS {
-                if *addr >= start_addr && *addr <= end_addr {
+            for lbl in &*LABELS {
+                if lbl.off >= start_addr && lbl.off <= end_addr {
                     // Found matching label.
                     // Store the virtual address alongside the first basic block, so we can turn
                     // inlined functions into calls during tracing.
-                    let vaddr = if bb_idx == &0 {
+                    let vaddr = if lbl.bb == 0 {
                         Some(block.first_instr())
                     } else {
                         None
                     };
-                    locs.push(SirLoc::new(sym.to_string(), *bb_idx, vaddr));
-                } else if *addr > end_addr {
+                    locs.push(SirLoc::new(lbl.symbol_name.clone(), lbl.bb, vaddr));
+                } else if lbl.off > end_addr {
                     // `labels` is sorted by address, so once we see one with an address
                     // higher than `end_addr`, we know there can be no further hits.
                     break;
@@ -76,93 +77,15 @@ fn get_phdr_offset() -> u64 {
     (&objects()[0]).addr() as u64
 }
 
-/// Extracts YK debug labels and their addresses from the executable.
+/// Loads SIR location labels from the executable.
 ///
-/// The returned vector is sorted by label address ascending.
-fn extract_labels() -> Result<Vec<(u64, (String, u32))>, gimli::Error> {
-    // Load executable
+/// The returned vector is sorted by label address ascending (due to the encode ordering).
+fn load_labels() -> Vec<SirLabel> {
     let pathb = env::current_exe().unwrap();
     let file = fs::File::open(&pathb.as_path()).unwrap();
     let mmap = unsafe { memmap::Mmap::map(&file).unwrap() };
     let object = object::File::parse(&*mmap).unwrap();
-    let endian = if object.is_little_endian() {
-        gimli::RunTimeEndian::Little
-    } else {
-        gimli::RunTimeEndian::Big
-    };
-
-    // Extract labels
-    let mut labels = Vec::new();
-
-    let loader = |id: gimli::SectionId| -> Result<&[u8], gimli::Error> {
-        Ok(object
-            .section_by_name(id.name())
-            .map(|sec| sec.data().expect("failed to decompress section"))
-            .unwrap_or(&[] as &[u8]))
-    };
-    let sup_loader = |_| Ok(&[] as &[u8]);
-    let dwarf_cow = gimli::Dwarf::load(&loader, &sup_loader)?;
-    let borrow_section: &dyn for<'a> Fn(&&'a [u8]) -> gimli::EndianSlice<'a, gimli::RunTimeEndian> =
-        &|section| gimli::EndianSlice::new(section, endian);
-    let dwarf = dwarf_cow.borrow(&borrow_section);
-    let mut iter = dwarf.units();
-    let mut subaddr = None;
-    while let Some(header) = iter.next()? {
-        let unit = dwarf.unit(header)?;
-        let mut entries = unit.entries();
-        while let Some((_, entry)) = entries.next_dfs()? {
-            if entry.tag() == gimli::DW_TAG_subprogram {
-                if let Some(_name) = entry.attr_value(gimli::DW_AT_linkage_name)? {
-                    if let Some(lowpc) = entry.attr_value(gimli::DW_AT_low_pc)? {
-                        let addr = match lowpc {
-                            gimli::AttributeValue::Addr(v) => v as u64,
-                            _ => panic!("Error reading dwarf information. Expected type 'Addr'.")
-                        };
-                        // We can not accurately insert labels at the beginning of functions,
-                        // because the label is offset by the function headers. We thus simply
-                        // remember the subprogram's address so we can later assign it to the first
-                        // block (ending with '_0') of this subprogram.
-                        subaddr = Some(addr);
-                    }
-                }
-            } else if entry.tag() == gimli::DW_TAG_label {
-                if let Some(name) = entry.attr_value(gimli::DW_AT_name)? {
-                    if let Some(es) = name.string_value(&dwarf.debug_str) {
-                        let s = es.to_string()?;
-                        if s.starts_with("__YK_") {
-                            if let Some(lowpc) = entry.attr_value(gimli::DW_AT_low_pc)? {
-                                let addr = match lowpc {
-                                    gimli::AttributeValue::Addr(v) => v as u64,
-                                    _ => panic!(
-                                        "Error reading dwarf information. Expected type 'Addr'."
-                                    )
-                                };
-                                if subaddr.is_some() && s.ends_with("_0") {
-                                    // This is the first block of the subprogram. Assign its label
-                                    // to the subprogram's address.
-                                    labels.push((subaddr.unwrap(), split_symbol(s)));
-                                    subaddr = None;
-                                } else {
-                                    labels.push((addr, split_symbol(s)));
-                                }
-                            } else {
-                                // Ignore labels that have no address.
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    labels.sort_by_key(|k| k.0);
-    Ok(labels)
-}
-
-fn split_symbol(s: &str) -> (String, u32) {
-    let data: Vec<&str> = s.split(':').collect();
-    debug_assert!(data.len() == 3);
-    let sym = data[1].to_owned();
-    let bb_idx = data[2].parse::<u32>().unwrap();
-    (sym, bb_idx)
+    let sec = object.section_by_name(ykpack::YKLABELS_SECTION).unwrap();
+    let ret = bincode::deserialize::<Vec<SirLabel>>(sec.data().unwrap()).unwrap();
+    ret
 }
