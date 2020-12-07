@@ -164,7 +164,7 @@ impl SirLoc {
 }
 
 /// Generic representation of a trace of SIR block locations.
-pub trait SirTrace: Debug {
+pub trait SirTrace: Debug + Send {
     /// Returns the length of the *raw* (untrimmed) trace, measured in SIR locations.
     fn raw_len(&self) -> usize;
 
