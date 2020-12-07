@@ -14,9 +14,13 @@ hwtracer = { git = "https://github.com/softdevteam/hwtracer" }
 lazy_static = "1.4.0"
 libc = "0.2.80"
 memmap = "0.7.0"
-object = "0.22.0"
 phdrs = { git = "https://github.com/softdevteam/phdrs" }
 ykpack = { path = "../ykpack" }
+
+[dependencies.object]
+version = "0.22.0"
+default-features = false
+features = ["read_core", "elf"]
 
 [dev-dependencies]
 fm = "0.1.4"
