@@ -42,13 +42,13 @@ const PHASE_COUNTING: usize = 0b10; // The value specifies how many times we've 
 /// nodes that can't be control points).
 #[derive(Debug)]
 pub struct Location {
-    pack: AtomicUsize,
+    state: AtomicUsize,
 }
 
 impl Location {
     pub fn new() -> Self {
         Self {
-            pack: AtomicUsize::new(PHASE_COUNTING),
+            state: AtomicUsize::new(PHASE_COUNTING),
         }
     }
 }
@@ -232,7 +232,7 @@ impl MTThread {
         loop {
             // We need Acquire ordering, as PHASE_COMPILED will need to read information written to
             // external data as a result of the PHASE_TRACING -> PHASE_COMPILED transition.
-            let lp = loc.pack.load(Ordering::Acquire);
+            let lp = loc.state.load(Ordering::Acquire);
             match lp & PHASE_TAG {
                 PHASE_COUNTING => {
                     let count = (lp & !PHASE_TAG) >> 2;
@@ -242,8 +242,8 @@ impl MTThread {
                             // count further.
                             return None;
                         }
-                        let new_pack = self.inner.tid as usize | PHASE_TRACING;
-                        if loc.pack.compare_and_swap(lp, new_pack, Ordering::Release) == lp {
+                        let new_state = self.inner.tid as usize | PHASE_TRACING;
+                        if loc.state.compare_and_swap(lp, new_state, Ordering::Release) == lp {
                             Rc::get_mut(&mut self.inner).unwrap().tracer =
                                 Some((start_tracing(self.inner.tracing_kind), self.inner.tid));
                             return None;
@@ -252,8 +252,8 @@ impl MTThread {
                     // Location or (less likely) has already compiled it so we go around the
                     // loop again to see what we should do.
                     } else {
-                        let new_pack = PHASE_COUNTING | ((count + 1) << PHASE_NUM_BITS);
-                        if loc.pack.compare_and_swap(lp, new_pack, Ordering::Release) == lp {
+                        let new_state = PHASE_COUNTING | ((count + 1) << PHASE_NUM_BITS);
+                        if loc.state.compare_and_swap(lp, new_state, Ordering::Release) == lp {
                             return None;
                         }
                         // We raced with another thread, but we'd still like to try incrementing
@@ -284,14 +284,14 @@ impl MTThread {
                     let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
                     let ct = TraceCompiler::<I>::compile(tir_trace);
                     // Now that we have a compiled trace, we need to put a pointer to it inside
-                    // the corresponding Location's pack. To inhibit ExecutableBuffer's Drop,
-                    // we move it into a box and forget it: the pointer in the pack is now the
+                    // the corresponding Location's state. To inhibit ExecutableBuffer's Drop,
+                    // we move it into a box and forget it: the pointer in the state is now the
                     // sole handle on the trace.
                     // FIXME: free up the memory when the trace is no longer used.
                     let ptr = Box::into_raw(Box::new(ct)) as usize;
 
-                    let new_pack = ptr | PHASE_COMPILED;
-                    loc.pack.store(new_pack, Ordering::Release);
+                    let new_state = ptr | PHASE_COMPILED;
+                    loc.state.store(new_state, Ordering::Release);
                     Rc::get_mut(&mut self.inner).unwrap().tracer = None;
                     return None;
                 }
@@ -378,15 +378,15 @@ mod tests {
         for i in 0..hot_thrsh {
             mtt.control_point(Some(&lp), dummy_step, &mut io);
             assert_eq!(
-                lp.pack.load(Ordering::Relaxed),
+                lp.state.load(Ordering::Relaxed),
                 PHASE_COUNTING | ((i + 1) << PHASE_NUM_BITS)
             );
         }
-        assert_eq!(lp.pack.load(Ordering::Relaxed) & PHASE_TAG, PHASE_COUNTING);
+        assert_eq!(lp.state.load(Ordering::Relaxed) & PHASE_TAG, PHASE_COUNTING);
         mtt.control_point(Some(&lp), dummy_step, &mut io);
-        assert_eq!(lp.pack.load(Ordering::Relaxed) & PHASE_TAG, PHASE_TRACING);
+        assert_eq!(lp.state.load(Ordering::Relaxed) & PHASE_TAG, PHASE_TRACING);
         mtt.control_point(Some(&lp), dummy_step, &mut io);
-        assert_eq!(lp.pack.load(Ordering::Relaxed) & PHASE_TAG, PHASE_COMPILED);
+        assert_eq!(lp.state.load(Ordering::Relaxed) & PHASE_TAG, PHASE_COMPILED);
     }
 
     #[test]
@@ -398,13 +398,13 @@ mod tests {
         for i in 0..hot_thrsh {
             mtt.control_point(Some(&lp), dummy_step, &mut io);
             assert_eq!(
-                lp.pack.load(Ordering::Relaxed),
+                lp.state.load(Ordering::Relaxed),
                 PHASE_COUNTING | ((i + 1) << PHASE_NUM_BITS)
             );
         }
-        assert_eq!(lp.pack.load(Ordering::Relaxed) & PHASE_TAG, PHASE_COUNTING);
+        assert_eq!(lp.state.load(Ordering::Relaxed) & PHASE_TAG, PHASE_COUNTING);
         mtt.control_point(Some(&lp), dummy_step, &mut io);
-        assert_eq!(lp.pack.load(Ordering::Relaxed) & PHASE_TAG, PHASE_TRACING);
+        assert_eq!(lp.state.load(Ordering::Relaxed) & PHASE_TAG, PHASE_TRACING);
     }
 
     #[test]
@@ -420,16 +420,16 @@ mod tests {
                 .spawn(move |mut mtt| {
                     let mut io = DummyIO {};
                     mtt.control_point(Some(&loc), dummy_step, &mut io);
-                    let c1 = loc.pack.load(Ordering::Relaxed);
+                    let c1 = loc.state.load(Ordering::Relaxed);
                     assert_eq!(c1 & PHASE_TAG, PHASE_COUNTING);
                     mtt.control_point(Some(&loc), dummy_step, &mut io);
-                    let c2 = loc.pack.load(Ordering::Relaxed);
+                    let c2 = loc.state.load(Ordering::Relaxed);
                     assert_eq!(c2 & PHASE_TAG, PHASE_COUNTING);
                     mtt.control_point(Some(&loc), dummy_step, &mut io);
-                    let c3 = loc.pack.load(Ordering::Relaxed);
+                    let c3 = loc.state.load(Ordering::Relaxed);
                     assert_eq!(c3 & PHASE_TAG, PHASE_COUNTING);
                     mtt.control_point(Some(&loc), dummy_step, &mut io);
-                    let c4 = loc.pack.load(Ordering::Relaxed);
+                    let c4 = loc.state.load(Ordering::Relaxed);
                     assert_eq!(c4 & PHASE_TAG, PHASE_COUNTING);
                     assert!(c4 > c3);
                     assert!(c3 > c2);
@@ -444,9 +444,12 @@ mod tests {
         {
             let mut io = DummyIO {};
             mtt.control_point(Some(&loc), dummy_step, &mut io);
-            assert_eq!(loc.pack.load(Ordering::Relaxed) & PHASE_TAG, PHASE_TRACING);
+            assert_eq!(loc.state.load(Ordering::Relaxed) & PHASE_TAG, PHASE_TRACING);
             mtt.control_point(Some(&loc), dummy_step, &mut io);
-            assert_eq!(loc.pack.load(Ordering::Relaxed) & PHASE_TAG, PHASE_COMPILED);
+            assert_eq!(
+                loc.state.load(Ordering::Relaxed) & PHASE_TAG,
+                PHASE_COMPILED
+            );
         }
     }
 
@@ -494,7 +497,7 @@ mod tests {
         }
 
         assert_eq!(
-            locs[0].as_ref().unwrap().pack.load(Ordering::Relaxed) & PHASE_TAG,
+            locs[0].as_ref().unwrap().state.load(Ordering::Relaxed) & PHASE_TAG,
             PHASE_COMPILED
         );
 
