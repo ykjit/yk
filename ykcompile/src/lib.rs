@@ -2333,7 +2333,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ref_deref_double_xxx() {
+    fn test_ref_deref_double() {
         #[derive(Debug)]
         struct IO(u64);
 
