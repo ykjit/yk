@@ -32,7 +32,7 @@ impl ThreadTracerImpl for HWTThreadTracer {
     fn stop_tracing(&mut self) -> Result<Box<dyn SirTrace>, InvalidTraceError> {
         let hwtrace = self.ttracer.stop_tracing().unwrap();
         let mt = HWTMapper::new();
-        mt.map(hwtrace)
+        mt.map_trace(hwtrace)
             .map_err(|_| InvalidTraceError::InternalError)
             .map(|sirtrace| Box::new(HWTSirTrace { sirtrace }) as Box<dyn SirTrace>)
     }
