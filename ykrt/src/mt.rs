@@ -2,11 +2,14 @@
 use std::time::Duration;
 use std::{
     alloc::{alloc, dealloc, Layout},
-    io, mem,
+    io,
+    marker::PhantomData,
+    mem,
     panic::{catch_unwind, resume_unwind, UnwindSafe},
     rc::Rc,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
+        mpsc::{channel, Receiver, TryRecvError},
         Arc,
     },
     thread::{self, JoinHandle},
@@ -24,10 +27,11 @@ const PHASE_NUM_BITS: usize = 2;
 // accessed without any further operations after the initial tag check.
 const PHASE_TAG: usize = 0b11; // All of the other PHASE_ tags must fit in this.
 const PHASE_COMPILED: usize = 0b00; // Value is a pointer to a chunk of memory containing a
-                                    // compiled trace.
+                                    // CompiledTrace<I>.
 const PHASE_TRACING: usize = 0b01; // Value is a pointer to a malloc'd block that allows us to
                                    // precisely identify when we have reached the same Location.
-const PHASE_COUNTING: usize = 0b10; // The value specifies how many times we've seen this Location.
+const PHASE_COMPILING: usize = 0b10; // Value is a pointer to a `Box<CompilingTrace<I>>`.
+const PHASE_COUNTING: usize = 0b11; // Value specifies how many times we've seen this Location.
 
 /// A `Location` stores state that the meta-tracer needs to identify hot loops and run associated
 /// machine code.
@@ -41,14 +45,62 @@ const PHASE_COUNTING: usize = 0b10; // The value specifies how many times we've 
 /// mechanism is for every bytecode or AST node to have its own `Location` (even for bytecodes or
 /// nodes that can't be control points).
 #[derive(Debug)]
-pub struct Location {
-    pack: AtomicUsize,
+pub struct Location<I> {
+    // A Location is a state machine which operates as follows (where PHASE_COUNTING is the start
+    // state):
+    //
+    //               ┌────────────────────────────────────────┐
+    //               │                                        │ ─────────────┐
+    //   reprofile   │             PHASE_COUNTING             │              │
+    //  ┌──────────▶ │                                        │ ◀────────────┘
+    //  │            └────────────────────────────────────────┘    increment
+    //  │              │                     ▲         ▲           count
+    //  │              │ start tracing       │ abort   │ abort
+    //  │              ▼                     │         │
+    //  │            ┌────────────────────┐  │         │
+    //  │            │   PHASE_TRACING    │ ─┘         │
+    //  │            └────────────────────┘            │
+    //  │              │                               │
+    //  │              │ start compiling trace         │
+    //  │              │ in thread                     │
+    //  │              ▼                               │
+    //  │            ┌────────────────────┐            │
+    //  |            |                    | ───────────┘
+    //  │            │                    │
+    //  │            │  PHASE_COMPILING   │ ──────┐
+    //  │            │                    │       │ still compiling in thread
+    //  │            │                    │ ◀─────┘
+    //  │            └────────────────────┘
+    //  │              │
+    //  │              │ trace compiled
+    //  │              ▼
+    //  │            ┌────────────────────┐
+    //  │            │                    │ ──────┐
+    //  │            │   PHASE_COMPILED   │       │
+    //  └─────────── │                    │ ◀─────┘
+    //               └────────────────────┘
+    //
+    // We hope that a Location soon reaches PHASE_COMPILED (aka "the happy state") and stays there.
+    state: AtomicUsize,
+    phantom: PhantomData<I>,
 }
 
-impl Location {
+impl<I> Location<I> {
     pub fn new() -> Self {
         Self {
-            pack: AtomicUsize::new(PHASE_COUNTING),
+            state: AtomicUsize::new(PHASE_COUNTING),
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<I> Drop for Location<I> {
+    fn drop(&mut self) {
+        let lp = self.state.load(Ordering::Relaxed);
+        if lp & PHASE_TAG == PHASE_COMPILING {
+            unsafe {
+                Box::from_raw((lp & !PHASE_TAG) as *mut CompilingTrace<I>);
+            }
         }
     }
 }
@@ -180,6 +232,11 @@ impl MTInner {
     }
 }
 
+/// The communication mechanism between a compiling thread and an interpreter thread.
+struct CompilingTrace<I> {
+    rcv: Receiver<CompiledTrace<I>>,
+}
+
 /// A meta-tracer aware thread. Note that this is conceptually a "front-end" to the actual
 /// meta-tracer thread akin to an `Rc`: this struct can be freely `clone()`d without duplicating
 /// the underlying meta-tracer thread. Note that this struct is neither `Send` nor `Sync`: it
@@ -196,8 +253,12 @@ impl MTThread {
     }
 
     /// Attempt to execute a compiled trace for location `loc`.
-    pub fn control_point<S, I>(&mut self, loc: Option<&Location>, step_fn: S, inputs: &mut I)
-    where
+    pub fn control_point<S, I: Send + 'static>(
+        &mut self,
+        loc: Option<&Location<I>>,
+        step_fn: S,
+        inputs: &mut I,
+    ) where
         S: Fn(&mut I),
     {
         // If a loop can start at this position then update the location and potentially start/stop
@@ -223,7 +284,10 @@ impl MTThread {
     /// `Location`s represent a statemachine: this function transitions to the next state (which
     /// may be the same as the previous state!). If this results in a compiled trace, it returns
     /// `Some(pointer_to_trace_function)`.
-    fn transition_location<I>(&mut self, loc: &Location) -> Option<fn(&mut I) -> bool> {
+    fn transition_location<I: Send + 'static>(
+        &mut self,
+        loc: &Location<I>,
+    ) -> Option<fn(&mut I) -> bool> {
         // Since we don't hold an explicit lock, updating a Location is tricky: we might read a
         // Location, work out what we'd like to update it to, and try updating it, only to find
         // that another thread interrupted us part way through. We therefore use compare_and_swap
@@ -232,7 +296,7 @@ impl MTThread {
         loop {
             // We need Acquire ordering, as PHASE_COMPILED will need to read information written to
             // external data as a result of the PHASE_TRACING -> PHASE_COMPILED transition.
-            let lp = loc.pack.load(Ordering::Acquire);
+            let lp = loc.state.load(Ordering::Acquire);
             match lp & PHASE_TAG {
                 PHASE_COUNTING => {
                     let count = (lp & !PHASE_TAG) >> 2;
@@ -242,8 +306,8 @@ impl MTThread {
                             // count further.
                             return None;
                         }
-                        let new_pack = self.inner.tid as usize | PHASE_TRACING;
-                        if loc.pack.compare_and_swap(lp, new_pack, Ordering::Release) == lp {
+                        let new_state = self.inner.tid as usize | PHASE_TRACING;
+                        if loc.state.compare_and_swap(lp, new_state, Ordering::Release) == lp {
                             Rc::get_mut(&mut self.inner).unwrap().tracer =
                                 Some((start_tracing(self.inner.tracing_kind), self.inner.tid));
                             return None;
@@ -252,8 +316,8 @@ impl MTThread {
                     // Location or (less likely) has already compiled it so we go around the
                     // loop again to see what we should do.
                     } else {
-                        let new_pack = PHASE_COUNTING | ((count + 1) << PHASE_NUM_BITS);
-                        if loc.pack.compare_and_swap(lp, new_pack, Ordering::Release) == lp {
+                        let new_state = PHASE_COUNTING | ((count + 1) << PHASE_NUM_BITS);
+                        if loc.state.compare_and_swap(lp, new_state, Ordering::Release) == lp {
                             return None;
                         }
                         // We raced with another thread, but we'd still like to try incrementing
@@ -266,13 +330,15 @@ impl MTThread {
                         if tid != ((lp & !PHASE_TAG) as *mut u8) {
                             // ...but we didn't start at the current Location.
                             return None;
+                        } else {
+                            // ...and we started at this Location, so we've got a complete loop!
                         }
-                    // ...and we started at this Location, so we've got a complete loop!
                     } else {
                         // Another thread is tracing this location.
                         return None;
                     }
 
+                    // Stop the tracer
                     let sir_trace = Rc::get_mut(&mut self.inner)
                         .unwrap()
                         .tracer
@@ -281,28 +347,47 @@ impl MTThread {
                         .0
                         .stop_tracing()
                         .unwrap();
-                    let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-                    let ct = TraceCompiler::<I>::compile(tir_trace);
-                    // Now that we have a compiled trace, we need to put a pointer to it inside
-                    // the corresponding Location's pack. To inhibit ExecutableBuffer's Drop,
-                    // we move it into a box and forget it: the pointer in the pack is now the
-                    // sole handle on the trace.
-                    // FIXME: free up the memory when the trace is no longer used.
-                    let ptr = Box::into_raw(Box::new(ct)) as usize;
 
-                    let new_pack = ptr | PHASE_COMPILED;
-                    loc.pack.store(new_pack, Ordering::Release);
+                    // Start a compilation thread.
+                    let (snd, rcv) = channel();
+                    thread::spawn(move || {
+                        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
+                        snd.send(TraceCompiler::<I>::compile(tir_trace)).ok();
+                    });
+                    let ptr = Box::into_raw(Box::new(CompilingTrace { rcv }));
+                    debug_assert_eq!(ptr as usize & PHASE_TAG, 0);
+                    let new_state = ptr as usize | PHASE_COMPILING;
+                    loc.state.store(new_state, Ordering::Release);
+
                     Rc::get_mut(&mut self.inner).unwrap().tracer = None;
                     return None;
                 }
+                PHASE_COMPILING => {
+                    let compiling =
+                        unsafe { Box::from_raw((lp & !PHASE_TAG) as *mut CompilingTrace<I>) };
+                    match compiling.rcv.try_recv() {
+                        Ok(ct) => {
+                            // FIXME: free up the memory when the trace is no longer used.
+                            let ptr: *mut CompiledTrace<I> = Box::into_raw(Box::new(ct));
+                            let new_state = ptr as usize | PHASE_COMPILED;
+                            loc.state.store(new_state, Ordering::Release);
+                            // Go around the loop so that the PHASE_COMPILED case below can extract
+                            // the function.
+                        }
+                        Err(TryRecvError::Empty) => {
+                            // The compiling thread is still operating.
+                            mem::forget(compiling);
+                            return None;
+                        }
+                        Err(TryRecvError::Disconnected) => {
+                            // The compiling thread has gone wrong in some way.
+                            todo!();
+                        }
+                    }
+                }
                 PHASE_COMPILED => {
-                    let p = (lp & !PHASE_TAG) as *const ();
-                    // Retrieve the CompiledTrace to gain access to the memory containing the
-                    // trace.
-                    let bct = unsafe { Box::from_raw(p as *mut CompiledTrace<I>) };
+                    let bct = unsafe { Box::from_raw((lp & !PHASE_TAG) as *mut CompiledTrace<I>) };
                     let f = unsafe { mem::transmute::<_, fn(&mut I) -> bool>(bct.ptr()) };
-                    // Forget the CompiledTrace again to make sure it isn't dropped before we had a
-                    // chance to execute it.
                     mem::forget(bct);
                     return Some(f);
                 }
@@ -360,6 +445,7 @@ impl Drop for MTThreadInner {
 
 #[cfg(test)]
 mod tests {
+    use std::thread::yield_now;
     extern crate test;
     use self::test::{black_box, Bencher};
     use super::*;
@@ -378,15 +464,16 @@ mod tests {
         for i in 0..hot_thrsh {
             mtt.control_point(Some(&lp), dummy_step, &mut io);
             assert_eq!(
-                lp.pack.load(Ordering::Relaxed),
+                lp.state.load(Ordering::Relaxed),
                 PHASE_COUNTING | ((i + 1) << PHASE_NUM_BITS)
             );
         }
-        assert_eq!(lp.pack.load(Ordering::Relaxed) & PHASE_TAG, PHASE_COUNTING);
+        assert_eq!(lp.state.load(Ordering::Relaxed) & PHASE_TAG, PHASE_COUNTING);
         mtt.control_point(Some(&lp), dummy_step, &mut io);
-        assert_eq!(lp.pack.load(Ordering::Relaxed) & PHASE_TAG, PHASE_TRACING);
+        assert_eq!(lp.state.load(Ordering::Relaxed) & PHASE_TAG, PHASE_TRACING);
         mtt.control_point(Some(&lp), dummy_step, &mut io);
-        assert_eq!(lp.pack.load(Ordering::Relaxed) & PHASE_TAG, PHASE_COMPILED);
+        let fs = lp.state.load(Ordering::Relaxed) & PHASE_TAG;
+        assert!(fs == PHASE_COMPILING || fs == PHASE_COMPILED);
     }
 
     #[test]
@@ -398,13 +485,13 @@ mod tests {
         for i in 0..hot_thrsh {
             mtt.control_point(Some(&lp), dummy_step, &mut io);
             assert_eq!(
-                lp.pack.load(Ordering::Relaxed),
+                lp.state.load(Ordering::Relaxed),
                 PHASE_COUNTING | ((i + 1) << PHASE_NUM_BITS)
             );
         }
-        assert_eq!(lp.pack.load(Ordering::Relaxed) & PHASE_TAG, PHASE_COUNTING);
+        assert_eq!(lp.state.load(Ordering::Relaxed) & PHASE_TAG, PHASE_COUNTING);
         mtt.control_point(Some(&lp), dummy_step, &mut io);
-        assert_eq!(lp.pack.load(Ordering::Relaxed) & PHASE_TAG, PHASE_TRACING);
+        assert_eq!(lp.state.load(Ordering::Relaxed) & PHASE_TAG, PHASE_TRACING);
     }
 
     #[test]
@@ -420,16 +507,16 @@ mod tests {
                 .spawn(move |mut mtt| {
                     let mut io = DummyIO {};
                     mtt.control_point(Some(&loc), dummy_step, &mut io);
-                    let c1 = loc.pack.load(Ordering::Relaxed);
+                    let c1 = loc.state.load(Ordering::Relaxed);
                     assert_eq!(c1 & PHASE_TAG, PHASE_COUNTING);
                     mtt.control_point(Some(&loc), dummy_step, &mut io);
-                    let c2 = loc.pack.load(Ordering::Relaxed);
+                    let c2 = loc.state.load(Ordering::Relaxed);
                     assert_eq!(c2 & PHASE_TAG, PHASE_COUNTING);
                     mtt.control_point(Some(&loc), dummy_step, &mut io);
-                    let c3 = loc.pack.load(Ordering::Relaxed);
+                    let c3 = loc.state.load(Ordering::Relaxed);
                     assert_eq!(c3 & PHASE_TAG, PHASE_COUNTING);
                     mtt.control_point(Some(&loc), dummy_step, &mut io);
-                    let c4 = loc.pack.load(Ordering::Relaxed);
+                    let c4 = loc.state.load(Ordering::Relaxed);
                     assert_eq!(c4 & PHASE_TAG, PHASE_COUNTING);
                     assert!(c4 > c3);
                     assert!(c3 > c2);
@@ -444,9 +531,18 @@ mod tests {
         {
             let mut io = DummyIO {};
             mtt.control_point(Some(&loc), dummy_step, &mut io);
-            assert_eq!(loc.pack.load(Ordering::Relaxed) & PHASE_TAG, PHASE_TRACING);
+            assert_eq!(loc.state.load(Ordering::Relaxed) & PHASE_TAG, PHASE_TRACING);
             mtt.control_point(Some(&loc), dummy_step, &mut io);
-            assert_eq!(loc.pack.load(Ordering::Relaxed) & PHASE_TAG, PHASE_COMPILED);
+            mtt.control_point(Some(&loc), dummy_step, &mut io);
+
+            while loc.state.load(Ordering::Relaxed) & PHASE_TAG == PHASE_COMPILING {
+                yield_now();
+                mtt.control_point(Some(&loc), dummy_step, &mut io);
+            }
+            assert_eq!(
+                loc.state.load(Ordering::Relaxed) & PHASE_TAG,
+                PHASE_COMPILED
+            );
         }
     }
 
@@ -493,15 +589,26 @@ mod tests {
             mtt.control_point(loc, dumb_interp_step, &mut tio);
         }
 
+        loop {
+            yield_now();
+            let loc = locs[tio.pc].as_ref();
+            if tio.pc == 0
+                && loc.unwrap().state.load(Ordering::Relaxed) & PHASE_TAG != PHASE_COMPILING
+            {
+                break;
+            }
+            mtt.control_point(loc, dumb_interp_step, &mut tio);
+        }
+
         assert_eq!(
-            locs[0].as_ref().unwrap().pack.load(Ordering::Relaxed) & PHASE_TAG,
+            locs[0].as_ref().unwrap().state.load(Ordering::Relaxed) & PHASE_TAG,
             PHASE_COMPILED
         );
 
         assert_eq!(tio.pc, 0);
-        assert_eq!(tio.count, 8);
 
         // A trace was just compiled. Running it should execute NOP twice.
+        tio.count = 8;
         for i in 0..10 {
             let loc = locs[tio.pc].as_ref();
             mtt.control_point(loc, dumb_interp_step, &mut tio);
