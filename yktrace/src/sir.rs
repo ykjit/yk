@@ -31,17 +31,23 @@ pub struct Sir<'m> {
     /// Maps a codegen unit hash to a `(section-name, header, header-size)` tuple.
     hdrs: FxHashMap<CguHash, (String, SirHeader, SirOffset)>,
     /// The current executable's ELF information.
-    exe_obj: object::File<'m>
+    exe_obj: object::File<'m>,
+    /// Section cache to avoid expensive `object::File::section_by_name()` calls.
+    sec_cache: FxHashMap<String, &'m [u8]>
 }
 
 impl<'m> Sir<'m> {
     pub fn new(mmap: &'m Mmap) -> Result<Self, ()> {
         // SAFETY: Not really, we hope that nobody changes the file underneath our feet.
         let mut hdrs = FxHashMap::default();
+        let mut sec_cache = FxHashMap::default();
         let exe_obj = object::File::parse(&*mmap).unwrap();
         for sec in exe_obj.sections() {
-            if sec.name().unwrap().starts_with(ykpack::SIR_SECTION_PREFIX) {
-                let mut curs = Cursor::new(sec.data().unwrap());
+            let sec_name = sec.name().unwrap();
+            let sec_data = sec.data().unwrap();
+            sec_cache.insert(sec_name.to_owned(), sec_data);
+            if sec_name.starts_with(ykpack::SIR_SECTION_PREFIX) {
+                let mut curs = Cursor::new(sec_data);
                 let mut dec = Decoder::from(&mut curs);
                 let hdr = if let Pack::Header(hdr) = dec.next().unwrap().unwrap() {
                     hdr
@@ -49,18 +55,18 @@ impl<'m> Sir<'m> {
                     panic!("missing sir header");
                 };
                 let hdr_size = usize::try_from(curs.seek(SeekFrom::Current(0)).unwrap()).unwrap();
-                hdrs.insert(
-                    hdr.cgu_hash,
-                    (sec.name().unwrap().to_owned(), hdr, hdr_size)
-                );
+                hdrs.insert(hdr.cgu_hash, (sec_name.to_owned(), hdr, hdr_size));
             }
         }
-        Ok(Self { hdrs, exe_obj })
+        Ok(Self {
+            hdrs,
+            exe_obj,
+            sec_cache
+        })
     }
 
     fn cursor_for_section(&self, sec_name: &str) -> Cursor<&[u8]> {
-        let sec = self.exe_obj.section_by_name(&sec_name).unwrap();
-        Cursor::new(sec.data().unwrap())
+        Cursor::new(self.sec_cache[sec_name])
     }
 
     /// Decode a type in a named section, at an absolute offset from the beginning of that section.
