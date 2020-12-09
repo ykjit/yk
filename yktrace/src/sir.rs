@@ -10,7 +10,8 @@ use std::{
     fmt::{self, Debug, Display, Write},
     fs::File,
     io::{Cursor, Seek, SeekFrom},
-    iter::Iterator
+    iter::Iterator,
+    sync::{Arc, RwLock}
 };
 use ykpack::{self, Body, BodyFlags, CguHash, Decoder, Pack, SirHeader, SirOffset};
 
@@ -33,7 +34,9 @@ pub struct Sir<'m> {
     /// The current executable's ELF information.
     exe_obj: object::File<'m>,
     /// Section cache to avoid expensive `object::File::section_by_name()` calls.
-    sec_cache: FxHashMap<String, &'m [u8]>
+    sec_cache: FxHashMap<String, &'m [u8]>,
+    /// Body cache, to avoid repeated decodings.
+    body_cache: RwLock<FxHashMap<String, Option<Arc<Body>>>>
 }
 
 impl<'m> Sir<'m> {
@@ -61,7 +64,8 @@ impl<'m> Sir<'m> {
         Ok(Self {
             hdrs,
             exe_obj,
-            sec_cache
+            sec_cache,
+            body_cache: Default::default()
         })
     }
 
@@ -105,12 +109,31 @@ impl<'m> Sir<'m> {
 
     /// Get the body data for the given symbol name.
     /// Returns None if not found.
-    pub fn body(&self, body_sym: &str) -> Option<Body> {
+    pub fn body(&self, body_sym: &str) -> Option<Arc<Body>> {
+        {
+            let rd = self.body_cache.read().unwrap();
+            if let Some(body) = rd.get(body_sym) {
+                // Cache hit, return a reference to the previously decoded body.
+                return body.clone();
+            }
+        } // Drop the RwLock's read() to prevent deadlocking.
+
+        // Cache miss. Decode the body and update the cache.
         for (sec_name, hdr, hdr_size) in SIR.hdrs.values() {
             if let Some(off) = hdr.bodies.get(body_sym) {
-                return Some(self.decode_body(sec_name, hdr_size + off));
+                let body = self.decode_body(sec_name, hdr_size + off);
+                let mut wr = self.body_cache.write().unwrap();
+                let arc = Arc::new(body);
+                wr.insert(body_sym.to_owned(), Some(arc.clone()));
+                return Some(arc);
             }
         }
+
+        // The body is absent. Update the cache with a `None` to prevent repeated searches.
+        self.body_cache
+            .write()
+            .unwrap()
+            .insert(body_sym.to_owned(), None);
         None
     }
 }
