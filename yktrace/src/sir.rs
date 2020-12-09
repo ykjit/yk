@@ -13,7 +13,7 @@ use std::{
     iter::Iterator,
     sync::{Arc, RwLock}
 };
-use ykpack::{self, Body, BodyFlags, CguHash, Decoder, Pack, SirHeader, SirOffset};
+use ykpack::{self, Body, BodyFlags, CguHash, Decoder, Pack, SirHeader, SirOffset, Ty};
 
 lazy_static! {
     pub static ref EXE_MMAP: Mmap =
@@ -36,7 +36,9 @@ pub struct Sir<'m> {
     /// Section cache to avoid expensive `object::File::section_by_name()` calls.
     sec_cache: FxHashMap<String, &'m [u8]>,
     /// Body cache, to avoid repeated decodings.
-    body_cache: RwLock<FxHashMap<String, Option<Arc<Body>>>>
+    body_cache: RwLock<FxHashMap<String, Option<Arc<Body>>>>,
+    /// Type cache, to avoid repeated decodings.
+    ty_cache: RwLock<FxHashMap<ykpack::TypeId, Arc<Ty>>>
 }
 
 impl<'m> Sir<'m> {
@@ -65,7 +67,8 @@ impl<'m> Sir<'m> {
             hdrs,
             exe_obj,
             sec_cache,
-            body_cache: Default::default()
+            body_cache: Default::default(),
+            ty_cache: Default::default()
         })
     }
 
@@ -87,11 +90,24 @@ impl<'m> Sir<'m> {
     }
 
     /// Get the type data for the given type ID.
-    pub fn ty(&self, tyid: &ykpack::TypeId) -> ykpack::Ty {
+    pub fn ty(&self, tyid: &ykpack::TypeId) -> Arc<ykpack::Ty> {
+        {
+            let rd = self.ty_cache.read().unwrap();
+            if let Some(ty) = rd.get(tyid) {
+                // Cache hit, return a reference to the previously decoded body.
+                return ty.clone();
+            }
+        } // Drop the RwLock's read() to prevent deadlocking.
+
+        // Cache miss. Decode the type and update the cache.
         let (cgu, tidx) = tyid;
         let (ref sec_name, ref hdr, hdr_size) = SIR.hdrs[cgu];
         let off = hdr.types[usize::try_from(*tidx).unwrap()];
-        self.decode_ty(sec_name, hdr_size + off)
+        let ty = self.decode_ty(sec_name, hdr_size + off);
+        let mut wr = self.ty_cache.write().unwrap();
+        let arc = Arc::new(ty);
+        wr.insert(tyid.to_owned(), arc.clone());
+        arc
     }
 
     /// Decode a body in a named section, at an absolute offset from the beginning of that section.
