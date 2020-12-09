@@ -1,12 +1,13 @@
 use std::alloc::{alloc, dealloc, Layout};
 use std::convert::{TryFrom, TryInto};
+use std::sync::Arc;
 use ykpack::{
-    self, BodyFlags, Constant, ConstantInt, IPlace, Local, LocalDecl, Statement, Terminator,
-    TypeId, UnsignedInt,
+    self, BodyFlags, CallOperand, Constant, ConstantInt, IPlace, Local, LocalDecl, Statement,
+    Terminator, TypeId, UnsignedInt,
 };
 use yktrace::sir::SIR;
 
-pub struct SIRInterpreter {
+pub struct StackFrame {
     /// Pointer to allocated memory containing a frame's locals.
     locals: *mut u8,
     /// The offset of each Local into locals.
@@ -15,8 +16,27 @@ pub struct SIRInterpreter {
     layout: Layout,
 }
 
+impl Drop for StackFrame {
+    fn drop(&mut self) {
+        unsafe { dealloc(self.locals, self.layout) }
+    }
+}
+
+pub struct SIRInterpreter {
+    frames: Vec<StackFrame>,
+    bbidx: ykpack::BasicBlockIndex,
+}
+
 impl SIRInterpreter {
     pub fn new(local_decls: &Vec<LocalDecl>) -> Self {
+        let frame = SIRInterpreter::allocate_locals(local_decls);
+        SIRInterpreter {
+            frames: vec![frame],
+            bbidx: 0,
+        }
+    }
+
+    fn allocate_locals(local_decls: &Vec<LocalDecl>) -> StackFrame {
         // FIXME Soon this will be pre-computed and handed to us by SIR.
         let mut offsets = Vec::new();
         let mut layout = Layout::from_size_align(0, 1).unwrap();
@@ -33,12 +53,15 @@ impl SIRInterpreter {
 
         // Allocate memory for the locals
         let locals = unsafe { alloc(layout) };
-
-        SIRInterpreter {
+        StackFrame {
             locals,
             offsets,
             layout,
         }
+    }
+
+    fn frame(&self) -> &StackFrame {
+        self.frames.last().unwrap()
     }
 
     /// Inserts a pointer to the trace inputs into `locals`.
@@ -52,40 +75,68 @@ impl SIRInterpreter {
         }
     }
 
-    pub unsafe fn interpret(&mut self, body: &ykpack::Body) {
+    pub unsafe fn interpret(&mut self, body: Arc<ykpack::Body>) {
         // Ignore yktrace::trace_debug.
         if body.flags.contains(BodyFlags::TRACE_DEBUG) {
             return;
         }
 
-        for stmt in body.blocks[0].stmts.iter() {
-            match stmt {
-                Statement::MkRef(dest, src) => self.mkref(dest, src),
-                Statement::DynOffs { .. } => todo!(),
-                Statement::Store(dest, src) => self.store(dest, src),
-                Statement::BinaryOp { .. } => todo!(),
-                Statement::Nop => {}
-                Statement::Unimplemented(_) | Statement::Debug(_) => todo!(),
-                Statement::Cast(..) => todo!(),
-                Statement::Call(..) | Statement::StorageDead(_) => unreachable!(),
+        loop {
+            let bbidx = usize::try_from(self.bbidx).unwrap();
+            let block = &body.blocks[bbidx];
+            for stmt in block.stmts.iter() {
+                match stmt {
+                    Statement::MkRef(dest, src) => self.mkref(dest, src),
+                    Statement::DynOffs { .. } => todo!(),
+                    Statement::Store(dest, src) => self.store(dest, src),
+                    Statement::BinaryOp { .. } => todo!(),
+                    Statement::Nop => {}
+                    Statement::Unimplemented(_) | Statement::Debug(_) => todo!(),
+                    Statement::Cast(..) => todo!(),
+                    Statement::Call(..) | Statement::StorageDead(_) => unreachable!(),
+                }
             }
-        }
 
-        match &body.blocks[0].term {
-            Terminator::Call {
-                operand: _op,
-                args: _args,
-                destination: _dest,
-            } => todo!(),
-            Terminator::Return => {}
-            t => todo!("{}", t),
+            match &block.term {
+                Terminator::Call {
+                    operand: op,
+                    args: _args,
+                    destination: dest,
+                } => {
+                    let fname = if let CallOperand::Fn(sym) = op {
+                        sym
+                    } else {
+                        todo!("unknown call target");
+                    };
+
+                    // Initialise the new stack frame.
+                    let body = SIR.body(fname).unwrap();
+                    let frame = SIRInterpreter::allocate_locals(&body.local_decls);
+                    self.frames.push(frame);
+                    self.bbidx = 0;
+
+                    self.interpret(body);
+                    // Get pointer to result from current frame.
+                    let ptr = self.local_ptr(&Local(0));
+                    // Restore previous stack frame, but keep the other frame around so the pointer to
+                    // the return value stays valid until we've copied it.
+                    let _oldframe = self.frames.pop().unwrap();
+                    // Write results to destination.
+                    if let Some((dest, bbidx)) = dest {
+                        self.write(dest, ptr);
+                        self.bbidx = *bbidx;
+                    }
+                }
+                Terminator::Return => break,
+                t => todo!("{}", t),
+            }
         }
     }
 
     /// Get the pointer to a Local.
     fn local_ptr(&self, local: &Local) -> *mut u8 {
-        let offset = self.offsets[usize::try_from(local.0).unwrap()];
-        unsafe { self.locals.add(offset) }
+        let offset = self.frame().offsets[usize::try_from(local.0).unwrap()];
+        unsafe { self.frame().locals.add(offset) }
     }
 
     /// Get the pointer for an IPlace, while applying all offsets.
@@ -190,12 +241,6 @@ impl SIRInterpreter {
     }
 }
 
-impl Drop for SIRInterpreter {
-    fn drop(&mut self) {
-        unsafe { dealloc(self.locals, self.layout) }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::SIRInterpreter;
@@ -208,7 +253,7 @@ mod tests {
         // be using the reference until the function `interpret` returns.
         si.set_trace_inputs(tio);
         unsafe {
-            si.interpret(&body);
+            si.interpret(body);
         }
     }
 
@@ -283,5 +328,24 @@ mod tests {
         let mut tio = IO((0, 3));
         interp("func_doubleref", &mut tio as *mut _ as *mut u8);
         assert_eq!(tio.0, (3, 3));
+    }
+
+    #[test]
+    fn test_call() {
+        struct IO(u8, u8);
+
+        fn foo() -> u8 {
+            5
+        }
+
+        #[no_mangle]
+        fn func_call(io: &mut IO) {
+            let a = foo();
+            io.0 = a;
+        }
+
+        let mut tio = IO(0, 0);
+        interp("func_call", &mut tio as *mut _ as *mut u8);
+        assert_eq!(tio.0, 5);
     }
 }
