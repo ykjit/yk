@@ -408,7 +408,7 @@ impl<TT> TraceCompiler<TT> {
         }
 
         // FIXME: optimisation: small structs and tuples etc. could actually live in a register.
-        let ty = SIR.ty(&decl.ty);
+        let ty = &*SIR.ty(&decl.ty);
         match ty {
             Ty::UnsignedInt(ui) => !matches!(ui, UnsignedIntTy::U128),
             Ty::SignedInt(si) => !matches!(si, SignedIntTy::I128),
@@ -982,7 +982,7 @@ impl<TT> TraceCompiler<TT> {
 
     fn c_cast(&mut self, dest: &IPlace, src: &IPlace) {
         let src_loc = self.iplace_to_location(src);
-        let ty = SIR.ty(&src.ty()); // Type of the source.
+        let ty = &*SIR.ty(&src.ty()); // Type of the source.
         let cty = SIR.ty(&dest.ty()); // Type of the cast (same as dest type).
         match ty {
             Ty::UnsignedInt(_) => self.c_cast_uint(src_loc, &ty, &cty),
