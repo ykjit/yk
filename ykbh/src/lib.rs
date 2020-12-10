@@ -3,10 +3,12 @@ use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 use ykpack::{
     self, BodyFlags, CallOperand, Constant, ConstantInt, IPlace, Local, LocalDecl, Statement,
-    Terminator, TypeId, UnsignedInt,
+    Terminator, UnsignedInt,
 };
 use yktrace::sir::SIR;
 
+/// A stack frame for writing and reading locals. Note that the allocated memory this frame points
+/// to needs to be freed manually before the stack frame is destoyed.
 pub struct StackFrame {
     /// Pointer to allocated memory containing a frame's locals.
     locals: *mut u8,
@@ -22,121 +24,75 @@ impl Drop for StackFrame {
     }
 }
 
-pub struct SIRInterpreter {
-    frames: Vec<StackFrame>,
-    bbidx: ykpack::BasicBlockIndex,
-}
-
-impl SIRInterpreter {
-    pub fn new(local_decls: &Vec<LocalDecl>) -> Self {
-        let frame = SIRInterpreter::allocate_locals(local_decls);
-        SIRInterpreter {
-            frames: vec![frame],
-            bbidx: 0,
-        }
-    }
-
-    fn allocate_locals(local_decls: &Vec<LocalDecl>) -> StackFrame {
-        // FIXME Soon this will be pre-computed and handed to us by SIR.
-        let mut offsets = Vec::new();
-        let mut layout = Layout::from_size_align(0, 1).unwrap();
-        for d in local_decls {
-            let align = SIR.ty(&d.ty).align();
-            let size = SIR.ty(&d.ty).size();
-            let l = Layout::from_size_align(size.try_into().unwrap(), align.try_into().unwrap())
-                .unwrap();
-            let (nl, s) = layout.extend(l).unwrap();
-            offsets.push(s);
-            layout = nl;
-        }
-        layout = layout.pad_to_align();
-
-        // Allocate memory for the locals
-        let locals = unsafe { alloc(layout) };
-        StackFrame {
-            locals,
-            offsets,
-            layout,
-        }
-    }
-
-    fn frame(&self) -> &StackFrame {
-        self.frames.last().unwrap()
-    }
-
-    /// Inserts a pointer to the trace inputs into `locals`.
-    pub fn set_trace_inputs(&mut self, tio: *mut u8) {
-        // FIXME Later this also sets other already initialised variables as well as the program
-        // counter of the interpreter.
-        let ptr = self.local_ptr(&Local(1)); // The trace inputs live in $1
+impl StackFrame {
+    /// Given a pointer `src` and a size, write its value to the pointer `dst`.
+    pub fn write_val(&mut self, dst: *mut u8, src: *const u8, size: usize) {
         unsafe {
-            // Write the pointer value of `tio` into locals.
-            std::ptr::write::<*mut u8>(ptr as *mut *mut u8, tio);
+            std::ptr::copy(src, dst, size);
         }
     }
 
-    pub unsafe fn interpret(&mut self, body: Arc<ykpack::Body>) {
-        // Ignore yktrace::trace_debug.
-        if body.flags.contains(BodyFlags::TRACE_DEBUG) {
-            return;
-        }
-
-        loop {
-            let bbidx = usize::try_from(self.bbidx).unwrap();
-            let block = &body.blocks[bbidx];
-            for stmt in block.stmts.iter() {
-                match stmt {
-                    Statement::MkRef(dest, src) => self.mkref(dest, src),
-                    Statement::DynOffs { .. } => todo!(),
-                    Statement::Store(dest, src) => self.store(dest, src),
-                    Statement::BinaryOp { .. } => todo!(),
-                    Statement::Nop => {}
-                    Statement::Unimplemented(_) | Statement::Debug(_) => todo!(),
-                    Statement::Cast(..) => todo!(),
-                    Statement::Call(..) | Statement::StorageDead(_) => unreachable!(),
+    /// Write a constant to the pointer `dst`.
+    pub fn write_const(&mut self, dest: *mut u8, constant: &Constant) {
+        match constant {
+            Constant::Int(ci) => match ci {
+                ConstantInt::UnsignedInt(ui) => match ui {
+                    UnsignedInt::U8(v) => self.write_val(dest, [*v].as_ptr(), 1),
+                    _ => todo!(),
+                },
+                ConstantInt::SignedInt(_si) => todo!(),
+            },
+            Constant::Bool(_b) => todo!(),
+            Constant::Tuple(t) => {
+                if SIR.ty(t).size() == 0 {
+                    // ZST: do nothing.
+                } else {
+                    todo!()
                 }
             }
+            _ => todo!(),
+        }
+    }
 
-            match &block.term {
-                Terminator::Call {
-                    operand: op,
-                    args: _args,
-                    destination: dest,
-                } => {
-                    let fname = if let CallOperand::Fn(sym) = op {
-                        sym
-                    } else {
-                        todo!("unknown call target");
-                    };
+    /// Stores one IPlace into another.
+    fn store(&mut self, dest: &IPlace, src: &IPlace) {
+        match src {
+            IPlace::Val { .. } | IPlace::Indirect { .. } => {
+                let src_ptr = self.iplace_to_ptr(src);
+                let dst_ptr = self.iplace_to_ptr(dest);
+                let size = usize::try_from(SIR.ty(&src.ty()).size()).unwrap();
+                self.write_val(dst_ptr, src_ptr, size);
+            }
+            IPlace::Const { val, ty: _ty } => {
+                let dst_ptr = self.iplace_to_ptr(dest);
+                self.write_const(dst_ptr, val);
+            }
+            _ => todo!(),
+        }
+    }
 
-                    // Initialise the new stack frame.
-                    let body = SIR.body(fname).unwrap();
-                    let frame = SIRInterpreter::allocate_locals(&body.local_decls);
-                    self.frames.push(frame);
-                    self.bbidx = 0;
-
-                    self.interpret(body);
-                    // Get pointer to result from current frame.
-                    let ptr = self.local_ptr(&Local(0));
-                    // Restore previous stack frame, but keep the other frame around so the pointer to
-                    // the return value stays valid until we've copied it.
-                    let _oldframe = self.frames.pop().unwrap();
-                    // Write results to destination.
-                    if let Some((dest, bbidx)) = dest {
-                        self.write(dest, ptr);
-                        self.bbidx = *bbidx;
-                    }
+    /// Copy over the call arguments from another frame.
+    pub fn copy_args(&mut self, args: &Vec<IPlace>, frame: &StackFrame) {
+        for (i, arg) in args.iter().enumerate() {
+            let dst = self.local_ptr(&Local(u32::try_from(i + 1).unwrap()));
+            match arg {
+                IPlace::Val { .. } | IPlace::Indirect { .. } => {
+                    let src = frame.iplace_to_ptr(arg);
+                    let size = usize::try_from(SIR.ty(&arg.ty()).size()).unwrap();
+                    self.write_val(dst, src, size);
                 }
-                Terminator::Return => break,
-                t => todo!("{}", t),
+                IPlace::Const { val, .. } => {
+                    self.write_const(dst, val);
+                }
+                _ => unreachable!(),
             }
         }
     }
 
     /// Get the pointer to a Local.
     fn local_ptr(&self, local: &Local) -> *mut u8 {
-        let offset = self.frame().offsets[usize::try_from(local.0).unwrap()];
-        unsafe { self.frame().locals.add(offset) }
+        let offset = self.offsets[usize::try_from(local.0).unwrap()];
+        unsafe { self.locals.add(offset) }
     }
 
     /// Get the pointer for an IPlace, while applying all offsets.
@@ -168,61 +124,134 @@ impl SIRInterpreter {
             _ => unreachable!(),
         }
     }
+}
 
-    /// Write some bytes to an IPlace. The amount of bytes is determined by the type of the
-    /// destination.
-    fn write(&mut self, dest: &IPlace, src: *const u8) {
-        match dest {
-            IPlace::Val {
-                local: _,
-                off: _,
-                ty,
-            }
-            | IPlace::Indirect { ptr: _, off: _, ty } => {
-                let size = usize::try_from(SIR.ty(ty).size()).unwrap();
-                let ptr = self.iplace_to_ptr(dest);
-                unsafe {
-                    std::ptr::copy(src, ptr, size);
+pub struct SIRInterpreter {
+    frames: Vec<StackFrame>,
+    bbidx: ykpack::BasicBlockIndex,
+}
+
+impl SIRInterpreter {
+    pub fn new(local_decls: &Vec<LocalDecl>) -> Self {
+        let frame = SIRInterpreter::allocate_locals(local_decls);
+        SIRInterpreter {
+            frames: vec![frame],
+            bbidx: 0,
+        }
+    }
+
+    /// Given a vector of local declarations, create a new StackFrame, which allocates just enough
+    /// space to hold all of them.
+    fn allocate_locals(local_decls: &Vec<LocalDecl>) -> StackFrame {
+        // FIXME Soon this will be pre-computed and handed to us by SIR.
+        let mut offsets = Vec::new();
+        let mut layout = Layout::from_size_align(0, 1).unwrap();
+        for d in local_decls {
+            let align = SIR.ty(&d.ty).align();
+            let size = SIR.ty(&d.ty).size();
+            let l = Layout::from_size_align(size.try_into().unwrap(), align.try_into().unwrap())
+                .unwrap();
+            let (nl, s) = layout.extend(l).unwrap();
+            offsets.push(s);
+            layout = nl;
+        }
+        layout = layout.pad_to_align();
+
+        // Allocate memory for the locals
+        let locals = unsafe { alloc(layout) };
+        StackFrame {
+            locals,
+            offsets,
+            layout,
+        }
+    }
+
+    /// Returns a reference to the currently active frame.
+    fn frame(&self) -> &StackFrame {
+        self.frames.last().unwrap()
+    }
+
+    /// Returns a mutable reference to the currently active frame.
+    fn frame_mut(&mut self) -> &mut StackFrame {
+        self.frames.last_mut().unwrap()
+    }
+
+    /// Inserts a pointer to the trace inputs into `locals`.
+    pub fn set_trace_inputs(&mut self, tio: *mut u8) {
+        // FIXME Later this also sets other already initialised variables as well as the program
+        // counter of the interpreter.
+        let ptr = self.frame().local_ptr(&Local(1)); // The trace inputs live in $1
+        unsafe {
+            // Write the pointer value of `tio` into locals.
+            std::ptr::write::<*mut u8>(ptr as *mut *mut u8, tio);
+        }
+    }
+
+    pub unsafe fn interpret(&mut self, body: Arc<ykpack::Body>) {
+        // Ignore yktrace::trace_debug.
+        if body.flags.contains(BodyFlags::TRACE_DEBUG) {
+            return;
+        }
+
+        loop {
+            let bbidx = usize::try_from(self.bbidx).unwrap();
+            let block = &body.blocks[bbidx];
+            for stmt in block.stmts.iter() {
+                match stmt {
+                    Statement::MkRef(dest, src) => self.mkref(dest, src),
+                    Statement::DynOffs { .. } => todo!(),
+                    Statement::Store(dest, src) => self.store(dest, src),
+                    Statement::BinaryOp { .. } => todo!(),
+                    Statement::Nop => {}
+                    Statement::Unimplemented(_) | Statement::Debug(_) => todo!(),
+                    Statement::Cast(..) => todo!(),
+                    Statement::Call(..) | Statement::StorageDead(_) => unreachable!(),
                 }
             }
-            _ => unreachable!(),
+
+            match &block.term {
+                Terminator::Call {
+                    operand: op,
+                    args,
+                    destination: dest,
+                } => {
+                    let fname = if let CallOperand::Fn(sym) = op {
+                        sym
+                    } else {
+                        todo!("unknown call target");
+                    };
+
+                    // Initialise the new stack frame.
+                    let body = SIR.body(fname).unwrap();
+                    let mut frame = SIRInterpreter::allocate_locals(&body.local_decls);
+                    frame.copy_args(args, self.frame());
+                    self.frames.push(frame);
+                    self.bbidx = 0;
+
+                    // Interpret the new frame.
+                    self.interpret(body);
+                    // Get pointer to result from current frame.
+                    let ptr = self.frame().local_ptr(&Local(0));
+                    // Restore previous stack frame, but keep the other frame around so the pointer to
+                    // the return value stays valid until we've copied it.
+                    let _oldframe = self.frames.pop().unwrap();
+                    // Write results to destination.
+                    if let Some((dest, bbidx)) = dest {
+                        let dst_ptr = self.frame().iplace_to_ptr(dest);
+                        let size = usize::try_from(SIR.ty(&dest.ty()).size()).unwrap();
+                        self.frame_mut().write_val(dst_ptr, ptr, size);
+                        self.bbidx = *bbidx;
+                    }
+                }
+                Terminator::Return => break,
+                t => todo!("{}", t),
+            }
         }
     }
 
     /// Implements the Store statement.
     fn store(&mut self, dest: &IPlace, src: &IPlace) {
-        match src {
-            IPlace::Val { .. } | IPlace::Indirect { .. } => {
-                let src_ptr = self.iplace_to_ptr(src);
-                self.write(dest, src_ptr);
-            }
-            IPlace::Const { val, ty } => {
-                self.store_const(dest, val, ty);
-            }
-            _ => todo!(),
-        }
-    }
-
-    /// Writes a constant to an IPlace.
-    fn store_const(&mut self, dest: &IPlace, val: &Constant, _ty: &TypeId) {
-        match val {
-            Constant::Int(ci) => match ci {
-                ConstantInt::UnsignedInt(ui) => match ui {
-                    UnsignedInt::U8(v) => self.write(dest, [*v].as_ptr()),
-                    _ => todo!(),
-                },
-                ConstantInt::SignedInt(_si) => todo!(),
-            },
-            Constant::Bool(_b) => todo!(),
-            Constant::Tuple(t) => {
-                if SIR.ty(t).size() == 0 {
-                    // ZST: do nothing.
-                } else {
-                    todo!()
-                }
-            }
-            _ => todo!(),
-        }
+        self.frames.last_mut().unwrap().store(dest, src);
     }
 
     /// Creates a reference to an IPlace.
@@ -230,8 +259,9 @@ impl SIRInterpreter {
         match dest {
             IPlace::Val { .. } | IPlace::Indirect { .. } => {
                 // Get pointer to src.
-                let src_ptr = self.iplace_to_ptr(src);
-                let dst_ptr = self.iplace_to_ptr(dest);
+                let frame = self.frames.last_mut().unwrap();
+                let src_ptr = frame.iplace_to_ptr(src);
+                let dst_ptr = frame.iplace_to_ptr(dest);
                 unsafe {
                     std::ptr::write::<*mut u8>(dst_ptr as *mut *mut u8, src_ptr);
                 }
@@ -334,13 +364,13 @@ mod tests {
     fn test_call() {
         struct IO(u8, u8);
 
-        fn foo() -> u8 {
-            5
+        fn foo(i: u8) -> u8 {
+            i
         }
 
         #[no_mangle]
         fn func_call(io: &mut IO) {
-            let a = foo();
+            let a = foo(5);
             io.0 = a;
         }
 
