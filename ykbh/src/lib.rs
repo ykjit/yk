@@ -193,7 +193,9 @@ impl SIRInterpreter {
             return;
         }
 
-        loop {
+        let mut bodies = vec![body];
+        let mut returns = Vec::new();
+        while let Some(body) = bodies.last() {
             let bbidx = usize::try_from(self.bbidx).unwrap();
             let block = &body.blocks[bbidx];
             for stmt in block.stmts.iter() {
@@ -227,23 +229,31 @@ impl SIRInterpreter {
                     frame.copy_args(args, self.frame());
                     self.frames.push(frame);
                     self.bbidx = 0;
-
-                    // Interpret the new frame.
-                    self.interpret(body);
-                    // Get pointer to result from current frame.
-                    let ptr = self.frame().local_ptr(&Local(0));
-                    // Restore previous stack frame, but keep the other frame around so the pointer to
-                    // the return value stays valid until we've copied it.
-                    let _oldframe = self.frames.pop().unwrap();
-                    // Write results to destination.
-                    if let Some((dest, bbidx)) = dest {
-                        let dst_ptr = self.frame().iplace_to_ptr(dest);
-                        let size = usize::try_from(SIR.ty(&dest.ty()).size()).unwrap();
-                        self.frame_mut().write_val(dst_ptr, ptr, size);
-                        self.bbidx = *bbidx;
+                    returns.push(dest.as_ref().map(|(p, b)| (p.clone(), *b)));
+                    bodies.push(body);
+                }
+                Terminator::Return => {
+                    // Are we returning from a call?
+                    if let Some(v) = returns.pop() {
+                        // Restore the previous stack frame, but keep the other frame around so we
+                        // can copy over the return value to the destination.
+                        let oldframe = self.frames.pop().unwrap();
+                        if let Some((dest, bbidx)) = v {
+                            // Get a pointer to the return value of the called frame.
+                            let ret_ptr = oldframe.local_ptr(&Local(0));
+                            // Write the return value to the destination in the previous frame.
+                            let dst_ptr = self.frame().iplace_to_ptr(&dest);
+                            let size = usize::try_from(SIR.ty(&dest.ty()).size()).unwrap();
+                            self.frame_mut().write_val(dst_ptr, ret_ptr, size);
+                            self.bbidx = bbidx;
+                        }
+                        // Restore previous body.
+                        bodies.pop();
+                    } else {
+                        // We are returning from the first body, so we are done interpreting.
+                        break;
                     }
                 }
-                Terminator::Return => break,
                 t => todo!("{}", t),
             }
         }
