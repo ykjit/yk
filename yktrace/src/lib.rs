@@ -117,7 +117,7 @@ mod test_helpers {
     struct WorkIO(usize);
 
     /// Test that basic tracing works.
-    pub(crate) fn test_trace(kind: TracingKind) {
+    pub(crate) fn trace(kind: TracingKind) {
         let mut th = start_tracing(kind);
         black_box(work(&mut WorkIO(10)));
         let trace = th.t_impl.stop_tracing().unwrap();
@@ -125,7 +125,7 @@ mod test_helpers {
     }
 
     /// Test that tracing twice sequentially in the same thread works.
-    pub(crate) fn test_trace_twice(kind: TracingKind) {
+    pub(crate) fn trace_twice(kind: TracingKind) {
         let mut th1 = start_tracing(kind);
         black_box(work(&mut WorkIO(10)));
         let trace1 = th1.t_impl.stop_tracing().unwrap();
@@ -138,7 +138,7 @@ mod test_helpers {
     }
 
     /// Test that tracing in different threads works.
-    pub(crate) fn test_trace_concurrent(kind: TracingKind) {
+    pub(crate) fn trace_concurrent(kind: TracingKind) {
         let thr = thread::spawn(move || {
             let mut th1 = start_tracing(kind);
             black_box(work(&mut WorkIO(10)));
@@ -156,7 +156,7 @@ mod test_helpers {
 
     /// Test that accessing an out of bounds index fails.
     /// Tests calling this should be marked `#[should_panic]`.
-    pub(crate) fn test_oob_trace_index(kind: TracingKind) {
+    pub(crate) fn oob_trace_index(kind: TracingKind) {
         // Construct a really short trace.
         let mut th = start_tracing(kind);
         // Empty trace -- no call to an interp_step.
@@ -165,7 +165,7 @@ mod test_helpers {
     }
 
     /// Test that accessing locations 0 through trace.raw_len() -1 does not panic.
-    pub(crate) fn test_in_bounds_trace_indices(kind: TracingKind) {
+    pub(crate) fn in_bounds_trace_indices(kind: TracingKind) {
         // Construct a really short trace.
         let mut th = start_tracing(kind);
         black_box(work(&mut WorkIO(10)));

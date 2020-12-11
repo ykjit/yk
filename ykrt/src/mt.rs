@@ -347,6 +347,7 @@ impl MTThread {
                         .0
                         .stop_tracing()
                         .unwrap();
+                    dbg!(sir_trace.raw_len());
 
                     // Start a compilation thread.
                     let (snd, rcv) = channel();
