@@ -299,7 +299,7 @@ impl MTThread {
             let lp = loc.state.load(Ordering::Acquire);
             match lp & PHASE_TAG {
                 PHASE_COUNTING => {
-                    let count = (lp & !PHASE_TAG) >> 2;
+                    let count = (lp & !PHASE_TAG) >> PHASE_NUM_BITS;
                     if count >= self.inner.hot_threshold {
                         if self.inner.tracer.is_some() {
                             // This thread is already tracing. Note that we don't increment the hot
