@@ -1762,7 +1762,10 @@ impl<TT> TraceCompiler<TT> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CompileError, HashMap, Local, Location, RegAlloc, TraceCompiler, REG_POOL};
+    use super::{
+        CompileError, HashMap, Local, LocalDecl, Location, RegAlloc, TraceCompiler, TypeId,
+        REG_POOL,
+    };
     use crate::stack_builder::StackBuilder;
     use fm::FMBuilder;
     use libc::{abs, c_void, getuid};
@@ -1777,6 +1780,38 @@ mod tests {
     }
     extern "C" {
         fn add_some(a: u64, b: u64, c: u64, d: u64, e: u64) -> u64;
+    }
+
+    /// Types IDs that we need for tests.
+    struct TestTypes {
+        t_u8: TypeId,
+        t_i64: TypeId,
+        t_string: TypeId,
+    }
+
+    impl TestTypes {
+        fn new() -> TestTypes {
+            // We can't know the type ID of any given type, so this works by defining unmangled
+            // functions with known return types and then looking them up by name in the SIR.
+            #[no_mangle]
+            fn i_return_u8() -> u8 {
+                0
+            }
+            #[no_mangle]
+            fn i_return_i64() -> i64 {
+                0
+            }
+            #[no_mangle]
+            fn i_return_string() -> String {
+                String::new()
+            }
+
+            TestTypes {
+                t_u8: SIR.body("i_return_u8").unwrap().local_decls[0].ty,
+                t_i64: SIR.body("i_return_i64").unwrap().local_decls[0].ty,
+                t_string: SIR.body("i_return_string").unwrap().local_decls[0].ty,
+            }
+        }
     }
 
     /// Fuzzy matches the textual TIR for the trace `tt` with the pattern `ptn`.
@@ -1820,10 +1855,34 @@ mod tests {
 
     // Repeatedly fetching the register for the same local should yield the same register and
     // should not exhaust the allocator.
-    #[ignore] // Broken because we don't know what type IDs to put in local_decls.
     #[test]
     fn reg_alloc_same_local() {
         struct IO(u8);
+
+        let types = TestTypes::new();
+        let mut local_decls = HashMap::new();
+        local_decls.insert(
+            Local(0),
+            LocalDecl {
+                ty: types.t_u8,
+                referenced: false,
+            },
+        );
+        local_decls.insert(
+            Local(1),
+            LocalDecl {
+                ty: types.t_i64,
+                referenced: false,
+            },
+        );
+        local_decls.insert(
+            Local(2),
+            LocalDecl {
+                ty: types.t_string,
+                referenced: false,
+            },
+        );
+
         let mut tc = TraceCompiler::<IO> {
             asm: dynasmrt::x64::Assembler::new().unwrap(),
             register_content_map: REG_POOL
@@ -1832,26 +1891,56 @@ mod tests {
                 .map(|r| (r, RegAlloc::Free))
                 .collect(),
             variable_location_map: HashMap::new(),
-            local_decls: HashMap::default(),
+            local_decls,
             stack_builder: StackBuilder::default(),
             addr_map: HashMap::new(),
             _pd: PhantomData,
         };
 
+        let u8_loc = tc.local_to_location(Local(0));
+        let i64_loc = tc.local_to_location(Local(1));
+        let string_loc = tc.local_to_location(Local(2));
         for _ in 0..32 {
-            assert_eq!(
-                tc.local_to_location(Local(1)),
-                tc.local_to_location(Local(1))
-            );
+            assert_eq!(tc.local_to_location(Local(0)), u8_loc);
+            assert_eq!(tc.local_to_location(Local(1)), i64_loc);
+            assert_eq!(tc.local_to_location(Local(2)), string_loc);
+            assert_eq!(tc.local_to_location(Local(1)), i64_loc);
+            assert_eq!(tc.local_to_location(Local(2)), string_loc);
+            assert_eq!(tc.local_to_location(Local(0)), u8_loc);
         }
     }
 
     // Locals should be allocated to different registers.
-    #[ignore] // Broken because we don't know what type IDs to put in local_decls.
     #[test]
     fn reg_alloc() {
-        let local_decls = HashMap::new();
         struct IO(u8);
+
+        let types = TestTypes::new();
+        let mut local_decls = HashMap::new();
+        for i in (0..9).step_by(3) {
+            local_decls.insert(
+                Local(i + 0),
+                LocalDecl {
+                    ty: types.t_u8,
+                    referenced: false,
+                },
+            );
+            local_decls.insert(
+                Local(i + 1),
+                LocalDecl {
+                    ty: types.t_i64,
+                    referenced: false,
+                },
+            );
+            local_decls.insert(
+                Local(i + 2),
+                LocalDecl {
+                    ty: types.t_string,
+                    referenced: false,
+                },
+            );
+        }
+
         let mut tc = TraceCompiler::<IO> {
             asm: dynasmrt::x64::Assembler::new().unwrap(),
             register_content_map: REG_POOL
