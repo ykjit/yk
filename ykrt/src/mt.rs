@@ -293,12 +293,13 @@ impl MTThread {
         // that another thread interrupted us part way through. We therefore use compare_and_swap
         // to update values, allowing us to detect if we were interrupted. If we were interrupted,
         // we simply retry the whole operation.
-        loop {
-            // We need Acquire ordering, as PHASE_COMPILED will need to read information written to
-            // external data as a result of the PHASE_TRACING -> PHASE_COMPILED transition.
-            let lp = loc.state.load(Ordering::Acquire);
-            match lp & PHASE_TAG {
-                PHASE_COUNTING => {
+
+        // We need Acquire ordering, as PHASE_COMPILED will need to read information written to
+        // external data as a result of the PHASE_TRACING -> PHASE_COMPILED transition.
+        let mut lp = loc.state.load(Ordering::Acquire);
+        match lp & PHASE_TAG {
+            PHASE_COUNTING => {
+                loop {
                     let count = (lp & !PHASE_TAG) >> PHASE_NUM_BITS;
                     if count >= self.inner.hot_threshold {
                         if self.inner.tracer.is_some() {
@@ -315,95 +316,92 @@ impl MTThread {
                             return None;
                         }
                         // We raced with another thread, which probably moved the Location from
-                        // PHASE_COUNTING to PHASE_TRACING. There's a small chance that the other
-                        // thread managed to both trace and compile the Location during the race,
-                        // but that's unlikely enough that it's not worth paying the performance
-                        // penalty of going around the loop again.
+                        // PHASE_COUNTING to PHASE_TRACING.
                         return None;
                     } else {
                         let new_state = PHASE_COUNTING | ((count + 1) << PHASE_NUM_BITS);
-                        if loc.state.compare_and_swap(lp, new_state, Ordering::Release) == lp {
+                        let old_lp = lp;
+                        lp = loc.state.compare_and_swap(lp, new_state, Ordering::Release);
+                        if lp == old_lp {
                             return None;
                         }
-                        // We raced with another thread while incrementing the count. It's worth us
-                        // trying to go around the loop again, as unless the count exceeded the hot
-                        // threshold, we'll still be able to increment it, ensuring that we don't
-                        // get weird non-determinism in when a Location is compiled.
                     }
-                }
-                PHASE_TRACING => {
-                    if let Some((_, tid)) = self.inner.tracer {
-                        // This thread is tracing something...
-                        if tid != ((lp & !PHASE_TAG) as *mut u8) {
-                            // ...but we didn't start at the current Location.
-                            return None;
-                        } else {
-                            // ...and we started at this Location, so we've got a complete loop!
-                        }
-                    } else {
-                        // Another thread is tracing this location.
+                    if lp & PHASE_TAG != PHASE_COUNTING {
                         return None;
                     }
-
-                    // Stop the tracer
-                    let sir_trace = Rc::get_mut(&mut self.inner)
-                        .unwrap()
-                        .tracer
-                        .take()
-                        .unwrap()
-                        .0
-                        .stop_tracing()
-                        .unwrap();
-                    dbg!(sir_trace.raw_len());
-
-                    // Start a compilation thread.
-                    let (snd, rcv) = channel();
-                    thread::spawn(move || {
-                        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-                        snd.send(TraceCompiler::<I>::compile(tir_trace)).ok();
-                    });
-                    let ptr = Box::into_raw(Box::new(CompilingTrace { rcv }));
-                    debug_assert_eq!(ptr as usize & PHASE_TAG, 0);
-                    let new_state = ptr as usize | PHASE_COMPILING;
-                    loc.state.store(new_state, Ordering::Release);
-
-                    Rc::get_mut(&mut self.inner).unwrap().tracer = None;
+                }
+            }
+            PHASE_TRACING => {
+                if let Some((_, tid)) = self.inner.tracer {
+                    // This thread is tracing something...
+                    if tid != ((lp & !PHASE_TAG) as *mut u8) {
+                        // ...but we didn't start at the current Location.
+                        return None;
+                    } else {
+                        // ...and we started at this Location, so we've got a complete loop!
+                    }
+                } else {
+                    // Another thread is tracing this location.
                     return None;
                 }
-                PHASE_COMPILING => {
-                    let compiling =
-                        unsafe { Box::from_raw((lp & !PHASE_TAG) as *mut CompilingTrace<I>) };
-                    match compiling.rcv.try_recv() {
-                        Ok(ct) => {
-                            // FIXME: free up the memory when the trace is no longer used.
-                            let ptr: *mut CompiledTrace<I> = Box::into_raw(Box::new(ct));
-                            let new_state = ptr as usize | PHASE_COMPILED;
-                            loc.state.store(new_state, Ordering::Release);
 
-                            let bct = unsafe { Box::from_raw(ptr) };
-                            let f = unsafe { mem::transmute::<_, fn(&mut I) -> bool>(bct.ptr()) };
-                            mem::forget(bct);
-                            return Some(f);
-                        }
-                        Err(TryRecvError::Empty) => {
-                            // The compiling thread is still operating.
-                            mem::forget(compiling);
-                            return None;
-                        }
-                        Err(TryRecvError::Disconnected) => {
-                            // The compiling thread has gone wrong in some way.
-                            todo!();
-                        }
+                // Stop the tracer
+                let sir_trace = Rc::get_mut(&mut self.inner)
+                    .unwrap()
+                    .tracer
+                    .take()
+                    .unwrap()
+                    .0
+                    .stop_tracing()
+                    .unwrap();
+
+                // Start a compilation thread.
+                let (snd, rcv) = channel();
+                thread::spawn(move || {
+                    let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
+                    snd.send(TraceCompiler::<I>::compile(tir_trace)).ok();
+                });
+                let ptr = Box::into_raw(Box::new(CompilingTrace { rcv }));
+                debug_assert_eq!(ptr as usize & PHASE_TAG, 0);
+                let new_state = ptr as usize | PHASE_COMPILING;
+                loc.state.store(new_state, Ordering::Release);
+
+                Rc::get_mut(&mut self.inner).unwrap().tracer = None;
+                return None;
+            }
+            PHASE_COMPILING => {
+                let compiling =
+                    unsafe { Box::from_raw((lp & !PHASE_TAG) as *mut CompilingTrace<I>) };
+                match compiling.rcv.try_recv() {
+                    Ok(ct) => {
+                        // FIXME: free up the memory when the trace is no longer used.
+                        let ptr: *mut CompiledTrace<I> = Box::into_raw(Box::new(ct));
+                        let new_state = ptr as usize | PHASE_COMPILED;
+                        loc.state.store(new_state, Ordering::Release);
+
+                        let bct = unsafe { Box::from_raw(ptr) };
+                        let f = unsafe { mem::transmute::<_, fn(&mut I) -> bool>(bct.ptr()) };
+                        mem::forget(bct);
+                        return Some(f);
+                    }
+                    Err(TryRecvError::Empty) => {
+                        // The compiling thread is still operating.
+                        mem::forget(compiling);
+                        return None;
+                    }
+                    Err(TryRecvError::Disconnected) => {
+                        // The compiling thread has gone wrong in some way.
+                        todo!();
                     }
                 }
-                PHASE_COMPILED => {
-                    let bct = unsafe { Box::from_raw((lp & !PHASE_TAG) as *mut CompiledTrace<I>) };
-                    let f = unsafe { mem::transmute::<_, fn(&mut I) -> bool>(bct.ptr()) };
-                    mem::forget(bct);
-                    return Some(f);
-                }
-                _ => unreachable!(),
             }
+            PHASE_COMPILED => {
+                let bct = unsafe { Box::from_raw((lp & !PHASE_TAG) as *mut CompiledTrace<I>) };
+                let f = unsafe { mem::transmute::<_, fn(&mut I) -> bool>(bct.ptr()) };
+                mem::forget(bct);
+                return Some(f);
+            }
+            _ => unreachable!(),
         }
     }
 }
