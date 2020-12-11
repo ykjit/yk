@@ -310,7 +310,7 @@ impl MTThread {
                             return None;
                         }
                         let new_state = self.inner.tid as usize | PHASE_TRACING;
-                        if loc.state.compare_and_swap(lp, new_state, Ordering::Release) == lp {
+                        if loc.state.compare_and_swap(lp, new_state, Ordering::Relaxed) == lp {
                             Rc::get_mut(&mut self.inner).unwrap().tracer =
                                 Some((start_tracing(self.inner.tracing_kind), self.inner.tid));
                             return None;
@@ -321,13 +321,18 @@ impl MTThread {
                     } else {
                         let new_state = PHASE_COUNTING | ((count + 1) << PHASE_NUM_BITS);
                         let old_lp = lp;
-                        lp = loc.state.compare_and_swap(lp, new_state, Ordering::Release);
+                        lp = loc.state.compare_and_swap(lp, new_state, Ordering::Relaxed);
                         if lp == old_lp {
                             return None;
                         }
-                    }
-                    if lp & PHASE_TAG != PHASE_COUNTING {
-                        return None;
+                        // We raced with another thread.
+                        if lp & PHASE_TAG != PHASE_COUNTING {
+                            // The other thread probably moved the Location from PHASE_COUNTING to
+                            // PHASE_TRACING.
+                            return None;
+                        }
+                        // This Location is still being counted, so go around the loop again and
+                        // try to apply our increment.
                     }
                 }
             }
