@@ -298,7 +298,7 @@ mod tests {
     }
 
     #[test]
-    fn test_simple() {
+    fn simple() {
         struct IO(u8, u8);
         #[no_mangle]
         fn simple(io: &mut IO) {
@@ -311,7 +311,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tuple() {
+    fn tuple() {
         struct IO((u8, u8, u8));
         #[no_mangle]
         fn func_tuple(io: &mut IO) {
@@ -326,7 +326,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ref() {
+    fn reference() {
         struct IO(u8, u8);
         #[no_mangle]
         fn func_ref(io: &mut IO) {
@@ -341,7 +341,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tupleref() {
+    fn tupleref() {
         struct IO((u8, u8));
         #[no_mangle]
         fn func_tupleref(io: &mut IO) {
@@ -357,7 +357,7 @@ mod tests {
     }
 
     #[test]
-    fn test_doubleref() {
+    fn doubleref() {
         struct IO((u8, u8));
         #[no_mangle]
         fn func_doubleref(io: &mut IO) {
@@ -371,7 +371,7 @@ mod tests {
     }
 
     #[test]
-    fn test_call() {
+    fn call() {
         struct IO(u8, u8);
 
         fn foo(i: u8) -> u8 {

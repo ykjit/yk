@@ -83,7 +83,7 @@ mod tests {
 
     // Check a typical serialising and deserialising session.
     #[test]
-    fn test_basic() {
+    fn basic() {
         let inputs = get_sample_packs();
         let num_packs = inputs.len();
         let mut buf = Vec::new();

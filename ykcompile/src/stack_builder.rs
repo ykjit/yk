@@ -40,7 +40,7 @@ mod tests {
     use super::StackBuilder;
 
     #[test]
-    fn test_stackbuilder() {
+    fn stackbuilder() {
         let mut sb = StackBuilder::default();
 
         assert_eq!(sb.alloc(8, 8).unwrap_mem().off, -8);

@@ -1798,7 +1798,7 @@ mod tests {
     }
 
     #[test]
-    fn test_simple() {
+    fn simple() {
         struct IO(u8);
 
         #[interp_step]
@@ -1880,7 +1880,7 @@ mod tests {
     }
 
     #[test]
-    fn test_function_call_simple() {
+    fn function_call_simple() {
         struct IO(u8);
 
         #[interp_step]
@@ -1902,7 +1902,7 @@ mod tests {
     }
 
     #[test]
-    fn test_function_call_nested() {
+    fn function_call_nested() {
         struct IO(u8);
 
         fn fnested3(i: u8, _j: u8) -> u8 {
@@ -2083,7 +2083,7 @@ mod tests {
 
     #[ignore] // FIXME: It has become hard to test spilling.
     #[test]
-    fn test_spilling_simple() {
+    fn spilling_simple() {
         struct IO(u64);
 
         #[interp_step]
@@ -2113,7 +2113,7 @@ mod tests {
 
     #[ignore] // FIXME: It has become hard to test spilling.
     #[test]
-    fn test_spilling_u64() {
+    fn spilling_u64() {
         struct IO(u64);
 
         fn u64value() -> u64 {
@@ -2150,7 +2150,7 @@ mod tests {
 
     #[ignore] // FIXME: It has become hard to test spilling.
     #[test]
-    fn test_mov_register_to_stack() {
+    fn mov_register_to_stack() {
         struct IO(u8, u8);
 
         #[interp_step]
@@ -2180,7 +2180,7 @@ mod tests {
 
     #[ignore] // FIXME: It has become hard to test spilling.
     #[test]
-    fn test_mov_stack_to_register() {
+    fn mov_stack_to_register() {
         struct IO(u8);
 
         #[interp_step]
@@ -2238,7 +2238,7 @@ mod tests {
     }
 
     #[test]
-    fn test_binop_add_simple() {
+    fn binop_add_simple() {
         #[derive(Eq, PartialEq, Debug)]
         struct IO(u64, u64, u64);
 
@@ -2259,7 +2259,7 @@ mod tests {
     }
 
     #[test]
-    fn test_binop_add_overflow() {
+    fn binop_add_overflow() {
         #[derive(Eq, PartialEq, Debug)]
         struct IO(u8, u8);
 
@@ -2287,7 +2287,7 @@ mod tests {
     }
 
     #[test]
-    fn test_binop_other() {
+    fn binop_other() {
         #[derive(Eq, PartialEq, Debug)]
         struct IO(u64, u64, u64);
 
@@ -2309,7 +2309,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ref_deref_simple() {
+    fn ref_deref_simple() {
         #[derive(Debug)]
         struct IO(u64);
 
@@ -2333,7 +2333,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ref_deref_double() {
+    fn ref_deref_double() {
         #[derive(Debug)]
         struct IO(u64);
 
@@ -2357,7 +2357,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ref_deref_double_and_field() {
+    fn ref_deref_double_and_field() {
         #[derive(Debug)]
         struct IO(u64);
 
@@ -2381,7 +2381,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ref_deref_stack() {
+    fn ref_deref_stack() {
         struct IO(u64);
 
         #[interp_step]
@@ -2412,7 +2412,7 @@ mod tests {
 
     /// Dereferences a variable that lives on the stack and stores it in a register.
     #[test]
-    fn test_deref_stack_to_register() {
+    fn deref_stack_to_register() {
         fn deref1(arg: u64) -> u64 {
             let a = &arg;
             return *a;
@@ -2440,7 +2440,7 @@ mod tests {
     }
 
     #[test]
-    fn test_deref_register_to_stack() {
+    fn deref_register_to_stack() {
         struct IO(u64);
 
         fn deref2(arg: u64) -> u64 {
@@ -2470,7 +2470,7 @@ mod tests {
     }
 
     #[test]
-    fn test_do_not_trace() {
+    fn do_not_trace() {
         struct IO(u8);
 
         #[do_not_trace]
@@ -2509,7 +2509,7 @@ mod tests {
     }
 
     #[test]
-    fn test_do_not_trace_stdlib() {
+    fn do_not_trace_stdlib() {
         struct IO<'a>(&'a mut Vec<u64>);
 
         #[interp_step]
@@ -2532,7 +2532,7 @@ mod tests {
     }
 
     #[test]
-    fn test_projection_chain() {
+    fn projection_chain() {
         #[derive(Debug)]
         struct IO((usize, u8, usize), u8, S, usize);
 
@@ -2568,7 +2568,7 @@ mod tests {
     }
 
     #[test]
-    fn test_projection_lhs() {
+    fn projection_lhs() {
         struct IO((u8, u8), u8);
 
         #[interp_step]
@@ -2590,7 +2590,7 @@ mod tests {
     }
 
     #[test]
-    fn test_array() {
+    fn array() {
         struct IO<'a>(&'a mut [u8; 3], u8);
 
         #[interp_step]
@@ -2619,7 +2619,7 @@ mod tests {
     }
 
     #[test]
-    fn test_array_nested() {
+    fn array_nested() {
         struct IO<'a>(&'a mut [[u8; 3]; 2], u8);
 
         #[interp_step]
@@ -2644,7 +2644,7 @@ mod tests {
     }
 
     #[test]
-    fn test_array_nested_mad() {
+    fn array_nested_mad() {
         struct S([u16; 4]);
         struct IO<'a>(&'a mut [S; 3], u16);
 
@@ -2740,7 +2740,7 @@ mod tests {
 
     #[test]
     #[ignore] // FIXME Broken during new trimming scheme. Seg faults.
-    fn test_rvalue_len() {
+    fn rvalue_len() {
         struct IO<'a>(&'a [u8], u8);
 
         fn matchthis(inputs: &IO, pc: usize) -> u8 {
@@ -2798,7 +2798,7 @@ mod tests {
     }
 
     #[test]
-    fn test_comparison() {
+    fn comparison() {
         struct IO(u8, bool);
 
         fn checks(i: u8) -> bool {
@@ -2830,7 +2830,7 @@ mod tests {
     }
 
     #[test]
-    fn test_guard() {
+    fn guard() {
         struct IO(u8, u8);
 
         fn guard(i: u8) -> u8 {
@@ -2864,7 +2864,7 @@ mod tests {
     }
 
     #[test]
-    fn test_match() {
+    fn matching() {
         struct IO(u8);
 
         #[interp_step]
@@ -2890,7 +2890,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cast() {
+    fn cast() {
         struct IO(u16, u8);
 
         #[interp_step]
@@ -2918,7 +2918,7 @@ mod tests {
     }
 
     #[test]
-    fn test_vec_add() {
+    fn vec_add() {
         struct IO {
             ptr: usize,
             cells: Vec<u8>,
