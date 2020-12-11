@@ -379,8 +379,11 @@ impl MTThread {
                             let ptr: *mut CompiledTrace<I> = Box::into_raw(Box::new(ct));
                             let new_state = ptr as usize | PHASE_COMPILED;
                             loc.state.store(new_state, Ordering::Release);
-                            // Go around the loop so that the PHASE_COMPILED case below can extract
-                            // the function.
+
+                            let bct = unsafe { Box::from_raw(ptr) };
+                            let f = unsafe { mem::transmute::<_, fn(&mut I) -> bool>(bct.ptr()) };
+                            mem::forget(bct);
+                            return Some(f);
                         }
                         Err(TryRecvError::Empty) => {
                             // The compiling thread is still operating.
