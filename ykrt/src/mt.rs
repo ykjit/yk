@@ -302,8 +302,10 @@ impl MTThread {
                     let count = (lp & !PHASE_TAG) >> PHASE_NUM_BITS;
                     if count >= self.inner.hot_threshold {
                         if self.inner.tracer.is_some() {
-                            // This thread is already tracing. Note that we don't increment the hot
-                            // count further.
+                            // This thread is already tracing another Location, so either another
+                            // thread needs to trace this Location or this thread needs to wait
+                            // until the current round of tracing has completed. Either way,
+                            // there's no point incrementing the hot count.
                             return None;
                         }
                         let new_state = self.inner.tid as usize | PHASE_TRACING;
@@ -312,16 +314,21 @@ impl MTThread {
                                 Some((start_tracing(self.inner.tracing_kind), self.inner.tid));
                             return None;
                         }
-                    // We raced with another thread that's (probably) trying to trace this
-                    // Location or (less likely) has already compiled it so we go around the
-                    // loop again to see what we should do.
+                        // We raced with another thread, which probably moved the Location from
+                        // PHASE_COUNTING to PHASE_TRACING. There's a small chance that the other
+                        // thread managed to both trace and compile the Location during the race,
+                        // but that's unlikely enough that it's not worth paying the performance
+                        // penalty of going around the loop again.
+                        return None;
                     } else {
                         let new_state = PHASE_COUNTING | ((count + 1) << PHASE_NUM_BITS);
                         if loc.state.compare_and_swap(lp, new_state, Ordering::Release) == lp {
                             return None;
                         }
-                        // We raced with another thread, but we'd still like to try incrementing
-                        // the count if possible, so go around the loop again.
+                        // We raced with another thread while incrementing the count. It's worth us
+                        // trying to go around the loop again, as unless the count exceeded the hot
+                        // threshold, we'll still be able to increment it, ensuring that we don't
+                        // get weird non-determinism in when a Location is compiled.
                     }
                 }
                 PHASE_TRACING => {
