@@ -294,8 +294,9 @@ impl MTThread {
         // to update values, allowing us to detect if we were interrupted. If we were interrupted,
         // we simply retry the whole operation.
 
-        // We need Acquire ordering, as PHASE_COMPILED will need to read information written to
-        // external data as a result of the PHASE_TRACING -> PHASE_COMPILED transition.
+        // We need Acquire ordering, as PHASE_COMPILING and PHASE_COMPILED need to read information
+        // written to external data. Alternatively, this load could be Relaxed but we would then
+        // need to place an Acquire fence in PHASE_COMPILING and PHASE_COMPILED.
         let mut lp = loc.state.load(Ordering::Acquire);
         match lp & PHASE_TAG {
             PHASE_COUNTING => {
