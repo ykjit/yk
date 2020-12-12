@@ -569,9 +569,9 @@ mod tests {
         let mut mtt = MTBuilder::new().hot_threshold(2).init();
 
         // The program is silly. Do nothing twice, then start again.
-        const NOP: u8 = 0;
+        const INC: u8 = 0;
         const RESTART: u8 = 1;
-        let prog = vec![NOP, NOP, RESTART];
+        let prog = vec![INC, INC, RESTART];
 
         // Suppose the bytecode compiler for this imaginary language knows that the first bytecode
         // is the only place a loop can start.
@@ -586,7 +586,7 @@ mod tests {
         #[interp_step]
         fn dumb_interp_step(tio: &mut IO) {
             match tio.prog[tio.pc] {
-                NOP => {
+                INC => {
                     tio.pc += 1;
                     tio.count += 1;
                 }
@@ -625,7 +625,7 @@ mod tests {
 
         assert_eq!(tio.pc, 0);
 
-        // A trace was just compiled. Running it should execute NOP twice.
+        // A trace was just compiled. Running it should execute INC twice.
         tio.count = 8;
         for i in 0..10 {
             let loc = locs[tio.pc].as_ref();
