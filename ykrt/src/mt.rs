@@ -188,6 +188,9 @@ pub struct MTThread {
     inner: Rc<MTThreadInner>,
 }
 
+impl !Send for MTThread {}
+impl !Sync for MTThread {}
+
 impl MTThread {
     /// Return a meta-tracer [`MT`](struct.MT.html) struct.
     pub fn mt(&self) -> &MT {
