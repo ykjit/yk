@@ -1984,6 +1984,62 @@ mod tests {
         }
     }
 
+    // Freeing registers should allow them to be re-allocated.
+    #[test]
+    fn reg_alloc_spills_and_frees() {
+        struct IO(u8);
+
+        let types = TestTypes::new();
+        let num_regs = REG_POOL.len() + 1; // Plus one for TIO_REG.
+        let num_decls = num_regs + 4;
+        let mut local_decls = HashMap::new();
+        for i in 0..num_decls {
+            local_decls.insert(
+                Local(u32::try_from(i).unwrap()),
+                LocalDecl {
+                    ty: types.t_u8,
+                    referenced: false,
+                },
+            );
+        }
+
+        let mut tc = TraceCompiler::<IO>::new(local_decls, Default::default());
+
+        // Fill registers.
+        for l in 0..num_regs {
+            assert!(matches!(
+                tc.local_to_location(Local(LocalIndex::try_from(l).unwrap())),
+                Location::Reg(..)
+            ));
+        }
+
+        // Allocating one more local should spill.
+        assert!(matches!(
+            tc.local_to_location(Local(LocalIndex::try_from(num_regs).unwrap())),
+            Location::Mem(..)
+        ));
+
+        // Now let's free two locals previously given a register.
+        tc.free_register(&Local(3)).unwrap();
+        tc.free_register(&Local(5)).unwrap();
+
+        // Allocating two more locals should therefore yield register locations.
+        assert!(matches!(
+            tc.local_to_location(Local(LocalIndex::try_from(num_regs + 1).unwrap())),
+            Location::Reg(..)
+        ));
+        assert!(matches!(
+            tc.local_to_location(Local(LocalIndex::try_from(num_regs + 2).unwrap())),
+            Location::Reg(..)
+        ));
+
+        // And one more should spill again.
+        assert!(matches!(
+            tc.local_to_location(Local(LocalIndex::try_from(num_regs + 3).unwrap())),
+            Location::Mem(..)
+        ));
+    }
+
     #[inline(never)]
     fn farg(i: u8) -> u8 {
         i
