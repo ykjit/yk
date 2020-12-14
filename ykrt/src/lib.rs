@@ -1,4 +1,5 @@
 #![feature(integer_atomics)]
+#![feature(negative_impls)]
 #![feature(test)]
 
 pub mod mt;

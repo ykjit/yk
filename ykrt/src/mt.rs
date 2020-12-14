@@ -246,6 +246,9 @@ pub struct MTThread {
     inner: Rc<MTThreadInner>,
 }
 
+impl !Send for MTThread {}
+impl !Sync for MTThread {}
+
 impl MTThread {
     /// Return a meta-tracer [`MT`](struct.MT.html) struct.
     pub fn mt(&self) -> &MT {
@@ -293,107 +296,121 @@ impl MTThread {
         // that another thread interrupted us part way through. We therefore use compare_and_swap
         // to update values, allowing us to detect if we were interrupted. If we were interrupted,
         // we simply retry the whole operation.
-        loop {
-            // We need Acquire ordering, as PHASE_COMPILED will need to read information written to
-            // external data as a result of the PHASE_TRACING -> PHASE_COMPILED transition.
-            let lp = loc.state.load(Ordering::Acquire);
-            match lp & PHASE_TAG {
-                PHASE_COUNTING => {
-                    let count = (lp & !PHASE_TAG) >> 2;
+
+        // We need Acquire ordering, as PHASE_COMPILING and PHASE_COMPILED need to read information
+        // written to external data. Alternatively, this load could be Relaxed but we would then
+        // need to place an Acquire fence in PHASE_COMPILING and PHASE_COMPILED.
+        let mut lp = loc.state.load(Ordering::Acquire);
+        match lp & PHASE_TAG {
+            PHASE_COUNTING => {
+                loop {
+                    let count = (lp & !PHASE_TAG) >> PHASE_NUM_BITS;
                     if count >= self.inner.hot_threshold {
                         if self.inner.tracer.is_some() {
-                            // This thread is already tracing. Note that we don't increment the hot
-                            // count further.
+                            // This thread is already tracing another Location, so either another
+                            // thread needs to trace this Location or this thread needs to wait
+                            // until the current round of tracing has completed. Either way,
+                            // there's no point incrementing the hot count.
                             return None;
                         }
                         let new_state = self.inner.tid as usize | PHASE_TRACING;
-                        if loc.state.compare_and_swap(lp, new_state, Ordering::Release) == lp {
+                        if loc.state.compare_and_swap(lp, new_state, Ordering::Relaxed) == lp {
                             Rc::get_mut(&mut self.inner).unwrap().tracer =
                                 Some((start_tracing(self.inner.tracing_kind), self.inner.tid));
                             return None;
                         }
-                    // We raced with another thread that's (probably) trying to trace this
-                    // Location or (less likely) has already compiled it so we go around the
-                    // loop again to see what we should do.
+                        // We raced with another thread, which probably moved the Location from
+                        // PHASE_COUNTING to PHASE_TRACING.
+                        return None;
                     } else {
                         let new_state = PHASE_COUNTING | ((count + 1) << PHASE_NUM_BITS);
-                        if loc.state.compare_and_swap(lp, new_state, Ordering::Release) == lp {
+                        let old_lp = lp;
+                        lp = loc.state.compare_and_swap(lp, new_state, Ordering::Relaxed);
+                        if lp == old_lp {
                             return None;
                         }
-                        // We raced with another thread, but we'd still like to try incrementing
-                        // the count if possible, so go around the loop again.
+                        // We raced with another thread.
+                        if lp & PHASE_TAG != PHASE_COUNTING {
+                            // The other thread probably moved the Location from PHASE_COUNTING to
+                            // PHASE_TRACING.
+                            return None;
+                        }
+                        // This Location is still being counted, so go around the loop again and
+                        // try to apply our increment.
                     }
                 }
-                PHASE_TRACING => {
-                    if let Some((_, tid)) = self.inner.tracer {
-                        // This thread is tracing something...
-                        if tid != ((lp & !PHASE_TAG) as *mut u8) {
-                            // ...but we didn't start at the current Location.
-                            return None;
-                        } else {
-                            // ...and we started at this Location, so we've got a complete loop!
-                        }
-                    } else {
-                        // Another thread is tracing this location.
+            }
+            PHASE_TRACING => {
+                if let Some((_, tid)) = self.inner.tracer {
+                    // This thread is tracing something...
+                    if tid != ((lp & !PHASE_TAG) as *mut u8) {
+                        // ...but we didn't start at the current Location.
                         return None;
+                    } else {
+                        // ...and we started at this Location, so we've got a complete loop!
                     }
-
-                    // Stop the tracer
-                    let sir_trace = Rc::get_mut(&mut self.inner)
-                        .unwrap()
-                        .tracer
-                        .take()
-                        .unwrap()
-                        .0
-                        .stop_tracing()
-                        .unwrap();
-                    dbg!(sir_trace.raw_len());
-
-                    // Start a compilation thread.
-                    let (snd, rcv) = channel();
-                    thread::spawn(move || {
-                        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-                        snd.send(TraceCompiler::<I>::compile(tir_trace)).ok();
-                    });
-                    let ptr = Box::into_raw(Box::new(CompilingTrace { rcv }));
-                    debug_assert_eq!(ptr as usize & PHASE_TAG, 0);
-                    let new_state = ptr as usize | PHASE_COMPILING;
-                    loc.state.store(new_state, Ordering::Release);
-
-                    Rc::get_mut(&mut self.inner).unwrap().tracer = None;
+                } else {
+                    // Another thread is tracing this location.
                     return None;
                 }
-                PHASE_COMPILING => {
-                    let compiling =
-                        unsafe { Box::from_raw((lp & !PHASE_TAG) as *mut CompilingTrace<I>) };
-                    match compiling.rcv.try_recv() {
-                        Ok(ct) => {
-                            // FIXME: free up the memory when the trace is no longer used.
-                            let ptr: *mut CompiledTrace<I> = Box::into_raw(Box::new(ct));
-                            let new_state = ptr as usize | PHASE_COMPILED;
-                            loc.state.store(new_state, Ordering::Release);
-                            // Go around the loop so that the PHASE_COMPILED case below can extract
-                            // the function.
-                        }
-                        Err(TryRecvError::Empty) => {
-                            // The compiling thread is still operating.
-                            mem::forget(compiling);
-                            return None;
-                        }
-                        Err(TryRecvError::Disconnected) => {
-                            // The compiling thread has gone wrong in some way.
-                            todo!();
-                        }
+
+                // Stop the tracer
+                let sir_trace = Rc::get_mut(&mut self.inner)
+                    .unwrap()
+                    .tracer
+                    .take()
+                    .unwrap()
+                    .0
+                    .stop_tracing()
+                    .unwrap();
+
+                // Start a compilation thread.
+                let (snd, rcv) = channel();
+                thread::spawn(move || {
+                    let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
+                    snd.send(TraceCompiler::<I>::compile(tir_trace)).ok();
+                });
+                let ptr = Box::into_raw(Box::new(CompilingTrace { rcv }));
+                debug_assert_eq!(ptr as usize & PHASE_TAG, 0);
+                let new_state = ptr as usize | PHASE_COMPILING;
+                loc.state.store(new_state, Ordering::Release);
+
+                Rc::get_mut(&mut self.inner).unwrap().tracer = None;
+                return None;
+            }
+            PHASE_COMPILING => {
+                let compiling =
+                    unsafe { Box::from_raw((lp & !PHASE_TAG) as *mut CompilingTrace<I>) };
+                match compiling.rcv.try_recv() {
+                    Ok(ct) => {
+                        // FIXME: free up the memory when the trace is no longer used.
+                        let ptr: *mut CompiledTrace<I> = Box::into_raw(Box::new(ct));
+                        let new_state = ptr as usize | PHASE_COMPILED;
+                        loc.state.store(new_state, Ordering::Release);
+
+                        let bct = unsafe { Box::from_raw(ptr) };
+                        let f = unsafe { mem::transmute::<_, fn(&mut I) -> bool>(bct.ptr()) };
+                        mem::forget(bct);
+                        return Some(f);
+                    }
+                    Err(TryRecvError::Empty) => {
+                        // The compiling thread is still operating.
+                        mem::forget(compiling);
+                        return None;
+                    }
+                    Err(TryRecvError::Disconnected) => {
+                        // The compiling thread has gone wrong in some way.
+                        todo!();
                     }
                 }
-                PHASE_COMPILED => {
-                    let bct = unsafe { Box::from_raw((lp & !PHASE_TAG) as *mut CompiledTrace<I>) };
-                    let f = unsafe { mem::transmute::<_, fn(&mut I) -> bool>(bct.ptr()) };
-                    mem::forget(bct);
-                    return Some(f);
-                }
-                _ => unreachable!(),
             }
+            PHASE_COMPILED => {
+                let bct = unsafe { Box::from_raw((lp & !PHASE_TAG) as *mut CompiledTrace<I>) };
+                let f = unsafe { mem::transmute::<_, fn(&mut I) -> bool>(bct.ptr()) };
+                mem::forget(bct);
+                return Some(f);
+            }
+            _ => unreachable!(),
         }
     }
 }
