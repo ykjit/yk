@@ -510,8 +510,8 @@ impl<TT> TraceCompiler<TT> {
         self.stack_builder.alloc(ty.size(), ty.align())
     }
 
-    /// Notifies the register allocator that the register allocated to `local` may now be re-used.
-    fn free_register(&mut self, local: &Local) -> Result<(), CompileError> {
+    /// Notifies the register allocator that a local has died and that its storage may be freed.
+    fn local_dead(&mut self, local: &Local) -> Result<(), CompileError> {
         match self.variable_location_map.get(local) {
             Some(Location::Reg(reg)) => {
                 // If this local is currently stored in a register, free it.
@@ -962,7 +962,7 @@ impl<TT> TraceCompiler<TT> {
                 idx,
                 scale,
             } => self.c_dynoffs(dest, base, idx, *scale),
-            Statement::StorageDead(l) => self.free_register(l)?,
+            Statement::StorageDead(l) => self.local_dead(l)?,
             Statement::Call(target, args, dest) => self.c_call(target, args, dest)?,
             Statement::Cast(dest, src) => self.c_cast(dest, src),
             Statement::Nop | Statement::Debug(..) => {}
@@ -2020,8 +2020,8 @@ mod tests {
         ));
 
         // Now let's free two locals previously given a register.
-        tc.free_register(&Local(3)).unwrap();
-        tc.free_register(&Local(5)).unwrap();
+        tc.local_dead(&Local(3)).unwrap();
+        tc.local_dead(&Local(5)).unwrap();
 
         // Allocating two more locals should therefore yield register locations.
         assert!(matches!(
