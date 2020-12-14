@@ -132,7 +132,7 @@ pub struct SIRInterpreter {
 }
 
 impl SIRInterpreter {
-    pub fn new(body: Arc<Body>) -> Self {
+    pub fn new(body: &Body) -> Self {
         let frame = SIRInterpreter::create_frame(body);
         SIRInterpreter {
             frames: vec![frame],
@@ -142,7 +142,7 @@ impl SIRInterpreter {
 
     /// Given a vector of local declarations, create a new StackFrame, which allocates just enough
     /// space to hold all of them.
-    fn create_frame(body: Arc<Body>) -> StackFrame {
+    fn create_frame(body: &Body) -> StackFrame {
         let (size, align) = body.layout;
         let offsets = body.offsets.clone();
         let layout = Layout::from_size_align(size, align).unwrap();
@@ -214,7 +214,7 @@ impl SIRInterpreter {
 
                     // Initialise the new stack frame.
                     let body = SIR.body(fname).unwrap();
-                    let mut frame = SIRInterpreter::create_frame(body.clone());
+                    let mut frame = SIRInterpreter::create_frame(&*body);
                     frame.copy_args(args, self.frame());
                     self.frames.push(frame);
                     self.bbidx = 0;
@@ -277,7 +277,7 @@ mod tests {
 
     fn interp(fname: &str, tio: *mut u8) {
         let body = SIR.body(fname).unwrap();
-        let mut si = SIRInterpreter::new(body.clone());
+        let mut si = SIRInterpreter::new(&*body);
         // The raw pointer `tio` and the reference it was created from do not alias since we won't
         // be using the reference until the function `interpret` returns.
         si.set_trace_inputs(tio);
