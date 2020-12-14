@@ -5,7 +5,7 @@
 use super::SirTrace;
 use crate::{
     errors::InvalidTraceError,
-    sir::{Sir, SirTraceIterator},
+    sir::{self, Sir, SirTraceIterator},
     INTERP_STEP_ARG
 };
 use std::{
@@ -17,8 +17,6 @@ pub use ykpack::{
     BinOp, BodyFlags, CallOperand, Constant, ConstantInt, IPlace, Local, LocalDecl, LocalIndex,
     Ptr, SignedInt, Statement, Terminator, UnsignedInt
 };
-
-const RETURN_LOCAL: Local = Local(0);
 
 /// A TIR trace is conceptually a straight-line path through the SIR with guarded speculation.
 #[derive(Debug)]
@@ -186,13 +184,13 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     // #[interp_step] function. We know this is unit so we can ignore it.
                     if let Statement::Store(
                         IPlace::Val {
-                            local: RETURN_LOCAL,
+                            local: sir::RETURN_LOCAL,
                             ..
                         },
                         _
                     ) = op
                     {
-                        debug_assert!(sir.ty(&rnm.local_decls[&RETURN_LOCAL].ty).is_unit());
+                        debug_assert!(sir.ty(&rnm.local_decls[&sir::RETURN_LOCAL].ty).is_unit());
                         continue;
                     }
 
@@ -301,7 +299,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     let dest_ip = return_iplaces.pop().unwrap();
                     let src_ip = rnm.rename_iplace(
                         &IPlace::Val {
-                            local: RETURN_LOCAL,
+                            local: sir::RETURN_LOCAL,
                             off: 0,
                             ty: dest_ip.ty()
                         },
@@ -706,8 +704,11 @@ pub mod test_helpers {}
 
 #[cfg(test)]
 pub mod tests {
-    use super::{TirTrace, RETURN_LOCAL};
-    use crate::{sir::SIR, start_tracing, trace_debug, TracingKind};
+    use super::TirTrace;
+    use crate::{
+        sir::{self, SIR},
+        start_tracing, trace_debug, TracingKind
+    };
     use fm::FMBuilder;
     use regex::Regex;
     use test::black_box;
@@ -822,7 +823,7 @@ pub mod tests {
         let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
         for idx in 0..tir_trace.len() {
             let op = unsafe { tir_trace.op(idx) };
-            assert!(!op.used_locals().contains(&RETURN_LOCAL));
+            assert!(!op.used_locals().contains(&sir::RETURN_LOCAL));
         }
     }
 }

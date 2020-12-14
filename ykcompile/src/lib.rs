@@ -1780,7 +1780,7 @@ mod tests {
     use regex::Regex;
     use std::{convert::TryFrom, default::Default};
     use ykpack::LocalIndex;
-    use yktrace::sir::SIR;
+    use yktrace::sir::{self, SIR};
     use yktrace::tir::TirTrace;
     use yktrace::{start_tracing, TracingKind};
 
@@ -1815,10 +1815,11 @@ mod tests {
                 String::new()
             }
 
+            let rv = usize::try_from(sir::RETURN_LOCAL.0).unwrap();
             TestTypes {
-                t_u8: SIR.body("i_return_u8").unwrap().local_decls[0].ty,
-                t_i64: SIR.body("i_return_i64").unwrap().local_decls[0].ty,
-                t_string: SIR.body("i_return_string").unwrap().local_decls[0].ty,
+                t_u8: SIR.body("i_return_u8").unwrap().local_decls[rv].ty,
+                t_i64: SIR.body("i_return_i64").unwrap().local_decls[rv].ty,
+                t_string: SIR.body("i_return_string").unwrap().local_decls[rv].ty,
             }
         }
     }
