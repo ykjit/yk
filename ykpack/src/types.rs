@@ -384,6 +384,8 @@ pub struct Body {
     pub flags: BodyFlags,
     pub local_decls: Vec<LocalDecl>,
     pub num_args: usize,
+    pub layout: (usize, usize),
+    pub offsets: Vec<usize>,
 }
 
 impl Display for Body {

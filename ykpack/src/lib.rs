@@ -60,6 +60,8 @@ mod tests {
             flags: BodyFlags::empty(),
             local_decls: Vec::new(),
             num_args: 0,
+            layout: (0, 0),
+            offsets: Vec::new(),
         });
 
         let stmts2_b1 = vec![Statement::Nop; 7];
@@ -76,6 +78,8 @@ mod tests {
             flags: BodyFlags::empty(),
             local_decls: Vec::new(),
             num_args: 0,
+            layout: (0, 0),
+            offsets: Vec::new(),
         });
 
         vec![sir1, sir2]
