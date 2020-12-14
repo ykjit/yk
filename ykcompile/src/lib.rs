@@ -406,6 +406,27 @@ pub struct TraceCompiler<TT> {
 }
 
 impl<TT> TraceCompiler<TT> {
+    fn new(local_decls: HashMap<Local, LocalDecl>, addr_map: HashMap<String, u64>) -> Self {
+        let mut tc = TraceCompiler::<TT> {
+            asm: dynasmrt::x64::Assembler::new().unwrap(),
+            register_content_map: REG_POOL.iter().map(|r| (*r, RegAlloc::Free)).collect(),
+            variable_location_map: HashMap::new(),
+            local_decls,
+            stack_builder: StackBuilder::default(),
+            addr_map,
+            _pd: PhantomData,
+        };
+
+        // At the start of the trace, jump to the label that allocates stack space.
+        dynasm!(tc.asm
+            ; jmp ->reserve
+            ; ->crash:
+            ; ud2
+            ; ->main:
+        );
+        tc
+    }
+
     fn can_live_in_register(decl: &LocalDecl) -> bool {
         if decl.referenced {
             // We must allocate it on the stack so that we can reference it.
@@ -1668,16 +1689,6 @@ impl<TT> TraceCompiler<TT> {
         );
     }
 
-    fn init(&mut self) {
-        // Jump to the label that reserves stack space for spilled locals.
-        dynasm!(self.asm
-            ; jmp ->reserve
-            ; ->crash:
-            ; ud2
-            ; ->main:
-        );
-    }
-
     /// Finish compilation and return the executable code that was assembled.
     fn finish(self, debug: bool) -> dynasmrt::ExecutableBuffer {
         let buf = self.asm.finalize().unwrap();
@@ -1720,22 +1731,11 @@ impl<TT> TraceCompiler<TT> {
         }
     }
 
-    fn _compile(tt: TirTrace) -> Self {
-        let assembler = dynasmrt::x64::Assembler::new().unwrap();
-
-        // Make the TirTrace mutable so we can drain it into the TraceCompiler.
-        let mut tt = tt;
-        let mut tc = TraceCompiler::<TT> {
-            asm: assembler,
-            register_content_map: REG_POOL.iter().map(|r| (*r, RegAlloc::Free)).collect(),
-            variable_location_map: HashMap::new(),
-            local_decls: tt.local_decls.clone(),
-            stack_builder: StackBuilder::default(),
-            addr_map: tt.addr_map.drain().into_iter().collect(),
-            _pd: PhantomData,
-        };
-
-        tc.init();
+    fn _compile(mut tt: TirTrace) -> Self {
+        let mut tc = TraceCompiler::new(
+            tt.local_decls.clone(),
+            tt.addr_map.drain().into_iter().collect(),
+        );
 
         for i in 0..tt.len() {
             let res = match unsafe { tt.op(i) } {
@@ -1773,14 +1773,12 @@ impl<TT> TraceCompiler<TT> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CompileError, HashMap, Local, LocalDecl, Location, RegAlloc, TraceCompiler, TypeId,
-        REG_POOL,
+        CompileError, HashMap, Local, LocalDecl, Location, TraceCompiler, TypeId, REG_POOL,
     };
-    use crate::stack_builder::StackBuilder;
     use fm::FMBuilder;
     use libc::{abs, c_void, getuid};
     use regex::Regex;
-    use std::{convert::TryFrom, marker::PhantomData};
+    use std::{convert::TryFrom, default::Default};
     use ykpack::LocalIndex;
     use yktrace::sir::SIR;
     use yktrace::tir::TirTrace;
@@ -1894,20 +1892,7 @@ mod tests {
             },
         );
 
-        let mut tc = TraceCompiler::<IO> {
-            asm: dynasmrt::x64::Assembler::new().unwrap(),
-            register_content_map: REG_POOL
-                .iter()
-                .cloned()
-                .map(|r| (r, RegAlloc::Free))
-                .collect(),
-            variable_location_map: HashMap::new(),
-            local_decls,
-            stack_builder: StackBuilder::default(),
-            addr_map: HashMap::new(),
-            _pd: PhantomData,
-        };
-
+        let mut tc = TraceCompiler::<IO>::new(local_decls, Default::default());
         let u8_loc = tc.local_to_location(Local(0));
         let i64_loc = tc.local_to_location(Local(1));
         let string_loc = tc.local_to_location(Local(2));
@@ -1952,20 +1937,7 @@ mod tests {
             );
         }
 
-        let mut tc = TraceCompiler::<IO> {
-            asm: dynasmrt::x64::Assembler::new().unwrap(),
-            register_content_map: REG_POOL
-                .iter()
-                .cloned()
-                .map(|r| (r, RegAlloc::Free))
-                .collect(),
-            variable_location_map: HashMap::new(),
-            local_decls,
-            stack_builder: StackBuilder::default(),
-            addr_map: HashMap::new(),
-            _pd: PhantomData,
-        };
-
+        let mut tc = TraceCompiler::<IO>::new(local_decls, Default::default());
         let mut seen: Vec<Location> = Vec::new();
         for l in 0..7 {
             let reg = tc.local_to_location(Local(l));
@@ -1994,19 +1966,7 @@ mod tests {
             );
         }
 
-        let mut tc = TraceCompiler::<IO> {
-            asm: dynasmrt::x64::Assembler::new().unwrap(),
-            register_content_map: REG_POOL
-                .iter()
-                .cloned()
-                .map(|r| (r, RegAlloc::Free))
-                .collect(),
-            variable_location_map: HashMap::new(),
-            local_decls,
-            stack_builder: StackBuilder::default(),
-            addr_map: HashMap::new(),
-            _pd: PhantomData,
-        };
+        let mut tc = TraceCompiler::<IO>::new(local_decls, Default::default());
 
         for l in 0..num_regs {
             assert!(matches!(
