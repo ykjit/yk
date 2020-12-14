@@ -47,6 +47,10 @@ lazy_static! {
                                      R10.code(), RBX.code(), R12.code(), R13.code(), R14.code(),
                                      R15.code()];
 
+    // The trace inputs/outputs are always allocated to this reserved register.
+    // This register should not appear in REG_POOL.
+    static ref TIO_REG: u8 = RDI.code();
+
     static ref TEMP_LOC: Location = Location::Reg(*TEMP_REG);
     static ref PTR_SIZE: u64 = u64::try_from(mem::size_of::<usize>()).unwrap();
 }
@@ -375,6 +379,7 @@ impl Location {
 }
 
 /// Allocation of one of the REG_POOL. Temporary registers are tracked separately.
+#[derive(Debug)]
 enum RegAlloc {
     Local(Local),
     Free,
@@ -440,8 +445,8 @@ impl<TT> TraceCompiler<TT> {
     /// performs one.
     fn local_to_location(&mut self, l: Local) -> Location {
         if l == INTERP_STEP_ARG {
-            // The argument is a mutable reference in RDI.
-            Location::Reg(RDI.code())
+            // There is a register set aside for trace inputs.
+            Location::Reg(*TIO_REG)
         } else if let Some(location) = self.variable_location_map.get(&l) {
             // We already have a location for this local.
             location.clone()
@@ -489,6 +494,11 @@ impl<TT> TraceCompiler<TT> {
         match self.variable_location_map.get(local) {
             Some(Location::Reg(reg)) => {
                 // If this local is currently stored in a register, free it.
+                //
+                // Note that if we are marking the reserved TIO_REG free then this actually adds a
+                // new register key to the map (as opposed to marking a pre-existing entry free).
+                // This is safe since if we are freeing TIO_REG, then the trace inputs local must
+                // not be used for the remainder of the trace.
                 self.register_content_map.insert(*reg, RegAlloc::Free);
             }
             Some(Location::Mem { .. }) | Some(Location::Indirect { .. }) => {}
@@ -1770,7 +1780,8 @@ mod tests {
     use fm::FMBuilder;
     use libc::{abs, c_void, getuid};
     use regex::Regex;
-    use std::marker::PhantomData;
+    use std::{convert::TryFrom, marker::PhantomData};
+    use ykpack::LocalIndex;
     use yktrace::sir::SIR;
     use yktrace::tir::TirTrace;
     use yktrace::{start_tracing, TracingKind};
@@ -1960,6 +1971,55 @@ mod tests {
             let reg = tc.local_to_location(Local(l));
             assert!(!seen.contains(&reg));
             seen.push(reg);
+        }
+    }
+
+    // Once registers are full, the allocator should start spilling.
+    #[test]
+    fn reg_alloc_spills() {
+        struct IO(u8);
+
+        let types = TestTypes::new();
+        let num_regs = REG_POOL.len() + 1; // Plus one for TIO_REG.
+        let num_spills = 16;
+        let num_decls = num_regs + num_spills;
+        let mut local_decls = HashMap::new();
+        for i in 0..num_decls {
+            local_decls.insert(
+                Local(u32::try_from(i).unwrap()),
+                LocalDecl {
+                    ty: types.t_u8,
+                    referenced: false,
+                },
+            );
+        }
+
+        let mut tc = TraceCompiler::<IO> {
+            asm: dynasmrt::x64::Assembler::new().unwrap(),
+            register_content_map: REG_POOL
+                .iter()
+                .cloned()
+                .map(|r| (r, RegAlloc::Free))
+                .collect(),
+            variable_location_map: HashMap::new(),
+            local_decls,
+            stack_builder: StackBuilder::default(),
+            addr_map: HashMap::new(),
+            _pd: PhantomData,
+        };
+
+        for l in 0..num_regs {
+            assert!(matches!(
+                tc.local_to_location(Local(LocalIndex::try_from(l).unwrap())),
+                Location::Reg(..)
+            ));
+        }
+
+        for l in num_regs..num_decls {
+            assert!(matches!(
+                tc.local_to_location(Local(LocalIndex::try_from(l).unwrap())),
+                Location::Mem(..)
+            ));
         }
     }
 
