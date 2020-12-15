@@ -1796,6 +1796,9 @@ mod tests {
         t_u8: TypeId,
         t_i64: TypeId,
         t_string: TypeId,
+        t_tiny_struct: TypeId,
+        t_tiny_array: TypeId,
+        t_tiny_tuple: TypeId,
     }
 
     impl TestTypes {
@@ -1814,12 +1817,28 @@ mod tests {
             fn i_return_string() -> String {
                 String::new()
             }
+            struct TinyStruct(u8);
+            #[no_mangle]
+            fn i_return_tiny_struct() -> TinyStruct {
+                TinyStruct(0)
+            }
+            #[no_mangle]
+            fn i_return_tiny_array() -> [u8; 1] {
+                [0]
+            }
+            #[no_mangle]
+            fn i_return_tiny_tuple() -> (u8,) {
+                (0,)
+            }
 
             let rv = usize::try_from(sir::RETURN_LOCAL.0).unwrap();
             TestTypes {
                 t_u8: SIR.body("i_return_u8").unwrap().local_decls[rv].ty,
                 t_i64: SIR.body("i_return_i64").unwrap().local_decls[rv].ty,
                 t_string: SIR.body("i_return_string").unwrap().local_decls[rv].ty,
+                t_tiny_struct: SIR.body("i_return_tiny_struct").unwrap().local_decls[rv].ty,
+                t_tiny_array: SIR.body("i_return_tiny_array").unwrap().local_decls[rv].ty,
+                t_tiny_tuple: SIR.body("i_return_tiny_tuple").unwrap().local_decls[rv].ty,
             }
         }
     }
@@ -2038,6 +2057,89 @@ mod tests {
             tc.local_to_location(Local(LocalIndex::try_from(num_regs + 3).unwrap())),
             Location::Mem(..)
         ));
+    }
+
+    // Check cases where a local is allocated on the stack even if registers are available.
+    #[test]
+    fn reg_alloc_always_on_stack() {
+        struct IO(u8);
+        let types = TestTypes::new();
+        let mut local_decls = HashMap::new();
+
+        // In a TIR trace, the first two decls are a unit and the trace inputs, which are handled
+        // specially. We populate their slots so that we can acquire regular locals with no special
+        // casing.
+        assert!(REG_POOL.len() >= 3); // Or we'd spill regardless.
+        for i in 0..=1 {
+            local_decls.insert(
+                Local(i),
+                LocalDecl {
+                    ty: types.t_u8,
+                    referenced: false,
+                },
+            );
+        }
+
+        // These are the decls we will actually test.
+        local_decls.insert(
+            Local(2),
+            LocalDecl {
+                ty: types.t_string,
+                referenced: false,
+            },
+        );
+        local_decls.insert(
+            Local(3),
+            LocalDecl {
+                ty: types.t_u8,
+                referenced: true,
+            },
+        );
+        local_decls.insert(
+            Local(4),
+            LocalDecl {
+                ty: types.t_tiny_struct,
+                referenced: false,
+            },
+        );
+        local_decls.insert(
+            Local(5),
+            LocalDecl {
+                ty: types.t_tiny_array,
+                referenced: false,
+            },
+        );
+        local_decls.insert(
+            Local(6),
+            LocalDecl {
+                ty: types.t_tiny_tuple,
+                referenced: false,
+            },
+        );
+
+        let mut tc = TraceCompiler::<IO>::new(local_decls, Default::default());
+
+        // Things larger than a register shouldn't be allocated to a register. Here we are
+        // allocating space for a `String`, which at the time of writing, is much larger than the
+        // size of a register on any platform I can think of (e.g. String is 24 bytes on x86_64).
+        assert!(matches!(tc.local_to_location(Local(2)), Location::Mem(..)));
+        tc.local_dead(&Local(2)).unwrap();
+
+        // Small types, like `u8`, can easily fit in a register, but if a local decl is referenced
+        // at some point in its live range then the allocator will put it directly onto the stack
+        // (even if registers are available).
+        assert!(matches!(tc.local_to_location(Local(3)), Location::Mem(..)));
+        tc.local_dead(&Local(3)).unwrap();
+
+        // A one-byte struct/enum/array/tuple can easily fit in a register, but for simplicity the
+        // code-gen currently allocates these types directly to the stack. This is not what we want
+        // in the long-run, but it's an invariant that should be tested nonetheless. FIXME.
+        //
+        // FIXME enum case cannot yet be tested as its layout isn't yet lowered.
+        for l in 4..=6 {
+            assert!(matches!(tc.local_to_location(Local(l)), Location::Mem(..)));
+            tc.local_dead(&Local(l)).unwrap();
+        }
     }
 
     #[inline(never)]
