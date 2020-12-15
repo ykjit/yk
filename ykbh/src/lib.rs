@@ -1,8 +1,8 @@
 use std::alloc::{alloc, dealloc, Layout};
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::sync::Arc;
 use ykpack::{
-    self, BodyFlags, CallOperand, Constant, ConstantInt, IPlace, Local, LocalDecl, Statement,
+    self, Body, BodyFlags, CallOperand, Constant, ConstantInt, IPlace, Local, Statement,
     Terminator, UnsignedInt,
 };
 use yktrace::sir::SIR;
@@ -132,8 +132,8 @@ pub struct SIRInterpreter {
 }
 
 impl SIRInterpreter {
-    pub fn new(local_decls: &Vec<LocalDecl>) -> Self {
-        let frame = SIRInterpreter::allocate_locals(local_decls);
+    pub fn new(body: &Body) -> Self {
+        let frame = SIRInterpreter::create_frame(body);
         SIRInterpreter {
             frames: vec![frame],
             bbidx: 0,
@@ -142,21 +142,10 @@ impl SIRInterpreter {
 
     /// Given a vector of local declarations, create a new StackFrame, which allocates just enough
     /// space to hold all of them.
-    fn allocate_locals(local_decls: &Vec<LocalDecl>) -> StackFrame {
-        // FIXME Soon this will be pre-computed and handed to us by SIR.
-        let mut offsets = Vec::new();
-        let mut layout = Layout::from_size_align(0, 1).unwrap();
-        for d in local_decls {
-            let align = SIR.ty(&d.ty).align();
-            let size = SIR.ty(&d.ty).size();
-            let l = Layout::from_size_align(size.try_into().unwrap(), align.try_into().unwrap())
-                .unwrap();
-            let (nl, s) = layout.extend(l).unwrap();
-            offsets.push(s);
-            layout = nl;
-        }
-        layout = layout.pad_to_align();
-
+    fn create_frame(body: &Body) -> StackFrame {
+        let (size, align) = body.layout;
+        let offsets = body.offsets.clone();
+        let layout = Layout::from_size_align(size, align).unwrap();
         // Allocate memory for the locals
         let locals = unsafe { alloc(layout) };
         StackFrame {
@@ -225,7 +214,7 @@ impl SIRInterpreter {
 
                     // Initialise the new stack frame.
                     let body = SIR.body(fname).unwrap();
-                    let mut frame = SIRInterpreter::allocate_locals(&body.local_decls);
+                    let mut frame = SIRInterpreter::create_frame(&*body);
                     frame.copy_args(args, self.frame());
                     self.frames.push(frame);
                     self.bbidx = 0;
@@ -288,7 +277,7 @@ mod tests {
 
     fn interp(fname: &str, tio: *mut u8) {
         let body = SIR.body(fname).unwrap();
-        let mut si = SIRInterpreter::new(&body.local_decls);
+        let mut si = SIRInterpreter::new(&*body);
         // The raw pointer `tio` and the reference it was created from do not alias since we won't
         // be using the reference until the function `interpret` returns.
         si.set_trace_inputs(tio);
