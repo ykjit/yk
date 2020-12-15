@@ -13,7 +13,9 @@ use std::{
     iter::Iterator,
     sync::{Arc, RwLock}
 };
-use ykpack::{self, Body, BodyFlags, CguHash, Decoder, Pack, SirHeader, SirOffset, Ty};
+use ykpack::{self, Body, BodyFlags, CguHash, Decoder, Local, Pack, SirHeader, SirOffset, Ty};
+
+pub const RETURN_LOCAL: Local = Local(0);
 
 lazy_static! {
     pub static ref EXE_MMAP: Mmap =

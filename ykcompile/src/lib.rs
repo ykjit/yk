@@ -47,6 +47,10 @@ lazy_static! {
                                      R10.code(), RBX.code(), R12.code(), R13.code(), R14.code(),
                                      R15.code()];
 
+    // The trace inputs/outputs are always allocated to this reserved register.
+    // This register should not appear in REG_POOL.
+    static ref TIO_REG: u8 = RDI.code();
+
     static ref TEMP_LOC: Location = Location::Reg(*TEMP_REG);
     static ref PTR_SIZE: u64 = u64::try_from(mem::size_of::<usize>()).unwrap();
 }
@@ -375,6 +379,7 @@ impl Location {
 }
 
 /// Allocation of one of the REG_POOL. Temporary registers are tracked separately.
+#[derive(Debug)]
 enum RegAlloc {
     Local(Local),
     Free,
@@ -401,6 +406,27 @@ pub struct TraceCompiler<TT> {
 }
 
 impl<TT> TraceCompiler<TT> {
+    fn new(local_decls: HashMap<Local, LocalDecl>, addr_map: HashMap<String, u64>) -> Self {
+        let mut tc = TraceCompiler::<TT> {
+            asm: dynasmrt::x64::Assembler::new().unwrap(),
+            register_content_map: REG_POOL.iter().map(|r| (*r, RegAlloc::Free)).collect(),
+            variable_location_map: HashMap::new(),
+            local_decls,
+            stack_builder: StackBuilder::default(),
+            addr_map,
+            _pd: PhantomData,
+        };
+
+        // At the start of the trace, jump to the label that allocates stack space.
+        dynasm!(tc.asm
+            ; jmp ->reserve
+            ; ->crash:
+            ; ud2
+            ; ->main:
+        );
+        tc
+    }
+
     fn can_live_in_register(decl: &LocalDecl) -> bool {
         if decl.referenced {
             // We must allocate it on the stack so that we can reference it.
@@ -440,8 +466,8 @@ impl<TT> TraceCompiler<TT> {
     /// performs one.
     fn local_to_location(&mut self, l: Local) -> Location {
         if l == INTERP_STEP_ARG {
-            // The argument is a mutable reference in RDI.
-            Location::Reg(RDI.code())
+            // There is a register set aside for trace inputs.
+            Location::Reg(*TIO_REG)
         } else if let Some(location) = self.variable_location_map.get(&l) {
             // We already have a location for this local.
             location.clone()
@@ -484,11 +510,16 @@ impl<TT> TraceCompiler<TT> {
         self.stack_builder.alloc(ty.size(), ty.align())
     }
 
-    /// Notifies the register allocator that the register allocated to `local` may now be re-used.
-    fn free_register(&mut self, local: &Local) -> Result<(), CompileError> {
+    /// Notifies the register allocator that a local has died and that its storage may be freed.
+    fn local_dead(&mut self, local: &Local) -> Result<(), CompileError> {
         match self.variable_location_map.get(local) {
             Some(Location::Reg(reg)) => {
                 // If this local is currently stored in a register, free it.
+                //
+                // Note that if we are marking the reserved TIO_REG free then this actually adds a
+                // new register key to the map (as opposed to marking a pre-existing entry free).
+                // This is safe since if we are freeing TIO_REG, then the trace inputs local must
+                // not be used for the remainder of the trace.
                 self.register_content_map.insert(*reg, RegAlloc::Free);
             }
             Some(Location::Mem { .. }) | Some(Location::Indirect { .. }) => {}
@@ -931,7 +962,7 @@ impl<TT> TraceCompiler<TT> {
                 idx,
                 scale,
             } => self.c_dynoffs(dest, base, idx, *scale),
-            Statement::StorageDead(l) => self.free_register(l)?,
+            Statement::StorageDead(l) => self.local_dead(l)?,
             Statement::Call(target, args, dest) => self.c_call(target, args, dest)?,
             Statement::Cast(dest, src) => self.c_cast(dest, src),
             Statement::Nop | Statement::Debug(..) => {}
@@ -1658,16 +1689,6 @@ impl<TT> TraceCompiler<TT> {
         );
     }
 
-    fn init(&mut self) {
-        // Jump to the label that reserves stack space for spilled locals.
-        dynasm!(self.asm
-            ; jmp ->reserve
-            ; ->crash:
-            ; ud2
-            ; ->main:
-        );
-    }
-
     /// Finish compilation and return the executable code that was assembled.
     fn finish(self, debug: bool) -> dynasmrt::ExecutableBuffer {
         let buf = self.asm.finalize().unwrap();
@@ -1710,22 +1731,11 @@ impl<TT> TraceCompiler<TT> {
         }
     }
 
-    fn _compile(tt: TirTrace) -> Self {
-        let assembler = dynasmrt::x64::Assembler::new().unwrap();
-
-        // Make the TirTrace mutable so we can drain it into the TraceCompiler.
-        let mut tt = tt;
-        let mut tc = TraceCompiler::<TT> {
-            asm: assembler,
-            register_content_map: REG_POOL.iter().map(|r| (*r, RegAlloc::Free)).collect(),
-            variable_location_map: HashMap::new(),
-            local_decls: tt.local_decls.clone(),
-            stack_builder: StackBuilder::default(),
-            addr_map: tt.addr_map.drain().into_iter().collect(),
-            _pd: PhantomData,
-        };
-
-        tc.init();
+    fn _compile(mut tt: TirTrace) -> Self {
+        let mut tc = TraceCompiler::new(
+            tt.local_decls.clone(),
+            tt.addr_map.drain().into_iter().collect(),
+        );
 
         for i in 0..tt.len() {
             let res = match unsafe { tt.op(i) } {
@@ -1762,13 +1772,15 @@ impl<TT> TraceCompiler<TT> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CompileError, HashMap, Local, Location, RegAlloc, TraceCompiler, REG_POOL};
-    use crate::stack_builder::StackBuilder;
+    use super::{
+        CompileError, HashMap, Local, LocalDecl, Location, TraceCompiler, TypeId, REG_POOL,
+    };
     use fm::FMBuilder;
     use libc::{abs, c_void, getuid};
     use regex::Regex;
-    use std::marker::PhantomData;
-    use yktrace::sir::SIR;
+    use std::{convert::TryFrom, default::Default};
+    use ykpack::LocalIndex;
+    use yktrace::sir::{self, SIR};
     use yktrace::tir::TirTrace;
     use yktrace::{start_tracing, TracingKind};
 
@@ -1777,6 +1789,39 @@ mod tests {
     }
     extern "C" {
         fn add_some(a: u64, b: u64, c: u64, d: u64, e: u64) -> u64;
+    }
+
+    /// Types IDs that we need for tests.
+    struct TestTypes {
+        t_u8: TypeId,
+        t_i64: TypeId,
+        t_string: TypeId,
+    }
+
+    impl TestTypes {
+        fn new() -> TestTypes {
+            // We can't know the type ID of any given type, so this works by defining unmangled
+            // functions with known return types and then looking them up by name in the SIR.
+            #[no_mangle]
+            fn i_return_u8() -> u8 {
+                0
+            }
+            #[no_mangle]
+            fn i_return_i64() -> i64 {
+                0
+            }
+            #[no_mangle]
+            fn i_return_string() -> String {
+                String::new()
+            }
+
+            let rv = usize::try_from(sir::RETURN_LOCAL.0).unwrap();
+            TestTypes {
+                t_u8: SIR.body("i_return_u8").unwrap().local_decls[rv].ty,
+                t_i64: SIR.body("i_return_i64").unwrap().local_decls[rv].ty,
+                t_string: SIR.body("i_return_string").unwrap().local_decls[rv].ty,
+            }
+        }
     }
 
     /// Fuzzy matches the textual TIR for the trace `tt` with the pattern `ptn`.
@@ -1820,58 +1865,179 @@ mod tests {
 
     // Repeatedly fetching the register for the same local should yield the same register and
     // should not exhaust the allocator.
-    #[ignore] // Broken because we don't know what type IDs to put in local_decls.
     #[test]
     fn reg_alloc_same_local() {
         struct IO(u8);
-        let mut tc = TraceCompiler::<IO> {
-            asm: dynasmrt::x64::Assembler::new().unwrap(),
-            register_content_map: REG_POOL
-                .iter()
-                .cloned()
-                .map(|r| (r, RegAlloc::Free))
-                .collect(),
-            variable_location_map: HashMap::new(),
-            local_decls: HashMap::default(),
-            stack_builder: StackBuilder::default(),
-            addr_map: HashMap::new(),
-            _pd: PhantomData,
-        };
 
+        let types = TestTypes::new();
+        let mut local_decls = HashMap::new();
+        local_decls.insert(
+            Local(0),
+            LocalDecl {
+                ty: types.t_u8,
+                referenced: false,
+            },
+        );
+        local_decls.insert(
+            Local(1),
+            LocalDecl {
+                ty: types.t_i64,
+                referenced: false,
+            },
+        );
+        local_decls.insert(
+            Local(2),
+            LocalDecl {
+                ty: types.t_string,
+                referenced: false,
+            },
+        );
+
+        let mut tc = TraceCompiler::<IO>::new(local_decls, Default::default());
+        let u8_loc = tc.local_to_location(Local(0));
+        let i64_loc = tc.local_to_location(Local(1));
+        let string_loc = tc.local_to_location(Local(2));
         for _ in 0..32 {
-            assert_eq!(
-                tc.local_to_location(Local(1)),
-                tc.local_to_location(Local(1))
-            );
+            assert_eq!(tc.local_to_location(Local(0)), u8_loc);
+            assert_eq!(tc.local_to_location(Local(1)), i64_loc);
+            assert_eq!(tc.local_to_location(Local(2)), string_loc);
+            assert_eq!(tc.local_to_location(Local(1)), i64_loc);
+            assert_eq!(tc.local_to_location(Local(2)), string_loc);
+            assert_eq!(tc.local_to_location(Local(0)), u8_loc);
         }
     }
 
     // Locals should be allocated to different registers.
-    #[ignore] // Broken because we don't know what type IDs to put in local_decls.
     #[test]
     fn reg_alloc() {
-        let local_decls = HashMap::new();
         struct IO(u8);
-        let mut tc = TraceCompiler::<IO> {
-            asm: dynasmrt::x64::Assembler::new().unwrap(),
-            register_content_map: REG_POOL
-                .iter()
-                .cloned()
-                .map(|r| (r, RegAlloc::Free))
-                .collect(),
-            variable_location_map: HashMap::new(),
-            local_decls,
-            stack_builder: StackBuilder::default(),
-            addr_map: HashMap::new(),
-            _pd: PhantomData,
-        };
 
+        let types = TestTypes::new();
+        let mut local_decls = HashMap::new();
+        for i in (0..9).step_by(3) {
+            local_decls.insert(
+                Local(i + 0),
+                LocalDecl {
+                    ty: types.t_u8,
+                    referenced: false,
+                },
+            );
+            local_decls.insert(
+                Local(i + 1),
+                LocalDecl {
+                    ty: types.t_i64,
+                    referenced: false,
+                },
+            );
+            local_decls.insert(
+                Local(i + 2),
+                LocalDecl {
+                    ty: types.t_string,
+                    referenced: false,
+                },
+            );
+        }
+
+        let mut tc = TraceCompiler::<IO>::new(local_decls, Default::default());
         let mut seen: Vec<Location> = Vec::new();
         for l in 0..7 {
             let reg = tc.local_to_location(Local(l));
             assert!(!seen.contains(&reg));
             seen.push(reg);
         }
+    }
+
+    // Once registers are full, the allocator should start spilling.
+    #[test]
+    fn reg_alloc_spills() {
+        struct IO(u8);
+
+        let types = TestTypes::new();
+        let num_regs = REG_POOL.len() + 1; // Plus one for TIO_REG.
+        let num_spills = 16;
+        let num_decls = num_regs + num_spills;
+        let mut local_decls = HashMap::new();
+        for i in 0..num_decls {
+            local_decls.insert(
+                Local(u32::try_from(i).unwrap()),
+                LocalDecl {
+                    ty: types.t_u8,
+                    referenced: false,
+                },
+            );
+        }
+
+        let mut tc = TraceCompiler::<IO>::new(local_decls, Default::default());
+
+        for l in 0..num_regs {
+            assert!(matches!(
+                tc.local_to_location(Local(LocalIndex::try_from(l).unwrap())),
+                Location::Reg(..)
+            ));
+        }
+
+        for l in num_regs..num_decls {
+            assert!(matches!(
+                tc.local_to_location(Local(LocalIndex::try_from(l).unwrap())),
+                Location::Mem(..)
+            ));
+        }
+    }
+
+    // Freeing registers should allow them to be re-allocated.
+    #[test]
+    fn reg_alloc_spills_and_frees() {
+        struct IO(u8);
+
+        let types = TestTypes::new();
+        let num_regs = REG_POOL.len() + 1; // Plus one for TIO_REG.
+        let num_decls = num_regs + 4;
+        let mut local_decls = HashMap::new();
+        for i in 0..num_decls {
+            local_decls.insert(
+                Local(u32::try_from(i).unwrap()),
+                LocalDecl {
+                    ty: types.t_u8,
+                    referenced: false,
+                },
+            );
+        }
+
+        let mut tc = TraceCompiler::<IO>::new(local_decls, Default::default());
+
+        // Fill registers.
+        for l in 0..num_regs {
+            assert!(matches!(
+                tc.local_to_location(Local(LocalIndex::try_from(l).unwrap())),
+                Location::Reg(..)
+            ));
+        }
+
+        // Allocating one more local should spill.
+        assert!(matches!(
+            tc.local_to_location(Local(LocalIndex::try_from(num_regs).unwrap())),
+            Location::Mem(..)
+        ));
+
+        // Now let's free two locals previously given a register.
+        tc.local_dead(&Local(3)).unwrap();
+        tc.local_dead(&Local(5)).unwrap();
+
+        // Allocating two more locals should therefore yield register locations.
+        assert!(matches!(
+            tc.local_to_location(Local(LocalIndex::try_from(num_regs + 1).unwrap())),
+            Location::Reg(..)
+        ));
+        assert!(matches!(
+            tc.local_to_location(Local(LocalIndex::try_from(num_regs + 2).unwrap())),
+            Location::Reg(..)
+        ));
+
+        // And one more should spill again.
+        assert!(matches!(
+            tc.local_to_location(Local(LocalIndex::try_from(num_regs + 3).unwrap())),
+            Location::Mem(..)
+        ));
     }
 
     #[inline(never)]
