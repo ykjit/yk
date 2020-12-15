@@ -21,7 +21,7 @@ use std::ffi::CString;
 use std::fmt::{self, Display, Formatter};
 use std::mem;
 use std::process::Command;
-use ykpack::{IPlace, OffT, SignedIntTy, Ty, TypeId, UnsignedIntTy};
+use ykpack::{IPlace, OffT, SignedIntTy, Ty, TyKind, TypeId, UnsignedIntTy};
 use yktrace::tir::{
     BinOp, CallOperand, Constant, Guard, GuardKind, Local, Statement, TirOp, TirTrace,
 };
@@ -435,14 +435,14 @@ impl<TT> TraceCompiler<TT> {
 
         // FIXME: optimisation: small structs and tuples etc. could actually live in a register.
         let ty = &*SIR.ty(&decl.ty);
-        match ty {
-            Ty::UnsignedInt(ui) => !matches!(ui, UnsignedIntTy::U128),
-            Ty::SignedInt(si) => !matches!(si, SignedIntTy::I128),
-            Ty::Array { .. } => false,
-            Ty::Slice(_) => false,
-            Ty::Ref(_) | Ty::Bool | Ty::Char => true,
-            Ty::Struct(..) | Ty::Tuple(..) => false,
-            Ty::Unimplemented(..) => todo!("{}", ty),
+        match &ty.kind {
+            TyKind::UnsignedInt(ui) => !matches!(ui, UnsignedIntTy::U128),
+            TyKind::SignedInt(si) => !matches!(si, SignedIntTy::I128),
+            TyKind::Array { .. } => false,
+            TyKind::Slice(_) => false,
+            TyKind::Ref(_) | TyKind::Bool | TyKind::Char => true,
+            TyKind::Struct(..) | TyKind::Tuple(..) => false,
+            TyKind::Unimplemented(..) => todo!("{}", ty),
         }
     }
 
@@ -1015,8 +1015,8 @@ impl<TT> TraceCompiler<TT> {
         let src_loc = self.iplace_to_location(src);
         let ty = &*SIR.ty(&src.ty()); // Type of the source.
         let cty = SIR.ty(&dest.ty()); // Type of the cast (same as dest type).
-        match ty {
-            Ty::UnsignedInt(_) => self.c_cast_uint(src_loc, &ty, &cty),
+        match ty.kind {
+            TyKind::UnsignedInt(_) => self.c_cast_uint(src_loc, &ty, &cty),
             _ => todo!(),
         }
         let dest_loc = self.iplace_to_location(dest);

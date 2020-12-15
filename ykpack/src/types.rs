@@ -7,7 +7,6 @@ use std::{
     convert::TryFrom,
     default::Default,
     fmt::{self, Display},
-    mem,
 };
 
 // FIXME these should probably all be tuple structs, as type aliases offer little type safety.
@@ -33,7 +32,14 @@ impl Display for CguHash {
 
 /// The type of a local variable.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
-pub enum Ty {
+pub struct Ty {
+    pub size: usize,
+    pub align: usize,
+    pub kind: TyKind,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
+pub enum TyKind {
     /// Signed integers.
     SignedInt(SignedIntTy),
     /// Unsigned integers.
@@ -44,11 +50,7 @@ pub enum Ty {
     Tuple(TupleTy),
     /// An array type.
     /// FIXME size_align can be computed from elem_ty and len, but requires some refactoring.
-    Array {
-        elem_ty: TypeId,
-        len: usize,
-        size_align: SizeAndAlign,
-    },
+    Array { elem_ty: TypeId, len: usize },
     /// A slice type.
     Slice(TypeId),
     /// A reference to something.
@@ -63,107 +65,42 @@ pub enum Ty {
 
 impl Display for Ty {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Ty::SignedInt(si) => write!(f, "{}", si),
-            Ty::UnsignedInt(ui) => write!(f, "{}", ui),
-            Ty::Struct(sty) => write!(f, "{}", sty),
-            Ty::Tuple(tty) => write!(f, "{}", tty),
-            Ty::Array { elem_ty, len, .. } => {
+        match &self.kind {
+            TyKind::SignedInt(si) => write!(f, "{}", si),
+            TyKind::UnsignedInt(ui) => write!(f, "{}", ui),
+            TyKind::Struct(sty) => write!(f, "{}", sty),
+            TyKind::Tuple(tty) => write!(f, "{}", tty),
+            TyKind::Array { elem_ty, len, .. } => {
                 write!(f, "[({}, {}); {}]", elem_ty.0, elem_ty.1, len)
             }
-            Ty::Slice(sty) => write!(f, "&[{:?}]", sty),
-            Ty::Ref(rty) => write!(f, "&{:?}", rty),
-            Ty::Bool => write!(f, "bool"),
-            Ty::Char => write!(f, "char"),
-            Ty::Unimplemented(m) => write!(f, "Unimplemented: {}", m),
+            TyKind::Slice(sty) => write!(f, "&[{:?}]", sty),
+            TyKind::Ref(rty) => write!(f, "&{:?}", rty),
+            TyKind::Bool => write!(f, "bool"),
+            TyKind::Char => write!(f, "char"),
+            TyKind::Unimplemented(m) => write!(f, "Unimplemented: {}", m),
         }
     }
 }
 
 impl Ty {
     pub fn size(&self) -> u64 {
-        match self {
-            Ty::UnsignedInt(ui) => match ui {
-                UnsignedIntTy::U8 => 1,
-                UnsignedIntTy::U16 => 2,
-                UnsignedIntTy::U32 => 4,
-                UnsignedIntTy::U64 => 8,
-                UnsignedIntTy::Usize => u64::try_from(mem::size_of::<usize>()).unwrap(),
-                UnsignedIntTy::U128 => 16,
-            },
-            Ty::SignedInt(ui) => match ui {
-                SignedIntTy::I8 => 1,
-                SignedIntTy::I16 => 2,
-                SignedIntTy::I32 => 4,
-                SignedIntTy::I64 => 8,
-                SignedIntTy::Isize => u64::try_from(mem::size_of::<isize>()).unwrap(),
-                SignedIntTy::I128 => 16,
-            },
-            Ty::Struct(sty) => u64::try_from(sty.size_align.size).unwrap(),
-            Ty::Tuple(tty) => u64::try_from(tty.size_align.size).unwrap(),
-            Ty::Ref(_) => u64::try_from(mem::size_of::<usize>()).unwrap(),
-            Ty::Bool => u64::try_from(mem::size_of::<bool>()).unwrap(),
-            Ty::Char => u64::try_from(mem::size_of::<char>()).unwrap(),
-            Ty::Array {
-                size_align: SizeAndAlign { size, .. },
-                ..
-            } => u64::try_from(*size).unwrap(),
-            _ => todo!(),
-        }
+        u64::try_from(self.size).unwrap()
     }
 
     pub fn align(&self) -> u64 {
-        match self {
-            Ty::UnsignedInt(ui) => match ui {
-                UnsignedIntTy::U8 => 1,
-                UnsignedIntTy::U16 => 2,
-                UnsignedIntTy::U32 => 4,
-                UnsignedIntTy::U64 => 8,
-                UnsignedIntTy::Usize =>
-                {
-                    #[cfg(target_arch = "x86_64")]
-                    8
-                }
-                UnsignedIntTy::U128 => 16,
-            },
-            Ty::SignedInt(ui) => match ui {
-                SignedIntTy::I8 => 1,
-                SignedIntTy::I16 => 2,
-                SignedIntTy::I32 => 4,
-                SignedIntTy::I64 => 8,
-                SignedIntTy::Isize =>
-                {
-                    #[cfg(target_arch = "x86_64")]
-                    8
-                }
-                SignedIntTy::I128 => 16,
-            },
-            Ty::Struct(sty) => u64::try_from(sty.size_align.align).unwrap(),
-            Ty::Tuple(tty) => u64::try_from(tty.size_align.align).unwrap(),
-            Ty::Ref(_) =>
-            {
-                #[cfg(target_arch = "x86_64")]
-                8
-            }
-            Ty::Bool => u64::try_from(mem::size_of::<bool>()).unwrap(),
-            Ty::Array {
-                size_align: SizeAndAlign { align, .. },
-                ..
-            } => u64::try_from(*align).unwrap(),
-            _ => todo!("{:?}", self),
-        }
+        u64::try_from(self.align).unwrap()
     }
 
     pub fn is_signed_int(&self) -> bool {
-        matches!(self, Self::SignedInt(..))
+        matches!(self.kind, TyKind::SignedInt(..))
     }
 
     pub fn is_int(&self) -> bool {
-        matches!(self, Self::SignedInt(..)) || matches!(self, Self::UnsignedInt(..))
+        matches!(self.kind, TyKind::SignedInt(..)) || matches!(self.kind, TyKind::UnsignedInt(..))
     }
 
     pub fn is_unit(&self) -> bool {
-        if let Self::Tuple(tty) = self {
+        if let TyKind::Tuple(tty) = &self.kind {
             tty.is_unit()
         } else {
             false
@@ -171,8 +108,8 @@ impl Ty {
     }
 
     pub fn unwrap_tuple(&self) -> &TupleTy {
-        if let Self::Tuple(tty) = self {
-            tty
+        if let TyKind::Tuple(tty) = &self.kind {
+            &tty
         } else {
             panic!("tried to unwrap a non-tuple");
         }
@@ -257,25 +194,9 @@ impl Display for Fields {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
-pub struct SizeAndAlign {
-    /// The alignment, in bytes.
-    pub align: i32, // i32 for use as a dynasm operand.
-    /// The size, in bytes.
-    pub size: i32, // Also i32 for dynasm.
-}
-
-impl Display for SizeAndAlign {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "align: {}, size: {}", self.align, self.size)
-    }
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
 pub struct TupleTy {
     /// The fields of the tuple.
     pub fields: Fields,
-    /// The size and alignment of the tuple.
-    pub size_align: SizeAndAlign,
 }
 
 impl TupleTy {
@@ -286,7 +207,7 @@ impl TupleTy {
 
 impl Display for TupleTy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "TupleTy {{ {}, {} }}", self.fields, self.size_align)
+        write!(f, "TupleTy {{ {} }}", self.fields)
     }
 }
 
@@ -294,13 +215,11 @@ impl Display for TupleTy {
 pub struct StructTy {
     /// The fields of the struct.
     pub fields: Fields,
-    /// The size and alignment of the struct.
-    pub size_align: SizeAndAlign,
 }
 
 impl Display for StructTy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "StructTy {{ {}, {} }}", self.fields, self.size_align)
+        write!(f, "StructTy {{ {} }}", self.fields)
     }
 }
 
