@@ -1,7 +1,6 @@
 #[cfg(test)]
 use std::time::Duration;
 use std::{
-    alloc::{alloc, dealloc, Layout},
     io,
     marker::PhantomData,
     mem,
@@ -27,11 +26,11 @@ const PHASE_NUM_BITS: usize = 3;
 const PHASE_TAG: usize = 0b111; // All of the other PHASE_ tags must fit in this.
 const PHASE_COMPILED: usize = 0b000; // Value is a pointer to a chunk of memory containing a
                                      // CompiledTrace<I>.
-const PHASE_TRACING: usize = 0b001; // Value is a pointer to a malloc'd block that allows us to
-                                    // precisely identify when we have reached the same Location.
+const PHASE_TRACING: usize = 0b001; // Value is a pointer to an Arc<u8> representing a thread ID.
 const PHASE_COMPILING: usize = 0b010; // Value is a pointer to a `Box<CompilingTrace<I>>`.
 const PHASE_COUNTING: usize = 0b011; // Value specifies how many times we've seen this Location.
 const PHASE_LOCKED: usize = 0b100; // No associated value.
+const PHASE_DONT_TRACE: usize = 0b101; // No associated value.
 
 /// A `Location` stores state that the meta-tracer needs to identify hot loops and run associated
 /// machine code.
@@ -49,41 +48,41 @@ pub struct Location<I> {
     // A Location is a state machine which operates as follows (where PHASE_COUNTING is the start
     // state):
     //
-    //               ┌────────────────────────────────────────┐
-    //               │                                        │ ─────────────┐
-    //   reprofile   │             PHASE_COUNTING             │              │
-    //  ┌──────────▶ │                                        │ ◀────────────┘
-    //  │            └────────────────────────────────────────┘    increment
-    //  │              │                                 ▲         count
-    //  │              │ start tracing                   │
-    //  │              ▼                                 │
-    //  │            ┌────────────────────┐              │ abort
-    //  │      ┌─────│                    │              |
-    //  │      |     │   PHASE_TRACING    │ ─────────────┤
-    //  │      └────▶│                    │              |
-    //  │            └────────────────────┘              │
-    //  │              │ start compiling trace           │
-    //  │              │ in thread                       │
-    //  │              ▼                                 │
-    //  │            ┌────────────────────┐              │
-    //  │            │                    │              |
-    //  |            |  PHASE_COMPILING   | ─────────────┤
-    //  │            │                    │              |
-    //  │            └────────────────────┘              |
-    //  │              │ trace maybe    ▲                |
-    //  │              │ compiled       | trace not yet  |
-    //  │              ▼                | compiled       |
-    //  │            ┌────────────────────┐              |
-    //  │            │    PHASE_LOCKED    │ ─────────────┘
-    //  │            └────────────────────┘
-    //  │              │ trace definitely
-    //  │              │ compiled
-    //  │              ▼
-    //  │            ┌────────────────────┐
-    //  │            │                    │ ──────┐
-    //  │            │   PHASE_COMPILED   │       │
-    //  └─────────── │                    │ ◀─────┘
-    //               └────────────────────┘
+    //              ┌────────────────────────────────────────┐
+    //              │                                        │─────────────┐
+    //   reprofile  │             PHASE_COUNTING             │             │
+    //  ┌──────────▶│                                        │◀────────────┘
+    //  │           └────────────────────────────────────────┘    increment
+    //  │             │                                             count
+    //  │             │ start tracing
+    //  │             ▼
+    //  │           ┌────────────────────┐
+    //  │           │                    │  abort   ┌────────────────────┐
+    //  │           │   PHASE_TRACING    │─────────▶│  PHASE_DONT_TRACE  │
+    //  │           │                    │          └────────────────────┘
+    //  │           └────────────────────┘
+    //  │             │ start compiling trace
+    //  │             │ in thread
+    //  │             ▼
+    //  │           ┌────────────────────┐
+    //  │           │                    │
+    //  |           |  PHASE_COMPILING   |
+    //  │           │                    │
+    //  │           └────────────────────┘
+    //  │             │ trace maybe    ▲
+    //  │             │ compiled       | trace not yet
+    //  │             ▼                | compiled
+    //  │           ┌────────────────────┐
+    //  │           │    PHASE_LOCKED    │
+    //  │           └────────────────────┘
+    //  │             │ trace definitely
+    //  │             │ compiled
+    //  │             ▼
+    //  │           ┌────────────────────┐
+    //  │           │                    │──────┐
+    //  │           │   PHASE_COMPILED   │      │
+    //  └───────────│                    │◀─────┘
+    //              └────────────────────┘
     //
     // We hope that a Location soon reaches PHASE_COMPILED (aka "the happy state") and stays there.
     state: AtomicUsize,
@@ -95,6 +94,15 @@ impl<I> Location<I> {
         Self {
             state: AtomicUsize::new(PHASE_COUNTING),
             phantom: PhantomData,
+        }
+    }
+}
+
+impl<I> Drop for Location<I> {
+    fn drop(&mut self) {
+        let lp = *self.state.get_mut();
+        if lp & PHASE_TAG == PHASE_TRACING {
+            unsafe { Arc::from_raw((lp & !PHASE_TAG) as *mut u8) };
         }
     }
 }
@@ -304,14 +312,21 @@ impl MTThread {
                             // there's no point incrementing the hot count.
                             return None;
                         }
-                        let new_state = self.inner.tid as usize | PHASE_TRACING;
+                        let ptr = Arc::into_raw(Arc::clone(&self.inner.tid));
+                        debug_assert_eq!(ptr as usize & PHASE_TAG, 0);
+                        let new_state = ptr as usize | PHASE_TRACING;
                         if loc.state.compare_and_swap(lp, new_state, Ordering::Relaxed) == lp {
-                            Rc::get_mut(&mut self.inner).unwrap().tracer =
-                                Some((start_tracing(self.inner.tracing_kind), self.inner.tid));
+                            Rc::get_mut(&mut self.inner).unwrap().tracer = Some((
+                                start_tracing(self.inner.tracing_kind),
+                                Arc::clone(&self.inner.tid),
+                            ));
                             return None;
                         }
                         // We raced with another thread, which probably moved the Location from
                         // PHASE_COUNTING to PHASE_TRACING.
+                        unsafe {
+                            Arc::from_raw(ptr as *mut u8);
+                        }
                         return None;
                     } else {
                         let new_state = PHASE_COUNTING | ((count + 1) << PHASE_NUM_BITS);
@@ -332,17 +347,38 @@ impl MTThread {
                 }
             }
             PHASE_TRACING => {
-                if let Some((_, tid)) = self.inner.tracer {
+                let loc_tid = unsafe { Arc::from_raw((lp & !PHASE_TAG) as *mut u8) };
+                if let Some((_, ref tid)) = self.inner.tracer {
                     // This thread is tracing something...
-                    if tid != ((lp & !PHASE_TAG) as *mut u8) {
+                    if !Arc::ptr_eq(tid, &loc_tid) {
                         // ...but we didn't start at the current Location.
+                        mem::forget(loc_tid);
                         return None;
                     } else {
                         // ...and we started at this Location, so we've got a complete loop!
                     }
                 } else {
                     // Another thread is tracing this location.
-                    return None;
+                    if Arc::strong_count(&loc_tid) == 1 {
+                        // The other thread has stopped. Mark this Location as DONT_TRACE.
+                        if loc
+                            .state
+                            .compare_and_swap(lp, PHASE_DONT_TRACE, Ordering::Acquire)
+                            == lp
+                        {
+                            // Drop the thread tid Arc.
+                            return None;
+                        } else {
+                            // We raced with another thread that is probably trying to set this to
+                            // PHASE_DONT_TRACE. Let it do its work, whatever that is.
+                            mem::forget(loc_tid);
+                            return None;
+                        }
+                    } else {
+                        // The other thread is still alive.
+                        mem::forget(loc_tid);
+                        return None;
+                    }
                 }
 
                 // Stop the tracer
@@ -414,7 +450,7 @@ impl MTThread {
                 mem::forget(mtx);
                 return None;
             }
-            PHASE_LOCKED => return None,
+            PHASE_LOCKED | PHASE_DONT_TRACE => return None,
             PHASE_COMPILED => {
                 let bct = unsafe { Box::from_raw((lp & !PHASE_TAG) as *mut CompiledTrace<I>) };
                 let f = unsafe { mem::transmute::<_, fn(&mut I) -> bool>(bct.ptr()) };
@@ -429,31 +465,26 @@ impl MTThread {
 /// The innards of a meta-tracer thread.
 struct MTThreadInner {
     mt: MT,
-    /// A value that uniquely identifies a thread. Since this ID needs to be ORable with PHASE_TAG,
-    /// we use a pointer to a malloc'd chunk of memory. We guarantee a) that chunk is aligned to a
-    /// machine word b) that it is a non-zero chunk of memory (and thus guaranteed to be a unique
-    /// pointer).
-    tid: *mut u8,
+    /// An Arc whose pointer address uniquely identifies this thread. When a Location is traced,
+    /// this Arc's strong count will be incremented. If, after this thread drops, this Arc's strong
+    /// count remains > 0, it means that it was in the process of tracing a loop, implying that
+    /// there is (or, at least, was at some point) a Location stuck in PHASE_TRACING.
+    tid: Arc<u8>,
     hot_threshold: HotThreshold,
     tracing_kind: TracingKind,
     /// The active tracer and the unique identifier of the [Location] that is being traced. We use
     /// a pointer to a 1 byte malloc'd chunk of memory since the resulting address is guaranteed to
     /// be unique.
-    tracer: Option<(ThreadTracer, *mut u8)>,
+    tracer: Option<(ThreadTracer, Arc<u8>)>,
 }
 
 impl MTThreadInner {
     fn init(mt: MT) -> MTThread {
         let hot_threshold = mt.hot_threshold();
         let tracing_kind = mt.tracing_kind();
-        let tid = {
-            let layout =
-                Layout::from_size_align(mem::size_of::<usize>(), mem::size_of::<usize>()).unwrap();
-            unsafe { alloc(layout) }
-        };
         let inner = MTThreadInner {
             mt,
-            tid,
+            tid: Arc::new(0),
             hot_threshold,
             tracing_kind,
             tracer: None,
@@ -461,14 +492,6 @@ impl MTThreadInner {
         MTThread {
             inner: Rc::new(inner),
         }
-    }
-}
-
-impl Drop for MTThreadInner {
-    fn drop(&mut self) {
-        let layout =
-            Layout::from_size_align(mem::size_of::<usize>(), mem::size_of::<usize>()).unwrap();
-        unsafe { dealloc(self.tid, layout) };
     }
 }
 
@@ -693,7 +716,7 @@ mod tests {
                 let t = mtt
                     .mt()
                     .spawn(move |mut mtt| {
-                        for _ in 0..(tio.prog.len() + 1) * THRESHOLD {
+                        for _ in 0..tio.prog.len() * THRESHOLD {
                             let loc = locs[tio.pc].as_ref();
                             mtt.control_point(loc, simple_interp_step, &mut tio);
                         }
@@ -740,6 +763,123 @@ mod tests {
                 t.join().unwrap();
             }
         }
+    }
+
+    #[test]
+    fn locations_dont_get_stuck_tracing() {
+        const THRESHOLD: usize = 2;
+
+        let mut mtt = MTBuilder::new().hot_threshold(THRESHOLD).init();
+
+        const INC: u8 = 0;
+        const RESTART: u8 = 1;
+        let prog = Arc::new(vec![INC, INC, RESTART]);
+
+        struct IO {
+            prog: Arc<Vec<u8>>,
+            count: u64,
+            pc: usize,
+        }
+
+        #[interp_step]
+        fn simple_interp_step(tio: &mut IO) {
+            match tio.prog[tio.pc] {
+                INC => {
+                    tio.pc += 1;
+                    tio.count += 1;
+                }
+                RESTART => tio.pc = 0,
+                _ => unreachable!(),
+            }
+        }
+
+        let locs = Arc::new(vec![Some(Location::new()), None, None]);
+        let mut tio = IO {
+            prog: Arc::clone(&prog),
+            count: 0,
+            pc: 0,
+        };
+        {
+            let locs = Arc::clone(&locs);
+            mtt.mt()
+                .spawn(move |mut mtt| {
+                    for _ in 0..tio.prog.len() * THRESHOLD + 1 {
+                        let loc = locs[tio.pc].as_ref();
+                        mtt.control_point(loc, simple_interp_step, &mut tio);
+                    }
+                })
+                .unwrap()
+                .join()
+                .unwrap();
+        }
+
+        let loc = locs[0].as_ref();
+        let tag = loc.unwrap().state.load(Ordering::Relaxed) & PHASE_TAG;
+        assert_eq!(tag, PHASE_TRACING);
+        let mut tio = IO {
+            prog: Arc::clone(&prog),
+            count: 0,
+            pc: 0,
+        };
+        mtt.control_point(loc, simple_interp_step, &mut tio);
+        let tag = loc.unwrap().state.load(Ordering::Relaxed) & PHASE_TAG;
+        assert_eq!(tag, PHASE_DONT_TRACE);
+    }
+
+    #[test]
+    fn stuck_locations_free_memory() {
+        const THRESHOLD: usize = 2;
+
+        let mtt = MTBuilder::new().hot_threshold(THRESHOLD).init();
+
+        const INC: u8 = 0;
+        const RESTART: u8 = 1;
+        let prog = Arc::new(vec![INC, INC, RESTART]);
+
+        struct IO {
+            prog: Arc<Vec<u8>>,
+            count: u64,
+            pc: usize,
+        }
+
+        #[interp_step]
+        fn simple_interp_step(tio: &mut IO) {
+            match tio.prog[tio.pc] {
+                INC => {
+                    tio.pc += 1;
+                    tio.count += 1;
+                }
+                RESTART => tio.pc = 0,
+                _ => unreachable!(),
+            }
+        }
+
+        let locs = Arc::new(vec![Some(Location::new()), None, None]);
+        let mut tio = IO {
+            prog: Arc::clone(&prog),
+            count: 0,
+            pc: 0,
+        };
+        {
+            let locs = Arc::clone(&locs);
+            mtt.mt()
+                .spawn(move |mut mtt| {
+                    for _ in 0..tio.prog.len() * THRESHOLD + 1 {
+                        let loc = locs[tio.pc].as_ref();
+                        mtt.control_point(loc, simple_interp_step, &mut tio);
+                    }
+                })
+                .unwrap()
+                .join()
+                .unwrap();
+        }
+
+        let loc = locs[0].as_ref();
+        let tag = loc.unwrap().state.load(Ordering::Relaxed) & PHASE_TAG;
+        assert_eq!(tag, PHASE_TRACING);
+        // This is a weak test: at this point we hope that the dropped location frees its Arc. If
+        // it doesn't, we won't have tested much. If it does, we at least get a modicum of "check
+        // that it's not a double free" testing.
     }
 
     #[bench]
