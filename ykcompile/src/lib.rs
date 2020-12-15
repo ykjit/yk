@@ -1890,27 +1890,9 @@ mod tests {
 
         let types = TestTypes::new();
         let mut local_decls = HashMap::new();
-        local_decls.insert(
-            Local(0),
-            LocalDecl {
-                ty: types.t_u8,
-                referenced: false,
-            },
-        );
-        local_decls.insert(
-            Local(1),
-            LocalDecl {
-                ty: types.t_i64,
-                referenced: false,
-            },
-        );
-        local_decls.insert(
-            Local(2),
-            LocalDecl {
-                ty: types.t_string,
-                referenced: false,
-            },
-        );
+        local_decls.insert(Local(0), LocalDecl::new(types.t_u8, false));
+        local_decls.insert(Local(1), LocalDecl::new(types.t_i64, false));
+        local_decls.insert(Local(2), LocalDecl::new(types.t_string, false));
 
         let mut tc = TraceCompiler::<IO>::new(local_decls, Default::default());
         let u8_loc = tc.local_to_location(Local(0));
@@ -1934,27 +1916,9 @@ mod tests {
         let types = TestTypes::new();
         let mut local_decls = HashMap::new();
         for i in (0..9).step_by(3) {
-            local_decls.insert(
-                Local(i + 0),
-                LocalDecl {
-                    ty: types.t_u8,
-                    referenced: false,
-                },
-            );
-            local_decls.insert(
-                Local(i + 1),
-                LocalDecl {
-                    ty: types.t_i64,
-                    referenced: false,
-                },
-            );
-            local_decls.insert(
-                Local(i + 2),
-                LocalDecl {
-                    ty: types.t_string,
-                    referenced: false,
-                },
-            );
+            local_decls.insert(Local(i + 0), LocalDecl::new(types.t_u8, false));
+            local_decls.insert(Local(i + 1), LocalDecl::new(types.t_i64, false));
+            local_decls.insert(Local(i + 2), LocalDecl::new(types.t_string, false));
         }
 
         let mut tc = TraceCompiler::<IO>::new(local_decls, Default::default());
@@ -1979,10 +1943,7 @@ mod tests {
         for i in 0..num_decls {
             local_decls.insert(
                 Local(u32::try_from(i).unwrap()),
-                LocalDecl {
-                    ty: types.t_u8,
-                    referenced: false,
-                },
+                LocalDecl::new(types.t_u8, false),
             );
         }
 
@@ -2015,10 +1976,7 @@ mod tests {
         for i in 0..num_decls {
             local_decls.insert(
                 Local(u32::try_from(i).unwrap()),
-                LocalDecl {
-                    ty: types.t_u8,
-                    referenced: false,
-                },
+                LocalDecl::new(types.t_u8, false),
             );
         }
 
@@ -2059,7 +2017,7 @@ mod tests {
         ));
     }
 
-    // Check cases where a local is allocated on the stack even if registers are available.
+    // Test cases where a local is allocated on the stack even if registers are available.
     #[test]
     fn reg_alloc_always_on_stack() {
         struct IO(u8);
@@ -2072,50 +2030,17 @@ mod tests {
         assert!(REG_POOL.len() >= 3); // Or we'd spill regardless.
         for i in 0..=1 {
             local_decls.insert(
-                Local(i),
-                LocalDecl {
-                    ty: types.t_u8,
-                    referenced: false,
-                },
+                Local(u32::try_from(i).unwrap()),
+                LocalDecl::new(types.t_u8, false),
             );
         }
 
         // These are the decls we will actually test.
-        local_decls.insert(
-            Local(2),
-            LocalDecl {
-                ty: types.t_string,
-                referenced: false,
-            },
-        );
-        local_decls.insert(
-            Local(3),
-            LocalDecl {
-                ty: types.t_u8,
-                referenced: true,
-            },
-        );
-        local_decls.insert(
-            Local(4),
-            LocalDecl {
-                ty: types.t_tiny_struct,
-                referenced: false,
-            },
-        );
-        local_decls.insert(
-            Local(5),
-            LocalDecl {
-                ty: types.t_tiny_array,
-                referenced: false,
-            },
-        );
-        local_decls.insert(
-            Local(6),
-            LocalDecl {
-                ty: types.t_tiny_tuple,
-                referenced: false,
-            },
-        );
+        local_decls.insert(Local(2), LocalDecl::new(types.t_string, false));
+        local_decls.insert(Local(3), LocalDecl::new(types.t_u8, true));
+        local_decls.insert(Local(4), LocalDecl::new(types.t_tiny_struct, false));
+        local_decls.insert(Local(5), LocalDecl::new(types.t_tiny_array, false));
+        local_decls.insert(Local(6), LocalDecl::new(types.t_tiny_tuple, false));
 
         let mut tc = TraceCompiler::<IO>::new(local_decls, Default::default());
 

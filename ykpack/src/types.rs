@@ -369,6 +369,12 @@ pub struct LocalDecl {
     pub referenced: bool,
 }
 
+impl LocalDecl {
+    pub fn new(ty: TypeId, referenced: bool) -> Self {
+        Self { ty, referenced }
+    }
+}
+
 impl Display for LocalDecl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "({}, {})", self.ty.0, self.ty.1)
