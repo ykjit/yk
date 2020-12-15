@@ -26,7 +26,8 @@ const PHASE_NUM_BITS: usize = 3;
 const PHASE_TAG: usize = 0b111; // All of the other PHASE_ tags must fit in this.
 const PHASE_COMPILED: usize = 0b000; // Value is a pointer to a chunk of memory containing a
                                      // CompiledTrace<I>.
-const PHASE_TRACING: usize = 0b001; // Value is a pointer to an Arc<u8> representing a thread ID.
+const PHASE_TRACING: usize = 0b001; // Value is a pointer to an Arc<ThreadIdInner> representing a
+                                    // thread ID.
 const PHASE_COMPILING: usize = 0b010; // Value is a pointer to a `Box<CompilingTrace<I>>`.
 const PHASE_COUNTING: usize = 0b011; // Value specifies how many times we've seen this Location.
 const PHASE_LOCKED: usize = 0b100; // No associated value.
@@ -235,6 +236,7 @@ impl MTInner {
 }
 
 type CompilingTrace<I> = Mutex<Option<Box<CompiledTrace<I>>>>;
+struct ThreadIdInner;
 
 /// A meta-tracer aware thread. Note that this is conceptually a "front-end" to the actual
 /// meta-tracer thread akin to an `Rc`: this struct can be freely `clone()`d without duplicating
@@ -346,7 +348,7 @@ impl MTThread {
                 }
             }
             PHASE_TRACING => {
-                let loc_tid = unsafe { Arc::from_raw((lp & !PHASE_TAG) as *mut u8) };
+                let loc_tid = unsafe { Arc::from_raw((lp & !PHASE_TAG) as *mut ThreadIdInner) };
                 if let Some((_, ref tid)) = self.inner.tracer {
                     // This thread is tracing something...
                     if !Arc::ptr_eq(tid, &loc_tid) {
@@ -468,13 +470,13 @@ struct MTThreadInner {
     /// this Arc's strong count will be incremented. If, after this thread drops, this Arc's strong
     /// count remains > 0, it means that it was in the process of tracing a loop, implying that
     /// there is (or, at least, was at some point) a Location stuck in PHASE_TRACING.
-    tid: Arc<u8>,
+    tid: Arc<ThreadIdInner>,
     hot_threshold: HotThreshold,
     tracing_kind: TracingKind,
     /// The active tracer and the unique identifier of the [Location] that is being traced. We use
     /// a pointer to a 1 byte malloc'd chunk of memory since the resulting address is guaranteed to
     /// be unique.
-    tracer: Option<(ThreadTracer, Arc<u8>)>,
+    tracer: Option<(ThreadTracer, Arc<ThreadIdInner>)>,
 }
 
 impl MTThreadInner {
@@ -483,7 +485,7 @@ impl MTThreadInner {
         let tracing_kind = mt.tracing_kind();
         let inner = MTThreadInner {
             mt,
-            tid: Arc::new(0),
+            tid: Arc::new(ThreadIdInner),
             hot_threshold,
             tracing_kind,
             tracer: None,
