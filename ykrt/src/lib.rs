@@ -1,6 +1,5 @@
-#![feature(integer_atomics)]
 #![feature(negative_impls)]
-#![feature(test)]
+#![cfg_attr(test, feature(test))]
 
 pub mod mt;
 
