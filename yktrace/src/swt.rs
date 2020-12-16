@@ -63,7 +63,7 @@ impl ThreadTracerImpl for SWTThreadTracer {
     }
 }
 
-pub fn start_tracing() -> ThreadTracer {
+pub(crate) fn start_tracing() -> ThreadTracer {
     unsafe {
         yk_swt_start_tracing_impl();
     }

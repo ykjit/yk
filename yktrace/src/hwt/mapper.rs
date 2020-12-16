@@ -26,7 +26,7 @@ pub struct HWTMapper {
 }
 
 impl HWTMapper {
-    pub fn new() -> HWTMapper {
+    pub(super) fn new() -> HWTMapper {
         let phdr_offset = get_phdr_offset();
         HWTMapper { phdr_offset }
     }
@@ -36,7 +36,7 @@ impl HWTMapper {
     /// For each block in the trace, the interval tree is queried for labels coinciding with the
     /// block. Label addresses which coincide are therefore contained within the block, and are
     /// thus part of the SIR trace.
-    pub fn map_trace(&self, trace: Box<dyn Trace>) -> Result<Vec<SirLoc>, HWTracerError> {
+    pub(super) fn map_trace(&self, trace: Box<dyn Trace>) -> Result<Vec<SirLoc>, HWTracerError> {
         let mut annotrace = Vec::new();
         for block in trace.iter_blocks() {
             let block = block?;
