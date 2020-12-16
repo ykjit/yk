@@ -3139,4 +3139,36 @@ mod tests {
         assert_eq!(cr, true);
         assert_eq!(args.cells, vec![1, 4, 3]);
     }
+
+    /// Check that calling a `do_not_trace` annotated function from within a regular (but
+    /// non-interp-step) function works.
+    #[test]
+    fn nested_do_not_trace() {
+        #[do_not_trace]
+        fn one() -> usize {
+            1
+        }
+
+        fn call_one() -> usize {
+            one()
+        }
+
+        struct IO(usize);
+
+        #[interp_step]
+        #[inline(never)]
+        fn interp_step(io: &mut IO) {
+            io.0 = call_one();
+        }
+
+        let mut inputs = IO(0);
+        let th = start_tracing(TracingKind::HardwareTracing);
+        interp_step(&mut inputs);
+        let sir_trace = th.stop_tracing().unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
+        let ct = TraceCompiler::<IO>::compile(tir_trace);
+        let mut args = IO(0);
+        assert!(ct.execute(&mut args), true);
+        assert_eq!(args.0, 1);
+    }
 }
