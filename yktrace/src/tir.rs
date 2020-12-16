@@ -351,7 +351,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                             val: rnm.rename_iplace(discr, &body),
                             kind: GuardKind::Integer(values[idx].val()),
                             block: GuardBlock {
-                                symbol_name: loc.symbol_name.to_owned(),
+                                symbol_name: loc.symbol_name,
                                 bb_idx: loc.bb_idx
                             },
                             live_locals: Vec::new()
@@ -364,7 +364,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                                     values.iter().map(|v| v.val()).collect()
                                 ),
                                 block: GuardBlock {
-                                    symbol_name: loc.symbol_name.to_owned(),
+                                    symbol_name: loc.symbol_name,
                                     bb_idx: loc.bb_idx
                                 },
                                 live_locals: Vec::new()
@@ -380,7 +380,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     val: cond.clone(),
                     kind: GuardKind::Boolean(*expected),
                     block: GuardBlock {
-                        symbol_name: loc.symbol_name.to_owned(),
+                        symbol_name: loc.symbol_name,
                         bb_idx: loc.bb_idx
                     },
                     live_locals: Vec::new()
@@ -581,7 +581,7 @@ impl Display for TirTrace<'_, '_> {
 
 #[derive(Debug)]
 pub struct GuardBlock {
-    pub symbol_name: String,
+    pub symbol_name: &'static str,
     pub bb_idx: ykpack::BasicBlockIndex
 }
 
