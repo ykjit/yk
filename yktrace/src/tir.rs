@@ -41,6 +41,10 @@ impl<'a, 'm> TirTrace<'a, 'm> {
         // Maps symbol names to their virtual addresses.
         let mut addr_map: HashMap<String, u64> = HashMap::new();
 
+        // A stack to keep track of where to store return values of inlined calls. When we
+        // encounter `$x = Call(...)` we push `$x` to the stack so that later, when we encounter
+        // the corresponding Return, we can find the correct place to store the return value (by
+        // popping from the stack).
         let mut return_iplaces: Vec<IPlace> = Vec::new();
 
         // As we compile, we are going to check the define-use (DU) chain of our local
@@ -242,7 +246,6 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                         .as_ref()
                         .map(|(ret_val, _)| rnm.rename_iplace(&ret_val, &body))
                         .unwrap();
-                    return_iplaces.push(ret_val.clone());
 
                     if let Some(callee_sym) = op.symbol() {
                         // We know the symbol name of the callee at least.
@@ -257,6 +260,10 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                                 ignore = Some(callee_sym.to_string());
                                 term_stmts.push(Statement::Call(op.clone(), newargs, Some(ret_val)))
                             } else {
+                                // Push the IPlace that the corresponding Return terminator should
+                                // assign the result of the call to.
+                                return_iplaces.push(ret_val.clone());
+
                                 // Inform VarRenamer about this function's offset, which is equal to the
                                 // number of variables assigned in the outer body.
                                 rnm.enter(callbody.local_decls.len());
