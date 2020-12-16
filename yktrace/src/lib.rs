@@ -1,8 +1,9 @@
-#![feature(test)]
+#![cfg_attr(test, feature(test))]
 #![feature(thread_local)]
 #![feature(core_intrinsics)]
 #![feature(global_asm)]
 
+#[cfg(test)]
 extern crate test;
 
 #[macro_use]

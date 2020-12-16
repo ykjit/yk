@@ -1,13 +1,12 @@
 //! The Yorick TIR trace compiler.
 
-#![feature(proc_macro_hygiene)]
-#![feature(test)]
-#![feature(core_intrinsics)]
+#![cfg_attr(test, feature(test))]
 
 #[macro_use]
 extern crate dynasmrt;
 #[macro_use]
 extern crate lazy_static;
+#[cfg(test)]
 extern crate test;
 
 mod stack_builder;
