@@ -10,7 +10,7 @@ use std::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex, TryLockError,
     },
-    thread::{self, JoinHandle},
+    thread::{self, yield_now, JoinHandle},
 };
 use ykcompile::{CompiledTrace, TraceCompiler};
 use yktrace::{sir::SIR, start_tracing, tir::TirTrace, ThreadTracer, TracingKind};
@@ -28,10 +28,11 @@ const PHASE_COMPILED: usize = 0b000; // Value is a pointer to a chunk of memory 
                                      // CompiledTrace<I>.
 const PHASE_TRACING: usize = 0b001; // Value is a pointer to an Arc<ThreadIdInner> representing a
                                     // thread ID.
-const PHASE_COMPILING: usize = 0b010; // Value is a pointer to a `Box<CompilingTrace<I>>`.
-const PHASE_COUNTING: usize = 0b011; // Value specifies how many times we've seen this Location.
-const PHASE_LOCKED: usize = 0b100; // No associated value.
-const PHASE_DONT_TRACE: usize = 0b101; // No associated value.
+const PHASE_TRACING_LOCK: usize = 0b010; // No associated value
+const PHASE_COMPILING: usize = 0b011; // Value is a pointer to a `Box<CompilingTrace<I>>`.
+const PHASE_COUNTING: usize = 0b100; // Value specifies how many times we've seen this Location.
+const PHASE_LOCKED: usize = 0b101; // No associated value.
+const PHASE_DONT_TRACE: usize = 0b110; // No associated value.
 
 /// A `Location` stores state that the meta-tracer needs to identify hot loops and run associated
 /// machine code.
@@ -58,8 +59,14 @@ pub struct Location<I> {
     //  │             │ start tracing
     //  │             ▼
     //  │           ┌────────────────────┐
+    //  │           │   PHASE_TRACING    │
+    //  │           └────────────────────┘
+    //  │             │ check for    ▲
+    //  │             │ stuckness    | still
+    //  │             ▼              | active
+    //  │           ┌────────────────────┐
     //  │           │                    │  abort   ┌────────────────────┐
-    //  │           │   PHASE_TRACING    │─────────▶│  PHASE_DONT_TRACE  │
+    //  │           │ PHASE_TRACING_LOCK │─────────▶│  PHASE_DONT_TRACE  │
     //  │           │                    │          └────────────────────┘
     //  │           └────────────────────┘
     //  │             │ start compiling trace
@@ -301,6 +308,7 @@ impl MTThread {
         // written to external data. Alternatively, this load could be Relaxed but we would then
         // need to place an Acquire fence in PHASE_COMPILING and PHASE_COMPILED.
         let mut lp = loc.state.load(Ordering::Acquire);
+
         match lp & PHASE_TAG {
             PHASE_COUNTING => {
                 loop {
@@ -347,12 +355,76 @@ impl MTThread {
                     }
                 }
             }
-            PHASE_TRACING => {
+            PHASE_TRACING | PHASE_TRACING_LOCK => {
+                if lp & PHASE_TAG == PHASE_TRACING_LOCK {
+                    // PHASE_TRACING_LOCK requires special handling, because another thread might
+                    // have grabbed it on this Location even though this thread is tracing this
+                    // location.
+
+                    if self.inner.tracer.is_none() {
+                        // If this thread isn't tracing anything, there's little point in spinning
+                        // as the thread tracing this location is still plausibly alive.
+                        return None;
+                    }
+
+                    // We wait to grab the lock.
+                    // FIXME: this is a terrible spinlock.
+                    while lp & PHASE_TAG == PHASE_TRACING_LOCK {
+                        yield_now();
+                        lp = loc.state.load(Ordering::Acquire);
+                    }
+
+                    if lp & PHASE_TAG != PHASE_TRACING {
+                        // While waiting for the Location to move beyond PHASE_TRACING_LOCK, we
+                        // probably raced with the thread tracing this location.
+                        return None;
+                    }
+                }
+
+                // Before we can do anything with this phase's value, we need to transition to
+                // `PHASE_TRACING_LOCK`.
+                loop {
+                    let old_lp = lp;
+                    lp = loc
+                        .state
+                        .compare_and_swap(lp, PHASE_TRACING_LOCK, Ordering::Acquire);
+                    if lp == old_lp {
+                        break;
+                    }
+                    if self.inner.tracer.is_none() {
+                        // This thread isn't tracing anything, so it's not worth us spinning and
+                        // trying to lock this location.
+                        return None;
+                    }
+                    // We are tracing something, and since it might be the current Location, we
+                    // need to transition to TRACING_LOCK to avoid tracing more than one iteration
+                    // of the loop. However, we might be able to determine that this thread
+                    // couldn't have been tracing this location, at which point we can bail out.
+                    // FIXME: this is a terrible spinlock.
+                    loop {
+                        match lp & PHASE_TAG {
+                            PHASE_TRACING => break,
+                            PHASE_TRACING_LOCK => (),
+                            PHASE_COMPILED | PHASE_COMPILING | PHASE_LOCKED | PHASE_COUNTING
+                            | PHASE_DONT_TRACE => {
+                                // If we observe any of these states, then another thread took
+                                // responsibility for this Location, proving that this thread can't
+                                // be responsible for it.
+                                return None;
+                            }
+                            _ => unreachable!(),
+                        }
+                        yield_now();
+                        lp = loc.state.load(Ordering::Relaxed);
+                    }
+                }
+
                 let loc_tid = unsafe { Arc::from_raw((lp & !PHASE_TAG) as *mut ThreadIdInner) };
                 if let Some((_, ref tid)) = self.inner.tracer {
                     // This thread is tracing something...
                     if !Arc::ptr_eq(tid, &loc_tid) {
                         // ...but we didn't start at the current Location.
+                        loc.state.store(lp, Ordering::Relaxed);
                         mem::forget(loc_tid);
                         return None;
                     } else {
@@ -362,21 +434,11 @@ impl MTThread {
                     // Another thread is tracing this location.
                     if Arc::strong_count(&loc_tid) == 1 {
                         // The other thread has stopped. Mark this Location as DONT_TRACE.
-                        if loc
-                            .state
-                            .compare_and_swap(lp, PHASE_DONT_TRACE, Ordering::Acquire)
-                            == lp
-                        {
-                            // Drop the thread tid Arc.
-                            return None;
-                        } else {
-                            // We raced with another thread that is probably trying to set this to
-                            // PHASE_DONT_TRACE. Let it do its work, whatever that is.
-                            mem::forget(loc_tid);
-                            return None;
-                        }
+                        loc.state.store(PHASE_DONT_TRACE, Ordering::Relaxed);
+                        return None;
                     } else {
                         // The other thread is still alive.
+                        loc.state.store(lp, Ordering::Relaxed);
                         mem::forget(loc_tid);
                         return None;
                     }
@@ -499,7 +561,7 @@ impl MTThreadInner {
 
 #[cfg(test)]
 mod tests {
-    use std::{thread::yield_now, time::Instant};
+    use std::thread::yield_now;
     extern crate test;
     use self::test::{black_box, Bencher};
     use super::*;
@@ -727,7 +789,6 @@ mod tests {
                 thrs.push(t);
             }
 
-            let start = Instant::now();
             let mut tio = IO {
                 prog: Arc::clone(&prog),
                 count: 0,
@@ -738,16 +799,10 @@ mod tests {
                 if tio.pc == 0 {
                     let tag = loc.unwrap().state.load(Ordering::Relaxed) & PHASE_TAG;
                     match tag {
-                        PHASE_COUNTING | PHASE_TRACING | PHASE_COMPILING | PHASE_LOCKED => (),
+                        PHASE_COUNTING | PHASE_TRACING | PHASE_TRACING_LOCK | PHASE_COMPILING
+                        | PHASE_LOCKED => (),
                         PHASE_COMPILED => break,
                         _ => panic!(),
-                    }
-                    if tag == PHASE_TRACING
-                        && Instant::now().duration_since(start) > Duration::from_millis(2000)
-                    {
-                        // It is possible, though unlikely, that we get stuck in PHASE_TRACING
-                        // forever, so a timeout is the only way we can handle this.
-                        break;
                     }
                 }
                 mtt.control_point(loc, simple_interp_step, &mut tio);
