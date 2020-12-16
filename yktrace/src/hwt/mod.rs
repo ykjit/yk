@@ -1,27 +1,11 @@
 //! Hardware tracing via ykrustc.
 
 use super::{SirTrace, ThreadTracer, ThreadTracerImpl};
-use crate::{errors::InvalidTraceError, SirLoc};
+use crate::errors::InvalidTraceError;
 use hwtracer::backends::TracerBuilder;
 
 pub mod mapper;
 use mapper::HWTMapper;
-
-/// A trace collected via hardware tracing.
-#[derive(Debug)]
-struct HWTSirTrace {
-    sirtrace: Vec<SirLoc>
-}
-
-impl SirTrace for HWTSirTrace {
-    fn raw_len(&self) -> usize {
-        self.sirtrace.len()
-    }
-
-    fn raw_loc(&self, idx: usize) -> &SirLoc {
-        &self.sirtrace[idx]
-    }
-}
 
 /// Hardware thread tracer.
 struct HWTThreadTracer {
@@ -30,13 +14,13 @@ struct HWTThreadTracer {
 }
 
 impl ThreadTracerImpl for HWTThreadTracer {
-    fn stop_tracing(&mut self) -> Result<Box<dyn SirTrace>, InvalidTraceError> {
+    fn stop_tracing(&mut self) -> Result<SirTrace, InvalidTraceError> {
         self.active = false;
         let hwtrace = self.ttracer.stop_tracing().unwrap();
         let mt = HWTMapper::new();
         mt.map_trace(hwtrace)
             .map_err(|_| InvalidTraceError::InternalError)
-            .map(|sirtrace| Box::new(HWTSirTrace { sirtrace }) as Box<dyn SirTrace>)
+            .map(|sirtrace| SirTrace::new(sirtrace))
     }
 }
 

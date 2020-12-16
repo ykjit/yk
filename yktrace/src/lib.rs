@@ -19,7 +19,7 @@ mod hwt;
 mod swt;
 
 use errors::InvalidTraceError;
-use sir::{SirLoc, SirTrace};
+use sir::SirTrace;
 use ykpack::Local;
 
 // In TIR traces, the argument to the interp_step is always local #1.
@@ -52,7 +52,7 @@ pub struct ThreadTracer {
 
 impl ThreadTracer {
     /// Stops tracing on the current thread, returning a TIR trace on success.
-    pub fn stop_tracing(mut self) -> Result<Box<dyn SirTrace>, InvalidTraceError> {
+    pub fn stop_tracing(mut self) -> Result<SirTrace, InvalidTraceError> {
         self.t_impl.stop_tracing()
     }
 }
@@ -60,7 +60,7 @@ impl ThreadTracer {
 // An generic interface which tracing backends must fulfill.
 trait ThreadTracerImpl {
     /// Stops tracing on the current thread, returning the SIR trace on success.
-    fn stop_tracing(&mut self) -> Result<Box<dyn SirTrace>, InvalidTraceError>;
+    fn stop_tracing(&mut self) -> Result<SirTrace, InvalidTraceError>;
 }
 
 /// Start tracing on the current thread using the specified tracing kind.
@@ -122,7 +122,7 @@ mod test_helpers {
         let mut th = start_tracing(kind);
         black_box(work(&mut WorkIO(10)));
         let trace = th.t_impl.stop_tracing().unwrap();
-        assert!(trace.raw_len() > 0);
+        assert!(trace.len() > 0);
     }
 
     /// Test that tracing twice sequentially in the same thread works.
@@ -135,7 +135,7 @@ mod test_helpers {
         black_box(work(&mut WorkIO(20)));
         let trace2 = th2.t_impl.stop_tracing().unwrap();
 
-        assert!(trace1.raw_len() < trace2.raw_len());
+        assert!(trace1.len() < trace2.len());
     }
 
     /// Test that tracing in different threads works.
@@ -143,12 +143,12 @@ mod test_helpers {
         let thr = thread::spawn(move || {
             let mut th1 = start_tracing(kind);
             black_box(work(&mut WorkIO(10)));
-            th1.t_impl.stop_tracing().unwrap().raw_len()
+            th1.t_impl.stop_tracing().unwrap().len()
         });
 
         let mut th2 = start_tracing(kind);
         black_box(work(&mut WorkIO(20)));
-        let len2 = th2.t_impl.stop_tracing().unwrap().raw_len();
+        let len2 = th2.t_impl.stop_tracing().unwrap().len();
 
         let len1 = thr.join().unwrap();
 
@@ -162,18 +162,18 @@ mod test_helpers {
         let mut th = start_tracing(kind);
         // Empty trace -- no call to an interp_step.
         let trace = th.t_impl.stop_tracing().unwrap();
-        trace.raw_loc(100000);
+        &trace[100000];
     }
 
-    /// Test that accessing locations 0 through trace.raw_len() -1 does not panic.
+    /// Test that accessing locations 0 through trace.len() -1 does not panic.
     pub(crate) fn in_bounds_trace_indices(kind: TracingKind) {
         // Construct a really short trace.
         let mut th = start_tracing(kind);
         black_box(work(&mut WorkIO(10)));
         let trace = th.t_impl.stop_tracing().unwrap();
 
-        for i in 0..trace.raw_len() {
-            trace.raw_loc(i);
+        for i in 0..trace.len() {
+            &trace[i];
         }
     }
 }

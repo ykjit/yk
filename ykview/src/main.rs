@@ -33,37 +33,24 @@ fn main() {
         // Leak the text here as the sir trace requires a 'static borrow of the symbol names parsed
         // from this text.
         let trace_text = Box::leak(trace_text.into_boxed_str());
-        let mut trace = VecSirTrace(vec![], ykpack::Local(0) /*FIXME*/);
+        let mut trace = vec![];
         for line in trace_text.lines() {
             let mut parts = line.trim().split(' ');
             let symbol_name = parts.next().unwrap();
             let bb_idx = parts.next().unwrap().parse::<u32>().unwrap();
             assert!(parts.next().is_none());
-            trace.0.push(yktrace::sir::SirLoc {
+            trace.push(yktrace::sir::SirLoc {
                 symbol_name,
                 bb_idx,
                 addr: None,
             });
         }
-        for loc in yktrace::sir::SirTraceIterator::new(&trace) {
+        for loc in &trace {
             println!("{:?}", loc);
         }
-        let tir = yktrace::tir::TirTrace::new(&sir, &trace).unwrap();
+        let tir = yktrace::tir::TirTrace::new(&sir, &yktrace::sir::SirTrace::new(trace)).unwrap();
         println!("{}", tir);
     } else {
         println!("{}", sir);
-    }
-}
-
-#[derive(Debug)]
-struct VecSirTrace(Vec<yktrace::sir::SirLoc>, ykpack::Local);
-
-impl yktrace::sir::SirTrace for VecSirTrace {
-    fn raw_len(&self) -> usize {
-        self.0.len()
-    }
-
-    fn raw_loc(&self, idx: usize) -> &yktrace::sir::SirLoc {
-        &self.0[idx]
     }
 }
