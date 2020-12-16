@@ -286,14 +286,14 @@ impl<TT> CompiledTrace<TT> {
 
 /// Represents a memory location using a register and an offset.
 #[derive(Debug, Clone, PartialEq)]
-pub struct RegAndOffset {
+struct RegAndOffset {
     reg: u8,
     off: OffT,
 }
 
 /// Describes the location of the pointer in Location::Indirect.
 #[derive(Debug, Clone, PartialEq)]
-pub enum IndirectLoc {
+enum IndirectLoc {
     /// There's a pointer in this register.
     Reg(u8),
     /// There's a pointer in memory somewhere.
@@ -301,7 +301,7 @@ pub enum IndirectLoc {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Location {
+enum Location {
     /// A value in a register.
     Reg(u8),
     /// A statically known memory location relative to a register.
@@ -1844,7 +1844,7 @@ mod tests {
 
     /// Fuzzy matches the textual TIR for the trace `tt` with the pattern `ptn`.
     /// Duplicated from yktrace, since you can't share things inside #[cfg(test)] between crates.
-    pub fn assert_tir(ptn: &str, tt: &TirTrace) {
+    fn assert_tir(ptn: &str, tt: &TirTrace) {
         let ptn_re = Regex::new(r"%.+?\b").unwrap(); // Names are words prefixed with `%`.
         let text_re = Regex::new(r"\$?.+?\b").unwrap(); // Any word optionally prefixed with `$`.
         let matcher = FMBuilder::new(ptn)

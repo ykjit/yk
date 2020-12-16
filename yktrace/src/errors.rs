@@ -12,7 +12,7 @@ pub enum InvalidTraceError {
 
 impl InvalidTraceError {
     /// A helper function to create a `InvalidTraceError::NoSir`.
-    pub fn no_sir(symbol_name: &str) -> Self {
+    pub(crate) fn no_sir(symbol_name: &str) -> Self {
         InvalidTraceError::NoSir(String::from(symbol_name))
     }
 }

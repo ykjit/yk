@@ -608,11 +608,11 @@ pub struct Guard {
 }
 
 impl Guard {
-    pub fn maybe_defined_locals(&self) -> Vec<Local> {
+    fn maybe_defined_locals(&self) -> Vec<Local> {
         Vec::new()
     }
 
-    pub fn used_locals(&self) -> Vec<Local> {
+    fn used_locals(&self) -> Vec<Local> {
         let mut ret = Vec::new();
         match &self.val {
             IPlace::Val { local, .. } => ret.push(*local),
@@ -698,7 +698,7 @@ impl TirOp {
         }
     }
 
-    pub fn used_locals(&self) -> Vec<Local> {
+    fn used_locals(&self) -> Vec<Local> {
         match &self {
             TirOp::Statement(stmt) => stmt.used_locals(),
             TirOp::Guard(guard) => guard.used_locals()
@@ -721,7 +721,7 @@ pub mod tests {
     use test::black_box;
 
     /// Fuzzy matches the textual TIR for the trace `tt` with the pattern `ptn`.
-    pub fn assert_tir(ptn: &str, tt: &TirTrace) {
+    fn assert_tir(ptn: &str, tt: &TirTrace) {
         let ptn_re = Regex::new(r"%.+?\b").unwrap(); // Names are words prefixed with `%`.
         let text_re = Regex::new(r"\$?.+?\b").unwrap(); // Any word optionally prefixed with `$`.
         let matcher = FMBuilder::new(ptn)
