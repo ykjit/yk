@@ -17,7 +17,7 @@ pub struct StackBuilder {
 impl StackBuilder {
     /// Allocate an object of given size and alignment on the stack, returning a `Location::Mem`
     /// describing the position of the allocation. The stack is assumed to grow down.
-    pub fn alloc(&mut self, size: u64, align: u64) -> Location {
+    pub(crate) fn alloc(&mut self, size: u64, align: u64) -> Location {
         self.align(align);
         self.stack_top += size;
         Location::new_mem(RBP.code(), -i32::try_from(self.stack_top).unwrap())
@@ -30,7 +30,7 @@ impl StackBuilder {
     }
 
     /// Total allocated stack size in bytes.
-    pub fn size(&self) -> u32 {
+    pub(crate) fn size(&self) -> u32 {
         self.stack_top.try_into().unwrap()
     }
 }
