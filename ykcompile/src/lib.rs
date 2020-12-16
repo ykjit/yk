@@ -2370,37 +2370,6 @@ mod tests {
         assert_eq!(spills, 9); // f, g: i32, h:  u8.
     }
 
-    #[ignore] // FIXME: It has become hard to test spilling.
-    #[test]
-    fn mov_stack_to_register() {
-        struct IO(u8);
-
-        #[interp_step]
-        fn stack_to_register(io: &mut IO) {
-            let _a = 1;
-            let _b = 2;
-            let c = 3;
-            let _d = 4;
-            // When returning from `farg` all registers are full, so `e` needs to be allocated on the
-            // stack. However, after we have returned, anything allocated during `farg` is freed. Thus
-            // returning `e` will allocate a new local in a (newly freed) register, resulting in a `mov
-            // reg, [rbp]` instruction.
-            let e = farg(c);
-            io.0 = e;
-        }
-
-        let mut inputs = IO(0);
-        let th = start_tracing(TracingKind::HardwareTracing);
-        stack_to_register(&mut inputs);
-        let sir_trace = th.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
-        let (ct, spills) = TraceCompiler::<IO>::test_compile(tir_trace);
-        let mut args = IO(0);
-        ct.execute(&mut args);
-        assert_eq!(args.0, 3);
-        assert_eq!(spills, 1); // Just one u8.
-    }
-
     #[test]
     fn ext_call_and_spilling() {
         struct IO(u64);
