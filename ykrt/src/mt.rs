@@ -243,10 +243,9 @@ type CompilingTrace<I> = Mutex<Option<Box<CompiledTrace<I>>>>;
 #[derive(Clone)]
 pub struct MTThread {
     inner: Rc<MTThreadInner>,
+    // Raw pointers are neither send nor sync.
+    _dont_send_or_sync_me: PhantomData<*mut ()>,
 }
-
-impl !Send for MTThread {}
-impl !Sync for MTThread {}
 
 impl MTThread {
     /// Return a meta-tracer [`MT`](struct.MT.html) struct.
@@ -491,6 +490,7 @@ impl MTThreadInner {
         };
         MTThread {
             inner: Rc::new(inner),
+            _dont_send_or_sync_me: PhantomData,
         }
     }
 }

@@ -1,7 +1,7 @@
 #![cfg_attr(test, feature(test))]
-#![feature(thread_local)]
-#![feature(core_intrinsics)]
-#![feature(global_asm)]
+#![cfg_attr(tracermode = "sw", feature(thread_local))]
+#![cfg_attr(tracermode = "sw", feature(core_intrinsics))]
+#![cfg_attr(tracermode = "sw", feature(global_asm))]
 
 #[cfg(test)]
 extern crate test;
