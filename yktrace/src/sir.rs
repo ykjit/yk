@@ -194,14 +194,14 @@ impl<'m> Display for Sir<'m> {
 /// traits we were disallowed from using in libcore.
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub struct SirLoc {
-    pub symbol_name: String,
+    pub symbol_name: &'static str,
     pub bb_idx: u32,
     // Virtual address of this location.
     pub addr: Option<u64>
 }
 
 impl SirLoc {
-    pub fn new(symbol_name: String, bb_idx: u32, addr: Option<u64>) -> Self {
+    pub fn new(symbol_name: &'static str, bb_idx: u32, addr: Option<u64>) -> Self {
         Self {
             symbol_name,
             bb_idx,

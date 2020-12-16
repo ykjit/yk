@@ -26,7 +26,7 @@ impl SWTSirTrace {
                 let swt_loc = unsafe { &*buf.offset(idx) };
                 let symbol_name = unsafe { std::ffi::CStr::from_ptr(swt_loc.symbol_name) };
                 SirLoc {
-                    symbol_name: symbol_name.to_str().unwrap().to_string(),
+                    symbol_name: symbol_name.to_str().unwrap(),
                     bb_idx: swt_loc.bb_idx,
                     addr: None
                 }

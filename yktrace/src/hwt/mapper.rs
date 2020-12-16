@@ -61,7 +61,7 @@ impl HWTMapper {
                     } else {
                         None
                     };
-                    (lbl.off, SirLoc::new(lbl.symbol_name.clone(), lbl.bb, vaddr))
+                    (lbl.off, SirLoc::new(&lbl.symbol_name, lbl.bb, vaddr))
                 })
                 .collect::<Vec<_>>();
             locs.sort_by_key(|l| l.0);

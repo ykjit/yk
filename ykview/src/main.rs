@@ -30,10 +30,13 @@ fn main() {
             std::fs::read(trace_file).unwrap()
         };
         let trace_text = String::from_utf8(trace_text).unwrap();
+        // Leak the text here as the sir trace requires a 'static borrow of the symbol names parsed
+        // from this text.
+        let trace_text = Box::leak(trace_text.into_boxed_str());
         let mut trace = VecSirTrace(vec![], ykpack::Local(0) /*FIXME*/);
         for line in trace_text.lines() {
             let mut parts = line.trim().split(' ');
-            let symbol_name = parts.next().unwrap().to_string();
+            let symbol_name = parts.next().unwrap();
             let bb_idx = parts.next().unwrap().parse::<u32>().unwrap();
             assert!(parts.next().is_none());
             trace.0.push(yktrace::sir::SirLoc {
