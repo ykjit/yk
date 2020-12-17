@@ -836,11 +836,6 @@ pub enum Terminator {
         location: IPlace,
         target_bb: BasicBlockIndex,
     },
-    DropAndReplace {
-        location: IPlace,
-        target_bb: BasicBlockIndex,
-        value: IPlace,
-    },
     Call {
         operand: CallOperand,
         args: Vec<IPlace>,
@@ -893,15 +888,6 @@ impl Display for Terminator {
                 location,
                 target_bb,
             } => write!(f, "drop {}, bb{}", target_bb, location,),
-            Terminator::DropAndReplace {
-                location,
-                value,
-                target_bb,
-            } => write!(
-                f,
-                "drop_and_replace {}, {}, bb{}",
-                location, value, target_bb,
-            ),
             Terminator::Call {
                 operand,
                 args,
