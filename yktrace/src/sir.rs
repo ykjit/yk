@@ -211,34 +211,28 @@ impl SirLoc {
 }
 
 /// Generic representation of a trace of SIR block locations.
-pub trait SirTrace: Debug + Send {
-    /// Returns the length of the *raw* (untrimmed) trace, measured in SIR locations.
-    fn raw_len(&self) -> usize;
+pub struct SirTrace(Vec<SirLoc>);
 
-    /// Returns the SIR location at index `idx` in the *raw* (untrimmed) trace.
-    fn raw_loc(&self, idx: usize) -> &SirLoc;
+impl SirTrace {
+    pub fn new(locs: Vec<SirLoc>) -> Self {
+        SirTrace(locs)
+    }
 }
 
-impl<'a> IntoIterator for &'a dyn SirTrace {
-    type Item = &'a SirLoc;
-    type IntoIter = SirTraceIterator<'a>;
+impl std::ops::Deref for SirTrace {
+    type Target = [SirLoc];
 
-    fn into_iter(self) -> Self::IntoIter {
-        SirTraceIterator::new(self)
+    fn deref(&self) -> &[SirLoc] {
+        &*self.0
     }
 }
 
 /// Returns a string containing the textual representation of a SIR trace.
-pub fn sir_trace_str(sir: &Sir, trace: &dyn SirTrace, trimmed: bool, show_blocks: bool) -> String {
-    let locs: Vec<&SirLoc> = match trimmed {
-        false => (0..(trace.raw_len())).map(|i| trace.raw_loc(i)).collect(),
-        true => trace.into_iter().collect()
-    };
-
+pub fn sir_trace_str(sir: &Sir, trace: &SirTrace, show_blocks: bool) -> String {
     let mut res = String::new();
     let res_r = &mut res;
 
-    for loc in locs {
+    for loc in &**trace {
         write!(res_r, "[{}] bb={}, flags=[", loc.symbol_name, loc.bb_idx).unwrap();
 
         let body = sir.body(&loc.symbol_name);
@@ -265,34 +259,8 @@ pub fn sir_trace_str(sir: &Sir, trace: &dyn SirTrace, trimmed: bool, show_blocks
     res
 }
 
-impl Display for dyn SirTrace {
+impl Display for SirTrace {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", sir_trace_str(&*SIR, self, false, true))
-    }
-}
-
-/// An iterator over a trimmed SIR trace.
-pub struct SirTraceIterator<'a> {
-    trace: &'a dyn SirTrace,
-    next_idx: usize
-}
-
-impl<'a> SirTraceIterator<'a> {
-    pub fn new(trace: &'a dyn SirTrace) -> Self {
-        SirTraceIterator { trace, next_idx: 0 }
-    }
-}
-
-impl<'a> Iterator for SirTraceIterator<'a> {
-    type Item = &'a SirLoc;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.next_idx < self.trace.raw_len() {
-            let ret = self.trace.raw_loc(self.next_idx);
-            self.next_idx += 1;
-            Some(ret)
-        } else {
-            None // No more locations.
-        }
+        write!(f, "{}", sir_trace_str(&*SIR, self, true))
     }
 }

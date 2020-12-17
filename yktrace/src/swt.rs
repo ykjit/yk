@@ -6,59 +6,32 @@ use libc;
 use std::convert::TryFrom;
 use ykpack::Local;
 
-/// A trace collected via software tracing.
-/// Since the trace is a heap-allocated C buffer, we represent it as a pointer and a length.
-#[derive(Debug)]
-struct SWTSirTrace {
-    locs: Vec<SirLoc>
-}
-
-impl SWTSirTrace {
-    /// Create a SWTSirTrace from a raw buffer and (element) length.
-    ///
-    /// `buf` must have been allocated by malloc(3); this function will free(2) it.
-    fn from_buf(buf: *const SwtLoc, len: usize) -> Self {
-        // When we make a SWTSirTrace, we convert all of the locations from core::SirLoc up to
-        // crate::SirLoc and store them in self so that we can hand out references via raw_loc().
-        let locs = (0..len)
-            .map(|idx| {
-                let idx = isize::try_from(idx).unwrap();
-                let swt_loc = unsafe { &*buf.offset(idx) };
-                let symbol_name = unsafe { std::ffi::CStr::from_ptr(swt_loc.symbol_name) };
-                SirLoc {
-                    symbol_name: symbol_name.to_str().unwrap(),
-                    bb_idx: swt_loc.bb_idx,
-                    addr: None
-                }
-            })
-            .collect();
-
-        unsafe { libc::free(buf as *mut libc::c_void) };
-        Self { locs }
-    }
-}
-
-impl SirTrace for SWTSirTrace {
-    fn raw_len(&self) -> usize {
-        self.locs.len()
-    }
-
-    fn raw_loc(&self, idx: usize) -> &SirLoc {
-        &self.locs[idx]
-    }
-}
-
 /// Softare thread tracer.
 struct SWTThreadTracer;
 
 impl ThreadTracerImpl for SWTThreadTracer {
-    fn stop_tracing(&mut self) -> Result<Box<dyn SirTrace>, InvalidTraceError> {
+    fn stop_tracing(&mut self) -> Result<SirTrace, InvalidTraceError> {
         let mut len = 0;
         let buf = unsafe { yk_swt_stop_tracing_impl(&mut len) };
         if buf as usize == 0 {
             Err(InvalidTraceError::InternalError)
         } else {
-            Ok(Box::new(SWTSirTrace::from_buf(buf, len)) as Box<dyn SirTrace>)
+            // When we make a SirTrace, we convert all of the locations from SwtLoc to SirLoc.
+            let locs = (0..len)
+                .map(|idx| {
+                    let idx = isize::try_from(idx).unwrap();
+                    let swt_loc = unsafe { &*buf.offset(idx) };
+                    let symbol_name = unsafe { std::ffi::CStr::from_ptr(swt_loc.symbol_name) };
+                    SirLoc {
+                        symbol_name: symbol_name.to_str().unwrap(),
+                        bb_idx: swt_loc.bb_idx,
+                        addr: None
+                    }
+                })
+                .collect();
+
+            unsafe { libc::free(buf as *mut libc::c_void) };
+            Ok(SirTrace::new(locs))
         }
     }
 }

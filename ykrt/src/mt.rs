@@ -396,7 +396,7 @@ impl MTThread {
                 let mtx = Arc::new(Mutex::new(None));
                 let mtx_cl = Arc::clone(&mtx);
                 thread::spawn(move || {
-                    let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
+                    let tir_trace = TirTrace::new(&*SIR, &sir_trace).unwrap();
                     let compiled = TraceCompiler::<I>::compile(tir_trace);
                     *mtx_cl.lock().unwrap() = Some(Box::new(compiled));
                     // FIXME: although we've now put the compiled trace into the mutex, there's no

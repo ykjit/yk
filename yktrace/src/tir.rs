@@ -5,7 +5,7 @@
 use super::SirTrace;
 use crate::{
     errors::InvalidTraceError,
-    sir::{self, Sir, SirTraceIterator},
+    sir::{self, Sir},
     INTERP_STEP_ARG
 };
 use std::{
@@ -32,9 +32,9 @@ impl<'a, 'm> TirTrace<'a, 'm> {
     /// Create a TirTrace from a SirTrace, trimming remnants of the code which starts/stops the
     /// tracer. Returns a TIR trace and the bounds the SIR trace was trimmed to, or Err if a symbol
     /// is encountered for which no SIR is available.
-    pub fn new<'s>(sir: &'a Sir<'m>, trace: &'s dyn SirTrace) -> Result<Self, InvalidTraceError> {
+    pub fn new<'s>(sir: &'a Sir<'m>, trace: &'s SirTrace) -> Result<Self, InvalidTraceError> {
         let mut ops = Vec::new();
-        let mut itr = SirTraceIterator::new(trace).peekable();
+        let mut itr = trace.iter().peekable();
         let mut rnm = VarRenamer::new();
         // Symbol name of the function currently being ignored during tracing.
         let mut ignore: Option<String> = None;
@@ -754,7 +754,7 @@ pub mod tests {
         let tracer = start_tracing(TracingKind::default());
         black_box(work(&mut io));
         let sir_trace = tracer.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &sir_trace).unwrap();
         assert_eq!(io.2, 15);
         assert!(tir_trace.len() > 0);
     }
@@ -792,7 +792,7 @@ pub mod tests {
         io.0 = 1;
         black_box(debug_tir_work(&mut io)); // -2
         let sir_trace = tracer.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &sir_trace).unwrap();
         assert_eq!(io.1, 38);
         assert_tir(
             "...\n\
@@ -827,7 +827,7 @@ pub mod tests {
         black_box(debug_tir_work(&mut io));
         io.0 = 2;
         let sir_trace = tracer.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*SIR, &*sir_trace).unwrap();
+        let tir_trace = TirTrace::new(&*SIR, &sir_trace).unwrap();
         for idx in 0..tir_trace.len() {
             let op = unsafe { tir_trace.op(idx) };
             assert!(!op.used_locals().contains(&sir::RETURN_LOCAL));
