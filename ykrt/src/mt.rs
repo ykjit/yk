@@ -34,6 +34,63 @@ const PHASE_COUNTING: usize = 0b100; // Value specifies how many times we've see
 const PHASE_LOCKED: usize = 0b101; // No associated value.
 const PHASE_DONT_TRACE: usize = 0b110; // No associated value.
 
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+struct State(usize);
+
+impl State {
+    fn phase(&self) -> usize {
+        self.0 & PHASE_TAG
+    }
+
+    fn phase_compiled<I>(trace: Box<CompiledTrace<I>>) -> Self {
+        let ptr = Box::into_raw(trace);
+        debug_assert_eq!(ptr as usize & PHASE_TAG, 0);
+        State(ptr as usize | PHASE_COMPILED)
+    }
+
+    fn phase_tracing(tid: Arc<ThreadIdInner>) -> Self {
+        let ptr = Arc::into_raw(tid);
+        debug_assert_eq!(ptr as usize & PHASE_TAG, 0);
+        State(ptr as usize | PHASE_TRACING)
+    }
+
+    fn phase_tracing_lock() -> Self {
+        State(PHASE_TRACING_LOCK)
+    }
+
+    fn phase_compiling<I>(trace: Arc<CompilingTrace<I>>) -> Self {
+        let ptr: *const CompilingTrace<I> = Arc::into_raw(trace);
+        debug_assert_eq!(ptr as usize & PHASE_TAG, 0);
+        State(ptr as usize | PHASE_COMPILING)
+    }
+
+    fn phase_counting(count: usize) -> Self {
+        debug_assert_eq!(count << PHASE_NUM_BITS >> PHASE_NUM_BITS, count);
+        State(PHASE_COUNTING | (count << PHASE_NUM_BITS))
+    }
+
+    fn phase_locked() -> Self {
+        State(PHASE_LOCKED)
+    }
+
+    fn phase_dont_trace() -> Self {
+        State(PHASE_DONT_TRACE)
+    }
+
+    fn number_data(&self) -> usize {
+        debug_assert_eq!(self.phase(), PHASE_COUNTING);
+        self.0 >> PHASE_NUM_BITS
+    }
+
+    fn pointer_data<T>(&self) -> *const T {
+        (self.0 & !PHASE_TAG) as *const T
+    }
+
+    unsafe fn ref_data<T>(&self) -> &T {
+        &*self.pointer_data()
+    }
+}
+
 /// A `Location` stores state that the meta-tracer needs to identify hot loops and run associated
 /// machine code.
 ///
@@ -103,6 +160,18 @@ impl<I> Location<I> {
             state: AtomicUsize::new(PHASE_COUNTING),
             phantom: PhantomData,
         }
+    }
+
+    fn load(&self, order: Ordering) -> State {
+        State(self.state.load(order))
+    }
+
+    fn compare_and_swap(&self, current: State, new: State, order: Ordering) -> State {
+        State(self.state.compare_and_swap(current.0, new.0, order))
+    }
+
+    fn store(&self, state: State, order: Ordering) {
+        self.state.store(state.0, order);
     }
 }
 
@@ -307,12 +376,12 @@ impl MTThread {
         // We need Acquire ordering, as PHASE_COMPILING and PHASE_COMPILED need to read information
         // written to external data. Alternatively, this load could be Relaxed but we would then
         // need to place an Acquire fence in PHASE_COMPILING and PHASE_COMPILED.
-        let mut lp = loc.state.load(Ordering::Acquire);
+        let mut lp = loc.load(Ordering::Acquire);
 
-        match lp & PHASE_TAG {
+        match lp.phase() {
             PHASE_COUNTING => {
                 loop {
-                    let count = (lp & !PHASE_TAG) >> PHASE_NUM_BITS;
+                    let count = lp.number_data();
                     if count >= self.inner.hot_threshold {
                         if self.inner.tracer.is_some() {
                             // This thread is already tracing another Location, so either another
@@ -321,10 +390,8 @@ impl MTThread {
                             // there's no point incrementing the hot count.
                             return None;
                         }
-                        let ptr = Arc::into_raw(Arc::clone(&self.inner.tid));
-                        debug_assert_eq!(ptr as usize & PHASE_TAG, 0);
-                        let new_state = ptr as usize | PHASE_TRACING;
-                        if loc.state.compare_and_swap(lp, new_state, Ordering::Relaxed) == lp {
+                        let new_state = State::phase_tracing(Arc::clone(&self.inner.tid));
+                        if loc.compare_and_swap(lp, new_state, Ordering::Relaxed) == lp {
                             Rc::get_mut(&mut self.inner).unwrap().tracer = Some((
                                 start_tracing(self.inner.tracing_kind),
                                 Arc::clone(&self.inner.tid),
@@ -334,18 +401,18 @@ impl MTThread {
                         // We raced with another thread, which probably moved the Location from
                         // PHASE_COUNTING to PHASE_TRACING.
                         unsafe {
-                            Arc::from_raw(ptr as *mut u8);
+                            Arc::from_raw(new_state.pointer_data::<u8>() as *mut u8);
                         }
                         return None;
                     } else {
-                        let new_state = PHASE_COUNTING | ((count + 1) << PHASE_NUM_BITS);
+                        let new_state = State::phase_counting(count + 1);
                         let old_lp = lp;
-                        lp = loc.state.compare_and_swap(lp, new_state, Ordering::Relaxed);
+                        lp = loc.compare_and_swap(lp, new_state, Ordering::Relaxed);
                         if lp == old_lp {
                             return None;
                         }
                         // We raced with another thread.
-                        if lp & PHASE_TAG != PHASE_COUNTING {
+                        if lp.phase() != PHASE_COUNTING {
                             // The other thread probably moved the Location from PHASE_COUNTING to
                             // PHASE_TRACING.
                             return None;
@@ -356,7 +423,7 @@ impl MTThread {
                 }
             }
             PHASE_TRACING | PHASE_TRACING_LOCK => {
-                if lp & PHASE_TAG == PHASE_TRACING_LOCK {
+                if lp.phase() == PHASE_TRACING_LOCK {
                     // PHASE_TRACING_LOCK requires special handling, because another thread might
                     // have grabbed it on this Location even though this thread is tracing this
                     // location.
@@ -369,12 +436,12 @@ impl MTThread {
 
                     // We wait to grab the lock.
                     // FIXME: this is a terrible spinlock.
-                    while lp & PHASE_TAG == PHASE_TRACING_LOCK {
+                    while lp.phase() == PHASE_TRACING_LOCK {
                         yield_now();
-                        lp = loc.state.load(Ordering::Acquire);
+                        lp = loc.load(Ordering::Acquire);
                     }
 
-                    if lp & PHASE_TAG != PHASE_TRACING {
+                    if lp.phase() != PHASE_TRACING {
                         // While waiting for the Location to move beyond PHASE_TRACING_LOCK, we
                         // probably raced with the thread tracing this location.
                         return None;
@@ -385,9 +452,7 @@ impl MTThread {
                 // `PHASE_TRACING_LOCK`.
                 loop {
                     let old_lp = lp;
-                    lp = loc
-                        .state
-                        .compare_and_swap(lp, PHASE_TRACING_LOCK, Ordering::Acquire);
+                    lp = loc.compare_and_swap(lp, State::phase_tracing_lock(), Ordering::Acquire);
                     if lp == old_lp {
                         break;
                     }
@@ -402,7 +467,7 @@ impl MTThread {
                     // couldn't have been tracing this location, at which point we can bail out.
                     // FIXME: this is a terrible spinlock.
                     loop {
-                        match lp & PHASE_TAG {
+                        match lp.phase() {
                             PHASE_TRACING => break,
                             PHASE_TRACING_LOCK => (),
                             PHASE_COMPILED | PHASE_COMPILING | PHASE_LOCKED | PHASE_COUNTING
@@ -415,16 +480,16 @@ impl MTThread {
                             _ => unreachable!(),
                         }
                         yield_now();
-                        lp = loc.state.load(Ordering::Relaxed);
+                        lp = loc.load(Ordering::Relaxed);
                     }
                 }
 
-                let loc_tid = unsafe { Arc::from_raw((lp & !PHASE_TAG) as *mut ThreadIdInner) };
+                let loc_tid = unsafe { Arc::from_raw(lp.pointer_data::<ThreadIdInner>()) };
                 if let Some((_, ref tid)) = self.inner.tracer {
                     // This thread is tracing something...
                     if !Arc::ptr_eq(tid, &loc_tid) {
                         // ...but we didn't start at the current Location.
-                        loc.state.store(lp, Ordering::Relaxed);
+                        loc.store(lp, Ordering::Relaxed);
                         mem::forget(loc_tid);
                         return None;
                     } else {
@@ -434,11 +499,11 @@ impl MTThread {
                     // Another thread is tracing this location.
                     if Arc::strong_count(&loc_tid) == 1 {
                         // The other thread has stopped. Mark this Location as DONT_TRACE.
-                        loc.state.store(PHASE_DONT_TRACE, Ordering::Relaxed);
+                        loc.store(State::phase_dont_trace(), Ordering::Relaxed);
                         return None;
                     } else {
                         // The other thread is still alive.
-                        loc.state.store(lp, Ordering::Relaxed);
+                        loc.store(lp, Ordering::Relaxed);
                         mem::forget(loc_tid);
                         return None;
                     }
@@ -465,10 +530,8 @@ impl MTThread {
                     // guarantee that the Location for which we're compiling will ever be executed
                     // again. In such a case, the memory has, in essence, leaked.
                 });
-                let ptr: *const CompilingTrace<I> = Arc::into_raw(mtx);
-                debug_assert_eq!(ptr as usize & PHASE_TAG, 0);
-                let new_state = ptr as usize | PHASE_COMPILING;
-                loc.state.store(new_state, Ordering::Release);
+                let new_state = State::phase_compiling(mtx);
+                loc.store(new_state, Ordering::Release);
 
                 Rc::get_mut(&mut self.inner).unwrap().tracer = None;
                 return None;
@@ -477,27 +540,17 @@ impl MTThread {
                 // We need to free the memory allocated earlier. To ensure we don't race with
                 // another thread and both try and free the memory, we need to transition to
                 // PHASE_LOCKED so that only this thread will try to free the memory.
-                if loc
-                    .state
-                    .compare_and_swap(lp, PHASE_LOCKED, Ordering::Acquire)
-                    != lp
-                {
+                if loc.compare_and_swap(lp, State::phase_locked(), Ordering::Acquire) != lp {
                     // We raced with another thread that's probably transitioned this Location to
                     // PHASE_LOCK.
                     return None;
                 }
-                let mtx = unsafe { Arc::from_raw((lp & !PHASE_TAG) as *const CompilingTrace<I>) };
+                let mtx = unsafe { lp.ref_data::<CompilingTrace<I>>() };
                 match mtx.try_lock() {
                     Ok(mut gd) => {
                         if let Some(tr) = (*gd).take() {
-                            let ptr: *mut CompiledTrace<I> = Box::into_raw(tr);
-                            debug_assert_eq!(ptr as usize & PHASE_TAG, 0);
-                            let new_state = ptr as usize | PHASE_COMPILED;
-                            loc.state.store(new_state, Ordering::Release);
-
-                            let bct = unsafe { Box::from_raw(ptr) };
-                            let f = unsafe { mem::transmute::<_, fn(&mut I) -> bool>(bct.ptr()) };
-                            mem::forget(bct);
+                            let f = unsafe { mem::transmute::<_, fn(&mut I) -> bool>(tr.ptr()) };
+                            loc.store(State::phase_compiled(tr), Ordering::Release);
                             return Some(f);
                         }
                     }
@@ -509,15 +562,13 @@ impl MTThread {
                         todo!();
                     }
                 }
-                loc.state.store(lp, Ordering::Relaxed);
-                mem::forget(mtx);
+                loc.store(lp, Ordering::Relaxed);
                 return None;
             }
             PHASE_LOCKED | PHASE_DONT_TRACE => return None,
             PHASE_COMPILED => {
-                let bct = unsafe { Box::from_raw((lp & !PHASE_TAG) as *mut CompiledTrace<I>) };
+                let bct = unsafe { lp.ref_data::<CompiledTrace<I>>() };
                 let f = unsafe { mem::transmute::<_, fn(&mut I) -> bool>(bct.ptr()) };
-                mem::forget(bct);
                 return Some(f);
             }
             _ => unreachable!(),
@@ -579,16 +630,13 @@ mod tests {
         let mut io = DummyIO {};
         for i in 0..hot_thrsh {
             mtt.control_point(Some(&lp), dummy_step, &mut io);
-            assert_eq!(
-                lp.state.load(Ordering::Relaxed),
-                PHASE_COUNTING | ((i + 1) << PHASE_NUM_BITS)
-            );
+            assert_eq!(lp.load(Ordering::Relaxed), State::phase_counting(i + 1));
         }
-        assert_eq!(lp.state.load(Ordering::Relaxed) & PHASE_TAG, PHASE_COUNTING);
+        assert_eq!(lp.load(Ordering::Relaxed).phase(), PHASE_COUNTING);
         mtt.control_point(Some(&lp), dummy_step, &mut io);
-        assert_eq!(lp.state.load(Ordering::Relaxed) & PHASE_TAG, PHASE_TRACING);
+        assert_eq!(lp.load(Ordering::Relaxed).phase(), PHASE_TRACING);
         mtt.control_point(Some(&lp), dummy_step, &mut io);
-        let fs = lp.state.load(Ordering::Relaxed) & PHASE_TAG;
+        let fs = lp.load(Ordering::Relaxed).phase();
         assert!(fs == PHASE_COMPILING || fs == PHASE_COMPILED);
     }
 
@@ -600,14 +648,11 @@ mod tests {
         let mut io = DummyIO {};
         for i in 0..hot_thrsh {
             mtt.control_point(Some(&lp), dummy_step, &mut io);
-            assert_eq!(
-                lp.state.load(Ordering::Relaxed),
-                PHASE_COUNTING | ((i + 1) << PHASE_NUM_BITS)
-            );
+            assert_eq!(lp.load(Ordering::Relaxed), State::phase_counting(i + 1));
         }
-        assert_eq!(lp.state.load(Ordering::Relaxed) & PHASE_TAG, PHASE_COUNTING);
+        assert_eq!(lp.load(Ordering::Relaxed).phase(), PHASE_COUNTING);
         mtt.control_point(Some(&lp), dummy_step, &mut io);
-        assert_eq!(lp.state.load(Ordering::Relaxed) & PHASE_TAG, PHASE_TRACING);
+        assert_eq!(lp.load(Ordering::Relaxed).phase(), PHASE_TRACING);
     }
 
     #[test]
@@ -623,20 +668,20 @@ mod tests {
                 .spawn(move |mut mtt| {
                     let mut io = DummyIO {};
                     mtt.control_point(Some(&loc), dummy_step, &mut io);
-                    let c1 = loc.state.load(Ordering::Relaxed);
-                    assert_eq!(c1 & PHASE_TAG, PHASE_COUNTING);
+                    let c1 = loc.load(Ordering::Relaxed);
+                    assert_eq!(c1.phase(), PHASE_COUNTING);
                     mtt.control_point(Some(&loc), dummy_step, &mut io);
-                    let c2 = loc.state.load(Ordering::Relaxed);
-                    assert_eq!(c2 & PHASE_TAG, PHASE_COUNTING);
+                    let c2 = loc.load(Ordering::Relaxed);
+                    assert_eq!(c2.phase(), PHASE_COUNTING);
                     mtt.control_point(Some(&loc), dummy_step, &mut io);
-                    let c3 = loc.state.load(Ordering::Relaxed);
-                    assert_eq!(c3 & PHASE_TAG, PHASE_COUNTING);
+                    let c3 = loc.load(Ordering::Relaxed);
+                    assert_eq!(c3.phase(), PHASE_COUNTING);
                     mtt.control_point(Some(&loc), dummy_step, &mut io);
-                    let c4 = loc.state.load(Ordering::Relaxed);
-                    assert_eq!(c4 & PHASE_TAG, PHASE_COUNTING);
-                    assert!(c4 > c3);
-                    assert!(c3 > c2);
-                    assert!(c2 > c1);
+                    let c4 = loc.load(Ordering::Relaxed);
+                    assert_eq!(c4.phase(), PHASE_COUNTING);
+                    assert!(c4.0 > c3.0);
+                    assert!(c3.0 > c2.0);
+                    assert!(c2.0 > c1.0);
                 })
                 .unwrap();
             thrs.push(t);
@@ -647,18 +692,15 @@ mod tests {
         {
             let mut io = DummyIO {};
             mtt.control_point(Some(&loc), dummy_step, &mut io);
-            assert_eq!(loc.state.load(Ordering::Relaxed) & PHASE_TAG, PHASE_TRACING);
+            assert_eq!(loc.load(Ordering::Relaxed).phase(), PHASE_TRACING);
             mtt.control_point(Some(&loc), dummy_step, &mut io);
             mtt.control_point(Some(&loc), dummy_step, &mut io);
 
-            while loc.state.load(Ordering::Relaxed) & PHASE_TAG == PHASE_COMPILING {
+            while loc.load(Ordering::Relaxed).phase() == PHASE_COMPILING {
                 yield_now();
                 mtt.control_point(Some(&loc), dummy_step, &mut io);
             }
-            assert_eq!(
-                loc.state.load(Ordering::Relaxed) & PHASE_TAG,
-                PHASE_COMPILED
-            );
+            assert_eq!(loc.load(Ordering::Relaxed).phase(), PHASE_COMPILED);
         }
     }
 
@@ -707,9 +749,7 @@ mod tests {
 
         loop {
             let loc = locs[tio.pc].as_ref();
-            if tio.pc == 0
-                && loc.unwrap().state.load(Ordering::Relaxed) & PHASE_TAG == PHASE_COMPILED
-            {
+            if tio.pc == 0 && loc.unwrap().load(Ordering::Relaxed).phase() == PHASE_COMPILED {
                 break;
             }
             mtt.control_point(loc, simple_interp_step, &mut tio);
@@ -717,7 +757,7 @@ mod tests {
         }
 
         assert_eq!(
-            locs[0].as_ref().unwrap().state.load(Ordering::Relaxed) & PHASE_TAG,
+            locs[0].as_ref().unwrap().load(Ordering::Relaxed).phase(),
             PHASE_COMPILED
         );
 
@@ -797,7 +837,7 @@ mod tests {
             loop {
                 let loc = locs[tio.pc].as_ref();
                 if tio.pc == 0 {
-                    let tag = loc.unwrap().state.load(Ordering::Relaxed) & PHASE_TAG;
+                    let tag = loc.unwrap().load(Ordering::Relaxed).phase();
                     match tag {
                         PHASE_COUNTING | PHASE_TRACING | PHASE_TRACING_LOCK | PHASE_COMPILING
                         | PHASE_LOCKED => (),
@@ -871,7 +911,7 @@ mod tests {
         }
 
         let loc = locs[0].as_ref();
-        let tag = loc.unwrap().state.load(Ordering::Relaxed) & PHASE_TAG;
+        let tag = loc.unwrap().load(Ordering::Relaxed).phase();
         assert_eq!(tag, PHASE_TRACING);
         let mut tio = IO {
             prog: Arc::clone(&prog),
@@ -879,7 +919,7 @@ mod tests {
             pc: 0,
         };
         mtt.control_point(loc, simple_interp_step, &mut tio);
-        let tag = loc.unwrap().state.load(Ordering::Relaxed) & PHASE_TAG;
+        let tag = loc.unwrap().load(Ordering::Relaxed).phase();
         assert_eq!(tag, PHASE_DONT_TRACE);
     }
 
@@ -932,7 +972,7 @@ mod tests {
         }
 
         let loc = locs[0].as_ref();
-        let tag = loc.unwrap().state.load(Ordering::Relaxed) & PHASE_TAG;
+        let tag = loc.unwrap().load(Ordering::Relaxed).phase();
         assert_eq!(tag, PHASE_TRACING);
         // This is a weak test: at this point we hope that the dropped location frees its Arc. If
         // it doesn't, we won't have tested much. If it does, we at least get a modicum of "check
