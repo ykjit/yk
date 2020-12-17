@@ -53,7 +53,13 @@ pub struct ThreadTracer {
 impl ThreadTracer {
     /// Stops tracing on the current thread, returning a TIR trace on success.
     pub fn stop_tracing(mut self) -> Result<SirTrace, InvalidTraceError> {
-        self.t_impl.stop_tracing()
+        let trace = self.t_impl.stop_tracing();
+        if let Ok(inner) = &trace {
+            if inner.len() == 0 {
+                return Err(InvalidTraceError::EmptyTrace);
+            }
+        }
+        trace
     }
 }
 
