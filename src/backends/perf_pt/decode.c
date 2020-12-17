@@ -375,9 +375,7 @@ block_is_terminated(struct pt_block *blk)
         case ptic_ptwrite:
             ret = false;
             break;
-        case ptic_error:
-            // This is not correct, but is blocked on:
-            // https://github.com/intel/libipt/issues/73
+        case ptic_indirect:
             ret = true;
             break;
         default:

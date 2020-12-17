@@ -5,23 +5,21 @@ DIR != pwd
 INST_DIR = ${DIR}/inst
 PYTHON=python3
 
-PROCESSOR_TRACE_REPO = https://github.com/01org/processor-trace.git
-PROCESSOR_TRACE_V = 890e5406a37621f851846b99fc381753b57463d1
-PROCESSOR_TRACE_SOURCE = processor-trace
+PROCESSOR_TRACE_REPO = https://github.com/intel/libipt
+PROCESSOR_TRACE_V = ffe1631be3dad2dc286529e3e05d552043d626f0
+PROCESSOR_TRACE_SOURCE = libipt
 
 XED_REPO = https://github.com/intelxed/xed
-XED_V = afbb851b5f2f2ac6cdb6e6d9bebbaf2d4e77286d
+XED_V = f7191e268c3ee17fc8c9b8d9bd3eee7159f29556
 XED_SOURCE = xed
 
 MBUILD_REPO = https://github.com/intelxed/mbuild
-MBUILD_V = 5304b94361fccd830c0e2417535a866b79c1c297
+MBUILD_V = 3e8eb33aada4153c21c4261b35e5f51f6e2019e8
 MBUILD_SOURCE = mbuild
 
 .PHONY: libipt
 
-all: libipt
-
-libipt: ${INST_DIR}/bin/ptdump
+all: ${INST_DIR}/bin/ptdump
 
 ${INST_DIR}:
 	install -d ${INST_DIR}/bin

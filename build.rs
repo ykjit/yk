@@ -52,7 +52,6 @@ fn build_libipt(c_deps_dir: &Path) {
     let res = Command::new("make")
         .arg("-f")
         .arg(C_DEPS_MAKEFILE)
-        .arg("libipt")
         .output()
         .unwrap_or_else(|_| panic!("Fatal error when building libipt"));
     if !res.status.success() {
@@ -74,7 +73,7 @@ fn fetch_libipt(c_deps_dir: &Path) {
     let prev_dir = env::current_dir().unwrap();
     env::set_current_dir(c_deps_dir).unwrap();
     let res = Command::new("make")
-        .arg("processor-trace") // target just fetches the code.
+        .arg("libipt") // target just fetches the code.
         .output()
         .unwrap_or_else(|_| panic!("Fatal error when fetching libipt"));
     if !res.status.success() {
@@ -128,16 +127,10 @@ fn main() {
         // If we built our own libipt above, then the fetch is a no-op.
         fetch_libipt(&c_deps_dir);
 
-        c_build.include(&format!(
-            "{}/processor-trace/libipt/internal/include",
-            c_deps_dir_s
-        ));
+        c_build.include(&format!("{}/libipt/libipt/internal/include", c_deps_dir_s));
+        c_build.file(&format!("{}/libipt/libipt/src/pt_cpu.c", c_deps_dir_s));
         c_build.file(&format!(
-            "{}/processor-trace/libipt/src/pt_cpu.c",
-            c_deps_dir_s
-        ));
-        c_build.file(&format!(
-            "{}/processor-trace/libipt/src/posix/pt_cpuid.c",
+            "{}/libipt/libipt/src/posix/pt_cpuid.c",
             c_deps_dir_s
         ));
 
