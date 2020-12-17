@@ -533,7 +533,6 @@ impl MTThread {
                 let new_state = State::phase_compiling(mtx);
                 loc.store(new_state, Ordering::Release);
 
-                Rc::get_mut(&mut self.inner).unwrap().tracer = None;
                 return None;
             }
             PHASE_COMPILING => {
