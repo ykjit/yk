@@ -5,11 +5,11 @@ use std::fmt::{self, Display, Formatter};
 pub enum InvalidTraceError {
     /// An empty trace was recorded.
     EmptyTrace,
+    /// Something went wrong in the compiler's tracing code
+    InternalError,
     /// There is no SIR for the location in the trace.
     /// The string inside is the binary symbol name in which the location appears.
-    NoSir(String),
-    /// Something went wrong in the compiler's tracing code
-    InternalError
+    NoSir(String)
 }
 
 impl InvalidTraceError {
@@ -23,10 +23,10 @@ impl Display for InvalidTraceError {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
             InvalidTraceError::EmptyTrace => write!(f, "Empty trace"),
+            InvalidTraceError::InternalError => write!(f, "Internal tracing error"),
             InvalidTraceError::NoSir(symbol_name) => {
                 write!(f, "No SIR for location in symbol: {}", symbol_name)
             }
-            InvalidTraceError::InternalError => write!(f, "Internal tracing error")
         }
     }
 }
