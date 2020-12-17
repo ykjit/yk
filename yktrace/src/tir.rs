@@ -331,7 +331,6 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                 Terminator::Goto(_)
                 | Terminator::Return
                 | Terminator::Drop { .. }
-                | Terminator::DropAndReplace { .. }
                 | Terminator::Call { .. }
                 | Terminator::Unimplemented(_) => None,
                 Terminator::Unreachable => panic!("Traced unreachable code"),
