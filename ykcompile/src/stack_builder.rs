@@ -3,7 +3,7 @@ use dynasmrt::{x64::Rq::RBP, Register};
 use std::convert::{TryFrom, TryInto};
 
 #[derive(Default, Debug)]
-pub struct StackBuilder {
+pub(crate) struct StackBuilder {
     /// Keeps track of how many bytes have been allocated.
     stack_top: u64,
 }

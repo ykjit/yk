@@ -13,7 +13,7 @@ use std::{
     thread::{self, yield_now, JoinHandle},
 };
 
-use ykcompile::{CompiledTrace, TraceCompiler};
+use ykcompile::{compile_trace, CompiledTrace};
 use yktrace::{sir::SIR, start_tracing, tir::TirTrace, ThreadTracer, TracingKind};
 
 use crate::location::{
@@ -363,7 +363,7 @@ impl MTThread {
                 let mtx_cl = Arc::clone(&mtx);
                 thread::spawn(move || {
                     let tir_trace = TirTrace::new(&*SIR, &sir_trace).unwrap();
-                    let compiled = TraceCompiler::<I>::compile(tir_trace);
+                    let compiled = compile_trace::<I>(tir_trace);
                     *mtx_cl.lock().unwrap() = Some(Box::new(compiled));
                     // FIXME: although we've now put the compiled trace into the mutex, there's no
                     // guarantee that the Location for which we're compiling will ever be executed
