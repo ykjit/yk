@@ -5,9 +5,9 @@ use std::fmt::{self, Display, Formatter};
 pub enum InvalidTraceError {
     /// An empty trace was recorded.
     EmptyTrace,
-    /// Something went wrong in the compiler's tracing code
+    /// Something went wrong in the compiler's tracing code.
     InternalError,
-    /// There is no SIR for the location in the trace.
+    /// There is no SIR for a location in the trace.
     /// The string inside is the binary symbol name in which the location appears.
     NoSir(String)
 }
