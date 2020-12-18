@@ -3,6 +3,7 @@ members=[
     "ykcompile",
     "ykpack",
     "ykrt",
+    "ykrt_internal",
     "yktrace",
     "ykview",
     "ykbh",

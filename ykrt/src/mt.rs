@@ -356,8 +356,7 @@ impl MTThread {
                     .take()
                     .unwrap()
                     .0
-                    .stop_tracing()
-                    .unwrap();
+                    .stop_tracing();
 
                 // Start a compilation thread.
                 let mtx = Arc::new(Mutex::new(None));

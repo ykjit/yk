@@ -1,0 +1,10 @@
+[package]
+name = "ykrt_internal"
+version = "0.1.0"
+authors = ["bjorn3 <bjorn3@users.noreply.github.com>"]
+edition = "2018"
+license = "Apache-2.0 OR MIT"
+
+[dependencies]
+yktrace = { path = "../yktrace" }
+ykcompile = { path = "../ykcompile" }

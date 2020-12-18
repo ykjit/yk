@@ -1,8 +1,16 @@
-use std::marker::PhantomData;
+use std::{ffi::c_void, marker::PhantomData};
 
-use yktrace::sir::{SirTrace, SIR};
-use yktrace::tir::TirTrace;
-use yktrace::InvalidTraceError;
+// Force ykrt_internal to be linked
+#[allow(unused_imports)]
+use ykrt_internal;
+
+extern "C" {
+    fn __ykrt_start_tracing(tracing_kind: u8) -> *mut c_void;
+    fn __ykrt_stop_tracing(tracer: *mut c_void) -> *mut c_void;
+    fn __ykrt_compile_trace(sir_trace: *mut c_void) -> *mut c_void;
+    fn __ykrt_compiled_trace_get_ptr(compiled_trace: *const c_void) -> *const c_void;
+    fn __ykrt_compiled_trace_dealloc(compiled_trace: *mut c_void);
+}
 
 /// The different ways by which we can collect a trace.
 #[derive(Clone, Copy)]
@@ -14,38 +22,48 @@ pub enum TracingKind {
     HardwareTracing = 1,
 }
 
-#[repr(C)]
-pub(crate) struct ThreadTracer(yktrace::ThreadTracer);
+pub(crate) struct ThreadTracer(*mut c_void);
+
+pub(crate) fn start_tracing(tracing_kind: TracingKind) -> ThreadTracer {
+    unsafe { ThreadTracer(__ykrt_start_tracing(tracing_kind as u8)) }
+}
 
 impl ThreadTracer {
-    pub(crate) fn stop_tracing(self) -> Result<SirTrace, InvalidTraceError> {
-        self.0.stop_tracing()
+    pub(crate) fn stop_tracing(self) -> SirTrace {
+        unsafe { SirTrace(__ykrt_stop_tracing(self.0)) }
     }
 }
 
-pub(crate) fn start_tracing(tracing_kind: TracingKind) -> ThreadTracer {
-    ThreadTracer(yktrace::start_tracing(match tracing_kind {
-        TracingKind::SoftwareTracing => yktrace::TracingKind::SoftwareTracing,
-        TracingKind::HardwareTracing => yktrace::TracingKind::HardwareTracing,
-    }))
+pub(crate) struct SirTrace(*mut c_void);
+
+unsafe impl Send for SirTrace {}
+unsafe impl Sync for SirTrace {}
+
+pub(crate) struct CompiledTrace<I> {
+    compiled: *mut c_void,
+    _marker: PhantomData<I>,
 }
 
-#[repr(C)]
-pub(crate) struct CompiledTrace<I> {
-    compiled: ykcompile::CompiledTrace,
-    _marker: PhantomData<I>,
+unsafe impl<I> Send for CompiledTrace<I> {}
+unsafe impl<I> Sync for CompiledTrace<I> {}
+
+pub(crate) fn compile_trace<T>(sir_trace: SirTrace) -> CompiledTrace<T> {
+    unsafe {
+        CompiledTrace {
+            compiled: __ykrt_compile_trace(sir_trace.0),
+            _marker: PhantomData,
+        }
+    }
 }
 
 impl<I> CompiledTrace<I> {
     pub(crate) fn ptr(&self) -> *const u8 {
-        self.compiled.ptr()
+        unsafe { __ykrt_compiled_trace_get_ptr(self.compiled) as *const u8 }
     }
 }
 
-pub(crate) fn compile_trace<T>(sir_trace: SirTrace) -> CompiledTrace<T> {
-    let tt = TirTrace::new(&*SIR, &sir_trace).unwrap();
-    CompiledTrace {
-        compiled: ykcompile::compile_trace(tt),
-        _marker: PhantomData,
+impl<I> Drop for CompiledTrace<I> {
+    fn drop(&mut self) {
+        unsafe { __ykrt_compiled_trace_dealloc(self.compiled) }
     }
 }
