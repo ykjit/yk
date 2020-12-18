@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use yktrace::sir::{SirTrace, SIR};
 use yktrace::tir::TirTrace;
 use yktrace::InvalidTraceError;
@@ -29,15 +31,21 @@ pub(crate) fn start_tracing(tracing_kind: TracingKind) -> ThreadTracer {
 }
 
 #[repr(C)]
-pub(crate) struct CompiledTrace<I>(ykcompile::CompiledTrace<I>);
+pub(crate) struct CompiledTrace<I> {
+    compiled: ykcompile::CompiledTrace,
+    _marker: PhantomData<I>,
+}
 
 impl<I> CompiledTrace<I> {
     pub(crate) fn ptr(&self) -> *const u8 {
-        self.0.ptr()
+        self.compiled.ptr()
     }
 }
 
 pub(crate) fn compile_trace<T>(sir_trace: SirTrace) -> CompiledTrace<T> {
     let tt = TirTrace::new(&*SIR, &sir_trace).unwrap();
-    CompiledTrace(ykcompile::compile_trace(tt))
+    CompiledTrace {
+        compiled: ykcompile::compile_trace(tt),
+        _marker: PhantomData,
+    }
 }
