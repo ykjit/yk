@@ -12,177 +12,17 @@ use std::{
     },
     thread::{self, yield_now, JoinHandle},
 };
+
 use ykcompile::{CompiledTrace, TraceCompiler};
 use yktrace::{sir::SIR, start_tracing, tir::TirTrace, ThreadTracer, TracingKind};
 
+use crate::location::{
+    CompilingTrace, Location, State, PHASE_COMPILED, PHASE_COMPILING, PHASE_COUNTING,
+    PHASE_DONT_TRACE, PHASE_LOCKED, PHASE_TRACING, PHASE_TRACING_LOCK,
+};
+
 pub type HotThreshold = usize;
 const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
-const PHASE_NUM_BITS: usize = 3;
-
-// The current meta-tracing phase of a given location in the end-user's code. Consists of a tag and
-// (optionally) a value. We expect the most commonly encountered tag at run-time is PHASE_COMPILED
-// whose value is a pointer to memory. By also making that tag 0b00, we allow that index to be
-// accessed without any further operations after the initial tag check.
-const PHASE_TAG: usize = 0b111; // All of the other PHASE_ tags must fit in this.
-const PHASE_COMPILED: usize = 0b000; // Value is a pointer to a chunk of memory containing a
-                                     // CompiledTrace<I>.
-const PHASE_TRACING: usize = 0b001; // Value is a pointer to an Arc<ThreadIdInner> representing a
-                                    // thread ID.
-const PHASE_TRACING_LOCK: usize = 0b010; // No associated value
-const PHASE_COMPILING: usize = 0b011; // Value is a pointer to a `Box<CompilingTrace<I>>`.
-const PHASE_COUNTING: usize = 0b100; // Value specifies how many times we've seen this Location.
-const PHASE_LOCKED: usize = 0b101; // No associated value.
-const PHASE_DONT_TRACE: usize = 0b110; // No associated value.
-
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-struct State(usize);
-
-impl State {
-    fn phase(&self) -> usize {
-        self.0 & PHASE_TAG
-    }
-
-    fn phase_compiled<I>(trace: Box<CompiledTrace<I>>) -> Self {
-        let ptr = Box::into_raw(trace);
-        debug_assert_eq!(ptr as usize & PHASE_TAG, 0);
-        State(ptr as usize | PHASE_COMPILED)
-    }
-
-    fn phase_tracing(tid: Arc<ThreadIdInner>) -> Self {
-        let ptr = Arc::into_raw(tid);
-        debug_assert_eq!(ptr as usize & PHASE_TAG, 0);
-        State(ptr as usize | PHASE_TRACING)
-    }
-
-    fn phase_tracing_lock() -> Self {
-        State(PHASE_TRACING_LOCK)
-    }
-
-    fn phase_compiling<I>(trace: Arc<CompilingTrace<I>>) -> Self {
-        let ptr: *const CompilingTrace<I> = Arc::into_raw(trace);
-        debug_assert_eq!(ptr as usize & PHASE_TAG, 0);
-        State(ptr as usize | PHASE_COMPILING)
-    }
-
-    fn phase_counting(count: usize) -> Self {
-        debug_assert_eq!(count << PHASE_NUM_BITS >> PHASE_NUM_BITS, count);
-        State(PHASE_COUNTING | (count << PHASE_NUM_BITS))
-    }
-
-    fn phase_locked() -> Self {
-        State(PHASE_LOCKED)
-    }
-
-    fn phase_dont_trace() -> Self {
-        State(PHASE_DONT_TRACE)
-    }
-
-    fn number_data(&self) -> usize {
-        debug_assert_eq!(self.phase(), PHASE_COUNTING);
-        self.0 >> PHASE_NUM_BITS
-    }
-
-    fn pointer_data<T>(&self) -> *const T {
-        (self.0 & !PHASE_TAG) as *const T
-    }
-
-    unsafe fn ref_data<T>(&self) -> &T {
-        &*self.pointer_data()
-    }
-}
-
-/// A `Location` stores state that the meta-tracer needs to identify hot loops and run associated
-/// machine code.
-///
-/// Each position in the end user's program that may be a control point (i.e. the possible start of
-/// a trace) must have an associated `Location`. The `Location` does not need to be at a stable
-/// address in memory and can be freely moved.
-///
-/// Program positions that can't be control points don't need an associated `Location`. For
-/// interpreters that can't (or don't want) to be as selective, a simple (if moderately wasteful)
-/// mechanism is for every bytecode or AST node to have its own `Location` (even for bytecodes or
-/// nodes that can't be control points).
-#[derive(Debug)]
-pub struct Location<I> {
-    // A Location is a state machine which operates as follows (where PHASE_COUNTING is the start
-    // state):
-    //
-    //              ┌────────────────────────────────────────┐
-    //              │                                        │─────────────┐
-    //   reprofile  │             PHASE_COUNTING             │             │
-    //  ┌──────────▶│                                        │◀────────────┘
-    //  │           └────────────────────────────────────────┘    increment
-    //  │             │                                             count
-    //  │             │ start tracing
-    //  │             ▼
-    //  │           ┌────────────────────┐
-    //  │           │   PHASE_TRACING    │
-    //  │           └────────────────────┘
-    //  │             │ check for    ▲
-    //  │             │ stuckness    | still
-    //  │             ▼              | active
-    //  │           ┌────────────────────┐
-    //  │           │                    │  abort   ┌────────────────────┐
-    //  │           │ PHASE_TRACING_LOCK │─────────▶│  PHASE_DONT_TRACE  │
-    //  │           │                    │          └────────────────────┘
-    //  │           └────────────────────┘
-    //  │             │ start compiling trace
-    //  │             │ in thread
-    //  │             ▼
-    //  │           ┌────────────────────┐
-    //  │           │                    │
-    //  |           |  PHASE_COMPILING   |
-    //  │           │                    │
-    //  │           └────────────────────┘
-    //  │             │ trace maybe    ▲
-    //  │             │ compiled       | trace not yet
-    //  │             ▼                | compiled
-    //  │           ┌────────────────────┐
-    //  │           │    PHASE_LOCKED    │
-    //  │           └────────────────────┘
-    //  │             │ trace definitely
-    //  │             │ compiled
-    //  │             ▼
-    //  │           ┌────────────────────┐
-    //  │           │                    │──────┐
-    //  │           │   PHASE_COMPILED   │      │
-    //  └───────────│                    │◀─────┘
-    //              └────────────────────┘
-    //
-    // We hope that a Location soon reaches PHASE_COMPILED (aka "the happy state") and stays there.
-    state: AtomicUsize,
-    phantom: PhantomData<I>,
-}
-
-impl<I> Location<I> {
-    pub fn new() -> Self {
-        Self {
-            state: AtomicUsize::new(PHASE_COUNTING),
-            phantom: PhantomData,
-        }
-    }
-
-    fn load(&self, order: Ordering) -> State {
-        State(self.state.load(order))
-    }
-
-    fn compare_and_swap(&self, current: State, new: State, order: Ordering) -> State {
-        State(self.state.compare_and_swap(current.0, new.0, order))
-    }
-
-    fn store(&self, state: State, order: Ordering) {
-        self.state.store(state.0, order);
-    }
-}
-
-impl<I> Drop for Location<I> {
-    fn drop(&mut self) {
-        let lp = *self.state.get_mut();
-        if lp & PHASE_TAG == PHASE_TRACING {
-            unsafe { Arc::from_raw((lp & !PHASE_TAG) as *mut u8) };
-        }
-    }
-}
 
 /// Configure a meta-tracer. Note that a process can only have one meta-tracer active at one point.
 pub struct MTBuilder {
@@ -311,8 +151,7 @@ impl MTInner {
     }
 }
 
-type CompilingTrace<I> = Mutex<Option<Box<CompiledTrace<I>>>>;
-struct ThreadIdInner;
+pub(crate) struct ThreadIdInner;
 
 /// A meta-tracer aware thread. Note that this is conceptually a "front-end" to the actual
 /// meta-tracer thread akin to an `Rc`: this struct can be freely `clone()`d without duplicating
@@ -678,9 +517,9 @@ mod tests {
                     mtt.control_point(Some(&loc), dummy_step, &mut io);
                     let c4 = loc.load(Ordering::Relaxed);
                     assert_eq!(c4.phase(), PHASE_COUNTING);
-                    assert!(c4.0 > c3.0);
-                    assert!(c3.0 > c2.0);
-                    assert!(c2.0 > c1.0);
+                    assert!(c4.number_data() > c3.number_data());
+                    assert!(c3.number_data() > c2.number_data());
+                    assert!(c2.number_data() > c1.number_data());
                 })
                 .unwrap();
             thrs.push(t);

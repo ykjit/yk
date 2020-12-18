@@ -1,5 +1,7 @@
 #![cfg_attr(test, feature(test))]
 
+mod location;
 pub mod mt;
 
-pub use self::mt::{Location, MT};
+pub use self::location::Location;
+pub use self::mt::MT;
