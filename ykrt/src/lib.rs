@@ -1,5 +1,6 @@
 #![cfg_attr(test, feature(test))]
 
+mod internal;
 mod location;
 pub mod mt;
 

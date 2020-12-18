@@ -18,7 +18,7 @@ mod hwt;
 #[cfg(tracermode = "sw")]
 mod swt;
 
-use errors::InvalidTraceError;
+pub use errors::InvalidTraceError;
 use sir::SirTrace;
 use ykpack::Local;
 

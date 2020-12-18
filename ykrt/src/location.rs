@@ -6,8 +6,7 @@ use std::{
     },
 };
 
-use ykcompile::CompiledTrace;
-
+use crate::internal::CompiledTrace;
 use crate::mt::ThreadIdInner;
 
 // The current meta-tracing phase of a given location in the end-user's code. Consists of a tag and
