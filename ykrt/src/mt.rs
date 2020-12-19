@@ -356,13 +356,14 @@ impl MTThread {
                     .take()
                     .unwrap()
                     .0
-                    .stop_tracing();
+                    .stop_tracing()
+                    .unwrap();
 
                 // Start a compilation thread.
                 let mtx = Arc::new(Mutex::new(None));
                 let mtx_cl = Arc::clone(&mtx);
                 thread::spawn(move || {
-                    let compiled = compile_trace::<I>(sir_trace);
+                    let compiled = compile_trace::<I>(sir_trace).unwrap();
                     *mtx_cl.lock().unwrap() = Some(Box::new(compiled));
                     // FIXME: although we've now put the compiled trace into the mutex, there's no
                     // guarantee that the Location for which we're compiling will ever be executed
