@@ -4,3 +4,8 @@
 language which aims to build a meta-tracing system from Rust. The tracing
 system as a whole is called Yorick. Imagine PyPy, but where your interpreter is
 written in Rust instead of RPython.
+
+## Contributors
+
+Yorick is developed by a team of people listed in the
+[contributors page](https://github.com/softdevteam/yk/graphs/contributors).
