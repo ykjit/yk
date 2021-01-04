@@ -348,7 +348,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     match edge_idx {
                         Some(idx) => Some(Guard {
                             val: rnm.rename_iplace(discr, &body),
-                            kind: GuardKind::Integer(values[idx].val()),
+                            kind: GuardKind::Integer(values[idx]),
                             block: GuardBlock {
                                 symbol_name: loc.symbol_name,
                                 bb_idx: loc.bb_idx
@@ -359,9 +359,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                             debug_assert!(next_blk == otherwise_bb);
                             Some(Guard {
                                 val: rnm.rename_iplace(discr, &body),
-                                kind: GuardKind::OtherInteger(
-                                    values.iter().map(|v| v.val()).collect()
-                                ),
+                                kind: GuardKind::OtherInteger(values.iter().cloned().collect()),
                                 block: GuardBlock {
                                     symbol_name: loc.symbol_name,
                                     bb_idx: loc.bb_idx
