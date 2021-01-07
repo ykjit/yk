@@ -549,8 +549,30 @@ impl<TT> TraceCompiler<TT> {
         dynasm!(self.asm
             ; push rax
             ; xor rax, rax
+        );
+
+        dynasm!(self.asm
             ; lea rdi, [Rq(dest.reg) + dest.off]
-            ; lea rsi, [Rq(src.reg) + src.off]
+        );
+        if src.reg == RDI.code() {
+            // If the second argument lived in RDI then we've just overwritten it, so we load it
+            // back from when we callee-saved it.
+            let mut rdi_stackpos = CALLER_SAVED_REGS
+                .iter()
+                .rev()
+                .position(|r| *r == RDI.code())
+                .unwrap();
+            // We've also pushed RAX in the meantime.
+            rdi_stackpos += 1;
+            dynasm!(self.asm
+                ; mov rsi, [rsp + i32::try_from(rdi_stackpos).unwrap() * 8]
+            );
+        } else {
+            dynasm!(self.asm
+                ; lea rsi, [Rq(src.reg) + src.off]
+            );
+        };
+        dynasm!(self.asm
             ; mov rdx, size as i32
             ; mov r11, QWORD sym as i64
             ; call r11
@@ -1428,11 +1450,18 @@ impl<TT> TraceCompiler<TT> {
                 IndirectLoc::Reg(src_reg) => {
                     debug_assert!(*src_reg != *TEMP_REG);
                     match size {
+                        1 | 2 | 4 => todo!(),
                         8 => dynasm!(self.asm
                             ; mov Rq(*TEMP_REG), QWORD [Rq(src_reg) + *src_off]
                             ; mov QWORD [Rq(dest_ro.reg) + dest_ro.off], Rq(*TEMP_REG)
                         ),
-                        _ => todo!(),
+                        _ => {
+                            let src_ro = RegAndOffset {
+                                reg: *src_reg,
+                                off: *src_off,
+                            };
+                            self.copy_memory(&dest_ro, &src_ro, size);
+                        }
                     }
                 }
             },
@@ -2783,36 +2812,24 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // FIXME Broken during new trimming scheme. Seg faults.
-    fn rvalue_len() {
+    fn array_slice_index() {
         struct IO<'a>(&'a [u8], u8);
-
-        fn matchthis(inputs: &IO, pc: usize) -> u8 {
-            let x = match inputs.0[pc] as char {
-                'a' => 1,
-                'b' => 2,
-                _ => 0,
-            };
-            x
-        }
 
         #[interp_step]
         fn interp_step(io: &mut IO) {
-            let x = matchthis(&io, 0);
-            io.1 = x;
+            io.1 = io.0[2];
         }
 
-        let a = "abc".as_bytes();
+        let a = [1, 2, 3];
         let mut inputs = IO(&a, 0);
         let th = start_tracing(TracingKind::HardwareTracing);
         interp_step(&mut inputs);
         let sir_trace = th.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&*SIR, &sir_trace).unwrap();
         let ct = compile_trace::<IO>(tir_trace);
-        let mut a2 = "abc".as_bytes();
-        let mut args = IO(&mut a2, 0);
+        let mut args = IO(&a, 0);
         ct.execute(&mut args);
-        assert_eq!(args.1, 1);
+        assert_eq!(args.1, 3);
     }
 
     // Only `interp_step` annotated functions and their callees should remain after trace trimming.
