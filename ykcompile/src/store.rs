@@ -405,7 +405,6 @@ impl<TT> TraceCompiler<TT> {
                     },
                 }
             }
-            (Location::NotLive, _) | (_, Location::NotLive) => unreachable!(),
             _ => todo!(),
         }
     }

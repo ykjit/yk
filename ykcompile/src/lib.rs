@@ -119,7 +119,6 @@ macro_rules! binop_add_sub {
                     }
                 }
                 Location::Indirect { .. } => todo!(),
-                Location::NotLive => todo!(),
             }
         }
     }
@@ -204,7 +203,6 @@ macro_rules! binop_mul_div {
                     }
                 }
                 Location::Indirect { .. } => todo!(),
-                Location::NotLive => todo!(),
             }
 
             // Restore RAX, RDX
@@ -319,8 +317,6 @@ enum Location {
     Indirect { ptr: IndirectLoc, off: OffT },
     /// A statically known constant.
     Const { val: Constant, ty: TypeId },
-    /// A non-live location. Used by the register allocator.
-    NotLive,
 }
 
 impl Location {
@@ -352,7 +348,6 @@ impl Location {
                 ..
             } => Some(*reg),
             Location::Const { .. } => None,
-            Location::NotLive => unreachable!(),
         }
     }
 
@@ -371,7 +366,6 @@ impl Location {
                 off: ind_off + off,
             },
             Location::Reg(..) | Location::Const { .. } => todo!("offsetting a constant"),
-            Location::NotLive => unreachable!(),
         }
     }
 
@@ -520,9 +514,13 @@ impl<TT> TraceCompiler<TT> {
 
     /// Notifies the register allocator that a local has died and that its storage may be freed.
     fn local_dead(&mut self, local: &Local) -> Result<(), CompileError> {
-        match self.variable_location_map.get(local) {
-            Some(Location::Reg(reg)) => {
-                // If this local is currently stored in a register, free it.
+        match self
+            .variable_location_map
+            .get(local)
+            .expect("freeing unallocated register")
+        {
+            Location::Reg(reg) => {
+                // This local is currently stored in a register, so free the register.
                 //
                 // Note that if we are marking the reserved TIO_REG free then this actually adds a
                 // new register key to the map (as opposed to marking a pre-existing entry free).
@@ -530,14 +528,10 @@ impl<TT> TraceCompiler<TT> {
                 // not be used for the remainder of the trace.
                 self.register_content_map.insert(*reg, RegAlloc::Free);
             }
-            Some(Location::Mem { .. }) | Some(Location::Indirect { .. }) => {}
-            Some(Location::NotLive) => unreachable!(),
-            Some(Location::Const { .. }) => unreachable!(),
-            None => {
-                unreachable!("freeing unallocated register");
-            }
+            Location::Mem { .. } | Location::Indirect { .. } => {}
+            Location::Const { .. } => unreachable!(),
         }
-        self.variable_location_map.insert(*local, Location::NotLive);
+        self.variable_location_map.remove(local);
         Ok(())
     }
 
@@ -704,7 +698,6 @@ impl<TT> TraceCompiler<TT> {
                         ; mov Rq(arg_reg), QWORD val.i64_cast()
                     );
                 }
-                Location::NotLive => unreachable!(),
             }
         }
 
@@ -952,7 +945,6 @@ impl<TT> TraceCompiler<TT> {
                 }
             },
             Location::Const { .. } => todo!(),
-            Location::NotLive => unreachable!(),
         }
 
         // 3) Apply the offset.
@@ -1034,7 +1026,6 @@ impl<TT> TraceCompiler<TT> {
                     }
                 }
             }
-            Location::NotLive => unreachable!(),
         }
         let dest_loc = self.iplace_to_location(dest);
         debug_assert_eq!(SIR.ty(&dest.ty()).size(), *PTR_SIZE);
@@ -1126,7 +1117,6 @@ impl<TT> TraceCompiler<TT> {
             Location::Mem(_ro) => todo!(),
             Location::Indirect { .. } => todo!(),
             Location::Const { .. } => todo!(),
-            Location::NotLive => unreachable!(),
         }
     }
 
