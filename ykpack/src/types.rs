@@ -223,40 +223,6 @@ impl Display for StructTy {
     }
 }
 
-/// rmp-serde serialisable 128-bit numeric types, to work around:
-/// https://github.com/3Hren/msgpack-rust/issues/169
-macro_rules! new_ser128 {
-    ($n: ident, $t: ty) => {
-        #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-        pub struct $n {
-            hi: u64,
-            lo: u64,
-        }
-
-        impl $n {
-            pub fn new(val: $t) -> Self {
-                Self {
-                    hi: (val >> 64) as u64,
-                    lo: val as u64,
-                }
-            }
-
-            pub fn val(&self) -> $t {
-                (self.hi as $t) << 64 | self.lo as $t
-            }
-        }
-
-        impl Display for $n {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "{}{}", self.val(), stringify!($t))
-            }
-        }
-    };
-}
-
-new_ser128!(SerU128, u128);
-new_ser128!(SerI128, i128);
-
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Copy, Hash, Ord, PartialOrd)]
 pub struct Local(pub LocalIndex);
 
@@ -705,7 +671,6 @@ impl ConstantInt {
 }
 
 /// Generate a method that constructs a ConstantInt variant from bits in u128 form.
-/// This can't be used to generate methods for 128-bit integers due to SerU128/SerI128.
 macro_rules! const_int_from_bits {
     ($fn_name: ident, $rs_t: ident, $yk_t: ident, $yk_variant: ident) => {
         pub fn $fn_name(bits: u128) -> Self {
@@ -719,21 +684,15 @@ impl ConstantInt {
     const_int_from_bits!(u16_from_bits, u16, UnsignedInt, U16);
     const_int_from_bits!(u32_from_bits, u32, UnsignedInt, U32);
     const_int_from_bits!(u64_from_bits, u64, UnsignedInt, U64);
+    const_int_from_bits!(u128_from_bits, u128, UnsignedInt, U128);
     const_int_from_bits!(usize_from_bits, usize, UnsignedInt, Usize);
-
-    pub fn u128_from_bits(bits: u128) -> Self {
-        ConstantInt::UnsignedInt(UnsignedInt::U128(SerU128::new(bits)))
-    }
 
     const_int_from_bits!(i8_from_bits, i8, SignedInt, I8);
     const_int_from_bits!(i16_from_bits, i16, SignedInt, I16);
     const_int_from_bits!(i32_from_bits, i32, SignedInt, I32);
     const_int_from_bits!(i64_from_bits, i64, SignedInt, I64);
+    const_int_from_bits!(i128_from_bits, i128, SignedInt, I128);
     const_int_from_bits!(isize_from_bits, isize, SignedInt, Isize);
-
-    pub fn i128_from_bits(bits: u128) -> Self {
-        ConstantInt::SignedInt(SignedInt::I128(SerI128::new(bits as i128)))
-    }
 }
 
 impl Display for ConstantInt {
@@ -752,7 +711,7 @@ pub enum UnsignedInt {
     U16(u16),
     U32(u32),
     U64(u64),
-    U128(SerU128),
+    U128(u128),
 }
 
 impl Display for UnsignedInt {
@@ -775,7 +734,7 @@ pub enum SignedInt {
     I16(i16),
     I32(i32),
     I64(i64),
-    I128(SerI128),
+    I128(i128),
 }
 
 impl Display for SignedInt {
@@ -826,7 +785,7 @@ pub enum Terminator {
     Goto(BasicBlockIndex),
     SwitchInt {
         discr: IPlace,
-        values: Vec<SerU128>,
+        values: Vec<u128>,
         target_bbs: Vec<BasicBlockIndex>,
         otherwise_bb: BasicBlockIndex,
     },
@@ -1010,19 +969,7 @@ impl Display for Pack {
 
 #[cfg(test)]
 mod tests {
-    use super::{ConstantInt, SerI128, SerU128, SignedInt, UnsignedInt};
-
-    #[test]
-    fn seru128_round_trip() {
-        let val: u128 = std::u128::MAX - 427819;
-        assert_eq!(SerU128::new(val).val(), val);
-    }
-
-    #[test]
-    fn seri128_round_trip() {
-        let val = std::i128::MIN + 77;
-        assert_eq!(SerI128::new(val).val(), val);
-    }
+    use super::{ConstantInt, SignedInt, UnsignedInt};
 
     #[test]
     fn const_u8_from_bits() {
@@ -1049,10 +996,14 @@ mod tests {
     fn const_i128_from_bits() {
         let v = -100001i128;
         let cst = ConstantInt::i128_from_bits(v as u128);
-        match &cst {
-            ConstantInt::SignedInt(SignedInt::I128(seri128)) => assert_eq!(seri128.val(), v),
-            _ => panic!(),
-        }
+        assert_eq!(cst, ConstantInt::SignedInt(SignedInt::I128(v)));
+    }
+
+    #[test]
+    fn const_u128_from_bits() {
+        let v = u128::MAX;
+        let cst = ConstantInt::u128_from_bits(v as u128);
+        assert_eq!(cst, ConstantInt::UnsignedInt(UnsignedInt::U128(v)));
     }
 }
 
