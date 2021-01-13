@@ -84,7 +84,7 @@ fn get_phdr_offset() -> u64 {
 fn load_labels() -> IntervalTree<usize, SirLabel> {
     let pathb = env::current_exe().unwrap();
     let file = fs::File::open(&pathb.as_path()).unwrap();
-    let mmap = unsafe { memmap::Mmap::map(&file).unwrap() };
+    let mmap = unsafe { memmap2::Mmap::map(&file).unwrap() };
     let object = object::File::parse(&*mmap).unwrap();
     let sec = object.section_by_name(ykpack::YKLABELS_SECTION).unwrap();
     let vec = bincode::deserialize::<Vec<SirLabel>>(sec.data().unwrap()).unwrap();

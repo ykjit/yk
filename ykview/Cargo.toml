@@ -6,6 +6,6 @@ edition = "2018"
 license = "Apache-2.0 OR MIT"
 
 [dependencies]
-memmap = "0.7.0"
+memmap2 = "0.2.0"
 ykpack = { path = "../ykpack" }
 yktrace = { path = "../yktrace" }
