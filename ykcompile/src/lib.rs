@@ -512,6 +512,11 @@ impl<TT> TraceCompiler<TT> {
         self.stack_builder.alloc(ty.size(), ty.align())
     }
 
+    fn local_live(&mut self, local: &Local) {
+        // Assign a Location to this Local.
+        self.local_to_location(*local);
+    }
+
     /// Notifies the register allocator that a local has died and that its storage may be freed.
     fn local_dead(&mut self, local: &Local) -> Result<(), CompileError> {
         match self
@@ -984,6 +989,7 @@ impl<TT> TraceCompiler<TT> {
                 idx,
                 scale,
             } => self.c_dynoffs(dest, base, idx, *scale),
+            Statement::StorageLive(l) => self.local_live(l),
             Statement::StorageDead(l) => self.local_dead(l)?,
             Statement::Call(target, args, dest) => self.c_call(target, args, dest)?,
             Statement::Cast(dest, src) => self.c_cast(dest, src),
@@ -1137,6 +1143,17 @@ impl<TT> TraceCompiler<TT> {
                 Location::Reg(reg) => {
                     for c in v {
                         self.cmp_reg_const(reg, *c, SIR.ty(&val.ty()).size());
+                        dynasm!(self.asm
+                            ; je ->guardfail
+                        );
+                    }
+                }
+                Location::Mem(ro) => {
+                    dynasm!(self.asm
+                        ; mov Rq(*TEMP_REG), QWORD [Rq(ro.reg) + ro.off]
+                    );
+                    for c in v {
+                        self.cmp_reg_const(*TEMP_REG, *c, SIR.ty(&val.ty()).size());
                         dynasm!(self.asm
                             ; je ->guardfail
                         );
