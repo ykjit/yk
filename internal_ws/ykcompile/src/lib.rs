@@ -2,6 +2,9 @@
 
 #![cfg_attr(test, feature(test))]
 
+#[cfg(not(all(target_arch = "x86_64", target_os = "linux")))]
+compile_error!("Currently only linux x86_64 is supported.");
+
 #[macro_use]
 extern crate dynasmrt;
 #[macro_use]
@@ -15,19 +18,21 @@ mod store;
 use dynasmrt::{x64::Rq::*, Register};
 use libc::{c_void, dlsym, RTLD_DEFAULT};
 use stack_builder::StackBuilder;
+use std::alloc::{alloc, Layout};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::ffi::CString;
 use std::fmt::{self, Display, Formatter};
 use std::mem;
 use std::process::Command;
+use ykbh::{FrameInfo, SIRInterpreter};
 use ykpack::{IPlace, OffT, SignedIntTy, Ty, TyKind, TypeId, UnsignedIntTy};
 use yktrace::tir::{
     BinOp, CallOperand, Constant, Guard, GuardKind, Local, Statement, TirOp, TirTrace,
 };
 use yktrace::{sir::SIR, INTERP_STEP_ARG};
 
-use dynasmrt::{DynasmApi, DynasmLabelApi};
+use dynasmrt::{DynamicLabel, DynasmApi, DynasmLabelApi};
 
 lazy_static! {
     // Registers that are caller-save as per the Sys-V ABI.
@@ -255,6 +260,54 @@ fn local_to_reg_name(loc: &Location) -> &'static str {
     }
 }
 
+// Collection of functions required during a guard failure to instantiate and initialise the SIR
+// interpreter for blackholing.
+
+/// Given a vector of `FrameInfo`s `vptr`, instantiates and initialises a SIR interpreter and returns its
+/// pointer. Consumes `vptr`.
+#[no_mangle]
+pub extern "sysv64" fn invoke_sinterp(vptr: *mut Vec<FrameInfo>) {
+    let v = unsafe { Box::from_raw(vptr) };
+    let mut si = SIRInterpreter::init_frames(*v);
+    //unsafe { si.interpret() };
+}
+
+/// Given a size and alignment, allocates memory which later holds the live variables of a stack
+/// frame.
+pub extern "sysv64" fn allocate_layout(size: usize, align: usize) -> *mut u8 {
+    let layout = Layout::from_size_align(size, align).unwrap();
+    unsafe { alloc(layout) }
+}
+
+/// Instantiates an empty vector of `FrameInfo`s and returns its pointer.
+pub extern "sysv64" fn bh_new_vec() -> *mut Vec<FrameInfo> {
+    let v: Vec<FrameInfo> = Vec::new();
+    let ptr = Box::into_raw(Box::new(v));
+    ptr
+}
+
+/// Pushes a new `FrameInfo` instance onto the vector behind the pointer `vptr`. The `FrameInfo`
+/// instance is creates from a pointer to a symbol name and its length, a basic block index and a
+/// pointer to some allocated memory.
+pub extern "sysv64" fn bh_push_vec(
+    vptr: *mut Vec<FrameInfo>,
+    sym_ptr: *const u8,
+    sym_len: usize,
+    bbidx: usize,
+    mem: *mut u8,
+) {
+    let fname =
+        unsafe { std::str::from_utf8(std::slice::from_raw_parts(sym_ptr, sym_len)).unwrap() };
+    let fi = FrameInfo {
+        sym: fname.to_string(),
+        bbidx,
+        mem,
+    };
+    let mut v = unsafe { Box::from_raw(vptr) };
+    v.push(fi);
+    Box::into_raw(v);
+}
+
 /// Compile a TIR trace, returning executable code.
 pub fn compile_trace(tt: TirTrace) -> CompiledTrace {
     CompiledTrace {
@@ -271,13 +324,14 @@ pub struct CompiledTrace {
 impl CompiledTrace {
     /// Execute the trace by calling (not jumping to) the first instruction's address.
     pub unsafe fn execute<TT>(&self, args: &mut TT) -> bool {
-        let func: fn(&mut TT) -> bool = mem::transmute(self.mc.ptr(dynasmrt::AssemblyOffset(0)));
-        self.exec_trace::<TT>(func, args)
+        let func: extern "sysv64" fn(&mut TT) -> bool =
+            mem::transmute(self.mc.ptr(dynasmrt::AssemblyOffset(0)));
+        self.exec_trace(func, args)
     }
 
     /// Actually call the code. This is a separate function making it easier to set a debugger
     /// breakpoint right before entering the trace.
-    fn exec_trace<TT>(&self, t_fn: fn(&mut TT) -> bool, args: &mut TT) -> bool {
+    fn exec_trace<TT>(&self, t_fn: extern "sysv64" fn(&mut TT) -> bool, args: &mut TT) -> bool {
         t_fn(args)
     }
 
@@ -1125,7 +1179,7 @@ impl TraceCompiler {
     }
 
     /// Compile a guard in the trace, emitting code to abort execution in case the guard fails.
-    fn c_guard(&mut self, guard: &Guard) {
+    fn c_guard(&mut self, guard: &Guard, dl: DynamicLabel) {
         // FIXME some of the terminators from which we build these guards can have cleanup blocks.
         // Currently we don't run any cleanup, but should we?
         match guard {
@@ -1138,7 +1192,7 @@ impl TraceCompiler {
                     for c in v {
                         self.cmp_reg_const(reg, *c, SIR.ty(&val.ty()).size());
                         dynasm!(self.asm
-                            ; je ->guardfail
+                            ; je =>dl
                         );
                     }
                 }
@@ -1149,7 +1203,7 @@ impl TraceCompiler {
                     for c in v {
                         self.cmp_reg_const(*TEMP_REG, *c, SIR.ty(&val.ty()).size());
                         dynasm!(self.asm
-                            ; je ->guardfail
+                            ; je =>dl
                         );
                     }
                 }
@@ -1163,7 +1217,7 @@ impl TraceCompiler {
                 Location::Reg(reg) => {
                     self.cmp_reg_const(reg, *c, SIR.ty(&val.ty()).size());
                     dynasm!(self.asm
-                        ; jne ->guardfail
+                        ; jne =>dl
                     );
                 }
                 Location::Mem(ro) => {
@@ -1172,7 +1226,7 @@ impl TraceCompiler {
                     );
                     self.cmp_reg_const(*TEMP_REG, *c, SIR.ty(&val.ty()).size());
                     dynasm!(self.asm
-                        ; jne ->guardfail
+                        ; jne =>dl
                     );
                 }
                 Location::Indirect { ptr, off } => {
@@ -1191,7 +1245,7 @@ impl TraceCompiler {
                     }
                     self.cmp_reg_const(*TEMP_REG, *c, SIR.ty(&val.ty()).size());
                     dynasm!(self.asm
-                        ; jne ->guardfail
+                        ; jne =>dl
                     );
                 }
                 _ => todo!(),
@@ -1204,13 +1258,13 @@ impl TraceCompiler {
                 Location::Reg(reg) => {
                     dynasm!(self.asm
                         ; cmp Rb(reg), *expect as i8
-                        ; jne ->guardfail
+                        ; jne =>dl
                     );
                 }
                 Location::Mem(ro) => {
                     dynasm!(self.asm
                         ; cmp BYTE [Rq(ro.reg) + ro.off], *expect as i8
-                        ; jne ->guardfail
+                        ; jne =>dl
                     );
                 }
                 _ => todo!(),
@@ -1295,28 +1349,185 @@ impl TraceCompiler {
     }
 
     /// Emit a return instruction.
-    fn ret(&mut self) {
+    fn ret(&mut self, gl: Vec<(&Guard, HashMap<&Local, Location>, DynamicLabel)>) {
         // Reset the stack/base pointers and return from the trace. We also need to generate the
         // code that reserves stack space for spilled locals here, since we don't know at the
         // beginning of the trace how many locals are going to be spilled.
+        // We also need to reserve space for any live local that remains in a register at the point
+        // of a guard failure. Finally, we push the CALLEE-SAVED registers onto the stack, so the
+        // stack looks as follows:
+        // RSP                                         RBP
+        // +------------+-------------+----------------+-------+-----+
+        // | SAVED REGS | LIVE LOCALS | SPILLED LOCALS | ALIGN | RBP |
+        // +------------+-------------+----------------+-------+-----+
+
+        // Reserved stack space for spilled locals during execution.
         let soff = self.stack_builder.size();
+        // Reserved memory on the stack to spill live locals to during a guard failure.
+        let live_off = REG_POOL.len() * 8;
+
+        // As we'll be making calls to other functions using the Sys-V 64 ABI, we need to make sure
+        // the stack is aligned to 16 bytes before the call instruction. Note that the call
+        // instruction itself will push the return address onto the stack, so at the beginning of
+        // the trace the stack will have an extra offset of 8 bytes.
+        // Instead of adjusting the alignment before each call instruction, we do this once at the
+        // beginning of the trace, since we won't be misaligning the stack during the trace
+        // (push/pop is allowed as long as there's no call inbetween them). We also need to
+        // consider the extra space reserved for spilled and live locals as well as the callee
+        // saved registers, when calculating the alignment.
+        // While we could use the stack builder to keep track of the stack and the alignment, this
+        // would require us to split up various dynasm! blocks, which is inconvenient.
+        let topalign = 16 - (live_off + soff as usize + CALLEE_SAVED_REGS.len() * 8) % 16;
+        // Restore registers.
         dynasm!(self.asm
             ; mov rax, 1 // Signifies that there were no guard failures.
             ; ->cleanup:
         );
         self.restore_regs(&*CALLEE_SAVED_REGS);
+        // Restore the stack and return.
         dynasm!(self.asm
+            ; add rsp, live_off as i32
             ; add rsp, soff as i32
+            ; add rsp, topalign as i32
             ; pop rbp
             ; ret
-            ; ->guardfail:
-            ; mov rax, 0
-            ; jmp ->cleanup
+        );
+
+        // Add guard failure labels. When a guard fails we jump to one of these labels. For each
+        // stack frame, we need to allocate memory using `allocate_layout`. We then copy the live
+        // variables into this memory and store it, together with other information, inside a
+        // Vec<FrameInfo>. Finally, we call `invoke_sinterp` passing in this vector, which
+        // initialises a SIR interpreter and runs it.
+        for (guard, mut live_locations, label) in gl {
+            // Symbol names of the functions called while executing the trace. Needed to recreate
+            // the stack frames in the SIRInterpreter.
+            let mut sym_labels = Vec::new();
+            for block in &guard.block {
+                let dynlbl = self.asm.new_dynamic_label();
+                dynasm!(self.asm
+                    ; => dynlbl
+                    ; .bytes block.symbol_name.as_bytes()
+                );
+                sym_labels.push(dynlbl);
+            }
+
+            // The beginning of the guard code.
+            dynasm!(self.asm
+                ; => label
+            );
+
+            // Add TIO to live_locations, to make sure it gets spilled as well.
+            live_locations.insert(&Local(1), self.local_to_location(Local(1)));
+
+            // Spill all registers that are currently in use to the stack, so we have enough
+            // registers available to generate the stack frames. This also saves us from having to
+            // do the save_regs/restore_regs dance multiple times below.
+            for (tirlocal, loc) in live_locations.iter_mut() {
+                match loc {
+                    Location::Reg(reg) => {
+                        let off = -i32::try_from(soff + u32::from(*reg) * 8).unwrap();
+                        let newloc = Location::Mem(RegAndOffset {
+                            reg: RBP.code(),
+                            off,
+                        });
+                        let ty = self.local_decls[&tirlocal].ty;
+                        let size = SIR.ty(&ty).size();
+                        self.store_raw(&newloc, &loc, size);
+                        *loc = newloc;
+                    }
+                    _ => {}
+                }
+            }
+
+            // Create vector to store the allocated memory pointers in, to be handed to the
+            // SIRInterpreter later. We can use a fixed register here, since we've spilled all
+            // registers to the stack.
+            let frame_vec_reg = R12.code();
+            dynasm!(self.asm
+                ; mov r11, QWORD bh_new_vec as i64
+                ; call r11
+                ; mov Rq(frame_vec_reg), rax
+            );
+
+            for (i, block) in guard.block.iter().enumerate() {
+                let sym = block.symbol_name;
+                let bbidx = block.bb_idx;
+                let body = SIR.body(sym).unwrap();
+                let sym_label = sym_labels[i];
+
+                // There's no need to save registers before this call, since we've moved
+                // all live locals to the stack above.
+                dynasm!(self.asm
+                    // Allocate memory for live variables.
+                    ; mov rdi, i32::try_from(body.layout.0).unwrap()
+                    ; mov rsi, i32::try_from(body.layout.1).unwrap()
+                    ; mov r11, QWORD allocate_layout as i64
+                    ; call r11
+                );
+                // Move live variables into allocated memory.
+                for liveloc in &guard.live_locals[i] {
+                    let ty = self.local_decls[&liveloc.tir].ty;
+                    let size = SIR.ty(&ty).size();
+                    let off = i32::try_from(body.offsets[usize::try_from(liveloc.sir.0).unwrap()])
+                        .unwrap();
+                    let dest_loc = Location::Mem(RegAndOffset {
+                        reg: RAX.code(),
+                        off,
+                    });
+                    let src_loc = &live_locations[&liveloc.tir];
+                    self.store_raw(&dest_loc, &src_loc, size);
+                }
+
+                if i == 0 {
+                    // Write TIO, whose Local is $1 in both SIR and TIR, into the `interp_step` stack
+                    // frame (which is the inner-most frame).
+                    let ty = self.local_decls[&Local(1)].ty;
+                    let size = SIR.ty(&ty).size();
+                    let off = i32::try_from(body.offsets[usize::try_from(1).unwrap()]).unwrap();
+                    let tio_loc = Location::Mem(RegAndOffset {
+                        reg: RAX.code(),
+                        off,
+                    });
+                    let src_loc = &live_locations[&Local(1)];
+                    self.store_raw(&tio_loc, &src_loc, size);
+                }
+
+                // Add frame information to vector.
+                dynasm!(self.asm
+                    ; mov rdi, Rq(frame_vec_reg)
+                    ; lea rsi, [=>sym_label]
+                    ; mov rdx, sym.len() as i32
+                    ; mov rcx, bbidx as i32
+                    ; mov r8, rax // allocated memory
+                    ; mov r11, QWORD bh_push_vec as i64
+                    ; call r11
+                );
+            }
+
+            // There's no need to save any registers here, since we immediately jump to cleanup
+            // afterwards, which exits the trace.
+            dynasm!(self.asm
+                // Invoke the SIR interpreter. FIXME later just return the allocated locals
+                // and let the meta tracer invoke the interpreter.
+                ; mov rdi, Rq(frame_vec_reg)
+                ; xor rax, rax
+                ; mov r11, QWORD invoke_sinterp as i64
+                ; call r11
+                ; mov rax, 0
+                ; jmp ->cleanup
+            );
+        }
+
+        // Reserve stack space.
+        dynasm!(self.asm
             ; ->reserve:
             ; push rbp
+            ; sub rsp, topalign as i32
             ; mov rbp, rsp
             ; sub rsp, soff as i32
+            ; sub rsp, live_off as i32
         );
+        // Save registers and jump to main.
         self.save_regs(&*CALLEE_SAVED_REGS);
         dynasm!(self.asm
             ; jmp ->main
@@ -1328,12 +1539,24 @@ impl TraceCompiler {
             tt.local_decls.clone(),
             tt.addr_map.drain().into_iter().collect(),
         );
-
+        let mut gl = Vec::new();
         for i in 0..tt.len() {
             let res = match unsafe { tt.op(i) } {
                 TirOp::Statement(st) => tc.c_statement(st),
                 TirOp::Guard(g) => {
-                    tc.c_guard(g);
+                    let dl = tc.asm.new_dynamic_label();
+                    tc.c_guard(g, dl);
+                    // As the locations of live variables may change throughout the trace, we need
+                    // to save them here for each guard, so when a guard fails we know from which
+                    // location to retrieve the live variables' values.
+                    let mut live_locations = HashMap::new();
+                    for v in &g.live_locals {
+                        for liveloc in v {
+                            let loc = tc.local_to_location(liveloc.tir);
+                            live_locations.insert(&liveloc.tir, loc);
+                        }
+                    }
+                    gl.push((g, live_locations, dl));
                     Ok(())
                 }
             };
@@ -1345,7 +1568,7 @@ impl TraceCompiler {
                 Err(e) => tc.crash_dump(Some(e)),
             }
         }
-        tc.ret();
+        tc.ret(gl);
         let buf = tc.asm.finalize().unwrap();
         if debug {
             // In debug mode the memory section which contains the compiled trace is marked as
