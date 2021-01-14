@@ -2,7 +2,7 @@
 
 use fallible_iterator::FallibleIterator;
 use fxhash::FxHashMap;
-use memmap::Mmap;
+use memmap2::Mmap;
 use object::{Object, ObjectSection};
 use std::{
     convert::TryFrom,

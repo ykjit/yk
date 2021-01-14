@@ -723,7 +723,7 @@ pub mod tests {
         let text_re = Regex::new(r"\$?.+?\b").unwrap(); // Any word optionally prefixed with `$`.
         let matcher = FMBuilder::new(ptn)
             .unwrap()
-            .name_matcher(Some((ptn_re, text_re)))
+            .name_matcher(ptn_re, text_re)
             .distinct_name_matching(true)
             .build()
             .unwrap();

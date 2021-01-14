@@ -1,4 +1,4 @@
-use memmap::Mmap;
+use memmap2::Mmap;
 use std::{fs::File, io::Read};
 
 fn main() {
