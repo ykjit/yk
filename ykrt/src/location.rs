@@ -159,7 +159,11 @@ impl<I> Location<I> {
     }
 
     pub(crate) fn compare_and_swap(&self, current: State, new: State, order: Ordering) -> State {
-        State(self.state.compare_and_swap(current.0, new.0, order))
+        State(
+            self.state
+                .compare_exchange(current.0, new.0, order, Ordering::Relaxed)
+                .unwrap_or_else(|e| e),
+        )
     }
 
     pub(crate) fn store(&self, state: State, order: Ordering) {
