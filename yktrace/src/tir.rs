@@ -5,8 +5,7 @@
 use super::SirTrace;
 use crate::{
     errors::InvalidTraceError,
-    sir::{self, Sir},
-    INTERP_STEP_ARG
+    sir::{self, Sir}
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -47,49 +46,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
         // popping from the stack).
         let mut return_iplaces: Vec<IPlace> = Vec::new();
 
-        // As we compile, we are going to check the define-use (DU) chain of our local
-        // variables. No local should be used without first being defined. If that happens it's
-        // likely that the user used a variable from outside the scope of the trace without
-        // introducing it via `trace_locals()`.
-        let mut defined_locals: HashSet<Local> = HashSet::new();
-        let mut def_sites: HashMap<Local, usize> = HashMap::new();
-        let mut last_use_sites = HashMap::new();
-
-        // Ensure the argument to the `interp_step` function is defined by the first statement.
-        // The arg is always at local index 1.
-        defined_locals.insert(INTERP_STEP_ARG);
-        def_sites.insert(INTERP_STEP_ARG, 0);
-
-        let mut update_defined_locals = |op: &TirOp, op_idx: usize| {
-            // Locals reported by `maybe_defined_locals()` are only defined if they are not already
-            // defined.
-            let newly_defined = op
-                .maybe_defined_locals()
-                .iter()
-                .filter_map(|l| {
-                    if !defined_locals.contains(l) {
-                        Some(*l)
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<Local>>();
-            defined_locals.extend(&newly_defined);
-            for d in newly_defined {
-                def_sites.insert(d, op_idx);
-            }
-
-            for lcl in op.used_locals() {
-                // The trace inputs local is regarded as being live for the whole trace.
-                if lcl == INTERP_STEP_ARG {
-                    continue;
-                }
-                if !defined_locals.contains(&lcl) {
-                    panic!("undefined local: {} in {}", lcl, op);
-                }
-                last_use_sites.insert(lcl, op_idx);
-            }
-        };
+        let mut live_locals: HashSet<Local> = HashSet::new();
 
         let mut in_interp_step = false;
         while let Some(loc) = itr.next() {
@@ -180,8 +137,18 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                             rnm.rename_iplace(dest, &body),
                             rnm.rename_iplace(src, &body)
                         ),
+                        Statement::StorageLive(local) => {
+                            let l = rnm.rename_local(local, &body);
+                            live_locals.insert(l);
+                            Statement::StorageLive(l)
+                        }
+                        Statement::StorageDead(local) => {
+                            let l = rnm.rename_local(local, &body);
+                            live_locals.remove(&l);
+                            Statement::StorageDead(l)
+                        }
                         // The following statements are specific to TIR and cannot appear in SIR.
-                        Statement::Call(..) | Statement::StorageDead(_) => unreachable!()
+                        Statement::Call(..) => unreachable!()
                     };
 
                     // In TIR, stores to local number zero are always to the return value of the
@@ -199,8 +166,6 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     }
 
                     let op = TirOp::Statement(op);
-
-                    update_defined_locals(&op, ops.len());
                     ops.push(op);
                 }
             }
@@ -322,7 +287,6 @@ impl<'a, 'm> TirTrace<'a, 'm> {
 
             for stmt in term_stmts {
                 let op = TirOp::Statement(stmt);
-                update_defined_locals(&op, ops.len());
                 ops.push(op);
             }
 
@@ -374,7 +338,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     ref expected,
                     ..
                 } => Some(Guard {
-                    val: cond.clone(),
+                    val: rnm.rename_iplace(cond, &body),
                     kind: GuardKind::Boolean(*expected),
                     block: GuardBlock {
                         symbol_name: loc.symbol_name,
@@ -389,49 +353,20 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                 }
             };
 
-            if let Some(g) = guard {
+            if let Some(mut g) = guard {
+                for local in &live_locals {
+                    let sirlocal = rnm.sir_map.get(local).unwrap();
+                    g.live_locals.push(LiveLocal {
+                        tir: *local,
+                        sir: *sirlocal
+                    });
+                }
                 let op = TirOp::Guard(g);
-                update_defined_locals(&op, ops.len());
                 ops.push(op);
             }
         }
 
-        let mut local_decls = rnm.done();
-
-        // Insert `StorageDead` statements after the last use of each local variable. We process
-        // the locals in reverse order of death site, so that inserting a statement cannot skew
-        // the indices for subsequent insertions.
-        let mut deads = last_use_sites.iter().collect::<Vec<(&Local, &usize)>>();
-        deads.sort_by(|a, b| b.1.cmp(a.1));
-        for (local, idx) in deads {
-            if def_sites[local] == *idx && !ops[*idx].may_have_side_effects() {
-                // If a defined local is never used, and the statement that defines it isn't
-                // side-effecting, then we can remove the statement and local's decl entirely.
-                //
-                // FIXME This is not perfect. Consider `x.0 = 0; x.1 = 1` and then x is not
-                // used after. The first operation will be seen to define `x`, the second will
-                // be seen as a use of `x`, and thus neither of these statements will be
-                // removed.
-                ops.remove(*idx);
-                let prev = local_decls.remove(&local);
-                debug_assert!(prev.is_some());
-            } else {
-                let ds = TirOp::Statement(ykpack::Statement::StorageDead(*local));
-                if *idx == ops.len() {
-                    ops.push(ds);
-                } else {
-                    ops.insert(*idx + 1, ds);
-                }
-
-                // Scan the live range of `local`, adding the variable to the live list of any
-                // guards we find.
-                for op_idx in def_sites[local]..*idx {
-                    if let TirOp::Guard(g) = &mut ops[op_idx] {
-                        g.live_locals.push(*local);
-                    }
-                }
-            }
-        }
+        let local_decls = rnm.done();
 
         Ok(Self {
             ops,
@@ -467,7 +402,8 @@ struct VarRenamer {
     /// offsets for consecutive inlined function calls.
     acc: Option<u32>,
     /// Maps a renamed local to its local declaration.
-    local_decls: HashMap<Local, LocalDecl>
+    local_decls: HashMap<Local, LocalDecl>,
+    pub sir_map: HashMap<Local, Local>
 }
 
 impl VarRenamer {
@@ -476,7 +412,8 @@ impl VarRenamer {
             stack: vec![0],
             offset: 0,
             acc: None,
-            local_decls: HashMap::new()
+            local_decls: HashMap::new(),
+            sir_map: HashMap::new()
         }
     }
 
@@ -545,6 +482,7 @@ impl VarRenamer {
             renamed,
             body.local_decls[usize::try_from(local.0).unwrap()].clone()
         );
+        self.sir_map.insert(renamed, local.clone());
         renamed
     }
 }
@@ -588,6 +526,13 @@ impl Display for GuardBlock {
     }
 }
 
+/// A mapping from a TIR local to its equivalent in SIR.
+#[derive(Debug)]
+pub struct LiveLocal {
+    tir: Local,
+    sir: Local
+}
+
 /// A guard states the assumptions from its position in a trace onward.
 #[derive(Debug)]
 pub struct Guard {
@@ -598,26 +543,9 @@ pub struct Guard {
     /// The block whose terminator was the basis for this guard. This is here so that, in the event
     /// that the guard fails, we know where to start the blackhole interpreter.
     pub block: GuardBlock,
-    /// The TIR locals that are live at the time of the guard (in addition to the trace I/O
-    /// variable, $1, which is assumed to be live throughout the entirety of the trace). This is
+    /// The TIR locals (and their SIR equivalent) that are live at the time of the guard. This is
     /// needed so that we can initialise the blackhole interpreter with the correct state.
-    pub live_locals: Vec<Local>
-}
-
-impl Guard {
-    fn maybe_defined_locals(&self) -> Vec<Local> {
-        Vec::new()
-    }
-
-    fn used_locals(&self) -> Vec<Local> {
-        let mut ret = Vec::new();
-        match &self.val {
-            IPlace::Val { local, .. } => ret.push(*local),
-            IPlace::Indirect { ptr, .. } => ret.push(ptr.local),
-            _ => {}
-        }
-        ret
-    }
+    pub live_locals: Vec<LiveLocal>
 }
 
 impl fmt::Display for Guard {
@@ -628,7 +556,7 @@ impl fmt::Display for Guard {
             "{}",
             self.live_locals
                 .iter()
-                .map(|l| l.to_string())
+                .map(|ll| ll.tir.to_string())
                 .collect::<Vec<String>>()
                 .join(", ")
         )?;
@@ -678,41 +606,13 @@ impl fmt::Display for TirOp {
     }
 }
 
-impl TirOp {
-    /// Returns true if the operation may affect locals besides those appearing in the operation.
-    fn may_have_side_effects(&self) -> bool {
-        if let TirOp::Statement(s) = self {
-            s.may_have_side_effects()
-        } else {
-            false
-        }
-    }
-
-    fn maybe_defined_locals(&self) -> Vec<Local> {
-        match &self {
-            TirOp::Statement(stmt) => stmt.maybe_defined_locals(),
-            TirOp::Guard(guard) => guard.maybe_defined_locals()
-        }
-    }
-
-    fn used_locals(&self) -> Vec<Local> {
-        match &self {
-            TirOp::Statement(stmt) => stmt.used_locals(),
-            TirOp::Guard(guard) => guard.used_locals()
-        }
-    }
-}
-
 #[cfg(test)]
 pub mod test_helpers {}
 
 #[cfg(test)]
 pub mod tests {
     use super::TirTrace;
-    use crate::{
-        sir::{self, SIR},
-        start_tracing, trace_debug, TracingKind
-    };
+    use crate::{sir::SIR, start_tracing, trace_debug, TracingKind};
     use fm::FMBuilder;
     use regex::Regex;
     use test::black_box;
@@ -813,21 +713,5 @@ pub mod tests {
               ...",
             &tir_trace
         );
-    }
-
-    #[test]
-    fn no_zero_locals() {
-        let mut io = DebugTirIO(0, 0);
-        let tracer = start_tracing(TracingKind::default());
-        black_box(debug_tir_work(&mut io));
-        io.0 = 1;
-        black_box(debug_tir_work(&mut io));
-        io.0 = 2;
-        let sir_trace = tracer.stop_tracing().unwrap();
-        let tir_trace = TirTrace::new(&*SIR, &sir_trace).unwrap();
-        for idx in 0..tir_trace.len() {
-            let op = unsafe { tir_trace.op(idx) };
-            assert!(!op.used_locals().contains(&sir::RETURN_LOCAL));
-        }
     }
 }

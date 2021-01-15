@@ -453,8 +453,9 @@ pub enum Statement {
         /// The scaling factor for `idx`.
         scale: u32,
     },
+    /// Marks a local variable live.
+    StorageLive(Local),
     /// Marks a local variable dead.
-    /// Note that locals are implicitly live at first use.
     StorageDead(Local),
     /// A (non-inlined) call from a TIR trace to a binary symbol using the system ABI. This does
     /// not appear in SIR. Not to be confused with Terminator::Call in SIR.
@@ -467,90 +468,6 @@ pub enum Statement {
     /// Any unimplemented lowering maps to this variant.
     /// The string inside is the stringified MIR statement.
     Unimplemented(String),
-}
-
-impl Statement {
-    fn maybe_push_local(v: &mut Vec<Local>, l: Option<Local>) {
-        if let Some(l) = l {
-            v.push(l);
-        }
-    }
-
-    /// Returns a vector of locals that this SIR statement *may* define.
-    /// Whether or not the local is actually defined depends upon whether this is the first write
-    /// into the local (there is no explicit liveness marker in SIR/TIR).
-    pub fn maybe_defined_locals(&self) -> Vec<Local> {
-        let mut ret = Vec::new();
-
-        match self {
-            Statement::Nop => (),
-            Statement::Store(dest, ..)
-            | Statement::MkRef(dest, ..)
-            | Statement::DynOffs { dest, .. }
-            | Statement::Cast(dest, ..)
-            | Statement::BinaryOp { dest, .. } => Self::maybe_push_local(&mut ret, dest.local()),
-            Statement::Call(_, _, dest) => {
-                if let Some(dest) = dest {
-                    Self::maybe_push_local(&mut ret, dest.local());
-                }
-            }
-            Statement::StorageDead(_) | Statement::Debug(_) | Statement::Unimplemented(_) => (),
-        }
-        ret
-    }
-
-    /// Returns a vector of locals that this SIR statement uses.
-    /// A definition is considered a use, so this returns a superset of what
-    /// `maybe_defined_locals()` does.
-    pub fn used_locals(&self) -> Vec<Local> {
-        let mut ret = Vec::new();
-
-        match self {
-            Statement::Nop => (),
-            Statement::MkRef(dest, src) => {
-                Self::maybe_push_local(&mut ret, dest.local());
-                Self::maybe_push_local(&mut ret, src.local());
-            }
-            Statement::DynOffs {
-                dest, base, idx, ..
-            } => {
-                Self::maybe_push_local(&mut ret, dest.local());
-                Self::maybe_push_local(&mut ret, base.local());
-                Self::maybe_push_local(&mut ret, idx.local());
-            }
-            Statement::BinaryOp {
-                dest, opnd1, opnd2, ..
-            } => {
-                Self::maybe_push_local(&mut ret, opnd1.local());
-                Self::maybe_push_local(&mut ret, opnd2.local());
-                Self::maybe_push_local(&mut ret, dest.local());
-            }
-            Statement::Store(dest, src) => {
-                Self::maybe_push_local(&mut ret, dest.local());
-                Self::maybe_push_local(&mut ret, src.local());
-            }
-            Statement::StorageDead(_) => (),
-            Statement::Call(_target, args, dest) => {
-                if let Some(dest) = dest {
-                    Self::maybe_push_local(&mut ret, dest.local());
-                }
-                for a in args {
-                    Self::maybe_push_local(&mut ret, a.local());
-                }
-            }
-            Statement::Cast(dest, src) => {
-                Self::maybe_push_local(&mut ret, dest.local());
-                Self::maybe_push_local(&mut ret, src.local());
-            }
-            Statement::Unimplemented(_) | Statement::Debug(_) => (),
-        }
-        ret
-    }
-
-    /// Returns true if the statement may affect locals besides those appearing in the statement.
-    pub fn may_have_side_effects(&self) -> bool {
-        matches!(self, Statement::Call(..))
-    }
 }
 
 impl Display for Statement {
@@ -576,6 +493,7 @@ impl Display for Statement {
                 let c = if *checked { " (checked)" } else { "" };
                 write!(f, "{} = {} {} {}{}", dest, opnd1, op, opnd2, c)
             }
+            Statement::StorageLive(local) => write!(f, "live({})", local),
             Statement::StorageDead(local) => write!(f, "dead({})", local),
             Statement::Call(op, args, dest) => {
                 let args_s = args

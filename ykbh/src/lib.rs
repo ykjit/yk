@@ -196,10 +196,10 @@ impl SIRInterpreter {
                     Statement::Nop => {}
                     Statement::Unimplemented(_) | Statement::Debug(_) => todo!(),
                     Statement::Cast(..) => todo!(),
-                    Statement::Call(..) | Statement::StorageDead(_) => unreachable!(),
+                    Statement::StorageLive(_) | Statement::StorageDead(_) => {}
+                    Statement::Call(..) => unreachable!(),
                 }
             }
-
             match &block.term {
                 Terminator::Call {
                     operand: op,
