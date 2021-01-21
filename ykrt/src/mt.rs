@@ -13,13 +13,11 @@ use std::{
     thread::{self, yield_now, JoinHandle},
 };
 
-use ykcompile::{compile_trace, CompiledTrace};
-use yktrace::{sir::SIR, start_tracing, tir::TirTrace, ThreadTracer, TracingKind};
-
 use crate::location::{
     CompilingTrace, Location, State, PHASE_COMPILED, PHASE_COMPILING, PHASE_COUNTING,
     PHASE_DONT_TRACE, PHASE_LOCKED, PHASE_TRACING, PHASE_TRACING_LOCK,
 };
+use ykshim_client::{compile_trace, start_tracing, CompiledTrace, ThreadTracer, TracingKind};
 
 pub type HotThreshold = usize;
 const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
@@ -36,7 +34,10 @@ impl MTBuilder {
     pub fn new() -> Self {
         Self {
             hot_threshold: DEFAULT_HOT_THRESHOLD,
-            tracing_kind: TracingKind::default(),
+            #[cfg(tracermode = "hw")]
+            tracing_kind: TracingKind::HardwareTracing,
+            #[cfg(tracermode = "sw")]
+            tracing_kind: TracingKind::SoftwareTracing,
         }
     }
 
@@ -362,8 +363,7 @@ impl MTThread {
                 let mtx = Arc::new(Mutex::new(None));
                 let mtx_cl = Arc::clone(&mtx);
                 thread::spawn(move || {
-                    let tir_trace = TirTrace::new(&*SIR, &sir_trace).unwrap();
-                    let compiled = compile_trace::<I>(tir_trace);
+                    let compiled = compile_trace::<I>(sir_trace).unwrap();
                     *mtx_cl.lock().unwrap() = Some(Box::new(compiled));
                     // FIXME: although we've now put the compiled trace into the mutex, there's no
                     // guarantee that the Location for which we're compiling will ever be executed

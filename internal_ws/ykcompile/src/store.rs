@@ -5,7 +5,7 @@ use dynasmrt::DynasmApi;
 use ykpack::IPlace;
 use yktrace::sir::SIR;
 
-impl<TT> TraceCompiler<TT> {
+impl TraceCompiler {
     /// Store the value in `src_loc` into `dest_loc`.
     pub(crate) fn store(&mut self, dest_ip: &IPlace, src_ip: &IPlace) {
         let dest_loc = self.iplace_to_location(dest_ip);

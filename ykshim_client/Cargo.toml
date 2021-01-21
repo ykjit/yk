@@ -1,10 +1,8 @@
 [package]
-name = "ykbh"
+name = "ykshim_client"
 version = "0.1.0"
 authors = ["The Yorick Developers"]
 edition = "2018"
 
 [dependencies]
 libc = "0.2.82"
-yktrace = { path = "../yktrace" }
-ykpack = { path = "../ykpack" }

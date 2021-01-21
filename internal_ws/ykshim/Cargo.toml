@@ -1,0 +1,16 @@
+[package]
+name = "ykshim"
+version = "0.1.0"
+authors = ["The Yorick Developers"]
+edition = "2018"
+license = "Apache-2.0 OR MIT"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+libc = "0.2.82"
+ykbh = { path = "../ykbh" }
+ykcompile = { path = "../ykcompile" }
+ykpack = { path = "../ykpack" }
+yktrace = { path = "../yktrace" }

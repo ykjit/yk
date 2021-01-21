@@ -15,9 +15,6 @@ libc = "0.2.82"
 ykpack = { path = "../ykpack" }
 yktrace = { path = "../yktrace" }
 
-[build-dependencies]
-cc = "1.0.66"
-
 [dev-dependencies]
 fm = "0.2.0"
 regex = "1.4.3"

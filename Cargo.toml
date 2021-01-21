@@ -1,15 +1,14 @@
 [workspace]
 members = [
-    # In the near future the `internal_ws` directory is going to be a
-    # separately compiled workspace (with optimisations).
-    # https://github.com/softdevteam/yk/pull/205
-    "internal_ws/ykcompile",
-    "internal_ws/ykpack",
-    "internal_ws/yktrace",
-    "internal_ws/ykview",
-    "internal_ws/ykbh",
+    "ykshim_client",
+    "tests",
+    "xtask",
     "ykrt",
 ]
+
+# "internal" is a separate cargo workspace containing things we never want to
+# trace. It is compiled separately with optimisations.
+exclude = [ "internal_ws" ]
 
 [profile.dev]
 panic = "abort"

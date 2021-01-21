@@ -6,9 +6,8 @@ use std::{
     },
 };
 
-use ykcompile::CompiledTrace;
-
 use crate::mt::ThreadIdInner;
+use ykshim_client::CompiledTrace;
 
 // The current meta-tracing phase of a given location in the end-user's code. Consists of a tag and
 // (optionally) a value. We expect the most commonly encountered tag at run-time is PHASE_COMPILED
