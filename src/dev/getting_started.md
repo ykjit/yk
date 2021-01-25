@@ -80,8 +80,8 @@ rustup override set yk-stage1
 Now `cargo` will run our compiler (also setting all of the various flags
 required) for this directory instead of the default Rust compiler.
 
-Then you can use normal `cargo` commands, but make sure to set
-`RUSTFLAGS='-C tracer=hw'` to build for hardware tracing.
+Then you can build and test the `yk` repo using `cargo xtask` commands, for
+example `cargo xtask test`.
 
 ### Gotchas / Tips
 
@@ -104,12 +104,8 @@ Then you can use normal `cargo` commands, but make sure to set
 
  - [Continuous Integration Cycles](ci_cycles.md)
 
- - When you set `RUSTFLAGS='-C tracer=hw'` optimisation is disabled so as to
-   prevent LLVM from re-ordering blocks. This is a limitation we hope to solve
-   later.
-
  - If you are using rust-analyser (or similar) in vim, make sure to set the
-   `RUSTFLAGS` environment the same as you use to build/test (namely `'-C
-   tracer=hw'`), otherwise vim and your shell session will keep invalidating
+   `RUSTFLAGS` environment the same as you use to build/test, otherwise vim and
+   your shell session will keep invalidating
    the incremental build cache and you'll constantly be rebuilding the same
    packages.
