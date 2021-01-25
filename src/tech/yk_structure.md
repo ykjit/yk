@@ -16,14 +16,14 @@ workspace then talks to the internal workspace via `extern` functions defined
 in the `ykshim` crate.
 
 ```
-       External Workspace             |       Internal Workspace
---------------------------------------------------------------------
-
-interpreter --\
-              |
-              +---> ykshim_client --------> ykshim --> JIT runtime
-              |
-tests  -------/
+          External Workspace                Internal Workspace
++------------------------------------+ +-----------------------------+
+| Interpreter +                      | |                             |
+|             |                      | |                             |
+|             +----> ykshim_client +----> yk_shim +----> JIT runtime |
+|             |                      | |                             |
+|       Tests +                      | |                             |
++------------------------------------+ +-----------------------------+
 ```
 
 To build the two workspaces, we use `cargo xtask`.
