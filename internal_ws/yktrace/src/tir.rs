@@ -104,6 +104,11 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                         symbol_name: loc.symbol_name,
                         bb_idx: loc.bb_idx
                     });
+                } else {
+                    // Update the basic block index of the current guard block, so the guard
+                    // failure can later jump to the correct block when initialising the SIR
+                    // interpreter.
+                    guard_blocks.last_mut().unwrap().bb_idx = loc.bb_idx;
                 }
 
                 // When converting the SIR trace into a TIR trace we alpha-rename the `Local`s from

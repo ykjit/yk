@@ -48,11 +48,15 @@ impl StackFrame {
             Constant::Int(ci) => match ci {
                 ConstantInt::UnsignedInt(ui) => match ui {
                     UnsignedInt::U8(v) => self.write_val(dest, [*v].as_ptr(), 1),
+                    UnsignedInt::Usize(v) => {
+                        let bytes = v.to_ne_bytes();
+                        self.write_val(dest, bytes.as_ptr(), bytes.len())
+                    }
                     _ => todo!(),
                 },
                 ConstantInt::SignedInt(_si) => todo!(),
             },
-            Constant::Bool(_b) => todo!(),
+            Constant::Bool(b) => self.write_val(dest, [*b as u8].as_ptr(), 1),
             Constant::Tuple(t) => {
                 if SIR.ty(t).size() == 0 {
                     // ZST: do nothing.
@@ -349,6 +353,7 @@ impl SIRInterpreter {
                 UnsignedIntTy::U128 => todo!(),
             },
             TyKind::SignedInt(_si) => unreachable!(),
+            TyKind::Bool => unsafe { u128::from(std::ptr::read::<u8>(ptr)) },
             _ => unreachable!(),
         }
     }

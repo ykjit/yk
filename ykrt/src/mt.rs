@@ -192,8 +192,10 @@ impl MTThread {
                     // Trace succesfully executed.
                     return;
                 } else {
-                    // FIXME blackholing
-                    todo!("Guard failure!")
+                    unsafe {
+                        let mut si = SIRInterpreter(ptr);
+                        si.interpret(inputs as *mut _ as *mut u8);
+                    }
                 }
             }
         }
@@ -863,5 +865,60 @@ mod tests {
                 t.join().unwrap();
             }
         });
+    }
+
+    #[test]
+    fn blackholing() {
+        let mut mtt = MTBuilder::new().hot_threshold(2).init();
+
+        const INC: u8 = 0;
+        const RESTART: u8 = 1;
+        let prog = vec![INC, INC, RESTART];
+        let locs = vec![Some(Location::new()), None, None];
+
+        struct IO {
+            prog: Vec<u8>,
+            pc: usize,
+            run: u8,
+        }
+
+        #[interp_step]
+        fn simple_interp_step(tio: &mut IO) {
+            match tio.prog[tio.pc] {
+                INC => {
+                    tio.pc += 1;
+                    if tio.run == 0 {
+                        tio.run = 99;
+                    }
+                }
+                RESTART => tio.pc = 0,
+                _ => unreachable!(),
+            }
+        }
+
+        let mut tio = IO {
+            prog,
+            pc: 0,
+            run: 1,
+        };
+
+        // Run until a trace has been compiled.
+        loop {
+            let loc = locs[tio.pc].as_ref();
+            if tio.pc == 0 && loc.unwrap().load(Ordering::Relaxed).phase() == PHASE_COMPILED {
+                break;
+            }
+            mtt.control_point(locs[tio.pc].as_ref(), simple_interp_step, &mut tio);
+            yield_now()
+        }
+
+        assert_eq!(tio.pc, 0);
+        assert_eq!(tio.run, 1);
+
+        // Now fail a guard.
+        tio.run = 0;
+        let loc = locs[tio.pc].as_ref();
+        mtt.control_point(loc, simple_interp_step, &mut tio);
+        assert_eq!(tio.run, 99);
     }
 }
