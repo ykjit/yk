@@ -43,37 +43,3 @@ pub(crate) fn start_tracing() -> ThreadTracer {
         })
     }
 }
-
-#[cfg(test)]
-#[cfg(tracermode = "hw")]
-mod tests {
-    use crate::{test_helpers, TracingKind};
-
-    const TRACING_KIND: TracingKind = TracingKind::HardwareTracing;
-
-    #[test]
-    fn trace() {
-        test_helpers::trace(TRACING_KIND);
-    }
-
-    #[test]
-    fn trace_twice() {
-        test_helpers::trace_twice(TRACING_KIND);
-    }
-
-    #[test]
-    fn trace_concurrent() {
-        test_helpers::trace_concurrent(TRACING_KIND);
-    }
-
-    #[test]
-    #[should_panic]
-    fn oob_trace_index() {
-        test_helpers::oob_trace_index(TRACING_KIND);
-    }
-
-    #[test]
-    fn in_bounds_trace_indices() {
-        test_helpers::in_bounds_trace_indices(TRACING_KIND);
-    }
-}

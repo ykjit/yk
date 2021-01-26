@@ -18,7 +18,7 @@ mod hwt;
 #[cfg(tracermode = "sw")]
 mod swt;
 
-use errors::InvalidTraceError;
+pub use errors::InvalidTraceError;
 use sir::SirTrace;
 use ykpack::Local;
 
@@ -99,87 +99,3 @@ pub fn start_tracing(kind: TracingKind) -> ThreadTracer {
 #[inline(never)]
 #[trace_debug]
 pub fn trace_debug(_msg: &'static str) {}
-
-/// The bodies of tests that we want to run on all tracing kinds live in here.
-#[cfg(test)]
-mod test_helpers {
-    use super::{start_tracing, TracingKind};
-    use std::thread;
-    use test::black_box;
-
-    // Some work to trace.
-    #[interp_step]
-    fn work(io: &mut WorkIO) {
-        let mut res = 0;
-        for i in 0..(io.0) {
-            if i % 2 == 0 {
-                res += 5;
-            } else {
-                res += 10 / i;
-            }
-        }
-        println!("{}", res); // prevents the above from being optimised out.
-    }
-
-    struct WorkIO(usize);
-
-    /// Test that basic tracing works.
-    pub(crate) fn trace(kind: TracingKind) {
-        let mut th = start_tracing(kind);
-        black_box(work(&mut WorkIO(10)));
-        let trace = th.t_impl.stop_tracing().unwrap();
-        assert!(trace.len() > 0);
-    }
-
-    /// Test that tracing twice sequentially in the same thread works.
-    pub(crate) fn trace_twice(kind: TracingKind) {
-        let mut th1 = start_tracing(kind);
-        black_box(work(&mut WorkIO(10)));
-        let trace1 = th1.t_impl.stop_tracing().unwrap();
-
-        let mut th2 = start_tracing(kind);
-        black_box(work(&mut WorkIO(20)));
-        let trace2 = th2.t_impl.stop_tracing().unwrap();
-
-        assert!(trace1.len() < trace2.len());
-    }
-
-    /// Test that tracing in different threads works.
-    pub(crate) fn trace_concurrent(kind: TracingKind) {
-        let thr = thread::spawn(move || {
-            let mut th1 = start_tracing(kind);
-            black_box(work(&mut WorkIO(10)));
-            th1.t_impl.stop_tracing().unwrap().len()
-        });
-
-        let mut th2 = start_tracing(kind);
-        black_box(work(&mut WorkIO(20)));
-        let len2 = th2.t_impl.stop_tracing().unwrap().len();
-
-        let len1 = thr.join().unwrap();
-
-        assert!(len1 < len2);
-    }
-
-    /// Test that accessing an out of bounds index fails.
-    /// Tests calling this should be marked `#[should_panic]`.
-    pub(crate) fn oob_trace_index(kind: TracingKind) {
-        // Construct a really short trace.
-        let mut th = start_tracing(kind);
-        // Empty trace -- no call to an interp_step.
-        let trace = th.t_impl.stop_tracing().unwrap();
-        &trace[100000];
-    }
-
-    /// Test that accessing locations 0 through trace.len() -1 does not panic.
-    pub(crate) fn in_bounds_trace_indices(kind: TracingKind) {
-        // Construct a really short trace.
-        let mut th = start_tracing(kind);
-        black_box(work(&mut WorkIO(10)));
-        let trace = th.t_impl.stop_tracing().unwrap();
-
-        for i in 0..trace.len() {
-            &trace[i];
-        }
-    }
-}

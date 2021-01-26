@@ -22,6 +22,7 @@ pub type TypeId = (CguHash, TyIndex); // CGU hash and vector index.
 pub type OffT = i32;
 
 #[derive(Debug, Hash, Eq, PartialEq, Copy, Clone, Serialize, Deserialize)]
+#[repr(C)]
 pub struct CguHash(pub u64);
 
 impl Display for CguHash {
@@ -224,6 +225,7 @@ impl Display for StructTy {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Copy, Hash, Ord, PartialOrd)]
+#[repr(C)]
 pub struct Local(pub LocalIndex);
 
 impl Display for Local {
@@ -247,6 +249,7 @@ bitflags! {
 
 /// The definition of a local variable, including its type.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[repr(C)]
 pub struct LocalDecl {
     pub ty: TypeId,
     /// If true this local variable is at some point referenced, and thus should be allocated on

@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "ykbh",
+    "ykcompile",
+    "ykpack",
+    "ykshim",
+    "yktrace",
+    "ykview",
+]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
