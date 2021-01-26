@@ -15,7 +15,6 @@ pub type DefIndex = u32;
 pub type BasicBlockIndex = u32;
 pub type StatementIndex = usize;
 pub type LocalIndex = u32;
-pub type TyIndex = u32;
 pub type FieldIndex = u32;
 pub type ArrayIndex = u32;
 pub type OffT = i32;
@@ -26,6 +25,17 @@ pub type OffT = i32;
 pub struct CguHash(pub u64);
 
 impl Display for CguHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:x}", self.0)
+    }
+}
+
+/// The index of a SIR type.
+#[derive(Debug, Hash, Eq, PartialEq, Copy, Clone, Serialize, Deserialize)]
+#[repr(C)]
+pub struct TyIndex(pub u32);
+
+impl Display for TyIndex {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:x}", self.0)
     }

@@ -82,7 +82,7 @@ pub fn sir_body_ret_ty(sym: &str) -> TypeId {
     let sym_c = CString::new(sym).unwrap();
     let mut ret = TypeId {
         cgu: CguHash(0),
-        idx: 0,
+        idx: TyIndex(0),
     };
     unsafe { __ykshimtest_body_ret_ty(sym_c.into_raw(), &mut ret) };
     ret
