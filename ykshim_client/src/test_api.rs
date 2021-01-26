@@ -17,8 +17,12 @@ type RawTraceCompiler = c_void;
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct CguHash(u64);
-// FIMXE make this a repr(C) struct so as to simplify __ykshimtest_body_ret_ty.
-pub type TypeId = (CguHash, TyIndex);
+#[derive(Debug, Copy, Clone)]
+#[repr(C)]
+pub struct TypeId {
+    pub cgu: CguHash,
+    pub idx: TyIndex,
+}
 
 extern "C" {
     fn __ykshimtest_compile_tir_trace(tir_trace: *mut RawTirTrace) -> *mut RawCompiledTrace;
@@ -28,13 +32,12 @@ extern "C" {
     fn __ykshimtest_tracecompiler_drop(comp: *mut RawTraceCompiler);
     fn __ykshimtest_tirtrace_len(tir_trace: *mut RawTirTrace) -> size_t;
     fn __ykshimtest_tirtrace_display(tir_trace: *mut RawTirTrace) -> *mut c_char;
-    fn __ykshimtest_body_ret_ty(sym: *mut c_char, ret_cgu: *mut CguHash, ret_idx: *mut TyIndex);
+    fn __ykshimtest_body_ret_ty(sym: *mut c_char, ret_tyid: *mut TypeId);
     fn __ykshimtest_tracecompiler_default() -> *mut RawTraceCompiler;
     fn __ykshimtest_tracecompiler_insert_decl(
         tc: *mut RawTraceCompiler,
         local: Local,
-        local_ty_cgu: CguHash,
-        local_ty_index: TyIndex,
+        local_ty: TypeId,
         referenced: bool,
     );
     fn __ykshimtest_tracecompiler_local_to_location_str(
@@ -77,10 +80,12 @@ impl fmt::Display for TirTrace {
 
 pub fn sir_body_ret_ty(sym: &str) -> TypeId {
     let sym_c = CString::new(sym).unwrap();
-    let mut cgu = CguHash(0);
-    let mut idx = 0;
-    unsafe { __ykshimtest_body_ret_ty(sym_c.into_raw(), &mut cgu, &mut idx) };
-    (cgu, idx)
+    let mut ret = TypeId {
+        cgu: CguHash(0),
+        idx: 0,
+    };
+    unsafe { __ykshimtest_body_ret_ty(sym_c.into_raw(), &mut ret) };
+    ret
 }
 
 pub struct LocalDecl {
@@ -100,15 +105,7 @@ impl TraceCompiler {
     pub fn new(local_decls: HashMap<Local, LocalDecl>) -> Self {
         let tc = unsafe { __ykshimtest_tracecompiler_default() };
         for (l, decl) in local_decls.iter() {
-            unsafe {
-                __ykshimtest_tracecompiler_insert_decl(
-                    tc,
-                    *l,
-                    decl.ty.0,
-                    decl.ty.1,
-                    decl.referenced,
-                )
-            };
+            unsafe { __ykshimtest_tracecompiler_insert_decl(tc, *l, decl.ty, decl.referenced) };
         }
 
         Self(tc)

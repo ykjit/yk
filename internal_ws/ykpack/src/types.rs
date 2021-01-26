@@ -18,9 +18,9 @@ pub type LocalIndex = u32;
 pub type TyIndex = u32;
 pub type FieldIndex = u32;
 pub type ArrayIndex = u32;
-pub type TypeId = (CguHash, TyIndex); // CGU hash and vector index.
 pub type OffT = i32;
 
+/// Uniquely identifies a compilation unit.
 #[derive(Debug, Hash, Eq, PartialEq, Copy, Clone, Serialize, Deserialize)]
 #[repr(C)]
 pub struct CguHash(pub u64);
@@ -28,6 +28,22 @@ pub struct CguHash(pub u64);
 impl Display for CguHash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:x}", self.0)
+    }
+}
+
+/// Uniquely identifies a SIR type.
+#[derive(Debug, Hash, Eq, PartialEq, Copy, Clone, Serialize, Deserialize)]
+#[repr(C)]
+pub struct TypeId {
+    /// Identifies which compilation unit the type comes from.
+    pub cgu: CguHash,
+    /// The type index within the compilation unit.
+    pub idx: TyIndex,
+}
+
+impl Display for TypeId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "({}, {})", self.cgu, self.idx)
     }
 }
 
@@ -71,9 +87,7 @@ impl Display for Ty {
             TyKind::UnsignedInt(ui) => write!(f, "{}", ui),
             TyKind::Struct(sty) => write!(f, "{}", sty),
             TyKind::Tuple(tty) => write!(f, "{}", tty),
-            TyKind::Array { elem_ty, len, .. } => {
-                write!(f, "[({}, {}); {}]", elem_ty.0, elem_ty.1, len)
-            }
+            TyKind::Array { elem_ty, len, .. } => write!(f, "[{}; {}]", elem_ty, len),
             TyKind::Slice(sty) => write!(f, "&[{:?}]", sty),
             TyKind::Ref(rty) => write!(f, "&{:?}", rty),
             TyKind::Bool => write!(f, "bool"),
@@ -187,7 +201,7 @@ impl Display for Fields {
                 .join(", "),
             self.tys
                 .iter()
-                .map(|t| format!("({}, {})", t.0, t.1))
+                .map(|t| format!("{}", t))
                 .collect::<Vec<String>>()
                 .join(", ")
         )
@@ -265,7 +279,7 @@ impl LocalDecl {
 
 impl Display for LocalDecl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "({}, {})", self.ty.0, self.ty.1)
+        write!(f, "{}", self.ty)
     }
 }
 

@@ -7,7 +7,7 @@ use std::ptr;
 
 use ykbh::SIRInterpreter;
 use ykcompile::{CompiledTrace, TraceCompiler, REG_POOL};
-use ykpack::{self, CguHash, Local, LocalDecl, TyIndex};
+use ykpack::{self, Local, LocalDecl, TypeId};
 use yktrace::sir::{self, SirTrace, SIR};
 use yktrace::tir::TirTrace;
 
@@ -45,16 +45,11 @@ unsafe extern "C" fn __ykshimtest_tirtrace_display<'a, 'm>(
 /// Looks up the TypeId of the return value of the given symbol. The TypeId is returned in two
 /// parts in `ret_cgu` and `ret_idx`.
 #[no_mangle]
-unsafe extern "C" fn __ykshimtest_body_ret_ty(
-    sym: *mut c_char,
-    ret_cgu: *mut CguHash,
-    ret_idx: *mut TyIndex,
-) {
+unsafe extern "C" fn __ykshimtest_body_ret_ty(sym: *mut c_char, ret_tyid: *mut TypeId) {
     let sym = CString::from_raw(sym);
     let rv = usize::try_from(sir::RETURN_LOCAL.0).unwrap();
     let tyid = SIR.body(&sym.to_str().unwrap()).unwrap().local_decls[rv].ty;
-    *ret_cgu = tyid.0;
-    *ret_idx = tyid.1;
+    *ret_tyid = tyid;
 }
 
 /// Creates a TraceCompiler with default settings.
@@ -76,15 +71,14 @@ unsafe extern "C" fn __ykshimtest_tracecompiler_drop(comp: *mut c_void) {
 unsafe extern "C" fn __ykshimtest_tracecompiler_insert_decl(
     tc: *mut c_void,
     local: Local,
-    local_ty_cgu: CguHash,
-    local_ty_index: TyIndex,
+    local_ty: TypeId,
     referenced: bool,
 ) {
     let tc = &mut *(tc as *mut TraceCompiler);
     tc.local_decls.insert(
         local,
         LocalDecl {
-            ty: (local_ty_cgu, local_ty_index),
+            ty: local_ty,
             referenced,
         },
     );
