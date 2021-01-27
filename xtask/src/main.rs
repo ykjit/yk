@@ -6,8 +6,6 @@
 //! For more information, see this section in the documentation:
 //! https://softdevteam.github.io/ykdocs/tech/yk_structure.html
 
-// FIXME make `cargo xtask fmt` and `cargo audit` work.
-
 use std::{env, path::PathBuf, process::Command};
 
 fn main() {
@@ -20,8 +18,32 @@ fn main() {
     // Change into the internal workspace.
     let this_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let int_dir = [&this_dir, "..", "internal_ws"].iter().collect::<PathBuf>();
-    env::set_current_dir(&int_dir).unwrap();
+    let ext_dir = [&this_dir, ".."].iter().collect::<PathBuf>();
 
+    // There is currently a bug where `cargo fmt` doesn't work for linked toolchains. In this case
+    // we fall back to the nightly toolchain's rustfmt.
+    // https://github.com/rust-lang/rust/issues/81431
+    if target == "fmt" {
+        let fmt = || {
+            let status = Command::new("sh")
+                .args(&["-c", "cargo +nightly fmt"])
+                .spawn()
+                .unwrap()
+                .wait()
+                .unwrap();
+
+            if !status.success() {
+                panic!("fmt failed");
+            }
+        };
+        env::set_current_dir(&int_dir).unwrap();
+        fmt();
+        env::set_current_dir(&ext_dir).unwrap();
+        fmt();
+        return;
+    }
+
+    env::set_current_dir(&int_dir).unwrap();
     let build_internal = |target: &str, with_extra_args: bool| {
         let mut int_rflags = rflags.clone();
         int_rflags.push_str(" --cfg tracermode=\"hw\"");
@@ -55,7 +77,6 @@ fn main() {
     ext_rflags.push_str(" -C tracer=hw");
 
     eprintln!("Building external (unoptimised) workspace...");
-    let ext_dir = [&this_dir, ".."].iter().collect::<PathBuf>();
     let int_target_dir = [int_dir.to_str().unwrap(), "target", "release"]
         .iter()
         .collect::<PathBuf>();
