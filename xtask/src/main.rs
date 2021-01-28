@@ -53,6 +53,7 @@ impl<'a> WorkspaceAction<'a> {
         let mut ld_library_path = env::var("LD_LIBRARY_PATH").unwrap_or_else(|_| String::new());
 
         match target {
+            "audit" => (),
             "build" | "check" | "clean" | "test" => {
                 if workspace == Workspace::Internal {
                     // Optimise the internal workspace.
