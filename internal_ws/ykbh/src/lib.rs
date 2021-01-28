@@ -192,7 +192,9 @@ impl SIRInterpreter {
     /// Run the SIR interpreter after it has been initialised by a guard failure. Since we start in
     /// the block where the guard failed, we immediately skip to the terminator and interpret it to
     /// see which block we need to start interpretation in.
-    pub unsafe fn interpret(&mut self) {
+    pub unsafe fn interpret(&mut self, tio: *mut u8) {
+        // Set the pointer to the trace inputs.
+        self.set_trace_inputs(tio);
         // Jump to the correct basic block.
         let lastfunc = self.funcs.last().unwrap();
         let lastret = *self.returns.last().unwrap();
@@ -228,13 +230,12 @@ impl SIRInterpreter {
         self.frames.last_mut().unwrap()
     }
 
-    /// Inserts a pointer to the trace inputs into `locals`.
+    /// Inserts a pointer to the trace inputs into the `interp_step` frame.
     pub fn set_trace_inputs(&mut self, tio: *mut u8) {
-        // FIXME Later this also sets other already initialised variables as well as the program
-        // counter of the interpreter.
-        let ptr = self.frame().local_ptr(&Local(1)); // The trace inputs live in $1
+        // The trace inputs live in $1
+        let ptr = self.frames.first().unwrap().local_ptr(&Local(1));
         unsafe {
-            // Write the pointer value of `tio` into locals.
+            // Write the pointer value of `tio` into this frames memory.
             std::ptr::write::<*mut u8>(ptr as *mut *mut u8, tio);
         }
     }

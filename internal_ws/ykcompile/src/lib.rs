@@ -266,10 +266,10 @@ fn local_to_reg_name(loc: &Location) -> &'static str {
 /// Given a vector of `FrameInfo`s `vptr`, instantiates and initialises a SIR interpreter and returns its
 /// pointer. Consumes `vptr`.
 #[no_mangle]
-pub extern "sysv64" fn invoke_sinterp(vptr: *mut Vec<FrameInfo>) {
+pub extern "sysv64" fn invoke_sinterp(vptr: *mut Vec<FrameInfo>) -> *mut SIRInterpreter {
     let v = unsafe { Box::from_raw(vptr) };
-    let mut si = SIRInterpreter::init_frames(*v);
-    //unsafe { si.interpret() };
+    let si = SIRInterpreter::init_frames(*v);
+    Box::into_raw(Box::new(si))
 }
 
 /// Given a size and alignment, allocates memory which later holds the live variables of a stack
@@ -323,15 +323,19 @@ pub struct CompiledTrace {
 
 impl CompiledTrace {
     /// Execute the trace by calling (not jumping to) the first instruction's address.
-    pub unsafe fn execute<TT>(&self, args: &mut TT) -> bool {
-        let func: extern "sysv64" fn(&mut TT) -> bool =
+    pub unsafe fn execute<TT>(&self, args: &mut TT) -> *mut SIRInterpreter {
+        let func: extern "sysv64" fn(&mut TT) -> *mut SIRInterpreter =
             mem::transmute(self.mc.ptr(dynasmrt::AssemblyOffset(0)));
         self.exec_trace(func, args)
     }
 
     /// Actually call the code. This is a separate function making it easier to set a debugger
     /// breakpoint right before entering the trace.
-    fn exec_trace<TT>(&self, t_fn: extern "sysv64" fn(&mut TT) -> bool, args: &mut TT) -> bool {
+    fn exec_trace<TT>(
+        &self,
+        t_fn: extern "sysv64" fn(&mut TT) -> *mut SIRInterpreter,
+        args: &mut TT,
+    ) -> *mut SIRInterpreter {
         t_fn(args)
     }
 
@@ -1380,7 +1384,7 @@ impl TraceCompiler {
         let topalign = 16 - (live_off + soff as usize + CALLEE_SAVED_REGS.len() * 8) % 16;
         // Restore registers.
         dynasm!(self.asm
-            ; mov rax, 1 // Signifies that there were no guard failures.
+            ; mov rax, 0 // Signifies that there were no guard failures.
             ; ->cleanup:
         );
         self.restore_regs(&*CALLEE_SAVED_REGS);
@@ -1415,9 +1419,6 @@ impl TraceCompiler {
             dynasm!(self.asm
                 ; => label
             );
-
-            // Add TIO to live_locations, to make sure it gets spilled as well.
-            live_locations.insert(&Local(1), self.local_to_location(Local(1)));
 
             // Spill all registers that are currently in use to the stack, so we have enough
             // registers available to generate the stack frames. This also saves us from having to
@@ -1478,20 +1479,6 @@ impl TraceCompiler {
                     self.store_raw(&dest_loc, &src_loc, size);
                 }
 
-                if i == 0 {
-                    // Write TIO, whose Local is $1 in both SIR and TIR, into the `interp_step` stack
-                    // frame (which is the inner-most frame).
-                    let ty = self.local_decls[&Local(1)].ty;
-                    let size = SIR.ty(&ty).size();
-                    let off = i32::try_from(body.offsets[usize::try_from(1).unwrap()]).unwrap();
-                    let tio_loc = Location::Mem(RegAndOffset {
-                        reg: RAX.code(),
-                        off,
-                    });
-                    let src_loc = &live_locations[&Local(1)];
-                    self.store_raw(&tio_loc, &src_loc, size);
-                }
-
                 // Add frame information to vector.
                 dynasm!(self.asm
                     ; mov rdi, Rq(frame_vec_reg)
@@ -1507,13 +1494,11 @@ impl TraceCompiler {
             // There's no need to save any registers here, since we immediately jump to cleanup
             // afterwards, which exits the trace.
             dynasm!(self.asm
-                // Invoke the SIR interpreter. FIXME later just return the allocated locals
-                // and let the meta tracer invoke the interpreter.
+                // Create and initialise SIR interpreter, then return it.
                 ; mov rdi, Rq(frame_vec_reg)
                 ; xor rax, rax
                 ; mov r11, QWORD invoke_sinterp as i64
                 ; call r11
-                ; mov rax, 0
                 ; jmp ->cleanup
             );
         }

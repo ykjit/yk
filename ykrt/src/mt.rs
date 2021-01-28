@@ -17,7 +17,10 @@ use crate::location::{
     CompilingTrace, Location, State, PHASE_COMPILED, PHASE_COMPILING, PHASE_COUNTING,
     PHASE_DONT_TRACE, PHASE_LOCKED, PHASE_TRACING, PHASE_TRACING_LOCK,
 };
-use ykshim_client::{compile_trace, start_tracing, CompiledTrace, ThreadTracer, TracingKind};
+use ykshim_client::{
+    compile_trace, start_tracing, CompiledTrace, RawSIRInterpreter, SIRInterpreter, ThreadTracer,
+    TracingKind,
+};
 
 pub type HotThreshold = usize;
 const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
@@ -184,7 +187,8 @@ impl MTThread {
         // this thread's tracer.
         if let Some(loc) = loc {
             if let Some(func) = self.transition_location::<I>(loc) {
-                if self.exec_trace(func, inputs) {
+                let ptr = self.exec_trace(func, inputs);
+                if ptr.is_null() {
                     // Trace succesfully executed.
                     return;
                 } else {
@@ -196,7 +200,11 @@ impl MTThread {
         step_fn(inputs)
     }
 
-    fn exec_trace<I>(&mut self, func: fn(&mut I) -> bool, inputs: &mut I) -> bool {
+    fn exec_trace<I>(
+        &mut self,
+        func: fn(&mut I) -> *mut RawSIRInterpreter,
+        inputs: &mut I,
+    ) -> *mut RawSIRInterpreter {
         func(inputs)
     }
 
@@ -206,7 +214,7 @@ impl MTThread {
     fn transition_location<I: Send + 'static>(
         &mut self,
         loc: &Location<I>,
-    ) -> Option<fn(&mut I) -> bool> {
+    ) -> Option<fn(&mut I) -> *mut RawSIRInterpreter> {
         // Since we don't hold an explicit lock, updating a Location is tricky: we might read a
         // Location, work out what we'd like to update it to, and try updating it, only to find
         // that another thread interrupted us part way through. We therefore use compare_and_swap
@@ -387,7 +395,9 @@ impl MTThread {
                 match mtx.try_lock() {
                     Ok(mut gd) => {
                         if let Some(tr) = (*gd).take() {
-                            let f = unsafe { mem::transmute::<_, fn(&mut I) -> bool>(tr.ptr()) };
+                            let f = unsafe {
+                                mem::transmute::<_, fn(&mut I) -> *mut RawSIRInterpreter>(tr.ptr())
+                            };
                             loc.store(State::phase_compiled(tr), Ordering::Release);
                             return Some(f);
                         }
@@ -406,7 +416,8 @@ impl MTThread {
             PHASE_LOCKED | PHASE_DONT_TRACE => return None,
             PHASE_COMPILED => {
                 let bct = unsafe { lp.ref_data::<CompiledTrace<I>>() };
-                let f = unsafe { mem::transmute::<_, fn(&mut I) -> bool>(bct.ptr()) };
+                let f =
+                    unsafe { mem::transmute::<_, fn(&mut I) -> *mut RawSIRInterpreter>(bct.ptr()) };
                 return Some(f);
             }
             _ => unreachable!(),
