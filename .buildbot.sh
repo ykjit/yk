@@ -27,6 +27,5 @@ sh rustup.sh --default-host x86_64-unknown-linux-gnu \
     -y
 export PATH=${CARGO_HOME}/bin/:$PATH
 rustup toolchain install nightly --allow-downgrade --component rustfmt
-# FIXME add fmt support to xtask build system.
-cargo +nightly fmt --all -- --check
+cargo xtask fmt --all -- --check
 cd internal_ws && cargo +nightly fmt --all -- --check
