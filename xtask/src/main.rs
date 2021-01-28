@@ -6,7 +6,11 @@
 //! For more information, see this section in the documentation:
 //! https://softdevteam.github.io/ykdocs/tech/yk_structure.html
 
-use std::{env, path::PathBuf, process::Command};
+use std::{
+    env,
+    path::PathBuf,
+    process::{exit, Command},
+};
 
 #[derive(PartialEq)]
 enum Workspace {
@@ -44,7 +48,7 @@ struct WorkspaceAction<'a> {
 }
 
 impl<'a> WorkspaceAction<'a> {
-    fn new(workspace: Workspace, target: &'a str) -> Self {
+    fn new(workspace: Workspace, target: &'a str) -> Result<Self, String> {
         let mut tool = env::var("CARGO").unwrap();
         let mut forced_deps = Vec::new();
         let mut target_args = vec![target];
@@ -65,7 +69,7 @@ impl<'a> WorkspaceAction<'a> {
                     // `cargo test` in the internal workspace won't build libykshim.so, so we have
                     // to force-build it to avoid linkage problems for the external workspace.
                     if target == "test" {
-                        forced_deps.push(WorkspaceAction::new(Workspace::Internal, "build"));
+                        forced_deps.push(WorkspaceAction::new(Workspace::Internal, "build")?);
                     }
                 } else {
                     // Emit code suitable for hardware tracing.
@@ -98,10 +102,15 @@ impl<'a> WorkspaceAction<'a> {
                 tool = "rustup".to_owned();
                 tool_args.extend(&["run", "nightly", "cargo"]);
             }
-            _ => panic!("the yk build system doesn't support this target"),
+            _ => {
+                return Err(format!(
+                    "the build system does not support the {} target",
+                    target
+                ))
+            }
         }
 
-        Self {
+        Ok(Self {
             tool,
             workspace_dir: workspace.dir(),
             tool_args,
@@ -109,17 +118,17 @@ impl<'a> WorkspaceAction<'a> {
             rust_flags,
             forced_deps,
             ld_library_path,
-        }
+        })
     }
 
-    fn run(self, extra_args: &[String]) {
+    fn run(self, extra_args: &[String]) -> Result<(), String> {
         // Run any dependencies first.
         for dep in self.forced_deps {
-            dep.run(&[]);
+            dep.run(&[])?;
         }
 
         env::set_current_dir(self.workspace_dir).unwrap();
-        let mut cmd = Command::new(self.tool);
+        let mut cmd = Command::new(&self.tool);
         let status = cmd
             .args(self.tool_args)
             .args(self.target_args)
@@ -133,9 +142,17 @@ impl<'a> WorkspaceAction<'a> {
             .unwrap();
 
         if !status.success() {
-            panic!("cargo failed");
+            let pb = PathBuf::from(self.tool);
+            let base = pb.iter().last().unwrap().to_str().unwrap();
+            return Err(format!("{} failed with exit code {}", base, status));
         }
+        Ok(())
     }
+}
+
+fn bail(err_str: String) -> ! {
+    eprintln!("xtask: {}", err_str);
+    exit(1);
 }
 
 fn main() {
@@ -143,6 +160,11 @@ fn main() {
     let target = args.next().unwrap();
     let extra_args = args.collect::<Vec<_>>();
 
-    WorkspaceAction::new(Workspace::Internal, &target).run(&extra_args);
-    WorkspaceAction::new(Workspace::External, &target).run(&extra_args);
+    let run_action = |ws: Workspace, target: &str, args: &[String]| {
+        let act = WorkspaceAction::new(ws, target).unwrap_or_else(|e| bail(e));
+        act.run(args).unwrap_or_else(|e| bail(e));
+    };
+
+    run_action(Workspace::Internal, &target, &extra_args);
+    run_action(Workspace::External, &target, &extra_args);
 }
