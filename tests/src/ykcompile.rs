@@ -3,8 +3,8 @@ use libc;
 use libc::{abs, c_void, getuid};
 use std::{collections::HashMap, convert::TryFrom, ptr};
 use ykshim_client::{
-    compile_trace, reg_pool_size, sir_body_ret_ty, start_tracing, Local, LocalDecl, LocalIndex,
-    TirTrace, TraceCompiler, TracingKind, TypeId,
+    compile_tir_trace, compile_trace, reg_pool_size, sir_body_ret_ty, start_tracing, Local,
+    LocalDecl, LocalIndex, TirTrace, TraceCompiler, TracingKind, TypeId,
 };
 
 extern "C" {
@@ -736,8 +736,7 @@ fn do_not_trace() {
         &tir_trace,
     );
 
-    // FIXME duplicated work: compile_trace builds tir again.
-    let ct = compile_trace(sir_trace).unwrap();
+    let ct = compile_tir_trace(tir_trace).unwrap();
     let mut args = IO(1);
     assert!(unsafe { ct.execute(&mut args) });
     assert_eq!(args.0, 3);

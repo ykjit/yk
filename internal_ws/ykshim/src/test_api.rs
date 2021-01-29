@@ -6,7 +6,7 @@ use std::os::raw::c_char;
 use std::ptr;
 
 use ykbh::SIRInterpreter;
-use ykcompile::{TraceCompiler, REG_POOL};
+use ykcompile::{CompiledTrace, TraceCompiler, REG_POOL};
 use ykpack::{self, CguHash, Local, LocalDecl, TyIndex};
 use yktrace::sir::{self, SirTrace, SIR};
 use yktrace::tir::TirTrace;
@@ -29,7 +29,7 @@ unsafe extern "C" fn __ykshimtest_tirtrace_new<'a, 'm>(
 /// Returns the length of a SIR trace.
 #[no_mangle]
 unsafe extern "C" fn __ykshimtest_tirtrace_len<'a, 'm>(tir_trace: *mut TirTrace<'a, 'm>) -> size_t {
-    Box::from_raw(tir_trace).len()
+    (*tir_trace).len()
 }
 
 /// Returns the human-readable Display string of a TIR trace.
@@ -37,7 +37,7 @@ unsafe extern "C" fn __ykshimtest_tirtrace_len<'a, 'm>(tir_trace: *mut TirTrace<
 unsafe extern "C" fn __ykshimtest_tirtrace_display<'a, 'm>(
     tir_trace: *mut TirTrace<'a, 'm>,
 ) -> *mut c_char {
-    let tt = Box::from_raw(tir_trace);
+    let tt = &(*tir_trace);
     let st = CString::new(format!("{}", tt)).unwrap();
     CString::into_raw(st)
 }
@@ -130,4 +130,13 @@ unsafe extern "C" fn __ykshimtest_interpret_body(body_name: *mut c_char, icx: *m
 #[no_mangle]
 unsafe extern "C" fn __ykshimtest_reg_pool_size() -> usize {
     REG_POOL.len()
+}
+
+/// Consumes and compiles the given TIR trace to native code, returning an opaque pointer to the
+/// compiled trace.
+#[no_mangle]
+fn __ykshimtest_compile_tir_trace(tir_trace: *mut TirTrace) -> *mut CompiledTrace {
+    let tir_trace = unsafe { Box::from_raw(tir_trace) };
+    let compiled_trace = ykcompile::compile_trace(*tir_trace);
+    Box::into_raw(Box::new(compiled_trace))
 }
