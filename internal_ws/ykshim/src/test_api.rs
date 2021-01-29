@@ -29,7 +29,7 @@ unsafe extern "C" fn __ykshimtest_tirtrace_new<'a, 'm>(
 /// Returns the length of a SIR trace.
 #[no_mangle]
 unsafe extern "C" fn __ykshimtest_tirtrace_len<'a, 'm>(tir_trace: *mut TirTrace<'a, 'm>) -> size_t {
-    Box::from_raw(tir_trace).len()
+    (*tir_trace).len()
 }
 
 /// Returns the human-readable Display string of a TIR trace.
@@ -37,7 +37,7 @@ unsafe extern "C" fn __ykshimtest_tirtrace_len<'a, 'm>(tir_trace: *mut TirTrace<
 unsafe extern "C" fn __ykshimtest_tirtrace_display<'a, 'm>(
     tir_trace: *mut TirTrace<'a, 'm>,
 ) -> *mut c_char {
-    let tt = Box::from_raw(tir_trace);
+    let tt = &(*tir_trace);
     let st = CString::new(format!("{}", tt)).unwrap();
     CString::into_raw(st)
 }
