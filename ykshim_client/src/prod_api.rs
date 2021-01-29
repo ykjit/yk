@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 use std::os::raw::c_char;
 use std::{mem, ptr};
 
-type RawCompiledTrace = c_void;
+pub(crate) type RawCompiledTrace = c_void;
 pub(crate) type RawSirTrace = c_void;
 type RawThreadTracer = c_void;
 
@@ -87,8 +87,8 @@ impl Drop for SirTrace {
 }
 
 pub struct CompiledTrace<I> {
-    compiled: *mut c_void,
-    _marker: PhantomData<I>,
+    pub(crate) compiled: *mut c_void,
+    pub(crate) _marker: PhantomData<I>,
 }
 
 unsafe impl<I> Send for CompiledTrace<I> {}

@@ -1,11 +1,12 @@
 //! The testing API client to ykshim.
 
-use crate::prod_api::{Local, RawSirTrace, SirTrace, TyIndex};
+use crate::prod_api::{CompiledTrace, Local, RawCompiledTrace, RawSirTrace, SirTrace, TyIndex};
 use libc::size_t;
 use std::collections::HashMap;
 use std::ffi::{c_void, CString};
-use std::fmt;
+use std::marker::PhantomData;
 use std::os::raw::c_char;
+use std::{fmt, ptr};
 
 // Opaque pointers.
 type RawTirTrace = c_void;
@@ -19,6 +20,7 @@ pub struct CguHash(u64);
 pub type TypeId = (CguHash, TyIndex);
 
 extern "C" {
+    fn __ykshimtest_compile_tir_trace(tir_trace: *mut RawTirTrace) -> *mut RawCompiledTrace;
     fn __ykshimtest_sirtrace_len(sir_trace: *mut RawSirTrace) -> size_t;
     fn __ykshimtest_tirtrace_new(sir_trace: *mut RawSirTrace) -> *mut RawTirTrace;
     fn __ykshimtest_tracecompiler_drop(comp: *mut RawTraceCompiler);
@@ -43,6 +45,7 @@ extern "C" {
     fn __ykshimtest_reg_pool_size() -> usize;
 }
 
+#[derive(Debug)]
 pub struct TirTrace(*mut RawTirTrace);
 
 impl TirTrace {
@@ -135,4 +138,13 @@ pub fn interpret_body<I>(body_name: &str, icx: &mut I) {
 
 pub fn reg_pool_size() -> usize {
     unsafe { __ykshimtest_reg_pool_size() }
+}
+
+pub fn compile_tir_trace<T>(mut tir_trace: TirTrace) -> Result<CompiledTrace<T>, CString> {
+    let compiled = unsafe { __ykshimtest_compile_tir_trace(tir_trace.0) };
+    tir_trace.0 = ptr::null_mut(); // consumed.
+    Ok(CompiledTrace {
+        compiled,
+        _marker: PhantomData,
+    })
 }
