@@ -5,9 +5,11 @@ use std::marker::PhantomData;
 use std::os::raw::c_char;
 use std::{mem, ptr};
 
+// Opaque pointers.
 pub(crate) type RawCompiledTrace = c_void;
 pub(crate) type RawSirTrace = c_void;
 type RawThreadTracer = c_void;
+pub(crate) type RawTirTrace = c_void;
 
 // These types and constants must be kept in sync with types of the same name in the internal
 // workspace.

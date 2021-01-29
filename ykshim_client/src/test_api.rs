@@ -1,6 +1,8 @@
 //! The testing API client to ykshim.
 
-use crate::prod_api::{CompiledTrace, Local, RawCompiledTrace, RawSirTrace, SirTrace, TyIndex};
+use crate::prod_api::{
+    CompiledTrace, Local, RawCompiledTrace, RawSirTrace, RawTirTrace, SirTrace, TyIndex,
+};
 use libc::size_t;
 use std::collections::HashMap;
 use std::ffi::{c_void, CString};
@@ -9,7 +11,6 @@ use std::os::raw::c_char;
 use std::{fmt, ptr};
 
 // Opaque pointers.
-type RawTirTrace = c_void;
 type RawTraceCompiler = c_void;
 
 // Keep these types in-sync with the internal workspace.
@@ -23,6 +24,7 @@ extern "C" {
     fn __ykshimtest_compile_tir_trace(tir_trace: *mut RawTirTrace) -> *mut RawCompiledTrace;
     fn __ykshimtest_sirtrace_len(sir_trace: *mut RawSirTrace) -> size_t;
     fn __ykshimtest_tirtrace_new(sir_trace: *mut RawSirTrace) -> *mut RawTirTrace;
+    fn __ykshim_tirtrace_drop(tir_trace: *mut RawTirTrace);
     fn __ykshimtest_tracecompiler_drop(comp: *mut RawTraceCompiler);
     fn __ykshimtest_tirtrace_len(tir_trace: *mut RawTirTrace) -> size_t;
     fn __ykshimtest_tirtrace_display(tir_trace: *mut RawTirTrace) -> *mut c_char;
@@ -55,6 +57,14 @@ impl TirTrace {
 
     pub fn len(&self) -> usize {
         unsafe { __ykshimtest_tirtrace_len(self.0) }
+    }
+}
+
+impl Drop for TirTrace {
+    fn drop(&mut self) {
+        if self.0 != ptr::null_mut() {
+            unsafe { __ykshim_tirtrace_drop(self.0) };
+        }
     }
 }
 

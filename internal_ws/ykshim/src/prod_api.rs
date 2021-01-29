@@ -100,3 +100,9 @@ unsafe extern "C" fn __ykshim_compiled_trace_drop(compiled_trace: *mut CompiledT
 unsafe extern "C" fn __ykshim_sirtrace_drop(trace: *mut SirTrace) {
     Box::from_raw(trace);
 }
+
+/// Drop a TIR trace.
+#[no_mangle]
+unsafe fn __ykshim_tirtrace_drop(tir_trace: *mut TirTrace) {
+    Box::from_raw(tir_trace);
+}
