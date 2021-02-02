@@ -102,9 +102,8 @@ impl<'m> Sir<'m> {
         } // Drop the RwLock's read() to prevent deadlocking.
 
         // Cache miss. Decode the type and update the cache.
-        let (cgu, tidx) = tyid;
-        let (ref sec_name, ref hdr, hdr_size) = SIR.hdrs[cgu];
-        let off = hdr.types[usize::try_from(*tidx).unwrap()];
+        let (ref sec_name, ref hdr, hdr_size) = SIR.hdrs[&tyid.cgu];
+        let off = hdr.types[usize::try_from(tyid.idx.0).unwrap()];
         let ty = self.decode_ty(sec_name, hdr_size + off);
         let mut wr = self.ty_cache.write().unwrap();
         let arc = Arc::new(ty);

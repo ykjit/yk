@@ -496,14 +496,7 @@ impl Display for TirTrace<'_, '_> {
             .collect::<Vec<(&Local, &LocalDecl)>>();
         sort_decls.sort_by(|l, r| l.0.partial_cmp(r.0).unwrap());
         for (l, dcl) in sort_decls {
-            writeln!(
-                f,
-                "  {}: ({}, {}) => {}",
-                l,
-                dcl.ty.0,
-                dcl.ty.1,
-                self.sir.ty(&dcl.ty)
-            )?;
+            writeln!(f, "  {}: {} => {}", l, dcl.ty, self.sir.ty(&dcl.ty))?;
         }
 
         writeln!(f, "ops:")?;

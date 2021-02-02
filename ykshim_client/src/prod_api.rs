@@ -17,7 +17,9 @@ pub type LocalIndex = u32;
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
 #[repr(C)]
 pub struct Local(pub LocalIndex);
-pub type TyIndex = u32;
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct TyIndex(pub u32);
 
 extern "C" {
     fn __ykshim_start_tracing(tracing_kind: u8) -> *mut RawThreadTracer;
