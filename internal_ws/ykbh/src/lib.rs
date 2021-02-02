@@ -17,9 +17,8 @@ pub struct FrameInfo {
     pub mem: *mut u8,
 }
 
-/// A stack frame for writing and reading locals. Note that the allocated memory this frame points
-/// to needs to be freed manually before the stack frame is destoyed.
-pub struct StackFrame {
+/// Heap allocated memory for writing and reading locals of a stack frame.
+pub struct LocalMem {
     /// Pointer to allocated memory containing a frame's locals.
     locals: *mut u8,
     /// The offset of each Local into locals.
@@ -28,13 +27,13 @@ pub struct StackFrame {
     layout: Layout,
 }
 
-impl Drop for StackFrame {
+impl Drop for LocalMem {
     fn drop(&mut self) {
         unsafe { dealloc(self.locals, self.layout) }
     }
 }
 
-impl StackFrame {
+impl LocalMem {
     /// Given a pointer `src` and a size, write its value to the pointer `dst`.
     pub fn write_val(&mut self, dst: *mut u8, src: *const u8, size: usize) {
         unsafe {
@@ -86,7 +85,7 @@ impl StackFrame {
     }
 
     /// Copy over the call arguments from another frame.
-    pub fn copy_args(&mut self, args: &Vec<IPlace>, frame: &StackFrame) {
+    pub fn copy_args(&mut self, args: &Vec<IPlace>, frame: &LocalMem) {
         for (i, arg) in args.iter().enumerate() {
             let dst = self.local_ptr(&Local(u32::try_from(i + 1).unwrap()));
             match arg {
@@ -140,20 +139,27 @@ impl StackFrame {
     }
 }
 
+/// A interpreter stack frame, containing allocated memory for the frames locals, and the function
+/// symbol name and basic block index needed by the interpreter to continue interpreting after
+/// returning from a function call.
+struct StackFrame {
+    /// Allocated memory holding live locals.
+    mem: LocalMem,
+    /// The current basic block index of this frame. Upon returning from a function call it is used
+    /// to look up the previous basic block and check its terminator to decide where to continue
+    /// interpreting.
+    bbidx: ykpack::BasicBlockIndex,
+    /// Symbol name of this stack frame. Needed to retrieve the SIR body of the function which
+    /// contains the statements we want to interpret.
+    func: String,
+}
+
 /// The SIR interpreter, also known as blackholing interpreter, is invoked when a guard fails in a
 /// trace. It is initalised with information from the trace, e.g. live variables, stack frames, and
-/// then run to get us back to a control point from where the normal interpreter then takes over.
+/// then run to get us back to a control point from where the normal interpreter can take over.
 pub struct SIRInterpreter {
-    /// Keeps track of the current stack frame, as well as previous stack frames, created by
-    /// function calls.
+    /// Keeps track of active stack frames (most recent last).
     frames: Vec<StackFrame>,
-    /// Current and previous basic block indexes. Upon returning from a function call, we look up
-    /// the previous basic block and look up its terminator to decide where to continue
-    /// interpreting.
-    bbidx: Vec<ykpack::BasicBlockIndex>,
-    /// Function names relating to each stack frame. These are needed to retrieve the SIR body of
-    /// the function which contains the statements we want to interpret.
-    funcs: Vec<String>,
 }
 
 impl SIRInterpreter {
@@ -161,8 +167,6 @@ impl SIRInterpreter {
         let frame = SIRInterpreter::create_frame(&sym);
         SIRInterpreter {
             frames: vec![frame],
-            bbidx: vec![0],
-            funcs: vec![sym],
         }
     }
 
@@ -170,24 +174,21 @@ impl SIRInterpreter {
     /// received from the failing guard.
     pub fn init_frames(v: Vec<FrameInfo>) -> Self {
         let mut frames = Vec::new();
-        let mut funcs = Vec::new();
-        let mut bbidx = Vec::new();
         for fi in v {
             let body = SIR.body(&fi.sym).unwrap();
-            let frame = StackFrame {
+            let mem = LocalMem {
                 locals: fi.mem,
                 offsets: body.offsets.clone(),
                 layout: Layout::from_size_align(body.layout.0, body.layout.1).unwrap(),
             };
+            let frame = StackFrame {
+                mem,
+                bbidx: u32::try_from(fi.bbidx).unwrap(),
+                func: fi.sym,
+            };
             frames.push(frame);
-            funcs.push(fi.sym);
-            bbidx.push(u32::try_from(fi.bbidx).unwrap());
         }
-        SIRInterpreter {
-            frames,
-            bbidx,
-            funcs,
-        }
+        SIRInterpreter { frames }
     }
 
     /// Run the SIR interpreter after it has been initialised by a guard failure. Since we start in
@@ -197,16 +198,15 @@ impl SIRInterpreter {
         // Set the pointer to the trace inputs.
         self.set_trace_inputs(tio);
         // Jump to the correct basic block by interpreting the terminator.
-        let lastfunc = self.funcs.last().unwrap();
-        let lastbb = self.bbidx();
-        let body = SIR.body(&lastfunc).unwrap();
-        self.terminator(&body.blocks[lastbb].term);
+        let frame = self.frames.last().unwrap();
+        let body = SIR.body(&frame.func).unwrap();
+        let bbidx = usize::try_from(frame.bbidx).unwrap();
+        self.terminator(&body.blocks[bbidx].term);
         // Start interpretation.
         self._interpret();
     }
 
-    /// Given a vector of local declarations, create a new StackFrame, which allocates just enough
-    /// space to hold all of them.
+    /// Given a vector of local declarations allocate just enough space to hold all of them.
     fn create_frame(sym: &String) -> StackFrame {
         let body = SIR.body(&sym).unwrap();
         let (size, align) = body.layout;
@@ -214,36 +214,27 @@ impl SIRInterpreter {
         let layout = Layout::from_size_align(size, align).unwrap();
         // Allocate memory for the locals
         let locals = unsafe { alloc(layout) };
-        StackFrame {
+        let mem = LocalMem {
             locals,
             offsets,
             layout,
+        };
+        StackFrame {
+            mem,
+            bbidx: 0,
+            func: sym.to_string(),
         }
     }
 
-    /// Returns a reference to the currently active frame.
-    fn frame(&self) -> &StackFrame {
-        self.frames.last().unwrap()
-    }
-
-    /// Returns a mutable reference to the currently active frame.
-    fn frame_mut(&mut self) -> &mut StackFrame {
-        self.frames.last_mut().unwrap()
-    }
-
-    fn bbidx(&self) -> usize {
-        let bbidx = self.bbidx.last().unwrap();
-        usize::try_from(*bbidx).unwrap()
-    }
-
-    fn set_bbidx(&mut self, bbidx: ykpack::BasicBlockIndex) {
-        *self.bbidx.last_mut().unwrap() = bbidx;
+    /// Returns a reference to the currently active locals.
+    fn locals(&self) -> &LocalMem {
+        &self.frames.last().unwrap().mem
     }
 
     /// Inserts a pointer to the trace inputs into the `interp_step` frame.
     pub fn set_trace_inputs(&mut self, tio: *mut u8) {
         // The trace inputs live in $1
-        let ptr = self.frames.first().unwrap().local_ptr(&Local(1));
+        let ptr = self.frames.first().unwrap().mem.local_ptr(&Local(1));
         unsafe {
             // Write the pointer value of `tio` into this frames memory.
             std::ptr::write::<*mut u8>(ptr as *mut *mut u8, tio);
@@ -251,9 +242,9 @@ impl SIRInterpreter {
     }
 
     pub unsafe fn _interpret(&mut self) {
-        while let Some(func) = self.funcs.last() {
-            let body = SIR.body(&func).unwrap();
-            let block = &body.blocks[self.bbidx()];
+        while let Some(frame) = self.frames.last() {
+            let body = SIR.body(&frame.func).unwrap();
+            let block = &body.blocks[usize::try_from(frame.bbidx).unwrap()];
             for stmt in block.stmts.iter() {
                 match stmt {
                     Statement::MkRef(dest, src) => self.mkref(&dest, &src),
@@ -287,22 +278,17 @@ impl SIRInterpreter {
 
                 // Initialise the new stack frame.
                 let mut frame = SIRInterpreter::create_frame(&fname);
-                frame.copy_args(args, self.frame());
+                frame.mem.copy_args(args, self.locals());
                 self.frames.push(frame);
-                self.bbidx.push(0);
-                self.funcs.push(fname.to_string());
             }
             Terminator::Return => {
                 // Return from current stackframe.
-                self.funcs.pop();
-                self.bbidx.pop();
                 let oldframe = self.frames.pop().unwrap();
                 // Are we still inside a nested call? Otherwise we are returning from the first
                 // body, so we are done interpreting.
-                if self.funcs.len() > 0 {
-                    let func = self.funcs.last().unwrap();
-                    let bbidx = self.bbidx();
-                    let body = SIR.body(&func).unwrap();
+                if let Some(curframe) = self.frames.last_mut() {
+                    let bbidx = usize::try_from(curframe.bbidx).unwrap();
+                    let body = SIR.body(&curframe.func).unwrap();
                     // Check the previous frame's call terminator to find out where we have to go
                     // next.
                     let (dest, bbidx) = match &body.blocks[bbidx].term {
@@ -314,12 +300,12 @@ impl SIRInterpreter {
                         _ => unreachable!(),
                     };
                     // Get a pointer to the return value of the called frame.
-                    let ret_ptr = oldframe.local_ptr(&Local(0));
+                    let ret_ptr = oldframe.mem.local_ptr(&Local(0));
                     // Write the return value to the destination in the previous frame.
-                    let dst_ptr = self.frame().iplace_to_ptr(&dest);
+                    let dst_ptr = curframe.mem.iplace_to_ptr(&dest);
                     let size = usize::try_from(SIR.ty(&dest.ty()).size()).unwrap();
-                    self.frame_mut().write_val(dst_ptr, ret_ptr, size);
-                    self.set_bbidx(bbidx);
+                    curframe.mem.write_val(dst_ptr, ret_ptr, size);
+                    curframe.bbidx = bbidx;
                 }
             }
             Terminator::SwitchInt {
@@ -329,23 +315,24 @@ impl SIRInterpreter {
                 otherwise_bb,
             } => {
                 let val = self.read_int(discr);
-                self.set_bbidx(*otherwise_bb);
+                let frame = self.frames.last_mut().unwrap();
+                frame.bbidx = *otherwise_bb;
                 for (i, v) in values.iter().enumerate() {
                     if val == *v {
-                        self.set_bbidx(target_bbs[i]);
+                        frame.bbidx = target_bbs[i];
                         break;
                     }
                 }
             }
             Terminator::Goto(bb) => {
-                self.set_bbidx(*bb);
+                self.frames.last_mut().unwrap().bbidx = *bb;
             }
             t => todo!("{}", t),
         }
     }
 
     fn read_int(&self, src: &IPlace) -> u128 {
-        let ptr = self.frame().iplace_to_ptr(src);
+        let ptr = self.locals().iplace_to_ptr(src);
         match &SIR.ty(&src.ty()).kind {
             TyKind::UnsignedInt(ui) => match ui {
                 UnsignedIntTy::Usize => todo!(),
@@ -363,7 +350,7 @@ impl SIRInterpreter {
 
     /// Implements the Store statement.
     fn store(&mut self, dest: &IPlace, src: &IPlace) {
-        self.frames.last_mut().unwrap().store(dest, src);
+        self.frames.last_mut().unwrap().mem.store(dest, src);
     }
 
     /// Creates a reference to an IPlace.
@@ -371,9 +358,9 @@ impl SIRInterpreter {
         match dest {
             IPlace::Val { .. } | IPlace::Indirect { .. } => {
                 // Get pointer to src.
-                let frame = self.frames.last_mut().unwrap();
-                let src_ptr = frame.iplace_to_ptr(src);
-                let dst_ptr = frame.iplace_to_ptr(dest);
+                let mem = &self.frames.last_mut().unwrap().mem;
+                let src_ptr = mem.iplace_to_ptr(src);
+                let dst_ptr = mem.iplace_to_ptr(dest);
                 unsafe {
                     std::ptr::write::<*mut u8>(dst_ptr as *mut *mut u8, src_ptr);
                 }
