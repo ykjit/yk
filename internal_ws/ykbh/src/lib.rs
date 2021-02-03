@@ -144,17 +144,16 @@ impl StackFrame {
 /// trace. It is initalised with information from the trace, e.g. live variables, stack frames, and
 /// then run to get us back to a control point from where the normal interpreter then takes over.
 pub struct SIRInterpreter {
-    /// Keeps track of the current stack frames, created by function calls.
+    /// Keeps track of the current stack frame, as well as previous stack frames, created by
+    /// function calls.
     frames: Vec<StackFrame>,
-    /// Index of the basic block we were in when a function was called. Upon returning from a
-    /// function, we go back to this basic block and look up its terminator to decide where to
-    /// continue.
-    returns: Vec<ykpack::BasicBlockIndex>,
+    /// Current and previous basic block indexes. Upon returning from a function call, we look up
+    /// the previous basic block and look up its terminator to decide where to continue
+    /// interpreting.
+    bbidx: Vec<ykpack::BasicBlockIndex>,
     /// Function names relating to each stack frame. These are needed to retrieve the SIR body of
     /// the function which contains the statements we want to interpret.
     funcs: Vec<String>,
-    /// Index of the basic block we are currently interpreting.
-    bbidx: ykpack::BasicBlockIndex,
 }
 
 impl SIRInterpreter {
@@ -162,9 +161,8 @@ impl SIRInterpreter {
         let frame = SIRInterpreter::create_frame(&sym);
         SIRInterpreter {
             frames: vec![frame],
-            returns: Vec::new(),
+            bbidx: vec![0],
             funcs: vec![sym],
-            bbidx: 0,
         }
     }
 
@@ -173,7 +171,7 @@ impl SIRInterpreter {
     pub fn init_frames(v: Vec<FrameInfo>) -> Self {
         let mut frames = Vec::new();
         let mut funcs = Vec::new();
-        let mut returns = Vec::new();
+        let mut bbidx = Vec::new();
         for fi in v {
             let body = SIR.body(&fi.sym).unwrap();
             let frame = StackFrame {
@@ -183,13 +181,12 @@ impl SIRInterpreter {
             };
             frames.push(frame);
             funcs.push(fi.sym);
-            returns.push(u32::try_from(fi.bbidx).unwrap());
+            bbidx.push(u32::try_from(fi.bbidx).unwrap());
         }
         SIRInterpreter {
             frames,
-            returns,
+            bbidx,
             funcs,
-            bbidx: 0,
         }
     }
 
@@ -199,11 +196,11 @@ impl SIRInterpreter {
     pub unsafe fn interpret(&mut self, tio: *mut u8) {
         // Set the pointer to the trace inputs.
         self.set_trace_inputs(tio);
-        // Jump to the correct basic block.
+        // Jump to the correct basic block by interpreting the terminator.
         let lastfunc = self.funcs.last().unwrap();
-        let lastret = *self.returns.last().unwrap();
-        let body = SIR.body(lastfunc).unwrap();
-        self.terminator(&body.blocks[lastret as usize].term);
+        let lastbb = self.bbidx();
+        let body = SIR.body(&lastfunc).unwrap();
+        self.terminator(&body.blocks[lastbb].term);
         // Start interpretation.
         self._interpret();
     }
@@ -234,6 +231,15 @@ impl SIRInterpreter {
         self.frames.last_mut().unwrap()
     }
 
+    fn bbidx(&self) -> usize {
+        let bbidx = self.bbidx.last().unwrap();
+        usize::try_from(*bbidx).unwrap()
+    }
+
+    fn set_bbidx(&mut self, bbidx: ykpack::BasicBlockIndex) {
+        *self.bbidx.last_mut().unwrap() = bbidx;
+    }
+
     /// Inserts a pointer to the trace inputs into the `interp_step` frame.
     pub fn set_trace_inputs(&mut self, tio: *mut u8) {
         // The trace inputs live in $1
@@ -247,8 +253,7 @@ impl SIRInterpreter {
     pub unsafe fn _interpret(&mut self) {
         while let Some(func) = self.funcs.last() {
             let body = SIR.body(&func).unwrap();
-            let bbidx = usize::try_from(self.bbidx).unwrap();
-            let block = &body.blocks[bbidx];
+            let block = &body.blocks[self.bbidx()];
             for stmt in block.stmts.iter() {
                 match stmt {
                     Statement::MkRef(dest, src) => self.mkref(&dest, &src),
@@ -284,21 +289,23 @@ impl SIRInterpreter {
                 let mut frame = SIRInterpreter::create_frame(&fname);
                 frame.copy_args(args, self.frame());
                 self.frames.push(frame);
-                self.returns.push(self.bbidx);
+                self.bbidx.push(0);
                 self.funcs.push(fname.to_string());
-                self.bbidx = 0;
             }
             Terminator::Return => {
+                // Return from current stackframe.
                 self.funcs.pop();
+                self.bbidx.pop();
+                let oldframe = self.frames.pop().unwrap();
                 // Are we still inside a nested call? Otherwise we are returning from the first
                 // body, so we are done interpreting.
                 if self.funcs.len() > 0 {
-                    let returnbb = self.returns.pop().unwrap();
                     let func = self.funcs.last().unwrap();
+                    let bbidx = self.bbidx();
                     let body = SIR.body(&func).unwrap();
-                    // Check the previous call terminator to find out where we have to go next.
-                    let (dest, bbidx) = match &body.blocks[usize::try_from(returnbb).unwrap()].term
-                    {
+                    // Check the previous frame's call terminator to find out where we have to go
+                    // next.
+                    let (dest, bbidx) = match &body.blocks[bbidx].term {
                         Terminator::Call {
                             operand: _,
                             args: _,
@@ -306,17 +313,13 @@ impl SIRInterpreter {
                         } => dest.as_ref().map(|(p, b)| (p.clone(), *b)).unwrap(),
                         _ => unreachable!(),
                     };
-
-                    // Restore the previous stack frame, but keep the other frame around so we
-                    // can copy over the return value to the destination.
-                    let oldframe = self.frames.pop().unwrap();
                     // Get a pointer to the return value of the called frame.
                     let ret_ptr = oldframe.local_ptr(&Local(0));
                     // Write the return value to the destination in the previous frame.
                     let dst_ptr = self.frame().iplace_to_ptr(&dest);
                     let size = usize::try_from(SIR.ty(&dest.ty()).size()).unwrap();
                     self.frame_mut().write_val(dst_ptr, ret_ptr, size);
-                    self.bbidx = bbidx;
+                    self.set_bbidx(bbidx);
                 }
             }
             Terminator::SwitchInt {
@@ -326,16 +329,16 @@ impl SIRInterpreter {
                 otherwise_bb,
             } => {
                 let val = self.read_int(discr);
-                self.bbidx = *otherwise_bb;
+                self.set_bbidx(*otherwise_bb);
                 for (i, v) in values.iter().enumerate() {
                     if val == *v {
-                        self.bbidx = target_bbs[i];
+                        self.set_bbidx(target_bbs[i]);
                         break;
                     }
                 }
             }
             Terminator::Goto(bb) => {
-                self.bbidx = *bb;
+                self.set_bbidx(*bb);
             }
             t => todo!("{}", t),
         }

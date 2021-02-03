@@ -4,7 +4,7 @@ use libc::{abs, c_void, getuid};
 use std::{collections::HashMap, convert::TryFrom, ptr};
 use ykshim_client::{
     compile_tir_trace, compile_trace, reg_pool_size, sir_body_ret_ty, start_tracing, Local,
-    LocalDecl, LocalIndex, SIRInterpreter, TirTrace, TraceCompiler, TracingKind, TypeId,
+    LocalDecl, LocalIndex, TirTrace, TraceCompiler, TracingKind, TypeId,
 };
 
 extern "C" {
@@ -1066,10 +1066,6 @@ fn guard() {
     let mut args = IO(3, 0);
     let ptr = unsafe { ct.execute(&mut args) };
     assert!(!ptr.is_null());
-    // Check that running the interpreter gets us the correct result.
-    let mut si: SIRInterpreter = SIRInterpreter(ptr);
-    unsafe { si.interpret(&mut args as *mut _ as *mut u8) };
-    assert_eq!(args.1, 10);
 }
 
 #[test]

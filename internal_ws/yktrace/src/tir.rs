@@ -50,6 +50,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
         let mut guard_blocks: Vec<GuardBlock> = Vec::new();
 
         let mut in_interp_step = false;
+        let mut entered_call = false;
         while let Some(loc) = itr.next() {
             let body = match sir.body(&loc.symbol_name) {
                 Some(b) => b,
@@ -93,22 +94,23 @@ impl<'a, 'm> TirTrace<'a, 'm> {
 
             // If we are not in the `interp_step` function, then ignore statements.
             if in_interp_step {
-                // For each new function we enter during the trace, create a new guard block. The
-                // list of guard blocks is later added to the guard, enabling us to recreate the
-                // stack frames for blackholing.
-                if guard_blocks.len() == 0
-                    || guard_blocks.last().unwrap().symbol_name != loc.symbol_name
-                {
+                if entered_call {
+                    entered_call = false;
+                    // For each new function we enter during the trace, create a new guard block.
+                    // The list of guard blocks is later added to the guard, enabling us to
+                    // recreate the stack frames for blackholing.
                     live_locals.push(HashSet::new());
                     guard_blocks.push(GuardBlock {
                         symbol_name: loc.symbol_name,
                         bb_idx: loc.bb_idx
                     });
                 } else {
-                    // Update the basic block index of the current guard block, so the guard
-                    // failure can later jump to the correct block when initialising the SIR
-                    // interpreter.
-                    guard_blocks.last_mut().unwrap().bb_idx = loc.bb_idx;
+                    // Update the basic block index of the current guard block, if there is one
+                    // (i.e. when we see a terminator that isn't a call, e.g. Goto, we update the
+                    // current guard block instead of creating a new one).
+                    if let Some(gblock) = guard_blocks.last_mut() {
+                        gblock.bb_idx = loc.bb_idx;
+                    }
                 }
 
                 // When converting the SIR trace into a TIR trace we alpha-rename the `Local`s from
@@ -201,9 +203,11 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                             if in_interp_step {
                                 panic!("recursion into interp_step detected");
                             }
+
                             // FIXME This means we add this call terminator to the statements, even
                             // though the rest of this block was skipped.
                             in_interp_step = true;
+                            entered_call = true;
                             continue;
                         }
                     }
@@ -246,6 +250,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                                 ignore = Some(callee_sym.to_string());
                                 term_stmts.push(Statement::Call(op.clone(), newargs, Some(ret_val)))
                             } else {
+                                entered_call = true;
                                 // Push the IPlace that the corresponding Return terminator should
                                 // assign the result of the call to.
                                 return_iplaces.push(ret_val.clone());
@@ -282,6 +287,8 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     if body.flags.contains(BodyFlags::INTERP_STEP) {
                         debug_assert!(in_interp_step);
                         in_interp_step = false;
+                        entered_call = false;
+                        guard_blocks.pop();
                         continue;
                     }
                     // After leaving an inlined function call we need to clean up any renaming
