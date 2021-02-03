@@ -11,3 +11,6 @@ mod ykcompile;
 
 #[cfg(test)]
 mod yktrace;
+
+#[cfg(test)]
+mod guardfailure;

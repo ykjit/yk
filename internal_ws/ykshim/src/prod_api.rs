@@ -106,3 +106,15 @@ unsafe extern "C" fn __ykshim_sirtrace_drop(trace: *mut SirTrace) {
 unsafe fn __ykshim_tirtrace_drop(tir_trace: *mut TirTrace) {
     Box::from_raw(tir_trace);
 }
+
+/// Start an initialised SIRInterpreter.
+#[no_mangle]
+unsafe extern "C" fn __ykshim_si_interpret(si: *mut ykbh::SIRInterpreter, icx: *mut u8) {
+    let si = &mut *si;
+    si.interpret(icx);
+}
+
+#[no_mangle]
+unsafe extern "C" fn __ykshim_sirinterpreter_drop(interp: *mut ykbh::SIRInterpreter) {
+    Box::from_raw(interp);
+}

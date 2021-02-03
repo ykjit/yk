@@ -82,7 +82,7 @@ fn simple() {
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.0, 13);
 }
 
@@ -278,7 +278,7 @@ fn function_call_simple() {
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.0, 13);
 }
 
@@ -306,7 +306,7 @@ fn function_call_nested() {
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.0, 20);
 }
 
@@ -372,7 +372,7 @@ fn exec_call_symbol_no_args() {
     let sir_trace = th.stop_tracing().unwrap();
     let mut args = IO(0);
     let ct = compile_trace(sir_trace).unwrap();
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(inputs.0, args.0);
 }
 
@@ -391,7 +391,7 @@ fn exec_call_symbol_with_arg() {
     let sir_trace = th.stop_tracing().unwrap();
     let mut args = IO(-56);
     let ct = compile_trace(sir_trace).unwrap();
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(inputs.0, args.0);
 }
 
@@ -410,7 +410,7 @@ fn exec_call_symbol_with_const_arg() {
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(inputs.0, args.0);
 }
 
@@ -428,7 +428,7 @@ fn exec_call_symbol_with_many_args() {
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(inputs.0, 21);
     assert_eq!(inputs.0, args.0);
 }
@@ -447,7 +447,7 @@ fn exec_call_symbol_with_many_args_some_ignored() {
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.0, 7);
     assert_eq!(args.0, inputs.0);
 }
@@ -475,7 +475,7 @@ fn ext_call_and_spilling() {
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(inputs.0, 7);
     assert_eq!(inputs.0, args.0);
 }
@@ -496,7 +496,7 @@ fn binop_add_simple() {
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(5, 2, 0);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args, IO(5, 2, 10));
 }
 
@@ -519,12 +519,12 @@ fn binop_add_overflow() {
 
     // Executing a trace with no overflow shouldn't fail any guards.
     let mut args = IO(10, 0);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args, IO(10, 11));
 
     // Executing a trace *with* overflow will fail a guard.
     let mut args = IO(255, 5);
-    assert!(!unsafe { ct.execute(&mut args) });
+    assert!(!unsafe { ct.execute(&mut args).is_null() });
 }
 
 #[test]
@@ -544,7 +544,7 @@ fn binop_other() {
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(5, 2, 0);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args, IO(5, 5, 10));
 }
 
@@ -567,7 +567,7 @@ fn ref_deref_simple() {
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.0, 10);
 }
 
@@ -590,7 +590,7 @@ fn ref_deref_double() {
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.0, 4);
 }
 
@@ -613,7 +613,7 @@ fn ref_deref_double_and_field() {
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.0, 5);
 }
 
@@ -642,7 +642,7 @@ fn ref_deref_stack() {
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.0, 10);
 }
 
@@ -670,7 +670,7 @@ fn deref_stack_to_register() {
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.0, 6);
 }
 
@@ -699,7 +699,7 @@ fn deref_register_to_stack() {
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args) }.is_null());
     assert_eq!(args.0, 6);
 }
 
@@ -738,7 +738,7 @@ fn do_not_trace() {
 
     let ct = compile_tir_trace(tir_trace).unwrap();
     let mut args = IO(1);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.0, 3);
 }
 
@@ -759,7 +759,7 @@ fn do_not_trace_stdlib() {
     let ct = compile_trace(sir_trace).unwrap();
     let mut argv: Vec<u64> = Vec::new();
     let mut args = IO(&mut argv);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(argv.len(), 1);
     assert_eq!(argv[0], 3);
 }
@@ -792,7 +792,7 @@ fn projection_chain() {
     let t2 = (1, 2, 3);
     let s2 = S { x: 5, y: 6 };
     let mut args = IO(t2, 0u8, s2, 0usize);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.0, (1usize, 2u8, 3usize));
     assert_eq!(args.1, 2u8);
     assert_eq!(args.2, S { x: 5, y: 6 });
@@ -816,7 +816,7 @@ fn projection_lhs() {
     let ct = compile_trace(sir_trace).unwrap();
     let t2 = (1u8, 2u8);
     let mut args = IO(t2, 3u8);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!((args.0).1, 3);
 }
 
@@ -840,7 +840,7 @@ fn array() {
     let ct = compile_trace(sir_trace).unwrap();
     let mut a2 = [3, 4, 5];
     let mut args = IO(&mut a2, 0);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.1, 4);
 }
 
@@ -864,7 +864,7 @@ fn array_nested() {
     let ct = compile_trace(sir_trace).unwrap();
     let mut a2 = [[3, 4, 5], [6, 7, 8]];
     let mut args = IO(&mut a2, 0);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.1, 8);
 }
 
@@ -889,7 +889,7 @@ fn array_nested_mad() {
     let ct = compile_trace(sir_trace).unwrap();
     let mut a2 = [S([3, 4, 5, 6]), S([7, 8, 9, 10]), S([11, 12, 13, 14])];
     let mut args = IO(&mut a2, 0);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.1, 13);
 }
 
@@ -910,7 +910,7 @@ fn rhs_struct_ref_field() {
     let ct = compile_trace(sir_trace).unwrap();
 
     let mut args = IO(10);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.0, 11);
 }
 
@@ -931,7 +931,7 @@ fn mut_lhs_struct_ref() {
     let ct = compile_trace(sir_trace).unwrap();
 
     let mut args = IO(10);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.0, 100);
 }
 
@@ -955,7 +955,7 @@ fn place_larger_than_reg() {
     assert_eq!(inputs.0, S(10, 10, 10));
 
     let mut args = IO(S(1, 1, 1));
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.0, S(10, 10, 10));
 }
 
@@ -976,7 +976,7 @@ fn array_slice_index() {
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(&a, 0);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.1, 3);
 }
 
@@ -1001,7 +1001,7 @@ fn trim_junk() {
     let ct = compile_trace(sir_trace).unwrap();
 
     let mut args = IO(0);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.0, 3);
 }
 
@@ -1032,7 +1032,7 @@ fn comparison() {
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0, false);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.1, true);
 }
 
@@ -1060,11 +1060,12 @@ fn guard() {
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0, 0);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.1, 9);
     // Execute trace with input that fails the guard.
     let mut args = IO(3, 0);
-    assert!(!unsafe { ct.execute(&mut args) });
+    let ptr = unsafe { ct.execute(&mut args) };
+    assert!(!ptr.is_null());
 }
 
 #[test]
@@ -1087,7 +1088,7 @@ fn matching() {
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(1);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.0, 2);
 }
 
@@ -1113,7 +1114,7 @@ fn cast() {
     assert_eq!(io.0, 1);
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0, 97);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.0, 1);
 }
 
@@ -1138,9 +1139,9 @@ fn vec_add() {
     let ct = compile_trace(sir_trace).unwrap();
     let cells = vec![1, 2, 3];
     let mut args = IO { ptr: 1, cells };
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.cells, vec![1, 3, 3]);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.cells, vec![1, 4, 3]);
 }
 
@@ -1171,6 +1172,6 @@ fn nested_do_not_trace() {
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0);
-    assert!(unsafe { ct.execute(&mut args) });
+    assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.0, 1);
 }

@@ -46,9 +46,11 @@ impl<'a, 'm> TirTrace<'a, 'm> {
         // popping from the stack).
         let mut return_iplaces: Vec<IPlace> = Vec::new();
 
-        let mut live_locals: HashSet<Local> = HashSet::new();
+        let mut live_locals: Vec<HashSet<Local>> = Vec::new();
+        let mut guard_blocks: Vec<GuardBlock> = Vec::new();
 
         let mut in_interp_step = false;
+        let mut entered_call = false;
         while let Some(loc) = itr.next() {
             let body = match sir.body(&loc.symbol_name) {
                 Some(b) => b,
@@ -92,6 +94,25 @@ impl<'a, 'm> TirTrace<'a, 'm> {
 
             // If we are not in the `interp_step` function, then ignore statements.
             if in_interp_step {
+                if entered_call {
+                    entered_call = false;
+                    // For each new function we enter during the trace, create a new guard block.
+                    // The list of guard blocks is later added to the guard, enabling us to
+                    // recreate the stack frames for blackholing.
+                    live_locals.push(HashSet::new());
+                    guard_blocks.push(GuardBlock {
+                        symbol_name: loc.symbol_name,
+                        bb_idx: loc.bb_idx
+                    });
+                } else {
+                    // Update the basic block index of the current guard block, if there is one
+                    // (i.e. when we see a terminator that isn't a call, e.g. Goto, we update the
+                    // current guard block instead of creating a new one).
+                    if let Some(gblock) = guard_blocks.last_mut() {
+                        gblock.bb_idx = loc.bb_idx;
+                    }
+                }
+
                 // When converting the SIR trace into a TIR trace we alpha-rename the `Local`s from
                 // inlined functions by adding an offset to each. This offset is derived from the
                 // number of assigned variables in the functions outer context. For example, if a
@@ -139,12 +160,12 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                         ),
                         Statement::StorageLive(local) => {
                             let l = rnm.rename_local(local, &body);
-                            live_locals.insert(l);
+                            live_locals.last_mut().unwrap().insert(l);
                             Statement::StorageLive(l)
                         }
                         Statement::StorageDead(local) => {
                             let l = rnm.rename_local(local, &body);
-                            live_locals.remove(&l);
+                            live_locals.last_mut().unwrap().remove(&l);
                             Statement::StorageDead(l)
                         }
                         // The following statements are specific to TIR and cannot appear in SIR.
@@ -182,7 +203,11 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                             if in_interp_step {
                                 panic!("recursion into interp_step detected");
                             }
+
+                            // FIXME This means we add this call terminator to the statements, even
+                            // though the rest of this block was skipped.
                             in_interp_step = true;
+                            entered_call = true;
                             continue;
                         }
                     }
@@ -225,6 +250,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                                 ignore = Some(callee_sym.to_string());
                                 term_stmts.push(Statement::Call(op.clone(), newargs, Some(ret_val)))
                             } else {
+                                entered_call = true;
                                 // Push the IPlace that the corresponding Return terminator should
                                 // assign the result of the call to.
                                 return_iplaces.push(ret_val.clone());
@@ -261,6 +287,8 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     if body.flags.contains(BodyFlags::INTERP_STEP) {
                         debug_assert!(in_interp_step);
                         in_interp_step = false;
+                        entered_call = false;
+                        guard_blocks.pop();
                         continue;
                     }
                     // After leaving an inlined function call we need to clean up any renaming
@@ -313,10 +341,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                         Some(idx) => Some(Guard {
                             val: rnm.rename_iplace(discr, &body),
                             kind: GuardKind::Integer(values[idx]),
-                            block: GuardBlock {
-                                symbol_name: loc.symbol_name,
-                                bb_idx: loc.bb_idx
-                            },
+                            block: Vec::new(),
                             live_locals: Vec::new()
                         }),
                         None => {
@@ -324,10 +349,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                             Some(Guard {
                                 val: rnm.rename_iplace(discr, &body),
                                 kind: GuardKind::OtherInteger(values.iter().cloned().collect()),
-                                block: GuardBlock {
-                                    symbol_name: loc.symbol_name,
-                                    bb_idx: loc.bb_idx
-                                },
+                                block: Vec::new(),
                                 live_locals: Vec::new()
                             })
                         }
@@ -340,10 +362,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                 } => Some(Guard {
                     val: rnm.rename_iplace(cond, &body),
                     kind: GuardKind::Boolean(*expected),
-                    block: GuardBlock {
-                        symbol_name: loc.symbol_name,
-                        bb_idx: loc.bb_idx
-                    },
+                    block: Vec::new(),
                     live_locals: Vec::new()
                 }),
                 Terminator::TraceDebugCall { ref msg, .. } => {
@@ -354,12 +373,19 @@ impl<'a, 'm> TirTrace<'a, 'm> {
             };
 
             if let Some(mut g) = guard {
-                for local in &live_locals {
-                    let sirlocal = rnm.sir_map.get(local).unwrap();
-                    g.live_locals.push(LiveLocal {
-                        tir: *local,
-                        sir: *sirlocal
-                    });
+                for gb in &guard_blocks {
+                    g.block.push(gb.clone());
+                }
+                for ll in &live_locals {
+                    let mut v = Vec::new();
+                    for local in ll {
+                        let sirlocal = rnm.sir_map.get(local).unwrap();
+                        v.push(LiveLocal {
+                            tir: *local,
+                            sir: *sirlocal
+                        });
+                    }
+                    g.live_locals.push(v);
                 }
                 let op = TirOp::Guard(g);
                 ops.push(op);
@@ -507,7 +533,7 @@ impl Display for TirTrace<'_, '_> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GuardBlock {
     pub symbol_name: &'static str,
     pub bb_idx: ykpack::BasicBlockIndex
@@ -522,8 +548,8 @@ impl Display for GuardBlock {
 /// A mapping from a TIR local to its equivalent in SIR.
 #[derive(Debug)]
 pub struct LiveLocal {
-    tir: Local,
-    sir: Local
+    pub tir: Local,
+    pub sir: Local
 }
 
 /// A guard states the assumptions from its position in a trace onward.
@@ -535,27 +561,28 @@ pub struct Guard {
     pub kind: GuardKind,
     /// The block whose terminator was the basis for this guard. This is here so that, in the event
     /// that the guard fails, we know where to start the blackhole interpreter.
-    pub block: GuardBlock,
+    pub block: Vec<GuardBlock>,
     /// The TIR locals (and their SIR equivalent) that are live at the time of the guard. This is
     /// needed so that we can initialise the blackhole interpreter with the correct state.
-    pub live_locals: Vec<LiveLocal>
+    pub live_locals: Vec<Vec<LiveLocal>>
 }
 
 impl fmt::Display for Guard {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut live = String::from("");
-        write!(
-            live,
-            "{}",
-            self.live_locals
-                .iter()
-                .map(|ll| ll.tir.to_string())
-                .collect::<Vec<String>>()
-                .join(", ")
-        )?;
+        for ll in &self.live_locals {
+            write!(
+                live,
+                "[{}]",
+                ll.iter()
+                    .map(|l| l.tir.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            )?;
+        }
         write!(
             f,
-            "guard({}, {}, {}, [{}])",
+            "guard({}, {}, {:?}, [{}])",
             self.val, self.kind, self.block, live
         )
     }

@@ -112,12 +112,10 @@ unsafe extern "C" fn __ykshimtest_tracecompiler_find_sym(sym: *mut c_char) -> *m
 /// Interpret a SIR body with the specified interpreter context.
 #[no_mangle]
 unsafe extern "C" fn __ykshimtest_interpret_body(body_name: *mut c_char, icx: *mut u8) {
-    let body = SIR
-        .body(CString::from_raw(body_name).to_str().unwrap())
-        .unwrap();
-    let mut si = SIRInterpreter::new(&*body);
+    let fname = CString::from_raw(body_name).to_str().unwrap().to_string();
+    let mut si = SIRInterpreter::new(fname);
     si.set_trace_inputs(icx);
-    si.interpret(body);
+    si._interpret();
 }
 
 /// Returns the size of the register allocators register pool.
