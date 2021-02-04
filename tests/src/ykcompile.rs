@@ -135,7 +135,7 @@ fn reg_alloc() {
 #[test]
 fn reg_alloc_spills() {
     let types = TestTypes::new();
-    let num_regs = reg_pool_size() + 1; // Plus one for TIO_REG.
+    let num_regs = reg_pool_size() + 1; // Plus one for ICTX_REG.
     let num_spills = 16;
     let num_decls = num_regs + num_spills;
     let mut local_decls = HashMap::new();
@@ -164,7 +164,7 @@ fn reg_alloc_spills() {
 #[test]
 fn reg_alloc_spills_and_frees() {
     let types = TestTypes::new();
-    let num_regs = reg_pool_size() + 1; // Plus one for TIO_REG.
+    let num_regs = reg_pool_size() + 1; // Plus one for ICTX_REG.
     let num_decls = num_regs + 4;
     let mut local_decls = HashMap::new();
     for i in 0..num_decls {

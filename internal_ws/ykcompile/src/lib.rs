@@ -54,7 +54,7 @@ lazy_static! {
 
     // The interpreter context is always allocated to this reserved register.
     // This register should not appear in REG_POOL.
-    static ref TIO_REG: u8 = RDI.code();
+    static ref ICTX_REG: u8 = RDI.code();
 
     static ref TEMP_LOC: Location = Location::Reg(*TEMP_REG);
     static ref PTR_SIZE: u64 = u64::try_from(mem::size_of::<usize>()).unwrap();
@@ -520,8 +520,8 @@ impl TraceCompiler {
     /// performs one.
     pub fn local_to_location(&mut self, l: Local) -> Location {
         if l == INTERP_STEP_ARG {
-            // There is a register set aside for the trace context.
-            Location::Reg(*TIO_REG)
+            // There is a register set aside for the interpreter context.
+            Location::Reg(*ICTX_REG)
         } else if let Some(location) = self.variable_location_map.get(&l) {
             // We already have a location for this local.
             location.clone()
@@ -579,10 +579,10 @@ impl TraceCompiler {
             Location::Reg(reg) => {
                 // This local is currently stored in a register, so free the register.
                 //
-                // Note that if we are marking the reserved TIO_REG free then this actually adds a
+                // Note that if we are marking the reserved ICTX_REG free then this actually adds a
                 // new register key to the map (as opposed to marking a pre-existing entry free).
-                // This is safe since if we are freeing TIO_REG, then the trace context local must
-                // not be used for the remainder of the trace.
+                // This is safe since if we are freeing ICTX_REG, then the interpreter context
+                // local must not be used for the remainder of the trace.
                 self.register_content_map.insert(*reg, RegAlloc::Free);
             }
             Location::Mem { .. } | Location::Indirect { .. } => {}
