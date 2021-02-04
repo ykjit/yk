@@ -52,7 +52,7 @@ lazy_static! {
                                      R10.code(), RBX.code(), R12.code(), R13.code(), R14.code(),
                                      R15.code()];
 
-    // The trace inputs/outputs are always allocated to this reserved register.
+    // The interpreter context is always allocated to this reserved register.
     // This register should not appear in REG_POOL.
     static ref TIO_REG: u8 = RDI.code();
 
@@ -520,7 +520,7 @@ impl TraceCompiler {
     /// performs one.
     pub fn local_to_location(&mut self, l: Local) -> Location {
         if l == INTERP_STEP_ARG {
-            // There is a register set aside for trace inputs.
+            // There is a register set aside for the trace context.
             Location::Reg(*TIO_REG)
         } else if let Some(location) = self.variable_location_map.get(&l) {
             // We already have a location for this local.
@@ -581,7 +581,7 @@ impl TraceCompiler {
                 //
                 // Note that if we are marking the reserved TIO_REG free then this actually adds a
                 // new register key to the map (as opposed to marking a pre-existing entry free).
-                // This is safe since if we are freeing TIO_REG, then the trace inputs local must
+                // This is safe since if we are freeing TIO_REG, then the trace context local must
                 // not be used for the remainder of the trace.
                 self.register_content_map.insert(*reg, RegAlloc::Free);
             }

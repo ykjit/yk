@@ -111,10 +111,10 @@ unsafe extern "C" fn __ykshimtest_tracecompiler_find_sym(sym: *mut c_char) -> *m
 
 /// Interpret a SIR body with the specified interpreter context.
 #[no_mangle]
-unsafe extern "C" fn __ykshimtest_interpret_body(body_name: *mut c_char, icx: *mut u8) {
+unsafe extern "C" fn __ykshimtest_interpret_body(body_name: *mut c_char, ctx: *mut u8) {
     let fname = CString::from_raw(body_name).to_str().unwrap().to_string();
     let mut si = SIRInterpreter::new(fname);
-    si.set_trace_inputs(icx);
+    si.set_interp_ctx(ctx);
     si._interpret();
 }
 

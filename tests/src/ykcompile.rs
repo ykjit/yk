@@ -212,9 +212,9 @@ fn reg_alloc_always_on_stack() {
     let types = TestTypes::new();
     let mut local_decls = HashMap::new();
 
-    // In a TIR trace, the first two decls are a unit and the trace inputs, which are handled
-    // specially. We populate their slots so that we can acquire regular locals with no special
-    // casing.
+    // In a TIR trace, the first two decls are a unit and the interpreter context, which are
+    // handled specially. We populate their slots so that we can acquire regular locals with no
+    // special casing.
     assert!(reg_pool_size() >= 3); // Or we'd spill regardless.
     for i in 0..=1 {
         local_decls.insert(
@@ -366,14 +366,14 @@ fn exec_call_symbol_no_args() {
         io.0 = unsafe { getuid() };
     }
 
-    let mut inputs = IO(0);
+    let mut ctx = IO(0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_step(&mut inputs);
+    interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let mut args = IO(0);
     let ct = compile_trace(sir_trace).unwrap();
     assert!(unsafe { ct.execute(&mut args).is_null() });
-    assert_eq!(inputs.0, args.0);
+    assert_eq!(ctx.0, args.0);
 }
 
 /// Execute a trace which calls a symbol accepting arguments and returns a value.
@@ -385,14 +385,14 @@ fn exec_call_symbol_with_arg() {
         io.0 = unsafe { abs(io.0) };
     }
 
-    let mut inputs = IO(-56);
+    let mut ctx = IO(-56);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_step(&mut inputs);
+    interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let mut args = IO(-56);
     let ct = compile_trace(sir_trace).unwrap();
     assert!(unsafe { ct.execute(&mut args).is_null() });
-    assert_eq!(inputs.0, args.0);
+    assert_eq!(ctx.0, args.0);
 }
 
 /// The same as `exec_call_symbol_args_with_rv`, just using a constant argument.
@@ -404,14 +404,14 @@ fn exec_call_symbol_with_const_arg() {
         io.0 = unsafe { abs(-123) };
     }
 
-    let mut inputs = IO(0);
+    let mut ctx = IO(0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_step(&mut inputs);
+    interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0);
     assert!(unsafe { ct.execute(&mut args).is_null() });
-    assert_eq!(inputs.0, args.0);
+    assert_eq!(ctx.0, args.0);
 }
 
 #[test]
@@ -422,15 +422,15 @@ fn exec_call_symbol_with_many_args() {
         io.0 = unsafe { add6(1, 2, 3, 4, 5, 6) };
     }
 
-    let mut inputs = IO(0);
+    let mut ctx = IO(0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_step(&mut inputs);
+    interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0);
     assert!(unsafe { ct.execute(&mut args).is_null() });
-    assert_eq!(inputs.0, 21);
-    assert_eq!(inputs.0, args.0);
+    assert_eq!(ctx.0, 21);
+    assert_eq!(ctx.0, args.0);
 }
 
 #[test]
@@ -441,15 +441,15 @@ fn exec_call_symbol_with_many_args_some_ignored() {
         io.0 = unsafe { add_some(1, 2, 3, 4, 5) };
     }
 
-    let mut inputs = IO(0);
+    let mut ctx = IO(0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_step(&mut inputs);
+    interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0);
     assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.0, 7);
-    assert_eq!(args.0, inputs.0);
+    assert_eq!(args.0, ctx.0);
 }
 
 #[test]
@@ -469,15 +469,15 @@ fn ext_call_and_spilling() {
         io.0 = expect;
     }
 
-    let mut inputs = IO(0);
+    let mut ctx = IO(0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    ext_call(&mut inputs);
+    ext_call(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0);
     assert!(unsafe { ct.execute(&mut args).is_null() });
-    assert_eq!(inputs.0, 7);
-    assert_eq!(inputs.0, args.0);
+    assert_eq!(ctx.0, 7);
+    assert_eq!(ctx.0, args.0);
 }
 
 #[test]
@@ -490,9 +490,9 @@ fn binop_add_simple() {
         io.2 = io.0 + io.1 + 3;
     }
 
-    let mut inputs = IO(5, 2, 0);
+    let mut ctx = IO(5, 2, 0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_stepx(&mut inputs);
+    interp_stepx(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(5, 2, 0);
@@ -510,11 +510,11 @@ fn binop_add_overflow() {
         io.1 = io.0 + 1;
     }
 
-    let mut inputs = IO(254, 0);
+    let mut ctx = IO(254, 0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_stepx(&mut inputs);
+    interp_stepx(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
-    assert_eq!(inputs.1, 255);
+    assert_eq!(ctx.1, 255);
     let ct = compile_trace(sir_trace).unwrap();
 
     // Executing a trace with no overflow shouldn't fail any guards.
@@ -538,9 +538,9 @@ fn binop_other() {
         io.1 = io.2 / 2;
     }
 
-    let mut inputs = IO(5, 2, 0);
+    let mut ctx = IO(5, 2, 0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_stepx(&mut inputs);
+    interp_stepx(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(5, 2, 0);
@@ -561,9 +561,9 @@ fn ref_deref_simple() {
         io.0 = *y;
     }
 
-    let mut inputs = IO(0);
+    let mut ctx = IO(0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_step(&mut inputs);
+    interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0);
@@ -584,9 +584,9 @@ fn ref_deref_double() {
         io.0 = x;
     }
 
-    let mut inputs = IO(0);
+    let mut ctx = IO(0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_step(&mut inputs);
+    interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0);
@@ -607,9 +607,9 @@ fn ref_deref_double_and_field() {
         io.0 = *y.1;
     }
 
-    let mut inputs = IO(0);
+    let mut ctx = IO(0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_step(&mut inputs);
+    interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0);
@@ -636,9 +636,9 @@ fn ref_deref_stack() {
         io.0 = z
     }
 
-    let mut inputs = IO(0);
+    let mut ctx = IO(0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_step(&mut inputs);
+    interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0);
@@ -664,9 +664,9 @@ fn deref_stack_to_register() {
     }
 
     struct IO(u64);
-    let mut inputs = IO(0);
+    let mut ctx = IO(0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_step(&mut inputs);
+    interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0);
@@ -693,9 +693,9 @@ fn deref_register_to_stack() {
     }
 
     // This test dereferences a variable that lives on the stack and stores it in a register.
-    let mut inputs = IO(0);
+    let mut ctx = IO(0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_step(&mut inputs);
+    interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0);
@@ -719,9 +719,9 @@ fn do_not_trace() {
         io.0 = dont_trace_this(io.0);
     }
 
-    let mut inputs = IO(1);
+    let mut ctx = IO(1);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_step(&mut inputs);
+    interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let tir_trace = TirTrace::new(&sir_trace);
 
@@ -752,9 +752,9 @@ fn do_not_trace_stdlib() {
     }
 
     let mut vec: Vec<u64> = Vec::new();
-    let mut inputs = IO(&mut vec);
+    let mut ctx = IO(&mut vec);
     let th = start_tracing(TracingKind::HardwareTracing);
-    dont_trace_stdlib(&mut inputs);
+    dont_trace_stdlib(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut argv: Vec<u64> = Vec::new();
@@ -783,9 +783,9 @@ fn projection_chain() {
 
     let s = S { x: 5, y: 6 };
     let t = (1, 2, 3);
-    let mut inputs = IO(t, 0u8, s, 0usize);
+    let mut ctx = IO(t, 0u8, s, 0usize);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_step(&mut inputs);
+    interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
 
@@ -809,9 +809,9 @@ fn projection_lhs() {
     }
 
     let t = (1u8, 2u8);
-    let mut inputs = IO(t, 3u8);
+    let mut ctx = IO(t, 3u8);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_step(&mut inputs);
+    interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let t2 = (1u8, 2u8);
@@ -832,11 +832,11 @@ fn array() {
     }
 
     let mut a = [3, 4, 5];
-    let mut inputs = IO(&mut a, 0);
+    let mut ctx = IO(&mut a, 0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    array(&mut inputs);
+    array(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
-    assert_eq!(inputs.1, 4);
+    assert_eq!(ctx.1, 4);
     let ct = compile_trace(sir_trace).unwrap();
     let mut a2 = [3, 4, 5];
     let mut args = IO(&mut a2, 0);
@@ -856,11 +856,11 @@ fn array_nested() {
     }
 
     let mut a = [[3, 4, 5], [6, 7, 8]];
-    let mut inputs = IO(&mut a, 0);
+    let mut ctx = IO(&mut a, 0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    array(&mut inputs);
+    array(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
-    assert_eq!(inputs.1, 8);
+    assert_eq!(ctx.1, 8);
     let ct = compile_trace(sir_trace).unwrap();
     let mut a2 = [[3, 4, 5], [6, 7, 8]];
     let mut args = IO(&mut a2, 0);
@@ -881,11 +881,11 @@ fn array_nested_mad() {
     }
 
     let mut a = [S([3, 4, 5, 6]), S([7, 8, 9, 10]), S([11, 12, 13, 14])];
-    let mut inputs = IO(&mut a, 0);
+    let mut ctx = IO(&mut a, 0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    array(&mut inputs);
+    array(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
-    assert_eq!(inputs.1, 13);
+    assert_eq!(ctx.1, 13);
     let ct = compile_trace(sir_trace).unwrap();
     let mut a2 = [S([3, 4, 5, 6]), S([7, 8, 9, 10]), S([11, 12, 13, 14])];
     let mut args = IO(&mut a2, 0);
@@ -903,9 +903,9 @@ fn rhs_struct_ref_field() {
         io.0 = io.0 + 1
     }
 
-    let mut inputs = IO(0);
+    let mut ctx = IO(0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    add1(&mut inputs);
+    add1(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
 
@@ -924,9 +924,9 @@ fn mut_lhs_struct_ref() {
         io.0 = 100;
     }
 
-    let mut inputs = IO(0);
+    let mut ctx = IO(0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    set100(&mut inputs);
+    set100(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
 
@@ -947,12 +947,12 @@ fn place_larger_than_reg() {
         io.0 = S(10, 10, 10);
     }
 
-    let mut inputs = IO(S(0, 0, 0));
+    let mut ctx = IO(S(0, 0, 0));
     let th = start_tracing(TracingKind::HardwareTracing);
-    ten(&mut inputs);
+    ten(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
-    assert_eq!(inputs.0, S(10, 10, 10));
+    assert_eq!(ctx.0, S(10, 10, 10));
 
     let mut args = IO(S(1, 1, 1));
     assert!(unsafe { ct.execute(&mut args).is_null() });
@@ -970,9 +970,9 @@ fn array_slice_index() {
     }
 
     let a = [1, 2, 3];
-    let mut inputs = IO(&a, 0);
+    let mut ctx = IO(&a, 0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_step(&mut inputs);
+    interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(&a, 0);
@@ -990,13 +990,13 @@ fn trim_junk() {
         io.0 += 1;
     }
 
-    let mut inputs = IO(0);
+    let mut ctx = IO(0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_step(&mut inputs);
-    inputs.0 = 0; // Should get trimmed.
-    interp_step(&mut inputs);
-    inputs.0 = 0; // Should get trimmed
-    interp_step(&mut inputs);
+    interp_step(&mut ctx);
+    ctx.0 = 0; // Should get trimmed.
+    interp_step(&mut ctx);
+    ctx.0 = 0; // Should get trimmed
+    interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
 
@@ -1026,9 +1026,9 @@ fn comparison() {
         io.1 = x;
     }
 
-    let mut inputs = IO(0, false);
+    let mut ctx = IO(0, false);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_step(&mut inputs);
+    interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0, false);
@@ -1054,15 +1054,15 @@ fn guard() {
         io.1 = x;
     }
 
-    let mut inputs = IO(std::hint::black_box(|i| i)(0), 0);
+    let mut ctx = IO(std::hint::black_box(|i| i)(0), 0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_step(&mut inputs);
+    interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0, 0);
     assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.1, 9);
-    // Execute trace with input that fails the guard.
+    // Execute the trace with the context that caused the guard to fail.
     let mut args = IO(3, 0);
     let ptr = unsafe { ct.execute(&mut args) };
     assert!(!ptr.is_null());
@@ -1166,9 +1166,9 @@ fn nested_do_not_trace() {
         io.0 = call_one();
     }
 
-    let mut inputs = IO(0);
+    let mut ctx = IO(0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_step(&mut inputs);
+    interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0);

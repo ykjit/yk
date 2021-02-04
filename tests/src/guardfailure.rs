@@ -18,15 +18,15 @@ fn simple() {
         io.1 = x;
     }
 
-    let mut inputs = IO(std::hint::black_box(|i| i)(0), 0);
+    let mut ctx = IO(std::hint::black_box(|i| i)(0), 0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_step(&mut inputs);
+    interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0, 0);
     assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.1, 9);
-    // Execute trace with input that fails the guard.
+    // Execute the trace with the context that caused the guard to fail.
     let mut args = IO(3, 0);
     let ptr = unsafe { ct.execute(&mut args) };
     assert!(!ptr.is_null());
@@ -60,15 +60,15 @@ fn recursion() {
         io.1 = x;
     }
 
-    let mut inputs = IO(std::hint::black_box(|i| i)(0), 0);
+    let mut ctx = IO(std::hint::black_box(|i| i)(0), 0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_step(&mut inputs);
+    interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(0, 0);
     assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.1, 1);
-    // Execute trace with input that fails the guard.
+    // Execute the trace with the context that caused the guard to fail.
     let mut args = IO(0, 1);
     let ptr = unsafe { ct.execute(&mut args) };
     assert!(!ptr.is_null());
@@ -98,15 +98,15 @@ fn recursion2() {
         io.1 = x;
     }
 
-    let mut inputs = IO(7, 0);
+    let mut ctx = IO(7, 0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_step(&mut inputs);
+    interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
     let mut args = IO(7, 1);
     assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.1, 1);
-    // Execute trace with input that fails the guard.
+    // Execute the trace with the context that caused the guard to fail.
     let mut args = IO(1, 0);
     let ptr = unsafe { ct.execute(&mut args) };
     assert!(!ptr.is_null());

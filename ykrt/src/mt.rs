@@ -179,7 +179,7 @@ impl MTThread {
         &mut self,
         loc: Option<&Location<I>>,
         step_fn: S,
-        inputs: &mut I,
+        ctx: &mut I,
     ) where
         S: Fn(&mut I),
     {
@@ -187,27 +187,27 @@ impl MTThread {
         // this thread's tracer.
         if let Some(loc) = loc {
             if let Some(func) = self.transition_location::<I>(loc) {
-                let ptr = self.exec_trace(func, inputs);
+                let ptr = self.exec_trace(func, ctx);
                 if ptr.is_null() {
                     // Trace succesfully executed.
                     return;
                 } else {
                     unsafe {
                         let mut si = SIRInterpreter(ptr);
-                        si.interpret(inputs as *mut _ as *mut u8);
+                        si.interpret(ctx as *mut _ as *mut u8);
                     }
                 }
             }
         }
-        step_fn(inputs)
+        step_fn(ctx)
     }
 
     fn exec_trace<I>(
         &mut self,
         func: fn(&mut I) -> *mut RawSIRInterpreter,
-        inputs: &mut I,
+        ctx: &mut I,
     ) -> *mut RawSIRInterpreter {
-        func(inputs)
+        func(ctx)
     }
 
     /// `Location`s represent a statemachine: this function transitions to the next state (which
@@ -471,7 +471,7 @@ mod tests {
     struct DummyIO {}
 
     #[interp_step]
-    fn dummy_step(_inputs: &mut DummyIO) {}
+    fn dummy_step(_: &mut DummyIO) {}
 
     #[test]
     fn threshold_passed() {
