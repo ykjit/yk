@@ -468,25 +468,25 @@ mod tests {
     use self::test::{black_box, Bencher};
     use super::*;
 
-    struct DummyIO {}
+    struct EmptyInterpCtx {}
 
     #[interp_step]
-    fn dummy_step(_: &mut DummyIO) {}
+    fn empty_step(_: &mut EmptyInterpCtx) {}
 
     #[test]
     fn threshold_passed() {
         let hot_thrsh = 1500;
         let mut mtt = MTBuilder::new().hot_threshold(hot_thrsh).init();
         let lp = Location::new();
-        let mut io = DummyIO {};
+        let mut io = EmptyInterpCtx {};
         for i in 0..hot_thrsh {
-            mtt.control_point(Some(&lp), dummy_step, &mut io);
+            mtt.control_point(Some(&lp), empty_step, &mut io);
             assert_eq!(lp.load(Ordering::Relaxed), State::phase_counting(i + 1));
         }
         assert_eq!(lp.load(Ordering::Relaxed).phase(), PHASE_COUNTING);
-        mtt.control_point(Some(&lp), dummy_step, &mut io);
+        mtt.control_point(Some(&lp), empty_step, &mut io);
         assert_eq!(lp.load(Ordering::Relaxed).phase(), PHASE_TRACING);
-        mtt.control_point(Some(&lp), dummy_step, &mut io);
+        mtt.control_point(Some(&lp), empty_step, &mut io);
         let fs = lp.load(Ordering::Relaxed).phase();
         assert!(fs == PHASE_COMPILING || fs == PHASE_COMPILED);
     }
@@ -496,13 +496,13 @@ mod tests {
         let hot_thrsh = 5;
         let mut mtt = MTBuilder::new().hot_threshold(hot_thrsh).init();
         let lp = Location::new();
-        let mut io = DummyIO {};
+        let mut io = EmptyInterpCtx {};
         for i in 0..hot_thrsh {
-            mtt.control_point(Some(&lp), dummy_step, &mut io);
+            mtt.control_point(Some(&lp), empty_step, &mut io);
             assert_eq!(lp.load(Ordering::Relaxed), State::phase_counting(i + 1));
         }
         assert_eq!(lp.load(Ordering::Relaxed).phase(), PHASE_COUNTING);
-        mtt.control_point(Some(&lp), dummy_step, &mut io);
+        mtt.control_point(Some(&lp), empty_step, &mut io);
         assert_eq!(lp.load(Ordering::Relaxed).phase(), PHASE_TRACING);
     }
 
@@ -517,17 +517,17 @@ mod tests {
             let t = mtt
                 .mt()
                 .spawn(move |mut mtt| {
-                    let mut io = DummyIO {};
-                    mtt.control_point(Some(&loc), dummy_step, &mut io);
+                    let mut io = EmptyInterpCtx {};
+                    mtt.control_point(Some(&loc), empty_step, &mut io);
                     let c1 = loc.load(Ordering::Relaxed);
                     assert_eq!(c1.phase(), PHASE_COUNTING);
-                    mtt.control_point(Some(&loc), dummy_step, &mut io);
+                    mtt.control_point(Some(&loc), empty_step, &mut io);
                     let c2 = loc.load(Ordering::Relaxed);
                     assert_eq!(c2.phase(), PHASE_COUNTING);
-                    mtt.control_point(Some(&loc), dummy_step, &mut io);
+                    mtt.control_point(Some(&loc), empty_step, &mut io);
                     let c3 = loc.load(Ordering::Relaxed);
                     assert_eq!(c3.phase(), PHASE_COUNTING);
-                    mtt.control_point(Some(&loc), dummy_step, &mut io);
+                    mtt.control_point(Some(&loc), empty_step, &mut io);
                     let c4 = loc.load(Ordering::Relaxed);
                     assert_eq!(c4.phase(), PHASE_COUNTING);
                     assert!(c4.number_data() > c3.number_data());
@@ -541,15 +541,15 @@ mod tests {
             t.join().unwrap();
         }
         {
-            let mut io = DummyIO {};
-            mtt.control_point(Some(&loc), dummy_step, &mut io);
+            let mut io = EmptyInterpCtx {};
+            mtt.control_point(Some(&loc), empty_step, &mut io);
             assert_eq!(loc.load(Ordering::Relaxed).phase(), PHASE_TRACING);
-            mtt.control_point(Some(&loc), dummy_step, &mut io);
-            mtt.control_point(Some(&loc), dummy_step, &mut io);
+            mtt.control_point(Some(&loc), empty_step, &mut io);
+            mtt.control_point(Some(&loc), empty_step, &mut io);
 
             while loc.load(Ordering::Relaxed).phase() == PHASE_COMPILING {
                 yield_now();
-                mtt.control_point(Some(&loc), dummy_step, &mut io);
+                mtt.control_point(Some(&loc), empty_step, &mut io);
             }
             assert_eq!(loc.load(Ordering::Relaxed).phase(), PHASE_COMPILED);
         }
@@ -568,14 +568,14 @@ mod tests {
         // is the only place a loop can start.
         let locs = vec![Some(Location::new()), None, None];
 
-        struct IO {
+        struct InterpCtx {
             prog: Vec<u8>,
             pc: usize,
             count: u64,
         }
 
         #[interp_step]
-        fn simple_interp_step(tio: &mut IO) {
+        fn simple_interp_step(tio: &mut InterpCtx) {
             match tio.prog[tio.pc] {
                 INC => {
                     tio.pc += 1;
@@ -586,7 +586,7 @@ mod tests {
             }
         }
 
-        let mut tio = IO {
+        let mut tio = InterpCtx {
             prog,
             pc: 0,
             count: 0,
@@ -637,14 +637,14 @@ mod tests {
         const RESTART: u8 = 1;
         let prog = Arc::new(vec![INC, INC, RESTART]);
 
-        struct IO {
+        struct InterpCtx {
             prog: Arc<Vec<u8>>,
             count: u64,
             pc: usize,
         }
 
         #[interp_step]
-        fn simple_interp_step(tio: &mut IO) {
+        fn simple_interp_step(tio: &mut InterpCtx) {
             match tio.prog[tio.pc] {
                 INC => {
                     tio.pc += 1;
@@ -663,7 +663,7 @@ mod tests {
             for _ in 0..NUM_THREADS {
                 let locs = Arc::clone(&locs);
                 let prog = Arc::clone(&prog);
-                let mut tio = IO {
+                let mut tio = InterpCtx {
                     prog,
                     count: 0,
                     pc: 0,
@@ -680,7 +680,7 @@ mod tests {
                 thrs.push(t);
             }
 
-            let mut tio = IO {
+            let mut tio = InterpCtx {
                 prog: Arc::clone(&prog),
                 count: 0,
                 pc: 0,
@@ -723,14 +723,14 @@ mod tests {
         const RESTART: u8 = 1;
         let prog = Arc::new(vec![INC, INC, RESTART]);
 
-        struct IO {
+        struct InterpCtx {
             prog: Arc<Vec<u8>>,
             count: u64,
             pc: usize,
         }
 
         #[interp_step]
-        fn simple_interp_step(tio: &mut IO) {
+        fn simple_interp_step(tio: &mut InterpCtx) {
             match tio.prog[tio.pc] {
                 INC => {
                     tio.pc += 1;
@@ -742,7 +742,7 @@ mod tests {
         }
 
         let locs = Arc::new(vec![Some(Location::new()), None, None]);
-        let mut tio = IO {
+        let mut tio = InterpCtx {
             prog: Arc::clone(&prog),
             count: 0,
             pc: 0,
@@ -764,7 +764,7 @@ mod tests {
         let loc = locs[0].as_ref();
         let tag = loc.unwrap().load(Ordering::Relaxed).phase();
         assert_eq!(tag, PHASE_TRACING);
-        let mut tio = IO {
+        let mut tio = InterpCtx {
             prog: Arc::clone(&prog),
             count: 0,
             pc: 0,
@@ -784,14 +784,14 @@ mod tests {
         const RESTART: u8 = 1;
         let prog = Arc::new(vec![INC, INC, RESTART]);
 
-        struct IO {
+        struct InterpCtx {
             prog: Arc<Vec<u8>>,
             count: u64,
             pc: usize,
         }
 
         #[interp_step]
-        fn simple_interp_step(tio: &mut IO) {
+        fn simple_interp_step(tio: &mut InterpCtx) {
             match tio.prog[tio.pc] {
                 INC => {
                     tio.pc += 1;
@@ -803,7 +803,7 @@ mod tests {
         }
 
         let locs = Arc::new(vec![Some(Location::new()), None, None]);
-        let mut tio = IO {
+        let mut tio = InterpCtx {
             prog: Arc::clone(&prog),
             count: 0,
             pc: 0,
@@ -834,10 +834,10 @@ mod tests {
     fn bench_single_threaded_control_point(b: &mut Bencher) {
         let mut mtt = MTBuilder::new().init();
         let lp = Location::new();
-        let mut io = DummyIO {};
+        let mut io = EmptyInterpCtx {};
         b.iter(|| {
             for _ in 0..100000 {
-                black_box(mtt.control_point(Some(&lp), dummy_step, &mut io));
+                black_box(mtt.control_point(Some(&lp), empty_step, &mut io));
             }
         });
     }
@@ -854,8 +854,8 @@ mod tests {
                     .mt()
                     .spawn(move |mut mtt| {
                         for _ in 0..100 {
-                            let mut io = DummyIO {};
-                            black_box(mtt.control_point(Some(&loc), dummy_step, &mut io));
+                            let mut io = EmptyInterpCtx {};
+                            black_box(mtt.control_point(Some(&loc), empty_step, &mut io));
                         }
                     })
                     .unwrap();
@@ -876,14 +876,14 @@ mod tests {
         let prog = vec![INC, INC, RESTART];
         let locs = vec![Some(Location::new()), None, None];
 
-        struct IO {
+        struct InterpCtx {
             prog: Vec<u8>,
             pc: usize,
             run: u8,
         }
 
         #[interp_step]
-        fn simple_interp_step(tio: &mut IO) {
+        fn simple_interp_step(tio: &mut InterpCtx) {
             match tio.prog[tio.pc] {
                 INC => {
                     tio.pc += 1;
@@ -896,7 +896,7 @@ mod tests {
             }
         }
 
-        let mut tio = IO {
+        let mut tio = InterpCtx {
             prog,
             pc: 0,
             run: 1,
