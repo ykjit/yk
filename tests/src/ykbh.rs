@@ -8,9 +8,9 @@ fn simple() {
         let a = 3;
         io.1 = a;
     }
-    let mut tio = InterpCtx(0, 0);
-    interpret_body("simple", &mut tio);
-    assert_eq!(tio.1, 3);
+    let mut ctx = InterpCtx(0, 0);
+    interpret_body("simple", &mut ctx);
+    assert_eq!(ctx.1, 3);
 }
 
 #[test]
@@ -23,9 +23,9 @@ fn tuple() {
         (io.0).1 = b;
     }
 
-    let mut tio = InterpCtx((1, 2, 3));
-    interpret_body("func_tuple", &mut tio);
-    assert_eq!(tio.0, (1, 3, 3));
+    let mut ctx = InterpCtx((1, 2, 3));
+    interpret_body("func_tuple", &mut ctx);
+    assert_eq!(ctx.0, (1, 3, 3));
 }
 
 #[test]
@@ -38,9 +38,9 @@ fn reference() {
         io.1 = *b;
     }
 
-    let mut tio = InterpCtx(5, 0);
-    interpret_body("func_ref", &mut tio);
-    assert_eq!(tio.1, 5);
+    let mut ctx = InterpCtx(5, 0);
+    interpret_body("func_ref", &mut ctx);
+    assert_eq!(ctx.1, 5);
 }
 
 #[test]
@@ -54,9 +54,9 @@ fn tupleref() {
         (io.0).0 = b.1;
     }
 
-    let mut tio = InterpCtx((0, 3));
-    interpret_body("func_tupleref", &mut tio);
-    assert_eq!(tio.0, (3, 5));
+    let mut ctx = InterpCtx((0, 3));
+    interpret_body("func_tupleref", &mut ctx);
+    assert_eq!(ctx.0, (3, 5));
 }
 
 #[test]
@@ -68,9 +68,9 @@ fn doubleref() {
         (io.0).0 = a.1;
     }
 
-    let mut tio = InterpCtx((0, 3));
-    interpret_body("func_doubleref", &mut tio);
-    assert_eq!(tio.0, (3, 3));
+    let mut ctx = InterpCtx((0, 3));
+    interpret_body("func_doubleref", &mut ctx);
+    assert_eq!(ctx.0, (3, 3));
 }
 
 #[test]
@@ -87,7 +87,7 @@ fn call() {
         io.0 = a;
     }
 
-    let mut tio = InterpCtx(0, 0);
-    interpret_body("func_call", &mut tio);
-    assert_eq!(tio.0, 5);
+    let mut ctx = InterpCtx(0, 0);
+    interpret_body("func_call", &mut ctx);
+    assert_eq!(ctx.0, 5);
 }

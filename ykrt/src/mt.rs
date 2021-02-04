@@ -575,18 +575,18 @@ mod tests {
         }
 
         #[interp_step]
-        fn simple_interp_step(tio: &mut InterpCtx) {
-            match tio.prog[tio.pc] {
+        fn simple_interp_step(ctx: &mut InterpCtx) {
+            match ctx.prog[ctx.pc] {
                 INC => {
-                    tio.pc += 1;
-                    tio.count += 1;
+                    ctx.pc += 1;
+                    ctx.count += 1;
                 }
-                RESTART => tio.pc = 0,
+                RESTART => ctx.pc = 0,
                 _ => unreachable!(),
             }
         }
 
-        let mut tio = InterpCtx {
+        let mut ctx = InterpCtx {
             prog,
             pc: 0,
             count: 0,
@@ -594,16 +594,16 @@ mod tests {
 
         // The interpreter loop. In reality this would (syntactically) be an infinite loop.
         for _ in 0..12 {
-            let loc = locs[tio.pc].as_ref();
-            mtt.control_point(loc, simple_interp_step, &mut tio);
+            let loc = locs[ctx.pc].as_ref();
+            mtt.control_point(loc, simple_interp_step, &mut ctx);
         }
 
         loop {
-            let loc = locs[tio.pc].as_ref();
-            if tio.pc == 0 && loc.unwrap().load(Ordering::Relaxed).phase() == PHASE_COMPILED {
+            let loc = locs[ctx.pc].as_ref();
+            if ctx.pc == 0 && loc.unwrap().load(Ordering::Relaxed).phase() == PHASE_COMPILED {
                 break;
             }
-            mtt.control_point(loc, simple_interp_step, &mut tio);
+            mtt.control_point(loc, simple_interp_step, &mut ctx);
             yield_now();
         }
 
@@ -612,14 +612,14 @@ mod tests {
             PHASE_COMPILED
         );
 
-        assert_eq!(tio.pc, 0);
+        assert_eq!(ctx.pc, 0);
 
         // A trace was just compiled. Running it should execute INC twice.
-        tio.count = 8;
+        ctx.count = 8;
         for i in 0..10 {
-            let loc = locs[tio.pc].as_ref();
-            mtt.control_point(loc, simple_interp_step, &mut tio);
-            assert_eq!(tio.count, 10 + i * 2);
+            let loc = locs[ctx.pc].as_ref();
+            mtt.control_point(loc, simple_interp_step, &mut ctx);
+            assert_eq!(ctx.count, 10 + i * 2);
         }
     }
 
@@ -644,13 +644,13 @@ mod tests {
         }
 
         #[interp_step]
-        fn simple_interp_step(tio: &mut InterpCtx) {
-            match tio.prog[tio.pc] {
+        fn simple_interp_step(ctx: &mut InterpCtx) {
+            match ctx.prog[ctx.pc] {
                 INC => {
-                    tio.pc += 1;
-                    tio.count += 1;
+                    ctx.pc += 1;
+                    ctx.count += 1;
                 }
-                RESTART => tio.pc = 0,
+                RESTART => ctx.pc = 0,
                 _ => unreachable!(),
             }
         }
@@ -663,7 +663,7 @@ mod tests {
             for _ in 0..NUM_THREADS {
                 let locs = Arc::clone(&locs);
                 let prog = Arc::clone(&prog);
-                let mut tio = InterpCtx {
+                let mut ctx = InterpCtx {
                     prog,
                     count: 0,
                     pc: 0,
@@ -671,23 +671,23 @@ mod tests {
                 let t = mtt
                     .mt()
                     .spawn(move |mut mtt| {
-                        for _ in 0..tio.prog.len() * THRESHOLD {
-                            let loc = locs[tio.pc].as_ref();
-                            mtt.control_point(loc, simple_interp_step, &mut tio);
+                        for _ in 0..ctx.prog.len() * THRESHOLD {
+                            let loc = locs[ctx.pc].as_ref();
+                            mtt.control_point(loc, simple_interp_step, &mut ctx);
                         }
                     })
                     .unwrap();
                 thrs.push(t);
             }
 
-            let mut tio = InterpCtx {
+            let mut ctx = InterpCtx {
                 prog: Arc::clone(&prog),
                 count: 0,
                 pc: 0,
             };
             loop {
-                let loc = locs[tio.pc].as_ref();
-                if tio.pc == 0 {
+                let loc = locs[ctx.pc].as_ref();
+                if ctx.pc == 0 {
                     let tag = loc.unwrap().load(Ordering::Relaxed).phase();
                     match tag {
                         PHASE_COUNTING | PHASE_TRACING | PHASE_TRACING_LOCK | PHASE_COMPILING
@@ -696,15 +696,15 @@ mod tests {
                         _ => panic!(),
                     }
                 }
-                mtt.control_point(loc, simple_interp_step, &mut tio);
+                mtt.control_point(loc, simple_interp_step, &mut ctx);
             }
 
-            tio.pc = 0;
-            tio.count = 8;
+            ctx.pc = 0;
+            ctx.count = 8;
             for i in 0..10 {
-                let loc = locs[tio.pc].as_ref();
-                mtt.control_point(loc, simple_interp_step, &mut tio);
-                assert_eq!(tio.count, 10 + i * 2);
+                let loc = locs[ctx.pc].as_ref();
+                mtt.control_point(loc, simple_interp_step, &mut ctx);
+                assert_eq!(ctx.count, 10 + i * 2);
             }
 
             for t in thrs {
@@ -730,19 +730,19 @@ mod tests {
         }
 
         #[interp_step]
-        fn simple_interp_step(tio: &mut InterpCtx) {
-            match tio.prog[tio.pc] {
+        fn simple_interp_step(ctx: &mut InterpCtx) {
+            match ctx.prog[ctx.pc] {
                 INC => {
-                    tio.pc += 1;
-                    tio.count += 1;
+                    ctx.pc += 1;
+                    ctx.count += 1;
                 }
-                RESTART => tio.pc = 0,
+                RESTART => ctx.pc = 0,
                 _ => unreachable!(),
             }
         }
 
         let locs = Arc::new(vec![Some(Location::new()), None, None]);
-        let mut tio = InterpCtx {
+        let mut ctx = InterpCtx {
             prog: Arc::clone(&prog),
             count: 0,
             pc: 0,
@@ -751,9 +751,9 @@ mod tests {
             let locs = Arc::clone(&locs);
             mtt.mt()
                 .spawn(move |mut mtt| {
-                    for _ in 0..tio.prog.len() * THRESHOLD + 1 {
-                        let loc = locs[tio.pc].as_ref();
-                        mtt.control_point(loc, simple_interp_step, &mut tio);
+                    for _ in 0..ctx.prog.len() * THRESHOLD + 1 {
+                        let loc = locs[ctx.pc].as_ref();
+                        mtt.control_point(loc, simple_interp_step, &mut ctx);
                     }
                 })
                 .unwrap()
@@ -764,12 +764,12 @@ mod tests {
         let loc = locs[0].as_ref();
         let tag = loc.unwrap().load(Ordering::Relaxed).phase();
         assert_eq!(tag, PHASE_TRACING);
-        let mut tio = InterpCtx {
+        let mut ctx = InterpCtx {
             prog: Arc::clone(&prog),
             count: 0,
             pc: 0,
         };
-        mtt.control_point(loc, simple_interp_step, &mut tio);
+        mtt.control_point(loc, simple_interp_step, &mut ctx);
         let tag = loc.unwrap().load(Ordering::Relaxed).phase();
         assert_eq!(tag, PHASE_DONT_TRACE);
     }
@@ -791,19 +791,19 @@ mod tests {
         }
 
         #[interp_step]
-        fn simple_interp_step(tio: &mut InterpCtx) {
-            match tio.prog[tio.pc] {
+        fn simple_interp_step(ctx: &mut InterpCtx) {
+            match ctx.prog[ctx.pc] {
                 INC => {
-                    tio.pc += 1;
-                    tio.count += 1;
+                    ctx.pc += 1;
+                    ctx.count += 1;
                 }
-                RESTART => tio.pc = 0,
+                RESTART => ctx.pc = 0,
                 _ => unreachable!(),
             }
         }
 
         let locs = Arc::new(vec![Some(Location::new()), None, None]);
-        let mut tio = InterpCtx {
+        let mut ctx = InterpCtx {
             prog: Arc::clone(&prog),
             count: 0,
             pc: 0,
@@ -812,9 +812,9 @@ mod tests {
             let locs = Arc::clone(&locs);
             mtt.mt()
                 .spawn(move |mut mtt| {
-                    for _ in 0..tio.prog.len() * THRESHOLD + 1 {
-                        let loc = locs[tio.pc].as_ref();
-                        mtt.control_point(loc, simple_interp_step, &mut tio);
+                    for _ in 0..ctx.prog.len() * THRESHOLD + 1 {
+                        let loc = locs[ctx.pc].as_ref();
+                        mtt.control_point(loc, simple_interp_step, &mut ctx);
                     }
                 })
                 .unwrap()
@@ -883,20 +883,20 @@ mod tests {
         }
 
         #[interp_step]
-        fn simple_interp_step(tio: &mut InterpCtx) {
-            match tio.prog[tio.pc] {
+        fn simple_interp_step(ctx: &mut InterpCtx) {
+            match ctx.prog[ctx.pc] {
                 INC => {
-                    tio.pc += 1;
-                    if tio.run == 0 {
-                        tio.run = 99;
+                    ctx.pc += 1;
+                    if ctx.run == 0 {
+                        ctx.run = 99;
                     }
                 }
-                RESTART => tio.pc = 0,
+                RESTART => ctx.pc = 0,
                 _ => unreachable!(),
             }
         }
 
-        let mut tio = InterpCtx {
+        let mut ctx = InterpCtx {
             prog,
             pc: 0,
             run: 1,
@@ -904,21 +904,21 @@ mod tests {
 
         // Run until a trace has been compiled.
         loop {
-            let loc = locs[tio.pc].as_ref();
-            if tio.pc == 0 && loc.unwrap().load(Ordering::Relaxed).phase() == PHASE_COMPILED {
+            let loc = locs[ctx.pc].as_ref();
+            if ctx.pc == 0 && loc.unwrap().load(Ordering::Relaxed).phase() == PHASE_COMPILED {
                 break;
             }
-            mtt.control_point(locs[tio.pc].as_ref(), simple_interp_step, &mut tio);
+            mtt.control_point(locs[ctx.pc].as_ref(), simple_interp_step, &mut ctx);
             yield_now()
         }
 
-        assert_eq!(tio.pc, 0);
-        assert_eq!(tio.run, 1);
+        assert_eq!(ctx.pc, 0);
+        assert_eq!(ctx.run, 1);
 
         // Now fail a guard.
-        tio.run = 0;
-        let loc = locs[tio.pc].as_ref();
-        mtt.control_point(loc, simple_interp_step, &mut tio);
-        assert_eq!(tio.run, 99);
+        ctx.run = 0;
+        let loc = locs[ctx.pc].as_ref();
+        mtt.control_point(loc, simple_interp_step, &mut ctx);
+        assert_eq!(ctx.run, 99);
     }
 }

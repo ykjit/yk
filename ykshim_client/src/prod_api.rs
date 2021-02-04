@@ -83,8 +83,8 @@ impl Drop for ThreadTracer {
 pub struct SIRInterpreter(pub *mut RawSIRInterpreter);
 
 impl SIRInterpreter {
-    pub unsafe fn interpret(&mut self, tio: *mut u8) {
-        __ykshim_si_interpret(self.0, tio);
+    pub unsafe fn interpret(&mut self, ctx: *mut u8) {
+        __ykshim_si_interpret(self.0, ctx);
     }
 }
 
