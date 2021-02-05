@@ -14,7 +14,7 @@ RUSTFLAGS="${RUSTFLAGS} -D warnings"
 tar jxf /opt/ykrustc-bin-snapshots/ykrustc-${STD_TRACER_MODE}-stage2-latest.tar.bz2
 export PATH=`pwd`/ykrustc-stage2-latest/bin:${PATH}
 
-cargo xtask test
+RUSTFLAGS="-C tracer=${STD_TRACER_MODE}" cargo xtask test
 
 export CARGO_HOME="`pwd`/.cargo"
 export RUSTUP_HOME="`pwd`/.rustup"
@@ -28,4 +28,3 @@ sh rustup.sh --default-host x86_64-unknown-linux-gnu \
 export PATH=${CARGO_HOME}/bin/:$PATH
 rustup toolchain install nightly --allow-downgrade --component rustfmt
 cargo xtask fmt --all -- --check
-cd internal_ws && cargo +nightly fmt --all -- --check

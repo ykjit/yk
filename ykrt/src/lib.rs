@@ -4,7 +4,7 @@ mod location;
 pub mod mt;
 
 pub use self::location::Location;
-pub use self::mt::MT;
+pub use self::mt::{MTBuilder, MT};
 
 /// A debugging aid for traces.
 /// Calls to this function are recognised by Yorick and a special debug TIR statement is inserted

@@ -6,11 +6,14 @@
 //! For more information, see this section in the documentation:
 //! https://softdevteam.github.io/ykdocs/tech/yk_structure.html
 
+use regex::Regex;
 use std::{
     env,
     path::PathBuf,
     process::{exit, Command},
 };
+
+include!("../../build_aux.rs");
 
 #[derive(PartialEq)]
 enum Workspace {
@@ -41,8 +44,6 @@ struct WorkspaceAction<'a> {
     target_args: Vec<&'a str>,
     /// The RUSTFLAGS environment to use.
     rust_flags: String,
-    /// The LD_LIBRARY_PATH environment to use.
-    ld_library_path: String,
     /// Workspace actions to run first.
     forced_deps: Vec<Self>,
 }
@@ -54,37 +55,24 @@ impl<'a> WorkspaceAction<'a> {
         let mut target_args = vec![target];
         let mut tool_args = Vec::new();
         let mut rust_flags = env::var("RUSTFLAGS").unwrap_or_else(|_| String::new());
-        let mut ld_library_path = env::var("LD_LIBRARY_PATH").unwrap_or_else(|_| String::new());
 
         match target {
             "audit" => (),
             "build" | "check" | "clean" | "test" => {
+                let tracing_kind = find_tracing_kind(&rust_flags);
                 if workspace == Workspace::Internal {
+                    rust_flags.clear();
                     // Optimise the internal workspace.
                     target_args.push("--release");
                     // Set the tracermode cfg macro, but without changing anything relating to code
-                    // generation. We can't use `-C tracer=hw` as this would turn off optimisations.
-                    rust_flags.push_str(" --cfg tracermode=\"hw\"");
+                    // generation. We can't use `-C tracer=hw` as this would turn off optimisations
+                    // and emit SIR for stuff we will never trace.
+                    rust_flags.push_str(&format!(" --cfg tracermode=\"{}\"", tracing_kind));
 
                     // `cargo test` in the internal workspace won't build libykshim.so, so we have
                     // to force-build it to avoid linkage problems for the external workspace.
                     if target == "test" {
                         forced_deps.push(WorkspaceAction::new(Workspace::Internal, "build")?);
-                    }
-                } else {
-                    // Emit code suitable for hardware tracing.
-                    rust_flags.push_str(" -C tracer=hw");
-
-                    if target == "test" {
-                        let append = [
-                            Workspace::Internal.dir().to_str().unwrap(),
-                            "target",
-                            "release",
-                        ]
-                        .iter()
-                        .collect::<PathBuf>();
-                        ld_library_path.push_str(":");
-                        ld_library_path.push_str(append.to_str().unwrap());
                     }
                 }
             }
@@ -99,6 +87,7 @@ impl<'a> WorkspaceAction<'a> {
                 // by $CARGO (in the environment) is a real cargo (not a wrapper) which won't
                 // understand `+nightly`. So the easiest way to run `cargo fmt` for the nightly
                 // toolchain is to use `rustup run nightly cargo fmt`.
+                rust_flags.clear();
                 tool = "rustup".to_owned();
                 tool_args.extend(&["run", "nightly", "cargo"]);
             }
@@ -117,7 +106,6 @@ impl<'a> WorkspaceAction<'a> {
             target_args,
             rust_flags,
             forced_deps,
-            ld_library_path,
         })
     }
 
@@ -127,15 +115,13 @@ impl<'a> WorkspaceAction<'a> {
             dep.run(&[])?;
         }
 
-        env::set_current_dir(self.workspace_dir).unwrap();
         let mut cmd = Command::new(&self.tool);
         let status = cmd
+            .current_dir(self.workspace_dir)
             .args(self.tool_args)
             .args(self.target_args)
             .args(extra_args)
-            .env_remove("RUSTFLAGS")
             .env("RUSTFLAGS", self.rust_flags)
-            .env("LD_LIBRARY_PATH", self.ld_library_path)
             .spawn()
             .unwrap()
             .wait()
@@ -156,6 +142,7 @@ fn bail(err_str: String) -> ! {
 }
 
 fn main() {
+    env::set_var("YK_XTASK", "YES");
     let mut args = env::args().skip(1);
     let target = args.next().unwrap();
     let extra_args = args.collect::<Vec<_>>();
