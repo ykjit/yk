@@ -633,13 +633,6 @@ impl TraceCompiler {
         self.restore_regs(&*CALLER_SAVED_REGS);
     }
 
-    /// Emit a NOP operation.
-    fn _nop(&mut self) {
-        dynasm!(self.asm
-            ; nop
-        );
-    }
-
     /// Push the specified registers to the stack in order.
     fn save_regs(&mut self, regs: &[u8]) {
         for reg in regs.iter() {
