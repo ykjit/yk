@@ -264,7 +264,9 @@ fn local_to_reg_name(loc: &Location) -> &'static str {
 // interpreter for blackholing.
 
 /// Given a vector of `FrameInfo`s `vptr`, instantiates and initialises a SIR interpreter and returns its
-/// pointer. Consumes `vptr`.
+/// pointer. Consumes `vptr`. XXX note this requires a move of `vptr`, so we should document
+/// something like "note that the calling function must fully transfer ownership of vptr
+/// to this function".
 #[no_mangle]
 pub extern "sysv64" fn invoke_sinterp(vptr: *mut Vec<FrameInfo>) -> *mut SIRInterpreter {
     let v = unsafe { Box::from_raw(vptr) };
