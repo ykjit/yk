@@ -1,3 +1,5 @@
+//! XXX needs a top-level doc comment
+
 use crate::Pack;
 
 /// The pack encoder.

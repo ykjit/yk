@@ -1,4 +1,5 @@
 //! The "Production" API client to ykshim.
+// XXX I'm not really sure what "production" means in this context.
 
 use std::ffi::{c_void, CString};
 use std::marker::PhantomData;

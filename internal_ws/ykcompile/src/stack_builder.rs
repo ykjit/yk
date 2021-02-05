@@ -1,3 +1,5 @@
+//! XXX needs a top-level doc comment
+
 use crate::Location;
 use dynasmrt::{x64::Rq::RBP, Register};
 use std::convert::{TryFrom, TryInto};
@@ -10,10 +12,10 @@ pub(crate) struct StackBuilder {
 
 /// A naive stack builder for allocating objects on the stack.
 ///
-/// Naive because it could allocate less space by caching up the requested allocations and
+/// XXX I can't parse this sentence. Naive because it could allocate less space by caching up the requested allocations and
 /// better-packing them.
 ///
-/// The top of the stack, before any calls to `alloc()` is assumed to be appropriately aligned.
+/// XXX or this sentence. The top of the stack, before any calls to `alloc()` is assumed to be appropriately aligned.
 impl StackBuilder {
     /// Allocate an object of given size and alignment on the stack, returning a `Location::Mem`
     /// describing the position of the allocation. The stack is assumed to grow down.

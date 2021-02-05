@@ -132,6 +132,9 @@ impl Ty {
         }
     }
 
+    // XXX this function feels a bit evil. surely it should be the caller's job to do this? that
+    // way the need to panic will either a) be clear b) not be possible because the caller has
+    // verified things?
     pub fn unwrap_tuple(&self) -> &TupleTy {
         if let TyKind::Tuple(tty) = &self.kind {
             &tty
@@ -362,12 +365,12 @@ impl Display for Ptr {
     }
 }
 
-/// An IR place. This is used in SIR and TIR to describe the (abstract) address of a piece of data.
+/// An IR place XXX why isn't the struct called "IRPlace"? [I've been wondering for ages what "IPlace" meant! "IRPlace" would be a bit clearer I think.]. This is used in SIR and TIR to describe the (abstract) address of a piece of data.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum IPlace {
     /// The IPlace describes a value as a Local+offset pair.
     Val { local: Local, off: OffT, ty: TypeId },
-    /// An indirect place behind a pointer. ykrustc uses these for deref and (dynamic) index
+    /// An indirect place behind a pointer XXX huh? i'm not sure what that means. ykrustc uses these for deref and (dynamic) index
     /// projections (which cannot be resolved statically and thus depend on a runtime pointer).
     Indirect {
         /// The location of the pointer to be dereferenced at runtime.
@@ -446,6 +449,8 @@ impl IPlace {
                     ty: new_ty,
                 }
             }
+            // are these unreachable or todos? if the former, the strings are unnecessary (and just
+            // lead to a bit of pointless binary bloat)
             Self::Const { .. } => unreachable!("const to indirect"),
             Self::Indirect { .. } => unreachable!("indirect to indirect"),
             Self::Unimplemented(_) => self.clone(),
@@ -467,7 +472,7 @@ pub enum Statement {
         opnd2: IPlace,
         checked: bool,
     },
-    /// Makes a reference.
+    /// Makes a reference. XXX from what to what?
     MkRef(IPlace, IPlace),
     /// Computes a pointer address at runtime.
     DynOffs {
@@ -952,6 +957,7 @@ mod tests {
     }
 }
 
+/// XXX this should be above the tests somewhere!
 /// A SIR mapping label.
 #[derive(Debug, Hash, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub struct SirLabel {

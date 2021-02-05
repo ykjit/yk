@@ -1,3 +1,5 @@
+//! XXX needs a top-level doc comment
+
 #![cfg_attr(test, feature(test))]
 
 mod location;

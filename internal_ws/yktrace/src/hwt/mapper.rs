@@ -1,3 +1,5 @@
+//! XXX needs a top-level doc comment
+
 use object::{Object, ObjectSection};
 use phdrs::objects;
 
@@ -73,6 +75,7 @@ impl HWTMapper {
 
 /// Extract the program header offset. This offset can be used to translate the address of a trace
 /// block to a program address, allowing us to find the correct SIR location.
+/// XXX if this is an address should it be usize?
 fn get_phdr_offset() -> u64 {
     (&objects()[0]).addr() as u64
 }

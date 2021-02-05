@@ -1,3 +1,5 @@
+//! XXX needs a top-level doc comment
+
 use std::fmt::{self, Display, Formatter};
 
 #[derive(Debug)]

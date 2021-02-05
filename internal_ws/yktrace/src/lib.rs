@@ -1,3 +1,5 @@
+//! XXX needs a top-level doc comment
+
 #![cfg_attr(test, feature(test))]
 #![cfg_attr(tracermode = "sw", feature(thread_local))]
 #![cfg_attr(tracermode = "sw", feature(core_intrinsics))]
@@ -23,6 +25,7 @@ use sir::SirTrace;
 use ykpack::Local;
 
 // In TIR traces, the argument to the interp_step is always local #1.
+// XXX this constant could be used in quite a few places throughout the repo!
 pub const INTERP_STEP_ARG: Local = Local(1);
 
 /// The different ways by which we can collect a trace.

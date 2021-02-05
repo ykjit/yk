@@ -82,7 +82,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
             }
 
             // If a function was annotated with `do_not_trace`, skip all instructions within it as
-            // well. FIXME: recursion.
+            // well. FIXME: recursion. what does "recursion" mean?!
             if let Some(sym) = &ignore {
                 if sym == &loc.symbol_name
                     && body.blocks[user_bb_idx_usize].term == Terminator::Return
@@ -229,9 +229,9 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     // Rename the return value.
                     //
                     // FIXME It seems that calls always have a destination despite the field being
-                    // `Option`. If this is not always the case, we may want add the `Local` offset
-                    // (`var_len`) to this statement so we can assign the arguments to the correct
-                    // `Local`s during trace compilation.
+                    // `Option`. If this is not always the case, we may want to add the `Local`
+                    // offset (`var_len`) to this statement so we can assign the arguments to the
+                    // correct `Local`s during trace compilation.
                     let ret_val = dest
                         .as_ref()
                         .map(|(ret_val, _)| rnm.rename_iplace(&ret_val, &body))
@@ -280,7 +280,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                             term_stmts.push(Statement::Call(op.clone(), newargs, Some(ret_val)))
                         }
                     } else {
-                        todo!("Unknown callee encountered");
+                        todo!();
                     }
                 }
                 Terminator::Return => {
@@ -335,7 +335,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     // Peek at the next block in the trace to see which outgoing edge was taken and
                     // infer which value we must guard upon. We are working on the assumption that
                     // a trace can't end on a SwitchInt. i.e. that another block follows.
-                    let next_blk = itr.peek().expect("no block to peek at").bb_idx;
+                    let next_blk = itr.peek().unwrap().bb_idx;
                     let edge_idx = target_bbs.iter().position(|e| *e == next_blk);
                     match edge_idx {
                         Some(idx) => Some(Guard {
@@ -461,7 +461,7 @@ impl VarRenamer {
         self.offset = self.acc.unwrap();
         self.stack.push(self.offset);
         if let Some(v) = self.acc.as_mut() {
-            *v += num_locals as u32;
+            *v += num_locals as u32; // u32::try_from?
         }
     }
 
@@ -472,6 +472,11 @@ impl VarRenamer {
         if let Some(v) = self.stack.last() {
             self.offset = *v;
         } else {
+            // presumably this fundamentally can't happen? at which point a `debug_assert` might be
+            // more appropriate so that the function is:
+            //   self.stack.pop();
+            //   debug_assert!(!self.stack.is_empty());
+            //   self.offset = self.stack.last().unwrap();
             panic!("Unbalanced enter/leave statements!")
         }
     }

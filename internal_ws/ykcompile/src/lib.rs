@@ -290,7 +290,7 @@ pub extern "sysv64" fn bh_new_vec() -> *mut Vec<FrameInfo> {
 
 /// Pushes a new `FrameInfo` instance onto the vector behind the pointer `vptr`. The `FrameInfo`
 /// instance is creates from a pointer to a symbol name and its length, a basic block index and a
-/// pointer to some allocated memory.
+/// pointer to some allocated memory. XXX need to document that `vptr` is consumed
 pub extern "sysv64" fn bh_push_vec(
     vptr: *mut Vec<FrameInfo>,
     sym_ptr: *const u8,
@@ -310,7 +310,7 @@ pub extern "sysv64" fn bh_push_vec(
     Box::into_raw(v);
 }
 
-/// Compile a TIR trace, returning executable code.
+/// Compile a TIR trace.
 pub fn compile_trace(tt: TirTrace) -> CompiledTrace {
     CompiledTrace {
         mc: TraceCompiler::_compile(tt, false),
@@ -410,7 +410,7 @@ impl Location {
 
     /// Apply an offset to the location, returning a new one.
     fn offset(self, off: OffT) -> Self {
-        if off == 0 {
+        if off == 0 { // Is the special case a performance hack or ... ?
             return self;
         }
         match self {
@@ -454,7 +454,7 @@ pub struct TraceCompiler {
     register_content_map: HashMap<u8, RegAlloc>,
     /// Maps trace locals to their location (register, stack).
     variable_location_map: HashMap<Local, Location>,
-    /// Local decls of the tir trace.
+    /// Local decls of the TIR trace.
     pub local_decls: HashMap<Local, LocalDecl>,
     /// Stack builder for allocating objects on the stack.
     stack_builder: StackBuilder,
@@ -566,6 +566,8 @@ impl TraceCompiler {
         self.stack_builder.alloc(ty.size(), ty.align())
     }
 
+    /// XXX Doc comment needed and maybe a better function name? I'm not sure if it means "make the
+    /// local come alive" or "check the local is alive"
     fn local_live(&mut self, local: &Local) {
         // Assign a Location to this Local.
         self.local_to_location(*local);
@@ -597,7 +599,8 @@ impl TraceCompiler {
     /// Copy bytes from one memory location to another.
     fn copy_memory(&mut self, dest: &RegAndOffset, src: &RegAndOffset, size: u64) {
         // We use memmove(3), as it's not clear if MIR (and therefore SIR) could cause copies
-        // involving overlapping buffers.
+        // involving overlapping buffers. XXX this sounds like a big thing not to be sure about!
+        // what's the underlying problem?
         let sym = Self::find_symbol("memmove").unwrap();
         self.save_regs(&*CALLER_SAVED_REGS);
         dynasm!(self.asm
@@ -642,7 +645,7 @@ impl TraceCompiler {
         );
     }
 
-    /// Push the specified registers to the stack in order.
+    /// Push the specified registers to the stack, in the order they are specified in the array.
     fn save_regs(&mut self, regs: &[u8]) {
         for reg in regs.iter() {
             dynasm!(self.asm
@@ -650,7 +653,9 @@ impl TraceCompiler {
             );
         }
     }
-    /// Pop the specified registers from the stack in reverse order.
+
+    /// Pop the specified registers from the stack in reverse order to how they are specified in
+    /// the array.
     fn restore_regs(&mut self, regs: &[u8]) {
         for reg in regs.iter().rev() {
             dynasm!(self.asm
@@ -1058,7 +1063,7 @@ impl TraceCompiler {
         let src_loc = self.iplace_to_location(src);
         match src_loc {
             Location::Reg(..) => {
-                // This isn't possible as the allocator explicitely puts things which are
+                // This isn't possible as the allocator explicitly puts things which are
                 // referenced onto the stack and never in registers.
                 unreachable!()
             }
@@ -1095,7 +1100,7 @@ impl TraceCompiler {
     fn c_cast(&mut self, dest: &IPlace, src: &IPlace) {
         let src_loc = self.iplace_to_location(src);
         let ty = &*SIR.ty(&src.ty()); // Type of the source.
-        let cty = SIR.ty(&dest.ty()); // Type of the cast (same as dest type).
+        let cty = SIR.ty(&dest.ty()); // Type of the cast (same as dest type XXX isn't this the case by definition?).
         match ty.kind {
             TyKind::UnsignedInt(_) => self.c_cast_uint(src_loc, &ty, &cty),
             _ => todo!(),
@@ -1187,7 +1192,8 @@ impl TraceCompiler {
     /// Compile a guard in the trace, emitting code to abort execution in case the guard fails.
     fn c_guard(&mut self, guard: &Guard, dl: DynamicLabel) {
         // FIXME some of the terminators from which we build these guards can have cleanup blocks.
-        // Currently we don't run any cleanup, but should we?
+        // Currently we don't run any cleanup, but should we? XXX does this mean we don't call
+        // drop? And, if so, what do we not call Drop on?
         match guard {
             Guard {
                 val,
@@ -1370,7 +1376,7 @@ impl TraceCompiler {
         // Reserved stack space for spilled locals during execution.
         let soff = self.stack_builder.size();
         // Reserved memory on the stack to spill live locals to during a guard failure.
-        let live_off = REG_POOL.len() * 8;
+        let live_off = REG_POOL.len() * 8; // Is `8` a machine word? Prefer a calculation/constant name.
 
         // As we'll be making calls to other functions using the Sys-V 64 ABI, we need to make sure
         // the stack is aligned to 16 bytes before the call instruction. Note that the call
@@ -1428,6 +1434,8 @@ impl TraceCompiler {
             for (tirlocal, loc) in live_locations.iter_mut() {
                 match loc {
                     Location::Reg(reg) => {
+                        // XXX I think that "-i32" is potentially dangerous because 2's offset is
+                        // not symmetric. We might need another check for that here?
                         let off = -i32::try_from(soff + u32::from(*reg) * 8).unwrap();
                         let newloc = Location::Mem(RegAndOffset {
                             reg: RBP.code(),
@@ -1442,7 +1450,7 @@ impl TraceCompiler {
                 }
             }
 
-            // Create vector to store the allocated memory pointers in, to be handed to the
+            // Create a vector "of what?" to store the allocated memory pointers in, to be handed to the
             // SIRInterpreter later. We can use a fixed register here, since we've spilled all
             // registers to the stack.
             let frame_vec_reg = R12.code();
@@ -1564,7 +1572,7 @@ impl TraceCompiler {
                 let ptr = buf.ptr(dynasmrt::AssemblyOffset(0)) as *mut libc::c_void;
                 let len = buf.len();
                 let alignment = ptr as usize % libc::sysconf(libc::_SC_PAGESIZE) as usize;
-                let ptr = ptr.offset(-(alignment as isize));
+                let ptr = ptr.offset(-(alignment as isize)); // probably better as ptr.pub?
                 let len = len + alignment;
                 libc::mprotect(ptr, len, libc::PROT_EXEC | libc::PROT_WRITE);
             }

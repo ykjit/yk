@@ -77,8 +77,11 @@ static mut TRACE_BUF_CAP: usize = 0;
 static mut __YK_SWT_ACTIVE: bool = false;
 
 // =======================
-// The following code may not call any non `#[do_not_trace]` function to prevent an infinite
-// recursion of `__yk_swt_rec_loc` calling a function calling `__yk_swt_rec_loc`.
+// XXX can we scope "following code"? does it mean "any of the rest of the code in this file?" If
+// so, it might be worth either a) putting this dangerous code in its own file with the warning at
+// the top b) attaching the warning to each function. perhaps the latter is the safest thing to do!
+// The following code must not call any non `#[do_not_trace]` function: if it does, an infinite
+// loop will occur where `__yk_swt_rec_loc` calls `__yk_swt_rec_loc`.
 
 /// Start tracing on the current thread.
 /// A new trace buffer is allocated and MIR locations will be written into it on

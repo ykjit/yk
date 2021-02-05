@@ -1,3 +1,5 @@
+//! Initialise the meta-tracing system.
+
 #[cfg(test)]
 use std::time::Duration;
 use std::{

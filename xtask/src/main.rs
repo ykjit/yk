@@ -150,6 +150,7 @@ impl<'a> WorkspaceAction<'a> {
     }
 }
 
+// `bail` is a weird name. maybe call it `abort`?
 fn bail(err_str: String) -> ! {
     eprintln!("xtask: {}", err_str);
     exit(1);

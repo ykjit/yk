@@ -1,3 +1,5 @@
+//! XXX needs a top-level doc comment
+
 use std::alloc::{alloc, dealloc, Layout};
 use std::convert::TryFrom;
 use ykpack::{
@@ -9,6 +11,8 @@ use yktrace::sir::SIR;
 /// Stores information needed to recreate stack frames in the SIRInterpreter.
 pub struct FrameInfo {
     /// The symbol name of this frame.
+    /// i might have misunderstood this, but does every function call in the stopgap interpreter
+    /// require mallocing a String?
     pub sym: String,
     /// Index of the current basic block we are in. When returning from a function call, the
     /// terminator of this block is were we continue.
@@ -199,6 +203,8 @@ impl SIRInterpreter {
     /// Run the SIR interpreter after it has been initialised by a guard failure. Since we start in
     /// the block where the guard failed, we immediately skip to the terminator and interpret it to
     /// see which block we need to start interpretation in.
+    /// XXX we have one function called "interpret" and another "_interpret" -- both public! At
+    /// least one of them needs a better name.
     pub unsafe fn interpret(&mut self, ctx: *mut u8) {
         self.set_interp_ctx(ctx);
         // Jump to the correct basic block by interpreting the terminator.
@@ -272,7 +278,6 @@ impl SIRInterpreter {
             Terminator::Call {
                 operand: op,
                 args,
-                destination: _dest,
             } => {
                 let fname = if let CallOperand::Fn(sym) = op {
                     sym
@@ -286,8 +291,8 @@ impl SIRInterpreter {
                 self.frames.push(frame);
             }
             Terminator::Return => {
-                // Return from current stack frame.
                 let oldframe = self.frames.pop().unwrap();
+                // XXX comment could do with rephrasing
                 // Are we still inside a nested call? Otherwise we are returning from the first
                 // body, so we are done interpreting.
                 if let Some(curframe) = self.frames.last_mut() {
@@ -304,7 +309,8 @@ impl SIRInterpreter {
                         _ => unreachable!(),
                     };
                     // Get a pointer to the return value of the called frame. XXX this needs to be
-                    // a named constant
+                    // a named constant. do a grep over the repo for `Local.[0-9]` to see more of
+                    // these
                     let ret_ptr = oldframe.mem.local_ptr(&Local(0));
                     // Write the return value to the destination in the previous frame.
                     let dst_ptr = curframe.mem.iplace_to_ptr(&dest);
@@ -353,11 +359,14 @@ impl SIRInterpreter {
         }
     }
 
+    /// XXX unhelpful comment
     /// Implements the Store statement.
     fn store(&mut self, dest: &IPlace, src: &IPlace) {
         self.frames.last_mut().unwrap().mem.store(dest, src);
     }
 
+    /// XXX this might be me being an idiot, but i have no idea what this comment means or, indeed,
+    /// what the function actually does!
     /// Creates a reference to an IPlace.
     fn mkref(&mut self, dest: &IPlace, src: &IPlace) {
         match dest {

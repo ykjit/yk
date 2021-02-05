@@ -1,3 +1,5 @@
+//! XXX needs a top-level doc comment
+
 use memmap2::Mmap;
 use std::{fs::File, io::Read};
 
