@@ -46,7 +46,7 @@ extern "C" {
     ) -> *mut c_char;
     fn __ykshimtest_tracecompiler_local_dead(tc: *mut RawTraceCompiler, local: Local);
     fn __ykshimtest_tracecompiler_find_sym(sym: *mut c_char) -> *mut c_void;
-    fn __ykshimtest_interpret_body(body_name: *mut c_char, icx: *mut u8);
+    fn __ykshimtest_interpret_body(body_name: *mut c_char, ctx: *mut u8);
     fn __ykshimtest_reg_pool_size() -> usize;
 }
 
@@ -138,9 +138,9 @@ impl SirTrace {
     }
 }
 
-pub fn interpret_body<I>(body_name: &str, icx: &mut I) {
+pub fn interpret_body<I>(body_name: &str, ctx: &mut I) {
     let body_cstr = CString::new(body_name).unwrap();
-    unsafe { __ykshimtest_interpret_body(body_cstr.into_raw(), icx as *mut _ as *mut u8) };
+    unsafe { __ykshimtest_interpret_body(body_cstr.into_raw(), ctx as *mut _ as *mut u8) };
 }
 
 pub fn reg_pool_size() -> usize {

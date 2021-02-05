@@ -5,7 +5,7 @@ use ykshim_client::{start_tracing, TracingKind};
 
 // Some work to trace.
 #[interp_step]
-fn work(io: &mut WorkIO) {
+fn work(io: &mut InterpCtx) {
     let mut res = 0;
     for i in 0..(io.0) {
         if i % 2 == 0 {
@@ -17,14 +17,14 @@ fn work(io: &mut WorkIO) {
     println!("{}", res); // prevents the above from being optimised out.
 }
 
-struct WorkIO(usize);
+struct InterpCtx(usize);
 
 /// Test that basic tracing works.
 #[test]
 fn trace() {
     #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
-    black_box(work(&mut WorkIO(10)));
+    black_box(work(&mut InterpCtx(10)));
     let trace = th.stop_tracing().unwrap();
     assert!(trace.len() > 0);
 }
@@ -36,11 +36,11 @@ fn trace_twice() {
     let kind = TracingKind::HardwareTracing;
 
     let th1 = start_tracing(kind);
-    black_box(work(&mut WorkIO(10)));
+    black_box(work(&mut InterpCtx(10)));
     let trace1 = th1.stop_tracing().unwrap();
 
     let th2 = start_tracing(kind);
-    black_box(work(&mut WorkIO(20)));
+    black_box(work(&mut InterpCtx(20)));
     let trace2 = th2.stop_tracing().unwrap();
 
     assert!(trace1.len() < trace2.len());
@@ -54,12 +54,12 @@ pub(crate) fn trace_concurrent() {
 
     let thr = thread::spawn(move || {
         let th1 = start_tracing(kind);
-        black_box(work(&mut WorkIO(10)));
+        black_box(work(&mut InterpCtx(10)));
         th1.stop_tracing().unwrap().len()
     });
 
     let th2 = start_tracing(kind);
-    black_box(work(&mut WorkIO(20)));
+    black_box(work(&mut InterpCtx(20)));
     let len2 = th2.stop_tracing().unwrap().len();
 
     let len1 = thr.join().unwrap();
@@ -76,7 +76,7 @@ mod tir {
     fn nonempty_tir_trace() {
         #[inline(never)]
         #[interp_step]
-        fn work(io: &mut IO) {
+        fn work(io: &mut InterpCtx) {
             let mut res = 0;
             while res < io.1 {
                 res += io.0;
@@ -84,8 +84,8 @@ mod tir {
             io.2 = res
         }
 
-        struct IO(usize, usize, usize);
-        let mut io = IO(3, 13, 0);
+        struct InterpCtx(usize, usize, usize);
+        let mut io = InterpCtx(3, 13, 0);
         // FIXME TracingMode::Default.
         #[cfg(tracermode = "hw")]
         let tracer = start_tracing(TracingKind::HardwareTracing);
@@ -96,11 +96,11 @@ mod tir {
         assert!(tir_trace.len() > 0);
     }
 
-    struct DebugTirIO(usize, usize);
+    struct DebugTirInterpCtx(usize, usize);
 
     #[inline(never)]
     #[interp_step]
-    fn debug_tir_work(io: &mut DebugTirIO) {
+    fn debug_tir_work(io: &mut DebugTirInterpCtx) {
         match io.0 {
             0 => {
                 trace_debug("Add 10");
@@ -120,7 +120,7 @@ mod tir {
 
     #[test]
     fn trace_debug_tir() {
-        let mut io = DebugTirIO(0, 0);
+        let mut io = DebugTirInterpCtx(0, 0);
         #[cfg(tracermode = "hw")]
         let tracer = start_tracing(TracingKind::HardwareTracing);
         black_box(debug_tir_work(&mut io)); // +10

@@ -109,9 +109,9 @@ unsafe fn __ykshim_tirtrace_drop(tir_trace: *mut TirTrace) {
 
 /// Start an initialised SIRInterpreter.
 #[no_mangle]
-unsafe extern "C" fn __ykshim_si_interpret(si: *mut ykbh::SIRInterpreter, icx: *mut u8) {
+unsafe extern "C" fn __ykshim_si_interpret(si: *mut ykbh::SIRInterpreter, ctx: *mut u8) {
     let si = &mut *si;
-    si.interpret(icx);
+    si.interpret(ctx);
 }
 
 #[no_mangle]

@@ -2,7 +2,7 @@ use ykshim_client::{compile_trace, start_tracing, SIRInterpreter, TracingKind};
 
 #[test]
 fn simple() {
-    struct IO(u8, u8);
+    struct InterpCtx(u8, u8);
 
     fn guard(i: u8) -> u8 {
         if i != 3 {
@@ -13,21 +13,21 @@ fn simple() {
     }
 
     #[interp_step]
-    fn interp_step(io: &mut IO) {
+    fn interp_step(io: &mut InterpCtx) {
         let x = guard(io.0);
         io.1 = x;
     }
 
-    let mut inputs = IO(std::hint::black_box(|i| i)(0), 0);
+    let mut ctx = InterpCtx(std::hint::black_box(|i| i)(0), 0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_step(&mut inputs);
+    interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
-    let mut args = IO(0, 0);
+    let mut args = InterpCtx(0, 0);
     assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.1, 9);
-    // Execute trace with input that fails the guard.
-    let mut args = IO(3, 0);
+    // Execute the trace with a context that causes a guard to fail.
+    let mut args = InterpCtx(3, 0);
     let ptr = unsafe { ct.execute(&mut args) };
     assert!(!ptr.is_null());
     // Check that running the interpreter gets us the correct result.
@@ -38,7 +38,7 @@ fn simple() {
 
 #[test]
 fn recursion() {
-    struct IO(u8, u8);
+    struct InterpCtx(u8, u8);
 
     // Test that if a guard fails within a recursive call, we still construct the correct stack
     // frames for the blackholing interpreter.
@@ -55,21 +55,21 @@ fn recursion() {
     }
 
     #[interp_step]
-    fn interp_step(io: &mut IO) {
+    fn interp_step(io: &mut InterpCtx) {
         let x = rec(io.0, io.1);
         io.1 = x;
     }
 
-    let mut inputs = IO(std::hint::black_box(|i| i)(0), 0);
+    let mut ctx = InterpCtx(std::hint::black_box(|i| i)(0), 0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_step(&mut inputs);
+    interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
-    let mut args = IO(0, 0);
+    let mut args = InterpCtx(0, 0);
     assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.1, 1);
-    // Execute trace with input that fails the guard.
-    let mut args = IO(0, 1);
+    // Execute the trace with a context that causes a guard to fail.
+    let mut args = InterpCtx(0, 1);
     let ptr = unsafe { ct.execute(&mut args) };
     assert!(!ptr.is_null());
     // Check that running the interpreter gets us the correct result.
@@ -81,7 +81,7 @@ fn recursion() {
 #[ignore]
 #[test]
 fn recursion2() {
-    struct IO(u8, u8);
+    struct InterpCtx(u8, u8);
 
     // Test that the SIR interpreter can deal with new recursions after a guard failure.
     fn rec(i: u8, j: u8) -> u8 {
@@ -93,21 +93,21 @@ fn recursion2() {
     }
 
     #[interp_step]
-    fn interp_step(io: &mut IO) {
+    fn interp_step(io: &mut InterpCtx) {
         let x = rec(io.0, io.1);
         io.1 = x;
     }
 
-    let mut inputs = IO(7, 0);
+    let mut ctx = InterpCtx(7, 0);
     let th = start_tracing(TracingKind::HardwareTracing);
-    interp_step(&mut inputs);
+    interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
-    let mut args = IO(7, 1);
+    let mut args = InterpCtx(7, 1);
     assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.1, 1);
-    // Execute trace with input that fails the guard.
-    let mut args = IO(1, 0);
+    // Execute the trace with a context that causes a guard to fail.
+    let mut args = InterpCtx(1, 0);
     let ptr = unsafe { ct.execute(&mut args) };
     assert!(!ptr.is_null());
     // Check that running the interpreter gets us the correct result.

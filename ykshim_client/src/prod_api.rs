@@ -35,7 +35,7 @@ extern "C" {
     fn __ykshim_compiled_trace_get_ptr(compiled_trace: *const RawCompiledTrace) -> *const c_void;
     fn __ykshim_compiled_trace_drop(compiled_trace: *mut RawCompiledTrace);
     fn __ykshim_sirtrace_drop(trace: *mut RawSirTrace);
-    fn __ykshim_si_interpret(interp: *mut RawSIRInterpreter, icx: *mut u8);
+    fn __ykshim_si_interpret(interp: *mut RawSIRInterpreter, ctx: *mut u8);
     fn __ykshim_sirinterpreter_drop(interp: *mut RawSIRInterpreter);
 }
 
@@ -83,8 +83,8 @@ impl Drop for ThreadTracer {
 pub struct SIRInterpreter(pub *mut RawSIRInterpreter);
 
 impl SIRInterpreter {
-    pub unsafe fn interpret(&mut self, tio: *mut u8) {
-        __ykshim_si_interpret(self.0, tio);
+    pub unsafe fn interpret(&mut self, ctx: *mut u8) {
+        __ykshim_si_interpret(self.0, ctx);
     }
 }
 
@@ -134,9 +134,9 @@ impl<I> CompiledTrace<I> {
     }
 
     /// Execute the trace with the given interpreter context.
-    pub unsafe fn execute(&self, icx: &mut I) -> *mut RawSIRInterpreter {
+    pub unsafe fn execute(&self, ctx: &mut I) -> *mut RawSIRInterpreter {
         let f = mem::transmute::<_, fn(&mut I) -> *mut RawSIRInterpreter>(self.ptr());
-        f(icx)
+        f(ctx)
     }
 }
 

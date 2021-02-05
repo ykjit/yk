@@ -194,9 +194,8 @@ impl SIRInterpreter {
     /// Run the SIR interpreter after it has been initialised by a guard failure. Since we start in
     /// the block where the guard failed, we immediately skip to the terminator and interpret it to
     /// see which block we need to start interpretation in.
-    pub unsafe fn interpret(&mut self, tio: *mut u8) {
-        // Set the pointer to the trace inputs.
-        self.set_trace_inputs(tio);
+    pub unsafe fn interpret(&mut self, ctx: *mut u8) {
+        self.set_interp_ctx(ctx);
         // Jump to the correct basic block by interpreting the terminator.
         let frame = self.frames.last().unwrap();
         let body = SIR.body(&frame.func).unwrap();
@@ -231,13 +230,13 @@ impl SIRInterpreter {
         &self.frames.last().unwrap().mem
     }
 
-    /// Inserts a pointer to the trace inputs into the `interp_step` frame.
-    pub fn set_trace_inputs(&mut self, tio: *mut u8) {
-        // The trace inputs live in $1
+    /// Inserts a pointer to the interpreter context into the `interp_step` frame.
+    pub fn set_interp_ctx(&mut self, ctx: *mut u8) {
+        // The interpreter context lives in $1
         let ptr = self.frames.first().unwrap().mem.local_ptr(&Local(1));
         unsafe {
             // Write the pointer value of `tio` into this frames memory.
-            std::ptr::write::<*mut u8>(ptr as *mut *mut u8, tio);
+            std::ptr::write::<*mut u8>(ptr as *mut *mut u8, ctx);
         }
     }
 
