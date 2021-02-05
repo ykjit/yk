@@ -311,7 +311,7 @@ pub extern "sysv64" fn bh_push_vec(
 /// Compile a TIR trace, returning executable code.
 pub fn compile_trace(tt: TirTrace) -> CompiledTrace {
     CompiledTrace {
-        mc: TraceCompiler::_compile(tt, false),
+        mc: TraceCompiler::compile(tt, false),
     }
 }
 
@@ -1172,7 +1172,7 @@ impl TraceCompiler {
                     _ => todo!("{}", ty.size()),
                 }
             }
-            Location::Mem(_ro) => todo!(),
+            Location::Mem(_) => todo!(),
             Location::Indirect { .. } => todo!(),
             Location::Const { .. } => todo!(),
         }
@@ -1519,7 +1519,7 @@ impl TraceCompiler {
         );
     }
 
-    fn _compile(mut tt: TirTrace, debug: bool) -> dynasmrt::ExecutableBuffer {
+    fn compile(mut tt: TirTrace, debug: bool) -> dynasmrt::ExecutableBuffer {
         let mut tc: Self = TraceCompiler::new(
             tt.local_decls.clone(),
             tt.addr_map.drain().into_iter().collect(),

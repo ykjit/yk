@@ -53,7 +53,7 @@ impl LocalMem {
                     }
                     _ => todo!(),
                 },
-                ConstantInt::SignedInt(_si) => todo!(),
+                ConstantInt::SignedInt(_) => todo!(),
             },
             Constant::Bool(b) => self.write_val(dest, [*b as u8].as_ptr(), 1),
             Constant::Tuple(t) => {
@@ -341,7 +341,7 @@ impl SIRInterpreter {
                 UnsignedIntTy::U64 => todo!(),
                 UnsignedIntTy::U128 => todo!(),
             },
-            TyKind::SignedInt(_si) => unreachable!(),
+            TyKind::SignedInt(_) => unreachable!(),
             TyKind::Bool => unsafe { u128::from(std::ptr::read::<u8>(ptr)) },
             _ => unreachable!(),
         }
