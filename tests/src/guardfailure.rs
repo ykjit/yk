@@ -78,23 +78,22 @@ fn recursion() {
     assert_eq!(args.1, 99);
 }
 
-#[ignore]
 #[test]
 fn recursion2() {
     struct InterpCtx(u8, u8);
 
     // Test that the SIR interpreter can deal with new recursions after a guard failure.
-    fn rec(i: u8, j: u8) -> u8 {
+    fn rec(i: u8) -> u8 {
         if i < 5 {
-            return rec(i + 1, j + 1);
+            return rec(i + 1);
         } else {
-            return j;
+            return i;
         }
     }
 
     #[interp_step]
     fn interp_step(io: &mut InterpCtx) {
-        let x = rec(io.0, io.1);
+        let x = rec(io.0);
         io.1 = x;
     }
 
@@ -103,9 +102,9 @@ fn recursion2() {
     interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
-    let mut args = InterpCtx(7, 1);
+    let mut args = InterpCtx(7, 0);
     assert!(unsafe { ct.execute(&mut args).is_null() });
-    assert_eq!(args.1, 1);
+    assert_eq!(args.1, 7);
     // Execute the trace with a context that causes a guard to fail.
     let mut args = InterpCtx(1, 0);
     let ptr = unsafe { ct.execute(&mut args) };

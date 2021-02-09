@@ -99,7 +99,6 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     // For each new function we enter during the trace, create a new guard block.
                     // The list of guard blocks is later added to the guard, enabling us to
                     // recreate the stack frames for blackholing.
-                    live_locals.push(HashSet::new());
                     guard_blocks.push(GuardBlock {
                         symbol_name: loc.symbol_name,
                         bb_idx: loc.bb_idx
@@ -208,6 +207,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                             // though the rest of this block was skipped.
                             in_interp_step = true;
                             entered_call = true;
+                            live_locals.push(HashSet::new());
                             continue;
                         }
                     }
@@ -260,11 +260,13 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                                 rnm.enter(callbody.local_decls.len());
 
                                 // Copy args in.
+                                live_locals.push(HashSet::new());
                                 for (arg_idx, arg) in newargs.iter().enumerate() {
                                     let dest_local = rnm.rename_local(
                                         &Local(u32::try_from(arg_idx).unwrap() + 1),
                                         &body
                                     );
+                                    live_locals.last_mut().unwrap().insert(dest_local.clone());
                                     let dest_ip = IPlace::Val {
                                         local: dest_local,
                                         off: 0,
@@ -284,11 +286,13 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     }
                 }
                 Terminator::Return => {
+                    guard_blocks.pop();
+                    live_locals.pop();
+
                     if body.flags.contains(BodyFlags::INTERP_STEP) {
                         debug_assert!(in_interp_step);
                         in_interp_step = false;
                         entered_call = false;
-                        guard_blocks.pop();
                         continue;
                     }
                     // After leaving an inlined function call we need to clean up any renaming
