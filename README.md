@@ -13,8 +13,18 @@ The compiler repo can be found [here](https://github.com/softdevteam/ykrustc).
 To get started, see
 [this section in the documentation](https://softdevteam.github.io/ykdocs/dev/getting_started.html).
 
-This repo uses xtask instead of regular cargo, so instead of running `cargo
-<target>`, you will instead need to execute `cargo xtask <target>`.
+To work with this repository, instead of running `cargo <target>`, instead
+execute `cargo xtask <target>`.
+
+You will also need to add the `-C tracer=<kind>` flag to `RUSTFLAGS` to tell
+the build system what kind of tracer you want to use (`hw` or `sw`, although
+only `hw` works at the moment).
+
+For example, to test using hardware tracing:
+```
+$ export RUSTFLAGS="-C tracer=hw"
+$ cargo xtask test
+```
 
 ## Contributors
 

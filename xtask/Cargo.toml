@@ -5,3 +5,4 @@ authors = ["The Yorick Developers"]
 edition = "2018"
 
 [dependencies]
+regex = "1.4.3"

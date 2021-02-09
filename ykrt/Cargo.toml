@@ -7,3 +7,6 @@ license = "Apache-2.0 OR MIT"
 
 [dependencies]
 ykshim_client = { path = "../ykshim_client" }
+
+[build-dependencies]
+regex = "1.4.3"
