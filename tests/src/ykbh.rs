@@ -91,3 +91,31 @@ fn call() {
     interpret_body("func_call", &mut ctx);
     assert_eq!(ctx.0, 5);
 }
+
+#[test]
+fn binops_arith() {
+    struct InterpCtx(u8, u8);
+
+    #[no_mangle]
+    fn add(io: &mut InterpCtx) {
+        io.0 = io.0 + io.1;
+    }
+
+    let mut ctx = InterpCtx(1, 2);
+    interpret_body("add", &mut ctx);
+    assert_eq!(ctx.0, 3);
+}
+
+#[test]
+fn binops_cond() {
+    struct InterpCtx(u8, u8, bool);
+
+    #[no_mangle]
+    fn lt(io: &mut InterpCtx) {
+        io.2 = io.0 < io.1;
+    }
+
+    let mut ctx = InterpCtx(1, 2, false);
+    interpret_body("lt", &mut ctx);
+    assert_eq!(ctx.2, true);
+}

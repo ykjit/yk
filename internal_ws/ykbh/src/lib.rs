@@ -1,7 +1,7 @@
 use std::alloc::{alloc, dealloc, Layout};
 use std::convert::TryFrom;
 use ykpack::{
-    self, CallOperand, Constant, ConstantInt, IPlace, Local, Statement, Terminator, TyKind,
+    self, BinOp, CallOperand, Constant, ConstantInt, IPlace, Local, Statement, Terminator, TyKind,
     UnsignedInt, UnsignedIntTy,
 };
 use yktrace::sir::SIR;
@@ -139,6 +139,43 @@ impl LocalMem {
     }
 }
 
+/// Binary operations macros.
+macro_rules! make_binop {
+    ($name: ident, $type: ident) => {
+        fn $name(
+            &mut self,
+            dest: &IPlace,
+            op: &BinOp,
+            opnd1: &IPlace,
+            opnd2: &IPlace,
+            checked: bool,
+        ) {
+            let a = $type::try_from(self.read_int(opnd1)).unwrap();
+            let b = $type::try_from(self.read_int(opnd2)).unwrap();
+            let locals = self.locals_mut();
+            let ptr = locals.iplace_to_ptr(dest);
+            let (v, of) = match op {
+                BinOp::Add => a.overflowing_add(b),
+                BinOp::Lt => ($type::from(a < b), false),
+                _ => todo!(),
+            };
+            if checked {
+                // Write overflow result into result tuple.
+                let ty = SIR.ty(&dest.ty());
+                let tty = ty.unwrap_tuple();
+                let flag_off = isize::try_from(tty.fields.offsets[1]).unwrap();
+                unsafe {
+                    std::ptr::write::<u8>(ptr.offset(flag_off), u8::from(of));
+                }
+            } else if of {
+                todo!("Raise error.")
+            }
+            let bytes = v.to_ne_bytes();
+            locals.write_val(ptr, bytes.as_ptr(), bytes.len());
+        }
+    };
+}
+
 /// A interpreter stack frame, containing allocated memory for the frames locals, and the function
 /// symbol name and basic block index needed by the interpreter to continue interpreting after
 /// returning from a function call.
@@ -225,9 +262,14 @@ impl SIRInterpreter {
         }
     }
 
-    /// Returns a reference to the currently active locals.
+    /// Returns an immutable reference to the currently active locals.
     fn locals(&self) -> &LocalMem {
         &self.frames.last().unwrap().mem
+    }
+
+    /// Returns a mutable reference to the currently active locals.
+    fn locals_mut(&mut self) -> &mut LocalMem {
+        &mut self.frames.last_mut().unwrap().mem
     }
 
     /// Inserts a pointer to the interpreter context into the `interp_step` frame.
@@ -249,7 +291,13 @@ impl SIRInterpreter {
                     Statement::MkRef(dest, src) => self.mkref(&dest, &src),
                     Statement::DynOffs { .. } => todo!(),
                     Statement::Store(dest, src) => self.store(&dest, &src),
-                    Statement::BinaryOp { .. } => todo!(),
+                    Statement::BinaryOp {
+                        dest,
+                        op,
+                        opnd1,
+                        opnd2,
+                        checked,
+                    } => self.binop(dest, op, opnd1, opnd2, *checked),
                     Statement::Nop => {}
                     Statement::Unimplemented(_) | Statement::Debug(_) => todo!(),
                     Statement::Cast(..) => todo!(),
@@ -257,7 +305,6 @@ impl SIRInterpreter {
                     Statement::Call(..) => unreachable!(),
                 }
             }
-
             self.terminator(&block.term);
         }
     }
@@ -326,11 +373,42 @@ impl SIRInterpreter {
             Terminator::Goto(bb) => {
                 self.frames.last_mut().unwrap().bbidx = *bb;
             }
+            Terminator::Assert {
+                cond,
+                expected,
+                target_bb,
+            } => {
+                let b = if self.read_int(cond) == 1 {
+                    true
+                } else {
+                    false
+                };
+                if b != *expected {
+                    todo!() // FIXME raise error
+                }
+                self.frames.last_mut().unwrap().bbidx = *target_bb;
+            }
             t => todo!("{}", t),
         }
     }
 
     fn read_int(&self, src: &IPlace) -> u128 {
+        match src {
+            IPlace::Const { val, ty: _ty } => {
+                let val = match val {
+                    Constant::Int(ci) => match ci {
+                        ConstantInt::UnsignedInt(ui) => match ui {
+                            UnsignedInt::U8(v) => u128::try_from(*v).unwrap(),
+                            _ => todo!(),
+                        },
+                        ConstantInt::SignedInt(_si) => todo!(),
+                    },
+                    _ => todo!(),
+                };
+                return val;
+            }
+            _ => {}
+        }
         let ptr = self.locals().iplace_to_ptr(src);
         match &SIR.ty(&src.ty()).kind {
             TyKind::UnsignedInt(ui) => match ui {
@@ -365,6 +443,36 @@ impl SIRInterpreter {
                 }
             }
             _ => unreachable!(),
+        }
+    }
+
+    make_binop!(binop_u8, u8);
+
+    fn binop(
+        &mut self,
+        dest: &IPlace,
+        op: &ykpack::BinOp,
+        opnd1: &IPlace,
+        opnd2: &IPlace,
+        checked: bool,
+    ) {
+        let ty = SIR.ty(&opnd1.ty());
+        if !ty.is_int() {
+            todo!("binops for non-integers");
+        }
+
+        match &ty.kind {
+            TyKind::UnsignedInt(ui) => match ui {
+                UnsignedIntTy::U8 => self.binop_u8(dest, op, opnd1, opnd2, checked),
+                UnsignedIntTy::U16 => todo!(),
+                UnsignedIntTy::U32 => todo!(),
+                UnsignedIntTy::U64 => todo!(),
+                UnsignedIntTy::U128 => todo!(),
+                UnsignedIntTy::Usize => todo!(),
+            },
+            TyKind::SignedInt(_si) => todo!(),
+            TyKind::Bool => unreachable!(),
+            e => unreachable!("{:?}", e),
         }
     }
 }
