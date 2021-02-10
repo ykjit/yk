@@ -77,7 +77,10 @@ fn simple() {
         io.0 = x;
     }
 
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     simple(&mut InterpCtx(0));
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -273,7 +276,10 @@ fn function_call_simple() {
     }
 
     let mut io = InterpCtx(0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     fcall(&mut io);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -301,7 +307,10 @@ fn function_call_nested() {
     }
 
     let mut io = InterpCtx(0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     fnested(&mut io);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -341,7 +350,10 @@ fn call_symbol_tir() {
         let _ = unsafe { add6(1, 1, 1, 1, 1, 1) };
     }
 
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     interp_step(&mut InterpCtx(()));
     let sir_trace = th.stop_tracing().unwrap();
     let tir_trace = TirTrace::new(&sir_trace);
@@ -367,7 +379,10 @@ fn exec_call_symbol_no_args() {
     }
 
     let mut ctx = InterpCtx(0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let mut args = InterpCtx(0);
@@ -386,7 +401,10 @@ fn exec_call_symbol_with_arg() {
     }
 
     let mut ctx = InterpCtx(-56);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let mut args = InterpCtx(-56);
@@ -405,7 +423,10 @@ fn exec_call_symbol_with_const_arg() {
     }
 
     let mut ctx = InterpCtx(0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -423,7 +444,10 @@ fn exec_call_symbol_with_many_args() {
     }
 
     let mut ctx = InterpCtx(0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -442,7 +466,10 @@ fn exec_call_symbol_with_many_args_some_ignored() {
     }
 
     let mut ctx = InterpCtx(0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -470,7 +497,10 @@ fn ext_call_and_spilling() {
     }
 
     let mut ctx = InterpCtx(0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     ext_call(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -491,7 +521,10 @@ fn binop_add_simple() {
     }
 
     let mut ctx = InterpCtx(5, 2, 0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     interp_stepx(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -511,7 +544,10 @@ fn binop_add_overflow() {
     }
 
     let mut ctx = InterpCtx(254, 0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     interp_stepx(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     assert_eq!(ctx.1, 255);
@@ -539,7 +575,10 @@ fn binop_other() {
     }
 
     let mut ctx = InterpCtx(5, 2, 0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     interp_stepx(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -562,7 +601,10 @@ fn ref_deref_simple() {
     }
 
     let mut ctx = InterpCtx(0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -585,7 +627,10 @@ fn ref_deref_double() {
     }
 
     let mut ctx = InterpCtx(0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -608,7 +653,10 @@ fn ref_deref_double_and_field() {
     }
 
     let mut ctx = InterpCtx(0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -637,7 +685,10 @@ fn ref_deref_stack() {
     }
 
     let mut ctx = InterpCtx(0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -665,7 +716,10 @@ fn deref_stack_to_register() {
 
     struct InterpCtx(u64);
     let mut ctx = InterpCtx(0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -694,7 +748,10 @@ fn deref_register_to_stack() {
 
     // This test dereferences a variable that lives on the stack and stores it in a register.
     let mut ctx = InterpCtx(0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -720,7 +777,10 @@ fn do_not_trace() {
     }
 
     let mut ctx = InterpCtx(1);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let tir_trace = TirTrace::new(&sir_trace);
@@ -753,7 +813,10 @@ fn do_not_trace_stdlib() {
 
     let mut vec: Vec<u64> = Vec::new();
     let mut ctx = InterpCtx(&mut vec);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     dont_trace_stdlib(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -784,7 +847,10 @@ fn projection_chain() {
     let s = S { x: 5, y: 6 };
     let t = (1, 2, 3);
     let mut ctx = InterpCtx(t, 0u8, s, 0usize);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -810,7 +876,10 @@ fn projection_lhs() {
 
     let t = (1u8, 2u8);
     let mut ctx = InterpCtx(t, 3u8);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -833,7 +902,10 @@ fn array() {
 
     let mut a = [3, 4, 5];
     let mut ctx = InterpCtx(&mut a, 0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     array(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     assert_eq!(ctx.1, 4);
@@ -857,7 +929,10 @@ fn array_nested() {
 
     let mut a = [[3, 4, 5], [6, 7, 8]];
     let mut ctx = InterpCtx(&mut a, 0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     array(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     assert_eq!(ctx.1, 8);
@@ -882,7 +957,10 @@ fn array_nested_mad() {
 
     let mut a = [S([3, 4, 5, 6]), S([7, 8, 9, 10]), S([11, 12, 13, 14])];
     let mut ctx = InterpCtx(&mut a, 0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     array(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     assert_eq!(ctx.1, 13);
@@ -904,7 +982,10 @@ fn rhs_struct_ref_field() {
     }
 
     let mut ctx = InterpCtx(0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     add1(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -925,7 +1006,10 @@ fn mut_lhs_struct_ref() {
     }
 
     let mut ctx = InterpCtx(0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     set100(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -948,7 +1032,10 @@ fn place_larger_than_reg() {
     }
 
     let mut ctx = InterpCtx(S(0, 0, 0));
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     ten(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -971,7 +1058,10 @@ fn array_slice_index() {
 
     let a = [1, 2, 3];
     let mut ctx = InterpCtx(&a, 0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -991,7 +1081,10 @@ fn trim_junk() {
     }
 
     let mut ctx = InterpCtx(0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     interp_step(&mut ctx);
     ctx.0 = 0; // Should get trimmed.
     interp_step(&mut ctx);
@@ -1027,7 +1120,10 @@ fn comparison() {
     }
 
     let mut ctx = InterpCtx(0, false);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -1055,7 +1151,10 @@ fn guard() {
     }
 
     let mut ctx = InterpCtx(std::hint::black_box(|i| i)(0), 0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -1083,7 +1182,10 @@ fn matching() {
         io.0 = x;
     }
 
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     matchthis(&mut InterpCtx(1));
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -1108,7 +1210,10 @@ fn cast() {
     }
 
     let mut io = InterpCtx(0, 97);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     matchthis(&mut io);
     let sir_trace = th.stop_tracing().unwrap();
     assert_eq!(io.0, 1);
@@ -1133,7 +1238,10 @@ fn vec_add() {
 
     let cells = vec![0, 1, 2];
     let mut io = InterpCtx { ptr: 1, cells };
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     vec_add(&mut io);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -1167,7 +1275,10 @@ fn nested_do_not_trace() {
     }
 
     let mut ctx = InterpCtx(0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
