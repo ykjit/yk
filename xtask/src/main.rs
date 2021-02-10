@@ -39,17 +39,37 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String]) {
         run_action(Workspace::Internal, target, extra_args);
     }
 
-    let mut tool = env::var("CARGO").unwrap();
-    let mut target_args = vec![target.to_string()];
-    let mut tool_args: Vec<&str> = Vec::new();
+    let mut cmd = if target == "fmt" {
+        // There is currently a bug where `cargo fmt` doesn't work for linked toolchains:
+        // https://github.com/rust-lang/rust/issues/81431
+        //
+        // As a workaround we fall back on the nightly toolchain installed via rustup. This
+        // is confusing. Normally when we run `cargo`, having used `rustup` to install, it
+        // is not actually `cargo` that we run, but a wrapper provided by `rustup`. It is
+        // this wrapper which understands the `+nightly` argument. The binary pointed to by
+        // by $CARGO (in the environment) is a real cargo (not a wrapper) which won't
+        // understand `+nightly`. So the easiest way to run `cargo fmt` for the nightly
+        // toolchain is to use `rustup run nightly cargo fmt`.
+        let mut cmd = Command::new("rustup");
+        cmd.args(&["run", "nightly", "cargo", "fmt"]);
+        cmd
+    } else {
+        let mut cmd = Command::new(env::var("CARGO").unwrap());
+        cmd.arg(target);
+        cmd
+    };
+
     let mut rust_flags = env::var("RUSTFLAGS").unwrap_or_else(|_| String::new());
 
     match target {
-        "audit" => (),
+        "audit" => {}
+        "fmt" => {
+            rust_flags.clear();
+        }
         "clean" => {
             if workspace == Workspace::Internal {
                 // The internal workspace is optimized.
-                target_args.push("--release".to_string());
+                cmd.arg("--release".to_string());
             }
         }
         "build" | "check" | "test" => {
@@ -58,12 +78,12 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String]) {
                 rust_flags = make_internal_rustflags(&rust_flags);
 
                 // Optimise the internal workspace.
-                target_args.push("--release".to_string());
+                cmd.arg("--release");
                 // Set the tracermode cfg macro, but without changing anything relating to code
                 // generation. We can't use `-C tracer=hw` as this would turn off optimisations
                 // and emit SIR for stuff we will never trace.
-                target_args.push("--features".to_string());
-                target_args.push(format!("yktrace/trace_{}", tracing_kind));
+                cmd.arg("--features");
+                cmd.arg(format!("yktrace/trace_{}", tracing_kind));
 
                 // `cargo test` in the internal workspace won't build libykshim.so, so we have
                 // to force-build it to avoid linkage problems for the external workspace.
@@ -72,32 +92,14 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String]) {
                 }
             }
         }
-        "fmt" => {
-            // There is currently a bug where `cargo fmt` doesn't work for linked toolchains:
-            // https://github.com/rust-lang/rust/issues/81431
-            //
-            // As a workaround we fall back on the nightly toolchain installed via rustup. This
-            // is confusing. Normally when we run `cargo`, having used `rustup` to install, it
-            // is not actually `cargo` that we run, but a wrapper provided by `rustup`. It is
-            // this wrapper which understands the `+nightly` argument. The binary pointed to by
-            // by $CARGO (in the environment) is a real cargo (not a wrapper) which won't
-            // understand `+nightly`. So the easiest way to run `cargo fmt` for the nightly
-            // toolchain is to use `rustup run nightly cargo fmt`.
-            rust_flags.clear();
-            tool = "rustup".to_owned();
-            tool_args.extend(&["run", "nightly", "cargo"]);
-        }
         _ => bail(format!(
             "the build system does not support the {} target",
             target
         )),
     }
 
-    let mut cmd = Command::new(&tool);
     let status = cmd
         .current_dir(workspace.dir())
-        .args(tool_args)
-        .args(target_args)
         .args(extra_args)
         .env("RUSTFLAGS", rust_flags)
         .spawn()
@@ -106,9 +108,7 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String]) {
         .unwrap();
 
     if !status.success() {
-        let pb = PathBuf::from(tool);
-        let base = pb.iter().last().unwrap().to_str().unwrap();
-        bail(format!("{} failed with exit code {}", base, status));
+        bail(format!("{:?} failed with {}", cmd, status));
     }
 }
 
