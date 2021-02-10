@@ -1,3 +1,7 @@
+/// The stopgap interpreter which is invoked during a guard failure. It picks up right after the
+/// guard and interprets SIR getting us safely back to a control point in the the meta-tracer from
+/// which point normal interpretation can continue.
+
 use std::alloc::{alloc, dealloc, Layout};
 use std::convert::TryFrom;
 use ykpack::{
@@ -176,26 +180,25 @@ macro_rules! make_binop {
     };
 }
 
-/// A interpreter stack frame, containing allocated memory for the frames locals, and the function
+/// An interpreter stack frame, containing allocated memory for the frames locals, and the function
 /// symbol name and basic block index needed by the interpreter to continue interpreting after
 /// returning from a function call.
 struct StackFrame {
     /// Allocated memory holding live locals.
     mem: LocalMem,
-    /// The current basic block index of this frame. Upon returning from a function call it is used
-    /// to look up the previous basic block and check its terminator to decide where to continue
-    /// interpreting.
+    /// The current basic block index of this frame.
     bbidx: ykpack::BasicBlockIndex,
     /// Symbol name of this stack frame. Needed to retrieve the SIR body of the function which
     /// contains the statements we want to interpret.
     func: String,
 }
 
-/// The SIR interpreter, also known as blackholing interpreter, is invoked when a guard fails in a
+/// The SIR interpreter, also known as stopgap interpreter, is invoked when a guard fails in a
 /// trace. It is initalised with information from the trace, e.g. live variables, stack frames, and
-/// then run to get us back to a control point from where the normal interpreter can take over.
+/// then run to get us back to a control point from which point the normal interpreter can take
+/// over.
 pub struct SIRInterpreter {
-    /// Keeps track of active stack frames (most recent last).
+    /// Active stack frames (most recent last).
     frames: Vec<StackFrame>,
 }
 
@@ -242,13 +245,13 @@ impl SIRInterpreter {
         self._interpret();
     }
 
-    /// Given a vector of local declarations allocate just enough space to hold all of them.
+    /// Given the symbol name of a function, generate a `StackFrame` which allocates the precise
+    /// amount of memory required by the locals used in that function.
     fn create_frame(sym: &String) -> StackFrame {
         let body = SIR.body(&sym).unwrap();
         let (size, align) = body.layout;
         let offsets = body.offsets.clone();
         let layout = Layout::from_size_align(size, align).unwrap();
-        // Allocate memory for the locals
         let locals = unsafe { alloc(layout) };
         let mem = LocalMem {
             locals,
@@ -277,7 +280,6 @@ impl SIRInterpreter {
         // The interpreter context lives in $1
         let ptr = self.frames.first().unwrap().mem.local_ptr(&Local(1));
         unsafe {
-            // Write the pointer value of `tio` into this frames memory.
             std::ptr::write::<*mut u8>(ptr as *mut *mut u8, ctx);
         }
     }
@@ -328,10 +330,9 @@ impl SIRInterpreter {
                 self.frames.push(frame);
             }
             Terminator::Return => {
-                // Return from current stackframe.
                 let oldframe = self.frames.pop().unwrap();
-                // Are we still inside a nested call? Otherwise we are returning from the first
-                // body, so we are done interpreting.
+                // If there are no more frames left, we are returning from the `interp_step`
+                // function, which means we have reached the control point and are done here.
                 if let Some(curframe) = self.frames.last_mut() {
                     let bbidx = usize::try_from(curframe.bbidx).unwrap();
                     let body = SIR.body(&curframe.func).unwrap();
@@ -425,12 +426,12 @@ impl SIRInterpreter {
         }
     }
 
-    /// Implements the Store statement.
+    /// Store the IPlace src in the IPlace dest in the current frame.
     fn store(&mut self, dest: &IPlace, src: &IPlace) {
         self.frames.last_mut().unwrap().mem.store(dest, src);
     }
 
-    /// Creates a reference to an IPlace.
+    /// Creates a reference to an IPlace, e.g. `dst = &src`.
     fn mkref(&mut self, dest: &IPlace, src: &IPlace) {
         match dest {
             IPlace::Val { .. } | IPlace::Indirect { .. } => {
