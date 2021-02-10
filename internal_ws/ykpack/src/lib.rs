@@ -21,8 +21,12 @@
 //!  The version field is automatically written and checked by the `Encoder` and `Decoder`
 //!  respectively.
 
+#[cfg(feature = "write_utils")]
+pub mod build;
 mod decode;
 mod encode;
+#[cfg(feature = "write_utils")]
+pub mod labels;
 mod types;
 
 pub use decode::Decoder;
