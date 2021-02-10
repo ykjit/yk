@@ -268,7 +268,7 @@ fn local_to_reg_name(loc: &Location) -> &'static str {
 #[no_mangle]
 pub extern "sysv64" fn invoke_sinterp(vptr: *mut Vec<FrameInfo>) -> *mut SIRInterpreter {
     let v = unsafe { Box::from_raw(vptr) };
-    let si = SIRInterpreter::init_frames(*v);
+    let si = SIRInterpreter::from_frames(*v);
     Box::into_raw(Box::new(si))
 }
 

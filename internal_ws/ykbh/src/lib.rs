@@ -1,6 +1,6 @@
-/// The stopgap interpreter which is invoked during a guard failure. It picks up right after the
-/// guard and interprets SIR getting us safely back to a control point in the the meta-tracer from
-/// which point normal interpretation can continue.
+//! The stopgap interpreter which is invoked during a guard failure. It picks up right after the
+//! guard and interprets SIR getting us safely back to a control point in the the meta-tracer from
+//! which point normal interpretation can continue.
 
 use std::alloc::{alloc, dealloc, Layout};
 use std::convert::TryFrom;
@@ -203,16 +203,17 @@ pub struct SIRInterpreter {
 }
 
 impl SIRInterpreter {
-    pub fn new(sym: String) -> Self {
+    /// Initialise the interpreter from a symbol name.
+    pub fn from_symbol(sym: String) -> Self {
         let frame = SIRInterpreter::create_frame(&sym);
         SIRInterpreter {
             frames: vec![frame],
         }
     }
 
-    /// Initialises the interpreter with information about live variables and stack frames,
-    /// received from the failing guard.
-    pub fn init_frames(v: Vec<FrameInfo>) -> Self {
+    /// Initialise the interpreter from a vector of `FrameInfo`s. Each contains information about
+    /// live variables and stack frames, received from a failing guard.
+    pub fn from_frames(v: Vec<FrameInfo>) -> Self {
         let mut frames = Vec::new();
         for fi in v {
             let body = SIR.body(&fi.sym).unwrap();
@@ -234,7 +235,7 @@ impl SIRInterpreter {
     /// Run the SIR interpreter after it has been initialised by a guard failure. Since we start in
     /// the block where the guard failed, we immediately skip to the terminator and interpret it to
     /// see which block we need to start interpretation in.
-    pub unsafe fn interpret(&mut self, ctx: *mut u8) {
+    pub unsafe fn sg_interpret(&mut self, ctx: *mut u8) {
         self.set_interp_ctx(ctx);
         // Jump to the correct basic block by interpreting the terminator.
         let frame = self.frames.last().unwrap();
@@ -242,7 +243,7 @@ impl SIRInterpreter {
         let bbidx = usize::try_from(frame.bbidx).unwrap();
         self.terminator(&body.blocks[bbidx].term);
         // Start interpretation.
-        self._interpret();
+        self.interpret();
     }
 
     /// Given the symbol name of a function, generate a `StackFrame` which allocates the precise
@@ -284,7 +285,7 @@ impl SIRInterpreter {
         }
     }
 
-    pub unsafe fn _interpret(&mut self) {
+    pub unsafe fn interpret(&mut self) {
         while let Some(frame) = self.frames.last() {
             let body = SIR.body(&frame.func).unwrap();
             let block = &body.blocks[usize::try_from(frame.bbidx).unwrap()];
