@@ -2,19 +2,19 @@
 
 set -e
 
-case ${STD_TRACER_MODE} in
+case ${CI_TRACER_KIND} in
     "sw" | "hw" ) true;;
-    *) echo "STD_TRACER_MODE must be set to either 'hw' or 'sw'"
+    *) echo "CI_TRACER_KIND must be set to either 'hw' or 'sw'"
        exit 1;;
 esac
 
 RUSTFLAGS="${RUSTFLAGS} -D warnings"
 
 # Use the most recent successful ykrustc build.
-tar jxf /opt/ykrustc-bin-snapshots/ykrustc-${STD_TRACER_MODE}-stage2-latest.tar.bz2
+tar jxf /opt/ykrustc-bin-snapshots/ykrustc-${CI_TRACER_KIND}-stage2-latest.tar.bz2
 export PATH=`pwd`/ykrustc-stage2-latest/bin:${PATH}
 
-RUSTFLAGS="-C tracer=${STD_TRACER_MODE}" cargo xtask test
+RUSTFLAGS="-C tracer=${CI_TRACER_KIND}" cargo xtask test
 
 export CARGO_HOME="`pwd`/.cargo"
 export RUSTUP_HOME="`pwd`/.rustup"
