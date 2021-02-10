@@ -8,7 +8,7 @@ use ykpack::{
     self, BinOp, CallOperand, Constant, ConstantInt, IPlace, Local, Statement, Terminator, TyKind,
     UnsignedInt, UnsignedIntTy,
 };
-use yktrace::sir::SIR;
+use yktrace::sir::{INTERP_STEP_ARG, RETURN_LOCAL, SIR};
 
 /// Stores information needed to recreate stack frames in the SIRInterpreter.
 pub struct FrameInfo {
@@ -279,7 +279,7 @@ impl SIRInterpreter {
     /// Inserts a pointer to the interpreter context into the `interp_step` frame.
     pub fn set_interp_ctx(&mut self, ctx: *mut u8) {
         // The interpreter context lives in $1
-        let ptr = self.frames.first().unwrap().mem.local_ptr(&Local(1));
+        let ptr = self.frames.first().unwrap().mem.local_ptr(&INTERP_STEP_ARG);
         unsafe {
             std::ptr::write::<*mut u8>(ptr as *mut *mut u8, ctx);
         }
@@ -348,7 +348,7 @@ impl SIRInterpreter {
                         _ => unreachable!(),
                     };
                     // Get a pointer to the return value of the called frame.
-                    let ret_ptr = oldframe.mem.local_ptr(&Local(0));
+                    let ret_ptr = oldframe.mem.local_ptr(&RETURN_LOCAL);
                     // Write the return value to the destination in the previous frame.
                     let dst_ptr = curframe.mem.iplace_to_ptr(&dest);
                     let size = usize::try_from(SIR.ty(&dest.ty()).size()).unwrap();

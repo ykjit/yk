@@ -27,10 +27,10 @@ use std::mem;
 use std::process::Command;
 use ykbh::{FrameInfo, SIRInterpreter};
 use ykpack::{IPlace, OffT, SignedIntTy, Ty, TyKind, TypeId, UnsignedIntTy};
+use yktrace::sir::{INTERP_STEP_ARG, SIR};
 use yktrace::tir::{
     BinOp, CallOperand, Constant, Guard, GuardKind, Local, Statement, TirOp, TirTrace,
 };
-use yktrace::{sir::SIR, INTERP_STEP_ARG};
 
 use dynasmrt::{DynamicLabel, DynasmApi, DynasmLabelApi};
 
