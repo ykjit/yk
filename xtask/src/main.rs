@@ -6,7 +6,6 @@
 //! For more information, see this section in the documentation:
 //! https://softdevteam.github.io/ykdocs/tech/yk_structure.html
 
-use regex::Regex;
 use std::{
     env,
     path::PathBuf,
