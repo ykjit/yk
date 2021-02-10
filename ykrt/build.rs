@@ -21,12 +21,15 @@ fn main() {
     // correctly when working directly with the yk repo (via xtask).
     if env::var("YK_XTASK").is_err() {
         let mut rustflags = env::var("RUSTFLAGS").unwrap_or_else(|_| String::new());
+        let tracing_kind = find_tracing_kind(&rustflags);
         rustflags = make_internal_rustflags(&rustflags);
         let status = Command::new(cargo)
-            .current_dir(&internal_dir)
+            .current_dir(internal_dir.join("ykshim"))
             .arg("build")
             .arg("--release")
             .env("RUSTFLAGS", &rustflags)
+            .arg("--features")
+            .arg(format!("yktrace/trace_{}", tracing_kind))
             .spawn()
             .unwrap()
             .wait()
