@@ -16,3 +16,15 @@ fn find_tracing_kind(rustflags: &str) -> String {
     }
     tracing_kind.to_owned()
 }
+
+/// Given the RUSTFLAGS for the external workspace, make flags for the internal one.
+fn make_internal_rustflags(rustflags: &str) -> String {
+    // Remove `-C tracer=<kind>`, as this would stifle optimisations.
+    let re = Regex::new(r"-C\s*tracer=[a-z]*").unwrap();
+    let mut int_rustflags = re.replace_all(rustflags, "").to_string();
+
+    // Set the tracermode cfg macro, but without changing anything relating to code generation.
+    let tracing_kind = find_tracing_kind(&rustflags);
+    int_rustflags.push_str(&format!(" --cfg tracermode=\"{}\"", tracing_kind));
+    int_rustflags
+}

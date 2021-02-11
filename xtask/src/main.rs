@@ -59,15 +59,11 @@ impl<'a> WorkspaceAction<'a> {
         match target {
             "audit" => (),
             "build" | "check" | "clean" | "test" => {
-                let tracing_kind = find_tracing_kind(&rust_flags);
                 if workspace == Workspace::Internal {
-                    rust_flags.clear();
+                    rust_flags = make_internal_rustflags(&rust_flags);
+
                     // Optimise the internal workspace.
                     target_args.push("--release");
-                    // Set the tracermode cfg macro, but without changing anything relating to code
-                    // generation. We can't use `-C tracer=hw` as this would turn off optimisations
-                    // and emit SIR for stuff we will never trace.
-                    rust_flags.push_str(&format!(" --cfg tracermode=\"{}\"", tracing_kind));
 
                     // `cargo test` in the internal workspace won't build libykshim.so, so we have
                     // to force-build it to avoid linkage problems for the external workspace.
