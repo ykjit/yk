@@ -298,11 +298,8 @@ pub extern "sysv64" fn bh_push_vec(
 ) {
     let fname =
         unsafe { std::str::from_utf8(std::slice::from_raw_parts(sym_ptr, sym_len)).unwrap() };
-    let fi = FrameInfo {
-        sym: fname.to_string(),
-        bbidx,
-        mem,
-    };
+    let body = SIR.body(fname).unwrap();
+    let fi = FrameInfo { body, bbidx, mem };
     let mut v = unsafe { Box::from_raw(vptr) };
     v.push(fi);
     Box::into_raw(v);

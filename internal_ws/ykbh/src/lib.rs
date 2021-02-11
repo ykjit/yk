@@ -4,16 +4,17 @@
 
 use std::alloc::{alloc, dealloc, Layout};
 use std::convert::TryFrom;
+use std::sync::Arc;
 use ykpack::{
-    self, BinOp, CallOperand, Constant, ConstantInt, IPlace, Local, Statement, Terminator, TyKind,
-    UnsignedInt, UnsignedIntTy,
+    self, BinOp, Body, CallOperand, Constant, ConstantInt, IPlace, Local, Statement, Terminator,
+    TyKind, UnsignedInt, UnsignedIntTy,
 };
 use yktrace::sir::{INTERP_STEP_ARG, RETURN_LOCAL, SIR};
 
 /// Stores information needed to recreate stack frames in the SIRInterpreter.
 pub struct FrameInfo {
-    /// The symbol name of this frame.
-    pub sym: String,
+    /// The body of this frame.
+    pub body: Arc<Body>,
     /// Index of the current basic block we are in. When returning from a function call, the
     /// terminator of this block is were we continue.
     pub bbidx: usize,
@@ -188,9 +189,8 @@ struct StackFrame {
     mem: LocalMem,
     /// The current basic block index of this frame.
     bbidx: ykpack::BasicBlockIndex,
-    /// Symbol name of this stack frame. Needed to retrieve the SIR body of the function which
-    /// contains the statements we want to interpret.
-    func: String,
+    /// Body of this stack frame.
+    body: Arc<Body>,
 }
 
 /// The SIR interpreter, also known as stopgap interpreter, is invoked when a guard fails in a
@@ -216,7 +216,7 @@ impl SIRInterpreter {
     pub fn from_frames(v: Vec<FrameInfo>) -> Self {
         let mut frames = Vec::new();
         for fi in v {
-            let body = SIR.body(&fi.sym).unwrap();
+            let body = &fi.body;
             let mem = LocalMem {
                 locals: fi.mem,
                 offsets: body.offsets.clone(),
@@ -225,7 +225,7 @@ impl SIRInterpreter {
             let frame = StackFrame {
                 mem,
                 bbidx: u32::try_from(fi.bbidx).unwrap(),
-                func: fi.sym,
+                body: fi.body.clone(),
             };
             frames.push(frame);
         }
@@ -239,7 +239,7 @@ impl SIRInterpreter {
         self.set_interp_ctx(ctx);
         // Jump to the correct basic block by interpreting the terminator.
         let frame = self.frames.last().unwrap();
-        let body = SIR.body(&frame.func).unwrap();
+        let body = frame.body.clone();
         let bbidx = usize::try_from(frame.bbidx).unwrap();
         self.terminator(&body.blocks[bbidx].term);
         // Start interpretation.
@@ -262,7 +262,7 @@ impl SIRInterpreter {
         StackFrame {
             mem,
             bbidx: 0,
-            func: sym.to_string(),
+            body,
         }
     }
 
@@ -287,7 +287,7 @@ impl SIRInterpreter {
 
     pub unsafe fn interpret(&mut self) {
         while let Some(frame) = self.frames.last() {
-            let body = SIR.body(&frame.func).unwrap();
+            let body = frame.body.clone();
             let block = &body.blocks[usize::try_from(frame.bbidx).unwrap()];
             for stmt in block.stmts.iter() {
                 match stmt {
@@ -336,7 +336,7 @@ impl SIRInterpreter {
                 // function, which means we have reached the control point and are done here.
                 if let Some(curframe) = self.frames.last_mut() {
                     let bbidx = usize::try_from(curframe.bbidx).unwrap();
-                    let body = SIR.body(&curframe.func).unwrap();
+                    let body = &curframe.body;
                     // Check the previous frame's call terminator to find out where we have to go
                     // next.
                     let (dest, bbidx) = match &body.blocks[bbidx].term {
