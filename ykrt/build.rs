@@ -15,21 +15,18 @@ fn main() {
     internal_dir.push("internal_ws");
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let cargo = env::var("CARGO").unwrap();
-    let rust_flags = env::var("RUSTFLAGS").unwrap_or_else(|_| String::new());
-    let tracing_kind = find_tracing_kind(&rust_flags);
 
     // Only build the internal workspace now if we are not using xtask, i.e. if we are being
     // consumed as a dependency. This means we see the compiler output for the internal workspace
     // correctly when working directly with the yk repo (via xtask).
     if env::var("YK_XTASK").is_err() {
+        let mut rustflags = env::var("RUSTFLAGS").unwrap_or_else(|_| String::new());
+        rustflags = make_internal_rustflags(&rustflags);
         let status = Command::new(cargo)
             .current_dir(&internal_dir)
             .arg("build")
             .arg("--release")
-            .env(
-                "RUSTFLAGS",
-                &format!("--cfg tracermode=\"{}\"", tracing_kind),
-            )
+            .env("RUSTFLAGS", &rustflags)
             .spawn()
             .unwrap()
             .wait()

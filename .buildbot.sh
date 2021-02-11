@@ -8,14 +8,20 @@ case ${CI_TRACER_KIND} in
        exit 1;;
 esac
 
-RUSTFLAGS="${RUSTFLAGS} -D warnings"
+export RUSTFLAGS="-C tracer=${CI_TRACER_KIND} -D warnings"
 
 # Use the most recent successful ykrustc build.
 tar jxf /opt/ykrustc-bin-snapshots/ykrustc-${CI_TRACER_KIND}-stage2-latest.tar.bz2
 export PATH=`pwd`/ykrustc-stage2-latest/bin:${PATH}
 
-RUSTFLAGS="-C tracer=${CI_TRACER_KIND}" cargo xtask test
+# Test both workspaces.
+cargo xtask test
+cargo xtask clean
 
+# Also test the build without xtask, as that's what consumers will do.
+cargo build
+
+unset RUSTFLAGS
 export CARGO_HOME="`pwd`/.cargo"
 export RUSTUP_HOME="`pwd`/.rustup"
 export RUSTUP_INIT_SKIP_PATH_CHECK="yes"
