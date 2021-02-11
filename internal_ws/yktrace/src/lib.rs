@@ -20,10 +20,6 @@ mod swt;
 
 pub use errors::InvalidTraceError;
 use sir::SirTrace;
-use ykpack::Local;
-
-// In TIR traces, the argument to the interp_step is always local #1.
-pub const INTERP_STEP_ARG: Local = Local(1);
 
 /// The different ways by which we can collect a trace.
 #[derive(Clone, Copy)]

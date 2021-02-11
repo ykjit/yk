@@ -27,10 +27,10 @@ use std::mem;
 use std::process::Command;
 use ykbh::{FrameInfo, SIRInterpreter};
 use ykpack::{IPlace, OffT, SignedIntTy, Ty, TyKind, TypeId, UnsignedIntTy};
+use yktrace::sir::{INTERP_STEP_ARG, SIR};
 use yktrace::tir::{
     BinOp, CallOperand, Constant, Guard, GuardKind, Local, Statement, TirOp, TirTrace,
 };
-use yktrace::{sir::SIR, INTERP_STEP_ARG};
 
 use dynasmrt::{DynamicLabel, DynasmApi, DynasmLabelApi};
 
@@ -268,7 +268,7 @@ fn local_to_reg_name(loc: &Location) -> &'static str {
 #[no_mangle]
 pub extern "sysv64" fn invoke_sinterp(vptr: *mut Vec<FrameInfo>) -> *mut SIRInterpreter {
     let v = unsafe { Box::from_raw(vptr) };
-    let si = SIRInterpreter::init_frames(*v);
+    let si = SIRInterpreter::from_frames(*v);
     Box::into_raw(Box::new(si))
 }
 

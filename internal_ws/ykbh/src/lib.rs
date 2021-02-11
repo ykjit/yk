@@ -1,10 +1,14 @@
+//! The stopgap interpreter which is invoked during a guard failure. It picks up right after the
+//! guard and interprets SIR getting us safely back to a control point in the the meta-tracer from
+//! which point normal interpretation can continue.
+
 use std::alloc::{alloc, dealloc, Layout};
 use std::convert::TryFrom;
 use ykpack::{
     self, BinOp, CallOperand, Constant, ConstantInt, IPlace, Local, Statement, Terminator, TyKind,
     UnsignedInt, UnsignedIntTy,
 };
-use yktrace::sir::SIR;
+use yktrace::sir::{INTERP_STEP_ARG, RETURN_LOCAL, SIR};
 
 /// Stores information needed to recreate stack frames in the SIRInterpreter.
 pub struct FrameInfo {
@@ -176,40 +180,40 @@ macro_rules! make_binop {
     };
 }
 
-/// A interpreter stack frame, containing allocated memory for the frames locals, and the function
+/// An interpreter stack frame, containing allocated memory for the frames locals, and the function
 /// symbol name and basic block index needed by the interpreter to continue interpreting after
 /// returning from a function call.
 struct StackFrame {
     /// Allocated memory holding live locals.
     mem: LocalMem,
-    /// The current basic block index of this frame. Upon returning from a function call it is used
-    /// to look up the previous basic block and check its terminator to decide where to continue
-    /// interpreting.
+    /// The current basic block index of this frame.
     bbidx: ykpack::BasicBlockIndex,
     /// Symbol name of this stack frame. Needed to retrieve the SIR body of the function which
     /// contains the statements we want to interpret.
     func: String,
 }
 
-/// The SIR interpreter, also known as blackholing interpreter, is invoked when a guard fails in a
+/// The SIR interpreter, also known as stopgap interpreter, is invoked when a guard fails in a
 /// trace. It is initalised with information from the trace, e.g. live variables, stack frames, and
-/// then run to get us back to a control point from where the normal interpreter can take over.
+/// then run to get us back to a control point from which point the normal interpreter can take
+/// over.
 pub struct SIRInterpreter {
-    /// Keeps track of active stack frames (most recent last).
+    /// Active stack frames (most recent last).
     frames: Vec<StackFrame>,
 }
 
 impl SIRInterpreter {
-    pub fn new(sym: String) -> Self {
+    /// Initialise the interpreter from a symbol name.
+    pub fn from_symbol(sym: String) -> Self {
         let frame = SIRInterpreter::create_frame(&sym);
         SIRInterpreter {
             frames: vec![frame],
         }
     }
 
-    /// Initialises the interpreter with information about live variables and stack frames,
-    /// received from the failing guard.
-    pub fn init_frames(v: Vec<FrameInfo>) -> Self {
+    /// Initialise the interpreter from a vector of `FrameInfo`s. Each contains information about
+    /// live variables and stack frames, received from a failing guard.
+    pub fn from_frames(v: Vec<FrameInfo>) -> Self {
         let mut frames = Vec::new();
         for fi in v {
             let body = SIR.body(&fi.sym).unwrap();
@@ -231,7 +235,7 @@ impl SIRInterpreter {
     /// Run the SIR interpreter after it has been initialised by a guard failure. Since we start in
     /// the block where the guard failed, we immediately skip to the terminator and interpret it to
     /// see which block we need to start interpretation in.
-    pub unsafe fn interpret(&mut self, ctx: *mut u8) {
+    pub unsafe fn sg_interpret(&mut self, ctx: *mut u8) {
         self.set_interp_ctx(ctx);
         // Jump to the correct basic block by interpreting the terminator.
         let frame = self.frames.last().unwrap();
@@ -239,16 +243,16 @@ impl SIRInterpreter {
         let bbidx = usize::try_from(frame.bbidx).unwrap();
         self.terminator(&body.blocks[bbidx].term);
         // Start interpretation.
-        self._interpret();
+        self.interpret();
     }
 
-    /// Given a vector of local declarations allocate just enough space to hold all of them.
+    /// Given the symbol name of a function, generate a `StackFrame` which allocates the precise
+    /// amount of memory required by the locals used in that function.
     fn create_frame(sym: &String) -> StackFrame {
         let body = SIR.body(&sym).unwrap();
         let (size, align) = body.layout;
         let offsets = body.offsets.clone();
         let layout = Layout::from_size_align(size, align).unwrap();
-        // Allocate memory for the locals
         let locals = unsafe { alloc(layout) };
         let mem = LocalMem {
             locals,
@@ -275,14 +279,13 @@ impl SIRInterpreter {
     /// Inserts a pointer to the interpreter context into the `interp_step` frame.
     pub fn set_interp_ctx(&mut self, ctx: *mut u8) {
         // The interpreter context lives in $1
-        let ptr = self.frames.first().unwrap().mem.local_ptr(&Local(1));
+        let ptr = self.frames.first().unwrap().mem.local_ptr(&INTERP_STEP_ARG);
         unsafe {
-            // Write the pointer value of `tio` into this frames memory.
             std::ptr::write::<*mut u8>(ptr as *mut *mut u8, ctx);
         }
     }
 
-    pub unsafe fn _interpret(&mut self) {
+    pub unsafe fn interpret(&mut self) {
         while let Some(frame) = self.frames.last() {
             let body = SIR.body(&frame.func).unwrap();
             let block = &body.blocks[usize::try_from(frame.bbidx).unwrap()];
@@ -328,10 +331,9 @@ impl SIRInterpreter {
                 self.frames.push(frame);
             }
             Terminator::Return => {
-                // Return from current stackframe.
                 let oldframe = self.frames.pop().unwrap();
-                // Are we still inside a nested call? Otherwise we are returning from the first
-                // body, so we are done interpreting.
+                // If there are no more frames left, we are returning from the `interp_step`
+                // function, which means we have reached the control point and are done here.
                 if let Some(curframe) = self.frames.last_mut() {
                     let bbidx = usize::try_from(curframe.bbidx).unwrap();
                     let body = SIR.body(&curframe.func).unwrap();
@@ -346,7 +348,7 @@ impl SIRInterpreter {
                         _ => unreachable!(),
                     };
                     // Get a pointer to the return value of the called frame.
-                    let ret_ptr = oldframe.mem.local_ptr(&Local(0));
+                    let ret_ptr = oldframe.mem.local_ptr(&RETURN_LOCAL);
                     // Write the return value to the destination in the previous frame.
                     let dst_ptr = curframe.mem.iplace_to_ptr(&dest);
                     let size = usize::try_from(SIR.ty(&dest.ty()).size()).unwrap();
@@ -425,12 +427,12 @@ impl SIRInterpreter {
         }
     }
 
-    /// Implements the Store statement.
+    /// Store the IPlace src in the IPlace dest in the current frame.
     fn store(&mut self, dest: &IPlace, src: &IPlace) {
         self.frames.last_mut().unwrap().mem.store(dest, src);
     }
 
-    /// Creates a reference to an IPlace.
+    /// Creates a reference to an IPlace, e.g. `dst = &src`.
     fn mkref(&mut self, dest: &IPlace, src: &IPlace) {
         match dest {
             IPlace::Val { .. } | IPlace::Indirect { .. } => {

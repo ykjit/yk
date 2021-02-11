@@ -15,7 +15,10 @@ use std::{
 };
 use ykpack::{self, Body, BodyFlags, CguHash, Decoder, Local, Pack, SirHeader, SirOffset, Ty};
 
+// The return local is always $0.
 pub const RETURN_LOCAL: Local = Local(0);
+// In TIR traces, the argument to the interp_step is always local $1.
+pub const INTERP_STEP_ARG: Local = Local(1);
 
 lazy_static! {
     pub static ref EXE_MMAP: Mmap =
