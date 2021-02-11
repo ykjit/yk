@@ -14,7 +14,10 @@ impl ThreadTracerImpl for SWTThreadTracer {
         let len;
         let buf = unsafe {
             if !__YK_SWT_ACTIVE {
-                libc::puts("no trace recorded\n\0" as *const str as *const i8);
+                libc::puts(
+                    "attempted to stop tracing when no tracer is active\n\0" as *const str
+                        as *const i8
+                );
                 libc::free(TRACE_BUF as *mut _);
                 TRACE_BUF = 0 as *mut SwtLoc;
                 TRACE_BUF_LEN = 0;
