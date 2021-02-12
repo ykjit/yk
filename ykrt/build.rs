@@ -1,4 +1,3 @@
-use regex::Regex;
 use std::env;
 use std::os::unix::fs::symlink;
 use std::path::PathBuf;
