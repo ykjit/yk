@@ -1,7 +1,7 @@
 #![cfg_attr(test, feature(test))]
-#![cfg_attr(tracermode = "sw", feature(thread_local))]
-#![cfg_attr(tracermode = "sw", feature(core_intrinsics))]
-#![cfg_attr(tracermode = "sw", feature(global_asm))]
+#![cfg_attr(feature = "trace_sw", feature(thread_local))]
+#![cfg_attr(feature = "trace_sw", feature(core_intrinsics))]
+#![cfg_attr(feature = "trace_sw", feature(global_asm))]
 
 #[cfg(test)]
 extern crate test;
@@ -13,9 +13,9 @@ mod errors;
 pub mod sir;
 pub mod tir;
 
-#[cfg(tracermode = "hw")]
+#[cfg(feature = "trace_hw")]
 mod hwt;
-#[cfg(tracermode = "sw")]
+#[cfg(feature = "trace_sw")]
 mod swt;
 
 pub use errors::InvalidTraceError;
@@ -33,9 +33,9 @@ pub enum TracingKind {
 impl Default for TracingKind {
     /// Returns the default tracing kind.
     fn default() -> Self {
-        #[cfg(tracermode = "hw")]
+        #[cfg(feature = "trace_hw")]
         return TracingKind::HardwareTracing;
-        #[cfg(tracermode = "sw")]
+        #[cfg(feature = "trace_sw")]
         return TracingKind::SoftwareTracing;
     }
 }
@@ -69,29 +69,21 @@ trait ThreadTracerImpl {
 /// Each thread can have at most one active tracer; calling `start_tracing()` on a thread where
 /// there is already an active tracer leads to undefined behaviour.
 pub fn start_tracing(kind: TracingKind) -> ThreadTracer {
-    #[cfg(not(any(doctest, tracermode = "hw", tracermode = "sw")))]
+    #[cfg(not(any(doctest, feature = "trace_hw", feature = "trace_sw")))]
     compile_error!("Please compile with `-C tracer=T`, where T is one of 'hw' or 'sw'");
 
     match kind {
         TracingKind::SoftwareTracing => {
-            #[cfg(tracermode = "hw")]
+            #[cfg(feature = "trace_hw")]
             panic!("requested software tracing, but `-C tracer=hw`");
-            #[cfg(tracermode = "sw")]
+            #[cfg(feature = "trace_sw")]
             swt::start_tracing()
         }
         TracingKind::HardwareTracing => {
-            #[cfg(tracermode = "sw")]
+            #[cfg(feature = "trace_sw")]
             panic!("requested hardware tracing, but `-C tracer=sw`");
-            #[cfg(tracermode = "hw")]
+            #[cfg(feature = "trace_hw")]
             hwt::start_tracing()
         }
     }
 }
-
-/// A debugging aid for traces.
-/// Calls to this function are recognised by Yorick and a special debug TIR statement is inserted
-/// into the trace. Interpreter writers should compile-time guard calls to this so as to only emit
-/// the extra bytecodes when explicitely turned on.
-#[inline(never)]
-#[trace_debug]
-pub fn trace_debug(_msg: &'static str) {}

@@ -24,6 +24,8 @@ struct InterpCtx(usize);
 fn trace() {
     #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     black_box(work(&mut InterpCtx(10)));
     let trace = th.stop_tracing().unwrap();
     assert!(trace.len() > 0);
@@ -34,6 +36,8 @@ fn trace() {
 fn trace_twice() {
     #[cfg(tracermode = "hw")]
     let kind = TracingKind::HardwareTracing;
+    #[cfg(tracermode = "sw")]
+    let kind = TracingKind::SoftwareTracing;
 
     let th1 = start_tracing(kind);
     black_box(work(&mut InterpCtx(10)));
@@ -51,6 +55,8 @@ fn trace_twice() {
 pub(crate) fn trace_concurrent() {
     #[cfg(tracermode = "hw")]
     let kind = TracingKind::HardwareTracing;
+    #[cfg(tracermode = "sw")]
+    let kind = TracingKind::SoftwareTracing;
 
     let thr = thread::spawn(move || {
         let th1 = start_tracing(kind);
@@ -89,6 +95,8 @@ mod tir {
         // FIXME TracingMode::Default.
         #[cfg(tracermode = "hw")]
         let tracer = start_tracing(TracingKind::HardwareTracing);
+        #[cfg(tracermode = "sw")]
+        let tracer = start_tracing(TracingKind::SoftwareTracing);
         black_box(work(&mut io));
         let sir_trace = tracer.stop_tracing().unwrap();
         let tir_trace = TirTrace::new(&sir_trace);
@@ -123,6 +131,8 @@ mod tir {
         let mut io = DebugTirInterpCtx(0, 0);
         #[cfg(tracermode = "hw")]
         let tracer = start_tracing(TracingKind::HardwareTracing);
+        #[cfg(tracermode = "sw")]
+        let tracer = start_tracing(TracingKind::SoftwareTracing);
         black_box(debug_tir_work(&mut io)); // +10
         black_box(debug_tir_work(&mut io)); // +10
         io.0 = 2;

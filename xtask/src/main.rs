@@ -25,7 +25,9 @@ impl Workspace {
     fn dir(&self) -> PathBuf {
         let this_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
         match self {
-            Self::Internal => [&this_dir, "..", "internal_ws"].iter().collect::<PathBuf>(),
+            Self::Internal => [&this_dir, "..", "internal_ws", "ykshim"]
+                .iter()
+                .collect::<PathBuf>(),
             Self::External => [&this_dir, ".."].iter().collect::<PathBuf>(),
         }
     }
@@ -41,7 +43,7 @@ struct WorkspaceAction<'a> {
     /// The path the to the workspace we will work in.
     workspace_dir: PathBuf,
     /// Arguments appended after `tool_args`.
-    target_args: Vec<&'a str>,
+    target_args: Vec<String>,
     /// The RUSTFLAGS environment to use.
     rust_flags: String,
     /// Workspace actions to run first.
@@ -52,18 +54,30 @@ impl<'a> WorkspaceAction<'a> {
     fn new(workspace: Workspace, target: &'a str) -> Result<Self, String> {
         let mut tool = env::var("CARGO").unwrap();
         let mut forced_deps = Vec::new();
-        let mut target_args = vec![target];
+        let mut target_args = vec![target.to_string()];
         let mut tool_args = Vec::new();
         let mut rust_flags = env::var("RUSTFLAGS").unwrap_or_else(|_| String::new());
 
         match target {
             "audit" => (),
-            "build" | "check" | "clean" | "test" => {
+            "clean" => {
                 if workspace == Workspace::Internal {
+                    // The internal workspace is optimized.
+                    target_args.push("--release".to_string());
+                }
+            }
+            "build" | "check" | "test" => {
+                if workspace == Workspace::Internal {
+                    let tracing_kind = find_tracing_kind(&rust_flags);
                     rust_flags = make_internal_rustflags(&rust_flags);
 
                     // Optimise the internal workspace.
-                    target_args.push("--release");
+                    target_args.push("--release".to_string());
+                    // Set the tracermode cfg macro, but without changing anything relating to code
+                    // generation. We can't use `-C tracer=hw` as this would turn off optimisations
+                    // and emit SIR for stuff we will never trace.
+                    target_args.push("--features".to_string());
+                    target_args.push(format!("yktrace/trace_{}", tracing_kind));
 
                     // `cargo test` in the internal workspace won't build libykshim.so, so we have
                     // to force-build it to avoid linkage problems for the external workspace.
