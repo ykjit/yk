@@ -15,15 +15,6 @@ The latter is a monorepo containing a few different crates.
 
 ## Building and Testing the Compiler
 
-First and foremost, you probably want to run:
-```
-./x.py setup
-```
-
-and choose to set up for compiler development.
-
-This isn't strictly necessary, but it will silence a warning.
-
 ### Building the Compiler
 
 To build the compiler, run:
