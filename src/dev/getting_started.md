@@ -1,5 +1,9 @@
 # Building and Running Tests
 
+This guide describes how to get up and running with hardware tracing in Yorick.
+
+XXX: software tracing with cranelift.
+
 ## Repos
 
 Yorick is spread over a handful of repos, but the two you are likely to need to clone are:
@@ -10,15 +14,6 @@ Yorick is spread over a handful of repos, but the two you are likely to need to 
 The latter is a monorepo containing a few different crates.
 
 ## Building and Testing the Compiler
-
-First and foremost, you probably want to run:
-```
-./x.py setup
-```
-
-and choose to set up for compiler development.
-
-This isn't strictly necessary, but it will silence a warning.
 
 ### Building the Compiler
 
@@ -79,6 +74,11 @@ rustup override set yk-stage1
 
 Now `cargo` will run our compiler (also setting all of the various flags
 required) for this directory instead of the default Rust compiler.
+
+To select hardware tracing, you need to set an environment variable:
+```
+export RUSTFLAGS="-C tracer=hw"
+```
 
 Then you can build and test the `yk` repo using `cargo xtask` commands, for
 example `cargo xtask test`.
