@@ -42,8 +42,16 @@ lazy_static! {
     static ref ICTX_REG: u8 = RDI.code();
 
     static ref TEMP_LOC: Location = Location::Reg(*TEMP_REG);
+
+    /// The size of a memory address in bytes.
     static ref PTR_SIZE: u64 = u64::try_from(mem::size_of::<usize>()).unwrap();
 }
+
+/// The size of a quad-word register (e.g. RAX) in bytes.
+const QWORD_REG_SIZE: usize = 8;
+
+/// Number of bytes the stack must be aligned to, immediately before a call via the Sys-V ABI.
+const SYSV_CALL_STACK_ALIGN: usize = 16;
 
 /// Generates functions for add/sub-style operations.
 /// The first operand must be in a register.
@@ -470,7 +478,7 @@ impl TraceCompiler {
             // We've also pushed RAX in the meantime.
             rdi_stackpos += 1;
             dynasm!(self.asm
-                ; mov rsi, [rsp + i32::try_from(rdi_stackpos).unwrap() * 8]
+                ; mov rsi, [rsp + i32::try_from(rdi_stackpos).unwrap() * i32::try_from(QWORD_REG_SIZE).unwrap()]
             );
         } else {
             dynasm!(self.asm
@@ -582,7 +590,7 @@ impl TraceCompiler {
                         // have overwritten the value in the meantime. So we should load the value
                         // back from the stack.
                         dynasm!(self.asm
-                            ; mov Rq(arg_reg), [rsp + idx * 8]
+                            ; mov Rq(arg_reg), [rsp + idx * i32::try_from(QWORD_REG_SIZE).unwrap()]
                         );
                     } else {
                         // We didn't save this register, so it remains intact.
@@ -1214,20 +1222,15 @@ impl TraceCompiler {
         // Reserved stack space for spilled locals during execution.
         let soff = self.stack_builder.size();
         // Reserved memory on the stack to spill live locals to during a guard failure.
-        let live_off = REG_POOL.len() * 8;
+        let live_off = REG_POOL.len() * usize::try_from(QWORD_REG_SIZE).unwrap();
 
-        // As we'll be making calls to other functions using the Sys-V 64 ABI, we need to make sure
-        // the stack is aligned to 16 bytes before the call instruction. Note that the call
-        // instruction itself will push the return address onto the stack, so at the beginning of
-        // the trace the stack will have an extra offset of 8 bytes.
-        // Instead of adjusting the alignment before each call instruction, we do this once at the
-        // beginning of the trace, since we won't be misaligning the stack during the trace
-        // (push/pop is allowed as long as there's no call inbetween them). We also need to
-        // consider the extra space reserved for spilled and live locals as well as the callee
-        // saved registers, when calculating the alignment.
-        // While we could use the stack builder to keep track of the stack and the alignment, this
-        // would require us to split up various dynasm! blocks, which is inconvenient.
-        let topalign = 16 - (live_off + soff as usize + CALLEE_SAVED_REGS.len() * 8) % 16;
+        // After allocating stack space for the trace, we pad the stack pointer up to the next
+        // 16-byte alignment boundary. Calls can use this fact when catering for alignment
+        // requirements of callees (if necessary). Interim pushes and pops in trace code are
+        // allowed as long as they are short-lived and correctly restore 16-byte alignment.
+        let topalign = SYSV_CALL_STACK_ALIGN
+            - (live_off + soff as usize + CALLEE_SAVED_REGS.len() * QWORD_REG_SIZE)
+                % SYSV_CALL_STACK_ALIGN;
         // Restore registers.
         dynasm!(self.asm
             ; mov rax, 0 // Signifies that there were no guard failures.
@@ -1272,7 +1275,10 @@ impl TraceCompiler {
             for (tirlocal, loc) in live_locations.iter_mut() {
                 match loc {
                     Location::Reg(reg) => {
-                        let off = -i32::try_from(soff + u32::from(*reg) * 8).unwrap();
+                        let off = -i32::try_from(
+                            soff + u32::from(*reg) * u32::try_from(QWORD_REG_SIZE).unwrap(),
+                        )
+                        .unwrap();
                         let newloc = Location::Mem(RegAndOffset {
                             reg: RBP.code(),
                             off,
