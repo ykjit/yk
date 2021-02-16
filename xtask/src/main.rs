@@ -20,22 +20,10 @@ enum Workspace {
     External,
 }
 
-impl Workspace {
-    fn dir(&self) -> PathBuf {
-        let this_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-        match self {
-            Self::Internal => [&this_dir, "..", "internal_ws", "ykshim"]
-                .iter()
-                .collect::<PathBuf>(),
-            Self::External => [&this_dir, ".."].iter().collect::<PathBuf>(),
-        }
-    }
-}
-
 fn run_action(workspace: Workspace, target: &str, extra_args: &[String]) {
     // The external workspace depends on libykshim.so produced by the internal workspace
     if workspace == Workspace::External {
-        run_action(Workspace::Internal, target, extra_args);
+        run_action(Workspace::Internal, target, &[]);
     }
 
     let mut cmd = if target == "fmt" {
@@ -51,10 +39,28 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String]) {
         // toolchain is to use `rustup run nightly cargo fmt`.
         let mut cmd = Command::new("rustup");
         cmd.args(&["run", "nightly", "cargo", "fmt"]);
+
+        let this_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+        let ws_dir = match workspace {
+            Workspace::Internal => [&this_dir, "..", "internal_ws"].iter().collect::<PathBuf>(),
+            Workspace::External => [&this_dir, ".."].iter().collect::<PathBuf>(),
+        };
+        cmd.current_dir(ws_dir);
+
         cmd
     } else {
         let mut cmd = Command::new(env::var("CARGO").unwrap());
         cmd.arg(target);
+
+        let this_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+        let ws_dir = match workspace {
+            Workspace::Internal => [&this_dir, "..", "internal_ws", "ykshim"]
+                .iter()
+                .collect::<PathBuf>(),
+            Workspace::External => [&this_dir, ".."].iter().collect::<PathBuf>(),
+        };
+        cmd.current_dir(ws_dir);
+
         cmd
     };
 
@@ -98,7 +104,6 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String]) {
     }
 
     let status = cmd
-        .current_dir(workspace.dir())
         .args(extra_args)
         .env("RUSTFLAGS", rust_flags)
         .spawn()
