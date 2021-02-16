@@ -1,6 +1,6 @@
 //! Code generation for stores.
 
-use crate::{IndirectLoc, Location, RegAndOffset, TraceCompiler, TEMP_REG};
+use super::{IndirectLoc, Location, RegAndOffset, TraceCompiler, TEMP_REG};
 use dynasmrt::DynasmApi;
 use ykpack::IPlace;
 use yktrace::sir::SIR;
