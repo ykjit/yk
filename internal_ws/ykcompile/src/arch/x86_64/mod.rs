@@ -1,15 +1,13 @@
 //! The Yorick TIR trace compiler.
 
 use crate::{
-    stack_builder::StackBuilder, CompiledTrace, IndirectLoc, Location, RegAlloc, RegAndOffset,
+    find_symbol, stack_builder::StackBuilder, CompileError, CompiledTrace, IndirectLoc, Location,
+    RegAlloc, RegAndOffset,
 };
 use dynasmrt::{x64::Rq::*, DynamicLabel, DynasmApi, DynasmLabelApi, Register};
-use libc::{c_void, dlsym, RTLD_DEFAULT};
 use std::alloc::{alloc, Layout};
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::ffi::CString;
-use std::fmt::{self, Display, Formatter};
 use std::mem;
 use std::process::Command;
 use ykbh::{FrameInfo, SIRInterpreter};
@@ -209,20 +207,6 @@ macro_rules! binop_mul_div {
                 ; pop rax
                 ; pop rdx
             );
-        }
-    }
-}
-
-#[derive(Debug, Hash, Eq, PartialEq)]
-pub enum CompileError {
-    /// The binary symbol could not be found.
-    UnknownSymbol(String),
-}
-
-impl Display for CompileError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnknownSymbol(s) => write!(f, "Unknown symbol: {}", s),
         }
     }
 }
@@ -457,7 +441,7 @@ impl TraceCompiler {
     fn copy_memory(&mut self, dest: &RegAndOffset, src: &RegAndOffset, size: u64) {
         // We use memmove(3), as it's not clear if MIR (and therefore SIR) could cause copies
         // involving overlapping buffers.
-        let sym = Self::find_symbol("memmove").unwrap();
+        let sym = find_symbol("memmove").unwrap();
         self.save_regs(&*CALLER_SAVED_REGS);
         dynasm!(self.asm
             ; push rax
@@ -617,7 +601,7 @@ impl TraceCompiler {
         } else {
             // This path is required for system calls. hwtracer doesn't trace through the kernel,
             // so system call addresses will never appear in addr_map.
-            TraceCompiler::find_symbol(sym)? as i64
+            find_symbol(sym)? as i64
         };
         dynasm!(self.asm
             // In Sys-V ABI, `al` is a hidden argument used to specify the number of vector args
@@ -1422,22 +1406,5 @@ impl TraceCompiler {
             }
         }
         buf
-    }
-
-    /// Returns a pointer to the static symbol `sym`, or an error if it cannot be found.
-    ///
-    /// In general, there is no guarantee that a symbol will be found, especially when dealing with
-    /// binary executables where there's no public API to speak of. In such cases the Rust compiler
-    /// is free to (and often does) throw away symbols. Note however that symbols marked
-    /// `#[no_mangle] are always exported.
-    pub fn find_symbol(sym: &str) -> Result<*mut c_void, CompileError> {
-        let sym_arg = CString::new(sym).unwrap();
-        let addr = unsafe { dlsym(RTLD_DEFAULT, sym_arg.into_raw()) };
-
-        if addr.is_null() {
-            Err(CompileError::UnknownSymbol(sym.to_owned()))
-        } else {
-            Ok(addr)
-        }
     }
 }

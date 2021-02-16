@@ -6,7 +6,7 @@ use std::os::raw::c_char;
 use std::ptr;
 
 use ykbh::SIRInterpreter;
-use ykcompile::{CompiledTrace, TraceCompiler, REG_POOL};
+use ykcompile::{find_symbol, CompiledTrace, TraceCompiler, REG_POOL};
 use ykpack::{self, Local, LocalDecl, TypeId};
 use yktrace::sir::{self, SirTrace, SIR};
 use yktrace::tir::TirTrace;
@@ -104,9 +104,8 @@ unsafe extern "C" fn __ykshimtest_tracecompiler_local_dead(tc: *mut TraceCompile
 
 /// Find a symbol's address in the current memory image. Returns NULL if it can't be found.
 #[no_mangle]
-unsafe extern "C" fn __ykshimtest_tracecompiler_find_sym(sym: *mut c_char) -> *mut c_void {
-    TraceCompiler::find_symbol(CString::from_raw(sym).to_str().unwrap())
-        .unwrap_or_else(|_| ptr::null_mut())
+unsafe extern "C" fn __ykshimtest_find_symbol(sym: *mut c_char) -> *mut c_void {
+    find_symbol(CString::from_raw(sym).to_str().unwrap()).unwrap_or_else(|_| ptr::null_mut())
 }
 
 /// Interpret a SIR body with the specified interpreter context.

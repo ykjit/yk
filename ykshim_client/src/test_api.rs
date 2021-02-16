@@ -45,7 +45,7 @@ extern "C" {
         local: Local,
     ) -> *mut c_char;
     fn __ykshimtest_tracecompiler_local_dead(tc: *mut RawTraceCompiler, local: Local);
-    fn __ykshimtest_tracecompiler_find_sym(sym: *mut c_char) -> *mut c_void;
+    fn __ykshimtest_find_symbol(sym: *mut c_char) -> *mut c_void;
     fn __ykshimtest_interpret_body(body_name: *mut c_char, ctx: *mut u8);
     fn __ykshimtest_reg_pool_size() -> usize;
 }
@@ -119,11 +119,6 @@ impl TraceCompiler {
     pub fn local_dead(&mut self, local: Local) {
         unsafe { __ykshimtest_tracecompiler_local_dead(self.0, local) };
     }
-
-    pub fn find_symbol(sym: &str) -> *mut c_void {
-        let ptr = CString::new(sym).unwrap().into_raw();
-        unsafe { __ykshimtest_tracecompiler_find_sym(ptr) }
-    }
 }
 
 impl Drop for TraceCompiler {
@@ -154,4 +149,9 @@ pub fn compile_tir_trace<T>(mut tir_trace: TirTrace) -> Result<CompiledTrace<T>,
         compiled,
         _marker: PhantomData,
     })
+}
+
+pub fn find_symbol(sym: &str) -> *mut c_void {
+    let ptr = CString::new(sym).unwrap().into_raw();
+    unsafe { __ykshimtest_find_symbol(ptr) }
 }
