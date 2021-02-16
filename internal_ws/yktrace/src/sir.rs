@@ -105,7 +105,7 @@ impl<'m> Sir<'m> {
         } // Drop the RwLock's read() to prevent deadlocking.
 
         // Cache miss. Decode the type and update the cache.
-        let (ref sec_name, ref hdr, hdr_size) = SIR.hdrs[&tyid.cgu];
+        let (ref sec_name, ref hdr, hdr_size) = self.hdrs[&tyid.cgu];
         let off = hdr.types[usize::try_from(tyid.idx.0).unwrap()];
         let ty = self.decode_ty(sec_name, hdr_size + off);
         let mut wr = self.ty_cache.write().unwrap();
@@ -139,7 +139,7 @@ impl<'m> Sir<'m> {
         } // Drop the RwLock's read() to prevent deadlocking.
 
         // Cache miss. Decode the body and update the cache.
-        for (sec_name, hdr, hdr_size) in SIR.hdrs.values() {
+        for (sec_name, hdr, hdr_size) in self.hdrs.values() {
             if let Some(off) = hdr.bodies.get(body_sym) {
                 let body = self.decode_body(sec_name, hdr_size + off);
                 let mut wr = self.body_cache.write().unwrap();
