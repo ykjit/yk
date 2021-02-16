@@ -615,6 +615,8 @@ impl TraceCompiler {
         let sym_addr = if let Some(addr) = self.addr_map.get(sym) {
             *addr as i64
         } else {
+            // This path is required for system calls. hwtracer doesn't trace through the kernel,
+            // so system call addresses will never appear in addr_map.
             TraceCompiler::find_symbol(sym)? as i64
         };
         dynasm!(self.asm
@@ -1423,6 +1425,11 @@ impl TraceCompiler {
     }
 
     /// Returns a pointer to the static symbol `sym`, or an error if it cannot be found.
+    ///
+    /// In general, there is no guarantee that a symbol will be found, especially when dealing with
+    /// binary executables where there's no public API to speak of. In such cases the Rust compiler
+    /// is free to (and often does) throw away symbols. Note however that symbols marked
+    /// `#[no_mangle] are always exported.
     pub fn find_symbol(sym: &str) -> Result<*mut c_void, CompileError> {
         let sym_arg = CString::new(sym).unwrap();
         let addr = unsafe { dlsym(RTLD_DEFAULT, sym_arg.into_raw()) };
