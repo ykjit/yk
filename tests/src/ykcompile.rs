@@ -1286,3 +1286,71 @@ fn nested_do_not_trace() {
     assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.0, 1);
 }
+
+#[test]
+fn recursive_do_not_trace() {
+    #[do_not_trace]
+    fn rec(i: u8) -> u8 {
+        let mut j = i;
+        if i < 10 {
+            j = rec(i + 1);
+        }
+        j
+    }
+
+    struct InterpCtx(u8);
+
+    #[interp_step]
+    #[inline(never)]
+    fn interp_step(io: &mut InterpCtx) {
+        io.0 = rec(1);
+    }
+
+    let mut ctx = InterpCtx(0);
+    #[cfg(tracermode = "hw")]
+    let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
+    interp_step(&mut ctx);
+    let sir_trace = th.stop_tracing().unwrap();
+    let ct = compile_trace(sir_trace).unwrap();
+    let mut args = InterpCtx(0);
+    assert!(unsafe { ct.execute(&mut args).is_null() });
+    assert_eq!(args.0, 10);
+}
+
+#[test]
+fn mut_recursive_do_not_trace() {
+    fn rec2(i: u8) -> u8 {
+        rec(i + 1)
+    }
+
+    #[do_not_trace]
+    fn rec(i: u8) -> u8 {
+        let mut j = i;
+        if i < 10 {
+            j = rec2(i);
+        }
+        j
+    }
+
+    struct InterpCtx(u8);
+
+    #[interp_step]
+    #[inline(never)]
+    fn interp_step(io: &mut InterpCtx) {
+        io.0 = rec(1);
+    }
+
+    let mut ctx = InterpCtx(0);
+    #[cfg(tracermode = "hw")]
+    let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
+    interp_step(&mut ctx);
+    let sir_trace = th.stop_tracing().unwrap();
+    let ct = compile_trace(sir_trace).unwrap();
+    let mut args = InterpCtx(0);
+    assert!(unsafe { ct.execute(&mut args).is_null() });
+    assert_eq!(args.0, 10);
+}

@@ -36,7 +36,9 @@ impl<'a, 'm> TirTrace<'a, 'm> {
         let mut itr = trace.iter().peekable();
         let mut rnm = VarRenamer::new();
         // Symbol name of the function currently being ignored during tracing.
-        let mut ignore: Option<String> = None;
+        let mut dnt_func: Option<String> = None;
+        // Number matching calls and returns of the current `do_not_trace` function.
+        let mut dnt_count: usize = 0;
         // Maps symbol names to their virtual addresses.
         let mut addr_map: HashMap<String, u64> = HashMap::new();
 
@@ -60,7 +62,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
             };
 
             // Ignore yktrace::trace_debug.
-            // We don't use the 'ignore' machinery below, as that would require the TraceDebugCall
+            // We don't use the 'do_not_trace' machinery below, as that would require the TraceDebugCall
             // terminator to contain the symbol name, which would be wasteful.
             if body.flags.contains(BodyFlags::TRACE_DEBUG) {
                 continue;
@@ -81,14 +83,31 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                 addr_map.insert(loc.symbol_name.to_string(), addr.unwrap());
             }
 
-            // If a function was annotated with `do_not_trace`, skip all instructions within it as
-            // well. FIXME: recursion.
-            if let Some(sym) = &ignore {
-                if sym == &loc.symbol_name
-                    && body.blocks[user_bb_idx_usize].term == Terminator::Return
-                {
-                    ignore = None;
-                }
+            // If a function was annotated with `do_not_trace`, we need to skip all instructions
+            // within it. However, since the tracer will have inlined function calls, the only way
+            // to detect that the `do_not_trace` function has finished, is by observing its return
+            // terminator. Since the `do_not_trace` function can be recursive we count how many
+            // times it is called and returned from and only stop ignoring things until we return
+            // from the outer-most `do_not_trace` function.
+            if let Some(sym) = &dnt_func {
+                match &body.blocks[user_bb_idx_usize].term {
+                    Terminator::Return => {
+                        if sym == loc.symbol_name {
+                            dnt_count -= 1;
+                            if dnt_count == 0 {
+                                dnt_func = None;
+                            }
+                        }
+                    }
+                    Terminator::Call { operand, .. } => {
+                        if let Some(csym) = operand.symbol() {
+                            if csym == sym {
+                                dnt_count += 1;
+                            }
+                        }
+                    }
+                    _ => {}
+                };
                 continue;
             }
 
@@ -247,7 +266,8 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                             // If the function has been annotated with do_not_trace, turn it into a
                             // call.
                             if callbody.flags.contains(BodyFlags::DO_NOT_TRACE) {
-                                ignore = Some(callee_sym.to_string());
+                                dnt_func = Some(callee_sym.to_string());
+                                dnt_count = 1;
                                 term_stmts.push(Statement::Call(op.clone(), newargs, Some(ret_val)))
                             } else {
                                 entered_call = true;

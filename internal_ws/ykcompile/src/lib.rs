@@ -93,7 +93,7 @@ impl Location {
             Location::Reg(..) => {
                 assert!(off == 0);
                 self
-            },
+            }
             Location::Const { .. } => todo!("offsetting a constant"),
         }
     }
