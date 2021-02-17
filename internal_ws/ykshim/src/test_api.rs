@@ -1,12 +1,12 @@
 use libc::size_t;
 use std::convert::TryFrom;
 use std::default::Default;
-use std::ffi::{c_void, CString};
+use std::ffi::{c_void, CStr, CString};
 use std::os::raw::c_char;
 use std::ptr;
 
 use ykbh::SIRInterpreter;
-use ykcompile::{CompiledTrace, TraceCompiler, REG_POOL};
+use ykcompile::{find_symbol, CompiledTrace, TraceCompiler, REG_POOL};
 use ykpack::{self, Local, LocalDecl, TypeId};
 use yktrace::sir::{self, SirTrace, SIR};
 use yktrace::tir::TirTrace;
@@ -42,11 +42,11 @@ unsafe extern "C" fn __ykshimtest_tirtrace_display<'a, 'm>(
     CString::into_raw(st)
 }
 
-/// Looks up the TypeId of the return value of the given symbol. The TypeId is returned in two
-/// parts in `ret_cgu` and `ret_idx`.
+/// Looks up the TypeId of the return value of the given symbol. The TypeId is returned via the
+/// `ret_tyid` argument.
 #[no_mangle]
-unsafe extern "C" fn __ykshimtest_body_ret_ty(sym: *mut c_char, ret_tyid: *mut TypeId) {
-    let sym = CString::from_raw(sym);
+unsafe extern "C" fn __ykshimtest_body_ret_ty(sym: *const c_char, ret_tyid: *mut TypeId) {
+    let sym = CStr::from_ptr(sym);
     let rv = usize::try_from(sir::RETURN_LOCAL.0).unwrap();
     let tyid = SIR.body(&sym.to_str().unwrap()).unwrap().local_decls[rv].ty;
     *ret_tyid = tyid;
@@ -65,8 +65,7 @@ unsafe extern "C" fn __ykshimtest_tracecompiler_drop(comp: *mut c_void) {
     Box::from_raw(comp as *mut TraceCompiler);
 }
 
-/// Inserts a local declaration of the specified TypeId into a TraceCompiler. The TypeId is passed
-/// in two parts: a CGU hash and a type index.
+/// Inserts a local declaration of the specified TypeId into a TraceCompiler.
 #[no_mangle]
 unsafe extern "C" fn __ykshimtest_tracecompiler_insert_decl(
     tc: *mut c_void,
@@ -104,15 +103,14 @@ unsafe extern "C" fn __ykshimtest_tracecompiler_local_dead(tc: *mut TraceCompile
 
 /// Find a symbol's address in the current memory image. Returns NULL if it can't be found.
 #[no_mangle]
-unsafe extern "C" fn __ykshimtest_tracecompiler_find_sym(sym: *mut c_char) -> *mut c_void {
-    TraceCompiler::find_symbol(CString::from_raw(sym).to_str().unwrap())
-        .unwrap_or_else(|_| ptr::null_mut())
+unsafe extern "C" fn __ykshimtest_find_symbol(sym: *const c_char) -> *mut c_void {
+    find_symbol(CStr::from_ptr(sym).to_str().unwrap()).unwrap_or_else(|_| ptr::null_mut())
 }
 
 /// Interpret a SIR body with the specified interpreter context.
 #[no_mangle]
-unsafe extern "C" fn __ykshimtest_interpret_body(body_name: *mut c_char, ctx: *mut u8) {
-    let fname = CString::from_raw(body_name).to_str().unwrap().to_string();
+unsafe extern "C" fn __ykshimtest_interpret_body(body_name: *const c_char, ctx: *mut u8) {
+    let fname = CStr::from_ptr(body_name).to_str().unwrap().to_string();
     let mut si = SIRInterpreter::from_symbol(fname);
     si.set_interp_ctx(ctx);
     si.interpret();

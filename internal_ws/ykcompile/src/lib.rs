@@ -9,7 +9,8 @@ extern crate lazy_static;
 #[cfg(test)]
 extern crate test;
 
-use std::mem;
+use libc::{c_void, dlsym, RTLD_DEFAULT};
+use std::{ffi::CString, fmt, mem};
 use ykbh::SIRInterpreter;
 use ykpack::{Constant, Local, OffT, TypeId};
 
@@ -19,6 +20,20 @@ mod stack_builder;
 // FIXME hard-wired use of the x86_64 backend.
 // This should be made into a properly abstracted API.
 pub use arch::x86_64::{compile_trace, TraceCompiler, REG_POOL};
+
+#[derive(Debug, Hash, Eq, PartialEq)]
+pub enum CompileError {
+    /// The binary symbol could not be found.
+    UnknownSymbol(String),
+}
+
+impl fmt::Display for CompileError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnknownSymbol(s) => write!(f, "Unknown symbol: {}", s),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Location {
@@ -144,5 +159,22 @@ impl CompiledTrace {
     /// guaranteed never to move in memory.
     pub fn ptr(&self) -> *const u8 {
         self.mc.ptr(dynasmrt::AssemblyOffset(0))
+    }
+}
+
+/// Returns a pointer to the static symbol `sym`, or an error if it cannot be found.
+///
+/// In general, there is no guarantee that a symbol will be found, especially when dealing with
+/// binary executables where there's no public API to speak of. In such cases the Rust compiler is
+/// free to (and often does) throw away symbols. Note however that symbols marked `#[no_mangle] are
+/// always exported.
+pub fn find_symbol(sym: &str) -> Result<*mut c_void, CompileError> {
+    let sym_arg = CString::new(sym).unwrap();
+    let addr = unsafe { dlsym(RTLD_DEFAULT, sym_arg.into_raw()) };
+
+    if !addr.is_null() {
+        Ok(addr)
+    } else {
+        Err(CompileError::UnknownSymbol(sym.to_owned()))
     }
 }

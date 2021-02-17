@@ -32,7 +32,7 @@ extern "C" {
     fn __ykshimtest_tracecompiler_drop(comp: *mut RawTraceCompiler);
     fn __ykshimtest_tirtrace_len(tir_trace: *mut RawTirTrace) -> size_t;
     fn __ykshimtest_tirtrace_display(tir_trace: *mut RawTirTrace) -> *mut c_char;
-    fn __ykshimtest_body_ret_ty(sym: *mut c_char, ret_tyid: *mut TypeId);
+    fn __ykshimtest_body_ret_ty(sym: *const c_char, ret_tyid: *mut TypeId);
     fn __ykshimtest_tracecompiler_default() -> *mut RawTraceCompiler;
     fn __ykshimtest_tracecompiler_insert_decl(
         tc: *mut RawTraceCompiler,
@@ -45,8 +45,8 @@ extern "C" {
         local: Local,
     ) -> *mut c_char;
     fn __ykshimtest_tracecompiler_local_dead(tc: *mut RawTraceCompiler, local: Local);
-    fn __ykshimtest_tracecompiler_find_sym(sym: *mut c_char) -> *mut c_void;
-    fn __ykshimtest_interpret_body(body_name: *mut c_char, ctx: *mut u8);
+    fn __ykshimtest_find_symbol(sym: *const c_char) -> *mut c_void;
+    fn __ykshimtest_interpret_body(body_name: *const c_char, ctx: *mut u8);
     fn __ykshimtest_reg_pool_size() -> usize;
 }
 
@@ -84,7 +84,7 @@ pub fn sir_body_ret_ty(sym: &str) -> TypeId {
         cgu: CguHash(0),
         idx: TyIndex(0),
     };
-    unsafe { __ykshimtest_body_ret_ty(sym_c.into_raw(), &mut ret) };
+    unsafe { __ykshimtest_body_ret_ty(sym_c.as_ptr(), &mut ret) };
     ret
 }
 
@@ -119,11 +119,6 @@ impl TraceCompiler {
     pub fn local_dead(&mut self, local: Local) {
         unsafe { __ykshimtest_tracecompiler_local_dead(self.0, local) };
     }
-
-    pub fn find_symbol(sym: &str) -> *mut c_void {
-        let ptr = CString::new(sym).unwrap().into_raw();
-        unsafe { __ykshimtest_tracecompiler_find_sym(ptr) }
-    }
 }
 
 impl Drop for TraceCompiler {
@@ -140,7 +135,7 @@ impl SirTrace {
 
 pub fn interpret_body<I>(body_name: &str, ctx: &mut I) {
     let body_cstr = CString::new(body_name).unwrap();
-    unsafe { __ykshimtest_interpret_body(body_cstr.into_raw(), ctx as *mut _ as *mut u8) };
+    unsafe { __ykshimtest_interpret_body(body_cstr.as_ptr(), ctx as *mut _ as *mut u8) };
 }
 
 pub fn reg_pool_size() -> usize {
@@ -154,4 +149,9 @@ pub fn compile_tir_trace<T>(mut tir_trace: TirTrace) -> Result<CompiledTrace<T>,
         compiled,
         _marker: PhantomData,
     })
+}
+
+pub fn find_symbol(sym: &str) -> *mut c_void {
+    let sym_cstr = CString::new(sym).unwrap();
+    unsafe { __ykshimtest_find_symbol(sym_cstr.as_ptr()) }
 }

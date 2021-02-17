@@ -3,8 +3,8 @@ use libc;
 use libc::{abs, c_void, getuid};
 use std::{collections::HashMap, convert::TryFrom, ptr};
 use ykshim_client::{
-    compile_tir_trace, compile_trace, reg_pool_size, sir_body_ret_ty, start_tracing, Local,
-    LocalDecl, LocalIndex, TirTrace, TraceCompiler, TracingKind, TypeId,
+    compile_tir_trace, compile_trace, find_symbol, reg_pool_size, sir_body_ret_ty, start_tracing,
+    Local, LocalDecl, LocalIndex, TirTrace, TraceCompiler, TracingKind, TypeId,
 };
 
 extern "C" {
@@ -322,7 +322,7 @@ fn function_call_nested() {
 // Test finding a symbol in a shared object.
 #[test]
 fn find_symbol_shared() {
-    assert!(TraceCompiler::find_symbol("printf") == libc::printf as *mut c_void);
+    assert!(find_symbol("printf") == libc::printf as *mut c_void);
 }
 
 // Test finding a symbol in the main binary.
@@ -331,13 +331,13 @@ fn find_symbol_shared() {
 #[test]
 #[no_mangle]
 fn find_symbol_main() {
-    assert!(TraceCompiler::find_symbol("find_symbol_main") == find_symbol_main as *mut c_void);
+    assert!(find_symbol("find_symbol_main") == find_symbol_main as *mut c_void);
 }
 
 // Check that a non-existent symbol cannot be found.
 #[test]
 fn find_nonexistent_symbol() {
-    assert_eq!(TraceCompiler::find_symbol("__xxxyyyzzz__"), ptr::null_mut());
+    assert_eq!(find_symbol("__xxxyyyzzz__"), ptr::null_mut());
 }
 
 // A trace which contains a call to something which we don't have SIR for should emit a TIR
