@@ -42,8 +42,8 @@ unsafe extern "C" fn __ykshimtest_tirtrace_display<'a, 'm>(
     CString::into_raw(st)
 }
 
-/// Looks up the TypeId of the return value of the given symbol. The TypeId is returned in two
-/// parts in `ret_cgu` and `ret_idx`.
+/// Looks up the TypeId of the return value of the given symbol. The TypeId is returned via the
+/// `ret_tyid` argument.
 #[no_mangle]
 unsafe extern "C" fn __ykshimtest_body_ret_ty(sym: *const c_char, ret_tyid: *mut TypeId) {
     let sym = CStr::from_ptr(sym);
@@ -65,8 +65,7 @@ unsafe extern "C" fn __ykshimtest_tracecompiler_drop(comp: *mut c_void) {
     Box::from_raw(comp as *mut TraceCompiler);
 }
 
-/// Inserts a local declaration of the specified TypeId into a TraceCompiler. The TypeId is passed
-/// in two parts: a CGU hash and a type index.
+/// Inserts a local declaration of the specified TypeId into a TraceCompiler.
 #[no_mangle]
 unsafe extern "C" fn __ykshimtest_tracecompiler_insert_decl(
     tc: *mut c_void,
