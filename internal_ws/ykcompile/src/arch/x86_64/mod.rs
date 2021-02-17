@@ -264,8 +264,9 @@ pub extern "sysv64" fn bh_new_vec() -> *mut Vec<FrameInfo> {
 }
 
 /// Pushes a new `FrameInfo` instance onto the vector behind the pointer `vptr`. The `FrameInfo`
-/// instance is creates from a pointer to a symbol name and its length, a basic block index and a
-/// pointer to some allocated memory.
+/// instance is created from a pointer to a symbol name and its length, a basic block index and a
+/// pointer to some allocated memory. Note that this function converts the raw pointer `vptr` into
+/// an `&mut` reference.
 pub extern "sysv64" fn bh_push_vec(
     vptr: *mut Vec<FrameInfo>,
     sym_ptr: *const u8,
@@ -277,9 +278,8 @@ pub extern "sysv64" fn bh_push_vec(
         unsafe { std::str::from_utf8(std::slice::from_raw_parts(sym_ptr, sym_len)).unwrap() };
     let body = SIR.body(fname).unwrap();
     let fi = FrameInfo { body, bbidx, mem };
-    let mut v = unsafe { Box::from_raw(vptr) };
+    let v = unsafe { &mut *vptr };
     v.push(fi);
-    Box::into_raw(v);
 }
 
 /// Compile a TIR trace, returning executable code.
