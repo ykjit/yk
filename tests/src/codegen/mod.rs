@@ -782,7 +782,6 @@ fn place_larger_than_reg() {
     assert_eq!(args.0, S(10, 10, 10));
 }
 
-#[ignore] // FIXME Sometimes assertion fails. Guard really failing?
 #[test]
 fn array_slice_index() {
     struct InterpCtx<'a>(&'a [u8], u8);

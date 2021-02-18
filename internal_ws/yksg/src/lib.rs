@@ -27,6 +27,7 @@ pub struct FrameInfo {
 }
 
 /// Heap allocated memory for writing and reading locals of a stack frame.
+#[derive(Debug)]
 pub struct LocalMem {
     /// Pointer to allocated memory containing a frame's locals.
     locals: *mut u8,
@@ -188,6 +189,7 @@ macro_rules! make_binop {
 /// An interpreter stack frame, containing allocated memory for the frames locals, and the function
 /// symbol name and basic block index needed by the interpreter to continue interpreting after
 /// returning from a function call.
+#[derive(Debug)]
 struct StackFrame {
     /// Allocated memory holding live locals.
     mem: LocalMem,
