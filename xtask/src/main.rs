@@ -78,6 +78,12 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String]) {
             }
         }
         "build" | "check" | "test" => {
+            // Ensure that the whole workspace is tested and not just the base crate in the
+            // workspace.
+            if target == "test" {
+                cmd.arg("--workspace");
+            }
+
             if workspace == Workspace::Internal {
                 let tracing_kind = find_tracing_kind(&rust_flags);
                 rust_flags = make_internal_rustflags(&rust_flags);
@@ -93,7 +99,7 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String]) {
                 // `cargo test` in the internal workspace won't build libykshim.so, so we have
                 // to force-build it to avoid linkage problems for the external workspace.
                 if target == "test" {
-                    run_action(Workspace::Internal, "build", extra_args);
+                    run_action(Workspace::Internal, "build", &[]);
                 }
             }
         }
