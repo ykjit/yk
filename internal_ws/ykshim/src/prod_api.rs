@@ -107,14 +107,14 @@ unsafe fn __ykshim_tirtrace_drop(tir_trace: *mut TirTrace) {
     Box::from_raw(tir_trace);
 }
 
-/// Start an initialised SIRInterpreter.
+/// Start an initialised StopgapInterpreter.
 #[no_mangle]
-unsafe extern "C" fn __ykshim_si_interpret(si: *mut ykbh::SIRInterpreter, ctx: *mut u8) {
+unsafe extern "C" fn __ykshim_si_interpret(si: *mut yksg::StopgapInterpreter, ctx: *mut u8) {
     let si = &mut *si;
     si.sg_interpret(ctx);
 }
 
 #[no_mangle]
-unsafe extern "C" fn __ykshim_sirinterpreter_drop(interp: *mut ykbh::SIRInterpreter) {
+unsafe extern "C" fn __ykshim_sirinterpreter_drop(interp: *mut yksg::StopgapInterpreter) {
     Box::from_raw(interp);
 }

@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 libc = "0.2.82"
-ykbh = { path = "../ykbh" }
+yksg = { path = "../yksg" }
 ykcompile = { path = "../ykcompile" }
 ykpack = { path = "../ykpack" }
 yktrace = { path = "../yktrace" }

@@ -98,7 +98,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     entered_call = false;
                     // For each new function we enter during the trace, create a new guard block.
                     // The list of guard blocks is later added to the guard, enabling us to
-                    // recreate the stack frames for blackholing.
+                    // recreate the stack frames for the stopgap interpreter.
                     guard_blocks.push(GuardBlock {
                         symbol_name: loc.symbol_name,
                         bb_idx: loc.bb_idx
@@ -564,10 +564,10 @@ pub struct Guard {
     /// The requirement upon `val` for the guard to pass.
     pub kind: GuardKind,
     /// The block whose terminator was the basis for this guard. This is here so that, in the event
-    /// that the guard fails, we know where to start the blackhole interpreter.
+    /// that the guard fails, we know where to start the stopgap interpreter.
     pub block: Vec<GuardBlock>,
     /// The TIR locals (and their SIR equivalent) that are live at the time of the guard. This is
-    /// needed so that we can initialise the blackhole interpreter with the correct state.
+    /// needed so that we can initialise the stopgap interpreter with the correct state.
     pub live_locals: Vec<Vec<LiveLocal>>
 }
 

@@ -14,7 +14,7 @@ lazy_static = "1.4.0"
 libc = "0.2.82"
 ykpack = { path = "../ykpack" }
 yktrace = { path = "../yktrace" }
-ykbh = { path = "../ykbh" }
+yksg = { path = "../yksg" }
 
 [dev-dependencies]
 fm = "0.2.0"
