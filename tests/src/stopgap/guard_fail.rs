@@ -1,3 +1,5 @@
+//! Testing the stopgap interpreter via guard failures.
+
 use ykshim_client::{compile_trace, start_tracing, StopgapInterpreter, TracingKind};
 
 #[test]
