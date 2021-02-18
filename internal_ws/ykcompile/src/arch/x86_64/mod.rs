@@ -10,8 +10,8 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::mem;
 use std::process::Command;
-use ykbh::{FrameInfo, SIRInterpreter};
 use ykpack::{IPlace, LocalDecl, SignedIntTy, Ty, TyKind, UnsignedIntTy};
+use yksg::{FrameInfo, StopgapInterpreter};
 use yktrace::sir::{INTERP_STEP_ARG, SIR};
 use yktrace::tir::{BinOp, CallOperand, Guard, GuardKind, Local, Statement, TirOp, TirTrace};
 
@@ -237,15 +237,15 @@ fn local_to_reg_name(loc: &Location) -> &'static str {
     }
 }
 
-// Collection of functions required during a guard failure to instantiate and initialise the SIR
-// interpreter for blackholing.
+// Collection of functions required during a guard failure to instantiate and initialise the
+// stopgap interpreter.
 
 /// Given a vector of `FrameInfo`s `vptr`, instantiates and initialises a SIR interpreter and returns its
 /// pointer. Consumes `vptr`.
 #[no_mangle]
-pub extern "sysv64" fn invoke_sinterp(vptr: *mut Vec<FrameInfo>) -> *mut SIRInterpreter {
+pub extern "sysv64" fn invoke_sinterp(vptr: *mut Vec<FrameInfo>) -> *mut StopgapInterpreter {
     let v = unsafe { Box::from_raw(vptr) };
-    let si = SIRInterpreter::from_frames(*v);
+    let si = StopgapInterpreter::from_frames(*v);
     Box::into_raw(Box::new(si))
 }
 
@@ -1239,7 +1239,7 @@ impl TraceCompiler {
         // initialises a SIR interpreter and runs it.
         for (guard, mut live_locations, label) in gl {
             // Symbol names of the functions called while executing the trace. Needed to recreate
-            // the stack frames in the SIRInterpreter.
+            // the stack frames in the StopgapInterpreter.
             let mut sym_labels = Vec::new();
             for block in &guard.block {
                 let dynlbl = self.asm.new_dynamic_label();
@@ -1279,7 +1279,7 @@ impl TraceCompiler {
             }
 
             // Create vector to store the allocated memory pointers in, to be handed to the
-            // SIRInterpreter later. We can use a fixed register here, since we've spilled all
+            // StopgapInterpreter later. We can use a fixed register here, since we've spilled all
             // registers to the stack.
             let frame_vec_reg = R12.code();
             dynasm!(self.asm

@@ -5,9 +5,9 @@ use std::ffi::{c_void, CStr, CString};
 use std::os::raw::c_char;
 use std::ptr;
 
-use ykbh::SIRInterpreter;
 use ykcompile::{find_symbol, CompiledTrace, TraceCompiler, REG_POOL};
 use ykpack::{self, Local, LocalDecl, TypeId};
+use yksg::StopgapInterpreter;
 use yktrace::sir::{self, SirTrace, SIR};
 use yktrace::tir::TirTrace;
 
@@ -111,7 +111,7 @@ unsafe extern "C" fn __ykshimtest_find_symbol(sym: *const c_char) -> *mut c_void
 #[no_mangle]
 unsafe extern "C" fn __ykshimtest_interpret_body(body_name: *const c_char, ctx: *mut u8) {
     let fname = CStr::from_ptr(body_name).to_str().unwrap().to_string();
-    let mut si = SIRInterpreter::from_symbol(fname);
+    let mut si = StopgapInterpreter::from_symbol(fname);
     si.set_interp_ctx(ctx);
     si.interpret();
 }

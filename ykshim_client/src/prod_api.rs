@@ -10,7 +10,7 @@ pub(crate) type RawCompiledTrace = c_void;
 pub(crate) type RawSirTrace = c_void;
 type RawThreadTracer = c_void;
 pub(crate) type RawTirTrace = c_void;
-pub type RawSIRInterpreter = c_void;
+pub type RawStopgapInterpreter = c_void;
 
 // These types and constants must be kept in sync with types of the same name in the internal
 // workspace.
@@ -35,8 +35,8 @@ extern "C" {
     fn __ykshim_compiled_trace_get_ptr(compiled_trace: *const RawCompiledTrace) -> *const c_void;
     fn __ykshim_compiled_trace_drop(compiled_trace: *mut RawCompiledTrace);
     fn __ykshim_sirtrace_drop(trace: *mut RawSirTrace);
-    fn __ykshim_si_interpret(interp: *mut RawSIRInterpreter, ctx: *mut u8);
-    fn __ykshim_sirinterpreter_drop(interp: *mut RawSIRInterpreter);
+    fn __ykshim_si_interpret(interp: *mut RawStopgapInterpreter, ctx: *mut u8);
+    fn __ykshim_sirinterpreter_drop(interp: *mut RawStopgapInterpreter);
 }
 
 /// The different ways by which we can collect a trace.
@@ -80,15 +80,15 @@ impl Drop for ThreadTracer {
     }
 }
 
-pub struct SIRInterpreter(pub *mut RawSIRInterpreter);
+pub struct StopgapInterpreter(pub *mut RawStopgapInterpreter);
 
-impl SIRInterpreter {
+impl StopgapInterpreter {
     pub unsafe fn interpret(&mut self, ctx: *mut u8) {
         __ykshim_si_interpret(self.0, ctx);
     }
 }
 
-impl Drop for SIRInterpreter {
+impl Drop for StopgapInterpreter {
     fn drop(&mut self) {
         unsafe { __ykshim_sirinterpreter_drop(self.0) }
     }
@@ -134,8 +134,8 @@ impl<I> CompiledTrace<I> {
     }
 
     /// Execute the trace with the given interpreter context.
-    pub unsafe fn execute(&self, ctx: &mut I) -> *mut RawSIRInterpreter {
-        let f = mem::transmute::<_, fn(&mut I) -> *mut RawSIRInterpreter>(self.ptr());
+    pub unsafe fn execute(&self, ctx: &mut I) -> *mut RawStopgapInterpreter {
+        let f = mem::transmute::<_, fn(&mut I) -> *mut RawStopgapInterpreter>(self.ptr());
         f(ctx)
     }
 }

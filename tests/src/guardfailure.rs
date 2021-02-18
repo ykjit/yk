@@ -1,4 +1,4 @@
-use ykshim_client::{compile_trace, start_tracing, SIRInterpreter, TracingKind};
+use ykshim_client::{compile_trace, start_tracing, StopgapInterpreter, TracingKind};
 
 #[test]
 fn simple() {
@@ -34,7 +34,7 @@ fn simple() {
     let ptr = unsafe { ct.execute(&mut args) };
     assert!(!ptr.is_null());
     // Check that running the interpreter gets us the correct result.
-    let mut si: SIRInterpreter = SIRInterpreter(ptr);
+    let mut si: StopgapInterpreter = StopgapInterpreter(ptr);
     unsafe { si.interpret(&mut args as *mut _ as *mut u8) };
     assert_eq!(args.1, 10);
 }
@@ -44,7 +44,7 @@ fn recursion() {
     struct InterpCtx(u8, u8);
 
     // Test that if a guard fails within a recursive call, we still construct the correct stack
-    // frames for the blackholing interpreter.
+    // frames for the stopgap interpreter.
     fn rec(i: u8, j: u8) -> u8 {
         let mut k = i;
         if i < 1 {
@@ -79,7 +79,7 @@ fn recursion() {
     let ptr = unsafe { ct.execute(&mut args) };
     assert!(!ptr.is_null());
     // Check that running the interpreter gets us the correct result.
-    let mut si: SIRInterpreter = SIRInterpreter(ptr);
+    let mut si: StopgapInterpreter = StopgapInterpreter(ptr);
     unsafe { si.interpret(&mut args as *mut _ as *mut u8) };
     assert_eq!(args.1, 99);
 }
@@ -119,7 +119,7 @@ fn recursion2() {
     let ptr = unsafe { ct.execute(&mut args) };
     assert!(!ptr.is_null());
     // Check that running the interpreter gets us the correct result.
-    let mut si: SIRInterpreter = SIRInterpreter(ptr);
+    let mut si: StopgapInterpreter = StopgapInterpreter(ptr);
     unsafe { si.interpret(&mut args as *mut _ as *mut u8) };
     assert_eq!(args.1, 5);
 }

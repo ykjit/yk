@@ -1,8 +1,8 @@
 [workspace]
 members = [
-    "ykbh",
     "ykcompile",
     "ykpack",
+    "yksg",
     "ykshim",
     "yktrace",
     "ykview",

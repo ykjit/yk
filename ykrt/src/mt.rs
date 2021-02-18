@@ -18,8 +18,8 @@ use crate::location::{
     PHASE_DONT_TRACE, PHASE_LOCKED, PHASE_TRACING, PHASE_TRACING_LOCK,
 };
 use ykshim_client::{
-    compile_trace, start_tracing, CompiledTrace, RawSIRInterpreter, SIRInterpreter, ThreadTracer,
-    TracingKind,
+    compile_trace, start_tracing, CompiledTrace, RawStopgapInterpreter, StopgapInterpreter,
+    ThreadTracer, TracingKind,
 };
 
 pub type HotThreshold = usize;
@@ -193,7 +193,7 @@ impl MTThread {
                     return;
                 } else {
                     unsafe {
-                        let mut si = SIRInterpreter(ptr);
+                        let mut si = StopgapInterpreter(ptr);
                         si.interpret(ctx as *mut _ as *mut u8);
                     }
                 }
@@ -204,9 +204,9 @@ impl MTThread {
 
     fn exec_trace<I>(
         &mut self,
-        func: fn(&mut I) -> *mut RawSIRInterpreter,
+        func: fn(&mut I) -> *mut RawStopgapInterpreter,
         ctx: &mut I,
-    ) -> *mut RawSIRInterpreter {
+    ) -> *mut RawStopgapInterpreter {
         func(ctx)
     }
 
@@ -216,7 +216,7 @@ impl MTThread {
     fn transition_location<I: Send + 'static>(
         &mut self,
         loc: &Location<I>,
-    ) -> Option<fn(&mut I) -> *mut RawSIRInterpreter> {
+    ) -> Option<fn(&mut I) -> *mut RawStopgapInterpreter> {
         // Since we don't hold an explicit lock, updating a Location is tricky: we might read a
         // Location, work out what we'd like to update it to, and try updating it, only to find
         // that another thread interrupted us part way through. We therefore use compare_and_swap
@@ -398,7 +398,9 @@ impl MTThread {
                     Ok(mut gd) => {
                         if let Some(tr) = (*gd).take() {
                             let f = unsafe {
-                                mem::transmute::<_, fn(&mut I) -> *mut RawSIRInterpreter>(tr.ptr())
+                                mem::transmute::<_, fn(&mut I) -> *mut RawStopgapInterpreter>(
+                                    tr.ptr(),
+                                )
                             };
                             loc.store(State::phase_compiled(tr), Ordering::Release);
                             return Some(f);
@@ -418,8 +420,9 @@ impl MTThread {
             PHASE_LOCKED | PHASE_DONT_TRACE => return None,
             PHASE_COMPILED => {
                 let bct = unsafe { lp.ref_data::<CompiledTrace<I>>() };
-                let f =
-                    unsafe { mem::transmute::<_, fn(&mut I) -> *mut RawSIRInterpreter>(bct.ptr()) };
+                let f = unsafe {
+                    mem::transmute::<_, fn(&mut I) -> *mut RawStopgapInterpreter>(bct.ptr())
+                };
                 return Some(f);
             }
             _ => unreachable!(),
@@ -868,7 +871,7 @@ mod tests {
     }
 
     #[test]
-    fn blackholing() {
+    fn stopgapping() {
         let mut mtt = MTBuilder::new().hot_threshold(2).init();
 
         const INC: u8 = 0;

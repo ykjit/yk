@@ -1,6 +1,10 @@
-//! The stopgap interpreter which is invoked during a guard failure. It picks up right after the
-//! guard and interprets SIR getting us safely back to a control point in the the meta-tracer from
-//! which point normal interpretation can continue.
+//! The stopgap interpreter.
+//!
+//! After a guard failure, the StopgapInterpreter takes over. It interprets SIR to execute the
+//! program from the guard failure until execution arrives back to the control point, at which
+//! point the normal interpreter can continue.
+//!
+//! In other systems, this process is sometimes called "blackholing".
 
 use std::alloc::{alloc, dealloc, Layout};
 use std::convert::TryFrom;
@@ -11,7 +15,7 @@ use ykpack::{
 };
 use yktrace::sir::{INTERP_STEP_ARG, RETURN_LOCAL, SIR};
 
-/// Stores information needed to recreate stack frames in the SIRInterpreter.
+/// Stores information needed to recreate stack frames in the StopgapInterpreter.
 pub struct FrameInfo {
     /// The body of this frame.
     pub body: Arc<Body>,
@@ -197,16 +201,16 @@ struct StackFrame {
 /// trace. It is initalised with information from the trace, e.g. live variables, stack frames, and
 /// then run to get us back to a control point from which point the normal interpreter can take
 /// over.
-pub struct SIRInterpreter {
+pub struct StopgapInterpreter {
     /// Active stack frames (most recent last).
     frames: Vec<StackFrame>,
 }
 
-impl SIRInterpreter {
+impl StopgapInterpreter {
     /// Initialise the interpreter from a symbol name.
     pub fn from_symbol(sym: String) -> Self {
-        let frame = SIRInterpreter::create_frame(&sym);
-        SIRInterpreter {
+        let frame = StopgapInterpreter::create_frame(&sym);
+        StopgapInterpreter {
             frames: vec![frame],
         }
     }
@@ -229,7 +233,7 @@ impl SIRInterpreter {
             };
             frames.push(frame);
         }
-        SIRInterpreter { frames }
+        StopgapInterpreter { frames }
     }
 
     /// Run the SIR interpreter after it has been initialised by a guard failure. Since we start in
@@ -326,7 +330,7 @@ impl SIRInterpreter {
                 };
 
                 // Initialise the new stack frame.
-                let mut frame = SIRInterpreter::create_frame(&fname);
+                let mut frame = StopgapInterpreter::create_frame(&fname);
                 frame.mem.copy_args(args, self.locals());
                 self.frames.push(frame);
             }

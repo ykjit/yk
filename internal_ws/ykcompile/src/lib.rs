@@ -11,8 +11,8 @@ extern crate test;
 
 use libc::{c_void, dlsym, RTLD_DEFAULT};
 use std::{ffi::CString, fmt, mem};
-use ykbh::SIRInterpreter;
 use ykpack::{Constant, Local, OffT, TypeId};
+use yksg::StopgapInterpreter;
 
 mod arch;
 mod stack_builder;
@@ -140,8 +140,8 @@ pub struct CompiledTrace {
 
 impl CompiledTrace {
     /// Execute the trace by calling (not jumping to) the first instruction's address.
-    pub unsafe fn execute<TT>(&self, args: &mut TT) -> *mut SIRInterpreter {
-        let func: extern "sysv64" fn(&mut TT) -> *mut SIRInterpreter =
+    pub unsafe fn execute<TT>(&self, args: &mut TT) -> *mut StopgapInterpreter {
+        let func: extern "sysv64" fn(&mut TT) -> *mut StopgapInterpreter =
             mem::transmute(self.mc.ptr(dynasmrt::AssemblyOffset(0)));
         self.exec_trace(func, args)
     }
@@ -150,9 +150,9 @@ impl CompiledTrace {
     /// breakpoint right before entering the trace.
     fn exec_trace<TT>(
         &self,
-        t_fn: extern "sysv64" fn(&mut TT) -> *mut SIRInterpreter,
+        t_fn: extern "sysv64" fn(&mut TT) -> *mut StopgapInterpreter,
         args: &mut TT,
-    ) -> *mut SIRInterpreter {
+    ) -> *mut StopgapInterpreter {
         t_fn(args)
     }
 
