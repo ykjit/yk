@@ -38,11 +38,12 @@ fn main() {
             let mut parts = line.trim().split(' ');
             let symbol_name = parts.next().unwrap();
             let bb_idx = parts.next().unwrap().parse::<u32>().unwrap();
+            let addr = parts.next().unwrap().parse::<u64>().unwrap();
             assert!(parts.next().is_none());
             trace.push(yktrace::sir::SirLoc {
                 symbol_name,
                 bb_idx,
-                addr: None,
+                addr: Some(addr),
             });
         }
         for loc in &trace {
