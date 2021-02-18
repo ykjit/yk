@@ -19,7 +19,10 @@ fn simple() {
     }
 
     let mut ctx = InterpCtx(std::hint::black_box(|i| i)(0), 0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -61,7 +64,10 @@ fn recursion() {
     }
 
     let mut ctx = InterpCtx(std::hint::black_box(|i| i)(0), 0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();
@@ -98,7 +104,10 @@ fn recursion2() {
     }
 
     let mut ctx = InterpCtx(7, 0);
+    #[cfg(tracermode = "hw")]
     let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
     interp_step(&mut ctx);
     let sir_trace = th.stop_tracing().unwrap();
     let ct = compile_trace(sir_trace).unwrap();

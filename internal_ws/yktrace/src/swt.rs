@@ -1,9 +1,9 @@
 //! Software tracing via ykrustc.
 
+use self::trace_buffer::TraceBuffer;
 use super::{SirTrace, ThreadTracer, ThreadTracerImpl};
 use crate::{errors::InvalidTraceError, sir::SirLoc};
-use libc;
-use std::convert::TryFrom;
+use std::cell::UnsafeCell;
 
 /// Softare thread tracer.
 struct SWTThreadTracer;
@@ -11,65 +11,30 @@ struct SWTThreadTracer;
 /// Stop tracing on the current thread.
 impl ThreadTracerImpl for SWTThreadTracer {
     fn stop_tracing(&mut self) -> Result<SirTrace, InvalidTraceError> {
-        let len;
-        let buf = unsafe {
-            if !__YK_SWT_ACTIVE {
-                libc::puts(
-                    "attempted to stop tracing when no tracer is active\n\0" as *const str
-                        as *const i8
-                );
-                libc::free(TRACE_BUF as *mut _);
-                TRACE_BUF = 0 as *mut SwtLoc;
-                TRACE_BUF_LEN = 0;
-                return Err(InvalidTraceError::InternalError);
-            }
+        if unsafe { !__YK_SWT_ACTIVE } {
+            println!("attempted to stop tracing when no tracer is active");
+            return Err(InvalidTraceError::InternalError);
+        }
 
+        unsafe {
             __YK_SWT_ACTIVE = false;
+        }
 
-            // We hand ownership of the trace to the caller. The caller is responsible
-            // for freeing the trace.
-            let ret_trace = TRACE_BUF;
-            len = TRACE_BUF_LEN;
+        let locs = TRACE_BUF.with(|trace_buf| {
+            // When we make a SirTrace, we convert all of the locations from SwtLoc to SirLoc.
+            trace_buf.get_sir_locs_and_clear()
+        });
 
-            // Now reset all off the recorder's state.
-            TRACE_BUF = 0 as *mut SwtLoc;
-            TRACE_BUF_LEN = 0;
-            TRACE_BUF_CAP = 0;
-
-            ret_trace
-        };
-
-        // When we make a SirTrace, we convert all of the locations from SwtLoc to SirLoc.
-        let locs = (0..len)
-            .map(|idx| {
-                let idx = isize::try_from(idx).unwrap();
-                let swt_loc = unsafe { &*buf.offset(idx) };
-                let symbol_name = unsafe { std::ffi::CStr::from_ptr(swt_loc.symbol_name) };
-                SirLoc {
-                    symbol_name: symbol_name.to_str().unwrap(),
-                    bb_idx: swt_loc.bb_idx,
-                    addr: None
-                }
-            })
-            .collect();
-
-        unsafe { libc::free(buf as *mut libc::c_void) };
         Ok(SirTrace::new(locs))
     }
 }
 
-/// Start tracing on the current thread.
-/// A new trace buffer is allocated and MIR locations will be written into it on
-/// subsequent calls to `yk_swt_rec_loc`. If the current thread is already
-/// tracing, calling this will lead to undefined behaviour.
 pub(crate) fn start_tracing() -> ThreadTracer {
-    unsafe {
-        TRACE_BUF = libc::calloc(TL_TRACE_INIT_CAP, std::mem::size_of::<SwtLoc>()) as *mut SwtLoc;
-        if TRACE_BUF as usize == 0 {
-            std::intrinsics::abort();
-        }
+    TRACE_BUF.with(|trace_buf| {
+        assert!(trace_buf.is_empty());
+    });
 
-        TRACE_BUF_CAP = TL_TRACE_INIT_CAP;
+    unsafe {
         __YK_SWT_ACTIVE = true;
     }
 
@@ -86,23 +51,10 @@ struct SwtLoc {
     bb_idx: u32
 }
 
-const TL_TRACE_INIT_CAP: usize = 1024;
-const TL_TRACE_REALLOC_CAP: usize = 1024;
-
-/// The trace buffer.
-///
-/// `calloc` and `free` are directly used instead of `Vec` to avoid calling into traced functions
-/// from `__yk_swt_rec_loc`. Otherwise there would be infinite recursion.
-#[thread_local]
-static mut TRACE_BUF: *mut SwtLoc = 0 as *mut SwtLoc;
-
-/// The number of elements in the trace buffer.
-#[thread_local]
-static mut TRACE_BUF_LEN: usize = 0;
-
-/// The allocation capacity of the trace buffer (in elements).
-#[thread_local]
-static mut TRACE_BUF_CAP: usize = 0;
+thread_local! {
+    /// The trace buffer.
+    static TRACE_BUF: TraceBuffer = TraceBuffer::new();
+}
 
 /// true = we are tracing, false = we are not tracing or an error occurred.
 #[thread_local]
@@ -167,35 +119,55 @@ __yk_swt_rec_loc_active:
 /// This is outlined to make the common case of tracing being disabled faster.
 #[no_mangle]
 unsafe extern "C" fn __yk_swt_rec_loc_impl(symbol_name: *const i8, bb_idx: u32) {
-    // Check if we need more space and reallocate if necessary.
-    if TRACE_BUF_LEN == TRACE_BUF_CAP {
-        if TRACE_BUF_CAP >= std::isize::MAX as usize - TL_TRACE_REALLOC_CAP {
-            // Trace capacity would overflow.
-            __YK_SWT_ACTIVE = false;
-            return;
-        }
-        let new_cap = TRACE_BUF_CAP + TL_TRACE_REALLOC_CAP;
-
-        if new_cap > std::isize::MAX as usize / std::intrinsics::size_of::<SwtLoc>() {
-            // New buffer size would overflow.
-            __YK_SWT_ACTIVE = false;
-            return;
-        }
-        let new_size = new_cap * std::intrinsics::size_of::<SwtLoc>();
-
-        TRACE_BUF = libc::realloc(TRACE_BUF as *mut _, new_size as usize) as *mut SwtLoc;
-        if TRACE_BUF as usize == 0 {
-            __YK_SWT_ACTIVE = false;
-            return;
-        }
-
-        TRACE_BUF_CAP = new_cap;
-    }
-
-    *((TRACE_BUF as usize + TRACE_BUF_LEN * std::intrinsics::size_of::<SwtLoc>()) as *mut SwtLoc) =
-        SwtLoc {
+    TRACE_BUF.with(|trace_buf| {
+        trace_buf.push(SwtLoc {
             symbol_name,
             bb_idx
-        };
-    TRACE_BUF_LEN += 1;
+        });
+    });
+}
+
+mod trace_buffer {
+    use super::*;
+
+    /// A buffer containing [`SwtLoc`]s. All public methods only require an immutable reference,
+    /// thereby allowing it to be stored inside a thread local without the overhead of a `RefCell`.
+    pub(super) struct TraceBuffer(UnsafeCell<Vec<SwtLoc>>);
+
+    impl TraceBuffer {
+        pub(super) fn new() -> Self {
+            TraceBuffer(UnsafeCell::new(Vec::with_capacity(1024)))
+        }
+
+        pub(super) fn is_empty(&self) -> bool {
+            // SAFETY: The api of `TraceBuffer` prevents any mutable references for the duration of
+            // this call.
+            unsafe { (&*self.0.get()).is_empty() }
+        }
+
+        #[inline]
+        pub(super) fn push(&self, loc: SwtLoc) {
+            // SAFETY: The api of `TraceBuffer` prevents any other references for the duration of
+            // this call.
+            unsafe {
+                (&mut *self.0.get()).push(loc);
+            }
+        }
+
+        pub(super) fn get_sir_locs_and_clear(&self) -> Vec<SirLoc> {
+            // SAFETY: The api of `TraceBuffer` prevents any other references for the duration of
+            // this call.
+            unsafe { &mut *self.0.get() }
+                .drain(..)
+                .map(|swt_loc| {
+                    let symbol_name = unsafe { std::ffi::CStr::from_ptr(swt_loc.symbol_name) };
+                    SirLoc {
+                        symbol_name: symbol_name.to_str().unwrap(),
+                        bb_idx: swt_loc.bb_idx,
+                        addr: None
+                    }
+                })
+                .collect()
+        }
+    }
 }
