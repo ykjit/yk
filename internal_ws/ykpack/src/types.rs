@@ -367,8 +367,9 @@ impl Display for Ptr {
 pub enum IPlace {
     /// The IPlace describes a value as a Local+offset pair.
     Val { local: Local, off: OffT, ty: TypeId },
-    /// An indirect place behind a pointer. ykrustc uses these for deref and (dynamic) index
-    /// projections (which cannot be resolved statically and thus depend on a runtime pointer).
+    /// An indirect place, i.e. an IPlace whose value is a pointer to another IPlace. ykrustc uses
+    /// these for deref and (dynamic) index projections (which cannot be resolved statically and
+    /// thus depend on a runtime pointer).
     Indirect {
         /// The location of the pointer to be dereferenced at runtime.
         ptr: Ptr,
@@ -446,8 +447,8 @@ impl IPlace {
                     ty: new_ty,
                 }
             }
-            Self::Const { .. } => unreachable!("const to indirect"),
-            Self::Indirect { .. } => unreachable!("indirect to indirect"),
+            Self::Const { .. } => unreachable!(),
+            Self::Indirect { .. } => unreachable!(),
             Self::Unimplemented(_) => self.clone(),
         }
     }
@@ -467,7 +468,7 @@ pub enum Statement {
         opnd2: IPlace,
         checked: bool,
     },
-    /// Makes a reference.
+    /// Makes a reference to another IPlace.
     MkRef(IPlace, IPlace),
     /// Computes a pointer address at runtime.
     DynOffs {
@@ -912,6 +913,14 @@ impl Display for Pack {
     }
 }
 
+/// A SIR mapping label.
+#[derive(Debug, Hash, Eq, PartialEq, Clone, Serialize, Deserialize)]
+pub struct SirLabel {
+    pub off: SirOffset,
+    pub symbol_name: String,
+    pub bb: BasicBlockIndex,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{ConstantInt, SignedInt, UnsignedInt};
@@ -950,12 +959,4 @@ mod tests {
         let cst = ConstantInt::u128_from_bits(v as u128);
         assert_eq!(cst, ConstantInt::UnsignedInt(UnsignedInt::U128(v)));
     }
-}
-
-/// A SIR mapping label.
-#[derive(Debug, Hash, Eq, PartialEq, Clone, Serialize, Deserialize)]
-pub struct SirLabel {
-    pub off: SirOffset,
-    pub symbol_name: String,
-    pub bb: BasicBlockIndex,
 }
