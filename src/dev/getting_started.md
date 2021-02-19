@@ -149,14 +149,7 @@ rebuilding the same packages.
  - `cargo` will not trigger a rebuild of `yk` if the compiler is rebuilt, so
    you may have to `cargo clean`.
 
- - If you want to run `rustfmt` in `yk`, it's usually easier to invoke the one
-   from the nightly toolchain with `cargo +nightly fmt`. To format the
-   compiler, use `./x.py fmt`.
-
- - Sadly the same trick does not work for `clippy`, as our `-C tracer` flag
-   confuses it. To use `clippy` you have to edit `config.toml` to enable
-   building it. Even then `cargo clippy` won't work due to a `rustup` bug and
-   you have to run the binary manually, setting a `LD_LIBRARY_PATH` as
-   necessary.
+ - `cargo xtask fmt` and `cargo xtask clippy` in the `yk` repo currently
+   require a nightly rust toolchain installed via rustup.
 
  - [Continuous Integration Cycles](ci_cycles.md)
