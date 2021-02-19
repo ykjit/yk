@@ -1,3 +1,11 @@
+//! A stack builder for allocating objects on the stack.
+//!
+//! The builder is naive in that it allocates objects immediately (when `alloc` is called), thus
+//! potentially inserting more alignment padding than would be necessary if we deferred and
+//! reordered allocations.
+//!
+//! The stack is assumed to be appropriately aligned before the builder is used.
+
 use crate::Location;
 use dynasmrt::{x64::Rq::RBP, Register};
 use std::convert::{TryFrom, TryInto};
@@ -8,12 +16,6 @@ pub(crate) struct StackBuilder {
     stack_top: u64,
 }
 
-/// A naive stack builder for allocating objects on the stack.
-///
-/// Naive because it could allocate less space by caching up the requested allocations and
-/// better-packing them.
-///
-/// The top of the stack, before any calls to `alloc()` is assumed to be appropriately aligned.
 impl StackBuilder {
     /// Allocate an object of given size and alignment on the stack, returning a `Location::Mem`
     /// describing the position of the allocation. The stack is assumed to grow down.

@@ -1,3 +1,5 @@
+//! Command-line tool for extracting and viewing SIR.
+
 use memmap2::Mmap;
 use std::{fs::File, io::Read};
 

@@ -1,3 +1,5 @@
+//! Trace location: track the state of a program location (counting, tracing, compiled, etc).
+
 use std::{
     marker::PhantomData,
     sync::{
