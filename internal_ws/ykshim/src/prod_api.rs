@@ -1,3 +1,5 @@
+//! The ykshim API.
+
 use std::ffi::{c_void, CString};
 use std::os::raw::c_char;
 

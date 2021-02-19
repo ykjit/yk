@@ -1,3 +1,5 @@
+//! Errors that can occur during tracing.
+
 use std::fmt::{self, Display, Formatter};
 
 #[derive(Debug)]

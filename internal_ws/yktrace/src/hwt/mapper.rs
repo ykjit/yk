@@ -1,3 +1,6 @@
+//! The mapper loads SIR location labels from the executable and provides a way to map virtual
+//! block addresses to SIR locations, i.e. symbol name and block index.
+
 use object::{Object, ObjectSection};
 use phdrs::objects;
 

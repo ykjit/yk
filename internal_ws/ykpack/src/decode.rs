@@ -1,9 +1,11 @@
+//! The pack decoder.
+//!
+//! Offers a simple iterator interface to serialised packs.
+
 use crate::Pack;
 use fallible_iterator::FallibleIterator;
 use std::io::Read;
 
-/// The pack decoder.
-/// Offers a simple iterator interface to serialised packs.
 pub struct Decoder<'a> {
     from: &'a mut dyn Read,
 }
