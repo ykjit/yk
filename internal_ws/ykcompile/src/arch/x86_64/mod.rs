@@ -282,7 +282,7 @@ pub extern "sysv64" fn bh_push_vec(
     v.push(fi);
 }
 
-/// Compile a TIR trace, returning executable code.
+/// Compile a TIR trace.
 pub fn compile_trace(tt: TirTrace) -> CompiledTrace {
     CompiledTrace {
         mc: TraceCompiler::compile(tt, false),
@@ -297,7 +297,7 @@ pub struct TraceCompiler {
     register_content_map: HashMap<u8, RegAlloc>,
     /// Maps trace locals to their location (register, stack).
     variable_location_map: HashMap<Local, Location>,
-    /// Local decls of the tir trace.
+    /// Local decls of the TIR trace.
     pub local_decls: HashMap<Local, LocalDecl>,
     /// Stack builder for allocating objects on the stack.
     stack_builder: StackBuilder,
@@ -409,7 +409,10 @@ impl TraceCompiler {
         self.stack_builder.alloc(ty.size(), ty.align())
     }
 
+    /// Assign a `Location` to a `Local` turning live. If possible, find it a register for it to
+    /// live in, or failing that, allocate space on the stack.
     fn local_live(&mut self, local: &Local) {
+        debug_assert!(self.variable_location_map.get(local).is_none());
         // Assign a Location to this Local.
         self.local_to_location(*local);
     }
@@ -440,7 +443,7 @@ impl TraceCompiler {
     /// Copy bytes from one memory location to another.
     fn copy_memory(&mut self, dest: &RegAndOffset, src: &RegAndOffset, size: u64) {
         // We use memmove(3), as it's not clear if MIR (and therefore SIR) could cause copies
-        // involving overlapping buffers.
+        // involving overlapping buffers. See https://github.com/rust-lang/rust/issues/68364.
         let sym = find_symbol("memmove").unwrap();
         self.save_regs(&*CALLER_SAVED_REGS);
         dynasm!(self.asm
@@ -478,7 +481,7 @@ impl TraceCompiler {
         self.restore_regs(&*CALLER_SAVED_REGS);
     }
 
-    /// Push the specified registers to the stack in order.
+    /// Push the specified registers to the stack in the order they appear in the array.
     fn save_regs(&mut self, regs: &[u8]) {
         for reg in regs.iter() {
             dynasm!(self.asm
@@ -486,7 +489,8 @@ impl TraceCompiler {
             );
         }
     }
-    /// Pop the specified registers from the stack in reverse order.
+    /// Pop the specified registers from the stack in reverse order to how they appear in the
+    /// array.
     fn restore_regs(&mut self, regs: &[u8]) {
         for reg in regs.iter().rev() {
             dynasm!(self.asm
@@ -896,7 +900,7 @@ impl TraceCompiler {
         let src_loc = self.iplace_to_location(src);
         match src_loc {
             Location::Reg(..) => {
-                // This isn't possible as the allocator explicitely puts things which are
+                // This isn't possible as the allocator explicitly puts things which are
                 // referenced onto the stack and never in registers.
                 unreachable!()
             }
@@ -933,7 +937,7 @@ impl TraceCompiler {
     fn c_cast(&mut self, dest: &IPlace, src: &IPlace) {
         let src_loc = self.iplace_to_location(src);
         let ty = &*SIR.ty(&src.ty()); // Type of the source.
-        let cty = SIR.ty(&dest.ty()); // Type of the cast (same as dest type).
+        let cty = SIR.ty(&dest.ty()); // Type of the cast.
         match ty.kind {
             TyKind::UnsignedInt(_) => self.c_cast_uint(src_loc, &ty, &cty),
             _ => todo!(),
@@ -1278,9 +1282,11 @@ impl TraceCompiler {
                 }
             }
 
-            // Create vector to store the allocated memory pointers in, to be handed to the
-            // StopgapInterpreter later. We can use a fixed register here, since we've spilled all
-            // registers to the stack.
+            // Create a vector of `FrameInfo`s in which we store the allocated memory pointers,
+            // body, and basic block index for each active stack frame during the guard failure.
+            // This vector is later handed to the StopgapInterpreter, in order to initialise the
+            // stack frames needed to interpret SIR. We can use a fixed register here, since we've
+            // spilled all registers to the stack.
             let frame_vec_reg = R12.code();
             dynasm!(self.asm
                 ; mov r11, QWORD bh_new_vec as i64
@@ -1400,7 +1406,7 @@ impl TraceCompiler {
                 let ptr = buf.ptr(dynasmrt::AssemblyOffset(0)) as *mut libc::c_void;
                 let len = buf.len();
                 let alignment = ptr as usize % libc::sysconf(libc::_SC_PAGESIZE) as usize;
-                let ptr = ptr.offset(-(alignment as isize));
+                let ptr = ptr.sub(alignment);
                 let len = len + alignment;
                 libc::mprotect(ptr, len, libc::PROT_EXEC | libc::PROT_WRITE);
             }
