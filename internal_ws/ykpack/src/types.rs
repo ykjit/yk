@@ -132,6 +132,7 @@ impl Ty {
         }
     }
 
+    /// Unwraps a tuple if `self` is `Self::Tuple` or panics otherwise.
     pub fn unwrap_tuple(&self) -> &TupleTy {
         if let TyKind::Tuple(tty) = &self.kind {
             &tty
