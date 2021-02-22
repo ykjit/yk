@@ -1,8 +1,6 @@
 //! The testing API client to ykshim.
 
-use crate::prod_api::{
-    CompiledTrace, Local, RawCompiledTrace, RawSirTrace, RawTirTrace, SirTrace, TyIndex,
-};
+use crate::{CompiledTrace, Local, RawCompiledTrace, RawSirTrace, RawTirTrace, SirTrace, TyIndex};
 use libc::size_t;
 use std::collections::HashMap;
 use std::ffi::{c_void, CString};
