@@ -26,8 +26,9 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String]) {
         run_action(Workspace::Internal, target, &[]);
     }
 
-    let mut cmd = if target == "fmt" {
-        // There is currently a bug where `cargo fmt` doesn't work for linked toolchains:
+    let mut cmd = if ["fmt", "clippy"].contains(&target) {
+        // There is currently a bug where `cargo fmt` and `cargo clippy` doesn't work for linked
+        // toolchains:
         // https://github.com/rust-lang/rust/issues/81431
         //
         // As a workaround we fall back on the nightly toolchain installed via rustup. This
@@ -38,7 +39,7 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String]) {
         // understand `+nightly`. So the easiest way to run `cargo fmt` for the nightly
         // toolchain is to use `rustup run nightly cargo fmt`.
         let mut cmd = Command::new("rustup");
-        cmd.args(&["run", "nightly", "cargo", "fmt"]);
+        cmd.args(&["run", "nightly", "cargo", target]);
 
         let this_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
         let ws_dir = match workspace {
@@ -77,7 +78,7 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String]) {
                 cmd.arg("--release".to_string());
             }
         }
-        "build" | "check" | "test" => {
+        "build" | "check" | "clippy" | "test" => {
             // Ensure that the whole workspace is tested and not just the base crate in the
             // workspace.
             if target == "test" {
@@ -101,6 +102,9 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String]) {
                 if target == "test" {
                     run_action(Workspace::Internal, "build", &[]);
                 }
+            } else if workspace == Workspace::External && target == "clippy" {
+                let tracing_kind = find_tracing_kind(&rust_flags);
+                rust_flags = format!("--cfg tracermode=\"{}\"", tracing_kind);
             }
         }
         _ => bail(format!(
@@ -117,7 +121,9 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String]) {
         .wait()
         .unwrap();
 
-    if !status.success() {
+    // The clippy exception ensures that both workspaces are linted if one workspace fails. The
+    // exit status may be inaccurate, but we can live with this.
+    if !status.success() && (target != "clippy") {
         bail(format!("{:?} failed with {}", cmd, status));
     }
 }
