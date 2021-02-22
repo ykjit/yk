@@ -47,7 +47,7 @@ fn add_section(exe_path: &Path, sec_data_path: &Path) {
 /// labels. Returns an list of labels ordered by file offset (ascending).
 fn extract_dwarf_labels(exe_filename: &Path) -> Result<Vec<SirLabel>, gimli::Error> {
     let file = fs::File::open(exe_filename).unwrap();
-    let mmap = unsafe { memmap::Mmap::map(&file).unwrap() };
+    let mmap = unsafe { memmap2::Mmap::map(&file).unwrap() };
     let object = object::File::parse(&*mmap).unwrap();
     let endian = if object.is_little_endian() {
         gimli::RunTimeEndian::Little
