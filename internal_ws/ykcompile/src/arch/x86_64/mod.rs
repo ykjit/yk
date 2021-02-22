@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::mem;
 use std::process::Command;
-use ykpack::{IPlace, LocalDecl, SignedIntTy, Ty, TyKind, UnsignedIntTy};
+use ykpack::{IRPlace, LocalDecl, SignedIntTy, Ty, TyKind, UnsignedIntTy};
 use yksg::{FrameInfo, StopgapInterpreter};
 use yktrace::sir::{INTERP_STEP_ARG, SIR};
 use yktrace::tir::{BinOp, CallOperand, Guard, GuardKind, Local, Statement, TirOp, TirTrace};
@@ -55,7 +55,7 @@ const SYSV_CALL_STACK_ALIGN: usize = 16;
 /// The first operand must be in a register.
 macro_rules! binop_add_sub {
     ($name: ident, $op:expr) => {
-        fn $name(&mut self, opnd1_reg: u8, opnd2: &IPlace) {
+        fn $name(&mut self, opnd1_reg: u8, opnd2: &IRPlace) {
             let size = SIR.ty(&opnd2.ty()).size();
             let opnd2_loc = self.iplace_to_location(opnd2);
             match opnd2_loc {
@@ -124,7 +124,7 @@ macro_rules! binop_add_sub {
 /// The first operand must be in a register.
 macro_rules! binop_mul_div {
     ($name: ident, $op:expr) => {
-        fn $name(&mut self, opnd1_reg: u8, opnd2: &IPlace) {
+        fn $name(&mut self, opnd1_reg: u8, opnd2: &IRPlace) {
             // mul and div overwrite RAX, RDX, so save them first.
             dynasm!(self.asm
                 ; push rax
@@ -345,15 +345,15 @@ impl TraceCompiler {
         }
     }
 
-    fn iplace_to_location(&mut self, ip: &IPlace) -> Location {
+    fn iplace_to_location(&mut self, ip: &IRPlace) -> Location {
         match ip {
-            IPlace::Val { local, off, .. } => self.local_to_location(*local).offset(*off),
-            IPlace::Indirect { ptr, off, .. } => self
+            IRPlace::Val { local, off, .. } => self.local_to_location(*local).offset(*off),
+            IRPlace::Indirect { ptr, off, .. } => self
                 .local_to_location(ptr.local)
                 .offset(ptr.off)
                 .to_indirect()
                 .offset(*off),
-            IPlace::Const { val, ty } => Location::Const {
+            IRPlace::Const { val, ty } => Location::Const {
                 val: val.clone(),
                 ty: *ty,
             },
@@ -517,8 +517,8 @@ impl TraceCompiler {
     fn c_call(
         &mut self,
         opnd: &CallOperand,
-        args: &[IPlace],
-        dest: &Option<IPlace>,
+        args: &[IRPlace],
+        dest: &Option<IRPlace>,
     ) -> Result<(), CompileError> {
         let sym = if let CallOperand::Fn(sym) = opnd {
             sym
@@ -628,15 +628,15 @@ impl TraceCompiler {
         Ok(())
     }
 
-    /// Load an IPlace into the given register. Panic if it doesn't fit.
-    fn load_reg_iplace(&mut self, reg: u8, src_ip: &IPlace) -> Location {
+    /// Load an IRPlace into the given register. Panic if it doesn't fit.
+    fn load_reg_iplace(&mut self, reg: u8, src_ip: &IRPlace) -> Location {
         let dest_loc = Location::Reg(reg);
         let src_loc = self.iplace_to_location(src_ip);
         self.store_raw(&dest_loc, &src_loc, SIR.ty(&src_ip.ty()).size());
         dest_loc
     }
 
-    fn c_binop(&mut self, dest: &IPlace, op: BinOp, opnd1: &IPlace, opnd2: &IPlace, checked: bool) {
+    fn c_binop(&mut self, dest: &IRPlace, op: BinOp, opnd1: &IRPlace, opnd2: &IRPlace, checked: bool) {
         let opnd1_ty = SIR.ty(&opnd1.ty());
         debug_assert!(opnd1_ty == SIR.ty(&opnd2.ty()));
 
@@ -713,7 +713,7 @@ impl TraceCompiler {
     binop_mul_div!(c_binop_mul, mul);
     binop_mul_div!(c_binop_div, div);
 
-    fn c_condition(&mut self, dest: &IPlace, binop: &BinOp, op1: &IPlace, op2: &IPlace) {
+    fn c_condition(&mut self, dest: &IRPlace, binop: &BinOp, op1: &IRPlace, op2: &IRPlace) {
         let src1 = self.iplace_to_location(op1);
         let ty = SIR.ty(&op1.ty());
 
@@ -812,7 +812,7 @@ impl TraceCompiler {
         self.store_raw(&dest_loc, &*TEMP_LOC, SIR.ty(&dest.ty()).size());
     }
 
-    fn c_dynoffs(&mut self, dest: &IPlace, base: &IPlace, idx: &IPlace, scale: u32) {
+    fn c_dynoffs(&mut self, dest: &IRPlace, base: &IRPlace, idx: &IRPlace, scale: u32) {
         // FIXME possible optimisation, use LEA if scale fits in a u8.
 
         // MUL clobbers RDX:RAX, so store/restore those.
@@ -896,7 +896,7 @@ impl TraceCompiler {
         Ok(())
     }
 
-    fn c_mkref(&mut self, dest: &IPlace, src: &IPlace) {
+    fn c_mkref(&mut self, dest: &IRPlace, src: &IRPlace) {
         let src_loc = self.iplace_to_location(src);
         match src_loc {
             Location::Reg(..) => {
@@ -934,7 +934,7 @@ impl TraceCompiler {
         self.store_raw(&dest_loc, &*TEMP_LOC, *PTR_SIZE);
     }
 
-    fn c_cast(&mut self, dest: &IPlace, src: &IPlace) {
+    fn c_cast(&mut self, dest: &IRPlace, src: &IRPlace) {
         let src_loc = self.iplace_to_location(src);
         let ty = &*SIR.ty(&src.ty()); // Type of the source.
         let cty = SIR.ty(&dest.ty()); // Type of the cast.
@@ -1022,7 +1022,7 @@ impl TraceCompiler {
         }
     }
 
-    fn c_istore(&mut self, dest: &IPlace, src: &IPlace) {
+    fn c_istore(&mut self, dest: &IRPlace, src: &IRPlace) {
         self.store(dest, src);
     }
 

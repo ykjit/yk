@@ -365,10 +365,10 @@ impl Display for Ptr {
 
 /// An IR place. This is used in SIR and TIR to describe the (abstract) address of a piece of data.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub enum IPlace {
-    /// The IPlace describes a value as a Local+offset pair.
+pub enum IRPlace {
+    /// The IRPlace describes a value as a Local+offset pair.
     Val { local: Local, off: OffT, ty: TypeId },
-    /// An indirect place, i.e. an IPlace whose value is a pointer to another IPlace. ykrustc uses
+    /// An indirect place, i.e. an IRPlace whose value is a pointer to another IRPlace. ykrustc uses
     /// these for deref and (dynamic) index projections (which cannot be resolved statically and
     /// thus depend on a runtime pointer).
     Indirect {
@@ -379,13 +379,13 @@ pub enum IPlace {
         /// The type of the resulting place.
         ty: TypeId,
     },
-    /// The IPlace describes a constant.
+    /// The IRPlace describes a constant.
     Const { val: Constant, ty: TypeId },
     /// A construct which we have no lowering for yet.
     Unimplemented(String),
 }
 
-impl Display for IPlace {
+impl Display for IRPlace {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Val {
@@ -412,7 +412,7 @@ impl Display for IPlace {
     }
 }
 
-impl IPlace {
+impl IRPlace {
     /// Returns the local used (if any) in the place.
     pub fn local(&self) -> Option<Local> {
         match self {
@@ -435,14 +435,14 @@ impl IPlace {
 
     /// Converts a direct place into an indirect one, forcing a dereference when read from or
     /// stored to.
-    pub fn to_indirect(&self, new_ty: TypeId) -> IPlace {
+    pub fn to_indirect(&self, new_ty: TypeId) -> IRPlace {
         match self {
             Self::Val { local, off, ty: _ } => {
                 let ptr = Ptr {
                     local: *local,
                     off: *off,
                 };
-                IPlace::Indirect {
+                IRPlace::Indirect {
                     ptr,
                     off: 0,
                     ty: new_ty,
@@ -460,25 +460,25 @@ pub enum Statement {
     /// Do nothing.
     Nop,
     /// Stores the content addressed by the right hand side into the left hand side.
-    Store(IPlace, IPlace),
+    Store(IRPlace, IRPlace),
     /// Binary operations. FIXME dest should be a local?
     BinaryOp {
-        dest: IPlace,
+        dest: IRPlace,
         op: BinOp,
-        opnd1: IPlace,
-        opnd2: IPlace,
+        opnd1: IRPlace,
+        opnd2: IRPlace,
         checked: bool,
     },
-    /// Makes a reference to another IPlace.
-    MkRef(IPlace, IPlace),
+    /// Makes a reference to another IRPlace.
+    MkRef(IRPlace, IRPlace),
     /// Computes a pointer address at runtime.
     DynOffs {
         /// Where to store the result.
-        dest: IPlace,
+        dest: IRPlace,
         /// The base address. `idx` * `scale` are added to this at runtime to give the result.
-        base: IPlace,
+        base: IRPlace,
         /// The index to multiply with `scale`.
-        idx: IPlace,
+        idx: IRPlace,
         /// The scaling factor for `idx`.
         scale: u32,
     },
@@ -488,10 +488,10 @@ pub enum Statement {
     StorageDead(Local),
     /// A (non-inlined) call from a TIR trace to a binary symbol using the system ABI. This does
     /// not appear in SIR. Not to be confused with Terminator::Call in SIR.
-    Call(CallOperand, Vec<IPlace>, Option<IPlace>),
+    Call(CallOperand, Vec<IRPlace>, Option<IRPlace>),
     /// Cast a value into another. Since the cast type and the destination type are the same, we
     /// only need the latter.
-    Cast(IPlace, IPlace),
+    Cast(IRPlace, IRPlace),
     /// A debug marker. This does not appear in SIR.
     Debug(String),
     /// Any unimplemented lowering maps to this variant.
@@ -731,7 +731,7 @@ impl Display for CallOperand {
 pub enum Terminator {
     Goto(BasicBlockIndex),
     SwitchInt {
-        discr: IPlace,
+        discr: IRPlace,
         values: Vec<u128>,
         target_bbs: Vec<BasicBlockIndex>,
         otherwise_bb: BasicBlockIndex,
@@ -739,14 +739,14 @@ pub enum Terminator {
     Return,
     Unreachable,
     Drop {
-        location: IPlace,
+        location: IRPlace,
         target_bb: BasicBlockIndex,
     },
     Call {
         operand: CallOperand,
-        args: Vec<IPlace>,
+        args: Vec<IRPlace>,
         /// The return value and basic block to continue at, if the call converges.
-        destination: Option<(IPlace, BasicBlockIndex)>,
+        destination: Option<(IRPlace, BasicBlockIndex)>,
     },
     /// A call to yktrace::trace_debug. This is converted into a Statement::Debug at TIR
     /// compilation time.
@@ -756,7 +756,7 @@ pub enum Terminator {
     },
     /// The value in `cond` must equal to `expected` to advance to `target_bb`.
     Assert {
-        cond: IPlace,
+        cond: IRPlace,
         expected: bool,
         target_bb: BasicBlockIndex,
     },

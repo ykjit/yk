@@ -2,12 +2,12 @@
 
 use super::{IndirectLoc, Location, RegAndOffset, TraceCompiler, TEMP_REG};
 use dynasmrt::DynasmApi;
-use ykpack::IPlace;
+use ykpack::IRPlace;
 use yktrace::sir::SIR;
 
 impl TraceCompiler {
     /// Store the value in `src_loc` into `dest_loc`.
-    pub(crate) fn store(&mut self, dest_ip: &IPlace, src_ip: &IPlace) {
+    pub(crate) fn store(&mut self, dest_ip: &IRPlace, src_ip: &IRPlace) {
         let dest_loc = self.iplace_to_location(dest_ip);
         let src_loc = self.iplace_to_location(src_ip);
         debug_assert!(SIR.ty(&dest_ip.ty()).size() == SIR.ty(&src_ip.ty()).size());

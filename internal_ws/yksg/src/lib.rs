@@ -10,7 +10,7 @@ use std::alloc::{alloc, dealloc, Layout};
 use std::convert::TryFrom;
 use std::sync::Arc;
 use ykpack::{
-    self, BinOp, Body, CallOperand, Constant, ConstantInt, IPlace, Local, Statement, Terminator,
+    self, BinOp, Body, CallOperand, Constant, ConstantInt, IRPlace, Local, Statement, Terminator,
     TyKind, UnsignedInt, UnsignedIntTy,
 };
 use yktrace::sir::{INTERP_STEP_ARG, RETURN_LOCAL, SIR};
@@ -77,16 +77,16 @@ impl LocalMem {
         }
     }
 
-    /// Stores one IPlace into another.
-    fn store(&mut self, dest: &IPlace, src: &IPlace) {
+    /// Stores one IRPlace into another.
+    fn store(&mut self, dest: &IRPlace, src: &IRPlace) {
         match src {
-            IPlace::Val { .. } | IPlace::Indirect { .. } => {
+            IRPlace::Val { .. } | IRPlace::Indirect { .. } => {
                 let src_ptr = self.iplace_to_ptr(src);
                 let dst_ptr = self.iplace_to_ptr(dest);
                 let size = usize::try_from(SIR.ty(&src.ty()).size()).unwrap();
                 self.write_val(dst_ptr, src_ptr, size);
             }
-            IPlace::Const { val, ty: _ty } => {
+            IRPlace::Const { val, ty: _ty } => {
                 let dst_ptr = self.iplace_to_ptr(dest);
                 self.write_const(dst_ptr, val);
             }
@@ -95,16 +95,16 @@ impl LocalMem {
     }
 
     /// Copy over the call arguments from another frame.
-    pub fn copy_args(&mut self, args: &Vec<IPlace>, frame: &LocalMem) {
+    pub fn copy_args(&mut self, args: &Vec<IRPlace>, frame: &LocalMem) {
         for (i, arg) in args.iter().enumerate() {
             let dst = self.local_ptr(&Local(u32::try_from(i + 1).unwrap()));
             match arg {
-                IPlace::Val { .. } | IPlace::Indirect { .. } => {
+                IRPlace::Val { .. } | IRPlace::Indirect { .. } => {
                     let src = frame.iplace_to_ptr(arg);
                     let size = usize::try_from(SIR.ty(&arg.ty()).size()).unwrap();
                     self.write_val(dst, src, size);
                 }
-                IPlace::Const { val, .. } => {
+                IRPlace::Const { val, .. } => {
                     self.write_const(dst, val);
                 }
                 _ => unreachable!(),
@@ -118,10 +118,10 @@ impl LocalMem {
         unsafe { self.locals.add(offset) }
     }
 
-    /// Get the pointer for an IPlace, while applying all offsets.
-    fn iplace_to_ptr(&self, place: &IPlace) -> *mut u8 {
+    /// Get the pointer for an IRPlace, while applying all offsets.
+    fn iplace_to_ptr(&self, place: &IRPlace) -> *mut u8 {
         match place {
-            IPlace::Val {
+            IRPlace::Val {
                 local,
                 off,
                 ty: _ty,
@@ -130,7 +130,7 @@ impl LocalMem {
                 let dest_ptr = self.local_ptr(&local);
                 unsafe { dest_ptr.add(usize::try_from(*off).unwrap()) }
             }
-            IPlace::Indirect { ptr, off, ty: _ty } => {
+            IRPlace::Indirect { ptr, off, ty: _ty } => {
                 // Get a pointer to the Indirect, which itself points to another pointer.
                 let dest_ptr = self.local_ptr(&ptr.local) as *mut *mut u8;
                 let ptr = unsafe {
@@ -154,10 +154,10 @@ macro_rules! make_binop {
     ($name: ident, $type: ident) => {
         fn $name(
             &mut self,
-            dest: &IPlace,
+            dest: &IRPlace,
             op: &BinOp,
-            opnd1: &IPlace,
-            opnd2: &IPlace,
+            opnd1: &IRPlace,
+            opnd2: &IRPlace,
             checked: bool,
         ) {
             let a = $type::try_from(self.read_int(opnd1)).unwrap();
@@ -400,9 +400,9 @@ impl StopgapInterpreter {
         }
     }
 
-    fn read_int(&self, src: &IPlace) -> u128 {
+    fn read_int(&self, src: &IRPlace) -> u128 {
         match src {
-            IPlace::Const { val, ty: _ty } => {
+            IRPlace::Const { val, ty: _ty } => {
                 let val = match val {
                     Constant::Int(ci) => match ci {
                         ConstantInt::UnsignedInt(ui) => match ui {
@@ -433,15 +433,15 @@ impl StopgapInterpreter {
         }
     }
 
-    /// Store the IPlace src in the IPlace dest in the current frame.
-    fn store(&mut self, dest: &IPlace, src: &IPlace) {
+    /// Store the IRPlace src in the IRPlace dest in the current frame.
+    fn store(&mut self, dest: &IRPlace, src: &IRPlace) {
         self.frames.last_mut().unwrap().mem.store(dest, src);
     }
 
-    /// Creates a reference to an IPlace, e.g. `dst = &src`.
-    fn mkref(&mut self, dest: &IPlace, src: &IPlace) {
+    /// Creates a reference to an IRPlace, e.g. `dst = &src`.
+    fn mkref(&mut self, dest: &IRPlace, src: &IRPlace) {
         match dest {
-            IPlace::Val { .. } | IPlace::Indirect { .. } => {
+            IRPlace::Val { .. } | IRPlace::Indirect { .. } => {
                 // Get pointer to src.
                 let mem = &self.frames.last_mut().unwrap().mem;
                 let src_ptr = mem.iplace_to_ptr(src);
@@ -458,10 +458,10 @@ impl StopgapInterpreter {
 
     fn binop(
         &mut self,
-        dest: &IPlace,
+        dest: &IRPlace,
         op: &ykpack::BinOp,
-        opnd1: &IPlace,
-        opnd2: &IPlace,
+        opnd1: &IRPlace,
+        opnd2: &IRPlace,
         checked: bool,
     ) {
         let ty = SIR.ty(&opnd1.ty());
