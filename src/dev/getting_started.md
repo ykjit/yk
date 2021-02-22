@@ -83,6 +83,63 @@ export RUSTFLAGS="-C tracer=hw"
 Then you can build and test the `yk` repo using `cargo xtask` commands, for
 example `cargo xtask test`.
 
+## Rust Analyzer
+
+[Rust-analyzer](https://github.com/rust-analyzer/rust-analyzer)
+is a language server implementation for Rust.
+
+Due to [the workspace model of the `yk` repo](../tech/yk_structure.md) and the
+`x.py` build system in `ykrustc`, Rust Analyzer won't work out of the box.
+Configuration is dependent on the LSP plugin used, but in general:
+
+ - For the `ykrustc` repo, you need to tell Rust Analyzer to run `x.py` and not
+   `cargo`. This is done via the `rust-analyzer.checkOnSave.overrideCommand`
+   option.
+
+ - For the `yk` repo, you need to point Rust Analyzer at the extra internal
+   workspace via the `rust-analyzer.linkedProjects` option.
+
+For example, for [vim-lsp](https://github.com/prabirshrestha/vim-lsp) you would
+use a configuration similar to the following:
+
+```
+if executable('rust-analyzer')
+    if filereadable("x.py")
+        " Rust compiler.
+        au User lsp_setup call lsp#register_server({
+                    \ 'name': 'rust-analyzer',
+                    \ 'cmd': {server_info->['rust-analyzer']},
+                    \ 'allowlist': ['rust'],
+                    \ 'workspace_config': {'rust-analyzer': {'checkOnSave': {'overrideCommand': './x.py check --json-output'}}},
+                    \ })
+    elseif filereadable("ykshim_client/Cargo.toml")
+        " It's the yk repo.
+        au User lsp_setup call lsp#register_server({
+                    \ 'name': 'rust-analyzer',
+                    \ 'cmd': {server_info->['rust-analyzer']},
+                    \ 'allowlist': ['rust'],
+                    \ 'workspace_config': {'rust-analyzer': {'linkedProjects': ['internal_ws/Cargo.toml']}},
+                    \ })
+    else
+        " Normal project.
+        "
+        " Either install rust-src from rustup or set RUST_SRC_PATH to the
+        " `library` subdir of a rust source clone. If you are working on
+        " Yorick, then that's the `library` directory in your ykrustc clone.
+        au User lsp_setup call lsp#register_server({
+                    \ 'name': 'rust-analyzer',
+                    \ 'cmd': {server_info->['rust-analyzer']},
+                    \ 'allowlist': ['rust'],
+                    \ })
+    endif
+endif
+```
+
+Once rust-analyzer is enabled, you should make sure that your editor uses the
+same `RUSTFLAGS` as building and testing do. Failure to do so will cause the
+incremental build cache to be repeatedly invalidated and you'll constantly be
+rebuilding the same packages.
+
 ### Gotchas / Tips
 
  - If you change the ABI of any of the structures in `yk` then you will have to
@@ -92,20 +149,7 @@ example `cargo xtask test`.
  - `cargo` will not trigger a rebuild of `yk` if the compiler is rebuilt, so
    you may have to `cargo clean`.
 
- - If you want to run `rustfmt` in `yk`, it's usually easier to invoke the one
-   from the nightly toolchain with `cargo +nightly fmt`. To format the
-   compiler, use `./x.py fmt`.
-
- - Sadly the same trick does not work for `clippy`, as our `-C tracer` flag
-   confuses it. To use `clippy` you have to edit `config.toml` to enable
-   building it. Even then `cargo clippy` won't work due to a `rustup` bug and
-   you have to run the binary manually, setting a `LD_LIBRARY_PATH` as
-   necessary.
+ - `cargo xtask fmt` and `cargo xtask clippy` in the `yk` repo currently
+   require a nightly rust toolchain installed via rustup.
 
  - [Continuous Integration Cycles](ci_cycles.md)
-
- - If you are using rust-analyser (or similar) in vim, make sure to set the
-   `RUSTFLAGS` environment the same as you use to build/test, otherwise vim and
-   your shell session will keep invalidating
-   the incremental build cache and you'll constantly be rebuilding the same
-   packages.

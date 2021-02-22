@@ -50,3 +50,6 @@ There are a few implementation details to note:
 
 - Since `yk` requires use of the abort strategy, no attempt is made to prevent
   unwinding across the C ABI (which would invoke undefined behaviour).
+
+- The workspace model means that rust-analyzer won't work properly by default.
+  See [here](../dev/getting_started.md#rust-analyzer) for details.
