@@ -51,12 +51,7 @@ unsafe extern "C" fn __ykshim_stop_tracing(
     match sir_trace {
         Ok(sir_trace) => Box::into_raw(Box::new(sir_trace)),
         Err(err) => {
-            *error_msg = CString::new(err.to_string())
-                .unwrap_or_else(|err| {
-                    eprintln!("Stop tracing error {} contains a null byte", err);
-                    std::process::abort();
-                })
-                .into_raw();
+            *error_msg = CString::new(err.to_string()).unwrap().into_raw();
             std::ptr::null_mut()
         }
     }
@@ -73,12 +68,7 @@ unsafe extern "C" fn __ykshim_compile_trace(
     let tt = match TirTrace::new(&*SIR, &*sir_trace) {
         Ok(tt) => tt,
         Err(err) => {
-            *error_msg = CString::new(err.to_string())
-                .unwrap_or_else(|err| {
-                    eprintln!("Tir compilation error {} contains a null byte", err);
-                    std::process::abort();
-                })
-                .into_raw();
+            *error_msg = CString::new(err.to_string()).unwrap().into_raw();
             return std::ptr::null_mut();
         }
     };

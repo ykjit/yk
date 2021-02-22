@@ -8,7 +8,6 @@ use std::marker::PhantomData;
 use std::os::raw::c_char;
 use std::{fmt, ptr};
 
-// Opaque pointers.
 type RawTraceCompiler = c_void;
 
 // Keep these types in-sync with the internal workspace.

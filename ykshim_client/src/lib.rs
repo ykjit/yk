@@ -19,14 +19,13 @@ use std::{mem, ptr};
 mod test_api;
 pub use test_api::*;
 
-// Opaque pointers.
 pub(crate) type RawCompiledTrace = c_void;
 pub(crate) type RawSirTrace = c_void;
 type RawThreadTracer = c_void;
 pub(crate) type RawTirTrace = c_void;
 pub type RawStopgapInterpreter = c_void;
 
-// These types and constants must be kept in sync with types of the same name in the internal
+// These types and constants must be kept in sync with those of the same name in the internal
 // workspace.
 pub type LocalIndex = u32;
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
@@ -68,15 +67,15 @@ pub struct ThreadTracer(*mut RawThreadTracer);
 /// Start tracing using the specified kind of tracing.
 pub fn start_tracing(tracing_kind: TracingKind) -> ThreadTracer {
     let tracer = unsafe { __ykshim_start_tracing(tracing_kind as u8) };
-    assert!(!tracer.is_null());
+    debug_assert!(!tracer.is_null());
     ThreadTracer(tracer)
 }
 
 impl ThreadTracer {
     pub fn stop_tracing(mut self) -> Result<SirTrace, CString> {
         let mut err_msg = std::ptr::null_mut();
-        let sir_trace = unsafe { __ykshim_stop_tracing(self.0, &mut err_msg) };
-        self.0 = ptr::null_mut(); // consumed.
+        let p = mem::replace(&mut self.0, ptr::null_mut());
+        let sir_trace = unsafe { __ykshim_stop_tracing(p, &mut err_msg) };
         if sir_trace.is_null() {
             return Err(unsafe { CString::from_raw(err_msg) });
         }
@@ -131,8 +130,8 @@ unsafe impl<I> Sync for CompiledTrace<I> {}
 
 pub fn compile_trace<T>(mut sir_trace: SirTrace) -> Result<CompiledTrace<T>, CString> {
     let mut err_msg = std::ptr::null_mut();
-    let compiled = unsafe { __ykshim_compile_trace(sir_trace.0, &mut err_msg) };
-    sir_trace.0 = ptr::null_mut(); // consumed.
+    let p = mem::replace(&mut sir_trace.0, ptr::null_mut());
+    let compiled = unsafe { __ykshim_compile_trace(p, &mut err_msg) };
     if compiled.is_null() {
         return Err(unsafe { CString::from_raw(err_msg) });
     }
