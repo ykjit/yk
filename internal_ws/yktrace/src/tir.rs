@@ -248,9 +248,9 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     // Rename the return value.
                     //
                     // FIXME It seems that calls always have a destination despite the field being
-                    // `Option`. If this is not always the case, we may want add the `Local` offset
-                    // (`var_len`) to this statement so we can assign the arguments to the correct
-                    // `Local`s during trace compilation.
+                    // `Option`. If this is not always the case, we may want to add the `Local`
+                    // offset (`var_len`) to this statement so we can assign the arguments to the
+                    // correct `Local`s during trace compilation.
                     let ret_val = dest
                         .as_ref()
                         .map(|(ret_val, _)| rnm.rename_iplace(&ret_val, &body))
@@ -302,7 +302,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                             term_stmts.push(Statement::Call(op.clone(), newargs, Some(ret_val)))
                         }
                     } else {
-                        todo!("Unknown callee encountered");
+                        todo!();
                     }
                 }
                 Terminator::Return => {
@@ -359,7 +359,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     // Peek at the next block in the trace to see which outgoing edge was taken and
                     // infer which value we must guard upon. We are working on the assumption that
                     // a trace can't end on a SwitchInt. i.e. that another block follows.
-                    let next_blk = itr.peek().expect("no block to peek at").bb_idx;
+                    let next_blk = itr.peek().unwrap().bb_idx;
                     let edge_idx = target_bbs.iter().position(|e| *e == next_blk);
                     match edge_idx {
                         Some(idx) => Some(Guard {
@@ -485,7 +485,7 @@ impl VarRenamer {
         self.offset = self.acc.unwrap();
         self.stack.push(self.offset);
         if let Some(v) = self.acc.as_mut() {
-            *v += num_locals as u32;
+            *v += u32::try_from(num_locals).unwrap();
         }
     }
 
@@ -493,11 +493,8 @@ impl VarRenamer {
         // When we leave an inlined function call, we pop the previous offset from the stack,
         // reverting the offset to what it was before the function was entered.
         self.stack.pop();
-        if let Some(v) = self.stack.last() {
-            self.offset = *v;
-        } else {
-            panic!("Unbalanced enter/leave statements!")
-        }
+        debug_assert!(!self.stack.is_empty());
+        self.offset = *self.stack.last().unwrap();
     }
 
     fn rename_iplace(&mut self, ip: &IPlace, body: &ykpack::Body) -> IPlace {
