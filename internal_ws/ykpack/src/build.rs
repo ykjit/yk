@@ -8,7 +8,7 @@ use indexmap::IndexMap;
 use std::{cell::RefCell, convert::TryFrom, default::Default, io};
 
 use crate::{
-    BasicBlock, BasicBlockIndex, Body, BodyFlags, CguHash, IPlace, Local, LocalDecl, Statement,
+    BasicBlock, BasicBlockIndex, Body, BodyFlags, CguHash, IRPlace, Local, LocalDecl, Statement,
     Terminator, Ty, TyIndex, TypeId,
 };
 
@@ -77,14 +77,14 @@ impl SirBuilder {
         }
     }
 
-    /// Returns a zero-offset IPlace for a new SIR local.
-    pub fn new_sir_local(&mut self, sirty: TypeId) -> IPlace {
+    /// Returns a zero-offset IRPlace for a new SIR local.
+    pub fn new_sir_local(&mut self, sirty: TypeId) -> IRPlace {
         let idx = u32::try_from(self.func.local_decls.len()).unwrap();
         self.func.local_decls.push(LocalDecl {
             ty: sirty,
             referenced: false,
         });
-        IPlace::Val {
+        IRPlace::Val {
             local: Local(idx),
             off: 0,
             ty: sirty,

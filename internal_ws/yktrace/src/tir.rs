@@ -13,7 +13,7 @@ use std::{
     fmt::{self, Display, Write}
 };
 pub use ykpack::{
-    BinOp, BodyFlags, CallOperand, Constant, ConstantInt, IPlace, Local, LocalDecl, LocalIndex,
+    BinOp, BodyFlags, CallOperand, Constant, ConstantInt, IRPlace, Local, LocalDecl, LocalIndex,
     Ptr, SignedInt, Statement, Terminator, UnsignedInt
 };
 
@@ -46,7 +46,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
         // encounter `$x = Call(...)` we push `$x` to the stack so that later, when we encounter
         // the corresponding Return, we can find the correct place to store the return value (by
         // popping from the stack).
-        let mut return_iplaces: Vec<IPlace> = Vec::new();
+        let mut return_iplaces: Vec<IRPlace> = Vec::new();
 
         let mut live_locals: Vec<HashSet<Local>> = Vec::new();
         let mut guard_blocks: Vec<GuardBlock> = Vec::new();
@@ -193,7 +193,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     // In TIR, stores to local number zero are always to the return value of the
                     // #[interp_step] function. We know this is unit so we can ignore it.
                     if let Statement::Store(
-                        IPlace::Val {
+                        IRPlace::Val {
                             local: sir::RETURN_LOCAL,
                             ..
                         },
@@ -271,7 +271,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                                 term_stmts.push(Statement::Call(op.clone(), newargs, Some(ret_val)))
                             } else {
                                 entered_call = true;
-                                // Push the IPlace that the corresponding Return terminator should
+                                // Push the IRPlace that the corresponding Return terminator should
                                 // assign the result of the call to.
                                 return_iplaces.push(ret_val.clone());
 
@@ -287,7 +287,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                                         &body
                                     );
                                     live_locals.last_mut().unwrap().insert(dest_local.clone());
-                                    let dest_ip = IPlace::Val {
+                                    let dest_ip = IRPlace::Val {
                                         local: dest_local,
                                         off: 0,
                                         ty: arg.ty()
@@ -322,7 +322,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     // `cur_call_args`.
                     let dest_ip = return_iplaces.pop().unwrap();
                     let src_ip = rnm.rename_iplace(
-                        &IPlace::Val {
+                        &IRPlace::Val {
                             local: sir::RETURN_LOCAL,
                             off: 0,
                             ty: dest_ip.ty()
@@ -497,14 +497,14 @@ impl VarRenamer {
         self.offset = *self.stack.last().unwrap();
     }
 
-    fn rename_iplace(&mut self, ip: &IPlace, body: &ykpack::Body) -> IPlace {
+    fn rename_iplace(&mut self, ip: &IRPlace, body: &ykpack::Body) -> IRPlace {
         match ip {
-            IPlace::Val { local, off, ty } => IPlace::Val {
+            IRPlace::Val { local, off, ty } => IRPlace::Val {
                 local: self.rename_local(local, body),
                 off: *off,
                 ty: *ty
             },
-            IPlace::Indirect { ptr, off, ty } => IPlace::Indirect {
+            IRPlace::Indirect { ptr, off, ty } => IRPlace::Indirect {
                 ptr: Ptr {
                     local: self.rename_local(&ptr.local, body),
                     off: ptr.off
@@ -512,12 +512,12 @@ impl VarRenamer {
                 off: *off,
                 ty: *ty
             },
-            IPlace::Const { .. } => ip.clone(),
-            IPlace::Unimplemented(..) => ip.clone()
+            IRPlace::Const { .. } => ip.clone(),
+            IRPlace::Unimplemented(..) => ip.clone()
         }
     }
 
-    fn rename_args(&mut self, args: &[IPlace], body: &ykpack::Body) -> Vec<IPlace> {
+    fn rename_args(&mut self, args: &[IRPlace], body: &ykpack::Body) -> Vec<IRPlace> {
         args.iter()
             .map(|op| self.rename_iplace(&op, body))
             .collect()
@@ -577,7 +577,7 @@ pub struct LiveLocal {
 #[derive(Debug)]
 pub struct Guard {
     /// The value to be checked if the guard is to pass.
-    pub val: IPlace,
+    pub val: IRPlace,
     /// The requirement upon `val` for the guard to pass.
     pub kind: GuardKind,
     /// The block whose terminator was the basis for this guard. This is here so that, in the event
