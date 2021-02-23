@@ -1,3 +1,7 @@
+//! The ykshim testing API.
+//!
+//! These functions are only exposed to allow testing from the external workspace.
+
 use libc::size_t;
 use std::convert::TryFrom;
 use std::default::Default;

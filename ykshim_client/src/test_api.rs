@@ -1,8 +1,6 @@
 //! The testing API client to ykshim.
 
-use crate::prod_api::{
-    CompiledTrace, Local, RawCompiledTrace, RawSirTrace, RawTirTrace, SirTrace, TyIndex,
-};
+use crate::{CompiledTrace, Local, RawCompiledTrace, RawSirTrace, RawTirTrace, SirTrace, TyIndex};
 use libc::size_t;
 use std::collections::HashMap;
 use std::ffi::{c_void, CString};
@@ -10,7 +8,6 @@ use std::marker::PhantomData;
 use std::os::raw::c_char;
 use std::{fmt, ptr};
 
-// Opaque pointers.
 type RawTraceCompiler = c_void;
 
 // Keep these types in-sync with the internal workspace.
