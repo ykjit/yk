@@ -2,11 +2,8 @@
 
 use crate::helpers::{add6, add_some};
 use libc;
-use libc::{abs, c_void, getuid};
-use std::ptr;
-use ykshim_client::{
-    compile_tir_trace, compile_trace, find_symbol, start_tracing, TirTrace, TracingKind,
-};
+use libc::{abs, getuid};
+use ykshim_client::{compile_tir_trace, compile_trace, start_tracing, TirTrace, TracingKind};
 
 mod reg_alloc;
 
@@ -91,27 +88,6 @@ fn function_call_nested() {
     let mut args = InterpCtx(0);
     assert!(unsafe { ct.execute(&mut args).is_null() });
     assert_eq!(args.0, 20);
-}
-
-// Test finding a symbol in a shared object.
-#[test]
-fn find_symbol_shared() {
-    assert!(find_symbol("printf") == libc::printf as *mut c_void);
-}
-
-// Test finding a symbol in the main binary.
-// For this to work the binary must have been linked with `--export-dynamic`, which ykrustc
-// appends to the linker command line.
-#[test]
-#[no_mangle]
-fn find_symbol_main() {
-    assert!(find_symbol("find_symbol_main") == find_symbol_main as *mut c_void);
-}
-
-// Check that a non-existent symbol cannot be found.
-#[test]
-fn find_nonexistent_symbol() {
-    assert_eq!(find_symbol("__xxxyyyzzz__"), ptr::null_mut());
 }
 
 // A trace which contains a call to something which we don't have SIR for should emit a TIR
