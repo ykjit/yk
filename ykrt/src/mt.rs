@@ -7,21 +7,21 @@ use std::{
     marker::PhantomData,
     mem,
     panic::{catch_unwind, resume_unwind, UnwindSafe},
+    ptr,
     rc::Rc,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc, Mutex, TryLockError,
+        Arc,
     },
-    thread::{self, yield_now, JoinHandle},
+    thread::{self, JoinHandle},
 };
 
-use crate::location::{
-    CompilingTrace, Location, State, PHASE_COMPILED, PHASE_COMPILING, PHASE_COUNTING,
-    PHASE_DONT_TRACE, PHASE_LOCKED, PHASE_TRACING, PHASE_TRACING_LOCK,
-};
+use parking_lot::Mutex;
+use parking_lot_core::SpinWait;
+
+use crate::location::{HotLocation, Location, State, ThreadIdInner};
 use ykshim_client::{
-    compile_trace, start_tracing, CompiledTrace, RawStopgapInterpreter, StopgapInterpreter,
-    ThreadTracer, TracingKind,
+    compile_trace, start_tracing, RawStopgapInterpreter, StopgapInterpreter, TracingKind,
 };
 
 pub type HotThreshold = usize;
@@ -157,8 +157,6 @@ impl MTInner {
     }
 }
 
-pub(crate) struct ThreadIdInner;
-
 /// A meta-tracer aware thread. Note that this is conceptually a "front-end" to the actual
 /// meta-tracer thread akin to an `Rc`: this struct can be freely `clone()`d without duplicating
 /// the underlying meta-tracer thread. Note that this struct is neither `Send` nor `Sync`: it
@@ -219,215 +217,204 @@ impl MTThread {
         &mut self,
         loc: &Location<I>,
     ) -> Option<fn(&mut I) -> *mut RawStopgapInterpreter> {
-        // Since we don't hold an explicit lock, updating a Location is tricky: we might read a
-        // Location, work out what we'd like to update it to, and try updating it, only to find
-        // that another thread interrupted us part way through. We therefore use compare_and_swap
-        // to update values, allowing us to detect if we were interrupted. If we were interrupted,
-        // we simply retry the whole operation.
+        let mut ls = loc.load(Ordering::Relaxed);
 
-        // We need Acquire ordering, as PHASE_COMPILING and PHASE_COMPILED need to read information
-        // written to external data. Alternatively, this load could be Relaxed but we would then
-        // need to place an Acquire fence in PHASE_COMPILING and PHASE_COMPILED.
-        let mut lp = loc.load(Ordering::Acquire);
+        if ls.is_counting() {
+            debug_assert!(!ls.is_locked());
+            debug_assert!(!ls.is_parked());
 
-        match lp.phase() {
-            PHASE_COUNTING => {
+            let count = ls.count();
+            if count < self.inner.hot_threshold {
+                // Try incrementing this location's hot count. We make no guarantees that this will
+                // succeed because under heavy contention we can end up racing with many other
+                // threads and it's not worth our time to halt execution merely to have an accurate
+                // hot count. However, we do try semi-hard to enforce monotonicity (i.e. preventing
+                // the hot count from going backwards) which can happen if an "older" thread has
+                // been paused for a long time. Even in that case, though, we do not try endlessly.
+                let mut spinwait = SpinWait::new();
                 loop {
-                    let count = lp.number_data();
-                    if count >= self.inner.hot_threshold {
-                        if self.inner.tracer.is_some() {
-                            // This thread is already tracing another Location, so either another
-                            // thread needs to trace this Location or this thread needs to wait
-                            // until the current round of tracing has completed. Either way,
-                            // there's no point incrementing the hot count.
-                            return None;
-                        }
-                        let new_state = State::phase_tracing(Arc::clone(&self.inner.tid));
-                        if loc.compare_and_swap(lp, new_state, Ordering::Relaxed) == lp {
-                            Rc::get_mut(&mut self.inner).unwrap().tracer = Some((
-                                start_tracing(self.inner.tracing_kind),
-                                Arc::clone(&self.inner.tid),
-                            ));
-                            return None;
-                        }
-                        // We raced with another thread, which probably moved the Location from
-                        // PHASE_COUNTING to PHASE_TRACING.
-                        unsafe {
-                            Arc::from_raw(new_state.pointer_data::<u8>() as *mut u8);
-                        }
-                        return None;
-                    } else {
-                        let new_state = State::phase_counting(count + 1);
-                        let old_lp = lp;
-                        lp = loc.compare_and_swap(lp, new_state, Ordering::Relaxed);
-                        if lp == old_lp {
-                            return None;
-                        }
-                        // We raced with another thread.
-                        if lp.phase() != PHASE_COUNTING {
-                            // The other thread probably moved the Location from PHASE_COUNTING to
-                            // PHASE_TRACING.
-                            return None;
-                        }
-                        // This Location is still being counted, so go around the loop again and
-                        // try to apply our increment.
-                    }
-                }
-            }
-            PHASE_TRACING | PHASE_TRACING_LOCK => {
-                if lp.phase() == PHASE_TRACING_LOCK {
-                    // PHASE_TRACING_LOCK requires special handling, because another thread might
-                    // have grabbed it on this Location even though this thread is tracing this
-                    // location.
-
-                    if self.inner.tracer.is_none() {
-                        // If this thread isn't tracing anything, there's little point in spinning
-                        // as the thread tracing this location is still plausibly alive.
-                        return None;
-                    }
-
-                    // We wait to grab the lock.
-                    // FIXME: this is a terrible spinlock.
-                    while lp.phase() == PHASE_TRACING_LOCK {
-                        yield_now();
-                        lp = loc.load(Ordering::Acquire);
-                    }
-
-                    if lp.phase() != PHASE_TRACING {
-                        // While waiting for the Location to move beyond PHASE_TRACING_LOCK, we
-                        // probably raced with the thread tracing this location.
-                        return None;
-                    }
-                }
-
-                // Before we can do anything with this phase's value, we need to transition to
-                // `PHASE_TRACING_LOCK`.
-                loop {
-                    let old_lp = lp;
-                    lp = loc.compare_and_swap(lp, State::phase_tracing_lock(), Ordering::Acquire);
-                    if lp == old_lp {
-                        break;
-                    }
-                    if self.inner.tracer.is_none() {
-                        // This thread isn't tracing anything, so it's not worth us spinning and
-                        // trying to lock this location.
-                        return None;
-                    }
-                    // We are tracing something, and since it might be the current Location, we
-                    // need to transition to TRACING_LOCK to avoid tracing more than one iteration
-                    // of the loop. However, we might be able to determine that this thread
-                    // couldn't have been tracing this location, at which point we can bail out.
-                    // FIXME: this is a terrible spinlock.
-                    loop {
-                        match lp.phase() {
-                            PHASE_TRACING => break,
-                            PHASE_TRACING_LOCK => (),
-                            PHASE_COMPILED | PHASE_COMPILING | PHASE_LOCKED | PHASE_COUNTING
-                            | PHASE_DONT_TRACE => {
-                                // If we observe any of these states, then another thread took
-                                // responsibility for this Location, proving that this thread can't
-                                // be responsible for it.
-                                return None;
+                    match loc.compare_exchange_weak(
+                        ls,
+                        ls.with_count(count + 1),
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    ) {
+                        Ok(_) => break,
+                        Err(new_ls) => {
+                            if !new_ls.is_counting() {
+                                // Another thread has probably started tracing this Location.
+                                break;
                             }
-                            _ => unreachable!(),
+                            if new_ls.count() >= count {
+                                // Although our increment hasn't worked, at least the count hasn't
+                                // gone backwards: rather than holding this thread up, let's get
+                                // back to the interpreter.
+                                break;
+                            }
+                            ls = new_ls;
+                            if spinwait.spin() {
+                                // We don't want to park this thread, so even though we can see the
+                                // count is going backwards, go back to the interpreter.
+                                break;
+                            }
                         }
-                        yield_now();
-                        lp = loc.load(Ordering::Relaxed);
                     }
                 }
-
-                let loc_tid = unsafe { Arc::from_raw(lp.pointer_data::<ThreadIdInner>()) };
-                if let Some((_, ref tid)) = self.inner.tracer {
-                    // This thread is tracing something...
-                    if !Arc::ptr_eq(tid, &loc_tid) {
-                        // ...but we didn't start at the current Location.
-                        loc.store(lp, Ordering::Relaxed);
-                        mem::forget(loc_tid);
-                        return None;
-                    } else {
-                        // ...and we started at this Location, so we've got a complete loop!
-                    }
-                } else {
-                    // Another thread is tracing this location.
-                    if Arc::strong_count(&loc_tid) == 1 {
-                        // The other thread has stopped. Mark this Location as DONT_TRACE.
-                        loc.store(State::phase_dont_trace(), Ordering::Relaxed);
-                        return None;
-                    } else {
-                        // The other thread is still alive.
-                        loc.store(lp, Ordering::Relaxed);
-                        mem::forget(loc_tid);
-                        return None;
-                    }
-                }
-
-                // Stop the tracer
-                let sir_trace = Rc::get_mut(&mut self.inner)
-                    .unwrap()
-                    .tracer
-                    .take()
-                    .unwrap()
-                    .0
-                    .stop_tracing()
-                    .unwrap();
-
-                // Start a compilation thread.
-                let mtx = Arc::new(Mutex::new(None));
-                let mtx_cl = Arc::clone(&mtx);
-                thread::spawn(move || {
-                    let compiled = compile_trace::<I>(sir_trace).unwrap();
-                    *mtx_cl.lock().unwrap() = Some(Box::new(compiled));
-                    // FIXME: although we've now put the compiled trace into the mutex, there's no
-                    // guarantee that the Location for which we're compiling will ever be executed
-                    // again. In such a case, the memory has, in essence, leaked.
-                });
-                let new_state = State::phase_compiling(mtx);
-                loc.store(new_state, Ordering::Release);
-
                 return None;
-            }
-            PHASE_COMPILING => {
-                // We need to free the memory allocated earlier. To ensure we don't race with
-                // another thread and both try and free the memory, we need to transition to
-                // PHASE_LOCKED so that only this thread will try to free the memory.
-                if loc.compare_and_swap(lp, State::phase_locked(), Ordering::Acquire) != lp {
-                    // We raced with another thread that's probably transitioned this Location to
-                    // PHASE_LOCK.
+            } else {
+                if self.inner.tracing.is_some() {
+                    // This thread is already tracing another Location, so either another
+                    // thread needs to trace this Location or this thread needs to wait
+                    // until the current round of tracing has completed. Either way,
+                    // there's no point incrementing the hot count.
                     return None;
                 }
-                let mtx = unsafe { lp.ref_data::<CompilingTrace<I>>() };
-                match mtx.try_lock() {
-                    Ok(mut gd) => {
-                        if let Some(tr) = (*gd).take() {
-                            let f = unsafe {
-                                mem::transmute::<_, fn(&mut I) -> *mut RawStopgapInterpreter>(
-                                    tr.ptr(),
-                                )
-                            };
-                            loc.store(State::phase_compiled(tr), Ordering::Release);
-                            return Some(f);
+                // To avoid racing with another thread that may also try starting to trace this
+                // location at the same time, we need to initialise and lock the Location, which we
+                // perform in a single step. Since this is such a critical step, and since we're
+                // prepared to bail out early, there's no point in yielding: either we win the race
+                // by trying repeatedly or we give up entirely.
+                let hl_ptr = Box::into_raw(Box::new(HotLocation::Tracing(None)));
+                let new_ls = State::new().with_hotlocation(hl_ptr).with_lock();
+                loop {
+                    debug_assert!(!ls.is_locked());
+                    match loc.compare_exchange_weak(
+                        ls,
+                        new_ls,
+                        Ordering::Acquire,
+                        Ordering::Relaxed,
+                    ) {
+                        Ok(_) => {
+                            // We've initialised this Location and obtained the lock, so we can now
+                            // start tracing for real.
+                            let tid = Arc::clone(&self.inner.tid);
+                            let tt = start_tracing(self.inner.tracing_kind);
+                            *unsafe { new_ls.hot_location() } =
+                                HotLocation::Tracing(Some((tid, tt)));
+                            Rc::get_mut(&mut self.inner).unwrap().tracing =
+                                Some(hl_ptr as *const ());
+                            loc.unlock();
+                            return None;
+                        }
+                        Err(x) => {
+                            if x.is_locked() {
+                                // We probably raced with another thread locking this Location in order to
+                                // start tracing. It's unlikely to be worth us spending time contending
+                                // with that other thread.
+                                unsafe { Box::from_raw(hl_ptr) };
+                                return None;
+                            }
+                            ls = x;
                         }
                     }
-                    Err(TryLockError::WouldBlock) => {
-                        // The compiling thread is still operating.
+                }
+            }
+        } else {
+            // There's no point contending with other threads, so in general we don't want to
+            // continually try grabbing the lock.
+            match loc.try_lock() {
+                Ok(x) => ls = x,
+                Err(_) => {
+                    // If this thread is tracing we need to grab the lock so that we can stop
+                    // tracing, otherwise we return to the interpreter.
+                    if self.inner.tracing.is_none() {
+                        return None;
                     }
-                    Err(TryLockError::Poisoned(_)) => {
-                        // The compiling thread has gone wrong in some way.
-                        todo!();
+                    match loc.lock() {
+                        Ok(x) => ls = x,
+                        Err(()) => unreachable!(),
                     }
                 }
-                loc.store(lp, Ordering::Relaxed);
-                return None;
             }
-            PHASE_LOCKED | PHASE_DONT_TRACE => return None,
-            PHASE_COMPILED => {
-                let bct = unsafe { lp.ref_data::<CompiledTrace<I>>() };
-                let f = unsafe {
-                    mem::transmute::<_, fn(&mut I) -> *mut RawStopgapInterpreter>(bct.ptr())
-                };
-                return Some(f);
+            let hl = unsafe { ls.hot_location() };
+            let hl_ptr = hl as *mut _ as *mut ();
+            match hl {
+                HotLocation::Compiled(tr) => {
+                    // FIXME: If we want to free compiled traces, we'll need to refcount (or use
+                    // a GC) to know if anyone's executing that trace at the moment.
+                    let f = unsafe {
+                        mem::transmute::<_, fn(&mut I) -> *mut RawStopgapInterpreter>(tr.ptr())
+                    };
+                    loc.unlock();
+                    return Some(f);
+                }
+                HotLocation::Compiling(mtx) => {
+                    let tr = {
+                        let gd = mtx.try_lock();
+                        if gd.is_none() {
+                            // Compilation is ongoing.
+                            loc.unlock();
+                            return None;
+                        }
+                        let mut gd = gd.unwrap();
+                        if gd.is_none() {
+                            // Compilation is ongoing.
+                            loc.unlock();
+                            return None;
+                        }
+                        (*gd).take().unwrap()
+                    };
+                    let f = unsafe {
+                        mem::transmute::<_, fn(&mut I) -> *mut RawStopgapInterpreter>(tr.ptr())
+                    };
+                    *hl = HotLocation::Compiled(tr);
+                    loc.unlock();
+                    return Some(f);
+                }
+                HotLocation::Tracing(opt) => {
+                    match self.inner.tracing {
+                        Some(other_hl_ptr) => {
+                            // This thread is tracing something...
+                            if !ptr::eq(hl_ptr, other_hl_ptr) {
+                                // but not this Location.
+                                loc.unlock();
+                                return None;
+                            }
+                        }
+                        None => {
+                            // This thread isn't tracing anything.
+                            if Arc::strong_count(&opt.as_ref().unwrap().0) == 1 {
+                                // Another thread was tracing this location but it's terminated.
+                                // FIXME: we should probably have some sort of occasional retry
+                                // heuristic rather than simply saying "never try tracing this
+                                // Location again."
+                                *hl = HotLocation::DontTrace;
+                            }
+                            loc.unlock();
+                            return None;
+                        }
+                    }
+                    // This thread is tracing this location: we must, therefore, have finished
+                    // tracing the loop. Notice that the ".1" implicitly drops the
+                    // Arc<ThreadIdInner> so that other threads won't think this thread has died
+                    // while tracing.
+                    match opt.take().unwrap().1.stop_tracing() {
+                        Ok(sir) => {
+                            // Start a compilation thread.
+                            let mtx = Arc::new(Mutex::new(None));
+                            let mtx_cl = Arc::clone(&mtx);
+                            *hl = HotLocation::Compiling(mtx);
+                            loc.unlock();
+
+                            Rc::get_mut(&mut self.inner).unwrap().tracing = None;
+                            thread::spawn(move || {
+                                let compiled = compile_trace::<I>(sir).unwrap();
+                                *mtx_cl.lock() = Some(Box::new(compiled));
+                                // FIXME: although we've now put the compiled trace into the mutex, there's no
+                                // guarantee that the Location for which we're compiling will ever be executed
+                                // again. In such a case, the memory has, in essence, leaked.
+                            });
+
+                            return None;
+                        }
+                        Err(_) => todo!(),
+                    }
+                }
+                HotLocation::DontTrace => {
+                    loc.unlock();
+                    return None;
+                }
             }
-            _ => unreachable!(),
         }
     }
 }
@@ -442,10 +429,9 @@ struct MTThreadInner {
     tid: Arc<ThreadIdInner>,
     hot_threshold: HotThreshold,
     tracing_kind: TracingKind,
-    /// The active tracer and the unique identifier of the [Location] that is being traced. We use
-    /// a pointer to a 1 byte malloc'd chunk of memory since the resulting address is guaranteed to
-    /// be unique.
-    tracer: Option<(ThreadTracer, Arc<ThreadIdInner>)>,
+    /// If this thread is tracing, store a pointer to the `HotLocation`: this allows us to
+    /// differentiate which thread is actually tracing the location.
+    tracing: Option<*const ()>,
 }
 
 impl MTThreadInner {
@@ -457,7 +443,7 @@ impl MTThreadInner {
             tid: Arc::new(ThreadIdInner),
             hot_threshold,
             tracing_kind,
-            tracer: None,
+            tracing: None,
         };
         MTThread {
             inner: Rc::new(inner),
@@ -472,7 +458,18 @@ mod tests {
     extern crate test;
     use self::test::{black_box, Bencher};
     use super::*;
+    use crate::location::{HotLocationDiscriminants, State};
 
+    fn hotlocation_discriminant<I>(loc: &Location<I>) -> HotLocationDiscriminants {
+        loc.lock().unwrap();
+        let ls = loc.load(Ordering::Acquire);
+        assert!(!ls.is_counting());
+        let x = HotLocationDiscriminants::from(&*unsafe { ls.hot_location() });
+        loc.unlock();
+        x
+    }
+
+    #[derive(Debug, PartialEq)]
     struct EmptyInterpCtx {}
 
     #[interp_step]
@@ -482,33 +479,43 @@ mod tests {
     fn threshold_passed() {
         let hot_thrsh = 1500;
         let mut mtt = MTBuilder::new().hot_threshold(hot_thrsh).init();
-        let lp = Location::new();
-        let mut io = EmptyInterpCtx {};
+        let loc = Location::new();
+        let mut ctx = EmptyInterpCtx {};
         for i in 0..hot_thrsh {
-            mtt.control_point(Some(&lp), empty_step, &mut io);
-            assert_eq!(lp.load(Ordering::Relaxed), State::phase_counting(i + 1));
+            mtt.control_point(Some(&loc), empty_step, &mut ctx);
+            assert_eq!(loc.load(Ordering::Relaxed), State::new().with_count(i + 1));
         }
-        assert_eq!(lp.load(Ordering::Relaxed).phase(), PHASE_COUNTING);
-        mtt.control_point(Some(&lp), empty_step, &mut io);
-        assert_eq!(lp.load(Ordering::Relaxed).phase(), PHASE_TRACING);
-        mtt.control_point(Some(&lp), empty_step, &mut io);
-        let fs = lp.load(Ordering::Relaxed).phase();
-        assert!(fs == PHASE_COMPILING || fs == PHASE_COMPILED);
+        assert!(loc.load(Ordering::Relaxed).is_counting());
+        mtt.control_point(Some(&loc), empty_step, &mut ctx);
+        assert_eq!(
+            hotlocation_discriminant(&loc),
+            HotLocationDiscriminants::Tracing
+        );
+        mtt.control_point(Some(&loc), empty_step, &mut ctx);
+        assert!([
+            HotLocationDiscriminants::Compiling,
+            HotLocationDiscriminants::Compiled
+        ]
+        .contains(&hotlocation_discriminant(&loc)));
     }
 
     #[test]
     fn stop_while_tracing() {
         let hot_thrsh = 5;
         let mut mtt = MTBuilder::new().hot_threshold(hot_thrsh).init();
-        let lp = Location::new();
-        let mut io = EmptyInterpCtx {};
+        let loc = Location::new();
+        let mut ctx = EmptyInterpCtx {};
         for i in 0..hot_thrsh {
-            mtt.control_point(Some(&lp), empty_step, &mut io);
-            assert_eq!(lp.load(Ordering::Relaxed), State::phase_counting(i + 1));
+            mtt.control_point(Some(&loc), empty_step, &mut ctx);
+            assert!(loc.load(Ordering::Relaxed).is_counting());
+            assert_eq!(loc.load(Ordering::Relaxed).count(), i + 1);
         }
-        assert_eq!(lp.load(Ordering::Relaxed).phase(), PHASE_COUNTING);
-        mtt.control_point(Some(&lp), empty_step, &mut io);
-        assert_eq!(lp.load(Ordering::Relaxed).phase(), PHASE_TRACING);
+        assert!(loc.load(Ordering::Relaxed).is_counting());
+        mtt.control_point(Some(&loc), empty_step, &mut ctx);
+        assert_eq!(
+            hotlocation_discriminant(&loc),
+            HotLocationDiscriminants::Tracing
+        );
     }
 
     #[test]
@@ -522,22 +529,22 @@ mod tests {
             let t = mtt
                 .mt()
                 .spawn(move |mut mtt| {
-                    let mut io = EmptyInterpCtx {};
-                    mtt.control_point(Some(&loc), empty_step, &mut io);
+                    let mut ctx = EmptyInterpCtx {};
+                    mtt.control_point(Some(&loc), empty_step, &mut ctx);
                     let c1 = loc.load(Ordering::Relaxed);
-                    assert_eq!(c1.phase(), PHASE_COUNTING);
-                    mtt.control_point(Some(&loc), empty_step, &mut io);
+                    assert!(c1.is_counting());
+                    mtt.control_point(Some(&loc), empty_step, &mut ctx);
                     let c2 = loc.load(Ordering::Relaxed);
-                    assert_eq!(c2.phase(), PHASE_COUNTING);
-                    mtt.control_point(Some(&loc), empty_step, &mut io);
+                    assert!(c2.is_counting());
+                    mtt.control_point(Some(&loc), empty_step, &mut ctx);
                     let c3 = loc.load(Ordering::Relaxed);
-                    assert_eq!(c3.phase(), PHASE_COUNTING);
-                    mtt.control_point(Some(&loc), empty_step, &mut io);
+                    assert!(c3.is_counting());
+                    mtt.control_point(Some(&loc), empty_step, &mut ctx);
                     let c4 = loc.load(Ordering::Relaxed);
-                    assert_eq!(c4.phase(), PHASE_COUNTING);
-                    assert!(c4.number_data() > c3.number_data());
-                    assert!(c3.number_data() > c2.number_data());
-                    assert!(c2.number_data() > c1.number_data());
+                    assert!(c4.is_counting());
+                    assert!(c4.count() >= c3.count());
+                    assert!(c3.count() >= c2.count());
+                    assert!(c2.count() >= c1.count());
                 })
                 .unwrap();
             thrs.push(t);
@@ -546,17 +553,26 @@ mod tests {
             t.join().unwrap();
         }
         {
-            let mut io = EmptyInterpCtx {};
-            mtt.control_point(Some(&loc), empty_step, &mut io);
-            assert_eq!(loc.load(Ordering::Relaxed).phase(), PHASE_TRACING);
-            mtt.control_point(Some(&loc), empty_step, &mut io);
-            mtt.control_point(Some(&loc), empty_step, &mut io);
-
-            while loc.load(Ordering::Relaxed).phase() == PHASE_COMPILING {
-                yield_now();
-                mtt.control_point(Some(&loc), empty_step, &mut io);
+            let mut ctx = EmptyInterpCtx {};
+            // Thread contention means that some count updates might have been dropped, so we have
+            // to keep the interpreter going until the threshold really is reached.
+            while loc.load(Ordering::Relaxed).is_counting() {
+                mtt.control_point(Some(&loc), empty_step, &mut ctx);
             }
-            assert_eq!(loc.load(Ordering::Relaxed).phase(), PHASE_COMPILED);
+            assert_eq!(
+                hotlocation_discriminant(&loc),
+                HotLocationDiscriminants::Tracing
+            );
+            mtt.control_point(Some(&loc), empty_step, &mut ctx);
+
+            while hotlocation_discriminant(&loc) == HotLocationDiscriminants::Compiling {
+                yield_now();
+                mtt.control_point(Some(&loc), empty_step, &mut ctx);
+            }
+            assert_eq!(
+                hotlocation_discriminant(&loc),
+                HotLocationDiscriminants::Compiled
+            );
         }
     }
 
@@ -605,19 +621,15 @@ mod tests {
 
         loop {
             let loc = locs[ctx.pc].as_ref();
-            if ctx.pc == 0 && loc.unwrap().load(Ordering::Relaxed).phase() == PHASE_COMPILED {
+            if ctx.pc == 0
+                && !loc.unwrap().load(Ordering::Relaxed).is_counting()
+                && hotlocation_discriminant(&loc.unwrap()) == HotLocationDiscriminants::Compiled
+            {
                 break;
             }
             mtt.control_point(loc, simple_interp_step, &mut ctx);
             yield_now();
         }
-
-        assert_eq!(
-            locs[0].as_ref().unwrap().load(Ordering::Relaxed).phase(),
-            PHASE_COMPILED
-        );
-
-        assert_eq!(ctx.pc, 0);
 
         // A trace was just compiled. Running it should execute INC twice.
         ctx.count = 8;
@@ -692,14 +704,11 @@ mod tests {
             };
             loop {
                 let loc = locs[ctx.pc].as_ref();
-                if ctx.pc == 0 {
-                    let tag = loc.unwrap().load(Ordering::Relaxed).phase();
-                    match tag {
-                        PHASE_COUNTING | PHASE_TRACING | PHASE_TRACING_LOCK | PHASE_COMPILING
-                        | PHASE_LOCKED => (),
-                        PHASE_COMPILED => break,
-                        _ => panic!(),
-                    }
+                if ctx.pc == 0
+                    && !loc.unwrap().load(Ordering::Relaxed).is_counting()
+                    && hotlocation_discriminant(&loc.unwrap()) == HotLocationDiscriminants::Compiled
+                {
+                    break;
                 }
                 mtt.control_point(loc, simple_interp_step, &mut ctx);
             }
@@ -709,6 +718,11 @@ mod tests {
             for i in 0..10 {
                 let loc = locs[ctx.pc].as_ref();
                 mtt.control_point(loc, simple_interp_step, &mut ctx);
+                assert!(ctx.pc == 0 || ctx.pc == 1);
+                while ctx.pc != 0 {
+                    let loc = locs[ctx.pc].as_ref();
+                    mtt.control_point(loc, simple_interp_step, &mut ctx);
+                }
                 assert_eq!(ctx.count, 10 + i * 2);
             }
 
@@ -767,16 +781,20 @@ mod tests {
         }
 
         let loc = locs[0].as_ref();
-        let tag = loc.unwrap().load(Ordering::Relaxed).phase();
-        assert_eq!(tag, PHASE_TRACING);
+        assert!(
+            !loc.unwrap().load(Ordering::Relaxed).is_counting()
+                && hotlocation_discriminant(&loc.unwrap()) == HotLocationDiscriminants::Tracing
+        );
         let mut ctx = InterpCtx {
             prog: Arc::clone(&prog),
             count: 0,
             pc: 0,
         };
         mtt.control_point(loc, simple_interp_step, &mut ctx);
-        let tag = loc.unwrap().load(Ordering::Relaxed).phase();
-        assert_eq!(tag, PHASE_DONT_TRACE);
+        assert!(
+            !loc.unwrap().load(Ordering::Relaxed).is_counting()
+                && hotlocation_discriminant(&loc.unwrap()) == HotLocationDiscriminants::DontTrace
+        );
     }
 
     #[test]
@@ -828,8 +846,10 @@ mod tests {
         }
 
         let loc = locs[0].as_ref();
-        let tag = loc.unwrap().load(Ordering::Relaxed).phase();
-        assert_eq!(tag, PHASE_TRACING);
+        assert!(
+            !loc.unwrap().load(Ordering::Relaxed).is_counting()
+                && hotlocation_discriminant(&loc.unwrap()) == HotLocationDiscriminants::Tracing
+        );
         // This is a weak test: at this point we hope that the dropped location frees its Arc. If
         // it doesn't, we won't have tested much. If it does, we at least get a modicum of "check
         // that it's not a double free" testing.
@@ -910,11 +930,13 @@ mod tests {
         // Run until a trace has been compiled.
         loop {
             let loc = locs[ctx.pc].as_ref();
-            if ctx.pc == 0 && loc.unwrap().load(Ordering::Relaxed).phase() == PHASE_COMPILED {
+            if ctx.pc == 0
+                && !loc.unwrap().load(Ordering::Relaxed).is_counting()
+                && hotlocation_discriminant(&loc.unwrap()) == HotLocationDiscriminants::Compiled
+            {
                 break;
             }
             mtt.control_point(locs[ctx.pc].as_ref(), simple_interp_step, &mut ctx);
-            yield_now()
         }
 
         assert_eq!(ctx.pc, 0);
