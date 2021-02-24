@@ -16,6 +16,7 @@ export PATH=`pwd`/ykrustc-stage2-latest/bin:${PATH}
 
 # Test both workspaces.
 cargo xtask test
+cargo xtask bench
 cargo xtask clean
 
 # Also test the build without xtask, as that's what consumers will do.
