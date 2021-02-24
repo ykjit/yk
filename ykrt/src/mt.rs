@@ -196,7 +196,7 @@ impl MTThread {
                 } else {
                     unsafe {
                         let mut si = StopgapInterpreter(ptr);
-                        si.interpret(ctx as *mut _ as *mut u8);
+                        si.interpret();
                     }
                 }
             }

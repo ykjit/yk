@@ -139,7 +139,10 @@ pub struct CompiledTrace {
 }
 
 impl CompiledTrace {
-    /// Execute the trace by calling (not jumping to) the first instruction's address.
+    /// Execute the trace by calling (not jumping to) the first instruction's address. Returns a
+    /// pointer to an initialised `StopgapInterpreter` if there was a guard failure, or a null
+    /// pointer otherwise. Note that the interpreter holds a `*mut` pointer to `args`, so we need
+    /// to make sure that `args` is still alive when we call the interpreters `interpret` function.
     pub unsafe fn execute<TT>(&self, args: &mut TT) -> *mut StopgapInterpreter {
         let func: extern "sysv64" fn(&mut TT) -> *mut StopgapInterpreter =
             mem::transmute(self.mc.ptr(dynasmrt::AssemblyOffset(0)));

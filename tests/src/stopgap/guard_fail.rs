@@ -37,7 +37,7 @@ fn simple() {
     assert!(!ptr.is_null());
     // Check that running the interpreter gets us the correct result.
     let mut si: StopgapInterpreter = StopgapInterpreter(ptr);
-    unsafe { si.interpret(&mut args as *mut _ as *mut u8) };
+    unsafe { si.interpret() };
     assert_eq!(args.1, 10);
 }
 
@@ -82,7 +82,7 @@ fn recursion() {
     assert!(!ptr.is_null());
     // Check that running the interpreter gets us the correct result.
     let mut si: StopgapInterpreter = StopgapInterpreter(ptr);
-    unsafe { si.interpret(&mut args as *mut _ as *mut u8) };
+    unsafe { si.interpret() };
     assert_eq!(args.1, 99);
 }
 
@@ -122,6 +122,6 @@ fn recursion2() {
     assert!(!ptr.is_null());
     // Check that running the interpreter gets us the correct result.
     let mut si: StopgapInterpreter = StopgapInterpreter(ptr);
-    unsafe { si.interpret(&mut args as *mut _ as *mut u8) };
+    unsafe { si.interpret() };
     assert_eq!(args.1, 5);
 }

@@ -235,21 +235,15 @@ impl StopgapInterpreter {
             };
             frames.push(frame);
         }
-        StopgapInterpreter { frames }
-    }
-
-    /// Run the SIR interpreter after it has been initialised by a guard failure. Since we start in
-    /// the block where the guard failed, we immediately skip to the terminator and interpret it to
-    /// see which block we need to start interpretation in.
-    pub unsafe fn sg_interpret(&mut self, ctx: *mut u8) {
-        self.set_interp_ctx(ctx);
-        // Jump to the correct basic block by interpreting the terminator.
-        let frame = self.frames.last().unwrap();
+        let mut sg = StopgapInterpreter { frames };
+        let frame = sg.frames.last().unwrap();
+        // Since we start in the block where the guard failed, we immediately skip to the
+        // terminator and interpret it to initialise the block where actual interpretation needs to
+        // start.
         let body = frame.body.clone();
         let bbidx = usize::try_from(frame.bbidx).unwrap();
-        self.terminator(&body.blocks[bbidx].term);
-        // Start interpretation.
-        self.interpret();
+        sg.terminator(&body.blocks[bbidx].term);
+        sg
     }
 
     /// Given the symbol name of a function, generate a `StackFrame` which allocates the precise
