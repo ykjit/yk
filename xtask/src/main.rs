@@ -14,7 +14,7 @@ use std::{
 
 include!("../../build_aux.rs");
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug, Clone, Copy)]
 enum Workspace {
     Internal,
     External,
@@ -78,7 +78,7 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String]) {
                 cmd.arg("--release".to_string());
             }
         }
-        "build" | "check" | "clippy" | "test" => {
+        "bench" | "build" | "check" | "clippy" | "test" => {
             // Ensure that the whole workspace is tested and not just the base crate in the
             // workspace.
             if target == "test" {
@@ -89,8 +89,11 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String]) {
                 let tracing_kind = find_tracing_kind(&rust_flags);
                 rust_flags = make_internal_rustflags(&rust_flags);
 
-                // Optimise the internal workspace.
-                cmd.arg("--release");
+                // Optimise the internal workspace. Don't pass `--release` for `cargo bench` however as it is
+                // already implied (and explicitly passing it is illegal).
+                if target != "bench" {
+                    cmd.arg("--release");
+                }
                 // Set the tracermode cfg macro, but without changing anything relating to code
                 // generation. We can't use `-C tracer=hw` as this would turn off optimisations
                 // and emit SIR for stuff we will never trace.
@@ -105,6 +108,9 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String]) {
             } else if workspace == Workspace::External && target == "clippy" {
                 let tracing_kind = find_tracing_kind(&rust_flags);
                 rust_flags = format!("--cfg tracermode=\"{}\"", tracing_kind);
+            } else if workspace == Workspace::External && target == "bench" {
+                // Setting this in `[profile.bench]` in `Cargo.toml` doesn't work.
+                rust_flags.push_str(" -C opt-level=0");
             }
         }
         _ => bail(format!(
