@@ -23,7 +23,7 @@ enum Workspace {
 fn run_action(workspace: Workspace, target: &str, extra_args: &[String]) {
     // The external workspace depends on libykshim.so produced by the internal workspace
     if workspace == Workspace::External {
-        run_action(Workspace::Internal, target, &[]);
+        run_action(Workspace::Internal, target, extra_args);
     }
 
     let mut cmd = if ["fmt", "clippy"].contains(&target) {
