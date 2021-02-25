@@ -5,7 +5,7 @@
 use super::SirTrace;
 use crate::{
     errors::InvalidTraceError,
-    sir::{self, Sir}
+    sir::{self, Sir, INTERP_STEP_ARG}
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -227,6 +227,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                             in_interp_step = true;
                             entered_call = true;
                             live_locals.push(HashSet::new());
+                            live_locals.last_mut().unwrap().insert(INTERP_STEP_ARG);
                             continue;
                         }
                     }
