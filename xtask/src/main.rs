@@ -14,7 +14,7 @@ use std::{
 
 include!("../../build_aux.rs");
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug, Clone, Copy)]
 enum Workspace {
     Internal,
     External,
