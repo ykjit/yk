@@ -13,6 +13,9 @@ mod helpers;
 mod stopgap;
 
 #[cfg(test)]
+mod symbols;
+
+#[cfg(test)]
 mod tir;
 
 #[cfg(test)]
