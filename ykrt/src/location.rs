@@ -4,85 +4,17 @@ use std::{
     marker::PhantomData,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc, Mutex,
+        Arc,
     },
 };
 
-use crate::mt::ThreadIdInner;
-use ykshim_client::CompiledTrace;
+use parking_lot::Mutex;
+use parking_lot_core::{
+    park, unpark_one, ParkResult, SpinWait, UnparkResult, UnparkToken, DEFAULT_PARK_TOKEN,
+};
+use strum::EnumDiscriminants;
 
-// The current meta-tracing phase of a given location in the end-user's code. Consists of a tag and
-// (optionally) a value. We expect the most commonly encountered tag at run-time is PHASE_COMPILED
-// whose value is a pointer to memory. By also making that tag 0b00, we allow that index to be
-// accessed without any further operations after the initial tag check.
-pub(crate) const PHASE_NUM_BITS: usize = 3;
-pub(crate) const PHASE_TAG: usize = 0b111; // All of the other PHASE_ tags must fit in this.
-pub(crate) const PHASE_COMPILED: usize = 0b000; // Value is a pointer to a chunk of memory containing a
-                                                // CompiledTrace<I>.
-pub(crate) const PHASE_TRACING: usize = 0b001; // Value is a pointer to an Arc<ThreadIdInner> representing a
-                                               // thread ID.
-pub(crate) const PHASE_TRACING_LOCK: usize = 0b010; // No associated value
-pub(crate) const PHASE_COMPILING: usize = 0b011; // Value is a pointer to a `Box<CompilingTrace<I>>`.
-pub(crate) const PHASE_COUNTING: usize = 0b100; // Value specifies how many times we've seen this Location.
-pub(crate) const PHASE_LOCKED: usize = 0b101; // No associated value.
-pub(crate) const PHASE_DONT_TRACE: usize = 0b110; // No associated value.
-
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub(crate) struct State(usize);
-
-impl State {
-    pub(crate) fn phase(&self) -> usize {
-        self.0 & PHASE_TAG
-    }
-
-    pub(crate) fn phase_compiled<I>(trace: Box<CompiledTrace<I>>) -> Self {
-        let ptr = Box::into_raw(trace);
-        debug_assert_eq!(ptr as usize & PHASE_TAG, 0);
-        State(ptr as usize | PHASE_COMPILED)
-    }
-
-    pub(crate) fn phase_tracing(tid: Arc<ThreadIdInner>) -> Self {
-        let ptr = Arc::into_raw(tid);
-        debug_assert_eq!(ptr as usize & PHASE_TAG, 0);
-        State(ptr as usize | PHASE_TRACING)
-    }
-
-    pub(crate) fn phase_tracing_lock() -> Self {
-        State(PHASE_TRACING_LOCK)
-    }
-
-    pub(crate) fn phase_compiling<I>(trace: Arc<CompilingTrace<I>>) -> Self {
-        let ptr: *const CompilingTrace<I> = Arc::into_raw(trace);
-        debug_assert_eq!(ptr as usize & PHASE_TAG, 0);
-        State(ptr as usize | PHASE_COMPILING)
-    }
-
-    pub(crate) fn phase_counting(count: usize) -> Self {
-        debug_assert_eq!(count << PHASE_NUM_BITS >> PHASE_NUM_BITS, count);
-        State(PHASE_COUNTING | (count << PHASE_NUM_BITS))
-    }
-
-    pub(crate) fn phase_locked() -> Self {
-        State(PHASE_LOCKED)
-    }
-
-    pub(crate) fn phase_dont_trace() -> Self {
-        State(PHASE_DONT_TRACE)
-    }
-
-    pub(crate) fn number_data(&self) -> usize {
-        debug_assert_eq!(self.phase(), PHASE_COUNTING);
-        self.0 >> PHASE_NUM_BITS
-    }
-
-    pub(crate) fn pointer_data<T>(&self) -> *const T {
-        (self.0 & !PHASE_TAG) as *const T
-    }
-
-    pub(crate) unsafe fn ref_data<T>(&self) -> &T {
-        &*self.pointer_data()
-    }
-}
+use ykshim_client::{CompiledTrace, ThreadTracer};
 
 /// A `Location` stores state that the meta-tracer needs to identify hot loops and run associated
 /// machine code.
@@ -97,88 +29,407 @@ impl State {
 /// nodes that can't be control points).
 #[derive(Debug)]
 pub struct Location<I> {
-    // A Location is a state machine which operates as follows (where PHASE_COUNTING is the start
+    // A Location is a state machine which operates as follows (where Counting is the start
     // state):
     //
-    //              ┌────────────────────────────────────────┐
-    //              │                                        │─────────────┐
-    //   reprofile  │             PHASE_COUNTING             │             │
-    //  ┌──────────▶│                                        │◀────────────┘
-    //  │           └────────────────────────────────────────┘    increment
-    //  │             │                                             count
+    //              ┌──────────────┐
+    //              │              │─────────────┐
+    //   reprofile  │   Counting   │             │
+    //  ┌──────────▶│              │◀────────────┘
+    //  │           └──────────────┘    increment
+    //  │             │                 count
     //  │             │ start tracing
     //  │             ▼
-    //  │           ┌────────────────────┐
-    //  │           │   PHASE_TRACING    │
-    //  │           └────────────────────┘
-    //  │             │ check for    ▲
-    //  │             │ stuckness    | still
-    //  │             ▼              | active
-    //  │           ┌────────────────────┐
-    //  │           │                    │  abort   ┌────────────────────┐
-    //  │           │ PHASE_TRACING_LOCK │─────────▶│  PHASE_DONT_TRACE  │
-    //  │           │                    │          └────────────────────┘
-    //  │           └────────────────────┘
+    //  │           ┌──────────────┐
+    //  |           |              | incomplete  ┌─────────────┐
+    //  │           │   Tracing    │────────────▶|  DontTrace  |
+    //  |           |              |             └─────────────┘
+    //  │           └──────────────┘
     //  │             │ start compiling trace
     //  │             │ in thread
     //  │             ▼
-    //  │           ┌────────────────────┐
-    //  │           │                    │
-    //  |           |  PHASE_COMPILING   |
-    //  │           │                    │
-    //  │           └────────────────────┘
-    //  │             │ trace maybe    ▲
-    //  │             │ compiled       | trace not yet
-    //  │             ▼                | compiled
-    //  │           ┌────────────────────┐
-    //  │           │    PHASE_LOCKED    │
-    //  │           └────────────────────┘
-    //  │             │ trace definitely
-    //  │             │ compiled
+    //  │           ┌──────────────┐
+    //  |           |  Compiling   |
+    //  │           └──────────────┘
+    //  │             │
+    //  │             │ trace compiled
     //  │             ▼
-    //  │           ┌────────────────────┐
-    //  │           │                    │──────┐
-    //  │           │   PHASE_COMPILED   │      │
-    //  └───────────│                    │◀─────┘
-    //              └────────────────────┘
+    //  │           ┌──────────────┐
+    //  └───────────│   Compiled   |
+    //              └──────────────┘
     //
-    // We hope that a Location soon reaches PHASE_COMPILED (aka "the happy state") and stays there.
+    // We hope that a Location soon reaches the Compiled state (aka "the happy state") and stays
+    // there.
+    //
+    // The state machine is encoded in a usize in a not-entirely-simple way, as we don't want to
+    // allocate any memory for Locations that do not become hot. The layout is as follows (on a 64
+    // bit machine):
+    //
+    //   bit(s) | 63..3   | 2           | 1         | 0
+    //          | payload | IS_COUNTING | IS_PARKED | IS_LOCKED
+    //
+    // In the Counting state, IS_COUNTING is set to 1, and IS_PARKED and IS_LOCKED are unused and
+    // must remain set at 0. The payload representing the count is incremented locklessly. All
+    // other states have IS_COUNTING set to 0 and the payload is the address of a boxed
+    // HotLocation, access to which is controlled by IS_LOCKED.
+    //
+    // The possible combinations of the counting and mutex bits are thus as follows:
+    //
+    //   payload       | IS_COUNTING | IS_PARKED | IS_LOCKED | Notes
+    //   --------------+-----------+---------+---------+-----------------------------------
+    //   <count>       | 1           | 0         | 0         | Start state
+    //                 | 1           | 0         | 1         | Illegal state
+    //                 | 1           | 1         | 0         | Illegal state
+    //                 | 1           | 1         | 1         | Illegal state
+    //   <HotLocation> | 0           | 0         | 0         | Not locked, no-one waiting
+    //   <HotLocation> | 0           | 0         | 1         | Locked, no thread(s) waiting
+    //   <HotLocation> | 0           | 1         | 0         | Not locked, thread(s) waiting
+    //   <HotLocation> | 0           | 1         | 1         | Locked, thread(s) waiting
+    //
+    // where `<count>` is an integer and `<HotLocation>` is a boxed `HotLocation` enum.
+    //
+    // The precise semantics of locking and, in particular, parking are subtle: interested readers
+    // are directed to https://github.com/Amanieu/parking_lot/blob/master/src/raw_mutex.rs#L33 for
+    // a more precise definition.
     state: AtomicUsize,
     phantom: PhantomData<I>,
 }
 
 impl<I> Location<I> {
+    /// Create a new location.
     pub fn new() -> Self {
+        // Locations start in the counting state with a count of 0.
         Self {
-            state: AtomicUsize::new(PHASE_COUNTING),
+            state: AtomicUsize::new(State::<I>::new().x),
             phantom: PhantomData,
         }
     }
 
-    pub(crate) fn load(&self, order: Ordering) -> State {
-        State(self.state.load(order))
+    /// Return this Location's internal state.
+    pub(crate) fn load(&self, order: Ordering) -> State<I> {
+        State {
+            x: self.state.load(order),
+            marker: PhantomData,
+        }
     }
 
-    pub(crate) fn compare_and_swap(&self, current: State, new: State, order: Ordering) -> State {
-        State(
-            self.state
-                .compare_exchange(current.0, new.0, order, Ordering::Relaxed)
-                .unwrap_or_else(|e| e),
-        )
+    pub(crate) fn compare_exchange_weak(
+        &self,
+        current: State<I>,
+        new: State<I>,
+        success: Ordering,
+        failure: Ordering,
+    ) -> Result<State<I>, State<I>> {
+        match self
+            .state
+            .compare_exchange_weak(current.x, new.x, success, failure)
+        {
+            Ok(x) => Ok(State {
+                x,
+                marker: PhantomData,
+            }),
+            Err(x) => Err(State {
+                x,
+                marker: PhantomData,
+            }),
+        }
     }
 
-    pub(crate) fn store(&self, state: State, order: Ordering) {
-        self.state.store(state.0, order);
+    /// Locks this `State` with `Acquire` ordering. If the location moves to the Counting state
+    /// during execution, this will return `Err`.
+    pub(crate) fn lock(&self) -> Result<State<I>, ()> {
+        {
+            let ls = self.load(Ordering::Relaxed);
+            debug_assert!(!ls.is_counting());
+            let new_ls = ls.with_lock().with_unparked();
+            if self
+                .state
+                .compare_exchange_weak(
+                    ls.with_unlock().with_unparked().x,
+                    new_ls.x,
+                    Ordering::Acquire,
+                    Ordering::Relaxed,
+                )
+                .is_ok()
+            {
+                return Ok(new_ls);
+            }
+        }
+
+        let mut spinwait = SpinWait::new();
+        let mut ls = self.load(Ordering::Relaxed);
+        loop {
+            if ls.is_counting() {
+                return Err(());
+            }
+
+            if !ls.is_locked() {
+                let new_ls = ls.with_lock();
+                match self.state.compare_exchange_weak(
+                    ls.x,
+                    new_ls.x,
+                    Ordering::Acquire,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(_) => return Ok(new_ls),
+                    Err(x) => ls = State::from_usize(x),
+                }
+                continue;
+            }
+
+            if !ls.is_parked() {
+                if spinwait.spin() {
+                    ls = self.load(Ordering::Relaxed);
+                    continue;
+                } else if let Err(x) = self.state.compare_exchange_weak(
+                    ls.x,
+                    ls.with_parked().x,
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                ) {
+                    ls = State::from_usize(x);
+                    continue;
+                }
+            }
+
+            let key = unsafe { ls.hot_location() } as *const _ as usize;
+            debug_assert_ne!(key, 0);
+            let validate = || {
+                let ls = self.load(Ordering::Relaxed);
+                ls.is_locked() && ls.is_parked()
+            };
+            let before_sleep = || {};
+            let timed_out = |_, _| unreachable!();
+            match unsafe {
+                park(
+                    key,
+                    validate,
+                    before_sleep,
+                    timed_out,
+                    DEFAULT_PARK_TOKEN,
+                    None,
+                )
+            } {
+                ParkResult::Unparked(TOKEN_HANDOFF) => return Ok(self.load(Ordering::Relaxed)),
+                ParkResult::Invalid | ParkResult::Unparked(_) => (),
+                ParkResult::TimedOut => unreachable!(),
+            }
+
+            // Loop back and try locking again
+            spinwait.reset();
+            ls = self.load(Ordering::Relaxed);
+        }
+    }
+
+    /// Unlocks this `State` with `Release` ordering.
+    pub(crate) fn unlock(&self) {
+        let ls = self.load(Ordering::Relaxed);
+        debug_assert!(ls.is_locked());
+        debug_assert!(!ls.is_counting());
+        if self
+            .state
+            .compare_exchange(
+                ls.with_unparked().x,
+                ls.with_unparked().with_unlock().x,
+                Ordering::Release,
+                Ordering::Relaxed,
+            )
+            .is_ok()
+        {
+            return;
+        }
+
+        // At this point we know another thread has parked itself.
+        let key = unsafe { ls.hot_location() } as *const _ as usize;
+        debug_assert_ne!(key, 0);
+        let callback = |result: UnparkResult| {
+            if result.unparked_threads != 0 && result.be_fair {
+                if !result.have_more_threads {
+                    debug_assert!(ls.is_locked());
+                    self.state.store(ls.with_unparked().x, Ordering::Relaxed);
+                }
+                return TOKEN_HANDOFF;
+            }
+
+            if result.have_more_threads {
+                self.state
+                    .store(ls.with_unlock().with_parked().x, Ordering::Release);
+            } else {
+                self.state
+                    .store(ls.with_unparked().with_unlock().x, Ordering::Release);
+            }
+            TOKEN_NORMAL
+        };
+        unsafe {
+            unpark_one(key, callback);
+        }
+    }
+
+    /// Try obtaining the lock, returning the new `State` if successful.
+    pub(crate) fn try_lock(&self) -> Result<State<I>, ()> {
+        let mut ls = self.load(Ordering::Relaxed);
+        loop {
+            if ls.is_locked() {
+                return Err(());
+            }
+            let new_ls = ls.with_lock();
+            match self.compare_exchange_weak(ls, new_ls, Ordering::Acquire, Ordering::Relaxed) {
+                Ok(_) => return Ok(new_ls),
+                Err(x) => ls = x,
+            }
+        }
     }
 }
 
 impl<I> Drop for Location<I> {
     fn drop(&mut self) {
-        let lp = *self.state.get_mut();
-        if lp & PHASE_TAG == PHASE_TRACING {
-            unsafe { Arc::from_raw((lp & !PHASE_TAG) as *mut u8) };
+        let ls = self.load(Ordering::Relaxed);
+        if !ls.is_counting() {
+            debug_assert!(!ls.is_locked());
+            let hr = unsafe { ls.hot_location() };
+            unsafe {
+                Box::from_raw(hr);
+            }
         }
     }
 }
 
-pub(crate) type CompilingTrace<I> = Mutex<Option<Box<CompiledTrace<I>>>>;
+#[cfg(target_pointer_width = "64")]
+pub(crate) const STATE_TAG: usize = 0b111; // All of the other tag data must fit in this.
+#[cfg(target_pointer_width = "64")]
+pub(crate) const STATE_NUM_BITS: usize = 3;
+
+pub(crate) const STATE_IS_LOCKED: usize = 0b001;
+pub(crate) const STATE_IS_PARKED: usize = 0b010;
+pub(crate) const STATE_IS_COUNTING: usize = 0b100;
+
+pub(crate) const TOKEN_NORMAL: UnparkToken = UnparkToken(0);
+pub(crate) const TOKEN_HANDOFF: UnparkToken = UnparkToken(1);
+
+#[derive(PartialEq, Eq, Debug)]
+pub(crate) struct State<I> {
+    pub(crate) x: usize,
+    marker: PhantomData<I>,
+}
+
+impl<I> Copy for State<I> {}
+
+impl<I> Clone for State<I> {
+    fn clone(&self) -> State<I> {
+        *self
+    }
+}
+
+impl<I> State<I> {
+    /// Return a new `State` in the counting phase with a count 0.
+    pub(crate) fn new() -> Self {
+        State {
+            x: STATE_IS_COUNTING,
+            marker: PhantomData,
+        }
+    }
+
+    fn from_usize(x: usize) -> Self {
+        State {
+            x,
+            marker: PhantomData,
+        }
+    }
+
+    pub(crate) fn is_locked(&self) -> bool {
+        self.x & STATE_IS_LOCKED != 0
+    }
+
+    pub(crate) fn is_parked(&self) -> bool {
+        self.x & STATE_IS_PARKED != 0
+    }
+
+    /// Is the Location in the counting or a non-counting state?
+    pub(crate) fn is_counting(&self) -> bool {
+        self.x & STATE_IS_COUNTING != 0
+    }
+
+    /// If, and only if, the Location is in the counting state, return the current count.
+    pub(crate) fn count(&self) -> usize {
+        debug_assert!(self.is_counting());
+        debug_assert!(!self.is_locked());
+        self.x >> STATE_NUM_BITS
+    }
+
+    /// If this `State` is not counting, return its `HotLocation`. It is undefined behaviour to
+    /// call this function if this `State` is in the counting phase and/or if this `State` is not
+    /// locked.
+    pub(crate) unsafe fn hot_location(&self) -> &mut HotLocation<I> {
+        debug_assert!(!self.is_counting());
+        //debug_assert!(self.is_locked());
+        &mut *((self.x & !STATE_TAG) as *mut _)
+    }
+
+    /// Return a version of this `State` with the locked bit set.
+    pub(crate) fn with_lock(&self) -> State<I> {
+        State {
+            x: self.x | STATE_IS_LOCKED,
+            marker: PhantomData,
+        }
+    }
+
+    /// Return a version of this `State` with the locked bit unset.
+    pub(crate) fn with_unlock(&self) -> State<I> {
+        State {
+            x: self.x & !STATE_IS_LOCKED,
+            marker: PhantomData,
+        }
+    }
+
+    /// Return a version of this `State` with the parked bit set.
+    pub(crate) fn with_parked(&self) -> State<I> {
+        State {
+            x: self.x | STATE_IS_PARKED,
+            marker: PhantomData,
+        }
+    }
+
+    /// Return a version of this `State` with the parked bit unset.
+    pub(crate) fn with_unparked(&self) -> State<I> {
+        State {
+            x: self.x & !STATE_IS_PARKED,
+            marker: PhantomData,
+        }
+    }
+
+    /// Return a version of this `State` with the count set to `count`. It is undefined behaviour
+    /// to call this function if this `State` is not in the counting phase.
+    pub(crate) fn with_count(&self, count: usize) -> Self {
+        debug_assert!(self.is_counting());
+        debug_assert_eq!(count << STATE_NUM_BITS >> STATE_NUM_BITS, count);
+        State {
+            x: (self.x & STATE_TAG) | (count << STATE_NUM_BITS),
+            marker: PhantomData,
+        }
+    }
+
+    /// Set this `State`'s `HotLocation`. It is undefined behaviour for this `State` to already
+    /// have a `HotLocation`.
+    pub(crate) fn with_hotlocation(&self, hl_ptr: *mut HotLocation<I>) -> Self {
+        debug_assert!(self.is_counting());
+        let hl_ptr = hl_ptr as usize;
+        debug_assert_eq!(hl_ptr & !STATE_TAG, hl_ptr);
+        State {
+            x: (self.x & (STATE_TAG & !STATE_IS_COUNTING)) | hl_ptr,
+            marker: PhantomData,
+        }
+    }
+}
+
+/// An opaque struct used by `MTThreadInner` to help identify if a thread that started a trace is
+/// still active.
+pub(crate) struct ThreadIdInner;
+
+/// A `Location`'s non-counting states.
+#[derive(EnumDiscriminants)]
+pub(crate) enum HotLocation<I> {
+    Compiled(Box<CompiledTrace<I>>),
+    Compiling(Arc<Mutex<Option<Box<CompiledTrace<I>>>>>),
+    DontTrace,
+    Tracing(Option<(Arc<ThreadIdInner>, ThreadTracer)>),
+}
