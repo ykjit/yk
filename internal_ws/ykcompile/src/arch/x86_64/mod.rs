@@ -636,7 +636,14 @@ impl TraceCompiler {
         dest_loc
     }
 
-    fn c_binop(&mut self, dest: &IRPlace, op: BinOp, opnd1: &IRPlace, opnd2: &IRPlace, checked: bool) {
+    fn c_binop(
+        &mut self,
+        dest: &IRPlace,
+        op: BinOp,
+        opnd1: &IRPlace,
+        opnd2: &IRPlace,
+        checked: bool,
+    ) {
         let opnd1_ty = SIR.ty(&opnd1.ty());
         debug_assert!(opnd1_ty == SIR.ty(&opnd2.ty()));
 

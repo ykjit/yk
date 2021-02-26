@@ -23,7 +23,7 @@ enum Workspace {
 fn run_action(workspace: Workspace, target: &str, extra_args: &[String]) {
     // The external workspace depends on libykshim.so produced by the internal workspace
     if workspace == Workspace::External {
-        run_action(Workspace::Internal, target, &[]);
+        run_action(Workspace::Internal, target, extra_args);
     }
 
     let mut cmd = if ["fmt", "clippy"].contains(&target) {
@@ -89,8 +89,7 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String]) {
                 let tracing_kind = find_tracing_kind(&rust_flags);
                 rust_flags = make_internal_rustflags(&rust_flags);
 
-                // Optimise the internal workspace. Don't pass `--release` for `cargo bench` however as it is
-                // already implied (and explicitly passing it is illegal).
+                // Optimise the internal workspace. `--release` is not valid for `cargo bench`.
                 if target != "bench" {
                     cmd.arg("--release");
                 }
