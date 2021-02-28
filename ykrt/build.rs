@@ -8,11 +8,9 @@ include!("../build_aux.rs");
 const YKSHIM_SO: &str = "libykshim.so";
 
 fn main() {
-    let ykrt_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    let mut internal_dir = ykrt_dir.clone();
+    let mut internal_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     internal_dir.push("..");
     internal_dir.push("internal_ws");
-    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let cargo = env::var("CARGO").unwrap();
 
     // Only build the internal workspace now if we are not using xtask, i.e. if we are being
@@ -41,13 +39,13 @@ fn main() {
 
     // If we symlink libykshim.so into the target dir, then this is already in the linker path when
     // run under cargo. In other words, the user won't have to set LD_LIBRARY_PATH.
-    let mut sym_dest = out_dir.clone();
+    let mut sym_dest = PathBuf::from(env::var("OUT_DIR").unwrap());
     sym_dest.push("..");
     sym_dest.push("..");
     sym_dest.push("..");
     sym_dest.push(YKSHIM_SO);
     if !PathBuf::from(&sym_dest).exists() {
-        let mut sym_src = internal_dir.clone();
+        let mut sym_src = internal_dir;
         sym_src.push("target");
         sym_src.push("release");
         sym_src.push(YKSHIM_SO);
