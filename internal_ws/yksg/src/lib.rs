@@ -45,14 +45,20 @@ impl Drop for LocalMem {
 
 impl LocalMem {
     /// Given a pointer `src` and a size, write its value to the pointer `dst`.
-    pub fn write_val(&mut self, dst: *mut u8, src: *const u8, size: usize) {
-        unsafe {
-            std::ptr::copy(src, dst, size);
-        }
+    ///
+    /// # Safety
+    ///
+    /// XXX?
+    pub unsafe fn write_val(&mut self, dst: *mut u8, src: *const u8, size: usize) {
+        std::ptr::copy(src, dst, size);
     }
 
     /// Write a constant to the pointer `dst`.
-    pub fn write_const(&mut self, dest: *mut u8, constant: &Constant) {
+    ///
+    /// # Safety
+    ///
+    /// XXX?
+    pub unsafe fn write_const(&mut self, dest: *mut u8, constant: &Constant) {
         match constant {
             Constant::Int(ci) => match ci {
                 ConstantInt::UnsignedInt(ui) => match ui {
@@ -88,7 +94,7 @@ impl LocalMem {
             }
             IRPlace::Const { val, ty: _ty } => {
                 let dst_ptr = self.iplace_to_ptr(dest);
-                self.write_const(dst_ptr, val);
+                unsafe { self.write_const(dst_ptr, val); }
             }
             _ => todo!(),
         }
@@ -102,10 +108,10 @@ impl LocalMem {
                 IRPlace::Val { .. } | IRPlace::Indirect { .. } => {
                     let src = frame.iplace_to_ptr(arg);
                     let size = usize::try_from(SIR.ty(&arg.ty()).size()).unwrap();
-                    self.write_val(dst, src, size);
+                    unsafe { self.write_val(dst, src, size); }
                 }
                 IRPlace::Const { val, .. } => {
-                    self.write_const(dst, val);
+                    unsafe { self.write_const(dst, val); }
                 }
                 _ => unreachable!(),
             }
@@ -181,7 +187,7 @@ macro_rules! make_binop {
                 todo!("Raise error.")
             }
             let bytes = v.to_ne_bytes();
-            locals.write_val(ptr, bytes.as_ptr(), bytes.len());
+            unsafe { locals.write_val(ptr, bytes.as_ptr(), bytes.len()); }
         }
     };
 }
@@ -277,12 +283,10 @@ impl StopgapInterpreter {
     }
 
     /// Inserts a pointer to the interpreter context into the `interp_step` frame.
-    pub fn set_interp_ctx(&mut self, ctx: *mut u8) {
+    pub unsafe fn set_interp_ctx(&mut self, ctx: *mut u8) {
         // The interpreter context lives in $1
         let ptr = self.frames.first().unwrap().mem.local_ptr(&INTERP_STEP_ARG);
-        unsafe {
-            std::ptr::write::<*mut u8>(ptr as *mut *mut u8, ctx);
-        }
+        std::ptr::write::<*mut u8>(ptr as *mut *mut u8, ctx);
     }
 
     pub unsafe fn interpret(&mut self) {
@@ -352,7 +356,7 @@ impl StopgapInterpreter {
                     // Write the return value to the destination in the previous frame.
                     let dst_ptr = curframe.mem.iplace_to_ptr(&dest);
                     let size = usize::try_from(SIR.ty(&dest.ty()).size()).unwrap();
-                    curframe.mem.write_val(dst_ptr, ret_ptr, size);
+                    unsafe { curframe.mem.write_val(dst_ptr, ret_ptr, size); }
                     curframe.bbidx = bbidx;
                 }
             }
