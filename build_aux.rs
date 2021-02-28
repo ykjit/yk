@@ -9,7 +9,7 @@ fn find_tracing_kind(rustflags: &str) -> String {
     let cfgs =
         std::process::Command::new(std::env::var("RUSTC").unwrap_or_else(|_| "rustc".to_string()))
             .args(&["--print", "cfg"])
-            .args(rustflags.split(" "))
+            .args(rustflags.split(' '))
             .output()
             .unwrap()
             .stdout;

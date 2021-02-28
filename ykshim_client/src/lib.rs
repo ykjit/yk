@@ -85,7 +85,7 @@ impl ThreadTracer {
 
 impl Drop for ThreadTracer {
     fn drop(&mut self) {
-        if self.0 != ptr::null_mut() {
+        if !self.0.is_null() {
             // We are still tracing.
             let mut err_msg = std::ptr::null_mut();
             unsafe { __ykshim_stop_tracing(self.0, &mut err_msg) };
@@ -114,7 +114,7 @@ unsafe impl Sync for SirTrace {}
 
 impl Drop for SirTrace {
     fn drop(&mut self) {
-        if self.0 != ptr::null_mut() {
+        if !self.0.is_null() {
             unsafe { __ykshim_sirtrace_drop(self.0) }
         }
     }

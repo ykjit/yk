@@ -55,6 +55,10 @@ impl TirTrace {
         Self(unsafe { __ykshimtest_tirtrace_new(sir_trace.0) })
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn len(&self) -> usize {
         unsafe { __ykshimtest_tirtrace_len(self.0) }
     }
@@ -62,7 +66,7 @@ impl TirTrace {
 
 impl Drop for TirTrace {
     fn drop(&mut self) {
-        if self.0 != ptr::null_mut() {
+        if !self.0.is_null() {
             unsafe { __ykshim_tirtrace_drop(self.0) };
         }
     }
@@ -125,6 +129,10 @@ impl Drop for TraceCompiler {
 }
 
 impl SirTrace {
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn len(&self) -> usize {
         unsafe { __ykshimtest_sirtrace_len(self.0) }
     }
