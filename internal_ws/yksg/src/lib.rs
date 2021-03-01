@@ -62,34 +62,34 @@ impl LocalMem {
     }
 
     /// Stores one IRPlace into another.
-    fn store(&mut self, dst: &IRPlace, src: &IRPlace) {
+    unsafe fn store(&mut self, dst: &IRPlace, src: &IRPlace) {
         match src {
             IRPlace::Val { .. } | IRPlace::Indirect { .. } => {
                 let src_ptr = self.iplace_to_ptr(src);
                 let dst_ptr = self.iplace_to_ptr(dst);
                 let size = usize::try_from(SIR.ty(&src.ty()).size()).unwrap();
-                unsafe { std::ptr::copy(src_ptr, dst_ptr, size); }
+                std::ptr::copy(src_ptr, dst_ptr, size);
             }
             IRPlace::Const { val, ty: _ty } => {
                 let dst_ptr = self.iplace_to_ptr(dst);
-                unsafe { self.write_const(dst_ptr, val); }
+                self.write_const(dst_ptr, val);
             }
             _ => todo!(),
         }
     }
 
     /// Copy over the call arguments from another frame.
-    fn copy_args(&mut self, args: &[IRPlace], frame: &LocalMem) {
+    unsafe fn copy_args(&mut self, args: &[IRPlace], frame: &LocalMem) {
         for (i, arg) in args.iter().enumerate() {
             let dst = self.local_ptr(&Local(u32::try_from(i + 1).unwrap()));
             match arg {
                 IRPlace::Val { .. } | IRPlace::Indirect { .. } => {
                     let src = frame.iplace_to_ptr(arg);
                     let size = usize::try_from(SIR.ty(&arg.ty()).size()).unwrap();
-                    unsafe { std::ptr::copy(src, dst, size); }
+                    std::ptr::copy(src, dst, size);
                 }
                 IRPlace::Const { val, .. } => {
-                    unsafe { self.write_const(dst, val); }
+                    self.write_const(dst, val);
                 }
                 _ => unreachable!(),
             }
@@ -225,7 +225,9 @@ impl StopgapInterpreter {
         // start.
         let body = frame.body.clone();
         let bbidx = usize::try_from(frame.bbidx).unwrap();
-        sg.terminator(&body.blocks[bbidx].term);
+        unsafe {
+            sg.terminator(&body.blocks[bbidx].term);
+        }
         sg
     }
 
@@ -293,7 +295,7 @@ impl StopgapInterpreter {
         }
     }
 
-    fn terminator(&mut self, term: &Terminator) {
+    unsafe fn terminator(&mut self, term: &Terminator) {
         match term {
             Terminator::Call {
                 operand: op,
@@ -333,7 +335,7 @@ impl StopgapInterpreter {
                     // Write the return value to the destination in the previous frame.
                     let dst_ptr = curframe.mem.iplace_to_ptr(&dest);
                     let size = usize::try_from(SIR.ty(&dest.ty()).size()).unwrap();
-                    unsafe { std::ptr::copy(ret_ptr, dst_ptr, size); }
+                    std::ptr::copy(ret_ptr, dst_ptr, size);
                     curframe.bbidx = bbidx;
                 }
             }
@@ -401,9 +403,9 @@ impl StopgapInterpreter {
         }
     }
 
-    /// Store the IRPlace src in the IRPlace dest in the current frame.
-    fn store(&mut self, dest: &IRPlace, src: &IRPlace) {
-        self.frames.last_mut().unwrap().mem.store(dest, src);
+    /// Store the IRPlace src in the IRPlace dst in the current frame.
+    unsafe fn store(&mut self, dst: &IRPlace, src: &IRPlace) {
+        self.frames.last_mut().unwrap().mem.store(dst, src);
     }
 
     /// Creates a reference to an IRPlace, e.g. `dst = &src`.
