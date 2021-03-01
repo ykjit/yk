@@ -195,6 +195,7 @@ impl MTThread {
                     unsafe {
                         let mut si = StopgapInterpreter(ptr);
                         si.interpret();
+                        return;
                     }
                 }
             }
@@ -912,8 +913,8 @@ mod tests {
             match ctx.prog[ctx.pc] {
                 INC => {
                     ctx.pc += 1;
-                    if ctx.run == 0 {
-                        ctx.run = 99;
+                    if ctx.run > 0 {
+                        ctx.run += 1;
                     }
                 }
                 RESTART => ctx.pc = 0,
@@ -924,7 +925,7 @@ mod tests {
         let mut ctx = InterpCtx {
             prog,
             pc: 0,
-            run: 1,
+            run: 0,
         };
 
         // Run until a trace has been compiled.
@@ -940,12 +941,12 @@ mod tests {
         }
 
         assert_eq!(ctx.pc, 0);
-        assert_eq!(ctx.run, 1);
+        assert_eq!(ctx.run, 0);
 
         // Now fail a guard.
-        ctx.run = 0;
+        ctx.run = 1;
         let loc = locs[ctx.pc].as_ref();
         mtt.control_point(loc, simple_interp_step, &mut ctx);
-        assert_eq!(ctx.run, 99);
+        assert_eq!(ctx.run, 2);
     }
 }
