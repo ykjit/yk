@@ -52,7 +52,7 @@ impl LocalMem {
     }
 
     /// Write a constant to the pointer `dst`.
-    pub fn write_const(&mut self, dest: *mut u8, constant: &Constant) {
+    fn write_const(&mut self, dst: *mut u8, constant: &Constant) {
         match constant {
             Constant::Int(ci) => match ci {
                 ConstantInt::UnsignedInt(ui) => match ui {
@@ -95,7 +95,7 @@ impl LocalMem {
     }
 
     /// Copy over the call arguments from another frame.
-    pub fn copy_args(&mut self, args: &[IRPlace], frame: &LocalMem) {
+    fn copy_args(&mut self, args: &[IRPlace], frame: &LocalMem) {
         for (i, arg) in args.iter().enumerate() {
             let dst = self.local_ptr(&Local(u32::try_from(i + 1).unwrap()));
             match arg {
