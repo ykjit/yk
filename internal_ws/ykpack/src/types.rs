@@ -227,7 +227,7 @@ pub struct TupleTy {
 
 impl TupleTy {
     pub fn is_unit(&self) -> bool {
-        self.fields.offsets.len() == 0
+        self.fields.offsets.is_empty()
     }
 }
 

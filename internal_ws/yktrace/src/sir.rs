@@ -7,6 +7,7 @@ use object::{Object, ObjectSection};
 use std::{
     convert::TryFrom,
     env,
+    error::Error,
     fmt::{self, Debug, Display, Write},
     fs::File,
     io::{Cursor, Seek, SeekFrom},
@@ -47,7 +48,7 @@ pub struct Sir<'m> {
 }
 
 impl<'m> Sir<'m> {
-    pub fn new(mmap: &'m Mmap) -> Result<Self, ()> {
+    pub fn new(mmap: &'m Mmap) -> Result<Self, Box<dyn Error>> {
         // SAFETY: Not really, we hope that nobody changes the file underneath our feet.
         let mut hdrs = FxHashMap::default();
         let mut sec_cache = FxHashMap::default();

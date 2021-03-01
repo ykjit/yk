@@ -287,7 +287,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                                         &Local(u32::try_from(arg_idx).unwrap() + 1),
                                         &body
                                     );
-                                    live_locals.last_mut().unwrap().insert(dest_local.clone());
+                                    live_locals.last_mut().unwrap().insert(dest_local);
                                     let dest_ip = IRPlace::Val {
                                         local: dest_local,
                                         off: 0,
@@ -373,7 +373,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                             debug_assert!(next_blk == otherwise_bb);
                             Some(Guard {
                                 val: rnm.rename_iplace(discr, &body),
-                                kind: GuardKind::OtherInteger(values.iter().cloned().collect()),
+                                kind: GuardKind::OtherInteger(values.to_vec()),
                                 block: Vec::new(),
                                 live_locals: Vec::new()
                             })
@@ -435,6 +435,10 @@ impl<'a, 'm> TirTrace<'a, 'm> {
     pub unsafe fn op(&self, idx: usize) -> &TirOp {
         debug_assert!(idx < self.ops.len(), "bogus trace index");
         &self.ops.get_unchecked(idx)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// Return the length of the trace measure in operations.
@@ -530,7 +534,7 @@ impl VarRenamer {
             renamed,
             body.local_decls[usize::try_from(local.0).unwrap()].clone()
         );
-        self.sir_map.insert(renamed, local.clone());
+        self.sir_map.insert(renamed, *local);
         renamed
     }
 }

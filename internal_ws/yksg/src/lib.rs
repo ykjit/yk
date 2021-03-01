@@ -95,7 +95,7 @@ impl LocalMem {
     }
 
     /// Copy over the call arguments from another frame.
-    pub fn copy_args(&mut self, args: &Vec<IRPlace>, frame: &LocalMem) {
+    pub fn copy_args(&mut self, args: &[IRPlace], frame: &LocalMem) {
         for (i, arg) in args.iter().enumerate() {
             let dst = self.local_ptr(&Local(u32::try_from(i + 1).unwrap()));
             match arg {
@@ -133,16 +133,13 @@ impl LocalMem {
             IRPlace::Indirect { ptr, off, ty: _ty } => {
                 // Get a pointer to the Indirect, which itself points to another pointer.
                 let dest_ptr = self.local_ptr(&ptr.local) as *mut *mut u8;
-                let ptr = unsafe {
+                unsafe {
                     // Dereference the pointer, by reading its value.
                     let mut p = std::ptr::read::<*mut u8>(dest_ptr);
                     // Add the offsets of the Indirect.
                     p = p.offset(isize::try_from(ptr.off).unwrap());
-                    p = p.offset(isize::try_from(*off).unwrap());
-                    p
-                };
-                // Now return the value as a pointer.
-                ptr
+                    p.offset(isize::try_from(*off).unwrap())
+                }
             }
             _ => unreachable!(),
         }
@@ -248,7 +245,7 @@ impl StopgapInterpreter {
 
     /// Given the symbol name of a function, generate a `StackFrame` which allocates the precise
     /// amount of memory required by the locals used in that function.
-    fn create_frame(sym: &String) -> StackFrame {
+    fn create_frame(sym: &str) -> StackFrame {
         let body = SIR.body(&sym).unwrap();
         let (size, align) = body.layout;
         let offsets = body.offsets.clone();
@@ -380,11 +377,7 @@ impl StopgapInterpreter {
                 expected,
                 target_bb,
             } => {
-                let b = if self.read_int(cond) == 1 {
-                    true
-                } else {
-                    false
-                };
+                let b = self.read_int(cond) == 1;
                 if b != *expected {
                     todo!() // FIXME raise error
                 }
@@ -395,21 +388,18 @@ impl StopgapInterpreter {
     }
 
     fn read_int(&self, src: &IRPlace) -> u128 {
-        match src {
-            IRPlace::Const { val, ty: _ty } => {
-                let val = match val {
-                    Constant::Int(ci) => match ci {
-                        ConstantInt::UnsignedInt(ui) => match ui {
-                            UnsignedInt::U8(v) => u128::try_from(*v).unwrap(),
-                            _ => todo!(),
-                        },
-                        ConstantInt::SignedInt(_si) => todo!(),
+        if let IRPlace::Const { val, ty: _ty } = src {
+            let val = match val {
+                Constant::Int(ci) => match ci {
+                    ConstantInt::UnsignedInt(ui) => match ui {
+                        UnsignedInt::U8(v) => u128::try_from(*v).unwrap(),
+                        _ => todo!(),
                     },
-                    _ => todo!(),
-                };
-                return val;
-            }
-            _ => {}
+                    ConstantInt::SignedInt(_si) => todo!(),
+                },
+                _ => todo!(),
+            };
+            return val;
         }
         let ptr = self.locals().iplace_to_ptr(src);
         match &SIR.ty(&src.ty()).kind {
