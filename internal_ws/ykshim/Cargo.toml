@@ -14,3 +14,6 @@ yksg = { path = "../yksg" }
 ykcompile = { path = "../ykcompile" }
 ykpack = { path = "../ykpack" }
 yktrace = { path = "../yktrace" }
+
+[features]
+testing = ["yksg/testing"]

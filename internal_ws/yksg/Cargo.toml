@@ -8,3 +8,6 @@ edition = "2018"
 libc = "0.2.82"
 yktrace = { path = "../yktrace" }
 ykpack = { path = "../ykpack" }
+
+[features]
+testing = []

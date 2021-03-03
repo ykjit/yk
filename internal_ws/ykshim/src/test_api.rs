@@ -1,6 +1,7 @@
 //! The ykshim testing API.
 //!
 //! These functions are only exposed to allow testing from the external workspace.
+#![cfg(feature = "testing")]
 
 use libc::size_t;
 use std::convert::TryFrom;
@@ -113,6 +114,7 @@ unsafe extern "C" fn __ykshimtest_find_symbol(sym: *const c_char) -> *mut c_void
 
 /// Interpret a SIR body with the specified interpreter context.
 #[no_mangle]
+#[cfg(feature = "testing")]
 unsafe extern "C" fn __ykshimtest_interpret_body(body_name: *const c_char, ctx: *mut u8) {
     let fname = CStr::from_ptr(body_name).to_str().unwrap().to_string();
     let mut si = StopgapInterpreter::from_symbol(fname);

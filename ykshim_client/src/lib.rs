@@ -16,7 +16,9 @@ use std::marker::PhantomData;
 use std::os::raw::c_char;
 use std::{mem, ptr};
 
+#[cfg(feature = "testing")]
 mod test_api;
+#[cfg(feature = "testing")]
 pub use test_api::*;
 
 pub(crate) type RawCompiledTrace = c_void;
