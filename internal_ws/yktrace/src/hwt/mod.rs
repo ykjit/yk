@@ -10,7 +10,7 @@ use mapper::HWTMapper;
 /// Hardware thread tracer.
 struct HWTThreadTracer {
     active: bool,
-    ttracer: Box<dyn hwtracer::ThreadTracer>
+    ttracer: Box<dyn hwtracer::ThreadTracer>,
 }
 
 impl ThreadTracerImpl for HWTThreadTracer {
@@ -39,7 +39,7 @@ pub(crate) fn start_tracing() -> ThreadTracer {
     ThreadTracer {
         t_impl: Box::new(HWTThreadTracer {
             active: true,
-            ttracer
-        })
+            ttracer,
+        }),
     }
 }

@@ -39,7 +39,7 @@ pub(crate) fn start_tracing() -> ThreadTracer {
     }
 
     ThreadTracer {
-        t_impl: Box::new(SWTThreadTracer {})
+        t_impl: Box::new(SWTThreadTracer {}),
     }
 }
 
@@ -48,7 +48,7 @@ pub(crate) fn start_tracing() -> ThreadTracer {
 #[derive(Copy, Clone)]
 struct SwtLoc {
     symbol_name: *const i8,
-    bb_idx: u32
+    bb_idx: u32,
 }
 
 thread_local! {
@@ -122,7 +122,7 @@ unsafe extern "C" fn __yk_swt_rec_loc_impl(symbol_name: *const i8, bb_idx: u32) 
     TRACE_BUF.with(|trace_buf| {
         trace_buf.push(SwtLoc {
             symbol_name,
-            bb_idx
+            bb_idx,
         });
     });
 }
@@ -164,7 +164,7 @@ mod trace_buffer {
                     SirLoc {
                         symbol_name: symbol_name.to_str().unwrap(),
                         bb_idx: swt_loc.bb_idx,
-                        addr: None
+                        addr: None,
                     }
                 })
                 .collect()

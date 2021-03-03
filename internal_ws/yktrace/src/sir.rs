@@ -12,7 +12,7 @@ use std::{
     fs::File,
     io::{Cursor, Seek, SeekFrom},
     iter::Iterator,
-    sync::{Arc, RwLock}
+    sync::{Arc, RwLock},
 };
 use ykpack::{self, Body, BodyFlags, CguHash, Decoder, Local, Pack, SirHeader, SirOffset, Ty};
 
@@ -44,7 +44,7 @@ pub struct Sir<'m> {
     /// Body cache, to avoid repeated decodings.
     body_cache: RwLock<FxHashMap<String, Option<Arc<Body>>>>,
     /// Type cache, to avoid repeated decodings.
-    ty_cache: RwLock<FxHashMap<ykpack::TypeId, Arc<Ty>>>
+    ty_cache: RwLock<FxHashMap<ykpack::TypeId, Arc<Ty>>>,
 }
 
 impl<'m> Sir<'m> {
@@ -74,7 +74,7 @@ impl<'m> Sir<'m> {
             exe_obj,
             sec_cache,
             body_cache: Default::default(),
-            ty_cache: Default::default()
+            ty_cache: Default::default(),
         })
     }
 
@@ -200,7 +200,7 @@ pub struct SirLoc {
     pub symbol_name: &'static str,
     pub bb_idx: u32,
     // Virtual address of this location.
-    pub addr: Option<u64>
+    pub addr: Option<u64>,
 }
 
 impl SirLoc {
@@ -208,7 +208,7 @@ impl SirLoc {
         Self {
             symbol_name,
             bb_idx,
-            addr
+            addr,
         }
     }
 }

@@ -25,7 +25,7 @@ lazy_static! {
 }
 
 pub struct HWTMapper {
-    phdr_offset: u64
+    phdr_offset: u64,
 }
 
 impl HWTMapper {
