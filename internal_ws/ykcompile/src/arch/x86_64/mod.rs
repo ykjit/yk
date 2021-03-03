@@ -123,45 +123,125 @@ macro_rules! binop_add_sub {
 /// Generates functions for mul/div-style operations.
 /// The first operand must be in a register.
 macro_rules! binop_mul_div {
+    // The addressing modes and semantics of x86_64 MUL and DIV are as follows:
+    //
+    //   Encoding       Semantics
+    //   --------------------------------------------------------------------
+    //   MUL r/m8:      AX * r/m8          AX <- result
+    //   MUL r/m16:     AX * r/m16         DX:AX <- result
+    //   MUL r/m32:     EAX * r/m32        EDX:EAX <- result
+    //   MUL r/m64:     RAX * r/m64        RDX:RAX <- result
+    //
+    //   DIV r/m8:      AX / r/m8          AL <- quotient,  AH <- remainder
+    //   DIV r/m16:     DX:AX / r/m16      AX <- quotient,  DX <- remainder
+    //   DIV r/m32:     EDX:EAX * r/m32    EAX <- quotient, EDX <- remainder
+    //   DIV r/m64:     RDX:RAX * r/m64    RAX <- quotient, RDX <- remainder
+    //
+    // A couple of thing to note:
+    //   - Both MUL and DIV's first (implicit) operand is twice as large as the second (explicit)
+    //     operand. For all but r/m8 variants, the operand extends into RDX.
+    //   - Similarly, the result of both MUL and DIV is twice as large as the second operand.
+    //
+    // SIR only deals with same-sized operands and doesn't require us to capture the remainder for
+    // division, so we don't use this extended operand/result space. This makes MUL and DIV very
+    // similar from our point of view, hence this macro is used to generate both implementations.
+    //
+    // We are however, required to zero the unused extended operand space to get the correct
+    // result, and we must be careful to save and restore anything that would be clobbered.
+    // Specifically:
+    //   - RAX is always clobbered, so we must always save and restore it.
+    //   - For all but the r/m8 variations, RDX is clobbered. So if the size of our SIR operands is
+    //     >1 byte, then we must also save and restore RDX.
+    //   - If our register allocator has put the second SIR operand in a register that will be
+    //     clobbered, then we cannot use this register as the r/m operand. In this case we borrow
+    //     RCX temporarily.
     ($name: ident, $op:expr) => {
         fn $name(&mut self, opnd1_reg: u8, opnd2: &IRPlace) {
-            // mul and div overwrite RAX, RDX, so save them first.
+            let size = SIR.ty(&opnd2.ty()).size();
+            // For all but r/m8 variants, RDX is clobbered.
+            if size > 1 {
+                dynasm!(self.asm
+                    ; push rdx
+                );
+            }
+            // RAX is always clobbered.
             dynasm!(self.asm
                 ; push rax
-                ; push rdx
-                ; xor rdx, rdx
             );
+            // Set up first operand.
             dynasm!(self.asm
                 ; mov rax, Rq(opnd1_reg)
             );
-            let size = SIR.ty(&opnd2.ty()).size();
+            // Set up second operand.
             let src_loc = self.iplace_to_location(opnd2);
             match src_loc {
-                Location::Reg(r) => match size {
-                    1 => {
+                Location::Reg(src_r) => {
+                    // Handle cases where our input operands clash with a clobbered register.
+                    let (r, borrow_rcx) = if src_r == RAX.code() {
+                        // RAX has already been clobbered. Take a copy from the stack.
+                        let rax_off = i32::try_from(QWORD_REG_SIZE).unwrap();
                         dynasm!(self.asm
-                            ; $op Rb(r)
+                            ; push rcx
+                            ; mov rcx, [rsp + rax_off]
+                        );
+                        (RCX.code(), true)
+                    } else if size > 1 && src_r == RDX.code() {
+                        // RDX hasn't been clobbered yet, but it will be.
+                        dynasm!(self.asm
+                            ; push rcx
+                            ; mov rcx, rdx
+                        );
+                        (RCX.code(), true)
+                    } else {
+                        (src_r, false)
+                    };
+                    // Set unused extended operand space to zero.
+                    if size == 1 {
+                        dynasm!(self.asm
+                            ; and ax, 0xff
+                        );
+                    } else {
+                        dynasm!(self.asm
+                            ; xor rdx, rdx
                         );
                     }
-                    2 => {
+                    match size {
+                        1 => {
+                            dynasm!(self.asm
+                                ; $op Rb(r)
+                            );
+                        }
+                        2 => {
+                            dynasm!(self.asm
+                                ; $op Rw(r)
+                            );
+                        }
+                        4 => {
+                            dynasm!(self.asm
+                                ; $op Rd(r)
+                            );
+                        }
+                        8 => {
+                            dynasm!(self.asm
+                                ; $op Rq(r)
+                            );
+                        }
+                        _ => unreachable!(format!("{}", SIR.ty(&opnd2.ty()))),
+                    }
+                    // If we borrowed RCX, then restore it.
+                    if borrow_rcx {
                         dynasm!(self.asm
-                            ; $op Rw(r)
+                            ; pop rcx
                         );
                     }
-                    4 => {
-                        dynasm!(self.asm
-                            ; $op Rd(r)
-                        );
-                    }
-                    8 => {
-                        dynasm!(self.asm
-                            ; $op Rq(r)
-                        );
-                    }
-                    _ => unreachable!(format!("{}", SIR.ty(&opnd2.ty()))),
                 },
                 Location::Mem(..) => todo!(),
                 Location::Const { val, .. } => {
+                    if size > 1 {
+                        dynasm!(self.asm
+                            ; xor rdx, rdx
+                        );
+                    }
                     // It's safe to use TEMP_REG here, because opnd2 isn't in a register and if
                     // opnd1_reg was TEMP_REG then we've already moved it into RAX.
                     let val = val.i64_cast();
@@ -200,13 +280,16 @@ macro_rules! binop_mul_div {
                 }
                 Location::Indirect { .. } => todo!(),
             }
-
-            // Restore RAX, RDX
+            // Put result in place and restore clobbered registers.
             dynasm!(self.asm
                 ; mov Rq(opnd1_reg), rax
                 ; pop rax
-                ; pop rdx
             );
+            if size > 1 {
+                dynasm!(self.asm
+                    ; pop rdx
+                );
+            }
         }
     }
 }

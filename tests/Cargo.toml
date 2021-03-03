@@ -8,6 +8,7 @@ edition = "2018"
 fm = "0.2.0"
 ykshim_client = { path = "../ykshim_client" }
 libc = "0.2.82"
+paste = "1.0"
 regex = "1.4.3"
 ykrt = { path = "../ykrt" }
 
