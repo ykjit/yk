@@ -100,21 +100,9 @@ impl TraceCompiler {
             },
             (Location::Reg(dst_reg), Location::Const { val: c_val, .. }) => {
                 let i64_c = c_val.i64_cast();
-                if i64_c <= i64::from(u32::MAX) {
-                    dynasm!(self.asm
-                        ; mov Rq(dst_reg), i64_c as i32
-                    );
-                } else {
-                    // Can't move 64-bit constants in x86_64.
-                    let i64_c = c_val.i64_cast();
-                    let hi_word = (i64_c >> 32) as i32;
-                    let lo_word = (i64_c & 0xffffffff) as i32;
-                    dynasm!(self.asm
-                        ; mov Rq(dst_reg), hi_word
-                        ; shl Rq(dst_reg), 32
-                        ; or Rq(dst_reg), lo_word
-                    );
-                }
+                dynasm!(self.asm
+                    ; mov Rq(dst_reg), QWORD i64_c
+                );
             }
             (Location::Mem(ro), Location::Const { val: c_val, ty }) => {
                 let c_i64 = c_val.i64_cast();
