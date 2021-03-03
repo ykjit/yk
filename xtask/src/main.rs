@@ -20,10 +20,10 @@ enum Workspace {
     External,
 }
 
-fn run_action(workspace: Workspace, target: &str, extra_args: &[String]) {
+fn run_action(workspace: Workspace, target: &str, extra_args: &[String], features: &[String]) {
     // The external workspace depends on libykshim.so produced by the internal workspace
     if workspace == Workspace::External {
-        run_action(Workspace::Internal, target, extra_args);
+        run_action(Workspace::Internal, target, extra_args, &[]);
     }
 
     let mut cmd = if ["fmt", "clippy"].contains(&target) {
@@ -97,12 +97,14 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String]) {
                 // generation. We can't use `-C tracer=hw` as this would turn off optimisations
                 // and emit SIR for stuff we will never trace.
                 cmd.arg("--features");
-                cmd.arg(format!("yktrace/trace_{}", tracing_kind));
+                let mut fs = Vec::from(features);
+                fs.push(format!("yktrace/trace_{}", tracing_kind));
+                cmd.arg(fs.join(","));
 
                 // `cargo test` in the internal workspace won't build libykshim.so, so we have
                 // to force-build it to avoid linkage problems for the external workspace.
                 if target == "test" {
-                    run_action(Workspace::Internal, "build", &[]);
+                    run_action(Workspace::Internal, "build", &[], &["testing".to_owned()]);
                 }
             } else if workspace == Workspace::External && target == "clippy" {
                 let tracing_kind = find_tracing_kind(&rust_flags);
@@ -144,5 +146,5 @@ fn main() {
     let target = args.next().unwrap();
     let extra_args = args.collect::<Vec<_>>();
 
-    run_action(Workspace::External, &target, &extra_args);
+    run_action(Workspace::External, &target, &extra_args, &[]);
 }

@@ -13,7 +13,7 @@ use ykpack::{
     self, BinOp, Body, CallOperand, Constant, ConstantInt, IRPlace, Local, Statement, Terminator,
     TyKind, UnsignedInt, UnsignedIntTy,
 };
-use yktrace::sir::{INTERP_STEP_ARG, RETURN_LOCAL, SIR};
+use yktrace::sir::{RETURN_LOCAL, SIR};
 
 /// Stores information needed to recreate stack frames in the StopgapInterpreter.
 pub struct FrameInfo {
@@ -262,9 +262,15 @@ impl StopgapInterpreter {
     }
 
     /// Inserts a pointer to the interpreter context into the `interp_step` frame.
+    #[cfg(feature = "testing")]
     pub unsafe fn set_interp_ctx(&mut self, ctx: *mut u8) {
         // The interpreter context lives in $1
-        let ptr = self.frames.first().unwrap().mem.local_ptr(&INTERP_STEP_ARG);
+        let ptr = self
+            .frames
+            .first()
+            .unwrap()
+            .mem
+            .local_ptr(&yktrace::sir::INTERP_STEP_ARG);
         std::ptr::write::<*mut u8>(ptr as *mut *mut u8, ctx);
     }
 

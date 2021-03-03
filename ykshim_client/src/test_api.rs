@@ -1,4 +1,5 @@
 //! The testing API client to ykshim.
+#![cfg(feature = "testing")]
 
 use crate::{CompiledTrace, Local, RawCompiledTrace, RawSirTrace, RawTirTrace, SirTrace, TyIndex};
 use libc::size_t;

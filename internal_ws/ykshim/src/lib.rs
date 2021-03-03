@@ -3,6 +3,7 @@
 //! For more information, see this section in the documentation:
 //! https://softdevteam.github.io/ykdocs/tech/yk_structure.html
 
+#[cfg(feature = "testing")]
 mod test_api;
 
 use std::ffi::{c_void, CString};
