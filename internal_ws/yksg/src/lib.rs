@@ -5,6 +5,8 @@
 //! point the normal interpreter can continue.
 //!
 //! In other systems, this process is sometimes called "blackholing".
+//!
+//! Tests for this module are in ../tests/src/stopgap/.
 
 use std::alloc::{alloc, dealloc, Layout};
 use std::convert::TryFrom;
