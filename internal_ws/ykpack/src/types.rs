@@ -461,9 +461,9 @@ pub enum Statement {
     Nop,
     /// Stores the content addressed by the right hand side into the left hand side.
     Store(IRPlace, IRPlace),
-    /// Binary operations. FIXME dest should be a local?
+    /// Binary operations. FIXME dst should be a local?
     BinaryOp {
-        dest: IRPlace,
+        dst: IRPlace,
         op: BinOp,
         opnd1: IRPlace,
         opnd2: IRPlace,
@@ -474,7 +474,7 @@ pub enum Statement {
     /// Computes a pointer address at runtime.
     DynOffs {
         /// Where to store the result.
-        dest: IRPlace,
+        dst: IRPlace,
         /// The base address. `idx` * `scale` are added to this at runtime to give the result.
         base: IRPlace,
         /// The index to multiply with `scale`.
@@ -505,37 +505,37 @@ impl Display for Statement {
             Statement::Nop => write!(f, "nop"),
             Statement::MkRef(l, r) => write!(f, "{} = &({})", l, r),
             Statement::DynOffs {
-                dest,
+                dst,
                 base,
                 idx,
                 scale,
                 ..
-            } => write!(f, "{} = dynoffs({}, {}, {})", dest, base, idx, scale),
+            } => write!(f, "{} = dynoffs({}, {}, {})", dst, base, idx, scale),
             Statement::Store(l, r) => write!(f, "{} = {}", l, r),
             Statement::BinaryOp {
-                dest,
+                dst,
                 op,
                 opnd1,
                 opnd2,
                 checked,
             } => {
                 let c = if *checked { " (checked)" } else { "" };
-                write!(f, "{} = {} {} {}{}", dest, opnd1, op, opnd2, c)
+                write!(f, "{} = {} {} {}{}", dst, opnd1, op, opnd2, c)
             }
             Statement::StorageLive(local) => write!(f, "live({})", local),
             Statement::StorageDead(local) => write!(f, "dead({})", local),
-            Statement::Call(op, args, dest) => {
+            Statement::Call(op, args, dst) => {
                 let args_s = args
                     .iter()
                     .map(|a| format!("{}", a))
                     .collect::<Vec<String>>()
                     .join(", ");
-                let dest_s = if let Some(dest) = dest {
-                    format!("{}", dest)
+                let dst_s = if let Some(dst) = dst {
+                    format!("{}", dst)
                 } else {
                     String::from("none")
                 };
-                write!(f, "{} = call({}, [{}])", dest_s, op, args_s)
+                write!(f, "{} = call({}, [{}])", dst_s, op, args_s)
             }
             Statement::Cast(d, s) => write!(f, "Cast({}, {})", d, s),
             Statement::Debug(s) => write!(f, "// {}", s),

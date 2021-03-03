@@ -138,33 +138,33 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                 // all variables in `bar` are offset by 5.
                 for stmt in body.blocks[user_bb_idx_usize].stmts.iter() {
                     let op = match stmt {
-                        Statement::MkRef(dest, src) => Statement::MkRef(
-                            rnm.rename_iplace(dest, &body),
+                        Statement::MkRef(dst, src) => Statement::MkRef(
+                            rnm.rename_iplace(dst, &body),
                             rnm.rename_iplace(src, &body),
                         ),
                         Statement::DynOffs {
-                            dest,
+                            dst,
                             base,
                             idx,
                             scale,
                         } => Statement::DynOffs {
-                            dest: rnm.rename_iplace(dest, &body),
+                            dst: rnm.rename_iplace(dst, &body),
                             base: rnm.rename_iplace(base, &body),
                             idx: rnm.rename_iplace(idx, &body),
                             scale: *scale,
                         },
-                        Statement::Store(dest, src) => Statement::Store(
-                            rnm.rename_iplace(dest, &body),
+                        Statement::Store(dst, src) => Statement::Store(
+                            rnm.rename_iplace(dst, &body),
                             rnm.rename_iplace(src, &body),
                         ),
                         Statement::BinaryOp {
-                            dest,
+                            dst,
                             op,
                             opnd1,
                             opnd2,
                             checked,
                         } => Statement::BinaryOp {
-                            dest: rnm.rename_iplace(dest, &body),
+                            dst: rnm.rename_iplace(dst, &body),
                             op: *op,
                             opnd1: rnm.rename_iplace(opnd1, &body),
                             opnd2: rnm.rename_iplace(opnd2, &body),
@@ -172,8 +172,8 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                         },
                         Statement::Nop => stmt.clone(),
                         Statement::Unimplemented(_) | Statement::Debug(_) => stmt.clone(),
-                        Statement::Cast(dest, src) => Statement::Cast(
-                            rnm.rename_iplace(dest, &body),
+                        Statement::Cast(dst, src) => Statement::Cast(
+                            rnm.rename_iplace(dst, &body),
                             rnm.rename_iplace(src, &body),
                         ),
                         Statement::StorageLive(local) => {
@@ -244,7 +244,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                 Terminator::Call {
                     operand: op,
                     args,
-                    destination: dest,
+                    destination: dst,
                 } => {
                     // Rename the return value.
                     //
@@ -252,7 +252,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     // `Option`. If this is not always the case, we may want to add the `Local`
                     // offset (`var_len`) to this statement so we can assign the arguments to the
                     // correct `Local`s during trace compilation.
-                    let ret_val = dest
+                    let ret_val = dst
                         .as_ref()
                         .map(|(ret_val, _)| rnm.rename_iplace(&ret_val, &body))
                         .unwrap();
@@ -283,17 +283,17 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                                 // Copy args in.
                                 live_locals.push(HashSet::new());
                                 for (arg_idx, arg) in newargs.iter().enumerate() {
-                                    let dest_local = rnm.rename_local(
+                                    let dst_local = rnm.rename_local(
                                         &Local(u32::try_from(arg_idx).unwrap() + 1),
                                         &body,
                                     );
-                                    live_locals.last_mut().unwrap().insert(dest_local);
-                                    let dest_ip = IRPlace::Val {
-                                        local: dest_local,
+                                    live_locals.last_mut().unwrap().insert(dst_local);
+                                    let dst_ip = IRPlace::Val {
+                                        local: dst_local,
                                         off: 0,
                                         ty: arg.ty(),
                                     };
-                                    term_stmts.push(Statement::Store(dest_ip, arg.clone()));
+                                    term_stmts.push(Statement::Store(dst_ip, arg.clone()));
                                 }
                             }
                         } else {
@@ -321,19 +321,19 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     // statements for call arguments. Which mappings we need to remove depends on
                     // the number of arguments the function call had, which we keep track of in
                     // `cur_call_args`.
-                    let dest_ip = return_iplaces.pop().unwrap();
+                    let dst_ip = return_iplaces.pop().unwrap();
                     let src_ip = rnm.rename_iplace(
                         &IRPlace::Val {
                             local: sir::RETURN_LOCAL,
                             off: 0,
-                            ty: dest_ip.ty(),
+                            ty: dst_ip.ty(),
                         },
                         &body,
                     );
                     rnm.leave();
 
                     // Copy out the return value into the caller.
-                    term_stmts.push(Statement::Store(dest_ip, src_ip));
+                    term_stmts.push(Statement::Store(dst_ip, src_ip));
                 }
                 _ => (),
             }

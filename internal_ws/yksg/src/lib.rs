@@ -111,15 +111,15 @@ impl LocalMem {
                 ty: _ty,
             } => {
                 // Get a pointer to the Val.
-                let dest_ptr = self.local_ptr(&local);
-                unsafe { dest_ptr.add(usize::try_from(*off).unwrap()) }
+                let dst_ptr = self.local_ptr(&local);
+                unsafe { dst_ptr.add(usize::try_from(*off).unwrap()) }
             }
             IRPlace::Indirect { ptr, off, ty: _ty } => {
                 // Get a pointer to the Indirect, which itself points to another pointer.
-                let dest_ptr = self.local_ptr(&ptr.local) as *mut *mut u8;
+                let dst_ptr = self.local_ptr(&ptr.local) as *mut *mut u8;
                 unsafe {
                     // Dereference the pointer, by reading its value.
-                    let mut p = std::ptr::read::<*mut u8>(dest_ptr);
+                    let mut p = std::ptr::read::<*mut u8>(dst_ptr);
                     // Add the offsets of the Indirect.
                     p = p.offset(isize::try_from(ptr.off).unwrap());
                     p.offset(isize::try_from(*off).unwrap())
@@ -135,7 +135,7 @@ macro_rules! make_binop {
     ($name: ident, $type: ident) => {
         fn $name(
             &mut self,
-            dest: &IRPlace,
+            dst: &IRPlace,
             op: &BinOp,
             opnd1: &IRPlace,
             opnd2: &IRPlace,
@@ -144,7 +144,7 @@ macro_rules! make_binop {
             let a = $type::try_from(self.read_int(opnd1)).unwrap();
             let b = $type::try_from(self.read_int(opnd2)).unwrap();
             let locals = self.locals_mut();
-            let ptr = locals.iplace_to_ptr(dest);
+            let ptr = locals.iplace_to_ptr(dst);
             let (v, of) = match op {
                 BinOp::Add => a.overflowing_add(b),
                 BinOp::Lt => ($type::from(a < b), false),
@@ -152,7 +152,7 @@ macro_rules! make_binop {
             };
             if checked {
                 // Write overflow result into result tuple.
-                let ty = SIR.ty(&dest.ty());
+                let ty = SIR.ty(&dst.ty());
                 let tty = ty.unwrap_tuple();
                 let flag_off = isize::try_from(tty.fields.offsets[1]).unwrap();
                 unsafe {
@@ -274,16 +274,16 @@ impl StopgapInterpreter {
             let block = &body.blocks[usize::try_from(frame.bbidx).unwrap()];
             for stmt in block.stmts.iter() {
                 match stmt {
-                    Statement::MkRef(dest, src) => self.mkref(&dest, &src),
+                    Statement::MkRef(dst, src) => self.mkref(&dst, &src),
                     Statement::DynOffs { .. } => todo!(),
-                    Statement::Store(dest, src) => self.store(&dest, &src),
+                    Statement::Store(dst, src) => self.store(&dst, &src),
                     Statement::BinaryOp {
-                        dest,
+                        dst,
                         op,
                         opnd1,
                         opnd2,
                         checked,
-                    } => self.binop(dest, op, opnd1, opnd2, *checked),
+                    } => self.binop(dst, op, opnd1, opnd2, *checked),
                     Statement::Nop => {}
                     Statement::Unimplemented(_) | Statement::Debug(_) => todo!(),
                     Statement::Cast(..) => todo!(),
@@ -300,7 +300,7 @@ impl StopgapInterpreter {
             Terminator::Call {
                 operand: op,
                 args,
-                destination: _dest,
+                destination: _dst,
             } => {
                 let fname = if let CallOperand::Fn(sym) = op {
                     sym
@@ -322,19 +322,19 @@ impl StopgapInterpreter {
                     let body = &curframe.body;
                     // Check the previous frame's call terminator to find out where we have to go
                     // next.
-                    let (dest, bbidx) = match &body.blocks[bbidx].term {
+                    let (dst, bbidx) = match &body.blocks[bbidx].term {
                         Terminator::Call {
                             operand: _,
                             args: _,
-                            destination: dest,
-                        } => dest.as_ref().map(|(p, b)| (p.clone(), *b)).unwrap(),
+                            destination: dst,
+                        } => dst.as_ref().map(|(p, b)| (p.clone(), *b)).unwrap(),
                         _ => unreachable!(),
                     };
                     // Get a pointer to the return value of the called frame.
                     let ret_ptr = oldframe.mem.local_ptr(&RETURN_LOCAL);
                     // Write the return value to the destination in the previous frame.
-                    let dst_ptr = curframe.mem.iplace_to_ptr(&dest);
-                    let size = usize::try_from(SIR.ty(&dest.ty()).size()).unwrap();
+                    let dst_ptr = curframe.mem.iplace_to_ptr(&dst);
+                    let size = usize::try_from(SIR.ty(&dst.ty()).size()).unwrap();
                     std::ptr::copy(ret_ptr, dst_ptr, size);
                     curframe.bbidx = bbidx;
                 }
@@ -409,13 +409,13 @@ impl StopgapInterpreter {
     }
 
     /// Creates a reference to an IRPlace, e.g. `dst = &src`.
-    fn mkref(&mut self, dest: &IRPlace, src: &IRPlace) {
-        match dest {
+    fn mkref(&mut self, dst: &IRPlace, src: &IRPlace) {
+        match dst {
             IRPlace::Val { .. } | IRPlace::Indirect { .. } => {
                 // Get pointer to src.
                 let mem = &self.frames.last_mut().unwrap().mem;
                 let src_ptr = mem.iplace_to_ptr(src);
-                let dst_ptr = mem.iplace_to_ptr(dest);
+                let dst_ptr = mem.iplace_to_ptr(dst);
                 unsafe {
                     std::ptr::write::<*mut u8>(dst_ptr as *mut *mut u8, src_ptr);
                 }
@@ -428,7 +428,7 @@ impl StopgapInterpreter {
 
     fn binop(
         &mut self,
-        dest: &IRPlace,
+        dst: &IRPlace,
         op: &ykpack::BinOp,
         opnd1: &IRPlace,
         opnd2: &IRPlace,
@@ -441,7 +441,7 @@ impl StopgapInterpreter {
 
         match &ty.kind {
             TyKind::UnsignedInt(ui) => match ui {
-                UnsignedIntTy::U8 => self.binop_u8(dest, op, opnd1, opnd2, checked),
+                UnsignedIntTy::U8 => self.binop_u8(dst, op, opnd1, opnd2, checked),
                 UnsignedIntTy::U16 => todo!(),
                 UnsignedIntTy::U32 => todo!(),
                 UnsignedIntTy::U64 => todo!(),

@@ -524,7 +524,7 @@ impl TraceCompiler {
     }
 
     /// Copy bytes from one memory location to another.
-    fn copy_memory(&mut self, dest: &RegAndOffset, src: &RegAndOffset, size: u64) {
+    fn copy_memory(&mut self, dst: &RegAndOffset, src: &RegAndOffset, size: u64) {
         // We use memmove(3), as it's not clear if MIR (and therefore SIR) could cause copies
         // involving overlapping buffers. See https://github.com/rust-lang/rust/issues/68364.
         let sym = find_symbol("memmove").unwrap();
@@ -535,7 +535,7 @@ impl TraceCompiler {
         );
 
         dynasm!(self.asm
-            ; lea rdi, [Rq(dest.reg) + dest.off]
+            ; lea rdi, [Rq(dst.reg) + dst.off]
         );
         if src.reg == RDI.code() {
             // If the second argument lived in RDI then we've just overwritten it, so we load it
@@ -601,7 +601,7 @@ impl TraceCompiler {
         &mut self,
         opnd: &CallOperand,
         args: &[IRPlace],
-        dest: &Option<IRPlace>,
+        dst: &Option<IRPlace>,
     ) -> Result<(), CompileError> {
         let sym = if let CallOperand::Fn(sym) = opnd {
             sym
@@ -618,12 +618,12 @@ impl TraceCompiler {
         // clobbered.
         // OPTIMISE: Only save registers in use by the register allocator.
         let mut save_regs = CALLER_SAVED_REGS.iter().cloned().collect::<Vec<u8>>();
-        if let Some(d) = dest {
-            let dest_loc = self.iplace_to_location(d);
-            if let Location::Reg(dest_reg) = dest_loc {
+        if let Some(d) = dst {
+            let dst_loc = self.iplace_to_location(d);
+            if let Location::Reg(dst_reg) = dst_loc {
                 // If the result of the call is destined for one of the caller-save registers, then
                 // there's no point in saving the register.
-                save_regs.retain(|r| *r != dest_reg);
+                save_regs.retain(|r| *r != dst_reg);
             }
         }
         self.save_regs(&*save_regs);
@@ -703,9 +703,9 @@ impl TraceCompiler {
         // Restore caller-save registers.
         self.restore_regs(&save_regs);
 
-        if let Some(d) = dest {
-            let dest_loc = self.iplace_to_location(d);
-            self.store_raw(&dest_loc, &Location::Reg(*TEMP_REG), SIR.ty(&d.ty()).size());
+        if let Some(d) = dst {
+            let dst_loc = self.iplace_to_location(d);
+            self.store_raw(&dst_loc, &Location::Reg(*TEMP_REG), SIR.ty(&d.ty()).size());
         }
 
         Ok(())
@@ -713,15 +713,15 @@ impl TraceCompiler {
 
     /// Load an IRPlace into the given register. Panic if it doesn't fit.
     fn load_reg_iplace(&mut self, reg: u8, src_ip: &IRPlace) -> Location {
-        let dest_loc = Location::Reg(reg);
+        let dst_loc = Location::Reg(reg);
         let src_loc = self.iplace_to_location(src_ip);
-        self.store_raw(&dest_loc, &src_loc, SIR.ty(&src_ip.ty()).size());
-        dest_loc
+        self.store_raw(&dst_loc, &src_loc, SIR.ty(&src_ip.ty()).size());
+        dst_loc
     }
 
     fn c_binop(
         &mut self,
-        dest: &IRPlace,
+        dst: &IRPlace,
         op: BinOp,
         opnd1: &IRPlace,
         opnd2: &IRPlace,
@@ -737,7 +737,7 @@ impl TraceCompiler {
 
         match op {
             BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
-                return self.c_condition(dest, &op, opnd1, opnd2);
+                return self.c_condition(dst, &op, opnd1, opnd2);
             }
             _ => {}
         }
@@ -768,13 +768,13 @@ impl TraceCompiler {
         }
 
         // 3) Move the result to where it is supposed to live.
-        let dest_loc = self.iplace_to_location(dest);
+        let dst_loc = self.iplace_to_location(dst);
         let size = opnd1_ty.size();
         if checked {
             // If it is a checked operation, then we have to build a (value, overflow-flag) tuple.
             // Let's do the flag first, so as to read EFLAGS closest to where they are set.
-            let dest_ro = dest_loc.unwrap_mem();
-            let sir_ty = SIR.ty(&dest.ty());
+            let dst_ro = dst_loc.unwrap_mem();
+            let sir_ty = SIR.ty(&dst.ty());
             let tty = sir_ty.unwrap_tuple();
             let flag_off = i32::try_from(tty.fields.offsets[1]).unwrap();
 
@@ -788,14 +788,14 @@ impl TraceCompiler {
                 );
             }
             dynasm!(self.asm
-                ; mov BYTE [Rq(dest_ro.reg) + dest_ro.off + flag_off], 0
+                ; mov BYTE [Rq(dst_ro.reg) + dst_ro.off + flag_off], 0
                 ; jmp >done
                 ; overflow:
-                ; mov BYTE [Rq(dest_ro.reg) + dest_ro.off + flag_off], 1
+                ; mov BYTE [Rq(dst_ro.reg) + dst_ro.off + flag_off], 1
                 ; done:
             );
         }
-        self.store_raw(&dest_loc, &*TEMP_LOC, size);
+        self.store_raw(&dst_loc, &*TEMP_LOC, size);
     }
 
     binop_add_sub!(c_binop_add, add);
@@ -803,7 +803,7 @@ impl TraceCompiler {
     binop_mul_div!(c_binop_mul, mul);
     binop_mul_div!(c_binop_div, div);
 
-    fn c_condition(&mut self, dest: &IRPlace, binop: &BinOp, op1: &IRPlace, op2: &IRPlace) {
+    fn c_condition(&mut self, dst: &IRPlace, binop: &BinOp, op1: &IRPlace, op2: &IRPlace) {
         let src1 = self.iplace_to_location(op1);
         let ty = SIR.ty(&op1.ty());
 
@@ -898,11 +898,11 @@ impl TraceCompiler {
          ; mov Rq(*TEMP_REG), 0
          ; skip:
         );
-        let dest_loc = self.iplace_to_location(dest);
-        self.store_raw(&dest_loc, &*TEMP_LOC, SIR.ty(&dest.ty()).size());
+        let dst_loc = self.iplace_to_location(dst);
+        self.store_raw(&dst_loc, &*TEMP_LOC, SIR.ty(&dst.ty()).size());
     }
 
-    fn c_dynoffs(&mut self, dest: &IRPlace, base: &IRPlace, idx: &IRPlace, scale: u32) {
+    fn c_dynoffs(&mut self, dst: &IRPlace, base: &IRPlace, idx: &IRPlace, scale: u32) {
         // FIXME possible optimisation, use LEA if scale fits in a u8.
 
         // MUL clobbers RDX:RAX, so store/restore those.
@@ -951,34 +951,34 @@ impl TraceCompiler {
         );
 
         // 4) Store the resulting pointer into the destination.
-        // The IR is constructed such that `dest_loc` will be indirect to ensure that subsequent
+        // The IR is constructed such that `dst_loc` will be indirect to ensure that subsequent
         // operations on this locatiion dereference the pointer.
-        let dest_loc = self.iplace_to_location(dest);
-        self.store_raw(&dest_loc, &*TEMP_LOC, *PTR_SIZE);
+        let dst_loc = self.iplace_to_location(dst);
+        self.store_raw(&dst_loc, &*TEMP_LOC, *PTR_SIZE);
     }
 
     /// Compile a TIR statement.
     fn c_statement(&mut self, stmt: &Statement) -> Result<(), CompileError> {
         match stmt {
-            Statement::Store(dest, src) => self.c_istore(dest, src),
+            Statement::Store(dst, src) => self.c_istore(dst, src),
             Statement::BinaryOp {
-                dest,
+                dst,
                 op,
                 opnd1,
                 opnd2,
                 checked,
-            } => self.c_binop(dest, *op, opnd1, opnd2, *checked),
-            Statement::MkRef(dest, src) => self.c_mkref(dest, src),
+            } => self.c_binop(dst, *op, opnd1, opnd2, *checked),
+            Statement::MkRef(dst, src) => self.c_mkref(dst, src),
             Statement::DynOffs {
-                dest,
+                dst,
                 base,
                 idx,
                 scale,
-            } => self.c_dynoffs(dest, base, idx, *scale),
+            } => self.c_dynoffs(dst, base, idx, *scale),
             Statement::StorageLive(l) => self.local_live(l),
             Statement::StorageDead(l) => self.local_dead(l)?,
-            Statement::Call(target, args, dest) => self.c_call(target, args, dest)?,
-            Statement::Cast(dest, src) => self.c_cast(dest, src),
+            Statement::Call(target, args, dst) => self.c_call(target, args, dst)?,
+            Statement::Cast(dst, src) => self.c_cast(dst, src),
             Statement::Nop | Statement::Debug(..) => {}
             Statement::Unimplemented(s) => todo!("{:?}", s),
         }
@@ -986,7 +986,7 @@ impl TraceCompiler {
         Ok(())
     }
 
-    fn c_mkref(&mut self, dest: &IRPlace, src: &IRPlace) {
+    fn c_mkref(&mut self, dst: &IRPlace, src: &IRPlace) {
         let src_loc = self.iplace_to_location(src);
         match src_loc {
             Location::Reg(..) => {
@@ -1019,21 +1019,21 @@ impl TraceCompiler {
                 }
             }
         }
-        let dest_loc = self.iplace_to_location(dest);
-        debug_assert_eq!(SIR.ty(&dest.ty()).size(), *PTR_SIZE);
-        self.store_raw(&dest_loc, &*TEMP_LOC, *PTR_SIZE);
+        let dst_loc = self.iplace_to_location(dst);
+        debug_assert_eq!(SIR.ty(&dst.ty()).size(), *PTR_SIZE);
+        self.store_raw(&dst_loc, &*TEMP_LOC, *PTR_SIZE);
     }
 
-    fn c_cast(&mut self, dest: &IRPlace, src: &IRPlace) {
+    fn c_cast(&mut self, dst: &IRPlace, src: &IRPlace) {
         let src_loc = self.iplace_to_location(src);
         let ty = &*SIR.ty(&src.ty()); // Type of the source.
-        let cty = SIR.ty(&dest.ty()); // Type of the cast.
+        let cty = SIR.ty(&dst.ty()); // Type of the cast.
         match ty.kind {
             TyKind::UnsignedInt(_) => self.c_cast_uint(src_loc, &ty, &cty),
             _ => todo!(),
         }
-        let dest_loc = self.iplace_to_location(dest);
-        self.store_raw(&dest_loc, &*TEMP_LOC, SIR.ty(&dest.ty()).size());
+        let dst_loc = self.iplace_to_location(dst);
+        self.store_raw(&dst_loc, &*TEMP_LOC, SIR.ty(&dst.ty()).size());
     }
 
     fn c_cast_uint(&mut self, src: Location, ty: &Ty, cty: &Ty) {
@@ -1112,8 +1112,8 @@ impl TraceCompiler {
         }
     }
 
-    fn c_istore(&mut self, dest: &IRPlace, src: &IRPlace) {
-        self.store(dest, src);
+    fn c_istore(&mut self, dst: &IRPlace, src: &IRPlace) {
+        self.store(dst, src);
     }
 
     /// Compile a guard in the trace, emitting code to abort execution in case the guard fails.
@@ -1405,12 +1405,12 @@ impl TraceCompiler {
                     let size = SIR.ty(&ty).size();
                     let off = i32::try_from(body.offsets[usize::try_from(liveloc.sir.0).unwrap()])
                         .unwrap();
-                    let dest_loc = Location::Mem(RegAndOffset {
+                    let dst_loc = Location::Mem(RegAndOffset {
                         reg: RAX.code(),
                         off,
                     });
                     let src_loc = &live_locations[&liveloc.tir];
-                    self.store_raw(&dest_loc, &src_loc, size);
+                    self.store_raw(&dst_loc, &src_loc, size);
                 }
 
                 // Add frame information to vector.
