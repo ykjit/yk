@@ -29,7 +29,7 @@ pub enum TracingKind {
     /// Software tracing via ykrustc.
     SoftwareTracing,
     /// Hardware tracing via ykrustc + hwtracer.
-    HardwareTracing
+    HardwareTracing,
 }
 
 impl Default for TracingKind {
@@ -45,7 +45,7 @@ impl Default for TracingKind {
 /// Represents a thread which is currently tracing.
 pub struct ThreadTracer {
     /// The tracing implementation.
-    t_impl: Box<dyn ThreadTracerImpl>
+    t_impl: Box<dyn ThreadTracerImpl>,
 }
 
 impl ThreadTracer {

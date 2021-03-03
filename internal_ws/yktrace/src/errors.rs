@@ -11,7 +11,7 @@ pub enum InvalidTraceError {
     InternalError,
     /// There is no SIR for a location in the trace.
     /// The string inside is the binary symbol name in which the location appears.
-    NoSir(String)
+    NoSir(String),
 }
 
 impl InvalidTraceError {

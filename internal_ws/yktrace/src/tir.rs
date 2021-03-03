@@ -5,16 +5,16 @@
 use super::SirTrace;
 use crate::{
     errors::InvalidTraceError,
-    sir::{self, Sir, INTERP_STEP_ARG}
+    sir::{self, Sir, INTERP_STEP_ARG},
 };
 use std::{
     collections::{HashMap, HashSet},
     convert::TryFrom,
-    fmt::{self, Display, Write}
+    fmt::{self, Display, Write},
 };
 pub use ykpack::{
     BinOp, BodyFlags, CallOperand, Constant, ConstantInt, IRPlace, Local, LocalDecl, LocalIndex,
-    Ptr, SignedInt, Statement, Terminator, UnsignedInt
+    Ptr, SignedInt, Statement, Terminator, UnsignedInt,
 };
 
 /// A TIR trace is conceptually a straight-line path through the SIR with guarded speculation.
@@ -24,7 +24,7 @@ pub struct TirTrace<'a, 'm> {
     /// Maps each local variable to its declaration, including type.
     pub local_decls: HashMap<Local, LocalDecl>,
     pub addr_map: HashMap<String, u64>,
-    sir: &'a Sir<'m>
+    sir: &'a Sir<'m>,
 }
 
 impl<'a, 'm> TirTrace<'a, 'm> {
@@ -120,7 +120,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     // recreate the stack frames for the stopgap interpreter.
                     guard_blocks.push(GuardBlock {
                         symbol_name: loc.symbol_name,
-                        bb_idx: loc.bb_idx
+                        bb_idx: loc.bb_idx,
                     });
                 } else {
                     // Update the basic block index of the current guard block, if there is one
@@ -140,41 +140,41 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     let op = match stmt {
                         Statement::MkRef(dest, src) => Statement::MkRef(
                             rnm.rename_iplace(dest, &body),
-                            rnm.rename_iplace(src, &body)
+                            rnm.rename_iplace(src, &body),
                         ),
                         Statement::DynOffs {
                             dest,
                             base,
                             idx,
-                            scale
+                            scale,
                         } => Statement::DynOffs {
                             dest: rnm.rename_iplace(dest, &body),
                             base: rnm.rename_iplace(base, &body),
                             idx: rnm.rename_iplace(idx, &body),
-                            scale: *scale
+                            scale: *scale,
                         },
                         Statement::Store(dest, src) => Statement::Store(
                             rnm.rename_iplace(dest, &body),
-                            rnm.rename_iplace(src, &body)
+                            rnm.rename_iplace(src, &body),
                         ),
                         Statement::BinaryOp {
                             dest,
                             op,
                             opnd1,
                             opnd2,
-                            checked
+                            checked,
                         } => Statement::BinaryOp {
                             dest: rnm.rename_iplace(dest, &body),
                             op: *op,
                             opnd1: rnm.rename_iplace(opnd1, &body),
                             opnd2: rnm.rename_iplace(opnd2, &body),
-                            checked: *checked
+                            checked: *checked,
                         },
                         Statement::Nop => stmt.clone(),
                         Statement::Unimplemented(_) | Statement::Debug(_) => stmt.clone(),
                         Statement::Cast(dest, src) => Statement::Cast(
                             rnm.rename_iplace(dest, &body),
-                            rnm.rename_iplace(src, &body)
+                            rnm.rename_iplace(src, &body),
                         ),
                         Statement::StorageLive(local) => {
                             let l = rnm.rename_local(local, &body);
@@ -187,7 +187,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                             Statement::StorageDead(l)
                         }
                         // The following statements are specific to TIR and cannot appear in SIR.
-                        Statement::Call(..) => unreachable!()
+                        Statement::Call(..) => unreachable!(),
                     };
 
                     // In TIR, stores to local number zero are always to the return value of the
@@ -197,7 +197,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                             local: sir::RETURN_LOCAL,
                             ..
                         },
-                        _
+                        _,
                     ) = op
                     {
                         debug_assert!(sir.ty(&rnm.local_decls[&sir::RETURN_LOCAL].ty).is_unit());
@@ -212,7 +212,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
             if let Terminator::Call {
                 operand: op,
                 args: _,
-                destination: _
+                destination: _,
             } = &body.blocks[user_bb_idx_usize].term
             {
                 if let Some(callee_sym) = op.symbol() {
@@ -244,7 +244,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                 Terminator::Call {
                     operand: op,
                     args,
-                    destination: dest
+                    destination: dest,
                 } => {
                     // Rename the return value.
                     //
@@ -285,13 +285,13 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                                 for (arg_idx, arg) in newargs.iter().enumerate() {
                                     let dest_local = rnm.rename_local(
                                         &Local(u32::try_from(arg_idx).unwrap() + 1),
-                                        &body
+                                        &body,
                                     );
                                     live_locals.last_mut().unwrap().insert(dest_local);
                                     let dest_ip = IRPlace::Val {
                                         local: dest_local,
                                         off: 0,
-                                        ty: arg.ty()
+                                        ty: arg.ty(),
                                     };
                                     term_stmts.push(Statement::Store(dest_ip, arg.clone()));
                                 }
@@ -326,16 +326,16 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                         &IRPlace::Val {
                             local: sir::RETURN_LOCAL,
                             off: 0,
-                            ty: dest_ip.ty()
+                            ty: dest_ip.ty(),
                         },
-                        &body
+                        &body,
                     );
                     rnm.leave();
 
                     // Copy out the return value into the caller.
                     term_stmts.push(Statement::Store(dest_ip, src_ip));
                 }
-                _ => ()
+                _ => (),
             }
 
             for stmt in term_stmts {
@@ -355,7 +355,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     ref discr,
                     ref values,
                     ref target_bbs,
-                    otherwise_bb
+                    otherwise_bb,
                 } => {
                     // Peek at the next block in the trace to see which outgoing edge was taken and
                     // infer which value we must guard upon. We are working on the assumption that
@@ -367,7 +367,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                             val: rnm.rename_iplace(discr, &body),
                             kind: GuardKind::Integer(values[idx]),
                             block: Vec::new(),
-                            live_locals: Vec::new()
+                            live_locals: Vec::new(),
                         }),
                         None => {
                             debug_assert!(next_blk == otherwise_bb);
@@ -375,7 +375,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                                 val: rnm.rename_iplace(discr, &body),
                                 kind: GuardKind::OtherInteger(values.to_vec()),
                                 block: Vec::new(),
-                                live_locals: Vec::new()
+                                live_locals: Vec::new(),
                             })
                         }
                     }
@@ -388,7 +388,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     val: rnm.rename_iplace(cond, &body),
                     kind: GuardKind::Boolean(*expected),
                     block: Vec::new(),
-                    live_locals: Vec::new()
+                    live_locals: Vec::new(),
                 }),
                 Terminator::TraceDebugCall { ref msg, .. } => {
                     // No guard, but we do add a debug statement.
@@ -407,7 +407,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                         let sirlocal = rnm.sir_map.get(local).unwrap();
                         v.push(LiveLocal {
                             tir: *local,
-                            sir: *sirlocal
+                            sir: *sirlocal,
                         });
                     }
                     g.live_locals.push(v);
@@ -423,7 +423,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
             ops,
             local_decls,
             addr_map,
-            sir
+            sir,
         })
     }
 
@@ -458,7 +458,7 @@ struct VarRenamer {
     acc: Option<u32>,
     /// Maps a renamed local to its local declaration.
     local_decls: HashMap<Local, LocalDecl>,
-    pub sir_map: HashMap<Local, Local>
+    pub sir_map: HashMap<Local, Local>,
 }
 
 impl VarRenamer {
@@ -468,7 +468,7 @@ impl VarRenamer {
             offset: 0,
             acc: None,
             local_decls: HashMap::new(),
-            sir_map: HashMap::new()
+            sir_map: HashMap::new(),
         }
     }
 
@@ -507,18 +507,18 @@ impl VarRenamer {
             IRPlace::Val { local, off, ty } => IRPlace::Val {
                 local: self.rename_local(local, body),
                 off: *off,
-                ty: *ty
+                ty: *ty,
             },
             IRPlace::Indirect { ptr, off, ty } => IRPlace::Indirect {
                 ptr: Ptr {
                     local: self.rename_local(&ptr.local, body),
-                    off: ptr.off
+                    off: ptr.off,
                 },
                 off: *off,
-                ty: *ty
+                ty: *ty,
             },
             IRPlace::Const { .. } => ip.clone(),
-            IRPlace::Unimplemented(..) => ip.clone()
+            IRPlace::Unimplemented(..) => ip.clone(),
         }
     }
 
@@ -532,7 +532,7 @@ impl VarRenamer {
         let renamed = Local(local.0 + self.offset);
         self.local_decls.insert(
             renamed,
-            body.local_decls[usize::try_from(local.0).unwrap()].clone()
+            body.local_decls[usize::try_from(local.0).unwrap()].clone(),
         );
         self.sir_map.insert(renamed, *local);
         renamed
@@ -562,7 +562,7 @@ impl Display for TirTrace<'_, '_> {
 #[derive(Debug, Clone)]
 pub struct GuardBlock {
     pub symbol_name: &'static str,
-    pub bb_idx: ykpack::BasicBlockIndex
+    pub bb_idx: ykpack::BasicBlockIndex,
 }
 
 impl Display for GuardBlock {
@@ -575,7 +575,7 @@ impl Display for GuardBlock {
 #[derive(Debug)]
 pub struct LiveLocal {
     pub tir: Local,
-    pub sir: Local
+    pub sir: Local,
 }
 
 /// A guard states the assumptions from its position in a trace onward.
@@ -590,7 +590,7 @@ pub struct Guard {
     pub block: Vec<GuardBlock>,
     /// The TIR locals (and their SIR equivalent) that are live at the time of the guard. This is
     /// needed so that we can initialise the stopgap interpreter with the correct state.
-    pub live_locals: Vec<Vec<LiveLocal>>
+    pub live_locals: Vec<Vec<LiveLocal>>,
 }
 
 impl fmt::Display for Guard {
@@ -623,7 +623,7 @@ pub enum GuardKind {
     /// due to the "otherwise" semantics of the `SwitchInt` terminator in SIR.
     OtherInteger(Vec<u128>),
     /// The value must equal a Boolean constant.
-    Boolean(bool)
+    Boolean(bool),
 }
 
 impl fmt::Display for GuardKind {
@@ -631,7 +631,7 @@ impl fmt::Display for GuardKind {
         match self {
             Self::Integer(u128v) => write!(f, "integer({})", u128v),
             Self::OtherInteger(u128vs) => write!(f, "other_integer({:?})", u128vs),
-            Self::Boolean(expect) => write!(f, "bool({})", expect)
+            Self::Boolean(expect) => write!(f, "bool({})", expect),
         }
     }
 }
@@ -640,14 +640,14 @@ impl fmt::Display for GuardKind {
 #[derive(Debug)]
 pub enum TirOp {
     Statement(Statement),
-    Guard(Guard)
+    Guard(Guard),
 }
 
 impl fmt::Display for TirOp {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             TirOp::Statement(st) => write!(f, "{}", st),
-            TirOp::Guard(gd) => write!(f, "{}", gd)
+            TirOp::Guard(gd) => write!(f, "{}", gd),
         }
     }
 }
