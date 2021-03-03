@@ -39,18 +39,18 @@ fn main() {
 
     // If we symlink libykshim.so into the target dir, then this is already in the linker path when
     // run under cargo. In other words, the user won't have to set LD_LIBRARY_PATH.
-    let mut sym_dest = PathBuf::from(env::var("OUT_DIR").unwrap());
-    sym_dest.push("..");
-    sym_dest.push("..");
-    sym_dest.push("..");
-    sym_dest.push(YKSHIM_SO);
-    if !PathBuf::from(&sym_dest).exists() {
+    let mut sym_dst = PathBuf::from(env::var("OUT_DIR").unwrap());
+    sym_dst.push("..");
+    sym_dst.push("..");
+    sym_dst.push("..");
+    sym_dst.push(YKSHIM_SO);
+    if !PathBuf::from(&sym_dst).exists() {
         let mut sym_src = internal_dir;
         sym_src.push("target");
         sym_src.push("release");
         sym_src.push(YKSHIM_SO);
-        dbg!(&sym_src, &sym_dest);
-        symlink(sym_src, sym_dest).unwrap();
+        dbg!(&sym_src, &sym_dst);
+        symlink(sym_src, sym_dst).unwrap();
     }
 
     println!(
