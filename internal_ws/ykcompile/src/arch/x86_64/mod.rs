@@ -341,24 +341,25 @@ extern "sysv64" fn invoke_sinterp(vptr: *mut Vec<FrameInfo>) -> *mut StopgapInte
     Box::into_raw(Box::new(si))
 }
 
-/// Given a size and alignment, allocates memory which later holds the live variables of a stack
-/// frame.
-extern "sysv64" fn allocate_layout(size: usize, align: usize) -> *mut u8 {
+/// Given a size and alignment, `alloc` a block of memory for storing a frame's live variables.
+extern "sysv64" fn alloc_live_vars(size: usize, align: usize) -> *mut u8 {
     let layout = Layout::from_size_align(size, align).unwrap();
     unsafe { alloc(layout) }
 }
 
-/// Instantiates an empty vector of `FrameInfo`s and returns its pointer.
-extern "sysv64" fn bh_new_vec() -> *mut Vec<FrameInfo> {
+/// Returns a pointer to a boxed empty `Vec<FrameInfo>`, suitable for passing to `push_frames_vec`.
+extern "sysv64" fn new_frames_vec() -> *mut Vec<FrameInfo> {
     let v: Vec<FrameInfo> = Vec::new();
     Box::into_raw(Box::new(v))
 }
 
-/// Pushes a new `FrameInfo` instance onto the vector behind the pointer `vptr`. The `FrameInfo`
-/// instance is created from a pointer to a symbol name and its length, a basic block index and a
-/// pointer to some allocated memory. Note that this function converts the raw pointer `vptr` into
-/// an `&mut` reference.
-extern "sysv64" fn bh_push_vec(
+/// Construct and push a new `FrameInfo` to the `Vec<FrameInfo>`. `sym_ptr` must be a pointer to a
+/// function symbol name (of length `sym_len`) that is guaranteed not to be deallocated or moved.
+/// `mem` is a pointer to a block of memory from `alloc_live_vars`, responsibility for which is
+/// effectively moved to this function (i.e. the caller of `push_frames_vec` should no longer
+/// read/write/free `mem`). Note that this function converts the raw pointer `vptr` into an `&mut`
+/// reference.
+extern "sysv64" fn push_frames_vec(
     vptr: *mut Vec<FrameInfo>,
     sym_ptr: *const u8,
     sym_len: usize,
@@ -1384,7 +1385,7 @@ impl TraceCompiler {
             // spilled all registers to the stack.
             let frame_vec_reg = R12.code();
             dynasm!(self.asm
-                ; mov r11, QWORD bh_new_vec as i64
+                ; mov r11, QWORD new_frames_vec as i64
                 ; call r11
                 ; mov Rq(frame_vec_reg), rax
             );
@@ -1401,7 +1402,7 @@ impl TraceCompiler {
                     // Allocate memory for live variables.
                     ; mov rdi, i32::try_from(body.layout.0).unwrap()
                     ; mov rsi, i32::try_from(body.layout.1).unwrap()
-                    ; mov r11, QWORD allocate_layout as i64
+                    ; mov r11, QWORD alloc_live_vars as i64
                     ; call r11
                 );
                 // Move live variables into allocated memory.
@@ -1425,7 +1426,7 @@ impl TraceCompiler {
                     ; mov rdx, sym.len() as i32
                     ; mov rcx, bbidx as i32
                     ; mov r8, rax // allocated memory
-                    ; mov r11, QWORD bh_push_vec as i64
+                    ; mov r11, QWORD push_frames_vec as i64
                     ; call r11
                 );
             }
