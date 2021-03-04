@@ -58,7 +58,7 @@ macro_rules! binop_add_sub {
     ($name: ident, $op:expr) => {
         fn $name(&mut self, opnd1_reg: u8, opnd2: &IRPlace) {
             let size = SIR.ty(&opnd2.ty()).size();
-            let opnd2_loc = self.iplace_to_location(opnd2);
+            let opnd2_loc = self.irplace_to_location(opnd2);
             match opnd2_loc {
                 Location::Reg(r) => match size {
                     1 => {
@@ -174,7 +174,7 @@ macro_rules! binop_mul_div {
                 ; mov rax, Rq(opnd1_reg)
             );
             // Set up second operand.
-            let src_loc = self.iplace_to_location(opnd2);
+            let src_loc = self.irplace_to_location(opnd2);
             match src_loc {
                 Location::Reg(src_r) => {
                     // Handle cases where our input operands clash with a clobbered register.
@@ -436,7 +436,7 @@ impl TraceCompiler {
         }
     }
 
-    fn iplace_to_location(&mut self, ip: &IRPlace) -> Location {
+    fn irplace_to_location(&mut self, ip: &IRPlace) -> Location {
         match ip {
             IRPlace::Val { local, off, .. } => self.local_to_location(*local).offset(*off),
             IRPlace::Indirect { ptr, off, .. } => self
@@ -627,7 +627,7 @@ impl TraceCompiler {
         // OPTIMISE: Only save registers in use by the register allocator.
         let mut save_regs = CALLER_SAVED_REGS.iter().cloned().collect::<Vec<u8>>();
         if let Some(d) = dst {
-            let dst_loc = self.iplace_to_location(d);
+            let dst_loc = self.irplace_to_location(d);
             if let Location::Reg(dst_reg) = dst_loc {
                 // If the result of the call is destined for one of the caller-save registers, then
                 // there's no point in saving the register.
@@ -661,7 +661,7 @@ impl TraceCompiler {
             let arg_reg = arg_regs.pop().unwrap();
 
             // Now load the argument into the correct argument register.
-            match self.iplace_to_location(arg) {
+            match self.irplace_to_location(arg) {
                 Location::Reg(reg) => {
                     if let Some(idx) = saved_stack_index(reg) {
                         // We saved this register to the stack during caller-save. Since there is
@@ -712,7 +712,7 @@ impl TraceCompiler {
         self.restore_regs(&save_regs);
 
         if let Some(d) = dst {
-            let dst_loc = self.iplace_to_location(d);
+            let dst_loc = self.irplace_to_location(d);
             self.store_raw(&dst_loc, &Location::Reg(*TEMP_REG), SIR.ty(&d.ty()).size());
         }
 
@@ -720,9 +720,9 @@ impl TraceCompiler {
     }
 
     /// Load an IRPlace into the given register. Panic if it doesn't fit.
-    fn load_reg_iplace(&mut self, reg: u8, src_ip: &IRPlace) -> Location {
+    fn load_reg_irplace(&mut self, reg: u8, src_ip: &IRPlace) -> Location {
         let dst_loc = Location::Reg(reg);
-        let src_loc = self.iplace_to_location(src_ip);
+        let src_loc = self.irplace_to_location(src_ip);
         self.store_raw(&dst_loc, &src_loc, SIR.ty(&src_ip.ty()).size());
         dst_loc
     }
@@ -752,7 +752,7 @@ impl TraceCompiler {
 
         // We do this in three stages.
         // 1) Copy the first operand into the temp register.
-        self.load_reg_iplace(*TEMP_REG, opnd1);
+        self.load_reg_irplace(*TEMP_REG, opnd1);
 
         // 2) Perform arithmetic.
         match op {
@@ -776,7 +776,7 @@ impl TraceCompiler {
         }
 
         // 3) Move the result to where it is supposed to live.
-        let dst_loc = self.iplace_to_location(dst);
+        let dst_loc = self.irplace_to_location(dst);
         let size = opnd1_ty.size();
         if checked {
             // If it is a checked operation, then we have to build a (value, overflow-flag) tuple.
@@ -812,10 +812,10 @@ impl TraceCompiler {
     binop_mul_div!(c_binop_div, div);
 
     fn c_condition(&mut self, dst: &IRPlace, binop: &BinOp, op1: &IRPlace, op2: &IRPlace) {
-        let src1 = self.iplace_to_location(op1);
+        let src1 = self.irplace_to_location(op1);
         let ty = SIR.ty(&op1.ty());
 
-        self.load_reg_iplace(*TEMP_REG, op2);
+        self.load_reg_irplace(*TEMP_REG, op2);
 
         match &src1 {
             Location::Reg(reg) => match ty.size() {
@@ -906,7 +906,7 @@ impl TraceCompiler {
          ; mov Rq(*TEMP_REG), 0
          ; skip:
         );
-        let dst_loc = self.iplace_to_location(dst);
+        let dst_loc = self.irplace_to_location(dst);
         self.store_raw(&dst_loc, &*TEMP_LOC, SIR.ty(&dst.ty()).size());
     }
 
@@ -921,7 +921,7 @@ impl TraceCompiler {
         );
 
         // 1) Multiply scale by idx, store in RAX.
-        self.load_reg_iplace(RAX.code(), idx);
+        self.load_reg_irplace(RAX.code(), idx);
         dynasm!(self.asm
             ; mov Rq(*TEMP_REG), i32::try_from(scale).unwrap()
             ; mul Rq(*TEMP_REG)
@@ -929,7 +929,7 @@ impl TraceCompiler {
         );
 
         // 2) Get the address of the thing we want to offset into a register.
-        let base_loc = self.iplace_to_location(base);
+        let base_loc = self.irplace_to_location(base);
         match base_loc {
             Location::Reg(..) => todo!(),
             Location::Mem(..) => todo!(),
@@ -961,7 +961,7 @@ impl TraceCompiler {
         // 4) Store the resulting pointer into the destination.
         // The IR is constructed such that `dst_loc` will be indirect to ensure that subsequent
         // operations on this locatiion dereference the pointer.
-        let dst_loc = self.iplace_to_location(dst);
+        let dst_loc = self.irplace_to_location(dst);
         self.store_raw(&dst_loc, &*TEMP_LOC, *PTR_SIZE);
     }
 
@@ -995,7 +995,7 @@ impl TraceCompiler {
     }
 
     fn c_mkref(&mut self, dst: &IRPlace, src: &IRPlace) {
-        let src_loc = self.iplace_to_location(src);
+        let src_loc = self.irplace_to_location(src);
         match src_loc {
             Location::Reg(..) => {
                 // This isn't possible as the allocator explicitly puts things which are
@@ -1027,20 +1027,20 @@ impl TraceCompiler {
                 }
             }
         }
-        let dst_loc = self.iplace_to_location(dst);
+        let dst_loc = self.irplace_to_location(dst);
         debug_assert_eq!(SIR.ty(&dst.ty()).size(), *PTR_SIZE);
         self.store_raw(&dst_loc, &*TEMP_LOC, *PTR_SIZE);
     }
 
     fn c_cast(&mut self, dst: &IRPlace, src: &IRPlace) {
-        let src_loc = self.iplace_to_location(src);
+        let src_loc = self.irplace_to_location(src);
         let ty = &*SIR.ty(&src.ty()); // Type of the source.
         let cty = SIR.ty(&dst.ty()); // Type of the cast.
         match ty.kind {
             TyKind::UnsignedInt(_) => self.c_cast_uint(src_loc, &ty, &cty),
             _ => todo!(),
         }
-        let dst_loc = self.iplace_to_location(dst);
+        let dst_loc = self.irplace_to_location(dst);
         self.store_raw(&dst_loc, &*TEMP_LOC, SIR.ty(&dst.ty()).size());
     }
 
@@ -1133,7 +1133,7 @@ impl TraceCompiler {
                 val,
                 kind: GuardKind::OtherInteger(v),
                 ..
-            } => match self.iplace_to_location(val) {
+            } => match self.irplace_to_location(val) {
                 Location::Reg(reg) => {
                     for c in v {
                         self.cmp_reg_const(reg, *c, SIR.ty(&val.ty()).size());
@@ -1159,7 +1159,7 @@ impl TraceCompiler {
                 val,
                 kind: GuardKind::Integer(c),
                 ..
-            } => match self.iplace_to_location(val) {
+            } => match self.irplace_to_location(val) {
                 Location::Reg(reg) => {
                     self.cmp_reg_const(reg, *c, SIR.ty(&val.ty()).size());
                     dynasm!(self.asm
@@ -1200,7 +1200,7 @@ impl TraceCompiler {
                 val,
                 kind: GuardKind::Boolean(expect),
                 ..
-            } => match self.iplace_to_location(val) {
+            } => match self.irplace_to_location(val) {
                 Location::Reg(reg) => {
                     dynasm!(self.asm
                         ; cmp Rb(reg), *expect as i8

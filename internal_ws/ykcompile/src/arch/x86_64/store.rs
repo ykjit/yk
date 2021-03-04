@@ -8,8 +8,8 @@ use yktrace::sir::SIR;
 impl TraceCompiler {
     /// Store the value in `src_loc` into `dst_loc`.
     pub(crate) fn store(&mut self, dst_ip: &IRPlace, src_ip: &IRPlace) {
-        let dst_loc = self.iplace_to_location(dst_ip);
-        let src_loc = self.iplace_to_location(src_ip);
+        let dst_loc = self.irplace_to_location(dst_ip);
+        let src_loc = self.irplace_to_location(src_ip);
         debug_assert!(SIR.ty(&dst_ip.ty()).size() == SIR.ty(&src_ip.ty()).size());
         self.store_raw(&dst_loc, &src_loc, SIR.ty(&dst_ip.ty()).size());
     }
