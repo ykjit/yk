@@ -1,7 +1,5 @@
 //! The Yorick TIR trace compiler.
 
-#![cfg_attr(test, feature(test))]
-
 use libc::{c_void, dlsym, RTLD_DEFAULT};
 use std::{ffi::CString, fmt, mem};
 use ykpack::{Constant, Local, OffT, TypeId};

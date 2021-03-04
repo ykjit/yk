@@ -1,6 +1,5 @@
 //! Utilities for collecting and decoding traces.
 
-#![cfg_attr(test, feature(test))]
 #![cfg_attr(feature = "trace_sw", feature(thread_local))]
 #![cfg_attr(feature = "trace_sw", feature(core_intrinsics))]
 #![cfg_attr(feature = "trace_sw", feature(global_asm))]
