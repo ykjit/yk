@@ -67,13 +67,13 @@ impl LocalMem {
     unsafe fn store(&mut self, dst: &IRPlace, src: &IRPlace) {
         match src {
             IRPlace::Val { .. } | IRPlace::Indirect { .. } => {
-                let src_ptr = self.iplace_to_ptr(src);
-                let dst_ptr = self.iplace_to_ptr(dst);
+                let src_ptr = self.irplace_to_ptr(src);
+                let dst_ptr = self.irplace_to_ptr(dst);
                 let size = usize::try_from(SIR.ty(&src.ty()).size()).unwrap();
                 std::ptr::copy(src_ptr, dst_ptr, size);
             }
             IRPlace::Const { val, ty: _ty } => {
-                let dst_ptr = self.iplace_to_ptr(dst);
+                let dst_ptr = self.irplace_to_ptr(dst);
                 self.write_const(dst_ptr, val);
             }
             _ => todo!(),
@@ -86,7 +86,7 @@ impl LocalMem {
             let dst = self.local_ptr(&Local(u32::try_from(i + 1).unwrap()));
             match arg {
                 IRPlace::Val { .. } | IRPlace::Indirect { .. } => {
-                    let src = frame.iplace_to_ptr(arg);
+                    let src = frame.irplace_to_ptr(arg);
                     let size = usize::try_from(SIR.ty(&arg.ty()).size()).unwrap();
                     std::ptr::copy(src, dst, size);
                 }
@@ -105,7 +105,7 @@ impl LocalMem {
     }
 
     /// Get the pointer for an IRPlace, while applying all offsets.
-    fn iplace_to_ptr(&self, place: &IRPlace) -> *mut u8 {
+    fn irplace_to_ptr(&self, place: &IRPlace) -> *mut u8 {
         match place {
             IRPlace::Val {
                 local,
@@ -146,7 +146,7 @@ macro_rules! make_binop {
             let a = $type::try_from(self.read_int(opnd1)).unwrap();
             let b = $type::try_from(self.read_int(opnd2)).unwrap();
             let locals = self.locals_mut();
-            let ptr = locals.iplace_to_ptr(dst);
+            let ptr = locals.irplace_to_ptr(dst);
             let (v, of) = match op {
                 BinOp::Add => a.overflowing_add(b),
                 BinOp::Lt => ($type::from(a < b), false),
@@ -341,7 +341,7 @@ impl StopgapInterpreter {
                     // Get a pointer to the return value of the called frame.
                     let ret_ptr = oldframe.mem.local_ptr(&RETURN_LOCAL);
                     // Write the return value to the destination in the previous frame.
-                    let dst_ptr = curframe.mem.iplace_to_ptr(&dst);
+                    let dst_ptr = curframe.mem.irplace_to_ptr(&dst);
                     let size = usize::try_from(SIR.ty(&dst.ty()).size()).unwrap();
                     std::ptr::copy(ret_ptr, dst_ptr, size);
                     curframe.bbidx = bbidx;
@@ -395,7 +395,7 @@ impl StopgapInterpreter {
             };
             return val;
         }
-        let ptr = self.locals().iplace_to_ptr(src);
+        let ptr = self.locals().irplace_to_ptr(src);
         match &SIR.ty(&src.ty()).kind {
             TyKind::UnsignedInt(ui) => match ui {
                 UnsignedIntTy::Usize => todo!(),
@@ -422,8 +422,8 @@ impl StopgapInterpreter {
             IRPlace::Val { .. } | IRPlace::Indirect { .. } => {
                 // Get pointer to src.
                 let mem = &self.frames.last_mut().unwrap().mem;
-                let src_ptr = mem.iplace_to_ptr(src);
-                let dst_ptr = mem.iplace_to_ptr(dst);
+                let src_ptr = mem.irplace_to_ptr(src);
+                let dst_ptr = mem.irplace_to_ptr(dst);
                 unsafe {
                     std::ptr::write::<*mut u8>(dst_ptr as *mut *mut u8, src_ptr);
                 }

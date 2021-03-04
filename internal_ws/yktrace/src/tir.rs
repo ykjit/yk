@@ -46,7 +46,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
         // encounter `$x = Call(...)` we push `$x` to the stack so that later, when we encounter
         // the corresponding Return, we can find the correct place to store the return value (by
         // popping from the stack).
-        let mut return_iplaces: Vec<IRPlace> = Vec::new();
+        let mut return_irplaces: Vec<IRPlace> = Vec::new();
 
         let mut live_locals: Vec<HashSet<Local>> = Vec::new();
         let mut guard_blocks: Vec<GuardBlock> = Vec::new();
@@ -139,8 +139,8 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                 for stmt in body.blocks[user_bb_idx_usize].stmts.iter() {
                     let op = match stmt {
                         Statement::MkRef(dst, src) => Statement::MkRef(
-                            rnm.rename_iplace(dst, &body),
-                            rnm.rename_iplace(src, &body),
+                            rnm.rename_irplace(dst, &body),
+                            rnm.rename_irplace(src, &body),
                         ),
                         Statement::DynOffs {
                             dst,
@@ -148,14 +148,14 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                             idx,
                             scale,
                         } => Statement::DynOffs {
-                            dst: rnm.rename_iplace(dst, &body),
-                            base: rnm.rename_iplace(base, &body),
-                            idx: rnm.rename_iplace(idx, &body),
+                            dst: rnm.rename_irplace(dst, &body),
+                            base: rnm.rename_irplace(base, &body),
+                            idx: rnm.rename_irplace(idx, &body),
                             scale: *scale,
                         },
                         Statement::Store(dst, src) => Statement::Store(
-                            rnm.rename_iplace(dst, &body),
-                            rnm.rename_iplace(src, &body),
+                            rnm.rename_irplace(dst, &body),
+                            rnm.rename_irplace(src, &body),
                         ),
                         Statement::BinaryOp {
                             dst,
@@ -164,17 +164,17 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                             opnd2,
                             checked,
                         } => Statement::BinaryOp {
-                            dst: rnm.rename_iplace(dst, &body),
+                            dst: rnm.rename_irplace(dst, &body),
                             op: *op,
-                            opnd1: rnm.rename_iplace(opnd1, &body),
-                            opnd2: rnm.rename_iplace(opnd2, &body),
+                            opnd1: rnm.rename_irplace(opnd1, &body),
+                            opnd2: rnm.rename_irplace(opnd2, &body),
                             checked: *checked,
                         },
                         Statement::Nop => stmt.clone(),
                         Statement::Unimplemented(_) | Statement::Debug(_) => stmt.clone(),
                         Statement::Cast(dst, src) => Statement::Cast(
-                            rnm.rename_iplace(dst, &body),
-                            rnm.rename_iplace(src, &body),
+                            rnm.rename_irplace(dst, &body),
+                            rnm.rename_irplace(src, &body),
                         ),
                         Statement::StorageLive(local) => {
                             let l = rnm.rename_local(local, &body);
@@ -254,7 +254,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     // correct `Local`s during trace compilation.
                     let ret_val = dst
                         .as_ref()
-                        .map(|(ret_val, _)| rnm.rename_iplace(&ret_val, &body))
+                        .map(|(ret_val, _)| rnm.rename_irplace(&ret_val, &body))
                         .unwrap();
 
                     if let Some(callee_sym) = op.symbol() {
@@ -274,7 +274,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                                 entered_call = true;
                                 // Push the IRPlace that the corresponding Return terminator should
                                 // assign the result of the call to.
-                                return_iplaces.push(ret_val.clone());
+                                return_irplaces.push(ret_val.clone());
 
                                 // Inform VarRenamer about this function's offset, which is equal to the
                                 // number of variables assigned in the outer body.
@@ -321,8 +321,8 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     // statements for call arguments. Which mappings we need to remove depends on
                     // the number of arguments the function call had, which we keep track of in
                     // `cur_call_args`.
-                    let dst_ip = return_iplaces.pop().unwrap();
-                    let src_ip = rnm.rename_iplace(
+                    let dst_ip = return_irplaces.pop().unwrap();
+                    let src_ip = rnm.rename_irplace(
                         &IRPlace::Val {
                             local: sir::RETURN_LOCAL,
                             off: 0,
@@ -364,7 +364,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     let edge_idx = target_bbs.iter().position(|e| *e == next_blk);
                     match edge_idx {
                         Some(idx) => Some(Guard {
-                            val: rnm.rename_iplace(discr, &body),
+                            val: rnm.rename_irplace(discr, &body),
                             kind: GuardKind::Integer(values[idx]),
                             block: Vec::new(),
                             live_locals: Vec::new(),
@@ -372,7 +372,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                         None => {
                             debug_assert!(next_blk == otherwise_bb);
                             Some(Guard {
-                                val: rnm.rename_iplace(discr, &body),
+                                val: rnm.rename_irplace(discr, &body),
                                 kind: GuardKind::OtherInteger(values.to_vec()),
                                 block: Vec::new(),
                                 live_locals: Vec::new(),
@@ -385,7 +385,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     ref expected,
                     ..
                 } => Some(Guard {
-                    val: rnm.rename_iplace(cond, &body),
+                    val: rnm.rename_irplace(cond, &body),
                     kind: GuardKind::Boolean(*expected),
                     block: Vec::new(),
                     live_locals: Vec::new(),
@@ -502,7 +502,7 @@ impl VarRenamer {
         self.offset = *self.stack.last().unwrap();
     }
 
-    fn rename_iplace(&mut self, ip: &IRPlace, body: &ykpack::Body) -> IRPlace {
+    fn rename_irplace(&mut self, ip: &IRPlace, body: &ykpack::Body) -> IRPlace {
         match ip {
             IRPlace::Val { local, off, ty } => IRPlace::Val {
                 local: self.rename_local(local, body),
@@ -524,7 +524,7 @@ impl VarRenamer {
 
     fn rename_args(&mut self, args: &[IRPlace], body: &ykpack::Body) -> Vec<IRPlace> {
         args.iter()
-            .map(|op| self.rename_iplace(&op, body))
+            .map(|op| self.rename_irplace(&op, body))
             .collect()
     }
 
