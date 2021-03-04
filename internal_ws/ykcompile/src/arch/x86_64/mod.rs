@@ -325,8 +325,7 @@ fn local_to_reg_name(loc: &Location) -> &'static str {
 
 /// Given a vector of `FrameInfo`s `vptr`, instantiates and initialises a SIR interpreter and returns its
 /// pointer. Consumes `vptr`.
-#[no_mangle]
-pub extern "sysv64" fn invoke_sinterp(vptr: *mut Vec<FrameInfo>) -> *mut StopgapInterpreter {
+extern "sysv64" fn invoke_sinterp(vptr: *mut Vec<FrameInfo>) -> *mut StopgapInterpreter {
     let v = unsafe { Box::from_raw(vptr) };
     let si = StopgapInterpreter::from_frames(*v);
     Box::into_raw(Box::new(si))
@@ -334,13 +333,13 @@ pub extern "sysv64" fn invoke_sinterp(vptr: *mut Vec<FrameInfo>) -> *mut Stopgap
 
 /// Given a size and alignment, allocates memory which later holds the live variables of a stack
 /// frame.
-pub extern "sysv64" fn allocate_layout(size: usize, align: usize) -> *mut u8 {
+extern "sysv64" fn allocate_layout(size: usize, align: usize) -> *mut u8 {
     let layout = Layout::from_size_align(size, align).unwrap();
     unsafe { alloc(layout) }
 }
 
 /// Instantiates an empty vector of `FrameInfo`s and returns its pointer.
-pub extern "sysv64" fn bh_new_vec() -> *mut Vec<FrameInfo> {
+extern "sysv64" fn bh_new_vec() -> *mut Vec<FrameInfo> {
     let v: Vec<FrameInfo> = Vec::new();
     let ptr = Box::into_raw(Box::new(v));
     ptr
@@ -350,7 +349,7 @@ pub extern "sysv64" fn bh_new_vec() -> *mut Vec<FrameInfo> {
 /// instance is created from a pointer to a symbol name and its length, a basic block index and a
 /// pointer to some allocated memory. Note that this function converts the raw pointer `vptr` into
 /// an `&mut` reference.
-pub extern "sysv64" fn bh_push_vec(
+extern "sysv64" fn bh_push_vec(
     vptr: *mut Vec<FrameInfo>,
     sym_ptr: *const u8,
     sym_len: usize,
