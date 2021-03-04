@@ -333,9 +333,9 @@ fn local_to_reg_name(loc: &Location) -> &'static str {
 // Collection of functions required during a guard failure to instantiate and initialise the
 // stopgap interpreter.
 
-/// Given a vector of `FrameInfo`s `vptr`, instantiates and initialises a SIR interpreter and returns its
-/// pointer. Consumes `vptr`.
-extern "sysv64" fn invoke_sinterp(vptr: *mut Vec<FrameInfo>) -> *mut StopgapInterpreter {
+/// Given a pointer to a vector of `FrameInfo`s, creates and returns a boxed StopgapInterpreter.
+/// Consumes `vptr`.
+extern "sysv64" fn new_stopgap(vptr: *mut Vec<FrameInfo>) -> *mut StopgapInterpreter {
     let v = unsafe { Box::from_raw(vptr) };
     let si = StopgapInterpreter::from_frames(*v);
     Box::into_raw(Box::new(si))
@@ -1338,8 +1338,8 @@ impl TraceCompiler {
         // Add guard failure labels. When a guard fails we jump to one of these labels. For each
         // stack frame, we need to allocate memory using `allocate_layout`. We then copy the live
         // variables into this memory and store it, together with other information, inside a
-        // Vec<FrameInfo>. Finally, we call `invoke_sinterp` passing in this vector, which
-        // initialises a SIR interpreter and runs it.
+        // Vec<FrameInfo>. Finally, we call `new_stopgap` passing in this vector, which
+        // returns a StopgapInterpreter that we can then run.
         for (guard, mut live_locations, label) in gl {
             // Symbol names of the functions called while executing the trace. Needed to recreate
             // the stack frames in the StopgapInterpreter.
@@ -1437,7 +1437,7 @@ impl TraceCompiler {
                 // Create and initialise SIR interpreter, then return it.
                 ; mov rdi, Rq(frame_vec_reg)
                 ; xor rax, rax
-                ; mov r11, QWORD invoke_sinterp as i64
+                ; mov r11, QWORD new_stopgap as i64
                 ; call r11
                 ; jmp ->cleanup
             );
