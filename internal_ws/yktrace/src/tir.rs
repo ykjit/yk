@@ -366,7 +366,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                         Some(idx) => Some(Guard {
                             val: rnm.rename_irplace(discr, &body),
                             kind: GuardKind::Integer(values[idx]),
-                            block: Vec::new(),
+                            blocks: Vec::new(),
                             live_locals: Vec::new(),
                         }),
                         None => {
@@ -374,7 +374,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                             Some(Guard {
                                 val: rnm.rename_irplace(discr, &body),
                                 kind: GuardKind::OtherInteger(values.to_vec()),
-                                block: Vec::new(),
+                                blocks: Vec::new(),
                                 live_locals: Vec::new(),
                             })
                         }
@@ -387,7 +387,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                 } => Some(Guard {
                     val: rnm.rename_irplace(cond, &body),
                     kind: GuardKind::Boolean(*expected),
-                    block: Vec::new(),
+                    blocks: Vec::new(),
                     live_locals: Vec::new(),
                 }),
                 Terminator::TraceDebugCall { ref msg, .. } => {
@@ -399,7 +399,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
 
             if let Some(mut g) = guard {
                 for gb in &guard_blocks {
-                    g.block.push(gb.clone());
+                    g.blocks.push(gb.clone());
                 }
                 for ll in &live_locals {
                     let mut v = Vec::new();
@@ -585,9 +585,10 @@ pub struct Guard {
     pub val: IRPlace,
     /// The requirement upon `val` for the guard to pass.
     pub kind: GuardKind,
-    /// The block whose terminator was the basis for this guard. This is here so that, in the event
-    /// that the guard fails, we know where to start the stopgap interpreter.
-    pub block: Vec<GuardBlock>,
+    /// The blocks active at the point of a terminator. Because a trace inlines functions, a guard
+    /// can fail at a point when, normally, we'd be `blocks.len()` stack frames deep in execution.
+    /// In order to start the `StopgapInterpreter`, we need to recreate each of those stack frames.
+    pub blocks: Vec<GuardBlock>,
     /// The TIR locals (and their SIR equivalent) that are live at the time of the guard. This is
     /// needed so that we can initialise the stopgap interpreter with the correct state.
     pub live_locals: Vec<Vec<LiveLocal>>,
@@ -609,7 +610,7 @@ impl fmt::Display for Guard {
         write!(
             f,
             "guard({}, {}, {:?}, [{}])",
-            self.val, self.kind, self.block, live
+            self.val, self.kind, self.blocks, live
         )
     }
 }

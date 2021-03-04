@@ -1346,7 +1346,7 @@ impl TraceCompiler {
             // Symbol names of the functions called while executing the trace. Needed to recreate
             // the stack frames in the StopgapInterpreter.
             let mut sym_labels = Vec::new();
-            for block in &guard.block {
+            for block in &guard.blocks {
                 let dynlbl = self.asm.new_dynamic_label();
                 dynasm!(self.asm
                     ; => dynlbl
@@ -1399,7 +1399,7 @@ impl TraceCompiler {
 
             // Second we iterate over all the functions that are "active" at the point of the
             // guard: each maps to a new stack frame.
-            for (i, block) in guard.block.iter().enumerate() {
+            for (i, block) in guard.blocks.iter().enumerate() {
                 let sym = block.symbol_name;
                 let bbidx = block.bb_idx;
                 let body = SIR.body(sym).unwrap();
