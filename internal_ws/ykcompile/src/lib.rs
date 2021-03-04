@@ -1,14 +1,5 @@
 //! The Yorick TIR trace compiler.
 
-#![cfg_attr(test, feature(test))]
-
-#[macro_use]
-extern crate dynasmrt;
-#[macro_use]
-extern crate lazy_static;
-#[cfg(test)]
-extern crate test;
-
 use libc::{c_void, dlsym, RTLD_DEFAULT};
 use std::{ffi::CString, fmt, mem};
 use ykpack::{Constant, Local, OffT, TypeId};

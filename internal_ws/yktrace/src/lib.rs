@@ -1,15 +1,8 @@
 //! Utilities for collecting and decoding traces.
 
-#![cfg_attr(test, feature(test))]
 #![cfg_attr(feature = "trace_sw", feature(thread_local))]
 #![cfg_attr(feature = "trace_sw", feature(core_intrinsics))]
 #![cfg_attr(feature = "trace_sw", feature(global_asm))]
-
-#[cfg(test)]
-extern crate test;
-
-#[macro_use]
-extern crate lazy_static;
 
 mod errors;
 pub mod sir;

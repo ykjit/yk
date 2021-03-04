@@ -4,7 +4,8 @@ use crate::{
     find_symbol, stack_builder::StackBuilder, CompileError, CompiledTrace, IndirectLoc, Location,
     RegAlloc, RegAndOffset,
 };
-use dynasmrt::{x64::Rq::*, DynamicLabel, DynasmApi, DynasmLabelApi, Register};
+use dynasmrt::{dynasm, x64::Rq::*, DynamicLabel, DynasmApi, DynasmLabelApi, Register};
+use lazy_static::lazy_static;
 use std::alloc::{alloc, Layout};
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -325,8 +326,7 @@ fn local_to_reg_name(loc: &Location) -> &'static str {
 
 /// Given a vector of `FrameInfo`s `vptr`, instantiates and initialises a SIR interpreter and returns its
 /// pointer. Consumes `vptr`.
-#[no_mangle]
-pub extern "sysv64" fn invoke_sinterp(vptr: *mut Vec<FrameInfo>) -> *mut StopgapInterpreter {
+extern "sysv64" fn invoke_sinterp(vptr: *mut Vec<FrameInfo>) -> *mut StopgapInterpreter {
     let v = unsafe { Box::from_raw(vptr) };
     let si = StopgapInterpreter::from_frames(*v);
     Box::into_raw(Box::new(si))
@@ -334,23 +334,22 @@ pub extern "sysv64" fn invoke_sinterp(vptr: *mut Vec<FrameInfo>) -> *mut Stopgap
 
 /// Given a size and alignment, allocates memory which later holds the live variables of a stack
 /// frame.
-pub extern "sysv64" fn allocate_layout(size: usize, align: usize) -> *mut u8 {
+extern "sysv64" fn allocate_layout(size: usize, align: usize) -> *mut u8 {
     let layout = Layout::from_size_align(size, align).unwrap();
     unsafe { alloc(layout) }
 }
 
 /// Instantiates an empty vector of `FrameInfo`s and returns its pointer.
-pub extern "sysv64" fn bh_new_vec() -> *mut Vec<FrameInfo> {
+extern "sysv64" fn bh_new_vec() -> *mut Vec<FrameInfo> {
     let v: Vec<FrameInfo> = Vec::new();
-    let ptr = Box::into_raw(Box::new(v));
-    ptr
+    Box::into_raw(Box::new(v))
 }
 
 /// Pushes a new `FrameInfo` instance onto the vector behind the pointer `vptr`. The `FrameInfo`
 /// instance is created from a pointer to a symbol name and its length, a basic block index and a
 /// pointer to some allocated memory. Note that this function converts the raw pointer `vptr` into
 /// an `&mut` reference.
-pub extern "sysv64" fn bh_push_vec(
+extern "sysv64" fn bh_push_vec(
     vptr: *mut Vec<FrameInfo>,
     sym_ptr: *const u8,
     sym_len: usize,
@@ -776,7 +775,7 @@ impl TraceCompiler {
             let dst_ro = dst_loc.unwrap_mem();
             let sir_ty = SIR.ty(&dst.ty());
             let tty = sir_ty.unwrap_tuple();
-            let flag_off = i32::try_from(tty.fields.offsets[1]).unwrap();
+            let flag_off = tty.fields.offsets[1];
 
             if opnd1_ty.is_signed_int() {
                 dynasm!(self.asm
@@ -1302,7 +1301,7 @@ impl TraceCompiler {
         // Reserved stack space for spilled locals during execution.
         let soff = self.stack_builder.size();
         // Reserved memory on the stack to spill live locals to during a guard failure.
-        let live_off = REG_POOL.len() * usize::try_from(QWORD_REG_SIZE).unwrap();
+        let live_off = REG_POOL.len() * QWORD_REG_SIZE;
 
         // After allocating stack space for the trace, we pad the stack pointer up to the next
         // 16-byte alignment boundary. Calls can use this fact when catering for alignment
@@ -1353,22 +1352,19 @@ impl TraceCompiler {
             // registers available to generate the stack frames. This also saves us from having to
             // do the save_regs/restore_regs dance multiple times below.
             for (tirlocal, loc) in live_locations.iter_mut() {
-                match loc {
-                    Location::Reg(reg) => {
-                        let off = -i32::try_from(
-                            soff + u32::from(*reg) * u32::try_from(QWORD_REG_SIZE).unwrap(),
-                        )
-                        .unwrap();
-                        let newloc = Location::Mem(RegAndOffset {
-                            reg: RBP.code(),
-                            off,
-                        });
-                        let ty = self.local_decls[&tirlocal].ty;
-                        let size = SIR.ty(&ty).size();
-                        self.store_raw(&newloc, &loc, size);
-                        *loc = newloc;
-                    }
-                    _ => {}
+                if let Location::Reg(reg) = loc {
+                    let off = -i32::try_from(
+                        soff + u32::from(*reg) * u32::try_from(QWORD_REG_SIZE).unwrap(),
+                    )
+                    .unwrap();
+                    let newloc = Location::Mem(RegAndOffset {
+                        reg: RBP.code(),
+                        off,
+                    });
+                    let ty = self.local_decls[&tirlocal].ty;
+                    let size = SIR.ty(&ty).size();
+                    self.store_raw(&newloc, &loc, size);
+                    *loc = newloc;
                 }
             }
 
