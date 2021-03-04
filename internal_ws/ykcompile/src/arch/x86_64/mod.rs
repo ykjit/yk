@@ -342,8 +342,7 @@ extern "sysv64" fn allocate_layout(size: usize, align: usize) -> *mut u8 {
 /// Instantiates an empty vector of `FrameInfo`s and returns its pointer.
 extern "sysv64" fn bh_new_vec() -> *mut Vec<FrameInfo> {
     let v: Vec<FrameInfo> = Vec::new();
-    let ptr = Box::into_raw(Box::new(v));
-    ptr
+    Box::into_raw(Box::new(v))
 }
 
 /// Pushes a new `FrameInfo` instance onto the vector behind the pointer `vptr`. The `FrameInfo`
@@ -776,7 +775,7 @@ impl TraceCompiler {
             let dst_ro = dst_loc.unwrap_mem();
             let sir_ty = SIR.ty(&dst.ty());
             let tty = sir_ty.unwrap_tuple();
-            let flag_off = i32::try_from(tty.fields.offsets[1]).unwrap();
+            let flag_off = tty.fields.offsets[1];
 
             if opnd1_ty.is_signed_int() {
                 dynasm!(self.asm
@@ -1302,7 +1301,7 @@ impl TraceCompiler {
         // Reserved stack space for spilled locals during execution.
         let soff = self.stack_builder.size();
         // Reserved memory on the stack to spill live locals to during a guard failure.
-        let live_off = REG_POOL.len() * usize::try_from(QWORD_REG_SIZE).unwrap();
+        let live_off = REG_POOL.len() * QWORD_REG_SIZE;
 
         // After allocating stack space for the trace, we pad the stack pointer up to the next
         // 16-byte alignment boundary. Calls can use this fact when catering for alignment
@@ -1353,22 +1352,19 @@ impl TraceCompiler {
             // registers available to generate the stack frames. This also saves us from having to
             // do the save_regs/restore_regs dance multiple times below.
             for (tirlocal, loc) in live_locations.iter_mut() {
-                match loc {
-                    Location::Reg(reg) => {
-                        let off = -i32::try_from(
-                            soff + u32::from(*reg) * u32::try_from(QWORD_REG_SIZE).unwrap(),
-                        )
-                        .unwrap();
-                        let newloc = Location::Mem(RegAndOffset {
-                            reg: RBP.code(),
-                            off,
-                        });
-                        let ty = self.local_decls[&tirlocal].ty;
-                        let size = SIR.ty(&ty).size();
-                        self.store_raw(&newloc, &loc, size);
-                        *loc = newloc;
-                    }
-                    _ => {}
+                if let Location::Reg(reg) = loc {
+                    let off = -i32::try_from(
+                        soff + u32::from(*reg) * u32::try_from(QWORD_REG_SIZE).unwrap(),
+                    )
+                    .unwrap();
+                    let newloc = Location::Mem(RegAndOffset {
+                        reg: RBP.code(),
+                        off,
+                    });
+                    let ty = self.local_decls[&tirlocal].ty;
+                    let size = SIR.ty(&ty).size();
+                    self.store_raw(&newloc, &loc, size);
+                    *loc = newloc;
                 }
             }
 
