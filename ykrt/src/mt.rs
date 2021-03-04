@@ -180,8 +180,9 @@ impl MTThread {
         loc: Option<&Location<I>>,
         step_fn: S,
         ctx: &mut I,
-    ) where
-        S: Fn(&mut I),
+    ) -> bool
+    where
+        S: Fn(&mut I) -> bool,
     {
         // If a loop can start at this position then update the location and potentially start/stop
         // this thread's tracer.
@@ -189,13 +190,13 @@ impl MTThread {
             if let Some(func) = self.transition_location::<I>(loc) {
                 let ptr = self.exec_trace(func, ctx);
                 if ptr.is_null() {
-                    // Trace succesfully executed.
-                    return;
+                    // Trace finished executing, which means the user did not specify that
+                    // `interp_step` should run in a loop, by adding a `return false`.
+                    return true;
                 } else {
                     unsafe {
                         let mut si = StopgapInterpreter(ptr);
-                        si.interpret();
-                        return;
+                        return si.interpret();
                     }
                 }
             }
@@ -474,7 +475,9 @@ mod tests {
     struct EmptyInterpCtx {}
 
     #[interp_step]
-    fn empty_step(_: &mut EmptyInterpCtx) {}
+    fn empty_step(_: &mut EmptyInterpCtx) -> bool {
+        true
+    }
 
     #[test]
     fn threshold_passed() {
@@ -597,7 +600,7 @@ mod tests {
         }
 
         #[interp_step]
-        fn simple_interp_step(ctx: &mut InterpCtx) {
+        fn simple_interp_step(ctx: &mut InterpCtx) -> bool {
             match ctx.prog[ctx.pc] {
                 INC => {
                     ctx.pc += 1;
@@ -605,7 +608,8 @@ mod tests {
                 }
                 RESTART => ctx.pc = 0,
                 _ => unreachable!(),
-            }
+            };
+            true
         }
 
         let mut ctx = InterpCtx {
@@ -662,7 +666,7 @@ mod tests {
         }
 
         #[interp_step]
-        fn simple_interp_step(ctx: &mut InterpCtx) {
+        fn simple_interp_step(ctx: &mut InterpCtx) -> bool {
             match ctx.prog[ctx.pc] {
                 INC => {
                     ctx.pc += 1;
@@ -670,7 +674,8 @@ mod tests {
                 }
                 RESTART => ctx.pc = 0,
                 _ => unreachable!(),
-            }
+            };
+            true
         }
 
         // This tests for non-deterministic bugs in the Location statemachine: the only way we can
@@ -750,7 +755,7 @@ mod tests {
         }
 
         #[interp_step]
-        fn simple_interp_step(ctx: &mut InterpCtx) {
+        fn simple_interp_step(ctx: &mut InterpCtx) -> bool {
             match ctx.prog[ctx.pc] {
                 INC => {
                     ctx.pc += 1;
@@ -758,7 +763,8 @@ mod tests {
                 }
                 RESTART => ctx.pc = 0,
                 _ => unreachable!(),
-            }
+            };
+            true
         }
 
         let locs = Arc::new(vec![Some(Location::new()), None, None]);
@@ -815,7 +821,7 @@ mod tests {
         }
 
         #[interp_step]
-        fn simple_interp_step(ctx: &mut InterpCtx) {
+        fn simple_interp_step(ctx: &mut InterpCtx) -> bool {
             match ctx.prog[ctx.pc] {
                 INC => {
                     ctx.pc += 1;
@@ -823,7 +829,8 @@ mod tests {
                 }
                 RESTART => ctx.pc = 0,
                 _ => unreachable!(),
-            }
+            };
+            true
         }
 
         let locs = Arc::new(vec![Some(Location::new()), None, None]);
@@ -909,7 +916,7 @@ mod tests {
         }
 
         #[interp_step]
-        fn simple_interp_step(ctx: &mut InterpCtx) {
+        fn simple_interp_step(ctx: &mut InterpCtx) -> bool {
             match ctx.prog[ctx.pc] {
                 INC => {
                     ctx.pc += 1;
@@ -919,7 +926,8 @@ mod tests {
                 }
                 RESTART => ctx.pc = 0,
                 _ => unreachable!(),
-            }
+            };
+            true
         }
 
         let mut ctx = InterpCtx {
@@ -948,5 +956,42 @@ mod tests {
         let loc = locs[ctx.pc].as_ref();
         mtt.control_point(loc, simple_interp_step, &mut ctx);
         assert_eq!(ctx.run, 2);
+    }
+
+    #[test]
+    fn loop_interpreter() {
+        use std::{thread, time};
+        let mut mtt = MTBuilder::new().hot_threshold(2).init();
+
+        let loc = Location::new();
+
+        struct InterpCtx {
+            counter: u8,
+        }
+
+        #[interp_step]
+        fn simple_interp_step(ctx: &mut InterpCtx) -> bool {
+            let a = ctx.counter;
+            if ctx.counter < 100 {
+                ctx.counter = a + 1;
+            } else {
+                ctx.counter = a + 2;
+            }
+            if ctx.counter > 110 {
+                return true; // Exit the interpreter.
+            }
+            false
+        }
+
+        let mut ctx = InterpCtx { counter: 0 };
+        loop {
+            if mtt.control_point(Some(&loc), simple_interp_step, &mut ctx) {
+                break;
+            }
+            // Slow down the interpreter so we get a chance to compile stuff.
+            thread::sleep(time::Duration::from_millis(10));
+        }
+
+        assert_eq!(ctx.counter, 112);
     }
 }

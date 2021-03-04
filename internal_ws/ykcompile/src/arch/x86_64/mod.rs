@@ -1286,7 +1286,11 @@ impl TraceCompiler {
     }
 
     /// Emit a return instruction.
-    fn ret(&mut self, gl: Vec<(&Guard, HashMap<&Local, Location>, DynamicLabel)>) {
+    fn ret(
+        &mut self,
+        gl: Vec<(&Guard, HashMap<&Local, Location>, DynamicLabel)>,
+        stitch_trace: bool,
+    ) {
         // Reset the stack/base pointers and return from the trace. We also need to generate the
         // code that reserves stack space for spilled locals here, since we don't know at the
         // beginning of the trace how many locals are going to be spilled.
@@ -1310,11 +1314,18 @@ impl TraceCompiler {
         let topalign = SYSV_CALL_STACK_ALIGN
             - (live_off + soff as usize + CALLEE_SAVED_REGS.len() * QWORD_REG_SIZE)
                 % SYSV_CALL_STACK_ALIGN;
-        // Restore registers.
+
+        if stitch_trace {
+            // Loop trace indefinitely until a guard fails.
+            dynasm!(self.asm
+                ; jmp ->main
+            );
+        }
         dynasm!(self.asm
             ; mov rax, 0 // Signifies that there were no guard failures.
             ; ->cleanup:
         );
+        // Restore registers.
         self.restore_regs(&*CALLEE_SAVED_REGS);
         // Restore the stack and return.
         dynasm!(self.asm
@@ -1483,7 +1494,7 @@ impl TraceCompiler {
                 Err(e) => tc.crash_dump(Some(e)),
             }
         }
-        tc.ret(gl);
+        tc.ret(gl, tt.stitch);
         let buf = tc.asm.finalize().unwrap();
         if debug {
             // In debug mode the memory section which contains the compiled trace is marked as

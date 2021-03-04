@@ -25,6 +25,7 @@ pub struct TirTrace<'a, 'm> {
     pub local_decls: HashMap<Local, LocalDecl>,
     pub addr_map: HashMap<String, u64>,
     sir: &'a Sir<'m>,
+    pub stitch: bool,
 }
 
 impl<'a, 'm> TirTrace<'a, 'm> {
@@ -51,6 +52,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
         let mut live_locals: Vec<HashSet<Local>> = Vec::new();
         let mut guard_blocks: Vec<GuardBlock> = Vec::new();
 
+        let mut stitch_trace = false;
         let mut in_interp_step = false;
         let mut entered_call = false;
         while let Some(loc) = itr.next() {
@@ -153,10 +155,23 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                             idx: rnm.rename_iplace(idx, &body),
                             scale: *scale,
                         },
-                        Statement::Store(dst, src) => Statement::Store(
-                            rnm.rename_iplace(dst, &body),
-                            rnm.rename_iplace(src, &body),
-                        ),
+                        Statement::Store(dst, src) => {
+                            if matches!(dst, IRPlace::Val { local, .. } if local == &sir::RETURN_LOCAL)
+                            {
+                                if matches!(src, IRPlace::Const { val: Constant::Bool(false), ..}) {
+                                    if body.flags.contains(BodyFlags::INTERP_STEP) {
+                                        // If the `interp_step` function returns false, we enabled
+                                        // trace stitching which loops the trace indefinitely until
+                                        // a guard fails.
+                                        stitch_trace = true;
+                                    }
+                                }
+                            }
+                            Statement::Store(
+                                rnm.rename_iplace(dst, &body),
+                                rnm.rename_iplace(src, &body),
+                            )
+                        }
                         Statement::BinaryOp {
                             dst,
                             op,
@@ -424,6 +439,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
             local_decls,
             addr_map,
             sir,
+            stitch: stitch_trace,
         })
     }
 
