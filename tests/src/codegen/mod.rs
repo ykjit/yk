@@ -271,6 +271,74 @@ macro_rules! mk_binop_test {
                 assert!(unsafe { ct.execute(&mut args).is_null() });
                 assert_eq!(args, BinopCtx::new($arg1, $arg2, $expect));
             }
+
+            /// The same test as above, but with $arg1 being a constant.
+            #[test]
+            fn [<$name _ $type _const_arg1>]() {
+                #[derive(Eq, PartialEq, Debug)]
+                struct BinopCtx {
+                    arg2: $type,
+                    res: $type,
+                }
+
+                impl BinopCtx {
+                    fn new(arg2: $type, res: $type) -> Self {
+                        Self { arg2, res }
+                    }
+                }
+
+                #[interp_step]
+                fn interp_step(ctx: &mut BinopCtx) {
+                    ctx.res = $arg1 $op ctx.arg2;
+                }
+
+                let mut ctx = BinopCtx::new($arg2, 0);
+                #[cfg(tracermode = "hw")]
+                let th = start_tracing(TracingKind::HardwareTracing);
+                #[cfg(tracermode = "sw")]
+                let th = start_tracing(TracingKind::SoftwareTracing);
+                interp_step(&mut ctx);
+                let sir_trace = th.stop_tracing().unwrap();
+                let ct = compile_trace(sir_trace).unwrap();
+
+                let mut args = BinopCtx::new($arg2, 0);
+                assert!(unsafe { ct.execute(&mut args).is_null() });
+                assert_eq!(args, BinopCtx::new($arg2, $expect));
+            }
+
+            /// And finally a test with a const $arg2.
+            #[test]
+            fn [<$name _ $type _const_arg2>]() {
+                #[derive(Eq, PartialEq, Debug)]
+                struct BinopCtx {
+                    arg1: $type,
+                    res: $type,
+                }
+
+                impl BinopCtx {
+                    fn new(arg1: $type, res: $type) -> Self {
+                        Self { arg1, res }
+                    }
+                }
+
+                #[interp_step]
+                fn interp_step(ctx: &mut BinopCtx) {
+                    ctx.res = ctx.arg1 $op $arg2
+                }
+
+                let mut ctx = BinopCtx::new($arg1, 0);
+                #[cfg(tracermode = "hw")]
+                let th = start_tracing(TracingKind::HardwareTracing);
+                #[cfg(tracermode = "sw")]
+                let th = start_tracing(TracingKind::SoftwareTracing);
+                interp_step(&mut ctx);
+                let sir_trace = th.stop_tracing().unwrap();
+                let ct = compile_trace(sir_trace).unwrap();
+
+                let mut args = BinopCtx::new($arg1, 0);
+                assert!(unsafe { ct.execute(&mut args).is_null() });
+                assert_eq!(args, BinopCtx::new($arg1, $expect));
+            }
         }
     };
 }
@@ -299,18 +367,28 @@ macro_rules! mk_binop_tests_signed {
     };
 }
 
+// FIXME -- At the time of writing we haven't implemented lowerings for Rust-level `const`s.
+// e.g. `unimplemented constant: const core::num::<impl u64>::MAX`
+// We can get away with using static values for now.
+static U16_MAX: u16 = 65535;
+static U32_MAX: u32 = 4294967295;
+static U64_MAX: u64 = 18446744073709551615;
+static I16_MAX: i16 = 32767;
+static I32_MAX: i32 = 2147483647;
+static I64_MAX: i64 = 9223372036854775807;
+
 mk_binop_tests_unsigned!(binop_add1, +, 0, 0, 0);
 mk_binop_tests_signed!(binop_add2, +, 0, 0, 0);
 mk_binop_tests_unsigned!(binop_add3, +, 1, 1, 2);
 mk_binop_tests_signed!(binop_add4, +, 1, 1, 2);
 mk_binop_tests_unsigned!(binop_add5, +, 253, 2, 255);
 mk_binop_tests_signed!(binop_add6, +, 125, 2, 127);
-mk_binop_test!(binop_add7, +, u16, u16::MAX - 7, 7, u16::MAX);
-mk_binop_test!(binop_add8, +, u32, u32::MAX - 14, 14, u32::MAX);
-mk_binop_test!(binop_add9, +, u64, u64::MAX - 100, 100, u64::MAX);
-mk_binop_test!(binop_add10, +, i16, i16::MAX - 7, 7, i16::MAX);
-mk_binop_test!(binop_add11, +, i32, i32::MAX - 14, 14, i32::MAX);
-mk_binop_test!(binop_add13, +, i64, i64::MAX - 100, 100, i64::MAX);
+mk_binop_test!(binop_add7, +, u16, U16_MAX - 7, 7, U16_MAX);
+mk_binop_test!(binop_add8, +, u32, U32_MAX - 14, 14, U32_MAX);
+mk_binop_test!(binop_add9, +, u64, U64_MAX - 100, 100, U64_MAX);
+mk_binop_test!(binop_add10, +, i16, I16_MAX - 7, 7, I16_MAX);
+mk_binop_test!(binop_add11, +, i32, I32_MAX - 14, 14, I32_MAX);
+mk_binop_test!(binop_add13, +, i64, I64_MAX - 100, 100, I64_MAX);
 
 mk_binop_tests_unsigned!(binop_sub1, -, 0, 0, 0);
 mk_binop_tests_signed!(binop_sub2, -, 0, 0, 0);
@@ -319,12 +397,12 @@ mk_binop_tests_signed!(binop_sub4, -, 1, 0, 1);
 mk_binop_tests_signed!(binop_sub5, -, 0, 1, -1);
 mk_binop_tests_signed!(binop_sub6, -, -120, 8, -128);
 mk_binop_tests_signed!(binop_sub7, -, -1, -1, 0);
-mk_binop_test!(binop_sub8, -, u16, u16::MAX, 7, u16::MAX - 7);
-mk_binop_test!(binop_sub9, -, u32, u32::MAX, 8, u32::MAX - 8);
-mk_binop_test!(binop_sub10, -, u64, u64::MAX, 33, u64::MAX - 33);
-mk_binop_test!(binop_sub11, -, i16, i16::MAX, 7, i16::MAX - 7);
-mk_binop_test!(binop_sub12, -, i32, i32::MAX, 8, i32::MAX - 8);
-mk_binop_test!(binop_sub13, -, i64, i64::MAX, 33, i64::MAX - 33);
+mk_binop_test!(binop_sub8, -, u16, U16_MAX, 7, U16_MAX - 7);
+mk_binop_test!(binop_sub9, -, u32, U32_MAX, 8, U32_MAX - 8);
+mk_binop_test!(binop_sub10, -, u64, U64_MAX, 33, U64_MAX - 33);
+mk_binop_test!(binop_sub11, -, i16, I16_MAX, 7, I16_MAX - 7);
+mk_binop_test!(binop_sub12, -, i32, I32_MAX, 8, I32_MAX - 8);
+mk_binop_test!(binop_sub13, -, i64, I64_MAX, 33, I64_MAX - 33);
 
 // FIXME implement and test signed multiplication.
 mk_binop_tests_unsigned!(binop_mul1, *, 0, 0, 0);

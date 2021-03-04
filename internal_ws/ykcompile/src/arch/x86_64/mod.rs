@@ -128,7 +128,7 @@ macro_rules! binop_mul_div {
     //
     //   Encoding       Semantics
     //   --------------------------------------------------------------------
-    //   MUL r/m8:      AX * r/m8          AX <- result
+    //   MUL r/m8:      AL * r/m8          AX <- result
     //   MUL r/m16:     AX * r/m16         DX:AX <- result
     //   MUL r/m32:     EAX * r/m32        EDX:EAX <- result
     //   MUL r/m64:     RAX * r/m64        RDX:RAX <- result
@@ -139,8 +139,8 @@ macro_rules! binop_mul_div {
     //   DIV r/m64:     RDX:RAX * r/m64    RAX <- quotient, RDX <- remainder
     //
     // A couple of thing to note:
-    //   - Both MUL and DIV's first (implicit) operand is twice as large as the second (explicit)
-    //     operand. For all but r/m8 variants, the operand extends into RDX.
+    //   - DIV's first (implicit) operand is twice as large as the second (explicit) operand and
+    //     for all but the r/m8 variant, the operand extends into (some subset of) RDX.
     //   - Similarly, the result of both MUL and DIV is twice as large as the second operand.
     //
     // SIR only deals with same-sized operands and doesn't require us to capture the remainder for
@@ -196,15 +196,17 @@ macro_rules! binop_mul_div {
                     } else {
                         (src_r, false)
                     };
-                    // Set unused extended operand space to zero.
-                    if size == 1 {
-                        dynasm!(self.asm
-                            ; and ax, 0xff
-                        );
-                    } else {
-                        dynasm!(self.asm
-                            ; xor rdx, rdx
-                        );
+                    // Set DIV's unused extended operand space to zero.
+                    if stringify!($op) == "div" {
+                        if size == 1 {
+                            dynasm!(self.asm
+                                ; and ax, 0x00ff
+                            );
+                        } else {
+                            dynasm!(self.asm
+                                ; xor rdx, rdx
+                            );
+                        }
                     }
                     match size {
                         1 => {
@@ -238,10 +240,17 @@ macro_rules! binop_mul_div {
                 },
                 Location::Mem(..) => todo!(),
                 Location::Const { val, .. } => {
-                    if size > 1 {
-                        dynasm!(self.asm
-                            ; xor rdx, rdx
-                        );
+                    // Set DIV's unused extended operand space to zero.
+                    if stringify!($op) == "div" {
+                        if size == 1 {
+                            dynasm!(self.asm
+                                ; and ax, 0x00ff
+                            );
+                        } else {
+                            dynasm!(self.asm
+                                ; xor rdx, rdx
+                            );
+                        }
                     }
                     // It's safe to use TEMP_REG here, because opnd2 isn't in a register and if
                     // opnd1_reg was TEMP_REG then we've already moved it into RAX.
