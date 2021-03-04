@@ -4,7 +4,8 @@ use crate::{
     find_symbol, stack_builder::StackBuilder, CompileError, CompiledTrace, IndirectLoc, Location,
     RegAlloc, RegAndOffset,
 };
-use dynasmrt::{x64::Rq::*, DynamicLabel, DynasmApi, DynasmLabelApi, Register};
+use dynasmrt::{dynasm, x64::Rq::*, DynamicLabel, DynasmApi, DynasmLabelApi, Register};
+use lazy_static::lazy_static;
 use std::alloc::{alloc, Layout};
 use std::collections::HashMap;
 use std::convert::TryFrom;

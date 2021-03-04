@@ -2,6 +2,7 @@
 
 use fallible_iterator::FallibleIterator;
 use fxhash::FxHashMap;
+use lazy_static::lazy_static;
 use memmap2::Mmap;
 use object::{Object, ObjectSection};
 use std::{

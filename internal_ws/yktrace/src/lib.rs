@@ -5,12 +5,6 @@
 #![cfg_attr(feature = "trace_sw", feature(core_intrinsics))]
 #![cfg_attr(feature = "trace_sw", feature(global_asm))]
 
-#[cfg(test)]
-extern crate test;
-
-#[macro_use]
-extern crate lazy_static;
-
 mod errors;
 pub mod sir;
 pub mod tir;

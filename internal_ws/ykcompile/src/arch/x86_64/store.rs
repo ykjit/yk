@@ -1,7 +1,7 @@
 //! Code generation for stores.
 
 use super::{IndirectLoc, Location, RegAndOffset, TraceCompiler, TEMP_REG};
-use dynasmrt::DynasmApi;
+use dynasmrt::{dynasm, DynasmApi};
 use ykpack::IRPlace;
 use yktrace::sir::SIR;
 
