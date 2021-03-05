@@ -25,7 +25,7 @@ pub struct FrameInfo {
     /// terminator of this block is were we continue.
     pub bbidx: usize,
     /// Pointer to memory containing the live variables.
-    pub mem: *mut u8,
+    pub locals: *mut u8,
 }
 
 /// Heap allocated memory for writing and reading locals of a stack frame.
@@ -209,7 +209,7 @@ impl StopgapInterpreter {
         for fi in v {
             let body = &fi.body;
             let mem = LocalMem {
-                locals: fi.mem,
+                locals: fi.locals,
                 offsets: body.offsets.clone(),
                 layout: Layout::from_size_align(body.layout.0, body.layout.1).unwrap(),
             };

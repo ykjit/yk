@@ -333,42 +333,47 @@ fn local_to_reg_name(loc: &Location) -> &'static str {
 // Collection of functions required during a guard failure to instantiate and initialise the
 // stopgap interpreter.
 
-/// Given a vector of `FrameInfo`s `vptr`, instantiates and initialises a SIR interpreter and returns its
-/// pointer. Consumes `vptr`.
-extern "sysv64" fn invoke_sinterp(vptr: *mut Vec<FrameInfo>) -> *mut StopgapInterpreter {
+/// Given a pointer to a vector of `FrameInfo`s, creates and returns a boxed StopgapInterpreter.
+/// Consumes `vptr`.
+extern "sysv64" fn new_stopgap(vptr: *mut Vec<FrameInfo>) -> *mut StopgapInterpreter {
     let v = unsafe { Box::from_raw(vptr) };
     let si = StopgapInterpreter::from_frames(*v);
     Box::into_raw(Box::new(si))
 }
 
-/// Given a size and alignment, allocates memory which later holds the live variables of a stack
-/// frame.
-extern "sysv64" fn allocate_layout(size: usize, align: usize) -> *mut u8 {
+/// Given a size and alignment, `alloc` a block of memory for storing a frame's live variables.
+extern "sysv64" fn alloc_live_vars(size: usize, align: usize) -> *mut u8 {
     let layout = Layout::from_size_align(size, align).unwrap();
     unsafe { alloc(layout) }
 }
 
-/// Instantiates an empty vector of `FrameInfo`s and returns its pointer.
-extern "sysv64" fn bh_new_vec() -> *mut Vec<FrameInfo> {
+/// Returns a pointer to a boxed empty `Vec<FrameInfo>`, suitable for passing to `push_frames_vec`.
+extern "sysv64" fn new_frames_vec() -> *mut Vec<FrameInfo> {
     let v: Vec<FrameInfo> = Vec::new();
     Box::into_raw(Box::new(v))
 }
 
-/// Pushes a new `FrameInfo` instance onto the vector behind the pointer `vptr`. The `FrameInfo`
-/// instance is created from a pointer to a symbol name and its length, a basic block index and a
-/// pointer to some allocated memory. Note that this function converts the raw pointer `vptr` into
-/// an `&mut` reference.
-extern "sysv64" fn bh_push_vec(
+/// Construct and push a new `FrameInfo` to the `Vec<FrameInfo>`. `sym_ptr` must be a pointer to a
+/// function symbol name (of length `sym_len`) that is guaranteed not to be deallocated or moved.
+/// `locals` is a pointer to a block of memory from `alloc_live_vars`, responsibility for which is
+/// effectively moved to this function (i.e. the caller of `push_frames_vec` should no longer
+/// read/write/free `mem`). Note that this function converts the raw pointer `vptr` into an `&mut`
+/// reference.
+extern "sysv64" fn push_frames_vec(
     vptr: *mut Vec<FrameInfo>,
     sym_ptr: *const u8,
     sym_len: usize,
     bbidx: usize,
-    mem: *mut u8,
+    locals: *mut u8,
 ) {
     let fname =
         unsafe { std::str::from_utf8(std::slice::from_raw_parts(sym_ptr, sym_len)).unwrap() };
     let body = SIR.body(fname).unwrap();
-    let fi = FrameInfo { body, bbidx, mem };
+    let fi = FrameInfo {
+        body,
+        bbidx,
+        locals,
+    };
     let v = unsafe { &mut *vptr };
     v.push(fi);
 }
@@ -1334,16 +1339,14 @@ impl TraceCompiler {
             ; ret
         );
 
-        // Add guard failure labels. When a guard fails we jump to one of these labels. For each
-        // stack frame, we need to allocate memory using `allocate_layout`. We then copy the live
-        // variables into this memory and store it, together with other information, inside a
-        // Vec<FrameInfo>. Finally, we call `invoke_sinterp` passing in this vector, which
-        // initialises a SIR interpreter and runs it.
+        // Output code for guard failure. This consists of a label for the guard to jump to and
+        // various code to get the system in the appropriate state for a StopgapInterpreter to take
+        // over execution.
         for (guard, mut live_locations, label) in gl {
             // Symbol names of the functions called while executing the trace. Needed to recreate
             // the stack frames in the StopgapInterpreter.
             let mut sym_labels = Vec::new();
-            for block in &guard.block {
+            for block in &guard.blocks {
                 let dynlbl = self.asm.new_dynamic_label();
                 dynasm!(self.asm
                     ; => dynlbl
@@ -1357,9 +1360,10 @@ impl TraceCompiler {
                 ; => label
             );
 
-            // Spill all registers that are currently in use to the stack, so we have enough
-            // registers available to generate the stack frames. This also saves us from having to
-            // do the save_regs/restore_regs dance multiple times below.
+            // Spill all registers holding live values to the stack. This serves two purposes:
+            // first, it frees up the registers for us to use for other purposes; second, it means
+            // that the stack frame reconstruction only has to deal with stack entries and can
+            // ignore registers entirely.
             for (tirlocal, loc) in live_locations.iter_mut() {
                 if let Location::Reg(reg) = loc {
                     let off = -i32::try_from(
@@ -1377,34 +1381,38 @@ impl TraceCompiler {
                 }
             }
 
-            // Create a vector of `FrameInfo`s in which we store the allocated memory pointers,
-            // body, and basic block index for each active stack frame during the guard failure.
-            // This vector is later handed to the StopgapInterpreter, in order to initialise the
-            // stack frames needed to interpret SIR. We can use a fixed register here, since we've
-            // spilled all registers to the stack.
+            // The trace has a single stack frame. However, since the trace can have inlined an
+            // arbitrary number of functions, at any given point in the trace we've effectively
+            // squashed multiple stack frames down into one. When a guard fails, we have to
+            // reconstruct these stack frames in the format that the StopgapInterpreter needs. This
+            // will have the same number of stack frames as the "real" executable would have,
+            // though we store them in a different format (the StopgapInterpreter has its own
+            // layout of stack frames).
+            //
+            // First we create the Vec that we'll store the new stack frames into.
             let frame_vec_reg = R12.code();
             dynasm!(self.asm
-                ; mov r11, QWORD bh_new_vec as i64
+                ; mov r11, QWORD new_frames_vec as i64
                 ; call r11
                 ; mov Rq(frame_vec_reg), rax
             );
 
-            for (i, block) in guard.block.iter().enumerate() {
+            // Second we iterate over all the functions that are "active" at the point of the
+            // guard: each maps to a new stack frame.
+            for (i, block) in guard.blocks.iter().enumerate() {
                 let sym = block.symbol_name;
                 let bbidx = block.bb_idx;
                 let body = SIR.body(sym).unwrap();
                 let sym_label = sym_labels[i];
 
-                // There's no need to save registers before this call, since we've moved
-                // all live locals to the stack above.
+                // Allocate memory for the live variables.
                 dynasm!(self.asm
-                    // Allocate memory for live variables.
                     ; mov rdi, i32::try_from(body.layout.0).unwrap()
                     ; mov rsi, i32::try_from(body.layout.1).unwrap()
-                    ; mov r11, QWORD allocate_layout as i64
+                    ; mov r11, QWORD alloc_live_vars as i64
                     ; call r11
                 );
-                // Move live variables into allocated memory.
+                // Move the live variables into the allocated memory.
                 for liveloc in &guard.live_locals[i] {
                     let ty = self.local_decls[&liveloc.tir].ty;
                     let size = SIR.ty(&ty).size();
@@ -1418,25 +1426,26 @@ impl TraceCompiler {
                     self.store_raw(&dst_loc, &src_loc, size);
                 }
 
-                // Add frame information to vector.
+                // Push the new stack frame to the Vec.
                 dynasm!(self.asm
                     ; mov rdi, Rq(frame_vec_reg)
                     ; lea rsi, [=>sym_label]
                     ; mov rdx, sym.len() as i32
                     ; mov rcx, bbidx as i32
                     ; mov r8, rax // allocated memory
-                    ; mov r11, QWORD bh_push_vec as i64
+                    ; mov r11, QWORD push_frames_vec as i64
                     ; call r11
                 );
             }
 
+            // Create and initialise SIR interpreter, then return it.
+            //
             // There's no need to save any registers here, since we immediately jump to cleanup
             // afterwards, which exits the trace.
             dynasm!(self.asm
-                // Create and initialise SIR interpreter, then return it.
                 ; mov rdi, Rq(frame_vec_reg)
                 ; xor rax, rax
-                ; mov r11, QWORD invoke_sinterp as i64
+                ; mov r11, QWORD new_stopgap as i64
                 ; call r11
                 ; jmp ->cleanup
             );
