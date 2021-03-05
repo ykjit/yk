@@ -4,7 +4,9 @@ use crate::{
     find_symbol, stack_builder::StackBuilder, CompileError, CompiledTrace, IndirectLoc, Location,
     RegAlloc, RegAndOffset,
 };
-use dynasmrt::{dynasm, x64::Rq::*, DynamicLabel, DynasmApi, DynasmLabelApi, Register};
+use dynasmrt::{
+    dynasm, x64::Rq::*, DynamicLabel, DynasmApi, DynasmLabelApi, ExecutableBuffer, Register,
+};
 use lazy_static::lazy_static;
 use std::alloc::{alloc, Layout};
 use std::collections::HashMap;
@@ -1299,8 +1301,11 @@ impl TraceCompiler {
         panic!("stopped due to trace compilation error");
     }
 
-    /// Emit a return instruction.
-    fn ret(&mut self, gl: Vec<(&Guard, HashMap<&Local, Location>, DynamicLabel)>) {
+    /// Finalise the compiled trace returning an ExecutableBuffer. Consumes self.
+    fn finish(
+        mut self,
+        gl: Vec<(&Guard, HashMap<&Local, Location>, DynamicLabel)>,
+    ) -> ExecutableBuffer {
         // Reset the stack/base pointers and return from the trace. We also need to generate the
         // code that reserves stack space for spilled locals here, since we don't know at the
         // beginning of the trace how many locals are going to be spilled.
@@ -1324,13 +1329,12 @@ impl TraceCompiler {
         let topalign = SYSV_CALL_STACK_ALIGN
             - (live_off + soff as usize + CALLEE_SAVED_REGS.len() * QWORD_REG_SIZE)
                 % SYSV_CALL_STACK_ALIGN;
-        // Restore registers.
         dynasm!(self.asm
             ; mov rax, 0 // Signifies that there were no guard failures.
             ; ->cleanup:
         );
+        // Exit from the trace, by resetting the stack and previously saved registers.
         self.restore_regs(&*CALLEE_SAVED_REGS);
-        // Restore the stack and return.
         dynasm!(self.asm
             ; add rsp, live_off as i32
             ; add rsp, soff as i32
@@ -1338,7 +1342,31 @@ impl TraceCompiler {
             ; pop rbp
             ; ret
         );
+        // Generate guard failure code.
+        self.compile_guards(gl, soff);
+        // Initialise the compiled trace, by aligning the stack, reserving space for spilling, and
+        // saving callee-saved registers.
+        dynasm!(self.asm
+            ; ->reserve:
+            ; push rbp
+            ; sub rsp, topalign as i32
+            ; mov rbp, rsp
+            ; sub rsp, soff as i32
+            ; sub rsp, live_off as i32
+        );
+        self.save_regs(&*CALLEE_SAVED_REGS);
+        dynasm!(self.asm
+            ; jmp ->main
+        );
+        // Return executable buffer.
+        self.asm.finalize().unwrap()
+    }
 
+    fn compile_guards(
+        &mut self,
+        gl: Vec<(&Guard, HashMap<&Local, Location>, DynamicLabel)>,
+        soff: u32,
+    ) {
         // Output code for guard failure. This consists of a label for the guard to jump to and
         // various code to get the system in the appropriate state for a StopgapInterpreter to take
         // over execution.
@@ -1450,21 +1478,6 @@ impl TraceCompiler {
                 ; jmp ->cleanup
             );
         }
-
-        // Reserve stack space.
-        dynasm!(self.asm
-            ; ->reserve:
-            ; push rbp
-            ; sub rsp, topalign as i32
-            ; mov rbp, rsp
-            ; sub rsp, soff as i32
-            ; sub rsp, live_off as i32
-        );
-        // Save registers and jump to main.
-        self.save_regs(&*CALLEE_SAVED_REGS);
-        dynasm!(self.asm
-            ; jmp ->main
-        );
     }
 
     fn compile(mut tt: TirTrace, debug: bool) -> dynasmrt::ExecutableBuffer {
@@ -1501,8 +1514,7 @@ impl TraceCompiler {
                 Err(e) => tc.crash_dump(Some(e)),
             }
         }
-        tc.ret(gl);
-        let buf = tc.asm.finalize().unwrap();
+        let buf = tc.finish(gl);
         if debug {
             // In debug mode the memory section which contains the compiled trace is marked as
             // writeable, which enables gdb/lldb to set breakpoints within the compiled code.
