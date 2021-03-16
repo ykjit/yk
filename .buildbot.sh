@@ -39,10 +39,19 @@ cd ..
 rustup override set ykrustc-stage1
 
 # Test both workspaces using the compiler we just built.
+# We do this for both debug and release mode.
 export RUSTFLAGS="-C tracer=${CI_TRACER_KIND} -D warnings"
-cargo xtask test
-cargo xtask bench
-cargo xtask clean
+for mode in "" "--release"; do
+    cargo xtask test ${mode}
+    # Check that extra arguments (e.g. test filtering and `--nocapture`) are
+    # handled correctly.
+    cargo xtask test guard ${mode} -- --nocapture | grep -v binop
+    cargo xtask clean ${mode}
 
-# Also test the build without xtask, as that's what consumers will do.
-cargo build
+    # Also test the build without xtask, as that's what consumers will do.
+    cargo build ${mode}
+    cargo clean ${mode}
+done
+
+# Benchmarking always implies release mode.
+cargo xtask bench

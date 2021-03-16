@@ -68,20 +68,14 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String], feature
     let mut rust_flags = env::var("RUSTFLAGS").unwrap_or_else(|_| String::new());
 
     match target {
-        "audit" => {}
+        "audit" | "clean" => {}
         "fmt" => {
             rust_flags.clear();
-        }
-        "clean" => {
-            if workspace == Workspace::Internal {
-                // The internal workspace is optimized.
-                cmd.arg("--release".to_string());
-            }
         }
         "bench" | "build" | "check" | "clippy" | "test" => {
             // Ensure that the whole workspace is tested and not just the base crate in the
             // workspace.
-            if target == "test" {
+            if target == "test" || target == "bench" {
                 cmd.arg("--workspace");
             }
 
@@ -89,10 +83,6 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String], feature
                 let tracing_kind = find_tracing_kind(&rust_flags);
                 rust_flags = make_internal_rustflags(&rust_flags);
 
-                // Optimise the internal workspace. `--release` is not valid for `cargo bench`.
-                if target != "bench" {
-                    cmd.arg("--release");
-                }
                 // Set the tracermode cfg macro, but without changing anything relating to code
                 // generation. We can't use `-C tracer=hw` as this would turn off optimisations
                 // and emit SIR for stuff we will never trace.
@@ -103,15 +93,25 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String], feature
 
                 // `cargo test` in the internal workspace won't build libykshim.so, so we have
                 // to force-build it to avoid linkage problems for the external workspace.
-                if target == "test" {
-                    run_action(Workspace::Internal, "build", &[], &["testing".to_owned()]);
+                if target == "test" || target == "bench" {
+                    // Since we are running a different target to what the user requested, the
+                    // extra_args they supplied may not be compatible with the "build" target.
+                    // But we must pass --release if they supplied it and the "bench" target is
+                    // implicitly a release mode build.
+                    let mut build_args = Vec::new();
+                    if extra_args.contains(&"--release".to_owned()) || target == "bench" {
+                        build_args.push("--release".to_owned());
+                    };
+                    run_action(
+                        Workspace::Internal,
+                        "build",
+                        &build_args,
+                        &["testing".to_owned()],
+                    );
                 }
             } else if workspace == Workspace::External && target == "clippy" {
                 let tracing_kind = find_tracing_kind(&rust_flags);
                 rust_flags = format!("--cfg tracermode=\"{}\"", tracing_kind);
-            } else if workspace == Workspace::External && target == "bench" {
-                // Setting this in `[profile.bench]` in `Cargo.toml` doesn't work.
-                rust_flags.push_str(" -C opt-level=0");
             }
         }
         _ => bail(format!(
@@ -120,13 +120,8 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String], feature
         )),
     }
 
-    let status = cmd
-        .args(extra_args)
-        .env("RUSTFLAGS", rust_flags)
-        .spawn()
-        .unwrap()
-        .wait()
-        .unwrap();
+    cmd.args(extra_args).env("RUSTFLAGS", rust_flags);
+    let status = cmd.spawn().unwrap().wait().unwrap();
 
     // The clippy exception ensures that both workspaces are linted if one workspace fails. The
     // exit status may be inaccurate, but we can live with this.

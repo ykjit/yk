@@ -5,9 +5,11 @@ fn main() {
         .file("src/test_helpers.c")
         .compile("ykcompile_test_helpers");
 
+    let profile = env::var("PROFILE").unwrap();
     println!(
-        "cargo:rustc-link-search={}/../internal_ws/target/release/",
-        env::current_dir().unwrap().to_str().unwrap()
+        "cargo:rustc-link-search={}/../internal_ws/target/{}/",
+        env::current_dir().unwrap().to_str().unwrap(),
+        profile
     );
     println!("cargo:rustc-link-lib=dylib=ykshim");
 }

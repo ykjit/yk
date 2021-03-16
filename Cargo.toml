@@ -12,3 +12,6 @@ exclude = [ "internal_ws" ]
 
 [profile.dev]
 panic = "abort"
+
+[profile.release]
+panic = "abort"

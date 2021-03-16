@@ -12,6 +12,7 @@ fn main() {
     internal_dir.push("..");
     internal_dir.push("internal_ws");
     let cargo = env::var("CARGO").unwrap();
+    let profile = env::var("PROFILE").unwrap();
 
     // Only build the internal workspace now if we are not using xtask, i.e. if we are being
     // consumed as a dependency. This means we see the compiler output for the internal workspace
@@ -20,17 +21,18 @@ fn main() {
         let mut rustflags = env::var("RUSTFLAGS").unwrap_or_else(|_| String::new());
         let tracing_kind = find_tracing_kind(&rustflags);
         rustflags = make_internal_rustflags(&rustflags);
-        let status = Command::new(cargo)
-            .current_dir(internal_dir.join("ykshim"))
+        let mut cmd = Command::new(cargo);
+        cmd.current_dir(internal_dir.join("ykshim"))
             .arg("build")
-            .arg("--release")
-            .env("RUSTFLAGS", &rustflags)
             .arg("--features")
             .arg(format!("yktrace/trace_{}", tracing_kind))
-            .spawn()
-            .unwrap()
-            .wait()
-            .unwrap();
+            .env("RUSTFLAGS", &rustflags);
+
+        if profile == "release" {
+            cmd.arg("--release");
+        }
+
+        let status = cmd.spawn().unwrap().wait().unwrap();
         if !status.success() {
             eprintln!("building internal workspace failed");
             std::process::exit(1);
@@ -47,14 +49,15 @@ fn main() {
     if !PathBuf::from(&sym_dst).exists() {
         let mut sym_src = internal_dir;
         sym_src.push("target");
-        sym_src.push("release");
+        sym_src.push(&profile);
         sym_src.push(YKSHIM_SO);
         symlink(sym_src, sym_dst).unwrap();
     }
 
     println!(
-        "cargo:rustc-link-search={}/../internal_ws/target/release/",
-        env::current_dir().unwrap().to_str().unwrap()
+        "cargo:rustc-link-search={}/../internal_ws/target/{}/",
+        env::current_dir().unwrap().to_str().unwrap(),
+        profile
     );
     println!("cargo:rustc-link-lib=dylib=ykshim");
 }
