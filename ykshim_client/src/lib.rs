@@ -151,6 +151,21 @@ impl<I> CompiledTrace<I> {
     /// Execute the trace with the given interpreter context.
     pub unsafe fn execute(&self, ctx: &mut I) -> *mut RawStopgapInterpreter {
         let f = mem::transmute::<_, fn(&mut I) -> *mut RawStopgapInterpreter>(self.ptr());
+        #[cfg(not(debug_assertions))]
+        return f(ctx);
+        #[cfg(debug_assertions)]
+        Self::exec_trace(f, ctx)
+    }
+
+    /// Call the compiled trace code.
+    /// This is separate from `execute()` so as to make it easy to get a GDB break point
+    /// immediately before our trace code. It is also named in such a way that `b exec_trace` will
+    /// break at all possible entry points to trace code (there is another one in `MTThread`).
+    #[cfg(debug_assertions)]
+    fn exec_trace(
+        f: fn(&mut I) -> *mut RawStopgapInterpreter,
+        ctx: &mut I,
+    ) -> *mut RawStopgapInterpreter {
         f(ctx)
     }
 }

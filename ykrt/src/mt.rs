@@ -187,7 +187,11 @@ impl MTThread {
         // this thread's tracer.
         if let Some(loc) = loc {
             if let Some(func) = self.transition_location::<I>(loc) {
+                #[cfg(not(debug_assertions))]
+                let ptr = func(ctx);
+                #[cfg(debug_assertions)]
                 let ptr = self.exec_trace(func, ctx);
+
                 if ptr.is_null() {
                     // Trace succesfully executed.
                     return;
@@ -203,6 +207,11 @@ impl MTThread {
         step_fn(ctx)
     }
 
+    /// Call the compiled trace code.
+    /// This is separate from the control point so as to make it easy to get a GDB break point
+    /// immediately before our trace code. It is also named in such a way that `b exec_trace` will
+    /// break at all possible entry points to trace code (there is another one in `CompiledTrace`).
+    #[cfg(debug_assertions)]
     fn exec_trace<I>(
         &mut self,
         func: fn(&mut I) -> *mut RawStopgapInterpreter,
