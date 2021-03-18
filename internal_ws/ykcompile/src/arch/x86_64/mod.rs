@@ -1330,7 +1330,16 @@ impl TraceCompiler {
         // Reserved stack space for spilled locals during execution.
         let soff = self.stack_builder.size();
         // Reserved memory on the stack to spill live locals to during a guard failure.
-        let live_off = REG_POOL.len() * QWORD_REG_SIZE;
+        let mut llmap = HashMap::new();
+        let mut live_off = 0;
+        for (_, live_locations, _) in &gl {
+            for (_, loc) in live_locations.iter() {
+                if let Location::Reg(reg) = loc {
+                    live_off += QWORD_REG_SIZE;
+                    llmap.insert(*reg, usize::try_from(soff).unwrap() + live_off);
+                }
+            }
+        }
 
         // After allocating stack space for the trace, we pad the stack pointer up to the next
         // 16-byte alignment boundary. Calls can use this fact when catering for alignment
@@ -1354,7 +1363,7 @@ impl TraceCompiler {
             ; ret
         );
         // Generate guard failure code.
-        self.compile_guards(gl, soff);
+        self.compile_guards(gl, llmap);
         // Initialise the compiled trace, by aligning the stack, reserving space for spilling, and
         // saving callee-saved registers.
         dynasm!(self.asm
@@ -1376,7 +1385,7 @@ impl TraceCompiler {
     fn compile_guards(
         &mut self,
         gl: Vec<(&Guard, HashMap<&Local, Location>, DynamicLabel)>,
-        soff: u32,
+        llmap: HashMap<u8, usize>,
     ) {
         // Output code for guard failure. This consists of a label for the guard to jump to and
         // various code to get the system in the appropriate state for a StopgapInterpreter to take
@@ -1405,13 +1414,9 @@ impl TraceCompiler {
             // ignore registers entirely.
             for (tirlocal, loc) in live_locations.iter_mut() {
                 if let Location::Reg(reg) = loc {
-                    let off = -i32::try_from(
-                        soff + u32::from(*reg) * u32::try_from(QWORD_REG_SIZE).unwrap(),
-                    )
-                    .unwrap();
                     let newloc = Location::Mem(RegAndOffset {
                         reg: RBP.code(),
-                        off,
+                        off: -1 * i32::try_from(llmap[reg]).unwrap(),
                     });
                     let ty = self.local_decls[&tirlocal].ty;
                     let size = SIR.ty(&ty).size();
