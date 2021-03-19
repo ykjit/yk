@@ -28,6 +28,10 @@ cargo xtask fmt --all -- --check
 # Build the compiler and add it as a linked toolchain.
 git clone https://github.com/softdevteam/ykrustc
 cd ykrustc
+cat <<EOD >> Cargo.toml
+[patch."https://github.com/softdevteam/yk"]
+ykpack = { path = "../internal_ws/ykpack" }
+EOD
 cp .buildbot.config.toml config.toml
 ./x.py build --stage 1
 rustup toolchain link ykrustc-stage1 `pwd`/build/x86_64-unknown-linux-gnu/stage1
