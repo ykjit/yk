@@ -5,6 +5,9 @@
 /// RUSTFLAGS accordingly, but you can't set arbitrary RUSTFLAGS from build.rs.
 /// This doesn't look for `-Ctracer` in RUSTFLAGS as different backends may use different methods
 /// of setting the tracing kind.
+///
+/// The reason we use `--print cfg` (instead of searching `rustflags`) is that different codegen
+/// backends have different ways of enabling tracing. `--print cfg` is codegen agnostic.
 fn find_tracing_kind(rustflags: &str) -> String {
     // Instead of trying to parse `rustflags` into an args array (hard), we build a string of args
     // which we then pass to the shell.
