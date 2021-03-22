@@ -226,7 +226,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                         _,
                     ) = op
                     {
-                        debug_assert!(sir.ty(&rnm.local_decls[&sir::RETURN_LOCAL].ty).is_unit());
+                        debug_assert!(sir.ty(&rnm.local_decls[&sir::RETURN_LOCAL].ty).is_bool());
                         continue;
                     }
 
