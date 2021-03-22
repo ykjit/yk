@@ -132,6 +132,10 @@ impl Ty {
         }
     }
 
+    pub fn is_bool(&self) -> bool {
+        self.kind == TyKind::Bool
+    }
+
     /// Unwraps a tuple if `self` is `Self::Tuple` or panics otherwise.
     pub fn unwrap_tuple(&self) -> &TupleTy {
         if let TyKind::Tuple(tty) = &self.kind {
