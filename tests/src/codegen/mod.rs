@@ -6,7 +6,28 @@ use libc::{abs, getuid};
 use paste::paste;
 use ykshim_client::{compile_tir_trace, compile_trace, start_tracing, TirTrace, TracingKind};
 
+mod cond_brs;
 mod reg_alloc;
+
+// FIXME -- At the time of writing we haven't implemented lowerings for Rust-level `const`s.
+// e.g. `unimplemented constant: const core::num::<impl u64>::MAX`
+// We can get away with using static values for now.
+static U8_MIN: u8 = 0;
+static U8_MAX: u8 = 255;
+static U16_MIN: u16 = 0;
+static U16_MAX: u16 = 65535;
+static U32_MIN: u32 = 0;
+static U32_MAX: u32 = 4294967295;
+static U64_MIN: u64 = 0;
+static U64_MAX: u64 = 18446744073709551615;
+static I8_MIN: i8 = -128;
+static I8_MAX: i8 = 127;
+static I16_MIN: i16 = -32768;
+static I16_MAX: i16 = 32767;
+static I32_MIN: i32 = -2147483648;
+static I32_MAX: i32 = 2147483647;
+static I64_MIN: i64 = -9223372036854775808;
+static I64_MAX: i64 = 9223372036854775807;
 
 #[test]
 fn simple() {
@@ -378,16 +399,6 @@ macro_rules! mk_binop_tests_signed {
         // FIXME i128 hits unreachable code.
     };
 }
-
-// FIXME -- At the time of writing we haven't implemented lowerings for Rust-level `const`s.
-// e.g. `unimplemented constant: const core::num::<impl u64>::MAX`
-// We can get away with using static values for now.
-static U16_MAX: u16 = 65535;
-static U32_MAX: u32 = 4294967295;
-static U64_MAX: u64 = 18446744073709551615;
-static I16_MAX: i16 = 32767;
-static I32_MAX: i32 = 2147483647;
-static I64_MAX: i64 = 9223372036854775807;
 
 mk_binop_tests_unsigned!(binop_add1, +, 0, 0, 0);
 mk_binop_tests_signed!(binop_add2, +, 0, 0, 0);

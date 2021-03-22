@@ -819,6 +819,7 @@ impl TraceCompiler {
     fn c_condition(&mut self, dst: &IRPlace, binop: &BinOp, op1: &IRPlace, op2: &IRPlace) {
         let src1 = self.irplace_to_location(op1);
         let ty = SIR.ty(&op1.ty());
+        debug_assert_eq!(ty, SIR.ty(&op2.ty()));
 
         self.load_reg_irplace(*TEMP_REG, op2);
 
@@ -874,38 +875,61 @@ impl TraceCompiler {
         dynasm!(self.asm
          ; mov Rq(*TEMP_REG), 1
         );
-        match binop {
-            BinOp::Eq => {
+        match (binop, ty.is_signed_int()) {
+            // Comparisons which are the same for both signed and unsigned integers.
+            (BinOp::Eq, _) => {
                 dynasm!(self.asm
                     ; je >skip
                 );
             }
-            BinOp::Ne => {
+            (BinOp::Ne, _) => {
                 dynasm!(self.asm
                     ; jne >skip
                 );
             }
-            BinOp::Lt => {
+            // Comparisons on signed integers use the less/greater opcode variants.
+            (BinOp::Lt, true) => {
                 dynasm!(self.asm
                     ; jl >skip
                 );
             }
-            BinOp::Le => {
+            (BinOp::Le, true) => {
                 dynasm!(self.asm
                     ; jle >skip
                 );
             }
-            BinOp::Gt => {
+            (BinOp::Gt, true) => {
                 dynasm!(self.asm
                     ; jg >skip
                 );
             }
-            BinOp::Ge => {
+            (BinOp::Ge, true) => {
                 dynasm!(self.asm
                     ; jge >skip
                 );
             }
-            _ => unreachable!(),
+            // Comparisons on signed integers use the below/above opcode variants.
+            (BinOp::Lt, false) => {
+                dynasm!(self.asm
+                    ; jb >skip
+                );
+            }
+            (BinOp::Le, false) => {
+                dynasm!(self.asm
+                    ; jbe >skip
+                );
+            }
+            (BinOp::Gt, false) => {
+                dynasm!(self.asm
+                    ; ja >skip
+                );
+            }
+            (BinOp::Ge, false) => {
+                dynasm!(self.asm
+                    ; jae >skip
+                );
+            }
+            _ => unreachable!(), // All other binary operations are illegal as conditions.
         }
         dynasm!(self.asm
          ; mov Rq(*TEMP_REG), 0
