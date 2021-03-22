@@ -5,11 +5,16 @@
 /// RUSTFLAGS accordingly, but you can't set arbitrary RUSTFLAGS from build.rs.
 /// This doesn't look for `-Ctracer` in RUSTFLAGS as different backends may use different methods
 /// of setting the tracing kind.
+///
+/// The reason we use `--print cfg` (instead of searching `rustflags`) is that different codegen
+/// backends have different ways of enabling tracing. `--print cfg` is codegen agnostic.
 fn find_tracing_kind(rustflags: &str) -> String {
-    let cfgs =
-        std::process::Command::new(std::env::var("RUSTC").unwrap_or_else(|_| "rustc".to_string()))
-            .args(&["--print", "cfg"])
-            .args(rustflags.split(' '))
+    // Instead of trying to parse `rustflags` into an args array (hard), we build a string of args
+    // which we then pass to the shell.
+    let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".to_string());
+    let sh_args = vec![&*rustc, rustflags, "--print cfg"].join(" ");
+    let cfgs = std::process::Command::new("/bin/sh")
+            .args(&["-c", &sh_args])
             .output()
             .unwrap()
             .stdout;
