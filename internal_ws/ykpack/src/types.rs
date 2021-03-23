@@ -590,16 +590,6 @@ pub enum ConstantInt {
     SignedInt(SignedInt),
 }
 
-impl From<bool> for ConstantInt {
-    fn from(b: bool) -> Self {
-        if b {
-            ConstantInt::UnsignedInt(UnsignedInt::Usize(1))
-        } else {
-            ConstantInt::UnsignedInt(UnsignedInt::Usize(0))
-        }
-    }
-}
-
 impl ConstantInt {
     /// Returns an i64 value suitable for loading into a register.
     /// If the constant is signed, then it will be sign-extended.
