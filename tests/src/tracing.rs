@@ -16,11 +16,11 @@ fn work(io: &mut InterpCtx) -> bool {
             res += 10 / i;
         }
     }
-    println!("{}", res); // prevents the above from being optimised out.
+    io.1 = res;
     true
 }
 
-struct InterpCtx(usize);
+struct InterpCtx(usize, usize);
 
 /// Test that basic tracing works.
 #[test]
@@ -29,7 +29,7 @@ fn trace() {
     let th = start_tracing(TracingKind::HardwareTracing);
     #[cfg(tracermode = "sw")]
     let th = start_tracing(TracingKind::SoftwareTracing);
-    black_box(work(&mut InterpCtx(10)));
+    black_box(work(&mut InterpCtx(10, 0)));
     let trace = th.stop_tracing().unwrap();
     assert!(trace.len() > 0);
 }
@@ -43,11 +43,11 @@ fn trace_twice() {
     let kind = TracingKind::SoftwareTracing;
 
     let th1 = start_tracing(kind);
-    black_box(work(&mut InterpCtx(10)));
+    black_box(work(&mut InterpCtx(10, 0)));
     let trace1 = th1.stop_tracing().unwrap();
 
     let th2 = start_tracing(kind);
-    black_box(work(&mut InterpCtx(20)));
+    black_box(work(&mut InterpCtx(20, 0)));
     let trace2 = th2.stop_tracing().unwrap();
 
     assert!(trace1.len() < trace2.len());
@@ -63,12 +63,12 @@ pub(crate) fn trace_concurrent() {
 
     let thr = thread::spawn(move || {
         let th1 = start_tracing(kind);
-        black_box(work(&mut InterpCtx(10)));
+        black_box(work(&mut InterpCtx(10, 0)));
         th1.stop_tracing().unwrap().len()
     });
 
     let th2 = start_tracing(kind);
-    black_box(work(&mut InterpCtx(20)));
+    black_box(work(&mut InterpCtx(20, 0)));
     let len2 = th2.stop_tracing().unwrap().len();
 
     let len1 = thr.join().unwrap();
