@@ -383,13 +383,23 @@ impl StopgapInterpreter {
                 expected,
                 target_bb,
             } => {
-                let b = self.read_int(cond) == 1;
-                if b != *expected {
-                    todo!() // FIXME raise error
+                if self.read_bool(cond) != *expected {
+                    todo!();
                 }
                 self.frames.last_mut().unwrap().bbidx = *target_bb;
             }
             t => todo!("{}", t),
+        }
+    }
+
+    fn read_bool(&self, src: &IRPlace) -> bool {
+        if let IRPlace::Const { val: Constant::Int(ConstantInt::UnsignedInt(UnsignedInt::U8(v))), ty: _ } = src {
+            *v != 0
+        } else if let TyKind::Bool = SIR.ty(&src.ty()).kind {
+            let ptr = self.locals().irplace_to_ptr(src);
+            unsafe { std::ptr::read::<u8>(ptr) != 0 }
+        } else {
+            unreachable!();
         }
     }
 
