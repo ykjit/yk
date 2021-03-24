@@ -18,7 +18,6 @@ fn reg_alloc_same_local() {
     let u8_loc = tc.local_to_location_str(Local(0));
     let i64_loc = tc.local_to_location_str(Local(1));
     let string_loc = tc.local_to_location_str(Local(2));
-    dbg!(&u8_loc);
     for _ in 0..32 {
         assert_eq!(tc.local_to_location_str(Local(0)), u8_loc);
         assert_eq!(tc.local_to_location_str(Local(1)), i64_loc);
@@ -153,7 +152,6 @@ fn reg_alloc_always_on_stack() {
     // Things larger than a register shouldn't be allocated to a register. Here we are
     // allocating space for a `String`, which at the time of writing, is much larger than the
     // size of a register on any platform I can think of (e.g. String is 24 bytes on x86_64).
-    dbg!(tc.local_to_location_str(Local(2)));
     assert!(tc.local_to_location_str(Local(2)).starts_with("Mem("));
     tc.local_dead(Local(2));
 

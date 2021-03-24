@@ -49,7 +49,6 @@ fn main() {
         sym_src.push("target");
         sym_src.push("release");
         sym_src.push(YKSHIM_SO);
-        dbg!(&sym_src, &sym_dst);
         symlink(sym_src, sym_dst).unwrap();
     }
 
