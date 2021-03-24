@@ -155,24 +155,22 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                             scale: *scale,
                         },
                         Statement::Store(dst, src) => {
-                            if matches!(dst, IRPlace::Val { local, .. } if local == &sir::RETURN_LOCAL)
+                            if matches!(dst, IRPlace::Val { local, .. } if local == &sir::RETURN_LOCAL && body.flags.contains(BodyFlags::INTERP_STEP))
                             {
-                                if body.flags.contains(BodyFlags::INTERP_STEP) {
-                                    match src {
-                                        IRPlace::Const {
-                                            val: Constant::Bool(b),
-                                            ..
-                                        } => {
-                                            // If the `interp_step` function returns false, we
-                                            // enabled trace looping which loops the trace
-                                            // indefinitely until a guard fails.
-                                            if *b == false {
-                                                loop_trace = true;
-                                            }
+                                match src {
+                                    IRPlace::Const {
+                                        val: Constant::Bool(b),
+                                        ..
+                                    } => {
+                                        // If the `interp_step` function returns false, we
+                                        // enabled trace looping which loops the trace
+                                        // indefinitely until a guard fails.
+                                        if !(*b) {
+                                            loop_trace = true;
                                         }
-                                        _ => {
-                                            panic!("Return value of `interp_step` function must be a constant bool.")
-                                        }
+                                    }
+                                    _ => {
+                                        panic!("Return value of `interp_step` function must be a constant bool.")
                                     }
                                 }
                             }
