@@ -67,10 +67,11 @@ impl MTBuilder {
         Ok(self)
     }
 
-    /// Select the kind of tracing to use.
-    pub fn tracing_kind(mut self, tracing_kind: TracingKind) -> Self {
+    /// Select the kind of tracing to use. Returns `Ok` if the run-time environment is capable of
+    /// using `TracingKind` or `Err` otherwise.
+    pub fn tracing_kind(mut self, tracing_kind: TracingKind) -> Result<Self, ()> {
         self.tracing_kind = tracing_kind;
-        self
+        Ok(self)
     }
 }
 
