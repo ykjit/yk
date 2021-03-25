@@ -3,6 +3,7 @@
 #[cfg(test)]
 use std::time::Duration;
 use std::{
+    error::Error,
     io,
     marker::PhantomData,
     mem,
@@ -43,14 +44,14 @@ pub struct MTBuilder {
 
 impl MTBuilder {
     /// Create a meta-tracer with default parameters.
-    pub fn new() -> Self {
-        Self {
+    pub fn new() -> Result<Self, Box<dyn Error>> {
+        Ok(Self {
             hot_threshold: DEFAULT_HOT_THRESHOLD,
             #[cfg(tracermode = "hw")]
             tracing_kind: TracingKind::HardwareTracing,
             #[cfg(tracermode = "sw")]
             tracing_kind: TracingKind::SoftwareTracing,
-        }
+        })
     }
 
     /// Consume the `MTBuilder` and create a meta-tracer, returning the
@@ -498,7 +499,7 @@ mod tests {
     #[test]
     fn threshold_passed() {
         let hot_thrsh: HotThreshold = 1500;
-        let mut mtt = MTBuilder::new().hot_threshold(hot_thrsh).init();
+        let mut mtt = MTBuilder::new().unwrap().hot_threshold(hot_thrsh).init();
         let loc = Location::new();
         let mut ctx = EmptyInterpCtx {};
         for i in 0..hot_thrsh {
@@ -522,7 +523,7 @@ mod tests {
     #[test]
     fn stop_while_tracing() {
         let hot_thrsh = 5;
-        let mut mtt = MTBuilder::new().hot_threshold(hot_thrsh).init();
+        let mut mtt = MTBuilder::new().unwrap().hot_threshold(hot_thrsh).init();
         let loc = Location::new();
         let mut ctx = EmptyInterpCtx {};
         for i in 0..hot_thrsh {
@@ -541,7 +542,7 @@ mod tests {
     #[test]
     fn threaded_threshold_passed() {
         let hot_thrsh = 4000;
-        let mut mtt = MTBuilder::new().hot_threshold(hot_thrsh).init();
+        let mut mtt = MTBuilder::new().unwrap().hot_threshold(hot_thrsh).init();
         let loc = Arc::new(Location::new());
         let mut thrs = vec![];
         for _ in 0..hot_thrsh / 4 {
@@ -598,7 +599,7 @@ mod tests {
 
     #[test]
     fn simple_interpreter() {
-        let mut mtt = MTBuilder::new().hot_threshold(2).init();
+        let mut mtt = MTBuilder::new().unwrap().hot_threshold(2).init();
 
         const INC: u8 = 0;
         const RESTART: u8 = 1;
@@ -669,7 +670,7 @@ mod tests {
         const THRESHOLD: HotThreshold = 100000;
         const NUM_THREADS: usize = 16;
 
-        let mut mtt = MTBuilder::new().hot_threshold(THRESHOLD).init();
+        let mut mtt = MTBuilder::new().unwrap().hot_threshold(THRESHOLD).init();
 
         const INC: u8 = 0;
         const RESTART: u8 = 1;
@@ -758,7 +759,7 @@ mod tests {
     fn locations_dont_get_stuck_tracing() {
         const THRESHOLD: HotThreshold = 2;
 
-        let mut mtt = MTBuilder::new().hot_threshold(THRESHOLD).init();
+        let mut mtt = MTBuilder::new().unwrap().hot_threshold(THRESHOLD).init();
 
         const INC: u8 = 0;
         const RESTART: u8 = 1;
@@ -824,7 +825,7 @@ mod tests {
     fn stuck_locations_free_memory() {
         const THRESHOLD: HotThreshold = 2;
 
-        let mtt = MTBuilder::new().hot_threshold(THRESHOLD).init();
+        let mtt = MTBuilder::new().unwrap().hot_threshold(THRESHOLD).init();
 
         const INC: u8 = 0;
         const RESTART: u8 = 1;
@@ -881,7 +882,7 @@ mod tests {
 
     #[bench]
     fn bench_single_threaded_control_point(b: &mut Bencher) {
-        let mut mtt = MTBuilder::new().init();
+        let mut mtt = MTBuilder::new().unwrap().init();
         let lp = Location::new();
         let mut io = EmptyInterpCtx {};
         b.iter(|| {
@@ -893,7 +894,7 @@ mod tests {
 
     #[bench]
     fn bench_multi_threaded_control_point(b: &mut Bencher) {
-        let mtt = MTBuilder::new().init();
+        let mtt = MTBuilder::new().unwrap().init();
         let loc = Arc::new(Location::new());
         b.iter(|| {
             let mut thrs = vec![];
@@ -918,7 +919,7 @@ mod tests {
 
     #[test]
     fn stopgapping() {
-        let mut mtt = MTBuilder::new().hot_threshold(2).init();
+        let mut mtt = MTBuilder::new().unwrap().hot_threshold(2).init();
 
         const INC: u8 = 0;
         const RESTART: u8 = 1;
@@ -977,7 +978,7 @@ mod tests {
     /// Tests that the stopgap interpreter returns the correct boolean to abort interpreting.
     #[test]
     fn loop_interpreter() {
-        let mut mtt = MTBuilder::new().hot_threshold(2).init();
+        let mut mtt = MTBuilder::new().unwrap().hot_threshold(2).init();
 
         let loc = Location::new();
 
