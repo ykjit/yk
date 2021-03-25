@@ -103,9 +103,15 @@ impl MT {
     {
         let mt_cl = self.clone();
         thread::Builder::new().spawn(move || {
-            mt_cl.inner.active_threads.fetch_add(1, Ordering::Relaxed);
+            mt_cl
+                .inner
+                .active_user_threads
+                .fetch_add(1, Ordering::Relaxed);
             let r = catch_unwind(|| f(MTThreadInner::init(mt_cl.clone())));
-            mt_cl.inner.active_threads.fetch_sub(1, Ordering::Relaxed);
+            mt_cl
+                .inner
+                .active_user_threads
+                .fetch_sub(1, Ordering::Relaxed);
             match r {
                 Ok(r) => r,
                 Err(e) => resume_unwind(e),
@@ -123,7 +129,9 @@ impl Drop for MT {
 /// The innards of a meta-tracer.
 struct MTInner {
     hot_threshold: AtomicHotThreshold,
-    active_threads: AtomicUsize,
+    /// The number of threads currently running the user's interpreter (directly or via JITed
+    /// code).
+    active_user_threads: AtomicUsize,
     tracing_kind: TracingKind,
 }
 
@@ -157,7 +165,7 @@ impl MTInner {
 
         let mtc = Self {
             hot_threshold: AtomicHotThreshold::new(hot_threshold),
-            active_threads: AtomicUsize::new(1),
+            active_user_threads: AtomicUsize::new(1),
             tracing_kind,
         };
         let mt = MT {
