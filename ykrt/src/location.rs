@@ -1,6 +1,7 @@
 //! Trace location: track the state of a program location (counting, tracing, compiled, etc).
 
 use std::{
+    convert::TryFrom,
     marker::PhantomData,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -15,6 +16,8 @@ use parking_lot_core::{
 use strum::EnumDiscriminants;
 
 use ykshim_client::{CompiledTrace, ThreadTracer};
+
+use crate::mt::HotThreshold;
 
 /// A `Location` stores state that the meta-tracer needs to identify hot loops and run associated
 /// machine code.
@@ -350,10 +353,10 @@ impl<I> State<I> {
     }
 
     /// If, and only if, the Location is in the counting state, return the current count.
-    pub(crate) fn count(&self) -> usize {
+    pub(crate) fn count(&self) -> HotThreshold {
         debug_assert!(self.is_counting());
         debug_assert!(!self.is_locked());
-        self.x >> STATE_NUM_BITS
+        u32::try_from(self.x >> STATE_NUM_BITS).unwrap()
     }
 
     /// If this `State` is not counting, return its `HotLocation`. It is undefined behaviour to
@@ -399,11 +402,11 @@ impl<I> State<I> {
 
     /// Return a version of this `State` with the count set to `count`. It is undefined behaviour
     /// to call this function if this `State` is not in the counting phase.
-    pub(crate) fn with_count(&self, count: usize) -> Self {
+    pub(crate) fn with_count(&self, count: HotThreshold) -> Self {
         debug_assert!(self.is_counting());
         debug_assert_eq!(count << STATE_NUM_BITS >> STATE_NUM_BITS, count);
         State {
-            x: (self.x & STATE_TAG) | (count << STATE_NUM_BITS),
+            x: (self.x & STATE_TAG) | (usize::try_from(count).unwrap() << STATE_NUM_BITS),
             marker: PhantomData,
         }
     }

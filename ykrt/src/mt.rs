@@ -10,7 +10,7 @@ use std::{
     ptr,
     rc::Rc,
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
         Arc,
     },
     thread::{self, JoinHandle},
@@ -24,7 +24,14 @@ use ykshim_client::{
     compile_trace, start_tracing, RawStopgapInterpreter, StopgapInterpreter, TracingKind,
 };
 
-pub type HotThreshold = usize;
+// The HotThreshold must be less than a machine word wide for [`Location::Location`] to do its
+// pointer tagging thing. We therefore choose a type which makes this statically clear to
+// users rather than having them try to use (say) u64::max() on a 64 bit machine and get a run-time
+// error.
+#[cfg(target_pointer_width = "64")]
+pub type HotThreshold = u32;
+#[cfg(target_pointer_width = "64")]
+type AtomicHotThreshold = AtomicU32;
 const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
 
 /// Configure a meta-tracer. Note that a process can only have one meta-tracer active at one point.
@@ -112,7 +119,7 @@ impl Drop for MT {
 
 /// The innards of a meta-tracer.
 struct MTInner {
-    hot_threshold: AtomicUsize,
+    hot_threshold: AtomicHotThreshold,
     active_threads: AtomicUsize,
     tracing_kind: TracingKind,
 }
@@ -146,7 +153,7 @@ impl MTInner {
         }
 
         let mtc = Self {
-            hot_threshold: AtomicUsize::new(hot_threshold),
+            hot_threshold: AtomicHotThreshold::new(hot_threshold),
             active_threads: AtomicUsize::new(1),
             tracing_kind,
         };
@@ -465,7 +472,7 @@ impl MTThreadInner {
 
 #[cfg(test)]
 mod tests {
-    use std::thread::yield_now;
+    use std::{convert::TryFrom, thread::yield_now};
     extern crate test;
     use self::test::{black_box, Bencher};
     use super::*;
@@ -490,7 +497,7 @@ mod tests {
 
     #[test]
     fn threshold_passed() {
-        let hot_thrsh = 1500;
+        let hot_thrsh: HotThreshold = 1500;
         let mut mtt = MTBuilder::new().hot_threshold(hot_thrsh).init();
         let loc = Location::new();
         let mut ctx = EmptyInterpCtx {};
@@ -659,7 +666,7 @@ mod tests {
         // If the threshold is too low (where "too low" is going to depend on many factors that we
         // can only guess at), it's less likely that we'll observe problematic interleavings,
         // because a single thread might execute everything it wants to without yielding once.
-        const THRESHOLD: usize = 100000;
+        const THRESHOLD: HotThreshold = 100000;
         const NUM_THREADS: usize = 16;
 
         let mut mtt = MTBuilder::new().hot_threshold(THRESHOLD).init();
@@ -703,7 +710,7 @@ mod tests {
                 let t = mtt
                     .mt()
                     .spawn(move |mut mtt| {
-                        for _ in 0..ctx.prog.len() * THRESHOLD {
+                        for _ in 0..ctx.prog.len() * usize::try_from(THRESHOLD).unwrap() {
                             let loc = locs[ctx.pc].as_ref();
                             mtt.control_point(loc, simple_interp_step, &mut ctx);
                         }
@@ -749,7 +756,7 @@ mod tests {
 
     #[test]
     fn locations_dont_get_stuck_tracing() {
-        const THRESHOLD: usize = 2;
+        const THRESHOLD: HotThreshold = 2;
 
         let mut mtt = MTBuilder::new().hot_threshold(THRESHOLD).init();
 
@@ -786,7 +793,7 @@ mod tests {
             let locs = Arc::clone(&locs);
             mtt.mt()
                 .spawn(move |mut mtt| {
-                    for _ in 0..ctx.prog.len() * THRESHOLD + 1 {
+                    for _ in 0..ctx.prog.len() * usize::try_from(THRESHOLD).unwrap() + 1 {
                         let loc = locs[ctx.pc].as_ref();
                         mtt.control_point(loc, simple_interp_step, &mut ctx);
                     }
@@ -815,7 +822,7 @@ mod tests {
 
     #[test]
     fn stuck_locations_free_memory() {
-        const THRESHOLD: usize = 2;
+        const THRESHOLD: HotThreshold = 2;
 
         let mtt = MTBuilder::new().hot_threshold(THRESHOLD).init();
 
@@ -852,7 +859,7 @@ mod tests {
             let locs = Arc::clone(&locs);
             mtt.mt()
                 .spawn(move |mut mtt| {
-                    for _ in 0..ctx.prog.len() * THRESHOLD + 1 {
+                    for _ in 0..ctx.prog.len() * usize::try_from(THRESHOLD).unwrap() + 1 {
                         let loc = locs[ctx.pc].as_ref();
                         mtt.control_point(loc, simple_interp_step, &mut ctx);
                     }
