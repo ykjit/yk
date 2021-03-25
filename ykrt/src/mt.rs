@@ -56,7 +56,7 @@ impl MTBuilder {
 
     /// Consume the `MTBuilder` and create a meta-tracer, returning the
     /// [`MTThread`](struct.MTThread.html) representing the current thread.
-    pub fn init(self) -> MTThread {
+    pub fn build(self) -> MTThread {
         MTInner::init(self.hot_threshold, self.tracing_kind)
     }
 
@@ -505,7 +505,7 @@ mod tests {
             .unwrap()
             .hot_threshold(hot_thrsh)
             .unwrap()
-            .init();
+            .build();
         let loc = Location::new();
         let mut ctx = EmptyInterpCtx {};
         for i in 0..hot_thrsh {
@@ -533,7 +533,7 @@ mod tests {
             .unwrap()
             .hot_threshold(hot_thrsh)
             .unwrap()
-            .init();
+            .build();
         let loc = Location::new();
         let mut ctx = EmptyInterpCtx {};
         for i in 0..hot_thrsh {
@@ -556,7 +556,7 @@ mod tests {
             .unwrap()
             .hot_threshold(hot_thrsh)
             .unwrap()
-            .init();
+            .build();
         let loc = Arc::new(Location::new());
         let mut thrs = vec![];
         for _ in 0..hot_thrsh / 4 {
@@ -613,7 +613,7 @@ mod tests {
 
     #[test]
     fn simple_interpreter() {
-        let mut mtt = MTBuilder::new().unwrap().hot_threshold(2).unwrap().init();
+        let mut mtt = MTBuilder::new().unwrap().hot_threshold(2).unwrap().build();
 
         const INC: u8 = 0;
         const RESTART: u8 = 1;
@@ -688,7 +688,7 @@ mod tests {
             .unwrap()
             .hot_threshold(THRESHOLD)
             .unwrap()
-            .init();
+            .build();
 
         const INC: u8 = 0;
         const RESTART: u8 = 1;
@@ -781,7 +781,7 @@ mod tests {
             .unwrap()
             .hot_threshold(THRESHOLD)
             .unwrap()
-            .init();
+            .build();
 
         const INC: u8 = 0;
         const RESTART: u8 = 1;
@@ -851,7 +851,7 @@ mod tests {
             .unwrap()
             .hot_threshold(THRESHOLD)
             .unwrap()
-            .init();
+            .build();
 
         const INC: u8 = 0;
         const RESTART: u8 = 1;
@@ -908,7 +908,7 @@ mod tests {
 
     #[bench]
     fn bench_single_threaded_control_point(b: &mut Bencher) {
-        let mut mtt = MTBuilder::new().unwrap().init();
+        let mut mtt = MTBuilder::new().unwrap().build();
         let lp = Location::new();
         let mut io = EmptyInterpCtx {};
         b.iter(|| {
@@ -920,7 +920,7 @@ mod tests {
 
     #[bench]
     fn bench_multi_threaded_control_point(b: &mut Bencher) {
-        let mtt = MTBuilder::new().unwrap().init();
+        let mtt = MTBuilder::new().unwrap().build();
         let loc = Arc::new(Location::new());
         b.iter(|| {
             let mut thrs = vec![];
@@ -945,7 +945,7 @@ mod tests {
 
     #[test]
     fn stopgapping() {
-        let mut mtt = MTBuilder::new().unwrap().hot_threshold(2).unwrap().init();
+        let mut mtt = MTBuilder::new().unwrap().hot_threshold(2).unwrap().build();
 
         const INC: u8 = 0;
         const RESTART: u8 = 1;
@@ -1004,7 +1004,7 @@ mod tests {
     /// Tests that the stopgap interpreter returns the correct boolean to abort interpreting.
     #[test]
     fn loop_interpreter() {
-        let mut mtt = MTBuilder::new().unwrap().hot_threshold(2).unwrap().init();
+        let mut mtt = MTBuilder::new().unwrap().hot_threshold(2).unwrap().build();
 
         let loc = Location::new();
 
