@@ -60,10 +60,11 @@ impl MTBuilder {
         MTInner::init(self.hot_threshold, self.tracing_kind)
     }
 
-    /// Change this meta-tracer builder's `hot_threshold` value.
-    pub fn hot_threshold(mut self, hot_threshold: HotThreshold) -> Self {
+    /// Change this meta-tracer builder's `hot_threshold` value. Returns `Ok` if `hot_threshold` is
+    /// an acceptable value or `Err` otherwise.
+    pub fn hot_threshold(mut self, hot_threshold: HotThreshold) -> Result<Self, ()> {
         self.hot_threshold = hot_threshold;
-        self
+        Ok(self)
     }
 
     /// Select the kind of tracing to use.
@@ -499,7 +500,11 @@ mod tests {
     #[test]
     fn threshold_passed() {
         let hot_thrsh: HotThreshold = 1500;
-        let mut mtt = MTBuilder::new().unwrap().hot_threshold(hot_thrsh).init();
+        let mut mtt = MTBuilder::new()
+            .unwrap()
+            .hot_threshold(hot_thrsh)
+            .unwrap()
+            .init();
         let loc = Location::new();
         let mut ctx = EmptyInterpCtx {};
         for i in 0..hot_thrsh {
@@ -523,7 +528,11 @@ mod tests {
     #[test]
     fn stop_while_tracing() {
         let hot_thrsh = 5;
-        let mut mtt = MTBuilder::new().unwrap().hot_threshold(hot_thrsh).init();
+        let mut mtt = MTBuilder::new()
+            .unwrap()
+            .hot_threshold(hot_thrsh)
+            .unwrap()
+            .init();
         let loc = Location::new();
         let mut ctx = EmptyInterpCtx {};
         for i in 0..hot_thrsh {
@@ -542,7 +551,11 @@ mod tests {
     #[test]
     fn threaded_threshold_passed() {
         let hot_thrsh = 4000;
-        let mut mtt = MTBuilder::new().unwrap().hot_threshold(hot_thrsh).init();
+        let mut mtt = MTBuilder::new()
+            .unwrap()
+            .hot_threshold(hot_thrsh)
+            .unwrap()
+            .init();
         let loc = Arc::new(Location::new());
         let mut thrs = vec![];
         for _ in 0..hot_thrsh / 4 {
@@ -599,7 +612,7 @@ mod tests {
 
     #[test]
     fn simple_interpreter() {
-        let mut mtt = MTBuilder::new().unwrap().hot_threshold(2).init();
+        let mut mtt = MTBuilder::new().unwrap().hot_threshold(2).unwrap().init();
 
         const INC: u8 = 0;
         const RESTART: u8 = 1;
@@ -670,7 +683,11 @@ mod tests {
         const THRESHOLD: HotThreshold = 100000;
         const NUM_THREADS: usize = 16;
 
-        let mut mtt = MTBuilder::new().unwrap().hot_threshold(THRESHOLD).init();
+        let mut mtt = MTBuilder::new()
+            .unwrap()
+            .hot_threshold(THRESHOLD)
+            .unwrap()
+            .init();
 
         const INC: u8 = 0;
         const RESTART: u8 = 1;
@@ -759,7 +776,11 @@ mod tests {
     fn locations_dont_get_stuck_tracing() {
         const THRESHOLD: HotThreshold = 2;
 
-        let mut mtt = MTBuilder::new().unwrap().hot_threshold(THRESHOLD).init();
+        let mut mtt = MTBuilder::new()
+            .unwrap()
+            .hot_threshold(THRESHOLD)
+            .unwrap()
+            .init();
 
         const INC: u8 = 0;
         const RESTART: u8 = 1;
@@ -825,7 +846,11 @@ mod tests {
     fn stuck_locations_free_memory() {
         const THRESHOLD: HotThreshold = 2;
 
-        let mtt = MTBuilder::new().unwrap().hot_threshold(THRESHOLD).init();
+        let mtt = MTBuilder::new()
+            .unwrap()
+            .hot_threshold(THRESHOLD)
+            .unwrap()
+            .init();
 
         const INC: u8 = 0;
         const RESTART: u8 = 1;
@@ -919,7 +944,7 @@ mod tests {
 
     #[test]
     fn stopgapping() {
-        let mut mtt = MTBuilder::new().unwrap().hot_threshold(2).init();
+        let mut mtt = MTBuilder::new().unwrap().hot_threshold(2).unwrap().init();
 
         const INC: u8 = 0;
         const RESTART: u8 = 1;
@@ -978,7 +1003,7 @@ mod tests {
     /// Tests that the stopgap interpreter returns the correct boolean to abort interpreting.
     #[test]
     fn loop_interpreter() {
-        let mut mtt = MTBuilder::new().unwrap().hot_threshold(2).init();
+        let mut mtt = MTBuilder::new().unwrap().hot_threshold(2).unwrap().init();
 
         let loc = Location::new();
 
