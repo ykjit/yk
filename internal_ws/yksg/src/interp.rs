@@ -20,7 +20,7 @@ pub struct FrameInfo {
 
 /// Heap allocated memory for writing and reading locals of a stack frame.
 #[derive(Debug)]
-pub struct LocalMem {
+struct LocalMem {
     /// Pointer to allocated memory containing a frame's locals.
     locals: *mut u8,
     /// The offset of each Local into locals.

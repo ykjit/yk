@@ -10,4 +10,4 @@
 
 mod interp;
 
-pub use interp::{FrameInfo, LocalMem, StopgapInterpreter};
+pub use interp::{FrameInfo, StopgapInterpreter};
