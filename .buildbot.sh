@@ -27,6 +27,9 @@ cargo xtask fmt --all -- --check
 
 # Build the compiler and add it as a linked toolchain.
 git clone https://github.com/softdevteam/ykrustc
+# Prevent cargo walking up the filesystem and picking up the yk cargo config.
+# This leads to all kinds of chaos (slow build, linkage errors).
+mv .cargo/config.toml .cargo/config.toml.save
 cd ykrustc
 cat <<EOD >> Cargo.toml
 [patch."https://github.com/softdevteam/yk"]
@@ -36,6 +39,7 @@ cp .buildbot.config.toml config.toml
 ./x.py build --stage 1
 rustup toolchain link ykrustc-stage1 `pwd`/build/x86_64-unknown-linux-gnu/stage1
 cd ..
+mv .cargo/config.toml.save .cargo/config.toml
 rustup override set ykrustc-stage1
 
 # Test both workspaces using the compiler we just built.
