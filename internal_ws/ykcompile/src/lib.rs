@@ -129,6 +129,10 @@ pub struct CompiledTrace {
 }
 
 impl CompiledTrace {
+    pub(crate) fn new(mc: dynasmrt::ExecutableBuffer) -> Self {
+        CompiledTrace { mc }
+    }
+
     /// Return a pointer to the mmap'd block of memory containing the trace. The underlying data is
     /// guaranteed never to move in memory.
     pub fn ptr(&self) -> *const u8 {

@@ -382,9 +382,7 @@ extern "sysv64" fn push_frames_vec(
 
 /// Compile a TIR trace.
 pub fn compile_trace(tt: TirTrace) -> CompiledTrace {
-    CompiledTrace {
-        mc: TraceCompiler::compile(tt, false),
-    }
+    CompiledTrace::new(TraceCompiler::compile(tt, false))
 }
 
 /// The `TraceCompiler` takes a `SIRTrace` and compiles it to machine code. Returns a `CompiledTrace`.
