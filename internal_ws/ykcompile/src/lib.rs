@@ -1,9 +1,8 @@
 //! The Yorick TIR trace compiler.
 
 use libc::{c_void, dlsym, RTLD_DEFAULT};
-use std::{ffi::CString, fmt, mem};
+use std::{ffi::CString, fmt};
 use ykpack::{Constant, Local, OffT, TypeId};
-use yksg::StopgapInterpreter;
 
 mod arch;
 mod stack_builder;
@@ -130,26 +129,6 @@ pub struct CompiledTrace {
 }
 
 impl CompiledTrace {
-    /// Execute the trace by calling (not jumping to) the first instruction's address. Returns a
-    /// pointer to an initialised `StopgapInterpreter` if there was a guard failure, or a null
-    /// pointer otherwise. Note that the interpreter holds a `*mut` pointer to `args`, so we need
-    /// to make sure that `args` is still alive when we call the interpreters `interpret` function.
-    pub unsafe fn execute<TT>(&self, args: &mut TT) -> *mut StopgapInterpreter {
-        let func: extern "sysv64" fn(&mut TT) -> *mut StopgapInterpreter =
-            mem::transmute(self.mc.ptr(dynasmrt::AssemblyOffset(0)));
-        self.exec_trace(func, args)
-    }
-
-    /// Actually call the code. This is a separate function making it easier to set a debugger
-    /// breakpoint right before entering the trace.
-    fn exec_trace<TT>(
-        &self,
-        t_fn: extern "sysv64" fn(&mut TT) -> *mut StopgapInterpreter,
-        args: &mut TT,
-    ) -> *mut StopgapInterpreter {
-        t_fn(args)
-    }
-
     /// Return a pointer to the mmap'd block of memory containing the trace. The underlying data is
     /// guaranteed never to move in memory.
     pub fn ptr(&self) -> *const u8 {
