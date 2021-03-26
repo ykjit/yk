@@ -46,7 +46,7 @@ pub fn neg_assert_tir(ptn: &str, tt: &TirTrace) {
 
 /// Types IDs that we need for tests.
 #[repr(C)]
-pub(crate)  struct TestTypes {
+pub(crate) struct TestTypes {
     pub t_u8: TypeId,
     pub t_i64: TypeId,
     pub t_string: TypeId,

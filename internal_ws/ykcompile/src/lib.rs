@@ -11,7 +11,7 @@ mod stack_builder;
 // This should be made into a properly abstracted API.
 pub use arch::x86_64::compile_trace;
 #[cfg(feature = "testing")]
-pub use arch::x86_64::{REG_POOL, TraceCompiler};
+pub use arch::x86_64::{TraceCompiler, REG_POOL};
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub enum CompileError {

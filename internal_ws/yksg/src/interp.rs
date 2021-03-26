@@ -10,7 +10,7 @@ use yktrace::sir::{RETURN_LOCAL, SIR};
 /// Stores information needed to recreate stack frames in the StopgapInterpreter.
 pub struct FrameInfo {
     /// The body of this frame.
-    pub(crate)  body: Arc<Body>,
+    pub(crate) body: Arc<Body>,
     /// Index of the current basic block we are in. When returning from a function call, the
     /// terminator of this block is were we continue.
     pub bbidx: usize,
