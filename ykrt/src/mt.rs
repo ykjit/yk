@@ -481,13 +481,15 @@ mod tests {
     use super::*;
     use crate::location::{HotLocationDiscriminants, State};
 
-    fn hotlocation_discriminant<I>(loc: &Location<I>) -> HotLocationDiscriminants {
-        loc.lock().unwrap();
-        let ls = loc.load(Ordering::Acquire);
-        assert!(!ls.is_counting());
-        let x = HotLocationDiscriminants::from(&*unsafe { ls.hot_location() });
-        loc.unlock();
-        x
+    fn hotlocation_discriminant<I>(loc: &Location<I>) -> Option<HotLocationDiscriminants> {
+        match loc.lock() {
+            Ok(ls) => {
+                let x = HotLocationDiscriminants::from(&*unsafe { ls.hot_location() });
+                loc.unlock();
+                Some(x)
+            }
+            Err(()) => None,
+        }
     }
 
     #[derive(Debug, PartialEq)]
@@ -515,7 +517,7 @@ mod tests {
         assert!(loc.load(Ordering::Relaxed).is_counting());
         mtt.control_point(Some(&loc), empty_step, &mut ctx);
         assert_eq!(
-            hotlocation_discriminant(&loc),
+            hotlocation_discriminant(&loc).unwrap(),
             HotLocationDiscriminants::Tracing
         );
         mtt.control_point(Some(&loc), empty_step, &mut ctx);
@@ -523,7 +525,7 @@ mod tests {
             HotLocationDiscriminants::Compiling,
             HotLocationDiscriminants::Compiled
         ]
-        .contains(&hotlocation_discriminant(&loc)));
+        .contains(&hotlocation_discriminant(&loc).unwrap()));
     }
 
     #[test]
@@ -544,7 +546,7 @@ mod tests {
         assert!(loc.load(Ordering::Relaxed).is_counting());
         mtt.control_point(Some(&loc), empty_step, &mut ctx);
         assert_eq!(
-            hotlocation_discriminant(&loc),
+            hotlocation_discriminant(&loc).unwrap(),
             HotLocationDiscriminants::Tracing
         );
     }
@@ -595,17 +597,17 @@ mod tests {
                 mtt.control_point(Some(&loc), empty_step, &mut ctx);
             }
             assert_eq!(
-                hotlocation_discriminant(&loc),
+                hotlocation_discriminant(&loc).unwrap(),
                 HotLocationDiscriminants::Tracing
             );
             mtt.control_point(Some(&loc), empty_step, &mut ctx);
 
-            while hotlocation_discriminant(&loc) == HotLocationDiscriminants::Compiling {
+            while hotlocation_discriminant(&loc) == Some(HotLocationDiscriminants::Compiling) {
                 yield_now();
                 mtt.control_point(Some(&loc), empty_step, &mut ctx);
             }
             assert_eq!(
-                hotlocation_discriminant(&loc),
+                hotlocation_discriminant(&loc).unwrap(),
                 HotLocationDiscriminants::Compiled
             );
         }
@@ -658,8 +660,8 @@ mod tests {
         loop {
             let loc = locs[ctx.pc].as_ref();
             if ctx.pc == 0
-                && !loc.unwrap().load(Ordering::Relaxed).is_counting()
-                && hotlocation_discriminant(&loc.unwrap()) == HotLocationDiscriminants::Compiled
+                && hotlocation_discriminant(&loc.unwrap())
+                    == Some(HotLocationDiscriminants::Compiled)
             {
                 break;
             }
@@ -746,8 +748,8 @@ mod tests {
             loop {
                 let loc = locs[ctx.pc].as_ref();
                 if ctx.pc == 0
-                    && !loc.unwrap().load(Ordering::Relaxed).is_counting()
-                    && hotlocation_discriminant(&loc.unwrap()) == HotLocationDiscriminants::Compiled
+                    && hotlocation_discriminant(&loc.unwrap())
+                        == Some(HotLocationDiscriminants::Compiled)
                 {
                     break;
                 }
@@ -827,9 +829,9 @@ mod tests {
         }
 
         let loc = locs[0].as_ref();
-        assert!(
-            !loc.unwrap().load(Ordering::Relaxed).is_counting()
-                && hotlocation_discriminant(&loc.unwrap()) == HotLocationDiscriminants::Tracing
+        assert_eq!(
+            hotlocation_discriminant(&loc.unwrap()),
+            Some(HotLocationDiscriminants::Tracing)
         );
         let mut ctx = InterpCtx {
             prog: Arc::clone(&prog),
@@ -837,9 +839,9 @@ mod tests {
             pc: 0,
         };
         mtt.control_point(loc, simple_interp_step, &mut ctx);
-        assert!(
-            !loc.unwrap().load(Ordering::Relaxed).is_counting()
-                && hotlocation_discriminant(&loc.unwrap()) == HotLocationDiscriminants::DontTrace
+        assert_eq!(
+            hotlocation_discriminant(&loc.unwrap()),
+            Some(HotLocationDiscriminants::DontTrace)
         );
     }
 
@@ -897,9 +899,9 @@ mod tests {
         }
 
         let loc = locs[0].as_ref();
-        assert!(
-            !loc.unwrap().load(Ordering::Relaxed).is_counting()
-                && hotlocation_discriminant(&loc.unwrap()) == HotLocationDiscriminants::Tracing
+        assert_eq!(
+            hotlocation_discriminant(&loc.unwrap()),
+            Some(HotLocationDiscriminants::Tracing)
         );
         // This is a weak test: at this point we hope that the dropped location frees its Arc. If
         // it doesn't, we won't have tested much. If it does, we at least get a modicum of "check
@@ -983,8 +985,8 @@ mod tests {
         loop {
             let loc = locs[ctx.pc].as_ref();
             if ctx.pc == 0
-                && !loc.unwrap().load(Ordering::Relaxed).is_counting()
-                && hotlocation_discriminant(&loc.unwrap()) == HotLocationDiscriminants::Compiled
+                && hotlocation_discriminant(&loc.unwrap())
+                    == Some(HotLocationDiscriminants::Compiled)
             {
                 break;
             }
@@ -1032,9 +1034,7 @@ mod tests {
         loop {
             ctx.counter = 0; // make sure we don't overflow
             mtt.control_point(Some(&loc), simple_interp_step, &mut ctx);
-            if !loc.load(Ordering::Relaxed).is_counting()
-                && hotlocation_discriminant(&loc) == HotLocationDiscriminants::Compiled
-            {
+            if hotlocation_discriminant(&loc) == Some(HotLocationDiscriminants::Compiled) {
                 break;
             }
         }

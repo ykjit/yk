@@ -138,12 +138,14 @@ impl<I> Location<I> {
         }
     }
 
-    /// Locks this `State` with `Acquire` ordering. If the location moves to the Counting state
-    /// during execution, this will return `Err`.
+    /// Locks this `State` with `Acquire` ordering. If the location was in, or moves to, the
+    /// Counting state this will return `Err`.
     pub(crate) fn lock(&self) -> Result<State<I>, ()> {
         {
             let ls = self.load(Ordering::Relaxed);
-            debug_assert!(!ls.is_counting());
+            if ls.is_counting() {
+                return Err(());
+            }
             let new_ls = ls.with_lock().with_unparked();
             if self
                 .state
