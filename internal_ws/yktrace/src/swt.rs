@@ -29,7 +29,7 @@ impl ThreadTracerImpl for SWTThreadTracer {
     }
 }
 
-pub(crate) fn start_tracing() -> ThreadTracer {
+pub(super) fn start_tracing() -> ThreadTracer {
     TRACE_BUF.with(|trace_buf| {
         assert!(trace_buf.is_empty());
     });

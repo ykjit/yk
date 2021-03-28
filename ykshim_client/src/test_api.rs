@@ -17,6 +17,7 @@ type RawTraceCompiler = c_void;
 struct CguHash(u64);
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
+#[cfg(feature = "testing")]
 pub struct TypeId {
     cgu: CguHash,
     idx: TyIndex,
@@ -49,6 +50,7 @@ extern "C" {
 }
 
 #[derive(Debug)]
+#[cfg(feature = "testing")]
 pub struct TirTrace(*mut RawTirTrace);
 
 impl TirTrace {

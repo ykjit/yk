@@ -198,6 +198,7 @@ pub struct StopgapInterpreter {
 
 impl StopgapInterpreter {
     /// Initialise the interpreter from a symbol name.
+    #[cfg(feature = "testing")]
     pub fn from_symbol(sym: String) -> Self {
         let frame = StopgapInterpreter::create_frame(&sym);
         StopgapInterpreter {

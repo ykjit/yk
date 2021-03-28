@@ -32,9 +32,11 @@ pub type RawStopgapInterpreter = c_void;
 pub type LocalIndex = u32;
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
 #[repr(C)]
+#[cfg(feature = "testing")]
 pub struct Local(pub LocalIndex);
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
+#[cfg(feature = "testing")]
 pub(crate) struct TyIndex(pub(crate) u32);
 
 extern "C" {
@@ -149,6 +151,7 @@ impl<I> CompiledTrace<I> {
     }
 
     /// Execute the trace with the given interpreter context.
+    #[cfg(feature = "testing")]
     pub unsafe fn execute(&self, ctx: &mut I) -> *mut RawStopgapInterpreter {
         let f = mem::transmute::<_, fn(&mut I) -> *mut RawStopgapInterpreter>(self.ptr());
         #[cfg(not(debug_assertions))]
