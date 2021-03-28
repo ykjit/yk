@@ -109,14 +109,14 @@ impl<I> Location<I> {
     }
 
     /// Return this Location's internal state.
-    pub(crate) fn load(&self, order: Ordering) -> State<I> {
+    pub(super) fn load(&self, order: Ordering) -> State<I> {
         State {
             x: self.state.load(order),
             marker: PhantomData,
         }
     }
 
-    pub(crate) fn compare_exchange_weak(
+    pub(super) fn compare_exchange_weak(
         &self,
         current: State<I>,
         new: State<I>,
@@ -140,7 +140,7 @@ impl<I> Location<I> {
 
     /// Locks this `State` with `Acquire` ordering. If the location was in, or moves to, the
     /// Counting state this will return `Err`.
-    pub(crate) fn lock(&self) -> Result<State<I>, ()> {
+    pub(super) fn lock(&self) -> Result<State<I>, ()> {
         {
             let ls = self.load(Ordering::Relaxed);
             if ls.is_counting() {
@@ -227,7 +227,7 @@ impl<I> Location<I> {
     }
 
     /// Unlocks this `State` with `Release` ordering.
-    pub(crate) fn unlock(&self) {
+    pub(super) fn unlock(&self) {
         let ls = self.load(Ordering::Relaxed);
         debug_assert!(ls.is_locked());
         debug_assert!(!ls.is_counting());
@@ -271,7 +271,7 @@ impl<I> Location<I> {
     }
 
     /// Try obtaining the lock, returning the new `State` if successful.
-    pub(crate) fn try_lock(&self) -> Result<State<I>, ()> {
+    pub(super) fn try_lock(&self) -> Result<State<I>, ()> {
         let mut ls = self.load(Ordering::Relaxed);
         loop {
             if ls.is_locked() {
@@ -300,20 +300,20 @@ impl<I> Drop for Location<I> {
 }
 
 #[cfg(target_pointer_width = "64")]
-pub(crate) const STATE_TAG: usize = 0b111; // All of the other tag data must fit in this.
+const STATE_TAG: usize = 0b111; // All of the other tag data must fit in this.
 #[cfg(target_pointer_width = "64")]
-pub(crate) const STATE_NUM_BITS: usize = 3;
+const STATE_NUM_BITS: usize = 3;
 
-pub(crate) const STATE_IS_LOCKED: usize = 0b001;
-pub(crate) const STATE_IS_PARKED: usize = 0b010;
-pub(crate) const STATE_IS_COUNTING: usize = 0b100;
+const STATE_IS_LOCKED: usize = 0b001;
+const STATE_IS_PARKED: usize = 0b010;
+const STATE_IS_COUNTING: usize = 0b100;
 
-pub(crate) const TOKEN_NORMAL: UnparkToken = UnparkToken(0);
-pub(crate) const TOKEN_HANDOFF: UnparkToken = UnparkToken(1);
+const TOKEN_NORMAL: UnparkToken = UnparkToken(0);
+const TOKEN_HANDOFF: UnparkToken = UnparkToken(1);
 
 #[derive(PartialEq, Eq, Debug)]
-pub(crate) struct State<I> {
-    pub(crate) x: usize,
+pub(super) struct State<I> {
+    x: usize,
     marker: PhantomData<I>,
 }
 
@@ -327,7 +327,7 @@ impl<I> Clone for State<I> {
 
 impl<I> State<I> {
     /// Return a new `State` in the counting phase with a count 0.
-    pub(crate) fn new() -> Self {
+    pub(super) fn new() -> Self {
         State {
             x: STATE_IS_COUNTING,
             marker: PhantomData,
@@ -341,21 +341,21 @@ impl<I> State<I> {
         }
     }
 
-    pub(crate) fn is_locked(&self) -> bool {
+    pub(super) fn is_locked(&self) -> bool {
         self.x & STATE_IS_LOCKED != 0
     }
 
-    pub(crate) fn is_parked(&self) -> bool {
+    pub(super) fn is_parked(&self) -> bool {
         self.x & STATE_IS_PARKED != 0
     }
 
     /// Is the Location in the counting or a non-counting state?
-    pub(crate) fn is_counting(&self) -> bool {
+    pub(super) fn is_counting(&self) -> bool {
         self.x & STATE_IS_COUNTING != 0
     }
 
     /// If, and only if, the Location is in the counting state, return the current count.
-    pub(crate) fn count(&self) -> HotThreshold {
+    pub(super) fn count(&self) -> HotThreshold {
         debug_assert!(self.is_counting());
         debug_assert!(!self.is_locked());
         u32::try_from(self.x >> STATE_NUM_BITS).unwrap()
@@ -364,14 +364,14 @@ impl<I> State<I> {
     /// If this `State` is not counting, return its `HotLocation`. It is undefined behaviour to
     /// call this function if this `State` is in the counting phase and/or if this `State` is not
     /// locked.
-    pub(crate) unsafe fn hot_location(&self) -> &mut HotLocation<I> {
+    pub(super) unsafe fn hot_location(&self) -> &mut HotLocation<I> {
         debug_assert!(!self.is_counting());
         //debug_assert!(self.is_locked());
         &mut *((self.x & !STATE_TAG) as *mut _)
     }
 
     /// Return a version of this `State` with the locked bit set.
-    pub(crate) fn with_lock(&self) -> State<I> {
+    pub(super) fn with_lock(&self) -> State<I> {
         State {
             x: self.x | STATE_IS_LOCKED,
             marker: PhantomData,
@@ -379,7 +379,7 @@ impl<I> State<I> {
     }
 
     /// Return a version of this `State` with the locked bit unset.
-    pub(crate) fn with_unlock(&self) -> State<I> {
+    fn with_unlock(&self) -> State<I> {
         State {
             x: self.x & !STATE_IS_LOCKED,
             marker: PhantomData,
@@ -387,7 +387,7 @@ impl<I> State<I> {
     }
 
     /// Return a version of this `State` with the parked bit set.
-    pub(crate) fn with_parked(&self) -> State<I> {
+    fn with_parked(&self) -> State<I> {
         State {
             x: self.x | STATE_IS_PARKED,
             marker: PhantomData,
@@ -395,7 +395,7 @@ impl<I> State<I> {
     }
 
     /// Return a version of this `State` with the parked bit unset.
-    pub(crate) fn with_unparked(&self) -> State<I> {
+    fn with_unparked(&self) -> State<I> {
         State {
             x: self.x & !STATE_IS_PARKED,
             marker: PhantomData,
@@ -404,7 +404,7 @@ impl<I> State<I> {
 
     /// Return a version of this `State` with the count set to `count`. It is undefined behaviour
     /// to call this function if this `State` is not in the counting phase.
-    pub(crate) fn with_count(&self, count: HotThreshold) -> Self {
+    pub(super) fn with_count(&self, count: HotThreshold) -> Self {
         debug_assert!(self.is_counting());
         debug_assert_eq!(count << STATE_NUM_BITS >> STATE_NUM_BITS, count);
         State {
@@ -415,7 +415,7 @@ impl<I> State<I> {
 
     /// Set this `State`'s `HotLocation`. It is undefined behaviour for this `State` to already
     /// have a `HotLocation`.
-    pub(crate) fn with_hotlocation(&self, hl_ptr: *mut HotLocation<I>) -> Self {
+    pub(super) fn with_hotlocation(&self, hl_ptr: *mut HotLocation<I>) -> Self {
         debug_assert!(self.is_counting());
         let hl_ptr = hl_ptr as usize;
         debug_assert_eq!(hl_ptr & !STATE_TAG, hl_ptr);
@@ -428,11 +428,11 @@ impl<I> State<I> {
 
 /// An opaque struct used by `MTThreadInner` to help identify if a thread that started a trace is
 /// still active.
-pub(crate) struct ThreadIdInner;
+pub(super) struct ThreadIdInner;
 
 /// A `Location`'s non-counting states.
 #[derive(EnumDiscriminants)]
-pub(crate) enum HotLocation<I> {
+pub(super) enum HotLocation<I> {
     Compiled(Box<CompiledTrace<I>>),
     Compiling(Arc<Mutex<Option<Box<CompiledTrace<I>>>>>),
     DontTrace,

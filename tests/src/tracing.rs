@@ -55,7 +55,7 @@ fn trace_twice() {
 
 /// Test that tracing in different threads works.
 #[test]
-pub(crate) fn trace_concurrent() {
+fn trace_concurrent() {
     #[cfg(tracermode = "hw")]
     let kind = TracingKind::HardwareTracing;
     #[cfg(tracermode = "sw")]
