@@ -230,7 +230,7 @@ pub struct TupleTy {
 }
 
 impl TupleTy {
-    pub fn is_unit(&self) -> bool {
+    fn is_unit(&self) -> bool {
         self.fields.offsets.is_empty()
     }
 }
@@ -306,7 +306,7 @@ pub struct Body {
     pub blocks: Vec<BasicBlock>,
     pub flags: BodyFlags,
     pub local_decls: Vec<LocalDecl>,
-    pub num_args: usize,
+    pub(super) num_args: usize,
     pub layout: (usize, usize),
     pub offsets: Vec<usize>,
 }
@@ -593,7 +593,7 @@ pub enum ConstantInt {
 impl ConstantInt {
     /// Returns an i64 value suitable for loading into a register.
     /// If the constant is signed, then it will be sign-extended.
-    pub fn i64_cast(&self) -> i64 {
+    fn i64_cast(&self) -> i64 {
         match self {
             ConstantInt::UnsignedInt(ui) => match ui {
                 UnsignedInt::U8(i) => *i as i64,
