@@ -71,6 +71,7 @@ fn trace_debug_tir() {
     let sir_trace = tracer.stop_tracing().unwrap();
     let tir_trace = TirTrace::new(&sir_trace);
     assert_eq!(io.1, 38);
+    #[cfg(debug_assertions)]
     assert_tir(
         "...\n\
             ops:\n\
@@ -90,6 +91,29 @@ fn trace_debug_tir() {
               // Minus 2
               ...
               ... - 2usize (checked)
+              ...",
+        &tir_trace,
+    );
+    #[cfg(not(debug_assertions))]
+    assert_tir(
+        "...\n\
+            ops:\n\
+              ...
+              // Add 10
+              ...
+              ... + 10usize
+              ...
+              // Add 10
+              ...
+              ... + 10usize
+              ...
+              // Multiply 2
+              ...
+              ... * 2usize
+              ...
+              // Minus 2
+              ...
+              ... - 2usize
               ...",
         &tir_trace,
     );

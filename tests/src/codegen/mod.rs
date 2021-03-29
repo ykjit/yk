@@ -433,6 +433,7 @@ mk_binop_test!(binop_div5, /, u32, 1048576, 8, 131072);
 mk_binop_test!(binop_div6, /, u64, 68719476736u64, 8, 8589934592);
 
 #[test]
+#[cfg(debug_assertions)]
 fn binop_add_overflow() {
     #[derive(Eq, PartialEq, Debug)]
     struct InterpCtx(u8, u8);
