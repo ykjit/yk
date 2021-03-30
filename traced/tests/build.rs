@@ -7,7 +7,7 @@ fn main() {
 
     let profile = env::var("PROFILE").unwrap();
     println!(
-        "cargo:rustc-link-search={}/../internal_ws/target/{}/",
+        "cargo:rustc-link-search={}/../../untraced/target/{}/",
         env::current_dir().unwrap().to_str().unwrap(),
         profile
     );

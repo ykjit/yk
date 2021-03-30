@@ -3,26 +3,27 @@ use std::os::unix::fs::symlink;
 use std::path::PathBuf;
 use std::process::Command;
 
-include!("../build_aux.rs");
+include!("../../build_aux.rs");
 
 const YKSHIM_SO: &str = "libykshim.so";
 
 fn main() {
-    let mut internal_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    internal_dir.push("..");
-    internal_dir.push("internal_ws");
+    let mut untraced_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    untraced_dir.push("..");
+    untraced_dir.push("..");
+    untraced_dir.push("untraced");
     let cargo = env::var("CARGO").unwrap();
     let profile = env::var("PROFILE").unwrap();
 
-    // Only build the internal workspace now if we are not using xtask, i.e. if we are being
-    // consumed as a dependency. This means we see the compiler output for the internal workspace
+    // Only build the untraced workspace now if we are not using xtask, i.e. if we are being
+    // consumed as a dependency. This means we see the compiler output for the untraced workspace
     // correctly when working directly with the yk repo (via xtask).
     if env::var("YK_XTASK").is_err() {
         let mut rustflags = env::var("RUSTFLAGS").unwrap_or_else(|_| String::new());
         let tracing_kind = find_tracing_kind(&rustflags);
-        rustflags = make_internal_rustflags(&rustflags);
+        rustflags = make_untraced_rustflags(&rustflags);
         let mut cmd = Command::new(cargo);
-        cmd.current_dir(internal_dir.join("ykshim"))
+        cmd.current_dir(untraced_dir.join("ykshim"))
             .arg("build")
             .arg("--features")
             .arg(format!("yktrace/trace_{}", tracing_kind))
@@ -34,7 +35,7 @@ fn main() {
 
         let status = cmd.spawn().unwrap().wait().unwrap();
         if !status.success() {
-            eprintln!("building internal workspace failed");
+            eprintln!("building untraced workspace failed");
             std::process::exit(1);
         }
     }
@@ -47,7 +48,7 @@ fn main() {
     sym_dst.push("..");
     sym_dst.push(YKSHIM_SO);
     if !PathBuf::from(&sym_dst).exists() {
-        let mut sym_src = internal_dir;
+        let mut sym_src = untraced_dir;
         sym_src.push("target");
         sym_src.push(&profile);
         sym_src.push(YKSHIM_SO);
@@ -55,7 +56,7 @@ fn main() {
     }
 
     println!(
-        "cargo:rustc-link-search={}/../internal_ws/target/{}/",
+        "cargo:rustc-link-search={}/../../untraced/target/{}/",
         env::current_dir().unwrap().to_str().unwrap(),
         profile
     );

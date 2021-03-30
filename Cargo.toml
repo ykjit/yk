@@ -1,17 +1,7 @@
+# This workspace contains only the build system.
 [workspace]
 members = [
-    "ykshim_client",
-    "tests",
     "xtask",
-    "ykrt",
 ]
 
-# "internal" is a separate cargo workspace containing things we never want to
-# trace. It is compiled separately with optimisations.
-exclude = [ "internal_ws" ]
-
-[profile.dev]
-panic = "abort"
-
-[profile.release]
-panic = "abort"
+exclude = ["traced", "untraced" ]

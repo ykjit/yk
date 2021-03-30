@@ -33,7 +33,7 @@ mv .cargo/config.toml .cargo/config.toml.save
 cd ykrustc
 cat <<EOD >> Cargo.toml
 [patch."https://github.com/softdevteam/yk"]
-ykpack = { path = "../internal_ws/ykpack" }
+ykpack = { path = "../untraced/ykpack" }
 EOD
 cp .buildbot.config.toml config.toml
 ./x.py build --stage 1

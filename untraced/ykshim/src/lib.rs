@@ -1,4 +1,4 @@
-//! API to the optimised internals of the JIT runtime.
+//! API to the untraced workspace.
 //!
 //! For more information, see this section in the documentation:
 //! https://softdevteam.github.io/ykdocs/tech/yk_structure.html
