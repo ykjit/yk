@@ -1,16 +1,17 @@
 //! The Yorick TIR trace compiler.
 
 use libc::{c_void, dlsym, RTLD_DEFAULT};
-use std::{ffi::CString, fmt, mem};
+use std::{ffi::CString, fmt};
 use ykpack::{Constant, Local, OffT, TypeId};
-use yksg::StopgapInterpreter;
 
 mod arch;
 mod stack_builder;
 
 // FIXME hard-wired use of the x86_64 backend.
 // This should be made into a properly abstracted API.
-pub use arch::x86_64::{compile_trace, TraceCompiler, REG_POOL};
+pub use arch::x86_64::compile_trace;
+#[cfg(feature = "testing")]
+pub use arch::x86_64::{TraceCompiler, REG_POOL};
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub enum CompileError {
@@ -130,24 +131,8 @@ pub struct CompiledTrace {
 }
 
 impl CompiledTrace {
-    /// Execute the trace by calling (not jumping to) the first instruction's address. Returns a
-    /// pointer to an initialised `StopgapInterpreter` if there was a guard failure, or a null
-    /// pointer otherwise. Note that the interpreter holds a `*mut` pointer to `args`, so we need
-    /// to make sure that `args` is still alive when we call the interpreters `interpret` function.
-    pub unsafe fn execute<TT>(&self, args: &mut TT) -> *mut StopgapInterpreter {
-        let func: extern "sysv64" fn(&mut TT) -> *mut StopgapInterpreter =
-            mem::transmute(self.mc.ptr(dynasmrt::AssemblyOffset(0)));
-        self.exec_trace(func, args)
-    }
-
-    /// Actually call the code. This is a separate function making it easier to set a debugger
-    /// breakpoint right before entering the trace.
-    fn exec_trace<TT>(
-        &self,
-        t_fn: extern "sysv64" fn(&mut TT) -> *mut StopgapInterpreter,
-        args: &mut TT,
-    ) -> *mut StopgapInterpreter {
-        t_fn(args)
+    pub(crate) fn new(mc: dynasmrt::ExecutableBuffer) -> Self {
+        CompiledTrace { mc }
     }
 
     /// Return a pointer to the mmap'd block of memory containing the trace. The underlying data is

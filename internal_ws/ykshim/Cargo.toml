@@ -16,4 +16,4 @@ ykpack = { path = "../ykpack" }
 yktrace = { path = "../yktrace" }
 
 [features]
-testing = ["yksg/testing"]
+testing = ["ykcompile/testing", "yksg/testing"]
