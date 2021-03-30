@@ -30,7 +30,7 @@ pub struct FrameInfo {
 
 /// Heap allocated memory for writing and reading locals of a stack frame.
 #[derive(Debug)]
-pub struct LocalMem {
+pub(crate) struct LocalMem {
     /// Pointer to allocated memory containing a frame's locals.
     locals: *mut u8,
     /// The offset of each Local into locals.
@@ -198,6 +198,7 @@ pub struct StopgapInterpreter {
 
 impl StopgapInterpreter {
     /// Initialise the interpreter from a symbol name.
+    #[cfg(feature = "testing")]
     pub fn from_symbol(sym: String) -> Self {
         let frame = StopgapInterpreter::create_frame(&sym);
         StopgapInterpreter {

@@ -7,7 +7,7 @@ use yktrace::sir::SIR;
 
 impl TraceCompiler {
     /// Store the value in `src_loc` into `dst_loc`.
-    pub(crate) fn store(&mut self, dst_ip: &IRPlace, src_ip: &IRPlace) {
+    pub(super) fn store(&mut self, dst_ip: &IRPlace, src_ip: &IRPlace) {
         let dst_loc = self.irplace_to_location(dst_ip);
         let src_loc = self.irplace_to_location(src_ip);
         debug_assert!(SIR.ty(&dst_ip.ty()).size() == SIR.ty(&src_ip.ty()).size());
@@ -15,7 +15,7 @@ impl TraceCompiler {
     }
 
     /// Stores src_loc into dst_loc.
-    pub(crate) fn store_raw(&mut self, dst_loc: &Location, src_loc: &Location, size: u64) {
+    pub(super) fn store_raw(&mut self, dst_loc: &Location, src_loc: &Location, size: u64) {
         // This is the one place in the compiler where we allow an explosion of cases over the
         // variants of `Location`. If elsewhere you find yourself matching over a pair of locations
         // you should try and re-work you code so it calls this.

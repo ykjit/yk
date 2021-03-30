@@ -14,12 +14,13 @@ type RawTraceCompiler = c_void;
 // Keep these types in-sync with the internal workspace.
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
-pub struct CguHash(u64);
+struct CguHash(u64);
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
+#[cfg(feature = "testing")]
 pub struct TypeId {
-    pub cgu: CguHash,
-    pub idx: TyIndex,
+    cgu: CguHash,
+    idx: TyIndex,
 }
 
 extern "C" {
@@ -49,6 +50,7 @@ extern "C" {
 }
 
 #[derive(Debug)]
+#[cfg(feature = "testing")]
 pub struct TirTrace(*mut RawTirTrace);
 
 impl TirTrace {
@@ -91,8 +93,8 @@ pub fn sir_body_ret_ty(sym: &str) -> TypeId {
 }
 
 pub struct LocalDecl {
-    pub ty: TypeId,
-    pub referenced: bool,
+    ty: TypeId,
+    referenced: bool,
 }
 
 impl LocalDecl {

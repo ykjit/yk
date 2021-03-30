@@ -5,14 +5,14 @@ use regex::Regex;
 use ykshim_client::{sir_body_ret_ty, TirTrace, TypeId};
 
 extern "C" {
-    pub fn add6(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64) -> u64;
+    pub(super) fn add6(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64) -> u64;
 }
 extern "C" {
-    pub fn add_some(a: u64, b: u64, c: u64, d: u64, e: u64) -> u64;
+    pub(super) fn add_some(a: u64, b: u64, c: u64, d: u64, e: u64) -> u64;
 }
 
 /// Fuzzy matches the textual TIR for the trace `tt` with the pattern `ptn`.
-pub fn assert_tir(ptn: &str, tt: &TirTrace) {
+pub(super) fn assert_tir(ptn: &str, tt: &TirTrace) {
     let ptn_re = Regex::new(r"%.+?\b").unwrap(); // Names are words prefixed with `%`.
     let text_re = Regex::new(r"\$?.+?\b").unwrap(); // Any word optionally prefixed with `$`.
     let matcher = FMBuilder::new(ptn)
@@ -28,7 +28,7 @@ pub fn assert_tir(ptn: &str, tt: &TirTrace) {
     }
 }
 
-pub fn neg_assert_tir(ptn: &str, tt: &TirTrace) {
+pub(super) fn neg_assert_tir(ptn: &str, tt: &TirTrace) {
     let ptn_re = Regex::new(r"%.+?\b").unwrap(); // Names are words prefixed with `%`.
     let text_re = Regex::new(r"\$?.+?\b").unwrap(); // Any word optionally prefixed with `$`.
     let matcher = FMBuilder::new(ptn)
@@ -46,17 +46,17 @@ pub fn neg_assert_tir(ptn: &str, tt: &TirTrace) {
 
 /// Types IDs that we need for tests.
 #[repr(C)]
-pub struct TestTypes {
-    pub t_u8: TypeId,
-    pub t_i64: TypeId,
-    pub t_string: TypeId,
-    pub t_tiny_struct: TypeId,
-    pub t_tiny_array: TypeId,
-    pub t_tiny_tuple: TypeId,
+pub(super) struct TestTypes {
+    pub(super) t_u8: TypeId,
+    pub(super) t_i64: TypeId,
+    pub(super) t_string: TypeId,
+    pub(super) t_tiny_struct: TypeId,
+    pub(super) t_tiny_array: TypeId,
+    pub(super) t_tiny_tuple: TypeId,
 }
 
 impl TestTypes {
-    pub fn new() -> TestTypes {
+    pub(super) fn new() -> TestTypes {
         // We can't know the type ID of any given type, so this works by defining unmangled
         // functions with known return types and then looking them up by name in the SIR.
         #[no_mangle]

@@ -4,4 +4,4 @@
 compile_error!("Currently only linux x86_64 is supported.");
 
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
-pub(crate) mod x86_64;
+pub(super) mod x86_64;
