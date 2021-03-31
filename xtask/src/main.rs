@@ -21,6 +21,18 @@ enum Workspace {
     Xtask,
 }
 
+impl Workspace {
+    /// Get the path to the workspace relative to the xtask crate's path.
+    fn path(&self) -> PathBuf {
+        let xtask_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+        match self {
+            Self::Untraced => [&xtask_dir, "..", "untraced"].iter().collect::<PathBuf>(),
+            Self::Traced => [&xtask_dir, "..", "traced"].iter().collect::<PathBuf>(),
+            Self::Xtask => PathBuf::from(&xtask_dir),
+        }
+    }
+}
+
 fn run_action(workspace: Workspace, target: &str, extra_args: &[String], features: &[String]) {
     // The traced workspace depends on libykshim.so produced by the untraced workspace
     if workspace == Workspace::Traced {
@@ -40,31 +52,12 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String], feature
         // understand `+nightly`. So the easiest way to run `cargo fmt` for the nightly
         // toolchain is to use `rustup run nightly cargo fmt`.
         let mut cmd = Command::new("rustup");
-        cmd.args(&["run", "nightly", "cargo", target]);
-
-        let this_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-        let ws_dir = match workspace {
-            Workspace::Untraced => [&this_dir, "..", "untraced"].iter().collect::<PathBuf>(),
-            Workspace::Traced => [&this_dir, "..", "traced"].iter().collect::<PathBuf>(),
-            Workspace::Xtask => PathBuf::from(this_dir),
-        };
-        cmd.current_dir(ws_dir);
-
+        cmd.args(&["run", "nightly", "cargo", target])
+            .current_dir(workspace.path());
         cmd
     } else {
         let mut cmd = Command::new(env::var("CARGO").unwrap());
-        cmd.arg(target);
-
-        let this_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-        let ws_dir = match workspace {
-            Workspace::Untraced => [&this_dir, "..", "untraced", "ykshim"]
-                .iter()
-                .collect::<PathBuf>(),
-            Workspace::Traced => [&this_dir, "..", "traced"].iter().collect::<PathBuf>(),
-            Workspace::Xtask => PathBuf::from(this_dir),
-        };
-        cmd.current_dir(ws_dir);
-
+        cmd.arg(target).current_dir(workspace.path());
         cmd
     };
 
