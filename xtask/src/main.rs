@@ -110,7 +110,7 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String], feature
                 rust_flags = format!("--cfg tracermode=\"{}\"", tracing_kind);
             }
         }
-        _ => bail(format!(
+        _ => fatal(format!(
             "the build system does not support the {} target",
             target
         )),
@@ -122,7 +122,7 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String], feature
     // The clippy exception ensures that both workspaces are linted if one workspace fails. The
     // exit status may be inaccurate, but we can live with this.
     if !status.success() && (target != "clippy") {
-        bail(format!("{:?} failed with {}", cmd, status));
+        fatal(format!("{:?} failed with {}", cmd, status));
     }
 
     // Ensure that we can clean, fmt and clippy the build system. Other operations are automatic
@@ -132,7 +132,7 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String], feature
     }
 }
 
-fn bail(err_str: String) -> ! {
+fn fatal(err_str: String) -> ! {
     eprintln!("xtask: {}", err_str);
     exit(1);
 }
