@@ -1,6 +1,6 @@
 //! Artificially testing the stopgap interpreter (without a guard failure).
 
-use ykshim_client::interpret_body;
+use untraced_api::interpret_body;
 
 #[test]
 fn simple() {

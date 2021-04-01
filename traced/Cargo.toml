@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "ykshim_client",
+    "untraced_api",
     "tests",
     "ykrt",
 ]

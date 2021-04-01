@@ -34,7 +34,7 @@ impl Workspace {
 }
 
 fn run_action(workspace: Workspace, target: &str, extra_args: &[String], features: &[String]) {
-    // The traced workspace depends on libykshim.so produced by the untraced workspace
+    // The traced workspace depends on libto_traced.so produced by the untraced workspace
     if workspace == Workspace::Traced {
         run_action(Workspace::Untraced, target, extra_args, &[]);
     }
@@ -87,7 +87,7 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String], feature
                 fs.push(format!("yktrace/trace_{}", tracing_kind));
                 cmd.arg(fs.join(","));
 
-                // `cargo test` in the untraced workspace won't build libykshim.so, so we have
+                // `cargo test` in the untraced workspace won't build libto_traced.so, so we have
                 // to force-build it to avoid linkage problems for the traced workspace.
                 if target == "test" || target == "bench" {
                     // Since we are running a different target to what the user requested, the

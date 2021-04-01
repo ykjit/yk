@@ -15,7 +15,7 @@ use parking_lot_core::{
 };
 use strum::EnumDiscriminants;
 
-use ykshim_client::{CompiledTrace, ThreadTracer};
+use untraced_api::{CompiledTrace, ThreadTracer};
 
 use crate::mt::HotThreshold;
 

@@ -3,7 +3,7 @@ members = [
     "ykcompile",
     "ykpack",
     "yksg",
-    "ykshim",
+    "to_traced",
     "yktrace",
     "ykview",
 ]

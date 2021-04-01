@@ -3,7 +3,7 @@
 // FIXME hard-coded hardware testing. Use default mode, but requires more shimming.
 
 use std::{hint::black_box, thread};
-use ykshim_client::{start_tracing, TracingKind};
+use untraced_api::{start_tracing, TracingKind};
 
 // Some work to trace.
 #[interp_step]

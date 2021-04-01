@@ -29,7 +29,7 @@ enum TracingKind {
 /// Starts tracing using the specified kind, returning a ThreadTracer through which to stop
 /// tracing.
 #[no_mangle]
-unsafe extern "C" fn __ykshim_start_tracing(tracing_kind: u8) -> *mut ThreadTracer {
+unsafe extern "C" fn __to_traced_start_tracing(tracing_kind: u8) -> *mut ThreadTracer {
     let tracing_kind = match tracing_kind {
         0 => yktrace::TracingKind::SoftwareTracing,
         1 => yktrace::TracingKind::HardwareTracing,
@@ -43,7 +43,7 @@ unsafe extern "C" fn __ykshim_start_tracing(tracing_kind: u8) -> *mut ThreadTrac
 /// error occurs then the returned pointer will be NULL and `error_msg` will contain details of the
 /// error.
 #[no_mangle]
-unsafe extern "C" fn __ykshim_stop_tracing(
+unsafe extern "C" fn __to_traced_stop_tracing(
     tracer: *mut ThreadTracer,
     error_msg: *mut *mut c_char,
 ) -> *mut SirTrace {
@@ -61,7 +61,7 @@ unsafe extern "C" fn __ykshim_stop_tracing(
 /// Compiles a SIR trace into an opaque pointer to a native code trace. If an error occurs, the
 /// returned pointer will be null, and `error_msg` will contain details of the error.
 #[no_mangle]
-unsafe extern "C" fn __ykshim_compile_trace(
+unsafe extern "C" fn __to_traced_compile_trace(
     sir_trace: *mut SirTrace,
     error_msg: *mut *mut c_char,
 ) -> *mut CompiledTrace {
@@ -79,7 +79,7 @@ unsafe extern "C" fn __ykshim_compile_trace(
 
 /// Gets a callable function pointer from a compiled trace.
 #[no_mangle]
-unsafe extern "C" fn __ykshim_compiled_trace_get_ptr(
+unsafe extern "C" fn __to_traced_compiled_trace_get_ptr(
     compiled_trace: *const CompiledTrace,
 ) -> *const c_void {
     let compiled_trace = &*(compiled_trace as *mut CompiledTrace);
@@ -88,30 +88,30 @@ unsafe extern "C" fn __ykshim_compiled_trace_get_ptr(
 
 /// Drop a compiled trace.
 #[no_mangle]
-unsafe extern "C" fn __ykshim_compiled_trace_drop(compiled_trace: *mut CompiledTrace) {
+unsafe extern "C" fn __to_traced_compiled_trace_drop(compiled_trace: *mut CompiledTrace) {
     Box::from_raw(compiled_trace);
 }
 
 /// Drop a SIR trace.
 #[no_mangle]
-unsafe extern "C" fn __ykshim_sirtrace_drop(trace: *mut SirTrace) {
+unsafe extern "C" fn __to_traced_sirtrace_drop(trace: *mut SirTrace) {
     Box::from_raw(trace);
 }
 
 /// Drop a TIR trace.
 #[no_mangle]
-unsafe fn __ykshim_tirtrace_drop(tir_trace: *mut TirTrace) {
+unsafe fn __to_traced_tirtrace_drop(tir_trace: *mut TirTrace) {
     Box::from_raw(tir_trace);
 }
 
 /// Start an initialised StopgapInterpreter.
 #[no_mangle]
-unsafe extern "C" fn __ykshim_si_interpret(si: *mut yksg::StopgapInterpreter) -> bool {
+unsafe extern "C" fn __to_traced_si_interpret(si: *mut yksg::StopgapInterpreter) -> bool {
     let si = &mut *si;
     si.interpret()
 }
 
 #[no_mangle]
-unsafe extern "C" fn __ykshim_sirinterpreter_drop(interp: *mut yksg::StopgapInterpreter) {
+unsafe extern "C" fn __to_traced_sirinterpreter_drop(interp: *mut yksg::StopgapInterpreter) {
     Box::from_raw(interp);
 }

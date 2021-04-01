@@ -2,7 +2,7 @@
 
 use fm::FMBuilder;
 use regex::Regex;
-use ykshim_client::{sir_body_ret_ty, TirTrace, TypeId};
+use untraced_api::{sir_body_ret_ty, TirTrace, TypeId};
 
 extern "C" {
     pub(super) fn add6(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64) -> u64;
