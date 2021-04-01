@@ -1,10 +1,2 @@
 [alias]
 xtask = "run --package xtask --"
-
-# Although we will never trace the build system, ykrustc will refuse to build it with
-# `-C tracer=hw` and with optimisations enabled.
-[profile.release]
-opt-level = 0
-
-[profile.bench]
-opt-level = 0

@@ -1,6 +1,0 @@
-# FIXME for software tracing we could optimise.
-[profile.release]
-opt-level = 0
-
-[profile.bench]
-opt-level = 0
