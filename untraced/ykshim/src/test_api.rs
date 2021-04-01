@@ -1,6 +1,6 @@
 //! The ykshim testing API.
 //!
-//! These functions are only exposed to allow testing from the external workspace.
+//! These functions are only exposed to allow testing from the traced workspace.
 #![cfg(feature = "testing")]
 
 use libc::size_t;

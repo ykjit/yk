@@ -11,7 +11,7 @@ use std::{fmt, ptr};
 
 type RawTraceCompiler = c_void;
 
-// Keep these types in-sync with the internal workspace.
+// Keep these types in-sync with the untraced workspace.
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 struct CguHash(u64);

@@ -16,14 +16,27 @@ include!("../../build_aux.rs");
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 enum Workspace {
-    Internal,
-    External,
+    Untraced,
+    Traced,
+    Xtask,
+}
+
+impl Workspace {
+    /// Get the path to the workspace relative to the xtask crate's path.
+    fn path(&self) -> PathBuf {
+        let xtask_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+        match self {
+            Self::Untraced => [&xtask_dir, "..", "untraced"].iter().collect::<PathBuf>(),
+            Self::Traced => [&xtask_dir, "..", "traced"].iter().collect::<PathBuf>(),
+            Self::Xtask => PathBuf::from(&xtask_dir),
+        }
+    }
 }
 
 fn run_action(workspace: Workspace, target: &str, extra_args: &[String], features: &[String]) {
-    // The external workspace depends on libykshim.so produced by the internal workspace
-    if workspace == Workspace::External {
-        run_action(Workspace::Internal, target, extra_args, &[]);
+    // The traced workspace depends on libykshim.so produced by the untraced workspace
+    if workspace == Workspace::Traced {
+        run_action(Workspace::Untraced, target, extra_args, &[]);
     }
 
     let mut cmd = if ["fmt", "clippy"].contains(&target) {
@@ -39,29 +52,12 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String], feature
         // understand `+nightly`. So the easiest way to run `cargo fmt` for the nightly
         // toolchain is to use `rustup run nightly cargo fmt`.
         let mut cmd = Command::new("rustup");
-        cmd.args(&["run", "nightly", "cargo", target]);
-
-        let this_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-        let ws_dir = match workspace {
-            Workspace::Internal => [&this_dir, "..", "internal_ws"].iter().collect::<PathBuf>(),
-            Workspace::External => [&this_dir, ".."].iter().collect::<PathBuf>(),
-        };
-        cmd.current_dir(ws_dir);
-
+        cmd.args(&["run", "nightly", "cargo", target])
+            .current_dir(workspace.path());
         cmd
     } else {
         let mut cmd = Command::new(env::var("CARGO").unwrap());
-        cmd.arg(target);
-
-        let this_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-        let ws_dir = match workspace {
-            Workspace::Internal => [&this_dir, "..", "internal_ws", "ykshim"]
-                .iter()
-                .collect::<PathBuf>(),
-            Workspace::External => [&this_dir, ".."].iter().collect::<PathBuf>(),
-        };
-        cmd.current_dir(ws_dir);
-
+        cmd.arg(target).current_dir(workspace.path());
         cmd
     };
 
@@ -79,9 +75,9 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String], feature
                 cmd.arg("--workspace");
             }
 
-            if workspace == Workspace::Internal {
+            if workspace == Workspace::Untraced {
                 let tracing_kind = find_tracing_kind(&rust_flags);
-                rust_flags = make_internal_rustflags(&rust_flags);
+                rust_flags = make_untraced_rustflags(&rust_flags);
 
                 // Set the tracermode cfg macro, but without changing anything relating to code
                 // generation. We can't use `-C tracer=hw` as this would turn off optimisations
@@ -91,8 +87,8 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String], feature
                 fs.push(format!("yktrace/trace_{}", tracing_kind));
                 cmd.arg(fs.join(","));
 
-                // `cargo test` in the internal workspace won't build libykshim.so, so we have
-                // to force-build it to avoid linkage problems for the external workspace.
+                // `cargo test` in the untraced workspace won't build libykshim.so, so we have
+                // to force-build it to avoid linkage problems for the traced workspace.
                 if target == "test" || target == "bench" {
                     // Since we are running a different target to what the user requested, the
                     // extra_args they supplied may not be compatible with the "build" target.
@@ -103,18 +99,18 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String], feature
                         build_args.push("--release".to_owned());
                     };
                     run_action(
-                        Workspace::Internal,
+                        Workspace::Untraced,
                         "build",
                         &build_args,
                         &["testing".to_owned()],
                     );
                 }
-            } else if workspace == Workspace::External && target == "clippy" {
+            } else if workspace == Workspace::Traced && target == "clippy" {
                 let tracing_kind = find_tracing_kind(&rust_flags);
                 rust_flags = format!("--cfg tracermode=\"{}\"", tracing_kind);
             }
         }
-        _ => bail(format!(
+        _ => fatal(format!(
             "the build system does not support the {} target",
             target
         )),
@@ -126,11 +122,17 @@ fn run_action(workspace: Workspace, target: &str, extra_args: &[String], feature
     // The clippy exception ensures that both workspaces are linted if one workspace fails. The
     // exit status may be inaccurate, but we can live with this.
     if !status.success() && (target != "clippy") {
-        bail(format!("{:?} failed with {}", cmd, status));
+        fatal(format!("{:?} failed with {}", cmd, status));
+    }
+
+    // Ensure that we can clean, fmt and clippy the build system. Other operations are automatic
+    // due to the cargo alias in .cargo/config.
+    if workspace == Workspace::Traced && ["clean", "fmt", "clippy"].contains(&target) {
+        run_action(Workspace::Xtask, target, extra_args, &[]);
     }
 }
 
-fn bail(err_str: String) -> ! {
+fn fatal(err_str: String) -> ! {
     eprintln!("xtask: {}", err_str);
     exit(1);
 }
@@ -141,5 +143,5 @@ fn main() {
     let target = args.next().unwrap();
     let extra_args = args.collect::<Vec<_>>();
 
-    run_action(Workspace::External, &target, &extra_args, &[]);
+    run_action(Workspace::Traced, &target, &extra_args, &[]);
 }

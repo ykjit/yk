@@ -1,0 +1,12 @@
+[workspace]
+members = [
+    "ykshim_client",
+    "tests",
+    "ykrt",
+]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

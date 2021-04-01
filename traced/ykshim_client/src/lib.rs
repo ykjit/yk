@@ -1,4 +1,4 @@
-//! Client to the ykshim crate in the internal workspace.
+//! Client to the ykshim crate in the untraced workspace.
 //!
 //! For more information, see this section in the documentation:
 //! https://softdevteam.github.io/ykdocs/tech/yk_structure.html
@@ -27,7 +27,7 @@ type RawThreadTracer = c_void;
 pub(crate) type RawTirTrace = c_void;
 pub type RawStopgapInterpreter = c_void;
 
-// These types and constants must be kept in sync with those of the same name in the internal
+// These types and constants must be kept in sync with those of the same name in the untraced
 // workspace.
 pub type LocalIndex = u32;
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]

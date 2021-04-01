@@ -33,8 +33,8 @@ fn find_tracing_kind(rustflags: &str) -> String {
     tracing_kind.to_owned()
 }
 
-/// Given the RUSTFLAGS for the external workspace, make flags for the internal one.
-fn make_internal_rustflags(rustflags: &str) -> String {
+/// Given the RUSTFLAGS for the traced workspace, make flags for the untraced one.
+fn make_untraced_rustflags(rustflags: &str) -> String {
     // Remove `-C tracer=<kind>` and `-C llvm-args=tracer=<kind>` for ykrustc and cg_clif
     // respectively, as this would stifle optimisations and in case of software tracing would cause
     // the tracing callback to recursively call into itself.
