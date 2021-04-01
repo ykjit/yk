@@ -3,6 +3,7 @@
 #[cfg(test)]
 use std::time::Duration;
 use std::{
+    cmp,
     error::Error,
     io,
     marker::PhantomData,
@@ -17,6 +18,7 @@ use std::{
     thread::{self, JoinHandle},
 };
 
+use num_cpus;
 use parking_lot::Mutex;
 use parking_lot_core::SpinWait;
 
@@ -38,6 +40,8 @@ const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
 /// Configure a meta-tracer. Note that a process can only have one meta-tracer active at one point.
 pub struct MTBuilder {
     hot_threshold: HotThreshold,
+    /// The maximum number of simultaneous worker (e.g. compilation) threads.
+    max_worker_threads: usize,
     /// The kind of tracer to use.
     tracing_kind: TracingKind,
 }
@@ -47,6 +51,7 @@ impl MTBuilder {
     pub fn new() -> Result<Self, Box<dyn Error>> {
         Ok(Self {
             hot_threshold: DEFAULT_HOT_THRESHOLD,
+            max_worker_threads: cmp::max(1, num_cpus::get() - 1),
             #[cfg(tracermode = "hw")]
             tracing_kind: TracingKind::HardwareTracing,
             #[cfg(tracermode = "sw")]
@@ -57,7 +62,11 @@ impl MTBuilder {
     /// Consume the `MTBuilder` and create a meta-tracer, returning the
     /// [`MTThread`](struct.MTThread.html) representing the current thread.
     pub fn build(self) -> MTThread {
-        MTInner::init(self.hot_threshold, self.tracing_kind)
+        MTInner::init(
+            self.hot_threshold,
+            self.max_worker_threads,
+            self.tracing_kind,
+        )
     }
 
     /// Change this meta-tracer builder's `hot_threshold` value. Returns `Ok` if `hot_threshold` is
@@ -65,6 +74,13 @@ impl MTBuilder {
     pub fn hot_threshold(mut self, hot_threshold: HotThreshold) -> Result<Self, ()> {
         self.hot_threshold = hot_threshold;
         Ok(self)
+    }
+
+    /// Sets the maximum number of worker threads to `max(1, num)`. Defaults to `max(1,
+    /// num_cpus::get() - 1)`.
+    pub fn max_worker_threads(mut self, num: usize) -> Self {
+        self.max_worker_threads = cmp::max(1, num);
+        self
     }
 
     /// Select the kind of tracing to use. Returns `Ok` if the run-time environment is capable of
@@ -86,6 +102,11 @@ impl MT {
     /// Return this meta-tracer's hot threshold.
     pub fn hot_threshold(&self) -> HotThreshold {
         self.inner.hot_threshold.load(Ordering::Relaxed)
+    }
+
+    /// Return this meta-tracer's maximum number of worker threads.
+    pub fn max_worker_threads(&self) -> usize {
+        self.inner.max_worker_threads.load(Ordering::Relaxed)
     }
 
     /// Return the kind of tracing that this meta-tracer is using.
@@ -132,6 +153,11 @@ struct MTInner {
     /// The number of threads currently running the user's interpreter (directly or via JITed
     /// code).
     active_user_threads: AtomicUsize,
+    /// The hard cap on the number of worker threads.
+    max_worker_threads: AtomicUsize,
+    /// How many worker threads are currently running. Note that this may temporarily be `>`
+    /// [`max_worker_threads`].
+    active_worker_threads: AtomicUsize,
     tracing_kind: TracingKind,
 }
 
@@ -140,7 +166,11 @@ static MT_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 impl MTInner {
     /// Create a new `MT`, wrapped immediately in an [`MTThread`](struct.MTThread.html).
-    fn init(hot_threshold: HotThreshold, tracing_kind: TracingKind) -> MTThread {
+    fn init(
+        hot_threshold: HotThreshold,
+        max_worker_threads: usize,
+        tracing_kind: TracingKind,
+    ) -> MTThread {
         // A process can only have a single MT instance.
 
         // In non-testing, we panic if the user calls this method while an MT instance is active.
@@ -166,6 +196,8 @@ impl MTInner {
         let mtc = Self {
             hot_threshold: AtomicHotThreshold::new(hot_threshold),
             active_user_threads: AtomicUsize::new(1),
+            max_worker_threads: AtomicUsize::new(max_worker_threads),
+            active_worker_threads: AtomicUsize::new(0),
             tracing_kind,
         };
         let mt = MT {
