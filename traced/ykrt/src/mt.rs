@@ -21,7 +21,7 @@ use parking_lot::Mutex;
 use parking_lot_core::SpinWait;
 
 use crate::location::{HotLocation, Location, State, ThreadIdInner};
-use ykshim_client::{
+use untraced_api::{
     compile_trace, start_tracing, RawStopgapInterpreter, StopgapInterpreter, TracingKind,
 };
 

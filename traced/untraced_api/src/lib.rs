@@ -1,4 +1,4 @@
-//! Client to the ykshim crate in the untraced workspace.
+//! Client to the to_traced crate in the untraced workspace.
 //!
 //! For more information, see this section in the documentation:
 //! https://softdevteam.github.io/ykdocs/tech/yk_structure.html
@@ -40,20 +40,21 @@ pub struct Local(pub LocalIndex);
 pub(crate) struct TyIndex(pub(crate) u32);
 
 extern "C" {
-    fn __ykshim_start_tracing(tracing_kind: u8) -> *mut RawThreadTracer;
-    fn __ykshim_stop_tracing(
+    fn __to_traced_start_tracing(tracing_kind: u8) -> *mut RawThreadTracer;
+    fn __to_traced_stop_tracing(
         tracer: *mut RawThreadTracer,
         error_msg: *mut *mut c_char,
     ) -> *mut RawSirTrace;
-    fn __ykshim_compile_trace(
+    fn __to_traced_compile_trace(
         sir_trace: *mut RawSirTrace,
         error_msg: *mut *mut c_char,
     ) -> *mut RawCompiledTrace;
-    fn __ykshim_compiled_trace_get_ptr(compiled_trace: *const RawCompiledTrace) -> *const c_void;
-    fn __ykshim_compiled_trace_drop(compiled_trace: *mut RawCompiledTrace);
-    fn __ykshim_sirtrace_drop(trace: *mut RawSirTrace);
-    fn __ykshim_si_interpret(interp: *mut RawStopgapInterpreter) -> bool;
-    fn __ykshim_sirinterpreter_drop(interp: *mut RawStopgapInterpreter);
+    fn __to_traced_compiled_trace_get_ptr(compiled_trace: *const RawCompiledTrace)
+        -> *const c_void;
+    fn __to_traced_compiled_trace_drop(compiled_trace: *mut RawCompiledTrace);
+    fn __to_traced_sirtrace_drop(trace: *mut RawSirTrace);
+    fn __to_traced_si_interpret(interp: *mut RawStopgapInterpreter) -> bool;
+    fn __to_traced_sirinterpreter_drop(interp: *mut RawStopgapInterpreter);
 }
 
 /// The different ways by which we can collect a trace.
@@ -70,7 +71,7 @@ pub struct ThreadTracer(*mut RawThreadTracer);
 
 /// Start tracing using the specified kind of tracing.
 pub fn start_tracing(tracing_kind: TracingKind) -> ThreadTracer {
-    let tracer = unsafe { __ykshim_start_tracing(tracing_kind as u8) };
+    let tracer = unsafe { __to_traced_start_tracing(tracing_kind as u8) };
     debug_assert!(!tracer.is_null());
     ThreadTracer(tracer)
 }
@@ -79,7 +80,7 @@ impl ThreadTracer {
     pub fn stop_tracing(mut self) -> Result<SirTrace, CString> {
         let mut err_msg = std::ptr::null_mut();
         let p = mem::replace(&mut self.0, ptr::null_mut());
-        let sir_trace = unsafe { __ykshim_stop_tracing(p, &mut err_msg) };
+        let sir_trace = unsafe { __to_traced_stop_tracing(p, &mut err_msg) };
         if sir_trace.is_null() {
             return Err(unsafe { CString::from_raw(err_msg) });
         }
@@ -92,7 +93,7 @@ impl Drop for ThreadTracer {
         if !self.0.is_null() {
             // We are still tracing.
             let mut err_msg = std::ptr::null_mut();
-            unsafe { __ykshim_stop_tracing(self.0, &mut err_msg) };
+            unsafe { __to_traced_stop_tracing(self.0, &mut err_msg) };
         }
     }
 }
@@ -101,13 +102,13 @@ pub struct StopgapInterpreter(pub *mut RawStopgapInterpreter);
 
 impl StopgapInterpreter {
     pub unsafe fn interpret(&mut self) -> bool {
-        __ykshim_si_interpret(self.0)
+        __to_traced_si_interpret(self.0)
     }
 }
 
 impl Drop for StopgapInterpreter {
     fn drop(&mut self) {
-        unsafe { __ykshim_sirinterpreter_drop(self.0) }
+        unsafe { __to_traced_sirinterpreter_drop(self.0) }
     }
 }
 
@@ -119,7 +120,7 @@ unsafe impl Sync for SirTrace {}
 impl Drop for SirTrace {
     fn drop(&mut self) {
         if !self.0.is_null() {
-            unsafe { __ykshim_sirtrace_drop(self.0) }
+            unsafe { __to_traced_sirtrace_drop(self.0) }
         }
     }
 }
@@ -135,7 +136,7 @@ unsafe impl<I> Sync for CompiledTrace<I> {}
 pub fn compile_trace<T>(mut sir_trace: SirTrace) -> Result<CompiledTrace<T>, CString> {
     let mut err_msg = std::ptr::null_mut();
     let p = mem::replace(&mut sir_trace.0, ptr::null_mut());
-    let compiled = unsafe { __ykshim_compile_trace(p, &mut err_msg) };
+    let compiled = unsafe { __to_traced_compile_trace(p, &mut err_msg) };
     if compiled.is_null() {
         return Err(unsafe { CString::from_raw(err_msg) });
     }
@@ -147,7 +148,7 @@ pub fn compile_trace<T>(mut sir_trace: SirTrace) -> Result<CompiledTrace<T>, CSt
 
 impl<I> CompiledTrace<I> {
     pub fn ptr(&self) -> *const u8 {
-        unsafe { __ykshim_compiled_trace_get_ptr(self.compiled) as *const u8 }
+        unsafe { __to_traced_compiled_trace_get_ptr(self.compiled) as *const u8 }
     }
 
     /// Execute the trace with the given interpreter context.
@@ -175,6 +176,6 @@ impl<I> CompiledTrace<I> {
 
 impl<I> Drop for CompiledTrace<I> {
     fn drop(&mut self) {
-        unsafe { __ykshim_compiled_trace_drop(self.compiled) }
+        unsafe { __to_traced_compiled_trace_drop(self.compiled) }
     }
 }

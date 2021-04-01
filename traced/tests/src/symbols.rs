@@ -2,7 +2,7 @@
 
 use libc::{self, c_void};
 use std::ptr;
-use ykshim_client::find_symbol;
+use untraced_api::find_symbol;
 
 // Test finding a symbol in a shared object.
 #[test]

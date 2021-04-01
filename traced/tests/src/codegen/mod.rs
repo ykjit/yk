@@ -3,7 +3,7 @@
 use crate::helpers::{add6, add_some};
 use libc;
 use libc::{abs, getuid};
-use ykshim_client::{compile_tir_trace, compile_trace, start_tracing, TirTrace, TracingKind};
+use untraced_api::{compile_tir_trace, compile_trace, start_tracing, TirTrace, TracingKind};
 
 mod binops;
 mod cond_brs;

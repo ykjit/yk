@@ -2,8 +2,8 @@
 
 use crate::helpers::{add6, assert_tir, neg_assert_tir};
 use std::hint::black_box;
+use untraced_api::{start_tracing, TirTrace, TracingKind};
 use ykrt::trace_debug;
-use ykshim_client::{start_tracing, TirTrace, TracingKind};
 
 #[test]
 fn nonempty_tir_trace() {

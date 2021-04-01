@@ -5,7 +5,7 @@ use super::{
     U32_MAX, U32_MIN, U64_MAX, U64_MIN, U8_MAX, U8_MIN,
 };
 use paste::paste;
-use ykshim_client::{compile_trace, start_tracing, TracingKind};
+use untraced_api::{compile_trace, start_tracing, TracingKind};
 
 /// Generates a test for a binary operation.
 macro_rules! mk_cond_br_tests {

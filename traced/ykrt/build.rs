@@ -5,7 +5,7 @@ use std::process::Command;
 
 include!("../../build_aux.rs");
 
-const YKSHIM_SO: &str = "libykshim.so";
+const TO_TRACED_SO: &str = "libto_traced.so";
 
 fn main() {
     let mut untraced_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
@@ -23,7 +23,7 @@ fn main() {
         let tracing_kind = find_tracing_kind(&rustflags);
         rustflags = make_untraced_rustflags(&rustflags);
         let mut cmd = Command::new(cargo);
-        cmd.current_dir(untraced_dir.join("ykshim"))
+        cmd.current_dir(untraced_dir.join("to_traced"))
             .arg("build")
             .arg("--features")
             .arg(format!("yktrace/trace_{}", tracing_kind))
@@ -40,18 +40,18 @@ fn main() {
         }
     }
 
-    // If we symlink libykshim.so into the target dir, then this is already in the linker path when
+    // If we symlink libto_traced.so into the target dir, then this is already in the linker path when
     // run under cargo. In other words, the user won't have to set LD_LIBRARY_PATH.
     let mut sym_dst = PathBuf::from(env::var("OUT_DIR").unwrap());
     sym_dst.push("..");
     sym_dst.push("..");
     sym_dst.push("..");
-    sym_dst.push(YKSHIM_SO);
+    sym_dst.push(TO_TRACED_SO);
     if !PathBuf::from(&sym_dst).exists() {
         let mut sym_src = untraced_dir;
         sym_src.push("target");
         sym_src.push(&profile);
-        sym_src.push(YKSHIM_SO);
+        sym_src.push(TO_TRACED_SO);
         symlink(sym_src, sym_dst).unwrap();
     }
 
@@ -60,5 +60,5 @@ fn main() {
         env::current_dir().unwrap().to_str().unwrap(),
         profile
     );
-    println!("cargo:rustc-link-lib=dylib=ykshim");
+    println!("cargo:rustc-link-lib=dylib=to_traced");
 }
