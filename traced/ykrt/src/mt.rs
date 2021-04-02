@@ -4,6 +4,7 @@
 use std::time::Duration;
 use std::{
     cmp,
+    collections::VecDeque,
     error::Error,
     io,
     marker::PhantomData,
@@ -12,6 +13,7 @@ use std::{
     ptr,
     rc::Rc,
     sync::{
+        self,
         atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
         Arc,
     },
@@ -24,7 +26,8 @@ use parking_lot_core::SpinWait;
 
 use crate::location::{HotLocation, Location, State, ThreadIdInner};
 use untraced_api::{
-    compile_trace, start_tracing, RawStopgapInterpreter, StopgapInterpreter, TracingKind,
+    compile_trace, start_tracing, CompiledTrace, RawStopgapInterpreter, SirTrace,
+    StopgapInterpreter, TracingKind,
 };
 
 // The HotThreshold must be less than a machine word wide for [`Location::Location`] to do its
@@ -139,6 +142,37 @@ impl MT {
             }
         })
     }
+
+    /// Queue `job` to be run on a worker thread.
+    fn queue_job(&self, job: Box<dyn FnOnce() + Send>) {
+        // We have a very simple model of worker threads. Each time a job is queued, we spin up a
+        // new worker thread iff we aren't already running the maximum number of worker threads.
+        // Once started, a worker thread never dies, and spins endlessly waiting for work.
+
+        let inner = Arc::clone(&self.inner);
+        inner.job_queue.lock().unwrap().push_back(job);
+
+        let max_jobs = inner.max_worker_threads.load(Ordering::Relaxed);
+        if inner.active_worker_threads.load(Ordering::Relaxed) < max_jobs {
+            // At the point of the `load` on the previous line, we weren't running the maximum
+            // number of worker threads. There is now a possible race condition where multiple
+            // threads calling `queue_job` could try creating multiple worker threads and push us
+            // over the maximum worker thread limit.
+            if inner.active_worker_threads.fetch_add(1, Ordering::Relaxed) > max_jobs {
+                // Another thread(s) is also spinning up another worker thread and they won the
+                // race.
+                inner.active_worker_threads.fetch_sub(1, Ordering::Relaxed);
+                return;
+            }
+
+            let inner_cl = Arc::clone(&self.inner);
+            thread::spawn(move || loop {
+                if let Some(x) = inner_cl.job_queue.lock().unwrap().pop_front() {
+                    x();
+                }
+            });
+        }
+    }
 }
 
 impl Drop for MT {
@@ -153,6 +187,8 @@ struct MTInner {
     /// The number of threads currently running the user's interpreter (directly or via JITed
     /// code).
     active_user_threads: AtomicUsize,
+    /// The ordered queue of compilation worker functions.
+    job_queue: sync::Mutex<VecDeque<Box<dyn FnOnce() + Send>>>,
     /// The hard cap on the number of worker threads.
     max_worker_threads: AtomicUsize,
     /// How many worker threads are currently running. Note that this may temporarily be `>`
@@ -195,6 +231,7 @@ impl MTInner {
 
         let mtc = Self {
             hot_threshold: AtomicHotThreshold::new(hot_threshold),
+            job_queue: sync::Mutex::new(VecDeque::new()),
             active_user_threads: AtomicUsize::new(1),
             max_worker_threads: AtomicUsize::new(max_worker_threads),
             active_worker_threads: AtomicUsize::new(0),
@@ -451,25 +488,15 @@ impl MTThread {
                     // while tracing.
                     match opt.take().unwrap().1.stop_tracing() {
                         Ok(sir) => {
-                            // Start a compilation thread.
                             let mtx = Arc::new(Mutex::new(None));
                             let mtx_cl = Arc::clone(&mtx);
                             *hl = HotLocation::Compiling(mtx);
                             loc.unlock();
-
-                            Rc::get_mut(&mut self.inner).unwrap().tracing = None;
-                            thread::spawn(move || {
-                                let compiled = compile_trace::<I>(sir).unwrap();
-                                *mtx_cl.lock() = Some(Box::new(compiled));
-                                // FIXME: although we've now put the compiled trace into the mutex, there's no
-                                // guarantee that the Location for which we're compiling will ever be executed
-                                // again. In such a case, the memory has, in essence, leaked.
-                            });
-
-                            return None;
+                            self.queue_compile_job(sir, mtx_cl);
                         }
                         Err(_) => todo!(),
                     }
+                    return None;
                 }
                 HotLocation::DontTrace => {
                     loc.unlock();
@@ -477,6 +504,23 @@ impl MTThread {
                 }
             }
         }
+    }
+
+    /// Add a compilation job for `sir` to the global work queue.
+    fn queue_compile_job<I: 'static>(
+        &self,
+        sir: SirTrace,
+        mtx: Arc<Mutex<Option<Box<CompiledTrace<I>>>>>,
+    ) {
+        let f = Box::new(move || {
+            let compiled = compile_trace::<I>(sir).unwrap();
+            *mtx.lock() = Some(Box::new(compiled));
+            // FIXME: although we've now put the compiled trace into the mutex, there's no
+            // guarantee that the Location for which we're compiling will ever be executed
+            // again. In such a case, the memory has, in essence, leaked.
+        });
+
+        self.inner.mt.queue_job(f);
     }
 }
 
@@ -883,6 +927,86 @@ mod tests {
             hotlocation_discriminant(&loc.unwrap()),
             Some(HotLocationDiscriminants::DontTrace)
         );
+    }
+
+    #[test]
+    fn more_hot_locations_than_worker_threads() {
+        // This test indirectly tests code around capping the maximum number of worker threads.
+        // We'd really like to check that not too many worker threads run at once, but that's
+        // surprisingly tricky to test reliably because for all we know the system might just so
+        // happen to run our worker threads one after the other. We therefore settle for running a
+        // program that compiles multiple locations, with luck more-or-less at the same time,
+        // hoping that this tests the various interactions around queueing etc.
+
+        let num_threads: usize = cmp::max(4, num_cpus::get());
+        let mtt = MTBuilder::new()
+            .unwrap()
+            .max_worker_threads(num_threads / 2)
+            .hot_threshold(2)
+            .unwrap()
+            .build();
+
+        const INC: u8 = 0;
+        const RESTART: u8 = 1;
+        // This test assumes throughout that each loop in the program is 3 bytecodes long.
+        let mut prog = Vec::with_capacity(3 * num_threads);
+        let mut locs = Vec::with_capacity(3 * num_threads);
+        for _ in 0..num_threads {
+            prog.extend(vec![INC, INC, RESTART]);
+            locs.extend(vec![Some(Location::new()), None, None]);
+        }
+        let prog = Arc::new(prog);
+        let locs = Arc::new(locs);
+
+        struct InterpCtx {
+            prog: Arc<Vec<u8>>,
+            count: u64,
+            pc: usize,
+        }
+
+        #[interp_step]
+        fn simple_interp_step(ctx: &mut InterpCtx) -> bool {
+            match ctx.prog[ctx.pc] {
+                INC => {
+                    ctx.pc += 1;
+                    ctx.count += 1;
+                }
+                RESTART => ctx.pc -= 2,
+                _ => unreachable!(),
+            };
+            true
+        }
+
+        let mut thrs = Vec::with_capacity(num_threads);
+        for i in 0..num_threads {
+            let prog = Arc::clone(&prog);
+            let locs = Arc::clone(&locs);
+            let t = mtt
+                .mt()
+                .spawn(move |mut mtt| {
+                    let mut ctx = InterpCtx {
+                        prog: Arc::clone(&prog),
+                        count: 0,
+                        pc: i * 3,
+                    };
+                    loop {
+                        let loc = locs[ctx.pc].as_ref();
+                        if let Some(l) = loc {
+                            if hotlocation_discriminant(l)
+                                == Some(HotLocationDiscriminants::Compiled)
+                            {
+                                break;
+                            }
+                        }
+                        mtt.control_point(loc, simple_interp_step, &mut ctx);
+                    }
+                })
+                .unwrap();
+            thrs.push(t);
+        }
+        for t in thrs {
+            t.join().unwrap();
+        }
     }
 
     #[test]
