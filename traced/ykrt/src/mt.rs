@@ -18,7 +18,7 @@ use std::{
 };
 
 use num_cpus;
-use parking_lot::Mutex;
+use parking_lot::{Condvar, Mutex, MutexGuard};
 use parking_lot_core::SpinWait;
 
 use crate::location::{HotLocation, Location, State, ThreadIdInner};
@@ -140,10 +140,12 @@ impl MT {
     fn queue_job(&self, job: Box<dyn FnOnce() + Send>) {
         // We have a very simple model of worker threads. Each time a job is queued, we spin up a
         // new worker thread iff we aren't already running the maximum number of worker threads.
-        // Once started, a worker thread never dies, and spins endlessly waiting for work.
+        // Once started, a worker thread never dies, waiting endlessly for work.
 
         let inner = Arc::clone(&self.inner);
-        inner.job_queue.lock().push_back(job);
+        let (cv, mtx) = &inner.job_queue;
+        mtx.lock().push_back(job);
+        cv.notify_one();
 
         let max_jobs = inner.max_worker_threads.load(Ordering::Relaxed);
         if inner.active_worker_threads.load(Ordering::Relaxed) < max_jobs {
@@ -159,9 +161,14 @@ impl MT {
             }
 
             let inner_cl = Arc::clone(&self.inner);
-            thread::spawn(move || loop {
-                if let Some(x) = inner_cl.job_queue.lock().pop_front() {
-                    x();
+            thread::spawn(move || {
+                let (cv, mtx) = &inner_cl.job_queue;
+                let mut lock = mtx.lock();
+                loop {
+                    match lock.pop_front() {
+                        Some(x) => MutexGuard::unlocked(&mut lock, x),
+                        None => cv.wait(&mut lock),
+                    }
                 }
             });
         }
@@ -181,7 +188,7 @@ struct MTInner {
     /// code).
     active_user_threads: AtomicUsize,
     /// The ordered queue of compilation worker functions.
-    job_queue: Mutex<VecDeque<Box<dyn FnOnce() + Send>>>,
+    job_queue: (Condvar, Mutex<VecDeque<Box<dyn FnOnce() + Send>>>),
     /// The hard cap on the number of worker threads.
     max_worker_threads: AtomicUsize,
     /// How many worker threads are currently running. Note that this may temporarily be `>`
@@ -224,7 +231,7 @@ impl MTInner {
 
         let mtc = Self {
             hot_threshold: AtomicHotThreshold::new(hot_threshold),
-            job_queue: Mutex::new(VecDeque::new()),
+            job_queue: (Condvar::new(), Mutex::new(VecDeque::new())),
             active_user_threads: AtomicUsize::new(1),
             max_worker_threads: AtomicUsize::new(max_worker_threads),
             active_worker_threads: AtomicUsize::new(0),
