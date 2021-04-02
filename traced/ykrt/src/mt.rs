@@ -11,7 +11,6 @@ use std::{
     mem, ptr,
     rc::Rc,
     sync::{
-        self,
         atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
         Arc,
     },
@@ -144,7 +143,7 @@ impl MT {
         // Once started, a worker thread never dies, and spins endlessly waiting for work.
 
         let inner = Arc::clone(&self.inner);
-        inner.job_queue.lock().unwrap().push_back(job);
+        inner.job_queue.lock().push_back(job);
 
         let max_jobs = inner.max_worker_threads.load(Ordering::Relaxed);
         if inner.active_worker_threads.load(Ordering::Relaxed) < max_jobs {
@@ -161,7 +160,7 @@ impl MT {
 
             let inner_cl = Arc::clone(&self.inner);
             thread::spawn(move || loop {
-                if let Some(x) = inner_cl.job_queue.lock().unwrap().pop_front() {
+                if let Some(x) = inner_cl.job_queue.lock().pop_front() {
                     x();
                 }
             });
@@ -182,7 +181,7 @@ struct MTInner {
     /// code).
     active_user_threads: AtomicUsize,
     /// The ordered queue of compilation worker functions.
-    job_queue: sync::Mutex<VecDeque<Box<dyn FnOnce() + Send>>>,
+    job_queue: Mutex<VecDeque<Box<dyn FnOnce() + Send>>>,
     /// The hard cap on the number of worker threads.
     max_worker_threads: AtomicUsize,
     /// How many worker threads are currently running. Note that this may temporarily be `>`
@@ -225,7 +224,7 @@ impl MTInner {
 
         let mtc = Self {
             hot_threshold: AtomicHotThreshold::new(hot_threshold),
-            job_queue: sync::Mutex::new(VecDeque::new()),
+            job_queue: Mutex::new(VecDeque::new()),
             active_user_threads: AtomicUsize::new(1),
             max_worker_threads: AtomicUsize::new(max_worker_threads),
             active_worker_threads: AtomicUsize::new(0),
