@@ -8,9 +8,7 @@ use std::{
     error::Error,
     io,
     marker::PhantomData,
-    mem,
-    panic::{catch_unwind, resume_unwind, UnwindSafe},
-    ptr,
+    mem, ptr,
     rc::Rc,
     sync::{
         self,
@@ -121,8 +119,7 @@ impl MT {
     /// handed a [`MTThread`](struct.MTThread.html) from which the `MT` itself can be accessed.
     pub fn spawn<F, T>(&self, f: F) -> io::Result<JoinHandle<T>>
     where
-        F: FnOnce(MTThread) -> T,
-        F: Send + UnwindSafe + 'static,
+        F: FnOnce(MTThread) -> T + Send + 'static,
         T: Send + 'static,
     {
         let mt_cl = self.clone();
@@ -131,15 +128,12 @@ impl MT {
                 .inner
                 .active_user_threads
                 .fetch_add(1, Ordering::Relaxed);
-            let r = catch_unwind(|| f(MTThreadInner::init(mt_cl.clone())));
+            let r = f(MTThreadInner::init(mt_cl.clone()));
             mt_cl
                 .inner
                 .active_user_threads
                 .fetch_sub(1, Ordering::Relaxed);
-            match r {
-                Ok(r) => r,
-                Err(e) => resume_unwind(e),
-            }
+            r
         })
     }
 
