@@ -13,26 +13,26 @@ use std::convert::{TryFrom, TryInto};
 #[derive(Default, Debug)]
 pub(super) struct StackBuilder {
     /// Keeps track of how many bytes have been allocated.
-    stack_top: u64,
+    stack_top: usize,
 }
 
 impl StackBuilder {
     /// Allocate an object of given size and alignment on the stack, returning a `Location::Mem`
     /// describing the position of the allocation. The stack is assumed to grow down.
-    pub(super) fn alloc(&mut self, size: u64, align: u64) -> Location {
+    pub(super) fn alloc(&mut self, size: usize, align: usize) -> Location {
         self.align(align);
         self.stack_top += size;
         Location::new_mem(RBP.code(), -i32::try_from(self.stack_top).unwrap())
     }
 
     /// Aligns `offset` to `align` bytes.
-    fn align(&mut self, align: u64) {
+    fn align(&mut self, align: usize) {
         let mask = align - 1;
         self.stack_top = (self.stack_top + mask) & !mask
     }
 
     /// Total allocated stack size in bytes.
-    pub(super) fn size(&self) -> u32 {
+    pub(super) fn size(&self) -> usize {
         self.stack_top.try_into().unwrap()
     }
 }
