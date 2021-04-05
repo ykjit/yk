@@ -788,7 +788,7 @@ impl TraceCompiler {
             let dst_ro = dst_loc.unwrap_mem();
             let sir_ty = SIR.ty(&dst.ty());
             let tty = sir_ty.unwrap_tuple();
-            let flag_off = tty.fields.offset(1);
+            let flag_off = tty.fields().offset(1);
 
             if opnd1_ty.is_signed_int() {
                 dynasm!(self.asm

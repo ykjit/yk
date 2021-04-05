@@ -257,12 +257,20 @@ impl Display for Fields {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
 pub struct TupleTy {
     /// The fields of the tuple.
-    pub fields: Fields,
+    fields: Fields,
 }
 
 impl TupleTy {
+    pub fn new(fields: Fields) -> Self {
+        Self { fields }
+    }
+
     fn is_unit(&self) -> bool {
         self.fields.offsets.is_empty()
+    }
+
+    pub fn fields(&self) -> &Fields {
+        &self.fields
     }
 }
 

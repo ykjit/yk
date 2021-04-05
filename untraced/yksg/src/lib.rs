@@ -157,7 +157,7 @@ macro_rules! make_binop {
                 // Write overflow result into result tuple.
                 let ty = SIR.ty(&dst.ty());
                 let tty = ty.unwrap_tuple();
-                let flag_off = isize::try_from(tty.fields.offset(1)).unwrap();
+                let flag_off = isize::try_from(tty.fields().offset(1)).unwrap();
                 unsafe {
                     std::ptr::write::<u8>(ptr.offset(flag_off), u8::from(of));
                 }
