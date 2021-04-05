@@ -283,7 +283,17 @@ impl Display for TupleTy {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
 pub struct StructTy {
     /// The fields of the struct.
-    pub fields: Fields,
+    fields: Fields,
+}
+
+impl StructTy {
+    pub fn new(fields: Fields) -> Self {
+        Self { fields }
+    }
+
+    pub fn fields(&self) -> &Fields {
+        &self.fields
+    }
 }
 
 impl Display for StructTy {
