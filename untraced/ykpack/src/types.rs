@@ -57,14 +57,6 @@ impl Display for TypeId {
     }
 }
 
-/// The type of a local variable.
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
-pub struct Ty {
-    pub size: usize,
-    pub align: usize,
-    pub kind: TyKind,
-}
-
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
 pub enum TyKind {
     /// Signed integers.
@@ -88,6 +80,14 @@ pub enum TyKind {
     Char,
     /// Anything that we've not yet defined a lowering for.
     Unimplemented(String),
+}
+
+/// The type of a local variable.
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
+pub struct Ty {
+    pub size: usize,
+    pub align: usize,
+    pub kind: TyKind,
 }
 
 impl Display for Ty {
