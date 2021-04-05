@@ -80,10 +80,7 @@ impl SirBuilder {
     /// Returns a zero-offset IRPlace for a new SIR local.
     pub fn new_sir_local(&mut self, sirty: TypeId) -> IRPlace {
         let idx = u32::try_from(self.func.local_decls.len()).unwrap();
-        self.func.local_decls.push(LocalDecl {
-            ty: sirty,
-            referenced: false,
-        });
+        self.func.local_decls.push(LocalDecl::new(sirty, false));
         IRPlace::Val {
             local: Local(idx),
             off: 0,
@@ -96,7 +93,7 @@ impl SirBuilder {
     pub fn notify_referenced(&mut self, l: Local) {
         let idx = usize::try_from(l.0).unwrap();
         let slot = self.func.local_decls.get_mut(idx).unwrap();
-        slot.referenced = true;
+        slot.set_is_referenced(true);
     }
 
     /// Returns true if there are no basic blocks.

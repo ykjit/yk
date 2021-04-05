@@ -329,15 +329,27 @@ bitflags! {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 #[repr(C)]
 pub struct LocalDecl {
-    pub ty: TypeId,
+    ty: TypeId,
     /// If true this local variable is at some point referenced, and thus should be allocated on
     /// the stack and never in a register.
-    pub referenced: bool,
+    is_referenced: bool,
 }
 
 impl LocalDecl {
-    pub fn new(ty: TypeId, referenced: bool) -> Self {
-        Self { ty, referenced }
+    pub fn new(ty: TypeId, is_referenced: bool) -> Self {
+        Self { ty, is_referenced }
+    }
+
+    pub fn ty(&self) -> TypeId {
+        self.ty
+    }
+
+    pub fn is_referenced(&self) -> bool {
+        self.is_referenced
+    }
+
+    pub fn set_is_referenced(&mut self, is_referenced: bool) {
+        self.is_referenced = is_referenced;
     }
 }
 

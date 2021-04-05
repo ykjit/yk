@@ -55,7 +55,7 @@ unsafe extern "C" fn __to_tracedtest_tirtrace_display<'a, 'm>(
 unsafe extern "C" fn __to_tracedtest_body_ret_ty(sym: *const c_char, ret_tyid: *mut TypeId) {
     let sym = CStr::from_ptr(sym);
     let rv = usize::try_from(sir::RETURN_LOCAL.0).unwrap();
-    let tyid = SIR.body(&sym.to_str().unwrap()).unwrap().local_decls[rv].ty;
+    let tyid = SIR.body(&sym.to_str().unwrap()).unwrap().local_decls[rv].ty();
     *ret_tyid = tyid;
 }
 
@@ -81,13 +81,8 @@ unsafe extern "C" fn __to_tracedtest_tracecompiler_insert_decl(
     referenced: bool,
 ) {
     let tc = &mut *(tc as *mut TraceCompiler);
-    tc.local_decls.insert(
-        local,
-        LocalDecl {
-            ty: local_ty,
-            referenced,
-        },
-    );
+    tc.local_decls
+        .insert(local, LocalDecl::new(local_ty, referenced));
 }
 
 /// Returns a string describing the register allocation of the specified local.

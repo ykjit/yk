@@ -422,13 +422,13 @@ impl TraceCompiler {
     }
 
     fn can_live_in_register(decl: &LocalDecl) -> bool {
-        if decl.referenced {
+        if decl.is_referenced() {
             // We must allocate it on the stack so that we can reference it.
             return false;
         }
 
         // FIXME: optimisation: small structs and tuples etc. could actually live in a register.
-        let ty = &*SIR.ty(&decl.ty);
+        let ty = &*SIR.ty(&decl.ty());
         match &ty.kind() {
             TyKind::UnsignedInt(ui) => !matches!(ui, UnsignedIntTy::U128),
             TyKind::SignedInt(si) => !matches!(si, SignedIntTy::I128),
@@ -480,7 +480,7 @@ impl TraceCompiler {
                 self.variable_location_map.insert(l, loc);
                 ret
             } else {
-                let ty = SIR.ty(&decl.ty);
+                let ty = SIR.ty(&decl.ty());
                 let loc = self.stack_builder.alloc(ty.size(), ty.align());
                 self.variable_location_map.insert(l, loc.clone());
                 loc
@@ -499,7 +499,7 @@ impl TraceCompiler {
     /// Spill a local to the stack and return its location. Note: This does not update the
     /// `variable_location_map`.
     fn spill_local_to_stack(&mut self, local: &Local) -> Location {
-        let tyid = self.local_decls[&local].ty;
+        let tyid = self.local_decls[&local].ty();
         let ty = SIR.ty(&tyid);
         self.stack_builder.alloc(ty.size(), ty.align())
     }
@@ -1439,7 +1439,7 @@ impl TraceCompiler {
                         reg: RBP.code(),
                         off: -1 * i32::try_from(llmap[reg]).unwrap(),
                     });
-                    let ty = self.local_decls[&tirlocal].ty;
+                    let ty = self.local_decls[&tirlocal].ty();
                     let size = SIR.ty(&ty).size();
                     self.store_raw(&newloc, &loc, size);
                     *loc = newloc;
@@ -1479,7 +1479,7 @@ impl TraceCompiler {
                 );
                 // Move the live variables into the allocated memory.
                 for liveloc in &guard.live_locals[i] {
-                    let ty = self.local_decls[&liveloc.tir].ty;
+                    let ty = self.local_decls[&liveloc.tir].ty();
                     let size = SIR.ty(&ty).size();
                     let off = i32::try_from(body.offsets[usize::try_from(liveloc.sir.0).unwrap()])
                         .unwrap();

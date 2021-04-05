@@ -224,7 +224,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                         _,
                     ) = op
                     {
-                        debug_assert!(sir.ty(&rnm.local_decls[&sir::RETURN_LOCAL].ty).is_bool());
+                        debug_assert!(sir.ty(&rnm.local_decls[&sir::RETURN_LOCAL].ty()).is_bool());
                         continue;
                     }
 
@@ -577,7 +577,7 @@ impl Display for TirTrace<'_, '_> {
             .collect::<Vec<(&Local, &LocalDecl)>>();
         sort_decls.sort_by(|l, r| l.0.partial_cmp(r.0).unwrap());
         for (l, dcl) in sort_decls {
-            writeln!(f, "  {}: {} => {}", l, dcl.ty, self.sir.ty(&dcl.ty))?;
+            writeln!(f, "  {}: {} => {}", l, dcl.ty(), self.sir.ty(&dcl.ty()))?;
         }
 
         writeln!(f, "ops:")?;
