@@ -90,23 +90,6 @@ pub struct Ty {
     pub kind: TyKind,
 }
 
-impl Display for Ty {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.kind {
-            TyKind::SignedInt(si) => write!(f, "{}", si),
-            TyKind::UnsignedInt(ui) => write!(f, "{}", ui),
-            TyKind::Struct(sty) => write!(f, "{}", sty),
-            TyKind::Tuple(tty) => write!(f, "{}", tty),
-            TyKind::Array { elem_ty, len, .. } => write!(f, "[{}; {}]", elem_ty, len),
-            TyKind::Slice(sty) => write!(f, "&[{:?}]", sty),
-            TyKind::Ref(rty) => write!(f, "&{:?}", rty),
-            TyKind::Bool => write!(f, "bool"),
-            TyKind::Char => write!(f, "char"),
-            TyKind::Unimplemented(m) => write!(f, "Unimplemented: {}", m),
-        }
-    }
-}
-
 impl Ty {
     pub fn size(&self) -> u64 {
         u64::try_from(self.size).unwrap()
@@ -142,6 +125,23 @@ impl Ty {
             &tty
         } else {
             panic!("tried to unwrap a non-tuple");
+        }
+    }
+}
+
+impl Display for Ty {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.kind {
+            TyKind::SignedInt(si) => write!(f, "{}", si),
+            TyKind::UnsignedInt(ui) => write!(f, "{}", ui),
+            TyKind::Struct(sty) => write!(f, "{}", sty),
+            TyKind::Tuple(tty) => write!(f, "{}", tty),
+            TyKind::Array { elem_ty, len, .. } => write!(f, "[{}; {}]", elem_ty, len),
+            TyKind::Slice(sty) => write!(f, "&[{:?}]", sty),
+            TyKind::Ref(rty) => write!(f, "&{:?}", rty),
+            TyKind::Bool => write!(f, "bool"),
+            TyKind::Char => write!(f, "char"),
+            TyKind::Unimplemented(m) => write!(f, "Unimplemented: {}", m),
         }
     }
 }
