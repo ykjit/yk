@@ -218,9 +218,21 @@ impl Display for UnsignedIntTy {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
 pub struct Fields {
     /// Field offsets.
-    pub offsets: Vec<OffT>,
+    offsets: Vec<OffT>,
     /// The type of each field.
-    pub tys: Vec<TypeId>,
+    tys: Vec<TypeId>,
+}
+
+impl Fields {
+    pub fn new(mut offsets: Vec<OffT>, mut tys: Vec<TypeId>) -> Self {
+        offsets.shrink_to_fit();
+        tys.shrink_to_fit();
+        Self { offsets, tys }
+    }
+
+    pub fn offset(&self, idx: usize) -> OffT {
+        self.offsets[idx]
+    }
 }
 
 impl Display for Fields {
