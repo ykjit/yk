@@ -4,7 +4,6 @@ use bitflags::bitflags;
 use fxhash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use std::{
-    convert::TryFrom,
     default::Default,
     fmt::{self, Display},
 };
@@ -85,18 +84,26 @@ pub enum TyKind {
 /// The type of a local variable.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
 pub struct Ty {
-    pub size: usize,
-    pub align: usize,
-    pub kind: TyKind,
+    size: usize,
+    align: usize,
+    kind: TyKind,
 }
 
 impl Ty {
-    pub fn size(&self) -> u64 {
-        u64::try_from(self.size).unwrap()
+    pub fn new(size: usize, align: usize, kind: TyKind) -> Self {
+        Ty { size, align, kind }
     }
 
-    pub fn align(&self) -> u64 {
-        u64::try_from(self.align).unwrap()
+    pub fn size(&self) -> usize {
+        self.size
+    }
+
+    pub fn align(&self) -> usize {
+        self.align
+    }
+
+    pub fn kind(&self) -> &TyKind {
+        &self.kind
     }
 
     pub fn is_signed_int(&self) -> bool {

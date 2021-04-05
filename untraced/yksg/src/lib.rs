@@ -409,7 +409,7 @@ impl StopgapInterpreter {
             return val;
         }
         let ptr = self.locals().irplace_to_ptr(src);
-        match &SIR.ty(&src.ty()).kind {
+        match &SIR.ty(&src.ty()).kind() {
             TyKind::UnsignedInt(ui) => match ui {
                 UnsignedIntTy::Usize => todo!(),
                 UnsignedIntTy::U8 => unsafe { u128::from(std::ptr::read::<u8>(ptr)) },
@@ -460,7 +460,7 @@ impl StopgapInterpreter {
             todo!("binops for non-integers");
         }
 
-        match &ty.kind {
+        match &ty.kind() {
             TyKind::UnsignedInt(ui) => match ui {
                 UnsignedIntTy::U8 => self.binop_u8(dst, op, opnd1, opnd2, checked),
                 UnsignedIntTy::U16 => todo!(),

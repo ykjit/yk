@@ -11,7 +11,6 @@ use lazy_static::lazy_static;
 use std::alloc::{alloc, Layout};
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::mem;
 use std::process::Command;
 use ykpack::{IRPlace, LocalDecl, SignedIntTy, Ty, TyKind, UnsignedIntTy};
 use yksg::{FrameInfo, StopgapInterpreter};
@@ -45,7 +44,7 @@ lazy_static! {
     static ref TEMP_LOC: Location = Location::Reg(*TEMP_REG);
 
     /// The size of a memory address in bytes.
-    static ref PTR_SIZE: u64 = u64::try_from(mem::size_of::<usize>()).unwrap();
+    static ref PTR_SIZE: usize = 8;
 }
 
 /// The size of a quad-word register (e.g. RAX) in bytes.
@@ -430,7 +429,7 @@ impl TraceCompiler {
 
         // FIXME: optimisation: small structs and tuples etc. could actually live in a register.
         let ty = &*SIR.ty(&decl.ty);
-        match &ty.kind {
+        match &ty.kind() {
             TyKind::UnsignedInt(ui) => !matches!(ui, UnsignedIntTy::U128),
             TyKind::SignedInt(si) => !matches!(si, SignedIntTy::I128),
             TyKind::Array { .. } => false,
@@ -537,7 +536,7 @@ impl TraceCompiler {
     }
 
     /// Copy bytes from one memory location to another.
-    fn copy_memory(&mut self, dst: &RegAndOffset, src: &RegAndOffset, size: u64) {
+    fn copy_memory(&mut self, dst: &RegAndOffset, src: &RegAndOffset, size: usize) {
         // We use memmove(3), as it's not clear if MIR (and therefore SIR) could cause copies
         // involving overlapping buffers. See https://github.com/rust-lang/rust/issues/68364.
         let sym = find_symbol("memmove").unwrap();
@@ -1075,7 +1074,7 @@ impl TraceCompiler {
         let src_loc = self.irplace_to_location(src);
         let ty = &*SIR.ty(&src.ty()); // Type of the source.
         let cty = SIR.ty(&dst.ty()); // Type of the cast.
-        match ty.kind {
+        match ty.kind() {
             TyKind::UnsignedInt(_) => self.c_cast_uint(src_loc, &ty, &cty),
             _ => todo!(),
         }
@@ -1257,7 +1256,7 @@ impl TraceCompiler {
         }
     }
 
-    fn cmp_reg_const(&mut self, reg: u8, c: u128, size: u64) {
+    fn cmp_reg_const(&mut self, reg: u8, c: u128, size: usize) {
         match size {
             1 => {
                 dynasm!(self.asm
