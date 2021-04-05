@@ -84,24 +84,12 @@ pub enum TyKind {
 /// The type of a local variable.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
 pub struct Ty {
-    size: usize,
-    align: usize,
+    #[cfg(target_pointer_width = "64")]
+    size_align: usize,
     kind: TyKind,
 }
 
 impl Ty {
-    pub fn new(size: usize, align: usize, kind: TyKind) -> Self {
-        Ty { size, align, kind }
-    }
-
-    pub fn size(&self) -> usize {
-        self.size
-    }
-
-    pub fn align(&self) -> usize {
-        self.align
-    }
-
     pub fn kind(&self) -> &TyKind {
         &self.kind
     }
@@ -133,6 +121,30 @@ impl Ty {
         } else {
             panic!("tried to unwrap a non-tuple");
         }
+    }
+}
+
+#[cfg(target_pointer_width = "64")]
+impl Ty {
+    // Pack size & align into 64 bits (48 bits for size, 16 bits for align).
+    const ALIGN_BITS: usize = 16;
+    const SIZE_MASK: usize = (1 << Self::ALIGN_BITS) - 1;
+    const ALIGN_MASK: usize = !Self::SIZE_MASK;
+
+    pub fn new(size: usize, align: usize, kind: TyKind) -> Self {
+        if size & !Self::SIZE_MASK != 0 || align >= (1 << Self::ALIGN_BITS) {
+            todo!();
+        }
+        let size_align = size | (align << (64 - Self::ALIGN_BITS));
+        Ty { size_align, kind }
+    }
+
+    pub fn size(&self) -> usize {
+        self.size_align & Self::SIZE_MASK
+    }
+
+    pub fn align(&self) -> usize {
+        (self.size_align & Self::ALIGN_MASK) >> (64 - Self::ALIGN_BITS)
     }
 }
 
