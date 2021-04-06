@@ -396,13 +396,29 @@ impl Display for Body {
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct BasicBlock {
-    pub stmts: Vec<Statement>,
-    pub term: Terminator,
+    stmts: Vec<Statement>,
+    term: Terminator,
 }
 
 impl BasicBlock {
     pub fn new(stmts: Vec<Statement>, term: Terminator) -> Self {
         Self { stmts, term }
+    }
+
+    pub fn stmts(&self) -> &Vec<Statement> {
+        &self.stmts
+    }
+
+    pub fn stmts_mut(&mut self) -> &mut Vec<Statement> {
+        &mut self.stmts
+    }
+
+    pub fn term(&self) -> &Terminator {
+        &self.term
+    }
+
+    pub fn term_mut(&mut self) -> &mut Terminator {
+        &mut self.term
     }
 }
 

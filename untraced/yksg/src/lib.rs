@@ -233,7 +233,7 @@ impl StopgapInterpreter {
         let body = frame.body.clone();
         let bbidx = usize::try_from(frame.bbidx).unwrap();
         unsafe {
-            sg.terminator(&body.blocks[bbidx].term);
+            sg.terminator(&body.blocks[bbidx].term());
         }
         sg
     }
@@ -285,7 +285,7 @@ impl StopgapInterpreter {
         while let Some(frame) = self.frames.last() {
             let body = frame.body.clone();
             let block = &body.blocks[usize::try_from(frame.bbidx).unwrap()];
-            for stmt in block.stmts.iter() {
+            for stmt in block.stmts().iter() {
                 match stmt {
                     Statement::MkRef(dst, src) => self.mkref(&dst, &src),
                     Statement::DynOffs { .. } => todo!(),
@@ -306,7 +306,7 @@ impl StopgapInterpreter {
                     }
                 }
             }
-            self.terminator(&block.term);
+            self.terminator(block.term());
         }
         self.rv
     }
@@ -338,7 +338,7 @@ impl StopgapInterpreter {
                     let body = &curframe.body;
                     // Check the previous frame's call terminator to find out where we have to go
                     // next.
-                    let (dst, bbidx) = match &body.blocks[bbidx].term {
+                    let (dst, bbidx) = match body.blocks[bbidx].term() {
                         Terminator::Call {
                             operand: _,
                             args: _,

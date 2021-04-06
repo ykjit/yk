@@ -91,7 +91,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
             // times it is called and returned from and only stop ignoring things until we return
             // from the outer-most `do_not_trace` function.
             if let Some(sym) = &dnt_func {
-                match &body.blocks[user_bb_idx_usize].term {
+                match body.blocks[user_bb_idx_usize].term() {
                     Terminator::Return => {
                         if sym == loc.symbol_name {
                             dnt_count -= 1;
@@ -137,7 +137,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                 // number of assigned variables in the functions outer context. For example, if a
                 // function `bar` is inlined into a function `foo`, and `foo` used 5 variables, then
                 // all variables in `bar` are offset by 5.
-                for stmt in body.blocks[user_bb_idx_usize].stmts.iter() {
+                for stmt in body.blocks[user_bb_idx_usize].stmts().iter() {
                     let op = match stmt {
                         Statement::MkRef(dst, src) => Statement::MkRef(
                             rnm.rename_irplace(dst, &body),
@@ -237,7 +237,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                 operand: op,
                 args: _,
                 destination: _,
-            } = &body.blocks[user_bb_idx_usize].term
+            } = body.blocks[user_bb_idx_usize].term()
             {
                 if let Some(callee_sym) = op.symbol() {
                     if let Some(callee_body) = sir.body(callee_sym) {
@@ -264,7 +264,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
 
             // Each SIR terminator becomes zero or more TIR statements.
             let mut term_stmts = Vec::new();
-            match &body.blocks[user_bb_idx_usize].term {
+            match body.blocks[user_bb_idx_usize].term() {
                 Terminator::Call {
                     operand: op,
                     args,
@@ -368,7 +368,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
             }
 
             // Convert the block terminator to a guard if necessary.
-            let guard = match body.blocks[user_bb_idx_usize].term {
+            let guard = match body.blocks[user_bb_idx_usize].term() {
                 Terminator::Goto(_)
                 | Terminator::Return
                 | Terminator::Drop { .. }
@@ -394,7 +394,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                             live_locals: Vec::new(),
                         }),
                         None => {
-                            debug_assert!(next_blk == otherwise_bb);
+                            debug_assert!(next_blk == *otherwise_bb);
                             Some(Guard {
                                 val: rnm.rename_irplace(discr, &body),
                                 kind: GuardKind::OtherInteger(values.to_vec()),

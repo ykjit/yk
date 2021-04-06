@@ -56,13 +56,7 @@ impl SirBuilder {
     pub fn new(symbol_name: String, flags: BodyFlags, num_args: usize, block_count: usize) -> Self {
         // Since there's a one-to-one mapping between MIR and SIR blocks, we know how many SIR
         // blocks we will need and can allocate empty SIR blocks ahead of time.
-        let blocks = vec![
-            BasicBlock {
-                stmts: Default::default(),
-                term: Terminator::Unreachable,
-            };
-            block_count
-        ];
+        let blocks = vec![BasicBlock::new(Vec::new(), Terminator::Unreachable); block_count];
 
         Self {
             func: Body {
@@ -104,13 +98,13 @@ impl SirBuilder {
     /// Appends a statement to the specified basic block.
     pub fn push_stmt(&mut self, bb: BasicBlockIndex, stmt: Statement) {
         self.func.blocks[usize::try_from(bb).unwrap()]
-            .stmts
+            .stmts_mut()
             .push(stmt);
     }
 
     /// Sets the terminator of the specified block.
     pub fn set_terminator(&mut self, bb: BasicBlockIndex, new_term: Terminator) {
-        let term = &mut self.func.blocks[usize::try_from(bb).unwrap()].term;
+        let term = self.func.blocks[usize::try_from(bb).unwrap()].term_mut();
         // We should only ever replace the default unreachable terminator assigned at allocation time.
         debug_assert!(*term == Terminator::Unreachable);
         *term = new_term
