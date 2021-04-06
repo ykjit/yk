@@ -118,12 +118,12 @@ impl LocalMem {
             }
             IRPlace::Indirect { ptr, off, ty: _ty } => {
                 // Get a pointer to the Indirect, which itself points to another pointer.
-                let dst_ptr = self.local_ptr(&ptr.local) as *mut *mut u8;
+                let dst_ptr = self.local_ptr(&ptr.local()) as *mut *mut u8;
                 unsafe {
                     // Dereference the pointer, by reading its value.
                     let mut p = std::ptr::read::<*mut u8>(dst_ptr);
                     // Add the offsets of the Indirect.
-                    p = p.offset(isize::try_from(ptr.off).unwrap());
+                    p = p.offset(isize::try_from(ptr.off()).unwrap());
                     p.offset(isize::try_from(*off).unwrap())
                 }
             }

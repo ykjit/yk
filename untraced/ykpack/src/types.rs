@@ -434,8 +434,22 @@ impl Display for BasicBlock {
 /// Represents a pointer to be dereferenced at runtime.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct Ptr {
-    pub local: Local,
-    pub off: OffT,
+    local: Local,
+    off: OffT,
+}
+
+impl Ptr {
+    pub fn new(local: Local, off: OffT) -> Self {
+        Self { local, off }
+    }
+
+    pub fn local(&self) -> Local {
+        self.local
+    }
+
+    pub fn off(&self) -> OffT {
+        self.off
+    }
 }
 
 impl Display for Ptr {

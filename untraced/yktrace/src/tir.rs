@@ -539,10 +539,7 @@ impl VarRenamer {
                 ty: *ty,
             },
             IRPlace::Indirect { ptr, off, ty } => IRPlace::Indirect {
-                ptr: Ptr {
-                    local: self.rename_local(&ptr.local, body),
-                    off: ptr.off,
-                },
+                ptr: Ptr::new(self.rename_local(&ptr.local(), body), ptr.off()),
                 off: *off,
                 ty: *ty,
             },

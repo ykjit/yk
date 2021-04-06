@@ -444,8 +444,8 @@ impl TraceCompiler {
         match ip {
             IRPlace::Val { local, off, .. } => self.local_to_location(*local).offset(*off),
             IRPlace::Indirect { ptr, off, .. } => self
-                .local_to_location(ptr.local)
-                .offset(ptr.off)
+                .local_to_location(ptr.local())
+                .offset(ptr.off())
                 .to_indirect()
                 .offset(*off),
             IRPlace::Const { val, ty } => Location::Const {
