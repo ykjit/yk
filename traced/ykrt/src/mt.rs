@@ -3,12 +3,12 @@
 #[cfg(test)]
 use std::time::Duration;
 use std::{
+    cmp,
+    collections::VecDeque,
     error::Error,
     io,
     marker::PhantomData,
-    mem,
-    panic::{catch_unwind, resume_unwind, UnwindSafe},
-    ptr,
+    mem, ptr,
     rc::Rc,
     sync::{
         atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
@@ -17,12 +17,14 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use parking_lot::Mutex;
+use num_cpus;
+use parking_lot::{Condvar, Mutex, MutexGuard};
 use parking_lot_core::SpinWait;
 
 use crate::location::{HotLocation, Location, State, ThreadIdInner};
 use untraced_api::{
-    compile_trace, start_tracing, RawStopgapInterpreter, StopgapInterpreter, TracingKind,
+    compile_trace, start_tracing, CompiledTrace, RawStopgapInterpreter, SirTrace,
+    StopgapInterpreter, TracingKind,
 };
 
 // The HotThreshold must be less than a machine word wide for [`Location::Location`] to do its
@@ -38,6 +40,8 @@ const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
 /// Configure a meta-tracer. Note that a process can only have one meta-tracer active at one point.
 pub struct MTBuilder {
     hot_threshold: HotThreshold,
+    /// The maximum number of simultaneous worker (e.g. compilation) threads.
+    max_worker_threads: usize,
     /// The kind of tracer to use.
     tracing_kind: TracingKind,
 }
@@ -47,6 +51,7 @@ impl MTBuilder {
     pub fn new() -> Result<Self, Box<dyn Error>> {
         Ok(Self {
             hot_threshold: DEFAULT_HOT_THRESHOLD,
+            max_worker_threads: cmp::max(1, num_cpus::get() - 1),
             #[cfg(tracermode = "hw")]
             tracing_kind: TracingKind::HardwareTracing,
             #[cfg(tracermode = "sw")]
@@ -57,7 +62,11 @@ impl MTBuilder {
     /// Consume the `MTBuilder` and create a meta-tracer, returning the
     /// [`MTThread`](struct.MTThread.html) representing the current thread.
     pub fn build(self) -> MTThread {
-        MTInner::init(self.hot_threshold, self.tracing_kind)
+        MTInner::init(
+            self.hot_threshold,
+            self.max_worker_threads,
+            self.tracing_kind,
+        )
     }
 
     /// Change this meta-tracer builder's `hot_threshold` value. Returns `Ok` if `hot_threshold` is
@@ -65,6 +74,13 @@ impl MTBuilder {
     pub fn hot_threshold(mut self, hot_threshold: HotThreshold) -> Result<Self, ()> {
         self.hot_threshold = hot_threshold;
         Ok(self)
+    }
+
+    /// Sets the maximum number of worker threads to `max(1, num)`. Defaults to `max(1,
+    /// num_cpus::get() - 1)`.
+    pub fn max_worker_threads(mut self, num: usize) -> Self {
+        self.max_worker_threads = cmp::max(1, num);
+        self
     }
 
     /// Select the kind of tracing to use. Returns `Ok` if the run-time environment is capable of
@@ -88,6 +104,11 @@ impl MT {
         self.inner.hot_threshold.load(Ordering::Relaxed)
     }
 
+    /// Return this meta-tracer's maximum number of worker threads.
+    pub fn max_worker_threads(&self) -> usize {
+        self.inner.max_worker_threads.load(Ordering::Relaxed)
+    }
+
     /// Return the kind of tracing that this meta-tracer is using.
     pub fn tracing_kind(&self) -> TracingKind {
         self.inner.tracing_kind
@@ -97,20 +118,60 @@ impl MT {
     /// handed a [`MTThread`](struct.MTThread.html) from which the `MT` itself can be accessed.
     pub fn spawn<F, T>(&self, f: F) -> io::Result<JoinHandle<T>>
     where
-        F: FnOnce(MTThread) -> T,
-        F: Send + UnwindSafe + 'static,
+        F: FnOnce(MTThread) -> T + Send + 'static,
         T: Send + 'static,
     {
         let mt_cl = self.clone();
         thread::Builder::new().spawn(move || {
-            mt_cl.inner.active_threads.fetch_add(1, Ordering::Relaxed);
-            let r = catch_unwind(|| f(MTThreadInner::init(mt_cl.clone())));
-            mt_cl.inner.active_threads.fetch_sub(1, Ordering::Relaxed);
-            match r {
-                Ok(r) => r,
-                Err(e) => resume_unwind(e),
-            }
+            mt_cl
+                .inner
+                .active_user_threads
+                .fetch_add(1, Ordering::Relaxed);
+            let r = f(MTThreadInner::init(mt_cl.clone()));
+            mt_cl
+                .inner
+                .active_user_threads
+                .fetch_sub(1, Ordering::Relaxed);
+            r
         })
+    }
+
+    /// Queue `job` to be run on a worker thread.
+    fn queue_job(&self, job: Box<dyn FnOnce() + Send>) {
+        // We have a very simple model of worker threads. Each time a job is queued, we spin up a
+        // new worker thread iff we aren't already running the maximum number of worker threads.
+        // Once started, a worker thread never dies, waiting endlessly for work.
+
+        let inner = Arc::clone(&self.inner);
+        let (cv, mtx) = &inner.job_queue;
+        mtx.lock().push_back(job);
+        cv.notify_one();
+
+        let max_jobs = inner.max_worker_threads.load(Ordering::Relaxed);
+        if inner.active_worker_threads.load(Ordering::Relaxed) < max_jobs {
+            // At the point of the `load` on the previous line, we weren't running the maximum
+            // number of worker threads. There is now a possible race condition where multiple
+            // threads calling `queue_job` could try creating multiple worker threads and push us
+            // over the maximum worker thread limit.
+            if inner.active_worker_threads.fetch_add(1, Ordering::Relaxed) > max_jobs {
+                // Another thread(s) is also spinning up another worker thread and they won the
+                // race.
+                inner.active_worker_threads.fetch_sub(1, Ordering::Relaxed);
+                return;
+            }
+
+            let inner_cl = Arc::clone(&self.inner);
+            thread::spawn(move || {
+                let (cv, mtx) = &inner_cl.job_queue;
+                let mut lock = mtx.lock();
+                loop {
+                    match lock.pop_front() {
+                        Some(x) => MutexGuard::unlocked(&mut lock, x),
+                        None => cv.wait(&mut lock),
+                    }
+                }
+            });
+        }
     }
 }
 
@@ -123,7 +184,16 @@ impl Drop for MT {
 /// The innards of a meta-tracer.
 struct MTInner {
     hot_threshold: AtomicHotThreshold,
-    active_threads: AtomicUsize,
+    /// The number of threads currently running the user's interpreter (directly or via JITed
+    /// code).
+    active_user_threads: AtomicUsize,
+    /// The ordered queue of compilation worker functions.
+    job_queue: (Condvar, Mutex<VecDeque<Box<dyn FnOnce() + Send>>>),
+    /// The hard cap on the number of worker threads.
+    max_worker_threads: AtomicUsize,
+    /// How many worker threads are currently running. Note that this may temporarily be `>`
+    /// [`max_worker_threads`].
+    active_worker_threads: AtomicUsize,
     tracing_kind: TracingKind,
 }
 
@@ -132,7 +202,11 @@ static MT_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 impl MTInner {
     /// Create a new `MT`, wrapped immediately in an [`MTThread`](struct.MTThread.html).
-    fn init(hot_threshold: HotThreshold, tracing_kind: TracingKind) -> MTThread {
+    fn init(
+        hot_threshold: HotThreshold,
+        max_worker_threads: usize,
+        tracing_kind: TracingKind,
+    ) -> MTThread {
         // A process can only have a single MT instance.
 
         // In non-testing, we panic if the user calls this method while an MT instance is active.
@@ -157,7 +231,10 @@ impl MTInner {
 
         let mtc = Self {
             hot_threshold: AtomicHotThreshold::new(hot_threshold),
-            active_threads: AtomicUsize::new(1),
+            job_queue: (Condvar::new(), Mutex::new(VecDeque::new())),
+            active_user_threads: AtomicUsize::new(1),
+            max_worker_threads: AtomicUsize::new(max_worker_threads),
+            active_worker_threads: AtomicUsize::new(0),
             tracing_kind,
         };
         let mt = MT {
@@ -411,25 +488,15 @@ impl MTThread {
                     // while tracing.
                     match opt.take().unwrap().1.stop_tracing() {
                         Ok(sir) => {
-                            // Start a compilation thread.
                             let mtx = Arc::new(Mutex::new(None));
                             let mtx_cl = Arc::clone(&mtx);
                             *hl = HotLocation::Compiling(mtx);
                             loc.unlock();
-
-                            Rc::get_mut(&mut self.inner).unwrap().tracing = None;
-                            thread::spawn(move || {
-                                let compiled = compile_trace::<I>(sir).unwrap();
-                                *mtx_cl.lock() = Some(Box::new(compiled));
-                                // FIXME: although we've now put the compiled trace into the mutex, there's no
-                                // guarantee that the Location for which we're compiling will ever be executed
-                                // again. In such a case, the memory has, in essence, leaked.
-                            });
-
-                            return None;
+                            self.queue_compile_job(sir, mtx_cl);
                         }
                         Err(_) => todo!(),
                     }
+                    return None;
                 }
                 HotLocation::DontTrace => {
                     loc.unlock();
@@ -437,6 +504,23 @@ impl MTThread {
                 }
             }
         }
+    }
+
+    /// Add a compilation job for `sir` to the global work queue.
+    fn queue_compile_job<I: 'static>(
+        &self,
+        sir: SirTrace,
+        mtx: Arc<Mutex<Option<Box<CompiledTrace<I>>>>>,
+    ) {
+        let f = Box::new(move || {
+            let compiled = compile_trace::<I>(sir).unwrap();
+            *mtx.lock() = Some(Box::new(compiled));
+            // FIXME: although we've now put the compiled trace into the mutex, there's no
+            // guarantee that the Location for which we're compiling will ever be executed
+            // again. In such a case, the memory has, in essence, leaked.
+        });
+
+        self.inner.mt.queue_job(f);
     }
 }
 
@@ -843,6 +927,86 @@ mod tests {
             hotlocation_discriminant(&loc.unwrap()),
             Some(HotLocationDiscriminants::DontTrace)
         );
+    }
+
+    #[test]
+    fn more_hot_locations_than_worker_threads() {
+        // This test indirectly tests code around capping the maximum number of worker threads.
+        // We'd really like to check that not too many worker threads run at once, but that's
+        // surprisingly tricky to test reliably because for all we know the system might just so
+        // happen to run our worker threads one after the other. We therefore settle for running a
+        // program that compiles multiple locations, with luck more-or-less at the same time,
+        // hoping that this tests the various interactions around queueing etc.
+
+        let num_threads: usize = cmp::max(4, num_cpus::get());
+        let mtt = MTBuilder::new()
+            .unwrap()
+            .max_worker_threads(num_threads / 2)
+            .hot_threshold(2)
+            .unwrap()
+            .build();
+
+        const INC: u8 = 0;
+        const RESTART: u8 = 1;
+        // This test assumes throughout that each loop in the program is 3 bytecodes long.
+        let mut prog = Vec::with_capacity(3 * num_threads);
+        let mut locs = Vec::with_capacity(3 * num_threads);
+        for _ in 0..num_threads {
+            prog.extend(vec![INC, INC, RESTART]);
+            locs.extend(vec![Some(Location::new()), None, None]);
+        }
+        let prog = Arc::new(prog);
+        let locs = Arc::new(locs);
+
+        struct InterpCtx {
+            prog: Arc<Vec<u8>>,
+            count: u64,
+            pc: usize,
+        }
+
+        #[interp_step]
+        fn simple_interp_step(ctx: &mut InterpCtx) -> bool {
+            match ctx.prog[ctx.pc] {
+                INC => {
+                    ctx.pc += 1;
+                    ctx.count += 1;
+                }
+                RESTART => ctx.pc -= 2,
+                _ => unreachable!(),
+            };
+            true
+        }
+
+        let mut thrs = Vec::with_capacity(num_threads);
+        for i in 0..num_threads {
+            let prog = Arc::clone(&prog);
+            let locs = Arc::clone(&locs);
+            let t = mtt
+                .mt()
+                .spawn(move |mut mtt| {
+                    let mut ctx = InterpCtx {
+                        prog: Arc::clone(&prog),
+                        count: 0,
+                        pc: i * 3,
+                    };
+                    loop {
+                        let loc = locs[ctx.pc].as_ref();
+                        if let Some(l) = loc {
+                            if hotlocation_discriminant(l)
+                                == Some(HotLocationDiscriminants::Compiled)
+                            {
+                                break;
+                            }
+                        }
+                        mtt.control_point(loc, simple_interp_step, &mut ctx);
+                    }
+                })
+                .unwrap();
+            thrs.push(t);
+        }
+        for t in thrs {
+            t.join().unwrap();
+        }
     }
 
     #[test]
