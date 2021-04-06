@@ -15,7 +15,7 @@ impl TraceCompiler {
     }
 
     /// Stores src_loc into dst_loc.
-    pub(super) fn store_raw(&mut self, dst_loc: &Location, src_loc: &Location, size: u64) {
+    pub(super) fn store_raw(&mut self, dst_loc: &Location, src_loc: &Location, size: usize) {
         // This is the one place in the compiler where we allow an explosion of cases over the
         // variants of `Location`. If elsewhere you find yourself matching over a pair of locations
         // you should try and re-work you code so it calls this.

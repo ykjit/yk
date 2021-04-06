@@ -118,12 +118,12 @@ impl LocalMem {
             }
             IRPlace::Indirect { ptr, off, ty: _ty } => {
                 // Get a pointer to the Indirect, which itself points to another pointer.
-                let dst_ptr = self.local_ptr(&ptr.local) as *mut *mut u8;
+                let dst_ptr = self.local_ptr(&ptr.local()) as *mut *mut u8;
                 unsafe {
                     // Dereference the pointer, by reading its value.
                     let mut p = std::ptr::read::<*mut u8>(dst_ptr);
                     // Add the offsets of the Indirect.
-                    p = p.offset(isize::try_from(ptr.off).unwrap());
+                    p = p.offset(isize::try_from(ptr.off()).unwrap());
                     p.offset(isize::try_from(*off).unwrap())
                 }
             }
@@ -157,7 +157,7 @@ macro_rules! make_binop {
                 // Write overflow result into result tuple.
                 let ty = SIR.ty(&dst.ty());
                 let tty = ty.unwrap_tuple();
-                let flag_off = isize::try_from(tty.fields.offsets[1]).unwrap();
+                let flag_off = isize::try_from(tty.fields().offset(1)).unwrap();
                 unsafe {
                     std::ptr::write::<u8>(ptr.offset(flag_off), u8::from(of));
                 }
@@ -233,7 +233,7 @@ impl StopgapInterpreter {
         let body = frame.body.clone();
         let bbidx = usize::try_from(frame.bbidx).unwrap();
         unsafe {
-            sg.terminator(&body.blocks[bbidx].term);
+            sg.terminator(&body.blocks[bbidx].term());
         }
         sg
     }
@@ -285,7 +285,7 @@ impl StopgapInterpreter {
         while let Some(frame) = self.frames.last() {
             let body = frame.body.clone();
             let block = &body.blocks[usize::try_from(frame.bbidx).unwrap()];
-            for stmt in block.stmts.iter() {
+            for stmt in block.stmts().iter() {
                 match stmt {
                     Statement::MkRef(dst, src) => self.mkref(&dst, &src),
                     Statement::DynOffs { .. } => todo!(),
@@ -306,7 +306,7 @@ impl StopgapInterpreter {
                     }
                 }
             }
-            self.terminator(&block.term);
+            self.terminator(block.term());
         }
         self.rv
     }
@@ -338,7 +338,7 @@ impl StopgapInterpreter {
                     let body = &curframe.body;
                     // Check the previous frame's call terminator to find out where we have to go
                     // next.
-                    let (dst, bbidx) = match &body.blocks[bbidx].term {
+                    let (dst, bbidx) = match body.blocks[bbidx].term() {
                         Terminator::Call {
                             operand: _,
                             args: _,
@@ -409,7 +409,7 @@ impl StopgapInterpreter {
             return val;
         }
         let ptr = self.locals().irplace_to_ptr(src);
-        match &SIR.ty(&src.ty()).kind {
+        match &SIR.ty(&src.ty()).kind() {
             TyKind::UnsignedInt(ui) => match ui {
                 UnsignedIntTy::Usize => todo!(),
                 UnsignedIntTy::U8 => unsafe { u128::from(std::ptr::read::<u8>(ptr)) },
@@ -460,7 +460,7 @@ impl StopgapInterpreter {
             todo!("binops for non-integers");
         }
 
-        match &ty.kind {
+        match &ty.kind() {
             TyKind::UnsignedInt(ui) => match ui {
                 UnsignedIntTy::U8 => self.binop_u8(dst, op, opnd1, opnd2, checked),
                 UnsignedIntTy::U16 => todo!(),

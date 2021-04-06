@@ -11,7 +11,6 @@ use lazy_static::lazy_static;
 use std::alloc::{alloc, Layout};
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::mem;
 use std::process::Command;
 use ykpack::{IRPlace, LocalDecl, SignedIntTy, Ty, TyKind, UnsignedIntTy};
 use yksg::{FrameInfo, StopgapInterpreter};
@@ -45,7 +44,7 @@ lazy_static! {
     static ref TEMP_LOC: Location = Location::Reg(*TEMP_REG);
 
     /// The size of a memory address in bytes.
-    static ref PTR_SIZE: u64 = u64::try_from(mem::size_of::<usize>()).unwrap();
+    static ref PTR_SIZE: usize = 8;
 }
 
 /// The size of a quad-word register (e.g. RAX) in bytes.
@@ -423,14 +422,14 @@ impl TraceCompiler {
     }
 
     fn can_live_in_register(decl: &LocalDecl) -> bool {
-        if decl.referenced {
+        if decl.is_referenced() {
             // We must allocate it on the stack so that we can reference it.
             return false;
         }
 
         // FIXME: optimisation: small structs and tuples etc. could actually live in a register.
-        let ty = &*SIR.ty(&decl.ty);
-        match &ty.kind {
+        let ty = &*SIR.ty(&decl.ty());
+        match &ty.kind() {
             TyKind::UnsignedInt(ui) => !matches!(ui, UnsignedIntTy::U128),
             TyKind::SignedInt(si) => !matches!(si, SignedIntTy::I128),
             TyKind::Array { .. } => false,
@@ -445,8 +444,8 @@ impl TraceCompiler {
         match ip {
             IRPlace::Val { local, off, .. } => self.local_to_location(*local).offset(*off),
             IRPlace::Indirect { ptr, off, .. } => self
-                .local_to_location(ptr.local)
-                .offset(ptr.off)
+                .local_to_location(ptr.local())
+                .offset(ptr.off())
                 .to_indirect()
                 .offset(*off),
             IRPlace::Const { val, ty } => Location::Const {
@@ -481,7 +480,7 @@ impl TraceCompiler {
                 self.variable_location_map.insert(l, loc);
                 ret
             } else {
-                let ty = SIR.ty(&decl.ty);
+                let ty = SIR.ty(&decl.ty());
                 let loc = self.stack_builder.alloc(ty.size(), ty.align());
                 self.variable_location_map.insert(l, loc.clone());
                 loc
@@ -500,7 +499,7 @@ impl TraceCompiler {
     /// Spill a local to the stack and return its location. Note: This does not update the
     /// `variable_location_map`.
     fn spill_local_to_stack(&mut self, local: &Local) -> Location {
-        let tyid = self.local_decls[&local].ty;
+        let tyid = self.local_decls[&local].ty();
         let ty = SIR.ty(&tyid);
         self.stack_builder.alloc(ty.size(), ty.align())
     }
@@ -537,7 +536,7 @@ impl TraceCompiler {
     }
 
     /// Copy bytes from one memory location to another.
-    fn copy_memory(&mut self, dst: &RegAndOffset, src: &RegAndOffset, size: u64) {
+    fn copy_memory(&mut self, dst: &RegAndOffset, src: &RegAndOffset, size: usize) {
         // We use memmove(3), as it's not clear if MIR (and therefore SIR) could cause copies
         // involving overlapping buffers. See https://github.com/rust-lang/rust/issues/68364.
         let sym = find_symbol("memmove").unwrap();
@@ -789,7 +788,7 @@ impl TraceCompiler {
             let dst_ro = dst_loc.unwrap_mem();
             let sir_ty = SIR.ty(&dst.ty());
             let tty = sir_ty.unwrap_tuple();
-            let flag_off = tty.fields.offsets[1];
+            let flag_off = tty.fields().offset(1);
 
             if opnd1_ty.is_signed_int() {
                 dynasm!(self.asm
@@ -1075,7 +1074,7 @@ impl TraceCompiler {
         let src_loc = self.irplace_to_location(src);
         let ty = &*SIR.ty(&src.ty()); // Type of the source.
         let cty = SIR.ty(&dst.ty()); // Type of the cast.
-        match ty.kind {
+        match ty.kind() {
             TyKind::UnsignedInt(_) => self.c_cast_uint(src_loc, &ty, &cty),
             _ => todo!(),
         }
@@ -1257,7 +1256,7 @@ impl TraceCompiler {
         }
     }
 
-    fn cmp_reg_const(&mut self, reg: u8, c: u128, size: u64) {
+    fn cmp_reg_const(&mut self, reg: u8, c: u128, size: usize) {
         match size {
             1 => {
                 dynasm!(self.asm
@@ -1440,7 +1439,7 @@ impl TraceCompiler {
                         reg: RBP.code(),
                         off: -1 * i32::try_from(llmap[reg]).unwrap(),
                     });
-                    let ty = self.local_decls[&tirlocal].ty;
+                    let ty = self.local_decls[&tirlocal].ty();
                     let size = SIR.ty(&ty).size();
                     self.store_raw(&newloc, &loc, size);
                     *loc = newloc;
@@ -1480,7 +1479,7 @@ impl TraceCompiler {
                 );
                 // Move the live variables into the allocated memory.
                 for liveloc in &guard.live_locals[i] {
-                    let ty = self.local_decls[&liveloc.tir].ty;
+                    let ty = self.local_decls[&liveloc.tir].ty();
                     let size = SIR.ty(&ty).size();
                     let off = i32::try_from(body.offsets[usize::try_from(liveloc.sir.0).unwrap()])
                         .unwrap();

@@ -4,7 +4,6 @@ use bitflags::bitflags;
 use fxhash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use std::{
-    convert::TryFrom,
     default::Default,
     fmt::{self, Display},
 };
@@ -57,14 +56,6 @@ impl Display for TypeId {
     }
 }
 
-/// The type of a local variable.
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
-pub struct Ty {
-    pub size: usize,
-    pub align: usize,
-    pub kind: TyKind,
-}
-
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
 pub enum TyKind {
     /// Signed integers.
@@ -90,30 +81,17 @@ pub enum TyKind {
     Unimplemented(String),
 }
 
-impl Display for Ty {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.kind {
-            TyKind::SignedInt(si) => write!(f, "{}", si),
-            TyKind::UnsignedInt(ui) => write!(f, "{}", ui),
-            TyKind::Struct(sty) => write!(f, "{}", sty),
-            TyKind::Tuple(tty) => write!(f, "{}", tty),
-            TyKind::Array { elem_ty, len, .. } => write!(f, "[{}; {}]", elem_ty, len),
-            TyKind::Slice(sty) => write!(f, "&[{:?}]", sty),
-            TyKind::Ref(rty) => write!(f, "&{:?}", rty),
-            TyKind::Bool => write!(f, "bool"),
-            TyKind::Char => write!(f, "char"),
-            TyKind::Unimplemented(m) => write!(f, "Unimplemented: {}", m),
-        }
-    }
+/// The type of a local variable.
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
+pub struct Ty {
+    #[cfg(target_pointer_width = "64")]
+    size_align: usize,
+    kind: TyKind,
 }
 
 impl Ty {
-    pub fn size(&self) -> u64 {
-        u64::try_from(self.size).unwrap()
-    }
-
-    pub fn align(&self) -> u64 {
-        u64::try_from(self.align).unwrap()
+    pub fn kind(&self) -> &TyKind {
+        &self.kind
     }
 
     pub fn is_signed_int(&self) -> bool {
@@ -142,6 +120,47 @@ impl Ty {
             &tty
         } else {
             panic!("tried to unwrap a non-tuple");
+        }
+    }
+}
+
+#[cfg(target_pointer_width = "64")]
+impl Ty {
+    // Pack size & align into 64 bits (48 bits for size, 16 bits for align).
+    const ALIGN_BITS: usize = 16;
+    const SIZE_MASK: usize = (1 << Self::ALIGN_BITS) - 1;
+    const ALIGN_MASK: usize = !Self::SIZE_MASK;
+
+    pub fn new(size: usize, align: usize, kind: TyKind) -> Self {
+        if size & !Self::SIZE_MASK != 0 || align >= (1 << Self::ALIGN_BITS) {
+            todo!();
+        }
+        let size_align = size | (align << (64 - Self::ALIGN_BITS));
+        Ty { size_align, kind }
+    }
+
+    pub fn size(&self) -> usize {
+        self.size_align & Self::SIZE_MASK
+    }
+
+    pub fn align(&self) -> usize {
+        (self.size_align & Self::ALIGN_MASK) >> (64 - Self::ALIGN_BITS)
+    }
+}
+
+impl Display for Ty {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.kind {
+            TyKind::SignedInt(si) => write!(f, "{}", si),
+            TyKind::UnsignedInt(ui) => write!(f, "{}", ui),
+            TyKind::Struct(sty) => write!(f, "{}", sty),
+            TyKind::Tuple(tty) => write!(f, "{}", tty),
+            TyKind::Array { elem_ty, len, .. } => write!(f, "[{}; {}]", elem_ty, len),
+            TyKind::Slice(sty) => write!(f, "&[{:?}]", sty),
+            TyKind::Ref(rty) => write!(f, "&{:?}", rty),
+            TyKind::Bool => write!(f, "bool"),
+            TyKind::Char => write!(f, "char"),
+            TyKind::Unimplemented(m) => write!(f, "Unimplemented: {}", m),
         }
     }
 }
@@ -199,9 +218,21 @@ impl Display for UnsignedIntTy {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
 pub struct Fields {
     /// Field offsets.
-    pub offsets: Vec<OffT>,
+    offsets: Vec<OffT>,
     /// The type of each field.
-    pub tys: Vec<TypeId>,
+    tys: Vec<TypeId>,
+}
+
+impl Fields {
+    pub fn new(mut offsets: Vec<OffT>, mut tys: Vec<TypeId>) -> Self {
+        offsets.shrink_to_fit();
+        tys.shrink_to_fit();
+        Self { offsets, tys }
+    }
+
+    pub fn offset(&self, idx: usize) -> OffT {
+        self.offsets[idx]
+    }
 }
 
 impl Display for Fields {
@@ -226,12 +257,20 @@ impl Display for Fields {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
 pub struct TupleTy {
     /// The fields of the tuple.
-    pub fields: Fields,
+    fields: Fields,
 }
 
 impl TupleTy {
+    pub fn new(fields: Fields) -> Self {
+        Self { fields }
+    }
+
     fn is_unit(&self) -> bool {
         self.fields.offsets.is_empty()
+    }
+
+    pub fn fields(&self) -> &Fields {
+        &self.fields
     }
 }
 
@@ -244,7 +283,17 @@ impl Display for TupleTy {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
 pub struct StructTy {
     /// The fields of the struct.
-    pub fields: Fields,
+    fields: Fields,
+}
+
+impl StructTy {
+    pub fn new(fields: Fields) -> Self {
+        Self { fields }
+    }
+
+    pub fn fields(&self) -> &Fields {
+        &self.fields
+    }
 }
 
 impl Display for StructTy {
@@ -280,15 +329,27 @@ bitflags! {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 #[repr(C)]
 pub struct LocalDecl {
-    pub ty: TypeId,
+    ty: TypeId,
     /// If true this local variable is at some point referenced, and thus should be allocated on
     /// the stack and never in a register.
-    pub referenced: bool,
+    is_referenced: bool,
 }
 
 impl LocalDecl {
-    pub fn new(ty: TypeId, referenced: bool) -> Self {
-        Self { ty, referenced }
+    pub fn new(ty: TypeId, is_referenced: bool) -> Self {
+        Self { ty, is_referenced }
+    }
+
+    pub fn ty(&self) -> TypeId {
+        self.ty
+    }
+
+    pub fn is_referenced(&self) -> bool {
+        self.is_referenced
+    }
+
+    pub fn set_is_referenced(&mut self, is_referenced: bool) {
+        self.is_referenced = is_referenced;
     }
 }
 
@@ -335,13 +396,29 @@ impl Display for Body {
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct BasicBlock {
-    pub stmts: Vec<Statement>,
-    pub term: Terminator,
+    stmts: Vec<Statement>,
+    term: Terminator,
 }
 
 impl BasicBlock {
     pub fn new(stmts: Vec<Statement>, term: Terminator) -> Self {
         Self { stmts, term }
+    }
+
+    pub fn stmts(&self) -> &Vec<Statement> {
+        &self.stmts
+    }
+
+    pub fn stmts_mut(&mut self) -> &mut Vec<Statement> {
+        &mut self.stmts
+    }
+
+    pub fn term(&self) -> &Terminator {
+        &self.term
+    }
+
+    pub fn term_mut(&mut self) -> &mut Terminator {
+        &mut self.term
     }
 }
 
@@ -357,8 +434,22 @@ impl Display for BasicBlock {
 /// Represents a pointer to be dereferenced at runtime.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct Ptr {
-    pub local: Local,
-    pub off: OffT,
+    local: Local,
+    off: OffT,
+}
+
+impl Ptr {
+    pub fn new(local: Local, off: OffT) -> Self {
+        Self { local, off }
+    }
+
+    pub fn local(&self) -> Local {
+        self.local
+    }
+
+    pub fn off(&self) -> OffT {
+        self.off
+    }
 }
 
 impl Display for Ptr {

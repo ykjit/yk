@@ -56,13 +56,7 @@ impl SirBuilder {
     pub fn new(symbol_name: String, flags: BodyFlags, num_args: usize, block_count: usize) -> Self {
         // Since there's a one-to-one mapping between MIR and SIR blocks, we know how many SIR
         // blocks we will need and can allocate empty SIR blocks ahead of time.
-        let blocks = vec![
-            BasicBlock {
-                stmts: Default::default(),
-                term: Terminator::Unreachable,
-            };
-            block_count
-        ];
+        let blocks = vec![BasicBlock::new(Vec::new(), Terminator::Unreachable); block_count];
 
         Self {
             func: Body {
@@ -80,10 +74,7 @@ impl SirBuilder {
     /// Returns a zero-offset IRPlace for a new SIR local.
     pub fn new_sir_local(&mut self, sirty: TypeId) -> IRPlace {
         let idx = u32::try_from(self.func.local_decls.len()).unwrap();
-        self.func.local_decls.push(LocalDecl {
-            ty: sirty,
-            referenced: false,
-        });
+        self.func.local_decls.push(LocalDecl::new(sirty, false));
         IRPlace::Val {
             local: Local(idx),
             off: 0,
@@ -96,7 +87,7 @@ impl SirBuilder {
     pub fn notify_referenced(&mut self, l: Local) {
         let idx = usize::try_from(l.0).unwrap();
         let slot = self.func.local_decls.get_mut(idx).unwrap();
-        slot.referenced = true;
+        slot.set_is_referenced(true);
     }
 
     /// Returns true if there are no basic blocks.
@@ -107,13 +98,13 @@ impl SirBuilder {
     /// Appends a statement to the specified basic block.
     pub fn push_stmt(&mut self, bb: BasicBlockIndex, stmt: Statement) {
         self.func.blocks[usize::try_from(bb).unwrap()]
-            .stmts
+            .stmts_mut()
             .push(stmt);
     }
 
     /// Sets the terminator of the specified block.
     pub fn set_terminator(&mut self, bb: BasicBlockIndex, new_term: Terminator) {
-        let term = &mut self.func.blocks[usize::try_from(bb).unwrap()].term;
+        let term = self.func.blocks[usize::try_from(bb).unwrap()].term_mut();
         // We should only ever replace the default unreachable terminator assigned at allocation time.
         debug_assert!(*term == Terminator::Unreachable);
         *term = new_term
