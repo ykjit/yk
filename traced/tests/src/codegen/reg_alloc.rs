@@ -2,7 +2,7 @@
 
 use crate::helpers::TestTypes;
 use std::{collections::HashMap, convert::TryFrom};
-use untraced_api::{reg_pool_size, Local, LocalDecl, LocalIndex, TraceCompiler};
+use to_untraced::{reg_pool_size, Local, LocalDecl, LocalIndex, TraceCompiler};
 
 // Repeatedly fetching the register for the same local should yield the same register and
 // should not exhaust the allocator.

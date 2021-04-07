@@ -2,7 +2,7 @@
 
 use super::{I16_MAX, I32_MAX, I64_MAX, U16_MAX, U32_MAX, U64_MAX};
 use paste::paste;
-use untraced_api::{compile_trace, start_tracing, TracingKind};
+use to_untraced::{compile_trace, start_tracing, TracingKind};
 
 /// Generates a test for a binary operation.
 macro_rules! mk_binop_test {

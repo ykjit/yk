@@ -1,6 +1,6 @@
 //! Artificially testing the stopgap interpreter (without a guard failure).
 
-use untraced_api::interpret_body;
+use to_untraced::interpret_body;
 
 #[test]
 fn simple() {

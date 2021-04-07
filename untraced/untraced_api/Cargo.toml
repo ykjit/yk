@@ -1,5 +1,5 @@
 [package]
-name = "to_traced"
+name = "untraced_api"
 version = "0.1.0"
 authors = ["The Yorick Developers"]
 edition = "2018"

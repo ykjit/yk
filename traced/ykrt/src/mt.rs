@@ -22,7 +22,7 @@ use parking_lot::{Condvar, Mutex, MutexGuard};
 use parking_lot_core::SpinWait;
 
 use crate::location::{HotLocation, Location, State, ThreadIdInner};
-use untraced_api::{
+use to_untraced::{
     compile_trace, start_tracing, CompiledTrace, RawStopgapInterpreter, SirTrace,
     StopgapInterpreter, TracingKind,
 };

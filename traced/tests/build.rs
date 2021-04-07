@@ -11,5 +11,5 @@ fn main() {
         env::current_dir().unwrap().to_str().unwrap(),
         profile
     );
-    println!("cargo:rustc-link-lib=dylib=to_traced");
+    println!("cargo:rustc-link-lib=dylib=untraced_api");
 }
