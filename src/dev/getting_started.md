@@ -17,6 +17,12 @@ The latter is a monorepo containing a few different crates.
 
 ### Building the Compiler
 
+First get the compiler sources:
+```
+git clone https://github.com/softdevteam/ykrustc
+cd ykrustc
+```
+
 To build the compiler, run:
 ```
 ./x.py build --stage 1
@@ -62,6 +68,12 @@ To work on `yk` you will need to have built the compiler, as detailed above.
 Then the easiest way to get going is to use `rustup` to create a "linked
 toolchain" and then override the `yk` repo to use it.
 
+First get the yk sources:
+```
+git clone https://github.com/softdevteam/yk
+cd yk
+```
+
 Supposing you have a stage 1 compiler built, you can make a linked toolchain with:
 ```
 rustup toolchain link yk-stage1 /path/to/ykrustc/build/x86_64-unknown-linux-gnu/stage1
@@ -96,8 +108,8 @@ Configuration is dependent on the LSP plugin used, but in general:
    `cargo`. This is done via the `rust-analyzer.checkOnSave.overrideCommand`
    option.
 
- - For the `yk` repo, you need to point Rust Analyzer at the extra internal
-   workspace via the `rust-analyzer.linkedProjects` option.
+ - For the `yk` repo, you need to point Rust Analyzer at the extra
+   workspaces via the `rust-analyzer.linkedProjects` option.
 
 For example, for [vim-lsp](https://github.com/prabirshrestha/vim-lsp) you would
 use a configuration similar to the following:
@@ -118,7 +130,7 @@ if executable('rust-analyzer')
                     \ 'name': 'rust-analyzer',
                     \ 'cmd': {server_info->['rust-analyzer']},
                     \ 'allowlist': ['rust'],
-                    \ 'workspace_config': {'rust-analyzer': {'linkedProjects': ['internal_ws/Cargo.toml']}},
+                    \ 'workspace_config': {'rust-analyzer': {'linkedProjects': ['traced/Cargo.toml', 'untraced/Cargo.toml']}},
                     \ })
     else
         " Normal project.

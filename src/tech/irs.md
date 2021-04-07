@@ -33,8 +33,8 @@ later in the codegen.
 
 ## Tracing IR (TIR)
 
-TIR is basically SIR with guards instead of branches. TIR is the basis for a
-compiled trace.
+TIR is basically SIR with (most) calls inlined and with guards instead of
+branches. TIR is the basis for a compiled trace.
 
 TIR [lives in yktrace](https://github.com/softdevteam/yk/tree/master/yktrace).
 

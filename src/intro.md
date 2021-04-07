@@ -10,5 +10,5 @@ yet.
 Yorick is developed by [The Software Development Team](https://soft-dev.org/)
 at King's College London.
 
-The source for this documentations is
+The source for this documentation is
 [available on GitHub](https://github.com/softdevteam/ykdocs).
