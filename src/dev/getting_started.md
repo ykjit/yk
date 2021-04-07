@@ -17,6 +17,12 @@ The latter is a monorepo containing a few different crates.
 
 ### Building the Compiler
 
+First get the compiler sources:
+```
+git clone https://github.com/softdevteam/ykrustc
+cd ykrustc
+```
+
 To build the compiler, run:
 ```
 ./x.py build --stage 1
@@ -61,6 +67,12 @@ the one CI uses.
 To work on `yk` you will need to have built the compiler, as detailed above.
 Then the easiest way to get going is to use `rustup` to create a "linked
 toolchain" and then override the `yk` repo to use it.
+
+First get the yk sources:
+```
+git clone https://github.com/softdevteam/yk
+cd yk
+```
 
 Supposing you have a stage 1 compiler built, you can make a linked toolchain with:
 ```
