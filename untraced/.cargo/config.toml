@@ -1,9 +1,0 @@
-# Cargo will walk up the filesystem and find the cargo config at ../.cargo/config which disables
-# optimisation. We don't want that for the untraced workspace, so we force the opt-levels back
-# to their default values.
-
-[profile.release]
-opt-level = 3
-
-[profile.bench]
-opt-level = 3
