@@ -108,8 +108,8 @@ Configuration is dependent on the LSP plugin used, but in general:
    `cargo`. This is done via the `rust-analyzer.checkOnSave.overrideCommand`
    option.
 
- - For the `yk` repo, you need to point Rust Analyzer at the extra internal
-   workspace via the `rust-analyzer.linkedProjects` option.
+ - For the `yk` repo, you need to point Rust Analyzer at the extra
+   workspaces via the `rust-analyzer.linkedProjects` option.
 
 For example, for [vim-lsp](https://github.com/prabirshrestha/vim-lsp) you would
 use a configuration similar to the following:
@@ -130,7 +130,7 @@ if executable('rust-analyzer')
                     \ 'name': 'rust-analyzer',
                     \ 'cmd': {server_info->['rust-analyzer']},
                     \ 'allowlist': ['rust'],
-                    \ 'workspace_config': {'rust-analyzer': {'linkedProjects': ['internal_ws/Cargo.toml']}},
+                    \ 'workspace_config': {'rust-analyzer': {'linkedProjects': ['traced/Cargo.toml', 'untraced/Cargo.toml']}},
                     \ })
     else
         " Normal project.
