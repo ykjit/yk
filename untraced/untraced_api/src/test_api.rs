@@ -1,4 +1,4 @@
-//! The to_traced testing API.
+//! The untraced testing API.
 //!
 //! These functions are only exposed to allow testing from the traced workspace.
 #![cfg(feature = "testing")]
@@ -18,13 +18,13 @@ use yktrace::tir::TirTrace;
 
 /// Returns the length of a SIR trace.
 #[no_mangle]
-unsafe extern "C" fn __to_tracedtest_sirtrace_len(sir_trace: *mut SirTrace) -> size_t {
+unsafe extern "C" fn __untraced_apitest_sirtrace_len(sir_trace: *mut SirTrace) -> size_t {
     (&mut *sir_trace).len()
 }
 
 /// Compile a TIR trace from a SIR trace.
 #[no_mangle]
-unsafe extern "C" fn __to_tracedtest_tirtrace_new<'a, 'm>(
+unsafe extern "C" fn __untraced_apitest_tirtrace_new<'a, 'm>(
     sir_trace: *mut SirTrace,
 ) -> *mut TirTrace<'a, 'm> {
     let sir_trace = &mut *(sir_trace);
@@ -33,7 +33,7 @@ unsafe extern "C" fn __to_tracedtest_tirtrace_new<'a, 'm>(
 
 /// Returns the length of a SIR trace.
 #[no_mangle]
-unsafe extern "C" fn __to_tracedtest_tirtrace_len<'a, 'm>(
+unsafe extern "C" fn __untraced_apitest_tirtrace_len<'a, 'm>(
     tir_trace: *mut TirTrace<'a, 'm>,
 ) -> size_t {
     (*tir_trace).len()
@@ -41,7 +41,7 @@ unsafe extern "C" fn __to_tracedtest_tirtrace_len<'a, 'm>(
 
 /// Returns the human-readable Display string of a TIR trace.
 #[no_mangle]
-unsafe extern "C" fn __to_tracedtest_tirtrace_display<'a, 'm>(
+unsafe extern "C" fn __untraced_apitest_tirtrace_display<'a, 'm>(
     tir_trace: *mut TirTrace<'a, 'm>,
 ) -> *mut c_char {
     let tt = &(*tir_trace);
@@ -52,7 +52,7 @@ unsafe extern "C" fn __to_tracedtest_tirtrace_display<'a, 'm>(
 /// Looks up the TypeId of the return value of the given symbol. The TypeId is returned via the
 /// `ret_tyid` argument.
 #[no_mangle]
-unsafe extern "C" fn __to_tracedtest_body_ret_ty(sym: *const c_char, ret_tyid: *mut TypeId) {
+unsafe extern "C" fn __untraced_apitest_body_ret_ty(sym: *const c_char, ret_tyid: *mut TypeId) {
     let sym = CStr::from_ptr(sym);
     let rv = usize::try_from(sir::RETURN_LOCAL.0).unwrap();
     let tyid = SIR.body(&sym.to_str().unwrap()).unwrap().local_decls[rv].ty();
@@ -61,20 +61,20 @@ unsafe extern "C" fn __to_tracedtest_body_ret_ty(sym: *const c_char, ret_tyid: *
 
 /// Creates a TraceCompiler with default settings.
 #[no_mangle]
-unsafe extern "C" fn __to_tracedtest_tracecompiler_default() -> *mut TraceCompiler {
+unsafe extern "C" fn __untraced_apitest_tracecompiler_default() -> *mut TraceCompiler {
     let tc = Box::new(TraceCompiler::new(Default::default(), Default::default()));
     Box::into_raw(tc)
 }
 
 /// Drop a TraceCompiler.
 #[no_mangle]
-unsafe extern "C" fn __to_tracedtest_tracecompiler_drop(comp: *mut c_void) {
+unsafe extern "C" fn __untraced_apitest_tracecompiler_drop(comp: *mut c_void) {
     Box::from_raw(comp as *mut TraceCompiler);
 }
 
 /// Inserts a local declaration of the specified TypeId into a TraceCompiler.
 #[no_mangle]
-unsafe extern "C" fn __to_tracedtest_tracecompiler_insert_decl(
+unsafe extern "C" fn __untraced_apitest_tracecompiler_insert_decl(
     tc: *mut c_void,
     local: Local,
     local_ty: TypeId,
@@ -87,7 +87,7 @@ unsafe extern "C" fn __to_tracedtest_tracecompiler_insert_decl(
 
 /// Returns a string describing the register allocation of the specified local.
 #[no_mangle]
-unsafe extern "C" fn __to_tracedtest_tracecompiler_local_to_location_str(
+unsafe extern "C" fn __untraced_apitest_tracecompiler_local_to_location_str(
     tc: *mut c_void,
     local: Local,
 ) -> *mut c_char {
@@ -98,7 +98,7 @@ unsafe extern "C" fn __to_tracedtest_tracecompiler_local_to_location_str(
 
 /// Inform a TraceCompiler's register allocator that a local variable is dead.
 #[no_mangle]
-unsafe extern "C" fn __to_tracedtest_tracecompiler_local_dead(
+unsafe extern "C" fn __untraced_apitest_tracecompiler_local_dead(
     tc: *mut TraceCompiler,
     local: Local,
 ) {
@@ -108,14 +108,14 @@ unsafe extern "C" fn __to_tracedtest_tracecompiler_local_dead(
 
 /// Find a symbol's address in the current memory image. Returns NULL if it can't be found.
 #[no_mangle]
-unsafe extern "C" fn __to_tracedtest_find_symbol(sym: *const c_char) -> *mut c_void {
+unsafe extern "C" fn __untraced_apitest_find_symbol(sym: *const c_char) -> *mut c_void {
     find_symbol(CStr::from_ptr(sym).to_str().unwrap()).unwrap_or_else(|_| ptr::null_mut())
 }
 
 /// Interpret a SIR body with the specified interpreter context.
 #[no_mangle]
 #[cfg(feature = "testing")]
-unsafe extern "C" fn __to_tracedtest_interpret_body(body_name: *const c_char, ctx: *mut u8) {
+unsafe extern "C" fn __untraced_apitest_interpret_body(body_name: *const c_char, ctx: *mut u8) {
     let fname = CStr::from_ptr(body_name).to_str().unwrap().to_string();
     let mut si = StopgapInterpreter::from_symbol(fname);
     si.set_interp_ctx(ctx);
@@ -124,14 +124,14 @@ unsafe extern "C" fn __to_tracedtest_interpret_body(body_name: *const c_char, ct
 
 /// Returns the size of the register allocators register pool.
 #[no_mangle]
-unsafe extern "C" fn __to_tracedtest_reg_pool_size() -> usize {
+unsafe extern "C" fn __untraced_apitest_reg_pool_size() -> usize {
     REG_POOL.len()
 }
 
 /// Consumes and compiles the given TIR trace to native code, returning an opaque pointer to the
 /// compiled trace.
 #[no_mangle]
-fn __to_tracedtest_compile_tir_trace(tir_trace: *mut TirTrace) -> *mut CompiledTrace {
+fn __untraced_apitest_compile_tir_trace(tir_trace: *mut TirTrace) -> *mut CompiledTrace {
     let tir_trace = unsafe { Box::from_raw(tir_trace) };
     let compiled_trace = ykcompile::compile_trace(*tir_trace);
     Box::into_raw(Box::new(compiled_trace))

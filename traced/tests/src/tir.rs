@@ -2,7 +2,7 @@
 
 use crate::helpers::{add6, assert_tir, neg_assert_tir};
 use std::hint::black_box;
-use untraced_api::{start_tracing, TirTrace, TracingKind};
+use to_untraced::{start_tracing, TirTrace, TracingKind};
 use ykrt::trace_debug;
 
 #[test]
