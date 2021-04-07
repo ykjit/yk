@@ -129,9 +129,9 @@ fn reg_alloc_always_on_stack() {
     let types = TestTypes::new();
     let mut local_decls = HashMap::new();
 
-    // In a TIR trace, the first two decls are a unit and the interpreter context, which are
-    // handled specially. We populate their slots so that we can acquire regular locals with no
-    // special casing.
+    // In a TIR trace, the first two decls are the return value and the interpreter context
+    // argument, which are handled specially. We populate their slots so that we can acquire
+    // regular locals with no special casing.
     assert!(reg_pool_size() >= 3); // Or we'd spill regardless.
     for i in 0..=1 {
         local_decls.insert(
