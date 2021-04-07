@@ -21,13 +21,13 @@ The `traced` workspace then talks to the `untraced` workspace via an API:
 
 ```
             Traced Workspace                  Untraced Workspace
-+------------------------------------+ +--------------------------------+
-| Interpreter +                      | |                                |
-|             |                      | |                                |
-|             +----> untraced_api +------> to_traced +----> JIT runtime |
-|             |                      | |                                |
-|       Tests +                      | |                                |
-+------------------------------------+ +--------------------------------+
++------------------------------------+ +----------------------------------+
+| Interpreter +                      | |                                  |
+|             |                      | |                                  |
+|             +-----> to_untraced +------> untraced_api +---> JIT runtime |
+|             |                      | |                                  |
+|       Tests +                      | |                                  |
++------------------------------------+ +----------------------------------+
 ```
 
 There are a few implementation details to note:
