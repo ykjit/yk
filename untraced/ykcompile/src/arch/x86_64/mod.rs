@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::process::Command;
 use ykpack::{IRPlace, LocalDecl, SignedIntTy, Ty, TyKind, UnsignedIntTy};
-use yksg::{FrameInfo, StopgapInterpreter};
+use yksg::{IncomingFrame, StopgapInterpreter};
 use yktrace::sir::{INTERP_STEP_ARG, SIR};
 use yktrace::tir::{BinOp, CallOperand, Guard, GuardKind, Local, Statement, TirOp, TirTrace};
 
@@ -334,9 +334,9 @@ fn local_to_reg_name(loc: &Location) -> &'static str {
 // Collection of functions required during a guard failure to instantiate and initialise the
 // stopgap interpreter.
 
-/// Given a pointer to a vector of `FrameInfo`s, creates and returns a boxed StopgapInterpreter.
+/// Given a pointer to a vector of `IncomingFrame`s, creates and returns a boxed StopgapInterpreter.
 /// Consumes `vptr`.
-extern "sysv64" fn new_stopgap(vptr: *mut Vec<FrameInfo>) -> *mut StopgapInterpreter {
+extern "sysv64" fn new_stopgap(vptr: *mut Vec<IncomingFrame>) -> *mut StopgapInterpreter {
     let v = unsafe { Box::from_raw(vptr) };
     let si = StopgapInterpreter::from_frames(*v);
     Box::into_raw(Box::new(si))
@@ -348,20 +348,20 @@ extern "sysv64" fn alloc_live_vars(size: usize, align: usize) -> *mut u8 {
     unsafe { alloc(layout) }
 }
 
-/// Returns a pointer to a boxed empty `Vec<FrameInfo>`, suitable for passing to `push_frames_vec`.
-extern "sysv64" fn new_frames_vec() -> *mut Vec<FrameInfo> {
-    let v: Vec<FrameInfo> = Vec::new();
+/// Returns a pointer to a boxed empty `Vec<IncomingFrame>`, suitable for passing to `push_frames_vec`.
+extern "sysv64" fn new_frames_vec() -> *mut Vec<IncomingFrame> {
+    let v: Vec<IncomingFrame> = Vec::new();
     Box::into_raw(Box::new(v))
 }
 
-/// Construct and push a new `FrameInfo` to the `Vec<FrameInfo>`. `sym_ptr` must be a pointer to a
+/// Construct and push a new `IncomingFrame` to the `Vec<IncomingFrame>`. `sym_ptr` must be a pointer to a
 /// function symbol name (of length `sym_len`) that is guaranteed not to be deallocated or moved.
 /// `locals` is a pointer to a block of memory from `alloc_live_vars`, responsibility for which is
 /// effectively moved to this function (i.e. the caller of `push_frames_vec` should no longer
 /// read/write/free `mem`). Note that this function converts the raw pointer `vptr` into an `&mut`
 /// reference.
 extern "sysv64" fn push_frames_vec(
-    vptr: *mut Vec<FrameInfo>,
+    vptr: *mut Vec<IncomingFrame>,
     sym_ptr: *const u8,
     sym_len: usize,
     bbidx: usize,
@@ -370,7 +370,7 @@ extern "sysv64" fn push_frames_vec(
     let fname =
         unsafe { std::str::from_utf8(std::slice::from_raw_parts(sym_ptr, sym_len)).unwrap() };
     let body = SIR.body(fname).unwrap();
-    let fi = FrameInfo {
+    let fi = IncomingFrame {
         body,
         bbidx,
         locals,

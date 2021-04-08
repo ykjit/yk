@@ -18,7 +18,7 @@ use ykpack::{
 use yktrace::sir::{RETURN_LOCAL, SIR};
 
 /// Stores information needed to recreate stack frames in the StopgapInterpreter.
-pub struct FrameInfo {
+pub struct IncomingFrame {
     /// The body of this frame.
     pub body: Arc<Body>,
     /// Index of the current basic block we are in. When returning from a function call, the
@@ -207,9 +207,9 @@ impl StopgapInterpreter {
         }
     }
 
-    /// Initialise the interpreter from a vector of `FrameInfo`s. Each contains information about
+    /// Initialise the interpreter from a vector of `IncomingFrame`s. Each contains information about
     /// live variables and stack frames, received from a failing guard.
-    pub fn from_frames(v: Vec<FrameInfo>) -> Self {
+    pub fn from_frames(v: Vec<IncomingFrame>) -> Self {
         let mut frames = Vec::new();
         for fi in v.into_iter() {
             let body = &fi.body;
