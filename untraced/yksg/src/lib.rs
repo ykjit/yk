@@ -40,24 +40,25 @@ impl IncomingFrame {
     }
 }
 
-/// Heap allocated memory for writing and reading locals of a stack frame.
+/// A frame's local variables.
 #[derive(Debug)]
-pub(crate) struct LocalMem {
-    /// Pointer to allocated memory containing a frame's locals.
+struct FrameLocals {
+    /// Pointer to malloc'd memory laid out according to the SIR description of this frame's
+    /// function's local variables.
     locals: *mut u8,
-    /// The offset of each Local into locals.
+    /// The offset of each `Local` into `self.locals`.
     offsets: Vec<usize>,
     /// The layout of locals. Needed for deallocating locals upon drop.
     layout: Layout,
 }
 
-impl Drop for LocalMem {
+impl Drop for FrameLocals {
     fn drop(&mut self) {
         unsafe { dealloc(self.locals, self.layout) }
     }
 }
 
-impl LocalMem {
+impl FrameLocals {
     /// Write a constant to the pointer `dst`.
     unsafe fn write_const(&mut self, dst: *mut u8, constant: &Constant) {
         match constant {
@@ -93,7 +94,7 @@ impl LocalMem {
     }
 
     /// Copy over the call arguments from another frame.
-    unsafe fn copy_args(&mut self, args: &[IRPlace], frame: &LocalMem) {
+    unsafe fn copy_args(&mut self, args: &[IRPlace], frame: &FrameLocals) {
         for (i, arg) in args.iter().enumerate() {
             let dst = self.local_ptr(&Local(u32::try_from(i + 1).unwrap()));
             match arg {
@@ -148,7 +149,7 @@ impl LocalMem {
 #[derive(Debug)]
 struct Frame {
     /// This frame's local variables.
-    mem: LocalMem,
+    mem: FrameLocals,
     /// This frame's program counter (which always increments in terms of basic blocks).
     pc: ykpack::BasicBlockIndex,
     /// Body of this stack frame.
@@ -184,7 +185,7 @@ impl StopgapInterpreter {
         for fi in v.into_iter() {
             let body = &fi.body;
             let layout = body.layout();
-            let mem = LocalMem {
+            let mem = FrameLocals {
                 locals: fi.locals,
                 offsets: body.offsets().clone(),
                 layout: Layout::from_size_align(layout.0, layout.1).unwrap(),
@@ -217,7 +218,7 @@ impl StopgapInterpreter {
         let offsets = body.offsets().clone();
         let layout = Layout::from_size_align(size, align).unwrap();
         let locals = unsafe { alloc(layout) };
-        let mem = LocalMem {
+        let mem = FrameLocals {
             locals,
             offsets,
             layout,
@@ -230,12 +231,12 @@ impl StopgapInterpreter {
     }
 
     /// Returns an immutable reference to the currently active locals.
-    fn locals(&self) -> &LocalMem {
+    fn locals(&self) -> &FrameLocals {
         &self.frames.last().unwrap().mem
     }
 
     /// Returns a mutable reference to the currently active locals.
-    fn locals_mut(&mut self) -> &mut LocalMem {
+    fn locals_mut(&mut self) -> &mut FrameLocals {
         &mut self.frames.last_mut().unwrap().mem
     }
 
