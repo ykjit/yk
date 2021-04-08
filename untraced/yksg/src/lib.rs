@@ -188,7 +188,7 @@ macro_rules! make_binop {
 /// symbol name and basic block index needed by the interpreter to continue interpreting after
 /// returning from a function call.
 #[derive(Debug)]
-struct StackFrame {
+struct Frame {
     /// Allocated memory holding live locals.
     mem: LocalMem,
     /// The current basic block index of this frame.
@@ -203,7 +203,7 @@ struct StackFrame {
 /// over.
 pub struct StopgapInterpreter {
     /// Active stack frames (most recent last).
-    frames: Vec<StackFrame>,
+    frames: Vec<Frame>,
     /// Value to be returned by the interpreter.
     rv: bool,
 }
@@ -231,7 +231,7 @@ impl StopgapInterpreter {
                 offsets: body.offsets().clone(),
                 layout: Layout::from_size_align(layout.0, layout.1).unwrap(),
             };
-            let frame = StackFrame {
+            let frame = Frame {
                 mem,
                 bbidx: u32::try_from(fi.bbidx).unwrap(),
                 body: fi.body.clone(),
@@ -251,9 +251,9 @@ impl StopgapInterpreter {
         sg
     }
 
-    /// Given the symbol name of a function, generate a `StackFrame` which allocates the precise
+    /// Given the symbol name of a function, generate a `Frame` which allocates the precise
     /// amount of memory required by the locals used in that function.
-    fn create_frame(sym: &str) -> StackFrame {
+    fn create_frame(sym: &str) -> Frame {
         let body = SIR.body(&sym).unwrap();
         let (size, align) = body.layout();
         let offsets = body.offsets().clone();
@@ -264,7 +264,7 @@ impl StopgapInterpreter {
             offsets,
             layout,
         };
-        StackFrame {
+        Frame {
             mem,
             bbidx: 0,
             body,
