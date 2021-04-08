@@ -144,46 +144,6 @@ impl LocalMem {
     }
 }
 
-/// Binary operations macros.
-macro_rules! make_binop {
-    ($name: ident, $type: ident) => {
-        fn $name(
-            &mut self,
-            dst: &IRPlace,
-            op: &BinOp,
-            opnd1: &IRPlace,
-            opnd2: &IRPlace,
-            checked: bool,
-        ) {
-            let a = $type::try_from(self.read_int(opnd1)).unwrap();
-            let b = $type::try_from(self.read_int(opnd2)).unwrap();
-            let locals = self.locals_mut();
-            let ptr = locals.irplace_to_ptr(dst);
-            let (v, of) = match op {
-                BinOp::Add => a.overflowing_add(b),
-                BinOp::Lt => ($type::from(a < b), false),
-                BinOp::Gt => ($type::from(a > b), false),
-                _ => todo!(),
-            };
-            if checked {
-                // Write overflow result into result tuple.
-                let ty = SIR.ty(&dst.ty());
-                let tty = ty.unwrap_tuple();
-                let flag_off = isize::try_from(tty.fields().offset(1)).unwrap();
-                unsafe {
-                    std::ptr::write::<u8>(ptr.offset(flag_off), u8::from(of));
-                }
-            } else if of {
-                todo!("Raise error.")
-            }
-            let bytes = v.to_ne_bytes();
-            unsafe {
-                std::ptr::copy(bytes.as_ptr(), ptr, bytes.len());
-            }
-        }
-    };
-}
-
 /// An interpreter function frame representing the current state of an executing function.
 #[derive(Debug)]
 struct Frame {
@@ -456,8 +416,6 @@ impl StopgapInterpreter {
         }
     }
 
-    make_binop!(binop_u8, u8);
-
     fn binop(
         &mut self,
         dst: &IRPlace,
@@ -485,4 +443,48 @@ impl StopgapInterpreter {
             e => unreachable!("{:?}", e),
         }
     }
+}
+
+/// Binary operations macros.
+macro_rules! make_binop {
+    ($name: ident, $type: ident) => {
+        fn $name(
+            &mut self,
+            dst: &IRPlace,
+            op: &BinOp,
+            opnd1: &IRPlace,
+            opnd2: &IRPlace,
+            checked: bool,
+        ) {
+            let a = $type::try_from(self.read_int(opnd1)).unwrap();
+            let b = $type::try_from(self.read_int(opnd2)).unwrap();
+            let locals = self.locals_mut();
+            let ptr = locals.irplace_to_ptr(dst);
+            let (v, of) = match op {
+                BinOp::Add => a.overflowing_add(b),
+                BinOp::Lt => ($type::from(a < b), false),
+                BinOp::Gt => ($type::from(a > b), false),
+                _ => todo!(),
+            };
+            if checked {
+                // Write overflow result into result tuple.
+                let ty = SIR.ty(&dst.ty());
+                let tty = ty.unwrap_tuple();
+                let flag_off = isize::try_from(tty.fields().offset(1)).unwrap();
+                unsafe {
+                    std::ptr::write::<u8>(ptr.offset(flag_off), u8::from(of));
+                }
+            } else if of {
+                todo!("Raise error.")
+            }
+            let bytes = v.to_ne_bytes();
+            unsafe {
+                std::ptr::copy(bytes.as_ptr(), ptr, bytes.len());
+            }
+        }
+    };
+}
+
+impl StopgapInterpreter {
+    make_binop!(binop_u8, u8);
 }
