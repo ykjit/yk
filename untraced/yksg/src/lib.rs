@@ -184,14 +184,12 @@ macro_rules! make_binop {
     };
 }
 
-/// An interpreter stack frame, containing allocated memory for the frames locals, and the function
-/// symbol name and basic block index needed by the interpreter to continue interpreting after
-/// returning from a function call.
+/// An interpreter function frame representing the current state of an executing function.
 #[derive(Debug)]
 struct Frame {
-    /// Allocated memory holding live locals.
+    /// This frame's local variables.
     mem: LocalMem,
-    /// The current basic block index of this frame.
+    /// This frame's program counter (which always increments in terms of basic blocks).
     bbidx: ykpack::BasicBlockIndex,
     /// Body of this stack frame.
     body: Arc<Body>,
