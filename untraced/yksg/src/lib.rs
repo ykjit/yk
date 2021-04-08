@@ -185,7 +185,7 @@ impl StopgapInterpreter {
             frames.push(frame);
         }
         let mut sg = StopgapInterpreter { frames, rv: true };
-        let frame = sg.frames.last().unwrap();
+        let frame = sg.peek_frame();
         // Since we start in the block where the guard failed, we immediately skip to the
         // terminator and interpret it to initialise the block where actual interpretation needs to
         // start.
@@ -195,6 +195,16 @@ impl StopgapInterpreter {
             sg.terminator(&body.blocks()[pc].term());
         }
         sg
+    }
+
+    // Return a reference to the most recent frame on the stack.
+    fn peek_frame(&self) -> &Frame {
+        &self.frames.last().unwrap()
+    }
+
+    // Return a mutable reference to the most recent frame on the stack.
+    fn peek_frame_mut(&mut self) -> &mut Frame {
+        self.frames.last_mut().unwrap()
     }
 
     /// Given the symbol name of a function, generate a `Frame` which allocates the precise
@@ -267,7 +277,7 @@ impl StopgapInterpreter {
                 };
 
                 // Initialise the new stack frame.
-                let oldframe = self.frames.last().unwrap();
+                let oldframe = self.peek_frame();
                 let mut newframe = StopgapInterpreter::create_frame(&fname);
                 newframe.copy_args(args, oldframe);
                 self.frames.push(newframe);
@@ -310,7 +320,7 @@ impl StopgapInterpreter {
                 otherwise_bb,
             } => {
                 let val = self.read_int(discr);
-                let frame = self.frames.last_mut().unwrap();
+                let frame = self.peek_frame_mut();
                 frame.pc = *otherwise_bb;
                 for (i, v) in values.iter().enumerate() {
                     if val == *v {
@@ -320,7 +330,7 @@ impl StopgapInterpreter {
                 }
             }
             Terminator::Goto(bb) => {
-                self.frames.last_mut().unwrap().pc = *bb;
+                self.peek_frame_mut().pc = *bb;
             }
             Terminator::Assert {
                 cond,
@@ -331,7 +341,7 @@ impl StopgapInterpreter {
                 if b != *expected {
                     todo!() // FIXME raise error
                 }
-                self.frames.last_mut().unwrap().pc = *target_bb;
+                self.peek_frame_mut().pc = *target_bb;
             }
             t => todo!("{}", t),
         }
@@ -351,7 +361,7 @@ impl StopgapInterpreter {
             };
             return val;
         }
-        let ptr = self.frames.last().unwrap().irplace_to_ptr(src);
+        let ptr = self.peek_frame().irplace_to_ptr(src);
         match &SIR.ty(&src.ty()).kind() {
             TyKind::UnsignedInt(ui) => match ui {
                 UnsignedIntTy::Usize => todo!(),
@@ -369,7 +379,7 @@ impl StopgapInterpreter {
 
     /// Store the IRPlace src in the IRPlace dst in the current frame.
     unsafe fn store(&mut self, dst: &IRPlace, src: &IRPlace) {
-        self.frames.last_mut().unwrap().store(dst, src);
+        self.peek_frame_mut().store(dst, src);
     }
 
     /// Creates a reference to an IRPlace, e.g. `dst = &src`.
@@ -377,7 +387,7 @@ impl StopgapInterpreter {
         match dst {
             IRPlace::Val { .. } | IRPlace::Indirect { .. } => {
                 // Get pointer to src.
-                let frame = &self.frames.last_mut().unwrap();
+                let frame = &self.peek_frame_mut();
                 let src_ptr = frame.irplace_to_ptr(src);
                 let dst_ptr = frame.irplace_to_ptr(dst);
                 unsafe {
@@ -430,7 +440,7 @@ macro_rules! make_binop {
         ) {
             let a = $type::try_from(self.read_int(opnd1)).unwrap();
             let b = $type::try_from(self.read_int(opnd2)).unwrap();
-            let frame = self.frames.last_mut().unwrap();
+            let frame = self.peek_frame_mut();
             let ptr = frame.irplace_to_ptr(dst);
             let (v, of) = match op {
                 BinOp::Add => a.overflowing_add(b),
