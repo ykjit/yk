@@ -58,15 +58,15 @@ mod tests {
             BasicBlock::new(stmts1_b1, dummy_term.clone()),
             BasicBlock::new(stmts1_b2, dummy_term.clone()),
         ];
-        let sir1 = Pack::Body(Body {
-            symbol_name: String::from("symbol1"),
-            blocks: blocks1,
-            flags: BodyFlags::empty(),
-            local_decls: Vec::new(),
-            num_args: 0,
-            layout: (0, 0),
-            offsets: Vec::new(),
-        });
+        let sir1 = Pack::Body(Body::new(
+            String::from("symbol1"),
+            blocks1,
+            BodyFlags::empty(),
+            Vec::new(),
+            0,
+            (0, 0),
+            Vec::new(),
+        ));
 
         let stmts2_b1 = vec![Statement::Nop; 7];
         let stmts2_b2 = vec![Statement::Nop; 200];
@@ -76,15 +76,15 @@ mod tests {
             BasicBlock::new(stmts2_b2, dummy_term.clone()),
             BasicBlock::new(stmts2_b3, dummy_term.clone()),
         ];
-        let sir2 = Pack::Body(Body {
-            symbol_name: String::from("symbol2"),
-            blocks: blocks2,
-            flags: BodyFlags::empty(),
-            local_decls: Vec::new(),
-            num_args: 0,
-            layout: (0, 0),
-            offsets: Vec::new(),
-        });
+        let sir2 = Pack::Body(Body::new(
+            String::from("symbol2"),
+            blocks2,
+            BodyFlags::empty(),
+            Vec::new(),
+            0,
+            (0, 0),
+            Vec::new(),
+        ));
 
         vec![sir1, sir2]
     }

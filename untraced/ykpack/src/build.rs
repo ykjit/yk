@@ -59,22 +59,24 @@ impl SirBuilder {
         let blocks = vec![BasicBlock::new(Vec::new(), Terminator::Unreachable); block_count];
 
         Self {
-            func: Body {
+            func: Body::new(
                 symbol_name,
                 blocks,
                 flags,
-                local_decls: Vec::new(),
+                Vec::new(),
                 num_args,
-                layout: (0, 0),
-                offsets: Vec::new(),
-            },
+                (0, 0),
+                Vec::new(),
+            ),
         }
     }
 
     /// Returns a zero-offset IRPlace for a new SIR local.
     pub fn new_sir_local(&mut self, sirty: TypeId) -> IRPlace {
-        let idx = u32::try_from(self.func.local_decls.len()).unwrap();
-        self.func.local_decls.push(LocalDecl::new(sirty, false));
+        let idx = u32::try_from(self.func.local_decls().len()).unwrap();
+        self.func
+            .local_decls_mut()
+            .push(LocalDecl::new(sirty, false));
         IRPlace::Val {
             local: Local(idx),
             off: 0,
@@ -86,25 +88,28 @@ impl SirBuilder {
     /// directly to the stack and not a register. You can't reference registers.
     pub fn notify_referenced(&mut self, l: Local) {
         let idx = usize::try_from(l.0).unwrap();
-        let slot = self.func.local_decls.get_mut(idx).unwrap();
-        slot.set_is_referenced(true);
+        self.func
+            .local_decls_mut()
+            .get_mut(idx)
+            .unwrap()
+            .set_is_referenced(true);
     }
 
     /// Returns true if there are no basic blocks.
     pub fn is_empty(&self) -> bool {
-        self.func.blocks.len() == 0
+        self.func.blocks().len() == 0
     }
 
     /// Appends a statement to the specified basic block.
     pub fn push_stmt(&mut self, bb: BasicBlockIndex, stmt: Statement) {
-        self.func.blocks[usize::try_from(bb).unwrap()]
+        self.func.blocks_mut()[usize::try_from(bb).unwrap()]
             .stmts_mut()
             .push(stmt);
     }
 
     /// Sets the terminator of the specified block.
     pub fn set_terminator(&mut self, bb: BasicBlockIndex, new_term: Terminator) {
-        let term = self.func.blocks[usize::try_from(bb).unwrap()].term_mut();
+        let term = self.func.blocks_mut()[usize::try_from(bb).unwrap()].term_mut();
         // We should only ever replace the default unreachable terminator assigned at allocation time.
         debug_assert!(*term == Terminator::Unreachable);
         *term = new_term

@@ -55,7 +55,7 @@ unsafe extern "C" fn __untraced_apitest_tirtrace_display<'a, 'm>(
 unsafe extern "C" fn __untraced_apitest_body_ret_ty(sym: *const c_char, ret_tyid: *mut TypeId) {
     let sym = CStr::from_ptr(sym);
     let rv = usize::try_from(sir::RETURN_LOCAL.0).unwrap();
-    let tyid = SIR.body(&sym.to_str().unwrap()).unwrap().local_decls[rv].ty();
+    let tyid = SIR.body(&sym.to_str().unwrap()).unwrap().local_decls()[rv].ty();
     *ret_tyid = tyid;
 }
 

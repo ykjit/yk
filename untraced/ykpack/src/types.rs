@@ -363,13 +363,79 @@ impl Display for LocalDecl {
 /// Each Body maps to exactly one MIR Body.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct Body {
-    pub symbol_name: String,
-    pub blocks: Vec<BasicBlock>,
-    pub flags: BodyFlags,
-    pub local_decls: Vec<LocalDecl>,
-    pub(super) num_args: usize,
-    pub layout: (usize, usize),
-    pub offsets: Vec<usize>,
+    symbol_name: String,
+    blocks: Vec<BasicBlock>,
+    flags: BodyFlags,
+    local_decls: Vec<LocalDecl>,
+    num_args: usize,
+    layout: (usize, usize),
+    offsets: Vec<usize>,
+}
+
+impl Body {
+    pub fn new(
+        symbol_name: String,
+        blocks: Vec<BasicBlock>,
+        flags: BodyFlags,
+        local_decls: Vec<LocalDecl>,
+        num_args: usize,
+        layout: (usize, usize),
+        offsets: Vec<usize>,
+    ) -> Self {
+        Self {
+            symbol_name,
+            blocks,
+            flags,
+            local_decls,
+            num_args,
+            layout,
+            offsets,
+        }
+    }
+
+    pub fn symbol_name(&self) -> &String {
+        &self.symbol_name
+    }
+
+    pub fn blocks(&self) -> &Vec<BasicBlock> {
+        &self.blocks
+    }
+
+    pub fn blocks_mut(&mut self) -> &mut Vec<BasicBlock> {
+        &mut self.blocks
+    }
+
+    pub fn flags(&self) -> BodyFlags {
+        self.flags
+    }
+
+    pub fn local_decls(&self) -> &Vec<LocalDecl> {
+        &self.local_decls
+    }
+
+    pub fn local_decls_mut(&mut self) -> &mut Vec<LocalDecl> {
+        &mut self.local_decls
+    }
+
+    pub fn num_args(&self) -> usize {
+        self.num_args
+    }
+
+    pub fn layout(&self) -> (usize, usize) {
+        self.layout
+    }
+
+    pub fn set_layout(&mut self, size: usize, align: usize) {
+        self.layout = (size, align);
+    }
+
+    pub fn offsets(&self) -> &Vec<usize> {
+        &self.offsets
+    }
+
+    pub fn offsets_mut(&mut self) -> &mut Vec<usize> {
+        &mut self.offsets
+    }
 }
 
 impl Display for Body {

@@ -65,13 +65,13 @@ impl<'a, 'm> TirTrace<'a, 'm> {
             // Ignore yktrace::trace_debug.
             // We don't use the 'do_not_trace' machinery below, as that would require the TraceDebugCall
             // terminator to contain the symbol name, which would be wasteful.
-            if body.flags.contains(BodyFlags::TRACE_DEBUG) {
+            if body.flags().contains(BodyFlags::TRACE_DEBUG) {
                 continue;
             }
 
             // Initialise VarRenamer's accumulator (and thus also set the first offset) to the
             // traces most outer number of locals.
-            rnm.init_acc(body.local_decls.len());
+            rnm.init_acc(body.local_decls().len());
 
             // When adding statements to the trace, we clone them (rather than referencing the
             // statements in the SIR) so that we have the freedom to mutate them later.
@@ -91,7 +91,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
             // times it is called and returned from and only stop ignoring things until we return
             // from the outer-most `do_not_trace` function.
             if let Some(sym) = &dnt_func {
-                match body.blocks[user_bb_idx_usize].term() {
+                match body.blocks()[user_bb_idx_usize].term() {
                     Terminator::Return => {
                         if sym == loc.symbol_name {
                             dnt_count -= 1;
@@ -137,7 +137,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                 // number of assigned variables in the functions outer context. For example, if a
                 // function `bar` is inlined into a function `foo`, and `foo` used 5 variables, then
                 // all variables in `bar` are offset by 5.
-                for stmt in body.blocks[user_bb_idx_usize].stmts().iter() {
+                for stmt in body.blocks()[user_bb_idx_usize].stmts().iter() {
                     let op = match stmt {
                         Statement::MkRef(dst, src) => Statement::MkRef(
                             rnm.rename_irplace(dst, &body),
@@ -155,7 +155,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                             scale: *scale,
                         },
                         Statement::Store(dst, src) => {
-                            if matches!(dst, IRPlace::Val { local, .. } if local == &sir::RETURN_LOCAL && body.flags.contains(BodyFlags::INTERP_STEP))
+                            if matches!(dst, IRPlace::Val { local, .. } if local == &sir::RETURN_LOCAL && body.flags().contains(BodyFlags::INTERP_STEP))
                             {
                                 match src {
                                     IRPlace::Const {
@@ -237,11 +237,11 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                 operand: op,
                 args: _,
                 destination: _,
-            } = body.blocks[user_bb_idx_usize].term()
+            } = body.blocks()[user_bb_idx_usize].term()
             {
                 if let Some(callee_sym) = op.symbol() {
                     if let Some(callee_body) = sir.body(callee_sym) {
-                        if callee_body.flags.contains(BodyFlags::INTERP_STEP) {
+                        if callee_body.flags().contains(BodyFlags::INTERP_STEP) {
                             if in_interp_step {
                                 panic!("recursion into interp_step detected");
                             }
@@ -264,7 +264,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
 
             // Each SIR terminator becomes zero or more TIR statements.
             let mut term_stmts = Vec::new();
-            match body.blocks[user_bb_idx_usize].term() {
+            match body.blocks()[user_bb_idx_usize].term() {
                 Terminator::Call {
                     operand: op,
                     args,
@@ -290,7 +290,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
 
                             // If the function has been annotated with do_not_trace, turn it into a
                             // call.
-                            if callbody.flags.contains(BodyFlags::DO_NOT_TRACE) {
+                            if callbody.flags().contains(BodyFlags::DO_NOT_TRACE) {
                                 dnt_func = Some(callee_sym.to_string());
                                 dnt_count = 1;
                                 term_stmts.push(Statement::Call(op.clone(), newargs, Some(ret_val)))
@@ -302,7 +302,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
 
                                 // Inform VarRenamer about this function's offset, which is equal to the
                                 // number of variables assigned in the outer body.
-                                rnm.enter(callbody.local_decls.len());
+                                rnm.enter(callbody.local_decls().len());
 
                                 // Copy args in.
                                 live_locals.push(HashSet::new());
@@ -334,7 +334,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
                     guard_blocks.pop();
                     live_locals.pop();
 
-                    if body.flags.contains(BodyFlags::INTERP_STEP) {
+                    if body.flags().contains(BodyFlags::INTERP_STEP) {
                         debug_assert!(in_interp_step);
                         in_interp_step = false;
                         entered_call = false;
@@ -368,7 +368,7 @@ impl<'a, 'm> TirTrace<'a, 'm> {
             }
 
             // Convert the block terminator to a guard if necessary.
-            let guard = match body.blocks[user_bb_idx_usize].term() {
+            let guard = match body.blocks()[user_bb_idx_usize].term() {
                 Terminator::Goto(_)
                 | Terminator::Return
                 | Terminator::Drop { .. }
@@ -558,7 +558,7 @@ impl VarRenamer {
         let renamed = Local(local.0 + self.offset);
         self.local_decls.insert(
             renamed,
-            body.local_decls[usize::try_from(local.0).unwrap()].clone(),
+            body.local_decls()[usize::try_from(local.0).unwrap()].clone(),
         );
         self.sir_map.insert(renamed, *local);
         renamed

@@ -211,12 +211,13 @@ impl StopgapInterpreter {
     /// live variables and stack frames, received from a failing guard.
     pub fn from_frames(v: Vec<FrameInfo>) -> Self {
         let mut frames = Vec::new();
-        for fi in v {
+        for fi in v.into_iter() {
             let body = &fi.body;
+            let layout = body.layout();
             let mem = LocalMem {
                 locals: fi.locals,
-                offsets: body.offsets.clone(),
-                layout: Layout::from_size_align(body.layout.0, body.layout.1).unwrap(),
+                offsets: body.offsets().clone(),
+                layout: Layout::from_size_align(layout.0, layout.1).unwrap(),
             };
             let frame = StackFrame {
                 mem,
@@ -233,7 +234,7 @@ impl StopgapInterpreter {
         let body = frame.body.clone();
         let bbidx = usize::try_from(frame.bbidx).unwrap();
         unsafe {
-            sg.terminator(&body.blocks[bbidx].term());
+            sg.terminator(&body.blocks()[bbidx].term());
         }
         sg
     }
@@ -242,8 +243,8 @@ impl StopgapInterpreter {
     /// amount of memory required by the locals used in that function.
     fn create_frame(sym: &str) -> StackFrame {
         let body = SIR.body(&sym).unwrap();
-        let (size, align) = body.layout;
-        let offsets = body.offsets.clone();
+        let (size, align) = body.layout();
+        let offsets = body.offsets().clone();
         let layout = Layout::from_size_align(size, align).unwrap();
         let locals = unsafe { alloc(layout) };
         let mem = LocalMem {
@@ -284,7 +285,7 @@ impl StopgapInterpreter {
     pub unsafe fn interpret(&mut self) -> bool {
         while let Some(frame) = self.frames.last() {
             let body = frame.body.clone();
-            let block = &body.blocks[usize::try_from(frame.bbidx).unwrap()];
+            let block = &body.blocks()[usize::try_from(frame.bbidx).unwrap()];
             for stmt in block.stmts().iter() {
                 match stmt {
                     Statement::MkRef(dst, src) => self.mkref(&dst, &src),
@@ -338,7 +339,7 @@ impl StopgapInterpreter {
                     let body = &curframe.body;
                     // Check the previous frame's call terminator to find out where we have to go
                     // next.
-                    let (dst, bbidx) = match body.blocks[bbidx].term() {
+                    let (dst, bbidx) = match body.blocks()[bbidx].term() {
                         Terminator::Call {
                             operand: _,
                             args: _,
