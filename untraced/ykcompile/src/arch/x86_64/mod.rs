@@ -1468,12 +1468,13 @@ impl TraceCompiler {
                 let sym = block.symbol_name;
                 let bbidx = block.bb_idx;
                 let body = SIR.body(sym).unwrap();
+                let layout = body.layout();
                 let sym_label = sym_labels[i];
 
                 // Allocate memory for the live variables.
                 dynasm!(self.asm
-                    ; mov rdi, i32::try_from(body.layout.0).unwrap()
-                    ; mov rsi, i32::try_from(body.layout.1).unwrap()
+                    ; mov rdi, i32::try_from(layout.0).unwrap()
+                    ; mov rsi, i32::try_from(layout.1).unwrap()
                     ; mov r11, QWORD alloc_live_vars as i64
                     ; call r11
                 );
@@ -1481,8 +1482,9 @@ impl TraceCompiler {
                 for liveloc in &guard.live_locals[i] {
                     let ty = self.local_decls[&liveloc.tir].ty();
                     let size = SIR.ty(&ty).size();
-                    let off = i32::try_from(body.offsets[usize::try_from(liveloc.sir.0).unwrap()])
-                        .unwrap();
+                    let off =
+                        i32::try_from(body.offsets()[usize::try_from(liveloc.sir.0).unwrap()])
+                            .unwrap();
                     let dst_loc = Location::Mem(RegAndOffset {
                         reg: RAX.code(),
                         off,

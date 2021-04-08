@@ -241,7 +241,7 @@ pub fn sir_trace_str(sir: &Sir, trace: &SirTrace, show_blocks: bool) -> String {
 
         let body = sir.body(&loc.symbol_name);
         if let Some(ref body) = body {
-            if body.flags.contains(BodyFlags::INTERP_STEP) {
+            if body.flags().contains(BodyFlags::INTERP_STEP) {
                 write!(res_r, "INTERP_STEP ").unwrap();
             }
         }
@@ -252,7 +252,7 @@ pub fn sir_trace_str(sir: &Sir, trace: &SirTrace, show_blocks: bool) -> String {
                 writeln!(
                     res_r,
                     "{}:",
-                    body.blocks[usize::try_from(loc.bb_idx).unwrap()]
+                    body.blocks()[usize::try_from(loc.bb_idx).unwrap()]
                 )
                 .unwrap();
             } else {
