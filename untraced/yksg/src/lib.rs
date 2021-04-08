@@ -190,7 +190,7 @@ struct Frame {
     /// This frame's local variables.
     mem: LocalMem,
     /// This frame's program counter (which always increments in terms of basic blocks).
-    bbidx: ykpack::BasicBlockIndex,
+    pc: ykpack::BasicBlockIndex,
     /// Body of this stack frame.
     body: Arc<Body>,
 }
@@ -231,7 +231,7 @@ impl StopgapInterpreter {
             };
             let frame = Frame {
                 mem,
-                bbidx: u32::try_from(fi.bbidx).unwrap(),
+                pc: u32::try_from(fi.bbidx).unwrap(),
                 body: fi.body.clone(),
             };
             frames.push(frame);
@@ -242,9 +242,9 @@ impl StopgapInterpreter {
         // terminator and interpret it to initialise the block where actual interpretation needs to
         // start.
         let body = frame.body.clone();
-        let bbidx = usize::try_from(frame.bbidx).unwrap();
+        let pc = usize::try_from(frame.pc).unwrap();
         unsafe {
-            sg.terminator(&body.blocks()[bbidx].term());
+            sg.terminator(&body.blocks()[pc].term());
         }
         sg
     }
@@ -264,7 +264,7 @@ impl StopgapInterpreter {
         };
         Frame {
             mem,
-            bbidx: 0,
+            pc: 0,
             body,
         }
     }
@@ -295,7 +295,7 @@ impl StopgapInterpreter {
     pub unsafe fn interpret(&mut self) -> bool {
         while let Some(frame) = self.frames.last() {
             let body = frame.body.clone();
-            let block = &body.blocks()[usize::try_from(frame.bbidx).unwrap()];
+            let block = &body.blocks()[usize::try_from(frame.pc).unwrap()];
             for stmt in block.stmts().iter() {
                 match stmt {
                     Statement::MkRef(dst, src) => self.mkref(&dst, &src),
@@ -345,11 +345,11 @@ impl StopgapInterpreter {
                 // If there are no more frames left, we are returning from the `interp_step`
                 // function, which means we have reached the control point and are done here.
                 if let Some(curframe) = self.frames.last_mut() {
-                    let bbidx = usize::try_from(curframe.bbidx).unwrap();
+                    let pc = usize::try_from(curframe.pc).unwrap();
                     let body = &curframe.body;
                     // Check the previous frame's call terminator to find out where we have to go
                     // next.
-                    let (dst, bbidx) = match body.blocks()[bbidx].term() {
+                    let (dst, pc) = match body.blocks()[pc].term() {
                         Terminator::Call {
                             operand: _,
                             args: _,
@@ -363,7 +363,7 @@ impl StopgapInterpreter {
                     let dst_ptr = curframe.mem.irplace_to_ptr(&dst);
                     let size = usize::try_from(SIR.ty(&dst.ty()).size()).unwrap();
                     std::ptr::copy(ret_ptr, dst_ptr, size);
-                    curframe.bbidx = bbidx;
+                    curframe.pc = pc;
                 } else {
                     // The return value of `interp_step` tells the meta-tracer whether to stop or
                     // continue running the interpreter.
@@ -379,16 +379,16 @@ impl StopgapInterpreter {
             } => {
                 let val = self.read_int(discr);
                 let frame = self.frames.last_mut().unwrap();
-                frame.bbidx = *otherwise_bb;
+                frame.pc = *otherwise_bb;
                 for (i, v) in values.iter().enumerate() {
                     if val == *v {
-                        frame.bbidx = target_bbs[i];
+                        frame.pc = target_bbs[i];
                         break;
                     }
                 }
             }
             Terminator::Goto(bb) => {
-                self.frames.last_mut().unwrap().bbidx = *bb;
+                self.frames.last_mut().unwrap().pc = *bb;
             }
             Terminator::Assert {
                 cond,
@@ -399,7 +399,7 @@ impl StopgapInterpreter {
                 if b != *expected {
                     todo!() // FIXME raise error
                 }
-                self.frames.last_mut().unwrap().bbidx = *target_bb;
+                self.frames.last_mut().unwrap().pc = *target_bb;
             }
             t => todo!("{}", t),
         }
