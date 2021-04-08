@@ -17,15 +17,27 @@ use ykpack::{
 };
 use yktrace::sir::{RETURN_LOCAL, SIR};
 
-/// Stores information needed to recreate stack frames in the StopgapInterpreter.
+/// When the StopgapInterpreter is called after a guard failure, it is passed a `Vec` of
+/// `IncomingFrame`s from the machine code. These are then converted into other structures more
+/// suitable for interpretation by the StopgapInterpreter.
 pub struct IncomingFrame {
     /// The body of this frame.
-    pub body: Arc<Body>,
+    body: Arc<Body>,
     /// Index of the current basic block we are in. When returning from a function call, the
     /// terminator of this block is were we continue.
-    pub bbidx: usize,
+    bbidx: usize,
     /// Pointer to memory containing the live variables.
-    pub locals: *mut u8,
+    locals: *mut u8,
+}
+
+impl IncomingFrame {
+    pub fn new(body: Arc<Body>, bbidx: usize, locals: *mut u8) -> Self {
+        Self {
+            body,
+            bbidx,
+            locals,
+        }
+    }
 }
 
 /// Heap allocated memory for writing and reading locals of a stack frame.

@@ -370,13 +370,7 @@ extern "sysv64" fn push_frames_vec(
     let fname =
         unsafe { std::str::from_utf8(std::slice::from_raw_parts(sym_ptr, sym_len)).unwrap() };
     let body = SIR.body(fname).unwrap();
-    let fi = IncomingFrame {
-        body,
-        bbidx,
-        locals,
-    };
-    let v = unsafe { &mut *vptr };
-    v.push(fi);
+    unsafe { &mut *vptr }.push(IncomingFrame::new(body, bbidx, locals));
 }
 
 /// Compile a TIR trace.
