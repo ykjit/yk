@@ -40,25 +40,18 @@ impl IncomingFrame {
     }
 }
 
-/// A frame's local variables.
+/// An interpreter function frame representing the current state of an executing function.
 #[derive(Debug)]
-struct FrameLocals {
-    /// Pointer to malloc'd memory laid out according to the SIR description of this frame's
-    /// function's local variables.
+struct Frame {
+    /// This frame's local variables.
     locals: *mut u8,
-    /// The offset of each `Local` into `self.locals`.
-    offsets: Vec<usize>,
-    /// The layout of locals. Needed for deallocating locals upon drop.
-    layout: Layout,
+    /// This frame's program counter (which always increments in terms of basic blocks).
+    pc: ykpack::BasicBlockIndex,
+    /// Body of this stack frame.
+    body: Arc<Body>,
 }
 
-impl Drop for FrameLocals {
-    fn drop(&mut self) {
-        unsafe { dealloc(self.locals, self.layout) }
-    }
-}
-
-impl FrameLocals {
+impl Frame {
     /// Write a constant to the pointer `dst`.
     unsafe fn write_const(&mut self, dst: *mut u8, constant: &Constant) {
         match constant {
@@ -94,12 +87,12 @@ impl FrameLocals {
     }
 
     /// Copy over the call arguments from another frame.
-    unsafe fn copy_args(&mut self, args: &[IRPlace], frame: &FrameLocals) {
+    unsafe fn copy_args(&mut self, args: &[IRPlace], oframe: &Frame) {
         for (i, arg) in args.iter().enumerate() {
             let dst = self.local_ptr(&Local(u32::try_from(i + 1).unwrap()));
             match arg {
                 IRPlace::Val { .. } | IRPlace::Indirect { .. } => {
-                    let src = frame.irplace_to_ptr(arg);
+                    let src = oframe.irplace_to_ptr(arg);
                     let size = usize::try_from(SIR.ty(&arg.ty()).size()).unwrap();
                     std::ptr::copy(src, dst, size);
                 }
@@ -113,7 +106,7 @@ impl FrameLocals {
 
     /// Get the pointer to a Local.
     fn local_ptr(&self, local: &Local) -> *mut u8 {
-        let offset = self.offsets[usize::try_from(local.0).unwrap()];
+        let offset = self.body.offsets()[usize::try_from(local.0).unwrap()];
         unsafe { self.locals.add(offset) }
     }
 
@@ -145,15 +138,16 @@ impl FrameLocals {
     }
 }
 
-/// An interpreter function frame representing the current state of an executing function.
-#[derive(Debug)]
-struct Frame {
-    /// This frame's local variables.
-    mem: FrameLocals,
-    /// This frame's program counter (which always increments in terms of basic blocks).
-    pc: ykpack::BasicBlockIndex,
-    /// Body of this stack frame.
-    body: Arc<Body>,
+impl Drop for Frame {
+    fn drop(&mut self) {
+        let layout = self.body.layout();
+        unsafe {
+            dealloc(
+                self.locals,
+                Layout::from_size_align_unchecked(layout.0, layout.1),
+            );
+        }
+    }
 }
 
 /// The SIR interpreter, also known as stopgap interpreter, is invoked when a guard fails in a
@@ -183,17 +177,10 @@ impl StopgapInterpreter {
     pub fn from_frames(v: Vec<IncomingFrame>) -> Self {
         let mut frames = Vec::new();
         for fi in v.into_iter() {
-            let body = &fi.body;
-            let layout = body.layout();
-            let mem = FrameLocals {
-                locals: fi.locals,
-                offsets: body.offsets().clone(),
-                layout: Layout::from_size_align(layout.0, layout.1).unwrap(),
-            };
             let frame = Frame {
-                mem,
+                locals: fi.locals,
                 pc: u32::try_from(fi.bbidx).unwrap(),
-                body: fi.body.clone(),
+                body: Arc::clone(&fi.body),
             };
             frames.push(frame);
         }
@@ -215,29 +202,13 @@ impl StopgapInterpreter {
     fn create_frame(sym: &str) -> Frame {
         let body = SIR.body(&sym).unwrap();
         let (size, align) = body.layout();
-        let offsets = body.offsets().clone();
         let layout = Layout::from_size_align(size, align).unwrap();
         let locals = unsafe { alloc(layout) };
-        let mem = FrameLocals {
-            locals,
-            offsets,
-            layout,
-        };
         Frame {
-            mem,
+            locals,
             pc: 0,
             body,
         }
-    }
-
-    /// Returns an immutable reference to the currently active locals.
-    fn locals(&self) -> &FrameLocals {
-        &self.frames.last().unwrap().mem
-    }
-
-    /// Returns a mutable reference to the currently active locals.
-    fn locals_mut(&mut self) -> &mut FrameLocals {
-        &mut self.frames.last_mut().unwrap().mem
     }
 
     /// Inserts a pointer to the interpreter context into the `interp_step` frame.
@@ -248,7 +219,6 @@ impl StopgapInterpreter {
             .frames
             .first()
             .unwrap()
-            .mem
             .local_ptr(&yktrace::sir::INTERP_STEP_ARG);
         std::ptr::write::<*mut u8>(ptr as *mut *mut u8, ctx);
     }
@@ -297,9 +267,10 @@ impl StopgapInterpreter {
                 };
 
                 // Initialise the new stack frame.
-                let mut frame = StopgapInterpreter::create_frame(&fname);
-                frame.mem.copy_args(args, self.locals());
-                self.frames.push(frame);
+                let oldframe = self.frames.last().unwrap();
+                let mut newframe = StopgapInterpreter::create_frame(&fname);
+                newframe.copy_args(args, oldframe);
+                self.frames.push(newframe);
             }
             Terminator::Return => {
                 let oldframe = self.frames.pop().unwrap();
@@ -319,16 +290,16 @@ impl StopgapInterpreter {
                         _ => unreachable!(),
                     };
                     // Get a pointer to the return value of the called frame.
-                    let ret_ptr = oldframe.mem.local_ptr(&RETURN_LOCAL);
+                    let ret_ptr = oldframe.local_ptr(&RETURN_LOCAL);
                     // Write the return value to the destination in the previous frame.
-                    let dst_ptr = curframe.mem.irplace_to_ptr(&dst);
+                    let dst_ptr = curframe.irplace_to_ptr(&dst);
                     let size = usize::try_from(SIR.ty(&dst.ty()).size()).unwrap();
                     std::ptr::copy(ret_ptr, dst_ptr, size);
                     curframe.pc = pc;
                 } else {
                     // The return value of `interp_step` tells the meta-tracer whether to stop or
                     // continue running the interpreter.
-                    let ret_ptr = oldframe.mem.local_ptr(&RETURN_LOCAL);
+                    let ret_ptr = oldframe.local_ptr(&RETURN_LOCAL);
                     self.rv = std::ptr::read::<bool>(ret_ptr as *const bool);
                 }
             }
@@ -380,7 +351,7 @@ impl StopgapInterpreter {
             };
             return val;
         }
-        let ptr = self.locals().irplace_to_ptr(src);
+        let ptr = self.frames.last().unwrap().irplace_to_ptr(src);
         match &SIR.ty(&src.ty()).kind() {
             TyKind::UnsignedInt(ui) => match ui {
                 UnsignedIntTy::Usize => todo!(),
@@ -398,7 +369,7 @@ impl StopgapInterpreter {
 
     /// Store the IRPlace src in the IRPlace dst in the current frame.
     unsafe fn store(&mut self, dst: &IRPlace, src: &IRPlace) {
-        self.frames.last_mut().unwrap().mem.store(dst, src);
+        self.frames.last_mut().unwrap().store(dst, src);
     }
 
     /// Creates a reference to an IRPlace, e.g. `dst = &src`.
@@ -406,9 +377,9 @@ impl StopgapInterpreter {
         match dst {
             IRPlace::Val { .. } | IRPlace::Indirect { .. } => {
                 // Get pointer to src.
-                let mem = &self.frames.last_mut().unwrap().mem;
-                let src_ptr = mem.irplace_to_ptr(src);
-                let dst_ptr = mem.irplace_to_ptr(dst);
+                let frame = &self.frames.last_mut().unwrap();
+                let src_ptr = frame.irplace_to_ptr(src);
+                let dst_ptr = frame.irplace_to_ptr(dst);
                 unsafe {
                     std::ptr::write::<*mut u8>(dst_ptr as *mut *mut u8, src_ptr);
                 }
@@ -459,8 +430,8 @@ macro_rules! make_binop {
         ) {
             let a = $type::try_from(self.read_int(opnd1)).unwrap();
             let b = $type::try_from(self.read_int(opnd2)).unwrap();
-            let locals = self.locals_mut();
-            let ptr = locals.irplace_to_ptr(dst);
+            let frame = self.frames.last_mut().unwrap();
+            let ptr = frame.irplace_to_ptr(dst);
             let (v, of) = match op {
                 BinOp::Add => a.overflowing_add(b),
                 BinOp::Lt => ($type::from(a < b), false),
