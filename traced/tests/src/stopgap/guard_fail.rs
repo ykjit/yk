@@ -1,5 +1,7 @@
 //! Testing the stopgap interpreter via guard failures.
 
+extern crate test;
+use self::test::Bencher;
 use to_untraced::{compile_trace, start_tracing, StopgapInterpreter, TracingKind};
 
 #[test]
@@ -217,4 +219,64 @@ fn trace_looping_nested() {
     let mut args = InterpCtx(0);
     unsafe { ct.execute(&mut args) };
     assert_eq!(args.0, 100);
+}
+
+#[bench]
+fn bench_recursion(b: &mut Bencher) {
+    struct InterpCtx {
+        fail_guard: bool,
+        x: u8,
+    }
+
+    // Test that the SIR interpreter can deal with new recursions after a guard failure.
+    fn rec(i: u8) -> u8 {
+        if i < 100 {
+            return rec(i + 1);
+        } else {
+            return i;
+        }
+    }
+
+    #[interp_step]
+    fn interp_step(ctx: &mut InterpCtx) -> bool {
+        if ctx.fail_guard {
+            ctx.x = rec(ctx.x);
+        } else {
+            ctx.x = rec(ctx.x - 1);
+        }
+        true
+    }
+
+    let mut ctx = InterpCtx {
+        fail_guard: false,
+        x: 101,
+    };
+    #[cfg(tracermode = "hw")]
+    let th = start_tracing(TracingKind::HardwareTracing);
+    #[cfg(tracermode = "sw")]
+    let th = start_tracing(TracingKind::SoftwareTracing);
+    interp_step(&mut ctx);
+    let sir_trace = th.stop_tracing().unwrap();
+    let ct = compile_trace(sir_trace).unwrap();
+    ctx = InterpCtx {
+        fail_guard: false,
+        x: 101,
+    };
+    assert!(unsafe { ct.execute(&mut ctx).is_null() });
+    assert_eq!(ctx.x, 100);
+    b.iter(|| {
+        for _ in 0..10 {
+            // Execute the trace with a context that causes a guard to fail.
+            let mut ctx = InterpCtx {
+                fail_guard: true,
+                x: 0,
+            };
+            let ptr = unsafe { ct.execute(&mut ctx) };
+            assert!(!ptr.is_null());
+            // Check that running the interpreter gets us the correct result.
+            let mut si: StopgapInterpreter = StopgapInterpreter(ptr);
+            unsafe { si.interpret() };
+            assert_eq!(ctx.x, 100);
+        }
+    });
 }
