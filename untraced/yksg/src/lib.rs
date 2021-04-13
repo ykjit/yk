@@ -17,35 +17,41 @@ use ykpack::{
 };
 use yktrace::sir::{RETURN_LOCAL, SIR};
 
-/// Stores information needed to recreate stack frames in the StopgapInterpreter.
-pub struct FrameInfo {
+/// When the StopgapInterpreter is called after a guard failure, it is passed a `Vec` of
+/// `IncomingFrame`s from the machine code. These are then converted into other structures more
+/// suitable for interpretation by the StopgapInterpreter.
+pub struct IncomingFrame {
     /// The body of this frame.
-    pub body: Arc<Body>,
+    body: Arc<Body>,
     /// Index of the current basic block we are in. When returning from a function call, the
     /// terminator of this block is were we continue.
-    pub bbidx: usize,
+    bbidx: usize,
     /// Pointer to memory containing the live variables.
-    pub locals: *mut u8,
-}
-
-/// Heap allocated memory for writing and reading locals of a stack frame.
-#[derive(Debug)]
-pub(crate) struct LocalMem {
-    /// Pointer to allocated memory containing a frame's locals.
     locals: *mut u8,
-    /// The offset of each Local into locals.
-    offsets: Vec<usize>,
-    /// The layout of locals. Needed for deallocating locals upon drop.
-    layout: Layout,
 }
 
-impl Drop for LocalMem {
-    fn drop(&mut self) {
-        unsafe { dealloc(self.locals, self.layout) }
+impl IncomingFrame {
+    pub fn new(body: Arc<Body>, bbidx: usize, locals: *mut u8) -> Self {
+        Self {
+            body,
+            bbidx,
+            locals,
+        }
     }
 }
 
-impl LocalMem {
+/// An interpreter function frame representing the current state of an executing function.
+#[derive(Debug)]
+struct Frame {
+    /// This frame's local variables.
+    locals: *mut u8,
+    /// This frame's program counter (which always increments in terms of basic blocks).
+    pc: ykpack::BasicBlockIndex,
+    /// Body of this stack frame.
+    body: Arc<Body>,
+}
+
+impl Frame {
     /// Write a constant to the pointer `dst`.
     unsafe fn write_const(&mut self, dst: *mut u8, constant: &Constant) {
         match constant {
@@ -81,12 +87,12 @@ impl LocalMem {
     }
 
     /// Copy over the call arguments from another frame.
-    unsafe fn copy_args(&mut self, args: &[IRPlace], frame: &LocalMem) {
+    unsafe fn copy_args(&mut self, args: &[IRPlace], oframe: &Frame) {
         for (i, arg) in args.iter().enumerate() {
             let dst = self.local_ptr(&Local(u32::try_from(i + 1).unwrap()));
             match arg {
                 IRPlace::Val { .. } | IRPlace::Indirect { .. } => {
-                    let src = frame.irplace_to_ptr(arg);
+                    let src = oframe.irplace_to_ptr(arg);
                     let size = usize::try_from(SIR.ty(&arg.ty()).size()).unwrap();
                     std::ptr::copy(src, dst, size);
                 }
@@ -100,7 +106,7 @@ impl LocalMem {
 
     /// Get the pointer to a Local.
     fn local_ptr(&self, local: &Local) -> *mut u8 {
-        let offset = self.offsets[usize::try_from(local.0).unwrap()];
+        let offset = self.body.offsets()[usize::try_from(local.0).unwrap()];
         unsafe { self.locals.add(offset) }
     }
 
@@ -132,57 +138,16 @@ impl LocalMem {
     }
 }
 
-/// Binary operations macros.
-macro_rules! make_binop {
-    ($name: ident, $type: ident) => {
-        fn $name(
-            &mut self,
-            dst: &IRPlace,
-            op: &BinOp,
-            opnd1: &IRPlace,
-            opnd2: &IRPlace,
-            checked: bool,
-        ) {
-            let a = $type::try_from(self.read_int(opnd1)).unwrap();
-            let b = $type::try_from(self.read_int(opnd2)).unwrap();
-            let locals = self.locals_mut();
-            let ptr = locals.irplace_to_ptr(dst);
-            let (v, of) = match op {
-                BinOp::Add => a.overflowing_add(b),
-                BinOp::Lt => ($type::from(a < b), false),
-                BinOp::Gt => ($type::from(a > b), false),
-                _ => todo!(),
-            };
-            if checked {
-                // Write overflow result into result tuple.
-                let ty = SIR.ty(&dst.ty());
-                let tty = ty.unwrap_tuple();
-                let flag_off = isize::try_from(tty.fields().offset(1)).unwrap();
-                unsafe {
-                    std::ptr::write::<u8>(ptr.offset(flag_off), u8::from(of));
-                }
-            } else if of {
-                todo!("Raise error.")
-            }
-            let bytes = v.to_ne_bytes();
-            unsafe {
-                std::ptr::copy(bytes.as_ptr(), ptr, bytes.len());
-            }
+impl Drop for Frame {
+    fn drop(&mut self) {
+        let layout = self.body.layout();
+        unsafe {
+            dealloc(
+                self.locals,
+                Layout::from_size_align_unchecked(layout.0, layout.1),
+            );
         }
-    };
-}
-
-/// An interpreter stack frame, containing allocated memory for the frames locals, and the function
-/// symbol name and basic block index needed by the interpreter to continue interpreting after
-/// returning from a function call.
-#[derive(Debug)]
-struct StackFrame {
-    /// Allocated memory holding live locals.
-    mem: LocalMem,
-    /// The current basic block index of this frame.
-    bbidx: ykpack::BasicBlockIndex,
-    /// Body of this stack frame.
-    body: Arc<Body>,
+    }
 }
 
 /// The SIR interpreter, also known as stopgap interpreter, is invoked when a guard fails in a
@@ -191,7 +156,7 @@ struct StackFrame {
 /// over.
 pub struct StopgapInterpreter {
     /// Active stack frames (most recent last).
-    frames: Vec<StackFrame>,
+    frames: Vec<Frame>,
     /// Value to be returned by the interpreter.
     rv: bool,
 }
@@ -207,66 +172,53 @@ impl StopgapInterpreter {
         }
     }
 
-    /// Initialise the interpreter from a vector of `FrameInfo`s. Each contains information about
+    /// Initialise the interpreter from a vector of `IncomingFrame`s. Each contains information about
     /// live variables and stack frames, received from a failing guard.
-    pub fn from_frames(v: Vec<FrameInfo>) -> Self {
+    pub fn from_frames(v: Vec<IncomingFrame>) -> Self {
         let mut frames = Vec::new();
         for fi in v.into_iter() {
-            let body = &fi.body;
-            let layout = body.layout();
-            let mem = LocalMem {
+            let frame = Frame {
                 locals: fi.locals,
-                offsets: body.offsets().clone(),
-                layout: Layout::from_size_align(layout.0, layout.1).unwrap(),
-            };
-            let frame = StackFrame {
-                mem,
-                bbidx: u32::try_from(fi.bbidx).unwrap(),
-                body: fi.body.clone(),
+                pc: u32::try_from(fi.bbidx).unwrap(),
+                body: Arc::clone(&fi.body),
             };
             frames.push(frame);
         }
         let mut sg = StopgapInterpreter { frames, rv: true };
-        let frame = sg.frames.last().unwrap();
+        let frame = sg.peek_frame();
         // Since we start in the block where the guard failed, we immediately skip to the
         // terminator and interpret it to initialise the block where actual interpretation needs to
         // start.
         let body = frame.body.clone();
-        let bbidx = usize::try_from(frame.bbidx).unwrap();
+        let pc = usize::try_from(frame.pc).unwrap();
         unsafe {
-            sg.terminator(&body.blocks()[bbidx].term());
+            sg.terminator(&body.blocks()[pc].term());
         }
         sg
     }
 
-    /// Given the symbol name of a function, generate a `StackFrame` which allocates the precise
+    // Return a reference to the most recent frame on the stack.
+    fn peek_frame(&self) -> &Frame {
+        &self.frames.last().unwrap()
+    }
+
+    // Return a mutable reference to the most recent frame on the stack.
+    fn peek_frame_mut(&mut self) -> &mut Frame {
+        self.frames.last_mut().unwrap()
+    }
+
+    /// Given the symbol name of a function, generate a `Frame` which allocates the precise
     /// amount of memory required by the locals used in that function.
-    fn create_frame(sym: &str) -> StackFrame {
+    fn create_frame(sym: &str) -> Frame {
         let body = SIR.body(&sym).unwrap();
         let (size, align) = body.layout();
-        let offsets = body.offsets().clone();
         let layout = Layout::from_size_align(size, align).unwrap();
         let locals = unsafe { alloc(layout) };
-        let mem = LocalMem {
+        Frame {
             locals,
-            offsets,
-            layout,
-        };
-        StackFrame {
-            mem,
-            bbidx: 0,
+            pc: 0,
             body,
         }
-    }
-
-    /// Returns an immutable reference to the currently active locals.
-    fn locals(&self) -> &LocalMem {
-        &self.frames.last().unwrap().mem
-    }
-
-    /// Returns a mutable reference to the currently active locals.
-    fn locals_mut(&mut self) -> &mut LocalMem {
-        &mut self.frames.last_mut().unwrap().mem
     }
 
     /// Inserts a pointer to the interpreter context into the `interp_step` frame.
@@ -277,7 +229,6 @@ impl StopgapInterpreter {
             .frames
             .first()
             .unwrap()
-            .mem
             .local_ptr(&yktrace::sir::INTERP_STEP_ARG);
         std::ptr::write::<*mut u8>(ptr as *mut *mut u8, ctx);
     }
@@ -285,7 +236,7 @@ impl StopgapInterpreter {
     pub unsafe fn interpret(&mut self) -> bool {
         while let Some(frame) = self.frames.last() {
             let body = frame.body.clone();
-            let block = &body.blocks()[usize::try_from(frame.bbidx).unwrap()];
+            let block = &body.blocks()[usize::try_from(frame.pc).unwrap()];
             for stmt in block.stmts().iter() {
                 match stmt {
                     Statement::MkRef(dst, src) => self.mkref(&dst, &src),
@@ -326,20 +277,21 @@ impl StopgapInterpreter {
                 };
 
                 // Initialise the new stack frame.
-                let mut frame = StopgapInterpreter::create_frame(&fname);
-                frame.mem.copy_args(args, self.locals());
-                self.frames.push(frame);
+                let oldframe = self.peek_frame();
+                let mut newframe = StopgapInterpreter::create_frame(&fname);
+                newframe.copy_args(args, oldframe);
+                self.frames.push(newframe);
             }
             Terminator::Return => {
                 let oldframe = self.frames.pop().unwrap();
                 // If there are no more frames left, we are returning from the `interp_step`
                 // function, which means we have reached the control point and are done here.
                 if let Some(curframe) = self.frames.last_mut() {
-                    let bbidx = usize::try_from(curframe.bbidx).unwrap();
+                    let pc = usize::try_from(curframe.pc).unwrap();
                     let body = &curframe.body;
                     // Check the previous frame's call terminator to find out where we have to go
                     // next.
-                    let (dst, bbidx) = match body.blocks()[bbidx].term() {
+                    let (dst, pc) = match body.blocks()[pc].term() {
                         Terminator::Call {
                             operand: _,
                             args: _,
@@ -348,16 +300,16 @@ impl StopgapInterpreter {
                         _ => unreachable!(),
                     };
                     // Get a pointer to the return value of the called frame.
-                    let ret_ptr = oldframe.mem.local_ptr(&RETURN_LOCAL);
+                    let ret_ptr = oldframe.local_ptr(&RETURN_LOCAL);
                     // Write the return value to the destination in the previous frame.
-                    let dst_ptr = curframe.mem.irplace_to_ptr(&dst);
+                    let dst_ptr = curframe.irplace_to_ptr(&dst);
                     let size = usize::try_from(SIR.ty(&dst.ty()).size()).unwrap();
                     std::ptr::copy(ret_ptr, dst_ptr, size);
-                    curframe.bbidx = bbidx;
+                    curframe.pc = pc;
                 } else {
                     // The return value of `interp_step` tells the meta-tracer whether to stop or
                     // continue running the interpreter.
-                    let ret_ptr = oldframe.mem.local_ptr(&RETURN_LOCAL);
+                    let ret_ptr = oldframe.local_ptr(&RETURN_LOCAL);
                     self.rv = std::ptr::read::<bool>(ret_ptr as *const bool);
                 }
             }
@@ -368,17 +320,17 @@ impl StopgapInterpreter {
                 otherwise_bb,
             } => {
                 let val = self.read_int(discr);
-                let frame = self.frames.last_mut().unwrap();
-                frame.bbidx = *otherwise_bb;
+                let frame = self.peek_frame_mut();
+                frame.pc = *otherwise_bb;
                 for (i, v) in values.iter().enumerate() {
                     if val == *v {
-                        frame.bbidx = target_bbs[i];
+                        frame.pc = target_bbs[i];
                         break;
                     }
                 }
             }
             Terminator::Goto(bb) => {
-                self.frames.last_mut().unwrap().bbidx = *bb;
+                self.peek_frame_mut().pc = *bb;
             }
             Terminator::Assert {
                 cond,
@@ -389,7 +341,7 @@ impl StopgapInterpreter {
                 if b != *expected {
                     todo!() // FIXME raise error
                 }
-                self.frames.last_mut().unwrap().bbidx = *target_bb;
+                self.peek_frame_mut().pc = *target_bb;
             }
             t => todo!("{}", t),
         }
@@ -409,7 +361,7 @@ impl StopgapInterpreter {
             };
             return val;
         }
-        let ptr = self.locals().irplace_to_ptr(src);
+        let ptr = self.peek_frame().irplace_to_ptr(src);
         match &SIR.ty(&src.ty()).kind() {
             TyKind::UnsignedInt(ui) => match ui {
                 UnsignedIntTy::Usize => todo!(),
@@ -427,7 +379,7 @@ impl StopgapInterpreter {
 
     /// Store the IRPlace src in the IRPlace dst in the current frame.
     unsafe fn store(&mut self, dst: &IRPlace, src: &IRPlace) {
-        self.frames.last_mut().unwrap().mem.store(dst, src);
+        self.peek_frame_mut().store(dst, src);
     }
 
     /// Creates a reference to an IRPlace, e.g. `dst = &src`.
@@ -435,9 +387,9 @@ impl StopgapInterpreter {
         match dst {
             IRPlace::Val { .. } | IRPlace::Indirect { .. } => {
                 // Get pointer to src.
-                let mem = &self.frames.last_mut().unwrap().mem;
-                let src_ptr = mem.irplace_to_ptr(src);
-                let dst_ptr = mem.irplace_to_ptr(dst);
+                let frame = &self.peek_frame_mut();
+                let src_ptr = frame.irplace_to_ptr(src);
+                let dst_ptr = frame.irplace_to_ptr(dst);
                 unsafe {
                     std::ptr::write::<*mut u8>(dst_ptr as *mut *mut u8, src_ptr);
                 }
@@ -445,8 +397,6 @@ impl StopgapInterpreter {
             _ => unreachable!(),
         }
     }
-
-    make_binop!(binop_u8, u8);
 
     fn binop(
         &mut self,
@@ -475,4 +425,48 @@ impl StopgapInterpreter {
             e => unreachable!("{:?}", e),
         }
     }
+}
+
+/// Binary operations macros.
+macro_rules! make_binop {
+    ($name: ident, $type: ident) => {
+        fn $name(
+            &mut self,
+            dst: &IRPlace,
+            op: &BinOp,
+            opnd1: &IRPlace,
+            opnd2: &IRPlace,
+            checked: bool,
+        ) {
+            let a = $type::try_from(self.read_int(opnd1)).unwrap();
+            let b = $type::try_from(self.read_int(opnd2)).unwrap();
+            let frame = self.peek_frame_mut();
+            let ptr = frame.irplace_to_ptr(dst);
+            let (v, of) = match op {
+                BinOp::Add => a.overflowing_add(b),
+                BinOp::Lt => ($type::from(a < b), false),
+                BinOp::Gt => ($type::from(a > b), false),
+                _ => todo!(),
+            };
+            if checked {
+                // Write overflow result into result tuple.
+                let ty = SIR.ty(&dst.ty());
+                let tty = ty.unwrap_tuple();
+                let flag_off = isize::try_from(tty.fields().offset(1)).unwrap();
+                unsafe {
+                    std::ptr::write::<u8>(ptr.offset(flag_off), u8::from(of));
+                }
+            } else if of {
+                todo!("Raise error.")
+            }
+            let bytes = v.to_ne_bytes();
+            unsafe {
+                std::ptr::copy(bytes.as_ptr(), ptr, bytes.len());
+            }
+        }
+    };
+}
+
+impl StopgapInterpreter {
+    make_binop!(binop_u8, u8);
 }
