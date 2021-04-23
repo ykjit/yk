@@ -88,14 +88,6 @@ impl From<PerfPTCError> for HWTracerError {
 }
 
 // FFI prototypes.
-//
-// XXX Rust bug. link_args always reported unused.
-// https://github.com/rust-lang/rust/issues/29596#issuecomment-310288094
-//
-// XXX Cargo bug(?).
-// Linker flags in build.rs ignored for the testing target. We must use `link_args` instead.
-#[allow(unused_attributes)]
-#[link_args = "-lipt"]
 extern "C" {
     // collect.c
     fn perf_pt_init_tracer(conf: *const PerfPTConfig, err: *mut PerfPTCError) -> *mut c_void;

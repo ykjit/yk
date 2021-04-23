@@ -39,7 +39,7 @@ fn main() {
 
     for i in 1..4 {
         thr_tracer.start_tracing().unwrap_or_else(|e| {
-            panic!(format!("Failed to start tracer: {}", e));
+            panic!("Failed to start tracer: {}", e);
         });
         let res = work();
         let trace = thr_tracer.stop_tracing().unwrap();
