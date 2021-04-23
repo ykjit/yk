@@ -1,7 +1,5 @@
-# This workspace contains only the build system.
 [workspace]
 members = [
-    "xtask",
+    "ykrt",
+    "yktrace",
 ]
-
-exclude = ["traced", "untraced" ]

@@ -1,8 +1,0 @@
-[package]
-name = "xtask"
-version = "0.1.0"
-authors = ["The Yorick Developers"]
-edition = "2018"
-
-[dependencies]
-regex = "1.4.3"
