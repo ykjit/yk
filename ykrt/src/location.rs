@@ -2,7 +2,6 @@
 
 use std::{
     convert::TryFrom,
-    marker::PhantomData,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -29,7 +28,7 @@ use yktrace::{CompiledTrace, ThreadTracer};
 /// mechanism is for every bytecode or AST node to have its own `Location` (even for bytecodes or
 /// nodes that can't be control points).
 #[derive(Debug)]
-pub struct Location<I> {
+pub struct Location {
     // A Location is a state machine which operates as follows (where Counting is the start
     // state):
     //
@@ -93,52 +92,43 @@ pub struct Location<I> {
     // are directed to https://github.com/Amanieu/parking_lot/blob/master/src/raw_mutex.rs#L33 for
     // a more precise definition.
     state: AtomicUsize,
-    phantom: PhantomData<I>,
 }
 
-impl<I> Location<I> {
+impl Location {
     /// Create a new location.
     pub fn new() -> Self {
         // Locations start in the counting state with a count of 0.
         Self {
-            state: AtomicUsize::new(State::<I>::new().x),
-            phantom: PhantomData,
+            state: AtomicUsize::new(State::new().x),
         }
     }
 
     /// Return this Location's internal state.
-    pub(super) fn load(&self, order: Ordering) -> State<I> {
+    pub(super) fn load(&self, order: Ordering) -> State {
         State {
             x: self.state.load(order),
-            marker: PhantomData,
         }
     }
 
     pub(super) fn compare_exchange_weak(
         &self,
-        current: State<I>,
-        new: State<I>,
+        current: State,
+        new: State,
         success: Ordering,
         failure: Ordering,
-    ) -> Result<State<I>, State<I>> {
+    ) -> Result<State, State> {
         match self
             .state
             .compare_exchange_weak(current.x, new.x, success, failure)
         {
-            Ok(x) => Ok(State {
-                x,
-                marker: PhantomData,
-            }),
-            Err(x) => Err(State {
-                x,
-                marker: PhantomData,
-            }),
+            Ok(x) => Ok(State { x }),
+            Err(x) => Err(State { x }),
         }
     }
 
     /// Locks this `State` with `Acquire` ordering. If the location was in, or moves to, the
     /// Counting state this will return `Err`.
-    pub(super) fn lock(&self) -> Result<State<I>, ()> {
+    pub(super) fn lock(&self) -> Result<State, ()> {
         {
             let ls = self.load(Ordering::Relaxed);
             if ls.is_counting() {
@@ -269,7 +259,7 @@ impl<I> Location<I> {
     }
 
     /// Try obtaining the lock, returning the new `State` if successful.
-    pub(super) fn try_lock(&self) -> Result<State<I>, ()> {
+    pub(super) fn try_lock(&self) -> Result<State, ()> {
         let mut ls = self.load(Ordering::Relaxed);
         loop {
             if ls.is_locked() {
@@ -284,7 +274,7 @@ impl<I> Location<I> {
     }
 }
 
-impl<I> Drop for Location<I> {
+impl Drop for Location {
     fn drop(&mut self) {
         let ls = self.load(Ordering::Relaxed);
         if !ls.is_counting() {
@@ -310,33 +300,28 @@ const TOKEN_NORMAL: UnparkToken = UnparkToken(0);
 const TOKEN_HANDOFF: UnparkToken = UnparkToken(1);
 
 #[derive(PartialEq, Eq, Debug)]
-pub(super) struct State<I> {
+pub(super) struct State {
     x: usize,
-    marker: PhantomData<I>,
 }
 
-impl<I> Copy for State<I> {}
+impl Copy for State {}
 
-impl<I> Clone for State<I> {
-    fn clone(&self) -> State<I> {
+impl Clone for State {
+    fn clone(&self) -> State {
         *self
     }
 }
 
-impl<I> State<I> {
+impl State {
     /// Return a new `State` in the counting phase with a count 0.
     pub(super) fn new() -> Self {
         State {
             x: STATE_IS_COUNTING,
-            marker: PhantomData,
         }
     }
 
     fn from_usize(x: usize) -> Self {
-        State {
-            x,
-            marker: PhantomData,
-        }
+        State { x }
     }
 
     pub(super) fn is_locked(&self) -> bool {
@@ -362,41 +347,37 @@ impl<I> State<I> {
     /// If this `State` is not counting, return its `HotLocation`. It is undefined behaviour to
     /// call this function if this `State` is in the counting phase and/or if this `State` is not
     /// locked.
-    pub(super) unsafe fn hot_location(&self) -> &mut HotLocation<I> {
+    pub(super) unsafe fn hot_location(&self) -> &mut HotLocation {
         debug_assert!(!self.is_counting());
         //debug_assert!(self.is_locked());
         &mut *((self.x & !STATE_TAG) as *mut _)
     }
 
     /// Return a version of this `State` with the locked bit set.
-    pub(super) fn with_lock(&self) -> State<I> {
+    pub(super) fn with_lock(&self) -> State {
         State {
             x: self.x | STATE_IS_LOCKED,
-            marker: PhantomData,
         }
     }
 
     /// Return a version of this `State` with the locked bit unset.
-    fn with_unlock(&self) -> State<I> {
+    fn with_unlock(&self) -> State {
         State {
             x: self.x & !STATE_IS_LOCKED,
-            marker: PhantomData,
         }
     }
 
     /// Return a version of this `State` with the parked bit set.
-    fn with_parked(&self) -> State<I> {
+    fn with_parked(&self) -> State {
         State {
             x: self.x | STATE_IS_PARKED,
-            marker: PhantomData,
         }
     }
 
     /// Return a version of this `State` with the parked bit unset.
-    fn with_unparked(&self) -> State<I> {
+    fn with_unparked(&self) -> State {
         State {
             x: self.x & !STATE_IS_PARKED,
-            marker: PhantomData,
         }
     }
 
@@ -407,19 +388,17 @@ impl<I> State<I> {
         debug_assert_eq!(count << STATE_NUM_BITS >> STATE_NUM_BITS, count);
         State {
             x: (self.x & STATE_TAG) | (usize::try_from(count).unwrap() << STATE_NUM_BITS),
-            marker: PhantomData,
         }
     }
 
     /// Set this `State`'s `HotLocation`. It is undefined behaviour for this `State` to already
     /// have a `HotLocation`.
-    pub(super) fn with_hotlocation(&self, hl_ptr: *mut HotLocation<I>) -> Self {
+    pub(super) fn with_hotlocation(&self, hl_ptr: *mut HotLocation) -> Self {
         debug_assert!(self.is_counting());
         let hl_ptr = hl_ptr as usize;
         debug_assert_eq!(hl_ptr & !STATE_TAG, hl_ptr);
         State {
             x: (self.x & (STATE_TAG & !STATE_IS_COUNTING)) | hl_ptr,
-            marker: PhantomData,
         }
     }
 }
@@ -430,9 +409,9 @@ pub(super) struct ThreadIdInner;
 
 /// A `Location`'s non-counting states.
 #[derive(EnumDiscriminants)]
-pub(super) enum HotLocation<I> {
-    Compiled(Box<CompiledTrace<I>>),
-    Compiling(Arc<Mutex<Option<Box<CompiledTrace<I>>>>>),
+pub(super) enum HotLocation {
+    Compiled(Box<CompiledTrace>),
+    Compiling(Arc<Mutex<Option<Box<CompiledTrace>>>>),
     DontTrace,
     Tracing(Option<(Arc<ThreadIdInner>, ThreadTracer)>),
 }

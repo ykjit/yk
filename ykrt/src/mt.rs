@@ -262,39 +262,20 @@ impl MTThread {
     }
 
     /// Attempt to execute a compiled trace for location `loc`.
-    pub fn control_point<S, I: Send + 'static>(
-        &mut self,
-        loc: Option<&Location<I>>,
-        step_fn: S,
-        ctx: &mut I,
-    ) -> bool
-    where
-        S: Fn(&mut I) -> bool,
-    {
+    pub fn control_point(&mut self, loc: Option<&Location>) {
         // If a loop can start at this position then update the location and potentially start/stop
         // this thread's tracer.
         if let Some(loc) = loc {
             // FIXME transition_location() may execute a trace, in which case we shouldn't execute
             // the step_fn -- anyway the step_fn design is going to be changed too.
-            self.transition_location::<I>(loc);
+            self.transition_location(loc);
         }
-        step_fn(ctx)
-    }
-
-    /// Call the compiled trace code.
-    /// This is separate from the control point so as to make it easy to get a GDB break point
-    /// immediately before our trace code. It is also named in such a way that `b exec_trace` will
-    /// break at all possible entry points to trace code (there is another one in `CompiledTrace`).
-    #[cfg(debug_assertions)]
-    fn exec_trace<I>(&mut self, func: fn(&mut I), ctx: &mut I) {
-        func(ctx)
     }
 
     /// `Location`s represent a statemachine: this function transitions to the next state (which
     /// may be the same as the previous state!). If this results in a compiled trace, it returns
     /// `Some(pointer_to_trace_function)`.
-    /// // FIXME this was added during the
-    fn transition_location<I: Send + 'static>(&mut self, loc: &Location<I>) {
+    fn transition_location(&mut self, loc: &Location) {
         let mut ls = loc.load(Ordering::Relaxed);
 
         if ls.is_counting() {
@@ -481,11 +462,7 @@ impl MTThread {
     }
 
     /// Add a compilation job for `sir` to the global work queue.
-    fn queue_compile_job<I: 'static>(
-        &self,
-        trace: IRTrace,
-        mtx: Arc<Mutex<Option<Box<CompiledTrace<I>>>>>,
-    ) {
+    fn queue_compile_job(&self, trace: IRTrace, mtx: Arc<Mutex<Option<Box<CompiledTrace>>>>) {
         let f = Box::new(move || {
             // FIXME compile IR trace to executable code here.
             let compiled = todo!();
@@ -543,7 +520,7 @@ impl MTThreadInner {
 //    use super::*;
 //    use crate::location::{HotLocationDiscriminants, State};
 //
-//    fn hotlocation_discriminant<I>(loc: &Location<I>) -> Option<HotLocationDiscriminants> {
+//    fn hotlocation_discriminant(loc: &Location) -> Option<HotLocationDiscriminants> {
 //        match loc.lock() {
 //            Ok(ls) => {
 //                let x = HotLocationDiscriminants::from(&*unsafe { ls.hot_location() });

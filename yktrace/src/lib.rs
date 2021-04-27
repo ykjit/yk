@@ -2,7 +2,6 @@
 
 mod errors;
 mod hwt;
-use std::marker::PhantomData;
 
 pub use errors::InvalidTraceError;
 
@@ -51,12 +50,10 @@ impl IRTrace {
 }
 
 /// Binary executable trace code.
-pub struct CompiledTrace<I> {
-    _pd: PhantomData<I>,
-}
+pub struct CompiledTrace {}
 
-unsafe impl<I> Send for CompiledTrace<I> {}
-unsafe impl<I> Sync for CompiledTrace<I> {}
+unsafe impl Send for CompiledTrace {}
+unsafe impl Sync for CompiledTrace {}
 
 /// Represents a thread which is currently tracing.
 pub struct ThreadTracer {
