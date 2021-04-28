@@ -6,24 +6,21 @@
 // Rust's POV.
 #![allow(unreachable_code, unused_variables, dead_code)]
 
-#[cfg(test)]
-use std::time::Duration;
 use std::{
+    cell::Cell,
     cmp,
     collections::VecDeque,
-    error::Error,
-    io,
     marker::PhantomData,
     ptr,
-    rc::Rc,
     sync::{
-        atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
+        atomic::{AtomicU32, AtomicUsize, Ordering},
         Arc,
     },
-    thread::{self, JoinHandle},
+    thread,
 };
 
 use num_cpus;
+use once_cell::sync::Lazy;
 use parking_lot::{Condvar, Mutex, MutexGuard};
 use parking_lot_core::SpinWait;
 
@@ -40,56 +37,8 @@ pub type HotThreshold = u32;
 type AtomicHotThreshold = AtomicU32;
 const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
 
-/// Configure a meta-tracer. Note that a process can only have one meta-tracer active at one point.
-pub struct MTBuilder {
-    hot_threshold: HotThreshold,
-    /// The maximum number of simultaneous worker (e.g. compilation) threads.
-    max_worker_threads: usize,
-    /// The kind of tracer to use.
-    tracing_kind: TracingKind,
-}
-
-impl MTBuilder {
-    /// Create a meta-tracer with default parameters.
-    pub fn new() -> Result<Self, Box<dyn Error>> {
-        Ok(Self {
-            hot_threshold: DEFAULT_HOT_THRESHOLD,
-            max_worker_threads: cmp::max(1, num_cpus::get() - 1),
-            tracing_kind: TracingKind::default(),
-        })
-    }
-
-    /// Consume the `MTBuilder` and create a meta-tracer, returning the
-    /// [`MTThread`](struct.MTThread.html) representing the current thread.
-    pub fn build(self) -> MTThread {
-        MTInner::init(
-            self.hot_threshold,
-            self.max_worker_threads,
-            self.tracing_kind,
-        )
-    }
-
-    /// Change this meta-tracer builder's `hot_threshold` value. Returns `Ok` if `hot_threshold` is
-    /// an acceptable value or `Err` otherwise.
-    pub fn hot_threshold(mut self, hot_threshold: HotThreshold) -> Result<Self, ()> {
-        self.hot_threshold = hot_threshold;
-        Ok(self)
-    }
-
-    /// Sets the maximum number of worker threads to `max(1, num)`. Defaults to `max(1,
-    /// num_cpus::get() - 1)`.
-    pub fn max_worker_threads(mut self, num: usize) -> Self {
-        self.max_worker_threads = cmp::max(1, num);
-        self
-    }
-
-    /// Select the kind of tracing to use. Returns `Ok` if the run-time environment is capable of
-    /// using `TracingKind` or `Err` otherwise.
-    pub fn tracing_kind(mut self, tracing_kind: TracingKind) -> Result<Self, ()> {
-        self.tracing_kind = tracing_kind;
-        Ok(self)
-    }
-}
+static GLOBAL_MT: Lazy<MT> = Lazy::new(|| MT::new());
+thread_local! {static THREAD_MTTHREAD: MTThread = MTThread::new();}
 
 #[derive(Clone)]
 /// A meta-tracer. Note that this is conceptually a "front-end" to the actual meta-tracer akin to
@@ -99,6 +48,24 @@ pub struct MT {
 }
 
 impl MT {
+    pub fn global() -> &'static Self {
+        &*GLOBAL_MT
+    }
+
+    fn new() -> Self {
+        let inner = MTInner {
+            hot_threshold: AtomicHotThreshold::new(DEFAULT_HOT_THRESHOLD),
+            job_queue: (Condvar::new(), Mutex::new(VecDeque::new())),
+            active_user_threads: AtomicUsize::new(1),
+            max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
+            active_worker_threads: AtomicUsize::new(0),
+            tracing_kind: TracingKind::default(),
+        };
+        Self {
+            inner: Arc::new(inner),
+        }
+    }
+
     /// Return this meta-tracer's hot threshold.
     pub fn hot_threshold(&self) -> HotThreshold {
         self.inner.hot_threshold.load(Ordering::Relaxed)
@@ -112,28 +79,6 @@ impl MT {
     /// Return the kind of tracing that this meta-tracer is using.
     pub fn tracing_kind(&self) -> TracingKind {
         self.inner.tracing_kind
-    }
-
-    /// Create a new thread that can be used in the meta-tracer: the new thread that is created is
-    /// handed a [`MTThread`](struct.MTThread.html) from which the `MT` itself can be accessed.
-    pub fn spawn<F, T>(&self, f: F) -> io::Result<JoinHandle<T>>
-    where
-        F: FnOnce(MTThread) -> T + Send + 'static,
-        T: Send + 'static,
-    {
-        let mt_cl = self.clone();
-        thread::Builder::new().spawn(move || {
-            mt_cl
-                .inner
-                .active_user_threads
-                .fetch_add(1, Ordering::Relaxed);
-            let r = f(MTThreadInner::init(mt_cl.clone()));
-            mt_cl
-                .inner
-                .active_user_threads
-                .fetch_sub(1, Ordering::Relaxed);
-            r
-        })
     }
 
     /// Queue `job` to be run on a worker thread.
@@ -173,109 +118,24 @@ impl MT {
             });
         }
     }
-}
-
-impl Drop for MT {
-    fn drop(&mut self) {
-        MT_ACTIVE.store(false, Ordering::Relaxed);
-    }
-}
-
-/// The innards of a meta-tracer.
-struct MTInner {
-    hot_threshold: AtomicHotThreshold,
-    /// The number of threads currently running the user's interpreter (directly or via JITed
-    /// code).
-    active_user_threads: AtomicUsize,
-    /// The ordered queue of compilation worker functions.
-    job_queue: (Condvar, Mutex<VecDeque<Box<dyn FnOnce() + Send>>>),
-    /// The hard cap on the number of worker threads.
-    max_worker_threads: AtomicUsize,
-    /// How many worker threads are currently running. Note that this may temporarily be `>`
-    /// [`max_worker_threads`].
-    active_worker_threads: AtomicUsize,
-    tracing_kind: TracingKind,
-}
-
-/// It's only safe to have one `MT` instance active at a time.
-static MT_ACTIVE: AtomicBool = AtomicBool::new(false);
-
-impl MTInner {
-    /// Create a new `MT`, wrapped immediately in an [`MTThread`](struct.MTThread.html).
-    fn init(
-        hot_threshold: HotThreshold,
-        max_worker_threads: usize,
-        tracing_kind: TracingKind,
-    ) -> MTThread {
-        // A process can only have a single MT instance.
-
-        // In non-testing, we panic if the user calls this method while an MT instance is active.
-        #[cfg(not(test))]
-        {
-            if MT_ACTIVE.swap(true, Ordering::Relaxed) {
-                panic!("Only one MT can be active at once.");
-            }
-        }
-
-        // In testing, we simply sleep until the other MT instance has gone away: this has the
-        // effect of serialising tests which use MT (but allowing other tests to run in parallel).
-        #[cfg(test)]
-        {
-            loop {
-                if !MT_ACTIVE.swap(true, Ordering::Relaxed) {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(10));
-            }
-        }
-
-        let mtc = Self {
-            hot_threshold: AtomicHotThreshold::new(hot_threshold),
-            job_queue: (Condvar::new(), Mutex::new(VecDeque::new())),
-            active_user_threads: AtomicUsize::new(1),
-            max_worker_threads: AtomicUsize::new(max_worker_threads),
-            active_worker_threads: AtomicUsize::new(0),
-            tracing_kind,
-        };
-        let mt = MT {
-            inner: Arc::new(mtc),
-        };
-        MTThreadInner::init(mt)
-    }
-}
-
-/// A meta-tracer aware thread. Note that this is conceptually a "front-end" to the actual
-/// meta-tracer thread akin to an `Rc`: this struct can be freely `clone()`d without duplicating
-/// the underlying meta-tracer thread. Note that this struct is neither `Send` nor `Sync`: it
-/// can only be accessed from within a single thread.
-#[derive(Clone)]
-pub struct MTThread {
-    inner: Rc<MTThreadInner>,
-    // Raw pointers are neither send nor sync.
-    _dont_send_or_sync_me: PhantomData<*mut ()>,
-}
-
-impl MTThread {
-    /// Return a meta-tracer [`MT`](struct.MT.html) struct.
-    pub fn mt(&self) -> &MT {
-        &self.inner.mt
-    }
 
     /// Attempt to execute a compiled trace for location `loc`.
-    pub fn control_point(&mut self, loc: Option<&Location>) {
+    pub fn control_point(&self, loc: Option<&Location>) {
         // If a loop can start at this position then update the location and potentially start/stop
         // this thread's tracer.
         if let Some(loc) = loc {
             // FIXME transition_location() may execute a trace, in which case we shouldn't execute
             // the step_fn -- anyway the step_fn design is going to be changed too.
-            self.transition_location(loc);
+            THREAD_MTTHREAD.with(|mtt| {
+                self.transition_location(mtt, loc);
+            });
         }
     }
 
     /// `Location`s represent a statemachine: this function transitions to the next state (which
     /// may be the same as the previous state!). If this results in a compiled trace, it returns
     /// `Some(pointer_to_trace_function)`.
-    fn transition_location(&mut self, loc: &Location) {
+    fn transition_location(&self, mtt: &MTThread, loc: &Location) {
         let mut ls = loc.load(Ordering::Relaxed);
 
         if ls.is_counting() {
@@ -283,7 +143,7 @@ impl MTThread {
             debug_assert!(!ls.is_parked());
 
             let count = ls.count();
-            if count < self.inner.hot_threshold {
+            if count < self.hot_threshold() {
                 // Try incrementing this location's hot count. We make no guarantees that this will
                 // succeed because under heavy contention we can end up racing with many other
                 // threads and it's not worth our time to halt execution merely to have an accurate
@@ -321,7 +181,7 @@ impl MTThread {
                 }
                 return;
             } else {
-                if self.inner.tracing.is_some() {
+                if mtt.tracing.get().is_some() {
                     // This thread is already tracing another Location, so either another
                     // thread needs to trace this Location or this thread needs to wait
                     // until the current round of tracing has completed. Either way,
@@ -346,12 +206,11 @@ impl MTThread {
                         Ok(_) => {
                             // We've initialised this Location and obtained the lock, so we can now
                             // start tracing for real.
-                            let tid = Arc::clone(&self.inner.tid);
-                            let tt = start_tracing(self.inner.tracing_kind);
+                            let tid = Arc::clone(&mtt.tid);
+                            let tt = start_tracing(self.tracing_kind());
                             *unsafe { new_ls.hot_location() } =
                                 HotLocation::Tracing(Some((tid, tt)));
-                            Rc::get_mut(&mut self.inner).unwrap().tracing =
-                                Some(hl_ptr as *const ());
+                            mtt.tracing.set(Some(hl_ptr as *const ()));
                             loc.unlock();
                             return;
                         }
@@ -376,7 +235,7 @@ impl MTThread {
                 Err(_) => {
                     // If this thread is tracing we need to grab the lock so that we can stop
                     // tracing, otherwise we return to the interpreter.
-                    if self.inner.tracing.is_none() {
+                    if mtt.tracing.get().is_none() {
                         return;
                     }
                     match loc.lock() {
@@ -415,7 +274,7 @@ impl MTThread {
                     return;
                 }
                 HotLocation::Tracing(opt) => {
-                    match self.inner.tracing {
+                    match mtt.tracing.get() {
                         Some(other_hl_ptr) => {
                             // This thread is tracing something...
                             if !ptr::eq(hl_ptr, other_hl_ptr) {
@@ -472,38 +331,48 @@ impl MTThread {
             // again. In such a case, the memory has, in essence, leaked.
         });
 
-        self.inner.mt.queue_job(f);
+        self.queue_job(f);
     }
 }
 
-/// The innards of a meta-tracer thread.
-struct MTThreadInner {
-    mt: MT,
+/// The innards of a meta-tracer.
+struct MTInner {
+    hot_threshold: AtomicHotThreshold,
+    /// The number of threads currently running the user's interpreter (directly or via JITed
+    /// code).
+    active_user_threads: AtomicUsize,
+    /// The ordered queue of compilation worker functions.
+    job_queue: (Condvar, Mutex<VecDeque<Box<dyn FnOnce() + Send>>>),
+    /// The hard cap on the number of worker threads.
+    max_worker_threads: AtomicUsize,
+    /// How many worker threads are currently running. Note that this may temporarily be `>`
+    /// [`max_worker_threads`].
+    active_worker_threads: AtomicUsize,
+    tracing_kind: TracingKind,
+}
+
+/// A meta-tracer aware thread. Note that this is conceptually a "front-end" to the actual
+/// meta-tracer thread akin to an `Rc`: this struct can be freely `clone()`d without duplicating
+/// the underlying meta-tracer thread. Note that this struct is neither `Send` nor `Sync`: it
+/// can only be accessed from within a single thread.
+pub struct MTThread {
     /// An Arc whose pointer address uniquely identifies this thread. When a Location is traced,
     /// this Arc's strong count will be incremented. If, after this thread drops, this Arc's strong
     /// count remains > 0, it means that it was in the process of tracing a loop, implying that
     /// there is (or, at least, was at some point) a Location stuck in PHASE_TRACING.
     tid: Arc<ThreadIdInner>,
-    hot_threshold: HotThreshold,
-    tracing_kind: TracingKind,
     /// If this thread is tracing, store a pointer to the `HotLocation`: this allows us to
     /// differentiate which thread is actually tracing the location.
-    tracing: Option<*const ()>,
+    tracing: Cell<Option<*const ()>>,
+    // Raw pointers are neither send nor sync.
+    _dont_send_or_sync_me: PhantomData<*mut ()>,
 }
 
-impl MTThreadInner {
-    fn init(mt: MT) -> MTThread {
-        let hot_threshold = mt.hot_threshold();
-        let tracing_kind = mt.tracing_kind();
-        let inner = MTThreadInner {
-            mt,
-            tid: Arc::new(ThreadIdInner),
-            hot_threshold,
-            tracing_kind,
-            tracing: None,
-        };
+impl MTThread {
+    fn new() -> Self {
         MTThread {
-            inner: Rc::new(inner),
+            tid: Arc::new(ThreadIdInner),
+            tracing: Cell::new(None),
             _dont_send_or_sync_me: PhantomData,
         }
     }
@@ -532,23 +401,19 @@ mod tests {
     #[ignore]
     fn threshold_passed() {
         let hot_thrsh: HotThreshold = 1500;
-        let mut mtt = MTBuilder::new()
-            .unwrap()
-            .hot_threshold(hot_thrsh)
-            .unwrap()
-            .build();
+        let mt = MT::global();
         let loc = Location::new();
         for i in 0..hot_thrsh {
-            mtt.control_point(Some(&loc));
+            mt.control_point(Some(&loc));
             assert_eq!(loc.load(Ordering::Relaxed), State::new().with_count(i + 1));
         }
         assert!(loc.load(Ordering::Relaxed).is_counting());
-        mtt.control_point(Some(&loc));
+        mt.control_point(Some(&loc));
         assert_eq!(
             hotlocation_discriminant(&loc).unwrap(),
             HotLocationDiscriminants::Tracing
         );
-        mtt.control_point(Some(&loc));
+        mt.control_point(Some(&loc));
         assert!([
             HotLocationDiscriminants::Compiling,
             HotLocationDiscriminants::Compiled
