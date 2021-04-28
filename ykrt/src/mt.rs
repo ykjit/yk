@@ -512,660 +512,649 @@ impl MTThreadInner {
 // FIXME These tests were broken during the big code deletion event of 2021 where we moved to LLVM
 // IR. I've left them in (commented), because although they are busted, the ykrt API isn't going to
 // change much and I think we can recover these test at some point.
-//#[cfg(test)]
-//mod tests {
-//    use std::{convert::TryFrom, thread::yield_now};
-//    extern crate test;
-//    use self::test::{black_box, Bencher};
-//    use super::*;
-//    use crate::location::{HotLocationDiscriminants, State};
-//
-//    fn hotlocation_discriminant(loc: &Location) -> Option<HotLocationDiscriminants> {
-//        match loc.lock() {
-//            Ok(ls) => {
-//                let x = HotLocationDiscriminants::from(&*unsafe { ls.hot_location() });
-//                loc.unlock();
-//                Some(x)
-//            }
-//            Err(()) => None,
-//        }
-//    }
-//
-//    #[derive(Debug, PartialEq)]
-//    struct EmptyInterpCtx {}
-//
-//    #[interp_step]
-//    fn empty_step(_: &mut EmptyInterpCtx) -> bool {
-//        true
-//    }
-//
-//    #[test]
-//    fn threshold_passed() {
-//        let hot_thrsh: HotThreshold = 1500;
-//        let mut mtt = MTBuilder::new()
-//            .unwrap()
-//            .hot_threshold(hot_thrsh)
-//            .unwrap()
-//            .build();
-//        let loc = Location::new();
-//        let mut ctx = EmptyInterpCtx {};
-//        for i in 0..hot_thrsh {
-//            mtt.control_point(Some(&loc), empty_step, &mut ctx);
-//            assert_eq!(loc.load(Ordering::Relaxed), State::new().with_count(i + 1));
-//        }
-//        assert!(loc.load(Ordering::Relaxed).is_counting());
-//        mtt.control_point(Some(&loc), empty_step, &mut ctx);
-//        assert_eq!(
-//            hotlocation_discriminant(&loc).unwrap(),
-//            HotLocationDiscriminants::Tracing
-//        );
-//        mtt.control_point(Some(&loc), empty_step, &mut ctx);
-//        assert!([
-//            HotLocationDiscriminants::Compiling,
-//            HotLocationDiscriminants::Compiled
-//        ]
-//        .contains(&hotlocation_discriminant(&loc).unwrap()));
-//    }
-//
-//    #[test]
-//    fn stop_while_tracing() {
-//        let hot_thrsh = 5;
-//        let mut mtt = MTBuilder::new()
-//            .unwrap()
-//            .hot_threshold(hot_thrsh)
-//            .unwrap()
-//            .build();
-//        let loc = Location::new();
-//        let mut ctx = EmptyInterpCtx {};
-//        for i in 0..hot_thrsh {
-//            mtt.control_point(Some(&loc), empty_step, &mut ctx);
-//            assert!(loc.load(Ordering::Relaxed).is_counting());
-//            assert_eq!(loc.load(Ordering::Relaxed).count(), i + 1);
-//        }
-//        assert!(loc.load(Ordering::Relaxed).is_counting());
-//        mtt.control_point(Some(&loc), empty_step, &mut ctx);
-//        assert_eq!(
-//            hotlocation_discriminant(&loc).unwrap(),
-//            HotLocationDiscriminants::Tracing
-//        );
-//    }
-//
-//    #[test]
-//    fn threaded_threshold_passed() {
-//        let hot_thrsh = 4000;
-//        let mut mtt = MTBuilder::new()
-//            .unwrap()
-//            .hot_threshold(hot_thrsh)
-//            .unwrap()
-//            .build();
-//        let loc = Arc::new(Location::new());
-//        let mut thrs = vec![];
-//        for _ in 0..hot_thrsh / 4 {
-//            let loc = Arc::clone(&loc);
-//            let t = mtt
-//                .mt()
-//                .spawn(move |mut mtt| {
-//                    let mut ctx = EmptyInterpCtx {};
-//                    mtt.control_point(Some(&loc), empty_step, &mut ctx);
-//                    let c1 = loc.load(Ordering::Relaxed);
-//                    assert!(c1.is_counting());
-//                    mtt.control_point(Some(&loc), empty_step, &mut ctx);
-//                    let c2 = loc.load(Ordering::Relaxed);
-//                    assert!(c2.is_counting());
-//                    mtt.control_point(Some(&loc), empty_step, &mut ctx);
-//                    let c3 = loc.load(Ordering::Relaxed);
-//                    assert!(c3.is_counting());
-//                    mtt.control_point(Some(&loc), empty_step, &mut ctx);
-//                    let c4 = loc.load(Ordering::Relaxed);
-//                    assert!(c4.is_counting());
-//                    assert!(c4.count() >= c3.count());
-//                    assert!(c3.count() >= c2.count());
-//                    assert!(c2.count() >= c1.count());
-//                })
-//                .unwrap();
-//            thrs.push(t);
-//        }
-//        for t in thrs {
-//            t.join().unwrap();
-//        }
-//        {
-//            let mut ctx = EmptyInterpCtx {};
-//            // Thread contention means that some count updates might have been dropped, so we have
-//            // to keep the interpreter going until the threshold really is reached.
-//            while loc.load(Ordering::Relaxed).is_counting() {
-//                mtt.control_point(Some(&loc), empty_step, &mut ctx);
-//            }
-//            assert_eq!(
-//                hotlocation_discriminant(&loc).unwrap(),
-//                HotLocationDiscriminants::Tracing
-//            );
-//            mtt.control_point(Some(&loc), empty_step, &mut ctx);
-//
-//            while hotlocation_discriminant(&loc) == Some(HotLocationDiscriminants::Compiling) {
-//                yield_now();
-//                mtt.control_point(Some(&loc), empty_step, &mut ctx);
-//            }
-//            assert_eq!(
-//                hotlocation_discriminant(&loc).unwrap(),
-//                HotLocationDiscriminants::Compiled
-//            );
-//        }
-//    }
-//
-//    #[test]
-//    fn simple_interpreter() {
-//        let mut mtt = MTBuilder::new().unwrap().hot_threshold(2).unwrap().build();
-//
-//        const INC: u8 = 0;
-//        const RESTART: u8 = 1;
-//        // The program is silly. Do nothing twice, then start again.
-//        let prog = vec![INC, INC, RESTART];
-//
-//        // Suppose the bytecode compiler for this imaginary language knows that the first bytecode
-//        // is the only place a loop can start.
-//        let locs = vec![Some(Location::new()), None, None];
-//
-//        struct InterpCtx {
-//            prog: Vec<u8>,
-//            pc: usize,
-//            count: u64,
-//        }
-//
-//        #[interp_step]
-//        fn simple_interp_step(ctx: &mut InterpCtx) -> bool {
-//            match ctx.prog[ctx.pc] {
-//                INC => {
-//                    ctx.pc += 1;
-//                    ctx.count += 1;
-//                }
-//                RESTART => ctx.pc = 0,
-//                _ => unreachable!(),
-//            };
-//            true
-//        }
-//
-//        let mut ctx = InterpCtx {
-//            prog,
-//            pc: 0,
-//            count: 0,
-//        };
-//
-//        // The interpreter loop. In reality this would (syntactically) be an infinite loop.
-//        for _ in 0..12 {
-//            let loc = locs[ctx.pc].as_ref();
-//            mtt.control_point(loc, simple_interp_step, &mut ctx);
-//        }
-//
-//        loop {
-//            let loc = locs[ctx.pc].as_ref();
-//            if ctx.pc == 0
-//                && hotlocation_discriminant(&loc.unwrap())
-//                    == Some(HotLocationDiscriminants::Compiled)
-//            {
-//                break;
-//            }
-//            mtt.control_point(loc, simple_interp_step, &mut ctx);
-//            yield_now();
-//        }
-//
-//        // A trace was just compiled. Running it should execute INC twice.
-//        ctx.count = 8;
-//        for i in 0..10 {
-//            let loc = locs[ctx.pc].as_ref();
-//            mtt.control_point(loc, simple_interp_step, &mut ctx);
-//            assert_eq!(ctx.count, 10 + i * 2);
-//        }
-//    }
-//
-//    #[test]
-//    fn simple_multithreaded_interpreter() {
-//        // If the threshold is too low (where "too low" is going to depend on many factors that we
-//        // can only guess at), it's less likely that we'll observe problematic interleavings,
-//        // because a single thread might execute everything it wants to without yielding once.
-//        const THRESHOLD: HotThreshold = 100000;
-//        const NUM_THREADS: usize = 16;
-//
-//        let mut mtt = MTBuilder::new()
-//            .unwrap()
-//            .hot_threshold(THRESHOLD)
-//            .unwrap()
-//            .build();
-//
-//        const INC: u8 = 0;
-//        const RESTART: u8 = 1;
-//        let prog = Arc::new(vec![INC, INC, RESTART]);
-//
-//        struct InterpCtx {
-//            prog: Arc<Vec<u8>>,
-//            count: u64,
-//            pc: usize,
-//        }
-//
-//        #[interp_step]
-//        fn simple_interp_step(ctx: &mut InterpCtx) -> bool {
-//            match ctx.prog[ctx.pc] {
-//                INC => {
-//                    ctx.pc += 1;
-//                    ctx.count += 1;
-//                }
-//                RESTART => ctx.pc = 0,
-//                _ => unreachable!(),
-//            };
-//            true
-//        }
-//
-//        // This tests for non-deterministic bugs in the Location statemachine: the only way we can
-//        // realistically find those is to keep trying tests over and over again.
-//        for _ in 0..10 {
-//            let locs = Arc::new(vec![Some(Location::new()), None, None]);
-//            let mut thrs = vec![];
-//            for _ in 0..NUM_THREADS {
-//                let locs = Arc::clone(&locs);
-//                let prog = Arc::clone(&prog);
-//                let mut ctx = InterpCtx {
-//                    prog,
-//                    count: 0,
-//                    pc: 0,
-//                };
-//                let t = mtt
-//                    .mt()
-//                    .spawn(move |mut mtt| {
-//                        for _ in 0..ctx.prog.len() * usize::try_from(THRESHOLD).unwrap() {
-//                            let loc = locs[ctx.pc].as_ref();
-//                            mtt.control_point(loc, simple_interp_step, &mut ctx);
-//                        }
-//                    })
-//                    .unwrap();
-//                thrs.push(t);
-//            }
-//
-//            let mut ctx = InterpCtx {
-//                prog: Arc::clone(&prog),
-//                count: 0,
-//                pc: 0,
-//            };
-//            loop {
-//                let loc = locs[ctx.pc].as_ref();
-//                if ctx.pc == 0
-//                    && hotlocation_discriminant(&loc.unwrap())
-//                        == Some(HotLocationDiscriminants::Compiled)
-//                {
-//                    break;
-//                }
-//                mtt.control_point(loc, simple_interp_step, &mut ctx);
-//            }
-//
-//            ctx.pc = 0;
-//            ctx.count = 8;
-//            for i in 0..10 {
-//                let loc = locs[ctx.pc].as_ref();
-//                mtt.control_point(loc, simple_interp_step, &mut ctx);
-//                assert!(ctx.pc == 0 || ctx.pc == 1);
-//                while ctx.pc != 0 {
-//                    let loc = locs[ctx.pc].as_ref();
-//                    mtt.control_point(loc, simple_interp_step, &mut ctx);
-//                }
-//                assert_eq!(ctx.count, 10 + i * 2);
-//            }
-//
-//            for t in thrs {
-//                t.join().unwrap();
-//            }
-//        }
-//    }
-//
-//    #[test]
-//    fn locations_dont_get_stuck_tracing() {
-//        const THRESHOLD: HotThreshold = 2;
-//
-//        let mut mtt = MTBuilder::new()
-//            .unwrap()
-//            .hot_threshold(THRESHOLD)
-//            .unwrap()
-//            .build();
-//
-//        const INC: u8 = 0;
-//        const RESTART: u8 = 1;
-//        let prog = Arc::new(vec![INC, INC, RESTART]);
-//
-//        struct InterpCtx {
-//            prog: Arc<Vec<u8>>,
-//            count: u64,
-//            pc: usize,
-//        }
-//
-//        #[interp_step]
-//        fn simple_interp_step(ctx: &mut InterpCtx) -> bool {
-//            match ctx.prog[ctx.pc] {
-//                INC => {
-//                    ctx.pc += 1;
-//                    ctx.count += 1;
-//                }
-//                RESTART => ctx.pc = 0,
-//                _ => unreachable!(),
-//            };
-//            true
-//        }
-//
-//        let locs = Arc::new(vec![Some(Location::new()), None, None]);
-//        let mut ctx = InterpCtx {
-//            prog: Arc::clone(&prog),
-//            count: 0,
-//            pc: 0,
-//        };
-//        {
-//            let locs = Arc::clone(&locs);
-//            mtt.mt()
-//                .spawn(move |mut mtt| {
-//                    for _ in 0..ctx.prog.len() * usize::try_from(THRESHOLD).unwrap() + 1 {
-//                        let loc = locs[ctx.pc].as_ref();
-//                        mtt.control_point(loc, simple_interp_step, &mut ctx);
-//                    }
-//                })
-//                .unwrap()
-//                .join()
-//                .unwrap();
-//        }
-//
-//        let loc = locs[0].as_ref();
-//        assert_eq!(
-//            hotlocation_discriminant(&loc.unwrap()),
-//            Some(HotLocationDiscriminants::Tracing)
-//        );
-//        let mut ctx = InterpCtx {
-//            prog: Arc::clone(&prog),
-//            count: 0,
-//            pc: 0,
-//        };
-//        mtt.control_point(loc, simple_interp_step, &mut ctx);
-//        assert_eq!(
-//            hotlocation_discriminant(&loc.unwrap()),
-//            Some(HotLocationDiscriminants::DontTrace)
-//        );
-//    }
-//
-//    #[test]
-//    fn more_hot_locations_than_worker_threads() {
-//        // This test indirectly tests code around capping the maximum number of worker threads.
-//        // We'd really like to check that not too many worker threads run at once, but that's
-//        // surprisingly tricky to test reliably because for all we know the system might just so
-//        // happen to run our worker threads one after the other. We therefore settle for running a
-//        // program that compiles multiple locations, with luck more-or-less at the same time,
-//        // hoping that this tests the various interactions around queueing etc.
-//
-//        let num_threads: usize = cmp::max(4, num_cpus::get());
-//        let mtt = MTBuilder::new()
-//            .unwrap()
-//            .max_worker_threads(num_threads / 2)
-//            .hot_threshold(2)
-//            .unwrap()
-//            .build();
-//
-//        const INC: u8 = 0;
-//        const RESTART: u8 = 1;
-//        // This test assumes throughout that each loop in the program is 3 bytecodes long.
-//        let mut prog = Vec::with_capacity(3 * num_threads);
-//        let mut locs = Vec::with_capacity(3 * num_threads);
-//        for _ in 0..num_threads {
-//            prog.extend(vec![INC, INC, RESTART]);
-//            locs.extend(vec![Some(Location::new()), None, None]);
-//        }
-//        let prog = Arc::new(prog);
-//        let locs = Arc::new(locs);
-//
-//        struct InterpCtx {
-//            prog: Arc<Vec<u8>>,
-//            count: u64,
-//            pc: usize,
-//        }
-//
-//        #[interp_step]
-//        fn simple_interp_step(ctx: &mut InterpCtx) -> bool {
-//            match ctx.prog[ctx.pc] {
-//                INC => {
-//                    ctx.pc += 1;
-//                    ctx.count += 1;
-//                }
-//                RESTART => ctx.pc -= 2,
-//                _ => unreachable!(),
-//            };
-//            true
-//        }
-//
-//        let mut thrs = Vec::with_capacity(num_threads);
-//        for i in 0..num_threads {
-//            let prog = Arc::clone(&prog);
-//            let locs = Arc::clone(&locs);
-//            let t = mtt
-//                .mt()
-//                .spawn(move |mut mtt| {
-//                    let mut ctx = InterpCtx {
-//                        prog: Arc::clone(&prog),
-//                        count: 0,
-//                        pc: i * 3,
-//                    };
-//                    loop {
-//                        let loc = locs[ctx.pc].as_ref();
-//                        if let Some(l) = loc {
-//                            if hotlocation_discriminant(l)
-//                                == Some(HotLocationDiscriminants::Compiled)
-//                            {
-//                                break;
-//                            }
-//                        }
-//                        mtt.control_point(loc, simple_interp_step, &mut ctx);
-//                    }
-//                })
-//                .unwrap();
-//            thrs.push(t);
-//        }
-//        for t in thrs {
-//            t.join().unwrap();
-//        }
-//    }
-//
-//    #[test]
-//    fn stuck_locations_free_memory() {
-//        const THRESHOLD: HotThreshold = 2;
-//
-//        let mtt = MTBuilder::new()
-//            .unwrap()
-//            .hot_threshold(THRESHOLD)
-//            .unwrap()
-//            .build();
-//
-//        const INC: u8 = 0;
-//        const RESTART: u8 = 1;
-//        let prog = Arc::new(vec![INC, INC, RESTART]);
-//
-//        struct InterpCtx {
-//            prog: Arc<Vec<u8>>,
-//            count: u64,
-//            pc: usize,
-//        }
-//
-//        #[interp_step]
-//        fn simple_interp_step(ctx: &mut InterpCtx) -> bool {
-//            match ctx.prog[ctx.pc] {
-//                INC => {
-//                    ctx.pc += 1;
-//                    ctx.count += 1;
-//                }
-//                RESTART => ctx.pc = 0,
-//                _ => unreachable!(),
-//            };
-//            true
-//        }
-//
-//        let locs = Arc::new(vec![Some(Location::new()), None, None]);
-//        let mut ctx = InterpCtx {
-//            prog: Arc::clone(&prog),
-//            count: 0,
-//            pc: 0,
-//        };
-//        {
-//            let locs = Arc::clone(&locs);
-//            mtt.mt()
-//                .spawn(move |mut mtt| {
-//                    for _ in 0..ctx.prog.len() * usize::try_from(THRESHOLD).unwrap() + 1 {
-//                        let loc = locs[ctx.pc].as_ref();
-//                        mtt.control_point(loc, simple_interp_step, &mut ctx);
-//                    }
-//                })
-//                .unwrap()
-//                .join()
-//                .unwrap();
-//        }
-//
-//        let loc = locs[0].as_ref();
-//        assert_eq!(
-//            hotlocation_discriminant(&loc.unwrap()),
-//            Some(HotLocationDiscriminants::Tracing)
-//        );
-//        // This is a weak test: at this point we hope that the dropped location frees its Arc. If
-//        // it doesn't, we won't have tested much. If it does, we at least get a modicum of "check
-//        // that it's not a double free" testing.
-//    }
-//
-//    #[bench]
-//    fn bench_single_threaded_control_point(b: &mut Bencher) {
-//        let mut mtt = MTBuilder::new().unwrap().build();
-//        let lp = Location::new();
-//        let mut io = EmptyInterpCtx {};
-//        b.iter(|| {
-//            for _ in 0..100000 {
-//                black_box(mtt.control_point(Some(&lp), empty_step, &mut io));
-//            }
-//        });
-//    }
-//
-//    #[bench]
-//    fn bench_multi_threaded_control_point(b: &mut Bencher) {
-//        let mtt = MTBuilder::new().unwrap().build();
-//        let loc = Arc::new(Location::new());
-//        b.iter(|| {
-//            let mut thrs = vec![];
-//            for _ in 0..4 {
-//                let loc = Arc::clone(&loc);
-//                let t = mtt
-//                    .mt()
-//                    .spawn(move |mut mtt| {
-//                        for _ in 0..100 {
-//                            let mut io = EmptyInterpCtx {};
-//                            black_box(mtt.control_point(Some(&loc), empty_step, &mut io));
-//                        }
-//                    })
-//                    .unwrap();
-//                thrs.push(t);
-//            }
-//            for t in thrs {
-//                t.join().unwrap();
-//            }
-//        });
-//    }
-//
-//    #[test]
-//    fn stopgapping() {
-//        let mut mtt = MTBuilder::new().unwrap().hot_threshold(2).unwrap().build();
-//
-//        const INC: u8 = 0;
-//        const RESTART: u8 = 1;
-//        let prog = vec![INC, INC, RESTART];
-//        let locs = vec![Some(Location::new()), None, None];
-//
-//        struct InterpCtx {
-//            prog: Vec<u8>,
-//            pc: usize,
-//            run: u8,
-//        }
-//
-//        #[interp_step]
-//        fn simple_interp_step(ctx: &mut InterpCtx) -> bool {
-//            match ctx.prog[ctx.pc] {
-//                INC => {
-//                    ctx.pc += 1;
-//                    if ctx.run > 0 {
-//                        ctx.run += 1;
-//                    }
-//                }
-//                RESTART => ctx.pc = 0,
-//                _ => unreachable!(),
-//            };
-//            true
-//        }
-//
-//        let mut ctx = InterpCtx {
-//            prog,
-//            pc: 0,
-//            run: 0,
-//        };
-//
-//        // Run until a trace has been compiled.
-//        loop {
-//            let loc = locs[ctx.pc].as_ref();
-//            if ctx.pc == 0
-//                && hotlocation_discriminant(&loc.unwrap())
-//                    == Some(HotLocationDiscriminants::Compiled)
-//            {
-//                break;
-//            }
-//            mtt.control_point(locs[ctx.pc].as_ref(), simple_interp_step, &mut ctx);
-//        }
-//
-//        assert_eq!(ctx.pc, 0);
-//        assert_eq!(ctx.run, 0);
-//
-//        // Now fail a guard.
-//        ctx.run = 1;
-//        let loc = locs[ctx.pc].as_ref();
-//        mtt.control_point(loc, simple_interp_step, &mut ctx);
-//        assert_eq!(ctx.run, 2);
-//    }
-//
-//    /// Tests that the stopgap interpreter returns the correct boolean to abort interpreting.
-//    #[test]
-//    fn loop_interpreter() {
-//        let mut mtt = MTBuilder::new().unwrap().hot_threshold(2).unwrap().build();
-//
-//        let loc = Location::new();
-//
-//        struct InterpCtx {
-//            counter: u8,
-//        }
-//
-//        #[interp_step]
-//        fn simple_interp_step(ctx: &mut InterpCtx) -> bool {
-//            let a = ctx.counter;
-//            if ctx.counter < 100 {
-//                ctx.counter = a + 1;
-//            } else {
-//                ctx.counter = a + 2;
-//            }
-//            if ctx.counter > 110 {
-//                return true; // Exit the interpreter.
-//            }
-//            false
-//        }
-//
-//        let mut ctx = InterpCtx { counter: 0 };
-//
-//        // Run until we have compiled a trace.
-//        loop {
-//            ctx.counter = 0; // make sure we don't overflow
-//            mtt.control_point(Some(&loc), simple_interp_step, &mut ctx);
-//            if hotlocation_discriminant(&loc) == Some(HotLocationDiscriminants::Compiled) {
-//                break;
-//            }
-//        }
-//
-//        // Now reset counter and run the compiled trace until a guard fails.
-//        ctx.counter = 100;
-//        loop {
-//            if mtt.control_point(Some(&loc), simple_interp_step, &mut ctx) {
-//                break;
-//            }
-//        }
-//
-//        assert_eq!(ctx.counter, 112);
-//    }
-//}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::location::HotLocationDiscriminants;
+
+    fn hotlocation_discriminant(loc: &Location) -> Option<HotLocationDiscriminants> {
+        match loc.lock() {
+            Ok(ls) => {
+                let x = HotLocationDiscriminants::from(&*unsafe { ls.hot_location() });
+                loc.unlock();
+                Some(x)
+            }
+            Err(()) => None,
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn threshold_passed() {
+        let hot_thrsh: HotThreshold = 1500;
+        let mut mtt = MTBuilder::new()
+            .unwrap()
+            .hot_threshold(hot_thrsh)
+            .unwrap()
+            .build();
+        let loc = Location::new();
+        for i in 0..hot_thrsh {
+            mtt.control_point(Some(&loc));
+            assert_eq!(loc.load(Ordering::Relaxed), State::new().with_count(i + 1));
+        }
+        assert!(loc.load(Ordering::Relaxed).is_counting());
+        mtt.control_point(Some(&loc));
+        assert_eq!(
+            hotlocation_discriminant(&loc).unwrap(),
+            HotLocationDiscriminants::Tracing
+        );
+        mtt.control_point(Some(&loc));
+        assert!([
+            HotLocationDiscriminants::Compiling,
+            HotLocationDiscriminants::Compiled
+        ]
+        .contains(&hotlocation_discriminant(&loc).unwrap()));
+    }
+
+    //    #[test]
+    //    fn stop_while_tracing() {
+    //        let hot_thrsh = 5;
+    //        let mut mtt = MTBuilder::new()
+    //            .unwrap()
+    //            .hot_threshold(hot_thrsh)
+    //            .unwrap()
+    //            .build();
+    //        let loc = Location::new();
+    //        let mut ctx = EmptyInterpCtx {};
+    //        for i in 0..hot_thrsh {
+    //            mtt.control_point(Some(&loc), empty_step, &mut ctx);
+    //            assert!(loc.load(Ordering::Relaxed).is_counting());
+    //            assert_eq!(loc.load(Ordering::Relaxed).count(), i + 1);
+    //        }
+    //        assert!(loc.load(Ordering::Relaxed).is_counting());
+    //        mtt.control_point(Some(&loc), empty_step, &mut ctx);
+    //        assert_eq!(
+    //            hotlocation_discriminant(&loc).unwrap(),
+    //            HotLocationDiscriminants::Tracing
+    //        );
+    //    }
+    //
+    //    #[test]
+    //    fn threaded_threshold_passed() {
+    //        let hot_thrsh = 4000;
+    //        let mut mtt = MTBuilder::new()
+    //            .unwrap()
+    //            .hot_threshold(hot_thrsh)
+    //            .unwrap()
+    //            .build();
+    //        let loc = Arc::new(Location::new());
+    //        let mut thrs = vec![];
+    //        for _ in 0..hot_thrsh / 4 {
+    //            let loc = Arc::clone(&loc);
+    //            let t = mtt
+    //                .mt()
+    //                .spawn(move |mut mtt| {
+    //                    let mut ctx = EmptyInterpCtx {};
+    //                    mtt.control_point(Some(&loc), empty_step, &mut ctx);
+    //                    let c1 = loc.load(Ordering::Relaxed);
+    //                    assert!(c1.is_counting());
+    //                    mtt.control_point(Some(&loc), empty_step, &mut ctx);
+    //                    let c2 = loc.load(Ordering::Relaxed);
+    //                    assert!(c2.is_counting());
+    //                    mtt.control_point(Some(&loc), empty_step, &mut ctx);
+    //                    let c3 = loc.load(Ordering::Relaxed);
+    //                    assert!(c3.is_counting());
+    //                    mtt.control_point(Some(&loc), empty_step, &mut ctx);
+    //                    let c4 = loc.load(Ordering::Relaxed);
+    //                    assert!(c4.is_counting());
+    //                    assert!(c4.count() >= c3.count());
+    //                    assert!(c3.count() >= c2.count());
+    //                    assert!(c2.count() >= c1.count());
+    //                })
+    //                .unwrap();
+    //            thrs.push(t);
+    //        }
+    //        for t in thrs {
+    //            t.join().unwrap();
+    //        }
+    //        {
+    //            let mut ctx = EmptyInterpCtx {};
+    //            // Thread contention means that some count updates might have been dropped, so we have
+    //            // to keep the interpreter going until the threshold really is reached.
+    //            while loc.load(Ordering::Relaxed).is_counting() {
+    //                mtt.control_point(Some(&loc), empty_step, &mut ctx);
+    //            }
+    //            assert_eq!(
+    //                hotlocation_discriminant(&loc).unwrap(),
+    //                HotLocationDiscriminants::Tracing
+    //            );
+    //            mtt.control_point(Some(&loc), empty_step, &mut ctx);
+    //
+    //            while hotlocation_discriminant(&loc) == Some(HotLocationDiscriminants::Compiling) {
+    //                yield_now();
+    //                mtt.control_point(Some(&loc), empty_step, &mut ctx);
+    //            }
+    //            assert_eq!(
+    //                hotlocation_discriminant(&loc).unwrap(),
+    //                HotLocationDiscriminants::Compiled
+    //            );
+    //        }
+    //    }
+    //
+    //    #[test]
+    //    fn simple_interpreter() {
+    //        let mut mtt = MTBuilder::new().unwrap().hot_threshold(2).unwrap().build();
+    //
+    //        const INC: u8 = 0;
+    //        const RESTART: u8 = 1;
+    //        // The program is silly. Do nothing twice, then start again.
+    //        let prog = vec![INC, INC, RESTART];
+    //
+    //        // Suppose the bytecode compiler for this imaginary language knows that the first bytecode
+    //        // is the only place a loop can start.
+    //        let locs = vec![Some(Location::new()), None, None];
+    //
+    //        struct InterpCtx {
+    //            prog: Vec<u8>,
+    //            pc: usize,
+    //            count: u64,
+    //        }
+    //
+    //        #[interp_step]
+    //        fn simple_interp_step(ctx: &mut InterpCtx) -> bool {
+    //            match ctx.prog[ctx.pc] {
+    //                INC => {
+    //                    ctx.pc += 1;
+    //                    ctx.count += 1;
+    //                }
+    //                RESTART => ctx.pc = 0,
+    //                _ => unreachable!(),
+    //            };
+    //            true
+    //        }
+    //
+    //        let mut ctx = InterpCtx {
+    //            prog,
+    //            pc: 0,
+    //            count: 0,
+    //        };
+    //
+    //        // The interpreter loop. In reality this would (syntactically) be an infinite loop.
+    //        for _ in 0..12 {
+    //            let loc = locs[ctx.pc].as_ref();
+    //            mtt.control_point(loc, simple_interp_step, &mut ctx);
+    //        }
+    //
+    //        loop {
+    //            let loc = locs[ctx.pc].as_ref();
+    //            if ctx.pc == 0
+    //                && hotlocation_discriminant(&loc.unwrap())
+    //                    == Some(HotLocationDiscriminants::Compiled)
+    //            {
+    //                break;
+    //            }
+    //            mtt.control_point(loc, simple_interp_step, &mut ctx);
+    //            yield_now();
+    //        }
+    //
+    //        // A trace was just compiled. Running it should execute INC twice.
+    //        ctx.count = 8;
+    //        for i in 0..10 {
+    //            let loc = locs[ctx.pc].as_ref();
+    //            mtt.control_point(loc, simple_interp_step, &mut ctx);
+    //            assert_eq!(ctx.count, 10 + i * 2);
+    //        }
+    //    }
+    //
+    //    #[test]
+    //    fn simple_multithreaded_interpreter() {
+    //        // If the threshold is too low (where "too low" is going to depend on many factors that we
+    //        // can only guess at), it's less likely that we'll observe problematic interleavings,
+    //        // because a single thread might execute everything it wants to without yielding once.
+    //        const THRESHOLD: HotThreshold = 100000;
+    //        const NUM_THREADS: usize = 16;
+    //
+    //        let mut mtt = MTBuilder::new()
+    //            .unwrap()
+    //            .hot_threshold(THRESHOLD)
+    //            .unwrap()
+    //            .build();
+    //
+    //        const INC: u8 = 0;
+    //        const RESTART: u8 = 1;
+    //        let prog = Arc::new(vec![INC, INC, RESTART]);
+    //
+    //        struct InterpCtx {
+    //            prog: Arc<Vec<u8>>,
+    //            count: u64,
+    //            pc: usize,
+    //        }
+    //
+    //        #[interp_step]
+    //        fn simple_interp_step(ctx: &mut InterpCtx) -> bool {
+    //            match ctx.prog[ctx.pc] {
+    //                INC => {
+    //                    ctx.pc += 1;
+    //                    ctx.count += 1;
+    //                }
+    //                RESTART => ctx.pc = 0,
+    //                _ => unreachable!(),
+    //            };
+    //            true
+    //        }
+    //
+    //        // This tests for non-deterministic bugs in the Location statemachine: the only way we can
+    //        // realistically find those is to keep trying tests over and over again.
+    //        for _ in 0..10 {
+    //            let locs = Arc::new(vec![Some(Location::new()), None, None]);
+    //            let mut thrs = vec![];
+    //            for _ in 0..NUM_THREADS {
+    //                let locs = Arc::clone(&locs);
+    //                let prog = Arc::clone(&prog);
+    //                let mut ctx = InterpCtx {
+    //                    prog,
+    //                    count: 0,
+    //                    pc: 0,
+    //                };
+    //                let t = mtt
+    //                    .mt()
+    //                    .spawn(move |mut mtt| {
+    //                        for _ in 0..ctx.prog.len() * usize::try_from(THRESHOLD).unwrap() {
+    //                            let loc = locs[ctx.pc].as_ref();
+    //                            mtt.control_point(loc, simple_interp_step, &mut ctx);
+    //                        }
+    //                    })
+    //                    .unwrap();
+    //                thrs.push(t);
+    //            }
+    //
+    //            let mut ctx = InterpCtx {
+    //                prog: Arc::clone(&prog),
+    //                count: 0,
+    //                pc: 0,
+    //            };
+    //            loop {
+    //                let loc = locs[ctx.pc].as_ref();
+    //                if ctx.pc == 0
+    //                    && hotlocation_discriminant(&loc.unwrap())
+    //                        == Some(HotLocationDiscriminants::Compiled)
+    //                {
+    //                    break;
+    //                }
+    //                mtt.control_point(loc, simple_interp_step, &mut ctx);
+    //            }
+    //
+    //            ctx.pc = 0;
+    //            ctx.count = 8;
+    //            for i in 0..10 {
+    //                let loc = locs[ctx.pc].as_ref();
+    //                mtt.control_point(loc, simple_interp_step, &mut ctx);
+    //                assert!(ctx.pc == 0 || ctx.pc == 1);
+    //                while ctx.pc != 0 {
+    //                    let loc = locs[ctx.pc].as_ref();
+    //                    mtt.control_point(loc, simple_interp_step, &mut ctx);
+    //                }
+    //                assert_eq!(ctx.count, 10 + i * 2);
+    //            }
+    //
+    //            for t in thrs {
+    //                t.join().unwrap();
+    //            }
+    //        }
+    //    }
+    //
+    //    #[test]
+    //    fn locations_dont_get_stuck_tracing() {
+    //        const THRESHOLD: HotThreshold = 2;
+    //
+    //        let mut mtt = MTBuilder::new()
+    //            .unwrap()
+    //            .hot_threshold(THRESHOLD)
+    //            .unwrap()
+    //            .build();
+    //
+    //        const INC: u8 = 0;
+    //        const RESTART: u8 = 1;
+    //        let prog = Arc::new(vec![INC, INC, RESTART]);
+    //
+    //        struct InterpCtx {
+    //            prog: Arc<Vec<u8>>,
+    //            count: u64,
+    //            pc: usize,
+    //        }
+    //
+    //        #[interp_step]
+    //        fn simple_interp_step(ctx: &mut InterpCtx) -> bool {
+    //            match ctx.prog[ctx.pc] {
+    //                INC => {
+    //                    ctx.pc += 1;
+    //                    ctx.count += 1;
+    //                }
+    //                RESTART => ctx.pc = 0,
+    //                _ => unreachable!(),
+    //            };
+    //            true
+    //        }
+    //
+    //        let locs = Arc::new(vec![Some(Location::new()), None, None]);
+    //        let mut ctx = InterpCtx {
+    //            prog: Arc::clone(&prog),
+    //            count: 0,
+    //            pc: 0,
+    //        };
+    //        {
+    //            let locs = Arc::clone(&locs);
+    //            mtt.mt()
+    //                .spawn(move |mut mtt| {
+    //                    for _ in 0..ctx.prog.len() * usize::try_from(THRESHOLD).unwrap() + 1 {
+    //                        let loc = locs[ctx.pc].as_ref();
+    //                        mtt.control_point(loc, simple_interp_step, &mut ctx);
+    //                    }
+    //                })
+    //                .unwrap()
+    //                .join()
+    //                .unwrap();
+    //        }
+    //
+    //        let loc = locs[0].as_ref();
+    //        assert_eq!(
+    //            hotlocation_discriminant(&loc.unwrap()),
+    //            Some(HotLocationDiscriminants::Tracing)
+    //        );
+    //        let mut ctx = InterpCtx {
+    //            prog: Arc::clone(&prog),
+    //            count: 0,
+    //            pc: 0,
+    //        };
+    //        mtt.control_point(loc, simple_interp_step, &mut ctx);
+    //        assert_eq!(
+    //            hotlocation_discriminant(&loc.unwrap()),
+    //            Some(HotLocationDiscriminants::DontTrace)
+    //        );
+    //    }
+    //
+    //    #[test]
+    //    fn more_hot_locations_than_worker_threads() {
+    //        // This test indirectly tests code around capping the maximum number of worker threads.
+    //        // We'd really like to check that not too many worker threads run at once, but that's
+    //        // surprisingly tricky to test reliably because for all we know the system might just so
+    //        // happen to run our worker threads one after the other. We therefore settle for running a
+    //        // program that compiles multiple locations, with luck more-or-less at the same time,
+    //        // hoping that this tests the various interactions around queueing etc.
+    //
+    //        let num_threads: usize = cmp::max(4, num_cpus::get());
+    //        let mtt = MTBuilder::new()
+    //            .unwrap()
+    //            .max_worker_threads(num_threads / 2)
+    //            .hot_threshold(2)
+    //            .unwrap()
+    //            .build();
+    //
+    //        const INC: u8 = 0;
+    //        const RESTART: u8 = 1;
+    //        // This test assumes throughout that each loop in the program is 3 bytecodes long.
+    //        let mut prog = Vec::with_capacity(3 * num_threads);
+    //        let mut locs = Vec::with_capacity(3 * num_threads);
+    //        for _ in 0..num_threads {
+    //            prog.extend(vec![INC, INC, RESTART]);
+    //            locs.extend(vec![Some(Location::new()), None, None]);
+    //        }
+    //        let prog = Arc::new(prog);
+    //        let locs = Arc::new(locs);
+    //
+    //        struct InterpCtx {
+    //            prog: Arc<Vec<u8>>,
+    //            count: u64,
+    //            pc: usize,
+    //        }
+    //
+    //        #[interp_step]
+    //        fn simple_interp_step(ctx: &mut InterpCtx) -> bool {
+    //            match ctx.prog[ctx.pc] {
+    //                INC => {
+    //                    ctx.pc += 1;
+    //                    ctx.count += 1;
+    //                }
+    //                RESTART => ctx.pc -= 2,
+    //                _ => unreachable!(),
+    //            };
+    //            true
+    //        }
+    //
+    //        let mut thrs = Vec::with_capacity(num_threads);
+    //        for i in 0..num_threads {
+    //            let prog = Arc::clone(&prog);
+    //            let locs = Arc::clone(&locs);
+    //            let t = mtt
+    //                .mt()
+    //                .spawn(move |mut mtt| {
+    //                    let mut ctx = InterpCtx {
+    //                        prog: Arc::clone(&prog),
+    //                        count: 0,
+    //                        pc: i * 3,
+    //                    };
+    //                    loop {
+    //                        let loc = locs[ctx.pc].as_ref();
+    //                        if let Some(l) = loc {
+    //                            if hotlocation_discriminant(l)
+    //                                == Some(HotLocationDiscriminants::Compiled)
+    //                            {
+    //                                break;
+    //                            }
+    //                        }
+    //                        mtt.control_point(loc, simple_interp_step, &mut ctx);
+    //                    }
+    //                })
+    //                .unwrap();
+    //            thrs.push(t);
+    //        }
+    //        for t in thrs {
+    //            t.join().unwrap();
+    //        }
+    //    }
+    //
+    //    #[test]
+    //    fn stuck_locations_free_memory() {
+    //        const THRESHOLD: HotThreshold = 2;
+    //
+    //        let mtt = MTBuilder::new()
+    //            .unwrap()
+    //            .hot_threshold(THRESHOLD)
+    //            .unwrap()
+    //            .build();
+    //
+    //        const INC: u8 = 0;
+    //        const RESTART: u8 = 1;
+    //        let prog = Arc::new(vec![INC, INC, RESTART]);
+    //
+    //        struct InterpCtx {
+    //            prog: Arc<Vec<u8>>,
+    //            count: u64,
+    //            pc: usize,
+    //        }
+    //
+    //        #[interp_step]
+    //        fn simple_interp_step(ctx: &mut InterpCtx) -> bool {
+    //            match ctx.prog[ctx.pc] {
+    //                INC => {
+    //                    ctx.pc += 1;
+    //                    ctx.count += 1;
+    //                }
+    //                RESTART => ctx.pc = 0,
+    //                _ => unreachable!(),
+    //            };
+    //            true
+    //        }
+    //
+    //        let locs = Arc::new(vec![Some(Location::new()), None, None]);
+    //        let mut ctx = InterpCtx {
+    //            prog: Arc::clone(&prog),
+    //            count: 0,
+    //            pc: 0,
+    //        };
+    //        {
+    //            let locs = Arc::clone(&locs);
+    //            mtt.mt()
+    //                .spawn(move |mut mtt| {
+    //                    for _ in 0..ctx.prog.len() * usize::try_from(THRESHOLD).unwrap() + 1 {
+    //                        let loc = locs[ctx.pc].as_ref();
+    //                        mtt.control_point(loc, simple_interp_step, &mut ctx);
+    //                    }
+    //                })
+    //                .unwrap()
+    //                .join()
+    //                .unwrap();
+    //        }
+    //
+    //        let loc = locs[0].as_ref();
+    //        assert_eq!(
+    //            hotlocation_discriminant(&loc.unwrap()),
+    //            Some(HotLocationDiscriminants::Tracing)
+    //        );
+    //        // This is a weak test: at this point we hope that the dropped location frees its Arc. If
+    //        // it doesn't, we won't have tested much. If it does, we at least get a modicum of "check
+    //        // that it's not a double free" testing.
+    //    }
+    //
+    //    #[bench]
+    //    fn bench_single_threaded_control_point(b: &mut Bencher) {
+    //        let mut mtt = MTBuilder::new().unwrap().build();
+    //        let lp = Location::new();
+    //        let mut io = EmptyInterpCtx {};
+    //        b.iter(|| {
+    //            for _ in 0..100000 {
+    //                black_box(mtt.control_point(Some(&lp), empty_step, &mut io));
+    //            }
+    //        });
+    //    }
+    //
+    //    #[bench]
+    //    fn bench_multi_threaded_control_point(b: &mut Bencher) {
+    //        let mtt = MTBuilder::new().unwrap().build();
+    //        let loc = Arc::new(Location::new());
+    //        b.iter(|| {
+    //            let mut thrs = vec![];
+    //            for _ in 0..4 {
+    //                let loc = Arc::clone(&loc);
+    //                let t = mtt
+    //                    .mt()
+    //                    .spawn(move |mut mtt| {
+    //                        for _ in 0..100 {
+    //                            let mut io = EmptyInterpCtx {};
+    //                            black_box(mtt.control_point(Some(&loc), empty_step, &mut io));
+    //                        }
+    //                    })
+    //                    .unwrap();
+    //                thrs.push(t);
+    //            }
+    //            for t in thrs {
+    //                t.join().unwrap();
+    //            }
+    //        });
+    //    }
+    //
+    //    #[test]
+    //    fn stopgapping() {
+    //        let mut mtt = MTBuilder::new().unwrap().hot_threshold(2).unwrap().build();
+    //
+    //        const INC: u8 = 0;
+    //        const RESTART: u8 = 1;
+    //        let prog = vec![INC, INC, RESTART];
+    //        let locs = vec![Some(Location::new()), None, None];
+    //
+    //        struct InterpCtx {
+    //            prog: Vec<u8>,
+    //            pc: usize,
+    //            run: u8,
+    //        }
+    //
+    //        #[interp_step]
+    //        fn simple_interp_step(ctx: &mut InterpCtx) -> bool {
+    //            match ctx.prog[ctx.pc] {
+    //                INC => {
+    //                    ctx.pc += 1;
+    //                    if ctx.run > 0 {
+    //                        ctx.run += 1;
+    //                    }
+    //                }
+    //                RESTART => ctx.pc = 0,
+    //                _ => unreachable!(),
+    //            };
+    //            true
+    //        }
+    //
+    //        let mut ctx = InterpCtx {
+    //            prog,
+    //            pc: 0,
+    //            run: 0,
+    //        };
+    //
+    //        // Run until a trace has been compiled.
+    //        loop {
+    //            let loc = locs[ctx.pc].as_ref();
+    //            if ctx.pc == 0
+    //                && hotlocation_discriminant(&loc.unwrap())
+    //                    == Some(HotLocationDiscriminants::Compiled)
+    //            {
+    //                break;
+    //            }
+    //            mtt.control_point(locs[ctx.pc].as_ref(), simple_interp_step, &mut ctx);
+    //        }
+    //
+    //        assert_eq!(ctx.pc, 0);
+    //        assert_eq!(ctx.run, 0);
+    //
+    //        // Now fail a guard.
+    //        ctx.run = 1;
+    //        let loc = locs[ctx.pc].as_ref();
+    //        mtt.control_point(loc, simple_interp_step, &mut ctx);
+    //        assert_eq!(ctx.run, 2);
+    //    }
+    //
+    //    /// Tests that the stopgap interpreter returns the correct boolean to abort interpreting.
+    //    #[test]
+    //    fn loop_interpreter() {
+    //        let mut mtt = MTBuilder::new().unwrap().hot_threshold(2).unwrap().build();
+    //
+    //        let loc = Location::new();
+    //
+    //        struct InterpCtx {
+    //            counter: u8,
+    //        }
+    //
+    //        #[interp_step]
+    //        fn simple_interp_step(ctx: &mut InterpCtx) -> bool {
+    //            let a = ctx.counter;
+    //            if ctx.counter < 100 {
+    //                ctx.counter = a + 1;
+    //            } else {
+    //                ctx.counter = a + 2;
+    //            }
+    //            if ctx.counter > 110 {
+    //                return true; // Exit the interpreter.
+    //            }
+    //            false
+    //        }
+    //
+    //        let mut ctx = InterpCtx { counter: 0 };
+    //
+    //        // Run until we have compiled a trace.
+    //        loop {
+    //            ctx.counter = 0; // make sure we don't overflow
+    //            mtt.control_point(Some(&loc), simple_interp_step, &mut ctx);
+    //            if hotlocation_discriminant(&loc) == Some(HotLocationDiscriminants::Compiled) {
+    //                break;
+    //            }
+    //        }
+    //
+    //        // Now reset counter and run the compiled trace until a guard fails.
+    //        ctx.counter = 100;
+    //        loop {
+    //            if mtt.control_point(Some(&loc), simple_interp_step, &mut ctx) {
+    //                break;
+    //            }
+    //        }
+    //
+    //        assert_eq!(ctx.counter, 112);
+    //    }
+}
