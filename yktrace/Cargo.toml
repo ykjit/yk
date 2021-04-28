@@ -5,10 +5,17 @@ authors = ["The Yorick Developers"]
 edition = "2018"
 license = "Apache-2.0 OR MIT"
 
+[lib]
+crate-type = ["dylib"]
+
 [dependencies]
+byteorder = "1.4.3"
+fxhash = "0.2.1"
 gimli = "0.23.0"
 hwtracer = { git = "https://github.com/softdevteam/hwtracer" }
+leb128 = "0.2.4"
 libc = "0.2.82"
+memmap2 = "0.2.2"
 phdrs = { git = "https://github.com/softdevteam/phdrs" }
 
 [dependencies.object]
@@ -19,3 +26,6 @@ features = ["read_core", "elf"]
 [dev-dependencies]
 fm = "0.2.0"
 regex = "1.4.3"
+
+[features]
+c_testing = []
