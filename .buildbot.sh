@@ -23,6 +23,34 @@ export PATH=${CARGO_HOME}/bin/:$PATH
 rustup toolchain install nightly --allow-downgrade --component rustfmt
 
 cargo fmt --all -- --check
+
+# Run the Rust tests.
 cargo test
 cargo test --release
 cargo bench
+
+# Build LLVM for the C tests.
+#
+# This is required because we have an un-upstreamed patch to get the post-LTO
+# blockmap section into the end binaries.
+#
+# Also note that this is a fork of Rust's fork, as we hope to get all of this
+# working for Rust binaries one day. Blocker:
+# https://github.com/rust-lang/rust/issues/84395
+cd target
+git clone -b yk/12.0-2021-04-15 https://github.com/vext01/llvm-project
+cd llvm-project
+mkdir build
+cd build
+cmake -DCMAKE_INSTALL_PREFIX=`pwd`/inst \
+    -DLLVM_INSTALL_UTILS=On \
+    -DCMAKE_BUILD_TYPE=release \
+    -DLLVM_ENABLE_ASSERTIONS=On \
+    -DLLVM_ENABLE_PROJECTS="lld;clang" \
+    ../llvm
+make -j `nproc` install
+export PATH=`pwd`/inst/bin:${PATH}
+cd ../../..
+
+# Run the C tests.
+make
