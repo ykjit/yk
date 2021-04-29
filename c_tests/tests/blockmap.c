@@ -1,3 +1,6 @@
+// Compiler:
+// Run-time:
+
 // Check the blockmap for this test program contains blocks.
 
 #include <stdio.h>

@@ -1,0 +1,19 @@
+[package]
+name = "c_tests"
+version = "0.1.0"
+authors = ["The Yorick Developers"]
+edition = "2018"
+license = "Apache-2.0 OR MIT"
+
+[[test]]
+name = "c_tests"
+path = "run.rs"
+harness = false
+
+[dependencies]
+tempfile = "3.2.0"
+yktrace = { path = "../yktrace", features = ["c_testing"] }
+
+[dev-dependencies]
+lang_tester = "0.5.0"
+tempfile = "3.2.0"
