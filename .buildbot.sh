@@ -37,14 +37,14 @@ git clone -b yk/12.0-2021-04-15 https://github.com/vext01/llvm-project
 cd llvm-project
 mkdir build
 cd build
-cmake -DCMAKE_INSTALL_PREFIX=`pwd`/inst \
+cmake -DCMAKE_INSTALL_PREFIX=`pwd`/../inst \
     -DLLVM_INSTALL_UTILS=On \
     -DCMAKE_BUILD_TYPE=release \
     -DLLVM_ENABLE_ASSERTIONS=On \
     -DLLVM_ENABLE_PROJECTS="lld;clang" \
     ../llvm
 make -j `nproc` install
-export PATH=`pwd`/inst/bin:${PATH}
+export PATH=`pwd`/../inst/bin:${PATH}
 cd ../../..
 
 cargo test
