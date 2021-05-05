@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "c_tests",
+    "ykllvmwrap",
     "ykrt",
     "yktrace",
 ]
