@@ -7,6 +7,7 @@
 #include <dlfcn.h>
 #include <llvm/DebugInfo/Symbolize/Symbolize.h>
 #include <string.h>
+#include <link.h>
 
 using namespace llvm;
 using namespace llvm::symbolize;
@@ -21,23 +22,10 @@ extern "C" void __yk_symbolizer_free(LLVMSymbolizer *Symbolizer) {
 
 // Finds the name of a code symbol from a virtual address.
 // The caller is responsible for freeing the returned (heap-allocated) C string.
-extern "C" char *__yk_symbolizer_find_code_sym(LLVMSymbolizer *Symbolizer, void *Vaddr) {
-    // Find which of the loaded objects holds this virtual address.
-    Dl_info Info;
-    if (dladdr(Vaddr, &Info) == 0 ) {
-        return NULL;
-    }
-
-    // Find the corresponding offset of vaddr from the start of the object.
-    auto Offs = (uintptr_t) Vaddr - (uintptr_t) Info.dli_fbase;
-
-    // Use the LLVM symbolizer to find the symbol name. Note that we don't
-    // simply rely on `Info.dli_sname`, as `dl_addr()` can only find a subset
-    // of symbols -- those exported -- and we don't want users to have to link
-    // with --export-dynamic.
-    auto LineInfo = Symbolizer->symbolizeCode(Info.dli_fname,
-        {Offs, object::SectionedAddress::UndefSection});
-    if (auto err = LineInfo.takeError()) {
+extern "C" char *__yk_symbolizer_find_code_sym(LLVMSymbolizer *Symbolizer, const char *Obj, uint64_t Off) {
+    object::SectionedAddress Mod{Off, object::SectionedAddress::UndefSection};
+    auto LineInfo = Symbolizer->symbolizeCode(Obj, Mod);
+    if (auto Err = LineInfo.takeError()) {
         return NULL;
     }
 

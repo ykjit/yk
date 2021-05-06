@@ -1,14 +1,11 @@
 [package]
-name = "ykllvmwrap"
+name = "ykutil"
 version = "0.1.0"
 authors = ["The Yorick Developers"]
 edition = "2018"
 license = "Apache-2.0 OR MIT"
 
 [dependencies]
-cc = "1.0.67"
-libc = "0.2.94"
-ykutil = { path = "../ykutil" }
-
-[build-dependencies]
-cc = "1.0.67"
+libc = "0.2.82"
+once_cell = "1.7.2"
+phdrs = { git = "https://github.com/softdevteam/phdrs" }
