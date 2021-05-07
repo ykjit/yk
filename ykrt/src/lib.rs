@@ -2,6 +2,7 @@
 
 #![cfg_attr(test, feature(test))]
 
+mod capi;
 mod location;
 pub(crate) mod mt;
 

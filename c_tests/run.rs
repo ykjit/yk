@@ -12,22 +12,29 @@ const COMMENT: &str = "//";
 /// Make a compiler command that compiles `src` to `exe`.
 fn mk_compiler(exe: &Path, src: &Path) -> Command {
     let mut compiler = Command::new("clang");
+
     let mut lib_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     lib_dir.push("..");
     lib_dir.push("target");
-
     #[cfg(cargo_profile = "debug")]
     lib_dir.push("debug");
     #[cfg(cargo_profile = "release")]
     lib_dir.push("release");
 
+    let mut ykrt_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    ykrt_dir.push("..");
+    ykrt_dir.push("ykrt");
+
     compiler.args(&[
         "-fuse-ld=lld",
         "-flto",
         "-Wl,--plugin-opt=-lto-embed-bitcode=optimized",
+        "-I",
+        ykrt_dir.to_str().unwrap(),
         "-L",
         lib_dir.to_str().unwrap(),
         "-lyktrace",
+        "-lykrt",
         "-o",
         exe.to_str().unwrap(),
         src.to_str().unwrap(),

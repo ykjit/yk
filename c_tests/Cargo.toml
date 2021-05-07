@@ -12,6 +12,7 @@ harness = false
 
 [dependencies]
 tempfile = "3.2.0"
+ykrt = { path = "../ykrt" }
 yktrace = { path = "../yktrace", features = ["c_testing"] }
 
 [dev-dependencies]
