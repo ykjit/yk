@@ -20,21 +20,21 @@ fn mk_compiler(exe: &Path, src: &Path) -> Command {
     lib_dir.push("debug");
     #[cfg(cargo_profile = "release")]
     lib_dir.push("release");
+    lib_dir.push("deps");
 
-    let mut ykrt_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    ykrt_dir.push("..");
-    ykrt_dir.push("ykrt");
+    let mut ykcapi_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    ykcapi_dir.push("..");
+    ykcapi_dir.push("ykcapi");
 
     compiler.args(&[
         "-fuse-ld=lld",
         "-flto",
         "-Wl,--plugin-opt=-lto-embed-bitcode=optimized",
         "-I",
-        ykrt_dir.to_str().unwrap(),
+        ykcapi_dir.to_str().unwrap(),
         "-L",
         lib_dir.to_str().unwrap(),
-        "-lyktrace",
-        "-lykrt",
+        "-lykcapi",
         "-o",
         exe.to_str().unwrap(),
         src.to_str().unwrap(),

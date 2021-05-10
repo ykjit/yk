@@ -1,0 +1,17 @@
+[package]
+name = "ykcapi"
+version = "0.1.0"
+authors = ["The Yorick Developers"]
+edition = "2018"
+license = "Apache-2.0 OR MIT"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ykllvmwrap = { path = "../ykllvmwrap" }
+ykrt = { path = "../ykrt" }
+yktrace = { path = "../yktrace" }
+
+[features]
+c_testing = []

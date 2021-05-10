@@ -10,11 +10,7 @@ name = "c_tests"
 path = "run.rs"
 harness = false
 
-[dependencies]
-tempfile = "3.2.0"
-ykrt = { path = "../ykrt" }
-yktrace = { path = "../yktrace", features = ["c_testing"] }
-
 [dev-dependencies]
 lang_tester = "0.5.0"
 tempfile = "3.2.0"
+ykcapi = { path = "../ykcapi", features = ["c_testing"] }

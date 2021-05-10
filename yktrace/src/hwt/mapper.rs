@@ -97,26 +97,3 @@ impl HWTMapper {
 fn get_phdr_offset() -> u64 {
     (&objects()[0]).addr() as u64
 }
-
-#[cfg(feature = "c_testing")]
-mod c_testing {
-    use super::BlockMap;
-
-    #[no_mangle]
-    pub extern "C" fn yktrace_hwt_mapper_blockmap_new() -> *mut BlockMap {
-        Box::into_raw(Box::new(BlockMap::new()))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn yktrace_hwt_mapper_blockmap_free(bm: *mut BlockMap) {
-        unsafe { Box::from_raw(bm) };
-    }
-
-    #[no_mangle]
-    pub extern "C" fn yktrace_hwt_mapper_blockmap_len(bm: *mut BlockMap) -> usize {
-        let bm = unsafe { Box::from_raw(bm) };
-        let ret = bm.len();
-        Box::leak(bm);
-        ret
-    }
-}
