@@ -48,6 +48,8 @@ pub struct MT {
 }
 
 impl MT {
+    /// Return a reference to the global [`MT`] instance: at any point, there is at most one of
+    /// these per process and an instance will be created if it does not already exist.
     pub fn global() -> &'static Self {
         &*GLOBAL_MT
     }
@@ -66,17 +68,20 @@ impl MT {
         }
     }
 
-    /// Return this meta-tracer's hot threshold.
+    /// Return this `MT` instance's current hot threshold. Notice that this value can be changed by
+    /// other threads and is thus potentially stale as soon as it is read.
     pub fn hot_threshold(&self) -> HotThreshold {
         self.inner.hot_threshold.load(Ordering::Relaxed)
     }
 
-    /// Return this meta-tracer's maximum number of worker threads.
+    /// Return this meta-tracer's maximum number of worker threads. Notice that this value can be
+    /// changed by other threads and is thus potentially stale as soon as it is read.
     pub fn max_worker_threads(&self) -> usize {
         self.inner.max_worker_threads.load(Ordering::Relaxed)
     }
 
-    /// Return the kind of tracing that this meta-tracer is using.
+    /// Return the kind of tracing that this meta-tracer is using. Notice that this value can be
+    /// changed by other threads and is thus potentially stale as soon as it is read.
     pub fn tracing_kind(&self) -> TracingKind {
         self.inner.tracing_kind
     }
@@ -119,7 +124,9 @@ impl MT {
         }
     }
 
-    /// Attempt to execute a compiled trace for location `loc`.
+    /// Attempt to execute a compiled trace for location `loc`. `None` may be passed to `loc` to
+    /// indicate that this particular point in the user's program cannot ever be the beginning of a
+    /// trace.
     pub fn control_point(&self, loc: Option<&Location>) {
         // If a loop can start at this position then update the location and potentially start/stop
         // this thread's tracer.

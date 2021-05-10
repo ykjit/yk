@@ -27,6 +27,7 @@ use yktrace::{CompiledTrace, ThreadTracer};
 /// interpreters that can't (or don't want) to be as selective, a simple (if moderately wasteful)
 /// mechanism is for every bytecode or AST node to have its own `Location` (even for bytecodes or
 /// nodes that can't be control points).
+#[repr(C)]
 #[derive(Debug)]
 pub struct Location {
     // A Location is a state machine which operates as follows (where Counting is the start
