@@ -1,7 +1,7 @@
 // Compiler:
 // Run-time:
 
-#include "ykrt.h"
+#include <yk.h>
 
 int
 main(int argc, char **argv)

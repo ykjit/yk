@@ -4,6 +4,7 @@ mod errors;
 mod hwt;
 
 pub use errors::InvalidTraceError;
+pub use hwt::mapper::BlockMap;
 
 /// The different ways by which we can collect a trace.
 #[derive(Clone, Copy)]
