@@ -29,12 +29,12 @@ pub extern "C" fn yk_control_point(mt: *mut MT, loc: *mut Location) {
 }
 
 #[no_mangle]
-pub extern "C" fn yk_new_location() -> Location {
+pub extern "C" fn yk_location_new() -> Location {
     Location::new()
 }
 
 #[no_mangle]
-pub extern "C" fn yk_drop_location(loc: *mut Location) {
+pub extern "C" fn yk_location_drop(loc: Location) {
     drop(loc)
 }
 
