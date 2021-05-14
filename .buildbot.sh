@@ -25,16 +25,9 @@ rustup toolchain install nightly --allow-downgrade --component rustfmt
 cargo fmt --all -- --check
 
 # Build LLVM for the C tests.
-#
-# This is required because we have an un-upstreamed patch to get the post-LTO
-# blockmap section into the end binaries.
-#
-# Also note that this is a fork of Rust's fork, as we hope to get all of this
-# working for Rust binaries one day. Blocker:
-# https://github.com/rust-lang/rust/issues/84395
 mkdir -p target && cd target
-git clone -b yk/12.0-2021-04-15 https://github.com/vext01/llvm-project
-cd llvm-project
+git clone https://github.com/ykjit/ykllvm
+cd ykllvm
 mkdir build
 cd build
 cmake -DCMAKE_INSTALL_PREFIX=`pwd`/../inst \
