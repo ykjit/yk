@@ -30,6 +30,7 @@ fn mk_compiler(exe: &Path, src: &Path) -> Command {
         "-fuse-ld=lld",
         "-flto",
         "-Wl,--plugin-opt=-lto-embed-bitcode=optimized",
+        "-Wl,--lto-basic-block-sections=labels",
         "-I",
         ykcapi_dir.to_str().unwrap(),
         "-L",
