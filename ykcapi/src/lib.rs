@@ -42,7 +42,11 @@ pub extern "C" fn yk_location_drop(loc: Location) {
 /// These symbols are not shipped as part of the main API.
 #[cfg(feature = "c_testing")]
 mod c_testing {
-    use yktrace::BlockMap;
+    use std::{ffi::CString, mem, os::raw::c_char};
+    use yktrace::{start_tracing, BlockMap, IRTrace, ThreadTracer, TracingKind};
+
+    const SW_TRACING: usize = 0;
+    const HW_TRACING: usize = 1;
 
     #[no_mangle]
     pub extern "C" fn __yktrace_hwt_mapper_blockmap_new() -> *mut BlockMap {
@@ -58,7 +62,55 @@ mod c_testing {
     pub extern "C" fn __yktrace_hwt_mapper_blockmap_len(bm: *mut BlockMap) -> usize {
         let bm = unsafe { Box::from_raw(bm) };
         let ret = bm.len();
-        Box::leak(bm);
+        mem::forget(bm);
         ret
+    }
+
+    #[no_mangle]
+    pub extern "C" fn __yktrace_start_tracing(kind: usize) -> *mut ThreadTracer {
+        let kind: TracingKind = match kind {
+            SW_TRACING => TracingKind::SoftwareTracing,
+            HW_TRACING => TracingKind::HardwareTracing,
+            _ => panic!(),
+        };
+        Box::into_raw(Box::new(start_tracing(kind)))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn __yktrace_stop_tracing(tt: *mut ThreadTracer) -> *mut IRTrace {
+        let tt = unsafe { Box::from_raw(tt) };
+        Box::into_raw(Box::new(tt.stop_tracing().unwrap())) as *mut _
+    }
+
+    #[no_mangle]
+    pub extern "C" fn __yktrace_irtrace_len(trace: *mut IRTrace) -> usize {
+        let trace = unsafe { Box::from_raw(trace) };
+        let ret = trace.len();
+        mem::forget(trace);
+        ret
+    }
+
+    /// Fetches the function name (`res_func`) and the block index (`res_bb`) at position `idx` in
+    /// `trace`. The caller must free() the function name.
+    #[no_mangle]
+    pub extern "C" fn __yktrace_irtrace_get(
+        trace: *mut IRTrace,
+        idx: usize,
+        res_func: *mut *mut c_char,
+        res_bb: *mut usize,
+    ) {
+        let trace = unsafe { Box::from_raw(trace) };
+        let blk = trace.get(idx).unwrap();
+        let c_func = CString::new(blk.func_name()).unwrap();
+        unsafe {
+            *res_func = c_func.into_raw();
+            *res_bb = blk.bb();
+        }
+        mem::forget(trace);
+    }
+
+    #[no_mangle]
+    pub extern "C" fn __yktrace_drop_irtrace(trace: *mut IRTrace) {
+        unsafe { Box::from_raw(trace) };
     }
 }

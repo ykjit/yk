@@ -25,11 +25,22 @@ impl Default for TracingKind {
 }
 
 /// A globally unique block ID for an LLVM IR block.
+#[derive(Debug)]
 pub struct IRBlock {
     /// The name of the function containing the block.
-    _func_name: String,
+    func_name: String,
     /// The index of the block within the function.
-    _bb: usize,
+    bb: usize,
+}
+
+impl IRBlock {
+    pub fn func_name(&self) -> &str {
+        &self.func_name
+    }
+
+    pub fn bb(&self) -> usize {
+        self.bb
+    }
 }
 
 /// An LLVM IR trace.
@@ -45,8 +56,12 @@ impl IRTrace {
         Self { blocks }
     }
 
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.blocks.len()
+    }
+
+    pub fn get(&self, idx: usize) -> Option<&IRBlock> {
+        self.blocks.get(idx)
     }
 }
 

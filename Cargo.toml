@@ -5,4 +5,5 @@ members = [
     "ykllvmwrap",
     "ykrt",
     "yktrace",
+    "ykutil",
 ]

@@ -2,39 +2,43 @@
 
 use crate::IRBlock;
 use byteorder::{NativeEndian, ReadBytesExt};
-use fxhash::FxHashMap;
 use hwtracer::{HWTracerError, Trace};
+use intervaltree::{self, IntervalTree};
 use memmap2;
 use object::{Object, ObjectSection};
-use phdrs::objects;
+use once_cell::sync::Lazy;
 use std::{
     convert::TryFrom,
     env, fs,
     io::{prelude::*, Cursor, SeekFrom},
 };
+use ykllvmwrap::symbolizer::Symbolizer;
+use ykutil::addr::code_vaddr_to_off;
 
 const BLOCK_MAP_SEC: &str = ".llvm_bb_addr_map";
+static BLOCK_MAP: Lazy<BlockMap> = Lazy::new(|| BlockMap::new());
 
 /// The information for one basic block, as per:
 /// https://llvm.org/docs/Extensions.html#sht-llvm-bb-addr-map-section-basic-block-address-map
+#[derive(Debug)]
 #[allow(dead_code)]
 struct BlockMapEntry {
     /// Function offset.
     f_off: u64,
     /// Basic block number.
-    bb: u8,
+    bb: usize,
 }
 
 /// Maps (unrelocated) block offsets to their corresponding block map entry.
 pub struct BlockMap {
-    map: FxHashMap<usize, BlockMapEntry>,
+    tree: IntervalTree<u64, BlockMapEntry>,
 }
 
 impl BlockMap {
     /// Parse the LLVM blockmap section of the current executable and return a struct holding the
     /// mappings.
     pub fn new() -> Self {
-        let mut map = FxHashMap::default();
+        let mut elems = Vec::new();
         let pathb = env::current_exe().unwrap();
         let file = fs::File::open(&pathb.as_path()).unwrap();
         let mmap = unsafe { memmap2::Mmap::map(&file).unwrap() };
@@ -46,54 +50,123 @@ impl BlockMap {
         // Keep reading records until we fall outside of the section's bounds.
         while crsr.position() < sec_size {
             let f_off = crsr.read_u64::<NativeEndian>().unwrap();
-            let n_blks = crsr.read_u8().unwrap();
+            let n_blks = leb128::read::unsigned(&mut crsr).unwrap();
             for bb in 0..n_blks {
                 let b_off = leb128::read::unsigned(&mut crsr).unwrap();
                 // Skip the block size. We still have to parse the field, as it's variable-size.
-                let _b_sz = leb128::read::unsigned(&mut crsr).unwrap();
+                let b_sz = leb128::read::unsigned(&mut crsr).unwrap();
                 // Skip over block meta-data.
                 crsr.seek(SeekFrom::Current(1)).unwrap();
 
-                map.insert(
-                    usize::try_from(f_off + b_off).unwrap(),
-                    BlockMapEntry { f_off, bb },
-                );
+                let lo = f_off + b_off;
+                let hi = lo + b_sz;
+                elems.push((
+                    (lo..hi),
+                    BlockMapEntry {
+                        f_off,
+                        bb: usize::try_from(bb).unwrap(),
+                    },
+                ));
             }
         }
-        Self { map }
+        Self {
+            tree: elems.into_iter().collect::<IntervalTree<_, _>>(),
+        }
     }
 
     pub fn len(&self) -> usize {
-        self.map.len()
+        self.tree.iter().count()
+    }
+
+    /// Queries the blockmap for blocks whose address range coincides with `start_off..end_off`.
+    fn query(
+        &self,
+        start_off: u64,
+        end_off: u64,
+    ) -> intervaltree::QueryIter<'_, u64, BlockMapEntry> {
+        self.tree.query(start_off..end_off)
     }
 }
 
 pub struct HWTMapper {
-    phdr_offset: u64,
+    symb: Symbolizer,
 }
 
 impl HWTMapper {
     pub(super) fn new() -> HWTMapper {
-        let phdr_offset = get_phdr_offset();
-        HWTMapper { phdr_offset }
+        Self {
+            symb: Symbolizer::new(),
+        }
     }
 
     /// Maps each entry of a hardware trace back the IR block from whence it was compiled.
     pub(super) fn map_trace(&self, trace: Box<dyn Trace>) -> Result<Vec<IRBlock>, HWTracerError> {
-        let blocks = Vec::new();
-        for block in trace.iter_blocks() {
+        let mut ret_irblocks = Vec::new();
+        let mut itr = trace.iter_blocks();
+        while let Some(block) = itr.next() {
             let block = block?;
-
-            // FIXME If the mapping using LLVM is precise, we might be able to get rid of end_addr?
-            let _start_addr = usize::try_from(block.first_instr() - self.phdr_offset).unwrap();
-            let _end_addr = usize::try_from(block.last_instr() - self.phdr_offset).unwrap();
-            todo!(); // FIXME use LLVM mapping info to find the right block in IR.
+            let irblocks = self.map_block(&block);
+            if !ret_irblocks.is_empty() && irblocks.is_empty() {
+                // Once we have seen the last block that can be mapped we are done.
+                break;
+            } else {
+                ret_irblocks.extend(irblocks);
+            }
         }
-        Ok(blocks)
-    }
-}
+        // No remaining blocks in the iterator should be mappable. If any can be, then we have
+        // unmappable blocks in the middle of the trace and something is wrong.
+        debug_assert!(itr.all(|block| self.map_block(&block.unwrap()).is_empty()));
 
-/// Extract the program header offset.
-fn get_phdr_offset() -> u64 {
-    (&objects()[0]).addr() as u64
+        Ok(ret_irblocks)
+    }
+
+    /// Maps one PT block to one or many LLVM IR blocks.
+    ///
+    /// The reason that there may be many corresponding blocks is due to the following scenario.
+    ///
+    /// Suppose that the LLVM IR looked like this:
+    ///
+    ///   bb1:
+    ///     ...
+    ///     br bb2;
+    ///   bb2:
+    ///     ...
+    ///
+    /// During codegen LLVM may remove the unconditional jump and simply place bb1 and bb2
+    /// consecutively, allowing bb1 to fall-thru to bb2. In the eyes of the PT block decoder, a
+    /// fall-thru does not terminate a block, so whereas LLVM sees two blocks, PT sees only one.
+    fn map_block(&self, block: &hwtracer::Block) -> Vec<IRBlock> {
+        let block_vaddr = block.first_instr();
+        let (obj_name, block_off) = code_vaddr_to_off(block_vaddr as usize).unwrap();
+        let block_len = block.last_instr() - block_vaddr;
+
+        let mut ret = Vec::new();
+        let mut ents = BLOCK_MAP
+            .query(block_off, block_off + block_len)
+            .collect::<Vec<_>>();
+
+        // If a PT block maps to multiple IR blocks, then the IR blocks should be at consecutive
+        // addresses (they should be related only by "fall-thru", without control flow dispatch, as
+        // depicted in the above doc string). For debug builds, we check this.
+        #[cfg(debug_assertions)]
+        let mut prev_ent: Option<&intervaltree::Element<_, _>> = None;
+
+        ents.sort_by(|x, y| x.range.start.partial_cmp(&y.range.start).unwrap());
+        for ent in ents {
+            #[cfg(debug_assertions)]
+            {
+                if let Some(prev) = prev_ent {
+                    debug_assert!(ent.range.start == prev.range.end);
+                }
+                prev_ent = Some(ent);
+            }
+
+            let func_name = self.symb.find_code_sym(obj_name, ent.value.f_off).unwrap();
+            ret.push(IRBlock {
+                func_name,
+                bb: ent.value.bb,
+            });
+        }
+        ret
+    }
 }
