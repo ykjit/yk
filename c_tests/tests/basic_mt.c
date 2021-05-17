@@ -6,7 +6,7 @@
 int
 main(int argc, char **argv)
 {
-    MT *mt = yk_mt();
+    YkMT *mt = yk_mt();
     YkLocation loc = yk_location_new();
     for (int i = 0; i < yk_mt_hot_threshold(mt); i++) {
         yk_control_point(mt, &loc);

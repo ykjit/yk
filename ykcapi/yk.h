@@ -5,7 +5,7 @@
 
 /// A meta-tracer.
 struct MT;
-typedef struct MT MT;
+typedef struct MT YkMT;
 
 // A `Location` stores state that the meta-tracer needs to identify hot loops
 // and run associated machine code.
@@ -33,17 +33,17 @@ typedef uint32_t YkHotThreshold;
 // Return a reference to the global `MT` instance: at any point, there is at
 // most one of these per process and an instance will be created if it does not
 // already exist.
-MT *yk_mt(void);
+YkMT *yk_mt(void);
 
 // Return this `MT` instance's current hot threshold. Notice that this value
 // can be changed by other threads and is thus potentially stale as soon as it
 // is read.
-YkHotThreshold yk_mt_hot_threshold(MT *);
+YkHotThreshold yk_mt_hot_threshold(YkMT *);
 
 // Attempt to execute a compiled trace for location `loc`. `NULL` may be passed
 // to `loc` to indicate that this particular point in the user's program cannot
 // ever be the beginning of a trace.
-void yk_control_point(MT *, YkLocation *);
+void yk_control_point(YkMT *, YkLocation *);
 
 // Create a new `Location`.
 //
