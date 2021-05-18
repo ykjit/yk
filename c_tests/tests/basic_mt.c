@@ -10,6 +10,7 @@ main(int argc, char **argv)
     YkLocation loc = yk_location_new();
     for (int i = 0; i < yk_mt_hot_threshold(mt); i++) {
         yk_control_point(mt, &loc);
+        yk_stopgap_safe();
     }
     yk_location_drop(loc);
     return 0;

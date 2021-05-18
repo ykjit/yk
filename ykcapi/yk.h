@@ -45,6 +45,13 @@ YkHotThreshold yk_mt_hot_threshold(MT *);
 // ever be the beginning of a trace.
 void yk_control_point(MT *, YkLocation *);
 
+// Mark this point in the program as being a safe point for the stopgap
+// interpreter to transition back to normal program execution. Typical stopgap
+// safe points are at the backwards jump(s) of an interpreter's main for/while
+// loop. If, for example, your interpreter uses interpreted gotos, you may want
+// to mark multiple locations as stopgap safe.
+void yk_stopgap_safe();
+
 // Create a new `Location`.
 //
 // Note that a `Location` created by this call must not simply be discarded: if

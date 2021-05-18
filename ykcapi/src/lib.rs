@@ -29,6 +29,12 @@ pub extern "C" fn yk_control_point(mt: *mut MT, loc: *mut Location) {
 }
 
 #[no_mangle]
+pub extern "C" fn yk_stopgap_safe() {
+    // This function is a marker for the trace compiler. It might need to become an LLVM builtin,
+    // or we may need to add an LLVM annotation or ...
+}
+
+#[no_mangle]
 pub extern "C" fn yk_location_new() -> Location {
     Location::new()
 }
