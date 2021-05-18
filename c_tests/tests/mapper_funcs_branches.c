@@ -43,7 +43,6 @@ main(int argc, char **argv)
         } else {
             assert(strcmp(func_name, "add_one_or_two") == 0);
         }
-        free(func_name);
     }
 
     __yktrace_drop_irtrace(tr);

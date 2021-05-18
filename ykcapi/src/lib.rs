@@ -42,7 +42,7 @@ pub extern "C" fn yk_location_drop(loc: Location) {
 /// These symbols are not shipped as part of the main API.
 #[cfg(feature = "c_testing")]
 mod c_testing {
-    use std::{ffi::CString, mem, os::raw::c_char};
+    use std::{mem, os::raw::c_char};
     use yktrace::{start_tracing, BlockMap, IRTrace, ThreadTracer, TracingKind};
 
     const SW_TRACING: usize = 0;
@@ -91,19 +91,18 @@ mod c_testing {
     }
 
     /// Fetches the function name (`res_func`) and the block index (`res_bb`) at position `idx` in
-    /// `trace`. The caller must free() the function name.
+    /// `trace`.
     #[no_mangle]
     pub extern "C" fn __yktrace_irtrace_get(
         trace: *mut IRTrace,
         idx: usize,
-        res_func: *mut *mut c_char,
+        res_func: *mut *const c_char,
         res_bb: *mut usize,
     ) {
         let trace = unsafe { Box::from_raw(trace) };
         let blk = trace.get(idx).unwrap();
-        let c_func = CString::new(blk.func_name()).unwrap();
         unsafe {
-            *res_func = c_func.into_raw();
+            *res_func = blk.func_name().as_ptr();
             *res_bb = blk.bb();
         }
         mem::forget(trace);
