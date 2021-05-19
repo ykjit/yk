@@ -112,4 +112,9 @@ mod c_testing {
     pub extern "C" fn __yktrace_drop_irtrace(trace: *mut IRTrace) {
         unsafe { Box::from_raw(trace) };
     }
+
+    #[no_mangle]
+    pub extern "C" fn __yktrace_irtrace_compile(trace: *mut IRTrace) {
+        unsafe { &*trace }.compile();
+    }
 }

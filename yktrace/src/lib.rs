@@ -64,6 +64,17 @@ impl IRTrace {
     pub fn get(&self, idx: usize) -> Option<&IRBlock> {
         self.blocks.get(idx)
     }
+
+    pub fn compile(&self) {
+        let len = self.len();
+        let mut func_names = Vec::with_capacity(len);
+        let mut bbs = Vec::with_capacity(len);
+        for blk in &self.blocks {
+            func_names.push(blk.func_name().as_ptr());
+            bbs.push(blk.bb());
+        }
+        unsafe { ykllvmwrap::__ykllvmwrap_irtrace_compile(func_names.as_ptr(), bbs.as_ptr(), len) }
+    }
 }
 
 /// Binary executable trace code.

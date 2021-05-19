@@ -32,3 +32,16 @@ extern "C" char *__yk_symbolizer_find_code_sym(LLVMSymbolizer *Symbolizer, const
     // OPTIMISE_ME: get rid of heap allocation.
     return strdup(LineInfo->FunctionName.c_str());
 }
+
+/// Compiles an IRTrace to executable code in memory.
+//
+// The trace to compile is passed in as two arrays of length Len. Then each
+// (FuncName[I], BBs[I]) pair identifies the LLVM block at position `I` in the
+// trace.
+extern "C" void __ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[], size_t Len) {
+    for (size_t Idx = 0; Idx < Len; Idx++) {
+        // FIXME populate.
+        //auto FuncName = FuncNames[Idx];
+        //auto BB = BBs[Idx];
+    }
+}
