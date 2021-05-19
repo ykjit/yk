@@ -22,7 +22,6 @@ main(int argc, char **argv)
     assert(strcmp(func_name, "main") == 0);
     assert(bb == 0);
 
-    free(func_name);
     __yktrace_drop_irtrace(tr);
 
     return (EXIT_SUCCESS);

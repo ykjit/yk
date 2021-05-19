@@ -1,6 +1,7 @@
 //! Utilities for collecting and decoding traces.
 
 mod errors;
+use std::ffi::{CStr, CString};
 mod hwt;
 
 pub use errors::InvalidTraceError;
@@ -28,14 +29,14 @@ impl Default for TracingKind {
 #[derive(Debug)]
 pub struct IRBlock {
     /// The name of the function containing the block.
-    func_name: String,
+    func_name: CString,
     /// The index of the block within the function.
     bb: usize,
 }
 
 impl IRBlock {
-    pub fn func_name(&self) -> &str {
-        &self.func_name
+    pub fn func_name(&self) -> &CStr {
+        &self.func_name.as_c_str()
     }
 
     pub fn bb(&self) -> usize {
