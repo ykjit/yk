@@ -60,10 +60,7 @@ mod c_testing {
 
     #[no_mangle]
     pub extern "C" fn __yktrace_hwt_mapper_blockmap_len(bm: *mut BlockMap) -> usize {
-        let bm = unsafe { Box::from_raw(bm) };
-        let ret = bm.len();
-        mem::forget(bm);
-        ret
+        unsafe { &*bm }.len()
     }
 
     #[no_mangle]
@@ -84,10 +81,7 @@ mod c_testing {
 
     #[no_mangle]
     pub extern "C" fn __yktrace_irtrace_len(trace: *mut IRTrace) -> usize {
-        let trace = unsafe { Box::from_raw(trace) };
-        let ret = trace.len();
-        mem::forget(trace);
-        ret
+        unsafe { &*trace }.len()
     }
 
     /// Fetches the function name (`res_func`) and the block index (`res_bb`) at position `idx` in
@@ -99,17 +93,21 @@ mod c_testing {
         res_func: *mut *const c_char,
         res_bb: *mut usize,
     ) {
-        let trace = unsafe { Box::from_raw(trace) };
+        let trace = unsafe { &*trace };
         let blk = trace.get(idx).unwrap();
         unsafe {
             *res_func = blk.func_name().as_ptr();
             *res_bb = blk.bb();
         }
-        mem::forget(trace);
     }
 
     #[no_mangle]
     pub extern "C" fn __yktrace_drop_irtrace(trace: *mut IRTrace) {
         unsafe { Box::from_raw(trace) };
+    }
+
+    #[no_mangle]
+    pub extern "C" fn __yktrace_irtrace_compile(trace: *mut IRTrace) {
+        unsafe { &*trace }.compile();
     }
 }
