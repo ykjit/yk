@@ -12,17 +12,21 @@
 using namespace llvm;
 using namespace llvm::symbolize;
 
-extern "C" LLVMSymbolizer *__yk_symbolizer_new() {
+extern "C" LLVMSymbolizer *__yk_llvmwrap_symbolizer_new() {
     return new LLVMSymbolizer;
 }
 
-extern "C" void __yk_symbolizer_free(LLVMSymbolizer *Symbolizer) {
+extern "C" void __yk_llvmwrap_symbolizer_free(LLVMSymbolizer *Symbolizer) {
     delete Symbolizer;
 }
 
 // Finds the name of a code symbol from a virtual address.
 // The caller is responsible for freeing the returned (heap-allocated) C string.
-extern "C" char *__yk_symbolizer_find_code_sym(LLVMSymbolizer *Symbolizer, const char *Obj, uint64_t Off) {
+extern "C" char *__yk_llvmwrap_symbolizer_find_code_sym(
+    LLVMSymbolizer *Symbolizer,
+    const char *Obj,
+    uint64_t Off)
+{
     object::SectionedAddress Mod{Off, object::SectionedAddress::UndefSection};
     auto LineInfo = Symbolizer->symbolizeCode(Obj, Mod);
     if (auto Err = LineInfo.takeError()) {
