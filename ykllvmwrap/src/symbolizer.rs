@@ -8,9 +8,9 @@ use std::{
 };
 
 extern "C" {
-    fn __yk_symbolizer_new() -> *mut c_void;
-    fn __yk_symbolizer_free(symbolizer: *mut c_void);
-    fn __yk_symbolizer_find_code_sym(
+    fn __yk_llvmwrap_symbolizer_new() -> *mut c_void;
+    fn __yk_llvmwrap_symbolizer_free(symbolizer: *mut c_void);
+    fn __yk_llvmwrap_symbolizer_find_code_sym(
         symbolizer: *mut c_void,
         obj: *const c_char,
         off: u64,
@@ -21,13 +21,13 @@ pub struct Symbolizer(*mut c_void);
 
 impl Symbolizer {
     pub fn new() -> Self {
-        Self(unsafe { __yk_symbolizer_new() })
+        Self(unsafe { __yk_llvmwrap_symbolizer_new() })
     }
 
     /// Returns the name of the symbol at byte offset `off` in the object file `obj`,
     /// or `None` if the symbol couldn't be found.
     pub fn find_code_sym(&self, obj: &CStr, off: u64) -> Option<CString> {
-        let ptr = unsafe { __yk_symbolizer_find_code_sym(self.0, obj.as_ptr(), off) };
+        let ptr = unsafe { __yk_llvmwrap_symbolizer_find_code_sym(self.0, obj.as_ptr(), off) };
         if ptr.is_null() {
             None
         } else {
@@ -46,7 +46,7 @@ impl Symbolizer {
 
 impl Drop for Symbolizer {
     fn drop(&mut self) {
-        unsafe { __yk_symbolizer_free(self.0) }
+        unsafe { __yk_llvmwrap_symbolizer_free(self.0) }
     }
 }
 
