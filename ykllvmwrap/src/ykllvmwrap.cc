@@ -4,6 +4,7 @@
 #define _GNU_SOURCE
 #endif
 
+#include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
 #include <llvm/DebugInfo/Symbolize/Symbolize.h>
 #include <llvm/ExecutionEngine/ExecutionEngine.h>
 #include <llvm/ExecutionEngine/MCJIT.h>
@@ -21,14 +22,39 @@
 #include <err.h>
 #include <limits>
 #include <link.h>
+#include <mutex>
 #include <stdlib.h>
 #include <string.h>
 
 #include "memman.cc"
 
 using namespace llvm;
+using namespace llvm::orc;
 using namespace llvm::symbolize;
 using namespace std;
+
+// The bitcode module loaded from the .llvmbc section of the currently-running
+// binary. This cannot be shared across threads and used concurrently without
+// acquiring a lock, and since we do want to allow parallel compilation, each
+// thread takes a copy of this module.
+ThreadSafeModule GlobalAOTMod;
+
+// Flag used to ensure that GlobalAOTMod is loaded only once.
+once_flag GlobalAOTModLoaded;
+
+// A copy of GlobalAOTMod for use by a single thread.
+//
+// A thread should never access this directly, but should instead go via
+// getThreadAOTMod() which deals with the necessary lazy initialisation.
+//
+// OPTIMISE_ME Copying GlobalAOTMod is quite expensive (cloneToNewContext()
+// serialises and deserializes). When a compilation thread dies, we should
+// return its ThreadAOTMod to a pool and transfer ownership to the next thread
+// that needs its own copy of GlobalAOTMod.
+thread_local ThreadSafeModule ThreadAOTMod;
+
+// A flag indicating whether GlobalAOTMod has been copied into the thread yet.
+thread_local bool ThreadAOTModInitialized = false;
 
 #define TRACE_FUNC_PREFIX "__yk_compiled_trace_"
 #define YKTRACE_START "__yktrace_start_tracing"
@@ -60,16 +86,40 @@ __yk_llvmwrap_symbolizer_find_code_sym(LLVMSymbolizer *Symbolizer,
   return strdup(LineInfo->FunctionName.c_str());
 }
 
-// Load an LLVM module from an address.
-std::unique_ptr<Module> load_module(LLVMContext &Context, char *Ptr,
-                                    size_t Len) {
+// Load the GlobalAOTMod.
+//
+// This must only be called from getAOTMod() for correct synchronisation.
+void loadAOTMod(char *Ptr, size_t Len) {
   auto Sf = StringRef(Ptr, Len);
   auto Mb = MemoryBufferRef(Sf, "");
   SMDiagnostic Error;
-  auto M = parseIR(Mb, Error, Context);
+  ThreadSafeContext AOTCtx = std::make_unique<LLVMContext>();
+  auto M = parseIR(Mb, Error, *AOTCtx.getContext());
   if (!M)
     errx(EXIT_FAILURE, "Can't load module.");
-  return M;
+  GlobalAOTMod = ThreadSafeModule(std::move(M), std::move(AOTCtx));
+}
+
+// Get a thread-safe handle on the LLVM module stored in the .llvmbc section of
+// the binary. The module is loaded if we haven't yet done so.
+//
+// When loading the module, the section's raw data must have been loaded
+// into memory elsewhere and passed in via the `Ptr` and `Len` arguments.
+//
+// If the module has already been loaded, then `Ptr` and `Len` are unused.
+//
+// FIXME The raw section data is repeatedly loaded in Rust code every time
+// IRTrace::compile() is called. We should move the raw loading into C++ and
+// put it in loadModule(). This would simplify the interface to this function
+// (Ptr and Len could go) and would ensure that the section is only read in
+// once.
+ThreadSafeModule *getThreadAOTMod(char *Ptr, size_t Len) {
+  std::call_once(GlobalAOTModLoaded, loadAOTMod, Ptr, Len);
+  if (!ThreadAOTModInitialized) {
+    ThreadAOTMod = cloneToNewContext(GlobalAOTMod);
+    ThreadAOTModInitialized = true;
+  }
+  return &ThreadAOTMod;
 }
 
 // Compile a module in-memory and return a pointer to its function.
@@ -106,24 +156,25 @@ extern "C" void *compile_module(string TraceName, Module *M) {
 extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
                                               size_t Len, char *SecPtr,
                                               size_t SecSize) {
-  LLVMContext Context;
-  auto DstMod = new Module("", Context);
-
+  ThreadSafeModule *ThreadAOTMod = getThreadAOTMod(SecPtr, SecSize);
+  // Getting the module without acquiring the context lock is safe in this
+  // instance since ThreadAOTMod is not shared between threads.
+  Module *AOTMod = ThreadAOTMod->getModuleUnlocked();
+  LLVMContext &JITContext = AOTMod->getContext();
+  auto JITMod = new Module("", JITContext);
   uint64_t TraceIdx = NextTraceIdx.fetch_add(1);
   if (TraceIdx == numeric_limits<uint64_t>::max())
     errx(EXIT_FAILURE, "trace index counter overflowed");
 
   string TraceName = string(TRACE_FUNC_PREFIX) + to_string(TraceIdx);
   llvm::FunctionType *FType =
-      llvm::FunctionType::get(Type::getVoidTy(Context), false);
+      llvm::FunctionType::get(Type::getVoidTy(JITContext), false);
   llvm::Function *DstFunc = llvm::Function::Create(
-      FType, Function::InternalLinkage, TraceName, DstMod);
+      FType, Function::InternalLinkage, TraceName, JITMod);
   DstFunc->setCallingConv(CallingConv::C);
-  auto DstBB = BasicBlock::Create(Context, "", DstFunc);
-  llvm::IRBuilder<> Builder(Context);
+  auto DstBB = BasicBlock::Create(JITContext, "", DstFunc);
+  llvm::IRBuilder<> Builder(JITContext);
   Builder.SetInsertPoint(DstBB);
-
-  auto SrcMod = load_module(Context, SecPtr, SecSize);
 
   llvm::ValueToValueMapTy VMap;
   bool Tracing = false;
@@ -133,7 +184,7 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
     auto FuncName = FuncNames[Idx];
 
     // Get a traced function so we can extract blocks from it.
-    Function *F = SrcMod->getFunction(FuncName);
+    Function *F = AOTMod->getFunction(FuncName);
     if (!F)
       errx(EXIT_FAILURE, "can't find function %s", FuncName);
 
@@ -164,9 +215,9 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
         continue;
 
       // If execution reaches here, then the instruction I is to be copied into
-      // DstMod. We now scan the instruction's operands checking that each is
-      // defined in DstMod. Any variable not defined means that the
-      // corresponding variable in SrcMod was instantiated prior to tracing.
+      // JITMod. We now scan the instruction's operands checking that each is
+      // defined in JITMod. Any variable not defined means that the
+      // corresponding variable in AOTMod was instantiated prior to tracing.
       // Eventually these operands need to become inputs to the trace, but
       // until we have figured out how to do that, we simply allocate dummy
       // storage for them so that the module will verify and compile. Obviously
@@ -175,7 +226,7 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
       for (unsigned OpIdx = 0; OpIdx < I->getNumOperands(); OpIdx++) {
         Value *Op = I->getOperand(OpIdx);
         if (VMap[Op] == nullptr) {
-          // Value is undefined in DstMod.
+          // Value is undefined in JITMod.
           Type *OpTy = Op->getType();
           if (isa<llvm::AllocaInst>(Op)) {
             // Value is a stack allocation, so make a dummy stack slot.
@@ -184,6 +235,7 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
             VMap[Op] = Alloca;
           } else {
             // Value is not a stack allocation, so make a dummy default value.
+            // FIXME fails for meta-data types (when you build with -g).
             Value *NullVal = Constant::getNullValue(OpTy);
             VMap[Op] = NullVal;
           }
@@ -206,9 +258,9 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
   }
   Builder.CreateRetVoid();
 #ifndef NDEBUG
-  llvm::verifyModule(*DstMod, &llvm::errs());
+  llvm::verifyModule(*JITMod, &llvm::errs());
 #endif
 
   // Compile IR trace and return a pointer to its function.
-  return compile_module(TraceName, DstMod);
+  return compile_module(TraceName, JITMod);
 }

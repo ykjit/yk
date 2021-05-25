@@ -37,6 +37,7 @@ fn mk_compiler(exe: &Path, src: &Path, opt: &str) -> Command {
         "-L",
         lib_dir.to_str().unwrap(),
         "-lykcapi",
+        "-pthread",
         "-o",
         exe.to_str().unwrap(),
         src.to_str().unwrap(),
