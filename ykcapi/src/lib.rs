@@ -42,7 +42,8 @@ pub extern "C" fn yk_location_drop(loc: Location) {
 /// These symbols are not shipped as part of the main API.
 #[cfg(feature = "c_testing")]
 mod c_testing {
-    use std::{mem, os::raw::c_char};
+    use libc::c_void;
+    use std::os::raw::c_char;
     use yktrace::{start_tracing, BlockMap, IRTrace, ThreadTracer, TracingKind};
 
     const SW_TRACING: usize = 0;
@@ -107,7 +108,7 @@ mod c_testing {
     }
 
     #[no_mangle]
-    pub extern "C" fn __yktrace_irtrace_compile(trace: *mut IRTrace) {
-        unsafe { &*trace }.compile();
+    pub extern "C" fn __yktrace_irtrace_compile(trace: *mut IRTrace) -> *const c_void {
+        unsafe { &*trace }.compile()
     }
 }

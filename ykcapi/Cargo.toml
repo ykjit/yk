@@ -9,6 +9,7 @@ license = "Apache-2.0 OR MIT"
 crate-type = ["cdylib"]
 
 [dependencies]
+libc = "0.2.94"
 ykllvmwrap = { path = "../ykllvmwrap" }
 ykrt = { path = "../ykrt" }
 yktrace = { path = "../yktrace" }

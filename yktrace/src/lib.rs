@@ -1,7 +1,11 @@
 //! Utilities for collecting and decoding traces.
 
 mod errors;
+use libc::c_void;
+use object::{self, Object, ObjectSection};
+use std::convert::TryFrom;
 use std::ffi::{CStr, CString};
+use std::{env, fs};
 mod hwt;
 
 pub use errors::InvalidTraceError;
@@ -65,7 +69,7 @@ impl IRTrace {
         self.blocks.get(idx)
     }
 
-    pub fn compile(&self) {
+    pub fn compile(&self) -> *const c_void {
         let len = self.len();
         let mut func_names = Vec::with_capacity(len);
         let mut bbs = Vec::with_capacity(len);
@@ -73,7 +77,25 @@ impl IRTrace {
             func_names.push(blk.func_name().as_ptr());
             bbs.push(blk.bb());
         }
-        unsafe { ykllvmwrap::__ykllvmwrap_irtrace_compile(func_names.as_ptr(), bbs.as_ptr(), len) }
+
+        // Find bitcode section in executable.
+        let pathb = env::current_exe().unwrap();
+        let file = fs::File::open(&pathb.as_path()).unwrap();
+        let mmap = unsafe { memmap2::Mmap::map(&file).unwrap() };
+        let object = object::File::parse(&*mmap).unwrap();
+        let sec = object.section_by_name(".llvmbc").unwrap();
+        let sec_ptr = sec.data().unwrap().as_ptr();
+        let sec_size = sec.size();
+
+        unsafe {
+            ykllvmwrap::__ykllvmwrap_irtrace_compile(
+                func_names.as_ptr(),
+                bbs.as_ptr(),
+                len,
+                sec_ptr as *const i8,
+                usize::try_from(sec_size).unwrap(),
+            )
+        }
     }
 }
 
