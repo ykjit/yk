@@ -11,19 +11,17 @@
 #include <string.h>
 #include <yk_testing.h>
 
-int
-main(int argc, char **argv)
-{
-    void *tt = __yktrace_start_tracing(HW_TRACING);
-    int res = 1 + 1;
-    void *tr = __yktrace_stop_tracing(tt);
+int main(int argc, char **argv) {
+  void *tt = __yktrace_start_tracing(HW_TRACING);
+  int res = 1 + 1;
+  void *tr = __yktrace_stop_tracing(tt);
 
-    assert(res == 2);
+  assert(res == 2);
 
-    void *ptr = __yktrace_irtrace_compile(tr);
-    __yktrace_drop_irtrace(tr);
-    void(*func)() = (void(*)())ptr;
-    func();
+  void *ptr = __yktrace_irtrace_compile(tr);
+  __yktrace_drop_irtrace(tr);
+  void (*func)() = (void (*)())ptr;
+  func();
 
-    return (EXIT_SUCCESS);
+  return (EXIT_SUCCESS);
 }

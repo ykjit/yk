@@ -21,7 +21,7 @@ typedef struct MT YkMT;
 // node to have its own `Location` (even for bytecodes or nodes that can't be
 // control points).
 typedef struct {
-    uintptr_t state;
+  uintptr_t state;
 } YkLocation;
 
 #if defined(__x86_64)
