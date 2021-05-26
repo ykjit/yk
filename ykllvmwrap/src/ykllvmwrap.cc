@@ -146,10 +146,27 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
           Tracing = false;
         }
       }
-      if (!Tracing && !llvm::isa<AllocaInst>(I)) {
-        // FIXME Remove allocas not needed in traced code.
+
+      if (!Tracing)
         continue;
+
+      // FIXME For any variable defined outside of the trace, we realise
+      // dummy storage space. Eventually, such variables should be inputs
+      // to the trace. This hack prevents the remapper from choking when
+      // it can't find the definition of an instruction operand.
+      if ((llvm::isa<llvm::StoreInst>(I)) && (VMap[&*I] == nullptr)) {
+        Value *DestOp = I->getOperand(1);
+        Value *SrcOp = I->getOperand(0);
+        Instruction *Alloca =
+            Builder.CreateAlloca(SrcOp->getType(), (unsigned)0);
+        VMap[DestOp] = Alloca;
+      } else if ((llvm::isa<llvm::LoadInst>(I)) && (VMap[&*I] == nullptr)) {
+        Value *SrcOp = I->getOperand(0);
+        Instruction *Alloca =
+            Builder.CreateAlloca(SrcOp->getType(), (unsigned)0);
+        VMap[SrcOp] = Alloca;
       }
+
       if (llvm::isa<llvm::BranchInst>(I)) {
         // FIXME Replace all branch instruction with guards.
         continue;
