@@ -22,6 +22,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "memman.cc"
+
 using namespace llvm;
 using namespace llvm::symbolize;
 
@@ -70,15 +72,22 @@ extern "C" void *compile_module(Module *M) {
   InitializeNativeTargetAsmPrinter();
   InitializeNativeTargetAsmParser();
 
+  // FIXME Remember memman or allocated memory pointers so we can free the
+  // latter when we're done with the trace.
+  auto memman = new MemMan();
+
   auto MPtr = std::unique_ptr<Module>(M);
-  ExecutionEngine *EE = EngineBuilder(std::move(MPtr)).create();
+  ExecutionEngine *EE =
+      EngineBuilder(std::move(MPtr))
+          .setMemoryManager(std::unique_ptr<MCJITMemoryManager>(memman))
+          .create();
   EE->finalizeObject();
 
   if (EE->hasError())
     errx(EXIT_FAILURE, "Couldn't compile trace: %s",
          EE->getErrorMessage().c_str());
 
-    return (void *) EE->getFunctionAddress(TRACE_FUNC_NAME);
+  return (void *)EE->getFunctionAddress(TRACE_FUNC_NAME);
 }
 
 // Compile an IRTrace to executable code in memory.
