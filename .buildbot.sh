@@ -40,6 +40,18 @@ make -j `nproc` install
 export PATH=`pwd`/../inst/bin:${PATH}
 cd ../../..
 
+# Check that clang-format is installed.
+clang-format --version
+# Format C/C++ files.
+find \( \
+    -iname "*.h" -o \
+    -iname "*.cc" -o \
+    -iname "*.cpp" -o \
+    -iname "*.c" \) \
+    ! -path "./target/*" \
+    ! -path "./.cargo/*" \
+    | xargs clang-format --dry-run -Werror
+
 cargo test
 cargo test --release
 cargo bench
