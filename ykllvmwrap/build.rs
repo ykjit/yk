@@ -1,4 +1,4 @@
-use std::process::Command;
+use std::{env, process::Command};
 
 fn main() {
     // Compile our wrappers with the right LLVM C++ flags.
@@ -19,6 +19,12 @@ fn main() {
         // Lots of unused parameters in the LLVM headers.
         .flag("-Wno-unused-parameter")
         .cpp(true);
+
+    // Set the C NDEBUG macro if Cargo is building in release mode. This ensures that assertions
+    // (and other things we guard with NDEBUG) only happen in debug builds.
+    if env::var("PROFILE").unwrap() == "release" {
+        comp.flag("-DNDEBUG");
+    }
     comp.compile("ykllvmwrap");
 
     // Ensure that downstream crates performing linkage use the right -L and -l flags.

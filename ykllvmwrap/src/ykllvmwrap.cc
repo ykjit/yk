@@ -195,7 +195,7 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
     }
   }
   Builder.CreateRetVoid();
-#ifdef DEBUG
+#ifndef NDEBUG
   llvm::verifyModule(*DstMod, &llvm::errs());
 #endif
 
