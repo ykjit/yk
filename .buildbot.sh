@@ -42,15 +42,9 @@ cd ../../..
 
 # Check that clang-format is installed.
 clang-format --version
-# Format C/C++ files.
-find \( \
-    -iname "*.h" -o \
-    -iname "*.cc" -o \
-    -iname "*.cpp" -o \
-    -iname "*.c" \) \
-    ! -path "./target/*" \
-    ! -path "./.cargo/*" \
-    | xargs clang-format --dry-run -Werror
+# Check C/C++ formatting using xtask.
+cargo xtask cfmt
+git diff --exit-code
 
 cargo test
 cargo test --release
