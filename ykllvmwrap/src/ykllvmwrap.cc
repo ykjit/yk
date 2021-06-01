@@ -136,10 +136,13 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
     for (auto I = BB->begin(); I != BB->end(); I++) {
       if (isa<CallInst>(I)) {
         Function *CF = cast<CallInst>(&*I)->getCalledFunction();
+        if (CF == nullptr)
+          continue;
+
+        // FIXME Strip storage of return value of __yktrace_start_tracing and
+        // argument setup of __yktrace_stop_tracing.
         if (CF->getName() == YKTRACE_START) {
           Tracing = true;
-          I++; // FIXME Better way of removing result of
-               // __yktrace_start_tracing.
           continue;
         } else if (CF->getName() == YKTRACE_STOP) {
           // FIXME Remove argument setup before __yktrace_stop_tracing call.
@@ -150,21 +153,31 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
       if (!Tracing)
         continue;
 
-      // FIXME For any variable defined outside of the trace, we realise
-      // dummy storage space. Eventually, such variables should be inputs
-      // to the trace. This hack prevents the remapper from choking when
-      // it can't find the definition of an instruction operand.
-      if ((llvm::isa<llvm::StoreInst>(I)) && (VMap[&*I] == nullptr)) {
-        Value *DestOp = I->getOperand(1);
-        Value *SrcOp = I->getOperand(0);
-        Instruction *Alloca =
-            Builder.CreateAlloca(SrcOp->getType(), (unsigned)0);
-        VMap[DestOp] = Alloca;
-      } else if ((llvm::isa<llvm::LoadInst>(I)) && (VMap[&*I] == nullptr)) {
-        Value *SrcOp = I->getOperand(0);
-        Instruction *Alloca =
-            Builder.CreateAlloca(SrcOp->getType(), (unsigned)0);
-        VMap[SrcOp] = Alloca;
+      // If execution reaches here, then the instruction I is to be copied into
+      // DstMod. We now scan the instruction's operands checking that each is
+      // defined in DstMod. Any variable not defined means that the
+      // corresponding variable in SrcMod was instantiated prior to tracing.
+      // Eventually these operands need to become inputs to the trace, but
+      // until we have figured out how to do that, we simply allocate dummy
+      // storage for them so that the module will verify and compile. Obviously
+      // mutations to these dummies are not observed outside the trace code, so
+      // this is strictly a FIXME.
+      for (unsigned OpIdx = 0; OpIdx < I->getNumOperands(); OpIdx++) {
+        Value *Op = I->getOperand(OpIdx);
+        if (VMap[Op] == nullptr) {
+          // Value is undefined in DstMod.
+          Type *OpTy = Op->getType();
+          if (isa<llvm::AllocaInst>(Op)) {
+            // Value is a stack allocation, so make a dummy stack slot.
+            Value *Alloca = Builder.CreateAlloca(
+                OpTy->getPointerElementType(), OpTy->getPointerAddressSpace());
+            VMap[Op] = Alloca;
+          } else {
+            // Value is not a stack allocation, so make a dummy default value.
+            Value *NullVal = Constant::getNullValue(OpTy);
+            VMap[Op] = NullVal;
+          }
+        }
       }
 
       if (llvm::isa<llvm::BranchInst>(I)) {
