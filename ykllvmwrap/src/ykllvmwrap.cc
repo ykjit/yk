@@ -16,8 +16,10 @@
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Transforms/Utils/ValueMapper.h>
 
+#include <atomic>
 #include <dlfcn.h>
 #include <err.h>
+#include <limits>
 #include <link.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,10 +28,14 @@
 
 using namespace llvm;
 using namespace llvm::symbolize;
+using namespace std;
 
-#define TRACE_FUNC_NAME "__yk_compiled_trace"
+#define TRACE_FUNC_PREFIX "__yk_compiled_trace_"
 #define YKTRACE_START "__yktrace_start_tracing"
 #define YKTRACE_STOP "__yktrace_stop_tracing"
+
+// An atomic counter used to issue compiled traces with unique names.
+atomic<uint64_t> NextTraceIdx(0);
 
 extern "C" LLVMSymbolizer *__yk_llvmwrap_symbolizer_new() {
   return new LLVMSymbolizer;
@@ -67,7 +73,7 @@ std::unique_ptr<Module> load_module(LLVMContext &Context, char *Ptr,
 }
 
 // Compile a module in-memory and return a pointer to its function.
-extern "C" void *compile_module(Module *M) {
+extern "C" void *compile_module(string TraceName, Module *M) {
   InitializeNativeTarget();
   InitializeNativeTargetAsmPrinter();
   InitializeNativeTargetAsmParser();
@@ -87,7 +93,7 @@ extern "C" void *compile_module(Module *M) {
     errx(EXIT_FAILURE, "Couldn't compile trace: %s",
          EE->getErrorMessage().c_str());
 
-  return (void *)EE->getFunctionAddress(TRACE_FUNC_NAME);
+  return (void *)EE->getFunctionAddress(TraceName);
 }
 
 // Compile an IRTrace to executable code in memory.
@@ -103,13 +109,17 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
   LLVMContext Context;
   auto DstMod = new Module("", Context);
 
-  // Set up new module for the trace.
+  uint64_t TraceIdx = NextTraceIdx.fetch_add(1);
+  if (TraceIdx == numeric_limits<uint64_t>::max())
+    errx(EXIT_FAILURE, "trace index counter overflowed");
+
+  string TraceName = string(TRACE_FUNC_PREFIX) + to_string(TraceIdx);
   llvm::FunctionType *FType =
       llvm::FunctionType::get(Type::getVoidTy(Context), false);
   llvm::Function *DstFunc = llvm::Function::Create(
-      FType, Function::InternalLinkage, TRACE_FUNC_NAME, DstMod);
+      FType, Function::InternalLinkage, TraceName, DstMod);
   DstFunc->setCallingConv(CallingConv::C);
-  auto DstBB = BasicBlock::Create(Context, "bb0", DstFunc);
+  auto DstBB = BasicBlock::Create(Context, "", DstFunc);
   llvm::IRBuilder<> Builder(Context);
   Builder.SetInsertPoint(DstBB);
 
@@ -200,5 +210,5 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
 #endif
 
   // Compile IR trace and return a pointer to its function.
-  return compile_module(DstMod);
+  return compile_module(TraceName, DstMod);
 }
