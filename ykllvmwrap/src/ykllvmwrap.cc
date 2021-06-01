@@ -119,7 +119,7 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
   llvm::Function *DstFunc = llvm::Function::Create(
       FType, Function::InternalLinkage, TraceName, DstMod);
   DstFunc->setCallingConv(CallingConv::C);
-  auto DstBB = BasicBlock::Create(Context, "bb0", DstFunc);
+  auto DstBB = BasicBlock::Create(Context, "", DstFunc);
   llvm::IRBuilder<> Builder(Context);
   Builder.SetInsertPoint(DstBB);
 
