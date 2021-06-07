@@ -6,8 +6,9 @@
 //! The sane solution is to have only one `cdylib` crate in our workspace (this crate) and all
 //! other crates are regular `rlibs`.
 
-use std::mem::drop;
+use std::{ffi::c_void, mem::drop};
 use ykrt::{HotThreshold, Location, MT};
+use ykutil;
 
 #[no_mangle]
 pub extern "C" fn yk_mt() -> *const MT {
@@ -36,6 +37,16 @@ pub extern "C" fn yk_location_new() -> Location {
 #[no_mangle]
 pub extern "C" fn yk_location_drop(loc: Location) {
     drop(loc)
+}
+
+/// Return a pointer to (and the size of) the .llvmbc section of the current executable.
+#[no_mangle]
+pub extern "C" fn __ykutil_get_llvmbc_section(res_addr: *mut *const c_void, res_size: *mut usize) {
+    let (addr, size) = ykutil::obj::llvmbc_section();
+    unsafe {
+        *res_addr = addr as *const c_void;
+        *res_size = size;
+    }
 }
 
 /// The following module contains exports only used for testing from external C code.

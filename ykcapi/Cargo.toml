@@ -13,6 +13,7 @@ libc = "0.2.94"
 ykllvmwrap = { path = "../ykllvmwrap" }
 ykrt = { path = "../ykrt" }
 yktrace = { path = "../yktrace" }
+ykutil = { path = "../ykutil" }
 
 [features]
 c_testing = []

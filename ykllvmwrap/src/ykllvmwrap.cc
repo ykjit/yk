@@ -33,6 +33,8 @@ using namespace llvm::orc;
 using namespace llvm::symbolize;
 using namespace std;
 
+extern "C" void __ykutil_get_llvmbc_section(void **res_addr, size_t *res_size);
+
 // The bitcode module loaded from the .llvmbc section of the currently-running
 // binary. This cannot be shared across threads and used concurrently without
 // acquiring a lock, and since we do want to allow parallel compilation, each
@@ -89,8 +91,11 @@ __yk_llvmwrap_symbolizer_find_code_sym(LLVMSymbolizer *Symbolizer,
 // Load the GlobalAOTMod.
 //
 // This must only be called from getAOTMod() for correct synchronisation.
-void loadAOTMod(char *Ptr, size_t Len) {
-  auto Sf = StringRef(Ptr, Len);
+void loadAOTMod(void *Unused) {
+  void *SecPtr;
+  size_t SecSize;
+  __ykutil_get_llvmbc_section(&SecPtr, &SecSize);
+  auto Sf = StringRef((const char *)SecPtr, SecSize);
   auto Mb = MemoryBufferRef(Sf, "");
   SMDiagnostic Error;
   ThreadSafeContext AOTCtx = std::make_unique<LLVMContext>();
@@ -102,19 +107,8 @@ void loadAOTMod(char *Ptr, size_t Len) {
 
 // Get a thread-safe handle on the LLVM module stored in the .llvmbc section of
 // the binary. The module is loaded if we haven't yet done so.
-//
-// When loading the module, the section's raw data must have been loaded
-// into memory elsewhere and passed in via the `Ptr` and `Len` arguments.
-//
-// If the module has already been loaded, then `Ptr` and `Len` are unused.
-//
-// FIXME The raw section data is repeatedly loaded in Rust code every time
-// IRTrace::compile() is called. We should move the raw loading into C++ and
-// put it in loadModule(). This would simplify the interface to this function
-// (Ptr and Len could go) and would ensure that the section is only read in
-// once.
-ThreadSafeModule *getThreadAOTMod(char *Ptr, size_t Len) {
-  std::call_once(GlobalAOTModLoaded, loadAOTMod, Ptr, Len);
+ThreadSafeModule *getThreadAOTMod(void) {
+  std::call_once(GlobalAOTModLoaded, loadAOTMod, nullptr);
   if (!ThreadAOTModInitialized) {
     ThreadAOTMod = cloneToNewContext(GlobalAOTMod);
     ThreadAOTModInitialized = true;
@@ -176,9 +170,8 @@ extern "C" void *compile_module(string TraceName, Module *M) {
 //
 // Returns a pointer to the compiled function.
 extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
-                                              size_t Len, char *SecPtr,
-                                              size_t SecSize) {
-  ThreadSafeModule *ThreadAOTMod = getThreadAOTMod(SecPtr, SecSize);
+                                              size_t Len) {
+  ThreadSafeModule *ThreadAOTMod = getThreadAOTMod();
   // Getting the module without acquiring the context lock is safe in this
   // instance since ThreadAOTMod is not shared between threads.
   Module *AOTMod = ThreadAOTMod->getModuleUnlocked();
