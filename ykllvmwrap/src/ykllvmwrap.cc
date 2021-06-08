@@ -122,6 +122,28 @@ ThreadSafeModule *getThreadAOTMod(char *Ptr, size_t Len) {
   return &ThreadAOTMod;
 }
 
+std::vector<Value *> get_trace_inputs(Function *F, uintptr_t BBIdx) {
+  std::vector<Value *> Vec;
+  auto It = F->begin();
+  // Skip to the first block in the trace which contains the `start_tracing`
+  // call.
+  std::advance(It, BBIdx);
+  BasicBlock *BB = &*It;
+  for (auto I = BB->begin(); I != BB->end(); I++) {
+    if (isa<CallInst>(I)) {
+      CallInst *CI = cast<CallInst>(&*I);
+      if (CI->getCalledFunction()->getName() == YKTRACE_START) {
+        // Skip first argument to start_tracing.
+        for (auto Arg = CI->arg_begin() + 1; Arg != CI->arg_end(); Arg++) {
+          Vec.push_back(Arg->get());
+        }
+        break;
+      }
+    }
+  }
+  return Vec;
+}
+
 // Compile a module in-memory and return a pointer to its function.
 extern "C" void *compile_module(string TraceName, Module *M) {
   InitializeNativeTarget();
@@ -166,17 +188,39 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
   if (TraceIdx == numeric_limits<uint64_t>::max())
     errx(EXIT_FAILURE, "trace index counter overflowed");
 
+  // Get var args from start_tracing call.
+  auto Inputs = get_trace_inputs(AOTMod->getFunction(FuncNames[0]), BBs[0]);
+
+  std::vector<Type *> InputTypes;
+  for (auto Val : Inputs) {
+    InputTypes.push_back(Val->getType());
+  }
+
+  // Create function to store compiled trace.
   string TraceName = string(TRACE_FUNC_PREFIX) + to_string(TraceIdx);
   llvm::FunctionType *FType =
-      llvm::FunctionType::get(Type::getVoidTy(JITContext), false);
+      llvm::FunctionType::get(Type::getVoidTy(JITContext), InputTypes, false);
   llvm::Function *DstFunc = llvm::Function::Create(
       FType, Function::InternalLinkage, TraceName, JITMod);
   DstFunc->setCallingConv(CallingConv::C);
+
+  // Create entry block and setup builder.
   auto DstBB = BasicBlock::Create(JITContext, "", DstFunc);
   llvm::IRBuilder<> Builder(JITContext);
   Builder.SetInsertPoint(DstBB);
 
   llvm::ValueToValueMapTy VMap;
+  // Variables that are used (but not defined) inbetween start and stop tracing
+  // need to be replaced with function arguments which the user passes into the
+  // compiled trace. This loop creates a mapping from those original variables
+  // to the function arguments of the compiled trace function.
+  for (size_t Idx = 0; Idx != Inputs.size(); Idx++) {
+    Value *OldVal = Inputs[Idx];
+    Value *NewVal = DstFunc->getArg(Idx);
+    assert(NewVal->getType()->isPointerTy());
+    VMap[OldVal] = NewVal;
+  }
+
   bool Tracing = false;
 
   // Iterate over the PT trace and stitch together all traced blocks.
@@ -214,6 +258,11 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
       if (!Tracing)
         continue;
 
+      if (llvm::isa<llvm::BranchInst>(I)) {
+        // FIXME Replace all branch instruction with guards.
+        continue;
+      }
+
       // If execution reaches here, then the instruction I is to be copied into
       // JITMod. We now scan the instruction's operands checking that each is
       // defined in JITMod. Any variable not defined means that the
@@ -234,17 +283,21 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
                 OpTy->getPointerElementType(), OpTy->getPointerAddressSpace());
             VMap[Op] = Alloca;
           } else {
-            // Value is not a stack allocation, so make a dummy default value.
-            // FIXME fails for meta-data types (when you build with -g).
-            Value *NullVal = Constant::getNullValue(OpTy);
-            VMap[Op] = NullVal;
+            if (OpTy->isIntegerTy()) {
+              // Value is an integer constant, so leave it as is.
+              // FIXME Extend this with other types as needed to get new
+              // tests to run. Ultimately, find a better way to do this.
+              VMap[Op] = Op;
+              continue;
+            } else {
+              // Value is not a stack allocation or constant, so make a dummy
+              // default value.
+              // FIXME fails for meta-data types (when you build with -g).
+              Value *NullVal = Constant::getNullValue(OpTy);
+              VMap[Op] = NullVal;
+            }
           }
         }
-      }
-
-      if (llvm::isa<llvm::BranchInst>(I)) {
-        // FIXME Replace all branch instruction with guards.
-        continue;
       }
 
       // Copy instruction over into the IR trace. Since the instruction

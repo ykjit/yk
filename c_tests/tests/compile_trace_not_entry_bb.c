@@ -21,7 +21,7 @@ int main(int argc, char **argv) {
     abort();
 
   int res;
-  void *tt = __yktrace_start_tracing(HW_TRACING);
+  void *tt = __yktrace_start_tracing(HW_TRACING, &res, &argc);
   // Causes both a load and a store to things defined outside the trace.
   res = 1 + argc;
   void *tr = __yktrace_stop_tracing(tt);
@@ -30,8 +30,10 @@ int main(int argc, char **argv) {
 
   void *ptr = __yktrace_irtrace_compile(tr);
   __yktrace_drop_irtrace(tr);
-  void (*func)() = (void (*)())ptr;
-  func();
+  void (*func)(int *, int *) = (void (*)(int *, int *))ptr;
+  int res2;
+  func(&res2, &argc);
+  assert(res2 == 2);
 
   return (EXIT_SUCCESS);
 }
