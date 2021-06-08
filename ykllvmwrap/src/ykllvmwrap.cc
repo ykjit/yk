@@ -47,7 +47,7 @@ once_flag GlobalAOTModLoaded;
 // A thread should never access this directly, but should instead go via
 // getThreadAOTMod() which deals with the necessary lazy initialisation.
 //
-// OPTIMISE_ME Copying GlobalAOTMod is quite expensive (cloneToNewContext()
+// PERF: Copying GlobalAOTMod is quite expensive (cloneToNewContext()
 // serialises and deserializes). When a compilation thread dies, we should
 // return its ThreadAOTMod to a pool and transfer ownership to the next thread
 // that needs its own copy of GlobalAOTMod.
@@ -82,7 +82,7 @@ __yk_llvmwrap_symbolizer_find_code_sym(LLVMSymbolizer *Symbolizer,
     return NULL;
   }
 
-  // OPTIMISE_ME: get rid of heap allocation.
+  // PERF: get rid of heap allocation.
   return strdup(LineInfo->FunctionName.c_str());
 }
 
