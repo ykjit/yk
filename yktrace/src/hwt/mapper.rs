@@ -51,12 +51,13 @@ impl BlockMap {
         while crsr.position() < sec_size {
             let f_off = crsr.read_u64::<NativeEndian>().unwrap();
             let n_blks = leb128::read::unsigned(&mut crsr).unwrap();
-            for bb in 0..n_blks {
+            for _ in 0..n_blks {
                 let b_off = leb128::read::unsigned(&mut crsr).unwrap();
                 // Skip the block size. We still have to parse the field, as it's variable-size.
                 let b_sz = leb128::read::unsigned(&mut crsr).unwrap();
                 // Skip over block meta-data.
                 crsr.seek(SeekFrom::Current(1)).unwrap();
+                let b_idx = leb128::read::unsigned(&mut crsr).unwrap();
 
                 let lo = f_off + b_off;
                 let hi = lo + b_sz;
@@ -64,7 +65,7 @@ impl BlockMap {
                     (lo..hi),
                     BlockMapEntry {
                         f_off,
-                        bb: usize::try_from(bb).unwrap(),
+                        bb: usize::try_from(b_idx).unwrap(),
                     },
                 ));
             }
