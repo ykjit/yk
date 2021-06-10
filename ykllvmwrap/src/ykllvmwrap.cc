@@ -222,6 +222,8 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
   }
 
   bool Tracing = false;
+  std::vector<CallInst *> inlined_calls;
+  CallInst *last_call = nullptr;
 
   // Iterate over the PT trace and stitch together all traced blocks.
   for (size_t Idx = 0; Idx < Len; Idx++) {
@@ -236,9 +238,18 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
     auto It = F->begin();
     std::advance(It, BBs[Idx]);
     BasicBlock *BB = &*It;
+
     // Iterate over all instructions within this block and copy them over
     // to our new module.
     for (auto I = BB->begin(); I != BB->end(); I++) {
+      // If we've returned from a call skip ahead to the instruction where we
+      // left off.
+      if (last_call != nullptr) {
+        if (&*I == last_call) {
+          last_call = nullptr;
+        }
+        continue;
+      }
       if (isa<CallInst>(I)) {
         Function *CF = cast<CallInst>(&*I)->getCalledFunction();
         if (CF == nullptr)
@@ -252,6 +263,15 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
         } else if (CF->getName() == YKTRACE_STOP) {
           // FIXME Remove argument setup before __yktrace_stop_tracing call.
           Tracing = false;
+        } else {
+          // Skip remainder of this block and remember where we stopped so we
+          // can continue tracing from this position after returning frome the
+          // inlined call.
+          // FIXME Deal with calls we cannot or don't want to inline.
+          if (Tracing) {
+            inlined_calls.push_back((CallInst *)&*I);
+            break;
+          }
         }
       }
 
@@ -260,6 +280,13 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
 
       if (llvm::isa<llvm::BranchInst>(I)) {
         // FIXME Replace all branch instruction with guards.
+        continue;
+      }
+
+      if (isa<ReturnInst>(I)) {
+        last_call = inlined_calls.back();
+        inlined_calls.pop_back();
+        // FIXME write return value to LHS of the call.
         continue;
       }
 
