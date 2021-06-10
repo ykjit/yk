@@ -286,7 +286,12 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
       if (isa<ReturnInst>(I)) {
         last_call = inlined_calls.back();
         inlined_calls.pop_back();
-        // FIXME write return value to LHS of the call.
+        // Replace the return variable of the call with its return value.
+        // Since the return value will have already been copied over to the
+        // JITModule, make sure we look up the copy.
+        auto OldRetVal = ((ReturnInst *)&*I)->getReturnValue();
+        auto NewRetVal = VMap[OldRetVal];
+        VMap[last_call] = NewRetVal;
         continue;
       }
 
