@@ -37,6 +37,9 @@ pub struct BlockMap {
 impl BlockMap {
     /// Parse the LLVM blockmap section of the current executable and return a struct holding the
     /// mappings.
+    ///
+    /// PERF: See if we can get the block map section marked as loadable so that the linker loads
+    /// it automatically at process creation time.
     pub fn new() -> Self {
         let mut elems = Vec::new();
         let pathb = env::current_exe().unwrap();
