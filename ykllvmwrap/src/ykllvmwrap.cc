@@ -149,12 +149,16 @@ extern "C" void *compile_module(string TraceName, Module *M) {
   auto memman = new MemMan();
 
   auto MPtr = std::unique_ptr<Module>(M);
+  string ErrStr;
   ExecutionEngine *EE =
       EngineBuilder(std::move(MPtr))
           .setMemoryManager(std::unique_ptr<MCJITMemoryManager>(memman))
+          .setErrorStr(&ErrStr)
           .create();
-  EE->finalizeObject();
+  if (EE == nullptr)
+    errx(EXIT_FAILURE, "Couldn't compile trace: %s", ErrStr.c_str());
 
+  EE->finalizeObject();
   if (EE->hasError())
     errx(EXIT_FAILURE, "Couldn't compile trace: %s",
          EE->getErrorMessage().c_str());
