@@ -251,7 +251,8 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
         continue;
       }
       if (isa<CallInst>(I)) {
-        Function *CF = cast<CallInst>(&*I)->getCalledFunction();
+        CallInst *CI = cast<CallInst>(&*I);
+        Function *CF = CI->getCalledFunction();
         if (CF == nullptr)
           continue;
 
@@ -269,7 +270,14 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
           // inlined call.
           // FIXME Deal with calls we cannot or don't want to inline.
           if (Tracing) {
-            inlined_calls.push_back((CallInst *)&*I);
+            inlined_calls.push_back(CI);
+            // During inlining, remap function arguments to the variables
+            // passed in by the caller.
+            for (unsigned int i = 0; i < CI->arg_size(); i++) {
+              Value *Var = CI->getArgOperand(i);
+              Value *Arg = CF->getArg(i);
+              VMap[Arg] = Var;
+            }
             break;
           }
         }
