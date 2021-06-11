@@ -65,6 +65,16 @@ thread_local bool ThreadAOTModInitialized = false;
 // An atomic counter used to issue compiled traces with unique names.
 atomic<uint64_t> NextTraceIdx(0);
 
+// Flag used to ensure that LLVM is initialised only once.
+once_flag LLVMInitialised;
+
+// Initialise LLVM for JIT compilation. This must be executed exactly once.
+void initLLVM(void *Unused) {
+  InitializeNativeTarget();
+  InitializeNativeTargetAsmPrinter();
+  InitializeNativeTargetAsmParser();
+}
+
 extern "C" LLVMSymbolizer *__yk_llvmwrap_symbolizer_new() {
   return new LLVMSymbolizer;
 }
@@ -140,9 +150,7 @@ std::vector<Value *> get_trace_inputs(Function *F, uintptr_t BBIdx) {
 
 // Compile a module in-memory and return a pointer to its function.
 extern "C" void *compile_module(string TraceName, Module *M) {
-  InitializeNativeTarget();
-  InitializeNativeTargetAsmPrinter();
-  InitializeNativeTargetAsmParser();
+  std::call_once(LLVMInitialised, initLLVM, nullptr);
 
   // FIXME Remember memman or allocated memory pointers so we can free the
   // latter when we're done with the trace.
