@@ -14,6 +14,8 @@ fn main() {
     for cf in cxxflags {
         comp.flag(cf);
     }
+    comp.flag("-Wall");
+    comp.flag("-Werror");
     comp.file("src/ykllvmwrap.cc")
         .compiler("clang++")
         // Lots of unused parameters in the LLVM headers.

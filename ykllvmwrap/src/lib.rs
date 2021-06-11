@@ -10,7 +10,5 @@ extern "C" {
         func_names: *const *const c_char,
         bbs: *const size_t,
         len: size_t,
-        sec_ptr: *const c_char,
-        sec_size: size_t,
     ) -> *const c_void;
 }

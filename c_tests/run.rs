@@ -28,6 +28,8 @@ fn mk_compiler(exe: &Path, src: &Path, opt: &str) -> Command {
 
     compiler.args(&[
         opt,
+        "-Werror",
+        "-Wall",
         "-fuse-ld=lld",
         "-flto",
         "-Wl,--plugin-opt=-lto-embed-bitcode=optimized",
