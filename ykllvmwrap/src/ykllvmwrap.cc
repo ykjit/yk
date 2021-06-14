@@ -353,6 +353,13 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
 #ifndef NDEBUG
   llvm::verifyModule(*JITMod, &llvm::errs());
 #endif
+  auto PrintIR = std::getenv("YKDEBUG_PRINT_IR");
+  if (PrintIR != nullptr) {
+    if (strcmp(PrintIR, "1") == 0) {
+      // Print out the compiled trace's IR to stderr.
+      JITMod->dump();
+    }
+  }
 
   // Compile IR trace and return a pointer to its function.
   return compile_module(TraceName, JITMod);

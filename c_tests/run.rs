@@ -12,6 +12,7 @@ const COMMENT: &str = "//";
 /// Make a compiler command that compiles `src` to `exe` using the optimisation flag `opt`.
 fn mk_compiler(exe: &Path, src: &Path, opt: &str) -> Command {
     let mut compiler = Command::new("clang");
+    compiler.env("YKDEBUG_PRINT_IR", "1");
 
     let mut lib_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     lib_dir.push("..");
@@ -52,7 +53,9 @@ fn run_suite(opt: &'static str) {
     LangTester::new()
         .test_dir("tests")
         .test_file_filter(|p| p.extension().unwrap().to_str().unwrap() == "c")
-        .test_extract(|p| {
+        .test_extract(move |p| {
+            let altp = p.with_extension(format!("c.{}", opt.strip_prefix("-").unwrap()));
+            let p = if altp.exists() { altp.as_path() } else { p };
             read_to_string(p)
                 .unwrap()
                 .lines()
@@ -74,6 +77,8 @@ fn run_suite(opt: &'static str) {
 }
 
 fn main() {
+    // Causes the trace compiler to print out the IR of the compiled trace to stderr.
+    env::set_var("YKDEBUG_PRINT_IR", "1");
     // Run the suite with the various different clang optimisation levels. We do this to maximise
     // the possibility of shaking out bugs (in both the JIT and the tests themselves).
     run_suite("-O0");
