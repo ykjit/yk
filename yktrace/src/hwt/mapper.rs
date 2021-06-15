@@ -18,15 +18,18 @@ use ykutil::addr::code_vaddr_to_off;
 const BLOCK_MAP_SEC: &str = ".llvm_bb_addr_map";
 static BLOCK_MAP: Lazy<BlockMap> = Lazy::new(|| BlockMap::new());
 
-/// The information for one basic block, as per:
+/// Indicates that (in LLVM) there was no BasicBlock corresponding with a MachineBasicBlock.
+const NO_BB: u64 = u64::MAX;
+
+/// The information for one LLVM MachineBasicBlock, as per:
 /// https://llvm.org/docs/Extensions.html#sht-llvm-bb-addr-map-section-basic-block-address-map
 #[derive(Debug)]
 #[allow(dead_code)]
 struct BlockMapEntry {
     /// Function offset.
     f_off: u64,
-    /// Basic block number.
-    bb: usize,
+    /// Basic block number or NO_BB if there is no corresponding block.
+    bb: u64,
 }
 
 /// Maps (unrelocated) block offsets to their corresponding block map entry.
@@ -64,13 +67,7 @@ impl BlockMap {
 
                 let lo = f_off + b_off;
                 let hi = lo + b_sz;
-                elems.push((
-                    (lo..hi),
-                    BlockMapEntry {
-                        f_off,
-                        bb: usize::try_from(b_idx).unwrap(),
-                    },
-                ));
+                elems.push(((lo..hi), BlockMapEntry { f_off, bb: b_idx }));
             }
         }
         Self {
@@ -157,6 +154,10 @@ impl HWTMapper {
 
         ents.sort_by(|x, y| x.range.start.partial_cmp(&y.range.start).unwrap());
         for ent in ents {
+            // Check that the MachineBasicBlock observed in the trace has a correspoinding BasicBlock.
+            // PERF: can we guarantee this won't happen and downgrade to a debug assertion?
+            assert_ne!(ent.value.bb, NO_BB);
+
             #[cfg(debug_assertions)]
             {
                 if let Some(prev) = prev_ent {
@@ -168,7 +169,7 @@ impl HWTMapper {
             let func_name = self.symb.find_code_sym(obj_name, ent.value.f_off).unwrap();
             ret.push(IRBlock {
                 func_name,
-                bb: ent.value.bb,
+                bb: usize::try_from(ent.value.bb).unwrap(),
             });
         }
         ret
