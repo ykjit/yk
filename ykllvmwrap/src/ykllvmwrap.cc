@@ -229,6 +229,7 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
   bool Tracing = false;
   std::vector<CallInst *> inlined_calls;
   CallInst *last_call = nullptr;
+  std::vector<GlobalVariable *> cloned_globals;
 
   // Iterate over the PT trace and stitch together all traced blocks.
   for (size_t Idx = 0; Idx < Len; Idx++) {
@@ -327,6 +328,18 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
             Value *Alloca = Builder.CreateAlloca(
                 OpTy->getPointerElementType(), OpTy->getPointerAddressSpace());
             VMap[Op] = Alloca;
+          } else if (isa<GlobalVariable>(Op)) {
+            // If there's a reference to a GlobalVariable, copy it over to the
+            // new module.
+            GlobalVariable *OldGV = cast<GlobalVariable>(Op);
+            GlobalVariable *GV = new GlobalVariable(
+                *JITMod, OldGV->getValueType(), OldGV->isConstant(),
+                OldGV->getLinkage(), (Constant *)nullptr, OldGV->getName(),
+                (GlobalVariable *)nullptr, OldGV->getThreadLocalMode(),
+                OldGV->getType()->getAddressSpace());
+            GV->copyAttributesFrom(&*OldGV);
+            VMap[&*OldGV] = GV;
+            cloned_globals.push_back(OldGV);
           } else {
             if (OpTy->isIntegerTy()) {
               // Value is an integer constant, so leave it as is.
@@ -355,6 +368,18 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
     }
   }
   Builder.CreateRetVoid();
+
+  // Fix initialisers/referrers for copied global variables.
+  // FIXME Do we also need to copy Linkage, MetaData, Comdat?
+  for (GlobalVariable *G : cloned_globals) {
+    GlobalVariable *NewGV = cast<GlobalVariable>(VMap[G]);
+    if (G->isDeclaration())
+      continue;
+
+    if (G->hasInitializer())
+      NewGV->setInitializer(MapValue(G->getInitializer(), VMap));
+  }
+
 #ifndef NDEBUG
   llvm::verifyModule(*JITMod, &llvm::errs());
 #endif
