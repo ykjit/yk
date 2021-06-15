@@ -154,7 +154,7 @@ impl HWTMapper {
 
         ents.sort_by(|x, y| x.range.start.partial_cmp(&y.range.start).unwrap());
         for ent in ents {
-            // Check that the MachineBasicBlock observed in the trace has a correspoinding BasicBlock.
+            // Check that the MachineBasicBlock observed in the trace has a corresponding BasicBlock.
             // PERF: can we guarantee this won't happen and downgrade to a debug assertion?
             assert_ne!(ent.value.bb, NO_BB);
 
