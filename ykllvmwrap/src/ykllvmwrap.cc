@@ -227,6 +227,8 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
   }
 
   bool Tracing = false;
+  std::vector<CallInst *> inlined_calls;
+  CallInst *last_call = nullptr;
 
   // Iterate over the PT trace and stitch together all traced blocks.
   for (size_t Idx = 0; Idx < Len; Idx++) {
@@ -241,11 +243,21 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
     auto It = F->begin();
     std::advance(It, BBs[Idx]);
     BasicBlock *BB = &*It;
+
     // Iterate over all instructions within this block and copy them over
     // to our new module.
     for (auto I = BB->begin(); I != BB->end(); I++) {
+      // If we've returned from a call skip ahead to the instruction where we
+      // left off.
+      if (last_call != nullptr) {
+        if (&*I == last_call) {
+          last_call = nullptr;
+        }
+        continue;
+      }
       if (isa<CallInst>(I)) {
-        Function *CF = cast<CallInst>(&*I)->getCalledFunction();
+        CallInst *CI = cast<CallInst>(&*I);
+        Function *CF = CI->getCalledFunction();
         if (CF == nullptr)
           continue;
 
@@ -257,6 +269,22 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
         } else if (CF->getName() == YKTRACE_STOP) {
           // FIXME Remove argument setup before __yktrace_stop_tracing call.
           Tracing = false;
+        } else {
+          // Skip remainder of this block and remember where we stopped so we
+          // can continue tracing from this position after returning frome the
+          // inlined call.
+          // FIXME Deal with calls we cannot or don't want to inline.
+          if (Tracing) {
+            inlined_calls.push_back(CI);
+            // During inlining, remap function arguments to the variables
+            // passed in by the caller.
+            for (unsigned int i = 0; i < CI->arg_size(); i++) {
+              Value *Var = CI->getArgOperand(i);
+              Value *Arg = CF->getArg(i);
+              VMap[Arg] = Var;
+            }
+            break;
+          }
         }
       }
 
@@ -265,6 +293,18 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
 
       if (llvm::isa<llvm::BranchInst>(I)) {
         // FIXME Replace all branch instruction with guards.
+        continue;
+      }
+
+      if (isa<ReturnInst>(I)) {
+        last_call = inlined_calls.back();
+        inlined_calls.pop_back();
+        // Replace the return variable of the call with its return value.
+        // Since the return value will have already been copied over to the
+        // JITModule, make sure we look up the copy.
+        auto OldRetVal = ((ReturnInst *)&*I)->getReturnValue();
+        auto NewRetVal = VMap[OldRetVal];
+        VMap[last_call] = NewRetVal;
         continue;
       }
 
@@ -318,6 +358,13 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
 #ifndef NDEBUG
   llvm::verifyModule(*JITMod, &llvm::errs());
 #endif
+  auto PrintIR = std::getenv("YKDEBUG_PRINT_IR");
+  if (PrintIR != nullptr) {
+    if (strcmp(PrintIR, "1") == 0) {
+      // Print out the compiled trace's IR to stderr.
+      JITMod->dump();
+    }
+  }
 
   // Compile IR trace and return a pointer to its function.
   return compile_module(TraceName, JITMod);

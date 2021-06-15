@@ -2,8 +2,6 @@
 // Run-time:
 //   stderr:
 //     define internal void @__yk_compiled_trace_0(i32* %0) {
-//       %2 = load i32, i32* %0, align 4, !tbaa !0
-//       %3 = icmp eq i32 %2, 0
 //       store i32 3, i32* %0, align 4, !tbaa !0
 //       ret void
 //     }
@@ -19,20 +17,16 @@
 #include <string.h>
 #include <yk_testing.h>
 
-int main(int argc, char **argv) {
-  int cond = argc;
-  void *tt = __yktrace_start_tracing(HW_TRACING, &cond);
-  int res = 0;
-  if (cond) {
-    res = 2;
-    cond = 3;
-  } else {
-    res = 4;
-  }
-  void *tr = __yktrace_stop_tracing(tt);
+__attribute__((noinline)) int f(a) { return a; }
 
-  assert(cond == 3);
-  assert(res == 2);
+int main(int argc, char **argv) {
+  int res = 0;
+  void *tt = __yktrace_start_tracing(HW_TRACING, &res);
+  int a = f(1);
+  int b = f(2);
+  res = a + b;
+  void *tr = __yktrace_stop_tracing(tt);
+  assert(res == 3);
 
   void *ptr = __yktrace_irtrace_compile(tr);
   __yktrace_drop_irtrace(tr);
