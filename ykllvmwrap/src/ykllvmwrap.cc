@@ -303,8 +303,12 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
         // Since the return value will have already been copied over to the
         // JITModule, make sure we look up the copy.
         auto OldRetVal = ((ReturnInst *)&*I)->getReturnValue();
-        auto NewRetVal = VMap[OldRetVal];
-        VMap[last_call] = NewRetVal;
+        if (isa<Constant>(OldRetVal)) {
+          VMap[last_call] = OldRetVal;
+        } else {
+          auto NewRetVal = VMap[OldRetVal];
+          VMap[last_call] = NewRetVal;
+        }
         continue;
       }
 
