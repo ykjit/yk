@@ -332,14 +332,21 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
             // If there's a reference to a GlobalVariable, copy it over to the
             // new module.
             GlobalVariable *OldGV = cast<GlobalVariable>(Op);
-            GlobalVariable *GV = new GlobalVariable(
-                *JITMod, OldGV->getValueType(), OldGV->isConstant(),
-                OldGV->getLinkage(), (Constant *)nullptr, OldGV->getName(),
-                (GlobalVariable *)nullptr, OldGV->getThreadLocalMode(),
-                OldGV->getType()->getAddressSpace());
-            GV->copyAttributesFrom(&*OldGV);
-            VMap[&*OldGV] = GV;
-            cloned_globals.push_back(OldGV);
+            if (OldGV->isConstant()) {
+              // Global variable is a constant so just copy it into the trace.
+              GlobalVariable *GV = new GlobalVariable(
+                  *JITMod, OldGV->getValueType(), OldGV->isConstant(),
+                  OldGV->getLinkage(), (Constant *)nullptr, OldGV->getName(),
+                  (GlobalVariable *)nullptr, OldGV->getThreadLocalMode(),
+                  OldGV->getType()->getAddressSpace());
+              GV->copyAttributesFrom(&*OldGV);
+              cloned_globals.push_back(OldGV);
+              VMap[OldGV] = GV;
+            } else {
+              // FIXME Allow trace to write to mutable global variables.
+              errx(EXIT_FAILURE, "Non-const global variable %s",
+                   OldGV->getName().data());
+            }
           } else {
             if (OpTy->isIntegerTy()) {
               // Value is an integer constant, so leave it as is.
