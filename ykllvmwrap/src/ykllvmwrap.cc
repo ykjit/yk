@@ -313,7 +313,7 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
           auto NewRetVal = VMap[OldRetVal];
           VMap[last_call] = NewRetVal;
         }
-        continue;
+        break;
       }
 
       // If execution reaches here, then the instruction I is to be copied into
