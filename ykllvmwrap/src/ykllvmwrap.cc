@@ -334,6 +334,9 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
             GlobalVariable *OldGV = cast<GlobalVariable>(Op);
             if (OldGV->isConstant()) {
               // Global variable is a constant so just copy it into the trace.
+              // We don't need to check if this global already exists, since
+              // we're skipping any operand that's already been cloned into the
+              // VMap.
               GlobalVariable *GV = new GlobalVariable(
                   *JITMod, OldGV->getValueType(), OldGV->isConstant(),
                   OldGV->getLinkage(), (Constant *)nullptr, OldGV->getName(),
