@@ -281,6 +281,10 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
             for (unsigned int i = 0; i < CI->arg_size(); i++) {
               Value *Var = CI->getArgOperand(i);
               Value *Arg = CF->getArg(i);
+              // If the operand has already been cloned into JITMod then we need
+              // to use the cloned value in the VMap.
+              if (VMap[Var] != nullptr)
+                Var = VMap[Var];
               VMap[Arg] = Var;
             }
             break;
