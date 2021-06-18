@@ -174,6 +174,79 @@ extern "C" void *compile_module(string TraceName, Module *M) {
   return (void *)EE->getFunctionAddress(TraceName);
 }
 
+#ifndef NDEBUG
+// Left trim (in-place) the character `C` from the string `S`.
+void lTrim(string &S, const char C) {
+  S.erase(0, std::min(S.find_first_not_of(C), S.size() - 1));
+}
+
+// Dumps an LLVM Value to a string and trims leading whitespace.
+void dumpValueToString(Value *V, string &S) {
+  raw_string_ostream RSO(S);
+  V->print(RSO);
+  lTrim(S, ' ');
+}
+
+// Print a trace's instructions "side-by-side" with the instructions from
+// which they were derived in the AOT module.
+void printSBS(Module *AOTMod, Module *JITMod, ValueToValueMapTy &RevVMap) {
+  assert(JITMod->size() == 1);
+  Function *JITFunc = &*JITMod->begin();
+
+  // Find the longest instruction from the JITMod so that we can align the
+  // second column.
+  size_t LongestJITLine = 0;
+  for (auto &JITBlock : *JITFunc) {
+    for (auto &JITInst : JITBlock) {
+      string Line;
+      dumpValueToString(&JITInst, Line);
+      auto Len = Line.length();
+      if (Len > LongestJITLine)
+        LongestJITLine = Len;
+    }
+  }
+
+  const string JITHeader = string("Trace");
+  string Padding = string(LongestJITLine - JITHeader.length(), ' ');
+  errs() << "\n\n--- Begin trace dump for " << JITFunc->getName() << " ---\n";
+  errs() << JITHeader << Padding << "  | AOT\n";
+
+  // Keep track of the AOT function we are currently in so that we can print
+  // inlined function thresholds in the dumped trace.
+  StringRef LastAOTFunc;
+  for (auto &JITBlock : *JITFunc) {
+    for (auto &JITInst : JITBlock) {
+      auto V = RevVMap[&JITInst];
+      if (V == nullptr) {
+        // The instruction wasn't cloned from the AOTMod, so print it only in
+        // the JIT column and carry on.
+        std::string Line;
+        dumpValueToString((Value *)&JITInst, Line);
+        errs() << Line << "\n";
+        continue;
+      }
+      Instruction *AOTInst = (Instruction *)&*V;
+      assert(AOTInst != nullptr);
+      Function *AOTFunc = AOTInst->getFunction();
+      assert(AOTFunc != nullptr);
+      StringRef AOTFuncName = AOTFunc->getName();
+      if (AOTFuncName != LastAOTFunc) {
+        // Print an inlining threshold.
+        errs() << "# " << AOTFuncName << "()\n";
+        LastAOTFunc = AOTFuncName;
+      }
+      string JITStr;
+      dumpValueToString((Value *)&JITInst, JITStr);
+      string Padding = string(LongestJITLine - JITStr.length(), ' ');
+      string AOTStr;
+      dumpValueToString((Value *)AOTInst, AOTStr);
+      errs() << JITStr << Padding << "  |  " << AOTStr << "\n";
+    }
+  }
+  errs() << "--- End trace dump for " << JITFunc->getName() << " ---\n";
+}
+#endif
+
 // Compile an IRTrace to executable code in memory.
 //
 // The trace to compile is passed in as two arrays of length Len. Then each
@@ -215,6 +288,9 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
   Builder.SetInsertPoint(DstBB);
 
   llvm::ValueToValueMapTy VMap;
+#ifndef NDEBUG
+  llvm::ValueToValueMapTy RevVMap;
+#endif
   // Variables that are used (but not defined) inbetween start and stop tracing
   // need to be replaced with function arguments which the user passes into the
   // compiled trace. This loop creates a mapping from those original variables
@@ -382,6 +458,9 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
       auto NewInst = &*I->clone();
       llvm::RemapInstruction(NewInst, VMap, RF_NoModuleLevelChanges);
       VMap[&*I] = NewInst;
+#ifndef NDEBUG
+      RevVMap[NewInst] = &*I;
+#endif
       Builder.Insert(NewInst);
     }
   }
@@ -399,9 +478,14 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
   }
 
 #ifndef NDEBUG
+  char *SBS = getenv("YK_PRINT_IR_SBS");
+  if ((SBS != nullptr) && (strcmp(SBS, "1") == 0)) {
+    printSBS(AOTMod, JITMod, RevVMap);
+  }
   llvm::verifyModule(*JITMod, &llvm::errs());
 #endif
-  auto PrintIR = std::getenv("YKDEBUG_PRINT_IR");
+
+  auto PrintIR = std::getenv("YK_PRINT_IR");
   if (PrintIR != nullptr) {
     if (strcmp(PrintIR, "1") == 0) {
       // Print out the compiled trace's IR to stderr.
