@@ -1,5 +1,6 @@
 // Compiler:
 // Run-time:
+//   env-var: YK_PRINT_IR=1
 //   stderr:
 //     define internal void @__yk_compiled_trace_0(i32* %0) {
 //       %2 = load i32, i32* %0, align 4, !tbaa !0
