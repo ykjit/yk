@@ -11,6 +11,6 @@ path = "run.rs"
 harness = false
 
 [dev-dependencies]
-lang_tester = "0.5.0"
+lang_tester = "0.7.0"
 tempfile = "3.2.0"
 ykcapi = { path = "../ykcapi", features = ["c_testing"] }
