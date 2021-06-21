@@ -302,7 +302,10 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
     VMap[OldVal] = NewVal;
   }
 
+  // When true, indicates that we've started copying instructions into the JIT
+  // module.
   bool Tracing = false;
+
   std::vector<CallInst *> inlined_calls;
   CallInst *last_call = nullptr;
   std::vector<GlobalVariable *> cloned_globals;
@@ -346,7 +349,7 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
           Tracing = true;
           continue;
         } else if (CF->getName() == YKTRACE_STOP) {
-          Tracing = false;
+          break;
         } else {
           // Skip remainder of this block and remember where we stopped so we
           // can continue tracing from this position after returning frome the
