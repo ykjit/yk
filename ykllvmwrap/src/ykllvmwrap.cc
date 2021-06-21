@@ -341,14 +341,11 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
         if (CF == nullptr)
           continue;
 
-        // FIXME Strip storage of return value of __yktrace_start_tracing and
-        // argument setup of __yktrace_stop_tracing.
         if (CF->getName() == YKTRACE_START) {
           ThreadTracer = &*I;
           Tracing = true;
           continue;
         } else if (CF->getName() == YKTRACE_STOP) {
-          // FIXME Remove argument setup before __yktrace_stop_tracing call.
           Tracing = false;
         } else {
           // Skip remainder of this block and remember where we stopped so we
