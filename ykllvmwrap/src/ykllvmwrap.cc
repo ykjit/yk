@@ -321,6 +321,9 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
     std::advance(It, BBs[Idx]);
     BasicBlock *BB = &*It;
 
+    // A pointer to the ThreadTracer returned by YKTRACE_START (once found).
+    Value *ThreadTracer = nullptr;
+
     // Iterate over all instructions within this block and copy them over
     // to our new module.
     for (auto I = BB->begin(); I != BB->end(); I++) {
@@ -341,6 +344,7 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
         // FIXME Strip storage of return value of __yktrace_start_tracing and
         // argument setup of __yktrace_stop_tracing.
         if (CF->getName() == YKTRACE_START) {
+          ThreadTracer = &*I;
           Tracing = true;
           continue;
         } else if (CF->getName() == YKTRACE_STOP) {
@@ -444,10 +448,11 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
               // tests to run. Ultimately, find a better way to do this.
               VMap[Op] = Op;
               continue;
-            } else {
-              // Value is not a stack allocation or constant, so make a dummy
-              // default value.
-              // FIXME fails for meta-data types (when you build with -g).
+            } else if (Op == ThreadTracer) {
+              // At some optimisation levels, the result from starting tracing
+              // (i.e. the ThreadTracer) is stored in an alloca'd stack space.
+              // Since we've stripped the instruction that generates that
+              // value, we have to make a dummy stack slot to keep LLVM happy.
               Value *NullVal = Constant::getNullValue(OpTy);
               VMap[Op] = NullVal;
             }
