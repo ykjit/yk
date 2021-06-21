@@ -441,19 +441,17 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
               errx(EXIT_FAILURE, "Non-const global variable %s",
                    OldGV->getName().data());
             }
-          } else {
-            if (isa<Constant>(Op)) {
-              // Value is a constant, so leave it as is.
-              VMap[Op] = Op;
-              continue;
-            } else if (Op == ThreadTracer) {
-              // At some optimisation levels, the result from starting tracing
-              // (i.e. the ThreadTracer) is stored in an alloca'd stack space.
-              // Since we've stripped the instruction that generates that
-              // value, we have to make a dummy stack slot to keep LLVM happy.
-              Value *NullVal = Constant::getNullValue(OpTy);
-              VMap[Op] = NullVal;
-            }
+          } else if (isa<Constant>(Op)) {
+            // Value is a constant, so leave it as is.
+            VMap[Op] = Op;
+            continue;
+          } else if (Op == ThreadTracer) {
+            // At some optimisation levels, the result from starting tracing
+            // (i.e. the ThreadTracer) is stored in an alloca'd stack space.
+            // Since we've stripped the instruction that generates that
+            // value, we have to make a dummy stack slot to keep LLVM happy.
+            Value *NullVal = Constant::getNullValue(OpTy);
+            VMap[Op] = NullVal;
           }
         }
       }
