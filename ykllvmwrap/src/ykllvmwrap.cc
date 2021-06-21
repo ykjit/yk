@@ -398,24 +398,23 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
       }
 
       // If execution reaches here, then the instruction I is to be copied into
-      // JITMod.
-      //
-      // FIXME: We now scan the instruction's operands checking that each is
-      // defined in JITMod. Any variable not defined means that the
-      // corresponding variable in AOTMod was instantiated prior to tracing,
-      // but was not marked as a trace input. Currently this only applies to
-      // variables relating to starting and stopping tracing. For those
-      // variables we simply allocate dummy storage so that the module will
-      // verify and compile. In the long run we should omit these instructions
-      // as tracing them is never beneficial. Then the below hack can be
-      // removed.
+      // JITMod. Before we can do this, we have to scan the instruction's
+      // operands checking that each is defined in JITMod.
       for (unsigned OpIdx = 0; OpIdx < I->getNumOperands(); OpIdx++) {
         Value *Op = I->getOperand(OpIdx);
         if (VMap[Op] == nullptr) {
           // Value is undefined in JITMod.
           Type *OpTy = Op->getType();
           if (isa<llvm::AllocaInst>(Op)) {
-            // Value is a stack allocation, so make a dummy stack slot.
+            // In the AOT module, the operand is allocated on the stack with an
+            // `alloca`, but this variable is as-yet undefined in the JIT
+            // module.
+            //
+            // This happens because LLVM has a tendency to move allocas up to
+            // the first block of a function, and if we didn't trace that block
+            // (e.g. we started tracing in a later block), then we will have
+            // missed those allocations. In these cases we materialise the
+            // allocations as we see them used in code that *was* traced.
             Value *Alloca = Builder.CreateAlloca(
                 OpTy->getPointerElementType(), OpTy->getPointerAddressSpace());
             VMap[Op] = Alloca;
