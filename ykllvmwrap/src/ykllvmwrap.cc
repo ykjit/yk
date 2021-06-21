@@ -403,7 +403,7 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
       for (unsigned OpIdx = 0; OpIdx < I->getNumOperands(); OpIdx++) {
         Value *Op = I->getOperand(OpIdx);
         if (VMap[Op] == nullptr) {
-          // Value is undefined in JITMod.
+          // The operand is undefined in JITMod.
           Type *OpTy = Op->getType();
           if (isa<llvm::AllocaInst>(Op)) {
             // In the AOT module, the operand is allocated on the stack with an
@@ -441,7 +441,7 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
                    OldGV->getName().data());
             }
           } else if (isa<Constant>(Op)) {
-            // Value is a constant, so leave it as is.
+            // The operand is a constant, so leave it as is.
             VMap[Op] = Op;
             continue;
           } else if (Op == ThreadTracer) {
