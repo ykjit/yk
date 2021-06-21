@@ -442,10 +442,8 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
                    OldGV->getName().data());
             }
           } else {
-            if (OpTy->isIntegerTy()) {
-              // Value is an integer constant, so leave it as is.
-              // FIXME Extend this with other types as needed to get new
-              // tests to run. Ultimately, find a better way to do this.
+            if (isa<Constant>(Op)) {
+              // Value is a constant, so leave it as is.
               VMap[Op] = Op;
               continue;
             } else if (Op == ThreadTracer) {
