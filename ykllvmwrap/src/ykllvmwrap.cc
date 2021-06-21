@@ -394,14 +394,17 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
       }
 
       // If execution reaches here, then the instruction I is to be copied into
-      // JITMod. We now scan the instruction's operands checking that each is
+      // JITMod.
+      //
+      // FIXME: We now scan the instruction's operands checking that each is
       // defined in JITMod. Any variable not defined means that the
-      // corresponding variable in AOTMod was instantiated prior to tracing.
-      // Eventually these operands need to become inputs to the trace, but
-      // until we have figured out how to do that, we simply allocate dummy
-      // storage for them so that the module will verify and compile. Obviously
-      // mutations to these dummies are not observed outside the trace code, so
-      // this is strictly a FIXME.
+      // corresponding variable in AOTMod was instantiated prior to tracing,
+      // but was not marked as a trace input. Currently this only applies to
+      // variables relating to starting and stopping tracing. For those
+      // variables we simply allocate dummy storage so that the module will
+      // verify and compile. In the long run we should omit these instructions
+      // as tracing them is never beneficial. Then the below hack can be
+      // removed.
       for (unsigned OpIdx = 0; OpIdx < I->getNumOperands(); OpIdx++) {
         Value *Op = I->getOperand(OpIdx);
         if (VMap[Op] == nullptr) {
