@@ -461,9 +461,8 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
         }
       }
 
-      // Copy instruction over into the IR trace. Since the instruction
-      // operands still reference values in the original bitcode, remap
-      // the operands to point to new values within the IR trace.
+      // Shortly we will copy the instruction into the JIT module. We start by
+      // cloning the instruction.
       auto NewInst = &*I->clone();
 
       // FIXME: For now we strip debugging meta-data from the JIT module just
@@ -481,11 +480,16 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
         }
       }
 
+      // Since the instruction operands still reference values from the AOT
+      // module, we must remap them to point to new values in the JIT module.
       llvm::RemapInstruction(NewInst, VMap, RF_NoModuleLevelChanges);
       VMap[&*I] = NewInst;
+
 #ifndef NDEBUG
       RevVMap[NewInst] = &*I;
 #endif
+
+      // And finally insert the new instruction into the JIT module.
       Builder.Insert(NewInst);
     }
   }
