@@ -358,6 +358,11 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
             auto PrevVMap = vmaps.back();
             vmaps.push_back(new llvm::ValueToValueMapTy());
             VMap = vmaps.back();
+            // Copy over globals
+            auto OutermostVMap = vmaps.front();
+            for (GlobalVariable *G : cloned_globals) {
+                (*VMap)[G] = (*OutermostVMap)[G];
+            }
             // During inlining, remap function arguments to the variables
             // passed in by the caller.
             for (unsigned int i = 0; i < CI->arg_size(); i++) {
@@ -441,6 +446,10 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
                   OldGV->getType()->getAddressSpace());
               GV->copyAttributesFrom(&*OldGV);
               cloned_globals.push_back(OldGV);
+              // Store globals in the outermost vmap so we can initialise them
+              // later.
+              auto OutermostVMap = vmaps.front();
+              (*OutermostVMap)[OldGV] = GV;
               (*VMap)[OldGV] = GV;
             } else {
               // FIXME Allow trace to write to mutable global variables.
