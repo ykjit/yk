@@ -29,6 +29,8 @@ fn mk_compiler(exe: &Path, src: &Path, opt: &str) -> Command {
 
     compiler.args(&[
         opt,
+        #[cfg(debug_assertions)]
+        "-g",
         "-Werror",
         "-Wall",
         "-fuse-ld=lld",

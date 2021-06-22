@@ -328,6 +328,12 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
     // Iterate over all instructions within this block and copy them over
     // to our new module.
     for (auto I = BB->begin(); I != BB->end(); I++) {
+      // Skip calls to debug intrinsics (e.g. @llvm.dbg.value). We don't
+      // currently handle debug info and these "pseudo-calls" cause our blocks
+      // to be prematurely terminated.
+      if (isa<DbgInfoIntrinsic>(I))
+        continue;
+
       // If we've returned from a call skip ahead to the instruction where we
       // left off.
       if (last_call != nullptr) {
@@ -459,6 +465,22 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
       // operands still reference values in the original bitcode, remap
       // the operands to point to new values within the IR trace.
       auto NewInst = &*I->clone();
+
+      // FIXME: For now we strip debugging meta-data from the JIT module just
+      // so that the module will verify and compile. In the long run we should
+      // include the debug info for the trace code. This would entail copying
+      // over the various module-level debugging declarations that are
+      // dependencies of instructions with !dbg meta-data attached.
+      if (NewInst->hasMetadata()) {
+        SmallVector<std::pair<unsigned, MDNode *>> InstrMD;
+        NewInst->getAllMetadata(InstrMD);
+        for (auto &MD : InstrMD) {
+          if (MD.first != LLVMContext::MD_dbg)
+            continue;
+          NewInst->setMetadata(MD.first, NULL);
+        }
+      }
+
       llvm::RemapInstruction(NewInst, VMap, RF_NoModuleLevelChanges);
       VMap[&*I] = NewInst;
 #ifndef NDEBUG
