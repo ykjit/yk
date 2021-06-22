@@ -302,7 +302,11 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
     VMap[OldVal] = NewVal;
   }
 
-  bool Tracing = false;
+  // A pointer to the call to YKTRACE_START in the AOT module (once
+  // encountered). When this changes from NULL to non-NULL, then we start
+  // copying instructions from the AOT module into the JIT module.
+  Instruction *StartTracingInstr = nullptr;
+
   std::vector<CallInst *> inlined_calls;
   CallInst *last_call = nullptr;
   std::vector<GlobalVariable *> cloned_globals;
@@ -338,20 +342,17 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
         if (CF == nullptr)
           continue;
 
-        // FIXME Strip storage of return value of __yktrace_start_tracing and
-        // argument setup of __yktrace_stop_tracing.
         if (CF->getName() == YKTRACE_START) {
-          Tracing = true;
+          StartTracingInstr = &*I;
           continue;
         } else if (CF->getName() == YKTRACE_STOP) {
-          // FIXME Remove argument setup before __yktrace_stop_tracing call.
-          Tracing = false;
+          break;
         } else {
           // Skip remainder of this block and remember where we stopped so we
           // can continue tracing from this position after returning frome the
           // inlined call.
           // FIXME Deal with calls we cannot or don't want to inline.
-          if (Tracing) {
+          if (StartTracingInstr != nullptr) {
             inlined_calls.push_back(CI);
             // During inlining, remap function arguments to the variables
             // passed in by the caller.
@@ -369,7 +370,9 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
         }
       }
 
-      if (!Tracing)
+      // We don't start copying instructions into the JIT module until we've
+      // seen the call to YKTRACE_START.
+      if (StartTracingInstr == nullptr)
         continue;
 
       if (llvm::isa<llvm::BranchInst>(I)) {
@@ -394,24 +397,23 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
       }
 
       // If execution reaches here, then the instruction I is to be copied into
-      // JITMod.
-      //
-      // FIXME: We now scan the instruction's operands checking that each is
-      // defined in JITMod. Any variable not defined means that the
-      // corresponding variable in AOTMod was instantiated prior to tracing,
-      // but was not marked as a trace input. Currently this only applies to
-      // variables relating to starting and stopping tracing. For those
-      // variables we simply allocate dummy storage so that the module will
-      // verify and compile. In the long run we should omit these instructions
-      // as tracing them is never beneficial. Then the below hack can be
-      // removed.
+      // JITMod. Before we can do this, we have to scan the instruction's
+      // operands checking that each is defined in JITMod.
       for (unsigned OpIdx = 0; OpIdx < I->getNumOperands(); OpIdx++) {
         Value *Op = I->getOperand(OpIdx);
         if (VMap[Op] == nullptr) {
-          // Value is undefined in JITMod.
+          // The operand is undefined in JITMod.
           Type *OpTy = Op->getType();
           if (isa<llvm::AllocaInst>(Op)) {
-            // Value is a stack allocation, so make a dummy stack slot.
+            // In the AOT module, the operand is allocated on the stack with an
+            // `alloca`, but this variable is as-yet undefined in the JIT
+            // module.
+            //
+            // This happens because LLVM has a tendency to move allocas up to
+            // the first block of a function, and if we didn't trace that block
+            // (e.g. we started tracing in a later block), then we will have
+            // missed those allocations. In these cases we materialise the
+            // allocations as we see them used in code that *was* traced.
             Value *Alloca = Builder.CreateAlloca(
                 OpTy->getPointerElementType(), OpTy->getPointerAddressSpace());
             VMap[Op] = Alloca;
@@ -437,20 +439,18 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
               errx(EXIT_FAILURE, "Non-const global variable %s",
                    OldGV->getName().data());
             }
-          } else {
-            if (OpTy->isIntegerTy()) {
-              // Value is an integer constant, so leave it as is.
-              // FIXME Extend this with other types as needed to get new
-              // tests to run. Ultimately, find a better way to do this.
-              VMap[Op] = Op;
-              continue;
-            } else {
-              // Value is not a stack allocation or constant, so make a dummy
-              // default value.
-              // FIXME fails for meta-data types (when you build with -g).
-              Value *NullVal = Constant::getNullValue(OpTy);
-              VMap[Op] = NullVal;
-            }
+          } else if (isa<Constant>(Op)) {
+            // The operand is a constant, so leave it as is.
+            VMap[Op] = Op;
+            continue;
+          } else if (Op == StartTracingInstr) {
+            // The value generated by StartTracingInstr is the thread tracer.
+            // At some optimisation levels, this gets stored in an alloca'd
+            // stack space. Since we've stripped the instruction that generates
+            // that value (from the JIT module), we have to make a dummy stack
+            // slot to keep LLVM happy.
+            Value *NullVal = Constant::getNullValue(OpTy);
+            VMap[Op] = NullVal;
           }
         }
       }
