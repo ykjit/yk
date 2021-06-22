@@ -287,7 +287,8 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
   llvm::IRBuilder<> Builder(JITContext);
   Builder.SetInsertPoint(DstBB);
 
-  llvm::ValueToValueMapTy VMap;
+  std::vector<ValueToValueMapTy*> vmaps;
+  vmaps.push_back(new llvm::ValueToValueMapTy());
 #ifndef NDEBUG
   llvm::ValueToValueMapTy RevVMap;
 #endif
@@ -295,11 +296,12 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
   // need to be replaced with function arguments which the user passes into the
   // compiled trace. This loop creates a mapping from those original variables
   // to the function arguments of the compiled trace function.
+  auto VMap = vmaps.back();
   for (size_t Idx = 0; Idx != Inputs.size(); Idx++) {
     Value *OldVal = Inputs[Idx];
     Value *NewVal = DstFunc->getArg(Idx);
     assert(NewVal->getType()->isPointerTy());
-    VMap[OldVal] = NewVal;
+    (*VMap)[OldVal] = NewVal;
   }
 
   bool Tracing = false;
@@ -353,6 +355,9 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
           // FIXME Deal with calls we cannot or don't want to inline.
           if (Tracing) {
             inlined_calls.push_back(CI);
+            auto PrevVMap = vmaps.back();
+            vmaps.push_back(new llvm::ValueToValueMapTy());
+            VMap = vmaps.back();
             // During inlining, remap function arguments to the variables
             // passed in by the caller.
             for (unsigned int i = 0; i < CI->arg_size(); i++) {
@@ -360,9 +365,9 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
               Value *Arg = CF->getArg(i);
               // If the operand has already been cloned into JITMod then we need
               // to use the cloned value in the VMap.
-              if (VMap[Var] != nullptr)
-                Var = VMap[Var];
-              VMap[Arg] = Var;
+              if ((*PrevVMap)[Var] != nullptr)
+                Var = (*PrevVMap)[Var];
+              (*VMap)[Arg] = Var;
             }
             break;
           }
@@ -380,18 +385,23 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
       if (isa<ReturnInst>(I)) {
         last_call = inlined_calls.back();
         inlined_calls.pop_back();
+        auto PrevVMap = vmaps.back();
+        vmaps.pop_back();
+        VMap = vmaps.back();
         // Replace the return variable of the call with its return value.
         // Since the return value will have already been copied over to the
         // JITModule, make sure we look up the copy.
         auto OldRetVal = ((ReturnInst *)&*I)->getReturnValue();
         if (isa<Constant>(OldRetVal)) {
-          VMap[last_call] = OldRetVal;
+          (*VMap)[last_call] = OldRetVal;
         } else {
-          auto NewRetVal = VMap[OldRetVal];
-          VMap[last_call] = NewRetVal;
+          auto NewRetVal = (*PrevVMap)[OldRetVal];
+          (*VMap)[last_call] = NewRetVal;
         }
         break;
       }
+
+      //VMap = &vmaps.back();
 
       // If execution reaches here, then the instruction I is to be copied into
       // JITMod.
@@ -407,14 +417,14 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
       // removed.
       for (unsigned OpIdx = 0; OpIdx < I->getNumOperands(); OpIdx++) {
         Value *Op = I->getOperand(OpIdx);
-        if (VMap[Op] == nullptr) {
+        if ((*VMap)[Op] == nullptr) {
           // Value is undefined in JITMod.
           Type *OpTy = Op->getType();
           if (isa<llvm::AllocaInst>(Op)) {
             // Value is a stack allocation, so make a dummy stack slot.
             Value *Alloca = Builder.CreateAlloca(
                 OpTy->getPointerElementType(), OpTy->getPointerAddressSpace());
-            VMap[Op] = Alloca;
+            (*VMap)[Op] = Alloca;
           } else if (isa<GlobalVariable>(Op)) {
             // If there's a reference to a GlobalVariable, copy it over to the
             // new module.
@@ -431,7 +441,7 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
                   OldGV->getType()->getAddressSpace());
               GV->copyAttributesFrom(&*OldGV);
               cloned_globals.push_back(OldGV);
-              VMap[OldGV] = GV;
+              (*VMap)[OldGV] = GV;
             } else {
               // FIXME Allow trace to write to mutable global variables.
               errx(EXIT_FAILURE, "Non-const global variable %s",
@@ -442,14 +452,14 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
               // Value is an integer constant, so leave it as is.
               // FIXME Extend this with other types as needed to get new
               // tests to run. Ultimately, find a better way to do this.
-              VMap[Op] = Op;
+              (*VMap)[Op] = Op;
               continue;
             } else {
               // Value is not a stack allocation or constant, so make a dummy
               // default value.
               // FIXME fails for meta-data types (when you build with -g).
               Value *NullVal = Constant::getNullValue(OpTy);
-              VMap[Op] = NullVal;
+              (*VMap)[Op] = NullVal;
             }
           }
         }
@@ -459,8 +469,8 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
       // operands still reference values in the original bitcode, remap
       // the operands to point to new values within the IR trace.
       auto NewInst = &*I->clone();
-      llvm::RemapInstruction(NewInst, VMap, RF_NoModuleLevelChanges);
-      VMap[&*I] = NewInst;
+      llvm::RemapInstruction(NewInst, *VMap, RF_NoModuleLevelChanges);
+      (*VMap)[&*I] = NewInst;
 #ifndef NDEBUG
       RevVMap[NewInst] = &*I;
 #endif
@@ -471,13 +481,14 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
 
   // Fix initialisers/referrers for copied global variables.
   // FIXME Do we also need to copy Linkage, MetaData, Comdat?
+  //auto &VMap = vmaps.back();
   for (GlobalVariable *G : cloned_globals) {
-    GlobalVariable *NewGV = cast<GlobalVariable>(VMap[G]);
+    GlobalVariable *NewGV = cast<GlobalVariable>((*VMap)[G]);
     if (G->isDeclaration())
       continue;
 
     if (G->hasInitializer())
-      NewGV->setInitializer(MapValue(G->getInitializer(), VMap));
+      NewGV->setInitializer(MapValue(G->getInitializer(), *VMap));
   }
 
 #ifndef NDEBUG
