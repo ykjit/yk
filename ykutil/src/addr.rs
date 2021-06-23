@@ -43,3 +43,26 @@ pub fn code_vaddr_to_off(vaddr: usize) -> Option<(&'static CStr, u64)> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::code_vaddr_to_off;
+    use libc::dlsym;
+    use std::{ffi::CString, ptr};
+
+    #[test]
+    fn map_libc() {
+        let func = CString::new("getuid").unwrap();
+        let vaddr = unsafe { dlsym(ptr::null_mut(), func.as_ptr() as *const i8) };
+        assert_ne!(vaddr, ptr::null_mut());
+        assert!(code_vaddr_to_off(vaddr as usize).is_some());
+    }
+
+    #[test]
+    #[no_mangle]
+    fn map_so() {
+        let vaddr = code_vaddr_to_off as *const u8;
+        assert_ne!(vaddr, ptr::null_mut());
+        assert!(code_vaddr_to_off(vaddr as usize).is_some());
+    }
+}
