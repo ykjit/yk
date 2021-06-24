@@ -166,7 +166,7 @@ impl HWTMapper {
                 prev_ent = Some(ent);
             }
 
-            let func_name = self.symb.find_code_sym(obj_name, ent.value.f_off).unwrap();
+            let func_name = self.symb.find_code_sym(&obj_name, ent.value.f_off).unwrap();
             ret.push(IRBlock {
                 func_name,
                 bb: usize::try_from(ent.value.bb).unwrap(),

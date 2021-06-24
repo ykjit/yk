@@ -5,6 +5,7 @@ use std::{
     ffi::{c_void, CStr, CString},
     ops::Drop,
     os::raw::c_char,
+    path::Path,
 };
 
 extern "C" {
@@ -26,8 +27,11 @@ impl Symbolizer {
 
     /// Returns the name of the symbol at byte offset `off` in the object file `obj`,
     /// or `None` if the symbol couldn't be found.
-    pub fn find_code_sym(&self, obj: &CStr, off: u64) -> Option<CString> {
-        let ptr = unsafe { __yk_llvmwrap_symbolizer_find_code_sym(self.0, obj.as_ptr(), off) };
+    pub fn find_code_sym(&self, obj: &Path, off: u64) -> Option<CString> {
+        let obj_c = CString::new(obj.to_str().unwrap()).unwrap();
+        let ptr = unsafe {
+            __yk_llvmwrap_symbolizer_find_code_sym(self.0, obj_c.as_ptr() as *const i8, off)
+        };
         if ptr.is_null() {
             None
         } else {
@@ -75,7 +79,7 @@ mod tests {
         let f_vaddr = symbolize_me_mangled as *const fn() as *const _ as usize;
         let (obj, f_off) = code_vaddr_to_off(f_vaddr).unwrap();
         let s = Symbolizer::new();
-        let sym = s.find_code_sym(obj, f_off).unwrap();
+        let sym = s.find_code_sym(&obj, f_off).unwrap();
         let sym = sym.to_str().unwrap();
         // The symbol will be suffixed with an auto-generated module name, e.g.:
         // ykllvmwrap::symbolizer::tests::symbolize_me_mangled::hc7a76ddceae6f9c4
@@ -89,7 +93,7 @@ mod tests {
         let f_vaddr = symbolize_me_unmangled as *const fn() as *const _ as usize;
         let (obj, f_off) = code_vaddr_to_off(f_vaddr).unwrap();
         let s = Symbolizer::new();
-        let sym = s.find_code_sym(obj, f_off).unwrap();
+        let sym = s.find_code_sym(&obj, f_off).unwrap();
         assert_eq!(sym.to_str().unwrap(), "symbolize_me_unmangled");
     }
 
@@ -98,7 +102,7 @@ mod tests {
         let f_vaddr = getuid as *const fn() as *const _ as usize;
         let (obj, f_off) = code_vaddr_to_off(f_vaddr).unwrap();
         let s = Symbolizer::new();
-        let sym = s.find_code_sym(obj, f_off).unwrap();
+        let sym = s.find_code_sym(&obj, f_off).unwrap();
         assert_eq!(sym.to_str().unwrap(), "getuid");
     }
 }

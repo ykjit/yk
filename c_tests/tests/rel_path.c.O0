@@ -1,0 +1,11 @@
+// Compiler:
+// Run-time:
+//   env-var: YK_PRINT_IR=1
+//   stderr:
+//     define internal void @__yk_compiled_trace_0(i32* %0) {
+//       %2 = alloca i8*, align 8
+//       store i8* null, i8** %2, align 8
+//       store i32 2, i32* %0, align 4
+//       %3 = load i8*, i8** %2, align 8
+//       ret void
+//     }
