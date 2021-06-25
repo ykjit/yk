@@ -25,7 +25,7 @@ int main(int argc, char **argv) {
   void *tr = __yktrace_stop_tracing(tt);
 
   size_t len = __yktrace_irtrace_len(tr);
-  for (int i = 0; i < len; i++) {
+  for (size_t i = 0; i < len; i++) {
     char *func_name = NULL;
     size_t bb = 0;
     __yktrace_irtrace_get(tr, i, &func_name, &bb);

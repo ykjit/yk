@@ -54,7 +54,7 @@ pub extern "C" fn __ykutil_get_llvmbc_section(res_addr: *mut *const c_void, res_
 #[cfg(feature = "c_testing")]
 mod c_testing {
     use libc::c_void;
-    use std::os::raw::c_char;
+    use std::{os::raw::c_char, ptr};
     use yktrace::{start_tracing, BlockMap, IRTrace, ThreadTracer, TracingKind};
 
     const SW_TRACING: usize = 0;
@@ -107,9 +107,17 @@ mod c_testing {
     ) {
         let trace = unsafe { &*trace };
         let blk = trace.get(idx).unwrap();
-        unsafe {
-            *res_func = blk.func_name().as_ptr();
-            *res_bb = blk.bb();
+        if let Some(blk) = blk {
+            unsafe {
+                *res_func = blk.func_name().as_ptr();
+                *res_bb = blk.bb();
+            }
+        } else {
+            // The block was unmappable.
+            unsafe {
+                *res_func = ptr::null();
+                *res_bb = 0;
+            }
         }
     }
 

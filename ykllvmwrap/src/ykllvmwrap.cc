@@ -315,6 +315,9 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
   for (size_t Idx = 0; Idx < Len; Idx++) {
     auto FuncName = FuncNames[Idx];
 
+    // FIXME: Deal with holes in the trace, e.g. calls to libc.
+    assert(FuncName != nullptr);
+
     // Get a traced function so we can extract blocks from it.
     Function *F = AOTMod->getFunction(FuncName);
     if (!F)
