@@ -2,7 +2,10 @@
 
 mod errors;
 use libc::c_void;
-use std::ffi::{CStr, CString};
+use std::{
+    ffi::{CStr, CString},
+    ptr,
+};
 mod hwt;
 
 pub use errors::InvalidTraceError;
@@ -75,7 +78,11 @@ impl IRTrace {
             bbs.push(blk.bb());
         }
 
-        unsafe { ykllvmwrap::__ykllvmwrap_irtrace_compile(func_names.as_ptr(), bbs.as_ptr(), len) }
+        let ret = unsafe {
+            ykllvmwrap::__ykllvmwrap_irtrace_compile(func_names.as_ptr(), bbs.as_ptr(), len)
+        };
+        assert_ne!(ret, ptr::null());
+        ret
     }
 }
 
