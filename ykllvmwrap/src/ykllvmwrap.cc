@@ -352,7 +352,7 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
           StartTracingInstr = &*I;
           continue;
         } else if (CF->getName() == YKTRACE_STOP) {
-          break;
+          goto done;
         } else {
           // Skip remainder of this block and remember where we stopped so we
           // can continue tracing from this position after returning frome the
@@ -493,6 +493,11 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
       Builder.Insert(NewInst);
     }
   }
+
+  // If we fell out of the loop, then we never saw YKTRACE_STOP.
+  return NULL;
+
+done:
   Builder.CreateRetVoid();
 
   // Fix initialisers/referrers for copied global variables.
