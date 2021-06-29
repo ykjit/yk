@@ -133,6 +133,7 @@ std::vector<Value *> get_trace_inputs(Function *F, uintptr_t BBIdx) {
   // call.
   std::advance(It, BBIdx);
   BasicBlock *BB = &*It;
+  bool found = false;
   for (auto I = BB->begin(); I != BB->end(); I++) {
     if (isa<CallInst>(I)) {
       CallInst *CI = cast<CallInst>(&*I);
@@ -141,10 +142,13 @@ std::vector<Value *> get_trace_inputs(Function *F, uintptr_t BBIdx) {
         for (auto Arg = CI->arg_begin() + 1; Arg != CI->arg_end(); Arg++) {
           Vec.push_back(Arg->get());
         }
+        found = true;
         break;
       }
     }
   }
+  if (!found)
+    errx(EXIT_FAILURE, "failed to find trace inputs");
   return Vec;
 }
 
