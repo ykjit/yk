@@ -144,7 +144,8 @@ public:
             StartTracingInstr = &*I;
             continue;
           } else if (CF->getName() == YKTRACE_STOP) {
-            goto done;
+            finalise(&Builder);
+            return JITMod;
           } else {
             // Skip remainder of this block and remember where we stopped so we
             // can continue from this position after returning from the inlined
@@ -202,21 +203,6 @@ public:
 
     // If we fell out of the loop, then we never saw YKTRACE_STOP.
     return NULL;
-
-  done:
-    Builder.CreateRetVoid();
-
-    // Fix initialisers/referrers for copied global variables.
-    // FIXME Do we also need to copy Linkage, MetaData, Comdat?
-    for (GlobalVariable *G : cloned_globals) {
-      GlobalVariable *NewGV = cast<GlobalVariable>(VMap[G]);
-      if (G->isDeclaration())
-        continue;
-
-      if (G->hasInitializer())
-        NewGV->setInitializer(MapValue(G->getInitializer(), VMap));
-    }
-    return JITMod;
   }
 
   void copyInstruction(IRBuilder<> *Builder, Instruction *I) {
@@ -308,5 +294,22 @@ public:
 
     // And finally insert the new instruction into the JIT module.
     Builder->Insert(NewInst);
+  }
+
+  // Finalise the JITModule by adding a return instruction and initialising
+  // global variables.
+  void finalise(IRBuilder<> *Builder) {
+    Builder->CreateRetVoid();
+
+    // Fix initialisers/referrers for copied global variables.
+    // FIXME Do we also need to copy Linkage, MetaData, Comdat?
+    for (GlobalVariable *G : cloned_globals) {
+      GlobalVariable *NewGV = cast<GlobalVariable>(VMap[G]);
+      if (G->isDeclaration())
+        continue;
+
+      if (G->hasInitializer())
+        NewGV->setInitializer(MapValue(G->getInitializer(), VMap));
+    }
   }
 };
