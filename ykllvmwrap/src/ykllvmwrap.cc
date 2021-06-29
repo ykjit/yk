@@ -126,7 +126,7 @@ ThreadSafeModule *getThreadAOTMod(void) {
   return &ThreadAOTMod;
 }
 
-std::vector<Value *> get_trace_inputs(Function *F, uintptr_t BBIdx) {
+std::vector<Value *> getTraceInputs(Function *F, uintptr_t BBIdx) {
   std::vector<Value *> Vec;
   auto It = F->begin();
   // Skip to the first block in the trace which contains the `start_tracing`
@@ -153,7 +153,7 @@ std::vector<Value *> get_trace_inputs(Function *F, uintptr_t BBIdx) {
 }
 
 // Compile a module in-memory and return a pointer to its function.
-extern "C" void *compile_module(string TraceName, Module *M) {
+extern "C" void *compileModule(string TraceName, Module *M) {
   std::call_once(LLVMInitialised, initLLVM, nullptr);
 
   // FIXME Remember memman or allocated memory pointers so we can free the
@@ -271,7 +271,7 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
     errx(EXIT_FAILURE, "trace index counter overflowed");
 
   // Get var args from start_tracing call.
-  auto Inputs = get_trace_inputs(AOTMod->getFunction(FuncNames[0]), BBs[0]);
+  auto Inputs = getTraceInputs(AOTMod->getFunction(FuncNames[0]), BBs[0]);
 
   std::vector<Type *> InputTypes;
   for (auto Val : Inputs) {
@@ -535,5 +535,5 @@ done:
   }
 
   // Compile IR trace and return a pointer to its function.
-  return compile_module(TraceName, JITMod);
+  return compileModule(TraceName, JITMod);
 }
