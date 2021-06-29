@@ -282,12 +282,12 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
   string TraceName = string(TRACE_FUNC_PREFIX) + to_string(TraceIdx);
   llvm::FunctionType *FType =
       llvm::FunctionType::get(Type::getVoidTy(JITContext), InputTypes, false);
-  llvm::Function *DstFunc = llvm::Function::Create(
+  llvm::Function *JITFunc = llvm::Function::Create(
       FType, Function::InternalLinkage, TraceName, JITMod);
-  DstFunc->setCallingConv(CallingConv::C);
+  JITFunc->setCallingConv(CallingConv::C);
 
   // Create entry block and setup builder.
-  auto DstBB = BasicBlock::Create(JITContext, "", DstFunc);
+  auto DstBB = BasicBlock::Create(JITContext, "", JITFunc);
   llvm::IRBuilder<> Builder(JITContext);
   Builder.SetInsertPoint(DstBB);
 
@@ -301,7 +301,7 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
   // to the function arguments of the compiled trace function.
   for (size_t Idx = 0; Idx != Inputs.size(); Idx++) {
     Value *OldVal = Inputs[Idx];
-    Value *NewVal = DstFunc->getArg(Idx);
+    Value *NewVal = JITFunc->getArg(Idx);
     assert(NewVal->getType()->isPointerTy());
     VMap[OldVal] = NewVal;
   }
