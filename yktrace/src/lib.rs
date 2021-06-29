@@ -30,7 +30,7 @@ impl Default for TracingKind {
 }
 
 /// A globally unique block ID for an LLVM IR block.
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct IRBlock {
     /// The name of the function containing the block.
     func_name: CString,
@@ -50,14 +50,18 @@ impl IRBlock {
 
 /// An LLVM IR trace.
 pub struct IRTrace {
-    blocks: Vec<IRBlock>,
+    // The blocks of the trace. A None element represents an arbitrarily sized portion of unknown
+    // code which we were unable to determine LLVM IR for, e.g. external library code.
+    //
+    // PERF: Use a special value instead of a None to save memory.
+    blocks: Vec<Option<IRBlock>>,
 }
 
 unsafe impl Send for IRTrace {}
 unsafe impl Sync for IRTrace {}
 
 impl IRTrace {
-    pub(crate) fn new(blocks: Vec<IRBlock>) -> Self {
+    pub(crate) fn new(blocks: Vec<Option<IRBlock>>) -> Self {
         Self { blocks }
     }
 
@@ -65,7 +69,10 @@ impl IRTrace {
         self.blocks.len()
     }
 
-    pub fn get(&self, idx: usize) -> Option<&IRBlock> {
+    // Get the block at the specified position.
+    // Returns None if there is no block at this index. Returns Some(None) if the block at that
+    // index couldn't be mapped.
+    pub fn get(&self, idx: usize) -> Option<&Option<IRBlock>> {
         self.blocks.get(idx)
     }
 
@@ -74,8 +81,14 @@ impl IRTrace {
         let mut func_names = Vec::with_capacity(len);
         let mut bbs = Vec::with_capacity(len);
         for blk in &self.blocks {
-            func_names.push(blk.func_name().as_ptr());
-            bbs.push(blk.bb());
+            if let Some(blk) = blk {
+                func_names.push(blk.func_name().as_ptr());
+                bbs.push(blk.bb());
+            } else {
+                // The block was unmappable. Indicate this with a null function name.
+                func_names.push(ptr::null());
+                bbs.push(0);
+            }
         }
 
         let ret = unsafe {

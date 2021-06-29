@@ -100,24 +100,32 @@ impl HWTMapper {
         }
     }
 
-    /// Maps each entry of a hardware trace back the IR block from whence it was compiled.
-    pub(super) fn map_trace(&self, trace: Box<dyn Trace>) -> Result<Vec<IRBlock>, HWTracerError> {
+    /// Maps each entry of a hardware trace back to the IR block from which it was compiled.
+    pub(super) fn map_trace(
+        &self,
+        trace: Box<dyn Trace>,
+    ) -> Result<Vec<Option<IRBlock>>, HWTracerError> {
         let mut ret_irblocks = Vec::new();
         let mut itr = trace.iter_blocks();
         while let Some(block) = itr.next() {
             let block = block?;
             let irblocks = self.map_block(&block);
-            if !ret_irblocks.is_empty() && irblocks.is_empty() {
-                // Once we have seen the last block that can be mapped we are done.
-                break;
+            if irblocks.is_empty() {
+                // The block is unmappable. Indicate the hole in the track with a None.
+                if ret_irblocks.last() != Some(&None) && !ret_irblocks.is_empty() {
+                    // Collapse repeated unmappable blocks to a single None.
+                    ret_irblocks.push(None);
+                }
             } else {
-                ret_irblocks.extend(irblocks);
+                ret_irblocks.extend(irblocks.into_iter().map(|b| Some(b)));
             }
         }
-        // No remaining blocks in the iterator should be mappable. If any can be, then we have
-        // unmappable blocks in the middle of the trace and something is wrong.
-        debug_assert!(itr.all(|block| self.map_block(&block.unwrap()).is_empty()));
-
+        // Strip any trailing unmappable blocks.
+        if ret_irblocks.last() == Some(&None) {
+            ret_irblocks.pop();
+        }
+        debug_assert_ne!(ret_irblocks.first(), Some(&None));
+        debug_assert_ne!(ret_irblocks.last(), Some(&None));
         Ok(ret_irblocks)
     }
 
