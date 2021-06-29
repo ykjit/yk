@@ -6,12 +6,12 @@ edition = "2018"
 license = "Apache-2.0 OR MIT"
 
 [dependencies]
-num_cpus = "1"
-once_cell = "1"
-parking_lot = "0.11"
-parking_lot_core = "0.8"
-strum = { version = "0.20", features = ["derive"] }
+num_cpus = "1.13.0"
+once_cell = "1.8.0"
+parking_lot = "0.11.1"
+parking_lot_core = "0.8.3"
+strum = { version = "0.21.0", features = ["derive"] }
 yktrace = { path = "../yktrace" }
 
 [build-dependencies]
-regex = "1.4.3"
+regex = "1.5.4"
