@@ -6,8 +6,8 @@ edition = "2018"
 license = "Apache-2.0 OR MIT"
 
 [dependencies]
-libc = "0.2.82"
-memmap2 = "0.2.2"
-object = "0.24.0"
-once_cell = "1.7.2"
+libc = "0.2.97"
+memmap2 = "0.3.0"
+object = "0.25.3"
+once_cell = "1.8.0"
 phdrs = { git = "https://github.com/softdevteam/phdrs" }

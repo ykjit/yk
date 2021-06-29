@@ -126,13 +126,14 @@ ThreadSafeModule *getThreadAOTMod(void) {
   return &ThreadAOTMod;
 }
 
-std::vector<Value *> get_trace_inputs(Function *F, uintptr_t BBIdx) {
+std::vector<Value *> getTraceInputs(Function *F, uintptr_t BBIdx) {
   std::vector<Value *> Vec;
   auto It = F->begin();
   // Skip to the first block in the trace which contains the `start_tracing`
   // call.
   std::advance(It, BBIdx);
   BasicBlock *BB = &*It;
+  bool found = false;
   for (auto I = BB->begin(); I != BB->end(); I++) {
     if (isa<CallInst>(I)) {
       CallInst *CI = cast<CallInst>(&*I);
@@ -141,15 +142,18 @@ std::vector<Value *> get_trace_inputs(Function *F, uintptr_t BBIdx) {
         for (auto Arg = CI->arg_begin() + 1; Arg != CI->arg_end(); Arg++) {
           Vec.push_back(Arg->get());
         }
+        found = true;
         break;
       }
     }
   }
+  if (!found)
+    errx(EXIT_FAILURE, "failed to find trace inputs");
   return Vec;
 }
 
 // Compile a module in-memory and return a pointer to its function.
-extern "C" void *compile_module(string TraceName, Module *M) {
+extern "C" void *compileModule(string TraceName, Module *M) {
   std::call_once(LLVMInitialised, initLLVM, nullptr);
 
   // FIXME Remember memman or allocated memory pointers so we can free the
@@ -267,7 +271,7 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
     errx(EXIT_FAILURE, "trace index counter overflowed");
 
   // Get var args from start_tracing call.
-  auto Inputs = get_trace_inputs(AOTMod->getFunction(FuncNames[0]), BBs[0]);
+  auto Inputs = getTraceInputs(AOTMod->getFunction(FuncNames[0]), BBs[0]);
 
   std::vector<Type *> InputTypes;
   for (auto Val : Inputs) {
@@ -278,12 +282,12 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
   string TraceName = string(TRACE_FUNC_PREFIX) + to_string(TraceIdx);
   llvm::FunctionType *FType =
       llvm::FunctionType::get(Type::getVoidTy(JITContext), InputTypes, false);
-  llvm::Function *DstFunc = llvm::Function::Create(
+  llvm::Function *JITFunc = llvm::Function::Create(
       FType, Function::InternalLinkage, TraceName, JITMod);
-  DstFunc->setCallingConv(CallingConv::C);
+  JITFunc->setCallingConv(CallingConv::C);
 
   // Create entry block and setup builder.
-  auto DstBB = BasicBlock::Create(JITContext, "", DstFunc);
+  auto DstBB = BasicBlock::Create(JITContext, "", JITFunc);
   llvm::IRBuilder<> Builder(JITContext);
   Builder.SetInsertPoint(DstBB);
 
@@ -297,7 +301,7 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
   // to the function arguments of the compiled trace function.
   for (size_t Idx = 0; Idx != Inputs.size(); Idx++) {
     Value *OldVal = Inputs[Idx];
-    Value *NewVal = DstFunc->getArg(Idx);
+    Value *NewVal = JITFunc->getArg(Idx);
     assert(NewVal->getType()->isPointerTy());
     VMap[OldVal] = NewVal;
   }
@@ -531,5 +535,5 @@ done:
   }
 
   // Compile IR trace and return a pointer to its function.
-  return compile_module(TraceName, JITMod);
+  return compileModule(TraceName, JITMod);
 }
