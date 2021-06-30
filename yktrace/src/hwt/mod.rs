@@ -20,7 +20,7 @@ impl ThreadTracerImpl for HWTThreadTracer {
         let mt = HWTMapper::new();
         mt.map_trace(hwtrace)
             .map_err(|_| InvalidTraceError::InternalError)
-            .map(IRTrace::new)
+            .map(|(b, f)| IRTrace::new(b, f))
     }
 }
 

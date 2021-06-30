@@ -121,7 +121,8 @@ ThreadSafeModule *getThreadAOTMod(void) {
 }
 
 // Compile a module in-memory and return a pointer to its function.
-extern "C" void *compileModule(string TraceName, Module *M) {
+extern "C" void *compileModule(string TraceName, Module *M,
+                               map<StringRef, uint64_t> GlobalMappings) {
   std::call_once(LLVMInitialised, initLLVM, nullptr);
 
   // FIXME Remember memman or allocated memory pointers so we can free the
@@ -135,8 +136,13 @@ extern "C" void *compileModule(string TraceName, Module *M) {
           .setMemoryManager(std::unique_ptr<MCJITMemoryManager>(memman))
           .setErrorStr(&ErrStr)
           .create();
+
   if (EE == nullptr)
     errx(EXIT_FAILURE, "Couldn't compile trace: %s", ErrStr.c_str());
+
+  for (auto GM : GlobalMappings) {
+    EE->addGlobalMapping(GM.first, GM.second);
+  }
 
   EE->finalizeObject();
   if (EE->hasError())
@@ -227,7 +233,9 @@ void printSBS(Module *AOTMod, Module *JITMod, ValueToValueMapTy &RevVMap) {
 //
 // Returns a pointer to the compiled function.
 extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
-                                              size_t Len) {
+                                              size_t Len, char *FAddrKeys[],
+                                              size_t FAddrVals[],
+                                              size_t FAddrLen) {
 
   ThreadSafeModule *ThreadAOTMod = getThreadAOTMod();
   // Getting the module without acquiring the context lock is safe in this
@@ -235,7 +243,8 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
   Module *AOTMod = ThreadAOTMod->getModuleUnlocked();
 
   JITModBuilder JB;
-  auto JITMod = JB.createModule(FuncNames, BBs, Len, AOTMod);
+  auto JITMod = JB.createModule(FuncNames, BBs, Len, AOTMod, FAddrKeys,
+                                FAddrVals, FAddrLen);
 
 #ifndef NDEBUG
   char *SBS = getenv("YK_PRINT_IR_SBS");
@@ -244,7 +253,6 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
   }
   llvm::verifyModule(*JITMod, &llvm::errs());
 #endif
-
   auto PrintIR = std::getenv("YK_PRINT_IR");
   if (PrintIR != nullptr) {
     if (strcmp(PrintIR, "1") == 0) {
@@ -254,5 +262,5 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
   }
 
   // Compile IR trace and return a pointer to its function.
-  return compileModule(JB.TraceName, JITMod);
+  return compileModule(JB.TraceName, JITMod, JB.globalMappings);
 }

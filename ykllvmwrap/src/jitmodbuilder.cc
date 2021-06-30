@@ -48,6 +48,8 @@ class JITModBuilder {
   Instruction *StartTracingInstr = nullptr;
 
 public:
+  // Store virtual addresses for called functions.
+  std::map<StringRef, uint64_t> globalMappings;
   // The function name of this trace.
   string TraceName;
   // Mapping from AOT instructions to JIT instructions.
@@ -57,8 +59,18 @@ public:
   ValueToValueMapTy RevVMap;
 #endif
 
+  Value *getMappedValue(Value *V) {
+    if (isa<Constant>(V)) {
+      return V;
+    } else {
+      auto NV = VMap[V];
+      return NV;
+    }
+  }
+
   Module *createModule(char *FuncNames[], size_t BBs[], size_t Len,
-                       Module *AOTMod) {
+                       Module *AOTMod, char *FAddrKeys[], uint64_t FAddrVals[],
+                       size_t FAddrLen) {
     LLVMContext &JITContext = AOTMod->getContext();
     JITMod = new Module("", JITContext);
     uint64_t TraceIdx = NextTraceIdx.fetch_add(1);
@@ -99,6 +111,8 @@ public:
 
     std::vector<CallInst *> inlined_calls;
     CallInst *last_call = nullptr;
+    size_t call_stack = 0;
+    CallInst *noinline_func = nullptr;
 
     // Iterate over the trace and stitch together all traced blocks.
     for (size_t Idx = 0; Idx < Len; Idx++) {
@@ -134,9 +148,11 @@ public:
           }
           continue;
         }
+
         if (isa<CallInst>(I)) {
           CallInst *CI = cast<CallInst>(&*I);
           Function *CF = CI->getCalledFunction();
+          StringRef CFName = CF->getName();
           if (CF == nullptr)
             continue;
 
@@ -147,22 +163,58 @@ public:
             finalise(&Builder);
             return JITMod;
           } else {
+            if (AOTMod->getFunction(CFName) != nullptr && call_stack > 0) {
+              // When ignoring an inlined function, we need to count other
+              // inlined function calls so we know when we left the initial
+              // function call.
+              call_stack += 1;
+              inlined_calls.push_back(CI);
+              break;
+            }
+            // If this is a recursive call that has been inlined, remove the
+            // inlined code and turn it into a normal call.
+            for (CallInst *cinst : inlined_calls) {
+              // Have we inlined this call already? Then this is recursion.
+              if (cinst->getCalledFunction() == CF) {
+                if (VMap[CF] == nullptr) {
+                  // Declare function.
+                  auto DeclFunc = llvm::Function::Create(
+                      CF->getFunctionType(), GlobalValue::ExternalLinkage,
+                      CFName, JITMod);
+                  VMap[CF] = DeclFunc;
+                  for (size_t i = 0; i < FAddrLen; i++) {
+                    char *FName = FAddrKeys[i];
+                    uint64_t FAddr = FAddrVals[i];
+                    if (strcmp(FName, CFName.data()) == 0) {
+                      globalMappings.insert(
+                          pair<StringRef, uint64_t>(CFName, FAddr));
+                      break;
+                    }
+                  }
+                }
+                copyInstruction(&Builder, (Instruction *)&*I);
+                noinline_func = CI;
+                call_stack = 1;
+                break;
+              }
+            }
             // Skip remainder of this block and remember where we stopped so we
             // can continue from this position after returning from the inlined
             // call.
-            // FIXME Deal with calls we cannot or don't want to inline.
             if (StartTracingInstr != nullptr) {
               inlined_calls.push_back(CI);
               // During inlining, remap function arguments to the variables
               // passed in by the caller.
-              for (unsigned int i = 0; i < CI->arg_size(); i++) {
-                Value *Var = CI->getArgOperand(i);
-                Value *Arg = CF->getArg(i);
-                // If the operand has already been cloned into JITMod then we
-                // need to use the cloned value in the VMap.
-                if (VMap[Var] != nullptr)
-                  Var = VMap[Var];
-                VMap[Arg] = Var;
+              if (call_stack == 0) {
+                for (unsigned int i = 0; i < CI->arg_size(); i++) {
+                  Value *Var = CI->getArgOperand(i);
+                  Value *Arg = CF->getArg(i);
+                  // If the operand has already been cloned into JITMod then we
+                  // need to use the cloned value in the VMap.
+                  if (VMap[Var] != nullptr)
+                    Var = VMap[Var];
+                  VMap[Arg] = Var;
+                }
               }
               break;
             }
@@ -182,17 +234,34 @@ public:
         if (isa<ReturnInst>(I)) {
           last_call = inlined_calls.back();
           inlined_calls.pop_back();
+          if (call_stack > 0) {
+            call_stack -= 1;
+            if (call_stack == 0) {
+              last_call = noinline_func;
+            }
+            continue;
+          }
           // Replace the return variable of the call with its return value.
           // Since the return value will have already been copied over to the
           // JITModule, make sure we look up the copy.
           auto OldRetVal = ((ReturnInst *)&*I)->getReturnValue();
-          if (isa<Constant>(OldRetVal)) {
-            VMap[last_call] = OldRetVal;
-          } else {
-            auto NewRetVal = VMap[OldRetVal];
-            VMap[last_call] = NewRetVal;
-          }
+          VMap[last_call] = getMappedValue(OldRetVal);
           break;
+        }
+
+        if (call_stack > 0) {
+          // We are currently ignoring an inlined function.
+          continue;
+        }
+
+        if (isa<PHINode>(I)) {
+          assert(Idx > 0);
+          auto LBIt = F->begin();
+          std::advance(LBIt, BBs[Idx - 1]);
+          BasicBlock *LastBlock = &*LBIt;
+          Value *V = ((PHINode *)&*I)->getIncomingValueForBlock(LastBlock);
+          VMap[&*I] = getMappedValue(V);
+          continue;
         }
 
         // If execution reaches here, then the instruction I is to be copied
