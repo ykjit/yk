@@ -33,8 +33,12 @@ impl Default for TracingKind {
 #[derive(Debug, Eq, PartialEq)]
 pub struct IRBlock {
     /// The name of the function containing the block.
+    ///
+    /// PERF: Use a string pool to avoid duplicated function names in traces.
     func_name: CString,
     /// The index of the block within the function.
+    ///
+    /// The special value `usize::MAX` indicates unmappable code.
     bb: usize,
 }
 
@@ -46,22 +50,33 @@ impl IRBlock {
     pub fn bb(&self) -> usize {
         self.bb
     }
+
+    /// Returns an IRBlock whose `bb` field indicates unmappable code.
+    pub fn unmappable() -> Self {
+        Self {
+            func_name: CString::new("").unwrap(),
+            bb: usize::MAX,
+        }
+    }
+
+    /// Determines whether `self` represents unmappable code.
+    pub fn is_unmappable(&self) -> bool {
+        self.bb == usize::MAX
+    }
 }
 
 /// An LLVM IR trace.
 pub struct IRTrace {
-    // The blocks of the trace. A None element represents an arbitrarily sized portion of unknown
-    // code which we were unable to determine LLVM IR for, e.g. external library code.
-    //
-    // PERF: Use a special value instead of a None to save memory.
-    blocks: Vec<Option<IRBlock>>,
+    // The blocks of the trace.
+    blocks: Vec<IRBlock>,
 }
 
 unsafe impl Send for IRTrace {}
 unsafe impl Sync for IRTrace {}
 
 impl IRTrace {
-    pub(crate) fn new(blocks: Vec<Option<IRBlock>>) -> Self {
+    pub(crate) fn new(blocks: Vec<IRBlock>) -> Self {
+        debug_assert!(blocks.len() < usize::MAX);
         Self { blocks }
     }
 
@@ -72,8 +87,12 @@ impl IRTrace {
     // Get the block at the specified position.
     // Returns None if there is no block at this index. Returns Some(None) if the block at that
     // index couldn't be mapped.
-    pub fn get(&self, idx: usize) -> Option<&Option<IRBlock>> {
-        self.blocks.get(idx)
+    pub fn get(&self, idx: usize) -> Option<Option<&IRBlock>> {
+        // usize::MAX is a reserved index.
+        debug_assert_ne!(idx, usize::MAX);
+        self.blocks
+            .get(idx)
+            .map(|b| if b.is_unmappable() { None } else { Some(b) })
     }
 
     pub fn compile(&self) -> *const c_void {
@@ -81,13 +100,13 @@ impl IRTrace {
         let mut func_names = Vec::with_capacity(len);
         let mut bbs = Vec::with_capacity(len);
         for blk in &self.blocks {
-            if let Some(blk) = blk {
-                func_names.push(blk.func_name().as_ptr());
-                bbs.push(blk.bb());
-            } else {
+            if blk.is_unmappable() {
                 // The block was unmappable. Indicate this with a null function name.
                 func_names.push(ptr::null());
                 bbs.push(0);
+            } else {
+                func_names.push(blk.func_name().as_ptr());
+                bbs.push(blk.bb());
             }
         }
 

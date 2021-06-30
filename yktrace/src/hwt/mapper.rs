@@ -101,31 +101,39 @@ impl HWTMapper {
     }
 
     /// Maps each entry of a hardware trace back to the IR block from which it was compiled.
-    pub(super) fn map_trace(
-        &self,
-        trace: Box<dyn Trace>,
-    ) -> Result<Vec<Option<IRBlock>>, HWTracerError> {
-        let mut ret_irblocks = Vec::new();
+    pub(super) fn map_trace(&self, trace: Box<dyn Trace>) -> Result<Vec<IRBlock>, HWTracerError> {
+        let mut ret_irblocks: Vec<IRBlock> = Vec::new();
         let mut itr = trace.iter_blocks();
         while let Some(block) = itr.next() {
             let block = block?;
             let irblocks = self.map_block(&block);
             if irblocks.is_empty() {
-                // The block is unmappable. Indicate the hole in the track with a None.
-                if ret_irblocks.last() != Some(&None) && !ret_irblocks.is_empty() {
-                    // Collapse repeated unmappable blocks to a single None.
-                    ret_irblocks.push(None);
+                // The block is unmappable. Insert a IRBlock that indicates this, but only if the
+                // trace isn't empty. We also take care to collapse repeated unmappable blocks into
+                // a single unmappable IRBlock.
+                if let Some(lb) = ret_irblocks.last() {
+                    if !lb.is_unmappable() {
+                        ret_irblocks.push(IRBlock::unmappable());
+                    }
                 }
             } else {
-                ret_irblocks.extend(irblocks.into_iter().map(|b| Some(b)));
+                ret_irblocks.extend(irblocks);
             }
         }
         // Strip any trailing unmappable blocks.
-        if ret_irblocks.last() == Some(&None) {
-            ret_irblocks.pop();
+        if !ret_irblocks.is_empty() {
+            if ret_irblocks.last().unwrap().is_unmappable() {
+                ret_irblocks.pop();
+            }
         }
-        debug_assert_ne!(ret_irblocks.first(), Some(&None));
-        debug_assert_ne!(ret_irblocks.last(), Some(&None));
+        #[cfg(debug_assertions)]
+        {
+            if !ret_irblocks.is_empty() {
+                debug_assert!(!ret_irblocks.first().unwrap().is_unmappable());
+                debug_assert!(!ret_irblocks.last().unwrap().is_unmappable());
+            }
+        }
+
         Ok(ret_irblocks)
     }
 
