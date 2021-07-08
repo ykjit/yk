@@ -3,6 +3,7 @@
 mod errors;
 use libc::c_void;
 use std::{
+    collections::HashMap,
     ffi::{CStr, CString},
     ptr,
 };
@@ -69,15 +70,16 @@ impl IRBlock {
 pub struct IRTrace {
     // The blocks of the trace.
     blocks: Vec<IRBlock>,
+    faddrs: HashMap<CString, u64>,
 }
 
 unsafe impl Send for IRTrace {}
 unsafe impl Sync for IRTrace {}
 
 impl IRTrace {
-    pub(crate) fn new(blocks: Vec<IRBlock>) -> Self {
+    pub(crate) fn new(blocks: Vec<IRBlock>, faddrs: HashMap<CString, u64>) -> Self {
         debug_assert!(blocks.len() < usize::MAX);
-        Self { blocks }
+        Self { blocks, faddrs }
     }
 
     pub fn len(&self) -> usize {
@@ -110,8 +112,22 @@ impl IRTrace {
             }
         }
 
+        let mut faddr_keys = Vec::new();
+        let mut faddr_vals = Vec::new();
+        for k in self.faddrs.iter() {
+            faddr_keys.push(k.0.as_ptr());
+            faddr_vals.push(*k.1);
+        }
+
         let ret = unsafe {
-            ykllvmwrap::__ykllvmwrap_irtrace_compile(func_names.as_ptr(), bbs.as_ptr(), len)
+            ykllvmwrap::__ykllvmwrap_irtrace_compile(
+                func_names.as_ptr(),
+                bbs.as_ptr(),
+                len,
+                faddr_keys.as_ptr(),
+                faddr_vals.as_ptr(),
+                faddr_keys.len(),
+            )
         };
         assert_ne!(ret, ptr::null());
         ret
