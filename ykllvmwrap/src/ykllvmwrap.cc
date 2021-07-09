@@ -247,13 +247,13 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
                                 FAddrVals, FAddrLen);
 
 #ifndef NDEBUG
-  char *SBS = getenv("YK_PRINT_IR_SBS");
+  char *SBS = getenv("YKD_PRINT_IR_SBS");
   if ((SBS != nullptr) && (strcmp(SBS, "1") == 0)) {
     printSBS(AOTMod, JITMod, JB.RevVMap);
   }
   llvm::verifyModule(*JITMod, &llvm::errs());
 #endif
-  auto PrintIR = std::getenv("YK_PRINT_IR");
+  auto PrintIR = std::getenv("YKD_PRINT_IR");
   if (PrintIR != nullptr) {
     if (strcmp(PrintIR, "1") == 0) {
       // Print out the compiled trace's IR to stderr.

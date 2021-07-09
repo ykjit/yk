@@ -12,7 +12,7 @@ const COMMENT: &str = "//";
 /// Make a compiler command that compiles `src` to `exe` using the optimisation flag `opt`.
 fn mk_compiler(exe: &Path, src: &Path, opt: &str) -> Command {
     let mut compiler = Command::new("clang");
-    compiler.env("YK_PRINT_IR", "1");
+    compiler.env("YKD_PRINT_IR", "1");
 
     let mut lib_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     lib_dir.push("..");
