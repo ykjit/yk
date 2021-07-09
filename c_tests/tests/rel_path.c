@@ -1,6 +1,6 @@
 // Compiler:
 // Run-time:
-//   env-var: YK_PRINT_IR=1
+//   env-var: YKD_PRINT_IR=1
 //   stderr:
 //   stderr:
 //     define internal void @__yk_compiled_trace_0(i32* %0) {
