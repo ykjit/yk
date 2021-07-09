@@ -152,17 +152,18 @@ public:
         if (isa<CallInst>(I)) {
           CallInst *CI = cast<CallInst>(&*I);
           Function *CF = CI->getCalledFunction();
-          StringRef CFName = CF->getName();
-          if (CF == nullptr)
-            continue;
 
-          if (CF->getName() == YKTRACE_START) {
+          if (CF == nullptr) {
+            // It's an external function or an intrinsic. We can't inline it,
+            // so we have no option but to copy the call as-is.
+          } else if (CF->getName() == YKTRACE_START) {
             StartTracingInstr = &*I;
             continue;
           } else if (CF->getName() == YKTRACE_STOP) {
             finalise(&Builder);
             return JITMod;
           } else {
+            StringRef CFName = CF->getName();
             if (AOTMod->getFunction(CFName) != nullptr && call_stack > 0) {
               // When ignoring an inlined function, we need to count other
               // inlined function calls so we know when we left the initial
@@ -317,8 +318,8 @@ public:
             errx(EXIT_FAILURE, "Non-const global variable %s",
                  OldGV->getName().data());
           }
-        } else if (isa<Constant>(Op)) {
-          // The operand is a constant, so leave it as is.
+        } else if ((isa<Constant>(Op)) || (isa<InlineAsm>(Op))) {
+          // Constants and inline asm can be ID-mapped.
           VMap[Op] = Op;
           continue;
         } else if (Op == StartTracingInstr) {
@@ -329,6 +330,8 @@ public:
           // dummy stack slot to keep LLVM happy.
           Value *NullVal = Constant::getNullValue(OpTy);
           VMap[Op] = NullVal;
+        } else {
+          errx(EXIT_FAILURE, "don't know how to handle operand");
         }
       }
     }
