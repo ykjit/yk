@@ -2,8 +2,6 @@
 // Run-time:
 
 // Check that basic trace compilation works.
-// FIXME An optimising compiler can remove all of the code between start/stop
-// tracing.
 
 #include <assert.h>
 #include <stdio.h>

@@ -1,6 +1,6 @@
 // Compiler:
 // Run-time:
-//   env-var: YKD_PRINT_IR=1
+//   env-var: YKD_PRINT_IR=jit-pre-opt
 //   stderr:
 //     ...
 //     define internal void @__yk_compiled_trace_0(i32* %0, i32* %1) {
@@ -19,9 +19,6 @@
 //     ...
 
 // Check that recursive function calls are not unrolled.
-//
-// FIXME An optimising compiler can remove all of the code between start/stop
-// tracing.
 
 #include <assert.h>
 #include <stdio.h>

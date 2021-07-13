@@ -1,7 +1,8 @@
 // Compiler:
 // Run-time:
-//   env-var: YKD_PRINT_IR=1
+//   env-var: YKD_PRINT_IR=jit-pre-opt
 //   stderr:
+//     ...
 //     define internal void @__yk_compiled_trace_0(i32* %0, i32* %1) {
 //       ...
 //       %21 = call i32 @fib(i32 %19, i32* %20)

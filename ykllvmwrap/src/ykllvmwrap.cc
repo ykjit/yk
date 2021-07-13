@@ -5,11 +5,13 @@
 #endif
 
 #include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
+#include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include <llvm/DebugInfo/Symbolize/Symbolize.h>
 #include <llvm/ExecutionEngine/ExecutionEngine.h>
 #include <llvm/ExecutionEngine/MCJIT.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/IRReader/IRReader.h>
@@ -61,6 +63,146 @@ thread_local bool ThreadAOTModInitialized = false;
 
 // Flag used to ensure that LLVM is initialised only once.
 once_flag LLVMInitialised;
+
+#ifndef NDEBUG
+// Left trim (in-place) the character `C` from the string `S`.
+void lTrim(string &S, const char C) {
+  S.erase(0, std::min(S.find_first_not_of(C), S.size() - 1));
+}
+
+// Dumps an LLVM Value to a string and trims leading whitespace.
+void dumpValueToString(Value *V, string &S) {
+  raw_string_ostream RSO(S);
+  V->print(RSO);
+  lTrim(S, ' ');
+}
+#endif
+
+enum DebugIR {
+  AOT,
+  JITPreOpt,
+  JITPreOptSBS,
+  JITPostOpt,
+};
+
+class DebugIRPrinter {
+private:
+  bitset<4> toPrint;
+
+  const char *debugIRStr(DebugIR IR) {
+    switch (IR) {
+    case DebugIR::AOT:
+      return "aot";
+    case DebugIR::JITPreOpt:
+      return "jit-pre-opt";
+    case DebugIR::JITPreOptSBS:
+      return "jit-pre-opt-sbs";
+    case DebugIR::JITPostOpt:
+      return "jit-post-opt";
+    default:
+      errx(EXIT_FAILURE, "unreachable");
+    }
+  }
+
+public:
+  DebugIRPrinter() {
+    char *Env = std::getenv("YKD_PRINT_IR");
+    char *Val;
+    while ((Val = strsep(&Env, ",")) != nullptr) {
+      if (strcmp(Val, "aot") == 0)
+        toPrint.set(DebugIR::AOT);
+      else if (strcmp(Val, "jit-pre-opt") == 0)
+        toPrint.set(DebugIR::JITPreOpt);
+#ifndef NDEBUG
+      else if (strcmp(Val, "jit-pre-opt-sbs") == 0)
+        toPrint.set(DebugIR::JITPreOptSBS);
+#endif
+      else if (strcmp(Val, "jit-post-opt") == 0)
+        toPrint.set(DebugIR::JITPostOpt);
+      else
+        errx(EXIT_FAILURE, "invalid parameter for YKD_PRINT_IR: '%s'", Val);
+    }
+  }
+
+#ifndef NDEBUG
+  // Print a trace's instructions "side-by-side" with the instructions from
+  // which they were derived in the AOT module.
+  void printSBS(Module *AOTMod, Module *JITMod, ValueToValueMapTy &RevVMap) {
+    assert(JITMod->size() == 1);
+    Function *JITFunc = &*JITMod->begin();
+
+    // Find the longest instruction from the JITMod so that we can align the
+    // second column.
+    size_t LongestJITLine = 0;
+    for (auto &JITBlock : *JITFunc) {
+      for (auto &JITInst : JITBlock) {
+        string Line;
+        dumpValueToString(&JITInst, Line);
+        auto Len = Line.length();
+        if (Len > LongestJITLine)
+          LongestJITLine = Len;
+      }
+    }
+
+    const string JITHeader = string("Trace");
+    string Padding = string(LongestJITLine - JITHeader.length(), ' ');
+    errs() << "\n\n--- Begin trace dump for " << JITFunc->getName() << " ---\n";
+    errs() << JITHeader << Padding << "  | AOT\n";
+
+    // Keep track of the AOT function we are currently in so that we can print
+    // inlined function thresholds in the dumped trace.
+    StringRef LastAOTFunc;
+    for (auto &JITBlock : *JITFunc) {
+      for (auto &JITInst : JITBlock) {
+        auto V = RevVMap[&JITInst];
+        if (V == nullptr) {
+          // The instruction wasn't cloned from the AOTMod, so print it only in
+          // the JIT column and carry on.
+          std::string Line;
+          dumpValueToString((Value *)&JITInst, Line);
+          errs() << Line << "\n";
+          continue;
+        }
+        Instruction *AOTInst = (Instruction *)&*V;
+        assert(AOTInst != nullptr);
+        Function *AOTFunc = AOTInst->getFunction();
+        assert(AOTFunc != nullptr);
+        StringRef AOTFuncName = AOTFunc->getName();
+        if (AOTFuncName != LastAOTFunc) {
+          // Print an inlining threshold.
+          errs() << "# " << AOTFuncName << "()\n";
+          LastAOTFunc = AOTFuncName;
+        }
+        string JITStr;
+        dumpValueToString((Value *)&JITInst, JITStr);
+        string Padding = string(LongestJITLine - JITStr.length(), ' ');
+        string AOTStr;
+        dumpValueToString((Value *)AOTInst, AOTStr);
+        errs() << JITStr << Padding << "  |  " << AOTStr << "\n";
+      }
+    }
+    errs() << "--- End trace dump for " << JITFunc->getName() << " ---\n";
+  }
+#endif
+
+  void print(enum DebugIR IR, Module *M, Module *SBSAOTMod = nullptr,
+             ValueToValueMapTy *SBSRevVMap = nullptr) {
+    if (toPrint[IR]) {
+      if (IR == DebugIR::JITPreOptSBS) {
+#ifndef NDEBUG
+        printSBS(SBSAOTMod, M, *SBSRevVMap);
+#endif
+      } else {
+        // We print begin/end markers so that we can more test the IR at
+        // specific stages in the JIT pipeline (by anchoring matches to the
+        // begin/end markers).
+        errs() << "--- Begin " << DebugIRPrinter::debugIRStr(IR) << " ---\n";
+        M->dump();
+        errs() << "--- End " << DebugIRPrinter::debugIRStr(IR) << " ---\n";
+      }
+    }
+  }
+};
 
 // Initialise LLVM for JIT compilation. This must be executed exactly once.
 void initLLVM(void *Unused) {
@@ -133,6 +275,7 @@ extern "C" void *compileModule(string TraceName, Module *M,
   string ErrStr;
   ExecutionEngine *EE =
       EngineBuilder(std::move(MPtr))
+          .setEngineKind(EngineKind::JIT)
           .setMemoryManager(std::unique_ptr<MCJITMemoryManager>(memman))
           .setErrorStr(&ErrStr)
           .create();
@@ -152,79 +295,6 @@ extern "C" void *compileModule(string TraceName, Module *M,
   return (void *)EE->getFunctionAddress(TraceName);
 }
 
-#ifndef NDEBUG
-// Left trim (in-place) the character `C` from the string `S`.
-void lTrim(string &S, const char C) {
-  S.erase(0, std::min(S.find_first_not_of(C), S.size() - 1));
-}
-
-// Dumps an LLVM Value to a string and trims leading whitespace.
-void dumpValueToString(Value *V, string &S) {
-  raw_string_ostream RSO(S);
-  V->print(RSO);
-  lTrim(S, ' ');
-}
-
-// Print a trace's instructions "side-by-side" with the instructions from
-// which they were derived in the AOT module.
-void printSBS(Module *AOTMod, Module *JITMod, ValueToValueMapTy &RevVMap) {
-  assert(JITMod->size() == 1);
-  Function *JITFunc = &*JITMod->begin();
-
-  // Find the longest instruction from the JITMod so that we can align the
-  // second column.
-  size_t LongestJITLine = 0;
-  for (auto &JITBlock : *JITFunc) {
-    for (auto &JITInst : JITBlock) {
-      string Line;
-      dumpValueToString(&JITInst, Line);
-      auto Len = Line.length();
-      if (Len > LongestJITLine)
-        LongestJITLine = Len;
-    }
-  }
-
-  const string JITHeader = string("Trace");
-  string Padding = string(LongestJITLine - JITHeader.length(), ' ');
-  errs() << "\n\n--- Begin trace dump for " << JITFunc->getName() << " ---\n";
-  errs() << JITHeader << Padding << "  | AOT\n";
-
-  // Keep track of the AOT function we are currently in so that we can print
-  // inlined function thresholds in the dumped trace.
-  StringRef LastAOTFunc;
-  for (auto &JITBlock : *JITFunc) {
-    for (auto &JITInst : JITBlock) {
-      auto V = RevVMap[&JITInst];
-      if (V == nullptr) {
-        // The instruction wasn't cloned from the AOTMod, so print it only in
-        // the JIT column and carry on.
-        std::string Line;
-        dumpValueToString((Value *)&JITInst, Line);
-        errs() << Line << "\n";
-        continue;
-      }
-      Instruction *AOTInst = (Instruction *)&*V;
-      assert(AOTInst != nullptr);
-      Function *AOTFunc = AOTInst->getFunction();
-      assert(AOTFunc != nullptr);
-      StringRef AOTFuncName = AOTFunc->getName();
-      if (AOTFuncName != LastAOTFunc) {
-        // Print an inlining threshold.
-        errs() << "# " << AOTFuncName << "()\n";
-        LastAOTFunc = AOTFuncName;
-      }
-      string JITStr;
-      dumpValueToString((Value *)&JITInst, JITStr);
-      string Padding = string(LongestJITLine - JITStr.length(), ' ');
-      string AOTStr;
-      dumpValueToString((Value *)AOTInst, AOTStr);
-      errs() << JITStr << Padding << "  |  " << AOTStr << "\n";
-    }
-  }
-  errs() << "--- End trace dump for " << JITFunc->getName() << " ---\n";
-}
-#endif
-
 // Compile an IRTrace to executable code in memory.
 //
 // The trace to compile is passed in as two arrays of length Len. Then each
@@ -236,30 +306,34 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
                                               size_t Len, char *FAddrKeys[],
                                               size_t FAddrVals[],
                                               size_t FAddrLen) {
+  DebugIRPrinter DIP;
 
   ThreadSafeModule *ThreadAOTMod = getThreadAOTMod();
   // Getting the module without acquiring the context lock is safe in this
   // instance since ThreadAOTMod is not shared between threads.
   Module *AOTMod = ThreadAOTMod->getModuleUnlocked();
 
+  DIP.print(DebugIR::AOT, AOTMod);
+
   JITModBuilder JB;
   auto JITMod = JB.createModule(FuncNames, BBs, Len, AOTMod, FAddrKeys,
                                 FAddrVals, FAddrLen);
 
+  DIP.print(DebugIR::JITPreOpt, JITMod);
 #ifndef NDEBUG
-  char *SBS = getenv("YKD_PRINT_IR_SBS");
-  if ((SBS != nullptr) && (strcmp(SBS, "1") == 0)) {
-    printSBS(AOTMod, JITMod, JB.RevVMap);
-  }
-  llvm::verifyModule(*JITMod, &llvm::errs());
+  DIP.print(DebugIR::JITPreOptSBS, JITMod, AOTMod, &JB.RevVMap);
 #endif
-  auto PrintIR = std::getenv("YKD_PRINT_IR");
-  if (PrintIR != nullptr) {
-    if (strcmp(PrintIR, "1") == 0) {
-      // Print out the compiled trace's IR to stderr.
-      JITMod->dump();
-    }
-  }
+
+  // The MCJIT code-gen does no optimisations itself, so we must do it
+  // ourselves.
+  PassManagerBuilder Builder;
+  Builder.OptLevel = 2; // FIXME Make this user-tweakable.
+  legacy::FunctionPassManager FPM(JITMod);
+  Builder.populateFunctionPassManager(FPM);
+  for (Function &F : *JITMod)
+    FPM.run(F);
+
+  DIP.print(DebugIR::JITPostOpt, JITMod);
 
   // Compile IR trace and return a pointer to its function.
   return compileModule(JB.TraceName, JITMod, JB.globalMappings);

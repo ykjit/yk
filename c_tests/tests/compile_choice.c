@@ -2,9 +2,6 @@
 // Run-time:
 
 // Check that tracing a cascading "if...else if...else" works.
-//
-// FIXME An optimising compiler can remove all of the code between start/stop
-// tracing.
 
 #include <assert.h>
 #include <stdio.h>

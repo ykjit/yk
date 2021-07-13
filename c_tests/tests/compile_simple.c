@@ -1,7 +1,8 @@
 // Compiler:
 // Run-time:
-//   env-var: YKD_PRINT_IR=1
+//   env-var: YKD_PRINT_IR=jit-pre-opt
 //   stderr:
+//     ...
 //     define internal void @__yk_compiled_trace_0(i32* %0) {
 //        store i32 2, i32* %0, align 4, !tbaa !0
 //        ret void
@@ -9,8 +10,6 @@
 //     ...
 
 // Check that basic trace compilation works.
-// FIXME An optimising compiler can remove all of the code between start/stop
-// tracing.
 
 #include <assert.h>
 #include <stdio.h>
