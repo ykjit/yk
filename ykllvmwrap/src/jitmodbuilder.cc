@@ -246,7 +246,8 @@ public:
           // Since the return value will have already been copied over to the
           // JITModule, make sure we look up the copy.
           auto OldRetVal = ((ReturnInst *)&*I)->getReturnValue();
-          VMap[last_call] = getMappedValue(OldRetVal);
+          if (OldRetVal != nullptr)
+            VMap[last_call] = getMappedValue(OldRetVal);
           break;
         }
 
