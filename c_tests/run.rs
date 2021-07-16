@@ -35,7 +35,7 @@ fn mk_compiler(exe: &Path, src: &Path, opt: &str) -> Command {
         "-Wall",
         "-fuse-ld=lld",
         "-flto",
-        "-Wl,--plugin-opt=-lto-embed-bitcode=optimized",
+        "-Wl,--mllvm=--embed-bitcode-final",
         "-Wl,--lto-basic-block-sections=labels",
         "-I",
         ykcapi_dir.to_str().unwrap(),
