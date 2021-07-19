@@ -6,6 +6,8 @@
 //! The sane solution is to have only one `cdylib` crate in our workspace (this crate) and all
 //! other crates are regular `rlibs`.
 
+#![feature(bench_black_box)]
+
 use std::{ffi::c_void, mem::drop};
 use ykrt::{HotThreshold, Location, MT};
 use ykutil;
@@ -54,7 +56,7 @@ pub extern "C" fn __ykutil_get_llvmbc_section(res_addr: *mut *const c_void, res_
 #[cfg(feature = "c_testing")]
 mod c_testing {
     use libc::c_void;
-    use std::{os::raw::c_char, ptr};
+    use std::{hint::black_box, os::raw::c_char, ptr};
     use yktrace::{start_tracing, BlockMap, IRTrace, ThreadTracer, TracingKind};
 
     const SW_TRACING: usize = 0;
@@ -77,18 +79,20 @@ mod c_testing {
 
     #[no_mangle]
     pub extern "C" fn __yktrace_start_tracing(kind: usize) -> *mut ThreadTracer {
+        let kind = black_box(kind);
         let kind: TracingKind = match kind {
             SW_TRACING => TracingKind::SoftwareTracing,
             HW_TRACING => TracingKind::HardwareTracing,
             _ => panic!(),
         };
-        Box::into_raw(Box::new(start_tracing(kind)))
+        black_box(Box::into_raw(Box::new(start_tracing(kind))))
     }
 
     #[no_mangle]
     pub extern "C" fn __yktrace_stop_tracing(tt: *mut ThreadTracer) -> *mut IRTrace {
+        let tt = black_box(tt);
         let tt = unsafe { Box::from_raw(tt) };
-        Box::into_raw(Box::new(tt.stop_tracing().unwrap())) as *mut _
+        black_box(Box::into_raw(Box::new(tt.stop_tracing().unwrap())) as *mut _)
     }
 
     #[no_mangle]

@@ -21,7 +21,8 @@ std::vector<Value *> getTraceInputs(Function *F, uintptr_t BBIdx) {
   for (auto I = BB->begin(); I != BB->end(); I++) {
     if (isa<CallInst>(I)) {
       CallInst *CI = cast<CallInst>(&*I);
-      if (CI->getCalledFunction()->getName() == YKTRACE_START) {
+      Function *CF = CI->getCalledFunction();
+      if ((CF != nullptr) && (CF->getName() == YKTRACE_START)) {
         // Skip first argument to start_tracing.
         for (auto Arg = CI->arg_begin() + 1; Arg != CI->arg_end(); Arg++) {
           Vec.push_back(Arg->get());

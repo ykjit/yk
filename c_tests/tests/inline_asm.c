@@ -1,15 +1,12 @@
 // Compiler:
 // Run-time:
-//   env-var: YKD_PRINT_IR=1
+//   env-var: YKD_PRINT_IR=jit-pre-opt
 //   stderr:
 //     ...
 //     ...call i32 asm "mov $$5, $0"...
 //     ...
 
 // Check that we can handle inline asm properly.
-//
-// FIXME An optimising compiler can remove all of the code between start/stop
-// tracing.
 
 #include <assert.h>
 #include <stdlib.h>

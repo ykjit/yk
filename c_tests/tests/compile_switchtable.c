@@ -1,9 +1,6 @@
 // Compiler:
 // Run-time:
 
-// FIXME An optimising compiler can remove all of the code between start/stop
-// tracing.
-
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>

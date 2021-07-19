@@ -2,9 +2,6 @@
 // Run-time:
 
 // Check that compiling and running multiple traces in sequence works.
-//
-// FIXME An optimising compiler can remove all of the code between start/stop
-// tracing.
 
 #include <assert.h>
 #include <stdio.h>

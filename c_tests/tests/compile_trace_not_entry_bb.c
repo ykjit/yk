@@ -5,9 +5,6 @@
 //
 // Since LLVM allocas typically appear in the entry block of a function, we
 // will miss the allocas if tracing starts in a later block.
-//
-// FIXME An optimising compiler can remove all of the code between start/stop
-// tracing.
 
 #include <assert.h>
 #include <stdio.h>
