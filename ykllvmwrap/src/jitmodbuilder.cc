@@ -228,8 +228,8 @@ public:
         if (StartTracingInstr == nullptr)
           continue;
 
-        if (llvm::isa<llvm::BranchInst>(I)) {
-          // FIXME Replace all branch instruction with guards.
+        if ((isa<llvm::BranchInst>(I)) || isa<SwitchInst>(I)) {
+          // FIXME Replace all potential CFG divergence with guards.
           continue;
         }
 
