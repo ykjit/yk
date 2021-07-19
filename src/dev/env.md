@@ -3,15 +3,18 @@
 There are a number of environment variables which control the behaviour of the
 yk system.
 
+Variables prefixed with `YKD_` are intended for debugging.
+
 ## `YKD_PRINT_IR`
 
-When `YKD_PRINT_IR=1`, yk will print (to `stderr`) a textual version of each
-trace's LLVM IR prior to code generation.
+`YKD_PRINT_IR` accepts a comma-separated list of JIT pipeline stages at which
+to print LLVM IR (to stderr).
 
-## `YKD_PRINT_IR_SBS`
+The following stages are supported:
 
-When `YKD_PRINT_IR_SBS=1`, yk will print (to `stderr`) a "side-by-side" listing
-of each trace's LLVM IR prior to code generation. The listing shows the
-instructions of the trace alongside the instructions from which they were
-derived (from the AOT IR stored in the interpreter binary). Inlining boundaries
-are also annotated on the listing.
+ - `aot`: the IR embedded in the ahead-of-time compiled binary.
+ - `jit-pre-opt`: the IR for the trace before it is optimised by LLVM.
+ - `jit-pre-opt-sbs`: the IR for the trace before it is optimised alongside the
+   AOT IR from which it was derived. Inlining boundaries are also annotated.
+ - `jit-post-opt`: the IR for the trace after LLVM has optimised it. This is
+   the IR that will be submitted to the LLVM code generator.
