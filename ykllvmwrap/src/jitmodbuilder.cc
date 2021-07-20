@@ -302,23 +302,19 @@ public:
           // If there's a reference to a GlobalVariable, copy it over to the
           // new module.
           GlobalVariable *OldGV = cast<GlobalVariable>(Op);
+          // Global variable is a constant so just copy it into the trace.
+          // We don't need to check if this global already exists, since
+          // we're skipping any operand that's already been cloned into
+          // the VMap.
+          GlobalVariable *GV = new GlobalVariable(
+              *JITMod, OldGV->getValueType(), OldGV->isConstant(),
+              OldGV->getLinkage(), (Constant *)nullptr, OldGV->getName(),
+              (GlobalVariable *)nullptr, OldGV->getThreadLocalMode(),
+              OldGV->getType()->getAddressSpace());
+          VMap[OldGV] = GV;
           if (OldGV->isConstant()) {
-            // Global variable is a constant so just copy it into the trace.
-            // We don't need to check if this global already exists, since
-            // we're skipping any operand that's already been cloned into
-            // the VMap.
-            GlobalVariable *GV = new GlobalVariable(
-                *JITMod, OldGV->getValueType(), OldGV->isConstant(),
-                OldGV->getLinkage(), (Constant *)nullptr, OldGV->getName(),
-                (GlobalVariable *)nullptr, OldGV->getThreadLocalMode(),
-                OldGV->getType()->getAddressSpace());
             GV->copyAttributesFrom(&*OldGV);
             cloned_globals.push_back(OldGV);
-            VMap[OldGV] = GV;
-          } else {
-            // FIXME Allow trace to write to mutable global variables.
-            errx(EXIT_FAILURE, "Non-const global variable %s",
-                 OldGV->getName().data());
           }
         } else if ((isa<Constant>(Op)) || (isa<InlineAsm>(Op))) {
           // Constants and inline asm can be ID-mapped.

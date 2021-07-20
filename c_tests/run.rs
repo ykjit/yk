@@ -37,6 +37,9 @@ fn mk_compiler(exe: &Path, src: &Path, opt: &str) -> Command {
         "-flto",
         "-Wl,--mllvm=--embed-bitcode-final",
         "-Wl,--lto-basic-block-sections=labels",
+        // FIXME: https://github.com/ykjit/yk/issues/381
+        // Find a better way of handling unexported globals inside a trace.
+        "-Wl,--export-dynamic",
         "-I",
         ykcapi_dir.to_str().unwrap(),
         "-L",
