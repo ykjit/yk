@@ -115,11 +115,16 @@ public:
     size_t call_stack = 0;
     CallInst *noinline_func = nullptr;
 
+    bool ExpectUnmappable = false;
+
     // Iterate over the trace and stitch together all traced blocks.
     for (size_t Idx = 0; Idx < Len; Idx++) {
       auto FuncName = FuncNames[Idx];
 
-      // FIXME: Deal with holes in the trace, e.g. calls to libc.
+      if (ExpectUnmappable && (FuncName == nullptr)) {
+        ExpectUnmappable = false;
+        continue;
+      }
       assert(FuncName != nullptr);
 
       // Get a traced function so we can extract blocks from it.
@@ -155,14 +160,26 @@ public:
           Function *CF = CI->getCalledFunction();
 
           if (CF == nullptr) {
-            // It's an external function or an intrinsic. We can't inline it,
-            // so we have no option but to copy the call as-is.
+            // The target isn't statically known, so we can't inline the callee.
           } else if (CF->getName() == YKTRACE_START) {
             StartTracingInstr = &*I;
             continue;
           } else if (CF->getName() == YKTRACE_STOP) {
             finalise(&Builder);
             return JITMod;
+          } else if (CF->isDeclaration()) {
+            // The definition of the callee is external to AOTMod. We still
+            // need to declare it locally if we have not done so yet.
+            if (VMap[CF] == nullptr) {
+              auto DeclFunc = llvm::Function::Create(
+                  CF->getFunctionType(), GlobalValue::ExternalLinkage,
+                  CF->getName(), JITMod);
+              VMap[CF] = DeclFunc;
+            }
+            // We should expect an "unmappable hole" in the trace. This is
+            // where the trace followed a call into external code for which be
+            // have no IR, and thus we cannot map blocks for.
+            ExpectUnmappable = true;
           } else {
             StringRef CFName = CF->getName();
             if (AOTMod->getFunction(CFName) != nullptr && call_stack > 0) {
