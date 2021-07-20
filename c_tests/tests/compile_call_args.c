@@ -4,7 +4,8 @@
 //   stderr:
 //     ...
 //     define internal void @__yk_compiled_trace_0(i32* %0) {
-//       store i32 5, i32* %0, align 4, !tbaa !0
+//       %2 = add nsw i32 3, 2
+//       store i32 %2, i32* %0, align 4, !tbaa !0
 //       ret void
 //     }
 //     ...
