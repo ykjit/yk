@@ -178,7 +178,17 @@ impl HWTMapper {
     fn map_block(&mut self, block: &hwtracer::Block) -> Vec<IRBlock> {
         let block_vaddr = block.first_instr();
         let (obj_name, block_off) = code_vaddr_to_off(block_vaddr as usize).unwrap();
-        let block_len = block.last_instr() - block_vaddr;
+
+        // The HW mapper gives us the start address of the last instruction in a block, which gives
+        // us an exclusive upper bound when the interval tree expects an inclusive upper bound.
+        // This is a problem when the last block in our sequence has a single 1 byte instruction:
+        // the exclusive upper bound will not include any of that block's bytes. Fortunately, we
+        // don't need to calculate the precise end address of the last instruction in a block (on
+        // variable width instruction sets that's impractical!): instead we just need to ensure
+        // we're at least 1 byte into that last instruction (hence the +1 below). Since every
+        // instruction (and thus every block) is at least 1 byte long, this is always safe, and
+        // ensures that we generate an inclusive upper bound.
+        let block_len = (block.last_instr() - block_vaddr) + 1;
 
         let mut ret = Vec::new();
         let mut ents = BLOCK_MAP
