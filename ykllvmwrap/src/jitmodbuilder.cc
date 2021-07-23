@@ -69,6 +69,8 @@ public:
     }
   }
 
+  // FIXME: this function needs to be refactored.
+  // https://github.com/ykjit/yk/issues/385
   Module *createModule(char *FuncNames[], size_t BBs[], size_t Len,
                        Module *AOTMod, char *FAddrKeys[], uint64_t FAddrVals[],
                        size_t FAddrLen) {
@@ -116,6 +118,7 @@ public:
     CallInst *noinline_func = nullptr;
 
     bool ExpectUnmappable = false;
+    Instruction *ExtCallResume = nullptr;
 
     // Iterate over the trace and stitch together all traced blocks.
     for (size_t Idx = 0; Idx < Len; Idx++) {
@@ -139,21 +142,33 @@ public:
 
       // Iterate over all instructions within this block and copy them over
       // to our new module.
+      // FIXME: It would be nice to merge the two skipping mechanisms
+      // (ExtCallResume/last_call).
       for (auto I = BB->begin(); I != BB->end(); I++) {
-        // Skip calls to debug intrinsics (e.g. @llvm.dbg.value). We don't
-        // currently handle debug info and these "pseudo-calls" cause our blocks
-        // to be prematurely terminated.
-        if (isa<DbgInfoIntrinsic>(I))
-          continue;
+        // If we've returned from an external call, skip ahead to the
+        // instruction where we left off.
+        if (ExtCallResume != nullptr) {
+          if (&*I != ExtCallResume) {
+            continue;
+          } else {
+            ExtCallResume = nullptr;
+          }
+        }
 
-        // If we've returned from a call, skip ahead to the instruction where
-        // we left off.
+        // If we've returned from an internal call, skip ahead to the
+        // instruction where we left off.
         if (last_call != nullptr) {
           if (&*I == last_call) {
             last_call = nullptr;
           }
           continue;
         }
+
+        // Skip calls to debug intrinsics (e.g. @llvm.dbg.value). We don't
+        // currently handle debug info and these "pseudo-calls" cause our blocks
+        // to be prematurely terminated.
+        if (isa<DbgInfoIntrinsic>(I))
+          continue;
 
         if (isa<CallInst>(I)) {
           CallInst *CI = cast<CallInst>(&*I);
@@ -167,7 +182,7 @@ public:
           } else if (CF->getName() == YKTRACE_STOP) {
             finalise(&Builder);
             return JITMod;
-          } else if (CF->isDeclaration()) {
+          } else if ((StartTracingInstr != nullptr) && (CF->isDeclaration())) {
             // The definition of the callee is external to AOTMod. We still
             // need to declare it locally if we have not done so yet.
             if (VMap[CF] == nullptr) {
@@ -176,10 +191,16 @@ public:
                   CF->getName(), JITMod);
               VMap[CF] = DeclFunc;
             }
+            copyInstruction(&Builder, (Instruction *)&*I);
             // We should expect an "unmappable hole" in the trace. This is
             // where the trace followed a call into external code for which be
             // have no IR, and thus we cannot map blocks for.
             ExpectUnmappable = true;
+            // Peek at the instruction we will need to resume at.
+            auto PeekIter = I;
+            PeekIter++;
+            ExtCallResume = &*PeekIter;
+            break;
           } else {
             StringRef CFName = CF->getName();
             if (AOTMod->getFunction(CFName) != nullptr && call_stack > 0) {
