@@ -44,6 +44,7 @@ int main(int argc, char **argv) {
   x = 2;
   NOOPT_VAL(x);
   res = x + 3; // We don't want this operation to be optimised away.
+  NOOPT_VAL(res);
   void *tr = __yktrace_stop_tracing(tt);
   assert(res == 5);
 
