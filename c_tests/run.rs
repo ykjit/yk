@@ -22,6 +22,7 @@ fn mk_compiler(exe: &Path, src: &Path, opt: &str) -> Command {
     #[cfg(cargo_profile = "release")]
     lib_dir.push("release");
     lib_dir.push("deps");
+    let lib_dir_str = lib_dir.to_str().unwrap();
 
     let mut ykcapi_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     ykcapi_dir.push("..");
@@ -43,7 +44,8 @@ fn mk_compiler(exe: &Path, src: &Path, opt: &str) -> Command {
         "-I",
         ykcapi_dir.to_str().unwrap(),
         "-L",
-        lib_dir.to_str().unwrap(),
+        lib_dir_str,
+        &format!("-Wl,-rpath={}", lib_dir_str),
         "-lykcapi",
         "-pthread",
         "-o",

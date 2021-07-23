@@ -114,6 +114,7 @@ impl HWTMapper {
     ) -> Result<(Vec<IRBlock>, HashMap<CString, u64>), HWTracerError> {
         let mut ret_irblocks: Vec<IRBlock> = Vec::new();
         let mut itr = trace.iter_blocks();
+        let mut prev_block: Option<hwtracer::Block> = None;
         while let Some(block) = itr.next() {
             let block = block?;
             let irblocks = self.map_block(&block);
@@ -127,8 +128,20 @@ impl HWTMapper {
                     }
                 }
             } else {
-                ret_irblocks.extend(irblocks);
+                for irblock in irblocks.into_iter() {
+                    // A basic block may map to >1 *machine* basic block. If we see the same block
+                    // repeated, then we need to check if we re-executing the same basic block or
+                    // if we are executing next machine basic block for that same block. In the
+                    // latter case, we mustn't record the block in the trace again.
+                    if !(ret_irblocks.last() == Some(&irblock)
+                        && prev_block.as_ref().map(|x| x.first_instr())
+                            != Some(block.first_instr()))
+                    {
+                        ret_irblocks.push(irblock);
+                    }
+                }
             }
+            prev_block = Some(block);
         }
         // Strip any trailing unmappable blocks.
         if !ret_irblocks.is_empty() {
@@ -165,7 +178,17 @@ impl HWTMapper {
     fn map_block(&mut self, block: &hwtracer::Block) -> Vec<IRBlock> {
         let block_vaddr = block.first_instr();
         let (obj_name, block_off) = code_vaddr_to_off(block_vaddr as usize).unwrap();
-        let block_len = block.last_instr() - block_vaddr;
+
+        // The HW mapper gives us the start address of the last instruction in a block, which gives
+        // us an exclusive upper bound when the interval tree expects an inclusive upper bound.
+        // This is a problem when the last block in our sequence has a single 1 byte instruction:
+        // the exclusive upper bound will not include any of that block's bytes. Fortunately, we
+        // don't need to calculate the precise end address of the last instruction in a block (on
+        // variable width instruction sets that's impractical!): instead we just need to ensure
+        // we're at least 1 byte into that last instruction (hence the +1 below). Since every
+        // instruction (and thus every block) is at least 1 byte long, this is always safe, and
+        // ensures that we generate an inclusive upper bound.
+        let block_len = (block.last_instr() - block_vaddr) + 1;
 
         let mut ret = Vec::new();
         let mut ents = BLOCK_MAP
