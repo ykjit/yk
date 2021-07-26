@@ -195,25 +195,16 @@ impl HWTMapper {
             .query(block_off, block_off + block_len)
             .collect::<Vec<_>>();
 
-        // If a PT block maps to multiple IR blocks, then the IR blocks should be at consecutive
-        // addresses (they should be related only by "fall-thru", without control flow dispatch, as
-        // depicted in the above doc string). For debug builds, we check this.
-        #[cfg(debug_assertions)]
-        let mut prev_ent: Option<&intervaltree::Element<_, _>> = None;
-
+        // In the case that a PT block maps to multiple machine blocks, it may be tempting to check
+        // that they are at consecutive address ranges. Unfortunately we can't do this because LLVM
+        // sometimes appends `nop` sleds (e.g. `nop word cs:[rax + rax]; nop`) to the ends of
+        // blocks for alignment. This padding is not reflected in the LLVM block address map, so
+        // blocks may not appear consecutive.
         ents.sort_by(|x, y| x.range.start.partial_cmp(&y.range.start).unwrap());
         for ent in ents {
             // Check that the MachineBasicBlock observed in the trace has a corresponding BasicBlock.
             // PERF: can we guarantee this won't happen and downgrade to a debug assertion?
             assert!(!ent.value.corr_bbs.is_empty());
-
-            #[cfg(debug_assertions)]
-            {
-                if let Some(prev) = prev_ent {
-                    debug_assert!(ent.range.start == prev.range.end);
-                }
-                prev_ent = Some(ent);
-            }
 
             let func_name = self.symb.find_code_sym(&obj_name, ent.value.f_off).unwrap();
             self.faddrs.insert(func_name.clone(), ent.value.f_off);
