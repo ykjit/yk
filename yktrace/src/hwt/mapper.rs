@@ -129,15 +129,27 @@ impl HWTMapper {
                 }
             } else {
                 for irblock in irblocks.into_iter() {
-                    // A basic block may map to >1 *machine* basic block. If we see the same block
-                    // repeated, then we need to check if we re-executing the same basic block or
-                    // if we are executing next machine basic block for that same block. In the
-                    // latter case, we mustn't record the block in the trace again.
-                    if !(ret_irblocks.last() == Some(&irblock)
-                        && prev_block.as_ref().map(|x| x.first_instr())
-                            != Some(block.first_instr()))
-                    {
-                        ret_irblocks.push(irblock);
+                    if let Some(irblock) = irblock {
+                        // An IR basic block may map to >1 *machine* basic block. If we see the
+                        // same IR block repeated, then we need to check if we re-executing the
+                        // same basic block or if we are executing the next machine basic block for
+                        // that same block. In the latter case, we mustn't record the block in the
+                        // trace again.
+                        if !(ret_irblocks.last() == Some(&irblock)
+                            && prev_block.as_ref().map(|x| x.first_instr())
+                                != Some(block.first_instr()))
+                        {
+                            ret_irblocks.push(irblock);
+                        }
+                    } else {
+                        // Part of a PT block mapped to a machine block in the LLVM block address
+                        // map, but the machine block has no corresponding IR blocks.
+                        //
+                        // FIXME: https://github.com/ykjit/yk/issues/388
+                        // We *think* this happens because LLVM can introduce extra
+                        // `MachineBasicBlock`s to help with laying out machine code. If that's the
+                        // case, then for our purposes these extra blocks can be ignored. However,
+                        // we should really investigate to be sure.
                     }
                 }
             }
@@ -162,6 +174,27 @@ impl HWTMapper {
 
     /// Maps one PT block to one or many LLVM IR blocks.
     ///
+    /// Mapping a PT block to IRBlocks occurs in two phases. First the mapper tries to find machine
+    /// blocks whose address ranges overlap with the address range of the PT block (by using the
+    /// LLVM block address map section). Once machine blocks have been found, the mapper then tries
+    /// to find which LLVM IR blocks the machine blocks are part of.
+    ///
+    /// A `Some` element in the returned vector means that the mapper found a machine block that
+    /// maps to part of the PT block and that the machine block could be directly mapped
+    /// to an IR block.
+    ///
+    /// A `None` element in the returned vector means that the mapper found a machine block that
+    /// corresponds with part of the PT block but that the machine block could *not* be directly
+    /// mapped to an IR block. This happens when `MachineBasicBlock::getBasicBlock()` returns
+    /// `nullptr`.
+    ///
+    /// This function returns an empty vector if the PT block was unmappable (no matching machine
+    /// blocks could be found).
+    ///
+    /// The reason we cannot simply ignore the `None` case is that it is important to differentiate
+    /// "there were no matching machine blocks" from "there were matching machine blocks, but we
+    /// were unable to find IR blocks for them".
+    ///
     /// The reason that there may be many corresponding blocks is due to the following scenario.
     ///
     /// Suppose that the LLVM IR looked like this:
@@ -175,7 +208,7 @@ impl HWTMapper {
     /// During codegen LLVM may remove the unconditional jump and simply place bb1 and bb2
     /// consecutively, allowing bb1 to fall-thru to bb2. In the eyes of the PT block decoder, a
     /// fall-thru does not terminate a block, so whereas LLVM sees two blocks, PT sees only one.
-    fn map_block(&mut self, block: &hwtracer::Block) -> Vec<IRBlock> {
+    fn map_block(&mut self, block: &hwtracer::Block) -> Vec<Option<IRBlock>> {
         let block_vaddr = block.first_instr();
         let (obj_name, block_off) = code_vaddr_to_off(block_vaddr as usize).unwrap();
 
@@ -195,33 +228,24 @@ impl HWTMapper {
             .query(block_off, block_off + block_len)
             .collect::<Vec<_>>();
 
-        // If a PT block maps to multiple IR blocks, then the IR blocks should be at consecutive
-        // addresses (they should be related only by "fall-thru", without control flow dispatch, as
-        // depicted in the above doc string). For debug builds, we check this.
-        #[cfg(debug_assertions)]
-        let mut prev_ent: Option<&intervaltree::Element<_, _>> = None;
-
+        // In the case that a PT block maps to multiple machine blocks, it may be tempting to check
+        // that they are at consecutive address ranges. Unfortunately we can't do this because LLVM
+        // sometimes appends `nop` sleds (e.g. `nop word cs:[rax + rax]; nop`) to the ends of
+        // blocks for alignment. This padding is not reflected in the LLVM block address map, so
+        // blocks may not appear consecutive.
         ents.sort_by(|x, y| x.range.start.partial_cmp(&y.range.start).unwrap());
         for ent in ents {
-            // Check that the MachineBasicBlock observed in the trace has a corresponding BasicBlock.
-            // PERF: can we guarantee this won't happen and downgrade to a debug assertion?
-            assert!(!ent.value.corr_bbs.is_empty());
-
-            #[cfg(debug_assertions)]
-            {
-                if let Some(prev) = prev_ent {
-                    debug_assert!(ent.range.start == prev.range.end);
+            if !ent.value.corr_bbs.is_empty() {
+                let func_name = self.symb.find_code_sym(&obj_name, ent.value.f_off).unwrap();
+                self.faddrs.insert(func_name.clone(), ent.value.f_off);
+                for bb in &ent.value.corr_bbs {
+                    ret.push(Some(IRBlock {
+                        func_name: func_name.clone(),
+                        bb: usize::try_from(*bb).unwrap(),
+                    }));
                 }
-                prev_ent = Some(ent);
-            }
-
-            let func_name = self.symb.find_code_sym(&obj_name, ent.value.f_off).unwrap();
-            self.faddrs.insert(func_name.clone(), ent.value.f_off);
-            for bb in &ent.value.corr_bbs {
-                ret.push(IRBlock {
-                    func_name: func_name.clone(),
-                    bb: usize::try_from(*bb).unwrap(),
-                });
+            } else {
+                ret.push(None);
             }
         }
         ret

@@ -36,3 +36,12 @@ void __yktrace_drop_irtrace(void *trace);
 #else
 #error non-clang compilers are not supported.
 #endif
+
+// Tries to block optimisations by telling the compiler that all memory
+// locations are touched. `NOOPT_VAL` is preferred, but you may not always have
+// direct access to the value(s) or expression(s) that you wish to block
+// optimisations to.
+//
+// Borrowed from:
+// https://github.com/google/benchmark/blob/ab74ae5e104f72fa957c1712707a06a781a974a6/include/benchmark/benchmark.h#L359
+#define CLOBBER_MEM() asm volatile("" : : : "memory");
