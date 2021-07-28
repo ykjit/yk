@@ -10,6 +10,13 @@ atomic<uint64_t> NextTraceIdx(0);
 #define YKTRACE_START "__yktrace_start_tracing"
 #define YKTRACE_STOP "__yktrace_stop_tracing"
 
+// Dump an error message and an LLVM value to stderr and exit with failure.
+void dumpValueAndExit(const char *Msg, Value *V) {
+  errs() << Msg << ": ";
+  V->dump();
+  exit(EXIT_FAILURE);
+}
+
 std::vector<Value *> getTraceInputs(Function *F, uintptr_t BBIdx) {
   std::vector<Value *> Vec;
   auto It = F->begin();
@@ -367,7 +374,7 @@ public:
           Value *NullVal = Constant::getNullValue(OpTy);
           VMap[Op] = NullVal;
         } else {
-          errx(EXIT_FAILURE, "don't know how to handle operand");
+          dumpValueAndExit("don't know how to handle operand", Op);
         }
       }
     }
