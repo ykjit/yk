@@ -152,6 +152,7 @@ public:
     // Keep track of the AOT function we are currently in so that we can print
     // inlined function thresholds in the dumped trace.
     StringRef LastAOTFunc;
+    const DebugLoc *LastDebugLoc = nullptr;
     for (auto &JITBlock : *JITFunc) {
       for (auto &JITInst : JITBlock) {
         auto V = RevVMap[&JITInst];
@@ -171,6 +172,14 @@ public:
         if (AOTFuncName != LastAOTFunc) {
           // Print an inlining threshold.
           errs() << "# " << AOTFuncName << "()\n";
+          LastAOTFunc = AOTFuncName;
+        }
+        const DebugLoc &ThisDebugLoc = JITInst.getDebugLoc();
+        if (LastDebugLoc != &ThisDebugLoc) {
+          string LocStr;
+          raw_string_ostream RSO(LocStr);
+          ThisDebugLoc.print(RSO);
+          errs() << "# " << LocStr << "\n";
           LastAOTFunc = AOTFuncName;
         }
         string JITStr;
