@@ -315,9 +315,8 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
 
   DIP.print(DebugIR::AOT, AOTMod);
 
-  JITModBuilder JB;
-  auto JITMod = JB.createModule(FuncNames, BBs, Len, AOTMod, FAddrKeys,
-                                FAddrVals, FAddrLen);
+  JITModBuilder JB(AOTMod, FuncNames, BBs, Len, FAddrKeys, FAddrVals, FAddrLen);
+  auto JITMod = JB.createModule();
 
   DIP.print(DebugIR::JITPreOpt, JITMod);
 #ifndef NDEBUG
