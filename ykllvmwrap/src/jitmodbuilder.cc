@@ -119,10 +119,10 @@ public:
       VMap[OldVal] = NewVal;
     }
 
-    std::vector<CallInst *> inlined_calls;
-    CallInst *ResumeAfter = nullptr;
+    std::vector<tuple<size_t, CallInst *>> InlinedCalls;
+    Optional<tuple<size_t, CallInst *>> ResumeAfter;
     size_t call_stack = 0;
-    CallInst *noinline_func = nullptr;
+    tuple<size_t, CallInst *> NoInlineFunc;
     bool ExpectUnmappable = false;
 
     // Iterate over the trace and stitch together all traced blocks.
@@ -147,15 +147,16 @@ public:
 
       // Iterate over all instructions within this block and copy them over
       // to our new module.
-      for (auto I = BB->begin(); I != BB->end(); I++) {
+      for (size_t CurInstrIdx = 0; CurInstrIdx < BB->size(); CurInstrIdx++) {
         // If we've returned from a call, skip ahead to the instruction where
         // we left off.
-        if (ResumeAfter != nullptr) {
-          if (&*I == ResumeAfter) {
-            ResumeAfter = nullptr;
-          }
-          continue;
+        if (ResumeAfter.hasValue() != 0) {
+          CurInstrIdx = std::get<0>(ResumeAfter.getValue()) + 1;
+          ResumeAfter.reset();
         }
+        auto I = BB->begin();
+        std::advance(I, CurInstrIdx);
+        assert(I != BB->end());
 
         // Skip calls to debug intrinsics (e.g. @llvm.dbg.value). We don't
         // currently handle debug info and these "pseudo-calls" cause our blocks
@@ -189,7 +190,7 @@ public:
             // where the trace followed a call into external code for which be
             // have no IR, and thus we cannot map blocks for.
             ExpectUnmappable = true;
-            ResumeAfter = cast<CallInst>(&*I);
+            ResumeAfter = make_tuple(CurInstrIdx, cast<CallInst>(&*I));
             break;
           } else {
             StringRef CFName = CF->getName();
@@ -198,14 +199,15 @@ public:
               // inlined function calls so we know when we left the initial
               // function call.
               call_stack += 1;
-              inlined_calls.push_back(CI);
+              InlinedCalls.push_back(make_tuple(CurInstrIdx, CI));
               break;
             }
             // If this is a recursive call that has been inlined, remove the
             // inlined code and turn it into a normal call.
-            for (CallInst *cinst : inlined_calls) {
+            for (auto Tup : InlinedCalls) {
+              CallInst *CInst = get<1>(Tup);
               // Have we inlined this call already? Then this is recursion.
-              if (cinst->getCalledFunction() == CF) {
+              if (CInst->getCalledFunction() == CF) {
                 if (VMap[CF] == nullptr) {
                   // Declare function.
                   auto DeclFunc = llvm::Function::Create(
@@ -223,7 +225,7 @@ public:
                   }
                 }
                 copyInstruction(&Builder, (Instruction *)&*I);
-                noinline_func = CI;
+                NoInlineFunc = make_tuple(CurInstrIdx, CI);
                 call_stack = 1;
                 break;
               }
@@ -232,7 +234,7 @@ public:
             // can continue from this position after returning from the inlined
             // call.
             if (StartTracingInstr != nullptr) {
-              inlined_calls.push_back(CI);
+              InlinedCalls.push_back(make_tuple(CurInstrIdx, CI));
               // During inlining, remap function arguments to the variables
               // passed in by the caller.
               if (call_stack == 0) {
@@ -262,12 +264,12 @@ public:
         }
 
         if (isa<ReturnInst>(I)) {
-          ResumeAfter = inlined_calls.back();
-          inlined_calls.pop_back();
+          ResumeAfter = InlinedCalls.back();
+          InlinedCalls.pop_back();
           if (call_stack > 0) {
             call_stack -= 1;
             if (call_stack == 0) {
-              ResumeAfter = noinline_func;
+              ResumeAfter = NoInlineFunc;
             }
             continue;
           }
@@ -275,8 +277,10 @@ public:
           // Since the return value will have already been copied over to the
           // JITModule, make sure we look up the copy.
           auto OldRetVal = ((ReturnInst *)&*I)->getReturnValue();
-          if (OldRetVal != nullptr)
-            VMap[ResumeAfter] = getMappedValue(OldRetVal);
+          if (OldRetVal != nullptr) {
+            assert(ResumeAfter.hasValue());
+            VMap[get<1>(ResumeAfter.getValue())] = getMappedValue(OldRetVal);
+          }
           break;
         }
 
