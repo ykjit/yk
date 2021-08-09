@@ -54,6 +54,28 @@ class JITModBuilder {
   // encountered). When this changes from NULL to non-NULL, then we start
   // copying instructions from the AOT module into the JIT module.
   Instruction *StartTracingInstr = nullptr;
+  // Stack of inlined calls, required to resume at the correct place in the
+  // caller.
+  std::vector<tuple<size_t, CallInst *>> InlinedCalls;
+  // Instruction at which to continue after an a call.
+  Optional<tuple<size_t, CallInst *>> ResumeAfter;
+  // Depth of nested calls. Used to track recursion.
+  // FIXME: can we kill this?
+  size_t call_stack = 0;
+  // Function currently being outlined.
+  // FIXME: this should be an Optional?
+  tuple<size_t, CallInst *> NoInlineFunc;
+  // Signifies a hole (for which we have no IR) in the trace.
+  bool ExpectUnmappable = false;
+
+  Value *getMappedValue(Value *V) {
+    if (isa<Constant>(V)) {
+      return V;
+    } else {
+      auto NV = VMap[V];
+      return NV;
+    }
+  }
 
 public:
   // Store virtual addresses for called functions.
@@ -66,15 +88,6 @@ public:
   // Reverse mapping for debugging.
   ValueToValueMapTy RevVMap;
 #endif
-
-  Value *getMappedValue(Value *V) {
-    if (isa<Constant>(V)) {
-      return V;
-    } else {
-      auto NV = VMap[V];
-      return NV;
-    }
-  }
 
   // FIXME: this function needs to be refactored.
   // https://github.com/ykjit/yk/issues/385
@@ -118,12 +131,6 @@ public:
       assert(NewVal->getType()->isPointerTy());
       VMap[OldVal] = NewVal;
     }
-
-    std::vector<tuple<size_t, CallInst *>> InlinedCalls;
-    Optional<tuple<size_t, CallInst *>> ResumeAfter;
-    size_t call_stack = 0;
-    tuple<size_t, CallInst *> NoInlineFunc;
-    bool ExpectUnmappable = false;
 
     // Iterate over the trace and stitch together all traced blocks.
     for (size_t Idx = 0; Idx < Len; Idx++) {
