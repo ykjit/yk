@@ -321,6 +321,7 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
 
   DIP.print(DebugIR::JITPreOpt, JITMod);
 #ifndef NDEBUG
+  llvm::verifyModule(*JITMod, &llvm::errs());
   DIP.print(DebugIR::JITPreOptSBS, JITMod, AOTMod, &JB.RevVMap);
 #endif
 
