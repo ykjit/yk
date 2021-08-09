@@ -120,12 +120,10 @@ public:
     }
 
     std::vector<CallInst *> inlined_calls;
-    CallInst *last_call = nullptr;
+    CallInst *ResumeAfter = nullptr;
     size_t call_stack = 0;
     CallInst *noinline_func = nullptr;
-
     bool ExpectUnmappable = false;
-    Instruction *ExtCallResume = nullptr;
 
     // Iterate over the trace and stitch together all traced blocks.
     for (size_t Idx = 0; Idx < Len; Idx++) {
@@ -149,24 +147,12 @@ public:
 
       // Iterate over all instructions within this block and copy them over
       // to our new module.
-      // FIXME: It would be nice to merge the two skipping mechanisms
-      // (ExtCallResume/last_call).
       for (auto I = BB->begin(); I != BB->end(); I++) {
-        // If we've returned from an external call, skip ahead to the
-        // instruction where we left off.
-        if (ExtCallResume != nullptr) {
-          if (&*I != ExtCallResume) {
-            continue;
-          } else {
-            ExtCallResume = nullptr;
-          }
-        }
-
-        // If we've returned from an internal call, skip ahead to the
-        // instruction where we left off.
-        if (last_call != nullptr) {
-          if (&*I == last_call) {
-            last_call = nullptr;
+        // If we've returned from a call, skip ahead to the instruction where
+        // we left off.
+        if (ResumeAfter != nullptr) {
+          if (&*I == ResumeAfter) {
+            ResumeAfter = nullptr;
           }
           continue;
         }
@@ -203,10 +189,7 @@ public:
             // where the trace followed a call into external code for which be
             // have no IR, and thus we cannot map blocks for.
             ExpectUnmappable = true;
-            // Peek at the instruction we will need to resume at.
-            auto PeekIter = I;
-            PeekIter++;
-            ExtCallResume = &*PeekIter;
+            ResumeAfter = cast<CallInst>(&*I);
             break;
           } else {
             StringRef CFName = CF->getName();
@@ -279,12 +262,12 @@ public:
         }
 
         if (isa<ReturnInst>(I)) {
-          last_call = inlined_calls.back();
+          ResumeAfter = inlined_calls.back();
           inlined_calls.pop_back();
           if (call_stack > 0) {
             call_stack -= 1;
             if (call_stack == 0) {
-              last_call = noinline_func;
+              ResumeAfter = noinline_func;
             }
             continue;
           }
@@ -293,7 +276,7 @@ public:
           // JITModule, make sure we look up the copy.
           auto OldRetVal = ((ReturnInst *)&*I)->getReturnValue();
           if (OldRetVal != nullptr)
-            VMap[last_call] = getMappedValue(OldRetVal);
+            VMap[ResumeAfter] = getMappedValue(OldRetVal);
           break;
         }
 
