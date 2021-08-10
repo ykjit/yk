@@ -5,6 +5,11 @@ using namespace std;
 
 // An atomic counter used to issue compiled traces with unique names.
 atomic<uint64_t> NextTraceIdx(0);
+uint64_t getNewTraceIdx() {
+  uint64_t TraceIdx = NextTraceIdx.fetch_add(1, memory_order_relaxed);
+  assert(TraceIdx != numeric_limits<uint64_t>::max());
+  return TraceIdx;
+}
 
 #define TRACE_FUNC_PREFIX "__yk_compiled_trace_"
 #define YKTRACE_START "__yktrace_start_tracing"
@@ -165,6 +170,66 @@ class JITModBuilder {
     }
   }
 
+  void handleReturnInst(Instruction *I) {
+    ResumeAfter = InlinedCalls.back();
+    InlinedCalls.pop_back();
+    if (call_stack > 0) {
+      call_stack -= 1;
+      if (call_stack == 0) {
+        ResumeAfter = NoInlineFunc;
+      }
+      return;
+    }
+    // Replace the return variable of the call with its return value.
+    // Since the return value will have already been copied over to the
+    // JITModule, make sure we look up the copy.
+    auto OldRetVal = ((ReturnInst *)&*I)->getReturnValue();
+    if (OldRetVal != nullptr) {
+      assert(ResumeAfter.hasValue());
+      VMap[get<1>(ResumeAfter.getValue())] = getMappedValue(OldRetVal);
+    }
+  }
+
+  void handlePHINode(Instruction *I, Function *F, size_t Idx) {
+    assert(Idx > 0);
+    auto LBIt = F->begin();
+    std::advance(LBIt, BBs[Idx - 1]);
+    BasicBlock *LastBlock = &*LBIt;
+    Value *V = ((PHINode *)&*I)->getIncomingValueForBlock(LastBlock);
+    VMap[&*I] = getMappedValue(V);
+  }
+
+  Function *createJITFunc(vector<Value *> *TraceInputs) {
+    // Compute a name for the trace.
+    uint64_t TraceIdx = getNewTraceIdx();
+    TraceName = string(TRACE_FUNC_PREFIX) + to_string(TraceIdx);
+
+    // Create the function.
+    std::vector<Type *> InputTypes;
+    for (auto Val : *TraceInputs)
+      InputTypes.push_back(Val->getType());
+    llvm::FunctionType *FType = llvm::FunctionType::get(
+        Type::getVoidTy(JITMod->getContext()), InputTypes, false);
+    llvm::Function *JITFunc = llvm::Function::Create(
+        FType, Function::InternalLinkage, TraceName, JITMod);
+    JITFunc->setCallingConv(CallingConv::C);
+
+    return JITFunc;
+  }
+
+  // Variables that are used (but not defined) inbetween starting and stopping
+  // tracing need to be replaced with function arguments which the user passes
+  // into the compiled trace. This loop creates a mapping from those original
+  // variables to the function arguments of the compiled trace function.
+  void mapTraceInputs(vector<Value *> &TraceInputs, Function *JITFunc) {
+    for (size_t Idx = 0; Idx < TraceInputs.size(); Idx++) {
+      Value *OldVal = TraceInputs[Idx];
+      Value *NewVal = JITFunc->getArg(Idx);
+      assert(NewVal->getType()->isPointerTy());
+      VMap[OldVal] = NewVal;
+    }
+  }
+
 public:
   // Store virtual addresses for called functions.
   std::map<StringRef, uint64_t> globalMappings;
@@ -187,47 +252,27 @@ public:
     this->FAddrKeys = FAddrKeys;
     this->FAddrVals = FAddrVals;
     this->FAddrLen = FAddrLen;
+
+    JITMod = new Module("", AOTMod->getContext());
   }
 
   // FIXME: this function needs to be refactored.
   // https://github.com/ykjit/yk/issues/385
   Module *createModule() {
-    LLVMContext &JITContext = AOTMod->getContext();
-    JITMod = new Module("", JITContext);
-    uint64_t TraceIdx = NextTraceIdx.fetch_add(1);
-    if (TraceIdx == numeric_limits<uint64_t>::max())
-      errx(EXIT_FAILURE, "trace index counter overflowed");
-
-    // Get var args from start_tracing call.
-    auto Inputs = getTraceInputs(AOTMod->getFunction(FuncNames[0]), BBs[0]);
-
-    std::vector<Type *> InputTypes;
-    for (auto Val : Inputs) {
-      InputTypes.push_back(Val->getType());
-    }
+    LLVMContext &JITContext = JITMod->getContext();
+    // Find the trace inputs.
+    auto TraceInputs =
+        getTraceInputs(AOTMod->getFunction(FuncNames[0]), BBs[0]);
 
     // Create function to store compiled trace.
-    TraceName = string(TRACE_FUNC_PREFIX) + to_string(TraceIdx);
-    llvm::FunctionType *FType =
-        llvm::FunctionType::get(Type::getVoidTy(JITContext), InputTypes, false);
-    llvm::Function *JITFunc = llvm::Function::Create(
-        FType, Function::InternalLinkage, TraceName, JITMod);
-    JITFunc->setCallingConv(CallingConv::C);
+    Function *JITFunc = createJITFunc(&TraceInputs);
+
+    // Add entries to the VMap for variables defined outside of the trace.
+    mapTraceInputs(TraceInputs, JITFunc);
 
     // Create entry block and setup builder.
     auto DstBB = BasicBlock::Create(JITContext, "", JITFunc);
     Builder.SetInsertPoint(DstBB);
-
-    // Variables that are used (but not defined) inbetween start and stop
-    // tracing need to be replaced with function arguments which the user passes
-    // into the compiled trace. This loop creates a mapping from those original
-    // variables to the function arguments of the compiled trace function.
-    for (size_t Idx = 0; Idx != Inputs.size(); Idx++) {
-      Value *OldVal = Inputs[Idx];
-      Value *NewVal = JITFunc->getArg(Idx);
-      assert(NewVal->getType()->isPointerTy());
-      VMap[OldVal] = NewVal;
-    }
 
     // Iterate over the trace and stitch together all traced blocks.
     for (size_t Idx = 0; Idx < Len; Idx++) {
@@ -296,23 +341,7 @@ public:
         }
 
         if (isa<ReturnInst>(I)) {
-          ResumeAfter = InlinedCalls.back();
-          InlinedCalls.pop_back();
-          if (call_stack > 0) {
-            call_stack -= 1;
-            if (call_stack == 0) {
-              ResumeAfter = NoInlineFunc;
-            }
-            continue;
-          }
-          // Replace the return variable of the call with its return value.
-          // Since the return value will have already been copied over to the
-          // JITModule, make sure we look up the copy.
-          auto OldRetVal = ((ReturnInst *)&*I)->getReturnValue();
-          if (OldRetVal != nullptr) {
-            assert(ResumeAfter.hasValue());
-            VMap[get<1>(ResumeAfter.getValue())] = getMappedValue(OldRetVal);
-          }
+          handleReturnInst(&*I);
           break;
         }
 
@@ -322,12 +351,7 @@ public:
         }
 
         if (isa<PHINode>(I)) {
-          assert(Idx > 0);
-          auto LBIt = F->begin();
-          std::advance(LBIt, BBs[Idx - 1]);
-          BasicBlock *LastBlock = &*LBIt;
-          Value *V = ((PHINode *)&*I)->getIncomingValueForBlock(LastBlock);
-          VMap[&*I] = getMappedValue(V);
+          handlePHINode(&*I, F, Idx);
           continue;
         }
 
