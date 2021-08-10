@@ -185,6 +185,19 @@ class JITModBuilder {
     return JITFunc;
   }
 
+  // Variables that are used (but not defined) inbetween starting and stopping
+  // tracing need to be replaced with function arguments which the user passes
+  // into the compiled trace. This loop creates a mapping from those original
+  // variables to the function arguments of the compiled trace function.
+  void mapTraceInputs(vector<Value *> &TraceInputs, Function *JITFunc) {
+    for (size_t Idx = 0; Idx < TraceInputs.size(); Idx++) {
+      Value *OldVal = TraceInputs[Idx];
+      Value *NewVal = JITFunc->getArg(Idx);
+      assert(NewVal->getType()->isPointerTy());
+      VMap[OldVal] = NewVal;
+    }
+  }
+
 public:
   // Store virtual addresses for called functions.
   std::map<StringRef, uint64_t> globalMappings;
@@ -222,20 +235,12 @@ public:
     // Create function to store compiled trace.
     Function *JITFunc = createJITFunc(&TraceInputs);
 
+    // Add entries to the VMap for variables defined outside of the trace.
+    mapTraceInputs(TraceInputs, JITFunc);
+
     // Create entry block and setup builder.
     auto DstBB = BasicBlock::Create(JITContext, "", JITFunc);
     Builder.SetInsertPoint(DstBB);
-
-    // Variables that are used (but not defined) inbetween start and stop
-    // tracing need to be replaced with function arguments which the user passes
-    // into the compiled trace. This loop creates a mapping from those original
-    // variables to the function arguments of the compiled trace function.
-    for (size_t Idx = 0; Idx != TraceInputs.size(); Idx++) {
-      Value *OldVal = TraceInputs[Idx];
-      Value *NewVal = JITFunc->getArg(Idx);
-      assert(NewVal->getType()->isPointerTy());
-      VMap[OldVal] = NewVal;
-    }
 
     // Iterate over the trace and stitch together all traced blocks.
     for (size_t Idx = 0; Idx < Len; Idx++) {
