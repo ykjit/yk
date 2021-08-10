@@ -67,11 +67,7 @@ class JITModBuilder {
   // Instruction at which to continue after an a call.
   Optional<tuple<size_t, CallInst *>> ResumeAfter;
   // Depth of nested calls when outlining a recursive function.
-  // FIXME: can we kill this?
   size_t RecCallDepth = 0;
-  // Function currently being outlined.
-  // FIXME: this should be an Optional?
-  tuple<size_t, CallInst *> NoInlineFunc;
   // Signifies a hole (for which we have no IR) in the trace.
   bool ExpectUnmappable = false;
   // The JITMod's builder.
@@ -161,7 +157,6 @@ class JITModBuilder {
           addGlobalMappingForFunction(CF);
         }
         copyInstruction(&Builder, CI);
-        NoInlineFunc = make_tuple(CurInstrIdx, CI);
         InlinedCalls.push_back(make_tuple(CurInstrIdx, CI));
         RecCallDepth = 1;
         return;
@@ -186,9 +181,6 @@ class JITModBuilder {
     InlinedCalls.pop_back();
     if (RecCallDepth > 0) {
       RecCallDepth -= 1;
-      if (RecCallDepth == 0) {
-        ResumeAfter = NoInlineFunc;
-      }
       return;
     }
     // Replace the return variable of the call with its return value.
