@@ -185,6 +185,15 @@ class JITModBuilder {
     }
   }
 
+  void handlePHINode(Instruction *I, Function *F, size_t Idx) {
+    assert(Idx > 0);
+    auto LBIt = F->begin();
+    std::advance(LBIt, BBs[Idx - 1]);
+    BasicBlock *LastBlock = &*LBIt;
+    Value *V = ((PHINode *)&*I)->getIncomingValueForBlock(LastBlock);
+    VMap[&*I] = getMappedValue(V);
+  }
+
   Function *createJITFunc(vector<Value *> *TraceInputs) {
     // Compute a name for the trace.
     uint64_t TraceIdx = NextTraceIdx.fetch_add(1);
@@ -339,12 +348,7 @@ public:
         }
 
         if (isa<PHINode>(I)) {
-          assert(Idx > 0);
-          auto LBIt = F->begin();
-          std::advance(LBIt, BBs[Idx - 1]);
-          BasicBlock *LastBlock = &*LBIt;
-          Value *V = ((PHINode *)&*I)->getIncomingValueForBlock(LastBlock);
-          VMap[&*I] = getMappedValue(V);
+          handlePHINode(&*I, F, Idx);
           continue;
         }
 
