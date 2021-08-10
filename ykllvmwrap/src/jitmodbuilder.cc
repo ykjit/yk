@@ -5,6 +5,11 @@ using namespace std;
 
 // An atomic counter used to issue compiled traces with unique names.
 atomic<uint64_t> NextTraceIdx(0);
+uint64_t getNewTraceIdx() {
+  uint64_t TraceIdx = NextTraceIdx.fetch_add(1, memory_order_relaxed);
+  assert(TraceIdx != numeric_limits<uint64_t>::max());
+  return TraceIdx;
+}
 
 #define TRACE_FUNC_PREFIX "__yk_compiled_trace_"
 #define YKTRACE_START "__yktrace_start_tracing"
@@ -196,9 +201,7 @@ class JITModBuilder {
 
   Function *createJITFunc(vector<Value *> *TraceInputs) {
     // Compute a name for the trace.
-    uint64_t TraceIdx = NextTraceIdx.fetch_add(1);
-    if (TraceIdx == numeric_limits<uint64_t>::max())
-      errx(EXIT_FAILURE, "trace index counter overflowed");
+    uint64_t TraceIdx = getNewTraceIdx();
     TraceName = string(TRACE_FUNC_PREFIX) + to_string(TraceIdx);
 
     // Create the function.
