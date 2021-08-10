@@ -116,6 +116,20 @@ class JITModBuilder {
     VMap[F] = DeclFunc;
   }
 
+  // Find the machine code corresponding to the given AOT IR function and
+  // ensure there's a mapping from its name to that machine code.
+  void addGlobalMappingForFunction(Function *CF) {
+    StringRef CFName = CF->getName();
+    for (size_t i = 0; i < FAddrLen; i++) {
+      char *FName = FAddrKeys[i];
+      uint64_t FAddr = FAddrVals[i];
+      if (strcmp(FName, CFName.data()) == 0) {
+        globalMappings.insert(pair<StringRef, uint64_t>(CFName, FAddr));
+        break;
+      }
+    }
+  }
+
   void handleCallInst(CallInst *CI, Function *CF, size_t &CurInstrIdx) {
     if (CF->isDeclaration()) {
       // The definition of the callee is external to AOTMod. We still
@@ -143,16 +157,8 @@ class JITModBuilder {
       // inlined code and turn it into a normal call.
       if (isRecursiveCall(CF)) {
         if (VMap[CF] == nullptr) {
-          StringRef CFName = CF->getName();
           declareFunction(CF);
-          for (size_t i = 0; i < FAddrLen; i++) {
-            char *FName = FAddrKeys[i];
-            uint64_t FAddr = FAddrVals[i];
-            if (strcmp(FName, CFName.data()) == 0) {
-              globalMappings.insert(pair<StringRef, uint64_t>(CFName, FAddr));
-              break;
-            }
-          }
+          addGlobalMappingForFunction(CF);
         }
         copyInstruction(&Builder, CI);
         NoInlineFunc = make_tuple(CurInstrIdx, CI);
