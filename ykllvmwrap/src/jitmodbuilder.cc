@@ -162,23 +162,21 @@ class JITModBuilder {
         }
         copyInstruction(&Builder, CI);
         NoInlineFunc = make_tuple(CurInstrIdx, CI);
+        InlinedCalls.push_back(make_tuple(CurInstrIdx, CI));
         RecCallDepth = 1;
+        return;
       }
-      // Skip remainder of this block and remember where we stopped so we can
-      // continue from this position after returning from the inlined call.
+      // This is neither recursion nor an external call, so keep it inlined.
       InlinedCalls.push_back(make_tuple(CurInstrIdx, CI));
-      if (RecCallDepth == 0) {
-        // During inlining, remap function arguments to the variables passed in
-        // by the caller.
-        for (unsigned int i = 0; i < CI->arg_size(); i++) {
-          Value *Var = CI->getArgOperand(i);
-          Value *Arg = CF->getArg(i);
-          // If the operand has already been cloned into JITMod then we
-          // need to use the cloned value in the VMap.
-          if (VMap[Var] != nullptr)
-            Var = VMap[Var];
-          VMap[Arg] = Var;
-        }
+      // Remap function arguments to the variables passed in by the caller.
+      for (unsigned int i = 0; i < CI->arg_size(); i++) {
+        Value *Var = CI->getArgOperand(i);
+        Value *Arg = CF->getArg(i);
+        // If the operand has already been cloned into JITMod then we
+        // need to use the cloned value in the VMap.
+        if (VMap[Var] != nullptr)
+          Var = VMap[Var];
+        VMap[Arg] = Var;
       }
     }
   }
