@@ -165,6 +165,26 @@ class JITModBuilder {
     }
   }
 
+  void handleReturnInst(Instruction *I) {
+    ResumeAfter = InlinedCalls.back();
+    InlinedCalls.pop_back();
+    if (call_stack > 0) {
+      call_stack -= 1;
+      if (call_stack == 0) {
+        ResumeAfter = NoInlineFunc;
+      }
+      return;
+    }
+    // Replace the return variable of the call with its return value.
+    // Since the return value will have already been copied over to the
+    // JITModule, make sure we look up the copy.
+    auto OldRetVal = ((ReturnInst *)&*I)->getReturnValue();
+    if (OldRetVal != nullptr) {
+      assert(ResumeAfter.hasValue());
+      VMap[get<1>(ResumeAfter.getValue())] = getMappedValue(OldRetVal);
+    }
+  }
+
   Function *createJITFunc(vector<Value *> *TraceInputs) {
     // Compute a name for the trace.
     uint64_t TraceIdx = NextTraceIdx.fetch_add(1);
@@ -309,23 +329,7 @@ public:
         }
 
         if (isa<ReturnInst>(I)) {
-          ResumeAfter = InlinedCalls.back();
-          InlinedCalls.pop_back();
-          if (call_stack > 0) {
-            call_stack -= 1;
-            if (call_stack == 0) {
-              ResumeAfter = NoInlineFunc;
-            }
-            continue;
-          }
-          // Replace the return variable of the call with its return value.
-          // Since the return value will have already been copied over to the
-          // JITModule, make sure we look up the copy.
-          auto OldRetVal = ((ReturnInst *)&*I)->getReturnValue();
-          if (OldRetVal != nullptr) {
-            assert(ResumeAfter.hasValue());
-            VMap[get<1>(ResumeAfter.getValue())] = getMappedValue(OldRetVal);
-          }
+          handleReturnInst(&*I);
           break;
         }
 
