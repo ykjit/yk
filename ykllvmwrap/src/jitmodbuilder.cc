@@ -96,7 +96,7 @@ class JITModBuilder {
   }
 
   void handleCallInst(CallInst *CI, Function *CF, size_t &CurInstrIdx) {
-    if ((StartTracingInstr != nullptr) && (CF->isDeclaration())) {
+    if (CF->isDeclaration()) {
       // The definition of the callee is external to AOTMod. We still
       // need to declare it locally if we have not done so yet.
       if (VMap[CF] == nullptr) {
@@ -105,18 +105,18 @@ class JITModBuilder {
                                                CF->getName(), JITMod);
         VMap[CF] = DeclFunc;
       }
-      copyInstruction(&Builder, (Instruction *)&*CI);
+      if (RecCallDepth == 0) {
+        copyInstruction(&Builder, (Instruction *)&*CI);
+      }
       // We should expect an "unmappable hole" in the trace. This is
-      // where the trace followed a call into external code for which be
+      // where the trace followed a call into external code for which we
       // have no IR, and thus we cannot map blocks for.
       ExpectUnmappable = true;
       ResumeAfter = make_tuple(CurInstrIdx, CI);
     } else {
-      StringRef CFName = CF->getName();
-      if (AOTMod->getFunction(CFName) != nullptr && RecCallDepth > 0) {
-        // When ignoring an inlined function, we need to count other
-        // inlined function calls so we know when we left the initial
-        // function call.
+      if (RecCallDepth > 0) {
+        // When outlining a recursive function, we need to count all other
+        // function calls so we know when we left the recusion.
         RecCallDepth += 1;
         InlinedCalls.push_back(make_tuple(CurInstrIdx, CI));
         return;
@@ -128,6 +128,7 @@ class JITModBuilder {
         // Have we inlined this call already? Then this is recursion.
         if (CInst->getCalledFunction() == CF) {
           if (VMap[CF] == nullptr) {
+            StringRef CFName = CF->getName();
             // Declare function.
             auto DeclFunc = llvm::Function::Create(CF->getFunctionType(),
                                                    GlobalValue::ExternalLinkage,
@@ -148,23 +149,20 @@ class JITModBuilder {
           break;
         }
       }
-      // Skip remainder of this block and remember where we stopped so we
-      // can continue from this position after returning from the inlined
-      // call.
-      if (StartTracingInstr != nullptr) {
-        InlinedCalls.push_back(make_tuple(CurInstrIdx, CI));
-        // During inlining, remap function arguments to the variables
-        // passed in by the caller.
-        if (RecCallDepth == 0) {
-          for (unsigned int i = 0; i < CI->arg_size(); i++) {
-            Value *Var = CI->getArgOperand(i);
-            Value *Arg = CF->getArg(i);
-            // If the operand has already been cloned into JITMod then we
-            // need to use the cloned value in the VMap.
-            if (VMap[Var] != nullptr)
-              Var = VMap[Var];
-            VMap[Arg] = Var;
-          }
+      // Skip remainder of this block and remember where we stopped so we can
+      // continue from this position after returning from the inlined call.
+      InlinedCalls.push_back(make_tuple(CurInstrIdx, CI));
+      if (RecCallDepth == 0) {
+        // During inlining, remap function arguments to the variables passed in
+        // by the caller.
+        for (unsigned int i = 0; i < CI->arg_size(); i++) {
+          Value *Var = CI->getArgOperand(i);
+          Value *Arg = CF->getArg(i);
+          // If the operand has already been cloned into JITMod then we
+          // need to use the cloned value in the VMap.
+          if (VMap[Var] != nullptr)
+            Var = VMap[Var];
+          VMap[Arg] = Var;
         }
       }
     }
@@ -324,7 +322,7 @@ public:
           } else if (CF->getName() == YKTRACE_STOP) {
             finalise(&Builder);
             return JITMod;
-          } else {
+          } else if (StartTracingInstr != nullptr) {
             handleCallInst(CI, CF, CurInstrIdx);
             break;
           }
