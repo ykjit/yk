@@ -95,6 +95,18 @@ class JITModBuilder {
     }
   }
 
+  // Returns true if the given function exists on the call stack, which means
+  // this is a recursive call.
+  bool isRecursiveCall(Function *F) {
+    for (auto Tup : InlinedCalls) {
+      CallInst *CInst = get<1>(Tup);
+      if (CInst->getCalledFunction() == F) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   void handleCallInst(CallInst *CI, Function *CF, size_t &CurInstrIdx) {
     if (CF->isDeclaration()) {
       // The definition of the callee is external to AOTMod. We still
@@ -123,31 +135,26 @@ class JITModBuilder {
       }
       // If this is a recursive call that has been inlined, remove the
       // inlined code and turn it into a normal call.
-      for (auto Tup : InlinedCalls) {
-        CallInst *CInst = get<1>(Tup);
-        // Have we inlined this call already? Then this is recursion.
-        if (CInst->getCalledFunction() == CF) {
-          if (VMap[CF] == nullptr) {
-            StringRef CFName = CF->getName();
-            // Declare function.
-            auto DeclFunc = llvm::Function::Create(CF->getFunctionType(),
-                                                   GlobalValue::ExternalLinkage,
-                                                   CFName, JITMod);
-            VMap[CF] = DeclFunc;
-            for (size_t i = 0; i < FAddrLen; i++) {
-              char *FName = FAddrKeys[i];
-              uint64_t FAddr = FAddrVals[i];
-              if (strcmp(FName, CFName.data()) == 0) {
-                globalMappings.insert(pair<StringRef, uint64_t>(CFName, FAddr));
-                break;
-              }
+      if (isRecursiveCall(CF)) {
+        if (VMap[CF] == nullptr) {
+          StringRef CFName = CF->getName();
+          // Declare function.
+          auto DeclFunc = llvm::Function::Create(CF->getFunctionType(),
+                                                 GlobalValue::ExternalLinkage,
+                                                 CFName, JITMod);
+          VMap[CF] = DeclFunc;
+          for (size_t i = 0; i < FAddrLen; i++) {
+            char *FName = FAddrKeys[i];
+            uint64_t FAddr = FAddrVals[i];
+            if (strcmp(FName, CFName.data()) == 0) {
+              globalMappings.insert(pair<StringRef, uint64_t>(CFName, FAddr));
+              break;
             }
           }
-          copyInstruction(&Builder, CI);
-          NoInlineFunc = make_tuple(CurInstrIdx, CI);
-          RecCallDepth = 1;
-          break;
         }
+        copyInstruction(&Builder, CI);
+        NoInlineFunc = make_tuple(CurInstrIdx, CI);
+        RecCallDepth = 1;
       }
       // Skip remainder of this block and remember where we stopped so we can
       // continue from this position after returning from the inlined call.
