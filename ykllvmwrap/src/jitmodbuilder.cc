@@ -165,6 +165,26 @@ class JITModBuilder {
     }
   }
 
+  Function *createJITFunc(vector<Value *> *TraceInputs) {
+    // Compute a name for the trace.
+    uint64_t TraceIdx = NextTraceIdx.fetch_add(1);
+    if (TraceIdx == numeric_limits<uint64_t>::max())
+      errx(EXIT_FAILURE, "trace index counter overflowed");
+    TraceName = string(TRACE_FUNC_PREFIX) + to_string(TraceIdx);
+
+    // Create the function.
+    std::vector<Type *> InputTypes;
+    for (auto Val : *TraceInputs)
+      InputTypes.push_back(Val->getType());
+    llvm::FunctionType *FType = llvm::FunctionType::get(
+        Type::getVoidTy(JITMod->getContext()), InputTypes, false);
+    llvm::Function *JITFunc = llvm::Function::Create(
+        FType, Function::InternalLinkage, TraceName, JITMod);
+    JITFunc->setCallingConv(CallingConv::C);
+
+    return JITFunc;
+  }
+
 public:
   // Store virtual addresses for called functions.
   std::map<StringRef, uint64_t> globalMappings;
@@ -195,22 +215,12 @@ public:
   // https://github.com/ykjit/yk/issues/385
   Module *createModule() {
     LLVMContext &JITContext = JITMod->getContext();
-    // Get var args from start_tracing call.
-    auto Inputs = getTraceInputs(AOTMod->getFunction(FuncNames[0]), BBs[0]);
+    // Find the trace inputs.
+    auto TraceInputs =
+        getTraceInputs(AOTMod->getFunction(FuncNames[0]), BBs[0]);
 
     // Create function to store compiled trace.
-    uint64_t TraceIdx = NextTraceIdx.fetch_add(1);
-    if (TraceIdx == numeric_limits<uint64_t>::max())
-      errx(EXIT_FAILURE, "trace index counter overflowed");
-    TraceName = string(TRACE_FUNC_PREFIX) + to_string(TraceIdx);
-    std::vector<Type *> InputTypes;
-    for (auto Val : Inputs)
-      InputTypes.push_back(Val->getType());
-    llvm::FunctionType *FType =
-        llvm::FunctionType::get(Type::getVoidTy(JITContext), InputTypes, false);
-    llvm::Function *JITFunc = llvm::Function::Create(
-        FType, Function::InternalLinkage, TraceName, JITMod);
-    JITFunc->setCallingConv(CallingConv::C);
+    Function *JITFunc = createJITFunc(&TraceInputs);
 
     // Create entry block and setup builder.
     auto DstBB = BasicBlock::Create(JITContext, "", JITFunc);
@@ -220,8 +230,8 @@ public:
     // tracing need to be replaced with function arguments which the user passes
     // into the compiled trace. This loop creates a mapping from those original
     // variables to the function arguments of the compiled trace function.
-    for (size_t Idx = 0; Idx != Inputs.size(); Idx++) {
-      Value *OldVal = Inputs[Idx];
+    for (size_t Idx = 0; Idx != TraceInputs.size(); Idx++) {
+      Value *OldVal = TraceInputs[Idx];
       Value *NewVal = JITFunc->getArg(Idx);
       assert(NewVal->getType()->isPointerTy());
       VMap[OldVal] = NewVal;
