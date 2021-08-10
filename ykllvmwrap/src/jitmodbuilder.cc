@@ -107,15 +107,21 @@ class JITModBuilder {
     return false;
   }
 
+  // Add an external declaration for the given function to JITMod.
+  void declareFunction(Function *F) {
+    assert(JITMod->getFunction(F->getName()) == nullptr);
+    auto DeclFunc = llvm::Function::Create(F->getFunctionType(),
+                                           GlobalValue::ExternalLinkage,
+                                           F->getName(), JITMod);
+    VMap[F] = DeclFunc;
+  }
+
   void handleCallInst(CallInst *CI, Function *CF, size_t &CurInstrIdx) {
     if (CF->isDeclaration()) {
       // The definition of the callee is external to AOTMod. We still
       // need to declare it locally if we have not done so yet.
       if (VMap[CF] == nullptr) {
-        auto DeclFunc = llvm::Function::Create(CF->getFunctionType(),
-                                               GlobalValue::ExternalLinkage,
-                                               CF->getName(), JITMod);
-        VMap[CF] = DeclFunc;
+        declareFunction(CF);
       }
       if (RecCallDepth == 0) {
         copyInstruction(&Builder, (Instruction *)&*CI);
@@ -138,11 +144,7 @@ class JITModBuilder {
       if (isRecursiveCall(CF)) {
         if (VMap[CF] == nullptr) {
           StringRef CFName = CF->getName();
-          // Declare function.
-          auto DeclFunc = llvm::Function::Create(CF->getFunctionType(),
-                                                 GlobalValue::ExternalLinkage,
-                                                 CFName, JITMod);
-          VMap[CF] = DeclFunc;
+          declareFunction(CF);
           for (size_t i = 0; i < FAddrLen; i++) {
             char *FName = FAddrKeys[i];
             uint64_t FAddr = FAddrVals[i];
