@@ -187,27 +187,25 @@ public:
     this->FAddrKeys = FAddrKeys;
     this->FAddrVals = FAddrVals;
     this->FAddrLen = FAddrLen;
+
+    JITMod = new Module("", AOTMod->getContext());
   }
 
   // FIXME: this function needs to be refactored.
   // https://github.com/ykjit/yk/issues/385
   Module *createModule() {
-    LLVMContext &JITContext = AOTMod->getContext();
-    JITMod = new Module("", JITContext);
-    uint64_t TraceIdx = NextTraceIdx.fetch_add(1);
-    if (TraceIdx == numeric_limits<uint64_t>::max())
-      errx(EXIT_FAILURE, "trace index counter overflowed");
-
+    LLVMContext &JITContext = JITMod->getContext();
     // Get var args from start_tracing call.
     auto Inputs = getTraceInputs(AOTMod->getFunction(FuncNames[0]), BBs[0]);
 
-    std::vector<Type *> InputTypes;
-    for (auto Val : Inputs) {
-      InputTypes.push_back(Val->getType());
-    }
-
     // Create function to store compiled trace.
+    uint64_t TraceIdx = NextTraceIdx.fetch_add(1);
+    if (TraceIdx == numeric_limits<uint64_t>::max())
+      errx(EXIT_FAILURE, "trace index counter overflowed");
     TraceName = string(TRACE_FUNC_PREFIX) + to_string(TraceIdx);
+    std::vector<Type *> InputTypes;
+    for (auto Val : Inputs)
+      InputTypes.push_back(Val->getType());
     llvm::FunctionType *FType =
         llvm::FunctionType::get(Type::getVoidTy(JITContext), InputTypes, false);
     llvm::Function *JITFunc = llvm::Function::Create(
