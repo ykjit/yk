@@ -66,9 +66,9 @@ class JITModBuilder {
   std::vector<tuple<size_t, CallInst *>> InlinedCalls;
   // Instruction at which to continue after an a call.
   Optional<tuple<size_t, CallInst *>> ResumeAfter;
-  // Depth of nested calls. Used to track recursion.
+  // Depth of nested calls when outlining a recursive function.
   // FIXME: can we kill this?
-  size_t call_stack = 0;
+  size_t RecCallDepth = 0;
   // Function currently being outlined.
   // FIXME: this should be an Optional?
   tuple<size_t, CallInst *> NoInlineFunc;
@@ -113,11 +113,11 @@ class JITModBuilder {
       ResumeAfter = make_tuple(CurInstrIdx, CI);
     } else {
       StringRef CFName = CF->getName();
-      if (AOTMod->getFunction(CFName) != nullptr && call_stack > 0) {
+      if (AOTMod->getFunction(CFName) != nullptr && RecCallDepth > 0) {
         // When ignoring an inlined function, we need to count other
         // inlined function calls so we know when we left the initial
         // function call.
-        call_stack += 1;
+        RecCallDepth += 1;
         InlinedCalls.push_back(make_tuple(CurInstrIdx, CI));
         return;
       }
@@ -144,7 +144,7 @@ class JITModBuilder {
           }
           copyInstruction(&Builder, CI);
           NoInlineFunc = make_tuple(CurInstrIdx, CI);
-          call_stack = 1;
+          RecCallDepth = 1;
           break;
         }
       }
@@ -155,7 +155,7 @@ class JITModBuilder {
         InlinedCalls.push_back(make_tuple(CurInstrIdx, CI));
         // During inlining, remap function arguments to the variables
         // passed in by the caller.
-        if (call_stack == 0) {
+        if (RecCallDepth == 0) {
           for (unsigned int i = 0; i < CI->arg_size(); i++) {
             Value *Var = CI->getArgOperand(i);
             Value *Arg = CF->getArg(i);
@@ -173,9 +173,9 @@ class JITModBuilder {
   void handleReturnInst(Instruction *I) {
     ResumeAfter = InlinedCalls.back();
     InlinedCalls.pop_back();
-    if (call_stack > 0) {
-      call_stack -= 1;
-      if (call_stack == 0) {
+    if (RecCallDepth > 0) {
+      RecCallDepth -= 1;
+      if (RecCallDepth == 0) {
         ResumeAfter = NoInlineFunc;
       }
       return;
@@ -345,7 +345,7 @@ public:
           break;
         }
 
-        if (call_stack > 0) {
+        if (RecCallDepth > 0) {
           // We are currently ignoring an inlined function.
           continue;
         }
