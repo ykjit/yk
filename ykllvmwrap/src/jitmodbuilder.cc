@@ -83,12 +83,11 @@ class JITModBuilder {
   size_t FAddrLen;
 
   Value *getMappedValue(Value *V) {
-    if (isa<Constant>(V)) {
-      return V;
-    } else {
-      auto NV = VMap[V];
-      return NV;
+    if (VMap.find(V) != VMap.end()) {
+      return VMap[V];
     }
+    assert(isa<Constant>(V));
+    return V;
   }
 
   // Returns true if the given function exists on the call stack, which means
@@ -171,9 +170,7 @@ class JITModBuilder {
         handleOperand(Var);
         // If the operand has already been cloned into JITMod then we
         // need to use the cloned value in the VMap.
-        if (VMap.find(Var) != VMap.end())
-          Var = VMap[Var];
-        VMap[Arg] = Var;
+        VMap[Arg] = getMappedValue(Var);
       }
     }
   }
@@ -398,11 +395,7 @@ public:
              CEOpIdx++) {
           Value *CEOp = CExpr->getOperand(CEOpIdx);
           handleOperand(CEOp);
-          if (VMap.find(CEOp) != VMap.end()) {
-            NewCEOps.push_back(cast<Constant>(VMap[CEOp]));
-          } else {
-            NewCEOps.push_back(cast<Constant>(CEOp));
-          }
+          NewCEOps.push_back(cast<Constant>(getMappedValue(CEOp)));
         }
         Constant *NewCExpr = CExpr->getWithOperands(NewCEOps);
         VMap[CExpr] = NewCExpr;
