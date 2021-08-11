@@ -5,6 +5,8 @@
 #endif
 
 #include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
+#include "llvm/IR/AssemblyAnnotationWriter.h"
+#include "llvm/Support/FormattedStream.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include <llvm/DebugInfo/Symbolize/Symbolize.h>
 #include <llvm/ExecutionEngine/ExecutionEngine.h>
@@ -35,6 +37,27 @@ using namespace llvm;
 using namespace llvm::orc;
 using namespace llvm::symbolize;
 using namespace std;
+
+// An annotator for `Module::print()` which adds debug location lines.
+class DebugAnnotationWriter : public AssemblyAnnotationWriter {
+  string LastLineInfo;
+
+public:
+  void emitInstructionAnnot(const Instruction *I, formatted_raw_ostream &OS) {
+    const DebugLoc &DL = I->getDebugLoc();
+    string LineInfo;
+    raw_string_ostream RSO(LineInfo);
+    DL.print(RSO);
+    if ((!LineInfo.empty()) && (LineInfo != LastLineInfo)) {
+      string FuncName = "<unknown-func>";
+      const MDNode *Scope = DL.getInlinedAtScope();
+      if (auto *SP = getDISubprogram(Scope))
+        FuncName.assign(SP->getName().data());
+      OS << "  ; " << FuncName << "() " << LineInfo << "\n";
+      LastLineInfo = LineInfo;
+    }
+  }
+};
 
 extern "C" void __ykutil_get_llvmbc_section(void **res_addr, size_t *res_size);
 
@@ -81,13 +104,12 @@ void dumpValueToString(Value *V, string &S) {
 enum DebugIR {
   AOT,
   JITPreOpt,
-  JITPreOptSBS,
   JITPostOpt,
 };
 
 class DebugIRPrinter {
 private:
-  bitset<4> toPrint;
+  bitset<3> toPrint;
 
   const char *debugIRStr(DebugIR IR) {
     switch (IR) {
@@ -95,8 +117,6 @@ private:
       return "aot";
     case DebugIR::JITPreOpt:
       return "jit-pre-opt";
-    case DebugIR::JITPreOptSBS:
-      return "jit-pre-opt-sbs";
     case DebugIR::JITPostOpt:
       return "jit-post-opt";
     default:
@@ -113,10 +133,6 @@ public:
         toPrint.set(DebugIR::AOT);
       else if (strcmp(Val, "jit-pre-opt") == 0)
         toPrint.set(DebugIR::JITPreOpt);
-#ifndef NDEBUG
-      else if (strcmp(Val, "jit-pre-opt-sbs") == 0)
-        toPrint.set(DebugIR::JITPreOptSBS);
-#endif
       else if (strcmp(Val, "jit-post-opt") == 0)
         toPrint.set(DebugIR::JITPostOpt);
       else
@@ -124,82 +140,13 @@ public:
     }
   }
 
-#ifndef NDEBUG
-  // Print a trace's instructions "side-by-side" with the instructions from
-  // which they were derived in the AOT module.
-  void printSBS(Module *AOTMod, Module *JITMod, ValueToValueMapTy &RevVMap) {
-    assert(JITMod->size() == 1);
-    Function *JITFunc = &*JITMod->begin();
-
-    // Find the longest instruction from the JITMod so that we can align the
-    // second column.
-    size_t LongestJITLine = 0;
-    for (auto &JITBlock : *JITFunc) {
-      for (auto &JITInst : JITBlock) {
-        string Line;
-        dumpValueToString(&JITInst, Line);
-        auto Len = Line.length();
-        if (Len > LongestJITLine)
-          LongestJITLine = Len;
-      }
-    }
-
-    const string JITHeader = string("Trace");
-    string Padding = string(LongestJITLine - JITHeader.length(), ' ');
-    errs() << "\n\n--- Begin trace dump for " << JITFunc->getName() << " ---\n";
-    errs() << JITHeader << Padding << "  | AOT\n";
-
-    // Keep track of the AOT function we are currently in so that we can print
-    // inlined function thresholds in the dumped trace.
-    StringRef LastAOTFunc;
-    for (auto &JITBlock : *JITFunc) {
-      for (auto &JITInst : JITBlock) {
-        auto V = RevVMap[&JITInst];
-        if (V == nullptr) {
-          // The instruction wasn't cloned from the AOTMod, so print it only in
-          // the JIT column and carry on.
-          std::string Line;
-          dumpValueToString((Value *)&JITInst, Line);
-          errs() << Line << "\n";
-          continue;
-        }
-        Instruction *AOTInst = (Instruction *)&*V;
-        assert(AOTInst != nullptr);
-        Function *AOTFunc = AOTInst->getFunction();
-        assert(AOTFunc != nullptr);
-        StringRef AOTFuncName = AOTFunc->getName();
-        if (AOTFuncName != LastAOTFunc) {
-          // Print an inlining threshold.
-          errs() << "# " << AOTFuncName << "()\n";
-          LastAOTFunc = AOTFuncName;
-        }
-        string JITStr;
-        dumpValueToString((Value *)&JITInst, JITStr);
-        string Padding = string(LongestJITLine - JITStr.length(), ' ');
-        string AOTStr;
-        dumpValueToString((Value *)AOTInst, AOTStr);
-        errs() << JITStr << Padding << "  |  " << AOTStr << "\n";
-      }
-    }
-    errs() << "--- End trace dump for " << JITFunc->getName() << " ---\n";
-  }
-#endif
-
-  void print(enum DebugIR IR, Module *M, Module *SBSAOTMod = nullptr,
-             ValueToValueMapTy *SBSRevVMap = nullptr) {
+  void print(enum DebugIR IR, Module *M) {
     if (toPrint[IR]) {
-      if (IR == DebugIR::JITPreOptSBS) {
-#ifndef NDEBUG
-        printSBS(SBSAOTMod, M, *SBSRevVMap);
-#endif
-      } else {
-        // We print begin/end markers so that we can more test the IR at
-        // specific stages in the JIT pipeline (by anchoring matches to the
-        // begin/end markers).
-        errs() << "--- Begin " << DebugIRPrinter::debugIRStr(IR) << " ---\n";
-        M->dump();
-        errs() << "--- End " << DebugIRPrinter::debugIRStr(IR) << " ---\n";
-      }
+      string PrintMode = debugIRStr(IR);
+      errs() << "--- Begin " << PrintMode << " ---\n";
+      DebugAnnotationWriter DAW;
+      M->print(errs(), &DAW);
+      errs() << "--- End " << PrintMode << " ---\n";
     }
   }
 };
@@ -321,7 +268,6 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
   DIP.print(DebugIR::JITPreOpt, JITMod);
 #ifndef NDEBUG
   llvm::verifyModule(*JITMod, &llvm::errs());
-  DIP.print(DebugIR::JITPreOptSBS, JITMod, AOTMod, &JB.RevVMap);
 #endif
 
   // The MCJIT code-gen does no optimisations itself, so we must do it

@@ -58,10 +58,24 @@ fn mk_compiler(exe: &Path, src: &Path, opt: &str) -> Command {
 fn run_suite(opt: &'static str) {
     println!("Running C tests with {}...", opt);
 
+    // Tests with the filename prefix `debug_` are only run in debug builds.
+    #[cfg(cargo_profile = "release")]
+    let filter: fn(&Path) -> bool = |p| {
+        p.extension().unwrap().to_str().unwrap() == "c"
+            && !p
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("debug_")
+    };
+    #[cfg(cargo_profile = "debug")]
+    let filter: fn(&Path) -> bool = |p| p.extension().unwrap().to_str().unwrap() == "c";
+
     let tempdir = TempDir::new().unwrap();
     LangTester::new()
         .test_dir("tests")
-        .test_file_filter(|p| p.extension().unwrap().to_str().unwrap() == "c")
+        .test_file_filter(filter)
         .test_extract(move |p| {
             let altp = p.with_extension(format!("c.{}", opt.strip_prefix("-").unwrap()));
             let p = if altp.exists() { altp.as_path() } else { p };

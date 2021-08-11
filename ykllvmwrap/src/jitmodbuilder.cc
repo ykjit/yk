@@ -1,5 +1,7 @@
 // Classes and functions for constructing a new LLVM module from a trace.
 
+#include "llvm/IR/DebugInfo.h"
+
 using namespace llvm;
 using namespace std;
 
@@ -240,10 +242,6 @@ public:
   string TraceName;
   // Mapping from AOT instructions to JIT instructions.
   ValueToValueMapTy VMap;
-#ifndef NDEBUG
-  // Reverse mapping for debugging.
-  ValueToValueMapTy RevVMap;
-#endif
 
   JITModBuilder(Module *AOTMod, char *FuncNames[], size_t BBs[], size_t Len,
                 char *FAddrKeys[], uint64_t FAddrVals[], size_t FAddrLen)
@@ -325,7 +323,7 @@ public:
             StartTracingInstr = &*CI;
             continue;
           } else if (CF->getName() == YKTRACE_STOP) {
-            finalise(&Builder);
+            finalise(AOTMod, &Builder);
             return JITMod;
           } else if (StartTracingInstr != nullptr) {
             handleCallInst(CI, CF, CurInstrIdx);
@@ -428,29 +426,18 @@ public:
     // cloning the instruction.
     auto NewInst = &*I->clone();
 
-    // FIXME: For now we strip debugging meta-data from the JIT module just
-    // so that the module will verify and compile. In the long run we should
-    // include the debug info for the trace code. This would entail copying
-    // over the various module-level debugging declarations that are
-    // dependencies of instructions with !dbg meta-data attached.
-    if (NewInst->hasMetadata()) {
-      SmallVector<std::pair<unsigned, MDNode *>> InstrMD;
-      NewInst->getAllMetadata(InstrMD);
-      for (auto &MD : InstrMD) {
-        if (MD.first != LLVMContext::MD_dbg)
-          continue;
-        NewInst->setMetadata(MD.first, NULL);
-      }
-    }
-
     // Since the instruction operands still reference values from the AOT
     // module, we must remap them to point to new values in the JIT module.
     llvm::RemapInstruction(NewInst, VMap, RF_NoModuleLevelChanges);
     VMap[&*I] = NewInst;
 
-#ifndef NDEBUG
-    RevVMap[NewInst] = &*I;
-#endif
+    // Copy over any debugging metadata required by the instruction.
+    llvm::SmallVector<std::pair<unsigned, llvm::MDNode *>, 1> metadataList;
+    I->getAllMetadata(metadataList);
+    for (auto MD : metadataList) {
+      NewInst->setMetadata(
+          MD.first, MapMetadata(MD.second, VMap, llvm::RF_MoveDistinctMDs));
+    }
 
     // And finally insert the new instruction into the JIT module.
     Builder->Insert(NewInst);
@@ -458,7 +445,7 @@ public:
 
   // Finalise the JITModule by adding a return instruction and initialising
   // global variables.
-  void finalise(IRBuilder<> *Builder) {
+  void finalise(Module *AOTMod, IRBuilder<> *Builder) {
     Builder->CreateRetVoid();
 
     // Fix initialisers/referrers for copied global variables.
@@ -470,6 +457,21 @@ public:
 
       if (G->hasInitializer())
         NewGV->setInitializer(MapValue(G->getInitializer(), VMap));
+    }
+
+    // Ensure that the JITModule has a `!llvm.dbg.cu`.
+    // This code is borrowed from LLVM's `cloneFunction()` implementation.
+    // OPT: Is there a faster way than scanning the whole module?
+    DebugInfoFinder DIFinder;
+    DIFinder.processModule(*AOTMod);
+    if (DIFinder.compile_unit_count()) {
+      auto *NMD = JITMod->getOrInsertNamedMetadata("llvm.dbg.cu");
+      SmallPtrSet<const void *, 8> Visited;
+      for (auto *Operand : NMD->operands())
+        Visited.insert(Operand);
+      for (auto *Unit : DIFinder.compile_units())
+        if (Visited.insert(Unit).second)
+          NMD->addOperand(Unit);
     }
   }
 };
