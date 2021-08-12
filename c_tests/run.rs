@@ -1,7 +1,10 @@
 use lang_tester::LangTester;
+use once_cell::sync::Lazy;
 use std::{
+    collections::HashMap,
     env,
     fs::read_to_string,
+    io::{self, Write},
     path::{Path, PathBuf},
     process::Command,
 };
@@ -9,8 +12,66 @@ use tempfile::TempDir;
 
 const COMMENT: &str = "//";
 
+const TEMPDIR_SUBST: &'static str = "%%TEMPDIR%%";
+static EXTRA_LINK: Lazy<HashMap<&'static str, Vec<ExtraLinkage>>> = Lazy::new(|| {
+    let mut map = HashMap::new();
+    map.insert(
+        "call_ext_in_obj.c",
+        vec![ExtraLinkage::new(
+            "%%TEMPDIR%%/call_me.o",
+            &[
+                "clang",
+                "-c",
+                "-O0",
+                "extra_linkage/call_me.c",
+                "-o",
+                "%%TEMPDIR%%/call_me.o",
+            ],
+        )],
+    );
+    map
+});
+
+/// Describes an extra object file to link to a C test.
+struct ExtraLinkage<'a> {
+    /// The name of the object file to be generated.
+    output_file: &'a str,
+    /// The command that generates the object file.
+    gen_cmd: &'a [&'a str],
+}
+
+impl<'a> ExtraLinkage<'a> {
+    fn new(output_file: &'a str, gen_cmd: &'a [&'a str]) -> Self {
+        Self {
+            output_file,
+            gen_cmd,
+        }
+    }
+
+    /// Run the command to generate the object in `tempdir` and return the absolute path to the
+    /// generated object.
+    fn generate_obj(&self, tempdir: &Path) -> PathBuf {
+        let mut cmd = Command::new(self.gen_cmd[0]);
+        let tempdir_s = tempdir.to_str().unwrap();
+        for arg in self.gen_cmd[1..].iter() {
+            cmd.arg(arg.replace(TEMPDIR_SUBST, tempdir_s));
+        }
+        let out = cmd.output().unwrap();
+        assert!(tempdir.exists());
+        if !out.status.success() {
+            io::stdout().write_all(&out.stdout).unwrap();
+            io::stderr().write_all(&out.stderr).unwrap();
+            panic!();
+        }
+        let mut ret = PathBuf::from(tempdir);
+        ret.push(&self.output_file.replace(TEMPDIR_SUBST, tempdir_s));
+        ret
+    }
+}
+
 /// Make a compiler command that compiles `src` to `exe` using the optimisation flag `opt`.
-fn mk_compiler(exe: &Path, src: &Path, opt: &str) -> Command {
+/// `extra_objs` is a collection of other object files to link.
+fn mk_compiler(exe: &Path, src: &Path, opt: &str, extra_objs: &[PathBuf]) -> Command {
     let mut compiler = Command::new("clang");
     compiler.env("YKD_PRINT_IR", "1");
 
@@ -52,6 +113,7 @@ fn mk_compiler(exe: &Path, src: &Path, opt: &str) -> Command {
         exe.to_str().unwrap(),
         src.to_str().unwrap(),
     ]);
+    compiler.args(extra_objs);
     compiler
 }
 
@@ -92,7 +154,17 @@ fn run_suite(opt: &'static str) {
             let mut exe = PathBuf::new();
             exe.push(&tempdir);
             exe.push(p.file_stem().unwrap());
-            let compiler = mk_compiler(&exe, p, opt);
+
+            // Decide if we have extra objects to link to the test.
+            let key = p.file_name().unwrap().to_str().unwrap();
+            let extra_objs = EXTRA_LINK
+                .get(key)
+                .unwrap_or(&Vec::new())
+                .iter()
+                .map(|l| l.generate_obj(tempdir.path()))
+                .collect::<Vec<PathBuf>>();
+
+            let compiler = mk_compiler(&exe, p, opt, &extra_objs);
             let runtime = Command::new(exe.clone());
             vec![("Compiler", compiler), ("Run-time", runtime)]
         })
