@@ -1,12 +1,5 @@
 // Compiler:
 // Run-time:
-//   env-var: YKD_PRINT_IR=jit-pre-opt
-//   stderr:
-//     ...
-//     ...call i32 @call_me(...
-//     ...
-//     declare i32 @call_me(i32)
-//     ...
 
 // Check that we can call a static function with internal linkage from the same
 // compilation unit.
@@ -28,8 +21,11 @@ static int call_me(int x) {
 
 int main(int argc, char **argv) {
   int res = 0;
-  void *tt = __yktrace_start_tracing(HW_TRACING, &res);
+  void *tt = __yktrace_start_tracing(HW_TRACING, &res, &argc);
   NOOPT_VAL(argc);
+  // At higher optimisation levels LLVM realises that this call can be
+  // completely removed. Hence we only structurally test a couple of lower opt
+  // levels.
   res = call_me(argc);
   NOOPT_VAL(res);
   void *tr = __yktrace_stop_tracing(tt);
@@ -37,9 +33,9 @@ int main(int argc, char **argv) {
 
   void *ptr = __yktrace_irtrace_compile(tr);
   __yktrace_drop_irtrace(tr);
-  void (*func)(int *) = (void (*)(int *))ptr;
+  void (*func)(int *, int *) = (void (*)(int *, int *))ptr;
   int res2 = 0;
-  func(&res2);
+  func(&res2, &argc);
   assert(res2 == 5);
 
   return (EXIT_SUCCESS);

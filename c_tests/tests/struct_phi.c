@@ -1,3 +1,4 @@
+// ignore: https://github.com/ykjit/yk/issues/409
 // Compiler:
 // Run-time:
 //   env-var: YKD_PRINT_IR=aot
