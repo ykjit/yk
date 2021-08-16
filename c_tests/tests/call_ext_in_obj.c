@@ -1,12 +1,6 @@
+// ignore: https://github.com/ykjit/yk/issues/409
 // Compiler:
 // Run-time:
-//   env-var: YKD_PRINT_IR=jit-pre-opt
-//   stderr:
-//     ...
-//     ...call i32 @call_me(...
-//     ...
-//     declare i32 @call_me(i32)
-//     ...
 
 // Check that we can call a function without IR from another object (.o) file.
 
