@@ -335,7 +335,8 @@ public:
         if (StartTracingInstr == nullptr)
           continue;
 
-        if ((isa<llvm::BranchInst>(I)) || isa<SwitchInst>(I)) {
+        if ((isa<BranchInst>(I)) || isa<SwitchInst>(I) ||
+            isa<IndirectBrInst>(I)) {
           // FIXME Replace all potential CFG divergence with guards.
           continue;
         }
