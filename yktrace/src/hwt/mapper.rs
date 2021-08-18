@@ -212,6 +212,17 @@ impl HWTMapper {
         let block_vaddr = block.first_instr();
         let (obj_name, block_off) = code_vaddr_to_off(block_vaddr as usize).unwrap();
 
+        // Currently we only read in a block map and IR for the currently running binary (and not
+        // for dynamically linked shared objects). Thus, if we see code from another object, we
+        // can't map it.
+        //
+        // FIXME: https://github.com/ykjit/yk/issues/413
+        // In the future we could inline code from shared objects if they were built for use with
+        // yk (i.e. they have a blockmap and IR embedded).
+        if obj_name != env::current_exe().unwrap() {
+            return Vec::new();
+        }
+
         // The HW mapper gives us the start address of the last instruction in a block, which gives
         // us an exclusive upper bound when the interval tree expects an inclusive upper bound.
         // This is a problem when the last block in our sequence has a single 1 byte instruction:
