@@ -234,6 +234,45 @@ class JITModBuilder {
     }
   }
 
+  // Delete the value `V` from its parent, also deleting any dependencies of
+  // `V` (i.e. operands) which then become dead.
+  void deleteDeadTransitive(Value *V) {
+    vector<Value *> Work;
+    Work.push_back(V);
+    while (!Work.empty()) {
+      Value *V = Work.back();
+      Work.pop_back();
+      // Remove `V` (an instruction or a global variable) from its parent
+      // container. If any of the operands of `V` have a sole use, then they
+      // will become dead and can also be deleted too.
+      if (isa<Instruction>(V)) {
+        Instruction *I = cast<Instruction>(V);
+        for (auto &Op : I->operands()) {
+          if (Op->hasOneUser()) {
+            Work.push_back(&*Op);
+          }
+        }
+        I->eraseFromParent();
+      } else if (isa<GlobalVariable>(V)) {
+        GlobalVariable *G = cast<GlobalVariable>(V);
+        for (auto &Op : G->operands()) {
+          if (Op->hasOneUser()) {
+            Work.push_back(&*Op);
+          }
+        }
+        // Be sure to remove this global variable from `cloned_globals` too, so
+        // that we don't try to add an initialiser later in `finalise()`.
+        erase_if(cloned_globals, [G, this](GlobalVariable *CG) {
+          assert(VMap.find(CG) != VMap.end());
+          return G == VMap[CG];
+        });
+        G->eraseFromParent();
+      } else {
+        dumpValueAndExit("Unexpected Value", V);
+      }
+    }
+  }
+
 public:
   // Store virtual addresses for called functions.
   std::map<StringRef, uint64_t> globalMappings;
@@ -335,7 +374,23 @@ public:
         if (StartTracingInstr == nullptr)
           continue;
 
-        if ((isa<llvm::BranchInst>(I)) || isa<SwitchInst>(I)) {
+        if (isa<IndirectBrInst>(I)) {
+          // FIXME Replace all potential CFG divergence with guards.
+          //
+          // It isn't necessary to copy the indirect branch into the `JITMod`
+          // as the successor block is known from the trace. However, naively
+          // not copying the branch would lead to dangling references in the IR
+          // because the `address` operand typically (indirectly) references
+          // AOT block addresses not present in the `JITMod`. Therefore we also
+          // remove the IR instruction which defines the `address` operand and
+          // anything which also becomes dead as a result (recursively).
+          Value *FirstOp = I->getOperand(0);
+          assert(VMap.find(FirstOp) != VMap.end());
+          deleteDeadTransitive(VMap[FirstOp]);
+          continue;
+        }
+
+        if ((isa<BranchInst>(I)) || isa<SwitchInst>(I)) {
           // FIXME Replace all potential CFG divergence with guards.
           continue;
         }
