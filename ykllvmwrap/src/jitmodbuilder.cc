@@ -362,6 +362,9 @@ public:
           CallInst *CI = cast<CallInst>(I);
           Function *CF = CI->getCalledFunction();
           if (CF == nullptr) {
+            if (StartTracingInstr == nullptr) {
+              continue;
+            }
             // The target isn't statically known, so we can't inline the
             // callee.
             if (!isa<InlineAsm>(CI->getCalledOperand())) {
