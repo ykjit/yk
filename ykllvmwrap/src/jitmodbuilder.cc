@@ -133,10 +133,10 @@ class JITModBuilder {
   }
 
   void handleCallInst(CallInst *CI, Function *CF, size_t &CurInstrIdx) {
-    if (CF->isDeclaration()) {
+    if (CF == nullptr || CF->isDeclaration()) {
       // The definition of the callee is external to AOTMod. We still
       // need to declare it locally if we have not done so yet.
-      if (VMap.find(CF) == VMap.end()) {
+      if (CF != nullptr && VMap.find(CF) == VMap.end()) {
         declareFunction(CF);
       }
       if (RecCallDepth == 0) {
@@ -370,15 +370,9 @@ public:
               assert(Idx + 1 < this->Len);
               auto IndirectFunc = FuncNames[Idx + 1];
               CF = AOTMod->getFunction(IndirectFunc);
-              if (CF != nullptr) {
-                handleCallInst(CI, CF, CurInstrIdx);
-                break;
-              } else {
-                ExpectUnmappable = true;
-                ResumeAfter = make_tuple(CurInstrIdx, CI);
-                copyInstruction(&Builder, (Instruction *)&*I);
-                break;
-              }
+              // FIXME Don't inline indirect calls unless promoted.
+              handleCallInst(CI, CF, CurInstrIdx);
+              break;
             }
           } else if (CF->getName() == YKTRACE_START) {
             StartTracingInstr = &*CI;
