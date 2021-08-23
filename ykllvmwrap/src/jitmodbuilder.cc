@@ -74,6 +74,11 @@ class JITModBuilder {
   bool ExpectUnmappable = false;
   // The JITMod's builder.
   llvm::IRBuilder<> Builder;
+  // Dead values to recursively delete upon finalisation of the JITMod. This is
+  // required because it's not safe to recursively delete values in the middle
+  // of creating the JIT module. We don't know if any of those values might be
+  // required later in the trace.
+  vector<Value *> DeleteDeadOnFinalise;
 
   // Information about the trace we are compiling.
   // FIXME: These should be grouped into structs.
@@ -234,9 +239,10 @@ class JITModBuilder {
     }
   }
 
-  // Delete the value `V` from its parent, also deleting any dependencies of
-  // `V` (i.e. operands) which then become dead.
+  // Delete the dead value `V` from its parent, also deleting any dependencies
+  // of `V` (i.e. operands) which then become dead.
   void deleteDeadTransitive(Value *V) {
+    assert(V->user_empty()); // The value should be dead.
     vector<Value *> Work;
     Work.push_back(V);
     while (!Work.empty()) {
@@ -386,7 +392,7 @@ public:
           // anything which also becomes dead as a result (recursively).
           Value *FirstOp = I->getOperand(0);
           assert(VMap.find(FirstOp) != VMap.end());
-          deleteDeadTransitive(VMap[FirstOp]);
+          DeleteDeadOnFinalise.push_back(VMap[FirstOp]);
           continue;
         }
 
@@ -519,6 +525,12 @@ public:
   // global variables.
   void finalise(Module *AOTMod, IRBuilder<> *Builder) {
     Builder->CreateRetVoid();
+
+    // Now that we've seen all possible uses of values in the JITMod, we can
+    // delete the values we've marked dead (and possibly their dependencies if
+    // they too turn out to be dead).
+    for (auto &V : DeleteDeadOnFinalise)
+      deleteDeadTransitive(V);
 
     // Fix initialisers/referrers for copied global variables.
     // FIXME Do we also need to copy Linkage, MetaData, Comdat?

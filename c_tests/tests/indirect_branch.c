@@ -17,30 +17,35 @@
 int main(int argc, char **argv) {
   // Note that LLVM knows that `l1` is dead code because `argc` is always >0.
   void *dispatch[] = {&&l1, &&l2, &&l3};
-  int z = 0;
+  int z = 0, idx = argc;
 
-  void *tt = __yktrace_start_tracing(HW_TRACING, &z, &argc);
-  NOOPT_VAL(argc);
-  goto *dispatch[argc];
+  void *tt = __yktrace_start_tracing(HW_TRACING, &z, &idx);
+  NOOPT_VAL(idx);
+
+  // Now jump to l2 and then l3 via computed gotos.
+  goto *dispatch[idx];
 l1:
-  z = 7;
-  goto done;
+  // unreachable.
+  exit(EXIT_FAILURE);
 l2:
-  z = 20;
-  goto done;
+  z += 1;
+  idx += 1;
+  goto *dispatch[idx];
 l3:
-  z = 33;
-done:
+  z += 2;
+
   NOOPT_VAL(z);
   void *tr = __yktrace_stop_tracing(tt);
-  assert(z == 20);
+  printf("ZZZ %d\n", z);
+  assert(z == 3);
 
   void *ptr = __yktrace_irtrace_compile(tr);
   __yktrace_drop_irtrace(tr);
   void (*func)(int *, int *) = (void (*)(int *, int *))ptr;
   int z2 = 0;
-  func(&z2, &argc);
-  assert(z2 == 20);
+  int idx2 = argc;
+  func(&z2, &idx2);
+  assert(z2 == 3);
 
   return (EXIT_SUCCESS);
 }
