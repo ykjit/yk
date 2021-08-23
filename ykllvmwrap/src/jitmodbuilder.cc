@@ -384,8 +384,15 @@ public:
             finalise(AOTMod, &Builder);
             return JITMod;
           } else if (StartTracingInstr != nullptr) {
-            handleCallInst(CI, CF, CurInstrIdx);
-            break;
+            if (CF->isIntrinsic()) {
+              // The function call is to an intrinsic, whose code will be
+              // inlined and thus it does not produce any callee blocks.
+              copyInstruction(&Builder, (Instruction *)&*I);
+              continue;
+            } else {
+              handleCallInst(CI, CF, CurInstrIdx);
+              break;
+            }
           }
         }
 
