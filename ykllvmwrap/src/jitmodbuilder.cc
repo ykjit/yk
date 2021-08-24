@@ -352,8 +352,7 @@ public:
     JITMod = new Module("", AOTMod->getContext());
   }
 
-  // FIXME: this function needs to be refactored.
-  // https://github.com/ykjit/yk/issues/385
+  // Generate the JIT module.
   Module *createModule() {
     LLVMContext &JITContext = JITMod->getContext();
     // Find the trace inputs.
