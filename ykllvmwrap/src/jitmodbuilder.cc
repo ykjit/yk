@@ -24,12 +24,65 @@ void dumpValueAndExit(const char *Msg, Value *V) {
   exit(EXIT_FAILURE);
 }
 
-std::vector<Value *> getTraceInputs(Function *F, uintptr_t BBIdx) {
+// A function name and basic block index pair that identifies a block in the
+// AOT LLVM IR.
+struct IRBlock {
+  // A non-null pointer to the function name.
+  char *FuncName;
+  // The index of the block in the parent LLVM function.
+  size_t BBIdx;
+};
+
+// Describes the software or hardware trace to be compiled using LLVM.
+class InputTrace {
+private:
+  // An ordered array of function names. Each non-null element describes the
+  // function part of a (function, block) pair that identifies an LLVM
+  // BasicBlock. A null element represents unmappable code in the trace.
+  char **FuncNames;
+  // An ordered array of basic block indices. Each element corresponds with
+  // an element (at the same index) in the above `FuncNames` array to make a
+  // (function, block) pair that identifies an LLVM BasicBlock.
+  size_t *BBs;
+  // The length of the `FuncNames` and `BBs` arrays.
+  size_t Len;
+
+public:
+  InputTrace(char **FuncNames, size_t *BBs, size_t Len)
+      : FuncNames(FuncNames), BBs(BBs), Len(Len) {}
+  size_t Length() { return Len; }
+
+  // Returns the optional IRBlock at index `Idx` in the trace. No value is
+  // returned if element at `Idx` was unmappable. It is undefined behaviour to
+  // invoke this method with an out-of-bounds `Idx`.
+  const Optional<IRBlock> operator[](size_t Idx) {
+    assert(Idx < Len);
+    char *FuncName = FuncNames[Idx];
+    if (FuncName == nullptr) {
+      return Optional<IRBlock>();
+    } else {
+      return Optional<IRBlock>(IRBlock{FuncName, BBs[Idx]});
+    }
+  }
+
+  // The same as `operator[]`, but for scenarios where you are certain that the
+  // element at position `Idx` cannot be unmappable.
+  const IRBlock getUnchecked(size_t Idx) {
+    assert(Idx < Len);
+    char *FuncName = FuncNames[Idx];
+    assert(FuncName != nullptr);
+    return IRBlock{FuncName, BBs[Idx]};
+  }
+};
+
+std::vector<Value *> getTraceInputs(Module *AOTMod, InputTrace &InpTrace) {
   std::vector<Value *> Vec;
+  IRBlock FirstBlock = InpTrace.getUnchecked(0);
+  Function *F = AOTMod->getFunction(FirstBlock.FuncName);
   auto It = F->begin();
   // Skip to the first block in the trace which contains the `start_tracing`
   // call.
-  std::advance(It, BBIdx);
+  std::advance(It, FirstBlock.BBIdx);
   BasicBlock *BB = &*It;
   bool found = false;
   for (auto I = BB->begin(); I != BB->end(); I++) {
@@ -82,9 +135,7 @@ class JITModBuilder {
 
   // Information about the trace we are compiling.
   // FIXME: These should be grouped into structs.
-  char **FuncNames;
-  size_t *BBs;
-  size_t Len;
+  InputTrace InpTrace;
   char **FAddrKeys;
   uint64_t *FAddrVals;
   size_t FAddrLen;
@@ -199,10 +250,11 @@ class JITModBuilder {
     }
   }
 
+  // FIXME: https://github.com/ykjit/yk/issues/394
   void handlePHINode(Instruction *I, Function *F, size_t Idx) {
     assert(Idx > 0);
     auto LBIt = F->begin();
-    std::advance(LBIt, BBs[Idx - 1]);
+    std::advance(LBIt, InpTrace.getUnchecked(Idx - 1).BBIdx);
     BasicBlock *LastBlock = &*LBIt;
     Value *V = ((PHINode *)&*I)->getIncomingValueForBlock(LastBlock);
     VMap[&*I] = getMappedValue(V);
@@ -287,13 +339,12 @@ public:
   // Mapping from AOT instructions to JIT instructions.
   ValueToValueMapTy VMap;
 
-  JITModBuilder(Module *AOTMod, char *FuncNames[], size_t BBs[], size_t Len,
-                char *FAddrKeys[], uint64_t FAddrVals[], size_t FAddrLen)
-      : Builder(AOTMod->getContext()) {
+  // OPT: https://github.com/ykjit/yk/issues/419
+  JITModBuilder(Module *AOTMod, char *FuncNames[], size_t BBs[],
+                size_t TraceLen, char *FAddrKeys[], uint64_t FAddrVals[],
+                size_t FAddrLen)
+      : Builder(AOTMod->getContext()), InpTrace(FuncNames, BBs, TraceLen) {
     this->AOTMod = AOTMod;
-    this->FuncNames = FuncNames;
-    this->BBs = BBs;
-    this->Len = Len;
     this->FAddrKeys = FAddrKeys;
     this->FAddrVals = FAddrVals;
     this->FAddrLen = FAddrLen;
@@ -301,13 +352,11 @@ public:
     JITMod = new Module("", AOTMod->getContext());
   }
 
-  // FIXME: this function needs to be refactored.
-  // https://github.com/ykjit/yk/issues/385
+  // Generate the JIT module.
   Module *createModule() {
     LLVMContext &JITContext = JITMod->getContext();
     // Find the trace inputs.
-    auto TraceInputs =
-        getTraceInputs(AOTMod->getFunction(FuncNames[0]), BBs[0]);
+    vector<Value *> TraceInputs = getTraceInputs(AOTMod, InpTrace);
 
     // Create function to store compiled trace.
     Function *JITFunc = createJITFunc(&TraceInputs);
@@ -320,23 +369,23 @@ public:
     Builder.SetInsertPoint(DstBB);
 
     // Iterate over the trace and stitch together all traced blocks.
-    for (size_t Idx = 0; Idx < Len; Idx++) {
-      auto FuncName = FuncNames[Idx];
-
-      if (ExpectUnmappable && (FuncName == nullptr)) {
+    for (size_t Idx = 0; Idx < InpTrace.Length(); Idx++) {
+      Optional<IRBlock> MaybeIB = InpTrace[Idx];
+      if (ExpectUnmappable && !MaybeIB.hasValue()) {
         ExpectUnmappable = false;
         continue;
       }
-      assert(FuncName != nullptr);
+      assert(MaybeIB.hasValue());
+      IRBlock IB = MaybeIB.getValue();
 
       // Get a traced function so we can extract blocks from it.
-      Function *F = AOTMod->getFunction(FuncName);
+      Function *F = AOTMod->getFunction(IB.FuncName);
       if (!F)
-        errx(EXIT_FAILURE, "can't find function %s", FuncName);
+        errx(EXIT_FAILURE, "can't find function %s", IB.FuncName);
 
       // Skip to the correct block.
       auto It = F->begin();
-      std::advance(It, BBs[Idx]);
+      std::advance(It, IB.BBIdx);
       BasicBlock *BB = &*It;
 
       // Iterate over all instructions within this block and copy them over
@@ -370,9 +419,12 @@ public:
             if (!isa<InlineAsm>(CI->getCalledOperand())) {
               // Look ahead in the trace to find the callee so we can
               // map the arguments if we are inlining the call.
-              assert(Idx + 1 < this->Len);
-              auto IndirectFunc = FuncNames[Idx + 1];
-              CF = AOTMod->getFunction(IndirectFunc);
+              Optional<IRBlock> MaybeNextIB = InpTrace[Idx + 1];
+              if (MaybeNextIB.hasValue()) {
+                CF = AOTMod->getFunction(MaybeNextIB.getValue().FuncName);
+              } else {
+                CF = nullptr;
+              }
               // FIXME Don't inline indirect calls unless promoted.
               handleCallInst(CI, CF, CurInstrIdx);
               break;
