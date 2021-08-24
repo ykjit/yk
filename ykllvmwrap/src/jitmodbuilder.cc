@@ -250,6 +250,7 @@ class JITModBuilder {
     }
   }
 
+  // FIXME: https://github.com/ykjit/yk/issues/394
   void handlePHINode(Instruction *I, Function *F, size_t Idx) {
     assert(Idx > 0);
     auto LBIt = F->begin();
