@@ -68,8 +68,9 @@ impl IRBlock {
 
 /// An LLVM IR trace.
 pub struct IRTrace {
-    // The blocks of the trace.
+    /// The blocks of the trace.
     blocks: Vec<IRBlock>,
+    /// Function addresses discovered dynamically via the trace. symbol-name -> address.
     faddrs: HashMap<CString, u64>,
 }
 
