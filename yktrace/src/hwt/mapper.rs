@@ -4,6 +4,7 @@ use crate::IRBlock;
 use byteorder::{NativeEndian, ReadBytesExt};
 use hwtracer::{HWTracerError, Trace};
 use intervaltree::{self, IntervalTree};
+use libc::c_void;
 use memmap2;
 use object::{Object, ObjectSection};
 use once_cell::sync::Lazy;
@@ -96,7 +97,7 @@ impl BlockMap {
 
 pub struct HWTMapper {
     symb: Symbolizer,
-    faddrs: HashMap<CString, u64>,
+    faddrs: HashMap<CString, *const c_void>,
 }
 
 impl HWTMapper {
@@ -111,7 +112,7 @@ impl HWTMapper {
     pub(super) fn map_trace(
         mut self,
         trace: Box<dyn Trace>,
-    ) -> Result<(Vec<IRBlock>, HashMap<CString, u64>), HWTracerError> {
+    ) -> Result<(Vec<IRBlock>, HashMap<CString, *const c_void>), HWTracerError> {
         let mut ret_irblocks: Vec<IRBlock> = Vec::new();
         let mut itr = trace.iter_blocks();
         let mut prev_block: Option<hwtracer::Block> = None;
@@ -248,7 +249,7 @@ impl HWTMapper {
         for ent in ents {
             if !ent.value.corr_bbs.is_empty() {
                 let func_name = self.symb.find_code_sym(&obj_name, ent.value.f_off).unwrap();
-                self.faddrs.insert(func_name.clone(), ent.value.f_off);
+                self.faddrs.insert(func_name.clone(), ent.value.f_off as *const c_void);
                 for bb in &ent.value.corr_bbs {
                     ret.push(Some(IRBlock {
                         func_name: func_name.clone(),

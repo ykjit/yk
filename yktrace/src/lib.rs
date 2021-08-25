@@ -71,14 +71,14 @@ pub struct IRTrace {
     /// The blocks of the trace.
     blocks: Vec<IRBlock>,
     /// Function addresses discovered dynamically via the trace. symbol-name -> address.
-    faddrs: HashMap<CString, u64>,
+    faddrs: HashMap<CString, *const c_void>,
 }
 
 unsafe impl Send for IRTrace {}
 unsafe impl Sync for IRTrace {}
 
 impl IRTrace {
-    pub(crate) fn new(blocks: Vec<IRBlock>, faddrs: HashMap<CString, u64>) -> Self {
+    pub(crate) fn new(blocks: Vec<IRBlock>, faddrs: HashMap<CString, *const c_void>) -> Self {
         debug_assert!(blocks.len() < usize::MAX);
         Self { blocks, faddrs }
     }

@@ -211,7 +211,7 @@ ThreadSafeModule *getThreadAOTMod(void) {
 
 // Compile a module in-memory and return a pointer to its function.
 extern "C" void *compileModule(string TraceName, Module *M,
-                               map<StringRef, uint64_t> GlobalMappings) {
+                               map<GlobalValue *, void *> GlobalMappings) {
   std::call_once(LLVMInitialised, initLLVM, nullptr);
 
   // FIXME Remember memman or allocated memory pointers so we can free the
@@ -251,7 +251,7 @@ extern "C" void *compileModule(string TraceName, Module *M,
 // Returns a pointer to the compiled function.
 extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
                                               size_t Len, char *FAddrKeys[],
-                                              size_t FAddrVals[],
+                                              void *FAddrVals[],
                                               size_t FAddrLen) {
   DebugIRPrinter DIP;
 
