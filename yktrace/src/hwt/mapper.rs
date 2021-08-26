@@ -17,7 +17,7 @@ use std::{
     io::{prelude::*, Cursor, SeekFrom},
 };
 use ykllvmwrap::symbolizer::Symbolizer;
-use ykutil::addr::code_vaddr_to_off;
+use ykutil::addr::{code_vaddr_to_off, off_to_vaddr_main_obj};
 
 const BLOCK_MAP_SEC: &str = ".llvm_bb_addr_map";
 static BLOCK_MAP: Lazy<BlockMap> = Lazy::new(|| BlockMap::new());
@@ -220,7 +220,8 @@ impl HWTMapper {
         // FIXME: https://github.com/ykjit/yk/issues/413
         // In the future we could inline code from shared objects if they were built for use with
         // yk (i.e. they have a blockmap and IR embedded).
-        if obj_name != env::current_exe().unwrap() {
+        let cur_exe = env::current_exe().unwrap();
+        if obj_name != cur_exe {
             return Vec::new();
         }
 
@@ -249,7 +250,11 @@ impl HWTMapper {
         for ent in ents {
             if !ent.value.corr_bbs.is_empty() {
                 let func_name = self.symb.find_code_sym(&obj_name, ent.value.f_off).unwrap();
-                self.faddrs.insert(func_name.clone(), ent.value.f_off as *const c_void);
+                if !self.faddrs.contains_key(&func_name) {
+                    let func_vaddr = off_to_vaddr_main_obj(ent.value.f_off).unwrap();
+                    self.faddrs
+                        .insert(func_name.clone(), func_vaddr as *const c_void);
+                }
                 for bb in &ent.value.corr_bbs {
                     ret.push(Some(IRBlock {
                         func_name: func_name.clone(),
