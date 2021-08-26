@@ -324,9 +324,9 @@ public:
       auto FuncName = FuncNames[Idx];
 
       if (ExpectUnmappable && (FuncName == nullptr)) {
-        ExpectUnmappable = false;
         continue;
       }
+      ExpectUnmappable = false;
       assert(FuncName != nullptr);
 
       // Get a traced function so we can extract blocks from it.
@@ -388,7 +388,17 @@ public:
               // The function call is to an intrinsic, whose code will be
               // inlined and thus it does not produce any callee blocks.
               copyInstruction(&Builder, (Instruction *)&*I);
-              continue;
+              if (FuncNames[Idx + 1] == nullptr) {
+                // Intrinsic isn't inlined so need to handle a hole in the
+                // trace.
+                // FIXME This is the same as handleCallInst with CF set to
+                // nullptr
+                ExpectUnmappable = true;
+                ResumeAfter = make_tuple(CurInstrIdx, CI);
+                break;
+              } else {
+                continue;
+              }
             } else {
               handleCallInst(CI, CF, CurInstrIdx);
               break;
