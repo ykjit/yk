@@ -11,7 +11,7 @@ extern "C" {
         bbs: *const size_t,
         len: size_t,
         faddr_keys: *const *const c_char,
-        faddr_vals: *const u64,
+        faddr_vals: *const *const c_void,
         len: size_t,
     ) -> *const c_void;
 }

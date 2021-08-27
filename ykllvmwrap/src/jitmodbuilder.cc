@@ -75,6 +75,28 @@ public:
   }
 };
 
+// Function virtual addresses observed in the input trace.
+// Maps a function symbol name to a virtual address.
+class FuncAddrs {
+  map<string, void *> Map;
+
+public:
+  FuncAddrs(char **FuncNames, void **VAddrs, size_t Len) {
+    for (size_t I = 0; I < Len; I++) {
+      Map.insert({FuncNames[I], VAddrs[I]});
+    }
+  }
+
+  // Lookup the address of the specified function name or return nullptr on
+  // failure.
+  void *operator[](const char *FuncName) {
+    auto It = Map.find(FuncName);
+    if (It == Map.end())
+      return nullptr; // Not found.
+    return It->second;
+  }
+};
+
 std::vector<Value *> getTraceInputs(Module *AOTMod, InputTrace &InpTrace) {
   std::vector<Value *> Vec;
   IRBlock FirstBlock = InpTrace.getUnchecked(0);
@@ -134,11 +156,9 @@ class JITModBuilder {
   vector<Value *> DeleteDeadOnFinalise;
 
   // Information about the trace we are compiling.
-  // FIXME: These should be grouped into structs.
   InputTrace InpTrace;
-  char **FAddrKeys;
-  uint64_t *FAddrVals;
-  size_t FAddrLen;
+  // Function virtual addresses discovered from the input trace.
+  FuncAddrs FAddrs;
 
   Value *getMappedValue(Value *V) {
     if (VMap.find(V) != VMap.end()) {
@@ -173,14 +193,9 @@ class JITModBuilder {
   // ensure there's a mapping from its name to that machine code.
   void addGlobalMappingForFunction(Function *CF) {
     StringRef CFName = CF->getName();
-    for (size_t i = 0; i < FAddrLen; i++) {
-      char *FName = FAddrKeys[i];
-      uint64_t FAddr = FAddrVals[i];
-      if (strcmp(FName, CFName.data()) == 0) {
-        globalMappings.insert(pair<StringRef, uint64_t>(CFName, FAddr));
-        break;
-      }
-    }
+    void *FAddr = FAddrs[CFName.data()];
+    assert(FAddr != nullptr);
+    globalMappings.insert({CF, FAddr});
   }
 
   void handleCallInst(CallInst *CI, Function *CF, size_t &CurInstrIdx) {
@@ -333,7 +348,7 @@ class JITModBuilder {
 
 public:
   // Store virtual addresses for called functions.
-  std::map<StringRef, uint64_t> globalMappings;
+  std::map<GlobalValue *, void *> globalMappings;
   // The function name of this trace.
   string TraceName;
   // Mapping from AOT instructions to JIT instructions.
@@ -341,13 +356,11 @@ public:
 
   // OPT: https://github.com/ykjit/yk/issues/419
   JITModBuilder(Module *AOTMod, char *FuncNames[], size_t BBs[],
-                size_t TraceLen, char *FAddrKeys[], uint64_t FAddrVals[],
+                size_t TraceLen, char *FAddrKeys[], void *FAddrVals[],
                 size_t FAddrLen)
-      : Builder(AOTMod->getContext()), InpTrace(FuncNames, BBs, TraceLen) {
+      : Builder(AOTMod->getContext()), InpTrace(FuncNames, BBs, TraceLen),
+        FAddrs(FAddrKeys, FAddrVals, FAddrLen) {
     this->AOTMod = AOTMod;
-    this->FAddrKeys = FAddrKeys;
-    this->FAddrVals = FAddrVals;
-    this->FAddrLen = FAddrLen;
 
     JITMod = new Module("", AOTMod->getContext());
   }

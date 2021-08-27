@@ -4,6 +4,7 @@ use crate::IRBlock;
 use byteorder::{NativeEndian, ReadBytesExt};
 use hwtracer::{HWTracerError, Trace};
 use intervaltree::{self, IntervalTree};
+use libc::c_void;
 use memmap2;
 use object::{Object, ObjectSection};
 use once_cell::sync::Lazy;
@@ -16,7 +17,7 @@ use std::{
     io::{prelude::*, Cursor, SeekFrom},
 };
 use ykllvmwrap::symbolizer::Symbolizer;
-use ykutil::addr::code_vaddr_to_off;
+use ykutil::addr::{code_vaddr_to_off, off_to_vaddr_main_obj};
 
 const BLOCK_MAP_SEC: &str = ".llvm_bb_addr_map";
 static BLOCK_MAP: Lazy<BlockMap> = Lazy::new(|| BlockMap::new());
@@ -96,7 +97,7 @@ impl BlockMap {
 
 pub struct HWTMapper {
     symb: Symbolizer,
-    faddrs: HashMap<CString, u64>,
+    faddrs: HashMap<CString, *const c_void>,
 }
 
 impl HWTMapper {
@@ -111,7 +112,7 @@ impl HWTMapper {
     pub(super) fn map_trace(
         mut self,
         trace: Box<dyn Trace>,
-    ) -> Result<(Vec<IRBlock>, HashMap<CString, u64>), HWTracerError> {
+    ) -> Result<(Vec<IRBlock>, HashMap<CString, *const c_void>), HWTracerError> {
         let mut ret_irblocks: Vec<IRBlock> = Vec::new();
         let mut itr = trace.iter_blocks();
         let mut prev_block: Option<hwtracer::Block> = None;
@@ -219,7 +220,8 @@ impl HWTMapper {
         // FIXME: https://github.com/ykjit/yk/issues/413
         // In the future we could inline code from shared objects if they were built for use with
         // yk (i.e. they have a blockmap and IR embedded).
-        if obj_name != env::current_exe().unwrap() {
+        let cur_exe = env::current_exe().unwrap();
+        if obj_name != cur_exe {
             return Vec::new();
         }
 
@@ -248,7 +250,11 @@ impl HWTMapper {
         for ent in ents {
             if !ent.value.corr_bbs.is_empty() {
                 let func_name = self.symb.find_code_sym(&obj_name, ent.value.f_off).unwrap();
-                self.faddrs.insert(func_name.clone(), ent.value.f_off);
+                if !self.faddrs.contains_key(&func_name) {
+                    let func_vaddr = off_to_vaddr_main_obj(ent.value.f_off).unwrap();
+                    self.faddrs
+                        .insert(func_name.clone(), func_vaddr as *const c_void);
+                }
                 for bb in &ent.value.corr_bbs {
                     ret.push(Some(IRBlock {
                         func_name: func_name.clone(),
