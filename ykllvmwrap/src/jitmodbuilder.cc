@@ -133,10 +133,10 @@ class JITModBuilder {
   }
 
   void handleCallInst(CallInst *CI, Function *CF, size_t &CurInstrIdx) {
-    if (CF == nullptr || CF->isDeclaration()) {
+    if (CF == nullptr || CF->isIntrinsic() || CF->isDeclaration()) {
       // The definition of the callee is external to AOTMod. We still
       // need to declare it locally if we have not done so yet.
-      if (CF != nullptr && VMap.find(CF) == VMap.end()) {
+      if (CF != nullptr && !CF->isIntrinsic() && VMap.find(CF) == VMap.end()) {
         declareFunction(CF);
       }
       if (RecCallDepth == 0) {
@@ -384,21 +384,14 @@ public:
             finalise(AOTMod, &Builder);
             return JITMod;
           } else if (StartTracingInstr != nullptr) {
-            if (CF->isIntrinsic()) {
-              // The function call is to an intrinsic, whose code will be
-              // inlined and thus it does not produce any callee blocks.
-              copyInstruction(&Builder, (Instruction *)&*I);
-              if (FuncNames[Idx + 1] == nullptr) {
-                // Intrinsic isn't inlined so need to handle a hole in the
-                // trace.
-                // FIXME This is the same as handleCallInst with CF set to
-                // nullptr
-                ExpectUnmappable = true;
-                ResumeAfter = make_tuple(CurInstrIdx, CI);
-                break;
-              } else {
-                continue;
+            if (CF->isIntrinsic() &&
+                (FuncNames[Idx + 1] != nullptr || Idx + 1 == this->Len)) {
+              // The function call is to an intrinsic whose code will be
+              // inlined and thus does not produce any callee blocks.
+              if (RecCallDepth == 0) {
+                copyInstruction(&Builder, (Instruction *)&*I);
               }
+              continue;
             } else {
               handleCallInst(CI, CF, CurInstrIdx);
               break;
