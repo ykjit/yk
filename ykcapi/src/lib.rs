@@ -7,6 +7,7 @@
 //! other crates are regular `rlibs`.
 
 #![feature(bench_black_box)]
+#![feature(c_variadic)]
 
 use std::{ffi::c_void, mem::drop};
 use ykrt::{HotThreshold, Location, MT};
@@ -78,7 +79,7 @@ mod c_testing {
     }
 
     #[no_mangle]
-    pub extern "C" fn __yktrace_start_tracing(kind: usize) -> *mut ThreadTracer {
+    pub unsafe extern "C" fn __yktrace_start_tracing(kind: usize, ...) -> *mut ThreadTracer {
         let kind = black_box(kind);
         let kind: TracingKind = match kind {
             SW_TRACING => TracingKind::SoftwareTracing,
