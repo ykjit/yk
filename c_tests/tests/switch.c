@@ -10,7 +10,7 @@
 
 int main(int argc, char **argv) {
   int x = 1, res = 0;
-  void *tt = __yktrace_start_tracing(HW_TRACING, &x, &res);
+  __yktrace_start_tracing(HW_TRACING, &x, &res);
   NOOPT_VAL(x);
   switch (x) {
   case 1:
@@ -26,7 +26,7 @@ int main(int argc, char **argv) {
     res += 1;
   }
   NOOPT_VAL(res);
-  void *tr = __yktrace_stop_tracing(tt);
+  void *tr = __yktrace_stop_tracing();
   assert(res == 5);
 
   x = 1;

@@ -13,8 +13,8 @@ void __yktrace_hwt_mapper_blockmap_free(void *mapper);
 // a compiled trace need to be "registered" by passing them into
 // __yktrace_start_tracing. While the start tracing call ignores them, it
 // allows us identify them when preparing the inlined trace code.
-void *__yktrace_start_tracing(uintptr_t kind, ...);
-void *__yktrace_stop_tracing(void *tt);
+void __yktrace_start_tracing(uintptr_t kind, ...);
+void *__yktrace_stop_tracing(void);
 size_t __yktrace_irtrace_len(void *trace);
 void __yktrace_irtrace_get(void *trace, size_t idx, char **res_func,
                            size_t *res_bb);

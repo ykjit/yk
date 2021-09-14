@@ -20,9 +20,9 @@ __attribute__((noinline)) int add_one_or_two(int arg) {
 }
 
 int main(int argc, char **argv) {
-  void *tt = __yktrace_start_tracing(HW_TRACING);
+  __yktrace_start_tracing(HW_TRACING);
   argc = add_one_or_two(argc);
-  void *tr = __yktrace_stop_tracing(tt);
+  void *tr = __yktrace_stop_tracing();
 
   size_t len = __yktrace_irtrace_len(tr);
   for (size_t i = 0; i < len; i++) {

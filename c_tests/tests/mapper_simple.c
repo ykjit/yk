@@ -10,8 +10,8 @@
 #include <yk_testing.h>
 
 int main(int argc, char **argv) {
-  void *tt = __yktrace_start_tracing(HW_TRACING);
-  void *tr = __yktrace_stop_tracing(tt);
+  __yktrace_start_tracing(HW_TRACING);
+  void *tr = __yktrace_stop_tracing();
   assert(__yktrace_irtrace_len(tr) == 1);
 
   char *func_name = NULL;

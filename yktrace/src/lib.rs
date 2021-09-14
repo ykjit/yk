@@ -1,8 +1,11 @@
 //! Utilities for collecting and decoding traces.
 
+#![feature(thread_local_const_init)]
+
 mod errors;
 use libc::c_void;
 use std::{
+    cell::RefCell,
     collections::HashMap,
     ffi::{CStr, CString},
     ptr,
@@ -11,6 +14,15 @@ mod hwt;
 
 pub use errors::InvalidTraceError;
 pub use hwt::mapper::BlockMap;
+
+thread_local! {
+    // When `Some`, contains the `ThreadTracer` for the current thread. When `None`, the current
+    // thread is not being traced.
+    //
+    // We hide the `ThreadTracer` in a thread local (rather than returning it to the consumer of
+    // yk). This ensures that the `ThreadTracer` itself cannot appear in traces.
+    pub static THREAD_TRACER: RefCell<Option<ThreadTracer>> = const { RefCell::new(None) };
+}
 
 /// The different ways by which we can collect a trace.
 #[derive(Clone, Copy)]
@@ -169,9 +181,21 @@ trait ThreadTracerImpl {
 /// Start tracing on the current thread using the specified tracing kind.
 /// Each thread can have at most one active tracer; calling `start_tracing()` on a thread where
 /// there is already an active tracer leads to undefined behaviour.
-pub fn start_tracing(kind: TracingKind) -> ThreadTracer {
-    match kind {
+pub fn start_tracing(kind: TracingKind) {
+    let tt = match kind {
         TracingKind::SoftwareTracing => todo!(),
         TracingKind::HardwareTracing => hwt::start_tracing(),
-    }
+    };
+    THREAD_TRACER.with(|tl| *tl.borrow_mut() = Some(tt));
+}
+
+/// Stop tracing on the current thread. Calling this when the current thread is not already tracing
+/// leads to undefined behaviour.
+pub fn stop_tracing() -> Result<IRTrace, InvalidTraceError> {
+    let mut res = Err(InvalidTraceError::EmptyTrace);
+    THREAD_TRACER.with(|tt| {
+        let tt_owned = tt.borrow_mut().take();
+        res = tt_owned.unwrap().stop_tracing();
+    });
+    res
 }

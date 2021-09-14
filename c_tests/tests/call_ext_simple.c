@@ -20,10 +20,10 @@
 
 int main(int argc, char **argv) {
   int ch = '1';
-  void *tt = __yktrace_start_tracing(HW_TRACING, &ch);
+  __yktrace_start_tracing(HW_TRACING, &ch);
   // Note that sometimes the compiler will make this a call to putc(3).
   putchar(ch);
-  void *tr = __yktrace_stop_tracing(tt);
+  void *tr = __yktrace_stop_tracing();
 
   ch = '2';
   void *ptr = __yktrace_irtrace_compile(tr);

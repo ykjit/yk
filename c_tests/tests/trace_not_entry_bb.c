@@ -18,10 +18,10 @@ int main(int argc, char **argv) {
     abort();
 
   int res;
-  void *tt = __yktrace_start_tracing(HW_TRACING, &res, &argc);
+  __yktrace_start_tracing(HW_TRACING, &res, &argc);
   // Causes both a load and a store to things defined outside the trace.
   res = 1 + argc;
-  void *tr = __yktrace_stop_tracing(tt);
+  void *tr = __yktrace_stop_tracing();
 
   assert(res == 2);
 

@@ -23,7 +23,7 @@
 
 int main(int argc, char **argv) {
   int cond = argc;
-  void *tt = __yktrace_start_tracing(HW_TRACING, &cond);
+  __yktrace_start_tracing(HW_TRACING, &cond);
   int res = 0;
   if (cond) {
     res = 2;
@@ -31,7 +31,7 @@ int main(int argc, char **argv) {
   } else {
     res = 4;
   }
-  void *tr = __yktrace_stop_tracing(tt);
+  void *tr = __yktrace_stop_tracing();
 
   assert(cond == 3);
   assert(res == 2);

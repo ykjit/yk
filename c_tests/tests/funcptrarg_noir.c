@@ -21,10 +21,10 @@ int bar(size_t (*func)(const char *)) {
 
 int main(int argc, char **argv) {
   int z = 0;
-  void *tt = __yktrace_start_tracing(HW_TRACING, &z);
+  __yktrace_start_tracing(HW_TRACING, &z);
   z = bar(strlen);
   NOOPT_VAL(z);
-  void *tr = __yktrace_stop_tracing(tt);
+  void *tr = __yktrace_stop_tracing();
   assert(z == 3);
 
   void *ptr = __yktrace_irtrace_compile(tr);
