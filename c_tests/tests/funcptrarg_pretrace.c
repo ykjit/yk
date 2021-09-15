@@ -16,9 +16,9 @@ int bar(size_t (*func)(const char *)) {
   int pre = func("abc");
 
   int res;
-  void *tt = __yktrace_start_tracing(HW_TRACING, &res, &func);
+  __yktrace_start_tracing(HW_TRACING, &res, &func);
   res = func("abc");
-  void *tr = __yktrace_stop_tracing(tt);
+  void *tr = __yktrace_stop_tracing();
   assert(res == 3);
 
   void *ptr = __yktrace_irtrace_compile(tr);

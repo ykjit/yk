@@ -21,14 +21,14 @@ static int call_me(int x) {
 
 int main(int argc, char **argv) {
   int res = 0;
-  void *tt = __yktrace_start_tracing(HW_TRACING, &res, &argc);
+  __yktrace_start_tracing(HW_TRACING, &res, &argc);
   NOOPT_VAL(argc);
   // At higher optimisation levels LLVM realises that this call can be
   // completely removed. Hence we only structurally test a couple of lower opt
   // levels.
   res = call_me(argc);
   NOOPT_VAL(res);
-  void *tr = __yktrace_stop_tracing(tt);
+  void *tr = __yktrace_stop_tracing();
   assert(res == 5);
 
   void *ptr = __yktrace_irtrace_compile(tr);

@@ -10,9 +10,9 @@
 
 int main(int argc, char **argv) {
   int res = 0;
-  void *tt = __yktrace_start_tracing(HW_TRACING, &res);
+  __yktrace_start_tracing(HW_TRACING, &res);
   res = 2;
-  void *tr = __yktrace_stop_tracing(tt);
+  void *tr = __yktrace_stop_tracing();
   __yktrace_irtrace_compile(tr);
   __yktrace_drop_irtrace(tr);
   return (EXIT_SUCCESS);

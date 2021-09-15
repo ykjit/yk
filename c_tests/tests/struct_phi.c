@@ -35,11 +35,11 @@ int main(int argc, char **argv) {
   struct s s1;
   s1.x = argc || z; // Creates a phi node.
   int y1 = 0;
-  void *tt = __yktrace_start_tracing(HW_TRACING, &y1, &s1);
+  __yktrace_start_tracing(HW_TRACING, &y1, &s1);
   NOOPT_VAL(s1);
   y1 = s1.x;
   NOOPT_VAL(y1);
-  void *tr = __yktrace_stop_tracing(tt);
+  void *tr = __yktrace_stop_tracing();
   assert(y1 == 1);
 
   void *ptr = __yktrace_irtrace_compile(tr);

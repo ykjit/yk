@@ -58,7 +58,7 @@ pub extern "C" fn __ykutil_get_llvmbc_section(res_addr: *mut *const c_void, res_
 mod c_testing {
     use libc::c_void;
     use std::{hint::black_box, os::raw::c_char, ptr};
-    use yktrace::{start_tracing, BlockMap, IRTrace, ThreadTracer, TracingKind};
+    use yktrace::{start_tracing, stop_tracing, BlockMap, IRTrace, TracingKind};
 
     const SW_TRACING: usize = 0;
     const HW_TRACING: usize = 1;
@@ -79,21 +79,19 @@ mod c_testing {
     }
 
     #[no_mangle]
-    pub unsafe extern "C" fn __yktrace_start_tracing(kind: usize, ...) -> *mut ThreadTracer {
+    pub unsafe extern "C" fn __yktrace_start_tracing(kind: usize, ...) {
         let kind = black_box(kind);
         let kind: TracingKind = match kind {
             SW_TRACING => TracingKind::SoftwareTracing,
             HW_TRACING => TracingKind::HardwareTracing,
             _ => panic!(),
         };
-        black_box(Box::into_raw(Box::new(start_tracing(kind))))
+        start_tracing(kind)
     }
 
     #[no_mangle]
-    pub extern "C" fn __yktrace_stop_tracing(tt: *mut ThreadTracer) -> *mut IRTrace {
-        let tt = black_box(tt);
-        let tt = unsafe { Box::from_raw(tt) };
-        black_box(Box::into_raw(Box::new(tt.stop_tracing().unwrap())) as *mut _)
+    pub extern "C" fn __yktrace_stop_tracing() -> *mut IRTrace {
+        Box::into_raw(Box::new(stop_tracing().unwrap())) as *mut _
     }
 
     #[no_mangle]

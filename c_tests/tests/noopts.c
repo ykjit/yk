@@ -36,7 +36,7 @@
 
 int main(int argc, char **argv) {
   int x, res;
-  void *tt = __yktrace_start_tracing(HW_TRACING, &res, &x);
+  __yktrace_start_tracing(HW_TRACING, &res, &x);
   // __yktrace_start_tracing() will already inhibit optimisations on `x` since
   // its address is passed as an argument and the compiler must assume that it
   // may be mutated. Therefore to properly test NOOPT_VAL we need to initialise
@@ -45,7 +45,7 @@ int main(int argc, char **argv) {
   NOOPT_VAL(x);
   res = x + 3; // We don't want this operation to be optimised away.
   NOOPT_VAL(res);
-  void *tr = __yktrace_stop_tracing(tt);
+  void *tr = __yktrace_stop_tracing();
   assert(res == 5);
 
   void *ptr = __yktrace_irtrace_compile(tr);

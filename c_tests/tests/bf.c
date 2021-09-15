@@ -103,15 +103,14 @@ void jit(char *prog, char *prog_end) {
     err(1, "out of memory");
   char *cells_end = cells + CELLS_LEN;
 
-  void *tt =
-      __yktrace_start_tracing(HW_TRACING, &prog, &prog_end, &cells, &cells_end);
+  __yktrace_start_tracing(HW_TRACING, &prog, &prog_end, &cells, &cells_end);
   NOOPT_VAL(prog);
   NOOPT_VAL(prog_end);
   NOOPT_VAL(cells);
   NOOPT_VAL(cells_end);
   interp(prog, prog_end, cells, cells_end);
   CLOBBER_MEM();
-  void *tr = __yktrace_stop_tracing(tt);
+  void *tr = __yktrace_stop_tracing();
 
   // Compile and run trace.
   void *ptr = __yktrace_irtrace_compile(tr);

@@ -25,7 +25,7 @@ use parking_lot::{Condvar, Mutex, MutexGuard};
 use parking_lot_core::SpinWait;
 
 use crate::location::{HotLocation, Location, State, ThreadIdInner};
-use yktrace::{start_tracing, CompiledTrace, IRTrace, TracingKind};
+use yktrace::{start_tracing, stop_tracing, CompiledTrace, IRTrace, TracingKind};
 
 // The HotThreshold must be less than a machine word wide for [`Location::Location`] to do its
 // pointer tagging thing. We therefore choose a type which makes this statically clear to
@@ -214,9 +214,8 @@ impl MT {
                             // We've initialised this Location and obtained the lock, so we can now
                             // start tracing for real.
                             let tid = Arc::clone(&mtt.tid);
-                            let tt = start_tracing(self.tracing_kind());
-                            *unsafe { new_ls.hot_location() } =
-                                HotLocation::Tracing(Some((tid, tt)));
+                            start_tracing(self.tracing_kind());
+                            *unsafe { new_ls.hot_location() } = HotLocation::Tracing(Some(tid));
                             mtt.tracing.set(Some(hl_ptr as *const ()));
                             loc.unlock();
                             return;
@@ -292,7 +291,7 @@ impl MT {
                         }
                         None => {
                             // This thread isn't tracing anything.
-                            if Arc::strong_count(&opt.as_ref().unwrap().0) == 1 {
+                            if Arc::strong_count(&opt.as_ref().unwrap()) == 1 {
                                 // Another thread was tracing this location but it's terminated.
                                 // FIXME: we should probably have some sort of occasional retry
                                 // heuristic rather than simply saying "never try tracing this
@@ -304,10 +303,12 @@ impl MT {
                         }
                     }
                     // This thread is tracing this location: we must, therefore, have finished
-                    // tracing the loop. Notice that the ".1" implicitly drops the
-                    // Arc<ThreadIdInner> so that other threads won't think this thread has died
-                    // while tracing.
-                    match opt.take().unwrap().1.stop_tracing() {
+                    // tracing the loop.
+                    //
+                    // We must ensure that the `Arc<ThreadId>` inside `opt` is dropped so that
+                    // other threads won't think this thread has died while tracing.
+                    opt.take();
+                    match stop_tracing() {
                         Ok(sir) => {
                             let mtx = Arc::new(Mutex::new(None));
                             let mtx_cl = Arc::clone(&mtx);

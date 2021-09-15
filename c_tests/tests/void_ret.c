@@ -13,9 +13,9 @@
 void __attribute__((noinline)) f() { return; }
 
 int main(int argc, char **argv) {
-  void *tt = __yktrace_start_tracing(HW_TRACING);
+  __yktrace_start_tracing(HW_TRACING);
   f();
-  void *tr = __yktrace_stop_tracing(tt);
+  void *tr = __yktrace_stop_tracing();
 
   void *ptr = __yktrace_irtrace_compile(tr);
   __yktrace_drop_irtrace(tr);

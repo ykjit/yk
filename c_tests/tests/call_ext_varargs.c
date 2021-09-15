@@ -22,9 +22,9 @@
 
 int main(int argc, char **argv) {
   int x = 1;
-  void *tt = __yktrace_start_tracing(HW_TRACING, &x);
+  __yktrace_start_tracing(HW_TRACING, &x);
   printf("abc%d%d%d\n", x, x + 1, x + 2);
-  void *tr = __yktrace_stop_tracing(tt);
+  void *tr = __yktrace_stop_tracing();
 
   x = 10;
   void *ptr = __yktrace_irtrace_compile(tr);

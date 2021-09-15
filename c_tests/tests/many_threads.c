@@ -17,9 +17,9 @@
 
 static void *trace(void *unused) {
   for (int i = 0; i < 3; i++) {
-    void *tt = __yktrace_start_tracing(HW_TRACING);
+    __yktrace_start_tracing(HW_TRACING);
     int res = 1 + 1;
-    void *tr = __yktrace_stop_tracing(tt);
+    void *tr = __yktrace_stop_tracing();
     assert(res == 2);
 
     void *ptr = __yktrace_irtrace_compile(tr);

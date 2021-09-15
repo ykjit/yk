@@ -14,7 +14,7 @@ use parking_lot_core::{
     park, unpark_one, ParkResult, SpinWait, UnparkResult, UnparkToken, DEFAULT_PARK_TOKEN,
 };
 use strum::EnumDiscriminants;
-use yktrace::{CompiledTrace, ThreadTracer};
+use yktrace::CompiledTrace;
 
 /// A `Location` stores state that the meta-tracer needs to identify hot loops and run associated
 /// machine code.
@@ -414,5 +414,5 @@ pub(super) enum HotLocation {
     Compiled(Box<CompiledTrace>),
     Compiling(Arc<Mutex<Option<Box<CompiledTrace>>>>),
     DontTrace,
-    Tracing(Option<(Arc<ThreadIdInner>, ThreadTracer)>),
+    Tracing(Option<Arc<ThreadIdInner>>),
 }

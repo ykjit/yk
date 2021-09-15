@@ -43,9 +43,9 @@ __attribute__((noinline)) int fib(int num, int *tcp) {
 
 int main(int argc, char **argv) {
   int res = 0;
-  void *tt = __yktrace_start_tracing(HW_TRACING, &res, &argc);
+  __yktrace_start_tracing(HW_TRACING, &res, &argc);
   res = fib(argc * 8, &argc);
-  void *tr = __yktrace_stop_tracing(tt);
+  void *tr = __yktrace_stop_tracing();
   assert(res == 21);
 
   void *ptr = __yktrace_irtrace_compile(tr);

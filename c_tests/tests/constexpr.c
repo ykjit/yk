@@ -25,9 +25,9 @@ __attribute__((noinline)) char foo(char *str) { return str[0]; }
 
 int main(int argc, char **argv) {
   int res = 0;
-  void *tt = __yktrace_start_tracing(HW_TRACING, &res);
+  __yktrace_start_tracing(HW_TRACING, &res);
   res = foo("abc");
-  void *tr = __yktrace_stop_tracing(tt);
+  void *tr = __yktrace_stop_tracing();
   assert(res == 97);
 
   void *ptr = __yktrace_irtrace_compile(tr);
