@@ -14,8 +14,9 @@ uint64_t getNewTraceIdx() {
 }
 
 #define TRACE_FUNC_PREFIX "__yk_compiled_trace_"
-#define YKTRACE_START "__yktrace_start_tracing"
 #define YKTRACE_STOP "__yktrace_stop_tracing"
+#define YK_NEW_CONTROL_POINT "yk_new_control_point"
+#define YK_CONTROL_POINT_ARG_IDX 1
 
 // Dump an error message and an LLVM value to stderr and exit with failure.
 void dumpValueAndExit(const char *Msg, Value *V) {
@@ -97,33 +98,14 @@ public:
   }
 };
 
-std::vector<Value *> getTraceInputs(Module *AOTMod, InputTrace &InpTrace) {
-  std::vector<Value *> Vec;
-  IRBlock FirstBlock = InpTrace.getUnchecked(0);
-  Function *F = AOTMod->getFunction(FirstBlock.FuncName);
-  auto It = F->begin();
-  // Skip to the first block in the trace which contains the `start_tracing`
-  // call.
-  std::advance(It, FirstBlock.BBIdx);
-  BasicBlock *BB = &*It;
-  bool found = false;
-  for (auto I = BB->begin(); I != BB->end(); I++) {
-    if (isa<CallInst>(I)) {
-      CallInst *CI = cast<CallInst>(&*I);
-      Function *CF = CI->getCalledFunction();
-      if ((CF != nullptr) && (CF->getName() == YKTRACE_START)) {
-        // Skip first argument to start_tracing.
-        for (auto Arg = CI->arg_begin() + 1; Arg != CI->arg_end(); Arg++) {
-          Vec.push_back(Arg->get());
-        }
-        found = true;
-        break;
-      }
-    }
-  }
-  if (!found)
-    errx(EXIT_FAILURE, "failed to find trace inputs");
-  return Vec;
+/// Get the `Value` of the `YkCtrlPointVars` struct by looking it up inside the
+/// arguments of the new control point.
+Value *getYkCtrlPointVarsStruct(Module *AOTMod, InputTrace &InpTrace) {
+  Function *F = AOTMod->getFunction(YK_NEW_CONTROL_POINT);
+  assert(F != nullptr);
+  User *CallSite = F->user_back();
+  CallInst *CI = cast<CallInst>(CallSite);
+  return CI->getArgOperand(YK_CONTROL_POINT_ARG_IDX);
 }
 
 class JITModBuilder {
@@ -134,10 +116,10 @@ class JITModBuilder {
   Module *AOTMod;
   // The new module that is being build.
   Module *JITMod;
-  // A pointer to the call to YKTRACE_START in the AOT module (once
+  // A pointer to the call to YK_NEW_CONTROL_POINT in the AOT module (once
   // encountered). When this changes from NULL to non-NULL, then we start
   // copying instructions from the AOT module into the JIT module.
-  Instruction *StartTracingInstr = nullptr;
+  Instruction *NewControlPointCall = nullptr;
   // Stack of inlined calls, required to resume at the correct place in the
   // caller.
   std::vector<tuple<size_t, CallInst *>> InlinedCalls;
@@ -159,6 +141,19 @@ class JITModBuilder {
   InputTrace InpTrace;
   // Function virtual addresses discovered from the input trace.
   FuncAddrs FAddrs;
+
+  // A stack of BasicBlocks. Each time we enter a new call frame, we push the
+  // first basic block to the stack. Following a branch to another basic block
+  // updates the most recently pushed block. This is required for selecting the
+  // correct incoming value when tracing a PHI node.
+  vector<BasicBlock *> LastCompletedBlocks;
+
+  // Since a trace starts tracing after the control point but ends before it,
+  // we need to map the values inserted into the `YkCtrlPointVars` (appearing
+  // before the control point) to the extracted values (appearing after the
+  // control point). This map helps to match inserted values to their
+  // corresponding extracted values using their index in the struct.
+  std::map<uint64_t, Value *> InsertValueMap;
 
   Value *getMappedValue(Value *V) {
     if (VMap.find(V) != VMap.end()) {
@@ -214,6 +209,7 @@ class JITModBuilder {
       ExpectUnmappable = true;
       ResumeAfter = make_tuple(CurInstrIdx, CI);
     } else {
+      LastCompletedBlocks.push_back(nullptr);
       if (RecCallDepth > 0) {
         // When outlining a recursive function, we need to count all other
         // function calls so we know when we left the recusion.
@@ -251,6 +247,7 @@ class JITModBuilder {
   void handleReturnInst(Instruction *I) {
     ResumeAfter = InlinedCalls.back();
     InlinedCalls.pop_back();
+    LastCompletedBlocks.pop_back();
     if (RecCallDepth > 0) {
       RecCallDepth -= 1;
       return;
@@ -265,45 +262,26 @@ class JITModBuilder {
     }
   }
 
-  // FIXME: https://github.com/ykjit/yk/issues/394
-  void handlePHINode(Instruction *I, Function *F, size_t Idx) {
-    assert(Idx > 0);
-    auto LBIt = F->begin();
-    std::advance(LBIt, InpTrace.getUnchecked(Idx - 1).BBIdx);
-    BasicBlock *LastBlock = &*LBIt;
-    Value *V = ((PHINode *)&*I)->getIncomingValueForBlock(LastBlock);
+  void handlePHINode(Instruction *I, BasicBlock *BB) {
+    Value *V = ((PHINode *)&*I)->getIncomingValueForBlock(BB);
     VMap[&*I] = getMappedValue(V);
   }
 
-  Function *createJITFunc(vector<Value *> *TraceInputs) {
+  Function *createJITFunc(Value *TraceInputs, Type *RetTy) {
     // Compute a name for the trace.
     uint64_t TraceIdx = getNewTraceIdx();
     TraceName = string(TRACE_FUNC_PREFIX) + to_string(TraceIdx);
 
     // Create the function.
     std::vector<Type *> InputTypes;
-    for (auto Val : *TraceInputs)
-      InputTypes.push_back(Val->getType());
-    llvm::FunctionType *FType = llvm::FunctionType::get(
-        Type::getVoidTy(JITMod->getContext()), InputTypes, false);
+    InputTypes.push_back(TraceInputs->getType());
+    llvm::FunctionType *FType =
+        llvm::FunctionType::get(RetTy, InputTypes, false);
     llvm::Function *JITFunc = llvm::Function::Create(
         FType, Function::InternalLinkage, TraceName, JITMod);
     JITFunc->setCallingConv(CallingConv::C);
 
     return JITFunc;
-  }
-
-  // Variables that are used (but not defined) inbetween starting and stopping
-  // tracing need to be replaced with function arguments which the user passes
-  // into the compiled trace. This loop creates a mapping from those original
-  // variables to the function arguments of the compiled trace function.
-  void mapTraceInputs(vector<Value *> &TraceInputs, Function *JITFunc) {
-    for (size_t Idx = 0; Idx < TraceInputs.size(); Idx++) {
-      Value *OldVal = TraceInputs[Idx];
-      Value *NewVal = JITFunc->getArg(Idx);
-      assert(NewVal->getType()->isPointerTy());
-      VMap[OldVal] = NewVal;
-    }
   }
 
   // Delete the dead value `V` from its parent, also deleting any dependencies
@@ -369,17 +347,101 @@ public:
   Module *createModule() {
     LLVMContext &JITContext = JITMod->getContext();
     // Find the trace inputs.
-    vector<Value *> TraceInputs = getTraceInputs(AOTMod, InpTrace);
+    Value *TraceInputs = getYkCtrlPointVarsStruct(AOTMod, InpTrace);
+
+    // Get new control point call.
+    Function *F = AOTMod->getFunction(YK_NEW_CONTROL_POINT);
+    User *CallSite = F->user_back();
+    CallInst *CPCI = cast<CallInst>(CallSite);
+    Type *OutputStructTy = CPCI->getType();
+
+    // When assembling a trace, we start collecting instructions below the
+    // control point and finish above it. This means that alloca'd variables
+    // become undefined (as they are defined outside of the trace) and thus
+    // need to be remapped to the input of the compiled trace. SSA values
+    // remain correct as phi nodes at the beginning of the trace automatically
+    // select the appropriate input value.
+    //
+    // For example, once patched, a typical interpreter loop will look like
+    // this:
+    //
+    // ```
+    // bb0:
+    //   %a = alloca  // Stack variable
+    //   store 0, %a
+    //   %b = 1       // Register variable
+    //   br %bb1
+    //
+    // bb1:
+    //   %b1 = phi [%b, %bb0], [%binc, %bb1]
+    //   %s = new YkCtrlPointVars
+    //
+    //   insertvalue %s, %a, 0
+    //   insertvalue %s, %b1, 1           // traces end here
+    //   %s2 = call yk_new_control_point(%s)
+    //   %anew = extractvalue %s, 0       // traces start here
+    //   %bnew = extractvalue %s, 1
+    //
+    //   %aload = load %anew
+    //   %ainc = add 1, %aload
+    //   store %ainc, %a
+    //   %binc = add 1, %bnew
+    //   br %bb1
+    // ```
+    //
+    // There are two trace inputs (`%a` and `%b1`) and two trace outputs
+    // (`%anew` and `%bnew`). `%a` and `%anew` correspond to the same
+    // high-level variable, and so do `%b1` and `%bnew`. When assembling a
+    // trace from the above IR, it would look like this:
+    //
+    // ```
+    // void compiled_trace(%YkCtrlPointVars %s) {
+    //   %anew = extractvalue %s, 0     // traces start here
+    //   %bnew = extractvalue %s, 1
+    //
+    //   %aload = load %anew
+    //   %ainc = add 1, %aload
+    //   store %ainc, %a                // %a is undefined
+    //   %binc = add 1, %bnew
+    //   %b1 = phi(bb0: %b, bb1: %binc)
+    //   %s = new struct
+    //
+    //   insertvalue %s, %a, 0
+    //   insertvalue %s, %b1, 1         // traces end here
+    //   br %bb0
+    // }
+    // ```
+    //
+    // Here `%a` is undefined because we didn't trace its allocation. Instead
+    // it needs to be extracted from the `YkCtrlPointVars`, which means we need
+    // to replace `%a` with `%anew` in the store instruction. The other value
+    // `%b` doesn't have this problem, since the PHI node already makes sure it
+    // selects the correct SSA value `%binc`.
+    Value *OutS = CPCI->getArgOperand(1);
+    while (isa<InsertValueInst>(OutS)) {
+      InsertValueInst *IVI = cast<InsertValueInst>(OutS);
+      if (!isa<PHINode>(IVI->getInsertedValueOperand())) {
+        InsertValueMap[*IVI->idx_begin()] = IVI->getInsertedValueOperand();
+      }
+      OutS = IVI->getAggregateOperand();
+    }
 
     // Create function to store compiled trace.
-    Function *JITFunc = createJITFunc(&TraceInputs);
+    Function *JITFunc = createJITFunc(TraceInputs, CPCI->getType());
 
-    // Add entries to the VMap for variables defined outside of the trace.
-    mapTraceInputs(TraceInputs, JITFunc);
+    // Remap control point return value.
+    VMap[CPCI] = JITFunc->getArg(0);
+
+    // Map the YkCtrlPointVars struct used inside the trace to the argument of
+    // the compiled trace function.
+    VMap[TraceInputs] = JITFunc->getArg(0);
 
     // Create entry block and setup builder.
     auto DstBB = BasicBlock::Create(JITContext, "", JITFunc);
     Builder.SetInsertPoint(DstBB);
+
+    LastCompletedBlocks.push_back(nullptr);
+    BasicBlock *NextCompletedBlock = nullptr;
 
     // Iterate over the trace and stitch together all traced blocks.
     for (size_t Idx = 0; Idx < InpTrace.Length(); Idx++) {
@@ -396,10 +458,18 @@ public:
       if (!F)
         errx(EXIT_FAILURE, "can't find function %s", IB.FuncName);
 
+      if (F->getName() == YK_NEW_CONTROL_POINT) {
+        continue;
+      }
+
       // Skip to the correct block.
       auto It = F->begin();
       std::advance(It, IB.BBIdx);
       BasicBlock *BB = &*It;
+
+      assert(LastCompletedBlocks.size() >= 1);
+      LastCompletedBlocks.back() = NextCompletedBlock;
+      NextCompletedBlock = BB;
 
       // Iterate over all instructions within this block and copy them over
       // to our new module.
@@ -424,7 +494,7 @@ public:
           CallInst *CI = cast<CallInst>(I);
           Function *CF = CI->getCalledFunction();
           if (CF == nullptr) {
-            if (StartTracingInstr == nullptr) {
+            if (NewControlPointCall == nullptr) {
               continue;
             }
             // The target isn't statically known, so we can't inline the
@@ -442,21 +512,27 @@ public:
               handleCallInst(CI, CF, CurInstrIdx);
               break;
             }
-          } else if (CF->getName() == YKTRACE_START) {
-            StartTracingInstr = &*CI;
+          } else if (CF->getName() == YK_NEW_CONTROL_POINT) {
+            if (NewControlPointCall == nullptr) {
+              NewControlPointCall = &*CI;
+            } else {
+              VMap[CI] = getMappedValue(CI->getArgOperand(1));
+              ResumeAfter = make_tuple(CurInstrIdx, CI);
+              break;
+            }
             continue;
           } else if (CF->getName() == YKTRACE_STOP) {
             finalise(AOTMod, &Builder);
             return JITMod;
-          } else if (StartTracingInstr != nullptr) {
+          } else if (NewControlPointCall != nullptr) {
             handleCallInst(CI, CF, CurInstrIdx);
             break;
           }
         }
 
         // We don't start copying instructions into the JIT module until we've
-        // seen the call to YKTRACE_START.
-        if (StartTracingInstr == nullptr)
+        // seen the call to YK_NEW_CONTROL_POINT.
+        if (NewControlPointCall == nullptr)
           continue;
 
         if (isa<IndirectBrInst>(I)) {
@@ -491,38 +567,42 @@ public:
         }
 
         if (isa<PHINode>(I)) {
-          handlePHINode(&*I, F, Idx);
+          assert(LastCompletedBlocks.size() >= 1);
+          handlePHINode(&*I, LastCompletedBlocks.back());
           continue;
         }
 
         // If execution reaches here, then the instruction I is to be copied
         // into JITMod.
         copyInstruction(&Builder, (Instruction *)&*I);
+
+        // Perform the remapping described by InsertValueMap. See comments
+        // above.
+        if (isa<ExtractValueInst>(I)) {
+          ExtractValueInst *EVI = cast<ExtractValueInst>(I);
+          if (EVI->getAggregateOperand()->getType() == OutputStructTy) {
+            Value *IV = InsertValueMap[*EVI->idx_begin()];
+            VMap[IV] = getMappedValue(EVI);
+          }
+        }
       }
     }
 
-    // If we fell out of the loop, then we never saw YKTRACE_STOP.
-    return NULL;
+    Builder.CreateRet(VMap[CPCI]);
+    finalise(AOTMod, &Builder);
+    return JITMod;
   }
 
   void handleOperand(Value *Op) {
     if (VMap.find(Op) == VMap.end()) {
       // The operand is undefined in JITMod.
       Type *OpTy = Op->getType();
-      if (isa<llvm::AllocaInst>(Op)) {
-        // In the AOT module, the operand is allocated on the stack with
-        // an `alloca`, but this variable is as-yet undefined in the JIT
-        // module.
-        //
-        // This happens because LLVM has a tendency to move allocas up to
-        // the first block of a function, and if we didn't trace that
-        // block (e.g. we started tracing in a later block), then we will
-        // have missed those allocations. In these cases we materialise
-        // the allocations as we see them used in code that *was* traced.
-        Value *Alloca = Builder.CreateAlloca(OpTy->getPointerElementType(),
-                                             OpTy->getPointerAddressSpace());
-        VMap[Op] = Alloca;
-      } else if (isa<ConstantExpr>(Op)) {
+
+      // Variables allocated outside of the traced section must be passed into
+      // the trace and thus must already have a mapping.
+      assert(!isa<llvm::AllocaInst>(Op));
+
+      if (isa<ConstantExpr>(Op)) {
         // A `ConstantExpr` may contain operands that require remapping, e.g.
         // global variables. Iterate over all operands and recursively call
         // `handleOperand` on them, then generate a new `ConstantExpr` with
@@ -562,8 +642,8 @@ public:
           declareFunction(cast<Function>(Op));
         }
         // Constants and inline asm don't need to be mapped.
-      } else if (Op == StartTracingInstr) {
-        // The value generated by StartTracingInstr is the thread tracer.
+      } else if (Op == NewControlPointCall) {
+        // The value generated by NewControlPointCall is the thread tracer.
         // At some optimisation levels, this gets stored in an alloca'd
         // stack space. Since we've stripped the instruction that
         // generates that value (from the JIT module), we have to make a
@@ -608,8 +688,6 @@ public:
   // Finalise the JITModule by adding a return instruction and initialising
   // global variables.
   void finalise(Module *AOTMod, IRBuilder<> *Builder) {
-    Builder->CreateRetVoid();
-
     // Now that we've seen all possible uses of values in the JITMod, we can
     // delete the values we've marked dead (and possibly their dependencies if
     // they too turn out to be dead).

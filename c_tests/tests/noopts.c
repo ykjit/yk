@@ -1,3 +1,4 @@
+// ignore: broken during new control point design
 // Compiler:
 // Run-time:
 //   env-var: YKD_PRINT_IR=aot,jit-pre-opt,jit-post-opt

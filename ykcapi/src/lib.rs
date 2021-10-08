@@ -9,27 +9,15 @@
 #![feature(bench_black_box)]
 #![feature(c_variadic)]
 
-use std::{ffi::c_void, mem::drop};
-use ykrt::{HotThreshold, Location, MT};
+use std::{ffi::c_void, os::raw::c_int};
+use ykrt::Location;
 use ykutil;
 
+// The "dummy control point" that is replaced in an LLVM pass.
+// FIXME for now the "location identifiers" are assumed to be `int`.
 #[no_mangle]
-pub extern "C" fn yk_mt() -> *const MT {
-    MT::global()
-}
-
-#[no_mangle]
-pub extern "C" fn yk_mt_hot_threshold(mt: *mut MT) -> HotThreshold {
-    unsafe { &*mt }.hot_threshold()
-}
-
-#[no_mangle]
-pub extern "C" fn yk_control_point(mt: *mut MT, loc: *mut Location) {
-    if !loc.is_null() {
-        unsafe { (&*mt).control_point(Some(&*loc)) };
-    } else {
-        unsafe { (&*mt).control_point(None) };
-    }
+pub extern "C" fn yk_control_point(_loc: c_int) {
+    // Intentionally empty.
 }
 
 #[no_mangle]
@@ -79,7 +67,7 @@ mod c_testing {
     }
 
     #[no_mangle]
-    pub unsafe extern "C" fn __yktrace_start_tracing(kind: usize, ...) {
+    pub unsafe extern "C" fn __yktrace_start_tracing(kind: usize) {
         let kind = black_box(kind);
         let kind: TracingKind = match kind {
             SW_TRACING => TracingKind::SoftwareTracing,

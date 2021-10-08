@@ -90,26 +90,43 @@ fn mk_compiler(exe: &Path, src: &Path, opt: &str, extra_objs: &[PathBuf]) -> Com
     ykcapi_dir.push("..");
     ykcapi_dir.push("ykcapi");
 
+    // FIXME: https://github.com/ykjit/yk/issues/427
+    // yk requires a lot of ykllvm compiler flags. We should consider adding "one main yk flag"
+    // which turns on all of the other flags.
     compiler.args(&[
         opt,
+        // If this is a debug build, include debug info in the test binary.
         #[cfg(debug_assertions)]
         "-g",
+        // Be strict.
         "-Werror",
         "-Wall",
+        // Enable LTO with lld.
         "-fuse-ld=lld",
         "-flto",
+        // Embed LLVM bitcode as late as possible.
         "-Wl,--mllvm=--embed-bitcode-final",
+        // Disable machines passes that would interfere with block mapping.
+        "-Wl,--mllvm=--disable-branch-fold",
+        "-Wl,--mllvm=--disable-block-placement",
+        // Ensure control point is patched.
+        "-Wl,--mllvm=--yk-patch-control-point",
+        // Emit a basic block map section. Used for block mapping.
         "-Wl,--lto-basic-block-sections=labels",
         // FIXME: https://github.com/ykjit/yk/issues/381
         // Find a better way of handling unexported globals inside a trace.
         "-Wl,--export-dynamic",
+        // Ensure the tests can find and use libykcapi.
         "-I",
         ykcapi_dir.to_str().unwrap(),
         "-L",
         lib_dir_str,
-        &format!("-Wl,-rpath={}", lib_dir_str),
         "-lykcapi",
+        // Encode an rpath so that we don't have to set LD_LIBRARY_PATH.
+        &format!("-Wl,-rpath={}", lib_dir_str),
+        // Some tests are multi-threaded via the pthread API.
         "-pthread",
+        // The input and output files.
         "-o",
         exe.to_str().unwrap(),
         src.to_str().unwrap(),
