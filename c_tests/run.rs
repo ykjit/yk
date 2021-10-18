@@ -1,5 +1,6 @@
 use lang_tester::LangTester;
 use once_cell::sync::Lazy;
+use regex::Regex;
 use std::{
     collections::HashMap,
     env,
@@ -167,6 +168,12 @@ fn run_suite(opt: &'static str) {
             let compiler = mk_compiler(&exe, p, opt, &extra_objs);
             let runtime = Command::new(exe.clone());
             vec![("Compiler", compiler), ("Run-time", runtime)]
+        })
+        .fm_options(|_, _, fmb| {
+            // Use `%%` to match non-literal LLVM variables in tests.
+            let ptn_re = Regex::new(r"%%.+?\b").unwrap();
+            let text_re = Regex::new(r"%.+?\b").unwrap();
+            fmb.name_matcher(ptn_re, text_re)
         })
         .run();
 }
