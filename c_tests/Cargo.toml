@@ -10,6 +10,9 @@ name = "c_tests"
 path = "run.rs"
 harness = false
 
+[dependencies]
+regex = "1.5.4"
+
 [dev-dependencies]
 lang_tester = "0.7.0"
 once_cell = "1.8.0"
