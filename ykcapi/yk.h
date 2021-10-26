@@ -30,25 +30,20 @@ typedef uint32_t YkHotThreshold;
 #error Unable to determine type of HotThreshold
 #endif
 
-// Return a reference to the global `MT` instance: at any point, there is at
-// most one of these per process and an instance will be created if it does not
-// already exist.
-YkMT *yk_mt(void);
-
-// Return this `MT` instance's current hot threshold. Notice that this value
-// can be changed by other threads and is thus potentially stale as soon as it
-// is read.
-YkHotThreshold yk_mt_hot_threshold(YkMT *);
-
-// Attempt to execute a compiled trace for location `loc`. `NULL` may be passed
-// to `loc` to indicate that this particular point in the user's program cannot
-// ever be the beginning of a trace.
-void yk_control_point(YkMT *, YkLocation *);
+// Notify yk that an iteration of an interpreter loop is about to start. The
+// argument passed uniquely identifies the current location in the user's
+// program. A call to this function may cause yk to start/stop tracing, or to
+// execute JITted code.
+//
+// FIXME: should accept `YkLocation`, not `int`.
+// FIXME: once the above is fixed, talk about locations for which a loop cannot
+// start.
+void yk_control_point(int);
 
 // Create a new `Location`.
 //
-// Note that a `Location` created by this call must not simply be discarded: if
-// no longer wanted, it must be passed to `yk_drop_location` to allow
+// Note that a `Location` created by this call must not simply be discarded:
+// if no longer wanted, it must be passed to `yk_drop_location` to allow
 // appropriate clean-up.
 YkLocation yk_location_new(void);
 

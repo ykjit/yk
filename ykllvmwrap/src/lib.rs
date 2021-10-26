@@ -1,5 +1,8 @@
 // Exporting parts of the LLVM C++ API not present in the LLVM C API.
 
+// FIXME: C++ exceptions may unwind over the Rust FFI?
+// https://github.com/ykjit/yk/issues/426
+
 use libc::{c_void, size_t};
 use std::os::raw::c_char;
 

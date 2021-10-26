@@ -1,3 +1,4 @@
+// ignore: broken during new control point design
 // Compiler:
 // Run-time:
 //   stdout:

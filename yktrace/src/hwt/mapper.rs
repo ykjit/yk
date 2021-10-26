@@ -136,9 +136,9 @@ impl HWTMapper {
                         // same basic block or if we are executing the next machine basic block for
                         // that same block. In the latter case, we mustn't record the block in the
                         // trace again.
-                        if !(ret_irblocks.last() == Some(&irblock)
-                            && prev_block.as_ref().map(|x| x.first_instr())
-                                != Some(block.first_instr()))
+                        if ret_irblocks.last() != Some(&irblock)
+                            || prev_block.as_ref().map(|x| x.first_instr())
+                                == Some(block.first_instr())
                         {
                             ret_irblocks.push(irblock);
                         }

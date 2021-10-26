@@ -1,6 +1,7 @@
 // Functions exported only for testing.
 
 #include <stdint.h>
+#include <stdio.h>
 
 #define SW_TRACING 0
 #define HW_TRACING 1
@@ -20,6 +21,8 @@ void __yktrace_irtrace_get(void *trace, size_t idx, char **res_func,
                            size_t *res_bb);
 void *__yktrace_irtrace_compile(void *trace);
 void __yktrace_drop_irtrace(void *trace);
+
+void __yk_debug_print(char *str) { fputs(str, stderr); }
 
 // Blocks the compiler from optimising the specified value or expression.
 //
