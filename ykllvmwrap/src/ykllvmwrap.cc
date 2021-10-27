@@ -30,6 +30,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+// A simple way of separating ykllvmwrap's (private) C++ code into separate
+// files without having to duplicate all of our definitions in header files.
 #include "jitmodbuilder.cc"
 #include "memman.cc"
 
