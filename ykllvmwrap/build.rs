@@ -17,6 +17,8 @@ fn main() {
     comp.flag("-Wall");
     comp.flag("-Werror");
     comp.file("src/ykllvmwrap.cc")
+        .file("src/jitmodbuilder.cc")
+        .file("src/memman.cc")
         .compiler("clang++")
         // Lots of unused parameters in the LLVM headers.
         .flag("-Wno-unused-parameter")
