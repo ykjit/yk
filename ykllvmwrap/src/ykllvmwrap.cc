@@ -32,7 +32,7 @@
 #include <string.h>
 
 #include "jitmodbuilder.h"
-#include "memman.cc"
+#include "memman.h"
 
 using namespace llvm;
 using namespace llvm::orc;
