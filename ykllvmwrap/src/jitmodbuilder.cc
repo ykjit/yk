@@ -7,6 +7,7 @@
 
 #include "jitmodbuilder.h"
 
+#include <atomic>
 #include <err.h>
 
 using namespace llvm;
