@@ -198,7 +198,7 @@ class JITModBuilder {
     StringRef CFName = CF->getName();
     void *FAddr = FAddrs[CFName.data()];
     assert(FAddr != nullptr);
-    globalMappings.insert({CF, FAddr});
+    GlobalMappings.insert({CF, FAddr});
   }
 
   void handleCallInst(CallInst *CI, Function *CF, size_t &CurInstrIdx) {
@@ -334,7 +334,7 @@ class JITModBuilder {
 
 public:
   // Store virtual addresses for called functions.
-  std::map<GlobalValue *, void *> globalMappings;
+  std::map<GlobalValue *, void *> GlobalMappings;
   // The function name of this trace.
   string TraceName;
   // Mapping from AOT instructions to JIT instructions.
@@ -737,5 +737,5 @@ createModule(Module *AOTMod, char *FuncNames[], size_t BBs[], size_t TraceLen,
                    FAddrLen);
   auto JITMod = JB.createModule();
   return make_tuple(JITMod, std::move(JB.TraceName),
-                    std::move(JB.globalMappings));
+                    std::move(JB.GlobalMappings));
 }
