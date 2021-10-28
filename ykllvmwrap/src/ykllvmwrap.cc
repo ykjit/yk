@@ -11,6 +11,7 @@
 #include <llvm/DebugInfo/Symbolize/Symbolize.h>
 #include <llvm/ExecutionEngine/ExecutionEngine.h>
 #include <llvm/ExecutionEngine/MCJIT.h>
+#include <llvm/IR/DebugInfo.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/LegacyPassManager.h>
@@ -30,7 +31,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "jitmodbuilder.cc"
+#include "jitmodbuilder.h"
 #include "memman.cc"
 
 using namespace llvm;
@@ -262,8 +263,11 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
 
   DIP.print(DebugIR::AOT, AOTMod);
 
-  JITModBuilder JB(AOTMod, FuncNames, BBs, Len, FAddrKeys, FAddrVals, FAddrLen);
-  auto JITMod = JB.createModule();
+  Module *JITMod;
+  std::string TraceName;
+  std::map<GlobalValue *, void *> GlobalMappings;
+  std::tie(JITMod, TraceName, GlobalMappings) =
+      createModule(AOTMod, FuncNames, BBs, Len, FAddrKeys, FAddrVals, FAddrLen);
   DIP.print(DebugIR::JITPreOpt, JITMod);
 #ifndef NDEBUG
   llvm::verifyModule(*JITMod, &llvm::errs());
@@ -281,5 +285,5 @@ extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
   DIP.print(DebugIR::JITPostOpt, JITMod);
 
   // Compile IR trace and return a pointer to its function.
-  return compileModule(JB.TraceName, JITMod, JB.globalMappings);
+  return compileModule(TraceName, JITMod, GlobalMappings);
 }

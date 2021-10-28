@@ -1,6 +1,13 @@
 // Classes and functions for constructing a new LLVM module from a trace.
 
 #include "llvm/IR/DebugInfo.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/Transforms/Utils/ValueMapper.h"
+
+#include "jitmodbuilder.h"
+
+#include <err.h>
 
 using namespace llvm;
 using namespace std;
@@ -721,3 +728,13 @@ public:
     }
   }
 };
+
+tuple<Module *, string, std::map<GlobalValue *, void *>>
+createModule(Module *AOTMod, char *FuncNames[], size_t BBs[], size_t TraceLen,
+             char *FAddrKeys[], void *FAddrVals[], size_t FAddrLen) {
+  JITModBuilder JB(AOTMod, FuncNames, BBs, TraceLen, FAddrKeys, FAddrVals,
+                   FAddrLen);
+  auto JITMod = JB.createModule();
+  return make_tuple(JITMod, std::move(JB.TraceName),
+                    std::move(JB.globalMappings));
+}
