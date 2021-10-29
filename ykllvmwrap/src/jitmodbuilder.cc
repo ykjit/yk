@@ -686,7 +686,8 @@ public:
     I->getAllMetadata(metadataList);
     for (auto MD : metadataList) {
       NewInst->setMetadata(
-          MD.first, MapMetadata(MD.second, VMap, llvm::RF_MoveDistinctMDs));
+          MD.first,
+          MapMetadata(MD.second, VMap, llvm::RF_ReuseAndMutateDistinctMDs));
     }
 
     // And finally insert the new instruction into the JIT module.
