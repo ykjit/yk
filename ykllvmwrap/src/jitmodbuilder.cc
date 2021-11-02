@@ -802,6 +802,19 @@ public:
           continue;
 
         if (isa<CallInst>(I)) {
+
+          if (isa<IntrinsicInst>(I)) {
+            // All intrinsic calls must have metadata attached that specifies
+            // whether it has been inlined or not.
+            MDNode *IMD = I->getMetadata("yk.intrinsic.inlined");
+            assert(IMD != nullptr);
+            ConstantAsMetadata *CAM =
+                cast<ConstantAsMetadata>(IMD->getOperand(0));
+            if (CAM->getValue()->isOneValue()) {
+              continue;
+            }
+          }
+
           CallInst *CI = cast<CallInst>(I);
           Function *CF = CI->getCalledFunction();
           if (CF == nullptr) {
