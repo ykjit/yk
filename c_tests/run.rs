@@ -106,11 +106,20 @@ fn mk_compiler(exe: &Path, src: &Path, opt: &str, extra_objs: &[PathBuf]) -> Com
         "-flto",
         // Embed LLVM bitcode as late as possible.
         "-Wl,--mllvm=--embed-bitcode-final",
-        // Disable machines passes that would interfere with block mapping.
+        // Disable machine passes that would interfere with block mapping.
+        //
+        // If you are trying to figure out which pass is breaking the mapping, you can add
+        // "-Wl,--mllvm=--print-after-all" to see the MIR after each pass. When you have foud the
+        // candidate, look in `TargetPassConfig.cpp` (in ykllvm) to find the CLI switch required to
+        // disable the pass.
         "-Wl,--mllvm=--disable-branch-fold",
         "-Wl,--mllvm=--disable-block-placement",
+        "-Wl,--mllvm=--disable-early-taildup", // Interferes with the BlockDisambiguate pass.
+        "-Wl,--mllvm=--disable-tail-duplicate", // ^^^
         // Ensure control point is patched.
         "-Wl,--mllvm=--yk-patch-control-point",
+        // Ensure we can unambiguously map back to LLVM IR blocks.
+        "-Wl,--mllvm=--yk-block-disambiguate",
         // Emit a basic block map section. Used for block mapping.
         "-Wl,--lto-basic-block-sections=labels",
         // FIXME: https://github.com/ykjit/yk/issues/381

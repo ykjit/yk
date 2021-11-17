@@ -115,7 +115,6 @@ impl HWTMapper {
     ) -> Result<(Vec<IRBlock>, HashMap<CString, *const c_void>), HWTracerError> {
         let mut ret_irblocks: Vec<IRBlock> = Vec::new();
         let mut itr = trace.iter_blocks();
-        let mut prev_block: Option<hwtracer::Block> = None;
         while let Some(block) = itr.next() {
             let block = block?;
             let irblocks = self.map_block(&block);
@@ -131,15 +130,12 @@ impl HWTMapper {
             } else {
                 for irblock in irblocks.into_iter() {
                     if let Some(irblock) = irblock {
-                        // An IR basic block may map to >1 *machine* basic block. If we see the
-                        // same IR block repeated, then we need to check if we re-executing the
-                        // same basic block or if we are executing the next machine basic block for
-                        // that same block. In the latter case, we mustn't record the block in the
-                        // trace again.
-                        if ret_irblocks.last() != Some(&irblock)
-                            || prev_block.as_ref().map(|x| x.first_instr())
-                                == Some(block.first_instr())
-                        {
+                        // The `BlockDisambiguate` pass in ykllvm ensures that no high-level LLVM
+                        // IR block ever branches straight back to itself, so if we see the same
+                        // high-level block more than once consecutively in a trace, then we know
+                        // that the IR block has been lowered to multiple machine blocks during
+                        // code-gen, and that we should only push the IR block once.
+                        if ret_irblocks.last() != Some(&irblock) {
                             ret_irblocks.push(irblock);
                         }
                     } else {
@@ -154,7 +150,6 @@ impl HWTMapper {
                     }
                 }
             }
-            prev_block = Some(block);
         }
         // Strip any trailing unmappable blocks.
         if !ret_irblocks.is_empty() {
