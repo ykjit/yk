@@ -141,16 +141,26 @@ fn run_suite(opt: &'static str) {
     // Tests with the filename prefix `debug_` are only run in debug builds.
     #[cfg(cargo_profile = "release")]
     let filter: fn(&Path) -> bool = |p| {
-        p.extension().unwrap().to_str().unwrap() == "c"
-            && !p
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .starts_with("debug_")
+        if let Some(ext) = p.extension() {
+            ext == "c"
+                && !p
+                    .file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .starts_with("debug_")
+        } else {
+            false
+        }
     };
     #[cfg(cargo_profile = "debug")]
-    let filter: fn(&Path) -> bool = |p| p.extension().unwrap().to_str().unwrap() == "c";
+    let filter: fn(&Path) -> bool = |p| {
+        if let Some(ext) = p.extension() {
+            ext == "c"
+        } else {
+            false
+        }
+    };
 
     let tempdir = TempDir::new().unwrap();
     LangTester::new()
