@@ -163,6 +163,12 @@ class JITModBuilder {
   // corresponding extracted values using their index in the struct.
   std::map<uint64_t, Value *> InsertValueMap;
 
+  // The block we branch to when a guard fails. Starts null, lazily created.
+  BasicBlock *GuardFailBB;
+
+  // The LLVM type for a C `int` on the current machine.
+  Type *IntTy;
+
   Value *getMappedValue(Value *V) {
     if (VMap.find(V) != VMap.end()) {
       return VMap[V];
@@ -252,6 +258,41 @@ class JITModBuilder {
     }
   }
 
+  void handleBranchInst(Function *JITFunc, BasicBlock *NextBlock,
+                        Instruction *I) {
+    assert(isa<BranchInst>(I));
+    BranchInst *BI = cast<BranchInst>(I);
+    LLVMContext &Context = JITMod->getContext();
+
+    if (BI->isUnconditional())
+      return; // Control-flow can not diverge. No guard required.
+
+    // A conditional branch should have two successors and one of them should
+    // be the block we observed in the trace.
+    assert(BI->getNumSuccessors() == 2);
+    assert((BI->getSuccessor(0) == NextBlock) ||
+           (BI->getSuccessor(1) == NextBlock));
+
+    // Get/create the guard failure and success blocks.
+    BasicBlock *FailBB = getGuardFailureBlock(JITFunc);
+    BasicBlock *SuccBB = BasicBlock::Create(Context, "", JITFunc);
+
+    // Insert the guard, using the the original AOT branch condition for now.
+    //
+    // OPT: Could add branch weights to `CreateCondBr` to hint to LLVM that we
+    // expect the guard to rarely fail?
+    BranchInst *Guard = Builder.CreateCondBr(getMappedValue(BI->getCondition()),
+                                             SuccBB, FailBB);
+
+    // If the trace took the false arm of the AOT branch, then we have to
+    // invert the condition of the guard we just inserted into the trace.
+    if (BI->getSuccessor(0) != NextBlock)
+      Guard->swapSuccessors();
+
+    // Continue constructing the trace in the `SuccBB`.
+    Builder.SetInsertPoint(SuccBB);
+  }
+
   void handleReturnInst(Instruction *I) {
     ResumeAfter = InlinedCalls.back();
     InlinedCalls.pop_back();
@@ -332,6 +373,51 @@ class JITModBuilder {
     }
   }
 
+  // Given an `IRBlock`, find and return the LLVM data structures for the basic
+  // block and its parent function.
+  std::pair<Function *, BasicBlock *> getLLVMAOTFuncAndBlock(IRBlock *IB) {
+    Function *F = AOTMod->getFunction(IB->FuncName);
+    assert(F != nullptr);
+
+    // Skip to the correct block.
+    auto It = F->begin();
+    std::advance(It, IB->BBIdx);
+    BasicBlock *BB = &*It;
+
+    return {F, BB};
+  }
+
+  // Returns a pointer to the guard failure block, creating it if necessary.
+  //
+  // FIXME: currently we crash out with `errx(3)`, but we should actually
+  // invoke a stop-gap interpreter.
+  BasicBlock *getGuardFailureBlock(Function *JITFunc) {
+    if (GuardFailBB == nullptr) {
+      // If `JITFunc` contains no blocks already, then the guard failure block
+      // becomes the entry block. This would lead to a trace that
+      // unconditionally and immediately fails a guard.
+      assert(JITFunc->getBasicBlockList().size() != 0);
+
+      // Declare `errx(3)`.
+      LLVMContext &Context = JITFunc->getContext();
+      FunctionType *LibcErrxFuncTy = FunctionType::get(
+          Type::getVoidTy(Context),
+          {IntTy, Type::getInt8Ty(Context)->getPointerTo()}, true);
+      Function *LibcErrxFunc = llvm::Function::Create(
+          LibcErrxFuncTy, GlobalValue::ExternalLinkage, "errx", JITMod);
+
+      // Create the block.
+      GuardFailBB = BasicBlock::Create(Context, "guardfail", JITFunc);
+      IRBuilder<> FailBuilder(GuardFailBB);
+      Value *ExitCode = ConstantInt::get(IntTy, EXIT_SUCCESS);
+      Value *Fmt =
+          FailBuilder.CreateGlobalStringPtr(StringRef("guard-failure"));
+      FailBuilder.CreateCall(LibcErrxFuncTy, LibcErrxFunc, {ExitCode, Fmt});
+      FailBuilder.CreateUnreachable(); // `errx(3)` is non-convergent.
+    }
+    return GuardFailBB;
+  }
+
 public:
   // Store virtual addresses for called functions.
   std::map<GlobalValue *, void *> GlobalMappings;
@@ -347,8 +433,10 @@ public:
       : Builder(AOTMod->getContext()), InpTrace(FuncNames, BBs, TraceLen),
         FAddrs(FAddrKeys, FAddrVals, FAddrLen) {
     this->AOTMod = AOTMod;
-
-    JITMod = new Module("", AOTMod->getContext());
+    LLVMContext &Context = AOTMod->getContext();
+    JITMod = new Module("", Context);
+    GuardFailBB = nullptr;
+    IntTy = Type::getIntNTy(Context, sizeof(int) * 8);
   }
 
   // Generate the JIT module.
@@ -461,19 +549,13 @@ public:
       assert(MaybeIB.hasValue());
       IRBlock IB = MaybeIB.getValue();
 
-      // Get a traced function so we can extract blocks from it.
-      Function *F = AOTMod->getFunction(IB.FuncName);
-      if (!F)
-        errx(EXIT_FAILURE, "can't find function %s", IB.FuncName);
+      Function *F;
+      BasicBlock *BB;
+      std::tie(F, BB) = getLLVMAOTFuncAndBlock(&IB);
 
       if (F->getName() == YK_NEW_CONTROL_POINT) {
         continue;
       }
-
-      // Skip to the correct block.
-      auto It = F->begin();
-      std::advance(It, IB.BBIdx);
-      BasicBlock *BB = &*It;
 
       assert(LastCompletedBlocks.size() >= 1);
       LastCompletedBlocks.back() = NextCompletedBlock;
@@ -559,10 +641,28 @@ public:
           continue;
         }
 
-        if ((isa<BranchInst>(I)) || isa<SwitchInst>(I)) {
-          // FIXME Replace all potential CFG divergence with guards.
-          continue;
+        if (isa<BranchInst>(I)) {
+          // Should not be an unmappable hole in the trace after a branch.
+          assert(InpTrace[Idx + 1].hasValue());
+
+          // Peek ahead in the trace so that an appropriate guard can be
+          // constructed.
+          IRBlock NextIB = InpTrace[Idx + 1].getValue();
+          BasicBlock *NextBB;
+          Function *NextFunc;
+          std::tie(NextFunc, NextBB) = getLLVMAOTFuncAndBlock(&NextIB);
+
+          // A branch shouldn't land us in another function.
+          assert(NextFunc == F);
+
+          handleBranchInst(JITFunc, NextBB, &*I);
+          break;
         }
+
+        // FIXME: These should be handled in a similar way as for a
+        // `BranchInst`. i.e. with guards.
+        if ((isa<SwitchInst>(I)) || (isa<IndirectBrInst>(I)))
+          break;
 
         if (isa<ReturnInst>(I)) {
           handleReturnInst(&*I);
