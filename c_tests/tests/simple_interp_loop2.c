@@ -4,27 +4,41 @@
 //   env-var: YKD_PRINT_IR=jit-pre-opt
 //   stderr:
 //     jit-state: start-tracing
+//     pc=0, mem=3
+//     pc=1, mem=3
+//     pc=2, mem=3
+//     pc=3, mem=2
 //     ...
 //     define internal %YkCtrlPointVars @__yk_compiled_trace_0(%YkCtrlPointVars %0) {
-//        ...
-//        %%x = extractvalue %YkCtrlPointVars...
-//        ...
-//        %%y = insertvalue %YkCtrlPointVars...
-//        ...
-//        ret %YkCtrlPointVars %%ret
+//       ...
+//       %{{x}} = extractvalue %YkCtrlPointVars...
+//       ...
+//     {{guard-fail-bb}}:...
+//       ...
+//       call void (i32, i8*, ...) @errx(i32 0,...
+//       unreachable
+//
+//     {{another-bb}}:...
+//       ...
+//       %{{restart-cond}} = icmp sgt i32 %{{mem}}, 0...
+//       br i1 %{{restart-cond}}, label %{{restart-bb}}, label %{{guard-fail-bb}}
+//
+//     {{restart-bb}}:...
+//       ...
+//       ret %YkCtrlPointVars %{{ret}}
 //     }
 //     ...
 //     jit-state: stop-tracing
-//     0
-//     1
-//     2
-//     3
+//     pc=0, mem=2
+//     pc=1, mem=2
+//     pc=2, mem=2
+//     pc=3, mem=1
 //     jit-state: enter-jit-code
-//     0
-//     1
-//     2
-//     3
-//     jit-state: exit-jit-code
+//     pc=0, mem=1
+//     pc=1, mem=1
+//     pc=2, mem=1
+//     pc=3, mem=0
+//     simple_interp_loop2: guard-failure
 //     ...
 #include <assert.h>
 #include <stdbool.h>
@@ -61,7 +75,7 @@ int main(int argc, char **argv) {
     yk_control_point(pc);
     assert(pc < prog_len);
     int bc = prog[pc];
-    fprintf(stderr, "%d\n", pc);
+    fprintf(stderr, "pc=%d, mem=%d\n", pc, mem);
     switch (bc) {
     case NOP:
       pc++;
@@ -83,7 +97,7 @@ int main(int argc, char **argv) {
     }
   }
 done:
+  abort(); // FIXME: unreachable due to aborting guard failure earlier.
   NOOPT_VAL(pc);
-  assert(pc == 5);
   return (EXIT_SUCCESS);
 }

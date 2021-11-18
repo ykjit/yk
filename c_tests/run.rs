@@ -206,9 +206,10 @@ fn run_suite(opt: &'static str) {
             vec![("Compiler", compiler), ("Run-time", runtime)]
         })
         .fm_options(|_, _, fmb| {
-            // Use `%%` to match non-literal LLVM variables in tests.
-            let ptn_re = Regex::new(r"%%.+?\b").unwrap();
-            let text_re = Regex::new(r"%.+?\b").unwrap();
+            // Use `{{}}` to match non-literal strings in tests.
+            // E.g. use `%{{var}}` to capture the name of a variable.
+            let ptn_re = Regex::new(r"\{\{.+?\}\}").unwrap();
+            let text_re = Regex::new(r".+?\b").unwrap();
             fmb.name_matcher(ptn_re, text_re)
         })
         .run();
