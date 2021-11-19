@@ -7,8 +7,11 @@
 //     i=3
 //     --- Begin jit-pre-opt ---
 //     ...
-//       %{{cond}} = icmp...
-//       br i1 %{{cond}}, label %{{succ-bb}}, label %guardfail
+//       switch i32 %{{cond}}, label %{{default-bb}} [
+//         i32 100, label %guardfail
+//         i32 200, label %guardfail
+//         i32 300, label %guardfail
+//       ]
 //
 //     guardfail:...
 //     ...
@@ -17,9 +20,9 @@
 //     i=2
 //     jit-state: enter-jit-code
 //     i=1
-//     switch: guard-failure
+//     switch_default: guard-failure
 
-// Check that tracing a non-default switch arm works correctly.
+// Check that tracing the default arm of a switch works correctly.
 
 #include <assert.h>
 #include <stdio.h>
@@ -31,22 +34,19 @@
 int main(int argc, char **argv) {
   int loc = 0;
   int i = 3;
-  int j = 300;
   NOOPT_VAL(i);
-  NOOPT_VAL(j);
   while (i > 0) {
     yk_control_point(loc);
     fprintf(stderr, "i=%d\n", i);
-    switch (j) {
+    switch (i) {
       case 100:
-        i = 997;
+        fprintf(stderr, "one hundred\n");
       case 200:
-        i = 998;
+        fprintf(stderr, "two hundred\n");
       case 300:
-        i--;
-        break;
+        fprintf(stderr, "three hundred\n");
       default:
-        i = 999;
+        i--;
     }
   }
   abort(); // FIXME: unreachable due to aborting guard failure earlier.
