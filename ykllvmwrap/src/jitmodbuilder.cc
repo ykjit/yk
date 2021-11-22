@@ -722,8 +722,6 @@ public:
       SuccBB = handleSwitchInst(JITFunc, NextBB, &*I);
     } else {
       assert(isa<IndirectBrInst>(I));
-      // FIXME: Implement guards for these.
-      //
       // It isn't necessary to copy the indirect branch into the `JITMod`
       // as the successor block is known from the trace. However, naively
       // not copying the branch would lead to dangling references in the
@@ -735,6 +733,9 @@ public:
       Value *FirstOp = I->getOperand(0);
       assert(VMap.find(FirstOp) != VMap.end());
       DeleteDeadOnFinalise.push_back(VMap[FirstOp]);
+      // FIXME: guards for indirect branches are not yet implemented.
+      // https://github.com/ykjit/yk/issues/438
+      abort();
     }
 
     // If a guard was emitted, then the block we had been building the trace
