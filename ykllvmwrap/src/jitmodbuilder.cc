@@ -22,7 +22,6 @@ uint64_t getNewTraceIdx() {
 }
 
 #define TRACE_FUNC_PREFIX "__yk_compiled_trace_"
-#define YKTRACE_STOP "__yktrace_stop_tracing"
 #define YK_NEW_CONTROL_POINT "yk_new_control_point"
 #define YK_CONTROL_POINT_ARG_IDX 1
 
@@ -642,9 +641,6 @@ public:
               break;
             }
             continue;
-          } else if (CF->getName() == YKTRACE_STOP) {
-            finalise(AOTMod, &Builder);
-            return JITMod;
           } else if (NewControlPointCall != nullptr) {
             handleCallInst(CI, CF, CurInstrIdx);
             break;
