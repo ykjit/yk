@@ -258,14 +258,16 @@ class JITModBuilder {
     }
   }
 
-  void handleBranchInst(Function *JITFunc, BasicBlock *NextBlock,
-                        Instruction *I) {
+  // Emits a guard for a LLVM `br` instruction, returning a pointer to the
+  // guard success block, or null if no guard was required.
+  BasicBlock *handleBranchInst(Function *JITFunc, BasicBlock *NextBlock,
+                               Instruction *I) {
     assert(isa<BranchInst>(I));
     BranchInst *BI = cast<BranchInst>(I);
     LLVMContext &Context = JITMod->getContext();
 
     if (BI->isUnconditional())
-      return; // Control-flow can not diverge. No guard required.
+      return nullptr; // Control-flow can not diverge. No guard required.
 
     // A conditional branch should have two successors and one of them should
     // be the block we observed in the trace.
@@ -289,8 +291,37 @@ class JITModBuilder {
     if (BI->getSuccessor(0) != NextBlock)
       Guard->swapSuccessors();
 
-    // Continue constructing the trace in the `SuccBB`.
-    Builder.SetInsertPoint(SuccBB);
+    return SuccBB;
+  }
+
+  // Emits a guard for a LLVM `switch` instruction, returning a pointer to the
+  // guard success block.
+  BasicBlock *handleSwitchInst(Function *JITFunc, BasicBlock *NextBlock,
+                               Instruction *I) {
+    assert(isa<SwitchInst>(I));
+    SwitchInst *SI = cast<SwitchInst>(I);
+
+    // Get/create the guard failure and success blocks.
+    LLVMContext &Context = JITMod->getContext();
+    BasicBlock *FailBB = getGuardFailureBlock(JITFunc);
+    BasicBlock *SuccBB = BasicBlock::Create(Context, "", JITFunc);
+
+    // Determine which switch case the trace took.
+    ConstantInt *MatchedValue = SI->findCaseDest(NextBlock);
+    if (MatchedValue != nullptr) {
+      // A non-default case was taken.
+      Value *Cmp = Builder.CreateICmpEQ(getMappedValue(SI->getCondition()),
+                                        MatchedValue);
+      Builder.CreateCondBr(Cmp, SuccBB, FailBB);
+    } else {
+      // The default case was taken.
+      SwitchInst *NewSI = Builder.CreateSwitch(
+          getMappedValue(SI->getCondition()), SuccBB, SI->getNumCases());
+      for (SwitchInst::CaseHandle &Case : SI->cases())
+        NewSI->addCase(Case.getCaseValue(), FailBB);
+    }
+
+    return SuccBB;
   }
 
   void handleReturnInst(Instruction *I) {
@@ -625,44 +656,11 @@ public:
         if (NewControlPointCall == nullptr)
           continue;
 
-        if (isa<IndirectBrInst>(I)) {
-          // FIXME Replace all potential CFG divergence with guards.
-          //
-          // It isn't necessary to copy the indirect branch into the `JITMod`
-          // as the successor block is known from the trace. However, naively
-          // not copying the branch would lead to dangling references in the IR
-          // because the `address` operand typically (indirectly) references
-          // AOT block addresses not present in the `JITMod`. Therefore we also
-          // remove the IR instruction which defines the `address` operand and
-          // anything which also becomes dead as a result (recursively).
-          Value *FirstOp = I->getOperand(0);
-          assert(VMap.find(FirstOp) != VMap.end());
-          DeleteDeadOnFinalise.push_back(VMap[FirstOp]);
-          continue;
-        }
-
-        if (isa<BranchInst>(I)) {
-          // Should not be an unmappable hole in the trace after a branch.
-          assert(InpTrace[Idx + 1].hasValue());
-
-          // Peek ahead in the trace so that an appropriate guard can be
-          // constructed.
-          IRBlock NextIB = InpTrace[Idx + 1].getValue();
-          BasicBlock *NextBB;
-          Function *NextFunc;
-          std::tie(NextFunc, NextBB) = getLLVMAOTFuncAndBlock(&NextIB);
-
-          // A branch shouldn't land us in another function.
-          assert(NextFunc == F);
-
-          handleBranchInst(JITFunc, NextBB, &*I);
+        if ((isa<BranchInst>(I)) || (isa<IndirectBrInst>(I)) ||
+            (isa<SwitchInst>(I))) {
+          handleBranchingControlFlow(&*I, Idx, JITFunc);
           break;
         }
-
-        // FIXME: These should be handled in a similar way as for a
-        // `BranchInst`. i.e. with guards.
-        if ((isa<SwitchInst>(I)) || (isa<IndirectBrInst>(I)))
-          break;
 
         if (isa<ReturnInst>(I)) {
           handleReturnInst(&*I);
@@ -699,6 +697,51 @@ public:
     Builder.CreateRet(VMap[CPCI]);
     finalise(AOTMod, &Builder);
     return JITMod;
+  }
+
+  void handleBranchingControlFlow(Instruction *I, size_t TraceIdx,
+                                  Function *JITFunc) {
+    // First, peek ahead in the trace and retrieve the next block. We need this
+    // so that we can insert an appropriate guard into the trace. A block must
+    // exist at `InpTrace[TraceIdx + 1]` because the branch instruction must
+    // transfer to a successor block, and branching cannot turn off tracing.
+    assert(InpTrace[TraceIdx + 1].hasValue()); // Should be a mappable block.
+    IRBlock NextIB = InpTrace[TraceIdx + 1].getValue();
+    BasicBlock *NextBB;
+    Function *NextFunc;
+    std::tie(NextFunc, NextBB) = getLLVMAOTFuncAndBlock(&NextIB);
+
+    // The branching instructions we are handling here are all transfer to a
+    // block in the same function.
+    assert(NextFunc == I->getFunction());
+
+    BasicBlock *SuccBB = nullptr;
+    if (isa<BranchInst>(I)) {
+      SuccBB = handleBranchInst(JITFunc, NextBB, &*I);
+    } else if (isa<SwitchInst>(I)) {
+      SuccBB = handleSwitchInst(JITFunc, NextBB, &*I);
+    } else {
+      assert(isa<IndirectBrInst>(I));
+      // FIXME: Implement guards for these.
+      //
+      // It isn't necessary to copy the indirect branch into the `JITMod`
+      // as the successor block is known from the trace. However, naively
+      // not copying the branch would lead to dangling references in the
+      // IR because the `address` operand typically (indirectly)
+      // references AOT block addresses not present in the `JITMod`.
+      // Therefore we also remove the IR instruction which defines the
+      // `address` operand and anything which also becomes dead as a
+      // result (recursively).
+      Value *FirstOp = I->getOperand(0);
+      assert(VMap.find(FirstOp) != VMap.end());
+      DeleteDeadOnFinalise.push_back(VMap[FirstOp]);
+    }
+
+    // If a guard was emitted, then the block we had been building the trace
+    // into will have been terminated (to check the guard condition) and we
+    // should resume building the trace into the new guard success block.
+    if (SuccBB != nullptr)
+      Builder.SetInsertPoint(SuccBB);
   }
 
   void handleOperand(Value *Op) {
