@@ -31,7 +31,9 @@
 //     jit-state: enter-jit-code
 //     i=3
 //     jit-state: exit-jit-code
+//     jit-state: enter-jit-code
 //     i=2
+//     jit-state: exit-jit-code
 //     jit-state: enter-jit-code
 //     i=1
 //     simple: guard-failure
