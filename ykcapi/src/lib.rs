@@ -9,14 +9,14 @@
 #![feature(bench_black_box)]
 #![feature(c_variadic)]
 
-use std::{ffi::c_void, os::raw::c_int};
+use std::ffi::c_void;
 use ykrt::Location;
 use ykutil;
 
 // The "dummy control point" that is replaced in an LLVM pass.
 // FIXME for now the "location identifiers" are assumed to be `int`.
 #[no_mangle]
-pub extern "C" fn yk_control_point(_loc: c_int) {
+pub extern "C" fn yk_control_point(_loc: *mut Location) {
     // Intentionally empty.
 }
 

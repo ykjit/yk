@@ -366,7 +366,7 @@ class JITModBuilder {
   // Delete the dead value `V` from its parent, also deleting any dependencies
   // of `V` (i.e. operands) which then become dead.
   void deleteDeadTransitive(Value *V) {
-    assert(V->user_empty()); // The value should be dead.
+    assert(V->user_empty()); // The value must be dead.
     vector<Value *> Work;
     Work.push_back(V);
     while (!Work.empty()) {
@@ -623,6 +623,15 @@ class JITModBuilder {
     }
   }
 
+  // Determines if the LLVM values `V1` and `V2` are instructions defined
+  // within the same LLVM `BasicBlock`. `V1` and `V2` must both be an instance
+  // of `Instruction`.
+  bool areInstrsDefinedInSameBlock(Value *V1, Value *V2) {
+    assert(isa<Instruction>(V1) && isa<Instruction>(V2));
+    return cast<Instruction>(V1)->getParent() ==
+           cast<Instruction>(V2)->getParent();
+  }
+
 public:
   // Store virtual addresses for called functions.
   std::map<GlobalValue *, void *> GlobalMappings;
@@ -660,8 +669,9 @@ public:
     // control point and finish above it. This means that alloca'd variables
     // become undefined (as they are defined outside of the trace) and thus
     // need to be remapped to the input of the compiled trace. SSA values
-    // remain correct as phi nodes at the beginning of the trace automatically
-    // select the appropriate input value.
+    // (from the same block as the control point) remain correct as phi nodes
+    // at the beginning of the trace automatically select the appropriate input
+    // value.
     //
     // For example, once patched, a typical interpreter loop will look like
     // this:
@@ -716,12 +726,18 @@ public:
     // Here `%a` is undefined because we didn't trace its allocation. Instead
     // it needs to be extracted from the `YkCtrlPointVars`, which means we need
     // to replace `%a` with `%anew` in the store instruction. The other value
-    // `%b` doesn't have this problem, since the PHI node already makes sure it
-    // selects the correct SSA value `%binc`.
+    // `%b` doesn't have this problem, since the PHI node in the control point
+    // block already makes sure it selects the correct SSA value `%binc`.
     Value *OutS = CPCI->getArgOperand(1);
+
     while (isa<InsertValueInst>(OutS)) {
       InsertValueInst *IVI = cast<InsertValueInst>(OutS);
-      if (!isa<PHINode>(IVI->getInsertedValueOperand())) {
+      Value *InsertedOperand = IVI->getInsertedValueOperand();
+      //  We need an entry in this map for any live variable that isn't defined
+      //  by a PHI node at the top of the block cotaining the call to the
+      //  control point.
+      if (!(isa<PHINode>(InsertedOperand) &&
+            areInstrsDefinedInSameBlock(InsertedOperand, IVI))) {
         InsertValueMap[*IVI->idx_begin()] = IVI->getInsertedValueOperand();
       }
       OutS = IVI->getAggregateOperand();

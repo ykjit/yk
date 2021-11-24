@@ -32,11 +32,11 @@
 #include <yk_testing.h>
 
 int main(int argc, char **argv) {
-  int loc = 0;
+  YkLocation loc = yk_location_new();
   int i = 3;
   NOOPT_VAL(i);
   while (i > 0) {
-    yk_control_point(loc);
+    yk_control_point(&loc);
     fprintf(stderr, "i=%d\n", i);
     switch (i) {
       case 100:
