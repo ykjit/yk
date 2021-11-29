@@ -54,12 +54,12 @@ void _yk_test(int i, int res) {
 
 int main(int argc, char **argv) {
   int res = 0;
-  int loc = 0;
+  YkLocation loc = yk_location_new();
   int i = 5;
   NOOPT_VAL(res);
   NOOPT_VAL(i);
   while (i > 0) {
-    yk_control_point(loc);
+    yk_control_point(&loc);
     fprintf(stderr, "i=%d\n", i);
     res += 2;
     i--;

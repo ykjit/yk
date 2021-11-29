@@ -59,17 +59,24 @@ int main(int argc, char **argv) {
   int prog[] = {1, 1, 1, 2, 1, 1};
   size_t prog_len = sizeof(prog) / sizeof(prog[0]);
 
-  // The program counter (FIXME: also serving as a location ID for now).
+  // Create one location for each potential PC value.
+  YkLocation locs[prog_len];
+  for (int i = 0; i < prog_len; i++)
+    locs[i] = yk_location_new();
+
+  // The program counter.
   int pc = 0;
 
   NOOPT_VAL(prog);
   NOOPT_VAL(prog_len);
   NOOPT_VAL(pc);
   NOOPT_VAL(mem);
+  NOOPT_VAL(locs);
 
   // interpreter loop.
   while (true) {
-    yk_control_point(pc);
+    YkLocation *loc = &locs[pc];
+    yk_control_point(loc);
     if (pc >= prog_len) {
       exit(0);
     }

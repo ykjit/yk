@@ -8,7 +8,7 @@ struct MT;
 typedef struct MT YkMT;
 
 // A `Location` stores state that the meta-tracer needs to identify hot loops
-// and run associated machine code.
+// and run associated machine code. This is a C mirror of `ykrt::Location`.
 //
 // Each position in the end user's program that may be a control point (i.e.
 // the possible start of a trace) must have an associated `Location`. The
@@ -38,7 +38,7 @@ typedef uint32_t YkHotThreshold;
 // FIXME: should accept `YkLocation`, not `int`.
 // FIXME: once the above is fixed, talk about locations for which a loop cannot
 // start.
-void yk_control_point(int);
+void yk_control_point(YkLocation *);
 
 // Create a new `Location`.
 //
