@@ -22,7 +22,7 @@ void __yktrace_irtrace_get(void *trace, size_t idx, char **res_func,
 void *__yktrace_irtrace_compile(void *trace);
 void __yktrace_drop_irtrace(void *trace);
 
-void __yk_debug_print(char *str) { fputs(str, stderr); }
+void __yk_debug_print(char *str);
 
 // Blocks the compiler from optimising the specified value or expression.
 //
