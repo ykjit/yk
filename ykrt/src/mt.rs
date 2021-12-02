@@ -6,6 +6,7 @@
 // Rust's POV.
 #![allow(unreachable_code, unused_variables, dead_code)]
 
+use core::ffi::c_void;
 use std::{
     cell::Cell,
     cmp,
@@ -14,7 +15,7 @@ use std::{
     ptr,
     sync::{
         atomic::{AtomicU32, AtomicUsize, Ordering},
-        Arc,
+        Arc, Mutex as RustMutex,
     },
     thread,
 };
@@ -40,6 +41,29 @@ const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
 static GLOBAL_MT: Lazy<MT> = Lazy::new(|| MT::new());
 thread_local! {static THREAD_MTTHREAD: MTThread = MTThread::new();}
 
+/// Actions that can be issued to the control point when transitioning a `Location`. These values
+/// are tags used in a `usize`. See the comment next to `transition_location_simple()` for detailed
+/// information.
+const JITACTION_NOP: usize = 1;
+const JITACTION_START_TRACING: usize = 2;
+const JITACTION_STOP_TRACING: usize = 3;
+
+// The mask for the above tagging scheme.
+const JITACTION_MASK: usize = 0b11;
+
+// FIXME: This struct should not exist. It is part of an over-simplified interim design. Not thread
+// safe, only allows one binary trace etc. To fix this we need to properly use the information
+// encoded in a `Location` by hooking in full-blown `transition_location()`.
+//
+// Also the pointers in this struct have been stored as `usize`s, as Rust gets upset that pointers
+// can't be shared across threads safely. Rust doesn't know that the design is (for now)
+// single-threaded.
+struct JITState {
+    start_loc: usize,  // really a `*const Location`.
+    trace_code: usize, // really a `*const c_void`.
+    are_we_tracing: bool,
+}
+
 #[derive(Clone)]
 /// A meta-tracer. Note that this is conceptually a "front-end" to the actual meta-tracer akin to
 /// an `Rc`: this struct can be freely `clone()`d without duplicating the underlying meta-tracer.
@@ -62,6 +86,12 @@ impl MT {
             max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
             active_worker_threads: AtomicUsize::new(0),
             tracing_kind: TracingKind::default(),
+            // FIXME: this will be removed when `transition_location()` is used.
+            jit_state: RustMutex::new(JITState {
+                start_loc: ptr::null::<Location>() as usize,
+                trace_code: ptr::null::<c_void>() as usize,
+                are_we_tracing: false,
+            }),
         };
         Self {
             inner: Arc::new(inner),
@@ -139,9 +169,83 @@ impl MT {
         }
     }
 
-    /// `Location`s represent a statemachine: this function transitions to the next state (which
-    /// may be the same as the previous state!). If this results in a compiled trace, it returns
-    /// `Some(pointer_to_trace_function)`.
+    // Stores the address of some JITted code inside the specified `Location`.
+    //
+    // This is required because when `transition_location_simple()` returns
+    // `JITACTION_STOP_TRACING`, the control point starts compiling executable code. Once
+    // compilation is complete, the address of the code needs to be stored back into the correct
+    // `Location`.
+    pub fn set_loc_code_ptr(loc: *mut Location, code: *const c_void) {
+        let mt = MT::global();
+        let js = &mut mt.inner.jit_state.lock().unwrap();
+        js.trace_code = code as usize;
+    }
+
+    /// FIXME: This is an interim version of `transition_location()` with (over-)simplified logic.
+    /// The state machines of `Location`s isn't properly hooked in, but this is the proposed
+    /// interface.
+    ///
+    /// This function is called once upon each execution of the control point. The `Location` (if
+    /// non-null) may be mutated and the state of the location may be transitioned.
+    ///
+    /// The returned `usize` signals what action the control point should take next (if any). The
+    /// potential values are:
+    ///
+    ///   +---------------------+---------------+---------------------------+
+    ///   | action   \    bits  |   MSB..=bit2  |      bit1 and bit0        |
+    ///   +---------------------+---------------+---------------------------+
+    ///   | nothing             |       0       | JITACTION_NOP             |
+    ///   | start tracing       |       0       | JITACTION_START_TRACING   |
+    ///   | stop tracing        |       0       | JITACTION_STOP_TRACING    |
+    ///   | execute JITted code |     aligned pointer to JITted code        |
+    ///   +---------------------+-------------------------------------------+
+    ///
+    /// In other words, if the value is neither `JITACTION_NOP`, `JITACTION_START_TRACING`, nor
+    /// `JITACTION_STOP_TRACING`, then the encoded action is to execute JITted code, and the full
+    /// `usize` value encodes a pointer to the executable code.
+    ///
+    /// Values not listed in the table are invalid encodings.
+    ///
+    /// This encoding scheme assumes that the allocator used to obtain heap memory for JITted code
+    /// will align allocations with at least two zero-valued least-significant bits. In other
+    /// words, we assume (and assert) that the `JITACTION_*` values are invalid aligned pointer
+    /// values.
+    ///
+    /// If a null `Location` pointer is passed, then this signals to the JIT that a loop cannot
+    /// start at this point in the interpreter. In this case the function always returns
+    /// `JITACTION_NOP`.
+    pub fn transition_location_simple(loc: *mut Location) -> usize {
+        // If a null location was passed, then a trace cannot start here.
+        if loc == ptr::null_mut() {
+            return JITACTION_NOP;
+        }
+
+        let loc_usize = loc as usize;
+        let mt = MT::global();
+        let js = &mut mt.inner.jit_state.lock().unwrap();
+        if js.are_we_tracing {
+            if js.start_loc == loc_usize {
+                js.are_we_tracing = false;
+                JITACTION_STOP_TRACING
+            } else {
+                JITACTION_NOP
+            }
+        } else {
+            // We are not currently collecting a trace.
+            if js.trace_code == ptr::null::<c_void>() as usize {
+                js.are_we_tracing = true;
+                js.start_loc = loc_usize;
+                JITACTION_START_TRACING
+            } else if js.start_loc == loc_usize {
+                // Check our alignment assumptions.
+                debug_assert_eq!(js.trace_code & JITACTION_MASK, 0);
+                js.trace_code
+            } else {
+                JITACTION_NOP
+            }
+        }
+    }
+
     fn transition_location(&self, mtt: &MTThread, loc: &Location) {
         let mut ls = loc.load(Ordering::Relaxed);
 
@@ -357,6 +461,8 @@ struct MTInner {
     /// [`max_worker_threads`].
     active_worker_threads: AtomicUsize,
     tracing_kind: TracingKind,
+    // FIXME: this should not exist.
+    jit_state: RustMutex<JITState>,
 }
 
 /// A meta-tracer aware thread. Note that this is conceptually a "front-end" to the actual
