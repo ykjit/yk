@@ -1,7 +1,5 @@
 //! Utilities for collecting and decoding traces.
 
-#![feature(thread_local_const_init)]
-
 mod errors;
 use libc::c_void;
 use std::{
