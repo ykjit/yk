@@ -1,7 +1,5 @@
 //! Utilities for collecting and decoding traces.
 
-#![feature(thread_local_const_init)]
-
 mod errors;
 use libc::c_void;
 use std::{
@@ -14,6 +12,8 @@ mod hwt;
 
 pub use errors::InvalidTraceError;
 pub use hwt::mapper::BlockMap;
+
+pub(crate) static CONTROL_POINT_SYM: &str = "yk_new_control_point";
 
 thread_local! {
     // When `Some`, contains the `ThreadTracer` for the current thread. When `None`, the current
@@ -56,6 +56,10 @@ pub struct IRBlock {
 }
 
 impl IRBlock {
+    pub(crate) fn new(func_name: CString, bb: usize) -> Self {
+        Self { func_name, bb }
+    }
+
     pub fn func_name(&self) -> &CStr {
         &self.func_name.as_c_str()
     }
@@ -75,6 +79,15 @@ impl IRBlock {
     /// Determines whether `self` represents unmappable code.
     pub fn is_unmappable(&self) -> bool {
         self.bb == usize::MAX
+    }
+
+    /// Returns an IRBlock whose `func_name` is that of the generated control point.
+    #[cfg(test)]
+    pub(crate) fn control_point() -> Self {
+        Self {
+            func_name: CString::new(CONTROL_POINT_SYM).unwrap(),
+            bb: 0,
+        }
     }
 }
 

@@ -11,7 +11,7 @@
 
 use std::ffi::{c_void, CStr};
 use std::os::raw::c_char;
-use ykrt::Location;
+use ykrt::{Location, MT};
 use ykutil;
 
 // The "dummy control point" that is replaced in an LLVM pass.
@@ -44,6 +44,18 @@ pub extern "C" fn __ykutil_get_llvmbc_section(res_addr: *mut *const c_void, res_
 #[no_mangle]
 pub extern "C" fn __yk_debug_print(s: *const c_char) {
     eprintln!("{}", unsafe { CStr::from_ptr(s) }.to_str().unwrap());
+}
+
+/// Decides what action to take (if any) upon encountering a location.
+#[no_mangle]
+pub extern "C" fn __ykrt_transition_location(loc: *mut Location) -> usize {
+    MT::transition_location_simple(loc)
+}
+
+/// Stores the pointer to JITted code for the location `loc`.
+#[no_mangle]
+pub extern "C" fn __ykrt_set_loc_code_ptr(loc: *mut Location, code: *const c_void) {
+    ykrt::MT::set_loc_code_ptr(loc, code)
 }
 
 /// The following module contains exports only used for testing from external C code.
