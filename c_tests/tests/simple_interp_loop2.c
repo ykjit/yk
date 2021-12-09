@@ -59,7 +59,7 @@ int mem = 3;
 
 int main(int argc, char **argv) {
   // A hard-coded program to execute.
-  int prog[] = {0, 0, 1, 2, 0, 3};
+  int prog[] = {NOP, NOP, DEC, RESTART_IF_NOT_ZERO, NOP, EXIT};
   size_t prog_len = sizeof(prog) / sizeof(prog[0]);
 
   // Create one location for each potential PC value.
