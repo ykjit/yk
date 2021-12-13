@@ -155,12 +155,9 @@ class JITModBuilder {
   // correct incoming value when tracing a PHI node.
   vector<BasicBlock *> LastCompletedBlocks;
 
-  // Since a trace starts tracing after the control point but ends before it,
-  // we need to map the values inserted into the `YkCtrlPointVars` (appearing
-  // before the control point) to the extracted values (appearing after the
-  // control point). This map helps to match inserted values to their
-  // corresponding extracted values using their index in the struct.
-  std::map<uint64_t, Value *> InsertValueMap;
+  // Maps field indices in the `YkCtrlPointVars` struct to the value stored
+  // prior to calling the control point.
+  std::map<uint64_t, Value *> LiveIndexMap;
 
   // The block we branch to when a guard fails. Starts null, lazily created.
   BasicBlock *GuardFailBB;
@@ -663,35 +660,52 @@ public:
     Function *F = AOTMod->getFunction(YK_NEW_CONTROL_POINT);
     User *CallSite = F->user_back();
     CallInst *CPCI = cast<CallInst>(CallSite);
-    Type *OutputStructTy = CPCI->getType();
+    Type *YkCtrlPointVarsPtrTy = F->getArg(1)->getType();
+    assert(YkCtrlPointVarsPtrTy->isPointerTy());
 
-    // When assembling a trace, we start collecting instructions below the
-    // control point and finish above it. This means that alloca'd variables
-    // become undefined (as they are defined outside of the trace) and thus
-    // need to be remapped to the input of the compiled trace. SSA values
-    // (from the same block as the control point) remain correct as phi nodes
-    // at the beginning of the trace automatically select the appropriate input
-    // value.
+    // When executing the interpreter loop AOT code, the code before the
+    // control point is executed, then the control point is called, then the
+    // code after the control point is executed.
+    //
+    // But when we collect a trace, the first code we see is the code *after*
+    // the call to the control point, then (assuming the interpreter loop
+    // doesn't exit) we branch back to the start of the loop and only then see
+    // the code before the call to the control point.
+    //
+    // In other words, there is a disparity between the order of the code in
+    // the AOT module and in collected traces and this has implications for the
+    // trace compiler. Without extra logic, alloca'd variables become undefined
+    // (as they are defined outside of the trace) and thus need to be remapped
+    // to the input of the compiled trace. SSA values (from the same block as
+    // the control point) remain correct as phi nodes at the beginning of the
+    // trace automatically select the appropriate input value.
     //
     // For example, once patched, a typical interpreter loop will look like
     // this:
+    //
+    // clang-format off
     //
     // ```
     // bb0:
     //   %a = alloca  // Stack variable
     //   store 0, %a
     //   %b = 1       // Register variable
+    //   %s = alloca YkCtrlPointVars
     //   br %bb1
     //
     // bb1:
     //   %b1 = phi [%b, %bb0], [%binc, %bb1]
-    //   %s = new YkCtrlPointVars
-    //
-    //   insertvalue %s, %a, 0
-    //   insertvalue %s, %b1, 1           // traces end here
-    //   %s2 = call yk_new_control_point(%s)
-    //   %anew = extractvalue %s, 0       // traces start here
-    //   %bnew = extractvalue %s, 1
+    //   %aptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 0
+    //   store %aptr, %a
+    //   %bptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 1
+    //   store %bptr, %b
+    //   // traces end here
+    //   call yk_new_control_point(%s)
+    //   // traces start here
+    //   %aptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 0
+    //   %anew = load %aptr
+    //   %bptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 1
+    //   %bnew = load %bptr
     //
     //   %aload = load %anew
     //   %ainc = add 1, %aload
@@ -700,54 +714,89 @@ public:
     //   br %bb1
     // ```
     //
-    // There are two trace inputs (`%a` and `%b1`) and two trace outputs
-    // (`%anew` and `%bnew`). `%a` and `%anew` correspond to the same
-    // high-level variable, and so do `%b1` and `%bnew`. When assembling a
-    // trace from the above IR, it would look like this:
+    // clang-format on
+    //
+    // There are two live variables stored into the `YKCtrlPointVars` struct
+    // before the call to the control point (`%a` and `%b`), and those
+    // variables are loaded back out after the call to the control point (into
+    // `%anew` and `%bnew`). `%a` and `%anew` correspond to the same high-level
+    // variable, and so do `%b1` and `%bnew`. When assembling a trace from the
+    // above IR, it would look like this:
+    //
+    // clang-format off
     //
     // ```
-    // void compiled_trace(%YkCtrlPointVars %s) {
-    //   %anew = extractvalue %s, 0     // traces start here
-    //   %bnew = extractvalue %s, 1
+    // void compiled_trace(%YkCtrlPointVars* %s) {
+    //   %aptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 0
+    //   %anew = load %aptr
+    //   %bptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 1
+    //   %bnew = load %bptr
     //
     //   %aload = load %anew
     //   %ainc = add 1, %aload
     //   store %ainc, %a                // %a is undefined
     //   %binc = add 1, %bnew
-    //   %b1 = phi(bb0: %b, bb1: %binc)
-    //   %s = new struct
+    //   %b1 = %bbinc                   // RHS selected from PHI.
     //
-    //   insertvalue %s, %a, 0
-    //   insertvalue %s, %b1, 1         // traces end here
-    //   br %bb0
+    //   %aptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 0
+    //   store %aptr, %a
+    //   %bptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 1
+    //   store %bptr, %b1
+    //   ...
     // }
     // ```
     //
+    // clang-format on
+    //
     // Here `%a` is undefined because we didn't trace its allocation. Instead
-    // it needs to be extracted from the `YkCtrlPointVars`, which means we need
-    // to replace `%a` with `%anew` in the store instruction. The other value
-    // `%b` doesn't have this problem, since the PHI node in the control point
-    // block already makes sure it selects the correct SSA value `%binc`.
-    Value *OutS = CPCI->getArgOperand(1);
+    // we need to use the definition extracted from the `YkCtrlPointVars`,
+    // which means we need to replace `%a` with `%anew` in the store
+    // instruction. The other value `%b` doesn't have this problem, since the
+    // PHI node in the control point block already makes sure it selects the
+    // correct SSA value `%binc`.
+    BasicBlock *CPCIBB = CPCI->getParent();
 
-    while (isa<InsertValueInst>(OutS)) {
-      InsertValueInst *IVI = cast<InsertValueInst>(OutS);
-      Value *InsertedOperand = IVI->getInsertedValueOperand();
-      //  We need an entry in this map for any live variable that isn't defined
-      //  by a PHI node at the top of the block cotaining the call to the
-      //  control point.
-      if (!(isa<PHINode>(InsertedOperand) &&
-            areInstrsDefinedInSameBlock(InsertedOperand, IVI))) {
-        InsertValueMap[*IVI->idx_begin()] = IVI->getInsertedValueOperand();
+    // First we scan for `getelementpointer`/`store` pairs leading up the
+    // control point. For each pair we add an entry to `LiveIndexMap`.
+    //
+    // For example, this instruction pair:
+    //
+    // ```
+    // %19 = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %3, i32 0, i32 2
+    // store i32* %6, i32** %19, align 8
+    // ```
+    //
+    // Adds an entry mapping the index `2` to `%6`.
+    for (BasicBlock::iterator CI = CPCIBB->begin(); &*CI != CPCI; CI++) {
+      assert(CI != CPCIBB->end());
+      if (!isa<GetElementPtrInst>(CI))
+        continue;
+
+      GetElementPtrInst *GI = cast<GetElementPtrInst>(CI);
+      if (GI->getPointerOperandType() != YkCtrlPointVarsPtrTy)
+        continue;
+
+      // We have seen a lookup into the live variables struct, the succeeding
+      // store instruction tells us which value is written into that field.
+      Instruction *NextInst = &*std::next(CI);
+      assert(isa<StoreInst>(NextInst));
+      StoreInst *SI = cast<StoreInst>(NextInst);
+      Value *StoredVal = SI->getValueOperand();
+      Value *StoredAtIdxVal = *(std::next(GI->idx_begin()));
+      assert(isa<ConstantInt>(StoredAtIdxVal));
+      uint64_t StoredAtIdx = cast<ConstantInt>(StoredAtIdxVal)->getZExtValue();
+
+      // We need an entry in this map for any live variable that isn't defined
+      // by a PHI node at the top of the block cotaining the call to the
+      // control point.
+      if (!(isa<PHINode>(StoredVal) &&
+            areInstrsDefinedInSameBlock(StoredVal, SI))) {
+        LiveIndexMap[StoredAtIdx] = StoredVal;
       }
-      OutS = IVI->getAggregateOperand();
     }
 
     // Create function to store compiled trace.
     Function *JITFunc = createJITFunc(TraceInputs, CPCI->getType());
-
-    // Remap control point return value.
-    VMap[CPCI] = JITFunc->getArg(0);
 
     // Map the YkCtrlPointVars struct used inside the trace to the argument of
     // the compiled trace function.
@@ -882,19 +931,29 @@ public:
         // into JITMod.
         copyInstruction(&Builder, (Instruction *)&*I);
 
-        // Perform the remapping described by InsertValueMap. See comments
-        // above.
-        if (isa<ExtractValueInst>(I)) {
-          ExtractValueInst *EVI = cast<ExtractValueInst>(I);
-          if (EVI->getAggregateOperand()->getType() == OutputStructTy) {
-            Value *IV = InsertValueMap[*EVI->idx_begin()];
-            VMap[IV] = getMappedValue(EVI);
+        // If we see a `getelementpointer`/`load` pair that is loading from the
+        // `YkCtrlPointVars` pointer, then we have to update the `VMap` using
+        // the information we previously computed in `LiveIndexMap`. See
+        // comments above about `LiveIndexMap`.
+        if (isa<LoadInst>(I)) {
+          LoadInst *LI = cast<LoadInst>(I);
+          Value *LoadOper = LI->getPointerOperand();
+          if (isa<GetElementPtrInst>(LoadOper)) {
+            GetElementPtrInst *GI = cast<GetElementPtrInst>(LoadOper);
+            if (GI->getPointerOperandType() == YkCtrlPointVarsPtrTy) {
+              Value *LoadedFromIdxVal = *(std::next(GI->idx_begin()));
+              assert(isa<ConstantInt>(LoadedFromIdxVal));
+              uint64_t LoadedFromIdx =
+                  cast<ConstantInt>(LoadedFromIdxVal)->getZExtValue();
+              Value *NewMapVal = LiveIndexMap[LoadedFromIdx];
+              VMap[NewMapVal] = getMappedValue(LI);
+            }
           }
         }
       }
     }
 
-    Builder.CreateRet(VMap[CPCI]);
+    Builder.CreateRetVoid();
     finalise(AOTMod, &Builder);
     return JITMod;
   }
