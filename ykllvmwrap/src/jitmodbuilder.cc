@@ -629,135 +629,101 @@ class JITModBuilder {
            cast<Instruction>(V2)->getParent();
   }
 
-public:
-  // Store virtual addresses for called functions.
-  std::map<GlobalValue *, void *> GlobalMappings;
-  // The function name of this trace.
-  string TraceName;
-  // Mapping from AOT instructions to JIT instructions.
-  ValueToValueMapTy VMap;
-
-  // OPT: https://github.com/ykjit/yk/issues/419
-  JITModBuilder(Module *AOTMod, char *FuncNames[], size_t BBs[],
-                size_t TraceLen, char *FAddrKeys[], void *FAddrVals[],
-                size_t FAddrLen)
-      : Builder(AOTMod->getContext()), InpTrace(FuncNames, BBs, TraceLen),
-        FAddrs(FAddrKeys, FAddrVals, FAddrLen) {
-    this->AOTMod = AOTMod;
-    LLVMContext &Context = AOTMod->getContext();
-    JITMod = new Module("", Context);
-    GuardFailBB = nullptr;
-    IntTy = Type::getIntNTy(Context, sizeof(int) * 8);
-  }
-
-  // Generate the JIT module.
-  Module *createModule() {
-    LLVMContext &JITContext = JITMod->getContext();
-    // Find the trace inputs.
-    Value *TraceInputs = getYkCtrlPointVarsStruct(AOTMod, InpTrace);
-
-    // Get new control point call.
-    Function *F = AOTMod->getFunction(YK_NEW_CONTROL_POINT);
-    User *CallSite = F->user_back();
-    CallInst *CPCI = cast<CallInst>(CallSite);
-    Type *YkCtrlPointVarsPtrTy = F->getArg(1)->getType();
-    assert(YkCtrlPointVarsPtrTy->isPointerTy());
-
-    // When executing the interpreter loop AOT code, the code before the
-    // control point is executed, then the control point is called, then the
-    // code after the control point is executed.
-    //
-    // But when we collect a trace, the first code we see is the code *after*
-    // the call to the control point, then (assuming the interpreter loop
-    // doesn't exit) we branch back to the start of the loop and only then see
-    // the code before the call to the control point.
-    //
-    // In other words, there is a disparity between the order of the code in
-    // the AOT module and in collected traces and this has implications for the
-    // trace compiler. Without extra logic, alloca'd variables become undefined
-    // (as they are defined outside of the trace) and thus need to be remapped
-    // to the input of the compiled trace. SSA values (from the same block as
-    // the control point) remain correct as phi nodes at the beginning of the
-    // trace automatically select the appropriate input value.
-    //
-    // For example, once patched, a typical interpreter loop will look like
-    // this:
-    //
-    // clang-format off
-    //
-    // ```
-    // bb0:
-    //   %a = alloca  // Stack variable
-    //   store 0, %a
-    //   %b = 1       // Register variable
-    //   %s = alloca YkCtrlPointVars
-    //   br %bb1
-    //
-    // bb1:
-    //   %b1 = phi [%b, %bb0], [%binc, %bb1]
-    //   %aptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 0
-    //   store %aptr, %a
-    //   %bptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 1
-    //   store %bptr, %b
-    //   // traces end here
-    //   call yk_new_control_point(%s)
-    //   // traces start here
-    //   %aptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 0
-    //   %anew = load %aptr
-    //   %bptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 1
-    //   %bnew = load %bptr
-    //
-    //   %aload = load %anew
-    //   %ainc = add 1, %aload
-    //   store %ainc, %a
-    //   %binc = add 1, %bnew
-    //   br %bb1
-    // ```
-    //
-    // clang-format on
-    //
-    // There are two live variables stored into the `YKCtrlPointVars` struct
-    // before the call to the control point (`%a` and `%b`), and those
-    // variables are loaded back out after the call to the control point (into
-    // `%anew` and `%bnew`). `%a` and `%anew` correspond to the same high-level
-    // variable, and so do `%b1` and `%bnew`. When assembling a trace from the
-    // above IR, it would look like this:
-    //
-    // clang-format off
-    //
-    // ```
-    // void compiled_trace(%YkCtrlPointVars* %s) {
-    //   %aptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 0
-    //   %anew = load %aptr
-    //   %bptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 1
-    //   %bnew = load %bptr
-    //
-    //   %aload = load %anew
-    //   %ainc = add 1, %aload
-    //   store %ainc, %a                // %a is undefined
-    //   %binc = add 1, %bnew
-    //   %b1 = %bbinc                   // RHS selected from PHI.
-    //
-    //   %aptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 0
-    //   store %aptr, %a
-    //   %bptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 1
-    //   store %bptr, %b1
-    //   ...
-    // }
-    // ```
-    //
-    // clang-format on
-    //
-    // Here `%a` is undefined because we didn't trace its allocation. Instead
-    // we need to use the definition extracted from the `YkCtrlPointVars`,
-    // which means we need to replace `%a` with `%anew` in the store
-    // instruction. The other value `%b` doesn't have this problem, since the
-    // PHI node in the control point block already makes sure it selects the
-    // correct SSA value `%binc`.
+  // When executing the interpreter loop AOT code, the code before the control
+  // point is executed, then the control point is called, then the code after
+  // the control point is executed.
+  //
+  // But when we collect a trace, the first code we see is the code *after* the
+  // call to the control point, then (assuming the interpreter loop doesn't
+  // exit) we branch back to the start of the loop and only then see the code
+  // before the call to the control point.
+  //
+  // In other words, there is a disparity between the order of the code in the
+  // AOT module and in collected traces and this has implications for the trace
+  // compiler. Without extra logic, alloca'd variables become undefined (as
+  // they are defined outside of the trace) and thus need to be remapped to the
+  // input of the compiled trace. SSA values (from the same block as the
+  // control point) remain correct as phi nodes at the beginning of the trace
+  // automatically select the appropriate input value.
+  //
+  // For example, once patched, a typical interpreter loop will look like this:
+  //
+  // clang-format off
+  //
+  // ```
+  // bb0:
+  //   %a = alloca  // Stack variable
+  //   store 0, %a
+  //   %b = 1       // Register variable
+  //   %s = alloca YkCtrlPointVars
+  //   br %bb1
+  //
+  // bb1:
+  //   %b1 = phi [%b, %bb0], [%binc, %bb1]
+  //   %aptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 0
+  //   store %aptr, %a
+  //   %bptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 1
+  //   store %bptr, %b
+  //   // traces end here
+  //   call yk_new_control_point(%s)
+  //   // traces start here
+  //   %aptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 0
+  //   %anew = load %aptr
+  //   %bptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 1
+  //   %bnew = load %bptr
+  //
+  //   %aload = load %anew
+  //   %ainc = add 1, %aload
+  //   store %ainc, %a
+  //   %binc = add 1, %bnew
+  //   br %bb1
+  // ```
+  //
+  // clang-format on
+  //
+  // There are two live variables stored into the `YKCtrlPointVars` struct
+  // before the call to the control point (`%a` and `%b`), and those variables
+  // are loaded back out after the call to the control point (into `%anew` and
+  // `%bnew`). `%a` and `%anew` correspond to the same high-level variable, and
+  // so do `%b1` and `%bnew`. When assembling a trace from the above IR, it
+  // would look like this:
+  //
+  // clang-format off
+  //
+  // ```
+  // void compiled_trace(%YkCtrlPointVars* %s) {
+  //   %aptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 0
+  //   %anew = load %aptr
+  //   %bptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 1
+  //   %bnew = load %bptr
+  //
+  //   %aload = load %anew
+  //   %ainc = add 1, %aload
+  //   store %ainc, %a                // %a is undefined
+  //   %binc = add 1, %bnew
+  //   %b1 = %bbinc                   // RHS selected from PHI.
+  //
+  //   %aptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 0
+  //   store %aptr, %a
+  //   %bptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 1
+  //   store %bptr, %b1
+  //   ...
+  // }
+  // ```
+  //
+  // clang-format on
+  //
+  // Here `%a` is undefined because we didn't trace its allocation. Instead we
+  // need to use the definition extracted from the `YkCtrlPointVars`, which
+  // means we need to replace `%a` with `%anew` in the store instruction. The
+  // other value `%b` doesn't have this problem, since the PHI node in the
+  // control point block already makes sure it selects the correct SSA value
+  // `%binc`.
+  void createLiveIndexMap(Instruction *CPCI, Type *YkCtrlPointVarsPtrTy) {
     BasicBlock *CPCIBB = CPCI->getParent();
 
-    // First we scan for `getelementpointer`/`store` pairs leading up the
-    // control point. For each pair we add an entry to `LiveIndexMap`.
+    // Scan for `getelementpointer`/`store` pairs leading up the control point.
+    // For each pair we add an entry to `LiveIndexMap`.
     //
     // For example, this instruction pair:
     //
@@ -794,6 +760,43 @@ public:
         LiveIndexMap[StoredAtIdx] = StoredVal;
       }
     }
+  }
+
+public:
+  // Store virtual addresses for called functions.
+  std::map<GlobalValue *, void *> GlobalMappings;
+  // The function name of this trace.
+  string TraceName;
+  // Mapping from AOT instructions to JIT instructions.
+  ValueToValueMapTy VMap;
+
+  // OPT: https://github.com/ykjit/yk/issues/419
+  JITModBuilder(Module *AOTMod, char *FuncNames[], size_t BBs[],
+                size_t TraceLen, char *FAddrKeys[], void *FAddrVals[],
+                size_t FAddrLen)
+      : Builder(AOTMod->getContext()), InpTrace(FuncNames, BBs, TraceLen),
+        FAddrs(FAddrKeys, FAddrVals, FAddrLen) {
+    this->AOTMod = AOTMod;
+    LLVMContext &Context = AOTMod->getContext();
+    JITMod = new Module("", Context);
+    GuardFailBB = nullptr;
+    IntTy = Type::getIntNTy(Context, sizeof(int) * 8);
+  }
+
+  // Generate the JIT module.
+  Module *createModule() {
+    LLVMContext &JITContext = JITMod->getContext();
+    // Find the trace inputs.
+    Value *TraceInputs = getYkCtrlPointVarsStruct(AOTMod, InpTrace);
+
+    // Get new control point call.
+    Function *F = AOTMod->getFunction(YK_NEW_CONTROL_POINT);
+    User *CallSite = F->user_back();
+    CallInst *CPCI = cast<CallInst>(CallSite);
+    Type *YkCtrlPointVarsPtrTy = F->getArg(1)->getType();
+    assert(YkCtrlPointVarsPtrTy->isPointerTy());
+
+    createLiveIndexMap(CPCI, YkCtrlPointVarsPtrTy);
 
     // Create function to store compiled trace.
     Function *JITFunc = createJITFunc(TraceInputs, CPCI->getType());
