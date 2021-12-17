@@ -18,3 +18,4 @@ lang_tester = "0.7.0"
 once_cell = "1.8.0"
 tempfile = "3.2.0"
 ykcapi = { path = "../ykcapi", features = ["c_testing"] }
+ykrt = { path = "../ykrt", features = ["jit_state_debug"] }

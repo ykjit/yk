@@ -4,10 +4,12 @@
 //   env-var: YKD_PRINT_IR=jit-pre-opt
 //   stderr:
 //     jit-state: start-tracing
-//     pc=0, mem=3
-//     pc=1, mem=3
-//     pc=2, mem=3
-//     pc=3, mem=2
+//     pc=0, mem=4
+//     pc=1, mem=4
+//     pc=2, mem=4
+//     pc=3, mem=3
+//     jit-state: stop-tracing
+//     --- Begin jit-pre-opt ---
 //     ...
 //     define internal void @__yk_compiled_trace_0(%YkCtrlPointVars* %0) {
 //       ...
@@ -32,7 +34,11 @@
 //       ret void
 //     }
 //     ...
-//     jit-state: stop-tracing
+//     --- End jit-pre-opt ---
+//     pc=0, mem=3
+//     pc=1, mem=3
+//     pc=2, mem=3
+//     pc=3, mem=2
 //     pc=0, mem=2
 //     pc=1, mem=2
 //     pc=2, mem=2
@@ -53,7 +59,7 @@
 #include <yk_testing.h>
 
 // The sole mutable memory cell of the interpreter.
-int mem = 3;
+int mem = 4;
 
 // The bytecodes accepted by the interpreter.
 #define NOP 0
@@ -82,9 +88,9 @@ int main(int argc, char **argv) {
 
   // interpreter loop.
   while (true) {
+    assert(pc < prog_len);
     YkLocation *loc = &locs[pc];
     yk_control_point(loc);
-    assert(pc < prog_len);
     int bc = prog[pc];
     fprintf(stderr, "pc=%d, mem=%d\n", pc, mem);
     switch (bc) {

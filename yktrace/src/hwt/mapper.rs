@@ -1,6 +1,6 @@
 //! The mapper translates a PT trace into an IR trace.
 
-use crate::{IRBlock, CONTROL_POINT_SYM};
+use crate::IRBlock;
 use byteorder::{NativeEndian, ReadBytesExt};
 use hwtracer::{HWTracerError, Trace};
 use intervaltree::{self, IntervalTree};
@@ -108,52 +108,6 @@ impl HWTMapper {
         }
     }
 
-    /// Collapse consecutive control point blocks (including any unmappable internals) into one
-    /// control point entry. Unmappable holes exist because the generated control point calls out to
-    /// Rust code for which we have no IR.
-    ///
-    /// For example, if the trace is:
-    ///
-    /// ```ignore
-    /// [bb1, bb2, bb3, ctrlp, ctrlp, ?, ctrlp, bb4]
-    /// ```
-    ///
-    /// (where `bbN` is a mappable block, `ctrlp` is a block in the control point, and `?` is
-    /// unmappable blocks), then this function would canonicalise the trace to:
-    ///
-    /// ```ignore
-    /// [bb1, bb2, bb3, ctrlp, bb4]
-    /// ```
-    fn canonicalise_control_point(mut irblocks: Vec<IRBlock>) -> Vec<IRBlock> {
-        let mut ret_irblocks: Vec<IRBlock> = Vec::new();
-        let ctrlp_sym_c = CString::new(CONTROL_POINT_SYM).unwrap();
-
-        // The trace starts inside the control point, as that's where tracing is enabled.
-        debug_assert_eq!(irblocks[0].func_name, ctrlp_sym_c);
-
-        let mut in_ctrlp = false;
-        for ib in irblocks.drain(..) {
-            if in_ctrlp {
-                // Determine if we have exited from the control point (bearing in mind that the
-                // control point executes external, and thus unmappable, code).
-                if !ib.is_unmappable() && ib.func_name != ctrlp_sym_c {
-                    in_ctrlp = false;
-                    ret_irblocks.push(ib);
-                }
-            } else {
-                // Determine if we have entered the control point.
-                if ib.func_name == ctrlp_sym_c {
-                    in_ctrlp = true;
-                }
-                ret_irblocks.push(ib);
-            }
-        }
-
-        // The trace must end inside the control point, as that's where tracing is disabled.
-        debug_assert!(in_ctrlp);
-        ret_irblocks
-    }
-
     /// Maps each entry of a hardware trace back to the IR block from which it was compiled.
     pub(super) fn map_trace(
         mut self,
@@ -203,8 +157,6 @@ impl HWTMapper {
                 ret_irblocks.pop();
             }
         }
-
-        let ret_irblocks = Self::canonicalise_control_point(ret_irblocks);
 
         #[cfg(debug_assertions)]
         {
@@ -310,91 +262,5 @@ impl HWTMapper {
             }
         }
         ret
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{CString, HWTMapper, IRBlock};
-
-    #[test]
-    fn canonicalise_control_point1() {
-        let trace = vec![
-            IRBlock::control_point(),
-            IRBlock::new(CString::new("main").unwrap(), 1),
-            IRBlock::control_point(),
-            IRBlock::new(CString::new("main").unwrap(), 2),
-            IRBlock::control_point(),
-        ];
-        let expect = vec![
-            IRBlock::control_point(),
-            IRBlock::new(CString::new("main").unwrap(), 1),
-            IRBlock::control_point(),
-            IRBlock::new(CString::new("main").unwrap(), 2),
-            IRBlock::control_point(),
-        ];
-        assert_eq!(HWTMapper::canonicalise_control_point(trace), expect);
-    }
-
-    #[test]
-    fn canonicalise_control_point2() {
-        let trace = vec![
-            IRBlock::control_point(),
-            IRBlock::control_point(),
-            IRBlock::new(CString::new("main").unwrap(), 1),
-            IRBlock::new(CString::new("main").unwrap(), 3),
-            IRBlock::new(CString::new("main").unwrap(), 4),
-            IRBlock::unmappable(),
-            IRBlock::new(CString::new("main").unwrap(), 4),
-            IRBlock::control_point(),
-            IRBlock::control_point(),
-            IRBlock::unmappable(),
-            IRBlock::unmappable(),
-            IRBlock::control_point(),
-            IRBlock::new(CString::new("main").unwrap(), 1),
-            IRBlock::new(CString::new("main").unwrap(), 3),
-            IRBlock::new(CString::new("main").unwrap(), 5),
-            IRBlock::control_point(),
-        ];
-        let expect = vec![
-            IRBlock::control_point(),
-            IRBlock::new(CString::new("main").unwrap(), 1),
-            IRBlock::new(CString::new("main").unwrap(), 3),
-            IRBlock::new(CString::new("main").unwrap(), 4),
-            IRBlock::unmappable(),
-            IRBlock::new(CString::new("main").unwrap(), 4),
-            IRBlock::control_point(),
-            IRBlock::new(CString::new("main").unwrap(), 1),
-            IRBlock::new(CString::new("main").unwrap(), 3),
-            IRBlock::new(CString::new("main").unwrap(), 5),
-            IRBlock::control_point(),
-        ];
-        assert_eq!(HWTMapper::canonicalise_control_point(trace), expect);
-    }
-
-    #[test]
-    fn canonicalise_control_point3() {
-        let trace = vec![IRBlock::control_point()];
-        let expect = vec![IRBlock::control_point()];
-        assert_eq!(HWTMapper::canonicalise_control_point(trace), expect);
-    }
-
-    #[test]
-    fn canonicalise_control_point4() {
-        let trace = vec![
-            IRBlock::control_point(),
-            IRBlock::new(CString::new("main").unwrap(), 1),
-            IRBlock::control_point(),
-            IRBlock::control_point(),
-            IRBlock::unmappable(),
-            IRBlock::control_point(),
-            IRBlock::unmappable(),
-        ];
-        let expect = vec![
-            IRBlock::control_point(),
-            IRBlock::new(CString::new("main").unwrap(), 1),
-            IRBlock::control_point(),
-        ];
-        assert_eq!(HWTMapper::canonicalise_control_point(trace), expect);
     }
 }

@@ -4,7 +4,8 @@
 //   env-var: YKD_PRINT_IR=jit-pre-opt
 //   stderr:
 //     jit-state: start-tracing
-//     i=3
+//     i=4
+//     jit-state: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //       %{{cond}} = icmp...
@@ -13,7 +14,7 @@
 //     guardfail:...
 //     ...
 //     --- End jit-pre-opt ---
-//     jit-state: stop-tracing
+//     i=3
 //     i=2
 //     jit-state: enter-jit-code
 //     i=1
@@ -30,7 +31,7 @@
 
 int main(int argc, char **argv) {
   YkLocation loc = yk_location_new();
-  int i = 3;
+  int i = 4;
   int j = 300;
   NOOPT_VAL(i);
   NOOPT_VAL(j);
