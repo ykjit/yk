@@ -210,9 +210,10 @@ extern "C" void *compileModule(string TraceName, Module *M,
                                map<GlobalValue *, void *> GlobalMappings) {
   std::call_once(LLVMInitialised, initLLVM, nullptr);
 
-  // FIXME Remember memman or allocated memory pointers so we can free the
-  // latter when we're done with the trace.
-  auto memman = new MemMan();
+  // Use our own memory manager to keep track of stackmap address.
+  AllocMem SMR;
+  MemMan *memman = new MemMan();
+  memman->setStackMapStore(&SMR);
 
   auto MPtr = std::unique_ptr<Module>(M);
   string ErrStr;
@@ -235,7 +236,15 @@ extern "C" void *compileModule(string TraceName, Module *M,
     errx(EXIT_FAILURE, "Couldn't compile trace: %s",
          EE->getErrorMessage().c_str());
 
-  return (void *)EE->getFunctionAddress(TraceName);
+  // Allocate space for compiled trace address, stackmap address, and stackmap
+  // size.
+  // FIXME This is a temporary hack until the redesigned hot location is up.
+  uintptr_t *ptr = (uintptr_t *)malloc(sizeof(uintptr_t) * 3);
+  ptr[0] = EE->getFunctionAddress(TraceName);
+  ptr[1] = (uintptr_t)SMR.Ptr;
+  ptr[2] = SMR.Size;
+
+  return ptr;
 }
 
 // Compile an IRTrace to executable code in memory.

@@ -158,19 +158,32 @@ pub struct CompiledTrace {
     /// The argument to the function is a pointer to a struct containing the live variables at the
     /// control point. The exact definition of this struct is not known to Rust: the struct is
     /// generated at interpreter compile-time by ykllvm.
-    entry: fn(*mut c_void),
+    entry: fn(*mut c_void, *const c_void, usize),
+    /// Pointer to the stackmap, required to parse the stackmap during a guard failure.
+    smptr: *const c_void,
+    /// The stackmaps size.
+    smsize: usize,
 }
 
 use std::mem;
+use std::slice;
 impl CompiledTrace {
+    /// Create a `CompiledTrace` from a pointer to an array containing: the pointer to the compiled
+    /// trace, the pointer to the stackmap, and the size of the stackmap.
     pub fn new(code_ptr: *const c_void) -> Self {
+        let slice = unsafe { slice::from_raw_parts(code_ptr as *const usize, 3) };
+        let funcptr = slice[0] as *const c_void;
+        let smptr = slice[1] as *const c_void;
+        let smsize = slice[2] as usize;
         Self {
-            entry: unsafe { mem::transmute(code_ptr) },
+            entry: unsafe { mem::transmute(funcptr) },
+            smptr,
+            smsize,
         }
     }
 
     pub fn exec(&self, ctrlp_vars: *mut c_void) {
-        (self.entry)(ctrlp_vars)
+        (self.entry)(ctrlp_vars, self.smptr, self.smsize)
     }
 }
 

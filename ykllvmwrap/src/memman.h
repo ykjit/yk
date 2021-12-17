@@ -13,6 +13,7 @@ struct AllocMem {
 class MemMan : public RTDyldMemoryManager {
   std::vector<AllocMem> code;
   std::vector<AllocMem> data;
+  AllocMem *SMR;
 
 public:
   MemMan();
@@ -26,6 +27,7 @@ public:
                                bool isReadOnly) override;
   bool finalizeMemory(std::string *ErrMsg) override;
   void freeMemory();
+  void setStackMapStore(AllocMem *Ptr);
 };
 
 #endif

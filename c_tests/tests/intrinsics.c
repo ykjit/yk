@@ -8,13 +8,17 @@
 //     jit-state: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     define internal void @__yk_compiled_trace_0(%YkCtrlPointVars* %0) {
+//     define internal void @__yk_compiled_trace_0(%YkCtrlPointVars* %0, i64* %1, i64 %2) {
 //        ...
 //     }
 //     ...
 //     --- End jit-pre-opt ---
 //     jit-state: enter-jit-code
-//     intrinsics: guard-failure
+//     ...
+//     jit-state: stopgap
+//     ...
+//     Indirect: 996 ...
+//     ...
 
 // Check that basic trace compilation works.
 
@@ -32,17 +36,20 @@ void _yk_test(int i, int res) {
 
 int main(int argc, char **argv) {
   int res = 0;
+  int src = 1000;
   YkLocation loc = yk_location_new();
   int i = 4;
   NOOPT_VAL(res);
   NOOPT_VAL(i);
+  NOOPT_VAL(src);
   while (i > 0) {
     yk_control_point(&loc);
-    memcpy(&res, &i, 4);
+    memcpy(&res, &src, 4);
+    src--;
     i--;
   }
   NOOPT_VAL(res);
-  assert(res == 0);
+  assert(res == 996);
   yk_location_drop(loc);
 
   return (EXIT_SUCCESS);

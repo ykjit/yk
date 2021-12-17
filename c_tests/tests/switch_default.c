@@ -22,7 +22,8 @@
 //     i=2
 //     jit-state: enter-jit-code
 //     i=1
-//     switch_default: guard-failure
+//     jit-state: stopgap
+//     ...
 
 // Check that tracing the default arm of a switch works correctly.
 
