@@ -42,6 +42,7 @@ int main(int argc, char **argv) {
   }
   NOOPT_VAL(res);
   assert(res == 0);
+  yk_location_drop(loc);
 
   return (EXIT_SUCCESS);
 }
