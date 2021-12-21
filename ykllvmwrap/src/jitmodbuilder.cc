@@ -22,7 +22,7 @@ uint64_t getNewTraceIdx() {
 }
 
 #define TRACE_FUNC_PREFIX "__yk_compiled_trace_"
-#define YK_NEW_CONTROL_POINT "yk_new_control_point"
+#define YK_NEW_CONTROL_POINT "__ykrt_control_point"
 #define YK_CONTROL_POINT_ARG_IDX 1
 
 // Dump an error message and an LLVM value to stderr and exit with failure.
@@ -826,10 +826,6 @@ public:
       BasicBlock *BB;
       std::tie(F, BB) = getLLVMAOTFuncAndBlock(&IB);
 
-      if (F->getName() == YK_NEW_CONTROL_POINT) {
-        continue;
-      }
-
       assert(LastCompletedBlocks.size() >= 1);
       LastCompletedBlocks.back() = NextCompletedBlock;
       NextCompletedBlock = BB;
@@ -889,6 +885,7 @@ public:
               break;
             }
           } else if (CF->getName() == YK_NEW_CONTROL_POINT) {
+            ExpectUnmappable = true; // control point is always opaque.
             if (NewControlPointCall == nullptr) {
               NewControlPointCall = &*CI;
             } else {

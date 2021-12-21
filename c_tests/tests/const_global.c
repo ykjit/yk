@@ -1,9 +1,12 @@
 // Compiler:
 //   env-var: YKD_PRINT_JITSTATE=1
 // Run-time:
-//   env-var: YKD_PRINT_IR=jit-pre-opt,aot
+//   env-var: YKD_PRINT_IR=jit-pre-opt
 //   stderr:
 //     jit-state: start-tracing
+//     i=5
+//     jit-state: stop-tracing
+//     --- Begin jit-pre-opt ---
 //     ...
 //     define internal void @__yk_compiled_trace_0(%YkCtrlPointVars* %0) {
 //        ...
@@ -28,11 +31,9 @@
 //        ret void
 //     }
 //     ...
-//     jit-state: stop-tracing
+//     --- End jit-pre-opt ---
 //     i=4
-//     jit-state: enter-jit-code
 //     i=3
-//     jit-state: exit-jit-code
 //     jit-state: enter-jit-code
 //     i=2
 //     jit-state: exit-jit-code

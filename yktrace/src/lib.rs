@@ -13,8 +13,6 @@ mod hwt;
 pub use errors::InvalidTraceError;
 pub use hwt::mapper::BlockMap;
 
-pub(crate) static CONTROL_POINT_SYM: &str = "yk_new_control_point";
-
 thread_local! {
     // When `Some`, contains the `ThreadTracer` for the current thread. When `None`, the current
     // thread is not being traced.
@@ -79,15 +77,6 @@ impl IRBlock {
     /// Determines whether `self` represents unmappable code.
     pub fn is_unmappable(&self) -> bool {
         self.bb == usize::MAX
-    }
-
-    /// Returns an IRBlock whose `func_name` is that of the generated control point.
-    #[cfg(test)]
-    pub(crate) fn control_point() -> Self {
-        Self {
-            func_name: CString::new(CONTROL_POINT_SYM).unwrap(),
-            bb: 0,
-        }
     }
 }
 
@@ -161,7 +150,27 @@ impl IRTrace {
 }
 
 /// Binary executable trace code.
-pub struct CompiledTrace {}
+pub struct CompiledTrace {
+    /// A function which when called, executes the compiled trace.
+    ///
+    /// The argument to the function is a pointer to a struct containing the live variables at the
+    /// control point. The exact definition of this struct is not known to Rust: the struct is
+    /// generated at interpreter compile-time by ykllvm.
+    entry: fn(*mut c_void),
+}
+
+use std::mem;
+impl CompiledTrace {
+    pub fn new(code_ptr: *const c_void) -> Self {
+        Self {
+            entry: unsafe { mem::transmute(code_ptr) },
+        }
+    }
+
+    pub fn exec(&self, ctrlp_vars: *mut c_void) {
+        (self.entry)(ctrlp_vars)
+    }
+}
 
 unsafe impl Send for CompiledTrace {}
 unsafe impl Sync for CompiledTrace {}

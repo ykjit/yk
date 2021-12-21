@@ -4,12 +4,14 @@
 //   env-var: YKD_PRINT_IR=jit-pre-opt
 //   stderr:
 //     jit-state: start-tracing
+//     jit-state: stop-tracing
+//     --- Begin jit-pre-opt ---
 //     ...
 //     define internal void @__yk_compiled_trace_0(%YkCtrlPointVars* %0) {
 //        ...
 //     }
 //     ...
-//     jit-state: stop-tracing
+//     --- End jit-pre-opt ---
 //     jit-state: enter-jit-code
 //     intrinsics: guard-failure
 
@@ -30,7 +32,7 @@ void _yk_test(int i, int res) {
 int main(int argc, char **argv) {
   int res = 0;
   YkLocation loc = yk_location_new();
-  int i = 3;
+  int i = 4;
   NOOPT_VAL(res);
   NOOPT_VAL(i);
   while (i > 0) {
