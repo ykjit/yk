@@ -9,8 +9,7 @@
 #![feature(bench_black_box)]
 #![feature(c_variadic)]
 
-use std::ffi::{c_void, CStr};
-use std::os::raw::c_char;
+use std::ffi::c_void;
 use ykrt::{Location, MT};
 use ykutil;
 
@@ -47,11 +46,6 @@ pub extern "C" fn __ykutil_get_llvmbc_section(res_addr: *mut *const c_void, res_
         *res_addr = addr as *const c_void;
         *res_size = size;
     }
-}
-
-#[no_mangle]
-pub extern "C" fn __yk_debug_print(s: *const c_char) {
-    eprintln!("{}", unsafe { CStr::from_ptr(s) }.to_str().unwrap());
 }
 
 /// The following module contains exports only used for testing from external C code.

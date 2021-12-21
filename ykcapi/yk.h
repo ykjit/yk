@@ -3,10 +3,6 @@
 
 #include <stdint.h>
 
-/// A meta-tracer.
-struct MT;
-typedef struct MT YkMT;
-
 // A `Location` stores state that the meta-tracer needs to identify hot loops
 // and run associated machine code. This is a C mirror of `ykrt::Location`.
 //
