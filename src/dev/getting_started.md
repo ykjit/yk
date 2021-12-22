@@ -2,14 +2,16 @@
 
 This guide describes how to get up and running with yk.
 
-## Repos
+## Repositories
 
-yk is spread over a handful of repos, but the two you are likely to need to clone are:
+yk is spread over several git repositories, but you will need to download and
+build at least the following two in order to have a running system:
 
  - [ykllvm](https://github.com/ykjit/ykllvm): Our fork of LLVM.
  - [yk](https://github.com/ykjit/yk): The runtime parts of the system.
 
-The latter is a monorepo containing a few different Rust crates.
+Since `yk` depends on `ykllvm`, you must build `ykllvm` first.
+
 
 ## Building `ykllvm`
 
@@ -28,23 +30,30 @@ cmake -DCMAKE_INSTALL_PREFIX=`pwd`/../inst \
 make -j `nproc` install
 ```
 
-Be sure to put your newly built binaries in your `$PATH`. E.g.:
+In order that your subsequent build(s) of `yk` pick up `ykllvm`, you must
+ensure that the `ykllvm` compiler binaries are used instead of your system's
+default LLVM binaries. For example, prepend the `ykllvm` installation
+directory to your `$PATH`:
+
 ```
-export PATH=/path/to/inst/bin:${PATH}
+export PATH=/path/to/ykllvm/inst/bin:${PATH}
 ```
+
 
 ## Working with the `yk` repo.
 
-The `yk` repo is a Rust workspace. You can build and test in the usual ways
-using `cargo`.
+The `yk` repo is a Rust workspace (i.e. a collection of crates). You can build
+and test in the usual ways using `cargo`.
 
 For example, to build and test the system, run:
+
 ```
 cargo test
 ```
 
 The only requirement is that the LLVM binaries in your `$PATH` are those from a
 compiled `ykllvm` (see the previous section).
+
 
 ### C++ code
 
