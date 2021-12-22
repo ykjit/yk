@@ -109,5 +109,9 @@ int main(int argc, char **argv) {
   }
   abort(); // FIXME: unreachable due to aborting guard failure earlier.
   NOOPT_VAL(pc);
+
+  for (int i = 0; i < prog_len; i++)
+    yk_location_drop(locs[i]);
+
   return (EXIT_SUCCESS);
 }
