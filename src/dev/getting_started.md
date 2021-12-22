@@ -15,7 +15,7 @@ Since `yk` depends on `ykllvm`, you must build `ykllvm` first.
 
 ## Building `ykllvm`
 
-Clone the repository and build `ykllvm`:
+Clone the repository, switch to the `ykjit/13.x` branch and build `ykllvm`:
 
 ```
 git clone https://github.com/ykjit/ykllvm
