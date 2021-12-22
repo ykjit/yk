@@ -13,15 +13,10 @@ The latter is a monorepo containing a few different Rust crates.
 
 ## Building `ykllvm`
 
-First get the sources:
+Clone the repository and build `ykllvm`:
+
 ```
 git clone https://github.com/ykjit/ykllvm
-cd ykrustc
-```
-
-To build, run:
-```
-./x.py build --stage 1
 cd ykllvm
 mkdir build
 cmake -DCMAKE_INSTALL_PREFIX=`pwd`/../inst \
