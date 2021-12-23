@@ -1,7 +1,7 @@
 [package]
 name = "ykrt"
 version = "0.1.0"
-authors = ["The Yorick Developers"]
+authors = ["The Yk Developers"]
 edition = "2018"
 license = "Apache-2.0 OR MIT"
 

@@ -1,4 +1,4 @@
-//! Interpreter-facing API to the Yorick meta-tracer.
+//! Interpreter-facing API to the Yk meta-tracer.
 
 #![cfg_attr(test, feature(test))]
 
