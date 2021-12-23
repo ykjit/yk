@@ -92,7 +92,7 @@ pub struct Location {
     // The precise semantics of locking and, in particular, parking are subtle: interested readers
     // are directed to https://github.com/Amanieu/parking_lot/blob/master/src/raw_mutex.rs#L33 for
     // a more precise definition.
-    state: AtomicUsize,
+    inner: AtomicUsize,
 }
 
 impl Location {
@@ -100,36 +100,36 @@ impl Location {
     pub fn new() -> Self {
         // Locations start in the counting state with a count of 0.
         Self {
-            state: AtomicUsize::new(State::new().x),
+            inner: AtomicUsize::new(LocationInner::new().x),
         }
     }
 
     /// Return this Location's internal state.
-    pub(super) fn load(&self, order: Ordering) -> State {
-        State {
-            x: self.state.load(order),
+    pub(super) fn load(&self, order: Ordering) -> LocationInner {
+        LocationInner {
+            x: self.inner.load(order),
         }
     }
 
     pub(super) fn compare_exchange_weak(
         &self,
-        current: State,
-        new: State,
+        current: LocationInner,
+        new: LocationInner,
         success: Ordering,
         failure: Ordering,
-    ) -> Result<State, State> {
+    ) -> Result<LocationInner, LocationInner> {
         match self
-            .state
+            .inner
             .compare_exchange_weak(current.x, new.x, success, failure)
         {
-            Ok(x) => Ok(State { x }),
-            Err(x) => Err(State { x }),
+            Ok(x) => Ok(LocationInner { x }),
+            Err(x) => Err(LocationInner { x }),
         }
     }
 
     /// Locks this `State` with `Acquire` ordering. If the location was in, or moves to, the
     /// Counting state this will return `Err`.
-    pub(super) fn lock(&self) -> Result<State, ()> {
+    pub(super) fn lock(&self) -> Result<LocationInner, ()> {
         {
             let ls = self.load(Ordering::Relaxed);
             if ls.is_counting() {
@@ -137,7 +137,7 @@ impl Location {
             }
             let new_ls = ls.with_lock().with_unparked();
             if self
-                .state
+                .inner
                 .compare_exchange_weak(
                     ls.with_unlock().with_unparked().x,
                     new_ls.x,
@@ -159,14 +159,14 @@ impl Location {
 
             if !ls.is_locked() {
                 let new_ls = ls.with_lock();
-                match self.state.compare_exchange_weak(
+                match self.inner.compare_exchange_weak(
                     ls.x,
                     new_ls.x,
                     Ordering::Acquire,
                     Ordering::Relaxed,
                 ) {
                     Ok(_) => return Ok(new_ls),
-                    Err(x) => ls = State::from_usize(x),
+                    Err(x) => ls = LocationInner::from_usize(x),
                 }
                 continue;
             }
@@ -175,13 +175,13 @@ impl Location {
                 if spinwait.spin() {
                     ls = self.load(Ordering::Relaxed);
                     continue;
-                } else if let Err(x) = self.state.compare_exchange_weak(
+                } else if let Err(x) = self.inner.compare_exchange_weak(
                     ls.x,
                     ls.with_parked().x,
                     Ordering::Relaxed,
                     Ordering::Relaxed,
                 ) {
-                    ls = State::from_usize(x);
+                    ls = LocationInner::from_usize(x);
                     continue;
                 }
             }
@@ -221,7 +221,7 @@ impl Location {
         debug_assert!(ls.is_locked());
         debug_assert!(!ls.is_counting());
         if self
-            .state
+            .inner
             .compare_exchange(
                 ls.with_unparked().x,
                 ls.with_unparked().with_unlock().x,
@@ -240,16 +240,16 @@ impl Location {
             if result.unparked_threads != 0 && result.be_fair {
                 if !result.have_more_threads {
                     debug_assert!(ls.is_locked());
-                    self.state.store(ls.with_unparked().x, Ordering::Relaxed);
+                    self.inner.store(ls.with_unparked().x, Ordering::Relaxed);
                 }
                 return TOKEN_HANDOFF;
             }
 
             if result.have_more_threads {
-                self.state
+                self.inner
                     .store(ls.with_unlock().with_parked().x, Ordering::Release);
             } else {
-                self.state
+                self.inner
                     .store(ls.with_unparked().with_unlock().x, Ordering::Release);
             }
             TOKEN_NORMAL
@@ -260,7 +260,7 @@ impl Location {
     }
 
     /// Try obtaining the lock, returning the new `State` if successful.
-    pub(super) fn try_lock(&self) -> Result<State, ()> {
+    pub(super) fn try_lock(&self) -> Result<LocationInner, ()> {
         let mut ls = self.load(Ordering::Relaxed);
         loop {
             if ls.is_locked() {
@@ -300,29 +300,21 @@ const STATE_IS_COUNTING: usize = 0b100;
 const TOKEN_NORMAL: UnparkToken = UnparkToken(0);
 const TOKEN_HANDOFF: UnparkToken = UnparkToken(1);
 
-#[derive(PartialEq, Eq, Debug)]
-pub(super) struct State {
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub(super) struct LocationInner {
     x: usize,
 }
 
-impl Copy for State {}
-
-impl Clone for State {
-    fn clone(&self) -> State {
-        *self
-    }
-}
-
-impl State {
+impl LocationInner {
     /// Return a new `State` in the counting phase with a count 0.
     pub(super) fn new() -> Self {
-        State {
+        LocationInner {
             x: STATE_IS_COUNTING,
         }
     }
 
     fn from_usize(x: usize) -> Self {
-        State { x }
+        LocationInner { x }
     }
 
     pub(super) fn is_locked(&self) -> bool {
@@ -355,29 +347,29 @@ impl State {
     }
 
     /// Return a version of this `State` with the locked bit set.
-    pub(super) fn with_lock(&self) -> State {
-        State {
+    pub(super) fn with_lock(&self) -> LocationInner {
+        LocationInner {
             x: self.x | STATE_IS_LOCKED,
         }
     }
 
     /// Return a version of this `State` with the locked bit unset.
-    fn with_unlock(&self) -> State {
-        State {
+    fn with_unlock(&self) -> LocationInner {
+        LocationInner {
             x: self.x & !STATE_IS_LOCKED,
         }
     }
 
     /// Return a version of this `State` with the parked bit set.
-    fn with_parked(&self) -> State {
-        State {
+    fn with_parked(&self) -> LocationInner {
+        LocationInner {
             x: self.x | STATE_IS_PARKED,
         }
     }
 
     /// Return a version of this `State` with the parked bit unset.
-    fn with_unparked(&self) -> State {
-        State {
+    fn with_unparked(&self) -> LocationInner {
+        LocationInner {
             x: self.x & !STATE_IS_PARKED,
         }
     }
@@ -387,7 +379,7 @@ impl State {
     pub(super) fn with_count(&self, count: HotThreshold) -> Self {
         debug_assert!(self.is_counting());
         debug_assert_eq!(count << STATE_NUM_BITS >> STATE_NUM_BITS, count);
-        State {
+        LocationInner {
             x: (self.x & STATE_TAG) | (usize::try_from(count).unwrap() << STATE_NUM_BITS),
         }
     }
@@ -398,7 +390,7 @@ impl State {
         debug_assert!(self.is_counting());
         let hl_ptr = hl_ptr as usize;
         debug_assert_eq!(hl_ptr & !STATE_TAG, hl_ptr);
-        State {
+        LocationInner {
             x: (self.x & (STATE_TAG & !STATE_IS_COUNTING)) | hl_ptr,
         }
     }
