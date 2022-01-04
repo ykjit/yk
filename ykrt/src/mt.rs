@@ -19,7 +19,7 @@ use once_cell::sync::Lazy;
 use parking_lot::{Condvar, Mutex, MutexGuard};
 use parking_lot_core::SpinWait;
 
-use crate::location::{HotLocation, Location, State, ThreadIdInner};
+use crate::location::{HotLocation, Location, LocationInner, ThreadIdInner};
 use yktrace::{start_tracing, stop_tracing, CompiledTrace, IRTrace, TracingKind};
 
 // The HotThreshold must be less than a machine word wide for [`Location::Location`] to do its
@@ -191,7 +191,7 @@ impl MT {
                 // prepared to bail out early, there's no point in yielding: either we win the race
                 // by trying repeatedly or we give up entirely.
                 let hl_ptr = Box::into_raw(Box::new(HotLocation::Tracing(None)));
-                let new_ls = State::new().with_hotlocation(hl_ptr).with_lock();
+                let new_ls = LocationInner::new().with_hotlocation(hl_ptr).with_lock();
                 loop {
                     debug_assert!(!ls.is_locked());
                     match loc.compare_exchange_weak(

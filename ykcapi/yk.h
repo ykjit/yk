@@ -39,7 +39,7 @@ void yk_control_point(YkLocation *);
 // Create a new `Location`.
 //
 // Note that a `Location` created by this call must not simply be discarded:
-// if no longer wanted, it must be passed to `yk_drop_location` to allow
+// if no longer wanted, it must be passed to `yk_location_drop` to allow
 // appropriate clean-up.
 YkLocation yk_location_new(void);
 
