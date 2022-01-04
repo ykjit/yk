@@ -1,4 +1,4 @@
-//! This crate exports the Yorick API via the C ABI.
+//! This crate exports the Yk API via the C ABI.
 //!
 //! We use a dedicated crate for exporting to C, as you quickly get into linkage trouble if you try
 //! and mix Rust dynamic libraries (namely you can get duplicate copies of dependencies).
