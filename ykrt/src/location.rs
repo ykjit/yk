@@ -273,6 +273,59 @@ impl Location {
             }
         }
     }
+
+    /// If the location is in the `Compiling` state, then wait for compilation to complete.
+    ///
+    /// This is used in testing, where we need some way to tame non-determinism in order to write
+    /// meaningful tests.
+    #[cfg(feature = "c_testing")]
+    pub fn block_if_compiling(&self) {
+        let ls = self.load(Ordering::Relaxed);
+
+        // If the location is in the counting state, then compilation cannot be occurring.
+        if ls.is_counting() {
+            return;
+        }
+
+        // A simple spin-lock which exits if either the location has no compilation pending, or if
+        // compilation has just finished for the location.
+        loop {
+            let again = match self.try_lock() {
+                Err(()) => true, // Failed to acquire lock, spin and retry.
+                Ok(ls) => {
+                    if let HotLocation::Compiling(mtx) = unsafe { ls.hot_location() } {
+                        // Compilation is either pending, ongoing, or just completed.
+                        if let Some(ct) = mtx.try_lock() {
+                            // We acquired the lock on the compiled trace storage. This means that
+                            // either:
+                            //
+                            // a) compilation is pending and the compilation thread hasn't yet
+                            // acquired its initial lock on the compiled trace storage. In this
+                            // case, the compiled trace storage remains `None` and we should spin
+                            // more until it becomes `Some`.
+                            //
+                            // b) Compilation has finished and the compilation thread has stored a
+                            // compiled trace and release the lock on its storage. In this case the
+                            // trace storage is `Some`, and we can stop spinning.
+                            ct.is_none()
+                        } else {
+                            // We failed to acquire the lock on the compiled trace storage, so the
+                            // compilation thread must be holding the lock. In this case,
+                            // compilation has started and is ongoing.
+                            true
+                        }
+                    } else {
+                        // If the location is not being compiled, then we don't need to spin.
+                        false
+                    }
+                }
+            };
+            self.unlock();
+            if !again {
+                break;
+            }
+        }
+    }
 }
 
 impl Drop for Location {

@@ -277,6 +277,10 @@ impl MT {
                         }
                         (*gd).take().unwrap()
                     };
+                    // FIXME: https://github.com/ykjit/yk/issues/462
+                    //
+                    // It would be nicer if the compilation thread itself transitioned the location
+                    // from `Compiling` to `Compiled`.
                     *hl = HotLocation::Compiled(tr);
                     loc.unlock();
                     // FIXME: In the event that trace compilation has just completed, we should be
@@ -336,21 +340,14 @@ impl MT {
 
     /// Add a compilation job for `sir` to the global work queue.
     fn queue_compile_job(&self, trace: IRTrace, mtx: Arc<Mutex<Option<Box<CompiledTrace>>>>) {
-        // FIXME: Until we can find a way of testing non-deterministic and time-sensitive JIT
-        // compilation, all compilation is done on the same thread, thus blocking the interpreter.
-        let code_ptr = trace.compile();
-        *mtx.lock() = Some(Box::new(CompiledTrace::new(code_ptr)));
-
-        // FIXME: It should actually look something like this:
-        //let f = Box::new(move || {
-        //    let code_ptr = trace.compile();
-        //    *mtx.lock() = Some(Box::new(CompiledTrace::new(code_ptr)));
-        //    // FIXME: although we've now put the compiled trace into the mutex, there's no
-        //    // guarantee that the Location for which we're compiling will ever be executed
-        //    // again. In such a case, the memory has, in essence, leaked.
-        //});
-
-        //self.queue_job(f);
+        let f = Box::new(move || {
+            let code_ptr = trace.compile();
+            *mtx.lock() = Some(Box::new(CompiledTrace::new(code_ptr)));
+            // FIXME: although we've now put the compiled trace into the mutex, there's no
+            // guarantee that the Location for which we're compiling will ever be executed
+            // again. In such a case, the memory has, in essence, leaked.
+        });
+        self.queue_job(f);
     }
 }
 
