@@ -1,5 +1,7 @@
 //! Utilities for collecting and decoding traces.
 
+#![feature(once_cell)]
+
 mod errors;
 use libc::c_void;
 use std::{

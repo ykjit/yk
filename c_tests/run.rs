@@ -1,6 +1,8 @@
+#![feature(once_cell)]
+
 use lang_tester::LangTester;
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::lazy::SyncLazy;
 use std::{
     collections::HashMap,
     env,
@@ -14,7 +16,7 @@ use tempfile::TempDir;
 const COMMENT: &str = "//";
 
 const TEMPDIR_SUBST: &'static str = "%%TEMPDIR%%";
-static EXTRA_LINK: Lazy<HashMap<&'static str, Vec<ExtraLinkage>>> = Lazy::new(|| {
+static EXTRA_LINK: SyncLazy<HashMap<&'static str, Vec<ExtraLinkage>>> = SyncLazy::new(|| {
     let mut map = HashMap::new();
     map.insert(
         "call_ext_in_obj.c",
