@@ -15,9 +15,9 @@ use std::{
 };
 
 use num_cpus;
-use once_cell::sync::Lazy;
 use parking_lot::{Condvar, Mutex, MutexGuard};
 use parking_lot_core::SpinWait;
+use std::lazy::SyncLazy;
 
 use crate::location::{HotLocation, Location, LocationInner, ThreadIdInner};
 use yktrace::{start_tracing, stop_tracing, CompiledTrace, IRTrace, TracingKind};
@@ -34,7 +34,7 @@ type AtomicHotThreshold = AtomicU32;
 // FIXME: just for parity with existing tests for now.
 const DEFAULT_HOT_THRESHOLD: HotThreshold = 0;
 
-static GLOBAL_MT: Lazy<MT> = Lazy::new(|| MT::new());
+static GLOBAL_MT: SyncLazy<MT> = SyncLazy::new(|| MT::new());
 thread_local! {static THREAD_MTTHREAD: MTThread = MTThread::new();}
 
 #[derive(Clone)]

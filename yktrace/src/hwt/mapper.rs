@@ -7,7 +7,7 @@ use intervaltree::{self, IntervalTree};
 use libc::c_void;
 use memmap2;
 use object::{Object, ObjectSection};
-use once_cell::sync::Lazy;
+use std::lazy::SyncLazy;
 use std::{
     collections::HashMap,
     convert::TryFrom,
@@ -20,7 +20,7 @@ use ykllvmwrap::symbolizer::Symbolizer;
 use ykutil::addr::{code_vaddr_to_off, off_to_vaddr_main_obj};
 
 const BLOCK_MAP_SEC: &str = ".llvm_bb_addr_map";
-static BLOCK_MAP: Lazy<BlockMap> = Lazy::new(|| BlockMap::new());
+static BLOCK_MAP: SyncLazy<BlockMap> = SyncLazy::new(|| BlockMap::new());
 
 /// The information for one LLVM MachineBasicBlock, as per:
 /// https://llvm.org/docs/Extensions.html#sht-llvm-bb-addr-map-section-basic-block-address-map
