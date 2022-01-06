@@ -131,7 +131,6 @@ impl MT {
         });
     }
 
-    #[allow(unreachable_code)]
     fn do_transition_location(&self, mtt: &MTThread, loc: &Location, ctrlp_vars: *mut c_void) {
         let mut ls = loc.load(Ordering::Relaxed);
 
