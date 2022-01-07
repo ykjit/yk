@@ -42,37 +42,37 @@ pub struct Location {
     //  │             │ start tracing
     //  │             ▼
     //  │           ┌──────────────┐
-    //  |           |              | incomplete  ┌─────────────┐
-    //  │           │   Tracing    │────────────▶|  DontTrace  |
-    //  |           |              |             └─────────────┘
+    //  │           │              │ incomplete  ┌─────────────┐
+    //  │           │   Tracing    │────────────▶│  DontTrace  │
+    //  │           │              │             └─────────────┘
     //  │           └──────────────┘
     //  │             │ start compiling trace
     //  │             │ in thread
     //  │             ▼
     //  │           ┌──────────────┐
-    //  |           |  Compiling   |
+    //  │           │  Compiling   │
     //  │           └──────────────┘
     //  │             │
     //  │             │ trace compiled
     //  │             ▼
     //  │           ┌──────────────┐
-    //  └───────────│   Compiled   |
+    //  └───────────│   Compiled   │
     //              └──────────────┘
     //
-    // We hope that a Location soon reaches the Compiled state (aka "the happy state") and stays
+    // We hope that a Location soon reaches the `Compiled` state (aka "the happy state") and stays
     // there.
     //
-    // The state machine is encoded in a usize in a not-entirely-simple way, as we don't want to
+    // The state machine is encoded in a `usize` in a not-entirely-simple way, as we don't want to
     // allocate any memory for Locations that do not become hot. The layout is as follows (on a 64
     // bit machine):
     //
     //   bit(s) | 63..3   | 2           | 1         | 0
     //          | payload | IS_COUNTING | IS_PARKED | IS_LOCKED
     //
-    // In the Counting state, IS_COUNTING is set to 1, and IS_PARKED and IS_LOCKED are unused and
-    // must remain set at 0. The payload representing the count is incremented locklessly. All
-    // other states have IS_COUNTING set to 0 and the payload is the address of a boxed
-    // HotLocation, access to which is controlled by IS_LOCKED.
+    // In the `Counting` state, `IS_COUNTING` is set to 1, and `IS_PARKED` and `IS_LOCKED` are
+    // unused and must remain set at 0. The payload representing the count is incremented
+    // locklessly. All other states have `IS_COUNTING` set to 0 and the payload is the address of a
+    // `Box<HotLocation>`, access to which is controlled by `IS_LOCKED`.
     //
     // The possible combinations of the counting and mutex bits are thus as follows:
     //
