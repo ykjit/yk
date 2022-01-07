@@ -76,18 +76,19 @@ pub struct Location {
     //
     // The possible combinations of the counting and mutex bits are thus as follows:
     //
-    //   payload       | IS_COUNTING | IS_PARKED | IS_LOCKED | Notes
-    //   --------------+-----------+---------+---------+-----------------------------------
-    //   <count>       | 1           | 0         | 0         | Start state
-    //                 | 1           | 0         | 1         | Illegal state
-    //                 | 1           | 1         | 0         | Illegal state
-    //                 | 1           | 1         | 1         | Illegal state
-    //   <HotLocation> | 0           | 0         | 0         | Not locked, no-one waiting
-    //   <HotLocation> | 0           | 0         | 1         | Locked, no thread(s) waiting
-    //   <HotLocation> | 0           | 1         | 0         | Not locked, thread(s) waiting
-    //   <HotLocation> | 0           | 1         | 1         | Locked, thread(s) waiting
+    //   payload          | IS_COUNTING | IS_PARKED | IS_LOCKED | Notes
+    //   -----------------+-----------+---------+---------+-----------------------------------
+    //   count            | 1           | 0         | 0         | Start state
+    //                    | 1           | 0         | 1         | Illegal state
+    //                    | 1           | 1         | 0         | Illegal state
+    //                    | 1           | 1         | 1         | Illegal state
+    //   Box<HotLocation> | 0           | 0         | 0         | Not locked, no-one waiting
+    //   Box<HotLocation> | 0           | 0         | 1         | Locked, no thread(s) waiting
+    //   Box<HotLocation> | 0           | 1         | 0         | Not locked, thread(s) waiting
+    //   Box<HotLocation> | 0           | 1         | 1         | Locked, thread(s) waiting
     //
-    // where `<count>` is an integer and `<HotLocation>` is a boxed `HotLocation` enum.
+    // where `count` is an integer and `Box<HotLocation>` is a pointer to a `malloc`ed block of
+    // memory in the heap containing a `HotLocation` enum.
     //
     // The precise semantics of locking and, in particular, parking are subtle: interested readers
     // are directed to https://github.com/Amanieu/parking_lot/blob/master/src/raw_mutex.rs#L33 for
