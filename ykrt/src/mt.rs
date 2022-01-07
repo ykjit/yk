@@ -6,6 +6,7 @@ use std::{
     collections::VecDeque,
     ffi::c_void,
     marker::PhantomData,
+    mem::forget,
     ptr,
     sync::{
         atomic::{AtomicU32, AtomicUsize, Ordering},
@@ -264,31 +265,12 @@ impl MT {
                         eprintln!("jit-state: exit-jit-code");
                     }
                 }
-                HotLocation::Compiling(mtx) => {
-                    let tr = {
-                        let gd = mtx.try_lock();
-                        if gd.is_none() {
-                            // Compilation is ongoing.
-                            loc.unlock();
-                            return;
-                        }
-                        let mut gd = gd.unwrap();
-                        if gd.is_none() {
-                            // Compilation is ongoing.
-                            loc.unlock();
-                            return;
-                        }
-                        (*gd).take().unwrap()
-                    };
-                    // FIXME: https://github.com/ykjit/yk/issues/462
-                    //
-                    // It would be nicer if the compilation thread itself transitioned the location
-                    // from `Compiling` to `Compiled`.
-                    *hl = HotLocation::Compiled(tr);
+                HotLocation::Compiling => {
                     loc.unlock();
-                    // FIXME: In the event that trace compilation has just completed, we should be
-                    // able to execute it straight away, rather than returning here.
                     return;
+                }
+                HotLocation::Dropped => {
+                    unreachable!();
                 }
                 HotLocation::Tracing(opt) => {
                     match mtt.tracing.get() {
@@ -323,11 +305,9 @@ impl MT {
                     eprintln!("jit-state: stop-tracing");
                     match stop_tracing() {
                         Ok(ir_trace) => {
-                            let mtx = Arc::new(Mutex::new(None));
-                            let mtx_cl = Arc::clone(&mtx);
-                            *hl = HotLocation::Compiling(mtx);
+                            *hl = HotLocation::Compiling;
                             loc.unlock();
-                            self.queue_compile_job(ir_trace, mtx_cl);
+                            self.queue_compile_job(ir_trace, hl);
                         }
                         Err(_) => todo!(),
                     }
@@ -342,13 +322,32 @@ impl MT {
     }
 
     /// Add a compilation job for `sir` to the global work queue.
-    fn queue_compile_job(&self, trace: IRTrace, mtx: Arc<Mutex<Option<Box<CompiledTrace>>>>) {
+    fn queue_compile_job(&self, trace: IRTrace, hl_ptr: *const HotLocation) {
+        let hl_ptr = hl_ptr as usize;
         let f = Box::new(move || {
             let code_ptr = trace.compile();
-            *mtx.lock() = Some(Box::new(CompiledTrace::new(code_ptr)));
-            // FIXME: although we've now put the compiled trace into the mutex, there's no
-            // guarantee that the Location for which we're compiling will ever be executed
-            // again. In such a case, the memory has, in essence, leaked.
+            let ct = Box::new(CompiledTrace::new(code_ptr));
+            // We can't lock a `HotLocation` directly as the `lock` method is on `Location`. We
+            // thus need to create a "fake" / "temporary" `Location` so that we can `lock` it: note
+            // that we *must not* `drop` this temporary `Location`, hence the later call to
+            // `forget`.
+            let tmp_ls = LocationInner::new().with_hotlocation(hl_ptr as *mut HotLocation);
+            let tmp_loc = unsafe { Location::from_location_inner(tmp_ls) };
+            tmp_loc.lock().unwrap();
+            let hl = unsafe { tmp_ls.hot_location() };
+            if let HotLocation::Compiling = hl {
+                // FIXME: although we've now put the compiled trace into the `HotLocation`, there's
+                // no guarantee that the `Location` for which we're compiling will ever be executed
+                // again. In such a case, the memory has, in essence, leaked.
+                *hl = HotLocation::Compiled(ct);
+            } else if let HotLocation::Dropped = hl {
+                // The Location pointing to this HotLocation was dropped. There's nothing we can do
+                // with the compiled trace, so we let it it be implicitly dropped.
+            } else {
+                unreachable!();
+            }
+            tmp_loc.unlock();
+            forget(tmp_loc);
         });
         self.queue_job(f);
     }

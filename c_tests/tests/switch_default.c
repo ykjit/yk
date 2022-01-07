@@ -19,7 +19,9 @@
 //     ...
 //     --- End jit-pre-opt ---
 //     i=3
+//     jit-state: enter-jit-code
 //     i=2
+//     jit-state: exit-jit-code
 //     jit-state: enter-jit-code
 //     i=1
 //     jit-state: stopgap

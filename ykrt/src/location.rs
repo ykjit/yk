@@ -9,7 +9,6 @@ use std::{
 };
 
 use crate::mt::HotThreshold;
-use parking_lot::Mutex;
 use parking_lot_core::{
     park, unpark_one, ParkResult, SpinWait, UnparkResult, UnparkToken, DEFAULT_PARK_TOKEN,
 };
@@ -49,9 +48,9 @@ pub struct Location {
     //  │             │ start compiling trace
     //  │             │ in thread
     //  │             ▼
-    //  │           ┌──────────────┐
-    //  │           │  Compiling   │
-    //  │           └──────────────┘
+    //  │           ┌──────────────┐             ┌───────────┐
+    //  │           │  Compiling   │────────────▶│  Dropped  │
+    //  │           └──────────────┘             └───────────┘
     //  │             │
     //  │             │ trace compiled
     //  │             ▼
@@ -102,6 +101,12 @@ impl Location {
         // Locations start in the counting state with a count of 0.
         Self {
             inner: AtomicUsize::new(LocationInner::new().x),
+        }
+    }
+
+    pub(super) unsafe fn from_location_inner(ls: LocationInner) -> Self {
+        Self {
+            inner: AtomicUsize::new(ls.x),
         }
     }
 
@@ -263,6 +268,7 @@ impl Location {
     /// Try obtaining the lock, returning the new `State` if successful.
     pub(super) fn try_lock(&self) -> Result<LocationInner, ()> {
         let mut ls = self.load(Ordering::Relaxed);
+        // FIXME: this could be in the counting state
         loop {
             if ls.is_locked() {
                 return Err(());
@@ -294,27 +300,8 @@ impl Location {
             let again = match self.try_lock() {
                 Err(()) => true, // Failed to acquire lock, spin and retry.
                 Ok(ls) => {
-                    if let HotLocation::Compiling(mtx) = unsafe { ls.hot_location() } {
-                        // Compilation is either pending, ongoing, or just completed.
-                        if let Some(ct) = mtx.try_lock() {
-                            // We acquired the lock on the compiled trace storage. This means that
-                            // either:
-                            //
-                            // a) compilation is pending and the compilation thread hasn't yet
-                            // acquired its initial lock on the compiled trace storage. In this
-                            // case, the compiled trace storage remains `None` and we should spin
-                            // more until it becomes `Some`.
-                            //
-                            // b) Compilation has finished and the compilation thread has stored a
-                            // compiled trace and release the lock on its storage. In this case the
-                            // trace storage is `Some`, and we can stop spinning.
-                            ct.is_none()
-                        } else {
-                            // We failed to acquire the lock on the compiled trace storage, so the
-                            // compilation thread must be holding the lock. In this case,
-                            // compilation has started and is ongoing.
-                            true
-                        }
+                    if let HotLocation::Compiling = unsafe { ls.hot_location() } {
+                        true
                     } else {
                         // If the location is not being compiled, then we don't need to spin.
                         false
@@ -334,9 +321,25 @@ impl Drop for Location {
         let ls = self.load(Ordering::Relaxed);
         if !ls.is_counting() {
             debug_assert!(!ls.is_locked());
-            let hr = unsafe { ls.hot_location() };
-            unsafe {
-                Box::from_raw(hr);
+            self.lock().unwrap();
+            let hl = unsafe { ls.hot_location() };
+            if let HotLocation::Compiled(_) = hl {
+                // FIXME: we can't drop this memory as another thread may still be executing the
+                // trace that's pointed to. There should be a ref count that we decrement and free
+                // memory if it reaches zero.
+                self.unlock();
+            } else if let HotLocation::Compiling = hl {
+                // Another thread has a pointer to the underlying `HotLocation`, so we have to
+                // signal to that thread that they need to free the `HotLocation`.
+                *hl = HotLocation::Dropped;
+                self.unlock();
+            } else if let HotLocation::DontTrace | HotLocation::Tracing(_) = hl {
+                self.unlock();
+                unsafe {
+                    Box::from_raw(hl);
+                }
+            } else {
+                unreachable!();
             }
         }
     }
@@ -457,8 +460,16 @@ pub(super) struct ThreadIdInner;
 /// A `Location`'s non-counting states.
 #[derive(EnumDiscriminants)]
 pub(super) enum HotLocation {
+    /// Points to executable machine code that can be executed instead of the interpreter for this
+    /// HotLocation.
     Compiled(Box<CompiledTrace>),
-    Compiling(Arc<Mutex<Option<Box<CompiledTrace>>>>),
+    /// This HotLocation is being compiled in another thread.
+    Compiling,
+    /// Whilst this HotLocation was being compiled in another thread, the [Location] was dropped.
+    Dropped,
+    /// This HotLocation has encountered problems (e.g. traces which are too long) and shouldn't be
+    /// traced again.
     DontTrace,
+    /// This HotLocation started a trace which is ongoing.
     Tracing(Option<Arc<ThreadIdInner>>),
 }
