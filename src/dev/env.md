@@ -19,6 +19,14 @@ The following stages are supported:
  - `jit-post-opt`: the IR for the trace after LLVM has optimised it. This is
    the IR that will be submitted to the LLVM code generator.
 
+### `YKD_SERIALISE_COMPILATION`
+
+When `YKD_SERIALISE_COMPILATION=1`, calls to `yk_control_point(loc)` will block
+while `loc` is being compiled.
+
+This variable is only available when the `c_testing` feature is used, and it is
+only intended for use in testing.
+
 ## Compile-time Variables
 
 ### `YKD_PRINT_JITSTATE`
