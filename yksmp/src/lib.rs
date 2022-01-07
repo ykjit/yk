@@ -8,8 +8,6 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::error;
-use std::ffi::c_void;
-use std::{ptr, slice};
 
 struct Function {
     addr: u64,
@@ -22,17 +20,17 @@ struct Record {
 }
 
 #[derive(Debug)]
-enum Location {
-    Register(u16),
-    Direct(u16, i32),
-    Indirect(u16, i32),
+pub enum Location {
+    Register(u16, u16),
+    Direct(u16, i32, u16),
+    Indirect(u16, i32, u16),
     Constant(u32),
     LargeConstant(u64),
 }
 
 /// Parses LLVM stackmaps version 3 from a given address. Provides a way to query relevant
 /// locations given the return address of a `__llvm_deoptimize` function.
-struct StackMapParser<'a> {
+pub struct StackMapParser<'a> {
     data: &'a [u8],
     offset: usize,
 }
@@ -123,22 +121,22 @@ impl StackMapParser<'_> {
         for _ in 0..num {
             let kind = self.read_u8();
             self.read_u8();
-            let _size = self.read_u16();
+            let size = self.read_u16();
             let dwreg = self.read_u16();
             self.read_u16();
 
             let location = match kind {
                 0x01 => {
                     self.read_i32();
-                    Location::Register(dwreg)
+                    Location::Register(dwreg, size)
                 }
                 0x02 => {
                     let offset = self.read_i32();
-                    Location::Direct(dwreg, offset)
+                    Location::Direct(dwreg, offset, size)
                 }
                 0x03 => {
                     let offset = self.read_i32();
-                    Location::Indirect(dwreg, offset)
+                    Location::Indirect(dwreg, offset, size)
                 }
                 0x04 => {
                     let offset = self.read_u32();
@@ -198,88 +196,6 @@ impl StackMapParser<'_> {
     }
 }
 
-struct Registers {
-    rax: usize,
-    rdx: usize,
-    rcx: usize,
-    rbx: usize,
-    rsi: usize,
-    rdi: usize,
-    rsp: usize,
-}
-
-impl Registers {
-    fn from_ptr(ptr: *const c_void) -> Registers {
-        Registers {
-            rax: Registers::read_from_stack(ptr, 0),
-            rdx: Registers::read_from_stack(ptr, 1),
-            rcx: Registers::read_from_stack(ptr, 2),
-            rbx: Registers::read_from_stack(ptr, 3),
-            rsi: Registers::read_from_stack(ptr, 4),
-            rdi: Registers::read_from_stack(ptr, 5),
-            rsp: Registers::read_from_stack(ptr, 6),
-        }
-    }
-
-    fn read_from_stack(rsp: *const c_void, off: isize) -> usize {
-        unsafe {
-            let ptr = rsp as *const usize;
-            ptr::read::<usize>(ptr.offset(off))
-        }
-    }
-
-    fn get(&self, id: u16) -> usize {
-        match id {
-            0 => self.rax,
-            1 => self.rdx,
-            2 => self.rcx,
-            3 => self.rbx,
-            4 => self.rsi,
-            5 => self.rdi,
-            6 => unreachable!("We currently have no way to access RBP of the previous stackframe."),
-            7 => self.rsp,
-            _ => unreachable!(),
-        }
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn __yk_stopgap(
-    addr: *const c_void,
-    size: usize,
-    retaddr: usize,
-    rsp: *const c_void,
-) {
-    // Restore saved registers from the stack.
-    let registers = Registers::from_ptr(rsp);
-
-    // Parse the stackmap.
-    let slice = unsafe { slice::from_raw_parts(addr as *mut u8, size) };
-    let map = StackMapParser::parse(slice).unwrap();
-    let locs = map.get(&retaddr.try_into().unwrap()).unwrap();
-
-    // Extract live values from the stackmap.
-    // FIXME: Until we have a stopgap interpreter we simply print the values.
-    for l in locs {
-        match l {
-            Location::Direct(reg, off) => {
-                // When using `llvm.experimental.deoptimize` then direct locations should always be
-                // in relation to RSP.
-                assert_eq!(*reg, 7);
-                // We need to add 2 bytes to the value of RSP to factor in the return address and
-                // the pushed RBP value of the previous frame.
-                let addr = registers.get(*reg) + (*off as usize) + 16;
-                let _v = unsafe { ptr::read::<u8>(addr as *mut u8) };
-                todo!();
-            }
-            Location::Constant(_v) => {
-                todo!();
-            }
-            _ => todo!(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod test {
 
@@ -321,8 +237,8 @@ mod test {
         let map = StackMapParser::parse(smsec.data().unwrap()).unwrap();
         let locs = &map.iter().nth(0).unwrap().1;
         assert_eq!(locs.len(), 2);
-        assert!(matches!(locs[0], Location::Direct(6, -4)));
-        assert!(matches!(locs[1], Location::Direct(6, -8)));
+        assert!(matches!(locs[0], Location::Direct(6, -4, _)));
+        assert!(matches!(locs[1], Location::Direct(6, -8, _)));
     }
 
     #[test]
@@ -336,7 +252,7 @@ mod test {
         assert!(matches!(locs[0], Location::Constant(0)));
         assert!(matches!(locs[1], Location::Constant(0)));
         assert!(matches!(locs[2], Location::Constant(2)));
-        assert!(matches!(locs[3], Location::Direct(7, 12)));
-        assert!(matches!(locs[4], Location::Direct(7, 8)));
+        assert!(matches!(locs[3], Location::Direct(7, 12, _)));
+        assert!(matches!(locs[4], Location::Direct(7, 8, _)));
     }
 }

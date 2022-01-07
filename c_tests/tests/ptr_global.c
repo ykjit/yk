@@ -6,7 +6,8 @@
 //   stderr:
 //     ...
 //     i=25
-//     ptr_global: guard-failure
+//     jit-state: stopgap
+//     ...
 
 // Check that tracing mutation of a global pointer works.
 

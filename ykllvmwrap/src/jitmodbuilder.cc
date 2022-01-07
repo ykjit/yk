@@ -1,6 +1,7 @@
 // Classes and functions for constructing a new LLVM module from a trace.
 
 #include "llvm/IR/DebugInfo.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
@@ -113,6 +114,25 @@ Value *getYkCtrlPointVarsStruct(Module *AOTMod, InputTrace &InpTrace) {
   User *CallSite = F->user_back();
   CallInst *CI = cast<CallInst>(CallSite);
   return CI->getArgOperand(YK_CONTROL_POINT_ARG_IDX);
+}
+
+/// Extract all live variables that need to be passed into the control point.
+/// FIXME: This is currently an overapproximation and will return some
+/// variables that are no longer alive.
+std::vector<Value *> getLiveVars(DominatorTree &DT, Instruction *Before) {
+  std::vector<Value *> Vec;
+  Function *Func = Before->getFunction();
+  for (auto &BB : *Func) {
+    if (!DT.dominates(cast<Instruction>(Before), &BB)) {
+      for (auto &I : BB) {
+        if ((!I.getType()->isVoidTy()) &&
+            (DT.dominates(&I, cast<Instruction>(Before)))) {
+          Vec.push_back(&I);
+        }
+      }
+    }
+  }
+  return Vec;
 }
 
 class JITModBuilder {
@@ -351,6 +371,13 @@ class JITModBuilder {
     // Create the function.
     std::vector<Type *> InputTypes;
     InputTypes.push_back(TraceInputs->getType());
+// Add arguments for stackmap pointer and size.
+#if defined(__x86_64)
+    InputTypes.push_back(Type::getInt64PtrTy(RetTy->getContext()));
+    InputTypes.push_back(Type::getInt64Ty(RetTy->getContext()));
+#else
+#error Not implemented!
+#endif
     llvm::FunctionType *FType =
         llvm::FunctionType::get(RetTy, InputTypes, false);
     llvm::Function *JITFunc = llvm::Function::Create(
@@ -427,20 +454,31 @@ class JITModBuilder {
 
       // Declare `errx(3)`.
       LLVMContext &Context = JITFunc->getContext();
-      FunctionType *LibcErrxFuncTy = FunctionType::get(
-          Type::getVoidTy(Context),
-          {IntTy, Type::getInt8Ty(Context)->getPointerTo()}, true);
-      Function *LibcErrxFunc = llvm::Function::Create(
-          LibcErrxFuncTy, GlobalValue::ExternalLinkage, "errx", JITMod);
 
       // Create the block.
       GuardFailBB = BasicBlock::Create(Context, "guardfail", JITFunc);
       IRBuilder<> FailBuilder(GuardFailBB);
-      Value *ExitCode = ConstantInt::get(IntTy, EXIT_SUCCESS);
-      Value *Fmt =
-          FailBuilder.CreateGlobalStringPtr(StringRef("guard-failure"));
-      FailBuilder.CreateCall(LibcErrxFuncTy, LibcErrxFunc, {ExitCode, Fmt});
-      FailBuilder.CreateUnreachable(); // `errx(3)` is non-convergent.
+
+      // Find live variables.
+      BasicBlock *CurrentBB = Builder.GetInsertBlock();
+      Instruction *CurrentInst = &CurrentBB->back();
+      DominatorTree DT(*JITFunc);
+      std::vector<Value *> LiveVals = getLiveVars(DT, CurrentInst);
+
+      // Create the deoptimization call.
+      Type *voidty = Type::getVoidTy(Context);
+      Function *DeoptInt = Intrinsic::getDeclaration(
+          JITFunc->getParent(), Intrinsic::experimental_deoptimize, {voidty});
+      OperandBundleDef ob =
+          OperandBundleDef("deopt", (ArrayRef<Value *>)LiveVals);
+      ArrayRef<OperandBundleDef> ar_ob = ArrayRef<OperandBundleDef>(ob);
+      // We already passed the stackmap address and size into the trace
+      // function so pass them on to the __llvm_deoptimize call.
+      CallInst::Create(DeoptInt, {JITFunc->getArg(1), JITFunc->getArg(2)},
+                       ar_ob, "", GuardFailBB);
+
+      // We always need to return after the deoptimisation call.
+      ReturnInst::Create(Context, nullptr, GuardFailBB);
     }
     return GuardFailBB;
   }
