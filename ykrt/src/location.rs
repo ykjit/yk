@@ -270,9 +270,8 @@ impl Location {
     /// nonsensical); or another thread held the lock.
     pub(super) fn try_lock(&self) -> Option<LocationInner> {
         let mut ls = self.load(Ordering::Relaxed);
-        // FIXME: this could be in the counting state
         loop {
-            if ls.is_locked() {
+            if ls.is_counting() || ls.is_locked() {
                 return None;
             }
             let new_ls = ls.with_lock();
