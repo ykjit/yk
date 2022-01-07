@@ -265,17 +265,19 @@ impl Location {
         }
     }
 
-    /// Try obtaining the lock, returning the new `State` if successful.
-    pub(super) fn try_lock(&self) -> Result<LocationInner, ()> {
+    /// Try obtaining a lock, returning the new [LocationInner] if successful. If a lock wasn't
+    /// obtained, the `Location` was either: in the Counting state (for which locks are
+    /// nonsensical); or another thread held the lock.
+    pub(super) fn try_lock(&self) -> Option<LocationInner> {
         let mut ls = self.load(Ordering::Relaxed);
         // FIXME: this could be in the counting state
         loop {
             if ls.is_locked() {
-                return Err(());
+                return None;
             }
             let new_ls = ls.with_lock();
             match self.compare_exchange_weak(ls, new_ls, Ordering::Acquire, Ordering::Relaxed) {
-                Ok(_) => return Ok(new_ls),
+                Ok(_) => return Some(new_ls),
                 Err(x) => ls = x,
             }
         }
@@ -298,8 +300,7 @@ impl Location {
         // compilation has just finished for the location.
         loop {
             let again = match self.try_lock() {
-                Err(()) => true, // Failed to acquire lock, spin and retry.
-                Ok(ls) => {
+                Some(ls) => {
                     if let HotLocation::Compiling = unsafe { ls.hot_location() } {
                         true
                     } else {
@@ -307,6 +308,7 @@ impl Location {
                         false
                     }
                 }
+                None => true, // Failed to acquire lock, spin and retry.
             };
             self.unlock();
             if !again {
