@@ -131,7 +131,6 @@ impl MT {
         });
     }
 
-    #[allow(unreachable_code)]
     fn do_transition_location(&self, mtt: &MTThread, loc: &Location, ctrlp_vars: *mut c_void) {
         let mut ls = loc.load(Ordering::Relaxed);
 
@@ -238,7 +237,11 @@ impl MT {
                     }
                     match loc.lock() {
                         Ok(x) => ls = x,
-                        Err(()) => unreachable!(),
+                        Err(()) => {
+                            // The location transitioned back to the counting state before we'd
+                            // gained a lock.
+                            return;
+                        }
                     }
                 }
             }
