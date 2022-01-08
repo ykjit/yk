@@ -1,5 +1,7 @@
 //! The main end-user interface to the meta-tracing system.
 
+#[cfg(feature = "c_testing")]
+use std::env;
 use std::{
     cell::Cell,
     cmp,
@@ -37,6 +39,10 @@ const DEFAULT_HOT_THRESHOLD: HotThreshold = 0;
 
 static GLOBAL_MT: SyncLazy<MT> = SyncLazy::new(|| MT::new());
 thread_local! {static THREAD_MTTHREAD: MTThread = MTThread::new();}
+
+#[cfg(feature = "c_testing")]
+static SERIALISE_COMPILATION: SyncLazy<bool> =
+    SyncLazy::new(|| &env::var("YKD_SERIALISE_COMPILATION").unwrap_or("0".to_owned()) == "1");
 
 #[derive(Clone)]
 /// A meta-tracer. Note that this is conceptually a "front-end" to the actual meta-tracer akin to
@@ -320,7 +326,8 @@ impl MT {
     /// Add a compilation job for `sir` to the global work queue.
     fn queue_compile_job(&self, trace: IRTrace, hl_ptr: *const HotLocation) {
         let hl_ptr = hl_ptr as usize;
-        let f = Box::new(move || {
+
+        let do_compile = move || {
             let code_ptr = trace.compile();
             let ct = Box::new(CompiledTrace::new(code_ptr));
             // We can't lock a `HotLocation` directly as the `lock` method is on `Location`. We
@@ -344,8 +351,15 @@ impl MT {
             }
             tmp_loc.unlock();
             forget(tmp_loc);
-        });
-        self.queue_job(f);
+        };
+
+        #[cfg(feature = "c_testing")]
+        if *SERIALISE_COMPILATION {
+            do_compile();
+            return;
+        }
+
+        self.queue_job(Box::new(do_compile));
     }
 }
 

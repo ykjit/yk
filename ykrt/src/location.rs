@@ -281,40 +281,6 @@ impl Location {
             }
         }
     }
-
-    /// If the location is in the `Compiling` state, then wait for compilation to complete.
-    ///
-    /// This is used in testing, where we need some way to tame non-determinism in order to write
-    /// meaningful tests.
-    #[cfg(feature = "c_testing")]
-    pub fn block_if_compiling(&self) {
-        let ls = self.load(Ordering::Relaxed);
-
-        // If the location is in the counting state, then compilation cannot be occurring.
-        if ls.is_counting() {
-            return;
-        }
-
-        // A simple spin-lock which exits if either the location has no compilation pending, or if
-        // compilation has just finished for the location.
-        loop {
-            let again = match self.try_lock() {
-                Some(ls) => {
-                    if let HotLocation::Compiling = unsafe { ls.hot_location() } {
-                        true
-                    } else {
-                        // If the location is not being compiled, then we don't need to spin.
-                        false
-                    }
-                }
-                None => true, // Failed to acquire lock, spin and retry.
-            };
-            self.unlock();
-            if !again {
-                break;
-            }
-        }
-    }
 }
 
 impl Drop for Location {
