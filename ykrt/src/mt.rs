@@ -54,9 +54,7 @@ impl MT {
     fn new() -> Self {
         let inner = MTInner {
             hot_threshold: AtomicHotThreshold::new(DEFAULT_HOT_THRESHOLD),
-            #[allow(dead_code)]
             job_queue: (Condvar::new(), Mutex::new(VecDeque::new())),
-            #[allow(dead_code)]
             active_user_threads: AtomicUsize::new(1),
             max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
             active_worker_threads: AtomicUsize::new(0),
@@ -86,7 +84,6 @@ impl MT {
     }
 
     /// Queue `job` to be run on a worker thread.
-    #[allow(dead_code)]
     fn queue_job(&self, job: Box<dyn FnOnce() + Send>) {
         // We have a very simple model of worker threads. Each time a job is queued, we spin up a
         // new worker thread iff we aren't already running the maximum number of worker threads.
