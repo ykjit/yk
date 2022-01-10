@@ -54,10 +54,7 @@ impl MT {
     fn new() -> Self {
         let inner = MTInner {
             hot_threshold: AtomicHotThreshold::new(DEFAULT_HOT_THRESHOLD),
-            #[allow(dead_code)]
             job_queue: (Condvar::new(), Mutex::new(VecDeque::new())),
-            #[allow(dead_code)]
-            active_user_threads: AtomicUsize::new(1),
             max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
             active_worker_threads: AtomicUsize::new(0),
             tracing_kind: TracingKind::default(),
@@ -86,7 +83,6 @@ impl MT {
     }
 
     /// Queue `job` to be run on a worker thread.
-    #[allow(dead_code)]
     fn queue_job(&self, job: Box<dyn FnOnce() + Send>) {
         // We have a very simple model of worker threads. Each time a job is queued, we spin up a
         // new worker thread iff we aren't already running the maximum number of worker threads.
@@ -357,10 +353,6 @@ impl MT {
 /// The innards of a meta-tracer.
 struct MTInner {
     hot_threshold: AtomicHotThreshold,
-    /// The number of threads currently running the user's interpreter (directly or via JITed
-    /// code).
-    #[allow(dead_code)]
-    active_user_threads: AtomicUsize,
     /// The ordered queue of compilation worker functions.
     job_queue: (Condvar, Mutex<VecDeque<Box<dyn FnOnce() + Send>>>),
     /// The hard cap on the number of worker threads.
@@ -371,10 +363,8 @@ struct MTInner {
     tracing_kind: TracingKind,
 }
 
-/// A meta-tracer aware thread. Note that this is conceptually a "front-end" to the actual
-/// meta-tracer thread akin to an `Rc`: this struct can be freely `clone()`d without duplicating
-/// the underlying meta-tracer thread. Note that this struct is neither `Send` nor `Sync`: it
-/// can only be accessed from within a single thread.
+/// Meta-tracer per-thread state. Note that this struct is neither `Send` nor `Sync`: it can only
+/// be accessed from within a single thread.
 pub struct MTThread {
     /// An Arc whose pointer address uniquely identifies this thread. When a Location is traced,
     /// this Arc's strong count will be incremented. If, after this thread drops, this Arc's strong
