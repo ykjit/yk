@@ -429,7 +429,7 @@ pub(super) struct ThreadIdInner;
 pub(super) enum HotLocation {
     /// Points to executable machine code that can be executed instead of the interpreter for this
     /// HotLocation.
-    Compiled(Box<CompiledTrace>),
+    Compiled(*const CompiledTrace),
     /// This HotLocation is being compiled in another thread.
     Compiling,
     /// Whilst this HotLocation was being compiled in another thread, the [Location] was dropped.

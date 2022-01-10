@@ -6,7 +6,6 @@ use std::{
     cell::Cell,
     cmp,
     collections::VecDeque,
-    ffi::c_void,
     marker::PhantomData,
     mem::forget,
     ptr,
@@ -127,14 +126,18 @@ impl MT {
         }
     }
 
-    pub fn transition_location(loc: &Location, ctrlp_vars: *mut c_void) {
+    /// Perform the next step to `loc` in the `Location` state-machine. If `loc` moves to the
+    /// Compiled state, return a pointer to a [CompiledTrace] object.
+    pub fn transition_location(loc: &Location) -> Option<*const CompiledTrace> {
         let mt = MT::global();
-        THREAD_MTTHREAD.with(|mtt| {
-            mt.do_transition_location(mtt, loc, ctrlp_vars);
-        });
+        THREAD_MTTHREAD.with(|mtt| mt.do_transition_location(mtt, loc))
     }
 
-    fn do_transition_location(&self, mtt: &MTThread, loc: &Location, ctrlp_vars: *mut c_void) {
+    fn do_transition_location(
+        &self,
+        mtt: &MTThread,
+        loc: &Location,
+    ) -> Option<*const CompiledTrace> {
         let mut ls = loc.load(Ordering::Relaxed);
 
         if ls.is_counting() {
@@ -178,14 +181,14 @@ impl MT {
                         }
                     }
                 }
-                return;
+                return None;
             } else {
                 if mtt.tracing.get().is_some() {
                     // This thread is already tracing another Location, so either another
                     // thread needs to trace this Location or this thread needs to wait
                     // until the current round of tracing has completed. Either way,
                     // there's no point incrementing the hot count.
-                    return;
+                    return None;
                 }
                 // To avoid racing with another thread that may also try starting to trace this
                 // location at the same time, we need to initialise and lock the Location, which we
@@ -212,7 +215,7 @@ impl MT {
                             *unsafe { new_ls.hot_location() } = HotLocation::Tracing(Some(tid));
                             mtt.tracing.set(Some(hl_ptr as *const ()));
                             loc.unlock();
-                            return;
+                            return None;
                         }
                         Err(x) => {
                             if x.is_locked() {
@@ -220,7 +223,7 @@ impl MT {
                                 // start tracing. It's unlikely to be worth us spending time contending
                                 // with that other thread.
                                 unsafe { Box::from_raw(hl_ptr) };
-                                return;
+                                return None;
                             }
                             ls = x;
                         }
@@ -236,14 +239,14 @@ impl MT {
                     // If this thread is tracing we need to grab the lock so that we can stop
                     // tracing, otherwise we return to the interpreter.
                     if mtt.tracing.get().is_none() {
-                        return;
+                        return None;
                     }
                     match loc.lock() {
                         Ok(x) => ls = x,
                         Err(()) => {
                             // The location transitioned back to the counting state before we'd
                             // gained a lock.
-                            return;
+                            return None;
                         }
                     }
                 }
@@ -251,25 +254,13 @@ impl MT {
             let hl = unsafe { ls.hot_location() };
             let hl_ptr = hl as *mut _ as *mut ();
             match hl {
-                HotLocation::Compiled(tr) => {
+                HotLocation::Compiled(ctr) => {
                     loc.unlock();
-                    // FIXME: If we want to free compiled traces, we'll need to refcount (or use
-                    // a GC) to know if anyone's executing that trace at the moment.
-                    //
-                    // FIXME: this loop shouldn't exist. Trace stitching should be implemented in
-                    // the trace itself.
-                    // https://github.com/ykjit/yk/issues/442
-                    loop {
-                        #[cfg(feature = "jit_state_debug")]
-                        eprintln!("jit-state: enter-jit-code");
-                        tr.exec(ctrlp_vars);
-                        #[cfg(feature = "jit_state_debug")]
-                        eprintln!("jit-state: exit-jit-code");
-                    }
+                    return Some(*ctr);
                 }
                 HotLocation::Compiling => {
                     loc.unlock();
-                    return;
+                    return None;
                 }
                 HotLocation::Dropped => {
                     unreachable!();
@@ -281,7 +272,7 @@ impl MT {
                             if !ptr::eq(hl_ptr, other_hl_ptr) {
                                 // but not this Location.
                                 loc.unlock();
-                                return;
+                                return None;
                             }
                         }
                         None => {
@@ -294,7 +285,7 @@ impl MT {
                                 *hl = HotLocation::DontTrace;
                             }
                             loc.unlock();
-                            return;
+                            return None;
                         }
                     }
                     // This thread is tracing this location: we must, therefore, have finished
@@ -313,11 +304,11 @@ impl MT {
                         }
                         Err(_) => todo!(),
                     }
-                    return;
+                    return None;
                 }
                 HotLocation::DontTrace => {
                     loc.unlock();
-                    return;
+                    return None;
                 }
             }
         }
@@ -342,7 +333,7 @@ impl MT {
                 // FIXME: although we've now put the compiled trace into the `HotLocation`, there's
                 // no guarantee that the `Location` for which we're compiling will ever be executed
                 // again. In such a case, the memory has, in essence, leaked.
-                *hl = HotLocation::Compiled(ct);
+                *hl = HotLocation::Compiled(Box::into_raw(ct));
             } else if let HotLocation::Dropped = hl {
                 // The Location pointing to this HotLocation was dropped. There's nothing we can do
                 // with the compiled trace, so we let it it be implicitly dropped.
