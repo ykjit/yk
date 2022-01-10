@@ -371,10 +371,8 @@ struct MTInner {
     tracing_kind: TracingKind,
 }
 
-/// A meta-tracer aware thread. Note that this is conceptually a "front-end" to the actual
-/// meta-tracer thread akin to an `Rc`: this struct can be freely `clone()`d without duplicating
-/// the underlying meta-tracer thread. Note that this struct is neither `Send` nor `Sync`: it
-/// can only be accessed from within a single thread.
+/// Meta-tracer per-thread state. Note that this struct is neither `Send` nor `Sync`: it can only
+/// be accessed from within a single thread.
 pub struct MTThread {
     /// An Arc whose pointer address uniquely identifies this thread. When a Location is traced,
     /// this Arc's strong count will be incremented. If, after this thread drops, this Arc's strong
