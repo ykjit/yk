@@ -151,7 +151,9 @@ impl IRTrace {
     }
 }
 
-/// Binary executable trace code.
+/// A trace compiled into machine code. Note that these are passed around as raw pointers and
+/// potentially referenced by multiple threads so, once created, instances of this struct must
+/// never be mutated.
 pub struct CompiledTrace {
     /// A function which when called, executes the compiled trace.
     ///

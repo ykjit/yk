@@ -262,7 +262,7 @@ impl MT {
                     loop {
                         #[cfg(feature = "jit_state_debug")]
                         eprintln!("jit-state: enter-jit-code");
-                        tr.exec(ctrlp_vars);
+                        unsafe { &**tr }.exec(ctrlp_vars);
                         #[cfg(feature = "jit_state_debug")]
                         eprintln!("jit-state: exit-jit-code");
                     }
@@ -342,7 +342,7 @@ impl MT {
                 // FIXME: although we've now put the compiled trace into the `HotLocation`, there's
                 // no guarantee that the `Location` for which we're compiling will ever be executed
                 // again. In such a case, the memory has, in essence, leaked.
-                *hl = HotLocation::Compiled(ct);
+                *hl = HotLocation::Compiled(Box::into_raw(ct));
             } else if let HotLocation::Dropped = hl {
                 // The Location pointing to this HotLocation was dropped. There's nothing we can do
                 // with the compiled trace, so we let it it be implicitly dropped.
