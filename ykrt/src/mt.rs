@@ -55,7 +55,6 @@ impl MT {
         let inner = MTInner {
             hot_threshold: AtomicHotThreshold::new(DEFAULT_HOT_THRESHOLD),
             job_queue: (Condvar::new(), Mutex::new(VecDeque::new())),
-            active_user_threads: AtomicUsize::new(1),
             max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
             active_worker_threads: AtomicUsize::new(0),
             tracing_kind: TracingKind::default(),
@@ -354,10 +353,6 @@ impl MT {
 /// The innards of a meta-tracer.
 struct MTInner {
     hot_threshold: AtomicHotThreshold,
-    /// The number of threads currently running the user's interpreter (directly or via JITed
-    /// code).
-    #[allow(dead_code)]
-    active_user_threads: AtomicUsize,
     /// The ordered queue of compilation worker functions.
     job_queue: (Condvar, Mutex<VecDeque<Box<dyn FnOnce() + Send>>>),
     /// The hard cap on the number of worker threads.
