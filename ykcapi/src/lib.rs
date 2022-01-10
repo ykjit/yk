@@ -11,20 +11,12 @@
 #![feature(once_cell)]
 
 use std::convert::TryInto;
-#[cfg(feature = "c_testing")]
-use std::env;
 use std::ffi::c_void;
-#[cfg(feature = "c_testing")]
-use std::lazy::SyncLazy;
 use std::process;
 use std::{ptr, slice};
 use ykrt::{Location, MT};
 use yksmp::{Location as SMLocation, StackMapParser};
 use ykutil;
-
-#[cfg(feature = "c_testing")]
-static SERIALISE_COMPILATION: SyncLazy<bool> =
-    SyncLazy::new(|| &env::var("YKD_SERIALISE_COMPILATION").unwrap_or("0".to_owned()) == "1");
 
 // The "dummy control point" that is replaced in an LLVM pass.
 #[no_mangle]
@@ -39,13 +31,6 @@ pub extern "C" fn __ykrt_control_point(loc: *mut Location, ctrlp_vars: *mut c_vo
     if !loc.is_null() {
         let loc = unsafe { &*loc };
         MT::transition_location(loc, ctrlp_vars);
-
-        #[cfg(feature = "c_testing")]
-        {
-            if *SERIALISE_COMPILATION {
-                loc.block_if_compiling();
-            }
-        }
     }
 }
 
