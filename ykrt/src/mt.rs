@@ -225,8 +225,8 @@ impl MT {
             // There's no point contending with other threads, so in general we don't want to
             // continually try grabbing the lock.
             match loc.try_lock() {
-                Ok(x) => ls = x,
-                Err(_) => {
+                Some(x) => ls = x,
+                None => {
                     // If this thread is tracing we need to grab the lock so that we can stop
                     // tracing, otherwise we return to the interpreter.
                     if mtt.tracing.get().is_none() {
