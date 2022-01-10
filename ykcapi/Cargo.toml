@@ -17,4 +17,5 @@ ykutil = { path = "../ykutil" }
 yksmp = { path = "../yksmp" }
 
 [features]
+jit_state_debug = []
 c_testing = []

@@ -16,5 +16,5 @@ regex = "1.5.4"
 [dev-dependencies]
 lang_tester = "0.7.0"
 tempfile = "3.2.0"
-ykcapi = { path = "../ykcapi", features = ["c_testing"] }
-ykrt = { path = "../ykrt", features = ["jit_state_debug", "c_testing"] }
+ykcapi = { path = "../ykcapi", features = ["c_testing", "jit_state_debug"] }
+ykrt = { path = "../ykrt", features = ["c_testing", "jit_state_debug"] }

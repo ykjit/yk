@@ -30,7 +30,21 @@ pub extern "C" fn __ykrt_control_point(loc: *mut Location, ctrlp_vars: *mut c_vo
     debug_assert!(!ctrlp_vars.is_null());
     if !loc.is_null() {
         let loc = unsafe { &*loc };
-        MT::transition_location(loc, ctrlp_vars);
+        if let Some(ctr) = MT::transition_location(loc) {
+            // FIXME: If we want to free compiled traces, we'll need to refcount (or use
+            // a GC) to know if anyone's executing that trace at the moment.
+            //
+            // FIXME: this loop shouldn't exist. Trace stitching should be implemented in
+            // the trace itself.
+            // https://github.com/ykjit/yk/issues/442
+            loop {
+                #[cfg(feature = "jit_state_debug")]
+                eprintln!("jit-state: enter-jit-code");
+                unsafe { &*ctr }.exec(ctrlp_vars);
+                #[cfg(feature = "jit_state_debug")]
+                eprintln!("jit-state: exit-jit-code");
+            }
+        }
     }
 }
 
