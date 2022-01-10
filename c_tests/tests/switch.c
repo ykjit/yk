@@ -5,7 +5,7 @@
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
 //     jit-state: start-tracing
-//     i=4
+//     i=3
 //     jit-state: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
@@ -15,7 +15,6 @@
 //     guardfail:...
 //     ...
 //     --- End jit-pre-opt ---
-//     i=3
 //     i=2
 //     jit-state: enter-jit-code
 //     i=1
@@ -33,7 +32,7 @@
 
 int main(int argc, char **argv) {
   YkLocation loc = yk_location_new();
-  int i = 4;
+  int i = 3;
   int j = 300;
   NOOPT_VAL(i);
   NOOPT_VAL(j);

@@ -9,7 +9,6 @@ use std::{
 };
 
 use crate::mt::HotThreshold;
-use parking_lot::Mutex;
 use parking_lot_core::{
     park, unpark_one, ParkResult, SpinWait, UnparkResult, UnparkToken, DEFAULT_PARK_TOKEN,
 };
@@ -42,52 +41,53 @@ pub struct Location {
     //  │             │ start tracing
     //  │             ▼
     //  │           ┌──────────────┐
-    //  |           |              | incomplete  ┌─────────────┐
-    //  │           │   Tracing    │────────────▶|  DontTrace  |
-    //  |           |              |             └─────────────┘
+    //  │           │              │ incomplete  ┌─────────────┐
+    //  │           │   Tracing    │────────────▶│  DontTrace  │
+    //  │           │              │             └─────────────┘
     //  │           └──────────────┘
     //  │             │ start compiling trace
     //  │             │ in thread
     //  │             ▼
-    //  │           ┌──────────────┐
-    //  |           |  Compiling   |
-    //  │           └──────────────┘
+    //  │           ┌──────────────┐             ┌───────────┐
+    //  │           │  Compiling   │────────────▶│  Dropped  │
+    //  │           └──────────────┘             └───────────┘
     //  │             │
     //  │             │ trace compiled
     //  │             ▼
     //  │           ┌──────────────┐
-    //  └───────────│   Compiled   |
+    //  └───────────│   Compiled   │
     //              └──────────────┘
     //
-    // We hope that a Location soon reaches the Compiled state (aka "the happy state") and stays
+    // We hope that a Location soon reaches the `Compiled` state (aka "the happy state") and stays
     // there.
     //
-    // The state machine is encoded in a usize in a not-entirely-simple way, as we don't want to
+    // The state machine is encoded in a `usize` in a not-entirely-simple way, as we don't want to
     // allocate any memory for Locations that do not become hot. The layout is as follows (on a 64
     // bit machine):
     //
     //   bit(s) | 63..3   | 2           | 1         | 0
     //          | payload | IS_COUNTING | IS_PARKED | IS_LOCKED
     //
-    // In the Counting state, IS_COUNTING is set to 1, and IS_PARKED and IS_LOCKED are unused and
-    // must remain set at 0. The payload representing the count is incremented locklessly. All
-    // other states have IS_COUNTING set to 0 and the payload is the address of a boxed
-    // HotLocation, access to which is controlled by IS_LOCKED.
+    // In the `Counting` state, `IS_COUNTING` is set to 1, and `IS_PARKED` and `IS_LOCKED` are
+    // unused and must remain set at 0. The payload representing the count is incremented
+    // locklessly. All other states have `IS_COUNTING` set to 0 and the payload is the address of a
+    // `Box<HotLocation>`, access to which is controlled by `IS_LOCKED`.
     //
     // The possible combinations of the counting and mutex bits are thus as follows:
     //
-    //   payload       | IS_COUNTING | IS_PARKED | IS_LOCKED | Notes
-    //   --------------+-----------+---------+---------+-----------------------------------
-    //   <count>       | 1           | 0         | 0         | Start state
-    //                 | 1           | 0         | 1         | Illegal state
-    //                 | 1           | 1         | 0         | Illegal state
-    //                 | 1           | 1         | 1         | Illegal state
-    //   <HotLocation> | 0           | 0         | 0         | Not locked, no-one waiting
-    //   <HotLocation> | 0           | 0         | 1         | Locked, no thread(s) waiting
-    //   <HotLocation> | 0           | 1         | 0         | Not locked, thread(s) waiting
-    //   <HotLocation> | 0           | 1         | 1         | Locked, thread(s) waiting
+    //   payload          | IS_COUNTING | IS_PARKED | IS_LOCKED | Notes
+    //   -----------------+-----------+---------+---------+-----------------------------------
+    //   count            | 1           | 0         | 0         | Start state
+    //                    | 1           | 0         | 1         | Illegal state
+    //                    | 1           | 1         | 0         | Illegal state
+    //                    | 1           | 1         | 1         | Illegal state
+    //   Box<HotLocation> | 0           | 0         | 0         | Not locked, no-one waiting
+    //   Box<HotLocation> | 0           | 0         | 1         | Locked, no thread(s) waiting
+    //   Box<HotLocation> | 0           | 1         | 0         | Not locked, thread(s) waiting
+    //   Box<HotLocation> | 0           | 1         | 1         | Locked, thread(s) waiting
     //
-    // where `<count>` is an integer and `<HotLocation>` is a boxed `HotLocation` enum.
+    // where `count` is an integer and `Box<HotLocation>` is a pointer to a `malloc`ed block of
+    // memory in the heap containing a `HotLocation` enum.
     //
     // The precise semantics of locking and, in particular, parking are subtle: interested readers
     // are directed to https://github.com/Amanieu/parking_lot/blob/master/src/raw_mutex.rs#L33 for
@@ -101,6 +101,12 @@ impl Location {
         // Locations start in the counting state with a count of 0.
         Self {
             inner: AtomicUsize::new(LocationInner::new().x),
+        }
+    }
+
+    pub(super) unsafe fn from_location_inner(ls: LocationInner) -> Self {
+        Self {
+            inner: AtomicUsize::new(ls.x),
         }
     }
 
@@ -262,6 +268,7 @@ impl Location {
     /// Try obtaining the lock, returning the new `State` if successful.
     pub(super) fn try_lock(&self) -> Result<LocationInner, ()> {
         let mut ls = self.load(Ordering::Relaxed);
+        // FIXME: this could be in the counting state
         loop {
             if ls.is_locked() {
                 return Err(());
@@ -293,27 +300,8 @@ impl Location {
             let again = match self.try_lock() {
                 Err(()) => true, // Failed to acquire lock, spin and retry.
                 Ok(ls) => {
-                    if let HotLocation::Compiling(mtx) = unsafe { ls.hot_location() } {
-                        // Compilation is either pending, ongoing, or just completed.
-                        if let Some(ct) = mtx.try_lock() {
-                            // We acquired the lock on the compiled trace storage. This means that
-                            // either:
-                            //
-                            // a) compilation is pending and the compilation thread hasn't yet
-                            // acquired its initial lock on the compiled trace storage. In this
-                            // case, the compiled trace storage remains `None` and we should spin
-                            // more until it becomes `Some`.
-                            //
-                            // b) Compilation has finished and the compilation thread has stored a
-                            // compiled trace and release the lock on its storage. In this case the
-                            // trace storage is `Some`, and we can stop spinning.
-                            ct.is_none()
-                        } else {
-                            // We failed to acquire the lock on the compiled trace storage, so the
-                            // compilation thread must be holding the lock. In this case,
-                            // compilation has started and is ongoing.
-                            true
-                        }
+                    if let HotLocation::Compiling = unsafe { ls.hot_location() } {
+                        true
                     } else {
                         // If the location is not being compiled, then we don't need to spin.
                         false
@@ -333,9 +321,25 @@ impl Drop for Location {
         let ls = self.load(Ordering::Relaxed);
         if !ls.is_counting() {
             debug_assert!(!ls.is_locked());
-            let hr = unsafe { ls.hot_location() };
-            unsafe {
-                Box::from_raw(hr);
+            self.lock().unwrap();
+            let hl = unsafe { ls.hot_location() };
+            if let HotLocation::Compiled(_) = hl {
+                // FIXME: we can't drop this memory as another thread may still be executing the
+                // trace that's pointed to. There should be a ref count that we decrement and free
+                // memory if it reaches zero.
+                self.unlock();
+            } else if let HotLocation::Compiling = hl {
+                // Another thread has a pointer to the underlying `HotLocation`, so we have to
+                // signal to that thread that they need to free the `HotLocation`.
+                *hl = HotLocation::Dropped;
+                self.unlock();
+            } else if let HotLocation::DontTrace | HotLocation::Tracing(_) = hl {
+                self.unlock();
+                unsafe {
+                    Box::from_raw(hl);
+                }
+            } else {
+                unreachable!();
             }
         }
     }
@@ -456,8 +460,16 @@ pub(super) struct ThreadIdInner;
 /// A `Location`'s non-counting states.
 #[derive(EnumDiscriminants)]
 pub(super) enum HotLocation {
+    /// Points to executable machine code that can be executed instead of the interpreter for this
+    /// HotLocation.
     Compiled(Box<CompiledTrace>),
-    Compiling(Arc<Mutex<Option<Box<CompiledTrace>>>>),
+    /// This HotLocation is being compiled in another thread.
+    Compiling,
+    /// Whilst this HotLocation was being compiled in another thread, the [Location] was dropped.
+    Dropped,
+    /// This HotLocation has encountered problems (e.g. traces which are too long) and shouldn't be
+    /// traced again.
     DontTrace,
+    /// This HotLocation started a trace which is ongoing.
     Tracing(Option<Arc<ThreadIdInner>>),
 }

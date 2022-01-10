@@ -5,7 +5,7 @@
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
 //     jit-state: start-tracing
-//     i=5
+//     i=4
 //     jit-state: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
@@ -32,7 +32,6 @@
 //     }
 //     ...
 //     --- End jit-pre-opt ---
-//     i=4
 //     i=3
 //     jit-state: enter-jit-code
 //     i=2
@@ -41,8 +40,8 @@
 //     i=1
 //     jit-state: stopgap
 //     ...
-//     Indirect: 10006 ...
-//     Indirect: 10008 ...
+//     Indirect: 10004...
+//     Indirect: 10006...
 //     ...
 
 // Check that basic trace compilation works.
@@ -62,7 +61,7 @@ void _yk_test(int i, int res) {
 int main(int argc, char **argv) {
   int res = 9998;
   YkLocation loc = yk_location_new();
-  int i = 5;
+  int i = 4;
   NOOPT_VAL(res);
   NOOPT_VAL(i);
   while (i > 0) {

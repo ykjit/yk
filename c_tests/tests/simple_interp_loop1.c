@@ -38,10 +38,12 @@
 //     pc=1, mem=8
 //     pc=2, mem=7
 //     pc=3, mem=6
+//     jit-state: enter-jit-code
 //     pc=0, mem=6
 //     pc=1, mem=5
 //     pc=2, mem=4
 //     pc=3, mem=3
+//     jit-state: exit-jit-code
 //     jit-state: enter-jit-code
 //     pc=0, mem=3
 //     pc=1, mem=2

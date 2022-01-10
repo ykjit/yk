@@ -17,7 +17,7 @@
 //     ...
 //     jit-state: stopgap
 //     ...
-//     Indirect: 996 ...
+//     Indirect: 997...
 //     ...
 
 // Check that basic trace compilation works.
@@ -38,7 +38,7 @@ int main(int argc, char **argv) {
   int res = 0;
   int src = 1000;
   YkLocation loc = yk_location_new();
-  int i = 4;
+  int i = 3;
   NOOPT_VAL(res);
   NOOPT_VAL(i);
   NOOPT_VAL(src);
