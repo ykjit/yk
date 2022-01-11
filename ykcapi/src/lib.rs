@@ -16,7 +16,6 @@ use std::process;
 use std::{ptr, slice};
 use ykrt::{Location, MT};
 use yksmp::{Location as SMLocation, StackMapParser};
-use ykutil;
 
 // The "dummy control point" that is replaced in an LLVM pass.
 #[no_mangle]
@@ -56,16 +55,6 @@ pub extern "C" fn yk_location_new() -> Location {
 #[no_mangle]
 pub extern "C" fn yk_location_drop(loc: Location) {
     drop(loc)
-}
-
-/// Return a pointer to (and the size of) the .llvmbc section of the current executable.
-#[no_mangle]
-pub extern "C" fn __ykutil_get_llvmbc_section(res_addr: *mut *const c_void, res_size: *mut usize) {
-    let (addr, size) = ykutil::obj::llvmbc_section();
-    unsafe {
-        *res_addr = addr as *const c_void;
-        *res_size = size;
-    }
 }
 
 /// Reads out registers spilled to the stack of the previous frame during the deoptimisation

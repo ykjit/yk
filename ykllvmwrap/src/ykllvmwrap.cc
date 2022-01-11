@@ -34,6 +34,13 @@ using namespace llvm::orc;
 using namespace llvm::symbolize;
 using namespace std;
 
+struct BitcodeSection {
+  // Pointer to the start of the LLVM bitcode section.
+  void *data;
+  // The length of the LLVM bitcode section, in bytes.
+  size_t len;
+};
+
 // An annotator for `Module::print()` which adds debug location lines.
 class DebugAnnotationWriter : public AssemblyAnnotationWriter {
   string LastLineInfo;
@@ -54,8 +61,6 @@ public:
     }
   }
 };
-
-extern "C" void __ykutil_get_llvmbc_section(void **res_addr, size_t *res_size);
 
 // The bitcode module loaded from the .llvmbc section of the currently-running
 // binary. This cannot be shared across threads and used concurrently without
@@ -180,11 +185,8 @@ __yk_llvmwrap_symbolizer_find_code_sym(LLVMSymbolizer *Symbolizer,
 // Load the GlobalAOTMod.
 //
 // This must only be called from getAOTMod() for correct synchronisation.
-void loadAOTMod(void *Unused) {
-  void *SecPtr;
-  size_t SecSize;
-  __ykutil_get_llvmbc_section(&SecPtr, &SecSize);
-  auto Sf = StringRef((const char *)SecPtr, SecSize);
+void loadAOTMod(struct BitcodeSection &Bitcode) {
+  auto Sf = StringRef((const char *)Bitcode.data, Bitcode.len);
   auto Mb = MemoryBufferRef(Sf, "");
   SMDiagnostic Error;
   ThreadSafeContext AOTCtx = std::make_unique<LLVMContext>();
@@ -196,8 +198,8 @@ void loadAOTMod(void *Unused) {
 
 // Get a thread-safe handle on the LLVM module stored in the .llvmbc section of
 // the binary. The module is loaded if we haven't yet done so.
-ThreadSafeModule *getThreadAOTMod(void) {
-  std::call_once(GlobalAOTModLoaded, loadAOTMod, nullptr);
+ThreadSafeModule *getThreadAOTMod(struct BitcodeSection &Bitcode) {
+  std::call_once(GlobalAOTModLoaded, loadAOTMod, Bitcode);
   if (!ThreadAOTModInitialized) {
     ThreadAOTMod = cloneToNewContext(GlobalAOTMod);
     ThreadAOTModInitialized = true;
@@ -254,13 +256,13 @@ extern "C" void *compileModule(string TraceName, Module *M,
 // trace.
 //
 // Returns a pointer to the compiled function.
-extern "C" void *__ykllvmwrap_irtrace_compile(char *FuncNames[], size_t BBs[],
-                                              size_t Len, char *FAddrKeys[],
-                                              void *FAddrVals[],
-                                              size_t FAddrLen) {
+extern "C" void *__ykllvmwrap_irtrace_compile(
+    char *FuncNames[], size_t BBs[], size_t Len, char *FAddrKeys[],
+    void *FAddrVals[], size_t FAddrLen, void *BitcodeData, size_t BitcodeLen) {
   DebugIRPrinter DIP;
 
-  ThreadSafeModule *ThreadAOTMod = getThreadAOTMod();
+  struct BitcodeSection Bitcode = {BitcodeData, BitcodeLen};
+  ThreadSafeModule *ThreadAOTMod = getThreadAOTMod(Bitcode);
   // Getting the module without acquiring the context lock is safe in this
   // instance since ThreadAOTMod is not shared between threads.
   Module *AOTMod = ThreadAOTMod->getModuleUnlocked();

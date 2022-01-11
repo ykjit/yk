@@ -11,6 +11,7 @@ use std::{
     ptr,
 };
 mod hwt;
+use ykutil::obj::llvmbc_section;
 
 pub use errors::InvalidTraceError;
 pub use hwt::mapper::BlockMap;
@@ -136,6 +137,8 @@ impl IRTrace {
             faddr_vals.push(*k.1);
         }
 
+        let (llvmbc_data, llvmbc_len) = llvmbc_section();
+
         let ret = unsafe {
             ykllvmwrap::__ykllvmwrap_irtrace_compile(
                 func_names.as_ptr(),
@@ -144,6 +147,8 @@ impl IRTrace {
                 faddr_keys.as_ptr(),
                 faddr_vals.as_ptr(),
                 faddr_keys.len(),
+                llvmbc_data,
+                llvmbc_len,
             )
         };
         assert_ne!(ret, ptr::null());

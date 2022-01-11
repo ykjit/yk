@@ -16,5 +16,7 @@ extern "C" {
         faddr_keys: *const *const c_char,
         faddr_vals: *const *const c_void,
         len: size_t,
+        llvmbc_data: *const u8,
+        llvmbc_len: size_t,
     ) -> *const c_void;
 }
