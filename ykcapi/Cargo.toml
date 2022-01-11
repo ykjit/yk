@@ -13,7 +13,6 @@ libc = "0.2.97"
 ykllvmwrap = { path = "../ykllvmwrap" }
 ykrt = { path = "../ykrt" }
 yktrace = { path = "../yktrace" }
-ykutil = { path = "../ykutil" }
 yksmp = { path = "../yksmp" }
 
 [features]

@@ -11,6 +11,7 @@ use std::{
     ptr,
 };
 mod hwt;
+use ykutil::obj::llvmbc_section;
 
 pub use errors::InvalidTraceError;
 pub use hwt::mapper::BlockMap;
@@ -115,9 +116,9 @@ impl IRTrace {
     }
 
     pub fn compile(&self) -> *const c_void {
-        let len = self.len();
-        let mut func_names = Vec::with_capacity(len);
-        let mut bbs = Vec::with_capacity(len);
+        let trace_len = self.len();
+        let mut func_names = Vec::with_capacity(trace_len);
+        let mut bbs = Vec::with_capacity(trace_len);
         for blk in &self.blocks {
             if blk.is_unmappable() {
                 // The block was unmappable. Indicate this with a null function name.
@@ -136,14 +137,18 @@ impl IRTrace {
             faddr_vals.push(*k.1);
         }
 
+        let (llvmbc_data, llvmbc_len) = llvmbc_section();
+
         let ret = unsafe {
             ykllvmwrap::__ykllvmwrap_irtrace_compile(
                 func_names.as_ptr(),
                 bbs.as_ptr(),
-                len,
+                trace_len,
                 faddr_keys.as_ptr(),
                 faddr_vals.as_ptr(),
                 faddr_keys.len(),
+                llvmbc_data,
+                llvmbc_len,
             )
         };
         assert_ne!(ret, ptr::null());
