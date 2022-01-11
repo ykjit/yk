@@ -116,9 +116,9 @@ impl IRTrace {
     }
 
     pub fn compile(&self) -> *const c_void {
-        let len = self.len();
-        let mut func_names = Vec::with_capacity(len);
-        let mut bbs = Vec::with_capacity(len);
+        let trace_len = self.len();
+        let mut func_names = Vec::with_capacity(trace_len);
+        let mut bbs = Vec::with_capacity(trace_len);
         for blk in &self.blocks {
             if blk.is_unmappable() {
                 // The block was unmappable. Indicate this with a null function name.
@@ -143,7 +143,7 @@ impl IRTrace {
             ykllvmwrap::__ykllvmwrap_irtrace_compile(
                 func_names.as_ptr(),
                 bbs.as_ptr(),
-                len,
+                trace_len,
                 faddr_keys.as_ptr(),
                 faddr_vals.as_ptr(),
                 faddr_keys.len(),

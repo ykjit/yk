@@ -257,7 +257,7 @@ extern "C" void *compileModule(string TraceName, Module *M,
 //
 // Returns a pointer to the compiled function.
 extern "C" void *__ykllvmwrap_irtrace_compile(
-    char *FuncNames[], size_t BBs[], size_t Len, char *FAddrKeys[],
+    char *FuncNames[], size_t BBs[], size_t TraceLen, char *FAddrKeys[],
     void *FAddrVals[], size_t FAddrLen, void *BitcodeData, size_t BitcodeLen) {
   DebugIRPrinter DIP;
 
@@ -272,8 +272,8 @@ extern "C" void *__ykllvmwrap_irtrace_compile(
   Module *JITMod;
   std::string TraceName;
   std::map<GlobalValue *, void *> GlobalMappings;
-  std::tie(JITMod, TraceName, GlobalMappings) =
-      createModule(AOTMod, FuncNames, BBs, Len, FAddrKeys, FAddrVals, FAddrLen);
+  std::tie(JITMod, TraceName, GlobalMappings) = createModule(
+      AOTMod, FuncNames, BBs, TraceLen, FAddrKeys, FAddrVals, FAddrLen);
   DIP.print(DebugIR::JITPreOpt, JITMod);
 #ifndef NDEBUG
   llvm::verifyModule(*JITMod, &llvm::errs());
