@@ -14,7 +14,7 @@ use std::convert::TryInto;
 use std::ffi::c_void;
 use std::process;
 use std::{ptr, slice};
-use ykrt::{Location, MT};
+use ykrt::{HotThreshold, Location, MT};
 use yksmp::{Location as SMLocation, StackMapParser};
 
 // The "dummy control point" that is replaced in an LLVM pass.
@@ -32,6 +32,12 @@ pub extern "C" fn __ykrt_control_point(loc: *mut Location, ctrlp_vars: *mut c_vo
         let loc = unsafe { &*loc };
         mt.control_point(loc, ctrlp_vars);
     }
+}
+
+#[no_mangle]
+pub extern "C" fn yk_set_hot_threshold(hot_threshold: HotThreshold) {
+    let mt = MT::global();
+    mt.set_hot_threshold(hot_threshold);
 }
 
 #[no_mangle]

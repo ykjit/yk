@@ -34,8 +34,7 @@ pub type HotThreshold = u32;
 #[cfg(target_pointer_width = "64")]
 type AtomicHotThreshold = AtomicU32;
 
-// FIXME: just for parity with existing tests for now.
-const DEFAULT_HOT_THRESHOLD: HotThreshold = 0;
+const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
 
 static GLOBAL_MT: SyncLazy<MT> = SyncLazy::new(|| MT::new());
 thread_local! {static THREAD_MTTHREAD: MTThread = MTThread::new();}
@@ -75,6 +74,11 @@ impl MT {
     /// other threads and is thus potentially stale as soon as it is read.
     pub fn hot_threshold(&self) -> HotThreshold {
         self.inner.hot_threshold.load(Ordering::Relaxed)
+    }
+
+    /// Set the threshold at which `Location`'s are considered hot.
+    pub fn set_hot_threshold(&self, hot_threshold: HotThreshold) {
+        self.inner.hot_threshold.store(hot_threshold, Ordering::Relaxed);
     }
 
     /// Return this meta-tracer's maximum number of worker threads. Notice that this value can be

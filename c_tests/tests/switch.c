@@ -31,6 +31,7 @@
 #include <yk_testing.h>
 
 int main(int argc, char **argv) {
+  yk_set_hot_threshold(0);
   YkLocation loc = yk_location_new();
   int i = 3;
   int j = 300;
