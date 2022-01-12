@@ -30,10 +30,6 @@ typedef uint32_t YkHotThreshold;
 // argument passed uniquely identifies the current location in the user's
 // program. A call to this function may cause yk to start/stop tracing, or to
 // execute JITted code.
-//
-// FIXME: should accept `YkLocation`, not `int`.
-// FIXME: once the above is fixed, talk about locations for which a loop cannot
-// start.
 void yk_control_point(YkLocation *);
 
 // Create a new `Location`.
