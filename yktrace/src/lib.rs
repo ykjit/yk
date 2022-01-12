@@ -26,7 +26,7 @@ thread_local! {
 }
 
 /// The different ways by which we can collect a trace.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TracingKind {
     /// Software tracing.
     SoftwareTracing,

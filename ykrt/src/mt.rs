@@ -78,7 +78,9 @@ impl MT {
 
     /// Set the threshold at which `Location`'s are considered hot.
     pub fn set_hot_threshold(&self, hot_threshold: HotThreshold) {
-        self.inner.hot_threshold.store(hot_threshold, Ordering::Relaxed);
+        self.inner
+            .hot_threshold
+            .store(hot_threshold, Ordering::Relaxed);
     }
 
     /// Return this meta-tracer's maximum number of worker threads. Notice that this value can be
@@ -410,9 +412,53 @@ impl MTThread {
 }
 
 /// What action should a caller of `MT::transition_location` take?
+#[derive(Debug, PartialEq)]
 enum TransitionLocation {
     NoAction,
     Execute(*const CompiledTrace),
     StartTracing(TracingKind),
     StopTracing(*const HotLocation),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::location::HotLocationDiscriminants;
+
+    fn hotlocation_discriminant(loc: &Location) -> Option<HotLocationDiscriminants> {
+        match loc.lock() {
+            Ok(ls) => {
+                let x = HotLocationDiscriminants::from(&*unsafe { ls.hot_location() });
+                loc.unlock();
+                Some(x)
+            }
+            Err(()) => None,
+        }
+    }
+
+    #[test]
+    fn hot_threshold_passed() {
+        let mt = MT::global();
+        let loc = Location::new();
+        THREAD_MTTHREAD.with(|mtt| {
+            for i in 0..mt.hot_threshold() {
+                assert_eq!(
+                    mt.transition_location(&mtt, &loc),
+                    TransitionLocation::NoAction
+                );
+                assert_eq!(
+                    loc.load(Ordering::Relaxed),
+                    LocationInner::new().with_count(i + 1)
+                );
+            }
+            assert_eq!(
+                mt.transition_location(&mtt, &loc),
+                TransitionLocation::StartTracing(mt.tracing_kind())
+            );
+            assert_eq!(
+                hotlocation_discriminant(&loc),
+                Some(HotLocationDiscriminants::Tracing)
+            );
+        });
+    }
 }
