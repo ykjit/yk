@@ -422,11 +422,11 @@ impl LocationInner {
 
 /// An opaque struct used by `MTThreadInner` to help identify if a thread that started a trace is
 /// still active.
-pub struct ThreadIdInner;
+pub(crate) struct ThreadIdInner;
 
 /// A `Location`'s non-counting states.
 #[derive(EnumDiscriminants)]
-pub enum HotLocation {
+pub(crate) enum HotLocation {
     /// Points to executable machine code that can be executed instead of the interpreter for this
     /// HotLocation.
     Compiled(*const CompiledTrace),

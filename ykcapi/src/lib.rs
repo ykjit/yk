@@ -14,9 +14,8 @@ use std::convert::TryInto;
 use std::ffi::c_void;
 use std::process;
 use std::{ptr, slice};
-use ykrt::{Location, TransitionLocation, MT};
+use ykrt::{Location, MT};
 use yksmp::{Location as SMLocation, StackMapParser};
-use yktrace::{start_tracing, stop_tracing};
 
 // The "dummy control point" that is replaced in an LLVM pass.
 #[no_mangle]
@@ -31,29 +30,7 @@ pub extern "C" fn __ykrt_control_point(loc: *mut Location, ctrlp_vars: *mut c_vo
     if !loc.is_null() {
         let mt = MT::global();
         let loc = unsafe { &*loc };
-        match mt.transition_location(loc) {
-            TransitionLocation::NoAction => (),
-            TransitionLocation::Execute(ctr) => {
-                // FIXME: If we want to free compiled traces, we'll need to refcount (or use
-                // a GC) to know if anyone's executing that trace at the moment.
-                //
-                // FIXME: this loop shouldn't exist. Trace stitching should be implemented in
-                // the trace itself.
-                // https://github.com/ykjit/yk/issues/442
-                loop {
-                    #[cfg(feature = "jit_state_debug")]
-                    eprintln!("jit-state: enter-jit-code");
-                    unsafe { &*ctr }.exec(ctrlp_vars);
-                    #[cfg(feature = "jit_state_debug")]
-                    eprintln!("jit-state: exit-jit-code");
-                }
-            }
-            TransitionLocation::StartTracing(kind) => start_tracing(kind),
-            TransitionLocation::StopTracing(hl) => match stop_tracing() {
-                Ok(ir_trace) => mt.queue_compile_job(ir_trace, hl),
-                Err(_) => todo!(),
-            },
-        }
+        mt.control_point(loc, ctrlp_vars);
     }
 }
 

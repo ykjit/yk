@@ -6,6 +6,7 @@ use std::{
     cell::Cell,
     cmp,
     collections::VecDeque,
+    ffi::c_void,
     marker::PhantomData,
     mem::forget,
     ptr,
@@ -22,7 +23,7 @@ use parking_lot_core::SpinWait;
 use std::lazy::SyncLazy;
 
 use crate::location::{HotLocation, Location, LocationInner, ThreadIdInner};
-use yktrace::{CompiledTrace, IRTrace, TracingKind};
+use yktrace::{start_tracing, stop_tracing, CompiledTrace, IRTrace, TracingKind};
 
 // The HotThreshold must be less than a machine word wide for [`Location::Location`] to do its
 // pointer tagging thing. We therefore choose a type which makes this statically clear to
@@ -126,17 +127,37 @@ impl MT {
         }
     }
 
-    /// Perform the next step to `loc` in the `Location` state-machine. If `loc` moves to the
-    /// Compiled state, return a pointer to a [CompiledTrace] object.
-    pub fn transition_location(&self, loc: &Location) -> TransitionLocation {
-        THREAD_MTTHREAD.with(|mtt| self.do_transition_location(mtt, loc))
+    pub fn control_point(&self, loc: &Location, ctrlp_vars: *mut c_void) {
+        THREAD_MTTHREAD.with(|mtt| {
+            match self.transition_location(mtt, loc) {
+                TransitionLocation::NoAction => (),
+                TransitionLocation::Execute(ctr) => {
+                    // FIXME: If we want to free compiled traces, we'll need to refcount (or use
+                    // a GC) to know if anyone's executing that trace at the moment.
+                    //
+                    // FIXME: this loop shouldn't exist. Trace stitching should be implemented in
+                    // the trace itself.
+                    // https://github.com/ykjit/yk/issues/442
+                    loop {
+                        #[cfg(feature = "jit_state_debug")]
+                        eprintln!("jit-state: enter-jit-code");
+                        unsafe { &*ctr }.exec(ctrlp_vars);
+                        #[cfg(feature = "jit_state_debug")]
+                        eprintln!("jit-state: exit-jit-code");
+                    }
+                }
+                TransitionLocation::StartTracing(kind) => start_tracing(kind),
+                TransitionLocation::StopTracing(hl) => match stop_tracing() {
+                    Ok(ir_trace) => self.queue_compile_job(ir_trace, hl),
+                    Err(_) => todo!(),
+                },
+            }
+        });
     }
 
-    fn do_transition_location(
-        &self,
-        mtt: &MTThread,
-        loc: &Location,
-    ) -> TransitionLocation {
+    /// Perform the next step to `loc` in the `Location` state-machine. If `loc` moves to the
+    /// Compiled state, return a pointer to a [CompiledTrace] object.
+    fn transition_location(&self, mtt: &MTThread, loc: &Location) -> TransitionLocation {
         let mut ls = loc.load(Ordering::Relaxed);
 
         if ls.is_counting() {
@@ -307,7 +328,7 @@ impl MT {
     }
 
     /// Add a compilation job for `sir` to the global work queue.
-    pub fn queue_compile_job(&self, trace: IRTrace, hl_ptr: *const HotLocation) {
+    fn queue_compile_job(&self, trace: IRTrace, hl_ptr: *const HotLocation) {
         let hl_ptr = hl_ptr as usize;
 
         let do_compile = move || {
@@ -385,9 +406,9 @@ impl MTThread {
 }
 
 /// What action should a caller of `MT::transition_location` take?
-pub enum TransitionLocation {
+enum TransitionLocation {
     NoAction,
     Execute(*const CompiledTrace),
     StartTracing(TracingKind),
-    StopTracing(*const HotLocation)
+    StopTracing(*const HotLocation),
 }
