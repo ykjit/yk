@@ -6,6 +6,7 @@ use std::{
     cell::Cell,
     cmp,
     collections::VecDeque,
+    ffi::c_void,
     marker::PhantomData,
     mem::forget,
     ptr,
@@ -33,8 +34,7 @@ pub type HotThreshold = u32;
 #[cfg(target_pointer_width = "64")]
 type AtomicHotThreshold = AtomicU32;
 
-// FIXME: just for parity with existing tests for now.
-const DEFAULT_HOT_THRESHOLD: HotThreshold = 0;
+const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
 
 static GLOBAL_MT: SyncLazy<MT> = SyncLazy::new(|| MT::new());
 thread_local! {static THREAD_MTTHREAD: MTThread = MTThread::new();}
@@ -74,6 +74,13 @@ impl MT {
     /// other threads and is thus potentially stale as soon as it is read.
     pub fn hot_threshold(&self) -> HotThreshold {
         self.inner.hot_threshold.load(Ordering::Relaxed)
+    }
+
+    /// Set the threshold at which `Location`'s are considered hot.
+    pub fn set_hot_threshold(&self, hot_threshold: HotThreshold) {
+        self.inner
+            .hot_threshold
+            .store(hot_threshold, Ordering::Relaxed);
     }
 
     /// Return this meta-tracer's maximum number of worker threads. Notice that this value can be
@@ -126,18 +133,37 @@ impl MT {
         }
     }
 
-    /// Perform the next step to `loc` in the `Location` state-machine. If `loc` moves to the
-    /// Compiled state, return a pointer to a [CompiledTrace] object.
-    pub fn transition_location(loc: &Location) -> Option<*const CompiledTrace> {
-        let mt = MT::global();
-        THREAD_MTTHREAD.with(|mtt| mt.do_transition_location(mtt, loc))
+    pub fn control_point(&self, loc: &Location, ctrlp_vars: *mut c_void) {
+        THREAD_MTTHREAD.with(|mtt| {
+            match self.transition_location(mtt, loc) {
+                TransitionLocation::NoAction => (),
+                TransitionLocation::Execute(ctr) => {
+                    // FIXME: If we want to free compiled traces, we'll need to refcount (or use
+                    // a GC) to know if anyone's executing that trace at the moment.
+                    //
+                    // FIXME: this loop shouldn't exist. Trace stitching should be implemented in
+                    // the trace itself.
+                    // https://github.com/ykjit/yk/issues/442
+                    loop {
+                        #[cfg(feature = "jit_state_debug")]
+                        eprintln!("jit-state: enter-jit-code");
+                        unsafe { &*ctr }.exec(ctrlp_vars);
+                        #[cfg(feature = "jit_state_debug")]
+                        eprintln!("jit-state: exit-jit-code");
+                    }
+                }
+                TransitionLocation::StartTracing(kind) => start_tracing(kind),
+                TransitionLocation::StopTracing(hl) => match stop_tracing() {
+                    Ok(ir_trace) => self.queue_compile_job(ir_trace, hl),
+                    Err(_) => todo!(),
+                },
+            }
+        });
     }
 
-    fn do_transition_location(
-        &self,
-        mtt: &MTThread,
-        loc: &Location,
-    ) -> Option<*const CompiledTrace> {
+    /// Perform the next step to `loc` in the `Location` state-machine. If `loc` moves to the
+    /// Compiled state, return a pointer to a [CompiledTrace] object.
+    fn transition_location(&self, mtt: &MTThread, loc: &Location) -> TransitionLocation {
         let mut ls = loc.load(Ordering::Relaxed);
 
         if ls.is_counting() {
@@ -181,14 +207,14 @@ impl MT {
                         }
                     }
                 }
-                return None;
+                return TransitionLocation::NoAction;
             } else {
                 if mtt.tracing.get().is_some() {
                     // This thread is already tracing another Location, so either another
                     // thread needs to trace this Location or this thread needs to wait
                     // until the current round of tracing has completed. Either way,
                     // there's no point incrementing the hot count.
-                    return None;
+                    return TransitionLocation::NoAction;
                 }
                 // To avoid racing with another thread that may also try starting to trace this
                 // location at the same time, we need to initialise and lock the Location, which we
@@ -211,11 +237,10 @@ impl MT {
                             let tid = Arc::clone(&mtt.tid);
                             #[cfg(feature = "jit_state_debug")]
                             eprintln!("jit-state: start-tracing");
-                            start_tracing(self.tracing_kind());
                             *unsafe { new_ls.hot_location() } = HotLocation::Tracing(Some(tid));
                             mtt.tracing.set(Some(hl_ptr as *const ()));
                             loc.unlock();
-                            return None;
+                            return TransitionLocation::StartTracing(self.tracing_kind());
                         }
                         Err(x) => {
                             if x.is_locked() {
@@ -223,7 +248,7 @@ impl MT {
                                 // start tracing. It's unlikely to be worth us spending time contending
                                 // with that other thread.
                                 unsafe { Box::from_raw(hl_ptr) };
-                                return None;
+                                return TransitionLocation::NoAction;
                             }
                             ls = x;
                         }
@@ -239,14 +264,14 @@ impl MT {
                     // If this thread is tracing we need to grab the lock so that we can stop
                     // tracing, otherwise we return to the interpreter.
                     if mtt.tracing.get().is_none() {
-                        return None;
+                        return TransitionLocation::NoAction;
                     }
                     match loc.lock() {
                         Ok(x) => ls = x,
                         Err(()) => {
                             // The location transitioned back to the counting state before we'd
                             // gained a lock.
-                            return None;
+                            return TransitionLocation::NoAction;
                         }
                     }
                 }
@@ -256,11 +281,11 @@ impl MT {
             match hl {
                 HotLocation::Compiled(ctr) => {
                     loc.unlock();
-                    return Some(*ctr);
+                    return TransitionLocation::Execute(*ctr);
                 }
                 HotLocation::Compiling => {
                     loc.unlock();
-                    return None;
+                    return TransitionLocation::NoAction;
                 }
                 HotLocation::Dropped => {
                     unreachable!();
@@ -272,7 +297,7 @@ impl MT {
                             if !ptr::eq(hl_ptr, other_hl_ptr) {
                                 // but not this Location.
                                 loc.unlock();
-                                return None;
+                                return TransitionLocation::NoAction;
                             }
                         }
                         None => {
@@ -285,7 +310,7 @@ impl MT {
                                 *hl = HotLocation::DontTrace;
                             }
                             loc.unlock();
-                            return None;
+                            return TransitionLocation::NoAction;
                         }
                     }
                     // This thread is tracing this location: we must, therefore, have finished
@@ -296,19 +321,13 @@ impl MT {
                     opt.take();
                     #[cfg(feature = "jit_state_debug")]
                     eprintln!("jit-state: stop-tracing");
-                    match stop_tracing() {
-                        Ok(ir_trace) => {
-                            *hl = HotLocation::Compiling;
-                            loc.unlock();
-                            self.queue_compile_job(ir_trace, hl);
-                        }
-                        Err(_) => todo!(),
-                    }
-                    return None;
+                    *hl = HotLocation::Compiling;
+                    loc.unlock();
+                    return TransitionLocation::StopTracing(hl);
                 }
                 HotLocation::DontTrace => {
                     loc.unlock();
-                    return None;
+                    return TransitionLocation::NoAction;
                 }
             }
         }
@@ -389,5 +408,57 @@ impl MTThread {
             tracing: Cell::new(None),
             _dont_send_or_sync_me: PhantomData,
         }
+    }
+}
+
+/// What action should a caller of `MT::transition_location` take?
+#[derive(Debug, PartialEq)]
+enum TransitionLocation {
+    NoAction,
+    Execute(*const CompiledTrace),
+    StartTracing(TracingKind),
+    StopTracing(*const HotLocation),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::location::HotLocationDiscriminants;
+
+    fn hotlocation_discriminant(loc: &Location) -> Option<HotLocationDiscriminants> {
+        match loc.lock() {
+            Ok(ls) => {
+                let x = HotLocationDiscriminants::from(&*unsafe { ls.hot_location() });
+                loc.unlock();
+                Some(x)
+            }
+            Err(()) => None,
+        }
+    }
+
+    #[test]
+    fn hot_threshold_passed() {
+        let mt = MT::global();
+        let loc = Location::new();
+        THREAD_MTTHREAD.with(|mtt| {
+            for i in 0..mt.hot_threshold() {
+                assert_eq!(
+                    mt.transition_location(&mtt, &loc),
+                    TransitionLocation::NoAction
+                );
+                assert_eq!(
+                    loc.load(Ordering::Relaxed),
+                    LocationInner::new().with_count(i + 1)
+                );
+            }
+            assert_eq!(
+                mt.transition_location(&mtt, &loc),
+                TransitionLocation::StartTracing(mt.tracing_kind())
+            );
+            assert_eq!(
+                hotlocation_discriminant(&loc),
+                Some(HotLocationDiscriminants::Tracing)
+            );
+        });
     }
 }

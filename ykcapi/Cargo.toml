@@ -16,5 +16,4 @@ yktrace = { path = "../yktrace" }
 yksmp = { path = "../yksmp" }
 
 [features]
-jit_state_debug = []
 c_testing = []

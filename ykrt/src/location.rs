@@ -287,7 +287,7 @@ impl Drop for Location {
     fn drop(&mut self) {
         let ls = self.load(Ordering::Relaxed);
         if !ls.is_counting() {
-            debug_assert!(!ls.is_locked());
+            debug_assert!(!ls.is_locked()); // FIXME: this could be locked
             self.lock().unwrap();
             let hl = unsafe { ls.hot_location() };
             if let HotLocation::Compiled(_) = hl {
@@ -422,11 +422,11 @@ impl LocationInner {
 
 /// An opaque struct used by `MTThreadInner` to help identify if a thread that started a trace is
 /// still active.
-pub(super) struct ThreadIdInner;
+pub(crate) struct ThreadIdInner;
 
 /// A `Location`'s non-counting states.
 #[derive(EnumDiscriminants)]
-pub(super) enum HotLocation {
+pub(crate) enum HotLocation {
     /// Points to executable machine code that can be executed instead of the interpreter for this
     /// HotLocation.
     Compiled(*const CompiledTrace),

@@ -37,6 +37,7 @@ void _yk_test(int i, int res) {
 int main(int argc, char **argv) {
   int res = 0;
   int src = 1000;
+  yk_set_hot_threshold(0);
   YkLocation loc = yk_location_new();
   int i = 3;
   NOOPT_VAL(res);
