@@ -185,12 +185,21 @@ class JITModBuilder {
   // The LLVM type for a C `int` on the current machine.
   Type *IntTy;
 
+  // Map JIT instruction to basic block index and instruction index of the
+  // corresponding AOT instruction.
+  std::map<Value *, std::tuple<size_t, size_t, Instruction *>> AOTMap;
+
   Value *getMappedValue(Value *V) {
     if (VMap.find(V) != VMap.end()) {
       return VMap[V];
     }
     assert(isa<Constant>(V));
     return V;
+  }
+
+  void insertAOTMap(Instruction *AOT, Value *JIT, size_t BBIdx,
+                    size_t InstrIdx) {
+    AOTMap[JIT] = {BBIdx, InstrIdx, AOT};
   }
 
   // Returns true if the given function exists on the call stack, which means
@@ -223,7 +232,8 @@ class JITModBuilder {
     GlobalMappings.insert({CF, FAddr});
   }
 
-  void handleCallInst(CallInst *CI, Function *CF, size_t &CurInstrIdx) {
+  void handleCallInst(CallInst *CI, Function *CF, size_t &CurBBIdx,
+                      size_t &CurInstrIdx) {
     if (CF == nullptr || CF->isDeclaration()) {
       // The definition of the callee is external to AOTMod. We still
       // need to declare it locally if we have not done so yet.
@@ -231,7 +241,7 @@ class JITModBuilder {
         declareFunction(CF);
       }
       if (RecCallDepth == 0) {
-        copyInstruction(&Builder, (Instruction *)&*CI);
+        copyInstruction(&Builder, (Instruction *)&*CI, CurBBIdx, CurInstrIdx);
       }
       // We should expect an "unmappable hole" in the trace. This is
       // where the trace followed a call into external code for which we
@@ -254,7 +264,7 @@ class JITModBuilder {
           declareFunction(CF);
           addGlobalMappingForFunction(CF);
         }
-        copyInstruction(&Builder, CI);
+        copyInstruction(&Builder, CI, CurBBIdx, CurInstrIdx);
         InlinedCalls.push_back(make_tuple(CurInstrIdx, CI));
         RecCallDepth = 1;
         return;
@@ -277,7 +287,8 @@ class JITModBuilder {
   // Emits a guard for a LLVM `br` instruction, returning a pointer to the
   // guard success block, or null if no guard was required.
   BasicBlock *handleBranchInst(Function *JITFunc, BasicBlock *NextBlock,
-                               Instruction *I) {
+                               Instruction *I, size_t CurBBIdx,
+                               size_t CurInstrIdx) {
     assert(isa<BranchInst>(I));
     BranchInst *BI = cast<BranchInst>(I);
     LLVMContext &Context = JITMod->getContext();
@@ -292,10 +303,11 @@ class JITModBuilder {
            (BI->getSuccessor(1) == NextBlock));
 
     // Get/create the guard failure and success blocks.
-    BasicBlock *FailBB = getGuardFailureBlock(JITFunc);
+    BasicBlock *FailBB = getGuardFailureBlock(JITFunc, CurBBIdx, CurInstrIdx,
+                                              I->getFunction()->getName());
     BasicBlock *SuccBB = BasicBlock::Create(Context, "", JITFunc);
 
-    // Insert the guard, using the the original AOT branch condition for now.
+    // Insert the guard, using the original AOT branch condition for now.
     //
     // OPT: Could add branch weights to `CreateCondBr` to hint to LLVM that we
     // expect the guard to rarely fail?
@@ -313,13 +325,15 @@ class JITModBuilder {
   // Emits a guard for a LLVM `switch` instruction, returning a pointer to the
   // guard success block.
   BasicBlock *handleSwitchInst(Function *JITFunc, BasicBlock *NextBlock,
-                               Instruction *I) {
+                               Instruction *I, size_t CurBBIdx,
+                               size_t CurInstrIdx) {
     assert(isa<SwitchInst>(I));
     SwitchInst *SI = cast<SwitchInst>(I);
 
     // Get/create the guard failure and success blocks.
     LLVMContext &Context = JITMod->getContext();
-    BasicBlock *FailBB = getGuardFailureBlock(JITFunc);
+    BasicBlock *FailBB = getGuardFailureBlock(JITFunc, CurBBIdx, CurInstrIdx,
+                                              I->getFunction()->getName());
     BasicBlock *SuccBB = BasicBlock::Create(Context, "", JITFunc);
 
     // Determine which switch case the trace took.
@@ -442,10 +456,8 @@ class JITModBuilder {
   }
 
   // Returns a pointer to the guard failure block, creating it if necessary.
-  //
-  // FIXME: currently we crash out with `errx(3)`, but we should actually
-  // invoke a stop-gap interpreter.
-  BasicBlock *getGuardFailureBlock(Function *JITFunc) {
+  BasicBlock *getGuardFailureBlock(Function *JITFunc, size_t CurBBIdx,
+                                   size_t CurInstrIdx, StringRef FuncName) {
     if (GuardFailBB == nullptr) {
       // If `JITFunc` contains no blocks already, then the guard failure block
       // becomes the entry block. This would lead to a trace that
@@ -464,6 +476,88 @@ class JITModBuilder {
       Instruction *CurrentInst = &CurrentBB->back();
       DominatorTree DT(*JITFunc);
       std::vector<Value *> LiveVals = getLiveVars(DT, CurrentInst);
+      // Naturally the current instruction is live too but wasn't included due
+      // to the way DominatorTree works.
+      LiveVals.push_back(CurrentInst);
+
+      // FIXME use more flexible type than int32
+      IntegerType *Int32Ty = Type::getInt32Ty(Context);
+      PointerType *Int8PtrTy = Type::getInt8PtrTy(Context);
+
+      // Create struct storing current basic block index and instruction index.
+      // This will be needed later to point the stopgap interpeter at the
+      // correct location from where to start interpretation.
+      // FIXME: Use function index instead of string name.
+      StructType *CurPosSTy =
+          StructType::get(Context, {Int32Ty, Int32Ty, Int8PtrTy});
+      AllocaInst *CurPos =
+          Builder.CreateAlloca(CurPosSTy, ConstantInt::get(Int32Ty, 1));
+      auto GEP = Builder.CreateGEP(
+          CurPosSTy, CurPos,
+          {ConstantInt::get(Int32Ty, 0), ConstantInt::get(Int32Ty, 0)});
+      Builder.CreateStore(ConstantInt::get(Int32Ty, CurBBIdx), GEP);
+      GEP = Builder.CreateGEP(
+          CurPosSTy, CurPos,
+          {ConstantInt::get(Int32Ty, 0), ConstantInt::get(Int32Ty, 1)});
+      Builder.CreateStore(ConstantInt::get(Int32Ty, CurInstrIdx), GEP);
+      Value *CurFunc = Builder.CreateGlobalStringPtr(FuncName);
+      GEP = Builder.CreateGEP(
+          CurPosSTy, CurPos,
+          {ConstantInt::get(Int32Ty, 0), ConstantInt::get(Int32Ty, 2)});
+      Builder.CreateStore(CurFunc, GEP);
+
+      // Create a vector in which to store the locations of the corresponding
+      // AOT variables.
+      StructType *AOTLocTy =
+          StructType::get(Context, {Int32Ty, Int32Ty, Int8PtrTy});
+      AllocaInst *AOTLocVec = Builder.CreateAlloca(
+          AOTLocTy, ConstantInt::get(Int32Ty, LiveVals.size()));
+      std::map<std::string, Value *> FuncPtrMap;
+      for (size_t I = 0; I < LiveVals.size(); I++) {
+        Value *Live = LiveVals[I];
+        std::tuple<size_t, size_t, Instruction *> Entry = AOTMap[Live];
+        size_t BBIdx = std::get<0>(Entry);
+        size_t InstrIdx = std::get<1>(Entry);
+        Instruction *AOTVar = std::get<2>(Entry);
+        auto iter = FuncPtrMap.find(AOTVar->getFunction()->getName().data());
+        Value *FPtr;
+        if (iter == FuncPtrMap.end()) {
+          // FIXME: Use function index instead of string name.
+          FPtr =
+              Builder.CreateGlobalStringPtr(AOTVar->getFunction()->getName());
+          FuncPtrMap.insert({AOTVar->getFunction()->getName().data(), FPtr});
+        } else {
+          FPtr = iter->second;
+        }
+        auto GEP = Builder.CreateGEP(
+            AOTLocTy, AOTLocVec,
+            {ConstantInt::get(Int32Ty, I), ConstantInt::get(Int32Ty, 0)});
+        Builder.CreateStore(ConstantInt::get(Int32Ty, BBIdx), GEP);
+        GEP = Builder.CreateGEP(
+            AOTLocTy, AOTLocVec,
+            {ConstantInt::get(Int32Ty, I), ConstantInt::get(Int32Ty, 1)});
+        Builder.CreateStore(ConstantInt::get(Int32Ty, InstrIdx), GEP);
+        GEP = Builder.CreateGEP(
+            AOTLocTy, AOTLocVec,
+            {ConstantInt::get(Int32Ty, I), ConstantInt::get(Int32Ty, 2)});
+        Builder.CreateStore(FPtr, GEP);
+      }
+
+      // Store the live variable vector and its length in a separate struct to
+      // save arguments.
+      PointerType *AOTLocVecPtrTy = PointerType::get(AOTLocTy, 0);
+      StructType *AOTMapSTy =
+          StructType::get(Context, {AOTLocVecPtrTy, Int32Ty});
+      AllocaInst *AOTMap =
+          Builder.CreateAlloca(AOTMapSTy, ConstantInt::get(Int32Ty, 1));
+      GEP = Builder.CreateGEP(
+          AOTMapSTy, AOTMap,
+          {ConstantInt::get(Int32Ty, 0), ConstantInt::get(Int32Ty, 0)});
+      Builder.CreateStore(AOTLocVec, GEP);
+      GEP = Builder.CreateGEP(
+          AOTMapSTy, AOTMap,
+          {ConstantInt::get(Int32Ty, 0), ConstantInt::get(Int32Ty, 1)});
+      Builder.CreateStore(ConstantInt::get(Int32Ty, LiveVals.size()), GEP);
 
       // Create the deoptimization call.
       Type *voidty = Type::getVoidTy(Context);
@@ -471,11 +565,11 @@ class JITModBuilder {
           JITFunc->getParent(), Intrinsic::experimental_deoptimize, {voidty});
       OperandBundleDef ob =
           OperandBundleDef("deopt", (ArrayRef<Value *>)LiveVals);
-      ArrayRef<OperandBundleDef> ar_ob = ArrayRef<OperandBundleDef>(ob);
       // We already passed the stackmap address and size into the trace
       // function so pass them on to the __llvm_deoptimize call.
-      CallInst::Create(DeoptInt, {JITFunc->getArg(1), JITFunc->getArg(2)},
-                       ar_ob, "", GuardFailBB);
+      CallInst::Create(DeoptInt,
+                       {JITFunc->getArg(1), JITFunc->getArg(2), AOTMap, CurPos},
+                       {ob}, "", GuardFailBB);
 
       // We always need to return after the deoptimisation call.
       ReturnInst::Create(Context, nullptr, GuardFailBB);
@@ -484,7 +578,8 @@ class JITModBuilder {
   }
 
   void handleBranchingControlFlow(Instruction *I, size_t TraceIdx,
-                                  Function *JITFunc) {
+                                  Function *JITFunc, size_t CurBBIdx,
+                                  size_t CurInstrIdx) {
     // First, peek ahead in the trace and retrieve the next block. We need this
     // so that we can insert an appropriate guard into the trace. A block must
     // exist at `InpTrace[TraceIdx + 1]` because the branch instruction must
@@ -501,9 +596,9 @@ class JITModBuilder {
 
     BasicBlock *SuccBB = nullptr;
     if (isa<BranchInst>(I)) {
-      SuccBB = handleBranchInst(JITFunc, NextBB, &*I);
+      SuccBB = handleBranchInst(JITFunc, NextBB, &*I, CurBBIdx, CurInstrIdx);
     } else if (isa<SwitchInst>(I)) {
-      SuccBB = handleSwitchInst(JITFunc, NextBB, &*I);
+      SuccBB = handleSwitchInst(JITFunc, NextBB, &*I, CurBBIdx, CurInstrIdx);
     } else {
       assert(isa<IndirectBrInst>(I));
       // It isn't necessary to copy the indirect branch into the `JITMod`
@@ -592,7 +687,8 @@ class JITModBuilder {
     }
   }
 
-  void copyInstruction(IRBuilder<> *Builder, Instruction *I) {
+  void copyInstruction(IRBuilder<> *Builder, Instruction *I, size_t CurBBIdx,
+                       size_t CurInstrIdx) {
     // Before copying an instruction, we have to scan the instruction's
     // operands checking that each is defined in JITMod.
     for (unsigned OpIdx = 0; OpIdx < I->getNumOperands(); OpIdx++) {
@@ -608,6 +704,7 @@ class JITModBuilder {
     // module, we must remap them to point to new values in the JIT module.
     llvm::RemapInstruction(NewInst, VMap, RF_NoModuleLevelChanges);
     VMap[&*I] = NewInst;
+    insertAOTMap(I, NewInst, CurBBIdx, CurInstrIdx);
 
     // Copy over any debugging metadata required by the instruction.
     llvm::SmallVector<std::pair<unsigned, llvm::MDNode *>, 1> metadataList;
@@ -859,6 +956,7 @@ public:
       }
       assert(MaybeIB.hasValue());
       IRBlock IB = MaybeIB.getValue();
+      size_t CurBBIdx = IB.BBIdx;
 
       Function *F;
       BasicBlock *BB;
@@ -919,7 +1017,7 @@ public:
                 CF = nullptr;
               }
               // FIXME Don't inline indirect calls unless promoted.
-              handleCallInst(CI, CF, CurInstrIdx);
+              handleCallInst(CI, CF, CurBBIdx, CurInstrIdx);
               break;
             }
           } else if (CF->getName() == YK_NEW_CONTROL_POINT) {
@@ -933,7 +1031,7 @@ public:
             }
             continue;
           } else if (NewControlPointCall != nullptr) {
-            handleCallInst(CI, CF, CurInstrIdx);
+            handleCallInst(CI, CF, CurBBIdx, CurInstrIdx);
             break;
           }
         }
@@ -945,7 +1043,7 @@ public:
 
         if ((isa<BranchInst>(I)) || (isa<IndirectBrInst>(I)) ||
             (isa<SwitchInst>(I))) {
-          handleBranchingControlFlow(&*I, Idx, JITFunc);
+          handleBranchingControlFlow(&*I, Idx, JITFunc, CurBBIdx, CurInstrIdx);
           break;
         }
 
@@ -967,7 +1065,7 @@ public:
 
         // If execution reaches here, then the instruction I is to be copied
         // into JITMod.
-        copyInstruction(&Builder, (Instruction *)&*I);
+        copyInstruction(&Builder, (Instruction *)&*I, CurBBIdx, CurInstrIdx);
 
         // If we see a `getelementpointer`/`load` pair that is loading from the
         // `YkCtrlPointVars` pointer, then we have to update the `VMap` using

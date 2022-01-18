@@ -50,7 +50,8 @@ void yk_location_drop(YkLocation);
 void yk_stopgap(void *addr, uintptr_t size, uintptr_t retaddr, void *rsp);
 
 #if defined(__x86_64)
-__attribute__((naked)) void __llvm_deoptimize(void *addr, uintptr_t size) {
+__attribute__((naked)) void __llvm_deoptimize(void *addr, uintptr_t size,
+                                              void *aotmap, void *curpos) {
   // Push all registers to the stack before they can be clobbered, so that we
   // can find their values after parsing in the stackmap. The order in which
   // we push the registers is equivalent to the Sys-V x86_64 ABI, which the
@@ -71,15 +72,16 @@ __attribute__((naked)) void __llvm_deoptimize(void *addr, uintptr_t size) {
       "push rcx\n"
       "push rdx\n"
       "push rax\n"
-      // Now we need to call yk_stopgap. The arguments need to be in RDI,
-      // RSI, RDX, and RCX. The first two arguments (stackmap address and
-      // stackmap size) are already where they need to be as we are just
-      // forwarding them from the current function's arguments. The remaining
-      // arguments (return address and current stack pointer) need to be in
-      // RDX and RCX. The return address was at [RSP] before the above
-      // pushes, so to find it we need to offset 8 bytes per push.
-      "mov rdx, [rsp+64]\n"
-      "mov rcx, rsp\n"
+      // Now we need to call yk_stopgap. The arguments need to be in RDI, RSI,
+      // RDX, RCX, R8, and R9. The first four arguments (stackmap address,
+      // stackmap size, live variable map, and current IR position) are already
+      // where they need to be as we are just forwarding them from the current
+      // function's arguments. The remaining arguments (return address and
+      // current stack pointer) need to be in R8 and R9. The return address was
+      // at [RSP] before the above pushes, so to find it we need to offset 8
+      // bytes per push.
+      "mov r8, [rsp+64]\n"
+      "mov r9, rsp\n"
       "sub rsp, 8\n"
       "call yk_stopgap\n"
       "add rsp, 64\n"

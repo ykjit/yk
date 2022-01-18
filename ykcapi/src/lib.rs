@@ -17,6 +17,11 @@ use std::{ptr, slice};
 use ykrt::{HotThreshold, Location, MT};
 use yksmp::{Location as SMLocation, StackMapParser};
 
+mod sginterp;
+use sginterp::{SGInterp, SGValue};
+
+mod llvmapihelper;
+
 // The "dummy control point" that is replaced in an LLVM pass.
 #[no_mangle]
 pub extern "C" fn yk_control_point(_loc: *mut Location) {
@@ -95,21 +100,57 @@ impl Registers {
     }
 }
 
+#[derive(Debug)]
+#[repr(C)]
+struct AOTVar {
+    bbidx: u32,
+    instridx: u32,
+    fname: *const i8,
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct AOTMap {
+    addr: *const c_void,
+    size: usize,
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct CurPos {
+    bbidx: u32,
+    instridx: u32,
+    fname: *const i8,
+}
+
 /// Parses the stackmap and saved registers from the given address (i.e. the return address of the
 /// deoptimisation call).
-/// FIXME: Until we have the stopgap interpreter we simply print out the values we find.
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
 pub extern "C" fn yk_stopgap(
     sm_addr: *const c_void,
     sm_size: usize,
+    aotmap: &AOTMap,
+    curpos: &CurPos,
     retaddr: usize,
     rsp: *const c_void,
 ) {
     // FIXME: remove once we have a stopgap interpreter.
     eprintln!("jit-state: stopgap");
+
+    // Parse AOTMap.
+    let aotmap = unsafe { slice::from_raw_parts(aotmap.addr as *const AOTVar, aotmap.size) };
+
     // Restore saved registers from the stack.
     let registers = Registers::from_ptr(rsp);
+
+    let mut sginterp = unsafe {
+        SGInterp::new(
+            curpos.bbidx,
+            curpos.instridx,
+            std::ffi::CStr::from_ptr(curpos.fname),
+        )
+    };
 
     // Parse the stackmap.
     let slice = unsafe { slice::from_raw_parts(sm_addr as *mut u8, sm_size) };
@@ -117,7 +158,8 @@ pub extern "C" fn yk_stopgap(
     let locs = map.get(&retaddr.try_into().unwrap()).unwrap();
 
     // Extract live values from the stackmap.
-    for l in locs {
+    // Skip first 3 locations as they don't relate to any of our live variables.
+    for (i, l) in locs.iter().skip(3).enumerate() {
         match l {
             SMLocation::Register(reg, size) => {
                 // FIXME: remove once we have a stopgap interpreter.
@@ -148,12 +190,30 @@ pub extern "C" fn yk_stopgap(
                     8 => unsafe { ptr::read::<u64>(addr as *mut u64) as u64 },
                     _ => unreachable!(),
                 };
+                let aot = &aotmap[i];
+                unsafe {
+                    sginterp.init_live(
+                        aot.bbidx,
+                        aot.instridx,
+                        std::ffi::CStr::from_ptr(aot.fname),
+                        SGValue::U64(v),
+                    );
+                }
                 // FIXME: remove once we have a stopgap interpreter.
-                eprintln!("Indirect: {} ({} {})", v, reg, off);
+                eprintln!("Indirect: {} ({} {} {})", v, reg, off, size);
             }
             SMLocation::Constant(v) => {
                 // FIXME: remove once we have a stopgap interpreter.
                 eprintln!("Constant: {}", v);
+                let aot = &aotmap[i];
+                unsafe {
+                    sginterp.init_live(
+                        aot.bbidx,
+                        aot.instridx,
+                        std::ffi::CStr::from_ptr(aot.fname),
+                        SGValue::U32(*v),
+                    );
+                }
             }
             SMLocation::LargeConstant(v) => {
                 // FIXME: remove once we have a stopgap interpreter.
@@ -161,7 +221,7 @@ pub extern "C" fn yk_stopgap(
             }
         }
     }
-    // FIXME: Initialise stopgap interpreter here.
+    unsafe { sginterp.interpret() };
     process::exit(0);
 }
 
