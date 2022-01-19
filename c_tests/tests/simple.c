@@ -53,11 +53,6 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-void _yk_test(int i, int res) {
-  if (i == 0)
-    assert(res == 2);
-}
-
 int main(int argc, char **argv) {
   yk_set_hot_threshold(0);
   int res = 9998;

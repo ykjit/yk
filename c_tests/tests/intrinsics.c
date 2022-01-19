@@ -29,11 +29,6 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-void _yk_test(int i, int res) {
-  if (i == 0)
-    assert(res == 2);
-}
-
 int main(int argc, char **argv) {
   int res = 0;
   int src = 1000;
