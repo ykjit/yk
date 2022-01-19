@@ -20,6 +20,10 @@ use yksmp::{Location as SMLocation, StackMapParser};
 mod sginterp;
 use sginterp::{SGInterp, SGValue};
 
+/// The first three locations of an LLVM stackmap record, according to the source, are CC, Flags,
+/// Num Deopts, which need to be skipped when mapping the stackmap values back to AOT variables.
+const SM_REC_HEADER: usize = 3;
+
 mod llvmapihelper;
 
 // The "dummy control point" that is replaced in an LLVM pass.
@@ -159,7 +163,7 @@ pub extern "C" fn yk_stopgap(
 
     // Extract live values from the stackmap.
     // Skip first 3 locations as they don't relate to any of our live variables.
-    for (i, l) in locs.iter().skip(3).enumerate() {
+    for (i, l) in locs.iter().skip(SM_REC_HEADER).enumerate() {
         match l {
             SMLocation::Register(reg, size) => {
                 // FIXME: remove once we have a stopgap interpreter.
