@@ -128,7 +128,7 @@ impl SGInterp {
             // exit. This is possibly a hack, though I'm not sure what the correct behaviour is.
             let op = LLVMGetOperand(instr, 0);
             let val = if !LLVMIsAConstant(op).is_null() {
-                llvmapihelper::parse_const(op)
+                llvmapihelper::llvm_const_to_sgvalue(op)
             } else {
                 todo!()
             };
