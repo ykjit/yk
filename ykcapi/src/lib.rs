@@ -25,6 +25,7 @@ use sginterp::{SGInterp, SGValue};
 const SM_REC_HEADER: usize = 3;
 
 mod llvmapihelper;
+mod llvmwrap;
 
 // The "dummy control point" that is replaced in an LLVM pass.
 #[no_mangle]

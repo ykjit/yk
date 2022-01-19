@@ -7,6 +7,7 @@ use std::ffi::CStr;
 use std::mem::MaybeUninit;
 
 use crate::llvmapihelper::{self};
+use crate::llvmwrap::{LocalVar};
 
 /// Stopgap interpreter values.
 #[derive(Debug)]
@@ -17,7 +18,7 @@ pub enum SGValue {
 
 /// A frame holding live variables.
 struct Frame {
-    vars: HashMap<LLVMValueRef, SGValue>,
+    vars: HashMap<LocalVar, SGValue>,
 }
 
 impl Frame {
@@ -28,12 +29,12 @@ impl Frame {
     }
 
     /// Get the value of the variable `key` in this frame.
-    fn get(&self, key: &LLVMValueRef) -> Option<&SGValue> {
+    fn get(&self, key: &LocalVar) -> Option<&SGValue> {
         self.vars.get(key)
     }
 
     /// Insert new variable into this frame.
-    fn add(&mut self, key: LLVMValueRef, val: SGValue) {
+    fn add(&mut self, key: LocalVar, val: SGValue) {
         self.vars.insert(key, val);
     }
 }
@@ -84,11 +85,11 @@ impl SGInterp {
         let func = LLVMGetNamedFunction(self.module, fname.as_ptr());
         let bb = llvmapihelper::get_basic_block(func, bbidx);
         let instr = llvmapihelper::get_instruction(bb, instridx);
-        self.frames.last_mut().unwrap().add(instr, value);
+        self.frames.last_mut().unwrap().add(LocalVar::new(instr), value);
     }
 
     /// Lookup the value of variable `var` in the current frame.
-    fn lookup(&self, var: &LLVMValueRef) -> Option<&SGValue> {
+    fn lookup(&self, var: &LocalVar) -> Option<&SGValue> {
         self.frames.last().unwrap().get(var)
     }
 
@@ -107,7 +108,7 @@ impl SGInterp {
 
     /// Interpret branch instruction `instr`.
     pub unsafe fn branch(&mut self, instr: LLVMValueRef) {
-        let cond = LLVMGetCondition(instr);
+        let cond = LocalVar::new(LLVMGetCondition(instr));
         let val = self.lookup(&cond);
         let res = match val.unwrap() {
             SGValue::U32(v) => *v == 1,
