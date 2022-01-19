@@ -19,7 +19,7 @@ pub unsafe fn get_instruction(bb: LLVMBasicBlockRef, instridx: u32) -> LLVMValue
     instr
 }
 
-pub unsafe fn parse_const(c: LLVMValueRef) -> SGValue {
+pub unsafe fn llvm_const_to_sgvalue(c: LLVMValueRef) -> SGValue {
     let ty = LLVMTypeOf(c);
     let kind = LLVMGetTypeKind(ty);
     match kind {
