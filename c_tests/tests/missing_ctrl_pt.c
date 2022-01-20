@@ -8,7 +8,6 @@
 // Check that the system crashes if the control point is missing.
 
 #include <stdlib.h>
-#include <stdbool.h>
 
 int main(int argc, char **argv) {
   // Control point is missing!
