@@ -4,6 +4,7 @@
 // Check the blockmap for this test program contains blocks.
 
 #include <assert.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <yk.h>
 #include <yk_testing.h>
@@ -19,5 +20,7 @@ int main(int argc, char **argv) {
 // compile with ykllvm.
 void unused() {
   YkLocation loc = yk_location_new();
-  yk_control_point(&loc);
+  while(true) {
+    yk_control_point(&loc);
+  }
 }
