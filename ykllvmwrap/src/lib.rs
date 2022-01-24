@@ -19,4 +19,16 @@ extern "C" {
         llvmbc_data: *const u8,
         llvmbc_len: size_t,
     ) -> *const c_void;
+
+    #[cfg(feature = "c_testing")]
+    pub fn __ykllvmwrap_irtrace_compile_for_tc_tests(
+        func_names: *const *const c_char,
+        bbs: *const size_t,
+        trace_len: size_t,
+        faddr_keys: *const *const c_char,
+        faddr_vals: *const *const c_void,
+        faddr_len: size_t,
+        llvmbc_data: *const u8,
+        llvmbc_len: size_t,
+    ) -> *const c_void;
 }

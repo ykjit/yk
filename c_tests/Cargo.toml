@@ -10,11 +10,19 @@ name = "c_tests"
 path = "run.rs"
 harness = false
 
+[[test]]
+name = "trace_compiler_tests"
+path = "run_trace_compiler.rs"
+harness = false
+
 [dependencies]
+memmap2 = "0.5.2"
 regex = "1.5.4"
+yktrace = { path = "../yktrace", features = ["c_testing"] }
 
 [dev-dependencies]
 lang_tester = "0.7.0"
 tempfile = "3.2.0"
 ykcapi = { path = "../ykcapi", features = ["c_testing"] }
+ykllvmwrap = { path = "../ykllvmwrap", features = ["c_testing"] }
 ykrt = { path = "../ykrt", features = ["c_testing", "jit_state_debug"] }

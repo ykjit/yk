@@ -12,3 +12,6 @@ ykutil = { path = "../ykutil" }
 
 [build-dependencies]
 cc = "1.0.68"
+
+[features]
+c_testing = []

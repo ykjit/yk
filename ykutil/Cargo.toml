@@ -7,6 +7,6 @@ license = "Apache-2.0 OR MIT"
 
 [dependencies]
 libc = "0.2.97"
-memmap2 = "0.3.0"
+memmap2 = "0.5.2"
 object = "0.25.3"
 phdrs = { git = "https://github.com/softdevteam/phdrs" }
