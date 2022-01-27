@@ -28,7 +28,7 @@ int main(int argc, char **argv) {
   p = argv[0];
   NOOPT_VAL(i);
   while (*p != '\0') {
-    yk_control_point(&loc);
+    yk_control_point(mt, &loc);
     fprintf(stderr, "i=%d\n", i);
     i++;
     p++;

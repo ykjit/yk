@@ -24,16 +24,17 @@ pub extern "C" fn yk_mt_global() -> &'static MT {
 
 // The "dummy control point" that is replaced in an LLVM pass.
 #[no_mangle]
-pub extern "C" fn yk_control_point(_loc: *mut Location) {
+pub extern "C" fn yk_control_point(_mt: *mut MT, _loc: *mut Location) {
     // Intentionally empty.
 }
 
 // The "real" control point, that is called once the interpreter has been patched by ykllvm.
 #[no_mangle]
-pub extern "C" fn __ykrt_control_point(loc: *mut Location, ctrlp_vars: *mut c_void) {
+pub extern "C" fn __ykrt_control_point(mt: *mut MT, loc: *mut Location, ctrlp_vars: *mut c_void) {
+    println!("{:?} {:?} {:?}", mt, loc, ctrlp_vars);
     debug_assert!(!ctrlp_vars.is_null());
     if !loc.is_null() {
-        let mt = MT::global();
+        let mt = unsafe { &*mt };
         let loc = unsafe { &*loc };
         mt.control_point(loc, ctrlp_vars);
     }

@@ -95,7 +95,7 @@ int main(int argc, char **argv) {
   while (true) {
     assert(pc < prog_len);
     YkLocation *loc = &locs[pc];
-    yk_control_point(loc);
+    yk_control_point(mt, loc);
     int bc = prog[pc];
     fprintf(stderr, "pc=%d, mem=%d\n", pc, mem);
     switch (bc) {

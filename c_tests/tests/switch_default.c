@@ -43,7 +43,7 @@ int main(int argc, char **argv) {
   int i = 4;
   NOOPT_VAL(i);
   while (i > 0) {
-    yk_control_point(&loc);
+    yk_control_point(mt, &loc);
     fprintf(stderr, "i=%d\n", i);
     switch (i) {
       case 100:
