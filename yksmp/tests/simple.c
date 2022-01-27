@@ -1,4 +1,3 @@
-int main() {
   int x = 11;
   int y = 13;
   // Insert stackmap here.

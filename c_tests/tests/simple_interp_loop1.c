@@ -70,7 +70,8 @@ int mem = 12;
 #define RESTART_IF_NOT_ZERO 2
 
 int main(int argc, char **argv) {
-  yk_set_hot_threshold(0);
+  YkMT *mt = yk_mt_global();
+  yk_set_hot_threshold(mt, 0);
 
   // A hard-coded program to execute.
   int prog[] = {DEC, DEC, DEC, RESTART_IF_NOT_ZERO, DEC, DEC};

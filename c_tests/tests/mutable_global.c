@@ -53,7 +53,8 @@
 int add;
 
 int main(int argc, char **argv) {
-  yk_set_hot_threshold(0);
+  YkMT *mt = yk_mt_global();
+  yk_set_hot_threshold(mt, 0);
   int res = 0;
   YkLocation loc = yk_location_new();
   int i = 4;

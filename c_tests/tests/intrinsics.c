@@ -32,7 +32,8 @@
 int main(int argc, char **argv) {
   int res = 0;
   int src = 1000;
-  yk_set_hot_threshold(0);
+  YkMT *mt = yk_mt_global();
+  yk_set_hot_threshold(mt, 0);
   YkLocation loc = yk_location_new();
   int i = 3;
   NOOPT_VAL(res);

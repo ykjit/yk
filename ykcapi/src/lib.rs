@@ -17,6 +17,11 @@ use std::{ptr, slice};
 use ykrt::{HotThreshold, Location, MT};
 use yksmp::{Location as SMLocation, StackMapParser};
 
+#[no_mangle]
+pub extern "C" fn yk_mt_global() -> &'static MT {
+    MT::global()
+}
+
 // The "dummy control point" that is replaced in an LLVM pass.
 #[no_mangle]
 pub extern "C" fn yk_control_point(_loc: *mut Location) {
@@ -35,8 +40,7 @@ pub extern "C" fn __ykrt_control_point(loc: *mut Location, ctrlp_vars: *mut c_vo
 }
 
 #[no_mangle]
-pub extern "C" fn yk_set_hot_threshold(hot_threshold: HotThreshold) {
-    let mt = MT::global();
+pub extern "C" fn yk_set_hot_threshold(mt: &MT, hot_threshold: HotThreshold) {
     mt.set_hot_threshold(hot_threshold);
 }
 
