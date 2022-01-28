@@ -9,13 +9,14 @@
 #include <yk_testing.h>
 
 int main(int argc, char **argv) {
+  YkMT *mt = yk_mt_global();
   int outers = 100;
   int inners = 100;
   NOOPT_VAL(outers);
   NOOPT_VAL(inners);
   for (int i = 0; i < outers; i++) {
     for (int j = 0; j < inners; j++) {
-      yk_control_point(NULL); // In a nested loop!
+      yk_control_point(mt, NULL); // In a nested loop!
     }
   }
   return (EXIT_SUCCESS);

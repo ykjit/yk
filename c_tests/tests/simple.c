@@ -54,14 +54,17 @@
 #include <yk_testing.h>
 
 int main(int argc, char **argv) {
-  yk_set_hot_threshold(0);
+  YkMT *mt = yk_mt_global();
+  yk_set_hot_threshold(mt, 0);
   int res = 9998;
   YkLocation loc = yk_location_new();
+  fflush(NULL);
   int i = 4;
+  NOOPT_VAL(loc);
   NOOPT_VAL(res);
   NOOPT_VAL(i);
   while (i > 0) {
-    yk_control_point(&loc);
+    yk_control_point(mt, &loc);
     fprintf(stderr, "i=%d\n", i);
     res += 2;
     i--;

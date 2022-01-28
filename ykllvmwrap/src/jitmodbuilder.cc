@@ -24,7 +24,8 @@ uint64_t getNewTraceIdx() {
 
 #define TRACE_FUNC_PREFIX "__yk_compiled_trace_"
 #define YK_NEW_CONTROL_POINT "__ykrt_control_point"
-#define YK_CONTROL_POINT_ARG_IDX 1
+#define YK_CONTROL_POINT_ARG_VARS_IDX 2
+#define YK_CONTROL_POINT_NUM_ARGS 3
 
 // Dump an error message and an LLVM value to stderr and exit with failure.
 void dumpValueAndExit(const char *Msg, Value *V) {
@@ -113,7 +114,8 @@ Value *getYkCtrlPointVarsStruct(Module *AOTMod, InputTrace &InpTrace) {
   assert(F != nullptr);
   User *CallSite = F->user_back();
   CallInst *CI = cast<CallInst>(CallSite);
-  return CI->getArgOperand(YK_CONTROL_POINT_ARG_IDX);
+  assert(CI->arg_size() == YK_CONTROL_POINT_NUM_ARGS);
+  return CI->getArgOperand(YK_CONTROL_POINT_ARG_VARS_IDX);
 }
 
 /// Extract all live variables that need to be passed into the control point.
@@ -831,7 +833,9 @@ public:
     Function *F = AOTMod->getFunction(YK_NEW_CONTROL_POINT);
     User *CallSite = F->user_back();
     CallInst *CPCI = cast<CallInst>(CallSite);
-    Type *YkCtrlPointVarsPtrTy = F->getArg(1)->getType();
+    assert(F->arg_size() == YK_CONTROL_POINT_NUM_ARGS);
+    Type *YkCtrlPointVarsPtrTy =
+        F->getArg(YK_CONTROL_POINT_ARG_VARS_IDX)->getType();
     assert(YkCtrlPointVarsPtrTy->isPointerTy());
 
     createLiveIndexMap(CPCI, YkCtrlPointVarsPtrTy);
@@ -927,7 +931,9 @@ public:
             if (NewControlPointCall == nullptr) {
               NewControlPointCall = &*CI;
             } else {
-              VMap[CI] = getMappedValue(CI->getArgOperand(1));
+              assert(CF->arg_size() == YK_CONTROL_POINT_NUM_ARGS);
+              VMap[CI] = getMappedValue(
+                  CI->getArgOperand(YK_CONTROL_POINT_ARG_VARS_IDX));
               ResumeAfter = make_tuple(CurInstrIdx, CI);
               break;
             }

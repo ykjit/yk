@@ -21,13 +21,14 @@
 char *p = NULL;
 
 int main(int argc, char **argv) {
-  yk_set_hot_threshold(0);
+  YkMT *mt = yk_mt_global();
+  yk_set_hot_threshold(mt, 0);
   int i = 0;
   YkLocation loc = yk_location_new();
   p = argv[0];
   NOOPT_VAL(i);
   while (*p != '\0') {
-    yk_control_point(&loc);
+    yk_control_point(mt, &loc);
     fprintf(stderr, "i=%d\n", i);
     i++;
     p++;

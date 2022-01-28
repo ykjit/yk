@@ -53,7 +53,8 @@
 int add;
 
 int main(int argc, char **argv) {
-  yk_set_hot_threshold(0);
+  YkMT *mt = yk_mt_global();
+  yk_set_hot_threshold(mt, 0);
   int res = 0;
   YkLocation loc = yk_location_new();
   int i = 4;
@@ -61,7 +62,7 @@ int main(int argc, char **argv) {
   NOOPT_VAL(res);
   NOOPT_VAL(i);
   while (i > 0) {
-    yk_control_point(&loc);
+    yk_control_point(mt, &loc);
     fprintf(stderr, "i=%d\n", i);
     res += add;
     i--;
