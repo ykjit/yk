@@ -36,7 +36,6 @@ type AtomicHotThreshold = AtomicU32;
 
 const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
 
-static GLOBAL_MT: SyncLazy<MT> = SyncLazy::new(|| MT::new());
 thread_local! {static THREAD_MTTHREAD: MTThread = MTThread::new();}
 
 #[cfg(feature = "c_testing")]
@@ -51,13 +50,9 @@ pub struct MT {
 }
 
 impl MT {
-    /// Return a reference to the global [`MT`] instance: at any point, there is at most one of
-    /// these per process and an instance will be created if it does not already exist.
-    pub fn global() -> &'static Self {
-        &*GLOBAL_MT
-    }
-
-    fn new() -> Self {
+    // Create a new meta-tracer instance. Arbitrarily many of these can be created, though there
+    // are no guarantees as to whether they will share resources effectively or fairly.
+    pub fn new() -> Self {
         let inner = MTInner {
             hot_threshold: AtomicHotThreshold::new(DEFAULT_HOT_THRESHOLD),
             job_queue: (Condvar::new(), Mutex::new(VecDeque::new())),
@@ -438,7 +433,7 @@ mod tests {
 
     #[test]
     fn hot_threshold_passed() {
-        let mt = MT::global();
+        let mt = MT::new();
         let loc = Location::new();
         THREAD_MTTHREAD.with(|mtt| {
             for i in 0..mt.hot_threshold() {

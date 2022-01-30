@@ -21,7 +21,7 @@
 char *p = NULL;
 
 int main(int argc, char **argv) {
-  YkMT *mt = yk_mt_global();
+  YkMT *mt = yk_mt_new();
   yk_set_hot_threshold(mt, 0);
   int i = 0;
   YkLocation loc = yk_location_new();
@@ -37,6 +37,7 @@ int main(int argc, char **argv) {
   NOOPT_VAL(i);
   NOOPT_VAL(p);
   yk_location_drop(loc);
+  yk_mt_drop(mt);
 
   return (EXIT_SUCCESS);
 }

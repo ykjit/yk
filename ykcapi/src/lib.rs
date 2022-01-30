@@ -20,8 +20,14 @@ use ykrt::{HotThreshold, Location, MT};
 use yksmp::{Location as SMLocation, StackMapParser};
 
 #[no_mangle]
-pub extern "C" fn yk_mt_global() -> &'static MT {
-    MT::global()
+pub extern "C" fn yk_mt_new() -> *mut MT {
+    let mt = Box::new(MT::new());
+    Box::into_raw(mt)
+}
+
+#[no_mangle]
+pub extern "C" fn yk_mt_drop(mt: *mut MT) {
+    unsafe { Box::from_raw(mt) };
 }
 
 // The "dummy control point" that is replaced in an LLVM pass.

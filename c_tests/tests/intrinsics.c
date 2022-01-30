@@ -32,7 +32,7 @@
 int main(int argc, char **argv) {
   int res = 0;
   int src = 1000;
-  YkMT *mt = yk_mt_global();
+  YkMT *mt = yk_mt_new();
   yk_set_hot_threshold(mt, 0);
   YkLocation loc = yk_location_new();
   int i = 3;
@@ -48,6 +48,7 @@ int main(int argc, char **argv) {
   NOOPT_VAL(res);
   assert(res == 996);
   yk_location_drop(loc);
+  yk_mt_drop(mt);
 
   return (EXIT_SUCCESS);
 }

@@ -70,7 +70,7 @@ int mem = 4;
 #define EXIT 3
 
 int main(int argc, char **argv) {
-  YkMT *mt = yk_mt_global();
+  YkMT *mt = yk_mt_new();
   yk_set_hot_threshold(mt, 0);
 
   // A hard-coded program to execute.
@@ -124,6 +124,7 @@ done:
 
   for (int i = 0; i < prog_len; i++)
     yk_location_drop(locs[i]);
+  yk_mt_drop(mt);
 
   return (EXIT_SUCCESS);
 }

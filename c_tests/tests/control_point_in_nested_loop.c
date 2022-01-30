@@ -9,7 +9,7 @@
 #include <yk_testing.h>
 
 int main(int argc, char **argv) {
-  YkMT *mt = yk_mt_global();
+  YkMT *mt = yk_mt_new();
   int outers = 100;
   int inners = 100;
   NOOPT_VAL(outers);
@@ -19,5 +19,6 @@ int main(int argc, char **argv) {
       yk_control_point(mt, NULL); // In a nested loop!
     }
   }
+  yk_mt_drop(mt);
   return (EXIT_SUCCESS);
 }

@@ -19,9 +19,11 @@ int main(int argc, char **argv) {
 // This isn't used as part of the test, but is required for this file to
 // compile with ykllvm.
 void unused() {
-  YkMT *mt = yk_mt_global();
+  YkMT *mt = yk_mt_new();
   YkLocation loc = yk_location_new();
   while(true) {
     yk_control_point(mt, &loc);
   }
+  yk_location_drop(loc);
+  yk_mt_drop(mt);
 }
