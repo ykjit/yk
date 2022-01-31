@@ -450,8 +450,10 @@ mod tests {
     }
 
     #[test]
-    fn hot_threshold_passed() {
+    fn basic_transitions() {
+        let hot_thrsh = 5;
         let mt = MT::new();
+        mt.set_hot_threshold(hot_thrsh);
         let loc = Location::new();
         for i in 0..mt.hot_threshold() {
             assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
@@ -467,6 +469,29 @@ mod tests {
         assert_eq!(
             hotlocation_discriminant(&loc),
             Some(HotLocationDiscriminants::Tracing)
+        );
+        match mt.transition_location(&loc) {
+            TransitionLocation::StopTracing(tracing_ls) => {
+                let ls = loc.load(Ordering::Relaxed);
+                assert!(!ls.is_counting());
+                assert_eq!(unsafe { ls.hot_location() } as *const _, tracing_ls);
+                unsafe {
+                    *(tracing_ls as *mut HotLocation) = HotLocation::Compiling;
+                }
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
+        assert_eq!(
+            hotlocation_discriminant(&loc),
+            Some(HotLocationDiscriminants::Compiling)
+        );
+        let ls = loc.load(Ordering::Relaxed);
+        assert!(!ls.is_counting());
+        *unsafe { ls.hot_location() } = HotLocation::Compiled(std::ptr::null());
+        assert_eq!(
+            mt.transition_location(&loc),
+            TransitionLocation::Execute(std::ptr::null())
         );
     }
 }
