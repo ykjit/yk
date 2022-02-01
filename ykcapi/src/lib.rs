@@ -8,8 +8,10 @@
 
 #![feature(bench_black_box)]
 #![feature(c_variadic)]
+#![feature(naked_functions)]
 #![feature(once_cell)]
 
+use std::arch::asm;
 use std::convert::TryInto;
 use std::ffi::c_void;
 use std::process;
@@ -169,6 +171,51 @@ pub extern "C" fn yk_stopgap(
     // FIXME: Initialise stopgap interpreter here.
     process::exit(0);
 }
+
+/// The `__llvm__deoptimize()` function required by `llvm.experimental.deoptimize` intrinsic, that
+/// we use for exiting to the stop-gap interpreter on guard failure.
+#[cfg(target_arch = "x86_64")]
+#[naked]
+#[no_mangle]
+pub extern "C" fn __llvm_deoptimize(addr: *const c_void, size: usize) {
+    // Push all registers to the stack before they can be clobbered, so that we can find their
+    // values after parsing in the stackmap. The order in which we push the registers is equivalent
+    // to the Sys-V x86_64 ABI, which the stackmap format uses as well. This function has the
+    // "naked" attribute to keep the optimiser from generating the function prologue which messes
+    // with the RSP value of the previous stack frame (this value is often referenced by the
+    // stackmap).
+    unsafe {
+        asm!(
+            // Save registers to the stack.
+            // FIXME: Add other registers that may be referenced by the stackmap.
+            "push rsp",
+            "push rbp",
+            "push rdi",
+            "push rsi",
+            "push rbx",
+            "push rcx",
+            "push rdx",
+            "push rax",
+            // Now we need to call yk_stopgap. The arguments need to be in RDI,
+            // RSI, RDX, and RCX. The first two arguments (stackmap address and
+            // stackmap size) are already where they need to be as we are just
+            // forwarding them from the current function's arguments. The remaining
+            // arguments (return address and current stack pointer) need to be in
+            // RDX and RCX. The return address was at [RSP] before the above
+            // pushes, so to find it we need to offset 8 bytes per push.
+            "mov rdx, [rsp+64]",
+            "mov rcx, rsp",
+            "sub rsp, 8",
+            "call yk_stopgap",
+            "add rsp, 64",
+            "ret",
+            options(noreturn)
+        );
+    }
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+compile_error!("__llvm_deoptimize() not yet implemented for this platform");
 
 /// The following module contains exports only used for testing from external C code.
 /// These symbols are not shipped as part of the main API.
