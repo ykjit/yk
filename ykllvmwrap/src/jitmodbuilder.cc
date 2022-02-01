@@ -107,17 +107,6 @@ public:
   }
 };
 
-/// Get the `Value` of the `YkCtrlPointVars` struct by looking it up inside the
-/// arguments of the new control point.
-Value *getYkCtrlPointVarsStruct(Module *AOTMod, InputTrace &InpTrace) {
-  Function *F = AOTMod->getFunction(YK_NEW_CONTROL_POINT);
-  assert(F != nullptr);
-  User *CallSite = F->user_back();
-  CallInst *CI = cast<CallInst>(CallSite);
-  assert(CI->arg_size() == YK_CONTROL_POINT_NUM_ARGS);
-  return CI->getArgOperand(YK_CONTROL_POINT_ARG_VARS_IDX);
-}
-
 /// Extract all live variables that need to be passed into the control point.
 /// FIXME: This is currently an overapproximation and will return some
 /// variables that are no longer alive.
@@ -177,8 +166,8 @@ class JITModBuilder {
   // correct incoming value when tracing a PHI node.
   vector<BasicBlock *> LastCompletedBlocks;
 
-  // Maps field indices in the `YkCtrlPointVars` struct to the value stored
-  // prior to calling the control point.
+  // Maps field indices in the live variables struct to the value stored prior
+  // to calling the control point.
   std::map<uint64_t, Value *> LiveIndexMap;
 
   // The block we branch to when a guard fails. Starts null, lazily created.
@@ -186,6 +175,15 @@ class JITModBuilder {
 
   // The LLVM type for a C `int` on the current machine.
   Type *IntTy;
+
+  // A pointer to the Value representing the trace input struct.
+  Value *TraceInputs;
+
+  // A pointer to the instruction that calls the patched control point.
+  CallInst *ControlPointCallInst;
+
+  // The function inside which we build the IR for the trace.
+  Function *JITFunc;
 
   Value *getMappedValue(Value *V) {
     if (VMap.find(V) != VMap.end()) {
@@ -365,7 +363,7 @@ class JITModBuilder {
     VMap[&*I] = getMappedValue(V);
   }
 
-  Function *createJITFunc(Value *TraceInputs, Type *RetTy) {
+  Function *createJITFunc(Value *TraceInputs) {
     // Compute a name for the trace.
     uint64_t TraceIdx = getNewTraceIdx();
     TraceName = string(TRACE_FUNC_PREFIX) + to_string(TraceIdx);
@@ -373,15 +371,17 @@ class JITModBuilder {
     // Create the function.
     std::vector<Type *> InputTypes;
     InputTypes.push_back(TraceInputs->getType());
-// Add arguments for stackmap pointer and size.
+
+    // Add arguments for stackmap pointer and size.
+    LLVMContext &Context = AOTMod->getContext();
 #if defined(__x86_64)
-    InputTypes.push_back(Type::getInt64PtrTy(RetTy->getContext()));
-    InputTypes.push_back(Type::getInt64Ty(RetTy->getContext()));
+    InputTypes.push_back(Type::getInt64PtrTy(Context));
+    InputTypes.push_back(Type::getInt64Ty(Context));
 #else
 #error Not implemented!
 #endif
     llvm::FunctionType *FType =
-        llvm::FunctionType::get(RetTy, InputTypes, false);
+        llvm::FunctionType::get(Type::getVoidTy(Context), InputTypes, false);
     llvm::Function *JITFunc = llvm::Function::Create(
         FType, Function::InternalLinkage, TraceName, JITMod);
     JITFunc->setCallingConv(CallingConv::C);
@@ -802,6 +802,29 @@ class JITModBuilder {
     }
   }
 
+  // Find the call site to the (patched) control point and the type of the
+  // struct used to pass in the live LLVM variables.
+  //
+  // FIXME: this assumes that there is a single call-site of the control point.
+  // https://github.com/ykjit/yk/issues/479
+  tuple<CallInst *, Value *> getControlPointInfo() {
+    Function *F = AOTMod->getFunction(YK_NEW_CONTROL_POINT);
+    assert(F->arg_size() == YK_CONTROL_POINT_NUM_ARGS);
+
+    User *CallSite = F->user_back();
+    CallInst *CPCI = cast<CallInst>(CallSite);
+    assert(CPCI->arg_size() == YK_CONTROL_POINT_NUM_ARGS);
+
+    Value *Inputs = CPCI->getArgOperand(YK_CONTROL_POINT_ARG_VARS_IDX);
+#ifndef NDEBUG
+    Type *InputsTy = Inputs->getType();
+    assert(InputsTy->isPointerTy());
+    assert(isa<StructType>(InputsTy->getPointerElementType()));
+#endif
+
+    return {CPCI, Inputs};
+  }
+
 public:
   // Store virtual addresses for called functions.
   std::map<GlobalValue *, void *> GlobalMappings;
@@ -821,40 +844,27 @@ public:
     JITMod = new Module("", Context);
     GuardFailBB = nullptr;
     IntTy = Type::getIntNTy(Context, sizeof(int) * 8);
-  }
 
-  // Generate the JIT module.
-  Module *createModule() {
-    LLVMContext &JITContext = JITMod->getContext();
-    // Find the trace inputs.
-    Value *TraceInputs = getYkCtrlPointVarsStruct(AOTMod, InpTrace);
+    std::tie(ControlPointCallInst, TraceInputs) = getControlPointInfo();
 
-    // Get new control point call.
-    Function *F = AOTMod->getFunction(YK_NEW_CONTROL_POINT);
-    User *CallSite = F->user_back();
-    CallInst *CPCI = cast<CallInst>(CallSite);
-    assert(F->arg_size() == YK_CONTROL_POINT_NUM_ARGS);
-    Type *YkCtrlPointVarsPtrTy =
-        F->getArg(YK_CONTROL_POINT_ARG_VARS_IDX)->getType();
-    assert(YkCtrlPointVarsPtrTy->isPointerTy());
-
-    createLiveIndexMap(CPCI, YkCtrlPointVarsPtrTy);
-
-    // Create function to store compiled trace.
-    Function *JITFunc = createJITFunc(TraceInputs, CPCI->getType());
-
-    // Map the YkCtrlPointVars struct used inside the trace to the argument of
-    // the compiled trace function.
-    VMap[TraceInputs] = JITFunc->getArg(0);
-
-    // Create entry block and setup builder.
-    auto DstBB = BasicBlock::Create(JITContext, "", JITFunc);
+    // Create a function inside of which we construct the IR for our trace.
+    JITFunc = createJITFunc(TraceInputs);
+    auto DstBB = BasicBlock::Create(JITMod->getContext(), "", JITFunc);
     Builder.SetInsertPoint(DstBB);
 
-    LastCompletedBlocks.push_back(nullptr);
-    BasicBlock *NextCompletedBlock = nullptr;
+    createLiveIndexMap(ControlPointCallInst, TraceInputs->getType());
 
-    // Iterate over the trace and stitch together all traced blocks.
+    // Map the live variables struct used inside the trace to the corresponding
+    // argument of the compiled trace function.
+    VMap[TraceInputs] = JITFunc->getArg(0);
+
+    LastCompletedBlocks.push_back(nullptr);
+  }
+
+  // Generate the JIT module by "glueing together" blocks that the trace
+  // executed in the AOT module.
+  Module *createModule() {
+    BasicBlock *NextCompletedBlock = nullptr;
     for (size_t Idx = 0; Idx < InpTrace.Length(); Idx++) {
       Optional<IRBlock> MaybeIB = InpTrace[Idx];
       if (ExpectUnmappable && !MaybeIB.hasValue()) {
@@ -984,7 +994,7 @@ public:
           Value *LoadOper = LI->getPointerOperand();
           if (isa<GetElementPtrInst>(LoadOper)) {
             GetElementPtrInst *GI = cast<GetElementPtrInst>(LoadOper);
-            if (GI->getPointerOperandType() == YkCtrlPointVarsPtrTy) {
+            if (GI->getPointerOperandType() == TraceInputs->getType()) {
               Value *LoadedFromIdxVal = *(std::next(GI->idx_begin()));
               assert(isa<ConstantInt>(LoadedFromIdxVal));
               uint64_t LoadedFromIdx =
