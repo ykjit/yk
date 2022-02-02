@@ -1,5 +1,6 @@
 // Classes and functions for constructing a new LLVM module from a trace.
 
+#include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/IRBuilder.h"
@@ -179,6 +180,9 @@ class JITModBuilder {
 
   // The LLVM type for a C `int` on the current machine.
   Type *IntTy;
+
+  // A pointer-sized integer (i.e. a Rust `usize`) for the current machine.
+  IntegerType *PointerSizedIntTy;
 
   // A pointer to the Value representing the trace input struct.
   Value *TraceInputs;
@@ -377,15 +381,11 @@ class JITModBuilder {
     InputTypes.push_back(TraceInputs->getType());
 
     // Add arguments for stackmap pointer and size.
-    LLVMContext &Context = AOTMod->getContext();
-#if defined(__x86_64)
-    InputTypes.push_back(Type::getInt64PtrTy(Context));
-    InputTypes.push_back(Type::getInt64Ty(Context));
-#else
-#error Not implemented!
-#endif
-    llvm::FunctionType *FType =
-        llvm::FunctionType::get(Type::getVoidTy(Context), InputTypes, false);
+    InputTypes.push_back(PointerSizedIntTy->getPointerTo());
+    InputTypes.push_back(PointerSizedIntTy);
+
+    llvm::FunctionType *FType = llvm::FunctionType::get(
+        Type::getVoidTy(JITMod->getContext()), InputTypes, false);
     llvm::Function *JITFunc = llvm::Function::Create(
         FType, Function::InternalLinkage, TraceName, JITMod);
     JITFunc->setCallingConv(CallingConv::C);
@@ -849,7 +849,11 @@ public:
     LLVMContext &Context = AOTMod->getContext();
     JITMod = new Module("", Context);
     GuardFailBB = nullptr;
+
+    // Cache common types.
     IntTy = Type::getIntNTy(Context, sizeof(int) * CHAR_BIT);
+    DataLayout DL(JITMod);
+    PointerSizedIntTy = DL.getIntPtrType(Context);
 
     std::tie(ControlPointCallInst, TraceInputs) = getControlPointInfo();
 
