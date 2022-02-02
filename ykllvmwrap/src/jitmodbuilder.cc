@@ -27,6 +27,10 @@ uint64_t getNewTraceIdx() {
 #define YK_CONTROL_POINT_ARG_VARS_IDX 2
 #define YK_CONTROL_POINT_NUM_ARGS 3
 
+#define JITFUNC_ARG_INPUTS_STRUCT_IDX 0
+#define JITFUNC_ARG_STACKMAP_ADDR_IDX 1
+#define JITFUNC_ARG_STACKMAP_LEN_IDX 2
+
 // Dump an error message and an LLVM value to stderr and exit with failure.
 void dumpValueAndExit(const char *Msg, Value *V) {
   errs() << Msg << ": ";
@@ -476,7 +480,9 @@ class JITModBuilder {
       ArrayRef<OperandBundleDef> ar_ob = ArrayRef<OperandBundleDef>(ob);
       // We already passed the stackmap address and size into the trace
       // function so pass them on to the __llvm_deoptimize call.
-      CallInst::Create(DeoptInt, {JITFunc->getArg(1), JITFunc->getArg(2)},
+      CallInst::Create(DeoptInt,
+                       {JITFunc->getArg(JITFUNC_ARG_STACKMAP_ADDR_IDX),
+                        JITFunc->getArg(JITFUNC_ARG_STACKMAP_LEN_IDX)},
                        ar_ob, "", GuardFailBB);
 
       // We always need to return after the deoptimisation call.
@@ -843,7 +849,7 @@ public:
     LLVMContext &Context = AOTMod->getContext();
     JITMod = new Module("", Context);
     GuardFailBB = nullptr;
-    IntTy = Type::getIntNTy(Context, sizeof(int) * 8);
+    IntTy = Type::getIntNTy(Context, sizeof(int) * CHAR_BIT);
 
     std::tie(ControlPointCallInst, TraceInputs) = getControlPointInfo();
 
@@ -856,7 +862,7 @@ public:
 
     // Map the live variables struct used inside the trace to the corresponding
     // argument of the compiled trace function.
-    VMap[TraceInputs] = JITFunc->getArg(0);
+    VMap[TraceInputs] = JITFunc->getArg(JITFUNC_ARG_INPUTS_STRUCT_IDX);
 
     LastCompletedBlocks.push_back(nullptr);
   }
