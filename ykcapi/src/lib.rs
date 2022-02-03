@@ -20,8 +20,14 @@ use ykrt::{HotThreshold, Location, MT};
 use yksmp::{Location as SMLocation, StackMapParser};
 
 #[no_mangle]
-pub extern "C" fn yk_mt_global() -> &'static MT {
-    MT::global()
+pub extern "C" fn yk_mt_new() -> *mut MT {
+    let mt = Box::new(MT::new());
+    Box::into_raw(mt)
+}
+
+#[no_mangle]
+pub extern "C" fn yk_mt_drop(mt: *mut MT) {
+    unsafe { Box::from_raw(mt) };
 }
 
 // The "dummy control point" that is replaced in an LLVM pass.
@@ -33,7 +39,6 @@ pub extern "C" fn yk_control_point(_mt: *mut MT, _loc: *mut Location) {
 // The "real" control point, that is called once the interpreter has been patched by ykllvm.
 #[no_mangle]
 pub extern "C" fn __ykrt_control_point(mt: *mut MT, loc: *mut Location, ctrlp_vars: *mut c_void) {
-    println!("{:?} {:?} {:?}", mt, loc, ctrlp_vars);
     debug_assert!(!ctrlp_vars.is_null());
     if !loc.is_null() {
         let mt = unsafe { &*mt };

@@ -12,7 +12,8 @@
 #include <yk.h>
 
 int main(int argc, char **argv) {
-  YkMT *mt = yk_mt_global();
+  YkMT *mt = yk_mt_new();
   yk_control_point(mt, NULL); // Not in a loop!
+  yk_mt_drop(mt);
   return (EXIT_SUCCESS);
 }

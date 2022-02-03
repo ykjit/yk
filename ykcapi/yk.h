@@ -28,8 +28,13 @@ typedef uint32_t YkHotThreshold;
 
 typedef struct YkMT YkMT;
 
-// Return a pointer to MT instance.
-YkMT *yk_mt_global();
+// Create a new `YkMT` instance.
+YkMT *yk_mt_new();
+
+// Drop a `YkMT` instance. This must be called at most once per `YkMT`
+// instance: calling this function more than once on a `YkMT` instance leads to
+// undefined behaviour.
+void yk_mt_drop(YkMT *);
 
 // Notify yk that an iteration of an interpreter loop is about to start. The
 // argument passed uniquely identifies the current location in the user's
