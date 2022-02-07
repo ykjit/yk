@@ -19,7 +19,6 @@ use std::{
 
 use num_cpus;
 use parking_lot::{Condvar, Mutex, MutexGuard};
-use parking_lot_core::SpinWait;
 use std::lazy::SyncLazy;
 
 use crate::location::{HotLocation, Location, LocationInner, ThreadIdInner};
@@ -166,40 +165,16 @@ impl MT {
             let count = ls.count();
             if count < self.hot_threshold() {
                 // Try incrementing this location's hot count. We make no guarantees that this will
-                // succeed because under heavy contention we can end up racing with many other
-                // threads and it's not worth our time to halt execution merely to have an accurate
-                // hot count. However, we do try semi-hard to enforce monotonicity (i.e. preventing
-                // the hot count from going backwards) which can happen if an "older" thread has
-                // been paused for a long time. Even in that case, though, we do not try endlessly.
-                let mut spinwait = SpinWait::new();
-                loop {
-                    match loc.compare_exchange_weak(
-                        ls,
-                        ls.with_count(count + 1),
-                        Ordering::Relaxed,
-                        Ordering::Relaxed,
-                    ) {
-                        Ok(_) => break,
-                        Err(new_ls) => {
-                            if !new_ls.is_counting() {
-                                // Another thread has probably started tracing this Location.
-                                break;
-                            }
-                            if new_ls.count() >= count {
-                                // Although our increment hasn't worked, at least the count hasn't
-                                // gone backwards: rather than holding this thread up, let's get
-                                // back to the interpreter.
-                                break;
-                            }
-                            ls = new_ls;
-                            if spinwait.spin() {
-                                // We don't want to park this thread, so even though we can see the
-                                // count is going backwards, go back to the interpreter.
-                                break;
-                            }
-                        }
-                    }
-                }
+                // succeed because under contention we can end up racing with many other threads
+                // and it's not worth our time to halt execution merely to have an accurate hot
+                // count.
+                loc.compare_exchange_weak(
+                    ls,
+                    ls.with_count(count + 1),
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                )
+                .ok();
                 return TransitionLocation::NoAction;
             } else {
                 return THREAD_MTTHREAD.with(|mtt| {
@@ -437,6 +412,7 @@ enum TransitionLocation {
 mod tests {
     use super::*;
     use crate::location::HotLocationDiscriminants;
+    use std::{convert::TryFrom, thread};
 
     fn hotlocation_discriminant(loc: &Location) -> Option<HotLocationDiscriminants> {
         match loc.lock() {
@@ -493,5 +469,60 @@ mod tests {
             mt.transition_location(&loc),
             TransitionLocation::Execute(std::ptr::null())
         );
+    }
+
+    #[test]
+    fn threaded_threshold() {
+        // Aim for a situation where there's a lot of contention.
+        let num_threads = u32::try_from(num_cpus::get() * 4).unwrap();
+        let hot_thrsh = num_threads.saturating_mul(10000);
+        let mt = MT::new();
+        mt.set_hot_threshold(hot_thrsh);
+        let loc = Arc::new(Location::new());
+
+        let mut thrs = vec![];
+        for _ in 0..num_threads {
+            let mt = mt.clone();
+            let loc = Arc::clone(&loc);
+            let t = thread::spawn(move || {
+                for _ in 0..hot_thrsh / num_threads {
+                    assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
+                    let c1 = loc.load(Ordering::Relaxed);
+                    assert!(c1.is_counting());
+                    assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
+                    let c2 = loc.load(Ordering::Relaxed);
+                    assert!(c2.is_counting());
+                    assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
+                    let c3 = loc.load(Ordering::Relaxed);
+                    assert!(c3.is_counting());
+                    assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
+                    let c4 = loc.load(Ordering::Relaxed);
+                    assert!(c4.is_counting());
+                    assert!(c4.count() >= c3.count());
+                    assert!(c3.count() >= c2.count());
+                    assert!(c2.count() >= c1.count());
+                }
+            });
+            thrs.push(t);
+        }
+        for t in thrs {
+            t.join().unwrap();
+        }
+        // Thread contention and the use of `compare_exchange_weak` means that there is absolutely
+        // no guarantee about what the location's count will be at this point other than it must be
+        // at or below the threshold: it could even be (although it's rather unlikely) 0!
+        assert!(loc.load(Ordering::Relaxed).is_counting());
+        loop {
+            match mt.transition_location(&loc) {
+                TransitionLocation::NoAction => (),
+                TransitionLocation::StartTracing(_) => break,
+                _ => unreachable!(),
+            }
+        }
+        assert!(matches!(
+            mt.transition_location(&loc),
+            TransitionLocation::StopTracing(_)
+        ));
+        // At this point, we have nothing to meaningfully test over the `basic_transitions` test.
     }
 }
