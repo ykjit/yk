@@ -410,9 +410,11 @@ enum TransitionLocation {
 
 #[cfg(test)]
 mod tests {
+    extern crate test;
     use super::*;
     use crate::location::HotLocationDiscriminants;
-    use std::{convert::TryFrom, thread};
+    use std::{convert::TryFrom, hint::black_box, thread};
+    use test::bench::Bencher;
 
     fn hotlocation_discriminant(loc: &Location) -> Option<HotLocationDiscriminants> {
         match loc.lock() {
@@ -563,5 +565,37 @@ mod tests {
             hotlocation_discriminant(&loc),
             Some(HotLocationDiscriminants::DontTrace)
         );
+    }
+
+    #[bench]
+    fn bench_single_threaded_control_point(b: &mut Bencher) {
+        let mt = MT::new();
+        let loc = Location::new();
+        b.iter(|| {
+            for _ in 0..100000 {
+                black_box(mt.transition_location(&loc));
+            }
+        });
+    }
+
+    #[bench]
+    fn bench_multi_threaded_control_point(b: &mut Bencher) {
+        let mt = MT::new();
+        let loc = Arc::new(Location::new());
+        b.iter(|| {
+            let mut thrs = vec![];
+            for _ in 0..4 {
+                let loc = Arc::clone(&loc);
+                let mt = mt.clone();
+                thrs.push(thread::spawn(move || {
+                    for _ in 0..100 {
+                        black_box(mt.transition_location(&loc));
+                    }
+                }));
+            }
+            for t in thrs {
+                t.join().unwrap();
+            }
+        });
     }
 }
