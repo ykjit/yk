@@ -525,4 +525,43 @@ mod tests {
         ));
         // At this point, we have nothing to meaningfully test over the `basic_transitions` test.
     }
+
+    #[test]
+    fn locations_dont_get_stuck_tracing() {
+        // If a thread starts tracing a location but terminates before finishing tracing, a
+        // Location can be left in the Tracing state: this test ensures that, as soon as another
+        // thread notices that the original Tracing thread has died, that the Location is updated
+        // to a non-tracing state.
+
+        const THRESHOLD: HotThreshold = 5;
+        let mt = MT::new();
+        mt.set_hot_threshold(THRESHOLD);
+        let loc = Arc::new(Location::new());
+
+        {
+            let mt = mt.clone();
+            let loc = Arc::clone(&loc);
+            thread::spawn(move || {
+                for _ in 0..THRESHOLD {
+                    assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
+                }
+                assert!(matches!(
+                    mt.transition_location(&loc),
+                    TransitionLocation::StartTracing(_)
+                ));
+            })
+            .join()
+            .unwrap();
+        }
+
+        assert_eq!(
+            hotlocation_discriminant(&loc),
+            Some(HotLocationDiscriminants::Tracing)
+        );
+        assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
+        assert_eq!(
+            hotlocation_discriminant(&loc),
+            Some(HotLocationDiscriminants::DontTrace)
+        );
+    }
 }
