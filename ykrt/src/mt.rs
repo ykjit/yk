@@ -276,7 +276,13 @@ impl MT {
                                 // Should be `return TransitionLocation::NoAction`
                                 1
                             } else {
-                                // Should be "do nothing"
+                                // This thread is tracing this location: we must, therefore, have
+                                // finished tracing the loop.
+                                //
+                                // We must ensure that the `Arc<ThreadId>` inside `opt` is dropped so that
+                                // other threads won't think this thread has died while tracing.
+                                mtt.tracing.set(None);
+                                opt.take();
                                 2
                             }
                         } else {
@@ -301,12 +307,6 @@ impl MT {
                         }
                         _ => unreachable!(),
                     }
-                    // This thread is tracing this location: we must, therefore, have finished
-                    // tracing the loop.
-                    //
-                    // We must ensure that the `Arc<ThreadId>` inside `opt` is dropped so that
-                    // other threads won't think this thread has died while tracing.
-                    opt.take();
                     #[cfg(feature = "jit_state_debug")]
                     eprintln!("jit-state: stop-tracing");
                     *hl = HotLocation::Compiling;
@@ -565,6 +565,51 @@ mod tests {
             hotlocation_discriminant(&loc),
             Some(HotLocationDiscriminants::DontTrace)
         );
+    }
+
+    #[test]
+    fn dont_trace_two_locations_simultaneously_in_one_thread() {
+        // A thread can only trace one Location at a time: if, having started tracing, it
+        // encounters another Location which has reached its hot threshold, it just ignores it.
+        // Once the first location is compiled, the second location can then be compiled.
+
+        const THRESHOLD: HotThreshold = 5;
+        let mt = MT::new();
+        mt.set_hot_threshold(THRESHOLD);
+        let loc1 = Location::new();
+        let loc2 = Location::new();
+
+        for _ in 0..THRESHOLD {
+            assert_eq!(mt.transition_location(&loc1), TransitionLocation::NoAction);
+            assert_eq!(mt.transition_location(&loc2), TransitionLocation::NoAction);
+        }
+        assert!(matches!(
+            mt.transition_location(&loc1),
+            TransitionLocation::StartTracing(_)
+        ));
+        assert_eq!(mt.transition_location(&loc2), TransitionLocation::NoAction);
+        assert_eq!(
+            hotlocation_discriminant(&loc1),
+            Some(HotLocationDiscriminants::Tracing)
+        );
+        assert!(loc2.load(Ordering::Relaxed).is_counting());
+        assert_eq!(loc2.load(Ordering::Relaxed).count(), THRESHOLD);
+        assert!(matches!(
+            mt.transition_location(&loc1),
+            TransitionLocation::StopTracing(_)
+        ));
+        assert_eq!(
+            hotlocation_discriminant(&loc1),
+            Some(HotLocationDiscriminants::Compiling)
+        );
+        assert!(matches!(
+            mt.transition_location(&loc2),
+            TransitionLocation::StartTracing(_)
+        ));
+        assert!(matches!(
+            mt.transition_location(&loc2),
+            TransitionLocation::StopTracing(_)
+        ));
     }
 
     #[bench]
