@@ -36,6 +36,7 @@
 //     ...
 //     --- End jit-pre-opt ---
 //     pc=0, mem=3
+//     jit-state: start-tracing
 //     pc=1, mem=3
 //     pc=2, mem=3
 //     pc=3, mem=2

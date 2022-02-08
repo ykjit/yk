@@ -276,7 +276,13 @@ impl MT {
                                 // Should be `return TransitionLocation::NoAction`
                                 1
                             } else {
-                                // Should be "do nothing"
+                                // This thread is tracing this location: we must, therefore, have
+                                // finished tracing the loop.
+                                //
+                                // We must ensure that the `Arc<ThreadId>` inside `opt` is dropped so that
+                                // other threads won't think this thread has died while tracing.
+                                mtt.tracing.set(None);
+                                opt.take();
                                 2
                             }
                         } else {
@@ -301,12 +307,6 @@ impl MT {
                         }
                         _ => unreachable!(),
                     }
-                    // This thread is tracing this location: we must, therefore, have finished
-                    // tracing the loop.
-                    //
-                    // We must ensure that the `Arc<ThreadId>` inside `opt` is dropped so that
-                    // other threads won't think this thread has died while tracing.
-                    opt.take();
                     #[cfg(feature = "jit_state_debug")]
                     eprintln!("jit-state: stop-tracing");
                     *hl = HotLocation::Compiling;
@@ -410,9 +410,11 @@ enum TransitionLocation {
 
 #[cfg(test)]
 mod tests {
+    extern crate test;
     use super::*;
     use crate::location::HotLocationDiscriminants;
-    use std::{convert::TryFrom, thread};
+    use std::{convert::TryFrom, hint::black_box, thread};
+    use test::bench::Bencher;
 
     fn hotlocation_discriminant(loc: &Location) -> Option<HotLocationDiscriminants> {
         match loc.lock() {
@@ -524,5 +526,121 @@ mod tests {
             TransitionLocation::StopTracing(_)
         ));
         // At this point, we have nothing to meaningfully test over the `basic_transitions` test.
+    }
+
+    #[test]
+    fn locations_dont_get_stuck_tracing() {
+        // If a thread starts tracing a location but terminates before finishing tracing, a
+        // Location can be left in the Tracing state: this test ensures that, as soon as another
+        // thread notices that the original Tracing thread has died, that the Location is updated
+        // to a non-tracing state.
+
+        const THRESHOLD: HotThreshold = 5;
+        let mt = MT::new();
+        mt.set_hot_threshold(THRESHOLD);
+        let loc = Arc::new(Location::new());
+
+        {
+            let mt = mt.clone();
+            let loc = Arc::clone(&loc);
+            thread::spawn(move || {
+                for _ in 0..THRESHOLD {
+                    assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
+                }
+                assert!(matches!(
+                    mt.transition_location(&loc),
+                    TransitionLocation::StartTracing(_)
+                ));
+            })
+            .join()
+            .unwrap();
+        }
+
+        assert_eq!(
+            hotlocation_discriminant(&loc),
+            Some(HotLocationDiscriminants::Tracing)
+        );
+        assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
+        assert_eq!(
+            hotlocation_discriminant(&loc),
+            Some(HotLocationDiscriminants::DontTrace)
+        );
+    }
+
+    #[test]
+    fn dont_trace_two_locations_simultaneously_in_one_thread() {
+        // A thread can only trace one Location at a time: if, having started tracing, it
+        // encounters another Location which has reached its hot threshold, it just ignores it.
+        // Once the first location is compiled, the second location can then be compiled.
+
+        const THRESHOLD: HotThreshold = 5;
+        let mt = MT::new();
+        mt.set_hot_threshold(THRESHOLD);
+        let loc1 = Location::new();
+        let loc2 = Location::new();
+
+        for _ in 0..THRESHOLD {
+            assert_eq!(mt.transition_location(&loc1), TransitionLocation::NoAction);
+            assert_eq!(mt.transition_location(&loc2), TransitionLocation::NoAction);
+        }
+        assert!(matches!(
+            mt.transition_location(&loc1),
+            TransitionLocation::StartTracing(_)
+        ));
+        assert_eq!(mt.transition_location(&loc2), TransitionLocation::NoAction);
+        assert_eq!(
+            hotlocation_discriminant(&loc1),
+            Some(HotLocationDiscriminants::Tracing)
+        );
+        assert!(loc2.load(Ordering::Relaxed).is_counting());
+        assert_eq!(loc2.load(Ordering::Relaxed).count(), THRESHOLD);
+        assert!(matches!(
+            mt.transition_location(&loc1),
+            TransitionLocation::StopTracing(_)
+        ));
+        assert_eq!(
+            hotlocation_discriminant(&loc1),
+            Some(HotLocationDiscriminants::Compiling)
+        );
+        assert!(matches!(
+            mt.transition_location(&loc2),
+            TransitionLocation::StartTracing(_)
+        ));
+        assert!(matches!(
+            mt.transition_location(&loc2),
+            TransitionLocation::StopTracing(_)
+        ));
+    }
+
+    #[bench]
+    fn bench_single_threaded_control_point(b: &mut Bencher) {
+        let mt = MT::new();
+        let loc = Location::new();
+        b.iter(|| {
+            for _ in 0..100000 {
+                black_box(mt.transition_location(&loc));
+            }
+        });
+    }
+
+    #[bench]
+    fn bench_multi_threaded_control_point(b: &mut Bencher) {
+        let mt = MT::new();
+        let loc = Arc::new(Location::new());
+        b.iter(|| {
+            let mut thrs = vec![];
+            for _ in 0..4 {
+                let loc = Arc::clone(&loc);
+                let mt = mt.clone();
+                thrs.push(thread::spawn(move || {
+                    for _ in 0..100 {
+                        black_box(mt.transition_location(&loc));
+                    }
+                }));
+            }
+            for t in thrs {
+                t.join().unwrap();
+            }
+        });
     }
 }
