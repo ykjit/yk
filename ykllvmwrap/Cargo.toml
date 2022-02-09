@@ -14,4 +14,4 @@ ykutil = { path = "../ykutil" }
 cc = "1.0.68"
 
 [features]
-c_testing = []
+yk_testing = []

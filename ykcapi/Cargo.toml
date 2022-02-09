@@ -16,4 +16,4 @@ yktrace = { path = "../yktrace" }
 yksmp = { path = "../yksmp" }
 
 [features]
-c_testing = []
+yk_testing = []

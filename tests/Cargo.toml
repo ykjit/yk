@@ -18,11 +18,11 @@ harness = false
 [dependencies]
 memmap2 = "0.5.2"
 regex = "1.5.4"
-yktrace = { path = "../yktrace", features = ["c_testing"] }
+yktrace = { path = "../yktrace", features = ["yk_testing"] }
 
 [dev-dependencies]
 lang_tester = "0.7.0"
 tempfile = "3.2.0"
-ykcapi = { path = "../ykcapi", features = ["c_testing"] }
-ykllvmwrap = { path = "../ykllvmwrap", features = ["c_testing"] }
-ykrt = { path = "../ykrt", features = ["c_testing", "jit_state_debug"] }
+ykcapi = { path = "../ykcapi", features = ["yk_testing"] }
+ykllvmwrap = { path = "../ykllvmwrap", features = ["yk_testing"] }
+ykrt = { path = "../ykrt", features = ["yk_testing", "jit_state_debug"] }

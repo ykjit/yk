@@ -160,7 +160,7 @@ impl IRTrace {
         ret
     }
 
-    #[cfg(feature = "c_testing")]
+    #[cfg(feature = "yk_testing")]
     pub fn compile_for_tc_tests(&self, llvmbc_data: *const u8, llvmbc_len: usize) {
         let (func_names, bbs, trace_len) = self.encode_trace();
 
