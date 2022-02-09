@@ -7,12 +7,12 @@ license = "Apache-2.0 OR MIT"
 
 [[test]]
 name = "c_tests"
-path = "run.rs"
+path = "langtest_c.rs"
 harness = false
 
 [[test]]
 name = "trace_compiler_tests"
-path = "run_trace_compiler.rs"
+path = "langtest_trace_compiler.rs"
 harness = false
 
 [dependencies]
