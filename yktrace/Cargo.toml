@@ -9,18 +9,18 @@ license = "Apache-2.0 OR MIT"
 byteorder = "1.4.3"
 elf = "0.0.10"
 fxhash = "0.2.1"
-gimli = "0.24.0"
+gimli = "0.26.1"
 hwtracer = { git = "https://github.com/softdevteam/hwtracer" }
-intervaltree = "0.2.6"
-leb128 = "0.2.4"
-libc = "0.2.97"
-memmap2 = "0.3.0"
+intervaltree = "0.2.7"
+leb128 = "0.2.5"
+libc = "0.2.117"
+memmap2 = "0.5.2"
 phdrs = { git = "https://github.com/softdevteam/phdrs" }
 ykllvmwrap = { path = "../ykllvmwrap" }
 ykutil = { path = "../ykutil" }
 
 [dependencies.object]
-version = "0.25.3"
+version = "0.28.3"
 default-features = false
 features = ["read_core", "elf"]
 

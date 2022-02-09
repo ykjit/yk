@@ -21,8 +21,8 @@ regex = "1.5.4"
 yktrace = { path = "../yktrace", features = ["yk_testing"] }
 
 [dev-dependencies]
-lang_tester = "0.7.0"
-tempfile = "3.2.0"
+lang_tester = "0.7.1"
+tempfile = "3.3.0"
 ykcapi = { path = "../ykcapi", features = ["yk_testing"] }
 ykllvmwrap = { path = "../ykllvmwrap", features = ["yk_testing"] }
 ykrt = { path = "../ykrt", features = ["yk_testing", "jit_state_debug"] }

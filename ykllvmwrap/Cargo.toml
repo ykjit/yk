@@ -6,12 +6,12 @@ edition = "2018"
 license = "Apache-2.0 OR MIT"
 
 [dependencies]
-cc = "1.0.68"
-libc = "0.2.97"
+cc = "1.0.72"
+libc = "0.2.117"
 ykutil = { path = "../ykutil" }
 
 [build-dependencies]
-cc = "1.0.68"
+cc = "1.0.72"
 
 [features]
 yk_testing = []
