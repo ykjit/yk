@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "c_tests",
+    "tests",
     "ykcapi",
     "ykllvmwrap",
     "ykrt",
