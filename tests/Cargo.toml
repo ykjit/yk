@@ -1,0 +1,28 @@
+[package]
+name = "tests"
+version = "0.1.0"
+authors = ["The Yk Developers"]
+edition = "2018"
+license = "Apache-2.0 OR MIT"
+
+[[test]]
+name = "c_tests"
+path = "langtest_c.rs"
+harness = false
+
+[[test]]
+name = "trace_compiler_tests"
+path = "langtest_trace_compiler.rs"
+harness = false
+
+[dependencies]
+memmap2 = "0.5.2"
+regex = "1.5.4"
+yktrace = { path = "../yktrace", features = ["yk_testing"] }
+
+[dev-dependencies]
+lang_tester = "0.7.1"
+tempfile = "3.3.0"
+ykcapi = { path = "../ykcapi", features = ["yk_testing"] }
+ykllvmwrap = { path = "../ykllvmwrap", features = ["yk_testing"] }
+ykrt = { path = "../ykrt", features = ["yk_testing", "jit_state_debug"] }

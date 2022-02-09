@@ -1,6 +1,6 @@
 //! The main end-user interface to the meta-tracing system.
 
-#[cfg(feature = "c_testing")]
+#[cfg(feature = "yk_testing")]
 use std::env;
 use std::{
     cell::Cell,
@@ -37,7 +37,7 @@ const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
 
 thread_local! {static THREAD_MTTHREAD: MTThread = MTThread::new();}
 
-#[cfg(feature = "c_testing")]
+#[cfg(feature = "yk_testing")]
 static SERIALISE_COMPILATION: SyncLazy<bool> =
     SyncLazy::new(|| &env::var("YKD_SERIALISE_COMPILATION").unwrap_or("0".to_owned()) == "1");
 
@@ -351,7 +351,7 @@ impl MT {
             forget(tmp_loc);
         };
 
-        #[cfg(feature = "c_testing")]
+        #[cfg(feature = "yk_testing")]
         if *SERIALISE_COMPILATION {
             do_compile();
             return;

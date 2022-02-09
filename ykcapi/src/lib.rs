@@ -224,8 +224,8 @@ compile_error!("__llvm_deoptimize() not yet implemented for this platform");
 
 /// The following module contains exports only used for testing from external C code.
 /// These symbols are not shipped as part of the main API.
-#[cfg(feature = "c_testing")]
-mod c_testing {
+#[cfg(feature = "yk_testing")]
+mod yk_testing {
     use yktrace::BlockMap;
 
     #[no_mangle]

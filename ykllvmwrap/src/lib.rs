@@ -20,7 +20,7 @@ extern "C" {
         llvmbc_len: size_t,
     ) -> *const c_void;
 
-    #[cfg(feature = "c_testing")]
+    #[cfg(feature = "yk_testing")]
     pub fn __ykllvmwrap_irtrace_compile_for_tc_tests(
         func_names: *const *const c_char,
         bbs: *const size_t,
