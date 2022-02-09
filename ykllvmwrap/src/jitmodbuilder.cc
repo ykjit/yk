@@ -813,7 +813,7 @@ class JITModBuilder {
   //
   // FIXME: this assumes that there is a single call-site of the control point.
   // https://github.com/ykjit/yk/issues/479
-  tuple<CallInst *, Value *> getControlPointInfo() {
+  static tuple<CallInst *, Value *> GetControlPointInfo(Module *AOTMod) {
     Function *F = AOTMod->getFunction(YK_NEW_CONTROL_POINT);
     assert(F->arg_size() == YK_CONTROL_POINT_NUM_ARGS);
 
@@ -831,21 +831,14 @@ class JITModBuilder {
     return {CPCI, Inputs};
   }
 
-public:
-  // Store virtual addresses for called functions.
-  std::map<GlobalValue *, void *> GlobalMappings;
-  // The function name of this trace.
-  string TraceName;
-  // Mapping from AOT instructions to JIT instructions.
-  ValueToValueMapTy VMap;
-
   // OPT: https://github.com/ykjit/yk/issues/419
   JITModBuilder(Module *AOTMod, char *FuncNames[], size_t BBs[],
                 size_t TraceLen, char *FAddrKeys[], void *FAddrVals[],
-                size_t FAddrLen)
-      : Builder(AOTMod->getContext()), InpTrace(FuncNames, BBs, TraceLen),
-        FAddrs(FAddrKeys, FAddrVals, FAddrLen) {
-    this->AOTMod = AOTMod;
+                size_t FAddrLen, CallInst *CPCI, Value *TraceInputs)
+      : AOTMod(AOTMod), Builder(AOTMod->getContext()),
+        InpTrace(FuncNames, BBs, TraceLen),
+        FAddrs(FAddrKeys, FAddrVals, FAddrLen), TraceInputs(TraceInputs),
+        ControlPointCallInst(CPCI) {
     LLVMContext &Context = AOTMod->getContext();
     JITMod = new Module("", Context);
     GuardFailBB = nullptr;
@@ -854,8 +847,6 @@ public:
     IntTy = Type::getIntNTy(Context, sizeof(int) * CHAR_BIT);
     DataLayout DL(JITMod);
     PointerSizedIntTy = DL.getIntPtrType(Context);
-
-    std::tie(ControlPointCallInst, TraceInputs) = getControlPointInfo();
 
     // Create a function inside of which we construct the IR for our trace.
     JITFunc = createJITFunc(TraceInputs);
@@ -870,6 +861,75 @@ public:
 
     LastCompletedBlocks.push_back(nullptr);
   }
+
+public:
+  // Store virtual addresses for called functions.
+  std::map<GlobalValue *, void *> GlobalMappings;
+  // The function name of this trace.
+  string TraceName;
+  // Mapping from AOT instructions to JIT instructions.
+  ValueToValueMapTy VMap;
+
+  JITModBuilder(JITModBuilder &&);
+
+  static JITModBuilder Create(Module *AOTMod, char *FuncNames[], size_t BBs[],
+                              size_t TraceLen, char *FAddrKeys[],
+                              void *FAddrVals[], size_t FAddrLen) {
+    CallInst *CPCI;
+    Value *TI;
+    std::tie(CPCI, TI) = GetControlPointInfo(AOTMod);
+    return JITModBuilder(AOTMod, FuncNames, BBs, TraceLen, FAddrKeys, FAddrVals,
+                         FAddrLen, CPCI, TI);
+  }
+
+#ifdef YK_TESTING
+  static JITModBuilder CreateMocked(Module *AOTMod, char *FuncNames[],
+                                    size_t BBs[], size_t TraceLen,
+                                    char *FAddrKeys[], void *FAddrVals[],
+                                    size_t FAddrLen) {
+    LLVMContext &Context = AOTMod->getContext();
+
+    // The trace compiler expects to be given a) a call to a control point, and
+    // b) a struct containing live variables.
+    //
+    // For the trace compiler tests, we don't want the user to have to worry
+    // about that stuff, so we fobb off the trace compiler with dummy versions
+    // of those things.
+    //
+    // First, in order for a) and b) to exist, they need a parent function to
+    // live in. We inject a never-called dummy function.
+    llvm::FunctionType *FuncType =
+        llvm::FunctionType::get(Type::getVoidTy(Context), {}, false);
+    llvm::Function *Func = llvm::Function::Create(
+        FuncType, Function::InternalLinkage, "__yk_tc_tests_dummy", AOTMod);
+    BasicBlock *BB = BasicBlock::Create(Context, "", Func);
+    IRBuilder<> Builder(BB);
+
+    // Now we make a struct that we pretend contains the values of the live
+    // variables at the time of the control point. It must have at least one
+    // field, or LLVM chokes because it is unsized.
+    Type *TraceInputsTy =
+        StructType::create(AOTMod->getContext(), Type::getInt8Ty(Context));
+    Value *TraceInputs = Builder.CreateAlloca(TraceInputsTy, 0, "");
+
+    // Now we make a call instruction, which tell the trace compiler is a call
+    // to the control point. It's actually a recursive call to the dummy
+    // function.
+    CallInst *CPCI = Builder.CreateCall(Func, {});
+    Builder.CreateUnreachable();
+
+    JITModBuilder JB(AOTMod, FuncNames, BBs, TraceLen, FAddrKeys, FAddrVals,
+                     FAddrLen, CPCI, TraceInputs);
+
+    // Trick the trace compiler into thinking that it has already seen the call
+    // to the control point, so that it starts copying instructions into JITMod
+    // straight away.
+    JB.NewControlPointCall = CPCI;
+    JB.ExpectUnmappable = true;
+
+    return JB;
+  }
+#endif
 
   // Generate the JIT module by "glueing together" blocks that the trace
   // executed in the AOT module.
@@ -904,6 +964,13 @@ public:
         auto I = BB->begin();
         std::advance(I, CurInstrIdx);
         assert(I != BB->end());
+
+#ifdef YK_TESTING
+        // In trace compiler tests, blocks may be terminated with an
+        // `unreachable` terminator.
+        if (isa<UnreachableInst>(I))
+          break;
+#endif
 
         // Skip calls to debug intrinsics (e.g. @llvm.dbg.value). We don't
         // currently handle debug info and these "pseudo-calls" cause our blocks
@@ -1026,9 +1093,22 @@ public:
 tuple<Module *, string, std::map<GlobalValue *, void *>>
 createModule(Module *AOTMod, char *FuncNames[], size_t BBs[], size_t TraceLen,
              char *FAddrKeys[], void *FAddrVals[], size_t FAddrLen) {
-  JITModBuilder JB(AOTMod, FuncNames, BBs, TraceLen, FAddrKeys, FAddrVals,
-                   FAddrLen);
+  JITModBuilder JB = JITModBuilder::Create(AOTMod, FuncNames, BBs, TraceLen,
+                                           FAddrKeys, FAddrVals, FAddrLen);
   auto JITMod = JB.createModule();
   return make_tuple(JITMod, std::move(JB.TraceName),
                     std::move(JB.GlobalMappings));
 }
+
+#ifdef YK_TESTING
+tuple<Module *, string, std::map<GlobalValue *, void *>>
+createModuleForTraceDriver(Module *AOTMod, char *FuncNames[], size_t BBs[],
+                           size_t TraceLen, char *FAddrKeys[],
+                           void *FAddrVals[], size_t FAddrLen) {
+  JITModBuilder JB = JITModBuilder::CreateMocked(
+      AOTMod, FuncNames, BBs, TraceLen, FAddrKeys, FAddrVals, FAddrLen);
+  auto JITMod = JB.createModule();
+  return make_tuple(JITMod, std::move(JB.TraceName),
+                    std::move(JB.GlobalMappings));
+}
+#endif

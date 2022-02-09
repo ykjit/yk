@@ -57,7 +57,7 @@ pub struct IRBlock {
 }
 
 impl IRBlock {
-    pub(crate) fn new(func_name: CString, bb: usize) -> Self {
+    pub fn new(func_name: CString, bb: usize) -> Self {
         Self { func_name, bb }
     }
 
@@ -95,7 +95,7 @@ unsafe impl Send for IRTrace {}
 unsafe impl Sync for IRTrace {}
 
 impl IRTrace {
-    pub(crate) fn new(blocks: Vec<IRBlock>, faddrs: HashMap<CString, *const c_void>) -> Self {
+    pub fn new(blocks: Vec<IRBlock>, faddrs: HashMap<CString, *const c_void>) -> Self {
         debug_assert!(blocks.len() < usize::MAX);
         Self { blocks, faddrs }
     }
@@ -115,7 +115,7 @@ impl IRTrace {
             .map(|b| if b.is_unmappable() { None } else { Some(b) })
     }
 
-    pub fn compile(&self) -> *const c_void {
+    fn encode_trace(&self) -> (Vec<*const i8>, Vec<usize>, usize) {
         let trace_len = self.len();
         let mut func_names = Vec::with_capacity(trace_len);
         let mut bbs = Vec::with_capacity(trace_len);
@@ -129,6 +129,11 @@ impl IRTrace {
                 bbs.push(blk.bb());
             }
         }
+        (func_names, bbs, trace_len)
+    }
+
+    pub fn compile(&self) -> *const c_void {
+        let (func_names, bbs, trace_len) = self.encode_trace();
 
         let mut faddr_keys = Vec::new();
         let mut faddr_vals = Vec::new();
@@ -153,6 +158,29 @@ impl IRTrace {
         };
         assert_ne!(ret, ptr::null());
         ret
+    }
+
+    #[cfg(feature = "c_testing")]
+    pub fn compile_for_tc_tests(&self, llvmbc_data: *const u8, llvmbc_len: usize) {
+        let (func_names, bbs, trace_len) = self.encode_trace();
+
+        // FIXME: Populate these later as-needed (using additional hashmap argument).
+        let faddr_keys = Vec::new();
+        let faddr_vals = Vec::new();
+
+        let ret = unsafe {
+            ykllvmwrap::__ykllvmwrap_irtrace_compile_for_tc_tests(
+                func_names.as_ptr(),
+                bbs.as_ptr(),
+                trace_len,
+                faddr_keys.as_ptr(),
+                faddr_vals.as_ptr(),
+                faddr_keys.len(),
+                llvmbc_data,
+                llvmbc_len,
+            )
+        };
+        assert_ne!(ret, ptr::null());
     }
 }
 

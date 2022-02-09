@@ -256,9 +256,10 @@ extern "C" void *compileModule(string TraceName, Module *M,
 // trace.
 //
 // Returns a pointer to the compiled function.
-extern "C" void *__ykllvmwrap_irtrace_compile(
-    char *FuncNames[], size_t BBs[], size_t TraceLen, char *FAddrKeys[],
-    void *FAddrVals[], size_t FAddrLen, void *BitcodeData, size_t BitcodeLen) {
+template <typename FN>
+void *compileIRTrace(FN Func, char *FuncNames[], size_t BBs[], size_t TraceLen,
+                     char *FAddrKeys[], void *FAddrVals[], size_t FAddrLen,
+                     void *BitcodeData, size_t BitcodeLen) {
   DebugIRPrinter DIP;
 
   struct BitcodeSection Bitcode = {BitcodeData, BitcodeLen};
@@ -272,8 +273,9 @@ extern "C" void *__ykllvmwrap_irtrace_compile(
   Module *JITMod;
   std::string TraceName;
   std::map<GlobalValue *, void *> GlobalMappings;
-  std::tie(JITMod, TraceName, GlobalMappings) = createModule(
-      AOTMod, FuncNames, BBs, TraceLen, FAddrKeys, FAddrVals, FAddrLen);
+  std::tie(JITMod, TraceName, GlobalMappings) =
+      Func(AOTMod, FuncNames, BBs, TraceLen, FAddrKeys, FAddrVals, FAddrLen);
+
   DIP.print(DebugIR::JITPreOpt, JITMod);
 #ifndef NDEBUG
   llvm::verifyModule(*JITMod, &llvm::errs());
@@ -293,3 +295,20 @@ extern "C" void *__ykllvmwrap_irtrace_compile(
   // Compile IR trace and return a pointer to its function.
   return compileModule(TraceName, JITMod, GlobalMappings);
 }
+
+extern "C" void *__ykllvmwrap_irtrace_compile(
+    char *FuncNames[], size_t BBs[], size_t TraceLen, char *FAddrKeys[],
+    void *FAddrVals[], size_t FAddrLen, void *BitcodeData, size_t BitcodeLen) {
+  return compileIRTrace(createModule, FuncNames, BBs, TraceLen, FAddrKeys,
+                        FAddrVals, FAddrLen, BitcodeData, BitcodeLen);
+}
+
+#ifdef YK_TESTING
+extern "C" void *__ykllvmwrap_irtrace_compile_for_tc_tests(
+    char *FuncNames[], size_t BBs[], size_t TraceLen, char *FAddrKeys[],
+    void *FAddrVals[], size_t FAddrLen, void *BitcodeData, size_t BitcodeLen) {
+  return compileIRTrace(createModuleForTraceDriver, FuncNames, BBs, TraceLen,
+                        FAddrKeys, FAddrVals, FAddrLen, BitcodeData,
+                        BitcodeLen);
+}
+#endif
