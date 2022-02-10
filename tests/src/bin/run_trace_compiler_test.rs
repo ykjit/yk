@@ -1,7 +1,7 @@
 //! Trace compiler test runner.
 //!
 //! Each invocation of this program runs one of the trace compiler tests found in the
-//! `trace_driver` directory of this crate.
+//! `trace_compiler` directory of this crate.
 
 use memmap2;
 use std::{collections::HashMap, env, ffi::CString, fs::File};
@@ -10,7 +10,7 @@ use yktrace::{IRBlock, IRTrace};
 fn main() {
     // Build the trace that we are going to have compiled.
     let mut bbs = vec![IRBlock::unmappable()];
-    for bb in env::var("TRACE_DRIVER_BBS").unwrap().split(",") {
+    for bb in env::var("YKT_TRACE_BBS").unwrap().split(",") {
         let mut elems = bb.split(":");
         let func = elems.next().unwrap();
         let bb_idx = elems.next().unwrap().parse::<usize>().unwrap();
