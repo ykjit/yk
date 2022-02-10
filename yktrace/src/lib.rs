@@ -164,7 +164,8 @@ impl IRTrace {
     pub fn compile_for_tc_tests(&self, llvmbc_data: *const u8, llvmbc_len: usize) {
         let (func_names, bbs, trace_len) = self.encode_trace();
 
-        // FIXME: Populate these later as-needed (using additional hashmap argument).
+        // These would only need to be populated if we were to load the resulting compiled code
+        // into the address space, which for trace compiler tests, we don't.
         let faddr_keys = Vec::new();
         let faddr_vals = Vec::new();
 
