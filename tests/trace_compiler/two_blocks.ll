@@ -1,6 +1,6 @@
 ; Run-time:
 ;   env-var: YKD_PRINT_IR=jit-pre-opt
-;   env-var: TRACE_DRIVER_BBS=main:0,main:1
+;   env-var: YKT_TRACE_BBS=main:0,main:1
 ;   stderr:
 ;      --- Begin jit-pre-opt ---
 ;      ...

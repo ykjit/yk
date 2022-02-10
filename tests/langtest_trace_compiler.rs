@@ -11,7 +11,7 @@ const COMMENT: &str = ";";
 fn main() {
     println!("Running trace compiler tests...");
 
-    // Find the `run_trace_driver_test` binary in the target dir.
+    // Find the `run_trace_compiler_test` binary in the target dir.
     let md = env::var("CARGO_MANIFEST_DIR").unwrap();
     let mut run_tc_test = PathBuf::from(md);
     run_tc_test.push("..");
