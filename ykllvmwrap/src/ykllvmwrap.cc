@@ -191,8 +191,10 @@ void loadAOTMod(struct BitcodeSection &Bitcode) {
   SMDiagnostic Error;
   ThreadSafeContext AOTCtx = std::make_unique<LLVMContext>();
   auto M = parseIR(Mb, Error, *AOTCtx.getContext());
-  if (!M)
+  if (!M) {
+    Error.print("", errs(), false);
     errx(EXIT_FAILURE, "Can't load module.");
+  }
   GlobalAOTMod = ThreadSafeModule(std::move(M), std::move(AOTCtx));
 }
 
