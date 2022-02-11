@@ -309,8 +309,8 @@ extern "C" void *__ykllvmwrap_irtrace_compile(
 extern "C" void *__ykllvmwrap_irtrace_compile_for_tc_tests(
     char *FuncNames[], size_t BBs[], size_t TraceLen, char *FAddrKeys[],
     void *FAddrVals[], size_t FAddrLen, void *BitcodeData, size_t BitcodeLen) {
-  return compileIRTrace(createModuleForTraceDriver, FuncNames, BBs, TraceLen,
-                        FAddrKeys, FAddrVals, FAddrLen, BitcodeData,
+  return compileIRTrace(createModuleForTraceCompilerTests, FuncNames, BBs,
+                        TraceLen, FAddrKeys, FAddrVals, FAddrLen, BitcodeData,
                         BitcodeLen);
 }
 #endif

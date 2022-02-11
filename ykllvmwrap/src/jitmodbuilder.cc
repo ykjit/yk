@@ -1102,9 +1102,10 @@ createModule(Module *AOTMod, char *FuncNames[], size_t BBs[], size_t TraceLen,
 
 #ifdef YK_TESTING
 tuple<Module *, string, std::map<GlobalValue *, void *>>
-createModuleForTraceDriver(Module *AOTMod, char *FuncNames[], size_t BBs[],
-                           size_t TraceLen, char *FAddrKeys[],
-                           void *FAddrVals[], size_t FAddrLen) {
+createModuleForTraceCompilerTests(Module *AOTMod, char *FuncNames[],
+                                  size_t BBs[], size_t TraceLen,
+                                  char *FAddrKeys[], void *FAddrVals[],
+                                  size_t FAddrLen) {
   JITModBuilder JB = JITModBuilder::CreateMocked(
       AOTMod, FuncNames, BBs, TraceLen, FAddrKeys, FAddrVals, FAddrLen);
   auto JITMod = JB.createModule();
