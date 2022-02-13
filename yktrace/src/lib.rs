@@ -188,6 +188,7 @@ impl IRTrace {
 /// A trace compiled into machine code. Note that these are passed around as raw pointers and
 /// potentially referenced by multiple threads so, once created, instances of this struct can only
 /// be updated if a lock is held or a field is atomic.
+#[derive(Debug)]
 pub struct CompiledTrace {
     /// A function which when called, executes the compiled trace.
     ///
@@ -218,7 +219,24 @@ impl CompiledTrace {
         }
     }
 
+    #[cfg(feature = "yk_testing")]
+    #[doc(hidden)]
+    /// Create a `CompiledTrace` with null contents. This is unsafe and only intended for testing
+    /// purposes where a `CompiledTrace` instance is required, but cannot sensibly be constructed
+    /// without overwhelming the test. The resulting instance must not be inspected or executed.
+    pub unsafe fn new_null() -> Self {
+        Self {
+            entry: mem::transmute::<*const (), fn(*mut c_void, *const c_void, usize)>(
+                std::ptr::null(),
+            ),
+            smptr: std::ptr::null() as *const _,
+            smsize: 0,
+        }
+    }
+
     pub fn exec(&self, ctrlp_vars: *mut c_void) {
+        #[cfg(feature = "yk_testing")]
+        assert_ne!(self.entry as *const (), std::ptr::null());
         (self.entry)(ctrlp_vars, self.smptr, self.smsize)
     }
 }
