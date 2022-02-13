@@ -9,6 +9,7 @@ use std::{
 };
 
 use crate::mt::HotThreshold;
+use parking_lot::Mutex;
 use parking_lot_core::{
     park, unpark_one, ParkResult, SpinWait, UnparkResult, UnparkToken, DEFAULT_PARK_TOKEN,
 };
@@ -104,16 +105,26 @@ impl Location {
         }
     }
 
-    pub(super) unsafe fn from_location_inner(ls: LocationInner) -> Self {
-        Self {
-            inner: AtomicUsize::new(ls.x),
-        }
-    }
-
     /// Return this Location's internal state.
     pub(super) fn load(&self, order: Ordering) -> LocationInner {
         LocationInner {
             x: self.inner.load(order),
+        }
+    }
+
+    pub(super) fn compare_exchange(
+        &self,
+        current: LocationInner,
+        new: LocationInner,
+        success: Ordering,
+        failure: Ordering,
+    ) -> Result<LocationInner, LocationInner> {
+        match self
+            .inner
+            .compare_exchange(current.x, new.x, success, failure)
+        {
+            Ok(x) => Ok(LocationInner { x }),
+            Err(x) => Err(LocationInner { x }),
         }
     }
 
@@ -295,10 +306,8 @@ impl Drop for Location {
                 // trace that's pointed to. There should be a ref count that we decrement and free
                 // memory if it reaches zero.
                 self.unlock();
-            } else if let HotLocation::Compiling = hl {
-                // Another thread has a pointer to the underlying `HotLocation`, so we have to
-                // signal to that thread that they need to free the `HotLocation`.
-                *hl = HotLocation::Dropped;
+            } else if let HotLocation::Compiling(mtx) = hl {
+                drop(mtx);
                 self.unlock();
             } else if let HotLocation::DontTrace | HotLocation::Tracing(_) = hl {
                 self.unlock();
@@ -430,10 +439,9 @@ pub(crate) enum HotLocation {
     /// Points to executable machine code that can be executed instead of the interpreter for this
     /// HotLocation.
     Compiled(*const CompiledTrace),
-    /// This HotLocation is being compiled in another thread.
-    Compiling,
-    /// Whilst this HotLocation was being compiled in another thread, the [Location] was dropped.
-    Dropped,
+    /// This HotLocation is being compiled in another thread: when compilation has completed the
+    /// `Option` will change from `None` to `Some`.
+    Compiling(Arc<Mutex<Option<Box<CompiledTrace>>>>),
     /// This HotLocation has encountered problems (e.g. traces which are too long) and shouldn't be
     /// traced again.
     DontTrace,
