@@ -720,6 +720,44 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn mark_locations_for_which_tracing_doesnt_succeed_as_donttrace() {
+        // If a thread starts tracing a Location and tracing does not stop before the thread
+        // terminates, that Location should be marked (currently forever!) as DontTrace.
+
+        const THRESHOLD: HotThreshold = 5;
+        let mt = MT::new();
+        mt.set_hot_threshold(THRESHOLD);
+        let loc = Arc::new(Location::new());
+
+        for _ in 0..THRESHOLD {
+            assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
+        }
+
+        {
+            let mt = mt.clone();
+            let loc = Arc::clone(&loc);
+            thread::spawn(move || {
+                assert!(matches!(
+                    mt.transition_location(&loc),
+                    TransitionLocation::StartTracing(_)
+                ));
+            })
+            .join()
+            .unwrap();
+        }
+
+        assert_eq!(
+            hotlocation_discriminant(&loc),
+            Some(HotLocationDiscriminants::Tracing)
+        );
+        assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
+        assert_eq!(
+            hotlocation_discriminant(&loc),
+            Some(HotLocationDiscriminants::DontTrace)
+        );
+    }
+
     #[bench]
     fn bench_single_threaded_control_point(b: &mut Bencher) {
         let mt = MT::new();
