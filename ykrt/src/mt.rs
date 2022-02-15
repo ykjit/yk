@@ -679,6 +679,47 @@ mod tests {
         assert_eq!(num_starts.load(Ordering::Relaxed), 1);
     }
 
+    #[test]
+    fn two_tracing_threads_must_not_stop_each_others_tracing_location() {
+        // A tracing thread can only stop tracing when it encounters the specific Location that
+        // caused it to start tracing. If it encounters another Location that also happens to be
+        // tracing, it must ignore it.
+
+        const THRESHOLD: HotThreshold = 5;
+        let mt = MT::new();
+        mt.set_hot_threshold(THRESHOLD);
+        let loc1 = Arc::new(Location::new());
+        let loc2 = Location::new();
+
+        for _ in 0..THRESHOLD {
+            assert_eq!(mt.transition_location(&loc1), TransitionLocation::NoAction);
+            assert_eq!(mt.transition_location(&loc2), TransitionLocation::NoAction);
+        }
+
+        {
+            let mt = mt.clone();
+            let loc1 = Arc::clone(&loc1);
+            thread::spawn(move || {
+                assert!(matches!(
+                    mt.transition_location(&loc1),
+                    TransitionLocation::StartTracing(_)
+                ));
+            })
+            .join()
+            .unwrap();
+        }
+
+        assert!(matches!(
+            mt.transition_location(&loc2),
+            TransitionLocation::StartTracing(_)
+        ));
+        assert_eq!(mt.transition_location(&loc1), TransitionLocation::NoAction);
+        assert!(matches!(
+            mt.transition_location(&loc2),
+            TransitionLocation::StopTracing(_)
+        ));
+    }
+
     #[bench]
     fn bench_single_threaded_control_point(b: &mut Bencher) {
         let mt = MT::new();
