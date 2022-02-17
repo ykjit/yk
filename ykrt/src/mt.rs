@@ -143,9 +143,17 @@ impl MT {
                     eprintln!("jit-state: exit-jit-code");
                 }
             }
-            TransitionLocation::StartTracing(kind) => start_tracing(kind),
+            TransitionLocation::StartTracing(kind) => {
+                #[cfg(feature = "jit_state_debug")]
+                eprintln!("jit-state: start-tracing");
+                start_tracing(kind);
+            }
             TransitionLocation::StopTracing(x) => match stop_tracing() {
-                Ok(ir_trace) => self.queue_compile_job(ir_trace, x),
+                Ok(ir_trace) => {
+                    #[cfg(feature = "jit_state_debug")]
+                    eprintln!("jit-state: stop-tracing");
+                    self.queue_compile_job(ir_trace, x);
+                }
                 Err(_) => todo!(),
             },
         }
@@ -195,8 +203,6 @@ impl MT {
                             Ok(_) => {
                                 // We've initialised this Location and obtained the lock, so we can now
                                 // start tracing for real.
-                                #[cfg(feature = "jit_state_debug")]
-                                eprintln!("jit-state: start-tracing");
                                 mtt.tracing.store(hl_ptr, Ordering::Relaxed);
                                 loc.unlock();
                                 TransitionLocation::StartTracing(self.tracing_kind())
@@ -274,8 +280,6 @@ impl MT {
                             // ...and it's this location: we must, therefore, have finished tracing
                             // the loop.
                             thread_arc.store(std::ptr::null_mut(), Ordering::Relaxed);
-                            #[cfg(feature = "jit_state_debug")]
-                            eprintln!("jit-state: stop-tracing");
                             let mtx = Arc::new(Mutex::new(None));
                             *hl = HotLocation::Compiling(Arc::clone(&mtx));
                             loc.unlock();
