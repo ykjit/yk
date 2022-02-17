@@ -270,13 +270,9 @@ impl MT {
                     let thread_arc = THREAD_MTTHREAD.with(|mtt| Arc::clone(&mtt.tracing));
                     if !thread_arc.load(Ordering::Relaxed).is_null() {
                         // This thread is tracing something...
-                        if !Arc::ptr_eq(tracing_arc, &thread_arc) {
-                            // but not this Location.
-                            loc.unlock();
-                            return TransitionLocation::NoAction;
-                        } else {
-                            // This thread is tracing this location: we must, therefore, have
-                            // finished tracing the loop.
+                        if Arc::ptr_eq(tracing_arc, &thread_arc) {
+                            // ...and it's this location: we must, therefore, have finished tracing
+                            // the loop.
                             thread_arc.store(std::ptr::null_mut(), Ordering::Relaxed);
                             #[cfg(feature = "jit_state_debug")]
                             eprintln!("jit-state: stop-tracing");
@@ -284,6 +280,10 @@ impl MT {
                             *hl = HotLocation::Compiling(Arc::clone(&mtx));
                             loc.unlock();
                             return TransitionLocation::StopTracing(mtx);
+                        } else {
+                            // but not this Location.
+                            loc.unlock();
+                            return TransitionLocation::NoAction;
                         }
                     } else {
                         // This thread isn't tracing anything
