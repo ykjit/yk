@@ -3,7 +3,7 @@
 use std::{
     convert::TryFrom,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicPtr, AtomicUsize, Ordering},
         Arc,
     },
 };
@@ -442,5 +442,5 @@ pub(crate) enum HotLocation {
     /// traced again.
     DontTrace,
     /// This HotLocation started a trace which is ongoing.
-    Tracing(Option<Arc<()>>),
+    Tracing(Arc<AtomicPtr<HotLocation>>),
 }
