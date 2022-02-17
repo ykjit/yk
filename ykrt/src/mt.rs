@@ -266,54 +266,37 @@ impl MT {
                     loc.unlock();
                     return r;
                 }
-                HotLocation::Tracing(tarc) => {
-                    // FIXME: This is the sort of hack that keeps me awake at night: we really want
-                    // to return from the outer function, and to modify `hl`, but can't because
-                    // we're in a closure. The integer return value allows us to perform the
-                    // control flow we want.
-                    let r = THREAD_MTTHREAD.with(|mtt| {
-                        let thread_hl_ptr = mtt.tracing.load(Ordering::Relaxed);
-                        if !thread_hl_ptr.is_null() {
-                            // This thread is tracing something...
-                            if !Arc::ptr_eq(tarc, &mtt.tracing) {
-                                // but not this Location.
-                                loc.unlock();
-                                // Should be `return TransitionLocation::NoAction`
-                                1
-                            } else {
-                                // This thread is tracing this location: we must, therefore, have
-                                // finished tracing the loop.
-                                mtt.tracing.store(std::ptr::null_mut(), Ordering::Relaxed);
-                                2
-                            }
-                        } else {
-                            // Should be "check if a now-dead thread was tracing this location"
-                            3
-                        }
-                    });
-                    match r {
-                        1 => return TransitionLocation::NoAction,
-                        2 => (),
-                        3 => {
-                            // This thread isn't tracing anything.
-                            if Arc::strong_count(tarc) == 1 {
-                                // Another thread was tracing this location but it's terminated.
-                                // FIXME: we should probably have some sort of occasional retry
-                                // heuristic rather than simply saying "never try tracing this
-                                // Location again."
-                                *hl = HotLocation::DontTrace;
-                            }
+                HotLocation::Tracing(tracing_arc) => {
+                    let thread_arc = THREAD_MTTHREAD.with(|mtt| Arc::clone(&mtt.tracing));
+                    if !thread_arc.load(Ordering::Relaxed).is_null() {
+                        // This thread is tracing something...
+                        if !Arc::ptr_eq(tracing_arc, &thread_arc) {
+                            // but not this Location.
                             loc.unlock();
                             return TransitionLocation::NoAction;
+                        } else {
+                            // This thread is tracing this location: we must, therefore, have
+                            // finished tracing the loop.
+                            thread_arc.store(std::ptr::null_mut(), Ordering::Relaxed);
+                            #[cfg(feature = "jit_state_debug")]
+                            eprintln!("jit-state: stop-tracing");
+                            let mtx = Arc::new(Mutex::new(None));
+                            *hl = HotLocation::Compiling(Arc::clone(&mtx));
+                            loc.unlock();
+                            return TransitionLocation::StopTracing(mtx);
                         }
-                        _ => unreachable!(),
+                    } else {
+                        // This thread isn't tracing anything
+                        if Arc::strong_count(tracing_arc) == 1 {
+                            // Another thread was tracing this location but it's terminated.
+                            // FIXME: we should probably have some sort of occasional retry
+                            // heuristic rather than simply saying "never try tracing this
+                            // Location again."
+                            *hl = HotLocation::DontTrace;
+                        }
+                        loc.unlock();
+                        return TransitionLocation::NoAction;
                     }
-                    #[cfg(feature = "jit_state_debug")]
-                    eprintln!("jit-state: stop-tracing");
-                    let mtx = Arc::new(Mutex::new(None));
-                    *hl = HotLocation::Compiling(Arc::clone(&mtx));
-                    loc.unlock();
-                    return TransitionLocation::StopTracing(mtx);
                 }
                 HotLocation::DontTrace => {
                     loc.unlock();
