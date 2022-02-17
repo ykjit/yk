@@ -20,7 +20,7 @@ use num_cpus;
 use parking_lot::{Condvar, Mutex, MutexGuard};
 use std::lazy::SyncLazy;
 
-use crate::location::{HotLocation, Location, LocationInner, ThreadIdInner};
+use crate::location::{HotLocation, Location, LocationInner};
 use yktrace::{start_tracing, stop_tracing, CompiledTrace, IRTrace, TracingKind};
 
 // The HotThreshold must be less than a machine word wide for [`Location::Location`] to do its
@@ -371,7 +371,7 @@ pub struct MTThread {
     /// this Arc's strong count will be incremented. If, after this thread drops, this Arc's strong
     /// count remains > 0, it means that it was in the process of tracing a loop, implying that
     /// there is (or, at least, was at some point) a Location stuck in PHASE_TRACING.
-    tid: Arc<ThreadIdInner>,
+    tid: Arc<()>,
     /// If this thread is tracing, store a pointer to the `HotLocation`: this allows us to
     /// differentiate which thread is actually tracing the location.
     tracing: Cell<Option<*const ()>>,
@@ -382,7 +382,7 @@ pub struct MTThread {
 impl MTThread {
     fn new() -> Self {
         MTThread {
-            tid: Arc::new(ThreadIdInner),
+            tid: Arc::new(()),
             tracing: Cell::new(None),
             _dont_send_or_sync_me: PhantomData,
         }

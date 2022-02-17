@@ -429,10 +429,6 @@ impl LocationInner {
     }
 }
 
-/// An opaque struct used by `MTThreadInner` to help identify if a thread that started a trace is
-/// still active.
-pub(crate) struct ThreadIdInner;
-
 /// A `Location`'s non-counting states.
 #[derive(EnumDiscriminants)]
 pub(crate) enum HotLocation {
@@ -446,5 +442,5 @@ pub(crate) enum HotLocation {
     /// traced again.
     DontTrace,
     /// This HotLocation started a trace which is ongoing.
-    Tracing(Option<Arc<ThreadIdInner>>),
+    Tracing(Option<Arc<()>>),
 }
