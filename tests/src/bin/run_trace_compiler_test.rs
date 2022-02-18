@@ -25,5 +25,5 @@ fn main() {
     let ll_file = File::open(ll_path).unwrap();
     let mmap = unsafe { memmap2::Mmap::map(&ll_file).unwrap() };
 
-    trace.compile_for_tc_tests(mmap.as_ptr(), mmap.len());
+    unsafe { trace.compile_for_tc_tests(mmap.as_ptr(), mmap.len()) };
 }

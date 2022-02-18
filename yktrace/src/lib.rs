@@ -1,6 +1,7 @@
 //! Utilities for collecting and decoding traces.
 
 #![feature(once_cell)]
+#![allow(clippy::new_without_default)]
 
 mod errors;
 use libc::c_void;
@@ -62,7 +63,7 @@ impl IRBlock {
     }
 
     pub fn func_name(&self) -> &CStr {
-        &self.func_name.as_c_str()
+        self.func_name.as_c_str()
     }
 
     pub fn bb(&self) -> usize {
@@ -161,7 +162,7 @@ impl IRTrace {
     }
 
     #[cfg(feature = "yk_testing")]
-    pub fn compile_for_tc_tests(&self, llvmbc_data: *const u8, llvmbc_len: usize) {
+    pub unsafe fn compile_for_tc_tests(&self, llvmbc_data: *const u8, llvmbc_len: usize) {
         let (func_names, bbs, trace_len) = self.encode_trace();
 
         // These would only need to be populated if we were to load the resulting compiled code
@@ -169,18 +170,16 @@ impl IRTrace {
         let faddr_keys = Vec::new();
         let faddr_vals = Vec::new();
 
-        let ret = unsafe {
-            ykllvmwrap::__ykllvmwrap_irtrace_compile_for_tc_tests(
-                func_names.as_ptr(),
-                bbs.as_ptr(),
-                trace_len,
-                faddr_keys.as_ptr(),
-                faddr_vals.as_ptr(),
-                faddr_keys.len(),
-                llvmbc_data,
-                llvmbc_len,
-            )
-        };
+        let ret = ykllvmwrap::__ykllvmwrap_irtrace_compile_for_tc_tests(
+            func_names.as_ptr(),
+            bbs.as_ptr(),
+            trace_len,
+            faddr_keys.as_ptr(),
+            faddr_vals.as_ptr(),
+            faddr_keys.len(),
+            llvmbc_data,
+            llvmbc_len,
+        );
         assert_ne!(ret, ptr::null());
     }
 }
