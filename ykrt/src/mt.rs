@@ -276,19 +276,17 @@ impl MT {
                     let thread_arc = THREAD_MTTHREAD.with(|mtt| Arc::clone(&mtt.tracing));
                     if !thread_arc.load(Ordering::Relaxed).is_null() {
                         // This thread is tracing something...
-                        if Arc::ptr_eq(tracing_arc, &thread_arc) {
-                            // ...and it's this location: we must, therefore, have finished tracing
-                            // the loop.
-                            thread_arc.store(std::ptr::null_mut(), Ordering::Relaxed);
-                            let mtx = Arc::new(Mutex::new(None));
-                            *hl = HotLocation::Compiling(Arc::clone(&mtx));
-                            loc.unlock();
-                            return TransitionLocation::StopTracing(mtx);
-                        } else {
-                            // but not this Location.
+                        if !Arc::ptr_eq(tracing_arc, &thread_arc) {
+                            // ...but not this Location.
                             loc.unlock();
                             return TransitionLocation::NoAction;
                         }
+                        // ...and it's this location: we have therefore finished tracing the loop.
+                        thread_arc.store(std::ptr::null_mut(), Ordering::Relaxed);
+                        let mtx = Arc::new(Mutex::new(None));
+                        *hl = HotLocation::Compiling(Arc::clone(&mtx));
+                        loc.unlock();
+                        return TransitionLocation::StopTracing(mtx);
                     } else {
                         // This thread isn't tracing anything
                         if Arc::strong_count(tracing_arc) == 1 {
