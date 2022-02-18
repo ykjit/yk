@@ -1,3 +1,5 @@
+#![allow(clippy::new_without_default)]
+
 //! Note that LLVM currently only supports stackmaps for 64 bit architectures. Once they support
 //! others we will need to either make this parser more dynamic or create a new one for each
 //! architecture.
@@ -97,7 +99,7 @@ impl StackMapParser<'_> {
         v
     }
 
-    fn read_records(&mut self, num: u64, consts: &Vec<u64>) -> Vec<Record> {
+    fn read_records(&mut self, num: u64, consts: &[u64]) -> Vec<Record> {
         let mut v = Vec::new();
         for _ in 0..num {
             let _id = self.read_u64();
@@ -116,7 +118,7 @@ impl StackMapParser<'_> {
         v
     }
 
-    fn read_locations(&mut self, num: u16, consts: &Vec<u64>) -> Vec<Location> {
+    fn read_locations(&mut self, num: u16, consts: &[u64]) -> Vec<Location> {
         let mut v = Vec::new();
         for _ in 0..num {
             let kind = self.read_u8();

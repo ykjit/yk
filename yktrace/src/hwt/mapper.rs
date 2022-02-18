@@ -20,7 +20,7 @@ use ykllvmwrap::symbolizer::Symbolizer;
 use ykutil::addr::{code_vaddr_to_off, off_to_vaddr_main_obj};
 
 const BLOCK_MAP_SEC: &str = ".llvm_bb_addr_map";
-static BLOCK_MAP: SyncLazy<BlockMap> = SyncLazy::new(|| BlockMap::new());
+static BLOCK_MAP: SyncLazy<BlockMap> = SyncLazy::new(BlockMap::new);
 
 /// The information for one LLVM MachineBasicBlock, as per:
 /// https://llvm.org/docs/Extensions.html#sht-llvm-bb-addr-map-section-basic-block-address-map
@@ -152,10 +152,8 @@ impl HWTMapper {
             }
         }
         // Strip any trailing unmappable blocks.
-        if !ret_irblocks.is_empty() {
-            if ret_irblocks.last().unwrap().is_unmappable() {
-                ret_irblocks.pop();
-            }
+        if !ret_irblocks.is_empty() && ret_irblocks.last().unwrap().is_unmappable() {
+            ret_irblocks.pop();
         }
 
         #[cfg(debug_assertions)]

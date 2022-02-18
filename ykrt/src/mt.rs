@@ -38,8 +38,9 @@ const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
 thread_local! {static THREAD_MTTHREAD: MTThread = MTThread::new();}
 
 #[cfg(feature = "yk_testing")]
-static SERIALISE_COMPILATION: SyncLazy<bool> =
-    SyncLazy::new(|| &env::var("YKD_SERIALISE_COMPILATION").unwrap_or("0".to_owned()) == "1");
+static SERIALISE_COMPILATION: SyncLazy<bool> = SyncLazy::new(|| {
+    &env::var("YKD_SERIALISE_COMPILATION").unwrap_or_else(|_| "0".to_owned()) == "1"
+});
 
 #[derive(Clone)]
 /// A meta-tracer. Note that this is conceptually a "front-end" to the actual meta-tracer akin to

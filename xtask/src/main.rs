@@ -15,7 +15,7 @@ fn ignore_dir(entry: &DirEntry) -> bool {
 fn clang_format() {
     for entry in WalkDir::new(".")
         .into_iter()
-        .filter_entry(|e| ignore_dir(e))
+        .filter_entry(ignore_dir)
         .filter_map(|e| e.ok())
     {
         if !entry.file_type().is_file() {
