@@ -8,7 +8,6 @@ use std::{
     collections::VecDeque,
     ffi::c_void,
     marker::PhantomData,
-    mem::forget,
     ptr,
     sync::{
         atomic::{AtomicU32, AtomicUsize, Ordering},
@@ -147,8 +146,8 @@ impl MT {
                 }
             }
             TransitionLocation::StartTracing(kind) => start_tracing(kind),
-            TransitionLocation::StopTracing(hl) => match stop_tracing() {
-                Ok(ir_trace) => self.queue_compile_job(ir_trace, hl),
+            TransitionLocation::StopTracing(x) => match stop_tracing() {
+                Ok(ir_trace) => self.queue_compile_job(ir_trace, x),
                 Err(_) => todo!(),
             },
         }
@@ -188,41 +187,40 @@ impl MT {
                     } else {
                         // To avoid racing with another thread that may also try starting to trace this
                         // location at the same time, we need to initialise and lock the Location, which we
-                        // perform in a single step. Since this is such a critical step, and since we're
-                        // prepared to bail out early, there's no point in yielding: either we win the race
-                        // by trying repeatedly or we give up entirely.
+                        // perform in a single step.
                         let hl_ptr = Box::into_raw(Box::new(HotLocation::Tracing(None)));
                         let new_ls = LocationInner::new().with_hotlocation(hl_ptr).with_lock();
-                        loop {
-                            debug_assert!(!ls.is_locked());
-                            match loc.compare_exchange_weak(
-                                ls,
-                                new_ls,
-                                Ordering::Acquire,
-                                Ordering::Relaxed,
-                            ) {
-                                Ok(_) => {
-                                    // We've initialised this Location and obtained the lock, so we can now
-                                    // start tracing for real.
-                                    let tid = Arc::clone(&mtt.tid);
-                                    #[cfg(feature = "jit_state_debug")]
-                                    eprintln!("jit-state: start-tracing");
-                                    *unsafe { new_ls.hot_location() } =
-                                        HotLocation::Tracing(Some(tid));
-                                    mtt.tracing.set(Some(hl_ptr as *const ()));
-                                    loc.unlock();
-                                    break TransitionLocation::StartTracing(self.tracing_kind());
-                                }
-                                Err(x) => {
-                                    if x.is_locked() {
-                                        // We probably raced with another thread locking this Location in order to
-                                        // start tracing. It's unlikely to be worth us spending time contending
-                                        // with that other thread.
-                                        unsafe { Box::from_raw(hl_ptr) };
-                                        break TransitionLocation::NoAction;
-                                    }
-                                    ls = x;
-                                }
+                        debug_assert!(!ls.is_locked());
+                        match loc.compare_exchange(ls, new_ls, Ordering::Acquire, Ordering::Relaxed)
+                        {
+                            Ok(_) => {
+                                // We've initialised this Location and obtained the lock, so we can now
+                                // start tracing for real.
+                                let tid = Arc::clone(&mtt.tid);
+                                #[cfg(feature = "jit_state_debug")]
+                                eprintln!("jit-state: start-tracing");
+                                *unsafe { new_ls.hot_location() } = HotLocation::Tracing(Some(tid));
+                                mtt.tracing.set(Some(hl_ptr as *const ()));
+                                loc.unlock();
+                                TransitionLocation::StartTracing(self.tracing_kind())
+                            }
+                            Err(x) => {
+                                // We failed for one of:
+                                //   1. The location is locked, meaning that another thread is
+                                //      probably trying to start tracing this location
+                                //   2. The location is not locked, but has moved to a non-counting
+                                //      state, meaning that tracing has started (and perhaps even
+                                //      finished!).
+                                //   3. The hot count is below the hot threshold. That probably
+                                //      means that this thread has been starved for so long that
+                                //      the location has gone through several state changes. Our
+                                //      information about whether this location is worth tracing or
+                                //      not is now out of date.
+                                debug_assert!(
+                                    x.is_locked() || !x.is_counting() || x.count() < ls.count()
+                                );
+                                unsafe { Box::from_raw(hl_ptr) };
+                                TransitionLocation::NoAction
                             }
                         }
                     }
@@ -256,12 +254,21 @@ impl MT {
                     loc.unlock();
                     return TransitionLocation::Execute(*ctr);
                 }
-                HotLocation::Compiling => {
+                HotLocation::Compiling(arcmtx) => {
+                    let r = match arcmtx.try_lock().map(|mut x| x.take()) {
+                        None | Some(None) => {
+                            // `None` means we failed to grab the lock; `Some(None)` means we
+                            // grabbed the lock but compilation has not yet completed.
+                            TransitionLocation::NoAction
+                        }
+                        Some(Some(ctr)) => {
+                            let ctr = Box::into_raw(ctr);
+                            *hl = HotLocation::Compiled(ctr);
+                            TransitionLocation::Execute(ctr)
+                        }
+                    };
                     loc.unlock();
-                    return TransitionLocation::NoAction;
-                }
-                HotLocation::Dropped => {
-                    unreachable!();
+                    return r;
                 }
                 HotLocation::Tracing(opt) => {
                     // FIXME: This is the sort of hack that keeps me awake at night: we really want
@@ -310,9 +317,10 @@ impl MT {
                     }
                     #[cfg(feature = "jit_state_debug")]
                     eprintln!("jit-state: stop-tracing");
-                    *hl = HotLocation::Compiling;
+                    let mtx = Arc::new(Mutex::new(None));
+                    *hl = HotLocation::Compiling(Arc::clone(&mtx));
                     loc.unlock();
-                    return TransitionLocation::StopTracing(hl);
+                    return TransitionLocation::StopTracing(mtx);
                 }
                 HotLocation::DontTrace => {
                     loc.unlock();
@@ -323,33 +331,14 @@ impl MT {
     }
 
     /// Add a compilation job for `sir` to the global work queue.
-    fn queue_compile_job(&self, trace: IRTrace, hl_ptr: *const HotLocation) {
-        let hl_ptr = hl_ptr as usize;
-
+    fn queue_compile_job(&self, trace: IRTrace, mtx: Arc<Mutex<Option<Box<CompiledTrace>>>>) {
         let do_compile = move || {
             let code_ptr = trace.compile();
             let ct = Box::new(CompiledTrace::new(code_ptr));
-            // We can't lock a `HotLocation` directly as the `lock` method is on `Location`. We
-            // thus need to create a "fake" / "temporary" `Location` so that we can `lock` it: note
-            // that we *must not* `drop` this temporary `Location`, hence the later call to
-            // `forget`.
-            let tmp_ls = LocationInner::new().with_hotlocation(hl_ptr as *mut HotLocation);
-            let tmp_loc = unsafe { Location::from_location_inner(tmp_ls) };
-            tmp_loc.lock().unwrap();
-            let hl = unsafe { tmp_ls.hot_location() };
-            if let HotLocation::Compiling = hl {
-                // FIXME: although we've now put the compiled trace into the `HotLocation`, there's
-                // no guarantee that the `Location` for which we're compiling will ever be executed
-                // again. In such a case, the memory has, in essence, leaked.
-                *hl = HotLocation::Compiled(Box::into_raw(ct));
-            } else if let HotLocation::Dropped = hl {
-                // The Location pointing to this HotLocation was dropped. There's nothing we can do
-                // with the compiled trace, so we let it it be implicitly dropped.
-            } else {
-                unreachable!();
-            }
-            tmp_loc.unlock();
-            forget(tmp_loc);
+            // FIXME: although we've now put the compiled trace into the `HotLocation`, there's
+            // no guarantee that the `Location` for which we're compiling will ever be executed
+            // again. In such a case, the memory has, in essence, leaked.
+            mtx.lock().replace(ct);
         };
 
         #[cfg(feature = "yk_testing")]
@@ -401,12 +390,27 @@ impl MTThread {
 }
 
 /// What action should a caller of `MT::transition_location` take?
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 enum TransitionLocation {
     NoAction,
     Execute(*const CompiledTrace),
     StartTracing(TracingKind),
-    StopTracing(*const HotLocation),
+    StopTracing(Arc<Mutex<Option<Box<CompiledTrace>>>>),
+}
+
+#[cfg(test)]
+impl PartialEq for TransitionLocation {
+    fn eq(&self, other: &Self) -> bool {
+        // We only implement enough of the equality function for the tests we have.
+        match (self, other) {
+            (TransitionLocation::NoAction, TransitionLocation::NoAction) => true,
+            (TransitionLocation::Execute(p1), TransitionLocation::Execute(p2)) => {
+                std::ptr::eq(p1, p2)
+            }
+            (TransitionLocation::StartTracing(x), TransitionLocation::StartTracing(y)) => x == y,
+            (_, _) => todo!(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -414,7 +418,7 @@ mod tests {
     extern crate test;
     use super::*;
     use crate::location::HotLocationDiscriminants;
-    use std::{convert::TryFrom, hint::black_box, thread};
+    use std::{convert::TryFrom, hint::black_box, sync::atomic::AtomicU64, thread};
     use test::bench::Bencher;
 
     fn hotlocation_discriminant(loc: &Location) -> Option<HotLocationDiscriminants> {
@@ -450,28 +454,20 @@ mod tests {
             Some(HotLocationDiscriminants::Tracing)
         );
         match mt.transition_location(&loc) {
-            TransitionLocation::StopTracing(tracing_ls) => {
-                let ls = loc.load(Ordering::Relaxed);
-                assert!(!ls.is_counting());
-                assert_eq!(unsafe { ls.hot_location() } as *const _, tracing_ls);
-                unsafe {
-                    *(tracing_ls as *mut HotLocation) = HotLocation::Compiling;
-                }
+            TransitionLocation::StopTracing(mtx) => {
+                assert_eq!(
+                    hotlocation_discriminant(&loc),
+                    Some(HotLocationDiscriminants::Compiling)
+                );
+                mtx.lock()
+                    .replace(Box::new(unsafe { CompiledTrace::new_null() }));
             }
             _ => unreachable!(),
         }
-        assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
-        assert_eq!(
-            hotlocation_discriminant(&loc),
-            Some(HotLocationDiscriminants::Compiling)
-        );
-        let ls = loc.load(Ordering::Relaxed);
-        assert!(!ls.is_counting());
-        *unsafe { ls.hot_location() } = HotLocation::Compiled(std::ptr::null());
-        assert_eq!(
+        assert!(matches!(
             mt.transition_location(&loc),
-            TransitionLocation::Execute(std::ptr::null())
-        );
+            TransitionLocation::Execute(_)
+        ));
     }
 
     #[test]
@@ -611,6 +607,155 @@ mod tests {
             mt.transition_location(&loc2),
             TransitionLocation::StopTracing(_)
         ));
+    }
+
+    #[test]
+    fn only_one_thread_starts_tracing() {
+        // If multiple threads hammer away at a location, only one of them can win the race to
+        // trace it (and then compile it etc.).
+
+        // We need to set a high enough threshold that the threads are likely to meaningfully
+        // interleave when interacting with the location.
+        const THRESHOLD: HotThreshold = 100000;
+        let mt = MT::new();
+        mt.set_hot_threshold(THRESHOLD);
+        let loc = Arc::new(Location::new());
+
+        let mut thrs = Vec::new();
+        let num_starts = Arc::new(AtomicU64::new(0));
+        for _ in 0..num_cpus::get() {
+            let loc = Arc::clone(&loc);
+            let mt = mt.clone();
+            let num_starts = Arc::clone(&num_starts);
+            thrs.push(thread::spawn(move || {
+                for _ in 0..THRESHOLD {
+                    match mt.transition_location(&loc) {
+                        TransitionLocation::NoAction => (),
+                        TransitionLocation::Execute(_) => (),
+                        TransitionLocation::StartTracing(_) => {
+                            num_starts.fetch_add(1, Ordering::Relaxed);
+                            assert_eq!(
+                                hotlocation_discriminant(&loc),
+                                Some(HotLocationDiscriminants::Tracing)
+                            );
+
+                            match mt.transition_location(&loc) {
+                                TransitionLocation::StopTracing(mtx) => {
+                                    assert_eq!(
+                                        hotlocation_discriminant(&loc),
+                                        Some(HotLocationDiscriminants::Compiling)
+                                    );
+                                    assert_eq!(
+                                        mt.transition_location(&loc),
+                                        TransitionLocation::NoAction
+                                    );
+                                    assert_eq!(
+                                        hotlocation_discriminant(&loc),
+                                        Some(HotLocationDiscriminants::Compiling)
+                                    );
+                                    mtx.lock()
+                                        .replace(Box::new(unsafe { CompiledTrace::new_null() }));
+                                }
+                                x => unreachable!("Reached incorrect state {:?}", x),
+                            }
+                            loop {
+                                if let TransitionLocation::Execute(_) = mt.transition_location(&loc)
+                                {
+                                    break;
+                                }
+                            }
+                            break;
+                        }
+                        TransitionLocation::StopTracing(_) => unreachable!(),
+                    }
+                }
+            }));
+        }
+
+        for t in thrs {
+            t.join().unwrap();
+        }
+
+        assert_eq!(num_starts.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn two_tracing_threads_must_not_stop_each_others_tracing_location() {
+        // A tracing thread can only stop tracing when it encounters the specific Location that
+        // caused it to start tracing. If it encounters another Location that also happens to be
+        // tracing, it must ignore it.
+
+        const THRESHOLD: HotThreshold = 5;
+        let mt = MT::new();
+        mt.set_hot_threshold(THRESHOLD);
+        let loc1 = Arc::new(Location::new());
+        let loc2 = Location::new();
+
+        for _ in 0..THRESHOLD {
+            assert_eq!(mt.transition_location(&loc1), TransitionLocation::NoAction);
+            assert_eq!(mt.transition_location(&loc2), TransitionLocation::NoAction);
+        }
+
+        {
+            let mt = mt.clone();
+            let loc1 = Arc::clone(&loc1);
+            thread::spawn(move || {
+                assert!(matches!(
+                    mt.transition_location(&loc1),
+                    TransitionLocation::StartTracing(_)
+                ));
+            })
+            .join()
+            .unwrap();
+        }
+
+        assert!(matches!(
+            mt.transition_location(&loc2),
+            TransitionLocation::StartTracing(_)
+        ));
+        assert_eq!(mt.transition_location(&loc1), TransitionLocation::NoAction);
+        assert!(matches!(
+            mt.transition_location(&loc2),
+            TransitionLocation::StopTracing(_)
+        ));
+    }
+
+    #[test]
+    fn mark_locations_for_which_tracing_doesnt_succeed_as_donttrace() {
+        // If a thread starts tracing a Location and tracing does not stop before the thread
+        // terminates, that Location should be marked (currently forever!) as DontTrace.
+
+        const THRESHOLD: HotThreshold = 5;
+        let mt = MT::new();
+        mt.set_hot_threshold(THRESHOLD);
+        let loc = Arc::new(Location::new());
+
+        for _ in 0..THRESHOLD {
+            assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
+        }
+
+        {
+            let mt = mt.clone();
+            let loc = Arc::clone(&loc);
+            thread::spawn(move || {
+                assert!(matches!(
+                    mt.transition_location(&loc),
+                    TransitionLocation::StartTracing(_)
+                ));
+            })
+            .join()
+            .unwrap();
+        }
+
+        assert_eq!(
+            hotlocation_discriminant(&loc),
+            Some(HotLocationDiscriminants::Tracing)
+        );
+        assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
+        assert_eq!(
+            hotlocation_discriminant(&loc),
+            Some(HotLocationDiscriminants::DontTrace)
+        );
     }
 
     #[bench]

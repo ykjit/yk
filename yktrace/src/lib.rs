@@ -187,13 +187,14 @@ impl IRTrace {
 /// A trace compiled into machine code. Note that these are passed around as raw pointers and
 /// potentially referenced by multiple threads so, once created, instances of this struct can only
 /// be updated if a lock is held or a field is atomic.
+#[derive(Debug)]
 pub struct CompiledTrace {
     /// A function which when called, executes the compiled trace.
     ///
     /// The argument to the function is a pointer to a struct containing the live variables at the
     /// control point. The exact definition of this struct is not known to Rust: the struct is
     /// generated at interpreter compile-time by ykllvm.
-    entry: fn(*mut c_void, *const c_void, usize),
+    entry: *const c_void,
     /// Pointer to the stackmap, required to parse the stackmap during a guard failure.
     smptr: *const c_void,
     /// The stackmaps size.
@@ -211,14 +212,30 @@ impl CompiledTrace {
         let smptr = slice[1] as *const c_void;
         let smsize = slice[2] as usize;
         Self {
-            entry: unsafe { mem::transmute(funcptr) },
+            entry: funcptr,
             smptr,
             smsize,
         }
     }
 
+    #[cfg(feature = "yk_testing")]
+    #[doc(hidden)]
+    /// Create a `CompiledTrace` with null contents. This is unsafe and only intended for testing
+    /// purposes where a `CompiledTrace` instance is required, but cannot sensibly be constructed
+    /// without overwhelming the test. The resulting instance must not be inspected or executed.
+    pub unsafe fn new_null() -> Self {
+        Self {
+            entry: std::ptr::null(),
+            smptr: std::ptr::null() as *const _,
+            smsize: 0,
+        }
+    }
+
     pub fn exec(&self, ctrlp_vars: *mut c_void) {
-        (self.entry)(ctrlp_vars, self.smptr, self.smsize)
+        #[cfg(feature = "yk_testing")]
+        assert_ne!(self.entry as *const (), std::ptr::null());
+        let f = unsafe { mem::transmute::<_, fn(*mut c_void, *const c_void, usize)>(self.entry) };
+        (f)(ctrlp_vars, self.smptr, self.smsize)
     }
 }
 
