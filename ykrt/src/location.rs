@@ -298,7 +298,6 @@ impl Drop for Location {
     fn drop(&mut self) {
         let ls = self.load(Ordering::Relaxed);
         if !ls.is_counting() {
-            debug_assert!(!ls.is_locked()); // FIXME: this could be locked
             self.lock().unwrap();
             let ls = self.load(Ordering::Relaxed);
             let hl = unsafe { ls.hot_location() };
