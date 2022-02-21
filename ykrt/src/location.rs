@@ -300,6 +300,7 @@ impl Drop for Location {
         if !ls.is_counting() {
             debug_assert!(!ls.is_locked()); // FIXME: this could be locked
             self.lock().unwrap();
+            let ls = self.load(Ordering::Relaxed);
             let hl = unsafe { ls.hot_location() };
             if let HotLocation::Compiled(_) = hl {
                 // FIXME: we can't drop this memory as another thread may still be executing the
@@ -375,7 +376,7 @@ impl LocationInner {
     /// locked.
     pub(super) unsafe fn hot_location(&self) -> &mut HotLocation {
         debug_assert!(!self.is_counting());
-        //debug_assert!(self.is_locked());
+        debug_assert!(self.is_locked());
         &mut *((self.x & !STATE_TAG) as *mut _)
     }
 
