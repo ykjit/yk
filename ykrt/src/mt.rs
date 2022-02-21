@@ -3,14 +3,12 @@
 #[cfg(feature = "yk_testing")]
 use std::env;
 use std::{
-    cell::Cell,
     cmp,
     collections::VecDeque,
     ffi::c_void,
     marker::PhantomData,
-    ptr,
     sync::{
-        atomic::{AtomicU32, AtomicUsize, Ordering},
+        atomic::{AtomicPtr, AtomicU32, AtomicUsize, Ordering},
         Arc,
     },
     thread,
@@ -20,7 +18,7 @@ use num_cpus;
 use parking_lot::{Condvar, Mutex, MutexGuard};
 use std::lazy::SyncLazy;
 
-use crate::location::{HotLocation, Location, LocationInner, ThreadIdInner};
+use crate::location::{HotLocation, Location, LocationInner};
 use yktrace::{start_tracing, stop_tracing, CompiledTrace, IRTrace, TracingKind};
 
 // The HotThreshold must be less than a machine word wide for [`Location::Location`] to do its
@@ -145,9 +143,17 @@ impl MT {
                     eprintln!("jit-state: exit-jit-code");
                 }
             }
-            TransitionLocation::StartTracing(kind) => start_tracing(kind),
+            TransitionLocation::StartTracing(kind) => {
+                #[cfg(feature = "jit_state_debug")]
+                eprintln!("jit-state: start-tracing");
+                start_tracing(kind);
+            }
             TransitionLocation::StopTracing(x) => match stop_tracing() {
-                Ok(ir_trace) => self.queue_compile_job(ir_trace, x),
+                Ok(ir_trace) => {
+                    #[cfg(feature = "jit_state_debug")]
+                    eprintln!("jit-state: stop-tracing");
+                    self.queue_compile_job(ir_trace, x);
+                }
                 Err(_) => todo!(),
             },
         }
@@ -178,7 +184,7 @@ impl MT {
                 return TransitionLocation::NoAction;
             } else {
                 return THREAD_MTTHREAD.with(|mtt| {
-                    if mtt.tracing.get().is_some() {
+                    if !mtt.tracing.load(Ordering::Relaxed).is_null() {
                         // This thread is already tracing another Location, so either another
                         // thread needs to trace this Location or this thread needs to wait
                         // until the current round of tracing has completed. Either way,
@@ -188,7 +194,8 @@ impl MT {
                         // To avoid racing with another thread that may also try starting to trace this
                         // location at the same time, we need to initialise and lock the Location, which we
                         // perform in a single step.
-                        let hl_ptr = Box::into_raw(Box::new(HotLocation::Tracing(None)));
+                        let hl_ptr =
+                            Box::into_raw(Box::new(HotLocation::Tracing(Arc::clone(&mtt.tracing))));
                         let new_ls = LocationInner::new().with_hotlocation(hl_ptr).with_lock();
                         debug_assert!(!ls.is_locked());
                         match loc.compare_exchange(ls, new_ls, Ordering::Acquire, Ordering::Relaxed)
@@ -196,11 +203,7 @@ impl MT {
                             Ok(_) => {
                                 // We've initialised this Location and obtained the lock, so we can now
                                 // start tracing for real.
-                                let tid = Arc::clone(&mtt.tid);
-                                #[cfg(feature = "jit_state_debug")]
-                                eprintln!("jit-state: start-tracing");
-                                *unsafe { new_ls.hot_location() } = HotLocation::Tracing(Some(tid));
-                                mtt.tracing.set(Some(hl_ptr as *const ()));
+                                mtt.tracing.store(hl_ptr, Ordering::Relaxed);
                                 loc.unlock();
                                 TransitionLocation::StartTracing(self.tracing_kind())
                             }
@@ -234,7 +237,7 @@ impl MT {
                 None => {
                     // If this thread is tracing we need to grab the lock so that we can stop
                     // tracing, otherwise we return to the interpreter.
-                    if THREAD_MTTHREAD.with(|mtt| mtt.tracing.get().is_none()) {
+                    if THREAD_MTTHREAD.with(|mtt| mtt.tracing.load(Ordering::Relaxed).is_null()) {
                         return TransitionLocation::NoAction;
                     }
                     match loc.lock() {
@@ -248,7 +251,6 @@ impl MT {
                 }
             }
             let hl = unsafe { ls.hot_location() };
-            let hl_ptr = hl as *mut _ as *mut ();
             match hl {
                 HotLocation::Compiled(ctr) => {
                     loc.unlock();
@@ -270,57 +272,33 @@ impl MT {
                     loc.unlock();
                     return r;
                 }
-                HotLocation::Tracing(opt) => {
-                    // FIXME: This is the sort of hack that keeps me awake at night: we really want
-                    // to return from the outer function, and to modify `hl`, but can't because
-                    // we're in a closure. The integer return value allows us to perform the
-                    // control flow we want.
-                    let r = THREAD_MTTHREAD.with(|mtt| {
-                        if let Some(other_hl_ptr) = mtt.tracing.get() {
-                            // This thread is tracing something...
-                            if !ptr::eq(hl_ptr, other_hl_ptr) {
-                                // but not this Location.
-                                loc.unlock();
-                                // Should be `return TransitionLocation::NoAction`
-                                1
-                            } else {
-                                // This thread is tracing this location: we must, therefore, have
-                                // finished tracing the loop.
-                                //
-                                // We must ensure that the `Arc<ThreadId>` inside `opt` is dropped so that
-                                // other threads won't think this thread has died while tracing.
-                                mtt.tracing.set(None);
-                                opt.take();
-                                2
-                            }
-                        } else {
-                            // Should be "check if a now-dead thread was tracing this location"
-                            3
-                        }
-                    });
-                    match r {
-                        1 => return TransitionLocation::NoAction,
-                        2 => (),
-                        3 => {
-                            // This thread isn't tracing anything.
-                            if Arc::strong_count(&opt.as_ref().unwrap()) == 1 {
-                                // Another thread was tracing this location but it's terminated.
-                                // FIXME: we should probably have some sort of occasional retry
-                                // heuristic rather than simply saying "never try tracing this
-                                // Location again."
-                                *hl = HotLocation::DontTrace;
-                            }
+                HotLocation::Tracing(tracing_arc) => {
+                    let thread_arc = THREAD_MTTHREAD.with(|mtt| Arc::clone(&mtt.tracing));
+                    if !thread_arc.load(Ordering::Relaxed).is_null() {
+                        // This thread is tracing something...
+                        if !Arc::ptr_eq(tracing_arc, &thread_arc) {
+                            // ...but not this Location.
                             loc.unlock();
                             return TransitionLocation::NoAction;
                         }
-                        _ => unreachable!(),
+                        // ...and it's this location: we have therefore finished tracing the loop.
+                        thread_arc.store(std::ptr::null_mut(), Ordering::Relaxed);
+                        let mtx = Arc::new(Mutex::new(None));
+                        *hl = HotLocation::Compiling(Arc::clone(&mtx));
+                        loc.unlock();
+                        return TransitionLocation::StopTracing(mtx);
+                    } else {
+                        // This thread isn't tracing anything
+                        if Arc::strong_count(tracing_arc) == 1 {
+                            // Another thread was tracing this location but it's terminated.
+                            // FIXME: we should probably have some sort of occasional retry
+                            // heuristic rather than simply saying "never try tracing this
+                            // Location again."
+                            *hl = HotLocation::DontTrace;
+                        }
+                        loc.unlock();
+                        return TransitionLocation::NoAction;
                     }
-                    #[cfg(feature = "jit_state_debug")]
-                    eprintln!("jit-state: stop-tracing");
-                    let mtx = Arc::new(Mutex::new(None));
-                    *hl = HotLocation::Compiling(Arc::clone(&mtx));
-                    loc.unlock();
-                    return TransitionLocation::StopTracing(mtx);
                 }
                 HotLocation::DontTrace => {
                     loc.unlock();
@@ -367,14 +345,22 @@ struct MTInner {
 /// Meta-tracer per-thread state. Note that this struct is neither `Send` nor `Sync`: it can only
 /// be accessed from within a single thread.
 pub struct MTThread {
-    /// An Arc whose pointer address uniquely identifies this thread. When a Location is traced,
-    /// this Arc's strong count will be incremented. If, after this thread drops, this Arc's strong
-    /// count remains > 0, it means that it was in the process of tracing a loop, implying that
-    /// there is (or, at least, was at some point) a Location stuck in PHASE_TRACING.
-    tid: Arc<ThreadIdInner>,
-    /// If this thread is tracing, store a pointer to the `HotLocation`: this allows us to
-    /// differentiate which thread is actually tracing the location.
-    tracing: Cell<Option<*const ()>>,
+    /// Is this thread currently tracing something? If so, the [AtomicPtr] points to the
+    /// [HotLocation] currently being traced. If not, the [AtomicPtr] is `null`. Note that no
+    /// reads/writes must depend on the [AtomicPtr], so all loads/stores can be
+    /// [Ordering::Relaxed].
+    ///
+    /// We wrap the [AtomicPtr] in an [Arc] to serve a second purpose: when we start tracing, we
+    /// `clone` the [Arc] and store it in [HotLocation::Tracing]. This allows another thread to
+    /// tell whether the thread that started tracing a [Location] is still alive or not by
+    /// inspecting its strong count (if the strong count is equal to 1 then the thread died while
+    /// tracing). Note that this relies on thread local storage dropping the [MTThread] instance
+    /// and (by implication) dropping the [Arc] and decrementing its strong count. Unfortunately,
+    /// there is no guarantee that thread local storage will be dropped when a thread dies (and
+    /// there is also significant platform variation in regard to dropping thread locals), so this
+    /// mechanism can't be fully relied upon: however, we can't monitor thread death in any other
+    /// reasonable way, so this will have to do.
+    tracing: Arc<AtomicPtr<HotLocation>>,
     // Raw pointers are neither send nor sync.
     _dont_send_or_sync_me: PhantomData<*mut ()>,
 }
@@ -382,8 +368,7 @@ pub struct MTThread {
 impl MTThread {
     fn new() -> Self {
         MTThread {
-            tid: Arc::new(ThreadIdInner),
-            tracing: Cell::new(None),
+            tracing: Arc::new(AtomicPtr::new(std::ptr::null_mut())),
             _dont_send_or_sync_me: PhantomData,
         }
     }
