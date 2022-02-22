@@ -1,27 +1,44 @@
-// ignore: broken during new control point design
 // Compiler:
+//   env-var: YKD_PRINT_JITSTATE=1
 // Run-time:
+//   env-var: YKD_SERIALISE_COMPILATION=1
+//   env-var: YKD_PRINT_IR=jit-pre-opt
+//   stderr:
+//     ...
+//     jit-state: enter-jit-code
+//     inside f
+//     jit-state: exit-jit-code
+//     ...
 
 // Check that inlining a function with a void return type works.
-//
-// FIXME An optimising compiler can remove all of the code between start/stop
-// tracing.
 
 #include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <yk.h>
 #include <yk_testing.h>
 
-void __attribute__((noinline)) f() { return; }
+void __attribute__((noinline)) f() {
+  fputs("inside f\n", stderr);
+  return;
+}
 
 int main(int argc, char **argv) {
-  __yktrace_start_tracing(HW_TRACING);
-  f();
-  void *tr = __yktrace_stop_tracing();
 
-  void *ptr = __yktrace_irtrace_compile(tr);
-  __yktrace_drop_irtrace(tr);
-  void (*func)() = (void (*)())ptr;
-  func();
+  YkMT *mt = yk_mt_new();
+  yk_set_hot_threshold(mt, 0);
+  YkLocation loc = yk_location_new();
 
+  int i = 4;
+  NOOPT_VAL(i);
+  while (i > 0) {
+    yk_control_point(mt, &loc);
+    f();
+    i--;
+  }
+
+  NOOPT_VAL(i);
+  yk_location_drop(loc);
+  yk_mt_drop(mt);
   return (EXIT_SUCCESS);
 }
