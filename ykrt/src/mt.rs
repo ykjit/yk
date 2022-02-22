@@ -18,7 +18,7 @@ use num_cpus;
 use parking_lot::{Condvar, Mutex, MutexGuard};
 use std::lazy::SyncLazy;
 
-use crate::location::{HotLocation, Location, LocationInner};
+use crate::location::{HotLocationKind, Location, LocationInner};
 use yktrace::{start_tracing, stop_tracing, CompiledTrace, IRTrace, TracingKind};
 
 // The HotThreshold must be less than a machine word wide for [`Location::Location`] to do its
@@ -194,8 +194,9 @@ impl MT {
                         // To avoid racing with another thread that may also try starting to trace this
                         // location at the same time, we need to initialise and lock the Location, which we
                         // perform in a single step.
-                        let hl_ptr =
-                            Box::into_raw(Box::new(HotLocation::Tracing(Arc::clone(&mtt.tracing))));
+                        let hl_ptr = Box::into_raw(Box::new(HotLocationKind::Tracing(Arc::clone(
+                            &mtt.tracing,
+                        ))));
                         let new_ls = LocationInner::new().with_hotlocation(hl_ptr).with_lock();
                         debug_assert!(!ls.is_locked());
                         match loc.compare_exchange(ls, new_ls, Ordering::Acquire, Ordering::Relaxed)
@@ -252,11 +253,11 @@ impl MT {
             }
             let hl = unsafe { ls.hot_location() };
             match hl {
-                HotLocation::Compiled(ctr) => {
+                HotLocationKind::Compiled(ctr) => {
                     loc.unlock();
                     return TransitionLocation::Execute(*ctr);
                 }
-                HotLocation::Compiling(arcmtx) => {
+                HotLocationKind::Compiling(arcmtx) => {
                     let r = match arcmtx.try_lock().map(|mut x| x.take()) {
                         None | Some(None) => {
                             // `None` means we failed to grab the lock; `Some(None)` means we
@@ -265,14 +266,14 @@ impl MT {
                         }
                         Some(Some(ctr)) => {
                             let ctr = Box::into_raw(ctr);
-                            *hl = HotLocation::Compiled(ctr);
+                            *hl = HotLocationKind::Compiled(ctr);
                             TransitionLocation::Execute(ctr)
                         }
                     };
                     loc.unlock();
                     return r;
                 }
-                HotLocation::Tracing(tracing_arc) => {
+                HotLocationKind::Tracing(tracing_arc) => {
                     let thread_arc = THREAD_MTTHREAD.with(|mtt| Arc::clone(&mtt.tracing));
                     if !thread_arc.load(Ordering::Relaxed).is_null() {
                         // This thread is tracing something...
@@ -284,7 +285,7 @@ impl MT {
                         // ...and it's this location: we have therefore finished tracing the loop.
                         thread_arc.store(std::ptr::null_mut(), Ordering::Relaxed);
                         let mtx = Arc::new(Mutex::new(None));
-                        *hl = HotLocation::Compiling(Arc::clone(&mtx));
+                        *hl = HotLocationKind::Compiling(Arc::clone(&mtx));
                         loc.unlock();
                         return TransitionLocation::StopTracing(mtx);
                     } else {
@@ -294,13 +295,13 @@ impl MT {
                             // FIXME: we should probably have some sort of occasional retry
                             // heuristic rather than simply saying "never try tracing this
                             // Location again."
-                            *hl = HotLocation::DontTrace;
+                            *hl = HotLocationKind::DontTrace;
                         }
                         loc.unlock();
                         return TransitionLocation::NoAction;
                     }
                 }
-                HotLocation::DontTrace => {
+                HotLocationKind::DontTrace => {
                     loc.unlock();
                     return TransitionLocation::NoAction;
                 }
@@ -360,7 +361,7 @@ pub struct MTThread {
     /// there is also significant platform variation in regard to dropping thread locals), so this
     /// mechanism can't be fully relied upon: however, we can't monitor thread death in any other
     /// reasonable way, so this will have to do.
-    tracing: Arc<AtomicPtr<HotLocation>>,
+    tracing: Arc<AtomicPtr<HotLocationKind>>,
     // Raw pointers are neither send nor sync.
     _dont_send_or_sync_me: PhantomData<*mut ()>,
 }
@@ -402,14 +403,14 @@ impl PartialEq for TransitionLocation {
 mod tests {
     extern crate test;
     use super::*;
-    use crate::location::HotLocationDiscriminants;
+    use crate::location::HotLocationKindDiscriminants;
     use std::{convert::TryFrom, hint::black_box, sync::atomic::AtomicU64, thread};
     use test::bench::Bencher;
 
-    fn hotlocation_discriminant(loc: &Location) -> Option<HotLocationDiscriminants> {
+    fn hotlocation_discriminant(loc: &Location) -> Option<HotLocationKindDiscriminants> {
         match loc.lock() {
             Ok(ls) => {
-                let x = HotLocationDiscriminants::from(&*unsafe { ls.hot_location() });
+                let x = HotLocationKindDiscriminants::from(&*unsafe { ls.hot_location() });
                 loc.unlock();
                 Some(x)
             }
@@ -436,13 +437,13 @@ mod tests {
         );
         assert_eq!(
             hotlocation_discriminant(&loc),
-            Some(HotLocationDiscriminants::Tracing)
+            Some(HotLocationKindDiscriminants::Tracing)
         );
         match mt.transition_location(&loc) {
             TransitionLocation::StopTracing(mtx) => {
                 assert_eq!(
                     hotlocation_discriminant(&loc),
-                    Some(HotLocationDiscriminants::Compiling)
+                    Some(HotLocationKindDiscriminants::Compiling)
                 );
                 mtx.lock()
                     .replace(Box::new(unsafe { CompiledTrace::new_null() }));
@@ -540,12 +541,12 @@ mod tests {
 
         assert_eq!(
             hotlocation_discriminant(&loc),
-            Some(HotLocationDiscriminants::Tracing)
+            Some(HotLocationKindDiscriminants::Tracing)
         );
         assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
         assert_eq!(
             hotlocation_discriminant(&loc),
-            Some(HotLocationDiscriminants::DontTrace)
+            Some(HotLocationKindDiscriminants::DontTrace)
         );
     }
 
@@ -572,7 +573,7 @@ mod tests {
         assert_eq!(mt.transition_location(&loc2), TransitionLocation::NoAction);
         assert_eq!(
             hotlocation_discriminant(&loc1),
-            Some(HotLocationDiscriminants::Tracing)
+            Some(HotLocationKindDiscriminants::Tracing)
         );
         assert!(loc2.load(Ordering::Relaxed).is_counting());
         assert_eq!(loc2.load(Ordering::Relaxed).count(), THRESHOLD);
@@ -582,7 +583,7 @@ mod tests {
         ));
         assert_eq!(
             hotlocation_discriminant(&loc1),
-            Some(HotLocationDiscriminants::Compiling)
+            Some(HotLocationKindDiscriminants::Compiling)
         );
         assert!(matches!(
             mt.transition_location(&loc2),
@@ -621,14 +622,14 @@ mod tests {
                             num_starts.fetch_add(1, Ordering::Relaxed);
                             assert_eq!(
                                 hotlocation_discriminant(&loc),
-                                Some(HotLocationDiscriminants::Tracing)
+                                Some(HotLocationKindDiscriminants::Tracing)
                             );
 
                             match mt.transition_location(&loc) {
                                 TransitionLocation::StopTracing(mtx) => {
                                     assert_eq!(
                                         hotlocation_discriminant(&loc),
-                                        Some(HotLocationDiscriminants::Compiling)
+                                        Some(HotLocationKindDiscriminants::Compiling)
                                     );
                                     assert_eq!(
                                         mt.transition_location(&loc),
@@ -636,7 +637,7 @@ mod tests {
                                     );
                                     assert_eq!(
                                         hotlocation_discriminant(&loc),
-                                        Some(HotLocationDiscriminants::Compiling)
+                                        Some(HotLocationKindDiscriminants::Compiling)
                                     );
                                     mtx.lock()
                                         .replace(Box::new(unsafe { CompiledTrace::new_null() }));
@@ -734,12 +735,12 @@ mod tests {
 
         assert_eq!(
             hotlocation_discriminant(&loc),
-            Some(HotLocationDiscriminants::Tracing)
+            Some(HotLocationKindDiscriminants::Tracing)
         );
         assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
         assert_eq!(
             hotlocation_discriminant(&loc),
-            Some(HotLocationDiscriminants::DontTrace)
+            Some(HotLocationKindDiscriminants::DontTrace)
         );
     }
 
