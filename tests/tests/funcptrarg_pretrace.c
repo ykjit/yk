@@ -1,36 +1,47 @@
-// ignore: broken during new control point design
 // Compiler:
 // Run-time:
+//   env-var: YKD_SERIALISE_COMPILATION=1
+//   env-var: YKD_PRINT_IR=jit-pre-opt
+//   stderr:
+//     ...
+//     --- Begin jit-pre-opt ---
+//     ...
+//     --- End jit-pre-opt ---
+//     ...
 
 // Test that indirect calls are only copied to the JITModule after we have seen
 // `start_tracing`. Since indirect calls are handled before our regular
 // are-we-tracing-yet check, and require an additional check, it makes sense to
 // test for this here.
+//
+// FIXME: since lang_tester cannot do negative matching, we can't check for the
+// absence of the indirect call. For now we are only checking that nothing
+// crashes.
 
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <yk.h>
 #include <yk_testing.h>
 
 int bar(size_t (*func)(const char *)) {
-  int pre = func("abc");
+  YkMT *mt = yk_mt_new();
+  yk_set_hot_threshold(mt, 0);
+  YkLocation loc = yk_location_new();
 
-  int res;
-  __yktrace_start_tracing(HW_TRACING, &res, &func);
-  res = func("abc");
-  void *tr = __yktrace_stop_tracing();
-  assert(res == 3);
+  size_t pre = func("abc");
+  int i = 2;
+  NOOPT_VAL(pre);
+  NOOPT_VAL(i);
+  while (i > 0) {
+    yk_control_point(mt, &loc);
+    i--;
+  }
 
-  void *ptr = __yktrace_irtrace_compile(tr);
-  __yktrace_drop_irtrace(tr);
-  void (*cfunc)(void *, void *) = (void (*)(void *, void *))ptr;
-  int output = 0;
-  cfunc(&output, &func);
-  assert(output == 3);
-
-  assert(pre == 3);
-  return res;
+  yk_location_drop(loc);
+  yk_mt_drop(mt);
+  return pre;
 }
 
 int main(int argc, char **argv) {
