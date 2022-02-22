@@ -18,7 +18,7 @@ use num_cpus;
 use parking_lot::{Condvar, Mutex, MutexGuard};
 use std::lazy::SyncLazy;
 
-use crate::location::{HotLocationKind, Location, LocationInner};
+use crate::location::{HotLocation, HotLocationKind, Location, LocationInner};
 use yktrace::{start_tracing, stop_tracing, CompiledTrace, IRTrace, TracingKind};
 
 // The HotThreshold must be less than a machine word wide for [`Location::Location`] to do its
@@ -194,9 +194,9 @@ impl MT {
                         // To avoid racing with another thread that may also try starting to trace this
                         // location at the same time, we need to initialise and lock the Location, which we
                         // perform in a single step.
-                        let hl_ptr = Box::into_raw(Box::new(HotLocationKind::Tracing(Arc::clone(
-                            &mtt.tracing,
-                        ))));
+                        let hl_ptr = Box::into_raw(Box::new(HotLocation {
+                            kind: HotLocationKind::Tracing(Arc::clone(&mtt.tracing)),
+                        }));
                         let new_ls = LocationInner::new().with_hotlocation(hl_ptr).with_lock();
                         debug_assert!(!ls.is_locked());
                         match loc.compare_exchange(ls, new_ls, Ordering::Acquire, Ordering::Relaxed)
@@ -252,7 +252,7 @@ impl MT {
                 }
             }
             let hl = unsafe { ls.hot_location() };
-            match hl {
+            match &hl.kind {
                 HotLocationKind::Compiled(ctr) => {
                     loc.unlock();
                     return TransitionLocation::Execute(*ctr);
@@ -266,14 +266,14 @@ impl MT {
                         }
                         Some(Some(ctr)) => {
                             let ctr = Box::into_raw(ctr);
-                            *hl = HotLocationKind::Compiled(ctr);
+                            hl.kind = HotLocationKind::Compiled(ctr);
                             TransitionLocation::Execute(ctr)
                         }
                     };
                     loc.unlock();
                     return r;
                 }
-                HotLocationKind::Tracing(tracing_arc) => {
+                HotLocationKind::Tracing(ref tracing_arc) => {
                     let thread_arc = THREAD_MTTHREAD.with(|mtt| Arc::clone(&mtt.tracing));
                     if !thread_arc.load(Ordering::Relaxed).is_null() {
                         // This thread is tracing something...
@@ -285,7 +285,7 @@ impl MT {
                         // ...and it's this location: we have therefore finished tracing the loop.
                         thread_arc.store(std::ptr::null_mut(), Ordering::Relaxed);
                         let mtx = Arc::new(Mutex::new(None));
-                        *hl = HotLocationKind::Compiling(Arc::clone(&mtx));
+                        hl.kind = HotLocationKind::Compiling(Arc::clone(&mtx));
                         loc.unlock();
                         return TransitionLocation::StopTracing(mtx);
                     } else {
@@ -295,7 +295,7 @@ impl MT {
                             // FIXME: we should probably have some sort of occasional retry
                             // heuristic rather than simply saying "never try tracing this
                             // Location again."
-                            *hl = HotLocationKind::DontTrace;
+                            hl.kind = HotLocationKind::DontTrace;
                         }
                         loc.unlock();
                         return TransitionLocation::NoAction;
@@ -361,7 +361,7 @@ pub struct MTThread {
     /// there is also significant platform variation in regard to dropping thread locals), so this
     /// mechanism can't be fully relied upon: however, we can't monitor thread death in any other
     /// reasonable way, so this will have to do.
-    tracing: Arc<AtomicPtr<HotLocationKind>>,
+    tracing: Arc<AtomicPtr<HotLocation>>,
     // Raw pointers are neither send nor sync.
     _dont_send_or_sync_me: PhantomData<*mut ()>,
 }
@@ -410,7 +410,7 @@ mod tests {
     fn hotlocation_discriminant(loc: &Location) -> Option<HotLocationKindDiscriminants> {
         match loc.lock() {
             Ok(ls) => {
-                let x = HotLocationKindDiscriminants::from(&*unsafe { ls.hot_location() });
+                let x = HotLocationKindDiscriminants::from(&unsafe { &*ls.hot_location() }.kind);
                 loc.unlock();
                 Some(x)
             }

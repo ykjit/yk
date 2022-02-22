@@ -301,15 +301,15 @@ impl Drop for Location {
             self.lock().unwrap();
             let ls = self.load(Ordering::Relaxed);
             let hl = unsafe { ls.hot_location() };
-            if let HotLocationKind::Compiled(_) = hl {
+            if let HotLocationKind::Compiled(_) = hl.kind {
                 // FIXME: we can't drop this memory as another thread may still be executing the
                 // trace that's pointed to. There should be a ref count that we decrement and free
                 // memory if it reaches zero.
                 self.unlock();
-            } else if let HotLocationKind::Compiling(mtx) = hl {
+            } else if let HotLocationKind::Compiling(ref mtx) = hl.kind {
                 drop(mtx);
                 self.unlock();
-            } else if let HotLocationKind::DontTrace | HotLocationKind::Tracing(_) = hl {
+            } else if let HotLocationKind::DontTrace | HotLocationKind::Tracing(_) = hl.kind {
                 self.unlock();
                 unsafe {
                     Box::from_raw(hl);
@@ -373,7 +373,7 @@ impl LocationInner {
     /// If this `State` is not counting, return its `HotLocation`. It is undefined behaviour to
     /// call this function if this `State` is in the counting phase and/or if this `State` is not
     /// locked.
-    pub(super) unsafe fn hot_location(&self) -> &mut HotLocationKind {
+    pub(super) unsafe fn hot_location(&self) -> &mut HotLocation {
         debug_assert!(!self.is_counting());
         debug_assert!(self.is_locked());
         &mut *((self.x & !STATE_TAG) as *mut _)
@@ -419,7 +419,7 @@ impl LocationInner {
 
     /// Set this `State`'s `HotLocation`. It is undefined behaviour for this `State` to already
     /// have a `HotLocation`.
-    pub(super) fn with_hotlocation(&self, hl_ptr: *mut HotLocationKind) -> Self {
+    pub(super) fn with_hotlocation(&self, hl_ptr: *mut HotLocation) -> Self {
         debug_assert!(self.is_counting());
         let hl_ptr = hl_ptr as usize;
         debug_assert_eq!(hl_ptr & !STATE_TAG, hl_ptr);
@@ -427,6 +427,10 @@ impl LocationInner {
             x: (self.x & (STATE_TAG & !STATE_IS_COUNTING)) | hl_ptr,
         }
     }
+}
+
+pub(crate) struct HotLocation {
+    pub(crate) kind: HotLocationKind,
 }
 
 /// A `Location`'s non-counting states.
@@ -442,5 +446,5 @@ pub(crate) enum HotLocationKind {
     /// traced again.
     DontTrace,
     /// This HotLocation started a trace which is ongoing.
-    Tracing(Arc<AtomicPtr<HotLocationKind>>),
+    Tracing(Arc<AtomicPtr<HotLocation>>),
 }
