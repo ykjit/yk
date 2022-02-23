@@ -459,7 +459,7 @@ mod tests {
     fn threaded_threshold() {
         // Aim for a situation where there's a lot of contention.
         let num_threads = u32::try_from(num_cpus::get() * 4).unwrap();
-        let hot_thrsh = num_threads.saturating_mul(10000);
+        let hot_thrsh = num_threads.saturating_mul(100000);
         let mt = MT::new();
         mt.set_hot_threshold(hot_thrsh);
         let loc = Arc::new(Location::new());
@@ -469,7 +469,10 @@ mod tests {
             let mt = mt.clone();
             let loc = Arc::clone(&loc);
             let t = thread::spawn(move || {
-                for _ in 0..hot_thrsh / num_threads {
+                // The "*4" is the number of times we call `transition_location` in the loop: we
+                // need to make sure that this loop cannot tip the Location over the threshold,
+                // otherwise tracing will start, and the assertions will fail.
+                for _ in 0..hot_thrsh / (num_threads * 4) {
                     assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
                     let c1 = loc.load(Ordering::Relaxed);
                     assert!(c1.is_counting());
