@@ -8,7 +8,7 @@ use std::{
     },
 };
 
-use crate::mt::HotThreshold;
+use crate::mt::{HotThreshold, TraceFailureThreshold};
 use parking_lot::Mutex;
 use parking_lot_core::{
     park, unpark_one, ParkResult, SpinWait, UnparkResult, UnparkToken, DEFAULT_PARK_TOKEN,
@@ -301,15 +301,15 @@ impl Drop for Location {
             self.lock().unwrap();
             let ls = self.load(Ordering::Relaxed);
             let hl = unsafe { ls.hot_location() };
-            if let HotLocation::Compiled(_) = hl {
+            if let HotLocationKind::Compiled(_) = hl.kind {
                 // FIXME: we can't drop this memory as another thread may still be executing the
                 // trace that's pointed to. There should be a ref count that we decrement and free
                 // memory if it reaches zero.
                 self.unlock();
-            } else if let HotLocation::Compiling(mtx) = hl {
+            } else if let HotLocationKind::Compiling(ref mtx) = hl.kind {
                 drop(mtx);
                 self.unlock();
-            } else if let HotLocation::DontTrace | HotLocation::Tracing(_) = hl {
+            } else if let HotLocationKind::DontTrace | HotLocationKind::Tracing(_) = hl.kind {
                 self.unlock();
                 unsafe {
                     Box::from_raw(hl);
@@ -429,9 +429,14 @@ impl LocationInner {
     }
 }
 
+pub(crate) struct HotLocation {
+    pub(crate) kind: HotLocationKind,
+    pub(crate) trace_failure: TraceFailureThreshold,
+}
+
 /// A `Location`'s non-counting states.
 #[derive(EnumDiscriminants)]
-pub(crate) enum HotLocation {
+pub(crate) enum HotLocationKind {
     /// Points to executable machine code that can be executed instead of the interpreter for this
     /// HotLocation.
     Compiled(*const CompiledTrace),
