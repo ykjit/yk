@@ -146,7 +146,7 @@ class JITModBuilder {
   // Stack of inlined calls, required to resume at the correct place in the
   // caller.
   std::vector<tuple<size_t, CallInst *>> InlinedCalls;
-  // Instruction at which to continue after an a call.
+  // Instruction at which to continue after a call.
   Optional<tuple<size_t, CallInst *>> ResumeAfter;
   // Depth of nested calls when outlining a recursive function.
   size_t RecCallDepth = 0;
