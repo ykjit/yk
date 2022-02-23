@@ -8,7 +8,7 @@ use std::{
     },
 };
 
-use crate::mt::HotThreshold;
+use crate::mt::{HotThreshold, TraceFailureThreshold};
 use parking_lot::Mutex;
 use parking_lot_core::{
     park, unpark_one, ParkResult, SpinWait, UnparkResult, UnparkToken, DEFAULT_PARK_TOKEN,
@@ -431,6 +431,7 @@ impl LocationInner {
 
 pub(crate) struct HotLocation {
     pub(crate) kind: HotLocationKind,
+    pub(crate) trace_failure: TraceFailureThreshold,
 }
 
 /// A `Location`'s non-counting states.

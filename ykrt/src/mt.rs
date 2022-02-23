@@ -8,7 +8,7 @@ use std::{
     ffi::c_void,
     marker::PhantomData,
     sync::{
-        atomic::{AtomicPtr, AtomicU32, AtomicUsize, Ordering},
+        atomic::{AtomicPtr, AtomicU16, AtomicU32, AtomicUsize, Ordering},
         Arc,
     },
     thread,
@@ -30,7 +30,11 @@ pub type HotThreshold = u32;
 #[cfg(target_pointer_width = "64")]
 type AtomicHotThreshold = AtomicU32;
 
+pub type TraceFailureThreshold = u16;
+pub type AtomicTraceFailureThreshold = AtomicU16;
+
 const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
+const DEFAULT_TRACE_FAILURE_THRESHOLD: TraceFailureThreshold = 5;
 
 thread_local! {static THREAD_MTTHREAD: MTThread = MTThread::new();}
 
@@ -52,6 +56,9 @@ impl MT {
     pub fn new() -> Self {
         let inner = MTInner {
             hot_threshold: AtomicHotThreshold::new(DEFAULT_HOT_THRESHOLD),
+            trace_failure_threshold: AtomicTraceFailureThreshold::new(
+                DEFAULT_TRACE_FAILURE_THRESHOLD,
+            ),
             job_queue: (Condvar::new(), Mutex::new(VecDeque::new())),
             max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
             active_worker_threads: AtomicUsize::new(0),
@@ -73,6 +80,23 @@ impl MT {
         self.inner
             .hot_threshold
             .store(hot_threshold, Ordering::Relaxed);
+    }
+
+    /// Return this `MT` instance's current trace failure threshold. Notice that this value can be
+    /// changed by other threads and is thus potentially stale as soon as it is read.
+    pub fn trace_failure_threshold(&self) -> TraceFailureThreshold {
+        self.inner.trace_failure_threshold.load(Ordering::Relaxed)
+    }
+
+    /// Set the threshold at which a `Location` from which tracing has failed multiple times is
+    /// marked as "do not try tracing again".
+    pub fn set_trace_failure_threshold(&self, trace_failure_threshold: TraceFailureThreshold) {
+        if trace_failure_threshold < 1 {
+            panic!("Trace failure threshold must be >= 1.");
+        }
+        self.inner
+            .trace_failure_threshold
+            .store(trace_failure_threshold, Ordering::Relaxed);
     }
 
     /// Return this meta-tracer's maximum number of worker threads. Notice that this value can be
@@ -196,6 +220,7 @@ impl MT {
                         // perform in a single step.
                         let hl_ptr = Box::into_raw(Box::new(HotLocation {
                             kind: HotLocationKind::Tracing(Arc::clone(&mtt.tracing)),
+                            trace_failure: 0,
                         }));
                         let new_ls = LocationInner::new().with_hotlocation(hl_ptr).with_lock();
                         debug_assert!(!ls.is_locked());
@@ -292,10 +317,20 @@ impl MT {
                         // This thread isn't tracing anything
                         if Arc::strong_count(tracing_arc) == 1 {
                             // Another thread was tracing this location but it's terminated.
-                            // FIXME: we should probably have some sort of occasional retry
-                            // heuristic rather than simply saying "never try tracing this
-                            // Location again."
-                            hl.kind = HotLocationKind::DontTrace;
+                            if hl.trace_failure < self.trace_failure_threshold() {
+                                // Let's try tracing the location again in this thread.
+                                hl.trace_failure += 1;
+                                hl.kind = HotLocationKind::Tracing(Arc::clone(&thread_arc));
+                                thread_arc.store(hl as _, Ordering::Relaxed);
+                                loc.unlock();
+                                return TransitionLocation::StartTracing(self.tracing_kind());
+                            } else {
+                                // This location has failed too many times: don't try tracing it
+                                // again.
+                                hl.kind = HotLocationKind::DontTrace;
+                                loc.unlock();
+                                return TransitionLocation::NoAction;
+                            }
                         }
                         loc.unlock();
                         return TransitionLocation::NoAction;
@@ -333,6 +368,7 @@ impl MT {
 /// The innards of a meta-tracer.
 struct MTInner {
     hot_threshold: AtomicHotThreshold,
+    trace_failure_threshold: AtomicTraceFailureThreshold,
     /// The ordered queue of compilation worker functions.
     job_queue: (Condvar, Mutex<VecDeque<Box<dyn FnOnce() + Send>>>),
     /// The hard cap on the number of worker threads.
@@ -394,7 +430,7 @@ impl PartialEq for TransitionLocation {
                 std::ptr::eq(p1, p2)
             }
             (TransitionLocation::StartTracing(x), TransitionLocation::StartTracing(y)) => x == y,
-            (_, _) => todo!(),
+            (x, y) => todo!("{:?} {:?}", x, y),
         }
     }
 }
@@ -513,30 +549,41 @@ mod tests {
 
     #[test]
     fn locations_dont_get_stuck_tracing() {
-        // If a thread starts tracing a location but terminates before finishing tracing, a
-        // Location can be left in the Tracing state: this test ensures that, as soon as another
-        // thread notices that the original Tracing thread has died, that the Location is updated
-        // to a non-tracing state.
+        // If tracing a location fails too many times (e.g. because the thread terminates before
+        // tracing is complete), the location must be marked as DontTrace.
 
         const THRESHOLD: HotThreshold = 5;
         let mt = MT::new();
         mt.set_hot_threshold(THRESHOLD);
         let loc = Arc::new(Location::new());
 
-        {
-            let mt = mt.clone();
-            let loc = Arc::clone(&loc);
-            thread::spawn(move || {
-                for _ in 0..THRESHOLD {
-                    assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
-                }
-                assert!(matches!(
-                    mt.transition_location(&loc),
-                    TransitionLocation::StartTracing(_)
-                ));
-            })
-            .join()
-            .unwrap();
+        // Get the location to the point of being hot.
+        for _ in 0..THRESHOLD {
+            assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
+        }
+
+        // Start tracing in a thread and purposefully let the thread terminate before tracing is
+        // complete.
+        for i in 0..mt.trace_failure_threshold() + 1 {
+            {
+                let mt = mt.clone();
+                let loc = Arc::clone(&loc);
+                thread::spawn(move || {
+                    assert!(matches!(
+                        mt.transition_location(&loc),
+                        TransitionLocation::StartTracing(_)
+                    ));
+                })
+                .join()
+                .unwrap();
+            }
+            assert_eq!(
+                hotlocation_discriminant(&loc),
+                Some(HotLocationKindDiscriminants::Tracing)
+            );
+            let ls = loc.lock().unwrap();
+            assert_eq!(unsafe { &*ls.hot_location() }.trace_failure, i);
+            loc.unlock();
         }
 
         assert_eq!(
@@ -547,6 +594,69 @@ mod tests {
         assert_eq!(
             hotlocation_discriminant(&loc),
             Some(HotLocationKindDiscriminants::DontTrace)
+        );
+    }
+
+    #[test]
+    fn locations_can_fail_tracing_before_succeeding() {
+        // Test that a location can fail tracing multiple times before being successfully traced.
+
+        const THRESHOLD: HotThreshold = 5;
+        let mt = MT::new();
+        mt.set_hot_threshold(THRESHOLD);
+        let loc = Arc::new(Location::new());
+
+        // Get the location to the point of being hot.
+        for _ in 0..THRESHOLD {
+            assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
+        }
+
+        // Start tracing in a thread and purposefully let the thread terminate before tracing is
+        // complete.
+        for i in 0..mt.trace_failure_threshold() {
+            {
+                let mt = mt.clone();
+                let loc = Arc::clone(&loc);
+                thread::spawn(move || {
+                    assert!(matches!(
+                        mt.transition_location(&loc),
+                        TransitionLocation::StartTracing(_)
+                    ));
+                })
+                .join()
+                .unwrap();
+            }
+            assert_eq!(
+                hotlocation_discriminant(&loc),
+                Some(HotLocationKindDiscriminants::Tracing)
+            );
+            let ls = loc.lock().unwrap();
+            assert_eq!(unsafe { &*ls.hot_location() }.trace_failure, i);
+            loc.unlock();
+        }
+
+        assert_eq!(
+            hotlocation_discriminant(&loc),
+            Some(HotLocationKindDiscriminants::Tracing)
+        );
+        // Start tracing again...
+        assert!(matches!(
+            mt.transition_location(&loc),
+            TransitionLocation::StartTracing(_)
+        ));
+        assert_eq!(
+            hotlocation_discriminant(&loc),
+            Some(HotLocationKindDiscriminants::Tracing)
+        );
+        // ...and this time let tracing succeed.
+        assert!(matches!(
+            mt.transition_location(&loc),
+            TransitionLocation::StopTracing(_)
+        ));
+        // If tracing succeeded, we'll now be in the Compiling state.
+        assert_eq!(
+            hotlocation_discriminant(&loc),
+            Some(HotLocationKindDiscriminants::Compiling)
         );
     }
 
@@ -704,44 +814,6 @@ mod tests {
             mt.transition_location(&loc2),
             TransitionLocation::StopTracing(_)
         ));
-    }
-
-    #[test]
-    fn mark_locations_for_which_tracing_doesnt_succeed_as_donttrace() {
-        // If a thread starts tracing a Location and tracing does not stop before the thread
-        // terminates, that Location should be marked (currently forever!) as DontTrace.
-
-        const THRESHOLD: HotThreshold = 5;
-        let mt = MT::new();
-        mt.set_hot_threshold(THRESHOLD);
-        let loc = Arc::new(Location::new());
-
-        for _ in 0..THRESHOLD {
-            assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
-        }
-
-        {
-            let mt = mt.clone();
-            let loc = Arc::clone(&loc);
-            thread::spawn(move || {
-                assert!(matches!(
-                    mt.transition_location(&loc),
-                    TransitionLocation::StartTracing(_)
-                ));
-            })
-            .join()
-            .unwrap();
-        }
-
-        assert_eq!(
-            hotlocation_discriminant(&loc),
-            Some(HotLocationKindDiscriminants::Tracing)
-        );
-        assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
-        assert_eq!(
-            hotlocation_discriminant(&loc),
-            Some(HotLocationKindDiscriminants::DontTrace)
-        );
     }
 
     #[bench]
