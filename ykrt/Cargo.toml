@@ -10,13 +10,10 @@ num_cpus = "1.13.1"
 parking_lot = "0.12.0"
 parking_lot_core = "0.9.1"
 strum = { version = "0.23.0", features = ["derive"] }
-yktrace = { path = "../yktrace", default-features = false, features = ["yk_testing"] }
+yktrace = { path = "../yktrace" }
 
 [build-dependencies]
 regex = "1.5.4"
-
-[dev-dependencies]
-ykrt = { path = ".", features = ["yk_testing"] }
 
 [features]
 jit_state_debug = []
