@@ -1036,12 +1036,6 @@ public:
         if (NewControlPointCall == nullptr)
           continue;
 
-        if ((isa<BranchInst>(I)) || (isa<IndirectBrInst>(I)) ||
-            (isa<SwitchInst>(I))) {
-          handleBranchingControlFlow(&*I, Idx, JITFunc);
-          break;
-        }
-
         if (isa<ReturnInst>(I)) {
           handleReturnInst(&*I);
           break;
@@ -1050,6 +1044,12 @@ public:
         if (RecCallDepth > 0) {
           // We are currently ignoring an inlined function.
           continue;
+        }
+
+        if ((isa<BranchInst>(I)) || (isa<IndirectBrInst>(I)) ||
+            (isa<SwitchInst>(I))) {
+          handleBranchingControlFlow(&*I, Idx, JITFunc);
+          break;
         }
 
         if (isa<PHINode>(I)) {

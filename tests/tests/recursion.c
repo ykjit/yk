@@ -1,3 +1,4 @@
+// ignore: optimisation levels >0 need more intrinsics support.
 // Compiler:
 //   env-var: YKD_PRINT_JITSTATE=1
 // Run-time:
@@ -5,17 +6,19 @@
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
 //     jit-state: start-tracing
-//     4:21
+//     4:0
 //     jit-state: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
+//     %45 = call i32 @f(...
+//     ...
 //     --- End jit-pre-opt ---
-//     3:21
+//     3:0
 //     jit-state: enter-jit-code
-//     2:21
+//     2:0
 //     jit-state: exit-jit-code
 //     jit-state: enter-jit-code
-//     1:21
+//     1:0
 //     jit-state: stopgap
 //     ...
 
@@ -26,17 +29,11 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-__attribute__((noinline)) int fib(int num) {
+__attribute__((noinline)) int f(int num) {
   if (num == 0)
     return 0;
-  if (num == 1)
-    return 1;
-  if (num == 2)
-    return 1;
-  int a = fib(num - 2);
-  int b = fib(num - 1);
-  int c = a + b;
-  return c;
+  else
+    return f(num - 1);
 }
 
 int main(int argc, char **argv) {
@@ -48,8 +45,9 @@ int main(int argc, char **argv) {
   NOOPT_VAL(i);
   while (i > 0) {
     yk_control_point(mt, &loc);
-    NOOPT_VAL(argc);
-    fprintf(stderr, "%d:%d\n", i, fib(argc * 8));
+    int x = 3;
+    NOOPT_VAL(x);
+    fprintf(stderr, "%d:%d\n", i, f(x));
     i--;
   }
 
