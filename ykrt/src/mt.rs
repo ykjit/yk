@@ -43,49 +43,52 @@ static SERIALISE_COMPILATION: SyncLazy<bool> = SyncLazy::new(|| {
     &env::var("YKD_SERIALISE_COMPILATION").unwrap_or_else(|_| "0".to_owned()) == "1"
 });
 
-#[derive(Clone)]
 /// A meta-tracer. Note that this is conceptually a "front-end" to the actual meta-tracer akin to
 /// an `Rc`: this struct can be freely `clone()`d without duplicating the underlying meta-tracer.
 pub struct MT {
-    inner: Arc<MTInner>,
+    hot_threshold: AtomicHotThreshold,
+    trace_failure_threshold: AtomicTraceFailureThreshold,
+    /// The ordered queue of compilation worker functions.
+    job_queue: Arc<(Condvar, Mutex<VecDeque<Box<dyn FnOnce() + Send>>>)>,
+    /// The hard cap on the number of worker threads.
+    max_worker_threads: AtomicUsize,
+    /// How many worker threads are currently running. Note that this may temporarily be `>`
+    /// [`max_worker_threads`].
+    active_worker_threads: AtomicUsize,
+    tracing_kind: TracingKind,
 }
 
 impl MT {
     // Create a new meta-tracer instance. Arbitrarily many of these can be created, though there
     // are no guarantees as to whether they will share resources effectively or fairly.
     pub fn new() -> Self {
-        let inner = MTInner {
+        Self {
             hot_threshold: AtomicHotThreshold::new(DEFAULT_HOT_THRESHOLD),
             trace_failure_threshold: AtomicTraceFailureThreshold::new(
                 DEFAULT_TRACE_FAILURE_THRESHOLD,
             ),
-            job_queue: (Condvar::new(), Mutex::new(VecDeque::new())),
+            job_queue: Arc::new((Condvar::new(), Mutex::new(VecDeque::new()))),
             max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
             active_worker_threads: AtomicUsize::new(0),
             tracing_kind: TracingKind::default(),
-        };
-        Self {
-            inner: Arc::new(inner),
         }
     }
 
     /// Return this `MT` instance's current hot threshold. Notice that this value can be changed by
     /// other threads and is thus potentially stale as soon as it is read.
     pub fn hot_threshold(&self) -> HotThreshold {
-        self.inner.hot_threshold.load(Ordering::Relaxed)
+        self.hot_threshold.load(Ordering::Relaxed)
     }
 
     /// Set the threshold at which `Location`'s are considered hot.
     pub fn set_hot_threshold(&self, hot_threshold: HotThreshold) {
-        self.inner
-            .hot_threshold
-            .store(hot_threshold, Ordering::Relaxed);
+        self.hot_threshold.store(hot_threshold, Ordering::Relaxed);
     }
 
     /// Return this `MT` instance's current trace failure threshold. Notice that this value can be
     /// changed by other threads and is thus potentially stale as soon as it is read.
     pub fn trace_failure_threshold(&self) -> TraceFailureThreshold {
-        self.inner.trace_failure_threshold.load(Ordering::Relaxed)
+        self.trace_failure_threshold.load(Ordering::Relaxed)
     }
 
     /// Set the threshold at which a `Location` from which tracing has failed multiple times is
@@ -94,21 +97,20 @@ impl MT {
         if trace_failure_threshold < 1 {
             panic!("Trace failure threshold must be >= 1.");
         }
-        self.inner
-            .trace_failure_threshold
+        self.trace_failure_threshold
             .store(trace_failure_threshold, Ordering::Relaxed);
     }
 
     /// Return this meta-tracer's maximum number of worker threads. Notice that this value can be
     /// changed by other threads and is thus potentially stale as soon as it is read.
     pub fn max_worker_threads(&self) -> usize {
-        self.inner.max_worker_threads.load(Ordering::Relaxed)
+        self.max_worker_threads.load(Ordering::Relaxed)
     }
 
     /// Return the kind of tracing that this meta-tracer is using. Notice that this value can be
     /// changed by other threads and is thus potentially stale as soon as it is read.
     pub fn tracing_kind(&self) -> TracingKind {
-        self.inner.tracing_kind
+        self.tracing_kind
     }
 
     /// Queue `job` to be run on a worker thread.
@@ -117,27 +119,26 @@ impl MT {
         // new worker thread iff we aren't already running the maximum number of worker threads.
         // Once started, a worker thread never dies, waiting endlessly for work.
 
-        let inner = Arc::clone(&self.inner);
-        let (cv, mtx) = &inner.job_queue;
+        let (cv, mtx) = &*self.job_queue;
         mtx.lock().push_back(job);
         cv.notify_one();
 
-        let max_jobs = inner.max_worker_threads.load(Ordering::Relaxed);
-        if inner.active_worker_threads.load(Ordering::Relaxed) < max_jobs {
+        let max_jobs = self.max_worker_threads.load(Ordering::Relaxed);
+        if self.active_worker_threads.load(Ordering::Relaxed) < max_jobs {
             // At the point of the `load` on the previous line, we weren't running the maximum
             // number of worker threads. There is now a possible race condition where multiple
             // threads calling `queue_job` could try creating multiple worker threads and push us
             // over the maximum worker thread limit.
-            if inner.active_worker_threads.fetch_add(1, Ordering::Relaxed) > max_jobs {
+            if self.active_worker_threads.fetch_add(1, Ordering::Relaxed) > max_jobs {
                 // Another thread(s) is also spinning up another worker thread and they won the
                 // race.
-                inner.active_worker_threads.fetch_sub(1, Ordering::Relaxed);
+                self.active_worker_threads.fetch_sub(1, Ordering::Relaxed);
                 return;
             }
 
-            let inner_cl = Arc::clone(&self.inner);
+            let jq = Arc::clone(&self.job_queue);
             thread::spawn(move || {
-                let (cv, mtx) = &inner_cl.job_queue;
+                let (cv, mtx) = &*jq;
                 let mut lock = mtx.lock();
                 loop {
                     match lock.pop_front() {
@@ -365,20 +366,6 @@ impl MT {
     }
 }
 
-/// The innards of a meta-tracer.
-struct MTInner {
-    hot_threshold: AtomicHotThreshold,
-    trace_failure_threshold: AtomicTraceFailureThreshold,
-    /// The ordered queue of compilation worker functions.
-    job_queue: (Condvar, Mutex<VecDeque<Box<dyn FnOnce() + Send>>>),
-    /// The hard cap on the number of worker threads.
-    max_worker_threads: AtomicUsize,
-    /// How many worker threads are currently running. Note that this may temporarily be `>`
-    /// [`max_worker_threads`].
-    active_worker_threads: AtomicUsize,
-    tracing_kind: TracingKind,
-}
-
 /// Meta-tracer per-thread state. Note that this struct is neither `Send` nor `Sync`: it can only
 /// be accessed from within a single thread.
 pub struct MTThread {
@@ -497,13 +484,13 @@ mod tests {
         // Aim for a situation where there's a lot of contention.
         let num_threads = u32::try_from(num_cpus::get() * 4).unwrap();
         let hot_thrsh = num_threads.saturating_mul(100000);
-        let mt = MT::new();
+        let mt = Arc::new(MT::new());
         mt.set_hot_threshold(hot_thrsh);
         let loc = Arc::new(Location::new());
 
         let mut thrs = vec![];
         for _ in 0..num_threads {
-            let mt = mt.clone();
+            let mt = Arc::clone(&mt);
             let loc = Arc::clone(&loc);
             let t = thread::spawn(move || {
                 // The "*4" is the number of times we call `transition_location` in the loop: we
@@ -556,7 +543,7 @@ mod tests {
         // tracing is complete), the location must be marked as DontTrace.
 
         const THRESHOLD: HotThreshold = 5;
-        let mt = MT::new();
+        let mt = Arc::new(MT::new());
         mt.set_hot_threshold(THRESHOLD);
         let loc = Arc::new(Location::new());
 
@@ -569,7 +556,7 @@ mod tests {
         // complete.
         for i in 0..mt.trace_failure_threshold() + 1 {
             {
-                let mt = mt.clone();
+                let mt = Arc::clone(&mt);
                 let loc = Arc::clone(&loc);
                 thread::spawn(move || {
                     assert!(matches!(
@@ -605,7 +592,7 @@ mod tests {
         // Test that a location can fail tracing multiple times before being successfully traced.
 
         const THRESHOLD: HotThreshold = 5;
-        let mt = MT::new();
+        let mt = Arc::new(MT::new());
         mt.set_hot_threshold(THRESHOLD);
         let loc = Arc::new(Location::new());
 
@@ -618,7 +605,7 @@ mod tests {
         // complete.
         for i in 0..mt.trace_failure_threshold() {
             {
-                let mt = mt.clone();
+                let mt = Arc::clone(&mt);
                 let loc = Arc::clone(&loc);
                 thread::spawn(move || {
                     assert!(matches!(
@@ -716,7 +703,7 @@ mod tests {
         // We need to set a high enough threshold that the threads are likely to meaningfully
         // interleave when interacting with the location.
         const THRESHOLD: HotThreshold = 100000;
-        let mt = MT::new();
+        let mt = Arc::new(MT::new());
         mt.set_hot_threshold(THRESHOLD);
         let loc = Arc::new(Location::new());
 
@@ -724,7 +711,7 @@ mod tests {
         let num_starts = Arc::new(AtomicU64::new(0));
         for _ in 0..num_cpus::get() {
             let loc = Arc::clone(&loc);
-            let mt = mt.clone();
+            let mt = Arc::clone(&mt);
             let num_starts = Arc::clone(&num_starts);
             thrs.push(thread::spawn(move || {
                 for _ in 0..THRESHOLD {
@@ -785,7 +772,7 @@ mod tests {
         // tracing, it must ignore it.
 
         const THRESHOLD: HotThreshold = 5;
-        let mt = MT::new();
+        let mt = Arc::new(MT::new());
         mt.set_hot_threshold(THRESHOLD);
         let loc1 = Arc::new(Location::new());
         let loc2 = Location::new();
@@ -796,7 +783,7 @@ mod tests {
         }
 
         {
-            let mt = mt.clone();
+            let mt = Arc::clone(&mt);
             let loc1 = Arc::clone(&loc1);
             thread::spawn(move || {
                 assert!(matches!(
@@ -832,13 +819,13 @@ mod tests {
 
     #[bench]
     fn bench_multi_threaded_control_point(b: &mut Bencher) {
-        let mt = MT::new();
+        let mt = Arc::new(MT::new());
         let loc = Arc::new(Location::new());
         b.iter(|| {
             let mut thrs = vec![];
             for _ in 0..4 {
                 let loc = Arc::clone(&loc);
-                let mt = mt.clone();
+                let mt = Arc::clone(&mt);
                 thrs.push(thread::spawn(move || {
                     for _ in 0..100 {
                         black_box(mt.transition_location(&loc));
