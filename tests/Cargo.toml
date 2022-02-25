@@ -23,6 +23,6 @@ yktrace = { path = "../yktrace", features = ["yk_testing"] }
 [dev-dependencies]
 lang_tester = "0.7.1"
 tempfile = "3.3.0"
-ykcapi = { path = "../ykcapi", features = ["yk_testing"] }
+ykcapi = { path = "../ykcapi", features = ["yk_testing", "jit_state_debug"] }
 ykllvmwrap = { path = "../ykllvmwrap", features = ["yk_testing"] }
 ykrt = { path = "../ykrt", features = ["yk_testing", "jit_state_debug"] }

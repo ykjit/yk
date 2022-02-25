@@ -17,3 +17,4 @@ yksmp = { path = "../yksmp" }
 
 [features]
 yk_testing = []
+jit_state_debug = []
