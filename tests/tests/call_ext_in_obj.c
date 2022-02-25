@@ -1,32 +1,44 @@
-// ignore: https://github.com/ykjit/yk/issues/409
 // Compiler:
+//   env-var: YKD_PRINT_JITSTATE=1
 // Run-time:
+//   env-var: YKD_PRINT_IR=jit-pre-opt
+//   env-var: YKD_SERIALISE_COMPILATION=1
+//   stderr:
+//     jit-state: start-tracing
+//     4
+//     jit-state: stop-tracing
+//     --- Begin jit-pre-opt ---
+//     ...
+//     --- End jit-pre-opt ---
+//     3
+//     jit-state: enter-jit-code
+//     2
+//     jit-state: stopgap
+//     ...
 
 // Check that we can call a function without IR from another object (.o) file.
 
-#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
+#include <yk.h>
 #include <yk_testing.h>
 
-extern int call_me(int);
+extern int call_me_add(int);
 
 int main(int argc, char **argv) {
-  int res = 0;
-  __yktrace_start_tracing(HW_TRACING, &res);
-  NOOPT_VAL(argc);
-  res = call_me(argc);
-  NOOPT_VAL(res);
-  void *tr = __yktrace_stop_tracing();
-  assert(res == 5);
+  YkMT *mt = yk_mt_new();
+  yk_set_hot_threshold(mt, 0);
+  YkLocation loc = yk_location_new();
 
-  void *ptr = __yktrace_irtrace_compile(tr);
-  __yktrace_drop_irtrace(tr);
-  void (*func)(int *) = (void (*)(int *))ptr;
-  int res2 = 0;
-  func(&res2);
-  assert(res2 == 5);
+  int i = 3;
+  NOOPT_VAL(i);
+  while (i > 0) {
+    yk_control_point(mt, &loc);
+    fprintf(stderr, "%d\n", call_me_add(i));
+    i--;
+  }
 
+  yk_location_drop(loc);
+  yk_mt_drop(mt);
   return (EXIT_SUCCESS);
 }

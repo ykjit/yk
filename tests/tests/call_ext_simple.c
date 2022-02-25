@@ -1,7 +1,7 @@
-// ignore: broken during new control point design
 // Compiler:
 // Run-time:
 //   env-var: YKD_PRINT_IR=jit-pre-opt
+//   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
 //     ...
 //     ...call i32 @putc...
@@ -17,20 +17,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <yk.h>
 #include <yk_testing.h>
 
 int main(int argc, char **argv) {
+  YkMT *mt = yk_mt_new();
+  yk_set_hot_threshold(mt, 0);
+  YkLocation loc = yk_location_new();
+
   int ch = '1';
-  __yktrace_start_tracing(HW_TRACING, &ch);
-  // Note that sometimes the compiler will make this a call to putc(3).
-  putchar(ch);
-  void *tr = __yktrace_stop_tracing();
+  NOOPT_VAL(ch);
+  while (ch != '3') {
+    yk_control_point(mt, &loc);
+    // Note that sometimes the compiler will make this a call to putc(3).
+    putchar(ch);
+    ch++;
+  }
 
-  ch = '2';
-  void *ptr = __yktrace_irtrace_compile(tr);
-  __yktrace_drop_irtrace(tr);
-  void (*func)(int *) = (void (*)(int *))ptr;
-  func(&ch);
-
+  yk_location_drop(loc);
+  yk_mt_drop(mt);
   return (EXIT_SUCCESS);
 }
