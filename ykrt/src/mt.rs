@@ -43,7 +43,6 @@ static SERIALISE_COMPILATION: SyncLazy<bool> = SyncLazy::new(|| {
     &env::var("YKD_SERIALISE_COMPILATION").unwrap_or_else(|_| "0".to_owned()) == "1"
 });
 
-#[derive(Clone)]
 /// A meta-tracer. Note that this is conceptually a "front-end" to the actual meta-tracer akin to
 /// an `Rc`: this struct can be freely `clone()`d without duplicating the underlying meta-tracer.
 pub struct MT {
@@ -497,13 +496,13 @@ mod tests {
         // Aim for a situation where there's a lot of contention.
         let num_threads = u32::try_from(num_cpus::get() * 4).unwrap();
         let hot_thrsh = num_threads.saturating_mul(100000);
-        let mt = MT::new();
+        let mt = Arc::new(MT::new());
         mt.set_hot_threshold(hot_thrsh);
         let loc = Arc::new(Location::new());
 
         let mut thrs = vec![];
         for _ in 0..num_threads {
-            let mt = mt.clone();
+            let mt = Arc::clone(&mt);
             let loc = Arc::clone(&loc);
             let t = thread::spawn(move || {
                 // The "*4" is the number of times we call `transition_location` in the loop: we
@@ -556,7 +555,7 @@ mod tests {
         // tracing is complete), the location must be marked as DontTrace.
 
         const THRESHOLD: HotThreshold = 5;
-        let mt = MT::new();
+        let mt = Arc::new(MT::new());
         mt.set_hot_threshold(THRESHOLD);
         let loc = Arc::new(Location::new());
 
@@ -569,7 +568,7 @@ mod tests {
         // complete.
         for i in 0..mt.trace_failure_threshold() + 1 {
             {
-                let mt = mt.clone();
+                let mt = Arc::clone(&mt);
                 let loc = Arc::clone(&loc);
                 thread::spawn(move || {
                     assert!(matches!(
@@ -605,7 +604,7 @@ mod tests {
         // Test that a location can fail tracing multiple times before being successfully traced.
 
         const THRESHOLD: HotThreshold = 5;
-        let mt = MT::new();
+        let mt = Arc::new(MT::new());
         mt.set_hot_threshold(THRESHOLD);
         let loc = Arc::new(Location::new());
 
@@ -618,7 +617,7 @@ mod tests {
         // complete.
         for i in 0..mt.trace_failure_threshold() {
             {
-                let mt = mt.clone();
+                let mt = Arc::clone(&mt);
                 let loc = Arc::clone(&loc);
                 thread::spawn(move || {
                     assert!(matches!(
@@ -716,7 +715,7 @@ mod tests {
         // We need to set a high enough threshold that the threads are likely to meaningfully
         // interleave when interacting with the location.
         const THRESHOLD: HotThreshold = 100000;
-        let mt = MT::new();
+        let mt = Arc::new(MT::new());
         mt.set_hot_threshold(THRESHOLD);
         let loc = Arc::new(Location::new());
 
@@ -724,7 +723,7 @@ mod tests {
         let num_starts = Arc::new(AtomicU64::new(0));
         for _ in 0..num_cpus::get() {
             let loc = Arc::clone(&loc);
-            let mt = mt.clone();
+            let mt = Arc::clone(&mt);
             let num_starts = Arc::clone(&num_starts);
             thrs.push(thread::spawn(move || {
                 for _ in 0..THRESHOLD {
@@ -785,7 +784,7 @@ mod tests {
         // tracing, it must ignore it.
 
         const THRESHOLD: HotThreshold = 5;
-        let mt = MT::new();
+        let mt = Arc::new(MT::new());
         mt.set_hot_threshold(THRESHOLD);
         let loc1 = Arc::new(Location::new());
         let loc2 = Location::new();
@@ -796,7 +795,7 @@ mod tests {
         }
 
         {
-            let mt = mt.clone();
+            let mt = Arc::clone(&mt);
             let loc1 = Arc::clone(&loc1);
             thread::spawn(move || {
                 assert!(matches!(
@@ -832,13 +831,13 @@ mod tests {
 
     #[bench]
     fn bench_multi_threaded_control_point(b: &mut Bencher) {
-        let mt = MT::new();
+        let mt = Arc::new(MT::new());
         let loc = Arc::new(Location::new());
         b.iter(|| {
             let mut thrs = vec![];
             for _ in 0..4 {
                 let loc = Arc::clone(&loc);
-                let mt = mt.clone();
+                let mt = Arc::clone(&mt);
                 thrs.push(thread::spawn(move || {
                     for _ in 0..100 {
                         black_box(mt.transition_location(&loc));
