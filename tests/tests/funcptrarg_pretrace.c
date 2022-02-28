@@ -27,7 +27,7 @@
 
 int bar(size_t (*func)(const char *)) {
   YkMT *mt = yk_mt_new();
-  yk_set_hot_threshold(mt, 0);
+  yk_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
   size_t pre = func("abc");

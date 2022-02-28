@@ -72,7 +72,7 @@ int mem = 4;
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new();
-  yk_set_hot_threshold(mt, 0);
+  yk_hot_threshold_set(mt, 0);
 
   // A hard-coded program to execute.
   int prog[] = {NOP, NOP, DEC, RESTART_IF_NOT_ZERO, NOP, EXIT};

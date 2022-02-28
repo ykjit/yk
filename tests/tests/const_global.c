@@ -56,7 +56,7 @@ const int add = 2;
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new();
-  yk_set_hot_threshold(mt, 0);
+  yk_hot_threshold_set(mt, 0);
   int res = 0;
   YkLocation loc = yk_location_new();
   int i = 4;
