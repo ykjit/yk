@@ -122,7 +122,7 @@ pub extern "C" fn yk_stopgap(
     rsp: *const c_void,
 ) {
     // FIXME: remove once we have a stopgap interpreter.
-    #[cfg(feature = "jit_state_debug")]
+    #[cfg(feature = "yk_jitstate_debug")]
     print_jit_state("stopgap");
     // Restore saved registers from the stack.
     let registers = Registers::from_ptr(rsp);

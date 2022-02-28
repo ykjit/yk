@@ -164,21 +164,21 @@ impl MT {
                 // the trace itself.
                 // https://github.com/ykjit/yk/issues/442
                 loop {
-                    #[cfg(feature = "jit_state_debug")]
+                    #[cfg(feature = "yk_jitstate_debug")]
                     print_jit_state("enter-jit-code");
                     unsafe { &*ctr }.exec(ctrlp_vars);
-                    #[cfg(feature = "jit_state_debug")]
+                    #[cfg(feature = "yk_jitstate_debug")]
                     print_jit_state("exit-jit-code");
                 }
             }
             TransitionLocation::StartTracing(kind) => {
-                #[cfg(feature = "jit_state_debug")]
+                #[cfg(feature = "yk_jitstate_debug")]
                 print_jit_state("start-tracing");
                 start_tracing(kind);
             }
             TransitionLocation::StopTracing(x) => match stop_tracing() {
                 Ok(ir_trace) => {
-                    #[cfg(feature = "jit_state_debug")]
+                    #[cfg(feature = "yk_jitstate_debug")]
                     print_jit_state("stop-tracing");
                     self.queue_compile_job(ir_trace, x);
                 }

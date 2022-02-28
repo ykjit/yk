@@ -16,5 +16,5 @@ yktrace = { path = "../yktrace" }
 regex = "1.5.4"
 
 [features]
-jit_state_debug = []
+yk_jitstate_debug = []
 yk_testing = []
