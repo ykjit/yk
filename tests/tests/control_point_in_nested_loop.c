@@ -3,8 +3,8 @@
 
 // Check that the system is OK with the control point being in a nested loop.
 
-#include <stdlib.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <yk.h>
 #include <yk_testing.h>
 
