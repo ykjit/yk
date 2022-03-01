@@ -11,6 +11,9 @@
 #![feature(naked_functions)]
 #![feature(once_cell)]
 
+#[cfg(feature = "yk_testing")]
+mod testing;
+
 use std::arch::asm;
 use std::convert::TryInto;
 use std::ffi::c_void;
@@ -221,25 +224,3 @@ pub extern "C" fn __llvm_deoptimize(addr: *const c_void, size: usize) {
 
 #[cfg(not(target_arch = "x86_64"))]
 compile_error!("__llvm_deoptimize() not yet implemented for this platform");
-
-/// The following module contains exports only used for testing from external C code.
-/// These symbols are not shipped as part of the main API.
-#[cfg(feature = "yk_testing")]
-mod yk_testing {
-    use yktrace::BlockMap;
-
-    #[no_mangle]
-    pub extern "C" fn __yktrace_hwt_mapper_blockmap_new() -> *mut BlockMap {
-        Box::into_raw(Box::new(BlockMap::new()))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn __yktrace_hwt_mapper_blockmap_free(bm: *mut BlockMap) {
-        unsafe { Box::from_raw(bm) };
-    }
-
-    #[no_mangle]
-    pub extern "C" fn __yktrace_hwt_mapper_blockmap_len(bm: *mut BlockMap) -> usize {
-        unsafe { &*bm }.len()
-    }
-}
