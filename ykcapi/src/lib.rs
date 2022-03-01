@@ -19,7 +19,7 @@ use std::convert::TryInto;
 use std::ffi::c_void;
 use std::process;
 use std::{ptr, slice};
-use ykrt::{HotThreshold, Location, MT};
+use ykrt::{print_jit_state, HotThreshold, Location, MT};
 use yksmp::{Location as SMLocation, StackMapParser};
 
 #[no_mangle]
@@ -122,7 +122,8 @@ pub extern "C" fn yk_stopgap(
     rsp: *const c_void,
 ) {
     // FIXME: remove once we have a stopgap interpreter.
-    eprintln!("jit-state: stopgap");
+    #[cfg(feature = "yk_jitstate_debug")]
+    print_jit_state("stopgap");
     // Restore saved registers from the stack.
     let registers = Registers::from_ptr(rsp);
 

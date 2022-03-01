@@ -1,8 +1,7 @@
-// Compiler:
-//   env-var: YKD_PRINT_JITSTATE=1
 // Run-time:
 //   env-var: YKD_PRINT_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
+//   env-var: YKD_PRINT_JITSTATE=1
 //   stderr:
 //     jit-state: start-tracing
 //     4:21

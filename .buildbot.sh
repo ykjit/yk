@@ -22,6 +22,14 @@ export PATH=${CARGO_HOME}/bin/:$PATH
 
 rustup toolchain install nightly --allow-downgrade --component rustfmt
 
+# There are some feature-gated testing/debugging switches which slow the JIT
+# down a bit. Check that if we build the system without tests, those features
+# are not enabled.
+for mode in "" "--release"; do \
+    cargo -Z unstable-options build ${mode} --build-plan -p ykcapi | \
+        awk '/yk_testing/ { ec=1 } /jit_state_debug/ { ec=1 } END {exit ec}'; \
+done
+
 cargo fmt --all -- --check
 
 # Build LLVM for the C tests.

@@ -18,7 +18,10 @@ use num_cpus;
 use parking_lot::{Condvar, Mutex, MutexGuard};
 use std::lazy::SyncLazy;
 
-use crate::location::{HotLocation, HotLocationKind, Location, LocationInner};
+use crate::{
+    location::{HotLocation, HotLocationKind, Location, LocationInner},
+    print_jit_state,
+};
 use yktrace::{start_tracing, stop_tracing, CompiledTrace, IRTrace, TracingKind};
 
 // The HotThreshold must be less than a machine word wide for [`Location::Location`] to do its
@@ -161,22 +164,22 @@ impl MT {
                 // the trace itself.
                 // https://github.com/ykjit/yk/issues/442
                 loop {
-                    #[cfg(feature = "jit_state_debug")]
-                    eprintln!("jit-state: enter-jit-code");
+                    #[cfg(feature = "yk_jitstate_debug")]
+                    print_jit_state("enter-jit-code");
                     unsafe { &*ctr }.exec(ctrlp_vars);
-                    #[cfg(feature = "jit_state_debug")]
-                    eprintln!("jit-state: exit-jit-code");
+                    #[cfg(feature = "yk_jitstate_debug")]
+                    print_jit_state("exit-jit-code");
                 }
             }
             TransitionLocation::StartTracing(kind) => {
-                #[cfg(feature = "jit_state_debug")]
-                eprintln!("jit-state: start-tracing");
+                #[cfg(feature = "yk_jitstate_debug")]
+                print_jit_state("start-tracing");
                 start_tracing(kind);
             }
             TransitionLocation::StopTracing(x) => match stop_tracing() {
                 Ok(ir_trace) => {
-                    #[cfg(feature = "jit_state_debug")]
-                    eprintln!("jit-state: stop-tracing");
+                    #[cfg(feature = "yk_jitstate_debug")]
+                    print_jit_state("stop-tracing");
                     self.queue_compile_job(ir_trace, x);
                 }
                 Err(_) => todo!(),
