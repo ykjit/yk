@@ -1,6 +1,6 @@
-// ignore: broken during new control point design
-// Compiler:
 // Run-time:
+//   env-var: YKD_PRINT_JITSTATE=1
+//   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_PRINT_IR=aot,jit-pre-opt,jit-post-opt
 //   stderr:
 //     ...
@@ -32,29 +32,26 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
+#include <yk.h>
 #include <yk_testing.h>
 
 int main(int argc, char **argv) {
-  int x, res;
-  __yktrace_start_tracing(HW_TRACING, &res, &x);
-  // __yktrace_start_tracing() will already inhibit optimisations on `x` since
-  // its address is passed as an argument and the compiler must assume that it
-  // may be mutated. Therefore to properly test NOOPT_VAL we need to initialise
-  // `x` after the call to __yktrace_start_tracing..
-  x = 2;
-  NOOPT_VAL(x);
-  res = x + 3; // We don't want this operation to be optimised away.
+  YkMT *mt = yk_mt_new();
+  yk_hot_threshold_set(mt, 0);
+  YkLocation loc = yk_location_new();
+
+  int x, res = 0, i = 3;
+  NOOPT_VAL(i);
+  while (i > 0) {
+    yk_control_point(mt, &loc);
+    x = 2;
+    NOOPT_VAL(x);
+    res = x + 3; // We don't want this operation to be optimised away.
+    i--;
+  }
   NOOPT_VAL(res);
-  void *tr = __yktrace_stop_tracing();
   assert(res == 5);
-
-  void *ptr = __yktrace_irtrace_compile(tr);
-  __yktrace_drop_irtrace(tr);
-  void (*func)(int *, int *) = (void (*)(int *, int *))ptr;
-  int res2 = 0;
-  func(&res2, &x);
-  assert(res2 == 5);
-
+  yk_location_drop(loc);
+  yk_mt_drop(mt);
   return (EXIT_SUCCESS);
 }

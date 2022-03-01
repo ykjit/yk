@@ -1,13 +1,27 @@
-// ignore: broken during new control point design
 // Compiler:
 // Run-time:
+//   env-var: YKD_PRINT_JITSTATE=1
+//   env-var: YKD_PRINT_IR=jit-pre-opt
+//   env-var: YKD_SERIALISE_COMPILATION=1
+//   stderr:
+//     ...
+//     jit-state: start-tracing
+//     3: 47
+//     jit-state: stop-tracing
+//     --- Begin jit-pre-opt ---
+//     ...
+//     --- End jit-pre-opt ---
+//     2: 47
+//     jit-state: enter-jit-code
+//     1: 47
+//     jit-state: stopgap
+//     ...
 
 // Check that tracing a cascading "if...else if...else" works.
 
-#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
+#include <yk.h>
 #include <yk_testing.h>
 
 __attribute__((noinline)) int f(int x) {
@@ -20,18 +34,20 @@ __attribute__((noinline)) int f(int x) {
 }
 
 int main(int argc, char **argv) {
-  int res = 0;
-  __yktrace_start_tracing(HW_TRACING, &res, &argc);
-  res = f(argc);
-  void *tr = __yktrace_stop_tracing();
-  assert(res == 47);
+  YkMT *mt = yk_mt_new();
+  yk_hot_threshold_set(mt, 0);
+  YkLocation loc = yk_location_new();
 
-  void *ptr = __yktrace_irtrace_compile(tr);
-  __yktrace_drop_irtrace(tr);
-  void (*func)(int *, int *) = (void (*)(int *, int *))ptr;
-  int res2 = 0;
-  func(&res2, &argc);
-  assert(res2 == 47);
+  int i = 3, x = 1;
+  NOOPT_VAL(i);
+  while (i > 0) {
+    yk_control_point(mt, &loc);
+    NOOPT_VAL(x);
+    fprintf(stderr, "%d: %d\n", i, f(x));
+    i--;
+  }
 
+  yk_location_drop(loc);
+  yk_mt_drop(mt);
   return (EXIT_SUCCESS);
 }
