@@ -19,6 +19,9 @@ The following stages are supported:
  - `jit-post-opt`: the IR for the trace after LLVM has optimised it. This is
    the IR that will be submitted to the LLVM code generator.
 
+This variable is always available, and does not require any Cargo feature to be
+enabled.
+
 ### `YKD_PRINT_JITSTATE`
 
 When defined, `YKD_PRINT_JITSTATE` causes the system to emit extra information
@@ -35,6 +38,9 @@ Note that there are no `start-interpreting` and `stop-interpreting`
 notifications: if the system is not currently tracing or executing JITted code,
 then it is implicitly interpreting.
 
+This variable is only available when building with the `yk_jitstate_debug`
+Cargo feature is enabled.
+
 ### `YKD_SERIALISE_COMPILATION`
 
 When `YKD_SERIALISE_COMPILATION=1`, calls to `yk_control_point(loc)` will block
@@ -42,3 +48,6 @@ while `loc` is being compiled.
 
 This variable is only available when the `c_testing` feature is used, and it is
 only intended for use in testing.
+
+This variable is only available when building with the `yk_testing` Cargo
+feature is enabled.
