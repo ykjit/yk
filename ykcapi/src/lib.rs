@@ -178,6 +178,11 @@ pub extern "C" fn yk_stopgap(
         }
     }
     // FIXME: Initialise stopgap interpreter here.
+    //
+    // Note that exiting like this causes mayhem for interpreters with multiple threads.
+    // See: https://github.com/ykjit/yk/pull/516#issuecomment-1062775714
+    //
+    // When we fix this, we should re-enable the multi-threaded tests at the same time.
     process::exit(0);
 }
 
