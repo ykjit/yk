@@ -1,15 +1,11 @@
-// ignore: broken during new control point design
 // Compiler:
 // Run-time:
+//   env-var: YKD_PRINT_JITSTATE=1
 //   env-var: YKD_PRINT_IR=jit-pre-opt
-//   stderr:
+//   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
 //     ...
-//     define internal void @__yk_compiled_trace_0(i32* %0) {
-//        ...
-//        store i32 2, i32* %0, align 4...
-//        ret void
-//     }
+//     jit-state: enter-jit-code
 //     ...
 
 // Check that running a traced binary via a relative path works.
@@ -17,10 +13,9 @@
 #include <assert.h>
 #include <err.h>
 #include <libgen.h>
-#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
+#include <yk.h>
 #include <yk_testing.h>
 
 int main(int argc, char **argv) {
@@ -41,18 +36,19 @@ int main(int argc, char **argv) {
     // NOREACH
   }
 
-  int res = 0;
-  __yktrace_start_tracing(HW_TRACING, &res);
-  res = 2;
-  void *tr = __yktrace_stop_tracing();
-  assert(res == 2);
+  YkMT *mt = yk_mt_new();
+  yk_hot_threshold_set(mt, 0);
+  YkLocation loc = yk_location_new();
 
-  void *ptr = __yktrace_irtrace_compile(tr);
-  __yktrace_drop_irtrace(tr);
-  void (*func)(int *) = (void (*)(int *))ptr;
-  int res2 = 0;
-  func(&res2);
-  assert(res2 == 2);
+  int i = 3;
+  NOOPT_VAL(i);
+  while (i > 0) {
+    yk_control_point(mt, &loc);
+    i--;
+  }
 
+  assert(i == 0);
+  yk_location_drop(loc);
+  yk_mt_drop(mt);
   return (EXIT_SUCCESS);
 }

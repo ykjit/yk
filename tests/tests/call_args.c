@@ -1,24 +1,27 @@
-// ignore: broken during new control point design
-// Compiler:
 // Run-time:
 //   env-var: YKD_PRINT_IR=jit-pre-opt
+//   env-var: YKD_SERIALISE_COMPILATION=1
+//   env-var: YKD_PRINT_JITSTATE=1
 //   stderr:
+//     jit-state: start-tracing
+//     3: 5
+//     jit-state: stop-tracing
+//     --- Begin jit-pre-opt ---
 //     ...
-//     define internal void @__yk_compiled_trace_0(i32* %0) {
-//       ...
-//       %2 = add nsw i32 3, 2...
-//       ...
-//       store i32 %2, i32* %0, align 4...
-//       ret void
-//     }
+//     %{{res}} = add nsw i32...
+//     ...
+//     --- End jit-pre-opt ---
+//     2: 5
+//     jit-state: enter-jit-code
+//     1: 5
+//     jit-state: stopgap
 //     ...
 
-// Check that basic trace compilation works.
+// Check that function calls with arguments do the right thing
 
-#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
+#include <yk.h>
 #include <yk_testing.h>
 
 __attribute__((noinline)) int f(int a, int b) {
@@ -27,18 +30,21 @@ __attribute__((noinline)) int f(int a, int b) {
 }
 
 int main(int argc, char **argv) {
-  int res = 0;
-  __yktrace_start_tracing(HW_TRACING, &res);
-  res = f(2, 3);
-  void *tr = __yktrace_stop_tracing();
-  assert(res == 5);
+  YkMT *mt = yk_mt_new();
+  yk_hot_threshold_set(mt, 0);
+  YkLocation loc = yk_location_new();
 
-  void *ptr = __yktrace_irtrace_compile(tr);
-  __yktrace_drop_irtrace(tr);
-  void (*func)(void *) = (void (*)(void *))ptr;
-  int output = 0;
-  func(&output);
-  assert(output == 5);
+  int i = 3, two = 2, three = 3;
+  NOOPT_VAL(i);
+  while (i > 0) {
+    yk_control_point(mt, &loc);
+    NOOPT_VAL(two);
+    NOOPT_VAL(three);
+    fprintf(stderr, "%d: %d\n", i, f(two, three));
+    i--;
+  }
 
+  yk_location_drop(loc);
+  yk_mt_drop(mt);
   return (EXIT_SUCCESS);
 }
