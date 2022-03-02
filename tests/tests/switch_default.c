@@ -45,14 +45,14 @@ int main(int argc, char **argv) {
     yk_control_point(mt, &loc);
     fprintf(stderr, "i=%d\n", i);
     switch (i) {
-      case 100:
-        fprintf(stderr, "one hundred\n");
-      case 200:
-        fprintf(stderr, "two hundred\n");
-      case 300:
-        fprintf(stderr, "three hundred\n");
-      default:
-        i--;
+    case 100:
+      fprintf(stderr, "one hundred\n");
+    case 200:
+      fprintf(stderr, "two hundred\n");
+    case 300:
+      fprintf(stderr, "three hundred\n");
+    default:
+      i--;
     }
   }
   abort(); // FIXME: unreachable due to aborting guard failure earlier.

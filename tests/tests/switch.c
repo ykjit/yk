@@ -41,15 +41,15 @@ int main(int argc, char **argv) {
     yk_control_point(mt, &loc);
     fprintf(stderr, "i=%d\n", i);
     switch (j) {
-      case 100:
-        i = 997;
-      case 200:
-        i = 998;
-      case 300:
-        i--;
-        break;
-      default:
-        i = 999;
+    case 100:
+      i = 997;
+    case 200:
+      i = 998;
+    case 300:
+      i--;
+      break;
+    default:
+      i = 999;
     }
   }
   abort(); // FIXME: unreachable due to aborting guard failure earlier.

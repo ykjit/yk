@@ -24,11 +24,14 @@ fn clang_format() {
         if let Some(ext) = entry.path().extension() {
             match ext.to_str().unwrap() {
                 "h" | "c" | "cpp" | "cc" => {
-                    Command::new("clang-format")
+                    let res = Command::new("clang-format")
                         .arg("-i")
                         .arg(entry.path())
                         .output()
                         .expect("Failed to execute xtask: cfmt");
+                    if !res.status.success() {
+                        panic!("clang-format failed on {}", entry.path().to_str().unwrap());
+                    }
                 }
                 _ => {}
             }

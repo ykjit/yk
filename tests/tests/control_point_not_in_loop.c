@@ -7,8 +7,8 @@
 
 // Check that the system crashes if the control point is not in a loop.
 
-#include <stdlib.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <yk.h>
 
 int main(int argc, char **argv) {

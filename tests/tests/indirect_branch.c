@@ -25,11 +25,11 @@ int main(int argc, char **argv) {
     yk_control_point(loc);
     fprintf(stderr, "i=%d\n", i);
     goto *dispatch[idx];
-label1:
+  label1:
     abort(); // unreachable.
-label2:
+  label2:
     abort(); // unreachable.
-label3:
+  label3:
     i--;
   }
   abort(); // FIXME: unreachable due to aborting guard failure earlier.

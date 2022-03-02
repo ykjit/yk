@@ -21,7 +21,7 @@ int main(int argc, char **argv) {
 void unused() {
   YkMT *mt = yk_mt_new();
   YkLocation loc = yk_location_new();
-  while(true) {
+  while (true) {
     yk_control_point(mt, &loc);
   }
   yk_location_drop(loc);
