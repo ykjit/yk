@@ -31,14 +31,14 @@
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new();
-  yk_hot_threshold_set(mt, 0);
+  yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
   int i = 3;
   int j = 300;
   NOOPT_VAL(i);
   NOOPT_VAL(j);
   while (i > 0) {
-    yk_control_point(mt, &loc);
+    yk_mt_control_point(mt, &loc);
     fprintf(stderr, "i=%d\n", i);
     switch (j) {
     case 100:

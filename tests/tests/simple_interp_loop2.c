@@ -71,7 +71,7 @@ int mem = 4;
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new();
-  yk_hot_threshold_set(mt, 0);
+  yk_mt_hot_threshold_set(mt, 0);
 
   // A hard-coded program to execute.
   int prog[] = {NOP, NOP, DEC, RESTART_IF_NOT_ZERO, NOP, EXIT};
@@ -95,7 +95,7 @@ int main(int argc, char **argv) {
   while (true) {
     assert(pc < prog_len);
     YkLocation *loc = &locs[pc];
-    yk_control_point(mt, loc);
+    yk_mt_control_point(mt, loc);
     int bc = prog[pc];
     fprintf(stderr, "pc=%d, mem=%d\n", pc, mem);
     switch (bc) {

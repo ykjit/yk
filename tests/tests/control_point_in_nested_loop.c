@@ -16,7 +16,7 @@ int main(int argc, char **argv) {
   NOOPT_VAL(inners);
   for (int i = 0; i < outers; i++) {
     for (int j = 0; j < inners; j++) {
-      yk_control_point(mt, NULL); // In a nested loop!
+      yk_mt_control_point(mt, NULL); // In a nested loop!
     }
   }
   yk_mt_drop(mt);

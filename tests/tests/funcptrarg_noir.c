@@ -27,7 +27,7 @@ int bar(size_t (*func)(const char *)) {
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new();
-  yk_hot_threshold_set(mt, 0);
+  yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
   int z = 0, i = 2;
@@ -36,7 +36,7 @@ int main(int argc, char **argv) {
   NOOPT_VAL(z);
   NOOPT_VAL(f);
   while (i > 0) {
-    yk_control_point(mt, &loc);
+    yk_mt_control_point(mt, &loc);
     z = bar(f);
     i--;
   }

@@ -26,13 +26,13 @@ extern int call_me_add(int);
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new();
-  yk_hot_threshold_set(mt, 0);
+  yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
   int i = 3;
   NOOPT_VAL(i);
   while (i > 0) {
-    yk_control_point(mt, &loc);
+    yk_mt_control_point(mt, &loc);
     fprintf(stderr, "%d\n", call_me_add(i));
     i--;
   }

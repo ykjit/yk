@@ -35,7 +35,7 @@ pub extern "C" fn yk_mt_drop(mt: *mut MT) {
 
 // The "dummy control point" that is replaced in an LLVM pass.
 #[no_mangle]
-pub extern "C" fn yk_control_point(_mt: *mut MT, _loc: *mut Location) {
+pub extern "C" fn yk_mt_control_point(_mt: *mut MT, _loc: *mut Location) {
     // Intentionally empty.
 }
 
@@ -51,7 +51,7 @@ pub extern "C" fn __ykrt_control_point(mt: *mut MT, loc: *mut Location, ctrlp_va
 }
 
 #[no_mangle]
-pub extern "C" fn yk_hot_threshold_set(mt: &MT, hot_threshold: HotThreshold) {
+pub extern "C" fn yk_mt_hot_threshold_set(mt: &MT, hot_threshold: HotThreshold) {
     mt.set_hot_threshold(hot_threshold);
 }
 
