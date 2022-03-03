@@ -35,7 +35,7 @@ int bar(size_t (*func)(const char *)) {
   NOOPT_VAL(pre);
   NOOPT_VAL(i);
   while (i > 0) {
-    yk_control_point(mt, &loc);
+    yk_mt_control_point(mt, &loc);
     i--;
   }
 

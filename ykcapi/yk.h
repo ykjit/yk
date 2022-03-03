@@ -40,7 +40,7 @@ void yk_mt_drop(YkMT *);
 // argument passed uniquely identifies the current location in the user's
 // program. A call to this function may cause yk to start/stop tracing, or to
 // execute JITted code.
-void yk_control_point(YkMT *, YkLocation *);
+void yk_mt_control_point(YkMT *, YkLocation *);
 
 // Set the threshold at which `YkLocation`'s are considered hot.
 void yk_hot_threshold_set(YkMT *, YkHotThreshold);

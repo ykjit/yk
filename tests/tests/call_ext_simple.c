@@ -28,7 +28,7 @@ int main(int argc, char **argv) {
   int ch = '1';
   NOOPT_VAL(ch);
   while (ch != '3') {
-    yk_control_point(mt, &loc);
+    yk_mt_control_point(mt, &loc);
     // Note that sometimes the compiler will make this a call to putc(3).
     putchar(ch);
     ch++;

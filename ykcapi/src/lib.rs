@@ -35,7 +35,7 @@ pub extern "C" fn yk_mt_drop(mt: *mut MT) {
 
 // The "dummy control point" that is replaced in an LLVM pass.
 #[no_mangle]
-pub extern "C" fn yk_control_point(_mt: *mut MT, _loc: *mut Location) {
+pub extern "C" fn yk_mt_control_point(_mt: *mut MT, _loc: *mut Location) {
     // Intentionally empty.
 }
 

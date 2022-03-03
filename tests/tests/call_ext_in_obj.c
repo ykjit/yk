@@ -32,7 +32,7 @@ int main(int argc, char **argv) {
   int i = 3;
   NOOPT_VAL(i);
   while (i > 0) {
-    yk_control_point(mt, &loc);
+    yk_mt_control_point(mt, &loc);
     fprintf(stderr, "%d\n", call_me_add(i));
     i--;
   }

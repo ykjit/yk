@@ -39,7 +39,7 @@ int main(int argc, char **argv) {
   NOOPT_VAL(i);
   NOOPT_VAL(src);
   while (i > 0) {
-    yk_control_point(mt, &loc);
+    yk_mt_control_point(mt, &loc);
     memcpy(&res, &src, 4);
     src--;
     i--;

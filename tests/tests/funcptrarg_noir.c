@@ -36,7 +36,7 @@ int main(int argc, char **argv) {
   NOOPT_VAL(z);
   NOOPT_VAL(f);
   while (i > 0) {
-    yk_control_point(mt, &loc);
+    yk_mt_control_point(mt, &loc);
     z = bar(f);
     i--;
   }

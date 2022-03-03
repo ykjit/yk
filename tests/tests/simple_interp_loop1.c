@@ -97,7 +97,7 @@ int main(int argc, char **argv) {
       exit(0);
     }
     YkLocation *loc = &locs[pc];
-    yk_control_point(mt, loc);
+    yk_mt_control_point(mt, loc);
     int bc = prog[pc];
     fprintf(stderr, "pc=%d, mem=%d\n", pc, mem);
     switch (bc) {

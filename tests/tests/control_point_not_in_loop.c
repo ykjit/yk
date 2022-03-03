@@ -2,7 +2,7 @@
 //   status: error
 //   stderr:
 //     ...
-//     ...error: yk_control_point() must be called inside a loop.
+//     ...error: yk_mt_control_point() must be called inside a loop.
 //     ...
 
 // Check that the system crashes if the control point is not in a loop.
@@ -13,7 +13,7 @@
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new();
-  yk_control_point(mt, NULL); // Not in a loop!
+  yk_mt_control_point(mt, NULL); // Not in a loop!
   yk_mt_drop(mt);
   return (EXIT_SUCCESS);
 }

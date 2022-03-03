@@ -24,7 +24,7 @@ int main(int argc, char **argv) {
   int y1 = 0, i = 3;
   NOOPT_VAL(i);
   while (i > 0) {
-    yk_control_point(mt, &loc);
+    yk_mt_control_point(mt, &loc);
     NOOPT_VAL(s1);
     y1 = s1.x;
     NOOPT_VAL(y1);

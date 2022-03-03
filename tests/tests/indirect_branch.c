@@ -22,7 +22,7 @@ int main(int argc, char **argv) {
   NOOPT_VAL(i);
   NOOPT_VAL(idx);
   while (i > 0) {
-    yk_control_point(loc);
+    yk_mt_control_point(loc);
     fprintf(stderr, "i=%d\n", i);
     goto *dispatch[idx];
   label1:
