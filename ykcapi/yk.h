@@ -43,7 +43,7 @@ void yk_mt_drop(YkMT *);
 void yk_mt_control_point(YkMT *, YkLocation *);
 
 // Set the threshold at which `YkLocation`'s are considered hot.
-void yk_hot_threshold_set(YkMT *, YkHotThreshold);
+void yk_mt_hot_threshold_set(YkMT *, YkHotThreshold);
 
 // Create a new `Location`.
 //

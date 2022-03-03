@@ -51,7 +51,7 @@ pub extern "C" fn __ykrt_control_point(mt: *mut MT, loc: *mut Location, ctrlp_va
 }
 
 #[no_mangle]
-pub extern "C" fn yk_hot_threshold_set(mt: &MT, hot_threshold: HotThreshold) {
+pub extern "C" fn yk_mt_hot_threshold_set(mt: &MT, hot_threshold: HotThreshold) {
     mt.set_hot_threshold(hot_threshold);
 }
 

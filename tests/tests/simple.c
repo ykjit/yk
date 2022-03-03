@@ -54,7 +54,7 @@
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new();
-  yk_hot_threshold_set(mt, 0);
+  yk_mt_hot_threshold_set(mt, 0);
   int res = 9998;
   YkLocation loc = yk_location_new();
   fflush(NULL);
