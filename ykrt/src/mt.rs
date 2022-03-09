@@ -284,9 +284,21 @@ impl MT {
             match &hl.kind {
                 HotLocationKind::Compiled(ctr) => {
                     loc.unlock();
-                    return TransitionLocation::Execute(*ctr);
+                    let thread_arc = THREAD_MTTHREAD.with(|mtt| Arc::clone(&mtt.tracing));
+                    if !thread_arc.load(Ordering::Relaxed).is_null() {
+                        // FIXME: https://github.com/ykjit/yk/issues/519
+                        return TransitionLocation::NoAction;
+                    } else {
+                        return TransitionLocation::Execute(*ctr);
+                    }
                 }
                 HotLocationKind::Compiling(arcmtx) => {
+                    let thread_arc = THREAD_MTTHREAD.with(|mtt| Arc::clone(&mtt.tracing));
+                    if !thread_arc.load(Ordering::Relaxed).is_null() {
+                        loc.unlock();
+                        // FIXME: https://github.com/ykjit/yk/issues/519
+                        return TransitionLocation::NoAction;
+                    }
                     let r = match arcmtx.try_lock().map(|mut x| x.take()) {
                         None | Some(None) => {
                             // `None` means we failed to grab the lock; `Some(None)` means we
@@ -839,5 +851,50 @@ mod tests {
                 t.join().unwrap();
             }
         });
+    }
+
+    #[test]
+    fn dont_trace_execution_of_a_trace() {
+        let mt = Arc::new(MT::new());
+        mt.set_hot_threshold(0);
+        let loc1 = Location::new();
+        let loc2 = Location::new();
+
+        // Get `loc1` to the point where there's a compiled trace for it.
+        assert!(matches!(
+            mt.transition_location(&loc1),
+            TransitionLocation::StartTracing(_)
+        ));
+        if let TransitionLocation::StopTracing(mtx) = mt.transition_location(&loc1) {
+            mtx.lock()
+                .replace(Box::new(unsafe { CompiledTrace::new_null() }));
+        } else {
+            panic!();
+        }
+
+        // If we transition `loc2` into `StartTracing`, then (for now) we should not execute the
+        // trace for `loc1`, as another location is being traced and we don't want to trace the
+        // execution of the trace!
+        //
+        // FIXME: this behaviour will need to change in the future:
+        // https://github.com/ykjit/yk/issues/519
+        assert!(matches!(
+            mt.transition_location(&loc2),
+            TransitionLocation::StartTracing(_)
+        ));
+        assert!(matches!(
+            mt.transition_location(&loc1),
+            TransitionLocation::NoAction
+        ));
+
+        // But once we stop tracing for `loc2`, we should be able to execute the trace for `loc1`.
+        assert!(matches!(
+            mt.transition_location(&loc2),
+            TransitionLocation::StopTracing(_)
+        ));
+        assert!(matches!(
+            mt.transition_location(&loc1),
+            TransitionLocation::Execute(_)
+        ));
     }
 }

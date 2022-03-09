@@ -34,7 +34,6 @@
 //     ...
 //     --- End jit-pre-opt ---
 //     pc=0, mem=9
-//     jit-state: start-tracing
 //     pc=1, mem=8
 //     pc=2, mem=7
 //     pc=3, mem=6
@@ -78,9 +77,13 @@ int main(int argc, char **argv) {
   size_t prog_len = sizeof(prog) / sizeof(prog[0]);
 
   // Create one location for each potential PC value.
-  YkLocation locs[prog_len];
+  YkLocation loop_loc = yk_location_new();
+  YkLocation *locs[prog_len];
   for (int i = 0; i < prog_len; i++)
-    locs[i] = yk_location_new();
+    if (i == 0)
+      locs[i] = &loop_loc;
+    else
+      locs[i] = NULL;
 
   // The program counter.
   int pc = 0;
@@ -96,8 +99,7 @@ int main(int argc, char **argv) {
     if (pc >= prog_len) {
       exit(0);
     }
-    YkLocation *loc = &locs[pc];
-    yk_mt_control_point(mt, loc);
+    yk_mt_control_point(mt, locs[pc]);
     int bc = prog[pc];
     fprintf(stderr, "pc=%d, mem=%d\n", pc, mem);
     switch (bc) {
@@ -118,8 +120,7 @@ int main(int argc, char **argv) {
   abort(); // FIXME: unreachable due to aborting guard failure earlier.
   NOOPT_VAL(pc);
 
-  for (int i = 0; i < prog_len; i++)
-    yk_location_drop(locs[i]);
+  yk_location_drop(loop_loc);
   yk_mt_drop(mt);
 
   return (EXIT_SUCCESS);
