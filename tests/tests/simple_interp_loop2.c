@@ -35,7 +35,6 @@
 //     ...
 //     --- End jit-pre-opt ---
 //     pc=0, mem=3
-//     jit-state: start-tracing
 //     pc=1, mem=3
 //     pc=2, mem=3
 //     pc=3, mem=2
@@ -52,6 +51,7 @@
 //     pc=3, mem=0
 //     jit-state: stopgap
 //     ...
+
 #include <assert.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -77,10 +77,13 @@ int main(int argc, char **argv) {
   int prog[] = {NOP, NOP, DEC, RESTART_IF_NOT_ZERO, NOP, EXIT};
   size_t prog_len = sizeof(prog) / sizeof(prog[0]);
 
-  // Create one location for each potential PC value.
-  YkLocation locs[prog_len];
+  YkLocation loop_loc = yk_location_new();
+  YkLocation *locs[prog_len];
   for (int i = 0; i < prog_len; i++)
-    locs[i] = yk_location_new();
+    if (i == 0)
+      locs[i] = &loop_loc;
+    else
+      locs[i] = NULL;
 
   // The program counter.
   int pc = 0;
@@ -94,8 +97,7 @@ int main(int argc, char **argv) {
   // interpreter loop.
   while (true) {
     assert(pc < prog_len);
-    YkLocation *loc = &locs[pc];
-    yk_mt_control_point(mt, loc);
+    yk_mt_control_point(mt, locs[pc]);
     int bc = prog[pc];
     fprintf(stderr, "pc=%d, mem=%d\n", pc, mem);
     switch (bc) {
@@ -122,8 +124,7 @@ done:
   abort(); // FIXME: unreachable due to aborting guard failure earlier.
   NOOPT_VAL(pc);
 
-  for (int i = 0; i < prog_len; i++)
-    yk_location_drop(locs[i]);
+  yk_location_drop(loop_loc);
   yk_mt_drop(mt);
 
   return (EXIT_SUCCESS);
