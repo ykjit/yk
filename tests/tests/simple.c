@@ -55,9 +55,9 @@
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new();
   yk_mt_hot_threshold_set(mt, 0);
-  int res = 9998;
   YkLocation loc = yk_location_new();
-  fflush(NULL);
+
+  int res = 9998;
   int i = 4;
   NOOPT_VAL(loc);
   NOOPT_VAL(res);
@@ -68,10 +68,10 @@ int main(int argc, char **argv) {
     res += 2;
     i--;
   }
+
   abort(); // FIXME: unreachable due to aborting guard failure earlier.
   NOOPT_VAL(res);
   yk_location_drop(loc);
   yk_mt_drop(mt);
-
   return (EXIT_SUCCESS);
 }

@@ -3,49 +3,44 @@
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_PRINT_JITSTATE=1
 //   stderr:
-//     ...
 //     jit-state: start-tracing
-//     3:1
+//     3:5
 //     jit-state: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     --- End jit-pre-opt ---
-//     2:1
+//     2:5
 //     jit-state: enter-jit-code
-//     1:1
+//     1:5
 //     jit-state: stopgap
 //     ...
 
-// Check that we can handle struct field accesses.
+// Check that using an argument (of a non-main() function) in a trace works.
 
-#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <yk.h>
 #include <yk_testing.h>
 
-struct s {
-  int x;
-};
-
-int main(int argc, char **argv) {
+void f(int x) {
   YkMT *mt = yk_mt_new();
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
-  struct s s1 = {argc};
-  int y1 = 0, i = 3;
+  int i = 3;
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    NOOPT_VAL(s1);
-    y1 = s1.x;
-    fprintf(stderr, "%d:%d\n", i, s1.x);
+    fprintf(stderr, "%d:%d\n", i, x);
     i--;
   }
-  assert(y1 == 1);
 
   yk_location_drop(loc);
   yk_mt_drop(mt);
+}
+
+int main(int argc, char **argv) {
+  f(5);
   return (EXIT_SUCCESS);
 }
