@@ -234,8 +234,12 @@ impl CompiledTrace {
     pub fn exec(&self, ctrlp_vars: *mut c_void) {
         #[cfg(feature = "yk_testing")]
         assert_ne!(self.entry as *const (), std::ptr::null());
-        let f = unsafe { mem::transmute::<_, fn(*mut c_void, *const c_void, usize)>(self.entry) };
-        (f)(ctrlp_vars, self.smptr, self.smsize)
+        unsafe {
+            let f = mem::transmute::<_, unsafe extern "C" fn(*mut c_void, *const c_void, usize)>(
+                self.entry,
+            );
+            f(ctrlp_vars, self.smptr, self.smsize)
+        }
     }
 }
 
