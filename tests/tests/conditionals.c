@@ -1,13 +1,13 @@
 // Run-time:
-//   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_PRINT_JITSTATE=1
+//   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
 //     ...
 //     jit-state: enter-jit-code
-//     z=4
+//     res=2
 //     ...
 
-// Test indirect calls where we have IR for the callee.
+// Check that conditional checks work.
 
 #include <assert.h>
 #include <stdio.h>
@@ -15,29 +15,24 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-__attribute__((noinline)) int foo(int a) {
-  NOOPT_VAL(a);
-  return a + 1;
-}
-
-int bar(int (*func)(int)) {
-  int a = func(3);
-  return a;
-}
-
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new();
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
-  int z = 0, i = 4;
+  int cond = 1, i = 4;
   NOOPT_VAL(i);
-  NOOPT_VAL(z);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    z = bar(foo);
-    assert(z == 4);
-    fprintf(stderr, "z=%d\n", z);
+    int res = 0;
+    NOOPT_VAL(cond);
+    if (cond) {
+      res = 2;
+    } else {
+      res = 4;
+    }
+    assert(res == 2);
+    fprintf(stderr, "res=%d\n", res);
     i--;
   }
 

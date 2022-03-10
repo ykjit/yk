@@ -1,43 +1,36 @@
-// ignore: broken during new control point design
-// Compiler:
-// Run-time:
+// ignore: opt levels > -O0 require more intrinstics support from ykllvm
 
 // Check that we can call a static function with internal linkage from the same
 // compilation unit.
 
 #include <assert.h>
-#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
+#include <yk.h>
 #include <yk_testing.h>
 
 static int call_me(int x) {
+  NOOPT_VAL(x);
   if (x == 5)
-    return x;
-  else {
-    // The recursion will cause a call to be emitted in the trace.
-    return call_me(x + 1);
-  }
+    return 1;
+  else
+    return 0;
 }
 
 int main(int argc, char **argv) {
-  int res = 0;
-  __yktrace_start_tracing(HW_TRACING, &res, &argc);
-  NOOPT_VAL(argc);
-  // At higher optimisation levels LLVM realises that this call can be
-  // completely removed. Hence we only structurally test a couple of lower opt
-  // levels.
-  res = call_me(argc);
-  NOOPT_VAL(res);
-  void *tr = __yktrace_stop_tracing();
-  assert(res == 5);
+  YkMT *mt = yk_mt_new();
+  yk_mt_hot_threshold_set(mt, 0);
+  YkLocation loc = yk_location_new();
 
-  void *ptr = __yktrace_irtrace_compile(tr);
-  __yktrace_drop_irtrace(tr);
-  void (*func)(int *, int *) = (void (*)(int *, int *))ptr;
-  int res2 = 0;
-  func(&res2, &argc);
-  assert(res2 == 5);
+  int res = 0, i = 4;
+  NOOPT_VAL(i);
+  while (i > 0) {
+    yk_mt_control_point(mt, &loc);
+    res = call_me(argc);
+    i--;
+  }
+  assert(res == 0);
 
+  yk_location_drop(loc);
+  yk_mt_drop(mt);
   return (EXIT_SUCCESS);
 }
