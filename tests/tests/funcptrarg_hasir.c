@@ -1,16 +1,24 @@
-// ignore: broken during new control point design
-// Compiler:
 // Run-time:
+//   env-var: YKD_SERIALISE_COMPILATION=1
+//   env-var: YKD_PRINT_JITSTATE=1
+//   stderr:
+//     ...
+//     jit-state: enter-jit-code
+//     z=4
+//     ...
 
 // Test indirect calls where we have IR for the callee.
 
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
+#include <yk.h>
 #include <yk_testing.h>
 
-__attribute__((noinline)) int foo(int a) { return a + 1; }
+__attribute__((noinline)) int foo(int a) {
+  NOOPT_VAL(a);
+  return a + 1;
+}
 
 int bar(int (*func)(int)) {
   int a = func(3);
@@ -18,19 +26,22 @@ int bar(int (*func)(int)) {
 }
 
 int main(int argc, char **argv) {
-  int z = 0;
-  __yktrace_start_tracing(HW_TRACING, &z);
-  z = bar(foo);
+  YkMT *mt = yk_mt_new();
+  yk_mt_hot_threshold_set(mt, 0);
+  YkLocation loc = yk_location_new();
+
+  int z = 0, i = 4;
+  NOOPT_VAL(i);
   NOOPT_VAL(z);
-  void *tr = __yktrace_stop_tracing();
-  assert(z == 4);
+  while (i > 0) {
+    yk_mt_control_point(mt, &loc);
+    z = bar(foo);
+    assert(z == 4);
+    fprintf(stderr, "z=%d\n", z);
+    i--;
+  }
 
-  void *ptr = __yktrace_irtrace_compile(tr);
-  __yktrace_drop_irtrace(tr);
-  void (*func)(void *) = (void (*)(void *))ptr;
-  int output = 0;
-  func(&output);
-  assert(output == 4);
-
+  yk_location_drop(loc);
+  yk_mt_drop(mt);
   return (EXIT_SUCCESS);
 }

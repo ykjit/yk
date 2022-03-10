@@ -1,48 +1,42 @@
-// ignore: broken during new control point design
-// Compiler:
 // Run-time:
-//   env-var: YKD_PRINT_IR=jit-pre-opt
+//   env-var: YKD_PRINT_JITSTATE=1
+//   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
 //     ...
-//     define internal void @__yk_compiled_trace_0(i32* %0) {
-//       ...
-//       %2 = load i32, i32* %0, align 4...
-//       %3 = icmp eq i32 %2, 0...
-//       ...
-//       store i32 3, i32* %0, align 4...
-//       ret void
-//     }
+//     jit-state: enter-jit-code
+//     res=2
 //     ...
 
-// Check that basic trace compilation works.
+// Check that conditional checks work.
 
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
+#include <yk.h>
 #include <yk_testing.h>
 
 int main(int argc, char **argv) {
-  int cond = argc;
-  __yktrace_start_tracing(HW_TRACING, &cond);
-  int res = 0;
-  if (cond) {
-    res = 2;
-    cond = 3;
-  } else {
-    res = 4;
+  YkMT *mt = yk_mt_new();
+  yk_mt_hot_threshold_set(mt, 0);
+  YkLocation loc = yk_location_new();
+
+  int cond = 1, i = 4;
+  NOOPT_VAL(i);
+  while (i > 0) {
+    yk_mt_control_point(mt, &loc);
+    int res = 0;
+    NOOPT_VAL(cond);
+    if (cond) {
+      res = 2;
+    } else {
+      res = 4;
+    }
+    assert(res == 2);
+    fprintf(stderr, "res=%d\n", res);
+    i--;
   }
-  void *tr = __yktrace_stop_tracing();
 
-  assert(cond == 3);
-  assert(res == 2);
-
-  void *ptr = __yktrace_irtrace_compile(tr);
-  __yktrace_drop_irtrace(tr);
-  void (*func)(void *) = (void (*)(void *))ptr;
-  int output = 0;
-  func(&output);
-  assert(output == 3);
-
+  yk_location_drop(loc);
+  yk_mt_drop(mt);
   return (EXIT_SUCCESS);
 }
