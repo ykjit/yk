@@ -984,7 +984,10 @@ public:
             // All intrinsic calls must have metadata attached that specifies
             // whether it has been inlined or not.
             MDNode *IMD = I->getMetadata("yk.intrinsic.inlined");
-            assert(IMD != nullptr);
+            if (IMD == nullptr) {
+              dumpValueAndExit(
+                  "instrinsic is missing `yk.intrinsic.inlined` metadata", &*I);
+            }
             ConstantAsMetadata *CAM =
                 cast<ConstantAsMetadata>(IMD->getOperand(0));
             if (CAM->getValue()->isOneValue()) {
