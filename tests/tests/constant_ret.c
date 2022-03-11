@@ -1,13 +1,20 @@
-// ignore: broken during new control point design
-// Compiler:
 // Run-time:
 //   env-var: YKD_PRINT_IR=jit-pre-opt
+//   env-var: YKD_SERIALISE_COMPILATION=1
+//   env-var: YKD_PRINT_JITSTATE=1
 //   stderr:
 //     ...
-//     define internal void @__yk_compiled_trace_0(i32* %0) {
+//     --- Begin jit-pre-opt ---
+//     ...
+//     define internal void @__yk_compiled_trace_0(...
 //       ...
-//       store i32 30, i32* %0, align 4...
+//       store i32 30, i32* %{{0}}, align 4...
 //       ...
+//     --- End jit-pre-opt ---
+//     2:30
+//     jit-state: enter-jit-code
+//     1:30
+//     ...
 
 // Check that returning a constant value from a traced function works.
 
@@ -15,23 +22,28 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <yk.h>
 #include <yk_testing.h>
 
 __attribute__((noinline)) int f() { return 30; }
 
 int main(int argc, char **argv) {
-  int res = 0;
-  __yktrace_start_tracing(HW_TRACING, &res);
-  res = f();
-  void *tr = __yktrace_stop_tracing();
-  assert(res == 30);
+  YkMT *mt = yk_mt_new();
+  yk_mt_hot_threshold_set(mt, 0);
+  YkLocation loc = yk_location_new();
 
-  void *ptr = __yktrace_irtrace_compile(tr);
-  __yktrace_drop_irtrace(tr);
-  void (*func)(int *) = (void (*)(int *))ptr;
-  int res2 = 0;
-  func(&res2);
-  assert(res2 == 30);
+  int i = 3, res = 0;
+  NOOPT_VAL(i);
+  while (i > 0) {
+    yk_mt_control_point(mt, &loc);
+    res = f();
+    NOOPT_VAL(res);
+    assert(res == 30);
+    fprintf(stderr, "%d:%d\n", i, res);
+    i--;
+  }
 
+  yk_location_drop(loc);
+  yk_mt_drop(mt);
   return (EXIT_SUCCESS);
 }
