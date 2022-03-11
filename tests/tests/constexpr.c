@@ -1,15 +1,22 @@
-// ignore: broken during new control point design
-// Compiler:
 // Run-time:
 //   env-var: YKD_PRINT_IR=jit-pre-opt
+//   env-var: YKD_PRINT_JITSTATE=1
+//   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
+//     ...
+//     --- Begin jit-pre-opt ---
 //     ...
 //     @.str = ...
 //     ...
-//     define internal void @__yk_compiled_trace_0(i32* %0) {
+//     define internal void @__yk_compiled_trace_0(...
 //       ...
-//       ...getelementptr inbounds ([4 x i8], [4 x i8]* @.str...
+//       ...store i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.str, i64 0, i64 0)...
 //       ...
+//     --- End jit-pre-opt ---
+//     2:97
+//     jit-state: enter-jit-code
+//     1:97
+//     ...
 
 // Check that global variables inside constant expressions are copied and
 // remapped.
@@ -17,26 +24,33 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
+#include <yk.h>
 #include <yk_testing.h>
 
 const volatile int global_int = 6;
 
-__attribute__((noinline)) char foo(char *str) { return str[0]; }
+__attribute__((noinline)) char foo(char *str) {
+  NOOPT_VAL(str);
+  // At optimisation levels >O0 this makes a constant GEP expression.
+  return str[0];
+}
 
 int main(int argc, char **argv) {
-  int res = 0;
-  __yktrace_start_tracing(HW_TRACING, &res);
-  res = foo("abc");
-  void *tr = __yktrace_stop_tracing();
-  assert(res == 97);
+  YkMT *mt = yk_mt_new();
+  yk_mt_hot_threshold_set(mt, 0);
+  YkLocation loc = yk_location_new();
 
-  void *ptr = __yktrace_irtrace_compile(tr);
-  __yktrace_drop_irtrace(tr);
-  void (*func)(void *) = (void (*)(void *))ptr;
-  int output = 0;
-  func(&output);
-  assert(output == 97);
+  int res = 0, i = 3;
+  NOOPT_VAL(i);
+  while (i > 0) {
+    yk_mt_control_point(mt, &loc);
+    res = foo("abc");
+    assert(res == 97);
+    fprintf(stderr, "%d:%d\n", i, res);
+    i--;
+  }
 
+  yk_location_drop(loc);
+  yk_mt_drop(mt);
   return (EXIT_SUCCESS);
 }
