@@ -73,10 +73,12 @@ To raise a pull request, you must:
      tests successfully (amongst other things, to avoid breaking `git bisect`).
 
   4. Push your branch to your GitHub fork and raise a pull request. Give the
-     pull request a descriptive name (for example, "Fix bug" is not useful but
+     pull request a meaningful title (for example, "Fix bug" is not helpful but
      "Deal with an empty list correctly" is) and a description (empty
-     descriptions are almost never acceptable). If it fixes a GitHub issue, add
-     the text `Fixes #<GitHub issue number>` into the description.
+     descriptions are almost never acceptable). If the pull request fixes all
+     aspects of a GitHub issue, add the text `Fixes #<GitHub issue number>`, as
+     a line on its own, into the description: GitHub will then automatically
+     close that issue when the pull request is merged.
 
 Your pull request has now been raised and will be reviewed by a yk contributor.
 The aim of a review is two fold: to ensure that contributions to yk are of an
