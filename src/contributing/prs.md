@@ -4,7 +4,8 @@ We welcome all and any contributions, from code to documentation to examples,
 submitted as *pull requests* to one of our [GitHub
 repositories](https://github.com/ykjit/). Pull requests are reviewed by a yk
 contributor: changes may be requested in an ongoing dialogue between reviewee
-and reviewer; and, once agreement is reached, the pull request will be merged.
+and reviewer; and, if and when agreement is reached, the pull request will be
+merged.
 
 This page explains yk's approach to the pull request model, based on
 observations of good practise in other projects, and our own experiences.
