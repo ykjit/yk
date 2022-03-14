@@ -58,12 +58,31 @@ requests are:
 
 ## The reviewer and reviewee covenant
 
-The aim of pull request reviewing is to ensure that contributions to yk are of
-good quality. We have high standards but we do not expect perfection: reviewers
-must not hold reviewees to unduly high standards. Similarly, reviews must not
-be adversarial: both reviewer and reviewee should work together to improve a
-pull request, with both parties assuming good faith on the part of the other.
+The aim of pull request reviewing is to make yk better while ensuring that our
+quality standards are maintained. Ultimately, it is in yk's best interests for
+all pull requests which satisfy the criteria listed in the previous section to
+be merged in.
+
+Both reviewer and reviewee have their part to play in making this process work.
+Most importantly, both parties must assume good faith on the part of the other:
+for example, questions are an opportunity to learn or explain, not to attack.
 Clear, polite, communication between both parties is required at all times.
+Reviewers should respond in a timely manner to comments, while understanding
+that reviewees may have many outside responsibilities that mean their responses
+are less timely.
+
+Reviewers should help a reviewee meet the expected standards, via questioning
+and explicit guidance, without setting the bar unnecessarily high. Reviewers
+need to accept:
+
+  * that a pull request cannot solve every problem, and some problems are best
+    deferred to a future pull request;
+  * and that some variance of individual style is acceptable.
+
+Put another way, while we set high standards, and require all contributions to
+meet them, we are not foolish enough to expect perfection. In particular,
+reviewers must be welcoming to newcomers, who may not be familiar with our
+processes or standards, and adjust accordingly.
 
 
 ## The pull request process in yk repositories
