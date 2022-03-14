@@ -4,7 +4,8 @@ We welcome all and any contributions, from code to documentation to examples,
 submitted as *pull requests* to one of our [GitHub
 repositories](https://github.com/ykjit/). Pull requests are reviewed by a yk
 contributor: changes may be requested in an ongoing dialogue between reviewee
-and reviewer; and, once agreement is reached, the pull request will be merged.
+and reviewer; and, if and when agreement is reached, the pull request will be
+merged.
 
 This page explains yk's approach to the pull request model, based on
 observations of good practise in other projects, and our own experiences.
@@ -50,9 +51,38 @@ requests are:
      that does not mean that every pull request should be merged: for example,
      a pull request which simply changes code to your preferred style is not
      only not useful but may cause problems for other people working in
-     parallel. However, porting the code to a little used platform probably is
-     often useful (provided it doesn't cause undue problems for more widely
-     used platforms).
+     parallel. However, porting the code to a little used platform is often
+     useful (provided it doesn't cause undue problems for more widely used
+     platforms).
+
+
+## The reviewer and reviewee covenant
+
+The aim of pull request reviewing is to make yk better while ensuring that our
+quality standards are maintained. Ultimately, it is in yk's best interests for
+all pull requests which satisfy the criteria listed in the previous section to
+be merged in.
+
+Both reviewer and reviewee have their part to play in making this process work.
+Most importantly, both parties must assume good faith on the part of the other:
+for example, questions are an opportunity to learn or explain, not to attack.
+Clear, polite, communication between both parties is required at all times.
+Reviewers should respond in a timely manner to comments, while understanding
+that reviewees may have many outside responsibilities that mean their responses
+are less timely.
+
+Reviewers should help a reviewee meet the expected standards, via questioning
+and explicit guidance, without setting the bar unnecessarily high. Reviewers
+need to accept:
+
+  * that a pull request cannot solve every problem, and some problems are best
+    deferred to a future pull request;
+  * and that some variance of individual style is acceptable.
+
+Put another way, while we set high standards, and require all contributions to
+meet them, we are not foolish enough to expect perfection. In particular,
+reviewers must be welcoming to newcomers, who may not be familiar with our
+processes or standards, and adjust accordingly.
 
 
 ## The pull request process in yk repositories
@@ -72,10 +102,12 @@ To raise a pull request, you must:
      tests successfully (amongst other things, to avoid breaking `git bisect`).
 
   4. Push your branch to your GitHub fork and raise a pull request. Give the
-     pull request a descriptive name (for example, "Fix bug" is not useful but
+     pull request a meaningful title (for example, "Fix bug" is not helpful but
      "Deal with an empty list correctly" is) and a description (empty
-     descriptions are almost never acceptable). If it fixes a GitHub issue, add
-     the text `Fixes #<GitHub issue number>` into the description.
+     descriptions are almost never acceptable). If the pull request fixes all
+     aspects of a GitHub issue, add the text `Fixes #<GitHub issue number>`, as
+     a line on its own, into the description: GitHub will then automatically
+     close that issue when the pull request is merged.
 
 Your pull request has now been raised and will be reviewed by a yk contributor.
 The aim of a review is two fold: to ensure that contributions to yk are of an
@@ -113,7 +145,7 @@ particular part of the repository. The general aim is to provide a pleasing
 sequence of self-contained commits which clearly articulate a change to future
 readers. At the very least, all of the "fix commits" must be merged away:
 commonly, these are merged into the main commits, or, though rarely, into a new
-commit(s). It is not required, and is often undesireable, to squash all commits
+commit(s). It is not required, and is often undesirable, to squash all commits
 down into a single commit: when multiple commits can better explain a change,
 they are much preferred. During squashing, you should also check that commit
 messages still accurately document their contents: revise those which need
@@ -123,16 +155,6 @@ The process of squashing is synonymous with `git rebase`, so when you are asked
 to squash it is also acceptable to: rebase the commit against the `master`
 branch at the same time; and force push the resulting rebased branch. *This is
 the only time you should force push an update to a branch.*
-
-
-## The reviewer and reviewee covenant
-
-The aim of pull request reviewing is to ensure that contributions to yk are of
-good quality. We have high standards but we do not expect perfection: reviewers
-must not hold reviewees to unduly high standards. Similarly, reviews must not
-be adversarial: both reviewer and reviewee should work together to improve a
-pull request, with both parties assuming good faith on the part of the other.
-Clear, polite, communication between both parties is required at all times.
 
 
 ## Documentation
