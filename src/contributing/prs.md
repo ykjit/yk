@@ -56,6 +56,16 @@ requests are:
      platforms).
 
 
+## The reviewer and reviewee covenant
+
+The aim of pull request reviewing is to ensure that contributions to yk are of
+good quality. We have high standards but we do not expect perfection: reviewers
+must not hold reviewees to unduly high standards. Similarly, reviews must not
+be adversarial: both reviewer and reviewee should work together to improve a
+pull request, with both parties assuming good faith on the part of the other.
+Clear, polite, communication between both parties is required at all times.
+
+
 ## The pull request process in yk repositories
 
 To raise a pull request, you must:
@@ -116,7 +126,7 @@ particular part of the repository. The general aim is to provide a pleasing
 sequence of self-contained commits which clearly articulate a change to future
 readers. At the very least, all of the "fix commits" must be merged away:
 commonly, these are merged into the main commits, or, though rarely, into a new
-commit(s). It is not required, and is often undesireable, to squash all commits
+commit(s). It is not required, and is often undesirable, to squash all commits
 down into a single commit: when multiple commits can better explain a change,
 they are much preferred. During squashing, you should also check that commit
 messages still accurately document their contents: revise those which need
@@ -126,16 +136,6 @@ The process of squashing is synonymous with `git rebase`, so when you are asked
 to squash it is also acceptable to: rebase the commit against the `master`
 branch at the same time; and force push the resulting rebased branch. *This is
 the only time you should force push an update to a branch.*
-
-
-## The reviewer and reviewee covenant
-
-The aim of pull request reviewing is to ensure that contributions to yk are of
-good quality. We have high standards but we do not expect perfection: reviewers
-must not hold reviewees to unduly high standards. Similarly, reviews must not
-be adversarial: both reviewer and reviewee should work together to improve a
-pull request, with both parties assuming good faith on the part of the other.
-Clear, polite, communication between both parties is required at all times.
 
 
 ## Documentation
