@@ -51,9 +51,9 @@ requests are:
      that does not mean that every pull request should be merged: for example,
      a pull request which simply changes code to your preferred style is not
      only not useful but may cause problems for other people working in
-     parallel. However, porting the code to a little used platform probably is
-     often useful (provided it doesn't cause undue problems for more widely
-     used platforms).
+     parallel. However, porting the code to a little used platform is often
+     useful (provided it doesn't cause undue problems for more widely used
+     platforms).
 
 
 ## The pull request process in yk repositories
