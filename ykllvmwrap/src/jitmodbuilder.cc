@@ -1102,6 +1102,10 @@ public:
       }
     }
 
+    // Recursive calls must have completed by the time we finish constructing
+    // the trace.
+    assert(RecCallDepth == 0);
+
     Builder.CreateRetVoid();
     finalise(AOTMod, &Builder);
     return JITMod;
