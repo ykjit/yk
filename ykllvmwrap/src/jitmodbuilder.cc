@@ -996,8 +996,9 @@ public:
                 (IID == Intrinsic::lifetime_end))
               continue;
 
-            // All intrinsic calls must have metadata attached that specifies
-            // whether it has been inlined or not.
+            // Any intrinsic call which may generate machine code must have
+            // metadata attached that specifies whether it has been inlined or
+            // not.
             MDNode *IMD = I->getMetadata("yk.intrinsic.inlined");
             if (IMD == nullptr) {
               dumpValueAndExit(
