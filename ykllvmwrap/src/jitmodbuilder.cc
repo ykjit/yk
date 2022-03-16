@@ -979,10 +979,26 @@ public:
           continue;
 
         if (isa<CallInst>(I)) {
-
           if (isa<IntrinsicInst>(I)) {
-            // All intrinsic calls must have metadata attached that specifies
-            // whether it has been inlined or not.
+            // `llvm.lifetime.start.*` and `llvm.lifetime.end.*` are
+            // annotations added by some compiler front-ends to allow backends
+            // to perform stack slot optimisations.
+            //
+            // Removing these annotations makes generated code slightly less
+            // efficient, but does not affect correctness, so we remove them to
+            // make our lives easier.
+            //
+            // OPT: Consider leaving the annotations in, or generating our own
+            // annotations, so that our compiled traces can take advantage of
+            // stack slot optimisations.
+            Intrinsic::ID IID = cast<CallBase>(I)->getIntrinsicID();
+            if ((IID == Intrinsic::lifetime_start) ||
+                (IID == Intrinsic::lifetime_end))
+              continue;
+
+            // Any intrinsic call which may generate machine code must have
+            // metadata attached that specifies whether it has been inlined or
+            // not.
             MDNode *IMD = I->getMetadata("yk.intrinsic.inlined");
             if (IMD == nullptr) {
               dumpValueAndExit(
@@ -1086,6 +1102,10 @@ public:
         }
       }
     }
+
+    // Recursive calls must have completed by the time we finish constructing
+    // the trace.
+    assert(RecCallDepth == 0);
 
     Builder.CreateRetVoid();
     finalise(AOTMod, &Builder);

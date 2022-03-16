@@ -1,4 +1,3 @@
-// ignore: optimisation levels >0 need more intrinsics support.
 // Run-time:
 //   env-var: YKD_PRINT_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
@@ -29,6 +28,7 @@
 #include <yk_testing.h>
 
 __attribute__((noinline)) int f(int num) {
+  NOOPT_VAL(num);
   if (num == 0)
     return 0;
   else
