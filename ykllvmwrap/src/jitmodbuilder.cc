@@ -1161,7 +1161,7 @@ createModuleForTraceCompilerTests(Module *AOTMod, char *FuncNames[],
   for (GlobalVariable &G : JITMod->globals()) {
     if ((!isa<Function>(&G)) && (!G.hasInitializer()) &&
         (JB.GlobalMappings.find(&G) == JB.GlobalMappings.end())) {
-      JB.GlobalMappings.insert({&G, (void *)0xdeadbeef});
+      JB.GlobalMappings.insert({&G, (void *)0x1});
     }
   }
 
