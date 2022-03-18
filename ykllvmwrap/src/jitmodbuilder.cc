@@ -928,7 +928,7 @@ public:
     std::vector<void *> NewFAddrVals;
     for (Function &F : AOTMod->functions()) {
       NewFAddrKeys.push_back(const_cast<char *>(F.getName().data()));
-      NewFAddrVals.push_back((void *)0x1);
+      NewFAddrVals.push_back((void *)YK_INVALID_FUNC_VADDR);
     }
 
     JITModBuilder JB(AOTMod, FuncNames, BBs, TraceLen, &NewFAddrKeys[0],
@@ -1161,7 +1161,7 @@ createModuleForTraceCompilerTests(Module *AOTMod, char *FuncNames[],
   for (GlobalVariable &G : JITMod->globals()) {
     if ((!isa<Function>(&G)) && (!G.hasInitializer()) &&
         (JB.GlobalMappings.find(&G) == JB.GlobalMappings.end())) {
-      JB.GlobalMappings.insert({&G, (void *)0x1});
+      JB.GlobalMappings.insert({&G, (void *)YK_INVALID_FUNC_VADDR});
     }
   }
 
