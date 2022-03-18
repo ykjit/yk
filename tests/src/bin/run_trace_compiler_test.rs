@@ -4,17 +4,37 @@
 //! `trace_compiler` directory of this crate.
 
 use memmap2;
-use std::{collections::HashMap, env, ffi::CString, fs::File};
+use std::{collections::HashMap, env, error::Error, ffi::CString, fs::File};
 use yktrace::{IRBlock, IRTrace};
 
-fn main() {
+const BBS_ENV: &str = "YKT_TRACE_BBS";
+
+fn parse_bb(bb: &str) -> Result<(CString, usize), Box<dyn Error>> {
+    let mut elems = bb.split(":");
+    let func = elems.next().ok_or("malformed function name")?;
+    let bb_idx = elems
+        .next()
+        .ok_or("malformed basic block index")?
+        .parse::<usize>()?;
+    Ok((CString::new(func)?, bb_idx))
+}
+
+fn main() -> Result<(), String> {
     // Build the trace that we are going to have compiled.
     let mut bbs = vec![IRBlock::unmappable()];
-    for bb in env::var("YKT_TRACE_BBS").unwrap().split(",") {
-        let mut elems = bb.split(":");
-        let func = elems.next().unwrap();
-        let bb_idx = elems.next().unwrap().parse::<usize>().unwrap();
-        bbs.push(IRBlock::new(CString::new(func).unwrap(), bb_idx));
+    if let Ok(tbbs) = env::var(BBS_ENV) {
+        for bb in tbbs.split(",") {
+            if let Ok((func, bb_idx)) = parse_bb(bb) {
+                bbs.push(IRBlock::new(func, bb_idx));
+            } else {
+                return Err(format!("{} is malformed", BBS_ENV));
+            }
+        }
+    } else {
+        return Err(format!(
+            "The test doesn't set the {} environment variable",
+            BBS_ENV
+        ));
     }
     let trace = IRTrace::new(bbs, HashMap::new());
 
@@ -26,4 +46,6 @@ fn main() {
     let mmap = unsafe { memmap2::Mmap::map(&ll_file).unwrap() };
 
     unsafe { trace.compile_for_tc_tests(mmap.as_ptr(), mmap.len()) };
+
+    Ok(())
 }
