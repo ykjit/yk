@@ -918,8 +918,21 @@ public:
     CallInst *CPCI = Builder.CreateCall(Func, {});
     Builder.CreateUnreachable();
 
-    JITModBuilder JB(AOTMod, FuncNames, BBs, TraceLen, FAddrKeys, FAddrVals,
-                     FAddrLen, CPCI, TraceInputs);
+    // Populate the function address map with dummy entries for all of the
+    // functions in the AOT module, so that the trace compiler can outline
+    // calls to them if neccessary.
+    //
+    // The actual addresses inserted don't matter, as the trace compiler suite
+    // only compiles traces (without executing them).
+    std::vector<char *> NewFAddrKeys;
+    std::vector<void *> NewFAddrVals;
+    for (Function &F : AOTMod->functions()) {
+      NewFAddrKeys.push_back(const_cast<char *>(F.getName().data()));
+      NewFAddrVals.push_back((void *)YK_INVALID_FUNC_VADDR);
+    }
+
+    JITModBuilder JB(AOTMod, FuncNames, BBs, TraceLen, &NewFAddrKeys[0],
+                     &NewFAddrVals[0], NewFAddrKeys.size(), CPCI, TraceInputs);
 
     // Trick the trace compiler into thinking that it has already seen the call
     // to the control point, so that it starts copying instructions into JITMod
@@ -1131,6 +1144,7 @@ createModuleForTraceCompilerTests(Module *AOTMod, char *FuncNames[],
                                   size_t FAddrLen) {
   JITModBuilder JB = JITModBuilder::CreateMocked(
       AOTMod, FuncNames, BBs, TraceLen, FAddrKeys, FAddrVals, FAddrLen);
+
   auto JITMod = JB.createModule();
 
   // When the trace compiler encounters a non-const global in a trace, it
@@ -1147,7 +1161,7 @@ createModuleForTraceCompilerTests(Module *AOTMod, char *FuncNames[],
   for (GlobalVariable &G : JITMod->globals()) {
     if ((!isa<Function>(&G)) && (!G.hasInitializer()) &&
         (JB.GlobalMappings.find(&G) == JB.GlobalMappings.end())) {
-      JB.GlobalMappings.insert({&G, (void *)0xdeadbeef});
+      JB.GlobalMappings.insert({&G, (void *)YK_INVALID_FUNC_VADDR});
     }
   }
 
