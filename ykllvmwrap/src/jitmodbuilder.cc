@@ -32,6 +32,8 @@ uint64_t getNewTraceIdx() {
 #define JITFUNC_ARG_STACKMAP_ADDR_IDX 1
 #define JITFUNC_ARG_STACKMAP_LEN_IDX 2
 
+#define YK_OUTLINE_FNATTR "yk_outline"
+
 // Dump an error message and an LLVM value to stderr and exit with failure.
 void dumpValueAndExit(const char *Msg, Value *V) {
   errs() << Msg << ": ";
@@ -148,8 +150,8 @@ class JITModBuilder {
   std::vector<tuple<size_t, CallInst *>> InlinedCalls;
   // Instruction at which to continue after a call.
   Optional<tuple<size_t, CallInst *>> ResumeAfter;
-  // Depth of nested calls when outlining a recursive function.
-  size_t RecCallDepth = 0;
+  // The depth of the call-stack during function outlining.
+  size_t OutlineCallDepth = 0;
   // Signifies a hole (for which we have no IR) in the trace.
   bool ExpectUnmappable = false;
   // The JITMod's builder.
@@ -238,7 +240,7 @@ class JITModBuilder {
       if (CF != nullptr && VMap.find(CF) == VMap.end()) {
         declareFunction(CF);
       }
-      if (RecCallDepth == 0) {
+      if (OutlineCallDepth == 0) {
         copyInstruction(&Builder, (Instruction *)&*CI);
       }
       // We should expect an "unmappable hole" in the trace. This is
@@ -248,26 +250,27 @@ class JITModBuilder {
       ResumeAfter = make_tuple(CurInstrIdx, CI);
     } else {
       LastCompletedBlocks.push_back(nullptr);
-      if (RecCallDepth > 0) {
+      if (OutlineCallDepth > 0) {
         // When outlining a recursive function, we need to count all other
         // function calls so we know when we left the recusion.
-        RecCallDepth += 1;
+        OutlineCallDepth += 1;
         InlinedCalls.push_back(make_tuple(CurInstrIdx, CI));
         return;
       }
-      // If this is a recursive call that has been inlined, remove the
-      // inlined code and turn it into a normal call.
-      if (isRecursiveCall(CF)) {
+      // If this is a recursive call that has been inlined, or if the callee
+      // has the "yk_outline" annotation, remove the inlined code and turn it
+      // into a normal (outlined) call.
+      if ((isRecursiveCall(CF) || CF->hasFnAttribute(YK_OUTLINE_FNATTR))) {
         if (VMap.find(CF) == VMap.end()) {
           declareFunction(CF);
           addGlobalMappingForFunction(CF);
         }
         copyInstruction(&Builder, CI);
         InlinedCalls.push_back(make_tuple(CurInstrIdx, CI));
-        RecCallDepth = 1;
+        OutlineCallDepth = 1;
         return;
       }
-      // This is neither recursion nor an external call, so keep it inlined.
+      // Otherwise keep the call inlined.
       InlinedCalls.push_back(make_tuple(CurInstrIdx, CI));
       // Remap function arguments to the variables passed in by the caller.
       for (unsigned int i = 0; i < CI->arg_size(); i++) {
@@ -352,8 +355,8 @@ class JITModBuilder {
     ResumeAfter = InlinedCalls.back();
     InlinedCalls.pop_back();
     LastCompletedBlocks.pop_back();
-    if (RecCallDepth > 0) {
-      RecCallDepth -= 1;
+    if (OutlineCallDepth > 0) {
+      OutlineCallDepth -= 1;
       return;
     }
     // Replace the return variable of the call with its return value.
@@ -1073,7 +1076,7 @@ public:
           break;
         }
 
-        if (RecCallDepth > 0) {
+        if (OutlineCallDepth > 0) {
           // We are currently ignoring an inlined function.
           continue;
         }
@@ -1118,7 +1121,7 @@ public:
 
     // Recursive calls must have completed by the time we finish constructing
     // the trace.
-    assert(RecCallDepth == 0);
+    assert(OutlineCallDepth == 0);
 
     Builder.CreateRetVoid();
     finalise(AOTMod, &Builder);
