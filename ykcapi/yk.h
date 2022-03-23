@@ -29,7 +29,7 @@ typedef uint32_t YkHotThreshold;
 typedef struct YkMT YkMT;
 
 // Create a new `YkMT` instance.
-YkMT *yk_mt_new();
+YkMT *yk_mt_new(void);
 
 // Drop a `YkMT` instance. This must be called at most once per `YkMT`
 // instance: calling this function more than once on a `YkMT` instance leads to
