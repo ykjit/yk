@@ -119,6 +119,7 @@ fn mk_compiler(exe: &Path, src: &Path, opt: &str, extra_objs: &[PathBuf]) -> Com
         "-Wl,--mllvm=--disable-early-taildup", // Interferes with the BlockDisambiguate pass.
         "-Wl,--mllvm=--disable-tail-duplicate", // ^^^
         "-Wl,--mllvm=--yk-disable-tail-call-codegen", // Interferes with the JIT's inlining stack.
+        "-Wl,--mllvm=--yk-no-fallthrough",     // Fallthrough optimisations distort block mapping.
         // Ensure control point is patched.
         "-Wl,--mllvm=--yk-patch-control-point",
         // Ensure we can unambiguously map back to LLVM IR blocks.
