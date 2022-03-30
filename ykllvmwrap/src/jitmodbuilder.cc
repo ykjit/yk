@@ -974,6 +974,11 @@ public:
         // If we've returned from a call, skip ahead to the instruction where
         // we left off.
         if (ResumeAfter.hasValue() != 0) {
+          // If we find ourselves resuming in a block other than the one we
+          // expected, then the compiler has changed the block structure. For
+          // now we are disabling fallthrough optimisations in ykllvm to
+          // prevent this from happening.
+          assert(std::get<1>(ResumeAfter.getValue())->getParent() == BB);
           CurInstrIdx = std::get<0>(ResumeAfter.getValue()) + 1;
           ResumeAfter.reset();
         }

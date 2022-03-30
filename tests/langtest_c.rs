@@ -111,14 +111,18 @@ fn mk_compiler(exe: &Path, src: &Path, opt: &str, extra_objs: &[PathBuf]) -> Com
         // Disable machine passes that would interfere with block mapping.
         //
         // If you are trying to figure out which pass is breaking the mapping, you can add
-        // "-Wl,--mllvm=--print-after-all" to see the MIR after each pass. When you have foud the
+        // "-Wl,--mllvm=--print-before-all"/"-Wl,--mllvm=--print-after-all" to see the MIR
+        // before/after each pass. You can make the output smaller by filtering the output by
+        // function name with "-Wl,--mllvm=--filter-print-funcs=<func>". When you have found the
         // candidate, look in `TargetPassConfig.cpp` (in ykllvm) to find the CLI switch required to
-        // disable the pass.
+        // disable the pass. If you can't (or don't want to) eliminate a whole pass, then you can
+        // add (or re-use) a yk-specific flag to disable only aspects of passes.
         "-Wl,--mllvm=--disable-branch-fold",
         "-Wl,--mllvm=--disable-block-placement",
         "-Wl,--mllvm=--disable-early-taildup", // Interferes with the BlockDisambiguate pass.
         "-Wl,--mllvm=--disable-tail-duplicate", // ^^^
         "-Wl,--mllvm=--yk-disable-tail-call-codegen", // Interferes with the JIT's inlining stack.
+        "-Wl,--mllvm=--yk-no-fallthrough",     // Fallthrough optimisations distort block mapping.
         // Ensure control point is patched.
         "-Wl,--mllvm=--yk-patch-control-point",
         // Ensure we can unambiguously map back to LLVM IR blocks.
