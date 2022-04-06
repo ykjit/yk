@@ -4,11 +4,11 @@
 ;   stderr:
 ;      --- Begin jit-pre-opt ---
 ;      ...
-;      define internal void @__yk_compiled_trace_0(...
+;      define internal {{type}} @__yk_compiled_trace_0(...
 ;        %{{0}} = add i32 1, 1
 ;        %{{1}} = sub i32 %{{0}}, 2
 ;        %{{2}} = add i32 %{{1}}, 3
-;        ret void
+;        ret {{type}}...
 ;      }
 ;      --- End jit-pre-opt ---
 

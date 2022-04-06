@@ -7,5 +7,6 @@ members = [
     "yktrace",
     "ykutil",
     "yksmp",
+    "yksgi",
     "xtask",
 ]

@@ -14,6 +14,8 @@ ykllvmwrap = { path = "../ykllvmwrap" }
 ykrt = { path = "../ykrt" }
 yktrace = { path = "../yktrace" }
 yksmp = { path = "../yksmp" }
+yksgi = { path = "../yksgi" }
+llvm-sys = "130"
 
 [features]
 yk_testing = []

@@ -55,7 +55,6 @@ int main(int argc, char **argv) {
       i--;
     }
   }
-  abort(); // FIXME: unreachable due to aborting guard failure earlier.
   yk_location_drop(loc);
   yk_mt_drop(mt);
 

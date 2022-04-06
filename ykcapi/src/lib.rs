@@ -15,12 +15,16 @@
 mod testing;
 
 use std::arch::asm;
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::ffi::c_void;
-use std::process;
 use std::{ptr, slice};
 use ykrt::{print_jit_state, HotThreshold, Location, MT};
+use yksgi::SGInterp;
 use yksmp::{Location as SMLocation, StackMapParser};
+
+/// The first three locations of an LLVM stackmap record, according to the source, are CC, Flags,
+/// Num Deopts, which need to be skipped when mapping the stackmap values back to AOT variables.
+const SM_REC_HEADER: usize = 3;
 
 #[no_mangle]
 pub extern "C" fn yk_mt_new() -> *mut MT {
@@ -41,13 +45,18 @@ pub extern "C" fn yk_mt_control_point(_mt: *mut MT, _loc: *mut Location) {
 
 // The "real" control point, that is called once the interpreter has been patched by ykllvm.
 #[no_mangle]
-pub extern "C" fn __ykrt_control_point(mt: *mut MT, loc: *mut Location, ctrlp_vars: *mut c_void) {
+pub extern "C" fn __ykrt_control_point(
+    mt: *mut MT,
+    loc: *mut Location,
+    ctrlp_vars: *mut c_void,
+) -> bool {
     debug_assert!(!ctrlp_vars.is_null());
     if !loc.is_null() {
         let mt = unsafe { &*mt };
         let loc = unsafe { &*loc };
-        mt.control_point(loc, ctrlp_vars);
+        return mt.control_point(loc, ctrlp_vars);
     }
+    false
 }
 
 #[no_mangle]
@@ -91,41 +100,80 @@ impl Registers {
     /// register's value.
     #[cfg(target_arch = "x86_64")]
     unsafe fn get(&self, id: u16) -> usize {
-        if id == 6 {
-            unreachable!("We currently have no way to access RBP of the previous stackframe.")
-        }
         if id > 7 {
             unreachable!(
                 "Register #{} currently not saved during deoptimisation.",
                 id
             )
         }
-        let mut val = self.read_from_stack(id.try_into().unwrap());
+        let val = self.read_from_stack(id.try_into().unwrap());
         // Due to the return address being pushed to the stack before we store RSP, its value is
         // off by 8 bytes.
         if id == 7 {
-            val += std::mem::size_of::<usize>();
+            todo!(); // Check this is still true now that llvm_deoptimize is a naked function.
         }
         val
     }
 }
 
-/// Parses the stackmap and saved registers from the given address (i.e. the return address of the
+/// Location in terms of basic block index, instruction index, and function name, of a
+/// variable in the AOT module. Mirrors the LLVM struct defined in ykllvmwrap/jitmodbuilder.cc.
+#[derive(Debug)]
+#[repr(C)]
+struct AOTVar {
+    bbidx: usize,
+    instridx: usize,
+    fname: *const i8,
+}
+
+/// Address and length of a vector containing AOTVars. Mirrors the struct defined in
+/// ykllvmwrap/jitmodbuilder.cc.
+#[derive(Debug)]
+#[repr(C)]
+pub struct AOTMap {
+    addr: *const c_void,
+    length: usize,
+}
+
+/// Location (basic block index, instruction index, function name) in the AOTModule where the guard
+/// failure occured. Mirrors the struct defined in ykllvmwrap/jitmodbuilder.cc.
+#[derive(Debug)]
+#[repr(C)]
+pub struct CurPos {
+    bbidx: usize,
+    instridx: usize,
+    fname: *const i8,
+}
+
+/// Reads the stackmap and saved registers from the given address (i.e. the return address of the
 /// deoptimisation call).
-/// FIXME: Until we have the stopgap interpreter we simply print out the values we find.
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
 pub extern "C" fn yk_stopgap(
     sm_addr: *const c_void,
     sm_size: usize,
+    aotmap: &AOTMap,
+    curpos: &CurPos,
     retaddr: usize,
     rsp: *const c_void,
-) {
+) -> u8 {
     // FIXME: remove once we have a stopgap interpreter.
     #[cfg(feature = "yk_jitstate_debug")]
     print_jit_state("stopgap");
+
+    // Parse AOTMap.
+    let aotmap = unsafe { slice::from_raw_parts(aotmap.addr as *const AOTVar, aotmap.length) };
+
     // Restore saved registers from the stack.
     let registers = Registers::from_ptr(rsp);
+
+    let mut sginterp = unsafe {
+        SGInterp::new(
+            curpos.bbidx,
+            curpos.instridx,
+            std::ffi::CStr::from_ptr(curpos.fname),
+        )
+    };
 
     // Parse the stackmap.
     let slice = unsafe { slice::from_raw_parts(sm_addr as *mut u8, sm_size) };
@@ -133,7 +181,8 @@ pub extern "C" fn yk_stopgap(
     let locs = map.get(&retaddr.try_into().unwrap()).unwrap();
 
     // Extract live values from the stackmap.
-    for l in locs {
+    // Skip first 3 locations as they don't relate to any of our live variables.
+    for (i, l) in locs.iter().skip(SM_REC_HEADER).enumerate() {
         match l {
             SMLocation::Register(reg, size) => {
                 // FIXME: remove once we have a stopgap interpreter.
@@ -142,9 +191,10 @@ pub extern "C" fn yk_stopgap(
             }
             SMLocation::Direct(reg, off, size) => {
                 // When using `llvm.experimental.deoptimize` then direct locations should always be
-                // in relation to RSP.
-                assert_eq!(*reg, 7);
-                let addr = unsafe { registers.get(*reg) + (*off as usize) };
+                // in relation to RBP.
+                assert_eq!(*reg, 6);
+                let addr = unsafe { registers.get(*reg) as *mut u8 };
+                let addr = unsafe { addr.offset(isize::try_from(*off).unwrap()) };
                 let v = match *size {
                     1 => unsafe { ptr::read::<u8>(addr as *mut u8) as u64 },
                     2 => unsafe { ptr::read::<u16>(addr as *mut u16) as u64 },
@@ -156,7 +206,8 @@ pub extern "C" fn yk_stopgap(
                 eprintln!("Direct: {} ({} {})", v, reg, off);
             }
             SMLocation::Indirect(reg, off, size) => {
-                let addr = unsafe { registers.get(*reg) + (*off as usize) };
+                let addr = unsafe { registers.get(*reg) as *mut u8 };
+                let addr = unsafe { addr.offset(isize::try_from(*off).unwrap()) };
                 let v = match *size {
                     1 => unsafe { ptr::read::<u8>(addr as *mut u8) as u64 },
                     2 => unsafe { ptr::read::<u16>(addr as *mut u16) as u64 },
@@ -164,12 +215,30 @@ pub extern "C" fn yk_stopgap(
                     8 => unsafe { ptr::read::<u64>(addr as *mut u64) as u64 },
                     _ => unreachable!(),
                 };
+                let aot = &aotmap[i];
+                unsafe {
+                    sginterp.var_init(
+                        aot.bbidx,
+                        aot.instridx,
+                        std::ffi::CStr::from_ptr(aot.fname),
+                        v,
+                    );
+                }
                 // FIXME: remove once we have a stopgap interpreter.
-                eprintln!("Indirect: {} ({} {})", v, reg, off);
+                eprintln!("Indirect: {:?} ({} {} {})", v, reg, off, size);
             }
             SMLocation::Constant(v) => {
                 // FIXME: remove once we have a stopgap interpreter.
                 eprintln!("Constant: {}", v);
+                let aot = &aotmap[i];
+                unsafe {
+                    sginterp.var_init(
+                        aot.bbidx,
+                        aot.instridx,
+                        std::ffi::CStr::from_ptr(aot.fname),
+                        *v as u64,
+                    );
+                }
             }
             SMLocation::LargeConstant(v) => {
                 // FIXME: remove once we have a stopgap interpreter.
@@ -177,13 +246,7 @@ pub extern "C" fn yk_stopgap(
             }
         }
     }
-    // FIXME: Initialise stopgap interpreter here.
-    //
-    // Note that exiting like this causes mayhem for interpreters with multiple threads.
-    // See: https://github.com/ykjit/yk/pull/516#issuecomment-1062775714
-    //
-    // When we fix this, we should re-enable the multi-threaded tests at the same time.
-    process::exit(0);
+    unsafe { sginterp.interpret() }
 }
 
 /// The `__llvm__deoptimize()` function required by `llvm.experimental.deoptimize` intrinsic, that
@@ -191,7 +254,12 @@ pub extern "C" fn yk_stopgap(
 #[cfg(target_arch = "x86_64")]
 #[naked]
 #[no_mangle]
-pub extern "C" fn __llvm_deoptimize(addr: *const c_void, size: usize) {
+pub extern "C" fn __llvm_deoptimize(
+    addr: *const c_void,
+    size: usize,
+    aotmap: *const c_void,
+    curpos: *const c_void,
+) -> u8 {
     // Push all registers to the stack before they can be clobbered, so that we can find their
     // values after parsing in the stackmap. The order in which we push the registers is equivalent
     // to the Sys-V x86_64 ABI, which the stackmap format uses as well. This function has the
@@ -210,21 +278,25 @@ pub extern "C" fn __llvm_deoptimize(addr: *const c_void, size: usize) {
             "push rcx",
             "push rdx",
             "push rax",
-            // Now we need to call yk_stopgap. The arguments need to be in RDI,
-            // RSI, RDX, and RCX. The first two arguments (stackmap address and
-            // stackmap size) are already where they need to be as we are just
-            // forwarding them from the current function's arguments. The remaining
-            // arguments (return address and current stack pointer) need to be in
-            // RDX and RCX. The return address was at [RSP] before the above
-            // pushes, so to find it we need to offset 8 bytes per push.
-            "mov rdx, [rsp+64]",
-            "mov rcx, rsp",
-            "sub rsp, 8",
+            // Now we need to call yk_stopgap. The arguments need to be in RDI, RSI, RDX,
+            // RCX, R8, and R9. The first four arguments (stackmap address, stackmap
+            // size, live variable map, and current IR position) are already where they
+            // need to be as we are just forwarding them from the current function's
+            // arguments. The remaining arguments (return address and current stack
+            // pointer) need to be in R8 and R9. The return address was at [RSP] before
+            // the above pushes, so to find it we need to offset 8 bytes per push.
+            "mov r8, [rsp+64]",
+            "mov r9, rsp",
+            "sub rsp, 8", // Alignment
             "call yk_stopgap",
-            "add rsp, 64",
+            "add rsp, 72",
+            // FIXME: Don't rely on RBP being pushed. Use frame size retrieved from
+            // stackmap instead.
+            "mov rsp, rbp",
+            "pop rbp",
             "ret",
             options(noreturn)
-        );
+        )
     }
 }
 
