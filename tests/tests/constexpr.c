@@ -1,3 +1,4 @@
+// ignore: Requires struct._IO_FILE in stopgap.
 // Run-time:
 //   env-var: YKD_PRINT_IR=jit-pre-opt
 //   env-var: YKD_PRINT_JITSTATE=1

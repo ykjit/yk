@@ -1,3 +1,4 @@
+// ignore: Requires stackmap support for nested functions.
 // Compiler:
 // Run-time:
 //   env-var: YKD_PRINT_JITSTATE=1

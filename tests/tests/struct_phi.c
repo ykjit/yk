@@ -35,5 +35,4 @@ int main(int argc, char **argv) {
   yk_location_drop(loc);
   yk_mt_drop(mt);
   return (EXIT_SUCCESS);
-  return (EXIT_SUCCESS);
 }

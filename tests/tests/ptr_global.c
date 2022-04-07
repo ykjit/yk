@@ -1,3 +1,4 @@
+// ignore: Requires global variables support in stopgap.
 // Run-time:
 //   env-var: YKD_PRINT_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
@@ -32,7 +33,6 @@ int main(int argc, char **argv) {
     i++;
     p++;
   }
-  abort(); // FIXME: unreachable due to aborting guard failure earlier.
   NOOPT_VAL(i);
   NOOPT_VAL(p);
   yk_location_drop(loc);

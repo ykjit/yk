@@ -5,21 +5,22 @@
 ;      --- Begin jit-pre-opt ---
 ;
 ;      %0 = type { i8 }
-;
-;      define internal void @__yk_compiled_trace_0(%0* %0, i64* %1, i64 %2) {
+;      ...
+;      define internal {{type}} @__yk_compiled_trace_0(%0* %0, i64* %1, i64 %2) {
 ;        %4 = icmp eq i32 1, 0
-;        br i1 %4, label %guardfail, label %5
+;        br i1 %4, label %guardfail, label %20
 ;
 ;      guardfail:                                        ; preds = %3
-;        call void (...) @llvm.experimental.deoptimize.isVoid(i64* %1, i64 %2) [ "deopt"() ]
-;        ret void
+;        ...
+;        %{{cprtn}} = call {{type}} (...) @llvm.experimental.deoptimize.{{type}}(i64* %1, i64 %2...
+;        ret {{type}} %{{cprtn}}
 ;
-;      5:                                                ; preds = %3
+;      20:                                               ; preds = %3
 ;        call void @f(i32 0)
-;        ret void
+;        ret {{type}}...
 ;      }
 ;
-;      declare void @llvm.experimental.deoptimize.isVoid(...)
+;      declare {{type}} @llvm.experimental.deoptimize.i8(...)
 ;
 ;      declare void @f(i32)
 ;      --- End jit-pre-opt ---

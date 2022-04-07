@@ -1,6 +1,7 @@
 //! Utilities for collecting and decoding traces.
 
 #![feature(once_cell)]
+#![feature(naked_functions)]
 #![allow(clippy::new_without_default)]
 
 mod errors;
@@ -12,6 +13,7 @@ use std::{
     ptr,
 };
 mod hwt;
+use std::arch::asm;
 use ykutil::obj::llvmbc_section;
 
 pub use errors::InvalidTraceError;
@@ -231,13 +233,47 @@ impl CompiledTrace {
         }
     }
 
-    pub fn exec(&self, ctrlp_vars: *mut c_void) {
+    #[cfg(target_arch = "x86_64")]
+    #[naked]
+    #[no_mangle]
+    /// Taking the deoptimisation path during a guard failure causes the epilogue of the compiled
+    /// trace to be skipped. This means that used callee-saved registers (CSRs) are not restored.
+    /// Until we've figured out how to restore only the used registers we take the sledge hammer
+    /// approach and save and restore all CSRs here.
+    /// OPT: Find a way to only restore needed registers (ideally right within the deopt code).
+    pub extern "C" fn exec(&self, ctrlp_vars: *mut c_void) -> u8 {
+        unsafe {
+            asm!(
+                "push rbx",
+                "push rsp",
+                "push rbp",
+                "push r12",
+                "push r13",
+                "push r14",
+                "push r15",
+                "call real_exec",
+                "pop r15",
+                "pop r14",
+                "pop r13",
+                "pop r12",
+                "pop rbp",
+                "pop rsp",
+                "pop rbx",
+                "ret",
+                options(noreturn)
+            )
+        }
+    }
+
+    #[no_mangle]
+    extern "C" fn real_exec(&self, ctrlp_vars: *mut c_void) -> u8 {
         #[cfg(feature = "yk_testing")]
         assert_ne!(self.entry as *const (), std::ptr::null());
         unsafe {
-            let f = mem::transmute::<_, unsafe extern "C" fn(*mut c_void, *const c_void, usize)>(
-                self.entry,
-            );
+            let f = mem::transmute::<
+                _,
+                unsafe extern "C" fn(*mut c_void, *const c_void, usize) -> u8,
+            >(self.entry);
             f(ctrlp_vars, self.smptr, self.smsize)
         }
     }

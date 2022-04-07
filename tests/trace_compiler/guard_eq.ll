@@ -4,21 +4,22 @@
 ;   stderr:
 ;      --- Begin jit-pre-opt ---
 ;      ...
-;      define internal void @__yk_compiled_trace_0(...
+;      define internal {{type}} @__yk_compiled_trace_0(...
 ;        %{{0}} = alloca i32, align 4
 ;        %{{1}} = icmp eq i32 1, 1
 ;        br i1 %{{1}}, label %{{true}}, label %guardfail
 ;
 ;      guardfail:...
-;        call void (...) @llvm.experimental.deoptimize.isVoid(...
-;        ret void
+;        ...
+;        %{{cprtn}} = call {{type}} (...) @llvm.experimental.deoptimize.{{type}}(...
+;        ret {{type}} %{{cprtn}}
 ;
 ;      {{true}}:...
 ;        store i32 1, i32* %{{0}}, align 4
-;        ret void
+;        ret {{type}} 0
 ;      }
 ;
-;      declare void @llvm.experimental.deoptimize.isVoid(...)
+;      declare {{type}} @llvm.experimental.deoptimize.{{type}}(...)
 ;      --- End jit-pre-opt ---
 
 define void @main() {

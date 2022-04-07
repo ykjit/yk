@@ -1,3 +1,4 @@
+// ignore: Bug. See https://github.com/ykjit/yk/issues/535
 // Run-time:
 //   env-var: YKD_PRINT_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1

@@ -39,6 +39,10 @@ pub type AtomicTraceFailureThreshold = AtomicU16;
 const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
 const DEFAULT_TRACE_FAILURE_THRESHOLD: TraceFailureThreshold = 5;
 
+const TRACE_RETURN_SUCCESS: u8 = 0;
+const TRACE_GUARDFAIL_CONTINUE: u8 = 1;
+const TRACE_GUARDFAIL_RETURN: u8 = 2;
+
 thread_local! {static THREAD_MTTHREAD: MTThread = MTThread::new();}
 
 #[cfg(feature = "yk_testing")]
@@ -153,7 +157,7 @@ impl MT {
         }
     }
 
-    pub fn control_point(&self, loc: &Location, ctrlp_vars: *mut c_void) {
+    pub fn control_point(&self, loc: &Location, ctrlp_vars: *mut c_void) -> bool {
         match self.transition_location(loc) {
             TransitionLocation::NoAction => (),
             TransitionLocation::Execute(ctr) => {
@@ -166,7 +170,12 @@ impl MT {
                 loop {
                     #[cfg(feature = "yk_jitstate_debug")]
                     print_jit_state("enter-jit-code");
-                    unsafe { &*ctr }.exec(ctrlp_vars);
+                    match unsafe { &*ctr }.exec(ctrlp_vars) {
+                        TRACE_RETURN_SUCCESS => {}
+                        TRACE_GUARDFAIL_CONTINUE => return false,
+                        TRACE_GUARDFAIL_RETURN => return true,
+                        _ => unreachable!(),
+                    }
                     #[cfg(feature = "yk_jitstate_debug")]
                     print_jit_state("exit-jit-code");
                 }
@@ -185,6 +194,7 @@ impl MT {
                 Err(_) => todo!(),
             },
         }
+        false
     }
 
     /// Perform the next step to `loc` in the `Location` state-machine. If `loc` moves to the
