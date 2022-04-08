@@ -18,7 +18,10 @@ int main(int argc, char **argv) {
 
 // This isn't used as part of the test, but is required for this file to
 // compile with ykllvm.
-void unused() {
+//
+// FIXME: This only returns an integer due to a shortcoming of the stopgap interpreter:
+// https://github.com/ykjit/yk/issues/537
+int unused() {
   YkMT *mt = yk_mt_new();
   YkLocation loc = yk_location_new();
   while (true) {
@@ -26,4 +29,5 @@ void unused() {
   }
   yk_location_drop(loc);
   yk_mt_drop(mt);
+  return 0;
 }
