@@ -3,8 +3,7 @@ use llvm_sys::bit_reader::LLVMParseBitcodeInContext2;
 use llvm_sys::core::*;
 use llvm_sys::prelude::{LLVMBasicBlockRef, LLVMModuleRef, LLVMTypeRef, LLVMValueRef};
 use llvm_sys::target::{LLVMGetModuleDataLayout, LLVMTargetDataRef};
-use llvm_sys::LLVMOpcode;
-use llvm_sys::LLVMTypeKind;
+use llvm_sys::{LLVMOpcode, LLVMTypeKind, LLVMValueKind};
 use std::ffi::CStr;
 use std::mem::MaybeUninit;
 
@@ -187,6 +186,10 @@ impl Value {
     pub fn as_str(&self) -> &CStr {
         unsafe { CStr::from_ptr(LLVMPrintValueToString(self.0)) }
     }
+
+    pub fn kind(&self) -> LLVMValueKind {
+        unsafe { LLVMGetValueKind(self.0) }
+    }
 }
 
 pub fn llvm_const_to_sgvalue(c: Value) -> SGValue {
@@ -196,6 +199,11 @@ pub fn llvm_const_to_sgvalue(c: Value) -> SGValue {
             // FIXME: Add tests to check there's no silent sign extension going on.
             let val = unsafe { LLVMConstIntGetZExtValue(c.get()) as u64 };
             SGValue::new(val, ty)
+        }
+        LLVMTypeKind::LLVMPointerTypeKind => {
+            // The only constant pointer LLVM allows is NULL.
+            assert!(c.kind() == LLVMValueKind::LLVMConstantPointerNullValueKind);
+            SGValue::new(0, ty)
         }
         _ => todo!(),
     }

@@ -1,13 +1,18 @@
-// ignore: broken during new control point design
-// Compiler:
 // Run-time:
+//   env-var: YKD_SERIALISE_COMPILATION=1
+//   env-var: YKD_PRINT_JITSTATE=1
+//   stderr:
+//     ...
+//     jit-state: enter-jit-code
+//     jit-state: exit-jit-code
+//     ...
+//     jit-state: stopgap
+//     ...
 //   stdout:
 //     Hello World!
-//     Hello World!
 
-// This is bf_base.c from https://github.com/ykjit/ykcbf modified to:
-//  - hard-code the input to the interpreter (hello.bf from the same repo).
-//  - replay the entire program execution via the JIT.
+// This is bf_base.c from https://github.com/ykjit/ykcbf modified to hard-code the input to the
+// interpreter (hello.bf from the same repo).
 
 #include <err.h>
 #include <fcntl.h>
@@ -25,10 +30,17 @@
   "++++++++++[>+++++++>++++++++++>+++>+<<<<-]>++.>+.+++++++..+++.>++.<<++++++" \
   "+++++++++.>.+++.------.--------.>+.>."
 
-void interp(char *prog, char *prog_end, char *cells, char *cells_end) {
+// FIXME: This only returns an integer due to a shortcoming of the stopgap interpreter:
+// https://github.com/ykjit/yk/issues/537
+int interp(char *prog, char *prog_end, char *cells, char *cells_end, YkMT *mt,
+           YkLocation *yklocs) {
   char *instr = prog;
   char *cell = cells;
   while (instr < prog_end) {
+    YkLocation *loc = NULL;
+    if (*instr == ']')
+      loc = &yklocs[instr - prog];
+    yk_mt_control_point(mt, loc);
     switch (*instr) {
     case '>': {
       if (cell++ == cells_end)
@@ -93,36 +105,27 @@ void interp(char *prog, char *prog_end, char *cells, char *cells_end) {
     }
     instr++;
   }
+  return 0;
 }
 
-// Traces an entire execution of the program and then runs is a second time
-// using JITted code. Expect all output twice in sequence.
-void jit(char *prog, char *prog_end) {
-  // First run collects a trace.
+int main(void) {
   char *cells = calloc(1, CELLS_LEN);
   if (cells == NULL)
     err(1, "out of memory");
   char *cells_end = cells + CELLS_LEN;
 
-  __yktrace_start_tracing(HW_TRACING, &prog, &prog_end, &cells, &cells_end);
-  NOOPT_VAL(prog);
-  NOOPT_VAL(prog_end);
-  NOOPT_VAL(cells);
-  NOOPT_VAL(cells_end);
-  interp(prog, prog_end, cells, cells_end);
-  CLOBBER_MEM();
-  void *tr = __yktrace_stop_tracing();
+  YkMT *mt = yk_mt_new();
+  yk_mt_hot_threshold_set(mt, 5);
 
-  // Compile and run trace.
-  void *ptr = __yktrace_irtrace_compile(tr);
-  __yktrace_drop_irtrace(tr);
+  size_t prog_len = sizeof(INPUT_PROG);
+  YkLocation *yklocs = calloc(prog_len, sizeof(YkLocation));
+  if (yklocs == NULL)
+    err(1, "out of memory");
+  for (YkLocation *ykloc = yklocs; ykloc < yklocs + prog_len; ykloc++)
+    *ykloc = yk_location_new();
 
-  memset(cells, '\0', CELLS_LEN);
-  void (*func)(void *, void *, void *, void *) =
-      (void (*)(void *, void *, void *, void *))ptr;
-  func(&prog, &prog_end, &cells, &cells_end);
-}
+  interp(INPUT_PROG, &INPUT_PROG[prog_len], cells, cells_end, mt, yklocs);
 
-int main(int argc, char *argv[]) {
-  jit(INPUT_PROG, &INPUT_PROG[strlen(INPUT_PROG)]);
+  free(cells);
+  free(yklocs);
 }

@@ -185,6 +185,7 @@ impl SGInterp {
                 LLVMOpcode::LLVMICmp => self.icmp(),
                 LLVMOpcode::LLVMLoad => self.load(),
                 LLVMOpcode::LLVMPHI => self.phi(),
+                LLVMOpcode::LLVMPtrToInt => self.ptrtoint(),
                 LLVMOpcode::LLVMRet => {
                     if self.ret() {
                         // We've interpreted the return of the control point's caller, so we need
@@ -199,12 +200,36 @@ impl SGInterp {
                     self.switch();
                     continue;
                 }
+                LLVMOpcode::LLVMSub => self.sub(),
+                LLVMOpcode::LLVMSelect => self.select(),
                 _ => todo!("{:?}", self.pc.as_str()),
             }
             self.pc = Value::new(LLVMGetNextInstruction(self.pc.get()));
         }
     }
 
+    fn select(&mut self) {
+        let cond = self.pc.get_operand(0);
+        let op_true = self.pc.get_operand(1);
+        let op_false = self.pc.get_operand(2);
+
+        if op_true.get_type().is_vector() || op_false.get_type().is_vector() {
+            todo!(
+                "vector switches are not implemented: {:?}",
+                self.pc.as_str()
+            );
+        }
+        debug_assert!(cond.get_type().get_int_width() == 1); // Only `i1` is valid.
+
+        let chosen = if self.var_lookup(&cond).val == 1 {
+            op_true
+        } else {
+            op_false
+        };
+        self.var_set(self.pc, self.var_lookup(&chosen));
+    }
+
+    // FIMXE: generalise binary operators.
     fn add(&mut self) {
         // FIXME: Handle overflows.
         let op1 = self.pc.get_operand(0);
@@ -212,6 +237,16 @@ impl SGInterp {
         let val1 = self.var_lookup(&op1);
         let val2 = self.var_lookup(&op2);
         let res = val1.val.checked_add(val2.val).unwrap();
+        self.var_set(self.pc, SGValue::new(res, self.pc.get_type()));
+    }
+
+    fn sub(&mut self) {
+        // FIXME: Handle underflows.
+        let op1 = self.pc.get_operand(0);
+        let op2 = self.pc.get_operand(1);
+        let val1 = self.var_lookup(&op1);
+        let val2 = self.var_lookup(&op2);
+        let res = val1.val.checked_sub(val2.val).unwrap();
         self.var_set(self.pc, SGValue::new(res, self.pc.get_type()));
     }
 
@@ -330,6 +365,7 @@ impl SGInterp {
             llvm_sys::LLVMIntPredicate::LLVMIntULT => val1.val < val2.val,
             llvm_sys::LLVMIntPredicate::LLVMIntUGT => val1.val > val2.val,
             llvm_sys::LLVMIntPredicate::LLVMIntEQ => val1.val == val2.val,
+            llvm_sys::LLVMIntPredicate::LLVMIntNE => val1.val != val2.val,
             llvm_sys::LLVMIntPredicate::LLVMIntSGT => match val1.ty.get_int_width() {
                 32 => val1.val as i32 > val2.val as i32,
                 _ => todo!(),
@@ -395,6 +431,14 @@ impl SGInterp {
         }
     }
 
+    fn ptrtoint(&mut self) {
+        let src = self.pc.get_operand(0);
+        let srcty = src.get_type();
+        debug_assert!(srcty.is_pointer());
+        let srcval = self.var_lookup(&src).val;
+        self.var_set(self.pc, SGValue::new(srcval, self.pc.get_type()));
+    }
+
     fn sext(&mut self) {
         let src = self.pc.get_operand(0);
         let srcty = src.get_type();
@@ -426,16 +470,14 @@ impl SGInterp {
         match ty.kind() {
             LLVMTypeKind::LLVMIntegerTypeKind => {
                 let width = LLVMGetIntTypeWidth(ty.get());
+                // FIXME: Can this be generalised? LLVM allows non-byte-sized integer types, so
+                // having a case for every possibility will be impractical:
+                // https://github.com/ykjit/yk/issues/536
                 match width {
-                    1 => {
-                        ptr::write(dstval.val as *mut u8, srcval.val as u8);
-                    }
-                    32 => {
-                        ptr::write(dstval.val as *mut u32, srcval.val as u32);
-                    }
-                    64 => {
-                        ptr::write(dstval.val as *mut u64, srcval.val as u64);
-                    }
+                    1 => ptr::write(dstval.val as *mut u8, srcval.val as u8),
+                    8 => ptr::write(dstval.val as *mut u8, srcval.val as u8),
+                    32 => ptr::write(dstval.val as *mut u32, srcval.val as u32),
+                    64 => ptr::write(dstval.val as *mut u64, srcval.val as u64),
                     _ => todo!(),
                 }
             }
