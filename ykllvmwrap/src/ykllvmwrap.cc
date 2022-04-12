@@ -232,7 +232,10 @@ extern "C" void *compileModule(string TraceName, Module *M,
     errx(EXIT_FAILURE, "Couldn't compile trace: %s", ErrStr.c_str());
 
   for (auto GM : GlobalMappings) {
-    EE->addGlobalMapping(GM.first, GM.second);
+    // If a value now has no parent, then it was optimised out and LLVM will be
+    // unhappy if we try to regster a global mapping for it.
+    if (GM.first->getParent() != nullptr)
+      EE->addGlobalMapping(GM.first, GM.second);
   }
 
   EE->finalizeObject();
@@ -288,9 +291,10 @@ void *compileIRTrace(FN Func, char *FuncNames[], size_t BBs[], size_t TraceLen,
   PassManagerBuilder Builder;
   Builder.OptLevel = 2; // FIXME Make this user-tweakable.
   legacy::FunctionPassManager FPM(JITMod);
+  legacy::PassManager MPM;
   Builder.populateFunctionPassManager(FPM);
-  for (Function &F : *JITMod)
-    FPM.run(F);
+  Builder.populateModulePassManager(MPM);
+  MPM.run(*JITMod);
 
   DIP.print(DebugIR::JITPostOpt, JITMod);
 
