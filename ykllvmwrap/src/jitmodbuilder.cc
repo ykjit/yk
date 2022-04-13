@@ -431,7 +431,7 @@ class JITModBuilder {
     llvm::FunctionType *FType = llvm::FunctionType::get(
         Type::getInt8Ty(JITMod->getContext()), InputTypes, false);
     llvm::Function *JITFunc = llvm::Function::Create(
-        FType, Function::InternalLinkage, TraceName, JITMod);
+        FType, Function::ExternalLinkage, TraceName, JITMod);
     JITFunc->setCallingConv(CallingConv::C);
 
     return JITFunc;

@@ -6,7 +6,7 @@
 ;
 ;     %0 = type { i8 }
 ;     ...
-;     define internal {{type}} @__yk_compiled_trace_0(%0* %0, i64* %1, i64 %2) {
+;     define {{type}} @__yk_compiled_trace_0(%0* %0, i64* %1, i64 %2) {
 ;       %4 = icmp eq i32 2, 0
 ;       br i1 %4, label %guardfail, label %{{5}}
 ;
