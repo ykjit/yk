@@ -180,7 +180,7 @@ fn run_suite(opt: &'static str) {
 
     let tempdir = TempDir::new().unwrap();
     LangTester::new()
-        .test_dir("tests")
+        .test_dir("c")
         .test_file_filter(filter)
         .test_extract(move |p| {
             let altp = p.with_extension(format!("c.{}", opt.strip_prefix("-").unwrap()));
