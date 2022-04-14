@@ -9,6 +9,7 @@
 ;        %{{1}} = add i32 %{{0}}, 2
 ;        ret {{type}}...
 ;      }
+;      ...
 ;      --- End jit-pre-opt ---
 
 ; Check that inlining a trivial function works.

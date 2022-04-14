@@ -9,6 +9,7 @@
 ;        %{{1}} = add i32 %{{0}}, 1
 ;        ret {{type}}...
 ;      }
+;      ...
 ;      --- End jit-pre-opt ---
 
 ; Check the trace compiler correctly handles a not-mutated global.

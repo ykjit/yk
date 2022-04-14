@@ -10,6 +10,7 @@
 ;      }
 ;
 ;      declare i32 @getuid()
+;      ...
 ;      --- End jit-pre-opt ---
 
 ; Check that calls to external functions are properly declared in the trace.

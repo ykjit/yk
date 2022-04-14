@@ -370,6 +370,10 @@ impl SGInterp {
                 32 => val1.val as i32 > val2.val as i32,
                 _ => todo!(),
             },
+            llvm_sys::LLVMIntPredicate::LLVMIntSLT => match val1.ty.get_int_width() {
+                32 => (val1.val as i32) < (val2.val as i32),
+                _ => todo!(),
+            },
             _ => todo!(),
         };
         self.var_set(self.pc, SGValue::new(b as u64, self.pc.get_type()));

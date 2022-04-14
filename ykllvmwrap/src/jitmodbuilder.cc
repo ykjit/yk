@@ -1326,6 +1326,18 @@ createModuleForTraceCompilerTests(Module *AOTMod, char *FuncNames[],
     }
   }
 
+  // Provide a dummy implementation of `__llvm_optimize()`.
+  //
+  // Without this, traces will sometimes fail to compile.
+  LLVMContext &Context = JITMod->getContext();
+  llvm::FunctionType *DOFuncType =
+    llvm::FunctionType::get(Type::getVoidTy(Context), {}, false);
+  llvm::Function *DOFunc = llvm::Function::Create(
+      DOFuncType, Function::ExternalLinkage, "__llvm_deoptimize", JITMod);
+  BasicBlock *DOBB = BasicBlock::Create(Context, "", DOFunc);
+  IRBuilder<> DOBuilder(DOBB);
+  DOBuilder.CreateUnreachable();
+
   return make_tuple(JITMod, std::move(JB.TraceName),
                     std::move(JB.GlobalMappings));
 }

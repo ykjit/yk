@@ -24,6 +24,7 @@
 ;     declare {{type}} @llvm.experimental.deoptimize.{{type}}(...)
 ;
 ;     declare void @f(i32)
+;     ...
 ;     --- End jit-pre-opt ---
 
 define void @f(i32 %0) {
