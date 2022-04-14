@@ -42,9 +42,20 @@ fn main() {
                 .join("\n")
         })
         .test_cmds(move |p| {
-            let mut run_tc_test = Command::new(run_tc_test.clone());
-            run_tc_test.arg(p);
-            vec![("Run-time", run_tc_test)]
+            // Path to a "runtime filter file" (rtf).
+            let mut rtf_p = PathBuf::from(p);
+            rtf_p.set_extension("rtf");
+
+            if !rtf_p.exists() {
+                let mut run_tc_test = Command::new(run_tc_test.clone());
+                run_tc_test.arg(p);
+                vec![("Run-time", run_tc_test)]
+            } else {
+                let mut rtf = Command::new(rtf_p.clone());
+                rtf.arg(run_tc_test.clone());
+                rtf.arg(p);
+                vec![("Run-time-filtered", rtf)]
+            }
         })
         .fm_options(|_, _, fmb| {
             // Use `{{}}` to match non-literal strings in tests.

@@ -8,6 +8,7 @@
 ;        %{{0}} = add i32 100, 100
 ;        ret {{type}}...
 ;      }
+;      ...
 ;      --- End jit-pre-opt ---
 
 define void @main() {

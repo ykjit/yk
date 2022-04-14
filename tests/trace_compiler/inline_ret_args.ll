@@ -10,6 +10,7 @@
 ;        %{{2}} = add i32 %{{1}}, 3
 ;        ret {{type}}...
 ;      }
+;      ...
 ;      --- End jit-pre-opt ---
 
 ; Check that inlining a function with arguments and a return value works.

@@ -9,6 +9,7 @@
 ;        %{{2}} = add i32 %{{0}}, 5
 ;        ret {{type}}...
 ;      }
+;      ...
 ;      --- End jit-pre-opt ---
 
 ; Check that inlining a simple function with a return value works.

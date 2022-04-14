@@ -4,8 +4,8 @@
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/Module.h"
 
-// An invalid virtual address for a function to begin at.
-#define YK_INVALID_FUNC_VADDR 0x1
+// An unaligned virtual address.
+#define YK_INVALID_ALIGNED_VADDR 0x1
 
 using namespace llvm;
 

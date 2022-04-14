@@ -20,6 +20,7 @@
 ;      }
 ;
 ;      declare {{type}} @llvm.experimental.deoptimize.{{type}}(...)
+;      ...
 ;      --- End jit-pre-opt ---
 
 define void @main() {

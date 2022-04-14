@@ -8,6 +8,7 @@
 ;        store i32 1, i32* @g, align 4
 ;        ret {{type}}...
 ;      }
+;      ...
 ;      --- End jit-pre-opt ---
 
 ; Check the trace compiler correctly handles a mutated global.
