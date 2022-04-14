@@ -200,11 +200,10 @@ pub fn llvm_const_to_sgvalue(c: Value) -> SGValue {
             let val = unsafe { LLVMConstIntGetZExtValue(c.get()) as u64 };
             SGValue::new(val, ty)
         }
-        LLVMTypeKind::LLVMPointerTypeKind => {
-            // The only constant pointer LLVM allows is NULL.
-            assert!(c.kind() == LLVMValueKind::LLVMConstantPointerNullValueKind);
-            SGValue::new(0, ty)
-        }
+        LLVMTypeKind::LLVMPointerTypeKind => match c.kind() {
+            LLVMValueKind::LLVMConstantPointerNullValueKind => SGValue::new(0, ty),
+            _ => todo!(),
+        },
         _ => todo!(),
     }
 }
