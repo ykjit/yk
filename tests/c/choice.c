@@ -1,4 +1,3 @@
-// ignore: Requires stackmap support for nested functions.
 // Compiler:
 // Run-time:
 //   env-var: YKD_PRINT_JITSTATE=1
@@ -15,7 +14,7 @@
 //     2: 47
 //     jit-state: enter-jit-code
 //     1: 47
-//     jit-state: stopgap
+//     jit-state: enter-stopgap
 //     ...
 
 // Check that tracing a cascading "if...else if...else" works.

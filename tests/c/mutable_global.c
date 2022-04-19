@@ -38,7 +38,7 @@
 //     jit-state: exit-jit-code
 //     jit-state: enter-jit-code
 //     i=1
-//     jit-state: stopgap
+//     jit-state: enter-stopgap
 //     ...
 
 // Check that using a global works.

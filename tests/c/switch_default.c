@@ -23,7 +23,7 @@
 //     jit-state: exit-jit-code
 //     jit-state: enter-jit-code
 //     i=1
-//     jit-state: stopgap
+//     jit-state: enter-stopgap
 //     ...
 
 // Check that tracing the default arm of a switch works correctly.

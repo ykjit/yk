@@ -165,6 +165,10 @@ impl Value {
         unsafe { !LLVMIsASwitchInst(self.0).is_null() }
     }
 
+    pub fn is_call(&self) -> bool {
+        unsafe { !LLVMIsACallInst(self.0).is_null() }
+    }
+
     pub fn get_type(&self) -> Type {
         unsafe { Type(LLVMTypeOf(self.0)) }
     }
@@ -204,7 +208,7 @@ pub fn llvm_const_to_sgvalue(c: Value) -> SGValue {
             LLVMValueKind::LLVMConstantPointerNullValueKind => SGValue::new(0, ty),
             _ => todo!(),
         },
-        _ => todo!(),
+        _ => todo!("{:?}", c.as_str()),
     }
 }
 

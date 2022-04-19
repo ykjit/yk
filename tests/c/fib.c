@@ -1,4 +1,4 @@
-// ignore: Requires stackmap support for nested functions.
+// ignore: Requires function calls in stopgap interpreter.
 // Run-time:
 //   env-var: YKD_PRINT_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1

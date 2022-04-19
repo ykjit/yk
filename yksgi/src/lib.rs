@@ -19,6 +19,16 @@ static ALWAYS_SKIP_FUNCS: [&str; 5] = [
 static SKIP_FOR_NOW_FUNCS: [&str; 2] = ["yk_location_drop", "yk_mt_drop"];
 static YK_CONTROL_POINT_FUNC: &str = "__ykrt_control_point";
 
+/// Active frames (basic block index, instruction index, function name) in the AOTModule where the
+/// guard failure occured. Mirrors the struct defined in ykllvmwrap/jitmodbuilder.cc.
+#[derive(Debug)]
+#[repr(C)]
+pub struct FrameInfo {
+    pub bbidx: usize,
+    pub instridx: usize,
+    pub fname: *const i8,
+}
+
 /// Stopgap interpreter values.
 #[derive(Clone, Copy, PartialEq)]
 pub struct SGValue {
@@ -43,12 +53,14 @@ impl SGValue {
 /// A frame holding live variables.
 struct Frame {
     vars: HashMap<Value, SGValue>,
+    pc: Value,
 }
 
 impl Frame {
-    fn new() -> Frame {
+    fn new(pc: Value) -> Frame {
         Frame {
             vars: HashMap::new(),
+            pc,
         }
     }
 
@@ -109,32 +121,54 @@ impl SGInterp {
     /// Create a new stopgap interpreter and initialise it to start interpretation at the location
     /// given by a basic block index, instruction index, and function name.
     /// FIXME: Support initialisation of multiple frames.
-    pub unsafe fn new(bbidx: usize, instridx: usize, fname: &CStr) -> SGInterp {
+    pub unsafe fn new(activeframes: &[FrameInfo]) -> SGInterp {
         // Get AOT module IR and parse it.
         let module = Module::from_bc();
+
+        // Initialise frames.
+        let mut frames = Vec::with_capacity(activeframes.len());
+        for frame in activeframes {
+            let funcname = std::ffi::CStr::from_ptr(frame.fname);
+            let func = module.function(funcname.as_ptr());
+            let bb = func.bb(frame.bbidx);
+            let instr = bb.instruction(frame.instridx);
+            frames.push(Frame::new(instr));
+        }
         // Create and initialise stop gap interpreter.
-        let func = module.function(fname.as_ptr());
-        let bb = func.bb(bbidx);
-        let instr = bb.instruction(instridx);
+        let current_pc = frames.last().unwrap().pc;
         SGInterp {
             module,
-            frames: vec![Frame::new()],
-            pc: instr,
+            frames,
+            pc: current_pc,
             lastbb: None,
         }
     }
 
     /// Add a live variable and its value to the current frame.
-    pub fn var_init(&mut self, bbidx: usize, instridx: usize, fname: &CStr, val: u64) {
+    pub fn var_init(
+        &mut self,
+        bbidx: usize,
+        instridx: usize,
+        fname: &CStr,
+        sfidx: usize,
+        val: u64,
+    ) {
         let func = self.module.function(fname.as_ptr());
         let bb = func.bb(bbidx);
         let instr = bb.instruction(instridx);
-        let orgaot = unsafe { get_aot_original(&instr) };
+        let orgaot = if sfidx == 0 {
+            unsafe { get_aot_original(&instr) }
+        } else {
+            // Only the root stackframe contains the control point call, so for the other frames
+            // there's no need to match live variables to their corresponding variables passed into
+            // the control point. See `get_aot_original` for more details.
+            None
+        };
         let ty = instr.get_type();
         let value = SGValue::new(val, ty);
-        self.frames.last_mut().unwrap().add(instr, value);
+        self.frames.get_mut(sfidx).unwrap().add(instr, value);
         if let Some(v) = orgaot {
-            self.frames.last_mut().unwrap().add(v, value);
+            self.frames.get_mut(sfidx).unwrap().add(v, value);
         }
     }
 
@@ -302,19 +336,36 @@ impl SGInterp {
             return false;
         } else if name.starts_with("puts") || name.starts_with("printf") {
             // FIXME: Until we can handle function calls, simulate prints to make our tests work.
+            // Get format string.
             let op = self.pc.get_operand(0);
             let op2 = op.get_operand(0);
             let op3 = LLVMGetInitializer(op2.get());
             let mut l = 0 as usize;
             let s = LLVMGetAsString(op3, &mut l);
-            libc::puts(s);
+            // Get operands
+            let mut ops = Vec::new();
+            for i in 1..LLVMGetNumOperands(self.pc.get()) - 1 {
+                let op = self.pc.get_operand(u32::try_from(i).unwrap());
+                let val = self.var_lookup(&op);
+                ops.push(val.val);
+            }
+            // FIXME: Hack in some printf calls with different arguments to improve our testing
+            // capabilities. Replace with a more dynamic approach once we've figured out how to do
+            // so.
+            match ops.len() {
+                0 => libc::printf(s),
+                1 => libc::printf(s, ops[0]),
+                2 => libc::printf(s, ops[0], ops[1]),
+                3 => libc::printf(s, ops[0], ops[1], ops[2]),
+                _ => todo!(),
+            };
             return false;
         } else if name.starts_with(YK_CONTROL_POINT_FUNC) {
             // FIXME: When we see the control point we are done and can just return.
             return true;
         } else {
             // FIXME: Properly implement calls.
-            todo!()
+            todo!("{:?}", self.pc.as_str())
         }
     }
 
@@ -417,21 +468,21 @@ impl SGInterp {
 
     /// Interpret return instruction `instr`.
     fn ret(&mut self) -> bool {
+        // FIXME: Pass return value back to the control point.
+        let op = self.pc.get_operand(0);
+        let retval = self.var_lookup(&op);
         if self.frames.len() == 1 {
             // We've reached the end of the interpreters main, so just get the return value and
             // exit.
-            // FIXME: This assumes that the bottom frame contains the interpreter loop which may
-            // not always be the case.
-            let op = self.pc.get_operand(0);
-            // FIXME: Pass return value back to the control point.
-            let _retval = if op.is_constant() {
-                llvmbridge::llvm_const_to_sgvalue(op)
-            } else {
-                todo!()
-            };
+            // FIXME: This assumes that the bottom frame contains the interpreter loop. Is this
+            // always the case?
             true
         } else {
-            todo!()
+            self.frames.pop();
+            self.pc = self.frames.last_mut().unwrap().pc;
+            debug_assert!(self.pc.is_call());
+            self.var_set(self.pc, retval);
+            false
         }
     }
 

@@ -39,11 +39,9 @@
 //     jit-state: exit-jit-code
 //     jit-state: enter-jit-code
 //     i=1
-//     jit-state: stopgap
+//     jit-state: enter-stopgap
 //     ...
-//     Indirect: 10004...
-//     Indirect: 10006...
-//     ...
+//     jit-state: exit-stopgap
 //   stdout:
 //     exit
 
