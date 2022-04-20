@@ -1,4 +1,5 @@
 use crate::SGValue;
+use libffi::middle::Type as FFIType;
 use llvm_sys::bit_reader::LLVMParseBitcodeInContext2;
 use llvm_sys::core::*;
 use llvm_sys::prelude::{LLVMBasicBlockRef, LLVMModuleRef, LLVMTypeRef, LLVMValueRef};
@@ -112,6 +113,10 @@ impl Type {
         matches!(self.kind(), LLVMTypeKind::LLVMIntegerTypeKind)
     }
 
+    pub fn is_void(&self) -> bool {
+        matches!(self.kind(), LLVMTypeKind::LLVMVoidTypeKind)
+    }
+
     pub fn get_int_width(&self) -> u32 {
         debug_assert!(self.is_integer());
         unsafe { LLVMGetIntTypeWidth(self.0) }
@@ -119,6 +124,24 @@ impl Type {
 
     pub fn as_str(&self) -> &CStr {
         unsafe { CStr::from_ptr(LLVMPrintTypeToString(self.0)) }
+    }
+
+    /// Converts an LLVM type into a libffi type.
+    pub fn ffi_type(&self) -> FFIType {
+        match self.kind() {
+            LLVMTypeKind::LLVMIntegerTypeKind => {
+                // FIXME: https://github.com/ykjit/yk/issues/536
+                match unsafe { LLVMGetIntTypeWidth(self.0) } {
+                    8 => FFIType::u8(),
+                    16 => FFIType::u16(),
+                    32 => FFIType::u32(),
+                    64 => FFIType::u64(),
+                    _ => todo!(),
+                }
+            }
+            LLVMTypeKind::LLVMVoidTypeKind => FFIType::void(),
+            _ => todo!("{:?}", self.as_str()),
+        }
     }
 }
 
@@ -165,6 +188,19 @@ impl Value {
         unsafe { !LLVMIsASwitchInst(self.0).is_null() }
     }
 
+    pub fn is_inline_asm(&self) -> bool {
+        !unsafe { LLVMIsAInlineAsm(self.0).is_null() }
+    }
+
+    pub fn is_function(&self) -> bool {
+        unsafe { !LLVMIsAFunction(self.0).is_null() }
+    }
+
+    pub fn is_vararg_function(&self) -> bool {
+        let el_ty = self.get_type().get_element_type().get();
+        (unsafe { LLVMIsFunctionVarArg(el_ty) }) != 0
+    }
+
     pub fn is_call(&self) -> bool {
         unsafe { !LLVMIsACallInst(self.0).is_null() }
     }
@@ -180,6 +216,14 @@ impl Value {
         }
     }
 
+    pub fn get_num_arg_operands(&self) -> u32 {
+        unsafe { LLVMGetNumArgOperands(self.0) }
+    }
+
+    pub fn get_called_value(&self) -> Value {
+        unsafe { Self::new(LLVMGetCalledValue(self.0)) }
+    }
+
     pub fn opcode(&self) -> LLVMOpcode {
         unsafe {
             debug_assert!(!LLVMIsAInstruction(self.0).is_null());
@@ -193,6 +237,12 @@ impl Value {
 
     pub fn kind(&self) -> LLVMValueKind {
         unsafe { LLVMGetValueKind(self.0) }
+    }
+
+    pub fn get_name(&self) -> &str {
+        let mut size = MaybeUninit::<usize>::uninit();
+        let name = unsafe { CStr::from_ptr(LLVMGetValueName2(self.0, size.as_mut_ptr())) };
+        name.to_str().unwrap()
     }
 }
 
@@ -228,7 +278,7 @@ pub unsafe fn get_aot_original(instr: &Value) -> Option<Value> {
             // If this isn't a pointer it can't be YKCtrlPointVars.
             return None;
         }
-        let ty = Type(LLVMGetElementType(ty.0));
+        let ty = ty.get_element_type();
         if !ty.is_struct() {
             // If this isn't a struct it can't be YKCtrlPointVars.
             return None;
