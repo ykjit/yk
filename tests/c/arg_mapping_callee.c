@@ -1,4 +1,3 @@
-// ignore: Requires stackmap support for nested functions.
 // Run-time:
 //   env-var: YKD_PRINT_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
@@ -13,7 +12,7 @@
 //     2:5
 //     jit-state: enter-jit-code
 //     1:5
-//     jit-state: stopgap
+//     jit-state: enter-stopgap
 //     ...
 
 // Check that using an argument (of a non-main() function) in a trace works.
@@ -24,7 +23,7 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-void f(int x) {
+int f(int x) {
   YkMT *mt = yk_mt_new();
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
@@ -39,6 +38,7 @@ void f(int x) {
 
   yk_location_drop(loc);
   yk_mt_drop(mt);
+  return 0;
 }
 
 int main(int argc, char **argv) {

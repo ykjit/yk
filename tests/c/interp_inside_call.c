@@ -1,49 +1,53 @@
 // Run-time:
-//   env-var: YKD_PRINT_IR=jit-pre-opt
+//   env-var: YKD_PRINT_IR=aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_PRINT_JITSTATE=1
 //   stderr:
-//     ...
 //     jit-state: start-tracing
-//     3:1
-//     jit-state: stop-tracing
-//     --- Begin jit-pre-opt ---
 //     ...
-//     --- End jit-pre-opt ---
-//     2:1
+//     jit-state: stop-tracing
+//     ...
 //     jit-state: enter-jit-code
-//     1:1
+//     ...
 //     jit-state: enter-stopgap
 //     ...
+//     jit-state: exit-stopgap
+//  stdout:
+//     ...
+//     i: 5 ret: 9
+//     ...
+//     i: 2 ret: 6
+//     i: 1 ret: 105
 
-// Check that we can handle struct field accesses.
+// Check that we can stopgap outside of nested, inlined calls.
 
-#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <yk.h>
 #include <yk_testing.h>
 
-struct s {
-  int x;
-};
+__attribute__((noinline)) int f(int a, int b) {
+  if (a > 1) {
+    return a + b;
+  } else {
+    return a + b + 100;
+  }
+}
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new();
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
-  struct s s1 = {argc};
-  int y1 = 0, i = 3;
+  int i = 5;
+  int ret = 0;
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    NOOPT_VAL(s1);
-    y1 = s1.x;
-    fprintf(stderr, "%d:%d\n", i, s1.x);
+    ret = f(i, argc + 3);
+    printf("i: %d ret: %d\n", i, ret);
     i--;
   }
-  assert(y1 == 1);
 
   yk_location_drop(loc);
   yk_mt_drop(mt);

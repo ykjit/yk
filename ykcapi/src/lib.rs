@@ -19,7 +19,7 @@ use std::convert::{TryFrom, TryInto};
 use std::ffi::c_void;
 use std::{ptr, slice};
 use ykrt::{print_jit_state, HotThreshold, Location, MT};
-use yksgi::SGInterp;
+use yksgi::{self, SGInterp};
 use yksmp::{Location as SMLocation, StackMapParser};
 
 /// The first three locations of an LLVM stackmap record, according to the source, are CC, Flags,
@@ -124,25 +124,16 @@ struct AOTVar {
     bbidx: usize,
     instridx: usize,
     fname: *const i8,
+    sfidx: usize,
 }
 
-/// Address and length of a vector containing AOTVars. Mirrors the struct defined in
+/// Address and length of a vector. Mirrors the struct defined in
 /// ykllvmwrap/jitmodbuilder.cc.
 #[derive(Debug)]
 #[repr(C)]
-pub struct AOTMap {
+pub struct CVec {
     addr: *const c_void,
     length: usize,
-}
-
-/// Location (basic block index, instruction index, function name) in the AOTModule where the guard
-/// failure occured. Mirrors the struct defined in ykllvmwrap/jitmodbuilder.cc.
-#[derive(Debug)]
-#[repr(C)]
-pub struct CurPos {
-    bbidx: usize,
-    instridx: usize,
-    fname: *const i8,
 }
 
 /// Reads the stackmap and saved registers from the given address (i.e. the return address of the
@@ -152,28 +143,27 @@ pub struct CurPos {
 pub extern "C" fn yk_stopgap(
     sm_addr: *const c_void,
     sm_size: usize,
-    aotmap: &AOTMap,
-    curpos: &CurPos,
+    aotmap: &CVec,
+    actframes: &CVec,
     retaddr: usize,
     rsp: *const c_void,
 ) -> u8 {
     // FIXME: remove once we have a stopgap interpreter.
     #[cfg(feature = "yk_jitstate_debug")]
-    print_jit_state("stopgap");
+    print_jit_state("enter-stopgap");
 
     // Parse AOTMap.
     let aotmap = unsafe { slice::from_raw_parts(aotmap.addr as *const AOTVar, aotmap.length) };
 
+    // Parse active frames vector.
+    let activeframes = unsafe {
+        slice::from_raw_parts(actframes.addr as *const yksgi::FrameInfo, actframes.length)
+    };
+
     // Restore saved registers from the stack.
     let registers = Registers::from_ptr(rsp);
 
-    let mut sginterp = unsafe {
-        SGInterp::new(
-            curpos.bbidx,
-            curpos.instridx,
-            std::ffi::CStr::from_ptr(curpos.fname),
-        )
-    };
+    let mut sginterp = unsafe { SGInterp::new(activeframes) };
 
     // Parse the stackmap.
     let slice = unsafe { slice::from_raw_parts(sm_addr as *mut u8, sm_size) };
@@ -184,26 +174,26 @@ pub extern "C" fn yk_stopgap(
     // Skip first 3 locations as they don't relate to any of our live variables.
     for (i, l) in locs.iter().skip(SM_REC_HEADER).enumerate() {
         match l {
-            SMLocation::Register(reg, size) => {
-                // FIXME: remove once we have a stopgap interpreter.
-                let val = unsafe { registers.get(*reg) };
-                eprintln!("Register: {} ({} {})", val, reg, size);
+            SMLocation::Register(reg, _size) => {
+                let _val = unsafe { registers.get(*reg) };
+                todo!();
             }
-            SMLocation::Direct(reg, off, size) => {
+            SMLocation::Direct(reg, off, _size) => {
                 // When using `llvm.experimental.deoptimize` then direct locations should always be
                 // in relation to RBP.
                 assert_eq!(*reg, 6);
                 let addr = unsafe { registers.get(*reg) as *mut u8 };
                 let addr = unsafe { addr.offset(isize::try_from(*off).unwrap()) };
-                let v = match *size {
-                    1 => unsafe { ptr::read::<u8>(addr as *mut u8) as u64 },
-                    2 => unsafe { ptr::read::<u16>(addr as *mut u16) as u64 },
-                    4 => unsafe { ptr::read::<u32>(addr as *mut u32) as u64 },
-                    8 => unsafe { ptr::read::<u64>(addr as *mut u64) as u64 },
-                    _ => unreachable!(),
-                };
-                // FIXME: remove once we have a stopgap interpreter.
-                eprintln!("Direct: {} ({} {})", v, reg, off);
+                let aot = &aotmap[i];
+                unsafe {
+                    sginterp.var_init(
+                        aot.bbidx,
+                        aot.instridx,
+                        std::ffi::CStr::from_ptr(aot.fname),
+                        aot.sfidx,
+                        addr as u64,
+                    );
+                }
             }
             SMLocation::Indirect(reg, off, size) => {
                 let addr = unsafe { registers.get(*reg) as *mut u8 };
@@ -221,32 +211,31 @@ pub extern "C" fn yk_stopgap(
                         aot.bbidx,
                         aot.instridx,
                         std::ffi::CStr::from_ptr(aot.fname),
+                        aot.sfidx,
                         v,
                     );
                 }
-                // FIXME: remove once we have a stopgap interpreter.
-                eprintln!("Indirect: {:?} ({} {} {})", v, reg, off, size);
             }
             SMLocation::Constant(v) => {
-                // FIXME: remove once we have a stopgap interpreter.
-                eprintln!("Constant: {}", v);
                 let aot = &aotmap[i];
                 unsafe {
                     sginterp.var_init(
                         aot.bbidx,
                         aot.instridx,
                         std::ffi::CStr::from_ptr(aot.fname),
+                        aot.sfidx,
                         *v as u64,
                     );
                 }
             }
-            SMLocation::LargeConstant(v) => {
-                // FIXME: remove once we have a stopgap interpreter.
-                eprintln!("Large constant: {}", v);
+            SMLocation::LargeConstant(_v) => {
+                todo!();
             }
         }
     }
-    unsafe { sginterp.interpret() }
+    let ret = unsafe { sginterp.interpret() };
+    print_jit_state("exit-stopgap");
+    ret
 }
 
 /// The `__llvm__deoptimize()` function required by `llvm.experimental.deoptimize` intrinsic, that

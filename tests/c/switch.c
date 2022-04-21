@@ -17,7 +17,7 @@
 //     i=2
 //     jit-state: enter-jit-code
 //     i=1
-//     jit-state: stopgap
+//     jit-state: enter-stopgap
 //     ...
 
 // Check that tracing a non-default switch arm works correctly.

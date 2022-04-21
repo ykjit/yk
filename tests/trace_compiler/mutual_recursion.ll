@@ -8,14 +8,14 @@
 ;      ...
 ;      define {{type}} @__yk_compiled_trace_0(%0* %0, i64* %1, i64 %2) {
 ;        %4 = icmp eq i32 1, 0
-;        br i1 %4, label %guardfail, label %20
+;        br i1 %4, label %guardfail, label %{{rtnbb}}
 ;
 ;      guardfail:                                        ; preds = %3
 ;        ...
 ;        %{{cprtn}} = call {{type}} (...) @llvm.experimental.deoptimize.{{type}}(i64* %1, i64 %2...
 ;        ret {{type}} %{{cprtn}}
 ;
-;      20:                                               ; preds = %3
+;      {{rtnbb}}:                                               ; preds = %3
 ;        call void @f(i32 0)
 ;        ret {{type}}...
 ;      }
