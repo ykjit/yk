@@ -157,7 +157,12 @@ impl MT {
         }
     }
 
-    pub fn control_point(&self, loc: &Location, ctrlp_vars: *mut c_void) -> bool {
+    pub fn control_point(
+        &self,
+        loc: &Location,
+        ctrlp_vars: *mut c_void,
+        returnval: *mut c_void,
+    ) -> bool {
         match self.transition_location(loc) {
             TransitionLocation::NoAction => (),
             TransitionLocation::Execute(ctr) => {
@@ -170,7 +175,7 @@ impl MT {
                 loop {
                     #[cfg(feature = "yk_jitstate_debug")]
                     print_jit_state("enter-jit-code");
-                    match unsafe { &*ctr }.exec(ctrlp_vars) {
+                    match unsafe { &*ctr }.exec(ctrlp_vars, returnval) {
                         TRACE_RETURN_SUCCESS => {}
                         TRACE_GUARDFAIL_CONTINUE => return false,
                         TRACE_GUARDFAIL_RETURN => return true,

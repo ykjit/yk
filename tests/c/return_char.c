@@ -7,9 +7,9 @@
 //     ...
 //     jit-state: stop-tracing
 //     ...
-//     %{{1}} = call i1 @__ykrt_control_point(%struct.YkMT* %{{2}}, %struct.YkLocation* %{{3}}, %YkCtrlPointVars* %{{4}}, i1* %{{retval}})...
+//     %{{1}} = call i1 @__ykrt_control_point(%struct.YkMT* %{{2}}, %struct.YkLocation* %{{3}}, %YkCtrlPointVars* %{{4}}, i8* %{{retval}})...
 //     ...
-//     define i8 @__yk_compiled_trace_0(%YkCtrlPointVars* %0, i64* %1, i64 %2, i1* %3) {
+//     define i8 @__yk_compiled_trace_0(%YkCtrlPointVars* %0, i64* %1, i64 %2, i8* %3) {
 //     ...
 //     jit-state: enter-jit-code
 //     ...
@@ -17,11 +17,7 @@
 //     ...
 //     jit-state: exit-stopgap
 //  stdout:
-//     f
-//     f
-//     f
-//     f
-//     f
+//     a
 
 // Check that we can stopgap outside of nested, inlined calls.
 
@@ -30,7 +26,7 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-__attribute__((noinline)) void f() {
+__attribute__((noinline)) char f() {
   YkMT *mt = yk_mt_new();
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
@@ -39,15 +35,16 @@ __attribute__((noinline)) void f() {
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    printf("f\n");
     i--;
   }
 
   yk_location_drop(loc);
   yk_mt_drop(mt);
+  return 'a';
 }
 
 int main(int argc, char **argv) {
-  f();
+  char c = f();
+  printf("%c", c);
   return (EXIT_SUCCESS);
 }

@@ -115,13 +115,15 @@ pub struct SGInterp {
     pc: Value,
     /// Last basic block that was interpreted.
     lastbb: Option<BasicBlock>,
+    /// Pointer in which to store the interpreted final return.
+    retvalptr: *mut c_void,
 }
 
 impl SGInterp {
     /// Create a new stopgap interpreter and initialise it to start interpretation at the location
     /// given by a basic block index, instruction index, and function name.
     /// FIXME: Support initialisation of multiple frames.
-    pub unsafe fn new(activeframes: &[FrameInfo]) -> SGInterp {
+    pub unsafe fn new(activeframes: &[FrameInfo], retvalptr: *mut c_void) -> SGInterp {
         // Get AOT module IR and parse it.
         let module = Module::from_bc();
 
@@ -141,6 +143,7 @@ impl SGInterp {
             frames,
             pc: current_pc,
             lastbb: None,
+            retvalptr,
         }
     }
 
@@ -527,10 +530,23 @@ impl SGInterp {
             Some(self.var_lookup(&op))
         };
         if self.frames.len() == 1 {
-            // We've reached the end of the interpreters main, so just get the return value and
-            // exit.
+            // We've reached the end of the interpreters main, so store the return value in the
+            // provided pointer.
             // FIXME: This assumes that the bottom frame contains the interpreter loop. Is this
             // always the case?
+            if let Some(val) = retval {
+                if val.ty.is_integer() {
+                    match val.ty.get_int_width() {
+                        8 => unsafe { ptr::write::<u8>(self.retvalptr as *mut u8, val.val as u8) },
+                        32 => unsafe {
+                            ptr::write::<u32>(self.retvalptr as *mut u32, val.val as u32)
+                        },
+                        _ => todo!(),
+                    }
+                } else {
+                    todo!()
+                }
+            }
             true
         } else {
             self.frames.pop();

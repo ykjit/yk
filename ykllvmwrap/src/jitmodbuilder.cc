@@ -26,11 +26,13 @@ uint64_t getNewTraceIdx() {
 #define TRACE_FUNC_PREFIX "__yk_compiled_trace_"
 #define YK_NEW_CONTROL_POINT "__ykrt_control_point"
 #define YK_CONTROL_POINT_ARG_VARS_IDX 2
-#define YK_CONTROL_POINT_NUM_ARGS 3
+#define YK_CONTROL_POINT_ARG_RETURNVAL_IDX 3
+#define YK_CONTROL_POINT_NUM_ARGS 4
 
 #define JITFUNC_ARG_INPUTS_STRUCT_IDX 0
 #define JITFUNC_ARG_STACKMAP_ADDR_IDX 1
 #define JITFUNC_ARG_STACKMAP_LEN_IDX 2
+#define JITFUNC_ARG_RETURNVAL_IDX 3
 
 #define YK_OUTLINE_FNATTR "yk_outline"
 
@@ -453,7 +455,7 @@ class JITModBuilder {
     insertAOTMap(I, NewInst, CurBBIdx, CurInstrIdx);
   }
 
-  Function *createJITFunc(Value *TraceInputs) {
+  Function *createJITFunc(Value *TraceInputs, Type *ReturnTy) {
     // Compute a name for the trace.
     uint64_t TraceIdx = getNewTraceIdx();
     TraceName = string(TRACE_FUNC_PREFIX) + to_string(TraceIdx);
@@ -465,6 +467,9 @@ class JITModBuilder {
     // Add arguments for stackmap pointer and size.
     InputTypes.push_back(PointerSizedIntTy->getPointerTo());
     InputTypes.push_back(PointerSizedIntTy);
+
+    // Add argument in which to store the value of an interpreted return.
+    InputTypes.push_back(ReturnTy);
 
     llvm::FunctionType *FType = llvm::FunctionType::get(
         Type::getInt8Ty(JITMod->getContext()), InputTypes, false);
@@ -684,6 +689,21 @@ class JITModBuilder {
       FailBuilder.CreateStore(
           ConstantInt::get(PointerSizedIntTy, LiveVals.size()), GEP);
 
+      // Store the stackmap address and length in a separate struct to save
+      // arguments.
+      AllocaInst *StackMapStruct = FailBuilder.CreateAlloca(
+          VecLenStructTy, ConstantInt::get(PointerSizedIntTy, 1));
+      GEP = FailBuilder.CreateGEP(VecLenStructTy, StackMapStruct,
+                                  {ConstantInt::get(PointerSizedIntTy, 0),
+                                   ConstantInt::get(Int32Ty, 0)});
+      FailBuilder.CreateStore(JITFunc->getArg(JITFUNC_ARG_STACKMAP_ADDR_IDX),
+                              GEP);
+      GEP = FailBuilder.CreateGEP(VecLenStructTy, StackMapStruct,
+                                  {ConstantInt::get(PointerSizedIntTy, 0),
+                                   ConstantInt::get(Int32Ty, 1)});
+      FailBuilder.CreateStore(JITFunc->getArg(JITFUNC_ARG_STACKMAP_LEN_IDX),
+                              GEP);
+
       // Create the deoptimization call.
       Type *retty = Type::getInt8Ty(Context);
       Function *DeoptInt = Intrinsic::getDeclaration(
@@ -694,9 +714,8 @@ class JITModBuilder {
       // function so pass them on to the __llvm_deoptimize call.
       Value *Ret =
           CallInst::Create(DeoptInt,
-                           {JITFunc->getArg(JITFUNC_ARG_STACKMAP_ADDR_IDX),
-                            JITFunc->getArg(JITFUNC_ARG_STACKMAP_LEN_IDX),
-                            AOTLocs, ActiveFramesStruct},
+                           {StackMapStruct, AOTLocs, ActiveFramesStruct,
+                            JITFunc->getArg(JITFUNC_ARG_RETURNVAL_IDX)},
                            {ob}, "", GuardFailBB);
 
       // We always need to return after the deoptimisation call.
@@ -1081,7 +1100,16 @@ class JITModBuilder {
     PointerSizedIntTy = DL.getIntPtrType(Context);
 
     // Create a function inside of which we construct the IR for our trace.
-    JITFunc = createJITFunc(TraceInputs);
+    Type *ReturnTy;
+    if (CPCI->getNumArgOperands() != YK_CONTROL_POINT_NUM_ARGS) {
+      // This means we are running the trace_compiler tests which only uses a
+      // dummy control point so create a dummy return value too.
+      ReturnTy = Type::getInt1Ty(Context)->getPointerTo();
+    } else {
+      ReturnTy =
+          CPCI->getArgOperand(YK_CONTROL_POINT_ARG_RETURNVAL_IDX)->getType();
+    }
+    JITFunc = createJITFunc(TraceInputs, ReturnTy);
     auto DstBB = BasicBlock::Create(JITMod->getContext(), "", JITFunc);
     Builder.SetInsertPoint(DstBB);
 

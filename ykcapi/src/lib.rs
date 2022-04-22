@@ -49,12 +49,15 @@ pub extern "C" fn __ykrt_control_point(
     mt: *mut MT,
     loc: *mut Location,
     ctrlp_vars: *mut c_void,
+    // Opaque pointer in which to store the result of the control point's caller's return value as
+    // interpreted by the stopgap interpreter.
+    returnval: *mut c_void,
 ) -> bool {
     debug_assert!(!ctrlp_vars.is_null());
     if !loc.is_null() {
         let mt = unsafe { &*mt };
         let loc = unsafe { &*loc };
-        return mt.control_point(loc, ctrlp_vars);
+        return mt.control_point(loc, ctrlp_vars, returnval);
     }
     false
 }
@@ -132,6 +135,7 @@ struct AOTVar {
 #[derive(Debug)]
 #[repr(C)]
 pub struct CVec {
+    // FIXME rename to PtrLen
     addr: *const c_void,
     length: usize,
 }
@@ -141,10 +145,10 @@ pub struct CVec {
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
 pub extern "C" fn yk_stopgap(
-    sm_addr: *const c_void,
-    sm_size: usize,
+    stackmap: &CVec,
     aotmap: &CVec,
     actframes: &CVec,
+    retvalptr: *mut c_void,
     retaddr: usize,
     rsp: *const c_void,
 ) -> u8 {
@@ -163,10 +167,10 @@ pub extern "C" fn yk_stopgap(
     // Restore saved registers from the stack.
     let registers = Registers::from_ptr(rsp);
 
-    let mut sginterp = unsafe { SGInterp::new(activeframes) };
+    let mut sginterp = unsafe { SGInterp::new(activeframes, retvalptr) };
 
     // Parse the stackmap.
-    let slice = unsafe { slice::from_raw_parts(sm_addr as *mut u8, sm_size) };
+    let slice = unsafe { slice::from_raw_parts(stackmap.addr as *mut u8, stackmap.length) };
     let map = StackMapParser::parse(slice).unwrap();
     let locs = map.get(&retaddr.try_into().unwrap()).unwrap();
 
@@ -244,10 +248,10 @@ pub extern "C" fn yk_stopgap(
 #[naked]
 #[no_mangle]
 pub extern "C" fn __llvm_deoptimize(
-    addr: *const c_void,
-    size: usize,
+    stackmap: *const c_void,
     aotmap: *const c_void,
-    curpos: *const c_void,
+    frames: *const c_void,
+    retval: *mut c_void,
 ) -> u8 {
     // Push all registers to the stack before they can be clobbered, so that we can find their
     // values after parsing in the stackmap. The order in which we push the registers is equivalent
@@ -268,8 +272,8 @@ pub extern "C" fn __llvm_deoptimize(
             "push rdx",
             "push rax",
             // Now we need to call yk_stopgap. The arguments need to be in RDI, RSI, RDX,
-            // RCX, R8, and R9. The first four arguments (stackmap address, stackmap
-            // size, live variable map, and current IR position) are already where they
+            // RCX, R8, and R9. The first four arguments (stackmap
+            // live variable map, frames, and return value pointer) are already where they
             // need to be as we are just forwarding them from the current function's
             // arguments. The remaining arguments (return address and current stack
             // pointer) need to be in R8 and R9. The return address was at [RSP] before
