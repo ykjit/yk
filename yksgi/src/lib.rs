@@ -519,8 +519,13 @@ impl SGInterp {
     /// Interpret return instruction `instr`.
     fn ret(&mut self) -> bool {
         // FIXME: Pass return value back to the control point.
-        let op = self.pc.get_operand(0);
-        let retval = self.var_lookup(&op);
+        let numops = unsafe { LLVMGetNumOperands(self.pc.get()) };
+        let retval = if numops == 0 {
+            None
+        } else {
+            let op = self.pc.get_operand(0);
+            Some(self.var_lookup(&op))
+        };
         if self.frames.len() == 1 {
             // We've reached the end of the interpreters main, so just get the return value and
             // exit.
@@ -531,7 +536,9 @@ impl SGInterp {
             self.frames.pop();
             self.pc = self.frames.last_mut().unwrap().pc;
             debug_assert!(self.pc.is_call());
-            self.var_set(self.pc, retval);
+            if let Some(val) = retval {
+                self.var_set(self.pc, val);
+            }
             false
         }
     }
