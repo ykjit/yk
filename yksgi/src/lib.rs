@@ -44,10 +44,6 @@ impl SGValue {
     pub fn with_type(&self, ty: Type) -> Self {
         SGValue::new(self.val, ty)
     }
-
-    pub fn as_str(&self) -> String {
-        format!("SGValue ( {}, {:?} )", self.val, self.ty.as_str())
-    }
 }
 
 /// A frame holding live variables.
