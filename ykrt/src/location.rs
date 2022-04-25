@@ -306,10 +306,10 @@ impl Drop for Location {
                 // trace that's pointed to. There should be a ref count that we decrement and free
                 // memory if it reaches zero.
                 self.unlock();
-            } else if let HotLocationKind::Compiling(ref mtx) = hl.kind {
-                drop(mtx);
-                self.unlock();
-            } else if let HotLocationKind::DontTrace | HotLocationKind::Tracing(_) = hl.kind {
+            } else if let HotLocationKind::Compiling(_)
+            | HotLocationKind::DontTrace
+            | HotLocationKind::Tracing(_) = hl.kind
+            {
                 self.unlock();
                 unsafe {
                     Box::from_raw(hl);
