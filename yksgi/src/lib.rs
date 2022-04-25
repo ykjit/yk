@@ -326,17 +326,17 @@ impl SGInterp {
         if ALWAYS_SKIP_FUNCS.contains(&name) {
             // There's no point calling these functions inside the stopgap interpreter so just skip
             // them.
-            return false;
+            false
         } else if SKIP_FOR_NOW_FUNCS.contains(&name) {
             // FIXME: These need to run, but since we can't do calls, just skip them for now.
-            return false;
+            false
         } else if name.starts_with("puts") || name.starts_with("printf") {
             // FIXME: Until we can handle function calls, simulate prints to make our tests work.
             // Get format string.
             let op = self.pc.get_operand(0);
             let op2 = op.get_operand(0);
             let op3 = LLVMGetInitializer(op2.get());
-            let mut l = 0 as usize;
+            let mut l = 0;
             let s = LLVMGetAsString(op3, &mut l);
             // Get operands
             let mut ops = Vec::new();
@@ -355,10 +355,10 @@ impl SGInterp {
                 3 => libc::printf(s, ops[0], ops[1], ops[2]),
                 _ => todo!(),
             };
-            return false;
+            false
         } else if name.starts_with(YK_CONTROL_POINT_FUNC) {
             // FIXME: When we see the control point we are done and can just return.
-            return true;
+            true
         } else {
             // FIXME: Properly implement calls.
             todo!("{:?}", self.pc.as_str())
