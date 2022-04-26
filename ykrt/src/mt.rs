@@ -219,9 +219,9 @@ impl MT {
                     Ordering::Relaxed,
                 )
                 .ok();
-                return TransitionLocation::NoAction;
+                TransitionLocation::NoAction
             } else {
-                return THREAD_MTTHREAD.with(|mtt| {
+                THREAD_MTTHREAD.with(|mtt| {
                     if !mtt.tracing.load(Ordering::Relaxed).is_null() {
                         // This thread is already tracing another Location, so either another
                         // thread needs to trace this Location or this thread needs to wait
@@ -267,7 +267,7 @@ impl MT {
                             }
                         }
                     }
-                });
+                })
             }
         } else {
             // There's no point contending with other threads, so in general we don't want to
@@ -297,9 +297,9 @@ impl MT {
                     let thread_arc = THREAD_MTTHREAD.with(|mtt| Arc::clone(&mtt.tracing));
                     if !thread_arc.load(Ordering::Relaxed).is_null() {
                         // FIXME: https://github.com/ykjit/yk/issues/519
-                        return TransitionLocation::NoAction;
+                        TransitionLocation::NoAction
                     } else {
-                        return TransitionLocation::Execute(*ctr);
+                        TransitionLocation::Execute(*ctr)
                     }
                 }
                 HotLocationKind::Compiling(arcmtx) => {
@@ -322,7 +322,7 @@ impl MT {
                         }
                     };
                     loc.unlock();
-                    return r;
+                    r
                 }
                 HotLocationKind::Tracing(ref tracing_arc) => {
                     let thread_arc = THREAD_MTTHREAD.with(|mtt| Arc::clone(&mtt.tracing));
@@ -338,7 +338,7 @@ impl MT {
                         let mtx = Arc::new(Mutex::new(None));
                         hl.kind = HotLocationKind::Compiling(Arc::clone(&mtx));
                         loc.unlock();
-                        return TransitionLocation::StopTracing(mtx);
+                        TransitionLocation::StopTracing(mtx)
                     } else {
                         // This thread isn't tracing anything
                         if Arc::strong_count(tracing_arc) == 1 {
@@ -359,12 +359,12 @@ impl MT {
                             }
                         }
                         loc.unlock();
-                        return TransitionLocation::NoAction;
+                        TransitionLocation::NoAction
                     }
                 }
                 HotLocationKind::DontTrace => {
                     loc.unlock();
-                    return TransitionLocation::NoAction;
+                    TransitionLocation::NoAction
                 }
             }
         }
