@@ -1,10 +1,14 @@
+use libc::dlsym;
+use libffi::middle::{arg as ffi_arg, Arg as FFIArg, Builder as FFIBuilder, CodePtr as FFICodePtr};
 use llvm_sys::core::*;
 use llvm_sys::target::{LLVMABISizeOfType, LLVMOffsetOfElement};
 use llvm_sys::{LLVMOpcode, LLVMTypeKind};
+use std::alloc::{alloc, dealloc, Layout};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::ffi::{c_void, CStr};
 use std::ptr;
+use std::slice;
 
 mod llvmbridge;
 use llvmbridge::{get_aot_original, BasicBlock, Module, Type, Value};
@@ -313,16 +317,13 @@ impl SGInterp {
     /// Implement call instructions. Returns `true` if the control point has been reached,
     /// `false` otherwise.
     unsafe fn call(&mut self) -> bool {
-        let func = LLVMGetCalledValue(self.pc.get());
-        if !LLVMIsAInlineAsm(func).is_null() {
+        let func = self.pc.get_called_value();
+        if func.is_inline_asm() {
             // FIXME: Implement calls to inline asm. Just skip them for now, as our tests won't run
             // otherwise.
             return false;
         }
-        let mut size = 0;
-        let name = CStr::from_ptr(LLVMGetValueName2(func, &mut size))
-            .to_str()
-            .unwrap();
+        let name = func.get_name();
         if ALWAYS_SKIP_FUNCS.contains(&name) {
             // There's no point calling these functions inside the stopgap interpreter so just skip
             // them.
@@ -360,8 +361,61 @@ impl SGInterp {
             // FIXME: When we see the control point we are done and can just return.
             true
         } else {
-            // FIXME: Properly implement calls.
-            todo!("{:?}", self.pc.as_str())
+            // We are going to do a native call via libffi, starting with looking up the address of
+            // the callee in the virtual address space.
+            //
+            // OPT: This could benefit from caching, and we may already know the address of the
+            // callee if we inlined it when preparing traces:
+            // https://github.com/ykjit/yk/issues/544
+            debug_assert!(func.is_function());
+            let fptr = dlsym(ptr::null_mut(), name.as_ptr() as *const i8);
+            if fptr == ptr::null_mut() {
+                todo!("couldn't find symbol: {}", name);
+            }
+
+            if func.is_vararg_function() {
+                todo!("calling a varargs function");
+            }
+
+            // Now build the calling interface and collect the values of the callee's arguments.
+            let mut builder = FFIBuilder::new();
+            let num_args = usize::try_from(self.pc.get_num_arg_operands()).unwrap();
+            let arg_lay = Layout::array::<u64>(num_args).unwrap();
+            let arg_mem = alloc(Layout::array::<u64>(num_args).unwrap());
+            let mut arg_mem_p = arg_mem.cast::<u64>();
+            for i in 0..num_args {
+                // The first N operands are the first N operands of the function being called.
+                let arg = self.pc.get_operand(u32::try_from(i).unwrap());
+                builder = builder.arg(arg.get_type().ffi_type());
+                *arg_mem_p = self.var_lookup(&arg).val;
+                arg_mem_p = arg_mem_p.add(1);
+            }
+            builder = builder.res(self.pc.get_type().ffi_type());
+            let cif = builder.into_cif(); // OPT: cache CIFs for repeated calls to same func sig.
+
+            // Actually do the call.
+            let ret_ty = self.pc.get_type();
+            let arg_slice = slice::from_raw_parts_mut::<u64>(arg_mem as *mut u64, num_args);
+            let ffi_arg_vals: Vec<FFIArg> = arg_slice.iter().map(|a| ffi_arg(a)).collect();
+            if ret_ty.is_integer() {
+                // FIXME: https://github.com/ykjit/yk/issues/536
+                match ret_ty.get_int_width() {
+                    32 => {
+                        let rv = cif.call::<u32>(FFICodePtr(fptr), &ffi_arg_vals) as u64;
+                        self.var_set(self.pc, SGValue::new(rv, ret_ty));
+                    }
+                    _ => todo!(),
+                }
+            } else if ret_ty.is_void() {
+                cif.call::<()>(FFICodePtr(fptr), &ffi_arg_vals);
+            } else {
+                todo!("{:?}", ret_ty.as_str());
+            };
+            // `ffi_arg_vals` contains raw pointers to `arg_mem`, so we had better drop those
+            // before we deallocate `arg_mem`.
+            drop(ffi_arg_vals);
+            dealloc(arg_mem, arg_lay);
+            return false;
         }
     }
 
