@@ -425,38 +425,48 @@ impl SGInterp {
     unsafe fn gep(&mut self) {
         // FIXME: If the target is a `struct` and it's packed, then we need to get the data layout
         // to compute the correct offsets.
+        // FIXME: Look into inbounds keyword and overflows.
         let ty = self.pc.get_type();
         debug_assert!(ty.is_pointer());
 
         let layout = self.module.datalayout();
         let aggr = self.pc.get_operand(0);
         let mut curty = aggr.get_type();
-        let ptr = self.var_lookup(&aggr).val;
+        let ptr = self.var_lookup(&aggr).val as *const c_void;
         let numops = LLVMGetNumOperands(self.pc.get());
 
-        let mut offset = 0;
+        // Since vector indexes can be negative, we need to use an i64 for the offset. In practise
+        // this should be enough, but if a GEP instruction ever happens to produce a bigger offset,
+        // this will throw an overflow error.
+        let mut offset: i64 = 0;
         for i in 1..numops {
             let op = self.pc.get_operand(u32::try_from(i).unwrap());
-            let idx = if op.is_constant() {
-                LLVMConstIntGetZExtValue(op.get())
-            } else {
-                self.var_lookup(&op).val
-            };
 
             if curty.is_struct() {
+                // Struct indexes are always positive.
+                let idx = if op.is_constant() {
+                    LLVMConstIntGetZExtValue(op.get())
+                } else {
+                    self.var_lookup(&op).val
+                };
                 let off = LLVMOffsetOfElement(layout, curty.get(), u32::try_from(idx).unwrap());
-                offset += off;
+                offset += i64::try_from(off).unwrap();
                 let nty = LLVMStructGetTypeAtIndex(curty.get(), u32::try_from(idx).unwrap());
                 curty = Type::new(nty);
             } else {
-                // Pointer into an array
+                // Pointer into an array. Indexes can be negative.
+                let idx = if op.is_constant() {
+                    LLVMConstIntGetSExtValue(op.get())
+                } else {
+                    self.var_lookup(&op).val as i64
+                };
                 curty = curty.get_element_type();
-                let size = LLVMABISizeOfType(layout, curty.get());
+                let size = i64::try_from(LLVMABISizeOfType(layout, curty.get())).unwrap();
                 offset += size * idx;
             }
         }
         debug_assert!(curty.get() == ty.get_element_type().get());
-        let newval = SGValue::new(ptr + offset, ty);
+        let newval = SGValue::new(ptr.offset(isize::try_from(offset).unwrap()) as u64, ty);
         self.var_set(self.pc, newval);
     }
 
