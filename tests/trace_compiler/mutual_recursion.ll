@@ -6,16 +6,16 @@
 ;
 ;      %0 = type { i8 }
 ;      ...
-;      define {{type}} @__yk_compiled_trace_0(%0* %0, i64* %1, i64 %2) {
-;        %4 = icmp eq i32 1, 0
-;        br i1 %4, label %guardfail, label %{{rtnbb}}
+;      define {{type}} @__yk_compiled_trace_0(%0* %0, i64* %1, i64 %2, i1* %3) {
+;        %{{4}} = icmp eq i32 1, 0
+;        br i1 %{{4}}, label %guardfail, label %{{rtnbb}}
 ;
-;      guardfail:                                        ; preds = %3
+;      guardfail:                                        ; preds = %4
 ;        ...
-;        %{{cprtn}} = call {{type}} (...) @llvm.experimental.deoptimize.{{type}}(i64* %1, i64 %2...
+;        %{{cprtn}} = call {{type}} (...) @llvm.experimental.deoptimize.{{type}}(...
 ;        ret {{type}} %{{cprtn}}
 ;
-;      {{rtnbb}}:                                               ; preds = %3
+;      {{rtnbb}}:                                               ; preds = %4
 ;        call void @f(i32 0)
 ;        ret {{type}}...
 ;      }
