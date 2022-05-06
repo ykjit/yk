@@ -140,6 +140,15 @@ std::vector<Value *> getLiveVars(
       for (auto &I : BB) {
         if ((!I.getType()->isVoidTy()) &&
             (DT.dominates(&I, cast<Instruction>(Before)))) {
+          if (AOTMap.find(&I) == AOTMap.end()) {
+            // We sometimes create extra variables that don't have a
+            // corresponding AOT variable. For example an AOT switch statement
+            // becomes two instructions, `icmp` and `br`. The `icmp`
+            // instruction can then be live and appear here. Since its value is
+            // inconsequential for the stopgap interpreter we can safely ignore
+            // it.
+            continue;
+          }
           std::tuple<size_t, size_t, Instruction *, size_t> Entry = AOTMap[&I];
           size_t StackFrameIdx = std::get<3>(Entry);
           if (StackFrameIdx > CallDepth) {
@@ -212,9 +221,6 @@ class JITModBuilder {
   // Maps field indices in the live variables struct to the value stored prior
   // to calling the control point.
   std::map<uint64_t, Value *> LiveIndexMap;
-
-  // The block we branch to when a guard fails. Starts null, lazily created.
-  BasicBlock *GuardFailBB;
 
   // The LLVM type for a C `int` on the current machine.
   Type *IntTy;
@@ -536,191 +542,191 @@ class JITModBuilder {
 
   // Returns a pointer to the guard failure block, creating it if necessary.
   BasicBlock *getGuardFailureBlock(Function *JITFunc, FrameInfo FInfo) {
-    if (GuardFailBB == nullptr) {
-      // If `JITFunc` contains no blocks already, then the guard failure block
-      // becomes the entry block. This would lead to a trace that
-      // unconditionally and immediately fails a guard.
-      assert(JITFunc->getBasicBlockList().size() != 0);
+    // If `JITFunc` contains no blocks already, then the guard failure block
+    // becomes the entry block. This would lead to a trace that
+    // unconditionally and immediately fails a guard.
+    assert(JITFunc->getBasicBlockList().size() != 0);
 
-      // Declare `errx(3)`.
-      LLVMContext &Context = JITFunc->getContext();
+    // Declare `errx(3)`.
+    LLVMContext &Context = JITFunc->getContext();
 
-      // Create the block.
-      GuardFailBB = BasicBlock::Create(Context, "guardfail", JITFunc);
-      IRBuilder<> FailBuilder(GuardFailBB);
+    // Create the block.
+    // FIXME: Cache guard blocks where live variables and frames are the same,
+    // e.g. this can happen when a loop is unrolled and the same condition
+    // produces a guard in each unrolled iteration.
+    BasicBlock *GuardFailBB = BasicBlock::Create(Context, "guardfail", JITFunc);
+    IRBuilder<> FailBuilder(GuardFailBB);
 
-      // Find live variables.
-      BasicBlock *CurrentBB = Builder.GetInsertBlock();
-      Instruction *CurrentInst = &CurrentBB->back();
-      DominatorTree DT(*JITFunc);
-      std::vector<Value *> LiveVals =
-          getLiveVars(DT, CurrentInst, AOTMap, CallDepth);
-      // Naturally the current instruction is live too but wasn't included due
-      // to the way DominatorTree works.
-      LiveVals.push_back(CurrentInst);
+    // Find live variables.
+    BasicBlock *CurrentBB = Builder.GetInsertBlock();
+    Instruction *CurrentInst = &CurrentBB->back();
+    DominatorTree DT(*JITFunc);
+    std::vector<Value *> LiveVals =
+        getLiveVars(DT, CurrentInst, AOTMap, CallDepth);
+    // Naturally the current instruction is live too but wasn't included due
+    // to the way DominatorTree works.
+    LiveVals.push_back(CurrentInst);
 
-      // Add the control point struct to the live variables we pass into the
-      // `deoptimize` call so the stopgap interpreter can access it.
-      Value *YKCPArg = JITFunc->getArg(JITFUNC_ARG_INPUTS_STRUCT_IDX);
-      LiveVals.push_back(YKCPArg);
-      std::tuple<size_t, size_t, Instruction *, size_t> YkCPAlloca =
-          getYkCPAlloca();
-      AOTMap[YKCPArg] = YkCPAlloca;
+    // Add the control point struct to the live variables we pass into the
+    // `deoptimize` call so the stopgap interpreter can access it.
+    Value *YKCPArg = JITFunc->getArg(JITFUNC_ARG_INPUTS_STRUCT_IDX);
+    LiveVals.push_back(YKCPArg);
+    std::tuple<size_t, size_t, Instruction *, size_t> YkCPAlloca =
+        getYkCPAlloca();
+    AOTMap[YKCPArg] = YkCPAlloca;
 
-      IntegerType *Int32Ty = Type::getInt32Ty(Context);
-      PointerType *Int8PtrTy = Type::getInt8PtrTy(Context);
+    IntegerType *Int32Ty = Type::getInt32Ty(Context);
+    PointerType *Int8PtrTy = Type::getInt8PtrTy(Context);
 
-      // Create struct type for storing a vector and its length.
-      PointerType *VecPtrTy = PointerType::get(Context, 0);
-      StructType *VecLenStructTy =
-          StructType::get(Context, {VecPtrTy, PointerSizedIntTy});
+    // Create struct type for storing a vector and its length.
+    PointerType *VecPtrTy = PointerType::get(Context, 0);
+    StructType *VecLenStructTy =
+        StructType::get(Context, {VecPtrTy, PointerSizedIntTy});
 
-      // Create a vector of active stackframes (i.e. basic block index,
-      // instruction index, function name). This will be needed later to point
-      // the stopgap interpeter at the correct location from where to start
-      // interpretation and to setup its stackframes.
-      // FIXME: Use function index instead of string name.
-      ActiveFrames.push_back(FInfo); // Add current frame.
-      StructType *ActiveFrameSTy = StructType::get(
-          Context, {PointerSizedIntTy, PointerSizedIntTy, Int8PtrTy});
-      AllocaInst *ActiveFrameVec = FailBuilder.CreateAlloca(
-          ActiveFrameSTy,
-          ConstantInt::get(PointerSizedIntTy, ActiveFrames.size()));
-      for (size_t I = 0; I < ActiveFrames.size(); I++) {
-        FrameInfo FI = ActiveFrames[I];
+    // Create a vector of active stackframes (i.e. basic block index,
+    // instruction index, function name). This will be needed later to point
+    // the stopgap interpeter at the correct location from where to start
+    // interpretation and to setup its stackframes.
+    // FIXME: Use function index instead of string name.
+    ActiveFrames.push_back(FInfo); // Add current frame.
+    StructType *ActiveFrameSTy = StructType::get(
+        Context, {PointerSizedIntTy, PointerSizedIntTy, Int8PtrTy});
+    AllocaInst *ActiveFrameVec = FailBuilder.CreateAlloca(
+        ActiveFrameSTy,
+        ConstantInt::get(PointerSizedIntTy, ActiveFrames.size()));
+    for (size_t I = 0; I < ActiveFrames.size(); I++) {
+      FrameInfo FI = ActiveFrames[I];
 
-        // Create GEP instructions to get pointers into the fields of the
-        // individual frames inside the ActiveFrameVec vector. The first index
-        // is for the element in the vector at position `I` (and is thus
-        // pointer sized). The second index is for the field inside that
-        // element (since each element has only 3 fields a Int8 would suffice,
-        // but for convenience we just use the Int32Ty we already have defined
-        // above).
-        auto GEP =
-            FailBuilder.CreateGEP(ActiveFrameSTy, ActiveFrameVec,
-                                  {ConstantInt::get(PointerSizedIntTy, I),
-                                   ConstantInt::get(Int32Ty, 0)});
-        FailBuilder.CreateStore(ConstantInt::get(PointerSizedIntTy, FI.BBIdx),
-                                GEP);
-        GEP = FailBuilder.CreateGEP(ActiveFrameSTy, ActiveFrameVec,
-                                    {ConstantInt::get(PointerSizedIntTy, I),
-                                     ConstantInt::get(Int32Ty, 1)});
-        FailBuilder.CreateStore(
-            ConstantInt::get(PointerSizedIntTy, FI.InstrIdx), GEP);
-        Value *CurFunc = FailBuilder.CreateGlobalStringPtr(FI.Fname);
-        GEP = FailBuilder.CreateGEP(ActiveFrameSTy, ActiveFrameVec,
-                                    {ConstantInt::get(PointerSizedIntTy, I),
-                                     ConstantInt::get(Int32Ty, 2)});
-        FailBuilder.CreateStore(CurFunc, GEP);
-      }
-
-      // Store the active frames vector and its length in a separate struct to
-      // save arguments.
-      AllocaInst *ActiveFramesStruct = FailBuilder.CreateAlloca(
-          VecLenStructTy, ConstantInt::get(PointerSizedIntTy, 1));
-      auto GEP = FailBuilder.CreateGEP(VecLenStructTy, ActiveFramesStruct,
-                                       {ConstantInt::get(PointerSizedIntTy, 0),
+      // Create GEP instructions to get pointers into the fields of the
+      // individual frames inside the ActiveFrameVec vector. The first index
+      // is for the element in the vector at position `I` (and is thus
+      // pointer sized). The second index is for the field inside that
+      // element (since each element has only 3 fields a Int8 would suffice,
+      // but for convenience we just use the Int32Ty we already have defined
+      // above).
+      auto GEP = FailBuilder.CreateGEP(ActiveFrameSTy, ActiveFrameVec,
+                                       {ConstantInt::get(PointerSizedIntTy, I),
                                         ConstantInt::get(Int32Ty, 0)});
-      FailBuilder.CreateStore(ActiveFrameVec, GEP);
-      GEP = FailBuilder.CreateGEP(VecLenStructTy, ActiveFramesStruct,
-                                  {ConstantInt::get(PointerSizedIntTy, 0),
-                                   ConstantInt::get(Int32Ty, 1)});
-      FailBuilder.CreateStore(
-          ConstantInt::get(PointerSizedIntTy, ActiveFrames.size()), GEP);
-
-      // Create a vector in which to store the locations of the corresponding
-      // AOT variables.
-      StructType *AOTLocTy =
-          StructType::get(Context, {PointerSizedIntTy, PointerSizedIntTy,
-                                    Int8PtrTy, PointerSizedIntTy});
-      AllocaInst *AOTLocVec = FailBuilder.CreateAlloca(
-          AOTLocTy, ConstantInt::get(PointerSizedIntTy, LiveVals.size()));
-      std::map<std::string, Value *> FuncPtrMap;
-      for (size_t I = 0; I < LiveVals.size(); I++) {
-        Value *Live = LiveVals[I];
-        std::tuple<size_t, size_t, Instruction *, size_t> Entry = AOTMap[Live];
-        size_t BBIdx = std::get<0>(Entry);
-        size_t InstrIdx = std::get<1>(Entry);
-        Instruction *AOTVar = std::get<2>(Entry);
-        size_t StackFrameIdx = std::get<3>(Entry);
-        auto iter = FuncPtrMap.find(AOTVar->getFunction()->getName().data());
-        Value *FPtr;
-        if (iter == FuncPtrMap.end()) {
-          // FIXME: Use function index instead of string name.
-          FPtr = FailBuilder.CreateGlobalStringPtr(
-              AOTVar->getFunction()->getName());
-          FuncPtrMap.insert({AOTVar->getFunction()->getName().data(), FPtr});
-        } else {
-          FPtr = iter->second;
-        }
-        auto GEP =
-            FailBuilder.CreateGEP(AOTLocTy, AOTLocVec,
+      FailBuilder.CreateStore(ConstantInt::get(PointerSizedIntTy, FI.BBIdx),
+                              GEP);
+      GEP = FailBuilder.CreateGEP(ActiveFrameSTy, ActiveFrameVec,
                                   {ConstantInt::get(PointerSizedIntTy, I),
-                                   ConstantInt::get(Int32Ty, 0)});
-        FailBuilder.CreateStore(ConstantInt::get(PointerSizedIntTy, BBIdx),
-                                GEP);
-        GEP = FailBuilder.CreateGEP(AOTLocTy, AOTLocVec,
-                                    {ConstantInt::get(PointerSizedIntTy, I),
-                                     ConstantInt::get(Int32Ty, 1)});
-        FailBuilder.CreateStore(ConstantInt::get(PointerSizedIntTy, InstrIdx),
-                                GEP);
-        GEP = FailBuilder.CreateGEP(AOTLocTy, AOTLocVec,
-                                    {ConstantInt::get(PointerSizedIntTy, I),
-                                     ConstantInt::get(Int32Ty, 2)});
-        FailBuilder.CreateStore(FPtr, GEP);
-        GEP = FailBuilder.CreateGEP(AOTLocTy, AOTLocVec,
-                                    {ConstantInt::get(PointerSizedIntTy, I),
-                                     ConstantInt::get(Int32Ty, 3)});
-        FailBuilder.CreateStore(
-            ConstantInt::get(PointerSizedIntTy, StackFrameIdx), GEP);
-      }
-
-      // Store the live variable vector and its length in a separate struct to
-      // save arguments.
-      AllocaInst *AOTLocs = FailBuilder.CreateAlloca(
-          VecLenStructTy, ConstantInt::get(PointerSizedIntTy, 1));
-      GEP = FailBuilder.CreateGEP(VecLenStructTy, AOTLocs,
-                                  {ConstantInt::get(PointerSizedIntTy, 0),
-                                   ConstantInt::get(Int32Ty, 0)});
-      FailBuilder.CreateStore(AOTLocVec, GEP);
-      GEP = FailBuilder.CreateGEP(VecLenStructTy, AOTLocs,
-                                  {ConstantInt::get(PointerSizedIntTy, 0),
                                    ConstantInt::get(Int32Ty, 1)});
-      FailBuilder.CreateStore(
-          ConstantInt::get(PointerSizedIntTy, LiveVals.size()), GEP);
-
-      // Store the stackmap address and length in a separate struct to save
-      // arguments.
-      AllocaInst *StackMapStruct = FailBuilder.CreateAlloca(
-          VecLenStructTy, ConstantInt::get(PointerSizedIntTy, 1));
-      GEP = FailBuilder.CreateGEP(VecLenStructTy, StackMapStruct,
-                                  {ConstantInt::get(PointerSizedIntTy, 0),
-                                   ConstantInt::get(Int32Ty, 0)});
-      FailBuilder.CreateStore(JITFunc->getArg(JITFUNC_ARG_STACKMAP_ADDR_IDX),
+      FailBuilder.CreateStore(ConstantInt::get(PointerSizedIntTy, FI.InstrIdx),
                               GEP);
-      GEP = FailBuilder.CreateGEP(VecLenStructTy, StackMapStruct,
-                                  {ConstantInt::get(PointerSizedIntTy, 0),
-                                   ConstantInt::get(Int32Ty, 1)});
-      FailBuilder.CreateStore(JITFunc->getArg(JITFUNC_ARG_STACKMAP_LEN_IDX),
-                              GEP);
-
-      // Create the deoptimization call.
-      Type *retty = Type::getInt8Ty(Context);
-      Function *DeoptInt = Intrinsic::getDeclaration(
-          JITFunc->getParent(), Intrinsic::experimental_deoptimize, {retty});
-      OperandBundleDef ob =
-          OperandBundleDef("deopt", (ArrayRef<Value *>)LiveVals);
-      // We already passed the stackmap address and size into the trace
-      // function so pass them on to the __llvm_deoptimize call.
-      Value *Ret =
-          CallInst::Create(DeoptInt,
-                           {StackMapStruct, AOTLocs, ActiveFramesStruct,
-                            JITFunc->getArg(JITFUNC_ARG_RETURNVAL_IDX)},
-                           {ob}, "", GuardFailBB);
-
-      // We always need to return after the deoptimisation call.
-      ReturnInst::Create(Context, Ret, GuardFailBB);
+      Value *CurFunc = FailBuilder.CreateGlobalStringPtr(FI.Fname);
+      GEP = FailBuilder.CreateGEP(ActiveFrameSTy, ActiveFrameVec,
+                                  {ConstantInt::get(PointerSizedIntTy, I),
+                                   ConstantInt::get(Int32Ty, 2)});
+      FailBuilder.CreateStore(CurFunc, GEP);
     }
+
+    // Store the active frames vector and its length in a separate struct to
+    // save arguments.
+    AllocaInst *ActiveFramesStruct = FailBuilder.CreateAlloca(
+        VecLenStructTy, ConstantInt::get(PointerSizedIntTy, 1));
+    auto GEP = FailBuilder.CreateGEP(
+        VecLenStructTy, ActiveFramesStruct,
+        {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 0)});
+    FailBuilder.CreateStore(ActiveFrameVec, GEP);
+    GEP = FailBuilder.CreateGEP(
+        VecLenStructTy, ActiveFramesStruct,
+        {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 1)});
+    FailBuilder.CreateStore(
+        ConstantInt::get(PointerSizedIntTy, ActiveFrames.size()), GEP);
+
+    // Create a vector in which to store the locations of the corresponding
+    // AOT variables.
+    StructType *AOTLocTy =
+        StructType::get(Context, {PointerSizedIntTy, PointerSizedIntTy,
+                                  Int8PtrTy, PointerSizedIntTy});
+    AllocaInst *AOTLocVec = FailBuilder.CreateAlloca(
+        AOTLocTy, ConstantInt::get(PointerSizedIntTy, LiveVals.size()));
+    std::map<std::string, Value *> FuncPtrMap;
+    for (size_t I = 0; I < LiveVals.size(); I++) {
+      Value *Live = LiveVals[I];
+      std::tuple<size_t, size_t, Instruction *, size_t> Entry = AOTMap[Live];
+      size_t BBIdx = std::get<0>(Entry);
+      size_t InstrIdx = std::get<1>(Entry);
+      Instruction *AOTVar = std::get<2>(Entry);
+      size_t StackFrameIdx = std::get<3>(Entry);
+      auto iter = FuncPtrMap.find(AOTVar->getFunction()->getName().data());
+      Value *FPtr;
+      if (iter == FuncPtrMap.end()) {
+        // FIXME: Use function index instead of string name.
+        FPtr =
+            FailBuilder.CreateGlobalStringPtr(AOTVar->getFunction()->getName());
+        FuncPtrMap.insert({AOTVar->getFunction()->getName().data(), FPtr});
+      } else {
+        FPtr = iter->second;
+      }
+      auto GEP = FailBuilder.CreateGEP(AOTLocTy, AOTLocVec,
+                                       {ConstantInt::get(PointerSizedIntTy, I),
+                                        ConstantInt::get(Int32Ty, 0)});
+      FailBuilder.CreateStore(ConstantInt::get(PointerSizedIntTy, BBIdx), GEP);
+      GEP = FailBuilder.CreateGEP(AOTLocTy, AOTLocVec,
+                                  {ConstantInt::get(PointerSizedIntTy, I),
+                                   ConstantInt::get(Int32Ty, 1)});
+      FailBuilder.CreateStore(ConstantInt::get(PointerSizedIntTy, InstrIdx),
+                              GEP);
+      GEP = FailBuilder.CreateGEP(AOTLocTy, AOTLocVec,
+                                  {ConstantInt::get(PointerSizedIntTy, I),
+                                   ConstantInt::get(Int32Ty, 2)});
+      FailBuilder.CreateStore(FPtr, GEP);
+      GEP = FailBuilder.CreateGEP(AOTLocTy, AOTLocVec,
+                                  {ConstantInt::get(PointerSizedIntTy, I),
+                                   ConstantInt::get(Int32Ty, 3)});
+      FailBuilder.CreateStore(
+          ConstantInt::get(PointerSizedIntTy, StackFrameIdx), GEP);
+    }
+
+    // Store the live variable vector and its length in a separate struct to
+    // save arguments.
+    AllocaInst *AOTLocs = FailBuilder.CreateAlloca(
+        VecLenStructTy, ConstantInt::get(PointerSizedIntTy, 1));
+    GEP = FailBuilder.CreateGEP(
+        VecLenStructTy, AOTLocs,
+        {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 0)});
+    FailBuilder.CreateStore(AOTLocVec, GEP);
+    GEP = FailBuilder.CreateGEP(
+        VecLenStructTy, AOTLocs,
+        {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 1)});
+    FailBuilder.CreateStore(
+        ConstantInt::get(PointerSizedIntTy, LiveVals.size()), GEP);
+
+    // Store the stackmap address and length in a separate struct to save
+    // arguments.
+    AllocaInst *StackMapStruct = FailBuilder.CreateAlloca(
+        VecLenStructTy, ConstantInt::get(PointerSizedIntTy, 1));
+    GEP = FailBuilder.CreateGEP(
+        VecLenStructTy, StackMapStruct,
+        {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 0)});
+    FailBuilder.CreateStore(JITFunc->getArg(JITFUNC_ARG_STACKMAP_ADDR_IDX),
+                            GEP);
+    GEP = FailBuilder.CreateGEP(
+        VecLenStructTy, StackMapStruct,
+        {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 1)});
+    FailBuilder.CreateStore(JITFunc->getArg(JITFUNC_ARG_STACKMAP_LEN_IDX), GEP);
+
+    // Create the deoptimization call.
+    Type *retty = Type::getInt8Ty(Context);
+    Function *DeoptInt = Intrinsic::getDeclaration(
+        JITFunc->getParent(), Intrinsic::experimental_deoptimize, {retty});
+    OperandBundleDef ob =
+        OperandBundleDef("deopt", (ArrayRef<Value *>)LiveVals);
+    // We already passed the stackmap address and size into the trace
+    // function so pass them on to the __llvm_deoptimize call.
+    Value *Ret = CallInst::Create(DeoptInt,
+                                  {StackMapStruct, AOTLocs, ActiveFramesStruct,
+                                   JITFunc->getArg(JITFUNC_ARG_RETURNVAL_IDX)},
+                                  {ob}, "", GuardFailBB);
+
+    // We always need to return after the deoptimisation call.
+    ReturnInst::Create(Context, Ret, GuardFailBB);
+
+    // Now that we've finished creating the guard, pop the current frame, so
+    // that future guards don't include it in their list of active frames.
+    ActiveFrames.pop_back();
     return GuardFailBB;
   }
 
@@ -1092,7 +1098,6 @@ class JITModBuilder {
         ControlPointCallInst(CPCI) {
     LLVMContext &Context = AOTMod->getContext();
     JITMod = new Module("", Context);
-    GuardFailBB = nullptr;
 
     // Cache common types.
     IntTy = Type::getIntNTy(Context, sizeof(int) * CHAR_BIT);

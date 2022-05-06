@@ -15,7 +15,7 @@
 ;     --- Begin guard-fail-brs ---
 ;     --- Begin jit-pre-opt ---
 ;       br i1 %{{pre-icmp1}}, label %{{pre-true1}}, label %guardfail
-;       br i1 %{{pre-icmp2}}, label %{{pre-true2}}, label %guardfail
+;       br i1 %{{pre-icmp2}}, label %{{pre-true2}}, label %guardfail1
 ;     --- End jit-pre-opt ---
 ;     --- Begin jit-post-opt ---
 ;       br i1 %{{post-icmp1}}, label %{{post-true1}}, label %guardfail
