@@ -382,6 +382,8 @@ impl MT {
         mtx: Arc<Mutex<Option<Box<CompiledTrace>>>>,
     ) {
         let do_compile = move || {
+            // FIXME: if mapping or tracing fails we don't want to abort, but in order to do that,
+            // we'll need to move the location into something other than the Compiling state.
             let irtrace = match utrace.map() {
                 Ok(x) => x,
                 Err(e) => todo!("{e:?}"),
