@@ -290,21 +290,15 @@ pub struct ThreadTracer {
 
 impl ThreadTracer {
     /// Stops tracing on the current thread, returning a IR trace on success.
-    pub fn stop_tracing(mut self) -> Result<IRTrace, InvalidTraceError> {
-        let trace = self.t_impl.stop_tracing();
-        if let Ok(inner) = &trace {
-            if inner.len() == 0 {
-                return Err(InvalidTraceError::EmptyTrace);
-            }
-        }
-        trace
+    pub fn stop_tracing(mut self) -> Result<Box<dyn UnmappedTrace>, InvalidTraceError> {
+        self.t_impl.stop_tracing()
     }
 }
 
 // An generic interface which tracing backends must fulfill.
 trait ThreadTracerImpl {
     /// Stops tracing on the current thread, returning the IR trace on success.
-    fn stop_tracing(&mut self) -> Result<IRTrace, InvalidTraceError>;
+    fn stop_tracing(&mut self) -> Result<Box<dyn UnmappedTrace>, InvalidTraceError>;
 }
 
 /// Start tracing on the current thread using the specified tracing kind.
@@ -320,11 +314,15 @@ pub fn start_tracing(kind: TracingKind) {
 
 /// Stop tracing on the current thread. Calling this when the current thread is not already tracing
 /// leads to undefined behaviour.
-pub fn stop_tracing() -> Result<IRTrace, InvalidTraceError> {
+pub fn stop_tracing() -> Result<Box<dyn UnmappedTrace>, InvalidTraceError> {
     let mut res = Err(InvalidTraceError::EmptyTrace);
     THREAD_TRACER.with(|tt| {
         let tt_owned = tt.borrow_mut().take();
         res = tt_owned.unwrap().stop_tracing();
     });
     res
+}
+
+pub trait UnmappedTrace: Send {
+    fn map(self: Box<Self>) -> Result<IRTrace, InvalidTraceError>;
 }
