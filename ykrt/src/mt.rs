@@ -22,7 +22,7 @@ use crate::{
     location::{HotLocation, HotLocationKind, Location, LocationInner},
     print_jit_state,
 };
-use yktrace::{start_tracing, stop_tracing, CompiledTrace, IRTrace, TracingKind};
+use yktrace::{start_tracing, stop_tracing, CompiledTrace, TracingKind, UnmappedTrace};
 
 // The HotThreshold must be less than a machine word wide for [`Location::Location`] to do its
 // pointer tagging thing. We therefore choose a type which makes this statically clear to
@@ -191,10 +191,10 @@ impl MT {
                 start_tracing(kind);
             }
             TransitionLocation::StopTracing(x) => match stop_tracing() {
-                Ok(ir_trace) => {
+                Ok(utrace) => {
                     #[cfg(feature = "yk_jitstate_debug")]
                     print_jit_state("stop-tracing");
-                    self.queue_compile_job(ir_trace, x);
+                    self.queue_compile_job(utrace, x);
                 }
                 Err(_) => todo!(),
             },
@@ -376,10 +376,18 @@ impl MT {
     }
 
     /// Add a compilation job for `sir` to the global work queue.
-    fn queue_compile_job(&self, trace: IRTrace, mtx: Arc<Mutex<Option<Box<CompiledTrace>>>>) {
+    fn queue_compile_job(
+        &self,
+        utrace: Box<dyn UnmappedTrace>,
+        mtx: Arc<Mutex<Option<Box<CompiledTrace>>>>,
+    ) {
         let do_compile = move || {
-            let code_ptr = trace.compile();
-            let ct = Box::new(CompiledTrace::new(code_ptr));
+            let irtrace = match utrace.map() {
+                Ok(x) => x,
+                Err(e) => todo!("{e:?}"),
+            };
+            let codeptr = irtrace.compile();
+            let ct = Box::new(CompiledTrace::new(codeptr));
             // FIXME: although we've now put the compiled trace into the `HotLocation`, there's
             // no guarantee that the `Location` for which we're compiling will ever be executed
             // again. In such a case, the memory has, in essence, leaked.

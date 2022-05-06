@@ -1,6 +1,6 @@
 //! Hardware tracing via ykrustc.
 
-use super::{IRTrace, ThreadTracer, ThreadTracerImpl};
+use super::{IRTrace, ThreadTracer, ThreadTracerImpl, UnmappedTrace};
 use crate::errors::InvalidTraceError;
 use hwtracer::backends::TracerBuilder;
 
@@ -14,13 +14,12 @@ struct HWTThreadTracer {
 }
 
 impl ThreadTracerImpl for HWTThreadTracer {
-    fn stop_tracing(&mut self) -> Result<IRTrace, InvalidTraceError> {
+    fn stop_tracing(&mut self) -> Result<Box<dyn UnmappedTrace>, InvalidTraceError> {
         self.active = false;
-        let hwtrace = self.ttracer.stop_tracing().unwrap();
-        let mt = HWTMapper::new();
-        mt.map_trace(hwtrace)
-            .map_err(|_| InvalidTraceError::InternalError)
-            .map(|(b, f)| IRTrace::new(b, f))
+        match self.ttracer.stop_tracing() {
+            Ok(t) => Ok(Box::new(PTTrace(t))),
+            Err(e) => todo!("{e:?}"),
+        }
     }
 }
 
@@ -41,5 +40,24 @@ pub(crate) fn start_tracing() -> ThreadTracer {
             active: true,
             ttracer,
         }),
+    }
+}
+
+struct PTTrace(Box<dyn hwtracer::Trace>);
+
+impl UnmappedTrace for PTTrace {
+    fn map(self: Box<Self>) -> Result<IRTrace, InvalidTraceError> {
+        let mt = HWTMapper::new();
+        let mapped = mt
+            .map_trace(self.0)
+            .map_err(|_| InvalidTraceError::InternalError)
+            .map(|(b, f)| IRTrace::new(b, f));
+
+        if let Ok(x) = &mapped {
+            if x.len() == 0 {
+                return Err(InvalidTraceError::EmptyTrace);
+            }
+        }
+        mapped
     }
 }
