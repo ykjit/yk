@@ -382,11 +382,16 @@ impl MT {
         mtx: Arc<Mutex<Option<Box<CompiledTrace>>>>,
     ) {
         let do_compile = move || {
+            // FIXME: if mapping or tracing fails we don't want to abort, but in order to do that,
+            // we'll need to move the location into something other than the Compiling state.
             let irtrace = match utrace.map() {
                 Ok(x) => x,
                 Err(e) => todo!("{e:?}"),
             };
-            let codeptr = irtrace.compile();
+            let codeptr = match irtrace.compile() {
+                Ok(x) => x,
+                Err(e) => todo!("{e:?}"),
+            };
             let ct = Box::new(CompiledTrace::new(codeptr));
             // FIXME: although we've now put the compiled trace into the `HotLocation`, there's
             // no guarantee that the `Location` for which we're compiling will ever be executed

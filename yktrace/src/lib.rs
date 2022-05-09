@@ -9,6 +9,7 @@ use libc::c_void;
 use std::{
     cell::RefCell,
     collections::HashMap,
+    error::Error,
     ffi::{CStr, CString},
     ptr,
 };
@@ -135,7 +136,7 @@ impl IRTrace {
         (func_names, bbs, trace_len)
     }
 
-    pub fn compile(&self) -> *const c_void {
+    pub fn compile(&self) -> Result<*const c_void, Box<dyn Error>> {
         let (func_names, bbs, trace_len) = self.encode_trace();
 
         let mut faddr_keys = Vec::new();
@@ -160,7 +161,7 @@ impl IRTrace {
             )
         };
         assert_ne!(ret, ptr::null());
-        ret
+        Ok(ret)
     }
 
     #[cfg(feature = "yk_testing")]
