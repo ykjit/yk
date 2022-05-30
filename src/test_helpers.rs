@@ -5,7 +5,7 @@
 
 #![cfg(test)]
 
-use super::{Block, HWTracerError, ThreadTracer, TracerState};
+use super::{Block, HWTracerError, ThreadTracer};
 use crate::Trace;
 use std::slice::Iter;
 use std::time::SystemTime;
@@ -58,7 +58,7 @@ where
 {
     tracer.start_tracing().unwrap();
     match tracer.start_tracing() {
-        Err(HWTracerError::TracerState(TracerState::Started)) => (),
+        Err(HWTracerError::AlreadyTracing) => (),
         _ => panic!(),
     };
     tracer.stop_tracing().unwrap();
@@ -70,7 +70,7 @@ where
     T: ThreadTracer,
 {
     match tracer.stop_tracing() {
-        Err(HWTracerError::TracerState(TracerState::Stopped)) => (),
+        Err(HWTracerError::AlreadyStopped) => (),
         _ => panic!(),
     };
 }

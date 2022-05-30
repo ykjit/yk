@@ -10,7 +10,6 @@ mod test_helpers;
 
 pub use errors::HWTracerError;
 use std::fmt::Debug;
-use std::fmt::{self, Display, Formatter};
 #[cfg(test)]
 use std::fs::File;
 use std::iter::Iterator;
@@ -50,27 +49,4 @@ pub trait ThreadTracer {
     ///
     /// [start_tracing](trait.ThreadTracer.html#method.start_tracing) must have been called prior.
     fn stop_tracing(&mut self) -> Result<Box<dyn Trace>, HWTracerError>;
-}
-
-// Keeps track of the internal state of a tracer.
-#[derive(PartialEq, Eq, Debug)]
-pub enum TracerState {
-    Stopped,
-    Started,
-}
-
-impl TracerState {
-    /// Returns the error corresponding with the `TracerState`.
-    pub fn as_error(self) -> HWTracerError {
-        HWTracerError::TracerState(self)
-    }
-}
-
-impl Display for TracerState {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        match *self {
-            TracerState::Started => write!(f, "started"),
-            TracerState::Stopped => write!(f, "stopped"),
-        }
-    }
 }

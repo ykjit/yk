@@ -1,4 +1,4 @@
-use crate::{backends::BackendKind, TracerState};
+use crate::backends::BackendKind;
 use libc::{c_int, strerror};
 use std::error::Error;
 use std::ffi::CStr;
@@ -15,7 +15,8 @@ pub enum HWTracerError {
     BackendUnavailable(BackendKind), // This backend was not compiled in to hwtracer.
     Permissions(String),             // Tracing is not permitted using this backend.
     Errno(c_int),                    // Something went wrong in C code.
-    TracerState(TracerState),        // The tracer is in the wrong state to do the requested task.
+    AlreadyTracing,                  // Trying to start a tracer that's already tracing.
+    AlreadyStopped,                  // Trying to stop a tracer that's not tracing.
     BadConfig(String),               // The tracer configuration was invalid.
     Custom(Box<dyn Error>), // All other errors can be nested here, however, don't rely on this
     // for performance since the `Box` incurs a runtime cost.
@@ -34,7 +35,10 @@ impl Display for HWTracerError {
                 let err_str = unsafe { CStr::from_ptr(strerror(n)) };
                 write!(f, "{}", err_str.to_str().unwrap())
             }
-            HWTracerError::TracerState(ref s) => write!(f, "Tracer in wrong state: {}", s),
+            HWTracerError::AlreadyTracing => {
+                write!(f, "Can't start a tracer that's already tracing")
+            }
+            HWTracerError::AlreadyStopped => write!(f, "Can't stop a tracer that's not tracing"),
             HWTracerError::BadConfig(ref s) => write!(f, "{}", s),
             HWTracerError::Custom(ref bx) => write!(f, "{}", bx),
             HWTracerError::Unknown => write!(f, "Unknown error"),
@@ -53,7 +57,8 @@ impl Error for HWTracerError {
             HWTracerError::BackendUnavailable(_) => None,
             HWTracerError::NoHWSupport(_) => None,
             HWTracerError::Permissions(_) => None,
-            HWTracerError::TracerState(_) => None,
+            HWTracerError::AlreadyTracing => None,
+            HWTracerError::AlreadyStopped => None,
             HWTracerError::BadConfig(_) => None,
             HWTracerError::Errno(_) => None,
             HWTracerError::Custom(ref bx) => Some(bx.as_ref()),
