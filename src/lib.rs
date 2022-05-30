@@ -18,12 +18,6 @@ use std::iter::Iterator;
 ///
 /// Each backend has its own concrete implementation.
 pub trait Trace: Debug + Send {
-    /// Dump the trace to the specified filename.
-    ///
-    /// The exact format varies per-backend.
-    #[cfg(test)]
-    fn to_file(&self, file: &mut File);
-
     /// Iterate over the blocks of the trace.
     fn iter_blocks<'t: 'i, 'i>(
         &'t self,
@@ -32,6 +26,12 @@ pub trait Trace: Debug + Send {
     /// Get the capacity of the trace in bytes.
     #[cfg(test)]
     fn capacity(&self) -> usize;
+
+    /// Dump the trace to the specified filename.
+    ///
+    /// The exact format varies per-backend.
+    #[cfg(test)]
+    fn to_file(&self, file: &mut File);
 }
 
 /// The interface offered by all tracer types.
