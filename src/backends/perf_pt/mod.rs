@@ -42,7 +42,7 @@ impl Error for LibIPTError {
 
 #[repr(C)]
 #[allow(dead_code)] // Only C constructs these.
-#[derive(PartialEq)]
+#[derive(Eq, PartialEq)]
 enum PerfPTCErrorKind {
     Unused,
     Unknown,

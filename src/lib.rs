@@ -1,5 +1,5 @@
-#![cfg_attr(feature = "clippy", feature(plugin))]
-#![cfg_attr(feature = "clippy", plugin(clippy))]
+#![allow(clippy::upper_case_acronyms)]
+#![allow(clippy::new_without_default)]
 
 mod block;
 pub use block::Block;
