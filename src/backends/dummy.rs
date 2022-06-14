@@ -1,5 +1,5 @@
 use crate::errors::HWTracerError;
-use crate::{Block, ThreadTracer, Trace, Tracer, TracerState};
+use crate::{Block, ThreadTracer, Trace, Tracer};
 #[cfg(test)]
 use std::fs::File;
 use std::iter::Iterator;
@@ -42,32 +42,30 @@ impl Tracer for DummyTracer {
 /// A tracer which doesn't really do anything.
 pub struct DummyThreadTracer {
     // Keeps track of the state of the tracer.
-    state: TracerState,
+    is_tracing: bool,
 }
 
 impl DummyThreadTracer {
     /// Create a dummy tracer.
     fn new() -> Self {
-        Self {
-            state: TracerState::Stopped,
-        }
+        Self { is_tracing: false }
     }
 }
 
 impl ThreadTracer for DummyThreadTracer {
     fn start_tracing(&mut self) -> Result<(), HWTracerError> {
-        if self.state != TracerState::Stopped {
-            return Err(TracerState::Started.as_error());
+        if self.is_tracing {
+            return Err(HWTracerError::AlreadyTracing);
         }
-        self.state = TracerState::Started;
+        self.is_tracing = true;
         Ok(())
     }
 
     fn stop_tracing(&mut self) -> Result<Box<dyn Trace>, HWTracerError> {
-        if self.state != TracerState::Started {
-            return Err(TracerState::Stopped.as_error());
+        if !self.is_tracing {
+            return Err(HWTracerError::AlreadyStopped);
         }
-        self.state = TracerState::Stopped;
+        self.is_tracing = false;
         Ok(Box::new(DummyTrace {}))
     }
 }

@@ -1,4 +1,3 @@
-use cc;
 use core::arch::x86_64::__cpuid_count;
 use rerun_except::rerun_except;
 use std::env;

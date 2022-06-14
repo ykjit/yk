@@ -1,6 +1,6 @@
 use super::PerfPTConfig;
 use crate::errors::HWTracerError;
-use crate::{Block, ThreadTracer, Trace, Tracer, TracerState};
+use crate::{Block, ThreadTracer, Trace, Tracer};
 use libc::{c_char, c_int, c_void, free, geteuid, malloc, size_t};
 use std::error::Error;
 use std::ffi::{self, CStr, CString};
@@ -42,7 +42,7 @@ impl Error for LibIPTError {
 
 #[repr(C)]
 #[allow(dead_code)] // Only C constructs these.
-#[derive(PartialEq)]
+#[derive(Eq, PartialEq)]
 enum PerfPTCErrorKind {
     Unused,
     Unknown,
@@ -373,7 +373,7 @@ pub struct PerfPTThreadTracer {
     // Opaque C pointer representing the tracer context.
     tracer_ctx: *mut c_void,
     // The state of the tracer.
-    state: TracerState,
+    is_tracing: bool,
     // The trace currently being collected, or `None`.
     trace: Option<Box<PerfPTTrace>>,
 }
@@ -383,7 +383,7 @@ impl PerfPTThreadTracer {
         Self {
             config,
             tracer_ctx: ptr::null_mut(),
-            state: TracerState::Stopped,
+            is_tracing: false,
             trace: None,
         }
     }
@@ -397,7 +397,7 @@ impl Default for PerfPTThreadTracer {
 
 impl Drop for PerfPTThreadTracer {
     fn drop(&mut self) {
-        if self.state == TracerState::Started {
+        if self.is_tracing {
             // If we haven't stopped the tracer already, stop it now.
             self.stop_tracing().unwrap();
         }
@@ -406,8 +406,8 @@ impl Drop for PerfPTThreadTracer {
 
 impl ThreadTracer for PerfPTThreadTracer {
     fn start_tracing(&mut self) -> Result<(), HWTracerError> {
-        if self.state == TracerState::Started {
-            return Err(TracerState::Started.as_error());
+        if self.is_tracing {
+            return Err(HWTracerError::AlreadyTracing);
         }
 
         // At the time of writing, we have to use a fresh Perf file descriptor to ensure traces
@@ -430,18 +430,18 @@ impl ThreadTracer for PerfPTThreadTracer {
         if !unsafe { perf_pt_start_tracer(self.tracer_ctx, &mut *trace, &mut cerr) } {
             return Err(cerr.into());
         }
-        self.state = TracerState::Started;
+        self.is_tracing = true;
         self.trace = Some(trace);
         Ok(())
     }
 
     fn stop_tracing(&mut self) -> Result<Box<dyn Trace>, HWTracerError> {
-        if self.state == TracerState::Stopped {
-            return Err(TracerState::Stopped.as_error());
+        if !self.is_tracing {
+            return Err(HWTracerError::AlreadyStopped);
         }
         let mut cerr = PerfPTCError::new();
         let rc = unsafe { perf_pt_stop_tracer(self.tracer_ctx, &mut cerr) };
-        self.state = TracerState::Stopped;
+        self.is_tracing = false;
         if !rc {
             return Err(cerr.into());
         }
