@@ -28,8 +28,8 @@ requests are:
   2. *Tested*. Every piece of new functionality, and every bug fix, must have
      at least one accompanying test, unless testing is impractical. Authors
      should also strive not to break any other part of the system. yk runs
-     various tests before a pull request is merged: this minimises, but does
-     not remove, the chances of a merged pull request breaking the repository:
+     various tests before a pull request is merged: this reduces, but does
+     not remove, the chances of a merged pull request breaking expectations:
      careful thought and testing on the part of the pull request author are
      still required.
 
