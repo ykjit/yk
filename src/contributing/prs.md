@@ -28,8 +28,8 @@ requests are:
   2. *Tested*. Every piece of new functionality, and every bug fix, must have
      at least one accompanying test, unless testing is impractical. Authors
      should also strive not to break any other part of the system. yk runs
-     various tests before a pull request is merged: this minimises, but does
-     not remove, the chances of a merged pull request breaking the repository:
+     various tests before a pull request is merged: this reduces, but does
+     not remove, the chances of a merged pull request breaking expectations:
      careful thought and testing on the part of the pull request author are
      still required.
 
@@ -55,6 +55,11 @@ requests are:
      useful (provided it doesn't cause undue problems for more widely used
      platforms).
 
+  5. *Harmonious*. As far as possible, new code should feel like a natural
+     extension of existing code. Following existing naming conventions, for
+     example, can sometimes grate, but internal consistency helps those who
+     read and edit the code later.
+
 
 ## The reviewer and reviewee covenant
 
@@ -77,7 +82,7 @@ need to accept:
 
   * that a pull request cannot solve every problem, and some problems are best
     deferred to a future pull request;
-  * and that some variance of individual style is acceptable.
+  * and that some variance of individual style is inevitable and acceptable.
 
 Put another way, while we set high standards, and require all contributions to
 meet them, we are not foolish enough to expect perfection. In particular,
