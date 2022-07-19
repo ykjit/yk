@@ -165,8 +165,12 @@ updating.
 
 The process of squashing is synonymous with `git rebase`, so when you are asked
 to squash it is also acceptable to: rebase the commit against the `master`
-branch at the same time; and force push the resulting rebased branch. *This is
-the only time you should force push an update to a branch.*
+branch at the same time; and force push the resulting rebased branch.
+
+Not that being asked to squash or to update a commit message are the only times
+you may force push an update to a branch. In both cases, the reviewee must only
+do so when explicitly asked to by a reviewer. If you are unsure, please ask a
+reviewer before force pushing.
 
 
 ## Documentation
