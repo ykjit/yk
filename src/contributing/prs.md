@@ -125,13 +125,20 @@ empty at this point?") or corrections (e.g. "we need to deal with the
 possibility of an empty list at this point"). For each comment you can either:
 
   1. Address the issue. For example, if the reviewer has pointed out correctly
-     that something needs to be changed, make a small additional commit, push
-     it to your branch and make a comment `Fixed in <git hash>` so that the
-     reviewer can check that the fix addresses their point. Each fix should be
-     in a separate commit so that it is easy to associate a comment with its
-     fix. Note that you must *never* force push updates to your branch unless
-     explicitly requested to do so by the reviewer: always make new commits on
-     your existing branch.
+     that something needs to be changed then:
+       1. make a small additional commit (one per fix);
+       2. push it to your branch;
+       3. and, in the same place as the reviewer made their comment, add a new
+	  comment `Fixed in <git hash>`.
+
+     The reviewer will then review your change and either: mark the
+     conversation as "resolved" if their point is adequately addressed; or
+     raise further comments otherwise.
+
+     Note that the reviewee must not: mark conversations as resolved (only the
+     reviewer should do so); force push updates to your branch unless
+     explicitly requested to do so by the reviewer (always make new commits on
+     the existing branch).
 
   2. Add a query. You might not understand the reviewer's question: it's fine
      to ask for clarification.
@@ -158,8 +165,12 @@ updating.
 
 The process of squashing is synonymous with `git rebase`, so when you are asked
 to squash it is also acceptable to: rebase the commit against the `master`
-branch at the same time; and force push the resulting rebased branch. *This is
-the only time you should force push an update to a branch.*
+branch at the same time; and force push the resulting rebased branch.
+
+Not that being asked to squash or to update a commit message are the only times
+you may force push an update to a branch. In both cases, the reviewee must only
+do so when explicitly asked to by a reviewer. If you are unsure, please ask a
+reviewer before force pushing.
 
 
 ## Documentation
