@@ -23,6 +23,7 @@ define void @main() {
 entry:
     %0 = add i32 0, 0
     %1 = icmp eq i32 %0, 0
+    call void (i64, i32, ...) @llvm.experimental.stackmap(i64 1, i32 0, i32 %0, i1 %1)
     br i1 %1, label %true, label %false
 
 true:
@@ -37,3 +38,4 @@ join:
     %4 = add i32 %3, 2
     unreachable
 }
+declare void @llvm.experimental.stackmap(i64, i32, ...)
