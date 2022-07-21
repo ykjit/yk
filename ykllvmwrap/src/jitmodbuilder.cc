@@ -5,6 +5,7 @@
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
 
 #include "jitmodbuilder.h"
@@ -410,7 +411,7 @@ class JITModBuilder {
       // The default case was taken.
       SwitchInst *NewSI = Builder.CreateSwitch(
           getMappedValue(SI->getCondition()), SuccBB, SI->getNumCases());
-      for (SwitchInst::CaseHandle &Case : SI->cases())
+      for (SwitchInst::CaseHandle Case : SI->cases())
         NewSI->addCase(Case.getCaseValue(), FailBB);
     }
 
@@ -579,9 +580,8 @@ class JITModBuilder {
     PointerType *Int8PtrTy = Type::getInt8PtrTy(Context);
 
     // Create struct type for storing a vector and its length.
-    PointerType *VecPtrTy = PointerType::get(Context, 0);
     StructType *VecLenStructTy =
-        StructType::get(Context, {VecPtrTy, PointerSizedIntTy});
+        StructType::get(Context, {Int8PtrTy, PointerSizedIntTy});
 
     // Create a vector of active stackframes (i.e. basic block index,
     // instruction index, function name). This will be needed later to point
@@ -1106,7 +1106,7 @@ class JITModBuilder {
 
     // Create a function inside of which we construct the IR for our trace.
     Type *ReturnTy;
-    if (CPCI->getNumArgOperands() != YK_CONTROL_POINT_NUM_ARGS) {
+    if (CPCI->arg_size() != YK_CONTROL_POINT_NUM_ARGS) {
       // This means we are running the trace_compiler tests which only uses a
       // dummy control point so create a dummy return value too.
       ReturnTy = Type::getInt1Ty(Context)->getPointerTo();

@@ -3,6 +3,7 @@
 
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/Module.h"
+#include <map>
 
 // An unaligned virtual address.
 #define YK_INVALID_ALIGNED_VADDR 0x1
