@@ -285,6 +285,26 @@ class JITModBuilder {
     GlobalMappings.insert({CF, FAddr});
   }
 
+  // Store a vector and its length as a struct. This allows us to save
+  // arguments when passing this information via the deoptimisation call.
+  AllocaInst *storeVecWithLength(IRBuilder<> &Builder, Value *Vec, Value *Len) {
+    LLVMContext &Context = Builder.getContext();
+    IntegerType *Int32Ty = Type::getInt32Ty(Context);
+    Type *VecTy = Vec->getType();
+    StructType *StructTy = StructType::get(Context, {VecTy, PointerSizedIntTy});
+    AllocaInst *Struct =
+        Builder.CreateAlloca(StructTy, ConstantInt::get(PointerSizedIntTy, 1));
+    auto GEP = Builder.CreateGEP(
+        StructTy, Struct,
+        {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 0)});
+    Builder.CreateStore(Vec, GEP);
+    GEP = Builder.CreateGEP(
+        StructTy, Struct,
+        {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 1)});
+    Builder.CreateStore(Len, GEP);
+    return Struct;
+  }
+
   void handleCallInst(CallInst *CI, Function *CF, size_t &CurBBIdx,
                       size_t &CurInstrIdx) {
     if (CF == nullptr || CF->isDeclaration()) {
@@ -619,19 +639,9 @@ class JITModBuilder {
 
     // Store the active frames vector and its length in a separate struct to
     // save arguments.
-    StructType *AFSVecTy =
-        StructType::get(Context, {ActiveFrameSTy->getPointerTo(), PointerSizedIntTy});
-    AllocaInst *ActiveFramesStruct = FailBuilder.CreateAlloca(
-        AFSVecTy, ConstantInt::get(PointerSizedIntTy, 1));
-    auto GEP = FailBuilder.CreateGEP(
-        AFSVecTy, ActiveFramesStruct,
-        {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 0)});
-    FailBuilder.CreateStore(ActiveFrameVec, GEP);
-    GEP = FailBuilder.CreateGEP(
-        AFSVecTy, ActiveFramesStruct,
-        {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 1)});
-    FailBuilder.CreateStore(
-        ConstantInt::get(PointerSizedIntTy, ActiveFrames.size()), GEP);
+    AllocaInst *ActiveFramesStruct = storeVecWithLength(
+        FailBuilder, ActiveFrameVec,
+        ConstantInt::get(PointerSizedIntTy, ActiveFrames.size()));
 
     // Create a vector in which to store the locations of the corresponding
     // AOT variables.
@@ -680,35 +690,15 @@ class JITModBuilder {
 
     // Store the live variable vector and its length in a separate struct to
     // save arguments.
-    StructType *AOTLocVecTy =
-        StructType::get(Context, {AOTLocTy->getPointerTo(), PointerSizedIntTy});
-    AllocaInst *AOTLocs = FailBuilder.CreateAlloca(
-        AOTLocVecTy, ConstantInt::get(PointerSizedIntTy, 1));
-    GEP = FailBuilder.CreateGEP(
-        AOTLocVecTy, AOTLocs,
-        {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 0)});
-    FailBuilder.CreateStore(AOTLocVec, GEP);
-    GEP = FailBuilder.CreateGEP(
-        AOTLocVecTy, AOTLocs,
-        {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 1)});
-    FailBuilder.CreateStore(
-        ConstantInt::get(PointerSizedIntTy, LiveVals.size()), GEP);
+    AllocaInst *AOTLocs = storeVecWithLength(
+        FailBuilder, AOTLocVec,
+        ConstantInt::get(PointerSizedIntTy, LiveVals.size()));
 
     // Store the stackmap address and length in a separate struct to save
     // arguments.
-    StructType *SMVecTy =
-        StructType::get(Context, {JITFunc->getArg(JITFUNC_ARG_STACKMAP_ADDR_IDX)->getType(), PointerSizedIntTy});
-    AllocaInst *StackMapStruct = FailBuilder.CreateAlloca(
-        SMVecTy, ConstantInt::get(PointerSizedIntTy, 1));
-    GEP = FailBuilder.CreateGEP(
-        SMVecTy, StackMapStruct,
-        {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 0)});
-    FailBuilder.CreateStore(JITFunc->getArg(JITFUNC_ARG_STACKMAP_ADDR_IDX),
-                            GEP);
-    GEP = FailBuilder.CreateGEP(
-        SMVecTy, StackMapStruct,
-        {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 1)});
-    FailBuilder.CreateStore(JITFunc->getArg(JITFUNC_ARG_STACKMAP_LEN_IDX), GEP);
+    AllocaInst *StackMapStruct = storeVecWithLength(
+        FailBuilder, JITFunc->getArg(JITFUNC_ARG_STACKMAP_ADDR_IDX),
+        JITFunc->getArg(JITFUNC_ARG_STACKMAP_LEN_IDX));
 
     // Create the deoptimization call.
     Type *retty = Type::getInt8Ty(Context);
