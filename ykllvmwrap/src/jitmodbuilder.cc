@@ -579,10 +579,6 @@ class JITModBuilder {
     IntegerType *Int32Ty = Type::getInt32Ty(Context);
     PointerType *Int8PtrTy = Type::getInt8PtrTy(Context);
 
-    // Create struct type for storing a vector and its length.
-    StructType *VecLenStructTy =
-        StructType::get(Context, {Int8PtrTy, PointerSizedIntTy});
-
     // Create a vector of active stackframes (i.e. basic block index,
     // instruction index, function name). This will be needed later to point
     // the stopgap interpeter at the correct location from where to start
@@ -623,14 +619,16 @@ class JITModBuilder {
 
     // Store the active frames vector and its length in a separate struct to
     // save arguments.
+    StructType *AFSVecTy =
+        StructType::get(Context, {ActiveFrameSTy->getPointerTo(), PointerSizedIntTy});
     AllocaInst *ActiveFramesStruct = FailBuilder.CreateAlloca(
-        VecLenStructTy, ConstantInt::get(PointerSizedIntTy, 1));
+        AFSVecTy, ConstantInt::get(PointerSizedIntTy, 1));
     auto GEP = FailBuilder.CreateGEP(
-        VecLenStructTy, ActiveFramesStruct,
+        AFSVecTy, ActiveFramesStruct,
         {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 0)});
     FailBuilder.CreateStore(ActiveFrameVec, GEP);
     GEP = FailBuilder.CreateGEP(
-        VecLenStructTy, ActiveFramesStruct,
+        AFSVecTy, ActiveFramesStruct,
         {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 1)});
     FailBuilder.CreateStore(
         ConstantInt::get(PointerSizedIntTy, ActiveFrames.size()), GEP);
@@ -682,29 +680,33 @@ class JITModBuilder {
 
     // Store the live variable vector and its length in a separate struct to
     // save arguments.
+    StructType *AOTLocVecTy =
+        StructType::get(Context, {AOTLocTy->getPointerTo(), PointerSizedIntTy});
     AllocaInst *AOTLocs = FailBuilder.CreateAlloca(
-        VecLenStructTy, ConstantInt::get(PointerSizedIntTy, 1));
+        AOTLocVecTy, ConstantInt::get(PointerSizedIntTy, 1));
     GEP = FailBuilder.CreateGEP(
-        VecLenStructTy, AOTLocs,
+        AOTLocVecTy, AOTLocs,
         {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 0)});
     FailBuilder.CreateStore(AOTLocVec, GEP);
     GEP = FailBuilder.CreateGEP(
-        VecLenStructTy, AOTLocs,
+        AOTLocVecTy, AOTLocs,
         {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 1)});
     FailBuilder.CreateStore(
         ConstantInt::get(PointerSizedIntTy, LiveVals.size()), GEP);
 
     // Store the stackmap address and length in a separate struct to save
     // arguments.
+    StructType *SMVecTy =
+        StructType::get(Context, {JITFunc->getArg(JITFUNC_ARG_STACKMAP_ADDR_IDX)->getType(), PointerSizedIntTy});
     AllocaInst *StackMapStruct = FailBuilder.CreateAlloca(
-        VecLenStructTy, ConstantInt::get(PointerSizedIntTy, 1));
+        SMVecTy, ConstantInt::get(PointerSizedIntTy, 1));
     GEP = FailBuilder.CreateGEP(
-        VecLenStructTy, StackMapStruct,
+        SMVecTy, StackMapStruct,
         {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 0)});
     FailBuilder.CreateStore(JITFunc->getArg(JITFUNC_ARG_STACKMAP_ADDR_IDX),
                             GEP);
     GEP = FailBuilder.CreateGEP(
-        VecLenStructTy, StackMapStruct,
+        SMVecTy, StackMapStruct,
         {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 1)});
     FailBuilder.CreateStore(JITFunc->getArg(JITFUNC_ARG_STACKMAP_LEN_IDX), GEP);
 
