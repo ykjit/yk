@@ -312,7 +312,7 @@ impl Drop for Location {
             {
                 self.unlock();
                 unsafe {
-                    Box::from_raw(hl);
+                    let _ = Box::from_raw(hl);
                 }
             } else {
                 unreachable!();
