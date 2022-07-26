@@ -16,7 +16,7 @@ use std::{
 
 use num_cpus;
 use parking_lot::{Condvar, Mutex, MutexGuard};
-use std::lazy::SyncLazy;
+use std::sync::LazyLock;
 
 use crate::{
     location::{HotLocation, HotLocationKind, Location, LocationInner},
@@ -46,7 +46,7 @@ const TRACE_GUARDFAIL_RETURN: u8 = 2;
 thread_local! {static THREAD_MTTHREAD: MTThread = MTThread::new();}
 
 #[cfg(feature = "yk_testing")]
-static SERIALISE_COMPILATION: SyncLazy<bool> = SyncLazy::new(|| {
+static SERIALISE_COMPILATION: LazyLock<bool> = LazyLock::new(|| {
     &env::var("YKD_SERIALISE_COMPILATION").unwrap_or_else(|_| "0".to_owned()) == "1"
 });
 

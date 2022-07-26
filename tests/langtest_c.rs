@@ -2,7 +2,7 @@
 
 use lang_tester::LangTester;
 use regex::Regex;
-use std::lazy::SyncLazy;
+use std::sync::LazyLock;
 use std::{
     collections::HashMap,
     env,
@@ -16,7 +16,7 @@ use tempfile::TempDir;
 const COMMENT: &str = "//";
 
 const TEMPDIR_SUBST: &'static str = "%%TEMPDIR%%";
-static EXTRA_LINK: SyncLazy<HashMap<&'static str, Vec<ExtraLinkage>>> = SyncLazy::new(|| {
+static EXTRA_LINK: LazyLock<HashMap<&'static str, Vec<ExtraLinkage>>> = LazyLock::new(|| {
     let mut map = HashMap::new();
     map.insert(
         "call_ext_in_obj.c",
