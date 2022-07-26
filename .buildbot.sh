@@ -36,7 +36,6 @@ cargo fmt --all -- --check
 mkdir -p target && cd target
 git clone https://github.com/ykjit/ykllvm
 cd ykllvm
-git checkout ykjit/13.x
 mkdir build
 cd build
 cmake -DCMAKE_INSTALL_PREFIX=`pwd`/../inst \
