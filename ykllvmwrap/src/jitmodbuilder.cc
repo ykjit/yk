@@ -5,6 +5,7 @@
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
 
 #include "jitmodbuilder.h"
@@ -284,6 +285,26 @@ class JITModBuilder {
     GlobalMappings.insert({CF, FAddr});
   }
 
+  // Store a vector and its length as a struct. This allows us to save
+  // arguments when passing this information via the deoptimisation call.
+  AllocaInst *storeVecWithLength(IRBuilder<> &Builder, Value *Vec, Value *Len) {
+    LLVMContext &Context = Builder.getContext();
+    IntegerType *Int32Ty = Type::getInt32Ty(Context);
+    Type *VecTy = Vec->getType();
+    StructType *StructTy = StructType::get(Context, {VecTy, PointerSizedIntTy});
+    AllocaInst *Struct =
+        Builder.CreateAlloca(StructTy, ConstantInt::get(PointerSizedIntTy, 1));
+    auto GEP = Builder.CreateGEP(
+        StructTy, Struct,
+        {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 0)});
+    Builder.CreateStore(Vec, GEP);
+    GEP = Builder.CreateGEP(
+        StructTy, Struct,
+        {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 1)});
+    Builder.CreateStore(Len, GEP);
+    return Struct;
+  }
+
   void handleCallInst(CallInst *CI, Function *CF, size_t &CurBBIdx,
                       size_t &CurInstrIdx) {
     if (CF == nullptr || CF->isDeclaration()) {
@@ -410,7 +431,7 @@ class JITModBuilder {
       // The default case was taken.
       SwitchInst *NewSI = Builder.CreateSwitch(
           getMappedValue(SI->getCondition()), SuccBB, SI->getNumCases());
-      for (SwitchInst::CaseHandle &Case : SI->cases())
+      for (SwitchInst::CaseHandle Case : SI->cases())
         NewSI->addCase(Case.getCaseValue(), FailBB);
     }
 
@@ -578,11 +599,6 @@ class JITModBuilder {
     IntegerType *Int32Ty = Type::getInt32Ty(Context);
     PointerType *Int8PtrTy = Type::getInt8PtrTy(Context);
 
-    // Create struct type for storing a vector and its length.
-    PointerType *VecPtrTy = PointerType::get(Context, 0);
-    StructType *VecLenStructTy =
-        StructType::get(Context, {VecPtrTy, PointerSizedIntTy});
-
     // Create a vector of active stackframes (i.e. basic block index,
     // instruction index, function name). This will be needed later to point
     // the stopgap interpeter at the correct location from where to start
@@ -623,17 +639,9 @@ class JITModBuilder {
 
     // Store the active frames vector and its length in a separate struct to
     // save arguments.
-    AllocaInst *ActiveFramesStruct = FailBuilder.CreateAlloca(
-        VecLenStructTy, ConstantInt::get(PointerSizedIntTy, 1));
-    auto GEP = FailBuilder.CreateGEP(
-        VecLenStructTy, ActiveFramesStruct,
-        {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 0)});
-    FailBuilder.CreateStore(ActiveFrameVec, GEP);
-    GEP = FailBuilder.CreateGEP(
-        VecLenStructTy, ActiveFramesStruct,
-        {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 1)});
-    FailBuilder.CreateStore(
-        ConstantInt::get(PointerSizedIntTy, ActiveFrames.size()), GEP);
+    AllocaInst *ActiveFramesStruct = storeVecWithLength(
+        FailBuilder, ActiveFrameVec,
+        ConstantInt::get(PointerSizedIntTy, ActiveFrames.size()));
 
     // Create a vector in which to store the locations of the corresponding
     // AOT variables.
@@ -682,31 +690,15 @@ class JITModBuilder {
 
     // Store the live variable vector and its length in a separate struct to
     // save arguments.
-    AllocaInst *AOTLocs = FailBuilder.CreateAlloca(
-        VecLenStructTy, ConstantInt::get(PointerSizedIntTy, 1));
-    GEP = FailBuilder.CreateGEP(
-        VecLenStructTy, AOTLocs,
-        {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 0)});
-    FailBuilder.CreateStore(AOTLocVec, GEP);
-    GEP = FailBuilder.CreateGEP(
-        VecLenStructTy, AOTLocs,
-        {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 1)});
-    FailBuilder.CreateStore(
-        ConstantInt::get(PointerSizedIntTy, LiveVals.size()), GEP);
+    AllocaInst *AOTLocs = storeVecWithLength(
+        FailBuilder, AOTLocVec,
+        ConstantInt::get(PointerSizedIntTy, LiveVals.size()));
 
     // Store the stackmap address and length in a separate struct to save
     // arguments.
-    AllocaInst *StackMapStruct = FailBuilder.CreateAlloca(
-        VecLenStructTy, ConstantInt::get(PointerSizedIntTy, 1));
-    GEP = FailBuilder.CreateGEP(
-        VecLenStructTy, StackMapStruct,
-        {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 0)});
-    FailBuilder.CreateStore(JITFunc->getArg(JITFUNC_ARG_STACKMAP_ADDR_IDX),
-                            GEP);
-    GEP = FailBuilder.CreateGEP(
-        VecLenStructTy, StackMapStruct,
-        {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 1)});
-    FailBuilder.CreateStore(JITFunc->getArg(JITFUNC_ARG_STACKMAP_LEN_IDX), GEP);
+    AllocaInst *StackMapStruct = storeVecWithLength(
+        FailBuilder, JITFunc->getArg(JITFUNC_ARG_STACKMAP_ADDR_IDX),
+        JITFunc->getArg(JITFUNC_ARG_STACKMAP_LEN_IDX));
 
     // Create the deoptimization call.
     Type *retty = Type::getInt8Ty(Context);
@@ -1106,7 +1098,7 @@ class JITModBuilder {
 
     // Create a function inside of which we construct the IR for our trace.
     Type *ReturnTy;
-    if (CPCI->getNumArgOperands() != YK_CONTROL_POINT_NUM_ARGS) {
+    if (CPCI->arg_size() != YK_CONTROL_POINT_NUM_ARGS) {
       // This means we are running the trace_compiler tests which only uses a
       // dummy control point so create a dummy return value too.
       ReturnTy = Type::getInt1Ty(Context)->getPointerTo();
