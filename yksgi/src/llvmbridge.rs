@@ -176,6 +176,10 @@ impl Value {
         unsafe { !LLVMIsAInstruction(self.0).is_null() }
     }
 
+    pub fn is_alloca(&self) -> bool {
+        unsafe { !LLVMIsAAllocaInst(self.0).is_null() }
+    }
+
     pub fn is_load(&self) -> bool {
         unsafe { !LLVMIsALoadInst(self.0).is_null() }
     }
@@ -197,7 +201,7 @@ impl Value {
     }
 
     pub fn is_vararg_function(&self) -> bool {
-        let el_ty = self.get_type().get_element_type().get();
+        let el_ty = unsafe { LLVMGlobalGetValueType(self.0) };
         (unsafe { LLVMIsFunctionVarArg(el_ty) }) != 0
     }
 
@@ -273,12 +277,10 @@ pub unsafe fn get_aot_original(instr: &Value) -> Option<Value> {
             return None;
         }
         let ykcpvars = gep.get_operand(0);
-        let ty = ykcpvars.get_type();
-        if !ty.is_pointer() {
-            // If this isn't a pointer it can't be YKCtrlPointVars.
+        if !ykcpvars.is_alloca() {
             return None;
         }
-        let ty = ty.get_element_type();
+        let ty = Type(LLVMGetAllocatedType(ykcpvars.0));
         if !ty.is_struct() {
             // If this isn't a struct it can't be YKCtrlPointVars.
             return None;
