@@ -56,8 +56,11 @@ impl BlockMap {
 
         // Keep reading records until we fall outside of the section's bounds.
         while crsr.position() < sec_size {
+            let _version = crsr.read_u8().unwrap();
+            let _feature = crsr.read_u8().unwrap();
             let f_off = crsr.read_u64::<NativeEndian>().unwrap();
             let n_blks = leb128::read::unsigned(&mut crsr).unwrap();
+            let mut last_off = f_off;
             for _ in 0..n_blks {
                 let mut corr_bbs = Vec::new();
                 let b_off = leb128::read::unsigned(&mut crsr).unwrap();
@@ -71,9 +74,10 @@ impl BlockMap {
                     corr_bbs.push(leb128::read::unsigned(&mut crsr).unwrap());
                 }
 
-                let lo = f_off + b_off;
+                let lo = last_off + b_off;
                 let hi = lo + b_sz;
                 elems.push(((lo..hi), BlockMapEntry { f_off, corr_bbs }));
+                last_off = hi;
             }
         }
         Self {
