@@ -13,9 +13,10 @@ use std::slice;
 mod llvmbridge;
 use llvmbridge::{get_aot_original, BasicBlock, Module, Type, Value};
 
-static ALWAYS_SKIP_FUNCS: [&str; 5] = [
+static ALWAYS_SKIP_FUNCS: [&str; 6] = [
     "llvm.lifetime",
     "llvm.lifetime.end.p0i8",
+    "llvm.lifetime.end.p0",
     "llvm.dbg.value",
     "llvm.dbg.declare",
     "fprintf",
@@ -339,9 +340,8 @@ impl SGInterp {
             // Get format string.
             let op = self.pc.get_operand(0);
             let op2 = op.get_operand(0);
-            let op3 = LLVMGetInitializer(op2.get());
             let mut l = 0;
-            let s = LLVMGetAsString(op3, &mut l);
+            let s = LLVMGetAsString(op2.get(), &mut l);
             // Get operands
             let mut ops = Vec::new();
             for i in 1..LLVMGetNumOperands(self.pc.get()) - 1 {
@@ -431,7 +431,8 @@ impl SGInterp {
 
         let layout = self.module.datalayout();
         let aggr = self.pc.get_operand(0);
-        let mut curty = aggr.get_type();
+        let mut curty = Type::new(LLVMArrayType(LLVMGetGEPSourceElementType(self.pc.get()), 0));
+
         let ptr = self.var_lookup(&aggr).val as *const c_void;
         let numops = LLVMGetNumOperands(self.pc.get());
 
@@ -465,7 +466,6 @@ impl SGInterp {
                 offset += size * idx;
             }
         }
-        debug_assert!(curty.get() == ty.get_element_type().get());
         let newval = SGValue::new(ptr.offset(isize::try_from(offset).unwrap()) as u64, ty);
         self.var_set(self.pc, newval);
     }

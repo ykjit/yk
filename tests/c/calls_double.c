@@ -15,7 +15,7 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-__attribute__((noinline)) int f(a) { return a; }
+__attribute__((noinline)) int f(int a) { return a; }
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new();

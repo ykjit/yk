@@ -4,9 +4,8 @@
 ;   stderr:
 ;      --- Begin jit-pre-opt ---
 ;
-;      %0 = type { i8 }
 ;      ...
-;      define {{type}} @__yk_compiled_trace_0(%0* %0, i64* %1, i64 %2, i1* %3) {
+;      define {{type}} @__yk_compiled_trace_0(ptr %0, ptr %1, i64 %2, ptr %3) {
 ;        %{{4}} = icmp eq i32 1, 0
 ;        br i1 %{{4}}, label %guardfail, label %{{rtnbb}}
 ;

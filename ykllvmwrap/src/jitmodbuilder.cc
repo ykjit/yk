@@ -1034,7 +1034,7 @@ class JITModBuilder {
         continue;
 
       GetElementPtrInst *GI = cast<GetElementPtrInst>(CI);
-      if (GI->getPointerOperandType() != YkCtrlPointVarsPtrTy)
+      if (GI->getPointerOperand() != TraceInputs)
         continue;
 
       // We have seen a lookup into the live variables struct, the succeeding
@@ -1074,7 +1074,6 @@ class JITModBuilder {
 #ifndef NDEBUG
     Type *InputsTy = Inputs->getType();
     assert(InputsTy->isPointerTy());
-    assert(isa<StructType>(InputsTy->getPointerElementType()));
 #endif
 
     return {CPCI, Inputs};
@@ -1366,7 +1365,7 @@ public:
           Value *LoadOper = LI->getPointerOperand();
           if (isa<GetElementPtrInst>(LoadOper)) {
             GetElementPtrInst *GI = cast<GetElementPtrInst>(LoadOper);
-            if (GI->getPointerOperandType() == TraceInputs->getType()) {
+            if (GI->getPointerOperand() == TraceInputs) {
               Value *LoadedFromIdxVal = *(std::next(GI->idx_begin()));
               assert(isa<ConstantInt>(LoadedFromIdxVal));
               uint64_t LoadedFromIdx =
