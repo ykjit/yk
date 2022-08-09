@@ -38,11 +38,16 @@ git clone https://github.com/ykjit/ykllvm
 cd ykllvm
 mkdir build
 cd build
+
+# Due to an LLVM bug, PIE breaks our mapper, and it's not enough to pass
+# `-fno-pie` to clang for some reason:
+# https://github.com/llvm/llvm-project/issues/57085
 cmake -DCMAKE_INSTALL_PREFIX=`pwd`/../inst \
     -DLLVM_INSTALL_UTILS=On \
     -DCMAKE_BUILD_TYPE=release \
     -DLLVM_ENABLE_ASSERTIONS=On \
     -DLLVM_ENABLE_PROJECTS="lld;clang" \
+    -DCLANG_DEFAULT_PIE_ON_LINUX=OFF \
     ../llvm
 make -j `nproc` install
 export PATH=`pwd`/../inst/bin:${PATH}

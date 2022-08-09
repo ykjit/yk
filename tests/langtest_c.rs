@@ -125,6 +125,8 @@ fn mk_compiler(exe: &Path, src: &Path, opt: &str, extra_objs: &[PathBuf]) -> Com
         "-Wl,--mllvm=--yk-no-fallthrough",     // Fallthrough optimisations distort block mapping.
         // Ensure control point is patched.
         "-Wl,--mllvm=--yk-patch-control-point",
+        // Emit stackmaps used for JIT deoptimisation.
+        "-Wl,--mllvm=--yk-insert-stackmaps",
         // Ensure we can unambiguously map back to LLVM IR blocks.
         "-Wl,--mllvm=--yk-block-disambiguate",
         // Emit a basic block map section. Used for block mapping.
