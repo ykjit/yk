@@ -1255,6 +1255,8 @@ public:
 
         if (isa<CallInst>(I)) {
           if (isa<IntrinsicInst>(I)) {
+            Intrinsic::ID IID = cast<CallBase>(I)->getIntrinsicID();
+
             // `llvm.lifetime.start.*` and `llvm.lifetime.end.*` are
             // annotations added by some compiler front-ends to allow backends
             // to perform stack slot optimisations.
@@ -1266,9 +1268,13 @@ public:
             // OPT: Consider leaving the annotations in, or generating our own
             // annotations, so that our compiled traces can take advantage of
             // stack slot optimisations.
-            Intrinsic::ID IID = cast<CallBase>(I)->getIntrinsicID();
             if ((IID == Intrinsic::lifetime_start) ||
                 (IID == Intrinsic::lifetime_end))
+              continue;
+
+            // Calls to `llvm.experimental.stackmap` are not really calls and
+            // they generate no code anyway. We can skip them.
+            if (IID == Intrinsic::experimental_stackmap)
               continue;
 
             // Any intrinsic call which may generate machine code must have

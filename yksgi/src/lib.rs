@@ -13,7 +13,8 @@ use std::slice;
 mod llvmbridge;
 use llvmbridge::{get_aot_original, BasicBlock, Module, Type, Value};
 
-static ALWAYS_SKIP_FUNCS: [&str; 6] = [
+static ALWAYS_SKIP_FUNCS: [&str; 7] = [
+    "llvm.experimental.stackmap",
     "llvm.lifetime",
     "llvm.lifetime.end.p0i8",
     "llvm.lifetime.end.p0",
