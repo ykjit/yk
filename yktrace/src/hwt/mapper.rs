@@ -16,8 +16,7 @@ use std::{
     fs,
     io::{prelude::*, Cursor, SeekFrom},
 };
-use ykllvmwrap::symbolizer::Symbolizer;
-use ykutil::addr::{code_vaddr_to_off, off_to_vaddr_main_obj};
+use ykutil::addr::{code_vaddr_to_off, off_to_vaddr_main_obj, vaddr_to_sym_and_obj};
 
 const BLOCK_MAP_SEC: &str = ".llvm_bb_addr_map";
 static BLOCK_MAP: LazyLock<BlockMap> = LazyLock::new(BlockMap::new);
@@ -100,14 +99,12 @@ impl BlockMap {
 }
 
 pub struct HWTMapper {
-    symb: Symbolizer,
     faddrs: HashMap<CString, *const c_void>,
 }
 
 impl HWTMapper {
     pub(super) fn new() -> HWTMapper {
         Self {
-            symb: Symbolizer::new(),
             faddrs: HashMap::new(),
         }
     }
@@ -247,15 +244,29 @@ impl HWTMapper {
         ents.sort_by(|x, y| x.range.start.partial_cmp(&y.range.start).unwrap());
         for ent in ents {
             if !ent.value.corr_bbs.is_empty() {
-                let func_name = self.symb.find_code_sym(&obj_name, ent.value.f_off).unwrap();
-                if !self.faddrs.contains_key(&func_name) {
+                // OPT: This could probably be sped up with caching. If we use an interval tree
+                // keyed virtual address ranges, then we could take advantage of the fact that all
+                // blocks belonging to the same function will fall within the address range of the
+                // function's symbol. If the cache knows that block A and B are from the same
+                // function, and a block X has a start address between blocks A and B, then X must
+                // also belong to the same function and there's no need to query the linker.
+                let (func_name, in_obj) =
+                    vaddr_to_sym_and_obj(usize::try_from(block_vaddr).unwrap()).unwrap();
+                debug_assert_eq!(
+                    obj_name.to_str().unwrap(),
+                    std::fs::canonicalize(in_obj.to_str().unwrap())
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                );
+                if !self.faddrs.contains_key(func_name) {
                     let func_vaddr = off_to_vaddr_main_obj(ent.value.f_off).unwrap();
                     self.faddrs
-                        .insert(func_name.clone(), func_vaddr as *const c_void);
+                        .insert(func_name.to_owned(), func_vaddr as *const c_void);
                 }
                 for bb in &ent.value.corr_bbs {
                     ret.push(Some(IRBlock::new(
-                        func_name.clone(),
+                        func_name.to_owned(),
                         usize::try_from(*bb).unwrap(),
                     )));
                 }

@@ -2,6 +2,7 @@
 
 use libc::{c_void, dladdr, Dl_info};
 use phdrs::objects;
+use std::mem::MaybeUninit;
 use std::{
     convert::TryFrom,
     env,
@@ -81,11 +82,34 @@ pub fn off_to_vaddr(containing_obj: &Path, off: u64) -> Option<usize> {
     None // Not found.
 }
 
+/// Given a virtual address in the current address space, (if possible) determine the name of the
+/// symbol this belongs to, and the path to the object from which it came.
+///
+/// On success returns `Ok((symbol_name, object_path))`, or on failure `Err(())`.
+///
+/// This function uses `dladdr()` internally, and thus inherits the same symbol visibility rules
+/// used there. For example, this function will not find unexported symbols.
+pub fn vaddr_to_sym_and_obj(vaddr: usize) -> Result<(&'static CStr, &'static CStr), ()> {
+    let mut info: MaybeUninit<Dl_info> = MaybeUninit::uninit();
+    if unsafe { dladdr(vaddr as *const c_void, info.as_mut_ptr()) } == 0 {
+        return Err(());
+    }
+    let info = unsafe { info.assume_init() };
+    // `dladdr()` returns success if at leaset the virtual address could be mapped to an object
+    // file, but here it is crucial that we can also find the symbol that the address belongs to.
+    if info.dli_sname == null() {
+        return Err(());
+    }
+    Ok((unsafe { CStr::from_ptr(info.dli_sname) }, unsafe {
+        CStr::from_ptr(info.dli_fname)
+    }))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{code_vaddr_to_off, off_to_vaddr, off_to_vaddr_main_obj};
+    use super::{code_vaddr_to_off, off_to_vaddr, off_to_vaddr_main_obj, vaddr_to_sym_and_obj};
     use libc::{dladdr, dlsym, Dl_info};
-    use std::{ffi::CString, ptr};
+    use std::{ffi::CString, path::PathBuf, ptr};
 
     #[test]
     fn map_libc() {
@@ -133,5 +157,34 @@ mod tests {
         let func_vaddr = round_trip_main as *const fn();
         let (_, off) = code_vaddr_to_off(func_vaddr as usize).unwrap();
         assert_eq!(off_to_vaddr_main_obj(off).unwrap(), func_vaddr as usize);
+    }
+
+    #[test]
+    fn vaddr_to_sym_and_obj_found() {
+        // To test this we need an exported symbol with a predictable (i.e. unmangled) name.
+        use libc::fflush;
+        let func_vaddr = fflush as *const fn();
+        let (sym, obj) = vaddr_to_sym_and_obj(func_vaddr as usize).unwrap();
+        assert_eq!(sym.to_str().unwrap(), "fflush");
+        let obj_path = PathBuf::from(obj.to_str().unwrap());
+        assert!(obj_path
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("libc.so."));
+    }
+
+    #[test]
+    fn vaddr_to_sym_and_obj_cant_find_obj() {
+        let func_vaddr = 1; // Obscure address unlikely to be in any loaded object.
+        assert!(vaddr_to_sym_and_obj(func_vaddr as usize).is_err());
+    }
+
+    #[test]
+    fn vaddr_to_sym_and_obj_cant_find_sym() {
+        // Address valid, but symbol not exported (test bin not built with `-Wl,--export-dynamic`).
+        let func_vaddr = vaddr_to_sym_and_obj_cant_find_sym as *const fn();
+        assert!(vaddr_to_sym_and_obj(func_vaddr as usize).is_err());
     }
 }
