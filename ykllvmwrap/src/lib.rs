@@ -8,8 +8,6 @@
 use libc::{c_void, size_t};
 use std::os::raw::c_char;
 
-pub mod symbolizer;
-
 extern "C" {
     pub fn __ykllvmwrap_irtrace_compile(
         func_names: *const *const c_char,

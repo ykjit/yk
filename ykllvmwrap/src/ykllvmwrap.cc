@@ -4,7 +4,6 @@
 #define _GNU_SOURCE
 #endif
 
-#include "llvm/DebugInfo/Symbolize/Symbolize.h"
 #include "llvm/ExecutionEngine/ExecutionEngine.h"
 #include "llvm/ExecutionEngine/MCJIT.h"
 #include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
@@ -31,7 +30,6 @@
 
 using namespace llvm;
 using namespace llvm::orc;
-using namespace llvm::symbolize;
 using namespace std;
 
 struct BitcodeSection {
@@ -157,29 +155,6 @@ void initLLVM(void *Unused) {
   InitializeNativeTarget();
   InitializeNativeTargetAsmPrinter();
   InitializeNativeTargetAsmParser();
-}
-
-extern "C" LLVMSymbolizer *__yk_llvmwrap_symbolizer_new() {
-  return new LLVMSymbolizer;
-}
-
-extern "C" void __yk_llvmwrap_symbolizer_free(LLVMSymbolizer *Symbolizer) {
-  delete Symbolizer;
-}
-
-// Finds the name of a code symbol from a virtual address.
-// The caller is responsible for freeing the returned (heap-allocated) C string.
-extern "C" char *
-__yk_llvmwrap_symbolizer_find_code_sym(LLVMSymbolizer *Symbolizer,
-                                       const char *Obj, uint64_t Off) {
-  object::SectionedAddress Mod{Off, object::SectionedAddress::UndefSection};
-  auto LineInfo = Symbolizer->symbolizeCode(Obj, Mod);
-  if (auto Err = LineInfo.takeError()) {
-    return NULL;
-  }
-
-  // PERF: get rid of heap allocation.
-  return strdup(LineInfo->FunctionName.c_str());
 }
 
 // Load the GlobalAOTMod.
