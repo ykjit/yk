@@ -22,10 +22,6 @@ use ykrt::{print_jit_state, HotThreshold, Location, MT};
 use yksgi::{self, SGInterp};
 use yksmp::{Location as SMLocation, StackMapParser};
 
-/// The first three locations of an LLVM stackmap record, according to the source, are CC, Flags,
-/// Num Deopts, which need to be skipped when mapping the stackmap values back to AOT variables.
-const SM_REC_HEADER: usize = 3;
-
 #[no_mangle]
 pub extern "C" fn yk_mt_new() -> *mut MT {
     let mt = Box::new(MT::new());
@@ -172,11 +168,16 @@ pub extern "C" fn yk_stopgap(
     // Parse the stackmap.
     let slice = unsafe { slice::from_raw_parts(stackmap.addr as *mut u8, stackmap.length) };
     let map = StackMapParser::parse(slice).unwrap();
-    let locs = map.get(&retaddr.try_into().unwrap()).unwrap();
+    let live_vars = map.get(&retaddr.try_into().unwrap()).unwrap();
 
     // Extract live values from the stackmap.
-    // Skip first 3 locations as they don't relate to any of our live variables.
-    for (i, l) in locs.iter().skip(SM_REC_HEADER).enumerate() {
+    // Skip first live variable that contains 3 unrelated locations (CC, Flags, Num Deopts).
+    for (i, locs) in live_vars.iter().skip(1).enumerate() {
+        // The stopgap interpreter assumes that each live value has at most one location. This
+        // isn't always true. Fixing it could be involved, but since we are planning on deleting
+        // the stopgap interpreter, let's just add an assertion for now.
+        assert!(locs.len() == 1);
+        let l = locs.get(0).unwrap();
         match l {
             SMLocation::Register(reg, _size) => {
                 let _val = unsafe { registers.get(*reg) };

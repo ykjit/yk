@@ -18,7 +18,7 @@ struct Function {
 
 struct Record {
     offset: u32,
-    locs: Vec<Location>,
+    live_vars: Vec<LiveVar>,
 }
 
 #[derive(Debug)]
@@ -30,6 +30,21 @@ pub enum Location {
     LargeConstant(u64),
 }
 
+#[derive(Debug)]
+pub struct LiveVar {
+    locs: Vec<Location>,
+}
+
+impl LiveVar {
+    pub fn len(&self) -> usize {
+        self.locs.len()
+    }
+
+    pub fn get(&self, idx: usize) -> Option<&Location> {
+        self.locs.get(idx)
+    }
+}
+
 /// Parses LLVM stackmaps version 3 from a given address. Provides a way to query relevant
 /// locations given the return address of a `__llvm_deoptimize` function.
 pub struct StackMapParser<'a> {
@@ -38,12 +53,12 @@ pub struct StackMapParser<'a> {
 }
 
 impl StackMapParser<'_> {
-    pub fn parse(data: &[u8]) -> Result<HashMap<u64, Vec<Location>>, Box<dyn error::Error>> {
+    pub fn parse(data: &[u8]) -> Result<HashMap<u64, Vec<LiveVar>>, Box<dyn error::Error>> {
         let mut smp = StackMapParser { data, offset: 0 };
         smp.read()
     }
 
-    fn read(&mut self) -> Result<HashMap<u64, Vec<Location>>, Box<dyn error::Error>> {
+    fn read(&mut self) -> Result<HashMap<u64, Vec<LiveVar>>, Box<dyn error::Error>> {
         // Read version number.
         if self.read_u8() != 3 {
             return Err("Only stackmap format version 3 is supported.".into());
@@ -73,7 +88,7 @@ impl StackMapParser<'_> {
             let records = self.read_records(f.record_count, &consts);
             for r in records {
                 let key = f.addr + u64::from(r.offset);
-                map.insert(key, r.locs);
+                map.insert(key, r.live_vars);
             }
         }
 
@@ -105,20 +120,31 @@ impl StackMapParser<'_> {
             let _id = self.read_u64();
             let offset = self.read_u32();
             self.read_u16();
-            let num_locs = self.read_u16();
-            let locs = self.read_locations(num_locs, consts);
+            let num_live_vars = self.read_u16();
+            let live_vars = self.read_live_vars(num_live_vars, consts);
             // Padding
             self.align_8();
             self.read_u16();
             let num_liveouts = self.read_u16();
             self.read_liveouts(num_liveouts);
             self.align_8();
-            v.push(Record { offset, locs });
+            v.push(Record { offset, live_vars });
         }
         v
     }
 
-    fn read_locations(&mut self, num: u16, consts: &[u64]) -> Vec<Location> {
+    fn read_live_vars(&mut self, num: u16, consts: &[u64]) -> Vec<LiveVar> {
+        let mut v = Vec::new();
+        for _ in 0..num {
+            let num_locs = self.read_u8();
+            v.push(LiveVar {
+                locs: self.read_locations(num_locs, consts),
+            });
+        }
+        v
+    }
+
+    fn read_locations(&mut self, num: u8, consts: &[u64]) -> Vec<Location> {
         let mut v = Vec::new();
         for _ in 0..num {
             let kind = self.read_u8();
@@ -237,10 +263,11 @@ mod test {
         let objfile = object::File::parse(&*data).unwrap();
         let smsec = objfile.section_by_name(".llvm_stackmaps").unwrap();
         let map = StackMapParser::parse(smsec.data().unwrap()).unwrap();
-        let locs = &map.iter().nth(0).unwrap().1;
-        assert_eq!(locs.len(), 2);
-        assert!(matches!(locs[0], Location::Direct(6, -4, _)));
-        assert!(matches!(locs[1], Location::Direct(6, -8, _)));
+        assert_eq!(map.len(), 1);
+        let vars = &map.values().nth(0).unwrap();
+        assert_eq!(vars.len(), 2);
+        assert!(matches!(vars[0].locs[..], [Location::Direct(6, -4, _)]));
+        assert!(matches!(vars[1].locs[..], [Location::Direct(6, -8, _)]));
     }
 
     #[test]
@@ -249,12 +276,19 @@ mod test {
         let objfile = object::File::parse(&*data).unwrap();
         let smsec = objfile.section_by_name(".llvm_stackmaps").unwrap();
         let map = StackMapParser::parse(smsec.data().unwrap()).unwrap();
-        let locs = &map.iter().nth(0).unwrap().1;
-        assert_eq!(locs.len(), 5);
-        assert!(matches!(locs[0], Location::Constant(0)));
-        assert!(matches!(locs[1], Location::Constant(0)));
-        assert!(matches!(locs[2], Location::Constant(2)));
-        assert!(matches!(locs[3], Location::Direct(7, 12, _)));
-        assert!(matches!(locs[4], Location::Direct(7, 8, _)));
+        assert_eq!(map.len(), 1);
+        let vars = &map.values().nth(0).unwrap();
+        assert_eq!(vars.len(), 3);
+        // First live var contains locations for CC, Flags and Num Deopts.
+        assert!(matches!(
+            vars[0].locs[..],
+            [
+                Location::Constant(0),
+                Location::Constant(0),
+                Location::Constant(2)
+            ]
+        ));
+        assert!(matches!(vars[1].locs[..], [Location::Direct(7, 12, _)]));
+        assert!(matches!(vars[2].locs[..], [Location::Direct(7, 8, _)]));
     }
 }
