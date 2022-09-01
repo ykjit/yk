@@ -37,6 +37,10 @@ uint64_t getNewTraceIdx() {
 
 #define YK_OUTLINE_FNATTR "yk_outline"
 
+// The first two arguments of a stackmap call are it's id and shadow bytes and
+// need to be skipped when scanning the operands for live values.
+#define YK_STACKMAP_SKIP_ARGS 2
+
 // Return value telling the caller of the compiled trace that no guard failure
 // occurred and it's safe to continue running the fake trace stitching loop.
 #define TRACE_RETURN_SUCCESS 0
@@ -125,6 +129,7 @@ struct FrameInfo {
   size_t BBIdx;
   size_t InstrIdx;
   StringRef Fname;
+  CallBase *SMCall;
 };
 
 /// Extract all live variables that need to be passed into the control point.
@@ -242,6 +247,12 @@ class JITModBuilder {
   // name, and stackframe index of the corresponding AOT instruction.
   std::map<Value *, std::tuple<size_t, size_t, Instruction *, size_t>> AOTMap;
 
+  // The last seen call to llvm.exerpimental.stackmap. We use this to keep
+  // track of the AOT live values on a per-frame basis. Matching those values
+  // to their corresponding values in the JIT tells us which values need to be
+  // deoptimised.
+  CallBase *LastSMCall;
+
   Value *getMappedValue(Value *V) {
     if (VMap.find(V) != VMap.end()) {
       return VMap[V];
@@ -355,7 +366,7 @@ class JITModBuilder {
         }
       }
       ActiveFrames.push_back(
-          {CurBBIdx, CurInstrIdx, CI->getFunction()->getName()});
+          {CurBBIdx, CurInstrIdx, CI->getFunction()->getName(), LastSMCall});
       CallDepth += 1;
     }
   }
@@ -388,7 +399,8 @@ class JITModBuilder {
 
     // Get/create the guard failure and success blocks.
     BasicBlock *FailBB = getGuardFailureBlock(
-        JITFunc, {CurBBIdx, CurInstrIdx, I->getFunction()->getName()});
+        JITFunc,
+        {CurBBIdx, CurInstrIdx, I->getFunction()->getName(), LastSMCall});
     BasicBlock *SuccBB = BasicBlock::Create(Context, "", JITFunc);
 
     // Insert the guard, using the original AOT branch condition for now.
@@ -417,7 +429,8 @@ class JITModBuilder {
     // Get/create the guard failure and success blocks.
     LLVMContext &Context = JITMod->getContext();
     BasicBlock *FailBB = getGuardFailureBlock(
-        JITFunc, {CurBBIdx, CurInstrIdx, I->getFunction()->getName()});
+        JITFunc,
+        {CurBBIdx, CurInstrIdx, I->getFunction()->getName(), LastSMCall});
     BasicBlock *SuccBB = BasicBlock::Create(Context, "", JITFunc);
 
     // Determine which switch case the trace took.
@@ -578,20 +591,9 @@ class JITModBuilder {
     BasicBlock *GuardFailBB = BasicBlock::Create(Context, "guardfail", JITFunc);
     IRBuilder<> FailBuilder(GuardFailBB);
 
-    // Find live variables.
-    BasicBlock *CurrentBB = Builder.GetInsertBlock();
-    Instruction *CurrentInst = &CurrentBB->back();
-    DominatorTree DT(*JITFunc);
-    std::vector<Value *> LiveVals =
-        getLiveVars(DT, CurrentInst, AOTMap, CallDepth);
-    // Naturally the current instruction is live too but wasn't included due
-    // to the way DominatorTree works.
-    LiveVals.push_back(CurrentInst);
-
     // Add the control point struct to the live variables we pass into the
     // `deoptimize` call so the stopgap interpreter can access it.
     Value *YKCPArg = JITFunc->getArg(JITFUNC_ARG_INPUTS_STRUCT_IDX);
-    LiveVals.push_back(YKCPArg);
     std::tuple<size_t, size_t, Instruction *, size_t> YkCPAlloca =
         getYkCPAlloca();
     AOTMap[YKCPArg] = YkCPAlloca;
@@ -610,8 +612,27 @@ class JITModBuilder {
     AllocaInst *ActiveFrameVec = FailBuilder.CreateAlloca(
         ActiveFrameSTy,
         ConstantInt::get(PointerSizedIntTy, ActiveFrames.size()));
+
+    std::vector<Value *> LiveValues;
     for (size_t I = 0; I < ActiveFrames.size(); I++) {
       FrameInfo FI = ActiveFrames[I];
+
+      // Read live AOTMod values from stackmap calls and find their
+      // corresponding values in JITMod. These are exactly the values that are
+      // live at each guard failure and need to be deoptimised.
+      CallBase *SMC = FI.SMCall;
+      for (size_t Idx = YK_STACKMAP_SKIP_ARGS; Idx < SMC->arg_size(); Idx++) {
+        Value *Arg = SMC->getArgOperand(Idx);
+        if (Arg == NewControlPointCall) {
+          // There's no corresponding JIT value for the return value of the
+          // control point call, so just skip it.
+          continue;
+        }
+        if (VMap.find(Arg) != VMap.end()) {
+          Value *JITArg = VMap[Arg];
+          LiveValues.push_back(JITArg);
+        }
+      }
 
       // Create GEP instructions to get pointers into the fields of the
       // individual frames inside the ActiveFrameVec vector. The first index
@@ -649,10 +670,10 @@ class JITModBuilder {
         StructType::get(Context, {PointerSizedIntTy, PointerSizedIntTy,
                                   Int8PtrTy, PointerSizedIntTy});
     AllocaInst *AOTLocVec = FailBuilder.CreateAlloca(
-        AOTLocTy, ConstantInt::get(PointerSizedIntTy, LiveVals.size()));
+        AOTLocTy, ConstantInt::get(PointerSizedIntTy, LiveValues.size()));
     std::map<std::string, Value *> FuncPtrMap;
-    for (size_t I = 0; I < LiveVals.size(); I++) {
-      Value *Live = LiveVals[I];
+    for (size_t I = 0; I < LiveValues.size(); I++) {
+      Value *Live = LiveValues[I];
       std::tuple<size_t, size_t, Instruction *, size_t> Entry = AOTMap[Live];
       size_t BBIdx = std::get<0>(Entry);
       size_t InstrIdx = std::get<1>(Entry);
@@ -692,7 +713,7 @@ class JITModBuilder {
     // save arguments.
     AllocaInst *AOTLocs = storeVecWithLength(
         FailBuilder, AOTLocVec,
-        ConstantInt::get(PointerSizedIntTy, LiveVals.size()));
+        ConstantInt::get(PointerSizedIntTy, LiveValues.size()));
 
     // Store the stackmap address and length in a separate struct to save
     // arguments.
@@ -705,7 +726,7 @@ class JITModBuilder {
     Function *DeoptInt = Intrinsic::getDeclaration(
         JITFunc->getParent(), Intrinsic::experimental_deoptimize, {retty});
     OperandBundleDef ob =
-        OperandBundleDef("deopt", (ArrayRef<Value *>)LiveVals);
+        OperandBundleDef("deopt", (ArrayRef<Value *>)LiveValues);
     // We already passed the stackmap address and size into the trace
     // function so pass them on to the __llvm_deoptimize call.
     Value *Ret = CallInst::Create(DeoptInt,
@@ -1274,8 +1295,10 @@ public:
 
             // Calls to `llvm.experimental.stackmap` are not really calls and
             // they generate no code anyway. We can skip them.
-            if (IID == Intrinsic::experimental_stackmap)
+            if (IID == Intrinsic::experimental_stackmap) {
+              LastSMCall = cast<CallBase>(I);
               continue;
+            }
 
             // Any intrinsic call which may generate machine code must have
             // metadata attached that specifies whether it has been inlined or

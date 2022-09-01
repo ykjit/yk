@@ -27,6 +27,7 @@
 define void @main() {
 entry:
     %0 = add i32 0, 999
+    call void (i64, i32, ...) @llvm.experimental.stackmap(i64 1, i32 0, i32 %0)
     switch i32 %0, label %bb_default [i32 0, label %bb_zero
                                       i32 1, label %bb_one
                                       i32 2, label %bb_two]
@@ -43,3 +44,4 @@ bb_one:
 bb_two:
     unreachable
 }
+declare void @llvm.experimental.stackmap(i64, i32, ...)

@@ -27,8 +27,10 @@
 
 define void @f(i32 %0) {
     %2 = icmp eq i32 %0, 0
+    call void (i64, i32, ...) @llvm.experimental.stackmap(i64 1, i32 0, i1 %2)
     br i1 %2, label %done, label %recurse
 recurse:
+    call void (i64, i32, ...) @llvm.experimental.stackmap(i64 1, i32 0)
     call void @g()
     br label %done
 done:
@@ -36,12 +38,15 @@ done:
 }
 
 define void @g() {
+    call void (i64, i32, ...) @llvm.experimental.stackmap(i64 1, i32 0)
     call void @f(i32 0)
     ret void
 }
 
 define void @main() {
 entry:
+    call void (i64, i32, ...) @llvm.experimental.stackmap(i64 1, i32 0)
     call void @f(i32 1)
     ret void
 }
+declare void @llvm.experimental.stackmap(i64, i32, ...)
