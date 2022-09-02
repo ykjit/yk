@@ -487,6 +487,11 @@ class JITModBuilder {
     // in the stopgap interpreter. Unfortunately for us, LLVM doesn't have a
     // simple assignment instruction so we have to emulate one using a select
     // instruction.
+    if (isa<GlobalVariable>(V)) {
+      // If the operand is a global variable, remember to clone it, or else the
+      // select instruction will reference the one in the old module.
+      V = cloneGlobalVariable(V);
+    }
     Instruction *NewInst = SelectInst::Create(
         ConstantInt::get(Type::getInt1Ty(JITMod->getContext()), 0), V, V);
     Builder.Insert(NewInst);
@@ -830,23 +835,7 @@ class JITModBuilder {
         Constant *NewCExpr = CExpr->getWithOperands(NewCEOps);
         VMap[CExpr] = NewCExpr;
       } else if (isa<GlobalVariable>(Op)) {
-        // If there's a reference to a GlobalVariable, copy it over to the
-        // new module.
-        GlobalVariable *OldGV = cast<GlobalVariable>(Op);
-        // Global variable is a constant so just copy it into the trace.
-        // We don't need to check if this global already exists, since
-        // we're skipping any operand that's already been cloned into
-        // the VMap.
-        GlobalVariable *GV = new GlobalVariable(
-            *JITMod, OldGV->getValueType(), OldGV->isConstant(),
-            OldGV->getLinkage(), (Constant *)nullptr, OldGV->getName(),
-            (GlobalVariable *)nullptr, OldGV->getThreadLocalMode(),
-            OldGV->getType()->getAddressSpace());
-        VMap[OldGV] = GV;
-        if (OldGV->isConstant()) {
-          GV->copyAttributesFrom(&*OldGV);
-          cloned_globals.push_back(OldGV);
-        }
+        cloneGlobalVariable(Op);
       } else if ((isa<Constant>(Op)) || (isa<InlineAsm>(Op))) {
         if (isa<Function>(Op)) {
           // We are storing a function pointer in a variable, so we need to
@@ -866,6 +855,24 @@ class JITModBuilder {
         dumpValueAndExit("don't know how to handle operand", Op);
       }
     }
+  }
+
+  GlobalVariable *cloneGlobalVariable(Value *V) {
+    GlobalVariable *OldGV = cast<GlobalVariable>(V);
+    // We don't need to check if this global already exists, since
+    // we're skipping any operand that's already been cloned into
+    // the VMap.
+    GlobalVariable *GV = new GlobalVariable(
+        *JITMod, OldGV->getValueType(), OldGV->isConstant(),
+        OldGV->getLinkage(), (Constant *)nullptr, OldGV->getName(),
+        (GlobalVariable *)nullptr, OldGV->getThreadLocalMode(),
+        OldGV->getType()->getAddressSpace());
+    VMap[OldGV] = GV;
+    if (OldGV->isConstant()) {
+      GV->copyAttributesFrom(&*OldGV);
+      cloned_globals.push_back(OldGV);
+    }
+    return GV;
   }
 
   void copyInstruction(IRBuilder<> *Builder, Instruction *I, size_t CurBBIdx,
