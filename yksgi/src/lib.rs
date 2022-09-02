@@ -156,11 +156,20 @@ impl SGInterp {
         instridx: usize,
         fname: &CStr,
         sfidx: usize,
-        val: u64,
+        mut val: u64,
     ) {
         let func = self.module.function(fname.as_ptr());
         let bb = func.bb(bbidx);
         let instr = bb.instruction(instridx);
+
+        if instr.get_type().is_integer() {
+            // Stackmap "small constants" get their value sign-extended to fill the reserved 32-bit
+            // space in the stackmap record. If the type of the constant is actually smaller than
+            // 32 bits, then we have to discard the unwanted high-order bits.
+            let iw = instr.get_type().get_int_width();
+            val &= u64::MAX >> (64 - iw);
+        }
+
         let orgaot = if sfidx == 0 {
             unsafe { get_aot_original(&instr) }
         } else {

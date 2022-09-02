@@ -343,7 +343,7 @@ class JITModBuilder {
       // If this is a recursive call that has been inlined, or if the callee
       // has the "yk_outline" annotation, remove the inlined code and turn it
       // into a normal (outlined) call.
-      else if (isRecursiveCall(CF) || CF->hasFnAttribute(YK_OUTLINE_FNATTR)) {
+      else if (CF->hasFnAttribute(YK_OUTLINE_FNATTR) || isRecursiveCall(CF)) {
         if (VMap.find(CF) == VMap.end()) {
           declareFunction(CF);
           addGlobalMappingForFunction(CF);
