@@ -26,7 +26,7 @@
 
 define void @main() {
 entry:
-    %v = load volatile i32 , i32 * @g
+    %v = load volatile i32 , ptr @g
     %cond1 = icmp slt i32 %v, 999
     call void (i64, i32, ...) @llvm.experimental.stackmap(i64 1, i32 0, i32 %v)
     br i1 %cond1, label %true1, label %falses

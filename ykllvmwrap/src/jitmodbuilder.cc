@@ -34,6 +34,7 @@ uint64_t getNewTraceIdx() {
 #define JITFUNC_ARG_STACKMAP_ADDR_IDX 1
 #define JITFUNC_ARG_STACKMAP_LEN_IDX 2
 #define JITFUNC_ARG_RETURNVAL_IDX 3
+#define JITFUNC_ARG_LIVEAOTVALS_PTR_IDX 4
 
 #define YK_OUTLINE_FNATTR "yk_outline"
 
@@ -125,11 +126,21 @@ public:
   }
 };
 
+// Struct to store an active frame, consisting of its location in the AOT
+// module and the instruction calling it.
 struct FrameInfo {
   size_t BBIdx;
   size_t InstrIdx;
   StringRef Fname;
   CallBase *SMCall;
+};
+
+// Struct to store a live AOT value.
+struct AOTInfo {
+  size_t BBIdx;
+  size_t InstrIdx;
+  const char *FName;
+  size_t FrameIdx;
 };
 
 /// Extract all live variables that need to be passed into the control point.
@@ -296,23 +307,24 @@ class JITModBuilder {
     GlobalMappings.insert({CF, FAddr});
   }
 
-  // Store a vector and its length as a struct. This allows us to save
-  // arguments when passing this information via the deoptimisation call.
-  AllocaInst *storeVecWithLength(IRBuilder<> &Builder, Value *Vec, Value *Len) {
+  // Generate LLVM IR to create a struct and store the given values.
+  AllocaInst *createAndFillStruct(IRBuilder<> &Builder,
+                                  std::vector<Value *> Vec) {
     LLVMContext &Context = Builder.getContext();
     IntegerType *Int32Ty = Type::getInt32Ty(Context);
-    Type *VecTy = Vec->getType();
-    StructType *StructTy = StructType::get(Context, {VecTy, PointerSizedIntTy});
+    std::vector<Type *> Types;
+    for (Value *V : Vec) {
+      Types.push_back(V->getType());
+    }
+    StructType *StructTy = StructType::get(Context, Types);
     AllocaInst *Struct =
         Builder.CreateAlloca(StructTy, ConstantInt::get(PointerSizedIntTy, 1));
-    auto GEP = Builder.CreateGEP(
-        StructTy, Struct,
-        {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 0)});
-    Builder.CreateStore(Vec, GEP);
-    GEP = Builder.CreateGEP(
-        StructTy, Struct,
-        {ConstantInt::get(PointerSizedIntTy, 0), ConstantInt::get(Int32Ty, 1)});
-    Builder.CreateStore(Len, GEP);
+    for (size_t I = 0; I < Vec.size(); I++) {
+      auto GEP = Builder.CreateGEP(StructTy, Struct,
+                                   {ConstantInt::get(PointerSizedIntTy, 0),
+                                    ConstantInt::get(Int32Ty, I)});
+      Builder.CreateStore(Vec[I], GEP);
+    }
     return Struct;
   }
 
@@ -516,6 +528,9 @@ class JITModBuilder {
     // Add argument in which to store the value of an interpreted return.
     InputTypes.push_back(ReturnTy);
 
+    // Add argument for memory block holding live AOT values.
+    InputTypes.push_back(PointerSizedIntTy->getPointerTo());
+
     llvm::FunctionType *FType = llvm::FunctionType::get(
         Type::getInt8Ty(JITMod->getContext()), InputTypes, false);
     llvm::Function *JITFunc = llvm::Function::Create(
@@ -665,18 +680,20 @@ class JITModBuilder {
 
     // Store the active frames vector and its length in a separate struct to
     // save arguments.
-    AllocaInst *ActiveFramesStruct = storeVecWithLength(
-        FailBuilder, ActiveFrameVec,
-        ConstantInt::get(PointerSizedIntTy, ActiveFrames.size()));
+    AllocaInst *ActiveFramesStruct = createAndFillStruct(
+        FailBuilder, {ActiveFrameVec, ConstantInt::get(PointerSizedIntTy,
+                                                       ActiveFrames.size())});
 
-    // Create a vector in which to store the locations of the corresponding
-    // AOT variables.
-    StructType *AOTLocTy =
-        StructType::get(Context, {PointerSizedIntTy, PointerSizedIntTy,
-                                  Int8PtrTy, PointerSizedIntTy});
-    AllocaInst *AOTLocVec = FailBuilder.CreateAlloca(
-        AOTLocTy, ConstantInt::get(PointerSizedIntTy, LiveValues.size()));
-    std::map<std::string, Value *> FuncPtrMap;
+    // Make more space to store the locations of the corresponding live AOT
+    // values for this guard failure.
+    size_t CurPos = LiveAOTNum;
+    LiveAOTNum += LiveValues.size();
+    LiveAOTArray = static_cast<AOTInfo *>(
+        reallocarray(LiveAOTArray, LiveAOTNum, sizeof(AOTInfo)));
+    assert(LiveAOTArray != NULL);
+    // Get a pointer to this guard failure's region in the memory block.
+    AOTInfo *CurrentRegion = &LiveAOTArray[CurPos];
+
     for (size_t I = 0; I < LiveValues.size(); I++) {
       Value *Live = LiveValues[I];
       std::tuple<size_t, size_t, Instruction *, size_t> Entry = AOTMap[Live];
@@ -684,47 +701,23 @@ class JITModBuilder {
       size_t InstrIdx = std::get<1>(Entry);
       Instruction *AOTVar = std::get<2>(Entry);
       size_t StackFrameIdx = std::get<3>(Entry);
-      auto iter = FuncPtrMap.find(AOTVar->getFunction()->getName().data());
-      Value *FPtr;
-      if (iter == FuncPtrMap.end()) {
-        // FIXME: Use function index instead of string name.
-        FPtr =
-            FailBuilder.CreateGlobalStringPtr(AOTVar->getFunction()->getName());
-        FuncPtrMap.insert({AOTVar->getFunction()->getName().data(), FPtr});
-      } else {
-        FPtr = iter->second;
-      }
-      auto GEP = FailBuilder.CreateGEP(AOTLocTy, AOTLocVec,
-                                       {ConstantInt::get(PointerSizedIntTy, I),
-                                        ConstantInt::get(Int32Ty, 0)});
-      FailBuilder.CreateStore(ConstantInt::get(PointerSizedIntTy, BBIdx), GEP);
-      GEP = FailBuilder.CreateGEP(AOTLocTy, AOTLocVec,
-                                  {ConstantInt::get(PointerSizedIntTy, I),
-                                   ConstantInt::get(Int32Ty, 1)});
-      FailBuilder.CreateStore(ConstantInt::get(PointerSizedIntTy, InstrIdx),
-                              GEP);
-      GEP = FailBuilder.CreateGEP(AOTLocTy, AOTLocVec,
-                                  {ConstantInt::get(PointerSizedIntTy, I),
-                                   ConstantInt::get(Int32Ty, 2)});
-      FailBuilder.CreateStore(FPtr, GEP);
-      GEP = FailBuilder.CreateGEP(AOTLocTy, AOTLocVec,
-                                  {ConstantInt::get(PointerSizedIntTy, I),
-                                   ConstantInt::get(Int32Ty, 3)});
-      FailBuilder.CreateStore(
-          ConstantInt::get(PointerSizedIntTy, StackFrameIdx), GEP);
+      const char *FName = AOTVar->getFunction()->getName().data();
+      CurrentRegion[I] = {BBIdx, InstrIdx, FName, StackFrameIdx};
     }
 
     // Store the live variable vector and its length in a separate struct to
     // save arguments.
-    AllocaInst *AOTLocs = storeVecWithLength(
-        FailBuilder, AOTLocVec,
-        ConstantInt::get(PointerSizedIntTy, LiveValues.size()));
+    AllocaInst *AOTLocs = createAndFillStruct(
+        FailBuilder,
+        {JITFunc->getArg(JITFUNC_ARG_LIVEAOTVALS_PTR_IDX),
+         ConstantInt::get(PointerSizedIntTy, CurPos * sizeof(AOTInfo)),
+         ConstantInt::get(PointerSizedIntTy, LiveValues.size())});
 
     // Store the stackmap address and length in a separate struct to save
     // arguments.
-    AllocaInst *StackMapStruct = storeVecWithLength(
-        FailBuilder, JITFunc->getArg(JITFUNC_ARG_STACKMAP_ADDR_IDX),
-        JITFunc->getArg(JITFUNC_ARG_STACKMAP_LEN_IDX));
+    AllocaInst *StackMapStruct = createAndFillStruct(
+        FailBuilder, {JITFunc->getArg(JITFUNC_ARG_STACKMAP_ADDR_IDX),
+                      JITFunc->getArg(JITFUNC_ARG_STACKMAP_LEN_IDX)});
 
     // Create the deoptimization call.
     Type *retty = Type::getInt8Ty(Context);
@@ -734,10 +727,11 @@ class JITModBuilder {
         OperandBundleDef("deopt", (ArrayRef<Value *>)LiveValues);
     // We already passed the stackmap address and size into the trace
     // function so pass them on to the __llvm_deoptimize call.
-    Value *Ret = CallInst::Create(DeoptInt,
-                                  {StackMapStruct, AOTLocs, ActiveFramesStruct,
-                                   JITFunc->getArg(JITFUNC_ARG_RETURNVAL_IDX)},
-                                  {ob}, "", GuardFailBB);
+    CallInst *Ret =
+        CallInst::Create(DeoptInt,
+                         {StackMapStruct, AOTLocs, ActiveFramesStruct,
+                          JITFunc->getArg(JITFUNC_ARG_RETURNVAL_IDX)},
+                         {ob}, "", GuardFailBB);
 
     // We always need to return after the deoptimisation call.
     ReturnInst::Create(Context, Ret, GuardFailBB);
@@ -1153,6 +1147,10 @@ public:
   string TraceName;
   // Mapping from AOT instructions to JIT instructions.
   ValueToValueMapTy VMap;
+  // Heap allocated memory storing the corresponding AOT values for currently
+  // live JIT values.
+  AOTInfo *LiveAOTArray = nullptr;
+  size_t LiveAOTNum = 0;
 
   JITModBuilder(JITModBuilder &&);
 
@@ -1231,6 +1229,7 @@ public:
   // Generate the JIT module by "glueing together" blocks that the trace
   // executed in the AOT module.
   Module *createModule() {
+    // Initialise the memory block holding live AOT values for guard failures.
     BasicBlock *NextCompletedBlock = nullptr;
     for (size_t Idx = 0; Idx < InpTrace.Length(); Idx++) {
       Optional<IRBlock> MaybeIB = InpTrace[Idx];
@@ -1425,18 +1424,18 @@ public:
   }
 };
 
-tuple<Module *, string, std::map<GlobalValue *, void *>>
+tuple<Module *, string, std::map<GlobalValue *, void *>, void *>
 createModule(Module *AOTMod, char *FuncNames[], size_t BBs[], size_t TraceLen,
              char *FAddrKeys[], void *FAddrVals[], size_t FAddrLen) {
   JITModBuilder JB = JITModBuilder::Create(AOTMod, FuncNames, BBs, TraceLen,
                                            FAddrKeys, FAddrVals, FAddrLen);
   auto JITMod = JB.createModule();
   return make_tuple(JITMod, std::move(JB.TraceName),
-                    std::move(JB.GlobalMappings));
+                    std::move(JB.GlobalMappings), JB.LiveAOTArray);
 }
 
 #ifdef YK_TESTING
-tuple<Module *, string, std::map<GlobalValue *, void *>>
+tuple<Module *, string, std::map<GlobalValue *, void *>, void *>
 createModuleForTraceCompilerTests(Module *AOTMod, char *FuncNames[],
                                   size_t BBs[], size_t TraceLen,
                                   char *FAddrKeys[], void *FAddrVals[],
@@ -1477,6 +1476,6 @@ createModuleForTraceCompilerTests(Module *AOTMod, char *FuncNames[],
   DOBuilder.CreateUnreachable();
 
   return make_tuple(JITMod, std::move(JB.TraceName),
-                    std::move(JB.GlobalMappings));
+                    std::move(JB.GlobalMappings), nullptr);
 }
 #endif
