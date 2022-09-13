@@ -18,20 +18,31 @@ const COMMENT: &str = "//";
 const TEMPDIR_SUBST: &'static str = "%%TEMPDIR%%";
 static EXTRA_LINK: LazyLock<HashMap<&'static str, Vec<ExtraLinkage>>> = LazyLock::new(|| {
     let mut map = HashMap::new();
-    map.insert(
+
+    // These tests get an extra, separately compiled (thus opaque to LTO), object file linked in.
+    for test_file in &[
         "call_ext_in_obj.c",
-        vec![ExtraLinkage::new(
-            "%%TEMPDIR%%/call_me.o",
-            &[
-                "clang",
-                "-c",
-                "-O0",
-                "extra_linkage/call_me.c",
-                "-o",
+        "loopy_funcs_not_inlined_by_default.c",
+        "not_loopy_funcs_inlined_by_default.c",
+        "unroll_safe_implies_noinline.c",
+        "unroll_safe_inlines.c",
+        "yk_unroll_safe_vs_yk_outline.c",
+    ] {
+        map.insert(
+            *test_file,
+            vec![ExtraLinkage::new(
                 "%%TEMPDIR%%/call_me.o",
-            ],
-        )],
-    );
+                &[
+                    "clang",
+                    "-c",
+                    "-O0",
+                    "extra_linkage/call_me.c",
+                    "-o",
+                    "%%TEMPDIR%%/call_me.o",
+                ],
+            )],
+        );
+    }
     map
 });
 
@@ -106,6 +117,8 @@ fn mk_compiler(exe: &Path, src: &Path, opt: &str, extra_objs: &[PathBuf]) -> Com
         // Enable LTO with lld.
         "-fuse-ld=lld",
         "-flto",
+        // Outline functions containing loops during AOT compilation. Needed for `yk_unroll_safe`.
+        "-fyk-noinline-funcs-with-loops",
         // Embed LLVM bitcode as late as possible.
         "-Wl,--mllvm=--embed-bitcode-final",
         // Disable machine passes that would interfere with block mapping.
