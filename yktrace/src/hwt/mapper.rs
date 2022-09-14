@@ -17,6 +17,7 @@ use std::{
     io::{prelude::*, Cursor, SeekFrom},
 };
 use ykutil::addr::{code_vaddr_to_off, off_to_vaddr_main_obj, vaddr_to_sym_and_obj};
+use ykutil::obj::SELF_BIN_PATH;
 
 const BLOCK_MAP_SEC: &str = ".llvm_bb_addr_map";
 static BLOCK_MAP: LazyLock<BlockMap> = LazyLock::new(BlockMap::new);
@@ -215,8 +216,7 @@ impl HWTMapper {
         // FIXME: https://github.com/ykjit/yk/issues/413
         // In the future we could inline code from shared objects if they were built for use with
         // yk (i.e. they have a blockmap and IR embedded).
-        let cur_exe = env::current_exe().unwrap();
-        if obj_name != cur_exe {
+        if obj_name != *SELF_BIN_PATH {
             return Vec::new();
         }
 
@@ -252,13 +252,7 @@ impl HWTMapper {
                 // also belong to the same function and there's no need to query the linker.
                 let (func_name, in_obj) =
                     vaddr_to_sym_and_obj(usize::try_from(block_vaddr).unwrap()).unwrap();
-                debug_assert_eq!(
-                    obj_name.to_str().unwrap(),
-                    std::fs::canonicalize(in_obj.to_str().unwrap())
-                        .unwrap()
-                        .to_str()
-                        .unwrap()
-                );
+                debug_assert_eq!(obj_name.to_str().unwrap(), in_obj.to_str().unwrap());
                 if !self.faddrs.contains_key(func_name) {
                     let func_vaddr = off_to_vaddr_main_obj(ent.value.f_off).unwrap();
                     self.faddrs
