@@ -8,22 +8,18 @@ use std::{
     convert::TryFrom,
     ffi::CStr,
     path::{Path, PathBuf},
-    ptr::{null, null_mut},
+    ptr::null,
 };
 
 /// Given a virtual address, returns a pair indicating the object in which the address originated
 /// and the byte offset.
 pub fn code_vaddr_to_off(vaddr: usize) -> Option<(PathBuf, u64)> {
     // Find the object file from which the virtual address was loaded.
-    let mut info: Dl_info = Dl_info {
-        dli_fname: null(),
-        dli_fbase: null_mut(),
-        dli_sname: null(),
-        dli_saddr: null_mut(),
-    };
-    if unsafe { dladdr(vaddr as *const c_void, &mut info as *mut Dl_info) } == 0 {
+    let mut info = MaybeUninit::<Dl_info>::uninit();
+    if unsafe { dladdr(vaddr as *const c_void, info.as_mut_ptr()) } == 0 {
         return None;
     }
+    let info = unsafe { info.assume_init() };
     let containing_obj = PathBuf::from(unsafe { CStr::from_ptr(info.dli_fname) }.to_str().unwrap());
 
     // Find the corresponding byte offset of the virtual address in the object.
