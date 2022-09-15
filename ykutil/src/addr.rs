@@ -83,7 +83,9 @@ pub fn vaddr_to_sym_and_obj(vaddr: usize) -> Result<(&'static CStr, &'static CSt
 
 #[cfg(test)]
 mod tests {
-    use super::{code_vaddr_to_off, off_to_vaddr, off_to_vaddr_main_obj, vaddr_to_sym_and_obj};
+    use super::{
+        code_vaddr_to_off, off_to_vaddr, off_to_vaddr_main_obj, vaddr_to_sym_and_obj, MaybeUninit,
+    };
     use libc::{dladdr, dlsym, Dl_info};
     use std::{ffi::CString, path::PathBuf, ptr};
 
@@ -109,16 +111,9 @@ mod tests {
     fn round_trip_so() {
         let func = CString::new("getuid").unwrap();
         let func_vaddr = unsafe { dlsym(ptr::null_mut(), func.as_ptr() as *const i8) };
-        let mut dlinfo: Dl_info = Dl_info {
-            dli_fname: ptr::null(),
-            dli_fbase: ptr::null_mut(),
-            dli_sname: ptr::null(),
-            dli_saddr: ptr::null_mut(),
-        };
-        assert_ne!(
-            unsafe { dladdr(func_vaddr, &mut dlinfo as *mut Dl_info) },
-            0
-        );
+        let mut dlinfo = MaybeUninit::<Dl_info>::uninit();
+        assert_ne!(unsafe { dladdr(func_vaddr, dlinfo.as_mut_ptr()) }, 0);
+        let dlinfo = unsafe { dlinfo.assume_init() };
         assert_eq!(func_vaddr, dlinfo.dli_saddr);
 
         let (obj, off) = code_vaddr_to_off(func_vaddr as usize).unwrap();
