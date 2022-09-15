@@ -202,22 +202,30 @@ pub struct CompiledTrace {
     smptr: *const c_void,
     /// The stackmaps size.
     smsize: usize,
+    /// Pointer to heap allocated live AOT values.
+    aotvals: *const c_void,
 }
 
 use std::mem;
 use std::slice;
 impl CompiledTrace {
     /// Create a `CompiledTrace` from a pointer to an array containing: the pointer to the compiled
-    /// trace, the pointer to the stackmap, and the size of the stackmap.
-    pub fn new(code_ptr: *const c_void) -> Self {
-        let slice = unsafe { slice::from_raw_parts(code_ptr as *const usize, 3) };
+    /// trace, the pointer to the stackmap and the size of the stackmap, and the pointer to the
+    /// live AOT values.
+    pub fn new(data: *const c_void) -> Self {
+        let slice = unsafe { slice::from_raw_parts(data as *const usize, 4) };
         let funcptr = slice[0] as *const c_void;
         let smptr = slice[1] as *const c_void;
         let smsize = slice[2] as usize;
+        let aotvals = slice[3] as *mut c_void;
+        // We heap allocated this array in ykllvmwrap to pass the data here. Now that we've
+        // extracted it we no longer need to keep the array around.
+        unsafe { libc::free(data as *mut c_void) };
         Self {
             entry: funcptr,
             smptr,
             smsize,
+            aotvals,
         }
     }
 
@@ -231,6 +239,7 @@ impl CompiledTrace {
             entry: std::ptr::null(),
             smptr: std::ptr::null() as *const _,
             smsize: 0,
+            aotvals: std::ptr::null() as *const _,
         }
     }
 
@@ -273,10 +282,25 @@ impl CompiledTrace {
         unsafe {
             let f = mem::transmute::<
                 _,
-                unsafe extern "C" fn(*mut c_void, *const c_void, usize, *mut c_void) -> u8,
+                unsafe extern "C" fn(
+                    *mut c_void,
+                    *const c_void,
+                    usize,
+                    *mut c_void,
+                    *const c_void,
+                ) -> u8,
             >(self.entry);
-            f(ctrlp_vars, self.smptr, self.smsize, returnval)
+            f(ctrlp_vars, self.smptr, self.smsize, returnval, self.aotvals)
         }
+    }
+}
+
+impl Drop for CompiledTrace {
+    fn drop(&mut self) {
+        // The memory holding the AOT live values needs to live as long as the trace. Now that we
+        // no longer need the trace, this can be freed too.
+        // FIXME: Free the memory for the stackmap which was allocated in ykllvmwrap/memman.cc.
+        unsafe { libc::free(self.aotvals as *mut c_void) };
     }
 }
 

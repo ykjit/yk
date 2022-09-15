@@ -12,7 +12,7 @@
 ;          i32 2, label %guardfail
 ;        ]
 ;
-;      guardfail:                                        ; preds = %4, %4, %4
+;      guardfail:                                        ; preds = %5, %5, %5
 ;        ...
 ;
 ;      {{5}}:...

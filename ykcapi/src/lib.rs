@@ -136,13 +136,23 @@ pub struct CVec {
     length: usize,
 }
 
+/// Address, offset, and length of the live AOT values for this guard failure. Mirrors the struct
+/// defined in ykllvmwrap/jitmodbuilder.cc.
+#[derive(Debug)]
+#[repr(C)]
+pub struct LiveAOTVals {
+    addr: *const c_void,
+    offset: usize,
+    length: usize,
+}
+
 /// Reads the stackmap and saved registers from the given address (i.e. the return address of the
 /// deoptimisation call).
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
 pub extern "C" fn yk_stopgap(
     stackmap: &CVec,
-    aotmap: &CVec,
+    aotvals: &LiveAOTVals,
     actframes: &CVec,
     retvalptr: *mut c_void,
     retaddr: usize,
@@ -152,10 +162,14 @@ pub extern "C" fn yk_stopgap(
     #[cfg(feature = "yk_jitstate_debug")]
     print_jit_state("enter-stopgap");
 
-    // Parse AOTMap.
-    let aotmap = unsafe { slice::from_raw_parts(aotmap.addr as *const AOTVar, aotmap.length) };
+    // Parse the live AOT values.
+    let aotvalsptr =
+        unsafe { (aotvals.addr as *const u8).offset(isize::try_from(aotvals.offset).unwrap()) };
+    let aotvals = unsafe { slice::from_raw_parts(aotvalsptr as *const AOTVar, aotvals.length) };
 
     // Parse active frames vector.
+    // Note that the memory behind this slice is allocated on the stack (of the compiled trace) and
+    // thus doesn't need to be freed.
     let activeframes = unsafe {
         slice::from_raw_parts(actframes.addr as *const yksgi::FrameInfo, actframes.length)
     };
@@ -189,7 +203,7 @@ pub extern "C" fn yk_stopgap(
                 assert_eq!(*reg, 6);
                 let addr = unsafe { registers.get(*reg) as *mut u8 };
                 let addr = unsafe { addr.offset(isize::try_from(*off).unwrap()) };
-                let aot = &aotmap[i];
+                let aot = &aotvals[i];
                 unsafe {
                     sginterp.var_init(
                         aot.bbidx,
@@ -210,7 +224,7 @@ pub extern "C" fn yk_stopgap(
                     8 => unsafe { ptr::read::<u64>(addr as *mut u64) as u64 },
                     _ => unreachable!(),
                 };
-                let aot = &aotmap[i];
+                let aot = &aotvals[i];
                 unsafe {
                     sginterp.var_init(
                         aot.bbidx,
@@ -222,7 +236,7 @@ pub extern "C" fn yk_stopgap(
                 }
             }
             SMLocation::Constant(v) => {
-                let aot = &aotmap[i];
+                let aot = &aotvals[i];
                 unsafe {
                     sginterp.var_init(
                         aot.bbidx,
@@ -250,7 +264,7 @@ pub extern "C" fn yk_stopgap(
 #[no_mangle]
 pub extern "C" fn __llvm_deoptimize(
     stackmap: *const c_void,
-    aotmap: *const c_void,
+    aotvals: *const c_void,
     frames: *const c_void,
     retval: *mut c_void,
 ) -> u8 {

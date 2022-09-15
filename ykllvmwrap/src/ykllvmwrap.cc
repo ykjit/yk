@@ -186,7 +186,8 @@ ThreadSafeModule *getThreadAOTMod(struct BitcodeSection &Bitcode) {
 
 // Compile a module in-memory and return a pointer to its function.
 extern "C" void *compileModule(string TraceName, Module *M,
-                               map<GlobalValue *, void *> GlobalMappings) {
+                               map<GlobalValue *, void *> GlobalMappings,
+                               void *LiveAOTVals) {
   std::call_once(LLVMInitialised, initLLVM, nullptr);
 
   // Use our own memory manager to keep track of stackmap address.
@@ -221,10 +222,11 @@ extern "C" void *compileModule(string TraceName, Module *M,
   // Allocate space for compiled trace address, stackmap address, and stackmap
   // size.
   // FIXME This is a temporary hack until the redesigned hot location is up.
-  uintptr_t *ptr = (uintptr_t *)malloc(sizeof(uintptr_t) * 3);
+  uintptr_t *ptr = (uintptr_t *)malloc(sizeof(uintptr_t) * 4);
   ptr[0] = EE->getFunctionAddress(TraceName);
-  ptr[1] = (uintptr_t)SMR.Ptr;
+  ptr[1] = reinterpret_cast<uintptr_t>(SMR.Ptr);
   ptr[2] = SMR.Size;
+  ptr[3] = reinterpret_cast<uintptr_t>(LiveAOTVals);
 
   return ptr;
 }
@@ -253,7 +255,8 @@ void *compileIRTrace(FN Func, char *FuncNames[], size_t BBs[], size_t TraceLen,
   Module *JITMod;
   std::string TraceName;
   std::map<GlobalValue *, void *> GlobalMappings;
-  std::tie(JITMod, TraceName, GlobalMappings) =
+  void *AOTMappingVec;
+  std::tie(JITMod, TraceName, GlobalMappings, AOTMappingVec) =
       Func(AOTMod, FuncNames, BBs, TraceLen, FAddrKeys, FAddrVals, FAddrLen);
 
   DIP.print(DebugIR::JITPreOpt, JITMod);
@@ -274,7 +277,7 @@ void *compileIRTrace(FN Func, char *FuncNames[], size_t BBs[], size_t TraceLen,
   DIP.print(DebugIR::JITPostOpt, JITMod);
 
   // Compile IR trace and return a pointer to its function.
-  return compileModule(TraceName, JITMod, GlobalMappings);
+  return compileModule(TraceName, JITMod, GlobalMappings, AOTMappingVec);
 }
 
 extern "C" void *__ykllvmwrap_irtrace_compile(
