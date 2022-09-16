@@ -56,6 +56,7 @@ struct load_self_image_args {
     int vdso_fd;
     char *vdso_filename;
     struct perf_pt_cerror *err;
+    const char *current_exe;
 };
 
 // Private prototypes.
@@ -66,7 +67,7 @@ static bool block_is_terminated(struct pt_block *);
 
 // Public prototypes.
 void *perf_pt_init_block_decoder(void *, uint64_t, int, char *, int *,
-                                 struct perf_pt_cerror *);
+                                 struct perf_pt_cerror *, const char *);
 bool perf_pt_next_block(struct pt_block_decoder *, int *, uint64_t *,
                         uint64_t *, struct perf_pt_cerror *);
 void perf_pt_free_block_decoder(struct pt_block_decoder *);
@@ -82,6 +83,9 @@ void perf_pt_free_block_decoder(struct pt_block_decoder *);
  * so it's up to the caller to make sure this file lives long enough for their
  * purposes.
  *
+ * `current_exe` is an absolute path to an on-disk executable from which to
+ * load the main executable's (i.e. not a shared library's) code.
+ *
  * `*decoder_status` will be updated to reflect the status of the decoder after
  * it has been synchronised.
  *
@@ -89,7 +93,8 @@ void perf_pt_free_block_decoder(struct pt_block_decoder *);
  */
 void *
 perf_pt_init_block_decoder(void *buf, uint64_t len, int vdso_fd, char *vdso_filename,
-                           int *decoder_status, struct perf_pt_cerror *err) {
+                           int *decoder_status, struct perf_pt_cerror *err,
+                           const char *current_exe) {
     bool failing = false;
 
     // Make a block decoder configuration.
@@ -148,7 +153,8 @@ perf_pt_init_block_decoder(void *buf, uint64_t len, int vdso_fd, char *vdso_file
         goto clean;
     }
 
-    struct load_self_image_args load_args = {image, vdso_fd, vdso_filename, err};
+    struct load_self_image_args load_args = {image, vdso_fd, vdso_filename,
+                                             err, current_exe};
     if (!load_self_image(&load_args)) {
         failing = true;
         goto clean;
@@ -425,7 +431,7 @@ load_self_image_cb(struct dl_phdr_info *info, size_t size, void *data)
     bool vdso = false;
     if (!*filename) {
         // On Linux, an empty name means that it is the executable itself.
-        filename = program_invocation_name;
+        filename = args->current_exe;
     } else {
         vdso = strcmp(filename, VDSO_NAME) == 0;
     }
