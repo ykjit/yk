@@ -3,7 +3,6 @@ use crate::errors::HWTracerError;
 use crate::{Block, ThreadTracer, Trace, Tracer};
 use libc::{c_char, c_int, c_void, free, geteuid, malloc, size_t};
 use std::error::Error;
-use std::ffi::{self, CStr, CString};
 use std::fmt::{self, Display, Formatter};
 use std::fs::File;
 use std::io::{self, Read};
@@ -13,6 +12,10 @@ use std::num::ParseIntError;
 use std::ops::Drop;
 use std::os::unix::io::AsRawFd;
 use std::ptr;
+use std::{
+    env,
+    ffi::{self, CStr, CString},
+};
 use tempfile::NamedTempFile;
 
 // The sysfs path used to set perf permissions.
@@ -106,6 +109,7 @@ extern "C" {
         vdso_filename: *const c_char,
         decoder_status: *mut c_int,
         err: *mut PerfPTCError,
+        current_exe: *const c_char,
     ) -> *mut c_void;
     fn perf_pt_next_block(
         decoder: *mut c_void,
@@ -168,6 +172,11 @@ impl<'t> PerfPTBlockIterator<'t> {
                 vdso_filename.as_ptr(),
                 &mut self.decoder_status,
                 &mut cerr,
+                // FIXME: current_exe() isn't reliable. We should find another way to do this.
+                CString::new(env::current_exe().unwrap().to_str().unwrap())
+                    .unwrap()
+                    .as_c_str()
+                    .as_ptr() as *const c_char,
             )
         };
         if decoder.is_null() {
