@@ -7,8 +7,6 @@ license = "Apache-2.0 OR MIT"
 
 [dependencies]
 libc = "0.2.117"
-memmap2 = "0.5.2"
-object = "0.28.3"
 phdrs = { git = "https://github.com/softdevteam/phdrs" }
 
 [build-dependencies]
