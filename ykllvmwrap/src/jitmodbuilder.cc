@@ -289,6 +289,10 @@ class JITModBuilder {
     return false;
   }
 
+  // Determines whether we are currently outlining code, i.e. we are processing
+  // the IR of a function we do not wish to inline.
+  bool isOutlining() { return OutlineCallDepth > 0; }
+
   // Add an external declaration for the given function to JITMod.
   void declareFunction(Function *F) {
     assert(JITMod->getFunction(F->getName()) == nullptr);
@@ -336,7 +340,7 @@ class JITModBuilder {
       if (CF != nullptr && VMap.find(CF) == VMap.end()) {
         declareFunction(CF);
       }
-      if (OutlineCallDepth == 0) {
+      if (!isOutlining()) {
         copyInstruction(&Builder, (Instruction *)&*CI, CurBBIdx, CurInstrIdx);
       }
       // We should expect an "unmappable hole" in the trace. This is
@@ -346,7 +350,7 @@ class JITModBuilder {
       ResumeAfter = make_tuple(CurInstrIdx, CI);
     } else {
       LastCompletedBlocks.push_back(nullptr);
-      if (OutlineCallDepth > 0) {
+      if (isOutlining()) {
         // When outlining a recursive function, we need to count all other
         // function calls so we know when we left the recusion.
         OutlineCallDepth += 1;
@@ -355,7 +359,8 @@ class JITModBuilder {
       // If this is a recursive call that has been inlined, or if the callee
       // has the "yk_outline" annotation, remove the inlined code and turn it
       // into a normal (outlined) call.
-      else if (CF->hasFnAttribute(YK_OUTLINE_FNATTR) || isRecursiveCall(CF)) {
+      else if (CF->hasFnAttribute(YK_OUTLINE_FNATTR) || CF->isVarArg() ||
+               isRecursiveCall(CF)) {
         if (VMap.find(CF) == VMap.end()) {
           declareFunction(CF);
           addGlobalMappingForFunction(CF);
@@ -469,7 +474,7 @@ class JITModBuilder {
     ResumeAfter = InlinedCalls.back();
     InlinedCalls.pop_back();
     LastCompletedBlocks.pop_back();
-    if (OutlineCallDepth > 0) {
+    if (isOutlining()) {
       OutlineCallDepth -= 1;
       return;
     }
@@ -1306,6 +1311,16 @@ public:
               continue;
             }
 
+            // Whitelist intrinsics that appear to be always inlined.
+            if (IID == Intrinsic::vastart || IID == Intrinsic::vaend ||
+                IID == Intrinsic::smax ||
+                IID == Intrinsic::usub_with_overflow) {
+              if (NewControlPointCall != nullptr && !isOutlining())
+                copyInstruction(&Builder, cast<CallInst>(I), CurBBIdx,
+                                CurInstrIdx);
+              continue;
+            }
+
             // Any intrinsic call which may generate machine code must have
             // metadata attached that specifies whether it has been inlined or
             // not.
@@ -1320,7 +1335,7 @@ public:
               // The intrinsic was inlined so we don't need to expect an
               // unmappable block and thus can just copy the call instruction
               // and continue processing the current block.
-              if (NewControlPointCall != nullptr)
+              if (NewControlPointCall != nullptr && !isOutlining())
                 copyInstruction(&Builder, cast<CallInst>(I), CurBBIdx,
                                 CurInstrIdx);
               continue;
@@ -1378,7 +1393,7 @@ public:
           break;
         }
 
-        if (OutlineCallDepth > 0) {
+        if (isOutlining()) {
           // We are currently ignoring an inlined function.
           continue;
         }
@@ -1423,7 +1438,7 @@ public:
 
     // Recursive calls must have completed by the time we finish constructing
     // the trace.
-    assert(OutlineCallDepth == 0);
+    assert(!isOutlining());
 
     Builder.CreateRet(ConstantInt::get(Type::getInt8Ty(JITMod->getContext()),
                                        TRACE_RETURN_SUCCESS));
