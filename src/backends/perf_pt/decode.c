@@ -57,6 +57,7 @@ struct load_self_image_args {
     char *vdso_filename;
     struct perf_pt_cerror *err;
     const char *current_exe;
+    struct  pt_image_section_cache *iscache;
 };
 
 // Private prototypes.
@@ -153,8 +154,16 @@ perf_pt_init_block_decoder(void *buf, uint64_t len, int vdso_fd, char *vdso_file
         goto clean;
     }
 
+    // Use image cache to speed up decoding.
+    struct pt_image_section_cache *iscache = pt_iscache_alloc(NULL);
+    if(iscache == NULL) {
+        perf_pt_set_err(err, perf_pt_cerror_unknown, 0);
+        failing = true;
+        goto clean;
+    }
+
     struct load_self_image_args load_args = {image, vdso_fd, vdso_filename,
-                                             err, current_exe};
+                                             err, current_exe, iscache};
     if (!load_self_image(&load_args)) {
         failing = true;
         goto clean;
@@ -467,9 +476,12 @@ load_self_image_cb(struct dl_phdr_info *info, size_t size, void *data)
             offset = phdr.p_offset;
         }
 
-        // XXX This could be made faster using a libipt instruction cache.
-        int rv = pt_image_add_file(args->image, filename, offset,
-                                   phdr.p_filesz, NULL, vaddr);
+        int isid = pt_iscache_add_file(args->iscache, filename, offset, phdr.p_filesz, vaddr);
+        if (isid < 0) {
+            return 1;
+        }
+
+        int rv = pt_image_add_cached(args->image, args->iscache, isid, NULL);
         if (rv < 0) {
             perf_pt_set_err(err, perf_pt_cerror_ipt, -rv);
             return 1;
