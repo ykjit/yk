@@ -140,6 +140,7 @@ impl Type {
                 }
             }
             LLVMTypeKind::LLVMVoidTypeKind => FFIType::void(),
+            LLVMTypeKind::LLVMPointerTypeKind => FFIType::pointer(),
             _ => todo!("{:?}", self.as_str()),
         }
     }
