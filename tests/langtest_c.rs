@@ -240,13 +240,10 @@ fn run_suite(opt: &'static str) {
 }
 
 fn main() {
-    // Run the suite with the various different clang optimisation levels. We do this to maximise
-    // the possibility of shaking out bugs (in both the JIT and the tests themselves).
+    // For now we can only compile with -O0 since higher optimisation levels introduce machine code
+    // we currently don't know how to deal with, e.g. temporaries which break stackmap
+    // reconstruction. This isn't a huge problem as in the future we will keep two versions of the
+    // interpreter around and only swap to -O0 when tracing and run on higher optimisation levels
+    // otherwise.
     run_suite("-O0");
-    run_suite("-O1");
-    run_suite("-O2");
-    run_suite("-O3");
-    run_suite("-Ofast");
-    run_suite("-Os");
-    run_suite("-Oz");
 }
