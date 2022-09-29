@@ -1317,8 +1317,16 @@ public:
             ConstantAsMetadata *CAM =
                 cast<ConstantAsMetadata>(IMD->getOperand(0));
             if (CAM->getValue()->isOneValue()) {
+              // The intrinsic was inlined so we don't need to expect an
+              // unmappable block and thus can just copy the call instruction
+              // and continue processing the current block.
+              if (NewControlPointCall != nullptr)
+                copyInstruction(&Builder, cast<CallInst>(I), CurBBIdx,
+                                CurInstrIdx);
               continue;
             }
+            // The intrinsic wasn't inlined so we let the following code handle
+            // it which already knows how to deal with such cases.
           }
 
           CallInst *CI = cast<CallInst>(I);
