@@ -144,6 +144,8 @@ fn mk_compiler(exe: &Path, src: &Path, opt: &str, extra_objs: &[PathBuf]) -> Com
         "-Wl,--mllvm=--yk-block-disambiguate",
         // Have the `.llvmbc` section loaded into memory by the loader.
         "-Wl,--mllvm=--yk-alloc-llvmbc-section",
+        // Have the `.llvm_bb_addr_map` section loaded into memory by the loader.
+        "-Wl,--mllvm=--yk-alloc-llvmbbaddrmap-section",
         // Emit a basic block map section. Used for block mapping.
         "-Wl,--lto-basic-block-sections=labels",
         // FIXME: https://github.com/ykjit/yk/issues/381

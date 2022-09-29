@@ -2,6 +2,7 @@
 
 #![feature(once_cell)]
 #![feature(naked_functions)]
+#![feature(ptr_sub_ptr)]
 #![allow(clippy::new_without_default)]
 
 mod errors;

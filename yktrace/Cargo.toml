@@ -14,15 +14,9 @@ hwtracer = { git = "https://github.com/ykjit/hwtracer" }
 intervaltree = "0.2.7"
 leb128 = "0.2.5"
 libc = "0.2.117"
-memmap2 = "0.5.2"
 phdrs = { git = "https://github.com/softdevteam/phdrs" }
 ykllvmwrap = { path = "../ykllvmwrap" }
 ykutil = { path = "../ykutil" }
-
-[dependencies.object]
-version = "0.28.3"
-default-features = false
-features = ["read_core", "elf"]
 
 [dev-dependencies]
 fm = "0.2.1"

@@ -20,6 +20,7 @@
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
 
+#include <dlfcn.h>
 #include <err.h>
 #include <link.h>
 #include <stdlib.h>
@@ -296,3 +297,67 @@ extern "C" void *__ykllvmwrap_irtrace_compile_for_tc_tests(
                         BitcodeLen);
 }
 #endif
+
+/// Find the extent of the .llvmbbaddrmap section in the address space.
+///
+/// ykllvm adds symbols like `ykllvm.bbaddrmap.<func>.start` and
+/// `ykllvm.bbaddrmap.<func>.end` to mark each function's bbaddrmap data
+/// region. The regions for all of the functions we know about in the AOT IR are
+/// contiguous, so it's just a matter of finding the lowest start address and
+/// the highest end address of these regions, then we can parse the records
+/// back-to-back later.
+///
+/// On success returns `true` and updates `StartAddr` and `EndAddr` to indicate
+/// the contiguous region of bbaddrmap data.
+///
+/// On error returns `false`, in which case the values of `StartAddr` and
+/// `EndAddr` are unchanged.
+extern "C" bool __ykllvmwrap_find_bbmaps(void *BitcodeData, size_t BitcodeLen,
+                                         uintptr_t *StartAddr,
+                                         uintptr_t *EndAddr) {
+  struct BitcodeSection Bitcode = {BitcodeData, BitcodeLen};
+  ThreadSafeModule *ThreadAOTMod = getThreadAOTMod(Bitcode);
+
+  void *Lo = reinterpret_cast<void *>(UINTPTR_MAX);
+  void *Hi = 0;
+  bool FoundOne = false;
+
+  for (Function &F : *ThreadAOTMod->getModuleUnlocked()) {
+    if (!F.isDeclaration()) {
+      string StartSymName = "ykllvm.bbaddrmap.";
+      StartSymName.append(F.getName().str());
+      StartSymName.append(".start");
+
+      string EndSymName = "ykllvm.bbaddrmap.";
+      EndSymName.append(F.getName().str());
+      EndSymName.append(".end");
+
+      void *StartAddr = dlsym(NULL, StartSymName.c_str());
+      void *EndAddr = dlsym(NULL, EndSymName.c_str());
+
+      // If we fail to find the bbaddrmap start/end symbol for any single
+      // function, then we can't report a reliable bound for all functions, so
+      // we may as well bail out now.
+      if (!StartAddr || !EndAddr)
+        return false;
+
+      assert(EndAddr >= StartAddr);
+      if (StartAddr < Lo)
+        Lo = StartAddr;
+
+      if (EndAddr > Hi)
+        Hi = EndAddr;
+
+      FoundOne = true;
+    }
+  }
+
+  // If we haven't seen at least a single pair of start/stop symbols then we
+  // can't reliably report the memory region for the bbaddrmap data.
+  if (!FoundOne)
+    return false;
+
+  *StartAddr = reinterpret_cast<uintptr_t>(Lo);
+  *EndAddr = reinterpret_cast<uintptr_t>(Hi);
+  return true;
+}
