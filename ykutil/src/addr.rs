@@ -56,16 +56,32 @@ pub fn off_to_vaddr(containing_obj: &Path, off: u64) -> Option<usize> {
     None // Not found.
 }
 
+pub struct SymbolInObject {
+    obj_name: &'static CStr,
+    sym_name: &'static CStr,
+    sym_vaddr: *const c_void,
+}
+
+impl SymbolInObject {
+    pub fn obj_name(&self) -> &'static CStr {
+        self.obj_name
+    }
+    pub fn sym_name(&self) -> &'static CStr {
+        self.sym_name
+    }
+    pub fn sym_vaddr(&self) -> *const c_void {
+        self.sym_vaddr
+    }
+}
+
 /// Given a virtual address in the current address space, (if possible) determine the name of the
 /// symbol this belongs to, and the path to the object from which it came.
 ///
-/// On success returns `Ok((symbol_name, object_path, symbol_address))`, or on failure `Err(())`.
+/// On success returns `Ok` with a `SymbolInObject`, or on failure `Err(())`.
 ///
 /// This function uses `dladdr()` internally, and thus inherits the same symbol visibility rules
 /// used there. For example, this function will not find unexported symbols.
-pub fn vaddr_to_sym_and_obj(
-    vaddr: usize,
-) -> Result<(&'static CStr, &'static CStr, *const c_void), ()> {
+pub fn vaddr_to_sym_and_obj(vaddr: usize) -> Result<SymbolInObject, ()> {
     let mut info: MaybeUninit<Dl_info> = MaybeUninit::uninit();
     if unsafe { dladdr(vaddr as *const c_void, info.as_mut_ptr()) } == 0 {
         return Err(());
@@ -76,11 +92,11 @@ pub fn vaddr_to_sym_and_obj(
     if info.dli_sname == null() {
         return Err(());
     }
-    Ok((
-        unsafe { CStr::from_ptr(info.dli_sname) },
-        unsafe { CStr::from_ptr(info.dli_fname) },
-        info.dli_saddr,
-    ))
+    Ok(SymbolInObject {
+        obj_name: unsafe { CStr::from_ptr(info.dli_fname) },
+        sym_name: unsafe { CStr::from_ptr(info.dli_sname) },
+        sym_vaddr: info.dli_saddr,
+    })
 }
 
 #[cfg(test)]
@@ -147,9 +163,9 @@ mod tests {
         // To test this we need an exported symbol with a predictable (i.e. unmangled) name.
         use libc::fflush;
         let func_vaddr = fflush as *const fn();
-        let (sym, obj, _) = vaddr_to_sym_and_obj(func_vaddr as usize).unwrap();
-        assert_eq!(sym.to_str().unwrap(), "fflush");
-        let obj_path = PathBuf::from(obj.to_str().unwrap());
+        let sio = vaddr_to_sym_and_obj(func_vaddr as usize).unwrap();
+        assert_eq!(sio.sym_name().to_str().unwrap(), "fflush");
+        let obj_path = PathBuf::from(sio.obj_name().to_str().unwrap());
         assert!(obj_path
             .file_name()
             .unwrap()

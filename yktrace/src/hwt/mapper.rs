@@ -258,15 +258,15 @@ impl HWTMapper {
                 // function's symbol. If the cache knows that block A and B are from the same
                 // function, and a block X has a start address between blocks A and B, then X must
                 // also belong to the same function and there's no need to query the linker.
-                let (func_name, in_obj, func_vaddr) =
-                    vaddr_to_sym_and_obj(usize::try_from(block_vaddr).unwrap()).unwrap();
-                debug_assert_eq!(obj_name.to_str().unwrap(), in_obj.to_str().unwrap());
-                if !self.faddrs.contains_key(func_name) {
-                    self.faddrs.insert(func_name.to_owned(), func_vaddr);
+                let sio = vaddr_to_sym_and_obj(usize::try_from(block_vaddr).unwrap()).unwrap();
+                debug_assert_eq!(obj_name.to_str().unwrap(), sio.obj_name().to_str().unwrap());
+                if !self.faddrs.contains_key(sio.sym_name()) {
+                    self.faddrs
+                        .insert(sio.sym_name().to_owned(), sio.sym_vaddr());
                 }
                 for bb in &ent.value.corr_bbs {
                     ret.push(Some(IRBlock::new(
-                        func_name.to_owned(),
+                        sio.sym_name().to_owned(),
                         usize::try_from(*bb).unwrap(),
                     )));
                 }
