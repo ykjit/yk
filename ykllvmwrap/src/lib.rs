@@ -31,4 +31,11 @@ extern "C" {
         llvmbc_data: *const u8,
         llvmbc_len: size_t,
     ) -> *const c_void;
+
+    pub fn __ykllvmwrap_find_bbmaps(
+        bitcode_data: *const u8,
+        bitcode_len: usize,
+        start_addr: *mut size_t,
+        end_addr: *mut size_t,
+    ) -> bool;
 }

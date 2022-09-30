@@ -5,21 +5,21 @@ use byteorder::{NativeEndian, ReadBytesExt};
 use hwtracer::{HWTracerError, Trace};
 use intervaltree::{self, IntervalTree};
 use libc::c_void;
-use memmap2;
-use object::{Object, ObjectSection};
-use std::sync::LazyLock;
 use std::{
     collections::HashMap,
     convert::TryFrom,
-    env,
     ffi::CString,
-    fs,
     io::{prelude::*, Cursor, SeekFrom},
+    mem::MaybeUninit,
+    slice,
+    sync::LazyLock,
 };
-use ykutil::addr::{code_vaddr_to_off, off_to_vaddr_main_obj, vaddr_to_sym_and_obj};
-use ykutil::obj::SELF_BIN_PATH;
+use ykllvmwrap::__ykllvmwrap_find_bbmaps;
+use ykutil::{
+    addr::{code_vaddr_to_off, off_to_vaddr_main_obj, vaddr_to_sym_and_obj},
+    obj::{llvmbc_section, SELF_BIN_PATH},
+};
 
-const BLOCK_MAP_SEC: &str = ".llvm_bb_addr_map";
 static BLOCK_MAP: LazyLock<BlockMap> = LazyLock::new(BlockMap::new);
 
 /// The information for one LLVM MachineBasicBlock, as per:
@@ -41,21 +41,29 @@ pub struct BlockMap {
 impl BlockMap {
     /// Parse the LLVM blockmap section of the current executable and return a struct holding the
     /// mappings.
-    ///
-    /// PERF: See if we can get the block map section marked as loadable so that the linker loads
-    /// it automatically at process creation time.
     pub fn new() -> Self {
-        let mut elems = Vec::new();
-        let pathb = env::current_exe().unwrap();
-        let file = fs::File::open(&pathb.as_path()).unwrap();
-        let mmap = unsafe { memmap2::Mmap::map(&file).unwrap() };
-        let object = object::File::parse(&*mmap).unwrap();
-        let sec = object.section_by_name(BLOCK_MAP_SEC).unwrap();
-        let sec_size = sec.size();
-        let mut crsr = Cursor::new(sec.data().unwrap());
+        let (bc, bc_len) = llvmbc_section();
 
-        // Keep reading records until we fall outside of the section's bounds.
-        while crsr.position() < sec_size {
+        let mut start_addr = MaybeUninit::uninit();
+        let mut end_addr = MaybeUninit::uninit();
+        let found = unsafe {
+            __ykllvmwrap_find_bbmaps(bc, bc_len, start_addr.as_mut_ptr(), end_addr.as_mut_ptr())
+        };
+        if !found {
+            panic!("couldn't find .llvmbbaddrmap data!");
+        }
+        let (start_addr, end_addr) = unsafe { (start_addr.assume_init(), end_addr.assume_init()) };
+        let bbaddrmap_data =
+            unsafe { slice::from_raw_parts(start_addr as *const u8, end_addr - start_addr) };
+
+        debug_assert!(start_addr != usize::MAX);
+        debug_assert!(end_addr != usize::MIN);
+        debug_assert!(end_addr > start_addr);
+
+        // Keep reading blockmap records until we fall outside of the section's bounds.
+        let mut elems = Vec::new();
+        let mut crsr = Cursor::new(bbaddrmap_data);
+        while crsr.position() < u64::try_from(bbaddrmap_data.len()).unwrap() {
             let _version = crsr.read_u8().unwrap();
             let _feature = crsr.read_u8().unwrap();
             let f_off = crsr.read_u64::<NativeEndian>().unwrap();
