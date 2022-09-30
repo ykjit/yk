@@ -16,7 +16,7 @@ use std::{
 };
 use ykllvmwrap::__ykllvmwrap_find_bbmaps;
 use ykutil::{
-    addr::{code_vaddr_to_off, off_to_vaddr_main_obj, vaddr_to_sym_and_obj},
+    addr::{code_vaddr_to_off, vaddr_to_sym_and_obj},
     obj::{llvmbc_section, SELF_BIN_PATH},
 };
 
@@ -258,17 +258,15 @@ impl HWTMapper {
                 // function's symbol. If the cache knows that block A and B are from the same
                 // function, and a block X has a start address between blocks A and B, then X must
                 // also belong to the same function and there's no need to query the linker.
-                let (func_name, in_obj) =
-                    vaddr_to_sym_and_obj(usize::try_from(block_vaddr).unwrap()).unwrap();
-                debug_assert_eq!(obj_name.to_str().unwrap(), in_obj.to_str().unwrap());
-                if !self.faddrs.contains_key(func_name) {
-                    let func_vaddr = off_to_vaddr_main_obj(ent.value.f_off).unwrap();
+                let sio = vaddr_to_sym_and_obj(usize::try_from(block_vaddr).unwrap()).unwrap();
+                debug_assert_eq!(obj_name.to_str().unwrap(), sio.obj_name().to_str().unwrap());
+                if !self.faddrs.contains_key(sio.sym_name()) {
                     self.faddrs
-                        .insert(func_name.to_owned(), func_vaddr as *const c_void);
+                        .insert(sio.sym_name().to_owned(), sio.sym_vaddr());
                 }
                 for bb in &ent.value.corr_bbs {
                     ret.push(Some(IRBlock::new(
-                        func_name.to_owned(),
+                        sio.sym_name().to_owned(),
                         usize::try_from(*bb).unwrap(),
                     )));
                 }

@@ -38,16 +38,14 @@ pub fn code_vaddr_to_off(vaddr: usize) -> Option<(PathBuf, u64)> {
     None
 }
 
-/// Find the virtual address of the offset `off` in the binary's "main object".
-pub fn off_to_vaddr_main_obj(off: u64) -> Option<usize> {
-    // Linux uses the empty string to denote the main object.
-    #[cfg(target_os = "linux")]
-    return off_to_vaddr(&PathBuf::new(), off);
-    #[cfg(not(target_os = "linux"))]
-    return off_to_vaddr(&env::current_exe().unwrap(), off);
-}
-
 /// Find the virtual address of the offset `off` in the object `containing_obj`.
+///
+/// Returns `OK(virtual_address)` if a virtual address is found for the object in question,
+/// otherwise returns `None`.
+///
+/// This is fragile and should be avoided if possible. In order for a hit, `containing_obj` must be
+/// in the same form as it appears in the program header table. This function makes no attempt to
+/// canonicalise equivalent, but different (in terms of string equality) object paths.
 pub fn off_to_vaddr(containing_obj: &Path, off: u64) -> Option<usize> {
     for obj in &objects() {
         if Path::new(obj.name().to_str().unwrap()) != containing_obj {
@@ -58,14 +56,32 @@ pub fn off_to_vaddr(containing_obj: &Path, off: u64) -> Option<usize> {
     None // Not found.
 }
 
+pub struct SymbolInObject {
+    obj_name: &'static CStr,
+    sym_name: &'static CStr,
+    sym_vaddr: *const c_void,
+}
+
+impl SymbolInObject {
+    pub fn obj_name(&self) -> &'static CStr {
+        self.obj_name
+    }
+    pub fn sym_name(&self) -> &'static CStr {
+        self.sym_name
+    }
+    pub fn sym_vaddr(&self) -> *const c_void {
+        self.sym_vaddr
+    }
+}
+
 /// Given a virtual address in the current address space, (if possible) determine the name of the
 /// symbol this belongs to, and the path to the object from which it came.
 ///
-/// On success returns `Ok((symbol_name, object_path))`, or on failure `Err(())`.
+/// On success returns `Ok` with a `SymbolInObject`, or on failure `Err(())`.
 ///
 /// This function uses `dladdr()` internally, and thus inherits the same symbol visibility rules
 /// used there. For example, this function will not find unexported symbols.
-pub fn vaddr_to_sym_and_obj(vaddr: usize) -> Result<(&'static CStr, &'static CStr), ()> {
+pub fn vaddr_to_sym_and_obj(vaddr: usize) -> Result<SymbolInObject, ()> {
     let mut info: MaybeUninit<Dl_info> = MaybeUninit::uninit();
     if unsafe { dladdr(vaddr as *const c_void, info.as_mut_ptr()) } == 0 {
         return Err(());
@@ -76,18 +92,22 @@ pub fn vaddr_to_sym_and_obj(vaddr: usize) -> Result<(&'static CStr, &'static CSt
     if info.dli_sname == null() {
         return Err(());
     }
-    Ok((unsafe { CStr::from_ptr(info.dli_sname) }, unsafe {
-        CStr::from_ptr(info.dli_fname)
-    }))
+    Ok(SymbolInObject {
+        obj_name: unsafe { CStr::from_ptr(info.dli_fname) },
+        sym_name: unsafe { CStr::from_ptr(info.dli_sname) },
+        sym_vaddr: info.dli_saddr,
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        code_vaddr_to_off, off_to_vaddr, off_to_vaddr_main_obj, vaddr_to_sym_and_obj, MaybeUninit,
-    };
+    use super::{code_vaddr_to_off, off_to_vaddr, vaddr_to_sym_and_obj, MaybeUninit};
     use libc::{dladdr, dlsym, Dl_info};
-    use std::{ffi::CString, path::PathBuf, ptr};
+    use std::{
+        ffi::CString,
+        path::{Path, PathBuf},
+        ptr,
+    };
 
     #[test]
     fn map_libc() {
@@ -126,8 +146,16 @@ mod tests {
     #[test]
     fn round_trip_main() {
         let func_vaddr = round_trip_main as *const fn();
-        let (_, off) = code_vaddr_to_off(func_vaddr as usize).unwrap();
-        assert_eq!(off_to_vaddr_main_obj(off).unwrap(), func_vaddr as usize);
+        let (_obj, off) = code_vaddr_to_off(func_vaddr as usize).unwrap();
+
+        // On Linux, the main object's name in the program headers is the empty string.
+        #[cfg(target_os = "linux")]
+        let main_obj = Path::new("");
+
+        #[cfg(not(target_os = "linux"))]
+        todo!(); // We may get away with using `_obj` returned from `code_vaddr_to_off()` above?
+
+        assert_eq!(off_to_vaddr(&main_obj, off).unwrap(), func_vaddr as usize);
     }
 
     #[test]
@@ -135,9 +163,9 @@ mod tests {
         // To test this we need an exported symbol with a predictable (i.e. unmangled) name.
         use libc::fflush;
         let func_vaddr = fflush as *const fn();
-        let (sym, obj) = vaddr_to_sym_and_obj(func_vaddr as usize).unwrap();
-        assert_eq!(sym.to_str().unwrap(), "fflush");
-        let obj_path = PathBuf::from(obj.to_str().unwrap());
+        let sio = vaddr_to_sym_and_obj(func_vaddr as usize).unwrap();
+        assert_eq!(sio.sym_name().to_str().unwrap(), "fflush");
+        let obj_path = PathBuf::from(sio.obj_name().to_str().unwrap());
         assert!(obj_path
             .file_name()
             .unwrap()
