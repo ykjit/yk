@@ -89,23 +89,36 @@ fn mk_compiler(exe: &Path, src: &Path, opt: &str, extra_objs: &[PathBuf]) -> Com
     let mut compiler = Command::new("clang");
     compiler.env("YKD_PRINT_IR", "1");
 
-    let mut lib_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    lib_dir.push("..");
-    lib_dir.push("target");
+    let yk_config = [
+        &env::var("CARGO_MANIFEST_DIR").unwrap(),
+        "..",
+        "ykcapi",
+        "scripts",
+        "yk-config",
+    ]
+    .iter()
+    .collect::<PathBuf>();
+
     #[cfg(cargo_profile = "debug")]
-    lib_dir.push("debug");
+    let mode = "debug";
     #[cfg(cargo_profile = "release")]
-    lib_dir.push("release");
-    lib_dir.push("deps");
-    let lib_dir_str = lib_dir.to_str().unwrap();
+    let mode = "release";
 
-    let mut ykcapi_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    ykcapi_dir.push("..");
-    ykcapi_dir.push("ykcapi");
+    let yk_config_out = Command::new(yk_config)
+        .args(&[mode, "--cflags", "--cppflags", "--ldflags", "--libs"])
+        .output()
+        .expect("failed to execute yk-config");
+    if !yk_config_out.status.success() {
+        panic!("yk-config exited with non-zero status");
+    }
+    let yk_flags = String::from_utf8(yk_config_out.stdout).unwrap();
 
-    // FIXME: https://github.com/ykjit/yk/issues/427
-    // yk requires a lot of ykllvm compiler flags. We should consider adding "one main yk flag"
-    // which turns on all of the other flags.
+    // yk-config never returns arguments containing spaces, so we can split by space here. If this
+    // ever changes, then we should build arguments as an "unparsed" string and parse that to `sh
+    // -c` and let the shell do the parsing.
+    let yk_flags = yk_flags.trim().split(" ");
+    compiler.args(yk_flags);
+
     compiler.args(&[
         opt,
         // If this is a debug build, include debug info in the test binary.
@@ -114,51 +127,6 @@ fn mk_compiler(exe: &Path, src: &Path, opt: &str, extra_objs: &[PathBuf]) -> Com
         // Be strict.
         "-Werror",
         "-Wall",
-        // Enable LTO with lld.
-        "-fuse-ld=lld",
-        "-flto",
-        // Outline functions containing loops during AOT compilation. Needed for `yk_unroll_safe`.
-        "-fyk-noinline-funcs-with-loops",
-        // Embed LLVM bitcode as late as possible.
-        "-Wl,--mllvm=--embed-bitcode-final",
-        // Disable machine passes that would interfere with block mapping.
-        //
-        // If you are trying to figure out which pass is breaking the mapping, you can add
-        // "-Wl,--mllvm=--print-before-all"/"-Wl,--mllvm=--print-after-all" to see the MIR
-        // before/after each pass. You can make the output smaller by filtering the output by
-        // function name with "-Wl,--mllvm=--filter-print-funcs=<func>". When you have found the
-        // candidate, look in `TargetPassConfig.cpp` (in ykllvm) to find the CLI switch required to
-        // disable the pass. If you can't (or don't want to) eliminate a whole pass, then you can
-        // add (or re-use) a yk-specific flag to disable only aspects of passes.
-        "-Wl,--mllvm=--disable-branch-fold",
-        "-Wl,--mllvm=--disable-block-placement",
-        "-Wl,--mllvm=--disable-early-taildup", // Interferes with the BlockDisambiguate pass.
-        "-Wl,--mllvm=--disable-tail-duplicate", // ^^^
-        "-Wl,--mllvm=--yk-disable-tail-call-codegen", // Interferes with the JIT's inlining stack.
-        "-Wl,--mllvm=--yk-no-fallthrough",     // Fallthrough optimisations distort block mapping.
-        // Ensure control point is patched.
-        "-Wl,--mllvm=--yk-patch-control-point",
-        // Emit stackmaps used for JIT deoptimisation.
-        "-Wl,--mllvm=--yk-insert-stackmaps",
-        // Ensure we can unambiguously map back to LLVM IR blocks.
-        "-Wl,--mllvm=--yk-block-disambiguate",
-        // Have the `.llvmbc` section loaded into memory by the loader.
-        "-Wl,--mllvm=--yk-alloc-llvmbc-section",
-        // Have the `.llvm_bb_addr_map` section loaded into memory by the loader.
-        "-Wl,--mllvm=--yk-alloc-llvmbbaddrmap-section",
-        // Emit a basic block map section. Used for block mapping.
-        "-Wl,--lto-basic-block-sections=labels",
-        // FIXME: https://github.com/ykjit/yk/issues/381
-        // Find a better way of handling unexported globals inside a trace.
-        "-Wl,--export-dynamic",
-        // Ensure the tests can find and use libykcapi.
-        "-I",
-        ykcapi_dir.to_str().unwrap(),
-        "-L",
-        lib_dir_str,
-        "-lykcapi",
-        // Encode an rpath so that we don't have to set LD_LIBRARY_PATH.
-        &format!("-Wl,-rpath={}", lib_dir_str),
         // Some tests are multi-threaded via the pthread API.
         "-pthread",
         // The input and output files.
