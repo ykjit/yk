@@ -1,0 +1,125 @@
+#!/bin/sh
+
+set -e
+
+# The parent directory of this script. Under some obscure circumstances $0 may
+# not be accurate, so we do some quick and dirty sanity checking.
+DIR=`dirname $0`
+if [ ! -d "${DIR}/../../yktrace" ]; then
+    1>&2 echo "error: couldn't find parent directory of yk-config"
+    exit 1
+fi
+
+OUTPUT=""
+
+usage() {
+    echo "Generate C compiler flags for building against the Yk JIT.\n"
+    echo "Usage:"
+    echo "    yk-config <mode> [--cppflags] [--cflags] [--ldflags]\n"
+    echo "    Where <mode> is either 'debug' or 'release'."
+}
+
+handle_arg() {
+    mode=$1
+    shift
+
+    case $1 in
+        --cflags)
+            # Enable LTO.
+            OUTPUT="${OUTPUT} -flto"
+            # Outline functions containing loops during AOT compilation. Needed
+            # for `yk_unroll_safe`.
+            OUTPUT="${OUTPUT} -fyk-noinline-funcs-with-loops"
+            ;;
+        --cppflags)
+            # Path to yk.h
+            OUTPUT="${OUTPUT} -I${DIR}/.."
+            ;;
+        --ldflags)
+            # Use lld.
+            OUTPUT="${OUTPUT} -fuse-ld=lld"
+            # Embed LLVM bitcode as late as possible.
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--embed-bitcode-final"
+
+            # Disable machine passes that would interfere with block mapping.
+            #
+            # If you are trying to figure out which pass is breaking the
+            # mapping, you can add "-Wl,--mllvm=--print-before-all" and/or
+            # "-Wl,--mllvm=--print-after-all" to see the MIR before/after
+            # each pass. You can make the output smaller by filtering the
+            # output by function name with
+            # "-Wl,--mllvm=--filter-print-funcs=<func>". When you have found
+            # the candidate, look in `TargetPassConfig.cpp` (in ykllvm) to
+            # find the CLI switch required to disable the pass. If you can't
+            # (or don't want to) eliminate a whole pass, then you can add
+            # (or re-use) a yk-specific flag to disable only aspects of passes.
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--disable-branch-fold"
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--disable-block-placement"
+            # These next two passes interfere with the BlockDisambiguate pass.
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--disable-early-taildup"
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--disable-tail-duplicate"
+            # Interferes with the JIT's inlining stack.
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-disable-tail-call-codegen"
+            # Fallthrough optimisations distort block mapping.
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-no-fallthrough"
+
+            # Ensure control point is patched.
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-patch-control-point"
+
+            # Emit stackmaps used for JIT deoptimisation.
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-insert-stackmaps"
+
+            # Ensure we can unambiguously map back to LLVM IR blocks.
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-block-disambiguate"
+
+            # Have the `.llvmbc` and `.llvm_bb_addr_map` sections loaded into
+            # memory by the loader.
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-alloc-llvmbc-section"
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-alloc-llvmbbaddrmap-section"
+
+            # Emit a basic block map section. Used for block mapping.
+            OUTPUT="${OUTPUT} -Wl,--lto-basic-block-sections=labels"
+
+            # Ensure all symbols are exported so that the JIT can use them.
+            # FIXME: https://github.com/ykjit/yk/issues/381
+            # Find a better way of handling unexported globals inside a trace.
+            OUTPUT="${OUTPUT} -Wl,--export-dynamic"
+
+            # Linkage to yk as a library.
+            OUTPUT="${OUTPUT} -L${DIR}/../../target/${mode}/deps"
+
+            # Encode an rpath so that we don't have to set LD_LIBRARY_PATH.
+            OUTPUT="${OUTPUT} -Wl,-rpath=${DIR}/../../target/${mode}/deps"
+            ;;
+        --libs)
+            OUTPUT="${OUTPUT} -lykcapi"
+            ;;
+        *)
+            1>&2 echo "unknown flag: $1\n"
+            usage
+            exit 1
+            ;;
+    esac
+}
+
+if [ $# -eq 0 ]; then
+    usage
+    exit 1
+fi
+
+case $1 in
+    debug|release);;
+    *) 1>&2 echo "unknown mode: $1\n"
+       usage
+       exit 1
+       ;;
+esac
+mode=$1
+shift
+
+while [ $# -ne 0 ]; do
+    handle_arg $mode $1
+    shift
+done
+
+echo ${OUTPUT}
