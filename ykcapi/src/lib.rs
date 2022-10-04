@@ -6,7 +6,6 @@
 //! The sane solution is to have only one `cdylib` crate in our workspace (this crate) and all
 //! other crates are regular `rlibs`.
 
-#![feature(bench_black_box)]
 #![feature(c_variadic)]
 #![feature(naked_functions)]
 #![feature(once_cell)]
