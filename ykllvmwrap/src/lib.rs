@@ -6,7 +6,7 @@
 // https://github.com/ykjit/yk/issues/426
 
 use libc::{c_void, size_t};
-use std::os::raw::c_char;
+use std::ffi::{c_char, c_int};
 
 extern "C" {
     pub fn __ykllvmwrap_irtrace_compile(
@@ -18,6 +18,8 @@ extern "C" {
         faddr_len: size_t,
         llvmbc_data: *const u8,
         llvmbc_len: size_t,
+        debuginfo_fd: c_int,
+        debuginfo_path: *const c_char,
     ) -> *const c_void;
 
     #[cfg(feature = "yk_testing")]
@@ -30,6 +32,8 @@ extern "C" {
         faddr_len: size_t,
         llvmbc_data: *const u8,
         llvmbc_len: size_t,
+        debuginfo_fd: c_int,
+        debuginfo_path: *const c_char,
     ) -> *const c_void;
 
     pub fn __ykllvmwrap_find_bbmaps(

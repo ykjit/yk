@@ -388,11 +388,11 @@ impl MT {
                 Ok(x) => x,
                 Err(e) => todo!("{e:?}"),
             };
-            let codeptr = match irtrace.compile() {
+            let (codeptr, di_tmpfile) = match irtrace.compile() {
                 Ok(x) => x,
                 Err(e) => todo!("{e:?}"),
             };
-            let ct = Box::new(CompiledTrace::new(codeptr));
+            let ct = Box::new(CompiledTrace::new(codeptr, di_tmpfile));
             // FIXME: although we've now put the compiled trace into the `HotLocation`, there's
             // no guarantee that the `Location` for which we're compiling will ever be executed
             // again. In such a case, the memory has, in essence, leaked.

@@ -7,15 +7,19 @@
 
 mod errors;
 use libc::c_void;
+#[cfg(unix)]
+use std::os::unix::io::AsRawFd;
 use std::{
     cell::RefCell,
     collections::HashMap,
+    env,
     error::Error,
-    ffi::{CStr, CString},
+    ffi::{c_char, c_int, CStr, CString},
     ptr,
 };
 mod hwt;
 use std::arch::asm;
+use tempfile::NamedTempFile;
 use ykutil::obj::llvmbc_section;
 
 pub use errors::InvalidTraceError;
@@ -137,7 +141,32 @@ impl IRTrace {
         (func_names, bbs, trace_len)
     }
 
-    pub fn compile(&self) -> Result<*const c_void, Box<dyn Error>> {
+    // If necessary, create a temporary file for us to write the trace's debugging "source code"
+    // into. Elsewhere, the JIT module will have `DebugLoc`s inserted into it which will point to
+    // lines in this temporary file.
+    //
+    // If the `YKD_TRACE_DEBUGINFO` environment variable is set to "1", then this function returns
+    // a `NamedTempFile`, a non-negative file descriptor, and a path to the file.
+    //
+    // If the `YKD_TRACE_DEBUGINFO` environment variable is *not* set to "1", then no file is
+    // created and this function returns `(None, -1, ptr::null())`.
+    #[cfg(unix)]
+    fn create_debuginfo_temp_file() -> (Option<NamedTempFile>, c_int, *const c_char) {
+        let mut di_tmp = None;
+        let mut di_fd = -1;
+        let mut di_tmpname_c = ptr::null() as *const c_char;
+        if let Ok(di_val) = env::var("YKD_TRACE_DEBUGINFO") {
+            if di_val == "1" {
+                let tmp = NamedTempFile::new().unwrap();
+                di_tmpname_c = tmp.path().to_str().unwrap().as_ptr() as *const c_char;
+                di_fd = tmp.as_raw_fd();
+                di_tmp = Some(tmp);
+            }
+        }
+        (di_tmp, di_fd, di_tmpname_c)
+    }
+
+    pub fn compile(&self) -> Result<(*const c_void, Option<NamedTempFile>), Box<dyn Error>> {
         let (func_names, bbs, trace_len) = self.encode_trace();
 
         let mut faddr_keys = Vec::new();
@@ -148,6 +177,7 @@ impl IRTrace {
         }
 
         let (llvmbc_data, llvmbc_len) = llvmbc_section();
+        let (di_tmp, di_fd, di_tmpname_c) = Self::create_debuginfo_temp_file();
 
         let ret = unsafe {
             ykllvmwrap::__ykllvmwrap_irtrace_compile(
@@ -159,15 +189,18 @@ impl IRTrace {
                 faddr_keys.len(),
                 llvmbc_data,
                 llvmbc_len,
+                di_fd,
+                di_tmpname_c,
             )
         };
         assert_ne!(ret, ptr::null());
-        Ok(ret)
+        Ok((ret, di_tmp))
     }
 
     #[cfg(feature = "yk_testing")]
     pub unsafe fn compile_for_tc_tests(&self, llvmbc_data: *const u8, llvmbc_len: usize) {
         let (func_names, bbs, trace_len) = self.encode_trace();
+        let (_di_tmp, di_fd, di_tmpname_c) = Self::create_debuginfo_temp_file();
 
         // These would only need to be populated if we were to load the resulting compiled code
         // into the address space, which for trace compiler tests, we don't.
@@ -183,6 +216,8 @@ impl IRTrace {
             faddr_keys.len(),
             llvmbc_data,
             llvmbc_len,
+            di_fd,
+            di_tmpname_c,
         );
         assert_ne!(ret, ptr::null());
     }
@@ -205,6 +240,13 @@ pub struct CompiledTrace {
     smsize: usize,
     /// Pointer to heap allocated live AOT values.
     aotvals: *const c_void,
+    /// If requested, a temporary file containing the "source code" for the trace, to be shown in
+    /// debuggers when stepping over the JITted code.
+    ///
+    /// (rustc incorrectly identifies this field as dead code. Although it isn't being "used", the
+    /// act of storing it is preventing the deletion of the file via its `Drop`)
+    #[allow(dead_code)]
+    di_tmpfile: Option<NamedTempFile>,
 }
 
 use std::mem;
@@ -213,7 +255,7 @@ impl CompiledTrace {
     /// Create a `CompiledTrace` from a pointer to an array containing: the pointer to the compiled
     /// trace, the pointer to the stackmap and the size of the stackmap, and the pointer to the
     /// live AOT values.
-    pub fn new(data: *const c_void) -> Self {
+    pub fn new(data: *const c_void, di_tmpfile: Option<NamedTempFile>) -> Self {
         let slice = unsafe { slice::from_raw_parts(data as *const usize, 4) };
         let funcptr = slice[0] as *const c_void;
         let smptr = slice[1] as *const c_void;
@@ -227,6 +269,7 @@ impl CompiledTrace {
             smptr,
             smsize,
             aotvals,
+            di_tmpfile,
         }
     }
 
@@ -241,6 +284,7 @@ impl CompiledTrace {
             smptr: std::ptr::null() as *const _,
             smsize: 0,
             aotvals: std::ptr::null() as *const _,
+            di_tmpfile: None,
         }
     }
 

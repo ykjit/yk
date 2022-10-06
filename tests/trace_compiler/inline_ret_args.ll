@@ -5,6 +5,7 @@
 ;      --- Begin jit-pre-opt ---
 ;      ...
 ;      define {{type}} @__yk_compiled_trace_0(...
+;      entry:
 ;        %{{0}} = add i32 1, 1
 ;        %{{1}} = sub i32 %{{0}}, 2
 ;        %{{2}} = add i32 %{{1}}, 3

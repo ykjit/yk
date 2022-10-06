@@ -16,6 +16,7 @@ fn main() {
     }
     comp.flag("-Wall");
     comp.flag("-Werror");
+    comp.flag("-std=c++17");
     comp.file("src/ykllvmwrap.cc")
         .file("src/jitmodbuilder.cc")
         .file("src/memman.cc")

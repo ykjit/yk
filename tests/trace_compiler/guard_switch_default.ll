@@ -5,6 +5,7 @@
 ;      --- Begin jit-pre-opt ---
 ;      ...
 ;      define {{type}} @__yk_compiled_trace_0(...
+;      entry:
 ;        %{{4}} = add i32 0, 999
 ;        switch i32 %{{4}}, label %{{5}} [
 ;          i32 0, label %guardfail
@@ -12,7 +13,7 @@
 ;          i32 2, label %guardfail
 ;        ]
 ;
-;      guardfail:                                        ; preds = %5, %5, %5
+;      guardfail:...
 ;        ...
 ;
 ;      {{5}}:...

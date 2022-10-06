@@ -4,7 +4,8 @@
 //   stderr:
 //     ...
 //     define i8 @__yk_compiled_trace_0(...
-//       ; main() c/debug_debuginfo.c:26:5
+//     entry:
+//       ; main() c/debug_debuginfo.c:27:5
 //       ...
 
 // Check that debug information is included in module prints.
