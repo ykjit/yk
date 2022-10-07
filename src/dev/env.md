@@ -3,7 +3,9 @@
 There are a number of environment variables which control the behaviour of the
 yk system.
 
-Variables prefixed with `YKD_` are intended for debugging.
+Variables prefixed with `YKD_` are intended for debugging only. Most (if not
+all) of the debugging variables introduce extra computation that slows down
+program execution.
 
 ## Run-time Variables
 
@@ -53,3 +55,13 @@ only intended for use in testing.
 
 This variable is only available when building with the `yk_testing` Cargo
 feature is enabled.
+
+### `YKD_TRACE_DEBUGINFO`
+
+When `YKD_TRACE_DEBUGINFO=1`, the JIT will add debugging information to JITted
+traces, allowing debuggers conforming to the [gdb JIT
+interface](https://sourceware.org/gdb/current/onlinedocs/gdb/JIT-Interface.html)
+to show higher-level representations of the code in the source view.
+
+This feature relies on the use of temporary files, which (in addition to being
+slow to create) are not guaranteed to be cleaned up.
