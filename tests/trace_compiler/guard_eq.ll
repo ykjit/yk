@@ -5,6 +5,7 @@
 ;      --- Begin jit-pre-opt ---
 ;      ...
 ;      define {{type}} @__yk_compiled_trace_0(...
+;      entry:
 ;        %{{0}} = alloca i32, align 4
 ;        %{{1}} = icmp eq i32 1, 1
 ;        br i1 %{{1}}, label %{{true}}, label %guardfail

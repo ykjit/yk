@@ -15,6 +15,7 @@ intervaltree = "0.2.7"
 leb128 = "0.2.5"
 libc = "0.2.117"
 phdrs = { git = "https://github.com/softdevteam/phdrs" }
+tempfile = "3.3.0"
 ykllvmwrap = { path = "../ykllvmwrap" }
 ykutil = { path = "../ykutil" }
 

@@ -8,6 +8,7 @@
 #include "llvm/ExecutionEngine/MCJIT.h"
 #include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
 #include "llvm/IR/AssemblyAnnotationWriter.h"
+#include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LegacyPassManager.h"
@@ -17,17 +18,26 @@
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/TargetSelect.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
 
 #include <dlfcn.h>
 #include <err.h>
+#include <filesystem>
 #include <link.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "jitmodbuilder.h"
 #include "memman.h"
+
+// When we create a compilation unit for our JIT debug info, LLVM forces us to
+// choose a language from one of those "recognised" by the DWARF spec (see
+// `Dwarf.def` in the LLVM sources). If you choose a value out of range, then an
+// LLVM assertion will fail, so we have to pretend to be another language.
+#define YKJIT_DWARF_LANG dwarf::DW_LANG_Cobol74
 
 using namespace llvm;
 using namespace llvm::orc;
@@ -40,24 +50,52 @@ struct BitcodeSection {
   size_t len;
 };
 
-// An annotator for `Module::print()` which adds debug location lines.
+// If possible, return a string describing the location of an instruction in
+// the AOT-compiled interpreter source code.
+//
+// Since it is undesirable to show duplicated debug locations, the callee
+// should pass in the last annotation that it saw (in `LastAnnot`), and this
+// function will return `None` if the debug location string was the same as
+// before.
+//
+// The string is prefixed with a `;` so as to look like a comment in a `.ll`
+// bytecode file.
+Optional<string> getSourceLevelInstructionAnnotation(const Instruction *I,
+                                                     string &LastAnnot) {
+  const DebugLoc &DL = I->getDebugLoc();
+  string LineInfo;
+  raw_string_ostream RSO(LineInfo);
+  DL.print(RSO);
+  if (LineInfo.empty())
+    return Optional<string>();
+
+  string FuncName = "<unknown-func>";
+  const MDNode *Scope = DL.getInlinedAtScope();
+  if (auto *SP = getDISubprogram(Scope))
+    FuncName.assign(SP->getName().data());
+  string Line = string("; ") + FuncName + "() " + LineInfo;
+
+  // We only want to show an annotation when the location has changed.
+  if (Line == LastAnnot)
+    return Optional<string>();
+
+  LastAnnot = Line;
+  return Line;
+}
+
+// An annotator for `Module::print()` which adds debug location lines at the
+// source-level. In other words, if the interpreter being JITted is written in
+// C, then we will be adding lines to the output which allude to where we are
+// in the C code.
 class DebugAnnotationWriter : public AssemblyAnnotationWriter {
   string LastLineInfo;
 
 public:
   void emitInstructionAnnot(const Instruction *I, formatted_raw_ostream &OS) {
-    const DebugLoc &DL = I->getDebugLoc();
-    string LineInfo;
-    raw_string_ostream RSO(LineInfo);
-    DL.print(RSO);
-    if ((!LineInfo.empty()) && (LineInfo != LastLineInfo)) {
-      string FuncName = "<unknown-func>";
-      const MDNode *Scope = DL.getInlinedAtScope();
-      if (auto *SP = getDISubprogram(Scope))
-        FuncName.assign(SP->getName().data());
-      OS << "  ; " << FuncName << "() " << LineInfo << "\n";
-      LastLineInfo = LineInfo;
-    }
+    Optional<string> LineInfo =
+        getSourceLevelInstructionAnnotation(I, LastLineInfo);
+    if (LineInfo.hasValue())
+      OS << "  " << LineInfo << "\n";
   }
 };
 
@@ -232,6 +270,103 @@ extern "C" void *compileModule(string TraceName, Module *M,
   return ptr;
 }
 
+/// Write the string `S` in its entirety to the file descriptor `FD`.
+void writeString(int FD, string S) {
+  const char *Buf = S.c_str();
+
+  size_t Remain = strlen(Buf);
+
+  // Otherwise we can't reliably know how much was written!
+  if (Remain > SSIZE_MAX)
+    errx(EXIT_FAILURE, "Remain > SSIZE_MAX");
+
+  while (Remain) {
+    ssize_t Wrote = write(FD, Buf, Remain);
+    if (Wrote == -1) {
+      if (errno == EINTR)
+        continue;
+      else
+        err(EXIT_FAILURE, "write");
+    }
+
+    assert(Wrote >= 0 && static_cast<size_t>(Wrote) <= Remain);
+
+    Remain -= Wrote;
+    Buf += Wrote;
+  }
+}
+
+/// Add debugging metadata to the module to help with debugging JITted code.
+///
+/// This works by iterating over the IR instructions of the JITted code and:
+///
+///  a) writing faked source code lines into the temporary file named by `Path`
+///     (whose file descriptor `FD` is open and ready for writing), and...
+///
+///  b) Add debug locations to the IR instructions that point to the relevant
+///     lines in the temporary file.
+///
+/// This means that debuggers (that conform to gdb's JIT interface:
+/// https://sourceware.org/gdb/current/onlinedocs/gdb/JIT-Interface.html) can
+/// show locations in the fake source code as you step over the machine code of
+/// the trace.
+///
+/// Note that the temporary file is free-form and doesn't have to be a valid
+/// source file in any particular language, so we can add any text we
+/// like to the file, if we think that would aid debugging.
+void rewriteDebugInfo(Module *M, string TraceName, int FD,
+                      const filesystem::path &Path) {
+  Function *JITFunc = M->getFunction(TraceName);
+  assert(JITFunc);
+
+  // Create a debug subprogram for the `JITFunc`.
+  DIBuilder DIB(*M);
+  DIFile *DF =
+      DIB.createFile(Path.filename().string(), Path.parent_path().string());
+  DIB.createCompileUnit(YKJIT_DWARF_LANG, DF, "ykjit", true, "", 0);
+  DISubroutineType *ST = DIB.createSubroutineType({});
+  DISubprogram *DS =
+      DIB.createFunction(DF, TraceName, TraceName, DF, 1, ST, 1,
+                         DINode::FlagZero, DISubprogram::SPFlagDefinition);
+  JITFunc->setSubprogram(DS);
+
+  // For each instruction in the trace IR, emit a human-readable version of the
+  // instruction into the temporary file and update the instruction's debug
+  // location to point to this line.
+  size_t LineNo = 1;
+  string LastSrcAnnot;
+  for (BasicBlock &BB : *JITFunc) {
+    // Emit a label for the block.
+    Twine BBLabel = string("\n") + BB.getName() + ": \n";
+    writeString(FD, BBLabel.str());
+    LineNo += 2;
+    for (Instruction &I : BB) {
+      // See if there's an "interpreter-source-level" annotation we can prepend.
+      // This makes it easier to see which (approximate) part of the AOT code
+      // the trace IR came from.
+      Optional<string> MaybeSrcAnnot =
+          getSourceLevelInstructionAnnotation(&I, LastSrcAnnot);
+      if (MaybeSrcAnnot.hasValue()) {
+        writeString(FD, string("  ") + MaybeSrcAnnot.value() + "\n");
+        LineNo++;
+      }
+
+      // Appends the stringified instruction.
+      string IS;
+      raw_string_ostream SS(IS);
+      I.print(SS);
+      writeString(FD, IS + "\n");
+
+      // Update debug location.
+      DILocation *DIL = DILocation::get(DS->getContext(), LineNo, 0, DS);
+      I.setDebugLoc(DebugLoc(DIL));
+      LineNo++;
+    }
+  }
+
+  DIB.finalize();
+}
+
 // Compile an IRTrace to executable code in memory.
 //
 // The trace to compile is passed in as two arrays of length Len. Then each
@@ -242,7 +377,8 @@ extern "C" void *compileModule(string TraceName, Module *M,
 template <typename FN>
 void *compileIRTrace(FN Func, char *FuncNames[], size_t BBs[], size_t TraceLen,
                      char *FAddrKeys[], void *FAddrVals[], size_t FAddrLen,
-                     void *BitcodeData, size_t BitcodeLen) {
+                     void *BitcodeData, size_t BitcodeLen, int DebugInfoFD,
+                     char *DebugInfoPath) {
   DebugIRPrinter DIP;
 
   struct BitcodeSection Bitcode = {BitcodeData, BitcodeLen};
@@ -277,24 +413,32 @@ void *compileIRTrace(FN Func, char *FuncNames[], size_t BBs[], size_t TraceLen,
 
   DIP.print(DebugIR::JITPostOpt, JITMod);
 
+  // If `DebugInfoFD` is -1, then trace debuginfo was not requested.
+  if (DebugInfoFD != -1)
+    rewriteDebugInfo(JITMod, TraceName, DebugInfoFD,
+                     filesystem::path(DebugInfoPath));
+
   // Compile IR trace and return a pointer to its function.
   return compileModule(TraceName, JITMod, GlobalMappings, AOTMappingVec);
 }
 
 extern "C" void *__ykllvmwrap_irtrace_compile(
     char *FuncNames[], size_t BBs[], size_t TraceLen, char *FAddrKeys[],
-    void *FAddrVals[], size_t FAddrLen, void *BitcodeData, size_t BitcodeLen) {
+    void *FAddrVals[], size_t FAddrLen, void *BitcodeData, size_t BitcodeLen,
+    int DebugInfoFD, char *DebugInfoPath) {
   return compileIRTrace(createModule, FuncNames, BBs, TraceLen, FAddrKeys,
-                        FAddrVals, FAddrLen, BitcodeData, BitcodeLen);
+                        FAddrVals, FAddrLen, BitcodeData, BitcodeLen,
+                        DebugInfoFD, DebugInfoPath);
 }
 
 #ifdef YK_TESTING
 extern "C" void *__ykllvmwrap_irtrace_compile_for_tc_tests(
     char *FuncNames[], size_t BBs[], size_t TraceLen, char *FAddrKeys[],
-    void *FAddrVals[], size_t FAddrLen, void *BitcodeData, size_t BitcodeLen) {
+    void *FAddrVals[], size_t FAddrLen, void *BitcodeData, size_t BitcodeLen,
+    int DebugInfoFD, char *DebugInfoPath) {
   return compileIRTrace(createModuleForTraceCompilerTests, FuncNames, BBs,
                         TraceLen, FAddrKeys, FAddrVals, FAddrLen, BitcodeData,
-                        BitcodeLen);
+                        BitcodeLen, DebugInfoFD, DebugInfoPath);
 }
 #endif
 

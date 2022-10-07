@@ -46,6 +46,9 @@ uint64_t getNewTraceIdx() {
 // occurred and it's safe to continue running the fake trace stitching loop.
 #define TRACE_RETURN_SUCCESS 0
 
+// The name prefix used for blocks that are branched to when a guard succeeds.
+#define GUARD_SUCCESS_BLOCK_NAME "guardsuccess"
+
 // Dump an error message and an LLVM value to stderr and exit with failure.
 void dumpValueAndExit(const char *Msg, Value *V) {
   errs() << Msg << ": ";
@@ -415,10 +418,14 @@ class JITModBuilder {
            (BI->getSuccessor(1) == NextBlock));
 
     // Get/create the guard failure and success blocks.
+    //
+    // Note that we don't have to worry about the block names being unique, as
+    // LLVM will make it so by appending a number to the block's name.
     BasicBlock *FailBB = getGuardFailureBlock(
         JITFunc,
         {CurBBIdx, CurInstrIdx, I->getFunction()->getName(), LastSMCall});
-    BasicBlock *SuccBB = BasicBlock::Create(Context, "", JITFunc);
+    BasicBlock *SuccBB =
+        BasicBlock::Create(Context, GUARD_SUCCESS_BLOCK_NAME, JITFunc);
 
     // Insert the guard, using the original AOT branch condition for now.
     //
@@ -448,7 +455,8 @@ class JITModBuilder {
     BasicBlock *FailBB = getGuardFailureBlock(
         JITFunc,
         {CurBBIdx, CurInstrIdx, I->getFunction()->getName(), LastSMCall});
-    BasicBlock *SuccBB = BasicBlock::Create(Context, "", JITFunc);
+    BasicBlock *SuccBB =
+        BasicBlock::Create(Context, GUARD_SUCCESS_BLOCK_NAME, JITFunc);
 
     // Determine which switch case the trace took.
     ConstantInt *MatchedValue = SI->findCaseDest(NextBlock);
@@ -1133,7 +1141,7 @@ class JITModBuilder {
           CPCI->getArgOperand(YK_CONTROL_POINT_ARG_RETURNVAL_IDX)->getType();
     }
     JITFunc = createJITFunc(TraceInputs, ReturnTy);
-    auto DstBB = BasicBlock::Create(JITMod->getContext(), "", JITFunc);
+    auto DstBB = BasicBlock::Create(JITMod->getContext(), "entry", JITFunc);
     Builder.SetInsertPoint(DstBB);
 
     createLiveIndexMap(ControlPointCallInst, TraceInputs->getType());
