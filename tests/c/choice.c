@@ -14,7 +14,7 @@
 //     2: 47
 //     jit-state: enter-jit-code
 //     1: 47
-//     jit-state: enter-stopgap
+//     jit-state: deoptimise
 //     ...
 
 // Check that tracing a cascading "if...else if...else" works.

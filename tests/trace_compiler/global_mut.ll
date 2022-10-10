@@ -6,7 +6,7 @@
 ;      ...
 ;      define {{type}} @__yk_compiled_trace_0(...
 ;      entry:
-;        store i32 1, i32* @g, align 4
+;        store i32 1, ptr @g, align 4
 ;        ret {{type}}...
 ;      }
 ;      ...
@@ -18,6 +18,6 @@
 
 define void @main() {
 entry:
-    store i32 1, i32* @g
+    store i32 1, ptr @g
     unreachable
 }

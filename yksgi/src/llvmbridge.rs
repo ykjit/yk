@@ -210,6 +210,10 @@ impl Value {
         unsafe { !LLVMIsACallInst(self.0).is_null() }
     }
 
+    pub fn is_intrinsic(&self) -> bool {
+        unsafe { !LLVMIsAIntrinsicInst(self.0).is_null() }
+    }
+
     pub fn get_type(&self) -> Type {
         unsafe { Type(LLVMTypeOf(self.0)) }
     }

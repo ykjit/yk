@@ -6,12 +6,13 @@
 //     ...
 //     f: 3
 //     jit-state: enter-jit-code
-//     ...
-//     jit-state: enter-stopgap
-//     ...
+//     jit-state: deoptimise
+//     jit-state: exit-jit-code
 //     f: 2
-//     jit-state: exit-stopgap
-//     ...
+//     jit-state: enter-jit-code
+//     jit-state: deoptimise
+//     jit-state: exit-jit-code
+//     f: 1
 
 // Check the stop-gap interpreter can call out to AOT-compiled functions.
 

@@ -11,7 +11,7 @@
 //     jit-state: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     define i8 @__yk_compiled_trace_0(ptr %0, ptr %1, i64 %2, ptr %3, ptr %4) {
+//     define ptr @__yk_compiled_trace_0(ptr %0, ptr %1, i64 %2, ptr %3, ptr %4) {
 //       ...
 //       %{{fptr}} = getelementptr %YkCtrlPointVars, ptr %0, i32 0, i32 0...
 //       %{{load}} = load...
@@ -24,8 +24,8 @@
 //
 //     {{guard-fail-bb}}:...
 //       ...
-//       %{{deoptret}} = call i8 (...) @llvm.experimental.deoptimize.i8(...
-//       ret i8 %{{deoptret}}
+//       %{{deoptret}} = call ptr (...) @llvm.experimental.deoptimize.p0(...
+//       ret ptr %{{deoptret}}
 //     ...
 //
 //     {{restart-bb}}:...
@@ -33,7 +33,7 @@
 //       %{{fptr2}} = getelementptr %YkCtrlPointVars, ptr %0, i32 0, i32 0...
 //       store...
 //       ...
-//       ret i8 0
+//       ret ptr null
 //     }
 //     ...
 //     --- End jit-pre-opt ---
@@ -52,9 +52,8 @@
 //     pc=1, mem=1
 //     pc=2, mem=1
 //     pc=3, mem=0
-//     jit-state: enter-stopgap
-//     ...
-//     jit-state: exit-stopgap
+//     jit-state: deoptimise
+//     jit-state: exit-jit-code
 //     pc=4, mem=0
 //     pc=5, mem=0
 
@@ -84,7 +83,7 @@ int main(int argc, char **argv) {
   size_t prog_len = sizeof(prog) / sizeof(prog[0]);
 
   YkLocation loop_loc = yk_location_new();
-  YkLocation *locs[prog_len];
+  YkLocation **locs = malloc(6 * 8);
   for (int i = 0; i < prog_len; i++)
     if (i == 0)
       locs[i] = &loop_loc;

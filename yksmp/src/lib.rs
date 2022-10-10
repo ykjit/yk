@@ -14,11 +14,15 @@ use std::error;
 struct Function {
     addr: u64,
     record_count: u64,
+    stack_size: u64,
 }
 
-struct Record {
-    offset: u32,
-    live_vars: Vec<LiveVar>,
+pub struct Record {
+    pub id: u64,
+    pub offset: u64,
+    pub live_vars: Vec<LiveVar>,
+    pub size: u64,
+    pub pinfo: Option<PrologueInfo>,
 }
 
 #[derive(Debug)]
@@ -45,6 +49,16 @@ impl LiveVar {
     }
 }
 
+pub struct PrologueInfo {
+    pub hasfp: bool,
+    pub csrs: Vec<(u16, i32)>,
+}
+
+pub struct SMEntry {
+    pub pinfo: PrologueInfo,
+    pub records: Vec<Record>,
+}
+
 /// Parses LLVM stackmaps version 3 from a given address. Provides a way to query relevant
 /// locations given the return address of a `__llvm_deoptimize` function.
 pub struct StackMapParser<'a> {
@@ -55,10 +69,22 @@ pub struct StackMapParser<'a> {
 impl StackMapParser<'_> {
     pub fn parse(data: &[u8]) -> Result<HashMap<u64, Vec<LiveVar>>, Box<dyn error::Error>> {
         let mut smp = StackMapParser { data, offset: 0 };
-        smp.read()
+        let entries = smp.read()?;
+        let mut map = HashMap::new();
+        for sme in entries {
+            for r in sme.records {
+                map.insert(r.offset, r.live_vars);
+            }
+        }
+        Ok(map)
     }
 
-    fn read(&mut self) -> Result<HashMap<u64, Vec<LiveVar>>, Box<dyn error::Error>> {
+    pub fn get_entries(data: &[u8]) -> Vec<SMEntry> {
+        let mut smp = StackMapParser { data, offset: 0 };
+        smp.read().unwrap()
+    }
+
+    fn read(&mut self) -> Result<Vec<SMEntry>, Box<dyn error::Error>> {
         // Read version number.
         if self.read_u8() != 3 {
             return Err("Only stackmap format version 3 is supported.".into());
@@ -75,33 +101,47 @@ impl StackMapParser<'_> {
         let funcs = self.read_functions(num_funcs);
         let consts = self.read_consts(num_consts);
 
-        let mut map = HashMap::new();
-
         // Check that the records match the sum of the expected records per function.
         assert_eq!(
             funcs.iter().map(|f| f.record_count).sum::<u64>(),
             u64::from(num_recs)
         );
 
+        let mut recs = Vec::new();
+
         // Parse records.
-        for f in funcs {
-            let records = self.read_records(f.record_count, &consts);
-            for r in records {
-                let key = f.addr + u64::from(r.offset);
-                map.insert(key, r.live_vars);
+        for f in &funcs {
+            let mut records = self.read_records(f.record_count, &consts);
+            for mut r in &mut records {
+                r.offset = f.addr + u64::from(r.offset);
+                r.size = f.stack_size;
             }
+            recs.push(records);
         }
 
-        Ok(map)
+        // Read prologue info.
+        let mut ps = self.read_prologue(num_funcs);
+
+        // Collect all the information into `SMEntry`s.
+        let mut smentries = Vec::new();
+        for records in recs.into_iter().rev() {
+            let pinfo = ps.pop().unwrap();
+            smentries.push(SMEntry { pinfo, records });
+        }
+        Ok(smentries)
     }
 
     fn read_functions(&mut self, num: u32) -> Vec<Function> {
         let mut v = Vec::new();
         for _ in 0..num {
             let addr = self.read_u64();
-            let _stack_size = self.read_u64();
+            let stack_size = self.read_u64();
             let record_count = self.read_u64();
-            v.push(Function { addr, record_count });
+            v.push(Function {
+                addr,
+                record_count,
+                stack_size,
+            });
         }
         v
     }
@@ -117,8 +157,8 @@ impl StackMapParser<'_> {
     fn read_records(&mut self, num: u64, consts: &[u64]) -> Vec<Record> {
         let mut v = Vec::new();
         for _ in 0..num {
-            let _id = self.read_u64();
-            let offset = self.read_u32();
+            let id = self.read_u64();
+            let offset = u64::from(self.read_u32());
             self.read_u16();
             let num_live_vars = self.read_u16();
             let live_vars = self.read_live_vars(num_live_vars, consts);
@@ -128,7 +168,13 @@ impl StackMapParser<'_> {
             let num_liveouts = self.read_u16();
             self.read_liveouts(num_liveouts);
             self.align_8();
-            v.push(Record { offset, live_vars });
+            v.push(Record {
+                id,
+                offset,
+                live_vars,
+                size: 0,
+                pinfo: None,
+            });
         }
         v
     }
@@ -187,6 +233,30 @@ impl StackMapParser<'_> {
             let _dwreg = self.read_u16();
             let _size = self.read_u8();
         }
+    }
+
+    fn read_prologue(&mut self, num_funcs: u32) -> Vec<PrologueInfo> {
+        let mut pis = Vec::new();
+        for _ in 0..num_funcs {
+            let hasfptr = self.read_u8();
+            assert!(hasfptr == 0 || hasfptr == 1);
+            self.read_u8(); // Padding
+            let numspills = self.read_u32();
+
+            let mut v = Vec::new();
+            for _ in 0..numspills {
+                let reg = self.read_u16();
+                self.read_u16(); // Padding
+                let off = self.read_i32();
+                v.push((reg, off));
+            }
+            let pi = PrologueInfo {
+                hasfp: hasfptr != 0,
+                csrs: v,
+            };
+            pis.push(pi);
+        }
+        pis
     }
 
     fn align_8(&mut self) {
