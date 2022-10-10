@@ -27,7 +27,7 @@ rustup toolchain install nightly --allow-downgrade --component rustfmt
 # are not enabled.
 for mode in "" "--release"; do \
     cargo -Z unstable-options build ${mode} --build-plan -p ykcapi | \
-        awk '/yk_testing/ { ec=1 } /jit_state_debug/ { ec=1 } END {exit ec}'; \
+        awk '/yk_testing/ { ec=1 } /yk_jitstate_debug/ { ec=1 } END {exit ec}'; \
 done
 
 cargo fmt --all -- --check
