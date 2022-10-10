@@ -16,12 +16,12 @@ use std::{
 
 use num_cpus;
 use parking_lot::{Condvar, Mutex, MutexGuard};
+#[cfg(feature = "yk_jitstate_debug")]
 use std::sync::LazyLock;
 
-use crate::{
-    location::{HotLocation, HotLocationKind, Location, LocationInner},
-    print_jit_state,
-};
+use crate::location::{HotLocation, HotLocationKind, Location, LocationInner};
+#[cfg(feature = "yk_jitstate_debug")]
+use crate::print_jit_state;
 use yktrace::{start_tracing, stop_tracing, CompiledTrace, TracingKind, UnmappedTrace};
 
 // The HotThreshold must be less than a machine word wide for [`Location::Location`] to do its

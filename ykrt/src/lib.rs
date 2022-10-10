@@ -5,6 +5,7 @@
 #![allow(clippy::type_complexity)]
 #![allow(clippy::new_without_default)]
 
+#[cfg(feature = "yk_jitstate_debug")]
 use std::{env, sync::LazyLock};
 
 mod location;
