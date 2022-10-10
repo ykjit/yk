@@ -59,6 +59,13 @@ clang-format --version
 cargo xtask cfmt
 git diff --exit-code
 
+# Check that building `ykcapi` in isolation works. This is what we'd be doing
+# if we were building release binaries, as it would mean we get a system
+# without the (slower) `yk_testing` and `yk_jitstate_debug` features enabled.
+for mode in "" "--release"; do
+    cargo build ${mode} -p ykcapi;
+done
+
 cargo test
 cargo test --release
 cargo bench
