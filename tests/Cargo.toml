@@ -16,13 +16,14 @@ path = "langtest_trace_compiler.rs"
 harness = false
 
 [dependencies]
+clap = { features = ["derive"], version = "4.0.11" }
 memmap2 = "0.5.2"
 regex = "1.5.4"
+tempfile = "3.3.0"
 yktrace = { path = "../yktrace", features = ["yk_testing"] }
 
 [dev-dependencies]
 lang_tester = "0.7.1"
-tempfile = "3.3.0"
 ykcapi = { path = "../ykcapi", features = ["yk_testing", "yk_jitstate_debug"] }
 ykllvmwrap = { path = "../ykllvmwrap", features = ["yk_testing"] }
 ykrt = { path = "../ykrt", features = ["yk_testing", "yk_jitstate_debug"] }
