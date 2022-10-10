@@ -17,7 +17,9 @@ use std::arch::asm;
 use std::convert::{TryFrom, TryInto};
 use std::ffi::c_void;
 use std::{ptr, slice};
-use ykrt::{print_jit_state, HotThreshold, Location, MT};
+#[cfg(feature = "yk_jitstate_debug")]
+use ykrt::print_jit_state;
+use ykrt::{HotThreshold, Location, MT};
 use yksgi::{self, SGInterp};
 use yksmp::{Location as SMLocation, StackMapParser};
 
@@ -252,6 +254,7 @@ pub extern "C" fn yk_stopgap(
         }
     }
     let ret = unsafe { sginterp.interpret() };
+    #[cfg(feature = "yk_jitstate_debug")]
     print_jit_state("exit-stopgap");
     ret
 }
