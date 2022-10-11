@@ -35,28 +35,25 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#ifndef __HWT_PRIVATE_H
+#define __HWT_PRIVATE_H
+
+#include <stddef.h>
+#include <inttypes.h>
 #include <stdbool.h>
-#include <intel-pt.h>
-#include "perf_pt_private.h"
 
-/*
- * Sets the error information (if not already set).
- */
-void
-perf_pt_set_err(struct perf_pt_cerror *err, int kind, int code) {
-    // Only set the error info if we would not be overwriting an earlier error.
-    if (err->kind == perf_pt_cerror_unused) {
-        err->kind = kind;
-        err->code = code;
-    }
-}
+enum hwt_cerror_kind {
+    hwt_cerror_unused,
+    hwt_cerror_unknown,
+    hwt_cerror_errno,
+    hwt_cerror_ipt,
+};
 
-/*
- * Indicates if the specified error code is the overflow code.
- * This exists to avoid copying (and keeping in sync) the ipt error code on the
- * Rust side.
- */
-bool
-perf_pt_is_overflow_err(int err) {
-    return err == pte_overflow;
-}
+struct hwt_cerror {
+    enum hwt_cerror_kind kind; // What sort of error is this?
+    int code;                  // The error code itself.
+};
+
+void hwt_set_cerr(struct hwt_cerror *, int, int);
+
+#endif

@@ -97,14 +97,19 @@ fn main() {
 
     let c_deps_dir = make_c_deps_dir();
     let c_deps_dir_s = c_deps_dir.display();
+    c_build.file("src/util.c");
 
-    // Check if we should build the perf_pt backend.
+    // Check if we should build the perf collector.
     if cfg!(all(target_os = "linux", target_arch = "x86_64"))
-        && feature_check("check_perf_pt.c", "check_perf_pt")
+        && feature_check("check_perf.c", "check_perf")
     {
-        c_build.file("src/backends/perf_pt/collect.c");
-        c_build.file("src/backends/perf_pt/decode.c");
-        c_build.file("src/backends/perf_pt/util.c");
+        c_build.file("src/collect/perf/collect.c");
+        println!("cargo:rustc-cfg=collector_perf");
+    }
+
+    // FIXME: libipt support is unconditionally built-in for now.
+    if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        c_build.file("src/decode/libipt/decode.c");
 
         // Decide whether to build our own libipt.
         if let Ok(val) = env::var("IPT_PATH") {
@@ -133,13 +138,14 @@ fn main() {
             c_deps_dir_s
         ));
 
-        println!("cargo:rustc-cfg=perf_pt");
+        println!("cargo:rustc-cfg=decoder_libipt");
         if cpu_supports_pt() {
-            println!("cargo:rustc-cfg=perf_pt_test");
+            println!("cargo:rustc-cfg=decoder_libipt_test");
         }
         println!("cargo:rustc-link-lib=static=ipt");
     }
     c_build.include("src/util");
+    c_build.include("src"); // to find `hwtracer_private.h`.
     c_build.compile("hwtracer_c");
 
     // Additional circumstances under which to re-run this build.rs.

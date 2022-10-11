@@ -61,7 +61,7 @@
 #include <stdatomic.h>
 #include <intel-pt.h>
 
-#include "perf_pt_private.h"
+#include "hwtracer_private.h"
 
 #define SYSFS_PT_TYPE   "/sys/bus/event_source/devices/intel_pt/type"
 #define MAX_PT_TYPE_STR 8
@@ -76,13 +76,12 @@
 #endif
 
 /*
- * Stores all information about the tracer.
+ * Stores all information about the collector.
  * Exposed to Rust only as an opaque pointer.
  */
-struct tracer_ctx {
-    pthread_t           tracer_thread;      // Tracer thread handle.
-    struct perf_pt_cerror
-                        tracer_thread_err;  // Errors from inside the tracer thread.
+struct hwt_perf_ctx {
+    pthread_t           collector_thread;   // Collector thread handle.
+    struct hwt_cerror   collector_thread_err;  // Errors from inside the tracer thread.
     int                 stop_fds[2];        // Pipe used to stop the poll loop.
     int                 perf_fd;            // FD used to talk to the perf API.
     void                *aux_buf;           // Ptr to the start of the the AUX buffer.
@@ -95,7 +94,7 @@ struct tracer_ctx {
  * Passed from Rust to C to configure tracing.
  * Must stay in sync with the Rust-side.
  */
-struct perf_pt_config {
+struct hwt_perf_collector_config {
     size_t      data_bufsize;          // Data buf size (in pages).
     size_t      aux_bufsize;           // AUX buf size (in pages).
     size_t      initial_trace_bufsize; // Initial capacity (in bytes) of a
@@ -104,10 +103,10 @@ struct perf_pt_config {
 
 /*
  * The manually malloc/free'd buffer managed by the Rust side.
- * To understand why this is split out from `struct perf_pt_trace`, see the
+ * To understand why this is split out from `struct hwt_perf_trace`, see the
  * corresponding struct in the Rust side.
  */
-struct perf_pt_trace_buf {
+struct hwt_perf_trace_buf {
     void *p;
 };
 
@@ -116,25 +115,25 @@ struct perf_pt_trace_buf {
  *
  * Shared with Rust code. Must stay in sync.
  */
-struct perf_pt_trace {
-    struct perf_pt_trace_buf buf;
+struct hwt_perf_trace {
+    struct hwt_perf_trace_buf buf;
     __u64 len;
     __u64 capacity;
 };
 
 /*
- * Stuff used in the tracer thread
+ * Stuff used in the collector thread
  */
-struct tracer_thread_args {
+struct collector_thread_args {
     int                 perf_fd;            // Perf notification fd.
     int                 stop_fd_rd;         // Polled for "stop" event.
-    sem_t               *tracer_init_sem;   // Tracer init sync.
-    struct perf_pt_trace
+    sem_t               *collector_init_sem;   // Tracer init sync.
+    struct hwt_perf_trace
                         *trace;             // Pointer to trace storage.
     void                *aux_buf;           // The AUX buffer itself;
     struct perf_event_mmap_page
                         *base_header;       // Pointer to the header in the base buffer.
-    struct perf_pt_cerror
+    struct hwt_cerror
                         *err;               // Errors generated inside the thread.
 };
 
@@ -159,19 +158,19 @@ struct read_format {
 
 // Private prototypes.
 static bool handle_sample(void *, struct perf_event_mmap_page *, struct
-                          perf_pt_trace *, void *, struct perf_pt_cerror *);
+                          hwt_perf_trace *, void *, struct hwt_cerror *);
 static bool read_aux(void *, struct perf_event_mmap_page *,
-                     struct perf_pt_trace *, struct perf_pt_cerror *);
+                     struct hwt_perf_trace *, struct hwt_cerror *);
 static bool poll_loop(int, int, struct perf_event_mmap_page *, void *,
-                      struct perf_pt_trace *, struct perf_pt_cerror *);
-static void *tracer_thread(void *);
-static int open_perf(size_t, struct perf_pt_cerror *);
+                      struct hwt_perf_trace *, struct hwt_cerror *);
+static void *collector_thread(void *);
+static int open_perf(size_t, struct hwt_cerror *);
 
 // Exposed Prototypes.
-struct tracer_ctx *perf_pt_init_tracer(struct perf_pt_config *, struct perf_pt_cerror *);
-bool perf_pt_start_tracer(struct tracer_ctx *, struct perf_pt_trace *, struct perf_pt_cerror *);
-bool perf_pt_stop_tracer(struct tracer_ctx *tr_ctx, struct perf_pt_cerror *);
-bool perf_pt_free_tracer(struct tracer_ctx *tr_ctx, struct perf_pt_cerror *);
+struct hwt_perf_ctx *hwt_perf_init_collector(struct hwt_perf_collector_config *, struct hwt_cerror *);
+bool hwt_perf_start_collector(struct hwt_perf_ctx *, struct hwt_perf_trace *, struct hwt_cerror *);
+bool hwt_perf_stop_collector(struct hwt_perf_ctx *tr_ctx, struct hwt_cerror *);
+bool hwt_perf_free_collector(struct hwt_perf_ctx *tr_ctx, struct hwt_cerror *);
 
 
 /*
@@ -183,8 +182,8 @@ bool perf_pt_free_tracer(struct tracer_ctx *tr_ctx, struct perf_pt_cerror *);
  */
 static bool
 handle_sample(void *aux_buf, struct perf_event_mmap_page *hdr,
-              struct perf_pt_trace *trace, void *data_tmp,
-              struct perf_pt_cerror *err)
+              struct hwt_perf_trace *trace, void *data_tmp,
+              struct hwt_cerror *err)
 {
     // We need to use atomics with orderings to protect against 2 cases.
     //
@@ -237,7 +236,7 @@ handle_sample(void *aux_buf, struct perf_event_mmap_page *hdr,
                 // truncated. If it was, then we didn't read out of the data buffer
                 // quickly/frequently enough.
                 if (rec_aux_sample->flags & PERF_AUX_FLAG_TRUNCATED) {
-                    perf_pt_set_err(err, perf_pt_cerror_ipt, pte_overflow);
+                    hwt_set_cerr(err, hwt_cerror_ipt, pte_overflow);
                     return false;
                 }
                 if (read_aux(aux_buf, hdr, trace, err) == false) {
@@ -245,7 +244,7 @@ handle_sample(void *aux_buf, struct perf_event_mmap_page *hdr,
                 }
                 break;
             case PERF_RECORD_LOST:
-                perf_pt_set_err(err, perf_pt_cerror_ipt, pte_overflow);
+                hwt_set_cerr(err, hwt_cerror_ipt, pte_overflow);
                 return false;
                 break;
             case PERF_RECORD_LOST_SAMPLES:
@@ -266,7 +265,7 @@ handle_sample(void *aux_buf, struct perf_event_mmap_page *hdr,
  */
 bool
 read_aux(void *aux_buf, struct perf_event_mmap_page *hdr,
-         struct perf_pt_trace *trace, struct perf_pt_cerror *err)
+         struct hwt_perf_trace *trace, struct hwt_cerror *err)
 {
     // Use of atomics here for the same reasons as for handle_sample().
     __u64 head_monotonic =
@@ -294,13 +293,13 @@ read_aux(void *aux_buf, struct perf_event_mmap_page *hdr,
         // the size_t argument of realloc(3).
         if (required_capacity >= SIZE_MAX / 2) {
             // We would overflow the size_t argument of realloc(3).
-            perf_pt_set_err(err, perf_pt_cerror_errno, ENOMEM);
+            hwt_set_cerr(err, hwt_cerror_errno, ENOMEM);
             return false;
         }
         size_t new_capacity = required_capacity * 2;
         void *new_buf = realloc(trace->buf.p, new_capacity);
         if (new_buf == NULL) {
-            perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+            hwt_set_cerr(err, hwt_cerror_errno, errno);
             return false;
         }
         trace->capacity = new_capacity;
@@ -328,7 +327,7 @@ read_aux(void *aux_buf, struct perf_event_mmap_page *hdr,
  */
 static bool
 poll_loop(int perf_fd, int stop_fd, struct perf_event_mmap_page *mmap_hdr,
-          void *aux, struct perf_pt_trace *trace, struct perf_pt_cerror *err)
+          void *aux, struct hwt_perf_trace *trace, struct hwt_cerror *err)
 {
     int n_events = 0;
     bool ret = true;
@@ -340,7 +339,7 @@ poll_loop(int perf_fd, int stop_fd, struct perf_event_mmap_page *mmap_hdr,
     // Temporary space for new samples in the data buffer.
     void *data_tmp = malloc(mmap_hdr->data_size);
     if (data_tmp == NULL) {
-        perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+        hwt_set_cerr(err, hwt_cerror_errno, errno);
         ret = false;
         goto done;
     }
@@ -348,13 +347,13 @@ poll_loop(int perf_fd, int stop_fd, struct perf_event_mmap_page *mmap_hdr,
     while (1) {
         n_events = poll(pfds, 2, INFTIM);
         if (n_events == -1) {
-            perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+            hwt_set_cerr(err, hwt_cerror_errno, errno);
             ret = false;
             goto done;
         }
 
         // POLLIN on pfds[0]: Overflow event on either the Perf AUX or data buffer.
-        // POLLHUP on pfds[1]: Tracer stopped by parent.
+        // POLLHUP on pfds[1]: Trace collection stopped by parent.
         if ((pfds[0].revents & POLLIN) || (pfds[1].revents & POLLHUP)) {
             // Read from the Perf file descriptor.
             // We don't actually use any of what we read, but it's probably
@@ -362,7 +361,7 @@ poll_loop(int perf_fd, int stop_fd, struct perf_event_mmap_page *mmap_hdr,
             struct read_format fd_data;
             if (pfds[0].revents & POLLIN) {
                 if (read(perf_fd, &fd_data, sizeof(fd_data)) == -1) {
-                    perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+                    hwt_set_cerr(err, hwt_cerror_errno, errno);
                     ret = false;
                     break;
                 }
@@ -398,7 +397,7 @@ done:
  * Returns a file descriptor, or -1 on error.
  */
 static int
-open_perf(size_t aux_bufsize, struct perf_pt_cerror *err) {
+open_perf(size_t aux_bufsize, struct hwt_cerror *err) {
     struct perf_event_attr attr;
     memset(&attr, 0, sizeof(attr));
     attr.size = sizeof(attr);
@@ -409,13 +408,13 @@ open_perf(size_t aux_bufsize, struct perf_pt_cerror *err) {
     // Get the perf "type" for Intel PT.
     FILE *pt_type_file = fopen(SYSFS_PT_TYPE, "r");
     if (pt_type_file == NULL) {
-        perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+        hwt_set_cerr(err, hwt_cerror_errno, errno);
         ret = -1;
         goto clean;
     }
     char pt_type_str[MAX_PT_TYPE_STR];
     if (fgets(pt_type_str, sizeof(pt_type_str), pt_type_file) == NULL) {
-        perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+        hwt_set_cerr(err, hwt_cerror_errno, errno);
         ret = -1;
         goto clean;
     }
@@ -455,12 +454,12 @@ open_perf(size_t aux_bufsize, struct perf_pt_cerror *err) {
     }
 
     if (ret == -1) {
-        perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+        hwt_set_cerr(err, hwt_cerror_errno, errno);
     }
 
 clean:
     if ((pt_type_file != NULL) && (fclose(pt_type_file) == -1)) {
-        perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+        hwt_set_cerr(err, hwt_cerror_errno, errno);
         ret = -1;
     }
 
@@ -473,9 +472,9 @@ clean:
  * Returns true on success and false otherwise.
  */
 static void *
-tracer_thread(void *arg)
+collector_thread(void *arg)
 {
-    struct tracer_thread_args *thr_args = (struct tracer_thread_args *) arg;
+    struct collector_thread_args *thr_args = (struct collector_thread_args *) arg;
     int sem_posted = false;
     bool ret = true;
 
@@ -483,14 +482,14 @@ tracer_thread(void *arg)
     // `thr_args', which is on the parent thread's stack, will become unusable.
     int perf_fd = thr_args->perf_fd;
     int stop_fd_rd = thr_args->stop_fd_rd;
-    struct perf_pt_trace *trace = thr_args->trace;
+    struct hwt_perf_trace *trace = thr_args->trace;
     void *aux_buf = thr_args->aux_buf;
     struct perf_event_mmap_page *base_header = thr_args->base_header;
-    struct perf_pt_cerror *err = thr_args->err;
+    struct hwt_cerror *err = thr_args->err;
 
     // Resume the interpreter loop.
-    if (sem_post(thr_args->tracer_init_sem) != 0) {
-        perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+    if (sem_post(thr_args->collector_init_sem) != 0) {
+        hwt_set_cerr(err, hwt_cerror_errno, errno);
         ret = false;
         goto clean;
     }
@@ -504,7 +503,7 @@ tracer_thread(void *arg)
 
 clean:
     if (!sem_posted) {
-        sem_post(thr_args->tracer_init_sem);
+        sem_post(thr_args->collector_init_sem);
     }
 
     return (void *) ret;
@@ -517,18 +516,18 @@ clean:
  */
 
 /*
- * Initialise a tracer context.
+ * Initialise a collector context.
  */
-struct tracer_ctx *
-perf_pt_init_tracer(struct perf_pt_config *tr_conf, struct perf_pt_cerror *err)
+struct hwt_perf_ctx *
+hwt_perf_init_collector(struct hwt_perf_collector_config *tr_conf, struct hwt_cerror *err)
 {
-    struct tracer_ctx *tr_ctx = NULL;
+    struct hwt_perf_ctx *tr_ctx = NULL;
     bool failing = false;
 
-    // Allocate and initialise tracer context.
+    // Allocate and initialise collector context.
     tr_ctx = malloc(sizeof(*tr_ctx));
     if (tr_ctx == NULL) {
-        perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+        hwt_set_cerr(err, hwt_cerror_errno, errno);
         failing = true;
         goto clean;
     }
@@ -541,7 +540,7 @@ perf_pt_init_tracer(struct perf_pt_config *tr_conf, struct perf_pt_cerror *err)
     // Obtain a file descriptor through which to speak to perf.
     tr_ctx->perf_fd = open_perf(tr_conf->aux_bufsize, err);
     if (tr_ctx->perf_fd == -1) {
-        perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+        hwt_set_cerr(err, hwt_cerror_errno, errno);
         failing = true;
         goto clean;
     }
@@ -571,7 +570,7 @@ perf_pt_init_tracer(struct perf_pt_config *tr_conf, struct perf_pt_cerror *err)
     tr_ctx->base_bufsize = (1 + tr_conf->data_bufsize) * page_size;
     tr_ctx->base_buf = mmap(NULL, tr_ctx->base_bufsize, PROT_WRITE, MAP_SHARED, tr_ctx->perf_fd, 0);
     if (tr_ctx->base_buf == MAP_FAILED) {
-        perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+        hwt_set_cerr(err, hwt_cerror_errno, errno);
         failing = true;
         goto clean;
     }
@@ -588,14 +587,14 @@ perf_pt_init_tracer(struct perf_pt_config *tr_conf, struct perf_pt_cerror *err)
     tr_ctx->aux_buf = mmap(NULL, base_header->aux_size, PROT_READ | PROT_WRITE,
         MAP_SHARED, tr_ctx->perf_fd, base_header->aux_offset);
     if (tr_ctx->aux_buf == MAP_FAILED) {
-        perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+        hwt_set_cerr(err, hwt_cerror_errno, errno);
         failing = true;
         goto clean;
     }
 
 clean:
     if (failing && (tr_ctx != NULL)) {
-        perf_pt_free_tracer(tr_ctx, err);
+        hwt_perf_free_collector(tr_ctx, err);
         return NULL;
     }
     return tr_ctx;
@@ -612,7 +611,7 @@ clean:
  * Returns true on success or false otherwise.
  */
 bool
-perf_pt_start_tracer(struct tracer_ctx *tr_ctx, struct perf_pt_trace *trace, struct perf_pt_cerror *err)
+hwt_perf_start_collector(struct hwt_perf_ctx *tr_ctx, struct hwt_perf_trace *trace, struct hwt_cerror *err)
 {
     int clean_sem = 0, clean_thread = 0;
     int ret = true;
@@ -621,51 +620,51 @@ perf_pt_start_tracer(struct tracer_ctx *tr_ctx, struct perf_pt_trace *trace, str
     //
     // It has to be a pipe becuase it needs to be used in a poll(6) loop later.
     if (pipe(tr_ctx->stop_fds) != 0) {
-        perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+        hwt_set_cerr(err, hwt_cerror_errno, errno);
         ret = false;
         goto clean;
     }
 
-    // Use a semaphore to wait for the tracer to be ready.
-    sem_t tracer_init_sem;
-    if (sem_init(&tracer_init_sem, 0, 0) == -1) {
-        perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+    // Use a semaphore to wait for the collector to be ready.
+    sem_t collector_init_sem;
+    if (sem_init(&collector_init_sem, 0, 0) == -1) {
+        hwt_set_cerr(err, hwt_cerror_errno, errno);
         ret = false;
         goto clean;
     }
     clean_sem = 1;
 
-    // The tracer context contains an error struct for tracking any errors
+    // The collector context contains an error struct for tracking any errors
     // coming from inside the thread. We initialise it to "no errors".
-    tr_ctx->tracer_thread_err.kind = perf_pt_cerror_unused;
-    tr_ctx->tracer_thread_err.code = 0;
+    tr_ctx->collector_thread_err.kind = hwt_cerror_unused;
+    tr_ctx->collector_thread_err.code = 0;
 
-    // Build the arguments struct for the tracer thread.
-    struct tracer_thread_args thr_args = {
+    // Build the arguments struct for the collector thread.
+    struct collector_thread_args thr_args = {
         tr_ctx->perf_fd,
         tr_ctx->stop_fds[0],
-        &tracer_init_sem,
+        &collector_init_sem,
         trace,
         tr_ctx->aux_buf,
         tr_ctx->base_buf, // The header is the first region in the base buf.
-        &tr_ctx->tracer_thread_err,
+        &tr_ctx->collector_thread_err,
     };
 
     // Spawn a thread to deal with copying out of the PT AUX buffer.
-    int rc = pthread_create(&tr_ctx->tracer_thread, NULL, tracer_thread, &thr_args);
+    int rc = pthread_create(&tr_ctx->collector_thread, NULL, collector_thread, &thr_args);
     if (rc) {
-        perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+        hwt_set_cerr(err, hwt_cerror_errno, errno);
         ret = false;
         goto clean;
     }
     clean_thread = 1;
 
-    // Wait for the tracer to initialise, and check it didn't fail.
+    // Wait for the collector to initialise, and check it didn't fail.
     rc = -1;
     while (rc == -1) {
-        rc = sem_wait(&tracer_init_sem);
+        rc = sem_wait(&collector_init_sem);
         if ((rc == -1) && (errno != EINTR)) {
-            perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+            hwt_set_cerr(err, hwt_cerror_errno, errno);
             ret = false;
             goto clean;
         }
@@ -673,14 +672,14 @@ perf_pt_start_tracer(struct tracer_ctx *tr_ctx, struct perf_pt_trace *trace, str
 
     // Turn on tracing hardware.
     if (ioctl(tr_ctx->perf_fd, PERF_EVENT_IOC_ENABLE, 0) < 0) {
-        perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+        hwt_set_cerr(err, hwt_cerror_errno, errno);
         ret = false;
         goto clean;
     }
 
 clean:
-    if ((clean_sem) && (sem_destroy(&tracer_init_sem) == -1)) {
-        perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+    if ((clean_sem) && (sem_destroy(&collector_init_sem) == -1)) {
+        hwt_set_cerr(err, hwt_cerror_errno, errno);
         ret = false;
     }
 
@@ -688,7 +687,7 @@ clean:
         if (clean_thread) {
             close(tr_ctx->stop_fds[1]); // signals thread to stop.
             tr_ctx->stop_fds[1] = -1;
-            pthread_join(tr_ctx->tracer_thread, NULL);
+            pthread_join(tr_ctx->collector_thread, NULL);
             close(tr_ctx->stop_fds[0]);
             tr_ctx->stop_fds[0] = -1;
         }
@@ -698,45 +697,45 @@ clean:
 }
 
 /*
- * Turn off the tracer.
+ * Turn off trace collection.
  *
  * Arguments:
- *   tr_ctx: The tracer context returned by perf_pt_start_tracer.
+ *   tr_ctx: The tracer context returned by hwt_perf_start_collector.
  *
  * Returns true on success or false otherwise.
  */
 bool
-perf_pt_stop_tracer(struct tracer_ctx *tr_ctx, struct perf_pt_cerror *err)
+hwt_perf_stop_collector(struct hwt_perf_ctx *tr_ctx, struct hwt_cerror *err)
 {
     int ret = true;
 
     // Turn off tracer hardware.
     if (ioctl(tr_ctx->perf_fd, PERF_EVENT_IOC_DISABLE, 0) < 0) {
-        perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+        hwt_set_cerr(err, hwt_cerror_errno, errno);
         ret = false;
     }
 
     // Signal poll loop to end.
     if (close(tr_ctx->stop_fds[1]) == -1) {
-        perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+        hwt_set_cerr(err, hwt_cerror_errno, errno);
         ret = false;
     }
     tr_ctx->stop_fds[1] = -1;
 
     // Wait for poll loop to exit.
     void *thr_exit;
-    if (pthread_join(tr_ctx->tracer_thread, &thr_exit) != 0) {
-        perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+    if (pthread_join(tr_ctx->collector_thread, &thr_exit) != 0) {
+        hwt_set_cerr(err, hwt_cerror_errno, errno);
         ret = false;
     }
     if ((bool) thr_exit != true) {
-        perf_pt_set_err(err, tr_ctx->tracer_thread_err.kind, tr_ctx->tracer_thread_err.code);
+        hwt_set_cerr(err, tr_ctx->collector_thread_err.kind, tr_ctx->collector_thread_err.code);
         ret = false;
     }
 
     // Clean up
     if (close(tr_ctx->stop_fds[0]) == -1) {
-        perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+        hwt_set_cerr(err, hwt_cerror_errno, errno);
         ret = false;
     }
     tr_ctx->stop_fds[0] = -1;
@@ -745,29 +744,29 @@ perf_pt_stop_tracer(struct tracer_ctx *tr_ctx, struct perf_pt_cerror *err)
 }
 
 /*
- * Clean up and free a tracer_ctx and its contents.
+ * Clean up and free a hwt_perf_ctx and its contents.
  *
  * Returns true on success or false otherwise.
  */
 bool
-perf_pt_free_tracer(struct tracer_ctx *tr_ctx, struct perf_pt_cerror *err) {
+hwt_perf_free_collector(struct hwt_perf_ctx *tr_ctx, struct hwt_cerror *err) {
     int ret = true;
 
     if ((tr_ctx->aux_buf) &&
         (munmap(tr_ctx->aux_buf, tr_ctx->aux_bufsize) == -1)) {
-        perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+        hwt_set_cerr(err, hwt_cerror_errno, errno);
         ret = false;
     }
     if ((tr_ctx->base_buf) &&
         (munmap(tr_ctx->base_buf, tr_ctx->base_bufsize) == -1)) {
-        perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+        hwt_set_cerr(err, hwt_cerror_errno, errno);
         ret = false;
     }
     if (tr_ctx->stop_fds[1] != -1) {
         // If the write end of the pipe is still open, the thread is still running.
         close(tr_ctx->stop_fds[1]); // signals thread to stop.
-        if (pthread_join(tr_ctx->tracer_thread, NULL) != 0) {
-            perf_pt_set_err(err, perf_pt_cerror_errno, errno);
+        if (pthread_join(tr_ctx->collector_thread, NULL) != 0) {
+            hwt_set_cerr(err, hwt_cerror_errno, errno);
             ret = false;
         }
     }
