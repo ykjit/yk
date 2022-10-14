@@ -154,7 +154,7 @@ reviewer is happy with the changes, they will ask the reviewee to "please
 squash" their pull request. The aim here is to provide a readable sequence of
 commits for those who later need to look at the history of changes to a
 particular part of the repository. The general aim is to provide a pleasing
-sequence of self-contained commits which clearly articulate a change to future
+sequence of individually documented commits which clearly articulate a change to future
 readers. At the very least, all of the "fix commits" must be merged away:
 commonly, these are merged into the main commits, or, though rarely, into a new
 commit(s). It is not required, and is often undesirable, to squash all commits
@@ -185,7 +185,11 @@ yk's documentation must be clear, concise, and complete. A good rule of thumb
 is to write documentation to the quality you would like to read it: use
 "proper" English (e.g. avoid colloquialisms), capitalise and punctuate
 appropriately, and don't expect to phrase things perfectly on your first
-attempt. In the context of pull requests, bear in mind that the code captures
-*what* has been changed, but not *why*: good documentation explains the context
-of a change, the reason the change is as it is, and the consequences of the
-change.
+attempt.
+
+In the context of pull requests, bear in mind that the code captures *what* has
+been changed, but not *why*: good documentation explains the context of a
+change, the reason the change is as it is, and the consequences of the change.
+The pull request itself should come with a description of what it aims to
+achieve and each individual commit must also contain a self-contained
+description of its changes.
