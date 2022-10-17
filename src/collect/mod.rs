@@ -2,7 +2,8 @@
 
 use crate::{errors::HWTracerError, Trace};
 use core::arch::x86_64::__cpuid_count;
-use libc::size_t;
+use libc::{size_t, sysconf, _SC_PAGESIZE};
+use std::{convert::TryFrom, sync::LazyLock};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
@@ -12,7 +13,13 @@ pub(crate) mod perf;
 pub(crate) use perf::PerfTraceCollector;
 
 const PERF_DFLT_DATA_BUFSIZE: size_t = 64;
-const PERF_DFLT_AUX_BUFSIZE: size_t = 1024;
+const PERF_DFLT_AUX_BUFSIZE: LazyLock<size_t> = LazyLock::new(|| {
+    // Allocate enough pages for a 64MiB trace buffer.
+    let mb64 = 1024 * 1024 * 64;
+    let page_sz = size_t::try_from(unsafe { sysconf(_SC_PAGESIZE) }).unwrap();
+    mb64 / page_sz + size_t::from(mb64 % page_sz != 0)
+});
+
 const PERF_DFLT_INITIAL_TRACE_BUFSIZE: size_t = 1024 * 1024; // 1MiB
 
 /// The interface offered by all trace collectors.
@@ -100,7 +107,7 @@ impl Default for PerfCollectorConfig {
     fn default() -> Self {
         Self {
             data_bufsize: PERF_DFLT_DATA_BUFSIZE,
-            aux_bufsize: PERF_DFLT_AUX_BUFSIZE,
+            aux_bufsize: *PERF_DFLT_AUX_BUFSIZE,
             initial_trace_bufsize: PERF_DFLT_INITIAL_TRACE_BUFSIZE,
         }
     }
@@ -191,8 +198,12 @@ impl TraceCollectorBuilder {
 #[cfg(test)]
 pub(crate) mod test_helpers {
     use crate::{
-        collect::ThreadTraceCollector, errors::HWTracerError, test_helpers::work_loop, Trace,
+        collect::{ThreadTraceCollector, TraceCollector},
+        errors::HWTracerError,
+        test_helpers::work_loop,
+        Trace,
     };
+    use std::thread;
 
     // Trace a closure that returns a u64.
     pub fn trace_closure<F>(tc: &mut dyn ThreadTraceCollector, f: F) -> Box<dyn Trace>
@@ -248,5 +259,21 @@ pub(crate) mod test_helpers {
             Err(HWTracerError::AlreadyStopped) => (),
             _ => panic!(),
         };
+    }
+
+    /// Check that traces can be collected concurrently.
+    pub fn concurrent_collection(tc: &dyn TraceCollector) {
+        for _ in 0..10 {
+            thread::scope(|s| {
+                let hndl = s.spawn(|| {
+                    let mut thr_c1 = tc.thread_collector();
+                    trace_closure(&mut *thr_c1, || work_loop(500));
+                });
+
+                let mut thr_c2 = tc.thread_collector();
+                trace_closure(&mut *thr_c2, || work_loop(500));
+                hndl.join().unwrap();
+            });
+        }
     }
 }

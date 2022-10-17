@@ -1,5 +1,6 @@
 #![allow(clippy::upper_case_acronyms)]
 #![allow(clippy::new_without_default)]
+#![feature(once_cell)]
 
 mod block;
 pub use block::Block;

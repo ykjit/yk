@@ -282,6 +282,11 @@ mod tests {
         test_helpers::not_started(PerfThreadTraceCollector::default());
     }
 
+    #[test]
+    fn concurrent_collection() {
+        test_helpers::concurrent_collection(&*TraceCollectorBuilder::new().build().unwrap());
+    }
+
     // Check that a long trace causes the trace buffer to reallocate.
     #[test]
     fn relloc_trace_buf() {
