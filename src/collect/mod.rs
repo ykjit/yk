@@ -24,7 +24,13 @@ const PERF_DFLT_INITIAL_TRACE_BUFSIZE: size_t = 1024 * 1024; // 1MiB
 
 /// The interface offered by all trace collectors.
 pub trait TraceCollector: Send + Sync {
-    /// Return a `ThreadTraceCollector` for tracing the current thread.
+    /// Obtain a `ThreadTraceCollector` for the current thread.
+    ///
+    /// A thread may obtain multiple `ThreadTraceCollector`s but must only collect a trace with one
+    /// at a time.
+    ///
+    /// FIXME: This API needs to be fixed:
+    /// https://github.com/ykjit/hwtracer/issues/101
     fn thread_collector(&self) -> Box<dyn ThreadTraceCollector>;
 }
 
