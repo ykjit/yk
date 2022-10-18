@@ -1,3 +1,5 @@
+//! C-level errors.
+
 use crate::{
     decode::libipt::{hwt_ipt_is_overflow_err, pt_errstr},
     HWTracerError,
@@ -50,7 +52,7 @@ pub(crate) struct PerfPTCError {
 }
 
 impl PerfPTCError {
-    // Creates a new error struct defaulting to an unknown error.
+    /// Creates a new error struct defaulting to an unknown error.
     pub(crate) fn new() -> Self {
         Self {
             typ: PerfPTCErrorKind::Unused,

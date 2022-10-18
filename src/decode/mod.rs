@@ -15,6 +15,7 @@ pub enum TraceDecoderKind {
 }
 
 impl TraceDecoderKind {
+    /// Returns the default kind of decoder for the current platform.
     fn default_for_platform() -> Option<Self> {
         for kind in Self::iter() {
             if Self::match_platform(&kind).is_ok() {
@@ -38,7 +39,7 @@ impl TraceDecoderKind {
 }
 
 pub trait TraceDecoder {
-    // Create the trace decoder.
+    /// Create the trace decoder.
     fn new() -> Self
     where
         Self: Sized;
@@ -91,7 +92,7 @@ mod test_helpers {
     };
     use std::slice::Iter;
 
-    // Helper to check an expected list of blocks matches what we actually got.
+    /// Helper to check an expected list of blocks matches what we actually got.
     pub fn test_expected_blocks(
         trace: Box<dyn Trace>,
         decoder_kind: TraceDecoderKind,
@@ -118,8 +119,8 @@ mod test_helpers {
         assert!(got_iter.next().is_none());
     }
 
-    // Trace two loops, one 10x larger than the other, then check the proportions match the number
-    // of block the trace passes through.
+    /// Trace two loops, one 10x larger than the other, then check the proportions match the number
+    /// of block the trace passes through.
     pub fn ten_times_as_many_blocks(
         thr_col: &mut dyn ThreadTraceCollector,
         decoder_kind: TraceDecoderKind,

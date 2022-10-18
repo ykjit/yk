@@ -8,22 +8,28 @@ use std::num::ParseIntError;
 
 #[derive(Debug)]
 pub enum HWTracerError {
-    HWBufferOverflow, // The trace buffer being used by the hardware overflowed.
-    // This is considered a non-fatal error since retrying the tracing
-    // may succeed.
-    NoHWSupport(String), // The hardware doesn't support a required feature. Not fatal for the
-    // same reason as `Permissions`. This may be non-fatal depending
-    // upon whether the consumer could (e.g.) try a different collector.
-    CollectorUnavailable(TraceCollectorKind), // This collector was not compiled in to hwtracer.
-    DecoderUnavailable(TraceDecoderKind),     // This decoder was not compiled in to hwtracer.
-    Permissions(String),                      // Permission denied.
-    Errno(c_int),                             // Something went wrong in C code.
-    AlreadyCollecting,                        // Trying to start an already collecting collector.
-    AlreadyStopped,                           // Trying to stop a not-currently-active collector.
-    BadConfig(String),                        // Configuration was invalid.
-    Custom(Box<dyn Error>), // All other errors can be nested here, however, don't rely on this
-    // for performance since the `Box` incurs a runtime cost.
-    Unknown, // An unknown error. Used sparingly in C code which doesn't set errno.
+    /// The trace buffer being used by the hardware overflowed.
+    HWBufferOverflow,
+    /// The hardware doesn't support a required feature.
+    NoHWSupport(String),
+    /// This collector was not compiled in to hwtracer.
+    CollectorUnavailable(TraceCollectorKind),
+    /// This decoder was not compiled into hwtracer.
+    DecoderUnavailable(TraceDecoderKind),
+    /// Permission denied.
+    Permissions(String),
+    /// Something went wrong in C code.
+    Errno(c_int),
+    /// The collector is already collecting.
+    AlreadyCollecting,
+    /// Trying to stop a not-currently-active collector.
+    AlreadyStopped,
+    /// Invalid configuration.
+    BadConfig(String),
+    /// An unknown error. Used sparingly for C code which doesn't set errno.
+    Unknown,
+    /// Any other error.
+    Custom(Box<dyn Error>),
 }
 
 impl Display for HWTracerError {

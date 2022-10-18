@@ -37,11 +37,11 @@ pub trait TraceCollector: Send + Sync {
 pub trait ThreadTraceCollector {
     /// Start recording a trace.
     ///
-    /// Tracing continues until [stop_collector](trait.ThreadTraceCollector.html#method.stop_collector) is called.
+    /// Tracing continues until [stop_collector] is called.
     fn start_collector(&mut self) -> Result<(), HWTracerError>;
     /// Turns off the tracer.
     ///
-    /// [start_collector](trait.ThreadTraceCollector.html#method.start_collector) must have been called prior.
+    /// Tracing continues until [stop_collector] is called.
     fn stop_collector(&mut self) -> Result<Box<dyn Trace>, HWTracerError>;
 }
 
@@ -53,7 +53,7 @@ pub enum TraceCollectorKind {
 }
 
 impl TraceCollectorKind {
-    // Finds a suitable `TraceCollectorKind` for the current hardware/OS.
+    /// Finds a suitable `TraceCollectorKind` for the current hardware/OS.
     fn default_for_platform() -> Option<Self> {
         for kind in TraceCollectorKind::iter() {
             if Self::match_platform(&kind).is_ok() {
@@ -211,7 +211,7 @@ pub(crate) mod test_helpers {
     };
     use std::thread;
 
-    // Trace a closure that returns a u64.
+    /// Trace a closure that returns a u64.
     pub fn trace_closure<F>(tc: &mut dyn ThreadTraceCollector, f: F) -> Box<dyn Trace>
     where
         F: FnOnce() -> u64,
@@ -223,7 +223,7 @@ pub(crate) mod test_helpers {
         trace
     }
 
-    // Check that starting and stopping a trace collector works.
+    /// Check that starting and stopping a trace collector works.
     pub fn basic_collection<T>(mut tracer: T)
     where
         T: ThreadTraceCollector,
@@ -232,7 +232,7 @@ pub(crate) mod test_helpers {
         assert_ne!(trace.len(), 0);
     }
 
-    // Check that repeated usage of the same trace collector works.
+    /// Check that repeated usage of the same trace collector works.
     pub fn repeated_collection<T>(mut tracer: T)
     where
         T: ThreadTraceCollector,
@@ -242,8 +242,8 @@ pub(crate) mod test_helpers {
         }
     }
 
-    // Check that starting a trace collector twice (without stopping maktracing inbetween) makes an
-    // appropriate error.
+    /// Check that starting a trace collector twice (without stopping maktracing inbetween) makes
+    /// an appropriate error.
     pub fn already_started<T>(mut tc: T)
     where
         T: ThreadTraceCollector,
@@ -256,7 +256,7 @@ pub(crate) mod test_helpers {
         tc.stop_collector().unwrap();
     }
 
-    // Check that stopping an unstarted trace collector makes an appropriate error.
+    /// Check that stopping an unstarted trace collector makes an appropriate error.
     pub fn not_started<T>(mut tc: T)
     where
         T: ThreadTraceCollector,

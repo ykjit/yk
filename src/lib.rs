@@ -24,7 +24,7 @@ pub trait Trace: Debug + Send {
     #[cfg(test)]
     fn capacity(&self) -> usize;
 
-    // Get the size of the trace in bytes.
+    /// Get the size of the trace in bytes.
     fn len(&self) -> usize;
 
     /// Dump the trace to the specified filename.
@@ -38,7 +38,7 @@ pub trait Trace: Debug + Send {
 mod test_helpers {
     use std::time::SystemTime;
 
-    // A loop that does some work that we can use to build a trace.
+    /// A loop that does some work that we can use to build a trace.
     #[inline(never)]
     pub fn work_loop(iters: u64) -> u64 {
         let mut res = 0;

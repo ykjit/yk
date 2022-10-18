@@ -11,7 +11,6 @@ use libc::{c_void, free, geteuid, malloc, size_t};
 use std::{convert::TryFrom, fs::File, io::Read, ptr, slice};
 
 extern "C" {
-    // collect.c
     fn hwt_perf_init_collector(
         conf: *const PerfCollectorConfig,
         err: *mut PerfPTCError,
@@ -27,6 +26,7 @@ extern "C" {
 
 const PERF_PERMS_PATH: &str = "/proc/sys/kernel/perf_event_paranoid";
 
+/// The configuration for a Linux Perf collector.
 #[derive(Debug)]
 pub(crate) struct PerfTraceCollector {
     config: PerfCollectorConfig,
@@ -192,11 +192,11 @@ unsafe impl Send for PerfTrace {}
 #[repr(C)]
 #[derive(Debug)]
 pub struct PerfTrace {
-    // The trace buffer.
+    /// The trace buffer.
     buf: PerfTraceBuf,
-    // The length of the trace (in bytes).
+    /// The length of the trace (in bytes).
     len: u64,
-    // `buf`'s allocation size (in bytes), <= `len`.
+    /// `buf`'s allocation size (in bytes), <= `len`.
     capacity: u64,
 }
 
@@ -228,10 +228,12 @@ impl Trace for PerfTrace {
         file.write_all(slice).unwrap();
     }
 
+    /// Return the raw bytes of the trace.
     fn bytes(&self) -> &[u8] {
         unsafe { slice::from_raw_parts(self.buf.0, usize::try_from(self.len).unwrap()) }
     }
 
+    /// Return the length of the trace, in bytes.
     fn len(&self) -> usize {
         usize::try_from(self.len).unwrap()
     }
@@ -287,7 +289,7 @@ mod tests {
         test_helpers::concurrent_collection(&*TraceCollectorBuilder::new().build().unwrap());
     }
 
-    // Check that a long trace causes the trace buffer to reallocate.
+    /// Check that a long trace causes the trace buffer to reallocate.
     #[test]
     fn relloc_trace_buf() {
         let start_bufsize = 512;
@@ -303,6 +305,7 @@ mod tests {
         assert!(trace.capacity() > start_bufsize);
     }
 
+    /// Check that an invalid data buffer size causes an error.
     #[test]
     fn test_config_bad_data_bufsize() {
         let mut bldr = TraceCollectorBuilder::new().kind(TraceCollectorKind::Perf);
@@ -317,6 +320,7 @@ mod tests {
         }
     }
 
+    /// Check that an invalid aux buffer size causes an error.
     #[test]
     fn test_config_bad_aux_bufsize() {
         let mut bldr = TraceCollectorBuilder::new().kind(TraceCollectorKind::Perf);
