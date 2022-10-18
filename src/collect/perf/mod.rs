@@ -59,7 +59,7 @@ impl PerfTraceCollector {
         // FIXME: We just assume that we are collecting a PT trace.
         // https://github.com/ykjit/hwtracer/issues/100
         if !unsafe { geteuid() } == 0 {
-            let mut f = File::open(&PERF_PERMS_PATH)?;
+            let mut f = File::open(PERF_PERMS_PATH)?;
             let mut buf = String::new();
             f.read_to_string(&mut buf)?;
             let perm = buf.trim().parse::<i8>()?;

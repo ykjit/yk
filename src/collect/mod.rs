@@ -13,7 +13,7 @@ pub(crate) mod perf;
 pub(crate) use perf::PerfTraceCollector;
 
 const PERF_DFLT_DATA_BUFSIZE: size_t = 64;
-const PERF_DFLT_AUX_BUFSIZE: LazyLock<size_t> = LazyLock::new(|| {
+static PERF_DFLT_AUX_BUFSIZE: LazyLock<size_t> = LazyLock::new(|| {
     // Allocate enough pages for a 64MiB trace buffer.
     let mb64 = 1024 * 1024 * 64;
     let page_sz = size_t::try_from(unsafe { sysconf(_SC_PAGESIZE) }).unwrap();
@@ -55,12 +55,7 @@ pub enum TraceCollectorKind {
 impl TraceCollectorKind {
     /// Finds a suitable `TraceCollectorKind` for the current hardware/OS.
     fn default_for_platform() -> Option<Self> {
-        for kind in TraceCollectorKind::iter() {
-            if Self::match_platform(&kind).is_ok() {
-                return Some(kind);
-            }
-        }
-        None
+        TraceCollectorKind::iter().find(|kind| Self::match_platform(&kind).is_ok())
     }
 
     /// Returns `Ok` if the this collector is appropriate for the current platform.
