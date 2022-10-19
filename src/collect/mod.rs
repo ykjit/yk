@@ -31,7 +31,7 @@ pub trait TraceCollector: Send + Sync {
     ///
     /// FIXME: This API needs to be fixed:
     /// https://github.com/ykjit/hwtracer/issues/101
-    fn thread_collector(&self) -> Box<dyn ThreadTraceCollector>;
+    unsafe fn thread_collector(&self) -> Box<dyn ThreadTraceCollector>;
 }
 
 pub trait ThreadTraceCollector {
@@ -272,11 +272,11 @@ pub(crate) mod test_helpers {
         for _ in 0..10 {
             thread::scope(|s| {
                 let hndl = s.spawn(|| {
-                    let mut thr_c1 = tc.thread_collector();
+                    let mut thr_c1 = unsafe { tc.thread_collector() };
                     trace_closure(&mut *thr_c1, || work_loop(500));
                 });
 
-                let mut thr_c2 = tc.thread_collector();
+                let mut thr_c2 = unsafe { tc.thread_collector() };
                 trace_closure(&mut *thr_c2, || work_loop(500));
                 hndl.join().unwrap();
             });

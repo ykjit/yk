@@ -320,14 +320,14 @@ mod tests {
     #[test]
     fn versus_ptxed_short_trace() {
         let tracer = TraceCollectorBuilder::new().build().unwrap();
-        trace_and_check_blocks(&mut *tracer.thread_collector(), || work_loop(10));
+        trace_and_check_blocks(&mut *unsafe { tracer.thread_collector() }, || work_loop(10));
     }
 
     // Check that the block decoder agrees ptxed on a (likely) empty trace;
     #[test]
     fn versus_ptxed_empty_trace() {
         let tracer = TraceCollectorBuilder::new().build().unwrap();
-        trace_and_check_blocks(&mut *tracer.thread_collector(), || work_loop(0));
+        trace_and_check_blocks(&mut *unsafe { tracer.thread_collector() }, || work_loop(0));
     }
 
     // Check that our block decoder deals with traces involving the VDSO correctly.
@@ -336,7 +336,7 @@ mod tests {
         use libc::{clock_gettime, timespec, CLOCK_MONOTONIC};
 
         let tracer = TraceCollectorBuilder::new().build().unwrap();
-        trace_and_check_blocks(&mut *tracer.thread_collector(), || {
+        trace_and_check_blocks(&mut *unsafe { tracer.thread_collector() }, || {
             let mut res = 0;
             let mut tv = timespec {
                 tv_sec: 0,
@@ -357,7 +357,9 @@ mod tests {
     #[test]
     fn versus_ptxed_long_trace() {
         let tracer = TraceCollectorBuilder::new().build().unwrap();
-        trace_and_check_blocks(&mut *tracer.thread_collector(), || work_loop(3000));
+        trace_and_check_blocks(&mut *unsafe { tracer.thread_collector() }, || {
+            work_loop(3000)
+        });
     }
 
     // Check that a block iterator returns none after an error.
@@ -388,11 +390,9 @@ mod tests {
 
     #[test]
     fn ten_times_as_many_blocks() {
-        let tr1 = TraceCollectorBuilder::new().build().unwrap();
-        let tr2 = TraceCollectorBuilder::new().build().unwrap();
+        let col = TraceCollectorBuilder::new().build().unwrap();
         test_helpers::ten_times_as_many_blocks(
-            &mut *tr1.thread_collector(),
-            &mut *tr2.thread_collector(),
+            &mut *unsafe { col.thread_collector() },
             TraceDecoderKind::LibIPT,
         );
     }

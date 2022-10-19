@@ -43,7 +43,7 @@ fn pt_chdir_rel() {
     // When we get here, we have a process that was invoked with a relative path.
 
     let tcol = TraceCollectorBuilder::new().build().unwrap();
-    let mut thr_col = tcol.thread_collector();
+    let mut thr_col = unsafe { tcol.thread_collector() };
 
     thr_col.start_collector().unwrap();
     println!("{}", work_loop(env::args().len() as u64));

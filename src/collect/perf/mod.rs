@@ -77,7 +77,7 @@ impl PerfTraceCollector {
 }
 
 impl TraceCollector for PerfTraceCollector {
-    fn thread_collector(&self) -> Box<dyn ThreadTraceCollector> {
+    unsafe fn thread_collector(&self) -> Box<dyn ThreadTraceCollector> {
         Box::new(PerfThreadTraceCollector::new(self.config.clone()))
     }
 }

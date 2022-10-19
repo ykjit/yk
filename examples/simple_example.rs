@@ -35,7 +35,8 @@ fn work() -> u32 {
 /// The results are printed to discourage the compiler from optimising the computation out.
 fn main() {
     let bldr = TraceCollectorBuilder::new();
-    let mut thr_col = bldr.build().unwrap().thread_collector();
+    let col = bldr.build().unwrap();
+    let mut thr_col = unsafe { col.thread_collector() };
 
     for i in 1..4 {
         thr_col.start_collector().unwrap_or_else(|e| {

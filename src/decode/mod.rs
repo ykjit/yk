@@ -121,12 +121,11 @@ mod test_helpers {
     // Trace two loops, one 10x larger than the other, then check the proportions match the number
     // of block the trace passes through.
     pub fn ten_times_as_many_blocks(
-        tracer1: &mut dyn ThreadTraceCollector,
-        tracer2: &mut dyn ThreadTraceCollector,
+        thr_col: &mut dyn ThreadTraceCollector,
         decoder_kind: TraceDecoderKind,
     ) {
-        let trace1 = trace_closure(tracer1, || work_loop(10));
-        let trace2 = trace_closure(tracer2, || work_loop(100));
+        let trace1 = trace_closure(thr_col, || work_loop(10));
+        let trace2 = trace_closure(thr_col, || work_loop(100));
 
         let dec: Box<dyn TraceDecoder> = TraceDecoderBuilder::new()
             .kind(decoder_kind)
