@@ -157,8 +157,7 @@ mod tests {
     use super::{LibIPTBlockIterator, PerfPTCError};
     use crate::{
         collect::{
-            perf::PerfTrace, test_helpers::trace_closure, ThreadTraceCollector,
-            TraceCollectorBuilder,
+            perf::PerfTrace, test_helpers::trace_closure, TraceCollector, TraceCollectorBuilder,
         },
         decode::{test_helpers, TraceDecoderKind},
         errors::HWTracerError,
@@ -311,11 +310,11 @@ mod tests {
     }
 
     /// Trace a closure and then decode it and check the block iterator agrees with ptxed.
-    fn trace_and_check_blocks<F>(tracer: &mut dyn ThreadTraceCollector, f: F)
+    fn trace_and_check_blocks<F>(tc: &TraceCollector, f: F)
     where
         F: FnOnce() -> u64,
     {
-        let trace = trace_closure(tracer, f);
+        let trace = trace_closure(&tc, f);
         let expects = get_expected_blocks(&trace);
         test_helpers::test_expected_blocks(trace, TraceDecoderKind::LibIPT, expects.iter());
     }
@@ -323,15 +322,15 @@ mod tests {
     /// Check that the block decoder agrees with the reference implementation in ptxed.
     #[test]
     fn versus_ptxed_short_trace() {
-        let tracer = TraceCollectorBuilder::new().build().unwrap();
-        trace_and_check_blocks(&mut *unsafe { tracer.thread_collector() }, || work_loop(10));
+        let tc = TraceCollectorBuilder::new().build().unwrap();
+        trace_and_check_blocks(&tc, || work_loop(10));
     }
 
     /// Check that the block decoder agrees ptxed on a (likely) empty trace;
     #[test]
     fn versus_ptxed_empty_trace() {
-        let tracer = TraceCollectorBuilder::new().build().unwrap();
-        trace_and_check_blocks(&mut *unsafe { tracer.thread_collector() }, || work_loop(0));
+        let tc = TraceCollectorBuilder::new().build().unwrap();
+        trace_and_check_blocks(&tc, || work_loop(0));
     }
 
     /// Check that our block decoder deals with traces involving the VDSO correctly.
@@ -339,8 +338,8 @@ mod tests {
     fn versus_ptxed_vdso() {
         use libc::{clock_gettime, timespec, CLOCK_MONOTONIC};
 
-        let tracer = TraceCollectorBuilder::new().build().unwrap();
-        trace_and_check_blocks(&mut *unsafe { tracer.thread_collector() }, || {
+        let tc = TraceCollectorBuilder::new().build().unwrap();
+        trace_and_check_blocks(&tc, || {
             let mut res = 0;
             let mut tv = timespec {
                 tv_sec: 0,
@@ -359,10 +358,8 @@ mod tests {
     /// Check that the block decoder agrees with ptxed on long trace.
     #[test]
     fn versus_ptxed_long_trace() {
-        let tracer = TraceCollectorBuilder::new().build().unwrap();
-        trace_and_check_blocks(&mut *unsafe { tracer.thread_collector() }, || {
-            work_loop(3000)
-        });
+        let tc = TraceCollectorBuilder::new().build().unwrap();
+        trace_and_check_blocks(&tc, || work_loop(3000));
     }
 
     /// Check that a block iterator returns none after an error.
@@ -393,10 +390,7 @@ mod tests {
 
     #[test]
     fn ten_times_as_many_blocks() {
-        let col = TraceCollectorBuilder::new().build().unwrap();
-        test_helpers::ten_times_as_many_blocks(
-            &mut *unsafe { col.thread_collector() },
-            TraceDecoderKind::LibIPT,
-        );
+        let tc = TraceCollectorBuilder::new().build().unwrap();
+        test_helpers::ten_times_as_many_blocks(tc, TraceDecoderKind::LibIPT);
     }
 }

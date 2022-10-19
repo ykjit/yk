@@ -3,7 +3,7 @@
 use super::PerfCollectorConfig;
 use crate::{
     c_errors::PerfPTCError,
-    collect::{ThreadTraceCollector, TraceCollector},
+    collect::{ThreadTraceCollector, TraceCollectorImpl},
     errors::HWTracerError,
     Trace,
 };
@@ -76,7 +76,7 @@ impl PerfTraceCollector {
     }
 }
 
-impl TraceCollector for PerfTraceCollector {
+impl TraceCollectorImpl for PerfTraceCollector {
     unsafe fn thread_collector(&self) -> Box<dyn ThreadTraceCollector> {
         Box::new(PerfThreadTraceCollector::new(self.config.clone()))
     }
@@ -88,8 +88,6 @@ pub struct PerfThreadTraceCollector {
     config: PerfCollectorConfig,
     // Opaque C pointer representing the collector context.
     ctx: *mut c_void,
-    // The state of the collector.
-    is_tracing: bool,
     // The trace currently being collected, or `None`.
     trace: Option<Box<PerfTrace>>,
 }
@@ -99,7 +97,6 @@ impl PerfThreadTraceCollector {
         Self {
             config,
             ctx: ptr::null_mut(),
-            is_tracing: false,
             trace: None,
         }
     }
@@ -111,21 +108,8 @@ impl Default for PerfThreadTraceCollector {
     }
 }
 
-impl Drop for PerfThreadTraceCollector {
-    fn drop(&mut self) {
-        if self.is_tracing {
-            // If we haven't stopped the collector already, stop it now.
-            self.stop_collector().unwrap();
-        }
-    }
-}
-
 impl ThreadTraceCollector for PerfThreadTraceCollector {
     fn start_collector(&mut self) -> Result<(), HWTracerError> {
-        if self.is_tracing {
-            return Err(HWTracerError::AlreadyCollecting);
-        }
-
         // At the time of writing, we have to use a fresh Perf file descriptor to ensure traces
         // start with a `PSB+` packet sequence. This is required for correct instruction-level and
         // block-level decoding. Therefore we have to re-initialise for each new tracing session.
@@ -147,18 +131,13 @@ impl ThreadTraceCollector for PerfThreadTraceCollector {
         if !unsafe { hwt_perf_start_collector(self.ctx, &mut *trace, &mut cerr) } {
             return Err(cerr.into());
         }
-        self.is_tracing = true;
         self.trace = Some(trace);
         Ok(())
     }
 
     fn stop_collector(&mut self) -> Result<Box<dyn Trace>, HWTracerError> {
-        if !self.is_tracing {
-            return Err(HWTracerError::AlreadyStopped);
-        }
         let mut cerr = PerfPTCError::new();
         let rc = unsafe { hwt_perf_stop_collector(self.ctx, &mut cerr) };
-        self.is_tracing = false;
         if !rc {
             return Err(cerr.into());
         }
@@ -257,36 +236,65 @@ mod tests {
     use super::{PerfCollectorConfig, PerfThreadTraceCollector};
     use crate::{
         collect::{
-            test_helpers, ThreadTraceCollector, TraceCollectorBuilder, TraceCollectorConfig,
-            TraceCollectorKind,
+            test_helpers, ThreadTraceCollector, TraceCollector, TraceCollectorBuilder,
+            TraceCollectorConfig, TraceCollectorKind,
         },
         errors::HWTracerError,
         test_helpers::work_loop,
     };
 
+    fn mk_collector() -> TraceCollector {
+        TraceCollectorBuilder::new()
+            .kind(TraceCollectorKind::Perf)
+            .build()
+            .unwrap()
+    }
+
     #[test]
     fn basic_collection() {
-        test_helpers::basic_collection(PerfThreadTraceCollector::default());
+        test_helpers::basic_collection(mk_collector());
     }
 
     #[test]
     pub fn repeated_collection() {
-        test_helpers::repeated_collection(PerfThreadTraceCollector::default());
+        test_helpers::repeated_collection(mk_collector());
+    }
+
+    #[test]
+    pub fn repeated_collection_different_collectors() {
+        let tcs = [
+            mk_collector(),
+            mk_collector(),
+            mk_collector(),
+            mk_collector(),
+            mk_collector(),
+            mk_collector(),
+            mk_collector(),
+            mk_collector(),
+            mk_collector(),
+            mk_collector(),
+        ];
+        test_helpers::repeated_collection_different_collectors(tcs);
     }
 
     #[test]
     pub fn already_started() {
-        test_helpers::already_started(PerfThreadTraceCollector::default());
+        test_helpers::already_started(mk_collector());
+    }
+
+    #[test]
+    pub fn already_started_different_collectors() {
+        test_helpers::already_started_different_collectors(mk_collector(), mk_collector());
     }
 
     #[test]
     pub fn not_started() {
-        test_helpers::not_started(PerfThreadTraceCollector::default());
+        test_helpers::not_started(mk_collector());
     }
 
     #[test]
     fn concurrent_collection() {
-        test_helpers::concurrent_collection(&*TraceCollectorBuilder::new().build().unwrap());
+        test_helpers::concurrent_collection(mk_collector());
     }
 
     /// Check that a long trace causes the trace buffer to reallocate.
