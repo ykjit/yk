@@ -9,6 +9,8 @@ libc = "0.2.80"
 lazy_static = "1.4.0"
 tempfile = "3.1.0"
 phdrs = { git = "https://github.com/softdevteam/phdrs" }
+strum = { version = "0.24.1", features = ["derive", "strum_macros"] }
+strum_macros = "0.24.3"
 
 [build-dependencies]
 cc = "1.0.62"

@@ -2,8 +2,9 @@
 /// a relative path.
 ///
 /// This may seem like a rather arbitrary thing to check, but this test was derived from a real
-/// bug: the PT backend was trying to create a libipt image using a (stale) relative path for the
-/// main binary's object.
+/// bug: the LibIPT decoder was trying to create a libipt image using a (stale) relative path for
+/// the main binary's object.
+use hwtracer::{collect::TraceCollectorBuilder, decode::TraceDecoderBuilder};
 use std::{env, path::PathBuf, time::SystemTime};
 
 #[inline(never)]
@@ -16,8 +17,6 @@ pub fn work_loop(iters: u64) -> u64 {
     res
 }
 
-// FIXME: check if the chip actually supports PT.
-#[cfg(perf_pt)]
 #[test]
 fn pt_chdir_rel() {
     let arg0 = env::args().next().unwrap();
@@ -43,18 +42,17 @@ fn pt_chdir_rel() {
 
     // When we get here, we have a process that was invoked with a relative path.
 
-    use hwtracer::backends::perf_pt::PerfPTThreadTracer;
-    use hwtracer::ThreadTracer;
+    let tcol = TraceCollectorBuilder::new().build().unwrap();
+    let mut thr_col = unsafe { tcol.thread_collector() };
 
-    let mut tracer = PerfPTThreadTracer::default();
-
-    tracer.start_tracing().unwrap();
+    thr_col.start_collector().unwrap();
     println!("{}", work_loop(env::args().len() as u64));
-    let trace = tracer.stop_tracing().unwrap();
+    let trace = thr_col.stop_collector().unwrap();
 
     // Now check that the trace decoder can still find its objects after we change dir.
+    let tdec = TraceDecoderBuilder::new().build().unwrap();
     env::set_current_dir("/").unwrap();
-    for b in trace.iter_blocks() {
+    for b in tdec.iter_blocks(&*trace) {
         b.unwrap(); // this would error if the decoder was confused by changing dir.
     }
 }

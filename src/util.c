@@ -35,33 +35,18 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-/*
- * This header contains items which are shared amongst multiple C files in the
- * perf_pt backend.
- */
-
-#ifndef __PERF_PT_PRIVATE_H
-#define __PERF_PT_PRIVATE_H
-
-#include <stddef.h>
-#include <inttypes.h>
 #include <stdbool.h>
+#include <intel-pt.h>
+#include "hwtracer_private.h"
 
-enum perf_pt_cerror_kind {
-    perf_pt_cerror_unused,
-    perf_pt_cerror_unknown,
-    perf_pt_cerror_errno,
-    perf_pt_cerror_ipt,
-};
-
-struct perf_pt_cerror {
-    enum perf_pt_cerror_kind kind; // What sort of error is this?
-    int code;                      // The error code itself.
-};
-
-bool dump_vdso(int, uint64_t, size_t, struct perf_pt_cerror *);
-void perf_pt_set_err(struct perf_pt_cerror *, int, int);
-
-#define VDSO_NAME "linux-vdso.so.1"
-
-#endif
+/*
+ * Sets the error information (if not already set).
+ */
+void
+hwt_set_cerr(struct hwt_cerror *err, int kind, int code) {
+    // Only set the error info if we would not be overwriting an earlier error.
+    if (err->kind == hwt_cerror_unused) {
+        err->kind = kind;
+        err->code = code;
+    }
+}
