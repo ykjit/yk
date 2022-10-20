@@ -3,8 +3,10 @@ unlicensed = "deny"
 confidence-threshold = 1.0
 allow = [
     "Apache-2.0",
-    "ISC",
     "MIT",
     "BSD-3-Clause",
     "Unicode-DFS-2016",
 ]
+
+[sources.allow-org]
+github = ["softdevteam"]
