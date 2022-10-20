@@ -2,7 +2,7 @@
 
 use crate::IRBlock;
 use byteorder::{NativeEndian, ReadBytesExt};
-use hwtracer::{HWTracerError, Trace};
+use hwtracer::{decode::TraceDecoderBuilder, HWTracerError, Trace};
 use intervaltree::{self, IntervalTree};
 use libc::c_void;
 use std::{
@@ -123,8 +123,9 @@ impl HWTMapper {
         mut self,
         trace: Box<dyn Trace>,
     ) -> Result<(Vec<IRBlock>, HashMap<CString, *const c_void>), HWTracerError> {
+        let tdec = TraceDecoderBuilder::new().build().unwrap();
         let mut ret_irblocks: Vec<IRBlock> = Vec::new();
-        let mut itr = trace.iter_blocks();
+        let mut itr = tdec.iter_blocks(&*trace);
         while let Some(block) = itr.next() {
             let block = block?;
             let irblocks = self.map_block(&block);
