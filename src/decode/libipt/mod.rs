@@ -52,18 +52,24 @@ impl TraceDecoder for LibIPTTraceDecoder {
     }
 }
 
-// Iterate over the blocks of an Intel PT trace using libipt.
+/// Iterate over the blocks of an Intel PT trace using libipt.
 struct LibIPTBlockIterator<'t> {
-    decoder: *mut c_void,  // C-level libipt block decoder.
-    decoder_status: c_int, // Stores the current libipt-level status of the above decoder.
-    #[allow(dead_code)] // Rust doesn't know that this exists only to keep the file long enough.
-    vdso_tempfile: Option<NamedTempFile>, // VDSO code stored temporarily.
-    trace: &'t dyn Trace,  // The trace we are iterating over.
-    errored: bool,         // Set to true when an error occurs, thus invalidating the iterator.
+    /// C-level libipt block decoder.
+    decoder: *mut c_void,
+    /// Stores the current libipt-level status of the above decoder.
+    decoder_status: c_int,
+    /// VDSO code (stored temporarily).
+    #[allow(dead_code)]
+    // Rust doesn't know that this exists only to keep the file long enough.
+    vdso_tempfile: Option<NamedTempFile>,
+    /// The trace we are iterating over.
+    trace: &'t dyn Trace,
+    /// Error state. Set to true when an error occurs, thus invalidating the iterator.
+    errored: bool,
 }
 
 impl<'t> LibIPTBlockIterator<'t> {
-    // Initialise the block decoder.
+    /// Initialise the block decoder.
     fn init_decoder(&mut self) -> Result<(), HWTracerError> {
         // Make a temp file for the C code to write the VDSO code into.
         //
@@ -169,11 +175,11 @@ mod tests {
 
     const VDSO_FILENAME: &str = "linux-vdso.so.1";
 
-    // Gets the ptxed arguments required to decode a trace for the current process.
-    //
-    // Returns a vector of arguments and a handle to a temproary file containing the VDSO code. The
-    // caller must make sure that this file lives long enough for ptxed to run (temp files are
-    // removed when they fall out of scope).
+    /// Gets the ptxed arguments required to decode a trace for the current process.
+    ///
+    /// Returns a vector of arguments and a handle to a temproary file containing the VDSO code.
+    /// The caller must make sure that this file lives long enough for ptxed to run (temp files are
+    /// removed when they fall out of scope).
     fn self_ptxed_args(trace_filename: &str) -> (Vec<String>, NamedTempFile) {
         let ptxed_args = vec![
             "--cpu",
@@ -241,11 +247,9 @@ mod tests {
         (ptxed_args, vdso_tempfile)
     }
 
-    /*
-     * Determine if the given x86_64 assembler mnemonic should terminate a block.
-     *
-     * Mnemonic assumed to be lower case.
-     */
+    /// Determine if the given x86_64 assembler mnemonic should terminate a block.
+    ///
+    /// Mnemonic assumed to be lower case.
     fn instr_terminates_block(instr: &str) -> bool {
         assert!(instr.find(|c: char| !c.is_lowercase()).is_none());
         match instr {
@@ -257,7 +261,7 @@ mod tests {
         }
     }
 
-    // Given a trace, use ptxed to get a vector of block start vaddrs.
+    /// Given a trace, use ptxed to get a vector of block start vaddrs.
     fn get_expected_blocks(trace: &Box<dyn Trace>) -> Vec<Block> {
         // Write the trace out to a temp file so ptxed can decode it.
         let mut tmpf = NamedTempFile::new().unwrap();
@@ -306,7 +310,7 @@ mod tests {
         block_vaddrs
     }
 
-    // Trace a closure and then decode it and check the block iterator agrees with ptxed.
+    /// Trace a closure and then decode it and check the block iterator agrees with ptxed.
     fn trace_and_check_blocks<F>(tracer: &mut dyn ThreadTraceCollector, f: F)
     where
         F: FnOnce() -> u64,
@@ -316,21 +320,21 @@ mod tests {
         test_helpers::test_expected_blocks(trace, TraceDecoderKind::LibIPT, expects.iter());
     }
 
-    // Check that the block decoder agrees with the reference implementation in ptxed.
+    /// Check that the block decoder agrees with the reference implementation in ptxed.
     #[test]
     fn versus_ptxed_short_trace() {
         let tracer = TraceCollectorBuilder::new().build().unwrap();
         trace_and_check_blocks(&mut *unsafe { tracer.thread_collector() }, || work_loop(10));
     }
 
-    // Check that the block decoder agrees ptxed on a (likely) empty trace;
+    /// Check that the block decoder agrees ptxed on a (likely) empty trace;
     #[test]
     fn versus_ptxed_empty_trace() {
         let tracer = TraceCollectorBuilder::new().build().unwrap();
         trace_and_check_blocks(&mut *unsafe { tracer.thread_collector() }, || work_loop(0));
     }
 
-    // Check that our block decoder deals with traces involving the VDSO correctly.
+    /// Check that our block decoder deals with traces involving the VDSO correctly.
     #[test]
     fn versus_ptxed_vdso() {
         use libc::{clock_gettime, timespec, CLOCK_MONOTONIC};
@@ -352,8 +356,7 @@ mod tests {
         });
     }
 
-    // Check that the block decoder agrees with ptxed on long trace.
-    //#[ignore] // Decoding long traces is slow.
+    /// Check that the block decoder agrees with ptxed on long trace.
     #[test]
     fn versus_ptxed_long_trace() {
         let tracer = TraceCollectorBuilder::new().build().unwrap();
@@ -362,7 +365,7 @@ mod tests {
         });
     }
 
-    // Check that a block iterator returns none after an error.
+    /// Check that a block iterator returns none after an error.
     #[test]
     fn error_stops_block_iter() {
         // A zero-sized trace will lead to an error.

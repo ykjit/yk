@@ -13,7 +13,7 @@ pub(crate) mod perf;
 pub(crate) use perf::PerfTraceCollector;
 
 const PERF_DFLT_DATA_BUFSIZE: size_t = 64;
-const PERF_DFLT_AUX_BUFSIZE: LazyLock<size_t> = LazyLock::new(|| {
+static PERF_DFLT_AUX_BUFSIZE: LazyLock<size_t> = LazyLock::new(|| {
     // Allocate enough pages for a 64MiB trace buffer.
     let mb64 = 1024 * 1024 * 64;
     let page_sz = size_t::try_from(unsafe { sysconf(_SC_PAGESIZE) }).unwrap();
@@ -37,11 +37,11 @@ pub trait TraceCollector: Send + Sync {
 pub trait ThreadTraceCollector {
     /// Start recording a trace.
     ///
-    /// Tracing continues until [stop_collector](trait.ThreadTraceCollector.html#method.stop_collector) is called.
+    /// Tracing continues until [stop_collector] is called.
     fn start_collector(&mut self) -> Result<(), HWTracerError>;
     /// Turns off the tracer.
     ///
-    /// [start_collector](trait.ThreadTraceCollector.html#method.start_collector) must have been called prior.
+    /// Tracing continues until [stop_collector] is called.
     fn stop_collector(&mut self) -> Result<Box<dyn Trace>, HWTracerError>;
 }
 
@@ -53,14 +53,9 @@ pub enum TraceCollectorKind {
 }
 
 impl TraceCollectorKind {
-    // Finds a suitable `TraceCollectorKind` for the current hardware/OS.
+    /// Finds a suitable `TraceCollectorKind` for the current hardware/OS.
     fn default_for_platform() -> Option<Self> {
-        for kind in TraceCollectorKind::iter() {
-            if Self::match_platform(&kind).is_ok() {
-                return Some(kind);
-            }
-        }
-        None
+        TraceCollectorKind::iter().find(|kind| Self::match_platform(&kind).is_ok())
     }
 
     /// Returns `Ok` if the this collector is appropriate for the current platform.
@@ -211,7 +206,7 @@ pub(crate) mod test_helpers {
     };
     use std::thread;
 
-    // Trace a closure that returns a u64.
+    /// Trace a closure that returns a u64.
     pub fn trace_closure<F>(tc: &mut dyn ThreadTraceCollector, f: F) -> Box<dyn Trace>
     where
         F: FnOnce() -> u64,
@@ -223,7 +218,7 @@ pub(crate) mod test_helpers {
         trace
     }
 
-    // Check that starting and stopping a trace collector works.
+    /// Check that starting and stopping a trace collector works.
     pub fn basic_collection<T>(mut tracer: T)
     where
         T: ThreadTraceCollector,
@@ -232,7 +227,7 @@ pub(crate) mod test_helpers {
         assert_ne!(trace.len(), 0);
     }
 
-    // Check that repeated usage of the same trace collector works.
+    /// Check that repeated usage of the same trace collector works.
     pub fn repeated_collection<T>(mut tracer: T)
     where
         T: ThreadTraceCollector,
@@ -242,8 +237,8 @@ pub(crate) mod test_helpers {
         }
     }
 
-    // Check that starting a trace collector twice (without stopping maktracing inbetween) makes an
-    // appropriate error.
+    /// Check that starting a trace collector twice (without stopping maktracing inbetween) makes
+    /// an appropriate error.
     pub fn already_started<T>(mut tc: T)
     where
         T: ThreadTraceCollector,
@@ -256,7 +251,7 @@ pub(crate) mod test_helpers {
         tc.stop_collector().unwrap();
     }
 
-    // Check that stopping an unstarted trace collector makes an appropriate error.
+    /// Check that stopping an unstarted trace collector makes an appropriate error.
     pub fn not_started<T>(mut tc: T)
     where
         T: ThreadTraceCollector,

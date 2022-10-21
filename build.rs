@@ -47,7 +47,7 @@ fn build_libipt(c_deps_dir: &Path) {
     eprintln!("Building libipt...");
 
     let prev_dir = env::current_dir().unwrap();
-    env::set_current_dir(&c_deps_dir).unwrap();
+    env::set_current_dir(c_deps_dir).unwrap();
     let res = Command::new("make")
         .arg("-f")
         .arg(C_DEPS_MAKEFILE)
