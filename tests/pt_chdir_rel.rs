@@ -42,12 +42,10 @@ fn pt_chdir_rel() {
 
     // When we get here, we have a process that was invoked with a relative path.
 
-    let tcol = TraceCollectorBuilder::new().build().unwrap();
-    let mut thr_col = unsafe { tcol.thread_collector() };
-
-    thr_col.start_collector().unwrap();
+    let tc = TraceCollectorBuilder::new().build().unwrap();
+    tc.start_thread_collector().unwrap();
     println!("{}", work_loop(env::args().len() as u64));
-    let trace = thr_col.stop_collector().unwrap();
+    let trace = tc.stop_thread_collector().unwrap();
 
     // Now check that the trace decoder can still find its objects after we change dir.
     let tdec = TraceDecoderBuilder::new().build().unwrap();
