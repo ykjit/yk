@@ -4,7 +4,7 @@ use llvm_sys::bit_reader::LLVMParseBitcodeInContext2;
 use llvm_sys::core::*;
 use llvm_sys::prelude::{LLVMBasicBlockRef, LLVMModuleRef, LLVMTypeRef, LLVMValueRef};
 use llvm_sys::target::{LLVMGetModuleDataLayout, LLVMTargetDataRef};
-use llvm_sys::{LLVMOpcode, LLVMTypeKind, LLVMValueKind};
+use llvm_sys::{LLVMTypeKind, LLVMValueKind};
 use std::ffi::CStr;
 use std::mem::MaybeUninit;
 
@@ -59,14 +59,6 @@ pub struct BasicBlock(LLVMBasicBlockRef);
 impl BasicBlock {
     pub unsafe fn new(bb: LLVMBasicBlockRef) -> Self {
         Self(bb)
-    }
-
-    pub fn get(&self) -> LLVMBasicBlockRef {
-        self.0
-    }
-
-    pub fn first(&self) -> Value {
-        self.instruction(0)
     }
 
     pub fn instruction(&self, instridx: usize) -> Value {
@@ -157,18 +149,6 @@ impl Value {
         self.0
     }
 
-    pub fn is_argument(&self) -> bool {
-        unsafe { !LLVMIsAArgument(self.0).is_null() }
-    }
-
-    pub fn is_constant(&self) -> bool {
-        unsafe { !LLVMIsAConstant(self.0).is_null() }
-    }
-
-    pub fn is_br(&self) -> bool {
-        unsafe { !LLVMIsABranchInst(self.0).is_null() }
-    }
-
     pub fn is_gep(&self) -> bool {
         unsafe { !LLVMIsAGetElementPtrInst(self.0).is_null() }
     }
@@ -187,23 +167,6 @@ impl Value {
 
     pub fn is_store(&self) -> bool {
         unsafe { !LLVMIsAStoreInst(self.0).is_null() }
-    }
-
-    pub fn is_switch(&self) -> bool {
-        unsafe { !LLVMIsASwitchInst(self.0).is_null() }
-    }
-
-    pub fn is_inline_asm(&self) -> bool {
-        !unsafe { LLVMIsAInlineAsm(self.0).is_null() }
-    }
-
-    pub fn is_function(&self) -> bool {
-        unsafe { !LLVMIsAFunction(self.0).is_null() }
-    }
-
-    pub fn is_vararg_function(&self) -> bool {
-        let el_ty = unsafe { LLVMGlobalGetValueType(self.0) };
-        (unsafe { LLVMIsFunctionVarArg(el_ty) }) != 0
     }
 
     pub fn is_call(&self) -> bool {
@@ -225,33 +188,12 @@ impl Value {
         }
     }
 
-    pub fn get_num_arg_operands(&self) -> u32 {
-        unsafe { LLVMGetNumArgOperands(self.0) }
-    }
-
-    pub fn get_called_value(&self) -> Value {
-        unsafe { Self::new(LLVMGetCalledValue(self.0)) }
-    }
-
-    pub fn opcode(&self) -> LLVMOpcode {
-        unsafe {
-            debug_assert!(!LLVMIsAInstruction(self.0).is_null());
-            LLVMGetInstructionOpcode(self.0)
-        }
-    }
-
     pub fn as_str(&self) -> &CStr {
         unsafe { CStr::from_ptr(LLVMPrintValueToString(self.0)) }
     }
 
     pub fn kind(&self) -> LLVMValueKind {
         unsafe { LLVMGetValueKind(self.0) }
-    }
-
-    pub fn get_name(&self) -> &str {
-        let mut size = MaybeUninit::<usize>::uninit();
-        let name = unsafe { CStr::from_ptr(LLVMGetValueName2(self.0, size.as_mut_ptr())) };
-        name.to_str().unwrap()
     }
 }
 

@@ -14,7 +14,7 @@ ykllvmwrap = { path = "../ykllvmwrap" }
 ykrt = { path = "../ykrt" }
 yktrace = { path = "../yktrace" }
 yksmp = { path = "../yksmp" }
-yksgi = { path = "../yksgi" }
+ykfr = { path = "../ykfr" }
 llvm-sys = "130"
 
 [features]
