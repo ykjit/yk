@@ -14,7 +14,7 @@
 //     2: 5
 //     jit-state: enter-jit-code
 //     1: 5
-//     jit-state: enter-stopgap
+//     jit-state: deoptimise
 //     ...
 
 // Check that function calls with arguments do the right thing

@@ -13,7 +13,7 @@
 //     2:1
 //     jit-state: enter-jit-code
 //     1:1
-//     jit-state: enter-stopgap
+//     jit-state: deoptimise
 //     ...
 
 // Check that we can handle struct field accesses.

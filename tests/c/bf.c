@@ -7,7 +7,7 @@
 //     jit-state: enter-jit-code
 //     jit-state: exit-jit-code
 //     ...
-//     jit-state: enter-stopgap
+//     jit-state: deoptimise
 //     ...
 //   stdout:
 //     Hello World!

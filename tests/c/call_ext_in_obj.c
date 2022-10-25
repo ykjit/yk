@@ -12,7 +12,7 @@
 //     3
 //     jit-state: enter-jit-code
 //     2
-//     jit-state: enter-stopgap
+//     jit-state: deoptimise
 //     ...
 
 // Check that we can call a function without IR from another object (.o) file.

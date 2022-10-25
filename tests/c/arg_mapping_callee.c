@@ -12,7 +12,7 @@
 //     2:5
 //     jit-state: enter-jit-code
 //     1:5
-//     jit-state: enter-stopgap
+//     jit-state: deoptimise
 //     ...
 
 // Check that using an argument (of a non-main() function) in a trace works.

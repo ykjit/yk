@@ -19,8 +19,8 @@
 //     jit-state: exit-jit-code
 //     jit-state: enter-jit-code
 //     i=6
-//     jit-state: enter-stopgap
-//     jit-state: exit-stopgap
+//     jit-state: deoptimise
+//     jit-state: exit-jit-code
 
 // Check that basic trace compilation works.
 

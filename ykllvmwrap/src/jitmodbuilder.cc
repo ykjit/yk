@@ -27,13 +27,13 @@ uint64_t getNewTraceIdx() {
 #define TRACE_FUNC_PREFIX "__yk_compiled_trace_"
 #define YK_NEW_CONTROL_POINT "__ykrt_control_point"
 #define YK_CONTROL_POINT_ARG_VARS_IDX 2
-#define YK_CONTROL_POINT_ARG_RETURNVAL_IDX 3
+#define YK_CONTROL_POINT_ARG_FRAMEADDR_IDX 3
 #define YK_CONTROL_POINT_NUM_ARGS 4
 
 #define JITFUNC_ARG_INPUTS_STRUCT_IDX 0
 #define JITFUNC_ARG_STACKMAP_ADDR_IDX 1
 #define JITFUNC_ARG_STACKMAP_LEN_IDX 2
-#define JITFUNC_ARG_RETURNVAL_IDX 3
+#define JITFUNC_ARG_FRAMEADDR_IDX 3
 #define JITFUNC_ARG_LIVEAOTVALS_PTR_IDX 4
 
 #define YK_OUTLINE_FNATTR "yk_outline"
@@ -525,7 +525,7 @@ class JITModBuilder {
     insertAOTMap(I, NewInst, CurBBIdx, CurInstrIdx);
   }
 
-  Function *createJITFunc(Value *TraceInputs, Type *ReturnTy) {
+  Function *createJITFunc(Value *TraceInputs, Type *FrameAddr) {
     // Compute a name for the trace.
     uint64_t TraceIdx = getNewTraceIdx();
     TraceName = string(TRACE_FUNC_PREFIX) + to_string(TraceIdx);
@@ -539,13 +539,13 @@ class JITModBuilder {
     InputTypes.push_back(PointerSizedIntTy);
 
     // Add argument in which to store the value of an interpreted return.
-    InputTypes.push_back(ReturnTy);
+    InputTypes.push_back(FrameAddr);
 
     // Add argument for memory block holding live AOT values.
     InputTypes.push_back(PointerSizedIntTy->getPointerTo());
 
     llvm::FunctionType *FType = llvm::FunctionType::get(
-        Type::getInt8Ty(JITMod->getContext()), InputTypes, false);
+        PointerType::get(JITMod->getContext(), 0), InputTypes, false);
     llvm::Function *JITFunc = llvm::Function::Create(
         FType, Function::ExternalLinkage, TraceName, JITMod);
     JITFunc->setCallingConv(CallingConv::C);
@@ -733,7 +733,7 @@ class JITModBuilder {
                       JITFunc->getArg(JITFUNC_ARG_STACKMAP_LEN_IDX)});
 
     // Create the deoptimization call.
-    Type *retty = Type::getInt8Ty(Context);
+    Type *retty = PointerType::get(Context, 0);
     Function *DeoptInt = Intrinsic::getDeclaration(
         JITFunc->getParent(), Intrinsic::experimental_deoptimize, {retty});
     OperandBundleDef ob =
@@ -743,7 +743,7 @@ class JITModBuilder {
     CallInst *Ret =
         CallInst::Create(DeoptInt,
                          {StackMapStruct, AOTLocs, ActiveFramesStruct,
-                          JITFunc->getArg(JITFUNC_ARG_RETURNVAL_IDX)},
+                          JITFunc->getArg(JITFUNC_ARG_FRAMEADDR_IDX)},
                          {ob}, "", GuardFailBB);
 
     // We always need to return after the deoptimisation call.
@@ -1131,16 +1131,7 @@ class JITModBuilder {
     PointerSizedIntTy = DL.getIntPtrType(Context);
 
     // Create a function inside of which we construct the IR for our trace.
-    Type *ReturnTy;
-    if (CPCI->arg_size() != YK_CONTROL_POINT_NUM_ARGS) {
-      // This means we are running the trace_compiler tests which only uses a
-      // dummy control point so create a dummy return value too.
-      ReturnTy = Type::getInt1Ty(Context)->getPointerTo();
-    } else {
-      ReturnTy =
-          CPCI->getArgOperand(YK_CONTROL_POINT_ARG_RETURNVAL_IDX)->getType();
-    }
-    JITFunc = createJITFunc(TraceInputs, ReturnTy);
+    JITFunc = createJITFunc(TraceInputs, PointerType::get(Context, 0));
     auto DstBB = BasicBlock::Create(JITMod->getContext(), "entry", JITFunc);
     Builder.SetInsertPoint(DstBB);
 
@@ -1312,6 +1303,13 @@ public:
                 (IID == Intrinsic::lifetime_end))
               continue;
 
+            // This intrinsic is used in AOTMod to pass the current frame
+            // address into the control point which is required for stack
+            // reconstruction. There's no use for this inside JITMod, so just
+            // ignore it.
+            if (IID == Intrinsic::frameaddress)
+              continue;
+
             // Calls to `llvm.experimental.stackmap` are not really calls and
             // they generate no code anyway. We can skip them.
             if (IID == Intrinsic::experimental_stackmap) {
@@ -1379,8 +1377,8 @@ public:
               NewControlPointCall = &*CI;
             } else {
               assert(CF->arg_size() == YK_CONTROL_POINT_NUM_ARGS);
-              VMap[CI] = getMappedValue(
-                  CI->getArgOperand(YK_CONTROL_POINT_ARG_VARS_IDX));
+              VMap[CI] = ConstantPointerNull::get(
+                  Type::getInt8PtrTy(JITMod->getContext()));
               ResumeAfter = make_tuple(CurInstrIdx, CI);
               break;
             }
@@ -1448,8 +1446,10 @@ public:
     // the trace.
     assert(!isOutlining());
 
-    Builder.CreateRet(ConstantInt::get(Type::getInt8Ty(JITMod->getContext()),
-                                       TRACE_RETURN_SUCCESS));
+    // If the trace succeeded return a null pointer instead of a reconstructed
+    // frame address.
+    Builder.CreateRet(
+        ConstantPointerNull::get(PointerType::get(JITMod->getContext(), 0)));
     finalise(AOTMod, &Builder);
     return JITMod;
   }

@@ -6,7 +6,7 @@
 ;      ...
 ;      define {{type}} @__yk_compiled_trace_0(...
 ;      entry:
-;        %{{0}} = load i32, i32* @g, align 4
+;        %{{0}} = load i32, ptr @g, align 4
 ;        %{{1}} = add i32 %{{0}}, 1
 ;        ret {{type}}...
 ;      }
@@ -19,7 +19,7 @@
 
 define void @main() {
 entry:
-    %0 = load i32, i32* @g
+    %0 = load i32, ptr @g
     %1 = add i32 %0, 1
     unreachable
 }
