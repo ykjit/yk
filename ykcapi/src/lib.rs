@@ -17,10 +17,10 @@ use std::arch::asm;
 use std::convert::{TryFrom, TryInto};
 use std::ffi::c_void;
 use std::{ptr, slice};
+use ykfr::{self, FrameReconstructor};
 #[cfg(feature = "yk_jitstate_debug")]
 use ykrt::print_jit_state;
 use ykrt::{HotThreshold, Location, MT};
-use yksgi::{self, SGInterp};
 use yksmp::{Location as SMLocation, StackMapParser};
 
 #[no_mangle]
@@ -222,13 +222,13 @@ pub extern "C" fn yk_stopgap(
     // Note that the memory behind this slice is allocated on the stack (of the compiled trace) and
     // thus doesn't need to be freed.
     let activeframes = unsafe {
-        slice::from_raw_parts(actframes.addr as *const yksgi::FrameInfo, actframes.length)
+        slice::from_raw_parts(actframes.addr as *const ykfr::FrameInfo, actframes.length)
     };
 
     // Restore saved registers from the stack.
     let registers = Registers::from_ptr(rsp);
 
-    let mut sginterp = unsafe { SGInterp::new(activeframes, frameaddr) };
+    let mut framerec = unsafe { FrameReconstructor::new(activeframes) };
 
     // Parse the stackmap of the JIT module.
     let slice = unsafe { slice::from_raw_parts(stackmap.addr as *mut u8, stackmap.length) };
@@ -256,7 +256,7 @@ pub extern "C" fn yk_stopgap(
                 let addr = unsafe { addr.offset(isize::try_from(*off).unwrap()) };
                 let aot = &aotvals[i];
                 unsafe {
-                    sginterp.var_init(
+                    framerec.var_init(
                         aot.bbidx,
                         aot.instridx,
                         std::ffi::CStr::from_ptr(aot.fname),
@@ -277,7 +277,7 @@ pub extern "C" fn yk_stopgap(
                 };
                 let aot = &aotvals[i];
                 unsafe {
-                    sginterp.var_init(
+                    framerec.var_init(
                         aot.bbidx,
                         aot.instridx,
                         std::ffi::CStr::from_ptr(aot.fname),
@@ -289,7 +289,7 @@ pub extern "C" fn yk_stopgap(
             SMLocation::Constant(v) => {
                 let aot = &aotvals[i];
                 unsafe {
-                    sginterp.var_init(
+                    framerec.var_init(
                         aot.bbidx,
                         aot.instridx,
                         std::ffi::CStr::from_ptr(aot.fname),
@@ -303,7 +303,7 @@ pub extern "C" fn yk_stopgap(
             }
         }
     }
-    let ret = sginterp.reconstruct_frames(frameaddr);
+    let ret = framerec.reconstruct_frames(frameaddr);
     ret
 }
 
