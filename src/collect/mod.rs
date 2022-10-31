@@ -232,7 +232,7 @@ impl TraceCollectorBuilder {
                     _pt_conf,
                 )?)));
                 #[cfg(not(collector_perf))]
-                unreachable!();
+                return Err(HWTracerError::CollectorUnavailable(self.kind));
             }
         }
     }
