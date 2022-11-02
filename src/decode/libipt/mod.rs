@@ -64,7 +64,7 @@ struct LibIPTBlockIterator<'t> {
     vdso_tempfile: Option<NamedTempFile>,
     /// The trace we are iterating over.
     trace: &'t dyn Trace,
-    /// Error state. Set to true when an error occurs, thus invalidating the iterator.
+    /// Set to true when an error has occured.
     errored: bool,
 }
 

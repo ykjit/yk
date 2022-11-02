@@ -9,9 +9,15 @@ pub(crate) mod libipt;
 #[cfg(decoder_libipt)]
 use libipt::LibIPTTraceDecoder;
 
+#[cfg(decoder_ykpt)]
+mod ykpt;
+#[cfg(decoder_ykpt)]
+use ykpt::YkPTTraceDecoder;
+
 #[derive(Clone, Copy, Debug, EnumIter)]
 pub enum TraceDecoderKind {
     LibIPT,
+    YkPT,
 }
 
 impl TraceDecoderKind {
@@ -29,10 +35,16 @@ impl TraceDecoderKind {
     fn match_platform(&self) -> Result<(), HWTracerError> {
         match self {
             Self::LibIPT => {
-                #[cfg(not(decoder_libipt))]
-                return Err(HWTracerError::DecoderUnavailable(Self::LibIPT));
                 #[cfg(decoder_libipt)]
                 return Ok(());
+                #[cfg(not(decoder_libipt))]
+                return Err(HWTracerError::DecoderUnavailable(Self::LibIPT));
+            }
+            Self::YkPT => {
+                #[cfg(decoder_ykpt)]
+                return Ok(());
+                #[cfg(not(decoder_ykpt))]
+                return Err(HWTracerError::DecoderUnavailable(Self::YkPT));
             }
         }
     }
@@ -76,7 +88,18 @@ impl TraceDecoderBuilder {
     pub fn build(self) -> Result<Box<dyn TraceDecoder>, HWTracerError> {
         self.kind.match_platform()?;
         match self.kind {
-            TraceDecoderKind::LibIPT => Ok(Box::new(LibIPTTraceDecoder::new())),
+            TraceDecoderKind::LibIPT => {
+                #[cfg(decoder_libipt)]
+                return Ok(Box::new(LibIPTTraceDecoder::new()));
+                #[cfg(not(decoder_libipt))]
+                return Err(HWTracerError::DecoderUnavailable(self.kind));
+            }
+            TraceDecoderKind::YkPT => {
+                #[cfg(decoder_ykpt)]
+                return Ok(Box::new(YkPTTraceDecoder::new()));
+                #[cfg(not(decoder_ykpt))]
+                return Err(HWTracerError::DecoderUnavailable(self.kind));
+            }
         }
     }
 }

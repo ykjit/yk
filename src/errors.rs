@@ -28,6 +28,8 @@ pub enum HWTracerError {
     BadConfig(String),
     /// An unknown error. Used sparingly for C code which doesn't set errno.
     Unknown,
+    /// Failed to decode trace.
+    TraceParseError(String),
     /// Any other error.
     Custom(Box<dyn Error>),
 }
@@ -55,6 +57,7 @@ impl Display for HWTracerError {
             HWTracerError::AlreadyStopped => write!(f, "Can't stop an inactice collector"),
             HWTracerError::BadConfig(ref s) => write!(f, "{}", s),
             HWTracerError::Custom(ref bx) => write!(f, "{}", bx),
+            HWTracerError::TraceParseError(ref s) => write!(f, "failed to parse trace: {}", s),
             HWTracerError::Unknown => write!(f, "Unknown error"),
         }
     }
@@ -77,6 +80,7 @@ impl Error for HWTracerError {
             HWTracerError::BadConfig(_) => None,
             HWTracerError::Errno(_) => None,
             HWTracerError::Custom(ref bx) => Some(bx.as_ref()),
+            HWTracerError::TraceParseError(_) => None,
             HWTracerError::Unknown => None,
         }
     }

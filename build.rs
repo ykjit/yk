@@ -144,6 +144,10 @@ fn main() {
         }
         println!("cargo:rustc-link-lib=static=ipt");
     }
+
+    #[cfg(target_arch = "x86_64")]
+    println!("cargo:rustc-cfg=decoder_ykpt");
+
     c_build.include("src/util");
     c_build.include("src"); // to find `hwtracer_private.h`.
     c_build.compile("hwtracer_c");
