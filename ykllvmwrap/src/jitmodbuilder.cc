@@ -385,6 +385,7 @@ class JITModBuilder {
           VMap[Arg] = getMappedValue(Var);
         }
       }
+      LastSMCall = cast<CallBase>(CI->getNextNonDebugInstruction());
       ActiveFrames.push_back(
           {CurBBIdx, CurInstrIdx, CI->getFunction()->getName(), LastSMCall});
       CallDepth += 1;

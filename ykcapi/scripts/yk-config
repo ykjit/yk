@@ -74,6 +74,7 @@ handle_arg() {
 
             # Use the Yk extensions to the blockmap section.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-extended-llvmbbaddrmap-section"
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-stackmap-offset-fix"
 
             # Have the `.llvmbc` and `.llvm_bb_addr_map` sections loaded into
             # memory by the loader.
