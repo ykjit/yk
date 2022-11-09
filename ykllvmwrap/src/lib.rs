@@ -35,11 +35,4 @@ extern "C" {
         debuginfo_fd: c_int,
         debuginfo_path: *const c_char,
     ) -> *const c_void;
-
-    pub fn __ykllvmwrap_find_bbmaps(
-        bitcode_data: *const u8,
-        bitcode_len: usize,
-        start_addr: *mut size_t,
-        end_addr: *mut size_t,
-    ) -> bool;
 }

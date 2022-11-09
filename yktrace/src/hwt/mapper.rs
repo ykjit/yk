@@ -10,14 +10,12 @@ use std::{
     convert::TryFrom,
     ffi::CString,
     io::{prelude::*, Cursor, SeekFrom},
-    mem::MaybeUninit,
     slice,
     sync::LazyLock,
 };
-use ykllvmwrap::__ykllvmwrap_find_bbmaps;
 use ykutil::{
     addr::{code_vaddr_to_off, vaddr_to_sym_and_obj},
-    obj::{llvmbc_section, SELF_BIN_PATH},
+    obj::SELF_BIN_PATH,
 };
 
 static BLOCK_MAP: LazyLock<BlockMap> = LazyLock::new(BlockMap::new);
@@ -33,6 +31,14 @@ struct BlockMapEntry {
     corr_bbs: Vec<u64>,
 }
 
+// ykllvm inserts a symbol pair marking the extent of the `.llvm_bb_addr_map` section.
+extern "C" {
+    #[link_name = "ykllvm.bbaddrmaps.start"]
+    static BBMAPS_START_BYTE: u8;
+    #[link_name = "ykllvm.bbaddrmaps.stop"]
+    static BBMAPS_STOP_BYTE: u8;
+}
+
 /// Maps (unrelocated) block offsets to their corresponding block map entry.
 pub struct BlockMap {
     tree: IntervalTree<u64, BlockMapEntry>,
@@ -42,23 +48,11 @@ impl BlockMap {
     /// Parse the LLVM blockmap section of the current executable and return a struct holding the
     /// mappings.
     pub fn new() -> Self {
-        let (bc, bc_len) = llvmbc_section();
-
-        let mut start_addr = MaybeUninit::uninit();
-        let mut end_addr = MaybeUninit::uninit();
-        let found = unsafe {
-            __ykllvmwrap_find_bbmaps(bc, bc_len, start_addr.as_mut_ptr(), end_addr.as_mut_ptr())
-        };
-        if !found {
-            panic!("couldn't find .llvmbbaddrmap data!");
-        }
-        let (start_addr, end_addr) = unsafe { (start_addr.assume_init(), end_addr.assume_init()) };
+        let start_addr = unsafe { &BBMAPS_START_BYTE as *const u8 };
+        let stop_addr = unsafe { &BBMAPS_STOP_BYTE as *const u8 };
+        debug_assert!(stop_addr > start_addr);
         let bbaddrmap_data =
-            unsafe { slice::from_raw_parts(start_addr as *const u8, end_addr - start_addr) };
-
-        debug_assert!(start_addr != usize::MAX);
-        debug_assert!(end_addr != usize::MIN);
-        debug_assert!(end_addr > start_addr);
+            unsafe { slice::from_raw_parts(start_addr, stop_addr.sub_ptr(start_addr)) };
 
         // Keep reading blockmap records until we fall outside of the section's bounds.
         let mut elems = Vec::new();
