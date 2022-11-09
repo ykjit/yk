@@ -183,15 +183,35 @@ impl TIPPGEPacket {
 pub(in crate::decode::ykpt) struct ShortTNTPacket {
     /// Bits encoding the branch decisions **and** a stop bit.
     ///
-    /// The deku assertion here is subtle: we know that the `branches` field must contain a stop
-    /// bit terminating the field, but if the stop bit appears in place of the first branch, then
-    /// this is not a short TNT packet at all; it's a long TNT packet.
+    /// The deku first part of the assertion here (`branches != 0x1`) is subtle: we know that the
+    /// `branches` field must contain a stop bit terminating the field, but if the stop bit appears
+    /// in place of the first branch, then this is not a short TNT packet at all; it's a long TNT
+    /// packet.
     ///
-    /// FIXME: marked `temp` until we actually use the field.
-    #[deku(bits = "7", assert = "*branches != 0x1", temp)]
+    /// The second part of the assertion (`branches != 0x0`) prevents a pad packet (`0x0`) from
+    /// being interpreted as a short TNT with no stop bit.
+    #[deku(bits = "7", assert = "*branches != 0x1 && *branches != 0x0")]
     branches: u8,
     #[deku(bits = "1", assert = "*magic == false", temp)]
     magic: bool,
+}
+
+impl ShortTNTPacket {
+    pub(in crate::decode::ykpt) fn tnts(&self) -> Vec<bool> {
+        let mut push = false;
+        let mut tnts = Vec::new();
+        for i in (0..7).rev() {
+            let bit = self.branches >> i & 0x1;
+            if !push && bit == 1 {
+                // We are witnessing the stop bit. Push from now on.
+                push = true;
+            } else if push {
+                tnts.push(bit == 1)
+            }
+        }
+        debug_assert!(push); // or we didn't see a stop bit!
+        tnts
+    }
 }
 
 /// Long Taken/Not-Taken (TNT) packet.
@@ -204,6 +224,12 @@ pub(in crate::decode::ykpt) struct LongTNTPacket {
     /// FIXME: marked `temp` until we actually use the field.
     #[deku(bits = "48", temp)]
     branches: u64,
+}
+
+impl LongTNTPacket {
+    pub(in crate::decode::ykpt) fn tnts(&self) -> Vec<bool> {
+        todo!();
+    }
 }
 
 /// Target IP (TIP) packet.
@@ -290,7 +316,7 @@ pub(in crate::decode::ykpt) struct CYCPacket {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) enum PacketKind {
+pub(in crate::decode::ykpt) enum PacketKind {
     PSB,
     CBR,
     PSBEND,
@@ -337,7 +363,7 @@ impl Packet {
         }
     }
 
-    pub(super) fn kind(&self) -> PacketKind {
+    pub(in crate::decode::ykpt) fn kind(&self) -> PacketKind {
         match self {
             Self::PSB(_) => PacketKind::PSB,
             Self::CBR(_) => PacketKind::CBR,
@@ -352,5 +378,37 @@ impl Packet {
             Self::FUP(..) => PacketKind::FUP,
             Self::CYC(_) => PacketKind::CYC,
         }
+    }
+
+    /// Extract the taken/not-taken decisions from a TNT packet.
+    ///
+    /// Returns `None` if the packet is not a TNT packet.
+    ///
+    /// OPT: Use a bit-field instead of a vector.
+    pub(in crate::decode::ykpt) fn tnts(&self) -> Option<Vec<bool>> {
+        match self {
+            Self::ShortTNT(p) => Some(p.tnts()),
+            Self::LongTNT(p) => Some(p.tnts()),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ShortTNTPacket;
+
+    #[test]
+    fn short_tnt() {
+        let mk = |branches: u8| ShortTNTPacket { branches };
+
+        debug_assert_eq!(mk(0b1000000).tnts(), vec![false; 6]);
+        debug_assert_eq!(mk(0b1111111).tnts(), vec![true; 6]);
+        debug_assert_eq!(mk(0b0000011).tnts(), vec![true]);
+        debug_assert_eq!(mk(0b0000010).tnts(), vec![false]);
+        debug_assert_eq!(
+            mk(0b1001001).tnts(),
+            vec![false, false, true, false, false, true]
+        );
     }
 }

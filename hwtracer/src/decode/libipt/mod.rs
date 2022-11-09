@@ -147,7 +147,10 @@ impl<'t> Iterator for LibIPTBlockIterator<'t> {
         if first_instr == 0 {
             None // End of packet stream.
         } else {
-            Some(Ok(Block::new(first_instr, last_instr)))
+            // The `+1` here is subtle. Libipt gives us the first byte of the last instruction of
+            // (what it deems) a block. Our `Block` requires that we capture at least the first
+            // byte of each instruction using an exclusive upper bound, so we must add one.
+            Some(Ok(Block::from_vaddr_range(first_instr, last_instr + 1)))
         }
     }
 }
@@ -299,7 +302,7 @@ mod tests {
                     // This instruction is the start of a block.
                     let vaddr_s = line.split_whitespace().next().unwrap();
                     let vaddr = u64::from_str_radix(vaddr_s, 16).unwrap();
-                    block_vaddrs.push(Block::new(vaddr, 0));
+                    block_vaddrs.push(Block::from_vaddr_range(vaddr, 0));
                     block_start = false;
                 }
                 last_instr = Some(line.split_whitespace().nth(1).unwrap());

@@ -2,11 +2,14 @@
 
 use super::{IRTrace, ThreadTracer, ThreadTracerImpl, UnmappedTrace};
 use crate::errors::InvalidTraceError;
-use hwtracer::collect::{TraceCollector, TraceCollectorBuilder};
+use hwtracer::{
+    collect::{TraceCollector, TraceCollectorBuilder},
+    decode::{TraceDecoderBuilder, TraceDecoderKind},
+};
 use std::sync::LazyLock;
 
 pub mod mapper;
-use mapper::HWTMapper;
+pub use mapper::HWTMapper;
 
 static TRACE_COLLECTOR: LazyLock<TraceCollector> = LazyLock::new(|| {
     // FIXME: This just makes a default trace collector. We should allow configuration somehow.
@@ -48,18 +51,26 @@ pub(crate) fn start_tracing() -> ThreadTracer {
 struct PTTrace(Box<dyn hwtracer::Trace>);
 
 impl UnmappedTrace for PTTrace {
-    fn map(self: Box<Self>) -> Result<IRTrace, InvalidTraceError> {
-        let mt = HWTMapper::new();
-        let mapped = mt
-            .map_trace(self.0)
-            .map_err(|_| InvalidTraceError::InternalError)
-            .map(|(b, f)| IRTrace::new(b, f));
+    fn map(self: Box<Self>, decoder: TraceDecoderKind) -> Result<IRTrace, InvalidTraceError> {
+        let tdec = TraceDecoderBuilder::new().kind(decoder).build().unwrap();
+        let mut itr = tdec.iter_blocks(self.0.as_ref());
+        let mut mt = HWTMapper::new(&mut *itr);
+        let mut mapped = Vec::new();
 
-        if let Ok(x) = &mapped {
-            if x.len() == 0 {
-                return Err(InvalidTraceError::EmptyTrace);
+        let mut last = None;
+        while let Some(res) = mt.next(last) {
+            if let Ok(blk) = res {
+                mapped.push(blk);
+                last = mapped.last();
+            } else {
+                return Err(InvalidTraceError::InternalError);
             }
         }
-        mapped
+
+        if mapped.is_empty() {
+            return Err(InvalidTraceError::EmptyTrace);
+        }
+
+        Ok(IRTrace::new(mapped, mt.faddrs()))
     }
 }

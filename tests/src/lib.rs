@@ -1,5 +1,7 @@
 #![feature(once_cell)]
 
+mod hwtracer_ykpt;
+
 use std::{
     collections::HashMap,
     env,
@@ -79,7 +81,15 @@ impl<'a> ExtraLinkage<'a> {
 
 /// Make a compiler command that compiles `src` to `exe` using the optimisation flag `opt`.
 /// `extra_objs` is a collection of other object files to link.
-pub fn mk_compiler(exe: &Path, src: &Path, opt: &str, extra_objs: &[PathBuf]) -> Command {
+///
+/// If `patch_cp` is `false` then the argument to patch the control point is omitted.
+pub fn mk_compiler(
+    exe: &Path,
+    src: &Path,
+    opt: &str,
+    extra_objs: &[PathBuf],
+    patch_cp: bool,
+) -> Command {
     let mut compiler = Command::new("clang");
     compiler.env("YKD_PRINT_IR", "1");
 
@@ -105,7 +115,11 @@ pub fn mk_compiler(exe: &Path, src: &Path, opt: &str, extra_objs: &[PathBuf]) ->
     if !yk_config_out.status.success() {
         panic!("yk-config exited with non-zero status");
     }
-    let yk_flags = String::from_utf8(yk_config_out.stdout).unwrap();
+    let mut yk_flags = String::from_utf8(yk_config_out.stdout).unwrap();
+
+    if !patch_cp {
+        yk_flags = yk_flags.replace("-Wl,--mllvm=--yk-patch-control-point", "");
+    }
 
     // yk-config never returns arguments containing spaces, so we can split by space here. If this
     // ever changes, then we should build arguments as an "unparsed" string and parse that to `sh

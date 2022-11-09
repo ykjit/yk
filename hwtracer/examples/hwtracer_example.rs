@@ -10,7 +10,11 @@ fn print_trace(trace: Box<dyn Trace>, name: &str, result: u32, qty: usize) {
     println!("{}: num_blocks={}, result={}", name, count, result);
 
     for (i, blk) in dec.iter_blocks(&*trace).take(qty).enumerate() {
-        println!("  block {}: 0x{:x}", i, blk.unwrap().first_instr());
+        if let Some((vaddr, _)) = blk.unwrap().vaddr_range() {
+            println!("  block {}: 0x{:x}", i, vaddr);
+        } else {
+            println!("  block {}: ???", i);
+        }
     }
     if count > qty {
         println!("  ... {} more", count - qty);

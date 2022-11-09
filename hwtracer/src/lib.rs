@@ -1,6 +1,7 @@
 #![allow(clippy::upper_case_acronyms)]
 #![allow(clippy::new_without_default)]
 #![feature(once_cell)]
+#![feature(ptr_sub_ptr)]
 
 mod block;
 pub use block::Block;
@@ -8,6 +9,7 @@ mod c_errors;
 pub mod collect;
 pub mod decode;
 pub mod errors;
+pub mod llvm_blockmap;
 
 pub use errors::HWTracerError;
 use std::fmt::Debug;

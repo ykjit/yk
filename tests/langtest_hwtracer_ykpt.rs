@@ -8,29 +8,13 @@ use std::{
     process::Command,
 };
 use tempfile::TempDir;
-use tests::{mk_compiler, EXTRA_LINK};
+use tests::mk_compiler;
 
 const COMMENT: &str = "//";
 
 fn run_suite(opt: &'static str) {
     println!("Running C tests with {}...", opt);
 
-    // Tests with the filename prefix `debug_` are only run in debug builds.
-    #[cfg(cargo_profile = "release")]
-    let filter: fn(&Path) -> bool = |p| {
-        if let Some(ext) = p.extension() {
-            ext == "c"
-                && !p
-                    .file_name()
-                    .unwrap()
-                    .to_str()
-                    .unwrap()
-                    .starts_with("debug_")
-        } else {
-            false
-        }
-    };
-    #[cfg(cargo_profile = "debug")]
     let filter: fn(&Path) -> bool = |p| {
         if let Some(ext) = p.extension() {
             ext == "c"
@@ -41,7 +25,7 @@ fn run_suite(opt: &'static str) {
 
     let tempdir = TempDir::new().unwrap();
     LangTester::new()
-        .test_dir("c")
+        .test_dir("hwtracer_ykpt")
         .test_file_filter(filter)
         .test_extract(move |p| {
             let altp = p.with_extension(format!("c.{}", opt.strip_prefix("-").unwrap()));
@@ -60,16 +44,8 @@ fn run_suite(opt: &'static str) {
             exe.push(&tempdir);
             exe.push(p.file_stem().unwrap());
 
-            // Decide if we have extra objects to link to the test.
-            let key = p.file_name().unwrap().to_str().unwrap();
-            let extra_objs = EXTRA_LINK
-                .get(key)
-                .unwrap_or(&Vec::new())
-                .iter()
-                .map(|l| l.generate_obj(tempdir.path()))
-                .collect::<Vec<PathBuf>>();
-
-            let compiler = mk_compiler(&exe, p, opt, &extra_objs, true);
+            let mut compiler = mk_compiler(&exe, p, opt, &[], false);
+            compiler.arg("-ltests");
             let runtime = Command::new(exe.clone());
             vec![("Compiler", compiler), ("Run-time", runtime)]
         })
@@ -84,10 +60,6 @@ fn run_suite(opt: &'static str) {
 }
 
 fn main() {
-    // For now we can only compile with -O0 since higher optimisation levels introduce machine code
-    // we currently don't know how to deal with, e.g. temporaries which break stackmap
-    // reconstruction. This isn't a huge problem as in the future we will keep two versions of the
-    // interpreter around and only swap to -O0 when tracing and run on higher optimisation levels
-    // otherwise.
+    // See `main()` in `langtest_c.rs` for why we test only `-O0`.
     run_suite("-O0");
 }

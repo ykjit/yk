@@ -22,7 +22,7 @@ pub enum TraceDecoderKind {
 
 impl TraceDecoderKind {
     /// Returns the default kind of decoder for the current platform.
-    fn default_for_platform() -> Option<Self> {
+    pub fn default_for_platform() -> Option<Self> {
         for kind in Self::iter() {
             if Self::match_platform(&kind).is_ok() {
                 return Some(kind);
@@ -133,8 +133,8 @@ mod test_helpers {
                 break;
             }
             assert_eq!(
-                got.unwrap().unwrap().first_instr(),
-                expect.unwrap().first_instr()
+                got.unwrap().unwrap().vaddr_range().unwrap().0,
+                expect.unwrap().vaddr_range().unwrap().0
             );
         }
         // Check that both iterators were the same length.

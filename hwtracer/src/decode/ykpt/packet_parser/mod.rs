@@ -4,7 +4,7 @@ use crate::errors::HWTracerError;
 use deku::{bitvec::BitSlice, DekuRead};
 use std::iter::Iterator;
 
-mod packets;
+pub(in crate::decode::ykpt) mod packets;
 use packets::*;
 
 #[derive(Clone, Copy, Debug)]
@@ -37,10 +37,17 @@ impl PacketParserState {
                 PacketKind::LongTNT,
                 PacketKind::PSB,
                 PacketKind::MODE,
+                PacketKind::CBR,
                 PacketKind::TIPPGE,
                 PacketKind::TIPPGD,
             ],
-            Self::PSBPlus => &[PacketKind::CBR, PacketKind::PSBEND],
+            Self::PSBPlus => &[
+                PacketKind::PAD,
+                PacketKind::CBR,
+                PacketKind::FUP,
+                PacketKind::MODE,
+                PacketKind::PSBEND,
+            ],
         }
     }
 
@@ -226,7 +233,6 @@ mod tests {
 
         let mut ts = TestState::Init;
         for pkt in PacketParser::new(trace.bytes()) {
-            dbg!(&ts, &pkt);
             ts = match (ts, pkt.unwrap().kind()) {
                 (TestState::Init, PacketKind::PSB) => TestState::SawPSBPlusStart,
                 (TestState::SawPSBPlusStart, PacketKind::PSBEND) => TestState::SawPSBPlusEnd,
