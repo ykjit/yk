@@ -13,8 +13,8 @@
 //
 // (a) the Software, and
 // (b) any piece of software and/or hardware listed in the lrgrwrks.txt file
-// if one is included with the Software (each a "Larger Work" to which the Software
-// is contributed by such licensors),
+// if one is included with the Software (each a "Larger Work" to which the
+// Software is contributed by such licensors),
 //
 // without restriction, including without limitation the rights to copy, create
 // derivative works of, display, perform, and distribute the Software and make,
@@ -35,18 +35,17 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <stdbool.h>
-#include <intel-pt.h>
 #include "hwtracer_private.h"
+#include <intel-pt.h>
+#include <stdbool.h>
 
 /*
  * Sets the error information (if not already set).
  */
-void
-hwt_set_cerr(struct hwt_cerror *err, int kind, int code) {
-    // Only set the error info if we would not be overwriting an earlier error.
-    if (err->kind == hwt_cerror_unused) {
-        err->kind = kind;
-        err->code = code;
-    }
+void hwt_set_cerr(struct hwt_cerror *err, int kind, int code) {
+  // Only set the error info if we would not be overwriting an earlier error.
+  if (err->kind == hwt_cerror_unused) {
+    err->kind = kind;
+    err->code = code;
+  }
 }
