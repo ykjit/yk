@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "hwtracer",
     "tests",
     "ykcapi",
     "ykllvmwrap",
