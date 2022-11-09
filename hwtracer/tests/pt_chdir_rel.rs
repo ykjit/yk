@@ -5,7 +5,7 @@
 /// bug: the LibIPT decoder was trying to create a libipt image using a (stale) relative path for
 /// the main binary's object.
 use hwtracer::{collect::TraceCollectorBuilder, decode::TraceDecoderBuilder};
-use std::{env, path::PathBuf, time::SystemTime};
+use std::{env, ffi::CString, path::PathBuf, time::SystemTime};
 
 #[inline(never)]
 pub fn work_loop(iters: u64) -> u64 {
@@ -28,7 +28,8 @@ fn pt_chdir_rel() {
         env::set_current_dir(&dir.to_str().unwrap()).unwrap();
 
         let prog = path.file_name().unwrap().to_str().unwrap();
-        let prog_p = prog.as_ptr() as *const i8;
+        let prog_c = CString::new(prog).unwrap();
+        let prog_p = prog_c.as_ptr();
 
         let args = env::args().collect::<Vec<_>>();
         let mut args_p = args.iter().map(|a| a.as_ptr()).collect::<Vec<_>>();
@@ -36,7 +37,7 @@ fn pt_chdir_rel() {
         args_p.push(0 as *const u8); // NULL sentinel.
 
         // We don't use `std::process::Command` because it can't reliably handle a relative path.
-        unsafe { libc::execv(prog_p, args_p.as_ptr() as *const *const i8) };
+        unsafe { libc::execv(prog_p as *const i8, args_p.as_ptr() as *const *const i8) };
         unreachable!();
     }
 
