@@ -73,3 +73,7 @@ done
 cargo test
 cargo test --release
 cargo bench
+
+# Run examples.
+cargo run --example hwtracer_example
+cargo run --release --example hwtracer_example
