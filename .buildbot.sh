@@ -32,6 +32,10 @@ done
 
 cargo fmt --all -- --check
 
+# Check licenses.
+which cargo-deny | cargo install cargo-deny
+cargo-deny check license
+
 # Build LLVM for the C tests.
 mkdir -p target && cd target
 git clone https://github.com/ykjit/ykllvm
