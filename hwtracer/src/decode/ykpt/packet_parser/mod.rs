@@ -1,8 +1,11 @@
 //! A packet parser for the Yk PT trace decoder.
 
 use crate::errors::HWTracerError;
-use deku::{bitvec::BitSlice, DekuRead};
-use std::iter::Iterator;
+use deku::{
+    bitvec::{BitSlice, Msb0},
+    DekuRead,
+};
+use std::{cmp::min, iter::Iterator};
 
 pub(in crate::decode::ykpt) mod packets;
 use packets::*;
@@ -65,8 +68,9 @@ impl PacketParserState {
 }
 
 pub(super) struct PacketParser<'t> {
-    /// The raw bytes of the PT trace we are iterating over.
-    bytes: &'t [u8],
+    /// The raw bytes of the PT trace we are iterating over. Stored as a `BitSlice` so that we can
+    /// use `deku` to parse bit-granularity fields out of packets.
+    bits: &'t BitSlice<u8, Msb0>,
     /// The parser operates as a state machine. This field keeps track of which state we are in.
     state: PacketParserState,
     /// The most recent Target IP (TIP) value that we've seen. This is needed because updated TIP
@@ -99,7 +103,7 @@ macro_rules! read_to_packet_tip {
 impl<'t> PacketParser<'t> {
     pub(super) fn new(bytes: &'t [u8]) -> Self {
         Self {
-            bytes,
+            bits: BitSlice::from_slice(bytes),
             state: PacketParserState::Init,
             prev_tip: 0,
         }
@@ -107,29 +111,35 @@ impl<'t> PacketParser<'t> {
 
     /// Attempt to parse a packet of the specified `PacketKind`.
     fn parse_kind(&mut self, kind: PacketKind) -> Option<Packet> {
-        let bits = BitSlice::from_slice(self.bytes).ok()?;
+        // PT packets are always a multiple of 8-bits in size.
+        debug_assert_eq!(self.bits.len() % 8, 0);
+
         let parse_res = match kind {
             PacketKind::PSB => {
-                read_to_packet!(PSBPacket, bits, Packet::PSB)
+                read_to_packet!(PSBPacket, self.bits, Packet::PSB)
             }
-            PacketKind::CBR => read_to_packet!(CBRPacket, bits, Packet::CBR),
-            PacketKind::PSBEND => read_to_packet!(PSBENDPacket, bits, Packet::PSBEND),
-            PacketKind::PAD => read_to_packet!(PADPacket, bits, Packet::PAD),
-            PacketKind::MODE => read_to_packet!(MODEPacket, bits, Packet::MODE),
+            PacketKind::CBR => read_to_packet!(CBRPacket, self.bits, Packet::CBR),
+            PacketKind::PSBEND => read_to_packet!(PSBENDPacket, self.bits, Packet::PSBEND),
+            PacketKind::PAD => read_to_packet!(PADPacket, self.bits, Packet::PAD),
+            PacketKind::MODE => read_to_packet!(MODEPacket, self.bits, Packet::MODE),
             PacketKind::TIPPGE => {
-                read_to_packet_tip!(TIPPGEPacket, bits, Packet::TIPPGE, self.prev_tip)
+                read_to_packet_tip!(TIPPGEPacket, self.bits, Packet::TIPPGE, self.prev_tip)
             }
             PacketKind::TIPPGD => {
-                read_to_packet_tip!(TIPPGDPacket, bits, Packet::TIPPGD, self.prev_tip)
+                read_to_packet_tip!(TIPPGDPacket, self.bits, Packet::TIPPGD, self.prev_tip)
             }
-            PacketKind::ShortTNT => read_to_packet!(ShortTNTPacket, bits, Packet::ShortTNT),
-            PacketKind::LongTNT => read_to_packet!(LongTNTPacket, bits, Packet::LongTNT),
-            PacketKind::TIP => read_to_packet_tip!(TIPPacket, bits, Packet::TIP, self.prev_tip),
-            PacketKind::FUP => read_to_packet_tip!(FUPPacket, bits, Packet::FUP, self.prev_tip),
-            PacketKind::CYC => read_to_packet!(CYCPacket, bits, Packet::CYC),
+            PacketKind::ShortTNT => read_to_packet!(ShortTNTPacket, self.bits, Packet::ShortTNT),
+            PacketKind::LongTNT => read_to_packet!(LongTNTPacket, self.bits, Packet::LongTNT),
+            PacketKind::TIP => {
+                read_to_packet_tip!(TIPPacket, self.bits, Packet::TIP, self.prev_tip)
+            }
+            PacketKind::FUP => {
+                read_to_packet_tip!(FUPPacket, self.bits, Packet::FUP, self.prev_tip)
+            }
+            PacketKind::CYC => read_to_packet!(CYCPacket, self.bits, Packet::CYC),
         };
         if let Ok((remain, pkt)) = parse_res {
-            self.bytes = remain.as_raw_slice();
+            self.bits = remain;
             Some(pkt)
         } else {
             None
@@ -158,14 +168,14 @@ impl<'t> PacketParser<'t> {
     ///
     /// This is used to format error messages, but is also useful when debugging.
     fn byte_stream_str(&self, nbytes: usize, sep: &str) -> String {
-        use std::cmp::min;
-        let nbytes = min(nbytes, self.bytes.len());
+        let nbytes = min(nbytes, self.bits.len() / 8);
+        let mut bytes = self.bits.windows(8);
         let mut vals = Vec::new();
-        for i in 0..nbytes {
-            vals.push(format!("{:08b}", self.bytes[i]));
+        for _ in 0..nbytes {
+            vals.push(format!("{:08b}", bytes.next().unwrap()));
         }
 
-        if self.bytes.len() > nbytes {
+        if self.bits.len() > nbytes {
             vals.push("...".to_owned());
         }
 
@@ -193,7 +203,7 @@ impl<'t> Iterator for PacketParser<'t> {
     type Item = Result<Packet, HWTracerError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if !self.bytes.is_empty() {
+        if !self.bits.is_empty() {
             Some(self.parse_packet())
         } else {
             None
