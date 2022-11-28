@@ -72,6 +72,9 @@ handle_arg() {
             # Ensure we can unambiguously map back to LLVM IR blocks.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-block-disambiguate"
 
+            # Use the Yk extensions to the blockmap section.
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-extended-llvmbbaddrmap-section"
+
             # Have the `.llvmbc` and `.llvm_bb_addr_map` sections loaded into
             # memory by the loader.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-alloc-llvmbc-section"
