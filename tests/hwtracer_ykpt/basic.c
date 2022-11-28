@@ -4,8 +4,6 @@
 #include <stdio.h>
 #include <yk_testing.h>
 
-void __hwykpt_assert_basic(void *trace);
-
 __attribute__((noinline)) uint64_t work(uint64_t iters) {
   uint64_t sum = 0;
   NOOPT_VAL(iters);
@@ -19,5 +17,5 @@ int main(void) {
   void *tc = __hwykpt_start_collector();
   work(10000);
   void *trace = __hwykpt_stop_collector(tc);
-  __hwykpt_assert_basic(trace);
+  __hwykpt_libipt_vs_ykpt(trace);
 }

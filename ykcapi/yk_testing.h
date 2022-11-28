@@ -38,3 +38,4 @@ void __yktrace_hwt_mapper_blockmap_free(void *mapper);
 // Stuff for the hwtracer_ykpt suite.
 void *__hwykpt_start_collector(void);
 void *__hwykpt_stop_collector(void *tc);
+void __hwykpt_libipt_vs_ykpt(void *trace);

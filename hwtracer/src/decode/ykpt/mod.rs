@@ -120,7 +120,7 @@ impl<'t> YkPTBlockIterator<'t> {
                     .value
                     .call_offs()
                     .iter()
-                    .find(|c| c.callsite_off() > b_off)
+                    .find(|c| c.callsite_off() >= b_off)
                 {
                     let target = call_info.target_off();
                     if let Some(target_off) = target {
