@@ -2,10 +2,10 @@
 
 #![feature(once_cell)]
 #![feature(naked_functions)]
-#![feature(ptr_sub_ptr)]
 #![allow(clippy::new_without_default)]
 
 mod errors;
+use hwtracer::decode::TraceDecoderKind;
 use libc::c_void;
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
@@ -17,13 +17,12 @@ use std::{
     ffi::{c_char, c_int, CStr, CString},
     ptr,
 };
-mod hwt;
+pub mod hwt;
 use std::arch::asm;
 use tempfile::NamedTempFile;
 use ykutil::obj::llvmbc_section;
 
 pub use errors::InvalidTraceError;
-pub use hwt::mapper::BlockMap;
 
 thread_local! {
     // When `Some`, contains the `ThreadTracer` for the current thread. When `None`, the current
@@ -402,5 +401,5 @@ pub fn stop_tracing() -> Result<Box<dyn UnmappedTrace>, InvalidTraceError> {
 }
 
 pub trait UnmappedTrace: Send {
-    fn map(self: Box<Self>) -> Result<IRTrace, InvalidTraceError>;
+    fn map(self: Box<Self>, decoder: TraceDecoderKind) -> Result<IRTrace, InvalidTraceError>;
 }

@@ -56,7 +56,7 @@ fn main() {
 
     let binstem = PathBuf::from(args.test_file.file_stem().unwrap());
     let binpath = [tempdir.path(), &binstem].iter().collect::<PathBuf>();
-    let mut cmd = mk_compiler(&binpath, &test_path, "-O0", &extra_objs);
+    let mut cmd = mk_compiler(&binpath, &test_path, "-O0", &extra_objs, true);
     if !cmd.spawn().unwrap().wait().unwrap().success() {
         panic!("compilation failed");
     }

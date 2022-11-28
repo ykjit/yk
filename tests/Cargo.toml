@@ -5,6 +5,10 @@ authors = ["The Yk Developers"]
 edition = "2018"
 license = "Apache-2.0 OR MIT"
 
+[lib]
+# cdylib is reuired for the `hwtracer_ykpt` suite.
+crate-type = ["lib", "cdylib"]
+
 [[test]]
 name = "c_tests"
 path = "langtest_c.rs"
@@ -15,8 +19,15 @@ name = "trace_compiler_tests"
 path = "langtest_trace_compiler.rs"
 harness = false
 
+[[test]]
+name = "hwtracer_ykpt_tests"
+path = "langtest_hwtracer_ykpt.rs"
+harness = false
+
 [dependencies]
 clap = { features = ["derive"], version = "4.0.11" }
+hwtracer = { path = "../hwtracer" }
+itertools = "0.10.5"
 memmap2 = "0.5.2"
 regex = "1.5.4"
 tempfile = "3.3.0"
