@@ -15,7 +15,6 @@ use hwtracer::{
     collect::{TraceCollector, TraceCollectorBuilder, TraceCollectorKind},
     Trace,
 };
-use itertools::{EitherOrBoth::*, Itertools};
 use yktrace::hwt::HWTMapper;
 
 #[no_mangle]
@@ -37,8 +36,9 @@ pub extern "C" fn __hwykpt_stop_collector(tc: *mut TraceCollector) -> *mut Box<d
     Box::into_raw(Box::new(trace))
 }
 
+/// Check that the result of mapping `trace` with libipt and ykpt is the same.
 #[no_mangle]
-pub extern "C" fn __hwykpt_assert_basic(trace: *mut Box<dyn Trace>) {
+pub extern "C" fn __hwykpt_libipt_vs_ykpt(trace: *mut Box<dyn Trace>) {
     let trace: Box<Box<dyn Trace>> = unsafe { Box::from_raw(trace) };
 
     let ipt_tdec = TraceDecoderBuilder::new()
@@ -56,22 +56,11 @@ pub extern "C" fn __hwykpt_assert_basic(trace: *mut Box<dyn Trace>) {
     let mut ykpt_mapper = HWTMapper::new(&mut ykpt_itr);
 
     let mut last = None;
-    let mut ipt_blks = Vec::new();
-    while let Some(blk) = ipt_mapper.next(last) {
-        ipt_blks.push(blk.unwrap());
-        last = ipt_blks.last();
+    while let Some(got) = ipt_mapper.next(last.as_ref()) {
+        let got = got.unwrap();
+        let expect = ykpt_mapper.next(last.as_ref()).unwrap().unwrap();
+        assert_eq!(expect, got);
+        last = Some(got);
     }
-
-    let mut ykpt_blks = Vec::new();
-    while let Some(blk) = ykpt_mapper.next(last) {
-        ykpt_blks.push(blk.unwrap());
-        last = ykpt_blks.last();
-    }
-
-    for pair in ipt_blks.iter().zip_longest(ykpt_blks) {
-        match pair {
-            Both(expect, got) => assert_eq!(expect, &got),
-            _ => panic!("iterator lengths differ"),
-        }
-    }
+    assert!(ykpt_mapper.next(last.as_ref()).is_none());
 }
