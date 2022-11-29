@@ -52,7 +52,7 @@ pub struct ExtraLinkage<'a> {
 }
 
 impl<'a> ExtraLinkage<'a> {
-    fn new(output_file: &'a str, gen_cmd: &'a [&'a str]) -> Self {
+    pub fn new(output_file: &'a str, gen_cmd: &'a [&'a str]) -> Self {
         Self {
             output_file,
             gen_cmd,

@@ -28,7 +28,9 @@ pub enum SuccessorKind {
         /// The offset of the "not taken" successor, or `None` if control flow is divergent.
         not_taken_target: Option<u64>,
     },
-    /// A control flow edge known only at runtime, e.g. a return or an indirect branch.
+    /// A return edge.
+    Return,
+    /// Any other control flow edge known only at runtime, e.g. an indirect branch.
     Dynamic,
 }
 
@@ -148,7 +150,7 @@ impl BlockMap {
                     corr_bbs.push(leb128::read::unsigned(&mut crsr).unwrap());
                 }
 
-                // Read call offsets.
+                // Read call information.
                 let num_calls = leb128::read::unsigned(&mut crsr).unwrap();
                 let mut call_offs = Vec::new();
                 for _ in 0..num_calls {
@@ -181,7 +183,8 @@ impl BlockMap {
                         taken_target: crsr.read_u64::<NativeEndian>().unwrap(),
                         not_taken_target: read_maybe_divergent_target(&mut crsr),
                     },
-                    2 => SuccessorKind::Dynamic,
+                    2 => SuccessorKind::Return,
+                    3 => SuccessorKind::Dynamic,
                     _ => unreachable!(),
                 };
 

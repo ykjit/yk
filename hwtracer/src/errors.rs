@@ -30,6 +30,10 @@ pub enum HWTracerError {
     Unknown,
     /// Failed to decode trace.
     TraceParseError(String),
+    /// A disassembly-related error.
+    DisasmFail(String),
+    /// End of hardware decoder packet stream.
+    NoMorePackets,
     /// Any other error.
     Custom(Box<dyn Error>),
 }
@@ -58,6 +62,8 @@ impl Display for HWTracerError {
             HWTracerError::BadConfig(ref s) => write!(f, "{}", s),
             HWTracerError::Custom(ref bx) => write!(f, "{}", bx),
             HWTracerError::TraceParseError(ref s) => write!(f, "failed to parse trace: {}", s),
+            HWTracerError::NoMorePackets => write!(f, "End of packet stream"),
+            HWTracerError::DisasmFail(ref s) => write!(f, "failed to disassemble: {}", s),
             HWTracerError::Unknown => write!(f, "Unknown error"),
         }
     }
@@ -82,6 +88,8 @@ impl Error for HWTracerError {
             HWTracerError::Custom(ref bx) => Some(bx.as_ref()),
             HWTracerError::TraceParseError(_) => None,
             HWTracerError::Unknown => None,
+            HWTracerError::NoMorePackets => None,
+            HWTracerError::DisasmFail(_) => None,
         }
     }
 }

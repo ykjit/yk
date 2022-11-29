@@ -56,9 +56,15 @@ pub extern "C" fn __hwykpt_libipt_vs_ykpt(trace: *mut Box<dyn Trace>) {
     let mut ykpt_mapper = HWTMapper::new(&mut ykpt_itr);
 
     let mut last = None;
-    while let Some(got) = ipt_mapper.next(last.as_ref()) {
-        let got = got.unwrap();
-        let expect = ykpt_mapper.next(last.as_ref()).unwrap().unwrap();
+    loop {
+        let next = ipt_mapper.next(last.as_ref());
+        if next.is_none() {
+            break;
+        }
+        let expect = next.unwrap();
+
+        let expect = expect.unwrap();
+        let got = ykpt_mapper.next(last.as_ref()).unwrap().unwrap();
         assert_eq!(expect, got);
         last = Some(got);
     }

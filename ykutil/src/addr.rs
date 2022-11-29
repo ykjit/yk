@@ -102,12 +102,9 @@ pub fn vaddr_to_sym_and_obj(vaddr: usize) -> Result<SymbolInObject, ()> {
 #[cfg(test)]
 mod tests {
     use super::{code_vaddr_to_off, off_to_vaddr, vaddr_to_sym_and_obj, MaybeUninit};
+    use crate::obj::PHDR_MAIN_OBJ;
     use libc::{dladdr, dlsym, Dl_info};
-    use std::{
-        ffi::CString,
-        path::{Path, PathBuf},
-        ptr,
-    };
+    use std::{ffi::CString, path::PathBuf, ptr};
 
     #[test]
     fn map_libc() {
@@ -147,15 +144,10 @@ mod tests {
     fn round_trip_main() {
         let func_vaddr = round_trip_main as *const fn();
         let (_obj, off) = code_vaddr_to_off(func_vaddr as usize).unwrap();
-
-        // On Linux, the main object's name in the program headers is the empty string.
-        #[cfg(target_os = "linux")]
-        let main_obj = Path::new("");
-
-        #[cfg(not(target_os = "linux"))]
-        todo!(); // We may get away with using `_obj` returned from `code_vaddr_to_off()` above?
-
-        assert_eq!(off_to_vaddr(&main_obj, off).unwrap(), func_vaddr as usize);
+        assert_eq!(
+            off_to_vaddr(&PHDR_MAIN_OBJ, off).unwrap(),
+            func_vaddr as usize
+        );
     }
 
     #[test]
