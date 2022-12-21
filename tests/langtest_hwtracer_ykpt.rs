@@ -13,7 +13,7 @@ use tests::mk_compiler;
 const COMMENT: &str = "//";
 
 fn run_suite(opt: &'static str) {
-    println!("Running C tests with {}...", opt);
+    println!("Running hwtracer_ykpt tests with {}...", opt);
 
     let filter: fn(&Path) -> bool = |p| {
         if let Some(ext) = p.extension() {
