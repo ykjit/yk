@@ -26,6 +26,8 @@ attributes #0 = { "yk_outline" "noinline"}
 define void @main() {
 entry:
     call void @call_me()
+    call void (i64, i32, ...) @llvm.experimental.stackmap(i64 1, i32 0)
     unreachable
 }
+declare void @llvm.experimental.stackmap(i64, i32, ...)
 

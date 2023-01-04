@@ -23,6 +23,8 @@ define void @main() {
 entry:
     %0 = add i32 1, 1
     %1 = call i32 @f()
+    call void (i64, i32, ...) @llvm.experimental.stackmap(i64 1, i32 0)
     %2 = add i32 %0, %1
     unreachable
 }
+declare void @llvm.experimental.stackmap(i64, i32, ...)
