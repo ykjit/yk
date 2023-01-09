@@ -326,6 +326,84 @@ impl<'t> YkPTBlockIterator<'t> {
         Ok(None)
     }
 
+    /// Follow the successor of the block described by the blockmap entry `ent`.
+    fn follow_blockmap_successor(&mut self, ent: &BlockMapEntry) -> Result<Block, HWTracerError> {
+        match ent.successor() {
+            SuccessorKind::Unconditional { target } => {
+                if let Some(target_off) = target {
+                    self.cur_loc = ObjLoc::MainObj(*target_off);
+                    return self.lookup_block_from_main_bin_offset(*target_off);
+                } else {
+                    // Divergent control flow.
+                    todo!();
+                }
+            }
+            SuccessorKind::Conditional {
+                taken_target,
+                not_taken_target,
+            } => {
+                // If we don't have any TNT choices buffered, get more.
+                if self.tnts.is_empty() {
+                    self.seek_tnt()?;
+                }
+
+                // Find where to go next based on whether the trace took the branch or not.
+                //
+                // The `unwrap()` is guaranteed to succeed because the above call to
+                // `seek_tnt()` has populated `self.tnts()`.
+                let target_off = if self.tnts.pop_front().unwrap() {
+                    *taken_target
+                } else {
+                    if let Some(ntt) = not_taken_target {
+                        *ntt
+                    } else {
+                        // Divergent control flow.
+                        todo!();
+                    }
+                };
+                self.cur_loc = ObjLoc::MainObj(target_off);
+                return self.lookup_block_from_main_bin_offset(target_off);
+            }
+            SuccessorKind::Return => {
+                if self.is_return_compressed()? {
+                    // This unwrap cannot fail if the CPU has implemented compressed
+                    // returns correctly.
+                    let off = match self.comprets.pop().unwrap() {
+                        CompRetAddr::AfterCall(off) => off + 1,
+                        CompRetAddr::VAddr(vaddr) => {
+                            let (obj, off) = self.vaddr_to_off(vaddr)?;
+                            debug_assert!(obj == *SELF_BIN_PATH);
+                            off
+                        }
+                    };
+
+                    self.cur_loc = ObjLoc::MainObj(off + 1);
+                    return self.lookup_block_from_main_bin_offset(off + 1);
+                } else {
+                    // A regular uncompressed return that relies on a TIP update.
+                    //
+                    // Note that `is_return_compressed()` has already updated
+                    // `self.cur_loc()`.
+                    match self.cur_loc {
+                        ObjLoc::MainObj(off) => {
+                            return Ok(self.lookup_block_from_main_bin_offset(off)?)
+                        }
+                        _ => return Ok(Block::Unknown),
+                    };
+                }
+            }
+            SuccessorKind::Dynamic => {
+                // We can only know the successor via a TIP update in a packet.
+                //
+                // FIXME: can't test without fixing indirect branch support for the
+                // block disambiguator pass in ykllvm.
+                //
+                // Test already written: tests/hwtracer_ykpt/indirect_jump.c
+                todo!();
+            }
+        }
+    }
+
     fn do_next(&mut self) -> Result<Block, HWTracerError> {
         // Read as far ahead as we can using static successor info encoded into the blockmap.
         match self.cur_loc {
@@ -342,80 +420,7 @@ impl<'t> YkPTBlockIterator<'t> {
 
                     // If we get here, there were no further calls to follow in the block, so we
                     // consult the static successor information.
-                    match ent.value.successor() {
-                        SuccessorKind::Unconditional { target } => {
-                            if let Some(target_off) = target {
-                                self.cur_loc = ObjLoc::MainObj(*target_off);
-                                return self.lookup_block_from_main_bin_offset(*target_off);
-                            } else {
-                                // Divergent control flow.
-                                todo!();
-                            }
-                        }
-                        SuccessorKind::Conditional {
-                            taken_target,
-                            not_taken_target,
-                        } => {
-                            // If we don't have any TNT choices buffered, get more.
-                            if self.tnts.is_empty() {
-                                self.seek_tnt()?;
-                            }
-
-                            // Find where to go next based on whether the trace took the branch or not.
-                            //
-                            // The `unwrap()` is guaranteed to succeed because the above call to
-                            // `seek_tnt()` has populated `self.tnts()`.
-                            let target_off = if self.tnts.pop_front().unwrap() {
-                                *taken_target
-                            } else {
-                                if let Some(ntt) = not_taken_target {
-                                    *ntt
-                                } else {
-                                    // Divergent control flow.
-                                    todo!();
-                                }
-                            };
-                            self.cur_loc = ObjLoc::MainObj(target_off);
-                            return self.lookup_block_from_main_bin_offset(target_off);
-                        }
-                        SuccessorKind::Return => {
-                            if self.is_return_compressed()? {
-                                // This unwrap cannot fail if the CPU has implemented compressed
-                                // returns correctly.
-                                let off = match self.comprets.pop().unwrap() {
-                                    CompRetAddr::AfterCall(off) => off + 1,
-                                    CompRetAddr::VAddr(vaddr) => {
-                                        let (obj, off) = self.vaddr_to_off(vaddr)?;
-                                        debug_assert!(obj == *SELF_BIN_PATH);
-                                        off
-                                    }
-                                };
-
-                                self.cur_loc = ObjLoc::MainObj(off + 1);
-                                return self.lookup_block_from_main_bin_offset(off + 1);
-                            } else {
-                                // A regular uncompressed return that relies on a TIP update.
-                                //
-                                // Note that `is_return_compressed()` has already updated
-                                // `self.cur_loc()`.
-                                match self.cur_loc {
-                                    ObjLoc::MainObj(off) => {
-                                        return Ok(self.lookup_block_from_main_bin_offset(off)?)
-                                    }
-                                    _ => return Ok(Block::Unknown),
-                                };
-                            }
-                        }
-                        SuccessorKind::Dynamic => {
-                            // We can only know the successor via a TIP update in a packet.
-                            //
-                            // FIXME: can't test without fixing indirect branch support for the
-                            // block disambiguator pass in ykllvm.
-                            //
-                            // Test already written: tests/hwtracer_ykpt/indirect_jump.c
-                            todo!();
-                        }
-                    }
+                    return self.follow_blockmap_successor(&ent.value);
                 } else {
                     self.cur_loc =
                         ObjLoc::OtherObjOrUnknown(Some(self.off_to_vaddr(&PHDR_MAIN_OBJ, b_off)?));
