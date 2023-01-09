@@ -294,6 +294,38 @@ impl<'t> YkPTBlockIterator<'t> {
         }
     }
 
+    /// Use the blockmap entry `ent` to follow the next (after the offset `b_off`) call in the
+    /// block (if one exists).
+    ///
+    /// Returns `Ok(Some(blk))` if there was a call to follow that lands us in the block `blk`.
+    ///
+    /// Returns `Ok(None)` if there was no call to follow after `b_off`.
+    fn maybe_follow_blockmap_call(
+        &mut self,
+        b_off: u64,
+        ent: &BlockMapEntry,
+    ) -> Result<Option<Block>, HWTracerError> {
+        if let Some(call_info) = ent.call_offs().iter().find(|c| c.callsite_off() >= b_off) {
+            self.comprets
+                .push(CompRetAddr::AfterCall(call_info.callsite_off()));
+
+            let target = call_info.target_off();
+            if let Some(target_off) = target {
+                self.cur_loc = ObjLoc::MainObj(target_off);
+                return Ok(Some(self.lookup_block_from_main_bin_offset(target_off)?));
+            } else {
+                // Call target isn't known statically. Find it from a TIP packet.
+                self.seek_tip()?;
+                return match self.cur_loc {
+                    ObjLoc::MainObj(off) => Ok(Some(self.lookup_block_from_main_bin_offset(off)?)),
+                    ObjLoc::OtherObjOrUnknown(_) => Ok(Some(Block::Unknown)),
+                };
+            }
+        }
+
+        Ok(None)
+    }
+
     fn do_next(&mut self) -> Result<Block, HWTracerError> {
         // Read as far ahead as we can using static successor info encoded into the blockmap.
         match self.cur_loc {
@@ -304,27 +336,8 @@ impl<'t> YkPTBlockIterator<'t> {
                 if let Some(ent) = self.lookup_blockmap_entry(b_off.to_owned()) {
                     // If there are calls in the block that come *after* the current position in the
                     // block, then we will need to follow those before we look at the successor info.
-                    if let Some(call_info) = ent
-                        .value
-                        .call_offs()
-                        .iter()
-                        .find(|c| c.callsite_off() >= b_off)
-                    {
-                        self.comprets
-                            .push(CompRetAddr::AfterCall(call_info.callsite_off()));
-
-                        let target = call_info.target_off();
-                        if let Some(target_off) = target {
-                            self.cur_loc = ObjLoc::MainObj(target_off);
-                            return self.lookup_block_from_main_bin_offset(target_off);
-                        } else {
-                            // Call target isn't known statically. Find it from a TIP packet.
-                            self.seek_tip()?;
-                            return match self.cur_loc {
-                                ObjLoc::MainObj(off) => self.lookup_block_from_main_bin_offset(off),
-                                ObjLoc::OtherObjOrUnknown(_) => Ok(Block::Unknown),
-                            };
-                        }
+                    if let Some(blk) = self.maybe_follow_blockmap_call(b_off, &ent.value)? {
+                        return Ok(blk);
                     }
 
                     // If we get here, there were no further calls to follow in the block, so we
