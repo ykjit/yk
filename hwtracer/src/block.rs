@@ -16,7 +16,10 @@ pub enum Block {
         /// Virtual address of *any* byte of the last instruction in this block.
         last_instr: BlockAddr,
     },
-    /// An unkonwn address range.
+    /// An unknown virtual address range.
+    ///
+    /// This is required because decoders don't have perfect knowledge about every block
+    /// in the virtual address space.
     Unknown,
 }
 
@@ -46,8 +49,12 @@ impl Block {
         }
     }
 
-    pub fn unknown() -> Self {
-        Self::Unknown
+    /// Returns `true` if `self` represents an unknown virtual address range.
+    pub fn is_unknown(&self) -> bool {
+        match self {
+            Self::Unknown => true,
+            _ => false,
+        }
     }
 
     /// If `self` represents a known address range, returns the address range, otherwise `None`.

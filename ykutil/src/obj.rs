@@ -3,6 +3,12 @@
 use libc::{c_void, dladdr, Dl_info};
 use std::{ffi::CStr, mem::MaybeUninit, path::PathBuf, ptr, sync::LazyLock};
 
+// The name of the main object as it appears in the program headers.
+//
+// On Linux this is the empty string.
+#[cfg(target_os = "linux")]
+pub static PHDR_MAIN_OBJ: LazyLock<PathBuf> = LazyLock::new(|| PathBuf::new());
+
 extern "C" {
     fn find_main() -> *const c_void;
 }

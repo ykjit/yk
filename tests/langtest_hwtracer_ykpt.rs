@@ -3,17 +3,57 @@
 use lang_tester::LangTester;
 use regex::Regex;
 use std::{
+    collections::HashMap,
     fs::read_to_string,
     path::{Path, PathBuf},
     process::Command,
+    sync::LazyLock,
 };
 use tempfile::TempDir;
 use tests::mk_compiler;
+use tests::ExtraLinkage;
 
 const COMMENT: &str = "//";
 
+pub static EXTRA_LINK_HWTRACER_YKPT: LazyLock<HashMap<&'static str, Vec<ExtraLinkage>>> =
+    LazyLock::new(|| {
+        let mut map = HashMap::new();
+
+        // These tests get an extra, separately compiled (thus opaque to LTO), object file linked in.
+        map.insert(
+            "foreign.c",
+            vec![ExtraLinkage::new(
+                "%%TEMPDIR%%/call_me.o",
+                &[
+                    "clang",
+                    "-c",
+                    "-O0",
+                    "extra_linkage/call_me.c",
+                    "-o",
+                    "%%TEMPDIR%%/call_me.o",
+                ],
+            )],
+        );
+        map.insert(
+            "stifle_compressed_ret.c",
+            vec![ExtraLinkage::new(
+                "%%TEMPDIR%%/fudge.o",
+                &[
+                    "clang",
+                    "-c",
+                    "-O0",
+                    "extra_linkage/fudge.s",
+                    "-o",
+                    "%%TEMPDIR%%/fudge.o",
+                ],
+            )],
+        );
+
+        map
+    });
+
 fn run_suite(opt: &'static str) {
-    println!("Running C tests with {}...", opt);
+    println!("Running hwtracer_ykpt tests with {}...", opt);
 
     let filter: fn(&Path) -> bool = |p| {
         if let Some(ext) = p.extension() {
@@ -44,7 +84,16 @@ fn run_suite(opt: &'static str) {
             exe.push(&tempdir);
             exe.push(p.file_stem().unwrap());
 
-            let mut compiler = mk_compiler(&exe, p, opt, &[], false);
+            // Decide if we have extra objects to link to the test.
+            let key = p.file_name().unwrap().to_str().unwrap();
+            let extra_objs = EXTRA_LINK_HWTRACER_YKPT
+                .get(key)
+                .unwrap_or(&Vec::new())
+                .iter()
+                .map(|l| l.generate_obj(tempdir.path()))
+                .collect::<Vec<PathBuf>>();
+
+            let mut compiler = mk_compiler(&exe, p, opt, &extra_objs, false);
             compiler.arg("-ltests");
             let runtime = Command::new(exe.clone());
             vec![("Compiler", compiler), ("Run-time", runtime)]
