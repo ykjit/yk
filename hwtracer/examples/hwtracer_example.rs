@@ -1,11 +1,17 @@
 use hwtracer::Trace;
-use hwtracer::{collect::TraceCollectorBuilder, decode::TraceDecoderBuilder};
+use hwtracer::{
+    collect::TraceCollectorBuilder,
+    decode::{TraceDecoderBuilder, TraceDecoderKind},
+};
 use std::time::SystemTime;
 
 /// Prints the addresses of the first `qty` blocks in a trace along with it's name and
 /// computation result.
 fn print_trace(trace: Box<dyn Trace>, name: &str, result: u32, qty: usize) {
-    let dec = TraceDecoderBuilder::new().build().unwrap();
+    let dec = TraceDecoderBuilder::new()
+        .kind(TraceDecoderKind::LibIPT)
+        .build()
+        .unwrap();
     let count = dec.iter_blocks(&*trace).count();
     println!("{}: num_blocks={}, result={}", name, count, result);
 

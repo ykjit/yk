@@ -394,12 +394,13 @@ impl<'t> YkPTBlockIterator<'t> {
             }
             SuccessorKind::Dynamic => {
                 // We can only know the successor via a TIP update in a packet.
-                //
-                // FIXME: can't test without fixing indirect branch support for the
-                // block disambiguator pass in ykllvm.
-                //
-                // Test already written: tests/hwtracer_ykpt/indirect_jump.c
-                todo!();
+                self.seek_tip()?;
+                match self.cur_loc {
+                    ObjLoc::MainObj(off) => {
+                        return Ok(self.lookup_block_from_main_bin_offset(off)?)
+                    }
+                    _ => return Ok(Block::Unknown),
+                };
             }
         }
     }

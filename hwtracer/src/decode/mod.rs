@@ -16,8 +16,8 @@ use ykpt::YkPTTraceDecoder;
 
 #[derive(Clone, Copy, Debug, EnumIter)]
 pub enum TraceDecoderKind {
-    LibIPT,
     YkPT,
+    LibIPT,
 }
 
 impl TraceDecoderKind {
