@@ -12,8 +12,11 @@ use tests::{mk_compiler, EXTRA_LINK};
 
 const COMMENT: &str = "//";
 
-fn run_suite(opt: &'static str) {
-    println!("Running C tests with {}...", opt);
+fn run_suite(opt: &'static str, force_decoder: &'static str) {
+    println!(
+        "Running C tests with opt level {} and forcing the {} decoder...",
+        opt, force_decoder
+    );
 
     // Tests with the filename prefix `debug_` are only run in debug builds.
     #[cfg(cargo_profile = "release")]
@@ -70,7 +73,8 @@ fn run_suite(opt: &'static str) {
                 .collect::<Vec<PathBuf>>();
 
             let compiler = mk_compiler(&exe, p, opt, &extra_objs, true);
-            let runtime = Command::new(exe.clone());
+            let mut runtime = Command::new(exe.clone());
+            runtime.env("YKD_FORCE_TRACE_DECODER", force_decoder);
             vec![("Compiler", compiler), ("Run-time", runtime)]
         })
         .fm_options(|_, _, fmb| {
@@ -89,5 +93,6 @@ fn main() {
     // reconstruction. This isn't a huge problem as in the future we will keep two versions of the
     // interpreter around and only swap to -O0 when tracing and run on higher optimisation levels
     // otherwise.
-    run_suite("-O0");
+    run_suite("-O0", "libipt");
+    run_suite("-O0", "ykpt");
 }

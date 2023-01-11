@@ -33,6 +33,7 @@ tempfile = "3.3.0"
 yktrace = { path = "../yktrace", features = ["yk_testing"] }
 
 [dev-dependencies]
+hwtracer = { path = "../hwtracer", features = ["yk_testing"] }
 lang_tester = "0.7.1"
 ykcapi = { path = "../ykcapi", features = ["yk_testing", "yk_jitstate_debug"] }
 ykllvmwrap = { path = "../ykllvmwrap", features = ["yk_testing"] }
