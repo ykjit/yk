@@ -577,14 +577,15 @@ impl<'t> YkPTBlockIterator<'t> {
                         // the decoder elsewhere.
                     } else {
                         let target_vaddr = self.branch_target_vaddr(&inst);
-                        if target_vaddr == inst.next_ip() {
-                            // FIXME: Intel PT treats this case specially.
-                            todo!();
+                        // Intel PT doesn't compress a call to the next address in the instruction
+                        // stream because such calls are unlikely to be convergent (i.e. they are
+                        // unlikely to ever return).
+                        if target_vaddr != inst.next_ip() {
+                            self.comprets
+                                .push(CompRetAddr::VAddr(usize::try_from(inst.next_ip()).unwrap()));
                         }
                         // We don't expect to see any 16-bit mode far calls in modernity.
                         debug_assert!(!inst.is_call_far());
-                        self.comprets
-                            .push(CompRetAddr::VAddr(usize::try_from(inst.next_ip()).unwrap()));
                         dis.set_ip(target_vaddr);
                         reposition = true;
                     }
@@ -627,7 +628,7 @@ impl<'t> YkPTBlockIterator<'t> {
     /// Keep decoding packets until we encounter one with a TIP update.
     fn seek_tip(&mut self) -> Result<(), HWTracerError> {
         loop {
-            if self.packet()?.target_ip().is_some() {
+            if self.packet()?.kind().encodes_target_ip() {
                 // Note that self.packet() will have update `self.cur_loc`.
                 return Ok(());
             }
@@ -641,7 +642,7 @@ impl<'t> YkPTBlockIterator<'t> {
     fn seek_tnt_or_tip(&mut self) -> Result<Packet, HWTracerError> {
         loop {
             let pkt = self.packet()?;
-            if pkt.target_ip().is_some() || pkt.tnts().is_some() {
+            if pkt.kind().encodes_target_ip() || pkt.tnts().is_some() {
                 return Ok(pkt);
             }
         }
@@ -650,7 +651,7 @@ impl<'t> YkPTBlockIterator<'t> {
     /// Fetch the next packet and update iterator state.
     fn packet(&mut self) -> Result<Packet, HWTracerError> {
         let ret = if let Some(pkt_or_err) = self.parser.next() {
-            let pkt = pkt_or_err?;
+            let mut pkt = pkt_or_err?;
 
             // Update `self.pge` if necessary.
             match pkt.kind() {
@@ -661,6 +662,30 @@ impl<'t> YkPTBlockIterator<'t> {
                 PacketKind::TIPPGD => {
                     debug_assert!(self.pge);
                     self.pge = false;
+                }
+                PacketKind::FUP if self.pge => {
+                    // FIXME: https://github.com/ykjit/yk/issues/593
+                    //
+                    // A FUP packet indicates that regular control flow was interrupted by an
+                    // asynchronous event (e.g. a signal handler or a context switch). For now we
+                    // only support the simple case where execution jumps off to some untraceable
+                    // foreign code for a while, before returning and resuming where we left off.
+                    // This is characterised by a [FUP, TIP.PGD, TIP.PGE] sequence (with no
+                    // intermediate TIP or TNT packets). In this case we can simply ignore the
+                    // interruption. Later we need to support FUPs more generally.
+                    pkt = self.seek_tnt_or_tip()?;
+                    if pkt.kind() != PacketKind::TIPPGD {
+                        return Err(HWTracerError::TraceInterrupted);
+                    }
+                    pkt = self.seek_tnt_or_tip()?;
+                    if pkt.kind() != PacketKind::TIPPGE {
+                        return Err(HWTracerError::TraceInterrupted);
+                    }
+                    if let Some(pkt_or_err) = self.parser.next() {
+                        pkt = pkt_or_err?;
+                    } else {
+                        return Err(HWTracerError::NoMorePackets);
+                    }
                 }
                 _ => (),
             }

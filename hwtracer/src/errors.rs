@@ -34,6 +34,8 @@ pub enum HWTracerError {
     DisasmFail(String),
     /// End of hardware decoder packet stream.
     NoMorePackets,
+    /// The trace was interrupted by an asynchronous event.
+    TraceInterrupted,
     /// Any other error.
     Custom(Box<dyn Error>),
 }
@@ -64,6 +66,7 @@ impl Display for HWTracerError {
             HWTracerError::TraceParseError(ref s) => write!(f, "failed to parse trace: {}", s),
             HWTracerError::NoMorePackets => write!(f, "End of packet stream"),
             HWTracerError::DisasmFail(ref s) => write!(f, "failed to disassemble: {}", s),
+            HWTracerError::TraceInterrupted => write!(f, "trace interrupted"),
             HWTracerError::Unknown => write!(f, "Unknown error"),
         }
     }
@@ -90,6 +93,7 @@ impl Error for HWTracerError {
             HWTracerError::Unknown => None,
             HWTracerError::NoMorePackets => None,
             HWTracerError::DisasmFail(_) => None,
+            HWTracerError::TraceInterrupted => None,
         }
     }
 }
