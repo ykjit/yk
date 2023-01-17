@@ -376,7 +376,14 @@ impl Packet {
             Self::TIPPGD(p, prev_tip) => p.target_ip(*prev_tip),
             Self::TIP(p, prev_tip) => p.target_ip(*prev_tip),
             Self::FUP(p, prev_tip) => p.target_ip(*prev_tip),
-            _ => None,
+            Self::PSB(_)
+            | Self::CBR(_)
+            | Self::PSBEND(_)
+            | Self::PAD(_)
+            | Self::MODE(_)
+            | Self::ShortTNT(_)
+            | Self::LongTNT(_)
+            | Self::CYC(_) => None,
         }
     }
 
@@ -406,7 +413,16 @@ impl Packet {
         match self {
             Self::ShortTNT(p) => Some(p.tnts()),
             Self::LongTNT(p) => Some(p.tnts()),
-            _ => None,
+            Self::PSB(_)
+            | Self::CBR(_)
+            | Self::PSBEND(_)
+            | Self::PAD(_)
+            | Self::MODE(_)
+            | Self::TIPPGE(_, _)
+            | Self::TIPPGD(_, _)
+            | Self::TIP(_, _)
+            | Self::FUP(_, _)
+            | Self::CYC(_) => None,
         }
     }
 }
