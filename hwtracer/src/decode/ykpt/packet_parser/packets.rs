@@ -144,15 +144,49 @@ pub(in crate::decode::ykpt) struct PSBENDPacket {}
 #[deku(magic = b"\x00")]
 pub(in crate::decode::ykpt) struct PADPacket {}
 
-/// Mode (MODE.*) packet.
+#[derive(Debug, Eq, PartialEq)]
+pub enum Bitness {
+    Bits16,
+    Bits32,
+    Bits64,
+}
+
+/// Mode (MODE.Exec) packet.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 #[deku(magic = b"\x99")]
-pub(in crate::decode::ykpt) struct MODEPacket {
-    // If we ever need to actually interpret the data inside the `MODE.*` packets, it would be best
-    // to split this struct out into multiple structs and have deku parse the different mode kinds
-    // independently.
-    #[deku(temp)]
+pub(in crate::decode::ykpt) struct MODEExecPacket {
+    #[deku(bits = "3", assert = "*magic1 == 0x0", temp)]
+    magic1: u8,
+    #[deku(bits = "2", temp)]
+    reserved: u8,
+    #[deku(bits = "1", temp)]
+    if_: u8,
+    #[deku(bits = "1")]
+    csd: u8,
+    #[deku(bits = "1")]
+    csl_lma: u8,
+}
+
+impl MODEExecPacket {
+    pub fn bitness(&self) -> Bitness {
+        match (self.csd, self.csl_lma) {
+            (0, 1) => Bitness::Bits64,
+            (1, 0) => Bitness::Bits32,
+            (0, 0) => Bitness::Bits16,
+            _ => unreachable!(),
+        }
+    }
+}
+
+/// Mode (MODE.TSX) packet.
+#[deku_derive(DekuRead)]
+#[derive(Debug)]
+#[deku(magic = b"\x99")]
+pub(in crate::decode::ykpt) struct MODETSXPacket {
+    #[deku(bits = "3", assert = "*magic1 == 0x1", temp)]
+    magic1: u8,
+    #[deku(bits = "5", temp)]
     unused: u8,
 }
 
@@ -321,7 +355,8 @@ pub(in crate::decode::ykpt) enum PacketKind {
     CBR,
     PSBEND,
     PAD,
-    MODE,
+    MODEExec,
+    MODETSX,
     TIPPGE,
     TIPPGD,
     ShortTNT,
@@ -340,10 +375,29 @@ impl PacketKind {
             | Self::CBR
             | Self::PSBEND
             | Self::PAD
-            | Self::MODE
+            | Self::MODEExec
+            | Self::MODETSX
             | Self::ShortTNT
             | Self::LongTNT
             | Self::CYC => false,
+        }
+    }
+
+    /// Returns `true` if this packet kind is one of the `MODE.*` packets.
+    pub fn is_mode(&self) -> bool {
+        match self {
+            Self::MODEExec | Self::MODETSX => true,
+            Self::CBR
+            | Self::CYC
+            | Self::FUP
+            | Self::LongTNT
+            | Self::PAD
+            | Self::PSB
+            | Self::PSBEND
+            | Self::ShortTNT
+            | Self::TIP
+            | Self::TIPPGD
+            | Self::TIPPGE => false,
         }
     }
 }
@@ -358,7 +412,8 @@ pub(in crate::decode::ykpt) enum Packet {
     CBR(CBRPacket),
     PSBEND(PSBENDPacket),
     PAD(PADPacket),
-    MODE(MODEPacket),
+    MODEExec(MODEExecPacket),
+    MODETSX(MODETSXPacket),
     TIPPGE(TIPPGEPacket, Option<usize>),
     TIPPGD(TIPPGDPacket, Option<usize>),
     ShortTNT(ShortTNTPacket),
@@ -380,7 +435,8 @@ impl Packet {
             | Self::CBR(_)
             | Self::PSBEND(_)
             | Self::PAD(_)
-            | Self::MODE(_)
+            | Self::MODEExec(_)
+            | Self::MODETSX(_)
             | Self::ShortTNT(_)
             | Self::LongTNT(_)
             | Self::CYC(_) => None,
@@ -393,7 +449,8 @@ impl Packet {
             Self::CBR(_) => PacketKind::CBR,
             Self::PSBEND(_) => PacketKind::PSBEND,
             Self::PAD(_) => PacketKind::PAD,
-            Self::MODE(_) => PacketKind::MODE,
+            Self::MODEExec(_) => PacketKind::MODEExec,
+            Self::MODETSX(_) => PacketKind::MODETSX,
             Self::TIPPGE(..) => PacketKind::TIPPGE,
             Self::TIPPGD(..) => PacketKind::TIPPGD,
             Self::ShortTNT(_) => PacketKind::ShortTNT,
@@ -417,7 +474,8 @@ impl Packet {
             | Self::CBR(_)
             | Self::PSBEND(_)
             | Self::PAD(_)
-            | Self::MODE(_)
+            | Self::MODEExec(_)
+            | Self::MODETSX(_)
             | Self::TIPPGE(_, _)
             | Self::TIPPGD(_, _)
             | Self::TIP(_, _)
