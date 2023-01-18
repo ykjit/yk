@@ -39,7 +39,8 @@ impl PacketParserState {
                 PacketKind::CYC,
                 PacketKind::LongTNT,
                 PacketKind::PSB,
-                PacketKind::MODE,
+                PacketKind::MODEExec,
+                PacketKind::MODETSX,
                 PacketKind::CBR,
                 PacketKind::TIPPGE,
                 PacketKind::TIPPGD,
@@ -48,7 +49,8 @@ impl PacketParserState {
                 PacketKind::PAD,
                 PacketKind::CBR,
                 PacketKind::FUP,
-                PacketKind::MODE,
+                PacketKind::MODEExec,
+                PacketKind::MODETSX,
                 PacketKind::PSBEND,
             ],
         }
@@ -121,7 +123,8 @@ impl<'t> PacketParser<'t> {
             PacketKind::CBR => read_to_packet!(CBRPacket, self.bits, Packet::CBR),
             PacketKind::PSBEND => read_to_packet!(PSBENDPacket, self.bits, Packet::PSBEND),
             PacketKind::PAD => read_to_packet!(PADPacket, self.bits, Packet::PAD),
-            PacketKind::MODE => read_to_packet!(MODEPacket, self.bits, Packet::MODE),
+            PacketKind::MODEExec => read_to_packet!(MODEExecPacket, self.bits, Packet::MODEExec),
+            PacketKind::MODETSX => read_to_packet!(MODETSXPacket, self.bits, Packet::MODETSX),
             PacketKind::TIPPGE => {
                 read_to_packet_tip!(TIPPGEPacket, self.bits, Packet::TIPPGE, self.prev_tip)
             }
@@ -204,7 +207,8 @@ impl<'t> Iterator for PacketParser<'t> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if !self.bits.is_empty() {
-            Some(self.parse_packet())
+            let p = self.parse_packet();
+            Some(p)
         } else {
             None
         }

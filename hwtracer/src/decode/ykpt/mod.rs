@@ -62,6 +62,7 @@ use ykutil::{
 
 mod packet_parser;
 use packet_parser::{
+    packets::Bitness,
     packets::{Packet, PacketKind},
     PacketParser,
 };
@@ -84,6 +85,7 @@ impl TraceDecoder for YkPTTraceDecoder {
             tnts: VecDeque::new(),
             comprets: CompressedReturns::new(),
             pge: false,
+            unbound_modes: false,
         };
         Box::new(itr)
     }
@@ -244,6 +246,8 @@ struct YkPTBlockIterator<'t> {
     /// When true, packet generation is enabled (we've seen a `TIP.PGE` packet, but no
     /// corresponding `TIP.PGD` yet).
     pge: bool,
+    /// When `true` we have seen one of more `MODE.*` packets that are yet to be bound.
+    unbound_modes: bool,
 }
 
 impl<'t> YkPTBlockIterator<'t> {
@@ -663,16 +667,17 @@ impl<'t> YkPTBlockIterator<'t> {
                     debug_assert!(self.pge);
                     self.pge = false;
                 }
-                PacketKind::FUP if self.pge => {
+                PacketKind::FUP if self.pge && !self.unbound_modes => {
                     // FIXME: https://github.com/ykjit/yk/issues/593
                     //
-                    // A FUP packet indicates that regular control flow was interrupted by an
-                    // asynchronous event (e.g. a signal handler or a context switch). For now we
-                    // only support the simple case where execution jumps off to some untraceable
-                    // foreign code for a while, before returning and resuming where we left off.
-                    // This is characterised by a [FUP, TIP.PGD, TIP.PGE] sequence (with no
-                    // intermediate TIP or TNT packets). In this case we can simply ignore the
-                    // interruption. Later we need to support FUPs more generally.
+                    // A FUP packet when there are no outstanding MODE packets indicates that
+                    // regular control flow was interrupted by an asynchronous event (e.g. a signal
+                    // handler or a context switch). For now we only support the simple case where
+                    // execution jumps off to some untraceable foreign code for a while, before
+                    // returning and resuming where we left off. This is characterised by a [FUP,
+                    // TIP.PGD, TIP.PGE] sequence (with no intermediate TIP or TNT packets). In
+                    // this case we can simply ignore the interruption. Later we need to support
+                    // FUPs more generally.
                     pkt = self.seek_tnt_or_tip()?;
                     if pkt.kind() != PacketKind::TIPPGD {
                         return Err(HWTracerError::TraceInterrupted);
@@ -688,6 +693,21 @@ impl<'t> YkPTBlockIterator<'t> {
                     }
                 }
                 _ => (),
+            }
+
+            // If it's a MODE packet, remember we've seen it. The meaning of TIP and FUP packets
+            // vary depending upon if they were preceded by MODE packets.
+            if pkt.kind().is_mode() {
+                // This whole codebase assumes 64-bit mode.
+                if let Packet::MODEExec(ref mep) = pkt {
+                    debug_assert_eq!(mep.bitness(), Bitness::Bits64);
+                }
+                self.unbound_modes = true;
+            }
+
+            // Does this packet bind to prior MODE packets? If so, it "consumes" the packet.
+            if pkt.kind().encodes_target_ip() && self.unbound_modes {
+                self.unbound_modes = false;
             }
 
             // Update `self.target_ip` if necessary.
