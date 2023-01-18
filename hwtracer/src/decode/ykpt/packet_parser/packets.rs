@@ -331,6 +331,23 @@ pub(in crate::decode::ykpt) enum PacketKind {
     CYC,
 }
 
+impl PacketKind {
+    /// Returns true if this kind of packet has a field for encoding a target IP.
+    pub fn encodes_target_ip(&self) -> bool {
+        match self {
+            Self::TIPPGE | Self::TIPPGD | Self::TIP | Self::FUP => true,
+            Self::PSB
+            | Self::CBR
+            | Self::PSBEND
+            | Self::PAD
+            | Self::MODE
+            | Self::ShortTNT
+            | Self::LongTNT
+            | Self::CYC => false,
+        }
+    }
+}
+
 /// The top-level representation of an Intel Processor Trace packet.
 ///
 /// Variants with an `Option<usize>` may cache the previous TIP value (at the time the packet was
@@ -352,14 +369,21 @@ pub(in crate::decode::ykpt) enum Packet {
 }
 
 impl Packet {
-    /// If the packet contains a TIP update, return the IP value.
+    /// If the packet contains a (non "out of context") TIP update, return the IP value.
     pub(in crate::decode::ykpt) fn target_ip(&self) -> Option<usize> {
         match self {
             Self::TIPPGE(p, prev_tip) => p.target_ip(*prev_tip),
             Self::TIPPGD(p, prev_tip) => p.target_ip(*prev_tip),
             Self::TIP(p, prev_tip) => p.target_ip(*prev_tip),
             Self::FUP(p, prev_tip) => p.target_ip(*prev_tip),
-            _ => None,
+            Self::PSB(_)
+            | Self::CBR(_)
+            | Self::PSBEND(_)
+            | Self::PAD(_)
+            | Self::MODE(_)
+            | Self::ShortTNT(_)
+            | Self::LongTNT(_)
+            | Self::CYC(_) => None,
         }
     }
 
@@ -389,7 +413,16 @@ impl Packet {
         match self {
             Self::ShortTNT(p) => Some(p.tnts()),
             Self::LongTNT(p) => Some(p.tnts()),
-            _ => None,
+            Self::PSB(_)
+            | Self::CBR(_)
+            | Self::PSBEND(_)
+            | Self::PAD(_)
+            | Self::MODE(_)
+            | Self::TIPPGE(_, _)
+            | Self::TIPPGD(_, _)
+            | Self::TIP(_, _)
+            | Self::FUP(_, _)
+            | Self::CYC(_) => None,
         }
     }
 }
