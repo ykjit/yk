@@ -253,7 +253,12 @@ mod tests {
     ///
     /// Mnemonic assumed to be lower case.
     fn instr_terminates_block(instr: &str) -> bool {
-        assert!(instr.find(|c: char| !c.is_lowercase()).is_none());
+        // Note that the disassembler sometimes uses the `data16` mnemonic for multi-byte NOPs, so
+        // we have to allow numeric characters too.
+        // https://stackoverflow.com/questions/36706280/what-does-data16-mean-in-objdump-output
+        assert!(instr
+            .find(|c: char| !c.is_lowercase() && !c.is_numeric())
+            .is_none());
         match instr {
             // JMP or Jcc are the only instructions beginning with 'j'.
             m if m.starts_with("j") => true,
