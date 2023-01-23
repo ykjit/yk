@@ -26,6 +26,7 @@
 #include <err.h>
 #include <filesystem>
 #include <link.h>
+#include <optional>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -60,14 +61,14 @@ struct BitcodeSection {
 //
 // The string is prefixed with a `;` so as to look like a comment in a `.ll`
 // bytecode file.
-Optional<string> getSourceLevelInstructionAnnotation(const Instruction *I,
+optional<string> getSourceLevelInstructionAnnotation(const Instruction *I,
                                                      string &LastAnnot) {
   const DebugLoc &DL = I->getDebugLoc();
   string LineInfo;
   raw_string_ostream RSO(LineInfo);
   DL.print(RSO);
   if (LineInfo.empty())
-    return Optional<string>();
+    return optional<string>();
 
   string FuncName = "<unknown-func>";
   const MDNode *Scope = DL.getInlinedAtScope();
@@ -77,7 +78,7 @@ Optional<string> getSourceLevelInstructionAnnotation(const Instruction *I,
 
   // We only want to show an annotation when the location has changed.
   if (Line == LastAnnot)
-    return Optional<string>();
+    return optional<string>();
 
   LastAnnot = Line;
   return Line;
@@ -92,9 +93,9 @@ class DebugAnnotationWriter : public AssemblyAnnotationWriter {
 
 public:
   void emitInstructionAnnot(const Instruction *I, formatted_raw_ostream &OS) {
-    Optional<string> LineInfo =
+    optional<string> LineInfo =
         getSourceLevelInstructionAnnotation(I, LastLineInfo);
-    if (LineInfo.hasValue())
+    if (LineInfo.has_value())
       OS << "  " << LineInfo << "\n";
   }
 };
@@ -344,9 +345,9 @@ void rewriteDebugInfo(Module *M, string TraceName, int FD,
       // See if there's an "interpreter-source-level" annotation we can prepend.
       // This makes it easier to see which (approximate) part of the AOT code
       // the trace IR came from.
-      Optional<string> MaybeSrcAnnot =
+      optional<string> MaybeSrcAnnot =
           getSourceLevelInstructionAnnotation(&I, LastSrcAnnot);
-      if (MaybeSrcAnnot.hasValue()) {
+      if (MaybeSrcAnnot.has_value()) {
         writeString(FD, string("  ") + MaybeSrcAnnot.value() + "\n");
         LineNo++;
       }
