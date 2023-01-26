@@ -87,13 +87,13 @@ public:
   // Returns the optional IRBlock at index `Idx` in the trace. No value is
   // returned if element at `Idx` was unmappable. It is undefined behaviour to
   // invoke this method with an out-of-bounds `Idx`.
-  const Optional<IRBlock> operator[](size_t Idx) {
+  const optional<IRBlock> operator[](size_t Idx) {
     assert(Idx < Len);
     char *FuncName = FuncNames[Idx];
     if (FuncName == nullptr) {
-      return Optional<IRBlock>();
+      return optional<IRBlock>();
     } else {
-      return Optional<IRBlock>(IRBlock{FuncName, BBs[Idx]});
+      return optional<IRBlock>(IRBlock{FuncName, BBs[Idx]});
     }
   }
 
@@ -209,7 +209,7 @@ class JITModBuilder {
   // caller.
   std::vector<tuple<size_t, CallInst *>> InlinedCalls;
   // Instruction at which to continue after a call.
-  Optional<tuple<size_t, CallInst *>> ResumeAfter;
+  optional<tuple<size_t, CallInst *>> ResumeAfter;
   // Active stackframes at each guard. Stores basic block index, instruction
   // index, function name.
   std::vector<FrameInfo> ActiveFrames;
@@ -492,9 +492,9 @@ class JITModBuilder {
     // JITModule, make sure we look up the copy.
     auto OldRetVal = ((ReturnInst *)&*I)->getReturnValue();
     if (OldRetVal != nullptr) {
-      assert(ResumeAfter.hasValue());
+      assert(ResumeAfter.has_value());
       // Update the AOTMap accordingly.
-      Instruction *AOT = get<1>(ResumeAfter.getValue());
+      Instruction *AOT = get<1>(ResumeAfter.value());
       Value *JIT = getMappedValue(OldRetVal);
       VMap[AOT] = getMappedValue(OldRetVal);
       insertAOTMap(AOT, JIT, CurBBIdx, CurInstrIdx);
@@ -613,7 +613,7 @@ class JITModBuilder {
     // If `JITFunc` contains no blocks already, then the guard failure block
     // becomes the entry block. This would lead to a trace that
     // unconditionally and immediately fails a guard.
-    assert(JITFunc->getBasicBlockList().size() != 0);
+    assert(JITFunc->size() != 0);
 
     // Declare `errx(3)`.
     LLVMContext &Context = JITFunc->getContext();
@@ -778,8 +778,8 @@ class JITModBuilder {
     // so that we can insert an appropriate guard into the trace. A block must
     // exist at `InpTrace[TraceIdx + 1]` because the branch instruction must
     // transfer to a successor block, and branching cannot turn off tracing.
-    assert(InpTrace[TraceIdx + 1].hasValue()); // Should be a mappable block.
-    IRBlock NextIB = InpTrace[TraceIdx + 1].getValue();
+    assert(InpTrace[TraceIdx + 1].has_value()); // Should be a mappable block.
+    IRBlock NextIB = InpTrace[TraceIdx + 1].value();
     BasicBlock *NextBB;
     Function *NextFunc;
     std::tie(NextFunc, NextBB) = getLLVMAOTFuncAndBlock(&NextIB);
@@ -1237,13 +1237,13 @@ public:
     // Initialise the memory block holding live AOT values for guard failures.
     BasicBlock *NextCompletedBlock = nullptr;
     for (size_t Idx = 0; Idx < InpTrace.Length(); Idx++) {
-      Optional<IRBlock> MaybeIB = InpTrace[Idx];
-      if (ExpectUnmappable && !MaybeIB.hasValue()) {
+      optional<IRBlock> MaybeIB = InpTrace[Idx];
+      if (ExpectUnmappable && !MaybeIB.has_value()) {
         ExpectUnmappable = false;
         continue;
       }
-      assert(MaybeIB.hasValue());
-      IRBlock IB = MaybeIB.getValue();
+      assert(MaybeIB.has_value());
+      IRBlock IB = MaybeIB.value();
       size_t CurBBIdx = IB.BBIdx;
 
       Function *F;
@@ -1259,13 +1259,13 @@ public:
       for (size_t CurInstrIdx = 0; CurInstrIdx < BB->size(); CurInstrIdx++) {
         // If we've returned from a call, skip ahead to the instruction where
         // we left off.
-        if (ResumeAfter.hasValue() != 0) {
+        if (ResumeAfter.has_value() != 0) {
           // If we find ourselves resuming in a block other than the one we
           // expected, then the compiler has changed the block structure. For
           // now we are disabling fallthrough optimisations in ykllvm to
           // prevent this from happening.
-          assert(std::get<1>(ResumeAfter.getValue())->getParent() == BB);
-          CurInstrIdx = std::get<0>(ResumeAfter.getValue()) + 1;
+          assert(std::get<1>(ResumeAfter.value())->getParent() == BB);
+          CurInstrIdx = std::get<0>(ResumeAfter.value()) + 1;
           ResumeAfter.reset();
         }
         auto I = BB->begin();
@@ -1362,9 +1362,9 @@ public:
             if (!isa<InlineAsm>(CI->getCalledOperand())) {
               // Look ahead in the trace to find the callee so we can
               // map the arguments if we are inlining the call.
-              Optional<IRBlock> MaybeNextIB = InpTrace[Idx + 1];
-              if (MaybeNextIB.hasValue()) {
-                CF = AOTMod->getFunction(MaybeNextIB.getValue().FuncName);
+              optional<IRBlock> MaybeNextIB = InpTrace[Idx + 1];
+              if (MaybeNextIB.has_value()) {
+                CF = AOTMod->getFunction(MaybeNextIB.value().FuncName);
               } else {
                 CF = nullptr;
               }
