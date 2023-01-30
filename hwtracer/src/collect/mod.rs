@@ -9,6 +9,8 @@ use strum_macros::EnumIter;
 
 #[cfg(collector_perf)]
 pub(crate) mod perf;
+#[cfg(all(collector_perf, feature = "yk_testing"))]
+pub use perf::PerfTrace;
 #[cfg(collector_perf)]
 pub(crate) use perf::PerfTraceCollector;
 
