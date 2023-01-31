@@ -64,11 +64,8 @@ Cargo feature is enabled.
 When `YKD_SERIALISE_COMPILATION=1`, calls to `yk_control_point(loc)` will block
 while `loc` is being compiled.
 
-This variable is only available when the `c_testing` feature is used, and it is
-only intended for use in testing.
-
-This variable is only available when building with the `yk_testing` Cargo
-feature is enabled.
+This variable is only available when building `ykrt` with the `yk_testing`
+Cargo feature enabled.
 
 ### `YKD_TRACE_DEBUGINFO`
 
