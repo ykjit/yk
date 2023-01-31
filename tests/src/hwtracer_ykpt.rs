@@ -1,11 +1,12 @@
-//! Tests for hwtracer's ykpt decoder.
+//! Testing and benchmarking bits for hwtracer's ykpt decoder.
 //!
 //! Why is this so convoluted? Read on...
 //!
-//! Ideally these tests would be inline Rust tests in the `hwtracer` crate, however the ykpt
-//! decoder relies on the block map section inserted by ykllvm. This means that the test binary has
-//! to be LTO linked by ykllvm, and be written in C. But the plot thickens, as the kinds of things
-//! we want the tests to check are Rust-based, so we will have to call back into Rust somehow.
+//! Ideally tests and benchmarks would be written in pure Rust, however the ykpt
+//! decoder relies on the block map section inserted by ykllvm. This means that the tests and
+//! benchmarks have to be LTO linked by ykllvm, and be written in C. But the plot thickens, as the
+//! kinds of things we want the tests to check are Rust-based, so we will have to call back into
+//! Rust somehow.
 //!
 //! To that end, the test files in `tests/hwtracer_ykpt` are compiled into test binaries (as a
 //! langtester suite) and then they call into this file to have assertions checked in Rust code.
@@ -69,4 +70,24 @@ pub extern "C" fn __hwykpt_libipt_vs_ykpt(trace: *mut Box<dyn Trace>) {
         last = Some(got);
     }
     assert!(ykpt_mapper.next(last.as_ref()).is_none());
+}
+
+/// Decode the specified trace and iterate over the resulting blocks.
+///
+/// Used for benchmarks.
+#[no_mangle]
+pub extern "C" fn __hwykpt_decode_trace(
+    trace: *mut Box<dyn Trace>,
+    decoder_kind: TraceDecoderKind,
+) {
+    let trace: Box<Box<dyn Trace>> = unsafe { Box::from_raw(trace) };
+
+    let ipt_tdec = TraceDecoderBuilder::new()
+        .kind(decoder_kind)
+        .build()
+        .unwrap();
+
+    for b in ipt_tdec.iter_blocks(&**trace) {
+        b.unwrap();
+    }
 }
