@@ -9,6 +9,14 @@ program execution.
 
 ## Run-time Variables
 
+### `YKD_FORCE_TRACE_DECODER`
+
+Forces use of the specified trace decoder. Valid values are `libipt` and
+`ykpt`.
+
+This variable is only available when `hwtracer` is compiled with the
+`yk_testing` Cargo feature enabled.
+
 ### `YKD_PRINT_IR`
 
 `YKD_PRINT_IR` accepts a comma-separated list of JIT pipeline stages at which
