@@ -7,7 +7,21 @@ Variables prefixed with `YKD_` are intended for debugging only. Most (if not
 all) of the debugging variables introduce extra computation that slows down
 program execution.
 
+Some variables are conditionally compiled-in when the containing crate is built
+with the `yk_testing` feature enabled. This feature is used internally for
+testing only. It is enabled whenever the `tests` crate is being compiled, so a
+regular `cargo build` in the root of the workspace will enable the feature (to
+build *without* the feature enabled, do `cargo build -p ykcapi`).
+
 ## Run-time Variables
+
+### `YKD_FORCE_TRACE_DECODER`
+
+Forces use of the specified trace decoder. Valid values are `libipt` and
+`ykpt`.
+
+This variable is only available when `hwtracer` is compiled with the
+`yk_testing` Cargo feature enabled.
 
 ### `YKD_PRINT_IR`
 
@@ -42,19 +56,16 @@ Note that there are no `start-interpreting` and `stop-interpreting`
 notifications: if the system is not currently tracing or executing JITted code,
 then it is implicitly interpreting.
 
-This variable is only available when building with the `yk_jitstate_debug`
-Cargo feature is enabled.
+This variable is only available when building `ykrt` with the
+`yk_jitstate_debug` Cargo feature enabled.
 
 ### `YKD_SERIALISE_COMPILATION`
 
 When `YKD_SERIALISE_COMPILATION=1`, calls to `yk_control_point(loc)` will block
 while `loc` is being compiled.
 
-This variable is only available when the `c_testing` feature is used, and it is
-only intended for use in testing.
-
-This variable is only available when building with the `yk_testing` Cargo
-feature is enabled.
+This variable is only available when building `ykrt` with the `yk_testing`
+Cargo feature enabled.
 
 ### `YKD_TRACE_DEBUGINFO`
 
