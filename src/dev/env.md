@@ -7,6 +7,12 @@ Variables prefixed with `YKD_` are intended for debugging only. Most (if not
 all) of the debugging variables introduce extra computation that slows down
 program execution.
 
+Some variables are conditionally compiled-in when the containing crate is built
+with the `yk_testing` feature enabled. This feature is used internally for
+testing only. It is enabled whenever the `tests` crate is being compiled, so a
+regular `cargo build` in the root of the workspace will enable the feature (to
+build *without* the feature enabled, do `cargo build -p ykcapi`).
+
 ## Run-time Variables
 
 ### `YKD_FORCE_TRACE_DECODER`
