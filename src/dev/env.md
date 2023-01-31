@@ -56,8 +56,8 @@ Note that there are no `start-interpreting` and `stop-interpreting`
 notifications: if the system is not currently tracing or executing JITted code,
 then it is implicitly interpreting.
 
-This variable is only available when building with the `yk_jitstate_debug`
-Cargo feature is enabled.
+This variable is only available when building `ykrt` with the
+`yk_jitstate_debug` Cargo feature enabled.
 
 ### `YKD_SERIALISE_COMPILATION`
 
