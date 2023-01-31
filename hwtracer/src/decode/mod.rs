@@ -1,6 +1,8 @@
 //! Trace decoders.
 
 use crate::{errors::HWTracerError, Block, Trace};
+#[cfg(feature = "yk_testing")]
+use std::env;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
@@ -48,6 +50,15 @@ impl TraceDecoderKind {
             }
         }
     }
+
+    #[cfg(feature = "yk_testing")]
+    fn from_str(name: &str) -> Self {
+        match name {
+            "libipt" => Self::LibIPT,
+            "ykpt" => Self::YkPT,
+            _ => panic!(),
+        }
+    }
 }
 
 pub trait TraceDecoder {
@@ -85,7 +96,13 @@ impl TraceDecoderBuilder {
     ///
     /// An error is returned if the requested decoder is inappropriate for the platform or the
     /// requested decoder was not compiled in to hwtracer.
-    pub fn build(self) -> Result<Box<dyn TraceDecoder>, HWTracerError> {
+    pub fn build(mut self) -> Result<Box<dyn TraceDecoder>, HWTracerError> {
+        #[cfg(feature = "yk_testing")]
+        {
+            if let Ok(val) = env::var("YKD_FORCE_TRACE_DECODER") {
+                self.kind = TraceDecoderKind::from_str(&val);
+            }
+        }
         self.kind.match_platform()?;
         match self.kind {
             TraceDecoderKind::LibIPT => {
