@@ -1,7 +1,7 @@
 //! Address utilities.
 
 use crate::obj::SELF_BIN_PATH;
-use libc::{c_void, dladdr, Dl_info};
+use libc::{self, c_void, Dl_info};
 use phdrs::objects;
 use std::mem::MaybeUninit;
 use std::{
@@ -11,15 +11,20 @@ use std::{
     ptr::null,
 };
 
+pub fn dladdr(vaddr: usize) -> Result<Dl_info, ()> {
+    let mut info = MaybeUninit::<Dl_info>::uninit();
+    if unsafe { libc::dladdr(vaddr as *const c_void, info.as_mut_ptr()) } != 0 {
+        Ok(unsafe { info.assume_init() })
+    } else {
+        Err(())
+    }
+}
+
 /// Given a virtual address, returns a pair indicating the object in which the address originated
 /// and the byte offset.
 pub fn vaddr_to_obj_and_off(vaddr: usize) -> Option<(PathBuf, u64)> {
     // Find the object file from which the virtual address was loaded.
-    let mut info = MaybeUninit::<Dl_info>::uninit();
-    if unsafe { dladdr(vaddr as *const c_void, info.as_mut_ptr()) } == 0 {
-        return None;
-    }
-    let info = unsafe { info.assume_init() };
+    let info = dladdr(vaddr).unwrap();
     let containing_obj = PathBuf::from(unsafe { CStr::from_ptr(info.dli_fname) }.to_str().unwrap());
 
     // Find the corresponding byte offset of the virtual address in the object.
@@ -82,11 +87,7 @@ impl SymbolInObject {
 /// This function uses `dladdr()` internally, and thus inherits the same symbol visibility rules
 /// used there. For example, this function will not find unexported symbols.
 pub fn vaddr_to_sym_and_obj(vaddr: usize) -> Result<SymbolInObject, ()> {
-    let mut info: MaybeUninit<Dl_info> = MaybeUninit::uninit();
-    if unsafe { dladdr(vaddr as *const c_void, info.as_mut_ptr()) } == 0 {
-        return Err(());
-    }
-    let info = unsafe { info.assume_init() };
+    let info = dladdr(vaddr)?;
     // `dladdr()` returns success if at leaset the virtual address could be mapped to an object
     // file, but here it is crucial that we can also find the symbol that the address belongs to.
     if info.dli_sname == null() {
@@ -103,7 +104,7 @@ pub fn vaddr_to_sym_and_obj(vaddr: usize) -> Result<SymbolInObject, ()> {
 mod tests {
     use super::{off_to_vaddr, vaddr_to_obj_and_off, vaddr_to_sym_and_obj, MaybeUninit};
     use crate::obj::PHDR_MAIN_OBJ;
-    use libc::{dladdr, dlsym, Dl_info};
+    use libc::{self, dlsym, Dl_info};
     use std::{ffi::CString, path::PathBuf, ptr};
 
     #[test]
@@ -129,7 +130,7 @@ mod tests {
         let func = CString::new("getuid").unwrap();
         let func_vaddr = unsafe { dlsym(ptr::null_mut(), func.as_ptr() as *const i8) };
         let mut dlinfo = MaybeUninit::<Dl_info>::uninit();
-        assert_ne!(unsafe { dladdr(func_vaddr, dlinfo.as_mut_ptr()) }, 0);
+        assert_ne!(unsafe { libc::dladdr(func_vaddr, dlinfo.as_mut_ptr()) }, 0);
         let dlinfo = unsafe { dlinfo.assume_init() };
         assert_eq!(func_vaddr, dlinfo.dli_saddr);
 

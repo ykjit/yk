@@ -1,7 +1,8 @@
 //! Utilities for dealing with object files.
 
-use libc::{c_void, dladdr, Dl_info};
-use std::{ffi::CStr, mem::MaybeUninit, path::PathBuf, ptr, sync::LazyLock};
+use crate::addr::dladdr;
+use libc::c_void;
+use std::{ffi::CStr, path::PathBuf, ptr, sync::LazyLock};
 
 // The name of the main object as it appears in the program headers.
 //
@@ -21,11 +22,7 @@ pub static SELF_BIN_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
     if addr == ptr::null_mut() as *mut c_void {
         panic!("couldn't find address of main()");
     }
-    let mut info = MaybeUninit::<Dl_info>::uninit();
-    if unsafe { dladdr(addr, info.as_mut_ptr()) } == 0 {
-        panic!("couldn't find Dl_info for main()");
-    }
-    let info = unsafe { info.assume_init() };
+    let info = dladdr(addr as usize).unwrap(); // ptr to usize cast always safe.
     PathBuf::from(unsafe { CStr::from_ptr(info.dli_fname) }.to_str().unwrap())
 });
 
