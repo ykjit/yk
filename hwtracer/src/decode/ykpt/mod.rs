@@ -263,7 +263,7 @@ impl<'t> YkPTBlockIterator<'t> {
 
     /// Convert a virtual address to a file offset.
     fn vaddr_to_off(&self, vaddr: usize) -> Result<(PathBuf, u64), HWTracerError> {
-        match ykutil::addr::code_vaddr_to_off(vaddr) {
+        match ykutil::addr::vaddr_to_obj_and_off(vaddr) {
             Some(tup) => Ok(tup),
             None => Err(HWTracerError::TraceParseError(
                 "failed to convert a virtual address to an offset".to_owned(),

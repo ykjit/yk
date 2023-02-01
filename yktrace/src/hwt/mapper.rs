@@ -6,7 +6,7 @@ use hwtracer::{Block, HWTracerError};
 use libc::c_void;
 use std::{collections::HashMap, convert::TryFrom, ffi::CString};
 use ykutil::{
-    addr::{code_vaddr_to_off, vaddr_to_sym_and_obj},
+    addr::{vaddr_to_obj_and_off, vaddr_to_sym_and_obj},
     obj::SELF_BIN_PATH,
 };
 
@@ -75,7 +75,7 @@ impl<'a> HWTMapper<'a> {
         }
         let (block_vaddr, block_last_instr) = b_rng.unwrap();
 
-        let (obj_name, block_off) = code_vaddr_to_off(block_vaddr as usize).unwrap();
+        let (obj_name, block_off) = vaddr_to_obj_and_off(block_vaddr as usize).unwrap();
 
         // Currently we only read in a block map and IR for the currently running binary (and not
         // for dynamically linked shared objects). Thus, if we see code from another object, we

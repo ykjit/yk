@@ -13,7 +13,7 @@ use std::{
 
 /// Given a virtual address, returns a pair indicating the object in which the address originated
 /// and the byte offset.
-pub fn code_vaddr_to_off(vaddr: usize) -> Option<(PathBuf, u64)> {
+pub fn vaddr_to_obj_and_off(vaddr: usize) -> Option<(PathBuf, u64)> {
     // Find the object file from which the virtual address was loaded.
     let mut info = MaybeUninit::<Dl_info>::uninit();
     if unsafe { dladdr(vaddr as *const c_void, info.as_mut_ptr()) } == 0 {
@@ -101,7 +101,7 @@ pub fn vaddr_to_sym_and_obj(vaddr: usize) -> Result<SymbolInObject, ()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{code_vaddr_to_off, off_to_vaddr, vaddr_to_sym_and_obj, MaybeUninit};
+    use super::{off_to_vaddr, vaddr_to_obj_and_off, vaddr_to_sym_and_obj, MaybeUninit};
     use crate::obj::PHDR_MAIN_OBJ;
     use libc::{dladdr, dlsym, Dl_info};
     use std::{ffi::CString, path::PathBuf, ptr};
@@ -111,15 +111,15 @@ mod tests {
         let func = CString::new("getuid").unwrap();
         let vaddr = unsafe { dlsym(ptr::null_mut(), func.as_ptr() as *const i8) };
         assert_ne!(vaddr, ptr::null_mut());
-        assert!(code_vaddr_to_off(vaddr as usize).is_some());
+        assert!(vaddr_to_obj_and_off(vaddr as usize).is_some());
     }
 
     #[test]
     #[no_mangle]
     fn map_so() {
-        let vaddr = code_vaddr_to_off as *const u8;
+        let vaddr = vaddr_to_obj_and_off as *const u8;
         assert_ne!(vaddr, ptr::null_mut());
-        assert!(code_vaddr_to_off(vaddr as usize).is_some());
+        assert!(vaddr_to_obj_and_off(vaddr as usize).is_some());
     }
 
     /// Check that converting a virtual address (from a shared object) to a file offset and back to
@@ -133,7 +133,7 @@ mod tests {
         let dlinfo = unsafe { dlinfo.assume_init() };
         assert_eq!(func_vaddr, dlinfo.dli_saddr);
 
-        let (obj, off) = code_vaddr_to_off(func_vaddr as usize).unwrap();
+        let (obj, off) = vaddr_to_obj_and_off(func_vaddr as usize).unwrap();
         assert_eq!(off_to_vaddr(&obj, off).unwrap(), func_vaddr as usize);
     }
 
@@ -143,7 +143,7 @@ mod tests {
     #[test]
     fn round_trip_main() {
         let func_vaddr = round_trip_main as *const fn();
-        let (_obj, off) = code_vaddr_to_off(func_vaddr as usize).unwrap();
+        let (_obj, off) = vaddr_to_obj_and_off(func_vaddr as usize).unwrap();
         assert_eq!(
             off_to_vaddr(&PHDR_MAIN_OBJ, off).unwrap(),
             func_vaddr as usize
