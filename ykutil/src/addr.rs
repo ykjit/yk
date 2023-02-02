@@ -1,6 +1,7 @@
 //! Address utilities.
 
 use crate::obj::SELF_BIN_PATH;
+use cached::proc_macro::cached;
 use libc::{self, c_void, Dl_info};
 use phdrs::objects;
 use std::mem::MaybeUninit;
@@ -13,8 +14,9 @@ use std::{
 /// A Rust wrapper around `libc::Dl_info` using FFI types.
 ///
 /// The strings inside are handed out by the loader and can (for now, since we don't support
-/// dlclose) be considered of static lifetime.
-#[derive(Debug)]
+/// dlclose) be considered of static lifetime. This makes the struct thread safe, and thus
+/// cacheable using `#[cached]`.
+#[derive(Debug, Clone)]
 pub struct DLInfo {
     dli_fname: Option<&'static CStr>,
     dli_fbase: usize,
@@ -61,6 +63,17 @@ impl DLInfo {
 }
 
 /// Wraps `libc::dlinfo`.
+///
+/// Returns `Err` if the underlying call to `libc::dlddr` fails.
+///
+/// FIXME: This cache should be invalidated (in part, if possible) when a object is loaded or
+/// unloaded from the address space.
+///
+/// FIXME: Consider using a LRU cache to limit memory consumption. The cached crate can do this for
+/// us if we can give it a suitable cache size.
+///
+/// FIXME: This cache is cloning. Performance could probably be improved more.
+#[cached]
 pub fn dladdr(vaddr: usize) -> Result<DLInfo, ()> {
     let mut info = MaybeUninit::<Dl_info>::uninit();
     if unsafe { libc::dladdr(vaddr as *const c_void, info.as_mut_ptr()) } != 0 {
