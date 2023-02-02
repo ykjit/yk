@@ -2,7 +2,7 @@
 
 use crate::addr::dladdr;
 use libc::c_void;
-use std::{ffi::CStr, path::PathBuf, ptr, sync::LazyLock};
+use std::{path::PathBuf, ptr, sync::LazyLock};
 
 // The name of the main object as it appears in the program headers.
 //
@@ -22,8 +22,9 @@ pub static SELF_BIN_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
     if addr == ptr::null_mut() as *mut c_void {
         panic!("couldn't find address of main()");
     }
+    // If this fails, there's little we can do but crash.
     let info = dladdr(addr as usize).unwrap(); // ptr to usize cast always safe.
-    PathBuf::from(unsafe { CStr::from_ptr(info.dli_fname) }.to_str().unwrap())
+    PathBuf::from(info.dli_fname().unwrap().to_str().unwrap())
 });
 
 /// The `llvm.embedded.module` symbol in the `.llvmbc` section.

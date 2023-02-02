@@ -109,16 +109,23 @@ impl<'a> HWTMapper<'a> {
                 // function, and a block X has a start address between blocks A and B, then X must
                 // also belong to the same function and there's no need to query the linker.
                 let sio = vaddr_to_sym_and_obj(usize::try_from(block_vaddr).unwrap()).unwrap();
-                debug_assert_eq!(obj_name.to_str().unwrap(), sio.obj_name().to_str().unwrap());
-                if !self.faddrs.contains_key(sio.sym_name()) {
-                    self.faddrs
-                        .insert(sio.sym_name().to_owned(), sio.sym_vaddr());
-                }
-                for bb in ent.value.corr_bbs() {
-                    ret.push(Some(IRBlock::new(
-                        sio.sym_name().to_owned(),
-                        usize::try_from(*bb).unwrap(),
-                    )));
+                debug_assert_eq!(
+                    obj_name.to_str().unwrap(),
+                    sio.dli_fname().unwrap().to_str().unwrap()
+                );
+                if let Some(sym_name) = sio.dli_sname() {
+                    if !self.faddrs.contains_key(sym_name) {
+                        self.faddrs
+                            .insert(sym_name.to_owned(), sio.dli_saddr() as *const c_void);
+                    }
+                    for bb in ent.value.corr_bbs() {
+                        ret.push(Some(IRBlock::new(
+                            sym_name.to_owned(),
+                            usize::try_from(*bb).unwrap(),
+                        )));
+                    }
+                } else {
+                    ret.push(None);
                 }
             } else {
                 ret.push(None);

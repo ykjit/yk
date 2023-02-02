@@ -5,16 +5,66 @@ use libc::{self, c_void, Dl_info};
 use phdrs::objects;
 use std::mem::MaybeUninit;
 use std::{
-    convert::TryFrom,
+    convert::{From, TryFrom},
     ffi::CStr,
     path::{Path, PathBuf},
-    ptr::null,
 };
 
-pub fn dladdr(vaddr: usize) -> Result<Dl_info, ()> {
+/// A Rust wrapper around `libc::Dl_info` using FFI types.
+///
+/// The strings inside are handed out by the loader and can (for now, since we don't support
+/// dlclose) be considered of static lifetime.
+#[derive(Debug)]
+pub struct DLInfo {
+    dli_fname: Option<&'static CStr>,
+    dli_fbase: usize,
+    dli_sname: Option<&'static CStr>,
+    dli_saddr: usize,
+}
+
+impl From<Dl_info> for DLInfo {
+    fn from(dli: Dl_info) -> Self {
+        let dli_fname = if !dli.dli_fname.is_null() {
+            Some(unsafe { CStr::from_ptr(dli.dli_fname) })
+        } else {
+            None
+        };
+
+        let dli_sname = if !dli.dli_sname.is_null() {
+            Some(unsafe { CStr::from_ptr(dli.dli_sname) })
+        } else {
+            None
+        };
+
+        Self {
+            dli_fname,
+            dli_fbase: dli.dli_fbase as usize,
+            dli_sname,
+            dli_saddr: dli.dli_saddr as usize,
+        }
+    }
+}
+
+impl DLInfo {
+    pub fn dli_fname(&self) -> Option<&'static CStr> {
+        self.dli_fname
+    }
+    pub fn dli_fbase(&self) -> usize {
+        self.dli_fbase
+    }
+    pub fn dli_sname(&self) -> Option<&'static CStr> {
+        self.dli_sname
+    }
+    pub fn dli_saddr(&self) -> usize {
+        self.dli_saddr
+    }
+}
+
+/// Wraps `libc::dlinfo`.
+pub fn dladdr(vaddr: usize) -> Result<DLInfo, ()> {
     let mut info = MaybeUninit::<Dl_info>::uninit();
     if unsafe { libc::dladdr(vaddr as *const c_void, info.as_mut_ptr()) } != 0 {
-        Ok(unsafe { info.assume_init() })
+        Ok(unsafe { info.assume_init() }.into())
     } else {
         Err(())
     }
@@ -25,7 +75,7 @@ pub fn dladdr(vaddr: usize) -> Result<Dl_info, ()> {
 pub fn vaddr_to_obj_and_off(vaddr: usize) -> Option<(PathBuf, u64)> {
     // Find the object file from which the virtual address was loaded.
     let info = dladdr(vaddr).unwrap();
-    let containing_obj = PathBuf::from(unsafe { CStr::from_ptr(info.dli_fname) }.to_str().unwrap());
+    let containing_obj = PathBuf::from(info.dli_fname.unwrap().to_str().unwrap());
 
     // Find the corresponding byte offset of the virtual address in the object.
     for obj in &objects() {
@@ -61,24 +111,6 @@ pub fn off_to_vaddr(containing_obj: &Path, off: u64) -> Option<usize> {
     None // Not found.
 }
 
-pub struct SymbolInObject {
-    obj_name: &'static CStr,
-    sym_name: &'static CStr,
-    sym_vaddr: *const c_void,
-}
-
-impl SymbolInObject {
-    pub fn obj_name(&self) -> &'static CStr {
-        self.obj_name
-    }
-    pub fn sym_name(&self) -> &'static CStr {
-        self.sym_name
-    }
-    pub fn sym_vaddr(&self) -> *const c_void {
-        self.sym_vaddr
-    }
-}
-
 /// Given a virtual address in the current address space, (if possible) determine the name of the
 /// symbol this belongs to, and the path to the object from which it came.
 ///
@@ -86,18 +118,15 @@ impl SymbolInObject {
 ///
 /// This function uses `dladdr()` internally, and thus inherits the same symbol visibility rules
 /// used there. For example, this function will not find unexported symbols.
-pub fn vaddr_to_sym_and_obj(vaddr: usize) -> Result<SymbolInObject, ()> {
+pub fn vaddr_to_sym_and_obj(vaddr: usize) -> Result<DLInfo, ()> {
     let info = dladdr(vaddr)?;
-    // `dladdr()` returns success if at leaset the virtual address could be mapped to an object
+    // `dladdr()` returns success if at least the virtual address could be mapped to an object
     // file, but here it is crucial that we can also find the symbol that the address belongs to.
-    if info.dli_sname == null() {
-        return Err(());
+    if info.dli_sname().is_some() {
+        Ok(info)
+    } else {
+        Err(())
     }
-    Ok(SymbolInObject {
-        obj_name: unsafe { CStr::from_ptr(info.dli_fname) },
-        sym_name: unsafe { CStr::from_ptr(info.dli_sname) },
-        sym_vaddr: info.dli_saddr,
-    })
 }
 
 #[cfg(test)]
@@ -157,8 +186,8 @@ mod tests {
         use libc::fflush;
         let func_vaddr = fflush as *const fn();
         let sio = vaddr_to_sym_and_obj(func_vaddr as usize).unwrap();
-        assert_eq!(sio.sym_name().to_str().unwrap(), "fflush");
-        let obj_path = PathBuf::from(sio.obj_name().to_str().unwrap());
+        assert_eq!(sio.dli_sname().unwrap().to_str().unwrap(), "fflush");
+        let obj_path = PathBuf::from(sio.dli_fname().unwrap().to_str().unwrap());
         assert!(obj_path
             .file_name()
             .unwrap()
