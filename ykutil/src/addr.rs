@@ -1,26 +1,94 @@
 //! Address utilities.
 
 use crate::obj::SELF_BIN_PATH;
-use libc::{c_void, dladdr, Dl_info};
+use cached::proc_macro::cached;
+use libc::{self, c_void, Dl_info};
 use phdrs::objects;
 use std::mem::MaybeUninit;
 use std::{
-    convert::TryFrom,
+    convert::{From, TryFrom},
     ffi::CStr,
     path::{Path, PathBuf},
-    ptr::null,
 };
+
+/// A Rust wrapper around `libc::Dl_info` using FFI types.
+///
+/// The strings inside are handed out by the loader and can (for now, since we don't support
+/// dlclose) be considered of static lifetime. This makes the struct thread safe, and thus
+/// cacheable using `#[cached]`.
+#[derive(Debug, Clone)]
+pub struct DLInfo {
+    dli_fname: Option<&'static CStr>,
+    dli_fbase: usize,
+    dli_sname: Option<&'static CStr>,
+    dli_saddr: usize,
+}
+
+impl From<Dl_info> for DLInfo {
+    fn from(dli: Dl_info) -> Self {
+        let dli_fname = if !dli.dli_fname.is_null() {
+            Some(unsafe { CStr::from_ptr(dli.dli_fname) })
+        } else {
+            None
+        };
+
+        let dli_sname = if !dli.dli_sname.is_null() {
+            Some(unsafe { CStr::from_ptr(dli.dli_sname) })
+        } else {
+            None
+        };
+
+        Self {
+            dli_fname,
+            dli_fbase: dli.dli_fbase as usize,
+            dli_sname,
+            dli_saddr: dli.dli_saddr as usize,
+        }
+    }
+}
+
+impl DLInfo {
+    pub fn dli_fname(&self) -> Option<&'static CStr> {
+        self.dli_fname
+    }
+    pub fn dli_fbase(&self) -> usize {
+        self.dli_fbase
+    }
+    pub fn dli_sname(&self) -> Option<&'static CStr> {
+        self.dli_sname
+    }
+    pub fn dli_saddr(&self) -> usize {
+        self.dli_saddr
+    }
+}
+
+/// Wraps `libc::dlinfo`.
+///
+/// Returns `Err` if the underlying call to `libc::dlddr` fails.
+///
+/// FIXME: This cache should be invalidated (in part, if possible) when a object is loaded or
+/// unloaded from the address space.
+///
+/// FIXME: Consider using a LRU cache to limit memory consumption. The cached crate can do this for
+/// us if we can give it a suitable cache size.
+///
+/// FIXME: This cache is cloning. Performance could probably be improved more.
+#[cached]
+pub fn dladdr(vaddr: usize) -> Result<DLInfo, ()> {
+    let mut info = MaybeUninit::<Dl_info>::uninit();
+    if unsafe { libc::dladdr(vaddr as *const c_void, info.as_mut_ptr()) } != 0 {
+        Ok(unsafe { info.assume_init() }.into())
+    } else {
+        Err(())
+    }
+}
 
 /// Given a virtual address, returns a pair indicating the object in which the address originated
 /// and the byte offset.
-pub fn code_vaddr_to_off(vaddr: usize) -> Option<(PathBuf, u64)> {
+pub fn vaddr_to_obj_and_off(vaddr: usize) -> Option<(PathBuf, u64)> {
     // Find the object file from which the virtual address was loaded.
-    let mut info = MaybeUninit::<Dl_info>::uninit();
-    if unsafe { dladdr(vaddr as *const c_void, info.as_mut_ptr()) } == 0 {
-        return None;
-    }
-    let info = unsafe { info.assume_init() };
-    let containing_obj = PathBuf::from(unsafe { CStr::from_ptr(info.dli_fname) }.to_str().unwrap());
+    let info = dladdr(vaddr).unwrap();
+    let containing_obj = PathBuf::from(info.dli_fname.unwrap().to_str().unwrap());
 
     // Find the corresponding byte offset of the virtual address in the object.
     for obj in &objects() {
@@ -56,24 +124,6 @@ pub fn off_to_vaddr(containing_obj: &Path, off: u64) -> Option<usize> {
     None // Not found.
 }
 
-pub struct SymbolInObject {
-    obj_name: &'static CStr,
-    sym_name: &'static CStr,
-    sym_vaddr: *const c_void,
-}
-
-impl SymbolInObject {
-    pub fn obj_name(&self) -> &'static CStr {
-        self.obj_name
-    }
-    pub fn sym_name(&self) -> &'static CStr {
-        self.sym_name
-    }
-    pub fn sym_vaddr(&self) -> *const c_void {
-        self.sym_vaddr
-    }
-}
-
 /// Given a virtual address in the current address space, (if possible) determine the name of the
 /// symbol this belongs to, and the path to the object from which it came.
 ///
@@ -81,29 +131,22 @@ impl SymbolInObject {
 ///
 /// This function uses `dladdr()` internally, and thus inherits the same symbol visibility rules
 /// used there. For example, this function will not find unexported symbols.
-pub fn vaddr_to_sym_and_obj(vaddr: usize) -> Result<SymbolInObject, ()> {
-    let mut info: MaybeUninit<Dl_info> = MaybeUninit::uninit();
-    if unsafe { dladdr(vaddr as *const c_void, info.as_mut_ptr()) } == 0 {
-        return Err(());
-    }
-    let info = unsafe { info.assume_init() };
-    // `dladdr()` returns success if at leaset the virtual address could be mapped to an object
+pub fn vaddr_to_sym_and_obj(vaddr: usize) -> Result<DLInfo, ()> {
+    let info = dladdr(vaddr)?;
+    // `dladdr()` returns success if at least the virtual address could be mapped to an object
     // file, but here it is crucial that we can also find the symbol that the address belongs to.
-    if info.dli_sname == null() {
-        return Err(());
+    if info.dli_sname().is_some() {
+        Ok(info)
+    } else {
+        Err(())
     }
-    Ok(SymbolInObject {
-        obj_name: unsafe { CStr::from_ptr(info.dli_fname) },
-        sym_name: unsafe { CStr::from_ptr(info.dli_sname) },
-        sym_vaddr: info.dli_saddr,
-    })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{code_vaddr_to_off, off_to_vaddr, vaddr_to_sym_and_obj, MaybeUninit};
+    use super::{off_to_vaddr, vaddr_to_obj_and_off, vaddr_to_sym_and_obj, MaybeUninit};
     use crate::obj::PHDR_MAIN_OBJ;
-    use libc::{dladdr, dlsym, Dl_info};
+    use libc::{self, dlsym, Dl_info};
     use std::{ffi::CString, path::PathBuf, ptr};
 
     #[test]
@@ -111,15 +154,15 @@ mod tests {
         let func = CString::new("getuid").unwrap();
         let vaddr = unsafe { dlsym(ptr::null_mut(), func.as_ptr() as *const i8) };
         assert_ne!(vaddr, ptr::null_mut());
-        assert!(code_vaddr_to_off(vaddr as usize).is_some());
+        assert!(vaddr_to_obj_and_off(vaddr as usize).is_some());
     }
 
     #[test]
     #[no_mangle]
     fn map_so() {
-        let vaddr = code_vaddr_to_off as *const u8;
+        let vaddr = vaddr_to_obj_and_off as *const u8;
         assert_ne!(vaddr, ptr::null_mut());
-        assert!(code_vaddr_to_off(vaddr as usize).is_some());
+        assert!(vaddr_to_obj_and_off(vaddr as usize).is_some());
     }
 
     /// Check that converting a virtual address (from a shared object) to a file offset and back to
@@ -129,11 +172,11 @@ mod tests {
         let func = CString::new("getuid").unwrap();
         let func_vaddr = unsafe { dlsym(ptr::null_mut(), func.as_ptr() as *const i8) };
         let mut dlinfo = MaybeUninit::<Dl_info>::uninit();
-        assert_ne!(unsafe { dladdr(func_vaddr, dlinfo.as_mut_ptr()) }, 0);
+        assert_ne!(unsafe { libc::dladdr(func_vaddr, dlinfo.as_mut_ptr()) }, 0);
         let dlinfo = unsafe { dlinfo.assume_init() };
         assert_eq!(func_vaddr, dlinfo.dli_saddr);
 
-        let (obj, off) = code_vaddr_to_off(func_vaddr as usize).unwrap();
+        let (obj, off) = vaddr_to_obj_and_off(func_vaddr as usize).unwrap();
         assert_eq!(off_to_vaddr(&obj, off).unwrap(), func_vaddr as usize);
     }
 
@@ -143,7 +186,7 @@ mod tests {
     #[test]
     fn round_trip_main() {
         let func_vaddr = round_trip_main as *const fn();
-        let (_obj, off) = code_vaddr_to_off(func_vaddr as usize).unwrap();
+        let (_obj, off) = vaddr_to_obj_and_off(func_vaddr as usize).unwrap();
         assert_eq!(
             off_to_vaddr(&PHDR_MAIN_OBJ, off).unwrap(),
             func_vaddr as usize
@@ -156,8 +199,8 @@ mod tests {
         use libc::fflush;
         let func_vaddr = fflush as *const fn();
         let sio = vaddr_to_sym_and_obj(func_vaddr as usize).unwrap();
-        assert_eq!(sio.sym_name().to_str().unwrap(), "fflush");
-        let obj_path = PathBuf::from(sio.obj_name().to_str().unwrap());
+        assert_eq!(sio.dli_sname().unwrap().to_str().unwrap(), "fflush");
+        let obj_path = PathBuf::from(sio.dli_fname().unwrap().to_str().unwrap());
         assert!(obj_path
             .file_name()
             .unwrap()
