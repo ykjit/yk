@@ -45,7 +45,6 @@ use crate::{
 };
 use iced_x86;
 use intervaltree::IntervalTree;
-use phdrs;
 use std::{
     collections::VecDeque,
     convert::TryFrom,
@@ -57,7 +56,7 @@ use std::{
 };
 use ykutil::{
     self,
-    obj::{PHDR_MAIN_OBJ, SELF_BIN_PATH},
+    obj::{PHDR_MAIN_OBJ, PHDR_OBJECT_CACHE, SELF_BIN_PATH},
 };
 
 mod packet_parser;
@@ -94,9 +93,9 @@ impl TraceDecoder for YkPTTraceDecoder {
 /// The virtual address ranges of segments that we may need to disassemble.
 static CODE_SEGS: LazyLock<CodeSegs> = LazyLock::new(|| {
     let mut segs = Vec::new();
-    for obj in phdrs::objects() {
+    for obj in PHDR_OBJECT_CACHE.iter() {
         let obj_base = obj.addr();
-        for hdr in obj.iter_phdrs() {
+        for hdr in obj.phdrs() {
             if (hdr.flags() & libc::PF_W) == 0 {
                 let vaddr = usize::try_from(obj_base + hdr.vaddr()).unwrap();
                 let memsz = usize::try_from(hdr.memsz()).unwrap();

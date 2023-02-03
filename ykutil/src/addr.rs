@@ -1,9 +1,8 @@
 //! Address utilities.
 
-use crate::obj::SELF_BIN_PATH;
+use crate::obj::{PHDR_OBJECT_CACHE, SELF_BIN_PATH};
 use cached::proc_macro::cached;
 use libc::{self, c_void, Dl_info};
-use phdrs::objects;
 use std::mem::MaybeUninit;
 use std::{
     convert::{From, TryFrom},
@@ -91,7 +90,7 @@ pub fn vaddr_to_obj_and_off(vaddr: usize) -> Option<(PathBuf, u64)> {
     let containing_obj = PathBuf::from(info.dli_fname.unwrap().to_str().unwrap());
 
     // Find the corresponding byte offset of the virtual address in the object.
-    for obj in &objects() {
+    for obj in PHDR_OBJECT_CACHE.iter() {
         let obj_name = obj.name();
         let obj_name: &Path = if unsafe { *obj_name.as_ptr() } == 0 {
             SELF_BIN_PATH.as_path()
@@ -115,7 +114,7 @@ pub fn vaddr_to_obj_and_off(vaddr: usize) -> Option<(PathBuf, u64)> {
 /// in the same form as it appears in the program header table. This function makes no attempt to
 /// canonicalise equivalent, but different (in terms of string equality) object paths.
 pub fn off_to_vaddr(containing_obj: &Path, off: u64) -> Option<usize> {
-    for obj in &objects() {
+    for obj in PHDR_OBJECT_CACHE.iter() {
         if Path::new(obj.name().to_str().unwrap()) != containing_obj {
             continue;
         }
