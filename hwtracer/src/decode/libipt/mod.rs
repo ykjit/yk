@@ -170,6 +170,7 @@ mod tests {
     use libc::{c_int, size_t, PF_X, PT_LOAD};
     use std::{convert::TryFrom, env, os::fd::AsRawFd, process::Command, ptr};
     use tempfile::NamedTempFile;
+    use ykutil::obj::PHDR_OBJECT_CACHE;
 
     extern "C" {
         fn hwt_ipt_dump_vdso(fd: c_int, vaddr: u64, len: size_t, err: &PerfPTCError) -> bool;
@@ -200,7 +201,7 @@ mod tests {
         let vdso_tempfile = NamedTempFile::new().unwrap();
 
         let exe = env::current_exe().unwrap();
-        for obj in phdrs::objects() {
+        for obj in PHDR_OBJECT_CACHE.iter() {
             let obj_name = obj.name().to_str().unwrap();
             let mut filename = if cfg!(target_os = "linux") && obj_name == "" {
                 exe.to_str().unwrap()
@@ -208,7 +209,7 @@ mod tests {
                 obj_name
             };
 
-            for hdr in obj.iter_phdrs() {
+            for hdr in obj.phdrs().iter() {
                 if hdr.type_() != PT_LOAD || hdr.flags() & PF_X == 0 {
                     continue; // Only look at loadable and executable segments.
                 }
