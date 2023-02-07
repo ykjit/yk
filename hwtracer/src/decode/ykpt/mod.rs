@@ -656,42 +656,39 @@ impl<'t> YkPTBlockIterator<'t> {
         let ret = if let Some(pkt_or_err) = self.parser.next() {
             let mut pkt = pkt_or_err?;
 
+            if pkt.kind() == PacketKind::FUP && self.pge && !self.unbound_modes {
+                // FIXME: https://github.com/ykjit/yk/issues/593
+                //
+                // A FUP packet when there are no outstanding MODE packets indicates that
+                // regular control flow was interrupted by an asynchronous event (e.g. a signal
+                // handler or a context switch). For now we only support the simple case where
+                // execution jumps off to some untraceable foreign code for a while, before
+                // returning and resuming where we left off. This is characterised by a [FUP,
+                // TIP.PGD, TIP.PGE] sequence (with no intermediate TIP or TNT packets). In
+                // this case we can simply ignore the interruption. Later we need to support
+                // FUPs more generally.
+                pkt = self.seek_tnt_or_tip()?;
+                if pkt.kind() != PacketKind::TIPPGD {
+                    return Err(HWTracerError::TraceInterrupted);
+                }
+                pkt = self.seek_tnt_or_tip()?;
+                if pkt.kind() != PacketKind::TIPPGE {
+                    return Err(HWTracerError::TraceInterrupted);
+                }
+                if let Some(pkt_or_err) = self.parser.next() {
+                    pkt = pkt_or_err?;
+                } else {
+                    return Err(HWTracerError::NoMorePackets);
+                }
+            }
+
             // Update `self.pge` if necessary.
-            match pkt.kind() {
-                PacketKind::TIPPGE => {
-                    debug_assert!(!self.pge);
-                    self.pge = true;
-                }
-                PacketKind::TIPPGD => {
-                    debug_assert!(self.pge);
-                    self.pge = false;
-                }
-                PacketKind::FUP if self.pge && !self.unbound_modes => {
-                    // FIXME: https://github.com/ykjit/yk/issues/593
-                    //
-                    // A FUP packet when there are no outstanding MODE packets indicates that
-                    // regular control flow was interrupted by an asynchronous event (e.g. a signal
-                    // handler or a context switch). For now we only support the simple case where
-                    // execution jumps off to some untraceable foreign code for a while, before
-                    // returning and resuming where we left off. This is characterised by a [FUP,
-                    // TIP.PGD, TIP.PGE] sequence (with no intermediate TIP or TNT packets). In
-                    // this case we can simply ignore the interruption. Later we need to support
-                    // FUPs more generally.
-                    pkt = self.seek_tnt_or_tip()?;
-                    if pkt.kind() != PacketKind::TIPPGD {
-                        return Err(HWTracerError::TraceInterrupted);
-                    }
-                    pkt = self.seek_tnt_or_tip()?;
-                    if pkt.kind() != PacketKind::TIPPGE {
-                        return Err(HWTracerError::TraceInterrupted);
-                    }
-                    if let Some(pkt_or_err) = self.parser.next() {
-                        pkt = pkt_or_err?;
-                    } else {
-                        return Err(HWTracerError::NoMorePackets);
-                    }
-                }
-                _ => (),
+            if pkt.kind() == PacketKind::TIPPGE {
+                debug_assert!(!self.pge);
+                self.pge = true;
+            } else if pkt.kind() == PacketKind::TIPPGD {
+                debug_assert!(self.pge);
+                self.pge = false;
             }
 
             // If it's a MODE packet, remember we've seen it. The meaning of TIP and FUP packets
