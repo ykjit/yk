@@ -2,7 +2,7 @@
 
 use crate::obj::{PHDR_OBJECT_CACHE, SELF_BIN_PATH};
 use cached::proc_macro::cached;
-use libc::{self, c_void, Dl_info};
+use libc::{self, c_void};
 use std::mem::MaybeUninit;
 use std::{
     convert::{From, TryFrom},
@@ -12,52 +12,58 @@ use std::{
 
 /// A Rust wrapper around `libc::Dl_info` using FFI types.
 ///
-/// The strings inside are handed out by the loader and can (for now, since we don't support
-/// dlclose) be considered of static lifetime. This makes the struct thread safe, and thus
-/// cacheable using `#[cached]`.
-#[derive(Debug, Clone)]
-pub struct DLInfo {
-    dli_fname: Option<&'static CStr>,
-    dli_fbase: usize,
-    dli_sname: Option<&'static CStr>,
-    dli_saddr: usize,
-}
+/// The strings inside are handed out (as raw pointers) by the loader and can (for now, since we
+/// don't support dlclose) be considered of static lifetime (hence `unsafe impl` of `Send` and
+/// `Sync`). This makes the struct thread safe, and thus cacheable using `#[cached]`.
+/// #[derive(Debug)]
+pub struct DLInfo(libc::Dl_info);
 
-impl From<Dl_info> for DLInfo {
-    fn from(dli: Dl_info) -> Self {
-        let dli_fname = if !dli.dli_fname.is_null() {
-            Some(unsafe { CStr::from_ptr(dli.dli_fname) })
-        } else {
-            None
-        };
+unsafe impl Send for DLInfo {}
+unsafe impl Sync for DLInfo {}
 
-        let dli_sname = if !dli.dli_sname.is_null() {
-            Some(unsafe { CStr::from_ptr(dli.dli_sname) })
-        } else {
-            None
-        };
-
-        Self {
-            dli_fname,
-            dli_fbase: dli.dli_fbase as usize,
-            dli_sname,
-            dli_saddr: dli.dli_saddr as usize,
-        }
+/// `libc::DL_info` isn't `Clone`, so we have to jump through some hoops.
+impl Clone for DLInfo {
+    fn clone(&self) -> Self {
+        Self(libc::Dl_info {
+            dli_fname: self.0.dli_fname,
+            dli_fbase: self.0.dli_fbase,
+            dli_sname: self.0.dli_sname,
+            dli_saddr: self.0.dli_saddr,
+        })
     }
 }
 
 impl DLInfo {
     pub fn dli_fname(&self) -> Option<&'static CStr> {
-        self.dli_fname
+        let p = self.0.dli_fname;
+        if !p.is_null() {
+            Some(unsafe { CStr::from_ptr(p) })
+        } else {
+            None
+        }
     }
+
     pub fn dli_fbase(&self) -> usize {
-        self.dli_fbase
+        self.0.dli_fbase as usize // pointer to usize cast always safe.
     }
+
     pub fn dli_sname(&self) -> Option<&'static CStr> {
-        self.dli_sname
+        let p = self.0.dli_sname;
+        if !p.is_null() {
+            Some(unsafe { CStr::from_ptr(p) })
+        } else {
+            None
+        }
     }
+
     pub fn dli_saddr(&self) -> usize {
-        self.dli_saddr
+        self.0.dli_saddr as usize // pointer to usize cast always safe
+    }
+}
+
+impl From<libc::Dl_info> for DLInfo {
+    fn from(dli: libc::Dl_info) -> Self {
+        Self(dli)
     }
 }
 
@@ -74,7 +80,7 @@ impl DLInfo {
 /// FIXME: This cache is cloning. Performance could probably be improved more.
 #[cached]
 pub fn dladdr(vaddr: usize) -> Result<DLInfo, ()> {
-    let mut info = MaybeUninit::<Dl_info>::uninit();
+    let mut info = MaybeUninit::<libc::Dl_info>::uninit();
     if unsafe { libc::dladdr(vaddr as *const c_void, info.as_mut_ptr()) } != 0 {
         Ok(unsafe { info.assume_init() }.into())
     } else {
@@ -87,7 +93,7 @@ pub fn dladdr(vaddr: usize) -> Result<DLInfo, ()> {
 pub fn vaddr_to_obj_and_off(vaddr: usize) -> Option<(PathBuf, u64)> {
     // Find the object file from which the virtual address was loaded.
     let info = dladdr(vaddr).unwrap();
-    let containing_obj = PathBuf::from(info.dli_fname.unwrap().to_str().unwrap());
+    let containing_obj = PathBuf::from(info.dli_fname().unwrap().to_str().unwrap());
 
     // Find the corresponding byte offset of the virtual address in the object.
     for obj in PHDR_OBJECT_CACHE.iter() {
