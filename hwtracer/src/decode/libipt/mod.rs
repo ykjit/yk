@@ -209,7 +209,7 @@ mod tests {
                 obj_name
             };
 
-            for hdr in obj.phdrs().iter() {
+            for hdr in obj.iter_phdrs() {
                 if hdr.type_() != PT_LOAD || hdr.flags() & PF_X == 0 {
                     continue; // Only look at loadable and executable segments.
                 }

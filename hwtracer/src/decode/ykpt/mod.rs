@@ -95,7 +95,7 @@ static CODE_SEGS: LazyLock<CodeSegs> = LazyLock::new(|| {
     let mut segs = Vec::new();
     for obj in PHDR_OBJECT_CACHE.iter() {
         let obj_base = obj.addr();
-        for hdr in obj.phdrs() {
+        for hdr in obj.iter_phdrs() {
             if (hdr.flags() & libc::PF_W) == 0 {
                 let vaddr = usize::try_from(obj_base + hdr.vaddr()).unwrap();
                 let memsz = usize::try_from(hdr.memsz()).unwrap();
