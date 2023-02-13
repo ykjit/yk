@@ -1,6 +1,10 @@
+use rerun_except::rerun_except;
 use std::{env, process::Command};
 
 fn main() {
+    // Ensure changing C++ source files or headers retriggers a build.
+    rerun_except(&[]).unwrap();
+
     // Compile our wrappers with the right LLVM C++ flags.
     let cxxflags_out = Command::new("llvm-config")
         .arg("--cxxflags")
