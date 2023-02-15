@@ -1152,6 +1152,21 @@ class JITModBuilder {
     VMap[TraceInputs] = JITFunc->getArg(JITFUNC_ARG_INPUTS_STRUCT_IDX);
 
     LastCompletedBlocks.push_back(nullptr);
+
+    // In debug builds, sanity check our assumptions about the input trace.
+#ifndef NDEBUG
+    size_t IL = InpTrace.Length();
+    // The trace is not empty.
+    assert(IL >= 1);
+    // The trace never starts with unmappable code (because it gets stripped by
+    // the maper).
+    assert(InpTrace[0].has_value());
+    // There should never be two unmappable blocks in a row in the trace
+    // (because the mapper collapses them to save memory).
+    for (size_t I = 0; I < IL - 1; I++) {
+      assert(InpTrace[I].has_value() || InpTrace[I + 1].has_value());
+    }
+#endif
   }
 
 public:
