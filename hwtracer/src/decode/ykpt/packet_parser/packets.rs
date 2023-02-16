@@ -349,6 +349,18 @@ pub(in crate::decode::ykpt) struct CYCPacket {
     extended: Vec<u8>,
 }
 
+/// Execution Stop (EXSTOP) packet.
+#[deku_derive(DekuRead)]
+#[derive(Debug)]
+pub(in crate::decode::ykpt) struct EXSTOPPacket {
+    #[deku(bits = "8", assert = "*magic1 == 0x2", temp)]
+    magic1: u8,
+    #[deku(bits = "1", temp)]
+    ip: u8,
+    #[deku(bits = "7", assert = "*magic2 == 0x2", temp)]
+    magic2: u8,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(in crate::decode::ykpt) enum PacketKind {
     PSB,
@@ -364,6 +376,7 @@ pub(in crate::decode::ykpt) enum PacketKind {
     TIP,
     FUP,
     CYC,
+    EXSTOP,
 }
 
 impl PacketKind {
@@ -379,7 +392,8 @@ impl PacketKind {
             | Self::MODETSX
             | Self::ShortTNT
             | Self::LongTNT
-            | Self::CYC => false,
+            | Self::CYC
+            | Self::EXSTOP => false,
         }
     }
 
@@ -397,7 +411,8 @@ impl PacketKind {
             | Self::ShortTNT
             | Self::TIP
             | Self::TIPPGD
-            | Self::TIPPGE => false,
+            | Self::TIPPGE
+            | Self::EXSTOP => false,
         }
     }
 }
@@ -421,6 +436,7 @@ pub(in crate::decode::ykpt) enum Packet {
     TIP(TIPPacket, Option<usize>),
     FUP(FUPPacket, Option<usize>),
     CYC(CYCPacket),
+    EXSTOP(EXSTOPPacket),
 }
 
 impl Packet {
@@ -439,7 +455,8 @@ impl Packet {
             | Self::MODETSX(_)
             | Self::ShortTNT(_)
             | Self::LongTNT(_)
-            | Self::CYC(_) => None,
+            | Self::CYC(_)
+            | Self::EXSTOP(_) => None,
         }
     }
 
@@ -458,6 +475,7 @@ impl Packet {
             Self::TIP(..) => PacketKind::TIP,
             Self::FUP(..) => PacketKind::FUP,
             Self::CYC(_) => PacketKind::CYC,
+            Self::EXSTOP(_) => PacketKind::EXSTOP,
         }
     }
 
@@ -480,7 +498,8 @@ impl Packet {
             | Self::TIPPGD(_, _)
             | Self::TIP(_, _)
             | Self::FUP(_, _)
-            | Self::CYC(_) => None,
+            | Self::CYC(_)
+            | Self::EXSTOP(_) => None,
         }
     }
 }

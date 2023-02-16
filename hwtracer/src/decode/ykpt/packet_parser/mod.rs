@@ -44,6 +44,7 @@ impl PacketParserState {
                 PacketKind::CBR,
                 PacketKind::TIPPGE,
                 PacketKind::TIPPGD,
+                PacketKind::EXSTOP,
             ],
             Self::PSBPlus => &[
                 PacketKind::PAD,
@@ -140,6 +141,7 @@ impl<'t> PacketParser<'t> {
                 read_to_packet_tip!(FUPPacket, self.bits, Packet::FUP, self.prev_tip)
             }
             PacketKind::CYC => read_to_packet!(CYCPacket, self.bits, Packet::CYC),
+            PacketKind::EXSTOP => read_to_packet!(EXSTOPPacket, self.bits, Packet::EXSTOP),
         };
         if let Ok((remain, pkt)) = parse_res {
             self.bits = remain;
@@ -160,7 +162,7 @@ impl<'t> PacketParser<'t> {
             }
         }
         Err(HWTracerError::TraceParseError(format!(
-            "In state {:?}, failed to parse packet: {}",
+            "In state {:?}, failed to parse packet from bytes: {}",
             self.state,
             self.byte_stream_str(8, ", ")
         )))
@@ -172,10 +174,18 @@ impl<'t> PacketParser<'t> {
     /// This is used to format error messages, but is also useful when debugging.
     fn byte_stream_str(&self, nbytes: usize, sep: &str) -> String {
         let nbytes = min(nbytes, self.bits.len() / 8);
-        let mut bytes = self.bits.windows(8);
+        let mut bytes = self.bits.chunks(8);
         let mut vals = Vec::new();
         for _ in 0..nbytes {
-            vals.push(format!("{:08b}", bytes.next().unwrap()));
+            vals.push(format!(
+                "{}",
+                bytes
+                    .next()
+                    .unwrap()
+                    .iter()
+                    .map(|bit| if *bit { '1' } else { '0' })
+                    .collect::<String>()
+            ));
         }
 
         if self.bits.len() > nbytes {
