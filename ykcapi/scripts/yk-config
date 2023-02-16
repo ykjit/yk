@@ -78,6 +78,8 @@ handle_arg() {
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-stackmap-offset-fix"
             # Enable shadow stacks.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-shadow-stack"
+            # Encode additional locations in stackmaps.
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-stackmap-add-locs"
 
             # Have the `.llvmbc` and `.llvm_bb_addr_map` sections loaded into
             # memory by the loader.
