@@ -21,7 +21,7 @@ fn parse_bb(bb: &str) -> Result<(CString, usize), Box<dyn Error>> {
 
 fn main() -> Result<(), String> {
     // Build the trace that we are going to have compiled.
-    let mut bbs = vec![IRBlock::unmappable()];
+    let mut bbs = vec![];
     if let Ok(tbbs) = env::var(BBS_ENV) {
         for bb in tbbs.split(',') {
             if let Ok((func, bb_idx)) = parse_bb(bb) {
