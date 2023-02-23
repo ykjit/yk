@@ -1371,12 +1371,14 @@ public:
             }
             ConstantAsMetadata *CAM =
                 cast<ConstantAsMetadata>(IMD->getOperand(0));
-            if (CAM->getValue()->isOneValue() && !isOutlining()) {
+            if (CAM->getValue()->isOneValue()) {
               // The intrinsic was inlined so we don't need to expect an
               // unmappable block and thus can just copy the call instruction
               // and continue processing the current block.
-              copyInstruction(&Builder, cast<CallInst>(I), CurBBIdx,
-                              CurInstrIdx);
+              if (!isOutlining()) {
+                copyInstruction(&Builder, cast<CallInst>(I), CurBBIdx,
+                                CurInstrIdx);
+              }
               continue;
             }
             // The intrinsic wasn't inlined so we let the following code handle
