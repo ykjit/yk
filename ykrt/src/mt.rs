@@ -392,15 +392,26 @@ impl MT {
                 Ok(x) => x,
                 Err(e) => todo!("{e:?}"),
             };
-            let (codeptr, di_tmpfile) = match irtrace.compile() {
-                Ok(x) => x,
-                Err(e) => todo!("{e:?}"),
+            match irtrace.compile() {
+                Ok((codeptr, di_tmpfile)) => {
+                    let ct = Box::new(CompiledTrace::new(codeptr, di_tmpfile));
+                    // FIXME: although we've now put the compiled trace into the `HotLocation`,
+                    // there's no guarantee that the `Location` for which we're compiling will ever
+                    // be executed again. In such a case, the memory has, in essence, leaked.
+                    mtx.lock().replace(ct);
+                }
+                Err(_e) => {
+                    // FIXME: Properly handle failed trace compilation, e.g. depending on the
+                    // reason for the failure we might want to block this location from being
+                    // traced again or only temporarily put it on hold and try again later.
+                    // See: https://github.com/ykjit/yk/issues/612
+                    // FIXME: Improve jit-state message.
+                    // See: https://github.com/ykjit/yk/issues/611
+                    //
+                    #[cfg(feature = "yk_jitstate_debug")]
+                    print_jit_state("trace-compilation-aborted");
+                }
             };
-            let ct = Box::new(CompiledTrace::new(codeptr, di_tmpfile));
-            // FIXME: although we've now put the compiled trace into the `HotLocation`, there's
-            // no guarantee that the `Location` for which we're compiling will ever be executed
-            // again. In such a case, the memory has, in essence, leaked.
-            mtx.lock().replace(ct);
         };
 
         #[cfg(feature = "yk_testing")]

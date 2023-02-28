@@ -1411,6 +1411,13 @@ public:
             ResumeAfter = make_tuple(CurInstrIdx, CI);
             break;
           } else {
+            StringRef S = CF->getName();
+            if (S == "_setjmp" || S == "_longjmp") {
+              // FIXME: We currently can't deal with traces containing
+              // setjmp/longjmp, so for now simply abort this trace.
+              // See: https://github.com/ykjit/yk/issues/610
+              return nullptr;
+            }
             handleCallInst(CI, CF, CurBBIdx, CurInstrIdx);
             break;
           }

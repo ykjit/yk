@@ -397,6 +397,11 @@ void *compileIRTrace(FN Func, char *FuncNames[], size_t BBs[], size_t TraceLen,
   std::tie(JITMod, TraceName, GlobalMappings, AOTMappingVec) =
       Func(AOTMod, FuncNames, BBs, TraceLen, FAddrKeys, FAddrVals, FAddrLen);
 
+  // If we failed to build the trace, return null.
+  if (JITMod == nullptr) {
+    return nullptr;
+  }
+
   DIP.print(DebugIR::JITPreOpt, JITMod);
 #ifndef NDEBUG
   llvm::verifyModule(*JITMod, &llvm::errs());
