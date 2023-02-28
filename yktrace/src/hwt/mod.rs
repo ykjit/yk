@@ -54,19 +54,11 @@ impl UnmappedTrace for PTTrace {
     fn map(self: Box<Self>, decoder: TraceDecoderKind) -> Result<IRTrace, InvalidTraceError> {
         let tdec = TraceDecoderBuilder::new().kind(decoder).build().unwrap();
         let mut itr = tdec.iter_blocks(self.0.as_ref());
-        let mut mt = HWTMapper::new(&mut *itr);
-        let mut mapped = Vec::new();
+        let mut mt = HWTMapper::new();
 
-        let mut last = None;
-        while let Some(res) = mt.next(last) {
-            if let Ok(blk) = res {
-                mapped.push(blk);
-                last = mapped.last();
-            } else {
-                return Err(InvalidTraceError::InternalError);
-            }
-        }
-
+        let mapped = mt
+            .map_trace(&mut *itr)
+            .map_err(|_| InvalidTraceError::InternalError)?;
         if mapped.is_empty() {
             return Err(InvalidTraceError::EmptyTrace);
         }
