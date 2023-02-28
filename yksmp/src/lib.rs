@@ -27,7 +27,7 @@ pub struct Record {
 
 #[derive(Debug)]
 pub enum Location {
-    Register(u16, u16),
+    Register(u16, u16, i32),
     Direct(u16, i32, u16),
     Indirect(u16, i32, u16),
     Constant(u32),
@@ -201,8 +201,8 @@ impl StackMapParser<'_> {
 
             let location = match kind {
                 0x01 => {
-                    self.read_i32();
-                    Location::Register(dwreg, size)
+                    let offset = self.read_i32();
+                    Location::Register(dwreg, size, offset)
                 }
                 0x02 => {
                     let offset = self.read_i32();

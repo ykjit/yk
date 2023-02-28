@@ -14,6 +14,7 @@ use llvmbridge::{get_aot_original, Module, Type, Value};
 
 static USIZEOF_POINTER: usize = std::mem::size_of::<*const ()>();
 static ISIZEOF_POINTER: isize = std::mem::size_of::<*const ()>() as isize;
+static RBP_DWARF_NUM: u16 = 6;
 
 /// Active frames (basic block index, instruction index, function name) in the AOTModule where the
 /// guard failure occured. Mirrors the struct defined in ykllvmwrap/jitmodbuilder.cc.
@@ -229,7 +230,7 @@ impl FrameReconstructor {
 
             // Update RBP to represent this frame's address.
             if pinfo.hasfp {
-                registers[6] = currframe as u64;
+                registers[usize::from(RBP_DWARF_NUM)] = currframe as u64;
             }
 
             // Calculate the next frame's address by substracting its size (plus return address)
@@ -277,8 +278,24 @@ impl FrameReconstructor {
                 // written to the allocated memory. Other locations we haven't encountered yet, so
                 // will deal with them as they appear.
                 match l {
-                    SMLocation::Register(reg, _size) => {
+                    SMLocation::Register(reg, _size, off) => {
                         registers[usize::from(*reg)] = val;
+                        if i == 0 {
+                            // skip first frame
+                            continue;
+                        }
+                        // Check if there's an additional spill location for this value. Negative
+                        // values indicate stack offsets, positive values are registers. Lastly, 0
+                        // indicates that there's no additional location. Note, that this means
+                        // that in order to encode register locations (where RAX = 0), all register
+                        // values have been offset by 1.
+                        if *off < 0 {
+                            let temp = unsafe { rbp.offset(isize::try_from(*off).unwrap()) };
+                            assert!(*off < i32::try_from(rec.size).unwrap());
+                            unsafe { ptr::write::<u64>(temp as *mut u64, val) };
+                        } else if *off > 0 {
+                            registers[usize::try_from(*off - 1).unwrap()] = val;
+                        }
                     }
                     SMLocation::Direct(reg, off, _) => {
                         if i == 0 {
@@ -292,14 +309,26 @@ impl FrameReconstructor {
                         let eltype = unsafe { LLVMGetAllocatedType(op.get()) };
                         let size = unsafe { LLVMABISizeOfType(layout, eltype) };
                         // Direct locations are always be in regards to RBP.
-                        assert_eq!(*reg, 6);
+                        assert_eq!(*reg, RBP_DWARF_NUM);
                         let temp = unsafe { rbp.offset(isize::try_from(*off).unwrap()) };
+                        assert!(*off < i32::try_from(rec.size).unwrap());
                         unsafe {
                             libc::memcpy(temp, val as *const c_void, usize::try_from(size).unwrap())
                         };
                     }
-                    SMLocation::Indirect(_reg, _off, _) => {
-                        todo!();
+                    SMLocation::Indirect(reg, off, size) => {
+                        if i == 0 {
+                            // skip first frame
+                            continue;
+                        }
+                        assert_eq!(*reg, RBP_DWARF_NUM);
+                        let temp = unsafe { rbp.offset(isize::try_from(*off).unwrap()) };
+                        assert!(*off < i32::try_from(rec.size).unwrap());
+                        match size {
+                            4 => unsafe { ptr::write::<u32>(temp as *mut u32, val as u32) },
+                            8 => unsafe { ptr::write::<u64>(temp as *mut u64, val) },
+                            _ => todo!(),
+                        }
                     }
                     SMLocation::Constant(_v) => {
                         todo!()
