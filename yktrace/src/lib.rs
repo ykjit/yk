@@ -192,8 +192,11 @@ impl IRTrace {
                 di_tmpname_c,
             )
         };
-        assert_ne!(ret, ptr::null());
-        Ok((ret, di_tmp))
+        if ret == ptr::null() {
+            Err("Could not compile trace.".into())
+        } else {
+            Ok((ret, di_tmp))
+        }
     }
 
     #[cfg(feature = "yk_testing")]
