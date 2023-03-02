@@ -11,18 +11,14 @@ use ykutil::{
 };
 
 /// Maps each entry of a hardware trace back to the IR block from which it was compiled.
-pub struct HWTMapper<'a> {
+pub struct HWTMapper {
     faddrs: HashMap<CString, *const c_void>,
-    trace_iter: &'a mut dyn Iterator<Item = Result<Block, HWTracerError>>,
-    buffered_irblocks: Vec<IRBlock>,
 }
 
-impl<'a> HWTMapper<'a> {
-    pub fn new(trace_iter: &'a mut dyn Iterator<Item = Result<Block, HWTracerError>>) -> Self {
+impl<'a> HWTMapper {
+    pub fn new() -> Self {
         Self {
             faddrs: HashMap::new(),
-            trace_iter,
-            buffered_irblocks: Vec::new(),
         }
     }
 
@@ -134,59 +130,67 @@ impl<'a> HWTMapper<'a> {
         ret
     }
 
-    /// Obtain the next mapped block.
+    /// Map the *machine* blocks of the specified trace into LLVM IR blocks.
     ///
-    /// `last_yielded` must be a reference to the last successfully mapped block returned by the
-    /// iterator (or `None` if this is the first time you are calling `next`).
-    pub fn next(
+    /// Each entry in the returned trace is either a "mapped block" identifying a successfully
+    /// mapped LLVM IR block, or an unsuccessfully mapped "unmappable block" (an unknown region of
+    /// code spanning at least one machine block).
+    ///
+    /// In the returned trace, unmappable blocks never appear consecutively.
+    ///
+    /// The returned trace will always start with a mapped block (the unmappable prefix of the
+    /// foreign "turn on tracing" routine is omitted).
+    pub fn map_trace(
         &mut self,
-        last_yielded: Option<&IRBlock>,
-    ) -> Option<Result<IRBlock, HWTracerError>> {
-        while self.buffered_irblocks.is_empty() {
-            let block = self.trace_iter.next();
-            if block.is_none() {
-                return None;
-            }
-            let block = block.unwrap();
-            if let Err(e) = block {
-                return Some(Err(e));
-            }
-            let irblocks = self.map_block(block.as_ref().unwrap());
+        mut trace_iter: &'a mut dyn Iterator<Item = Result<Block, HWTracerError>>,
+    ) -> Result<Vec<IRBlock>, HWTracerError> {
+        let mut ret: Vec<IRBlock> = Vec::new();
+
+        for block in &mut trace_iter {
+            let irblocks = self.map_block(&block?);
             if irblocks.is_empty() {
                 // The block is unmappable. Insert a IRBlock that indicates this, but only if the
-                // trace isn't empty. We also take care to collapse repeated unmappable blocks into
-                // a single unmappable IRBlock.
-                if let Some(blk) = last_yielded {
-                    if !blk.is_unmappable() {
-                        self.buffered_irblocks.push(IRBlock::unmappable());
+                // trace isn't empty (we never report the leading unmappable code in a trace). We
+                // also take care to collapse consecutive unmappable blocks into one.
+                if let Some(last) = ret.last_mut() {
+                    if !last.is_unmappable() {
+                        ret.push(IRBlock::unmappable());
+                    } else {
+                        // Don't push, thus collapsing repeated unmappable blocks into one.
                     }
                 }
             } else {
                 for irblock in irblocks.into_iter() {
-                    if let Some(irblock) = irblock {
-                        // The `BlockDisambiguate` pass in ykllvm ensures that no high-level LLVM
-                        // IR block ever branches straight back to itself, so if we see the same
-                        // high-level block more than once consecutively in a trace, then we know
-                        // that the IR block has been lowered to multiple machine blocks during
-                        // code-gen, and that we should only push the IR block once.
-                        if last_yielded != Some(&irblock) {
-                            self.buffered_irblocks.push(irblock);
+                    if let Some(irb) = irblock {
+                        match ret.last() {
+                            Some(last) if &irb != last => ret.push(irb),
+                            Some(_) => {
+                                // The `BlockDisambiguate` pass in ykllvm ensures that no
+                                // high-level LLVM IR block ever branches straight back to itself,
+                                // so if we see the same high-level block more than once
+                                // consecutively in a trace, then we know that the IR block has
+                                // been lowered to multiple machine blocks during code-gen, and
+                                // that we should only push the IR block once.
+                            }
+                            None => {
+                                // The returned trace is empty thus far and `irb` is mappable, so
+                                // we always want to push that.
+                                ret.push(irb);
+                            }
                         }
                     } else {
-                        // Part of a PT block mapped to a machine block in the LLVM block address
-                        // map, but the machine block has no corresponding IR blocks.
+                        // Part of a PT block mapped to a machine block in the LLVM block
+                        // address map, but the machine block has no corresponding IR blocks.
                         //
                         // FIXME: https://github.com/ykjit/yk/issues/388
                         // We *think* this happens because LLVM can introduce extra
-                        // `MachineBasicBlock`s to help with laying out machine code. If that's the
-                        // case, then for our purposes these extra blocks can be ignored. However,
-                        // we should really investigate to be sure.
+                        // `MachineBasicBlock`s to help with laying out machine code. If that's
+                        // the case, then for our purposes these extra blocks can be ignored.
+                        // However, we should really investigate to be sure.
                     }
                 }
             }
         }
-
-        let ret = self.buffered_irblocks.pop().unwrap();
-        Some(Ok(ret))
+        Ok(ret)
     }
 }

@@ -47,29 +47,30 @@ pub extern "C" fn __hwykpt_libipt_vs_ykpt(trace: *mut Box<dyn Trace>) {
         .build()
         .unwrap();
     let mut ipt_itr = ipt_tdec.iter_blocks(&**trace);
-    let mut ipt_mapper = HWTMapper::new(&mut ipt_itr);
+    let mut ipt_mapper = HWTMapper::new();
+    let ipt_irblocks = ipt_mapper.map_trace(&mut ipt_itr).unwrap();
+    let mut ipt_irb_itr = ipt_irblocks.iter();
 
     let ykpt_tdec = TraceDecoderBuilder::new()
         .kind(TraceDecoderKind::YkPT)
         .build()
         .unwrap();
     let mut ykpt_itr = ykpt_tdec.iter_blocks(&**trace);
-    let mut ykpt_mapper = HWTMapper::new(&mut ykpt_itr);
+    let mut ykpt_mapper = HWTMapper::new();
+    let ykpt_irblocks = ykpt_mapper.map_trace(&mut ykpt_itr).unwrap();
+    let mut ykpt_irb_itr = ykpt_irblocks.iter();
 
-    let mut last = None;
     loop {
-        let next = ipt_mapper.next(last.as_ref());
+        let next = ipt_irb_itr.next();
         if next.is_none() {
             break;
         }
         let expect = next.unwrap();
 
-        let expect = expect.unwrap();
-        let got = ykpt_mapper.next(last.as_ref()).unwrap().unwrap();
+        let got = ykpt_irb_itr.next().unwrap();
         assert_eq!(expect, got);
-        last = Some(got);
     }
-    assert!(ykpt_mapper.next(last.as_ref()).is_none());
+    assert!(ykpt_irb_itr.next().is_none());
 }
 
 /// Decode the specified trace and iterate over the resulting blocks.
