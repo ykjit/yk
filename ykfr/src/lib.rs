@@ -379,7 +379,7 @@ impl FrameReconstructor {
         // correct amount.
         unsafe {
             rsp = rsp.sub(USIZEOF_POINTER);
-            ptr::write(rsp as *mut usize, memsize - USIZEOF_POINTER);
+            ptr::write(rsp as *mut usize, memsize);
         }
 
         // Mark the memory read-only and return its pointer.
