@@ -7,11 +7,14 @@ use llvm_sys::target::{LLVMGetModuleDataLayout, LLVMTargetDataRef};
 use llvm_sys::{LLVMTypeKind, LLVMValueKind};
 use std::ffi::CStr;
 use std::mem::MaybeUninit;
+use std::ops::Drop;
 
 pub struct Module(LLVMModuleRef);
 
 impl Module {
     pub unsafe fn from_bc() -> Self {
+        // FIXME: Use cached loading logic from `ykllvmwrap` in here.
+        // See: https://github.com/ykjit/yk/issues/617
         let (addr, size) = ykutil::obj::llvmbc_section();
         let membuf = LLVMCreateMemoryBufferWithMemoryRange(
             addr as *const i8,
@@ -23,6 +26,7 @@ impl Module {
         let mut module: MaybeUninit<LLVMModuleRef> = MaybeUninit::uninit();
         LLVMParseBitcodeInContext2(context, membuf, module.as_mut_ptr());
         let module = module.assume_init();
+        LLVMDisposeMemoryBuffer(membuf);
         Self(module)
     }
 
@@ -34,6 +38,14 @@ impl Module {
 
     pub fn datalayout(&self) -> LLVMTargetDataRef {
         unsafe { LLVMGetModuleDataLayout(self.0) }
+    }
+}
+
+impl Drop for Module {
+    fn drop(&mut self) {
+        let context = unsafe { LLVMGetModuleContext(self.0) };
+        unsafe { LLVMDisposeModule(self.0) };
+        unsafe { LLVMContextDispose(context) };
     }
 }
 
