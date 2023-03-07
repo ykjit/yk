@@ -156,8 +156,11 @@ pub extern "C" fn __ykrt_reconstruct_frames(newframesptr: *const c_void) {
     unsafe {
         asm!(
             // The first 8 bytes of the new frames is the size of the map, needed for copying it
-            // over. Move it into rdx.
+            // over. Move it into RDX, but reduce it by 8 bytes, since we'll also adjust RDI next
+            // to make it point to the actual beginning of the new frames (jumping over the length
+            // value stored at the beginning of RDI).
             "mov rdx, [rdi]",
+            "sub rdx, 8",
             // Then adjust the address to where the new stack actually starts.
             "add rdi, 8",
             // Make space for the new stack, but use 8 bytes less in order to overwrite this
@@ -171,7 +174,11 @@ pub extern "C" fn __ykrt_reconstruct_frames(newframesptr: *const c_void) {
             // Now move the source (i.e. the heap allocated frames) into the first argument and its
             // size into the second. Then free the memory.
             "mov rdi, rsi",
+            // Adjust rdi back to beginning of `newframesptr`.
+            "sub rdi, 8",
             "mov rsi, rdx",
+            // Adjust length back to full size to free entire mmap.
+            "add rsi, 8",
             "call munmap",
             // Restore registers.
             // FIXME: Add other registers that may need restoring (e.g. floating point).
