@@ -101,13 +101,13 @@ fn get_stackmap_call(pc: Value) -> Value {
     };
     if cfg!(debug_assertions) {
         // If we are in debug mode, make sure this is indeed always the stackmap call.
-        assert!(sm.is_call());
-        assert!(sm.is_intrinsic());
+        debug_assert!(sm.is_call());
+        debug_assert!(sm.is_intrinsic());
         let id = unsafe { LLVMGetIntrinsicID(LLVMGetCalledValue(sm.get())) };
         let mut len = 0;
         let ptr = unsafe { LLVMIntrinsicGetName(id, &mut len) };
         let name = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap();
-        assert_eq!(name, "llvm.experimental.stackmap");
+        debug_assert_eq!(name, "llvm.experimental.stackmap");
     }
     sm
 }
