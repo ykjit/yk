@@ -875,6 +875,21 @@ class JITModBuilder {
     if (OldGV->isConstant()) {
       GV->copyAttributesFrom(&*OldGV);
       cloned_globals.push_back(OldGV);
+      // If this is a vector containing other constants, we need to clone
+      // those as well.
+      Type *Ty = OldGV->getValueType();
+      Constant *C = OldGV->getInitializer();
+      if (Ty->isArrayTy()) {
+        if ((cast<ArrayType>(Ty))->getElementType()->isPointerTy()) {
+          ConstantArray *GVA = dyn_cast<ConstantArray>(C);
+          for (size_t I = 0; I < Ty->getArrayNumElements(); I++) {
+            Constant *Elem = GVA->getAggregateElement(I);
+            if (isa<GlobalVariable>(Elem) && VMap.count(Elem) == 0) {
+              cloneGlobalVariable(Elem);
+            }
+          }
+        }
+      }
     }
     return GV;
   }
