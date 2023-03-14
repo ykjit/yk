@@ -224,6 +224,15 @@ ThreadSafeModule *getThreadAOTMod(struct BitcodeSection &Bitcode) {
   return &ThreadAOTMod;
 }
 
+// Exposes `getThreadAOTMod` so we can get a thread-safe copy of the
+// AOT IR from within Rust.
+extern "C" LLVMModuleRef
+LLVMGetThreadSafeModule(struct BitcodeSection &Bitcode) {
+  ThreadSafeModule *ThreadAOTMod = getThreadAOTMod(Bitcode);
+  Module *AOTMod = ThreadAOTMod->getModuleUnlocked();
+  return llvm::wrap(AOTMod);
+}
+
 // Compile a module in-memory and return a pointer to its function.
 extern "C" void *compileModule(string TraceName, Module *M,
                                map<GlobalValue *, void *> GlobalMappings,

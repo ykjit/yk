@@ -1,32 +1,28 @@
 use crate::SGValue;
 use libffi::middle::Type as FFIType;
-use llvm_sys::bit_reader::LLVMParseBitcodeInContext2;
 use llvm_sys::core::*;
 use llvm_sys::prelude::{LLVMBasicBlockRef, LLVMModuleRef, LLVMTypeRef, LLVMValueRef};
 use llvm_sys::target::{LLVMGetModuleDataLayout, LLVMTargetDataRef};
 use llvm_sys::{LLVMTypeKind, LLVMValueKind};
 use std::ffi::CStr;
-use std::mem::MaybeUninit;
-use std::ops::Drop;
 
 pub struct Module(LLVMModuleRef);
 
+// Replicates struct of same name in `ykllvmwrap.cc`.
+#[repr(C)]
+pub struct BitcodeSection {
+    data: *const u8,
+    len: usize,
+}
+
+extern "C" {
+    pub fn LLVMGetThreadSafeModule(bs: BitcodeSection) -> LLVMModuleRef;
+}
+
 impl Module {
     pub unsafe fn from_bc() -> Self {
-        // FIXME: Use cached loading logic from `ykllvmwrap` in here.
-        // See: https://github.com/ykjit/yk/issues/617
-        let (addr, size) = ykutil::obj::llvmbc_section();
-        let membuf = LLVMCreateMemoryBufferWithMemoryRange(
-            addr as *const i8,
-            size,
-            "".as_ptr() as *const i8,
-            0,
-        );
-        let context = LLVMContextCreate();
-        let mut module: MaybeUninit<LLVMModuleRef> = MaybeUninit::uninit();
-        LLVMParseBitcodeInContext2(context, membuf, module.as_mut_ptr());
-        let module = module.assume_init();
-        LLVMDisposeMemoryBuffer(membuf);
+        let (data, len) = ykutil::obj::llvmbc_section();
+        let module = LLVMGetThreadSafeModule(BitcodeSection { data, len });
         Self(module)
     }
 
@@ -38,14 +34,6 @@ impl Module {
 
     pub fn datalayout(&self) -> LLVMTargetDataRef {
         unsafe { LLVMGetModuleDataLayout(self.0) }
-    }
-}
-
-impl Drop for Module {
-    fn drop(&mut self) {
-        let context = unsafe { LLVMGetModuleContext(self.0) };
-        unsafe { LLVMDisposeModule(self.0) };
-        unsafe { LLVMContextDispose(context) };
     }
 }
 
