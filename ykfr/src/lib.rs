@@ -1,3 +1,5 @@
+#![feature(once_cell)]
+
 use llvm_sys::{core::*, target::LLVMABISizeOfType};
 use object::{Object, ObjectSection};
 use std::{
@@ -6,11 +8,31 @@ use std::{
     env,
     ffi::{c_void, CStr},
     fs, ptr, slice,
+    sync::LazyLock,
 };
-use yksmp::{Location as SMLocation, StackMapParser};
+use yksmp::{Location as SMLocation, SMEntry, StackMapParser};
 
 mod llvmbridge;
 use llvmbridge::{get_aot_original, Module, Type, Value};
+
+pub static AOT_STACKMAPS: LazyLock<Vec<SMEntry>> = LazyLock::new(|| {
+    // Load the stackmap from the binary to parse in the stackmaps.
+    // FIXME: Don't use current_exe.
+    let pathb = env::current_exe().unwrap();
+    let file = fs::File::open(&pathb.as_path()).unwrap();
+    let exemmap = unsafe { memmap2::Mmap::map(&file).unwrap() };
+    let object = object::File::parse(&*exemmap).unwrap();
+    let sec = object.section_by_name(".llvm_stackmaps").unwrap();
+
+    // Parse the stackmap.
+    let slice = unsafe {
+        slice::from_raw_parts(
+            sec.address() as *mut u8,
+            usize::try_from(sec.size()).unwrap(),
+        )
+    };
+    StackMapParser::get_entries(slice)
+});
 
 static USIZEOF_POINTER: usize = std::mem::size_of::<*const ()>();
 static ISIZEOF_POINTER: isize = std::mem::size_of::<*const ()>() as isize;
@@ -121,25 +143,8 @@ impl FrameReconstructor {
     /// `memcpy`ed to the actual stack by [ykcapi::__ykrt_reconstruct_frames].
     #[cfg(target_arch = "x86_64")]
     pub fn reconstruct_frames(&self, btmframeaddr: *mut c_void) -> *const c_void {
-        // Load the stackmap from the binary to parse in the stackmaps.
-        // FIXME: Don't use current_exe.
-        let pathb = env::current_exe().unwrap();
-        let file = fs::File::open(&pathb.as_path()).unwrap();
-        let exemmap = unsafe { memmap2::Mmap::map(&file).unwrap() };
-        let object = object::File::parse(&*exemmap).unwrap();
-        let sec = object.section_by_name(".llvm_stackmaps").unwrap();
-
         // Vec holding currently active register values.
         let mut registers = vec![0; 16];
-
-        // Parse the stackmap.
-        let slice = unsafe {
-            slice::from_raw_parts(
-                sec.address() as *mut u8,
-                usize::try_from(sec.size()).unwrap(),
-            )
-        };
-        let smentries = StackMapParser::get_entries(slice);
 
         // The final size of the memory we need to allocate. Inititialised with space to store
         // registers for register recovery.
@@ -157,7 +162,7 @@ impl FrameReconstructor {
             let mut pinfo = None;
             let mut rec = None;
             // Iterate over function entries to find the correct record and relevant prologue info.
-            for entry in &smentries {
+            for entry in AOT_STACKMAPS.iter() {
                 for r in &entry.records {
                     if r.id == smid {
                         pinfo = Some(&entry.pinfo);

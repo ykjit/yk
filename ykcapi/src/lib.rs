@@ -238,6 +238,8 @@ pub extern "C" fn yk_stopgap(
     let mut framerec = unsafe { FrameReconstructor::new(activeframes) };
 
     // Parse the stackmap of the JIT module.
+    // OPT: Parsing the stackmap and initialising `framerec` is slow and could be heavily reduced
+    // by caching the result.
     let slice = unsafe { slice::from_raw_parts(stackmap.addr as *mut u8, stackmap.length) };
     let map = StackMapParser::parse(slice).unwrap();
     let live_vars = map.get(&retaddr.try_into().unwrap()).unwrap();
