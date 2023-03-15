@@ -369,53 +369,6 @@ struct AOTInfo {
   size_t FrameIdx;
 };
 
-/// Extract all live variables that need to be passed into the control point.
-/// FIXME: This is currently an over-approximation and will return some
-/// variables that are no longer alive.
-std::vector<Value *> getLiveVars(
-    DominatorTree &DT, Instruction *Before,
-    std::map<Value *, std::tuple<size_t, size_t, Instruction *, size_t>> AOTMap,
-    size_t CallDepth) {
-  std::vector<Value *> Vec;
-  Function *Func = Before->getFunction();
-  for (auto &BB : *Func) {
-    if (!DT.dominates(cast<Instruction>(Before), &BB)) {
-      for (auto &I : BB) {
-        if ((!I.getType()->isVoidTy()) &&
-            (DT.dominates(&I, cast<Instruction>(Before)))) {
-          if (AOTMap.find(&I) == AOTMap.end()) {
-            // We sometimes create extra variables that don't have a
-            // corresponding AOT variable. For example an AOT switch statement
-            // becomes two instructions, `icmp` and `br`. The `icmp`
-            // instruction can then be live and appear here. Since its value is
-            // inconsequential for the stopgap interpreter we can safely ignore
-            // it.
-            continue;
-          }
-          std::tuple<size_t, size_t, Instruction *, size_t> Entry = AOTMap[&I];
-          size_t StackFrameIdx = std::get<3>(Entry);
-          if (StackFrameIdx > CallDepth) {
-            // Due to the over-approximation this function may pick up
-            // variables from an already finished stack frame. Adding these
-            // variables will lead to the stopgap interpeter trying to
-            // initialise them into a stack frame that doesn't exist. We can
-            // work around this by disallowing live variables for out-of-range
-            // stack frame indexes. While this still means that the stopgap
-            // interpreter can intialise some dead variables inside its frames,
-            // this is still treated as an over-approximation and won't lead to
-            // an error. Ultimately, this whole function needs to be replaced
-            // with proper liveness analysis, at which point this workaround
-            // won't be needed anymore.
-            continue;
-          }
-          Vec.push_back(&I);
-        }
-      }
-    }
-  }
-  return Vec;
-}
-
 class JITModBuilder {
   // Global variables/functions that were copied over and need to be
   // initialised.
