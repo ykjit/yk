@@ -1569,17 +1569,20 @@ public:
       // after this block finishes.
       size_t StackDepthBefore = CallStack.size();
 
+      // The index of the instruction in `BB` that we are currently processing.
+      size_t CurInstrIdx = 0;
+
+      // If we've returned from a call, skip ahead to the instruction where
+      // we left off.
+      std::optional<size_t> ResumeIdx = MPF->getResumeInstrIdx();
+      if (ResumeIdx.has_value()) {
+        CurInstrIdx = *ResumeIdx;
+        MPF->clearResume();
+      }
+
       // Iterate over all instructions within this block and copy them over
       // to our new module.
-      for (size_t CurInstrIdx = 0; CurInstrIdx < BB->size(); CurInstrIdx++) {
-        // If we've returned from a call, skip ahead to the instruction where
-        // we left off.
-        std::optional<size_t> ResumeIdx = MPF->getResumeInstrIdx();
-        if (ResumeIdx.has_value()) {
-          CurInstrIdx = *ResumeIdx;
-          MPF->clearResume();
-        }
-
+      for (; CurInstrIdx < BB->size(); CurInstrIdx++) {
         auto I = BB->begin();
         std::advance(I, CurInstrIdx);
         assert(I != BB->end());
