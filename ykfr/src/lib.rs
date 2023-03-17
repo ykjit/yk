@@ -101,13 +101,13 @@ fn get_stackmap_call(pc: Value) -> Value {
     };
     if cfg!(debug_assertions) {
         // If we are in debug mode, make sure this is indeed always the stackmap call.
-        assert!(sm.is_call());
-        assert!(sm.is_intrinsic());
+        debug_assert!(sm.is_call());
+        debug_assert!(sm.is_intrinsic());
         let id = unsafe { LLVMGetIntrinsicID(LLVMGetCalledValue(sm.get())) };
         let mut len = 0;
         let ptr = unsafe { LLVMIntrinsicGetName(id, &mut len) };
         let name = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap();
-        assert_eq!(name, "llvm.experimental.stackmap");
+        debug_assert_eq!(name, "llvm.experimental.stackmap");
     }
     sm
 }
@@ -296,7 +296,7 @@ impl FrameReconstructor {
                         // values have been offset by 1.
                         if *off < 0 {
                             let temp = unsafe { rbp.offset(isize::try_from(*off).unwrap()) };
-                            assert!(*off < i32::try_from(rec.size).unwrap());
+                            debug_assert!(*off < i32::try_from(rec.size).unwrap());
                             unsafe { ptr::write::<u64>(temp as *mut u64, val) };
                         } else if *off > 0 {
                             registers[usize::try_from(*off - 1).unwrap()] = val;
@@ -314,9 +314,9 @@ impl FrameReconstructor {
                         let eltype = unsafe { LLVMGetAllocatedType(op.get()) };
                         let size = unsafe { LLVMABISizeOfType(layout, eltype) };
                         // Direct locations are always be in regards to RBP.
-                        assert_eq!(*reg, RBP_DWARF_NUM);
+                        debug_assert_eq!(*reg, RBP_DWARF_NUM);
                         let temp = unsafe { rbp.offset(isize::try_from(*off).unwrap()) };
-                        assert!(*off < i32::try_from(rec.size).unwrap());
+                        debug_assert!(*off < i32::try_from(rec.size).unwrap());
                         unsafe {
                             libc::memcpy(temp, val as *const c_void, usize::try_from(size).unwrap())
                         };
@@ -326,9 +326,9 @@ impl FrameReconstructor {
                             // skip first frame
                             continue;
                         }
-                        assert_eq!(*reg, RBP_DWARF_NUM);
+                        debug_assert_eq!(*reg, RBP_DWARF_NUM);
                         let temp = unsafe { rbp.offset(isize::try_from(*off).unwrap()) };
-                        assert!(*off < i32::try_from(rec.size).unwrap());
+                        debug_assert!(*off < i32::try_from(rec.size).unwrap());
                         match size {
                             4 => unsafe { ptr::write::<u32>(temp as *mut u32, val as u32) },
                             8 => unsafe { ptr::write::<u64>(temp as *mut u64, val) },
