@@ -1,0 +1,10 @@
+[package]
+name = "ykbuild"
+version = "0.1.0"
+authors = ["The Yk Developers"]
+edition = "2021"
+license = "Apache-2.0 OR MIT"
+
+[dependencies]
+glob = "0.3.1"
+tempfile = "3.3.0"

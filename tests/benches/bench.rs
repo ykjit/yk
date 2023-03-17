@@ -27,7 +27,7 @@ fn compile_runner(tempdir: &TempDir) -> PathBuf {
     exe.push(&tempdir);
     exe.push(src.file_stem().unwrap());
 
-    let mut compiler = mk_compiler(&exe, &src, "-O0", &[], false);
+    let mut compiler = mk_compiler("clang", &exe, &src, "-O0", &[], false);
     compiler.arg("-ltests");
     let out = compiler.output().unwrap();
     check_output(&out);

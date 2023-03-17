@@ -31,6 +31,7 @@ libc = "0.2.139"
 memmap2 = "0.5.2"
 regex = "1.5.4"
 tempfile = "3.3.0"
+ykbuild = { path = "../ykbuild" }
 yktrace = { path = "../yktrace", features = ["yk_testing"] }
 
 [dev-dependencies]
