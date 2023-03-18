@@ -2,6 +2,7 @@
 members = [
     "hwtracer",
     "tests",
+    "ykbuild",
     "ykcapi",
     "ykllvmwrap",
     "ykrt",

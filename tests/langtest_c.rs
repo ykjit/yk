@@ -1,14 +1,17 @@
+#![feature(fn_traits)]
 #![feature(once_cell)]
 
 use lang_tester::LangTester;
 use regex::Regex;
 use std::{
+    env,
     fs::read_to_string,
     path::{Path, PathBuf},
     process::Command,
 };
 use tempfile::TempDir;
 use tests::{mk_compiler, EXTRA_LINK};
+use ykbuild::{CCGenerator, CCLang};
 
 const COMMENT: &str = "//";
 
@@ -43,6 +46,11 @@ fn run_suite(opt: &'static str, force_decoder: &'static str) {
     };
 
     let tempdir = TempDir::new().unwrap();
+
+    // Generate a `compile_commands.json` database for clangd.
+    let ccg = CCGenerator::new("c_tests", &env::var("CARGO_MANIFEST_DIR").unwrap());
+    env::set_var.call(ccg.build_env());
+
     LangTester::new()
         .test_dir("c")
         .test_file_filter(filter)
@@ -72,7 +80,14 @@ fn run_suite(opt: &'static str, force_decoder: &'static str) {
                 .map(|l| l.generate_obj(tempdir.path()))
                 .collect::<Vec<PathBuf>>();
 
-            let compiler = mk_compiler(&exe, p, opt, &extra_objs, true);
+            let compiler = mk_compiler(
+                CCLang::C.compiler_wrapper().to_str().unwrap(),
+                &exe,
+                p,
+                opt,
+                &extra_objs,
+                true,
+            );
             let mut runtime = Command::new(exe.clone());
             runtime.env("YKD_FORCE_TRACE_DECODER", force_decoder);
             vec![("Compiler", compiler), ("Run-time", runtime)]
@@ -85,6 +100,7 @@ fn run_suite(opt: &'static str, force_decoder: &'static str) {
             fmb.name_matcher(ptn_re, text_re)
         })
         .run();
+    ccg.generate();
 }
 
 fn main() {

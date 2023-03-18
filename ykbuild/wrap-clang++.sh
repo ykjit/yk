@@ -6,6 +6,6 @@
 
 set -e
 
-echo "clang++ $@" > $(mktemp -p ${YKLLVMWRAP_JSON_TEMP})
+echo "clang++ $@" > $(mktemp -p ${YK_CC_TEMPDIR})
 
 clang++ $@

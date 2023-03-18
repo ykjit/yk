@@ -85,13 +85,14 @@ impl<'a> ExtraLinkage<'a> {
 ///
 /// If `patch_cp` is `false` then the argument to patch the control point is omitted.
 pub fn mk_compiler(
+    compiler: &str,
     exe: &Path,
     src: &Path,
     opt: &str,
     extra_objs: &[PathBuf],
     patch_cp: bool,
 ) -> Command {
-    let mut compiler = Command::new("clang");
+    let mut compiler = Command::new(compiler);
     compiler.env("YKD_PRINT_IR", "1");
 
     let yk_config = [
@@ -128,6 +129,7 @@ pub fn mk_compiler(
     let yk_flags = yk_flags.trim().split(" ");
     compiler.args(yk_flags);
 
+    compiler.args(extra_objs);
     compiler.args(&[
         opt,
         // If this is a debug build, include debug info in the test binary.
@@ -143,6 +145,5 @@ pub fn mk_compiler(
         exe.to_str().unwrap(),
         src.to_str().unwrap(),
     ]);
-    compiler.args(extra_objs);
     compiler
 }

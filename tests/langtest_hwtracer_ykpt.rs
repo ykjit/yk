@@ -93,7 +93,7 @@ fn run_suite(opt: &'static str) {
                 .map(|l| l.generate_obj(tempdir.path()))
                 .collect::<Vec<PathBuf>>();
 
-            let mut compiler = mk_compiler(&exe, p, opt, &extra_objs, false);
+            let mut compiler = mk_compiler("clang", &exe, p, opt, &extra_objs, false);
             compiler.arg("-ltests");
             let runtime = Command::new(exe.clone());
             vec![("Compiler", compiler), ("Run-time", runtime)]
