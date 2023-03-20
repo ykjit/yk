@@ -361,6 +361,11 @@ pub(in crate::decode::ykpt) struct EXSTOPPacket {
     magic2: u8,
 }
 
+/// Overflow (OVF) packet.
+#[derive(Debug, PartialEq, DekuRead)]
+#[deku(magic = b"\x02\xf3")]
+pub(in crate::decode::ykpt) struct OVFPacket {}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(in crate::decode::ykpt) enum PacketKind {
     PSB,
@@ -377,6 +382,7 @@ pub(in crate::decode::ykpt) enum PacketKind {
     FUP,
     CYC,
     EXSTOP,
+    OVF,
 }
 
 impl PacketKind {
@@ -393,7 +399,8 @@ impl PacketKind {
             | Self::ShortTNT
             | Self::LongTNT
             | Self::CYC
-            | Self::EXSTOP => false,
+            | Self::EXSTOP
+            | Self::OVF => false,
         }
     }
 
@@ -412,7 +419,8 @@ impl PacketKind {
             | Self::TIP
             | Self::TIPPGD
             | Self::TIPPGE
-            | Self::EXSTOP => false,
+            | Self::EXSTOP
+            | Self::OVF => false,
         }
     }
 }
@@ -437,6 +445,7 @@ pub(in crate::decode::ykpt) enum Packet {
     FUP(FUPPacket, Option<usize>),
     CYC(CYCPacket),
     EXSTOP(EXSTOPPacket),
+    OVF(OVFPacket),
 }
 
 impl Packet {
@@ -456,7 +465,8 @@ impl Packet {
             | Self::ShortTNT(_)
             | Self::LongTNT(_)
             | Self::CYC(_)
-            | Self::EXSTOP(_) => None,
+            | Self::EXSTOP(_)
+            | Self::OVF(_) => None,
         }
     }
 
@@ -476,6 +486,7 @@ impl Packet {
             Self::FUP(..) => PacketKind::FUP,
             Self::CYC(_) => PacketKind::CYC,
             Self::EXSTOP(_) => PacketKind::EXSTOP,
+            Self::OVF(_) => PacketKind::OVF,
         }
     }
 
@@ -499,7 +510,8 @@ impl Packet {
             | Self::TIP(_, _)
             | Self::FUP(_, _)
             | Self::CYC(_)
-            | Self::EXSTOP(_) => None,
+            | Self::EXSTOP(_)
+            | Self::OVF(_) => None,
         }
     }
 }

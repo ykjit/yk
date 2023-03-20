@@ -656,6 +656,10 @@ impl<'t> YkPTBlockIterator<'t> {
         let ret = if let Some(pkt_or_err) = self.parser.next() {
             let mut pkt = pkt_or_err?;
 
+            if pkt.kind() == PacketKind::OVF {
+                return Err(HWTracerError::HWBufferOverflow);
+            }
+
             if pkt.kind() == PacketKind::FUP && self.pge && !self.unbound_modes {
                 // FIXME: https://github.com/ykjit/yk/issues/593
                 //
