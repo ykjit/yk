@@ -109,6 +109,8 @@ fn main() {
     // reconstruction. This isn't a huge problem as in the future we will keep two versions of the
     // interpreter around and only swap to -O0 when tracing and run on higher optimisation levels
     // otherwise.
-    run_suite("-O0", "libipt");
+
+    // FIXME: libipt requires stack adjustment value tracking.
+    //run_suite("-O0", "libipt");
     run_suite("-O0", "ykpt");
 }

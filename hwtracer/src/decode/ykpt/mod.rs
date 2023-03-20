@@ -46,6 +46,7 @@ use crate::{
 use iced_x86;
 use intervaltree::IntervalTree;
 use std::{
+    cell::Cell,
     collections::VecDeque,
     convert::TryFrom,
     fmt::{self, Debug},
@@ -77,16 +78,7 @@ impl TraceDecoder for YkPTTraceDecoder {
         &'t self,
         trace: &'t dyn Trace,
     ) -> Box<dyn Iterator<Item = Result<Block, HWTracerError>> + '_> {
-        let itr = YkPTBlockIterator {
-            errored: false,
-            parser: PacketParser::new(trace.bytes()),
-            cur_loc: ObjLoc::OtherObjOrUnknown(None),
-            tnts: VecDeque::new(),
-            comprets: CompressedReturns::new(),
-            pge: false,
-            unbound_modes: false,
-        };
-        Box::new(itr)
+        Box::new(YkPTBlockIterator::new(trace))
     }
 }
 
@@ -231,8 +223,9 @@ impl CompressedReturns {
 
 /// Iterate over the blocks of an Intel PT trace using the fast Yk PT decoder.
 struct YkPTBlockIterator<'t> {
-    /// Set to true when an error has occured.
-    errored: bool,
+    /// The next block that the iterator will hand out. We lookahead like this so that we can
+    /// retrospectively add the stack adjustment value of the block (if neccessary).
+    next: Cell<Result<Block, HWTracerError>>,
     /// The packet iterator used to drive the decoding process.
     parser: PacketParser<'t>,
     /// Keeps track of where we are in the traced binary.
@@ -250,6 +243,23 @@ struct YkPTBlockIterator<'t> {
 }
 
 impl<'t> YkPTBlockIterator<'t> {
+    fn new(trace: &'t dyn Trace) -> Self {
+        let mut this = YkPTBlockIterator {
+            next: Cell::new(Ok(Block::new_unknown())),
+            parser: PacketParser::new(trace.bytes()),
+            cur_loc: ObjLoc::OtherObjOrUnknown(None),
+            tnts: VecDeque::new(),
+            comprets: CompressedReturns::new(),
+            pge: false,
+            unbound_modes: false,
+        };
+
+        // Prime the cached next element.
+        *this.next.get_mut() = this.do_next();
+
+        this
+    }
+
     /// Convert a file offset to a virtual address.
     fn off_to_vaddr(&self, obj: &Path, off: u64) -> Result<usize, HWTracerError> {
         match ykutil::addr::off_to_vaddr(obj, off) {
@@ -293,7 +303,7 @@ impl<'t> YkPTBlockIterator<'t> {
                 u64::try_from(self.off_to_vaddr(&PHDR_MAIN_OBJ, ent.range.end)?).unwrap(),
             ))
         } else {
-            Ok(Block::Unknown)
+            Ok(Block::new_unknown())
         }
     }
 
@@ -321,7 +331,7 @@ impl<'t> YkPTBlockIterator<'t> {
                 self.seek_tip()?;
                 return match self.cur_loc {
                     ObjLoc::MainObj(off) => Ok(Some(self.lookup_block_from_main_bin_offset(off)?)),
-                    ObjLoc::OtherObjOrUnknown(_) => Ok(Some(Block::Unknown)),
+                    ObjLoc::OtherObjOrUnknown(_) => Ok(Some(Block::new_unknown())),
                 };
             }
         }
@@ -369,17 +379,22 @@ impl<'t> YkPTBlockIterator<'t> {
                 if self.is_return_compressed()? {
                     // This unwrap cannot fail if the CPU has implemented compressed
                     // returns correctly.
-                    let off = match self.comprets.pop().unwrap() {
-                        CompRetAddr::AfterCall(off) => off + 1,
+                    self.cur_loc = match self.comprets.pop().unwrap() {
+                        CompRetAddr::AfterCall(off) => ObjLoc::MainObj(off + 1),
                         CompRetAddr::VAddr(vaddr) => {
                             let (obj, off) = self.vaddr_to_off(vaddr)?;
-                            debug_assert!(obj == *SELF_BIN_PATH);
-                            off
+                            if obj == *SELF_BIN_PATH {
+                                ObjLoc::MainObj(off)
+                            } else {
+                                ObjLoc::OtherObjOrUnknown(Some(vaddr))
+                            }
                         }
                     };
-
-                    self.cur_loc = ObjLoc::MainObj(off + 1);
-                    self.lookup_block_from_main_bin_offset(off + 1)
+                    if let ObjLoc::MainObj(off) = self.cur_loc {
+                        self.lookup_block_from_main_bin_offset(off + 1)
+                    } else {
+                        Ok(Block::new_unknown())
+                    }
                 } else {
                     // A regular uncompressed return that relies on a TIP update.
                     //
@@ -387,7 +402,7 @@ impl<'t> YkPTBlockIterator<'t> {
                     // `self.cur_loc()`.
                     match self.cur_loc {
                         ObjLoc::MainObj(off) => Ok(self.lookup_block_from_main_bin_offset(off)?),
-                        _ => Ok(Block::Unknown),
+                        _ => Ok(Block::new_unknown()),
                     }
                 }
             }
@@ -396,7 +411,7 @@ impl<'t> YkPTBlockIterator<'t> {
                 self.seek_tip()?;
                 match self.cur_loc {
                     ObjLoc::MainObj(off) => Ok(self.lookup_block_from_main_bin_offset(off)?),
-                    _ => Ok(Block::Unknown),
+                    _ => Ok(Block::new_unknown()),
                 }
             }
         }
@@ -422,7 +437,7 @@ impl<'t> YkPTBlockIterator<'t> {
                 } else {
                     self.cur_loc =
                         ObjLoc::OtherObjOrUnknown(Some(self.off_to_vaddr(&PHDR_MAIN_OBJ, b_off)?));
-                    Ok(Block::Unknown)
+                    Ok(Block::new_unknown())
                 }
             }
             ObjLoc::OtherObjOrUnknown(vaddr) => self.skip_foreign(vaddr),
@@ -465,6 +480,16 @@ impl<'t> YkPTBlockIterator<'t> {
         }
 
         Ok(compressed)
+    }
+
+    fn update_stack_adjust(&mut self, by: isize) {
+        *self
+            .next
+            .get_mut()
+            .as_mut()
+            .unwrap() // safe: we only get here during disassembly, where `self.next` is `Some`.
+            .stack_adjust_mut()
+            .unwrap() += by;
     }
 
     fn disassemble(&mut self, start_vaddr: usize) -> Result<Block, HWTracerError> {
@@ -532,6 +557,7 @@ impl<'t> YkPTBlockIterator<'t> {
                     };
                     dis.set_ip(u64::try_from(ret_vaddr).unwrap());
                     reposition = true;
+                    self.update_stack_adjust(-1);
                 }
                 iced_x86::FlowControl::IndirectBranch | iced_x86::FlowControl::IndirectCall => {
                     self.seek_tip()?;
@@ -550,6 +576,7 @@ impl<'t> YkPTBlockIterator<'t> {
                         debug_assert!(!inst.is_call_far());
                         self.comprets
                             .push(CompRetAddr::VAddr(usize::try_from(inst.next_ip()).unwrap()));
+                        self.update_stack_adjust(1);
                     }
 
                     dis.set_ip(u64::try_from(vaddr).unwrap());
@@ -589,6 +616,7 @@ impl<'t> YkPTBlockIterator<'t> {
                         debug_assert!(!inst.is_call_far());
                         dis.set_ip(target_vaddr);
                         reposition = true;
+                        self.update_stack_adjust(1);
                     }
                 }
                 _ => todo!(),
@@ -736,17 +764,31 @@ impl<'t> Iterator for YkPTBlockIterator<'t> {
     type Item = Result<Block, HWTracerError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if !self.errored {
-            match self.do_next() {
-                Ok(blk) => Some(Ok(blk)),
-                Err(HWTracerError::NoMorePackets) => None, // Signals end of iterator.
-                Err(e) => {
-                    self.errored = true;
-                    Some(Err(e))
-                }
+        // Compute the value the iterator will give out on a subsequent call to `next()`.
+        //
+        // It may be tempting to immediately extract `self.next` from its `Cell` and match on that,
+        // but we can't because the call to `self.do_next()` mutates the *current* `self.next()` in the case where
+        // disassembly of foreign code is required (`Block::Unknown::stack_adjust` will be
+        // updated).
+        let new_next = match self.next.get_mut() {
+            Ok(_) => self.do_next(),
+            Err(HWTracerError::NoMorePackets) => {
+                // If the iterator is exhausted, it remains exhausted.
+                Err(HWTracerError::NoMorePackets)
             }
-        } else {
-            None
+            Err(_) => {
+                // In the case where the iterator yields an error for the first time, subsequent
+                // iterator pumps will yield `NoMorePackets`. It would have been nice to "pin" the
+                // initial error, giving that out for each subsequent call to `next()`, but that
+                // would require us to clone the error. That is hard for `HWTracerError`, because
+                // one variant contains a `dyn Error` which isn't `Clone`.
+                Err(HWTracerError::NoMorePackets)
+            }
+        };
+        match self.next.replace(new_next) {
+            Ok(b) => Some(Ok(b)),
+            Err(HWTracerError::NoMorePackets) => None,
+            Err(e) => Some(Err(e)),
         }
     }
 }

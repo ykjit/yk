@@ -53,41 +53,74 @@ impl Default for TracingKind {
 
 /// A globally unique block ID for an LLVM IR block.
 #[derive(Debug, Eq, PartialEq)]
-pub struct IRBlock {
-    /// The name of the function containing the block.
+pub enum IRBlock {
+    /// A sucessfully mapped block.
+    Mapped {
+        /// The name of the function containing the block.
+        ///
+        /// PERF: Use a string pool to avoid duplicated function names in traces.
+        func_name: CString,
+        /// The index of the block within the function.
+        ///
+        /// The special value `usize::MAX` indicates unmappable code.
+        bb: usize,
+    },
+    /// One or more machine blocks that could not be mapped.
     ///
-    /// PERF: Use a string pool to avoid duplicated function names in traces.
-    func_name: CString,
-    /// The index of the block within the function.
-    ///
-    /// The special value `usize::MAX` indicates unmappable code.
-    bb: usize,
+    /// This usually means that the blocks were compiled outside of ykllvm.
+    Unmappable {
+        /// The change to the stack depth as a result of executing the unmappable region.
+        stack_adjust: isize,
+    },
 }
 
 impl IRBlock {
-    pub fn new(func_name: CString, bb: usize) -> Self {
-        Self { func_name, bb }
+    pub fn new_mapped(func_name: CString, bb: usize) -> Self {
+        Self::Mapped { func_name, bb }
     }
 
+    pub fn new_unmappable(stack_adjust: isize) -> Self {
+        Self::Unmappable { stack_adjust }
+    }
+
+    /// If `self` is a mapped block, return the function name, otherwise panic.
     pub fn func_name(&self) -> &CStr {
-        self.func_name.as_c_str()
+        if let Self::Mapped { func_name, .. } = self {
+            func_name.as_c_str()
+        } else {
+            panic!();
+        }
     }
 
+    /// If `self` is a mapped block, return the basic block index, otherwise panic.
     pub fn bb(&self) -> usize {
-        self.bb
-    }
-
-    /// Returns an IRBlock whose `bb` field indicates unmappable code.
-    pub fn unmappable() -> Self {
-        Self {
-            func_name: CString::new("").unwrap(),
-            bb: usize::MAX,
+        if let Self::Mapped { bb, .. } = self {
+            *bb
+        } else {
+            panic!();
         }
     }
 
     /// Determines whether `self` represents unmappable code.
     pub fn is_unmappable(&self) -> bool {
-        self.bb == usize::MAX
+        matches!(self, Self::Unmappable { .. })
+    }
+
+    /// If `self` is an unmappable region, return the stack adjustment value, otherwise panic.
+    pub fn stack_adjust(&self) -> isize {
+        if let Self::Unmappable { stack_adjust } = self {
+            *stack_adjust
+        } else {
+            panic!();
+        }
+    }
+
+    pub fn stack_adjust_mut(&mut self) -> &mut isize {
+        if let Self::Unmappable { stack_adjust } = self {
+            stack_adjust
+        } else {
+            panic!();
+        }
     }
 }
 
@@ -129,9 +162,13 @@ impl IRTrace {
         let mut bbs = Vec::with_capacity(trace_len);
         for blk in &self.blocks {
             if blk.is_unmappable() {
-                // The block was unmappable. Indicate this with a null function name.
+                // The block was unmappable. Indicate this with a null function name and the block
+                // index encodes the stack adjustment value.
                 func_names.push(ptr::null());
-                bbs.push(0);
+                // Subtle cast from `isize` to `usize`. `as` is used deliberately here to preserve
+                // the exact bit pattern. The consumer on the other side of the FFI knows to
+                // reverse this.
+                bbs.push(blk.stack_adjust() as usize);
             } else {
                 func_names.push(blk.func_name().as_ptr());
                 bbs.push(blk.bb());

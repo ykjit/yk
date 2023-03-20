@@ -24,7 +24,7 @@ fn main() -> Result<(), String> {
     if let Ok(tbbs) = env::var(BBS_ENV) {
         for bb in tbbs.split(',') {
             if let Ok((func, bb_idx)) = parse_bb(bb) {
-                bbs.push(IRBlock::new(func, bb_idx));
+                bbs.push(IRBlock::new_mapped(func, bb_idx));
             } else {
                 return Err(format!("{} is malformed", BBS_ENV));
             }
