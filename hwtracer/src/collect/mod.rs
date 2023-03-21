@@ -97,7 +97,7 @@ pub enum TraceCollectorKind {
 impl TraceCollectorKind {
     /// Finds a suitable `TraceCollectorKind` for the current hardware/OS.
     fn default_for_platform() -> Option<Self> {
-        TraceCollectorKind::iter().find(|kind| Self::match_platform(&kind).is_ok())
+        TraceCollectorKind::iter().find(|kind| Self::match_platform(kind).is_ok())
     }
 
     /// Returns `Ok` if the this collector is appropriate for the current platform.

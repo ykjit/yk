@@ -180,22 +180,21 @@ impl<'t> PacketParser<'t> {
         let mut bytes = self.bits.chunks(8);
         let mut vals = Vec::new();
         for _ in 0..nbytes {
-            vals.push(format!(
-                "{}",
+            vals.push(
                 bytes
                     .next()
                     .unwrap()
                     .iter()
                     .map(|bit| if *bit { '1' } else { '0' })
-                    .collect::<String>()
-            ));
+                    .collect::<String>(),
+            );
         }
 
         if self.bits.len() > nbytes {
             vals.push("...".to_owned());
         }
 
-        format!("{}", vals.join(sep))
+        vals.join(sep)
     }
 
     /// Attempt to parse a packet.

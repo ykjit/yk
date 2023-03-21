@@ -11,7 +11,7 @@ use std::{
     sync::LazyLock,
 };
 
-const TEMPDIR_SUBST: &'static str = "%%TEMPDIR%%";
+const TEMPDIR_SUBST: &str = "%%TEMPDIR%%";
 pub static EXTRA_LINK: LazyLock<HashMap<&'static str, Vec<ExtraLinkage>>> = LazyLock::new(|| {
     let mut map = HashMap::new();
 
@@ -111,7 +111,7 @@ pub fn mk_compiler(
     let mode = "release";
 
     let yk_config_out = Command::new(yk_config)
-        .args(&[mode, "--cflags", "--cppflags", "--ldflags", "--libs"])
+        .args([mode, "--cflags", "--cppflags", "--ldflags", "--libs"])
         .output()
         .expect("failed to execute yk-config");
     if !yk_config_out.status.success() {
@@ -126,11 +126,11 @@ pub fn mk_compiler(
     // yk-config never returns arguments containing spaces, so we can split by space here. If this
     // ever changes, then we should build arguments as an "unparsed" string and parse that to `sh
     // -c` and let the shell do the parsing.
-    let yk_flags = yk_flags.trim().split(" ");
+    let yk_flags = yk_flags.trim().split(' ');
     compiler.args(yk_flags);
 
     compiler.args(extra_objs);
-    compiler.args(&[
+    compiler.args([
         opt,
         // If this is a debug build, include debug info in the test binary.
         #[cfg(debug_assertions)]

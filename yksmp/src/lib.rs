@@ -113,7 +113,7 @@ impl StackMapParser<'_> {
         for f in &funcs {
             let mut records = self.read_records(f.record_count, &consts);
             for mut r in &mut records {
-                r.offset = f.addr + u64::from(r.offset);
+                r.offset += f.addr;
                 r.size = f.stack_size;
             }
             recs.push(records);
@@ -334,7 +334,7 @@ mod test {
         let smsec = objfile.section_by_name(".llvm_stackmaps").unwrap();
         let map = StackMapParser::parse(smsec.data().unwrap()).unwrap();
         assert_eq!(map.len(), 1);
-        let vars = &map.values().nth(0).unwrap();
+        let vars = &map.values().next().unwrap();
         assert_eq!(vars.len(), 2);
         assert!(matches!(vars[0].locs[..], [Location::Direct(6, -4, _)]));
         assert!(matches!(vars[1].locs[..], [Location::Direct(6, -8, _)]));
@@ -347,7 +347,7 @@ mod test {
         let smsec = objfile.section_by_name(".llvm_stackmaps").unwrap();
         let map = StackMapParser::parse(smsec.data().unwrap()).unwrap();
         assert_eq!(map.len(), 1);
-        let vars = &map.values().nth(0).unwrap();
+        let vars = &map.values().next().unwrap();
         assert_eq!(vars.len(), 3);
         // First live var contains locations for CC, Flags and Num Deopts.
         assert!(matches!(

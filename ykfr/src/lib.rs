@@ -19,7 +19,7 @@ pub static AOT_STACKMAPS: LazyLock<Vec<SMEntry>> = LazyLock::new(|| {
     // Load the stackmap from the binary to parse in the stackmaps.
     // FIXME: Don't use current_exe.
     let pathb = env::current_exe().unwrap();
-    let file = fs::File::open(&pathb.as_path()).unwrap();
+    let file = fs::File::open(pathb.as_path()).unwrap();
     let exemmap = unsafe { memmap2::Mmap::map(&file).unwrap() };
     let object = object::File::parse(&*exemmap).unwrap();
     let sec = object.section_by_name(".llvm_stackmaps").unwrap();
@@ -389,7 +389,7 @@ impl FrameReconstructor {
 
         // Mark the memory read-only and return its pointer.
         unsafe { libc::mprotect(mmap, memsize, libc::PROT_READ) };
-        return mmap;
+        mmap
     }
 
     /// Add a live variable and its value to the current frame.

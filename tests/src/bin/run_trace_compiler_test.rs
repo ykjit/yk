@@ -3,7 +3,6 @@
 //! Each invocation of this program runs one of the trace compiler tests found in the
 //! `trace_compiler` directory of this crate.
 
-use memmap2;
 use std::{collections::HashMap, env, error::Error, ffi::CString, fs::File};
 use yktrace::{IRBlock, IRTrace};
 

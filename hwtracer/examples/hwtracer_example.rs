@@ -25,7 +25,7 @@ fn print_trace(trace: Box<dyn Trace>, name: &str, result: u32, qty: usize) {
     if count > qty {
         println!("  ... {} more", count - qty);
     }
-    println!("");
+    println!();
 }
 
 /// It's up to you to ensure the compiler doesn't move or optimise out the computation you intend

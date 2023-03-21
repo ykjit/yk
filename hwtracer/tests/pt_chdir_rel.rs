@@ -23,12 +23,12 @@ pub fn work_loop(iters: u64) -> u64 {
 #[test]
 fn pt_chdir_rel() {
     let arg0 = env::args().next().unwrap();
-    if arg0.starts_with("/") {
+    if arg0.starts_with('/') {
         // Reinvoke ourself with a relative path.
         let path = PathBuf::from(arg0);
 
         let dir = path.parent().unwrap();
-        env::set_current_dir(&dir.to_str().unwrap()).unwrap();
+        env::set_current_dir(dir.to_str().unwrap()).unwrap();
 
         let prog = path.file_name().unwrap().to_str().unwrap();
         let prog_c = CString::new(prog).unwrap();
@@ -37,7 +37,7 @@ fn pt_chdir_rel() {
         let args = env::args().collect::<Vec<_>>();
         let mut args_p = args.iter().map(|a| a.as_ptr()).collect::<Vec<_>>();
         args_p[0] = prog_p as *const u8; // Replace absolute path.
-        args_p.push(0 as *const u8); // NULL sentinel.
+        args_p.push(std::ptr::null::<u8>()); // NULL sentinel.
 
         // We don't use `std::process::Command` because it can't reliably handle a relative path.
         unsafe { libc::execv(prog_p as *const i8, args_p.as_ptr() as *const *const i8) };

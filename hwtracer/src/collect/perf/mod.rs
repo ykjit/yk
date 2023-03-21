@@ -301,8 +301,10 @@ mod tests {
     #[test]
     fn relloc_trace_buf() {
         let start_bufsize = 512;
-        let mut config = PerfCollectorConfig::default();
-        config.initial_trace_bufsize = start_bufsize;
+        let config = PerfCollectorConfig {
+            initial_trace_bufsize: start_bufsize,
+            ..Default::default()
+        };
         let mut tracer = PerfThreadTraceCollector::new(config);
 
         tracer.start_collector().unwrap();

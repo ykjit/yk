@@ -261,7 +261,7 @@ impl CompiledTrace {
         let slice = unsafe { slice::from_raw_parts(data as *const usize, 4) };
         let funcptr = slice[0] as *const c_void;
         let smptr = slice[1] as *const c_void;
-        let smsize = slice[2] as usize;
+        let smsize = slice[2];
         let aotvals = slice[3] as *mut c_void;
         // We heap allocated this array in ykllvmwrap to pass the data here. Now that we've
         // extracted it we no longer need to keep the array around.
