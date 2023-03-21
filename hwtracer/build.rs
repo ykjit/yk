@@ -1,3 +1,5 @@
+#![feature(fn_traits)]
+
 use core::arch::x86_64::__cpuid_count;
 use rerun_except::rerun_except;
 use std::env;
@@ -5,6 +7,7 @@ use std::fs;
 use std::os::unix::fs as unix_fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use ykbuild::{CCGenerator, CCLang};
 
 const FEATURE_CHECKS_PATH: &str = "feature_checks";
 
@@ -95,6 +98,11 @@ fn cpu_supports_pt() -> bool {
 fn main() {
     let mut c_build = cc::Build::new();
 
+    // Generate a `compile_commands.json` database for clangd.
+    let ccg = CCGenerator::new("hwtracer", &env::var("CARGO_MANIFEST_DIR").unwrap());
+    env::set_var.call(ccg.build_env());
+    c_build.compiler(CCLang::C.compiler_wrapper());
+
     let c_deps_dir = make_c_deps_dir();
     let c_deps_dir_s = c_deps_dir.display();
     c_build.file("src/util.c");
@@ -163,4 +171,6 @@ fn main() {
         ".buildbot.sh",
     ])
     .unwrap();
+
+    ccg.generate();
 }
