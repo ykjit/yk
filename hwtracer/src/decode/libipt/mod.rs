@@ -194,7 +194,7 @@ mod tests {
             "--pt",
             trace_filename,
         ];
-        let mut ptxed_args: Vec<String> = ptxed_args.into_iter().map(|e| String::from(e)).collect();
+        let mut ptxed_args: Vec<String> = ptxed_args.into_iter().map(String::from).collect();
 
         // Make a temp file to dump the VDSO code into. This is necessary because ptxed cannot read
         // code from a virtual address: it can only load from file.
@@ -262,7 +262,7 @@ mod tests {
             .is_none());
         match instr {
             // JMP or Jcc are the only instructions beginning with 'j'.
-            m if m.starts_with("j") => true,
+            m if m.starts_with('j') => true,
             "call" | "ret" | "loop" | "loope" | "loopne" | "syscall" | "sysenter" | "sysexit"
             | "sysret" | "xabort" => true,
             _ => false,
@@ -273,7 +273,7 @@ mod tests {
     fn get_expected_blocks(trace: &Box<dyn Trace>) -> Vec<Block> {
         // Write the trace out to a temp file so ptxed can decode it.
         let mut tmpf = NamedTempFile::new().unwrap();
-        trace.to_file(&mut tmpf.as_file_mut());
+        trace.to_file(tmpf.as_file_mut());
         let (args, _vdso_tempfile) = self_ptxed_args(tmpf.path().to_str().unwrap());
 
         let out = Command::new(env!("PTXED")).args(&args).output().unwrap();
@@ -294,7 +294,7 @@ mod tests {
             let line = line.trim();
             if line.contains("error") {
                 panic!("error line in ptxed output:\n{}", line);
-            } else if line.starts_with("[") {
+            } else if line.starts_with('[') {
                 // It's a special line, e.g. [enabled], [disabled], [block]...
                 if line == "[block]"
                     && (last_instr.is_none() || instr_terminates_block(last_instr.unwrap()))
@@ -323,7 +323,7 @@ mod tests {
     where
         F: FnOnce() -> u64,
     {
-        let trace = trace_closure(&tc, f);
+        let trace = trace_closure(tc, f);
         let expects = get_expected_blocks(&trace);
         test_helpers::test_expected_blocks(trace, TraceDecoderKind::LibIPT, expects.iter());
     }

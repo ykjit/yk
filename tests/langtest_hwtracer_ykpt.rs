@@ -68,7 +68,7 @@ fn run_suite(opt: &'static str) {
         .test_dir("hwtracer_ykpt")
         .test_file_filter(filter)
         .test_extract(move |p| {
-            let altp = p.with_extension(format!("c.{}", opt.strip_prefix("-").unwrap()));
+            let altp = p.with_extension(format!("c.{}", opt.strip_prefix('-').unwrap()));
             let p = if altp.exists() { altp.as_path() } else { p };
             read_to_string(p)
                 .unwrap()

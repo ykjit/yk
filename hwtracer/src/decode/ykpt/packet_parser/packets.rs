@@ -21,10 +21,7 @@ impl IPBytes {
 
     /// Returns `true` if we need the previous TIP value to make sense of the new one.
     pub(super) fn needs_prev_tip(&self) -> bool {
-        match self.val {
-            0b001 | 0b010 | 0b100 => true,
-            _ => false,
-        }
+        matches!(self.val, 0b001 | 0b010 | 0b100)
     }
 }
 
@@ -116,7 +113,7 @@ impl TargetIP {
             0b111 => unreachable!(), // reserved by Intel.
             _ => todo!("IPBytes: {:03b}", ip_bytes.val),
         };
-        Some(usize::try_from(res).unwrap())
+        Some(res)
     }
 }
 
@@ -226,7 +223,7 @@ pub(in crate::decode::ykpt) struct ShortTNTPacket {
     /// being interpreted as a short TNT with no stop bit.
     #[deku(bits = "7", assert = "*branches != 0x1 && *branches != 0x0")]
     branches: u8,
-    #[deku(bits = "1", assert = "*magic == false", temp)]
+    #[deku(bits = "1", assert = "!*magic", temp)]
     magic: bool,
 }
 
@@ -340,12 +337,7 @@ pub(in crate::decode::ykpt) struct CYCPacket {
     #[deku(bits = "2", assert = "*magic & 0x3 == 0b11", temp)]
     magic: u8,
     /// A CYC packet is variable length and has 0 or more "extended" bytes.
-    #[deku(
-        bits = 8,
-        cond = "*exp == true",
-        until = "|e: &u8| e & 0x01 != 0x01",
-        temp
-    )]
+    #[deku(bits = 8, cond = "*exp", until = "|e: &u8| e & 0x01 != 0x01", temp)]
     extended: Vec<u8>,
 }
 

@@ -202,7 +202,7 @@ pub fn llvm_const_to_sgvalue(c: Value) -> SGValue {
     match ty.kind() {
         LLVMTypeKind::LLVMIntegerTypeKind => {
             // FIXME: Add tests to check there's no silent sign extension going on.
-            let val = unsafe { LLVMConstIntGetZExtValue(c.get()) as u64 };
+            let val = unsafe { LLVMConstIntGetZExtValue(c.get()) };
             SGValue::new(val, ty)
         }
         LLVMTypeKind::LLVMPointerTypeKind => match c.kind() {

@@ -37,11 +37,9 @@ fn main() {
     let args = Args::parse();
 
     let md = env::var("CARGO_MANIFEST_DIR").unwrap();
-    let test_path = PathBuf::from(
-        [&md, "c", &args.test_file.to_str().unwrap()]
-            .iter()
-            .collect::<PathBuf>(),
-    );
+    let test_path = [&md, "c", (args.test_file.to_str().unwrap())]
+        .iter()
+        .collect::<PathBuf>();
     let tempdir = TempDir::new().unwrap();
 
     // Compile the test.

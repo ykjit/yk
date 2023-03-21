@@ -281,7 +281,7 @@ pub extern "C" fn yk_stopgap(
                     1 => unsafe { ptr::read::<u8>(addr as *mut u8) as u64 },
                     2 => unsafe { ptr::read::<u16>(addr as *mut u16) as u64 },
                     4 => unsafe { ptr::read::<u32>(addr as *mut u32) as u64 },
-                    8 => unsafe { ptr::read::<u64>(addr as *mut u64) as u64 },
+                    8 => unsafe { ptr::read::<u64>(addr as *mut u64) },
                     _ => unreachable!(),
                 };
                 let aot = &aotvals[i];
@@ -312,8 +312,8 @@ pub extern "C" fn yk_stopgap(
             }
         }
     }
-    let ret = framerec.reconstruct_frames(frameaddr);
-    ret
+
+    framerec.reconstruct_frames(frameaddr)
 }
 
 /// The `__llvm__deoptimize()` function required by `llvm.experimental.deoptimize` intrinsic, that

@@ -15,7 +15,6 @@ use std::{
     thread,
 };
 
-use num_cpus;
 use parking_lot::{Condvar, Mutex, MutexGuard};
 #[cfg(feature = "yk_jitstate_debug")]
 use std::sync::LazyLock;

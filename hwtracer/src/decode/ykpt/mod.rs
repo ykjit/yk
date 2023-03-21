@@ -356,13 +356,11 @@ impl<'t> YkPTBlockIterator<'t> {
                 // `seek_tnt()` has populated `self.tnts()`.
                 let target_off = if self.tnts.pop_front().unwrap() {
                     *taken_target
+                } else if let Some(ntt) = not_taken_target {
+                    *ntt
                 } else {
-                    if let Some(ntt) = not_taken_target {
-                        *ntt
-                    } else {
-                        // Divergent control flow.
-                        todo!();
-                    }
+                    // Divergent control flow.
+                    todo!();
                 };
                 self.cur_loc = ObjLoc::MainObj(target_off);
                 self.lookup_block_from_main_bin_offset(target_off)
@@ -415,16 +413,16 @@ impl<'t> YkPTBlockIterator<'t> {
                     // If there are calls in the block that come *after* the current position in the
                     // block, then we will need to follow those before we look at the successor info.
                     if let Some(blk) = self.maybe_follow_blockmap_call(b_off, &ent.value)? {
-                        return Ok(blk);
+                        Ok(blk)
+                    } else {
+                        // If we get here, there were no further calls to follow in the block, so we
+                        // consult the static successor information.
+                        self.follow_blockmap_successor(&ent.value)
                     }
-
-                    // If we get here, there were no further calls to follow in the block, so we
-                    // consult the static successor information.
-                    return self.follow_blockmap_successor(&ent.value);
                 } else {
                     self.cur_loc =
                         ObjLoc::OtherObjOrUnknown(Some(self.off_to_vaddr(&PHDR_MAIN_OBJ, b_off)?));
-                    return Ok(Block::Unknown);
+                    Ok(Block::Unknown)
                 }
             }
             ObjLoc::OtherObjOrUnknown(vaddr) => self.skip_foreign(vaddr),

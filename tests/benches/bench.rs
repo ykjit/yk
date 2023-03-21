@@ -24,7 +24,7 @@ fn compile_runner(tempdir: &TempDir) -> PathBuf {
         .collect::<PathBuf>();
 
     let mut exe = PathBuf::new();
-    exe.push(&tempdir);
+    exe.push(tempdir);
     exe.push(src.file_stem().unwrap());
 
     let mut compiler = mk_compiler("clang", &exe, &src, "-O0", &[], false);

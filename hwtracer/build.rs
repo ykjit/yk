@@ -61,7 +61,7 @@ fn build_libipt(c_deps_dir: &Path) {
         panic!();
     }
 
-    env::set_current_dir(&prev_dir).unwrap();
+    env::set_current_dir(prev_dir).unwrap();
 }
 
 // We always fetch libipt regardless of if we will build our own libipt. This is becuase there are
@@ -83,7 +83,7 @@ fn fetch_libipt(c_deps_dir: &Path) {
         panic!();
     }
 
-    env::set_current_dir(&prev_dir).unwrap();
+    env::set_current_dir(prev_dir).unwrap();
 }
 
 // Checks if the CPU supports Intel Processor Trace.

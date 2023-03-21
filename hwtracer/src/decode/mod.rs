@@ -26,12 +26,7 @@ pub enum TraceDecoderKind {
 impl TraceDecoderKind {
     /// Returns the default kind of decoder for the current platform.
     pub fn default_for_platform() -> Option<Self> {
-        for kind in Self::iter() {
-            if Self::match_platform(&kind).is_ok() {
-                return Some(kind);
-            }
-        }
-        None
+        Self::iter().find(|&kind| Self::match_platform(&kind).is_ok())
     }
 
     /// Returns `Ok` if the this decoder kind is appropriate for the current platform.
@@ -162,9 +157,9 @@ mod test_helpers {
 
     /// Trace two loops, one 10x larger than the other, then check the proportions match the number
     /// of block the trace passes through.
-    pub fn ten_times_as_many_blocks(mut tc: TraceCollector, decoder_kind: TraceDecoderKind) {
-        let trace1 = trace_closure(&mut tc, || work_loop(10));
-        let trace2 = trace_closure(&mut tc, || work_loop(100));
+    pub fn ten_times_as_many_blocks(tc: TraceCollector, decoder_kind: TraceDecoderKind) {
+        let trace1 = trace_closure(&tc, || work_loop(10));
+        let trace2 = trace_closure(&tc, || work_loop(100));
 
         let dec: Box<dyn TraceDecoder> = TraceDecoderBuilder::new()
             .kind(decoder_kind)

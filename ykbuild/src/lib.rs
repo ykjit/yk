@@ -105,7 +105,7 @@ impl CCGenerator {
             let buf = buf.trim();
 
             // We assume (and assert) that the source file is the last argument.
-            let ccfile = buf.split(" ").last().unwrap();
+            let ccfile = buf.split(' ').last().unwrap();
             assert!(CCLang::C
                 .extensions()
                 .iter()
@@ -136,7 +136,7 @@ impl CCGenerator {
             .iter()
             .collect::<PathBuf>();
         let mut outfile = File::create(outpath).unwrap();
-        write!(outfile, "[\n").unwrap();
+        writeln!(outfile, "[").unwrap();
         write!(outfile, "{}", entries.join(",\n")).unwrap();
         write!(outfile, "\n]\n").unwrap();
     }

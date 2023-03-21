@@ -51,10 +51,7 @@ impl Block {
 
     /// Returns `true` if `self` represents an unknown virtual address range.
     pub fn is_unknown(&self) -> bool {
-        match self {
-            Self::Unknown => true,
-            _ => false,
-        }
+        matches!(self, Self::Unknown)
     }
 
     /// If `self` represents a known address range, returns the address range, otherwise `None`.

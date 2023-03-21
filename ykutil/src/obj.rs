@@ -114,7 +114,7 @@ pub static PHDR_OBJECT_CACHE: LazyLock<Vec<Object>> = LazyLock::new(|| {
 //
 // On Linux this is the empty string.
 #[cfg(target_os = "linux")]
-pub static PHDR_MAIN_OBJ: LazyLock<PathBuf> = LazyLock::new(|| PathBuf::new());
+pub static PHDR_MAIN_OBJ: LazyLock<PathBuf> = LazyLock::new(PathBuf::new);
 
 extern "C" {
     fn find_main() -> *const c_void;
