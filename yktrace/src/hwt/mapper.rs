@@ -115,7 +115,7 @@ impl<'a> HWTMapper {
                             .insert(sym_name.to_owned(), sio.dli_saddr() as *const c_void);
                     }
                     for bb in ent.value.corr_bbs() {
-                        ret.push(Some(IRBlock::new(
+                        ret.push(Some(IRBlock::new_mapped(
                             sym_name.to_owned(),
                             usize::try_from(*bb).unwrap(),
                         )));
@@ -147,16 +147,20 @@ impl<'a> HWTMapper {
         let mut ret: Vec<IRBlock> = Vec::new();
 
         for block in &mut trace_iter {
-            let irblocks = self.map_block(&block?);
+            let block = block?;
+            let irblocks = self.map_block(&block);
             if irblocks.is_empty() {
                 // The block is unmappable. Insert a IRBlock that indicates this, but only if the
                 // trace isn't empty (we never report the leading unmappable code in a trace). We
                 // also take care to collapse consecutive unmappable blocks into one.
                 if let Some(last) = ret.last_mut() {
                     if !last.is_unmappable() {
-                        ret.push(IRBlock::unmappable());
+                        ret.push(IRBlock::new_unmappable(block.stack_adjust().unwrap()));
                     } else {
-                        // Don't push, thus collapsing repeated unmappable blocks into one.
+                        // The previous entry in the trace is already and unmappable region. Don't
+                        // push, thus collapsing repeated unmappable blocks into one. We do have to
+                        // sum together the stack adjust values though!
+                        *last.stack_adjust_mut() += block.stack_adjust().unwrap();
                     }
                 }
             } else {

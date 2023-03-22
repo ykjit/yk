@@ -11,7 +11,9 @@
 #include "jitmodbuilder.h"
 
 #include <atomic>
+#include <bit>
 #include <err.h>
+#include <sys/types.h>
 #include <variant>
 
 using namespace llvm;
@@ -182,31 +184,31 @@ public:
   }
 };
 
-// An entry in the callstack that represents at least one foreign frame.
-struct ForeignFrames {
-  void dump() { errs() << "ForeignFrames {}\n"; }
+// An entry in the callstack that represents one foreign frame.
+struct ForeignFrame {
+  void dump() { errs() << "ForeignFrame {}\n"; }
 };
 
 // An entry in the call stack.
 class StackFrame {
   // Either a frame we have IR for, or foreign frames that we don't.
-  std::variant<MappableFrame, ForeignFrames> Inner;
+  std::variant<MappableFrame, ForeignFrame> Inner;
 
-  StackFrame(std::variant<MappableFrame, ForeignFrames> Inner) : Inner(Inner){};
+  StackFrame(std::variant<MappableFrame, ForeignFrame> Inner) : Inner(Inner){};
 
 public:
   // Create a frame entry for which we have IR.
   static StackFrame CreateMappableFrame(
       Function *F, CallInst *LastSMCall,
       std::optional<BlockResumePoint> ResumePoint = std::nullopt) {
-    return StackFrame(std::variant<MappableFrame, ForeignFrames>(
+    return StackFrame(std::variant<MappableFrame, ForeignFrame>(
         MappableFrame{F, nullptr, LastSMCall, ResumePoint}));
   }
 
   // Create a frame entry for foreign code for which we have no IR.
   static StackFrame CreateForeignFrame() {
     return StackFrame(
-        std::variant<MappableFrame, ForeignFrames>(ForeignFrames{}));
+        std::variant<MappableFrame, ForeignFrame>(ForeignFrame{}));
   }
 
   // If this frame is mappable, return a pointer to the mappable frame,
@@ -220,7 +222,7 @@ public:
     if (MappableFrame *MF = std::get_if<MappableFrame>(&Inner)) {
       MF->dump();
     } else {
-      std::get<ForeignFrames>(Inner).dump();
+      std::get<ForeignFrame>(Inner).dump();
     }
   }
 };
@@ -288,13 +290,51 @@ void dumpValueAndExit(const char *Msg, Value *V) {
   exit(EXIT_FAILURE);
 }
 
-// A function name and basic block index pair that identifies a block in the
-// AOT LLVM IR.
+// A function name and basic block index pair that identifies a mappable block
+// in the AOT LLVM IR.
 struct IRBlock {
   // A non-null pointer to the function name.
   char *FuncName;
   // The index of the block in the parent LLVM function.
   size_t BBIdx;
+};
+
+// An unmappable region of code spanning one or more machine blocks.
+struct UnmappableRegion {
+  // The effect executing the unmappable block had on the stack depth. This is
+  // the number of frames (not the size of the stack in bytes).
+  //
+  // Since each UnmappableRegion in a trace is followed by a mappable IRBlock,
+  // this value can be used to determine if the unmappable code:
+  //
+  //  - returned back to mappable code (StackAdjust < 0).
+  //  - called deeper into mappable code (StackAdjust > 0).
+  //  - "fell through" into mappable code (StackAdjust ==  0).
+  ssize_t StackAdjust;
+};
+
+class TraceLoc {
+  std::variant<IRBlock, UnmappableRegion> Loc;
+
+public:
+  TraceLoc(std::variant<IRBlock, UnmappableRegion> Loc) : Loc(Loc) {}
+
+  UnmappableRegion *getUnmappableRegion() {
+    return std::get_if<UnmappableRegion>(&Loc);
+  }
+
+  IRBlock *getMappedBlock() { return std::get_if<IRBlock>(&Loc); }
+
+  void dump() {
+    if (IRBlock *IRB = std::get_if<IRBlock>(&Loc)) {
+      errs() << "IRBlock(Func=" << IRB->FuncName << ", BBIdx=" << IRB->BBIdx
+             << ")\n";
+    } else {
+      UnmappableRegion *U = std::get_if<UnmappableRegion>(&Loc);
+      assert(U);
+      errs() << "UnmappableRegion(StackAdjust=" << U->StackAdjust << ")\n";
+    }
+  }
 };
 
 // Describes the software or hardware trace to be compiled using LLVM.
@@ -319,23 +359,20 @@ public:
   // Returns the optional IRBlock at index `Idx` in the trace. No value is
   // returned if element at `Idx` was unmappable. It is undefined behaviour to
   // invoke this method with an out-of-bounds `Idx`.
-  const optional<IRBlock> operator[](size_t Idx) {
+  TraceLoc operator[](size_t Idx) {
     assert(Idx < Len);
     char *FuncName = FuncNames[Idx];
     if (FuncName == nullptr) {
-      return optional<IRBlock>();
+      // Subtle bitcast from `size_t` to `ssize_t`. When the trace was encoded
+      // into an FFI friendly format, unmappable blocks use the `Idx` field
+      // (a `size_t`) to encode the stack adjustment value (a `ssize_t`). The
+      // cast below reverses that.
+      return TraceLoc(variant<IRBlock, UnmappableRegion>{
+          UnmappableRegion{bit_cast<ssize_t, size_t>(BBs[Idx])}});
     } else {
-      return optional<IRBlock>(IRBlock{FuncName, BBs[Idx]});
+      return TraceLoc(
+          variant<IRBlock, UnmappableRegion>{IRBlock{FuncName, BBs[Idx]}});
     }
-  }
-
-  // The same as `operator[]`, but for scenarios where you are certain that the
-  // element at position `Idx` cannot be unmappable.
-  const IRBlock getUnchecked(size_t Idx) {
-    assert(Idx < Len);
-    char *FuncName = FuncNames[Idx];
-    assert(FuncName != nullptr);
-    return IRBlock{FuncName, BBs[Idx]};
   }
 };
 
@@ -379,8 +416,6 @@ class JITModBuilder {
   Module *JITMod;
   // When true, the compiler is outlining.
   bool Outlining = false;
-  // Signifies a hole (for which we have no IR) in the trace.
-  bool ExpectUnmappable = false;
   // The JITMod's builder.
   llvm::IRBuilder<> Builder;
   // Dead values to recursively delete upon finalisation of the JITMod. This is
@@ -517,11 +552,6 @@ class JITModBuilder {
         copyInstruction(&Builder, (Instruction *)&*CI, CurBBIdx, CurInstrIdx);
         startOutlining();
       }
-      // We should expect an "unmappable hole" in the trace. This is
-      // where the trace followed a call into external code for which we
-      // have no IR, and thus we cannot map blocks for.
-      ExpectUnmappable = true;
-
       CallStack.pushFrame(StackFrame::CreateForeignFrame());
     } else {
       // Calling to a non-foreign function.
@@ -954,11 +984,11 @@ class JITModBuilder {
     // so that we can insert an appropriate guard into the trace. A block must
     // exist at `InpTrace[TraceIdx + 1]` because the branch instruction must
     // transfer to a successor block, and branching cannot turn off tracing.
-    assert(InpTrace[TraceIdx + 1].has_value()); // Should be a mappable block.
-    IRBlock NextIB = InpTrace[TraceIdx + 1].value();
+    IRBlock *NextIB = InpTrace[TraceIdx + 1].getMappedBlock();
+    assert(NextIB);
     BasicBlock *NextBB;
     Function *NextFunc;
-    std::tie(NextFunc, NextBB) = getLLVMAOTFuncAndBlock(&NextIB);
+    std::tie(NextFunc, NextBB) = getLLVMAOTFuncAndBlock(NextIB);
 
     // The branching instructions we are handling here are all transfer to a
     // block in the same function.
@@ -1347,13 +1377,14 @@ class JITModBuilder {
     VMap[TraceInputs] = JITFunc->getArg(JITFUNC_ARG_INPUTS_STRUCT_IDX);
 
     // Push the initial frame.
-    IRBlock StartIRB = *InpTrace[0];
-    Function *StartFunc = AOTMod->getFunction(StartIRB.FuncName);
+    IRBlock *StartIRB = InpTrace[0].getMappedBlock();
+    assert(StartIRB);
+    Function *StartFunc = AOTMod->getFunction(StartIRB->FuncName);
     std::optional<BlockResumePoint> RP;
     if (InitialResume.has_value()) {
       auto [StartInstrIdx, StartCPCall] = *InitialResume;
       assert(StartCPCall->getFunction() == StartFunc);
-      RP = BlockResumePoint{StartIRB.BBIdx, StartCPCall, StartInstrIdx};
+      RP = BlockResumePoint{StartIRB->BBIdx, StartCPCall, StartInstrIdx};
     }
     StackFrame InitFrame =
         StackFrame::CreateMappableFrame(StartFunc, nullptr, RP);
@@ -1366,11 +1397,11 @@ class JITModBuilder {
     assert(IL >= 1);
     // The trace never starts with unmappable code (because it gets stripped by
     // the maper).
-    assert(InpTrace[0].has_value());
+    assert(InpTrace[0].getMappedBlock());
     // There should never be two unmappable blocks in a row in the trace
     // (because the mapper collapses them to save memory).
     for (size_t I = 0; I < IL - 1; I++) {
-      assert(InpTrace[I].has_value() || InpTrace[I + 1].has_value());
+      assert(InpTrace[I].getMappedBlock() || InpTrace[I + 1].getMappedBlock());
     }
 #endif
   }
@@ -1470,38 +1501,76 @@ public:
     for (size_t Idx = 0; Idx < InpTrace.Length(); Idx++) {
       // Update the previously executed BB in the most-recent frame (if it's
       // mappable).
-      optional<IRBlock> MaybeIB = InpTrace[Idx];
+      TraceLoc Loc = InpTrace[Idx];
 
-      // If we previously saw a call to foreign code, there will now be an
-      // "unmappable hole" in the trace.
-      if (ExpectUnmappable) {
-        assert(!MaybeIB.has_value());
-        // FIXME: Allow foreign code to call back to mappable code.
+      if (UnmappableRegion *UR = Loc.getUnmappableRegion()) {
+        // The trace entered a region of unmappable foreign code.
         //
-        // We've just seen an unmappable region in the trace. There are never
-        // two unmappable regions in a row, so the next block is guaranteed to
-        // be mappable. Since we don't yet allow foreign code to "call back"
-        // into mappable code, we assume that the subsequent mappable block is
-        // the result of the foreign code returning to mappable code.
-        assert(!CallStack.curFrame().getMappableFrame());
-        CallStack.popFrame();
-        ExpectUnmappable = false;
-        tryStopOutlining();
+        // As noted in the mapper and asserted in the JITModBuilder constructor,
+        // there are never two unmappable regions in a row, so the next block
+        // (if there is one) is guaranteed to be mappable. The question is: will
+        // the foreign code be *returning* into mappable code, or will it be
+        // *calling back* deeper into mappable code? The trace decoder keeps
+        // track of the stack effects of foreign code (assuming its control flow
+        // isn't bonkers), so we are able to use that information to decide.
+
+        if (InpTrace.Length() == Idx + 1) {
+          // This unmappable region is the end of the trace, so there's no
+          // need to maintain the stack any more.
+          continue;
+        }
+
+        assert(!CallStack.curMappableFrame());
+
+        // FIXME: think about what do do in the face of setjmp/longjmp. How
+        // would we find the stack adjustment value for such code?
+        if (UR->StackAdjust < 0) {
+          // The stack got smaller as a result of executing the foreign code,
+          // so we must be returning to mappable code.
+          while (UR->StackAdjust < 0) {
+            // We don't allow foreign code to pop non-foreign frames. That
+            // seems like a sure indiciator of bonkers control flow.
+            assert(!CallStack.curMappableFrame());
+            CallStack.popFrame();
+            UR->StackAdjust++;
+          }
+          assert(CallStack.curMappableFrame());
+          tryStopOutlining();
+        } else if (UR->StackAdjust > 0) {
+          // The stack got bigger as a result of executing the foreign code. It
+          // must have called deeper and eventually into mappable code.
+          //
+          // If the stack adjustment value is N, then there must be N-1 foreign
+          // frames and the last remaining frame is the new mappable frame.
+          while (UR->StackAdjust > 1) {
+            CallStack.pushFrame(StackFrame::CreateForeignFrame());
+            UR->StackAdjust--;
+          }
+          IRBlock *NextIB = InpTrace[Idx + 1].getMappedBlock();
+          assert(NextIB);
+          assert(NextIB->BBIdx == 0);
+          auto [NextFunc, BB] = getLLVMAOTFuncAndBlock(NextIB);
+          CallStack.pushFrame(
+              StackFrame::CreateMappableFrame(NextFunc, nullptr));
+        } else {
+          // The stack size didn't change. That could indicate that foreign code
+          // is "falling through" into mappable code (which we don't allow).
+          // Either way, something has gone wrong.
+          assert(false);
+        }
         continue;
       }
 
       // If we get here then we must have a mappable block and the most-recent
       // frame should also be mappable.
-      assert(MaybeIB.has_value());
       MappableFrame *MPF = CallStack.curMappableFrame();
       assert(MPF);
 
-      IRBlock IB = MaybeIB.value();
-      size_t CurBBIdx = IB.BBIdx;
+      IRBlock *IB = Loc.getMappedBlock();
+      assert(IB);
+      size_t CurBBIdx = IB->BBIdx;
 
-      Function *F;
-      BasicBlock *BB;
-      std::tie(F, BB) = getLLVMAOTFuncAndBlock(&IB);
+      auto [F, BB] = getLLVMAOTFuncAndBlock(IB);
       assert(MPF->Func == F);
 
 #ifndef NDEBUG
@@ -1629,9 +1698,9 @@ public:
             if (!isa<InlineAsm>(CI->getCalledOperand())) {
               // Look ahead in the trace to find the callee so we can
               // map the arguments if we are inlining the call.
-              optional<IRBlock> MaybeNextIB = InpTrace[Idx + 1];
-              if (MaybeNextIB.has_value()) {
-                CF = AOTMod->getFunction(MaybeNextIB.value().FuncName);
+              TraceLoc MaybeNextIB = InpTrace[Idx + 1];
+              if (const IRBlock *NextIB = MaybeNextIB.getMappedBlock()) {
+                CF = AOTMod->getFunction(NextIB->FuncName);
               } else {
                 CF = nullptr;
               }
@@ -1640,7 +1709,6 @@ public:
               break;
             }
           } else if (CF == ControlPointCallInst->getCalledFunction()) {
-            ExpectUnmappable = true; // control point is always opaque.
             assert(CF->arg_size() == YK_CONTROL_POINT_NUM_ARGS);
             VMap[CI] = ConstantPointerNull::get(
                 Type::getInt8PtrTy(JITMod->getContext()));

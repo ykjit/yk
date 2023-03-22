@@ -20,20 +20,25 @@ pub enum Block {
     ///
     /// This is required because decoders don't have perfect knowledge about every block
     /// in the virtual address space.
-    Unknown,
+    Unknown {
+        /// The stack adjustment required as a consequence of executing this unknown code.
+        stack_adjust: isize,
+    },
 }
 
 impl fmt::Debug for Block {
     /// Format virtual addresses using hexidecimal.
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let Self::VAddrRange {
-            first_instr,
-            last_instr,
-        } = self
-        {
-            write!(f, "Block({:x}..={:x})", first_instr, last_instr)
-        } else {
-            write!(f, "UnkonwnBlock(???..=???)")
+        match self {
+            Self::VAddrRange {
+                first_instr,
+                last_instr,
+            } => {
+                write!(f, "Block({:x}..={:x})", first_instr, last_instr)
+            }
+            Self::Unknown { stack_adjust } => {
+                write!(f, "UnkonwnBlock(stack_adjust={stack_adjust})")
+            }
         }
     }
 }
@@ -51,7 +56,7 @@ impl Block {
 
     /// Returns `true` if `self` represents an unknown virtual address range.
     pub fn is_unknown(&self) -> bool {
-        matches!(self, Self::Unknown)
+        matches!(self, Self::Unknown { .. })
     }
 
     /// If `self` represents a known address range, returns the address range, otherwise `None`.
@@ -62,6 +67,32 @@ impl Block {
         } = self
         {
             Some((*first_instr, *last_instr))
+        } else {
+            None
+        }
+    }
+
+    /// Create an unknown block.
+    pub fn new_unknown() -> Self {
+        Self::Unknown { stack_adjust: 0 }
+    }
+
+    /// Return the stack adjustment value, if applicable.
+    pub fn stack_adjust(&self) -> Option<isize> {
+        if let Self::Unknown { stack_adjust } = self {
+            Some(*stack_adjust)
+        } else {
+            None
+        }
+    }
+
+    /// Return a mutable reference to the stack adjustment value, if applicable.
+    pub fn stack_adjust_mut(&mut self) -> Option<&mut isize> {
+        if let Self::Unknown {
+            ref mut stack_adjust,
+        } = self
+        {
+            Some(stack_adjust)
         } else {
             None
         }
