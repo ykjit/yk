@@ -26,6 +26,7 @@ cmake -DCMAKE_INSTALL_PREFIX=`pwd`/../inst \
     -DCMAKE_BUILD_TYPE=release \
     -DLLVM_ENABLE_ASSERTIONS=On \
     -DLLVM_ENABLE_PROJECTS="lld;clang" \
+    -DCLANG_DEFAULT_PIE_ON_LINUX=OFF \
     ../llvm
 make -j `nproc` install
 ```
