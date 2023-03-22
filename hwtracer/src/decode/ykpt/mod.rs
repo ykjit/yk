@@ -49,10 +49,11 @@ use std::{
     cell::Cell,
     collections::VecDeque,
     convert::TryFrom,
+    ffi::CString,
     fmt::{self, Debug},
     ops::Range,
     path::{Path, PathBuf},
-    slice,
+    ptr, slice,
     sync::LazyLock,
 };
 use ykutil::{
@@ -501,6 +502,20 @@ impl<'t> YkPTBlockIterator<'t> {
             .map_err(|_| HWTracerError::DisasmFail("failed to set position".to_owned()))?;
         let mut reposition: bool = false;
 
+        // `as usize` below are safe casts from raw pointer to pointer-sized integer.
+        let longjmp_vaddr = {
+            let func = CString::new("longjmp").unwrap();
+            u64::try_from(unsafe { libc::dlsym(ptr::null_mut(), func.as_ptr()) } as usize).unwrap()
+        };
+        let us_longjmp_vaddr = {
+            let func = CString::new("_longjmp").unwrap();
+            u64::try_from(unsafe { libc::dlsym(ptr::null_mut(), func.as_ptr()) } as usize).unwrap()
+        };
+        let siglongjmp_vaddr = {
+            let func = CString::new("siglongjmp").unwrap();
+            u64::try_from(unsafe { libc::dlsym(ptr::null_mut(), func.as_ptr()) } as usize).unwrap()
+        };
+
         loop {
             let vaddr = usize::try_from(dis.ip()).unwrap();
             let (obj, off) = self.vaddr_to_off(vaddr)?;
@@ -605,6 +620,15 @@ impl<'t> YkPTBlockIterator<'t> {
                         // the decoder elsewhere.
                     } else {
                         let target_vaddr = self.branch_target_vaddr(&inst);
+
+                        // We can't (yet) handle longjmp in unmapped code. Crash if we spot it.
+                        if (longjmp_vaddr != 0 && target_vaddr == longjmp_vaddr)
+                            || (us_longjmp_vaddr != 0 && target_vaddr == us_longjmp_vaddr)
+                            || (siglongjmp_vaddr == 0 && target_vaddr == siglongjmp_vaddr)
+                        {
+                            panic!("encountered call to longjmp in unmapped code");
+                        }
+
                         // Intel PT doesn't compress a call to the next address in the instruction
                         // stream because such calls are unlikely to be convergent (i.e. they are
                         // unlikely to ever return).

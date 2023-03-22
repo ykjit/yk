@@ -18,6 +18,7 @@ pub static EXTRA_LINK: LazyLock<HashMap<&'static str, Vec<ExtraLinkage>>> = Lazy
     // These tests get an extra, separately compiled (thus opaque to LTO), object file linked in.
     for test_file in &[
         "call_ext_in_obj.c",
+        "unmapped_setjmp.c",
         "loopy_funcs_not_inlined_by_default.c",
         "not_loopy_funcs_inlined_by_default.c",
         "reentrant.c",
@@ -31,6 +32,7 @@ pub static EXTRA_LINK: LazyLock<HashMap<&'static str, Vec<ExtraLinkage>>> = Lazy
                 "%%TEMPDIR%%/call_me.o",
                 &[
                     "clang",
+                    "-I../ykcapi",
                     "-c",
                     "-O0",
                     "extra_linkage/call_me.c",
