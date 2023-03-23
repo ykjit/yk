@@ -1536,7 +1536,12 @@ public:
           }
           assert(CallStack.curMappableFrame());
           tryStopOutlining();
-        } else if (UR->StackAdjust > 0) {
+        } else {
+          // If the stack size hasn't changed, either we've got something wrong,
+          // or the unmappable code has transitioned back to mappable code in a
+          // way we don't currently support.
+          assert(UR->StackAdjust > 0);
+
           // The stack got bigger as a result of executing the foreign code. It
           // must have called deeper and eventually into mappable code.
           //
@@ -1552,11 +1557,6 @@ public:
           auto [NextFunc, BB] = getLLVMAOTFuncAndBlock(NextIB);
           CallStack.pushFrame(
               StackFrame::CreateMappableFrame(NextFunc, nullptr));
-        } else {
-          // The stack size didn't change. That could indicate that foreign code
-          // is "falling through" into mappable code (which we don't allow).
-          // Either way, something has gone wrong.
-          assert(false);
         }
         continue;
       }
