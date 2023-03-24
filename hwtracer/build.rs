@@ -130,7 +130,6 @@ fn main() {
         } else {
             build_libipt(&c_deps_dir);
             c_build.include(&format!("{}/inst/include/", c_deps_dir_s));
-            c_build.flag(&format!("-L{}/inst/lib", c_deps_dir_s));
             println!("cargo:rustc-link-search={}/inst/lib", c_deps_dir_s);
             println!("cargo:rustc-env=PTXED={}/inst/bin/ptxed", c_deps_dir_s);
         }
