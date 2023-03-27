@@ -1,4 +1,3 @@
-// ignore: Requires global variable stderr in stopgap.
 // Run-time:
 //   env-var: YKD_PRINT_JITSTATE=1
 //   env-var: YKD_SERIALISE_COMPILATION=1

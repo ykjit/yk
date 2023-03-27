@@ -1,4 +1,3 @@
-// ignore: opt levels > -O0 require more intrinstics support from ykllvm
 
 // Check that we can call a static function with internal linkage from the same
 // compilation unit.
