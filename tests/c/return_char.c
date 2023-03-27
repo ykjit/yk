@@ -27,7 +27,7 @@
 #include <yk_testing.h>
 
 __attribute__((noinline)) char f() {
-  YkMT *mt = yk_mt_new();
+  YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 

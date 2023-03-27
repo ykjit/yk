@@ -22,7 +22,7 @@ int main(int argc, char **argv) {
 // FIXME: This only returns an integer due to a shortcoming of the stopgap interpreter:
 // https://github.com/ykjit/yk/issues/537
 uint32_t unused() {
-  YkMT *mt = yk_mt_new();
+  YkMT *mt = yk_mt_new(NULL);
   YkLocation loc = yk_location_new();
   while (true) {
     yk_mt_control_point(mt, &loc);

@@ -28,8 +28,14 @@ typedef uint32_t YkHotThreshold;
 
 typedef struct YkMT YkMT;
 
-// Create a new `YkMT` instance.
-YkMT *yk_mt_new(void);
+// Create a new `YkMT` instance. If this fails then:
+//   * If `err_msg` is `NULL`, this function will abort.
+//   * If `err_msg` is not `NULL`:
+//       1. A malloc()d string with an error message explaining the failure
+//          will be placed in `*err_msg`. It is the callers duty to free this
+//          string.
+//       2. `yk_mt_new` will return `NULL`.
+YkMT *yk_mt_new(char **err_msg);
 
 // Drop a `YkMT` instance. This must be called at most once per `YkMT`
 // instance: calling this function more than once on a `YkMT` instance leads to

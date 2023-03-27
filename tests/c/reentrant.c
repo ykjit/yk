@@ -35,7 +35,7 @@ int call_callback(int (*callback)(int, int), int x, int y);
 __attribute((noinline)) int callback(int x, int y) { return (x + y) / 2; }
 
 int main(int argc, char **argv) {
-  YkMT *mt = yk_mt_new();
+  YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 

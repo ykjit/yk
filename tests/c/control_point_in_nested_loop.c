@@ -9,7 +9,7 @@
 #include <yk_testing.h>
 
 int main(int argc, char **argv) {
-  YkMT *mt = yk_mt_new();
+  YkMT *mt = yk_mt_new(NULL);
   int outers = 100;
   int inners = 100;
   NOOPT_VAL(outers);

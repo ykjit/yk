@@ -32,7 +32,7 @@ int call_me(int x); // from extra_linkage/call_me.c
 __attribute__((noinline)) void inline_into_trace(int x) { call_me(x); }
 
 int main(int argc, char **argv) {
-  YkMT *mt = yk_mt_new();
+  YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 

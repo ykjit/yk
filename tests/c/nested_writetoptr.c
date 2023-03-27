@@ -54,7 +54,7 @@ __attribute__((noinline)) void foo(int i) {
 }
 
 int main(int argc, char **argv) {
-  YkMT *mt = yk_mt_new();
+  YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
