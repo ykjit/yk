@@ -60,6 +60,7 @@ pub struct MT {
     /// How many worker threads are currently running. Note that this may temporarily be `>`
     /// [`max_worker_threads`].
     active_worker_threads: AtomicUsize,
+    trace_decoder_kind: TraceDecoderKind,
     tracing_kind: TracingKind,
 }
 
@@ -75,6 +76,7 @@ impl MT {
             job_queue: Arc::new((Condvar::new(), Mutex::new(VecDeque::new()))),
             max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
             active_worker_threads: AtomicUsize::new(0),
+            trace_decoder_kind: TraceDecoderKind::default_for_platform().unwrap(),
             tracing_kind: TracingKind::default(),
         }
     }
@@ -382,12 +384,11 @@ impl MT {
         utrace: Box<dyn UnmappedTrace>,
         mtx: Arc<Mutex<Option<Box<CompiledTrace>>>>,
     ) {
+        let tdk = self.trace_decoder_kind;
         let do_compile = move || {
-            // FIXME: Selection of the trace decoder kind should be configurable somehow.
-            let decoder = TraceDecoderKind::default_for_platform().unwrap();
             // FIXME: if mapping or tracing fails we don't want to abort, but in order to do that,
             // we'll need to move the location into something other than the Compiling state.
-            let irtrace = match utrace.map(decoder) {
+            let irtrace = match utrace.map(tdk) {
                 Ok(x) => x,
                 Err(e) => todo!("{e:?}"),
             };
