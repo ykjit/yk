@@ -130,14 +130,12 @@ pub fn off_to_vaddr(containing_obj: &Path, off: u64) -> Option<usize> {
 ///
 /// This function uses `dladdr()` internally, and thus inherits the same symbol visibility rules
 /// used there. For example, this function will not find unexported symbols.
-pub fn vaddr_to_sym_and_obj(vaddr: usize) -> Result<DLInfo, ()> {
-    let info = dladdr(vaddr)?;
+pub fn vaddr_to_sym_and_obj(vaddr: usize) -> Option<DLInfo> {
     // `dladdr()` returns success if at least the virtual address could be mapped to an object
     // file, but here it is crucial that we can also find the symbol that the address belongs to.
-    if info.dli_sname().is_some() {
-        Ok(info)
-    } else {
-        Err(())
+    match dladdr(vaddr) {
+        Ok(x) if x.dli_sname().is_some() => Some(x),
+        Ok(_) | Err(()) => None,
     }
 }
 
@@ -211,13 +209,13 @@ mod tests {
     #[test]
     fn vaddr_to_sym_and_obj_cant_find_obj() {
         let func_vaddr = 1; // Obscure address unlikely to be in any loaded object.
-        assert!(vaddr_to_sym_and_obj(func_vaddr as usize).is_err());
+        assert!(vaddr_to_sym_and_obj(func_vaddr as usize).is_none());
     }
 
     #[test]
     fn vaddr_to_sym_and_obj_cant_find_sym() {
         // Address valid, but symbol not exported (test bin not built with `-Wl,--export-dynamic`).
         let func_vaddr = vaddr_to_sym_and_obj_cant_find_sym as *const fn();
-        assert!(vaddr_to_sym_and_obj(func_vaddr as usize).is_err());
+        assert!(vaddr_to_sym_and_obj(func_vaddr as usize).is_none());
     }
 }
