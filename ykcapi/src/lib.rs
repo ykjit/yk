@@ -25,7 +25,7 @@ use yksmp::{Location as SMLocation, StackMapParser};
 
 #[no_mangle]
 pub extern "C" fn yk_mt_new() -> *mut MT {
-    let mt = Box::new(MT::new());
+    let mt = Box::new(MT::new().unwrap());
     Box::into_raw(mt)
 }
 
