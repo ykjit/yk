@@ -1,4 +1,3 @@
-// ignore: Can only reliably make a PHI node at -O0.
 
 // Check that we can handle struct field accesses where the field is
 // initialised via a phi node.

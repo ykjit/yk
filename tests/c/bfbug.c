@@ -1,4 +1,4 @@
-// ignore: runs too fast to check what should be checked. reenable when the PT decoder is faster
+// ignore: Consistently hits `Assertion `!CallStack.curMappableFrame()' failed`
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_PRINT_JITSTATE=1

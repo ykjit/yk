@@ -1,4 +1,3 @@
-// ignore: can't trace reentrant code yet. see below.
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_PRINT_IR=jit-pre-opt
