@@ -1,4 +1,6 @@
 #![feature(once_cell)]
+#![allow(clippy::comparison_chain)]
+#![allow(clippy::missing_safety_doc)]
 
 use llvm_sys::{core::*, target::LLVMABISizeOfType};
 use object::{Object, ObjectSection};

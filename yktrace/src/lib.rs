@@ -2,7 +2,9 @@
 
 #![feature(once_cell)]
 #![feature(naked_functions)]
+#![allow(clippy::len_without_is_empty)]
 #![allow(clippy::new_without_default)]
+#![allow(clippy::missing_safety_doc)]
 
 mod errors;
 use hwtracer::decode::TraceDecoderKind;
@@ -229,7 +231,7 @@ impl IRTrace {
                 di_tmpname_c,
             )
         };
-        if ret == ptr::null() {
+        if ret.is_null() {
             Err("Could not compile trace.".into())
         } else {
             Ok((ret, di_tmp))

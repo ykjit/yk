@@ -78,7 +78,7 @@ impl MT {
             max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
             active_worker_threads: AtomicUsize::new(0),
             trace_decoder_kind: TraceDecoderKind::default_for_platform()
-                .ok_or_else(|| "Tracing is not supported on this platform")?,
+                .ok_or("Tracing is not supported on this platform")?,
             tracing_kind: TracingKind::default(),
         })
     }
