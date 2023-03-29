@@ -13,7 +13,6 @@
 #[cfg(feature = "yk_testing")]
 mod testing;
 
-use libc;
 use std::arch::asm;
 use std::convert::{TryFrom, TryInto};
 use std::ffi::{c_char, c_void, CString};
@@ -25,6 +24,7 @@ use ykrt::{HotThreshold, Location, MT};
 use yksmp::{Location as SMLocation, StackMapParser};
 
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn yk_mt_new(err_msg: *mut *const c_char) -> *mut MT {
     match MT::new() {
         Ok(mt) => Box::into_raw(Box::new(mt)),
@@ -45,6 +45,7 @@ pub extern "C" fn yk_mt_new(err_msg: *mut *const c_char) -> *mut MT {
 }
 
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn yk_mt_drop(mt: *mut MT) {
     unsafe { Box::from_raw(mt) };
 }
@@ -58,6 +59,7 @@ pub extern "C" fn yk_mt_control_point(_mt: *mut MT, _loc: *mut Location) {
 // The "real" control point, that is called once the interpreter has been patched by ykllvm.
 // Returns the address of a reconstructed stack or null if there wasn#t a guard failure.
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn __ykrt_control_point(
     mt: *mut MT,
     loc: *mut Location,

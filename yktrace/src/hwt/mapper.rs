@@ -104,6 +104,7 @@ impl<'a> HWTMapper {
                 // function's symbol. If the cache knows that block A and B are from the same
                 // function, and a block X has a start address between blocks A and B, then X must
                 // also belong to the same function and there's no need to query the linker.
+                // FIXME: Is this `unwrap` safe?
                 let sio = vaddr_to_sym_and_obj(usize::try_from(block_vaddr).unwrap()).unwrap();
                 debug_assert_eq!(
                     obj_name.to_str().unwrap(),

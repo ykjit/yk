@@ -703,7 +703,7 @@ impl<'t> YkPTBlockIterator<'t> {
 
     /// Fetch the next packet and update iterator state.
     fn packet(&mut self) -> Result<Packet, HWTracerError> {
-        let ret = if let Some(pkt_or_err) = self.parser.next() {
+        if let Some(pkt_or_err) = self.parser.next() {
             let mut pkt = pkt_or_err?;
 
             if pkt.kind() == PacketKind::OVF {
@@ -778,9 +778,7 @@ impl<'t> YkPTBlockIterator<'t> {
             Ok(pkt)
         } else {
             Err(HWTracerError::NoMorePackets)
-        };
-
-        ret
+        }
     }
 }
 

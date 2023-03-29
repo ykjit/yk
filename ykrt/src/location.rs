@@ -373,6 +373,7 @@ impl LocationInner {
     /// If this `State` is not counting, return its `HotLocation`. It is undefined behaviour to
     /// call this function if this `State` is in the counting phase and/or if this `State` is not
     /// locked.
+    #[allow(clippy::mut_from_ref)]
     pub(super) unsafe fn hot_location(&self) -> &mut HotLocation {
         debug_assert!(!self.is_counting());
         debug_assert!(self.is_locked());
