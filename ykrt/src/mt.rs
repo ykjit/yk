@@ -6,6 +6,7 @@ use std::env;
 use std::{
     cmp,
     collections::VecDeque,
+    error::Error,
     ffi::c_void,
     marker::PhantomData,
     sync::{
@@ -60,14 +61,15 @@ pub struct MT {
     /// How many worker threads are currently running. Note that this may temporarily be `>`
     /// [`max_worker_threads`].
     active_worker_threads: AtomicUsize,
+    trace_decoder_kind: TraceDecoderKind,
     tracing_kind: TracingKind,
 }
 
 impl MT {
     // Create a new meta-tracer instance. Arbitrarily many of these can be created, though there
     // are no guarantees as to whether they will share resources effectively or fairly.
-    pub fn new() -> Self {
-        Self {
+    pub fn new() -> Result<Self, Box<dyn Error>> {
+        Ok(Self {
             hot_threshold: AtomicHotThreshold::new(DEFAULT_HOT_THRESHOLD),
             trace_failure_threshold: AtomicTraceFailureThreshold::new(
                 DEFAULT_TRACE_FAILURE_THRESHOLD,
@@ -75,8 +77,10 @@ impl MT {
             job_queue: Arc::new((Condvar::new(), Mutex::new(VecDeque::new()))),
             max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
             active_worker_threads: AtomicUsize::new(0),
+            trace_decoder_kind: TraceDecoderKind::default_for_platform()
+                .ok_or_else(|| "Tracing is not supported on this platform")?,
             tracing_kind: TracingKind::default(),
-        }
+        })
     }
 
     /// Return this `MT` instance's current hot threshold. Notice that this value can be changed by
@@ -382,12 +386,11 @@ impl MT {
         utrace: Box<dyn UnmappedTrace>,
         mtx: Arc<Mutex<Option<Box<CompiledTrace>>>>,
     ) {
+        let tdk = self.trace_decoder_kind;
         let do_compile = move || {
-            // FIXME: Selection of the trace decoder kind should be configurable somehow.
-            let decoder = TraceDecoderKind::default_for_platform().unwrap();
             // FIXME: if mapping or tracing fails we don't want to abort, but in order to do that,
             // we'll need to move the location into something other than the Compiling state.
-            let irtrace = match utrace.map(decoder) {
+            let irtrace = match utrace.map(tdk) {
                 Ok(x) => x,
                 Err(e) => todo!("{e:?}"),
             };
@@ -501,7 +504,7 @@ mod tests {
     #[test]
     fn basic_transitions() {
         let hot_thrsh = 5;
-        let mt = MT::new();
+        let mt = MT::new().unwrap();
         mt.set_hot_threshold(hot_thrsh);
         let loc = Location::new();
         for i in 0..mt.hot_threshold() {
@@ -541,7 +544,7 @@ mod tests {
         // Aim for a situation where there's a lot of contention.
         let num_threads = u32::try_from(num_cpus::get() * 4).unwrap();
         let hot_thrsh = num_threads.saturating_mul(100000);
-        let mt = Arc::new(MT::new());
+        let mt = Arc::new(MT::new().unwrap());
         mt.set_hot_threshold(hot_thrsh);
         let loc = Arc::new(Location::new());
 
@@ -600,7 +603,7 @@ mod tests {
         // tracing is complete), the location must be marked as DontTrace.
 
         const THRESHOLD: HotThreshold = 5;
-        let mt = Arc::new(MT::new());
+        let mt = Arc::new(MT::new().unwrap());
         mt.set_hot_threshold(THRESHOLD);
         let loc = Arc::new(Location::new());
 
@@ -649,7 +652,7 @@ mod tests {
         // Test that a location can fail tracing multiple times before being successfully traced.
 
         const THRESHOLD: HotThreshold = 5;
-        let mt = Arc::new(MT::new());
+        let mt = Arc::new(MT::new().unwrap());
         mt.set_hot_threshold(THRESHOLD);
         let loc = Arc::new(Location::new());
 
@@ -714,7 +717,7 @@ mod tests {
         // Once the first location is compiled, the second location can then be compiled.
 
         const THRESHOLD: HotThreshold = 5;
-        let mt = MT::new();
+        let mt = MT::new().unwrap();
         mt.set_hot_threshold(THRESHOLD);
         let loc1 = Location::new();
         let loc2 = Location::new();
@@ -760,7 +763,7 @@ mod tests {
         // We need to set a high enough threshold that the threads are likely to meaningfully
         // interleave when interacting with the location.
         const THRESHOLD: HotThreshold = 100000;
-        let mt = Arc::new(MT::new());
+        let mt = Arc::new(MT::new().unwrap());
         mt.set_hot_threshold(THRESHOLD);
         let loc = Arc::new(Location::new());
 
@@ -829,7 +832,7 @@ mod tests {
         // tracing, it must ignore it.
 
         const THRESHOLD: HotThreshold = 5;
-        let mt = Arc::new(MT::new());
+        let mt = Arc::new(MT::new().unwrap());
         mt.set_hot_threshold(THRESHOLD);
         let loc1 = Arc::new(Location::new());
         let loc2 = Location::new();
@@ -865,7 +868,7 @@ mod tests {
 
     #[bench]
     fn bench_single_threaded_control_point(b: &mut Bencher) {
-        let mt = MT::new();
+        let mt = MT::new().unwrap();
         let loc = Location::new();
         b.iter(|| {
             for _ in 0..100000 {
@@ -876,7 +879,7 @@ mod tests {
 
     #[bench]
     fn bench_multi_threaded_control_point(b: &mut Bencher) {
-        let mt = Arc::new(MT::new());
+        let mt = Arc::new(MT::new().unwrap());
         let loc = Arc::new(Location::new());
         b.iter(|| {
             let mut thrs = vec![];
@@ -897,7 +900,7 @@ mod tests {
 
     #[test]
     fn dont_trace_execution_of_a_trace() {
-        let mt = Arc::new(MT::new());
+        let mt = Arc::new(MT::new().unwrap());
         mt.set_hot_threshold(0);
         let loc1 = Location::new();
         let loc2 = Location::new();

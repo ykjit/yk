@@ -24,7 +24,8 @@ pub enum TraceDecoderKind {
 }
 
 impl TraceDecoderKind {
-    /// Returns the default kind of decoder for the current platform.
+    /// Returns the default kind of decoder for the current platform or `None` if this platform
+    /// does not support tracing.
     pub fn default_for_platform() -> Option<Self> {
         Self::iter().find(|&kind| Self::match_platform(&kind).is_ok())
     }

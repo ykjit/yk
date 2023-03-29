@@ -114,7 +114,7 @@ int main(void) {
     err(1, "out of memory");
   char *cells_end = cells + CELLS_LEN;
 
-  YkMT *mt = yk_mt_new();
+  YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 5);
 
   size_t prog_len = sizeof(INPUT_PROG);

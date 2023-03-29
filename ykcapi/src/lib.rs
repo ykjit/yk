@@ -13,9 +13,10 @@
 #[cfg(feature = "yk_testing")]
 mod testing;
 
+use libc;
 use std::arch::asm;
 use std::convert::{TryFrom, TryInto};
-use std::ffi::c_void;
+use std::ffi::{c_char, c_void, CString};
 use std::{ptr, slice};
 use ykfr::{self, FrameReconstructor};
 #[cfg(feature = "yk_jitstate_debug")]
@@ -24,9 +25,23 @@ use ykrt::{HotThreshold, Location, MT};
 use yksmp::{Location as SMLocation, StackMapParser};
 
 #[no_mangle]
-pub extern "C" fn yk_mt_new() -> *mut MT {
-    let mt = Box::new(MT::new());
-    Box::into_raw(mt)
+pub extern "C" fn yk_mt_new(err_msg: *mut *const c_char) -> *mut MT {
+    match MT::new() {
+        Ok(mt) => Box::into_raw(Box::new(mt)),
+        Err(e) => {
+            if err_msg.is_null() {
+                panic!("{}", e);
+            }
+            let s = CString::new(e.to_string()).unwrap();
+            let b = s.to_bytes_with_nul();
+            let buf = unsafe { libc::malloc(b.len()) as *mut i8 };
+            unsafe {
+                buf.copy_from(b.as_ptr() as *const i8, b.len());
+            }
+            unsafe { *err_msg = buf };
+            ptr::null_mut()
+        }
+    }
 }
 
 #[no_mangle]
