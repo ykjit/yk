@@ -1714,7 +1714,9 @@ public:
                 Type::getInt8PtrTy(JITMod->getContext()));
 
             MPF->setResume(CurBBIdx, &*I, CurInstrIdx);
-            startOutlining();
+            if (!Outlining) {
+              startOutlining();
+            }
             CallStack.pushFrame(StackFrame::CreateForeignFrame());
             break;
           } else {
