@@ -692,7 +692,10 @@ class JITModBuilder {
       Instruction *AOT = MPF->getResumeAfterInstruction();
       assert(isa<CallInst>(AOT));
       Value *JIT = getMappedValue(OldRetVal);
-      VMap[AOT] = getMappedValue(OldRetVal);
+      VMap[AOT] = JIT;
+
+      CurBBIdx = MPF->Resume.value().ResumeBBIdx;
+      CurInstrIdx = MPF->Resume.value().ResumeAfterInstrIdx;
       insertAOTMap(AOT, JIT, CurBBIdx, CurInstrIdx);
     }
   }
