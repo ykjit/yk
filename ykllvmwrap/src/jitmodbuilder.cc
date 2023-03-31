@@ -74,7 +74,9 @@ struct BlockResumePoint {
   //
   // If we want to resume at the `load`, then we store the `call`.
   Instruction *ResumeAfterInstr;
-  // The index of the instruction immediately *before* where we should resume.
+  // The index of the last call instruction. This is the instruction immediately
+  // *before* the instruction we want to resume from after returning from a
+  // call.
   //
   // This could be computed by looping over `ResumeInstr`'s parent block, but
   // since it's needed fairly frequently, we cache it.
@@ -176,10 +178,12 @@ public:
     }
   }
 
-  // Return the instruction immediately before the instruction to resume at.
+  // Return the last encountered call in the current basic block. This is the
+  // call instructions from where we need to resume after processing the
+  // callee.
   //
-  // Throws if there is no resume point set.
-  Instruction *getResumeAfterInstruction() {
+  // Throws if no call has yet been encountered.
+  Instruction *getLastCallInstruction() {
     return Resume.value().ResumeAfterInstr;
   }
 };
@@ -689,7 +693,7 @@ class JITModBuilder {
     if (OldRetVal != nullptr) {
       MappableFrame *MPF = CallStack.curMappableFrame();
       assert(MPF);
-      Instruction *AOT = MPF->getResumeAfterInstruction();
+      Instruction *AOT = MPF->getLastCallInstruction();
       assert(isa<CallInst>(AOT));
       Value *JIT = getMappedValue(OldRetVal);
       VMap[AOT] = JIT;
