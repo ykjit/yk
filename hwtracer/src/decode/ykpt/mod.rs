@@ -767,6 +767,21 @@ impl<'t> YkPTBlockIterator<'t> {
             // `self.cur_loc`.
             if pkt.kind() == PacketKind::PSB {
                 pkt = self.skip_psb_plus()?;
+
+                // FIXME: Why does clearing the compressed return stack here (as we should) cause
+                // non-deterministic crashes?
+                //
+                // Section 33.3.7 of the Intel Manual explains that:
+                //
+                //   "the decoder should never need to retain any information (e.g., LastIP, call
+                //   stack, compound packet event) across a PSB; all compound packet events will be
+                //   completed before a PSB, and any compression state will be reset"
+                //
+                // The "compression state" it refers to is `self.comprets`, yet:
+                //
+                //   self.comprets.rets.clear();
+                //
+                // will causes us to to (sometimes) pop from an empty return stack.
             }
 
             // Update `self.pge` if necessary.
