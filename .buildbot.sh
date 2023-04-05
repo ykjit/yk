@@ -70,8 +70,11 @@ for mode in "" "--release"; do
     cargo build ${mode} -p ykcapi;
 done
 
-cargo test
-cargo test --release
+for i in $(seq 10); do
+    cargo test
+    cargo test --release
+done
+
 cargo bench
 
 # Run examples.
