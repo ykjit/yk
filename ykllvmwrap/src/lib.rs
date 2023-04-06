@@ -17,7 +17,7 @@ extern "C" {
         faddr_vals: *const *const c_void,
         faddr_len: size_t,
         llvmbc_data: *const u8,
-        llvmbc_len: size_t,
+        llvmbc_len: u64,
         debuginfo_fd: c_int,
         debuginfo_path: *const c_char,
     ) -> *const c_void;
@@ -31,7 +31,7 @@ extern "C" {
         faddr_vals: *const *const c_void,
         faddr_len: size_t,
         llvmbc_data: *const u8,
-        llvmbc_len: size_t,
+        llvmbc_len: u64,
         debuginfo_fd: c_int,
         debuginfo_path: *const c_char,
     ) -> *const c_void;

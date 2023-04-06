@@ -137,7 +137,7 @@ pub static SELF_BIN_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
 #[repr(C)]
 struct EmbeddedModule {
     /// The length of the bitcode.
-    len: usize,
+    len: u64,
     /// The start of the bitcode itself.
     first_byte_of_bitcode: u8,
 }
@@ -150,7 +150,7 @@ extern "C" {
 }
 
 /// Returns a pointer to (and the size of) the raw LLVM bitcode in the current address space.
-pub fn llvmbc_section() -> (*const u8, usize) {
+pub fn llvmbc_section() -> (*const u8, u64) {
     let bc = unsafe { &LLVMBC };
     (&bc.first_byte_of_bitcode as *const u8, bc.len)
 }
