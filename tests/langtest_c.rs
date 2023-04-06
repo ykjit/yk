@@ -1,5 +1,5 @@
 #![feature(fn_traits)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 
 use lang_tester::LangTester;
 use regex::Regex;

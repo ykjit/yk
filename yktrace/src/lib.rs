@@ -1,6 +1,6 @@
 //! Utilities for collecting and decoding traces.
 
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 #![feature(naked_functions)]
 #![allow(clippy::len_without_is_empty)]
 #![allow(clippy::new_without_default)]
@@ -239,7 +239,7 @@ impl IRTrace {
     }
 
     #[cfg(feature = "yk_testing")]
-    pub unsafe fn compile_for_tc_tests(&self, llvmbc_data: *const u8, llvmbc_len: usize) {
+    pub unsafe fn compile_for_tc_tests(&self, llvmbc_data: *const u8, llvmbc_len: u64) {
         let (func_names, bbs, trace_len) = self.encode_trace();
         let (_di_tmp, di_fd, di_tmpname_c) = Self::create_debuginfo_temp_file();
 

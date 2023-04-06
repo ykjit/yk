@@ -439,7 +439,7 @@ void *compileIRTrace(FN Func, char *FuncNames[], size_t BBs[], size_t TraceLen,
 
 extern "C" void *__ykllvmwrap_irtrace_compile(
     char *FuncNames[], size_t BBs[], size_t TraceLen, char *FAddrKeys[],
-    void *FAddrVals[], size_t FAddrLen, void *BitcodeData, size_t BitcodeLen,
+    void *FAddrVals[], size_t FAddrLen, void *BitcodeData, uint64_t BitcodeLen,
     int DebugInfoFD, char *DebugInfoPath) {
   return compileIRTrace(createModule, FuncNames, BBs, TraceLen, FAddrKeys,
                         FAddrVals, FAddrLen, BitcodeData, BitcodeLen,
@@ -449,7 +449,7 @@ extern "C" void *__ykllvmwrap_irtrace_compile(
 #ifdef YK_TESTING
 extern "C" void *__ykllvmwrap_irtrace_compile_for_tc_tests(
     char *FuncNames[], size_t BBs[], size_t TraceLen, char *FAddrKeys[],
-    void *FAddrVals[], size_t FAddrLen, void *BitcodeData, size_t BitcodeLen,
+    void *FAddrVals[], size_t FAddrLen, void *BitcodeData, uint64_t BitcodeLen,
     int DebugInfoFD, char *DebugInfoPath) {
   return compileIRTrace(createModuleForTraceCompilerTests, FuncNames, BBs,
                         TraceLen, FAddrKeys, FAddrVals, FAddrLen, BitcodeData,

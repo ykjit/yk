@@ -12,7 +12,7 @@ pub struct Module(LLVMModuleRef);
 #[repr(C)]
 pub struct BitcodeSection {
     data: *const u8,
-    len: usize,
+    len: u64,
 }
 
 extern "C" {

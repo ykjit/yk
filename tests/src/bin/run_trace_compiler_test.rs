@@ -3,7 +3,7 @@
 //! Each invocation of this program runs one of the trace compiler tests found in the
 //! `trace_compiler` directory of this crate.
 
-use std::{collections::HashMap, env, error::Error, ffi::CString, fs::File};
+use std::{collections::HashMap, convert::TryInto, env, error::Error, ffi::CString, fs::File};
 use yktrace::{IRBlock, IRTrace};
 
 const BBS_ENV: &str = "YKT_TRACE_BBS";
@@ -44,7 +44,7 @@ fn main() -> Result<(), String> {
     let ll_file = File::open(ll_path).unwrap();
     let mmap = unsafe { memmap2::Mmap::map(&ll_file).unwrap() };
 
-    unsafe { trace.compile_for_tc_tests(mmap.as_ptr(), mmap.len()) };
+    unsafe { trace.compile_for_tc_tests(mmap.as_ptr(), mmap.len().try_into().unwrap()) };
 
     Ok(())
 }

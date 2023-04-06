@@ -8,7 +8,7 @@
 
 #![feature(c_variadic)]
 #![feature(naked_functions)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 
 #[cfg(feature = "yk_testing")]
 mod testing;

@@ -1,7 +1,7 @@
 #![allow(clippy::len_without_is_empty)]
 #![allow(clippy::new_without_default)]
 #![allow(clippy::upper_case_acronyms)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 #![feature(ptr_sub_ptr)]
 
 mod block;
