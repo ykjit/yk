@@ -1,7 +1,7 @@
 //! Interpreter-facing API to the Yk meta-tracer.
 
 #![cfg_attr(test, feature(test))]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 #![allow(clippy::type_complexity)]
 #![allow(clippy::new_without_default)]
 
