@@ -701,6 +701,26 @@ impl<'t> YkPTBlockIterator<'t> {
         }
     }
 
+    /// Skip packets up until and including the next `PSBEND` packet. The first packet after the
+    /// `PSBEND` is returned.
+    fn skip_psb_plus(&mut self) -> Result<Packet, HWTracerError> {
+        loop {
+            if let Some(pkt_or_err) = self.parser.next() {
+                if pkt_or_err?.kind() == PacketKind::PSBEND {
+                    break;
+                }
+            } else {
+                return Err(HWTracerError::NoMorePackets);
+            }
+        }
+
+        if let Some(pkt_or_err) = self.parser.next() {
+            pkt_or_err
+        } else {
+            Err(HWTracerError::NoMorePackets)
+        }
+    }
+
     /// Fetch the next packet and update iterator state.
     fn packet(&mut self) -> Result<Packet, HWTracerError> {
         if let Some(pkt_or_err) = self.parser.next() {
@@ -734,6 +754,34 @@ impl<'t> YkPTBlockIterator<'t> {
                 } else {
                     return Err(HWTracerError::NoMorePackets);
                 }
+            }
+
+            // Section 33.3.7 of the Intel Manual says that packets in a PSB+ sequence:
+            //
+            //   "should be interpreted as "status only", since they do not imply any change of
+            //   state at the time of the PSB, nor are they associated directly with any
+            //   instruction or event. Thus, the normal binding and ordering rules that apply to
+            //   these packets outside of PSB+ can be ignored..."
+            //
+            // So we don't let (e.g.) packets carrying a target ip inside a PSB+ update
+            // `self.cur_loc`.
+            if pkt.kind() == PacketKind::PSB {
+                pkt = self.skip_psb_plus()?;
+
+                // FIXME: Why does clearing the compressed return stack here (as we should) cause
+                // non-deterministic crashes?
+                //
+                // Section 33.3.7 of the Intel Manual explains that:
+                //
+                //   "the decoder should never need to retain any information (e.g., LastIP, call
+                //   stack, compound packet event) across a PSB; all compound packet events will be
+                //   completed before a PSB, and any compression state will be reset"
+                //
+                // The "compression state" it refers to is `self.comprets`, yet:
+                //
+                //   self.comprets.rets.clear();
+                //
+                // will causes us to to (sometimes) pop from an empty return stack.
             }
 
             // Update `self.pge` if necessary.
