@@ -99,6 +99,9 @@ handle_arg() {
 
             # Encode an rpath so that we don't have to set LD_LIBRARY_PATH.
             OUTPUT="${OUTPUT} -Wl,-rpath=${DIR}/../../target/${mode}/deps"
+
+            # Improve the quality of profiling data.
+            OUTPUT="${OUTPUT} -Wl,--no-rosegment"
             ;;
         --libs)
             OUTPUT="${OUTPUT} -lykcapi"
