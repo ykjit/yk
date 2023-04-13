@@ -286,7 +286,7 @@ public:
 // Dump an error message and an LLVM value to stderr and exit with failure.
 void dumpValueAndExit(const char *Msg, Value *V) {
   errs() << Msg << ": ";
-  V->dump();
+  V->print(errs());
   exit(EXIT_FAILURE);
 }
 
