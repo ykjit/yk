@@ -56,8 +56,6 @@ impl CallInfo {
 /// The information for one LLVM `MachineBasicBlock`.
 #[derive(Debug)]
 pub struct BlockMapEntry {
-    /// Function offset.
-    f_off: u64,
     /// Indices of corresponding BasicBlocks.
     corr_bbs: Vec<u64>,
     /// Successor information.
@@ -69,10 +67,6 @@ pub struct BlockMapEntry {
 impl BlockMapEntry {
     pub fn corr_bbs(&self) -> &Vec<u64> {
         &self.corr_bbs
-    }
-
-    pub fn f_off(&self) -> u64 {
-        self.f_off
     }
 
     pub fn successor(&self) -> &SuccessorKind {
@@ -134,9 +128,8 @@ impl BlockMap {
         while crsr.position() < u64::try_from(bbaddrmap_data.len()).unwrap() {
             let _version = crsr.read_u8().unwrap();
             let _feature = crsr.read_u8().unwrap();
-            let f_off = crsr.read_u64::<NativeEndian>().unwrap();
+            let mut last_off = crsr.read_u64::<NativeEndian>().unwrap();
             let n_blks = leb128::read::unsigned(&mut crsr).unwrap();
-            let mut last_off = f_off;
             for _ in 0..n_blks {
                 let mut corr_bbs = Vec::new();
                 let b_off = leb128::read::unsigned(&mut crsr).unwrap();
@@ -193,7 +186,6 @@ impl BlockMap {
                 elems.push((
                     (lo..hi),
                     BlockMapEntry {
-                        f_off,
                         corr_bbs,
                         call_offs,
                         succ,
