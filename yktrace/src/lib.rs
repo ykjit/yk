@@ -147,17 +147,6 @@ impl IRTrace {
         self.blocks.len()
     }
 
-    // Get the block at the specified position.
-    // Returns None if there is no block at this index. Returns Some(None) if the block at that
-    // index couldn't be mapped.
-    pub fn get(&self, idx: usize) -> Option<Option<&IRBlock>> {
-        // usize::MAX is a reserved index.
-        debug_assert_ne!(idx, usize::MAX);
-        self.blocks
-            .get(idx)
-            .map(|b| if b.is_unmappable() { None } else { Some(b) })
-    }
-
     fn encode_trace(&self) -> (Vec<*const i8>, Vec<usize>, usize) {
         let trace_len = self.len();
         let mut func_names = Vec::with_capacity(trace_len);
