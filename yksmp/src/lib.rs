@@ -23,7 +23,6 @@ pub struct Record {
     pub offset: u64,
     pub live_vars: Vec<LiveVar>,
     pub size: u64,
-    pub pinfo: Option<PrologueInfo>,
 }
 
 #[derive(Debug)]
@@ -174,7 +173,6 @@ impl StackMapParser<'_> {
                 offset,
                 live_vars,
                 size: 0,
-                pinfo: None,
             });
         }
         v
