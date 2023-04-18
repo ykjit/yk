@@ -1,6 +1,7 @@
 # The yk meta-tracing system.
 
-yk is a meta-tracing system. More details to follow.
+yk is a meta-tracing system. See the [yk book](https://ykjit.github.io/yk/)
+for more details.
 
 
 # Contributors
