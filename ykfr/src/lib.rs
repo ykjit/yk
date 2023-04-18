@@ -306,7 +306,12 @@ impl FrameReconstructor {
                     }
                     SMLocation::Direct(reg, off, _) => {
                         if i == 0 {
-                            // skip first frame
+                            // Direct locations are pointers into the stack (e.g. alloca or GEP).
+                            // Normally, AOT and JIT have different stacks so copying them over
+                            // would be incorrect. However, since we are using a shadow stack which
+                            // is shared between AOT and JIT these values should be identical and
+                            // thus don't need copying. Interestingly, if we do copy them, this
+                            // leads to segfaults. FIXME: Investigate more.
                             continue;
                         }
                         debug_assert!(op.is_alloca());
@@ -324,14 +329,23 @@ impl FrameReconstructor {
                         };
                     }
                     SMLocation::Indirect(reg, off, size) => {
-                        if i == 0 {
-                            // skip first frame
-                            continue;
-                        }
                         debug_assert_eq!(*reg, RBP_DWARF_NUM);
-                        let temp = unsafe { rbp.offset(isize::try_from(*off).unwrap()) };
+                        let temp = if i == 0 {
+                            // While the bottom frame is already on the stack and doesn't need to
+                            // be recreated, we still need to copy over new values from the JIT.
+                            // Luckily, we know the address of the bottom frame, so we can write
+                            // any changes directly to it from here.
+                            unsafe { btmframeaddr.offset(isize::try_from(*off).unwrap()) }
+                        } else {
+                            unsafe { rbp.offset(isize::try_from(*off).unwrap()) }
+                        };
                         debug_assert!(*off < i32::try_from(rec.size).unwrap());
+                        // FIXME: The minimum size reported by the stackmap is 1 which represents 1
+                        // byte. LLVM IR allows for smaller sizes, e.g. `i1` representing a single
+                        // bit. It is currently unclear how that affects this code, so I'm leaving
+                        // this comment here so we don't forget.
                         match size {
+                            1 => unsafe { ptr::write::<u8>(temp as *mut u8, val as u8) },
                             4 => unsafe { ptr::write::<u32>(temp as *mut u32, val as u32) },
                             8 => unsafe { ptr::write::<u64>(temp as *mut u64, val) },
                             _ => todo!(),
