@@ -74,8 +74,8 @@ handle_arg() {
 
             # Use the Yk extensions to the blockmap section.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-extended-llvmbbaddrmap-section"
-            # Enable fix for stackmap offsets.
-            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-stackmap-offset-fix"
+            # Enable fix for spill reloads before stackmaps.
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-stackmap-spillreloads-fix"
             # Enable shadow stacks.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-shadow-stack"
             # Encode additional locations in stackmaps.
