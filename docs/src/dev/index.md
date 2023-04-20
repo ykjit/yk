@@ -1,3 +1,3 @@
 # Development
 
-This section talks about how set up your system to start developing yk.
+This section explains how to setup and use yk.
