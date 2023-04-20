@@ -93,6 +93,7 @@ handle_arg() {
             # FIXME: https://github.com/ykjit/yk/issues/381
             # Find a better way of handling unexported globals inside a trace.
             OUTPUT="${OUTPUT} -Wl,--export-dynamic"
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-linkage"
 
             # Linkage to yk as a library.
             OUTPUT="${OUTPUT} -L${DIR}/../../target/${mode}/deps"
