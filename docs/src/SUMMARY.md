@@ -7,5 +7,6 @@
     - [Getting Started](./dev/getting_started.md)
     - [Environment Variables](./dev/env.md)
     - [Profiling](./dev/profiling.md)
+    - [Understanding Traces](./dev/understanding_traces.md)
 - [Contributing]()
     - [Pull Requests](./contributing/prs.md)
