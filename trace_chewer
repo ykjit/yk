@@ -7,16 +7,26 @@
 # output. Any changes in that are likely to lead to this script producing
 # incorrect output.
 
-import getopt, os, sys
+import getopt, importlib.util, os, sys
 
 def file_name_to_object(n):
     if n == "-": return sys.stdin
     return open(n, "r")
 
 def simplify():
-    try: opts, args = getopt.getopt(sys.argv[2:], "")
+    try: opts, args = getopt.getopt(sys.argv[2:], "p:")
     except getopt.GetoptError as e: usage(e)
     if len(args) != 1: usage()
+    plugin = None
+    for k, v in opts:
+        match k:
+            case "-p":
+                if plugin is not None: usage()
+                spec = importlib.util.spec_from_file_location("plugin", v)
+                plugin = importlib.util.module_from_spec(spec)
+                sys.modules["plugin"] = plugin
+                spec.loader.exec_module(plugin)
+            case _: usage()
 
     traces = []
     pre_opt = None
@@ -40,7 +50,13 @@ def simplify():
                 trace.append(l)
             traces.append(trace)
 
+    if plugin and hasattr(plugin, "DebugInfoProcess"):
+        dip = plugin.DebugInfoProcess()
+    else:
+        dip = DefaultDebugInfoProcess()
+
     for t_i, t in enumerate(traces):
+        dip.next_trace()
         # Delete rubbish at end of trace
         while len(t) > 0:
             if t[-1] == "}": break
@@ -71,6 +87,14 @@ def simplify():
                 while j < len(t) and t[j].startswith("  "): j += 1
                 del t[i:j+1]
             elif t[i].startswith("guardsuccess"): del t[i]
+            elif t[i].startswith("  ; "):
+                f, p = t[i][4:].split(" ")
+                p, l, c = p.split(":")
+                x = dip.process(p, int(l), int(c), f)
+                if x is None: del t[i]
+                else:
+                    t[i] = x
+                    i += 1
             else: i += 1
 
         if pre_opt: phase = "pre-opt"
@@ -79,6 +103,10 @@ def simplify():
         print("\n".join(t))
         print(f"--- End simplified {phase} trace {t_i + 1} ---")
 
+class DefaultDebugInfoProcess:
+    def next_trace(self): pass
+    def process(self, path, line, col, fn): return f"  ; {path}:{line}:{col} {fn}"
+
 def error(msg):
     sys.stderr.write(msg)
     sys.exit(1)
@@ -86,7 +114,7 @@ def error(msg):
 def usage(msg=None):
     if msg: sys.stderr.write(f"{msg}\n")
     prog = os.path.basename(sys.argv[0])
-    sys.stderr.write(f"Usage:\n  {prog} simplify <trace-file|->\n")
+    sys.stderr.write(f"Usage:\n  {prog} simplify [-p <plugin.py>] <trace-file|->\n")
     sys.exit(1)
 
 if len(sys.argv) <= 2: usage()
