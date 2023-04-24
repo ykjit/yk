@@ -1,6 +1,6 @@
 # ykdocs
 
-Documentation for the Yorick Metatracer.
+Documentation for the Yk Metatracer.
 
 Use [mdbook](https://crates.io/crates/mdbook) to generate the docs.
 
