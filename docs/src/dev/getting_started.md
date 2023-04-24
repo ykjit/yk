@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide describes how to get up and running with yk.
+This guide describes how to start developing Yk.
 
 ## Repositories
 
