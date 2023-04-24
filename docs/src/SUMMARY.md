@@ -3,6 +3,7 @@
 - [Introduction](./intro.md)
 - [Using Yk](./user/index.md)
   - [Installation](./user/install.md)
+  - [Available Interpreters](./user/interps.md)
   - [Gotchas](./user/gotchas.md)
 - [Development](./dev/index.md)
     - [Getting Started](./dev/getting_started.md)

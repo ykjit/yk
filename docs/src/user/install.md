@@ -11,7 +11,7 @@ At the time of writing, running Yk requires the following:
 
  - Linux perf (for collecting PT traces).
 
- - A Yk-enabled programming language interpreter.
+ - A [Yk-enabled programming language interpreter](interps.md).
 
 Note that at present, non-root users can only use Yk if
 `/proc/sys/kernel/perf_event_paranoid` is set to `-1`.
