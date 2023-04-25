@@ -19,11 +19,16 @@ fn main() {
 
     let mut comp = cc::Build::new();
     for cf in cxxflags {
+        if cf.contains("-std=") {
+            // llvm-config contains a -std=c++XY flag, but we want to force a particular
+            // version below, so we override it.
+            continue;
+        }
         comp.flag(cf);
     }
     comp.flag("-Wall");
     comp.flag("-Werror");
-    comp.flag("-std=c++17");
+    comp.flag("-std=c++20");
     comp.file("src/ykllvmwrap.cc")
         .file("src/jitmodbuilder.cc")
         .file("src/memman.cc")
