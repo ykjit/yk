@@ -18,7 +18,11 @@ so it is often worth checking both.
 ## trace_chewer
 
 `trace_chewer` is a small program included with yk which can help you
-understand a trace.
+understand `YKD_PRINT_IR`s output. The general format of `trace_chewer` is:
+
+```
+trace_chewer <command> <args>
+```
 
 
 ### simplify
@@ -31,9 +35,53 @@ branches into simpler `guard_true(%var)` or `guard_false(%var)` statements
 then continue executing the trace, otherwise deoptimise back to the
 interpreter).
 
-If you specify `-` as the filename, `trace_chewer` will read from stdin. This
-means that you can simplify traces without saving them to disk:
+If you specify `-` as the filename, `trace_chewer simplify` will read from
+stdin. This means that you can simplify traces without saving them to disk:
 
 ```
 YKD_PRINT_IR=jit-post-opt lua f.lua 2>&1 | trace_chewer simplify -
+```
+
+You can specify a plugin with `trace_chewer simplify -p <plugin.py>`:
+`simplify` makes use of the [`DebugInfoProcess`](#debuginfoprocess) API.
+
+
+### plugins
+
+Some `trace_chewer` commands take a `-p <plugin.py>` plugin argument.
+`plugin.py` is a Python file that `trace_chewer` will load as a module called
+`plugin`. Different commands will use different parts of the plugin API.
+
+#### `DebugInfoProcess`
+
+This class is used to process debug info lines in traces. The API is:
+
+```python
+# This class will be instantiated before trace_chewer
+# processes any traces.
+class DebugInfoProcess:
+    # Called before starting each new trace in the
+    # debug output.
+    def next_trace(self): ...
+    # Called for each debug line in the output:
+    #   * `path` is the (possibly incomplete) source
+    #      path (string)
+    #   * `line` is the line number (int)
+    #   * `col` is the column number (int)
+    #   * `fn` is the function that `line` is part
+    #      of (string)
+    # Return values are:
+    #   * A (possibly multi-line) string
+    #   * `None`: do not include any debug info at
+    #     this point in the trace
+    def process(self, path, line, col, fn): ...
+```
+
+The default `DebugInfoProcess` in `trace_chewer` is:
+
+```python
+class DebugInfoProcess:
+  def next_trace(self): pass
+  def process(self, path, line, col, fn):
+    return f"  ; {path}:{line}:{col} {fn}"
 ```
