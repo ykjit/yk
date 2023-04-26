@@ -2,12 +2,6 @@
 
 set -e
 
-case ${CI_TRACER_KIND} in
-    "sw" | "hw" ) true;;
-    *) echo "CI_TRACER_KIND must be set to either 'hw' or 'sw'"
-       exit 1;;
-esac
-
 # Install rustup.
 export CARGO_HOME="`pwd`/.cargo"
 export RUSTUP_HOME="`pwd`/.rustup"
