@@ -53,8 +53,10 @@ cmake -DCMAKE_INSTALL_PREFIX=`pwd`/../inst \
     -DLLVM_ENABLE_ASSERTIONS=On \
     -DLLVM_ENABLE_PROJECTS="lld;clang" \
     -DCLANG_DEFAULT_PIE_ON_LINUX=OFF \
+    -GNinja \
     ../llvm
-make -j `nproc` install
+cmake --build .
+cmake --install .
 export PATH=`pwd`/../inst/bin:${PATH}
 cd ../../..
 
