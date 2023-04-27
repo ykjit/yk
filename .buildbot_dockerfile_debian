@@ -3,7 +3,7 @@ ARG CI_UID
 RUN useradd -m -u ${CI_UID} ci
 RUN apt-get update && \
 apt-get -y install build-essential curl procps file git cmake python3 \
-    libtinfo-dev libzip-dev ccache
+    libtinfo-dev libzip-dev ninja-build
 WORKDIR /ci
 RUN chown ${CI_UID}:${CI_UID} .
 COPY --chown=${CI_UID}:${CI_UID} . .
