@@ -2,7 +2,11 @@
 
 use rerun_except::rerun_except;
 use std::env;
-use ykbuild::{apply_llvm_ld_library_path, llvm_config, CCGenerator, CCLang};
+use ykbuild::{
+    apply_llvm_ld_library_path,
+    ccgen::{CCGenerator, CCLang},
+    llvm_config,
+};
 
 fn main() {
     // Ensure changing C++ source files or headers retriggers a build.

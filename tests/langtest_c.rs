@@ -11,7 +11,7 @@ use std::{
 };
 use tempfile::TempDir;
 use tests::{mk_compiler, EXTRA_LINK};
-use ykbuild::{CCGenerator, CCLang};
+use ykbuild::ccgen::{CCGenerator, CCLang};
 
 const COMMENT: &str = "//";
 
