@@ -30,6 +30,9 @@ handle_arg() {
             # Outline functions containing loops during AOT compilation. Needed
             # for `yk_unroll_safe`.
             OUTPUT="${OUTPUT} -fyk-noinline-funcs-with-loops"
+            case $mode in
+                debug) OUTPUT="$OUTPUT -g" ;;
+            esac
             ;;
         --cppflags)
             # Path to yk.h
