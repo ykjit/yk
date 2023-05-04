@@ -19,14 +19,13 @@ def simplify():
     if len(args) != 1: usage()
     plugin = None
     for k, v in opts:
-        match k:
-            case "-p":
-                if plugin is not None: usage()
-                spec = importlib.util.spec_from_file_location("plugin", v)
-                plugin = importlib.util.module_from_spec(spec)
-                sys.modules["plugin"] = plugin
-                spec.loader.exec_module(plugin)
-            case _: usage()
+        if k == "-p":
+            if plugin is not None: usage()
+            spec = importlib.util.spec_from_file_location("plugin", v)
+            plugin = importlib.util.module_from_spec(spec)
+            sys.modules["plugin"] = plugin
+            spec.loader.exec_module(plugin)
+        else: usage()
 
     traces = []
     pre_opt = None
@@ -118,6 +117,5 @@ def usage(msg=None):
     sys.exit(1)
 
 if len(sys.argv) <= 2: usage()
-match sys.argv[1]:
-    case "simplify": simplify()
-    case _: usage()
+if sys.argv[1] == "simplify": simplify()
+else: usage()
