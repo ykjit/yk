@@ -6,6 +6,7 @@ use std::{
     fs::{create_dir_all, File},
     io::{Read, Write},
     path::{Path, PathBuf},
+    process::Command,
 };
 use tempfile::TempDir;
 
@@ -140,4 +141,20 @@ impl CCGenerator {
         write!(outfile, "{}", entries.join(",\n")).unwrap();
         write!(outfile, "\n]\n").unwrap();
     }
+}
+
+pub fn llvm_config() -> Command {
+    let mut c = Command::new("llvm-config");
+    c.arg("--link-shared");
+    c
+}
+
+/// Call from a build script to ensure that the LLVM libraries are in the loader path.
+///
+/// This is preferred to adding an rpath, as we wouldn't want to distribute binaries with
+/// system-local rpaths inside.
+pub fn apply_llvm_ld_library_path() {
+    let lib_dir = llvm_config().arg("--libdir").output().unwrap().stdout;
+    let lib_dir = std::str::from_utf8(&lib_dir).unwrap();
+    println!("cargo:rustc-env=LD_LIBRARY_PATH={}", lib_dir);
 }
