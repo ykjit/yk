@@ -43,6 +43,9 @@ ykcapi = { path = "../ykcapi", features = ["yk_testing", "yk_jitstate_debug"] }
 ykllvmwrap = { path = "../ykllvmwrap", features = ["yk_testing"] }
 ykrt = { path = "../ykrt", features = ["yk_testing", "yk_jitstate_debug"] }
 
+[build-dependencies]
+ykbuild = { path = "../ykbuild" }
+
 [[bench]]
 name = "bench"
 harness = false

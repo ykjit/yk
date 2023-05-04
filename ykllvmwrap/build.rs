@@ -1,19 +1,15 @@
 #![feature(fn_traits)]
 
 use rerun_except::rerun_except;
-use std::{env, process::Command};
-use ykbuild::{CCGenerator, CCLang};
+use std::env;
+use ykbuild::{apply_llvm_ld_library_path, llvm_config, CCGenerator, CCLang};
 
 fn main() {
     // Ensure changing C++ source files or headers retriggers a build.
     rerun_except(&[]).unwrap();
 
     // Compile our wrappers with the right LLVM C++ flags.
-    let cxxflags_out = Command::new("llvm-config")
-        .arg("--cxxflags")
-        .output()
-        .unwrap()
-        .stdout;
+    let cxxflags_out = llvm_config().arg("--cxxflags").output().unwrap().stdout;
     let cxxflags_str = std::str::from_utf8(&cxxflags_out).unwrap();
     let cxxflags = cxxflags_str.split_whitespace().collect::<Vec<_>>();
 
@@ -58,19 +54,12 @@ fn main() {
     ccg.generate();
 
     // Ensure that downstream crates performing linkage use the right -L and -l flags.
-    let lib_dir = Command::new("llvm-config")
-        .arg("--libdir")
-        .output()
-        .unwrap()
-        .stdout;
+    let lib_dir = llvm_config().arg("--libdir").output().unwrap().stdout;
     let lib_dir = std::str::from_utf8(&lib_dir).unwrap();
     println!("cargo:rustc-link-search={}", lib_dir);
+    apply_llvm_ld_library_path();
 
-    let libs = Command::new("llvm-config")
-        .arg("--libs")
-        .output()
-        .unwrap()
-        .stdout;
+    let libs = llvm_config().arg("--libs").output().unwrap().stdout;
     let libs = std::str::from_utf8(&libs).unwrap();
     for lib in libs.split_whitespace() {
         assert!(lib.starts_with("-l"));

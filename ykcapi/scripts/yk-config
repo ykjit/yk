@@ -99,7 +99,15 @@ handle_arg() {
             OUTPUT="${OUTPUT} -L${DIR}/../../target/${mode}/deps"
 
             # Encode an rpath so that we don't have to set LD_LIBRARY_PATH.
+            #
+            # FIXME: Adding rpaths should probably be behind a flag. It's kind
+            # of rude to add local rpaths to interpreter binaries that
+            # downstreams may want to distribute.
             OUTPUT="${OUTPUT} -Wl,-rpath=${DIR}/../../target/${mode}/deps"
+            OUTPUT="${OUTPUT} -Wl,-rpath=$(llvm-config --link-shared --libdir)"
+            # Add a proper RPATH, not a RUNPATH:
+            # https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/1737608
+            OUTPUT="${OUTPUT} -Wl,--disable-new-dtags"
 
             # Improve the quality of profiling data.
             OUTPUT="${OUTPUT} -Wl,--no-rosegment"

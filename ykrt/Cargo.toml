@@ -15,6 +15,7 @@ yktrace = { path = "../yktrace" }
 
 [build-dependencies]
 regex = "1.5.4"
+ykbuild = { path = "../ykbuild" }
 
 [features]
 yk_jitstate_debug = []
