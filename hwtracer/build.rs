@@ -7,7 +7,7 @@ use std::fs;
 use std::os::unix::fs as unix_fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use ykbuild::{CCGenerator, CCLang};
+use ykbuild::ccgen::{CCGenerator, CCLang};
 
 const FEATURE_CHECKS_PATH: &str = "feature_checks";
 
