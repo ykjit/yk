@@ -271,7 +271,7 @@ pub unsafe extern "C" fn yk_stopgap(
         assert!(locs.len() == 1);
         let l = locs.get(0).unwrap();
         match l {
-            SMLocation::Register(reg, _size, _off) => {
+            SMLocation::Register(reg, _size, _off, _extra) => {
                 let _val = unsafe { registers.get(*reg) };
                 todo!();
             }
