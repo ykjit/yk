@@ -10,6 +10,9 @@ fn manifest_dir() -> String {
 
 pub fn llvm_config() -> Command {
     let mut c = Command::new("llvm-config");
+    if let (Ok(bin_dir), Ok(path)) = (env::var("YKB_YKLLVM_INSTALL_DIR"), env::var("PATH")) {
+        c.env("PATH", format!("{bin_dir}:{path}"));
+    }
     c.arg("--link-shared");
     c
 }
