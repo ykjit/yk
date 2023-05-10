@@ -37,11 +37,11 @@ mdbook build
 test -d book
 cd ..
 
-# Build LLVM for the C tests.
-cd ykllvm
-mkdir build
-cd build
-
+# We build our own LLVM-with-assertions to get access to clang-format. Since
+# we're going to such lengths, we then reuse this installation of LLVM when
+# doing non-`--build` releases below.
+mkdir -p ykllvm/build
+cd ykllvm/build
 # Due to an LLVM bug, PIE breaks our mapper, and it's not enough to pass
 # `-fno-pie` to clang for some reason:
 # https://github.com/llvm/llvm-project/issues/57085
@@ -56,13 +56,13 @@ cmake -DCMAKE_INSTALL_PREFIX=`pwd`/../inst \
     ../llvm
 cmake --build .
 cmake --install .
-export PATH=`pwd`/../inst/bin:${PATH}
+export YKB_YKLLVM_INSTALL_DIR=`pwd`/../inst/bin
 cd ../../
 
 # Check that clang-format is installed.
-clang-format --version
+PATH=${YKB_YKLLVM_INSTALL_DIR}:${PATH} clang-format --version
 # Check C/C++ formatting using xtask.
-cargo xtask cfmt
+PATH=${YKB_YKLLVM_INSTALL_DIR}:${PATH} cargo xtask cfmt
 
 # This is used to check clang-tidy output, but the dirty submodule from building
 # ykllvm is also shown.
@@ -81,8 +81,10 @@ for i in $(seq 10); do
     cargo test --release
 done
 
-cargo bench
-
 # Run examples.
 cargo run --example hwtracer_example
 cargo run --release --example hwtracer_example
+
+# Run cargo bench, forcing yk to build its own LLVM-without-assertions.
+unset YKB_YKLLVM_INSTALL_DIR
+cargo bench
