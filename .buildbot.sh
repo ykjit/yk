@@ -37,9 +37,11 @@ mdbook build
 test -d book
 cd ..
 
-# We build our own LLVM-with-assertions to get access to clang-format. Since
-# we're going to such lengths, we then reuse this installation of LLVM when
-# doing non-`--build` releases below.
+# We could let yk build two copies of LLVM, but we also want to: check that
+# YKB_YKLLVM_INSTALL_DIR works; and we want access to clang-format from a build
+# of LLVM. So we first build our own LLVM-with-assertions, use the
+# YKB_YKLLVM_INSTALL_DIR variable to have yk use that, and use its
+# clang-format.
 mkdir -p ykllvm/build
 cd ykllvm/build
 # Due to an LLVM bug, PIE breaks our mapper, and it's not enough to pass
@@ -85,6 +87,8 @@ done
 cargo run --example hwtracer_example
 cargo run --release --example hwtracer_example
 
-# Run cargo bench, forcing yk to build its own LLVM-without-assertions.
+# We now want to test `cargo bench` which we also takes as an opportunity to
+# check that yk can build ykllvm, which requires unsetting
+# YKB_YKLLVM_INSTALL_DIR.
 unset YKB_YKLLVM_INSTALL_DIR
 cargo bench
