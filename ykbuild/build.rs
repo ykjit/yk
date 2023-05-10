@@ -36,12 +36,22 @@ fn main() {
         .build_arg(nprocs);
 
     if let Ok(args) = env::var("YKB_YKLLVM_BUILD_ARGS") {
+        // Caveat: this assumes no cmake argument contains a ',' or a ':'.
         for arg in args.split(",") {
-            if !arg.starts_with("-D") {
-                panic!("YKB_YKLLVM_BUILD_ARGS must only contain -D arguments");
+            match arg.split(":").collect::<Vec<_>>()[..] {
+                ["define", kv] => {
+                    let (k, v) = kv.split_once("=").unwrap();
+                    ykllvm.define(k, v);
+                }
+                ["build_arg", ba] => {
+                    ykllvm.build_arg(ba);
+                }
+                ["generator", g] => {
+                    ykllvm.generator(g);
+                }
+                [k, _] => panic!("Unknown kind {k}"),
+                _ => panic!("Incorrectly formatted option {arg}"),
             }
-            let (k, v) = arg.strip_prefix("-D").unwrap().split_once("=").unwrap();
-            ykllvm.define(k, v);
         }
     }
 
