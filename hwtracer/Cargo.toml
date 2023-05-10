@@ -16,6 +16,7 @@ ykutil = { path = "../ykutil" }
 intervaltree = "0.2.7"
 byteorder = "1.4.3"
 leb128 = "0.2.5"
+ykbuild = { path = "../ykbuild" }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 iced-x86 = { version = "1.18.0", features = ["decoder"]}
