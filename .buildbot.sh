@@ -38,8 +38,6 @@ test -d book
 cd ..
 
 # Build LLVM for the C tests.
-mkdir -p target && cd target
-git clone https://github.com/ykjit/ykllvm
 cd ykllvm
 mkdir build
 cd build
@@ -59,13 +57,17 @@ cmake -DCMAKE_INSTALL_PREFIX=`pwd`/../inst \
 cmake --build .
 cmake --install .
 export PATH=`pwd`/../inst/bin:${PATH}
-cd ../../..
+cd ../../
 
 # Check that clang-format is installed.
 clang-format --version
 # Check C/C++ formatting using xtask.
 cargo xtask cfmt
-git diff --exit-code
+
+# This is used to check clang-tidy output, but the dirty submodule from building
+# ykllvm is also shown.
+# FIXME: Add build/ to .gitignore in ykllvm
+git diff --exit-code --ignore-submodules
 
 # Check that building `ykcapi` in isolation works. This is what we'd be doing
 # if we were building release binaries, as it would mean we get a system

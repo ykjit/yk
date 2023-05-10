@@ -6,6 +6,7 @@ fn ignore_dir(entry: &DirEntry) -> bool {
     if entry.path().starts_with("./target")
         || entry.path().starts_with("./.cargo")
         || entry.path().starts_with("./.git")
+        || entry.path().starts_with("./ykllvm")
     {
         return false;
     }

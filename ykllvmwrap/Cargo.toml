@@ -9,6 +9,7 @@ license = "Apache-2.0 OR MIT"
 cc = "1.0.72"
 libc = "0.2.117"
 ykutil = { path = "../ykutil" }
+ykbuild = { path = "../ykbuild" }
 
 [build-dependencies]
 cc = "1.0.72"
