@@ -12,6 +12,7 @@ use std::{
 use tempfile::TempDir;
 use tests::mk_compiler;
 use tests::ExtraLinkage;
+use ykbuild::ccgen::CCLang;
 
 const COMMENT: &str = "//";
 
@@ -93,7 +94,9 @@ fn run_suite(opt: &'static str) {
                 .map(|l| l.generate_obj(tempdir.path()))
                 .collect::<Vec<PathBuf>>();
 
-            let mut compiler = mk_compiler("clang", &exe, p, opt, &extra_objs, false);
+            let mut compiler = mk_compiler(
+                CCLang::C.compiler_wrapper().to_str().unwrap(),
+                &exe, p, opt, &extra_objs, false);
             compiler.arg("-ltests");
             let runtime = Command::new(exe.clone());
             vec![("Compiler", compiler), ("Run-time", runtime)]

@@ -4,6 +4,7 @@ use clap::Parser;
 use std::{env, path::PathBuf, process::Command};
 use tempfile::TempDir;
 use tests::{mk_compiler, EXTRA_LINK};
+use ykbuild::ccgen::CCLang;
 
 /// Run a C test under gdb.
 #[derive(Parser, Debug)]
@@ -54,7 +55,14 @@ fn main() {
 
     let binstem = PathBuf::from(args.test_file.file_stem().unwrap());
     let binpath = [tempdir.path(), &binstem].iter().collect::<PathBuf>();
-    let mut cmd = mk_compiler("clang", &binpath, &test_path, "-O0", &extra_objs, true);
+    let mut cmd = mk_compiler(
+        CCLang::C.compiler_wrapper().to_str().unwrap(),
+        &binpath,
+        &test_path,
+        "-O0",
+        &extra_objs,
+        true,
+    );
     if !cmd.spawn().unwrap().wait().unwrap().success() {
         panic!("compilation failed");
     }

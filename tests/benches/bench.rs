@@ -13,6 +13,7 @@ use std::{
 };
 use tempfile::TempDir;
 use tests::mk_compiler;
+use ykbuild::ccgen::CCLang;
 
 const SAMPLE_SIZE: usize = 50;
 const MEASUREMENT_TIME: Duration = Duration::from_secs(30);
@@ -27,7 +28,14 @@ fn compile_runner(tempdir: &TempDir) -> PathBuf {
     exe.push(tempdir);
     exe.push(src.file_stem().unwrap());
 
-    let mut compiler = mk_compiler("clang", &exe, &src, "-O0", &[], false);
+    let mut compiler = mk_compiler(
+        CCLang::C.compiler_wrapper().to_str().unwrap(),
+        &exe,
+        &src,
+        "-O0",
+        &[],
+        false,
+    );
     compiler.arg("-ltests");
     let out = compiler.output().unwrap();
     check_output(&out);
