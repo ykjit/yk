@@ -13,6 +13,18 @@ testing only. It is enabled whenever the `tests` crate is being compiled, so a
 regular `cargo build` in the root of the workspace will enable the feature (to
 build *without* the feature enabled, do `cargo build -p ykcapi`).
 
+## Build-time Variables
+
+### `YKB_YKLLVM_BIN_DIR`
+
+Under normal circumstances, yk builds a copy of its LLVM fork "ykllvm" and uses
+it to build interpreters. You can use your own ykllvm build by specifying the
+directory where the executables (e.g. `clang`, `llvm-config`, and so on) are
+stored with `YKB_YKLLVM_BIN_DIR`. yk does not check your installation for
+compatibility: it is your responsibility to ensure that your ykllvm build
+matches that expected by yk.
+
+
 ## Run-time Variables
 
 ### `YKD_FORCE_TRACE_DECODER`
