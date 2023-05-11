@@ -5,11 +5,8 @@ const YKLLVM: &str = "../ykllvm/llvm";
 const PROFILE: &str = "Release";
 
 fn main() {
-    if env::var("YKB_YKLLVM_INSTALL_DIR").is_ok() {
-        println!(
-            "cargo:ykllvm={}",
-            env::var("YKB_YKLLVM_INSTALL_DIR").unwrap()
-        );
+    if env::var("YKB_YKLLVM_BIN_DIR").is_ok() {
+        println!("cargo:ykllvm={}", env::var("YKB_YKLLVM_BIN_DIR").unwrap());
         return;
     }
 
