@@ -17,12 +17,19 @@ build *without* the feature enabled, do `cargo build -p ykcapi`).
 
 ### `YKB_YKLLVM_BIN_DIR`
 
-Under normal circumstances, yk builds a copy of its LLVM fork "ykllvm" and uses
-it to build interpreters. You can use your own ykllvm build by specifying the
-directory where the executables (e.g. `clang`, `llvm-config`, and so on) are
-stored with `YKB_YKLLVM_BIN_DIR`. yk does not check your installation for
-compatibility: it is your responsibility to ensure that your ykllvm build
-matches that expected by yk.
+Under normal circumstances, yk builds a copy of its LLVM fork "ykllvm", which
+it also uses it to build interpreters (via the compiler's use of `yk-config`).
+You can use your own ykllvm build by specifying the directory where the
+executables (e.g. `clang`, `llvm-config`, and so on) are stored with
+`YKB_YKLLVM_BIN_DIR`.
+
+yk does not check your installation for compatibility: it is your
+responsibility to ensure that your ykllvm build matches that expected by yk.
+
+It is also undefined behaviour to move between defining this variable and not
+within a repository using `yk` (including the `yk` repository itself). If you
+want to set/unset `YKB_YKLLVM_BIN_DIR` then `cargo clean` any repositories
+using `yk` before rebuilding them.
 
 
 ## Run-time Variables

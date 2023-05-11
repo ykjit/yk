@@ -16,14 +16,6 @@ export PATH=${CARGO_HOME}/bin/:$PATH
 
 rustup toolchain install nightly --allow-downgrade --component rustfmt
 
-# There are some feature-gated testing/debugging switches which slow the JIT
-# down a bit. Check that if we build the system without tests, those features
-# are not enabled.
-for mode in "" "--release"; do \
-    cargo -Z unstable-options build ${mode} --build-plan -p ykcapi | \
-        awk '/yk_testing/ { ec=1 } /yk_jitstate_debug/ { ec=1 } END {exit ec}'; \
-done
-
 cargo fmt --all -- --check
 
 # Check licenses.
@@ -37,11 +29,13 @@ mdbook build
 test -d book
 cd ..
 
-# Build LLVM for the C tests.
-cd ykllvm
-mkdir build
-cd build
-
+# We could let yk build two copies of LLVM, but we also want to: check that
+# YKB_YKLLVM_BIN_DIR works; and we want access to clang-format from a build
+# of LLVM. So we first build our own LLVM-with-assertions, use the
+# YKB_YKLLVM_BIN_DIR variable to have yk use that, and use its
+# clang-format.
+mkdir -p ykllvm/build
+cd ykllvm/build
 # Due to an LLVM bug, PIE breaks our mapper, and it's not enough to pass
 # `-fno-pie` to clang for some reason:
 # https://github.com/llvm/llvm-project/issues/57085
@@ -56,33 +50,47 @@ cmake -DCMAKE_INSTALL_PREFIX=`pwd`/../inst \
     ../llvm
 cmake --build .
 cmake --install .
-export PATH=`pwd`/../inst/bin:${PATH}
+export YKB_YKLLVM_BIN_DIR=`pwd`/../inst/bin
 cd ../../
 
 # Check that clang-format is installed.
-clang-format --version
+PATH=${YKB_YKLLVM_BIN_DIR}:${PATH} clang-format --version
 # Check C/C++ formatting using xtask.
-cargo xtask cfmt
-
+PATH=${YKB_YKLLVM_BIN_DIR}:${PATH} cargo xtask cfmt
 # This is used to check clang-tidy output, but the dirty submodule from building
 # ykllvm is also shown.
 # FIXME: Add build/ to .gitignore in ykllvm
 git diff --exit-code --ignore-submodules
 
-# Check that building `ykcapi` in isolation works. This is what we'd be doing
-# if we were building release binaries, as it would mean we get a system
-# without the (slower) `yk_testing` and `yk_jitstate_debug` features enabled.
-for mode in "" "--release"; do
-    cargo build ${mode} -p ykcapi;
-done
+# There are some feature-gated testing/debugging switches which slow the JIT
+# down a bit. Check that if we build the system without tests, those features
+# are not enabled.
+cargo -Z unstable-options build --build-plan -p ykcapi | \
+    awk '/yk_testing/ { ec=1 } /yk_jitstate_debug/ { ec=1 } END {exit ec}'
 
 for i in $(seq 10); do
     cargo test
-    cargo test --release
 done
-
-cargo bench
 
 # Run examples.
 cargo run --example hwtracer_example
+
+
+# We now want to test building with `--release`, which we also take as an
+# opportunity to check that yk can build ykllvm, which requires unsetting
+# YKB_YKLLVM_BIN_DIR. In essence, we now repeat much of what we did above but
+# with `--release`.
+unset YKB_YKLLVM_BIN_DIR
+
+cargo -Z unstable-options build --release --build-plan -p ykcapi | \
+    awk '/yk_testing/ { ec=1 } /yk_jitstate_debug/ { ec=1 } END {exit ec}'
+
+cargo build --release -p ykcapi
+
+for i in $(seq 10); do
+    cargo test --release
+done
+
 cargo run --release --example hwtracer_example
+
+cargo bench

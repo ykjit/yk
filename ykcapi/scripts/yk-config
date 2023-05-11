@@ -15,7 +15,7 @@ OUTPUT=""
 usage() {
     echo "Generate C compiler flags for building against the Yk JIT.\n"
     echo "Usage:"
-    echo "    yk-config <mode> [--cppflags] [--cflags] [--ldflags]\n"
+    echo "    yk-config <mode> <--cc|--cxx|--cppflags|--cflags|--ldflags>\n"
     echo "    Where <mode> is either 'debug' or 'release'."
 }
 
@@ -23,7 +23,16 @@ handle_arg() {
     mode=$1
     shift
 
+    if [ "x${YKB_YKLLVM_BIN_DIR}" != "x" ]; then
+        ykllvm_bin_dir=`realpath ${YKB_YKLLVM_BIN_DIR}`
+    else
+        # The way this path is calculated must match that in ykbuild/build.rs.
+        ykllvm_bin_dir=`realpath ${DIR}/../../target/${mode}/ykllvm/bin/`
+    fi
+
     case $1 in
+        --cc) OUTPUT="${ykllvm_bin_dir}/clang" ;;
+        --cxx) OUTPUT="${ykllvm_bin_dir}/clang++" ;;
         --cflags)
             # Enable LTO.
             OUTPUT="${OUTPUT} -flto"
@@ -107,7 +116,7 @@ handle_arg() {
             # of rude to add local rpaths to interpreter binaries that
             # downstreams may want to distribute.
             OUTPUT="${OUTPUT} -Wl,-rpath=${DIR}/../../target/${mode}/deps"
-            OUTPUT="${OUTPUT} -Wl,-rpath=$(llvm-config --link-shared --libdir)"
+            OUTPUT="${OUTPUT} -Wl,-rpath=$(${ykllvm_bin_dir}/llvm-config --link-shared --libdir)"
             # Add a proper RPATH, not a RUNPATH:
             # https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/1737608
             OUTPUT="${OUTPUT} -Wl,--disable-new-dtags"

@@ -4,6 +4,5 @@
 
 set -e
 
-echo "clang $@" > $(mktemp -p ${YK_CC_TEMPDIR})
-
-clang $@
+echo "${YK_COMPILER_PATH} $@" > $(mktemp -p ${YK_COMPILER_TEMPDIR})
+${YK_COMPILER_PATH} $@
