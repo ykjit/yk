@@ -10,6 +10,7 @@ use std::{
     process::Command,
     sync::LazyLock,
 };
+use ykbuild::llvm_bin_path;
 
 const TEMPDIR_SUBST: &str = "%%TEMPDIR%%";
 pub static EXTRA_LINK: LazyLock<HashMap<&'static str, Vec<ExtraLinkage>>> = LazyLock::new(|| {
@@ -114,9 +115,11 @@ pub fn mk_compiler(
 
     let yk_config_out = Command::new(yk_config)
         .args([mode, "--cflags", "--cppflags", "--ldflags", "--libs"])
+        .env("PATH", llvm_bin_path())
         .output()
         .expect("failed to execute yk-config");
     if !yk_config_out.status.success() {
+        io::stderr().write_all(&yk_config_out.stderr);
         panic!("yk-config exited with non-zero status");
     }
     let mut yk_flags = String::from_utf8(yk_config_out.stdout).unwrap();

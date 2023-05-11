@@ -8,12 +8,20 @@ fn manifest_dir() -> String {
     env::var("CARGO_MANIFEST_DIR").unwrap()
 }
 
+/// Return an extended PATH variable with the LLVM binary dir at its head.
+pub fn llvm_bin_path() -> String {
+    let path = env::var("PATH").expect("PATH environment variable not defined");
+    if let Ok(bin_dir) = env::var("YKB_YKLLVM_INSTALL_DIR") {
+        format!("{bin_dir}:{path}")
+    } else {
+        format!("{}:{path}", env::var("DEP_YKBUILD_YKLLVM").unwrap())
+    }
+}
+
 pub fn llvm_config() -> Command {
     let mut c = Command::new("llvm-config");
-    if let (Ok(bin_dir), Ok(path)) = (env::var("YKB_YKLLVM_INSTALL_DIR"), env::var("PATH")) {
-        c.env("PATH", format!("{bin_dir}:{path}"));
-    }
     c.arg("--link-shared");
+    c.env("PATH", llvm_bin_path());
     c
 }
 

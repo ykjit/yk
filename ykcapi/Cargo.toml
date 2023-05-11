@@ -11,6 +11,7 @@ crate-type = ["cdylib"]
 [dependencies]
 hwtracer = { path = "../hwtracer" }
 libc = "0.2.117"
+ykbuild = { path = "../ykbuild" }
 ykllvmwrap = { path = "../ykllvmwrap" }
 ykrt = { path = "../ykrt" }
 yktrace = { path = "../yktrace" }
