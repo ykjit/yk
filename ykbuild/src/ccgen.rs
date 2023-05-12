@@ -9,31 +9,6 @@ use std::{
 };
 use tempfile::TempDir;
 
-/// A language that clangd understands.
-pub enum CCLang {
-    C,
-    CPP,
-}
-
-impl CCLang {
-    fn extensions(&self) -> &'static [&'static str] {
-        match self {
-            Self::C => &["c"],
-            Self::CPP => &["cpp", "cxx", "cc"],
-        }
-    }
-
-    pub fn compiler_wrapper(&self) -> PathBuf {
-        let script = match self {
-            Self::C => "wrap-clang.sh",
-            Self::CPP => "wrap-clang++.sh",
-        };
-        [&manifest_dir(), "..", "ykbuild", script]
-            .iter()
-            .collect::<PathBuf>()
-    }
-}
-
 /// Generate a clangd compilation databases to give LSP support for Yk's C/C++ code.
 ///
 /// This provides a compiler wrapper which captures the compilation commands and a way to write
@@ -48,7 +23,7 @@ impl CCLang {
 ///
 /// - Call `CCGenerator::new()` with the desired parameters.
 ///
-/// - Compile your C/C++ code with the compiler wrapper returned by `CCLang::compiler_wrapper()`
+/// - Compile your C/C++ code with the compiler wrapper returned by `CCGenerator::wrapper_path()`
 ///   with the environment returned by `CCGenerator::build_env()` applied. Note that the source
 ///   file to be compiled MUST be the last argument of the compiler invocation!
 ///
@@ -85,6 +60,13 @@ impl CCGenerator {
         }
     }
 
+    /// Return the path of the `compiler-wrapper`.
+    pub fn wrapper_path(&self) -> PathBuf {
+        [&manifest_dir(), "..", "ykbuild", "compiler-wrapper"]
+            .iter()
+            .collect::<PathBuf>()
+    }
+
     /// Returns the key and value that must be applied to the wrapped compiler's environment.
     pub fn build_env(&self) -> (&str, &str) {
         ("YK_COMPILER_TEMPDIR", self.tmpdir.path().to_str().unwrap())
@@ -102,10 +84,8 @@ impl CCGenerator {
 
             // We assume (and assert) that the source file is the last argument.
             let ccfile = buf.split(' ').last().unwrap();
-            assert!(CCLang::C
-                .extensions()
+            assert!(["c", "cpp", "cxx", "cc"]
                 .iter()
-                .chain(CCLang::CPP.extensions())
                 .any(|e| e == &Path::new(ccfile).extension().unwrap().to_str().unwrap()));
             let mut entry = String::new();
             entry.push_str("  {\n");
