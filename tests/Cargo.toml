@@ -40,7 +40,7 @@ hwtracer = { path = "../hwtracer", features = ["yk_testing"] }
 criterion = { version = "0.4", features = ["html_reports"] }
 lang_tester = "0.7.1"
 ykcapi = { path = "../ykcapi", features = ["yk_testing", "yk_jitstate_debug"] }
-ykllvmwrap = { path = "../ykllvmwrap", features = ["yk_testing"] }
+yktracec = { path = "../yktracec", features = ["yk_testing"] }
 ykrt = { path = "../ykrt", features = ["yk_testing", "yk_jitstate_debug"] }
 
 [build-dependencies]

@@ -207,7 +207,7 @@ impl IRTrace {
         let (di_tmp, di_fd, di_tmpname_c) = Self::create_debuginfo_temp_file();
 
         let ret = unsafe {
-            ykllvmwrap::__ykllvmwrap_irtrace_compile(
+            yktracec::__yktracec_irtrace_compile(
                 func_names.as_ptr(),
                 bbs.as_ptr(),
                 trace_len,
@@ -237,7 +237,7 @@ impl IRTrace {
         let faddr_keys = Vec::new();
         let faddr_vals = Vec::new();
 
-        let ret = ykllvmwrap::__ykllvmwrap_irtrace_compile_for_tc_tests(
+        let ret = yktracec::__yktracec_irtrace_compile_for_tc_tests(
             func_names.as_ptr(),
             bbs.as_ptr(),
             trace_len,
@@ -291,7 +291,7 @@ impl CompiledTrace {
         let smptr = slice[1] as *const c_void;
         let smsize = slice[2];
         let aotvals = slice[3] as *mut c_void;
-        // We heap allocated this array in ykllvmwrap to pass the data here. Now that we've
+        // We heap allocated this array in yktracec to pass the data here. Now that we've
         // extracted it we no longer need to keep the array around.
         unsafe { libc::free(data as *mut c_void) };
         Self {
@@ -382,7 +382,7 @@ impl Drop for CompiledTrace {
     fn drop(&mut self) {
         // The memory holding the AOT live values needs to live as long as the trace. Now that we
         // no longer need the trace, this can be freed too.
-        // FIXME: Free the memory for the stackmap which was allocated in ykllvmwrap/memman.cc.
+        // FIXME: Free the memory for the stackmap which was allocated in yktracec/memman.cc.
         unsafe { libc::free(self.aotvals as *mut c_void) };
     }
 }

@@ -41,7 +41,7 @@ static ISIZEOF_POINTER: isize = std::mem::size_of::<*const ()>() as isize;
 static RBP_DWARF_NUM: u16 = 6;
 
 /// Active frames (basic block index, instruction index, function name) in the AOTModule where the
-/// guard failure occured. Mirrors the struct defined in ykllvmwrap/jitmodbuilder.cc.
+/// guard failure occured. Mirrors the struct defined in yktracec/jitmodbuilder.cc.
 #[derive(Debug)]
 #[repr(C)]
 pub struct FrameInfo {

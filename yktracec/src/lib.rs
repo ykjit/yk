@@ -9,7 +9,7 @@ use libc::{c_void, size_t};
 use std::ffi::{c_char, c_int};
 
 extern "C" {
-    pub fn __ykllvmwrap_irtrace_compile(
+    pub fn __yktracec_irtrace_compile(
         func_names: *const *const c_char,
         bbs: *const size_t,
         trace_len: size_t,
@@ -23,7 +23,7 @@ extern "C" {
     ) -> *const c_void;
 
     #[cfg(feature = "yk_testing")]
-    pub fn __ykllvmwrap_irtrace_compile_for_tc_tests(
+    pub fn __yktracec_irtrace_compile_for_tc_tests(
         func_names: *const *const c_char,
         bbs: *const size_t,
         trace_len: size_t,
