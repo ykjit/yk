@@ -1,10 +1,10 @@
 # Installation
 
-This section details how to get up and running with Yk.
+This section details how to get yk up and running.
 
-# System Requirements
+## System Requirements
 
-At the time of writing, running Yk requires the following:
+At the time of writing, yk requires the following:
 
  - A Linux system with a CPU that supports Intel Processor Trace.
    (`grep intel_pt /proc/cpuinfo` to check)
@@ -13,13 +13,24 @@ At the time of writing, running Yk requires the following:
 
  - A [Yk-enabled programming language interpreter](interps.md).
 
+ - A recent nightly install of [Rust](https://www.rust-lang.org/).
+
 Note that at present, non-root users can only use Yk if
 `/proc/sys/kernel/perf_event_paranoid` is set to `-1`.
 
-# Getting Yk
 
-Eventually we'd like to distribute source and binary releases of Yk, but we are
-not there yet.
+## Building
 
-In the meantime, see the [developer instructions](../dev/getting_started.md) on
-how to build from git source.
+Clone the [main yk repository](https://github.com/ykjit/yk) and build
+it with `cargo`:
+
+```sh
+$ git clone --recurse-submodules --depth 1 \
+  https://github.com/ykjit/yk/
+$ cd yk
+$ cargo build --release
+```
+
+Note that this will also clone [ykllvm](https://github.com/ykjit/ykllvm) as a
+submodule of yk. If you later want access to the full git history, either
+remove `--depth 1` or run `git fetch --unshallow`.

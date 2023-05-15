@@ -193,3 +193,12 @@ change, the reason the change is as it is, and the consequences of the change.
 The pull request itself should come with a description of what it aims to
 achieve and each individual commit must also contain a self-contained
 description of its changes.
+
+
+## Formatting
+
+yk's continuous integration setup only accepts contributions of well-formatted
+code. Changed Rust code must be formatted with `cargo fmt`. Changed C++ code
+must be formatted with `cargo xtask cfmt`. Please run both before you raise PR,
+and rerun them each time you are about to make a commit in response to reviewer
+comments.
