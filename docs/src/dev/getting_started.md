@@ -1,60 +1,27 @@
 # Getting Started
 
-This guide describes how to start developing Yk.
+yk is spread over several git repositories, but in most cases you only need the
+[main yk repository](https://github.com/ykjit/yk). First clone it, and then
+build it:
 
-## Repositories
-
-yk is spread over several git repositories, but you will need to download and
-build at least the following two in order to have a running system:
-
- - [ykllvm](https://github.com/ykjit/ykllvm): Our fork of LLVM.
- - [yk](https://github.com/ykjit/yk): The runtime parts of the system.
-
-Since `yk` depends on `ykllvm`, you must build `ykllvm` first.
-
-
-## Building `ykllvm`
-
-Clone and build like this:
-
-```
-git clone https://github.com/ykjit/ykllvm
-cd ykllvm
-mkdir build
-cmake -DCMAKE_INSTALL_PREFIX=`pwd`/../inst \
-    -DLLVM_INSTALL_UTILS=On \
-    -DCMAKE_BUILD_TYPE=release \
-    -DLLVM_ENABLE_ASSERTIONS=On \
-    -DLLVM_ENABLE_PROJECTS="lld;clang" \
-    -DBUILD_SHARED_LIBS=ON \
-    -DCLANG_DEFAULT_PIE_ON_LINUX=OFF \
-    ../llvm
-make -j `nproc` install
+```sh
+$ git clone --recurse-submodules --depth 1 \
+  https://github.com/ykjit/yk/
+$ cd yk
+$ cargo build --release
 ```
 
-In order that your subsequent build(s) of `yk` pick up `ykllvm`, you must
-ensure that the `ykllvm` compiler binaries are used instead of your system's
-default LLVM binaries. For example, prepend the `ykllvm` installation
-directory to your `$PATH`:
-
-```
-export PATH=/path/to/ykllvm/inst/bin:${PATH}
-```
-
-
-## Working with the `yk` repo.
+Note that this will also clone [ykllvm](https://github.com/ykjit/ykllvm) as a
+submodule of yk. If you want access to the full git history, either remove
+`--depth 1` or run `git fetch --unshallow`.
 
 The `yk` repo is a Rust workspace (i.e. a collection of crates). You can build
-and test in the usual ways using `cargo`.
-
-For example, to build and test the system, run:
+and test in the usual ways using `cargo`. For example, to build and test the
+system, run:
 
 ```
 cargo test
 ```
-
-The only requirement is that the LLVM binaries in your `$PATH` are those from a
-compiled `ykllvm` (see the previous section).
 
 
 ### C++ code
