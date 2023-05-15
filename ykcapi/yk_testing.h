@@ -35,7 +35,7 @@ void __yktrace_hwt_mapper_blockmap_free(void *mapper);
 // https://github.com/google/benchmark/blob/ab74ae5e104f72fa957c1712707a06a781a974a6/include/benchmark/benchmark.h#L359
 #define CLOBBER_MEM() asm volatile("" : : : "memory");
 
-// Stuff for the hwtracer_ykpt suite.
+// Stuff for decoder benchmarks.
 void *__hwykpt_start_collector(void);
 void *__hwykpt_stop_collector(void *tc);
 void __hwykpt_libipt_vs_ykpt(void *trace);

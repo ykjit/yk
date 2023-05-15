@@ -80,9 +80,6 @@ fn bench_native(c: &mut Criterion) {
     let (_tempdir, runner, mut group) = setup(c, "trace-decode-native");
 
     for param in [1000, 10000, 100000] {
-        group.bench_function(BenchmarkId::new("LibIPT", format!("{}", param)), |b| {
-            b.iter(|| collect_and_decode_trace(&runner, 0, param, TraceDecoderKind::LibIPT))
-        });
         group.bench_function(BenchmarkId::new("YkPT", format!("{}", param)), |b| {
             b.iter(|| collect_and_decode_trace(&runner, 0, param, TraceDecoderKind::YkPT))
         });
@@ -95,9 +92,6 @@ fn bench_disasm(c: &mut Criterion) {
     let (_tempdir, runner, mut group) = setup(c, "trace-decode-disasm");
 
     for param in [10, 30, 50] {
-        group.bench_function(BenchmarkId::new("LibIPT", format!("{}", param)), |b| {
-            b.iter(|| collect_and_decode_trace(&runner, 1, param, TraceDecoderKind::LibIPT))
-        });
         group.bench_function(BenchmarkId::new("YkPT", format!("{}", param)), |b| {
             b.iter(|| collect_and_decode_trace(&runner, 1, param, TraceDecoderKind::YkPT))
         });

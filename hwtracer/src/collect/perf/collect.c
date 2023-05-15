@@ -3,8 +3,6 @@
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <hwtracer_util.h>
-#include <intel-pt.h>
 #include <inttypes.h>
 #include <limits.h>
 #include <linux/perf_event.h>
@@ -136,6 +134,15 @@ bool hwt_perf_start_collector(struct hwt_perf_ctx *, struct hwt_perf_trace *,
 bool hwt_perf_stop_collector(struct hwt_perf_ctx *tr_ctx, struct hwt_cerror *);
 bool hwt_perf_free_collector(struct hwt_perf_ctx *tr_ctx, struct hwt_cerror *);
 
+// Sets C error information (if not already set).
+void hwt_set_cerr(struct hwt_cerror *err, int kind, int code) {
+  // Only set the error info if we would not be overwriting an earlier error.
+  if (err->kind == hwt_cerror_unused) {
+    err->kind = kind;
+    err->code = code;
+  }
+}
+
 /*
  * Called when the poll(2) loop is woken up with a POLL_IN. Samples are read
  * from the Perf data buffer and an action is invoked for each depending its
@@ -197,7 +204,7 @@ static bool handle_sample(void *aux_buf, struct perf_event_mmap_page *hdr,
       // truncated. If it was, then we didn't read out of the data buffer
       // quickly/frequently enough.
       if (rec_aux_sample->flags & PERF_AUX_FLAG_TRUNCATED) {
-        hwt_set_cerr(err, hwt_cerror_ipt, pte_overflow);
+        hwt_set_cerr(err, hwt_cerror_pt, PT_ERROR_OVERFLOW);
         return false;
       }
       if (read_aux(aux_buf, hdr, trace, err) == false) {
@@ -205,7 +212,7 @@ static bool handle_sample(void *aux_buf, struct perf_event_mmap_page *hdr,
       }
       break;
     case PERF_RECORD_LOST:
-      hwt_set_cerr(err, hwt_cerror_ipt, pte_overflow);
+      hwt_set_cerr(err, hwt_cerror_pt, PT_ERROR_OVERFLOW);
       return false;
       break;
     case PERF_RECORD_LOST_SAMPLES:

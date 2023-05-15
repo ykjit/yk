@@ -12,7 +12,7 @@ program execution, sometimes significantly.
 
 ### `YKD_FORCE_TRACE_DECODER`
 
-Forces use of the specified trace decoder. Valid values are `libipt` and
+Forces use of the specified trace decoder. The only valid value for now is
 `ykpt`.
 
 This variable is only available when `hwtracer` is compiled with the

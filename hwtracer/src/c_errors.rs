@@ -1,37 +1,7 @@
 //! C-level errors.
 
-use crate::{
-    decode::libipt::{hwt_ipt_is_overflow_err, pt_errstr},
-    HWTracerError,
-};
+use crate::HWTracerError;
 use libc::c_int;
-use std::{
-    error::Error,
-    ffi::CStr,
-    fmt::{self, Display, Formatter},
-};
-
-/// An error indicated by a C-level libipt error code.
-#[derive(Debug)]
-struct LibIPTError(c_int);
-
-impl Display for LibIPTError {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        // Ask libipt for a string representation of the error code.
-        let err_str = unsafe { CStr::from_ptr(pt_errstr(self.0)) };
-        write!(f, "libipt error: {}", err_str.to_str().unwrap())
-    }
-}
-
-impl Error for LibIPTError {
-    fn description(&self) -> &str {
-        "libipt error"
-    }
-
-    fn cause(&self) -> Option<&dyn Error> {
-        None
-    }
-}
 
 #[repr(C)]
 #[allow(dead_code)] // Only C constructs these.
@@ -40,7 +10,11 @@ enum PerfPTCErrorKind {
     Unused,
     Unknown,
     Errno,
-    IPT,
+    PT,
+}
+
+enum PTErrorCode {
+    Overflow = 0,
 }
 
 /// Represents an error occurring in C code.
@@ -69,11 +43,11 @@ impl From<PerfPTCError> for HWTracerError {
             PerfPTCErrorKind::Unused => HWTracerError::Unknown,
             PerfPTCErrorKind::Unknown => HWTracerError::Unknown,
             PerfPTCErrorKind::Errno => HWTracerError::Errno(err.code),
-            PerfPTCErrorKind::IPT => {
+            PerfPTCErrorKind::PT => {
                 // Overflow is a special case with its own error type.
-                match unsafe { hwt_ipt_is_overflow_err(err.code) } {
-                    true => HWTracerError::HWBufferOverflow,
-                    false => HWTracerError::Custom(Box::new(LibIPTError(err.code))),
+                match err.code {
+                    v if v == PTErrorCode::Overflow as c_int => HWTracerError::HWBufferOverflow,
+                    _ => unreachable!(),
                 }
             }
         }

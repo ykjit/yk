@@ -19,12 +19,6 @@ name = "trace_compiler_tests"
 path = "langtest_trace_compiler.rs"
 harness = false
 
-# FIXME: disabled until libipt can do stack_adjust.
-#[[test]]
-#name = "hwtracer_ykpt_tests"
-#path = "langtest_hwtracer_ykpt.rs"
-#harness = false
-
 [dependencies]
 clap = { features = ["derive"], version = "4.0.11" }
 hwtracer = { path = "../hwtracer", features = [ "yk_testing" ] }
