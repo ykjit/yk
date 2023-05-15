@@ -69,7 +69,7 @@ cargo -Z unstable-options build --build-plan -p ykcapi | \
     awk '/yk_testing/ { ec=1 } /yk_jitstate_debug/ { ec=1 } END {exit ec}'
 
 for i in $(seq 10); do
-    cargo test
+    RUST_TEST_SHUFFLE=1 cargo test
 done
 
 # Run examples.
@@ -88,7 +88,7 @@ cargo -Z unstable-options build --release --build-plan -p ykcapi | \
 cargo build --release -p ykcapi
 
 for i in $(seq 10); do
-    cargo test --release
+    RUST_TEST_SHUFFLE=1 cargo test --release
 done
 
 cargo run --release --example hwtracer_example
