@@ -134,7 +134,7 @@ impl Registers {
 }
 
 /// Location in terms of basic block index, instruction index, and function name, of a
-/// variable in the AOT module. Mirrors the LLVM struct defined in ykllvmwrap/jitmodbuilder.cc.
+/// variable in the AOT module. Mirrors the LLVM struct defined in yktracec/jitmodbuilder.cc.
 #[derive(Debug)]
 #[repr(C)]
 struct AOTVar {
@@ -145,7 +145,7 @@ struct AOTVar {
 }
 
 /// Address and length of a vector. Mirrors the struct defined in
-/// ykllvmwrap/jitmodbuilder.cc.
+/// yktracec/jitmodbuilder.cc.
 #[derive(Debug)]
 #[repr(C)]
 pub struct CVec {
@@ -155,7 +155,7 @@ pub struct CVec {
 }
 
 /// Address, offset, and length of the live AOT values for this guard failure. Mirrors the struct
-/// defined in ykllvmwrap/jitmodbuilder.cc.
+/// defined in yktracec/jitmodbuilder.cc.
 #[derive(Debug)]
 #[repr(C)]
 pub struct LiveAOTVals {

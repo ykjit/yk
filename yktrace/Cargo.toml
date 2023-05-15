@@ -13,7 +13,7 @@ hwtracer = { path = "../hwtracer" }
 intervaltree = "0.2.7"
 libc = "0.2.117"
 tempfile = "3.3.0"
-ykllvmwrap = { path = "../ykllvmwrap" }
+yktracec = { path = "../yktracec" }
 ykutil = { path = "../ykutil" }
 
 [dev-dependencies]

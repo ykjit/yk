@@ -437,7 +437,7 @@ void *compileIRTrace(FN Func, char *FuncNames[], size_t BBs[], size_t TraceLen,
   return compileModule(TraceName, JITMod, GlobalMappings, AOTMappingVec);
 }
 
-extern "C" void *__ykllvmwrap_irtrace_compile(
+extern "C" void *__yktracec_irtrace_compile(
     char *FuncNames[], size_t BBs[], size_t TraceLen, char *FAddrKeys[],
     void *FAddrVals[], size_t FAddrLen, void *BitcodeData, uint64_t BitcodeLen,
     int DebugInfoFD, char *DebugInfoPath) {
@@ -447,7 +447,7 @@ extern "C" void *__ykllvmwrap_irtrace_compile(
 }
 
 #ifdef YK_TESTING
-extern "C" void *__ykllvmwrap_irtrace_compile_for_tc_tests(
+extern "C" void *__yktracec_irtrace_compile_for_tc_tests(
     char *FuncNames[], size_t BBs[], size_t TraceLen, char *FAddrKeys[],
     void *FAddrVals[], size_t FAddrLen, void *BitcodeData, uint64_t BitcodeLen,
     int DebugInfoFD, char *DebugInfoPath) {
