@@ -1,3 +1,4 @@
 [submodule "ykllvm"]
 	path = ykllvm
 	url = https://github.com/ykjit/ykllvm
+	shallow = true
