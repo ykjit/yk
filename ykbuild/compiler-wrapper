@@ -1,0 +1,9 @@
+#! /bin/sh
+
+# This wrapper script is used to record compiler invocations in sub-builds.
+# That information can then be used for e.g. code completion purposes.
+
+set -e
+
+echo "${YK_COMPILER_PATH} $@" > $(mktemp -p ${YK_COMPILER_TEMPDIR})
+${YK_COMPILER_PATH} $@
