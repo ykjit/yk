@@ -112,7 +112,7 @@ impl StackMapParser<'_> {
         // Parse records.
         for f in &funcs {
             let mut records = self.read_records(f.record_count, &consts);
-            for mut r in &mut records {
+            for r in &mut records {
                 r.offset += f.addr;
                 r.size = f.stack_size;
             }
