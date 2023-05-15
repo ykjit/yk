@@ -87,7 +87,7 @@ impl CCGenerator {
 
     /// Returns the key and value that must be applied to the wrapped compiler's environment.
     pub fn build_env(&self) -> (&str, &str) {
-        ("YK_CC_TEMPDIR", self.tmpdir.path().to_str().unwrap())
+        ("YK_COMPILER_TEMPDIR", self.tmpdir.path().to_str().unwrap())
     }
 
     /// Call when the build is done to generate the `build_commands.json` file.

@@ -10,6 +10,7 @@ use std::{
     process::Command,
     sync::LazyLock,
 };
+use ykbuild::ykllvm_bin;
 
 const TEMPDIR_SUBST: &str = "%%TEMPDIR%%";
 pub static EXTRA_LINK: LazyLock<HashMap<&'static str, Vec<ExtraLinkage>>> = LazyLock::new(|| {
@@ -30,8 +31,8 @@ pub static EXTRA_LINK: LazyLock<HashMap<&'static str, Vec<ExtraLinkage>>> = Lazy
             *test_file,
             vec![ExtraLinkage::new(
                 "%%TEMPDIR%%/call_me.o",
+                ykllvm_bin("clang").to_owned(),
                 &[
-                    "clang",
                     "-I../ykcapi",
                     "-c",
                     "-O0",
@@ -49,27 +50,33 @@ pub static EXTRA_LINK: LazyLock<HashMap<&'static str, Vec<ExtraLinkage>>> = Lazy
 pub struct ExtraLinkage<'a> {
     /// The name of the object file to be generated.
     output_file: &'a str,
-    /// The command that generates the object file.
-    gen_cmd: &'a [&'a str],
+    /// The path to the binary we want to run.
+    gen_bin: PathBuf,
+    /// Arguments to the binary.
+    gen_args: &'a [&'a str],
 }
 
 impl<'a> ExtraLinkage<'a> {
-    pub fn new(output_file: &'a str, gen_cmd: &'a [&'a str]) -> Self {
+    pub fn new(output_file: &'a str, gen_bin: PathBuf, gen_args: &'a [&'a str]) -> Self {
         Self {
             output_file,
-            gen_cmd,
+            gen_bin,
+            gen_args,
         }
     }
 
     /// Run the command to generate the object in `tempdir` and return the absolute path to the
     /// generated object.
     pub fn generate_obj(&self, tempdir: &Path) -> PathBuf {
-        let mut cmd = Command::new(self.gen_cmd[0]);
+        let mut cmd = Command::new(&self.gen_bin);
         let tempdir_s = tempdir.to_str().unwrap();
-        for arg in self.gen_cmd[1..].iter() {
+        for arg in self.gen_args.iter() {
             cmd.arg(arg.replace(TEMPDIR_SUBST, tempdir_s));
         }
-        let out = cmd.output().unwrap();
+        let out = match cmd.output() {
+            Ok(x) => x,
+            Err(e) => panic!("Error when running {:?} {:?}", cmd, e),
+        };
         assert!(tempdir.exists());
         if !out.status.success() {
             io::stdout().write_all(&out.stdout).unwrap();
@@ -87,7 +94,7 @@ impl<'a> ExtraLinkage<'a> {
 ///
 /// If `patch_cp` is `false` then the argument to patch the control point is omitted.
 pub fn mk_compiler(
-    compiler: &str,
+    compiler: &Path,
     exe: &Path,
     src: &Path,
     opt: &str,
@@ -117,6 +124,7 @@ pub fn mk_compiler(
         .output()
         .expect("failed to execute yk-config");
     if !yk_config_out.status.success() {
+        io::stderr().write_all(&yk_config_out.stderr).ok();
         panic!("yk-config exited with non-zero status");
     }
     let mut yk_flags = String::from_utf8(yk_config_out.stdout).unwrap();

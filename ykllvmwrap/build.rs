@@ -1,11 +1,11 @@
 #![feature(fn_traits)]
 
 use rerun_except::rerun_except;
-use std::env;
+use std::{env, process::Command};
 use ykbuild::{
     apply_llvm_ld_library_path,
     ccgen::{CCGenerator, CCLang},
-    llvm_config,
+    ykllvm_bin,
 };
 
 fn main() {
@@ -13,7 +13,12 @@ fn main() {
     rerun_except(&[]).unwrap();
 
     // Compile our wrappers with the right LLVM C++ flags.
-    let cxxflags_out = llvm_config().arg("--cxxflags").output().unwrap().stdout;
+    let cxxflags_out = Command::new(&ykllvm_bin("llvm-config"))
+        .arg("--link-shared")
+        .arg("--cxxflags")
+        .output()
+        .unwrap()
+        .stdout;
     let cxxflags_str = std::str::from_utf8(&cxxflags_out).unwrap();
     let cxxflags = cxxflags_str.split_whitespace().collect::<Vec<_>>();
 
@@ -49,6 +54,7 @@ fn main() {
     // Generate a `compile_commands.json` database for clangd.
     let ccg = CCGenerator::new("ykllvmwrap", &env::var("CARGO_MANIFEST_DIR").unwrap());
     env::set_var.call(ccg.build_env());
+    env::set_var("YK_COMPILER_PATH", ykllvm_bin("clang++"));
     comp.compiler(CCLang::CPP.compiler_wrapper());
 
     // Actually do the compilation.
@@ -58,12 +64,22 @@ fn main() {
     ccg.generate();
 
     // Ensure that downstream crates performing linkage use the right -L and -l flags.
-    let lib_dir = llvm_config().arg("--libdir").output().unwrap().stdout;
+    let lib_dir = Command::new(&ykllvm_bin("llvm-config"))
+        .arg("--link-shared")
+        .arg("--libdir")
+        .output()
+        .unwrap()
+        .stdout;
     let lib_dir = std::str::from_utf8(&lib_dir).unwrap();
     println!("cargo:rustc-link-search={}", lib_dir);
     apply_llvm_ld_library_path();
 
-    let libs = llvm_config().arg("--libs").output().unwrap().stdout;
+    let libs = Command::new(&ykllvm_bin("llvm-config"))
+        .arg("--link-shared")
+        .arg("--libs")
+        .output()
+        .unwrap()
+        .stdout;
     let libs = std::str::from_utf8(&libs).unwrap();
     for lib in libs.split_whitespace() {
         assert!(lib.starts_with("-l"));

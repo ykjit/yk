@@ -7,7 +7,10 @@ use std::fs;
 use std::os::unix::fs as unix_fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use ykbuild::ccgen::{CCGenerator, CCLang};
+use ykbuild::{
+    ccgen::{CCGenerator, CCLang},
+    ykllvm_bin,
+};
 
 const FEATURE_CHECKS_PATH: &str = "feature_checks";
 
@@ -101,6 +104,7 @@ fn main() {
     // Generate a `compile_commands.json` database for clangd.
     let ccg = CCGenerator::new("hwtracer", &env::var("CARGO_MANIFEST_DIR").unwrap());
     env::set_var.call(ccg.build_env());
+    env::set_var("YK_COMPILER_PATH", ykllvm_bin("clang"));
     c_build.compiler(CCLang::C.compiler_wrapper());
 
     let c_deps_dir = make_c_deps_dir();

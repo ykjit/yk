@@ -11,7 +11,10 @@ use std::{
 };
 use tempfile::TempDir;
 use tests::{mk_compiler, EXTRA_LINK};
-use ykbuild::ccgen::{CCGenerator, CCLang};
+use ykbuild::{
+    ccgen::{CCGenerator, CCLang},
+    ykllvm_bin,
+};
 
 const COMMENT: &str = "//";
 
@@ -50,6 +53,7 @@ fn run_suite(opt: &'static str, force_decoder: &'static str) {
     // Generate a `compile_commands.json` database for clangd.
     let ccg = CCGenerator::new("c_tests", &env::var("CARGO_MANIFEST_DIR").unwrap());
     env::set_var.call(ccg.build_env());
+    env::set_var("YK_COMPILER_PATH", ykllvm_bin("clang"));
 
     LangTester::new()
         .test_dir("c")
@@ -80,14 +84,15 @@ fn run_suite(opt: &'static str, force_decoder: &'static str) {
                 .map(|l| l.generate_obj(tempdir.path()))
                 .collect::<Vec<PathBuf>>();
 
-            let compiler = mk_compiler(
-                CCLang::C.compiler_wrapper().to_str().unwrap(),
+            let mut compiler = mk_compiler(
+                CCLang::C.compiler_wrapper().as_path(),
                 &exe,
                 p,
                 opt,
                 &extra_objs,
                 true,
             );
+            compiler.env("YK_COMPILER_PATH", ykllvm_bin("clang"));
             let mut runtime = Command::new(exe.clone());
             runtime.env("YKD_FORCE_TRACE_DECODER", force_decoder);
             vec![("Compiler", compiler), ("Run-time", runtime)]

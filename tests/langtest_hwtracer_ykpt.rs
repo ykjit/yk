@@ -12,6 +12,7 @@ use std::{
 use tempfile::TempDir;
 use tests::mk_compiler;
 use tests::ExtraLinkage;
+use ykbuild::ykllvm_bin;
 
 const COMMENT: &str = "//";
 
@@ -24,8 +25,8 @@ pub static EXTRA_LINK_HWTRACER_YKPT: LazyLock<HashMap<&'static str, Vec<ExtraLin
             "foreign.c",
             vec![ExtraLinkage::new(
                 "%%TEMPDIR%%/call_me.o",
+                ykllvm_bin("clang").to_owned(),
                 &[
-                    "clang",
                     "-c",
                     "-O0",
                     "extra_linkage/call_me.c",
@@ -38,8 +39,8 @@ pub static EXTRA_LINK_HWTRACER_YKPT: LazyLock<HashMap<&'static str, Vec<ExtraLin
             "stifle_compressed_ret.c",
             vec![ExtraLinkage::new(
                 "%%TEMPDIR%%/fudge.o",
+                ykllvm_bin("clang").to_owned(),
                 &[
-                    "clang",
                     "-c",
                     "-O0",
                     "extra_linkage/fudge.s",
@@ -93,7 +94,7 @@ fn run_suite(opt: &'static str) {
                 .map(|l| l.generate_obj(tempdir.path()))
                 .collect::<Vec<PathBuf>>();
 
-            let mut compiler = mk_compiler("clang", &exe, p, opt, &extra_objs, false);
+            let mut compiler = mk_compiler(ykllvm_bin("clang"), &exe, p, opt, &extra_objs, false);
             compiler.arg("-ltests");
             let runtime = Command::new(exe.clone());
             vec![("Compiler", compiler), ("Run-time", runtime)]
