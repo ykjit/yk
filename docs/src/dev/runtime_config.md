@@ -1,35 +1,11 @@
-# Environment Variables
+# Run-time configuration
 
-There are a number of environment variables which control the behaviour of the
-yk system.
+There are a number of environment variables which control the run_time
+behaviour of the yk system.
 
 Variables prefixed with `YKD_` are intended for debugging only. Most (if not
 all) of the debugging variables introduce extra computation that slows down
-program execution.
-
-Some variables are conditionally compiled-in when the containing crate is built
-with the `yk_testing` feature enabled. This feature is used internally for
-testing only. It is enabled whenever the `tests` crate is being compiled, so a
-regular `cargo build` in the root of the workspace will enable the feature (to
-build *without* the feature enabled, do `cargo build -p ykcapi`).
-
-## Build-time Variables
-
-### `YKB_YKLLVM_BIN_DIR`
-
-Under normal circumstances, yk builds a copy of its LLVM fork "ykllvm", which
-it also uses it to build interpreters (via the compiler's use of `yk-config`).
-You can use your own ykllvm build by specifying the directory where the
-executables (e.g. `clang`, `llvm-config`, and so on) are stored with
-`YKB_YKLLVM_BIN_DIR`.
-
-yk does not check your installation for compatibility: it is your
-responsibility to ensure that your ykllvm build matches that expected by yk.
-
-It is also undefined behaviour to move between defining this variable and not
-within a repository using `yk` (including the `yk` repository itself). If you
-want to set/unset `YKB_YKLLVM_BIN_DIR` then `cargo clean` any repositories
-using `yk` before rebuilding them.
+program execution, sometimes significantly.
 
 
 ## Run-time Variables
@@ -41,6 +17,7 @@ Forces use of the specified trace decoder. Valid values are `libipt` and
 
 This variable is only available when `hwtracer` is compiled with the
 `yk_testing` Cargo feature enabled.
+
 
 ### `YKD_PRINT_IR`
 
@@ -56,6 +33,7 @@ The following stages are supported:
 
 This variable is always available, and does not require any Cargo feature to be
 enabled.
+
 
 ### `YKD_PRINT_JITSTATE`
 
@@ -78,6 +56,7 @@ then it is implicitly interpreting.
 This variable is only available when building `ykrt` with the
 `yk_jitstate_debug` Cargo feature enabled.
 
+
 ### `YKD_SERIALISE_COMPILATION`
 
 When `YKD_SERIALISE_COMPILATION=1`, calls to `yk_control_point(loc)` will block
@@ -85,6 +64,7 @@ while `loc` is being compiled.
 
 This variable is only available when building `ykrt` with the `yk_testing`
 Cargo feature enabled.
+
 
 ### `YKD_TRACE_DEBUGINFO`
 
