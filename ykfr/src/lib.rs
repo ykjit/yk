@@ -144,7 +144,7 @@ impl FrameReconstructor {
     /// inside some allocated memory whose pointer this function returns. The frames are then later
     /// `memcpy`ed to the actual stack by [ykcapi::__ykrt_reconstruct_frames].
     #[cfg(target_arch = "x86_64")]
-    pub fn reconstruct_frames(&self, btmframeaddr: *mut c_void) -> *const c_void {
+    pub unsafe fn reconstruct_frames(&self, btmframeaddr: *mut c_void) -> *const c_void {
         // Vec holding currently active register values.
         let mut registers = vec![0; 16];
 
