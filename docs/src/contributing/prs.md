@@ -199,6 +199,7 @@ description of its changes.
 
 yk's continuous integration setup only accepts contributions of well-formatted
 code. Changed Rust code must be formatted with `cargo fmt`. Changed C++ code
-must be formatted with `cargo xtask cfmt`. Please run both before you raise PR,
+must be formatted with `cargo xtask cfmt` (this assumes `clang-format` is in
+`$PATH`). Please run both before you raise PR,
 and rerun them each time you are about to make a commit in response to reviewer
 comments.

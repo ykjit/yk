@@ -35,3 +35,9 @@ yk has an internal Rust feature called `yk_testing`. It is enabled whenever the
 `tests` crate is being compiled, so a regular `cargo build` in the root of the
 workspace will enable the feature (to build *without* the feature enabled, do
 `cargo build -p ykcapi`).
+
+## clangd
+
+The `yk` build system generates compilation command databases for use with
+clangd. If you want diagnostics and/or completion in your editor (via an LSP),
+make sure you have a `clangd` in `$PATH`.
