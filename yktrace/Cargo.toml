@@ -2,13 +2,13 @@
 name = "yktrace"
 version = "0.1.0"
 authors = ["The Yk Developers"]
-edition = "2018"
+edition = "2021"
 license = "Apache-2.0 OR MIT"
 
 [dependencies]
-elf = "0.0.10"
+elf = "0.7"
 fxhash = "0.2.1"
-gimli = "0.26.1"
+gimli = "0.27"
 hwtracer = { path = "../hwtracer" }
 intervaltree = "0.2.7"
 libc = "0.2.117"

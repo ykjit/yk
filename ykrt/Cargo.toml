@@ -2,7 +2,7 @@
 name = "ykrt"
 version = "0.1.0"
 authors = ["The Yk Developers"]
-edition = "2018"
+edition = "2021"
 license = "Apache-2.0 OR MIT"
 
 [dependencies]
@@ -10,7 +10,7 @@ hwtracer = { path = "../hwtracer" }
 num_cpus = "1.13.1"
 parking_lot = "0.12.0"
 parking_lot_core = "0.9.1"
-strum = { version = "0.23.0", features = ["derive"] }
+strum = { version = "0.24.0", features = ["derive"] }
 yktrace = { path = "../yktrace" }
 
 [build-dependencies]
