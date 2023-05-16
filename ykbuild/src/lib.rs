@@ -8,8 +8,24 @@ use std::{
 
 pub mod completion_wrapper;
 
-fn manifest_dir() -> String {
-    env::var("CARGO_MANIFEST_DIR").unwrap()
+/// Return the subdirectory of Cargo's `target` directory where we should be building things.
+///
+/// There are no guarantees about where this will be. However, in practise this will probably point
+/// to a directory whose leaf is `debug` or `release`.
+fn target_dir() -> PathBuf {
+    let target_dir = Path::new(env!("OUT_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_owned();
+    {
+        let leaf = target_dir.file_name().unwrap().to_str().unwrap();
+        assert!(leaf == "debug" || leaf == "release");
+    }
+    target_dir
 }
 
 /// Return a [Path] to the directory containing a ykllvm installation.
@@ -19,18 +35,7 @@ pub fn ykllvm_bin_dir() -> PathBuf {
         Err(_) => {
             // The directory returned here *must* be exactly the same as that produced by
             // `ykbuild/build.rs`.
-            let mut ykllvm_dir = Path::new(env!("OUT_DIR"))
-                .parent()
-                .unwrap()
-                .parent()
-                .unwrap()
-                .parent()
-                .unwrap()
-                .to_owned();
-            {
-                let leaf = ykllvm_dir.file_name().unwrap().to_str().unwrap();
-                assert!(leaf == "debug" || leaf == "release");
-            }
+            let mut ykllvm_dir = target_dir();
             ykllvm_dir.push("ykllvm");
             ykllvm_dir.push("bin");
             ykllvm_dir

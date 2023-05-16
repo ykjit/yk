@@ -1,8 +1,9 @@
 //! Generate compilation command databases for use with clangd.
 
-use crate::manifest_dir;
+use crate::target_dir;
 use glob::glob;
 use std::{
+    env,
     fs::{create_dir_all, File},
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -63,9 +64,13 @@ impl CompletionWrapper {
 
     /// Return the path of the `completion-wrapper`.
     pub fn wrapper_path(&self) -> PathBuf {
-        [&manifest_dir(), "..", "ykbuild", "completion-wrapper"]
-            .iter()
-            .collect::<PathBuf>()
+        let mut p = Path::new(&env::var("CARGO_MANIFEST_DIR").unwrap())
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        p.push("ykbuild");
+        p.push("completion-wrapper");
+        p
     }
 
     /// Returns the key and value that must be applied to the wrapped compiler's environment.
@@ -73,7 +78,7 @@ impl CompletionWrapper {
         ("YK_COMPILER_TEMPDIR", self.tmpdir.path().to_str().unwrap())
     }
 
-    /// Call when the build is done to generate the `build_commands.json` file.
+    /// Call when the build is done to generate the `compile_commands.json` file.
     pub fn generate(self) {
         let mut entries = Vec::new();
 
@@ -97,19 +102,13 @@ impl CompletionWrapper {
             entries.push(entry);
         }
 
-        let out_dir = [
-            &manifest_dir(),
-            "..",
-            "target",
-            "compile_commands",
-            &self.db_subdir,
-        ]
-        .iter()
-        .collect::<PathBuf>();
-        create_dir_all(out_dir.clone()).unwrap();
+        let mut cc_dir = target_dir();
+        cc_dir.push("compile_commands");
+        cc_dir.push(&self.db_subdir);
+        create_dir_all(cc_dir.clone()).unwrap();
 
         // Write JSON to Rust target dir.
-        let outpath = [&out_dir, Path::new("compile_commands.json")]
+        let outpath = [&cc_dir, Path::new("compile_commands.json")]
             .iter()
             .collect::<PathBuf>();
         let mut outfile = File::create(outpath).unwrap();
