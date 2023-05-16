@@ -1,5 +1,4 @@
 use std::env;
-use ykbuild;
 
 pub fn main() {
     // Expose the cargo profile to run.rs so that it can set the right link flags.

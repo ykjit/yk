@@ -95,7 +95,7 @@ fn main() {
         .to_owned();
     let mut cfg_cmd = Command::new("cmake");
     cfg_cmd
-        .args(&[
+        .args([
             &format!(
                 "-DCMAKE_INSTALL_PREFIX={}",
                 ykllvm_dir.as_os_str().to_str().unwrap()
@@ -114,23 +114,23 @@ fn main() {
 
     let mut build_cmd = Command::new("cmake");
     build_cmd
-        .args(&["--build", "."])
+        .args(["--build", "."])
         .current_dir(build_dir.as_os_str().to_str().unwrap());
 
     let mut inst_cmd = Command::new("cmake");
     inst_cmd
-        .args(&["--install", "."])
+        .args(["--install", "."])
         .current_dir(build_dir.as_os_str().to_str().unwrap());
 
     if let Ok(args) = env::var("YKB_YKLLVM_BUILD_ARGS") {
         // Caveat: this assumes no cmake argument contains a ',' or a ':'.
-        for arg in args.split(",") {
-            match arg.split(":").collect::<Vec<_>>()[..] {
+        for arg in args.split(',') {
+            match arg.split(':').collect::<Vec<_>>()[..] {
                 ["define", x] => {
-                    cfg_cmd.arg(x.to_owned());
+                    cfg_cmd.arg(x);
                 }
                 ["build_arg", x] => {
-                    build_cmd.arg(x.to_owned());
+                    build_cmd.arg(x);
                 }
                 ["generator", x] => {
                     generator = x.to_owned();
@@ -151,7 +151,7 @@ fn main() {
     );
 
     if generator == "Unix Makefiles" {
-        build_cmd.args(&["-j", num_cpus::get().to_string().as_str()]);
+        build_cmd.args(["-j", num_cpus::get().to_string().as_str()]);
     }
 
     cfg_cmd.status().unwrap().exit_ok().unwrap();

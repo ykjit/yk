@@ -6,6 +6,7 @@
 //! The sane solution is to have only one `cdylib` crate in our workspace (this crate) and all
 //! other crates are regular `rlibs`.
 
+#![allow(clippy::missing_safety_doc)]
 #![feature(c_variadic)]
 #![feature(naked_functions)]
 #![feature(lazy_cell)]
@@ -226,7 +227,7 @@ pub extern "C" fn __ykrt_reconstruct_frames(newframesptr: *const c_void) {
 /// variables, etc., in order to reconstruct the stack.
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
-pub extern "C" fn yk_stopgap(
+pub unsafe extern "C" fn yk_stopgap(
     stackmap: &CVec,
     aotvals: &LiveAOTVals,
     actframes: &CVec,
@@ -330,7 +331,7 @@ pub extern "C" fn yk_stopgap(
         }
     }
 
-    framerec.reconstruct_frames(frameaddr)
+    unsafe { framerec.reconstruct_frames(frameaddr) }
 }
 
 /// The `__llvm__deoptimize()` function required by `llvm.experimental.deoptimize` intrinsic, that
