@@ -9,7 +9,8 @@ use std::{
 };
 use tempfile::TempDir;
 
-/// Generate a clangd compilation databases to give LSP support for Yk's C/C++ code.
+/// Wrap C/C++ compiler commands to produce a `clangd` compilation database, enabling LSP support
+/// yor yk's C/C++ code.
 ///
 /// This provides a compiler wrapper which captures the compilation commands and a way to write
 /// them into a `compile_commands.json` file that can be used by clangd.
@@ -38,13 +39,13 @@ use tempfile::TempDir;
 /// CompileFlags:
 ///     CompilationDatabase: ../target/compile_commands/<db_subdir>/
 /// ```
-pub struct CCGenerator {
+pub struct CompletionWrapper {
     db_subdir: String,
     dir_field: String,
     tmpdir: TempDir,
 }
 
-impl CCGenerator {
+impl CompletionWrapper {
     /// Create a compiler commands database generator.
     ///
     ///  - `db_subdir` specifies the subdirectory of `target/compiler_commands/` to put the

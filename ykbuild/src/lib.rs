@@ -6,7 +6,7 @@ use std::{
     process::Command,
 };
 
-pub mod ccgen;
+pub mod completion_wrapper;
 
 fn manifest_dir() -> String {
     env::var("CARGO_MANIFEST_DIR").unwrap()

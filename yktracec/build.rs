@@ -2,7 +2,7 @@
 
 use rerun_except::rerun_except;
 use std::{env, process::Command};
-use ykbuild::{apply_llvm_ld_library_path, ccgen::CCGenerator, ykllvm_bin};
+use ykbuild::{apply_llvm_ld_library_path, completion_wrapper::CompletionWrapper, ykllvm_bin};
 
 fn main() {
     // Ensure changing C++ source files or headers retriggers a build.
@@ -48,7 +48,7 @@ fn main() {
     }
 
     // Generate a `compile_commands.json` database for clangd.
-    let ccg = CCGenerator::new("ykllvmwrap", &env::var("CARGO_MANIFEST_DIR").unwrap());
+    let ccg = CompletionWrapper::new("ykllvmwrap", &env::var("CARGO_MANIFEST_DIR").unwrap());
     env::set_var.call(ccg.build_env());
     env::set_var("YK_COMPILER_PATH", ykllvm_bin("clang++"));
     comp.compiler(ccg.wrapper_path());
