@@ -61,9 +61,9 @@ impl CompletionWrapper {
         }
     }
 
-    /// Return the path of the `compiler-wrapper`.
+    /// Return the path of the `completion-wrapper`.
     pub fn wrapper_path(&self) -> PathBuf {
-        [&manifest_dir(), "..", "ykbuild", "compiler-wrapper"]
+        [&manifest_dir(), "..", "ykbuild", "completion-wrapper"]
             .iter()
             .collect::<PathBuf>()
     }
