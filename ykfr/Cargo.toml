@@ -10,7 +10,7 @@ libc = "0.2.97"
 libffi = "3.0.0"
 ykutil = { path = "../ykutil" }
 yksmp = { path = "../yksmp" }
-memmap2 = "0.5.2"
+memmap2 = "0.6"
 
 [dependencies.llvm-sys]
 # note: using a git version to get llvm linkage features in llvm-sys (not in a
@@ -21,7 +21,7 @@ rev = "678b3da2b2239ae12766c964e6e613c0d82b5f37"
 features = ["no-llvm-linking"]
 
 [dependencies.object]
-version = "0.28.3"
+version = "0.31"
 default-features = false
 features = ["read_core", "elf"]
 

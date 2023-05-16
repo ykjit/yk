@@ -6,4 +6,4 @@ authors = ["The Yk Developers"]
 license = "Apache-2.0 OR MIT"
 
 [dependencies]
-object = "0.28.3"
+object = "0.31"
