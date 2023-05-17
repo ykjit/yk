@@ -6,11 +6,6 @@ use std::env;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
-#[cfg(decoder_libipt)]
-pub(crate) mod libipt;
-#[cfg(decoder_libipt)]
-use libipt::LibIPTTraceDecoder;
-
 #[cfg(decoder_ykpt)]
 mod ykpt;
 #[cfg(decoder_ykpt)]
@@ -20,7 +15,6 @@ use ykpt::YkPTTraceDecoder;
 #[repr(u8)]
 pub enum TraceDecoderKind {
     YkPT,
-    LibIPT,
 }
 
 impl TraceDecoderKind {
@@ -33,12 +27,6 @@ impl TraceDecoderKind {
     /// Returns `Ok` if the this decoder kind is appropriate for the current platform.
     fn match_platform(&self) -> Result<(), HWTracerError> {
         match self {
-            Self::LibIPT => {
-                #[cfg(decoder_libipt)]
-                return Ok(());
-                #[cfg(not(decoder_libipt))]
-                return Err(HWTracerError::DecoderUnavailable(Self::LibIPT));
-            }
             Self::YkPT => {
                 #[cfg(decoder_ykpt)]
                 return Ok(());
@@ -51,7 +39,6 @@ impl TraceDecoderKind {
     #[cfg(feature = "yk_testing")]
     fn from_str(name: &str) -> Self {
         match name {
-            "libipt" => Self::LibIPT,
             "ykpt" => Self::YkPT,
             _ => panic!(),
         }
@@ -102,12 +89,6 @@ impl TraceDecoderBuilder {
         }
         self.kind.match_platform()?;
         match self.kind {
-            TraceDecoderKind::LibIPT => {
-                #[cfg(decoder_libipt)]
-                return Ok(Box::new(LibIPTTraceDecoder::new()));
-                #[cfg(not(decoder_libipt))]
-                return Err(HWTracerError::DecoderUnavailable(self.kind));
-            }
             TraceDecoderKind::YkPT => {
                 #[cfg(decoder_ykpt)]
                 return Ok(Box::new(YkPTTraceDecoder::new()));
@@ -125,36 +106,7 @@ mod test_helpers {
     use crate::{
         collect::{test_helpers::trace_closure, TraceCollector},
         test_helpers::work_loop,
-        Block, Trace,
     };
-    use std::slice::Iter;
-
-    /// Helper to check an expected list of blocks matches what we actually got.
-    pub fn test_expected_blocks(
-        trace: Box<dyn Trace>,
-        decoder_kind: TraceDecoderKind,
-        mut expect_iter: Iter<Block>,
-    ) {
-        let dec = TraceDecoderBuilder::new()
-            .kind(decoder_kind)
-            .build()
-            .unwrap();
-        let mut got_iter = dec.iter_blocks(&*trace);
-        loop {
-            let expect = expect_iter.next();
-            let got = got_iter.next();
-            if expect.is_none() || got.is_none() {
-                break;
-            }
-            assert_eq!(
-                got.unwrap().unwrap().vaddr_range().unwrap().0,
-                expect.unwrap().vaddr_range().unwrap().0
-            );
-        }
-        // Check that both iterators were the same length.
-        assert!(expect_iter.next().is_none());
-        assert!(got_iter.next().is_none());
-    }
 
     /// Trace two loops, one 10x larger than the other, then check the proportions match the number
     /// of block the trace passes through.

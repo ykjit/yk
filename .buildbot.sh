@@ -72,10 +72,6 @@ for i in $(seq 10); do
     RUST_TEST_SHUFFLE=1 cargo test
 done
 
-# Run examples.
-cargo run --example hwtracer_example
-
-
 # We now want to test building with `--release`, which we also take as an
 # opportunity to check that yk can build ykllvm, which requires unsetting
 # YKB_YKLLVM_BIN_DIR. In essence, we now repeat much of what we did above but
@@ -90,7 +86,5 @@ cargo build --release -p ykcapi
 for i in $(seq 10); do
     RUST_TEST_SHUFFLE=1 cargo test --release
 done
-
-cargo run --release --example hwtracer_example
 
 cargo bench

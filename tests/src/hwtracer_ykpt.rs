@@ -16,7 +16,6 @@ use hwtracer::{
     collect::{TraceCollector, TraceCollectorBuilder, TraceCollectorKind},
     Trace,
 };
-use yktrace::hwt::HWTMapper;
 
 #[no_mangle]
 pub extern "C" fn __hwykpt_start_collector() -> *mut TraceCollector {
@@ -35,42 +34,6 @@ pub extern "C" fn __hwykpt_stop_collector(tc: *mut TraceCollector) -> *mut Box<d
     // We have to return a double-boxed trait object, as the inner Box is a fat pointer that
     // can't be passed across the C ABI.
     Box::into_raw(Box::new(trace))
-}
-
-/// Check that the result of mapping `trace` with libipt and ykpt is the same.
-#[no_mangle]
-pub extern "C" fn __hwykpt_libipt_vs_ykpt(trace: *mut Box<dyn Trace>) {
-    let trace: Box<Box<dyn Trace>> = unsafe { Box::from_raw(trace) };
-
-    let ipt_tdec = TraceDecoderBuilder::new()
-        .kind(TraceDecoderKind::LibIPT)
-        .build()
-        .unwrap();
-    let mut ipt_itr = ipt_tdec.iter_blocks(&**trace);
-    let mut ipt_mapper = HWTMapper::new();
-    let ipt_irblocks = ipt_mapper.map_trace(&mut ipt_itr).unwrap();
-    let mut ipt_irb_itr = ipt_irblocks.iter();
-
-    let ykpt_tdec = TraceDecoderBuilder::new()
-        .kind(TraceDecoderKind::YkPT)
-        .build()
-        .unwrap();
-    let mut ykpt_itr = ykpt_tdec.iter_blocks(&**trace);
-    let mut ykpt_mapper = HWTMapper::new();
-    let ykpt_irblocks = ykpt_mapper.map_trace(&mut ykpt_itr).unwrap();
-    let mut ykpt_irb_itr = ykpt_irblocks.iter();
-
-    loop {
-        let next = ipt_irb_itr.next();
-        if next.is_none() {
-            break;
-        }
-        let expect = next.unwrap();
-
-        let got = ykpt_irb_itr.next().unwrap();
-        assert_eq!(expect, got);
-    }
-    assert!(ykpt_irb_itr.next().is_none());
 }
 
 /// Decode the specified trace and iterate over the resulting blocks.

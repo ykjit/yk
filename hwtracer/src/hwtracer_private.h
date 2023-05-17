@@ -9,8 +9,10 @@ enum hwt_cerror_kind {
   hwt_cerror_unused,
   hwt_cerror_unknown,
   hwt_cerror_errno,
-  hwt_cerror_ipt,
+  hwt_cerror_pt,
 };
+
+#define PT_ERROR_OVERFLOW 0
 
 struct hwt_cerror {
   enum hwt_cerror_kind kind; // What sort of error is this?
