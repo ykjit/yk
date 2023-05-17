@@ -11,7 +11,7 @@ use std::{
 };
 use tempfile::TempDir;
 use tests::{mk_compiler, EXTRA_LINK};
-use ykbuild::{ccgen::CCGenerator, ykllvm_bin};
+use ykbuild::{completion_wrapper::CompletionWrapper, ykllvm_bin};
 
 const COMMENT: &str = "//";
 
@@ -48,7 +48,7 @@ fn run_suite(opt: &'static str, force_decoder: &'static str) {
     let tempdir = TempDir::new().unwrap();
 
     // Generate a `compile_commands.json` database for clangd.
-    let ccg = CCGenerator::new("c_tests", &env::var("CARGO_MANIFEST_DIR").unwrap());
+    let ccg = CompletionWrapper::new("c_tests", &env::var("CARGO_MANIFEST_DIR").unwrap());
     let wrapper_path = ccg.wrapper_path().to_owned();
     env::set_var.call(ccg.build_env());
     env::set_var("YK_COMPILER_PATH", ykllvm_bin("clang"));

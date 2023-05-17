@@ -7,7 +7,7 @@ use std::fs;
 use std::os::unix::fs as unix_fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use ykbuild::{ccgen::CCGenerator, ykllvm_bin};
+use ykbuild::{completion_wrapper::CompletionWrapper, ykllvm_bin};
 
 const FEATURE_CHECKS_PATH: &str = "feature_checks";
 
@@ -99,7 +99,7 @@ fn main() {
     let mut c_build = cc::Build::new();
 
     // Generate a `compile_commands.json` database for clangd.
-    let ccg = CCGenerator::new("hwtracer", &env::var("CARGO_MANIFEST_DIR").unwrap());
+    let ccg = CompletionWrapper::new("hwtracer", &env::var("CARGO_MANIFEST_DIR").unwrap());
     env::set_var.call(ccg.build_env());
     env::set_var("YK_COMPILER_PATH", ykllvm_bin("clang"));
     c_build.compiler(ccg.wrapper_path());

@@ -1,50 +1,46 @@
 //! Generate compilation command databases for use with clangd.
 
-use crate::manifest_dir;
+use crate::target_dir;
 use glob::glob;
 use std::{
+    env,
     fs::{create_dir_all, File},
     io::{Read, Write},
     path::{Path, PathBuf},
 };
 use tempfile::TempDir;
 
-/// Generate a clangd compilation databases to give LSP support for Yk's C/C++ code.
+/// Wrap C/C++ compiler commands to help LSP. At the moment this produces output suitable for
+/// [clangd](https://clangd.llvm.org/) into (typically)
+/// `target/<debug|release>/clangd/<crate-name>/compile_commands.json`.
 ///
-/// This provides a compiler wrapper which captures the compilation commands and a way to write
-/// them into a `compile_commands.json` file that can be used by clangd.
-///
-/// This only exists in part due to:
-/// https://github.com/rust-lang/cc-rs/issues/497
-///
-/// but also so that we can use clangd on our lang_tester suites.
+/// It works by providing a compiler wrapper which is called in lieu of the compiler: it captures
+/// full compiler command-line invocations, writes them to a temporary directory, then joins them
+/// together.
 ///
 /// Steps for use:
-///
-/// - Call `CCGenerator::new()` with the desired parameters.
-///
+/// - Call `CompletionWrapper::new()` with the desired parameters.
 /// - Compile your C/C++ code with the compiler wrapper returned by `CCGenerator::wrapper_path()`
 ///   with the environment returned by `CCGenerator::build_env()` applied. Note that the source
 ///   file to be compiled MUST be the last argument of the compiler invocation!
-///
 /// - Once all compilation is complete, the consumer can generate the JSON file by calling
 ///   `generate()`.
 ///
 /// By default `clangd` will only search parent directories of source files for databases, so it
 /// will not find the generated databases in the Rust `target` directory. You will need to
-/// strategically place `.clangd` configuration files like the following:
+/// place a `.clangd` file in each yk crate:
 ///
 /// ```ignore
 /// CompileFlags:
-///     CompilationDatabase: ../target/compile_commands/<db_subdir>/
+///     CompilationDatabase: ../target/<debug|release>/clangd/<crate-name>/
 /// ```
-pub struct CCGenerator {
+pub struct CompletionWrapper {
     db_subdir: String,
     dir_field: String,
     tmpdir: TempDir,
 }
 
-impl CCGenerator {
+impl CompletionWrapper {
     /// Create a compiler commands database generator.
     ///
     ///  - `db_subdir` specifies the subdirectory of `target/compiler_commands/` to put the
@@ -60,11 +56,15 @@ impl CCGenerator {
         }
     }
 
-    /// Return the path of the `compiler-wrapper`.
+    /// Return the path of the `completion-wrapper`.
     pub fn wrapper_path(&self) -> PathBuf {
-        [&manifest_dir(), "..", "ykbuild", "compiler-wrapper"]
-            .iter()
-            .collect::<PathBuf>()
+        let mut p = Path::new(&env::var("CARGO_MANIFEST_DIR").unwrap())
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        p.push("ykbuild");
+        p.push("completion-wrapper");
+        p
     }
 
     /// Returns the key and value that must be applied to the wrapped compiler's environment.
@@ -72,7 +72,7 @@ impl CCGenerator {
         ("YK_COMPILER_TEMPDIR", self.tmpdir.path().to_str().unwrap())
     }
 
-    /// Call when the build is done to generate the `build_commands.json` file.
+    /// Call when the build is done to generate the `compile_commands.json` file.
     pub fn generate(self) {
         let mut entries = Vec::new();
 
@@ -96,24 +96,15 @@ impl CCGenerator {
             entries.push(entry);
         }
 
-        let out_dir = [
-            &manifest_dir(),
-            "..",
-            "target",
-            "compile_commands",
-            &self.db_subdir,
-        ]
-        .iter()
-        .collect::<PathBuf>();
-        create_dir_all(out_dir.clone()).unwrap();
-
-        // Write JSON to Rust target dir.
-        let outpath = [&out_dir, Path::new("compile_commands.json")]
-            .iter()
-            .collect::<PathBuf>();
-        let mut outfile = File::create(outpath).unwrap();
-        writeln!(outfile, "[").unwrap();
-        write!(outfile, "{}", entries.join(",\n")).unwrap();
-        write!(outfile, "\n]\n").unwrap();
+        // Write JSON to compile_commands.json.
+        let mut p = target_dir();
+        p.push("clangd");
+        p.push(&self.db_subdir);
+        create_dir_all(p.clone()).unwrap();
+        p.push("compile_commands.json");
+        let mut f = File::create(p).unwrap();
+        writeln!(f, "[").unwrap();
+        write!(f, "{}", entries.join(",\n")).unwrap();
+        write!(f, "\n]\n").unwrap();
     }
 }
