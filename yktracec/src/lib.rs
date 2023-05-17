@@ -1,12 +1,16 @@
 // Exporting parts of the LLVM C++ API not present in the LLVM C API.
 
 #![allow(clippy::new_without_default)]
+#![feature(local_key_cell_methods)]
+#![feature(c_variadic)]
 
 // FIXME: C++ exceptions may unwind over the Rust FFI?
 // https://github.com/ykjit/yk/issues/426
 
 use libc::{c_void, size_t};
 use std::ffi::{c_char, c_int};
+
+pub mod promote;
 
 extern "C" {
     pub fn __yktracec_irtrace_compile(
