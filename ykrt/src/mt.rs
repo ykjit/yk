@@ -27,6 +27,7 @@ use crate::{
     location::{HotLocation, HotLocationKind, Location},
     trace::{default_tracer_for_platform, CompiledTrace, ThreadTracer, Tracer, UnmappedTrace},
 };
+use yktracec::promote;
 
 // The HotThreshold must be less than a machine word wide for [`Location::Location`] to do its
 // pointer tagging thing. We therefore choose a type which makes this statically clear to
@@ -175,12 +176,14 @@ impl MT {
                 let tracer = Arc::clone(&self.tracer);
                 match Arc::clone(&tracer).start_collector() {
                     Ok(tt) => THREAD_MTTHREAD.with(|mtt| {
+                        promote::thread_record_enable(true);
                         *mtt.thread_tracer.borrow_mut() = Some((tracer, tt));
                     }),
                     Err(e) => todo!("{e:?}"),
                 }
             }
             TransitionLocation::StopTracing(x) => {
+                promote::thread_record_enable(false);
                 // Assuming no bugs elsewhere, the `unwrap` cannot fail, because `StartTracing`
                 // will have put a `Some` in the `Rc`.
                 let (trcr, thrdtrcr) =

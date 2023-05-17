@@ -14,6 +14,7 @@ parking_lot = "0.12.0"
 parking_lot_core = "0.9.1"
 tempfile = "3.3.0"
 yksmp = { path = "../yksmp" }
+strum = { version = "0.24.0", features = ["derive"] }
 yktracec = { path = "../yktracec" }
 ykutil = { path = "../ykutil" }
 

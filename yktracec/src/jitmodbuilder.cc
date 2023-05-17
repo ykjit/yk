@@ -19,6 +19,9 @@
 using namespace llvm;
 using namespace std;
 
+extern "C" uint64_t __yk_lookup_promote_usize(const char *func_name,
+                                              size_t arg_idx);
+
 // An atomic counter used to issue compiled traces with unique names.
 atomic<uint64_t> NextTraceIdx(0);
 uint64_t getNewTraceIdx() {
@@ -27,6 +30,8 @@ uint64_t getNewTraceIdx() {
   return TraceIdx;
 }
 
+// FIXME: A lot of these #defines should be C++ consts, then the compiler can
+// tell us if they are unused.
 #define TRACE_FUNC_PREFIX "__yk_compiled_trace_"
 #define YK_NEW_CONTROL_POINT "__ykrt_control_point"
 #define YK_CONTROL_POINT_ARG_VARS_IDX 2
@@ -38,6 +43,10 @@ uint64_t getNewTraceIdx() {
 #define JITFUNC_ARG_STACKMAP_LEN_IDX 2
 #define JITFUNC_ARG_FRAMEADDR_IDX 3
 #define JITFUNC_ARG_LIVEAOTVALS_PTR_IDX 4
+
+const char *PromoteRecFnName = "__yk_record_promote_usize";
+const unsigned PromoteRecFnFuncNameIdx = 0;
+const unsigned PromoteRecFnNumPromotesIdx = 1;
 
 #define YK_OUTLINE_FNATTR "yk_outline"
 
@@ -878,7 +887,11 @@ class JITModBuilder {
         }
         if (VMap.find(Arg) != VMap.end()) {
           Value *JITArg = VMap[Arg];
-          LiveValues.push_back(JITArg);
+          if (isa<Constant>(JITArg)) {
+            LiveValues.push_back(PromoteMap.at(Arg));
+          } else {
+            LiveValues.push_back(JITArg);
+          }
         }
       }
 
@@ -1427,6 +1440,10 @@ public:
   // live JIT values.
   AOTInfo *LiveAOTArray = nullptr;
   size_t LiveAOTNum = 0;
+  // FIXME: try to get rid of PromoteMap by allowing the VMap to handle
+  // constants, and passing the original pre-promoted value to
+  // getGuardFailureBlock() when building the value guard.
+  std::map<Value *, Value *> PromoteMap;
 
   JITModBuilder(JITModBuilder &&);
 
@@ -1732,6 +1749,10 @@ public:
             }
             CallStack.pushFrame(StackFrame::CreateForeignFrame());
             break;
+          } else if (CF->getName() == PromoteRecFnName) {
+            // Variables are being promoted to a constants.
+            handlePromote(CI, MPF, BB, CurBBIdx, CurInstrIdx);
+            break;
           } else {
             StringRef S = CF->getName();
             if (S == "_setjmp" || S == "_longjmp") {
@@ -1900,6 +1921,63 @@ public:
     }
     finalise(AOTMod, &Builder);
     return JITMod;
+  }
+
+  /// Handle promoted variables.
+  void handlePromote(CallInst *CI, MappableFrame *MPF, BasicBlock *BB,
+                     size_t CurBBIdx, size_t CurInstrIdx) {
+    // First lookup the constant value the trace is going to use.
+    GlobalVariable *PFuncNameGV =
+        cast<GlobalVariable>(CI->getArgOperand(PromoteRecFnFuncNameIdx));
+    assert(PFuncNameGV->isConstant());
+    const char *PFuncName =
+        cast<ConstantDataArray>(PFuncNameGV->getInitializer())
+            ->getAsString()
+            .data();
+
+    size_t NumPromotes =
+        cast<ConstantInt>(CI->getArgOperand(PromoteRecFnNumPromotesIdx))
+            ->getZExtValue();
+
+    for (unsigned PI = 0; PI < NumPromotes; PI++) {
+      size_t PArgIdx =
+          cast<ConstantInt>(
+              CI->getArgOperand(PromoteRecFnNumPromotesIdx + PI * 2 + 1))
+              ->getZExtValue();
+      uint64_t PConst = __yk_lookup_promote_usize(PFuncName, PArgIdx);
+      // FIXME: hard-coded 64
+      Value *PConstLL = Builder.getInt64(PConst);
+      Value *PromoteVar =
+          CI->getArgOperand(PromoteRecFnNumPromotesIdx + PI * 2 + 2);
+      Value *JITPromoteVar = getMappedValue(PromoteVar);
+
+      // Now emit a guard for the value, so that we deoptimise if the
+      // value ever changes.
+      MPF->LastSMCall = cast<CallInst>(CI->getNextNonDebugInstruction());
+
+      PromoteMap.insert({PromoteVar, JITPromoteVar});
+
+      BasicBlock *FailBB = getGuardFailureBlock(BB, CurBBIdx, CI, CurInstrIdx);
+      BasicBlock *SuccBB = BasicBlock::Create(
+          JITMod->getContext(), GUARD_SUCCESS_BLOCK_NAME, JITFunc);
+      Value *Deopt = Builder.CreateICmp(CmpInst::Predicate::ICMP_NE,
+                                        JITPromoteVar, PConstLL);
+      Builder.CreateCondBr(Deopt, FailBB, SuccBB);
+
+      // Carry on constructing the trace module in the success block.
+      Builder.SetInsertPoint(SuccBB);
+
+      // Update the VMap so that henceforth, the promoted variable is in
+      // fact a constant.
+      VMap[PromoteVar] = PConstLL;
+    }
+
+    // We will have traced the constant recorder. We don't want that in
+    // the trace so a) we don't copy the call, and b) we enter
+    // outlining mode.
+    MPF->setResume(CurBBIdx, &*CI, CurInstrIdx);
+    startOutlining();
+    CallStack.pushFrame(StackFrame::CreateForeignFrame());
   }
 };
 

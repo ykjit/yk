@@ -27,6 +27,7 @@ regex = "1.5.4"
 tempfile = "3.3.0"
 ykbuild = { path = "../ykbuild" }
 ykrt = { path = "../ykrt", features = ["yk_testing", "yk_jitstate_debug"] }
+yktracec = { path = "../yktracec", features = ["yk_testing"] }
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["html_reports"] }
@@ -41,4 +42,8 @@ ykbuild = { path = "../ykbuild" }
 
 [[bench]]
 name = "bench"
+harness = false
+
+[[bench]]
+name = "promote"
 harness = false
