@@ -1,6 +1,6 @@
 //! Generate compilation command databases for use with clangd.
 
-use crate::target_dir;
+use crate::{target_dir, ykllvm_bin};
 use glob::glob;
 use std::{
     env,
@@ -10,7 +10,7 @@ use std::{
 };
 use tempfile::TempDir;
 
-/// Wrap C/C++ compiler commands to help LSP. At the moment this produces output suitable for
+/// Wrap C compiler commands to help LSP. At the moment this produces output suitable for
 /// [clangd](https://clangd.llvm.org/) into (typically)
 /// `target/<debug|release>/clangd/<crate-name>/compile_commands.json`.
 ///
@@ -67,9 +67,21 @@ impl CompletionWrapper {
         p
     }
 
-    /// Returns the key and value that must be applied to the wrapped compiler's environment.
-    pub fn build_env(&self) -> (&str, &str) {
-        ("YK_COMPILER_TEMPDIR", self.tmpdir.path().to_str().unwrap())
+    /// Returns a [Vec] of `(key, value)` pairs that define environment variables necessary for the
+    /// wrapper compiler's environment.
+    ///
+    /// Note that this currently hardcodes the wrapped compiler to `clang`.
+    pub fn build_env(&self) -> Vec<(&str, String)> {
+        vec![
+            (
+                "YK_COMPILER_TEMPDIR",
+                self.tmpdir.path().to_str().unwrap().to_owned(),
+            ),
+            (
+                "YK_COMPILER_PATH",
+                ykllvm_bin("clang").as_os_str().to_str().unwrap().to_owned(),
+            ),
+        ]
     }
 
     /// Call when the build is done to generate the `compile_commands.json` file.

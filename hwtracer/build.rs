@@ -3,7 +3,7 @@
 use rerun_except::rerun_except;
 use std::env;
 use std::path::PathBuf;
-use ykbuild::{completion_wrapper::CompletionWrapper, ykllvm_bin};
+use ykbuild::completion_wrapper::CompletionWrapper;
 
 const FEATURE_CHECKS_PATH: &str = "feature_checks";
 
@@ -24,8 +24,9 @@ fn main() {
 
     // Generate a `compile_commands.json` database for clangd.
     let ccg = CompletionWrapper::new("hwtracer", &env::var("CARGO_MANIFEST_DIR").unwrap());
-    env::set_var.call(ccg.build_env());
-    env::set_var("YK_COMPILER_PATH", ykllvm_bin("clang"));
+    for (k, v) in ccg.build_env() {
+        env::set_var(k, v);
+    }
     c_build.compiler(ccg.wrapper_path());
 
     // Check if we should build the perf collector.
