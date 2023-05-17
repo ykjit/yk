@@ -106,7 +106,7 @@ fn main() {
             "-DLLVM_ENABLE_ASSERTIONS=On",
             #[cfg(not(debug_assertions))]
             "-DLLVM_ENABLE_ASSERTIONS=Off",
-            "-DLLVM_ENABLE_PROJECTS=lld;clang",
+            "-DLLVM_ENABLE_PROJECTS=lld;clang;clang-tools-extra",
             // We have to turn off PIE due to: https://github.com/llvm/llvm-project/issues/57085
             "-DCLANG_DEFAULT_PIE_ON_LINUX=OFF",
             "-DBUILD_SHARED_LIBS=ON",
