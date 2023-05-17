@@ -285,8 +285,13 @@ impl FrameReconstructor {
                 // written to the allocated memory. Other locations we haven't encountered yet, so
                 // will deal with them as they appear.
                 match l {
-                    SMLocation::Register(reg, _size, off) => {
+                    SMLocation::Register(reg, _size, off, extra) => {
                         registers[usize::from(*reg)] = val;
+                        if *extra != 0 {
+                            // The stackmap has recorded an additional register we need to write
+                            // this value to.
+                            registers[usize::try_from(*extra - 1).unwrap()] = val;
+                        }
                         if i == 0 {
                             // skip first frame
                             continue;
