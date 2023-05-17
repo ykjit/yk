@@ -6,3 +6,4 @@ license = "Apache-2.0 OR MIT"
 
 [dependencies]
 walkdir = "2.3.2"
+ykbuild = { path = "../ykbuild" }

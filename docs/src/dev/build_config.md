@@ -40,4 +40,6 @@ workspace will enable the feature (to build *without* the feature enabled, do
 
 The `yk` build system generates compilation command databases for use with
 clangd. If you want diagnostics and/or completion in your editor (via an LSP),
-make sure you have a `clangd` in `$PATH`.
+you will have to configure the LSP to use `clangd` (the automated build system
+puts a `clangd` binary into `target/<debug|release>/ykllvm/bin` that you could
+use).
