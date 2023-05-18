@@ -3,7 +3,7 @@
 use rerun_except::rerun_except;
 use std::env;
 use std::path::PathBuf;
-use ykbuild::completion_wrapper::CompletionWrapper;
+use ykbuild::{completion_wrapper::CompletionWrapper, ykllvm_bin};
 
 const FEATURE_CHECKS_PATH: &str = "feature_checks";
 
@@ -23,7 +23,7 @@ fn main() {
     let mut c_build = cc::Build::new();
 
     // Generate a `compile_commands.json` database for clangd.
-    let ccg = CompletionWrapper::new("hwtracer");
+    let ccg = CompletionWrapper::new(ykllvm_bin("clang"), "hwtracer");
     for (k, v) in ccg.build_env() {
         env::set_var(k, v);
     }

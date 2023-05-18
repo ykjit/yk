@@ -1,6 +1,6 @@
 //! Generate compilation command databases for use with clangd.
 
-use crate::{target_dir, ykllvm_bin};
+use crate::target_dir;
 use glob::glob;
 use std::{
     env,
@@ -35,6 +35,7 @@ use tempfile::TempDir;
 ///     CompilationDatabase: ../target/<debug|release>/clangd/<crate-name>/
 /// ```
 pub struct CompletionWrapper {
+    compiler: PathBuf,
     db_subdir: String,
     tmpdir: TempDir,
 }
@@ -42,10 +43,13 @@ pub struct CompletionWrapper {
 impl CompletionWrapper {
     /// Create a compiler commands database generator.
     ///
+    ///  - `compiler` is the path to the compiler to be wrapped.
+    ///
     ///  - `db_subdir` specifies the subdirectory of `target/compiler_commands/` to put the
     ///    generated JSON file into.
-    pub fn new(db_subdir: &str) -> Self {
+    pub fn new(compiler: PathBuf, db_subdir: &str) -> Self {
         Self {
+            compiler,
             db_subdir: db_subdir.to_owned(),
             tmpdir: TempDir::new().unwrap(),
         }
@@ -64,8 +68,6 @@ impl CompletionWrapper {
 
     /// Returns a [Vec] of `(key, value)` pairs that define environment variables necessary for the
     /// wrapper compiler's environment.
-    ///
-    /// Note that this currently hardcodes the wrapped compiler to `clang`.
     pub fn build_env(&self) -> Vec<(&str, String)> {
         vec![
             (
@@ -74,7 +76,7 @@ impl CompletionWrapper {
             ),
             (
                 "YK_COMPILER_PATH",
-                ykllvm_bin("clang").as_os_str().to_str().unwrap().to_owned(),
+                self.compiler.as_os_str().to_str().unwrap().to_owned(),
             ),
         ]
     }
