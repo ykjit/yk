@@ -48,7 +48,7 @@ fn run_suite(opt: &'static str, force_decoder: &'static str) {
     let tempdir = TempDir::new().unwrap();
 
     // Generate a `compile_commands.json` database for clangd.
-    let ccg = CompletionWrapper::new("c_tests");
+    let ccg = CompletionWrapper::new(ykllvm_bin("clang"), "c_tests");
     for (k, v) in ccg.build_env() {
         env::set_var(k, v);
     }
