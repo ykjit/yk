@@ -23,7 +23,7 @@ fn main() {
     let mut c_build = cc::Build::new();
 
     // Generate a `compile_commands.json` database for clangd.
-    let ccg = CompletionWrapper::new("hwtracer", &env::var("CARGO_MANIFEST_DIR").unwrap());
+    let ccg = CompletionWrapper::new("hwtracer");
     for (k, v) in ccg.build_env() {
         env::set_var(k, v);
     }
