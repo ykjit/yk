@@ -49,8 +49,9 @@ fn main() {
 
     // Generate a `compile_commands.json` database for clangd.
     let ccg = CompletionWrapper::new("ykllvmwrap", &env::var("CARGO_MANIFEST_DIR").unwrap());
-    env::set_var.call(ccg.build_env());
-    env::set_var("YK_COMPILER_PATH", ykllvm_bin("clang++"));
+    for (k, v) in ccg.build_env() {
+        env::set_var(k, v);
+    }
     comp.compiler(ccg.wrapper_path());
 
     // Actually do the compilation.
