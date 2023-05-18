@@ -36,7 +36,6 @@ use tempfile::TempDir;
 /// ```
 pub struct CompletionWrapper {
     db_subdir: String,
-    dir_field: String,
     tmpdir: TempDir,
 }
 
@@ -45,13 +44,9 @@ impl CompletionWrapper {
     ///
     ///  - `db_subdir` specifies the subdirectory of `target/compiler_commands/` to put the
     ///    generated JSON file into.
-    ///
-    ///  - `dir_field` specifies the string to use for the `directory` fields inside the generated
-    ///    JSON file. See: https://clang.llvm.org/docs/JSONCompilationDatabase.html
-    pub fn new(db_subdir: &str, dir_field: &str) -> Self {
+    pub fn new(db_subdir: &str) -> Self {
         Self {
             db_subdir: db_subdir.to_owned(),
-            dir_field: dir_field.to_owned(),
             tmpdir: TempDir::new().unwrap(),
         }
     }
@@ -101,7 +96,10 @@ impl CompletionWrapper {
                 .any(|e| e == &Path::new(ccfile).extension().unwrap().to_str().unwrap()));
             let mut entry = String::new();
             entry.push_str("  {\n");
-            entry.push_str(&format!("    \"directory\": \"{}\",\n", self.dir_field));
+            entry.push_str(&format!(
+                "    \"directory\": \"{}\",\n",
+                env::var("CARGO_MANIFEST_DIR").unwrap()
+            ));
             entry.push_str(&format!("    \"command\": \"{buf}\",\n"));
             entry.push_str(&format!("    \"file\": \"{ccfile}\",\n"));
             entry.push_str("  }");
