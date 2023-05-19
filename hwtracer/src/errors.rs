@@ -1,4 +1,3 @@
-use crate::{collect::TraceCollectorKind, decode::TraceDecoderKind};
 use libc::{c_int, strerror};
 use std::error::Error;
 use std::ffi::{self, CStr};
@@ -12,10 +11,6 @@ pub enum HWTracerError {
     HWBufferOverflow,
     /// The hardware doesn't support a required feature.
     NoHWSupport(String),
-    /// This collector was not compiled in to hwtracer.
-    CollectorUnavailable(TraceCollectorKind),
-    /// This decoder was not compiled into hwtracer.
-    DecoderUnavailable(TraceDecoderKind),
     /// Permission denied.
     Permissions(String),
     /// Something went wrong in C code.
@@ -44,12 +39,6 @@ impl Display for HWTracerError {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match *self {
             HWTracerError::HWBufferOverflow => write!(f, "Hardware trace buffer overflow"),
-            HWTracerError::CollectorUnavailable(ref s) => {
-                write!(f, "Trace collector unavailble: {:?}", s)
-            }
-            HWTracerError::DecoderUnavailable(ref s) => {
-                write!(f, "Trace decoder unavailble: {:?}", s)
-            }
             HWTracerError::NoHWSupport(ref s) => write!(f, "{}", s),
             HWTracerError::Permissions(ref s) => write!(f, "{}", s),
             HWTracerError::Errno(n) => {
@@ -80,8 +69,6 @@ impl Error for HWTracerError {
     fn cause(&self) -> Option<&dyn Error> {
         match *self {
             HWTracerError::HWBufferOverflow => None,
-            HWTracerError::CollectorUnavailable(_) => None,
-            HWTracerError::DecoderUnavailable(_) => None,
             HWTracerError::NoHWSupport(_) => None,
             HWTracerError::Permissions(_) => None,
             HWTracerError::AlreadyCollecting => None,

@@ -3,7 +3,7 @@
 use super::{IRTrace, ThreadTracer, ThreadTracerImpl, UnmappedTrace};
 use crate::errors::InvalidTraceError;
 use hwtracer::{
-    collect::{TraceCollector, TraceCollectorBuilder},
+    collect::TraceCollector,
     decode::{TraceDecoderBuilder, TraceDecoderKind},
 };
 use std::sync::LazyLock;
@@ -13,7 +13,7 @@ pub use mapper::HWTMapper;
 
 static TRACE_COLLECTOR: LazyLock<TraceCollector> = LazyLock::new(|| {
     // FIXME: This just makes a default trace collector. We should allow configuration somehow.
-    TraceCollectorBuilder::new().build().unwrap()
+    TraceCollector::default_for_platform().unwrap()
 });
 
 /// Hardware thread tracer.

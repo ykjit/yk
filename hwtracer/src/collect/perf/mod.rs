@@ -235,19 +235,13 @@ impl Drop for PerfTrace {
 mod tests {
     use super::{PerfCollectorConfig, PerfThreadTraceCollector};
     use crate::{
-        collect::{
-            test_helpers, ThreadTraceCollector, TraceCollector, TraceCollectorBuilder,
-            TraceCollectorConfig, TraceCollectorKind,
-        },
+        collect::{perf::PerfTraceCollector, test_helpers, ThreadTraceCollector, TraceCollector},
         errors::HWTracerError,
         test_helpers::work_loop,
     };
 
     fn mk_collector() -> TraceCollector {
-        TraceCollectorBuilder::new()
-            .kind(TraceCollectorKind::Perf)
-            .build()
-            .unwrap()
+        TraceCollector::default_for_platform().unwrap()
     }
 
     #[test]
@@ -318,13 +312,13 @@ mod tests {
     /// Check that an invalid data buffer size causes an error.
     #[test]
     fn test_config_bad_data_bufsize() {
-        let mut bldr = TraceCollectorBuilder::new().kind(TraceCollectorKind::Perf);
-        match bldr.config() {
-            TraceCollectorConfig::Perf(ref mut ppt_conf) => ppt_conf.data_bufsize = 3,
-        }
-        match bldr.build() {
-            Err(HWTracerError::BadConfig(s)) => {
-                assert_eq!(s, "data_bufsize must be a positive power of 2");
+        let mut cfg = PerfCollectorConfig::default();
+        cfg.data_bufsize = 3;
+        match PerfTraceCollector::new(cfg) {
+            Err(HWTracerError::BadConfig(s))
+                if s == "data_bufsize must be a positive power of 2" =>
+            {
+                ()
             }
             _ => panic!(),
         }
@@ -333,13 +327,13 @@ mod tests {
     /// Check that an invalid aux buffer size causes an error.
     #[test]
     fn test_config_bad_aux_bufsize() {
-        let mut bldr = TraceCollectorBuilder::new().kind(TraceCollectorKind::Perf);
-        match bldr.config() {
-            TraceCollectorConfig::Perf(ref mut ppt_conf) => ppt_conf.aux_bufsize = 3,
-        }
-        match bldr.build() {
-            Err(HWTracerError::BadConfig(s)) => {
-                assert_eq!(s, "aux_bufsize must be a positive power of 2");
+        let mut cfg = PerfCollectorConfig::default();
+        cfg.aux_bufsize = 3;
+        match PerfTraceCollector::new(cfg) {
+            Err(HWTracerError::BadConfig(s))
+                if s == "aux_bufsize must be a positive power of 2" =>
+            {
+                ()
             }
             _ => panic!(),
         }

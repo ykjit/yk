@@ -4,8 +4,6 @@ use crate::{errors::HWTracerError, Trace};
 use core::arch::x86_64::__cpuid_count;
 use libc::{size_t, sysconf, _SC_PAGESIZE};
 use std::{cell::RefCell, convert::TryFrom, sync::LazyLock};
-use strum::IntoEnumIterator;
-use strum_macros::EnumIter;
 
 #[cfg(collector_perf)]
 pub(crate) mod perf;
@@ -31,7 +29,7 @@ thread_local! {
 }
 
 /// The private innards of a `TraceCollector`.
-pub(crate) trait TraceCollectorImpl: Send + Sync {
+pub trait TraceCollectorImpl: Send + Sync {
     unsafe fn thread_collector(&self) -> Box<dyn ThreadTraceCollector>;
 }
 
@@ -41,8 +39,19 @@ pub struct TraceCollector {
 }
 
 impl TraceCollector {
-    pub(crate) fn new(col_impl: Box<dyn TraceCollectorImpl>) -> Self {
+    #[cfg(debug_assertions)]
+    pub fn new(col_impl: Box<dyn TraceCollectorImpl>) -> Self {
         Self { col_impl }
+    }
+
+    pub fn default_for_platform() -> Result<Self, HWTracerError> {
+        if pt_supported() {
+            Ok(Self {
+                col_impl: Box::new(PerfTraceCollector::new(PerfCollectorConfig::default())?),
+            })
+        } else {
+            todo!();
+        }
     }
 
     /// Start collecting a trace of the current thread.
@@ -76,7 +85,7 @@ impl TraceCollector {
 }
 
 /// Represents a trace collection session for a single thread.
-pub(crate) trait ThreadTraceCollector {
+pub trait ThreadTraceCollector {
     /// Start recording a trace.
     ///
     /// Tracing continues until [stop_collector] is called.
@@ -85,51 +94,6 @@ pub(crate) trait ThreadTraceCollector {
     ///
     /// Tracing continues until [stop_collector] is called.
     fn stop_collector(&mut self) -> Result<Box<dyn Trace>, HWTracerError>;
-}
-
-/// Kinds of collector that hwtracer supports (in order of "auto-selection preference").
-#[derive(Debug, EnumIter)]
-pub enum TraceCollectorKind {
-    /// The `perf` subsystem, as found on Linux.
-    Perf,
-}
-
-impl TraceCollectorKind {
-    /// Finds a suitable `TraceCollectorKind` for the current hardware/OS.
-    fn default_for_platform() -> Option<Self> {
-        TraceCollectorKind::iter().find(|kind| Self::match_platform(kind).is_ok())
-    }
-
-    /// Returns `Ok` if the this collector is appropriate for the current platform.
-    fn match_platform(&self) -> Result<(), HWTracerError> {
-        match self {
-            Self::Perf => {
-                #[cfg(not(collector_perf))]
-                return Err(HWTracerError::CollectorUnavailable(Self::Perf));
-                #[cfg(collector_perf)]
-                {
-                    if !Self::pt_supported() {
-                        return Err(HWTracerError::NoHWSupport(
-                            "Intel PT not supported by CPU".into(),
-                        ));
-                    }
-                    Ok(())
-                }
-            }
-        }
-    }
-
-    /// Checks if the CPU supports Intel Processor Trace.
-    fn pt_supported() -> bool {
-        let res = unsafe { __cpuid_count(0x7, 0x0) };
-        (res.ebx & (1 << 25)) != 0
-    }
-}
-
-/// Configuration for trace collectors.
-#[derive(Debug)]
-pub enum TraceCollectorConfig {
-    Perf(PerfCollectorConfig),
 }
 
 /// Configures the Perf collector.
@@ -156,88 +120,10 @@ impl Default for PerfCollectorConfig {
     }
 }
 
-impl TraceCollectorConfig {
-    fn kind(&self) -> TraceCollectorKind {
-        match self {
-            TraceCollectorConfig::Perf { .. } => TraceCollectorKind::Perf,
-        }
-    }
-}
-
-/// A builder interface for instantiating trace collectors.
-///
-/// # Make a trace collector using the appropriate defaults.
-/// ```
-/// use hwtracer::collect::TraceCollectorBuilder;
-/// TraceCollectorBuilder::new().build().unwrap();
-/// ```
-///
-/// # Make a trace collector that uses Perf for collection with default options.
-/// ```
-/// use hwtracer::collect::{TraceCollectorBuilder, TraceCollectorKind};
-///
-/// let res = TraceCollectorBuilder::new().kind(TraceCollectorKind::Perf).build();
-/// if let Ok(tracer) = res {
-///     // Use the collector.
-/// } else {
-///     // Platform doesn't support Linux Perf or CPU doesn't support Intel Processor Trace.
-/// }
-/// ```
-///
-/// # Make a collector appropriate for the current platform, using custom Perf collector options if
-/// the Perf collector was chosen.
-/// ```
-/// use hwtracer::collect::{TraceCollectorBuilder, TraceCollectorConfig};
-/// let mut bldr = TraceCollectorBuilder::new();
-/// if let TraceCollectorConfig::Perf(ref mut ppt_config) = bldr.config() {
-///     ppt_config.aux_bufsize = 8192;
-/// }
-/// bldr.build().unwrap();
-/// ```
-pub struct TraceCollectorBuilder {
-    config: TraceCollectorConfig,
-}
-
-impl TraceCollectorBuilder {
-    /// Create a new `TraceCollectorBuilder` using sensible defaults.
-    pub fn new() -> Self {
-        let config = match TraceCollectorKind::default_for_platform().unwrap() {
-            TraceCollectorKind::Perf => TraceCollectorConfig::Perf(PerfCollectorConfig::default()),
-        };
-        Self { config }
-    }
-
-    /// Select the kind of trace collector.
-    pub fn kind(mut self, kind: TraceCollectorKind) -> Self {
-        self.config = match kind {
-            TraceCollectorKind::Perf => TraceCollectorConfig::Perf(PerfCollectorConfig::default()),
-        };
-        self
-    }
-
-    /// Get a mutable reference to the collector configuraion.
-    pub fn config(&mut self) -> &mut TraceCollectorConfig {
-        &mut self.config
-    }
-
-    /// Build the trace collector
-    ///
-    /// An error is returned if the requested collector is inappropriate for the platform or not
-    /// compiled in to hwtracer.
-    pub fn build(self) -> Result<TraceCollector, HWTracerError> {
-        let kind = self.config.kind();
-        kind.match_platform()?;
-        match self.config {
-            TraceCollectorConfig::Perf(_pt_conf) => {
-                #[cfg(collector_perf)]
-                return Ok(TraceCollector::new(Box::new(PerfTraceCollector::new(
-                    _pt_conf,
-                )?)));
-                #[cfg(not(collector_perf))]
-                return Err(HWTracerError::CollectorUnavailable(self.kind));
-            }
-        }
-    }
+/// Checks if the CPU supports Intel Processor Trace.
+fn pt_supported() -> bool {
+    let res = unsafe { __cpuid_count(0x7, 0x0) };
+    (res.ebx & (1 << 25)) != 0
 }
 
 #[cfg(test)]
