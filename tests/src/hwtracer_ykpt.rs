@@ -12,17 +12,11 @@
 //! langtester suite) and then they call into this file to have assertions checked in Rust code.
 
 use hwtracer::decode::{TraceDecoderBuilder, TraceDecoderKind};
-use hwtracer::{
-    collect::{TraceCollector, TraceCollectorBuilder, TraceCollectorKind},
-    Trace,
-};
+use hwtracer::{collect::TraceCollector, Trace};
 
 #[no_mangle]
 pub extern "C" fn __hwykpt_start_collector() -> *mut TraceCollector {
-    let tc = TraceCollectorBuilder::new()
-        .kind(TraceCollectorKind::Perf)
-        .build()
-        .unwrap();
+    let tc = TraceCollector::default_for_platform().unwrap();
     tc.start_thread_collector().unwrap();
     Box::into_raw(Box::new(tc))
 }

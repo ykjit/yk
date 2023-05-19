@@ -878,14 +878,14 @@ fn is_ret_near(inst: &iced_x86::Instruction) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::{
-        collect::TraceCollectorBuilder,
+        collect::TraceCollector,
         decode::{test_helpers, TraceDecoderKind},
     };
 
     #[ignore] // FIXME
     #[test]
     fn ten_times_as_many_blocks() {
-        let tc = TraceCollectorBuilder::new().build().unwrap();
+        let tc = TraceCollector::default_for_platform().unwrap();
         test_helpers::ten_times_as_many_blocks(tc, TraceDecoderKind::YkPT);
     }
 }
