@@ -232,7 +232,7 @@ mod tests {
     use super::{packets::*, PacketParser};
     use crate::{
         collect::{test_helpers::trace_closure, TraceCollector},
-        test_helpers::work_loop,
+        work_loop,
     };
 
     /// Parse the packets of a small trace, checking the basic structure of the decoded trace.

@@ -105,7 +105,7 @@ mod test_helpers {
     use super::{TraceDecoder, TraceDecoderBuilder, TraceDecoderKind};
     use crate::{
         collect::{test_helpers::trace_closure, TraceCollector},
-        test_helpers::work_loop,
+        work_loop,
     };
 
     /// Trace two loops, one 10x larger than the other, then check the proportions match the number

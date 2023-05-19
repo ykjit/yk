@@ -237,7 +237,7 @@ mod tests {
     use crate::{
         collect::{perf::PerfTraceCollector, test_helpers, ThreadTraceCollector, TraceCollector},
         errors::HWTracerError,
-        test_helpers::work_loop,
+        work_loop,
     };
 
     fn mk_collector() -> TraceCollector {
