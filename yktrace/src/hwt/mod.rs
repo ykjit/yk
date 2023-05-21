@@ -3,7 +3,7 @@
 use super::{IRTrace, ThreadTracer, ThreadTracerImpl, UnmappedTrace};
 use crate::errors::InvalidTraceError;
 use hwtracer::{
-    collect::TraceCollector,
+    collect::{default_tracer_for_platform, Tracer},
     decode::{TraceDecoderBuilder, TraceDecoderKind},
 };
 use std::sync::LazyLock;
@@ -11,9 +11,9 @@ use std::sync::LazyLock;
 pub mod mapper;
 pub use mapper::HWTMapper;
 
-static TRACE_COLLECTOR: LazyLock<TraceCollector> = LazyLock::new(|| {
+static TRACE_COLLECTOR: LazyLock<Box<dyn Tracer>> = LazyLock::new(|| {
     // FIXME: This just makes a default trace collector. We should allow configuration somehow.
-    TraceCollector::default_for_platform().unwrap()
+    default_tracer_for_platform().unwrap()
 });
 
 /// Hardware thread tracer.
@@ -24,7 +24,7 @@ struct HWTThreadTracer {
 impl ThreadTracerImpl for HWTThreadTracer {
     fn stop_tracing(&mut self) -> Result<Box<dyn UnmappedTrace>, InvalidTraceError> {
         self.active = false;
-        match TRACE_COLLECTOR.stop_thread_collector() {
+        match TRACE_COLLECTOR.stop_collector() {
             Ok(t) => Ok(Box::new(PTTrace(t))),
             Err(e) => todo!("{e:?}"),
         }
@@ -34,14 +34,14 @@ impl ThreadTracerImpl for HWTThreadTracer {
 impl Drop for HWTThreadTracer {
     fn drop(&mut self) {
         if self.active {
-            TRACE_COLLECTOR.stop_thread_collector().unwrap();
+            TRACE_COLLECTOR.stop_collector().unwrap();
         }
     }
 }
 
 pub(crate) fn start_tracing() -> ThreadTracer {
     TRACE_COLLECTOR
-        .start_thread_collector()
+        .start_collector()
         .expect("Failed to start trace collector");
     ThreadTracer {
         t_impl: Box::new(HWTThreadTracer { active: true }),
