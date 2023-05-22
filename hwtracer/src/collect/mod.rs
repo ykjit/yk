@@ -128,7 +128,7 @@ fn pt_supported() -> bool {
 
 #[cfg(test)]
 pub(crate) mod test_helpers {
-    use crate::{collect::TraceCollector, errors::HWTracerError, test_helpers::work_loop, Trace};
+    use crate::{collect::TraceCollector, errors::HWTracerError, work_loop, Trace};
     use std::thread;
 
     /// Trace a closure that returns a u64.
