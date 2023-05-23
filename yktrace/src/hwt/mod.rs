@@ -1,30 +1,27 @@
 //! Hardware tracing via ykrustc.
 
-use super::{IRTrace, ThreadTracer, ThreadTracerImpl, UnmappedTrace};
+use super::{IRTrace, ThreadTracer, UnmappedTrace};
 use crate::errors::InvalidTraceError;
 use hwtracer::{
-    collect::{default_tracer_for_platform, Tracer},
+    collect::{default_tracer_for_platform, ThreadTracer as HWThreadTracer, Tracer},
     decode::{TraceDecoderBuilder, TraceDecoderKind},
 };
-use std::sync::LazyLock;
 
 pub mod mapper;
 pub use mapper::HWTMapper;
 
-static TRACE_COLLECTOR: LazyLock<Box<dyn Tracer>> = LazyLock::new(|| {
-    // FIXME: This just makes a default trace collector. We should allow configuration somehow.
-    default_tracer_for_platform().unwrap()
-});
-
 /// Hardware thread tracer.
 struct HWTThreadTracer {
-    active: bool,
+    tracer: Box<dyn Tracer>,
+    thread_tracer: Option<Box<dyn HWThreadTracer>>,
 }
 
-impl ThreadTracerImpl for HWTThreadTracer {
-    fn stop_tracing(&mut self) -> Result<Box<dyn UnmappedTrace>, InvalidTraceError> {
-        self.active = false;
-        match TRACE_COLLECTOR.stop_collector() {
+impl ThreadTracer for HWTThreadTracer {
+    fn stop_collector(&mut self) -> Result<Box<dyn UnmappedTrace>, InvalidTraceError> {
+        match self
+            .tracer
+            .stop_collector(self.thread_tracer.take().unwrap())
+        {
             Ok(t) => Ok(Box::new(PTTrace(t))),
             Err(e) => todo!("{e:?}"),
         }
@@ -33,19 +30,19 @@ impl ThreadTracerImpl for HWTThreadTracer {
 
 impl Drop for HWTThreadTracer {
     fn drop(&mut self) {
-        if self.active {
-            TRACE_COLLECTOR.stop_collector().unwrap();
+        if self.thread_tracer.is_some() {
+            self.stop_collector().ok();
         }
     }
 }
 
-pub(crate) fn start_tracing() -> ThreadTracer {
-    TRACE_COLLECTOR
-        .start_collector()
-        .expect("Failed to start trace collector");
-    ThreadTracer {
-        t_impl: Box::new(HWTThreadTracer { active: true }),
-    }
+pub(crate) fn start_tracing() -> Box<dyn ThreadTracer> {
+    let tracer = default_tracer_for_platform().unwrap();
+    let thread_tracer = Some(tracer.start_collector().unwrap());
+    Box::new(HWTThreadTracer {
+        tracer,
+        thread_tracer,
+    })
 }
 
 struct PTTrace(Box<dyn hwtracer::Trace>);

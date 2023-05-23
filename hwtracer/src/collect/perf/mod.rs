@@ -8,7 +8,7 @@ use crate::{
     Trace,
 };
 use libc::{c_void, free, geteuid, malloc, size_t};
-use std::{convert::TryFrom, fs::File, io::Read, ptr, slice};
+use std::{any::Any, convert::TryFrom, fs::File, io::Read, ptr, slice};
 
 extern "C" {
     fn hwt_perf_init_collector(
@@ -33,10 +33,14 @@ pub(crate) struct PerfTracer {
 }
 
 impl Tracer for PerfTracer {
-    fn start(&self) -> Result<Box<dyn ThreadTracer>, HWTracerError> {
+    fn start_collector(&self) -> Result<Box<dyn ThreadTracer>, HWTracerError> {
         let mut tt = Box::new(PerfThreadTracer::new(self.config.clone()));
         tt.start()?;
         Ok(tt)
+    }
+
+    fn stop_collector(&self, tt: Box<dyn ThreadTracer>) -> Result<Box<dyn Trace>, HWTracerError> {
+        tt.as_any().downcast::<PerfThreadTracer>().unwrap().stop()
     }
 }
 
@@ -95,19 +99,8 @@ pub struct PerfThreadTracer {
 }
 
 impl ThreadTracer for PerfThreadTracer {
-    fn stop(mut self: Box<Self>) -> Result<Box<dyn Trace>, HWTracerError> {
-        let mut cerr = PerfPTCError::new();
-        let rc = unsafe { hwt_perf_stop_collector(self.ctx, &mut cerr) };
-        if !rc {
-            return Err(cerr.into());
-        }
-
-        let mut cerr = PerfPTCError::new();
-        if !unsafe { hwt_perf_free_collector(self.ctx, &mut cerr) } {
-            return Err(cerr.into());
-        }
-
-        Ok(self.trace.take().unwrap())
+    fn as_any(self: Box<Self>) -> Box<dyn Any> {
+        self
     }
 }
 
@@ -144,6 +137,21 @@ impl PerfThreadTracer {
         }
         self.trace = Some(trace);
         Ok(())
+    }
+
+    fn stop(mut self: Box<Self>) -> Result<Box<dyn Trace>, HWTracerError> {
+        let mut cerr = PerfPTCError::new();
+        let rc = unsafe { hwt_perf_stop_collector(self.ctx, &mut cerr) };
+        if !rc {
+            return Err(cerr.into());
+        }
+
+        let mut cerr = PerfPTCError::new();
+        if !unsafe { hwt_perf_free_collector(self.ctx, &mut cerr) } {
+            return Err(cerr.into());
+        }
+
+        Ok(self.trace.take().unwrap())
     }
 }
 
@@ -265,21 +273,6 @@ mod tests {
     }
 
     #[test]
-    pub fn already_started() {
-        test_helpers::already_started(mk_collector());
-    }
-
-    #[test]
-    pub fn already_started_different_collectors() {
-        test_helpers::already_started_different_collectors(mk_collector(), mk_collector());
-    }
-
-    #[test]
-    pub fn not_started() {
-        test_helpers::not_started(mk_collector());
-    }
-
-    #[test]
     fn concurrent_collection() {
         test_helpers::concurrent_collection(mk_collector());
     }
@@ -294,9 +287,9 @@ mod tests {
         };
         let tracer = PerfTracer::new(config).unwrap();
 
-        tracer.start_collector().unwrap();
+        let tt = tracer.start_collector().unwrap();
         let res = work_loop(10000);
-        let trace = tracer.stop_collector().unwrap();
+        let trace = tracer.stop_collector(tt).unwrap();
 
         println!("res: {}", res); // Stop over-optimisation.
         assert!(trace.capacity() > start_bufsize);
