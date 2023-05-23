@@ -1761,6 +1761,69 @@ public:
           continue;
         }
 
+        if (Idx > 0 && Idx < InpTrace.Length() - 2) {
+          // Stores and loads into/from YkCtrlPointVars only need to be copied
+          // if they appear at the beginning or end of the trace. Any
+          // YkCtrlPointVars loads and stores inbetween come from tracing over
+          // the control point and aren't needed. We remove them here to reduce
+          // the size of traces.
+          if (isa<GetElementPtrInst>(I)) {
+            GetElementPtrInst *GEP = cast<GetElementPtrInst>(I);
+            if (GEP->getPointerOperand() == TraceInputs) {
+              // Collect stores
+              std::vector<Value *> Stores;
+              while (isa<GetElementPtrInst>(I)) {
+                assert(cast<GetElementPtrInst>(I)->getPointerOperand() ==
+                       TraceInputs);
+                I++;
+                assert(isa<StoreInst>(I));
+                Stores.insert(Stores.begin(),
+                              cast<StoreInst>(I)->getValueOperand());
+                I++;
+              }
+              // Skip frameaddress, control point, and stackmap call
+              // instructions.
+              assert(isa<CallInst>(I)); // frameaddr call
+              I++;
+              assert(isa<CallInst>(I)); // control point call
+              Value *CI = &*I;
+              I++;
+              assert(isa<CallInst>(I)); // stackmap call
+              MPF->LastSMCall = cast<CallInst>(I);
+              I++;
+              assert(isa<GetElementPtrInst>(I));
+              // Now find the loads and map them to the values of the previous
+              // stores.
+              while (isa<GetElementPtrInst>(I)) {
+                I++;
+                assert(isa<LoadInst>(I));
+
+                VMap[&*I] = getMappedValue(Stores.back());
+                Stores.pop_back();
+                I++;
+              }
+
+              // We've seen the control point so do the same we used to do when
+              // encountering a control point.
+              VMap[CI] = ConstantPointerNull::get(
+                  Type::getInt8PtrTy(JITMod->getContext()));
+
+              // The next two trace blocks may be skipped as they only contain
+              // the (unmappable) control point followed by the return to the
+              // current block which only has a branch instruction left which we
+              // don't care about. Skipping the latter also means we don't
+              // create additional guard-failure blocks for branches that can
+              // never fail, reducing the trace even more.
+
+              Idx += 1;
+              assert(InpTrace[Idx].getUnmappableRegion());
+              Idx += 1;
+              assert(InpTrace[Idx].getMappedBlock());
+              break;
+            }
+          }
+        }
+
         // If execution reaches here, then the instruction I is to be copied
         // into JITMod.
         copyInstruction(&Builder, (Instruction *)&*I, CurBBIdx, CurInstrIdx);
