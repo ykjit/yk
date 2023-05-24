@@ -87,4 +87,6 @@ for i in $(seq 10); do
     RUST_TEST_SHUFFLE=1 cargo test --release
 done
 
-cargo bench
+# We want to check that the benchmarks build and run correctly, but want to
+# ignore the results, so run them for the minimum possible time.
+cargo bench --bench bench -- --profile-time 1
