@@ -316,7 +316,6 @@ impl MT {
                     let thread_arc = THREAD_MTTHREAD.with(|mtt| Arc::clone(&mtt.tracing));
                     if !thread_arc.load(Ordering::Relaxed).is_null() {
                         loc.unlock();
-                        // FIXME: https://github.com/ykjit/yk/issues/519
                         return TransitionLocation::NoAction;
                     }
                     let r = match arcmtx.try_lock().map(|mut x| x.take()) {
