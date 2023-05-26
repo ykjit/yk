@@ -9,7 +9,7 @@ RUN update-alternatives --set cc /usr/bin/clang-13
 RUN update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-13 999
 RUN update-alternatives --set c++ /usr/bin/clang++-13
 RUN ln -sf /usr/bin/clang-13 /usr/bin/clang
-RUN ln -sf /usr/bin/clang-13 /usr/bin/clang++
+RUN ln -sf /usr/bin/clang++-13 /usr/bin/clang++
 WORKDIR /ci
 RUN chown ${CI_UID}:${CI_UID} .
 COPY --chown=${CI_UID}:${CI_UID} . .

@@ -38,6 +38,7 @@ yktracec = { path = "../yktracec", features = ["yk_testing"] }
 ykrt = { path = "../ykrt", features = ["yk_testing", "yk_jitstate_debug"] }
 
 [build-dependencies]
+rerun_except = "1.0.0"
 ykbuild = { path = "../ykbuild" }
 
 [[bench]]
