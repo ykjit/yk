@@ -4,6 +4,7 @@ use hwtracer::decode::TraceDecoderKind;
 #[cfg(feature = "yk_testing")]
 use std::env;
 use std::{
+    cell::RefCell,
     cmp,
     collections::VecDeque,
     error::Error,
@@ -23,7 +24,7 @@ use std::sync::LazyLock;
 use crate::location::{HotLocation, HotLocationKind, Location, LocationInner};
 #[cfg(feature = "yk_jitstate_debug")]
 use crate::print_jit_state;
-use yktrace::{start_tracing, stop_tracing, CompiledTrace, TracingKind, UnmappedTrace};
+use yktrace::{CompiledTrace, ThreadTracer, Tracer, UnmappedTrace};
 
 // The HotThreshold must be less than a machine word wide for [`Location::Location`] to do its
 // pointer tagging thing. We therefore choose a type which makes this statically clear to
@@ -62,7 +63,7 @@ pub struct MT {
     /// [`max_worker_threads`].
     active_worker_threads: AtomicUsize,
     trace_decoder_kind: TraceDecoderKind,
-    tracing_kind: TracingKind,
+    tracer: Arc<dyn Tracer>,
 }
 
 impl MT {
@@ -79,7 +80,7 @@ impl MT {
             active_worker_threads: AtomicUsize::new(0),
             trace_decoder_kind: TraceDecoderKind::default_for_platform()
                 .ok_or("Tracing is not supported on this platform")?,
-            tracing_kind: TracingKind::default(),
+            tracer: yktrace::default_tracer_for_platform()?,
         })
     }
 
@@ -114,12 +115,6 @@ impl MT {
     /// changed by other threads and is thus potentially stale as soon as it is read.
     pub fn max_worker_threads(&self) -> usize {
         self.max_worker_threads.load(Ordering::Relaxed)
-    }
-
-    /// Return the kind of tracing that this meta-tracer is using. Notice that this value can be
-    /// changed by other threads and is thus potentially stale as soon as it is read.
-    pub fn tracing_kind(&self) -> TracingKind {
-        self.tracing_kind
     }
 
     /// Queue `job` to be run on a worker thread.
@@ -190,19 +185,31 @@ impl MT {
                     }
                 }
             }
-            TransitionLocation::StartTracing(kind) => {
+            TransitionLocation::StartTracing => {
                 #[cfg(feature = "yk_jitstate_debug")]
                 print_jit_state("start-tracing");
-                start_tracing(kind);
-            }
-            TransitionLocation::StopTracing(x) => match stop_tracing() {
-                Ok(utrace) => {
-                    #[cfg(feature = "yk_jitstate_debug")]
-                    print_jit_state("stop-tracing");
-                    self.queue_compile_job(utrace, x);
+                match Arc::clone(&self.tracer).start_collector() {
+                    Ok(tt) => {
+                        THREAD_MTTHREAD.with(|mtt| *mtt.thread_tracer.borrow_mut() = Some(tt))
+                    }
+                    Err(e) => todo!("{e:?}"),
                 }
-                Err(_) => todo!(),
-            },
+            }
+            TransitionLocation::StopTracing(x) => {
+                // Assuming no bugs elsewhere, the `unwrap` cannot fail, because `StartTracing`
+                // will have put a `Some` in the `Rc`.
+                match THREAD_MTTHREAD
+                    .with(|mtt| mtt.thread_tracer.take().unwrap())
+                    .stop_collector()
+                {
+                    Ok(utrace) => {
+                        #[cfg(feature = "yk_jitstate_debug")]
+                        print_jit_state("stop-tracing");
+                        self.queue_compile_job(utrace, x);
+                    }
+                    Err(_) => todo!(),
+                }
+            }
         }
         std::ptr::null()
     }
@@ -255,7 +262,7 @@ impl MT {
                                 // start tracing for real.
                                 mtt.tracing.store(hl_ptr, Ordering::Relaxed);
                                 loc.unlock();
-                                TransitionLocation::StartTracing(self.tracing_kind())
+                                TransitionLocation::StartTracing
                             }
                             Err(x) => {
                                 // We failed for one of:
@@ -358,7 +365,7 @@ impl MT {
                                 hl.kind = HotLocationKind::Tracing(Arc::clone(&thread_arc));
                                 thread_arc.store(hl as _, Ordering::Relaxed);
                                 loc.unlock();
-                                return TransitionLocation::StartTracing(self.tracing_kind());
+                                return TransitionLocation::StartTracing;
                             } else {
                                 // This location has failed too many times: don't try tracing it
                                 // again.
@@ -444,6 +451,9 @@ pub struct MTThread {
     /// mechanism can't be fully relied upon: however, we can't monitor thread death in any other
     /// reasonable way, so this will have to do.
     tracing: Arc<AtomicPtr<HotLocation>>,
+    /// When is active, this will be `RefCell<Some(...)>`; when tracing is inactive
+    /// `RefCell<None>`.
+    thread_tracer: RefCell<Option<Box<dyn ThreadTracer>>>,
     // Raw pointers are neither send nor sync.
     _dont_send_or_sync_me: PhantomData<*mut ()>,
 }
@@ -452,6 +462,7 @@ impl MTThread {
     fn new() -> Self {
         MTThread {
             tracing: Arc::new(AtomicPtr::new(std::ptr::null_mut())),
+            thread_tracer: RefCell::new(None),
             _dont_send_or_sync_me: PhantomData,
         }
     }
@@ -462,7 +473,7 @@ impl MTThread {
 enum TransitionLocation {
     NoAction,
     Execute(*const CompiledTrace),
-    StartTracing(TracingKind),
+    StartTracing,
     StopTracing(Arc<Mutex<Option<Box<CompiledTrace>>>>),
 }
 
@@ -475,7 +486,7 @@ impl PartialEq for TransitionLocation {
             (TransitionLocation::Execute(p1), TransitionLocation::Execute(p2)) => {
                 std::ptr::eq(p1, p2)
             }
-            (TransitionLocation::StartTracing(x), TransitionLocation::StartTracing(y)) => x == y,
+            (TransitionLocation::StartTracing, TransitionLocation::StartTracing) => true,
             (x, y) => todo!("{:?} {:?}", x, y),
         }
     }
@@ -515,7 +526,7 @@ mod tests {
         }
         assert_eq!(
             mt.transition_location(&loc),
-            TransitionLocation::StartTracing(mt.tracing_kind())
+            TransitionLocation::StartTracing
         );
         assert_eq!(
             hotlocation_discriminant(&loc),
@@ -585,7 +596,7 @@ mod tests {
         loop {
             match mt.transition_location(&loc) {
                 TransitionLocation::NoAction => (),
-                TransitionLocation::StartTracing(_) => break,
+                TransitionLocation::StartTracing => break,
                 _ => unreachable!(),
             }
         }
@@ -620,7 +631,7 @@ mod tests {
                 thread::spawn(move || {
                     assert!(matches!(
                         mt.transition_location(&loc),
-                        TransitionLocation::StartTracing(_)
+                        TransitionLocation::StartTracing
                     ));
                 })
                 .join()
@@ -669,7 +680,7 @@ mod tests {
                 thread::spawn(move || {
                     assert!(matches!(
                         mt.transition_location(&loc),
-                        TransitionLocation::StartTracing(_)
+                        TransitionLocation::StartTracing
                     ));
                 })
                 .join()
@@ -691,7 +702,7 @@ mod tests {
         // Start tracing again...
         assert!(matches!(
             mt.transition_location(&loc),
-            TransitionLocation::StartTracing(_)
+            TransitionLocation::StartTracing
         ));
         assert_eq!(
             hotlocation_discriminant(&loc),
@@ -727,7 +738,7 @@ mod tests {
         }
         assert!(matches!(
             mt.transition_location(&loc1),
-            TransitionLocation::StartTracing(_)
+            TransitionLocation::StartTracing
         ));
         assert_eq!(mt.transition_location(&loc2), TransitionLocation::NoAction);
         assert_eq!(
@@ -746,7 +757,7 @@ mod tests {
         );
         assert!(matches!(
             mt.transition_location(&loc2),
-            TransitionLocation::StartTracing(_)
+            TransitionLocation::StartTracing
         ));
         assert!(matches!(
             mt.transition_location(&loc2),
@@ -777,7 +788,7 @@ mod tests {
                     match mt.transition_location(&loc) {
                         TransitionLocation::NoAction => (),
                         TransitionLocation::Execute(_) => (),
-                        TransitionLocation::StartTracing(_) => {
+                        TransitionLocation::StartTracing => {
                             num_starts.fetch_add(1, Ordering::Relaxed);
                             assert_eq!(
                                 hotlocation_discriminant(&loc),
@@ -847,7 +858,7 @@ mod tests {
             thread::spawn(move || {
                 assert!(matches!(
                     mt.transition_location(&loc1),
-                    TransitionLocation::StartTracing(_)
+                    TransitionLocation::StartTracing
                 ));
             })
             .join()
@@ -856,7 +867,7 @@ mod tests {
 
         assert!(matches!(
             mt.transition_location(&loc2),
-            TransitionLocation::StartTracing(_)
+            TransitionLocation::StartTracing
         ));
         assert_eq!(mt.transition_location(&loc1), TransitionLocation::NoAction);
         assert!(matches!(
@@ -907,7 +918,7 @@ mod tests {
         // Get `loc1` to the point where there's a compiled trace for it.
         assert!(matches!(
             mt.transition_location(&loc1),
-            TransitionLocation::StartTracing(_)
+            TransitionLocation::StartTracing
         ));
         if let TransitionLocation::StopTracing(mtx) = mt.transition_location(&loc1) {
             mtx.lock()
@@ -924,7 +935,7 @@ mod tests {
         // https://github.com/ykjit/yk/issues/519
         assert!(matches!(
             mt.transition_location(&loc2),
-            TransitionLocation::StartTracing(_)
+            TransitionLocation::StartTracing
         ));
         assert!(matches!(
             mt.transition_location(&loc1),

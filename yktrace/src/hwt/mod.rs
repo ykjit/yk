@@ -1,50 +1,50 @@
 //! Hardware tracing via ykrustc.
 
-use super::{IRTrace, ThreadTracer, ThreadTracerImpl, UnmappedTrace};
+use super::{IRTrace, ThreadTracer, UnmappedTrace};
 use crate::errors::InvalidTraceError;
-use hwtracer::{
-    collect::TraceCollector,
-    decode::{TraceDecoderBuilder, TraceDecoderKind},
-};
-use std::sync::LazyLock;
+use hwtracer::decode::{TraceDecoderBuilder, TraceDecoderKind};
+use std::{error::Error, sync::Arc};
 
 pub mod mapper;
 pub use mapper::HWTMapper;
 
-static TRACE_COLLECTOR: LazyLock<TraceCollector> = LazyLock::new(|| {
-    // FIXME: This just makes a default trace collector. We should allow configuration somehow.
-    TraceCollector::default_for_platform().unwrap()
-});
+pub struct HWTracer {
+    backend: Box<dyn hwtracer::Tracer>,
+}
+
+impl super::Tracer for HWTracer {
+    fn start_collector(self: Arc<Self>) -> Result<Box<dyn ThreadTracer>, Box<dyn Error>> {
+        Ok(Box::new(HWTThreadTracer {
+            tracer: Arc::clone(&self),
+            thread_tracer: Some(self.backend.start_collector()?),
+        }))
+    }
+}
+
+impl HWTracer {
+    pub fn new() -> Result<Self, Box<dyn Error>> {
+        Ok(HWTracer {
+            backend: hwtracer::default_tracer_for_platform()?,
+        })
+    }
+}
 
 /// Hardware thread tracer.
 struct HWTThreadTracer {
-    active: bool,
+    tracer: Arc<HWTracer>,
+    thread_tracer: Option<Box<dyn hwtracer::ThreadTracer>>,
 }
 
-impl ThreadTracerImpl for HWTThreadTracer {
-    fn stop_tracing(&mut self) -> Result<Box<dyn UnmappedTrace>, InvalidTraceError> {
-        self.active = false;
-        match TRACE_COLLECTOR.stop_thread_collector() {
+impl ThreadTracer for HWTThreadTracer {
+    fn stop_collector(mut self: Box<Self>) -> Result<Box<dyn UnmappedTrace>, InvalidTraceError> {
+        match self
+            .tracer
+            .backend
+            .stop_collector(self.thread_tracer.take().unwrap())
+        {
             Ok(t) => Ok(Box::new(PTTrace(t))),
             Err(e) => todo!("{e:?}"),
         }
-    }
-}
-
-impl Drop for HWTThreadTracer {
-    fn drop(&mut self) {
-        if self.active {
-            TRACE_COLLECTOR.stop_thread_collector().unwrap();
-        }
-    }
-}
-
-pub(crate) fn start_tracing() -> ThreadTracer {
-    TRACE_COLLECTOR
-        .start_thread_collector()
-        .expect("Failed to start trace collector");
-    ThreadTracer {
-        t_impl: Box::new(HWTThreadTracer { active: true }),
     }
 }
 

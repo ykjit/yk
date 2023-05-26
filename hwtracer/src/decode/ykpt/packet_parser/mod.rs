@@ -231,14 +231,14 @@ impl<'t> Iterator for PacketParser<'t> {
 mod tests {
     use super::{packets::*, PacketParser};
     use crate::{
-        collect::{test_helpers::trace_closure, TraceCollector},
+        collect::{default_tracer_for_platform, test_helpers::trace_closure},
         work_loop,
     };
 
     /// Parse the packets of a small trace, checking the basic structure of the decoded trace.
     #[test]
     fn parse_small_trace() {
-        let tc = TraceCollector::default_for_platform().unwrap();
+        let tc = default_tracer_for_platform().unwrap();
         let trace = trace_closure(&tc, || work_loop(3));
 
         #[derive(Clone, Copy, Debug)]

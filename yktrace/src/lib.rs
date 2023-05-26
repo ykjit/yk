@@ -12,12 +12,12 @@ use libc::c_void;
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
 use std::{
-    cell::RefCell,
     collections::HashMap,
     env,
     error::Error,
     ffi::{c_char, c_int, CStr, CString},
     ptr,
+    sync::Arc,
 };
 pub mod hwt;
 use std::arch::asm;
@@ -25,33 +25,6 @@ use tempfile::NamedTempFile;
 use ykutil::obj::llvmbc_section;
 
 pub use errors::InvalidTraceError;
-
-thread_local! {
-    // When `Some`, contains the `ThreadTracer` for the current thread. When `None`, the current
-    // thread is not being traced.
-    //
-    // We hide the `ThreadTracer` in a thread local (rather than returning it to the consumer of
-    // yk). This ensures that the `ThreadTracer` itself cannot appear in traces.
-    pub static THREAD_TRACER: RefCell<Option<ThreadTracer>> = const { RefCell::new(None) };
-}
-
-/// The different ways by which we can collect a trace.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum TracingKind {
-    /// Software tracing.
-    SoftwareTracing,
-    /// Hardware tracing via a branch tracer (e.g. Intel PT).
-    HardwareTracing,
-}
-
-impl Default for TracingKind {
-    /// Returns the default tracing kind.
-    fn default() -> Self {
-        // FIXME this should query the hardware for a suitable hardware tracer and failing that
-        // fall back on software tracing.
-        TracingKind::HardwareTracing
-    }
-}
 
 /// A globally unique block ID for an LLVM IR block.
 #[derive(Debug, Eq, PartialEq)]
@@ -390,45 +363,21 @@ impl Drop for CompiledTrace {
 unsafe impl Send for CompiledTrace {}
 unsafe impl Sync for CompiledTrace {}
 
+/// A tracer is an object which can start / stop collecting traces. It may have its own
+/// configuration, but that is dependent on the concrete tracer itself.
+pub trait Tracer: Send + Sync {
+    /// Start collecting a trace of the current thread.
+    fn start_collector(self: Arc<Self>) -> Result<Box<dyn ThreadTracer>, Box<dyn Error>>;
+}
+
 /// Represents a thread which is currently tracing.
-pub struct ThreadTracer {
-    /// The tracing implementation.
-    t_impl: Box<dyn ThreadTracerImpl>,
+pub trait ThreadTracer {
+    /// Stop collecting a trace of the current thread.
+    fn stop_collector(self: Box<Self>) -> Result<Box<dyn UnmappedTrace>, InvalidTraceError>;
 }
 
-impl ThreadTracer {
-    /// Stops tracing on the current thread, returning a IR trace on success.
-    pub fn stop_tracing(mut self) -> Result<Box<dyn UnmappedTrace>, InvalidTraceError> {
-        self.t_impl.stop_tracing()
-    }
-}
-
-// An generic interface which tracing backends must fulfill.
-trait ThreadTracerImpl {
-    /// Stops tracing on the current thread, returning the IR trace on success.
-    fn stop_tracing(&mut self) -> Result<Box<dyn UnmappedTrace>, InvalidTraceError>;
-}
-
-/// Start tracing on the current thread using the specified tracing kind.
-/// Each thread can have at most one active tracer; calling `start_tracing()` on a thread where
-/// there is already an active tracer leads to undefined behaviour.
-pub fn start_tracing(kind: TracingKind) {
-    let tt = match kind {
-        TracingKind::SoftwareTracing => todo!(),
-        TracingKind::HardwareTracing => hwt::start_tracing(),
-    };
-    THREAD_TRACER.with(|tl| *tl.borrow_mut() = Some(tt));
-}
-
-/// Stop tracing on the current thread. Calling this when the current thread is not already tracing
-/// leads to undefined behaviour.
-pub fn stop_tracing() -> Result<Box<dyn UnmappedTrace>, InvalidTraceError> {
-    let mut res = Err(InvalidTraceError::EmptyTrace);
-    THREAD_TRACER.with(|tt| {
-        let tt_owned = tt.borrow_mut().take();
-        res = tt_owned.unwrap().stop_tracing();
-    });
-    res
+pub fn default_tracer_for_platform() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
+    Ok(Arc::new(hwt::HWTracer::new()?))
 }
 
 pub trait UnmappedTrace: Send {

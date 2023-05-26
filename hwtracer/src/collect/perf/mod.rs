@@ -3,12 +3,12 @@
 use super::PerfCollectorConfig;
 use crate::{
     c_errors::PerfPTCError,
-    collect::{ThreadTraceCollector, TraceCollectorImpl},
+    collect::{ThreadTracer, Tracer},
     errors::HWTracerError,
     Trace,
 };
 use libc::{c_void, free, geteuid, malloc, size_t};
-use std::{convert::TryFrom, fs::File, io::Read, ptr, slice};
+use std::{any::Any, convert::TryFrom, fs::File, io::Read, ptr, slice};
 
 extern "C" {
     fn hwt_perf_init_collector(
@@ -27,12 +27,24 @@ extern "C" {
 const PERF_PERMS_PATH: &str = "/proc/sys/kernel/perf_event_paranoid";
 
 /// The configuration for a Linux Perf collector.
-#[derive(Debug)]
-pub(crate) struct PerfTraceCollector {
+#[derive(Clone, Debug)]
+pub(crate) struct PerfTracer {
     config: PerfCollectorConfig,
 }
 
-impl PerfTraceCollector {
+impl Tracer for PerfTracer {
+    fn start_collector(&self) -> Result<Box<dyn ThreadTracer>, HWTracerError> {
+        let mut tt = Box::new(PerfThreadTracer::new(self.config.clone()));
+        tt.start()?;
+        Ok(tt)
+    }
+
+    fn stop_collector(&self, tt: Box<dyn ThreadTracer>) -> Result<Box<dyn Trace>, HWTracerError> {
+        tt.as_any().downcast::<PerfThreadTracer>().unwrap().stop()
+    }
+}
+
+impl PerfTracer {
     pub(super) fn new(config: PerfCollectorConfig) -> Result<Self, HWTracerError>
     where
         Self: Sized,
@@ -75,15 +87,9 @@ impl PerfTraceCollector {
         Ok(Self { config })
     }
 }
-
-impl TraceCollectorImpl for PerfTraceCollector {
-    unsafe fn thread_collector(&self) -> Box<dyn ThreadTraceCollector> {
-        Box::new(PerfThreadTraceCollector::new(self.config.clone()))
-    }
-}
-
+///
 /// A collector that uses the Linux Perf interface to Intel Processor Trace.
-pub struct PerfThreadTraceCollector {
+pub struct PerfThreadTracer {
     // The configuration for this collector.
     config: PerfCollectorConfig,
     // Opaque C pointer representing the collector context.
@@ -92,7 +98,13 @@ pub struct PerfThreadTraceCollector {
     trace: Option<Box<PerfTrace>>,
 }
 
-impl PerfThreadTraceCollector {
+impl ThreadTracer for PerfThreadTracer {
+    fn as_any(self: Box<Self>) -> Box<dyn Any> {
+        self
+    }
+}
+
+impl PerfThreadTracer {
     fn new(config: PerfCollectorConfig) -> Self {
         Self {
             config,
@@ -100,16 +112,8 @@ impl PerfThreadTraceCollector {
             trace: None,
         }
     }
-}
 
-impl Default for PerfThreadTraceCollector {
-    fn default() -> Self {
-        PerfThreadTraceCollector::new(PerfCollectorConfig::default())
-    }
-}
-
-impl ThreadTraceCollector for PerfThreadTraceCollector {
-    fn start_collector(&mut self) -> Result<(), HWTracerError> {
+    fn start(&mut self) -> Result<(), HWTracerError> {
         // At the time of writing, we have to use a fresh Perf file descriptor to ensure traces
         // start with a `PSB+` packet sequence. This is required for correct instruction-level and
         // block-level decoding. Therefore we have to re-initialise for each new tracing session.
@@ -135,7 +139,7 @@ impl ThreadTraceCollector for PerfThreadTraceCollector {
         Ok(())
     }
 
-    fn stop_collector(&mut self) -> Result<Box<dyn Trace>, HWTracerError> {
+    fn stop(mut self: Box<Self>) -> Result<Box<dyn Trace>, HWTracerError> {
         let mut cerr = PerfPTCError::new();
         let rc = unsafe { hwt_perf_stop_collector(self.ctx, &mut cerr) };
         if !rc {
@@ -146,11 +150,8 @@ impl ThreadTraceCollector for PerfThreadTraceCollector {
         if !unsafe { hwt_perf_free_collector(self.ctx, &mut cerr) } {
             return Err(cerr.into());
         }
-        self.ctx = ptr::null_mut();
 
-        let ret = self.trace.take().unwrap();
-        self.trace = None;
-        Ok(ret as Box<dyn Trace>)
+        Ok(self.trace.take().unwrap())
     }
 }
 
@@ -233,15 +234,15 @@ impl Drop for PerfTrace {
 
 #[cfg(test)]
 mod tests {
-    use super::{PerfCollectorConfig, PerfThreadTraceCollector};
+    use super::*;
     use crate::{
-        collect::{perf::PerfTraceCollector, test_helpers, ThreadTraceCollector, TraceCollector},
+        collect::{default_tracer_for_platform, perf::PerfTracer, test_helpers, Tracer},
         errors::HWTracerError,
         work_loop,
     };
 
-    fn mk_collector() -> TraceCollector {
-        TraceCollector::default_for_platform().unwrap()
+    fn mk_collector() -> Box<dyn Tracer> {
+        default_tracer_for_platform().unwrap()
     }
 
     #[test]
@@ -272,21 +273,6 @@ mod tests {
     }
 
     #[test]
-    pub fn already_started() {
-        test_helpers::already_started(mk_collector());
-    }
-
-    #[test]
-    pub fn already_started_different_collectors() {
-        test_helpers::already_started_different_collectors(mk_collector(), mk_collector());
-    }
-
-    #[test]
-    pub fn not_started() {
-        test_helpers::not_started(mk_collector());
-    }
-
-    #[test]
     fn concurrent_collection() {
         test_helpers::concurrent_collection(mk_collector());
     }
@@ -299,11 +285,11 @@ mod tests {
             initial_trace_bufsize: start_bufsize,
             ..Default::default()
         };
-        let mut tracer = PerfThreadTraceCollector::new(config);
+        let tracer = PerfTracer::new(config).unwrap();
 
-        tracer.start_collector().unwrap();
+        let tt = tracer.start_collector().unwrap();
         let res = work_loop(10000);
-        let trace = tracer.stop_collector().unwrap();
+        let trace = tracer.stop_collector(tt).unwrap();
 
         println!("res: {}", res); // Stop over-optimisation.
         assert!(trace.capacity() > start_bufsize);
@@ -314,7 +300,7 @@ mod tests {
     fn test_config_bad_data_bufsize() {
         let mut cfg = PerfCollectorConfig::default();
         cfg.data_bufsize = 3;
-        match PerfTraceCollector::new(cfg) {
+        match PerfTracer::new(cfg) {
             Err(HWTracerError::BadConfig(s))
                 if s == "data_bufsize must be a positive power of 2" =>
             {
@@ -329,7 +315,7 @@ mod tests {
     fn test_config_bad_aux_bufsize() {
         let mut cfg = PerfCollectorConfig::default();
         cfg.aux_bufsize = 3;
-        match PerfTraceCollector::new(cfg) {
+        match PerfTracer::new(cfg) {
             Err(HWTracerError::BadConfig(s))
                 if s == "aux_bufsize must be a positive power of 2" =>
             {

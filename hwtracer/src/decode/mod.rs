@@ -104,13 +104,13 @@ impl TraceDecoderBuilder {
 mod test_helpers {
     use super::{TraceDecoder, TraceDecoderBuilder, TraceDecoderKind};
     use crate::{
-        collect::{test_helpers::trace_closure, TraceCollector},
+        collect::{test_helpers::trace_closure, Tracer},
         work_loop,
     };
 
     /// Trace two loops, one 10x larger than the other, then check the proportions match the number
     /// of block the trace passes through.
-    pub fn ten_times_as_many_blocks(tc: TraceCollector, decoder_kind: TraceDecoderKind) {
+    pub fn ten_times_as_many_blocks(tc: Box<dyn Tracer>, decoder_kind: TraceDecoderKind) {
         let trace1 = trace_closure(&tc, || work_loop(10));
         let trace2 = trace_closure(&tc, || work_loop(100));
 

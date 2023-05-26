@@ -3,14 +3,14 @@
 use crate::{errors::HWTracerError, Trace};
 use core::arch::x86_64::__cpuid_count;
 use libc::{size_t, sysconf, _SC_PAGESIZE};
-use std::{cell::RefCell, convert::TryFrom, sync::LazyLock};
+use std::{any::Any, convert::TryFrom, sync::LazyLock};
 
 #[cfg(collector_perf)]
 pub(crate) mod perf;
 #[cfg(all(collector_perf, feature = "yk_testing"))]
 pub use perf::PerfTrace;
 #[cfg(collector_perf)]
-pub(crate) use perf::PerfTraceCollector;
+pub(crate) use perf::PerfTracer;
 
 const PERF_DFLT_DATA_BUFSIZE: size_t = 64;
 static PERF_DFLT_AUX_BUFSIZE: LazyLock<size_t> = LazyLock::new(|| {
@@ -22,78 +22,30 @@ static PERF_DFLT_AUX_BUFSIZE: LazyLock<size_t> = LazyLock::new(|| {
 
 const PERF_DFLT_INITIAL_TRACE_BUFSIZE: size_t = 1024 * 1024; // 1MiB
 
-thread_local! {
-    /// When `Some` holds the `ThreadTraceCollector` that is collecting a trace of the current
-    /// thread.
-    static THREAD_TRACE_COLLECTOR: RefCell<Option<Box<dyn ThreadTraceCollector>>> = RefCell::new(None);
-}
-
-/// The private innards of a `TraceCollector`.
-pub trait TraceCollectorImpl: Send + Sync {
-    unsafe fn thread_collector(&self) -> Box<dyn ThreadTraceCollector>;
-}
-
-/// The public interface offered by all trace collectors.
-pub struct TraceCollector {
-    col_impl: Box<dyn TraceCollectorImpl>,
-}
-
-impl TraceCollector {
-    #[cfg(debug_assertions)]
-    pub fn new(col_impl: Box<dyn TraceCollectorImpl>) -> Self {
-        Self { col_impl }
-    }
-
-    pub fn default_for_platform() -> Result<Self, HWTracerError> {
-        if pt_supported() {
-            Ok(Self {
-                col_impl: Box::new(PerfTraceCollector::new(PerfCollectorConfig::default())?),
-            })
-        } else {
-            todo!();
-        }
-    }
-
+pub trait Tracer: Send + Sync {
     /// Start collecting a trace of the current thread.
-    pub fn start_thread_collector(&self) -> Result<(), HWTracerError> {
-        THREAD_TRACE_COLLECTOR.with(|inner| {
-            let mut inner = inner.borrow_mut();
-            if inner.is_some() {
-                Err(HWTracerError::AlreadyCollecting)
-            } else {
-                let mut thr_col = unsafe { self.col_impl.thread_collector() };
-                thr_col.start_collector()?;
-                *inner = Some(thr_col);
-                Ok(())
-            }
-        })
-    }
+    fn start_collector(&self) -> Result<Box<dyn ThreadTracer>, HWTracerError>;
 
     /// Stop collecting a trace of the current thread.
-    pub fn stop_thread_collector(&self) -> Result<Box<dyn Trace>, HWTracerError> {
-        THREAD_TRACE_COLLECTOR.with(|inner| {
-            let mut inner = inner.borrow_mut();
-            if let Some(thr_col) = &mut *inner {
-                let ret = thr_col.stop_collector();
-                *inner = None;
-                ret
-            } else {
-                Err(HWTracerError::AlreadyStopped)
-            }
-        })
+    fn stop_collector(&self, tt: Box<dyn ThreadTracer>) -> Result<Box<dyn Trace>, HWTracerError>;
+}
+
+pub trait ThreadTracer {
+    fn as_any(self: Box<Self>) -> Box<dyn Any>;
+}
+
+pub fn default_tracer_for_platform() -> Result<Box<dyn Tracer>, HWTracerError> {
+    if pt_supported() {
+        Ok(Box::new(PerfTracer::new(PerfCollectorConfig::default())?))
+    } else {
+        todo!();
     }
 }
 
-/// Represents a trace collection session for a single thread.
-pub trait ThreadTraceCollector {
-    /// Start recording a trace.
-    ///
-    /// Tracing continues until [stop_collector] is called.
-    fn start_collector(&mut self) -> Result<(), HWTracerError>;
-    /// Turns off the tracer.
-    ///
-    /// Tracing continues until [stop_collector] is called.
-    fn stop_collector(&mut self) -> Result<Box<dyn Trace>, HWTracerError>;
+/// Checks if the CPU supports Intel Processor Trace.
+fn pt_supported() -> bool {
+    let res = unsafe { __cpuid_count(0x7, 0x0) };
+    (res.ebx & (1 << 25)) != 0
 }
 
 /// Configures the Perf collector.
@@ -120,80 +72,45 @@ impl Default for PerfCollectorConfig {
     }
 }
 
-/// Checks if the CPU supports Intel Processor Trace.
-fn pt_supported() -> bool {
-    let res = unsafe { __cpuid_count(0x7, 0x0) };
-    (res.ebx & (1 << 25)) != 0
-}
-
 #[cfg(test)]
 pub(crate) mod test_helpers {
-    use crate::{collect::TraceCollector, errors::HWTracerError, work_loop, Trace};
+    use crate::{collect::Tracer, work_loop, Trace};
     use std::thread;
 
     /// Trace a closure that returns a u64.
-    pub fn trace_closure<F>(tc: &TraceCollector, f: F) -> Box<dyn Trace>
+    pub fn trace_closure<F>(tc: &Box<dyn Tracer>, f: F) -> Box<dyn Trace>
     where
         F: FnOnce() -> u64,
     {
-        tc.start_thread_collector().unwrap();
+        let tt = tc.start_collector().unwrap();
         let res = f();
-        let trace = tc.stop_thread_collector().unwrap();
+        let trace = tc.stop_collector(tt).unwrap();
         println!("traced closure with result: {}", res); // To avoid over-optimisation.
         trace
     }
 
     /// Check that starting and stopping a trace collector works.
-    pub fn basic_collection(tc: TraceCollector) {
+    pub fn basic_collection(tc: Box<dyn Tracer>) {
         let trace = trace_closure(&tc, || work_loop(500));
         assert_ne!(trace.len(), 0);
     }
 
     /// Check that repeated usage of the same trace collector works.
-    pub fn repeated_collection(tc: TraceCollector) {
+    pub fn repeated_collection(tc: Box<dyn Tracer>) {
         for _ in 0..10 {
             trace_closure(&tc, || work_loop(500));
         }
     }
 
     /// Check that repeated collection using different collectors works.
-    pub fn repeated_collection_different_collectors(tcs: [TraceCollector; 10]) {
+    pub fn repeated_collection_different_collectors(tcs: [Box<dyn Tracer>; 10]) {
         for i in 0..10 {
             trace_closure(&tcs[i], || work_loop(500));
         }
     }
 
-    /// Check that starting a trace collector twice (without stopping maktracing inbetween) makes
-    /// an appropriate error.
-    pub fn already_started(tc: TraceCollector) {
-        tc.start_thread_collector().unwrap();
-        match tc.start_thread_collector() {
-            Err(HWTracerError::AlreadyCollecting) => (),
-            _ => panic!(),
-        };
-        tc.stop_thread_collector().unwrap();
-    }
-
-    /// Check that an attempt to trace the same thread using different collectors fails.
-    pub fn already_started_different_collectors(tc1: TraceCollector, tc2: TraceCollector) {
-        tc1.start_thread_collector().unwrap();
-        match tc2.start_thread_collector() {
-            Err(HWTracerError::AlreadyCollecting) => (),
-            _ => panic!(),
-        };
-        tc1.stop_thread_collector().unwrap();
-    }
-
-    /// Check that stopping an unstarted trace collector makes an appropriate error.
-    pub fn not_started(tc: TraceCollector) {
-        match tc.stop_thread_collector() {
-            Err(HWTracerError::AlreadyStopped) => (),
-            _ => panic!(),
-        };
-    }
-
     /// Check that traces can be collected concurrently.
-    pub fn concurrent_collection(tc: TraceCollector) {
+    pub fn concurrent_collection(tc: Box<dyn Tracer>) {
         for _ in 0..10 {
             thread::scope(|s| {
                 let hndl = s.spawn(|| {
