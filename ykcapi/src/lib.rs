@@ -227,7 +227,7 @@ pub extern "C" fn __ykrt_reconstruct_frames(newframesptr: *const c_void) {
 /// variables, etc., in order to reconstruct the stack.
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
-pub unsafe extern "C" fn yk_stopgap(
+pub unsafe extern "C" fn __ykrt_deopt(
     stackmap: &CVec,
     aotvals: &LiveAOTVals,
     actframes: &CVec,
@@ -364,7 +364,7 @@ pub extern "C" fn __llvm_deoptimize(
             "push rcx",
             "push rdx",
             "push rax",
-            // Now we need to call yk_stopgap. The arguments need to be in RDI, RSI, RDX,
+            // Now we need to call __ykrt_deopt. The arguments need to be in RDI, RSI, RDX,
             // RCX, R8, and R9. The first four arguments (stackmap
             // live variable map, frames, and return value pointer) are already where they
             // need to be as we are just forwarding them from the current function's
@@ -374,7 +374,7 @@ pub extern "C" fn __llvm_deoptimize(
             "mov r8, [rsp+64]",
             "mov r9, rsp",
             "sub rsp, 8", // Alignment
-            "call yk_stopgap",
+            "call __ykrt_deopt",
             "add rsp, 72",
             // FIXME: Don't rely on RBP being pushed. Use frame size retrieved from
             // stackmap instead.
