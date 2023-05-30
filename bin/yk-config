@@ -5,7 +5,7 @@ set -e
 # The parent directory of this script. Under some obscure circumstances $0 may
 # not be accurate, so we do some quick and dirty sanity checking.
 DIR=`dirname $0`
-if [ ! -d "${DIR}/../../yktrace" ]; then
+if [ ! -d "${DIR}/../yktrace" ]; then
     1>&2 echo "error: couldn't find parent directory of yk-config"
     exit 1
 fi
@@ -27,7 +27,7 @@ handle_arg() {
         ykllvm_bin_dir=`realpath ${YKB_YKLLVM_BIN_DIR}`
     else
         # The way this path is calculated must match that in ykbuild/build.rs.
-        ykllvm_bin_dir=`realpath ${DIR}/../../target/${mode}/ykllvm/bin/`
+        ykllvm_bin_dir=`realpath ${DIR}/../target/${mode}/ykllvm/bin/`
     fi
 
     case $1 in
@@ -45,7 +45,7 @@ handle_arg() {
             ;;
         --cppflags)
             # Path to yk.h
-            OUTPUT="${OUTPUT} -I${DIR}/.."
+            OUTPUT="${OUTPUT} -I${DIR}/../ykcapi"
             ;;
         --ldflags)
             # Use lld.
@@ -108,14 +108,14 @@ handle_arg() {
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-linkage"
 
             # Linkage to yk as a library.
-            OUTPUT="${OUTPUT} -L${DIR}/../../target/${mode}/deps"
+            OUTPUT="${OUTPUT} -L${DIR}/../target/${mode}/deps"
 
             # Encode an rpath so that we don't have to set LD_LIBRARY_PATH.
             #
             # FIXME: Adding rpaths should probably be behind a flag. It's kind
             # of rude to add local rpaths to interpreter binaries that
             # downstreams may want to distribute.
-            OUTPUT="${OUTPUT} -Wl,-rpath=${DIR}/../../target/${mode}/deps"
+            OUTPUT="${OUTPUT} -Wl,-rpath=${DIR}/../target/${mode}/deps"
             OUTPUT="${OUTPUT} -Wl,-rpath=$(${ykllvm_bin_dir}/llvm-config --link-shared --libdir)"
             # Add a proper RPATH, not a RUNPATH:
             # https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/1737608
