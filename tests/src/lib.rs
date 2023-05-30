@@ -107,8 +107,7 @@ pub fn mk_compiler(
     let yk_config = [
         &env::var("CARGO_MANIFEST_DIR").unwrap(),
         "..",
-        "ykcapi",
-        "scripts",
+        "bin",
         "yk-config",
     ]
     .iter()
