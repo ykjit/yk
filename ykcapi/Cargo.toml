@@ -27,4 +27,3 @@ ykbuild = { path = "../ykbuild" }
 
 [features]
 yk_testing = []
-yk_jitstate_debug = []

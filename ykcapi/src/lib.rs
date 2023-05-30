@@ -11,9 +11,6 @@
 #![feature(naked_functions)]
 #![feature(lazy_cell)]
 
-#[cfg(feature = "yk_testing")]
-mod testing;
-
 use std::{
     ffi::{c_char, c_void, CString},
     ptr,
