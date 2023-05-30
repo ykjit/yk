@@ -13,9 +13,6 @@ hwtracer = { path = "../hwtracer" }
 libc = "0.2.117"
 yktracec = { path = "../yktracec" }
 ykrt = { path = "../ykrt" }
-yktrace = { path = "../yktrace" }
-yksmp = { path = "../yksmp" }
-ykfr = { path = "../ykfr" }
 
 [dependencies.llvm-sys]
 # note: using a git version to get llvm linkage features in llvm-sys (not in a
