@@ -68,6 +68,8 @@ git diff --exit-code --ignore-submodules
 # down a bit. Check that if we build the system without tests, those features
 # are not enabled.
 cargo -Z unstable-options build --build-plan -p ykcapi | \
+    awk '/yk_testing/ { ec=1 } END {exit ec}'
+cargo -Z unstable-options build --build-plan -p ykrt | \
     awk '/yk_testing/ { ec=1 } /yk_jitstate_debug/ { ec=1 } END {exit ec}'
 
 for i in $(seq 10); do
