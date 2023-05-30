@@ -7,7 +7,6 @@
 #![allow(clippy::missing_safety_doc)]
 
 mod errors;
-use hwtracer::decode::TraceDecoderKind;
 use libc::c_void;
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
@@ -381,5 +380,5 @@ pub fn default_tracer_for_platform() -> Result<Arc<dyn Tracer>, Box<dyn Error>> 
 }
 
 pub trait UnmappedTrace: Send {
-    fn map(self: Box<Self>, decoder: TraceDecoderKind) -> Result<IRTrace, InvalidTraceError>;
+    fn map(self: Box<Self>, tracer: Arc<dyn Tracer>) -> Result<IRTrace, InvalidTraceError>;
 }

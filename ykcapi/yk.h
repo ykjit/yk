@@ -63,6 +63,4 @@ YkLocation yk_location_new(void);
 // will occur.
 void yk_location_drop(YkLocation);
 
-void yk_stopgap(void *addr, uintptr_t size, uintptr_t retaddr, void *rsp);
-
 #endif

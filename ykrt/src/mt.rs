@@ -1,6 +1,5 @@
 //! The main end-user interface to the meta-tracing system.
 
-use hwtracer::decode::TraceDecoderKind;
 #[cfg(feature = "yk_testing")]
 use std::env;
 use std::{
@@ -62,7 +61,6 @@ pub struct MT {
     /// How many worker threads are currently running. Note that this may temporarily be `>`
     /// [`max_worker_threads`].
     active_worker_threads: AtomicUsize,
-    trace_decoder_kind: TraceDecoderKind,
     tracer: Arc<dyn Tracer>,
 }
 
@@ -78,8 +76,6 @@ impl MT {
             job_queue: Arc::new((Condvar::new(), Mutex::new(VecDeque::new()))),
             max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
             active_worker_threads: AtomicUsize::new(0),
-            trace_decoder_kind: TraceDecoderKind::default_for_platform()
-                .ok_or("Tracing is not supported on this platform")?,
             tracer: yktrace::default_tracer_for_platform()?,
         })
     }
@@ -188,24 +184,23 @@ impl MT {
             TransitionLocation::StartTracing => {
                 #[cfg(feature = "yk_jitstate_debug")]
                 print_jit_state("start-tracing");
-                match Arc::clone(&self.tracer).start_collector() {
-                    Ok(tt) => {
-                        THREAD_MTTHREAD.with(|mtt| *mtt.thread_tracer.borrow_mut() = Some(tt))
-                    }
+                let tracer = Arc::clone(&self.tracer);
+                match Arc::clone(&tracer).start_collector() {
+                    Ok(tt) => THREAD_MTTHREAD
+                        .with(|mtt| *mtt.thread_tracer.borrow_mut() = Some((tracer, tt))),
                     Err(e) => todo!("{e:?}"),
                 }
             }
             TransitionLocation::StopTracing(x) => {
                 // Assuming no bugs elsewhere, the `unwrap` cannot fail, because `StartTracing`
                 // will have put a `Some` in the `Rc`.
-                match THREAD_MTTHREAD
-                    .with(|mtt| mtt.thread_tracer.take().unwrap())
-                    .stop_collector()
-                {
+                let (trcr, thrdtrcr) =
+                    THREAD_MTTHREAD.with(|mtt| mtt.thread_tracer.take().unwrap());
+                match thrdtrcr.stop_collector() {
                     Ok(utrace) => {
                         #[cfg(feature = "yk_jitstate_debug")]
                         print_jit_state("stop-tracing");
-                        self.queue_compile_job(utrace, x);
+                        self.queue_compile_job(utrace, x, trcr);
                     }
                     Err(_) => todo!(),
                 }
@@ -391,12 +386,12 @@ impl MT {
         &self,
         utrace: Box<dyn UnmappedTrace>,
         mtx: Arc<Mutex<Option<Box<CompiledTrace>>>>,
+        tracer: Arc<dyn Tracer>,
     ) {
-        let tdk = self.trace_decoder_kind;
         let do_compile = move || {
             // FIXME: if mapping or tracing fails we don't want to abort, but in order to do that,
             // we'll need to move the location into something other than the Compiling state.
-            let irtrace = match utrace.map(tdk) {
+            let irtrace = match utrace.map(tracer) {
                 Ok(x) => x,
                 Err(e) => todo!("{e:?}"),
             };
@@ -451,9 +446,10 @@ pub struct MTThread {
     /// mechanism can't be fully relied upon: however, we can't monitor thread death in any other
     /// reasonable way, so this will have to do.
     tracing: Arc<AtomicPtr<HotLocation>>,
-    /// When is active, this will be `RefCell<Some(...)>`; when tracing is inactive
-    /// `RefCell<None>`.
-    thread_tracer: RefCell<Option<Box<dyn ThreadTracer>>>,
+    /// When tracing is active, this will be `RefCell<Some(...)>`; when tracing is inactive
+    /// `RefCell<None>`. We need to keep track of the [Tracer] used to start the [ThreadTracer], as
+    /// trace mapping requires a reference to the [Tracer].
+    thread_tracer: RefCell<Option<(Arc<dyn Tracer>, Box<dyn ThreadTracer>)>>,
     // Raw pointers are neither send nor sync.
     _dont_send_or_sync_me: PhantomData<*mut ()>,
 }

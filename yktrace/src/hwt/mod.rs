@@ -1,8 +1,8 @@
 //! Hardware tracing via ykrustc.
 
-use super::{IRTrace, ThreadTracer, UnmappedTrace};
+use super::{IRTrace, ThreadTracer, Tracer, UnmappedTrace};
 use crate::errors::InvalidTraceError;
-use hwtracer::decode::{TraceDecoderBuilder, TraceDecoderKind};
+use hwtracer::decode::TraceDecoderBuilder;
 use std::{error::Error, sync::Arc};
 
 pub mod mapper;
@@ -51,8 +51,8 @@ impl ThreadTracer for HWTThreadTracer {
 struct PTTrace(Box<dyn hwtracer::Trace>);
 
 impl UnmappedTrace for PTTrace {
-    fn map(self: Box<Self>, decoder: TraceDecoderKind) -> Result<IRTrace, InvalidTraceError> {
-        let tdec = TraceDecoderBuilder::new().kind(decoder).build().unwrap();
+    fn map(self: Box<Self>, _tracer: Arc<dyn Tracer>) -> Result<IRTrace, InvalidTraceError> {
+        let tdec = TraceDecoderBuilder::new().build().unwrap();
         let mut itr = tdec.iter_blocks(self.0.as_ref());
         let mut mt = HWTMapper::new();
 
