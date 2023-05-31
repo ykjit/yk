@@ -3,7 +3,10 @@
 use crate::{errors::HWTracerError, Trace};
 use core::arch::x86_64::__cpuid_count;
 use libc::{size_t, sysconf, _SC_PAGESIZE};
-use std::{any::Any, convert::TryFrom, sync::LazyLock};
+use std::{
+    convert::TryFrom,
+    sync::{Arc, LazyLock},
+};
 
 #[cfg(collector_perf)]
 pub(crate) mod perf;
@@ -22,21 +25,22 @@ static PERF_DFLT_AUX_BUFSIZE: LazyLock<size_t> = LazyLock::new(|| {
 
 const PERF_DFLT_INITIAL_TRACE_BUFSIZE: size_t = 1024 * 1024; // 1MiB
 
+/// A tracer is an object which can start / stop collecting traces. It may have its own
+/// configuration, but that is dependent on the particular tracing backend.
 pub trait Tracer: Send + Sync {
     /// Start collecting a trace of the current thread.
-    fn start_collector(&self) -> Result<Box<dyn ThreadTracer>, HWTracerError>;
-
-    /// Stop collecting a trace of the current thread.
-    fn stop_collector(&self, tt: Box<dyn ThreadTracer>) -> Result<Box<dyn Trace>, HWTracerError>;
+    fn start_collector(self: Arc<Self>) -> Result<Box<dyn ThreadTracer>, HWTracerError>;
 }
 
+/// Represents a thread which is currently tracing.
 pub trait ThreadTracer {
-    fn as_any(self: Box<Self>) -> Box<dyn Any>;
+    /// Stop collecting a trace of the current thread.
+    fn stop_collector(self: Box<Self>) -> Result<Box<dyn Trace>, HWTracerError>;
 }
 
-pub fn default_tracer_for_platform() -> Result<Box<dyn Tracer>, HWTracerError> {
+pub fn default_tracer_for_platform() -> Result<Arc<dyn Tracer>, HWTracerError> {
     if pt_supported() {
-        Ok(Box::new(PerfTracer::new(PerfCollectorConfig::default())?))
+        Ok(PerfTracer::new(PerfCollectorConfig::default())?)
     } else {
         todo!();
     }
@@ -75,42 +79,42 @@ impl Default for PerfCollectorConfig {
 #[cfg(test)]
 pub(crate) mod test_helpers {
     use crate::{collect::Tracer, work_loop, Trace};
-    use std::thread;
+    use std::{sync::Arc, thread};
 
     /// Trace a closure that returns a u64.
-    pub fn trace_closure<F>(tc: &Box<dyn Tracer>, f: F) -> Box<dyn Trace>
+    pub fn trace_closure<F>(tc: &Arc<dyn Tracer>, f: F) -> Box<dyn Trace>
     where
         F: FnOnce() -> u64,
     {
-        let tt = tc.start_collector().unwrap();
+        let tt = Arc::clone(tc).start_collector().unwrap();
         let res = f();
-        let trace = tc.stop_collector(tt).unwrap();
+        let trace = tt.stop_collector().unwrap();
         println!("traced closure with result: {}", res); // To avoid over-optimisation.
         trace
     }
 
     /// Check that starting and stopping a trace collector works.
-    pub fn basic_collection(tc: Box<dyn Tracer>) {
+    pub fn basic_collection(tc: Arc<dyn Tracer>) {
         let trace = trace_closure(&tc, || work_loop(500));
         assert_ne!(trace.len(), 0);
     }
 
     /// Check that repeated usage of the same trace collector works.
-    pub fn repeated_collection(tc: Box<dyn Tracer>) {
+    pub fn repeated_collection(tc: Arc<dyn Tracer>) {
         for _ in 0..10 {
             trace_closure(&tc, || work_loop(500));
         }
     }
 
     /// Check that repeated collection using different collectors works.
-    pub fn repeated_collection_different_collectors(tcs: [Box<dyn Tracer>; 10]) {
+    pub fn repeated_collection_different_collectors(tcs: [Arc<dyn Tracer>; 10]) {
         for i in 0..10 {
             trace_closure(&tcs[i], || work_loop(500));
         }
     }
 
     /// Check that traces can be collected concurrently.
-    pub fn concurrent_collection(tc: Box<dyn Tracer>) {
+    pub fn concurrent_collection(tc: Arc<dyn Tracer>) {
         for _ in 0..10 {
             thread::scope(|s| {
                 let hndl = s.spawn(|| {
