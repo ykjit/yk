@@ -9,14 +9,13 @@ pub mod mapper;
 pub use mapper::HWTMapper;
 
 pub struct HWTracer {
-    backend: Box<dyn hwtracer::Tracer>,
+    backend: Arc<dyn hwtracer::Tracer>,
 }
 
 impl super::Tracer for HWTracer {
     fn start_collector(self: Arc<Self>) -> Result<Box<dyn ThreadTracer>, Box<dyn Error>> {
         Ok(Box::new(HWTThreadTracer {
-            tracer: Arc::clone(&self),
-            thread_tracer: Some(self.backend.start_collector()?),
+            thread_tracer: Arc::clone(&self.backend).start_collector()?,
         }))
     }
 }
@@ -31,17 +30,12 @@ impl HWTracer {
 
 /// Hardware thread tracer.
 struct HWTThreadTracer {
-    tracer: Arc<HWTracer>,
-    thread_tracer: Option<Box<dyn hwtracer::ThreadTracer>>,
+    thread_tracer: Box<dyn hwtracer::ThreadTracer>,
 }
 
 impl ThreadTracer for HWTThreadTracer {
-    fn stop_collector(mut self: Box<Self>) -> Result<Box<dyn UnmappedTrace>, InvalidTraceError> {
-        match self
-            .tracer
-            .backend
-            .stop_collector(self.thread_tracer.take().unwrap())
-        {
+    fn stop_collector(self: Box<Self>) -> Result<Box<dyn UnmappedTrace>, InvalidTraceError> {
+        match self.thread_tracer.stop_collector() {
             Ok(t) => Ok(Box::new(PTTrace(t))),
             Err(e) => todo!("{e:?}"),
         }

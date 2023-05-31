@@ -107,10 +107,11 @@ mod test_helpers {
         collect::{test_helpers::trace_closure, Tracer},
         work_loop,
     };
+    use std::sync::Arc;
 
     /// Trace two loops, one 10x larger than the other, then check the proportions match the number
     /// of block the trace passes through.
-    pub fn ten_times_as_many_blocks(tc: Box<dyn Tracer>, decoder_kind: TraceDecoderKind) {
+    pub fn ten_times_as_many_blocks(tc: Arc<dyn Tracer>, decoder_kind: TraceDecoderKind) {
         let trace1 = trace_closure(&tc, || work_loop(10));
         let trace2 = trace_closure(&tc, || work_loop(100));
 

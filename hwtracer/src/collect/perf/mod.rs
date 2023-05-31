@@ -8,7 +8,7 @@ use crate::{
     Trace,
 };
 use libc::{c_void, free, geteuid, malloc, size_t};
-use std::{any::Any, convert::TryFrom, fs::File, io::Read, ptr, slice};
+use std::{convert::TryFrom, fs::File, io::Read, slice, sync::Arc};
 
 extern "C" {
     fn hwt_perf_init_collector(
@@ -33,19 +33,13 @@ pub(crate) struct PerfTracer {
 }
 
 impl Tracer for PerfTracer {
-    fn start_collector(&self) -> Result<Box<dyn ThreadTracer>, HWTracerError> {
-        let mut tt = Box::new(PerfThreadTracer::new(self.config.clone()));
-        tt.start()?;
-        Ok(tt)
-    }
-
-    fn stop_collector(&self, tt: Box<dyn ThreadTracer>) -> Result<Box<dyn Trace>, HWTracerError> {
-        tt.as_any().downcast::<PerfThreadTracer>().unwrap().stop()
+    fn start_collector(self: Arc<Self>) -> Result<Box<dyn ThreadTracer>, HWTracerError> {
+        Ok(Box::new(PerfThreadTracer::new(&self)?))
     }
 }
 
 impl PerfTracer {
-    pub(super) fn new(config: PerfCollectorConfig) -> Result<Self, HWTracerError>
+    pub(super) fn new(config: PerfCollectorConfig) -> Result<Arc<Self>, HWTracerError>
     where
         Self: Sized,
     {
@@ -84,62 +78,20 @@ impl PerfTracer {
             }
         }
 
-        Ok(Self { config })
+        Ok(Arc::new(Self { config }))
     }
 }
-///
+
 /// A collector that uses the Linux Perf interface to Intel Processor Trace.
 pub struct PerfThreadTracer {
-    // The configuration for this collector.
-    config: PerfCollectorConfig,
     // Opaque C pointer representing the collector context.
     ctx: *mut c_void,
     // The trace currently being collected, or `None`.
-    trace: Option<Box<PerfTrace>>,
+    trace: Box<PerfTrace>,
 }
 
 impl ThreadTracer for PerfThreadTracer {
-    fn as_any(self: Box<Self>) -> Box<dyn Any> {
-        self
-    }
-}
-
-impl PerfThreadTracer {
-    fn new(config: PerfCollectorConfig) -> Self {
-        Self {
-            config,
-            ctx: ptr::null_mut(),
-            trace: None,
-        }
-    }
-
-    fn start(&mut self) -> Result<(), HWTracerError> {
-        // At the time of writing, we have to use a fresh Perf file descriptor to ensure traces
-        // start with a `PSB+` packet sequence. This is required for correct instruction-level and
-        // block-level decoding. Therefore we have to re-initialise for each new tracing session.
-        let mut cerr = PerfPTCError::new();
-        self.ctx = unsafe {
-            hwt_perf_init_collector(&self.config as *const PerfCollectorConfig, &mut cerr)
-        };
-        if self.ctx.is_null() {
-            return Err(cerr.into());
-        }
-
-        // It is essential we box the trace now to stop it from moving. If it were to move, then
-        // the reference which we pass to C here would become invalid. The interface to
-        // `stop_collector` needs to return a Box<Tracer> anyway, so it's no big deal.
-        //
-        // Note that the C code will mutate the trace's members directly.
-        let mut trace = Box::new(PerfTrace::new(self.config.initial_trace_bufsize)?);
-        let mut cerr = PerfPTCError::new();
-        if !unsafe { hwt_perf_start_collector(self.ctx, &mut *trace, &mut cerr) } {
-            return Err(cerr.into());
-        }
-        self.trace = Some(trace);
-        Ok(())
-    }
-
-    fn stop(mut self: Box<Self>) -> Result<Box<dyn Trace>, HWTracerError> {
+    fn stop_collector(self: Box<Self>) -> Result<Box<dyn Trace>, HWTracerError> {
         let mut cerr = PerfPTCError::new();
         let rc = unsafe { hwt_perf_stop_collector(self.ctx, &mut cerr) };
         if !rc {
@@ -151,7 +103,35 @@ impl PerfThreadTracer {
             return Err(cerr.into());
         }
 
-        Ok(self.trace.take().unwrap())
+        Ok(self.trace)
+    }
+}
+
+impl PerfThreadTracer {
+    fn new(tracer: &PerfTracer) -> Result<Self, HWTracerError> {
+        // At the time of writing, we have to use a fresh Perf file descriptor to ensure traces
+        // start with a `PSB+` packet sequence. This is required for correct instruction-level and
+        // block-level decoding. Therefore we have to re-initialise for each new tracing session.
+        let mut cerr = PerfPTCError::new();
+        let ctx = unsafe {
+            hwt_perf_init_collector(&tracer.config as *const PerfCollectorConfig, &mut cerr)
+        };
+        if ctx.is_null() {
+            return Err(cerr.into());
+        }
+
+        // It is essential we box the trace now to stop it from moving. If it were to move, then
+        // the reference which we pass to C here would become invalid. The interface to
+        // `stop_collector` needs to return a Box<Tracer> anyway, so it's no big deal.
+        //
+        // Note that the C code will mutate the trace's members directly.
+        let mut trace = Box::new(PerfTrace::new(tracer.config.initial_trace_bufsize)?);
+        let mut cerr = PerfPTCError::new();
+        if !unsafe { hwt_perf_start_collector(ctx, &mut *trace, &mut cerr) } {
+            return Err(cerr.into());
+        }
+
+        Ok(Self { ctx, trace })
     }
 }
 
@@ -240,8 +220,9 @@ mod tests {
         errors::HWTracerError,
         work_loop,
     };
+    use std::sync::Arc;
 
-    fn mk_collector() -> Box<dyn Tracer> {
+    fn mk_collector() -> Arc<dyn Tracer> {
         default_tracer_for_platform().unwrap()
     }
 
@@ -289,7 +270,7 @@ mod tests {
 
         let tt = tracer.start_collector().unwrap();
         let res = work_loop(10000);
-        let trace = tracer.stop_collector(tt).unwrap();
+        let trace = tt.stop_collector().unwrap();
 
         println!("res: {}", res); // Stop over-optimisation.
         assert!(trace.capacity() > start_bufsize);
