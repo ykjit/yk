@@ -1,4 +1,4 @@
-// ignore: Requires stopgap support for global variables.
+// ignore: Shadow stack doesn't currently support dynamically sized stack.
 // Run-time:
 //   env-var: YKD_PRINT_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
@@ -53,6 +53,8 @@
 //     ...
 //     Indirect: 3 ...
 //     ...
+
+// Test basic interpreter.
 
 #include <assert.h>
 #include <stdbool.h>

@@ -713,7 +713,7 @@ class JITModBuilder {
     // back to it during a guard failure. To solve this we need to assign the
     // incoming value to a new SSA variable to make sure there's a mapping from
     // a JITMod value back to an AOT value and that the latter is initialised
-    // in the stopgap interpreter. Unfortunately for us, LLVM doesn't have a
+    // during deoptimisation. Unfortunately for us, LLVM doesn't have a
     // simple assignment instruction so we have to emulate one using a select
     // instruction.
     if (isa<GlobalVariable>(V)) {
@@ -829,7 +829,7 @@ class JITModBuilder {
     IRBuilder<> FailBuilder(GuardFailBB);
 
     // Add the control point struct to the live variables we pass into the
-    // `deoptimize` call so the stopgap interpreter can access it.
+    // `deoptimize` call so that it can be accessed.
     Value *YKCPArg = JITFunc->getArg(JITFUNC_ARG_INPUTS_STRUCT_IDX);
     std::tuple<size_t, size_t, Instruction *, size_t> YkCPAlloca =
         getYkCPAlloca();

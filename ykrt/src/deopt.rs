@@ -84,7 +84,7 @@ struct LiveAOTVals {
 compile_error!("__llvm_deoptimize() not yet implemented for this platform");
 
 /// The `__llvm__deoptimize()` function required by `llvm.experimental.deoptimize` intrinsic, that
-/// we use for exiting to the stop-gap interpreter on guard failure.
+/// is called during a guard failure.
 #[cfg(target_arch = "x86_64")]
 #[naked]
 #[no_mangle]
@@ -103,7 +103,7 @@ extern "C" fn __llvm_deoptimize(
     unsafe {
         asm!(
             // Save registers that may be referenced by the stackmap to the stack before they get
-            // overwritten, so that we read their values later during stopgapping.
+            // overwritten, so that we can read their values later during deoptimisation.
             // FIXME: Add other registers that may be referenced by the stackmap.
             "push rsp",
             "push rbp",
@@ -177,9 +177,9 @@ unsafe extern "C" fn __ykrt_deopt(
     // Extract live values from the stackmap.
     // Skip first live variable that contains 3 unrelated locations (CC, Flags, Num Deopts).
     for (i, locs) in live_vars.iter().skip(1).enumerate() {
-        // The stopgap interpreter assumes that each live value has at most one location. This
-        // isn't always true. Fixing it could be involved, but since we are planning on deleting
-        // the stopgap interpreter, let's just add an assertion for now.
+        // We currently assume that live variables have at most one location. We currently encode
+        // extra locations inside a single location. But we are running out of space so we might
+        // need to extend stackmaps later to allow for multiple locations per variable.
         assert!(locs.len() == 1);
         let l = locs.get(0).unwrap();
         match l {

@@ -1,3 +1,10 @@
+// Run-time:
+//   env-var: YKD_SERIALISE_COMPILATION=1
+//   env-var: YKD_PRINT_JITSTATE=1
+//   stderr:
+//     ...
+//     jit-state: enter-jit-code
+//     ...
 
 // Check that we can call a static function with internal linkage from the same
 // compilation unit.
@@ -7,7 +14,7 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-static int call_me(int x) {
+__attribute__((noinline)) static int call_me(int x) {
   NOOPT_VAL(x);
   if (x == 5)
     return 1;

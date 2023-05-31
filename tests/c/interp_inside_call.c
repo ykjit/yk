@@ -19,7 +19,7 @@
 //     i: 2 ret: 6
 //     i: 1 ret: 105
 
-// Check that we can stopgap outside of nested, inlined calls.
+// Simple guard failure test.
 
 #include <stdio.h>
 #include <stdlib.h>

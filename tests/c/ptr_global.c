@@ -1,4 +1,3 @@
-// ignore: Requires global variables support in stopgap.
 // Run-time:
 //   env-var: YKD_PRINT_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
@@ -6,7 +5,7 @@
 //   stderr:
 //     ...
 //     i=25
-//     jit-state: stopgap
+//     jit-state: deoptimise
 //     ...
 
 // Check that tracing mutation of a global pointer works.
