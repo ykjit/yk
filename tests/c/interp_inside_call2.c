@@ -19,7 +19,7 @@
 //     i: 2 ret: 9
 //     i: 1 ret: 108
 
-// Check that we can stopgap outside of nested, inlined calls.
+// Test deoptimisation inside nested call.
 
 #include <stdio.h>
 #include <stdlib.h>

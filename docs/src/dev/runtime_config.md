@@ -47,8 +47,6 @@ When defined, `YKD_PRINT_JITSTATE` causes the system to emit extra information
  * `jit-state: exit-jit-code` is printed when the system stops executing
    JITted code.
 
-FIXME: Add stop-gapping states once finalised.
-
 Note that there are no `start-interpreting` and `stop-interpreting`
 notifications: if the system is not currently tracing or executing JITted code,
 then it is implicitly interpreting.

@@ -1,4 +1,4 @@
-// ignore: needs a non-exiting stop-gap interpreter.
+// ignore: Shadow stack doesn't currently support dynamically sized stack.
 // Run-time:
 //   env-var: YKD_PRINT_JITSTATE=1
 //   stderr:
@@ -7,9 +7,6 @@
 //     ...
 
 // Check that compiling and running traces in parallel works.
-//
-// FIXME: this requires a stop-gap interpreter which does not simply exit.
-// See: https://github.com/ykjit/yk/pull/516#issuecomment-1062775714
 
 #include <assert.h>
 #include <err.h>

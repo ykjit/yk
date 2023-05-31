@@ -1,4 +1,3 @@
-// ignore: Requires function calls in stopgap interpreter.
 // Run-time:
 //   env-var: YKD_PRINT_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
@@ -16,7 +15,7 @@
 //     jit-state: exit-jit-code
 //     jit-state: enter-jit-code
 //     1:21
-//     jit-state: stopgap
+//     jit-state: deoptimise
 //     ...
 
 // Check that recursive function calls are not unrolled.

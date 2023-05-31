@@ -30,8 +30,6 @@
   "++++++++++[>+++++++>++++++++++>+++>+<<<<-]>++.>+.+++++++..+++.>++.<<++++++" \
   "+++++++++.>.+++.------.--------.>+.>."
 
-// FIXME: This only returns an integer due to a shortcoming of the stopgap interpreter:
-// https://github.com/ykjit/yk/issues/537
 int interp(char *prog, char *prog_end, char *cells, char *cells_end, YkMT *mt,
            YkLocation *yklocs) {
   char *instr = prog;
