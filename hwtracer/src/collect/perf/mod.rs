@@ -179,15 +179,6 @@ impl PerfTrace {
 }
 
 impl Trace for PerfTrace {
-    /// Write the raw trace packets into the specified file.
-    #[cfg(test)]
-    fn to_file(&self, file: &mut File) {
-        use std::io::prelude::*;
-
-        let slice = unsafe { slice::from_raw_parts(self.buf.0 as *const u8, self.len as usize) };
-        file.write_all(slice).unwrap();
-    }
-
     /// Return the raw bytes of the trace.
     fn bytes(&self) -> &[u8] {
         unsafe { slice::from_raw_parts(self.buf.0, usize::try_from(self.len).unwrap()) }
