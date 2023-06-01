@@ -1,5 +1,3 @@
-#![feature(fn_traits)]
-
 use rerun_except::rerun_except;
 use std::env;
 use std::path::PathBuf;

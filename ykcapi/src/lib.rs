@@ -7,9 +7,6 @@
 //! other crates are regular `rlibs`.
 
 #![allow(clippy::missing_safety_doc)]
-#![feature(c_variadic)]
-#![feature(naked_functions)]
-#![feature(lazy_cell)]
 
 use std::{
     ffi::{c_char, c_void, CString},

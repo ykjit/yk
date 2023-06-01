@@ -1,5 +1,3 @@
-#![feature(fn_traits)]
-
 use rerun_except::rerun_except;
 use std::{env, process::Command};
 use ykbuild::{apply_llvm_ld_library_path, completion_wrapper::CompletionWrapper, ykllvm_bin};
