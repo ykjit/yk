@@ -46,7 +46,7 @@ fn main() {
     }
 
     // Generate a `compile_commands.json` database for clangd.
-    let ccg = CompletionWrapper::new(ykllvm_bin("clang++"), "ykllvmwrap");
+    let ccg = CompletionWrapper::new(ykllvm_bin("clang++"), "yktracec");
     for (k, v) in ccg.build_env() {
         env::set_var(k, v);
     }
