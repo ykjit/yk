@@ -1,2 +1,2 @@
 CompileFlags:
-    CompilationDatabase: ../target/debug/clangd/ykllvmwrap/
+    CompilationDatabase: ../target/debug/clangd/yktracec/
