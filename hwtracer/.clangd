@@ -1,2 +1,2 @@
 CompileFlags:
-    CompilationDatabase: ../target/compile_commands/hwtracer/
+    CompilationDatabase: ../target/debug/clangd/hwtracer/
