@@ -20,8 +20,6 @@ use work_loop::work_loop;
 
 pub use errors::HWTracerError;
 use std::fmt::Debug;
-#[cfg(test)]
-use std::fs::File;
 
 /// Represents a generic trace.
 ///
@@ -35,10 +33,4 @@ pub trait Trace: Debug + Send {
 
     /// Get the size of the trace in bytes.
     fn len(&self) -> usize;
-
-    /// Dump the trace to the specified filename.
-    ///
-    /// The exact format varies depending on what kind of trace it is.
-    #[cfg(test)]
-    fn to_file(&self, file: &mut File);
 }
