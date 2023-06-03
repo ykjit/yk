@@ -270,14 +270,13 @@ mod tests {
     /// Check that an invalid data buffer size causes an error.
     #[test]
     fn test_config_bad_data_bufsize() {
-        let mut cfg = PerfCollectorConfig::default();
-        cfg.data_bufsize = 3;
+        let cfg = PerfCollectorConfig {
+            data_bufsize: 3,
+            ..PerfCollectorConfig::default()
+        };
         match PerfTracer::new(cfg) {
             Err(HWTracerError::BadConfig(s))
-                if s == "data_bufsize must be a positive power of 2" =>
-            {
-                ()
-            }
+                if s == "data_bufsize must be a positive power of 2" => {}
             _ => panic!(),
         }
     }
@@ -285,14 +284,13 @@ mod tests {
     /// Check that an invalid aux buffer size causes an error.
     #[test]
     fn test_config_bad_aux_bufsize() {
-        let mut cfg = PerfCollectorConfig::default();
-        cfg.aux_bufsize = 3;
+        let cfg = PerfCollectorConfig {
+            aux_bufsize: 3,
+            ..PerfCollectorConfig::default()
+        };
         match PerfTracer::new(cfg) {
             Err(HWTracerError::BadConfig(s))
-                if s == "aux_bufsize must be a positive power of 2" =>
-            {
-                ()
-            }
+                if s == "aux_bufsize must be a positive power of 2" => {}
             _ => panic!(),
         }
     }
