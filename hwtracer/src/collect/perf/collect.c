@@ -11,6 +11,7 @@
 #include <semaphore.h>
 #include <stdatomic.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,8 +22,6 @@
 #include <syscall.h>
 #include <time.h>
 #include <unistd.h>
-
-#include "hwtracer_private.h"
 
 #define SYSFS_PT_TYPE "/sys/bus/event_source/devices/intel_pt/type"
 #define MAX_PT_TYPE_STR 8
@@ -35,6 +34,20 @@
 #ifndef INFTIM
 #define INFTIM -1
 #endif
+
+enum hwt_cerror_kind {
+  hwt_cerror_unused,
+  hwt_cerror_unknown,
+  hwt_cerror_errno,
+  hwt_cerror_pt,
+};
+
+#define PT_ERROR_OVERFLOW 0
+
+struct hwt_cerror {
+  enum hwt_cerror_kind kind; // What sort of error is this?
+  int code;                  // The error code itself.
+};
 
 /*
  * Stores all information about the collector.
@@ -125,6 +138,7 @@ static bool poll_loop(int, int, struct perf_event_mmap_page *, void *,
                       struct hwt_perf_trace *, struct hwt_cerror *);
 static void *collector_thread(void *);
 static int open_perf(size_t, struct hwt_cerror *);
+void hwt_set_cerr(struct hwt_cerror *, int, int);
 
 // Exposed Prototypes.
 struct hwt_perf_ctx *hwt_perf_init_collector(struct hwt_perf_collector_config *,

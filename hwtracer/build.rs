@@ -39,7 +39,6 @@ fn main() {
     println!("cargo:rustc-cfg=decoder_ykpt");
 
     c_build.include("src/util");
-    c_build.include("src"); // to find `hwtracer_private.h`.
     c_build.compile("hwtracer_c");
 
     // Additional circumstances under which to re-run this build.rs.
