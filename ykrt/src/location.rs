@@ -8,13 +8,15 @@ use std::{
     },
 };
 
-use crate::mt::{HotThreshold, TraceFailureThreshold};
+use crate::{
+    mt::{HotThreshold, TraceFailureThreshold},
+    trace::CompiledTrace,
+};
 use parking_lot::Mutex;
 use parking_lot_core::{
     park, unpark_one, ParkResult, SpinWait, UnparkResult, UnparkToken, DEFAULT_PARK_TOKEN,
 };
 use strum::EnumDiscriminants;
-use yktrace::CompiledTrace;
 
 /// A `Location` stores state that the meta-tracer needs to identify hot loops and run associated
 /// machine code.

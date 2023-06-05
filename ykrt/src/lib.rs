@@ -9,6 +9,7 @@
 mod deopt;
 mod location;
 pub(crate) mod mt;
+pub mod trace;
 
 pub use self::location::Location;
 pub use self::mt::{HotThreshold, MT};

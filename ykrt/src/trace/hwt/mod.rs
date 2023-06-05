@@ -1,7 +1,6 @@
 //! Hardware tracing via ykrustc.
 
-use super::{IRTrace, ThreadTracer, Tracer, UnmappedTrace};
-use crate::errors::InvalidTraceError;
+use super::{errors::InvalidTraceError, IRTrace, ThreadTracer, Tracer, UnmappedTrace};
 use hwtracer::decode::TraceDecoderBuilder;
 use std::{error::Error, sync::Arc};
 

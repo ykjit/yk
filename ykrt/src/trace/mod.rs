@@ -1,6 +1,5 @@
 //! Utilities for collecting and decoding traces.
 
-#![feature(naked_functions)]
 #![allow(clippy::len_without_is_empty)]
 #![allow(clippy::new_without_default)]
 #![allow(clippy::missing_safety_doc)]

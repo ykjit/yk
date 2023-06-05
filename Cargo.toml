@@ -6,7 +6,6 @@ members = [
     "ykcapi",
     "yktracec",
     "ykrt",
-    "yktrace",
     "ykutil",
     "yksmp",
     "ykfr",

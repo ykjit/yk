@@ -20,10 +20,12 @@ use parking_lot::{Condvar, Mutex, MutexGuard};
 #[cfg(feature = "yk_jitstate_debug")]
 use std::sync::LazyLock;
 
-use crate::location::{HotLocation, HotLocationKind, Location, LocationInner};
 #[cfg(feature = "yk_jitstate_debug")]
 use crate::print_jit_state;
-use yktrace::{CompiledTrace, ThreadTracer, Tracer, UnmappedTrace};
+use crate::{
+    location::{HotLocation, HotLocationKind, Location, LocationInner},
+    trace::{default_tracer_for_platform, CompiledTrace, ThreadTracer, Tracer, UnmappedTrace},
+};
 
 // The HotThreshold must be less than a machine word wide for [`Location::Location`] to do its
 // pointer tagging thing. We therefore choose a type which makes this statically clear to
@@ -76,7 +78,7 @@ impl MT {
             job_queue: Arc::new((Condvar::new(), Mutex::new(VecDeque::new()))),
             max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
             active_worker_threads: AtomicUsize::new(0),
-            tracer: yktrace::default_tracer_for_platform()?,
+            tracer: default_tracer_for_platform()?,
         })
     }
 
