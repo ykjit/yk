@@ -9,18 +9,8 @@ license = "Apache-2.0 OR MIT"
 crate-type = ["cdylib"]
 
 [dependencies]
-hwtracer = { path = "../hwtracer" }
 libc = "0.2.117"
-yktracec = { path = "../yktracec" }
 ykrt = { path = "../ykrt" }
-
-[dependencies.llvm-sys]
-# note: using a git version to get llvm linkage features in llvm-sys (not in a
-# release at the time of writing)
-git = "https://gitlab.com/taricorp/llvm-sys.rs"
-rev = "678b3da2b2239ae12766c964e6e613c0d82b5f37"
-# because yk already links llvm elsewhere.
-features = ["no-llvm-linking"]
 
 [build-dependencies]
 ykbuild = { path = "../ykbuild" }
