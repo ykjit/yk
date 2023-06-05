@@ -49,7 +49,7 @@ fn run_suite(opt: &'static str, force_decoder: &'static str) {
     for (k, v) in ccg.build_env() {
         env::set_var(k, v);
     }
-    let wrapper_path = ccg.wrapper_path().to_owned();
+    let wrapper_path = ccg.wrapper_path();
 
     LangTester::new()
         .test_dir("c")

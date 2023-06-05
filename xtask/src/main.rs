@@ -27,15 +27,31 @@ fn clang_format() {
             match ext.to_str().unwrap() {
                 "h" | "c" | "cpp" | "cc" => {
                     let clang_format = ykllvm_bin("clang-format");
-                    let res = Command::new(&clang_format)
+                    let mut err_msg = None;
+                    match Command::new(&clang_format)
                         .arg("-i")
                         .arg(entry.path())
                         .output()
-                        .expect(&format!("Failed to execute {:?}", clang_format));
-                    if !res.status.success() {
+                    {
+                        Ok(r) => {
+                            let stderr =
+                                std::str::from_utf8(&r.stderr).unwrap_or("<non UTF-8 stderr>");
+                            match r.status.code() {
+                                Some(0) => (),
+                                Some(c) => {
+                                    err_msg = Some(format!("returned exit code {c}:\n\n{stderr}"))
+                                }
+                                None => {
+                                    err_msg = Some("terminated by signal:\n\n{stderr}".to_owned())
+                                }
+                            }
+                        }
+                        Err(e) => err_msg = Some(e.to_string()),
+                    }
+                    if let Some(m) = err_msg {
                         panic!(
-                            "{:?} failed on {}",
-                            clang_format,
+                            "{} -i {}: {m}",
+                            clang_format.as_path().to_str().unwrap(),
                             entry.path().to_str().unwrap()
                         );
                     }

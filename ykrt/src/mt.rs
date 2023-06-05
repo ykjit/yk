@@ -168,7 +168,7 @@ impl MT {
                 loop {
                     #[cfg(feature = "yk_jitstate_debug")]
                     print_jit_state("enter-jit-code");
-                    match unsafe { &*ctr }.exec(ctrlp_vars, frameaddr) {
+                    match ctr.exec(ctrlp_vars, frameaddr) {
                         TRACE_RETURN_SUCCESS => {
                             #[cfg(feature = "yk_jitstate_debug")]
                             print_jit_state("exit-jit-code");
@@ -311,7 +311,7 @@ impl MT {
                         // FIXME: https://github.com/ykjit/yk/issues/519
                         TransitionLocation::NoAction
                     } else {
-                        TransitionLocation::Execute(*ctr)
+                        TransitionLocation::Execute(Arc::clone(ctr))
                     }
                 }
                 HotLocationKind::Compiling(arcmtx) => {
@@ -327,8 +327,7 @@ impl MT {
                             TransitionLocation::NoAction
                         }
                         Some(Some(ctr)) => {
-                            let ctr = Box::into_raw(ctr);
-                            hl.kind = HotLocationKind::Compiled(ctr);
+                            hl.kind = HotLocationKind::Compiled(Arc::clone(&ctr));
                             TransitionLocation::Execute(ctr)
                         }
                     };
@@ -385,7 +384,7 @@ impl MT {
     fn queue_compile_job(
         &self,
         utrace: Box<dyn UnmappedTrace>,
-        mtx: Arc<Mutex<Option<Box<CompiledTrace>>>>,
+        mtx: Arc<Mutex<Option<Arc<CompiledTrace>>>>,
         tracer: Arc<dyn Tracer>,
     ) {
         let do_compile = move || {
@@ -397,7 +396,7 @@ impl MT {
             };
             match irtrace.compile() {
                 Ok((codeptr, di_tmpfile)) => {
-                    let ct = Box::new(CompiledTrace::new(codeptr, di_tmpfile));
+                    let ct = Arc::new(CompiledTrace::new(codeptr, di_tmpfile));
                     // FIXME: although we've now put the compiled trace into the `HotLocation`,
                     // there's no guarantee that the `Location` for which we're compiling will ever
                     // be executed again. In such a case, the memory has, in essence, leaked.
@@ -468,9 +467,9 @@ impl MTThread {
 #[derive(Debug)]
 enum TransitionLocation {
     NoAction,
-    Execute(*const CompiledTrace),
+    Execute(Arc<CompiledTrace>),
     StartTracing,
-    StopTracing(Arc<Mutex<Option<Box<CompiledTrace>>>>),
+    StopTracing(Arc<Mutex<Option<Arc<CompiledTrace>>>>),
 }
 
 #[cfg(test)]
@@ -535,7 +534,7 @@ mod tests {
                     Some(HotLocationKindDiscriminants::Compiling)
                 );
                 mtx.lock()
-                    .replace(Box::new(unsafe { CompiledTrace::new_null() }));
+                    .replace(Arc::new(unsafe { CompiledTrace::new_null() }));
             }
             _ => unreachable!(),
         }
@@ -806,7 +805,7 @@ mod tests {
                                         Some(HotLocationKindDiscriminants::Compiling)
                                     );
                                     mtx.lock()
-                                        .replace(Box::new(unsafe { CompiledTrace::new_null() }));
+                                        .replace(Arc::new(unsafe { CompiledTrace::new_null() }));
                                 }
                                 x => unreachable!("Reached incorrect state {:?}", x),
                             }
@@ -918,7 +917,7 @@ mod tests {
         ));
         if let TransitionLocation::StopTracing(mtx) = mt.transition_location(&loc1) {
             mtx.lock()
-                .replace(Box::new(unsafe { CompiledTrace::new_null() }));
+                .replace(Arc::new(unsafe { CompiledTrace::new_null() }));
         } else {
             panic!();
         }

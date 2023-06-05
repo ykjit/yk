@@ -108,8 +108,8 @@ pub(crate) mod test_helpers {
 
     /// Check that repeated collection using different collectors works.
     pub fn repeated_collection_different_collectors(tcs: [Arc<dyn Tracer>; 10]) {
-        for i in 0..10 {
-            trace_closure(&tcs[i], || work_loop(500));
+        for t in tcs {
+            trace_closure(&t, || work_loop(500));
         }
     }
 

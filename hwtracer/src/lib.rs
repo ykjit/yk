@@ -13,13 +13,10 @@ pub mod decode;
 pub mod errors;
 pub mod llvm_blockmap;
 
-#[cfg(test)]
-mod work_loop;
-#[cfg(test)]
-use work_loop::work_loop;
-
 pub use errors::HWTracerError;
 use std::fmt::Debug;
+#[cfg(test)]
+use std::time::SystemTime;
 
 /// Represents a generic trace.
 ///
@@ -33,4 +30,16 @@ pub trait Trace: Debug + Send {
 
     /// Get the size of the trace in bytes.
     fn len(&self) -> usize;
+}
+
+/// A loop that does some work that we can use to build a trace.
+#[cfg(test)]
+#[inline(never)]
+pub fn work_loop(iters: u64) -> u64 {
+    let mut res = 0;
+    for _ in 0..iters {
+        // Computation which stops the compiler from eliminating the loop.
+        res += SystemTime::now().elapsed().unwrap().subsec_nanos() as u64;
+    }
+    res
 }
