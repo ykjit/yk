@@ -102,7 +102,6 @@ pub fn mk_compiler(
     patch_cp: bool,
 ) -> Command {
     let mut compiler = Command::new(compiler);
-    compiler.env("YKD_PRINT_IR", "1");
 
     let yk_config = [
         &env::var("CARGO_MANIFEST_DIR").unwrap(),

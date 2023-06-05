@@ -1,6 +1,6 @@
 //! The mapper translates a PT trace into an IR trace.
 
-use crate::IRBlock;
+use crate::trace::IRBlock;
 use hwtracer::llvm_blockmap::LLVM_BLOCK_MAP;
 use hwtracer::{Block, HWTracerError};
 use libc::c_void;

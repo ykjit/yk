@@ -5,7 +5,7 @@ set -e
 # The parent directory of this script. Under some obscure circumstances $0 may
 # not be accurate, so we do some quick and dirty sanity checking.
 DIR=`dirname $0`
-if [ ! -d "${DIR}/../yktrace" ]; then
+if [ ! -d "${DIR}/../ykrt" ]; then
     1>&2 echo "error: couldn't find parent directory of yk-config"
     exit 1
 fi

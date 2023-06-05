@@ -4,7 +4,7 @@
 //! `trace_compiler` directory of this crate.
 
 use std::{collections::HashMap, convert::TryInto, env, error::Error, ffi::CString, fs::File};
-use yktrace::{IRBlock, IRTrace};
+use ykrt::trace::{IRBlock, IRTrace};
 
 const BBS_ENV: &str = "YKT_TRACE_BBS";
 
