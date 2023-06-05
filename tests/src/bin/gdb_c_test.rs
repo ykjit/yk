@@ -96,5 +96,5 @@ fn main() {
     }
 
     // Run gdb!
-    gdb.spawn().unwrap().wait().unwrap();
+    gdb.spawn().expect("failed to spawn gdb").wait().unwrap();
 }
