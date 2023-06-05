@@ -440,10 +440,10 @@ pub(crate) struct HotLocation {
 pub(crate) enum HotLocationKind {
     /// Points to executable machine code that can be executed instead of the interpreter for this
     /// HotLocation.
-    Compiled(*const CompiledTrace),
+    Compiled(Arc<CompiledTrace>),
     /// This HotLocation is being compiled in another thread: when compilation has completed the
     /// `Option` will change from `None` to `Some`.
-    Compiling(Arc<Mutex<Option<Box<CompiledTrace>>>>),
+    Compiling(Arc<Mutex<Option<Arc<CompiledTrace>>>>),
     /// This HotLocation has encountered problems (e.g. traces which are too long) and shouldn't be
     /// traced again.
     DontTrace,
