@@ -7,7 +7,6 @@ license = "Apache-2.0 OR MIT"
 
 [dependencies]
 libc = "0.2.97"
-libffi = "3.0.0"
 ykutil = { path = "../ykutil" }
 yksmp = { path = "../yksmp" }
 memmap2 = "0.6"
