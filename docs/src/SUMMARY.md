@@ -7,6 +7,7 @@
 - [Development](./dev/index.md)
   - [Configuring the build](./dev/build_config.md)
   - [Run-time configuration](./dev/runtime_config.md)
+  - [Debugging](./dev/debugging.md)
   - [Profiling](./dev/profiling.md)
   - [Understanding Traces](./dev/understanding_traces.md)
   - [Gotchas](./dev/gotchas.md)
