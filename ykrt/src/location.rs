@@ -348,6 +348,15 @@ impl LocationInner {
         }
     }
 
+    /// Create a new unlocked [LocationInner] with [HotLocation] `hl_ptr`.
+    pub(super) fn from_hotlocation(hl_ptr: *mut HotLocation) -> Self {
+        let hl_ptr = hl_ptr as usize;
+        debug_assert_eq!(hl_ptr & !STATE_TAG, hl_ptr);
+        LocationInner {
+            x: (STATE_TAG & !STATE_IS_COUNTING) | hl_ptr,
+        }
+    }
+
     fn from_usize(x: usize) -> Self {
         LocationInner { x }
     }
@@ -417,17 +426,6 @@ impl LocationInner {
         debug_assert_eq!(count << STATE_NUM_BITS >> STATE_NUM_BITS, count);
         LocationInner {
             x: (self.x & STATE_TAG) | (usize::try_from(count).unwrap() << STATE_NUM_BITS),
-        }
-    }
-
-    /// Set this `State`'s `HotLocation`. It is undefined behaviour for this `State` to already
-    /// have a `HotLocation`.
-    pub(super) fn with_hotlocation(&self, hl_ptr: *mut HotLocation) -> Self {
-        debug_assert!(self.is_counting());
-        let hl_ptr = hl_ptr as usize;
-        debug_assert_eq!(hl_ptr & !STATE_TAG, hl_ptr);
-        LocationInner {
-            x: (self.x & (STATE_TAG & !STATE_IS_COUNTING)) | hl_ptr,
         }
     }
 }
