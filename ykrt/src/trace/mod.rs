@@ -273,7 +273,7 @@ impl CompiledTrace {
         }
     }
 
-    #[cfg(feature = "yk_testing")]
+    #[cfg(any(test, feature = "yk_testing"))]
     #[doc(hidden)]
     /// Create a `CompiledTrace` with null contents. This is unsafe and only intended for testing
     /// purposes where a `CompiledTrace` instance is required, but cannot sensibly be constructed

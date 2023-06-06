@@ -2,8 +2,9 @@
 
 use std::{
     convert::TryFrom,
+    mem,
     sync::{
-        atomic::{AtomicPtr, AtomicUsize, Ordering},
+        atomic::{AtomicUsize, Ordering},
         Arc,
     },
 };
@@ -13,10 +14,17 @@ use crate::{
     trace::CompiledTrace,
 };
 use parking_lot::Mutex;
-use parking_lot_core::{
-    park, unpark_one, ParkResult, SpinWait, UnparkResult, UnparkToken, DEFAULT_PARK_TOKEN,
-};
-use strum::EnumDiscriminants;
+
+#[cfg(target_pointer_width = "64")]
+const STATE_TAG: usize = 0b1; // All of the tag data must fit in this.
+#[cfg(target_pointer_width = "64")]
+const STATE_NUM_BITS: usize = 1;
+
+/// Because hot locations will be most common, we save ourselves the effort of ANDing bits away by
+/// having `STATE_HOT` be 0, expecting that `ptr & !0` will be optimised to just `ptr`.
+const STATE_HOT: usize = 0;
+/// In the not hot state, we have to do `(inner & !1) >> STATE_NUM_BITS` to derive the count.
+const STATE_NOT_HOT: usize = 0b1;
 
 /// A `Location` stores state that the meta-tracer needs to identify hot loops and run associated
 /// machine code.
@@ -32,8 +40,7 @@ use strum::EnumDiscriminants;
 #[repr(C)]
 #[derive(Debug)]
 pub struct Location {
-    // A Location is a state machine which operates as follows (where Counting is the start
-    // state):
+    // A Location is a state machine which operates as follows (where Counting is the start state):
     //
     //              ┌──────────────┐
     //              │              │─────────────┐
@@ -62,39 +69,18 @@ pub struct Location {
     //              └──────────────┘
     //
     // We hope that a Location soon reaches the `Compiled` state (aka "the happy state") and stays
-    // there.
+    // there. However, many Locations will not be used frequently enough to reach such a state, so
+    // we don't want to waste resources on them.
     //
-    // The state machine is encoded in a `usize` in a not-entirely-simple way, as we don't want to
-    // allocate any memory for Locations that do not become hot. The layout is as follows (on a 64
-    // bit machine):
+    // We therefore encode a Location as a tagged integer: in the initial (Counting) state, no
+    // memory is allocated; if the location is used frequently enough it becomes hot, memory
+    // is allocated for it, and a pointer stored instead of an integer. Note that once memory for a
+    // hot location is allocated, it can only be (scheduled for) deallocation when a Location
+    // is dropped, as the Location may have handed out `&` references to that allocated memory.
     //
-    //   bit(s) | 63..3   | 2           | 1         | 0
-    //          | payload | IS_COUNTING | IS_PARKED | IS_LOCKED
-    //
-    // In the `Counting` state, `IS_COUNTING` is set to 1, and `IS_PARKED` and `IS_LOCKED` are
-    // unused and must remain set at 0. The payload representing the count is incremented
-    // locklessly. All other states have `IS_COUNTING` set to 0 and the payload is the address of a
-    // `Box<HotLocation>`, access to which is controlled by `IS_LOCKED`.
-    //
-    // The possible combinations of the counting and mutex bits are thus as follows:
-    //
-    //   payload          | IS_COUNTING | IS_PARKED | IS_LOCKED | Notes
-    //   -----------------+-----------+---------+---------+-----------------------------------
-    //   count            | 1           | 0         | 0         | Start state
-    //                    | 1           | 0         | 1         | Illegal state
-    //                    | 1           | 1         | 0         | Illegal state
-    //                    | 1           | 1         | 1         | Illegal state
-    //   Box<HotLocation> | 0           | 0         | 0         | Not locked, no-one waiting
-    //   Box<HotLocation> | 0           | 0         | 1         | Locked, no thread(s) waiting
-    //   Box<HotLocation> | 0           | 1         | 0         | Not locked, thread(s) waiting
-    //   Box<HotLocation> | 0           | 1         | 1         | Locked, thread(s) waiting
-    //
-    // where `count` is an integer and `Box<HotLocation>` is a pointer to a `malloc`ed block of
-    // memory in the heap containing a `HotLocation` enum.
-    //
-    // The precise semantics of locking and, in particular, parking are subtle: interested readers
-    // are directed to https://github.com/Amanieu/parking_lot/blob/master/src/raw_mutex.rs#L33 for
-    // a more precise definition.
+    // The layout of a Location is as follows: bit 0 = <STATE_NOT_HOT|STATE_HOT>; bits 1..<machine
+    // width> = payload. In the `STATE_NOT_HOT` state, the payload is an integer; in a `STATE_HOT`
+    // state, the payload is a pointer from `Arc::into_raw::<Mutex<HotLocation>>()`.
     inner: AtomicUsize,
 }
 
@@ -103,340 +89,117 @@ impl Location {
     pub fn new() -> Self {
         // Locations start in the counting state with a count of 0.
         Self {
-            inner: AtomicUsize::new(LocationInner::new().x),
+            inner: AtomicUsize::new(STATE_NOT_HOT),
         }
     }
 
-    /// Return this Location's internal state.
-    pub(super) fn load(&self, order: Ordering) -> LocationInner {
-        LocationInner {
-            x: self.inner.load(order),
+    /// If `self` is in the `Counting` state, return its count, or `None` otherwise.
+    pub(crate) fn count(&self) -> Option<HotThreshold> {
+        let x = self.inner.load(Ordering::Relaxed);
+        if x & STATE_NOT_HOT != 0 {
+            // For the `as` to be safe, `HotThreshold` can't be bigger than `usize`
+            debug_assert!(mem::size_of::<HotThreshold>() <= mem::size_of::<usize>());
+            Some((x >> STATE_NUM_BITS) as HotThreshold)
+        } else {
+            None
         }
     }
 
-    pub(super) fn compare_exchange(
-        &self,
-        current: LocationInner,
-        new: LocationInner,
-        success: Ordering,
-        failure: Ordering,
-    ) -> Result<LocationInner, LocationInner> {
-        match self
-            .inner
-            .compare_exchange(current.x, new.x, success, failure)
-        {
-            Ok(x) => Ok(LocationInner { x }),
-            Err(x) => Err(LocationInner { x }),
-        }
-    }
+    /// Change `self`s count to `new` if: `self` is in the `Counting` state; and the current count
+    /// is `old`. If the transition is successful, return `true`.
+    pub(crate) fn count_set(&self, old: HotThreshold, new: HotThreshold) -> bool {
+        // `HotThreshold` must be unsigned
+        debug_assert_eq!(HotThreshold::MIN, 0);
+        // `HotThreshold` can't be bigger than `usize`
+        debug_assert!(mem::size_of::<HotThreshold>() <= mem::size_of::<usize>());
+        // The particular value of `new` must fit in the bits we have available.
+        debug_assert!((new as usize)
+            .checked_shl(u32::try_from(STATE_NUM_BITS).unwrap())
+            .is_some());
 
-    pub(super) fn compare_exchange_weak(
-        &self,
-        current: LocationInner,
-        new: LocationInner,
-        success: Ordering,
-        failure: Ordering,
-    ) -> Result<LocationInner, LocationInner> {
-        match self
-            .inner
-            .compare_exchange_weak(current.x, new.x, success, failure)
-        {
-            Ok(x) => Ok(LocationInner { x }),
-            Err(x) => Err(LocationInner { x }),
-        }
-    }
-
-    /// Locks this `State` with `Acquire` ordering. If the location was in, or moves to, the
-    /// Counting state this will return `Err`.
-    pub(super) fn lock(&self) -> Result<LocationInner, ()> {
-        {
-            let ls = self.load(Ordering::Relaxed);
-            if ls.is_counting() {
-                return Err(());
-            }
-            let new_ls = ls.with_lock().with_unparked();
-            if self
-                .inner
-                .compare_exchange_weak(
-                    ls.with_unlock().with_unparked().x,
-                    new_ls.x,
-                    Ordering::Acquire,
-                    Ordering::Relaxed,
-                )
-                .is_ok()
-            {
-                return Ok(new_ls);
-            }
-        }
-
-        let mut spinwait = SpinWait::new();
-        let mut ls = self.load(Ordering::Relaxed);
-        loop {
-            if ls.is_counting() {
-                return Err(());
-            }
-
-            if !ls.is_locked() {
-                let new_ls = ls.with_lock();
-                match self.inner.compare_exchange_weak(
-                    ls.x,
-                    new_ls.x,
-                    Ordering::Acquire,
-                    Ordering::Relaxed,
-                ) {
-                    Ok(_) => return Ok(new_ls),
-                    Err(x) => ls = LocationInner::from_usize(x),
-                }
-                continue;
-            }
-
-            if !ls.is_parked() {
-                if spinwait.spin() {
-                    ls = self.load(Ordering::Relaxed);
-                    continue;
-                } else if let Err(x) = self.inner.compare_exchange_weak(
-                    ls.x,
-                    ls.with_parked().x,
-                    Ordering::Relaxed,
-                    Ordering::Relaxed,
-                ) {
-                    ls = LocationInner::from_usize(x);
-                    continue;
-                }
-            }
-
-            let key = unsafe { ls.hot_location() } as *const _ as usize;
-            debug_assert_ne!(key, 0);
-            let validate = || {
-                let ls = self.load(Ordering::Relaxed);
-                ls.is_locked() && ls.is_parked()
-            };
-            let before_sleep = || {};
-            let timed_out = |_, _| unreachable!();
-            match unsafe {
-                park(
-                    key,
-                    validate,
-                    before_sleep,
-                    timed_out,
-                    DEFAULT_PARK_TOKEN,
-                    None,
-                )
-            } {
-                ParkResult::Unparked(TOKEN_HANDOFF) => return Ok(self.load(Ordering::Relaxed)),
-                ParkResult::Invalid | ParkResult::Unparked(_) => (),
-                ParkResult::TimedOut => unreachable!(),
-            }
-
-            // Loop back and try locking again
-            spinwait.reset();
-            ls = self.load(Ordering::Relaxed);
-        }
-    }
-
-    /// Unlocks this `State` with `Release` ordering.
-    pub(super) fn unlock(&self) {
-        let ls = self.load(Ordering::Relaxed);
-        debug_assert!(ls.is_locked());
-        debug_assert!(!ls.is_counting());
-        if self
-            .inner
-            .compare_exchange(
-                ls.with_unparked().x,
-                ls.with_unparked().with_unlock().x,
-                Ordering::Release,
+        self.inner
+            .compare_exchange_weak(
+                ((old as usize) << STATE_NUM_BITS) | STATE_NOT_HOT,
+                ((new as usize) << STATE_NUM_BITS) | STATE_NOT_HOT,
+                Ordering::Relaxed,
                 Ordering::Relaxed,
             )
             .is_ok()
-        {
-            return;
-        }
+    }
 
-        // At this point we know another thread has parked itself.
-        let key = unsafe { ls.hot_location() } as *const _ as usize;
-        debug_assert_ne!(key, 0);
-        let callback = |result: UnparkResult| {
-            if result.unparked_threads != 0 && result.be_fair {
-                if !result.have_more_threads {
-                    debug_assert!(ls.is_locked());
-                    self.inner.store(ls.with_unparked().x, Ordering::Relaxed);
+    /// Change `self` to be a [HotLocation] `hl` if: `self` is in the `Counting` state; and the
+    /// count is `old`. If the transition is successful, return a clone of the [Arc] that now
+    /// wraps the [HotLocation].
+    pub(crate) fn count_to_hot_location(
+        &self,
+        old: HotThreshold,
+        hl: HotLocation,
+    ) -> Option<Arc<Mutex<HotLocation>>> {
+        let hl = Arc::new(Mutex::new(hl));
+        let cl: *const Mutex<HotLocation> = Arc::into_raw(Arc::clone(&hl));
+        debug_assert_eq!((cl as usize) & !STATE_TAG, cl as usize);
+        match self.inner.compare_exchange(
+            ((old as usize) << STATE_NUM_BITS) | STATE_NOT_HOT,
+            (cl as usize) | STATE_HOT,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => Some(hl),
+            Err(_) => {
+                unsafe {
+                    Arc::from_raw(cl);
                 }
-                return TOKEN_HANDOFF;
+                None
             }
-
-            if result.have_more_threads {
-                self.inner
-                    .store(ls.with_unlock().with_parked().x, Ordering::Release);
-            } else {
-                self.inner
-                    .store(ls.with_unparked().with_unlock().x, Ordering::Release);
-            }
-            TOKEN_NORMAL
-        };
-        unsafe {
-            unpark_one(key, callback);
         }
     }
 
-    /// Try obtaining a lock, returning the new [LocationInner] if successful. If a lock wasn't
-    /// obtained, the `Location` was either: in the Counting state (for which locks are
-    /// nonsensical); or another thread held the lock.
-    pub(super) fn try_lock(&self) -> Option<LocationInner> {
-        let mut ls = self.load(Ordering::Relaxed);
-        loop {
-            if ls.is_counting() || ls.is_locked() {
-                return None;
-            }
-            let new_ls = ls.with_lock();
-            match self.compare_exchange_weak(ls, new_ls, Ordering::Acquire, Ordering::Relaxed) {
-                Ok(_) => return Some(new_ls),
-                Err(x) => ls = x,
-            }
+    /// If `self` has a [HotLocation] return a reference to the `Mutex` that directly wraps it, or
+    /// `None` otherwise.
+    pub(crate) fn hot_location(&self) -> Option<&Mutex<HotLocation>> {
+        let x = self.inner.load(Ordering::Relaxed);
+        if x & STATE_NOT_HOT == 0 {
+            // `Arc::into_raw::<Mutex<T>>` returns `*mut Mutex<T>` so the address we're wrapping is
+            // a pointer to the `Mutex` itself. By returning a `&` reference we ensure that the
+            // reference to the `Mutex` can't outlive this `Location`.
+            Some(unsafe { &*(x as *const _) })
+        } else {
+            None
+        }
+    }
+
+    /// If `self` has a [HotLocation] return a clone of the [Arc] that wraps it, or `None`
+    /// otherwise.
+    pub(crate) fn hot_location_arc_clone(&self) -> Option<Arc<Mutex<HotLocation>>> {
+        let x = self.inner.load(Ordering::Relaxed);
+        if x & STATE_NOT_HOT == 0 {
+            let raw = unsafe { Arc::from_raw(x as *mut _) };
+            let cl = Arc::clone(&raw);
+            mem::forget(raw);
+            Some(cl)
+        } else {
+            None
         }
     }
 }
 
 impl Drop for Location {
     fn drop(&mut self) {
-        let ls = self.load(Ordering::Relaxed);
-        if !ls.is_counting() {
-            self.lock().unwrap();
-            let ls = self.load(Ordering::Relaxed);
-            let hl = unsafe { ls.hot_location() };
-            if let HotLocationKind::Compiled(_) = hl.kind {
-                // FIXME: we can't drop this memory as another thread may still be executing the
-                // trace that's pointed to. There should be a ref count that we decrement and free
-                // memory if it reaches zero.
-                self.unlock();
-            } else if let HotLocationKind::Compiling(_)
-            | HotLocationKind::DontTrace
-            | HotLocationKind::Tracing(_) = hl.kind
-            {
-                self.unlock();
-                unsafe {
-                    let _ = Box::from_raw(hl);
-                }
-            } else {
-                unreachable!();
-            }
+        let x = self.inner.load(Ordering::Relaxed);
+        if x & STATE_NOT_HOT == 0 {
+            drop(unsafe { Arc::from_raw(x as *mut Mutex<HotLocation>) });
         }
     }
 }
 
-#[cfg(target_pointer_width = "64")]
-const STATE_TAG: usize = 0b111; // All of the other tag data must fit in this.
-#[cfg(target_pointer_width = "64")]
-const STATE_NUM_BITS: usize = 3;
-
-const STATE_IS_LOCKED: usize = 0b001;
-const STATE_IS_PARKED: usize = 0b010;
-const STATE_IS_COUNTING: usize = 0b100;
-
-const TOKEN_NORMAL: UnparkToken = UnparkToken(0);
-const TOKEN_HANDOFF: UnparkToken = UnparkToken(1);
-
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub(super) struct LocationInner {
-    x: usize,
-}
-
-impl LocationInner {
-    /// Return a new `State` in the counting phase with a count 0.
-    pub(super) fn new() -> Self {
-        LocationInner {
-            x: STATE_IS_COUNTING,
-        }
-    }
-
-    /// Create a new unlocked [LocationInner] with [HotLocation] `hl_ptr`.
-    pub(super) fn from_hotlocation(hl_ptr: *mut HotLocation) -> Self {
-        let hl_ptr = hl_ptr as usize;
-        debug_assert_eq!(hl_ptr & !STATE_TAG, hl_ptr);
-        LocationInner {
-            x: (STATE_TAG & !STATE_IS_COUNTING) | hl_ptr,
-        }
-    }
-
-    fn from_usize(x: usize) -> Self {
-        LocationInner { x }
-    }
-
-    pub(super) fn is_locked(&self) -> bool {
-        self.x & STATE_IS_LOCKED != 0
-    }
-
-    pub(super) fn is_parked(&self) -> bool {
-        self.x & STATE_IS_PARKED != 0
-    }
-
-    /// Is the Location in the counting or a non-counting state?
-    pub(super) fn is_counting(&self) -> bool {
-        self.x & STATE_IS_COUNTING != 0
-    }
-
-    /// If, and only if, the Location is in the counting state, return the current count.
-    pub(super) fn count(&self) -> HotThreshold {
-        debug_assert!(self.is_counting());
-        debug_assert!(!self.is_locked());
-        u32::try_from(self.x >> STATE_NUM_BITS).unwrap()
-    }
-
-    /// If this `State` is not counting, return its `HotLocation`. It is undefined behaviour to
-    /// call this function if this `State` is in the counting phase and/or if this `State` is not
-    /// locked.
-    #[allow(clippy::mut_from_ref)]
-    pub(super) unsafe fn hot_location(&self) -> &mut HotLocation {
-        debug_assert!(!self.is_counting());
-        debug_assert!(self.is_locked());
-        &mut *((self.x & !STATE_TAG) as *mut _)
-    }
-
-    /// Return a version of this `State` with the locked bit set.
-    pub(super) fn with_lock(&self) -> LocationInner {
-        LocationInner {
-            x: self.x | STATE_IS_LOCKED,
-        }
-    }
-
-    /// Return a version of this `State` with the locked bit unset.
-    fn with_unlock(&self) -> LocationInner {
-        LocationInner {
-            x: self.x & !STATE_IS_LOCKED,
-        }
-    }
-
-    /// Return a version of this `State` with the parked bit set.
-    fn with_parked(&self) -> LocationInner {
-        LocationInner {
-            x: self.x | STATE_IS_PARKED,
-        }
-    }
-
-    /// Return a version of this `State` with the parked bit unset.
-    fn with_unparked(&self) -> LocationInner {
-        LocationInner {
-            x: self.x & !STATE_IS_PARKED,
-        }
-    }
-
-    /// Return a version of this `State` with the count set to `count`. It is undefined behaviour
-    /// to call this function if this `State` is not in the counting phase.
-    pub(super) fn with_count(&self, count: HotThreshold) -> Self {
-        debug_assert!(self.is_counting());
-        debug_assert_eq!(count << STATE_NUM_BITS >> STATE_NUM_BITS, count);
-        LocationInner {
-            x: (self.x & STATE_TAG) | (usize::try_from(count).unwrap() << STATE_NUM_BITS),
-        }
-    }
-}
-
+#[derive(Debug)]
 pub(crate) struct HotLocation {
     pub(crate) kind: HotLocationKind,
     pub(crate) trace_failure: TraceFailureThreshold,
 }
 
 /// A `Location`'s non-counting states.
-#[derive(EnumDiscriminants)]
+#[derive(Debug)]
 pub(crate) enum HotLocationKind {
     /// Points to executable machine code that can be executed instead of the interpreter for this
     /// HotLocation.
@@ -448,5 +211,5 @@ pub(crate) enum HotLocationKind {
     /// traced again.
     DontTrace,
     /// This HotLocation started a trace which is ongoing.
-    Tracing(Arc<AtomicPtr<HotLocation>>),
+    Tracing(u32),
 }
