@@ -250,7 +250,7 @@ impl MT {
                             kind: HotLocationKind::Tracing(Arc::clone(&mtt.tracing)),
                             trace_failure: 0,
                         }));
-                        let new_ls = LocationInner::new().with_hotlocation(hl_ptr).with_lock();
+                        let new_ls = LocationInner::from_hotlocation(hl_ptr).with_lock();
                         debug_assert!(!ls.is_locked());
                         match loc.compare_exchange(ls, new_ls, Ordering::Acquire, Ordering::Relaxed)
                         {
