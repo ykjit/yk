@@ -1609,6 +1609,9 @@ public:
         MPF->clearResume();
       }
 
+      // The compare instruction immediately following the control point.
+      Value *CtrlPointCmpInstr = nullptr;
+
       // Iterate over all instructions within this block and copy them over
       // to our new module.
       for (; CurInstrIdx < BB->size(); CurInstrIdx++) {
@@ -1749,8 +1752,33 @@ public:
           continue;
         }
 
+        if (isa<CmpInst>(I)) {
+          Value *V = cast<CmpInst>(I)->getOperand(0);
+          if (V == ControlPointCallInst) {
+            // Remember the compare instruction after the control point, so we
+            // can remove the corresponding branch instruction to get rid of an
+            // unneccesary guard failure.
+            CtrlPointCmpInstr = &*I;
+            continue;
+          }
+        }
+
         if ((isa<BranchInst>(I)) || (isa<IndirectBrInst>(I)) ||
             (isa<SwitchInst>(I))) {
+          if (isa<BranchInst>(I)) {
+            BranchInst *B = cast<BranchInst>(I);
+            if (B->isConditional() && B->getCondition() == CtrlPointCmpInstr) {
+              // Don't generate guard failures for the comparison after the
+              // control point. This comparison is used in AOT to do frame
+              // reconstruction, and thus can never fail inside a trace.
+              // Also insert a new block here which will be the entry point for
+              // trace looping.
+              BasicBlock *NewBB = BasicBlock::Create(Builder.getContext(), "", JITFunc);
+              Builder.CreateBr(NewBB);
+              Builder.SetInsertPoint(NewBB);
+              continue;
+            }
+          }
           handleBranchingControlFlow(&*I, Idx, JITFunc, CurBBIdx, CurInstrIdx);
           break;
         }
