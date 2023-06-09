@@ -10,6 +10,7 @@ hwtracer = { path = "../hwtracer" }
 libc = "0.2.117"
 num_cpus = "1.13.1"
 parking_lot = "0.12.0"
+parking_lot_core = "0.9.1"
 tempfile = "3.3.0"
 ykfr = { path = "../ykfr" }
 yksmp = { path = "../yksmp" }
