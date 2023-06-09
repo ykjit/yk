@@ -11,8 +11,6 @@
 //     jit-state: enter-jit-code
 //     i=4
 //     1 3 4 6 2 5 end
-//     jit-state: exit-jit-code
-//     jit-state: enter-jit-code
 //     i=5
 //     1 2 3 4 6 5 end
 //     jit-state: deoptimise

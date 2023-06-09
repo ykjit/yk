@@ -12,8 +12,6 @@
 //     3:21
 //     jit-state: enter-jit-code
 //     2:21
-//     jit-state: exit-jit-code
-//     jit-state: enter-jit-code
 //     1:21
 //     jit-state: deoptimise
 //     ...

@@ -6,6 +6,8 @@
 //     ...
 //     jit-state: enter-jit-code
 //     inside f
+//     inside f
+//     jit-state: deoptimise
 //     jit-state: exit-jit-code
 //     ...
 

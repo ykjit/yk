@@ -449,6 +449,9 @@ class JITModBuilder {
   // A pointer to the instruction that calls the patched control point.
   CallInst *ControlPointCallInst;
 
+  // The entry block for trace looping.
+  BasicBlock *LoopEntryBB = nullptr;
+
   // The function inside which we build the IR for the trace.
   Function *JITFunc;
 
@@ -1773,9 +1776,10 @@ public:
               // reconstruction, and thus can never fail inside a trace.
               // Also insert a new block here which will be the entry point for
               // trace looping.
-              BasicBlock *NewBB = BasicBlock::Create(Builder.getContext(), "", JITFunc);
-              Builder.CreateBr(NewBB);
-              Builder.SetInsertPoint(NewBB);
+              LoopEntryBB = BasicBlock::Create(Builder.getContext(),
+                                               "loopentry", JITFunc);
+              Builder.CreateBr(LoopEntryBB);
+              Builder.SetInsertPoint(LoopEntryBB);
               continue;
             }
           }
@@ -1884,10 +1888,16 @@ public:
       }
     }
 
-    // If the trace succeeded return a null pointer instead of a reconstructed
-    // frame address.
-    Builder.CreateRet(
-        ConstantPointerNull::get(PointerType::get(JITMod->getContext(), 0)));
+    // If the trace succeeded, loop back to the top. The only way to leave the
+    // trace is via a guard failure.
+    if (LoopEntryBB) {
+      Builder.CreateBr(LoopEntryBB);
+    } else {
+      // This is here only because some of our `.ll` tests don't contain a
+      // control point, so the loop-entry block is never created.
+      Builder.CreateRet(
+          ConstantPointerNull::get(PointerType::get(JITMod->getContext(), 0)));
+    }
     finalise(AOTMod, &Builder);
     return JITMod;
   }

@@ -27,11 +27,11 @@
 //     jit-state: enter-jit-code
 //     Can't JIT this!
 //     Or this!
-//     jit-state: exit-jit-code
-//     jit-state: enter-jit-code
 //     Can't JIT this!
 //     Or this!
-//     jit-state: exit-jit-code
+//     Can't JIT this!
+//     Or this!
+//     jit-state: deoptimise
 //     ...
 
 // Check that the `yk_outline` annotation works when a `yk_outline` annotated

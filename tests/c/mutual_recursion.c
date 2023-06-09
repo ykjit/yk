@@ -25,7 +25,6 @@
 //     f: 1
 //     g: 1
 //     f: 0
-//     jit-state: exit-jit-code
 //     ...
 
 // Check that mutual recusrion works.
