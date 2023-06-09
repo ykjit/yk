@@ -10,7 +10,7 @@ use std::{
     ffi::c_void,
     marker::PhantomData,
     sync::{
-        atomic::{AtomicPtr, AtomicU16, AtomicU32, AtomicUsize, Ordering},
+        atomic::{AtomicU16, AtomicU32, AtomicUsize, Ordering},
         Arc,
     },
     thread,
@@ -23,7 +23,7 @@ use std::sync::LazyLock;
 #[cfg(feature = "yk_jitstate_debug")]
 use crate::print_jit_state;
 use crate::{
-    location::{HotLocation, HotLocationKind, Location, LocationInner},
+    location::{HotLocation, HotLocationKind, Location},
     trace::{default_tracer_for_platform, CompiledTrace, ThreadTracer, Tracer, UnmappedTrace},
 };
 
@@ -188,8 +188,9 @@ impl MT {
                 print_jit_state("start-tracing");
                 let tracer = Arc::clone(&self.tracer);
                 match Arc::clone(&tracer).start_collector() {
-                    Ok(tt) => THREAD_MTTHREAD
-                        .with(|mtt| *mtt.thread_tracer.borrow_mut() = Some((tracer, tt))),
+                    Ok(tt) => THREAD_MTTHREAD.with(|mtt| {
+                        *mtt.thread_tracer.borrow_mut() = Some((tracer, tt));
+                    }),
                     Err(e) => todo!("{e:?}"),
                 }
             }
@@ -214,169 +215,129 @@ impl MT {
     /// Perform the next step to `loc` in the `Location` state-machine. If `loc` moves to the
     /// Compiled state, return a pointer to a [CompiledTrace] object.
     fn transition_location(&self, loc: &Location) -> TransitionLocation {
-        let mut ls = loc.load(Ordering::Relaxed);
+        let am_tracing = THREAD_MTTHREAD.with(|mtt| mtt.tracing.borrow().is_some());
+        match loc.hot_location() {
+            Some(hl) => {
+                // In general we don't want to contend with other threads, so if we can't grab the
+                // lock for the [HotLocation], we fall back to the interpreter. However, if this
+                // thread is tracing a loop, we absolutely have to grab the lock, because we need
+                // to see if this is the location we started at: if so, we have to stop tracing.
+                let mut lk = if !am_tracing {
+                    // This thread isn't tracing anything, so we can safely carry on interpreting.
+                    match hl.try_lock() {
+                        Some(lk) => lk,
+                        None => return TransitionLocation::NoAction,
+                    }
+                } else {
+                    // This thread is tracing something, so we must grab the lock.
+                    hl.lock()
+                };
 
-        if ls.is_counting() {
-            debug_assert!(!ls.is_locked());
-            debug_assert!(!ls.is_parked());
-
-            let count = ls.count();
-            if count < self.hot_threshold() {
-                // Try incrementing this location's hot count. We make no guarantees that this will
-                // succeed because under contention we can end up racing with many other threads
-                // and it's not worth our time to halt execution merely to have an accurate hot
-                // count.
-                loc.compare_exchange_weak(
-                    ls,
-                    ls.with_count(count + 1),
-                    Ordering::Relaxed,
-                    Ordering::Relaxed,
-                )
-                .ok();
-                TransitionLocation::NoAction
-            } else {
-                THREAD_MTTHREAD.with(|mtt| {
-                    if !mtt.tracing.load(Ordering::Relaxed).is_null() {
-                        // This thread is already tracing another Location, so either another
-                        // thread needs to trace this Location or this thread needs to wait
-                        // until the current round of tracing has completed. Either way,
-                        // there's no point incrementing the hot count.
-                        TransitionLocation::NoAction
-                    } else {
-                        // To avoid racing with another thread that may also try starting to trace this
-                        // location at the same time, we need to initialise and lock the Location, which we
-                        // perform in a single step.
-                        let hl_ptr = Box::into_raw(Box::new(HotLocation {
-                            kind: HotLocationKind::Tracing(Arc::clone(&mtt.tracing)),
-                            trace_failure: 0,
-                        }));
-                        let new_ls = LocationInner::from_hotlocation(hl_ptr).with_lock();
-                        debug_assert!(!ls.is_locked());
-                        match loc.compare_exchange(ls, new_ls, Ordering::Acquire, Ordering::Relaxed)
-                        {
-                            Ok(_) => {
-                                // We've initialised this Location and obtained the lock, so we can now
-                                // start tracing for real.
-                                mtt.tracing.store(hl_ptr, Ordering::Relaxed);
-                                loc.unlock();
-                                TransitionLocation::StartTracing
+                match lk.kind {
+                    HotLocationKind::Compiled(ref ctr) => {
+                        if am_tracing {
+                            // This thread is tracing something, so bail out as quickly as possible
+                            TransitionLocation::NoAction
+                        } else {
+                            TransitionLocation::Execute(Arc::clone(ctr))
+                        }
+                    }
+                    HotLocationKind::Compiling(ref arcmtx) => {
+                        if am_tracing {
+                            // This thread is tracing something, so bail out as quickly as possible
+                            TransitionLocation::NoAction
+                        } else {
+                            match arcmtx.try_lock().map(|mut x| x.take()) {
+                                None | Some(None) => {
+                                    // `None` means we failed to grab the lock; `Some(None)` means we
+                                    // grabbed the lock but compilation has not yet completed.
+                                    TransitionLocation::NoAction
+                                }
+                                Some(Some(ctr)) => {
+                                    lk.kind = HotLocationKind::Compiled(Arc::clone(&ctr));
+                                    TransitionLocation::Execute(ctr)
+                                }
                             }
-                            Err(x) => {
-                                // We failed for one of:
-                                //   1. The location is locked, meaning that another thread is
-                                //      probably trying to start tracing this location
-                                //   2. The location is not locked, but has moved to a non-counting
-                                //      state, meaning that tracing has started (and perhaps even
-                                //      finished!).
-                                //   3. The hot count is below the hot threshold. That probably
-                                //      means that this thread has been starved for so long that
-                                //      the location has gone through several state changes. Our
-                                //      information about whether this location is worth tracing or
-                                //      not is now out of date.
-                                debug_assert!(
-                                    x.is_locked() || !x.is_counting() || x.count() < ls.count()
-                                );
-                                unsafe { Box::from_raw(hl_ptr) };
+                        }
+                    }
+                    HotLocationKind::Tracing(_) => {
+                        THREAD_MTTHREAD.with(|mtt| {
+                            let hl = loc.hot_location_arc_clone().unwrap();
+                            let mut thread_hl_out = mtt.tracing.borrow_mut();
+                            if let Some(ref thread_hl_in) = *thread_hl_out {
+                                // This thread is tracing something...
+                                if !Arc::ptr_eq(thread_hl_in, &hl) {
+                                    // ...but not this Location.
+                                    TransitionLocation::NoAction
+                                } else {
+                                    // ...and it's this location: we have therefore finished tracing the loop.
+                                    *thread_hl_out = None;
+                                    let mtx = Arc::new(Mutex::new(None));
+                                    lk.kind = HotLocationKind::Compiling(Arc::clone(&mtx));
+                                    TransitionLocation::StopTracing(mtx)
+                                }
+                            } else {
+                                // This thread isn't tracing anything. Note that because we called
+                                // `hot_location_arc_clone` above, the strong count of an `Arc`
+                                // that's no longer being used by that thread will be 2.
+                                if Arc::strong_count(&hl) == 2 {
+                                    // Another thread was tracing this location but it's terminated.
+                                    if lk.trace_failure < self.trace_failure_threshold() {
+                                        // Let's try tracing the location again in this thread.
+                                        lk.trace_failure += 1;
+                                        lk.kind = HotLocationKind::Tracing(0);
+                                        *thread_hl_out = Some(Arc::clone(&hl));
+                                        TransitionLocation::StartTracing
+                                    } else {
+                                        // This location has failed too many times: don't try tracing it
+                                        // again.
+                                        lk.kind = HotLocationKind::DontTrace;
+                                        TransitionLocation::NoAction
+                                    }
+                                } else {
+                                    // Another thread is tracing this location.
+                                    TransitionLocation::NoAction
+                                }
+                            }
+                        })
+                    }
+                    HotLocationKind::DontTrace => TransitionLocation::NoAction,
+                }
+            }
+            None => {
+                if am_tracing {
+                    // This thread is tracing something, so bail out as quickly as possible
+                    return TransitionLocation::NoAction;
+                }
+                match loc.count() {
+                    Some(x) => {
+                        if x < self.hot_threshold() {
+                            loc.count_set(x, x + 1);
+                            TransitionLocation::NoAction
+                        } else {
+                            let hl = HotLocation {
+                                kind: HotLocationKind::Tracing(0),
+                                trace_failure: 0,
+                            };
+                            if let Some(hl) = loc.count_to_hot_location(x, hl) {
+                                THREAD_MTTHREAD.with(|mtt| {
+                                    debug_assert!(mtt.tracing.borrow().is_none());
+                                    *mtt.tracing.borrow_mut() = Some(hl);
+                                });
+                                TransitionLocation::StartTracing
+                            } else {
+                                // We raced with another thread which has started tracing this
+                                // location. We leave it to do the tracing.
                                 TransitionLocation::NoAction
                             }
                         }
                     }
-                })
-            }
-        } else {
-            // There's no point contending with other threads, so in general we don't want to
-            // continually try grabbing the lock.
-            match loc.try_lock() {
-                Some(x) => ls = x,
-                None => {
-                    // If this thread is tracing we need to grab the lock so that we can stop
-                    // tracing, otherwise we return to the interpreter.
-                    if THREAD_MTTHREAD.with(|mtt| mtt.tracing.load(Ordering::Relaxed).is_null()) {
-                        return TransitionLocation::NoAction;
-                    }
-                    match loc.lock() {
-                        Ok(x) => ls = x,
-                        Err(()) => {
-                            // The location transitioned back to the counting state before we'd
-                            // gained a lock.
-                            return TransitionLocation::NoAction;
-                        }
-                    }
-                }
-            }
-            let hl = unsafe { ls.hot_location() };
-            match &hl.kind {
-                HotLocationKind::Compiled(ctr) => {
-                    loc.unlock();
-                    let thread_arc = THREAD_MTTHREAD.with(|mtt| Arc::clone(&mtt.tracing));
-                    if !thread_arc.load(Ordering::Relaxed).is_null() {
-                        // FIXME: https://github.com/ykjit/yk/issues/519
-                        TransitionLocation::NoAction
-                    } else {
-                        TransitionLocation::Execute(Arc::clone(ctr))
-                    }
-                }
-                HotLocationKind::Compiling(arcmtx) => {
-                    let thread_arc = THREAD_MTTHREAD.with(|mtt| Arc::clone(&mtt.tracing));
-                    if !thread_arc.load(Ordering::Relaxed).is_null() {
-                        loc.unlock();
-                        return TransitionLocation::NoAction;
-                    }
-                    let r = match arcmtx.try_lock().map(|mut x| x.take()) {
-                        None | Some(None) => {
-                            // `None` means we failed to grab the lock; `Some(None)` means we
-                            // grabbed the lock but compilation has not yet completed.
-                            TransitionLocation::NoAction
-                        }
-                        Some(Some(ctr)) => {
-                            hl.kind = HotLocationKind::Compiled(Arc::clone(&ctr));
-                            TransitionLocation::Execute(ctr)
-                        }
-                    };
-                    loc.unlock();
-                    r
-                }
-                HotLocationKind::Tracing(ref tracing_arc) => {
-                    let thread_arc = THREAD_MTTHREAD.with(|mtt| Arc::clone(&mtt.tracing));
-                    if !thread_arc.load(Ordering::Relaxed).is_null() {
-                        // This thread is tracing something...
-                        if !Arc::ptr_eq(tracing_arc, &thread_arc) {
-                            // ...but not this Location.
-                            loc.unlock();
-                            return TransitionLocation::NoAction;
-                        }
-                        // ...and it's this location: we have therefore finished tracing the loop.
-                        thread_arc.store(std::ptr::null_mut(), Ordering::Relaxed);
-                        let mtx = Arc::new(Mutex::new(None));
-                        hl.kind = HotLocationKind::Compiling(Arc::clone(&mtx));
-                        loc.unlock();
-                        TransitionLocation::StopTracing(mtx)
-                    } else {
-                        // This thread isn't tracing anything
-                        if Arc::strong_count(tracing_arc) == 1 {
-                            // Another thread was tracing this location but it's terminated.
-                            if hl.trace_failure < self.trace_failure_threshold() {
-                                // Let's try tracing the location again in this thread.
-                                hl.trace_failure += 1;
-                                hl.kind = HotLocationKind::Tracing(Arc::clone(&thread_arc));
-                                thread_arc.store(hl as _, Ordering::Relaxed);
-                                loc.unlock();
-                                return TransitionLocation::StartTracing;
-                            } else {
-                                // This location has failed too many times: don't try tracing it
-                                // again.
-                                hl.kind = HotLocationKind::DontTrace;
-                                loc.unlock();
-                                return TransitionLocation::NoAction;
-                            }
-                        }
-                        loc.unlock();
+                    None => {
+                        // `loc` is being updated by another thread and we've caught it in the
+                        // middle of that. We could spin but we might as well let the other thread
+                        // do its thing and go around the interpreter again.
                         TransitionLocation::NoAction
                     }
-                }
-                HotLocationKind::DontTrace => {
-                    loc.unlock();
-                    TransitionLocation::NoAction
                 }
             }
         }
@@ -431,22 +392,16 @@ impl MT {
 /// Meta-tracer per-thread state. Note that this struct is neither `Send` nor `Sync`: it can only
 /// be accessed from within a single thread.
 pub struct MTThread {
-    /// Is this thread currently tracing something? If so, the [AtomicPtr] points to the
-    /// [HotLocation] currently being traced. If not, the [AtomicPtr] is `null`. Note that no
-    /// reads/writes must depend on the [AtomicPtr], so all loads/stores can be
-    /// [Ordering::Relaxed].
-    ///
-    /// We wrap the [AtomicPtr] in an [Arc] to serve a second purpose: when we start tracing, we
-    /// `clone` the [Arc] and store it in [HotLocation::Tracing]. This allows another thread to
-    /// tell whether the thread that started tracing a [Location] is still alive or not by
-    /// inspecting its strong count (if the strong count is equal to 1 then the thread died while
-    /// tracing). Note that this relies on thread local storage dropping the [MTThread] instance
-    /// and (by implication) dropping the [Arc] and decrementing its strong count. Unfortunately,
-    /// there is no guarantee that thread local storage will be dropped when a thread dies (and
-    /// there is also significant platform variation in regard to dropping thread locals), so this
-    /// mechanism can't be fully relied upon: however, we can't monitor thread death in any other
-    /// reasonable way, so this will have to do.
-    tracing: Arc<AtomicPtr<HotLocation>>,
+    /// Is this thread currently tracing something? If so, this will be a `Some<...>`. This allows
+    /// another thread to tell whether the thread that started tracing a [Location] is still alive
+    /// or not by inspecting its strong count (if the strong count is equal to 1 then the thread
+    /// died while tracing). Note that this relies on thread local storage dropping the [MTThread]
+    /// instance and (by implication) dropping the [Arc] and decrementing its strong count.
+    /// Unfortunately, there is no guarantee that thread local storage will be dropped when a
+    /// thread dies (and there is also significant platform variation in regard to dropping thread
+    /// locals), so this mechanism can't be fully relied upon: however, we can't monitor thread
+    /// death in any other reasonable way, so this will have to do.
+    tracing: RefCell<Option<Arc<Mutex<HotLocation>>>>,
     /// When tracing is active, this will be `RefCell<Some(...)>`; when tracing is inactive
     /// `RefCell<None>`. We need to keep track of the [Tracer] used to start the [ThreadTracer], as
     /// trace mapping requires a reference to the [Tracer].
@@ -458,7 +413,7 @@ pub struct MTThread {
 impl MTThread {
     fn new() -> Self {
         MTThread {
-            tracing: Arc::new(AtomicPtr::new(std::ptr::null_mut())),
+            tracing: RefCell::new(None),
             thread_tracer: RefCell::new(None),
             _dont_send_or_sync_me: PhantomData,
         }
@@ -493,20 +448,9 @@ impl PartialEq for TransitionLocation {
 mod tests {
     extern crate test;
     use super::*;
-    use crate::location::HotLocationKindDiscriminants;
+    use crate::location::HotLocationKind;
     use std::{convert::TryFrom, hint::black_box, sync::atomic::AtomicU64, thread};
     use test::bench::Bencher;
-
-    fn hotlocation_discriminant(loc: &Location) -> Option<HotLocationKindDiscriminants> {
-        match loc.lock() {
-            Ok(ls) => {
-                let x = HotLocationKindDiscriminants::from(&unsafe { &*ls.hot_location() }.kind);
-                loc.unlock();
-                Some(x)
-            }
-            Err(()) => None,
-        }
-    }
 
     #[test]
     fn basic_transitions() {
@@ -516,27 +460,23 @@ mod tests {
         let loc = Location::new();
         for i in 0..mt.hot_threshold() {
             assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
-            assert_eq!(
-                loc.load(Ordering::Relaxed),
-                LocationInner::new().with_count(i + 1)
-            );
+            assert_eq!(loc.count(), Some(i + 1));
         }
         assert_eq!(
             mt.transition_location(&loc),
             TransitionLocation::StartTracing
         );
-        assert_eq!(
-            hotlocation_discriminant(&loc),
-            Some(HotLocationKindDiscriminants::Tracing)
-        );
+        assert!(matches!(
+            loc.hot_location().unwrap().lock().kind,
+            HotLocationKind::Tracing(_)
+        ));
         match mt.transition_location(&loc) {
             TransitionLocation::StopTracing(mtx) => {
-                assert_eq!(
-                    hotlocation_discriminant(&loc),
-                    Some(HotLocationKindDiscriminants::Compiling)
-                );
-                mtx.lock()
-                    .replace(Arc::new(unsafe { CompiledTrace::new_null() }));
+                assert!(matches!(
+                    loc.hot_location().unwrap().lock().kind,
+                    HotLocationKind::Compiling(_)
+                ));
+                *mtx.lock() = Some(Arc::new(unsafe { CompiledTrace::new_null() }));
             }
             _ => unreachable!(),
         }
@@ -565,20 +505,20 @@ mod tests {
                 // otherwise tracing will start, and the assertions will fail.
                 for _ in 0..hot_thrsh / (num_threads * 4) {
                     assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
-                    let c1 = loc.load(Ordering::Relaxed);
-                    assert!(c1.is_counting());
+                    let c1 = loc.count();
+                    assert!(c1.is_some());
                     assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
-                    let c2 = loc.load(Ordering::Relaxed);
-                    assert!(c2.is_counting());
+                    let c2 = loc.count();
+                    assert!(c2.is_some());
                     assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
-                    let c3 = loc.load(Ordering::Relaxed);
-                    assert!(c3.is_counting());
+                    let c3 = loc.count();
+                    assert!(c3.is_some());
                     assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
-                    let c4 = loc.load(Ordering::Relaxed);
-                    assert!(c4.is_counting());
-                    assert!(c4.count() >= c3.count());
-                    assert!(c3.count() >= c2.count());
-                    assert!(c2.count() >= c1.count());
+                    let c4 = loc.count();
+                    assert!(c4.is_some());
+                    assert!(c4.unwrap() >= c3.unwrap());
+                    assert!(c3.unwrap() >= c2.unwrap());
+                    assert!(c2.unwrap() >= c1.unwrap());
                 }
             });
             thrs.push(t);
@@ -589,7 +529,7 @@ mod tests {
         // Thread contention and the use of `compare_exchange_weak` means that there is absolutely
         // no guarantee about what the location's count will be at this point other than it must be
         // at or below the threshold: it could even be (although it's rather unlikely) 0!
-        assert!(loc.load(Ordering::Relaxed).is_counting());
+        assert!(loc.count().is_some());
         loop {
             match mt.transition_location(&loc) {
                 TransitionLocation::NoAction => (),
@@ -634,24 +574,22 @@ mod tests {
                 .join()
                 .unwrap();
             }
-            assert_eq!(
-                hotlocation_discriminant(&loc),
-                Some(HotLocationKindDiscriminants::Tracing)
-            );
-            let ls = loc.lock().unwrap();
-            assert_eq!(unsafe { &*ls.hot_location() }.trace_failure, i);
-            loc.unlock();
+            assert!(matches!(
+                loc.hot_location().unwrap().lock().kind,
+                HotLocationKind::Tracing(_)
+            ));
+            assert_eq!(loc.hot_location().unwrap().lock().trace_failure, i);
         }
 
-        assert_eq!(
-            hotlocation_discriminant(&loc),
-            Some(HotLocationKindDiscriminants::Tracing)
-        );
+        assert!(matches!(
+            loc.hot_location().unwrap().lock().kind,
+            HotLocationKind::Tracing(_)
+        ));
         assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
-        assert_eq!(
-            hotlocation_discriminant(&loc),
-            Some(HotLocationKindDiscriminants::DontTrace)
-        );
+        assert!(matches!(
+            loc.hot_location().unwrap().lock().kind,
+            HotLocationKind::DontTrace
+        ));
     }
 
     #[test]
@@ -683,38 +621,36 @@ mod tests {
                 .join()
                 .unwrap();
             }
-            assert_eq!(
-                hotlocation_discriminant(&loc),
-                Some(HotLocationKindDiscriminants::Tracing)
-            );
-            let ls = loc.lock().unwrap();
-            assert_eq!(unsafe { &*ls.hot_location() }.trace_failure, i);
-            loc.unlock();
+            assert!(matches!(
+                loc.hot_location().unwrap().lock().kind,
+                HotLocationKind::Tracing(_)
+            ));
+            assert_eq!(loc.hot_location().unwrap().lock().trace_failure, i);
         }
 
-        assert_eq!(
-            hotlocation_discriminant(&loc),
-            Some(HotLocationKindDiscriminants::Tracing)
-        );
+        assert!(matches!(
+            loc.hot_location().unwrap().lock().kind,
+            HotLocationKind::Tracing(_)
+        ));
         // Start tracing again...
         assert!(matches!(
             mt.transition_location(&loc),
             TransitionLocation::StartTracing
         ));
-        assert_eq!(
-            hotlocation_discriminant(&loc),
-            Some(HotLocationKindDiscriminants::Tracing)
-        );
+        assert!(matches!(
+            loc.hot_location().unwrap().lock().kind,
+            HotLocationKind::Tracing(_)
+        ));
         // ...and this time let tracing succeed.
         assert!(matches!(
             mt.transition_location(&loc),
             TransitionLocation::StopTracing(_)
         ));
         // If tracing succeeded, we'll now be in the Compiling state.
-        assert_eq!(
-            hotlocation_discriminant(&loc),
-            Some(HotLocationKindDiscriminants::Compiling)
-        );
+        assert!(matches!(
+            loc.hot_location().unwrap().lock().kind,
+            HotLocationKind::Compiling(_)
+        ));
     }
 
     #[test]
@@ -738,20 +674,19 @@ mod tests {
             TransitionLocation::StartTracing
         ));
         assert_eq!(mt.transition_location(&loc2), TransitionLocation::NoAction);
-        assert_eq!(
-            hotlocation_discriminant(&loc1),
-            Some(HotLocationKindDiscriminants::Tracing)
-        );
-        assert!(loc2.load(Ordering::Relaxed).is_counting());
-        assert_eq!(loc2.load(Ordering::Relaxed).count(), THRESHOLD);
+        assert!(matches!(
+            loc1.hot_location().unwrap().lock().kind,
+            HotLocationKind::Tracing(_)
+        ));
+        assert_eq!(loc2.count(), Some(THRESHOLD));
         assert!(matches!(
             mt.transition_location(&loc1),
             TransitionLocation::StopTracing(_)
         ));
-        assert_eq!(
-            hotlocation_discriminant(&loc1),
-            Some(HotLocationKindDiscriminants::Compiling)
-        );
+        assert!(matches!(
+            loc1.hot_location().unwrap().lock().kind,
+            HotLocationKind::Compiling(_)
+        ));
         assert!(matches!(
             mt.transition_location(&loc2),
             TransitionLocation::StartTracing
@@ -787,27 +722,27 @@ mod tests {
                         TransitionLocation::Execute(_) => (),
                         TransitionLocation::StartTracing => {
                             num_starts.fetch_add(1, Ordering::Relaxed);
-                            assert_eq!(
-                                hotlocation_discriminant(&loc),
-                                Some(HotLocationKindDiscriminants::Tracing)
-                            );
+                            assert!(matches!(
+                                loc.hot_location().unwrap().lock().kind,
+                                HotLocationKind::Tracing(_)
+                            ));
 
                             match mt.transition_location(&loc) {
                                 TransitionLocation::StopTracing(mtx) => {
-                                    assert_eq!(
-                                        hotlocation_discriminant(&loc),
-                                        Some(HotLocationKindDiscriminants::Compiling)
-                                    );
+                                    assert!(matches!(
+                                        loc.hot_location().unwrap().lock().kind,
+                                        HotLocationKind::Compiling(_)
+                                    ));
                                     assert_eq!(
                                         mt.transition_location(&loc),
                                         TransitionLocation::NoAction
                                     );
-                                    assert_eq!(
-                                        hotlocation_discriminant(&loc),
-                                        Some(HotLocationKindDiscriminants::Compiling)
-                                    );
-                                    mtx.lock()
-                                        .replace(Arc::new(unsafe { CompiledTrace::new_null() }));
+                                    assert!(matches!(
+                                        loc.hot_location().unwrap().lock().kind,
+                                        HotLocationKind::Compiling(_)
+                                    ));
+                                    *mtx.lock() =
+                                        Some(Arc::new(unsafe { CompiledTrace::new_null() }));
                                 }
                                 x => unreachable!("Reached incorrect state {:?}", x),
                             }
@@ -918,8 +853,7 @@ mod tests {
             TransitionLocation::StartTracing
         ));
         if let TransitionLocation::StopTracing(mtx) = mt.transition_location(&loc1) {
-            mtx.lock()
-                .replace(Arc::new(unsafe { CompiledTrace::new_null() }));
+            *mtx.lock() = Some(Arc::new(unsafe { CompiledTrace::new_null() }));
         } else {
             panic!();
         }
