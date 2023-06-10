@@ -8,6 +8,5 @@ members = [
     "ykrt",
     "ykutil",
     "yksmp",
-    "ykfr",
     "xtask",
 ]

@@ -7,6 +7,7 @@
 #![allow(clippy::new_without_default)]
 
 mod deopt;
+mod frame;
 mod location;
 pub(crate) mod mt;
 pub mod trace;

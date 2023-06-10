@@ -1,4 +1,3 @@
-#![feature(lazy_cell)]
 #![allow(clippy::comparison_chain)]
 #![allow(clippy::missing_safety_doc)]
 

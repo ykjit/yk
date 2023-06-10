@@ -1,10 +1,10 @@
 //! Run-time deoptimisation support: when a guard fails, this module restores the state necessary
 //! to resume interpreter execution.
 
+use crate::frame::{FrameInfo, FrameReconstructor};
 #[cfg(feature = "yk_jitstate_debug")]
 use crate::print_jit_state;
 use std::{arch::asm, ffi::c_void, ptr, slice};
-use ykfr::{self, FrameReconstructor};
 use yksmp::{Location as SMLocation, StackMapParser};
 
 /// Reads out registers spilled to the stack of the previous frame during the deoptimisation
@@ -158,9 +158,8 @@ unsafe extern "C" fn __ykrt_deopt(
     // Parse active frames vector.
     // Note that the memory behind this slice is allocated on the stack (of the compiled trace) and
     // thus doesn't need to be freed.
-    let activeframes = unsafe {
-        slice::from_raw_parts(actframes.addr as *const ykfr::FrameInfo, actframes.length)
-    };
+    let activeframes =
+        unsafe { slice::from_raw_parts(actframes.addr as *const FrameInfo, actframes.length) };
 
     // Restore saved registers from the stack.
     let registers = Registers::from_ptr(rsp);

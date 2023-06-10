@@ -1,4 +1,4 @@
-use crate::SGValue;
+use super::SGValue;
 use llvm_sys::core::*;
 use llvm_sys::prelude::{LLVMBasicBlockRef, LLVMModuleRef, LLVMTypeRef, LLVMValueRef};
 use llvm_sys::target::{LLVMGetModuleDataLayout, LLVMTargetDataRef};
