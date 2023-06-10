@@ -42,7 +42,9 @@ pub fn default_tracer_for_platform() -> Result<Arc<dyn Tracer>, HWTracerError> {
     if pt_supported() {
         Ok(PerfTracer::new(PerfCollectorConfig::default())?)
     } else {
-        todo!();
+        Err(HWTracerError::NoHWSupport(
+            "CPU doesn't support the Processor Trace (PT) feature".to_owned(),
+        ))
     }
 }
 
