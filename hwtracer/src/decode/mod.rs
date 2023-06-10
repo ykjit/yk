@@ -80,7 +80,7 @@ impl TraceDecoderBuilder {
     ///
     /// An error is returned if the requested decoder is inappropriate for the platform or the
     /// requested decoder was not compiled in to hwtracer.
-    pub fn build(mut self) -> Result<Box<dyn TraceDecoder>, HWTracerError> {
+    pub fn build(self) -> Result<Box<dyn TraceDecoder>, HWTracerError> {
         #[cfg(feature = "yk_testing")]
         {
             if let Ok(val) = env::var("YKD_FORCE_TRACE_DECODER") {
