@@ -262,7 +262,7 @@ impl MT {
                                 }
                             }
                         }
-                        HotLocationKind::Tracing(_) => {
+                        HotLocationKind::Tracing => {
                             let hl = loc.hot_location_arc_clone().unwrap();
                             let mut thread_hl_out = mtt.tracing.borrow_mut();
                             if let Some(ref thread_hl_in) = *thread_hl_out {
@@ -286,7 +286,7 @@ impl MT {
                                     if lk.trace_failure < self.trace_failure_threshold() {
                                         // Let's try tracing the location again in this thread.
                                         lk.trace_failure += 1;
-                                        lk.kind = HotLocationKind::Tracing(0);
+                                        lk.kind = HotLocationKind::Tracing;
                                         *thread_hl_out = Some(Arc::clone(&hl));
                                         TransitionLocation::StartTracing
                                     } else {
@@ -316,7 +316,7 @@ impl MT {
                                 TransitionLocation::NoAction
                             } else {
                                 let hl = HotLocation {
-                                    kind: HotLocationKind::Tracing(0),
+                                    kind: HotLocationKind::Tracing,
                                     trace_failure: 0,
                                 };
                                 if let Some(hl) = loc.count_to_hot_location(x, hl) {
@@ -467,7 +467,7 @@ mod tests {
         );
         assert!(matches!(
             loc.hot_location().unwrap().lock().kind,
-            HotLocationKind::Tracing(_)
+            HotLocationKind::Tracing
         ));
         match mt.transition_location(&loc) {
             TransitionLocation::StopTracing(mtx) => {
@@ -575,14 +575,14 @@ mod tests {
             }
             assert!(matches!(
                 loc.hot_location().unwrap().lock().kind,
-                HotLocationKind::Tracing(_)
+                HotLocationKind::Tracing
             ));
             assert_eq!(loc.hot_location().unwrap().lock().trace_failure, i);
         }
 
         assert!(matches!(
             loc.hot_location().unwrap().lock().kind,
-            HotLocationKind::Tracing(_)
+            HotLocationKind::Tracing
         ));
         assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
         assert!(matches!(
@@ -622,14 +622,14 @@ mod tests {
             }
             assert!(matches!(
                 loc.hot_location().unwrap().lock().kind,
-                HotLocationKind::Tracing(_)
+                HotLocationKind::Tracing
             ));
             assert_eq!(loc.hot_location().unwrap().lock().trace_failure, i);
         }
 
         assert!(matches!(
             loc.hot_location().unwrap().lock().kind,
-            HotLocationKind::Tracing(_)
+            HotLocationKind::Tracing
         ));
         // Start tracing again...
         assert!(matches!(
@@ -638,7 +638,7 @@ mod tests {
         ));
         assert!(matches!(
             loc.hot_location().unwrap().lock().kind,
-            HotLocationKind::Tracing(_)
+            HotLocationKind::Tracing
         ));
         // ...and this time let tracing succeed.
         assert!(matches!(
@@ -675,7 +675,7 @@ mod tests {
         assert_eq!(mt.transition_location(&loc2), TransitionLocation::NoAction);
         assert!(matches!(
             loc1.hot_location().unwrap().lock().kind,
-            HotLocationKind::Tracing(_)
+            HotLocationKind::Tracing
         ));
         assert_eq!(loc2.count(), Some(THRESHOLD));
         assert!(matches!(
@@ -723,7 +723,7 @@ mod tests {
                             num_starts.fetch_add(1, Ordering::Relaxed);
                             assert!(matches!(
                                 loc.hot_location().unwrap().lock().kind,
-                                HotLocationKind::Tracing(_)
+                                HotLocationKind::Tracing
                             ));
 
                             match mt.transition_location(&loc) {

@@ -211,5 +211,5 @@ pub(crate) enum HotLocationKind {
     /// traced again.
     DontTrace,
     /// This HotLocation started a trace which is ongoing.
-    Tracing(u32),
+    Tracing,
 }
