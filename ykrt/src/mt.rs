@@ -180,7 +180,7 @@ impl MT {
                     Err(e) => todo!("{e:?}"),
                 }
             }
-            TransitionLocation::StopTracing(x) => {
+            TransitionLocation::StopTracing(hl_arc) => {
                 // Assuming no bugs elsewhere, the `unwrap` cannot fail, because `StartTracing`
                 // will have put a `Some` in the `Rc`.
                 let (trcr, thrdtrcr) =
@@ -189,7 +189,7 @@ impl MT {
                     Ok(utrace) => {
                         #[cfg(feature = "yk_jitstate_debug")]
                         print_jit_state("stop-tracing");
-                        self.queue_compile_job(utrace, x, trcr);
+                        self.queue_compile_job(utrace, hl_arc, trcr);
                     }
                     Err(_) => todo!(),
                 }
@@ -244,24 +244,7 @@ impl MT {
                                 TransitionLocation::Execute(Arc::clone(ctr))
                             }
                         }
-                        HotLocationKind::Compiling(ref arcmtx) => {
-                            if am_tracing {
-                                // This thread is tracing something, so bail out as quickly as possible
-                                TransitionLocation::NoAction
-                            } else {
-                                match arcmtx.try_lock().map(|mut x| x.take()) {
-                                    None | Some(None) => {
-                                        // `None` means we failed to grab the lock; `Some(None)` means we
-                                        // grabbed the lock but compilation has not yet completed.
-                                        TransitionLocation::NoAction
-                                    }
-                                    Some(Some(ctr)) => {
-                                        lk.kind = HotLocationKind::Compiled(Arc::clone(&ctr));
-                                        TransitionLocation::Execute(ctr)
-                                    }
-                                }
-                            }
-                        }
+                        HotLocationKind::Compiling => TransitionLocation::NoAction,
                         HotLocationKind::Tracing => {
                             let hl = loc.hot_location_arc_clone().unwrap();
                             let mut thread_hl_out = mtt.tracing.borrow_mut();
@@ -273,9 +256,8 @@ impl MT {
                                 } else {
                                     // ...and it's this location: we have therefore finished tracing the loop.
                                     *thread_hl_out = None;
-                                    let mtx = Arc::new(Mutex::new(None));
-                                    lk.kind = HotLocationKind::Compiling(Arc::clone(&mtx));
-                                    TransitionLocation::StopTracing(mtx)
+                                    lk.kind = HotLocationKind::Compiling;
+                                    TransitionLocation::StopTracing(hl)
                                 }
                             } else {
                                 // This thread isn't tracing anything. Note that because we called
@@ -287,7 +269,7 @@ impl MT {
                                         // Let's try tracing the location again in this thread.
                                         lk.trace_failure += 1;
                                         lk.kind = HotLocationKind::Tracing;
-                                        *thread_hl_out = Some(Arc::clone(&hl));
+                                        *thread_hl_out = Some(hl);
                                         TransitionLocation::StartTracing
                                     } else {
                                         // This location has failed too many times: don't try tracing it
@@ -342,11 +324,11 @@ impl MT {
         })
     }
 
-    /// Add a compilation job for `sir` to the global work queue.
+    /// Add a compilation job for `utrace` to the global work queue.
     fn queue_compile_job(
         &self,
         utrace: Box<dyn UnmappedTrace>,
-        mtx: Arc<Mutex<Option<Arc<CompiledTrace>>>>,
+        hl_arc: Arc<Mutex<HotLocation>>,
         tracer: Arc<dyn Tracer>,
     ) {
         let do_compile = move || {
@@ -358,11 +340,9 @@ impl MT {
             };
             match irtrace.compile() {
                 Ok((codeptr, di_tmpfile)) => {
-                    let ct = Arc::new(CompiledTrace::new(codeptr, di_tmpfile));
-                    // FIXME: although we've now put the compiled trace into the `HotLocation`,
-                    // there's no guarantee that the `Location` for which we're compiling will ever
-                    // be executed again. In such a case, the memory has, in essence, leaked.
-                    mtx.lock().replace(ct);
+                    hl_arc.lock().kind = HotLocationKind::Compiled(Arc::new(CompiledTrace::new(
+                        codeptr, di_tmpfile,
+                    )));
                 }
                 Err(_e) => {
                     // FIXME: Properly handle failed trace compilation, e.g. depending on the
@@ -425,7 +405,7 @@ enum TransitionLocation {
     NoAction,
     Execute(Arc<CompiledTrace>),
     StartTracing,
-    StopTracing(Arc<Mutex<Option<Arc<CompiledTrace>>>>),
+    StopTracing(Arc<Mutex<HotLocation>>),
 }
 
 #[cfg(test)]
@@ -470,12 +450,13 @@ mod tests {
             HotLocationKind::Tracing
         ));
         match mt.transition_location(&loc) {
-            TransitionLocation::StopTracing(mtx) => {
+            TransitionLocation::StopTracing(_) => {
                 assert!(matches!(
                     loc.hot_location().unwrap().lock().kind,
-                    HotLocationKind::Compiling(_)
+                    HotLocationKind::Compiling
                 ));
-                *mtx.lock() = Some(Arc::new(unsafe { CompiledTrace::new_null() }));
+                loc.hot_location().unwrap().lock().kind =
+                    HotLocationKind::Compiled(Arc::new(unsafe { CompiledTrace::new_null() }));
             }
             _ => unreachable!(),
         }
@@ -648,7 +629,7 @@ mod tests {
         // If tracing succeeded, we'll now be in the Compiling state.
         assert!(matches!(
             loc.hot_location().unwrap().lock().kind,
-            HotLocationKind::Compiling(_)
+            HotLocationKind::Compiling
         ));
     }
 
@@ -684,7 +665,7 @@ mod tests {
         ));
         assert!(matches!(
             loc1.hot_location().unwrap().lock().kind,
-            HotLocationKind::Compiling(_)
+            HotLocationKind::Compiling
         ));
         assert!(matches!(
             mt.transition_location(&loc2),
@@ -727,10 +708,10 @@ mod tests {
                             ));
 
                             match mt.transition_location(&loc) {
-                                TransitionLocation::StopTracing(mtx) => {
+                                TransitionLocation::StopTracing(_) => {
                                     assert!(matches!(
                                         loc.hot_location().unwrap().lock().kind,
-                                        HotLocationKind::Compiling(_)
+                                        HotLocationKind::Compiling
                                     ));
                                     assert_eq!(
                                         mt.transition_location(&loc),
@@ -738,10 +719,12 @@ mod tests {
                                     );
                                     assert!(matches!(
                                         loc.hot_location().unwrap().lock().kind,
-                                        HotLocationKind::Compiling(_)
+                                        HotLocationKind::Compiling
                                     ));
-                                    *mtx.lock() =
-                                        Some(Arc::new(unsafe { CompiledTrace::new_null() }));
+                                    loc.hot_location().unwrap().lock().kind =
+                                        HotLocationKind::Compiled(Arc::new(unsafe {
+                                            CompiledTrace::new_null()
+                                        }));
                                 }
                                 x => unreachable!("Reached incorrect state {:?}", x),
                             }
@@ -851,8 +834,9 @@ mod tests {
             mt.transition_location(&loc1),
             TransitionLocation::StartTracing
         ));
-        if let TransitionLocation::StopTracing(mtx) = mt.transition_location(&loc1) {
-            *mtx.lock() = Some(Arc::new(unsafe { CompiledTrace::new_null() }));
+        if let TransitionLocation::StopTracing(_) = mt.transition_location(&loc1) {
+            loc1.hot_location().unwrap().lock().kind =
+                HotLocationKind::Compiled(Arc::new(unsafe { CompiledTrace::new_null() }));
         } else {
             panic!();
         }
