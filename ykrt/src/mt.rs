@@ -201,68 +201,68 @@ impl MT {
     /// Perform the next step to `loc` in the `Location` state-machine. If `loc` moves to the
     /// Compiled state, return a pointer to a [CompiledTrace] object.
     fn transition_location(&self, loc: &Location) -> TransitionLocation {
-        let am_tracing = THREAD_MTTHREAD.with(|mtt| mtt.tracing.borrow().is_some());
-        match loc.hot_location() {
-            Some(hl) => {
-                // If this thread is tracing something, we *must* grab the [HotLocation] lock,
-                // because we need to know for sure if `loc` is the point at which we should stop
-                // tracing. If this thread is not tracing anything, however, it's not worth
-                // contending too much with other threads: we try moderately hard to grab the lock,
-                // but we don't want to park this thread.
-                let mut lk = if !am_tracing {
-                    // This thread isn't tracing anything, so we try for a little while to grab the
-                    // lock, before giving up and falling back to the interpreter. In general, we
-                    // expect that we'll grab the lock rather quickly. However, there is one nasty
-                    // use-case, which is when an army of threads all start executing the same
-                    // piece of tiny code and end up thrashing away at a single Location,
-                    // particularly when it's in a non-Compiled state: we can end up contending
-                    // horribly for a single lock, and not making much progress. In that case, it's
-                    // probably better to let some threads fall back to the interpreter for another
-                    // iteration, and hopefully allow them to get sufficiently out-of-sync that
-                    // they no longer contend on this one lock as much.
-                    let mut sw = SpinWait::new();
-                    loop {
-                        if let Some(lk) = hl.try_lock() {
-                            break lk;
+        THREAD_MTTHREAD.with(|mtt| {
+            let am_tracing = mtt.tracing.borrow().is_some();
+            match loc.hot_location() {
+                Some(hl) => {
+                    // If this thread is tracing something, we *must* grab the [HotLocation] lock,
+                    // because we need to know for sure if `loc` is the point at which we should stop
+                    // tracing. If this thread is not tracing anything, however, it's not worth
+                    // contending too much with other threads: we try moderately hard to grab the lock,
+                    // but we don't want to park this thread.
+                    let mut lk = if !am_tracing {
+                        // This thread isn't tracing anything, so we try for a little while to grab the
+                        // lock, before giving up and falling back to the interpreter. In general, we
+                        // expect that we'll grab the lock rather quickly. However, there is one nasty
+                        // use-case, which is when an army of threads all start executing the same
+                        // piece of tiny code and end up thrashing away at a single Location,
+                        // particularly when it's in a non-Compiled state: we can end up contending
+                        // horribly for a single lock, and not making much progress. In that case, it's
+                        // probably better to let some threads fall back to the interpreter for another
+                        // iteration, and hopefully allow them to get sufficiently out-of-sync that
+                        // they no longer contend on this one lock as much.
+                        let mut sw = SpinWait::new();
+                        loop {
+                            if let Some(lk) = hl.try_lock() {
+                                break lk;
+                            }
+                            if !sw.spin() {
+                                return TransitionLocation::NoAction;
+                            }
                         }
-                        if !sw.spin() {
-                            return TransitionLocation::NoAction;
-                        }
-                    }
-                } else {
-                    // This thread is tracing something, so we must grab the lock.
-                    hl.lock()
-                };
+                    } else {
+                        // This thread is tracing something, so we must grab the lock.
+                        hl.lock()
+                    };
 
-                match lk.kind {
-                    HotLocationKind::Compiled(ref ctr) => {
-                        if am_tracing {
-                            // This thread is tracing something, so bail out as quickly as possible
-                            TransitionLocation::NoAction
-                        } else {
-                            TransitionLocation::Execute(Arc::clone(ctr))
+                    match lk.kind {
+                        HotLocationKind::Compiled(ref ctr) => {
+                            if am_tracing {
+                                // This thread is tracing something, so bail out as quickly as possible
+                                TransitionLocation::NoAction
+                            } else {
+                                TransitionLocation::Execute(Arc::clone(ctr))
+                            }
                         }
-                    }
-                    HotLocationKind::Compiling(ref arcmtx) => {
-                        if am_tracing {
-                            // This thread is tracing something, so bail out as quickly as possible
-                            TransitionLocation::NoAction
-                        } else {
-                            match arcmtx.try_lock().map(|mut x| x.take()) {
-                                None | Some(None) => {
-                                    // `None` means we failed to grab the lock; `Some(None)` means we
-                                    // grabbed the lock but compilation has not yet completed.
-                                    TransitionLocation::NoAction
-                                }
-                                Some(Some(ctr)) => {
-                                    lk.kind = HotLocationKind::Compiled(Arc::clone(&ctr));
-                                    TransitionLocation::Execute(ctr)
+                        HotLocationKind::Compiling(ref arcmtx) => {
+                            if am_tracing {
+                                // This thread is tracing something, so bail out as quickly as possible
+                                TransitionLocation::NoAction
+                            } else {
+                                match arcmtx.try_lock().map(|mut x| x.take()) {
+                                    None | Some(None) => {
+                                        // `None` means we failed to grab the lock; `Some(None)` means we
+                                        // grabbed the lock but compilation has not yet completed.
+                                        TransitionLocation::NoAction
+                                    }
+                                    Some(Some(ctr)) => {
+                                        lk.kind = HotLocationKind::Compiled(Arc::clone(&ctr));
+                                        TransitionLocation::Execute(ctr)
+                                    }
                                 }
                             }
                         }
-                    }
-                    HotLocationKind::Tracing(_) => {
-                        THREAD_MTTHREAD.with(|mtt| {
+                        HotLocationKind::Tracing(_) => {
                             let hl = loc.hot_location_arc_clone().unwrap();
                             let mut thread_hl_out = mtt.tracing.borrow_mut();
                             if let Some(ref thread_hl_in) = *thread_hl_out {
@@ -300,48 +300,46 @@ impl MT {
                                     TransitionLocation::NoAction
                                 }
                             }
-                        })
+                        }
+                        HotLocationKind::DontTrace => TransitionLocation::NoAction,
                     }
-                    HotLocationKind::DontTrace => TransitionLocation::NoAction,
                 }
-            }
-            None => {
-                if am_tracing {
-                    // This thread is tracing something, so bail out as quickly as possible
-                    return TransitionLocation::NoAction;
-                }
-                match loc.count() {
-                    Some(x) => {
-                        if x < self.hot_threshold() {
-                            loc.count_set(x, x + 1);
-                            TransitionLocation::NoAction
-                        } else {
-                            let hl = HotLocation {
-                                kind: HotLocationKind::Tracing(0),
-                                trace_failure: 0,
-                            };
-                            if let Some(hl) = loc.count_to_hot_location(x, hl) {
-                                THREAD_MTTHREAD.with(|mtt| {
+                None => {
+                    if am_tracing {
+                        // This thread is tracing something, so bail out as quickly as possible
+                        return TransitionLocation::NoAction;
+                    }
+                    match loc.count() {
+                        Some(x) => {
+                            if x < self.hot_threshold() {
+                                loc.count_set(x, x + 1);
+                                TransitionLocation::NoAction
+                            } else {
+                                let hl = HotLocation {
+                                    kind: HotLocationKind::Tracing(0),
+                                    trace_failure: 0,
+                                };
+                                if let Some(hl) = loc.count_to_hot_location(x, hl) {
                                     debug_assert!(mtt.tracing.borrow().is_none());
                                     *mtt.tracing.borrow_mut() = Some(hl);
-                                });
-                                TransitionLocation::StartTracing
-                            } else {
-                                // We raced with another thread which has started tracing this
-                                // location. We leave it to do the tracing.
-                                TransitionLocation::NoAction
+                                    TransitionLocation::StartTracing
+                                } else {
+                                    // We raced with another thread which has started tracing this
+                                    // location. We leave it to do the tracing.
+                                    TransitionLocation::NoAction
+                                }
                             }
                         }
-                    }
-                    None => {
-                        // `loc` is being updated by another thread and we've caught it in the
-                        // middle of that. We could spin but we might as well let the other thread
-                        // do its thing and go around the interpreter again.
-                        TransitionLocation::NoAction
+                        None => {
+                            // `loc` is being updated by another thread and we've caught it in the
+                            // middle of that. We could spin but we might as well let the other thread
+                            // do its thing and go around the interpreter again.
+                            TransitionLocation::NoAction
+                        }
                     }
                 }
             }
-        }
+        })
     }
 
     /// Add a compilation job for `sir` to the global work queue.
