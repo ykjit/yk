@@ -17,6 +17,7 @@ use std::{
 };
 
 use parking_lot::{Condvar, Mutex, MutexGuard};
+use parking_lot_core::SpinWait;
 #[cfg(feature = "yk_jitstate_debug")]
 use std::sync::LazyLock;
 
@@ -218,15 +219,30 @@ impl MT {
         let am_tracing = THREAD_MTTHREAD.with(|mtt| mtt.tracing.borrow().is_some());
         match loc.hot_location() {
             Some(hl) => {
-                // In general we don't want to contend with other threads, so if we can't grab the
-                // lock for the [HotLocation], we fall back to the interpreter. However, if this
-                // thread is tracing a loop, we absolutely have to grab the lock, because we need
-                // to see if this is the location we started at: if so, we have to stop tracing.
+                // If this thread is tracing something, we *must* grab the [HotLocation] lock,
+                // because we need to know for sure if `loc` is the point at which we should stop
+                // tracing. If this thread is not tracing anything, however, it's not worth
+                // contending too much with other threads: we try moderately hard to grab the lock,
+                // but we don't want to park this thread.
                 let mut lk = if !am_tracing {
-                    // This thread isn't tracing anything, so we can safely carry on interpreting.
-                    match hl.try_lock() {
-                        Some(lk) => lk,
-                        None => return TransitionLocation::NoAction,
+                    // This thread isn't tracing anything, so we try for a little while to grab the
+                    // lock, before giving up and falling back to the interpreter. In general, we
+                    // expect that we'll grab the lock rather quickly. However, there is one nasty
+                    // use-case, which is when an army of threads all start executing the same
+                    // piece of tiny code and end up thrashing away at a single Location,
+                    // particularly when it's in a non-Compiled state: we can end up contending
+                    // horribly for a single lock, and not making much progress. In that case, it's
+                    // probably better to let some threads fall back to the interpreter for another
+                    // iteration, and hopefully allow them to get sufficiently out-of-sync that
+                    // they no longer contend on this one lock as much.
+                    let mut sw = SpinWait::new();
+                    loop {
+                        if let Some(lk) = hl.try_lock() {
+                            break lk;
+                        }
+                        if !sw.spin() {
+                            return TransitionLocation::NoAction;
+                        }
                     }
                 } else {
                     // This thread is tracing something, so we must grab the lock.
