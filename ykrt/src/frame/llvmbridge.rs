@@ -1,4 +1,4 @@
-use crate::SGValue;
+use super::SGValue;
 use llvm_sys::core::*;
 use llvm_sys::prelude::{LLVMBasicBlockRef, LLVMModuleRef, LLVMTypeRef, LLVMValueRef};
 use llvm_sys::target::{LLVMGetModuleDataLayout, LLVMTargetDataRef};
@@ -72,36 +72,16 @@ impl BasicBlock {
 #[derive(PartialEq, Eq, Clone, Copy, Hash)]
 pub struct Type(LLVMTypeRef);
 impl Type {
-    pub unsafe fn new(tref: LLVMTypeRef) -> Self {
-        Type(tref)
-    }
-
-    pub fn get_element_type(&self) -> Self {
-        unsafe { Type::new(LLVMGetElementType(self.0)) }
-    }
-
     pub fn kind(&self) -> LLVMTypeKind {
         unsafe { LLVMGetTypeKind(self.0) }
-    }
-
-    pub fn is_pointer(&self) -> bool {
-        matches!(self.kind(), LLVMTypeKind::LLVMPointerTypeKind)
     }
 
     pub fn is_struct(&self) -> bool {
         matches!(self.kind(), LLVMTypeKind::LLVMStructTypeKind)
     }
 
-    pub fn is_vector(&self) -> bool {
-        matches!(self.kind(), LLVMTypeKind::LLVMVectorTypeKind)
-    }
-
     pub fn is_integer(&self) -> bool {
         matches!(self.kind(), LLVMTypeKind::LLVMIntegerTypeKind)
-    }
-
-    pub fn is_void(&self) -> bool {
-        matches!(self.kind(), LLVMTypeKind::LLVMVoidTypeKind)
     }
 
     pub fn get_int_width(&self) -> u32 {

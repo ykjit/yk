@@ -26,10 +26,9 @@
 //     ...
 //     jit-state: enter-jit-code
 //     Can't JIT this!
-//     jit-state: exit-jit-code
-//     jit-state: enter-jit-code
 //     Can't JIT this!
-//     jit-state: exit-jit-code
+//     Can't JIT this!
+//     jit-state: deoptimise
 //     ...
 
 // Check that the `yk_outline` annotation works.

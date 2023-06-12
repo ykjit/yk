@@ -6,7 +6,6 @@
 //     ...
 //     jit-state: enter-jit-code
 //     x=2
-//     jit-state: exit-jit-code
 //     ...
 
 // Check that a call followed immediately by an unconditional branch doesn't

@@ -1,4 +1,3 @@
-#![feature(lazy_cell)]
 #![allow(clippy::comparison_chain)]
 #![allow(clippy::missing_safety_doc)]
 
@@ -60,10 +59,6 @@ pub struct SGValue {
 impl SGValue {
     pub fn new(val: u64, ty: Type) -> Self {
         SGValue { val, ty }
-    }
-
-    pub fn with_type(&self, ty: Type) -> Self {
-        SGValue::new(self.val, ty)
     }
 }
 

@@ -18,8 +18,6 @@
 //     cucumber
 //     jit-state: enter-jit-code
 //     tomato
-//     jit-state: exit-jit-code
-//     jit-state: enter-jit-code
 //     banana
 //     jit-state: deoptimise
 //     ...

@@ -43,8 +43,6 @@ pub type AtomicTraceFailureThreshold = AtomicU16;
 const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
 const DEFAULT_TRACE_FAILURE_THRESHOLD: TraceFailureThreshold = 5;
 
-const TRACE_RETURN_SUCCESS: *const c_void = std::ptr::null();
-
 thread_local! {static THREAD_MTTHREAD: MTThread = MTThread::new();}
 
 #[cfg(feature = "yk_testing")]
@@ -164,25 +162,12 @@ impl MT {
             TransitionLocation::Execute(ctr) => {
                 // FIXME: If we want to free compiled traces, we'll need to refcount (or use
                 // a GC) to know if anyone's executing that trace at the moment.
-                //
-                // FIXME: this loop shouldn't exist. Trace stitching should be implemented in
-                // the trace itself.
-                // https://github.com/ykjit/yk/issues/442
-                loop {
-                    #[cfg(feature = "yk_jitstate_debug")]
-                    print_jit_state("enter-jit-code");
-                    match ctr.exec(ctrlp_vars, frameaddr) {
-                        TRACE_RETURN_SUCCESS => {
-                            #[cfg(feature = "yk_jitstate_debug")]
-                            print_jit_state("exit-jit-code");
-                        }
-                        v => {
-                            #[cfg(feature = "yk_jitstate_debug")]
-                            print_jit_state("exit-jit-code");
-                            return v;
-                        }
-                    }
-                }
+                #[cfg(feature = "yk_jitstate_debug")]
+                print_jit_state("enter-jit-code");
+                let ptr = ctr.exec(ctrlp_vars, frameaddr);
+                #[cfg(feature = "yk_jitstate_debug")]
+                print_jit_state("exit-jit-code");
+                return ptr;
             }
             TransitionLocation::StartTracing => {
                 #[cfg(feature = "yk_jitstate_debug")]
