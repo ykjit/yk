@@ -1793,7 +1793,7 @@ public:
           continue;
         }
 
-        if (Idx > 0 && Idx < InpTrace.Length() - 2) {
+        if (Idx > 0 && Idx < InpTrace.Length() - 1) {
           // Stores and loads into/from YkCtrlPointVars only need to be copied
           // if they appear at the beginning or end of the trace. Any
           // YkCtrlPointVars loads and stores inbetween come from tracing over
@@ -1812,6 +1812,17 @@ public:
                 Stores.insert(Stores.begin(),
                               cast<StoreInst>(I)->getValueOperand());
                 I++;
+              }
+              if (Idx == InpTrace.Length() - 2) {
+                // Once we reached the YkCtrlPointVars stores at the end of the
+                // trace, we're done. We don't need to copy those instructions
+                // over, since all YkCtrlPointVars are stored on the shadow
+                // stack.
+                // FIXME: Once we allow more optimisations in AOT, some of the
+                // YkCtrlPointVars won't be stored on the shadow stack anymore,
+                // and we might have to insert PHI nodes into the loop entry
+                // block.
+                break;
               }
               // Skip frameaddress, control point, and stackmap call
               // instructions.
