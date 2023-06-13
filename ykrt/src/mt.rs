@@ -160,8 +160,6 @@ impl MT {
         match self.transition_location(loc) {
             TransitionLocation::NoAction => (),
             TransitionLocation::Execute(ctr) => {
-                // FIXME: If we want to free compiled traces, we'll need to refcount (or use
-                // a GC) to know if anyone's executing that trace at the moment.
                 #[cfg(feature = "yk_jitstate_debug")]
                 print_jit_state("enter-jit-code");
                 let ptr = ctr.exec(ctrlp_vars, frameaddr);
