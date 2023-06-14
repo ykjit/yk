@@ -69,7 +69,7 @@ impl TraceDecoderBuilder {
     /// Build the trace decoder.
     ///
     /// An error is returned if the requested decoder is inappropriate for the platform or the
-    /// requested decoder was not compiled in to hwtracer.
+    /// requested decoder was not compiled in to perftracer.
     pub fn build(self) -> Result<Box<dyn TraceDecoder>, HWTracerError> {
         self.kind.match_platform()?;
         match self.kind {

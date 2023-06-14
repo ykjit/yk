@@ -6,7 +6,7 @@ edition = "2021"
 license = "Apache-2.0 OR MIT"
 
 [lib]
-# cdylib is reuired for the `hwtracer_ykpt` suite.
+# cdylib is reuired for the `perftracer_ykpt` suite.
 crate-type = ["lib", "cdylib"]
 
 [[test]]
@@ -21,7 +21,7 @@ harness = false
 
 [dependencies]
 clap = { features = ["derive"], version = "4.0.11" }
-hwtracer = { path = "../hwtracer", features = [ "yk_testing" ] }
+perftracer = { path = "../perftracer", features = [ "yk_testing" ] }
 memmap2 = "0.6"
 regex = "1.5.4"
 tempfile = "3.3.0"

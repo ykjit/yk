@@ -1,14 +1,14 @@
 //! Hardware tracing via ykrustc.
 
 use super::{errors::InvalidTraceError, IRTrace, ThreadTracer, Tracer, UnmappedTrace};
-use hwtracer::decode::TraceDecoderBuilder;
+use perftracer::decode::TraceDecoderBuilder;
 use std::{error::Error, sync::Arc};
 
 pub mod mapper;
 pub use mapper::HWTMapper;
 
 pub struct HWTracer {
-    backend: Arc<dyn hwtracer::Tracer>,
+    backend: Arc<dyn perftracer::Tracer>,
 }
 
 impl super::Tracer for HWTracer {
@@ -22,14 +22,14 @@ impl super::Tracer for HWTracer {
 impl HWTracer {
     pub fn new() -> Result<Self, Box<dyn Error>> {
         Ok(HWTracer {
-            backend: hwtracer::default_tracer_for_platform()?,
+            backend: perftracer::default_tracer_for_platform()?,
         })
     }
 }
 
 /// Hardware thread tracer.
 struct HWTThreadTracer {
-    thread_tracer: Box<dyn hwtracer::ThreadTracer>,
+    thread_tracer: Box<dyn perftracer::ThreadTracer>,
 }
 
 impl ThreadTracer for HWTThreadTracer {
@@ -41,7 +41,7 @@ impl ThreadTracer for HWTThreadTracer {
     }
 }
 
-struct PTTrace(Box<dyn hwtracer::Trace>);
+struct PTTrace(Box<dyn perftracer::Trace>);
 
 impl UnmappedTrace for PTTrace {
     fn map(self: Box<Self>, _tracer: Arc<dyn Tracer>) -> Result<IRTrace, InvalidTraceError> {

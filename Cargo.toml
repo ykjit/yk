@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "hwtracer",
+    "perftracer",
     "tests",
     "ykbuild",
     "ykcapi",

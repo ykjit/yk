@@ -1,9 +1,9 @@
 //! The mapper translates a PT trace into an IR trace.
 
 use crate::trace::IRBlock;
-use hwtracer::llvm_blockmap::LLVM_BLOCK_MAP;
-use hwtracer::{Block, HWTracerError};
 use libc::c_void;
+use perftracer::llvm_blockmap::LLVM_BLOCK_MAP;
+use perftracer::{Block, HWTracerError};
 use std::{collections::HashMap, convert::TryFrom, ffi::CString};
 use ykutil::{
     addr::{vaddr_to_obj_and_off, vaddr_to_sym_and_obj},
@@ -62,7 +62,7 @@ impl<'a> HWTMapper {
     /// During codegen LLVM may remove the unconditional jump and simply place bb1 and bb2
     /// consecutively, allowing bb1 to fall-thru to bb2. In the eyes of the PT block decoder, a
     /// fall-thru does not terminate a block, so whereas LLVM sees two blocks, PT sees only one.
-    fn map_block(&mut self, block: &hwtracer::Block) -> Vec<Option<IRBlock>> {
+    fn map_block(&mut self, block: &perftracer::Block) -> Vec<Option<IRBlock>> {
         let b_rng = block.vaddr_range();
         if b_rng.is_none() {
             // If the address range of the block isn't known, then it follows that we can't map

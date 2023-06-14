@@ -21,7 +21,7 @@ fn main() {
     let mut c_build = cc::Build::new();
 
     // Generate a `compile_commands.json` database for clangd.
-    let ccg = CompletionWrapper::new(ykllvm_bin("clang"), "hwtracer");
+    let ccg = CompletionWrapper::new(ykllvm_bin("clang"), "perftracer");
     for (k, v) in ccg.build_env() {
         env::set_var(k, v);
     }
@@ -39,7 +39,7 @@ fn main() {
     println!("cargo:rustc-cfg=decoder_ykpt");
 
     c_build.include("src/util");
-    c_build.compile("hwtracer_c");
+    c_build.compile("perftracer_c");
 
     // Additional circumstances under which to re-run this build.rs.
     rerun_except(&[

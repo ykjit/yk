@@ -1,4 +1,4 @@
-//! Testing and benchmarking bits for hwtracer's ykpt decoder.
+//! Testing and benchmarking bits for perftracer's ykpt decoder.
 //!
 //! Why is this so convoluted? Read on...
 //!
@@ -8,10 +8,10 @@
 //! kinds of things we want the tests to check are Rust-based, so we will have to call back into
 //! Rust somehow.
 //!
-//! To that end, the test files in `tests/hwtracer_ykpt` are compiled into test binaries (as a
+//! To that end, the test files in `tests/perftracer_ykpt` are compiled into test binaries (as a
 //! langtester suite) and then they call into this file to have assertions checked in Rust code.
 
-use hwtracer::{
+use perftracer::{
     collect::{default_tracer_for_platform, ThreadTracer},
     decode::{TraceDecoderBuilder, TraceDecoderKind},
     Trace,

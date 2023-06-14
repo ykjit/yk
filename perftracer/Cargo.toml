@@ -1,5 +1,5 @@
 [package]
-name = "hwtracer"
+name = "perftracer"
 version = "0.1.0"
 authors = ["The Yk Developers"]
 edition = "2021"

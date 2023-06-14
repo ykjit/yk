@@ -614,7 +614,7 @@ impl<'t> YkPTBlockIterator<'t> {
                 }
                 iced_x86::FlowControl::Call => {
                     if inst.code() == iced_x86::Code::Syscall {
-                        // Do nothing. We have disabled kernel tracing in hwtracer, so
+                        // Do nothing. We have disabled kernel tracing in perftracer, so
                         // entering/leaving a syscall will generate packet generation
                         // disable/enable events (`TIP.PGD`/`TIP.PGE` packets) which are handled by
                         // the decoder elsewhere.

@@ -63,7 +63,7 @@ impl Display for HWTracerError {
 
 impl Error for HWTracerError {
     fn description(&self) -> &str {
-        "hwtracer error"
+        "perftracer error"
     }
 
     fn cause(&self) -> Option<&dyn Error> {

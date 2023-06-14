@@ -1,4 +1,4 @@
-# hwtracer
+# perftracer
 
 A small Rust/C library to trace sections of the current process using CPU
 tracing technology.

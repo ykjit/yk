@@ -4,7 +4,7 @@ use criterion::{
     criterion_group, criterion_main, measurement::Measurement, BenchmarkGroup, BenchmarkId,
     Criterion, SamplingMode,
 };
-use hwtracer::decode::TraceDecoderKind;
+use perftracer::decode::TraceDecoderKind;
 use std::{
     env,
     path::{Path, PathBuf},

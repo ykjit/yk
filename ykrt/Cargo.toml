@@ -6,7 +6,7 @@ edition = "2021"
 license = "Apache-2.0 OR MIT"
 
 [dependencies]
-hwtracer = { path = "../hwtracer" }
+perftracer = { path = "../perftracer" }
 libc = "0.2.117"
 memmap2 = "0.6"
 num_cpus = "1.13.1"
