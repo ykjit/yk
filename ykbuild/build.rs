@@ -18,6 +18,9 @@ fn main() {
         return;
     }
 
+    if !Path::new(YKLLVM_SUBMODULE_PATH).is_dir() {
+        panic!("YKLLVM Submodule ({}) was not found! To check submodules, run:\n $ git submodule update --init --recursive\n", YKLLVM_SUBMODULE_PATH);
+    }
     // To avoid running cmake config/build/install, we only do anything with cmake if either a) no
     // build of ykllvm exists b) the ykllvm submodule's hash has changed since we last built it.
     //
