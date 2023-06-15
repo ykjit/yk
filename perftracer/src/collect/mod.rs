@@ -8,11 +8,9 @@ use std::{
     sync::{Arc, LazyLock},
 };
 
-#[cfg(collector_perf)]
 pub(crate) mod perf;
-#[cfg(all(collector_perf, feature = "yk_testing"))]
+#[cfg(feature = "yk_testing")]
 pub use perf::PerfTrace;
-#[cfg(collector_perf)]
 pub(crate) use perf::PerfTracer;
 
 const PERF_DFLT_DATA_BUFSIZE: size_t = 64;

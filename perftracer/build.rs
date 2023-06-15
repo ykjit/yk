@@ -27,18 +27,17 @@ fn main() {
     }
     c_build.compiler(ccg.wrapper_path());
 
-    // Check if we should build the perf collector.
-    if cfg!(all(target_os = "linux", target_arch = "x86_64"))
-        && feature_check("check_perf.c", "check_perf")
+    // Check if perftracer can plausibly be built.
+    if !cfg!(all(target_os = "linux", target_arch = "x86_64"))
+        || !feature_check("check_perf.c", "check_perf")
     {
-        c_build.file("src/collect/perf/collect.c");
-        println!("cargo:rustc-cfg=collector_perf");
+        panic!("perftracer is not supported on this OS and / or architecture");
     }
 
     #[cfg(target_arch = "x86_64")]
     println!("cargo:rustc-cfg=decoder_ykpt");
 
-    c_build.include("src/util");
+    c_build.file("src/collect/perf/collect.c");
     c_build.compile("perftracer_c");
 
     // Additional circumstances under which to re-run this build.rs.
