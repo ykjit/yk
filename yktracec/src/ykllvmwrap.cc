@@ -236,7 +236,7 @@ LLVMGetThreadSafeModule(struct BitcodeSection &Bitcode) {
 // Compile a module in-memory and return a pointer to its function.
 extern "C" void *compileModule(string TraceName, Module *M,
                                map<GlobalValue *, void *> GlobalMappings,
-                               void *LiveAOTVals) {
+                               void *LiveAOTVals, size_t GuardCount) {
   std::call_once(LLVMInitialised, initLLVM, nullptr);
 
   // Use our own memory manager to keep track of stackmap address.
@@ -271,11 +271,12 @@ extern "C" void *compileModule(string TraceName, Module *M,
   // Allocate space for compiled trace address, stackmap address, and stackmap
   // size.
   // FIXME This is a temporary hack until the redesigned hot location is up.
-  uintptr_t *ptr = (uintptr_t *)malloc(sizeof(uintptr_t) * 4);
+  uintptr_t *ptr = (uintptr_t *)malloc(sizeof(uintptr_t) * 5);
   ptr[0] = EE->getFunctionAddress(TraceName);
   ptr[1] = reinterpret_cast<uintptr_t>(SMR.Ptr);
   ptr[2] = SMR.Size;
   ptr[3] = reinterpret_cast<uintptr_t>(LiveAOTVals);
+  ptr[4] = GuardCount;
 
   return ptr;
 }
@@ -403,7 +404,8 @@ void *compileIRTrace(FN Func, char *FuncNames[], size_t BBs[], size_t TraceLen,
   std::string TraceName;
   std::map<GlobalValue *, void *> GlobalMappings;
   void *AOTMappingVec;
-  std::tie(JITMod, TraceName, GlobalMappings, AOTMappingVec) =
+  size_t GuardCount;
+  std::tie(JITMod, TraceName, GlobalMappings, AOTMappingVec, GuardCount) =
       Func(AOTMod, FuncNames, BBs, TraceLen, FAddrKeys, FAddrVals, FAddrLen);
 
   // If we failed to build the trace, return null.
@@ -434,7 +436,8 @@ void *compileIRTrace(FN Func, char *FuncNames[], size_t BBs[], size_t TraceLen,
                      filesystem::path(DebugInfoPath));
 
   // Compile IR trace and return a pointer to its function.
-  return compileModule(TraceName, JITMod, GlobalMappings, AOTMappingVec);
+  return compileModule(TraceName, JITMod, GlobalMappings, AOTMappingVec,
+                       GuardCount);
 }
 
 extern "C" void *__yktracec_irtrace_compile(
