@@ -94,4 +94,9 @@ done
 
 # We want to check that the benchmarks build and run correctly, but want to
 # ignore the results, so run them for the minimum possible time.
-cargo bench --bench bench -- --profile-time 1
+#
+# Note that --profile-time doesn't work without --bench, so we have to run each
+# benchmark individually.
+for b in collect_and_decode promote; do
+    cargo bench --bench ${b} -- --profile-time 1
+done
