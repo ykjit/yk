@@ -184,30 +184,21 @@ impl FrameReconstructor {
         // amount.
         memsize += USIZEOF_POINTER;
 
-        // Now that we've calculated the stack's size, allocate it using mmap.
-        let mmap = unsafe {
-            libc::mmap(
-                std::ptr::null_mut(),
-                memsize,
-                libc::PROT_READ | libc::PROT_WRITE,
-                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
-                -1,
-                0,
-            )
-        };
+        // Now that we've calculated the stack's size, allocate memory for it.
+        let newstack = unsafe { libc::malloc(memsize) };
 
         // Get the modules layout which we'll need to extract type sizes of LLVM IR.
         let layout = self.module.datalayout();
 
-        // Generate and write frames to the mmap. Since the stack grows downwards and we need to
-        // keep track of spilled register values we write to the mmap from back to front. To make
-        // things easier to think about we create two variables rbp and rsp which simulate their
-        // assembler namesakes.
+        // Generate and write frames to the new stack. Since the stack grows downwards and we need
+        // to keep track of spilled register values we write to `newstack` from back to front. To
+        // make things easier to think about we create two variables `rbp` and `rsp` which simulate
+        // their assembler namesakes.
         // Note that while the bottom-most frame still exists and doesn't need to be reconstructed,
         // we still need to get the register values from its stackmap in case those registers are
         // spilled by the next frame.
 
-        let mut rbp = unsafe { mmap.offset(isize::try_from(memsize).unwrap()) };
+        let mut rbp = unsafe { newstack.offset(isize::try_from(memsize).unwrap()) };
         let mut rsp = rbp;
         // Keep track of the addresses of the current and previous frame so we can update the RBP
         // register as needed.
@@ -403,9 +394,8 @@ impl FrameReconstructor {
             ptr::write(rsp as *mut usize, memsize);
         }
 
-        // Mark the memory read-only and return its pointer.
-        unsafe { libc::mprotect(mmap, memsize, libc::PROT_READ) };
-        mmap
+        // Return the pointer to the new stack.
+        newstack
     }
 
     /// Add a live variable and its value to the current frame.

@@ -283,14 +283,12 @@ extern "C" fn __ykrt_reconstruct_frames(newframesptr: *const c_void) {
             "mov rdi, rsp", // 1st arg: dest
             "call memcpy",
             // Now move the source (i.e. the heap allocated frames) into the first argument and its
-            // size into the second. Then free the memory.
+            // size into the second.
             "mov rdi, rsi",
             // Adjust rdi back to beginning of `newframesptr`.
             "sub rdi, 8",
-            "mov rsi, rdx",
-            // Adjust length back to full size to free entire mmap.
-            "add rsi, 8",
-            "call munmap",
+            // Free the malloced memory.
+            "call free",
             // Restore registers.
             // FIXME: Add other registers that may need restoring (e.g. floating point).
             "pop r15",
