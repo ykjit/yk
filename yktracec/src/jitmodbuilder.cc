@@ -372,7 +372,7 @@ public:
       // (a `size_t`) to encode the stack adjustment value (a `ssize_t`). The
       // cast below reverses that.
       return TraceLoc(variant<IRBlock, UnmappableRegion>{
-          UnmappableRegion{bit_cast<ssize_t, size_t>(BBs[Idx])}});
+          UnmappableRegion{llvm::bit_cast<ssize_t, size_t>(BBs[Idx])}});
     } else {
       return TraceLoc(
           variant<IRBlock, UnmappableRegion>{IRBlock{FuncName, BBs[Idx]}});
