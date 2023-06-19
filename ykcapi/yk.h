@@ -2,6 +2,7 @@
 #define YK_H
 
 #include <stdint.h>
+#include <sys/types.h>
 
 // A `Location` stores state that the meta-tracer needs to identify hot loops
 // and run associated machine code. This is a C mirror of `ykrt::Location`.
@@ -62,5 +63,12 @@ YkLocation yk_location_new(void);
 // `Location` must not be further used after this call or undefined behaviour
 // will occur.
 void yk_location_drop(YkLocation);
+
+// Promote a value to a constant.
+//
+// This is an identity function whose return value will be promoted to a
+// constant when the call is traced.
+#define yk_promote(X) __ykllvm_recognised_promote(X)
+size_t __ykllvm_recognised_promote(size_t);
 
 #endif

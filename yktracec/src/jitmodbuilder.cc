@@ -19,6 +19,8 @@
 using namespace llvm;
 using namespace std;
 
+extern "C" size_t __yk_lookup_promote_usize();
+
 // An atomic counter used to issue compiled traces with unique names.
 atomic<uint64_t> NextTraceIdx(0);
 uint64_t getNewTraceIdx() {
@@ -38,6 +40,8 @@ uint64_t getNewTraceIdx() {
 #define JITFUNC_ARG_STACKMAP_LEN_IDX 2
 #define JITFUNC_ARG_FRAMEADDR_IDX 3
 #define JITFUNC_ARG_LIVEAOTVALS_PTR_IDX 4
+
+const char *PromoteRecFnName = "__ykllvm_recognised_promote";
 
 #define YK_OUTLINE_FNATTR "yk_outline"
 
@@ -1739,6 +1743,10 @@ public:
             }
             CallStack.pushFrame(StackFrame::CreateForeignFrame());
             break;
+          } else if (CF->getName() == PromoteRecFnName) {
+            // A value is being promoted to a constant.
+            handlePromote(CI, MPF, BB, CurBBIdx, CurInstrIdx);
+            break;
           } else {
             StringRef S = CF->getName();
             if (S == "_setjmp" || S == "_longjmp") {
@@ -1918,6 +1926,62 @@ public:
     }
     finalise(AOTMod, &Builder);
     return JITMod;
+  }
+
+  /// Handle promotions.
+  void handlePromote(CallInst *CI, MappableFrame *MPF, BasicBlock *BB,
+                     size_t CurBBIdx, size_t CurInstrIdx) {
+    // First lookup the constant value the trace is going to use.
+    uint64_t PConst = __yk_lookup_promote_usize();
+    Value *PConstLL =
+        Builder.getIntN(PointerSizedIntTy->getIntegerBitWidth(), PConst);
+    Value *PromoteVar = CI->getArgOperand(0);
+    Value *JITPromoteVar = getMappedValue(PromoteVar);
+
+    // By promoting a value to a constant, we specialised the remainder of the
+    // trace to that constant value. We must emit a guard that ensures that we
+    // doptimise if the promoted value deviates from the "baked-in" constant.
+    MPF->LastSMCall = cast<CallInst>(CI->getNextNonDebugInstruction());
+
+    // When we encounter `%y = yk_promote(%x)` in the AOT module, we don't copy
+    // this instruction into the JIT module, only update future references to
+    // `%y` with a constant. However, in AOT `%y` still exists and needs to be
+    // re-materialised when we deoptimise, so we have to point some JIT variable
+    // back to `%y` in our AOTMAP.
+    //
+    // Since in AOT, `%y` and `%x` are identical, really we'd like to point
+    // `AOTMap[JITPromoteVar]` to `CI`, but that would overwrite the existing
+    // (required!) mapping for `JITPromoteVar`.
+    //
+    // What we therefore do is make an instruction to the effect `%y = %x` in
+    // the JIT module, and map that instruction back to `%y` in the AOT module.
+    Instruction *NewInst = SelectInst::Create(
+        ConstantInt::get(Type::getInt1Ty(JITMod->getContext()), 0),
+        JITPromoteVar, JITPromoteVar);
+    Builder.Insert(NewInst);
+
+    VMap[CI] = NewInst;
+    insertAOTMap(CI, NewInst, CurBBIdx, CurInstrIdx);
+
+    BasicBlock *FailBB = getGuardFailureBlock(BB, CurBBIdx, CI, CurInstrIdx);
+    BasicBlock *SuccBB = BasicBlock::Create(JITMod->getContext(),
+                                            GUARD_SUCCESS_BLOCK_NAME, JITFunc);
+    Value *Deopt = Builder.CreateICmp(CmpInst::Predicate::ICMP_NE,
+                                      JITPromoteVar, PConstLL);
+    Builder.CreateCondBr(Deopt, FailBB, SuccBB);
+
+    // Carry on constructing the trace module in the success block.
+    Builder.SetInsertPoint(SuccBB);
+
+    // Update the VMap so that the promoted value is now a constant.
+    VMap[CI] = PConstLL;
+
+    // We will have traced the constant recorder. We don't want that in
+    // the trace so a) we don't copy the call, and b) we enter
+    // outlining mode.
+    MPF->setResume(CurBBIdx, &*CI, CurInstrIdx);
+    startOutlining();
+    CallStack.pushFrame(StackFrame::CreateForeignFrame());
   }
 };
 
