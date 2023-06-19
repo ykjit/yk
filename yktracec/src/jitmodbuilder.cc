@@ -822,6 +822,11 @@ class JITModBuilder {
     // unconditionally and immediately fails a guard.
     assert(JITFunc->size() != 0);
 
+    // Keep a count of he current number of guards. This number is used as an
+    // index into `CompiledTrace.guards` to handle side-traces inside guard
+    // failures.
+    GuardCount += 1;
+
     LLVMContext &Context = JITFunc->getContext();
 
     // Create the block.
@@ -960,7 +965,8 @@ class JITModBuilder {
     CallInst *Ret =
         CallInst::Create(DeoptInt,
                          {StackMapStruct, AOTLocs, ActiveFramesStruct,
-                          JITFunc->getArg(JITFUNC_ARG_FRAMEADDR_IDX)},
+                          JITFunc->getArg(JITFUNC_ARG_FRAMEADDR_IDX),
+                          ConstantInt::get(PointerSizedIntTy, GuardCount)},
                          {ob}, "", GuardFailBB);
 
     // We always need to return after the deoptimisation call.
@@ -1427,6 +1433,7 @@ public:
   // live JIT values.
   AOTInfo *LiveAOTArray = nullptr;
   size_t LiveAOTNum = 0;
+  size_t GuardCount = 0;
 
   JITModBuilder(JITModBuilder &&);
 
@@ -1914,18 +1921,19 @@ public:
   }
 };
 
-tuple<Module *, string, std::map<GlobalValue *, void *>, void *>
+tuple<Module *, string, std::map<GlobalValue *, void *>, void *, size_t>
 createModule(Module *AOTMod, char *FuncNames[], size_t BBs[], size_t TraceLen,
              char *FAddrKeys[], void *FAddrVals[], size_t FAddrLen) {
   JITModBuilder JB = JITModBuilder::Create(AOTMod, FuncNames, BBs, TraceLen,
                                            FAddrKeys, FAddrVals, FAddrLen);
   auto JITMod = JB.createModule();
   return make_tuple(JITMod, std::move(JB.TraceName),
-                    std::move(JB.GlobalMappings), JB.LiveAOTArray);
+                    std::move(JB.GlobalMappings), JB.LiveAOTArray,
+                    JB.GuardCount);
 }
 
 #ifdef YK_TESTING
-tuple<Module *, string, std::map<GlobalValue *, void *>, void *>
+tuple<Module *, string, std::map<GlobalValue *, void *>, void *, size_t>
 createModuleForTraceCompilerTests(Module *AOTMod, char *FuncNames[],
                                   size_t BBs[], size_t TraceLen,
                                   char *FAddrKeys[], void *FAddrVals[],
@@ -1966,6 +1974,6 @@ createModuleForTraceCompilerTests(Module *AOTMod, char *FuncNames[],
   DOBuilder.CreateUnreachable();
 
   return make_tuple(JITMod, std::move(JB.TraceName),
-                    std::move(JB.GlobalMappings), nullptr);
+                    std::move(JB.GlobalMappings), nullptr, 0);
 }
 #endif

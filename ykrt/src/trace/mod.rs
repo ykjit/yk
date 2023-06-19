@@ -223,6 +223,12 @@ impl IRTrace {
     }
 }
 
+#[derive(Debug)]
+struct Guard {
+    failed: u32,
+    code: Option<*const c_void>,
+}
+
 /// A trace compiled into machine code. Note that these are passed around as raw pointers and
 /// potentially referenced by multiple threads so, once created, instances of this struct can only
 /// be updated if a lock is held or a field is atomic.
@@ -240,6 +246,8 @@ pub struct CompiledTrace {
     smsize: usize,
     /// Pointer to heap allocated live AOT values.
     aotvals: *const c_void,
+    /// List of guards containing hotness counts or compiled side traces.
+    guards: Vec<Option<Guard>>,
     /// If requested, a temporary file containing the "source code" for the trace, to be shown in
     /// debuggers when stepping over the JITted code.
     ///
@@ -256,11 +264,12 @@ impl CompiledTrace {
     /// trace, the pointer to the stackmap and the size of the stackmap, and the pointer to the
     /// live AOT values.
     pub fn new(data: *const c_void, di_tmpfile: Option<NamedTempFile>) -> Self {
-        let slice = unsafe { slice::from_raw_parts(data as *const usize, 4) };
+        let slice = unsafe { slice::from_raw_parts(data as *const usize, 5) };
         let funcptr = slice[0] as *const c_void;
         let smptr = slice[1] as *const c_void;
         let smsize = slice[2];
         let aotvals = slice[3] as *mut c_void;
+        let guardcount = slice[4] as usize;
         // We heap allocated this array in yktracec to pass the data here. Now that we've
         // extracted it we no longer need to keep the array around.
         unsafe { libc::free(data as *mut c_void) };
@@ -270,6 +279,7 @@ impl CompiledTrace {
             smsize,
             aotvals,
             di_tmpfile,
+            guards: Vec::with_capacity(guardcount),
         }
     }
 
@@ -285,6 +295,7 @@ impl CompiledTrace {
             smsize: 0,
             aotvals: std::ptr::null() as *const _,
             di_tmpfile: None,
+            guards: Vec::new(),
         }
     }
 

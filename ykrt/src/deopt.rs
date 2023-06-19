@@ -93,6 +93,7 @@ extern "C" fn __llvm_deoptimize(
     aotvals: *const c_void,
     frames: *const c_void,
     retval: *mut c_void,
+    guardid: usize,
 ) -> *const c_void {
     // Push all registers to the stack before they can be clobbered, so that we can find their
     // values after parsing in the stackmap. The order in which we push the registers is equivalent
@@ -113,16 +114,17 @@ extern "C" fn __llvm_deoptimize(
             "push rcx",
             "push rdx",
             "push rax",
+            "mov r10, r8", // Store guardid in r10 so we can use r8 for the arguments.
             // Now we need to call __ykrt_deopt. The arguments need to be in RDI, RSI, RDX,
-            // RCX, R8, and R9. The first four arguments (stackmap
-            // live variable map, frames, and return value pointer) are already where they
+            // RCX, R8, and R9. The first four arguments (stackmap,
+            // live variable map, active frames, and frame address) are already where they
             // need to be as we are just forwarding them from the current function's
             // arguments. The remaining arguments (return address and current stack
             // pointer) need to be in R8 and R9. The return address was at [RSP] before
             // the above pushes, so to find it we need to offset 8 bytes per push.
             "mov r8, [rsp+64]",
             "mov r9, rsp",
-            "sub rsp, 8", // Alignment
+            "push r10", // Push guardid as the 7th argument onto stack.
             "call __ykrt_deopt",
             "add rsp, 72",
             // FIXME: Don't rely on RBP being pushed. Use frame size retrieved from
@@ -140,15 +142,26 @@ extern "C" fn __llvm_deoptimize(
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
 unsafe extern "C" fn __ykrt_deopt(
+    // Address and size of the JIT stackmap.
     stackmap: &CVec,
+    // Struct describing the location of the AOT live variables.
     aotvals: &LiveAOTVals,
+    // Address and size of vector holding active AOT frame information needed to recreate them.
     actframes: &CVec,
+    // Address of the control point's frame.
     frameaddr: *mut c_void,
+    // Return address of deoptimize call. Used to find the correct stackmap record.
     retaddr: usize,
+    // Current stack pointer. Needed to read spilled register values from the stack.
     rsp: *const c_void,
+    // ID of the failing guard.
+    guardid: usize,
 ) -> *const c_void {
     #[cfg(feature = "yk_jitstate_debug")]
     print_jit_state("deoptimise");
+
+    // FIXME: Check here if we have a side trace and execute it. Otherwise just increment the guard
+    // failure counter.
 
     // Parse the live AOT values.
     let aotvalsptr =

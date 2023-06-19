@@ -10,11 +10,13 @@
 
 using namespace llvm;
 
-std::tuple<Module *, std::string, std::map<GlobalValue *, void *>, void *>
+std::tuple<Module *, std::string, std::map<GlobalValue *, void *>, void *,
+           size_t>
 createModule(Module *AOTMod, char *FuncNames[], size_t BBs[], size_t TraceLen,
              char *FAddrKeys[], void *FAddrVals[], size_t FAddrLen);
 #ifdef YK_TESTING
-std::tuple<Module *, std::string, std::map<GlobalValue *, void *>, void *>
+std::tuple<Module *, std::string, std::map<GlobalValue *, void *>, void *,
+           size_t>
 createModuleForTraceCompilerTests(Module *AOTMod, char *FuncNames[],
                                   size_t BBs[], size_t TraceLen,
                                   char *FAddrKeys[], void *FAddrVals[],
