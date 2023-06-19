@@ -7,23 +7,15 @@ use criterion::{
 use std::{
     env,
     path::{Path, PathBuf},
-    process::{Command, Output},
+    process::Command,
     time::Duration,
 };
 use tempfile::TempDir;
-use tests::mk_compiler;
+use tests::{check_output, mk_compiler};
 use ykbuild::ykllvm_bin;
 
 const SAMPLE_SIZE: usize = 30;
 const MEASUREMENT_TIME: Duration = Duration::from_secs(20);
-
-fn check_output(out: &Output) {
-    if !out.status.success() {
-        println!("{}", std::str::from_utf8(&out.stdout).unwrap());
-        eprintln!("{}", std::str::from_utf8(&out.stderr).unwrap());
-        panic!();
-    }
-}
 
 fn compile_bench(tempdir: &TempDir, promote: bool) -> PathBuf {
     let md = env::var("CARGO_MANIFEST_DIR").unwrap();

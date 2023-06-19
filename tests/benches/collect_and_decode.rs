@@ -8,11 +8,11 @@ use hwtracer::decode::TraceDecoderKind;
 use std::{
     env,
     path::{Path, PathBuf},
-    process::{Command, Output},
+    process::Command,
     time::Duration,
 };
 use tempfile::TempDir;
-use tests::mk_compiler;
+use tests::{check_output, mk_compiler};
 use ykbuild::ykllvm_bin;
 
 const SAMPLE_SIZE: usize = 50;
@@ -49,14 +49,6 @@ fn collect_and_decode_trace(
         .output()
         .unwrap();
     check_output(&out);
-}
-
-fn check_output(out: &Output) {
-    if !out.status.success() {
-        println!("{}", std::str::from_utf8(&out.stdout).unwrap());
-        eprintln!("{}", std::str::from_utf8(&out.stderr).unwrap());
-        panic!();
-    }
 }
 
 fn setup<'c, M: Measurement>(

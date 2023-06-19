@@ -7,7 +7,7 @@ use std::{
     env,
     io::{self, Write},
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Output},
     sync::LazyLock,
 };
 use ykbuild::ykllvm_bin;
@@ -156,4 +156,14 @@ pub fn mk_compiler(
         src.to_str().unwrap(),
     ]);
     compiler
+}
+
+/// Check the `std::process::Output` of a `std::process::Command`, printing the output and
+/// panicking on non-zero exit status.
+pub fn check_output(out: &Output) {
+    if !out.status.success() {
+        println!("{}", std::str::from_utf8(&out.stdout).unwrap());
+        eprintln!("{}", std::str::from_utf8(&out.stderr).unwrap());
+        panic!();
+    }
 }
