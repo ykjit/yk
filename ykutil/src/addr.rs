@@ -196,7 +196,10 @@ mod tests {
         use libc::fflush;
         let func_vaddr = fflush as *const fn();
         let sio = vaddr_to_sym_and_obj(func_vaddr as usize).unwrap();
-        assert_eq!(sio.dli_sname().unwrap().to_str().unwrap(), "fflush");
+        assert!(matches!(
+            sio.dli_sname().unwrap().to_str().unwrap(),
+            "fflush" | "_IO_fflush"
+        ));
         let obj_path = PathBuf::from(sio.dli_fname().unwrap().to_str().unwrap());
         assert!(obj_path
             .file_name()
