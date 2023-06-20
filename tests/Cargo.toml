@@ -41,7 +41,7 @@ rerun_except = "1.0.0"
 ykbuild = { path = "../ykbuild" }
 
 [[bench]]
-name = "bench"
+name = "collect_and_decode"
 harness = false
 
 [[bench]]
