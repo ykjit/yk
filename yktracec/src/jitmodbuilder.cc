@@ -36,10 +36,8 @@ uint64_t getNewTraceIdx() {
 #define YK_CONTROL_POINT_NUM_ARGS 4
 
 #define JITFUNC_ARG_INPUTS_STRUCT_IDX 0
-#define JITFUNC_ARG_STACKMAP_ADDR_IDX 1
-#define JITFUNC_ARG_STACKMAP_LEN_IDX 2
-#define JITFUNC_ARG_FRAMEADDR_IDX 3
-#define JITFUNC_ARG_LIVEAOTVALS_PTR_IDX 4
+#define JITFUNC_ARG_COMPILEDTRACE_IDX 1
+#define JITFUNC_ARG_FRAMEADDR_IDX 2
 
 const char *PromoteRecFnName = "__ykllvm_recognised_promote";
 
@@ -743,17 +741,15 @@ class JITModBuilder {
 
     // Create the function.
     std::vector<Type *> InputTypes;
+
+    // Add YkCtrlPointVars argument.
     InputTypes.push_back(TraceInputs->getType());
 
-    // Add arguments for stackmap pointer and size.
+    // Add *CompiledTrace argument.
     InputTypes.push_back(PointerSizedIntTy->getPointerTo());
-    InputTypes.push_back(PointerSizedIntTy);
 
-    // Add argument in which to store the value of an interpreted return.
+    // Add argument for pointer to the frame containing the control point.
     InputTypes.push_back(FrameAddr);
-
-    // Add argument for memory block holding live AOT values.
-    InputTypes.push_back(PointerSizedIntTy->getPointerTo());
 
     llvm::FunctionType *FType = llvm::FunctionType::get(
         PointerType::get(JITMod->getContext(), 0), InputTypes, false);
@@ -944,19 +940,11 @@ class JITModBuilder {
       CurrentRegion[I] = {BBIdx, InstrIdx, FName, StackFrameIdx};
     }
 
-    // Store the live variable vector and its length in a separate struct to
-    // save arguments.
+    // Store the offset and length of the live AOT variables.
     AllocaInst *AOTLocs = createAndFillStruct(
         FailBuilder,
-        {JITFunc->getArg(JITFUNC_ARG_LIVEAOTVALS_PTR_IDX),
-         ConstantInt::get(PointerSizedIntTy, CurPos * sizeof(AOTInfo)),
+        {ConstantInt::get(PointerSizedIntTy, CurPos * sizeof(AOTInfo)),
          ConstantInt::get(PointerSizedIntTy, LiveValues.size())});
-
-    // Store the stackmap address and length in a separate struct to save
-    // arguments.
-    AllocaInst *StackMapStruct = createAndFillStruct(
-        FailBuilder, {JITFunc->getArg(JITFUNC_ARG_STACKMAP_ADDR_IDX),
-                      JITFunc->getArg(JITFUNC_ARG_STACKMAP_LEN_IDX)});
 
     // Create the deoptimization call.
     Type *retty = PointerType::get(Context, 0);
@@ -966,12 +954,12 @@ class JITModBuilder {
         OperandBundleDef("deopt", (ArrayRef<Value *>)LiveValues);
     // We already passed the stackmap address and size into the trace
     // function so pass them on to the __llvm_deoptimize call.
-    CallInst *Ret =
-        CallInst::Create(DeoptInt,
-                         {StackMapStruct, AOTLocs, ActiveFramesStruct,
-                          JITFunc->getArg(JITFUNC_ARG_FRAMEADDR_IDX),
-                          ConstantInt::get(PointerSizedIntTy, GuardCount)},
-                         {ob}, "", GuardFailBB);
+    CallInst *Ret = CallInst::Create(
+        DeoptInt,
+        {JITFunc->getArg(JITFUNC_ARG_COMPILEDTRACE_IDX),
+         JITFunc->getArg(JITFUNC_ARG_FRAMEADDR_IDX), AOTLocs,
+         ActiveFramesStruct, ConstantInt::get(PointerSizedIntTy, GuardCount)},
+        {ob}, "", GuardFailBB);
 
     // We always need to return after the deoptimisation call.
     ReturnInst::Create(Context, Ret, GuardFailBB);

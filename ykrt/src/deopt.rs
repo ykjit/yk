@@ -4,7 +4,8 @@
 use crate::frame::{FrameInfo, FrameReconstructor};
 #[cfg(feature = "yk_jitstate_debug")]
 use crate::print_jit_state;
-use std::{arch::asm, ffi::c_void, ptr, slice};
+use crate::trace::CompiledTrace;
+use std::{arch::asm, ffi::c_void, ptr, slice, sync::Arc};
 use yksmp::{Location as SMLocation, StackMapParser};
 
 /// Reads out registers spilled to the stack of the previous frame during the deoptimisation
@@ -75,9 +76,18 @@ struct CVec {
 #[derive(Debug)]
 #[repr(C)]
 struct LiveAOTVals {
-    addr: *const c_void,
     offset: usize,
     length: usize,
+}
+
+/// Struct containing pointers needed for frame reconstruction.
+#[derive(Debug)]
+#[repr(C)]
+pub struct NewFramesInfo {
+    // Address of the new stackframes in memory.
+    src: *const c_void,
+    // Address into the current stack we want to write `src` to.
+    dst: *const c_void,
 }
 
 #[cfg(not(target_arch = "x86_64"))]
@@ -89,18 +99,19 @@ compile_error!("__llvm_deoptimize() not yet implemented for this platform");
 #[naked]
 #[no_mangle]
 extern "C" fn __llvm_deoptimize(
-    stackmap: *const c_void,
+    ctr: *const CompiledTrace,
+    frameaddr: *mut c_void,
     aotvals: *const c_void,
-    frames: *const c_void,
-    retval: *mut c_void,
+    actframes: *const c_void,
     guardid: usize,
-) -> *const c_void {
+) -> ! {
     // Push all registers to the stack before they can be clobbered, so that we can find their
     // values after parsing in the stackmap. The order in which we push the registers is equivalent
     // to the Sys-V x86_64 ABI, which the stackmap format uses as well. This function has the
     // "naked" attribute to keep the optimiser from generating the function prologue which messes
     // with the RSP value of the previous stack frame (this value is often referenced by the
     // stackmap).
+
     unsafe {
         asm!(
             // Save registers that may be referenced by the stackmap to the stack before they get
@@ -114,23 +125,18 @@ extern "C" fn __llvm_deoptimize(
             "push rcx",
             "push rdx",
             "push rax",
-            "mov r10, r8", // Store guardid in r10 so we can use r8 for the arguments.
-            // Now we need to call __ykrt_deopt. The arguments need to be in RDI, RSI, RDX,
-            // RCX, R8, and R9. The first four arguments (stackmap,
-            // live variable map, active frames, and frame address) are already where they
-            // need to be as we are just forwarding them from the current function's
-            // arguments. The remaining arguments (return address and current stack
-            // pointer) need to be in R8 and R9. The return address was at [RSP] before
-            // the above pushes, so to find it we need to offset 8 bytes per push.
-            "mov r8, [rsp+64]",
-            "mov r9, rsp",
-            "push r10", // Push guardid as the 7th argument onto stack.
-            "call __ykrt_deopt",
-            "add rsp, 72",
-            // FIXME: Don't rely on RBP being pushed. Use frame size retrieved from
-            // stackmap instead.
-            "mov rsp, rbp",
-            "pop rbp",
+            // Since we are just passing through the arguments of this function to `__ykrt_deopt`,
+            // we don't need do anything here. However, we need to add some extra arguments to the
+            // call.
+
+            // The return address was at [RSP] before the above pushes, so to find it we need to
+            // offset 8 bytes per push.
+            "mov r9, [rsp+64]",
+            "push rsp",                       // Current stack pointer.
+            "call __ykrt_deopt",              // Returns NewFramesInfo
+            "mov rdi, rax",                   // Pass NewFramesInfo.src as 1st argument.
+            "mov rsi, rdx",                   // Pass NewFramesInfo.dst as 2nd argument.
+            "call __ykrt_reconstruct_frames", // This doesn't return.
             "ret",
             options(noreturn)
         )
@@ -142,30 +148,32 @@ extern "C" fn __llvm_deoptimize(
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
 unsafe extern "C" fn __ykrt_deopt(
-    // Address and size of the JIT stackmap.
-    stackmap: &CVec,
+    ctr: *const CompiledTrace,
+    // Address of the control point's frame.
+    frameaddr: *mut c_void,
     // Struct describing the location of the AOT live variables.
     aotvals: &LiveAOTVals,
     // Address and size of vector holding active AOT frame information needed to recreate them.
     actframes: &CVec,
-    // Address of the control point's frame.
-    frameaddr: *mut c_void,
+    // ID of the failing guard.
+    guardid: usize,
     // Return address of deoptimize call. Used to find the correct stackmap record.
     retaddr: usize,
     // Current stack pointer. Needed to read spilled register values from the stack.
     rsp: *const c_void,
-    // ID of the failing guard.
-    guardid: usize,
-) -> *const c_void {
+) -> NewFramesInfo {
     #[cfg(feature = "yk_jitstate_debug")]
     print_jit_state("deoptimise");
+
+    // Put the CompiledTrace back into an Arc, so it is dropped properly.
+    let ctr = Arc::from_raw(ctr);
 
     // FIXME: Check here if we have a side trace and execute it. Otherwise just increment the guard
     // failure counter.
 
     // Parse the live AOT values.
     let aotvalsptr =
-        unsafe { (aotvals.addr as *const u8).offset(isize::try_from(aotvals.offset).unwrap()) };
+        unsafe { (ctr.aotvals as *const u8).offset(isize::try_from(aotvals.offset).unwrap()) };
     let aotvals = unsafe { slice::from_raw_parts(aotvalsptr as *const AOTVar, aotvals.length) };
 
     // Parse active frames vector.
@@ -182,7 +190,7 @@ unsafe extern "C" fn __ykrt_deopt(
     // Parse the stackmap of the JIT module.
     // OPT: Parsing the stackmap and initialising `framerec` is slow and could be heavily reduced
     // by caching the result.
-    let slice = unsafe { slice::from_raw_parts(stackmap.addr as *mut u8, stackmap.length) };
+    let slice = unsafe { slice::from_raw_parts(ctr.smptr as *mut u8, ctr.smsize) };
     let map = StackMapParser::parse(slice).unwrap();
     let live_vars = map.get(&retaddr.try_into().unwrap()).unwrap();
 
@@ -255,7 +263,19 @@ unsafe extern "C" fn __ykrt_deopt(
         }
     }
 
-    unsafe { framerec.reconstruct_frames(frameaddr) }
+    // FIXME: This print doesn't really serve a purpose anymore, since `deoptimise` will always be
+    // followed by `exit-jit-code` as there's no other way to leave a trace.
+    #[cfg(feature = "yk_jitstate_debug")]
+    print_jit_state("exit-jit-code");
+
+    let (ptr, btmframesize) = unsafe { framerec.reconstruct_frames(frameaddr) };
+    // Calculate the offset on the stack we want to write the new frames to: immediately after the
+    // frame containing the control point.
+    let newframesdst = frameaddr.sub(btmframesize);
+    NewFramesInfo {
+        src: ptr as *const c_void,
+        dst: newframesdst,
+    }
 }
 
 /// After a guard failure, reconstructs the stack frames and registers and then jumps back to the
@@ -263,7 +283,10 @@ unsafe extern "C" fn __ykrt_deopt(
 #[cfg(target_arch = "x86_64")]
 #[naked]
 #[no_mangle]
-extern "C" fn __ykrt_reconstruct_frames(newframesptr: *const c_void) {
+extern "C" fn __ykrt_reconstruct_frames(
+    newframesptr: *const c_void,
+    newframedst: *const c_void,
+) -> ! {
     unsafe {
         asm!(
             // The first 8 bytes of the new frames is the size of the map, needed for copying it
@@ -274,9 +297,10 @@ extern "C" fn __ykrt_reconstruct_frames(newframesptr: *const c_void) {
             "sub rdx, 8",
             // Then adjust the address to where the new stack actually starts.
             "add rdi, 8",
-            // Make space for the new stack, but use 8 bytes less in order to overwrite this
-            // function's return address since we won't be returning there.
-            "add rsp, 8",
+            // Reset RSP to the end of the control point's caller's frame (this doesn't include the
+            // return address which will thus be overwritten in the process)
+            "mov rsp, rsi",
+            // Make space for the new frame.
             "sub rsp, rdx",
             // Copy over the new stack frames.
             "mov rsi, rdi", // 2nd arg: src
@@ -306,9 +330,9 @@ extern "C" fn __ykrt_reconstruct_frames(newframesptr: *const c_void) {
             "pop rcx",
             "pop rdx",
             "pop rax",
-            // Load new return address from the stack and jump to it.
-            "add rsp, 8",
-            "jmp [rsp-8]",
+            // At this point the address we want to deoptimise to is on top of the stack. The `ret`
+            // instruction will pop it from the stack and jump to it.
+            "ret",
             options(noreturn)
         )
     }
