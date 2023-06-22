@@ -263,11 +263,6 @@ unsafe extern "C" fn __ykrt_deopt(
         }
     }
 
-    // FIXME: This print doesn't really serve a purpose anymore, since `deoptimise` will always be
-    // followed by `exit-jit-code` as there's no other way to leave a trace.
-    #[cfg(feature = "yk_jitstate_debug")]
-    print_jit_state("exit-jit-code");
-
     let (ptr, btmframesize) = unsafe { framerec.reconstruct_frames(frameaddr) };
     // Calculate the offset on the stack we want to write the new frames to: immediately after the
     // frame containing the control point.

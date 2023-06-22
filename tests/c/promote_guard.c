@@ -34,14 +34,12 @@
 //     y=400
 //     y=500
 //     jit-state: deoptimise
-//     jit-state: exit-jit-code
 //     y=700
 //     jit-state: enter-jit-code
 //     y=800
 //     y=900
 //     y=1000
 //     jit-state: deoptimise
-//     jit-state: exit-jit-code
 //     y=1999
 
 // Check that promotions are guarded correctly.

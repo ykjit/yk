@@ -39,8 +39,6 @@
 //     i=2
 //     i=1
 //     jit-state: deoptimise
-//     ...
-//     jit-state: exit-jit-code
 //   stdout:
 //     exit
 

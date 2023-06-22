@@ -31,7 +31,6 @@
 //     y=200
 //     y=250
 //     jit-state: deoptimise
-//     jit-state: exit-jit-code
 
 // Check that expression promotion works in traces.
 

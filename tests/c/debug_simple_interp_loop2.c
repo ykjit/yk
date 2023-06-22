@@ -57,7 +57,6 @@
 //     pc=2, mem=1
 //     pc=3, mem=0
 //     jit-state: deoptimise
-//     jit-state: exit-jit-code
 //     pc=4, mem=0
 //     pc=5, mem=0
 
