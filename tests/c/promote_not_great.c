@@ -25,7 +25,6 @@
 //     z=8
 //     z=10
 //     jit-state: deoptimise
-//     jit-state: exit-jit-code
 
 // Demonstrate where yk_promote() needs improvement.
 

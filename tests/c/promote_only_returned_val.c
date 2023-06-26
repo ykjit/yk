@@ -21,7 +21,6 @@
 //     y=4
 //     y=5
 //     jit-state: deoptimise
-//     jit-state: exit-jit-code
 
 // Check that the incoming argument to `yk_promote()` isn't what is promoted
 // (it's the returned value that is!)

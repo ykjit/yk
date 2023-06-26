@@ -14,7 +14,6 @@
 //     i=5
 //     1 2 3 4 6 5 end
 //     jit-state: deoptimise
-//     jit-state: exit-jit-code
 
 // Check that foreign code calling back to "native" code works.
 

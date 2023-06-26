@@ -18,7 +18,6 @@
 //     i=6
 //     i=6
 //     jit-state: deoptimise
-//     jit-state: exit-jit-code
 
 // Check that basic trace compilation works.
 

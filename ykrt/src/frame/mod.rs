@@ -139,7 +139,7 @@ impl FrameReconstructor {
     /// inside some allocated memory whose pointer this function returns. The frames are then later
     /// `memcpy`ed to the actual stack by [ykcapi::__ykrt_reconstruct_frames].
     #[cfg(target_arch = "x86_64")]
-    pub unsafe fn reconstruct_frames(&self, btmframeaddr: *mut c_void) -> *const c_void {
+    pub unsafe fn reconstruct_frames(&self, btmframeaddr: *mut c_void) -> (*const c_void, usize) {
         // Vec holding currently active register values.
         let mut registers = vec![0; 16];
 
@@ -148,6 +148,8 @@ impl FrameReconstructor {
         let mut memsize: usize = 15 * USIZEOF_POINTER;
         // Vec to collect stackmaps for each frame.
         let mut smaps = Vec::new();
+        // Size of the bottom-most frame (frame containing the control point).
+        let mut btmframesize = 0;
 
         // Collect stackmaps for each frame and calculate the final size of memory required to
         // store the reconstructed stack.
@@ -175,6 +177,17 @@ impl FrameReconstructor {
             // reconstructed.
             if i > 0 {
                 memsize += usize::try_from(rec.size).unwrap();
+            } else {
+                // Get the size of the frame containing the control point, which we'll later use to
+                // calculate the stack offset to write the new frames to. Note that we'll be adding
+                // this to a pointer retrieved via the `llvm.frameaddr` intrinsic, which doesn't
+                // include the pushed RBP at the beginning of the frame, whereas the size reported
+                // by the stackmap does. So if this frame uses the frame pointer, substract its
+                // size again.
+                btmframesize = usize::try_from(rec.size).unwrap();
+                if pinfo.hasfp {
+                    btmframesize -= USIZEOF_POINTER;
+                }
             }
             memsize += USIZEOF_POINTER; // Reserve space for return address.
             smaps.push((i, frame, rec, pinfo));
@@ -362,11 +375,7 @@ impl FrameReconstructor {
                 }
             }
             // WRITE RETURN ADDRESS.
-            // Write the return address for the previous frame into the current frame. Note that
-            // for calls we don't want to return to the address just before the call since that
-            // would mean executing the call twice. For anything else on the other hand we do need
-            // to re-execute the instruction (e.g. icmp, test) in order to set the correct flags
-            // for the following jump instruction.
+            // Write the return address for the previous frame into the current frame.
             rsp = unsafe { rsp.sub(USIZEOF_POINTER) };
             unsafe {
                 ptr::write(rsp as *mut u64, rec.offset);
@@ -395,7 +404,7 @@ impl FrameReconstructor {
         }
 
         // Return the pointer to the new stack.
-        newstack
+        (newstack, btmframesize)
     }
 
     /// Add a live variable and its value to the current frame.

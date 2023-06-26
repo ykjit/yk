@@ -33,7 +33,6 @@
 //     y=400
 //     y=500
 //     jit-state: deoptimise
-//     jit-state: exit-jit-code
 
 // Check that promotion works in traces.
 

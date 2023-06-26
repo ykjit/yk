@@ -20,8 +20,6 @@
 //     tomato
 //     banana
 //     jit-state: deoptimise
-//     ...
-//     jit-state: exit-jit-code
 //   stdout:
 //     exit
 

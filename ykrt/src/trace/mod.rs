@@ -17,7 +17,6 @@ use std::{
     sync::Arc,
 };
 pub mod hwt;
-use std::arch::asm;
 use tempfile::NamedTempFile;
 use ykutil::obj::llvmbc_section;
 
@@ -239,13 +238,13 @@ pub struct CompiledTrace {
     /// The argument to the function is a pointer to a struct containing the live variables at the
     /// control point. The exact definition of this struct is not known to Rust: the struct is
     /// generated at interpreter compile-time by ykllvm.
-    entry: *const c_void,
+    pub entry: *const c_void,
     /// Pointer to the stackmap, required to parse the stackmap during a guard failure.
-    smptr: *const c_void,
+    pub smptr: *const c_void,
     /// The stackmaps size.
-    smsize: usize,
+    pub smsize: usize,
     /// Pointer to heap allocated live AOT values.
-    aotvals: *const c_void,
+    pub aotvals: *const c_void,
     /// List of guards containing hotness counts or compiled side traces.
     guards: Vec<Option<Guard>>,
     /// If requested, a temporary file containing the "source code" for the trace, to be shown in
@@ -257,7 +256,6 @@ pub struct CompiledTrace {
     di_tmpfile: Option<NamedTempFile>,
 }
 
-use std::mem;
 use std::slice;
 impl CompiledTrace {
     /// Create a `CompiledTrace` from a pointer to an array containing: the pointer to the compiled
@@ -296,65 +294,6 @@ impl CompiledTrace {
             aotvals: std::ptr::null() as *const _,
             di_tmpfile: None,
             guards: Vec::new(),
-        }
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    #[naked]
-    #[no_mangle]
-    /// Taking the deoptimisation path during a guard failure causes the epilogue of the compiled
-    /// trace to be skipped. This means that used callee-saved registers (CSRs) are not restored.
-    /// Until we've figured out how to restore only the used registers we take the sledge hammer
-    /// approach and save and restore all CSRs here.
-    /// OPT: Find a way to only restore needed registers (ideally right within the deopt code).
-    pub extern "C" fn exec(
-        &self,
-        ctrlp_vars: *mut c_void,
-        frameaddr: *mut c_void,
-    ) -> *const c_void {
-        unsafe {
-            asm!(
-                "push rbx",
-                "push rsp",
-                "push rbp",
-                "push r12",
-                "push r13",
-                "push r14",
-                "push r15",
-                "call real_exec",
-                "pop r15",
-                "pop r14",
-                "pop r13",
-                "pop r12",
-                "pop rbp",
-                "pop rsp",
-                "pop rbx",
-                "ret",
-                options(noreturn)
-            )
-        }
-    }
-
-    #[no_mangle]
-    extern "C" fn real_exec(
-        &self,
-        ctrlp_vars: *mut c_void,
-        frameaddr: *mut c_void,
-    ) -> *const c_void {
-        #[cfg(feature = "yk_testing")]
-        assert_ne!(self.entry as *const (), std::ptr::null());
-        unsafe {
-            let f = mem::transmute::<
-                _,
-                unsafe extern "C" fn(
-                    *mut c_void,
-                    *const c_void,
-                    usize,
-                    *mut c_void,
-                    *const c_void,
-                ) -> *const c_void,
-            >(self.entry);
-            f(ctrlp_vars, self.smptr, self.smsize, frameaddr, self.aotvals)
         }
     }
 }

@@ -11,7 +11,7 @@
 //     jit-state: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     define ptr @__yk_compiled_trace_0(ptr %0, ptr %1, i64 %2, ptr %3, ptr %4) {
+//     define ptr @__yk_compiled_trace_0(ptr %0, ptr %1, ptr %2) {
 //       ...
 //       %{{fptr}} = getelementptr %YkCtrlPointVars, ptr %0, i32 0, i32 0...
 //       %{{load}} = load...
@@ -57,7 +57,6 @@
 //     pc=2, mem=1
 //     pc=3, mem=0
 //     jit-state: deoptimise
-//     jit-state: exit-jit-code
 //     pc=4, mem=0
 //     pc=5, mem=0
 

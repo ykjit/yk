@@ -9,6 +9,7 @@ use std::{
     error::Error,
     ffi::c_void,
     marker::PhantomData,
+    mem,
     sync::{
         atomic::{AtomicU16, AtomicU32, AtomicUsize, Ordering},
         Arc,
@@ -163,10 +164,16 @@ impl MT {
             TransitionLocation::Execute(ctr) => {
                 #[cfg(feature = "yk_jitstate_debug")]
                 print_jit_state("enter-jit-code");
-                let ptr = ctr.exec(ctrlp_vars, frameaddr);
-                #[cfg(feature = "yk_jitstate_debug")]
-                print_jit_state("exit-jit-code");
-                return ptr;
+
+                unsafe {
+                    #[cfg(feature = "yk_testing")]
+                    assert_ne!(ctr.entry as *const (), std::ptr::null());
+                    let f = mem::transmute::<
+                        _,
+                        unsafe extern "C" fn(*mut c_void, *const CompiledTrace, *const c_void) -> !,
+                    >(ctr.entry);
+                    f(ctrlp_vars, Arc::into_raw(ctr), frameaddr);
+                }
             }
             TransitionLocation::StartTracing => {
                 #[cfg(feature = "yk_jitstate_debug")]

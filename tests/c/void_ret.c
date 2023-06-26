@@ -8,7 +8,6 @@
 //     inside f
 //     inside f
 //     jit-state: deoptimise
-//     jit-state: exit-jit-code
 //     ...
 
 // Check that inlining a function with a void return type works.
