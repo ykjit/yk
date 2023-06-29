@@ -1,0 +1,6 @@
+#!/bin/sh
+#
+# Wrapper around the `gdb_c_test` binary to make it easier to use.
+
+set -e
+cargo run --bin gdb_c_test -- $@
