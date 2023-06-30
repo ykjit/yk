@@ -435,10 +435,6 @@ class JITModBuilder {
   // Function virtual addresses discovered from the input trace.
   FuncAddrs FAddrs;
 
-  // Maps field indices in the live variables struct to the value stored prior
-  // to calling the control point.
-  std::map<uint64_t, Value *> LiveIndexMap;
-
   // The LLVM type for a C `int` on the current machine.
   Type *IntTy;
 
@@ -813,7 +809,6 @@ class JITModBuilder {
     // becomes the entry block. This would lead to a trace that
     // unconditionally and immediately fails a guard.
     assert(JITFunc->size() != 0);
-
     // Keep a count of he current number of guards. This number is used as an
     // index into `CompiledTrace.guards` to handle side-traces inside guard
     // failures.
@@ -1170,112 +1165,45 @@ class JITModBuilder {
            cast<Instruction>(V2)->getParent();
   }
 
-  // When executing the interpreter loop AOT code, the code before the control
-  // point is executed, then the control point is called, then the code after
-  // the control point is executed.
+  // At the beginning of the trace we need to extract the live values from
+  // YkCtrlPointVars and use those inplace of their original AOT values. We can
+  // do this by looking up the value that was stored inside YkCtrlPointVars at
+  // AOT time, and then emit the neccessary loads to replace them with.
   //
-  // But when we collect a trace, the first code we see is the code *after* the
-  // call to the control point, then (assuming the interpreter loop doesn't
-  // exit) we branch back to the start of the loop and only then see the code
-  // before the call to the control point.
-  //
-  // In other words, there is a disparity between the order of the code in the
-  // AOT module and in collected traces and this has implications for the trace
-  // compiler. Without extra logic, alloca'd variables become undefined (as
-  // they are defined outside of the trace) and thus need to be remapped to the
-  // input of the compiled trace. SSA values (from the same block as the
-  // control point) remain correct as phi nodes at the beginning of the trace
-  // automatically select the appropriate input value.
-  //
-  // For example, once patched, a typical interpreter loop will look like this:
+  // For example the following AOT code:
   //
   // clang-format off
-  //
   // ```
-  // bb0:
-  //   %a = alloca  // Stack variable
-  //   store 0, %a
-  //   %b = 1       // Register variable
-  //   %s = alloca YkCtrlPointVars
-  //   br %bb1
-  //
-  // bb1:
-  //   %b1 = phi [%b, %bb0], [%binc, %bb1]
-  //   %aptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 0
-  //   store %aptr, %a
-  //   %bptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 1
-  //   store %bptr, %b
-  //   // traces end here
-  //   call yk_new_control_point(%s)
-  //   // traces start here
-  //   %aptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 0
-  //   %anew = load %aptr
-  //   %bptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 1
-  //   %bnew = load %bptr
-  //
-  //   %aload = load %anew
-  //   %ainc = add 1, %aload
-  //   store %ainc, %a
-  //   %binc = add 1, %bnew
-  //   br %bb1
+  // $1 = 2
+  // store $1, YkCtrlPointVars, 0, 0
+  // control_point(YkCtrlPointVars)
+  // add $1, 1
   // ```
   //
-  // clang-format on
-  //
-  // There are two live variables stored into the `YKCtrlPointVars` struct
-  // before the call to the control point (`%a` and `%b`), and those variables
-  // are loaded back out after the call to the control point (into `%anew` and
-  // `%bnew`). `%a` and `%anew` correspond to the same high-level variable, and
-  // so do `%b1` and `%bnew`. When assembling a trace from the above IR, it
-  // would look like this:
-  //
-  // clang-format off
+  // would result in the following JIT code:
   //
   // ```
-  // void compiled_trace(%YkCtrlPointVars* %s) {
-  //   %aptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 0
-  //   %anew = load %aptr
-  //   %bptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 1
-  //   %bnew = load %bptr
-  //
-  //   %aload = load %anew
-  //   %ainc = add 1, %aload
-  //   store %ainc, %a                // %a is undefined
-  //   %binc = add 1, %bnew
-  //   %b1 = %bbinc                   // RHS selected from PHI.
-  //
-  //   %aptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 0
-  //   store %aptr, %a
-  //   %bptr = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %s, i32 0, i32 1
-  //   store %bptr, %b1
-  //   ...
+  // void compiled_trace(YkCtrlPointVars $1) {
+  //   $2 = load $1, 0, 0
+  //   add $2, 1
   // }
   // ```
-  //
   // clang-format on
-  //
-  // Here `%a` is undefined because we didn't trace its allocation. Instead we
-  // need to use the definition extracted from the `YkCtrlPointVars`, which
-  // means we need to replace `%a` with `%anew` in the store instruction. The
-  // other value `%b` doesn't have this problem, since the PHI node in the
-  // control point block already makes sure it selects the correct SSA value
-  // `%binc`.
-  void createLiveIndexMap(Instruction *CPCI, Type *YkCtrlPointVarsPtrTy) {
+  void createTraceHeader(Instruction *CPCI, Type *YkCtrlPointVarsPtrTy) {
     BasicBlock *CPCIBB = CPCI->getParent();
+    Function *F = CPCIBB->getParent();
 
-    // Scan for `getelementpointer`/`store` pairs leading up the control point.
-    // For each pair we add an entry to `LiveIndexMap`.
-    //
-    // For example, this instruction pair:
-    //
-    // ```
-    // %19 = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %3, i32 0, i32 2
-    // store i32* %6, i32** %19, align 8
-    // ```
-    //
-    // Adds an entry mapping the index `2` to `%6`.
+    size_t CurInstrIdx = 0;
+    size_t CurBBIdx = 0;
+    for (auto BB = F->begin(); &*BB != CPCIBB; BB++) {
+      CurBBIdx += 1;
+    }
+
+    // Find the store instructions related to YkCtrlPointVars and generate and
+    // insert a load for each stored value.
     for (BasicBlock::iterator CI = CPCIBB->begin(); &*CI != CPCI; CI++) {
       assert(CI != CPCIBB->end());
+      CurInstrIdx++;
       if (!isa<GetElementPtrInst>(CI))
         continue;
 
@@ -1289,18 +1217,32 @@ class JITModBuilder {
       assert(isa<StoreInst>(NextInst));
       StoreInst *SI = cast<StoreInst>(NextInst);
       Value *StoredVal = SI->getValueOperand();
-      Value *StoredAtIdxVal = *(std::next(GI->idx_begin()));
-      assert(isa<ConstantInt>(StoredAtIdxVal));
-      uint64_t StoredAtIdx = cast<ConstantInt>(StoredAtIdxVal)->getZExtValue();
 
-      // We need an entry in this map for any live variable that isn't defined
-      // by a PHI node at the top of the block cotaining the call to the
-      // control point.
+      // Now generate the load and update the VMap to reference this load
+      // instead of the original AOT value.
       if (!(isa<PHINode>(StoredVal) &&
             areInstrsDefinedInSameBlock(StoredVal, SI))) {
-        LiveIndexMap[StoredAtIdx] = StoredVal;
+        Instruction *GEP = Builder.Insert(GI->clone());
+        llvm::RemapInstruction(GEP, VMap, RF_NoModuleLevelChanges);
+        Instruction *Load = Builder.CreateLoad(StoredVal->getType(), GEP);
+        VMap[StoredVal] = Load;
+        // For deoptimisation we need to create a mapping from the original AOT
+        // value to the corresponding JIT value. This mapping is encoded using
+        // the basic block index and instruction index. These are costly to
+        // calculate, so instead we create mapping to the YkCtrlPointVars store
+        // instruction instead. During optimisation we can then easily fish out
+        // the original AOT value via this instructions operand.
+        insertAOTMap(cast<Instruction>(StoredVal), Load, CurBBIdx, CurInstrIdx);
       }
     }
+
+    // Now that we've generated the YkCtrlPointVars loads at the beginning of
+    // the trace, create new block, so we don't run these loads on every loop
+    // iteration.
+    LoopEntryBB =
+        BasicBlock::Create(Builder.getContext(), "loopentry", JITFunc);
+    Builder.CreateBr(LoopEntryBB);
+    Builder.SetInsertPoint(LoopEntryBB);
   }
 
   // Find the call site to the (patched) control point, the index of that call
@@ -1359,8 +1301,6 @@ class JITModBuilder {
     auto DstBB = BasicBlock::Create(JITMod->getContext(), "entry", JITFunc);
     Builder.SetInsertPoint(DstBB);
 
-    createLiveIndexMap(ControlPointCallInst, TraceInputs->getType());
-
     // Map the live variables struct used inside the trace to the corresponding
     // argument of the compiled trace function.
     VMap[TraceInputs] = JITFunc->getArg(JITFUNC_ARG_INPUTS_STRUCT_IDX);
@@ -1378,6 +1318,8 @@ class JITModBuilder {
     StackFrame InitFrame =
         StackFrame::CreateMappableFrame(StartFunc, nullptr, RP);
     CallStack.pushFrame(InitFrame);
+
+    createTraceHeader(ControlPointCallInst, TraceInputs->getType());
 
     // In debug builds, sanity check our assumptions about the input trace.
 #ifndef NDEBUG
@@ -1738,11 +1680,10 @@ public:
         }
 
         if (Idx > 0 && Idx < InpTrace.Length() - 1) {
-          // Stores and loads into/from YkCtrlPointVars only need to be copied
-          // if they appear at the beginning or end of the trace. Any
-          // YkCtrlPointVars loads and stores inbetween come from tracing over
-          // the control point and aren't needed. We remove them here to reduce
-          // the size of traces.
+          // Stores into YkCtrlPointVars only need to be copied if they appear
+          // at the beginning or end of the trace. Any YkCtrlPointVars stores
+          // inbetween come from tracing over the control point and aren't
+          // needed. We remove them here to reduce the size of traces.
           if (isa<GetElementPtrInst>(I)) {
             GetElementPtrInst *GEP = cast<GetElementPtrInst>(I);
             if (GEP->getPointerOperand() == TraceInputs) {
@@ -1782,19 +1723,6 @@ public:
               MPF->LastSMCall = cast<CallInst>(I);
               I++;
               CurInstrIdx++;
-              assert(isa<GetElementPtrInst>(I));
-              // Now find the loads and map them to the values of the previous
-              // stores.
-              while (isa<GetElementPtrInst>(I)) {
-                I++;
-                CurInstrIdx++;
-                assert(isa<LoadInst>(I));
-
-                VMap[&*I] = getMappedValue(Stores.back());
-                Stores.pop_back();
-                I++;
-                CurInstrIdx++;
-              }
 
               // We've seen the control point so the next block will be
               // unmappable. Set a resume point so we can continue collecting
@@ -1812,35 +1740,6 @@ public:
         // If execution reaches here, then the instruction I is to be copied
         // into JITMod.
         copyInstruction(&Builder, (Instruction *)&*I, CurBBIdx, CurInstrIdx);
-
-        // If we see a `getelementpointer`/`load` pair that is loading from the
-        // `YkCtrlPointVars` pointer, then we have to update the `VMap` using
-        // the information we previously computed in `LiveIndexMap`. See
-        // comments above about `LiveIndexMap`.
-        if (isa<LoadInst>(I)) {
-          LoadInst *LI = cast<LoadInst>(I);
-          Value *LoadOper = LI->getPointerOperand();
-          if (isa<GetElementPtrInst>(LoadOper)) {
-            GetElementPtrInst *GI = cast<GetElementPtrInst>(LoadOper);
-            if (GI->getPointerOperand() == TraceInputs) {
-              Value *LoadedFromIdxVal = *(std::next(GI->idx_begin()));
-              assert(isa<ConstantInt>(LoadedFromIdxVal));
-              uint64_t LoadedFromIdx =
-                  cast<ConstantInt>(LoadedFromIdxVal)->getZExtValue();
-              Value *NewMapVal = LiveIndexMap[LoadedFromIdx];
-              VMap[NewMapVal] = getMappedValue(LI);
-              if (!isa<GetElementPtrInst>(LI->getNextNonDebugInstruction())) {
-                // This is the last YkCtrlPointVars load. Insert a branch here
-                // to have an entry point for trace looping that doesn't
-                // include loading from YkCtrlPointVars.
-                LoopEntryBB = BasicBlock::Create(Builder.getContext(),
-                                                 "loopentry", JITFunc);
-                Builder.CreateBr(LoopEntryBB);
-                Builder.SetInsertPoint(LoopEntryBB);
-              }
-            }
-          }
-        }
       }
 
       // Block complete. If we are still in the same frame, then update the

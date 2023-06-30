@@ -12,7 +12,7 @@
 ;        %{{y}} = add i32 %{{x}}, 1
 ;        %{{select}} = select i1 false, i32 %{{y}}, i32 %{{y}}
 ;        %{{z}} = add i32 %{{select}}, 2
-;        ret {{type}}...
+;        br label %loopentry
 ;      }
 ;      ...
 ;      --- End jit-pre-opt ---

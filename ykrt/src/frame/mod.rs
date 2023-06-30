@@ -14,7 +14,7 @@ use std::{
 use yksmp::{Location as SMLocation, SMEntry, StackMapParser};
 
 mod llvmbridge;
-use llvmbridge::{get_aot_original, Module, Type, Value};
+use llvmbridge::{Module, Type, Value};
 
 pub static AOT_STACKMAPS: LazyLock<Vec<SMEntry>> = LazyLock::new(|| {
     // Load the stackmap from the binary to parse in the stackmaps.
@@ -418,7 +418,15 @@ impl FrameReconstructor {
     ) {
         let func = self.module.function(fname.as_ptr());
         let bb = func.bb(bbidx);
-        let instr = bb.instruction(instridx);
+        let mut instr = bb.instruction(instridx);
+
+        // When setting up the trace header, we need to map JIT loads to the original AOT value
+        // passed via YkCtrlPointVars. That value needs to be encoded as (BBIdx, InstrIdx) which
+        // are time intensive to find. Instead we just map the load to the YkCtrlPointVars store
+        // instruction. The actual AOT value can then simply be found in the first operand.
+        if instr.is_store() {
+            instr = instr.get_operand(0);
+        }
 
         if instr.get_type().is_integer() {
             // Stackmap "small constants" get their value sign-extended to fill the reserved 32-bit
@@ -428,19 +436,8 @@ impl FrameReconstructor {
             val &= u64::MAX >> (64 - iw);
         }
 
-        let orgaot = if sfidx == 0 {
-            unsafe { get_aot_original(&instr) }
-        } else {
-            // Only the root stackframe contains the control point call, so for the other frames
-            // there's no need to match live variables to their corresponding variables passed into
-            // the control point. See `get_aot_original` for more details.
-            None
-        };
         let ty = instr.get_type();
         let value = SGValue::new(val, ty);
         self.frames.get_mut(sfidx).unwrap().add(instr, value);
-        if let Some(v) = orgaot {
-            self.frames.get_mut(sfidx).unwrap().add(v, value);
-        }
     }
 }

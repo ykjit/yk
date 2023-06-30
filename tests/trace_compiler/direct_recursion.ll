@@ -6,7 +6,8 @@
 ;
 ;     ...
 ;     define {{type}} @__yk_compiled_trace_0(ptr %0, ptr %1, ptr %2) {
-;     entry:
+;     ...
+;     loopentry:...
 ;       %{{4}} = icmp eq i32 2, 0
 ;       br i1 %{{4}}, label %guardfail, label %{{5}}
 ;
@@ -18,7 +19,7 @@
 ;     {{5}}:...
 ;       %{{6}} = sub i32 2, 1
 ;       call void @f(i32 %{{6}})
-;       ret {{type}}...
+;       br label %loopentry
 ;     }
 ;
 ;     declare {{type}} @llvm.experimental.deoptimize.p0(...)
