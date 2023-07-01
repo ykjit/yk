@@ -79,7 +79,7 @@ fn run_suite(opt: &'static str) {
 
             let mut compiler = mk_compiler(wrapper_path.as_path(), &exe, p, opt, &extra_objs, true);
             compiler.env("YK_COMPILER_PATH", ykllvm_bin("clang"));
-            let mut runtime = Command::new(exe.clone());
+            let runtime = Command::new(exe.clone());
             vec![("Compiler", compiler), ("Run-time", runtime)]
         })
         .fm_options(|_, _, fmb| {
