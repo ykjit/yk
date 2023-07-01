@@ -38,7 +38,7 @@ pub extern "C" fn yk_mt_new(err_msg: *mut *const c_char) -> *mut MT {
 #[no_mangle]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn yk_mt_drop(mt: *mut MT) {
-    unsafe { Box::from_raw(mt) };
+    drop(unsafe { Box::from_raw(mt) });
 }
 
 // The "dummy control point" that is replaced in an LLVM pass.
