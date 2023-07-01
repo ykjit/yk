@@ -10,7 +10,7 @@ pub extern "C" fn __yktrace_hwt_mapper_blockmap_new() -> *mut BlockMap {
 
 #[no_mangle]
 pub extern "C" fn __yktrace_hwt_mapper_blockmap_free(bm: *mut BlockMap) {
-    unsafe { Box::from_raw(bm) };
+    drop(unsafe { Box::from_raw(bm) });
 }
 
 #[no_mangle]
