@@ -1255,6 +1255,7 @@ class JITModBuilder {
   GetControlPointInfo(Module *AOTMod) {
     Function *F = AOTMod->getFunction(YK_NEW_CONTROL_POINT);
     assert(F->arg_size() == YK_CONTROL_POINT_NUM_ARGS);
+    assert(F->getReturnType()->isVoidTy());
 
     User *CallSite = F->user_back();
     CallInst *CPCI = cast<CallInst>(CallSite);
