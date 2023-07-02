@@ -62,7 +62,7 @@ pub extern "C" fn __ykrt_control_point(
     if !loc.is_null() {
         let mt = unsafe { &*mt };
         let loc = unsafe { &*loc };
-        return mt.control_point(loc, ctrlp_vars, frameaddr);
+        mt.control_point(loc, ctrlp_vars, frameaddr);
     }
     std::ptr::null()
 }

@@ -153,12 +153,7 @@ impl MT {
         }
     }
 
-    pub fn control_point(
-        &self,
-        loc: &Location,
-        ctrlp_vars: *mut c_void,
-        frameaddr: *mut c_void,
-    ) -> *const c_void {
+    pub fn control_point(&self, loc: &Location, ctrlp_vars: *mut c_void, frameaddr: *mut c_void) {
         match self.transition_location(loc) {
             TransitionLocation::NoAction => (),
             TransitionLocation::Execute(ctr) => {
@@ -203,7 +198,6 @@ impl MT {
                 }
             }
         }
-        std::ptr::null()
     }
 
     /// Perform the next step to `loc` in the `Location` state-machine. If `loc` moves to the
