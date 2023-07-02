@@ -1270,10 +1270,7 @@ class JITModBuilder {
     }
 
     Value *Inputs = CPCI->getArgOperand(YK_CONTROL_POINT_ARG_VARS_IDX);
-#ifndef NDEBUG
-    Type *InputsTy = Inputs->getType();
-    assert(InputsTy->isPointerTy());
-#endif
+    assert(Inputs->getType()->isPointerTy());
 
     return {CPCI, CPCIIdx, Inputs};
   }
