@@ -10,6 +10,7 @@
 
 use std::{
     ffi::{c_char, c_void, CString},
+    mem::forget,
     ptr,
     sync::Arc,
 };
@@ -53,7 +54,7 @@ pub extern "C" fn yk_mt_control_point(_mt: *mut MT, _loc: *mut Location) {
 #[no_mangle]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn __ykrt_control_point(
-    mt: *mut MT,
+    mt: *const MT,
     loc: *mut Location,
     ctrlp_vars: *mut c_void,
     // Frame address of caller.
@@ -63,14 +64,18 @@ pub extern "C" fn __ykrt_control_point(
     if !loc.is_null() {
         let mt = unsafe { &*mt };
         let loc = unsafe { &*loc };
-        mt.control_point(loc, ctrlp_vars, frameaddr);
+        let arc = unsafe { Arc::from_raw(mt) };
+        arc.control_point(loc, ctrlp_vars, frameaddr);
+        forget(arc);
     }
     std::ptr::null()
 }
 
 #[no_mangle]
-pub extern "C" fn yk_mt_hot_threshold_set(mt: &MT, hot_threshold: HotThreshold) {
-    mt.set_hot_threshold(hot_threshold);
+pub extern "C" fn yk_mt_hot_threshold_set(mt: *const MT, hot_threshold: HotThreshold) {
+    let arc = unsafe { Arc::from_raw(mt) };
+    arc.set_hot_threshold(hot_threshold);
+    forget(arc);
 }
 
 #[no_mangle]

@@ -85,24 +85,27 @@ impl MT {
 
     /// Return this `MT` instance's current hot threshold. Notice that this value can be changed by
     /// other threads and is thus potentially stale as soon as it is read.
-    pub fn hot_threshold(&self) -> HotThreshold {
+    pub fn hot_threshold(self: &Arc<Self>) -> HotThreshold {
         self.hot_threshold.load(Ordering::Relaxed)
     }
 
     /// Set the threshold at which `Location`'s are considered hot.
-    pub fn set_hot_threshold(&self, hot_threshold: HotThreshold) {
+    pub fn set_hot_threshold(self: &Arc<Self>, hot_threshold: HotThreshold) {
         self.hot_threshold.store(hot_threshold, Ordering::Relaxed);
     }
 
     /// Return this `MT` instance's current trace failure threshold. Notice that this value can be
     /// changed by other threads and is thus potentially stale as soon as it is read.
-    pub fn trace_failure_threshold(&self) -> TraceFailureThreshold {
+    pub fn trace_failure_threshold(self: &Arc<Self>) -> TraceFailureThreshold {
         self.trace_failure_threshold.load(Ordering::Relaxed)
     }
 
     /// Set the threshold at which a `Location` from which tracing has failed multiple times is
     /// marked as "do not try tracing again".
-    pub fn set_trace_failure_threshold(&self, trace_failure_threshold: TraceFailureThreshold) {
+    pub fn set_trace_failure_threshold(
+        self: &Arc<Self>,
+        trace_failure_threshold: TraceFailureThreshold,
+    ) {
         if trace_failure_threshold < 1 {
             panic!("Trace failure threshold must be >= 1.");
         }
@@ -112,12 +115,12 @@ impl MT {
 
     /// Return this meta-tracer's maximum number of worker threads. Notice that this value can be
     /// changed by other threads and is thus potentially stale as soon as it is read.
-    pub fn max_worker_threads(&self) -> usize {
+    pub fn max_worker_threads(self: &Arc<Self>) -> usize {
         self.max_worker_threads.load(Ordering::Relaxed)
     }
 
     /// Queue `job` to be run on a worker thread.
-    fn queue_job(&self, job: Box<dyn FnOnce() + Send>) {
+    fn queue_job(self: &Arc<Self>, job: Box<dyn FnOnce() + Send>) {
         // We have a very simple model of worker threads. Each time a job is queued, we spin up a
         // new worker thread iff we aren't already running the maximum number of worker threads.
         // Once started, a worker thread never dies, waiting endlessly for work.
@@ -153,7 +156,12 @@ impl MT {
         }
     }
 
-    pub fn control_point(&self, loc: &Location, ctrlp_vars: *mut c_void, frameaddr: *mut c_void) {
+    pub fn control_point(
+        self: &Arc<Self>,
+        loc: &Location,
+        ctrlp_vars: *mut c_void,
+        frameaddr: *mut c_void,
+    ) {
         match self.transition_location(loc) {
             TransitionLocation::NoAction => (),
             TransitionLocation::Execute(ctr) => {
@@ -202,7 +210,7 @@ impl MT {
 
     /// Perform the next step to `loc` in the `Location` state-machine. If `loc` moves to the
     /// Compiled state, return a pointer to a [CompiledTrace] object.
-    fn transition_location(&self, loc: &Location) -> TransitionLocation {
+    fn transition_location(self: &Arc<Self>, loc: &Location) -> TransitionLocation {
         THREAD_MTTHREAD.with(|mtt| {
             let am_tracing = mtt.tracing.borrow().is_some();
             match loc.hot_location() {
@@ -328,7 +336,7 @@ impl MT {
 
     /// Add a compilation job for `utrace` to the global work queue.
     fn queue_compile_job(
-        &self,
+        self: &Arc<Self>,
         utrace: Box<dyn UnmappedTrace>,
         hl_arc: Arc<Mutex<HotLocation>>,
         tracer: Arc<dyn Tracer>,
