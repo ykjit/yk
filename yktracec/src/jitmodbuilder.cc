@@ -1255,6 +1255,7 @@ class JITModBuilder {
   GetControlPointInfo(Module *AOTMod) {
     Function *F = AOTMod->getFunction(YK_NEW_CONTROL_POINT);
     assert(F->arg_size() == YK_CONTROL_POINT_NUM_ARGS);
+    assert(F->getReturnType()->isVoidTy());
 
     User *CallSite = F->user_back();
     CallInst *CPCI = cast<CallInst>(CallSite);
@@ -1270,10 +1271,7 @@ class JITModBuilder {
     }
 
     Value *Inputs = CPCI->getArgOperand(YK_CONTROL_POINT_ARG_VARS_IDX);
-#ifndef NDEBUG
-    Type *InputsTy = Inputs->getType();
-    assert(InputsTy->isPointerTy());
-#endif
+    assert(Inputs->getType()->isPointerTy());
 
     return {CPCI, CPCIIdx, Inputs};
   }
