@@ -2,6 +2,7 @@ use llvm_sys::core::*;
 use llvm_sys::prelude::{LLVMBasicBlockRef, LLVMModuleRef, LLVMTypeRef, LLVMValueRef};
 use llvm_sys::target::{LLVMGetModuleDataLayout, LLVMTargetDataRef};
 use llvm_sys::LLVMTypeKind;
+use std::{ffi::CStr, fmt};
 
 pub struct Module(LLVMModuleRef);
 
@@ -124,5 +125,13 @@ impl Value {
             debug_assert!(!LLVMIsAUser(self.0).is_null());
             Value(LLVMGetOperand(self.0, idx))
         }
+    }
+}
+
+impl fmt::Debug for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", unsafe {
+            CStr::from_ptr(LLVMPrintValueToString(self.0))
+        })
     }
 }
