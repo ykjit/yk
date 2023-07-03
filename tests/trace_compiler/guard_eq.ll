@@ -5,7 +5,8 @@
 ;      --- Begin jit-pre-opt ---
 ;      ...
 ;      define {{type}} @__yk_compiled_trace_0(...
-;      entry:
+;      ...
+;      loopentry:...
 ;        %{{0}} = alloca i32, align 4
 ;        %{{1}} = icmp eq i32 1, 1
 ;        br i1 %{{1}}, label %{{true}}, label %guardfail
@@ -17,7 +18,7 @@
 ;
 ;      {{true}}:...
 ;        store i32 1, ptr %{{0}}, align 4
-;        ret {{type}} null
+;        br label %loopentry
 ;      }
 ;
 ;      declare {{type}} @llvm.experimental.deoptimize.p0(...)

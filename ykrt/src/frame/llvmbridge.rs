@@ -1,9 +1,7 @@
-use super::SGValue;
 use llvm_sys::core::*;
 use llvm_sys::prelude::{LLVMBasicBlockRef, LLVMModuleRef, LLVMTypeRef, LLVMValueRef};
 use llvm_sys::target::{LLVMGetModuleDataLayout, LLVMTargetDataRef};
-use llvm_sys::{LLVMTypeKind, LLVMValueKind};
-use std::ffi::CStr;
+use llvm_sys::LLVMTypeKind;
 
 pub struct Module(LLVMModuleRef);
 
@@ -76,10 +74,6 @@ impl Type {
         unsafe { LLVMGetTypeKind(self.0) }
     }
 
-    pub fn is_struct(&self) -> bool {
-        matches!(self.kind(), LLVMTypeKind::LLVMStructTypeKind)
-    }
-
     pub fn is_integer(&self) -> bool {
         matches!(self.kind(), LLVMTypeKind::LLVMIntegerTypeKind)
     }
@@ -101,20 +95,12 @@ impl Value {
         self.0
     }
 
-    pub fn is_gep(&self) -> bool {
-        unsafe { !LLVMIsAGetElementPtrInst(self.0).is_null() }
-    }
-
     pub fn is_instruction(&self) -> bool {
         unsafe { !LLVMIsAInstruction(self.0).is_null() }
     }
 
     pub fn is_alloca(&self) -> bool {
         unsafe { !LLVMIsAAllocaInst(self.0).is_null() }
-    }
-
-    pub fn is_load(&self) -> bool {
-        unsafe { !LLVMIsALoadInst(self.0).is_null() }
     }
 
     pub fn is_store(&self) -> bool {
@@ -139,75 +125,4 @@ impl Value {
             Value(LLVMGetOperand(self.0, idx))
         }
     }
-
-    pub fn as_str(&self) -> &CStr {
-        unsafe { CStr::from_ptr(LLVMPrintValueToString(self.0)) }
-    }
-
-    pub fn kind(&self) -> LLVMValueKind {
-        unsafe { LLVMGetValueKind(self.0) }
-    }
-}
-
-pub fn llvm_const_to_sgvalue(c: Value) -> SGValue {
-    let ty = c.get_type();
-    match ty.kind() {
-        LLVMTypeKind::LLVMIntegerTypeKind => {
-            // FIXME: Add tests to check there's no silent sign extension going on.
-            let val = unsafe { LLVMConstIntGetZExtValue(c.get()) };
-            SGValue::new(val, ty)
-        }
-        LLVMTypeKind::LLVMPointerTypeKind => match c.kind() {
-            LLVMValueKind::LLVMConstantPointerNullValueKind => SGValue::new(0, ty),
-            _ => todo!(),
-        },
-        _ => todo!("{:?}", c.as_str()),
-    }
-}
-
-/// Some live variables (e.g. pointers) have two representations: before they are copied into the
-/// YKCtrlVars struct, and after. When initialising such a variable we need to assign to both
-/// representations so that we can interpret IR outside of the main interpreter loop. This function
-/// takes a live variable and tries to find its other representation if there is one.
-pub unsafe fn get_aot_original(instr: &Value) -> Option<Value> {
-    if instr.is_load() {
-        let gep = instr.get_operand(0);
-        if !gep.is_gep() {
-            return None;
-        }
-        let ykcpvars = gep.get_operand(0);
-        if !ykcpvars.is_alloca() {
-            return None;
-        }
-        let ty = Type(LLVMGetAllocatedType(ykcpvars.0));
-        if !ty.is_struct() {
-            // If this isn't a struct it can't be YKCtrlPointVars.
-            return None;
-        }
-        let name = CStr::from_ptr(LLVMGetStructName(ty.0));
-        if name.to_str().unwrap() != "YkCtrlPointVars" {
-            // This isn't the YKCtrlPointVars struct.
-            return None;
-        }
-        // We found the YKCtrlPointVars struct. Now iterate over all it's uses to find the
-        // corresponding store instruction from which we can extract the original AOT variable.
-        let tgtoff = llvm_const_to_sgvalue(gep.get_operand(2));
-
-        let mut varuse = LLVMGetFirstUse(ykcpvars.0);
-        while !varuse.is_null() {
-            let varuser = Value(LLVMGetUser(varuse));
-            if varuser.is_gep() {
-                let curoff = llvm_const_to_sgvalue(varuser.get_operand(2));
-                if tgtoff == curoff {
-                    let aotuse = LLVMGetFirstUse(varuser.0);
-                    let aotstore = Value(LLVMGetUser(aotuse));
-                    if aotstore.is_store() {
-                        return Some(aotstore.get_operand(0));
-                    }
-                }
-            }
-            varuse = LLVMGetNextUse(varuse);
-        }
-    }
-    None
 }
