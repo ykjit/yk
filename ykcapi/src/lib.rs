@@ -11,14 +11,15 @@
 use std::{
     ffi::{c_char, c_void, CString},
     ptr,
+    sync::Arc,
 };
 use ykrt::{HotThreshold, Location, MT};
 
 #[no_mangle]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
-pub extern "C" fn yk_mt_new(err_msg: *mut *const c_char) -> *mut MT {
+pub extern "C" fn yk_mt_new(err_msg: *mut *const c_char) -> *const MT {
     match MT::new() {
-        Ok(mt) => Box::into_raw(Box::new(mt)),
+        Ok(mt) => Arc::into_raw(mt),
         Err(e) => {
             if err_msg.is_null() {
                 panic!("{}", e);
@@ -37,8 +38,8 @@ pub extern "C" fn yk_mt_new(err_msg: *mut *const c_char) -> *mut MT {
 
 #[no_mangle]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
-pub extern "C" fn yk_mt_drop(mt: *mut MT) {
-    drop(unsafe { Box::from_raw(mt) });
+pub extern "C" fn yk_mt_drop(mt: *const MT) {
+    drop(unsafe { Arc::from_raw(mt) });
 }
 
 // The "dummy control point" that is replaced in an LLVM pass.

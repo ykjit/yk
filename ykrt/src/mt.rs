@@ -70,8 +70,8 @@ pub struct MT {
 impl MT {
     // Create a new meta-tracer instance. Arbitrarily many of these can be created, though there
     // are no guarantees as to whether they will share resources effectively or fairly.
-    pub fn new() -> Result<Self, Box<dyn Error>> {
-        Ok(Self {
+    pub fn new() -> Result<Arc<Self>, Box<dyn Error>> {
+        Ok(Arc::new(Self {
             hot_threshold: AtomicHotThreshold::new(DEFAULT_HOT_THRESHOLD),
             trace_failure_threshold: AtomicTraceFailureThreshold::new(
                 DEFAULT_TRACE_FAILURE_THRESHOLD,
@@ -80,7 +80,7 @@ impl MT {
             max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
             active_worker_threads: AtomicUsize::new(0),
             tracer: default_tracer_for_platform()?,
-        })
+        }))
     }
 
     /// Return this `MT` instance's current hot threshold. Notice that this value can be changed by
