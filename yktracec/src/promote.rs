@@ -43,9 +43,7 @@ impl ValueRecorder {
     /// Remove and return the oldest recorded constant.
     pub fn pop(&mut self) -> usize {
         debug_assert!(!self.record_enable);
-        self.pbuf
-            .pop_front()
-            .expect(&format!("promote buffer undeflow"))
+        self.pbuf.pop_front().expect("promote buffer undeflow")
     }
 }
 
@@ -69,7 +67,7 @@ pub extern "C" fn __yk_lookup_promote_usize() -> usize {
 ///
 /// The user sees this as `yk_promote` via a macro.
 #[no_mangle]
-pub unsafe extern "C" fn __ykllvm_recognised_promote(val: usize) -> usize {
+pub extern "C" fn __ykllvm_recognised_promote(val: usize) -> usize {
     VAL_REC.with_borrow_mut(|r| {
         r.push(val);
     });
