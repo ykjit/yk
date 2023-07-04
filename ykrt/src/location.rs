@@ -65,7 +65,13 @@ pub struct Location {
     //  │             │ trace compiled
     //  │             ▼
     //  │           ┌──────────────┐
-    //  └───────────│   Compiled   │
+    //  └───────────│   Compiled   │◀────────────┐
+    //              └──────────────┘             │
+    //                │                          │
+    //                │ guard failed             │
+    //                ▼                          │
+    //              ┌──────────────┐             │
+    //              │  SideTracing │─────────────┘
     //              └──────────────┘
     //
     // We hope that a Location soon reaches the `Compiled` state (aka "the happy state") and stays
@@ -212,4 +218,7 @@ pub(crate) enum HotLocationKind {
     DontTrace,
     /// This HotLocation started a trace which is ongoing.
     Tracing,
+    /// While executing JIT compiled code, a guard failed often enough for us to want to generate a
+    /// side trace for this HotLocation.
+    SideTracing(Arc<CompiledTrace>),
 }
