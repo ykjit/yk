@@ -43,9 +43,7 @@ impl ValueRecorder {
     /// Remove and return the oldest recorded constant.
     pub fn pop(&mut self) -> usize {
         debug_assert!(!self.record_enable);
-        self.pbuf
-            .pop_front()
-            .expect(&format!("promote buffer undeflow"))
+        self.pbuf.pop_front().expect("promote buffer undeflow")
     }
 }
 

@@ -141,7 +141,7 @@ impl FrameReconstructor {
     #[cfg(target_arch = "x86_64")]
     pub unsafe fn reconstruct_frames(&self, btmframeaddr: *mut c_void) -> (*const c_void, usize) {
         // Vec holding currently active register values.
-        let mut registers = vec![0; 16];
+        let mut registers = [0; 16];
 
         // The final size of the memory we need to allocate. Inititialised with space to store
         // registers for register recovery.

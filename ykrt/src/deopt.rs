@@ -228,7 +228,7 @@ unsafe extern "C" fn __ykrt_deopt(
                 let addr = unsafe { registers.get(*reg) as *mut u8 };
                 let addr = unsafe { addr.offset(isize::try_from(*off).unwrap()) };
                 let v = match *size {
-                    1 => unsafe { ptr::read::<u8>(addr as *mut u8) as u64 },
+                    1 => unsafe { ptr::read::<u8>(addr) as u64 },
                     2 => unsafe { ptr::read::<u16>(addr as *mut u16) as u64 },
                     4 => unsafe { ptr::read::<u32>(addr as *mut u32) as u64 },
                     8 => unsafe { ptr::read::<u64>(addr as *mut u64) },
@@ -263,12 +263,12 @@ unsafe extern "C" fn __ykrt_deopt(
         }
     }
 
-    let (ptr, btmframesize) = unsafe { framerec.reconstruct_frames(frameaddr) };
+    let (src, btmframesize) = unsafe { framerec.reconstruct_frames(frameaddr) };
     // Calculate the offset on the stack we want to write the new frames to: immediately after the
     // frame containing the control point.
     let newframesdst = frameaddr.sub(btmframesize);
     NewFramesInfo {
-        src: ptr as *const c_void,
+        src,
         dst: newframesdst,
     }
 }

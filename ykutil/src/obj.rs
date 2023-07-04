@@ -10,7 +10,6 @@ use phdrs;
 use std::{
     ffi::{CStr, CString},
     path::PathBuf,
-    ptr,
     sync::LazyLock,
 };
 
@@ -125,7 +124,7 @@ extern "C" {
 /// This relies on there being an exported symbol for `main()`.
 pub static SELF_BIN_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
     let addr = unsafe { find_main() };
-    if addr == ptr::null_mut() as *mut c_void {
+    if addr.is_null() {
         panic!("couldn't find address of main()");
     }
     // If this fails, there's little we can do but crash.
