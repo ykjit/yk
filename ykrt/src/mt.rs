@@ -190,7 +190,8 @@ impl MT {
                     Err(e) => todo!("{e:?}"),
                 }
             }
-            TransitionLocation::StopTracing(hl_arc) => {
+            TransitionLocation::StopTracing(hl_arc)
+            | TransitionLocation::StopSideTracing(hl_arc) => {
                 promote::thread_record_enable(false);
                 // Assuming no bugs elsewhere, the `unwrap` cannot fail, because `StartTracing`
                 // will have put a `Some` in the `Rc`.
@@ -200,6 +201,8 @@ impl MT {
                     Ok(utrace) => {
                         #[cfg(feature = "yk_jitstate_debug")]
                         print_jit_state("stop-tracing");
+                        // FIXME: for side tracing we probably need to queue a different kind of
+                        // compile job.
                         self.queue_compile_job(utrace, hl_arc, trcr);
                     }
                     Err(_) => todo!(),
@@ -293,6 +296,25 @@ impl MT {
                                 }
                             }
                         }
+                        HotLocationKind::SideTracing(ref ctr) => {
+                            let hl = loc.hot_location_arc_clone().unwrap();
+                            let mut thread_hl_out = mtt.tracing.borrow_mut();
+                            if let Some(ref thread_hl_in) = *thread_hl_out {
+                                // This thread is tracing something...
+                                if !Arc::ptr_eq(thread_hl_in, &hl) {
+                                    // ...but not this Location.
+                                    TransitionLocation::Execute(Arc::clone(ctr))
+                                } else {
+                                    // ...and it's this location: we have therefore finished tracing the loop.
+                                    *thread_hl_out = None;
+                                    lk.kind = HotLocationKind::Compiled(Arc::clone(ctr));
+                                    TransitionLocation::StopSideTracing(hl)
+                                }
+                            } else {
+                                // This thread isn't tracing anything.
+                                TransitionLocation::Execute(Arc::clone(ctr))
+                            }
+                        }
                         HotLocationKind::DontTrace => TransitionLocation::NoAction,
                     }
                 }
@@ -376,6 +398,19 @@ impl MT {
 
         self.queue_job(Box::new(do_compile));
     }
+
+    /// Start recording a side trace for a guard that failed while executing JIT compiled code in
+    /// `hl`.
+    fn side_trace(self: &Arc<Self>, hl: Arc<Mutex<HotLocation>>) {
+        THREAD_MTTHREAD.with(|mtt| {
+            debug_assert!(!mtt.tracing.borrow().is_some());
+            let mut lk = hl.lock();
+            if let HotLocationKind::Compiled(ref ctr) = lk.kind {
+                *mtt.tracing.borrow_mut() = Some(Arc::clone(&hl));
+                lk.kind = HotLocationKind::SideTracing(Arc::clone(ctr));
+            }
+        });
+    }
 }
 
 /// Meta-tracer per-thread state. Note that this struct is neither `Send` nor `Sync`: it can only
@@ -416,6 +451,7 @@ enum TransitionLocation {
     Execute(Arc<CompiledTrace>),
     StartTracing,
     StopTracing(Arc<Mutex<HotLocation>>),
+    StopSideTracing(Arc<Mutex<HotLocation>>),
 }
 
 #[cfg(test)]
@@ -467,6 +503,20 @@ mod tests {
                 ));
                 loc.hot_location().unwrap().lock().kind =
                     HotLocationKind::Compiled(Arc::new(unsafe { CompiledTrace::new_null() }));
+            }
+            _ => unreachable!(),
+        }
+        assert!(matches!(
+            mt.transition_location(&loc),
+            TransitionLocation::Execute(_)
+        ));
+        mt.side_trace(loc.hot_location_arc_clone().unwrap());
+        match mt.transition_location(&loc) {
+            TransitionLocation::StopSideTracing(_) => {
+                assert!(matches!(
+                    loc.hot_location().unwrap().lock().kind,
+                    HotLocationKind::Compiled(_)
+                ));
             }
             _ => unreachable!(),
         }
@@ -746,7 +796,8 @@ mod tests {
                             }
                             break;
                         }
-                        TransitionLocation::StopTracing(_) => unreachable!(),
+                        TransitionLocation::StopTracing(_)
+                        | TransitionLocation::StopSideTracing(_) => unreachable!(),
                     }
                 }
             }));
@@ -797,6 +848,68 @@ mod tests {
         assert!(matches!(
             mt.transition_location(&loc2),
             TransitionLocation::StopTracing(_)
+        ));
+    }
+
+    #[test]
+    fn two_sidetracing_threads_must_not_stop_each_others_tracing_location() {
+        // A side-tracing thread can only stop tracing when it encounters the specific Location
+        // that caused it to start tracing. If it encounters another Location that also happens to
+        // be tracing, it must ignore it.
+
+        const THRESHOLD: HotThreshold = 5;
+        let mt = Arc::new(MT::new().unwrap());
+        mt.set_hot_threshold(THRESHOLD);
+        let loc1 = Arc::new(Location::new());
+        let loc2 = Location::new();
+
+        fn to_compiled(mt: &Arc<MT>, loc: &Location) {
+            for _ in 0..THRESHOLD {
+                assert_eq!(mt.transition_location(&loc), TransitionLocation::NoAction);
+            }
+
+            assert_eq!(
+                mt.transition_location(&loc),
+                TransitionLocation::StartTracing
+            );
+            assert!(matches!(
+                loc.hot_location().unwrap().lock().kind,
+                HotLocationKind::Tracing
+            ));
+            match mt.transition_location(&loc) {
+                TransitionLocation::StopTracing(_) => {
+                    assert!(matches!(
+                        loc.hot_location().unwrap().lock().kind,
+                        HotLocationKind::Compiling
+                    ));
+                    loc.hot_location().unwrap().lock().kind =
+                        HotLocationKind::Compiled(Arc::new(unsafe { CompiledTrace::new_null() }));
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        to_compiled(&mt, &loc1);
+        to_compiled(&mt, &loc2);
+
+        {
+            let mt = Arc::clone(&mt);
+            let loc1 = Arc::clone(&loc1);
+            thread::spawn(move || {
+                mt.side_trace(loc1.hot_location_arc_clone().unwrap());
+            })
+            .join()
+            .unwrap();
+        }
+
+        mt.side_trace(loc2.hot_location_arc_clone().unwrap());
+        assert!(matches!(
+            mt.transition_location(&loc1),
+            TransitionLocation::Execute(_)
+        ));
+        assert!(matches!(
+            mt.transition_location(&loc2),
+            TransitionLocation::StopSideTracing(_)
         ));
     }
 
