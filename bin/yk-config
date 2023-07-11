@@ -39,6 +39,10 @@ handle_arg() {
             # Outline functions containing loops during AOT compilation. Needed
             # for `yk_unroll_safe`.
             OUTPUT="${OUTPUT} -fyk-noinline-funcs-with-loops"
+            # Required so that our curated set of optimisation passes can run.
+            # Without this, clang will slap `optnone` attributes on every
+            # function, causing optimisations to skip them.
+            OUTPUT="${OUTPUT} -Xclang -disable-O0-optnone"
             case $mode in
                 debug) OUTPUT="$OUTPUT -g" ;;
             esac
@@ -92,6 +96,12 @@ handle_arg() {
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-shadow-stack"
             # Encode additional locations in stackmaps.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-stackmap-add-locs"
+
+            # Add known yk-friendly optimisations.
+            #
+            # This pairs with `-Xclang -disable-O0-optnone`. See above.
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-optnone-after-ir-passes"
+            OUTPUT="${OUTPUT} -Wl,--lto-newpm-passes=instcombine"
 
             # Have the `.llvmbc` and `.llvm_bb_addr_map` sections loaded into
             # memory by the loader.

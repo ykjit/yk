@@ -1,3 +1,4 @@
+// ignore: https://github.com/ykjit/yk/issues/777
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_PRINT_JITSTATE=1

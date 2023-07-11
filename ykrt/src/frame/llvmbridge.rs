@@ -50,6 +50,11 @@ impl Function {
         }
         unsafe { BasicBlock::new(bb) }
     }
+
+    /// Get the argument at the specified index.
+    pub fn arg(&self, argidx: usize) -> Value {
+        unsafe { Value::new(LLVMGetParam(self.0, u32::try_from(argidx).unwrap())) }
+    }
 }
 
 pub struct BasicBlock(LLVMBasicBlockRef);
