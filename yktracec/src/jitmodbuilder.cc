@@ -54,6 +54,10 @@ const char *PromoteRecFnName = "__ykllvm_recognised_promote";
 // The name prefix used for blocks that are branched to when a guard succeeds.
 #define GUARD_SUCCESS_BLOCK_NAME "guardsuccess"
 
+const std::array<Intrinsic::ID, 5> AlwaysInlinedIntrinsics = {
+    Intrinsic::ctpop, Intrinsic::smax, Intrinsic::usub_with_overflow,
+    Intrinsic::vaend, Intrinsic::vastart};
+
 // Describes a "resume point" in an LLVM IR basic block.
 //
 // The trace compiler has to keep track of its progress through the AOT control
@@ -1618,9 +1622,9 @@ public:
             }
 
             // Whitelist intrinsics that appear to be always inlined.
-            if (IID == Intrinsic::vastart || IID == Intrinsic::vaend ||
-                IID == Intrinsic::smax ||
-                IID == Intrinsic::usub_with_overflow) {
+            if (std::find(AlwaysInlinedIntrinsics.begin(),
+                          AlwaysInlinedIntrinsics.end(),
+                          IID) != AlwaysInlinedIntrinsics.end()) {
               if (!Outlining) {
                 copyInstruction(&Builder, cast<CallInst>(I), CurBBIdx,
                                 CurInstrIdx);
