@@ -1,7 +1,7 @@
 #![allow(clippy::comparison_chain)]
 #![allow(clippy::missing_safety_doc)]
 
-use llvm_sys::{core::*, target::LLVMABISizeOfType};
+use llvm_sys::{core::*, prelude::LLVMModuleRef, target::LLVMABISizeOfType};
 use object::{Object, ObjectSection};
 use std::{
     collections::HashMap,
@@ -14,6 +14,7 @@ use std::{
 use yksmp::{Location as SMLocation, SMEntry, StackMapParser};
 
 mod llvmbridge;
+pub use llvmbridge::{BitcodeSection, LLVMGetThreadSafeModule};
 use llvmbridge::{Module, Type, Value};
 
 pub static AOT_STACKMAPS: LazyLock<Vec<SMEntry>> = LazyLock::new(|| {
@@ -119,9 +120,9 @@ pub struct FrameReconstructor {
 
 impl FrameReconstructor {
     /// Create a new instance and initialise the frames we need to reconstruct.
-    pub unsafe fn new(activeframes: &[FrameInfo]) -> FrameReconstructor {
+    pub unsafe fn new(activeframes: &[FrameInfo], module: LLVMModuleRef) -> FrameReconstructor {
         // Get AOT module IR and parse it.
-        let module = Module::from_bc();
+        let module = Module::new(module);
 
         // Initialise frames.
         let mut frames = Vec::with_capacity(activeframes.len());

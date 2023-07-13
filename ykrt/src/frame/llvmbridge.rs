@@ -1,4 +1,5 @@
 use llvm_sys::core::*;
+use llvm_sys::orc2::LLVMOrcThreadSafeModuleRef;
 use llvm_sys::prelude::{LLVMBasicBlockRef, LLVMModuleRef, LLVMTypeRef, LLVMValueRef};
 use llvm_sys::target::{LLVMGetModuleDataLayout, LLVMTargetDataRef};
 use llvm_sys::LLVMTypeKind;
@@ -9,18 +10,16 @@ pub struct Module(LLVMModuleRef);
 // Replicates struct of same name in `ykllvmwrap.cc`.
 #[repr(C)]
 pub struct BitcodeSection {
-    data: *const u8,
-    len: u64,
+    pub data: *const u8,
+    pub len: u64,
 }
 
 extern "C" {
-    pub fn LLVMGetThreadSafeModule(bs: BitcodeSection) -> LLVMModuleRef;
+    pub fn LLVMGetThreadSafeModule(bs: BitcodeSection) -> LLVMOrcThreadSafeModuleRef;
 }
 
 impl Module {
-    pub unsafe fn from_bc() -> Self {
-        let (data, len) = ykutil::obj::llvmbc_section();
-        let module = LLVMGetThreadSafeModule(BitcodeSection { data, len });
+    pub unsafe fn new(module: LLVMModuleRef) -> Self {
         Self(module)
     }
 
