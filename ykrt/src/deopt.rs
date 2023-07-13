@@ -1,10 +1,15 @@
 //! Run-time deoptimisation support: when a guard fails, this module restores the state necessary
 //! to resume interpreter execution.
 
-use crate::frame::{FrameInfo, FrameReconstructor};
+use crate::frame::{BitcodeSection, FrameInfo, FrameReconstructor, LLVMGetThreadSafeModule};
 #[cfg(feature = "yk_jitstate_debug")]
 use crate::print_jit_state;
 use crate::trace::CompiledTrace;
+use llvm_sys::orc2::LLVMOrcThreadSafeModuleWithModuleDo;
+use llvm_sys::{
+    error::{LLVMCreateStringError, LLVMErrorRef},
+    prelude::LLVMModuleRef,
+};
 use std::{arch::asm, ffi::c_void, ptr, slice, sync::Arc};
 use yksmp::{Location as SMLocation, StackMapParser};
 
@@ -145,37 +150,35 @@ extern "C" fn __llvm_deoptimize(
     }
 }
 
-/// Called when a guard failure occurs. Handles the reading of stackmaps, matching of JIT to AOT
-/// variables, etc., in order to reconstruct the stack.
-#[cfg(target_arch = "x86_64")]
-#[no_mangle]
-unsafe extern "C" fn __ykrt_deopt(
-    ctr: *const CompiledTrace,
-    // Address of the control point's frame.
+/// Struct storing information we need to pass via the `LLVMOrcThreadSafeModuleWithModuleDo`
+/// function.
+struct ReconstructInfo<'a> {
+    ctr: Arc<CompiledTrace>,
     frameaddr: *mut c_void,
-    // Struct describing the location of the AOT live variables.
-    aotvals: &LiveAOTVals,
-    // Address and size of vector holding active AOT frame information needed to recreate them.
-    actframes: &CVec,
-    // ID of the failing guard.
-    guardid: usize,
-    // Return address of deoptimize call. Used to find the correct stackmap record.
+    aotvals: &'a LiveAOTVals,
+    actframes: &'a CVec,
     retaddr: usize,
-    // Current stack pointer. Needed to read spilled register values from the stack.
     rsp: *const c_void,
-) -> NewFramesInfo {
-    #[cfg(feature = "yk_jitstate_debug")]
-    print_jit_state("deoptimise");
+    nfi: Option<NewFramesInfo>,
+}
 
-    // Put the CompiledTrace back into an Arc, so it is dropped properly.
-    let ctr = Arc::from_raw(ctr);
+/// Collects the relevant information needed for deoptimisation and then reconstructs the stack.
+/// Returns a pointer to the new stack and a pointer to the current stack which needs to be
+/// overwritten.
+extern "C" fn ts_reconstruct(ctx: *mut c_void, module: LLVMModuleRef) -> LLVMErrorRef {
+    let info = unsafe { Box::<&mut ReconstructInfo>::from_raw(ctx as *mut &mut ReconstructInfo) };
+    let ctr = &info.ctr;
+    let frameaddr = info.frameaddr;
+    let aotvals = info.aotvals;
+    let actframes = info.actframes;
+    let retaddr = info.retaddr;
+    let rsp = info.rsp;
 
-    // FIXME: Check here if we have a side trace and execute it. Otherwise just increment the guard
-    // failure counter.
-
-    // Parse the live AOT values.
+    // Find the relevant AOT variables for this deopt in the AOT variables section.
     let aotvalsptr =
         unsafe { (ctr.aotvals as *const u8).offset(isize::try_from(aotvals.offset).unwrap()) };
+
+    // Parse the live AOT values.
     let aotvals = unsafe { slice::from_raw_parts(aotvalsptr as *const AOTVar, aotvals.length) };
 
     // Parse active frames vector.
@@ -187,7 +190,7 @@ unsafe extern "C" fn __ykrt_deopt(
     // Restore saved registers from the stack.
     let registers = Registers::from_ptr(rsp);
 
-    let mut framerec = unsafe { FrameReconstructor::new(activeframes) };
+    let mut framerec = unsafe { FrameReconstructor::new(activeframes, module) };
 
     // Parse the stackmap of the JIT module.
     // OPT: Parsing the stackmap and initialising `framerec` is slow and could be heavily reduced
@@ -268,11 +271,69 @@ unsafe extern "C" fn __ykrt_deopt(
     let (src, btmframesize) = unsafe { framerec.reconstruct_frames(frameaddr) };
     // Calculate the offset on the stack we want to write the new frames to: immediately after the
     // frame containing the control point.
-    let newframesdst = frameaddr.sub(btmframesize);
-    NewFramesInfo {
+    let newframesdst = unsafe { frameaddr.sub(btmframesize) };
+    let nfi = NewFramesInfo {
         src,
         dst: newframesdst,
-    }
+    };
+
+    info.nfi = Some(nfi);
+    Box::into_raw(info);
+
+    unsafe { LLVMCreateStringError("".as_ptr() as *const i8) }
+}
+
+/// Called when a guard failure occurs. After getting access to the global AOT module, passes all
+/// the relevant information to `ts_reconstruct` via `ThreadSafeModuleWithModuleDo` to reconstruct
+/// the stack.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+unsafe extern "C" fn __ykrt_deopt(
+    ctr: *const CompiledTrace,
+    // Address of the control point's frame.
+    frameaddr: *mut c_void,
+    // Struct describing the location of the AOT live variables.
+    aotvals: &LiveAOTVals,
+    // Address and size of vector holding active AOT frame information needed to recreate them.
+    actframes: &CVec,
+    // ID of the failing guard.
+    guardid: usize,
+    // Return address of deoptimize call. Used to find the correct stackmap record.
+    retaddr: usize,
+    // Current stack pointer. Needed to read spilled register values from the stack.
+    rsp: *const c_void,
+) -> NewFramesInfo {
+    #[cfg(feature = "yk_jitstate_debug")]
+    print_jit_state("deoptimise");
+
+    // Put the CompiledTrace back into an Arc, so it is dropped properly.
+    let ctr = Arc::from_raw(ctr);
+
+    // FIXME: Check here if we have a side trace and execute it. Otherwise just increment the guard
+    // failure counter.
+
+    // Copy arguments into a struct we can pass into the ThreadSafeModuleWithModuleDo function.
+    let mut info = ReconstructInfo {
+        ctr: Arc::clone(&ctr),
+        frameaddr,
+        aotvals,
+        actframes,
+        retaddr,
+        rsp,
+        nfi: None,
+    };
+
+    let infoptr = Box::into_raw(Box::new(&mut info));
+
+    let (data, len) = ykutil::obj::llvmbc_section();
+    let moduleref = LLVMGetThreadSafeModule(BitcodeSection { data, len });
+
+    // The LLVM CAPI doesn't allow us to manually lock/unlock a ThreadSafeModule, and uses a
+    // call-back function instead which it runs after locking the module. This means we need to
+    // pass in variables from this scope via a struct which is passed into the function.
+    LLVMOrcThreadSafeModuleWithModuleDo(moduleref, ts_reconstruct, infoptr as *mut c_void);
+
+    info.nfi.unwrap()
 }
 
 /// After a guard failure, reconstructs the stack frames and registers and then jumps back to the

@@ -4,6 +4,7 @@
 #define _GNU_SOURCE
 #endif
 
+#include "llvm-c/Orc.h"
 #include "llvm/ExecutionEngine/ExecutionEngine.h"
 #include "llvm/ExecutionEngine/MCJIT.h"
 #include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
@@ -217,20 +218,18 @@ void loadAOTMod(struct BitcodeSection &Bitcode) {
 // the binary. The module is loaded if we haven't yet done so.
 ThreadSafeModule *getThreadAOTMod(struct BitcodeSection &Bitcode) {
   std::call_once(GlobalAOTModLoaded, loadAOTMod, Bitcode);
-  if (!ThreadAOTModInitialized) {
-    ThreadAOTMod = cloneToNewContext(GlobalAOTMod);
-    ThreadAOTModInitialized = true;
-  }
-  return &ThreadAOTMod;
+  return &GlobalAOTMod;
 }
 
 // Exposes `getThreadAOTMod` so we can get a thread-safe copy of the
 // AOT IR from within Rust.
-extern "C" LLVMModuleRef
+extern "C" LLVMOrcThreadSafeModuleRef
 LLVMGetThreadSafeModule(struct BitcodeSection &Bitcode) {
   ThreadSafeModule *ThreadAOTMod = getThreadAOTMod(Bitcode);
-  Module *AOTMod = ThreadAOTMod->getModuleUnlocked();
-  return llvm::wrap(AOTMod);
+  // Since the LLVM CAPI doesn't expose the ThreadSafeModule wrapper, we have
+  // to do the casting ourselves.
+  return reinterpret_cast<LLVMOrcThreadSafeModuleRef>(
+      const_cast<ThreadSafeModule *>(ThreadAOTMod));
 }
 
 // Compile a module in-memory and return a pointer to its function.
@@ -394,19 +393,22 @@ void *compileIRTrace(FN Func, char *FuncNames[], size_t BBs[], size_t TraceLen,
 
   struct BitcodeSection Bitcode = {BitcodeData, BitcodeLen};
   ThreadSafeModule *ThreadAOTMod = getThreadAOTMod(Bitcode);
-  // Getting the module without acquiring the context lock is safe in this
-  // instance since ThreadAOTMod is not shared between threads.
-  Module *AOTMod = ThreadAOTMod->getModuleUnlocked();
-
-  DIP.print(DebugIR::AOT, AOTMod);
 
   Module *JITMod;
   std::string TraceName;
   std::map<GlobalValue *, void *> GlobalMappings;
   void *AOTMappingVec;
   size_t GuardCount;
-  std::tie(JITMod, TraceName, GlobalMappings, AOTMappingVec, GuardCount) =
-      Func(AOTMod, FuncNames, BBs, TraceLen, FAddrKeys, FAddrVals, FAddrLen);
+
+  // Get access to the shared AOT module and use it to assemble the trace. This
+  // will automatically wait to acquire a lock and release it when done. Once
+  // we have assembled the trace we no longer need hold on to the AOT module as
+  // it isn't needed for compilation.
+  ThreadAOTMod->withModuleDo([&](Module &AOTMod) {
+    DIP.print(DebugIR::AOT, &AOTMod);
+    std::tie(JITMod, TraceName, GlobalMappings, AOTMappingVec, GuardCount) =
+        Func(&AOTMod, FuncNames, BBs, TraceLen, FAddrKeys, FAddrVals, FAddrLen);
+  });
 
   // If we failed to build the trace, return null.
   if (JITMod == nullptr) {
