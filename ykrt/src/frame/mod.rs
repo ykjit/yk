@@ -411,33 +411,37 @@ impl FrameReconstructor {
     pub fn var_init(
         &mut self,
         bbidx: usize,
-        instridx: usize,
+        defined_at_idx: usize,
         fname: &CStr,
         sfidx: usize,
         mut val: u64,
     ) {
         let func = self.module.function(fname.as_ptr());
-        let bb = func.bb(bbidx);
-        let mut instr = bb.instruction(instridx);
+        let key = if bbidx != usize::MAX {
+            let mut instr = func.bb(bbidx).instruction(defined_at_idx);
 
-        // When setting up the trace header, we need to map JIT loads to the original AOT value
-        // passed via YkCtrlPointVars. That value needs to be encoded as (BBIdx, InstrIdx) which
-        // are time intensive to find. Instead we just map the load to the YkCtrlPointVars store
-        // instruction. The actual AOT value can then simply be found in the first operand.
-        if instr.is_store() {
-            instr = instr.get_operand(0);
-        }
+            // When setting up the trace header, we need to map JIT loads to the original AOT value
+            // passed via YkCtrlPointVars. That value needs to be encoded as (BBIdx, InstrIdx) which
+            // are time intensive to find. Instead we just map the load to the YkCtrlPointVars store
+            // instruction. The actual AOT value can then simply be found in the first operand.
+            if instr.is_store() {
+                instr = instr.get_operand(0);
+            }
+            instr
+        } else {
+            func.arg(defined_at_idx)
+        };
 
-        if instr.get_type().is_integer() {
+        let ty = key.get_type();
+        if key.get_type().is_integer() {
             // Stackmap "small constants" get their value sign-extended to fill the reserved 32-bit
             // space in the stackmap record. If the type of the constant is actually smaller than
             // 32 bits, then we have to discard the unwanted high-order bits.
-            let iw = instr.get_type().get_int_width();
+            let iw = ty.get_int_width();
             val &= u64::MAX >> (64 - iw);
         }
 
-        let ty = instr.get_type();
         let value = SGValue::new(val, ty);
-        self.frames.get_mut(sfidx).unwrap().add(instr, value);
+        self.frames.get_mut(sfidx).unwrap().add(key, value);
     }
 }

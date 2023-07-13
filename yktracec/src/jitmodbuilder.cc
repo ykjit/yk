@@ -54,6 +54,10 @@ const char *PromoteRecFnName = "__ykllvm_recognised_promote";
 // The name prefix used for blocks that are branched to when a guard succeeds.
 #define GUARD_SUCCESS_BLOCK_NAME "guardsuccess"
 
+const std::array<Intrinsic::ID, 5> AlwaysInlinedIntrinsics = {
+    Intrinsic::ctpop, Intrinsic::smax, Intrinsic::usub_with_overflow,
+    Intrinsic::vaend, Intrinsic::vastart};
+
 // Describes a "resume point" in an LLVM IR basic block.
 //
 // The trace compiler has to keep track of its progress through the AOT control
@@ -406,8 +410,12 @@ public:
 
 // Struct to store a live AOT value.
 struct AOTInfo {
+  // The index of the AOT basic block in which the value is defined, or
+  // `SIZE_MAX`, if the value is an argument in the parent function.
   size_t BBIdx;
-  size_t InstrIdx;
+  // The index of the instruction that defines the value (in the parent basic
+  // block) or (if `BBIdx` is `SIZE_MAX`) the argument index of the value.
+  size_t DefinedAtIdx;
   const char *FName;
   size_t FrameIdx;
 };
@@ -460,6 +468,9 @@ class JITModBuilder {
   // The trace-compiler's view of the AOT IR call stack during trace
   // compilation.
   CallStack CallStack;
+
+  // Maps each `yk_promote()` call to the JIT variable that was promoted.
+  std::map<Value *, Value *> PromoteMap;
 
   Value *getMappedValue(Value *V) {
     if (VMap.find(V) != VMap.end()) {
@@ -591,7 +602,8 @@ class JITModBuilder {
       }
       CallInst *LastSMCall = cast<CallInst>(CI->getNextNonDebugInstruction());
       CurFrame->LastSMCall = LastSMCall;
-      CallStack.pushFrame(StackFrame::CreateMappableFrame(CF, nullptr));
+      CallStack.pushFrame(
+          StackFrame::CreateMappableFrame(CF, nullptr, std::nullopt));
     }
   }
 
@@ -850,7 +862,9 @@ class JITModBuilder {
     assert(CurFrame);
     CurFrame->setResume(CurBBIdx, Instr, CurInstrIdx);
 
-    std::vector<Value *> LiveValues;
+    std::vector<std::tuple<
+        Value *, std::optional<std::tuple<const char *, size_t, size_t>>>>
+        LiveValues;
     for (size_t I = 0; I < CallStack.size(); I++) {
       StackFrame &SF = CallStack.getFrame(I);
       MappableFrame *MF = SF.getMappableFrame();
@@ -868,9 +882,22 @@ class JITModBuilder {
           // control point call, so just skip it.
           continue;
         }
+        std::optional<std::tuple<const char *, size_t, size_t>> FArgInfo =
+            std::nullopt;
+        // AOT values that are arguments to their parent function need to be
+        // treated specially, since the trace compiler doesn't track them in
+        // the usual mappings.
+        if (Argument *AOTArg = dyn_cast<Argument>(Arg)) {
+          FArgInfo = {AOTArg->getParent()->getName().data(), AOTArg->getArgNo(),
+                      I};
+        }
         if (VMap.find(Arg) != VMap.end()) {
           Value *JITArg = VMap[Arg];
-          LiveValues.push_back(JITArg);
+          if (isa<Constant>(JITArg)) {
+            JITArg = PromoteMap.at(Arg);
+          } else {
+            LiveValues.push_back({JITArg, FArgInfo});
+          }
         }
       }
 
@@ -917,28 +944,37 @@ class JITModBuilder {
     AOTInfo *CurrentRegion = &LiveAOTArray[CurPos];
 
     for (size_t I = 0; I < LiveValues.size(); I++) {
-      Value *Live = LiveValues[I];
-      std::tuple<size_t, size_t, Instruction *, size_t> Entry = AOTMap[Live];
-      size_t BBIdx = std::get<0>(Entry);
-      size_t InstrIdx = std::get<1>(Entry);
-      Instruction *AOTVar = std::get<2>(Entry);
-      size_t StackFrameIdx = std::get<3>(Entry);
-      const char *FName = AOTVar->getFunction()->getName().data();
-      CurrentRegion[I] = {BBIdx, InstrIdx, FName, StackFrameIdx};
+      auto [Live, FArgInfo] = LiveValues[I];
+      if (!FArgInfo.has_value()) {
+        // The value is defined by an `Instruction`.
+        auto [BBIdx, InstrIdx, AOTVar, StackFrameIdx] = AOTMap.at(Live);
+        assert(BBIdx != SIZE_MAX); // SIZE_MAX is used to indicate an argument.
+        const char *FName = AOTVar->getFunction()->getName().data();
+        CurrentRegion[I] = {BBIdx, InstrIdx, FName, StackFrameIdx};
+      } else {
+        // The value is an `Argument`.
+        auto [FName, FArgIdx, StackFrameIdx] = FArgInfo.value();
+        CurrentRegion[I] = {SIZE_MAX, FArgIdx, FName, StackFrameIdx};
+      }
+    }
+
+    std::vector<Value *> DeoptLives;
+    for (auto V : LiveValues) {
+      DeoptLives.push_back(std::get<0>(V));
     }
 
     // Store the offset and length of the live AOT variables.
     AllocaInst *AOTLocs = createAndFillStruct(
         FailBuilder,
         {ConstantInt::get(PointerSizedIntTy, CurPos * sizeof(AOTInfo)),
-         ConstantInt::get(PointerSizedIntTy, LiveValues.size())});
+         ConstantInt::get(PointerSizedIntTy, DeoptLives.size())});
 
     // Create the deoptimization call.
     Type *retty = PointerType::get(Context, 0);
     Function *DeoptInt = Intrinsic::getDeclaration(
         JITFunc->getParent(), Intrinsic::experimental_deoptimize, {retty});
     OperandBundleDef ob =
-        OperandBundleDef("deopt", (ArrayRef<Value *>)LiveValues);
+        OperandBundleDef("deopt", (ArrayRef<Value *>)DeoptLives);
     // We already passed the stackmap address and size into the trace
     // function so pass them on to the __llvm_deoptimize call.
     CallInst *Ret = CallInst::Create(
@@ -1589,9 +1625,9 @@ public:
             }
 
             // Whitelist intrinsics that appear to be always inlined.
-            if (IID == Intrinsic::vastart || IID == Intrinsic::vaend ||
-                IID == Intrinsic::smax ||
-                IID == Intrinsic::usub_with_overflow) {
+            if (std::find(AlwaysInlinedIntrinsics.begin(),
+                          AlwaysInlinedIntrinsics.end(),
+                          IID) != AlwaysInlinedIntrinsics.end()) {
               if (!Outlining) {
                 copyInstruction(&Builder, cast<CallInst>(I), CurBBIdx,
                                 CurInstrIdx);
@@ -1811,6 +1847,7 @@ public:
 
     // Update the VMap so that the promoted value is now a constant.
     VMap[CI] = PConstLL;
+    PromoteMap[CI] = JITPromoteVar;
 
     // We will have traced the constant recorder. We don't want that in
     // the trace so a) we don't copy the call, and b) we enter

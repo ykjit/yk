@@ -51,12 +51,14 @@ impl Registers {
 }
 
 /// Location in terms of basic block index, instruction index, and function name, of a
-/// variable in the AOT module. Mirrors the LLVM struct defined in yktracec/jitmodbuilder.cc.
+/// variable in the AOT module. Mirrors `AOTInfo` in yktracec/jitmodbuilder.cc.
 #[derive(Debug)]
 #[repr(C)]
 struct AOTVar {
+    /// Basic block index, or `usuze::MAX` if the value is a function argument.
     bbidx: usize,
-    instridx: usize,
+    /// Instruction index or agument index (if `bbidx` is `usize::MAX`)
+    defined_at_idx: usize,
     fname: *const i8,
     sfidx: usize,
 }
@@ -217,7 +219,7 @@ unsafe extern "C" fn __ykrt_deopt(
                 unsafe {
                     framerec.var_init(
                         aot.bbidx,
-                        aot.instridx,
+                        aot.defined_at_idx,
                         std::ffi::CStr::from_ptr(aot.fname),
                         aot.sfidx,
                         addr as u64,
@@ -238,7 +240,7 @@ unsafe extern "C" fn __ykrt_deopt(
                 unsafe {
                     framerec.var_init(
                         aot.bbidx,
-                        aot.instridx,
+                        aot.defined_at_idx,
                         std::ffi::CStr::from_ptr(aot.fname),
                         aot.sfidx,
                         v,
@@ -250,7 +252,7 @@ unsafe extern "C" fn __ykrt_deopt(
                 unsafe {
                     framerec.var_init(
                         aot.bbidx,
-                        aot.instridx,
+                        aot.defined_at_idx,
                         std::ffi::CStr::from_ptr(aot.fname),
                         aot.sfidx,
                         *v as u64,
