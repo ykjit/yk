@@ -1538,7 +1538,10 @@ public:
         auto I = BB->begin();
         std::advance(I, CurInstrIdx);
         assert(I != BB->end());
-
+        if (I->getType()->isFloatingPointTy()) {
+          dumpValueAndExit("Floating point instructions are not supported yet",
+                           &*I);
+        }
 #ifdef YK_TESTING
         // In trace compiler tests, blocks may be terminated with an
         // `unreachable` terminator.
