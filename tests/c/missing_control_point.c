@@ -1,11 +1,11 @@
 // Compiler:
-//   status: error
+//   status: success
 //   stderr:
 //     ...
-//     ...error: ykllvm couldn't find the call to `yk_mt_control_point()`
+//     ...warning: ykllvm couldn't find the call to `yk_mt_control_point()`
 //     ...
 
-// Check that the system crashes if the control point is missing.
+// Check that the ykllvm warns if the control point is missing.
 
 #include <stdlib.h>
 
