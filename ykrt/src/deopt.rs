@@ -347,6 +347,8 @@ extern "C" fn __ykrt_reconstruct_frames(
 ) -> ! {
     unsafe {
         asm!(
+            // Stash the original value of the `newframesptr` malloc'd block.
+            "mov r12, rdi",
             // The first 8 bytes of the new frames is the size of the map, needed for copying it
             // over. Move it into RDX, but reduce it by 8 bytes, since we'll also adjust RDI next
             // to make it point to the actual beginning of the new frames (jumping over the length
@@ -364,12 +366,8 @@ extern "C" fn __ykrt_reconstruct_frames(
             "mov rsi, rdi", // 2nd arg: src
             "mov rdi, rsp", // 1st arg: dest
             "call memcpy",
-            // Now move the source (i.e. the heap allocated frames) into the first argument and its
-            // size into the second.
-            "mov rdi, rsi",
-            // Adjust rdi back to beginning of `newframesptr`.
-            "sub rdi, 8",
-            // Free the malloced memory.
+            // Free `newframesptr`.
+            "mov rdi, r12",
             "call free",
             // Restore registers.
             // FIXME: Add other registers that may need restoring (e.g. floating point).
