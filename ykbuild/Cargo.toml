@@ -15,4 +15,5 @@ tempfile = "3.3.0"
 [build-dependencies]
 fs4 = "0.6"
 num_cpus = "1.0"
+rerun_except = "1.0.0"
 which = "4.4.0"
