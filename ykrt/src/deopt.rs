@@ -1,14 +1,14 @@
 //! Run-time deoptimisation support: when a guard fails, this module restores the state necessary
 //! to resume interpreter execution.
 
-use crate::frame::{BitcodeSection, FrameInfo, FrameReconstructor, LLVMGetThreadSafeModule};
+use crate::frame::{BitcodeSection, FrameReconstructor, LLVMGetThreadSafeModule};
 #[cfg(feature = "yk_jitstate_debug")]
 use crate::print_jit_state;
 use crate::trace::CompiledTrace;
 use llvm_sys::orc2::LLVMOrcThreadSafeModuleWithModuleDo;
 use llvm_sys::{
     error::{LLVMCreateStringError, LLVMErrorRef},
-    prelude::LLVMModuleRef,
+    prelude::{LLVMModuleRef, LLVMValueRef},
 };
 use std::{arch::asm, ffi::c_void, ptr, slice, sync::Arc};
 use yksmp::{Location as SMLocation, StackMapParser};
@@ -60,11 +60,7 @@ impl Registers {
 #[derive(Debug)]
 #[repr(C)]
 struct AOTVar {
-    /// Basic block index, or `usuze::MAX` if the value is a function argument.
-    bbidx: usize,
-    /// Instruction index or agument index (if `bbidx` is `usize::MAX`)
-    defined_at_idx: usize,
-    fname: *const i8,
+    val: *const c_void,
     sfidx: usize,
 }
 
@@ -185,7 +181,7 @@ extern "C" fn ts_reconstruct(ctx: *mut c_void, module: LLVMModuleRef) -> LLVMErr
     // Note that the memory behind this slice is allocated on the stack (of the compiled trace) and
     // thus doesn't need to be freed.
     let activeframes =
-        unsafe { slice::from_raw_parts(actframes.addr as *const FrameInfo, actframes.length) };
+        unsafe { slice::from_raw_parts(actframes.addr as *mut LLVMValueRef, actframes.length) };
 
     // Restore saved registers from the stack.
     let registers = Registers::from_ptr(rsp);
@@ -219,15 +215,7 @@ extern "C" fn ts_reconstruct(ctx: *mut c_void, module: LLVMModuleRef) -> LLVMErr
                 let addr = unsafe { registers.get(*reg) as *mut u8 };
                 let addr = unsafe { addr.offset(isize::try_from(*off).unwrap()) };
                 let aot = &aotvals[i];
-                unsafe {
-                    framerec.var_init(
-                        aot.bbidx,
-                        aot.defined_at_idx,
-                        std::ffi::CStr::from_ptr(aot.fname),
-                        aot.sfidx,
-                        addr as u64,
-                    );
-                }
+                framerec.var_init(aot.val, aot.sfidx, addr as u64);
             }
             SMLocation::Indirect(reg, off, size) => {
                 let addr = unsafe { registers.get(*reg) as *mut u8 };
@@ -240,27 +228,11 @@ extern "C" fn ts_reconstruct(ctx: *mut c_void, module: LLVMModuleRef) -> LLVMErr
                     _ => unreachable!(),
                 };
                 let aot = &aotvals[i];
-                unsafe {
-                    framerec.var_init(
-                        aot.bbidx,
-                        aot.defined_at_idx,
-                        std::ffi::CStr::from_ptr(aot.fname),
-                        aot.sfidx,
-                        v,
-                    );
-                }
+                framerec.var_init(aot.val, aot.sfidx, v);
             }
             SMLocation::Constant(v) => {
                 let aot = &aotvals[i];
-                unsafe {
-                    framerec.var_init(
-                        aot.bbidx,
-                        aot.defined_at_idx,
-                        std::ffi::CStr::from_ptr(aot.fname),
-                        aot.sfidx,
-                        *v as u64,
-                    );
-                }
+                framerec.var_init(aot.val, aot.sfidx, *v as u64);
             }
             SMLocation::LargeConstant(_v) => {
                 todo!();
