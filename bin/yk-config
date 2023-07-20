@@ -15,7 +15,7 @@ OUTPUT=""
 usage() {
     echo "Generate C compiler flags for building against the Yk JIT.\n"
     echo "Usage:"
-    echo "    yk-config <mode> <--cc|--cxx|--cppflags|--cflags|--ldflags>\n"
+    echo "    yk-config <mode> <--cc|--cxx|--ar|--ranlib|--cppflags|--cflags|--ldflags>\n"
     echo "    Where <mode> is either 'debug' or 'release'."
 }
 
@@ -33,6 +33,8 @@ handle_arg() {
     case $1 in
         --cc) OUTPUT="${ykllvm_bin_dir}/clang" ;;
         --cxx) OUTPUT="${ykllvm_bin_dir}/clang++" ;;
+        --ar) OUTPUT="${ykllvm_bin_dir}/llvm-ar" ;;
+        --ranlib) OUTPUT="${ykllvm_bin_dir}/llvm-ranlib" ;;
         --cflags)
             # Enable LTO.
             OUTPUT="${OUTPUT} -flto"
