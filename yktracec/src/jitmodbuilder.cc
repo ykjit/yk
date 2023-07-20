@@ -39,7 +39,7 @@ uint64_t getNewTraceIdx() {
 #define JITFUNC_ARG_COMPILEDTRACE_IDX 1
 #define JITFUNC_ARG_FRAMEADDR_IDX 2
 
-const char *PromoteRecFnName = "__ykllvm_recognised_promote";
+const char *PromoteRecFnName = "__yk_promote";
 
 #define YK_OUTLINE_FNATTR "yk_outline"
 
@@ -458,9 +458,6 @@ class JITModBuilder {
   // The trace-compiler's view of the AOT IR call stack during trace
   // compilation.
   CallStack CallStack;
-
-  // Maps each `yk_promote()` call to the JIT variable that was promoted.
-  std::map<Value *, Value *> PromoteMap;
 
   Value *getMappedValue(Value *V) {
     if (VMap.find(V) != VMap.end()) {
@@ -1715,25 +1712,6 @@ public:
     // doptimise if the promoted value deviates from the "baked-in" constant.
     MPF->LastSMCall = cast<CallInst>(CI->getNextNonDebugInstruction());
 
-    // When we encounter `%y = yk_promote(%x)` in the AOT module, we don't copy
-    // this instruction into the JIT module, only update future references to
-    // `%y` with a constant. However, in AOT `%y` still exists and needs to be
-    // re-materialised when we deoptimise, so we have to point some JIT variable
-    // back to `%y`.
-    //
-    // Since in AOT, `%y` and `%x` are identical, really we'd like to point
-    // `JITPromoteVar` to `CI`, but that would overwrite the existing
-    // (required!) mapping for `JITPromoteVar`.
-    //
-    // What we therefore do is make an instruction to the effect `%y = %x` in
-    // the JIT module, and map that instruction back to `%y` in the AOT module.
-    Instruction *NewInst = SelectInst::Create(
-        ConstantInt::get(Type::getInt1Ty(JITMod->getContext()), 0),
-        JITPromoteVar, JITPromoteVar);
-    Builder.Insert(NewInst);
-
-    VMap[CI] = NewInst;
-
     BasicBlock *FailBB = getGuardFailureBlock(BB, CurBBIdx, CI, CurInstrIdx);
     BasicBlock *SuccBB = BasicBlock::Create(JITMod->getContext(),
                                             GUARD_SUCCESS_BLOCK_NAME, JITFunc);
@@ -1744,9 +1722,17 @@ public:
     // Carry on constructing the trace module in the success block.
     Builder.SetInsertPoint(SuccBB);
 
-    // Update the VMap so that the promoted value is now a constant.
-    VMap[CI] = PConstLL;
-    PromoteMap[CI] = JITPromoteVar;
+    // You might think that we need to do: `VMap[CI] = PConstLL` so as to use
+    // the constant in place of the promoted value from here onward.
+    //
+    // As it happens, the guard we just inserted already gives LLVM everything
+    // it needs to promote the value for us.
+    //
+    // If we trace a `yk_promote(x)` when `x==5`, then the trace compiler
+    // makes a guard that says "if x!=5 then goto the guard failure block,
+    // otherwise goto the guard success block". It is then likely that LLVM
+    // will infer that `x==5` in the guard success block and propagate the
+    // constant for us automatically.
 
     // We will have traced the constant recorder. We don't want that in
     // the trace so a) we don't copy the call, and b) we enter

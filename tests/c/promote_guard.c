@@ -54,8 +54,8 @@
 #define ELEMS 10
 
 size_t inner(size_t x, size_t y) {
-  size_t xp = yk_promote(x);
-  y += xp;
+  yk_promote(x);
+  y += x;
   return y;
 }
 

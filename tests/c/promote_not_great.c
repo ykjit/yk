@@ -34,10 +34,10 @@
 #include <yk_testing.h>
 
 size_t inner(size_t x, size_t y) {
-  x = yk_promote(x);
-  y = yk_promote(y);
+  yk_promote(x);
+  yk_promote(y);
   size_t ret = x / y; // JIT doesn't manage to promote `x`.
-  x = yk_promote(x);  // JIT doesn't manage to kill repeated guard.
+  yk_promote(x);      // JIT doesn't manage to kill repeated guard.
   return ret;
 }
 

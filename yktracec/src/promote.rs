@@ -67,9 +67,8 @@ pub extern "C" fn __yk_lookup_promote_usize() -> usize {
 ///
 /// The user sees this as `yk_promote` via a macro.
 #[no_mangle]
-pub extern "C" fn __ykllvm_recognised_promote(val: usize) -> usize {
+pub extern "C" fn __yk_promote(val: usize) {
     VAL_REC.with_borrow_mut(|r| {
         r.push(val);
     });
-    val
 }
