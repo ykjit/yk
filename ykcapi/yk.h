@@ -66,9 +66,10 @@ void yk_location_drop(YkLocation);
 
 // Promote a value to a constant.
 //
-// This is an identity function whose return value will be promoted to a
-// constant when the call is traced.
-#define yk_promote(X) __ykllvm_recognised_promote(X)
-size_t __ykllvm_recognised_promote(size_t);
+// Yk will attempt to promote the argument to a constant when the call is
+// traced and compiled. The call to `yk_promote()` itself is also omitted from
+// compiled traces.
+#define yk_promote(X) __yk_promote(X)
+void __yk_promote(size_t);
 
 #endif

@@ -7,10 +7,10 @@
 
 uint64_t inner(uint64_t a, uint64_t b, uint64_t x, uint64_t y, uint64_t z) {
 #ifdef DO_PROMOTE
-  a = yk_promote(a);
-  b = yk_promote(b);
-  x = yk_promote(x);
-  z = yk_promote(z);
+  yk_promote(a);
+  yk_promote(b);
+  yk_promote(x);
+  yk_promote(z);
 #endif
   y += x * 3 - z;  // +1
   y += a - 10 * b; // no-op

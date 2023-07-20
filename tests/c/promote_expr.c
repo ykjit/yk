@@ -42,7 +42,8 @@
 #include <yk_testing.h>
 
 __attribute__((__noinline__)) size_t inner(size_t x) {
-  return yk_promote(x + 25);
+  yk_promote(x + 25);
+  return x + 25;
 }
 
 int main(int argc, char **argv) {
