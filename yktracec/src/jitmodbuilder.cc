@@ -410,13 +410,7 @@ public:
 
 // Struct to store a live AOT value.
 struct AOTInfo {
-  // The index of the AOT basic block in which the value is defined, or
-  // `SIZE_MAX`, if the value is an argument in the parent function.
-  size_t BBIdx;
-  // The index of the instruction that defines the value (in the parent basic
-  // block) or (if `BBIdx` is `SIZE_MAX`) the argument index of the value.
-  size_t DefinedAtIdx;
-  const char *FName;
+  void *Value;
   size_t FrameIdx;
 };
 
@@ -461,10 +455,6 @@ class JITModBuilder {
   // The function inside which we build the IR for the trace.
   Function *JITFunc;
 
-  // Map JIT instruction to basic block index, instruction index, function
-  // name, and stackframe index of the corresponding AOT instruction.
-  std::map<Value *, std::tuple<size_t, size_t, Instruction *, size_t>> AOTMap;
-
   // The trace-compiler's view of the AOT IR call stack during trace
   // compilation.
   CallStack CallStack;
@@ -478,11 +468,6 @@ class JITModBuilder {
     }
     assert(isa<Constant>(V));
     return V;
-  }
-
-  void insertAOTMap(Instruction *AOT, Value *JIT, size_t BBIdx,
-                    size_t InstrIdx) {
-    AOTMap[JIT] = {BBIdx, InstrIdx, AOT, CallStack.size() - 1};
   }
 
   // Start outlining.
@@ -702,10 +687,6 @@ class JITModBuilder {
       assert(isa<CallInst>(AOT));
       Value *JIT = getMappedValue(OldRetVal);
       VMap[AOT] = JIT;
-
-      CurBBIdx = MPF->Resume.value().ResumeBBIdx;
-      CurInstrIdx = MPF->Resume.value().ResumeAfterInstrIdx;
-      insertAOTMap(AOT, JIT, CurBBIdx, CurInstrIdx);
     }
   }
 
@@ -731,7 +712,6 @@ class JITModBuilder {
     Builder.Insert(NewInst);
     llvm::RemapInstruction(NewInst, VMap, RF_NoModuleLevelChanges);
     VMap[&*I] = NewInst;
-    insertAOTMap(I, NewInst, CurBBIdx, CurInstrIdx);
   }
 
   Function *createJITFunc(Value *TraceInputs, Type *FrameAddr) {
@@ -835,24 +815,13 @@ class JITModBuilder {
     BasicBlock *GuardFailBB = BasicBlock::Create(Context, "guardfail", JITFunc);
     IRBuilder<> FailBuilder(GuardFailBB);
 
-    // Add the control point struct to the live variables we pass into the
-    // `deoptimize` call so that it can be accessed.
-    Value *YKCPArg = JITFunc->getArg(JITFUNC_ARG_INPUTS_STRUCT_IDX);
-    std::tuple<size_t, size_t, Instruction *, size_t> YkCPAlloca =
-        getYkCPAlloca();
-    AOTMap[YKCPArg] = YkCPAlloca;
-
-    IntegerType *Int32Ty = Type::getInt32Ty(Context);
-    PointerType *Int8PtrTy = Type::getInt8PtrTy(Context);
-
     // Create a vector of active stackframes (i.e. basic block index,
     // instruction index, function name). This will be needed later for
     // reconstructing the stack after deoptimisation.
     // FIXME: Use function index instead of string name.
-    StructType *ActiveFrameSTy = StructType::get(
-        Context, {PointerSizedIntTy, PointerSizedIntTy, Int8PtrTy});
     AllocaInst *ActiveFrameVec = FailBuilder.CreateAlloca(
-        ActiveFrameSTy, ConstantInt::get(PointerSizedIntTy, CallStack.size()));
+        PointerSizedIntTy,
+        ConstantInt::get(PointerSizedIntTy, CallStack.size()));
 
     // To describe the callstack at a guard failure, the following code uses
     // the basic block resume points for all of the frames on the stack. The
@@ -862,9 +831,7 @@ class JITModBuilder {
     assert(CurFrame);
     CurFrame->setResume(CurBBIdx, Instr, CurInstrIdx);
 
-    std::vector<std::tuple<
-        Value *, std::optional<std::tuple<const char *, size_t, size_t>>>>
-        LiveValues;
+    std::vector<std::tuple<Value *, Value *, size_t>> LiveValues;
     for (size_t I = 0; I < CallStack.size(); I++) {
       StackFrame &SF = CallStack.getFrame(I);
       MappableFrame *MF = SF.getMappableFrame();
@@ -882,49 +849,26 @@ class JITModBuilder {
           // control point call, so just skip it.
           continue;
         }
-        std::optional<std::tuple<const char *, size_t, size_t>> FArgInfo =
-            std::nullopt;
-        // AOT values that are arguments to their parent function need to be
-        // treated specially, since the trace compiler doesn't track them in
-        // the usual mappings.
-        if (Argument *AOTArg = dyn_cast<Argument>(Arg)) {
-          FArgInfo = {AOTArg->getParent()->getName().data(), AOTArg->getArgNo(),
-                      I};
-        }
         if (VMap.find(Arg) != VMap.end()) {
           Value *JITArg = VMap[Arg];
-          if (isa<Constant>(JITArg)) {
-            JITArg = PromoteMap.at(Arg);
-          } else {
-            LiveValues.push_back({JITArg, FArgInfo});
+          if (!isa<Constant>(JITArg)) {
+            LiveValues.push_back({JITArg, Arg, I});
           }
         }
       }
 
-      // Create GEP instructions to get pointers into the fields of the
-      // individual frames inside the ActiveFrameVec vector. The first index
-      // is for the element in the vector at position `I` (and is thus
-      // pointer sized). The second index is for the field inside that
-      // element (since each element has only 3 fields a Int8 would suffice,
-      // but for convenience we just use the Int32Ty we already have defined
-      // above).
-      auto GEP = FailBuilder.CreateGEP(ActiveFrameSTy, ActiveFrameVec,
-                                       {ConstantInt::get(PointerSizedIntTy, I),
-                                        ConstantInt::get(Int32Ty, 0)});
+      // Store the current program counter (instruction) for each active frame.
+      auto GEP =
+          FailBuilder.CreateGEP(PointerSizedIntTy, ActiveFrameVec,
+                                {
+                                    ConstantInt::get(PointerSizedIntTy, I),
+                                });
       assert(MF->Resume.has_value());
       BlockResumePoint &RP = MF->Resume.value();
-      FailBuilder.CreateStore(
-          ConstantInt::get(PointerSizedIntTy, RP.ResumeBBIdx), GEP);
-      GEP = FailBuilder.CreateGEP(ActiveFrameSTy, ActiveFrameVec,
-                                  {ConstantInt::get(PointerSizedIntTy, I),
-                                   ConstantInt::get(Int32Ty, 1)});
-      FailBuilder.CreateStore(
-          ConstantInt::get(PointerSizedIntTy, RP.ResumeAfterInstrIdx), GEP);
-      Value *CurFunc = FailBuilder.CreateGlobalStringPtr(MF->Func->getName());
-      GEP = FailBuilder.CreateGEP(ActiveFrameSTy, ActiveFrameVec,
-                                  {ConstantInt::get(PointerSizedIntTy, I),
-                                   ConstantInt::get(Int32Ty, 2)});
-      FailBuilder.CreateStore(CurFunc, GEP);
+      uintptr_t InstrPtr =
+          reinterpret_cast<uintptr_t>(llvm::wrap(RP.ResumeAfterInstr));
+      FailBuilder.CreateStore(ConstantInt::get(PointerSizedIntTy, InstrPtr),
+                              GEP);
     }
 
     // Store the active frames vector and its length in a separate struct to
@@ -943,24 +887,11 @@ class JITModBuilder {
     // Get a pointer to this guard failure's region in the memory block.
     AOTInfo *CurrentRegion = &LiveAOTArray[CurPos];
 
-    for (size_t I = 0; I < LiveValues.size(); I++) {
-      auto [Live, FArgInfo] = LiveValues[I];
-      if (!FArgInfo.has_value()) {
-        // The value is defined by an `Instruction`.
-        auto [BBIdx, InstrIdx, AOTVar, StackFrameIdx] = AOTMap.at(Live);
-        assert(BBIdx != SIZE_MAX); // SIZE_MAX is used to indicate an argument.
-        const char *FName = AOTVar->getFunction()->getName().data();
-        CurrentRegion[I] = {BBIdx, InstrIdx, FName, StackFrameIdx};
-      } else {
-        // The value is an `Argument`.
-        auto [FName, FArgIdx, StackFrameIdx] = FArgInfo.value();
-        CurrentRegion[I] = {SIZE_MAX, FArgIdx, FName, StackFrameIdx};
-      }
-    }
-
     std::vector<Value *> DeoptLives;
-    for (auto V : LiveValues) {
-      DeoptLives.push_back(std::get<0>(V));
+    for (size_t I = 0; I < LiveValues.size(); I++) {
+      auto [Live, AOTVar, StackFrameIdx] = LiveValues[I];
+      CurrentRegion[I] = {llvm::wrap(AOTVar), StackFrameIdx};
+      DeoptLives.push_back(Live);
     }
 
     // Store the offset and length of the live AOT variables.
@@ -991,21 +922,6 @@ class JITModBuilder {
     CurFrame->clearResume();
 
     return GuardFailBB;
-  }
-
-  std::tuple<size_t, size_t, Instruction *, size_t> getYkCPAlloca() {
-    Function *F = ((Instruction *)TraceInputs)->getFunction();
-    BasicBlock &BB = F->getEntryBlock();
-    size_t Idx = 0;
-    for (auto I = BB.begin(); I != BB.end(); I++) {
-      if (cast<Instruction>(I) == TraceInputs) {
-        break;
-      }
-      Idx++;
-    }
-    assert(Idx < BB.size() &&
-           "Could not find control point struct alloca in entry block.");
-    return {0, Idx, cast<Instruction>(TraceInputs), 0};
   }
 
   void handleBranchingControlFlow(Instruction *I, size_t TraceIdx,
@@ -1141,7 +1057,6 @@ class JITModBuilder {
     // module, we must remap them to point to new values in the JIT module.
     llvm::RemapInstruction(NewInst, VMap, RF_NoModuleLevelChanges);
     VMap[&*I] = NewInst;
-    insertAOTMap(I, NewInst, CurBBIdx, CurInstrIdx);
 
     // Copy over any debugging metadata required by the instruction.
     llvm::SmallVector<std::pair<unsigned, llvm::MDNode *>, 1> metadataList;
@@ -1227,19 +1142,11 @@ class JITModBuilder {
   // clang-format on
   void createTraceHeader(Instruction *CPCI, Type *YkCtrlPointVarsPtrTy) {
     BasicBlock *CPCIBB = CPCI->getParent();
-    Function *F = CPCIBB->getParent();
-
-    size_t CurInstrIdx = 0;
-    size_t CurBBIdx = 0;
-    for (auto BB = F->begin(); &*BB != CPCIBB; BB++) {
-      CurBBIdx += 1;
-    }
 
     // Find the store instructions related to YkCtrlPointVars and generate and
     // insert a load for each stored value.
     for (BasicBlock::iterator CI = CPCIBB->begin(); &*CI != CPCI; CI++) {
       assert(CI != CPCIBB->end());
-      CurInstrIdx++;
       if (!isa<GetElementPtrInst>(CI))
         continue;
 
@@ -1262,13 +1169,6 @@ class JITModBuilder {
         llvm::RemapInstruction(GEP, VMap, RF_NoModuleLevelChanges);
         Instruction *Load = Builder.CreateLoad(StoredVal->getType(), GEP);
         VMap[StoredVal] = Load;
-        // For deoptimisation we need to create a mapping from the original AOT
-        // value to the corresponding JIT value. This mapping is encoded using
-        // the basic block index and instruction index. These are costly to
-        // calculate, so instead we create mapping to the YkCtrlPointVars store
-        // instruction instead. During optimisation we can then easily fish out
-        // the original AOT value via this instructions operand.
-        insertAOTMap(cast<Instruction>(StoredVal), Load, CurBBIdx, CurInstrIdx);
       }
     }
 
@@ -1819,10 +1719,10 @@ public:
     // this instruction into the JIT module, only update future references to
     // `%y` with a constant. However, in AOT `%y` still exists and needs to be
     // re-materialised when we deoptimise, so we have to point some JIT variable
-    // back to `%y` in our AOTMAP.
+    // back to `%y`.
     //
     // Since in AOT, `%y` and `%x` are identical, really we'd like to point
-    // `AOTMap[JITPromoteVar]` to `CI`, but that would overwrite the existing
+    // `JITPromoteVar` to `CI`, but that would overwrite the existing
     // (required!) mapping for `JITPromoteVar`.
     //
     // What we therefore do is make an instruction to the effect `%y = %x` in
@@ -1833,7 +1733,6 @@ public:
     Builder.Insert(NewInst);
 
     VMap[CI] = NewInst;
-    insertAOTMap(CI, NewInst, CurBBIdx, CurInstrIdx);
 
     BasicBlock *FailBB = getGuardFailureBlock(BB, CurBBIdx, CI, CurInstrIdx);
     BasicBlock *SuccBB = BasicBlock::Create(JITMod->getContext(),

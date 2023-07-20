@@ -1,7 +1,7 @@
 #![allow(clippy::comparison_chain)]
 #![allow(clippy::missing_safety_doc)]
 
-use llvm_sys::{core::*, prelude::LLVMModuleRef, target::LLVMABISizeOfType};
+use llvm_sys::{core::*, prelude::LLVMModuleRef, prelude::LLVMValueRef, target::LLVMABISizeOfType};
 use object::{Object, ObjectSection};
 use std::{
     collections::HashMap,
@@ -40,17 +40,7 @@ static USIZEOF_POINTER: usize = std::mem::size_of::<*const ()>();
 static ISIZEOF_POINTER: isize = std::mem::size_of::<*const ()>() as isize;
 static RBP_DWARF_NUM: u16 = 6;
 
-/// Active frames (basic block index, instruction index, function name) in the AOTModule where the
-/// guard failure occured. Mirrors the struct defined in yktracec/jitmodbuilder.cc.
-#[derive(Debug)]
-#[repr(C)]
-pub struct FrameInfo {
-    pub bbidx: usize,
-    pub instridx: usize,
-    pub fname: *const i8,
-}
-
-/// Stopgap interpreter values.
+/// Live value.
 #[derive(Clone, Copy, PartialEq)]
 pub struct SGValue {
     pub val: u64,
@@ -120,18 +110,15 @@ pub struct FrameReconstructor {
 
 impl FrameReconstructor {
     /// Create a new instance and initialise the frames we need to reconstruct.
-    pub unsafe fn new(activeframes: &[FrameInfo], module: LLVMModuleRef) -> FrameReconstructor {
+    pub unsafe fn new(activeframes: &[LLVMValueRef], module: LLVMModuleRef) -> FrameReconstructor {
         // Get AOT module IR and parse it.
         let module = Module::new(module);
 
         // Initialise frames.
         let mut frames = Vec::with_capacity(activeframes.len());
-        for frame in activeframes {
-            let funcname = std::ffi::CStr::from_ptr(frame.fname);
-            let func = module.function(funcname.as_ptr());
-            let bb = func.bb(frame.bbidx);
-            let instr = bb.instruction(frame.instridx);
-            frames.push(Frame::new(instr));
+        for pc in activeframes {
+            let val = Value::new(*pc);
+            frames.push(Frame::new(val));
         }
         FrameReconstructor { module, frames }
     }
@@ -409,32 +396,10 @@ impl FrameReconstructor {
     }
 
     /// Add a live variable and its value to the current frame.
-    pub fn var_init(
-        &mut self,
-        bbidx: usize,
-        defined_at_idx: usize,
-        fname: &CStr,
-        sfidx: usize,
-        mut val: u64,
-    ) {
-        let func = self.module.function(fname.as_ptr());
-        let key = if bbidx != usize::MAX {
-            let mut instr = func.bb(bbidx).instruction(defined_at_idx);
-
-            // When setting up the trace header, we need to map JIT loads to the original AOT value
-            // passed via YkCtrlPointVars. That value needs to be encoded as (BBIdx, InstrIdx) which
-            // are time intensive to find. Instead we just map the load to the YkCtrlPointVars store
-            // instruction. The actual AOT value can then simply be found in the first operand.
-            if instr.is_store() {
-                instr = instr.get_operand(0);
-            }
-            instr
-        } else {
-            func.arg(defined_at_idx)
-        };
-
-        let ty = key.get_type();
-        if key.get_type().is_integer() {
+    pub fn var_init(&mut self, aotval: *const c_void, sfidx: usize, mut val: u64) {
+        let aotval = unsafe { Value::new(aotval as LLVMValueRef) };
+        let ty = aotval.get_type();
+        if aotval.get_type().is_integer() {
             // Stackmap "small constants" get their value sign-extended to fill the reserved 32-bit
             // space in the stackmap record. If the type of the constant is actually smaller than
             // 32 bits, then we have to discard the unwanted high-order bits.
@@ -442,7 +407,7 @@ impl FrameReconstructor {
             val &= u64::MAX >> (64 - iw);
         }
 
-        let value = SGValue::new(val, ty);
-        self.frames.get_mut(sfidx).unwrap().add(key, value);
+        let liveval = SGValue::new(val, ty);
+        self.frames.get_mut(sfidx).unwrap().add(aotval, liveval);
     }
 }

@@ -23,52 +23,8 @@ impl Module {
         Self(module)
     }
 
-    pub fn function(&self, name: *const i8) -> Function {
-        let func = unsafe { LLVMGetNamedFunction(self.0, name) };
-        debug_assert!(!func.is_null());
-        unsafe { Function::new(func) }
-    }
-
     pub fn datalayout(&self) -> LLVMTargetDataRef {
         unsafe { LLVMGetModuleDataLayout(self.0) }
-    }
-}
-
-pub struct Function(LLVMValueRef);
-
-impl Function {
-    pub unsafe fn new(func: LLVMValueRef) -> Self {
-        debug_assert!(!LLVMIsAFunction(func).is_null());
-        Self(func)
-    }
-
-    pub fn bb(&self, bbidx: usize) -> BasicBlock {
-        let mut bb = unsafe { LLVMGetFirstBasicBlock(self.0) };
-        for _ in 0..bbidx {
-            bb = unsafe { LLVMGetNextBasicBlock(bb) };
-        }
-        unsafe { BasicBlock::new(bb) }
-    }
-
-    /// Get the argument at the specified index.
-    pub fn arg(&self, argidx: usize) -> Value {
-        unsafe { Value::new(LLVMGetParam(self.0, u32::try_from(argidx).unwrap())) }
-    }
-}
-
-pub struct BasicBlock(LLVMBasicBlockRef);
-
-impl BasicBlock {
-    pub unsafe fn new(bb: LLVMBasicBlockRef) -> Self {
-        Self(bb)
-    }
-
-    pub fn instruction(&self, instridx: usize) -> Value {
-        let mut instr = unsafe { LLVMGetFirstInstruction(self.0) };
-        for _ in 0..instridx {
-            instr = unsafe { LLVMGetNextInstruction(instr) };
-        }
-        unsafe { Value::new(instr) }
     }
 }
 
@@ -106,10 +62,6 @@ impl Value {
 
     pub fn is_alloca(&self) -> bool {
         unsafe { !LLVMIsAAllocaInst(self.0).is_null() }
-    }
-
-    pub fn is_store(&self) -> bool {
-        unsafe { !LLVMIsAStoreInst(self.0).is_null() }
     }
 
     pub fn is_call(&self) -> bool {
