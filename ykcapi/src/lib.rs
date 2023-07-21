@@ -17,8 +17,7 @@ use std::{
 use ykrt::{HotThreshold, Location, MT};
 
 #[no_mangle]
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
-pub extern "C" fn yk_mt_new(err_msg: *mut *const c_char) -> *const MT {
+pub unsafe extern "C" fn yk_mt_new(err_msg: *mut *const c_char) -> *const MT {
     match MT::new() {
         Ok(mt) => Arc::into_raw(mt),
         Err(e) => {
@@ -72,7 +71,7 @@ pub extern "C" fn __ykrt_control_point(
 }
 
 #[no_mangle]
-pub extern "C" fn yk_mt_hot_threshold_set(mt: *const MT, hot_threshold: HotThreshold) {
+pub unsafe extern "C" fn yk_mt_hot_threshold_set(mt: *const MT, hot_threshold: HotThreshold) {
     let arc = unsafe { Arc::from_raw(mt) };
     arc.set_hot_threshold(hot_threshold);
     forget(arc);

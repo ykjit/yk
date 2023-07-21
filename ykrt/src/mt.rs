@@ -156,6 +156,7 @@ impl MT {
         }
     }
 
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
     pub fn control_point(
         self: &Arc<Self>,
         loc: &Location,
