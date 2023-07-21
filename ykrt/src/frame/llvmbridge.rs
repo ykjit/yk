@@ -1,6 +1,6 @@
 use llvm_sys::core::*;
 use llvm_sys::orc2::LLVMOrcThreadSafeModuleRef;
-use llvm_sys::prelude::{LLVMBasicBlockRef, LLVMModuleRef, LLVMTypeRef, LLVMValueRef};
+use llvm_sys::prelude::{LLVMModuleRef, LLVMTypeRef, LLVMValueRef};
 use llvm_sys::target::{LLVMGetModuleDataLayout, LLVMTargetDataRef};
 use llvm_sys::LLVMTypeKind;
 use std::{ffi::CStr, fmt};
