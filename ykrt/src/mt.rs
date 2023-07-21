@@ -176,6 +176,8 @@ impl MT {
                         _,
                         unsafe extern "C" fn(*mut c_void, *const CompiledTrace, *const c_void) -> !,
                     >(ctr.entry);
+                    // FIXME: Calling this function overwrites the current (Rust) function frame,
+                    // rather than unwinding it. https://github.com/ykjit/yk/issues/778
                     f(ctrlp_vars, Arc::into_raw(ctr), frameaddr);
                 }
             }
