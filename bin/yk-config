@@ -10,6 +10,64 @@ if [ ! -d "${DIR}/../ykrt" ]; then
     exit 1
 fi
 
+# The AOT optimisations that we can tolerate.
+#
+# This is based on the O3 LTO pipeline defined in LLVM's
+# `PassBuilder::buildLTODefaultPipeline()` in `PassBuilderPipelines.cpp`.
+#
+# We exlude any optimisations guarded by a "off-by-default" CLI flag.
+#
+# We omit anything to do with PGO, OpenMP, Bolt's inliner, vectorisation,
+# control-flow integrity (CFI) or "remarks" for now. FIXME: think about which
+# of those make sense to turn on for yk.
+#
+# FIXME; We also don't invoke any of the various callbacks in their pipeline,
+# e.g. `invokePeepholeEPCallbacks()`. More investigation required.
+#
+# FIXME: In the C++ code that builds the default LTO pipeline, some passes have
+# parameters and the passes can be run multiple times with differing parameters
+# (e.g. `lowertypetests`). How do we express that here? Can we?
+#
+# Note that we don't intend yk to work like this in the long run. We hope to be
+# able to give the user the standard choice clang command-line optimisation
+# levels (O0, O1, ...). We are only working this way for now in order to
+# understand which passes break yk.
+#
+# Passes always present in upstream's LTO pipeline (i.e. at >=O0):
+AOTPASSES="annotation2metadata"
+# Passes additionally present in upstream's O1 LTO pipeline.
+AOTPASSES="${AOTPASSES},globaldce,forceattrs,inferattrs,callsite-splitting"
+AOTPASSES="${AOTPASSES},ipsccp,called-value-propagation,function-attrs"
+AOTPASSES="${AOTPASSES},rpo-function-attrs,globalsplit,wholeprogramdevirt"
+# Passes additionally present in upstream's O2 LTO pipeline.
+#
+# FIXME: skipping some problematic passes for now:
+#
+# These cause test failures and need to be investigated. When adding these
+# back, be sure to put them in the right place, and check if they should run
+# more than once in the pipeline.
+AOTPASSES="${AOTPASSES},globalopt"
+#AOTPASSES="${AOTPASSES},mem2reg" -- breaks yk test suite.
+AOTPASSES="${AOTPASSES},constmerge,instcombine"
+# Note `aggressive-instcombine` is O3.
+#
+# FIXME: Also note that `inline` probably isn't doing anything since we require
+# the interpreter to be built -O0, menaning clang will slap `noinline`
+# everywhere.
+AOTPASSES="${AOTPASSES},aggressive-instcombine,inline"
+AOTPASSES="${AOTPASSES},globalopt,globaldce,argpromotion,deadargelim"
+#AOTPASSES="${AOTPASSES},instcombine" -- this second invocation breaks yklua
+#AOTPASSES="${AOTPASSES},jumpthreading,sroa,tailcallalim" -- break yk test suite.
+AOTPASSES="${AOTPASSES},function-attrs"
+#AOTPASSES="${AOTPASSES},licm,gvn" -- breaks yk test suite.
+#AOTPASSES="${AOTPASSES},memcpyopt" -- breaks yklua
+AOTPASSES="${AOTPASSES},dse,mldst-motion,loop-flatten,indvars"
+AOTPASSES="${AOTPASSES},loop-deletion,loop-unroll,loop-distribute"
+#AOTPASSES="${AOTPASSES},jumpthreading" -- breaks yklua
+AOTPASSES="${AOTPASSES},lowertypetests,lowertypetests"
+#AOTPASSES="${AOTPASSES},simplifycfg" -- breaks yk test suite.
+AOTPASSES="${AOTPASSES},elim-avail-extern,globaldce"
+
 OUTPUT=""
 
 usage() {
@@ -103,7 +161,7 @@ handle_arg() {
             #
             # This pairs with `-Xclang -disable-O0-optnone`. See above.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-optnone-after-ir-passes"
-            OUTPUT="${OUTPUT} -Wl,--lto-newpm-passes=instcombine"
+            OUTPUT="${OUTPUT} -Xlinker --lto-newpm-passes=${AOTPASSES}"
 
             # Have the `.llvmbc` and `.llvm_bb_addr_map` sections loaded into
             # memory by the loader.
