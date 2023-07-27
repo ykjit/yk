@@ -25,6 +25,7 @@ use std::sync::LazyLock;
 #[cfg(feature = "yk_jitstate_debug")]
 use crate::print_jit_state;
 use crate::{
+    jitstats::JitStats,
     location::{HotLocation, HotLocationKind, Location},
     trace::{default_tracer_for_platform, CompiledTrace, ThreadTracer, Tracer, UnmappedTrace},
 };
@@ -65,6 +66,7 @@ pub struct MT {
     /// [`max_worker_threads`].
     active_worker_threads: AtomicUsize,
     tracer: Arc<dyn Tracer>,
+    jitstats: JitStats,
 }
 
 impl MT {
@@ -80,6 +82,7 @@ impl MT {
             max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
             active_worker_threads: AtomicUsize::new(0),
             tracer: default_tracer_for_platform()?,
+            jitstats: JitStats::new(),
         }))
     }
 
@@ -281,6 +284,7 @@ impl MT {
                                 // that's no longer being used by that thread will be 2.
                                 if Arc::strong_count(&hl) == 2 {
                                     // Another thread was tracing this location but it's terminated.
+                                    self.jitstats.trace_collected_err();
                                     if lk.trace_failure < self.trace_failure_threshold() {
                                         // Let's try tracing the location again in this thread.
                                         lk.trace_failure += 1;
@@ -366,6 +370,8 @@ impl MT {
         hl_arc: Arc<Mutex<HotLocation>>,
         tracer: Arc<dyn Tracer>,
     ) {
+        self.jitstats.trace_collected_ok();
+        let mt = Arc::clone(self);
         let do_compile = move || {
             // FIXME: if mapping or tracing fails we don't want to abort, but in order to do that,
             // we'll need to move the location into something other than the Compiling state.
@@ -378,15 +384,16 @@ impl MT {
                     hl_arc.lock().kind = HotLocationKind::Compiled(Arc::new(CompiledTrace::new(
                         codeptr, di_tmpfile,
                     )));
+                    mt.jitstats.trace_compiled_ok();
                 }
                 Err(_e) => {
                     // FIXME: Properly handle failed trace compilation, e.g. depending on the
                     // reason for the failure we might want to block this location from being
                     // traced again or only temporarily put it on hold and try again later.
                     // See: https://github.com/ykjit/yk/issues/612
+                    mt.jitstats.trace_compiled_err();
                     // FIXME: Improve jit-state message.
                     // See: https://github.com/ykjit/yk/issues/611
-                    //
                     #[cfg(feature = "yk_jitstate_debug")]
                     print_jit_state("trace-compilation-aborted");
                 }
