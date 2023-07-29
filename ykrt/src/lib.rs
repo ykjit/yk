@@ -8,6 +8,7 @@
 
 mod deopt;
 mod frame;
+mod jitstats;
 mod location;
 pub(crate) mod mt;
 pub mod trace;
