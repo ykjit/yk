@@ -1,17 +1,6 @@
-# Debugging.
+# Debugging
 
-## JIT statistics
-
-At the end of an interpreter run, yk can print out some simple statistics about
-what happened during execution. If the `YKD_JITSTATS=<path>` environment
-variable is defined, then JSON statistics will be written to the file at
-`<path>` once the interpreter "drops" the `YkMt` instance. `-` (i.e. a single
-dash) can be used in place of path, in which case the statistics will be
-written to `stderr`. Note that if the interpreter starts multiple yk instances,
-then statistics will be written (and, probably, overwritten) to `<file>`.
-
-
-## Debugging JITted code.
+## Debugging JITted code
 
 Often you will find the need to inspect JITted code with a debugger. If the
 problem trace comes from a C test (i.e. one of the test cases under `tests/c`),

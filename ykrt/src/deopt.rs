@@ -4,7 +4,7 @@
 use crate::frame::{BitcodeSection, FrameReconstructor, LLVMGetThreadSafeModule};
 #[cfg(feature = "yk_jitstate_debug")]
 use crate::print_jit_state;
-use crate::trace::CompiledTrace;
+use crate::{jitstats::TimingState, trace::CompiledTrace};
 use llvm_sys::orc2::LLVMOrcThreadSafeModuleWithModuleDo;
 use llvm_sys::{
     error::{LLVMCreateStringError, LLVMErrorRef},
@@ -275,11 +275,12 @@ unsafe extern "C" fn __ykrt_deopt(
     // Current stack pointer. Needed to read spilled register values from the stack.
     rsp: *const c_void,
 ) -> NewFramesInfo {
-    #[cfg(feature = "yk_jitstate_debug")]
-    print_jit_state("deoptimise");
-
     // Put the CompiledTrace back into an Arc, so it is dropped properly.
     let ctr = Arc::from_raw(ctr);
+
+    #[cfg(feature = "yk_jitstate_debug")]
+    print_jit_state("deoptimise");
+    ctr.mt.jitstats.timing_state(TimingState::Deopting);
 
     // FIXME: Check here if we have a side trace and execute it. Otherwise just increment the guard
     // failure counter.
@@ -305,6 +306,7 @@ unsafe extern "C" fn __ykrt_deopt(
     // pass in variables from this scope via a struct which is passed into the function.
     LLVMOrcThreadSafeModuleWithModuleDo(moduleref, ts_reconstruct, infoptr as *mut c_void);
 
+    ctr.mt.jitstats.timing_state(TimingState::OutsideYk);
     info.nfi.unwrap()
 }
 

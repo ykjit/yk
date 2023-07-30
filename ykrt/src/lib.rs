@@ -2,6 +2,7 @@
 
 #![cfg_attr(test, feature(test))]
 #![feature(lazy_cell)]
+#![feature(local_key_cell_methods)]
 #![feature(naked_functions)]
 #![allow(clippy::type_complexity)]
 #![allow(clippy::new_without_default)]

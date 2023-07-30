@@ -3,10 +3,12 @@
 //   env-var: YKD_JITSTATS=/dev/stderr
 //   stderr:
 //     {
-//       "traces_collected_ok": 1,
+//       ...
 //       "traces_collected_err": 0,
-//       "traces_compiled_ok": 0,
-//       "traces_compiled_err": 1
+//       "traces_collected_ok": 1,
+//       "traces_compiled_err": 1,
+//       "traces_compiled_ok": 0
+//       ...
 //     }
 
 #include <assert.h>
