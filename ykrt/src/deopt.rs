@@ -188,12 +188,8 @@ extern "C" fn ts_reconstruct(ctx: *mut c_void, module: LLVMModuleRef) -> LLVMErr
 
     let mut framerec = unsafe { FrameReconstructor::new(activeframes, module) };
 
-    // Parse the stackmap of the JIT module.
-    // OPT: Parsing the stackmap and initialising `framerec` is slow and could be heavily reduced
-    // by caching the result.
-    let slice = unsafe { slice::from_raw_parts(ctr.smptr as *mut u8, ctr.smsize) };
-    let map = StackMapParser::parse(slice).unwrap();
-    let live_vars = map.get(&retaddr.try_into().unwrap()).unwrap();
+    // Retrieve the live variables for this guard from this trace's stackmap.
+    let live_vars = ctr.smap.get(&retaddr.try_into().unwrap()).unwrap();
 
     // Extract live values from the stackmap.
     // Skip first live variable that contains 3 unrelated locations (CC, Flags, Num Deopts).
