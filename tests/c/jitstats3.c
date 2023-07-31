@@ -20,17 +20,17 @@
 #include <yk_testing.h>
 
 int main(int argc, char **argv) {
-    YkMT *mt = yk_mt_new(NULL);
-    yk_mt_hot_threshold_set(mt, 0);
-    YkLocation loc = yk_location_new();
+  YkMT *mt = yk_mt_new(NULL);
+  yk_mt_hot_threshold_set(mt, 0);
+  YkLocation loc = yk_location_new();
 
-    for (int i = 0; i < 2; i += 1) {
-        yk_mt_control_point(mt, &loc);
-        jmp_buf env;
-        setjmp(env);
-    }
+  for (int i = 0; i < 2; i += 1) {
+    yk_mt_control_point(mt, &loc);
+    jmp_buf env;
+    setjmp(env);
+  }
 
-    yk_location_drop(loc);
-    yk_mt_drop(mt);
-    return (EXIT_SUCCESS);
+  yk_location_drop(loc);
+  yk_mt_drop(mt);
+  return (EXIT_SUCCESS);
 }
