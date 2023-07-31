@@ -18,6 +18,7 @@ use std::{
 };
 pub mod hwt;
 use tempfile::NamedTempFile;
+use yksmp::{LiveVar, StackMapParser};
 use ykutil::obj::llvmbc_section;
 
 pub use errors::InvalidTraceError;
@@ -239,10 +240,9 @@ pub struct CompiledTrace {
     /// control point. The exact definition of this struct is not known to Rust: the struct is
     /// generated at interpreter compile-time by ykllvm.
     pub entry: *const c_void,
-    /// Pointer to the stackmap, required to parse the stackmap during a guard failure.
-    pub smptr: *const c_void,
-    /// The stackmaps size.
-    pub smsize: usize,
+    /// Parsed stackmap of this trace. We only need to read this once, and can then use it to
+    /// lookup stackmap information for each guard failure as needed.
+    pub smap: HashMap<u64, Vec<LiveVar>>,
     /// Pointer to heap allocated live AOT values.
     pub aotvals: *const c_void,
     /// List of guards containing hotness counts or compiled side traces.
@@ -268,13 +268,19 @@ impl CompiledTrace {
         let smsize = slice[2];
         let aotvals = slice[3] as *mut c_void;
         let guardcount = slice[4] as usize;
+
+        // Parse the stackmap of this trace and cache it. The original data allocated by memman.cc
+        // is now no longer needed and can be freed.
+        let smslice = unsafe { slice::from_raw_parts(smptr as *mut u8, smsize) };
+        let smap = StackMapParser::parse(smslice).unwrap();
+        unsafe { libc::munmap(smptr as *mut c_void, smsize) };
+
         // We heap allocated this array in yktracec to pass the data here. Now that we've
         // extracted it we no longer need to keep the array around.
         unsafe { libc::free(data as *mut c_void) };
         Self {
             entry: funcptr,
-            smptr,
-            smsize,
+            smap,
             aotvals,
             di_tmpfile,
             guards: Vec::with_capacity(guardcount),
@@ -289,8 +295,7 @@ impl CompiledTrace {
     pub unsafe fn new_null() -> Self {
         Self {
             entry: std::ptr::null(),
-            smptr: std::ptr::null() as *const _,
-            smsize: 0,
+            smap: HashMap::new(),
             aotvals: std::ptr::null() as *const _,
             di_tmpfile: None,
             guards: Vec::new(),
@@ -302,7 +307,6 @@ impl Drop for CompiledTrace {
     fn drop(&mut self) {
         // The memory holding the AOT live values needs to live as long as the trace. Now that we
         // no longer need the trace, this can be freed too.
-        // FIXME: Free the memory for the stackmap which was allocated in yktracec/memman.cc.
         unsafe { libc::free(self.aotvals as *mut c_void) };
     }
 }
