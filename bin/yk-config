@@ -71,7 +71,7 @@ AOTPASSES="${AOTPASSES},elim-avail-extern,globaldce"
 OUTPUT=""
 
 usage() {
-    echo "Generate C compiler flags for building against the Yk JIT.\n"
+    echo "Generate C compiler flags for building against the yk JIT.\n"
     echo "Usage:"
     echo "    yk-config <mode> <--cc|--cxx|--ar|--ranlib|--cppflags|--cflags|--ldflags>\n"
     echo "    Where <mode> is either 'debug' or 'release'."
@@ -148,7 +148,7 @@ handle_arg() {
             # Ensure we can unambiguously map back to LLVM IR blocks.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-block-disambiguate"
 
-            # Use the Yk extensions to the blockmap section.
+            # Use the yk extensions to the blockmap section.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-extended-llvmbbaddrmap-section"
             # Enable fix for spill reloads before stackmaps.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-stackmap-spillreloads-fix"
