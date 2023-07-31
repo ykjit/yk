@@ -173,6 +173,7 @@ impl MT {
             TransitionLocation::Execute(ctr) => {
                 #[cfg(feature = "yk_jitstate_debug")]
                 print_jit_state("enter-jit-code");
+                self.jitstats.trace_executed();
                 self.jitstats.timing_state(TimingState::JitExecuting);
 
                 unsafe {

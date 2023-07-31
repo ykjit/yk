@@ -4,6 +4,7 @@
 //   stderr:
 //     {
 //       ...
+//       "trace_executions": 1,
 //       "traces_collected_err": 0,
 //       "traces_collected_ok": 1,
 //       "traces_compiled_err": 0,
