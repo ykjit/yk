@@ -25,7 +25,7 @@ use std::sync::LazyLock;
 #[cfg(feature = "yk_jitstate_debug")]
 use crate::print_jit_state;
 use crate::{
-    jitstats::JitStats,
+    jitstats::{JitStats, TimingState},
     location::{HotLocation, HotLocationKind, Location},
     trace::{default_tracer_for_platform, CompiledTrace, ThreadTracer, Tracer, UnmappedTrace},
 };
@@ -66,7 +66,7 @@ pub struct MT {
     /// [`max_worker_threads`].
     active_worker_threads: AtomicUsize,
     tracer: Arc<dyn Tracer>,
-    jitstats: JitStats,
+    pub(crate) jitstats: JitStats,
 }
 
 impl MT {
@@ -145,8 +145,10 @@ impl MT {
                 return;
             }
 
+            let mt = Arc::clone(self);
             let jq = Arc::clone(&self.job_queue);
             thread::spawn(move || {
+                mt.jitstats.timing_state(TimingState::None);
                 let (cv, mtx) = &*jq;
                 let mut lock = mtx.lock();
                 loop {
@@ -171,6 +173,7 @@ impl MT {
             TransitionLocation::Execute(ctr) => {
                 #[cfg(feature = "yk_jitstate_debug")]
                 print_jit_state("enter-jit-code");
+                self.jitstats.timing_state(TimingState::JitExecuting);
 
                 unsafe {
                     #[cfg(feature = "yk_testing")]
@@ -372,33 +375,37 @@ impl MT {
     ) {
         self.jitstats.trace_collected_ok();
         let mt = Arc::clone(self);
-        let do_compile = move || {
-            // FIXME: if mapping or tracing fails we don't want to abort, but in order to do that,
-            // we'll need to move the location into something other than the Compiling state.
-            let irtrace = match utrace.map(tracer) {
-                Ok(x) => x,
-                Err(e) => todo!("{e:?}"),
+        let do_compile =
+            move || {
+                mt.jitstats.timing_state(TimingState::TraceMapping);
+                // FIXME: if mapping or tracing fails we don't want to abort, but in order to do that,
+                // we'll need to move the location into something other than the Compiling state.
+                let irtrace = match utrace.map(tracer) {
+                    Ok(x) => x,
+                    Err(e) => todo!("{e:?}"),
+                };
+                mt.jitstats.timing_state(TimingState::Compiling);
+                match irtrace.compile() {
+                    Ok((codeptr, di_tmpfile)) => {
+                        hl_arc.lock().kind = HotLocationKind::Compiled(Arc::new(
+                            CompiledTrace::new(Arc::clone(&mt), codeptr, di_tmpfile),
+                        ));
+                        mt.jitstats.trace_compiled_ok();
+                    }
+                    Err(_e) => {
+                        // FIXME: Properly handle failed trace compilation, e.g. depending on the
+                        // reason for the failure we might want to block this location from being
+                        // traced again or only temporarily put it on hold and try again later.
+                        // See: https://github.com/ykjit/yk/issues/612
+                        mt.jitstats.trace_compiled_err();
+                        // FIXME: Improve jit-state message.
+                        // See: https://github.com/ykjit/yk/issues/611
+                        #[cfg(feature = "yk_jitstate_debug")]
+                        print_jit_state("trace-compilation-aborted");
+                    }
+                };
+                mt.jitstats.timing_state(TimingState::None);
             };
-            match irtrace.compile() {
-                Ok((codeptr, di_tmpfile)) => {
-                    hl_arc.lock().kind = HotLocationKind::Compiled(Arc::new(CompiledTrace::new(
-                        codeptr, di_tmpfile,
-                    )));
-                    mt.jitstats.trace_compiled_ok();
-                }
-                Err(_e) => {
-                    // FIXME: Properly handle failed trace compilation, e.g. depending on the
-                    // reason for the failure we might want to block this location from being
-                    // traced again or only temporarily put it on hold and try again later.
-                    // See: https://github.com/ykjit/yk/issues/612
-                    mt.jitstats.trace_compiled_err();
-                    // FIXME: Improve jit-state message.
-                    // See: https://github.com/ykjit/yk/issues/611
-                    #[cfg(feature = "yk_jitstate_debug")]
-                    print_jit_state("trace-compilation-aborted");
-                }
-            };
-        };
 
         #[cfg(feature = "yk_testing")]
         if *SERIALISE_COMPILATION {
@@ -420,6 +427,12 @@ impl MT {
                 lk.kind = HotLocationKind::SideTracing(Arc::clone(ctr));
             }
         });
+    }
+}
+
+impl Drop for MT {
+    fn drop(&mut self) {
+        self.jitstats.timing_state(TimingState::None);
     }
 }
 
@@ -512,7 +525,9 @@ mod tests {
                     HotLocationKind::Compiling
                 ));
                 loc.hot_location().unwrap().lock().kind =
-                    HotLocationKind::Compiled(Arc::new(unsafe { CompiledTrace::new_null() }));
+                    HotLocationKind::Compiled(Arc::new(unsafe {
+                        CompiledTrace::new_null(Arc::clone(&mt))
+                    }));
             }
             _ => unreachable!(),
         }
@@ -793,7 +808,7 @@ mod tests {
                                     ));
                                     loc.hot_location().unwrap().lock().kind =
                                         HotLocationKind::Compiled(Arc::new(unsafe {
-                                            CompiledTrace::new_null()
+                                            CompiledTrace::new_null(Arc::clone(&mt))
                                         }));
                                 }
                                 x => unreachable!("Reached incorrect state {:?}", x),
@@ -893,7 +908,9 @@ mod tests {
                         HotLocationKind::Compiling
                     ));
                     loc.hot_location().unwrap().lock().kind =
-                        HotLocationKind::Compiled(Arc::new(unsafe { CompiledTrace::new_null() }));
+                        HotLocationKind::Compiled(Arc::new(unsafe {
+                            CompiledTrace::new_null(Arc::clone(&mt))
+                        }));
                 }
                 _ => unreachable!(),
             }
@@ -969,7 +986,9 @@ mod tests {
         ));
         if let TransitionLocation::StopTracing(_) = mt.transition_location(&loc1) {
             loc1.hot_location().unwrap().lock().kind =
-                HotLocationKind::Compiled(Arc::new(unsafe { CompiledTrace::new_null() }));
+                HotLocationKind::Compiled(Arc::new(unsafe {
+                    CompiledTrace::new_null(Arc::clone(&mt))
+                }));
         } else {
             panic!();
         }

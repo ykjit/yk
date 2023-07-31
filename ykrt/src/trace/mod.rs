@@ -13,13 +13,14 @@ use std::{
     env,
     error::Error,
     ffi::{c_char, c_int, CStr, CString},
-    ptr,
+    fmt, ptr,
     sync::Arc,
 };
 pub mod hwt;
 use tempfile::NamedTempFile;
 use ykutil::obj::llvmbc_section;
 
+use crate::mt::MT;
 pub use errors::InvalidTraceError;
 
 /// A globally unique block ID for an LLVM IR block.
@@ -231,8 +232,8 @@ struct Guard {
 /// A trace compiled into machine code. Note that these are passed around as raw pointers and
 /// potentially referenced by multiple threads so, once created, instances of this struct can only
 /// be updated if a lock is held or a field is atomic.
-#[derive(Debug)]
 pub struct CompiledTrace {
+    pub mt: Arc<MT>,
     /// A function which when called, executes the compiled trace.
     ///
     /// The argument to the function is a pointer to a struct containing the live variables at the
@@ -261,7 +262,7 @@ impl CompiledTrace {
     /// Create a `CompiledTrace` from a pointer to an array containing: the pointer to the compiled
     /// trace, the pointer to the stackmap and the size of the stackmap, and the pointer to the
     /// live AOT values.
-    pub fn new(data: *const c_void, di_tmpfile: Option<NamedTempFile>) -> Self {
+    pub fn new(mt: Arc<MT>, data: *const c_void, di_tmpfile: Option<NamedTempFile>) -> Self {
         let slice = unsafe { slice::from_raw_parts(data as *const usize, 5) };
         let funcptr = slice[0] as *const c_void;
         let smptr = slice[1] as *const c_void;
@@ -272,6 +273,7 @@ impl CompiledTrace {
         // extracted it we no longer need to keep the array around.
         unsafe { libc::free(data as *mut c_void) };
         Self {
+            mt,
             entry: funcptr,
             smptr,
             smsize,
@@ -286,8 +288,9 @@ impl CompiledTrace {
     /// Create a `CompiledTrace` with null contents. This is unsafe and only intended for testing
     /// purposes where a `CompiledTrace` instance is required, but cannot sensibly be constructed
     /// without overwhelming the test. The resulting instance must not be inspected or executed.
-    pub unsafe fn new_null() -> Self {
+    pub unsafe fn new_null(mt: Arc<MT>) -> Self {
         Self {
+            mt,
             entry: std::ptr::null(),
             smptr: std::ptr::null() as *const _,
             smsize: 0,
@@ -304,6 +307,12 @@ impl Drop for CompiledTrace {
         // no longer need the trace, this can be freed too.
         // FIXME: Free the memory for the stackmap which was allocated in yktracec/memman.cc.
         unsafe { libc::free(self.aotvals as *mut c_void) };
+    }
+}
+
+impl fmt::Debug for CompiledTrace {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "CompiledTrace {{ ... }}")
     }
 }
 
