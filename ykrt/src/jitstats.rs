@@ -105,7 +105,7 @@ impl JitStatsInner {
 
     fn to_json(&self) -> String {
         fn fmt_duration(d: Duration) -> String {
-            format!("{}.{}", d.as_secs(), d.as_millis())
+            format!("{}.{:03}", d.as_secs(), d.subsec_millis())
         }
 
         let mut fields = vec![
