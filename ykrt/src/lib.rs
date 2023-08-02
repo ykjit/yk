@@ -9,10 +9,10 @@
 
 mod deopt;
 mod frame;
-mod jitstats;
 mod location;
 pub(crate) mod mt;
 pub mod trace;
+mod ykstats;
 
 pub use self::location::Location;
 pub use self::mt::{HotThreshold, MT};
