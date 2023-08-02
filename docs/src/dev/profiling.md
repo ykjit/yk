@@ -46,6 +46,8 @@ Fields and their meaning are as follows:
    "outside yk".
  * `duration_trace_mapping`. Float, seconds. How long was spent mapping a "raw"
    trace to compiler-ready IR?
+ * `trace_executions`. Unsigned integer. How many times have traces been
+   executed? Note that the same trace can count arbitrarily many times to this.
  * `traces_collected_err`. Unsigned integer. How many traces were collected
    unsuccessfully?
  * `traces_collected_ok`. Unsigned integer. How many traces were collected

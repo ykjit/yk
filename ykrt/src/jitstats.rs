@@ -32,6 +32,10 @@ struct JitStatsInner {
     traces_compiled_ok: u64,
     /// How many traces were compiled unsuccessfully?
     traces_compiled_err: u64,
+    /// How many times have traces been executed? Note that the same trace can count arbitrarily
+    /// many times to this.
+    trace_executions: u64,
+    /// The time spent in each [TimingState].
     durations: [Duration; TimingState::COUNT],
 }
 
@@ -79,6 +83,10 @@ impl JitStats {
         self.lock(|inner| inner.traces_compiled_err += 1);
     }
 
+    pub fn trace_executed(&self) {
+        self.lock(|inner| inner.trace_executions += 1);
+    }
+
     /// Change the [TimingState] the current thread is in.
     pub fn timing_state(&self, new_state: TimingState) {
         self.lock(|inner| {
@@ -99,6 +107,7 @@ impl JitStatsInner {
             traces_collected_err: 0,
             traces_compiled_ok: 0,
             traces_compiled_err: 0,
+            trace_executions: 0,
             durations: [Duration::new(0, 0); TimingState::COUNT],
         }
     }
@@ -125,6 +134,10 @@ impl JitStatsInner {
                 "traces_compiled_err".to_owned(),
                 self.traces_compiled_err.to_string(),
             ),
+            (
+                "trace_executions".to_owned(),
+                self.trace_executions.to_string(),
+            ),
         ];
         for v in TimingState::iter() {
             let s = v.to_string();
@@ -132,6 +145,7 @@ impl JitStatsInner {
                 fields.push((s, fmt_duration(self.durations[v as usize])));
             }
         }
+        // We sort the output fields so that tests can match the output with a simple text match.
         fields.sort_unstable_by(|(k1, _), (k2, _)| k1.cmp(k2));
         format!(
             r#"{{
