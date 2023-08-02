@@ -43,6 +43,11 @@ type AtomicHotThreshold = AtomicU32;
 pub type TraceFailureThreshold = u16;
 pub type AtomicTraceFailureThreshold = AtomicU16;
 
+/// How many blocks long can a trace be before we give up trying to compile it? Note that the
+/// slower our compiler, the lower this will have to be in order to give the perception of
+/// reasonable performance.
+/// FIXME: needs to be configurable.
+pub(crate) const DEFAULT_TRACE_TOO_LONG: usize = 5000;
 const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
 const DEFAULT_TRACE_FAILURE_THRESHOLD: TraceFailureThreshold = 5;
 
@@ -376,37 +381,42 @@ impl MT {
     ) {
         self.stats.trace_collected_ok();
         let mt = Arc::clone(self);
-        let do_compile =
-            move || {
-                mt.stats.timing_state(TimingState::TraceMapping);
-                // FIXME: if mapping or tracing fails we don't want to abort, but in order to do that,
-                // we'll need to move the location into something other than the Compiling state.
-                let irtrace = match utrace.map(tracer) {
-                    Ok(x) => x,
-                    Err(e) => todo!("{e:?}"),
-                };
-                mt.stats.timing_state(TimingState::Compiling);
-                match irtrace.compile() {
-                    Ok((codeptr, di_tmpfile)) => {
-                        hl_arc.lock().kind = HotLocationKind::Compiled(Arc::new(
-                            CompiledTrace::new(Arc::clone(&mt), codeptr, di_tmpfile),
-                        ));
-                        mt.stats.trace_compiled_ok();
-                    }
-                    Err(_e) => {
-                        // FIXME: Properly handle failed trace compilation, e.g. depending on the
-                        // reason for the failure we might want to block this location from being
-                        // traced again or only temporarily put it on hold and try again later.
-                        // See: https://github.com/ykjit/yk/issues/612
-                        mt.stats.trace_compiled_err();
-                        // FIXME: Improve jit-state message.
-                        // See: https://github.com/ykjit/yk/issues/611
-                        #[cfg(feature = "yk_jitstate_debug")]
-                        print_jit_state("trace-compilation-aborted");
-                    }
-                };
-                mt.stats.timing_state(TimingState::None);
-            };
+        let do_compile = move || {
+            mt.stats.timing_state(TimingState::TraceMapping);
+            match utrace.map(tracer) {
+                Ok(irtrace) => {
+                    mt.stats.timing_state(TimingState::Compiling);
+                    match irtrace.compile() {
+                        Ok((codeptr, di_tmpfile)) => {
+                            hl_arc.lock().kind = HotLocationKind::Compiled(Arc::new(
+                                CompiledTrace::new(Arc::clone(&mt), codeptr, di_tmpfile),
+                            ));
+                            mt.stats.trace_compiled_ok();
+                        }
+                        Err(_) => {
+                            // FIXME: Immediately marking a location as `DontTrace` is too brutal.
+                            // See: https://github.com/ykjit/yk/issues/612
+                            mt.stats.trace_compiled_err();
+                            hl_arc.lock().kind = HotLocationKind::DontTrace;
+                            // FIXME: Improve jit-state message.
+                            // See: https://github.com/ykjit/yk/issues/611
+                            #[cfg(feature = "yk_jitstate_debug")]
+                            print_jit_state("trace-compilation-aborted");
+                        }
+                    };
+                }
+                Err(_) => {
+                    // FIXME: Immediately marking a location as `DontTrace` is too brutal.
+                    // See: https://github.com/ykjit/yk/issues/612
+                    hl_arc.lock().kind = HotLocationKind::DontTrace;
+                    mt.stats.trace_compiled_err();
+                    #[cfg(feature = "yk_jitstate_debug")]
+                    print_jit_state("trace-compilation-aborted");
+                }
+            }
+
+            mt.stats.timing_state(TimingState::None);
+        };
 
         #[cfg(feature = "yk_testing")]
         if *SERIALISE_COMPILATION {

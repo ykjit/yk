@@ -31,6 +31,8 @@ pub enum HWTracerError {
     NoMorePackets,
     /// The trace was interrupted by an asynchronous event.
     TraceInterrupted,
+    /// The trace was too long
+    TraceTooLong,
     /// Any other error.
     Custom(Box<dyn Error>),
 }
@@ -56,6 +58,7 @@ impl Display for HWTracerError {
             HWTracerError::NoMorePackets => write!(f, "End of packet stream"),
             HWTracerError::DisasmFail(ref s) => write!(f, "failed to disassemble: {}", s),
             HWTracerError::TraceInterrupted => write!(f, "trace interrupted"),
+            HWTracerError::TraceTooLong => write!(f, "trace too long"),
             HWTracerError::Unknown => write!(f, "Unknown error"),
         }
     }
@@ -81,6 +84,7 @@ impl Error for HWTracerError {
             HWTracerError::NoMorePackets => None,
             HWTracerError::DisasmFail(_) => None,
             HWTracerError::TraceInterrupted => None,
+            HWTracerError::TraceTooLong => None,
         }
     }
 }
