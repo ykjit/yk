@@ -1,7 +1,7 @@
 // ignore: Shadow stack not supported on non-main threads.
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_JITSTATS=/dev/stderr
+//   env-var: YKD_STATS=-
 //   stderr:
 //     {
 //       ...

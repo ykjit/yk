@@ -15,17 +15,17 @@ use std::{
 use strum::{Display, EnumCount, EnumIter, IntoEnumIterator};
 
 /// Record yk statistics if enabled. In non-testing mode, this is only enabled if the end user
-/// defines the environment variable `YKD_JITSTATS`. In testing mode, this is always enabled, with
+/// defines the environment variable `YKD_STATS`. In testing mode, this is always enabled, with
 /// output being sent to `stderr`.
-pub(crate) struct JitStats {
+pub(crate) struct YkStats {
     // On most runs of yk we anticipate that the end user won't want to be recording JIT
     // statistics, so we want to able to do the quickest possible check for "are any stats to be
     // recorded?" The outer `Option` means thus becomes a simple `if (NULL) { return}` check: only
     // if stats are to be recorded do we have to go to the expense of locking a `Mutex`.
-    inner: Option<Mutex<JitStatsInner>>,
+    inner: Option<Mutex<YkStatsInner>>,
 }
 
-struct JitStatsInner {
+struct YkStatsInner {
     /// The path to write output. If exactly equal to `-`, output will be written to stderr.
     output_path: String,
     /// How many traces were collected successfully?
@@ -43,12 +43,12 @@ struct JitStatsInner {
     durations: [Duration; TimingState::COUNT],
 }
 
-impl JitStats {
+impl YkStats {
     #[cfg(not(test))]
     pub fn new() -> Self {
-        if let Ok(p) = env::var("YKD_JITSTATS") {
+        if let Ok(p) = env::var("YKD_STATS") {
             Self {
-                inner: Some(Mutex::new(JitStatsInner::new(p))),
+                inner: Some(Mutex::new(YkStatsInner::new(p))),
             }
         } else {
             Self { inner: None }
@@ -58,13 +58,13 @@ impl JitStats {
     #[cfg(test)]
     pub fn new() -> Self {
         Self {
-            inner: Some(Mutex::new(JitStatsInner::new("-".to_string()))),
+            inner: Some(Mutex::new(YkStatsInner::new("-".to_string()))),
         }
     }
 
     fn lock<F, T>(&self, f: F) -> Option<T>
     where
-        F: FnOnce(&mut JitStatsInner) -> T,
+        F: FnOnce(&mut YkStatsInner) -> T,
     {
         self.inner
             .as_ref()
@@ -108,7 +108,7 @@ impl JitStats {
     }
 }
 
-impl JitStatsInner {
+impl YkStatsInner {
     fn new(output_path: String) -> Self {
         Self {
             output_path,
@@ -171,7 +171,7 @@ impl JitStatsInner {
     }
 }
 
-impl Drop for JitStatsInner {
+impl Drop for YkStatsInner {
     fn drop(&mut self) {
         let json = self.to_json();
         if self.output_path == "-" {

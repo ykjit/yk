@@ -25,9 +25,9 @@ use std::sync::LazyLock;
 #[cfg(feature = "yk_jitstate_debug")]
 use crate::print_jit_state;
 use crate::{
-    jitstats::{JitStats, TimingState},
     location::{HotLocation, HotLocationKind, Location},
     trace::{default_tracer_for_platform, CompiledTrace, ThreadTracer, Tracer, UnmappedTrace},
+    ykstats::{TimingState, YkStats},
 };
 use yktracec::promote;
 
@@ -66,7 +66,7 @@ pub struct MT {
     /// [`max_worker_threads`].
     active_worker_threads: AtomicUsize,
     tracer: Arc<dyn Tracer>,
-    pub(crate) jitstats: JitStats,
+    pub(crate) stats: YkStats,
 }
 
 impl MT {
@@ -82,7 +82,7 @@ impl MT {
             max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
             active_worker_threads: AtomicUsize::new(0),
             tracer: default_tracer_for_platform()?,
-            jitstats: JitStats::new(),
+            stats: YkStats::new(),
         }))
     }
 
@@ -148,7 +148,7 @@ impl MT {
             let mt = Arc::clone(self);
             let jq = Arc::clone(&self.job_queue);
             thread::spawn(move || {
-                mt.jitstats.timing_state(TimingState::None);
+                mt.stats.timing_state(TimingState::None);
                 let (cv, mtx) = &*jq;
                 let mut lock = mtx.lock();
                 loop {
@@ -173,8 +173,8 @@ impl MT {
             TransitionLocation::Execute(ctr) => {
                 #[cfg(feature = "yk_jitstate_debug")]
                 print_jit_state("enter-jit-code");
-                self.jitstats.trace_executed();
-                self.jitstats.timing_state(TimingState::JitExecuting);
+                self.stats.trace_executed();
+                self.stats.timing_state(TimingState::JitExecuting);
 
                 unsafe {
                     #[cfg(feature = "yk_testing")]
@@ -288,7 +288,7 @@ impl MT {
                                 // that's no longer being used by that thread will be 2.
                                 if Arc::strong_count(&hl) == 2 {
                                     // Another thread was tracing this location but it's terminated.
-                                    self.jitstats.trace_collected_err();
+                                    self.stats.trace_collected_err();
                                     if lk.trace_failure < self.trace_failure_threshold() {
                                         // Let's try tracing the location again in this thread.
                                         lk.trace_failure += 1;
@@ -374,38 +374,38 @@ impl MT {
         hl_arc: Arc<Mutex<HotLocation>>,
         tracer: Arc<dyn Tracer>,
     ) {
-        self.jitstats.trace_collected_ok();
+        self.stats.trace_collected_ok();
         let mt = Arc::clone(self);
         let do_compile =
             move || {
-                mt.jitstats.timing_state(TimingState::TraceMapping);
+                mt.stats.timing_state(TimingState::TraceMapping);
                 // FIXME: if mapping or tracing fails we don't want to abort, but in order to do that,
                 // we'll need to move the location into something other than the Compiling state.
                 let irtrace = match utrace.map(tracer) {
                     Ok(x) => x,
                     Err(e) => todo!("{e:?}"),
                 };
-                mt.jitstats.timing_state(TimingState::Compiling);
+                mt.stats.timing_state(TimingState::Compiling);
                 match irtrace.compile() {
                     Ok((codeptr, di_tmpfile)) => {
                         hl_arc.lock().kind = HotLocationKind::Compiled(Arc::new(
                             CompiledTrace::new(Arc::clone(&mt), codeptr, di_tmpfile),
                         ));
-                        mt.jitstats.trace_compiled_ok();
+                        mt.stats.trace_compiled_ok();
                     }
                     Err(_e) => {
                         // FIXME: Properly handle failed trace compilation, e.g. depending on the
                         // reason for the failure we might want to block this location from being
                         // traced again or only temporarily put it on hold and try again later.
                         // See: https://github.com/ykjit/yk/issues/612
-                        mt.jitstats.trace_compiled_err();
+                        mt.stats.trace_compiled_err();
                         // FIXME: Improve jit-state message.
                         // See: https://github.com/ykjit/yk/issues/611
                         #[cfg(feature = "yk_jitstate_debug")]
                         print_jit_state("trace-compilation-aborted");
                     }
                 };
-                mt.jitstats.timing_state(TimingState::None);
+                mt.stats.timing_state(TimingState::None);
             };
 
         #[cfg(feature = "yk_testing")]
@@ -433,7 +433,7 @@ impl MT {
 
 impl Drop for MT {
     fn drop(&mut self) {
-        self.jitstats.timing_state(TimingState::None);
+        self.stats.timing_state(TimingState::None);
     }
 }
 
