@@ -1,10 +1,7 @@
-/// This module records statistics about Yk and the VM it is part of. The accuracy of the
-/// statistics varies: in general, the statistics about yk's internals are accurate, but
-/// interactions with the wider interpreter are likely to be approximations, because we can only
-/// guess at what the interpreter is doing. For example, when an interpreter spins up a thread,
-/// does that count as "time spent interpreting"? What happens if it's a job queue that immediately
-/// goes to sleep? In such cases, we are very much in "best effort" territory -- but it's better
-/// than nothing!
+/// This module records statistics about yk and the VM it is part of. The accuracy of the
+/// statistics varies: for example, "durations" are wall-clock time, which inevitably fail to
+/// account for context switches and the like. Thus the statistics are very much in "best effort"
+/// territory -- but it's better than nothing!
 
 #[cfg(not(test))]
 use std::env;
@@ -17,7 +14,14 @@ use std::{
 };
 use strum::{Display, EnumCount, EnumIter, IntoEnumIterator};
 
+/// Record yk statistics if enabled. In non-testing mode, this is only enabled if the end user
+/// defines the environment variable `YKD_JITSTATS`. In testing mode, this is always enabled, with
+/// output being sent to `stderr`.
 pub(crate) struct JitStats {
+    // On most runs of yk we anticipate that the end user won't want to be recording JIT
+    // statistics, so we want to able to do the quickest possible check for "are any stats to be
+    // recorded?" The outer `Option` means thus becomes a simple `if (NULL) { return}` check: only
+    // if stats are to be recorded do we have to go to the expense of locking a `Mutex`.
     inner: Option<Mutex<JitStatsInner>>,
 }
 
@@ -67,22 +71,27 @@ impl JitStats {
             .map(|x| f(x.lock().unwrap().deref_mut()))
     }
 
+    /// Increment the "a trace has been collected successfully" count.
     pub fn trace_collected_ok(&self) {
         self.lock(|inner| inner.traces_collected_ok += 1);
     }
 
+    /// Increment the "a trace has been collected unsuccessfully" count.
     pub fn trace_collected_err(&self) {
         self.lock(|inner| inner.traces_collected_err += 1);
     }
 
+    /// Increment the "a trace has been compiled successfully" count.
     pub fn trace_compiled_ok(&self) {
         self.lock(|inner| inner.traces_compiled_ok += 1);
     }
 
+    /// Increment the "a trace has been compiled unsuccessfully" count.
     pub fn trace_compiled_err(&self) {
         self.lock(|inner| inner.traces_compiled_err += 1);
     }
 
+    /// Increment the "a compiled trace has started execution" count.
     pub fn trace_executed(&self) {
         self.lock(|inner| inner.trace_executions += 1);
     }
@@ -112,6 +121,8 @@ impl JitStatsInner {
         }
     }
 
+    /// Turn these statistics into JSON. The output is guaranteed to be sorted by field name so
+    /// that textual matching of the JSON string (e.g. in lang_tester) is possible.
     fn to_json(&self) -> String {
         fn fmt_duration(d: Duration) -> String {
             format!("{}.{}", d.as_secs(), d.as_millis())
