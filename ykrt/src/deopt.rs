@@ -172,7 +172,7 @@ extern "C" fn ts_reconstruct(ctx: *mut c_void, module: LLVMModuleRef) -> LLVMErr
 
     // Find the relevant AOT variables for this deopt in the AOT variables section.
     let aotvalsptr =
-        unsafe { (ctr.aotvals as *const u8).offset(isize::try_from(aotvals.offset).unwrap()) };
+        unsafe { (ctr.aotvals() as *const u8).offset(isize::try_from(aotvals.offset).unwrap()) };
 
     // Parse the live AOT values.
     let aotvals = unsafe { slice::from_raw_parts(aotvalsptr as *const AOTVar, aotvals.length) };
