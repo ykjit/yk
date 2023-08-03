@@ -221,10 +221,13 @@ impl IRTrace {
     }
 }
 
-#[derive(Debug)]
+struct SendSyncConstPtr<T>(*const T);
+unsafe impl<T> Send for SendSyncConstPtr<T> {}
+unsafe impl<T> Sync for SendSyncConstPtr<T> {}
+
 struct Guard {
     failed: u32,
-    code: Option<*const c_void>,
+    code: Option<SendSyncConstPtr<c_void>>,
 }
 
 /// A trace compiled into machine code. Note that these are passed around as raw pointers and
@@ -237,12 +240,12 @@ pub struct CompiledTrace {
     /// The argument to the function is a pointer to a struct containing the live variables at the
     /// control point. The exact definition of this struct is not known to Rust: the struct is
     /// generated at interpreter compile-time by ykllvm.
-    pub entry: *const c_void,
+    entry: SendSyncConstPtr<c_void>,
     /// Parsed stackmap of this trace. We only need to read this once, and can then use it to
     /// lookup stackmap information for each guard failure as needed.
     pub smap: HashMap<u64, Vec<LiveVar>>,
     /// Pointer to heap allocated live AOT values.
-    pub aotvals: *const c_void,
+    aotvals: SendSyncConstPtr<c_void>,
     /// List of guards containing hotness counts or compiled side traces.
     guards: Vec<Option<Guard>>,
     /// If requested, a temporary file containing the "source code" for the trace, to be shown in
@@ -278,9 +281,9 @@ impl CompiledTrace {
         unsafe { libc::free(data as *mut c_void) };
         Self {
             mt,
-            entry: funcptr,
+            entry: SendSyncConstPtr(funcptr),
             smap,
-            aotvals,
+            aotvals: SendSyncConstPtr(aotvals),
             di_tmpfile,
             guards: Vec::with_capacity(guardcount),
         }
@@ -294,12 +297,20 @@ impl CompiledTrace {
     pub unsafe fn new_null(mt: Arc<MT>) -> Self {
         Self {
             mt,
-            entry: std::ptr::null(),
+            entry: SendSyncConstPtr(std::ptr::null()),
             smap: HashMap::new(),
-            aotvals: std::ptr::null() as *const _,
+            aotvals: SendSyncConstPtr(std::ptr::null()),
             di_tmpfile: None,
             guards: Vec::new(),
         }
+    }
+
+    pub fn aotvals(&self) -> *const c_void {
+        self.aotvals.0
+    }
+
+    pub fn entry(&self) -> *const c_void {
+        self.entry.0
     }
 }
 
@@ -307,7 +318,7 @@ impl Drop for CompiledTrace {
     fn drop(&mut self) {
         // The memory holding the AOT live values needs to live as long as the trace. Now that we
         // no longer need the trace, this can be freed too.
-        unsafe { libc::free(self.aotvals as *mut c_void) };
+        unsafe { libc::free(self.aotvals.0 as *mut c_void) };
     }
 }
 
@@ -316,9 +327,6 @@ impl fmt::Debug for CompiledTrace {
         write!(f, "CompiledTrace {{ ... }}")
     }
 }
-
-unsafe impl Send for CompiledTrace {}
-unsafe impl Sync for CompiledTrace {}
 
 /// A tracer is an object which can start / stop collecting traces. It may have its own
 /// configuration, but that is dependent on the concrete tracer itself.
