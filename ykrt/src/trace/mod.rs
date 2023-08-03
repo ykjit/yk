@@ -105,9 +105,6 @@ pub struct IRTrace {
     faddrs: HashMap<CString, *const c_void>,
 }
 
-unsafe impl Send for IRTrace {}
-unsafe impl Sync for IRTrace {}
-
 impl IRTrace {
     pub fn new(blocks: Vec<IRBlock>, faddrs: HashMap<CString, *const c_void>) -> Self {
         debug_assert!(blocks.len() < usize::MAX);
