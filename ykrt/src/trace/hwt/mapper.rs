@@ -147,7 +147,10 @@ impl<'a> HWTMapper {
     ) -> Result<Vec<IRBlock>, HWTracerError> {
         let mut ret: Vec<IRBlock> = Vec::new();
 
-        for block in &mut trace_iter {
+        for (i, block) in &mut trace_iter.enumerate() {
+            if i > crate::mt::DEFAULT_TRACE_TOO_LONG {
+                return Err(HWTracerError::TraceTooLong);
+            }
             let block = block?;
             let irblocks = self.map_block(&block);
             if irblocks.is_empty() {
