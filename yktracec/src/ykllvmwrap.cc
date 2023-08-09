@@ -201,8 +201,8 @@ void initLLVM(void *Unused) {
 // Load the GlobalAOTMod.
 //
 // This must only be called from getAOTMod() for correct synchronisation.
-void loadAOTMod(struct BitcodeSection &Bitcode) {
-  auto Sf = StringRef((const char *)Bitcode.data, Bitcode.len);
+void loadAOTMod(struct BitcodeSection *Bitcode) {
+  auto Sf = StringRef((const char *)Bitcode->data, Bitcode->len);
   auto Mb = MemoryBufferRef(Sf, "");
   SMDiagnostic Error;
   ThreadSafeContext AOTCtx = std::make_unique<LLVMContext>();
@@ -216,7 +216,7 @@ void loadAOTMod(struct BitcodeSection &Bitcode) {
 
 // Get a thread-safe handle on the LLVM module stored in the .llvmbc section of
 // the binary. The module is loaded if we haven't yet done so.
-ThreadSafeModule *getThreadAOTMod(struct BitcodeSection &Bitcode) {
+ThreadSafeModule *getThreadAOTMod(struct BitcodeSection *Bitcode) {
   std::call_once(GlobalAOTModLoaded, loadAOTMod, Bitcode);
   return &GlobalAOTMod;
 }
@@ -224,7 +224,7 @@ ThreadSafeModule *getThreadAOTMod(struct BitcodeSection &Bitcode) {
 // Exposes `getThreadAOTMod` so we can get a thread-safe copy of the
 // AOT IR from within Rust.
 extern "C" LLVMOrcThreadSafeModuleRef
-LLVMGetThreadSafeModule(struct BitcodeSection &Bitcode) {
+LLVMGetThreadSafeModule(struct BitcodeSection *Bitcode) {
   ThreadSafeModule *ThreadAOTMod = getThreadAOTMod(Bitcode);
   // Since the LLVM CAPI doesn't expose the ThreadSafeModule wrapper, we have
   // to do the casting ourselves.
@@ -392,7 +392,7 @@ void *compileIRTrace(FN Func, char *FuncNames[], size_t BBs[], size_t TraceLen,
   DebugIRPrinter DIP;
 
   struct BitcodeSection Bitcode = {BitcodeData, BitcodeLen};
-  ThreadSafeModule *ThreadAOTMod = getThreadAOTMod(Bitcode);
+  ThreadSafeModule *ThreadAOTMod = getThreadAOTMod(&Bitcode);
 
   Module *JITMod;
   std::string TraceName;

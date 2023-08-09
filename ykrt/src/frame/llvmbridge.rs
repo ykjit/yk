@@ -15,7 +15,7 @@ pub struct BitcodeSection {
 }
 
 extern "C" {
-    pub fn LLVMGetThreadSafeModule(bs: BitcodeSection) -> LLVMOrcThreadSafeModuleRef;
+    pub fn LLVMGetThreadSafeModule(bs: *const BitcodeSection) -> LLVMOrcThreadSafeModuleRef;
 }
 
 impl Module {
