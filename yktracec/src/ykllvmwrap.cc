@@ -224,7 +224,7 @@ ThreadSafeModule *getThreadAOTMod(struct BitcodeSection *Bitcode) {
 // Exposes `getThreadAOTMod` so we can get a thread-safe copy of the
 // AOT IR from within Rust.
 extern "C" LLVMOrcThreadSafeModuleRef
-LLVMGetThreadSafeModule(struct BitcodeSection *Bitcode) {
+__yktracec_get_aot_module(struct BitcodeSection *Bitcode) {
   ThreadSafeModule *ThreadAOTMod = getThreadAOTMod(Bitcode);
   // Since the LLVM CAPI doesn't expose the ThreadSafeModule wrapper, we have
   // to do the casting ourselves.

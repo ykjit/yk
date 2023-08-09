@@ -1,7 +1,7 @@
 //! Run-time deoptimisation support: when a guard fails, this module restores the state necessary
 //! to resume interpreter execution.
 
-use crate::frame::{BitcodeSection, FrameReconstructor, LLVMGetThreadSafeModule};
+use crate::frame::{BitcodeSection, FrameReconstructor, __yktracec_get_aot_module};
 #[cfg(feature = "yk_jitstate_debug")]
 use crate::print_jit_state;
 use crate::{trace::CompiledTrace, ykstats::TimingState};
@@ -295,7 +295,7 @@ unsafe extern "C" fn __ykrt_deopt(
     let infoptr = Box::into_raw(Box::new(&mut info));
 
     let (data, len) = ykutil::obj::llvmbc_section();
-    let moduleref = LLVMGetThreadSafeModule(&BitcodeSection { data, len });
+    let moduleref = __yktracec_get_aot_module(&BitcodeSection { data, len });
 
     // The LLVM CAPI doesn't allow us to manually lock/unlock a ThreadSafeModule, and uses a
     // call-back function instead which it runs after locking the module. This means we need to

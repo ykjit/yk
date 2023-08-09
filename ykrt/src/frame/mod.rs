@@ -14,7 +14,7 @@ use std::{
 use yksmp::{Location as SMLocation, SMEntry, StackMapParser};
 
 mod llvmbridge;
-pub use llvmbridge::{BitcodeSection, LLVMGetThreadSafeModule};
+pub use llvmbridge::{BitcodeSection, __yktracec_get_aot_module};
 use llvmbridge::{Module, Type, Value};
 
 pub static AOT_STACKMAPS: LazyLock<Vec<SMEntry>> = LazyLock::new(|| {
