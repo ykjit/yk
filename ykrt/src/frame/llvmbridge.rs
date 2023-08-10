@@ -15,7 +15,7 @@ pub struct BitcodeSection {
 }
 
 extern "C" {
-    pub fn LLVMGetThreadSafeModule(bs: BitcodeSection) -> LLVMOrcThreadSafeModuleRef;
+    pub fn __yktracec_get_aot_module(bs: *const BitcodeSection) -> LLVMOrcThreadSafeModuleRef;
 }
 
 impl Module {
