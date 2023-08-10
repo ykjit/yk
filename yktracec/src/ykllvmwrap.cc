@@ -50,6 +50,8 @@ struct BitcodeSection {
   void *data;
   // The length of the LLVM bitcode section, in bytes.
   size_t len;
+
+  StringRef asStringRef() { return StringRef(static_cast<char *>(data), len); }
 };
 
 // If possible, return a string describing the location of an instruction in
@@ -202,8 +204,7 @@ void initLLVM(void *Unused) {
 //
 // This must only be called from getAOTMod() for correct synchronisation.
 void loadAOTMod(struct BitcodeSection *Bitcode) {
-  auto Sf = StringRef((const char *)Bitcode->data, Bitcode->len);
-  auto Mb = MemoryBufferRef(Sf, "");
+  auto Mb = MemoryBufferRef(Bitcode->asStringRef(), "");
   SMDiagnostic Error;
   ThreadSafeContext AOTCtx = std::make_unique<LLVMContext>();
   auto M = parseIR(Mb, Error, *AOTCtx.getContext());
