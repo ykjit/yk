@@ -394,10 +394,8 @@ impl MT {
                             mt.stats.trace_compiled_ok();
                         }
                         Err(_) => {
-                            // FIXME: Immediately marking a location as `DontTrace` is too brutal.
-                            // See: https://github.com/ykjit/yk/issues/612
                             mt.stats.trace_compiled_err();
-                            hl_arc.lock().kind = HotLocationKind::DontTrace;
+                            hl_arc.lock().trace_failed(&mt);
                             // FIXME: Improve jit-state message.
                             // See: https://github.com/ykjit/yk/issues/611
                             #[cfg(feature = "yk_jitstate_debug")]
@@ -406,10 +404,8 @@ impl MT {
                     };
                 }
                 Err(_) => {
-                    // FIXME: Immediately marking a location as `DontTrace` is too brutal.
-                    // See: https://github.com/ykjit/yk/issues/612
-                    hl_arc.lock().kind = HotLocationKind::DontTrace;
                     mt.stats.trace_compiled_err();
+                    hl_arc.lock().trace_failed(&mt);
                     #[cfg(feature = "yk_jitstate_debug")]
                     print_jit_state("trace-compilation-aborted");
                 }

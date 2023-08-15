@@ -238,7 +238,6 @@ pub(crate) enum HotLocationKind {
     SideTracing(Arc<CompiledTrace>),
 }
 
-
 /// When a [HotLocation] has failed to compile a valid trace, should the [HotLocation] be tried
 /// again or not?
 pub(crate) enum TraceFailed {
