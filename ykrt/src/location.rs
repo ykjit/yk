@@ -10,7 +10,7 @@ use std::{
 };
 
 use crate::{
-    mt::{HotThreshold, TraceFailureThreshold},
+    mt::{HotThreshold, TraceFailureThreshold, MT},
     trace::CompiledTrace,
 };
 use parking_lot::Mutex;
@@ -204,6 +204,21 @@ pub(crate) struct HotLocation {
     pub(crate) trace_failure: TraceFailureThreshold,
 }
 
+impl HotLocation {
+    /// Mark a trace starting at this `HotLocation` as having failed. The return value indicates
+    /// whether further traces for this location should be generated or not.
+    pub(crate) fn trace_failed(&mut self, mt: &Arc<MT>) -> TraceFailed {
+        if self.trace_failure < mt.trace_failure_threshold() {
+            self.trace_failure += 1;
+            self.kind = HotLocationKind::Tracing;
+            TraceFailed::KeepTrying
+        } else {
+            self.kind = HotLocationKind::DontTrace;
+            TraceFailed::DontTrace
+        }
+    }
+}
+
 /// A `Location`'s non-counting states.
 #[derive(Debug)]
 pub(crate) enum HotLocationKind {
@@ -221,4 +236,12 @@ pub(crate) enum HotLocationKind {
     /// While executing JIT compiled code, a guard failed often enough for us to want to generate a
     /// side trace for this HotLocation.
     SideTracing(Arc<CompiledTrace>),
+}
+
+
+/// When a [HotLocation] has failed to compile a valid trace, should the [HotLocation] be tried
+/// again or not?
+pub(crate) enum TraceFailed {
+    KeepTrying,
+    DontTrace,
 }
