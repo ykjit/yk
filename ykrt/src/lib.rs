@@ -7,6 +7,7 @@
 #![allow(clippy::type_complexity)]
 #![allow(clippy::new_without_default)]
 
+mod compile;
 mod deopt;
 mod frame;
 mod location;
