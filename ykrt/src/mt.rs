@@ -25,7 +25,7 @@ use std::sync::LazyLock;
 #[cfg(feature = "yk_jitstate_debug")]
 use crate::print_jit_state;
 use crate::{
-    location::{HotLocation, HotLocationKind, Location},
+    location::{HotLocation, HotLocationKind, Location, TraceFailed},
     trace::{default_tracer_for_platform, CompiledTrace, ThreadTracer, Tracer, UnmappedTrace},
     ykstats::{TimingState, YkStats},
 };
@@ -70,7 +70,9 @@ pub struct MT {
     /// How many worker threads are currently running. Note that this may temporarily be `>`
     /// [`max_worker_threads`].
     active_worker_threads: AtomicUsize,
-    tracer: Arc<dyn Tracer>,
+    /// The [Tracer] that should be used for creating future traces. Note that this might not be
+    /// the same as the tracer(s) used to create past traces.
+    tracer: Mutex<Arc<dyn Tracer>>,
     pub(crate) stats: YkStats,
 }
 
@@ -86,7 +88,7 @@ impl MT {
             job_queue: Arc::new((Condvar::new(), Mutex::new(VecDeque::new()))),
             max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
             active_worker_threads: AtomicUsize::new(0),
-            tracer: default_tracer_for_platform()?,
+            tracer: Mutex::new(default_tracer_for_platform()?),
             stats: YkStats::new(),
         }))
     }
@@ -196,7 +198,10 @@ impl MT {
             TransitionLocation::StartTracing => {
                 #[cfg(feature = "yk_jitstate_debug")]
                 print_jit_state("start-tracing");
-                let tracer = Arc::clone(&self.tracer);
+                let tracer = {
+                    let lk = self.tracer.lock();
+                    Arc::clone(&*lk)
+                };
                 match Arc::clone(&tracer).start_collector() {
                     Ok(tt) => THREAD_MTTHREAD.with(|mtt| {
                         promote::thread_record_enable(true);
@@ -294,17 +299,12 @@ impl MT {
                                 if Arc::strong_count(&hl) == 2 {
                                     // Another thread was tracing this location but it's terminated.
                                     self.stats.trace_collected_err();
-                                    if lk.trace_failure < self.trace_failure_threshold() {
-                                        // Let's try tracing the location again in this thread.
-                                        lk.trace_failure += 1;
-                                        lk.kind = HotLocationKind::Tracing;
-                                        *thread_hl_out = Some(hl);
-                                        TransitionLocation::StartTracing
-                                    } else {
-                                        // This location has failed too many times: don't try tracing it
-                                        // again.
-                                        lk.kind = HotLocationKind::DontTrace;
-                                        TransitionLocation::NoAction
+                                    match lk.trace_failed(self) {
+                                        TraceFailed::KeepTrying => {
+                                            *thread_hl_out = Some(hl);
+                                            TransitionLocation::StartTracing
+                                        }
+                                        TraceFailed::DontTrace => TransitionLocation::NoAction,
                                     }
                                 } else {
                                     // Another thread is tracing this location.
@@ -394,10 +394,8 @@ impl MT {
                             mt.stats.trace_compiled_ok();
                         }
                         Err(_) => {
-                            // FIXME: Immediately marking a location as `DontTrace` is too brutal.
-                            // See: https://github.com/ykjit/yk/issues/612
                             mt.stats.trace_compiled_err();
-                            hl_arc.lock().kind = HotLocationKind::DontTrace;
+                            hl_arc.lock().trace_failed(&mt);
                             // FIXME: Improve jit-state message.
                             // See: https://github.com/ykjit/yk/issues/611
                             #[cfg(feature = "yk_jitstate_debug")]
@@ -406,10 +404,8 @@ impl MT {
                     };
                 }
                 Err(_) => {
-                    // FIXME: Immediately marking a location as `DontTrace` is too brutal.
-                    // See: https://github.com/ykjit/yk/issues/612
-                    hl_arc.lock().kind = HotLocationKind::DontTrace;
                     mt.stats.trace_compiled_err();
+                    hl_arc.lock().trace_failed(&mt);
                     #[cfg(feature = "yk_jitstate_debug")]
                     print_jit_state("trace-compilation-aborted");
                 }
