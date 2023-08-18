@@ -25,6 +25,7 @@ use std::sync::LazyLock;
 #[cfg(feature = "yk_jitstate_debug")]
 use crate::print_jit_state;
 use crate::{
+    compile::{default_compiler, Compiler},
     location::{HotLocation, HotLocationKind, Location, TraceFailed},
     trace::{default_tracer_for_platform, CompiledTrace, ThreadTracer, Tracer, UnmappedTrace},
     ykstats::{TimingState, YkStats},
@@ -73,6 +74,9 @@ pub struct MT {
     /// The [Tracer] that should be used for creating future traces. Note that this might not be
     /// the same as the tracer(s) used to create past traces.
     tracer: Mutex<Arc<dyn Tracer>>,
+    /// The [Compiler] that will be used for compiling future mapped traces. Note that this might
+    /// not be the same as the compiler(s) used to compile past traces.
+    compiler: Mutex<Arc<dyn Compiler>>,
     pub(crate) stats: YkStats,
 }
 
@@ -89,6 +93,7 @@ impl MT {
             max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
             active_worker_threads: AtomicUsize::new(0),
             tracer: Mutex::new(default_tracer_for_platform()?),
+            compiler: Mutex::new(default_compiler()?),
             stats: YkStats::new(),
         }))
     }
@@ -386,7 +391,11 @@ impl MT {
             match utrace.map(tracer) {
                 Ok(irtrace) => {
                     mt.stats.timing_state(TimingState::Compiling);
-                    match irtrace.compile() {
+                    let compiler = {
+                        let lk = mt.compiler.lock();
+                        Arc::clone(&*lk)
+                    };
+                    match compiler.compile(irtrace) {
                         Ok((codeptr, di_tmpfile)) => {
                             hl_arc.lock().kind = HotLocationKind::Compiled(Arc::new(
                                 CompiledTrace::new(Arc::clone(&mt), codeptr, di_tmpfile),

@@ -19,6 +19,7 @@ use std::{
 pub mod hwt;
 use tempfile::NamedTempFile;
 use yksmp::{LiveVar, StackMapParser};
+#[cfg(not(test))]
 use ykutil::obj::llvmbc_section;
 
 use crate::mt::MT;
@@ -161,6 +162,15 @@ impl IRTrace {
         (di_tmp, di_fd, di_tmpname_c)
     }
 
+    #[cfg(test)]
+    pub fn compile(&self) -> Result<(*const c_void, Option<NamedTempFile>), Box<dyn Error>> {
+        // llvmbc_section is only defined when ykllvm is used to compile code: rustc doesn't use
+        // ykllvm, so in testing mode we end up getting a linking error with the "main" `compile`
+        // method just below this one. Simply stubbing out `compile` is a horrible hack.
+        panic!("This code cannot be compiled in test mode because it uses llvmbc_section");
+    }
+
+    #[cfg(not(test))]
     pub fn compile(&self) -> Result<(*const c_void, Option<NamedTempFile>), Box<dyn Error>> {
         let (func_names, bbs, trace_len) = self.encode_trace();
 
