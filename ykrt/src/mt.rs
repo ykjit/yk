@@ -25,9 +25,9 @@ use std::sync::LazyLock;
 #[cfg(feature = "yk_jitstate_debug")]
 use crate::print_jit_state;
 use crate::{
-    compile::{default_compiler, Compiler},
+    compile::{default_compiler, CompiledTrace, Compiler},
     location::{HotLocation, HotLocationKind, Location, TraceFailed},
-    trace::{default_tracer_for_platform, CompiledTrace, ThreadTracer, Tracer, UnmappedTrace},
+    trace::{default_tracer_for_platform, ThreadTracer, Tracer, UnmappedTrace},
     ykstats::{TimingState, YkStats},
 };
 use yktracec::promote;
@@ -74,8 +74,8 @@ pub struct MT {
     /// The [Tracer] that should be used for creating future traces. Note that this might not be
     /// the same as the tracer(s) used to create past traces.
     tracer: Mutex<Arc<dyn Tracer>>,
-    /// The [Compiler] that will be used for compiling future mapped traces. Note that this might
-    /// not be the same as the compiler(s) used to compile past traces.
+    /// The [Compiler] that will be used for compiling future `IRTrace`s. Note that this might not
+    /// be the same as the compiler(s) used to compile past `IRTrace`s.
     compiler: Mutex<Arc<dyn Compiler>>,
     pub(crate) stats: YkStats,
 }
@@ -390,11 +390,12 @@ impl MT {
             mt.stats.timing_state(TimingState::TraceMapping);
             match utrace.map(tracer) {
                 Ok(irtrace) => {
-                    mt.stats.timing_state(TimingState::Compiling);
+                    mt.stats.timing_state(TimingState::None);
                     let compiler = {
                         let lk = mt.compiler.lock();
                         Arc::clone(&*lk)
                     };
+                    mt.stats.timing_state(TimingState::Compiling);
                     match compiler.compile(irtrace) {
                         Ok((codeptr, di_tmpfile)) => {
                             hl_arc.lock().kind = HotLocationKind::Compiled(Arc::new(

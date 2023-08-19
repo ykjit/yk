@@ -131,25 +131,3 @@ pub static SELF_BIN_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
     let info = dladdr(addr as usize).unwrap(); // ptr to usize cast always safe.
     PathBuf::from(info.dli_fname().unwrap().to_str().unwrap())
 });
-
-/// The `llvm.embedded.module` symbol in the `.llvmbc` section.
-#[repr(C)]
-struct EmbeddedModule {
-    /// The length of the bitcode.
-    len: u64,
-    /// The start of the bitcode itself.
-    first_byte_of_bitcode: u8,
-}
-
-// ykllvm adds the `SHF_ALLOC` flag to the `.llvmbc` section so that the loader puts it into our
-// address space at load time.
-extern "C" {
-    #[link_name = "llvm.embedded.module"]
-    static LLVMBC: EmbeddedModule;
-}
-
-/// Returns a pointer to (and the size of) the raw LLVM bitcode in the current address space.
-pub fn llvmbc_section() -> (*const u8, u64) {
-    let bc = unsafe { &LLVMBC };
-    (&bc.first_byte_of_bitcode as *const u8, bc.len)
-}

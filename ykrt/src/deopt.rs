@@ -4,7 +4,7 @@
 use crate::frame::{BitcodeSection, FrameReconstructor, __yktracec_get_aot_module};
 #[cfg(feature = "yk_jitstate_debug")]
 use crate::print_jit_state;
-use crate::{trace::CompiledTrace, ykstats::TimingState};
+use crate::{compile::CompiledTrace, ykstats::TimingState};
 use llvm_sys::orc2::LLVMOrcThreadSafeModuleWithModuleDo;
 use llvm_sys::{
     error::{LLVMCreateStringError, LLVMErrorRef},
@@ -294,7 +294,7 @@ unsafe extern "C" fn __ykrt_deopt(
 
     let infoptr = Box::into_raw(Box::new(&mut info));
 
-    let (data, len) = ykutil::obj::llvmbc_section();
+    let (data, len) = crate::compile::jitc_llvm::llvmbc_section();
     let moduleref = __yktracec_get_aot_module(&BitcodeSection { data, len });
 
     // The LLVM CAPI doesn't allow us to manually lock/unlock a ThreadSafeModule, and uses a

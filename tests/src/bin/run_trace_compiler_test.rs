@@ -4,7 +4,10 @@
 //! `trace_compiler` directory of this crate.
 
 use std::{collections::HashMap, convert::TryInto, env, error::Error, ffi::CString, fs::File};
-use ykrt::trace::{IRBlock, IRTrace};
+use ykrt::{
+    compile::default_compiler,
+    trace::{IRBlock, IRTrace},
+};
 
 const BBS_ENV: &str = "YKT_TRACE_BBS";
 
@@ -35,7 +38,7 @@ fn main() -> Result<(), String> {
             BBS_ENV
         ));
     }
-    let trace = IRTrace::new(bbs, HashMap::new());
+    let irtrace = IRTrace::new(bbs, HashMap::new());
 
     // Map the `.ll` file into the address space so that we can give a pointer to it to the trace
     // compiler. Normally (i.e. outside of testing), the trace compiler wouldn't deal with textual
@@ -44,7 +47,10 @@ fn main() -> Result<(), String> {
     let ll_file = File::open(ll_path).unwrap();
     let mmap = unsafe { memmap2::Mmap::map(&ll_file).unwrap() };
 
-    unsafe { trace.compile_for_tc_tests(mmap.as_ptr(), mmap.len().try_into().unwrap()) };
+    let compiler = default_compiler().unwrap();
+    unsafe {
+        compiler.compile_for_tc_tests(irtrace, mmap.as_ptr(), mmap.len().try_into().unwrap())
+    };
 
     Ok(())
 }

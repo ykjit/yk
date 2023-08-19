@@ -1,7 +1,6 @@
 // Exporting parts of the LLVM C++ API not present in the LLVM C API.
 
 #![allow(clippy::new_without_default)]
-#![feature(local_key_cell_methods)]
 #![feature(c_variadic)]
 
 // FIXME: C++ exceptions may unwind over the Rust FFI?

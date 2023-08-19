@@ -10,8 +10,8 @@ use std::{
 };
 
 use crate::{
+    compile::CompiledTrace,
     mt::{HotThreshold, TraceFailureThreshold, MT},
-    trace::CompiledTrace,
 };
 use parking_lot::Mutex;
 
