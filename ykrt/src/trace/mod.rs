@@ -14,6 +14,8 @@ use std::{
     ffi::{CStr, CString},
     sync::Arc,
 };
+
+#[cfg(tracer_hwt)]
 pub mod hwt;
 
 pub use errors::InvalidTraceError;
@@ -117,14 +119,20 @@ pub trait Tracer: Send + Sync {
     fn start_collector(self: Arc<Self>) -> Result<Box<dyn ThreadTracer>, Box<dyn Error>>;
 }
 
+pub fn default_tracer_for_platform() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
+    #[cfg(tracer_hwt)]
+    {
+        return Ok(Arc::new(hwt::HWTracer::new()?));
+    }
+
+    #[allow(unreachable_code)]
+    Err("No tracing backend this platform/configuration.".into())
+}
+
 /// Represents a thread which is currently tracing.
 pub trait ThreadTracer {
     /// Stop collecting a trace of the current thread.
     fn stop_collector(self: Box<Self>) -> Result<Box<dyn UnmappedTrace>, InvalidTraceError>;
-}
-
-pub fn default_tracer_for_platform() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
-    Ok(Arc::new(hwt::HWTracer::new()?))
 }
 
 pub trait UnmappedTrace: Send {

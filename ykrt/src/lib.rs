@@ -33,5 +33,5 @@ pub fn print_jit_state(state: &str) {
     }
 }
 
-#[cfg(feature = "yk_testing")]
+#[cfg(all(tracer_hwt, feature = "yk_testing"))]
 mod testing;
