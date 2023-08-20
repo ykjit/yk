@@ -6,6 +6,7 @@ use std::{error::Error, sync::Arc};
 
 pub mod mapper;
 pub use mapper::HWTMapper;
+mod testing;
 
 pub struct HWTracer {
     backend: Arc<dyn hwtracer::Tracer>,

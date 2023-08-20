@@ -32,6 +32,3 @@ pub fn print_jit_state(state: &str) {
         eprintln!("jit-state: {}", state);
     }
 }
-
-#[cfg(all(tracer_hwt, feature = "yk_testing"))]
-mod testing;
