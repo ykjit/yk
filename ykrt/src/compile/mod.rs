@@ -1,4 +1,4 @@
-use crate::{mt::MT, trace::IRTrace};
+use crate::{mt::MT, trace::MappedTrace};
 use libc::c_void;
 use std::{collections::HashMap, error::Error, fmt, slice, sync::Arc};
 use tempfile::NamedTempFile;
@@ -9,16 +9,16 @@ pub(crate) mod jitc_llvm;
 
 /// The trait that every JIT compiler backend must implement.
 pub trait Compiler: Send + Sync {
-    /// Compile an [IRTrace] into machine code.
+    /// Compile an [MappedTrace] into machine code.
     fn compile(
         &self,
-        irtrace: IRTrace,
+        irtrace: MappedTrace,
     ) -> Result<(*const c_void, Option<NamedTempFile>), Box<dyn Error>>;
 
     #[cfg(feature = "yk_testing")]
     unsafe fn compile_for_tc_tests(
         &self,
-        irtrace: IRTrace,
+        irtrace: MappedTrace,
         llvmbc_data: *const u8,
         llvmbc_len: u64,
     );

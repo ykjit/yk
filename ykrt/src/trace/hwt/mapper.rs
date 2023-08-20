@@ -1,6 +1,6 @@
 //! The mapper translates a PT trace into an IR trace.
 
-use crate::trace::IRBlock;
+use crate::trace::TracedAOTBlock;
 use hwtracer::llvm_blockmap::LLVM_BLOCK_MAP;
 use hwtracer::{Block, HWTracerError};
 use libc::c_void;
@@ -62,7 +62,7 @@ impl<'a> HWTMapper {
     /// During codegen LLVM may remove the unconditional jump and simply place bb1 and bb2
     /// consecutively, allowing bb1 to fall-thru to bb2. In the eyes of the PT block decoder, a
     /// fall-thru does not terminate a block, so whereas LLVM sees two blocks, PT sees only one.
-    fn map_block(&mut self, block: &hwtracer::Block) -> Vec<Option<IRBlock>> {
+    fn map_block(&mut self, block: &hwtracer::Block) -> Vec<Option<TracedAOTBlock>> {
         let b_rng = block.vaddr_range();
         if b_rng.is_none() {
             // If the address range of the block isn't known, then it follows that we can't map
@@ -116,7 +116,7 @@ impl<'a> HWTMapper {
                             .insert(sym_name.to_owned(), sio.dli_saddr() as *const c_void);
                     }
                     for bb in ent.value.corr_bbs() {
-                        ret.push(Some(IRBlock::new_mapped(
+                        ret.push(Some(TracedAOTBlock::new_mapped(
                             sym_name.to_owned(),
                             usize::try_from(*bb).unwrap(),
                         )));
@@ -144,8 +144,8 @@ impl<'a> HWTMapper {
     pub fn map_trace(
         &mut self,
         mut trace_iter: &'a mut dyn Iterator<Item = Result<Block, HWTracerError>>,
-    ) -> Result<Vec<IRBlock>, HWTracerError> {
-        let mut ret: Vec<IRBlock> = Vec::new();
+    ) -> Result<Vec<TracedAOTBlock>, HWTracerError> {
+        let mut ret: Vec<TracedAOTBlock> = Vec::new();
 
         for (i, block) in &mut trace_iter.enumerate() {
             if i > crate::mt::DEFAULT_TRACE_TOO_LONG {
@@ -159,7 +159,9 @@ impl<'a> HWTMapper {
                 // also take care to collapse consecutive unmappable blocks into one.
                 if let Some(last) = ret.last_mut() {
                     if !last.is_unmappable() {
-                        ret.push(IRBlock::new_unmappable(block.stack_adjust().unwrap()));
+                        ret.push(TracedAOTBlock::new_unmappable(
+                            block.stack_adjust().unwrap(),
+                        ));
                     } else {
                         // The previous entry in the trace is already and unmappable region. Don't
                         // push, thus collapsing repeated unmappable blocks into one. We do have to

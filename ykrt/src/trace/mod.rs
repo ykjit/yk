@@ -18,9 +18,9 @@ pub mod hwt;
 
 pub use errors::InvalidTraceError;
 
-/// A globally unique block ID for an LLVM IR block.
+/// An AOT LLVM IR block that has been traced at JIT time.
 #[derive(Debug, Eq, PartialEq)]
-pub enum IRBlock {
+pub enum TracedAOTBlock {
     /// A sucessfully mapped block.
     Mapped {
         /// The name of the function containing the block.
@@ -41,7 +41,7 @@ pub enum IRBlock {
     },
 }
 
-impl IRBlock {
+impl TracedAOTBlock {
     pub fn new_mapped(func_name: CString, bb: usize) -> Self {
         Self::Mapped { func_name, bb }
     }
@@ -91,16 +91,16 @@ impl IRBlock {
     }
 }
 
-/// An LLVM IR trace.
-pub struct IRTrace {
+/// A mapped trace of AOT LLVM IR blocks.
+pub struct MappedTrace {
     /// The blocks of the trace.
-    pub(crate) blocks: Vec<IRBlock>,
+    pub(crate) blocks: Vec<TracedAOTBlock>,
     /// Function addresses discovered dynamically via the trace. symbol-name -> address.
     pub(crate) faddrs: HashMap<CString, *const c_void>,
 }
 
-impl IRTrace {
-    pub fn new(blocks: Vec<IRBlock>, faddrs: HashMap<CString, *const c_void>) -> Self {
+impl MappedTrace {
+    pub fn new(blocks: Vec<TracedAOTBlock>, faddrs: HashMap<CString, *const c_void>) -> Self {
         debug_assert!(blocks.len() < usize::MAX);
         Self { blocks, faddrs }
     }
@@ -128,5 +128,5 @@ pub fn default_tracer_for_platform() -> Result<Arc<dyn Tracer>, Box<dyn Error>> 
 }
 
 pub trait UnmappedTrace: Send {
-    fn map(self: Box<Self>, tracer: Arc<dyn Tracer>) -> Result<IRTrace, InvalidTraceError>;
+    fn map(self: Box<Self>, tracer: Arc<dyn Tracer>) -> Result<MappedTrace, InvalidTraceError>;
 }
