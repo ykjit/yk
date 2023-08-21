@@ -10,19 +10,12 @@ use libc::c_void;
 use std::os::unix::io::AsRawFd;
 use std::{
     collections::HashMap,
-    env,
     error::Error,
-    ffi::{c_char, c_int, CStr, CString},
-    fmt, ptr,
+    ffi::{CStr, CString},
     sync::Arc,
 };
 pub mod hwt;
-use tempfile::NamedTempFile;
-use yksmp::{LiveVar, StackMapParser};
-#[cfg(not(test))]
-use ykutil::obj::llvmbc_section;
 
-use crate::mt::MT;
 pub use errors::InvalidTraceError;
 
 /// A globally unique block ID for an LLVM IR block.
@@ -101,9 +94,9 @@ impl IRBlock {
 /// An LLVM IR trace.
 pub struct IRTrace {
     /// The blocks of the trace.
-    blocks: Vec<IRBlock>,
+    pub(crate) blocks: Vec<IRBlock>,
     /// Function addresses discovered dynamically via the trace. symbol-name -> address.
-    faddrs: HashMap<CString, *const c_void>,
+    pub(crate) faddrs: HashMap<CString, *const c_void>,
 }
 
 impl IRTrace {
@@ -114,227 +107,6 @@ impl IRTrace {
 
     pub fn len(&self) -> usize {
         self.blocks.len()
-    }
-
-    fn encode_trace(&self) -> (Vec<*const i8>, Vec<usize>, usize) {
-        let trace_len = self.len();
-        let mut func_names = Vec::with_capacity(trace_len);
-        let mut bbs = Vec::with_capacity(trace_len);
-        for blk in &self.blocks {
-            if blk.is_unmappable() {
-                // The block was unmappable. Indicate this with a null function name and the block
-                // index encodes the stack adjustment value.
-                func_names.push(ptr::null());
-                // Subtle cast from `isize` to `usize`. `as` is used deliberately here to preserve
-                // the exact bit pattern. The consumer on the other side of the FFI knows to
-                // reverse this.
-                bbs.push(blk.stack_adjust() as usize);
-            } else {
-                func_names.push(blk.func_name().as_ptr());
-                bbs.push(blk.bb());
-            }
-        }
-        (func_names, bbs, trace_len)
-    }
-
-    // If necessary, create a temporary file for us to write the trace's debugging "source code"
-    // into. Elsewhere, the JIT module will have `DebugLoc`s inserted into it which will point to
-    // lines in this temporary file.
-    //
-    // If the `YKD_TRACE_DEBUGINFO` environment variable is set to "1", then this function returns
-    // a `NamedTempFile`, a non-negative file descriptor, and a path to the file.
-    //
-    // If the `YKD_TRACE_DEBUGINFO` environment variable is *not* set to "1", then no file is
-    // created and this function returns `(None, -1, ptr::null())`.
-    #[cfg(unix)]
-    fn create_debuginfo_temp_file() -> (Option<NamedTempFile>, c_int, *const c_char) {
-        let mut di_tmp = None;
-        let mut di_fd = -1;
-        let mut di_tmpname_c = ptr::null() as *const c_char;
-        if let Ok(di_val) = env::var("YKD_TRACE_DEBUGINFO") {
-            if di_val == "1" {
-                let tmp = NamedTempFile::new().unwrap();
-                di_tmpname_c = tmp.path().to_str().unwrap().as_ptr() as *const c_char;
-                di_fd = tmp.as_raw_fd();
-                di_tmp = Some(tmp);
-            }
-        }
-        (di_tmp, di_fd, di_tmpname_c)
-    }
-
-    #[cfg(test)]
-    pub fn compile(&self) -> Result<(*const c_void, Option<NamedTempFile>), Box<dyn Error>> {
-        // llvmbc_section is only defined when ykllvm is used to compile code: rustc doesn't use
-        // ykllvm, so in testing mode we end up getting a linking error with the "main" `compile`
-        // method just below this one. Simply stubbing out `compile` is a horrible hack.
-        panic!("This code cannot be compiled in test mode because it uses llvmbc_section");
-    }
-
-    #[cfg(not(test))]
-    pub fn compile(&self) -> Result<(*const c_void, Option<NamedTempFile>), Box<dyn Error>> {
-        let (func_names, bbs, trace_len) = self.encode_trace();
-
-        let mut faddr_keys = Vec::new();
-        let mut faddr_vals = Vec::new();
-        for k in self.faddrs.iter() {
-            faddr_keys.push(k.0.as_ptr());
-            faddr_vals.push(*k.1);
-        }
-
-        let (llvmbc_data, llvmbc_len) = llvmbc_section();
-        let (di_tmp, di_fd, di_tmpname_c) = Self::create_debuginfo_temp_file();
-
-        let ret = unsafe {
-            yktracec::__yktracec_irtrace_compile(
-                func_names.as_ptr(),
-                bbs.as_ptr(),
-                trace_len,
-                faddr_keys.as_ptr(),
-                faddr_vals.as_ptr(),
-                faddr_keys.len(),
-                llvmbc_data,
-                llvmbc_len,
-                di_fd,
-                di_tmpname_c,
-            )
-        };
-        if ret.is_null() {
-            Err("Could not compile trace.".into())
-        } else {
-            Ok((ret, di_tmp))
-        }
-    }
-
-    #[cfg(feature = "yk_testing")]
-    pub unsafe fn compile_for_tc_tests(&self, llvmbc_data: *const u8, llvmbc_len: u64) {
-        let (func_names, bbs, trace_len) = self.encode_trace();
-        let (_di_tmp, di_fd, di_tmpname_c) = Self::create_debuginfo_temp_file();
-
-        // These would only need to be populated if we were to load the resulting compiled code
-        // into the address space, which for trace compiler tests, we don't.
-        let faddr_keys = Vec::new();
-        let faddr_vals = Vec::new();
-
-        let ret = yktracec::__yktracec_irtrace_compile_for_tc_tests(
-            func_names.as_ptr(),
-            bbs.as_ptr(),
-            trace_len,
-            faddr_keys.as_ptr(),
-            faddr_vals.as_ptr(),
-            faddr_keys.len(),
-            llvmbc_data,
-            llvmbc_len,
-            di_fd,
-            di_tmpname_c,
-        );
-        assert_ne!(ret, ptr::null());
-    }
-}
-
-struct SendSyncConstPtr<T>(*const T);
-unsafe impl<T> Send for SendSyncConstPtr<T> {}
-unsafe impl<T> Sync for SendSyncConstPtr<T> {}
-
-struct Guard {
-    failed: u32,
-    code: Option<SendSyncConstPtr<c_void>>,
-}
-
-/// A trace compiled into machine code. Note that these are passed around as raw pointers and
-/// potentially referenced by multiple threads so, once created, instances of this struct can only
-/// be updated if a lock is held or a field is atomic.
-pub struct CompiledTrace {
-    pub mt: Arc<MT>,
-    /// A function which when called, executes the compiled trace.
-    ///
-    /// The argument to the function is a pointer to a struct containing the live variables at the
-    /// control point. The exact definition of this struct is not known to Rust: the struct is
-    /// generated at interpreter compile-time by ykllvm.
-    entry: SendSyncConstPtr<c_void>,
-    /// Parsed stackmap of this trace. We only need to read this once, and can then use it to
-    /// lookup stackmap information for each guard failure as needed.
-    pub smap: HashMap<u64, Vec<LiveVar>>,
-    /// Pointer to heap allocated live AOT values.
-    aotvals: SendSyncConstPtr<c_void>,
-    /// List of guards containing hotness counts or compiled side traces.
-    guards: Vec<Option<Guard>>,
-    /// If requested, a temporary file containing the "source code" for the trace, to be shown in
-    /// debuggers when stepping over the JITted code.
-    ///
-    /// (rustc incorrectly identifies this field as dead code. Although it isn't being "used", the
-    /// act of storing it is preventing the deletion of the file via its `Drop`)
-    #[allow(dead_code)]
-    di_tmpfile: Option<NamedTempFile>,
-}
-
-use std::slice;
-impl CompiledTrace {
-    /// Create a `CompiledTrace` from a pointer to an array containing: the pointer to the compiled
-    /// trace, the pointer to the stackmap and the size of the stackmap, and the pointer to the
-    /// live AOT values.
-    pub fn new(mt: Arc<MT>, data: *const c_void, di_tmpfile: Option<NamedTempFile>) -> Self {
-        let slice = unsafe { slice::from_raw_parts(data as *const usize, 5) };
-        let funcptr = slice[0] as *const c_void;
-        let smptr = slice[1] as *const c_void;
-        let smsize = slice[2];
-        let aotvals = slice[3] as *mut c_void;
-        let guardcount = slice[4] as usize;
-
-        // Parse the stackmap of this trace and cache it. The original data allocated by memman.cc
-        // is now no longer needed and can be freed.
-        let smslice = unsafe { slice::from_raw_parts(smptr as *mut u8, smsize) };
-        let smap = StackMapParser::parse(smslice).unwrap();
-        unsafe { libc::munmap(smptr as *mut c_void, smsize) };
-
-        // We heap allocated this array in yktracec to pass the data here. Now that we've
-        // extracted it we no longer need to keep the array around.
-        unsafe { libc::free(data as *mut c_void) };
-        Self {
-            mt,
-            entry: SendSyncConstPtr(funcptr),
-            smap,
-            aotvals: SendSyncConstPtr(aotvals),
-            di_tmpfile,
-            guards: Vec::with_capacity(guardcount),
-        }
-    }
-
-    #[cfg(any(test, feature = "yk_testing"))]
-    #[doc(hidden)]
-    /// Create a `CompiledTrace` with null contents. This is unsafe and only intended for testing
-    /// purposes where a `CompiledTrace` instance is required, but cannot sensibly be constructed
-    /// without overwhelming the test. The resulting instance must not be inspected or executed.
-    pub unsafe fn new_null(mt: Arc<MT>) -> Self {
-        Self {
-            mt,
-            entry: SendSyncConstPtr(std::ptr::null()),
-            smap: HashMap::new(),
-            aotvals: SendSyncConstPtr(std::ptr::null()),
-            di_tmpfile: None,
-            guards: Vec::new(),
-        }
-    }
-
-    pub fn aotvals(&self) -> *const c_void {
-        self.aotvals.0
-    }
-
-    pub fn entry(&self) -> *const c_void {
-        self.entry.0
-    }
-}
-
-impl Drop for CompiledTrace {
-    fn drop(&mut self) {
-        // The memory holding the AOT live values needs to live as long as the trace. Now that we
-        // no longer need the trace, this can be freed too.
-        unsafe { libc::free(self.aotvals.0 as *mut c_void) };
-    }
-}
-
-impl fmt::Debug for CompiledTrace {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "CompiledTrace {{ ... }}")
     }
 }
 

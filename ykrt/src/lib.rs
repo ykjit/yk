@@ -2,12 +2,13 @@
 
 #![cfg_attr(test, feature(test))]
 #![feature(lazy_cell)]
+#![feature(link_llvm_intrinsics)]
 #![feature(local_key_cell_methods)]
 #![feature(naked_functions)]
 #![allow(clippy::type_complexity)]
 #![allow(clippy::new_without_default)]
 
-mod compile;
+pub mod compile;
 mod deopt;
 mod frame;
 mod location;
