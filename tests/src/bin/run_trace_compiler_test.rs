@@ -6,7 +6,7 @@
 use std::{collections::HashMap, convert::TryInto, env, error::Error, ffi::CString, fs::File};
 use ykrt::{
     compile::default_compiler,
-    trace::{IRBlock, IRTrace},
+    trace::{MappedTrace, TracedAOTBlock},
 };
 
 const BBS_ENV: &str = "YKT_TRACE_BBS";
@@ -27,7 +27,7 @@ fn main() -> Result<(), String> {
     if let Ok(tbbs) = env::var(BBS_ENV) {
         for bb in tbbs.split(',') {
             if let Ok((func, bb_idx)) = parse_bb(bb) {
-                bbs.push(IRBlock::new_mapped(func, bb_idx));
+                bbs.push(TracedAOTBlock::new_mapped(func, bb_idx));
             } else {
                 return Err(format!("{} is malformed", BBS_ENV));
             }
@@ -38,7 +38,7 @@ fn main() -> Result<(), String> {
             BBS_ENV
         ));
     }
-    let irtrace = IRTrace::new(bbs, HashMap::new());
+    let irtrace = MappedTrace::new(bbs, HashMap::new());
 
     // Map the `.ll` file into the address space so that we can give a pointer to it to the trace
     // compiler. Normally (i.e. outside of testing), the trace compiler wouldn't deal with textual

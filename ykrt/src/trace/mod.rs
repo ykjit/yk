@@ -14,13 +14,15 @@ use std::{
     ffi::{CStr, CString},
     sync::Arc,
 };
+
+#[cfg(tracer_hwt)]
 pub mod hwt;
 
 pub use errors::InvalidTraceError;
 
-/// A globally unique block ID for an LLVM IR block.
+/// An AOT LLVM IR block that has been traced at JIT time.
 #[derive(Debug, Eq, PartialEq)]
-pub enum IRBlock {
+pub enum TracedAOTBlock {
     /// A sucessfully mapped block.
     Mapped {
         /// The name of the function containing the block.
@@ -41,7 +43,7 @@ pub enum IRBlock {
     },
 }
 
-impl IRBlock {
+impl TracedAOTBlock {
     pub fn new_mapped(func_name: CString, bb: usize) -> Self {
         Self::Mapped { func_name, bb }
     }
@@ -91,16 +93,16 @@ impl IRBlock {
     }
 }
 
-/// An LLVM IR trace.
-pub struct IRTrace {
+/// A mapped trace of AOT LLVM IR blocks.
+pub struct MappedTrace {
     /// The blocks of the trace.
-    pub(crate) blocks: Vec<IRBlock>,
+    pub(crate) blocks: Vec<TracedAOTBlock>,
     /// Function addresses discovered dynamically via the trace. symbol-name -> address.
     pub(crate) faddrs: HashMap<CString, *const c_void>,
 }
 
-impl IRTrace {
-    pub fn new(blocks: Vec<IRBlock>, faddrs: HashMap<CString, *const c_void>) -> Self {
+impl MappedTrace {
+    pub fn new(blocks: Vec<TracedAOTBlock>, faddrs: HashMap<CString, *const c_void>) -> Self {
         debug_assert!(blocks.len() < usize::MAX);
         Self { blocks, faddrs }
     }
@@ -117,16 +119,25 @@ pub trait Tracer: Send + Sync {
     fn start_collector(self: Arc<Self>) -> Result<Box<dyn ThreadTracer>, Box<dyn Error>>;
 }
 
+/// Return a [Tracer] instance or `Err` if none can be found. The [Tracer] returned will be
+/// selected on a combination of what the platform can support and other (possibly run-time) user
+/// configuration.
+pub fn default_tracer() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
+    #[cfg(tracer_hwt)]
+    {
+        return Ok(Arc::new(hwt::HWTracer::new()?));
+    }
+
+    #[allow(unreachable_code)]
+    Err("No tracing backend this platform/configuration.".into())
+}
+
 /// Represents a thread which is currently tracing.
 pub trait ThreadTracer {
     /// Stop collecting a trace of the current thread.
     fn stop_collector(self: Box<Self>) -> Result<Box<dyn UnmappedTrace>, InvalidTraceError>;
 }
 
-pub fn default_tracer_for_platform() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
-    Ok(Arc::new(hwt::HWTracer::new()?))
-}
-
 pub trait UnmappedTrace: Send {
-    fn map(self: Box<Self>, tracer: Arc<dyn Tracer>) -> Result<IRTrace, InvalidTraceError>;
+    fn map(self: Box<Self>, tracer: Arc<dyn Tracer>) -> Result<MappedTrace, InvalidTraceError>;
 }

@@ -1,7 +1,7 @@
-//! An LLVM JIT backend. Currently a minimal wrapper around the fact that [IRTrace]s are hardcoded
+//! An LLVM JIT backend. Currently a minimal wrapper around the fact that [MappedTrace]s are hardcoded
 //! to be compiled with LLVM.
 
-use crate::{compile::Compiler, trace::IRTrace};
+use crate::{compile::Compiler, trace::MappedTrace};
 use libc::{c_void, dlsym};
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
@@ -19,7 +19,7 @@ pub(crate) struct JITCLLVM;
 impl Compiler for JITCLLVM {
     fn compile(
         &self,
-        irtrace: IRTrace,
+        irtrace: MappedTrace,
     ) -> Result<(*const c_void, Option<NamedTempFile>), Box<dyn Error>> {
         let (func_names, bbs, trace_len) = self.encode_trace(&irtrace);
 
@@ -57,7 +57,7 @@ impl Compiler for JITCLLVM {
     #[cfg(feature = "yk_testing")]
     unsafe fn compile_for_tc_tests(
         &self,
-        irtrace: IRTrace,
+        irtrace: MappedTrace,
         llvmbc_data: *const u8,
         llvmbc_len: u64,
     ) {
@@ -90,7 +90,7 @@ impl JITCLLVM {
         Ok(Arc::new(JITCLLVM))
     }
 
-    fn encode_trace(&self, irtrace: &IRTrace) -> (Vec<*const i8>, Vec<usize>, usize) {
+    fn encode_trace(&self, irtrace: &MappedTrace) -> (Vec<*const i8>, Vec<usize>, usize) {
         let trace_len = irtrace.len();
         let mut func_names = Vec::with_capacity(trace_len);
         let mut bbs = Vec::with_capacity(trace_len);
