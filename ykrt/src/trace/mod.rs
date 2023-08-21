@@ -119,7 +119,10 @@ pub trait Tracer: Send + Sync {
     fn start_collector(self: Arc<Self>) -> Result<Box<dyn ThreadTracer>, Box<dyn Error>>;
 }
 
-pub fn default_tracer_for_platform() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
+/// Return a [Tracer] instance or `Err` if none can be found. The [Tracer] returned will be
+/// selected on a combination of what the platform can support and other (possibly run-time) user
+/// configuration.
+pub fn default_tracer() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
     #[cfg(tracer_hwt)]
     {
         return Ok(Arc::new(hwt::HWTracer::new()?));

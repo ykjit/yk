@@ -27,7 +27,7 @@ use crate::print_jit_state;
 use crate::{
     compile::{default_compiler, CompiledTrace, Compiler},
     location::{HotLocation, HotLocationKind, Location, TraceFailed},
-    trace::{default_tracer_for_platform, ThreadTracer, Tracer, UnmappedTrace},
+    trace::{default_tracer, ThreadTracer, Tracer, UnmappedTrace},
     ykstats::{TimingState, YkStats},
 };
 use yktracec::promote;
@@ -92,7 +92,7 @@ impl MT {
             job_queue: Arc::new((Condvar::new(), Mutex::new(VecDeque::new()))),
             max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
             active_worker_threads: AtomicUsize::new(0),
-            tracer: Mutex::new(default_tracer_for_platform()?),
+            tracer: Mutex::new(default_tracer()?),
             compiler: Mutex::new(default_compiler()?),
             stats: YkStats::new(),
         }))
