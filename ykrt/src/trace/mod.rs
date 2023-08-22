@@ -139,5 +139,5 @@ pub trait ThreadTracer {
 }
 
 pub trait UnmappedTrace: Send {
-    fn map(self: Box<Self>, tracer: Arc<dyn Tracer>) -> Result<MappedTrace, InvalidTraceError>;
+    fn map(self: Box<Self>) -> Result<MappedTrace, InvalidTraceError>;
 }

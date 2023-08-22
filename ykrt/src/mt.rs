@@ -210,7 +210,7 @@ impl MT {
                 match Arc::clone(&tracer).start_collector() {
                     Ok(tt) => THREAD_MTTHREAD.with(|mtt| {
                         promote::thread_record_enable(true);
-                        *mtt.thread_tracer.borrow_mut() = Some((tracer, tt));
+                        *mtt.thread_tracer.borrow_mut() = Some(tt);
                     }),
                     Err(e) => todo!("{e:?}"),
                 }
@@ -220,15 +220,14 @@ impl MT {
                 promote::thread_record_enable(false);
                 // Assuming no bugs elsewhere, the `unwrap` cannot fail, because `StartTracing`
                 // will have put a `Some` in the `Rc`.
-                let (trcr, thrdtrcr) =
-                    THREAD_MTTHREAD.with(|mtt| mtt.thread_tracer.take().unwrap());
+                let thrdtrcr = THREAD_MTTHREAD.with(|mtt| mtt.thread_tracer.take().unwrap());
                 match thrdtrcr.stop_collector() {
                     Ok(utrace) => {
                         #[cfg(feature = "yk_jitstate_debug")]
                         print_jit_state("stop-tracing");
                         // FIXME: for side tracing we probably need to queue a different kind of
                         // compile job.
-                        self.queue_compile_job(utrace, hl_arc, trcr);
+                        self.queue_compile_job(utrace, hl_arc);
                     }
                     Err(_) => todo!(),
                 }
@@ -382,13 +381,12 @@ impl MT {
         self: &Arc<Self>,
         utrace: Box<dyn UnmappedTrace>,
         hl_arc: Arc<Mutex<HotLocation>>,
-        tracer: Arc<dyn Tracer>,
     ) {
         self.stats.trace_collected_ok();
         let mt = Arc::clone(self);
         let do_compile = move || {
             mt.stats.timing_state(TimingState::TraceMapping);
-            match utrace.map(tracer) {
+            match utrace.map() {
                 Ok(irtrace) => {
                     mt.stats.timing_state(TimingState::None);
                     let compiler = {
@@ -469,7 +467,7 @@ pub struct MTThread {
     /// When tracing is active, this will be `RefCell<Some(...)>`; when tracing is inactive
     /// `RefCell<None>`. We need to keep track of the [Tracer] used to start the [ThreadTracer], as
     /// trace mapping requires a reference to the [Tracer].
-    thread_tracer: RefCell<Option<(Arc<dyn Tracer>, Box<dyn ThreadTracer>)>>,
+    thread_tracer: RefCell<Option<Box<dyn ThreadTracer>>>,
     // Raw pointers are neither send nor sync.
     _dont_send_or_sync_me: PhantomData<*mut ()>,
 }

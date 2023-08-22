@@ -45,7 +45,7 @@ impl ThreadTracer for HWTThreadTracer {
 struct PTTrace(Box<dyn hwtracer::Trace>);
 
 impl UnmappedTrace for PTTrace {
-    fn map(self: Box<Self>, _tracer: Arc<dyn Tracer>) -> Result<MappedTrace, InvalidTraceError> {
+    fn map(self: Box<Self>) -> Result<MappedTrace, InvalidTraceError> {
         let tdec = TraceDecoderBuilder::new().build().unwrap();
         let mut itr = tdec.iter_blocks(self.0.as_ref());
         let mut mt = HWTMapper::new();
