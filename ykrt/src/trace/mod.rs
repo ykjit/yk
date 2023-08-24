@@ -43,10 +43,10 @@ pub fn default_tracer() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
 /// Represents a thread which is currently tracing.
 pub trait ThreadTracer {
     /// Stop collecting a trace of the current thread.
-    fn stop_collector(self: Box<Self>) -> Result<Box<dyn UnmappedTrace>, InvalidTraceError>;
+    fn stop_collector(self: Box<Self>) -> Result<Box<dyn RawTrace>, InvalidTraceError>;
 }
 
-pub trait UnmappedTrace: Send {
+pub trait RawTrace: Send {
     fn map(self: Box<Self>) -> Result<MappedTrace, InvalidTraceError>;
 }
 

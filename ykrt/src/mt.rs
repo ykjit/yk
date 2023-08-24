@@ -27,7 +27,7 @@ use crate::print_jit_state;
 use crate::{
     compile::{default_compiler, CompiledTrace, Compiler},
     location::{HotLocation, HotLocationKind, Location, TraceFailed},
-    trace::{default_tracer, ThreadTracer, Tracer, UnmappedTrace},
+    trace::{default_tracer, RawTrace, ThreadTracer, Tracer},
     ykstats::{TimingState, YkStats},
 };
 use yktracec::promote;
@@ -379,7 +379,7 @@ impl MT {
     /// Add a compilation job for `utrace` to the global work queue.
     fn queue_compile_job(
         self: &Arc<Self>,
-        utrace: Box<dyn UnmappedTrace>,
+        utrace: Box<dyn RawTrace>,
         hl_arc: Arc<Mutex<HotLocation>>,
     ) {
         self.stats.trace_collected_ok();
