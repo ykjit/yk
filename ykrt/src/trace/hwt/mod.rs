@@ -1,6 +1,6 @@
 //! Hardware tracing via ykrustc.
 
-use super::{errors::InvalidTraceError, MappedTrace, ThreadTracer, Tracer, UnmappedTrace};
+use super::{errors::InvalidTraceError, MappedTrace, RawTrace, ThreadTracer, Tracer};
 use hwtracer::decode::TraceDecoderBuilder;
 use std::{error::Error, sync::Arc};
 
@@ -34,7 +34,7 @@ struct HWTThreadTracer {
 }
 
 impl ThreadTracer for HWTThreadTracer {
-    fn stop_collector(self: Box<Self>) -> Result<Box<dyn UnmappedTrace>, InvalidTraceError> {
+    fn stop_collector(self: Box<Self>) -> Result<Box<dyn RawTrace>, InvalidTraceError> {
         match self.thread_tracer.stop_collector() {
             Ok(t) => Ok(Box::new(PTTrace(t))),
             Err(e) => todo!("{e:?}"),
@@ -44,7 +44,7 @@ impl ThreadTracer for HWTThreadTracer {
 
 struct PTTrace(Box<dyn hwtracer::Trace>);
 
-impl UnmappedTrace for PTTrace {
+impl RawTrace for PTTrace {
     fn map(self: Box<Self>) -> Result<MappedTrace, InvalidTraceError> {
         let tdec = TraceDecoderBuilder::new().build().unwrap();
         let mut itr = tdec.iter_blocks(self.0.as_ref());
