@@ -10,7 +10,7 @@ libc = "0.2.80"
 strum = { version = "0.24.1", features = ["derive", "strum_macros"] }
 strum_macros = "0.24.3"
 deku = "0.16"
-ykutil = { path = "../ykutil" }
+ykaddr = { path = "../ykaddr" }
 intervaltree = "0.2.7"
 byteorder = "1.4.3"
 leb128 = "0.2.5"
