@@ -56,7 +56,7 @@ use std::{
     ptr, slice,
     sync::LazyLock,
 };
-use ykutil::{
+use ykaddr::{
     self,
     obj::{PHDR_MAIN_OBJ, PHDR_OBJECT_CACHE, SELF_BIN_PATH},
 };
@@ -263,7 +263,7 @@ impl<'t> YkPTBlockIterator<'t> {
 
     /// Convert a file offset to a virtual address.
     fn off_to_vaddr(&self, obj: &Path, off: u64) -> Result<usize, HWTracerError> {
-        match ykutil::addr::off_to_vaddr(obj, off) {
+        match ykaddr::addr::off_to_vaddr(obj, off) {
             Some(vaddr) => Ok(vaddr),
             None => Err(HWTracerError::TraceParseError(
                 "failed to convert an offset to a virtual address".to_owned(),
@@ -273,7 +273,7 @@ impl<'t> YkPTBlockIterator<'t> {
 
     /// Convert a virtual address to a file offset.
     fn vaddr_to_off(&self, vaddr: usize) -> Result<(PathBuf, u64), HWTracerError> {
-        match ykutil::addr::vaddr_to_obj_and_off(vaddr) {
+        match ykaddr::addr::vaddr_to_obj_and_off(vaddr) {
             Some(tup) => Ok(tup),
             None => Err(HWTracerError::TraceParseError(
                 "failed to convert a virtual address to an offset".to_owned(),

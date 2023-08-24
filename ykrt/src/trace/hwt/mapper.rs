@@ -5,7 +5,7 @@ use hwtracer::llvm_blockmap::LLVM_BLOCK_MAP;
 use hwtracer::{Block, HWTracerError};
 use libc::c_void;
 use std::{collections::HashMap, convert::TryFrom, ffi::CString};
-use ykutil::{
+use ykaddr::{
     addr::{vaddr_to_obj_and_off, vaddr_to_sym_and_obj},
     obj::SELF_BIN_PATH,
 };

@@ -2,11 +2,11 @@
 members = [
     "hwtracer",
     "tests",
+    "ykaddr",
     "ykbuild",
     "ykcapi",
     "yktracec",
     "ykrt",
-    "ykutil",
     "yksmp",
     "xtask",
 ]
