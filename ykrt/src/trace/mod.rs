@@ -20,6 +20,55 @@ pub mod hwt;
 
 pub use errors::InvalidTraceError;
 
+/// A tracer is an object which can start / stop collecting traces. It may have its own
+/// configuration, but that is dependent on the concrete tracer itself.
+pub trait Tracer: Send + Sync {
+    /// Start collecting a trace of the current thread.
+    fn start_collector(self: Arc<Self>) -> Result<Box<dyn ThreadTracer>, Box<dyn Error>>;
+}
+
+/// Return a [Tracer] instance or `Err` if none can be found. The [Tracer] returned will be
+/// selected on a combination of what the platform can support and other (possibly run-time) user
+/// configuration.
+pub fn default_tracer() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
+    #[cfg(tracer_hwt)]
+    {
+        return Ok(Arc::new(hwt::HWTracer::new()?));
+    }
+
+    #[allow(unreachable_code)]
+    Err("No tracing backend this platform/configuration.".into())
+}
+
+/// Represents a thread which is currently tracing.
+pub trait ThreadTracer {
+    /// Stop collecting a trace of the current thread.
+    fn stop_collector(self: Box<Self>) -> Result<Box<dyn UnmappedTrace>, InvalidTraceError>;
+}
+
+pub trait UnmappedTrace: Send {
+    fn map(self: Box<Self>) -> Result<MappedTrace, InvalidTraceError>;
+}
+
+/// A mapped trace of AOT LLVM IR blocks.
+pub struct MappedTrace {
+    /// The blocks of the trace.
+    pub(crate) blocks: Vec<TracedAOTBlock>,
+    /// Function addresses discovered dynamically via the trace. symbol-name -> address.
+    pub(crate) faddrs: HashMap<CString, *const c_void>,
+}
+
+impl MappedTrace {
+    pub fn new(blocks: Vec<TracedAOTBlock>, faddrs: HashMap<CString, *const c_void>) -> Self {
+        debug_assert!(blocks.len() < usize::MAX);
+        Self { blocks, faddrs }
+    }
+
+    pub fn len(&self) -> usize {
+        self.blocks.len()
+    }
+}
+
 /// An AOT LLVM IR block that has been traced at JIT time.
 #[derive(Debug, Eq, PartialEq)]
 pub enum TracedAOTBlock {
@@ -91,53 +140,4 @@ impl TracedAOTBlock {
             panic!();
         }
     }
-}
-
-/// A mapped trace of AOT LLVM IR blocks.
-pub struct MappedTrace {
-    /// The blocks of the trace.
-    pub(crate) blocks: Vec<TracedAOTBlock>,
-    /// Function addresses discovered dynamically via the trace. symbol-name -> address.
-    pub(crate) faddrs: HashMap<CString, *const c_void>,
-}
-
-impl MappedTrace {
-    pub fn new(blocks: Vec<TracedAOTBlock>, faddrs: HashMap<CString, *const c_void>) -> Self {
-        debug_assert!(blocks.len() < usize::MAX);
-        Self { blocks, faddrs }
-    }
-
-    pub fn len(&self) -> usize {
-        self.blocks.len()
-    }
-}
-
-/// A tracer is an object which can start / stop collecting traces. It may have its own
-/// configuration, but that is dependent on the concrete tracer itself.
-pub trait Tracer: Send + Sync {
-    /// Start collecting a trace of the current thread.
-    fn start_collector(self: Arc<Self>) -> Result<Box<dyn ThreadTracer>, Box<dyn Error>>;
-}
-
-/// Return a [Tracer] instance or `Err` if none can be found. The [Tracer] returned will be
-/// selected on a combination of what the platform can support and other (possibly run-time) user
-/// configuration.
-pub fn default_tracer() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
-    #[cfg(tracer_hwt)]
-    {
-        return Ok(Arc::new(hwt::HWTracer::new()?));
-    }
-
-    #[allow(unreachable_code)]
-    Err("No tracing backend this platform/configuration.".into())
-}
-
-/// Represents a thread which is currently tracing.
-pub trait ThreadTracer {
-    /// Stop collecting a trace of the current thread.
-    fn stop_collector(self: Box<Self>) -> Result<Box<dyn UnmappedTrace>, InvalidTraceError>;
-}
-
-pub trait UnmappedTrace: Send {
-    fn map(self: Box<Self>) -> Result<MappedTrace, InvalidTraceError>;
 }
