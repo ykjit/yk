@@ -46,6 +46,10 @@ pub trait ThreadTracer {
     fn stop_collector(self: Box<Self>) -> Result<Box<dyn RawTrace>, InvalidTraceError>;
 }
 
+/// A raw trace resulting from a tracer.
+///
+/// Depending on the backend: the raw trace may need considerable processing to convert into basic
+/// block addresses; or it may contain those basic block addresses in an easily digestible fashion.
 pub trait RawTrace: Send {
     fn map(self: Box<Self>) -> Result<MappedTrace, InvalidTraceError>;
 }
