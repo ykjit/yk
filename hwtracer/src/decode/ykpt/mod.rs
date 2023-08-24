@@ -68,18 +68,17 @@ use packet_parser::{
     PacketParser,
 };
 
-pub(crate) struct YkPTTraceDecoder {}
+pub(crate) struct YkPTTraceDecoder {
+    trace: Box<dyn Trace>,
+}
 
 impl TraceDecoder for YkPTTraceDecoder {
-    fn new() -> Self {
-        Self {}
+    fn new(trace: Box<dyn Trace>) -> Self {
+        Self { trace }
     }
 
-    fn iter_blocks<'t>(
-        &'t self,
-        trace: &'t dyn Trace,
-    ) -> Box<dyn Iterator<Item = Result<Block, HWTracerError>> + '_> {
-        Box::new(YkPTBlockIterator::new(trace))
+    fn iter_blocks<'a>(&'a self) -> Box<dyn Iterator<Item = Result<Block, HWTracerError>> + 'a> {
+        Box::new(YkPTBlockIterator::new(&*self.trace))
     }
 }
 

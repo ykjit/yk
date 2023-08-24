@@ -46,12 +46,11 @@ struct PTTrace(Box<dyn hwtracer::Trace>);
 
 impl RawTrace for PTTrace {
     fn map(self: Box<Self>) -> Result<MappedTrace, InvalidTraceError> {
-        let tdec = default_decoder().map_err(|_| InvalidTraceError::InternalError)?;
-        let mut itr = tdec.iter_blocks(self.0.as_ref());
+        let tdec = default_decoder(self.0).map_err(|_| InvalidTraceError::InternalError)?;
         let mut mt = HWTMapper::new();
 
         let mapped = mt
-            .map_trace(&mut *itr)
+            .map_trace(tdec)
             .map_err(|_| InvalidTraceError::InternalError)?;
         if mapped.is_empty() {
             return Err(InvalidTraceError::EmptyTrace);
