@@ -877,15 +877,12 @@ fn is_ret_near(inst: &iced_x86::Instruction) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        collect::default_tracer_for_platform,
-        decode::{test_helpers, TraceDecoderKind},
-    };
+    use crate::{collect::default_tracer_for_platform, decode::test_helpers};
 
     #[ignore] // FIXME
     #[test]
     fn ten_times_as_many_blocks() {
         let tc = default_tracer_for_platform().unwrap();
-        test_helpers::ten_times_as_many_blocks(tc, TraceDecoderKind::YkPT);
+        test_helpers::ten_times_as_many_blocks(tc);
     }
 }
