@@ -13,7 +13,7 @@
 
 use hwtracer::{
     collect::{default_tracer_for_platform, ThreadTracer},
-    decode::{TraceDecoderBuilder, TraceDecoderKind},
+    decode::default_decoder,
     Trace,
 };
 use std::ffi::c_void;
@@ -43,17 +43,10 @@ pub extern "C" fn __hwykpt_stop_collector(tc: *mut Box<dyn ThreadTracer>) -> *mu
 ///
 /// Used for benchmarks.
 #[no_mangle]
-pub extern "C" fn __hwykpt_decode_trace(
-    trace: *mut Box<dyn Trace>,
-    decoder_kind: TraceDecoderKind,
-) {
+pub extern "C" fn __hwykpt_decode_trace(trace: *mut Box<dyn Trace>) {
     let trace: Box<Box<dyn Trace>> = unsafe { Box::from_raw(trace) };
 
-    let ipt_tdec = TraceDecoderBuilder::new()
-        .kind(decoder_kind)
-        .build()
-        .unwrap();
-
+    let ipt_tdec = default_decoder().unwrap();
     for b in ipt_tdec.iter_blocks(&**trace) {
         b.unwrap();
     }

@@ -43,7 +43,7 @@ __attribute__((noinline)) uint64_t disasm(uint64_t iters) {
   return res;
 }
 
-void collect_and_decode(int benchmark, size_t param, int decoder_kind) {
+void collect_and_decode(int benchmark, size_t param) {
   uint64_t res;
 
   void *tc = __hwykpt_start_collector();
@@ -57,17 +57,17 @@ void collect_and_decode(int benchmark, size_t param, int decoder_kind) {
   void *trace = __hwykpt_stop_collector(tc);
   NOOPT_VAL(res);
 
-  __hwykpt_decode_trace(trace, decoder_kind);
+  __hwykpt_decode_trace(trace);
 }
 
 void usage(void) {
-  printf("args: <benchmark> <param> <decoder-kind>\n");
+  printf("args: <benchmark> <param>\n");
   exit(EXIT_FAILURE);
 }
 
 int main(int argc, char **argv) {
-  if (argc != 4)
+  if (argc != 3)
     usage();
 
-  collect_and_decode(atoi(argv[1]), atoi(argv[2]), atoi(argv[3]));
+  collect_and_decode(atoi(argv[1]), atoi(argv[2]));
 }

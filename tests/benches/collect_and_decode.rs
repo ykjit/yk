@@ -4,7 +4,6 @@ use criterion::{
     criterion_group, criterion_main, measurement::Measurement, BenchmarkGroup, BenchmarkId,
     Criterion, SamplingMode,
 };
-use hwtracer::decode::TraceDecoderKind;
 use std::{
     env,
     path::{Path, PathBuf},
@@ -36,16 +35,10 @@ fn compile_runner(tempdir: &TempDir) -> PathBuf {
     exe
 }
 
-fn collect_and_decode_trace(
-    runner: &Path,
-    benchmark: usize,
-    param: usize,
-    decoder_kind: TraceDecoderKind,
-) {
+fn collect_and_decode_trace(runner: &Path, benchmark: usize, param: usize) {
     let out = Command::new(runner)
         .arg(format!("{}", benchmark))
         .arg(format!("{}", param))
-        .arg(format!("{}", decoder_kind as u8))
         .output()
         .unwrap();
     check_output(&out);
@@ -73,7 +66,7 @@ fn bench_native(c: &mut Criterion) {
 
     for param in [1000, 10000, 100000] {
         group.bench_function(BenchmarkId::new("YkPT", format!("{}", param)), |b| {
-            b.iter(|| collect_and_decode_trace(&runner, 0, param, TraceDecoderKind::YkPT))
+            b.iter(|| collect_and_decode_trace(&runner, 0, param))
         });
     }
 }
@@ -85,7 +78,7 @@ fn bench_disasm(c: &mut Criterion) {
 
     for param in [10, 30, 50] {
         group.bench_function(BenchmarkId::new("YkPT", format!("{}", param)), |b| {
-            b.iter(|| collect_and_decode_trace(&runner, 1, param, TraceDecoderKind::YkPT))
+            b.iter(|| collect_and_decode_trace(&runner, 1, param))
         });
     }
 }
