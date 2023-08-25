@@ -1,6 +1,6 @@
 //! The Linux Perf trace collector.
 
-use super::PerfCollectorConfig;
+use crate::perf::PerfCollectorConfig;
 use crate::{
     c_errors::PerfPTCError,
     collect::{ThreadTracer, Tracer},

@@ -40,7 +40,7 @@
 use crate::{
     errors::HWTracerError,
     llvm_blockmap::{BlockMapEntry, SuccessorKind, LLVM_BLOCK_MAP},
-    Block, Trace,
+    Block,
 };
 use iced_x86;
 use intervaltree::IntervalTree;

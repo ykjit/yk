@@ -12,6 +12,8 @@ pub use collect::{default_tracer_for_platform, ThreadTracer, Tracer};
 pub mod decode;
 pub mod errors;
 pub mod llvm_blockmap;
+#[cfg(collector_perf)]
+mod perf;
 
 pub use errors::HWTracerError;
 use std::fmt::Debug;

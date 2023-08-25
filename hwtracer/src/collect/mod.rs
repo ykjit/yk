@@ -2,11 +2,7 @@
 
 use crate::{errors::HWTracerError, Trace};
 use core::arch::x86_64::__cpuid_count;
-use libc::{size_t, sysconf, _SC_PAGESIZE};
-use std::{
-    convert::TryFrom,
-    sync::{Arc, LazyLock},
-};
+use std::sync::Arc;
 
 #[cfg(collector_perf)]
 pub(crate) mod perf;
@@ -14,16 +10,6 @@ pub(crate) mod perf;
 pub use perf::PerfTrace;
 #[cfg(collector_perf)]
 pub(crate) use perf::PerfTracer;
-
-const PERF_DFLT_DATA_BUFSIZE: size_t = 64;
-static PERF_DFLT_AUX_BUFSIZE: LazyLock<size_t> = LazyLock::new(|| {
-    // Allocate enough pages for a 64MiB trace buffer.
-    let mb64 = 1024 * 1024 * 64;
-    let page_sz = size_t::try_from(unsafe { sysconf(_SC_PAGESIZE) }).unwrap();
-    mb64 / page_sz + size_t::from(mb64 % page_sz != 0)
-});
-
-const PERF_DFLT_INITIAL_TRACE_BUFSIZE: size_t = 1024 * 1024; // 1MiB
 
 /// A tracer is an object which can start / stop collecting traces. It may have its own
 /// configuration, but that is dependent on the particular tracing backend.
@@ -39,43 +25,26 @@ pub trait ThreadTracer {
 }
 
 pub fn default_tracer_for_platform() -> Result<Arc<dyn Tracer>, HWTracerError> {
-    if pt_supported() {
-        Ok(PerfTracer::new(PerfCollectorConfig::default())?)
-    } else {
-        Err(HWTracerError::NoHWSupport(
+    #[cfg(collector_perf)]
+    {
+        if pt_supported() {
+            return Ok(PerfTracer::new(crate::perf::PerfCollectorConfig::default())?);
+        }
+        return Err(HWTracerError::NoHWSupport(
             "CPU doesn't support the Processor Trace (PT) feature".to_owned(),
-        ))
+        ));
     }
+
+    #[allow(unreachable_code)]
+    Err(HWTracerError::Custom(
+        "No tracer supported on this platform".into(),
+    ))
 }
 
 /// Checks if the CPU supports Intel Processor Trace.
 fn pt_supported() -> bool {
     let res = unsafe { __cpuid_count(0x7, 0x0) };
     (res.ebx & (1 << 25)) != 0
-}
-
-/// Configures the Perf collector.
-///
-// Must stay in sync with the C code.
-#[derive(Clone, Debug)]
-#[repr(C)]
-pub struct PerfCollectorConfig {
-    /// Data buffer size, in pages. Must be a power of 2.
-    pub data_bufsize: size_t,
-    /// AUX buffer size, in pages. Must be a power of 2.
-    pub aux_bufsize: size_t,
-    /// The initial trace storage buffer size (in bytes) of new traces.
-    pub initial_trace_bufsize: size_t,
-}
-
-impl Default for PerfCollectorConfig {
-    fn default() -> Self {
-        Self {
-            data_bufsize: PERF_DFLT_DATA_BUFSIZE,
-            aux_bufsize: *PERF_DFLT_AUX_BUFSIZE,
-            initial_trace_bufsize: PERF_DFLT_INITIAL_TRACE_BUFSIZE,
-        }
-    }
 }
 
 #[cfg(test)]
