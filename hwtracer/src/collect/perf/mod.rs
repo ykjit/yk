@@ -180,11 +180,6 @@ impl PerfTrace {
 }
 
 impl Trace for PerfTrace {
-    /// Return the length of the trace, in bytes.
-    fn len(&self) -> usize {
-        usize::try_from(self.len).unwrap()
-    }
-
     #[cfg(decoder_ykpt)]
     fn iter_blocks<'a>(&'a self) -> Box<dyn Iterator<Item = Result<Block, HWTracerError>> + 'a> {
         let bytes =
@@ -200,6 +195,11 @@ impl Trace for PerfTrace {
     #[cfg(test)]
     fn capacity(&self) -> usize {
         self.capacity as usize
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        usize::try_from(self.len).unwrap()
     }
 }
 
