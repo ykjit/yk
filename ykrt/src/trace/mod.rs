@@ -6,8 +6,6 @@
 
 mod errors;
 use libc::c_void;
-#[cfg(unix)]
-use std::os::unix::io::AsRawFd;
 use std::{
     collections::HashMap,
     error::Error,

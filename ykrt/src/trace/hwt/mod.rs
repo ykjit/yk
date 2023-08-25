@@ -1,7 +1,6 @@
 //! Hardware tracing via ykrustc.
 
-use super::{errors::InvalidTraceError, MappedTrace, RawTrace, ThreadTracer, Tracer};
-use hwtracer::decode::default_decoder;
+use super::{errors::InvalidTraceError, MappedTrace, RawTrace, ThreadTracer};
 use std::{error::Error, sync::Arc};
 
 pub mod mapper;
@@ -46,11 +45,10 @@ struct PTTrace(Box<dyn hwtracer::Trace>);
 
 impl RawTrace for PTTrace {
     fn map(self: Box<Self>) -> Result<MappedTrace, InvalidTraceError> {
-        let tdec = default_decoder(self.0).map_err(|_| InvalidTraceError::InternalError)?;
         let mut mt = HWTMapper::new();
 
         let mapped = mt
-            .map_trace(tdec)
+            .map_trace(self.0)
             .map_err(|_| InvalidTraceError::InternalError)?;
         if mapped.is_empty() {
             return Err(InvalidTraceError::EmptyTrace);

@@ -38,7 +38,6 @@
 //! code that are compiled with ykllvm.
 
 use crate::{
-    decode::TraceDecoder,
     errors::HWTracerError,
     llvm_blockmap::{BlockMapEntry, SuccessorKind, LLVM_BLOCK_MAP},
     Block, Trace,
@@ -67,20 +66,6 @@ use packet_parser::{
     packets::{Packet, PacketKind},
     PacketParser,
 };
-
-pub(crate) struct YkPTTraceDecoder {
-    trace: Box<dyn Trace>,
-}
-
-impl TraceDecoder for YkPTTraceDecoder {
-    fn new(trace: Box<dyn Trace>) -> Self {
-        Self { trace }
-    }
-
-    fn iter_blocks<'a>(&'a self) -> Box<dyn Iterator<Item = Result<Block, HWTracerError>> + 'a> {
-        Box::new(YkPTBlockIterator::new(&*self.trace))
-    }
-}
 
 /// The virtual address ranges of segments that we may need to disassemble.
 static CODE_SEGS: LazyLock<CodeSegs> = LazyLock::new(|| {
@@ -222,7 +207,7 @@ impl CompressedReturns {
 }
 
 /// Iterate over the blocks of an Intel PT trace using the fast Yk PT decoder.
-struct YkPTBlockIterator<'t> {
+pub(crate) struct YkPTBlockIterator<'t> {
     /// The next block that the iterator will hand out. We lookahead like this so that we can
     /// retrospectively add the stack adjustment value of the block (if neccessary).
     next: Cell<Result<Block, HWTracerError>>,
@@ -243,7 +228,7 @@ struct YkPTBlockIterator<'t> {
 }
 
 impl<'t> YkPTBlockIterator<'t> {
-    fn new(trace: &'t dyn Trace) -> Self {
+    pub(crate) fn new(trace: &'t dyn Trace) -> Self {
         let mut this = YkPTBlockIterator {
             next: Cell::new(Ok(Block::new_unknown())),
             parser: PacketParser::new(trace.bytes()),

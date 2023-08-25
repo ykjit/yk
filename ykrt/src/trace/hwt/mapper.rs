@@ -2,7 +2,7 @@
 
 use crate::trace::TracedAOTBlock;
 use hwtracer::llvm_blockmap::LLVM_BLOCK_MAP;
-use hwtracer::{decode::TraceDecoder, Block, HWTracerError};
+use hwtracer::{HWTracerError, Trace};
 use libc::c_void;
 use std::{collections::HashMap, convert::TryFrom, ffi::CString};
 use ykaddr::{
@@ -143,11 +143,11 @@ impl<'a> HWTMapper {
     /// foreign "turn on tracing" routine is omitted).
     pub fn map_trace(
         &mut self,
-        tdec: Box<dyn TraceDecoder>,
+        trace: Box<dyn Trace>,
     ) -> Result<Vec<TracedAOTBlock>, HWTracerError> {
         let mut ret: Vec<TracedAOTBlock> = Vec::new();
 
-        for (i, block) in tdec.iter_blocks().enumerate() {
+        for (i, block) in trace.iter_blocks().enumerate() {
             if i > crate::mt::DEFAULT_TRACE_TOO_LONG {
                 return Err(HWTracerError::TraceTooLong);
             }
