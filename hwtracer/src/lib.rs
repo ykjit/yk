@@ -20,7 +20,7 @@ mod pt;
 pub use errors::HWTracerError;
 use std::fmt::Debug;
 #[cfg(test)]
-use std::time::SystemTime;
+use std::{sync::Arc, time::SystemTime};
 
 /// Represents a generic trace.
 ///
@@ -44,11 +44,24 @@ pub trait Trace: Debug + Send {
 /// A loop that does some work that we can use to build a trace.
 #[cfg(test)]
 #[inline(never)]
-pub fn work_loop(iters: u64) -> u64 {
+pub(crate) fn work_loop(iters: u64) -> u64 {
     let mut res = 0;
     for _ in 0..iters {
         // Computation which stops the compiler from eliminating the loop.
         res += SystemTime::now().elapsed().unwrap().subsec_nanos() as u64;
     }
     res
+}
+
+/// Trace a closure that returns a u64.
+#[cfg(test)]
+pub(crate) fn trace_closure<F>(tc: &Arc<dyn Tracer>, f: F) -> Box<dyn Trace>
+where
+    F: FnOnce() -> u64,
+{
+    let tt = Arc::clone(tc).start_collector().unwrap();
+    let res = f();
+    let trace = tt.stop_collector().unwrap();
+    println!("traced closure with result: {}", res); // To avoid over-optimisation.
+    trace
 }

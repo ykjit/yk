@@ -6,10 +6,7 @@ pub(crate) mod ykpt;
 /// Decoder agnostic tests  and helper routines live here.
 #[cfg(test)]
 mod test_helpers {
-    use crate::{
-        collect::{test_helpers::trace_closure, Tracer},
-        work_loop,
-    };
+    use crate::{collect::Tracer, trace_closure, work_loop};
     use std::sync::Arc;
 
     /// Trace two loops, one 10x larger than the other, then check the proportions match the number

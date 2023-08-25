@@ -36,51 +36,55 @@ pub fn default_tracer_for_platform() -> Result<Arc<dyn Tracer>, HWTracerError> {
 }
 
 #[cfg(test)]
-pub(crate) mod test_helpers {
-    use crate::{collect::Tracer, work_loop, Trace};
+mod test {
+    use crate::{
+        collect::{default_tracer_for_platform, Tracer},
+        trace_closure, work_loop,
+    };
     use std::{sync::Arc, thread};
 
-    /// Trace a closure that returns a u64.
-    pub fn trace_closure<F>(tc: &Arc<dyn Tracer>, f: F) -> Box<dyn Trace>
-    where
-        F: FnOnce() -> u64,
-    {
-        let tt = Arc::clone(tc).start_collector().unwrap();
-        let res = f();
-        let trace = tt.stop_collector().unwrap();
-        println!("traced closure with result: {}", res); // To avoid over-optimisation.
-        trace
+    fn all_collectors() -> Vec<Arc<dyn Tracer>> {
+        // So far we only support Perf + PT...
+        vec![default_tracer_for_platform().unwrap()]
     }
 
-    /// Check that starting and stopping a trace collector works.
-    pub fn basic_collection(tc: Arc<dyn Tracer>) {
-        let trace = trace_closure(&tc, || work_loop(500));
-        assert_ne!(trace.len(), 0);
-    }
-
-    /// Check that repeated usage of the same trace collector works.
-    pub fn repeated_collection(tc: Arc<dyn Tracer>) {
-        for _ in 0..10 {
-            trace_closure(&tc, || work_loop(500));
+    #[test]
+    fn basic_collection() {
+        for c in all_collectors() {
+            let trace = trace_closure(&c, || work_loop(500));
+            assert_ne!(trace.len(), 0);
         }
     }
 
-    /// Check that repeated collection using different collectors works.
-    pub fn repeated_collection_different_collectors(tcs: [Arc<dyn Tracer>; 10]) {
-        for t in tcs {
-            trace_closure(&t, || work_loop(500));
+    #[test]
+    pub fn repeated_collection() {
+        for c in all_collectors() {
+            for _ in 0..10 {
+                let trace = trace_closure(&c, || work_loop(500));
+                assert_ne!(trace.len(), 0);
+            }
         }
     }
 
-    /// Check that traces can be collected concurrently.
-    pub fn concurrent_collection(tc: Arc<dyn Tracer>) {
+    #[test]
+    pub fn repeated_collection_different_collectors() {
         for _ in 0..10 {
+            for c in all_collectors() {
+                let trace = trace_closure(&c, || work_loop(500));
+                assert_ne!(trace.len(), 0);
+            }
+        }
+    }
+
+    #[test]
+    fn concurrent_collection() {
+        for c in all_collectors() {
             thread::scope(|s| {
                 let hndl = s.spawn(|| {
-                    trace_closure(&tc, || work_loop(500));
+                    trace_closure(&c, || work_loop(500));
                 });
 
-                trace_closure(&tc, || work_loop(500));
+                trace_closure(&c, || work_loop(500));
                 hndl.join().unwrap();
             });
         }

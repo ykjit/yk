@@ -230,10 +230,7 @@ impl<'t> Iterator for PacketParser<'t> {
 #[cfg(test)]
 mod tests {
     use super::{packets::*, PacketParser};
-    use crate::{
-        collect::{default_tracer_for_platform, test_helpers::trace_closure},
-        work_loop,
-    };
+    use crate::{collect::default_tracer_for_platform, trace_closure, work_loop};
 
     /// Parse the packets of a small trace, checking the basic structure of the decoded trace.
     #[test]

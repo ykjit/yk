@@ -214,49 +214,7 @@ impl Drop for PerfTrace {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        collect::{default_tracer_for_platform, test_helpers, Tracer},
-        errors::HWTracerError,
-        perf::collect::PerfTracer,
-        work_loop,
-    };
-    use std::sync::Arc;
-
-    fn mk_collector() -> Arc<dyn Tracer> {
-        default_tracer_for_platform().unwrap()
-    }
-
-    #[test]
-    fn basic_collection() {
-        test_helpers::basic_collection(mk_collector());
-    }
-
-    #[test]
-    pub fn repeated_collection() {
-        test_helpers::repeated_collection(mk_collector());
-    }
-
-    #[test]
-    pub fn repeated_collection_different_collectors() {
-        let tcs = [
-            mk_collector(),
-            mk_collector(),
-            mk_collector(),
-            mk_collector(),
-            mk_collector(),
-            mk_collector(),
-            mk_collector(),
-            mk_collector(),
-            mk_collector(),
-            mk_collector(),
-        ];
-        test_helpers::repeated_collection_different_collectors(tcs);
-    }
-
-    #[test]
-    fn concurrent_collection() {
-        test_helpers::concurrent_collection(mk_collector());
-    }
+    use crate::{collect::Tracer, errors::HWTracerError, perf::collect::PerfTracer, work_loop};
 
     /// Check that a long trace causes the trace buffer to reallocate.
     #[test]
