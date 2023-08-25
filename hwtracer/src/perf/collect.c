@@ -23,6 +23,7 @@
 #include <time.h>
 #include <unistd.h>
 
+// FIXME: This file currently only expects to collect PT traces.
 #define SYSFS_PT_TYPE "/sys/bus/event_source/devices/intel_pt/type"
 #define MAX_PT_TYPE_STR 8
 
