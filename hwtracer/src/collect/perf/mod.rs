@@ -4,8 +4,9 @@ use super::PerfCollectorConfig;
 use crate::{
     c_errors::PerfPTCError,
     collect::{ThreadTracer, Tracer},
+    decode::ykpt::YkPTBlockIterator,
     errors::HWTracerError,
-    Trace,
+    Block, Trace,
 };
 use libc::{c_void, free, geteuid, malloc, size_t};
 use std::{convert::TryFrom, fs::File, io::Read, slice, sync::Arc};
@@ -192,6 +193,11 @@ impl Trace for PerfTrace {
     #[cfg(test)]
     fn capacity(&self) -> usize {
         self.capacity as usize
+    }
+
+    #[cfg(decoder_ykpt)]
+    fn iter_blocks<'a>(&'a self) -> Box<dyn Iterator<Item = Result<Block, HWTracerError>> + 'a> {
+        Box::new(YkPTBlockIterator::new(self))
     }
 }
 
