@@ -3,13 +3,6 @@
 use crate::{errors::HWTracerError, Trace};
 use std::sync::Arc;
 
-#[cfg(collector_perf)]
-pub(crate) mod perf;
-#[cfg(all(collector_perf, feature = "yk_testing"))]
-pub use perf::PerfTrace;
-#[cfg(collector_perf)]
-pub(crate) use perf::PerfTracer;
-
 /// A tracer is an object which can start / stop collecting traces. It may have its own
 /// configuration, but that is dependent on the particular tracing backend.
 pub trait Tracer: Send + Sync {
@@ -27,7 +20,9 @@ pub fn default_tracer_for_platform() -> Result<Arc<dyn Tracer>, HWTracerError> {
     #[cfg(all(collector_perf, target_arch = "x86_64"))]
     {
         if crate::pt::pt_supported() {
-            return Ok(PerfTracer::new(crate::perf::PerfCollectorConfig::default())?);
+            return Ok(crate::perf::collect::PerfTracer::new(
+                crate::perf::PerfCollectorConfig::default(),
+            )?);
         }
         return Err(HWTracerError::NoHWSupport(
             "CPU doesn't support the Processor Trace (PT) feature".to_owned(),

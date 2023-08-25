@@ -1,6 +1,8 @@
 use libc::{size_t, sysconf, _SC_PAGESIZE};
 use std::{convert::TryFrom, sync::LazyLock};
 
+pub(crate) mod collect;
+
 const PERF_DFLT_DATA_BUFSIZE: size_t = 64;
 static PERF_DFLT_AUX_BUFSIZE: LazyLock<size_t> = LazyLock::new(|| {
     // Allocate enough pages for a 64MiB trace buffer.

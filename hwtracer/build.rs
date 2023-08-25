@@ -31,7 +31,7 @@ fn main() {
     if cfg!(all(target_os = "linux", target_arch = "x86_64"))
         && feature_check("check_perf.c", "check_perf")
     {
-        c_build.file("src/collect/perf/collect.c");
+        c_build.file("src/perf/collect.c");
         println!("cargo:rustc-cfg=collector_perf");
     }
 

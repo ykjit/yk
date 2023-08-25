@@ -40,7 +40,7 @@ impl Tracer for PerfTracer {
 }
 
 impl PerfTracer {
-    pub(super) fn new(config: PerfCollectorConfig) -> Result<Arc<Self>, HWTracerError>
+    pub(crate) fn new(config: PerfCollectorConfig) -> Result<Arc<Self>, HWTracerError>
     where
         Self: Sized,
     {
@@ -215,8 +215,9 @@ impl Drop for PerfTrace {
 mod tests {
     use super::*;
     use crate::{
-        collect::{default_tracer_for_platform, perf::PerfTracer, test_helpers, Tracer},
+        collect::{default_tracer_for_platform, test_helpers, Tracer},
         errors::HWTracerError,
+        perf::collect::PerfTracer,
         work_loop,
     };
     use std::sync::Arc;
