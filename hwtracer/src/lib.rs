@@ -14,6 +14,8 @@ pub mod errors;
 pub mod llvm_blockmap;
 #[cfg(collector_perf)]
 mod perf;
+#[cfg(target_arch = "x86_64")]
+mod pt;
 
 pub use errors::HWTracerError;
 use std::fmt::Debug;

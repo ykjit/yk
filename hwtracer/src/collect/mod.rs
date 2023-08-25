@@ -1,7 +1,6 @@
 //! Trace collectors.
 
 use crate::{errors::HWTracerError, Trace};
-use core::arch::x86_64::__cpuid_count;
 use std::sync::Arc;
 
 #[cfg(collector_perf)]
@@ -25,9 +24,9 @@ pub trait ThreadTracer {
 }
 
 pub fn default_tracer_for_platform() -> Result<Arc<dyn Tracer>, HWTracerError> {
-    #[cfg(collector_perf)]
+    #[cfg(all(collector_perf, target_arch = "x86_64"))]
     {
-        if pt_supported() {
+        if crate::pt::pt_supported() {
             return Ok(PerfTracer::new(crate::perf::PerfCollectorConfig::default())?);
         }
         return Err(HWTracerError::NoHWSupport(
@@ -39,12 +38,6 @@ pub fn default_tracer_for_platform() -> Result<Arc<dyn Tracer>, HWTracerError> {
     Err(HWTracerError::Custom(
         "No tracer supported on this platform".into(),
     ))
-}
-
-/// Checks if the CPU supports Intel Processor Trace.
-fn pt_supported() -> bool {
-    let res = unsafe { __cpuid_count(0x7, 0x0) };
-    (res.ebx & (1 << 25)) != 0
 }
 
 #[cfg(test)]
