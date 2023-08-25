@@ -192,6 +192,7 @@ impl Trace for PerfTrace {
         Box::new(YkPTBlockIterator::new(bytes))
     }
 
+    #[cfg(test)]
     fn bytes(&self) -> &[u8] {
         unsafe { slice::from_raw_parts(self.buf.0, usize::try_from(self.len).unwrap()) }
     }

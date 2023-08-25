@@ -28,6 +28,7 @@ pub trait Trace: Debug + Send {
     /// Iterate over the blocks of the trace.
     fn iter_blocks<'a>(&'a self) -> Box<dyn Iterator<Item = Result<Block, HWTracerError>> + 'a>;
 
+    #[cfg(test)]
     fn bytes(&self) -> &[u8];
 
     /// Get the capacity of the trace in bytes.

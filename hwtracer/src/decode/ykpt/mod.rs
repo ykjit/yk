@@ -228,10 +228,10 @@ pub(crate) struct YkPTBlockIterator<'t> {
 }
 
 impl<'t> YkPTBlockIterator<'t> {
-    pub(crate) fn new(trace: &'t dyn Trace) -> Self {
+    pub(crate) fn new(trace: &'t [u8]) -> Self {
         let mut this = YkPTBlockIterator {
             next: Cell::new(Ok(Block::new_unknown())),
-            parser: PacketParser::new(trace.bytes()),
+            parser: PacketParser::new(trace),
             cur_loc: ObjLoc::OtherObjOrUnknown(None),
             tnts: VecDeque::new(),
             comprets: CompressedReturns::new(),
