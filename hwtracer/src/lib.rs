@@ -22,17 +22,17 @@ use std::time::SystemTime;
 ///
 /// Each trace decoder has its own concrete implementation.
 pub trait Trace: Debug + Send {
-    fn bytes(&self) -> &[u8];
-
-    /// Get the capacity of the trace in bytes.
-    #[cfg(test)]
-    fn capacity(&self) -> usize;
-
     /// Get the size of the trace in bytes.
     fn len(&self) -> usize;
 
     /// Iterate over the blocks of the trace.
     fn iter_blocks<'a>(&'a self) -> Box<dyn Iterator<Item = Result<Block, HWTracerError>> + 'a>;
+
+    fn bytes(&self) -> &[u8];
+
+    /// Get the capacity of the trace in bytes.
+    #[cfg(test)]
+    fn capacity(&self) -> usize;
 }
 
 /// A loop that does some work that we can use to build a trace.

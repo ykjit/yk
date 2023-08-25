@@ -180,24 +180,25 @@ impl PerfTrace {
 }
 
 impl Trace for PerfTrace {
-    /// Return the raw bytes of the trace.
-    fn bytes(&self) -> &[u8] {
-        unsafe { slice::from_raw_parts(self.buf.0, usize::try_from(self.len).unwrap()) }
-    }
-
     /// Return the length of the trace, in bytes.
     fn len(&self) -> usize {
         usize::try_from(self.len).unwrap()
     }
 
+    #[cfg(decoder_ykpt)]
+    fn iter_blocks<'a>(&'a self) -> Box<dyn Iterator<Item = Result<Block, HWTracerError>> + 'a> {
+        let bytes =
+            unsafe { slice::from_raw_parts(self.buf.0, usize::try_from(self.len).unwrap()) };
+        Box::new(YkPTBlockIterator::new(bytes))
+    }
+
+    fn bytes(&self) -> &[u8] {
+        unsafe { slice::from_raw_parts(self.buf.0, usize::try_from(self.len).unwrap()) }
+    }
+
     #[cfg(test)]
     fn capacity(&self) -> usize {
         self.capacity as usize
-    }
-
-    #[cfg(decoder_ykpt)]
-    fn iter_blocks<'a>(&'a self) -> Box<dyn Iterator<Item = Result<Block, HWTracerError>> + 'a> {
-        Box::new(YkPTBlockIterator::new(self))
     }
 }
 
