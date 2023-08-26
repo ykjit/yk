@@ -860,7 +860,7 @@ fn is_ret_near(inst: &iced_x86::Instruction) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::{collect::default_tracer, trace_closure, work_loop};
+    use crate::{default_tracer, trace_closure, work_loop};
 
     #[ignore] // FIXME
     #[test]

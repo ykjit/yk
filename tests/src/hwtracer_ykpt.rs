@@ -11,10 +11,7 @@
 //! To that end, the test files in `tests/hwtracer_ykpt` are compiled into test binaries (as a
 //! langtester suite) and then they call into this file to have assertions checked in Rust code.
 
-use hwtracer::{
-    collect::{default_tracer, ThreadTracer},
-    Trace,
-};
+use hwtracer::{default_tracer, ThreadTracer, Trace};
 use std::ffi::c_void;
 
 #[no_mangle]

@@ -3,12 +3,7 @@
 use crate::perf::PerfCollectorConfig;
 #[cfg(decoder_ykpt)]
 use crate::pt::ykpt::YkPTBlockIterator;
-use crate::{
-    c_errors::PerfPTCError,
-    collect::{ThreadTracer, Tracer},
-    errors::HWTracerError,
-    Block, Trace,
-};
+use crate::{c_errors::PerfPTCError, errors::HWTracerError, Block, ThreadTracer, Trace, Tracer};
 use libc::{c_void, free, geteuid, malloc, size_t};
 use std::{convert::TryFrom, fs::File, io::Read, slice, sync::Arc};
 
@@ -215,7 +210,7 @@ impl Drop for PerfTrace {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{collect::Tracer, errors::HWTracerError, perf::collect::PerfTracer, work_loop};
+    use crate::{errors::HWTracerError, perf::collect::PerfTracer, work_loop, Tracer};
 
     /// Check that a long trace causes the trace buffer to reallocate.
     #[test]
