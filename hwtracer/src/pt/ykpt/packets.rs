@@ -7,14 +7,14 @@ use std::convert::TryFrom;
 ///
 /// This tells us what kind of compression was used for a `TargetIP`.
 #[derive(Clone, Copy, Debug, DekuRead)]
-pub(in crate::decode::ykpt) struct IPBytes {
+pub(super) struct IPBytes {
     #[deku(bits = "3")]
     val: u8,
 }
 
 impl IPBytes {
     #[cfg(test)]
-    pub(in crate::decode::ykpt) fn new(val: u8) -> Self {
+    pub(super) fn new(val: u8) -> Self {
         debug_assert!(val >> 3 == 0);
         Self { val }
     }
@@ -30,7 +30,7 @@ impl IPBytes {
 /// This is a variable-width field depending upon the value if `IPBytes` in the containing packet.
 #[derive(Debug, DekuRead)]
 #[deku(id = "ip_bytes_val", ctx = "ip_bytes_val: u8")]
-pub(in crate::decode::ykpt) enum TargetIP {
+pub(super) enum TargetIP {
     #[deku(id = "0b000")]
     OutOfContext,
     #[deku(id = "0b001")]
@@ -45,7 +45,7 @@ pub(in crate::decode::ykpt) enum TargetIP {
 
 impl TargetIP {
     #[cfg(test)]
-    pub(in crate::decode::ykpt) fn from_bits(bits: u8, val: u64) -> Self {
+    pub(super) fn from_bits(bits: u8, val: u64) -> Self {
         match bits {
             0 => Self::OutOfContext,
             16 => Self::Ip16(u16::try_from(val).unwrap()),
@@ -59,11 +59,7 @@ impl TargetIP {
     /// Decompress a `TargetIP` and `IPBytes` pair into an instruction pointer address.
     ///
     /// Returns `None` if the target IP was "out of context".
-    pub(in crate::decode::ykpt) fn decompress(
-        &self,
-        ip_bytes: IPBytes,
-        prev_tip: Option<usize>,
-    ) -> Option<usize> {
+    pub(super) fn decompress(&self, ip_bytes: IPBytes, prev_tip: Option<usize>) -> Option<usize> {
         let res = match ip_bytes.val {
             0b000 => {
                 debug_assert!(matches!(self, Self::OutOfContext));
@@ -120,13 +116,13 @@ impl TargetIP {
 /// Packet Stream Boundary (PSB) packet.
 #[derive(Debug, PartialEq, DekuRead)]
 #[deku(magic = b"\x02\x82\x02\x82\x02\x82\x02\x82\x02\x82\x02\x82\x02\x82\x02\x82")]
-pub(in crate::decode::ykpt) struct PSBPacket {}
+pub(super) struct PSBPacket {}
 
 /// Core Bus Ratio (CBR) packet.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 #[deku(magic = b"\x02\x03")]
-pub(in crate::decode::ykpt) struct CBRPacket {
+pub(super) struct CBRPacket {
     #[deku(temp)]
     unused: u16,
 }
@@ -134,12 +130,12 @@ pub(in crate::decode::ykpt) struct CBRPacket {
 /// End of PSB+ sequence (PSBEND) packet.
 #[derive(Debug, DekuRead)]
 #[deku(magic = b"\x02\x23")]
-pub(in crate::decode::ykpt) struct PSBENDPacket {}
+pub(super) struct PSBENDPacket {}
 
 /// Padding (PAD) packet.
 #[derive(Debug, DekuRead)]
 #[deku(magic = b"\x00")]
-pub(in crate::decode::ykpt) struct PADPacket {}
+pub(super) struct PADPacket {}
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Bitness {
@@ -152,7 +148,7 @@ pub enum Bitness {
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 #[deku(magic = b"\x99")]
-pub(in crate::decode::ykpt) struct MODEExecPacket {
+pub(super) struct MODEExecPacket {
     #[deku(bits = "3", assert = "*magic1 == 0x0", temp)]
     magic1: u8,
     #[deku(bits = "2", temp)]
@@ -180,7 +176,7 @@ impl MODEExecPacket {
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 #[deku(magic = b"\x99")]
-pub(in crate::decode::ykpt) struct MODETSXPacket {
+pub(super) struct MODETSXPacket {
     #[deku(bits = "3", assert = "*magic1 == 0x1", temp)]
     magic1: u8,
     #[deku(bits = "5", temp)]
@@ -190,7 +186,7 @@ pub(in crate::decode::ykpt) struct MODETSXPacket {
 /// Packet Generation Enable (TIP.PGE) packet.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
-pub(in crate::decode::ykpt) struct TIPPGEPacket {
+pub(super) struct TIPPGEPacket {
     ip_bytes: IPBytes,
     #[deku(bits = "5", assert = "*magic & 0x1f == 0x11", temp)]
     magic: u8,
@@ -211,7 +207,7 @@ impl TIPPGEPacket {
 /// Short Taken/Not-Taken (TNT) packet.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
-pub(in crate::decode::ykpt) struct ShortTNTPacket {
+pub(super) struct ShortTNTPacket {
     /// Bits encoding the branch decisions **and** a stop bit.
     ///
     /// The deku first part of the assertion here (`branches != 0x1`) is subtle: we know that the
@@ -228,7 +224,7 @@ pub(in crate::decode::ykpt) struct ShortTNTPacket {
 }
 
 impl ShortTNTPacket {
-    pub(in crate::decode::ykpt) fn tnts(&self) -> Vec<bool> {
+    pub(super) fn tnts(&self) -> Vec<bool> {
         let mut push = false;
         let mut tnts = Vec::new();
         for i in (0..7).rev() {
@@ -249,7 +245,7 @@ impl ShortTNTPacket {
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 #[deku(magic = b"\x02\xa3")]
-pub(in crate::decode::ykpt) struct LongTNTPacket {
+pub(super) struct LongTNTPacket {
     /// Bits encoding the branch decisions **and** a stop bit.
     ///
     /// FIXME: marked `temp` until we actually use the field.
@@ -258,7 +254,7 @@ pub(in crate::decode::ykpt) struct LongTNTPacket {
 }
 
 impl LongTNTPacket {
-    pub(in crate::decode::ykpt) fn tnts(&self) -> Vec<bool> {
+    pub(super) fn tnts(&self) -> Vec<bool> {
         todo!();
     }
 }
@@ -266,7 +262,7 @@ impl LongTNTPacket {
 /// Target IP (TIP) packet.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
-pub(in crate::decode::ykpt) struct TIPPacket {
+pub(super) struct TIPPacket {
     ip_bytes: IPBytes,
     #[deku(bits = "5", assert = "*magic & 0x1f == 0x0d", temp)]
     magic: u8,
@@ -287,7 +283,7 @@ impl TIPPacket {
 /// Packet Generation Disable (TIP.PGD) packet.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
-pub(in crate::decode::ykpt) struct TIPPGDPacket {
+pub(super) struct TIPPGDPacket {
     ip_bytes: IPBytes,
     #[deku(bits = "5", assert = "*magic & 0x1f == 0x1", temp)]
     magic: u8,
@@ -308,7 +304,7 @@ impl TIPPGDPacket {
 /// Flow Update (FUP) packet.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
-pub(in crate::decode::ykpt) struct FUPPacket {
+pub(super) struct FUPPacket {
     ip_bytes: IPBytes,
     #[deku(bits = "5", assert = "*magic & 0x1f == 0b11101", temp)]
     magic: u8,
@@ -329,7 +325,7 @@ impl FUPPacket {
 /// Cycle count (CYC) packet.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
-pub(in crate::decode::ykpt) struct CYCPacket {
+pub(super) struct CYCPacket {
     #[deku(bits = "5", temp)]
     unused: u8,
     #[deku(bits = "1", temp)]
@@ -344,7 +340,7 @@ pub(in crate::decode::ykpt) struct CYCPacket {
 /// Execution Stop (EXSTOP) packet.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
-pub(in crate::decode::ykpt) struct EXSTOPPacket {
+pub(super) struct EXSTOPPacket {
     #[deku(bits = "8", assert = "*magic1 == 0x2", temp)]
     magic1: u8,
     #[deku(bits = "1", temp)]
@@ -356,10 +352,10 @@ pub(in crate::decode::ykpt) struct EXSTOPPacket {
 /// Overflow (OVF) packet.
 #[derive(Debug, PartialEq, DekuRead)]
 #[deku(magic = b"\x02\xf3")]
-pub(in crate::decode::ykpt) struct OVFPacket {}
+pub(super) struct OVFPacket {}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(in crate::decode::ykpt) enum PacketKind {
+pub(super) enum PacketKind {
     PSB,
     CBR,
     PSBEND,
@@ -422,7 +418,7 @@ impl PacketKind {
 /// Variants with an `Option<usize>` may cache the previous TIP value (at the time the packet was
 /// created). This may be needed to get the updated TIP value from the packet.
 #[derive(Debug)]
-pub(in crate::decode::ykpt) enum Packet {
+pub(super) enum Packet {
     PSB(PSBPacket),
     CBR(CBRPacket),
     PSBEND(PSBENDPacket),
@@ -442,7 +438,7 @@ pub(in crate::decode::ykpt) enum Packet {
 
 impl Packet {
     /// If the packet contains a (non "out of context") TIP update, return the IP value.
-    pub(in crate::decode::ykpt) fn target_ip(&self) -> Option<usize> {
+    pub(super) fn target_ip(&self) -> Option<usize> {
         match self {
             Self::TIPPGE(p, prev_tip) => p.target_ip(*prev_tip),
             Self::TIPPGD(p, prev_tip) => p.target_ip(*prev_tip),
@@ -462,7 +458,7 @@ impl Packet {
         }
     }
 
-    pub(in crate::decode::ykpt) fn kind(&self) -> PacketKind {
+    pub(super) fn kind(&self) -> PacketKind {
         match self {
             Self::PSB(_) => PacketKind::PSB,
             Self::CBR(_) => PacketKind::CBR,
@@ -487,7 +483,7 @@ impl Packet {
     /// Returns `None` if the packet is not a TNT packet.
     ///
     /// OPT: Use a bit-field instead of a vector.
-    pub(in crate::decode::ykpt) fn tnts(&self) -> Option<Vec<bool>> {
+    pub(super) fn tnts(&self) -> Option<Vec<bool>> {
         match self {
             Self::ShortTNT(p) => Some(p.tnts()),
             Self::LongTNT(p) => Some(p.tnts()),

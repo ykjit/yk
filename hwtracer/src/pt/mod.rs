@@ -1,3 +1,5 @@
+pub(crate) mod ykpt;
+
 use core::arch::x86_64::__cpuid_count;
 
 /// Checks if the CPU supports Intel Processor Trace.

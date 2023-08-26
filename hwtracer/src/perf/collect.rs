@@ -1,10 +1,11 @@
 //! The Linux Perf trace collector.
 
 use crate::perf::PerfCollectorConfig;
+#[cfg(decoder_ykpt)]
+use crate::pt::ykpt::YkPTBlockIterator;
 use crate::{
     c_errors::PerfPTCError,
     collect::{ThreadTracer, Tracer},
-    decode::ykpt::YkPTBlockIterator,
     errors::HWTracerError,
     Block, Trace,
 };

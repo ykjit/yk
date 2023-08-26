@@ -37,6 +37,9 @@
 //! conditional branch instructions. We can still use compiler-assisted decoding for portions of
 //! code that are compiled with ykllvm.
 
+mod packets;
+mod parser;
+
 use crate::{
     errors::HWTracerError,
     llvm_blockmap::{BlockMapEntry, SuccessorKind, LLVM_BLOCK_MAP},
@@ -60,12 +63,8 @@ use ykaddr::{
     obj::{PHDR_MAIN_OBJ, PHDR_OBJECT_CACHE, SELF_BIN_PATH},
 };
 
-mod packet_parser;
-use packet_parser::{
-    packets::Bitness,
-    packets::{Packet, PacketKind},
-    PacketParser,
-};
+use packets::{Bitness, Packet, PacketKind};
+use parser::PacketParser;
 
 /// The virtual address ranges of segments that we may need to disassemble.
 static CODE_SEGS: LazyLock<CodeSegs> = LazyLock::new(|| {
@@ -861,12 +860,23 @@ fn is_ret_near(inst: &iced_x86::Instruction) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::{collect::default_tracer_for_platform, decode::test_helpers};
+    use crate::{collect::default_tracer_for_platform, trace_closure, work_loop};
 
     #[ignore] // FIXME
     #[test]
+    /// Trace two loops, one 10x larger than the other, then check the proportions match the number
+    /// of block the trace passes through.
     fn ten_times_as_many_blocks() {
         let tc = default_tracer_for_platform().unwrap();
-        test_helpers::ten_times_as_many_blocks(tc);
+
+        let trace1 = trace_closure(&tc, || work_loop(10));
+        let trace2 = trace_closure(&tc, || work_loop(100));
+
+        let ct1 = trace1.iter_blocks().count();
+        let ct2 = trace2.iter_blocks().count();
+
+        // Should be roughly 10x more blocks in trace2. It won't be exactly 10x, due to the stuff
+        // we trace either side of the loop itself. On a smallish trace, that will be significant.
+        assert!(ct2 > ct1 * 8);
     }
 }
