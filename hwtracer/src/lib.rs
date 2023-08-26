@@ -6,7 +6,6 @@
 
 mod block;
 pub use block::Block;
-mod c_errors;
 pub mod errors;
 pub mod llvm_blockmap;
 #[cfg(collector_perf)]

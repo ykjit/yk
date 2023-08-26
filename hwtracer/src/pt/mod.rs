@@ -1,3 +1,4 @@
+pub(crate) mod c_errors;
 pub(crate) mod ykpt;
 
 use core::arch::x86_64::__cpuid_count;
