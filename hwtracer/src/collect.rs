@@ -16,7 +16,8 @@ pub trait ThreadTracer {
     fn stop_collector(self: Box<Self>) -> Result<Box<dyn Trace>, HWTracerError>;
 }
 
-pub fn default_tracer_for_platform() -> Result<Arc<dyn Tracer>, HWTracerError> {
+/// Return the default tracer for this platform and configuration.
+pub fn default_tracer() -> Result<Arc<dyn Tracer>, HWTracerError> {
     #[cfg(all(collector_perf, target_arch = "x86_64"))]
     {
         if crate::pt::pt_supported() {
@@ -38,14 +39,14 @@ pub fn default_tracer_for_platform() -> Result<Arc<dyn Tracer>, HWTracerError> {
 #[cfg(test)]
 mod test {
     use crate::{
-        collect::{default_tracer_for_platform, Tracer},
+        collect::{default_tracer, Tracer},
         trace_closure, work_loop,
     };
     use std::{sync::Arc, thread};
 
     fn all_collectors() -> Vec<Arc<dyn Tracer>> {
         // So far we only support Perf + PT...
-        vec![default_tracer_for_platform().unwrap()]
+        vec![default_tracer().unwrap()]
     }
 
     #[test]

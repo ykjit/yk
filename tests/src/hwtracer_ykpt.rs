@@ -12,7 +12,7 @@
 //! langtester suite) and then they call into this file to have assertions checked in Rust code.
 
 use hwtracer::{
-    collect::{default_tracer_for_platform, ThreadTracer},
+    collect::{default_tracer, ThreadTracer},
     Trace,
 };
 use std::ffi::c_void;
@@ -21,7 +21,7 @@ use std::ffi::c_void;
 /// The value returned by this function *must* be passed to [__hwykpt_stop_collector] or memory
 /// will leak.
 pub extern "C" fn __hwykpt_start_collector() -> *mut Box<dyn ThreadTracer> {
-    let t = default_tracer_for_platform().unwrap();
+    let t = default_tracer().unwrap();
     let tt = t.start_collector().unwrap();
     // In order to pass the trait object over the FFI, we have to box it twice.
     Box::into_raw(Box::new(tt))

@@ -8,7 +8,7 @@ mod block;
 pub use block::Block;
 mod c_errors;
 pub mod collect;
-pub use collect::{default_tracer_for_platform, ThreadTracer, Tracer};
+pub use collect::{default_tracer, ThreadTracer, Tracer};
 pub mod errors;
 pub mod llvm_blockmap;
 #[cfg(collector_perf)]
