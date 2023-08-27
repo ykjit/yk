@@ -18,6 +18,16 @@ fn feature_check(filename: &str, output_file: &str) -> bool {
 }
 
 fn main() {
+    rerun_except(&[
+        "README.md",
+        "deny.toml",
+        "LICENSE-*",
+        "COPYRIGHT",
+        "bors.toml",
+        ".buildbot.sh",
+    ])
+    .unwrap();
+
     let mut c_build = cc::Build::new();
 
     // Generate a `compile_commands.json` database for clangd.
@@ -39,17 +49,5 @@ fn main() {
     }
 
     c_build.compile("hwtracer_c");
-
-    // Additional circumstances under which to re-run this build.rs.
-    rerun_except(&[
-        "README.md",
-        "deny.toml",
-        "LICENSE-*",
-        "COPYRIGHT",
-        "bors.toml",
-        ".buildbot.sh",
-    ])
-    .unwrap();
-
     ccg.generate();
 }
