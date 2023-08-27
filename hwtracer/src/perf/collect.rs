@@ -3,7 +3,7 @@
 use crate::perf::PerfCollectorConfig;
 #[cfg(pt)]
 use crate::pt::c_errors::PerfPTCError;
-#[cfg(decoder_ykpt)]
+#[cfg(ykpt)]
 use crate::pt::ykpt::YkPTBlockIterator;
 use crate::{errors::HWTracerError, Block, ThreadTracer, Trace, Tracer};
 use libc::{c_void, free, geteuid, malloc, size_t};
@@ -181,7 +181,7 @@ impl PerfTrace {
 }
 
 impl Trace for PerfTrace {
-    #[cfg(decoder_ykpt)]
+    #[cfg(ykpt)]
     fn iter_blocks<'a>(&'a self) -> Box<dyn Iterator<Item = Result<Block, HWTracerError>> + 'a> {
         let bytes =
             unsafe { slice::from_raw_parts(self.buf.0, usize::try_from(self.len).unwrap()) };

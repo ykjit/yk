@@ -37,7 +37,7 @@ fn main() {
 
             #[cfg(target_arch = "x86_64")]
             {
-                println!("cargo:rustc-cfg=decoder_ykpt");
+                println!("cargo:rustc-cfg=ykpt");
                 println!("cargo:rustc-cfg=pt");
             }
         }
