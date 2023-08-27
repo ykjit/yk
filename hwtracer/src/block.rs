@@ -27,7 +27,7 @@ pub enum Block {
 }
 
 impl fmt::Debug for Block {
-    /// Format virtual addresses using hexidecimal.
+    /// Format virtual addresses using hexadecimal.
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::VAddrRange {
@@ -37,7 +37,7 @@ impl fmt::Debug for Block {
                 write!(f, "Block({:x}..={:x})", first_instr, last_instr)
             }
             Self::Unknown { stack_adjust } => {
-                write!(f, "UnkonwnBlock(stack_adjust={stack_adjust})")
+                write!(f, "UnknownBlock(stack_adjust={stack_adjust})")
             }
         }
     }
