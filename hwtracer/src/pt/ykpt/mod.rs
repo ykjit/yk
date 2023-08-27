@@ -229,7 +229,7 @@ pub(crate) struct YkPTBlockIterator<'t> {
 impl<'t> YkPTBlockIterator<'t> {
     pub(crate) fn new(trace: &'t [u8]) -> Self {
         let mut this = YkPTBlockIterator {
-            next: Cell::new(Ok(Block::new_unknown())),
+            next: Cell::new(Ok(Block::from_stack_adjust(0))),
             parser: PacketParser::new(trace),
             cur_loc: ObjLoc::OtherObjOrUnknown(None),
             tnts: VecDeque::new(),
@@ -287,7 +287,7 @@ impl<'t> YkPTBlockIterator<'t> {
                 u64::try_from(self.off_to_vaddr(&PHDR_MAIN_OBJ, ent.range.end)?).unwrap(),
             ))
         } else {
-            Ok(Block::new_unknown())
+            Ok(Block::from_stack_adjust(0))
         }
     }
 
@@ -315,7 +315,7 @@ impl<'t> YkPTBlockIterator<'t> {
                 self.seek_tip()?;
                 return match self.cur_loc {
                     ObjLoc::MainObj(off) => Ok(Some(self.lookup_block_from_main_bin_offset(off)?)),
-                    ObjLoc::OtherObjOrUnknown(_) => Ok(Some(Block::new_unknown())),
+                    ObjLoc::OtherObjOrUnknown(_) => Ok(Some(Block::from_stack_adjust(0))),
                 };
             }
         }
@@ -377,7 +377,7 @@ impl<'t> YkPTBlockIterator<'t> {
                     if let ObjLoc::MainObj(off) = self.cur_loc {
                         self.lookup_block_from_main_bin_offset(off + 1)
                     } else {
-                        Ok(Block::new_unknown())
+                        Ok(Block::from_stack_adjust(0))
                     }
                 } else {
                     // A regular uncompressed return that relies on a TIP update.
@@ -386,7 +386,7 @@ impl<'t> YkPTBlockIterator<'t> {
                     // `self.cur_loc()`.
                     match self.cur_loc {
                         ObjLoc::MainObj(off) => Ok(self.lookup_block_from_main_bin_offset(off)?),
-                        _ => Ok(Block::new_unknown()),
+                        _ => Ok(Block::from_stack_adjust(0)),
                     }
                 }
             }
@@ -395,7 +395,7 @@ impl<'t> YkPTBlockIterator<'t> {
                 self.seek_tip()?;
                 match self.cur_loc {
                     ObjLoc::MainObj(off) => Ok(self.lookup_block_from_main_bin_offset(off)?),
-                    _ => Ok(Block::new_unknown()),
+                    _ => Ok(Block::from_stack_adjust(0)),
                 }
             }
         }
@@ -421,7 +421,7 @@ impl<'t> YkPTBlockIterator<'t> {
                 } else {
                     self.cur_loc =
                         ObjLoc::OtherObjOrUnknown(Some(self.off_to_vaddr(&PHDR_MAIN_OBJ, b_off)?));
-                    Ok(Block::new_unknown())
+                    Ok(Block::from_stack_adjust(0))
                 }
             }
             ObjLoc::OtherObjOrUnknown(vaddr) => self.skip_foreign(vaddr),
@@ -467,13 +467,11 @@ impl<'t> YkPTBlockIterator<'t> {
     }
 
     fn update_stack_adjust(&mut self, by: isize) {
-        *self
-            .next
-            .get_mut()
-            .as_mut()
-            .unwrap() // safe: we only get here during disassembly, where `self.next` is `Some`.
-            .stack_adjust_mut()
-            .unwrap() += by;
+        // We only get here during disassembly, so `slot` is `Some(Block::StackAdjust)` and both
+        // unwraps in this function cannot fail.
+        let slot = self.next.get_mut().as_mut().unwrap();
+        let new = Block::from_stack_adjust(slot.stack_adjust().unwrap() + by);
+        *slot = new;
     }
 
     fn disassemble(&mut self, start_vaddr: usize) -> Result<Block, HWTracerError> {

@@ -54,6 +54,11 @@ impl Block {
         }
     }
 
+    /// Create an unknown block.
+    pub fn from_stack_adjust(stack_adjust: isize) -> Self {
+        Self::Unknown { stack_adjust }
+    }
+
     /// Returns `true` if `self` represents an unknown virtual address range.
     pub fn is_unknown(&self) -> bool {
         matches!(self, Self::Unknown { .. })
@@ -72,27 +77,10 @@ impl Block {
         }
     }
 
-    /// Create an unknown block.
-    pub fn new_unknown() -> Self {
-        Self::Unknown { stack_adjust: 0 }
-    }
-
     /// Return the stack adjustment value, if applicable.
     pub fn stack_adjust(&self) -> Option<isize> {
         if let Self::Unknown { stack_adjust } = self {
             Some(*stack_adjust)
-        } else {
-            None
-        }
-    }
-
-    /// Return a mutable reference to the stack adjustment value, if applicable.
-    pub fn stack_adjust_mut(&mut self) -> Option<&mut isize> {
-        if let Self::Unknown {
-            ref mut stack_adjust,
-        } = self
-        {
-            Some(stack_adjust)
         } else {
             None
         }
