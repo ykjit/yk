@@ -7,12 +7,14 @@ use libc::c_int;
 #[allow(dead_code)] // Only C constructs these.
 #[derive(Eq, PartialEq)]
 enum PerfPTCErrorKind {
-    Unused,
-    Unknown,
-    Errno,
-    PT,
+    Unused = 0,
+    Unknown = 1,
+    Errno = 2,
+    #[cfg(target_arch = "x86_64")]
+    PT = 3,
 }
 
+#[repr(C)]
 enum PTErrorCode {
     Overflow = 0,
 }
@@ -43,6 +45,7 @@ impl From<PerfPTCError> for HWTracerError {
             PerfPTCErrorKind::Unused => HWTracerError::Unknown,
             PerfPTCErrorKind::Unknown => HWTracerError::Unknown,
             PerfPTCErrorKind::Errno => HWTracerError::Errno(err.code),
+            #[cfg(target_arch = "x86_64")]
             PerfPTCErrorKind::PT => {
                 // Overflow is a special case with its own error type.
                 match err.code {

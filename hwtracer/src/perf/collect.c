@@ -37,13 +37,17 @@
 #endif
 
 enum hwt_cerror_kind {
-  hwt_cerror_unused,
-  hwt_cerror_unknown,
-  hwt_cerror_errno,
-  hwt_cerror_pt,
+  hwt_cerror_unused = 0,
+  hwt_cerror_unknown = 1,
+  hwt_cerror_errno = 2,
+#if defined(__x86_64__)
+  hwt_cerror_pt = 3,
+#endif
 };
 
-#define PT_ERROR_OVERFLOW 0
+#if defined(__x86_64__)
+enum hwt_pt_kind { hwt_pt_overflow = 0 };
+#endif
 
 struct hwt_cerror {
   enum hwt_cerror_kind kind; // What sort of error is this?
@@ -219,7 +223,7 @@ static bool handle_sample(void *aux_buf, struct perf_event_mmap_page *hdr,
       // truncated. If it was, then we didn't read out of the data buffer
       // quickly/frequently enough.
       if (rec_aux_sample->flags & PERF_AUX_FLAG_TRUNCATED) {
-        hwt_set_cerr(err, hwt_cerror_pt, PT_ERROR_OVERFLOW);
+        hwt_set_cerr(err, hwt_cerror_pt, hwt_pt_overflow);
         return false;
       }
       if (read_aux(aux_buf, hdr, trace, err) == false) {
@@ -227,7 +231,7 @@ static bool handle_sample(void *aux_buf, struct perf_event_mmap_page *hdr,
       }
       break;
     case PERF_RECORD_LOST:
-      hwt_set_cerr(err, hwt_cerror_pt, PT_ERROR_OVERFLOW);
+      hwt_set_cerr(err, hwt_cerror_pt, hwt_pt_overflow);
       return false;
       break;
     case PERF_RECORD_LOST_SAMPLES:
