@@ -1,17 +1,11 @@
 use libc::{size_t, sysconf, _SC_PAGESIZE};
-use std::{convert::TryFrom, sync::LazyLock};
+use std::alloc::Layout;
 
 pub(crate) mod collect;
 
-const PERF_DFLT_DATA_BUFSIZE: size_t = 64;
-static PERF_DFLT_AUX_BUFSIZE: LazyLock<size_t> = LazyLock::new(|| {
-    // Allocate enough pages for a 64MiB trace buffer.
-    let mb64 = 1024 * 1024 * 64;
-    let page_sz = size_t::try_from(unsafe { sysconf(_SC_PAGESIZE) }).unwrap();
-    mb64 / page_sz + size_t::from(mb64 % page_sz != 0)
-});
-
-const PERF_DFLT_INITIAL_TRACE_BUFSIZE: size_t = 1024 * 1024; // 1MiB
+const PERF_DFLT_DATA_BUFSIZE: size_t = 64; // Pages
+const PERF_DFLT_AUX_BUFSIZE: size_t = 64 * 1024 * 1024; // MiB
+const PERF_DFLT_INITIAL_TRACE_BUFSIZE: size_t = 1024 * 1024; // MiB
 
 /// Configures the Perf collector.
 ///
@@ -29,9 +23,18 @@ pub struct PerfCollectorConfig {
 
 impl Default for PerfCollectorConfig {
     fn default() -> Self {
+        // The `as` is safe because `long` on x86 Linux is at most 8 bytes.
+        let pagesize = unsafe { sysconf(_SC_PAGESIZE) } as usize;
+        // aux_bufsize is given in terms of pages, but we don't know big a page is until runtime,
+        // so we convert the MiB constant into number of pages.
+        let aux_bufsize = Layout::from_size_align(PERF_DFLT_AUX_BUFSIZE, pagesize)
+            .unwrap()
+            .pad_to_align()
+            .size()
+            / pagesize;
         Self {
             data_bufsize: PERF_DFLT_DATA_BUFSIZE,
-            aux_bufsize: *PERF_DFLT_AUX_BUFSIZE,
+            aux_bufsize,
             initial_trace_bufsize: PERF_DFLT_INITIAL_TRACE_BUFSIZE,
         }
     }
