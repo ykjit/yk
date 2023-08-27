@@ -18,15 +18,7 @@ fn feature_check(filename: &str, output_file: &str) -> bool {
 }
 
 fn main() {
-    rerun_except(&[
-        "README.md",
-        "deny.toml",
-        "LICENSE-*",
-        "COPYRIGHT",
-        "bors.toml",
-        ".buildbot.sh",
-    ])
-    .unwrap();
+    rerun_except(&["README.md"]).unwrap();
 
     let mut c_build = cc::Build::new();
 
