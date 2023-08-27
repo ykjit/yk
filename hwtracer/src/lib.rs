@@ -8,7 +8,7 @@ mod block;
 pub use block::Block;
 pub mod errors;
 pub mod llvm_blockmap;
-#[cfg(collector_perf)]
+#[cfg(linux_perf)]
 mod perf;
 #[cfg(target_arch = "x86_64")]
 mod pt;
@@ -27,7 +27,7 @@ pub trait Tracer: Send + Sync {
 
 /// Return the default tracer for this platform and configuration.
 pub fn default_tracer() -> Result<Arc<dyn Tracer>, HWTracerError> {
-    #[cfg(all(collector_perf, target_arch = "x86_64"))]
+    #[cfg(all(linux_perf, target_arch = "x86_64"))]
     {
         if crate::pt::pt_supported() {
             return Ok(crate::perf::collect::PerfTracer::new(
