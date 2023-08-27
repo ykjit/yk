@@ -27,16 +27,16 @@ fn main() {
     }
     c_build.compiler(ccg.wrapper_path());
 
-    // Check if we should build the perf collector.
-    if cfg!(all(target_os = "linux", target_arch = "x86_64"))
-        && feature_check("check_perf.c", "check_perf")
-    {
-        c_build.file("src/perf/collect.c");
-        println!("cargo:rustc-cfg=collector_perf");
-    }
-
     #[cfg(target_arch = "x86_64")]
     println!("cargo:rustc-cfg=decoder_ykpt");
+
+    #[cfg(target_os = "linux")]
+    {
+        if feature_check("check_perf.c", "check_perf") {
+            c_build.file("src/perf/collect.c");
+            println!("cargo:rustc-cfg=collector_perf");
+        }
+    }
 
     c_build.include("src/util");
     c_build.compile("hwtracer_c");
