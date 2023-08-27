@@ -229,12 +229,15 @@ impl<'t> Iterator for PacketParser<'t> {
 #[cfg(test)]
 mod tests {
     use super::{super::packets::*, PacketParser};
-    use crate::{default_tracer, trace_closure, work_loop};
+    use crate::{trace_closure, work_loop, TracerBuilder, TracerKind};
 
     /// Parse the packets of a small trace, checking the basic structure of the decoded trace.
     #[test]
     fn parse_small_trace() {
-        let tc = default_tracer().unwrap();
+        let tc = TracerBuilder::new()
+            .tracer_kind(TracerKind::PT(crate::perf::PerfCollectorConfig::default()))
+            .build()
+            .unwrap();
         let trace = trace_closure(&tc, || work_loop(3));
 
         #[derive(Clone, Copy, Debug)]

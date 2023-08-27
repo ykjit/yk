@@ -16,33 +16,68 @@ mod pt;
 pub use errors::HWTracerError;
 #[cfg(test)]
 use std::time::SystemTime;
-use std::{fmt::Debug, sync::Arc};
+use std::{error::Error, fmt::Debug, sync::Arc};
+
+/// A builder for [Tracer]s. By default, will attempt to use the most appropriate [Tracer] for your
+/// platform/configuration. This can be overridden with [TracerBuilder::tracer_kind] and
+/// [TracerKind].
+pub struct TracerBuilder {
+    tracer_kind: Option<TracerKind>,
+}
+
+impl TracerBuilder {
+    /// Create a new [TracerBuilder] with default settings. This will attempt to use the most
+    /// appropriate [Tracer] for your platform/configuration. If no suitable [Tracer] can be found,
+    /// [TracerKind::None] will be set as the default.
+    pub fn new() -> Self {
+        #[cfg(all(linux_perf, target_arch = "x86_64"))]
+        {
+            if crate::pt::pt_supported() {
+                return TracerBuilder {
+                    tracer_kind: Some(TracerKind::PT(perf::PerfCollectorConfig::default())),
+                };
+            }
+        }
+
+        TracerBuilder { tracer_kind: None }
+    }
+
+    /// Change the [TracerKind] of this [TracerBuilder].
+    pub fn tracer_kind(mut self, tracer_kind: TracerKind) -> Self {
+        self.tracer_kind = Some(tracer_kind);
+        self
+    }
+
+    /// Build this [TracerBuild] and produce a [Tracer] as output.
+    pub fn build(self) -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
+        match self.tracer_kind {
+            #[cfg(all(linux_perf, target_arch = "x86_64"))]
+            Some(TracerKind::PT(config)) => {
+                if !crate::pt::pt_supported() {
+                    Err("CPU doesn't support the Processor Trace (PT) feature".into())
+                } else {
+                    Ok(crate::perf::collect::PerfTracer::new(config)?)
+                }
+            }
+            None => Err("No tracer specified: that probably means that no tracers are supported on this platform/configuration".into())
+        }
+    }
+}
+
+/// The kind of [Tracer] to be built by [TracerBuilder].
+pub enum TracerKind {
+    // If you add a new variant, don't forget to update `all_collectors` in the `test` mod later in
+    // this file.
+    #[cfg(all(linux_perf, target_arch = "x86_64"))]
+    /// An IntelPT tracer. Note that this currently uses the ykpt decoder.
+    PT(perf::PerfCollectorConfig),
+}
 
 /// A tracer is an object which can start / stop collecting traces. It may have its own
 /// configuration, but that is dependent on the particular tracing backend.
 pub trait Tracer: Send + Sync {
     /// Start collecting a trace of the current thread.
     fn start_collector(self: Arc<Self>) -> Result<Box<dyn ThreadTracer>, HWTracerError>;
-}
-
-/// Return the default tracer for this platform and configuration.
-pub fn default_tracer() -> Result<Arc<dyn Tracer>, HWTracerError> {
-    #[cfg(all(linux_perf, target_arch = "x86_64"))]
-    {
-        if crate::pt::pt_supported() {
-            return Ok(crate::perf::collect::PerfTracer::new(
-                crate::perf::PerfCollectorConfig::default(),
-            )?);
-        }
-        return Err(HWTracerError::NoHWSupport(
-            "CPU doesn't support the Processor Trace (PT) feature".to_owned(),
-        ));
-    }
-
-    #[allow(unreachable_code)]
-    Err(HWTracerError::Custom(
-        "No tracer supported on this platform".into(),
-    ))
 }
 
 /// Represents a thread which is currently tracing.
@@ -97,12 +132,21 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::{default_tracer, trace_closure, work_loop, Tracer};
+    use crate::{trace_closure, work_loop, Tracer, TracerBuilder, TracerKind};
     use std::{sync::Arc, thread};
 
     fn all_collectors() -> Vec<Arc<dyn Tracer>> {
-        // So far we only support Perf + PT...
-        vec![default_tracer().unwrap()]
+        let mut kinds = vec![];
+
+        #[cfg(all(linux_perf, target_arch = "x86_64"))]
+        if !crate::pt::pt_supported() {
+            kinds.push(TracerKind::PT(crate::perf::PerfCollectorConfig::default()))
+        }
+
+        kinds
+            .into_iter()
+            .map(|k| TracerBuilder::new().tracer_kind(k).build().unwrap())
+            .collect::<Vec<_>>()
     }
 
     #[test]

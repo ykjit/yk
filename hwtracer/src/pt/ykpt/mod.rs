@@ -858,14 +858,17 @@ fn is_ret_near(inst: &iced_x86::Instruction) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::{default_tracer, trace_closure, work_loop};
+    use crate::{perf::PerfCollectorConfig, trace_closure, work_loop, TracerBuilder, TracerKind};
 
     #[ignore] // FIXME
     #[test]
     /// Trace two loops, one 10x larger than the other, then check the proportions match the number
     /// of block the trace passes through.
     fn ten_times_as_many_blocks() {
-        let tc = default_tracer().unwrap();
+        let tc = TracerBuilder::new()
+            .tracer_kind(TracerKind::PT(PerfCollectorConfig::default()))
+            .build()
+            .unwrap();
 
         let trace1 = trace_closure(&tc, || work_loop(10));
         let trace2 = trace_closure(&tc, || work_loop(100));

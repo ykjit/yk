@@ -22,7 +22,7 @@ impl super::Tracer for HWTracer {
 impl HWTracer {
     pub fn new() -> Result<Self, Box<dyn Error>> {
         Ok(HWTracer {
-            backend: hwtracer::default_tracer()?,
+            backend: hwtracer::TracerBuilder::new().build()?,
         })
     }
 }
