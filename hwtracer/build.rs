@@ -38,7 +38,6 @@ fn main() {
         }
     }
 
-    c_build.include("src/util");
     c_build.compile("hwtracer_c");
 
     // Additional circumstances under which to re-run this build.rs.
