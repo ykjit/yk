@@ -22,6 +22,3 @@ iced-x86 = { version = "1.18.0", features = ["decoder"]}
 cc = "1.0.62"
 rerun_except = "1"
 ykbuild = { path = "../ykbuild" }
-
-[features]
-yk_testing = []
