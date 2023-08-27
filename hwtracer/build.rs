@@ -29,14 +29,17 @@ fn main() {
     }
     c_build.compiler(ccg.wrapper_path());
 
-    #[cfg(target_arch = "x86_64")]
-    println!("cargo:rustc-cfg=decoder_ykpt");
-
     #[cfg(target_os = "linux")]
     {
         if feature_check("linux_perf.c", "linux_perf") {
             c_build.file("src/perf/collect.c");
             println!("cargo:rustc-cfg=linux_perf");
+
+            #[cfg(target_arch = "x86_64")]
+            {
+                println!("cargo:rustc-cfg=decoder_ykpt");
+                println!("cargo:rustc-cfg=pt");
+            }
         }
     }
 

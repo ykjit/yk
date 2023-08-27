@@ -10,7 +10,7 @@ pub mod errors;
 pub mod llvm_blockmap;
 #[cfg(linux_perf)]
 mod perf;
-#[cfg(target_arch = "x86_64")]
+#[cfg(pt)]
 mod pt;
 
 pub use errors::HWTracerError;
@@ -30,7 +30,7 @@ impl TracerBuilder {
     /// appropriate [Tracer] for your platform/configuration. If no suitable [Tracer] can be found,
     /// [TracerKind::None] will be set as the default.
     pub fn new() -> Self {
-        #[cfg(all(linux_perf, target_arch = "x86_64"))]
+        #[cfg(all(linux_perf, pt))]
         {
             if crate::pt::pt_supported() {
                 return TracerBuilder {
@@ -51,7 +51,7 @@ impl TracerBuilder {
     /// Build this [TracerBuild] and produce a [Tracer] as output.
     pub fn build(self) -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
         match self.tracer_kind {
-            #[cfg(all(linux_perf, target_arch = "x86_64"))]
+            #[cfg(all(linux_perf, pt))]
             Some(TracerKind::PT(config)) => {
                 if !crate::pt::pt_supported() {
                     Err("CPU doesn't support the Processor Trace (PT) feature".into())
@@ -68,7 +68,7 @@ impl TracerBuilder {
 pub enum TracerKind {
     // If you add a new variant, don't forget to update `all_collectors` in the `test` mod later in
     // this file.
-    #[cfg(all(linux_perf, target_arch = "x86_64"))]
+    #[cfg(all(linux_perf, pt))]
     /// An IntelPT tracer. Note that this currently uses the ykpt decoder.
     PT(perf::PerfCollectorConfig),
 }
@@ -138,7 +138,7 @@ mod test {
     fn all_collectors() -> Vec<Arc<dyn Tracer>> {
         let mut kinds = vec![];
 
-        #[cfg(all(linux_perf, target_arch = "x86_64"))]
+        #[cfg(all(linux_perf, pt))]
         if !crate::pt::pt_supported() {
             kinds.push(TracerKind::PT(crate::perf::PerfCollectorConfig::default()))
         }

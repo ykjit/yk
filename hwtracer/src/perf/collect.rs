@@ -1,7 +1,7 @@
 //! The Linux Perf trace collector.
 
 use crate::perf::PerfCollectorConfig;
-#[cfg(target_arch = "x86_64")]
+#[cfg(pt)]
 use crate::pt::c_errors::PerfPTCError;
 #[cfg(decoder_ykpt)]
 use crate::pt::ykpt::YkPTBlockIterator;
@@ -9,7 +9,7 @@ use crate::{errors::HWTracerError, Block, ThreadTracer, Trace, Tracer};
 use libc::{c_void, free, geteuid, malloc, size_t};
 use std::{convert::TryFrom, fs::File, io::Read, slice, sync::Arc};
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(pt)]
 extern "C" {
     fn hwt_perf_init_collector(
         conf: *const PerfCollectorConfig,
@@ -91,7 +91,7 @@ pub struct PerfThreadTracer {
 }
 
 impl ThreadTracer for PerfThreadTracer {
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(pt)]
     fn stop_collector(self: Box<Self>) -> Result<Box<dyn Trace>, HWTracerError> {
         let mut cerr = PerfPTCError::new();
         let rc = unsafe { hwt_perf_stop_collector(self.ctx, &mut cerr) };
@@ -109,7 +109,7 @@ impl ThreadTracer for PerfThreadTracer {
 }
 
 impl PerfThreadTracer {
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(pt)]
     fn new(tracer: &PerfTracer) -> Result<Self, HWTracerError> {
         // At the time of writing, we have to use a fresh Perf file descriptor to ensure traces
         // start with a `PSB+` packet sequence. This is required for correct instruction-level and
