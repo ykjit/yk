@@ -1,4 +1,4 @@
-//! The mapper translates a PT trace into an IR trace.
+//! The mapper translates a hwtracer trace into an IR trace.
 
 use crate::trace::TracedAOTBlock;
 use hwtracer::llvm_blockmap::LLVM_BLOCK_MAP;
@@ -26,24 +26,24 @@ impl<'a> HWTMapper {
         self.faddrs
     }
 
-    /// Maps one PT block to one or many LLVM IR blocks.
+    /// Maps one hwtracer block to one or more AOT LLVM IR blocks.
     ///
-    /// Mapping a PT block to IRBlocks occurs in two phases. First the mapper tries to find machine
-    /// blocks whose address ranges overlap with the address range of the PT block (by using the
-    /// LLVM block address map section). Once machine blocks have been found, the mapper then tries
-    /// to find which LLVM IR blocks the machine blocks are part of.
+    /// Mapping an hwtracer block to AOT LLVM IR blocks occurs in two phases. First the mapper
+    /// tries to find machine blocks whose address ranges overlap with the address range of the
+    /// hwtracer block (by using the LLVM block address map section). Once machine blocks have been
+    /// found, the mapper then tries to find which LLVM IR blocks the machine blocks are part of.
     ///
     /// A `Some` element in the returned vector means that the mapper found a machine block that
-    /// maps to part of the PT block and that the machine block could be directly mapped
-    /// to an IR block.
+    /// maps to part of the hwtracer block and that the machine block could be directly mapped
+    /// to an AOT LLVM IR block.
     ///
     /// A `None` element in the returned vector means that the mapper found a machine block that
-    /// corresponds with part of the PT block but that the machine block could *not* be directly
-    /// mapped to an IR block. This happens when `MachineBasicBlock::getBasicBlock()` returns
-    /// `nullptr`.
+    /// corresponds with part of the hwtracer block but that the machine block could *not* be
+    /// directly mapped to an AOT LLVM IR block. This happens when
+    /// `MachineBasicBlock::getBasicBlock()` returns `nullptr`.
     ///
-    /// This function returns an empty vector if the PT block was unmappable (no matching machine
-    /// blocks could be found).
+    /// This function returns an empty vector if the hwtracer block was unmappable (no matching
+    /// machine blocks could be found).
     ///
     /// The reason we cannot simply ignore the `None` case is that it is important to differentiate
     /// "there were no matching machine blocks" from "there were matching machine blocks, but we
@@ -60,8 +60,8 @@ impl<'a> HWTMapper {
     ///     ...
     ///
     /// During codegen LLVM may remove the unconditional jump and simply place bb1 and bb2
-    /// consecutively, allowing bb1 to fall-thru to bb2. In the eyes of the PT block decoder, a
-    /// fall-thru does not terminate a block, so whereas LLVM sees two blocks, PT sees only one.
+    /// consecutively, allowing bb1 to fall-thru to bb2. In the eyes of hwtracer, a fall-thru does
+    /// not terminate a block, so whereas LLVM sees two blocks, hwtracer sees only one.
     fn map_block(&mut self, block: &hwtracer::Block) -> Vec<Option<TracedAOTBlock>> {
         let b_rng = block.vaddr_range();
         if b_rng.is_none() {
@@ -90,11 +90,11 @@ impl<'a> HWTMapper {
             .query(block_off, block_off + block_len)
             .collect::<Vec<_>>();
 
-        // In the case that a PT block maps to multiple machine blocks, it may be tempting to check
-        // that they are at consecutive address ranges. Unfortunately we can't do this because LLVM
-        // sometimes appends `nop` sleds (e.g. `nop word cs:[rax + rax]; nop`) to the ends of
-        // blocks for alignment. This padding is not reflected in the LLVM block address map, so
-        // blocks may not appear consecutive.
+        // In the case that an hwtracer block maps to multiple machine blocks, it may be tempting
+        // to check that they are at consecutive address ranges. Unfortunately we can't do this
+        // because LLVM sometimes appends `nop` sleds (e.g. `nop word cs:[rax + rax]; nop`) to the
+        // ends of blocks for alignment. This padding is not reflected in the LLVM block address
+        // map, so blocks may not appear consecutive.
         ents.sort_by(|x, y| x.range.start.partial_cmp(&y.range.start).unwrap());
         for ent in ents {
             if !ent.value.corr_bbs().is_empty() {
@@ -189,8 +189,9 @@ impl<'a> HWTMapper {
                             }
                         }
                     } else {
-                        // Part of a PT block mapped to a machine block in the LLVM block
-                        // address map, but the machine block has no corresponding IR blocks.
+                        // Part of an hwtracer block mapped to a machine block in the LLVM block
+                        // address map, but the machine block has no corresponding AOT LLVM IR
+                        // blocks.
                         //
                         // FIXME: https://github.com/ykjit/yk/issues/388
                         // We *think* this happens because LLVM can introduce extra

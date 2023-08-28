@@ -35,15 +35,15 @@ struct HWTThreadTracer {
 impl ThreadTracer for HWTThreadTracer {
     fn stop_collector(self: Box<Self>) -> Result<Box<dyn RawTrace>, InvalidTraceError> {
         match self.thread_tracer.stop_collector() {
-            Ok(t) => Ok(Box::new(PTTrace(t))),
+            Ok(t) => Ok(Box::new(HWTTrace(t))),
             Err(e) => todo!("{e:?}"),
         }
     }
 }
 
-struct PTTrace(Box<dyn hwtracer::Trace>);
+struct HWTTrace(Box<dyn hwtracer::Trace>);
 
-impl RawTrace for PTTrace {
+impl RawTrace for HWTTrace {
     fn map(self: Box<Self>) -> Result<MappedTrace, InvalidTraceError> {
         let mut mt = HWTMapper::new();
 
