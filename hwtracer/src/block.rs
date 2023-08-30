@@ -27,7 +27,7 @@ pub enum Block {
 }
 
 impl fmt::Debug for Block {
-    /// Format virtual addresses using hexidecimal.
+    /// Format virtual addresses using hexadecimal.
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::VAddrRange {
@@ -37,7 +37,7 @@ impl fmt::Debug for Block {
                 write!(f, "Block({:x}..={:x})", first_instr, last_instr)
             }
             Self::Unknown { stack_adjust } => {
-                write!(f, "UnkonwnBlock(stack_adjust={stack_adjust})")
+                write!(f, "UnknownBlock(stack_adjust={stack_adjust})")
             }
         }
     }
@@ -52,6 +52,11 @@ impl Block {
             first_instr,
             last_instr,
         }
+    }
+
+    /// Create an unknown block.
+    pub fn from_stack_adjust(stack_adjust: isize) -> Self {
+        Self::Unknown { stack_adjust }
     }
 
     /// Returns `true` if `self` represents an unknown virtual address range.
@@ -72,27 +77,10 @@ impl Block {
         }
     }
 
-    /// Create an unknown block.
-    pub fn new_unknown() -> Self {
-        Self::Unknown { stack_adjust: 0 }
-    }
-
     /// Return the stack adjustment value, if applicable.
     pub fn stack_adjust(&self) -> Option<isize> {
         if let Self::Unknown { stack_adjust } = self {
             Some(*stack_adjust)
-        } else {
-            None
-        }
-    }
-
-    /// Return a mutable reference to the stack adjustment value, if applicable.
-    pub fn stack_adjust_mut(&mut self) -> Option<&mut isize> {
-        if let Self::Unknown {
-            ref mut stack_adjust,
-        } = self
-        {
-            Some(stack_adjust)
         } else {
             None
         }

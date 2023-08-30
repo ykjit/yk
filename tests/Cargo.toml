@@ -21,7 +21,7 @@ harness = false
 
 [dependencies]
 clap = { features = ["derive"], version = "4.0.11" }
-hwtracer = { path = "../hwtracer", features = [ "yk_testing" ] }
+hwtracer = { path = "../hwtracer" }
 memmap2 = "0.6"
 regex = "1.5.4"
 tempfile = "3.3.0"

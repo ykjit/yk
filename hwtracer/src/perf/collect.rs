@@ -1,16 +1,15 @@
 //! The Linux Perf trace collector.
 
-use super::PerfCollectorConfig;
-use crate::{
-    c_errors::PerfPTCError,
-    collect::{ThreadTracer, Tracer},
-    decode::ykpt::YkPTBlockIterator,
-    errors::HWTracerError,
-    Block, Trace,
-};
+use crate::perf::PerfCollectorConfig;
+#[cfg(pt)]
+use crate::pt::c_errors::PerfPTCError;
+#[cfg(ykpt)]
+use crate::pt::ykpt::YkPTBlockIterator;
+use crate::{errors::HWTracerError, Block, ThreadTracer, Trace, Tracer};
 use libc::{c_void, free, geteuid, malloc, size_t};
 use std::{convert::TryFrom, fs::File, io::Read, slice, sync::Arc};
 
+#[cfg(pt)]
 extern "C" {
     fn hwt_perf_init_collector(
         conf: *const PerfCollectorConfig,
@@ -40,7 +39,7 @@ impl Tracer for PerfTracer {
 }
 
 impl PerfTracer {
-    pub(super) fn new(config: PerfCollectorConfig) -> Result<Arc<Self>, HWTracerError>
+    pub(crate) fn new(config: PerfCollectorConfig) -> Result<Arc<Self>, HWTracerError>
     where
         Self: Sized,
     {
@@ -92,6 +91,7 @@ pub struct PerfThreadTracer {
 }
 
 impl ThreadTracer for PerfThreadTracer {
+    #[cfg(pt)]
     fn stop_collector(self: Box<Self>) -> Result<Box<dyn Trace>, HWTracerError> {
         let mut cerr = PerfPTCError::new();
         let rc = unsafe { hwt_perf_stop_collector(self.ctx, &mut cerr) };
@@ -109,6 +109,7 @@ impl ThreadTracer for PerfThreadTracer {
 }
 
 impl PerfThreadTracer {
+    #[cfg(pt)]
     fn new(tracer: &PerfTracer) -> Result<Self, HWTracerError> {
         // At the time of writing, we have to use a fresh Perf file descriptor to ensure traces
         // start with a `PSB+` packet sequence. This is required for correct instruction-level and
@@ -180,7 +181,7 @@ impl PerfTrace {
 }
 
 impl Trace for PerfTrace {
-    #[cfg(decoder_ykpt)]
+    #[cfg(ykpt)]
     fn iter_blocks<'a>(&'a self) -> Box<dyn Iterator<Item = Result<Block, HWTracerError>> + 'a> {
         let bytes =
             unsafe { slice::from_raw_parts(self.buf.0, usize::try_from(self.len).unwrap()) };
@@ -214,48 +215,7 @@ impl Drop for PerfTrace {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        collect::{default_tracer_for_platform, perf::PerfTracer, test_helpers, Tracer},
-        errors::HWTracerError,
-        work_loop,
-    };
-    use std::sync::Arc;
-
-    fn mk_collector() -> Arc<dyn Tracer> {
-        default_tracer_for_platform().unwrap()
-    }
-
-    #[test]
-    fn basic_collection() {
-        test_helpers::basic_collection(mk_collector());
-    }
-
-    #[test]
-    pub fn repeated_collection() {
-        test_helpers::repeated_collection(mk_collector());
-    }
-
-    #[test]
-    pub fn repeated_collection_different_collectors() {
-        let tcs = [
-            mk_collector(),
-            mk_collector(),
-            mk_collector(),
-            mk_collector(),
-            mk_collector(),
-            mk_collector(),
-            mk_collector(),
-            mk_collector(),
-            mk_collector(),
-            mk_collector(),
-        ];
-        test_helpers::repeated_collection_different_collectors(tcs);
-    }
-
-    #[test]
-    fn concurrent_collection() {
-        test_helpers::concurrent_collection(mk_collector());
-    }
+    use crate::{errors::HWTracerError, perf::collect::PerfTracer, work_loop, Tracer};
 
     /// Check that a long trace causes the trace buffer to reallocate.
     #[test]

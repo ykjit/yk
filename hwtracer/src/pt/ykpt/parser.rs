@@ -7,8 +7,7 @@ use deku::{
 };
 use std::{cmp::min, iter::Iterator};
 
-pub(in crate::decode::ykpt) mod packets;
-use packets::*;
+use super::packets::*;
 
 #[derive(Clone, Copy, Debug)]
 enum PacketParserState {
@@ -229,16 +228,16 @@ impl<'t> Iterator for PacketParser<'t> {
 
 #[cfg(test)]
 mod tests {
-    use super::{packets::*, PacketParser};
-    use crate::{
-        collect::{default_tracer_for_platform, test_helpers::trace_closure},
-        work_loop,
-    };
+    use super::{super::packets::*, PacketParser};
+    use crate::{trace_closure, work_loop, TracerBuilder, TracerKind};
 
     /// Parse the packets of a small trace, checking the basic structure of the decoded trace.
     #[test]
     fn parse_small_trace() {
-        let tc = default_tracer_for_platform().unwrap();
+        let tc = TracerBuilder::new()
+            .tracer_kind(TracerKind::PT(crate::perf::PerfCollectorConfig::default()))
+            .build()
+            .unwrap();
         let trace = trace_closure(&tc, || work_loop(3));
 
         #[derive(Clone, Copy, Debug)]

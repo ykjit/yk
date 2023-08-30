@@ -2,9 +2,9 @@
 
 use crate::trace::TracedAOTBlock;
 use hwtracer::llvm_blockmap::LLVM_BLOCK_MAP;
-use hwtracer::{HWTracerError, Trace};
+use hwtracer::Trace;
 use libc::c_void;
-use std::{collections::HashMap, convert::TryFrom, ffi::CString};
+use std::{collections::HashMap, convert::TryFrom, error::Error, ffi::CString};
 use ykaddr::{
     addr::{vaddr_to_obj_and_off, vaddr_to_sym_and_obj},
     obj::SELF_BIN_PATH,
@@ -144,12 +144,12 @@ impl<'a> HWTMapper {
     pub fn map_trace(
         &mut self,
         trace: Box<dyn Trace>,
-    ) -> Result<Vec<TracedAOTBlock>, HWTracerError> {
+    ) -> Result<Vec<TracedAOTBlock>, Box<dyn Error>> {
         let mut ret: Vec<TracedAOTBlock> = Vec::new();
 
         for (i, block) in trace.iter_blocks().enumerate() {
             if i > crate::mt::DEFAULT_TRACE_TOO_LONG {
-                return Err(HWTracerError::TraceTooLong);
+                return Err("Trace too long".into());
             }
             let block = block?;
             let irblocks = self.map_block(&block);

@@ -37,10 +37,13 @@
 //! conditional branch instructions. We can still use compiler-assisted decoding for portions of
 //! code that are compiled with ykllvm.
 
+mod packets;
+mod parser;
+
 use crate::{
     errors::HWTracerError,
     llvm_blockmap::{BlockMapEntry, SuccessorKind, LLVM_BLOCK_MAP},
-    Block, Trace,
+    Block,
 };
 use iced_x86;
 use intervaltree::IntervalTree;
@@ -60,12 +63,8 @@ use ykaddr::{
     obj::{PHDR_MAIN_OBJ, PHDR_OBJECT_CACHE, SELF_BIN_PATH},
 };
 
-mod packet_parser;
-use packet_parser::{
-    packets::Bitness,
-    packets::{Packet, PacketKind},
-    PacketParser,
-};
+use packets::{Bitness, Packet, PacketKind};
+use parser::PacketParser;
 
 /// The virtual address ranges of segments that we may need to disassemble.
 static CODE_SEGS: LazyLock<CodeSegs> = LazyLock::new(|| {
@@ -230,7 +229,7 @@ pub(crate) struct YkPTBlockIterator<'t> {
 impl<'t> YkPTBlockIterator<'t> {
     pub(crate) fn new(trace: &'t [u8]) -> Self {
         let mut this = YkPTBlockIterator {
-            next: Cell::new(Ok(Block::new_unknown())),
+            next: Cell::new(Ok(Block::from_stack_adjust(0))),
             parser: PacketParser::new(trace),
             cur_loc: ObjLoc::OtherObjOrUnknown(None),
             tnts: VecDeque::new(),
@@ -288,7 +287,7 @@ impl<'t> YkPTBlockIterator<'t> {
                 u64::try_from(self.off_to_vaddr(&PHDR_MAIN_OBJ, ent.range.end)?).unwrap(),
             ))
         } else {
-            Ok(Block::new_unknown())
+            Ok(Block::from_stack_adjust(0))
         }
     }
 
@@ -316,7 +315,7 @@ impl<'t> YkPTBlockIterator<'t> {
                 self.seek_tip()?;
                 return match self.cur_loc {
                     ObjLoc::MainObj(off) => Ok(Some(self.lookup_block_from_main_bin_offset(off)?)),
-                    ObjLoc::OtherObjOrUnknown(_) => Ok(Some(Block::new_unknown())),
+                    ObjLoc::OtherObjOrUnknown(_) => Ok(Some(Block::from_stack_adjust(0))),
                 };
             }
         }
@@ -378,7 +377,7 @@ impl<'t> YkPTBlockIterator<'t> {
                     if let ObjLoc::MainObj(off) = self.cur_loc {
                         self.lookup_block_from_main_bin_offset(off + 1)
                     } else {
-                        Ok(Block::new_unknown())
+                        Ok(Block::from_stack_adjust(0))
                     }
                 } else {
                     // A regular uncompressed return that relies on a TIP update.
@@ -387,7 +386,7 @@ impl<'t> YkPTBlockIterator<'t> {
                     // `self.cur_loc()`.
                     match self.cur_loc {
                         ObjLoc::MainObj(off) => Ok(self.lookup_block_from_main_bin_offset(off)?),
-                        _ => Ok(Block::new_unknown()),
+                        _ => Ok(Block::from_stack_adjust(0)),
                     }
                 }
             }
@@ -396,7 +395,7 @@ impl<'t> YkPTBlockIterator<'t> {
                 self.seek_tip()?;
                 match self.cur_loc {
                     ObjLoc::MainObj(off) => Ok(self.lookup_block_from_main_bin_offset(off)?),
-                    _ => Ok(Block::new_unknown()),
+                    _ => Ok(Block::from_stack_adjust(0)),
                 }
             }
         }
@@ -422,7 +421,7 @@ impl<'t> YkPTBlockIterator<'t> {
                 } else {
                     self.cur_loc =
                         ObjLoc::OtherObjOrUnknown(Some(self.off_to_vaddr(&PHDR_MAIN_OBJ, b_off)?));
-                    Ok(Block::new_unknown())
+                    Ok(Block::from_stack_adjust(0))
                 }
             }
             ObjLoc::OtherObjOrUnknown(vaddr) => self.skip_foreign(vaddr),
@@ -468,13 +467,11 @@ impl<'t> YkPTBlockIterator<'t> {
     }
 
     fn update_stack_adjust(&mut self, by: isize) {
-        *self
-            .next
-            .get_mut()
-            .as_mut()
-            .unwrap() // safe: we only get here during disassembly, where `self.next` is `Some`.
-            .stack_adjust_mut()
-            .unwrap() += by;
+        // We only get here during disassembly, so `slot` is `Some(Block::StackAdjust)` and both
+        // unwraps in this function cannot fail.
+        let slot = self.next.get_mut().as_mut().unwrap();
+        let new = Block::from_stack_adjust(slot.stack_adjust().unwrap() + by);
+        *slot = new;
     }
 
     fn disassemble(&mut self, start_vaddr: usize) -> Result<Block, HWTracerError> {
@@ -861,12 +858,26 @@ fn is_ret_near(inst: &iced_x86::Instruction) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::{collect::default_tracer_for_platform, decode::test_helpers};
+    use crate::{perf::PerfCollectorConfig, trace_closure, work_loop, TracerBuilder, TracerKind};
 
     #[ignore] // FIXME
     #[test]
+    /// Trace two loops, one 10x larger than the other, then check the proportions match the number
+    /// of block the trace passes through.
     fn ten_times_as_many_blocks() {
-        let tc = default_tracer_for_platform().unwrap();
-        test_helpers::ten_times_as_many_blocks(tc);
+        let tc = TracerBuilder::new()
+            .tracer_kind(TracerKind::PT(PerfCollectorConfig::default()))
+            .build()
+            .unwrap();
+
+        let trace1 = trace_closure(&tc, || work_loop(10));
+        let trace2 = trace_closure(&tc, || work_loop(100));
+
+        let ct1 = trace1.iter_blocks().count();
+        let ct2 = trace2.iter_blocks().count();
+
+        // Should be roughly 10x more blocks in trace2. It won't be exactly 10x, due to the stuff
+        // we trace either side of the loop itself. On a smallish trace, that will be significant.
+        assert!(ct2 > ct1 * 8);
     }
 }

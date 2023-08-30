@@ -18,6 +18,8 @@ fn feature_check(filename: &str, output_file: &str) -> bool {
 }
 
 fn main() {
+    rerun_except(&["README.md"]).unwrap();
+
     let mut c_build = cc::Build::new();
 
     // Generate a `compile_commands.json` database for clangd.
@@ -27,30 +29,20 @@ fn main() {
     }
     c_build.compiler(ccg.wrapper_path());
 
-    // Check if we should build the perf collector.
-    if cfg!(all(target_os = "linux", target_arch = "x86_64"))
-        && feature_check("check_perf.c", "check_perf")
+    #[cfg(target_os = "linux")]
     {
-        c_build.file("src/collect/perf/collect.c");
-        println!("cargo:rustc-cfg=collector_perf");
+        if feature_check("linux_perf.c", "linux_perf") {
+            c_build.file("src/perf/collect.c");
+            println!("cargo:rustc-cfg=linux_perf");
+
+            #[cfg(target_arch = "x86_64")]
+            {
+                println!("cargo:rustc-cfg=ykpt");
+                println!("cargo:rustc-cfg=pt");
+            }
+        }
     }
 
-    #[cfg(target_arch = "x86_64")]
-    println!("cargo:rustc-cfg=decoder_ykpt");
-
-    c_build.include("src/util");
     c_build.compile("hwtracer_c");
-
-    // Additional circumstances under which to re-run this build.rs.
-    rerun_except(&[
-        "README.md",
-        "deny.toml",
-        "LICENSE-*",
-        "COPYRIGHT",
-        "bors.toml",
-        ".buildbot.sh",
-    ])
-    .unwrap();
-
     ccg.generate();
 }

@@ -11,17 +11,14 @@
 //! To that end, the test files in `tests/hwtracer_ykpt` are compiled into test binaries (as a
 //! langtester suite) and then they call into this file to have assertions checked in Rust code.
 
-use hwtracer::{
-    collect::{default_tracer_for_platform, ThreadTracer},
-    Trace,
-};
+use hwtracer::{ThreadTracer, Trace, TracerBuilder};
 use std::ffi::c_void;
 
 #[no_mangle]
 /// The value returned by this function *must* be passed to [__hwykpt_stop_collector] or memory
 /// will leak.
 pub extern "C" fn __hwykpt_start_collector() -> *mut Box<dyn ThreadTracer> {
-    let t = default_tracer_for_platform().unwrap();
+    let t = TracerBuilder::new().build().unwrap();
     let tt = t.start_collector().unwrap();
     // In order to pass the trait object over the FFI, we have to box it twice.
     Box::into_raw(Box::new(tt))
