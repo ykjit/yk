@@ -204,14 +204,10 @@ extern "C" fn ts_reconstruct(ctx: *mut c_void, module: LLVMModuleRef) -> LLVMErr
                 let _val = unsafe { registers.get(*reg) };
                 todo!();
             }
-            SMLocation::Direct(reg, off, _size) => {
-                // When using `llvm.experimental.deoptimize` then direct locations should always be
-                // in relation to RBP.
-                assert_eq!(*reg, 6);
-                let addr = unsafe { registers.get(*reg) as *mut u8 };
-                let addr = unsafe { addr.offset(isize::try_from(*off).unwrap()) };
-                let aot = &aotvals[i];
-                framerec.var_init(aot.val, aot.sfidx, addr as u64);
+            SMLocation::Direct(..) => {
+                // We use a (heap allocated) shadow stack for both the JIT and AOT stack, so
+                // `Direct` locations can't (currently) arise for JITted code.
+                todo!();
             }
             SMLocation::Indirect(reg, off, size) => {
                 let addr = unsafe { registers.get(*reg) as *mut u8 };
