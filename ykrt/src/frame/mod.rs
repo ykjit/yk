@@ -296,29 +296,18 @@ impl FrameReconstructor {
                             registers[usize::try_from(*off - 1).unwrap()] = val;
                         }
                     }
-                    SMLocation::Direct(reg, off, _) => {
-                        if i == 0 {
-                            // Direct locations are pointers into the stack (e.g. alloca or GEP).
-                            // Normally, AOT and JIT have different stacks so copying them over
-                            // would be incorrect. However, since we are using a shadow stack which
-                            // is shared between AOT and JIT these values should be identical and
-                            // thus don't need copying. Interestingly, if we do copy them, this
-                            // leads to segfaults. FIXME: Investigate more.
-                            continue;
-                        }
-                        debug_assert!(op.is_alloca());
-
-                        // The sizes reported by the stackmap aren't always correct. But we can get
-                        // the correct size from the IR.
-                        let eltype = unsafe { LLVMGetAllocatedType(op.get()) };
-                        let size = unsafe { LLVMABISizeOfType(layout, eltype) };
-                        // Direct locations are always be in regards to RBP.
-                        debug_assert_eq!(*reg, RBP_DWARF_NUM);
-                        let temp = unsafe { rbp.offset(isize::try_from(*off).unwrap()) };
-                        debug_assert!(*off < i32::try_from(rec.size).unwrap());
-                        unsafe {
-                            libc::memcpy(temp, val as *const c_void, usize::try_from(size).unwrap())
-                        };
+                    SMLocation::Direct(..) => {
+                        // Direct locations are pointers to the stack, stored on the stack (e.g.
+                        // `alloca` or GEP). Our shadow stack unifies the JIT and AOT stacks,
+                        // replacing them with a heap allocation. For this reason, no `Direct`
+                        // stackmap entries can exist apart from those special-cased in the shadow
+                        // stack pass (e.g. the control point struct and the result of
+                        // `yk_mt_location_new()`). The exceptions only appear (for now) at frame
+                        // index 0 (where the control point is), and since this frame will not be
+                        // re-written by deopt, there's no need to restore those direct locations
+                        // anyway.
+                        debug_assert_eq!(i, 0);
+                        continue;
                     }
                     SMLocation::Indirect(reg, off, size) => {
                         debug_assert_eq!(*reg, RBP_DWARF_NUM);
