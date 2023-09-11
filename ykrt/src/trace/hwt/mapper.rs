@@ -15,7 +15,7 @@ pub struct HWTMapper {
     faddrs: HashMap<CString, *const c_void>,
 }
 
-impl<'a> HWTMapper {
+impl HWTMapper {
     pub fn new() -> Self {
         Self {
             faddrs: HashMap::new(),
