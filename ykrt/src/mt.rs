@@ -394,11 +394,9 @@ impl MT {
                         Arc::clone(&*lk)
                     };
                     mt.stats.timing_state(TimingState::Compiling);
-                    match compiler.compile(irtrace) {
-                        Ok((codeptr, di_tmpfile)) => {
-                            hl_arc.lock().kind = HotLocationKind::Compiled(Arc::new(
-                                CompiledTrace::new(Arc::clone(&mt), codeptr, di_tmpfile),
-                            ));
+                    match compiler.compile(Arc::clone(&mt), irtrace) {
+                        Ok(ct) => {
+                            hl_arc.lock().kind = HotLocationKind::Compiled(Arc::new(ct));
                             mt.stats.trace_compiled_ok();
                         }
                         Err(_) => {
