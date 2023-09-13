@@ -10,10 +10,7 @@ pub(crate) mod jitc_llvm;
 /// The trait that every JIT compiler backend must implement.
 pub trait Compiler: Send + Sync {
     /// Compile an [MappedTrace] into machine code.
-    fn compile(
-        &self,
-        irtrace: MappedTrace,
-    ) -> Result<(*const c_void, Option<NamedTempFile>), Box<dyn Error>>;
+    fn compile(&self, mt: Arc<MT>, irtrace: MappedTrace) -> Result<CompiledTrace, Box<dyn Error>>;
 
     #[cfg(feature = "yk_testing")]
     unsafe fn compile_for_tc_tests(

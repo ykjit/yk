@@ -1,7 +1,11 @@
 //! An LLVM JIT backend. Currently a minimal wrapper around the fact that [MappedTrace]s are hardcoded
 //! to be compiled with LLVM.
 
-use crate::{compile::Compiler, trace::MappedTrace};
+use crate::{
+    compile::{CompiledTrace, Compiler},
+    mt::MT,
+    trace::MappedTrace,
+};
 use libc::{c_void, dlsym};
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
@@ -17,10 +21,7 @@ use tempfile::NamedTempFile;
 pub(crate) struct JITCLLVM;
 
 impl Compiler for JITCLLVM {
-    fn compile(
-        &self,
-        irtrace: MappedTrace,
-    ) -> Result<(*const c_void, Option<NamedTempFile>), Box<dyn Error>> {
+    fn compile(&self, mt: Arc<MT>, irtrace: MappedTrace) -> Result<CompiledTrace, Box<dyn Error>> {
         let (func_names, bbs, trace_len) = self.encode_trace(&irtrace);
 
         let mut faddr_keys = Vec::new();
@@ -50,7 +51,7 @@ impl Compiler for JITCLLVM {
         if ret.is_null() {
             Err("Could not compile trace.".into())
         } else {
-            Ok((ret, di_tmp))
+            Ok(CompiledTrace::new(mt, ret, di_tmp))
         }
     }
 
