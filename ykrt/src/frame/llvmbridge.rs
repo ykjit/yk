@@ -6,7 +6,7 @@ use std::{ffi::CStr, fmt};
 
 // Replicates struct of same name in `ykllvmwrap.cc`.
 #[repr(C)]
-pub(crate) struct BitcodeSection {
+pub struct BitcodeSection {
     pub data: *const u8,
     pub len: u64,
 }

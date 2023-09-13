@@ -2,12 +2,13 @@
 
 use crate::obj::{PHDR_OBJECT_CACHE, SELF_BIN_PATH};
 use cached::proc_macro::cached;
-use libc::{self, c_void, Dl_info};
-use std::mem::MaybeUninit;
+use libc::{self, c_void, dlsym, Dl_info, RTLD_DEFAULT};
 use std::{
     convert::{From, TryFrom},
     ffi::CStr,
+    mem::MaybeUninit,
     path::{Path, PathBuf},
+    ptr,
 };
 
 /// A Rust wrapper around `libc::Dl_info` using FFI types.
@@ -220,5 +221,18 @@ mod tests {
         // Address valid, but symbol not exported (test bin not built with `-Wl,--export-dynamic`).
         let func_vaddr = vaddr_to_sym_and_obj_cant_find_sym as *const fn();
         assert!(vaddr_to_sym_and_obj(func_vaddr as usize).is_none());
+    }
+}
+
+/// A thin wrapper around `dlsym()` for mapping symbol names to virtual addresses.
+///
+/// FIXME: Look for raw uses of `dlsym()` throughout our code base and replace them with a call to
+/// this wrapper. Related: https://github.com/ykjit/yk/issues/835
+pub fn symbol_vaddr(sym: &CStr) -> Option<usize> {
+    let va = unsafe { dlsym(RTLD_DEFAULT, sym.as_ptr()) };
+    if va != ptr::null_mut() {
+        Some(va as usize)
+    } else {
+        None
     }
 }

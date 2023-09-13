@@ -10,6 +10,13 @@ program execution, sometimes significantly.
 
 ## Run-time Variables
 
+### `YKD_NEW_CODEGEN`
+
+When set to `1` forces the JIT to use the new codegen.
+
+This is temporary, and will be removed once the new codegen is production
+quality.
+
 ### `YKD_PRINT_IR`
 
 `YKD_PRINT_IR` accepts a comma-separated list of JIT pipeline stages at which
