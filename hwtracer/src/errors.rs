@@ -3,7 +3,6 @@ use std::error::Error;
 use std::ffi::{self, CStr};
 use std::fmt::{self, Display, Formatter};
 use std::io;
-use std::num::ParseIntError;
 
 #[derive(Debug)]
 pub enum HWTracerError {
@@ -93,12 +92,6 @@ impl From<io::Error> for HWTracerError {
 
 impl From<ffi::NulError> for HWTracerError {
     fn from(err: ffi::NulError) -> Self {
-        HWTracerError::Custom(Box::new(err))
-    }
-}
-
-impl From<ParseIntError> for HWTracerError {
-    fn from(err: ParseIntError) -> Self {
         HWTracerError::Custom(Box::new(err))
     }
 }
