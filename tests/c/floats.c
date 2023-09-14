@@ -1,7 +1,6 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   status: error
-//   stderr: Floating point instructions are not supported yet...
+//   status: success
 
 #include <stdio.h>
 #include <yk.h>
