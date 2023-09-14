@@ -1,9 +1,9 @@
 use libc::{c_int, strerror};
-use std::error::Error;
-use std::ffi::{self, CStr};
-use std::fmt::{self, Display, Formatter};
-use std::io;
-use std::num::ParseIntError;
+use std::{
+    error::Error,
+    ffi::CStr,
+    fmt::{self, Display, Formatter},
+};
 
 #[derive(Debug)]
 pub enum HWTracerError {
@@ -31,8 +31,6 @@ pub enum HWTracerError {
     NoMorePackets,
     /// The trace was interrupted by an asynchronous event.
     TraceInterrupted,
-    /// Any other error.
-    Custom(Box<dyn Error>),
 }
 
 impl Display for HWTracerError {
@@ -51,7 +49,6 @@ impl Display for HWTracerError {
             }
             HWTracerError::AlreadyStopped => write!(f, "Can't stop an inactice collector"),
             HWTracerError::BadConfig(ref s) => write!(f, "{}", s),
-            HWTracerError::Custom(ref bx) => write!(f, "{}", bx),
             HWTracerError::TraceParseError(ref s) => write!(f, "failed to parse trace: {}", s),
             HWTracerError::NoMorePackets => write!(f, "End of packet stream"),
             HWTracerError::DisasmFail(ref s) => write!(f, "failed to disassemble: {}", s),
@@ -75,30 +72,11 @@ impl Error for HWTracerError {
             HWTracerError::AlreadyStopped => None,
             HWTracerError::BadConfig(_) => None,
             HWTracerError::Errno(_) => None,
-            HWTracerError::Custom(ref bx) => Some(bx.as_ref()),
             HWTracerError::TraceParseError(_) => None,
             HWTracerError::Unknown => None,
             HWTracerError::NoMorePackets => None,
             HWTracerError::DisasmFail(_) => None,
             HWTracerError::TraceInterrupted => None,
         }
-    }
-}
-
-impl From<io::Error> for HWTracerError {
-    fn from(err: io::Error) -> Self {
-        HWTracerError::Custom(Box::new(err))
-    }
-}
-
-impl From<ffi::NulError> for HWTracerError {
-    fn from(err: ffi::NulError) -> Self {
-        HWTracerError::Custom(Box::new(err))
-    }
-}
-
-impl From<ParseIntError> for HWTracerError {
-    fn from(err: ParseIntError) -> Self {
-        HWTracerError::Custom(Box::new(err))
     }
 }

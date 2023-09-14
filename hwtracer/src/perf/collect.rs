@@ -7,7 +7,7 @@ use crate::pt::c_errors::PerfPTCError;
 use crate::pt::ykpt::YkPTBlockIterator;
 use crate::{errors::HWTracerError, Block, ThreadTracer, Trace, Tracer};
 use libc::{c_void, free, geteuid, malloc, size_t};
-use std::{convert::TryFrom, fs::File, io::Read, slice, sync::Arc};
+use std::{convert::TryFrom, fs::read_to_string, io::Read, slice, sync::Arc};
 
 #[cfg(pt)]
 extern "C" {
@@ -65,16 +65,14 @@ impl PerfTracer {
         // FIXME: We just assume that we are collecting a PT trace.
         // https://github.com/ykjit/hwtracer/issues/100
         if !unsafe { geteuid() } == 0 {
-            let mut f = File::open(PERF_PERMS_PATH)?;
-            let mut buf = String::new();
-            f.read_to_string(&mut buf)?;
-            let perm = buf.trim().parse::<i8>()?;
-            if perm != -1 {
-                let msg = format!(
-                    "Tracing not permitted: you must be root or {} must contain -1",
-                    PERF_PERMS_PATH
-                );
-                return Err(HWTracerError::Permissions(msg));
+            match read_to_string(PERF_PERMS_PATH) {
+                Ok(x) if x.trim() == "-1" => (),
+                _ => {
+                    let msg = format!(
+                        "Tracing not permitted: you must be root or {PERF_PERMS_PATH} must contain -1",
+                    );
+                    return Err(HWTracerError::Permissions(msg));
+                }
             }
         }
 
