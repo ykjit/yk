@@ -273,6 +273,13 @@ impl FrameReconstructor {
                 // will deal with them as they appear.
                 match l {
                     SMLocation::Register(reg, _size, off, extra) => {
+                        if *reg > 16 {
+                            // FIXME: Implement deoptimisation into floating point registers.
+                            //        LLVM stackmaps use DWARF register number mapping.
+                            //        See page 57 in https://refspecs.linuxbase.org /elf/x86_64-abi-0.99.pdf
+                            //        Anything above 16 (most notably floating registers) we currently do not support.
+                            todo!()
+                        }
                         registers[usize::from(*reg)] = val;
                         if *extra != 0 {
                             // The stackmap has recorded an additional register we need to write
