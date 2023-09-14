@@ -163,11 +163,11 @@ impl<'t> PacketParser<'t> {
                 return Ok(pkt);
             }
         }
-        Err(HWTracerError::TraceParseError(format!(
+        panic!(
             "In state {:?}, failed to parse packet from bytes: {}",
             self.state,
             self.byte_stream_str(8, ", ")
-        )))
+        );
     }
 
     /// Returns a string showing a binary formatted peek at the next `nbytes` bytes of

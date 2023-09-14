@@ -13,10 +13,10 @@ mod perf;
 #[cfg(pt)]
 mod pt;
 
-pub use errors::HWTracerError;
+pub use errors::{HWTracerError, TemporaryErrorKind};
 #[cfg(test)]
 use std::time::SystemTime;
-use std::{error::Error, fmt::Debug, sync::Arc};
+use std::{fmt::Debug, sync::Arc};
 
 /// A builder for [Tracer]s. By default, will attempt to use the most appropriate [Tracer] for your
 /// platform/configuration. This can be overridden with [TracerBuilder::tracer_kind] and
@@ -49,17 +49,17 @@ impl TracerBuilder {
     }
 
     /// Build this [TracerBuild] and produce a [Tracer] as output.
-    pub fn build(self) -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
+    pub fn build(self) -> Result<Arc<dyn Tracer>, HWTracerError> {
         match self.tracer_kind {
             #[cfg(all(linux_perf, pt))]
             Some(TracerKind::PT(config)) => {
                 if !crate::pt::pt_supported() {
-                    Err("CPU doesn't support the Processor Trace (PT) feature".into())
+                    Err(HWTracerError::ConfigError("CPU doesn't support the Processor Trace (PT) feature".into()))
                 } else {
                     Ok(crate::perf::collect::PerfTracer::new(config)?)
                 }
             }
-            None => Err("No tracer specified: that probably means that no tracers are supported on this platform/configuration".into())
+            None => Err(HWTracerError::ConfigError("No tracer specified: that probably means that no tracers are supported on this platform/configuration".into()))
         }
     }
 }

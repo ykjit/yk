@@ -5,9 +5,12 @@ use crate::perf::PerfCollectorConfig;
 use crate::pt::c_errors::PerfPTCError;
 #[cfg(ykpt)]
 use crate::pt::ykpt::YkPTBlockIterator;
-use crate::{errors::HWTracerError, Block, ThreadTracer, Trace, Tracer};
+use crate::{
+    errors::{HWTracerError, TemporaryErrorKind},
+    Block, ThreadTracer, Trace, Tracer,
+};
 use libc::{c_void, free, geteuid, malloc, size_t};
-use std::{convert::TryFrom, fs::read_to_string, io::Read, slice, sync::Arc};
+use std::{convert::TryFrom, fs::read_to_string, slice, sync::Arc};
 
 #[cfg(pt)]
 extern "C" {
@@ -48,14 +51,14 @@ impl PerfTracer {
             (v & (v - 1)) == 0
         }
         if !power_of_2(config.data_bufsize) {
-            return Err(HWTracerError::BadConfig(String::from(
-                "data_bufsize must be a positive power of 2",
-            )));
+            return Err(HWTracerError::ConfigError(
+                "data_bufsize must be a positive power of 2".into(),
+            ));
         }
         if !power_of_2(config.aux_bufsize) {
-            return Err(HWTracerError::BadConfig(String::from(
-                "aux_bufsize must be a positive power of 2",
-            )));
+            return Err(HWTracerError::ConfigError(
+                "aux_bufsize must be a positive power of 2".into(),
+            ));
         }
 
         // Check we have permissions to collect a PT trace using perf.
@@ -68,10 +71,7 @@ impl PerfTracer {
             match read_to_string(PERF_PERMS_PATH) {
                 Ok(x) if x.trim() == "-1" => (),
                 _ => {
-                    let msg = format!(
-                        "Tracing not permitted: you must be root or {PERF_PERMS_PATH} must contain -1",
-                    );
-                    return Err(HWTracerError::Permissions(msg));
+                    return Err(HWTracerError::ConfigError(format!("Tracing not permitted: you must be root or {PERF_PERMS_PATH} must contain -1")));
                 }
             }
         }
@@ -168,7 +168,7 @@ impl PerfTrace {
     pub(crate) fn new(capacity: size_t) -> Result<Self, HWTracerError> {
         let buf = unsafe { malloc(capacity) as *mut u8 };
         if buf.is_null() {
-            return Err(HWTracerError::Unknown);
+            return Err(HWTracerError::Temporary(TemporaryErrorKind::CantAllocate));
         }
         Ok(Self {
             buf: PerfTraceBuf(buf),
@@ -241,7 +241,7 @@ mod tests {
             ..PerfCollectorConfig::default()
         };
         match PerfTracer::new(cfg) {
-            Err(HWTracerError::BadConfig(s))
+            Err(HWTracerError::ConfigError(s))
                 if s == "data_bufsize must be a positive power of 2" => {}
             _ => panic!(),
         }
@@ -255,7 +255,7 @@ mod tests {
             ..PerfCollectorConfig::default()
         };
         match PerfTracer::new(cfg) {
-            Err(HWTracerError::BadConfig(s))
+            Err(HWTracerError::ConfigError(s))
                 if s == "aux_bufsize must be a positive power of 2" => {}
             _ => panic!(),
         }

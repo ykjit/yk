@@ -41,7 +41,7 @@ mod packets;
 mod parser;
 
 use crate::{
-    errors::HWTracerError,
+    errors::{HWTracerError, TemporaryErrorKind},
     llvm_blockmap::{BlockMapEntry, SuccessorKind, LLVM_BLOCK_MAP},
     Block,
 };
@@ -246,22 +246,12 @@ impl<'t> YkPTBlockIterator<'t> {
 
     /// Convert a file offset to a virtual address.
     fn off_to_vaddr(&self, obj: &Path, off: u64) -> Result<usize, HWTracerError> {
-        match ykaddr::addr::off_to_vaddr(obj, off) {
-            Some(vaddr) => Ok(vaddr),
-            None => Err(HWTracerError::TraceParseError(
-                "failed to convert an offset to a virtual address".to_owned(),
-            )),
-        }
+        Ok(ykaddr::addr::off_to_vaddr(obj, off).unwrap())
     }
 
     /// Convert a virtual address to a file offset.
     fn vaddr_to_off(&self, vaddr: usize) -> Result<(PathBuf, u64), HWTracerError> {
-        match ykaddr::addr::vaddr_to_obj_and_off(vaddr) {
-            Some(tup) => Ok(tup),
-            None => Err(HWTracerError::TraceParseError(
-                "failed to convert a virtual address to an offset".to_owned(),
-            )),
-        }
+        Ok(ykaddr::addr::vaddr_to_obj_and_off(vaddr).unwrap())
     }
 
     /// Looks up the blockmap entry for the given offset in the "main object binary".
@@ -479,8 +469,7 @@ impl<'t> YkPTBlockIterator<'t> {
         let mut dis =
             iced_x86::Decoder::with_ip(64, seg.slice, u64::try_from(seg.vaddrs.start).unwrap(), 0);
         dis.set_ip(u64::try_from(start_vaddr).unwrap());
-        dis.set_position(start_vaddr - seg.vaddrs.start)
-            .map_err(|_| HWTracerError::DisasmFail("failed to set position".to_owned()))?;
+        dis.set_position(start_vaddr - seg.vaddrs.start).unwrap();
         let mut reposition: bool = false;
 
         // `as usize` below are safe casts from raw pointer to pointer-sized integer.
@@ -521,8 +510,7 @@ impl<'t> YkPTBlockIterator<'t> {
             }
 
             if reposition {
-                dis.set_position(vaddr - seg.vaddrs.start)
-                    .map_err(|_| HWTracerError::DisasmFail("failed to reposition".to_owned()))?;
+                dis.set_position(vaddr - seg.vaddrs.start).unwrap();
                 reposition = false;
             }
 
@@ -698,7 +686,7 @@ impl<'t> YkPTBlockIterator<'t> {
         if let Some(pkt_or_err) = self.parser.next() {
             pkt_or_err
         } else {
-            Err(HWTracerError::NoMorePackets)
+            return Err(HWTracerError::NoMorePackets);
         }
     }
 
@@ -708,7 +696,9 @@ impl<'t> YkPTBlockIterator<'t> {
             let mut pkt = pkt_or_err?;
 
             if pkt.kind() == PacketKind::OVF {
-                return Err(HWTracerError::HWBufferOverflow);
+                return Err(HWTracerError::Temporary(
+                    TemporaryErrorKind::TraceBufferOverflow,
+                ));
             }
 
             if pkt.kind() == PacketKind::FUP && self.pge && !self.unbound_modes {
@@ -724,11 +714,15 @@ impl<'t> YkPTBlockIterator<'t> {
                 // FUPs more generally.
                 pkt = self.seek_tnt_or_tip()?;
                 if pkt.kind() != PacketKind::TIPPGD {
-                    return Err(HWTracerError::TraceInterrupted);
+                    return Err(HWTracerError::Temporary(
+                        TemporaryErrorKind::TraceInterrupted,
+                    ));
                 }
                 pkt = self.seek_tnt_or_tip()?;
                 if pkt.kind() != PacketKind::TIPPGE {
-                    return Err(HWTracerError::TraceInterrupted);
+                    return Err(HWTracerError::Temporary(
+                        TemporaryErrorKind::TraceInterrupted,
+                    ));
                 }
                 if let Some(pkt_or_err) = self.parser.next() {
                     pkt = pkt_or_err?;
@@ -806,7 +800,7 @@ impl<'t> YkPTBlockIterator<'t> {
 
             Ok(pkt)
         } else {
-            Err(HWTracerError::NoMorePackets)
+            return Err(HWTracerError::NoMorePackets);
         }
     }
 }
