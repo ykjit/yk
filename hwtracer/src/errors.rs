@@ -13,9 +13,6 @@ pub enum HWTracerError {
     /// retrying the same operation again will succeed.
     #[error("Temporary error: {0}")]
     Temporary(TemporaryErrorKind),
-    /// Temporary hack.
-    #[error("Temporary hack")]
-    NoMorePackets,
 }
 
 #[derive(Debug)]
