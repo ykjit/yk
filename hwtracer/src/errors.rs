@@ -1,6 +1,6 @@
 use libc::{c_int, strerror};
 use std::error::Error;
-use std::ffi::{self, CStr};
+use std::ffi::CStr;
 use std::fmt::{self, Display, Formatter};
 use std::io;
 
@@ -81,17 +81,5 @@ impl Error for HWTracerError {
             HWTracerError::DisasmFail(_) => None,
             HWTracerError::TraceInterrupted => None,
         }
-    }
-}
-
-impl From<io::Error> for HWTracerError {
-    fn from(err: io::Error) -> Self {
-        HWTracerError::Custom(Box::new(err))
-    }
-}
-
-impl From<ffi::NulError> for HWTracerError {
-    fn from(err: ffi::NulError) -> Self {
-        HWTracerError::Custom(Box::new(err))
     }
 }
