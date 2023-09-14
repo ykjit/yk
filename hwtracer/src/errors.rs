@@ -1,8 +1,9 @@
 use libc::{c_int, strerror};
-use std::error::Error;
-use std::ffi::CStr;
-use std::fmt::{self, Display, Formatter};
-use std::io;
+use std::{
+    error::Error,
+    ffi::CStr,
+    fmt::{self, Display, Formatter},
+};
 
 #[derive(Debug)]
 pub enum HWTracerError {
