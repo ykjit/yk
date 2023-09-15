@@ -102,7 +102,9 @@ pub(crate) struct NewFramesInfo {
 compile_error!("__llvm_deoptimize() not yet implemented for this platform");
 
 /// The `__llvm__deoptimize()` function required by `llvm.experimental.deoptimize` intrinsic, that
-/// is called during a guard failure.
+/// is called during a guard failure. Forwards all its arguments to `__ykrt_deopt` which does the
+/// actual deoptimisation. See that function's description for more details. Note, that `ctr` will
+/// be cast into an `Arc` inside `__ykrt_deopt` and then dropped.
 #[cfg(target_arch = "x86_64")]
 #[naked]
 #[no_mangle]
@@ -265,7 +267,9 @@ extern "C" fn ts_reconstruct(ctx: *mut c_void, _module: LLVMModuleRef) -> LLVMEr
 ///
 /// The arguments are as follows:
 ///
-///   * `ctr`: The [CompiledTrace].
+///   * `ctr`: An `Arc<CompiledTrace>` that has been cast to a `*const CompiledTrace`. Will be cast
+///      back into an `Arc` by this function and then dropped before deoptimisation or execution of
+///      a side-trace.
 ///   * `frameaddr`: Address of the control point's frame.
 ///   * `aotvals`: Struct describing the location of the AOT live variables.
 ///   * `actframes`: Address and size of vector holding active AOT frame information needed to
@@ -287,7 +291,10 @@ unsafe extern "C" fn __ykrt_deopt(
     jitcallstack: *const c_void,
     rsp: *const c_void,
 ) -> NewFramesInfo {
-    // Put the CompiledTrace back into an Arc, so it is dropped properly.
+    // The `ctr` argument is a `Arc<CompiledTrace>` that is being cloned prior to each trace
+    // execution. Traces can only return via this deopt, so we can (and must) turn this back into
+    // an `Arc` so it will be dropped at the end of this function. Unless, we are going to execute
+    // a side-trace. In that case this function will not return and we need to drop `ctr` manually.
     let ctr = Arc::from_raw(ctr);
 
     let guardid = GuardId(guardid);
@@ -338,8 +345,13 @@ unsafe extern "C" fn __ykrt_deopt(
             // Execute the side trace.
             let f = mem::transmute::<
                 _,
-                unsafe extern "C" fn(*mut c_void, *const CompiledTrace, *const c_void) -> (),
+                unsafe extern "C" fn(*mut c_void, *const CompiledTrace, *const c_void) -> !,
             >(st.entry());
+
+            // This `Arc<CompiledTrace>` was cloned before executing this trace. Since the
+            // side-trace will not return, we need to drop `ctr` manually here to avoid leaks.
+            drop(ctr);
+
             #[cfg(feature = "yk_jitstate_debug")]
             print_jit_state("execute-side-trace");
             // FIXME: Calling this function overwrites the current (Rust) function frame,
@@ -349,10 +361,6 @@ unsafe extern "C" fn __ykrt_deopt(
                 Arc::into_raw(st),
                 frameaddr,
             );
-            return NewFramesInfo {
-                src: std::ptr::null(),
-                dst: std::ptr::null(),
-            };
         }
     }
 
