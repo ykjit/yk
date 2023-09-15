@@ -1,6 +1,6 @@
 //! C-level errors.
 
-use crate::HWTracerError;
+use crate::{HWTracerError, TemporaryErrorKind};
 use libc::c_int;
 
 #[repr(C)]
@@ -45,14 +45,22 @@ impl From<PerfPTCError> for HWTracerError {
         // If this assert crashes out, then we forgot a hwt_set_cerr() somewhere in C code.
         debug_assert!(err.typ != PerfPTCErrorKind::Unused);
         match err.typ {
-            PerfPTCErrorKind::Unused => HWTracerError::Unknown,
-            PerfPTCErrorKind::Unknown => HWTracerError::Unknown,
-            PerfPTCErrorKind::Errno => HWTracerError::Errno(err.code),
+            PerfPTCErrorKind::Unused => {
+                HWTracerError::Unrecoverable("PerfPTCErrorKind::Unused".into())
+            }
+            PerfPTCErrorKind::Unknown => {
+                HWTracerError::Unrecoverable("PerfPTCErrorKind::Unknown".into())
+            }
+            PerfPTCErrorKind::Errno => {
+                HWTracerError::Unrecoverable(format!("c set errnor {}", err.code))
+            }
             #[cfg(pt)]
             PerfPTCErrorKind::PT => {
                 // Overflow is a special case with its own error type.
                 match err.code {
-                    v if v == PTErrorCode::Overflow as c_int => HWTracerError::HWBufferOverflow,
+                    v if v == PTErrorCode::Overflow as c_int => {
+                        HWTracerError::Temporary(TemporaryErrorKind::TraceBufferOverflow)
+                    }
                     _ => unreachable!(),
                 }
             }

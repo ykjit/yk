@@ -6,7 +6,7 @@ use crate::{
     mt::MT,
     trace::MappedTrace,
 };
-use libc::{c_void, dlsym};
+use libc::dlsym;
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
 use std::{

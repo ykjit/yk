@@ -41,7 +41,7 @@ mod packets;
 mod parser;
 
 use crate::{
-    errors::HWTracerError,
+    errors::{HWTracerError, TemporaryErrorKind},
     llvm_blockmap::{BlockMapEntry, SuccessorKind, LLVM_BLOCK_MAP},
     Block,
 };
@@ -58,6 +58,7 @@ use std::{
     ptr, slice,
     sync::LazyLock,
 };
+use thiserror::Error;
 use ykaddr::{
     self,
     obj::{PHDR_MAIN_OBJ, PHDR_OBJECT_CACHE, SELF_BIN_PATH},
@@ -209,7 +210,7 @@ impl CompressedReturns {
 pub(crate) struct YkPTBlockIterator<'t> {
     /// The next block that the iterator will hand out. We lookahead like this so that we can
     /// retrospectively add the stack adjustment value of the block (if neccessary).
-    next: Cell<Result<Block, HWTracerError>>,
+    next: Cell<Result<Block, IteratorError>>,
     /// The packet iterator used to drive the decoding process.
     parser: PacketParser<'t>,
     /// Keeps track of where we are in the traced binary.
@@ -245,23 +246,13 @@ impl<'t> YkPTBlockIterator<'t> {
     }
 
     /// Convert a file offset to a virtual address.
-    fn off_to_vaddr(&self, obj: &Path, off: u64) -> Result<usize, HWTracerError> {
-        match ykaddr::addr::off_to_vaddr(obj, off) {
-            Some(vaddr) => Ok(vaddr),
-            None => Err(HWTracerError::TraceParseError(
-                "failed to convert an offset to a virtual address".to_owned(),
-            )),
-        }
+    fn off_to_vaddr(&self, obj: &Path, off: u64) -> Result<usize, IteratorError> {
+        Ok(ykaddr::addr::off_to_vaddr(obj, off).unwrap())
     }
 
     /// Convert a virtual address to a file offset.
-    fn vaddr_to_off(&self, vaddr: usize) -> Result<(PathBuf, u64), HWTracerError> {
-        match ykaddr::addr::vaddr_to_obj_and_off(vaddr) {
-            Some(tup) => Ok(tup),
-            None => Err(HWTracerError::TraceParseError(
-                "failed to convert a virtual address to an offset".to_owned(),
-            )),
-        }
+    fn vaddr_to_off(&self, vaddr: usize) -> Result<(PathBuf, u64), IteratorError> {
+        Ok(ykaddr::addr::vaddr_to_obj_and_off(vaddr).unwrap())
     }
 
     /// Looks up the blockmap entry for the given offset in the "main object binary".
@@ -280,7 +271,7 @@ impl<'t> YkPTBlockIterator<'t> {
     }
 
     // Lookup a block from an offset in the "main binary" (i.e. not from a shared object).
-    fn lookup_block_from_main_bin_offset(&mut self, off: u64) -> Result<Block, HWTracerError> {
+    fn lookup_block_from_main_bin_offset(&mut self, off: u64) -> Result<Block, IteratorError> {
         if let Some(ent) = self.lookup_blockmap_entry(off) {
             Ok(Block::from_vaddr_range(
                 u64::try_from(self.off_to_vaddr(&PHDR_MAIN_OBJ, ent.range.start)?).unwrap(),
@@ -301,7 +292,7 @@ impl<'t> YkPTBlockIterator<'t> {
         &mut self,
         b_off: u64,
         ent: &BlockMapEntry,
-    ) -> Result<Option<Block>, HWTracerError> {
+    ) -> Result<Option<Block>, IteratorError> {
         if let Some(call_info) = ent.call_offs().iter().find(|c| c.callsite_off() >= b_off) {
             self.comprets
                 .push(CompRetAddr::AfterCall(call_info.callsite_off()));
@@ -324,7 +315,7 @@ impl<'t> YkPTBlockIterator<'t> {
     }
 
     /// Follow the successor of the block described by the blockmap entry `ent`.
-    fn follow_blockmap_successor(&mut self, ent: &BlockMapEntry) -> Result<Block, HWTracerError> {
+    fn follow_blockmap_successor(&mut self, ent: &BlockMapEntry) -> Result<Block, IteratorError> {
         match ent.successor() {
             SuccessorKind::Unconditional { target } => {
                 if let Some(target_off) = target {
@@ -401,7 +392,7 @@ impl<'t> YkPTBlockIterator<'t> {
         }
     }
 
-    fn do_next(&mut self) -> Result<Block, HWTracerError> {
+    fn do_next(&mut self) -> Result<Block, IteratorError> {
         // Read as far ahead as we can using static successor info encoded into the blockmap.
         match self.cur_loc {
             ObjLoc::MainObj(b_off) => {
@@ -442,7 +433,7 @@ impl<'t> YkPTBlockIterator<'t> {
     // Determines if a return from a function was compressed in the packet stream.
     //
     // In the event that the return is compressed, the taken decision is popped from `self.tnts`.
-    fn is_return_compressed(&mut self) -> Result<bool, HWTracerError> {
+    fn is_return_compressed(&mut self) -> Result<bool, IteratorError> {
         let compressed = if !self.tnts.is_empty() {
             // As the Intel manual explains, when a return is *not* compressed, the CPU's TNT
             // buffers are flushed, so if we have any buffered TNT decisions, then this must be a
@@ -474,13 +465,12 @@ impl<'t> YkPTBlockIterator<'t> {
         *slot = new;
     }
 
-    fn disassemble(&mut self, start_vaddr: usize) -> Result<Block, HWTracerError> {
+    fn disassemble(&mut self, start_vaddr: usize) -> Result<Block, IteratorError> {
         let mut seg = CODE_SEGS.seg(start_vaddr);
         let mut dis =
             iced_x86::Decoder::with_ip(64, seg.slice, u64::try_from(seg.vaddrs.start).unwrap(), 0);
         dis.set_ip(u64::try_from(start_vaddr).unwrap());
-        dis.set_position(start_vaddr - seg.vaddrs.start)
-            .map_err(|_| HWTracerError::DisasmFail("failed to set position".to_owned()))?;
+        dis.set_position(start_vaddr - seg.vaddrs.start).unwrap();
         let mut reposition: bool = false;
 
         // `as usize` below are safe casts from raw pointer to pointer-sized integer.
@@ -521,8 +511,7 @@ impl<'t> YkPTBlockIterator<'t> {
             }
 
             if reposition {
-                dis.set_position(vaddr - seg.vaddrs.start)
-                    .map_err(|_| HWTracerError::DisasmFail("failed to reposition".to_owned()))?;
+                dis.set_position(vaddr - seg.vaddrs.start).unwrap();
                 reposition = false;
             }
 
@@ -630,7 +619,7 @@ impl<'t> YkPTBlockIterator<'t> {
     }
 
     /// Skip over "foreign code" for which we have no blockmap info for.
-    fn skip_foreign(&mut self, start_vaddr: Option<usize>) -> Result<Block, HWTracerError> {
+    fn skip_foreign(&mut self, start_vaddr: Option<usize>) -> Result<Block, IteratorError> {
         let start_vaddr = match start_vaddr {
             Some(v) => v,
             None => {
@@ -650,7 +639,7 @@ impl<'t> YkPTBlockIterator<'t> {
     }
 
     /// Keep decoding packets until we encounter a TNT packet.
-    fn seek_tnt(&mut self) -> Result<(), HWTracerError> {
+    fn seek_tnt(&mut self) -> Result<(), IteratorError> {
         loop {
             let pkt = self.packet()?; // Potentially populates `self.tnts`.
             if pkt.tnts().is_some() {
@@ -660,7 +649,7 @@ impl<'t> YkPTBlockIterator<'t> {
     }
 
     /// Keep decoding packets until we encounter one with a TIP update.
-    fn seek_tip(&mut self) -> Result<(), HWTracerError> {
+    fn seek_tip(&mut self) -> Result<(), IteratorError> {
         loop {
             if self.packet()?.kind().encodes_target_ip() {
                 // Note that self.packet() will have update `self.cur_loc`.
@@ -673,7 +662,7 @@ impl<'t> YkPTBlockIterator<'t> {
     ///
     /// The packet is returned so that the consumer can determine which kind of packet was
     /// encountered.
-    fn seek_tnt_or_tip(&mut self) -> Result<Packet, HWTracerError> {
+    fn seek_tnt_or_tip(&mut self) -> Result<Packet, IteratorError> {
         loop {
             let pkt = self.packet()?;
             if pkt.kind().encodes_target_ip() || pkt.tnts().is_some() {
@@ -684,31 +673,33 @@ impl<'t> YkPTBlockIterator<'t> {
 
     /// Skip packets up until and including the next `PSBEND` packet. The first packet after the
     /// `PSBEND` is returned.
-    fn skip_psb_plus(&mut self) -> Result<Packet, HWTracerError> {
+    fn skip_psb_plus(&mut self) -> Result<Packet, IteratorError> {
         loop {
             if let Some(pkt_or_err) = self.parser.next() {
                 if pkt_or_err?.kind() == PacketKind::PSBEND {
                     break;
                 }
             } else {
-                return Err(HWTracerError::NoMorePackets);
+                panic!("No more packets");
             }
         }
 
         if let Some(pkt_or_err) = self.parser.next() {
-            pkt_or_err
+            Ok(pkt_or_err?)
         } else {
-            Err(HWTracerError::NoMorePackets)
+            Err(IteratorError::NoMorePackets)
         }
     }
 
     /// Fetch the next packet and update iterator state.
-    fn packet(&mut self) -> Result<Packet, HWTracerError> {
+    fn packet(&mut self) -> Result<Packet, IteratorError> {
         if let Some(pkt_or_err) = self.parser.next() {
             let mut pkt = pkt_or_err?;
 
             if pkt.kind() == PacketKind::OVF {
-                return Err(HWTracerError::HWBufferOverflow);
+                return Err(IteratorError::HWTracerError(HWTracerError::Temporary(
+                    TemporaryErrorKind::TraceBufferOverflow,
+                )));
             }
 
             if pkt.kind() == PacketKind::FUP && self.pge && !self.unbound_modes {
@@ -724,16 +715,20 @@ impl<'t> YkPTBlockIterator<'t> {
                 // FUPs more generally.
                 pkt = self.seek_tnt_or_tip()?;
                 if pkt.kind() != PacketKind::TIPPGD {
-                    return Err(HWTracerError::TraceInterrupted);
+                    return Err(IteratorError::HWTracerError(HWTracerError::Temporary(
+                        TemporaryErrorKind::TraceInterrupted,
+                    )));
                 }
                 pkt = self.seek_tnt_or_tip()?;
                 if pkt.kind() != PacketKind::TIPPGE {
-                    return Err(HWTracerError::TraceInterrupted);
+                    return Err(IteratorError::HWTracerError(HWTracerError::Temporary(
+                        TemporaryErrorKind::TraceInterrupted,
+                    )));
                 }
                 if let Some(pkt_or_err) = self.parser.next() {
                     pkt = pkt_or_err?;
                 } else {
-                    return Err(HWTracerError::NoMorePackets);
+                    return Err(IteratorError::NoMorePackets);
                 }
             }
 
@@ -806,7 +801,7 @@ impl<'t> YkPTBlockIterator<'t> {
 
             Ok(pkt)
         } else {
-            Err(HWTracerError::NoMorePackets)
+            Err(IteratorError::NoMorePackets)
         }
     }
 }
@@ -823,9 +818,9 @@ impl<'t> Iterator for YkPTBlockIterator<'t> {
         // updated).
         let new_next = match self.next.get_mut() {
             Ok(_) => self.do_next(),
-            Err(HWTracerError::NoMorePackets) => {
+            Err(IteratorError::NoMorePackets) => {
                 // If the iterator is exhausted, it remains exhausted.
-                Err(HWTracerError::NoMorePackets)
+                return None;
             }
             Err(_) => {
                 // In the case where the iterator yields an error for the first time, subsequent
@@ -833,14 +828,30 @@ impl<'t> Iterator for YkPTBlockIterator<'t> {
                 // initial error, giving that out for each subsequent call to `next()`, but that
                 // would require us to clone the error. That is hard for `HWTracerError`, because
                 // one variant contains a `dyn Error` which isn't `Clone`.
-                Err(HWTracerError::NoMorePackets)
+                return None;
             }
         };
         match self.next.replace(new_next) {
             Ok(b) => Some(Ok(b)),
-            Err(HWTracerError::NoMorePackets) => None,
-            Err(e) => Some(Err(e)),
+            Err(IteratorError::NoMorePackets) => None,
+            Err(IteratorError::HWTracerError(e)) => Some(Err(e)),
         }
+    }
+}
+
+/// An internal-to-this-module struct which allows the block iterator to distinguish "we reached
+/// the end of the packet stream in an expected manner" from more serious errors.
+#[derive(Debug, Error)]
+enum IteratorError {
+    #[error("No more packets")]
+    NoMorePackets,
+    #[error("HWTracerError: {0}")]
+    HWTracerError(HWTracerError),
+}
+
+impl From<HWTracerError> for IteratorError {
+    fn from(e: HWTracerError) -> Self {
+        IteratorError::HWTracerError(e)
     }
 }
 
