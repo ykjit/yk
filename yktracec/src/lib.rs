@@ -23,6 +23,9 @@ extern "C" {
         llvmbc_len: u64,
         debuginfo_fd: c_int,
         debuginfo_path: *const c_char,
+        jitcallstack: *const c_void,
+        aotvalsptr: *const c_void,
+        aotvalslen: usize,
     ) -> *const c_void;
 
     #[cfg(feature = "yk_testing")]

@@ -54,6 +54,9 @@ const char *PromoteRecFnName = "__yk_promote";
 // The name prefix used for blocks that are branched to when a guard succeeds.
 #define GUARD_SUCCESS_BLOCK_NAME "guardsuccess"
 
+// Special ID for the final guard inside a side-trace.
+const size_t SIDETRACE_LAST_GUARD_ID = numeric_limits<uint64_t>::max();
+
 const std::array<Intrinsic::ID, 5> AlwaysInlinedIntrinsics = {
     Intrinsic::ctpop, Intrinsic::smax, Intrinsic::usub_with_overflow,
     Intrinsic::vaend, Intrinsic::vastart};
@@ -246,6 +249,14 @@ public:
   // Add a new frame to the stack.
   void pushFrame(StackFrame F) { Stack.push_back(F); }
 
+  CallStack *clone() {
+    // Create a heap allocated copy of the CallStack and return its pointer.
+    CallStack NewCS = *this;
+    void *mem = malloc(sizeof(CallStack));
+    CallStack *C = new (mem) CallStack(std::move(NewCS));
+    return C;
+  }
+
   // Pop and return the most-recent frame from the stack.
   StackFrame popFrame() {
     assert(!Stack.empty());
@@ -410,7 +421,7 @@ public:
 
 // Struct to store a live AOT value.
 struct AOTInfo {
-  void *Value;
+  LLVMValueRef Value;
   size_t FrameIdx;
 };
 
@@ -458,6 +469,9 @@ class JITModBuilder {
   // The trace-compiler's view of the AOT IR call stack during trace
   // compilation.
   CallStack CallStack;
+
+  // Set to true for a side-trace or false for a normal trace.
+  bool IsSideTrace = false;
 
   Value *getMappedValue(Value *V) {
     if (VMap.find(V) != VMap.end()) {
@@ -611,8 +625,8 @@ class JITModBuilder {
     //
     // Note that we don't have to worry about the block names being unique, as
     // LLVM will make it so by appending a number to the block's name.
-    BasicBlock *FailBB =
-        getGuardFailureBlock(BI->getParent(), CurBBIdx, I, CurInstrIdx);
+    BasicBlock *FailBB = getGuardFailureBlock(BI->getParent(), CurBBIdx, I,
+                                              CurInstrIdx, GuardCount);
     BasicBlock *SuccBB =
         BasicBlock::Create(Context, GUARD_SUCCESS_BLOCK_NAME, JITFunc);
 
@@ -641,8 +655,8 @@ class JITModBuilder {
 
     // Get/create the guard failure and success blocks.
     LLVMContext &Context = JITMod->getContext();
-    BasicBlock *FailBB =
-        getGuardFailureBlock(SI->getParent(), CurBBIdx, I, CurInstrIdx);
+    BasicBlock *FailBB = getGuardFailureBlock(SI->getParent(), CurBBIdx, I,
+                                              CurInstrIdx, GuardCount);
     BasicBlock *SuccBB =
         BasicBlock::Create(Context, GUARD_SUCCESS_BLOCK_NAME, JITFunc);
 
@@ -793,7 +807,8 @@ class JITModBuilder {
 
   // Returns a pointer to the guard failure block, creating it if necessary.
   BasicBlock *getGuardFailureBlock(BasicBlock *CurBB, size_t CurBBIdx,
-                                   Instruction *Instr, size_t CurInstrIdx) {
+                                   Instruction *Instr, size_t CurInstrIdx,
+                                   size_t GuardId) {
     // If `JITFunc` contains no blocks already, then the guard failure block
     // becomes the entry block. This would lead to a trace that
     // unconditionally and immediately fails a guard.
@@ -827,6 +842,12 @@ class JITModBuilder {
     MappableFrame *CurFrame = CallStack.curMappableFrame();
     assert(CurFrame);
     CurFrame->setResume(CurBBIdx, Instr, CurInstrIdx);
+
+    // Clone the CallStack, store it on the heap, and hardcode its pointer into
+    // the deoptimize call. We'll need this call stack for side-tracing to
+    // initialise JITModBuilder in a way that allows us start tracing from
+    // locations not immediately after the control point.
+    auto NewCallStack = CallStack.clone();
 
     std::vector<std::tuple<Value *, Value *, size_t>> LiveValues;
     for (size_t I = 0; I < CallStack.size(); I++) {
@@ -909,7 +930,8 @@ class JITModBuilder {
         DeoptInt,
         {JITFunc->getArg(JITFUNC_ARG_COMPILEDTRACE_IDX),
          JITFunc->getArg(JITFUNC_ARG_FRAMEADDR_IDX), AOTLocs,
-         ActiveFramesStruct, ConstantInt::get(PointerSizedIntTy, GuardCount)},
+         ActiveFramesStruct, ConstantInt::get(PointerSizedIntTy, GuardId),
+         ConstantInt::get(PointerSizedIntTy, (size_t)NewCallStack)},
         {ob}, "", GuardFailBB);
 
     // We always need to return after the deoptimisation call.
@@ -1178,6 +1200,24 @@ class JITModBuilder {
     Builder.SetInsertPoint(LoopEntryBB);
   }
 
+  // Generate loads for the live variables passed into the side trace call.
+  // Unlike the normal trace we can't loop back to the top of the side-trace
+  // (the side-trace ends at the control point and this is where we need to
+  // return to).
+  void createSideTraceHeader(Instruction *CPCI, Type *YkCtrlPointVarsPtrTy,
+                             void *AOTValsPtr, size_t AOTValsLen) {
+    IntegerType *Int32Ty = Type::getInt32Ty(CPCI->getContext());
+    AOTInfo *LiveVals = reinterpret_cast<AOTInfo *>(AOTValsPtr);
+    for (size_t i = 0; i < AOTValsLen; i++) {
+      AOTInfo Info = LiveVals[i];
+      Value *V = llvm::unwrap(Info.Value);
+      Value *GEP = Builder.CreateGEP(YkCtrlPointVarsPtrTy, JITFunc->getArg(0),
+                                     {ConstantInt::get(Int32Ty, i)});
+      Value *Load = Builder.CreateLoad(V->getType(), GEP);
+      VMap[V] = Load;
+    }
+  }
+
   // Find the call site to the (patched) control point, the index of that call
   // site in the parent block, and the type of the struct used to pass in the
   // live LLVM variables.
@@ -1214,7 +1254,8 @@ class JITModBuilder {
                 size_t TraceLen, char *FAddrKeys[], void *FAddrVals[],
                 size_t FAddrLen, CallInst *CPCI,
                 std::optional<std::tuple<size_t, CallInst *>> InitialResume,
-                Value *TraceInputs)
+                Value *TraceInputs, void *CallStackPtr, void *AOTValsPtr,
+                size_t AOTValsLen)
       : AOTMod(AOTMod), Builder(AOTMod->getContext()),
         InpTrace(FuncNames, BBs, TraceLen),
         FAddrs(FAddrKeys, FAddrVals, FAddrLen), TraceInputs(TraceInputs),
@@ -1236,21 +1277,36 @@ class JITModBuilder {
     // argument of the compiled trace function.
     VMap[TraceInputs] = JITFunc->getArg(JITFUNC_ARG_INPUTS_STRUCT_IDX);
 
-    // Push the initial frame.
-    IRBlock *StartIRB = InpTrace[0].getMappedBlock();
-    assert(StartIRB);
-    Function *StartFunc = AOTMod->getFunction(StartIRB->FuncName);
-    std::optional<BlockResumePoint> RP;
-    if (InitialResume.has_value()) {
-      auto [StartInstrIdx, StartCPCall] = *InitialResume;
-      assert(StartCPCall->getFunction() == StartFunc);
-      RP = BlockResumePoint{StartIRB->BBIdx, StartCPCall, StartInstrIdx};
+    // If this is a side-trace (i.e. CallStackPtr is not null), then recast
+    // pointer to heap allocated CallStack and clone it into this
+    // JITModBuilder's CallStack.
+    if (CallStackPtr) {
+      CallStack = *reinterpret_cast<class CallStack *>(CallStackPtr);
+    } else {
+      // Push the initial frame.
+      IRBlock *StartIRB = InpTrace[0].getMappedBlock();
+      assert(StartIRB);
+      Function *StartFunc = AOTMod->getFunction(StartIRB->FuncName);
+      std::optional<BlockResumePoint> RP;
+      if (InitialResume.has_value()) {
+        auto [StartInstrIdx, StartCPCall] = *InitialResume;
+        assert(StartCPCall->getFunction() == StartFunc);
+        RP = BlockResumePoint{StartIRB->BBIdx, StartCPCall, StartInstrIdx};
+      }
+      StackFrame InitFrame =
+          StackFrame::CreateMappableFrame(StartFunc, nullptr, RP);
+      CallStack.pushFrame(InitFrame);
     }
-    StackFrame InitFrame =
-        StackFrame::CreateMappableFrame(StartFunc, nullptr, RP);
-    CallStack.pushFrame(InitFrame);
 
-    createTraceHeader(ControlPointCallInst, TraceInputs->getType());
+    // If aotvalsptr is not null then read the values out and generate loads for
+    // each at the beginning of the function
+    if (AOTValsPtr) {
+      IsSideTrace = true;
+      createSideTraceHeader(ControlPointCallInst, TraceInputs->getType(),
+                            AOTValsPtr, AOTValsLen);
+    } else {
+      createTraceHeader(ControlPointCallInst, TraceInputs->getType());
+    }
 
     // In debug builds, sanity check our assumptions about the input trace.
 #ifndef NDEBUG
@@ -1285,13 +1341,16 @@ public:
 
   static JITModBuilder Create(Module *AOTMod, char *FuncNames[], size_t BBs[],
                               size_t TraceLen, char *FAddrKeys[],
-                              void *FAddrVals[], size_t FAddrLen) {
+                              void *FAddrVals[], size_t FAddrLen,
+                              void *CallStack, void *AOTValsPtr,
+                              size_t AOTValsLen) {
     CallInst *CPCI;
     Value *TI;
     size_t CPCIIdx;
     std::tie(CPCI, CPCIIdx, TI) = GetControlPointInfo(AOTMod);
     return JITModBuilder(AOTMod, FuncNames, BBs, TraceLen, FAddrKeys, FAddrVals,
-                         FAddrLen, CPCI, make_tuple(CPCIIdx, CPCI), TI);
+                         FAddrLen, CPCI, make_tuple(CPCIIdx, CPCI), TI,
+                         CallStack, AOTValsPtr, AOTValsLen);
   }
 
 #ifdef YK_TESTING
@@ -1351,7 +1410,7 @@ public:
     // trace, instead of after the return from the control point.
     JITModBuilder JB(AOTMod, FuncNames, BBs, TraceLen, &NewFAddrKeys[0],
                      &NewFAddrVals[0], NewFAddrKeys.size(), CPCI, {},
-                     TraceInputs);
+                     TraceInputs, nullptr, nullptr, 0);
 
     return JB;
   }
@@ -1360,6 +1419,8 @@ public:
   // Generate the JIT module by "glueing together" blocks that the trace
   // executed in the AOT module.
   Module *createModule() {
+    size_t CurBBIdx;
+    size_t CurInstrIdx;
     // Iterate over the blocks of the trace.
     for (size_t Idx = 0; Idx < InpTrace.Length(); Idx++) {
       // Update the previously executed BB in the most-recent frame (if it's
@@ -1431,7 +1492,7 @@ public:
 
       IRBlock *IB = Loc.getMappedBlock();
       assert(IB);
-      size_t CurBBIdx = IB->BBIdx;
+      CurBBIdx = IB->BBIdx;
 
       auto [F, BB] = getLLVMAOTFuncAndBlock(IB);
       assert(MPF->Func == F);
@@ -1455,7 +1516,7 @@ public:
       size_t StackDepthBefore = CallStack.size();
 
       // The index of the instruction in `BB` that we are currently processing.
-      size_t CurInstrIdx = 0;
+      CurInstrIdx = 0;
 
       // If we've returned from a call, skip ahead to the instruction where
       // we left off.
@@ -1639,6 +1700,23 @@ public:
                 // YkCtrlPointVars won't be stored on the shadow stack anymore,
                 // and we might have to insert PHI nodes into the loop entry
                 // block.
+                I++;
+                CurInstrIdx++;
+                Instruction *CPInstr = &*I;
+                I++;
+                CurInstrIdx++;
+                assert(isa<CallInst>(I)); // stackmap call
+                MPF->LastSMCall = cast<CallInst>(I);
+                if (IsSideTrace) {
+                  // We can't currently loop back to the parent trace when the
+                  // side trace reaches its end (this requires patching the
+                  // parent trace). Instead we simply guard fail back to the
+                  // main interpreter.
+                  BasicBlock *FailBB =
+                      getGuardFailureBlock(BB, CurBBIdx, CPInstr, CurInstrIdx,
+                                           SIDETRACE_LAST_GUARD_ID);
+                  Builder.CreateBr(FailBB);
+                }
                 break;
               }
               // Skip frameaddress, control point, and stackmap call
@@ -1683,7 +1761,7 @@ public:
     // trace is via a guard failure.
     if (LoopEntryBB) {
       Builder.CreateBr(LoopEntryBB);
-    } else {
+    } else if (!IsSideTrace) {
       // This is here only because some of our `.ll` tests don't contain a
       // control point, so the loop-entry block is never created.
       Builder.CreateRet(
@@ -1708,7 +1786,8 @@ public:
     // doptimise if the promoted value deviates from the "baked-in" constant.
     MPF->LastSMCall = cast<CallInst>(CI->getNextNonDebugInstruction());
 
-    BasicBlock *FailBB = getGuardFailureBlock(BB, CurBBIdx, CI, CurInstrIdx);
+    BasicBlock *FailBB =
+        getGuardFailureBlock(BB, CurBBIdx, CI, CurInstrIdx, GuardCount);
     BasicBlock *SuccBB = BasicBlock::Create(JITMod->getContext(),
                                             GUARD_SUCCESS_BLOCK_NAME, JITFunc);
     Value *Deopt = Builder.CreateICmp(CmpInst::Predicate::ICMP_NE,
@@ -1741,9 +1820,11 @@ public:
 
 tuple<Module *, string, std::map<GlobalValue *, void *>, void *, size_t>
 createModule(Module *AOTMod, char *FuncNames[], size_t BBs[], size_t TraceLen,
-             char *FAddrKeys[], void *FAddrVals[], size_t FAddrLen) {
+             char *FAddrKeys[], void *FAddrVals[], size_t FAddrLen,
+             void *CallStack, void *AOTValsPtr, size_t AOTValsLen) {
   JITModBuilder JB = JITModBuilder::Create(AOTMod, FuncNames, BBs, TraceLen,
-                                           FAddrKeys, FAddrVals, FAddrLen);
+                                           FAddrKeys, FAddrVals, FAddrLen,
+                                           CallStack, AOTValsPtr, AOTValsLen);
   auto JITMod = JB.createModule();
   return make_tuple(JITMod, std::move(JB.TraceName),
                     std::move(JB.GlobalMappings), JB.LiveAOTArray,
@@ -1755,7 +1836,8 @@ tuple<Module *, string, std::map<GlobalValue *, void *>, void *, size_t>
 createModuleForTraceCompilerTests(Module *AOTMod, char *FuncNames[],
                                   size_t BBs[], size_t TraceLen,
                                   char *FAddrKeys[], void *FAddrVals[],
-                                  size_t FAddrLen) {
+                                  size_t FAddrLen, void *CallStack,
+                                  void *AOTValsPtr, size_t AOTValsLen) {
   JITModBuilder JB = JITModBuilder::CreateMocked(
       AOTMod, FuncNames, BBs, TraceLen, FAddrKeys, FAddrVals, FAddrLen);
 

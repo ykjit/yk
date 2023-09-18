@@ -389,7 +389,8 @@ template <typename FN>
 void *compileIRTrace(FN Func, char *FuncNames[], size_t BBs[], size_t TraceLen,
                      char *FAddrKeys[], void *FAddrVals[], size_t FAddrLen,
                      void *BitcodeData, size_t BitcodeLen, int DebugInfoFD,
-                     char *DebugInfoPath) {
+                     char *DebugInfoPath, void *CallStack, void *AOTValsPtr,
+                     size_t AOTValsLen) {
   DebugIRPrinter DIP;
 
   struct BitcodeSection Bitcode = {BitcodeData, BitcodeLen};
@@ -408,7 +409,8 @@ void *compileIRTrace(FN Func, char *FuncNames[], size_t BBs[], size_t TraceLen,
   ThreadAOTMod->withModuleDo([&](Module &AOTMod) {
     DIP.print(DebugIR::AOT, &AOTMod);
     std::tie(JITMod, TraceName, GlobalMappings, AOTMappingVec, GuardCount) =
-        Func(&AOTMod, FuncNames, BBs, TraceLen, FAddrKeys, FAddrVals, FAddrLen);
+        Func(&AOTMod, FuncNames, BBs, TraceLen, FAddrKeys, FAddrVals, FAddrLen,
+             CallStack, AOTValsPtr, AOTValsLen);
   });
 
   // If we failed to build the trace, return null.
@@ -446,10 +448,12 @@ void *compileIRTrace(FN Func, char *FuncNames[], size_t BBs[], size_t TraceLen,
 extern "C" void *__yktracec_irtrace_compile(
     char *FuncNames[], size_t BBs[], size_t TraceLen, char *FAddrKeys[],
     void *FAddrVals[], size_t FAddrLen, void *BitcodeData, uint64_t BitcodeLen,
-    int DebugInfoFD, char *DebugInfoPath) {
+    int DebugInfoFD, char *DebugInfoPath, void *CallStack, void *AOTValsPtr,
+    size_t AOTValsLen) {
   return compileIRTrace(createModule, FuncNames, BBs, TraceLen, FAddrKeys,
                         FAddrVals, FAddrLen, BitcodeData, BitcodeLen,
-                        DebugInfoFD, DebugInfoPath);
+                        DebugInfoFD, DebugInfoPath, CallStack, AOTValsPtr,
+                        AOTValsLen);
 }
 
 #ifdef YK_TESTING
@@ -459,6 +463,7 @@ extern "C" void *__yktracec_irtrace_compile_for_tc_tests(
     int DebugInfoFD, char *DebugInfoPath) {
   return compileIRTrace(createModuleForTraceCompilerTests, FuncNames, BBs,
                         TraceLen, FAddrKeys, FAddrVals, FAddrLen, BitcodeData,
-                        BitcodeLen, DebugInfoFD, DebugInfoPath);
+                        BitcodeLen, DebugInfoFD, DebugInfoPath, nullptr,
+                        nullptr, 0);
 }
 #endif

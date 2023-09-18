@@ -72,6 +72,17 @@ impl Value {
         unsafe { !LLVMIsAIntrinsicInst(self.0).is_null() }
     }
 
+    pub fn is_frameaddr_call(&self) -> bool {
+        if self.is_call() {
+            let mut len: usize = 0;
+            let s = unsafe { LLVMGetValueName2(LLVMGetCalledValue(self.0), &mut len) };
+            if unsafe { CStr::from_ptr(s) }.to_str() == Ok("llvm.frameaddress.p0") {
+                return true;
+            }
+        }
+        false
+    }
+
     pub fn get_type(&self) -> Type {
         unsafe { Type(LLVMTypeOf(self.0)) }
     }

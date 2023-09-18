@@ -3,10 +3,12 @@
 
 use crate::{
     compile::{CompiledTrace, Compiler},
-    mt::MT,
+    location::HotLocation,
+    mt::{SideTraceInfo, MT},
     trace::MappedTrace,
 };
 use libc::dlsym;
+use parking_lot::Mutex;
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
 use std::{
@@ -14,14 +16,20 @@ use std::{
     error::Error,
     ffi::{c_char, c_int, CString},
     ptr,
-    sync::Arc,
+    sync::{Arc, Weak},
 };
 use tempfile::NamedTempFile;
 
 pub(crate) struct JITCLLVM;
 
 impl Compiler for JITCLLVM {
-    fn compile(&self, mt: Arc<MT>, irtrace: MappedTrace) -> Result<CompiledTrace, Box<dyn Error>> {
+    fn compile(
+        &self,
+        mt: Arc<MT>,
+        irtrace: MappedTrace,
+        sti: &SideTraceInfo,
+        hl: Weak<Mutex<HotLocation>>,
+    ) -> Result<CompiledTrace, Box<dyn Error>> {
         let (func_names, bbs, trace_len) = self.encode_trace(&irtrace);
 
         let mut faddr_keys = Vec::new();
@@ -46,12 +54,15 @@ impl Compiler for JITCLLVM {
                 llvmbc_len,
                 di_fd,
                 di_tmpname_c,
+                sti.callstack,
+                sti.aotvalsptr,
+                sti.aotvalslen,
             )
         };
         if ret.is_null() {
             Err("Could not compile trace.".into())
         } else {
-            Ok(CompiledTrace::new(mt, ret, di_tmp))
+            Ok(CompiledTrace::new(mt, ret, di_tmp, hl))
         }
     }
 

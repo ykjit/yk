@@ -10,8 +10,12 @@ use llvm_sys::{
     error::{LLVMCreateStringError, LLVMErrorRef},
     prelude::{LLVMModuleRef, LLVMValueRef},
 };
+use std::mem;
 use std::{arch::asm, ffi::c_void, ptr, slice, sync::Arc};
-use yksmp::{Location as SMLocation, StackMapParser};
+use yksmp::Location as SMLocation;
+
+// Special id for the last guard inside a side-trace.
+const SIDETRACE_LAST_GUARD_ID: usize = usize::MAX;
 
 /// Reads out registers spilled to the stack of the previous frame during the deoptimisation
 /// routine. The order of the registers are in accordance to the DWARF register number mapping
@@ -107,6 +111,7 @@ extern "C" fn __llvm_deoptimize(
     aotvals: *const c_void,
     actframes: *const c_void,
     guardid: usize,
+    jitcallstack: *const c_void,
 ) -> ! {
     // Push all registers to the stack before they can be clobbered, so that we can find their
     // values after parsing in the stackmap. The order in which we push the registers is equivalent
@@ -132,10 +137,14 @@ extern "C" fn __llvm_deoptimize(
             // we don't need do anything here. However, we need to add some extra arguments to the
             // call.
 
+            // Additional arguments are passed via the stack in reverse order **after** alignment.
+            "mov r12, rsp", // Copy original RSP value.
+            "sub rsp, 8",   // Alignment
+            "push r12",     // Current stack pointer.
+            "push r9",      // JITModBuilder CallStack
             // The return address was at [RSP] before the above pushes, so to find it we need to
             // offset 8 bytes per push.
-            "mov r9, [rsp+64]",
-            "push rsp",                       // Current stack pointer.
+            "mov r9, [rsp+88]",
             "call __ykrt_deopt",              // Returns NewFramesInfo
             "mov rdi, rax",                   // Pass NewFramesInfo.src as 1st argument.
             "mov rsi, rdx",                   // Pass NewFramesInfo.dst as 2nd argument.
@@ -170,7 +179,7 @@ extern "C" fn ts_reconstruct(ctx: *mut c_void, module: LLVMModuleRef) -> LLVMErr
     let retaddr = info.retaddr;
     let rsp = info.rsp;
 
-    // Find the relevant AOT variables for this deopt in the AOT variables section.
+    // Parse the live AOT values.
     let aotvalsptr =
         unsafe { (ctr.aotvals() as *const u8).offset(isize::try_from(aotvals.offset).unwrap()) };
 
@@ -194,10 +203,12 @@ extern "C" fn ts_reconstruct(ctx: *mut c_void, module: LLVMModuleRef) -> LLVMErr
     // Extract live values from the stackmap.
     // Skip first live variable that contains 3 unrelated locations (CC, Flags, Num Deopts).
     for (i, locs) in live_vars.iter().skip(1).enumerate() {
-        // We currently assume that live variables have at most one location. We currently encode
-        // extra locations inside a single location. But we are running out of space so we might
-        // need to extend stackmaps later to allow for multiple locations per variable.
-        assert!(locs.len() == 1);
+        // We currently assume that live variables have at most one location. Extra locations are
+        // encoded inside a single location via the offset field. However, encoding further
+        // locations may be difficult as we are running out of space, so we may need to extend
+        // stackmaps later to allow for multiple locations per variable.
+        // Live variables must have a location, so this unwrap should never fail. If it does,
+        // something has gone wrong with stackmaps.
         let l = locs.get(0).unwrap();
         match l {
             SMLocation::Register(reg, _size, _off, _extra) => {
@@ -264,18 +275,82 @@ unsafe extern "C" fn __ykrt_deopt(
     guardid: usize,
     // Return address of deoptimize call. Used to find the correct stackmap record.
     retaddr: usize,
+    // The parent trace's call stack at the time of the guard failure. Required to assemble
+    // a side trace.
+    jitcallstack: *const c_void,
     // Current stack pointer. Needed to read spilled register values from the stack.
     rsp: *const c_void,
 ) -> NewFramesInfo {
     // Put the CompiledTrace back into an Arc, so it is dropped properly.
     let ctr = Arc::from_raw(ctr);
 
+    // Check if we have a side trace and execute it.
+    if guardid != SIDETRACE_LAST_GUARD_ID {
+        let guard = &ctr.guards[guardid];
+        if let Some(st) = guard.getct() {
+            let registers = Registers::from_ptr(rsp);
+            let live_vars = ctr.smap.get(&retaddr.try_into().unwrap()).unwrap();
+            let mut ykctrlpvars = Vec::new();
+            for (_i, locs) in live_vars.iter().skip(1).enumerate() {
+                assert!(locs.len() == 1);
+                let l = locs.get(0).unwrap();
+                match l {
+                    SMLocation::Register(reg, _size, _off, _extra) => {
+                        let _val = unsafe { registers.get(*reg) };
+                        todo!();
+                    }
+                    SMLocation::Direct(reg, off, _size) => {
+                        // When using `llvm.experimental.deoptimize` then direct locations should always be
+                        // in relation to RBP.
+                        assert_eq!(*reg, 6);
+                        let addr = unsafe { registers.get(*reg) as *mut u8 };
+                        let addr = unsafe { addr.offset(isize::try_from(*off).unwrap()) };
+                        ykctrlpvars.push(addr as u64);
+                    }
+                    SMLocation::Indirect(reg, off, size) => {
+                        let addr = unsafe { registers.get(*reg) as *mut u8 };
+                        let addr = unsafe { addr.offset(isize::try_from(*off).unwrap()) };
+                        let v = match *size {
+                            1 => unsafe { ptr::read::<u8>(addr) as u64 },
+                            2 => unsafe { ptr::read::<u16>(addr as *mut u16) as u64 },
+                            4 => unsafe { ptr::read::<u32>(addr as *mut u32) as u64 },
+                            8 => unsafe { ptr::read::<u64>(addr as *mut u64) },
+                            _ => unreachable!(),
+                        };
+                        ykctrlpvars.push(v);
+                    }
+                    SMLocation::Constant(v) => {
+                        ykctrlpvars.push(*v as u64);
+                    }
+                    SMLocation::LargeConstant(_v) => {
+                        todo!();
+                    }
+                }
+            }
+            // Execute the side trace.
+            let f = mem::transmute::<
+                _,
+                unsafe extern "C" fn(*mut c_void, *const CompiledTrace, *const c_void) -> (),
+            >(st.entry());
+            #[cfg(feature = "yk_jitstate_debug")]
+            print_jit_state("execute-side-trace");
+            // FIXME: Calling this function overwrites the current (Rust) function frame,
+            // rather than unwinding it. https://github.com/ykjit/yk/issues/778
+            f(
+                ykctrlpvars.as_ptr() as *mut c_void,
+                Arc::into_raw(st),
+                frameaddr,
+            );
+            return NewFramesInfo {
+                src: std::ptr::null(),
+                dst: std::ptr::null(),
+            };
+        }
+    }
+
     #[cfg(feature = "yk_jitstate_debug")]
     print_jit_state("deoptimise");
-    ctr.mt.stats.timing_state(TimingState::Deopting);
-
-    // FIXME: Check here if we have a side trace and execute it. Otherwise just increment the guard
-    // failure counter.
+    (*ctr).mt.stats.timing_state(TimingState::Deopting);
 
     // Copy arguments into a struct we can pass into the ThreadSafeModuleWithModuleDo function.
     let mut info = ReconstructInfo {
@@ -298,7 +373,29 @@ unsafe extern "C" fn __ykrt_deopt(
     // pass in variables from this scope via a struct which is passed into the function.
     LLVMOrcThreadSafeModuleWithModuleDo(moduleref, ts_reconstruct, infoptr as *mut c_void);
 
+    // We want to start side tracing only after we deoptimised. Otherwise we'd trace the whole
+    // deopt routine which will later be costly to disassemble.
+    if guardid != SIDETRACE_LAST_GUARD_ID {
+        let guard = &ctr.guards[guardid];
+        guard.inc();
+        if guard.failcount() >= ctr.mt.sidetrace_threshold() {
+            // This guard is hot, so compile a new side-trace.
+            let aotvalsptr = unsafe {
+                (ctr.aotvals() as *const u8).offset(isize::try_from(aotvals.offset).unwrap())
+            };
+            ctr.mt.side_trace(
+                ctr.hl.upgrade().unwrap(), // FIXME: This might fail.
+                jitcallstack,
+                aotvalsptr as *const c_void,
+                aotvals.length,
+                guardid,
+                Arc::clone(&ctr),
+            );
+        }
+    }
+
     ctr.mt.stats.timing_state(TimingState::OutsideYk);
+
     info.nfi.unwrap()
 }
 
