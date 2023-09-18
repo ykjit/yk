@@ -1,6 +1,19 @@
-use crate::{mt::MT, trace::MappedTrace};
+use crate::{
+    location::HotLocation,
+    mt::{SideTraceInfo, MT},
+    trace::MappedTrace,
+};
 use libc::c_void;
-use std::{collections::HashMap, error::Error, fmt, slice, sync::Arc};
+use parking_lot::Mutex;
+use std::{
+    collections::HashMap,
+    error::Error,
+    fmt, slice,
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc, Weak,
+    },
+};
 use tempfile::NamedTempFile;
 use yksmp::{LiveVar, StackMapParser};
 
@@ -10,7 +23,13 @@ pub(crate) mod jitc_llvm;
 /// The trait that every JIT compiler backend must implement.
 pub trait Compiler: Send + Sync {
     /// Compile an [MappedTrace] into machine code.
-    fn compile(&self, mt: Arc<MT>, irtrace: MappedTrace) -> Result<CompiledTrace, Box<dyn Error>>;
+    fn compile(
+        &self,
+        mt: Arc<MT>,
+        irtrace: MappedTrace,
+        sti: &SideTraceInfo,
+        hl: Weak<Mutex<HotLocation>>,
+    ) -> Result<CompiledTrace, Box<dyn Error>>;
 
     #[cfg(feature = "yk_testing")]
     unsafe fn compile_for_tc_tests(
@@ -35,16 +54,42 @@ struct SendSyncConstPtr<T>(*const T);
 unsafe impl<T> Send for SendSyncConstPtr<T> {}
 unsafe impl<T> Sync for SendSyncConstPtr<T> {}
 
-struct Guard {
-    failed: u32,
-    code: Option<SendSyncConstPtr<c_void>>,
+/// Responsible for tracking how often a guard in a `CompiledTrace` fails. A hotness counter is
+/// incremented each time the matching guard failure in a `CompiledTrace` is triggered. Also stores
+/// the side-trace once its compiled.
+pub struct Guard {
+    failed: AtomicU32,
+    ct: Mutex<Option<Arc<CompiledTrace>>>,
+}
+
+impl Guard {
+    /// Increments the guard failure counter.
+    pub fn inc(&self) {
+        self.failed.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Returns the current guard failure counter.
+    pub fn failcount(&self) -> u32 {
+        self.failed.load(Ordering::Relaxed)
+    }
+
+    /// Stores a compiled side-trace inside this guard.
+    pub fn setct(&self, ct: Arc<CompiledTrace>) {
+        let _ = self.ct.lock().insert(ct);
+    }
+
+    /// Retrieves the stored side-trace or None, if no side-trace has been compiled yet.
+    pub fn getct(&self) -> Option<Arc<CompiledTrace>> {
+        self.ct.lock().as_ref().map(|x| Arc::clone(x))
+    }
 }
 
 /// A trace compiled into machine code. Note that these are passed around as raw pointers and
 /// potentially referenced by multiple threads so, once created, instances of this struct can only
 /// be updated if a lock is held or a field is atomic.
 pub struct CompiledTrace {
-    pub mt: Arc<MT>,
+    // Reference to the meta-tracer required for side tracing.
+    pub(crate) mt: Arc<MT>,
     /// A function which when called, executes the compiled trace.
     ///
     /// The argument to the function is a pointer to a struct containing the live variables at the
@@ -53,11 +98,11 @@ pub struct CompiledTrace {
     entry: SendSyncConstPtr<c_void>,
     /// Parsed stackmap of this trace. We only need to read this once, and can then use it to
     /// lookup stackmap information for each guard failure as needed.
-    pub smap: HashMap<u64, Vec<LiveVar>>,
+    pub(crate) smap: HashMap<u64, Vec<LiveVar>>,
     /// Pointer to heap allocated live AOT values.
     aotvals: SendSyncConstPtr<c_void>,
-    /// List of guards containing hotness counts or compiled side traces.
-    guards: Vec<Option<Guard>>,
+    /// List of guards containing hotness counts and compiled side traces.
+    pub(crate) guards: Vec<Guard>,
     /// If requested, a temporary file containing the "source code" for the trace, to be shown in
     /// debuggers when stepping over the JITted code.
     ///
@@ -65,13 +110,20 @@ pub struct CompiledTrace {
     /// act of storing it is preventing the deletion of the file via its `Drop`)
     #[allow(dead_code)]
     di_tmpfile: Option<NamedTempFile>,
+    /// Reference to the HotLocation, required for side tracing.
+    pub(crate) hl: Weak<Mutex<HotLocation>>,
 }
 
 impl CompiledTrace {
     /// Create a `CompiledTrace` from a pointer to an array containing: the pointer to the compiled
     /// trace, the pointer to the stackmap and the size of the stackmap, and the pointer to the
-    /// live AOT values.
-    pub fn new(mt: Arc<MT>, data: *const c_void, di_tmpfile: Option<NamedTempFile>) -> Self {
+    /// live AOT values. The arguments `mt` and `hl` are required for side-tracing.
+    pub fn new(
+        mt: Arc<MT>,
+        data: *const c_void,
+        di_tmpfile: Option<NamedTempFile>,
+        hl: Weak<Mutex<HotLocation>>,
+    ) -> Self {
         let slice = unsafe { slice::from_raw_parts(data as *const usize, 5) };
         let funcptr = slice[0] as *const c_void;
         let smptr = slice[1] as *const c_void;
@@ -88,13 +140,21 @@ impl CompiledTrace {
         // We heap allocated this array in yktracec to pass the data here. Now that we've
         // extracted it we no longer need to keep the array around.
         unsafe { libc::free(data as *mut c_void) };
+        let mut guards = Vec::new();
+        for _ in 0..=guardcount {
+            guards.push(Guard {
+                failed: 0.into(),
+                ct: None.into(),
+            });
+        }
         Self {
             mt,
             entry: SendSyncConstPtr(funcptr),
             smap,
             aotvals: SendSyncConstPtr(aotvals),
             di_tmpfile,
-            guards: Vec::with_capacity(guardcount),
+            guards,
+            hl,
         }
     }
 
@@ -111,6 +171,7 @@ impl CompiledTrace {
             aotvals: SendSyncConstPtr(std::ptr::null()),
             di_tmpfile: None,
             guards: Vec::new(),
+            hl: Weak::new(),
         }
     }
 

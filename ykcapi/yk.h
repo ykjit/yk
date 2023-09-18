@@ -52,6 +52,9 @@ void yk_mt_control_point(YkMT *, YkLocation *);
 // Set the threshold at which `YkLocation`'s are considered hot.
 void yk_mt_hot_threshold_set(YkMT *, YkHotThreshold);
 
+// Set the threshold at which guard failures are considered hot.
+void yk_mt_sidetrace_threshold_set(YkMT *, YkHotThreshold);
+
 // Create a new `Location`.
 //
 // Note that a `Location` created by this call must not simply be discarded:

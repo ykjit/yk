@@ -11,7 +11,7 @@ use std::{
 
 use crate::{
     compile::CompiledTrace,
-    mt::{HotThreshold, TraceFailureThreshold, MT},
+    mt::{HotThreshold, SideTraceInfo, TraceFailureThreshold, MT},
 };
 use parking_lot::Mutex;
 
@@ -199,7 +199,7 @@ impl Drop for Location {
 }
 
 #[derive(Debug)]
-pub(crate) struct HotLocation {
+pub struct HotLocation {
     pub(crate) kind: HotLocationKind,
     pub(crate) trace_failure: TraceFailureThreshold,
 }
@@ -235,7 +235,7 @@ pub(crate) enum HotLocationKind {
     Tracing,
     /// While executing JIT compiled code, a guard failed often enough for us to want to generate a
     /// side trace for this HotLocation.
-    SideTracing(Arc<CompiledTrace>),
+    SideTracing(Arc<CompiledTrace>, SideTraceInfo, Arc<CompiledTrace>),
 }
 
 /// When a [HotLocation] has failed to compile a valid trace, should the [HotLocation] be tried

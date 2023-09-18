@@ -78,6 +78,13 @@ pub unsafe extern "C" fn yk_mt_hot_threshold_set(mt: *const MT, hot_threshold: H
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn yk_mt_sidetrace_threshold_set(mt: *const MT, hot_threshold: HotThreshold) {
+    let arc = unsafe { Arc::from_raw(mt) };
+    arc.set_sidetrace_threshold(hot_threshold);
+    forget(arc);
+}
+
+#[no_mangle]
 pub extern "C" fn yk_location_new() -> Location {
     Location::new()
 }
