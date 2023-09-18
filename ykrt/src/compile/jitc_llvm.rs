@@ -16,7 +16,7 @@ use std::{
     error::Error,
     ffi::{c_char, c_int, CString},
     ptr,
-    sync::{Arc, Weak},
+    sync::Arc,
 };
 use tempfile::NamedTempFile;
 
@@ -28,7 +28,7 @@ impl Compiler for JITCLLVM {
         mt: Arc<MT>,
         irtrace: MappedTrace,
         sti: Option<SideTraceInfo>,
-        hl: Weak<Mutex<HotLocation>>,
+        hl: Arc<Mutex<HotLocation>>,
     ) -> Result<CompiledTrace, Box<dyn Error>> {
         let (func_names, bbs, trace_len) = self.encode_trace(&irtrace);
 
@@ -67,7 +67,7 @@ impl Compiler for JITCLLVM {
         if ret.is_null() {
             Err("Could not compile trace.".into())
         } else {
-            Ok(CompiledTrace::new(mt, ret, di_tmp, hl))
+            Ok(CompiledTrace::new(mt, ret, di_tmp, Arc::downgrade(&hl)))
         }
     }
 

@@ -452,7 +452,6 @@ impl MT {
     ) {
         self.stats.trace_collected_ok();
         let mt = Arc::clone(self);
-        let hlclone = Arc::downgrade(&hl_arc);
         let do_compile = move || {
             mt.stats.timing_state(TimingState::TraceMapping);
             match utrace.map() {
@@ -464,7 +463,7 @@ impl MT {
                     };
                     mt.stats.timing_state(TimingState::Compiling);
                     let guardid = sti.map(|x| x.guardid);
-                    match compiler.compile(Arc::clone(&mt), irtrace, sti, hlclone) {
+                    match compiler.compile(Arc::clone(&mt), irtrace, sti, Arc::clone(&hl_arc)) {
                         Ok(ct) => {
                             let mut hl = hl_arc.lock();
                             match &hl.kind {
