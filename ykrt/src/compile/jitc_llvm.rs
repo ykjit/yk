@@ -27,7 +27,7 @@ impl Compiler for JITCLLVM {
         &self,
         mt: Arc<MT>,
         irtrace: MappedTrace,
-        sti: &SideTraceInfo,
+        sti: SideTraceInfo,
         hl: Weak<Mutex<HotLocation>>,
     ) -> Result<CompiledTrace, Box<dyn Error>> {
         let (func_names, bbs, trace_len) = self.encode_trace(&irtrace);

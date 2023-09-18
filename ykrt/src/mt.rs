@@ -474,13 +474,14 @@ impl MT {
                         Arc::clone(&*lk)
                     };
                     mt.stats.timing_state(TimingState::Compiling);
-                    match compiler.compile(Arc::clone(&mt), irtrace, &sti, hlclone) {
+                    let guardid = sti.guardid;
+                    match compiler.compile(Arc::clone(&mt), irtrace, sti, hlclone) {
                         Ok(ct) => {
                             let mut hl = hl_arc.lock();
                             match &hl.kind {
                                 HotLocationKind::Compiled(_ctr) => {
                                     let ctr = parent.unwrap();
-                                    let guard = &ctr.guards[sti.guardid];
+                                    let guard = &ctr.guards[guardid];
                                     guard.setct(Arc::new(ct));
                                 }
                                 _ => {
