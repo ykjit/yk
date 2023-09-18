@@ -432,6 +432,27 @@ impl MT {
         })
     }
 
+    /// Perform the next step to `loc` in the `Location` state-machine for a guard failure.
+    pub(crate) fn transition_guard_failure(
+        self: &Arc<Self>,
+        hl: Arc<Mutex<HotLocation>>,
+        sti: SideTraceInfo,
+        parent: Arc<CompiledTrace>,
+    ) -> TransitionGuardFailure {
+        THREAD_MTTHREAD.with(|mtt| {
+            // This thread should not be tracing anything.
+            debug_assert!(!mtt.tracing.borrow().is_some());
+            let mut lk = hl.lock();
+            if let HotLocationKind::Compiled(ref ctr) = lk.kind {
+                *mtt.tracing.borrow_mut() = Some(Arc::clone(&hl));
+                lk.kind = HotLocationKind::SideTracing(Arc::clone(ctr), sti, parent);
+                TransitionGuardFailure::StartSideTracing
+            } else {
+                TransitionGuardFailure::NoAction
+            }
+        })
+    }
+
     /// Add a compilation job for `utrace` to the global work queue.
     fn queue_compile_job(
         self: &Arc<Self>,
@@ -503,35 +524,26 @@ impl MT {
     pub(crate) fn side_trace(
         self: &Arc<Self>,
         hl: Arc<Mutex<HotLocation>>,
-        callstack: *const c_void,
-        aotvalsptr: *const c_void,
-        aotvalslen: usize,
-        guardid: usize,
+        sti: SideTraceInfo,
         parent: Arc<CompiledTrace>,
     ) {
-        #[cfg(feature = "yk_jitstate_debug")]
-        print_jit_state("start-side-tracing");
-        let tracer = {
-            let lk = self.tracer.lock();
-            Arc::clone(&*lk)
-        };
-        let sti = SideTraceInfo {
-            callstack,
-            aotvalsptr,
-            aotvalslen,
-            guardid,
-        };
-        match Arc::clone(&tracer).start_collector() {
-            Ok(tt) => THREAD_MTTHREAD.with(|mtt| {
-                promote::thread_record_enable(true);
-                *mtt.thread_tracer.borrow_mut() = Some(tt);
-                let mut lk = hl.lock();
-                if let HotLocationKind::Compiled(ref ctr) = lk.kind {
-                    *mtt.tracing.borrow_mut() = Some(Arc::clone(&hl));
-                    lk.kind = HotLocationKind::SideTracing(Arc::clone(ctr), sti, parent);
+        match self.transition_guard_failure(hl, sti, parent) {
+            TransitionGuardFailure::NoAction => todo!(),
+            TransitionGuardFailure::StartSideTracing => {
+                #[cfg(feature = "yk_jitstate_debug")]
+                print_jit_state("start-side-tracing");
+                let tracer = {
+                    let lk = self.tracer.lock();
+                    Arc::clone(&*lk)
+                };
+                match Arc::clone(&tracer).start_collector() {
+                    Ok(tt) => THREAD_MTTHREAD.with(|mtt| {
+                        promote::thread_record_enable(true);
+                        *mtt.thread_tracer.borrow_mut() = Some(tt);
+                    }),
+                    Err(e) => todo!("{e:?}"),
                 }
-            }),
-            Err(e) => todo!("{e:?}"),
+            }
         }
     }
 }
@@ -581,6 +593,13 @@ enum TransitionControlPoint {
     StartTracing,
     StopTracing(Arc<Mutex<HotLocation>>),
     StopSideTracing(Arc<Mutex<HotLocation>>, SideTraceInfo, Arc<CompiledTrace>),
+}
+
+/// What action should a caller of [MT::transition_guard_failure] take?
+#[derive(Debug)]
+pub(crate) enum TransitionGuardFailure {
+    NoAction,
+    StartSideTracing,
 }
 
 #[cfg(test)]
@@ -637,6 +656,33 @@ mod tests {
                     HotLocationKind::Compiled(Arc::new(unsafe {
                         CompiledTrace::new_null(Arc::clone(&mt))
                     }));
+            }
+            _ => unreachable!(),
+        }
+        assert!(matches!(
+            mt.transition_control_point(&loc),
+            TransitionControlPoint::Execute(_)
+        ));
+        let sti = SideTraceInfo {
+            callstack: std::ptr::null(),
+            aotvalsptr: std::ptr::null(),
+            aotvalslen: 0,
+            guardid: 0,
+        };
+        assert!(matches!(
+            mt.transition_guard_failure(
+                loc.hot_location_arc_clone().unwrap(),
+                sti,
+                Arc::new(unsafe { CompiledTrace::new_null(Arc::clone(&mt)) }),
+            ),
+            TransitionGuardFailure::StartSideTracing
+        ));
+        match mt.transition_control_point(&loc) {
+            TransitionControlPoint::StopSideTracing(_, _, _) => {
+                assert!(matches!(
+                    loc.hot_location().unwrap().lock().kind,
+                    HotLocationKind::Compiled(_)
+                ));
             }
             _ => unreachable!(),
         }
@@ -1012,7 +1058,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn two_sidetracing_threads_must_not_stop_each_others_tracing_location() {
         // A side-tracing thread can only stop tracing when it encounters the specific Location
         // that caused it to start tracing. If it encounters another Location that also happens to
@@ -1062,27 +1107,39 @@ mod tests {
             let mt = Arc::clone(&mt);
             let loc1 = Arc::clone(&loc1);
             thread::spawn(move || {
-                mt.side_trace(
-                    loc1.hot_location_arc_clone().unwrap(),
-                    std::ptr::null(),
-                    std::ptr::null(),
-                    0,
-                    0,
-                    Arc::new(unsafe { CompiledTrace::new_null(Arc::clone(&mt)) }),
-                );
+                let sti = SideTraceInfo {
+                    callstack: std::ptr::null(),
+                    aotvalsptr: std::ptr::null(),
+                    aotvalslen: 0,
+                    guardid: 0,
+                };
+                assert!(matches!(
+                    mt.transition_guard_failure(
+                        loc1.hot_location_arc_clone().unwrap(),
+                        sti,
+                        Arc::new(unsafe { CompiledTrace::new_null(Arc::clone(&mt)) }),
+                    ),
+                    TransitionGuardFailure::StartSideTracing
+                ));
             })
             .join()
             .unwrap();
         }
 
-        mt.side_trace(
-            loc2.hot_location_arc_clone().unwrap(),
-            std::ptr::null(),
-            std::ptr::null(),
-            0,
-            0,
-            Arc::new(unsafe { CompiledTrace::new_null(Arc::clone(&mt)) }),
-        );
+        let sti = SideTraceInfo {
+            callstack: std::ptr::null(),
+            aotvalsptr: std::ptr::null(),
+            aotvalslen: 0,
+            guardid: 0,
+        };
+        assert!(matches!(
+            mt.transition_guard_failure(
+                loc2.hot_location_arc_clone().unwrap(),
+                sti,
+                Arc::new(unsafe { CompiledTrace::new_null(Arc::clone(&mt)) }),
+            ),
+            TransitionGuardFailure::StartSideTracing
+        ));
         assert!(matches!(
             mt.transition_control_point(&loc1),
             TransitionControlPoint::Execute(_)
