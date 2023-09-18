@@ -70,17 +70,6 @@ pub struct SideTraceInfo {
     pub guardid: usize,
 }
 
-impl SideTraceInfo {
-    fn empty() -> SideTraceInfo {
-        SideTraceInfo {
-            callstack: std::ptr::null(),
-            aotvalsptr: std::ptr::null(),
-            aotvalslen: 0,
-            guardid: 0,
-        }
-    }
-}
-
 unsafe impl Send for SideTraceInfo {}
 
 /// A meta-tracer. Note that this is conceptually a "front-end" to the actual meta-tracer akin to
@@ -268,7 +257,7 @@ impl MT {
                     Ok(utrace) => {
                         #[cfg(feature = "yk_jitstate_debug")]
                         print_jit_state("stop-tracing");
-                        self.queue_compile_job(utrace, hl_arc, SideTraceInfo::empty(), None);
+                        self.queue_compile_job(utrace, hl_arc, None, None);
                     }
                     Err(_) => todo!(),
                 }
@@ -282,7 +271,7 @@ impl MT {
                     Ok(utrace) => {
                         #[cfg(feature = "yk_jitstate_debug")]
                         print_jit_state("stop-side-tracing");
-                        self.queue_compile_job(utrace, hl_arc, sti, Some(parent));
+                        self.queue_compile_job(utrace, hl_arc, Some(sti), Some(parent));
                     }
                     Err(_) => todo!(),
                 }
@@ -458,7 +447,7 @@ impl MT {
         self: &Arc<Self>,
         utrace: Box<dyn RawTrace>,
         hl_arc: Arc<Mutex<HotLocation>>,
-        sti: SideTraceInfo,
+        sti: Option<SideTraceInfo>,
         parent: Option<Arc<CompiledTrace>>,
     ) {
         self.stats.trace_collected_ok();
@@ -474,14 +463,14 @@ impl MT {
                         Arc::clone(&*lk)
                     };
                     mt.stats.timing_state(TimingState::Compiling);
-                    let guardid = sti.guardid;
+                    let guardid = sti.map(|x| x.guardid);
                     match compiler.compile(Arc::clone(&mt), irtrace, sti, hlclone) {
                         Ok(ct) => {
                             let mut hl = hl_arc.lock();
                             match &hl.kind {
                                 HotLocationKind::Compiled(_ctr) => {
                                     let ctr = parent.unwrap();
-                                    let guard = &ctr.guards[guardid];
+                                    let guard = &ctr.guards[guardid.unwrap()];
                                     guard.setct(Arc::new(ct));
                                 }
                                 _ => {

@@ -27,7 +27,7 @@ pub trait Compiler: Send + Sync {
         &self,
         mt: Arc<MT>,
         irtrace: MappedTrace,
-        sti: SideTraceInfo,
+        sti: Option<SideTraceInfo>,
         hl: Weak<Mutex<HotLocation>>,
     ) -> Result<CompiledTrace, Box<dyn Error>>;
 

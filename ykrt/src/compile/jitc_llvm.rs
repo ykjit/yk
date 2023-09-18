@@ -27,7 +27,7 @@ impl Compiler for JITCLLVM {
         &self,
         mt: Arc<MT>,
         irtrace: MappedTrace,
-        sti: SideTraceInfo,
+        sti: Option<SideTraceInfo>,
         hl: Weak<Mutex<HotLocation>>,
     ) -> Result<CompiledTrace, Box<dyn Error>> {
         let (func_names, bbs, trace_len) = self.encode_trace(&irtrace);
@@ -42,6 +42,11 @@ impl Compiler for JITCLLVM {
         let (llvmbc_data, llvmbc_len) = llvmbc_section();
         let (di_tmp, di_fd, di_tmpname_c) = Self::create_debuginfo_temp_file();
 
+        let (callstack, aotvalsptr, aotvalslen) = match sti {
+            Some(sti) => (sti.callstack, sti.aotvalsptr, sti.aotvalslen),
+            None => (std::ptr::null(), std::ptr::null(), 0),
+        };
+
         let ret = unsafe {
             yktracec::__yktracec_irtrace_compile(
                 func_names.as_ptr(),
@@ -54,9 +59,9 @@ impl Compiler for JITCLLVM {
                 llvmbc_len,
                 di_fd,
                 di_tmpname_c,
-                sti.callstack,
-                sti.aotvalsptr,
-                sti.aotvalslen,
+                callstack,
+                aotvalsptr,
+                aotvalslen,
             )
         };
         if ret.is_null() {
