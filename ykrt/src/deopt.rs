@@ -4,7 +4,7 @@
 use crate::frame::{BitcodeSection, FrameReconstructor, __yktracec_get_aot_module};
 #[cfg(feature = "yk_jitstate_debug")]
 use crate::print_jit_state;
-use crate::{compile::CompiledTrace, ykstats::TimingState};
+use crate::{compile::CompiledTrace, mt::SideTraceInfo, ykstats::TimingState};
 use llvm_sys::orc2::LLVMOrcThreadSafeModuleWithModuleDo;
 use llvm_sys::{
     error::{LLVMCreateStringError, LLVMErrorRef},
@@ -380,17 +380,18 @@ unsafe extern "C" fn __ykrt_deopt(
         guard.inc();
         if guard.failcount() >= ctr.mt.sidetrace_threshold() {
             // This guard is hot, so compile a new side-trace.
-            let aotvalsptr = unsafe {
-                (ctr.aotvals() as *const u8).offset(isize::try_from(aotvals.offset).unwrap())
-            };
-            ctr.mt.side_trace(
-                ctr.hl.upgrade().unwrap(), // FIXME: This might fail.
-                jitcallstack,
-                aotvalsptr as *const c_void,
-                aotvals.length,
-                guardid,
-                Arc::clone(&ctr),
-            );
+            if let Some(hl) = ctr.hl.upgrade() {
+                let aotvalsptr = unsafe {
+                    (ctr.aotvals() as *const u8).offset(isize::try_from(aotvals.offset).unwrap())
+                } as *const c_void;
+                let sti = SideTraceInfo {
+                    callstack: jitcallstack,
+                    aotvalsptr,
+                    aotvalslen: aotvals.length,
+                    guardid,
+                };
+                ctr.mt.side_trace(hl, sti, Arc::clone(&ctr));
+            }
         }
     }
 
