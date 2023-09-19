@@ -14,13 +14,13 @@ use std::{
 };
 
 #[cfg(tracer_hwt)]
-pub mod hwt;
+pub(crate) mod hwt;
 
-pub use errors::InvalidTraceError;
+pub(crate) use errors::InvalidTraceError;
 
 /// A tracer is an object which can start / stop collecting traces. It may have its own
 /// configuration, but that is dependent on the concrete tracer itself.
-pub trait Tracer: Send + Sync {
+pub(crate) trait Tracer: Send + Sync {
     /// Start collecting a trace of the current thread.
     fn start_collector(self: Arc<Self>) -> Result<Box<dyn ThreadTracer>, Box<dyn Error>>;
 }
@@ -28,7 +28,7 @@ pub trait Tracer: Send + Sync {
 /// Return a [Tracer] instance or `Err` if none can be found. The [Tracer] returned will be
 /// selected on a combination of what the platform can support and other (possibly run-time) user
 /// configuration.
-pub fn default_tracer() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
+pub(crate) fn default_tracer() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
     #[cfg(tracer_hwt)]
     {
         return Ok(Arc::new(hwt::HWTracer::new()?));
@@ -39,7 +39,7 @@ pub fn default_tracer() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
 }
 
 /// Represents a thread which is currently tracing.
-pub trait ThreadTracer {
+pub(crate) trait ThreadTracer {
     /// Stop collecting a trace of the current thread.
     fn stop_collector(self: Box<Self>) -> Result<Box<dyn RawTrace>, InvalidTraceError>;
 }
@@ -48,7 +48,7 @@ pub trait ThreadTracer {
 ///
 /// Depending on the backend: the raw trace may need considerable processing to convert into basic
 /// block addresses; or it may contain those basic block addresses in an easily digestible fashion.
-pub trait RawTrace: Send {
+pub(crate) trait RawTrace: Send {
     fn map(self: Box<Self>) -> Result<MappedTrace, InvalidTraceError>;
 }
 

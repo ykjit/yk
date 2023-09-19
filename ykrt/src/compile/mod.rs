@@ -21,7 +21,7 @@ use yksmp::{LiveVar, StackMapParser};
 pub(crate) mod jitc_llvm;
 
 /// The trait that every JIT compiler backend must implement.
-pub trait Compiler: Send + Sync {
+pub(crate) trait Compiler: Send + Sync {
     /// Compile an [MappedTrace] into machine code.
     fn compile(
         &self,
@@ -40,7 +40,7 @@ pub trait Compiler: Send + Sync {
     );
 }
 
-pub fn default_compiler() -> Result<Arc<dyn Compiler>, Box<dyn Error>> {
+pub(crate) fn default_compiler() -> Result<Arc<dyn Compiler>, Box<dyn Error>> {
     #[cfg(jitc_llvm)]
     {
         return Ok(jitc_llvm::JITCLLVM::new()?);
@@ -50,6 +50,13 @@ pub fn default_compiler() -> Result<Arc<dyn Compiler>, Box<dyn Error>> {
     Err("No JIT compiler supported on this platform/configuration.".into())
 }
 
+#[cfg(feature = "yk_testing")]
+pub unsafe fn compile_for_tc_tests(irtrace: MappedTrace, llvmbc_data: *const u8, llvmbc_len: u64) {
+    default_compiler()
+        .unwrap()
+        .compile_for_tc_tests(irtrace, llvmbc_data, llvmbc_len);
+}
+
 struct SendSyncConstPtr<T>(*const T);
 unsafe impl<T> Send for SendSyncConstPtr<T> {}
 unsafe impl<T> Sync for SendSyncConstPtr<T> {}
@@ -57,7 +64,7 @@ unsafe impl<T> Sync for SendSyncConstPtr<T> {}
 /// Responsible for tracking how often a guard in a `CompiledTrace` fails. A hotness counter is
 /// incremented each time the matching guard failure in a `CompiledTrace` is triggered. Also stores
 /// the side-trace once its compiled.
-pub struct Guard {
+pub(crate) struct Guard {
     failed: AtomicU32,
     ct: Mutex<Option<Arc<CompiledTrace>>>,
 }
@@ -87,7 +94,7 @@ impl Guard {
 /// A trace compiled into machine code. Note that these are passed around as raw pointers and
 /// potentially referenced by multiple threads so, once created, instances of this struct can only
 /// be updated if a lock is held or a field is atomic.
-pub struct CompiledTrace {
+pub(crate) struct CompiledTrace {
     // Reference to the meta-tracer required for side tracing.
     pub(crate) mt: Arc<MT>,
     /// A function which when called, executes the compiled trace.
@@ -118,7 +125,7 @@ impl CompiledTrace {
     /// Create a `CompiledTrace` from a pointer to an array containing: the pointer to the compiled
     /// trace, the pointer to the stackmap and the size of the stackmap, and the pointer to the
     /// live AOT values. The arguments `mt` and `hl` are required for side-tracing.
-    pub fn new(
+    pub(crate) fn new(
         mt: Arc<MT>,
         data: *const c_void,
         di_tmpfile: Option<NamedTempFile>,
@@ -158,12 +165,12 @@ impl CompiledTrace {
         }
     }
 
-    #[cfg(any(test, feature = "yk_testing"))]
+    #[cfg(test)]
     #[doc(hidden)]
     /// Create a `CompiledTrace` with null contents. This is unsafe and only intended for testing
     /// purposes where a `CompiledTrace` instance is required, but cannot sensibly be constructed
     /// without overwhelming the test. The resulting instance must not be inspected or executed.
-    pub unsafe fn new_null(mt: Arc<MT>) -> Self {
+    pub(crate) unsafe fn new_null(mt: Arc<MT>) -> Self {
         Self {
             mt,
             entry: SendSyncConstPtr(std::ptr::null()),
@@ -175,11 +182,11 @@ impl CompiledTrace {
         }
     }
 
-    pub fn aotvals(&self) -> *const c_void {
+    pub(crate) fn aotvals(&self) -> *const c_void {
         self.aotvals.0
     }
 
-    pub fn entry(&self) -> *const c_void {
+    pub(crate) fn entry(&self) -> *const c_void {
         self.entry.0
     }
 }

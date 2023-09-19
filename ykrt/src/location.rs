@@ -199,7 +199,7 @@ impl Drop for Location {
 }
 
 #[derive(Debug)]
-pub struct HotLocation {
+pub(crate) struct HotLocation {
     pub(crate) kind: HotLocationKind,
     pub(crate) trace_failure: TraceFailureThreshold,
 }
