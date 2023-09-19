@@ -1,11 +1,8 @@
 use llvm_sys::core::*;
 use llvm_sys::orc2::LLVMOrcThreadSafeModuleRef;
-use llvm_sys::prelude::{LLVMModuleRef, LLVMTypeRef, LLVMValueRef};
-use llvm_sys::target::{LLVMGetModuleDataLayout, LLVMTargetDataRef};
+use llvm_sys::prelude::{LLVMTypeRef, LLVMValueRef};
 use llvm_sys::LLVMTypeKind;
 use std::{ffi::CStr, fmt};
-
-pub struct Module(LLVMModuleRef);
 
 // Replicates struct of same name in `ykllvmwrap.cc`.
 #[repr(C)]
@@ -16,16 +13,6 @@ pub struct BitcodeSection {
 
 extern "C" {
     pub fn __yktracec_get_aot_module(bs: *const BitcodeSection) -> LLVMOrcThreadSafeModuleRef;
-}
-
-impl Module {
-    pub unsafe fn new(module: LLVMModuleRef) -> Self {
-        Self(module)
-    }
-
-    pub fn datalayout(&self) -> LLVMTargetDataRef {
-        unsafe { LLVMGetModuleDataLayout(self.0) }
-    }
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash)]
@@ -58,10 +45,6 @@ impl Value {
 
     pub fn is_instruction(&self) -> bool {
         unsafe { !LLVMIsAInstruction(self.0).is_null() }
-    }
-
-    pub fn is_alloca(&self) -> bool {
-        unsafe { !LLVMIsAAllocaInst(self.0).is_null() }
     }
 
     pub fn is_call(&self) -> bool {
