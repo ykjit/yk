@@ -170,7 +170,7 @@ struct ReconstructInfo<'a> {
 /// Collects the relevant information needed for deoptimisation and then reconstructs the stack.
 /// Returns a pointer to the new stack and a pointer to the current stack which needs to be
 /// overwritten.
-extern "C" fn ts_reconstruct(ctx: *mut c_void, module: LLVMModuleRef) -> LLVMErrorRef {
+extern "C" fn ts_reconstruct(ctx: *mut c_void, _module: LLVMModuleRef) -> LLVMErrorRef {
     let info = unsafe { Box::<&mut ReconstructInfo>::from_raw(ctx as *mut &mut ReconstructInfo) };
     let ctr = &info.ctr;
     let frameaddr = info.frameaddr;
@@ -195,7 +195,7 @@ extern "C" fn ts_reconstruct(ctx: *mut c_void, module: LLVMModuleRef) -> LLVMErr
     // Restore saved registers from the stack.
     let registers = Registers::from_ptr(rsp);
 
-    let mut framerec = unsafe { FrameReconstructor::new(activeframes, module) };
+    let mut framerec = unsafe { FrameReconstructor::new(activeframes) };
 
     // Retrieve the live variables for this guard from this trace's stackmap.
     let live_vars = ctr.smap.get(&retaddr.try_into().unwrap()).unwrap();

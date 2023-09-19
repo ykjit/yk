@@ -64,6 +64,22 @@ PATH=${YKB_YKLLVM_BIN_DIR}:${PATH} cargo xtask cfmt
 # FIXME: Add build/ to .gitignore in ykllvm
 git diff --exit-code --ignore-submodules
 
+# Check for unused variables in each package
+for p in $(sed -n -e '/^members =/,/^\]$/{/^members =/d;/^\]$/d;p;}' \
+  Cargo.toml \
+  | \
+  tr -d ' \t\",'); do
+    cd $p
+    if [ $p = "tests" ]; then
+        cargo rustc --profile check --lib -- -D unused-variables
+    else
+        cargo rustc --profile check -- -D unused-variables
+        cargo rustc --profile check --tests -- -D unused-variables
+        cargo rustc --profile check --benches -- -D unused-variables
+    fi
+    cd ..
+done
+
 # There are some feature-gated testing/debugging switches which slow the JIT
 # down a bit. Check that if we build the system without tests, those features
 # are not enabled.

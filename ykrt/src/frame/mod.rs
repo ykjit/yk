@@ -1,7 +1,7 @@
 #![allow(clippy::comparison_chain)]
 #![allow(clippy::missing_safety_doc)]
 
-use llvm_sys::{core::*, prelude::LLVMModuleRef, prelude::LLVMValueRef, target::LLVMABISizeOfType};
+use llvm_sys::{core::*, prelude::LLVMValueRef};
 use object::{Object, ObjectSection};
 use std::{
     collections::HashMap,
@@ -15,7 +15,7 @@ use yksmp::{Location as SMLocation, SMEntry, StackMapParser};
 
 mod llvmbridge;
 pub use llvmbridge::{BitcodeSection, __yktracec_get_aot_module};
-use llvmbridge::{Module, Type, Value};
+use llvmbridge::{Type, Value};
 
 pub static AOT_STACKMAPS: LazyLock<Vec<SMEntry>> = LazyLock::new(|| {
     // Load the stackmap from the binary to parse in the stackmaps.
@@ -102,25 +102,20 @@ fn get_stackmap_call(pc: Value) -> Value {
 
 /// The struct responsible for reconstructing the new frames after a guard failure.
 pub struct FrameReconstructor {
-    /// AOT IR module.
-    module: Module,
     /// Current frames.
     frames: Vec<Frame>,
 }
 
 impl FrameReconstructor {
     /// Create a new instance and initialise the frames we need to reconstruct.
-    pub unsafe fn new(activeframes: &[LLVMValueRef], module: LLVMModuleRef) -> FrameReconstructor {
-        // Get AOT module IR and parse it.
-        let module = Module::new(module);
-
+    pub unsafe fn new(activeframes: &[LLVMValueRef]) -> FrameReconstructor {
         // Initialise frames.
         let mut frames = Vec::with_capacity(activeframes.len());
         for pc in activeframes {
             let val = Value::new(*pc);
             frames.push(Frame::new(val));
         }
-        FrameReconstructor { module, frames }
+        FrameReconstructor { frames }
     }
 
     /// Generate frames from stackmap information after a guard failure. The new frames are stored
@@ -187,9 +182,6 @@ impl FrameReconstructor {
 
         // Now that we've calculated the stack's size, allocate memory for it.
         let newstack = unsafe { libc::malloc(memsize) };
-
-        // Get the modules layout which we'll need to extract type sizes of LLVM IR.
-        let layout = self.module.datalayout();
 
         // Generate and write frames to the new stack. Since the stack grows downwards and we need
         // to keep track of spilled register values we write to `newstack` from back to front. To
