@@ -455,6 +455,10 @@ impl MT {
             mt.stats.timing_state(TimingState::TraceMapping);
             match utrace.map() {
                 Ok(irtrace) => {
+                    debug_assert!(
+                        sidetrace.is_none()
+                            || matches!(hl_arc.lock().kind, HotLocationKind::Compiled(_))
+                    );
                     mt.stats.timing_state(TimingState::None);
                     let compiler = {
                         let lk = mt.compiler.lock();
@@ -472,6 +476,9 @@ impl MT {
                             let mut hl = hl_arc.lock();
                             match &hl.kind {
                                 HotLocationKind::Compiled(_) => {
+                                    // The `unwrap`s cannot fail because of the condition contained
+                                    // in the `debug_assert` above: if `sidetrace` is not-`None`
+                                    // then `hl_arc.kind` is `Compiled`.
                                     let ctr = sidetrace.map(|x| x.1).unwrap();
                                     let guard = &ctr.guards[guardid.unwrap()];
                                     guard.setct(Arc::new(ct));
