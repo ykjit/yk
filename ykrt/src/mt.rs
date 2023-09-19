@@ -486,7 +486,7 @@ impl MT {
                                     // in the `debug_assert` above: if `sidetrace` is not-`None`
                                     // then `hl_arc.kind` is `Compiled`.
                                     let ctr = sidetrace.map(|x| x.1).unwrap();
-                                    let guard = &ctr.guards[guardid.unwrap()];
+                                    let guard = &ctr.guards()[guardid.unwrap()];
                                     guard.setct(Arc::new(ct));
                                 }
                                 _ => {

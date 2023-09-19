@@ -116,7 +116,8 @@ pub(crate) struct CompiledTrace {
     /// Pointer to heap allocated live AOT values.
     aotvals: SendSyncConstPtr<c_void>,
     /// List of guards containing hotness counts and compiled side traces.
-    pub(crate) guards: Vec<Guard>,
+    #[cfg(not(test))]
+    guards: Vec<Guard>,
     /// If requested, a temporary file containing the "source code" for the trace, to be shown in
     /// debuggers when stepping over the JITted code.
     ///
@@ -181,6 +182,10 @@ impl CompiledTrace {
         &self.smap
     }
 
+    pub(crate) fn guards(&self) -> &Vec<Guard> {
+        &self.guards
+    }
+
     pub(crate) fn aotvals(&self) -> *const c_void {
         self.aotvals.0
     }
@@ -208,7 +213,6 @@ impl CompiledTrace {
         Self {
             aotvals: SendSyncConstPtr(std::ptr::null()),
             di_tmpfile: None,
-            guards: Vec::new(),
             hl: Weak::new(),
         }
     }
@@ -218,6 +222,10 @@ impl CompiledTrace {
     }
 
     pub(crate) fn smap(&self) -> &HashMap<u64, Vec<LiveVar>> {
+        todo!();
+    }
+
+    pub(crate) fn guards(&self) -> &Vec<Guard> {
         todo!();
     }
 
