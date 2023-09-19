@@ -199,7 +199,7 @@ impl CompiledTrace {
     /// Create a `CompiledTrace` with null contents. This is unsafe and only intended for testing
     /// purposes where a `CompiledTrace` instance is required, but cannot sensibly be constructed
     /// without overwhelming the test. The resulting instance must not be inspected or executed.
-    pub(crate) unsafe fn new_null(_mt: Arc<MT>) -> Self {
+    pub(crate) unsafe fn new_null() -> Self {
         Self {
             smap: HashMap::new(),
             aotvals: SendSyncConstPtr(std::ptr::null()),
