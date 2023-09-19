@@ -5,17 +5,21 @@ use crate::{
 };
 use libc::c_void;
 use parking_lot::Mutex;
+#[cfg(not(test))]
+use std::slice;
 use std::{
     collections::HashMap,
     error::Error,
-    fmt, slice,
+    fmt,
     sync::{
         atomic::{AtomicU32, Ordering},
         Arc, Weak,
     },
 };
 use tempfile::NamedTempFile;
-use yksmp::{LiveVar, StackMapParser};
+use yksmp::LiveVar;
+#[cfg(not(test))]
+use yksmp::StackMapParser;
 
 #[cfg(jitc_llvm)]
 pub(crate) mod jitc_llvm;
@@ -102,6 +106,7 @@ pub(crate) struct CompiledTrace {
     /// The argument to the function is a pointer to a struct containing the live variables at the
     /// control point. The exact definition of this struct is not known to Rust: the struct is
     /// generated at interpreter compile-time by ykllvm.
+    #[cfg(not(test))]
     entry: SendSyncConstPtr<c_void>,
     /// Parsed stackmap of this trace. We only need to read this once, and can then use it to
     /// lookup stackmap information for each guard failure as needed.
@@ -121,6 +126,7 @@ pub(crate) struct CompiledTrace {
     pub(crate) hl: Weak<Mutex<HotLocation>>,
 }
 
+#[cfg(not(test))]
 impl CompiledTrace {
     /// Create a `CompiledTrace` from a pointer to an array containing: the pointer to the compiled
     /// trace, the pointer to the stackmap and the size of the stackmap, and the pointer to the
@@ -165,15 +171,32 @@ impl CompiledTrace {
         }
     }
 
-    #[cfg(test)]
-    #[doc(hidden)]
+    pub(crate) fn aotvals(&self) -> *const c_void {
+        self.aotvals.0
+    }
+
+    pub(crate) fn entry(&self) -> *const c_void {
+        self.entry.0
+    }
+}
+
+#[cfg(test)]
+impl CompiledTrace {
+    pub(crate) fn new(
+        _mt: Arc<MT>,
+        _data: *const c_void,
+        _di_tmpfile: Option<NamedTempFile>,
+        _hl: Weak<Mutex<HotLocation>>,
+    ) -> Self {
+        todo!();
+    }
+
     /// Create a `CompiledTrace` with null contents. This is unsafe and only intended for testing
     /// purposes where a `CompiledTrace` instance is required, but cannot sensibly be constructed
     /// without overwhelming the test. The resulting instance must not be inspected or executed.
     pub(crate) unsafe fn new_null(mt: Arc<MT>) -> Self {
         Self {
             mt,
-            entry: SendSyncConstPtr(std::ptr::null()),
             smap: HashMap::new(),
             aotvals: SendSyncConstPtr(std::ptr::null()),
             di_tmpfile: None,
@@ -183,11 +206,11 @@ impl CompiledTrace {
     }
 
     pub(crate) fn aotvals(&self) -> *const c_void {
-        self.aotvals.0
+        todo!();
     }
 
     pub(crate) fn entry(&self) -> *const c_void {
-        self.entry.0
+        todo!();
     }
 }
 
