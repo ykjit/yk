@@ -27,8 +27,8 @@ pub trait Compiler: Send + Sync {
         &self,
         mt: Arc<MT>,
         irtrace: MappedTrace,
-        sti: &SideTraceInfo,
-        hl: Weak<Mutex<HotLocation>>,
+        sti: Option<SideTraceInfo>,
+        hl: Arc<Mutex<HotLocation>>,
     ) -> Result<CompiledTrace, Box<dyn Error>>;
 
     #[cfg(feature = "yk_testing")]

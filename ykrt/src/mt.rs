@@ -70,17 +70,6 @@ pub struct SideTraceInfo {
     pub guardid: usize,
 }
 
-impl SideTraceInfo {
-    fn empty() -> SideTraceInfo {
-        SideTraceInfo {
-            callstack: std::ptr::null(),
-            aotvalsptr: std::ptr::null(),
-            aotvalslen: 0,
-            guardid: 0,
-        }
-    }
-}
-
 unsafe impl Send for SideTraceInfo {}
 
 /// A meta-tracer. Note that this is conceptually a "front-end" to the actual meta-tracer akin to
@@ -268,7 +257,7 @@ impl MT {
                     Ok(utrace) => {
                         #[cfg(feature = "yk_jitstate_debug")]
                         print_jit_state("stop-tracing");
-                        self.queue_compile_job(utrace, hl_arc, SideTraceInfo::empty(), None);
+                        self.queue_compile_job(utrace, hl_arc, None);
                     }
                     Err(_) => todo!(),
                 }
@@ -282,7 +271,7 @@ impl MT {
                     Ok(utrace) => {
                         #[cfg(feature = "yk_jitstate_debug")]
                         print_jit_state("stop-side-tracing");
-                        self.queue_compile_job(utrace, hl_arc, sti, Some(parent));
+                        self.queue_compile_job(utrace, hl_arc, Some((sti, parent)));
                     }
                     Err(_) => todo!(),
                 }
@@ -453,34 +442,51 @@ impl MT {
         })
     }
 
-    /// Add a compilation job for `utrace` to the global work queue.
+    /// Add a compilation job for to the global work queue:
+    ///   * `utrace` is the trace to be compiled.
+    ///   * `hl_arc` is the [HotLocation] this compilation job is related to.
+    ///   * `sidetrace`, if not `None`, specifies that this is a side-trace compilation job.
+    ///     The `Arc<CompiledTrace>` is the parent [CompiledTrace] for the side-trace. Because
+    ///     side-traces can nest, this may or may not be the same [CompiledTrace] as contained
+    ///     in the `hl_arc`.
     fn queue_compile_job(
         self: &Arc<Self>,
         utrace: Box<dyn RawTrace>,
         hl_arc: Arc<Mutex<HotLocation>>,
-        sti: SideTraceInfo,
-        parent: Option<Arc<CompiledTrace>>,
+        sidetrace: Option<(SideTraceInfo, Arc<CompiledTrace>)>,
     ) {
         self.stats.trace_collected_ok();
         let mt = Arc::clone(self);
-        let hlclone = Arc::downgrade(&hl_arc);
         let do_compile = move || {
             mt.stats.timing_state(TimingState::TraceMapping);
             match utrace.map() {
                 Ok(irtrace) => {
+                    debug_assert!(
+                        sidetrace.is_none()
+                            || matches!(hl_arc.lock().kind, HotLocationKind::Compiled(_))
+                    );
                     mt.stats.timing_state(TimingState::None);
                     let compiler = {
                         let lk = mt.compiler.lock();
                         Arc::clone(&*lk)
                     };
                     mt.stats.timing_state(TimingState::Compiling);
-                    match compiler.compile(Arc::clone(&mt), irtrace, &sti, hlclone) {
+                    let guardid = sidetrace.as_ref().map(|x| x.0.guardid);
+                    match compiler.compile(
+                        Arc::clone(&mt),
+                        irtrace,
+                        sidetrace.as_ref().map(|x| x.0.clone()),
+                        Arc::clone(&hl_arc),
+                    ) {
                         Ok(ct) => {
                             let mut hl = hl_arc.lock();
                             match &hl.kind {
-                                HotLocationKind::Compiled(_ctr) => {
-                                    let ctr = parent.unwrap();
-                                    let guard = &ctr.guards[sti.guardid];
+                                HotLocationKind::Compiled(_) => {
+                                    // The `unwrap`s cannot fail because of the condition contained
+                                    // in the `debug_assert` above: if `sidetrace` is not-`None`
+                                    // then `hl_arc.kind` is `Compiled`.
+                                    let ctr = sidetrace.map(|x| x.1).unwrap();
+                                    let guard = &ctr.guards[guardid.unwrap()];
                                     guard.setct(Arc::new(ct));
                                 }
                                 _ => {
