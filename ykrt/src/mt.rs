@@ -442,7 +442,13 @@ impl MT {
         })
     }
 
-    /// Add a compilation job for `utrace` to the global work queue.
+    /// Add a compilation job for to the global work queue:
+    ///   * `utrace` is the trace to be compiled.
+    ///   * `hl_arc` is the [HotLocation] this compilation job is related to.
+    ///   * `sidetrace`, if not `None`, specifies that this is a side-trace compilation job.
+    ///     The `Arc<CompiledTrace>` is the parent [CompiledTrace] for the side-trace. Because
+    ///     side-traces can nest, this may or may not be the same [CompiledTrace] as contained
+    ///     in the `hl_arc`.
     fn queue_compile_job(
         self: &Arc<Self>,
         utrace: Box<dyn RawTrace>,
