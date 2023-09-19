@@ -198,7 +198,7 @@ extern "C" fn ts_reconstruct(ctx: *mut c_void, _module: LLVMModuleRef) -> LLVMEr
     let mut framerec = unsafe { FrameReconstructor::new(activeframes) };
 
     // Retrieve the live variables for this guard from this trace's stackmap.
-    let live_vars = ctr.smap.get(&retaddr.try_into().unwrap()).unwrap();
+    let live_vars = ctr.smap().get(&retaddr.try_into().unwrap()).unwrap();
 
     // Extract live values from the stackmap.
     // Skip first live variable that contains 3 unrelated locations (CC, Flags, Num Deopts).
@@ -289,7 +289,7 @@ unsafe extern "C" fn __ykrt_deopt(
         let guard = &ctr.guards[guardid];
         if let Some(st) = guard.getct() {
             let registers = Registers::from_ptr(rsp);
-            let live_vars = ctr.smap.get(&retaddr.try_into().unwrap()).unwrap();
+            let live_vars = ctr.smap().get(&retaddr.try_into().unwrap()).unwrap();
             let mut ykctrlpvars = Vec::new();
             for (_i, locs) in live_vars.iter().skip(1).enumerate() {
                 assert!(locs.len() == 1);

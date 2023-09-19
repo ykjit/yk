@@ -111,7 +111,8 @@ pub(crate) struct CompiledTrace {
     entry: SendSyncConstPtr<c_void>,
     /// Parsed stackmap of this trace. We only need to read this once, and can then use it to
     /// lookup stackmap information for each guard failure as needed.
-    pub(crate) smap: HashMap<u64, Vec<LiveVar>>,
+    #[cfg(not(test))]
+    smap: HashMap<u64, Vec<LiveVar>>,
     /// Pointer to heap allocated live AOT values.
     aotvals: SendSyncConstPtr<c_void>,
     /// List of guards containing hotness counts and compiled side traces.
@@ -176,6 +177,10 @@ impl CompiledTrace {
         &self.mt
     }
 
+    pub(crate) fn smap(&self) -> &HashMap<u64, Vec<LiveVar>> {
+        &self.smap
+    }
+
     pub(crate) fn aotvals(&self) -> *const c_void {
         self.aotvals.0
     }
@@ -201,7 +206,6 @@ impl CompiledTrace {
     /// without overwhelming the test. The resulting instance must not be inspected or executed.
     pub(crate) unsafe fn new_null() -> Self {
         Self {
-            smap: HashMap::new(),
             aotvals: SendSyncConstPtr(std::ptr::null()),
             di_tmpfile: None,
             guards: Vec::new(),
@@ -210,6 +214,10 @@ impl CompiledTrace {
     }
 
     pub(crate) fn mt(&self) -> &Arc<MT> {
+        todo!();
+    }
+
+    pub(crate) fn smap(&self) -> &HashMap<u64, Vec<LiveVar>> {
         todo!();
     }
 
