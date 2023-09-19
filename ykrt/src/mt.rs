@@ -257,7 +257,7 @@ impl MT {
                     Ok(utrace) => {
                         #[cfg(feature = "yk_jitstate_debug")]
                         print_jit_state("stop-tracing");
-                        self.queue_compile_job(utrace, hl_arc, None, None);
+                        self.queue_compile_job(utrace, hl_arc, None);
                     }
                     Err(_) => todo!(),
                 }
@@ -271,7 +271,7 @@ impl MT {
                     Ok(utrace) => {
                         #[cfg(feature = "yk_jitstate_debug")]
                         print_jit_state("stop-side-tracing");
-                        self.queue_compile_job(utrace, hl_arc, Some(sti), Some(parent));
+                        self.queue_compile_job(utrace, hl_arc, Some((sti, parent)));
                     }
                     Err(_) => todo!(),
                 }
@@ -447,8 +447,7 @@ impl MT {
         self: &Arc<Self>,
         utrace: Box<dyn RawTrace>,
         hl_arc: Arc<Mutex<HotLocation>>,
-        sti: Option<SideTraceInfo>,
-        parent: Option<Arc<CompiledTrace>>,
+        sidetrace: Option<(SideTraceInfo, Arc<CompiledTrace>)>,
     ) {
         self.stats.trace_collected_ok();
         let mt = Arc::clone(self);
@@ -462,13 +461,18 @@ impl MT {
                         Arc::clone(&*lk)
                     };
                     mt.stats.timing_state(TimingState::Compiling);
-                    let guardid = sti.map(|x| x.guardid);
-                    match compiler.compile(Arc::clone(&mt), irtrace, sti, Arc::clone(&hl_arc)) {
+                    let guardid = sidetrace.as_ref().map(|x| x.0.guardid);
+                    match compiler.compile(
+                        Arc::clone(&mt),
+                        irtrace,
+                        sidetrace.as_ref().map(|x| x.0.clone()),
+                        Arc::clone(&hl_arc),
+                    ) {
                         Ok(ct) => {
                             let mut hl = hl_arc.lock();
                             match &hl.kind {
-                                HotLocationKind::Compiled(_ctr) => {
-                                    let ctr = parent.unwrap();
+                                HotLocationKind::Compiled(_) => {
+                                    let ctr = sidetrace.map(|x| x.1).unwrap();
                                     let guard = &ctr.guards[guardid.unwrap()];
                                     guard.setct(Arc::new(ct));
                                 }
