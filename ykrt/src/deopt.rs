@@ -380,7 +380,7 @@ unsafe extern "C" fn __ykrt_deopt(
         guard.inc();
         if guard.failcount() >= ctr.mt().sidetrace_threshold() {
             // This guard is hot, so compile a new side-trace.
-            if let Some(hl) = ctr.hl.upgrade() {
+            if let Some(hl) = ctr.hl().upgrade() {
                 let aotvalsptr = unsafe {
                     (ctr.aotvals() as *const u8).offset(isize::try_from(aotvals.offset).unwrap())
                 } as *const c_void;

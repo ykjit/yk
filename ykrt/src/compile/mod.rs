@@ -126,7 +126,8 @@ pub(crate) struct CompiledTrace {
     #[allow(dead_code)]
     di_tmpfile: Option<NamedTempFile>,
     /// Reference to the HotLocation, required for side tracing.
-    pub(crate) hl: Weak<Mutex<HotLocation>>,
+    #[cfg(not(test))]
+    hl: Weak<Mutex<HotLocation>>,
 }
 
 #[cfg(not(test))]
@@ -193,6 +194,10 @@ impl CompiledTrace {
     pub(crate) fn entry(&self) -> *const c_void {
         self.entry.0
     }
+
+    pub(crate) fn hl(&self) -> &Weak<Mutex<HotLocation>> {
+        &self.hl
+    }
 }
 
 #[cfg(test)]
@@ -213,7 +218,6 @@ impl CompiledTrace {
         Self {
             aotvals: SendSyncConstPtr(std::ptr::null()),
             di_tmpfile: None,
-            hl: Weak::new(),
         }
     }
 
@@ -234,6 +238,10 @@ impl CompiledTrace {
     }
 
     pub(crate) fn entry(&self) -> *const c_void {
+        todo!();
+    }
+
+    pub(crate) fn hl(&self) -> &Weak<Mutex<HotLocation>> {
         todo!();
     }
 }
