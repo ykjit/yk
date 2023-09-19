@@ -100,7 +100,8 @@ impl Guard {
 /// be updated if a lock is held or a field is atomic.
 pub(crate) struct CompiledTrace {
     // Reference to the meta-tracer required for side tracing.
-    pub(crate) mt: Arc<MT>,
+    #[cfg(not(test))]
+    mt: Arc<MT>,
     /// A function which when called, executes the compiled trace.
     ///
     /// The argument to the function is a pointer to a struct containing the live variables at the
@@ -171,6 +172,10 @@ impl CompiledTrace {
         }
     }
 
+    pub(crate) fn mt(&self) -> &Arc<MT> {
+        &self.mt
+    }
+
     pub(crate) fn aotvals(&self) -> *const c_void {
         self.aotvals.0
     }
@@ -194,15 +199,18 @@ impl CompiledTrace {
     /// Create a `CompiledTrace` with null contents. This is unsafe and only intended for testing
     /// purposes where a `CompiledTrace` instance is required, but cannot sensibly be constructed
     /// without overwhelming the test. The resulting instance must not be inspected or executed.
-    pub(crate) unsafe fn new_null(mt: Arc<MT>) -> Self {
+    pub(crate) unsafe fn new_null(_mt: Arc<MT>) -> Self {
         Self {
-            mt,
             smap: HashMap::new(),
             aotvals: SendSyncConstPtr(std::ptr::null()),
             di_tmpfile: None,
             guards: Vec::new(),
             hl: Weak::new(),
         }
+    }
+
+    pub(crate) fn mt(&self) -> &Arc<MT> {
+        todo!();
     }
 
     pub(crate) fn aotvals(&self) -> *const c_void {

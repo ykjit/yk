@@ -350,7 +350,7 @@ unsafe extern "C" fn __ykrt_deopt(
 
     #[cfg(feature = "yk_jitstate_debug")]
     print_jit_state("deoptimise");
-    (*ctr).mt.stats.timing_state(TimingState::Deopting);
+    (*ctr).mt().stats.timing_state(TimingState::Deopting);
 
     // Copy arguments into a struct we can pass into the ThreadSafeModuleWithModuleDo function.
     let mut info = ReconstructInfo {
@@ -378,7 +378,7 @@ unsafe extern "C" fn __ykrt_deopt(
     if guardid != SIDETRACE_LAST_GUARD_ID {
         let guard = &ctr.guards[guardid];
         guard.inc();
-        if guard.failcount() >= ctr.mt.sidetrace_threshold() {
+        if guard.failcount() >= ctr.mt().sidetrace_threshold() {
             // This guard is hot, so compile a new side-trace.
             if let Some(hl) = ctr.hl.upgrade() {
                 let aotvalsptr = unsafe {
@@ -390,12 +390,12 @@ unsafe extern "C" fn __ykrt_deopt(
                     aotvalslen: aotvals.length,
                     guardid,
                 };
-                ctr.mt.side_trace(hl, sti, Arc::clone(&ctr));
+                ctr.mt().side_trace(hl, sti, Arc::clone(&ctr));
             }
         }
     }
 
-    ctr.mt.stats.timing_state(TimingState::OutsideYk);
+    ctr.mt().stats.timing_state(TimingState::OutsideYk);
 
     info.nfi.unwrap()
 }
