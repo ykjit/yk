@@ -659,7 +659,7 @@ mod tests {
                     HotLocationKind::Compiling
                 ));
                 loc.hot_location().unwrap().lock().kind =
-                    HotLocationKind::Compiled(Arc::new(unsafe { CompiledTrace::new_null() }));
+                    HotLocationKind::Compiled(Arc::new(CompiledTrace::new_testing()));
             }
             _ => unreachable!(),
         }
@@ -677,7 +677,7 @@ mod tests {
             mt.transition_guard_failure(
                 loc.hot_location_arc_clone().unwrap(),
                 sti,
-                Arc::new(unsafe { CompiledTrace::new_null() }),
+                Arc::new(CompiledTrace::new_testing()),
             ),
             TransitionGuardFailure::StartSideTracing
         ));
@@ -982,9 +982,9 @@ mod tests {
                                         HotLocationKind::Compiling
                                     ));
                                     loc.hot_location().unwrap().lock().kind =
-                                        HotLocationKind::Compiled(Arc::new(unsafe {
-                                            CompiledTrace::new_null()
-                                        }));
+                                        HotLocationKind::Compiled(Arc::new(
+                                            CompiledTrace::new_testing(),
+                                        ));
                                 }
                                 x => unreachable!("Reached incorrect state {:?}", x),
                             }
@@ -1096,7 +1096,7 @@ mod tests {
                         HotLocationKind::Compiling
                     ));
                     loc.hot_location().unwrap().lock().kind =
-                        HotLocationKind::Compiled(Arc::new(unsafe { CompiledTrace::new_null() }));
+                        HotLocationKind::Compiled(Arc::new(CompiledTrace::new_testing()));
                 }
                 _ => unreachable!(),
             }
@@ -1119,7 +1119,7 @@ mod tests {
                     mt.transition_guard_failure(
                         loc1.hot_location_arc_clone().unwrap(),
                         sti,
-                        Arc::new(unsafe { CompiledTrace::new_null() }),
+                        Arc::new(CompiledTrace::new_testing()),
                     ),
                     TransitionGuardFailure::StartSideTracing
                 ));
@@ -1138,7 +1138,7 @@ mod tests {
             mt.transition_guard_failure(
                 loc2.hot_location_arc_clone().unwrap(),
                 sti,
-                Arc::new(unsafe { CompiledTrace::new_null() }),
+                Arc::new(CompiledTrace::new_testing()),
             ),
             TransitionGuardFailure::StartSideTracing
         ));
@@ -1198,7 +1198,7 @@ mod tests {
         ));
         if let TransitionControlPoint::StopTracing(_) = mt.transition_control_point(&loc1) {
             loc1.hot_location().unwrap().lock().kind =
-                HotLocationKind::Compiled(Arc::new(unsafe { CompiledTrace::new_null() }));
+                HotLocationKind::Compiled(Arc::new(CompiledTrace::new_testing()));
         } else {
             panic!();
         }

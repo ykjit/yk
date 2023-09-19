@@ -98,25 +98,22 @@ impl Guard {
 /// A trace compiled into machine code. Note that these are passed around as raw pointers and
 /// potentially referenced by multiple threads so, once created, instances of this struct can only
 /// be updated if a lock is held or a field is atomic.
+#[cfg(not(test))]
 pub(crate) struct CompiledTrace {
     // Reference to the meta-tracer required for side tracing.
-    #[cfg(not(test))]
     mt: Arc<MT>,
     /// A function which when called, executes the compiled trace.
     ///
     /// The argument to the function is a pointer to a struct containing the live variables at the
     /// control point. The exact definition of this struct is not known to Rust: the struct is
     /// generated at interpreter compile-time by ykllvm.
-    #[cfg(not(test))]
     entry: SendSyncConstPtr<c_void>,
     /// Parsed stackmap of this trace. We only need to read this once, and can then use it to
     /// lookup stackmap information for each guard failure as needed.
-    #[cfg(not(test))]
     smap: HashMap<u64, Vec<LiveVar>>,
     /// Pointer to heap allocated live AOT values.
     aotvals: SendSyncConstPtr<c_void>,
     /// List of guards containing hotness counts and compiled side traces.
-    #[cfg(not(test))]
     guards: Vec<Guard>,
     /// If requested, a temporary file containing the "source code" for the trace, to be shown in
     /// debuggers when stepping over the JITted code.
@@ -126,7 +123,6 @@ pub(crate) struct CompiledTrace {
     #[allow(dead_code)]
     di_tmpfile: Option<NamedTempFile>,
     /// Reference to the HotLocation, required for side tracing.
-    #[cfg(not(test))]
     hl: Weak<Mutex<HotLocation>>,
 }
 
@@ -200,6 +196,24 @@ impl CompiledTrace {
     }
 }
 
+#[cfg(not(test))]
+impl Drop for CompiledTrace {
+    fn drop(&mut self) {
+        // The memory holding the AOT live values needs to live as long as the trace. Now that we
+        // no longer need the trace, this can be freed too.
+        unsafe { libc::free(self.aotvals.0 as *mut c_void) };
+    }
+}
+
+impl fmt::Debug for CompiledTrace {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "CompiledTrace {{ ... }}")
+    }
+}
+
+#[cfg(test)]
+pub(crate) struct CompiledTrace;
+
 #[cfg(test)]
 impl CompiledTrace {
     pub(crate) fn new(
@@ -211,14 +225,10 @@ impl CompiledTrace {
         todo!();
     }
 
-    /// Create a `CompiledTrace` with null contents. This is unsafe and only intended for testing
-    /// purposes where a `CompiledTrace` instance is required, but cannot sensibly be constructed
-    /// without overwhelming the test. The resulting instance must not be inspected or executed.
-    pub(crate) unsafe fn new_null() -> Self {
-        Self {
-            aotvals: SendSyncConstPtr(std::ptr::null()),
-            di_tmpfile: None,
-        }
+    /// Create a `CompiledTrace` suitable for testing purposes. The resulting instance is not
+    /// useful other than as a placeholder: calling any of its methods will cause a panic.
+    pub(crate) fn new_testing() -> Self {
+        Self
     }
 
     pub(crate) fn mt(&self) -> &Arc<MT> {
@@ -243,19 +253,5 @@ impl CompiledTrace {
 
     pub(crate) fn hl(&self) -> &Weak<Mutex<HotLocation>> {
         todo!();
-    }
-}
-
-impl Drop for CompiledTrace {
-    fn drop(&mut self) {
-        // The memory holding the AOT live values needs to live as long as the trace. Now that we
-        // no longer need the trace, this can be freed too.
-        unsafe { libc::free(self.aotvals.0 as *mut c_void) };
-    }
-}
-
-impl fmt::Debug for CompiledTrace {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "CompiledTrace {{ ... }}")
     }
 }
