@@ -5,17 +5,21 @@ use crate::{
 };
 use libc::c_void;
 use parking_lot::Mutex;
+#[cfg(not(test))]
+use std::slice;
 use std::{
     collections::HashMap,
     error::Error,
-    fmt, slice,
+    fmt,
     sync::{
         atomic::{AtomicU32, Ordering},
         Arc, Weak,
     },
 };
 use tempfile::NamedTempFile;
-use yksmp::{LiveVar, StackMapParser};
+use yksmp::LiveVar;
+#[cfg(not(test))]
+use yksmp::StackMapParser;
 
 #[cfg(jitc_llvm)]
 pub(crate) mod jitc_llvm;
@@ -94,9 +98,10 @@ impl Guard {
 /// A trace compiled into machine code. Note that these are passed around as raw pointers and
 /// potentially referenced by multiple threads so, once created, instances of this struct can only
 /// be updated if a lock is held or a field is atomic.
+#[cfg(not(test))]
 pub(crate) struct CompiledTrace {
     // Reference to the meta-tracer required for side tracing.
-    pub(crate) mt: Arc<MT>,
+    mt: Arc<MT>,
     /// A function which when called, executes the compiled trace.
     ///
     /// The argument to the function is a pointer to a struct containing the live variables at the
@@ -105,11 +110,11 @@ pub(crate) struct CompiledTrace {
     entry: SendSyncConstPtr<c_void>,
     /// Parsed stackmap of this trace. We only need to read this once, and can then use it to
     /// lookup stackmap information for each guard failure as needed.
-    pub(crate) smap: HashMap<u64, Vec<LiveVar>>,
+    smap: HashMap<u64, Vec<LiveVar>>,
     /// Pointer to heap allocated live AOT values.
     aotvals: SendSyncConstPtr<c_void>,
     /// List of guards containing hotness counts and compiled side traces.
-    pub(crate) guards: Vec<Guard>,
+    guards: Vec<Guard>,
     /// If requested, a temporary file containing the "source code" for the trace, to be shown in
     /// debuggers when stepping over the JITted code.
     ///
@@ -118,9 +123,10 @@ pub(crate) struct CompiledTrace {
     #[allow(dead_code)]
     di_tmpfile: Option<NamedTempFile>,
     /// Reference to the HotLocation, required for side tracing.
-    pub(crate) hl: Weak<Mutex<HotLocation>>,
+    hl: Weak<Mutex<HotLocation>>,
 }
 
+#[cfg(not(test))]
 impl CompiledTrace {
     /// Create a `CompiledTrace` from a pointer to an array containing: the pointer to the compiled
     /// trace, the pointer to the stackmap and the size of the stackmap, and the pointer to the
@@ -165,21 +171,16 @@ impl CompiledTrace {
         }
     }
 
-    #[cfg(test)]
-    #[doc(hidden)]
-    /// Create a `CompiledTrace` with null contents. This is unsafe and only intended for testing
-    /// purposes where a `CompiledTrace` instance is required, but cannot sensibly be constructed
-    /// without overwhelming the test. The resulting instance must not be inspected or executed.
-    pub(crate) unsafe fn new_null(mt: Arc<MT>) -> Self {
-        Self {
-            mt,
-            entry: SendSyncConstPtr(std::ptr::null()),
-            smap: HashMap::new(),
-            aotvals: SendSyncConstPtr(std::ptr::null()),
-            di_tmpfile: None,
-            guards: Vec::new(),
-            hl: Weak::new(),
-        }
+    pub(crate) fn mt(&self) -> &Arc<MT> {
+        &self.mt
+    }
+
+    pub(crate) fn smap(&self) -> &HashMap<u64, Vec<LiveVar>> {
+        &self.smap
+    }
+
+    pub(crate) fn guards(&self) -> &Vec<Guard> {
+        &self.guards
     }
 
     pub(crate) fn aotvals(&self) -> *const c_void {
@@ -189,8 +190,13 @@ impl CompiledTrace {
     pub(crate) fn entry(&self) -> *const c_void {
         self.entry.0
     }
+
+    pub(crate) fn hl(&self) -> &Weak<Mutex<HotLocation>> {
+        &self.hl
+    }
 }
 
+#[cfg(not(test))]
 impl Drop for CompiledTrace {
     fn drop(&mut self) {
         // The memory holding the AOT live values needs to live as long as the trace. Now that we
@@ -202,5 +208,50 @@ impl Drop for CompiledTrace {
 impl fmt::Debug for CompiledTrace {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "CompiledTrace {{ ... }}")
+    }
+}
+
+#[cfg(test)]
+pub(crate) struct CompiledTrace;
+
+#[cfg(test)]
+impl CompiledTrace {
+    pub(crate) fn new(
+        _mt: Arc<MT>,
+        _data: *const c_void,
+        _di_tmpfile: Option<NamedTempFile>,
+        _hl: Weak<Mutex<HotLocation>>,
+    ) -> Self {
+        todo!();
+    }
+
+    /// Create a `CompiledTrace` suitable for testing purposes. The resulting instance is not
+    /// useful other than as a placeholder: calling any of its methods will cause a panic.
+    pub(crate) fn new_testing() -> Self {
+        Self
+    }
+
+    pub(crate) fn mt(&self) -> &Arc<MT> {
+        todo!();
+    }
+
+    pub(crate) fn smap(&self) -> &HashMap<u64, Vec<LiveVar>> {
+        todo!();
+    }
+
+    pub(crate) fn guards(&self) -> &Vec<Guard> {
+        todo!();
+    }
+
+    pub(crate) fn aotvals(&self) -> *const c_void {
+        todo!();
+    }
+
+    pub(crate) fn entry(&self) -> *const c_void {
+        todo!();
+    }
+
+    pub(crate) fn hl(&self) -> &Weak<Mutex<HotLocation>> {
+        todo!();
     }
 }
