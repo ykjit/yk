@@ -5,7 +5,7 @@
 
 use std::{collections::HashMap, convert::TryInto, env, error::Error, ffi::CString, fs::File};
 use ykrt::{
-    compile::default_compiler,
+    compile::compile_for_tc_tests,
     trace::{MappedTrace, TracedAOTBlock},
 };
 
@@ -47,10 +47,7 @@ fn main() -> Result<(), String> {
     let ll_file = File::open(ll_path).unwrap();
     let mmap = unsafe { memmap2::Mmap::map(&ll_file).unwrap() };
 
-    let compiler = default_compiler().unwrap();
-    unsafe {
-        compiler.compile_for_tc_tests(irtrace, mmap.as_ptr(), mmap.len().try_into().unwrap())
-    };
+    unsafe { compile_for_tc_tests(irtrace, mmap.as_ptr(), mmap.len().try_into().unwrap()) };
 
     Ok(())
 }

@@ -14,7 +14,7 @@ use std::{
 use yksmp::{Location as SMLocation, SMEntry, StackMapParser};
 
 mod llvmbridge;
-pub use llvmbridge::{BitcodeSection, __yktracec_get_aot_module};
+pub(crate) use llvmbridge::{BitcodeSection, __yktracec_get_aot_module};
 use llvmbridge::{Type, Value};
 
 pub static AOT_STACKMAPS: LazyLock<Vec<SMEntry>> = LazyLock::new(|| {
@@ -42,7 +42,7 @@ static RBP_DWARF_NUM: u16 = 6;
 
 /// Live value.
 #[derive(Clone, Copy, PartialEq)]
-pub struct SGValue {
+pub(crate) struct SGValue {
     pub val: u64,
     pub ty: Type,
 }
@@ -101,7 +101,7 @@ fn get_stackmap_call(pc: Value) -> Value {
 }
 
 /// The struct responsible for reconstructing the new frames after a guard failure.
-pub struct FrameReconstructor {
+pub(crate) struct FrameReconstructor {
     /// Current frames.
     frames: Vec<Frame>,
 }

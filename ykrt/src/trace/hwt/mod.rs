@@ -3,11 +3,11 @@
 use super::{errors::InvalidTraceError, MappedTrace, RawTrace, ThreadTracer};
 use std::{error::Error, sync::Arc};
 
-pub mod mapper;
-pub use mapper::HWTMapper;
+pub(crate) mod mapper;
+pub(crate) use mapper::HWTMapper;
 mod testing;
 
-pub struct HWTracer {
+pub(crate) struct HWTracer {
     backend: Arc<dyn hwtracer::Tracer>,
 }
 

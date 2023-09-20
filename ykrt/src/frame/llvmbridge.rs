@@ -6,7 +6,7 @@ use std::{ffi::CStr, fmt};
 
 // Replicates struct of same name in `ykllvmwrap.cc`.
 #[repr(C)]
-pub struct BitcodeSection {
+pub(crate) struct BitcodeSection {
     pub data: *const u8,
     pub len: u64,
 }
@@ -16,7 +16,7 @@ extern "C" {
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash)]
-pub struct Type(LLVMTypeRef);
+pub(crate) struct Type(LLVMTypeRef);
 impl Type {
     pub fn kind(&self) -> LLVMTypeKind {
         unsafe { LLVMGetTypeKind(self.0) }
@@ -33,7 +33,7 @@ impl Type {
 }
 
 #[derive(PartialEq, Eq, Hash, Clone, Copy)]
-pub struct Value(LLVMValueRef);
+pub(crate) struct Value(LLVMValueRef);
 impl Value {
     pub unsafe fn new(vref: LLVMValueRef) -> Self {
         Value(vref)

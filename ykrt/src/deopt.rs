@@ -90,7 +90,7 @@ struct LiveAOTVals {
 /// Struct containing pointers needed for frame reconstruction.
 #[derive(Debug)]
 #[repr(C)]
-pub struct NewFramesInfo {
+pub(crate) struct NewFramesInfo {
     // Address of the new stackframes in memory.
     src: *const c_void,
     // Address into the current stack we want to write `src` to.

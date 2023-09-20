@@ -63,7 +63,7 @@ static SERIALISE_COMPILATION: LazyLock<bool> = LazyLock::new(|| {
 /// Stores information required for compiling a side-trace. Passed down from a (parent) trace
 /// during deoptimisation.
 #[derive(Debug, Copy, Clone)]
-pub struct SideTraceInfo {
+pub(crate) struct SideTraceInfo {
     pub callstack: *const c_void,
     pub aotvalsptr: *const c_void,
     pub aotvalslen: usize,
@@ -562,7 +562,7 @@ impl Drop for MT {
 
 /// Meta-tracer per-thread state. Note that this struct is neither `Send` nor `Sync`: it can only
 /// be accessed from within a single thread.
-pub struct MTThread {
+pub(crate) struct MTThread {
     /// Is this thread currently tracing something? If so, this will be a `Some<...>`. This allows
     /// another thread to tell whether the thread that started tracing a [Location] is still alive
     /// or not by inspecting its strong count (if the strong count is equal to 1 then the thread

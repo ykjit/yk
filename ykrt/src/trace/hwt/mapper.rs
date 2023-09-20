@@ -11,7 +11,7 @@ use ykaddr::{
 };
 
 /// Maps each entry of a hardware trace back to the IR block from which it was compiled.
-pub struct HWTMapper {
+pub(crate) struct HWTMapper {
     faddrs: HashMap<CString, *const c_void>,
 }
 
