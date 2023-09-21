@@ -286,7 +286,7 @@ unsafe extern "C" fn __ykrt_deopt(
 
     // Check if we have a side trace and execute it.
     if guardid != SIDETRACE_LAST_GUARD_ID {
-        let guard = &ctr.guards()[guardid];
+        let guard = ctr.guard(guardid);
         if let Some(st) = guard.getct() {
             let registers = Registers::from_ptr(rsp);
             let live_vars = ctr.smap().get(&retaddr.try_into().unwrap()).unwrap();
@@ -376,7 +376,7 @@ unsafe extern "C" fn __ykrt_deopt(
     // We want to start side tracing only after we deoptimised. Otherwise we'd trace the whole
     // deopt routine which will later be costly to disassemble.
     if guardid != SIDETRACE_LAST_GUARD_ID {
-        let guard = &ctr.guards()[guardid];
+        let guard = ctr.guard(guardid);
         guard.inc();
         if guard.failcount() >= ctr.mt().sidetrace_threshold() {
             // This guard is hot, so compile a new side-trace.

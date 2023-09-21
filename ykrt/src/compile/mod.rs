@@ -179,8 +179,9 @@ impl CompiledTrace {
         &self.smap
     }
 
-    pub(crate) fn guards(&self) -> &Vec<Guard> {
-        &self.guards
+    /// Return a reference to the guard `id`.
+    pub(crate) fn guard(&self, id: usize) -> &Guard {
+        &self.guards[id]
     }
 
     pub(crate) fn aotvals(&self) -> *const c_void {
@@ -239,7 +240,7 @@ impl CompiledTrace {
         todo!();
     }
 
-    pub(crate) fn guards(&self) -> &Vec<Guard> {
+    pub(crate) fn guard(&self, id: usize) -> &Guard {
         todo!();
     }
 
