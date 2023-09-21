@@ -184,6 +184,11 @@ impl CompiledTrace {
         &self.guards[id.0]
     }
 
+    /// Is the guard `id` the last guard in this `CompiledTrace`?
+    pub(crate) fn is_last_guard(&self, id: GuardId) -> bool {
+        id.0 + 1 == self.guards.len()
+    }
+
     pub(crate) fn aotvals(&self) -> *const c_void {
         self.aotvals.0
     }
@@ -241,6 +246,10 @@ impl CompiledTrace {
     }
 
     pub(crate) fn guard(&self, _id: GuardId) -> &Guard {
+        todo!();
+    }
+
+    pub(crate) fn is_last_guard(&self, _id: GuardId) -> bool {
         todo!();
     }
 

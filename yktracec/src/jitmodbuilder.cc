@@ -54,9 +54,6 @@ const char *PromoteRecFnName = "__yk_promote";
 // The name prefix used for blocks that are branched to when a guard succeeds.
 #define GUARD_SUCCESS_BLOCK_NAME "guardsuccess"
 
-// Special ID for the final guard inside a side-trace.
-const size_t SIDETRACE_LAST_GUARD_ID = numeric_limits<uint64_t>::max();
-
 const std::array<Intrinsic::ID, 5> AlwaysInlinedIntrinsics = {
     Intrinsic::ctpop, Intrinsic::smax, Intrinsic::usub_with_overflow,
     Intrinsic::vaend, Intrinsic::vastart};
@@ -1712,9 +1709,8 @@ public:
                   // side trace reaches its end (this requires patching the
                   // parent trace). Instead we simply guard fail back to the
                   // main interpreter.
-                  BasicBlock *FailBB =
-                      getGuardFailureBlock(BB, CurBBIdx, CPInstr, CurInstrIdx,
-                                           SIDETRACE_LAST_GUARD_ID);
+                  BasicBlock *FailBB = getGuardFailureBlock(
+                      BB, CurBBIdx, CPInstr, CurInstrIdx, GuardCount);
                   Builder.CreateBr(FailBB);
                 }
                 break;
