@@ -9,6 +9,7 @@ use parking_lot::Mutex;
 use std::slice;
 use std::{
     collections::HashMap,
+    env,
     error::Error,
     fmt,
     sync::{
@@ -23,6 +24,9 @@ use yksmp::StackMapParser;
 
 #[cfg(jitc_llvm)]
 pub(crate) mod jitc_llvm;
+
+#[cfg(jitc_yk)]
+pub(crate) mod jitc_yk;
 
 /// The trait that every JIT compiler backend must implement.
 pub(crate) trait Compiler: Send + Sync {
@@ -45,6 +49,15 @@ pub(crate) trait Compiler: Send + Sync {
 }
 
 pub(crate) fn default_compiler() -> Result<Arc<dyn Compiler>, Box<dyn Error>> {
+    #[cfg(jitc_yk)]
+    // Transitionary env var to turn on the new code generator.
+    //
+    // This will be removed once the transition away from LLVM as a trace compiler is complete.
+    if let Ok(v) = env::var("YKD_NEW_CODEGEN") {
+        if v == "1" {
+            return Ok(jitc_yk::JITCYk::new()?);
+        }
+    }
     #[cfg(jitc_llvm)]
     {
         return Ok(jitc_llvm::JITCLLVM::new()?);

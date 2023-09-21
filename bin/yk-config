@@ -64,6 +64,8 @@ handle_arg() {
             OUTPUT="${OUTPUT} -fuse-ld=lld"
             # Embed LLVM bitcode as late as possible.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--embed-bitcode-final"
+            # Embed Yk's IR.
+            OUTPUT="${OUTPUT} -Wl,-mllvm=--yk-embed-ir"
 
             # Disable machine passes that would interfere with block mapping.
             #

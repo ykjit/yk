@@ -6,6 +6,7 @@ edition = "2021"
 license = "Apache-2.0 OR MIT"
 
 [dependencies]
+deku = { version = "0.16.0", features = ["std"] }
 hwtracer = { path = "../hwtracer" }
 libc = "0.2.117"
 memmap2 = "0.6"
@@ -34,6 +35,9 @@ features = ["read_core", "elf"]
 [build-dependencies]
 regex = "1.5.4"
 ykbuild = { path = "../ykbuild" }
+
+[dev-dependencies]
+byteorder = "1.4.3"
 
 [features]
 yk_jitstate_debug = []
