@@ -475,7 +475,7 @@ impl MT {
                     match compiler.compile(
                         Arc::clone(&mt),
                         irtrace,
-                        sidetrace.as_ref().map(|x| x.0.clone()),
+                        sidetrace.as_ref().map(|x| x.0),
                         Arc::clone(&hl_arc),
                     ) {
                         Ok(ct) => {
