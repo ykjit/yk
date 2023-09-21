@@ -180,8 +180,8 @@ impl CompiledTrace {
     }
 
     /// Return a reference to the guard `id`.
-    pub(crate) fn guard(&self, id: usize) -> &Guard {
-        &self.guards[id]
+    pub(crate) fn guard(&self, id: GuardId) -> &Guard {
+        &self.guards[id.0]
     }
 
     pub(crate) fn aotvals(&self) -> *const c_void {
@@ -240,7 +240,7 @@ impl CompiledTrace {
         todo!();
     }
 
-    pub(crate) fn guard(&self, id: usize) -> &Guard {
+    pub(crate) fn guard(&self, _id: GuardId) -> &Guard {
         todo!();
     }
 
@@ -254,5 +254,17 @@ impl CompiledTrace {
 
     pub(crate) fn hl(&self) -> &Weak<Mutex<HotLocation>> {
         todo!();
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct GuardId(pub(crate) usize);
+
+impl GuardId {
+    #[cfg(test)]
+    /// Only when testing, create a `GuardId` with an illegal value: trying to use this `GuardId`
+    /// will either cause an error or lead to undefined behaviour.
+    pub(crate) fn illegal() -> Self {
+        GuardId(usize::max_value())
     }
 }

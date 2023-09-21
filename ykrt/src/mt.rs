@@ -25,7 +25,7 @@ use std::sync::LazyLock;
 #[cfg(feature = "yk_jitstate_debug")]
 use crate::print_jit_state;
 use crate::{
-    compile::{default_compiler, CompiledTrace, Compiler},
+    compile::{default_compiler, CompiledTrace, Compiler, GuardId},
     location::{HotLocation, HotLocationKind, Location, TraceFailed},
     trace::{default_tracer, RawTrace, ThreadTracer, Tracer},
     ykstats::{TimingState, YkStats},
@@ -67,7 +67,7 @@ pub(crate) struct SideTraceInfo {
     pub callstack: *const c_void,
     pub aotvalsptr: *const c_void,
     pub aotvalslen: usize,
-    pub guardid: usize,
+    pub guardid: GuardId,
 }
 
 unsafe impl Send for SideTraceInfo {}
@@ -671,7 +671,7 @@ mod tests {
             callstack: std::ptr::null(),
             aotvalsptr: std::ptr::null(),
             aotvalslen: 0,
-            guardid: 0,
+            guardid: GuardId::illegal(),
         };
         assert!(matches!(
             mt.transition_guard_failure(
@@ -1113,7 +1113,7 @@ mod tests {
                     callstack: std::ptr::null(),
                     aotvalsptr: std::ptr::null(),
                     aotvalslen: 0,
-                    guardid: 0,
+                    guardid: GuardId::illegal(),
                 };
                 assert!(matches!(
                     mt.transition_guard_failure(
@@ -1132,7 +1132,7 @@ mod tests {
             callstack: std::ptr::null(),
             aotvalsptr: std::ptr::null(),
             aotvalslen: 0,
-            guardid: 0,
+            guardid: GuardId::illegal(),
         };
         assert!(matches!(
             mt.transition_guard_failure(
