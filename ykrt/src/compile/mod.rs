@@ -104,7 +104,7 @@ impl Guard {
 
     /// Retrieves the stored side-trace or None, if no side-trace has been compiled yet.
     pub fn getct(&self) -> Option<Arc<CompiledTrace>> {
-        self.ct.lock().as_ref().map(|x| Arc::clone(x))
+        self.ct.lock().as_ref().map(Arc::clone)
     }
 }
 

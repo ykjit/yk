@@ -45,7 +45,6 @@ use crate::{
     llvm_blockmap::{BlockMapEntry, SuccessorKind, LLVM_BLOCK_MAP},
     Block,
 };
-use iced_x86;
 use intervaltree::IntervalTree;
 use std::{
     cell::Cell,
