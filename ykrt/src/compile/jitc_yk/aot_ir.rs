@@ -35,6 +35,90 @@ fn deserialise_string(v: Vec<u8>) -> Result<String, DekuError> {
 #[deku(type = "u8")]
 pub(crate) enum Opcode {
     Nop = 0,
+    Load,
+    Store,
+    Alloca,
+    Call,
+    GetElementPtr,
+    Br,
+    Icmp,
+    BinaryOperator,
+    Ret,
+    Unimplemented = 255,
+}
+
+impl Display for Opcode {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", format!("{:?}", self).to_lowercase())
+    }
+}
+
+impl Opcode {
+    fn generates_value(&self) -> bool {
+        // FIXME: calls may or may not generate a value depending upon the callee.
+        // For now we assume a call does generate a value.
+        match self {
+            Self::Nop | Self::Store | Self::Br | Self::Ret | Self::Unimplemented => false,
+            Self::Load
+            | Self::Alloca
+            | Self::Call
+            | Self::GetElementPtr
+            | Self::Icmp
+            | Self::BinaryOperator => true,
+        }
+    }
+}
+
+#[deku_derive(DekuRead)]
+#[derive(Debug)]
+pub(crate) struct ConstantOperand {
+    constant_idx: usize,
+}
+
+impl Display for ConstantOperand {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // FIXME: print the constant properly.
+        // This requires access to the constant table which we don't have here, so we will have to
+        // re-architect printing.
+        write!(f, "const[{}]", self.constant_idx)
+    }
+}
+
+#[deku_derive(DekuRead)]
+#[derive(Debug)]
+pub(crate) struct LocalVariableOperand {
+    bb_idx: usize,
+    inst_idx: usize,
+}
+
+impl Display for LocalVariableOperand {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // FIXME: Assign the variable a name during printing. Requires a largeish change, as we'd
+        // need to carry around some state, which `Display` doesn't allow (or does it?).
+        write!(f, "${}_{}", self.bb_idx, self.inst_idx)
+    }
+}
+
+#[deku_derive(DekuRead)]
+#[derive(Debug)]
+#[deku(type = "u8")]
+pub(crate) enum Operand {
+    #[deku(id = "0")]
+    Constant(ConstantOperand),
+    #[deku(id = "1")]
+    LocalVariable(LocalVariableOperand),
+    #[deku(id = "2")]
+    String(#[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")] String),
+}
+
+impl Display for Operand {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Constant(c) => write!(f, "{}", c),
+            Self::LocalVariable(l) => write!(f, "{}", l),
+            Self::String(s) => write!(f, "\"{}\"", s),
+        }
+    }
 }
 
 /// A bytecode instruction.
@@ -42,11 +126,29 @@ pub(crate) enum Opcode {
 #[derive(Debug)]
 pub(crate) struct Instruction {
     opcode: Opcode,
+    #[deku(temp)]
+    num_operands: u32,
+    #[deku(count = "num_operands")]
+    operands: Vec<Operand>,
 }
 
 impl Display for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self.opcode)
+        if self.opcode.generates_value() {
+            // FIXME: We would like to print the variable name here, but we don't hav the context
+            // to do so. Module printing needs a re-think.
+            write!(f, "$_ = ")?;
+        }
+        write!(f, "{}", self.opcode)?;
+        if !self.operands.is_empty() {
+            write!(f, " ")?;
+        }
+        let op_strs = self
+            .operands
+            .iter()
+            .map(|o| format!("{}", o))
+            .collect::<Vec<_>>();
+        write!(f, "{}", op_strs.join(", "))
     }
 }
 
@@ -102,6 +204,35 @@ impl Display for Function {
     }
 }
 
+// A fixed-width two's compliment integer.
+//
+// Signedness is not specified.
+#[deku_derive(DekuRead)]
+#[derive(Debug)]
+pub(crate) struct IntegerType {
+    num_bits: u32,
+}
+
+/// A type.
+#[deku_derive(DekuRead)]
+#[derive(Debug)]
+#[deku(type = "u8")]
+pub(crate) enum Type {
+    #[deku(id = "0")]
+    Integer(IntegerType),
+}
+
+/// A constant.
+#[deku_derive(DekuRead)]
+#[derive(Debug)]
+pub(crate) struct Constant {
+    type_index: usize,
+    #[deku(temp)]
+    num_bytes: usize,
+    #[deku(count = "num_bytes")]
+    bytes: Vec<u8>,
+}
+
 /// A bytecode module.
 ///
 /// This is the top-level container for the bytecode.
@@ -116,6 +247,14 @@ pub(crate) struct AOTModule {
     num_funcs: usize,
     #[deku(count = "num_funcs")]
     funcs: Vec<Function>,
+    #[deku(temp)]
+    num_types: usize,
+    #[deku(count = "num_types")]
+    types: Vec<Type>,
+    #[deku(temp)]
+    num_consts: usize,
+    #[deku(count = "num_consts")]
+    consts: Vec<Constant>,
 }
 
 impl Display for AOTModule {
@@ -131,7 +270,10 @@ impl Display for AOTModule {
 /// Deserialise an AOT module from the slice `data`.
 pub(crate) fn deserialise_module(data: &[u8]) -> Result<AOTModule, Box<dyn Error>> {
     match AOTModule::from_bytes((data, 0)) {
-        Ok(((_, _), modu)) => Ok(modu),
+        Ok(((_, _), modu)) => {
+            println!("{}", modu);
+            Ok(modu)
+        }
         Err(e) => Err(e.to_string().into()),
     }
 }
@@ -172,16 +314,28 @@ mod tests {
         write_native_usize(&mut data, 2);
         // funcs[0].blocks[0].instrs[0].opcode
         data.write_u8(Opcode::Nop as u8).unwrap();
+        // funcs[0].blocks[0].instrs[0].num_operands
+        data.write_u32::<NativeEndian>(0).unwrap();
         // funcs[0].blocks[0].instrs[1].opcode
         data.write_u8(Opcode::Nop as u8).unwrap();
+        // funcs[0].blocks[0].instrs[1].num_operands
+        data.write_u32::<NativeEndian>(0).unwrap();
         // funcs[0].blocks[1].num_instrs
         write_native_usize(&mut data, 1);
         // funcs[0].blocks[1].instrs[0].opcode
         data.write_u8(Opcode::Nop as u8).unwrap();
+        // funcs[0].blocks[1].instrs[0].num_operands
+        data.write_u32::<NativeEndian>(0).unwrap();
 
         // funcs[1].name
         write_str(&mut data, "bar");
         // funcs[0].num_blocks
+        write_native_usize(&mut data, 0);
+
+        // num_types
+        write_native_usize(&mut data, 0);
+
+        // num_consts
         write_native_usize(&mut data, 0);
 
         let test_mod = deserialise_module(data.as_slice()).unwrap();
@@ -193,10 +347,10 @@ mod tests {
 
 func foo {
   bb0:
-    Nop
-    Nop
+    nop
+    nop
   bb1:
-    Nop
+    nop
 }
 
 func bar;
