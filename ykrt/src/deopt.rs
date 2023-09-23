@@ -385,8 +385,7 @@ unsafe extern "C" fn __ykrt_deopt(
     // deopt routine which will later be costly to disassemble.
     if !ctr.is_last_guard(guardid) {
         let guard = ctr.guard(guardid);
-        guard.inc();
-        if guard.failcount() >= ctr.mt().sidetrace_threshold() {
+        if guard.inc_failed(ctr.mt()) {
             // This guard is hot, so compile a new side-trace.
             if let Some(hl) = ctr.hl().upgrade() {
                 let aotvalsptr = unsafe {
