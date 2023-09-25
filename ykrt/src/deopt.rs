@@ -4,7 +4,11 @@
 use crate::frame::{BitcodeSection, FrameReconstructor, __yktracec_get_aot_module};
 #[cfg(feature = "yk_jitstate_debug")]
 use crate::print_jit_state;
-use crate::{compile::CompiledTrace, mt::SideTraceInfo, ykstats::TimingState};
+use crate::{
+    compile::{CompiledTrace, GuardId},
+    mt::SideTraceInfo,
+    ykstats::TimingState,
+};
 use llvm_sys::orc2::LLVMOrcThreadSafeModuleWithModuleDo;
 use llvm_sys::{
     error::{LLVMCreateStringError, LLVMErrorRef},
@@ -13,9 +17,6 @@ use llvm_sys::{
 use std::mem;
 use std::{arch::asm, ffi::c_void, ptr, slice, sync::Arc};
 use yksmp::Location as SMLocation;
-
-// Special id for the last guard inside a side-trace.
-const SIDETRACE_LAST_GUARD_ID: usize = usize::MAX;
 
 /// Reads out registers spilled to the stack of the previous frame during the deoptimisation
 /// routine. The order of the registers are in accordance to the DWARF register number mapping
@@ -284,9 +285,11 @@ unsafe extern "C" fn __ykrt_deopt(
     // Put the CompiledTrace back into an Arc, so it is dropped properly.
     let ctr = Arc::from_raw(ctr);
 
+    let guardid = GuardId(guardid);
+
     // Check if we have a side trace and execute it.
-    if guardid != SIDETRACE_LAST_GUARD_ID {
-        let guard = &ctr.guards()[guardid];
+    if !ctr.is_last_guard(guardid) {
+        let guard = ctr.guard(guardid);
         if let Some(st) = guard.getct() {
             let registers = Registers::from_ptr(rsp);
             let live_vars = ctr.smap().get(&retaddr.try_into().unwrap()).unwrap();
@@ -375,8 +378,8 @@ unsafe extern "C" fn __ykrt_deopt(
 
     // We want to start side tracing only after we deoptimised. Otherwise we'd trace the whole
     // deopt routine which will later be costly to disassemble.
-    if guardid != SIDETRACE_LAST_GUARD_ID {
-        let guard = &ctr.guards()[guardid];
+    if !ctr.is_last_guard(guardid) {
+        let guard = ctr.guard(guardid);
         guard.inc();
         if guard.failcount() >= ctr.mt().sidetrace_threshold() {
             // This guard is hot, so compile a new side-trace.
@@ -388,7 +391,7 @@ unsafe extern "C" fn __ykrt_deopt(
                     callstack: jitcallstack,
                     aotvalsptr,
                     aotvalslen: aotvals.length,
-                    guardid,
+                    guardid: guardid,
                 };
                 ctr.mt().side_trace(hl, sti, Arc::clone(&ctr));
             }

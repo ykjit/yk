@@ -192,8 +192,14 @@ impl CompiledTrace {
         &self.smap
     }
 
-    pub(crate) fn guards(&self) -> &Vec<Guard> {
-        &self.guards
+    /// Return a reference to the guard `id`.
+    pub(crate) fn guard(&self, id: GuardId) -> &Guard {
+        &self.guards[id.0]
+    }
+
+    /// Is the guard `id` the last guard in this `CompiledTrace`?
+    pub(crate) fn is_last_guard(&self, id: GuardId) -> bool {
+        id.0 + 1 == self.guards.len()
     }
 
     pub(crate) fn aotvals(&self) -> *const c_void {
@@ -252,7 +258,11 @@ impl CompiledTrace {
         todo!();
     }
 
-    pub(crate) fn guards(&self) -> &Vec<Guard> {
+    pub(crate) fn guard(&self, _id: GuardId) -> &Guard {
+        todo!();
+    }
+
+    pub(crate) fn is_last_guard(&self, _id: GuardId) -> bool {
         todo!();
     }
 
@@ -266,5 +276,17 @@ impl CompiledTrace {
 
     pub(crate) fn hl(&self) -> &Weak<Mutex<HotLocation>> {
         todo!();
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct GuardId(pub(crate) usize);
+
+impl GuardId {
+    #[cfg(test)]
+    /// Only when testing, create a `GuardId` with an illegal value: trying to use this `GuardId`
+    /// will either cause an error or lead to undefined behaviour.
+    pub(crate) fn illegal() -> Self {
+        GuardId(usize::max_value())
     }
 }
