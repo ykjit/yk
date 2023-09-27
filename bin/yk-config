@@ -89,7 +89,9 @@ handle_arg() {
             # Embed LLVM bitcode as late as possible.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--embed-bitcode-final"
             # Embed Yk's IR.
-            OUTPUT="${OUTPUT} -Wl,-mllvm=--yk-embed-ir"
+            if [ "${YKD_NEW_CODEGEN}" = "1" ]; then
+                OUTPUT="${OUTPUT} -Wl,-mllvm=--yk-embed-ir"
+            fi
 
             # Disable machine passes that would interfere with block mapping.
             #
