@@ -210,6 +210,7 @@ impl Display for Function {
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct IntegerType {
+    #[deku(temp)] // FIXME: untemp when needed.
     num_bits: u32,
 }
 
@@ -226,10 +227,11 @@ pub(crate) enum Type {
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct Constant {
+    #[deku(temp)] // FIXME: untemp when needed.
     type_index: usize,
     #[deku(temp)]
     num_bytes: usize,
-    #[deku(count = "num_bytes")]
+    #[deku(count = "num_bytes", temp)] // FIXME: untemp when needed.
     bytes: Vec<u8>,
 }
 
@@ -249,11 +251,11 @@ pub(crate) struct AOTModule {
     funcs: Vec<Function>,
     #[deku(temp)]
     num_types: usize,
-    #[deku(count = "num_types")]
+    #[deku(count = "num_types", temp)] // FIXME: untemp when needed.
     types: Vec<Type>,
     #[deku(temp)]
     num_consts: usize,
-    #[deku(count = "num_consts")]
+    #[deku(count = "num_consts", temp)] // FIXME: untemp when needed.
     consts: Vec<Constant>,
 }
 
