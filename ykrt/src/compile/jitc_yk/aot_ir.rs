@@ -99,15 +99,19 @@ impl Display for LocalVariableOperand {
     }
 }
 
+const OPKIND_CONST: u8 = 0;
+const OPKIND_LOCAL_VARIABLE: u8 = 1;
+const OPKIND_STRING: u8 = 2;
+
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 #[deku(type = "u8")]
 pub(crate) enum Operand {
-    #[deku(id = "0")]
+    #[deku(id = "OPKIND_CONST")]
     Constant(ConstantOperand),
-    #[deku(id = "1")]
+    #[deku(id = "OPKIND_LOCAL_VARIABLE")]
     LocalVariable(LocalVariableOperand),
-    #[deku(id = "2")]
+    #[deku(id = "OPKIND_STRING")]
     String(#[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")] String),
 }
 
@@ -214,13 +218,18 @@ pub(crate) struct IntegerType {
     num_bits: u32,
 }
 
+const TYKIND_INTEGER: u8 = 0;
+const TYKIND_UNIMPLEMENTED: u8 = 255;
+
 /// A type.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 #[deku(type = "u8")]
 pub(crate) enum Type {
-    #[deku(id = "0")]
+    #[deku(id = "TYKIND_INTEGER")]
     Integer(IntegerType),
+    #[deku(id = "TYKIND_UNIMPLEMENTED")]
+    Unimplemented,
 }
 
 /// A constant.
@@ -250,18 +259,21 @@ pub(crate) struct AOTModule {
     #[deku(count = "num_funcs")]
     funcs: Vec<Function>,
     #[deku(temp)]
-    num_types: usize,
-    #[deku(count = "num_types", temp)] // FIXME: untemp when needed.
-    types: Vec<Type>,
-    #[deku(temp)]
     num_consts: usize,
-    #[deku(count = "num_consts", temp)] // FIXME: untemp when needed.
+    #[deku(count = "num_consts")]
     consts: Vec<Constant>,
+    #[deku(temp)]
+    num_types: usize,
+    #[deku(count = "num_types")]
+    types: Vec<Type>,
 }
 
 impl Display for AOTModule {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "# IR format version: {}", self.version)?;
+        writeln!(f, "# Num funcs: {}", self.funcs.len())?;
+        writeln!(f, "# Num consts: {}", self.consts.len())?;
+        writeln!(f, "# Num types: {}", self.types.len())?;
         for func in &self.funcs {
             writeln!(f, "\n{}", func)?;
         }
@@ -282,7 +294,10 @@ pub(crate) fn deserialise_module(data: &[u8]) -> Result<AOTModule, Box<dyn Error
 
 #[cfg(test)]
 mod tests {
-    use super::{deserialise_module, deserialise_string, Opcode, FORMAT_VERSION, MAGIC};
+    use super::{
+        deserialise_module, deserialise_string, Opcode, FORMAT_VERSION, MAGIC, OPKIND_CONST,
+        TYKIND_UNIMPLEMENTED,
+    };
     use byteorder::{NativeEndian, WriteBytesExt};
     use std::ffi::CString;
 
@@ -315,9 +330,13 @@ mod tests {
         // funcs[0].blocks[0].num_instrs
         write_native_usize(&mut data, 2);
         // funcs[0].blocks[0].instrs[0].opcode
-        data.write_u8(Opcode::Nop as u8).unwrap();
+        data.write_u8(Opcode::Alloca as u8).unwrap();
         // funcs[0].blocks[0].instrs[0].num_operands
-        data.write_u32::<NativeEndian>(0).unwrap();
+        data.write_u32::<NativeEndian>(1).unwrap();
+        // funcs[0].blocks[0].instrs[0].operands[0].operand_kind
+        data.write_u8(OPKIND_CONST).unwrap();
+        // funcs[0].blocks[0].instrs[0].operands[0].const_idx
+        write_native_usize(&mut data, 0);
         // funcs[0].blocks[0].instrs[1].opcode
         data.write_u8(Opcode::Nop as u8).unwrap();
         // funcs[0].blocks[0].instrs[1].num_operands
@@ -334,11 +353,17 @@ mod tests {
         // funcs[0].num_blocks
         write_native_usize(&mut data, 0);
 
-        // num_types
+        // num_consts
+        write_native_usize(&mut data, 1);
+        // consts[0].type_index
+        write_native_usize(&mut data, 0);
+        // consts[0].num_bytes
         write_native_usize(&mut data, 0);
 
-        // num_consts
-        write_native_usize(&mut data, 0);
+        // num_types
+        write_native_usize(&mut data, 1);
+        // types[0].type_kind
+        data.write_u8(TYKIND_UNIMPLEMENTED).unwrap();
 
         let test_mod = deserialise_module(data.as_slice()).unwrap();
         let string_mod = format!("{}", test_mod);
@@ -346,10 +371,13 @@ mod tests {
         println!("{}", string_mod);
         let expect = "\
 # IR format version: 0
+# Num funcs: 2
+# Num consts: 1
+# Num types: 1
 
 func foo {
   bb0:
-    nop
+    $_ = alloca const[0]
     nop
   bb1:
     nop
