@@ -64,18 +64,19 @@ PATH=${YKB_YKLLVM_BIN_DIR}:${PATH} cargo xtask cfmt
 # FIXME: Add build/ to .gitignore in ykllvm
 git diff --exit-code --ignore-submodules
 
-# Check for unused variables in each package
+# Check for annoying compiler warnings in each package.
+WARNING_DEFINES="-D unused-variables -D dead-code"
 for p in $(sed -n -e '/^members =/,/^\]$/{/^members =/d;/^\]$/d;p;}' \
   Cargo.toml \
   | \
   tr -d ' \t\",'); do
     cd $p
     if [ $p = "tests" ]; then
-        cargo rustc --profile check --lib -- -D unused-variables
+        cargo rustc --profile check --lib -- ${WARNING_DEFINES}
     else
-        cargo rustc --profile check -- -D unused-variables
-        cargo rustc --profile check --tests -- -D unused-variables
-        cargo rustc --profile check --benches -- -D unused-variables
+        cargo rustc --profile check -- ${WARNING_DEFINES}
+        cargo rustc --profile check --tests -- ${WARNING_DEFINES}
+        cargo rustc --profile check --benches -- ${WARNING_DEFINES}
     fi
     cd ..
 done
