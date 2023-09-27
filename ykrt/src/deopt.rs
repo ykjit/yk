@@ -262,24 +262,29 @@ extern "C" fn ts_reconstruct(ctx: *mut c_void, _module: LLVMModuleRef) -> LLVMEr
 /// Called when a guard failure occurs. After getting access to the global AOT module, passes all
 /// the relevant information to `ts_reconstruct` via `ThreadSafeModuleWithModuleDo` to reconstruct
 /// the stack.
+///
+/// The arguments are as follows:
+///
+///   * `ctr`: The [CompiledTrace].
+///   * `frameaddr`: Address of the control point's frame.
+///   * `aotvals`: Struct describing the location of the AOT live variables.
+///   * `actframes`: Address and size of vector holding active AOT frame information needed to
+///      recreate them.
+///   * `guardid`: ID of the failing guard.
+///   * `retaddr`: Return address of deoptimize call. Used to find the correct stackmap record.
+///   * `jitcallstack`: The parent trace's call stack at the time of the guard failure. Required to
+///      assemble a side trace.
+///   * `rsp`: Current stack pointer. Needed to read spilled register values from the stack.
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
 unsafe extern "C" fn __ykrt_deopt(
     ctr: *const CompiledTrace,
-    // Address of the control point's frame.
     frameaddr: *mut c_void,
-    // Struct describing the location of the AOT live variables.
     aotvals: &LiveAOTVals,
-    // Address and size of vector holding active AOT frame information needed to recreate them.
     actframes: &CVec,
-    // ID of the failing guard.
     guardid: usize,
-    // Return address of deoptimize call. Used to find the correct stackmap record.
     retaddr: usize,
-    // The parent trace's call stack at the time of the guard failure. Required to assemble
-    // a side trace.
     jitcallstack: *const c_void,
-    // Current stack pointer. Needed to read spilled register values from the stack.
     rsp: *const c_void,
 ) -> NewFramesInfo {
     // Put the CompiledTrace back into an Arc, so it is dropped properly.
@@ -380,8 +385,7 @@ unsafe extern "C" fn __ykrt_deopt(
     // deopt routine which will later be costly to disassemble.
     if !ctr.is_last_guard(guardid) {
         let guard = ctr.guard(guardid);
-        guard.inc();
-        if guard.failcount() >= ctr.mt().sidetrace_threshold() {
+        if guard.inc_failed(ctr.mt()) {
             // This guard is hot, so compile a new side-trace.
             if let Some(hl) = ctr.hl().upgrade() {
                 let aotvalsptr = unsafe {

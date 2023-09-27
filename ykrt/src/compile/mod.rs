@@ -82,19 +82,16 @@ unsafe impl<T> Sync for SendSyncConstPtr<T> {}
 /// incremented each time the matching guard failure in a `CompiledTrace` is triggered. Also stores
 /// the side-trace once its compiled.
 pub(crate) struct Guard {
+    /// How often has this guard failed?
     failed: AtomicU32,
     ct: Mutex<Option<Arc<CompiledTrace>>>,
 }
 
 impl Guard {
-    /// Increments the guard failure counter.
-    pub fn inc(&self) {
-        self.failed.fetch_add(1, Ordering::Relaxed);
-    }
-
-    /// Returns the current guard failure counter.
-    pub fn failcount(&self) -> u32 {
-        self.failed.load(Ordering::Relaxed)
+    /// Increments the guard failure counter. Returns `true` if the guard has failed often enough
+    /// to be worth side-tracing.
+    pub fn inc_failed(&self, mt: &Arc<MT>) -> bool {
+        self.failed.fetch_add(1, Ordering::Relaxed) + 1 >= mt.sidetrace_threshold()
     }
 
     /// Stores a compiled side-trace inside this guard.
