@@ -7,7 +7,7 @@ fn main() {
     rerun_except(&[]).unwrap();
 
     // Compile our wrappers with the right LLVM C++ flags.
-    let cxxflags_out = Command::new(&ykllvm_bin("llvm-config"))
+    let cxxflags_out = Command::new(ykllvm_bin("llvm-config"))
         .arg("--link-shared")
         .arg("--cxxflags")
         .output()
@@ -59,7 +59,7 @@ fn main() {
     ccg.generate();
 
     // Ensure that downstream crates performing linkage use the right -L and -l flags.
-    let lib_dir = Command::new(&ykllvm_bin("llvm-config"))
+    let lib_dir = Command::new(ykllvm_bin("llvm-config"))
         .arg("--link-shared")
         .arg("--libdir")
         .output()
@@ -69,7 +69,7 @@ fn main() {
     println!("cargo:rustc-link-search={}", lib_dir);
     apply_llvm_ld_library_path();
 
-    let libs = Command::new(&ykllvm_bin("llvm-config"))
+    let libs = Command::new(ykllvm_bin("llvm-config"))
         .arg("--link-shared")
         .arg("--libs")
         .output()

@@ -395,7 +395,7 @@ unsafe extern "C" fn __ykrt_deopt(
                     callstack: jitcallstack,
                     aotvalsptr,
                     aotvalslen: aotvals.length,
-                    guardid: guardid,
+                    guardid,
                 };
                 ctr.mt().side_trace(hl, sti, Arc::clone(&ctr));
             }
