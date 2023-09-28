@@ -8,7 +8,6 @@ use std::{
     ffi::CStr,
     mem::MaybeUninit,
     path::{Path, PathBuf},
-    ptr,
 };
 
 /// A Rust wrapper around `libc::Dl_info` using FFI types.
@@ -230,7 +229,7 @@ mod tests {
 /// this wrapper. Related: https://github.com/ykjit/yk/issues/835
 pub fn symbol_vaddr(sym: &CStr) -> Option<usize> {
     let va = unsafe { dlsym(RTLD_DEFAULT, sym.as_ptr()) };
-    if va != ptr::null_mut() {
+    if !va.is_null() {
         Some(va as usize)
     } else {
         None

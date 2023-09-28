@@ -2,7 +2,6 @@
 
 #![cfg_attr(test, feature(test))]
 #![feature(lazy_cell)]
-#![feature(link_llvm_intrinsics)]
 #![feature(naked_functions)]
 #![allow(clippy::type_complexity)]
 #![allow(clippy::new_without_default)]
