@@ -1,17 +1,10 @@
 //! Yk's AOT IR deserialiser.
 //!
 //! This is a parser for the on-disk (in the ELF binary) IR format used to express the
-//! ahead-of-time compiled interpreter.
-//!
-//! The `Display` implementations convert the in-memory data structures into a human-readable
-//! textual format.
+//! (immutable) ahead-of-time compiled interpreter.
 
 use deku::prelude::*;
-use std::{
-    error::Error,
-    ffi::CStr,
-    fmt::{self, Display},
-};
+use std::{cell::RefCell, error::Error, ffi::CStr};
 
 /// A magic number that all bytecode payloads begin with.
 const MAGIC: u32 = 0xedd5f00d;
@@ -26,6 +19,26 @@ fn deserialise_string(v: Vec<u8>) -> Result<String, DekuError> {
             Err(_) => err,
         },
         _ => err,
+    }
+}
+
+/// A trait for converting in-memory data-structures into a human-readable textual format.
+///
+/// This is modelled on [`std::fmt::Display`], but a reference to the module is always passed down
+/// so that constructs that require lookups into the module's tables from stringification have
+/// access to them.
+///
+/// The way we implement this (returning a `String`) is inefficient, but it doesn't hugely matter,
+/// as the human-readable format is only provided as a debugging aid.
+pub(crate) trait IRDisplay {
+    /// Return a human-readable string.
+    fn to_str(&self, m: &AOTModule) -> String;
+
+    /// Print myself to stderr in human-readable form.
+    ///
+    /// This is provided as a debugging convenience.
+    fn dump(&self, m: &AOTModule) {
+        eprintln!("{}", self.to_str(m));
     }
 }
 
@@ -47,9 +60,9 @@ pub(crate) enum Opcode {
     Unimplemented = 255,
 }
 
-impl Display for Opcode {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", format!("{:?}", self).to_lowercase())
+impl IRDisplay for Opcode {
+    fn to_str(&self, _m: &AOTModule) -> String {
+        format!("{:?}", self).to_lowercase()
     }
 }
 
@@ -75,12 +88,9 @@ pub(crate) struct ConstantOperand {
     constant_idx: usize,
 }
 
-impl Display for ConstantOperand {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // FIXME: print the constant properly.
-        // This requires access to the constant table which we don't have here, so we will have to
-        // re-architect printing.
-        write!(f, "const[{}]", self.constant_idx)
+impl IRDisplay for ConstantOperand {
+    fn to_str(&self, m: &AOTModule) -> String {
+        format!("{}", m.consts[self.constant_idx].to_str(m))
     }
 }
 
@@ -91,11 +101,9 @@ pub(crate) struct LocalVariableOperand {
     inst_idx: usize,
 }
 
-impl Display for LocalVariableOperand {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // FIXME: Assign the variable a name during printing. Requires a largeish change, as we'd
-        // need to carry around some state, which `Display` doesn't allow (or does it?).
-        write!(f, "${}_{}", self.bb_idx, self.inst_idx)
+impl IRDisplay for LocalVariableOperand {
+    fn to_str(&self, _m: &AOTModule) -> String {
+        format!("${}_{}", self.bb_idx, self.inst_idx)
     }
 }
 
@@ -115,12 +123,12 @@ pub(crate) enum Operand {
     String(#[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")] String),
 }
 
-impl Display for Operand {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl IRDisplay for Operand {
+    fn to_str(&self, m: &AOTModule) -> String {
         match self {
-            Self::Constant(c) => write!(f, "{}", c),
-            Self::LocalVariable(l) => write!(f, "{}", l),
-            Self::String(s) => write!(f, "\"{}\"", s),
+            Self::Constant(c) => c.to_str(m),
+            Self::LocalVariable(l) => l.to_str(m),
+            Self::String(s) => format!("\"{}\"", s),
         }
     }
 }
@@ -134,25 +142,34 @@ pub(crate) struct Instruction {
     num_operands: u32,
     #[deku(count = "num_operands")]
     operands: Vec<Operand>,
+    /// A variable name, only computed if the instruction is ever printed.
+    #[deku(skip)]
+    name: RefCell<Option<String>>,
 }
 
-impl Display for Instruction {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.opcode.generates_value() {
-            // FIXME: We would like to print the variable name here, but we don't hav the context
-            // to do so. Module printing needs a re-think.
-            write!(f, "$_ = ")?;
+impl IRDisplay for Instruction {
+    fn to_str(&self, m: &AOTModule) -> String {
+        if self.name.borrow().is_none() {
+            m.compute_variable_names();
         }
-        write!(f, "{}", self.opcode)?;
+
+        let mut ret = String::new();
+        if self.opcode.generates_value() {
+            let name = self.name.borrow();
+            // The unwrap cannot fail, as we forced computation of variable names above.
+            ret.push_str(&format!("${} = ", name.as_ref().unwrap()));
+        }
+        ret.push_str(&self.opcode.to_str(m));
         if !self.operands.is_empty() {
-            write!(f, " ")?;
+            ret.push_str(" ");
         }
         let op_strs = self
             .operands
             .iter()
-            .map(|o| format!("{}", o))
+            .map(|o| o.to_str(m))
             .collect::<Vec<_>>();
-        write!(f, "{}", op_strs.join(", "))
+        ret.push_str(&op_strs.join(", "));
+        ret
     }
 }
 
@@ -166,12 +183,13 @@ pub(crate) struct Block {
     instrs: Vec<Instruction>,
 }
 
-impl Display for Block {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl IRDisplay for Block {
+    fn to_str(&self, m: &AOTModule) -> String {
+        let mut ret = String::new();
         for i in &self.instrs {
-            writeln!(f, "    {}", i)?;
+            ret.push_str(&format!("    {}\n", i.to_str(m)));
         }
-        Ok(())
+        ret
     }
 }
 
@@ -193,18 +211,20 @@ impl Function {
     }
 }
 
-impl Display for Function {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl IRDisplay for Function {
+    fn to_str(&self, m: &AOTModule) -> String {
+        let mut ret = String::new();
         if self.is_declaration() {
             // declarations have no body, so print it as such.
-            write!(f, "func {};", self.name)
+            ret.push_str(&format!("func {};\n", self.name));
         } else {
-            writeln!(f, "func {} {{", self.name)?;
+            ret.push_str(&format!("func {} {{\n", self.name));
             for (i, b) in self.blocks.iter().enumerate() {
-                write!(f, "  bb{}:\n{}", i, b)?;
+                ret.push_str(&format!("  bb{}:\n{}", i, b.to_str(m)));
             }
-            write!(f, "}}")
+            ret.push_str("}\n");
         }
+        ret
     }
 }
 
@@ -212,10 +232,18 @@ impl Display for Function {
 //
 // Signedness is not specified.
 #[deku_derive(DekuRead)]
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct IntegerType {
     #[deku(temp)] // FIXME: untemp when needed.
     num_bits: u32,
+}
+
+impl IntegerType {
+    fn const_to_str(&self, _c: &Constant) -> String {
+        // FIXME: Implement printing of aribitrarily-sized (in bits) integers.
+        // Consider using a bigint library so we don't have to do it ourself?
+        String::from("SOMECONST")
+    }
 }
 
 const TYKIND_INTEGER: u8 = 0;
@@ -223,7 +251,7 @@ const TYKIND_UNIMPLEMENTED: u8 = 255;
 
 /// A type.
 #[deku_derive(DekuRead)]
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 #[deku(type = "u8")]
 pub(crate) enum Type {
     #[deku(id = "TYKIND_INTEGER")]
@@ -232,16 +260,30 @@ pub(crate) enum Type {
     Unimplemented,
 }
 
+impl Type {
+    fn const_to_str(&self, c: &Constant) -> String {
+        match self {
+            Self::Integer(it) => it.const_to_str(c),
+            Self::Unimplemented => String::from("SOMETYPE"),
+        }
+    }
+}
+
 /// A constant.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct Constant {
-    #[deku(temp)] // FIXME: untemp when needed.
     type_index: usize,
     #[deku(temp)]
     num_bytes: usize,
-    #[deku(count = "num_bytes", temp)] // FIXME: untemp when needed.
+    #[deku(count = "num_bytes", temp)]
     bytes: Vec<u8>,
+}
+
+impl IRDisplay for Constant {
+    fn to_str(&self, m: &AOTModule) -> String {
+        m.types[self.type_index].const_to_str(self)
+    }
 }
 
 /// A bytecode module.
@@ -268,26 +310,45 @@ pub(crate) struct AOTModule {
     types: Vec<Type>,
 }
 
-impl Display for AOTModule {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "# IR format version: {}", self.version)?;
-        writeln!(f, "# Num funcs: {}", self.funcs.len())?;
-        writeln!(f, "# Num consts: {}", self.consts.len())?;
-        writeln!(f, "# Num types: {}", self.types.len())?;
-        for func in &self.funcs {
-            writeln!(f, "\n{}", func)?;
+impl AOTModule {
+    /// Compute variable names for all instructions that generate a value.
+    fn compute_variable_names(&self) {
+        // Note that because the on-disk IR is conceptually immutable, so we don't have to worry
+        // about keeping the names up to date.
+        for f in &self.funcs {
+            for (bb_idx, bb) in f.blocks.iter().enumerate() {
+                for (inst_idx, inst) in bb.instrs.iter().enumerate() {
+                    if inst.opcode.generates_value() {
+                        *inst.name.borrow_mut() = Some(format!("{}_{}", bb_idx, inst_idx));
+                    }
+                }
+            }
         }
-        Ok(())
+    }
+
+    pub(crate) fn to_str(&self) -> String {
+        let mut ret = String::new();
+        ret.push_str(&format!("# IR format version: {}\n", self.version));
+        ret.push_str(&format!("# Num funcs: {}\n", self.funcs.len()));
+        ret.push_str(&format!("# Num consts: {}\n", self.consts.len()));
+        ret.push_str(&format!("# Num types: {}\n", self.types.len()));
+
+        for func in &self.funcs {
+            ret.push_str(&format!("\n{}", func.to_str(self)));
+        }
+        ret
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn dump(&self) {
+        eprintln!("{}", self.to_str());
     }
 }
 
 /// Deserialise an AOT module from the slice `data`.
 pub(crate) fn deserialise_module(data: &[u8]) -> Result<AOTModule, Box<dyn Error>> {
     match AOTModule::from_bytes((data, 0)) {
-        Ok(((_, _), modu)) => {
-            println!("{}", modu);
-            Ok(modu)
-        }
+        Ok(((_, _), modu)) => Ok(modu),
         Err(e) => Err(e.to_string().into()),
     }
 }
@@ -366,7 +427,7 @@ mod tests {
         data.write_u8(TYKIND_UNIMPLEMENTED).unwrap();
 
         let test_mod = deserialise_module(data.as_slice()).unwrap();
-        let string_mod = format!("{}", test_mod);
+        let string_mod = test_mod.to_str();
 
         println!("{}", string_mod);
         let expect = "\
@@ -377,7 +438,7 @@ mod tests {
 
 func foo {
   bb0:
-    $_ = alloca const[0]
+    $0_0 = alloca SOMETYPE
     nop
   bb1:
     nop

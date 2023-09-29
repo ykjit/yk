@@ -26,8 +26,8 @@ impl Compiler for JITCYk {
             todo!();
         }
         let ir_slice = yk_ir_section();
-        let _aot_mod = aot_ir::deserialise_module(ir_slice);
-        todo!();
+        let aot_mod = aot_ir::deserialise_module(ir_slice).unwrap();
+        todo!("{}", aot_mod.to_str());
     }
 
     #[cfg(feature = "yk_testing")]
