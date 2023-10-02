@@ -6,9 +6,9 @@ edition = "2021"
 license = "Apache-2.0 OR MIT"
 
 [dependencies]
-cached = { version = "0.43", features = ["proc_macro"] }
-libc = "0.2.117"
+cached = { version = "0.45", features = ["proc_macro"] }
+libc = "0.2"
 phdrs = { git = "https://github.com/softdevteam/phdrs" }
 
 [build-dependencies]
-cc = "1.0.72"
+cc = "1.0.83"

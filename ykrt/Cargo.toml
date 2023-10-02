@@ -8,15 +8,15 @@ license = "Apache-2.0 OR MIT"
 [dependencies]
 deku = { version = "0.16.0", features = ["std"] }
 hwtracer = { path = "../hwtracer" }
-libc = "0.2.117"
-memmap2 = "0.6"
+libc = "0.2.148"
+memmap2 = "0.7"
 num_cpus = "1.13.1"
 parking_lot = "0.12.0"
 parking_lot_core = "0.9.1"
-tempfile = "3.3.0"
+tempfile = "3.8"
 ykaddr = { path = "../ykaddr" }
 yksmp = { path = "../yksmp" }
-strum = { version = "0.24.0", features = ["derive"] }
+strum = { version = "0.25", features = ["derive"] }
 yktracec = { path = "../yktracec" }
 
 [dependencies.llvm-sys]
@@ -28,12 +28,12 @@ rev = "678b3da2b2239ae12766c964e6e613c0d82b5f37"
 features = ["no-llvm-linking"]
 
 [dependencies.object]
-version = "0.31"
+version = "0.32"
 default-features = false
 features = ["read_core", "elf"]
 
 [build-dependencies]
-regex = "1.5.4"
+regex = "1.9"
 ykbuild = { path = "../ykbuild" }
 
 [dev-dependencies]
