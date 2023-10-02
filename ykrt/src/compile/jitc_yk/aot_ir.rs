@@ -66,22 +66,6 @@ impl IRDisplay for Opcode {
     }
 }
 
-impl Opcode {
-    fn generates_value(&self) -> bool {
-        // FIXME: calls may or may not generate a value depending upon the callee.
-        // For now we assume a call does generate a value.
-        match self {
-            Self::Nop | Self::Store | Self::Br | Self::Ret | Self::Unimplemented => false,
-            Self::Load
-            | Self::Alloca
-            | Self::Call
-            | Self::GetElementPtr
-            | Self::Icmp
-            | Self::BinaryOperator => true,
-        }
-    }
-}
-
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct ConstantOperand {
@@ -172,7 +156,7 @@ impl IRDisplay for Instruction {
         }
 
         let mut ret = String::new();
-        if self.opcode.generates_value() {
+        if m.instr_generates_value(self) {
             let name = self.name.borrow();
             // The unwrap cannot fail, as we forced computation of variable names above.
             ret.push_str(&format!(
@@ -359,7 +343,7 @@ impl AOTModule {
         for f in &self.funcs {
             for (bb_idx, bb) in f.blocks.iter().enumerate() {
                 for (inst_idx, inst) in bb.instrs.iter().enumerate() {
-                    if inst.opcode.generates_value() {
+                    if self.instr_generates_value(inst) {
                         *inst.name.borrow_mut() = Some(format!("{}_{}", bb_idx, inst_idx));
                     }
                 }
@@ -401,6 +385,10 @@ impl AOTModule {
         self.instr_type(instr)
     }
 
+    fn instr_generates_value(&self, i: &Instruction) -> bool {
+        self.instr_type(i) != &Type::Void
+    }
+
     pub(crate) fn to_str(&self) -> String {
         let mut ret = String::new();
         ret.push_str(&format!("# IR format version: {}\n", self.version));
@@ -435,7 +423,7 @@ pub(crate) fn deserialise_module(data: &[u8]) -> Result<AOTModule, Box<dyn Error
 mod tests {
     use super::{
         deserialise_module, deserialise_string, Opcode, FORMAT_VERSION, MAGIC, OPKIND_CONST,
-        OPKIND_UNIMPLEMENTED, TYKIND_UNIMPLEMENTED,
+        OPKIND_UNIMPLEMENTED, TYKIND_UNIMPLEMENTED, TYKIND_VOID,
     };
     use byteorder::{NativeEndian, WriteBytesExt};
     use std::ffi::CString;
@@ -469,7 +457,7 @@ mod tests {
         // funcs[0].blocks[0].num_instrs
         write_native_usize(&mut data, 2);
         // funcs[0].blocks[0].instrs[0].type_index
-        write_native_usize(&mut data, 0);
+        write_native_usize(&mut data, 1);
         // funcs[0].blocks[0].instrs[0].opcode
         data.write_u8(Opcode::Alloca as u8).unwrap();
         // funcs[0].blocks[0].instrs[0].num_operands
@@ -504,13 +492,15 @@ mod tests {
         // num_consts
         write_native_usize(&mut data, 1);
         // consts[0].type_index
-        write_native_usize(&mut data, 0);
+        write_native_usize(&mut data, 1);
         // consts[0].num_bytes
         write_native_usize(&mut data, 0);
 
         // num_types
-        write_native_usize(&mut data, 1);
+        write_native_usize(&mut data, 2);
         // types[0].type_kind
+        data.write_u8(TYKIND_VOID).unwrap();
+        // types[1].type_kind
         data.write_u8(TYKIND_UNIMPLEMENTED).unwrap();
         write_str(&mut data, "a_type");
 
@@ -522,7 +512,7 @@ mod tests {
 # IR format version: 0
 # Num funcs: 2
 # Num consts: 1
-# Num types: 1
+# Num types: 2
 
 func foo {
   bb0:
