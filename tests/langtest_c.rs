@@ -1,3 +1,5 @@
+#![feature(lazy_cell)]
+
 use lang_tester::LangTester;
 use regex::Regex;
 use std::{
@@ -5,12 +7,34 @@ use std::{
     fs::read_to_string,
     path::{Path, PathBuf},
     process::Command,
+    sync::LazyLock,
 };
 use tempfile::TempDir;
 use tests::{mk_compiler, EXTRA_LINK};
 use ykbuild::{completion_wrapper::CompletionWrapper, ykllvm_bin};
 
 const COMMENT: &str = "//";
+
+static NEW_CODEGEN: LazyLock<bool> = LazyLock::new(|| {
+    if let Ok(val) = env::var("YKD_NEW_CODEGEN") {
+        if val == "1" {
+            return true;
+        }
+    }
+    false
+});
+
+/// Transitionary hack to allow the LLVM and new codegen to co-exist.
+///
+/// Once the new codegen is complete we can kill this.
+fn correct_codegen_for_test(p: &Path) -> bool {
+    let fname = p.file_name().unwrap().to_str().unwrap();
+    if *NEW_CODEGEN {
+        fname.contains(".newcg.")
+    } else {
+        !fname.contains(".newcg.")
+    }
+}
 
 fn run_suite(opt: &'static str) {
     println!("Running C tests with opt level {}...", opt);
@@ -20,6 +44,7 @@ fn run_suite(opt: &'static str) {
     let filter: fn(&Path) -> bool = |p| {
         if let Some(ext) = p.extension() {
             ext == "c"
+                && correct_codegen_for_test(p)
                 && !p
                     .file_name()
                     .unwrap()
@@ -33,7 +58,7 @@ fn run_suite(opt: &'static str) {
     #[cfg(cargo_profile = "debug")]
     let filter: fn(&Path) -> bool = |p| {
         if let Some(ext) = p.extension() {
-            ext == "c"
+            ext == "c" && correct_codegen_for_test(p)
         } else {
             false
         }
