@@ -273,7 +273,8 @@ impl IRDisplay for IntegerType {
     }
 }
 
-const TYKIND_INTEGER: u8 = 0;
+const TYKIND_VOID: u8 = 0;
+const TYKIND_INTEGER: u8 = 1;
 const TYKIND_UNIMPLEMENTED: u8 = 255;
 
 /// A type.
@@ -281,6 +282,8 @@ const TYKIND_UNIMPLEMENTED: u8 = 255;
 #[derive(Debug, PartialEq, Eq)]
 #[deku(type = "u8")]
 pub(crate) enum Type {
+    #[deku(id = "TYKIND_VOID")]
+    Void,
     #[deku(id = "TYKIND_INTEGER")]
     Integer(IntegerType),
     #[deku(id = "TYKIND_UNIMPLEMENTED")]
@@ -290,6 +293,7 @@ pub(crate) enum Type {
 impl Type {
     fn const_to_str(&self, c: &Constant) -> String {
         match self {
+            Self::Void => "void".to_owned(),
             Self::Integer(it) => it.const_to_str(c),
             Self::Unimplemented(s) => format!("?cst<{}>", s),
         }
@@ -299,6 +303,7 @@ impl Type {
 impl IRDisplay for Type {
     fn to_str(&self, m: &AOTModule) -> String {
         match self {
+            Self::Void => "void".to_owned(),
             Self::Integer(i) => i.to_str(m),
             Self::Unimplemented(s) => format!("?ty<{}>", s),
         }

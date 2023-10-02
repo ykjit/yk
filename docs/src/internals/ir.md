@@ -53,8 +53,12 @@ Constant {
 
 `Type` is encoded as one of the following:
 
-IntegerType {
+VoidType {
     type_kind: u8 = 0
+}
+
+IntegerType {
+    type_kind: u8 = 1
     num_bits: u32
 }
 
