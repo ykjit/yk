@@ -1,6 +1,26 @@
 #!/usr/bin/env python3
+"""
+usage: python3 try_passes.py <-lto -prelink] -- path path/to/test/oracle
 
-import argparse, math, os, shutil, sys, time, queue 
+This script aims to identify an LLVM AOT pipeline that satisfies a test oracle.
+A typical test oracle would be a script that builds an interpreter and runs a
+test suite. This script is required because some passes don't yet work with Yk.
+
+The user specifies at least one pipeline (i.e. -prelink or -lto). The algorithm
+then starts with the default clang -O2 pipeline which is sent to the test
+oracle for evaluation. Each time the oracle is invoked it is passed a list of
+prelink and postlink passes in the environment variable (PRELINK_PASSES and
+POSTLINK_PASSES). The oracle must ensure that these pipelines are used when
+compiling the interpreter (usually by passing the pipeline to the
+--pre-link-pipeline and --post-link-pipeline arguments of yk-config). If the
+oracle accepts the pipeline (it returns zero), then the passes are appended to
+an "accept list". If the oracle rejects the pipeline (it returns non-zero),
+then the algorithm divides the failing pipeline into two parts and tests the
+two halves independently (in parallel). The search continues recursively until
+the search space is exhausted. Upon termination the final accept list is
+printed.
+"""
+import argparse, os, shutil, sys, time, queue 
 from dataclasses import dataclass
 from multiprocessing import Manager, Process, Queue, Value
 from subprocess import PIPE, Popen
@@ -77,7 +97,7 @@ def test_pipeline(logf, pl):
     log(logf, "\n\n" + str(pl) + "\n")  
 
     # Make sure we don't run empty strings in pipeline.
-    assert (len(pl.pre_link) != 0 and len(pl.link_time) != 0), "Both prelink and postlink passes cannot be empty!!!"
+    assert (len(pl.pre_link) != 0 or len(pl.link_time) != 0), "Both prelink and postlink passes cannot be empty!!!"
 
     env = os.environ
     env["PRELINK_PASSES"] = ",".join([p.name for p in pl.pre_link])
@@ -176,6 +196,10 @@ def main(logf, is_prelink):
     binary_split(logf, passes, is_prelink)
 
 if __name__ == "__main__":
+    if '--help' in sys.argv:
+        print(__doc__)
+        exit(0)
+
     parser = argparse.ArgumentParser()
 
     group = parser.add_mutually_exclusive_group(required=True)
