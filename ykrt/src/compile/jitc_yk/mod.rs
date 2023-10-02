@@ -7,8 +7,46 @@ use crate::{
     trace::MappedTrace,
 };
 use parking_lot::Mutex;
-use std::{error::Error, ffi::CString, slice, sync::Arc};
+use std::{
+    collections::HashSet,
+    env,
+    error::Error,
+    ffi::CString,
+    slice,
+    sync::{Arc, LazyLock},
+};
 use ykaddr::addr::symbol_vaddr;
+
+#[derive(Eq, Hash, PartialEq)]
+enum IRPhase {
+    AOT,
+    PreOpt,
+    PostOpt,
+}
+
+impl IRPhase {
+    fn from_str(s: &str) -> Result<Self, String> {
+        let ret = match s {
+            "aot" => Self::AOT,
+            "jit-pre-opt" => Self::PreOpt,
+            "jit-post-opt" => Self::PostOpt,
+            _ => return Err(format!("Invalid YKD_PRINT_IR value: {}", s)),
+        };
+        Ok(ret)
+    }
+}
+
+static PHASES_TO_PRINT: LazyLock<HashSet<IRPhase>> = LazyLock::new(|| {
+    if let Ok(stages) = env::var("YKD_PRINT_IR") {
+        stages
+            .split(",")
+            .map(IRPhase::from_str)
+            .map(|res| res.unwrap())
+            .collect::<HashSet<IRPhase>>()
+    } else {
+        HashSet::new()
+    }
+});
 
 mod aot_ir;
 
@@ -26,8 +64,16 @@ impl Compiler for JITCYk {
             todo!();
         }
         let ir_slice = yk_ir_section();
+        // FIXME: Cache deserialisation, so we don't load it afresh each time.
         let aot_mod = aot_ir::deserialise_module(ir_slice).unwrap();
-        todo!("{}", aot_mod.to_str());
+
+        if PHASES_TO_PRINT.contains(&IRPhase::AOT) {
+            eprintln!("--- Begin aot ---");
+            aot_mod.dump();
+            eprintln!("--- End aot ---");
+        }
+
+        todo!("new codegen doesn't work yet");
     }
 
     #[cfg(feature = "yk_testing")]

@@ -91,6 +91,7 @@ cargo -Z unstable-options build --build-plan -p ykrt | \
 
 for i in $(seq 10); do
     RUST_TEST_SHUFFLE=1 cargo test
+    YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test
 done
 
 # We now want to test building with `--release`, which we also take as an
@@ -107,6 +108,7 @@ cargo build --release -p ykcapi
 
 for i in $(seq 10); do
     RUST_TEST_SHUFFLE=1 cargo test --release
+    YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test --release
 done
 
 # We want to check that the benchmarks build and run correctly, but want to
