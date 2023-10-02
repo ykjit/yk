@@ -35,6 +35,7 @@ Block {
 }
 
 Instruction {
+    type_index: usize // type of value generated
     opcode: u8
     num_operands: u32
     operands: Operand[num_operands]
