@@ -259,6 +259,7 @@ impl IRDisplay for IntegerType {
 
 const TYKIND_VOID: u8 = 0;
 const TYKIND_INTEGER: u8 = 1;
+const TYKIND_PTR: u8 = 2;
 const TYKIND_UNIMPLEMENTED: u8 = 255;
 
 /// A type.
@@ -270,6 +271,8 @@ pub(crate) enum Type {
     Void,
     #[deku(id = "TYKIND_INTEGER")]
     Integer(IntegerType),
+    #[deku(id = "TYKIND_PTR")]
+    Ptr,
     #[deku(id = "TYKIND_UNIMPLEMENTED")]
     Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")] String),
 }
@@ -279,6 +282,7 @@ impl Type {
         match self {
             Self::Void => "void".to_owned(),
             Self::Integer(it) => it.const_to_str(c),
+            Self::Ptr => "const_ptr".to_owned(),
             Self::Unimplemented(s) => format!("?cst<{}>", s),
         }
     }
@@ -289,6 +293,7 @@ impl IRDisplay for Type {
         match self {
             Self::Void => "void".to_owned(),
             Self::Integer(i) => i.to_str(m),
+            Self::Ptr => "ptr".to_owned(),
             Self::Unimplemented(s) => format!("?ty<{}>", s),
         }
     }
@@ -423,7 +428,7 @@ pub(crate) fn deserialise_module(data: &[u8]) -> Result<AOTModule, Box<dyn Error
 mod tests {
     use super::{
         deserialise_module, deserialise_string, Opcode, FORMAT_VERSION, MAGIC, OPKIND_CONST,
-        OPKIND_UNIMPLEMENTED, TYKIND_UNIMPLEMENTED, TYKIND_VOID,
+        OPKIND_UNIMPLEMENTED, TYKIND_PTR, TYKIND_UNIMPLEMENTED, TYKIND_VOID,
     };
     use byteorder::{NativeEndian, WriteBytesExt};
     use std::ffi::CString;
@@ -457,7 +462,7 @@ mod tests {
         // funcs[0].blocks[0].num_instrs
         write_native_usize(&mut data, 2);
         // funcs[0].blocks[0].instrs[0].type_index
-        write_native_usize(&mut data, 1);
+        write_native_usize(&mut data, 2);
         // funcs[0].blocks[0].instrs[0].opcode
         data.write_u8(Opcode::Alloca as u8).unwrap();
         // funcs[0].blocks[0].instrs[0].num_operands
@@ -497,12 +502,14 @@ mod tests {
         write_native_usize(&mut data, 0);
 
         // num_types
-        write_native_usize(&mut data, 2);
+        write_native_usize(&mut data, 3);
         // types[0].type_kind
         data.write_u8(TYKIND_VOID).unwrap();
         // types[1].type_kind
         data.write_u8(TYKIND_UNIMPLEMENTED).unwrap();
         write_str(&mut data, "a_type");
+        // types[2].type_kind
+        data.write_u8(TYKIND_PTR).unwrap();
 
         let test_mod = deserialise_module(data.as_slice()).unwrap();
         let string_mod = test_mod.to_str();
@@ -512,11 +519,11 @@ mod tests {
 # IR format version: 0
 # Num funcs: 2
 # Num consts: 1
-# Num types: 2
+# Num types: 3
 
 func foo {
   bb0:
-    $0_0: ?ty<a_type> = alloca ?cst<a_type>
+    $0_0: ptr = alloca ?cst<a_type>
     nop
   bb1:
     ?inst<%3 = some_llvm_instruction ...>
