@@ -9,6 +9,7 @@ use std::{
     ffi::{c_void, CStr},
     fs, ptr, slice,
     sync::LazyLock,
+    thread,
 };
 use yksmp::{Location as SMLocation, SMEntry, StackMapParser};
 
@@ -34,6 +35,10 @@ pub static AOT_STACKMAPS: LazyLock<Vec<SMEntry>> = LazyLock::new(|| {
     };
     StackMapParser::get_entries(slice)
 });
+
+pub(crate) fn load_aot_stackmaps() {
+    thread::spawn(|| LazyLock::force(&AOT_STACKMAPS));
+}
 
 static USIZEOF_POINTER: usize = std::mem::size_of::<*const ()>();
 static ISIZEOF_POINTER: isize = std::mem::size_of::<*const ()>() as isize;
