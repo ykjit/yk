@@ -296,6 +296,7 @@ unsafe extern "C" fn __ykrt_deopt(
     // an `Arc` so it will be dropped at the end of this function. Unless, we are going to execute
     // a side-trace. In that case this function will not return and we need to drop `ctr` manually.
     let ctr = Arc::from_raw(ctr);
+    (*ctr).mt().stats.timing_state(TimingState::Deopting);
 
     let guardid = GuardId(guardid);
 
@@ -347,6 +348,7 @@ unsafe extern "C" fn __ykrt_deopt(
                 _,
                 unsafe extern "C" fn(*mut c_void, *const CompiledTrace, *const c_void) -> !,
             >(st.entry());
+            (*ctr).mt().stats.timing_state(TimingState::JitExecuting);
 
             // This `Arc<CompiledTrace>` was cloned before executing this trace. Since the
             // side-trace will not return, we need to drop `ctr` manually here to avoid leaks.
@@ -366,7 +368,6 @@ unsafe extern "C" fn __ykrt_deopt(
 
     #[cfg(feature = "yk_jitstate_debug")]
     print_jit_state("deoptimise");
-    (*ctr).mt().stats.timing_state(TimingState::Deopting);
 
     // Copy arguments into a struct we can pass into the ThreadSafeModuleWithModuleDo function.
     let mut info = ReconstructInfo {
