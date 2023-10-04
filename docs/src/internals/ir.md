@@ -62,6 +62,10 @@ IntegerType {
     num_bits: u32
 }
 
+PointerType {
+    type_kind: u8 = 2
+}
+
 ### Operand encoding.
 
 `Operand` is encoded as one of the following:
