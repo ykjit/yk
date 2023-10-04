@@ -144,7 +144,7 @@ mod tests {
     use super::{off_to_vaddr, vaddr_to_obj_and_off, vaddr_to_sym_and_obj, MaybeUninit};
     use crate::obj::PHDR_MAIN_OBJ;
     use libc::{self, dlsym, Dl_info};
-    use std::{ffi::CString, path::PathBuf, ptr};
+    use std::{ffi::CString, ptr};
 
     #[test]
     fn map_libc() {
