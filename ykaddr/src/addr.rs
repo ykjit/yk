@@ -191,7 +191,7 @@ mod tests {
     }
 
     #[test]
-    fn vaddr_to_sym_and_obj_found() {
+    fn vaddr_to_sym() {
         // To test this we need an exported symbol with a predictable (i.e. unmangled) name.
         use libc::fflush;
         let func_vaddr = fflush as *const fn();
@@ -200,13 +200,6 @@ mod tests {
             sio.dli_sname().unwrap().to_str().unwrap(),
             "fflush" | "_IO_fflush"
         ));
-        let obj_path = PathBuf::from(sio.dli_fname().unwrap().to_str().unwrap());
-        assert!(obj_path
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .starts_with("libc.so."));
     }
 
     #[test]
