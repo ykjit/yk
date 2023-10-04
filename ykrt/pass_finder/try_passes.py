@@ -30,9 +30,6 @@ STAGES = "pre_link", "link_time"
 @dataclass
 class Pass:
     name: str
-    # FIXME: implement support for pass parameters?
-    #args: list
-
     def __str__(self):
         return self.name
 
@@ -82,10 +79,10 @@ def get_all_passes(is_prelink):
     seen = set()
      
     for descr in pass_descrs:
-        parts = descr.split("<")
-        if parts[0] not in seen:
-            seen.add(parts[0])
-            passes.append(Pass(parts[0]))
+        if descr not in seen:
+            seen.add(descr)
+            passes.append(Pass(descr))
+    
 
     print(f"Found {len(passes)} passes")    
     return passes

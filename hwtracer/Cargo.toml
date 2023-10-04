@@ -6,10 +6,10 @@ edition = "2021"
 license = "Apache-2.0 OR MIT"
 
 [dependencies]
-libc = "0.2.80"
-strum = { version = "0.24.1", features = ["derive", "strum_macros"] }
-strum_macros = "0.24.3"
-deku = { version = "0.16.0", features = ["std"] }
+libc = "0.2.148"
+strum = { version = "0.25", features = ["derive"] }
+strum_macros = "0.25"
+deku = "0.16.0"
 ykaddr = { path = "../ykaddr" }
 intervaltree = "0.2.7"
 byteorder = "1.4.3"
@@ -20,6 +20,6 @@ thiserror = "1"
 iced-x86 = { version = "1.18.0", features = ["decoder"]}
 
 [build-dependencies]
-cc = "1.0.62"
+cc = "1.0.83"
 rerun_except = "1"
 ykbuild = { path = "../ykbuild" }
