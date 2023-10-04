@@ -2,6 +2,7 @@
 //   env-var: YKD_PRINT_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_PRINT_JITSTATE=1
+//   env-var: YKD_STATS=-
 //   stderr:
 //     jit-state: start-tracing
 //     1
@@ -49,6 +50,11 @@
 //     28
 //     jit-state: deoptimise
 //     30
+//     {
+//         ...
+//         "trace_executions": 7,
+//         ...
+//     }
 //   stdout:
 //     exit
 

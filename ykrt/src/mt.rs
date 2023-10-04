@@ -229,7 +229,9 @@ impl MT {
                         unsafe extern "C" fn(*mut c_void, *const CompiledTrace, *const c_void) -> !,
                     >(ctr.entry());
                     // FIXME: Calling this function overwrites the current (Rust) function frame,
-                    // rather than unwinding it. https://github.com/ykjit/yk/issues/778
+                    // rather than unwinding it. https://github.com/ykjit/yk/issues/778.
+                    // The `Arc<CompiledTrace>` passed into the trace here will be safely dropped
+                    // upon deoptimisation, which is the only way to exit a trace.
                     f(ctrlp_vars, Arc::into_raw(ctr), frameaddr);
                 }
             }
