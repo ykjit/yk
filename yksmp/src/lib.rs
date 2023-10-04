@@ -25,6 +25,17 @@ pub struct Record {
     pub size: u64,
 }
 
+impl Record {
+    pub fn empty() -> Record {
+        Record {
+            id: 0,
+            offset: 0,
+            live_vars: Vec::new(),
+            size: 0,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum Location {
     Register(u16, u16, i32, u16),
@@ -69,7 +80,7 @@ pub struct StackMapParser<'a> {
 impl StackMapParser<'_> {
     pub fn parse(data: &[u8]) -> Result<HashMap<u64, Vec<LiveVar>>, Box<dyn error::Error>> {
         let mut smp = StackMapParser { data, offset: 0 };
-        let entries = smp.read()?;
+        let (entries, _) = smp.read()?;
         let mut map = HashMap::new();
         for sme in entries {
             for r in sme.records {
@@ -79,12 +90,12 @@ impl StackMapParser<'_> {
         Ok(map)
     }
 
-    pub fn get_entries(data: &[u8]) -> Vec<SMEntry> {
+    pub fn get_entries(data: &[u8]) -> (Vec<SMEntry>, u32) {
         let mut smp = StackMapParser { data, offset: 0 };
         smp.read().unwrap()
     }
 
-    fn read(&mut self) -> Result<Vec<SMEntry>, Box<dyn error::Error>> {
+    fn read(&mut self) -> Result<(Vec<SMEntry>, u32), Box<dyn error::Error>> {
         // Read version number.
         if self.read_u8() != 3 {
             return Err("Only stackmap format version 3 is supported.".into());
@@ -128,7 +139,7 @@ impl StackMapParser<'_> {
             let pinfo = ps.pop().unwrap();
             smentries.push(SMEntry { pinfo, records });
         }
-        Ok(smentries)
+        Ok((smentries, num_recs))
     }
 
     fn read_functions(&mut self, num: u32) -> Vec<Function> {

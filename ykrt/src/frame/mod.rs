@@ -11,13 +11,26 @@ use std::{
     sync::LazyLock,
     thread,
 };
-use yksmp::{Location as SMLocation, SMEntry, StackMapParser};
+use yksmp::{Location as SMLocation, PrologueInfo, Record, StackMapParser};
 
 mod llvmbridge;
 pub(crate) use llvmbridge::{BitcodeSection, __yktracec_get_aot_module};
 use llvmbridge::{Type, Value};
 
-pub static AOT_STACKMAPS: LazyLock<Vec<SMEntry>> = LazyLock::new(|| {
+struct AOTStackmapInfo {
+    pinfos: Vec<PrologueInfo>,
+    records: Vec<(Record, usize)>,
+}
+
+impl AOTStackmapInfo {
+    fn get(&self, stackmapid: usize) -> (&Record, &PrologueInfo) {
+        let (rec, pid) = &self.records[stackmapid];
+        let pinfo = &self.pinfos[*pid];
+        (rec, pinfo)
+    }
+}
+
+static AOT_STACKMAPS: LazyLock<AOTStackmapInfo> = LazyLock::new(|| {
     // Load the stackmap from the binary to parse in the stackmaps.
     // FIXME: Don't use current_exe.
     let pathb = env::current_exe().unwrap();
@@ -33,7 +46,18 @@ pub static AOT_STACKMAPS: LazyLock<Vec<SMEntry>> = LazyLock::new(|| {
             usize::try_from(sec.size()).unwrap(),
         )
     };
-    StackMapParser::get_entries(slice)
+    let (entries, numrecs) = StackMapParser::get_entries(slice);
+    let mut pinfos = Vec::new();
+    let mut records = Vec::new();
+    records.resize_with(usize::try_from(numrecs).unwrap(), || (Record::empty(), 0));
+    for entry in entries {
+        pinfos.push(entry.pinfo);
+        for r in entry.records {
+            let idx = usize::try_from(r.id).unwrap();
+            records[idx] = (r, pinfos.len() - 1);
+        }
+    }
+    AOTStackmapInfo { pinfos, records }
 });
 
 pub(crate) fn load_aot_stackmaps() {
@@ -145,20 +169,7 @@ impl FrameReconstructor {
             let smcall = get_stackmap_call(frame.pc);
             let smid = unsafe { LLVMConstIntGetZExtValue(smcall.get_operand(0).get()) };
             // Find prologue info and stackmap record for this frame.
-            let mut pinfo = None;
-            let mut rec = None;
-            // Iterate over function entries to find the correct record and relevant prologue info.
-            for entry in AOT_STACKMAPS.iter() {
-                for r in &entry.records {
-                    if r.id == smid {
-                        pinfo = Some(&entry.pinfo);
-                        rec = Some(r);
-                        break;
-                    }
-                }
-            }
-            let rec = rec.unwrap();
-            let pinfo = pinfo.unwrap();
+            let (rec, pinfo) = AOT_STACKMAPS.get(usize::try_from(smid).unwrap());
             // We don't need to allocate memory for the bottom-most frame, i.e. the frame
             // containing the control point, since this frame already exists and doesn't need to be
             // reconstructed.
