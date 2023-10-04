@@ -94,6 +94,33 @@ for i in $(seq 10); do
     YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test
 done
 
+# Test with LLVM sanitisers
+RUSTFLAGS="-Z sanitizer=address" cargo test --target x86_64-unknown-linux-gnu
+# The thread sanitiser has a number of false positives by default, so we need a
+# suppression file to avoid those overwhelming us. This does mean that we might
+# suppress some true positives, but there's little we can do about that.
+suppressions_path=`mktemp`
+cat << EOF > $suppressions_path
+# The tests::EXTRA_LINK closure leads to a race being reported, but that seems
+# to be due to an internal detail of `LazyLock` rather than our code.
+race:tests::EXTRA_LINK::
+# The following data races are reported in libraries (the Rust standard library
+# or external crates). None of them are obviously a bad data race and, even if
+# they are, there's nothing we can do about them.
+race:alloc::sync::Arc<T,A>::drop_slow
+race:<alloc::sync::Arc<T,A> as core::ops::drop::Drop>::drop
+race:core::sync::atomic::atomic_
+race:hashbrown::raw::RawTable
+race:lock_api::mutex::RawMutex>::try_lock
+race:std::collections::hash::map::RandomState
+race:std::sync::mpmc::list::Channel<T>::
+race:std::sync::remutex::ReentrantMutexGuard
+EOF
+RUST_TEST_THREADS=1 \
+    RUSTFLAGS="-Z sanitizer=thread" \
+    TSAN_OPTIONS="suppressions=$suppressions_path" \
+    cargo test --target x86_64-unknown-linux-gnu
+
 # We now want to test building with `--release`, which we also take as an
 # opportunity to check that yk can build ykllvm, which requires unsetting
 # YKB_YKLLVM_BIN_DIR. In essence, we now repeat much of what we did above but
