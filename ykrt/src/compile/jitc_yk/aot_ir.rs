@@ -99,8 +99,15 @@ impl IRDisplay for LocalVariableOperand {
     }
 }
 
+#[deku_derive(DekuRead)]
+#[derive(Debug)]
+pub(crate) struct TypeOperand {
+    type_idx: usize,
+}
+
 const OPKIND_CONST: u8 = 0;
 const OPKIND_LOCAL_VARIABLE: u8 = 1;
+const OPKIND_TYPE: u8 = 2;
 const OPKIND_UNIMPLEMENTED: u8 = 255;
 
 #[deku_derive(DekuRead)]
@@ -111,6 +118,8 @@ pub(crate) enum Operand {
     Constant(ConstantOperand),
     #[deku(id = "OPKIND_LOCAL_VARIABLE")]
     LocalVariable(LocalVariableOperand),
+    #[deku(id = "OPKIND_TYPE")]
+    Type(TypeOperand),
     #[deku(id = "OPKIND_UNIMPLEMENTED")]
     Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")] String),
 }
@@ -120,6 +129,7 @@ impl IRDisplay for Operand {
         match self {
             Self::Constant(c) => c.to_str(m),
             Self::LocalVariable(l) => l.to_str(m),
+            Self::Type(t) => m.types[t.type_idx].to_str(m),
             Self::Unimplemented(s) => format!("?op<{}>", s),
         }
     }
@@ -445,7 +455,7 @@ pub(crate) fn deserialise_module(data: &[u8]) -> Result<AOTModule, Box<dyn Error
 mod tests {
     use super::{
         deserialise_module, deserialise_string, Constant, IntegerType, Opcode, FORMAT_VERSION,
-        MAGIC, OPKIND_CONST, OPKIND_UNIMPLEMENTED, TYKIND_INTEGER, TYKIND_PTR,
+        MAGIC, OPKIND_CONST, OPKIND_TYPE, OPKIND_UNIMPLEMENTED, TYKIND_INTEGER, TYKIND_PTR,
         TYKIND_UNIMPLEMENTED, TYKIND_VOID,
     };
     use byteorder::{NativeEndian, WriteBytesExt};
@@ -501,7 +511,7 @@ mod tests {
         // funcs[0].blocks[0].instrs[1].num_operands
         data.write_u32::<NativeEndian>(0).unwrap();
         // funcs[0].blocks[1].num_instrs
-        write_native_usize(&mut data, 2);
+        write_native_usize(&mut data, 3);
         // funcs[0].blocks[1].instrs[0].type_index
         write_native_usize(&mut data, 0);
         // funcs[0].blocks[1].instrs[0].opcode
@@ -521,6 +531,20 @@ mod tests {
         data.write_u8(OPKIND_CONST as u8).unwrap();
         // funcs[0].blocks[0].instrs[1].operands[0].const_idx
         write_native_usize(&mut data, 1);
+        // funcs[0].blocks[0].instrs[0].type_index
+        write_native_usize(&mut data, 2);
+        // funcs[0].blocks[1].instrs[2].opcode
+        data.write_u8(Opcode::Alloca as u8).unwrap();
+        // funcs[0].blocks[1].instrs[2].num_operands
+        data.write_u32::<NativeEndian>(2).unwrap();
+        // funcs[0].blocks[1].instrs[2].operands[0].operand_kind
+        data.write_u8(OPKIND_TYPE).unwrap();
+        // funcs[0].blocks[1].instrs[2].operands[0].type_index
+        write_native_usize(&mut data, 3);
+        // funcs[0].blocks[1].instrs[2].operands[1].operand_kind
+        data.write_u8(OPKIND_CONST as u8).unwrap();
+        // funcs[0].blocks[0].instrs[2].operands[1].const_idx
+        write_native_usize(&mut data, 2);
 
         // funcs[1].name
         write_str(&mut data, "bar");
@@ -528,7 +552,7 @@ mod tests {
         write_native_usize(&mut data, 0);
 
         // num_consts
-        write_native_usize(&mut data, 2);
+        write_native_usize(&mut data, 3);
         // consts[0].type_index
         write_native_usize(&mut data, 1);
         // consts[0].num_bytes
@@ -539,6 +563,12 @@ mod tests {
         write_native_usize(&mut data, 4);
         // consts[1].bytes
         data.write_u32::<NativeEndian>(u32::MAX).unwrap();
+        // consts[2].type_index
+        write_native_usize(&mut data, 3);
+        // consts[2].num_bytes
+        write_native_usize(&mut data, 4);
+        // consts[2].bytes
+        data.write_u32::<NativeEndian>(50).unwrap();
 
         // num_types
         write_native_usize(&mut data, 4);
@@ -561,7 +591,7 @@ mod tests {
         let expect = "\
 # IR format version: 0
 # Num funcs: 2
-# Num consts: 2
+# Num consts: 3
 # Num types: 4
 
 func foo {
@@ -571,6 +601,7 @@ func foo {
   bb1:
     ?inst<%3 = some_llvm_instruction ...>
     $1_1: ptr = getelementptr -1i32
+    $1_2: ptr = alloca i32, 50i32
 }
 
 func bar;
