@@ -3,8 +3,9 @@
 //! This is a parser for the on-disk (in the ELF binary) IR format used to express the
 //! (immutable) ahead-of-time compiled interpreter.
 
+use byteorder::{NativeEndian, ReadBytesExt};
 use deku::prelude::*;
-use std::{cell::RefCell, error::Error, ffi::CStr};
+use std::{cell::RefCell, error::Error, ffi::CStr, io::Cursor};
 
 /// A magic number that all bytecode payloads begin with.
 const MAGIC: u32 = 0xedd5f00d;
@@ -244,10 +245,26 @@ pub(crate) struct IntegerType {
 }
 
 impl IntegerType {
-    fn const_to_str(&self, _c: &Constant) -> String {
-        // FIXME: Implement printing of aribitrarily-sized (in bits) integers.
-        // Consider using a bigint library so we don't have to do it ourself?
-        String::from("SOMECONST")
+    fn const_to_str(&self, c: &Constant) -> String {
+        // FIXME: For now we just handle common integer types, but eventually we will need to
+        // implement printing of aribitrarily-sized (in bits) integers. Consider using a bigint
+        // library so we don't have to do it ourself?
+        //
+        // This discussion may help:
+        // https://rust-lang.zulipchat.com/#narrow/stream/122651-general/topic/.E2.9C.94.20Big.20Integer.20library.20with.20bit.20granularity/near/393733327
+
+        // All of the unwraps below are safe due to:
+        debug_assert!(c.bytes.len() * 8 >= usize::try_from(self.num_bits).unwrap());
+
+        let mut c = Cursor::new(&c.bytes);
+        match self.num_bits {
+            1 => format!("{}i1", c.read_i8().unwrap() & 1),
+            8 => format!("{}i8", c.read_i8().unwrap()),
+            16 => format!("{}i16", c.read_i16::<NativeEndian>().unwrap()),
+            32 => format!("{}i32", c.read_i32::<NativeEndian>().unwrap()),
+            64 => format!("{}i64", c.read_i64::<NativeEndian>().unwrap()),
+            _ => todo!("{}", self.num_bits),
+        }
     }
 }
 
@@ -306,7 +323,7 @@ pub(crate) struct Constant {
     type_index: usize,
     #[deku(temp)]
     num_bytes: usize,
-    #[deku(count = "num_bytes", temp)]
+    #[deku(count = "num_bytes")]
     bytes: Vec<u8>,
 }
 
@@ -427,8 +444,9 @@ pub(crate) fn deserialise_module(data: &[u8]) -> Result<AOTModule, Box<dyn Error
 #[cfg(test)]
 mod tests {
     use super::{
-        deserialise_module, deserialise_string, Opcode, FORMAT_VERSION, MAGIC, OPKIND_CONST,
-        OPKIND_UNIMPLEMENTED, TYKIND_PTR, TYKIND_UNIMPLEMENTED, TYKIND_VOID,
+        deserialise_module, deserialise_string, Constant, IntegerType, Opcode, FORMAT_VERSION,
+        MAGIC, OPKIND_CONST, OPKIND_UNIMPLEMENTED, TYKIND_INTEGER, TYKIND_PTR,
+        TYKIND_UNIMPLEMENTED, TYKIND_VOID,
     };
     use byteorder::{NativeEndian, WriteBytesExt};
     use std::ffi::CString;
@@ -443,6 +461,11 @@ mod tests {
         d.push(0); // null terminator.
     }
 
+    /// Note that this test only checks valid IR encodings and not for valid IR semantics. For
+    /// example, nonsensical instruction arguments (incorrect arg counts, incorrect arg types etc.)
+    /// are not checked.
+    ///
+    /// FIXME: implement an IR validator for this purpose.
     #[test]
     fn deser_and_display() {
         let mut data = Vec::new();
@@ -478,7 +501,7 @@ mod tests {
         // funcs[0].blocks[0].instrs[1].num_operands
         data.write_u32::<NativeEndian>(0).unwrap();
         // funcs[0].blocks[1].num_instrs
-        write_native_usize(&mut data, 1);
+        write_native_usize(&mut data, 2);
         // funcs[0].blocks[1].instrs[0].type_index
         write_native_usize(&mut data, 0);
         // funcs[0].blocks[1].instrs[0].opcode
@@ -488,6 +511,16 @@ mod tests {
         // funcs[0].blocks[1].instrs[0].operands[0].operand_kind
         data.write_u8(OPKIND_UNIMPLEMENTED as u8).unwrap();
         write_str(&mut data, "%3 = some_llvm_instruction ...");
+        // funcs[0].blocks[1].instrs[1].type_index
+        write_native_usize(&mut data, 2);
+        // funcs[0].blocks[1].instrs[1].opcode
+        data.write_u8(Opcode::GetElementPtr as u8).unwrap();
+        // funcs[0].blocks[1].instrs[1].num_operands
+        data.write_u32::<NativeEndian>(1).unwrap();
+        // funcs[0].blocks[1].instrs[1].operands[0].operand_kind
+        data.write_u8(OPKIND_CONST as u8).unwrap();
+        // funcs[0].blocks[0].instrs[1].operands[0].const_idx
+        write_native_usize(&mut data, 1);
 
         // funcs[1].name
         write_str(&mut data, "bar");
@@ -495,14 +528,20 @@ mod tests {
         write_native_usize(&mut data, 0);
 
         // num_consts
-        write_native_usize(&mut data, 1);
+        write_native_usize(&mut data, 2);
         // consts[0].type_index
         write_native_usize(&mut data, 1);
         // consts[0].num_bytes
         write_native_usize(&mut data, 0);
+        // consts[1].type_index
+        write_native_usize(&mut data, 3);
+        // consts[1].num_bytes
+        write_native_usize(&mut data, 4);
+        // consts[1].bytes
+        data.write_u32::<NativeEndian>(u32::MAX).unwrap();
 
         // num_types
-        write_native_usize(&mut data, 3);
+        write_native_usize(&mut data, 4);
         // types[0].type_kind
         data.write_u8(TYKIND_VOID).unwrap();
         // types[1].type_kind
@@ -510,6 +549,10 @@ mod tests {
         write_str(&mut data, "a_type");
         // types[2].type_kind
         data.write_u8(TYKIND_PTR).unwrap();
+        // types[2].type_kind
+        data.write_u8(TYKIND_INTEGER).unwrap();
+        // types[2].int_type.num_bits
+        data.write_u32::<NativeEndian>(32).unwrap();
 
         let test_mod = deserialise_module(data.as_slice()).unwrap();
         let string_mod = test_mod.to_str();
@@ -518,8 +561,8 @@ mod tests {
         let expect = "\
 # IR format version: 0
 # Num funcs: 2
-# Num consts: 1
-# Num types: 3
+# Num consts: 2
+# Num types: 4
 
 func foo {
   bb0:
@@ -527,6 +570,7 @@ func foo {
     nop
   bb1:
     ?inst<%3 = some_llvm_instruction ...>
+    $1_1: ptr = getelementptr -1i32
 }
 
 func bar;
@@ -546,5 +590,72 @@ func bar;
         check("the quick brown fox jumped over the lazy dog");
         check("");
         check("         ");
+    }
+
+    #[test]
+    fn const_int_strings() {
+        use num_traits::cast::NumCast;
+        use std::mem;
+
+        // Check (in an endian neutral manner) that a `num-bits`-sized integer of value `num`, when
+        // converted to a constant IR integer, then stringified, results in the string `expect`.
+        //
+        // When `num` has a bit size greater than `num_bits` the most significant bits of `num` are
+        // treated as undefined: they can be any value as IR stringification will ignore them.
+        fn check<T: NumCast + Sized>(num_bits: u32, num: T, expect: &str) {
+            assert!(mem::size_of::<T>() * 8 >= usize::try_from(num_bits).unwrap());
+
+            // Get a byte-vector for `num`.
+            let mut bytes: Vec<u8> = Vec::new();
+            match mem::size_of::<T>() {
+                1 => bytes
+                    .write_u8(<u8 as NumCast>::from::<T>(num).unwrap())
+                    .unwrap(),
+                2 => bytes
+                    .write_u16::<NativeEndian>(<u16 as NumCast>::from(num).unwrap())
+                    .unwrap(),
+                4 => bytes
+                    .write_u32::<NativeEndian>(<u32 as NumCast>::from(num).unwrap())
+                    .unwrap(),
+                8 => bytes
+                    .write_u64::<NativeEndian>(<u64 as NumCast>::from(num).unwrap())
+                    .unwrap(),
+                _ => todo!("{}", mem::size_of::<T>()),
+            }
+
+            // Construct an IR constant and check it stringifies ok.
+            let it = IntegerType { num_bits };
+            let c = Constant {
+                type_index: 0,
+                bytes,
+            };
+            assert_eq!(it.const_to_str(&c), expect);
+        }
+
+        check(1, 1u8, "1i1");
+        check(1, 0u8, "0i1");
+        check(1, 254u8, "0i1");
+        check(1, 255u8, "1i1");
+        check(1, 254u64, "0i1");
+        check(1, 255u64, "1i1");
+
+        check(16, 0u16, "0i16");
+        check(16, u16::MAX, "-1i16");
+        check(16, 12345u16, "12345i16");
+        check(16, 12345u64, "12345i16");
+        check(16, i16::MIN as u16, &format!("{}i16", i16::MIN));
+        check(16, i16::MIN as u64, &format!("{}i16", i16::MIN));
+
+        check(32, 0u32, "0i32");
+        check(32, u32::MAX, "-1i32");
+        check(32, 12345u32, "12345i32");
+        check(32, 12345u64, "12345i32");
+        check(32, i32::MIN as u32, &format!("{}i32", i32::MIN));
+        check(32, i32::MIN as u64, &format!("{}i32", i32::MIN));
+
+        check(64, 0u64, "0i64");
+        check(64, u64::MAX, "-1i64");
+        check(64, 12345678u64, "12345678i64");
+        check(64, i64::MIN as u64, &format!("{}i64", i64::MIN));
     }
 }
