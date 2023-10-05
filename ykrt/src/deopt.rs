@@ -306,8 +306,9 @@ unsafe extern "C" fn __ykrt_deopt(
         if let Some(st) = guard.getct() {
             let registers = Registers::from_ptr(rsp);
             let live_vars = ctr.smap().get(&retaddr.try_into().unwrap()).unwrap();
-            let mut ykctrlpvars = Vec::new();
-            for (_i, locs) in live_vars.iter().skip(1).enumerate() {
+            debug_assert!(live_vars.len() > 0);
+            let mut ykctrlpvars = vec![0; live_vars.len() - 1];
+            for (i, locs) in live_vars.iter().skip(1).enumerate() {
                 assert!(locs.len() == 1);
                 let l = locs.get(0).unwrap();
                 match l {
@@ -321,7 +322,7 @@ unsafe extern "C" fn __ykrt_deopt(
                         assert_eq!(*reg, 6);
                         let addr = unsafe { registers.get(*reg) as *mut u8 };
                         let addr = unsafe { addr.offset(isize::try_from(*off).unwrap()) };
-                        ykctrlpvars.push(addr as u64);
+                        ykctrlpvars[i] = addr as u64;
                     }
                     SMLocation::Indirect(reg, off, size) => {
                         let addr = unsafe { registers.get(*reg) as *mut u8 };
@@ -333,10 +334,10 @@ unsafe extern "C" fn __ykrt_deopt(
                             8 => unsafe { ptr::read::<u64>(addr as *mut u64) },
                             _ => unreachable!(),
                         };
-                        ykctrlpvars.push(v);
+                        ykctrlpvars[i] = v;
                     }
                     SMLocation::Constant(v) => {
-                        ykctrlpvars.push(*v as u64);
+                        ykctrlpvars[i] = *v as u64;
                     }
                     SMLocation::LargeConstant(_v) => {
                         todo!();
