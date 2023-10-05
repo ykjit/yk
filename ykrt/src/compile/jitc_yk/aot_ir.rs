@@ -480,108 +480,148 @@ mod tests {
     fn deser_and_display() {
         let mut data = Vec::new();
 
-        // magic
+        // HEADER
+        // magic:
         data.write_u32::<NativeEndian>(MAGIC).unwrap();
-        // version
+        // version:
         data.write_u32::<NativeEndian>(FORMAT_VERSION).unwrap();
 
-        // num_functions
+        // num_functions:
         write_native_usize(&mut data, 2);
 
-        // funcs[0].name
+        // FUNCTION 0
+        // name:
         write_str(&mut data, "foo");
-        // funcs[0].num_blocks
+        // num_blocks:
         write_native_usize(&mut data, 2);
-        // funcs[0].blocks[0].num_instrs
+
+        // BLOCK 0
+        // num_instrs:
         write_native_usize(&mut data, 2);
-        // funcs[0].blocks[0].instrs[0].type_index
+
+        // INSTRUCTION 0
+        // type_index:
         write_native_usize(&mut data, 2);
-        // funcs[0].blocks[0].instrs[0].opcode
+        // opcode:
         data.write_u8(Opcode::Alloca as u8).unwrap();
-        // funcs[0].blocks[0].instrs[0].num_operands
+        // num_operands:
         data.write_u32::<NativeEndian>(1).unwrap();
-        // funcs[0].blocks[0].instrs[0].operands[0].operand_kind
+        // OPERAND 0
+        // operand_kind:
         data.write_u8(OPKIND_CONST).unwrap();
-        // funcs[0].blocks[0].instrs[0].operands[0].const_idx
+        // const_idx
         write_native_usize(&mut data, 0);
-        // funcs[0].blocks[0].instrs[1].type_index
+
+        // INSTRUCTION 1
+        // type_index:
         write_native_usize(&mut data, 0);
-        // funcs[0].blocks[0].instrs[1].opcode
+        // opcode:
         data.write_u8(Opcode::Nop as u8).unwrap();
-        // funcs[0].blocks[0].instrs[1].num_operands
+        // num_operands:
         data.write_u32::<NativeEndian>(0).unwrap();
-        // funcs[0].blocks[1].num_instrs
+
+        // BLOCK 1
+        // num_instrs:
         write_native_usize(&mut data, 3);
-        // funcs[0].blocks[1].instrs[0].type_index
+
+        // INSTRUCTION 0
+        // type_index:
         write_native_usize(&mut data, 0);
-        // funcs[0].blocks[1].instrs[0].opcode
+        // opcode:
         data.write_u8(Opcode::Unimplemented as u8).unwrap();
-        // funcs[0].blocks[1].instrs[0].num_operands
+        // num_operands:
         data.write_u32::<NativeEndian>(1).unwrap();
-        // funcs[0].blocks[1].instrs[0].operands[0].operand_kind
+        // OPERAND 0
+        // operand_kind:
         data.write_u8(OPKIND_UNIMPLEMENTED as u8).unwrap();
+        // unimplemented description:
         write_str(&mut data, "%3 = some_llvm_instruction ...");
-        // funcs[0].blocks[1].instrs[1].type_index
+
+        // INSTRUCTION 1
+        // type_index:
         write_native_usize(&mut data, 2);
-        // funcs[0].blocks[1].instrs[1].opcode
+        // opcode:
         data.write_u8(Opcode::GetElementPtr as u8).unwrap();
-        // funcs[0].blocks[1].instrs[1].num_operands
+        // num_operands:
         data.write_u32::<NativeEndian>(1).unwrap();
-        // funcs[0].blocks[1].instrs[1].operands[0].operand_kind
+        // OPERAND 0
+        // operand_kind:
         data.write_u8(OPKIND_CONST as u8).unwrap();
-        // funcs[0].blocks[0].instrs[1].operands[0].const_idx
+        // const_idx:
         write_native_usize(&mut data, 1);
-        // funcs[0].blocks[0].instrs[0].type_index
+
+        // INSTRUCTION 2
+        // type_index:
         write_native_usize(&mut data, 2);
-        // funcs[0].blocks[1].instrs[2].opcode
+        // opcode:
         data.write_u8(Opcode::Alloca as u8).unwrap();
-        // funcs[0].blocks[1].instrs[2].num_operands
+        // num_operands:
         data.write_u32::<NativeEndian>(2).unwrap();
-        // funcs[0].blocks[1].instrs[2].operands[0].operand_kind
+        // OPERAND 0
+        // operand_kind:
         data.write_u8(OPKIND_TYPE).unwrap();
-        // funcs[0].blocks[1].instrs[2].operands[0].type_index
+        // type_index:
         write_native_usize(&mut data, 3);
-        // funcs[0].blocks[1].instrs[2].operands[1].operand_kind
+        // OPERAND 1
+        // operand_kind:
         data.write_u8(OPKIND_CONST as u8).unwrap();
-        // funcs[0].blocks[0].instrs[2].operands[1].const_idx
+        // const_idx:
         write_native_usize(&mut data, 2);
 
-        // funcs[1].name
+        // FUNCTION 1
+        // name:
         write_str(&mut data, "bar");
-        // funcs[0].num_blocks
+        // num_blocks:
         write_native_usize(&mut data, 0);
 
-        // num_consts
+        // CONSTANTS
+        // num_consts:
         write_native_usize(&mut data, 3);
-        // consts[0].type_index
+
+        // CONSTANT 0
+        // type_index:
         write_native_usize(&mut data, 1);
-        // consts[0].num_bytes
+        // num_bytes:
         write_native_usize(&mut data, 0);
-        // consts[1].type_index
+
+        // CONSTANT 1
+        // type_index:
         write_native_usize(&mut data, 3);
-        // consts[1].num_bytes
+        // num_bytes:
         write_native_usize(&mut data, 4);
-        // consts[1].bytes
+        // bytes:
         data.write_u32::<NativeEndian>(u32::MAX).unwrap();
-        // consts[2].type_index
+
+        // CONSTANT 2
+        // type_index:
         write_native_usize(&mut data, 3);
-        // consts[2].num_bytes
+        // num_bytes:
         write_native_usize(&mut data, 4);
-        // consts[2].bytes
+        // bytes:
         data.write_u32::<NativeEndian>(50).unwrap();
 
-        // num_types
+        // TYPES
+        // num_types:
         write_native_usize(&mut data, 4);
-        // types[0].type_kind
+
+        // TYPE 0
+        // type_kind:
         data.write_u8(TYKIND_VOID).unwrap();
-        // types[1].type_kind
+
+        // TYPE 1
+        // type_kind:
         data.write_u8(TYKIND_UNIMPLEMENTED).unwrap();
+        // unimplemented description:
         write_str(&mut data, "a_type");
-        // types[2].type_kind
+
+        // TYPE 2
+        // type_kind:
         data.write_u8(TYKIND_PTR).unwrap();
-        // types[2].type_kind
+
+        // TYPE 3
+        // type_kind:
         data.write_u8(TYKIND_INTEGER).unwrap();
-        // types[2].int_type.num_bits
+        // num_bits:
         data.write_u32::<NativeEndian>(32).unwrap();
 
         let test_mod = deserialise_module(data.as_slice()).unwrap();
