@@ -82,8 +82,13 @@ LocalVariableOperand {
     inst_idx: usize     // instruction defines the referenced local variable.
 }
 
-StringOperand { // Used as a catch-all for unimplemented operands.
+TypeOperand {
     operand_kind: u8 = 2
+    type_idx: usize
+}
+
+UnimplementedOperand { // Used as a catch-all for unimplemented operands.
+    operand_kind: u8 = 255
     str: null_term_str
 }
 ```
