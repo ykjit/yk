@@ -105,9 +105,16 @@ pub(crate) struct TypeOperand {
     type_idx: usize,
 }
 
+#[deku_derive(DekuRead)]
+#[derive(Debug)]
+pub(crate) struct FunctionOperand {
+    func_idx: usize,
+}
+
 const OPKIND_CONST: u8 = 0;
 const OPKIND_LOCAL_VARIABLE: u8 = 1;
 const OPKIND_TYPE: u8 = 2;
+const OPKIND_FUNCTION: u8 = 3;
 const OPKIND_UNIMPLEMENTED: u8 = 255;
 
 #[deku_derive(DekuRead)]
@@ -120,6 +127,8 @@ pub(crate) enum Operand {
     LocalVariable(LocalVariableOperand),
     #[deku(id = "OPKIND_TYPE")]
     Type(TypeOperand),
+    #[deku(id = "OPKIND_FUNCTION")]
+    Function(FunctionOperand),
     #[deku(id = "OPKIND_UNIMPLEMENTED")]
     Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")] String),
 }
@@ -130,6 +139,7 @@ impl IRDisplay for Operand {
             Self::Constant(c) => c.to_str(m),
             Self::LocalVariable(l) => l.to_str(m),
             Self::Type(t) => m.types[t.type_idx].to_str(m),
+            Self::Function(f) => m.funcs[f.func_idx].name.to_owned(),
             Self::Unimplemented(s) => format!("?op<{}>", s),
         }
     }
@@ -185,7 +195,20 @@ impl IRDisplay for Instruction {
             .iter()
             .map(|o| o.to_str(m))
             .collect::<Vec<_>>();
-        ret.push_str(&op_strs.join(", "));
+
+        if self.opcode != Opcode::Call {
+            ret.push_str(&op_strs.join(", "));
+        } else {
+            // Put parentheses around the call arguments.
+            let mut itr = op_strs.into_iter();
+            // unwrap safe: calls must have at least a callee operand.
+            ret.push_str(&itr.next().unwrap());
+            let rest = itr.collect::<Vec<_>>();
+            ret.push('(');
+            ret.push_str(&rest.join(", "));
+            ret.push(')');
+        }
+
         ret
     }
 }
@@ -455,8 +478,8 @@ pub(crate) fn deserialise_module(data: &[u8]) -> Result<AOTModule, Box<dyn Error
 mod tests {
     use super::{
         deserialise_module, deserialise_string, Constant, IntegerType, Opcode, FORMAT_VERSION,
-        MAGIC, OPKIND_CONST, OPKIND_TYPE, OPKIND_UNIMPLEMENTED, TYKIND_INTEGER, TYKIND_PTR,
-        TYKIND_UNIMPLEMENTED, TYKIND_VOID,
+        MAGIC, OPKIND_CONST, OPKIND_FUNCTION, OPKIND_TYPE, OPKIND_UNIMPLEMENTED, TYKIND_INTEGER,
+        TYKIND_PTR, TYKIND_UNIMPLEMENTED, TYKIND_VOID,
     };
     use byteorder::{NativeEndian, WriteBytesExt};
     use std::ffi::CString;
@@ -522,7 +545,7 @@ mod tests {
 
         // BLOCK 1
         // num_instrs:
-        write_native_usize(&mut data, 3);
+        write_native_usize(&mut data, 4);
 
         // INSTRUCTION 0
         // type_index:
@@ -565,6 +588,29 @@ mod tests {
         // OPERAND 1
         // operand_kind:
         data.write_u8(OPKIND_CONST as u8).unwrap();
+        // const_idx:
+        write_native_usize(&mut data, 2);
+
+        // INSTRUCTION 3
+        // type_index:
+        write_native_usize(&mut data, 2);
+        // opcode:
+        data.write_u8(Opcode::Call as u8).unwrap();
+        // num_operands:
+        data.write_u32::<NativeEndian>(3).unwrap();
+        // OPERAND 0
+        // operand_kind:
+        data.write_u8(OPKIND_FUNCTION).unwrap();
+        // func_idx:
+        write_native_usize(&mut data, 1);
+        // OPERAND 1
+        // operand_kind:
+        data.write_u8(OPKIND_CONST).unwrap();
+        // const_idx:
+        write_native_usize(&mut data, 2);
+        // OPERAND 2
+        // operand_kind:
+        data.write_u8(OPKIND_CONST).unwrap();
         // const_idx:
         write_native_usize(&mut data, 2);
 
@@ -642,6 +688,7 @@ func foo {
     ?inst<%3 = some_llvm_instruction ...>
     $1_1: ptr = getelementptr -1i32
     $1_2: ptr = alloca i32, 50i32
+    $1_3: ptr = call bar(50i32, 50i32)
 }
 
 func bar;
