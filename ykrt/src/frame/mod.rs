@@ -4,20 +4,33 @@
 use llvm_sys::{core::*, prelude::LLVMValueRef};
 use object::{Object, ObjectSection};
 use std::{
-    collections::HashMap,
     convert::TryFrom,
     env,
     ffi::{c_void, CStr},
     fs, ptr, slice,
     sync::LazyLock,
+    thread,
 };
-use yksmp::{Location as SMLocation, SMEntry, StackMapParser};
+use yksmp::{Location as SMLocation, PrologueInfo, Record, StackMapParser};
 
 mod llvmbridge;
 pub(crate) use llvmbridge::{BitcodeSection, __yktracec_get_aot_module};
 use llvmbridge::{Type, Value};
 
-pub static AOT_STACKMAPS: LazyLock<Vec<SMEntry>> = LazyLock::new(|| {
+struct AOTStackmapInfo {
+    pinfos: Vec<PrologueInfo>,
+    records: Vec<(Record, usize)>,
+}
+
+impl AOTStackmapInfo {
+    fn get(&self, stackmapid: usize) -> (&Record, &PrologueInfo) {
+        let (rec, pid) = &self.records[stackmapid];
+        let pinfo = &self.pinfos[*pid];
+        (rec, pinfo)
+    }
+}
+
+static AOT_STACKMAPS: LazyLock<AOTStackmapInfo> = LazyLock::new(|| {
     // Load the stackmap from the binary to parse in the stackmaps.
     // FIXME: Don't use current_exe.
     let pathb = env::current_exe().unwrap();
@@ -33,8 +46,23 @@ pub static AOT_STACKMAPS: LazyLock<Vec<SMEntry>> = LazyLock::new(|| {
             usize::try_from(sec.size()).unwrap(),
         )
     };
-    StackMapParser::get_entries(slice)
+    let (entries, numrecs) = StackMapParser::get_entries(slice);
+    let mut pinfos = Vec::new();
+    let mut records = Vec::new();
+    records.resize_with(usize::try_from(numrecs).unwrap(), || (Record::empty(), 0));
+    for entry in entries {
+        pinfos.push(entry.pinfo);
+        for r in entry.records {
+            let idx = usize::try_from(r.id).unwrap();
+            records[idx] = (r, pinfos.len() - 1);
+        }
+    }
+    AOTStackmapInfo { pinfos, records }
 });
+
+pub(crate) fn load_aot_stackmaps() {
+    thread::spawn(|| LazyLock::force(&AOT_STACKMAPS));
+}
 
 static USIZEOF_POINTER: usize = std::mem::size_of::<*const ()>();
 static ISIZEOF_POINTER: isize = std::mem::size_of::<*const ()>() as isize;
@@ -55,26 +83,26 @@ impl SGValue {
 
 /// A frame holding live variables.
 struct Frame {
-    vars: HashMap<Value, SGValue>,
+    vars: Vec<SGValue>,
     pc: Value,
 }
 
 impl Frame {
     fn new(pc: Value) -> Frame {
         Frame {
-            vars: HashMap::new(),
+            vars: Vec::new(),
             pc,
         }
     }
 
     /// Get the value of the variable `key` in this frame.
-    fn get(&self, key: &Value) -> Option<&SGValue> {
-        self.vars.get(key)
+    fn get(&self, i: usize) -> Option<&SGValue> {
+        self.vars.get(i)
     }
 
     /// Add new variable `key` with value `val`.
-    fn add(&mut self, key: Value, val: SGValue) {
-        self.vars.insert(key, val);
+    fn add(&mut self, val: SGValue) {
+        self.vars.push(val);
     }
 }
 
@@ -141,20 +169,7 @@ impl FrameReconstructor {
             let smcall = get_stackmap_call(frame.pc);
             let smid = unsafe { LLVMConstIntGetZExtValue(smcall.get_operand(0).get()) };
             // Find prologue info and stackmap record for this frame.
-            let mut pinfo = None;
-            let mut rec = None;
-            // Iterate over function entries to find the correct record and relevant prologue info.
-            for entry in AOT_STACKMAPS.iter() {
-                for r in &entry.records {
-                    if r.id == smid {
-                        pinfo = Some(&entry.pinfo);
-                        rec = Some(r);
-                        break;
-                    }
-                }
-            }
-            let rec = rec.unwrap();
-            let pinfo = pinfo.unwrap();
+            let (rec, pinfo) = AOT_STACKMAPS.get(usize::try_from(smid).unwrap());
             // We don't need to allocate memory for the bottom-most frame, i.e. the frame
             // containing the control point, since this frame already exists and doesn't need to be
             // reconstructed.
@@ -248,11 +263,11 @@ impl FrameReconstructor {
             // WRITE STACKMAP LOCATIONS.
             // Now write all live variables to the new stack in the order they are listed in the
             // AOT stackmap call.
-            let smcall = get_stackmap_call(frame.pc);
             for (j, lv) in rec.live_vars.iter().enumerate() {
                 // Adjust the operand index by 2 to skip stackmap ID and shadow bytes.
-                let op = smcall.get_operand(u32::try_from(j + 2).unwrap());
-                if op.is_frameaddr_call() {
+                let val = if let Some(sg) = frame.get(j) {
+                    sg.val
+                } else {
                     // Sidetraces require an unconditional guard at the end which deopts back to
                     // the control point. The stackmap at this location contains the value returned
                     // by the call to `frameaddr`. We are not interested in its value and tracking
@@ -260,9 +275,11 @@ impl FrameReconstructor {
                     // to). So the easiest approach for now is to simply omit this live variable
                     // during deoptimisation. In the future we will patch side traces into the
                     // parent trace, so this hack will no longer be needed then.
+                    debug_assert!(get_stackmap_call(frame.pc)
+                        .get_operand(u32::try_from(j + 2).unwrap())
+                        .is_frameaddr_call());
                     continue;
-                }
-                let val = frame.get(&op).unwrap().val;
+                };
                 let l = if lv.len() == 1 {
                     lv.get(0).unwrap()
                 } else {
@@ -406,6 +423,6 @@ impl FrameReconstructor {
         }
 
         let liveval = SGValue::new(val, ty);
-        self.frames.get_mut(sfidx).unwrap().add(aotval, liveval);
+        self.frames.get_mut(sfidx).unwrap().add(liveval);
     }
 }

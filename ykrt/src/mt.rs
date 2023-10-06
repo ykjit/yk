@@ -100,10 +100,13 @@ impl std::fmt::Debug for MT {
     }
 }
 
+use crate::frame::load_aot_stackmaps;
+
 impl MT {
     // Create a new meta-tracer instance. Arbitrarily many of these can be created, though there
     // are no guarantees as to whether they will share resources effectively or fairly.
     pub fn new() -> Result<Arc<Self>, Box<dyn Error>> {
+        load_aot_stackmaps();
         Ok(Arc::new(Self {
             hot_threshold: AtomicHotThreshold::new(DEFAULT_HOT_THRESHOLD),
             sidetrace_threshold: AtomicHotThreshold::new(DEFAULT_SIDETRACE_THRESHOLD),
