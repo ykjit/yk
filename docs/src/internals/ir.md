@@ -87,6 +87,11 @@ TypeOperand {
     type_idx: usize
 }
 
+FunctionOperand {
+    operand_kind: u8 = 3
+    func_idx: usize
+}
+
 UnimplementedOperand { // Used as a catch-all for unimplemented operands.
     operand_kind: u8 = 255
     str: null_term_str
