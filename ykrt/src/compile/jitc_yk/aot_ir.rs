@@ -55,6 +55,7 @@ pub(crate) enum Opcode {
     Call,
     GetElementPtr,
     Br,
+    CondBr,
     Icmp,
     BinaryOperator,
     Ret,
@@ -107,6 +108,18 @@ pub(crate) struct TypeOperand {
 
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
+pub(crate) struct BlockOperand {
+    bb_idx: usize,
+}
+
+impl IRDisplay for BlockOperand {
+    fn to_str(&self, _m: &AOTModule) -> String {
+        format!("bb{}", self.bb_idx)
+    }
+}
+
+#[deku_derive(DekuRead)]
+#[derive(Debug)]
 pub(crate) struct FunctionOperand {
     func_idx: usize,
 }
@@ -115,6 +128,7 @@ const OPKIND_CONST: u8 = 0;
 const OPKIND_LOCAL_VARIABLE: u8 = 1;
 const OPKIND_TYPE: u8 = 2;
 const OPKIND_FUNCTION: u8 = 3;
+const OPKIND_BLOCK: u8 = 4;
 const OPKIND_UNIMPLEMENTED: u8 = 255;
 
 #[deku_derive(DekuRead)]
@@ -129,6 +143,8 @@ pub(crate) enum Operand {
     Type(TypeOperand),
     #[deku(id = "OPKIND_FUNCTION")]
     Function(FunctionOperand),
+    #[deku(id = "OPKIND_BLOCK")]
+    Block(BlockOperand),
     #[deku(id = "OPKIND_UNIMPLEMENTED")]
     Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")] String),
 }
@@ -140,6 +156,7 @@ impl IRDisplay for Operand {
             Self::LocalVariable(l) => l.to_str(m),
             Self::Type(t) => m.types[t.type_idx].to_str(m),
             Self::Function(f) => m.funcs[f.func_idx].name.to_owned(),
+            Self::Block(bb) => bb.to_str(m),
             Self::Unimplemented(s) => format!("?op<{}>", s),
         }
     }
@@ -478,8 +495,8 @@ pub(crate) fn deserialise_module(data: &[u8]) -> Result<AOTModule, Box<dyn Error
 mod tests {
     use super::{
         deserialise_module, deserialise_string, Constant, IntegerType, Opcode, FORMAT_VERSION,
-        MAGIC, OPKIND_CONST, OPKIND_FUNCTION, OPKIND_TYPE, OPKIND_UNIMPLEMENTED, TYKIND_INTEGER,
-        TYKIND_PTR, TYKIND_UNIMPLEMENTED, TYKIND_VOID,
+        MAGIC, OPKIND_BLOCK, OPKIND_CONST, OPKIND_FUNCTION, OPKIND_LOCAL_VARIABLE, OPKIND_TYPE,
+        OPKIND_UNIMPLEMENTED, TYKIND_INTEGER, TYKIND_PTR, TYKIND_UNIMPLEMENTED, TYKIND_VOID,
     };
     use byteorder::{NativeEndian, WriteBytesExt};
     use std::ffi::CString;
@@ -520,7 +537,7 @@ mod tests {
 
         // BLOCK 0
         // num_instrs:
-        write_native_usize(&mut data, 2);
+        write_native_usize(&mut data, 3);
 
         // INSTRUCTION 0
         // type_index:
@@ -543,9 +560,34 @@ mod tests {
         // num_operands:
         data.write_u32::<NativeEndian>(0).unwrap();
 
+        // INSTRUCTION 2
+        // type_index:
+        write_native_usize(&mut data, 0);
+        // opcode:
+        data.write_u8(Opcode::CondBr as u8).unwrap();
+        // num_operands:
+        data.write_u32::<NativeEndian>(3).unwrap();
+        // OPERAND 0
+        // operand_kind:
+        data.write_u8(OPKIND_LOCAL_VARIABLE as u8).unwrap();
+        // bb_idx:
+        write_native_usize(&mut data, 0);
+        // inst_idx:
+        write_native_usize(&mut data, 0);
+        // OPERAND 1
+        // operand_kind:
+        data.write_u8(OPKIND_BLOCK as u8).unwrap();
+        // bb_idx:
+        write_native_usize(&mut data, 0);
+        // OPERAND 2
+        // operand_kind:
+        data.write_u8(OPKIND_BLOCK as u8).unwrap();
+        // bb_idx:
+        write_native_usize(&mut data, 1);
+
         // BLOCK 1
         // num_instrs:
-        write_native_usize(&mut data, 4);
+        write_native_usize(&mut data, 5);
 
         // INSTRUCTION 0
         // type_index:
@@ -613,6 +655,14 @@ mod tests {
         data.write_u8(OPKIND_CONST).unwrap();
         // const_idx:
         write_native_usize(&mut data, 2);
+
+        // INSTRUCTION 4
+        // type_index:
+        write_native_usize(&mut data, 0);
+        // opcode:
+        data.write_u8(Opcode::Br as u8).unwrap();
+        // num_operands:
+        data.write_u32::<NativeEndian>(0).unwrap();
 
         // FUNCTION 1
         // name:
@@ -684,11 +734,13 @@ func foo {
   bb0:
     $0_0: ptr = alloca ?cst<a_type>
     nop
+    condbr $0_0: ptr, bb0, bb1
   bb1:
     ?inst<%3 = some_llvm_instruction ...>
     $1_1: ptr = getelementptr -1i32
     $1_2: ptr = alloca i32, 50i32
     $1_3: ptr = call bar(50i32, 50i32)
+    br
 }
 
 func bar;
