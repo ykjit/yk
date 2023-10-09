@@ -26,7 +26,7 @@ use yksmp::StackMapParser;
 pub(crate) mod jitc_llvm;
 
 #[cfg(jitc_yk)]
-pub(crate) mod jitc_yk;
+pub mod jitc_yk;
 
 /// The trait that every JIT compiler backend must implement.
 pub(crate) trait Compiler: Send + Sync {

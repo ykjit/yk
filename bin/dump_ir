@@ -1,0 +1,6 @@
+#!/bin/sh
+#
+# Wrapper around the `dump_ir` binary to make it easier to use.
+
+set -e
+cargo run --bin dump_ir -- $@

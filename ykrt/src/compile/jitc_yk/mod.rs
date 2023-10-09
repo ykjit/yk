@@ -48,7 +48,7 @@ static PHASES_TO_PRINT: LazyLock<HashSet<IRPhase>> = LazyLock::new(|| {
     }
 });
 
-mod aot_ir;
+pub mod aot_ir;
 
 pub(crate) struct JITCYk;
 
