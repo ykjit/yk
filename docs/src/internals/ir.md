@@ -92,6 +92,11 @@ FunctionOperand {
     func_idx: usize
 }
 
+BlockOperand {
+    operand_kind: u8 = 4
+    bb_idx: usize
+}
+
 UnimplementedOperand { // Used as a catch-all for unimplemented operands.
     operand_kind: u8 = 255
     str: null_term_str
