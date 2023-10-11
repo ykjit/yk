@@ -189,7 +189,7 @@ impl IRDisplay for Instruction {
             }
         }
 
-        if self.name.borrow().is_none() {
+        if !*m.var_names_computed.borrow() {
             m.compute_variable_names();
         }
 
@@ -405,11 +405,17 @@ pub(crate) struct AOTModule {
     num_types: usize,
     #[deku(count = "num_types")]
     types: Vec<Type>,
+    /// Have local variable names been computed?
+    ///
+    /// Names are computed on-demand when an instruction is printed for the first time.
+    #[deku(skip)]
+    var_names_computed: RefCell<bool>,
 }
 
 impl AOTModule {
     /// Compute variable names for all instructions that generate a value.
     fn compute_variable_names(&self) {
+        debug_assert!(!*self.var_names_computed.borrow());
         // Note that because the on-disk IR is conceptually immutable, so we don't have to worry
         // about keeping the names up to date.
         for f in &self.funcs {
@@ -421,6 +427,7 @@ impl AOTModule {
                 }
             }
         }
+        *self.var_names_computed.borrow_mut() = true;
     }
 
     /// Fill in the function index of local variable operands of instructions.o
