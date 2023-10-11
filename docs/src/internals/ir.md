@@ -25,6 +25,7 @@ Module {
 
 Function {
     name: null_term_str
+    type_index: usize
     num_blocks: usize
     blocks: Block[num_blocks]
 }
@@ -66,6 +67,14 @@ PointerType {
     type_kind: u8 = 2
 }
 
+FunctionType {
+    type_kind: u8 = 3
+    num_args: usize
+    arg_tys: Type[num_args]
+    ret_ty: Type
+    is_vararg: u8
+}
+
 ### Operand encoding.
 
 `Operand` is encoded as one of the following:
@@ -95,6 +104,11 @@ FunctionOperand {
 BlockOperand {
     operand_kind: u8 = 4
     bb_idx: usize
+}
+
+ArgOperand {
+    operand_kind: u8 = 5
+    arg_idx: usize
 }
 
 UnimplementedOperand { // Used as a catch-all for unimplemented operands.
