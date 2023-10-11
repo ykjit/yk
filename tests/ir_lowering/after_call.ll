@@ -1,10 +1,10 @@
 ; Dump:
 ;   stdout:
 ;     ...
-;     func main {
+;     func main($arg0: i32, $arg1: ptr) -> i32 {
 ;       bb0:
-;         $0_0: i32 = call f(?op<i32 %0>)
-;         $0_1: i1 = icmp ?op<i32 %0>, 1i32
+;         $0_0: i32 = call f($arg0)
+;         $0_1: i1 = icmp $arg0, 1i32
 ;         condbr $0_1: i1, bb2, bb1
 ;     ...
 
