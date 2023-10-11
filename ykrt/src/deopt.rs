@@ -395,6 +395,7 @@ unsafe extern "C" fn __ykrt_deopt(
     // pass in variables from this scope via a struct which is passed into the function.
     LLVMOrcThreadSafeModuleWithModuleDo(moduleref, ts_reconstruct, infoptr as *mut c_void);
 
+    ctr.mt().stats.timing_state(TimingState::OutsideYk);
     // We want to start side tracing only after we deoptimised. Otherwise we'd trace the whole
     // deopt routine which will later be costly to disassemble.
     debug_assert!(isswitchguard == 0 || isswitchguard == 1);
@@ -416,8 +417,6 @@ unsafe extern "C" fn __ykrt_deopt(
             }
         }
     }
-
-    ctr.mt().stats.timing_state(TimingState::OutsideYk);
 
     info.nfi.unwrap()
 }
