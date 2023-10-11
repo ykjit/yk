@@ -39,30 +39,24 @@ fn correct_codegen_for_test(p: &Path) -> bool {
 fn run_suite(opt: &'static str) {
     println!("Running C tests with opt level {}...", opt);
 
+    fn is_c(p: &Path) -> bool {
+        p.extension().as_ref().and_then(|p| p.to_str()) == Some("c")
+    }
+
     // Tests with the filename prefix `debug_` are only run in debug builds.
     #[cfg(cargo_profile = "release")]
-    let filter: fn(&Path) -> bool = |p| {
-        if let Some(ext) = p.extension() {
-            ext == "c"
-                && correct_codegen_for_test(p)
-                && !p
-                    .file_name()
-                    .unwrap()
-                    .to_str()
-                    .unwrap()
-                    .starts_with("debug_")
-        } else {
-            false
-        }
+    let filter = |p: &Path| {
+        is_c(p)
+            && correct_codegen_for_test(p)
+            && !p
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("debug_")
     };
     #[cfg(cargo_profile = "debug")]
-    let filter: fn(&Path) -> bool = |p| {
-        if let Some(ext) = p.extension() {
-            ext == "c" && correct_codegen_for_test(p)
-        } else {
-            false
-        }
-    };
+    let filter = |p: &Path| is_c(p) && correct_codegen_for_test(p);
 
     let tempdir = TempDir::new().unwrap();
 

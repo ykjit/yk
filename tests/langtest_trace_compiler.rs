@@ -29,13 +29,7 @@ fn main() {
 
     LangTester::new()
         .test_dir("trace_compiler")
-        .test_file_filter(|p| {
-            if let Some(ext) = p.extension() {
-                ext == "ll"
-            } else {
-                false
-            }
-        })
+        .test_file_filter(|p| p.extension().as_ref().and_then(|p| p.to_str()) == Some("ll"))
         .test_extract(move |p| {
             read_to_string(p)
                 .unwrap()
