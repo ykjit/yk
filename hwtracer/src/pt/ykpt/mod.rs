@@ -219,9 +219,6 @@ pub(crate) struct YkPTBlockIterator<'t> {
     tnts: VecDeque<bool>,
     /// The compressed return stack.
     comprets: CompressedReturns,
-    /// When true, packet generation is enabled (we've seen a `TIP.PGE` packet, but no
-    /// corresponding `TIP.PGD` yet).
-    pge: bool,
     /// When `true` we have seen one of more `MODE.*` packets that are yet to be bound.
     unbound_modes: bool,
 }
@@ -234,7 +231,6 @@ impl<'t> YkPTBlockIterator<'t> {
             cur_loc: ObjLoc::OtherObjOrUnknown(None),
             tnts: VecDeque::new(),
             comprets: CompressedReturns::new(),
-            pge: false,
             unbound_modes: false,
         };
 
@@ -701,7 +697,7 @@ impl<'t> YkPTBlockIterator<'t> {
                 )));
             }
 
-            if pkt.kind() == PacketKind::FUP && self.pge && !self.unbound_modes {
+            if pkt.kind() == PacketKind::FUP && !self.unbound_modes {
                 // FIXME: https://github.com/ykjit/yk/issues/593
                 //
                 // A FUP packet when there are no outstanding MODE packets indicates that
@@ -759,15 +755,6 @@ impl<'t> YkPTBlockIterator<'t> {
                 // will causes us to to (sometimes) pop from an empty return stack.
             }
 
-            // Update `self.pge` if necessary.
-            if pkt.kind() == PacketKind::TIPPGE {
-                debug_assert!(!self.pge);
-                self.pge = true;
-            } else if pkt.kind() == PacketKind::TIPPGD {
-                debug_assert!(self.pge);
-                self.pge = false;
-            }
-
             // If it's a MODE packet, remember we've seen it. The meaning of TIP and FUP packets
             // vary depending upon if they were preceded by MODE packets.
             if pkt.kind().is_mode() {
@@ -785,12 +772,10 @@ impl<'t> YkPTBlockIterator<'t> {
 
             // Update `self.target_ip` if necessary.
             if let Some(vaddr) = pkt.target_ip() {
-                if self.pge {
-                    self.cur_loc = match self.vaddr_to_off(vaddr)? {
-                        (obj, off) if obj == *SELF_BIN_PATH => ObjLoc::MainObj(off),
-                        _ => ObjLoc::OtherObjOrUnknown(Some(vaddr)),
-                    };
-                }
+                self.cur_loc = match self.vaddr_to_off(vaddr)? {
+                    (obj, off) if obj == *SELF_BIN_PATH => ObjLoc::MainObj(off),
+                    _ => ObjLoc::OtherObjOrUnknown(Some(vaddr)),
+                };
             }
 
             // Update `self.tnts` if necessary.
