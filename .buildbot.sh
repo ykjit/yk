@@ -69,17 +69,17 @@ WARNING_DEFINES="-D unused-variables -D dead-code"
 for p in $(sed -n -e '/^members =/,/^\]$/{/^members =/d;/^\]$/d;p;}' \
   Cargo.toml \
   | \
-  tr -d ' \t\",'); do
-    cd $p
-    if [ $p = "tests" ]; then
-        cargo rustc --profile check --lib -- ${WARNING_DEFINES}
-    else
-        cargo rustc --profile check -- ${WARNING_DEFINES}
-        cargo rustc --profile check --tests -- ${WARNING_DEFINES}
-        cargo rustc --profile check --benches -- ${WARNING_DEFINES}
+  tr -d ' \t\",' | grep -v xtask); do
+    cargo rustc -p $p --profile check --lib -- ${WARNING_DEFINES}
+    # For some reason, we can't do these checks on crates with binary targets.
+    if [ "$p" != "ykrt" ] && [ "$p" != "tests" ]; then
+        cargo rustc -p $p --profile check --tests -- ${WARNING_DEFINES}
+        cargo rustc -p $p --profile check --benches -- ${WARNING_DEFINES}
     fi
-    cd ..
 done
+cargo rustc -p tests --profile check --bin dump_ir -- ${WARNING_DEFINES}
+cargo rustc -p tests --profile check --bin gdb_c_test -- ${WARNING_DEFINES}
+cargo rustc -p xtask --profile check --bin xtask -- ${WARNING_DEFINES}
 
 # There are some feature-gated testing/debugging switches which slow the JIT
 # down a bit. Check that if we build the system without tests, those features

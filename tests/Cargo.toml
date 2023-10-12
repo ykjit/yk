@@ -19,6 +19,11 @@ name = "trace_compiler_tests"
 path = "langtest_trace_compiler.rs"
 harness = false
 
+[[test]]
+name = "ir_lowering_tests"
+path = "langtest_ir_lowering.rs"
+harness = false
+
 [dependencies]
 clap = { features = ["derive"], version = "4.4" }
 hwtracer = { path = "../hwtracer" }

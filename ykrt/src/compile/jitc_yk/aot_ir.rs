@@ -5,7 +5,7 @@
 
 use byteorder::{NativeEndian, ReadBytesExt};
 use deku::prelude::*;
-use std::{cell::RefCell, error::Error, ffi::CStr, io::Cursor};
+use std::{cell::RefCell, error::Error, ffi::CStr, fs, io::Cursor, path::PathBuf};
 
 /// A magic number that all bytecode payloads begin with.
 const MAGIC: u32 = 0xedd5f00d;
@@ -496,6 +496,16 @@ pub(crate) fn deserialise_module(data: &[u8]) -> Result<AOTModule, Box<dyn Error
         }
         Err(e) => Err(e.to_string().into()),
     }
+}
+
+/// Deserialise and print IR from an on-disk file.
+///
+/// Used for support tooling (in turn used by tests too).
+pub fn print_from_file(path: &PathBuf) -> Result<(), Box<dyn Error>> {
+    let data = fs::read(path)?;
+    let ir = deserialise_module(&data)?;
+    println!("{}", ir.to_str());
+    Ok(())
 }
 
 #[cfg(test)]
