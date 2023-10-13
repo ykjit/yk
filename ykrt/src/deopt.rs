@@ -115,6 +115,7 @@ extern "C" fn __llvm_deoptimize(
     actframes: *const c_void,
     guardid: usize,
     jitcallstack: *const c_void,
+    isswitchguard: usize,
 ) -> ! {
     // Push all registers to the stack before they can be clobbered, so that we can find their
     // values after parsing in the stackmap. The order in which we push the registers is equivalent
@@ -141,10 +142,11 @@ extern "C" fn __llvm_deoptimize(
             // call.
 
             // Additional arguments are passed via the stack in reverse order **after** alignment.
-            "mov r12, rsp", // Copy original RSP value.
-            "sub rsp, 8",   // Alignment
-            "push r12",     // Current stack pointer.
-            "push r9",      // JITModBuilder CallStack
+            "mov r12, [rsp+72]", // Copy isswitchguard argument.
+            "mov r13, rsp",      // Copy original RSP value.
+            "push r12",          // Add isswitchguard argument to this call.
+            "push r13",          // Current stack pointer.
+            "push r9",           // JITModBuilder CallStack
             // The return address was at [RSP] before the above pushes, so to find it we need to
             // offset 8 bytes per push.
             "mov r9, [rsp+88]",
@@ -279,6 +281,7 @@ extern "C" fn ts_reconstruct(ctx: *mut c_void, _module: LLVMModuleRef) -> LLVMEr
 ///   * `jitcallstack`: The parent trace's call stack at the time of the guard failure. Required to
 ///      assemble a side trace.
 ///   * `rsp`: Current stack pointer. Needed to read spilled register values from the stack.
+///   * `isswitchguard`: 1 if this guards a switch statement, 0 otherwise.
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
 unsafe extern "C" fn __ykrt_deopt(
@@ -290,6 +293,7 @@ unsafe extern "C" fn __ykrt_deopt(
     retaddr: usize,
     jitcallstack: *const c_void,
     rsp: *const c_void,
+    isswitchguard: usize,
 ) -> NewFramesInfo {
     // The `ctr` argument is a `Arc<CompiledTrace>` that is being cloned prior to each trace
     // execution. Traces can only return via this deopt, so we can (and must) turn this back into
@@ -391,9 +395,11 @@ unsafe extern "C" fn __ykrt_deopt(
     // pass in variables from this scope via a struct which is passed into the function.
     LLVMOrcThreadSafeModuleWithModuleDo(moduleref, ts_reconstruct, infoptr as *mut c_void);
 
+    ctr.mt().stats.timing_state(TimingState::OutsideYk);
     // We want to start side tracing only after we deoptimised. Otherwise we'd trace the whole
     // deopt routine which will later be costly to disassemble.
-    if !ctr.is_last_guard(guardid) {
+    debug_assert!(isswitchguard == 0 || isswitchguard == 1);
+    if isswitchguard == 0 && !ctr.is_last_guard(guardid) {
         let guard = ctr.guard(guardid);
         if guard.inc_failed(ctr.mt()) {
             // This guard is hot, so compile a new side-trace.
@@ -411,8 +417,6 @@ unsafe extern "C" fn __ykrt_deopt(
             }
         }
     }
-
-    ctr.mt().stats.timing_state(TimingState::OutsideYk);
 
     info.nfi.unwrap()
 }

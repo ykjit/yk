@@ -653,7 +653,7 @@ class JITModBuilder {
     // Get/create the guard failure and success blocks.
     LLVMContext &Context = JITMod->getContext();
     BasicBlock *FailBB = getGuardFailureBlock(SI->getParent(), CurBBIdx, I,
-                                              CurInstrIdx, GuardCount);
+                                              CurInstrIdx, GuardCount, 1);
     BasicBlock *SuccBB =
         BasicBlock::Create(Context, GUARD_SUCCESS_BLOCK_NAME, JITFunc);
 
@@ -805,7 +805,7 @@ class JITModBuilder {
   // Returns a pointer to the guard failure block, creating it if necessary.
   BasicBlock *getGuardFailureBlock(BasicBlock *CurBB, size_t CurBBIdx,
                                    Instruction *Instr, size_t CurInstrIdx,
-                                   size_t GuardId) {
+                                   size_t GuardId, size_t IsSwitch = 0) {
     // If `JITFunc` contains no blocks already, then the guard failure block
     // becomes the entry block. This would lead to a trace that
     // unconditionally and immediately fails a guard.
@@ -928,7 +928,8 @@ class JITModBuilder {
         {JITFunc->getArg(JITFUNC_ARG_COMPILEDTRACE_IDX),
          JITFunc->getArg(JITFUNC_ARG_FRAMEADDR_IDX), AOTLocs,
          ActiveFramesStruct, ConstantInt::get(PointerSizedIntTy, GuardId),
-         ConstantInt::get(PointerSizedIntTy, (size_t)NewCallStack)},
+         ConstantInt::get(PointerSizedIntTy, (size_t)NewCallStack),
+         ConstantInt::get(PointerSizedIntTy, IsSwitch)},
         {ob}, "", GuardFailBB);
 
     // We always need to return after the deoptimisation call.

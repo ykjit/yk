@@ -1,4 +1,3 @@
-// ignore: breaks the trace compiler
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   stdout:
