@@ -88,6 +88,8 @@ handle_arg() {
             OUTPUT="${OUTPUT} -fuse-ld=lld"
             # Embed LLVM bitcode as late as possible.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--embed-bitcode-final"
+            # Add pthread_create wrapper function (__wrap_pthread_create)
+            OUTPUT="${OUTPUT} -Wl,--wrap=pthread_create"
             # Embed Yk's IR.
             if [ "${YKD_NEW_CODEGEN}" = "1" ]; then
                 OUTPUT="${OUTPUT} -Wl,-mllvm=--yk-embed-ir"
