@@ -13,6 +13,7 @@ mod deopt;
 mod frame;
 mod location;
 pub(crate) mod mt;
+pub(crate) mod thread_intercept;
 pub mod trace;
 mod ykstats;
 
