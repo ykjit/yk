@@ -11,8 +11,6 @@ use super::packets::*;
 
 #[derive(Clone, Copy, Debug)]
 enum PacketParserState {
-    /// Initial state, waiting for a PSB packet.
-    Init,
     /// The "normal" decoding state.
     Normal,
     /// We are decoding a PSB+ sequence.
@@ -29,7 +27,6 @@ impl PacketParserState {
         // OPT: The order below is a rough guess based on what limited traces I've seen. Benchmark
         // and optimise.
         match self {
-            Self::Init => &[PacketKind::PSB],
             Self::Normal => &[
                 PacketKind::ShortTNT,
                 PacketKind::PAD,
@@ -62,7 +59,6 @@ impl PacketParserState {
     /// kind of packet.
     fn transition(&mut self, pkt_kind: PacketKind) {
         let new = match (*self, pkt_kind) {
-            (Self::Init, PacketKind::PSB) => Self::PSBPlus,
             (Self::Normal, PacketKind::PSB) => Self::PSBPlus,
             (Self::PSBPlus, PacketKind::PSBEND) => Self::Normal,
             _ => return, // No state transition.
@@ -108,7 +104,7 @@ impl<'t> PacketParser<'t> {
     pub(super) fn new(bytes: &'t [u8]) -> Self {
         Self {
             bits: BitSlice::from_slice(bytes),
-            state: PacketParserState::Init,
+            state: PacketParserState::Normal,
             prev_tip: 0,
         }
     }
@@ -230,6 +226,7 @@ impl<'t> Iterator for PacketParser<'t> {
 mod tests {
     use super::{super::packets::*, PacketParser};
     use crate::{trace_closure, work_loop, TracerBuilder, TracerKind};
+    use std::hint::black_box;
 
     /// Parse the packets of a small trace, checking the basic structure of the decoded trace.
     #[test]
@@ -269,6 +266,22 @@ mod tests {
             };
         }
         assert!(matches!(ts, TestState::SawPacketGenDisable));
+    }
+
+    /// Checks PT packet streams make sense when a perf fd is re-used.
+    #[test]
+    fn decode_many() {
+        let tc = TracerBuilder::new()
+            .tracer_kind(TracerKind::PT(crate::perf::PerfCollectorConfig::default()))
+            .build()
+            .unwrap();
+        for _ in 0..50 {
+            let trace = trace_closure(&tc, || work_loop(3));
+            // Force full-decoding of the trace.
+            for p in PacketParser::new(trace.bytes()) {
+                let _ = black_box(p);
+            }
+        }
     }
 
     /// Test target IP decompression when the `IPBytes = 0b000`.
