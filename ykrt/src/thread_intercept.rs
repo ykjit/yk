@@ -18,12 +18,12 @@ extern "C" fn wrap_thread_routine(arg: *mut c_void) -> *mut c_void {
         //  Obtain address of a shadowstack_0 symbol
         let shadowstack_addr: *mut libc::c_void = dlsym(null_mut(), str.as_ptr() as *const i8);
         if shadowstack_addr.is_null() {
-            panic!("Unable to find shadowstack address!")
+            panic!("Unable to find shadowstack address")
         }
         // Allocate stack
         let stack_addr = malloc(SHADOW_STACK_SIZE);
         if stack_addr.is_null() {
-            panic!("Unable allocate stack!")
+            panic!("Unable allocate stack")
         }
         // Set shadowstack addr with new allocated stack
         *(shadowstack_addr as *mut *mut c_void) = stack_addr;
