@@ -5,7 +5,7 @@
 ;       bb0:
 ;         $0_0: i32 = call f($arg0)
 ;         $0_1: i1 = icmp $arg0, 1i32
-;         condbr $0_1: i1, bb2, bb1
+;         condbr $0_1, bb2, bb1
 ;     ...
 
 
