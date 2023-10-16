@@ -14,27 +14,39 @@ struct ThreadRoutine {
 
 extern "C" fn wrap_thread_routine(arg: *mut c_void) -> *mut c_void {
     let str = CString::new("shadowstack_0").unwrap();
-    unsafe {
+    let shadowstack_symbol_addr = unsafe {
         //  Obtain address of a shadowstack_0 symbol
-        let shadowstack_addr: *mut libc::c_void = dlsym(null_mut(), str.as_ptr() as *const i8);
-        if shadowstack_addr.is_null() {
-            panic!("Unable to find shadowstack address")
-        }
-        // Allocate stack
-        let stack_addr = malloc(SHADOW_STACK_SIZE);
-        if stack_addr.is_null() {
-            panic!("Unable allocate stack")
-        }
-        // Set shadowstack addr with new allocated stack
-        *(shadowstack_addr as *mut *mut c_void) = stack_addr;
-        let thread_routine: &ThreadRoutine = (arg as *mut ThreadRoutine)
-            .as_ref()
-            .expect("Thread routine function and args data.");
-        // Call original thread routine
-        let result = (thread_routine.start_routine)(thread_routine.args);
-        free(stack_addr);
-        result
+        dlsym(null_mut(), str.as_ptr() as *const i8)
+    };
+    if shadowstack_symbol_addr.is_null() {
+        panic!("Unable to find shadowstack address")
     }
+    let stack_addr = unsafe {
+        // Allocate stack
+        malloc(SHADOW_STACK_SIZE)
+    };
+    if stack_addr.is_null() {
+        panic!("Unable allocate stack")
+    }
+    unsafe {
+        // Set shadowstack symbol with new allocated stack
+        *(shadowstack_symbol_addr as *mut *mut c_void) = stack_addr;
+    }
+    let thread_routine = unsafe {
+        // Obtain ThreadRoutine struct
+        Box::from_raw(arg as *mut ThreadRoutine)
+    };
+
+    // Call original thread routine
+    let result = (thread_routine.start_routine)(thread_routine.args);
+
+    unsafe {
+        // Free allocated stack
+        free(stack_addr)
+    }
+
+    result
+    
 }
 
 #[no_mangle]
@@ -44,11 +56,12 @@ pub extern "C" fn __wrap_pthread_create(
     start_routine: extern "C" fn(*mut c_void) -> *mut c_void,
     args: *mut c_void,
 ) -> c_int {
+    let ptr = Box::into_raw(Box::new(ThreadRoutine {
+        args,
+        start_routine,
+    }));
+    println!(" [YK] PTR {:p}", ptr);
     unsafe {
-        let routine_args = &ThreadRoutine {
-            args,
-            start_routine,
-        } as *const ThreadRoutine as *mut c_void;
-        return pthread_create(thread, attr, wrap_thread_routine, routine_args);
+        return pthread_create(thread, attr, wrap_thread_routine, ptr as *mut c_void);
     }
 }
