@@ -119,16 +119,34 @@ pub fn mk_compiler(
     #[cfg(cargo_profile = "release")]
     let mode = "release";
 
+    let prelink_args = env::var("PRELINK_PASSES").unwrap_or_default();
+    let postlink_args = env::var("POSTLINK_PASSES").unwrap_or_default();
+
+    let mut yk_config_args = vec![mode];
+
+    if !prelink_args.is_empty() {
+        yk_config_args.push("--prelink-pipeline");
+        yk_config_args.push(&prelink_args);
+    }
+    yk_config_args.push("--cflags");
+    yk_config_args.push("--cppflags");
+    if !postlink_args.is_empty() {
+        yk_config_args.push("--postlink-pipeline");
+        yk_config_args.push(&postlink_args);
+    }
+    yk_config_args.push("--ldflags");
+    yk_config_args.push("--libs");
+
     let yk_config_out = Command::new(yk_config)
-        .args([mode, "--cflags", "--cppflags", "--ldflags", "--libs"])
+        .args(&yk_config_args)
         .output()
         .expect("failed to execute yk-config");
     if !yk_config_out.status.success() {
         io::stderr().write_all(&yk_config_out.stderr).ok();
         panic!("yk-config exited with non-zero status");
     }
-    let mut yk_flags = String::from_utf8(yk_config_out.stdout).unwrap();
 
+    let mut yk_flags = String::from_utf8(yk_config_out.stdout).unwrap();
     if !patch_cp {
         yk_flags = yk_flags.replace("-Wl,--mllvm=--yk-patch-control-point", "");
     }
