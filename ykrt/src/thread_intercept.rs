@@ -58,7 +58,6 @@ pub extern "C" fn __wrap_pthread_create(
         args,
         start_routine,
     }));
-    println!(" [YK] PTR {:p}", ptr);
     unsafe {
         return pthread_create(thread, attr, wrap_thread_routine, ptr as *mut c_void);
     }
