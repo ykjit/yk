@@ -44,9 +44,7 @@ extern "C" fn wrap_thread_routine(arg: *mut c_void) -> *mut c_void {
         // Free allocated stack
         free(stack_addr)
     }
-
     result
-    
 }
 
 #[no_mangle]
