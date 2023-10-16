@@ -270,24 +270,13 @@ bool read_aux(void *aux_buf, struct perf_event_mmap_page *hdr,
     new_data_size = (size - tail) + head;
   }
 
-  // Reallocate the trace storage buffer if more space is required.
   __u64 required_capacity = trace->len + new_data_size;
   if (required_capacity > trace->capacity) {
-    // Over-allocate to 2x what we need, checking that the result fits in
-    // the size_t argument of realloc(3).
-    if (required_capacity >= SIZE_MAX / 2) {
-      // We would overflow the size_t argument of realloc(3).
-      hwt_set_cerr(err, hwt_cerror_errno, ENOMEM);
-      return false;
-    }
-    size_t new_capacity = required_capacity * 2;
-    void *new_buf = realloc(trace->buf.p, new_capacity);
-    if (new_buf == NULL) {
-      hwt_set_cerr(err, hwt_cerror_errno, errno);
-      return false;
-    }
-    trace->capacity = new_capacity;
-    trace->buf.p = new_buf;
+    // FIXME: Reallocate the trace storage buffer if more space is required.
+    // Note that this requires careful synchronisation between the collection
+    // thread, the main thread, and Rust code.
+    hwt_set_cerr(err, hwt_cerror_errno, ENOMEM);
+    return false;
   }
 
   // Finally append the new AUX data to the end of the trace storage buffer.

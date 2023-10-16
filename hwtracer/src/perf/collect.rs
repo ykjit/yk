@@ -217,6 +217,8 @@ mod tests {
 
     /// Check that a long trace causes the trace buffer to reallocate.
     #[test]
+    // FIXME: Reallocating the trace buffer causes synchronisation problems.
+    #[ignore]
     fn relloc_trace_buf() {
         let start_bufsize = 512;
         let config = PerfCollectorConfig {
