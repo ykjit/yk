@@ -95,31 +95,29 @@ for i in $(seq 10); do
 done
 
 # Test with LLVM sanitisers
-RUSTFLAGS="-Z sanitizer=address" cargo test --target x86_64-unknown-linux-gnu
-# The thread sanitiser has a number of false positives by default, so we need a
-# suppression file to avoid those overwhelming us. This does mean that we might
-# suppress some true positives, but there's little we can do about that.
+rustup component add rust-src
+RUSTFLAGS="-Z sanitizer=address" cargo test \
+    -Z build-std \
+    --target x86_64-unknown-linux-gnu
+# The thread sanitiser does have false positives (albeit much reduced by `-Z
+# build-std`), so we have to add a suppression file to avoid those stopping
+# this script from succeeding. This does mean that we might suppress some true
+# positives, but there's little we can do about that.
 suppressions_path=`mktemp`
 cat << EOF > $suppressions_path
-# The tests::EXTRA_LINK closure leads to a race being reported, but that seems
-# to be due to an internal detail of `LazyLock` rather than our code.
-race:tests::EXTRA_LINK::
-# The following data races are reported in libraries (the Rust standard library
-# or external crates). None of them are obviously a bad data race and, even if
-# they are, there's nothing we can do about them.
-race:alloc::sync::Arc<T,A>::drop_slow
-race:<alloc::sync::Arc<T,A> as core::ops::drop::Drop>::drop
+# Thread sanitiser doesn't know about atomic operations.
 race:core::sync::atomic::atomic_
-race:hashbrown::raw::RawTable
-race:lock_api::mutex::RawMutex>::try_lock
-race:std::collections::hash::map::RandomState
-race:std::sync::mpmc::list::Channel<T>::
-race:std::sync::remutex::ReentrantMutexGuard
+# count_to_hot_location moves something into a mutex, at which point accesses
+# to it are safe, but thread sanitiser doesn't seem to pick up the link between
+# the two.
+race:ykrt::location::Location::count_to_hot_location
 EOF
 RUST_TEST_THREADS=1 \
     RUSTFLAGS="-Z sanitizer=thread" \
     TSAN_OPTIONS="suppressions=$suppressions_path" \
-    cargo test --target x86_64-unknown-linux-gnu
+    cargo test \
+    -Z build-std \
+    --target x86_64-unknown-linux-gnu
 
 # We now want to test building with `--release`, which we also take as an
 # opportunity to check that yk can build ykllvm, which requires unsetting
