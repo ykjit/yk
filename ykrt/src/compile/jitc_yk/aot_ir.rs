@@ -90,13 +90,8 @@ pub(crate) struct LocalVariableOperand {
 }
 
 impl IRDisplay for LocalVariableOperand {
-    fn to_str(&self, m: &AOTModule) -> String {
-        format!(
-            "${}_{}: {}",
-            self.bb_idx,
-            self.inst_idx,
-            m.local_var_operand_type(self).to_str(m)
-        )
+    fn to_str(&self, _m: &AOTModule) -> String {
+        format!("${}_{}", self.bb_idx, self.inst_idx,)
     }
 }
 
@@ -528,15 +523,6 @@ impl AOTModule {
         &self.types[instr.type_index]
     }
 
-    /// Get the type of the local variable operand.
-    ///
-    /// It is UB to pass an operand that is not from an instruction in the `AOTModule` referenced
-    /// by `self`.
-    fn local_var_operand_type(&self, o: &LocalVariableOperand) -> &Type {
-        let instr = &self.funcs[o.func_idx].blocks[o.bb_idx].instrs[o.inst_idx];
-        self.instr_type(instr)
-    }
-
     fn instr_generates_value(&self, i: &Instruction) -> bool {
         self.instr_type(i) != &Type::Void
     }
@@ -852,7 +838,7 @@ func foo($arg0: ptr, $arg1: i32) -> i32 {
   bb0:
     $0_0: ptr = alloca ?cst<a_type>
     nop
-    condbr $0_0: ptr, bb0, bb1
+    condbr $0_0, bb0, bb1
   bb1:
     ?inst<%3 = some_llvm_instruction ...>
     $1_1: ptr = getelementptr -1i32
