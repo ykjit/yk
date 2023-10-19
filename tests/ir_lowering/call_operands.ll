@@ -1,7 +1,7 @@
 ; Dump:
 ;   stdout:
 ;     ...
-;     func main {
+;     func main() -> i32 {
 ;       bb0:
 ;         call f(1i32, 2i32, 3i32)
 ;         ret 0i32
