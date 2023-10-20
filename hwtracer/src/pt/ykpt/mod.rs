@@ -550,10 +550,13 @@ impl<'t> YkPTBlockIterator<'t> {
                     };
 
                     if inst.flow_control() == iced_x86::FlowControl::IndirectCall {
-                        if usize::try_from(inst.next_ip()).unwrap() == vaddr {
-                            todo!("zero length call");
-                        }
                         debug_assert!(!inst.is_call_far());
+                        // Indirect calls, even zero-length ones, are always compressed. See
+                        // Section 33.4.2.2 of the Intel Manual:
+                        //
+                        // "push the next IP onto the stack...note that this excludes zero-length
+                        // CALLs, which are *direct* near CALLs with displacement zero (to the next
+                        // IP)
                         self.comprets
                             .push(CompRetAddr::VAddr(usize::try_from(inst.next_ip()).unwrap()));
                         self.update_stack_adjust(1);
