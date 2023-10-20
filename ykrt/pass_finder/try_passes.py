@@ -100,7 +100,7 @@ def test_pipeline(logf, pl):
     env["PRELINK_PASSES"] = ",".join([p.name for p in pl.pre_link])
     env["LINKTIME_PASSES"] = ",".join([p.name for p in pl.link_time])
 
-    p = Popen("try_repeat 10 sh test.sh 2>&1", cwd=CWD, shell=True,
+    p = Popen("try_repeat 10 sh run_tests.sh 2>&1", cwd=CWD, shell=True,
               stdout=PIPE, close_fds=True, env=env)
     
     sout, _ =  p.communicate()
@@ -193,6 +193,10 @@ def main(logf, is_prelink):
     binary_split(logf, passes, is_prelink)
 
 if __name__ == "__main__":
+    if not os.environ.get('YK_PATH') or not os.environ.get('YKLUA_PATH'):
+        print("Please set both YK_PATH and YKLUA_PATH environment variables before running the script.")
+        exit(1)
+        
     if '--help' in sys.argv:
         print(__doc__)
         exit(0)

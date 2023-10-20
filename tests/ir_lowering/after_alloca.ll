@@ -1,12 +1,12 @@
 ; Dump:
 ;   stdout:
 ;     ...
-;     func main {
+;     func main($arg0: i32, $arg1: ptr) -> i32 {
 ;       bb0:
 ;         $0_0: ptr = alloca i32, 1i32
-;         store 1i32, $0_0: ptr
-;         $0_2: i1 = icmp ?op<i32 %0>, 1i32
-;         condbr $0_2: i1, bb2, bb1
+;         store 1i32, $0_0
+;         $0_2: i1 = icmp $arg0, 1i32
+;         condbr $0_2, bb2, bb1
 ;     ...
 
 

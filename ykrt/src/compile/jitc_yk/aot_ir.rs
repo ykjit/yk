@@ -90,13 +90,8 @@ pub(crate) struct LocalVariableOperand {
 }
 
 impl IRDisplay for LocalVariableOperand {
-    fn to_str(&self, m: &AOTModule) -> String {
-        format!(
-            "${}_{}: {}",
-            self.bb_idx,
-            self.inst_idx,
-            m.local_var_operand_type(self).to_str(m)
-        )
+    fn to_str(&self, _m: &AOTModule) -> String {
+        format!("${}_{}", self.bb_idx, self.inst_idx,)
     }
 }
 
@@ -124,11 +119,25 @@ pub(crate) struct FunctionOperand {
     func_idx: usize,
 }
 
+/// An operand that is an argument to the parent function.
+#[deku_derive(DekuRead)]
+#[derive(Debug)]
+pub(crate) struct ArgOperand {
+    arg_idx: usize,
+}
+
+impl IRDisplay for ArgOperand {
+    fn to_str(&self, _m: &AOTModule) -> String {
+        format!("$arg{}", self.arg_idx)
+    }
+}
+
 const OPKIND_CONST: u8 = 0;
 const OPKIND_LOCAL_VARIABLE: u8 = 1;
 const OPKIND_TYPE: u8 = 2;
 const OPKIND_FUNCTION: u8 = 3;
 const OPKIND_BLOCK: u8 = 4;
+const OPKIND_ARG: u8 = 5;
 const OPKIND_UNIMPLEMENTED: u8 = 255;
 
 #[deku_derive(DekuRead)]
@@ -145,6 +154,8 @@ pub(crate) enum Operand {
     Function(FunctionOperand),
     #[deku(id = "OPKIND_BLOCK")]
     Block(BlockOperand),
+    #[deku(id = "OPKIND_ARG")]
+    Arg(ArgOperand),
     #[deku(id = "OPKIND_UNIMPLEMENTED")]
     Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")] String),
 }
@@ -157,6 +168,7 @@ impl IRDisplay for Operand {
             Self::Type(t) => m.types[t.type_idx].to_str(m),
             Self::Function(f) => m.funcs[f.func_idx].name.to_owned(),
             Self::Block(bb) => bb.to_str(m),
+            Self::Arg(a) => a.to_str(m),
             Self::Unimplemented(s) => format!("?op<{}>", s),
         }
     }
@@ -256,6 +268,7 @@ impl IRDisplay for Block {
 pub(crate) struct Function {
     #[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")]
     name: String,
+    type_index: usize,
     #[deku(temp)]
     num_blocks: usize,
     #[deku(count = "num_blocks")]
@@ -270,18 +283,40 @@ impl Function {
 
 impl IRDisplay for Function {
     fn to_str(&self, m: &AOTModule) -> String {
-        let mut ret = String::new();
-        if self.is_declaration() {
-            // declarations have no body, so print it as such.
-            ret.push_str(&format!("func {};\n", self.name));
-        } else {
-            ret.push_str(&format!("func {} {{\n", self.name));
-            for (i, b) in self.blocks.iter().enumerate() {
-                ret.push_str(&format!("  bb{}:\n{}", i, b.to_str(m)));
+        let ty = &m.types[self.type_index];
+        if let Type::Func(fty) = ty {
+            let mut ret = format!(
+                "func {}({}",
+                self.name,
+                fty.arg_tys
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| format!("$arg{}: {}", i, m.types[*t].to_str(m)))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            if fty.is_vararg {
+                ret.push_str(", ...");
             }
-            ret.push_str("}\n");
+            ret.push(')');
+            let ret_ty = &m.types[fty.ret_ty];
+            if ret_ty != &Type::Void {
+                ret.push_str(&format!(" -> {}", ret_ty.to_str(m)));
+            }
+            if self.is_declaration() {
+                // declarations have no body, so print it as such.
+                ret.push_str(";\n");
+            } else {
+                ret.push_str(" {\n");
+                for (i, b) in self.blocks.iter().enumerate() {
+                    ret.push_str(&format!("  bb{}:\n{}", i, b.to_str(m)));
+                }
+                ret.push_str("}\n");
+            }
+            ret
+        } else {
+            unreachable!("{}", ty.to_str(m)); // Impossible for a function to not be of type `Func`.
         }
-        ret
     }
 }
 
@@ -324,9 +359,38 @@ impl IRDisplay for IntegerType {
     }
 }
 
+#[deku_derive(DekuRead)]
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct FuncType {
+    /// The number of formal arguments the function takes.
+    #[deku(temp)]
+    num_args: usize,
+    /// Type indices for the function's formal arguments.
+    #[deku(count = "num_args")]
+    arg_tys: Vec<usize>,
+    /// Type index of the function's return type.
+    ret_ty: usize,
+    /// Is the function vararg?
+    is_vararg: bool,
+}
+
+impl IRDisplay for FuncType {
+    fn to_str(&self, m: &AOTModule) -> String {
+        format!(
+            "func({})",
+            self.arg_tys
+                .iter()
+                .map(|t| m.types[*t].to_str(m))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+}
+
 const TYKIND_VOID: u8 = 0;
 const TYKIND_INTEGER: u8 = 1;
 const TYKIND_PTR: u8 = 2;
+const TYKIND_FUNC: u8 = 3;
 const TYKIND_UNIMPLEMENTED: u8 = 255;
 
 /// A type.
@@ -340,6 +404,8 @@ pub(crate) enum Type {
     Integer(IntegerType),
     #[deku(id = "TYKIND_PTR")]
     Ptr,
+    #[deku(id = "TYKIND_FUNC")]
+    Func(FuncType),
     #[deku(id = "TYKIND_UNIMPLEMENTED")]
     Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")] String),
 }
@@ -350,6 +416,7 @@ impl Type {
             Self::Void => "void".to_owned(),
             Self::Integer(it) => it.const_to_str(c),
             Self::Ptr => "const_ptr".to_owned(),
+            Self::Func(_) => unreachable!(), // No such thing as a constant function in our IR.
             Self::Unimplemented(s) => format!("?cst<{}>", s),
         }
     }
@@ -361,6 +428,7 @@ impl IRDisplay for Type {
             Self::Void => "void".to_owned(),
             Self::Integer(i) => i.to_str(m),
             Self::Ptr => "ptr".to_owned(),
+            Self::Func(ft) => ft.to_str(m),
             Self::Unimplemented(s) => format!("?ty<{}>", s),
         }
     }
@@ -455,15 +523,6 @@ impl AOTModule {
         &self.types[instr.type_index]
     }
 
-    /// Get the type of the local variable operand.
-    ///
-    /// It is UB to pass an operand that is not from an instruction in the `AOTModule` referenced
-    /// by `self`.
-    fn local_var_operand_type(&self, o: &LocalVariableOperand) -> &Type {
-        let instr = &self.funcs[o.func_idx].blocks[o.bb_idx].instrs[o.inst_idx];
-        self.instr_type(instr)
-    }
-
     fn instr_generates_value(&self, i: &Instruction) -> bool {
         self.instr_type(i) != &Type::Void
     }
@@ -513,7 +572,8 @@ mod tests {
     use super::{
         deserialise_module, deserialise_string, Constant, IntegerType, Opcode, FORMAT_VERSION,
         MAGIC, OPKIND_BLOCK, OPKIND_CONST, OPKIND_FUNCTION, OPKIND_LOCAL_VARIABLE, OPKIND_TYPE,
-        OPKIND_UNIMPLEMENTED, TYKIND_INTEGER, TYKIND_PTR, TYKIND_UNIMPLEMENTED, TYKIND_VOID,
+        OPKIND_UNIMPLEMENTED, TYKIND_FUNC, TYKIND_INTEGER, TYKIND_PTR, TYKIND_UNIMPLEMENTED,
+        TYKIND_VOID,
     };
     use byteorder::{NativeEndian, WriteBytesExt};
     use std::ffi::CString;
@@ -549,6 +609,8 @@ mod tests {
         // FUNCTION 0
         // name:
         write_str(&mut data, "foo");
+        // type_index:
+        write_native_usize(&mut data, 4);
         // num_blocks:
         write_native_usize(&mut data, 2);
 
@@ -684,6 +746,8 @@ mod tests {
         // FUNCTION 1
         // name:
         write_str(&mut data, "bar");
+        // type_index:
+        write_native_usize(&mut data, 5);
         // num_blocks:
         write_native_usize(&mut data, 0);
 
@@ -715,7 +779,7 @@ mod tests {
 
         // TYPES
         // num_types:
-        write_native_usize(&mut data, 4);
+        write_native_usize(&mut data, 6);
 
         // TYPE 0
         // type_kind:
@@ -737,6 +801,29 @@ mod tests {
         // num_bits:
         data.write_u32::<NativeEndian>(32).unwrap();
 
+        // TYPE 4
+        // type_kind:
+        data.write_u8(TYKIND_FUNC).unwrap();
+        // num_args:
+        write_native_usize(&mut data, 2);
+        // arg_tys:
+        write_native_usize(&mut data, 2);
+        write_native_usize(&mut data, 3);
+        // ret_ty:
+        write_native_usize(&mut data, 3);
+        // is_vararg:
+        data.write_u8(0).unwrap();
+
+        // TYPE 5
+        // type_kind:
+        data.write_u8(TYKIND_FUNC).unwrap();
+        // num_args:
+        write_native_usize(&mut data, 0);
+        // ret_ty:
+        write_native_usize(&mut data, 0);
+        // is_vararg:
+        data.write_u8(0).unwrap();
+
         let test_mod = deserialise_module(data.as_slice()).unwrap();
         let string_mod = test_mod.to_str();
 
@@ -745,13 +832,13 @@ mod tests {
 # IR format version: 0
 # Num funcs: 2
 # Num consts: 3
-# Num types: 4
+# Num types: 6
 
-func foo {
+func foo($arg0: ptr, $arg1: i32) -> i32 {
   bb0:
     $0_0: ptr = alloca ?cst<a_type>
     nop
-    condbr $0_0: ptr, bb0, bb1
+    condbr $0_0, bb0, bb1
   bb1:
     ?inst<%3 = some_llvm_instruction ...>
     $1_1: ptr = getelementptr -1i32
@@ -760,7 +847,7 @@ func foo {
     br
 }
 
-func bar;
+func bar();
 ";
         assert_eq!(expect, string_mod);
     }
