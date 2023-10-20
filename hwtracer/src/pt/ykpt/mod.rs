@@ -608,7 +608,25 @@ impl<'t> YkPTBlockIterator<'t> {
                         self.update_stack_adjust(1);
                     }
                 }
-                _ => todo!(),
+                iced_x86::FlowControl::Interrupt => {
+                    // It's my understanding that `INT` instructions aren't really used any more.
+                    // Interrupt 0x80 used to be used to do system calls, but now there is the
+                    // `SYSCALL` instruction which is generally preferred.
+                    unreachable!("interrupt");
+                }
+                iced_x86::FlowControl::XbeginXabortXend => {
+                    // Transactions. These are a bit like time machines for the CPU. They can cause
+                    // memory and registers to be rewound to a (dynamically decided) past state.
+                    //
+                    // FIXME: We might be able to handle these by peeking ahead in the trace, but
+                    // let's cross that bridge when we come to it.
+                    todo!("transaction instruction: {}", inst);
+                }
+                iced_x86::FlowControl::Exception => {
+                    // We were unable to disassemble the instruction stream to a valid x86_64
+                    // instruction. This shouldn't happen, and if it does, I want to know about it!
+                    unreachable!("invalid instruction encoding");
+                }
             }
         }
     }
