@@ -581,6 +581,7 @@ impl<'t> YkPTBlockIterator<'t> {
                     reposition = true;
                 }
                 iced_x86::FlowControl::Call => {
+                    // A *direct* call.
                     if inst.code() == iced_x86::Code::Syscall {
                         // Do nothing. We have disabled kernel tracing in hwtracer, so
                         // entering/leaving a syscall will generate packet generation
@@ -597,9 +598,13 @@ impl<'t> YkPTBlockIterator<'t> {
                             panic!("encountered call to longjmp in unmapped code");
                         }
 
-                        // Intel PT doesn't compress a call to the next address in the instruction
-                        // stream because such calls are unlikely to be convergent (i.e. they are
-                        // unlikely to ever return).
+                        // Intel PT doesn't compress a direct call to the next instruction.
+                        //
+                        // Section 33.4.2.2 of the Intel Manual:
+                        //
+                        // "For near CALLs, push the Next IP onto the stack... Note that this
+                        // excludes zero-length CALLs, which are direct near CALLs with
+                        // displacement zero (to the next IP).
                         if target_vaddr != inst.next_ip() {
                             self.comprets
                                 .push(CompRetAddr::VAddr(usize::try_from(inst.next_ip()).unwrap()));
