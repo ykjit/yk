@@ -51,6 +51,7 @@ impl PacketParserState {
                 PacketKind::MODETSX,
                 PacketKind::PSBEND,
                 PacketKind::OVF,
+                PacketKind::VMCS,
             ],
         }
     }
@@ -140,6 +141,7 @@ impl<'t> PacketParser<'t> {
             PacketKind::CYC => read_to_packet!(CYCPacket, self.bits, Packet::CYC),
             PacketKind::EXSTOP => read_to_packet!(EXSTOPPacket, self.bits, Packet::EXSTOP),
             PacketKind::OVF => read_to_packet!(OVFPacket, self.bits, Packet::OVF),
+            PacketKind::VMCS => read_to_packet!(VMCSPacket, self.bits, Packet::VMCS),
         };
         if let Ok((remain, pkt)) = parse_res {
             self.bits = remain;
