@@ -39,6 +39,8 @@ pub enum SuccessorKind {
 pub struct CallInfo {
     /// Offset of the call instruction
     callsite_off: u64,
+    /// Offset of the return address (should the call return conventionally).
+    return_off: u64,
     /// Offset of the target of the call (if known statically).
     target_off: Option<u64>,
 }
@@ -46,6 +48,10 @@ pub struct CallInfo {
 impl CallInfo {
     pub fn callsite_off(&self) -> u64 {
         self.callsite_off
+    }
+
+    pub fn return_off(&self) -> u64 {
+        self.return_off
     }
 
     pub fn target_off(&self) -> Option<u64> {
@@ -151,10 +157,13 @@ impl BlockMap {
                 let mut call_offs = Vec::new();
                 for _ in 0..num_calls {
                     let callsite_off = crsr.read_u64::<NativeEndian>().unwrap();
+                    let return_off = crsr.read_u64::<NativeEndian>().unwrap();
+                    debug_assert!(callsite_off < return_off);
                     let target = crsr.read_u64::<NativeEndian>().unwrap();
                     let target_off = if target != 0 { Some(target) } else { None };
                     call_offs.push(CallInfo {
                         callsite_off,
+                        return_off,
                         target_off,
                     })
                 }

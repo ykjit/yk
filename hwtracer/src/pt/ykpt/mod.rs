@@ -289,15 +289,25 @@ impl<'t> YkPTBlockIterator<'t> {
         ent: &BlockMapEntry,
     ) -> Result<Option<Block>, IteratorError> {
         if let Some(call_info) = ent.call_offs().iter().find(|c| c.callsite_off() >= b_off) {
-            self.comprets
-                .push(CompRetAddr::AfterCall(call_info.callsite_off()));
-
             let target = call_info.target_off();
+
             if let Some(target_off) = target {
+                // This is a direct call.
+                //
+                // PT won't compress returns from direct calls if the call target is the
+                // instruction address immediately after the call.
+                //
+                // See the Intel Manual, Section 33.4.2.2 for details.
+                if target_off != call_info.return_off() {
+                    self.comprets
+                        .push(CompRetAddr::AfterCall(call_info.callsite_off()));
+                }
                 self.cur_loc = ObjLoc::MainObj(target_off);
                 return Ok(Some(self.lookup_block_from_main_bin_offset(target_off)?));
             } else {
-                // Call target isn't known statically. Find it from a TIP packet.
+                // This is an indirect call.
+                self.comprets
+                    .push(CompRetAddr::AfterCall(call_info.callsite_off()));
                 self.seek_tip()?;
                 return match self.cur_loc {
                     ObjLoc::MainObj(off) => Ok(Some(self.lookup_block_from_main_bin_offset(off)?)),
