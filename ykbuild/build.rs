@@ -136,8 +136,13 @@ fn main() {
         .current_dir(build_dir.as_os_str().to_str().unwrap());
 
     let mut build_cmd = Command::new("cmake");
+    let mut build_args = vec!["--build".into(), ".".into()];
+    if let Ok(jobs) = env::var("NUM_JOBS") {
+        build_args.push("-j".into());
+        build_args.push(jobs);
+    }
     build_cmd
-        .args(["--build", "."])
+        .args(build_args)
         .current_dir(build_dir.as_os_str().to_str().unwrap());
 
     let mut inst_cmd = Command::new("cmake");
@@ -180,10 +185,6 @@ fn main() {
                 .to_str()
                 .unwrap(),
         );
-
-        if generator == "Unix Makefiles" {
-            build_cmd.args(["-j", num_cpus::get().to_string().as_str()]);
-        }
 
         cfg_cmd.status().unwrap().exit_ok().unwrap();
     }
