@@ -126,12 +126,15 @@ impl BlockMap {
         let mut elems = Vec::new();
         let mut crsr = Cursor::new(bbaddrmap_data);
         while crsr.position() < u64::try_from(bbaddrmap_data.len()).unwrap() {
-            let _version = crsr.read_u8().unwrap();
+            let version = crsr.read_u8().unwrap();
             let _feature = crsr.read_u8().unwrap();
             let mut last_off = crsr.read_u64::<NativeEndian>().unwrap();
             let n_blks = leb128::read::unsigned(&mut crsr).unwrap();
             for _ in 0..n_blks {
                 let mut corr_bbs = Vec::new();
+                if version > 1 {
+                    let _bbid = leb128::read::unsigned(&mut crsr).unwrap();
+                }
                 let b_off = leb128::read::unsigned(&mut crsr).unwrap();
                 // Skip the block size. We still have to parse the field, as it's variable-size.
                 let b_sz = leb128::read::unsigned(&mut crsr).unwrap();
