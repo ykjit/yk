@@ -51,7 +51,7 @@ extern "C" fn wrap_thread_routine(arg: *mut c_void) -> *mut c_void {
 /// YK functionality.
 ///
 /// The function stores `start_routine` and `args` pointers in `ThreadRoutine` struct raw pointer.
-/// `ThreadRoutine` raw pointer is passed to the `wrap_thread_routine` function,
+/// `ThreadRoutine` is passed to the `wrap_thread_routine` function as a raw pointer,
 /// that will use it to call the original routine with the original arguments.
 ///
 /// The `ThreadRoutine` raw pointer is initialised by the `Box::into_raw` call.
