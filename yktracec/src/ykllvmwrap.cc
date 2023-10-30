@@ -16,13 +16,14 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/IRReader/IRReader.h"
+#include "llvm/Passes/PassBuilder.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
 
+#include <bitset>
 #include <dlfcn.h>
 #include <err.h>
 #include <filesystem>
@@ -425,13 +426,21 @@ void *compileIRTrace(FN Func, char *FuncNames[], size_t BBs[], size_t TraceLen,
 
   // The MCJIT code-gen does no optimisations itself, so we must do it
   // ourselves.
-  PassManagerBuilder Builder;
-  Builder.OptLevel = 2; // FIXME Make this user-tweakable.
-  legacy::FunctionPassManager FPM(JITMod);
-  legacy::PassManager MPM;
-  Builder.populateFunctionPassManager(FPM);
-  Builder.populateModulePassManager(MPM);
-  MPM.run(*JITMod);
+  // Note,that the order of the manager definitions below matters. Changing
+  // them may result in segfaults.
+  LoopAnalysisManager LAM;
+  FunctionAnalysisManager FAM;
+  CGSCCAnalysisManager CGAM;
+  ModuleAnalysisManager MAM;
+  PassBuilder Builder;
+  Builder.registerModuleAnalyses(MAM);
+  Builder.registerCGSCCAnalyses(CGAM);
+  Builder.registerFunctionAnalyses(FAM);
+  Builder.registerLoopAnalyses(LAM);
+  Builder.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+  ModulePassManager MPM =
+      Builder.buildPerModuleDefaultPipeline(OptimizationLevel::O2);
+  MPM.run(*JITMod, MAM);
 
   DIP.print(DebugIR::JITPostOpt, JITMod);
 
