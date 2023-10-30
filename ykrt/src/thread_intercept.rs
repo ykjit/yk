@@ -47,6 +47,27 @@ extern "C" fn wrap_thread_routine(arg: *mut c_void) -> *mut c_void {
     result
 }
 
+/// This function intercepts the standard POSIX pthread_create `pthread_create` function and wraps it with custom
+/// YK functionality.
+///
+/// The function stores `start_routine` and `args` pointers in `ThreadRoutine` struct raw pointer.
+/// `ThreadRoutine` raw pointer is passed to the `wrap_thread_routine` function,
+/// that will use it to call the original routine with the original arguments.
+///
+/// The `ThreadRoutine` raw pointer is initialised by the `Box::into_raw` call.
+/// It will be dropped once it's re-constructed as a box from the raw pointer. i.e. when `Box::from_raw` is called.
+/// 
+/// Parameters:
+/// * `thread`: A pointer to a `pthread_t` that will store the new thread's ID.
+/// * `attr`: A pointer to the thread attributes.
+/// * `start_routine`: A function pointer to the thread's start routine.
+/// * `args`: A pointer to start routine arguments.
+/// 
+/// Returns:
+///
+/// This function returns an integer status code from the `pthread_create` call, where 0 indicates success and non-zero
+/// values represent errors during thread creation.
+///
 #[no_mangle]
 pub extern "C" fn __wrap_pthread_create(
     thread: *mut pthread_t,
@@ -58,7 +79,5 @@ pub extern "C" fn __wrap_pthread_create(
         args,
         start_routine,
     }));
-    unsafe {
-        return pthread_create(thread, attr, wrap_thread_routine, ptr as *mut c_void);
-    }
+    unsafe { return pthread_create(thread, attr, wrap_thread_routine, ptr as *mut c_void) }
 }
