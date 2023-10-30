@@ -354,6 +354,18 @@ pub(super) struct EXSTOPPacket {
 #[deku(magic = b"\x02\xf3")]
 pub(super) struct OVFPacket {}
 
+/// Virtual Machine Control Structure (VMCS) packet.
+#[deku_derive(DekuRead)]
+#[derive(Debug)]
+pub(super) struct VMCSPacket {
+    #[deku(bits = "8", assert = "*magic1 == 0x2", temp)]
+    magic1: u8,
+    #[deku(bits = "8", assert = "*magic2 == 0b11001000", temp)]
+    magic2: u8,
+    #[deku(temp)]
+    unused: u64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum PacketKind {
     PSB,
@@ -371,6 +383,7 @@ pub(super) enum PacketKind {
     CYC,
     EXSTOP,
     OVF,
+    VMCS,
 }
 
 impl PacketKind {
@@ -388,7 +401,8 @@ impl PacketKind {
             | Self::LongTNT
             | Self::CYC
             | Self::EXSTOP
-            | Self::OVF => false,
+            | Self::OVF
+            | Self::VMCS => false,
         }
     }
 
@@ -408,7 +422,8 @@ impl PacketKind {
             | Self::TIPPGD
             | Self::TIPPGE
             | Self::EXSTOP
-            | Self::OVF => false,
+            | Self::OVF
+            | Self::VMCS => false,
         }
     }
 }
@@ -434,6 +449,7 @@ pub(super) enum Packet {
     CYC(CYCPacket),
     EXSTOP(EXSTOPPacket),
     OVF(OVFPacket),
+    VMCS(VMCSPacket),
 }
 
 impl Packet {
@@ -454,7 +470,8 @@ impl Packet {
             | Self::LongTNT(_)
             | Self::CYC(_)
             | Self::EXSTOP(_)
-            | Self::OVF(_) => None,
+            | Self::OVF(_)
+            | Self::VMCS(_) => None,
         }
     }
 
@@ -475,6 +492,7 @@ impl Packet {
             Self::CYC(_) => PacketKind::CYC,
             Self::EXSTOP(_) => PacketKind::EXSTOP,
             Self::OVF(_) => PacketKind::OVF,
+            Self::VMCS(_) => PacketKind::VMCS,
         }
     }
 
@@ -499,7 +517,8 @@ impl Packet {
             | Self::FUP(_, _)
             | Self::CYC(_)
             | Self::EXSTOP(_)
-            | Self::OVF(_) => None,
+            | Self::OVF(_)
+            | Self::VMCS(_) => None,
         }
     }
 }
