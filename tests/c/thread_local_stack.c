@@ -49,8 +49,6 @@ int main(int argc, char **argv) {
     yk_mt_control_point(mt, &loc);
     pthread_create(&thread_handles[i], NULL, thread_function, NULL);
   }
-  // Allow threads to start execution
-  sleep(2);
   // Sending the signal to wake up threads
   for (int i = 0; i < MAX_THREADS; i++) {
     sem_post(&semaphore);
