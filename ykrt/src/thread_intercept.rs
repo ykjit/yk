@@ -14,17 +14,12 @@ struct ThreadRoutine {
 
 extern "C" fn wrap_thread_routine(arg: *mut c_void) -> *mut c_void {
     let str = CString::new("shadowstack_0").unwrap();
-    let shadowstack_symbol_addr = unsafe {
-        //  Obtain address of a shadowstack_0 symbol
-        dlsym(null_mut(), str.as_ptr() as *const i8)
-    };
+    // Obtain address of a shadowstack_0 symbol
+    let shadowstack_symbol_addr = unsafe { dlsym(null_mut(), str.as_ptr() as *const i8) };
     if shadowstack_symbol_addr.is_null() {
         panic!("Unable to find shadowstack address")
     }
-    let stack_addr = unsafe {
-        // Allocate stack
-        malloc(SHADOW_STACK_SIZE)
-    };
+    let stack_addr = unsafe { malloc(SHADOW_STACK_SIZE) };
     if stack_addr.is_null() {
         panic!("Unable allocate stack")
     }
@@ -56,13 +51,13 @@ extern "C" fn wrap_thread_routine(arg: *mut c_void) -> *mut c_void {
 ///
 /// The `ThreadRoutine` raw pointer is initialised by the `Box::into_raw` call.
 /// It will be dropped once it's re-constructed as a box from the raw pointer. i.e. when `Box::from_raw` is called.
-/// 
+///
 /// Parameters:
 /// * `thread`: A pointer to a `pthread_t` that will store the new thread's ID.
 /// * `attr`: A pointer to the thread attributes.
 /// * `start_routine`: A function pointer to the thread's start routine.
 /// * `args`: A pointer to start routine arguments.
-/// 
+///
 /// Returns:
 ///
 /// This function returns an integer status code from the `pthread_create` call, where 0 indicates success and non-zero
