@@ -21,7 +21,7 @@ extern "C" fn wrap_thread_routine(arg: *mut c_void) -> *mut c_void {
     }
     let stack_addr = unsafe { malloc(SHADOW_STACK_SIZE) };
     if stack_addr.is_null() {
-        panic!("Unable allocate stack")
+        panic!("Unable to allocate stack")
     }
     unsafe {
         // Set shadowstack symbol with new allocated stack
