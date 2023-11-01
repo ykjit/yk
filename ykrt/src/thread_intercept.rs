@@ -41,7 +41,7 @@ extern "C" fn wrap_thread_routine(arg: *mut c_void) -> *mut c_void {
     let result = (thread_routine.start_routine)(thread_routine.args);
 
     unsafe {
-        // Free allocated stack
+        // YKFIXME: Potential memory leak. If the thread is cancelled we might not free allocated memory.
         free(stack_addr)
     }
     result
