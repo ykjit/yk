@@ -1,7 +1,7 @@
 // Compiler:
 // Run-time:
 //   status: success
-//   stdout: 704982704,704982704,704982704
+//   stdout: 704982704 704982704 704982704
 //   stderr:
 
 // This test tries to reproduce the thread stack race condition.
@@ -33,7 +33,7 @@ void *thread_function(void *arg) {
   for (int i = 0; i < 100000; i++) {
     sum += i;
   }
-  printf("%d,", sum);
+  printf("%d ", sum);
   return NULL;
 }
 
