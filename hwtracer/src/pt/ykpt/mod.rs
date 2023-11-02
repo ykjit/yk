@@ -289,15 +289,25 @@ impl<'t> YkPTBlockIterator<'t> {
         ent: &BlockMapEntry,
     ) -> Result<Option<Block>, IteratorError> {
         if let Some(call_info) = ent.call_offs().iter().find(|c| c.callsite_off() >= b_off) {
-            self.comprets
-                .push(CompRetAddr::AfterCall(call_info.callsite_off()));
-
             let target = call_info.target_off();
+
             if let Some(target_off) = target {
+                // This is a direct call.
+                //
+                // PT won't compress returns from direct calls if the call target is the
+                // instruction address immediately after the call.
+                //
+                // See the Intel Manual, Section 33.4.2.2 for details.
+                if target_off != call_info.return_off() {
+                    self.comprets
+                        .push(CompRetAddr::AfterCall(call_info.callsite_off()));
+                }
                 self.cur_loc = ObjLoc::MainObj(target_off);
                 return Ok(Some(self.lookup_block_from_main_bin_offset(target_off)?));
             } else {
-                // Call target isn't known statically. Find it from a TIP packet.
+                // This is an indirect call.
+                self.comprets
+                    .push(CompRetAddr::AfterCall(call_info.callsite_off()));
                 self.seek_tip()?;
                 return match self.cur_loc {
                     ObjLoc::MainObj(off) => Ok(Some(self.lookup_block_from_main_bin_offset(off)?)),
@@ -550,10 +560,13 @@ impl<'t> YkPTBlockIterator<'t> {
                     };
 
                     if inst.flow_control() == iced_x86::FlowControl::IndirectCall {
-                        if usize::try_from(inst.next_ip()).unwrap() == vaddr {
-                            todo!("zero length call");
-                        }
                         debug_assert!(!inst.is_call_far());
+                        // Indirect calls, even zero-length ones, are always compressed. See
+                        // Section 33.4.2.2 of the Intel Manual:
+                        //
+                        // "push the next IP onto the stack...note that this excludes zero-length
+                        // CALLs, which are *direct* near CALLs with displacement zero (to the next
+                        // IP)
                         self.comprets
                             .push(CompRetAddr::VAddr(usize::try_from(inst.next_ip()).unwrap()));
                         self.update_stack_adjust(1);
@@ -578,6 +591,7 @@ impl<'t> YkPTBlockIterator<'t> {
                     reposition = true;
                 }
                 iced_x86::FlowControl::Call => {
+                    // A *direct* call.
                     if inst.code() == iced_x86::Code::Syscall {
                         // Do nothing. We have disabled kernel tracing in hwtracer, so
                         // entering/leaving a syscall will generate packet generation
@@ -594,9 +608,13 @@ impl<'t> YkPTBlockIterator<'t> {
                             panic!("encountered call to longjmp in unmapped code");
                         }
 
-                        // Intel PT doesn't compress a call to the next address in the instruction
-                        // stream because such calls are unlikely to be convergent (i.e. they are
-                        // unlikely to ever return).
+                        // Intel PT doesn't compress a direct call to the next instruction.
+                        //
+                        // Section 33.4.2.2 of the Intel Manual:
+                        //
+                        // "For near CALLs, push the Next IP onto the stack... Note that this
+                        // excludes zero-length CALLs, which are direct near CALLs with
+                        // displacement zero (to the next IP).
                         if target_vaddr != inst.next_ip() {
                             self.comprets
                                 .push(CompRetAddr::VAddr(usize::try_from(inst.next_ip()).unwrap()));
