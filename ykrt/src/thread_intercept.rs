@@ -27,10 +27,8 @@ extern "C" fn wrap_thread_routine(arg: *mut c_void) -> *mut c_void {
         // Set shadowstack symbol with new allocated stack
         *(shadowstack_symbol_addr as *mut *mut c_void) = stack_addr;
     }
-    let thread_routine = unsafe {
-        // Obtain ThreadRoutine struct
-        Box::from_raw(arg as *mut ThreadRoutine)
-    };
+    // Re-construct ThreadRoutine struct from raw pointer as a box.
+    let thread_routine = unsafe { Box::from_raw(arg as *mut ThreadRoutine) };
 
     // Call original thread routine
     let result = (thread_routine.start_routine)(thread_routine.args);
@@ -50,7 +48,7 @@ extern "C" fn wrap_thread_routine(arg: *mut c_void) -> *mut c_void {
 /// that will use it to call the original routine with the original arguments.
 ///
 /// The `ThreadRoutine` raw pointer is initialised by the `Box::into_raw` call.
-/// It will be dropped once it's re-constructed as a box from the raw pointer. i.e. when `Box::from_raw` is called.
+/// It will be dropped once it's re-constructed as a box from the raw pointer. i.e. when `Box::from_raw` is called at the end of `wrap_thread_routine` scope.
 ///
 /// Parameters:
 /// * `thread`: A pointer to a `pthread_t` that will store the new thread's ID.
