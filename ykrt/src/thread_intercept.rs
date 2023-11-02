@@ -12,6 +12,17 @@ struct ThreadRoutine {
     pub start_routine: extern "C" fn(*mut c_void) -> *mut c_void,
 }
 
+/// This function is a thread routine passed as an argument to the `pthread_create` POSIX function.
+/// It allocates a thread-local stack and calls the original routine with its original arguments.
+///
+/// Parameters:
+/// * `arg`: A raw pointer to a heap value of a boxed `ThreadRoutine` struct produced by
+/// `Box::into_raw`. This memory will be released when the box is reconstructed using
+/// `Box::from_raw` and it goes out of the `wrap_thread_routine` scope.
+///
+/// Returns:
+/// Result of the original routine called with original arguments.
+///
 extern "C" fn wrap_thread_routine(arg: *mut c_void) -> *mut c_void {
     let str = CString::new("shadowstack_0").unwrap();
     // Obtain address of a shadowstack_0 symbol
@@ -40,15 +51,16 @@ extern "C" fn wrap_thread_routine(arg: *mut c_void) -> *mut c_void {
     result
 }
 
-/// This function intercepts the standard POSIX pthread_create `pthread_create` function and wraps it with custom
-/// YK functionality.
+/// This function intercepts the standard POSIX pthread_create `pthread_create` function and wraps
+/// it with custom YK functionality.
 ///
 /// The function stores `start_routine` and `args` pointers in `ThreadRoutine` struct raw pointer.
 /// `ThreadRoutine` is passed to the `wrap_thread_routine` function as a raw pointer,
 /// that will use it to call the original routine with the original arguments.
 ///
 /// The `ThreadRoutine` raw pointer is initialised by the `Box::into_raw` call.
-/// It will be dropped once it's re-constructed as a box from the raw pointer. i.e. when `Box::from_raw` is called at the end of `wrap_thread_routine` scope.
+/// It will be dropped once it's re-constructed as a box from the raw pointer. i.e. when
+/// `Box::from_raw` is called at the end of `wrap_thread_routine` scope.
 ///
 /// Parameters:
 /// * `thread`: A pointer to a `pthread_t` that will store the new thread's ID.
@@ -58,8 +70,8 @@ extern "C" fn wrap_thread_routine(arg: *mut c_void) -> *mut c_void {
 ///
 /// Returns:
 ///
-/// This function returns an integer status code from the `pthread_create` call, where 0 indicates success and non-zero
-/// values represent errors during thread creation.
+/// This function returns an integer status code from the `pthread_create` call, where 0 indicates
+/// success and non-zero values represent errors during thread creation.
 ///
 #[no_mangle]
 pub extern "C" fn __wrap_pthread_create(
