@@ -1,6 +1,6 @@
 //! Hardware tracing via ykrustc.
 
-use super::{errors::InvalidTraceError, MappedTrace, RawTrace, ThreadTracer};
+use super::{errors::InvalidTraceError, MappedTrace, RawTrace, TraceCollector};
 use std::{error::Error, sync::Arc};
 
 pub(crate) mod mapper;
@@ -12,8 +12,8 @@ pub(crate) struct HWTracer {
 }
 
 impl super::Tracer for HWTracer {
-    fn start_collector(self: Arc<Self>) -> Result<Box<dyn ThreadTracer>, Box<dyn Error>> {
-        Ok(Box::new(HWTThreadTracer {
+    fn start_collector(self: Arc<Self>) -> Result<Box<dyn TraceCollector>, Box<dyn Error>> {
+        Ok(Box::new(HWTTraceCollector {
             thread_tracer: Arc::clone(&self.backend).start_collector()?,
         }))
     }
@@ -28,11 +28,11 @@ impl HWTracer {
 }
 
 /// Hardware thread tracer.
-struct HWTThreadTracer {
+struct HWTTraceCollector {
     thread_tracer: Box<dyn hwtracer::ThreadTracer>,
 }
 
-impl ThreadTracer for HWTThreadTracer {
+impl TraceCollector for HWTTraceCollector {
     fn stop_collector(self: Box<Self>) -> Result<Box<dyn RawTrace>, InvalidTraceError> {
         match self.thread_tracer.stop_collector() {
             Ok(t) => Ok(Box::new(HWTTrace(t))),
