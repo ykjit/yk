@@ -1,4 +1,4 @@
-//! Hardware tracing via ykrustc.
+//! Hardware tracing via hwtracer.
 
 use super::{errors::InvalidTraceError, MappedTrace, RawTrace, TraceCollector};
 use std::{error::Error, sync::Arc};
