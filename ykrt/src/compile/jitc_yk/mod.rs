@@ -39,7 +39,7 @@ impl IRPhase {
 static PHASES_TO_PRINT: LazyLock<HashSet<IRPhase>> = LazyLock::new(|| {
     if let Ok(stages) = env::var("YKD_PRINT_IR") {
         stages
-            .split(",")
+            .split(',')
             .map(IRPhase::from_str)
             .map(|res| res.unwrap())
             .collect::<HashSet<IRPhase>>()
