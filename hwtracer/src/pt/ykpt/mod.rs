@@ -456,6 +456,10 @@ impl<'t> YkPTBlockIterator<'t> {
             // TNT buffer. The unwrap cannot fail becuase the above code ensures that `self.tnts`
             // is not empty.
             let taken = self.tnts.pop_front().unwrap();
+            // FIXME: If you re-enable compressed returns (in `collect.c`), once in a blue moon
+            // this assertion will fail.
+            //
+            // More info: https://github.com/ykjit/yk/issues/874
             debug_assert!(taken);
         }
 

@@ -37,6 +37,9 @@
 #define INFTIM -1
 #endif
 
+// The bit in the IA32_RTIT_CTL MSR that disables compressed returns.
+#define IA32_RTIT_CTL_DISRETC 1 << 11
+
 /*
  * The thread's perf file descriptor and its associated underlying `mmap(2)`
  * regions. The file descriptor is re-used for subsequent trace collections for
@@ -384,6 +387,11 @@ static int open_perf(size_t aux_bufsize, struct hwt_cerror *err) {
   memset(&attr, 0, sizeof(attr));
   attr.size = sizeof(attr);
   attr.size = sizeof(struct perf_event_attr);
+
+  // Disable compressed returns for now.
+  //
+  // FIXME: https://github.com/ykjit/yk/issues/874
+  attr.config |= IA32_RTIT_CTL_DISRETC;
 
   int ret = -1;
 
