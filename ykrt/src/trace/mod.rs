@@ -18,8 +18,9 @@ pub(crate) mod hwt;
 
 pub(crate) use errors::InvalidTraceError;
 
-/// A tracer is an object which can start / stop collecting traces. It may have its own
-/// configuration, but that is dependent on the concrete tracer itself.
+/// A `Tracer` is a front-end to a tracer backend (e.g. hardware or software tracing). The tracer
+/// backend may have its own configuration options, which is why `Tracer` does not have a `new`
+/// method.
 pub(crate) trait Tracer: Send + Sync {
     /// Start collecting a trace of the current thread.
     fn start_collector(self: Arc<Self>) -> Result<Box<dyn ThreadTracer>, Box<dyn Error>>;
