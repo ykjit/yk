@@ -453,9 +453,13 @@ impl<'t> YkPTBlockIterator<'t> {
 
         if compressed {
             // If the return was compressed, we must we consume one "taken=true" decision from the
-            // TNT buffer. The unwrap cannot fail becuase the above code ensures that `self.tnts`
+            // TNT buffer. The unwrap cannot fail because the above code ensures that `self.tnts`
             // is not empty.
             let taken = self.tnts.pop_front().unwrap();
+            // FIXME: If you re-enable compressed returns (in `collect.c`), once in a blue moon
+            // this assertion will fail.
+            //
+            // More info: https://github.com/ykjit/yk/issues/874
             debug_assert!(taken);
         }
 
