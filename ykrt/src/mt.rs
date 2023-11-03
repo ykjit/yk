@@ -27,7 +27,7 @@ use crate::print_jit_state;
 use crate::{
     compile::{default_compiler, CompiledTrace, Compiler, GuardId},
     location::{HotLocation, HotLocationKind, Location, TraceFailed},
-    trace::{default_tracer, RawTrace, ThreadTracer, Tracer},
+    trace::{default_tracer, RawTrace, TraceCollector, Tracer},
     ykstats::{TimingState, YkStats},
 };
 use yktracec::promote;
@@ -581,7 +581,7 @@ pub(crate) struct MTThread {
     /// When tracing is active, this will be `RefCell<Some(...)>`; when tracing is inactive
     /// `RefCell<None>`. We need to keep track of the [Tracer] used to start the [ThreadTracer], as
     /// trace mapping requires a reference to the [Tracer].
-    thread_tracer: RefCell<Option<Box<dyn ThreadTracer>>>,
+    thread_tracer: RefCell<Option<Box<dyn TraceCollector>>>,
     // Raw pointers are neither send nor sync.
     _dont_send_or_sync_me: PhantomData<*mut ()>,
 }
