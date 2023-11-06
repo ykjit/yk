@@ -10,11 +10,14 @@ if [ ! -d "${DIR}/../ykrt" ]; then
     exit 1
 fi
 
-# The post-link time optimisations that we can tolerate.
+# The post-link time optimisations that we can tolerate. At this moment this is
+# only the instcombine pass in the below configuration (copied over from the
+# default pipeline). Using `instcombine` on its own breaks, possibly due to the
+# missing `no-verify-fixpoint`.
 #
 # FIXME: Once we know what breaks us, allow the user to use the regular -O0,
 # -O1, -O2, etc. clang flags like normal.
-POSTLINK_PASSES_STR=instcombine
+POSTLINK_PASSES_STR="instcombine<max-iterations=1;no-use-loop-info;no-verify-fixpoint>"
 
 OUTPUT=""
 
