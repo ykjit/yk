@@ -152,7 +152,7 @@ impl CompiledTrace {
         let smptr = slice[1] as *const c_void;
         let smsize = slice[2];
         let aotvals = slice[3] as *mut c_void;
-        let guardcount = slice[4] as usize;
+        let guardcount = slice[4];
 
         // Parse the stackmap of this trace and cache it. The original data allocated by memman.cc
         // is now no longer needed and can be freed.

@@ -73,12 +73,12 @@ impl DLInfo {
 ///
 /// FIXME: This cache is cloning. Performance could probably be improved more.
 #[cached]
-pub fn dladdr(vaddr: usize) -> Result<DLInfo, ()> {
+pub fn dladdr(vaddr: usize) -> Option<DLInfo> {
     let mut info = MaybeUninit::<Dl_info>::uninit();
     if unsafe { libc::dladdr(vaddr as *const c_void, info.as_mut_ptr()) } != 0 {
-        Ok(unsafe { info.assume_init() }.into())
+        Some(unsafe { info.assume_init() }.into())
     } else {
-        Err(())
+        None
     }
 }
 
@@ -134,8 +134,8 @@ pub fn vaddr_to_sym_and_obj(vaddr: usize) -> Option<DLInfo> {
     // `dladdr()` returns success if at least the virtual address could be mapped to an object
     // file, but here it is crucial that we can also find the symbol that the address belongs to.
     match dladdr(vaddr) {
-        Ok(x) if x.dli_sname().is_some() => Some(x),
-        Ok(_) | Err(()) => None,
+        Some(x) if x.dli_sname().is_some() => Some(x),
+        Some(_) | None => None,
     }
 }
 

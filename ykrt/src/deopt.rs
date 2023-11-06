@@ -310,7 +310,7 @@ unsafe extern "C" fn __ykrt_deopt(
         if let Some(st) = guard.getct() {
             let registers = Registers::from_ptr(rsp);
             let live_vars = ctr.smap().get(&retaddr.try_into().unwrap()).unwrap();
-            debug_assert!(live_vars.len() > 0);
+            debug_assert!(!live_vars.is_empty());
             let mut ykctrlpvars = vec![0; live_vars.len() - 1];
             for (i, locs) in live_vars.iter().skip(1).enumerate() {
                 assert!(locs.len() == 1);

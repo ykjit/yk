@@ -14,7 +14,7 @@ fn extract_bytecode(tempdir: &TempDir, fname: &str) -> Result<PathBuf, Box<dyn E
     let mut out_file = tempdir.path().to_owned();
     out_file.push(OUTFILE);
     let output = Command::new("objcopy")
-        .args(&[
+        .args([
             "--dump-section",
             &format!(".yk_ir={}", out_file.to_str().unwrap()),
             fname,
@@ -29,7 +29,7 @@ fn extract_bytecode(tempdir: &TempDir, fname: &str) -> Result<PathBuf, Box<dyn E
 }
 
 fn inner() -> Result<(), Box<dyn Error>> {
-    if let Some(exe) = env::args().skip(1).next() {
+    if let Some(exe) = env::args().nth(1) {
         let tempdir = TempDir::new()?;
         let bcfile = extract_bytecode(&tempdir, &exe)?;
         aot_ir::print_from_file(&bcfile)?;
