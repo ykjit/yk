@@ -45,6 +45,19 @@ pub static EXTRA_LINK: LazyLock<HashMap<&'static str, Vec<ExtraLinkage>>> = Lazy
             )],
         );
     }
+    map.insert(
+        "x86_64_zero_len_call.c",
+        vec![ExtraLinkage::new(
+            "%%TEMPDIR%%/x86_64_zero_len_call.o",
+            ykllvm_bin("clang").to_owned(),
+            &[
+                "-c",
+                "extra_linkage/x86_64_zero_len_call.s",
+                "-o",
+                "%%TEMPDIR%%/x86_64_zero_len_call.o",
+            ],
+        )],
+    );
     map
 });
 
