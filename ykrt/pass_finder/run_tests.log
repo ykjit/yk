@@ -1,0 +1,1827 @@
+   Compiling ykrt v0.1.0 (/home/shreei/research/yk_pv/ykrt)
+   Compiling tests v0.1.0 (/home/shreei/research/yk_pv/tests)
+   Compiling ykcapi v0.1.0 (/home/shreei/research/yk_pv/ykcapi)
+    Finished test [unoptimized + debuginfo] target(s) in 37.03s
+     Running unittests src/lib.rs (target/debug/deps/hwtracer-e30c10988da8e9b9)
+
+running 15 tests
+test perf::collect::tests::relloc_trace_buf ... ignored
+test perf::collect::tests::test_config_bad_aux_bufsize ... ok
+test perf::collect::tests::test_config_bad_data_bufsize ... ok
+test pt::ykpt::packets::tests::short_tnt ... ok
+test pt::ykpt::parser::tests::ipbytes_decompress_000 ... ok
+test pt::ykpt::parser::tests::ipbytes_decompress_001 ... ok
+test pt::ykpt::parser::tests::ipbytes_decompress_010 ... ok
+test pt::ykpt::tests::ten_times_as_many_blocks ... ignored
+test pt::ykpt::parser::tests::ipbytes_decompress_011 ... ok
+test test::basic_collection ... ok
+test test::concurrent_collection ... ok
+test test::repeated_collection ... ok
+test test::repeated_collection_different_collectors ... ok
+test pt::ykpt::parser::tests::parse_small_trace ... ok
+test pt::ykpt::parser::tests::decode_many ... ok
+
+test result: ok. 13 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 1.00s
+
+     Running unittests src/lib.rs (target/debug/deps/tests-e844fc0fce8ba2fb)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/dump_ir.rs (target/debug/deps/dump_ir-0e9179de08f1e22a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/gdb_c_test.rs (target/debug/deps/gdb_c_test-2623ead10998a020)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/run_trace_compiler_test.rs (target/debug/deps/run_trace_compiler_test-0de92c6e693995ed)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running langtest_c.rs (target/debug/deps/c_tests-96b6f820b3a8a4f3)
+Running C tests with opt level -O0...
+
+running 79 tests
+test lang_tests::constexpr.c ... [0m[33mignored[0m
+test lang_tests::indirect_branch.c ... [0m[33mignored[0m
+test lang_tests::intrinsics.c ... [0m[31mFAILED[0m
+test lang_tests::promote.c ... [0m[31mFAILED[0m
+test lang_tests::funcptrarg_noir.c ... [0m[31mFAILED[0m
+test lang_tests::call_args.c ... [0m[31mFAILED[0m
+test lang_tests::intrinsic_noinline.c ... [0m[31mFAILED[0m
+test lang_tests::direct_recursion.c ... [0m[31mFAILED[0m
+test lang_tests::switch_many_guards_failing.c ... [0m[31mFAILED[0m
+test lang_tests::not_loopy_funcs_inlined_by_default.c ... [0m[31mFAILED[0m
+test lang_tests::blockmap.c ... [0m[31mFAILED[0m
+test lang_tests::mutable_global.c ... [0m[31mFAILED[0m
+test lang_tests::lifetime_intrinsics.c ... [0m[33mignored[0m
+test lang_tests::struct_simple.c ... [0m[31mFAILED[0m
+test lang_tests::void_ret.c ... [0m[31mFAILED[0m
+test lang_tests::promote_expr.c ... [0m[31mFAILED[0m
+test lang_tests::many_threads_one_loc.c ... [0m[33mignored[0m
+test lang_tests::ptr_global.c ... [0m[31mFAILED[0m
+test lang_tests::simple_nested.c ... [0m[33mignored[0m
+test lang_tests::reentrant.c ... [0m[31mFAILED[0m
+test lang_tests::switch_non_default.c ... [0m[31mFAILED[0m
+test lang_tests::mutual_recursion.c ... [0m[31mFAILED[0m
+test lang_tests::choice.c ... [0m[31mFAILED[0m
+test lang_tests::struct_phi.c ... [0m[31mFAILED[0m
+test lang_tests::sidetrace_while.c ... [0m[31mFAILED[0m
+test lang_tests::varargs_inlined.c ... [0m[31mFAILED[0m
+test lang_tests::unroll_safe_inlines.c ... [0m[31mFAILED[0m
+test lang_tests::debug_simple_interp_loop2.c ... [0m[31mFAILED[0m
+test lang_tests::switch_nested_guard.c ... [0m[31mFAILED[0m
+test lang_tests::calls_double.c ... [0m[31mFAILED[0m
+test lang_tests::setlongjmp.c ... [0m[31mFAILED[0m
+test lang_tests::rel_path.c ... [0m[31mFAILED[0m
+test lang_tests::resume_and_branch.c ... [0m[31mFAILED[0m
+test lang_tests::bf.c ... [0m[31mFAILED[0m
+test lang_tests::simple_interp_loop1.c ... [0m[33mignored[0m
+test lang_tests::switch_default.c ... [0m[31mFAILED[0m
+test lang_tests::noopts.c ... [0m[31mFAILED[0m
+test lang_tests::const_global.c ... [0m[31mFAILED[0m
+test lang_tests::arg_mapping_callee.c ... [0m[31mFAILED[0m
+test lang_tests::debug_debuginfo.c ... [0m[31mFAILED[0m
+test lang_tests::varargs.c ... [0m[31mFAILED[0m
+test lang_tests::stats3.c ... [0m[31mFAILED[0m
+test lang_tests::stats1.c ... [0m[31mFAILED[0m
+test lang_tests::control_point_in_nested_loop.c ... [0m[32mok[0m
+test lang_tests::unmapped_setjmp.c ... [0m[32mok[0m
+test lang_tests::funcptrarg_pretrace.c ... [0m[31mFAILED[0m
+test lang_tests::no_trace_annotation.c ... [0m[31mFAILED[0m
+test lang_tests::pthread_create.c ... [0m[32mok[0m
+test lang_tests::call_ext_simple.c ... [0m[31mFAILED[0m
+test lang_tests::call_ext_varargs.c ... [0m[33mignored[0m
+test lang_tests::interp_inside_call.c ... [0m[31mFAILED[0m
+test lang_tests::side-trace.c ... [0m[31mFAILED[0m
+test lang_tests::awkward_unmappable.c ... [0m[33mignored[0m
+test lang_tests::call_ext_in_obj.c ... [0m[31mFAILED[0m
+test lang_tests::promote_not_great.c ... [0m[31mFAILED[0m
+test lang_tests::floats.c ... [0m[31mFAILED[0m
+test lang_tests::missing_control_point.c ... [0m[32mok[0m
+test lang_tests::promote_guard.c ... [0m[31mFAILED[0m
+test lang_tests::stats2.c ... [0m[33mignored[0m
+test lang_tests::funcptrarg_hasir.c ... [0m[31mFAILED[0m
+test lang_tests::strarray.c ... [0m[31mFAILED[0m
+test lang_tests::internal_linkage_same_obj.c ... [0m[31mFAILED[0m
+test lang_tests::loopy_funcs_not_inlined_by_default.c ... [0m[31mFAILED[0m
+test lang_tests::yk_unroll_safe_vs_yk_outline.c ... [0m[31mFAILED[0m
+test lang_tests::fib.c ... [0m[31mFAILED[0m
+test lang_tests::control_point_not_in_loop.c ... [0m[32mok[0m
+test lang_tests::smmultisrc.c ... [0m[31mFAILED[0m
+test lang_tests::no_trace_annotation2.c ... [0m[31mFAILED[0m
+test lang_tests::nested_sidetrace.c ... [0m[31mFAILED[0m
+test lang_tests::many_threads_many_locs.c ... [0m[33mignored[0m
+test lang_tests::x86_64_zero_len_call.c ... [0m[31mFAILED[0m
+test lang_tests::simple.c ... [0m[31mFAILED[0m
+test lang_tests::qsort.c ... [0m[31mFAILED[0m
+test lang_tests::interp_inside_call2.c ... [0m[31mFAILED[0m
+test lang_tests::smmultisrc2.c ... [0m[31mFAILED[0m
+test lang_tests::unroll_safe_implies_noinline.c ... [0m[31mFAILED[0m
+test lang_tests::nested_writetoptr.c ... [0m[31mFAILED[0m
+test lang_tests::inline_asm.c ... [0m[31mFAILED[0m
+test lang_tests::conditionals.c ... [0m[31mFAILED[0m
+
+failures:
+
+---- lang_tests::intrinsics.c status ----
+Exited due to signal: 6
+
+---- lang_tests::intrinsics.c stderr ----
+
+Pattern (error at line 3):
+   |jit-state: start-tracing
+   |jit-state: stop-tracing
+>> |--- Begin jit-pre-opt ---
+   |...
+   |define ptr @__yk_compiled_trace_0(ptr %0, ptr %1, ptr %2...
+   |   ...
+   ...
+
+Text (error at line 3):
+   |jit-state: start-tracing
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::intrinsics.c stdout ----
+
+Pattern (error at line 1):
+>> |998
+
+Text (error at line 1):
+>>
+
+---- lang_tests::promote.c status ----
+Exited due to signal: 6
+
+---- lang_tests::promote.c stderr ----
+
+Pattern (error at line 4):
+   |jit-state: start-tracing
+   |y=100
+   |jit-state: stop-tracing
+>> |--- Begin jit-post-opt ---
+   |...
+   |define ptr @__yk_compiled_trace_0(...
+   |  ...
+   ...
+
+Text (error at line 4):
+   |jit-state: start-tracing
+   |y=100
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::promote.c stdout ----
+
+
+
+---- lang_tests::funcptrarg_noir.c status ----
+Exited due to signal: 6
+
+---- lang_tests::funcptrarg_noir.c stderr ----
+
+Pattern (error at line 2):
+   |...
+>> |--- Begin jit-pre-opt ---
+   |...
+   |%{{44}} = call i64 %{{43}}(ptr noundef nonnull @.str)...
+   |...
+   ...
+
+Text (error at line 6):
+   ...
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::funcptrarg_noir.c stdout ----
+
+
+
+---- lang_tests::call_args.c status ----
+Exited due to signal: 6
+
+---- lang_tests::call_args.c stderr ----
+
+Pattern (error at line 4):
+   |jit-state: start-tracing
+   |3: 5
+   |jit-state: stop-tracing
+>> |--- Begin jit-pre-opt ---
+   |...
+   |%{{res}} = add nsw i32...
+   |...
+   ...
+
+Text (error at line 4):
+   |jit-state: start-tracing
+   |3: 5
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::call_args.c stdout ----
+
+
+
+---- lang_tests::intrinsic_noinline.c status ----
+Exited due to signal: 6
+
+---- lang_tests::intrinsic_noinline.c stderr ----
+
+Pattern (error at line 3):
+   |jit-state: start-tracing
+   |jit-state: stop-tracing
+>> |--- Begin jit-pre-opt ---
+   |...
+   |define ptr @__yk_compiled_trace_0(ptr %0, ptr %1, ptr %2...
+   |   ...
+   ...
+
+Text (error at line 3):
+   |jit-state: start-tracing
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:193:26:
+   |internal error: entered unreachable code
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::intrinsic_noinline.c stdout ----
+
+Pattern (error at line 1):
+>> |3
+
+Text (error at line 1):
+>>
+
+---- lang_tests::direct_recursion.c status ----
+Exited due to signal: 6
+
+---- lang_tests::direct_recursion.c stderr ----
+
+Pattern (error at line 4):
+   |jit-state: start-tracing
+   |4:0
+   |jit-state: stop-tracing
+>> |--- Begin jit-pre-opt ---
+   |...
+   |...call i32 @f(...
+   |...
+   ...
+
+Text (error at line 4):
+   |jit-state: start-tracing
+   |4:0
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::direct_recursion.c stdout ----
+
+
+
+---- lang_tests::switch_many_guards_failing.c status ----
+Exited due to signal: 6
+
+---- lang_tests::switch_many_guards_failing.c stderr ----
+
+thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+assertion failed: callsite_off < return_off
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+fatal runtime error: failed to initiate panic, error 5
+
+
+---- lang_tests::switch_many_guards_failing.c stdout ----
+
+Pattern (error at line 1):
+>> |jihgfedcbajihgfedcbajihgfedcbajihgfedcbajihgfedcbajihgfedcbajihgfedcbajihgfedcbajihgfedcbajihgfedcba
+
+Text (error at line 1):
+>>
+
+---- lang_tests::not_loopy_funcs_inlined_by_default.c status ----
+Exited due to signal: 6
+
+---- lang_tests::not_loopy_funcs_inlined_by_default.c stderr ----
+
+Pattern (error at line 2):
+   |...
+>> |--- Begin jit-pre-opt ---
+   |...
+   |define ptr @__yk_compiled_trace_0(ptr %0, ptr %1, ptr %2) {
+   |  ...
+   ...
+
+Text (error at line 4):
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::not_loopy_funcs_inlined_by_default.c stdout ----
+
+
+
+---- lang_tests::blockmap.c status ----
+Exited due to signal: 6
+
+---- lang_tests::blockmap.c stderr ----
+
+thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+assertion failed: callsite_off < return_off
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+fatal runtime error: failed to initiate panic, error 5
+
+
+---- lang_tests::blockmap.c stdout ----
+
+
+
+---- lang_tests::mutable_global.c status ----
+Exited due to signal: 6
+
+---- lang_tests::mutable_global.c stderr ----
+
+Pattern (error at line 4):
+   |jit-state: start-tracing
+   |i=4
+   |jit-state: stop-tracing
+>> |--- Begin jit-pre-opt ---
+   |...
+   |define {{ty}} @__yk_compiled_trace_0(ptr %0, ptr %1, ptr %2) {
+   |   ...
+   ...
+
+Text (error at line 4):
+   |jit-state: start-tracing
+   |i=4
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::mutable_global.c stdout ----
+
+
+
+---- lang_tests::struct_simple.c status ----
+Exited due to signal: 6
+
+---- lang_tests::struct_simple.c stderr ----
+
+Pattern (error at line 5):
+   ...
+   |jit-state: start-tracing
+   |3:1
+   |jit-state: stop-tracing
+>> |--- Begin jit-pre-opt ---
+   |...
+   |--- End jit-pre-opt ---
+   |2:1
+   ...
+
+Text (error at line 4):
+   |jit-state: start-tracing
+   |3:1
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::struct_simple.c stdout ----
+
+
+
+---- lang_tests::void_ret.c status ----
+Exited due to signal: 6
+
+---- lang_tests::void_ret.c stderr ----
+
+Pattern (error at line 2):
+   |...
+>> |jit-state: enter-jit-code
+   |inside f
+   |inside f
+   |jit-state: deoptimise
+   ...
+
+Text (error at line 7):
+   ...
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::void_ret.c stdout ----
+
+
+
+---- lang_tests::promote_expr.c status ----
+Exited due to signal: 6
+
+---- lang_tests::promote_expr.c stderr ----
+
+Pattern (error at line 4):
+   |jit-state: start-tracing
+   |y=50
+   |jit-state: stop-tracing
+>> |--- Begin jit-post-opt ---
+   |...
+   |define ptr @__yk_compiled_trace_0(...
+   |  ...
+   ...
+
+Text (error at line 4):
+   |jit-state: start-tracing
+   |y=50
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::promote_expr.c stdout ----
+
+
+
+---- lang_tests::ptr_global.c status ----
+Exited due to signal: 6
+
+---- lang_tests::ptr_global.c stderr ----
+
+Pattern (error at line 2):
+   |...
+>> |i=25
+   |jit-state: deoptimise
+   |...
+
+Text (error at line 7):
+   ...
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::ptr_global.c stdout ----
+
+
+
+---- lang_tests::reentrant.c status ----
+Exited due to signal: 6
+
+---- lang_tests::reentrant.c stderr ----
+
+jit-state: start-tracing
+i=4, x=0
+jit-state: stop-tracing
+thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+assertion failed: callsite_off < return_off
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+fatal runtime error: failed to initiate panic, error 5
+
+
+---- lang_tests::reentrant.c stdout ----
+
+
+
+---- lang_tests::switch_non_default.c status ----
+Exited due to signal: 6
+
+---- lang_tests::switch_non_default.c stderr ----
+
+Pattern (error at line 4):
+   |jit-state: start-tracing
+   |i=3
+   |jit-state: stop-tracing
+>> |--- Begin jit-pre-opt ---
+   |...
+   |  %{{cond}} = icmp...
+   |  br i1 %{{cond}}, label %{{succ-bb}}, label %guardfail
+   ...
+
+Text (error at line 4):
+   |jit-state: start-tracing
+   |i=3
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::switch_non_default.c stdout ----
+
+
+
+---- lang_tests::mutual_recursion.c status ----
+Exited due to signal: 6
+
+---- lang_tests::mutual_recursion.c stderr ----
+
+Pattern (error at line 2):
+   |...
+>> |--- Begin aot ---
+   |...
+   |define dso_local void @g(...
+   |...
+   ...
+
+Text (error at line 13):
+   ...
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::mutual_recursion.c stdout ----
+
+
+
+---- lang_tests::choice.c status ----
+Exited due to signal: 6
+
+---- lang_tests::choice.c stderr ----
+
+Pattern (error at line 5):
+   ...
+   |jit-state: start-tracing
+   |3: 47
+   |jit-state: stop-tracing
+>> |--- Begin jit-pre-opt ---
+   |...
+   |--- End jit-pre-opt ---
+   |2: 47
+   ...
+
+Text (error at line 4):
+   |jit-state: start-tracing
+   |3: 47
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::choice.c stdout ----
+
+
+
+---- lang_tests::struct_phi.c status ----
+Exited due to signal: 6
+
+---- lang_tests::struct_phi.c stderr ----
+
+Pattern (error at line 2):
+   |...
+>> |define dso_local i32 @main...
+   |  ...
+   |  ...= phi...
+   |  ...
+   ...
+
+Text (error at line 6):
+   ...
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::struct_phi.c stdout ----
+
+
+
+---- lang_tests::sidetrace_while.c status ----
+Exited due to signal: 6
+
+---- lang_tests::sidetrace_while.c stderr ----
+
+Pattern (error at line 2):
+   |...
+>> |jit-state: execute-side-trace
+   |...
+   |500
+
+Text (error at line 7):
+   ...
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::sidetrace_while.c stdout ----
+
+Pattern (error at line 1):
+>> |exit
+
+Text (error at line 1):
+>>
+
+---- lang_tests::varargs_inlined.c status ----
+Exited due to signal: 6
+
+---- lang_tests::varargs_inlined.c stderr ----
+
+Pattern (error at line 4):
+   |jit-state: start-tracing
+   |i=1
+   |jit-state: stop-tracing
+>> |--- Begin aot ---
+   |...
+   |call void @llvm.va_start...
+   |...
+   ...
+
+Text (error at line 4):
+   |jit-state: start-tracing
+   |i=1
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::varargs_inlined.c stdout ----
+
+
+
+---- lang_tests::unroll_safe_inlines.c status ----
+Exited due to signal: 6
+
+---- lang_tests::unroll_safe_inlines.c stderr ----
+
+Pattern (error at line 2):
+   |...
+>> |--- Begin jit-pre-opt ---
+   |...
+   |define ptr @__yk_compiled_trace_0(ptr %0, ptr %1, ptr %2) {
+   |  ...
+   ...
+
+Text (error at line 4):
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::unroll_safe_inlines.c stdout ----
+
+
+
+---- lang_tests::debug_simple_interp_loop2.c status ----
+Exited due to signal: 6
+
+---- lang_tests::debug_simple_interp_loop2.c stderr ----
+
+Pattern (error at line 7):
+   ...
+   |pc=2, mem=4
+   |pc=3, mem=3
+   |jit-state: stop-tracing
+>> |--- Begin jit-pre-opt ---
+   |...
+   |define ptr @__yk_compiled_trace_0(ptr %0, ptr %1, ptr %2) {
+   |  ...
+   ...
+
+Text (error at line 7):
+   ...
+   |pc=2, mem=4
+   |pc=3, mem=3
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::debug_simple_interp_loop2.c stdout ----
+
+
+
+---- lang_tests::switch_nested_guard.c status ----
+Exited due to signal: 6
+
+---- lang_tests::switch_nested_guard.c stderr ----
+
+thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+assertion failed: callsite_off < return_off
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+fatal runtime error: failed to initiate panic, error 5
+
+
+---- lang_tests::switch_nested_guard.c stdout ----
+
+Pattern (error at line 1):
+>> |gfedcblagfedcbjagfedcbmagfedcbkagfedcbiagfedcblagfedcbjagfedcbmagfedcbkagfedcbiagfedcblagfedcbjagfedcbmagfedcbkagf
+
+Text (error at line 1):
+>>
+
+---- lang_tests::calls_double.c status ----
+Exited due to signal: 6
+
+---- lang_tests::calls_double.c stderr ----
+
+Pattern (error at line 2):
+   |...
+>> |jit-state: enter-jit-code
+   |res=3
+   |...
+
+Text (error at line 7):
+   ...
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::calls_double.c stdout ----
+
+
+
+---- lang_tests::setlongjmp.c status ----
+Exited due to signal: 6
+
+---- lang_tests::setlongjmp.c stderr ----
+
+Pattern (error at line 3):
+   |...
+   |jit-state: stop-tracing
+>> |jit-state: trace-compilation-aborted
+   |...
+
+Text (error at line 4):
+   |jit-state: start-tracing
+   |i=4
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::setlongjmp.c stdout ----
+
+
+
+---- lang_tests::rel_path.c status ----
+Exited due to signal: 6
+
+---- lang_tests::rel_path.c stderr ----
+
+Pattern (error at line 2):
+   |...
+>> |jit-state: enter-jit-code
+   |...
+
+Text (error at line 6):
+   ...
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::rel_path.c stdout ----
+
+
+
+---- lang_tests::resume_and_branch.c status ----
+Exited due to signal: 6
+
+---- lang_tests::resume_and_branch.c stderr ----
+
+Pattern (error at line 2):
+   |...
+>> |jit-state: enter-jit-code
+   |x=2
+   |...
+
+Text (error at line 7):
+   ...
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::resume_and_branch.c stdout ----
+
+
+
+---- lang_tests::bf.c status ----
+Exited due to signal: 6
+
+---- lang_tests::bf.c stderr ----
+
+Pattern (error at line 2):
+   |...
+>> |jit-state: enter-jit-code
+   |...
+   |jit-state: deoptimise
+   |...
+   ...
+
+Text (error at line 6):
+   ...
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:193:26:
+   |internal error: entered unreachable code
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::bf.c stdout ----
+
+Pattern (error at line 1):
+>> |Hello World!
+
+Text (error at line 1):
+>>
+
+---- lang_tests::switch_default.c status ----
+Exited due to signal: 6
+
+---- lang_tests::switch_default.c stderr ----
+
+Pattern (error at line 4):
+   |jit-state: start-tracing
+   |i=3
+   |jit-state: stop-tracing
+>> |--- Begin jit-pre-opt ---
+   |...
+   |  switch i32 %{{cond}}, label %{{default-bb}} [
+   |    i32 299, label %guardfail...
+   ...
+
+Text (error at line 4):
+   |jit-state: start-tracing
+   |i=3
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::switch_default.c stdout ----
+
+
+
+---- lang_tests::noopts.c status ----
+Exited due to signal: 6
+
+---- lang_tests::noopts.c stderr ----
+
+Pattern (error at line 2):
+   |...
+>> |--- Begin aot ---
+   |...
+   |store i32 2...
+   |...
+   ...
+
+Text (error at line 6):
+   ...
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::noopts.c stdout ----
+
+
+
+---- lang_tests::const_global.c status ----
+Exited due to signal: 6
+
+---- lang_tests::const_global.c stderr ----
+
+Pattern (error at line 4):
+   |jit-state: start-tracing
+   |i=4
+   |jit-state: stop-tracing
+>> |--- Begin jit-pre-opt ---
+   |...
+   |define {{ty}} @__yk_compiled_trace_0(ptr %0, ptr %1, ptr %2) {
+   |   ...
+   ...
+
+Text (error at line 4):
+   |jit-state: start-tracing
+   |i=4
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::const_global.c stdout ----
+
+
+
+---- lang_tests::arg_mapping_callee.c status ----
+Exited due to signal: 6
+
+---- lang_tests::arg_mapping_callee.c stderr ----
+
+Pattern (error at line 4):
+   |jit-state: start-tracing
+   |3:5
+   |jit-state: stop-tracing
+>> |--- Begin jit-pre-opt ---
+   |...
+   |--- End jit-pre-opt ---
+   |2:5
+   ...
+
+Text (error at line 4):
+   |jit-state: start-tracing
+   |3:5
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::arg_mapping_callee.c stdout ----
+
+
+
+---- lang_tests::debug_debuginfo.c status ----
+Exited due to signal: 6
+
+---- lang_tests::debug_debuginfo.c stderr ----
+
+Pattern (error at line 2):
+   |...
+>> |define ptr @__yk_compiled_trace_0(...
+   |entry:
+   |  ; main() c/debug_debuginfo.c:27:5
+   |  ...
+   ...
+
+Text (error at line 4):
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::debug_debuginfo.c stdout ----
+
+
+
+---- lang_tests::varargs.c status ----
+Exited due to signal: 6
+
+---- lang_tests::varargs.c stderr ----
+
+Pattern (error at line 4):
+   |jit-state: start-tracing
+   |i=6
+   |jit-state: stop-tracing
+>> |--- Begin aot ---
+   |...
+   |call void @llvm.va_start...
+   |...
+   ...
+
+Text (error at line 4):
+   |jit-state: start-tracing
+   |i=6
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::varargs.c stdout ----
+
+
+
+---- lang_tests::stats3.c status ----
+Exited due to signal: 6
+
+---- lang_tests::stats3.c stderr ----
+
+Pattern (error at line 1):
+>> |{
+   |  ...
+   |  "trace_executions": 0,
+   |  "traces_collected_err": 0,
+   ...
+
+Text (error at line 1):
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::stats3.c stdout ----
+
+
+
+---- lang_tests::stats1.c status ----
+Exited due to signal: 6
+
+---- lang_tests::stats1.c stderr ----
+
+Pattern (error at line 1):
+>> |{
+   |  ...
+   |  "trace_executions": 1,
+   |  "traces_collected_err": 0,
+   ...
+
+Text (error at line 1):
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::stats1.c stdout ----
+
+
+
+---- lang_tests::funcptrarg_pretrace.c status ----
+Exited due to signal: 6
+
+---- lang_tests::funcptrarg_pretrace.c stderr ----
+
+Pattern (error at line 2):
+   |...
+>> |--- Begin jit-pre-opt ---
+   |...
+   |--- End jit-pre-opt ---
+   |...
+   ...
+
+Text (error at line 6):
+   ...
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::funcptrarg_pretrace.c stdout ----
+
+
+
+---- lang_tests::no_trace_annotation.c status ----
+Exited due to signal: 6
+
+---- lang_tests::no_trace_annotation.c stderr ----
+
+Pattern (error at line 2):
+   |...
+>> |--- Begin aot ---
+   |...
+   |call void @call_me()...
+   |...
+   ...
+
+Text (error at line 7):
+   ...
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::no_trace_annotation.c stdout ----
+
+
+
+---- lang_tests::call_ext_simple.c status ----
+Exited due to signal: 6
+
+---- lang_tests::call_ext_simple.c stderr ----
+
+Pattern (error at line 2):
+   |...
+>> |...call i32 @putc...
+   |...
+   |declare i32 @putc...
+   |...
+   ...
+
+Text (error at line 4):
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::call_ext_simple.c stdout ----
+
+Pattern (error at line 1):
+>> |12
+
+Text (error at line 1):
+>>
+
+---- lang_tests::interp_inside_call.c status ----
+Exited due to signal: 6
+
+---- lang_tests::interp_inside_call.c stderr ----
+
+Pattern (error at line 5):
+   ...
+   |...
+   |jit-state: stop-tracing
+   |...
+>> |jit-state: enter-jit-code
+   |...
+   |jit-state: deoptimise
+
+Text (error at line 6):
+   ...
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::interp_inside_call.c stdout ----
+
+Pattern (error at line 2):
+   |...
+>> |i: 5 ret: 9
+   |...
+   |i: 2 ret: 6
+   |i: 1 ret: 105
+   ...
+
+Text (error at line 1):
+>>
+
+---- lang_tests::side-trace.c status ----
+Exited due to signal: 6
+
+---- lang_tests::side-trace.c stderr ----
+
+Pattern (error at line 4):
+   |jit-state: start-tracing
+   |1
+   |jit-state: stop-tracing
+>> |--- Begin jit-pre-opt ---
+   |...
+   |--- End jit-pre-opt ---
+   |2
+   ...
+
+Text (error at line 4):
+   |jit-state: start-tracing
+   |1
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::side-trace.c stdout ----
+
+Pattern (error at line 1):
+>> |exit
+
+Text (error at line 1):
+>>
+
+---- lang_tests::call_ext_in_obj.c status ----
+Exited due to signal: 6
+
+---- lang_tests::call_ext_in_obj.c stderr ----
+
+Pattern (error at line 4):
+   |jit-state: start-tracing
+   |4
+   |jit-state: stop-tracing
+>> |--- Begin jit-pre-opt ---
+   |...
+   |--- End jit-pre-opt ---
+   |3
+   ...
+
+Text (error at line 4):
+   |jit-state: start-tracing
+   |4
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::call_ext_in_obj.c stdout ----
+
+
+
+---- lang_tests::promote_not_great.c status ----
+Exited due to signal: 6
+
+---- lang_tests::promote_not_great.c stderr ----
+
+Pattern (error at line 4):
+   |jit-state: start-tracing
+   |z=2
+   |jit-state: stop-tracing
+>> |--- Begin jit-post-opt ---
+   |...
+   |define ptr @__yk_compiled_trace_0(...
+   |  ...
+   ...
+
+Text (error at line 4):
+   |jit-state: start-tracing
+   |z=2
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::promote_not_great.c stdout ----
+
+
+
+---- lang_tests::floats.c status ----
+Exited due to signal: 6
+
+---- lang_tests::floats.c stderr ----
+
+thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+assertion failed: callsite_off < return_off
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+fatal runtime error: failed to initiate panic, error 5
+
+
+---- lang_tests::floats.c stdout ----
+
+
+
+---- lang_tests::promote_guard.c status ----
+Exited due to signal: 6
+
+---- lang_tests::promote_guard.c stderr ----
+
+Pattern (error at line 4):
+   |jit-state: start-tracing
+   |y=100
+   |jit-state: stop-tracing
+>> |--- Begin jit-post-opt ---
+   |...
+   |define ptr @__yk_compiled_trace_0(...
+   |  ...
+   ...
+
+Text (error at line 4):
+   |jit-state: start-tracing
+   |y=100
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::promote_guard.c stdout ----
+
+
+
+---- lang_tests::funcptrarg_hasir.c status ----
+Exited due to signal: 6
+
+---- lang_tests::funcptrarg_hasir.c stderr ----
+
+Pattern (error at line 2):
+   |...
+>> |jit-state: enter-jit-code
+   |z=4
+   |...
+
+Text (error at line 7):
+   ...
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::funcptrarg_hasir.c stdout ----
+
+
+
+---- lang_tests::strarray.c status ----
+Exited due to signal: 6
+
+---- lang_tests::strarray.c stderr ----
+
+Pattern (error at line 4):
+   |jit-state: start-tracing
+   |pepper
+   |jit-state: stop-tracing
+>> |--- Begin aot ---
+   |...
+   |@.str.2 = private unnamed_addr constant [6 x i8] c"apple\00", align 1...
+   |@.str.3 = private unnamed_addr constant [7 x i8] c"banana\00", align 1...
+   ...
+
+Text (error at line 4):
+   |jit-state: start-tracing
+   |pepper
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::strarray.c stdout ----
+
+Pattern (error at line 1):
+>> |exit
+
+Text (error at line 1):
+>>
+
+---- lang_tests::internal_linkage_same_obj.c status ----
+Exited due to signal: 6
+
+---- lang_tests::internal_linkage_same_obj.c stderr ----
+
+Pattern (error at line 2):
+   |...
+>> |jit-state: enter-jit-code
+   |...
+
+Text (error at line 6):
+   ...
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::internal_linkage_same_obj.c stdout ----
+
+
+
+---- lang_tests::loopy_funcs_not_inlined_by_default.c status ----
+Exited due to signal: 6
+
+---- lang_tests::loopy_funcs_not_inlined_by_default.c stderr ----
+
+Pattern (error at line 1):
+>> |--- Begin aot ---
+   |...
+   |call void @never_inline_into_trace(i32 noundef ...
+   |...
+   ...
+
+Text (error at line 1):
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::loopy_funcs_not_inlined_by_default.c stdout ----
+
+
+
+---- lang_tests::yk_unroll_safe_vs_yk_outline.c status ----
+Exited due to signal: 6
+
+---- lang_tests::yk_unroll_safe_vs_yk_outline.c stderr ----
+
+Pattern (error at line 2):
+   |...
+>> |--- Begin jit-pre-opt ---
+   |...
+   |define ptr @__yk_compiled_trace_0(ptr %0, ptr %1, ptr %2) {
+   |  ...
+   ...
+
+Text (error at line 4):
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::yk_unroll_safe_vs_yk_outline.c stdout ----
+
+
+
+---- lang_tests::fib.c status ----
+Exited due to signal: 6
+
+---- lang_tests::fib.c stderr ----
+
+Pattern (error at line 4):
+   |jit-state: start-tracing
+   |4:21
+   |jit-state: stop-tracing
+>> |--- Begin jit-pre-opt ---
+   |...
+   |--- End jit-pre-opt ---
+   |3:21
+   ...
+
+Text (error at line 4):
+   |jit-state: start-tracing
+   |4:21
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::fib.c stdout ----
+
+
+
+---- lang_tests::smmultisrc.c status ----
+Exited due to signal: 6
+
+---- lang_tests::smmultisrc.c stderr ----
+
+jit-state: start-tracing
+geti: 0 5 3 4 5 6
+geti: 1 5 3 4 5 6
+geti: 1 2 3 4 5 6
+jit-state: stop-tracing
+thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:193:26:
+internal error: entered unreachable code
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+fatal runtime error: failed to initiate panic, error 5
+
+
+---- lang_tests::smmultisrc.c stdout ----
+
+Pattern (error at line 1):
+>> |1 2 3 4 5 6
+   |1 2 3 4 5 6
+   |1 2 3 4 5 6
+   |1 2 3 4 5 6
+   ...
+
+Text (error at line 1):
+>>
+
+---- lang_tests::no_trace_annotation2.c status ----
+Exited due to signal: 6
+
+---- lang_tests::no_trace_annotation2.c stderr ----
+
+Pattern (error at line 2):
+   |...
+>> |--- Begin aot ---
+   |...
+   |call void @call_me()...
+   |...
+   ...
+
+Text (error at line 8):
+   ...
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::no_trace_annotation2.c stdout ----
+
+
+
+---- lang_tests::nested_sidetrace.c status ----
+Exited due to signal: 6
+
+---- lang_tests::nested_sidetrace.c stderr ----
+
+Pattern (error at line 4):
+   |jit-state: start-tracing
+   |1
+   |jit-state: stop-tracing
+>> |--- Begin jit-pre-opt ---
+   |...
+   |--- End jit-pre-opt ---
+   |2
+   ...
+
+Text (error at line 4):
+   |jit-state: start-tracing
+   |1
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::nested_sidetrace.c stdout ----
+
+Pattern (error at line 1):
+>> |exit
+
+Text (error at line 1):
+>>
+
+---- lang_tests::x86_64_zero_len_call.c status ----
+Exited due to signal: 6
+
+---- lang_tests::x86_64_zero_len_call.c stderr ----
+
+Pattern (error at line 2):
+   |...
+>> |jit-state: enter-jit-code
+   |...
+
+Text (error at line 6):
+   ...
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::x86_64_zero_len_call.c stdout ----
+
+Pattern (error at line 1):
+>> |exit
+
+Text (error at line 1):
+>>
+
+---- lang_tests::simple.c status ----
+Exited due to signal: 6
+
+---- lang_tests::simple.c stderr ----
+
+Pattern (error at line 4):
+   |jit-state: start-tracing
+   |i=4
+   |jit-state: stop-tracing
+>> |--- Begin jit-pre-opt ---
+   |...
+   |define {{rtnty}} @__yk_compiled_trace_0(ptr %0, ptr %1, ptr %2) {
+   |   ...
+   ...
+
+Text (error at line 4):
+   |jit-state: start-tracing
+   |i=4
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::simple.c stdout ----
+
+Pattern (error at line 1):
+>> |exit
+
+Text (error at line 1):
+>>
+
+---- lang_tests::qsort.c status ----
+Exited due to signal: 6
+
+---- lang_tests::qsort.c stderr ----
+
+Pattern (error at line 5):
+   ...
+   |i=2
+   |4 6 1 3 2 5 end
+   |jit-state: stop-tracing
+>> |i=3
+   |1 4 6 3 2 5 end
+   |jit-state: enter-jit-code
+   |i=4
+   ...
+
+Text (error at line 5):
+   ...
+   |i=2
+   |4 6 1 3 2 5 end
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:152:69:
+   |called `Result::unwrap()` on an `Err` value: IoError(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::qsort.c stdout ----
+
+
+
+---- lang_tests::interp_inside_call2.c status ----
+Exited due to signal: 6
+
+---- lang_tests::interp_inside_call2.c stderr ----
+
+Pattern (error at line 5):
+   ...
+   |...
+   |jit-state: stop-tracing
+   |...
+>> |jit-state: enter-jit-code
+   |...
+   |jit-state: deoptimise
+
+Text (error at line 6):
+   ...
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::interp_inside_call2.c stdout ----
+
+Pattern (error at line 2):
+   |...
+>> |i: 5 ret: 12
+   |...
+   |i: 2 ret: 9
+   |i: 1 ret: 108
+   ...
+
+Text (error at line 1):
+>>
+
+---- lang_tests::smmultisrc2.c status ----
+Exited due to signal: 6
+
+---- lang_tests::smmultisrc2.c stderr ----
+
+jit-state: start-tracing
+geti: 0 5 3 4 5 6
+geti: 1 5 3 4 5 6
+geti: 2 5 3 4 5 6
+geti: 3 5 3 4 5 6
+geti: 4 5 3 4 5 6
+geti: 1 5 3 4 5 6
+jit-state: stop-tracing
+thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+assertion failed: callsite_off < return_off
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+fatal runtime error: failed to initiate panic, error 5
+
+
+---- lang_tests::smmultisrc2.c stdout ----
+
+Pattern (error at line 1):
+>> |1 2 3 4 5 6
+   |1 2 3 4 5 6
+   |1 2 3 4 5 6
+   |1 2 3 4 5 6
+   ...
+
+Text (error at line 1):
+>>
+
+---- lang_tests::unroll_safe_implies_noinline.c status ----
+Exited due to signal: 6
+
+---- lang_tests::unroll_safe_implies_noinline.c stderr ----
+
+Pattern (error at line 2):
+   |...
+>> |--- Begin aot ---
+   |...
+   |call void @never_aot_inline(i32 noundef ...
+   |...
+   ...
+
+Text (error at line 4):
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::unroll_safe_implies_noinline.c stdout ----
+
+
+
+---- lang_tests::nested_writetoptr.c status ----
+Exited due to signal: 6
+
+---- lang_tests::nested_writetoptr.c stderr ----
+
+Pattern (error at line 3):
+   |jit-state: start-tracing
+   |jit-state: stop-tracing
+>> |--- Begin aot ---
+   |...
+   |define dso_local void @foo(...
+   |...
+   ...
+
+Text (error at line 3):
+   |jit-state: start-tracing
+   |jit-state: stop-tracing
+>> |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+   |fatal runtime error: failed to initiate panic, error 5
+   ...
+
+---- lang_tests::nested_writetoptr.c stdout ----
+
+Pattern (error at line 1):
+>> |2
+   |2
+   |2
+   |2
+   ...
+
+Text (error at line 1):
+>>
+
+---- lang_tests::inline_asm.c status ----
+Exited due to signal: 6
+
+---- lang_tests::inline_asm.c stderr ----
+
+Pattern (error at line 2):
+   |...
+>> |--- Begin jit-pre-opt ---
+   |...
+   |...call i32 asm "mov $$5, $0"...
+   |...
+   ...
+
+Text (error at line 7):
+   ...
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::inline_asm.c stdout ----
+
+
+
+---- lang_tests::conditionals.c status ----
+Exited due to signal: 6
+
+---- lang_tests::conditionals.c stderr ----
+
+Pattern (error at line 2):
+   |...
+>> |jit-state: enter-jit-code
+   |res=2
+   |...
+
+Text (error at line 7):
+   ...
+   |thread '<unnamed>' panicked at hwtracer/src/llvm_blockmap.rs:161:21:
+   |assertion failed: callsite_off < return_off
+   |note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+>> |fatal runtime error: failed to initiate panic, error 5
+
+---- lang_tests::conditionals.c stdout ----
+
+
+
+failures:
+    lang_tests::intrinsics.c    lang_tests::promote.c    lang_tests::funcptrarg_noir.c    lang_tests::call_args.c    lang_tests::intrinsic_noinline.c    lang_tests::direct_recursion.c    lang_tests::switch_many_guards_failing.c    lang_tests::not_loopy_funcs_inlined_by_default.c    lang_tests::blockmap.c    lang_tests::mutable_global.c    lang_tests::struct_simple.c    lang_tests::void_ret.c    lang_tests::promote_expr.c    lang_tests::ptr_global.c    lang_tests::reentrant.c    lang_tests::switch_non_default.c    lang_tests::mutual_recursion.c    lang_tests::choice.c    lang_tests::struct_phi.c    lang_tests::sidetrace_while.c    lang_tests::varargs_inlined.c    lang_tests::unroll_safe_inlines.c    lang_tests::debug_simple_interp_loop2.c    lang_tests::switch_nested_guard.c    lang_tests::calls_double.c    lang_tests::setlongjmp.c    lang_tests::rel_path.c    lang_tests::resume_and_branch.c    lang_tests::bf.c    lang_tests::switch_default.c    lang_tests::noopts.c    lang_tests::const_global.c    lang_tests::arg_mapping_callee.c    lang_tests::debug_debuginfo.c    lang_tests::varargs.c    lang_tests::stats3.c    lang_tests::stats1.c    lang_tests::funcptrarg_pretrace.c    lang_tests::no_trace_annotation.c    lang_tests::call_ext_simple.c    lang_tests::interp_inside_call.c    lang_tests::side-trace.c    lang_tests::call_ext_in_obj.c    lang_tests::promote_not_great.c    lang_tests::floats.c    lang_tests::promote_guard.c    lang_tests::funcptrarg_hasir.c    lang_tests::strarray.c    lang_tests::internal_linkage_same_obj.c    lang_tests::loopy_funcs_not_inlined_by_default.c    lang_tests::yk_unroll_safe_vs_yk_outline.c    lang_tests::fib.c    lang_tests::smmultisrc.c    lang_tests::no_trace_annotation2.c    lang_tests::nested_sidetrace.c    lang_tests::x86_64_zero_len_call.c    lang_tests::simple.c    lang_tests::qsort.c    lang_tests::interp_inside_call2.c    lang_tests::smmultisrc2.c    lang_tests::unroll_safe_implies_noinline.c    lang_tests::nested_writetoptr.c    lang_tests::inline_asm.c    lang_tests::conditionals.c
+
+test result: [0m[31mFAILED[0m. 15 passed; 64 failed; 10 ignored; 0 measured; 0 filtered out
+
+error: test failed, to rerun pass `-p tests --test c_tests`
+
+Caused by:
+  process didn't exit successfully: `/home/shreei/research/yk_pv/target/debug/deps/c_tests-96b6f820b3a8a4f3` (exit status: 1)
+multitime: Error when attempting to run timeout
