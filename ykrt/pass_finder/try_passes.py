@@ -24,6 +24,7 @@ import argparse, io, os, random, shutil, subprocess, sys, time, queue
 from dataclasses import dataclass
 from multiprocessing import Manager, Process, Queue, Value
 from subprocess import PIPE, Popen
+import cargo_run
 
 # Stages in an LTO pipeline where optimisation passes can happen.
 STAGES = "pre_link", "link_time"
@@ -71,15 +72,14 @@ def split_passes(passes_string):
     temp_part = []      
     paren_stack = []     
     angle_stack = []    
-
+    
     i = 0  
-    while i < len(passes_string):
+    while i < len(passes_string): # change the while loop to for loop
         char = passes_string[i]
 
         if char == '(':
             paren_stack.append(char)
         elif char == ')':
-            if paren_stack:
                 paren_stack.pop()
 
         if char == '<':
@@ -138,24 +138,26 @@ def test_pipeline(logf, pl):
     env = os.environ.copy()  # Create a copy of the environment
     env["PRELINK_PASSES"] = ",".join([p.name for p in pl.pre_link])
     env["LINKTIME_PASSES"] = ",".join([p.name for p in pl.link_time])
-    
+
     print(f"\033[91m!!!!!!\033[0m")
     
-    p = subprocess.Popen("try_repeat 1 sh run_tests.sh 2>&1", cwd=CWD, shell=True,
-              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-
-    sout, serr =  p.communicate()
+    # p = subprocess.Popen("sh run_tests.sh 2>&1", cwd=CWD, shell=True,
+    #           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    # sout, serr =  p.communicate()
+    ret, time = cargo_run.run_test("/home/research/yk_pv", env=env)
+    
     print(f"\033[91m@@@@@@@@@@\033[0m")
-    val = sout.strip().split('\n')[-1]
-    print(f"\033[91m{val}\033[0m")
-
-    if p.returncode == 0:
+    print(f"\033[92m return code': {ret} \033[0m")
+    if ret == 0:
+        # val = sout.strip().split('\n')[-1]
         print(" [OK]")
+        print(f"\033[92m time: {time}\033[0m")
         log(logf, str(pl) + ": OK\n")
+        return True, time
     else:
         log(logf, str(pl) + " : FAILED\n")
-        print(" [FAIL]")
-    return p.returncode == 0, val
+        print(" [FAIL]") 
+        return False, None  
 
 def list_of_passes_to_str(passes):
     return ",".join([str(p) for p in passes])
@@ -235,20 +237,13 @@ def evaluate_fitness(logf, is_prelink, entity, passes):
             try_passes.append(passes[i])
 
     config = get_pipeline_config(is_prelink, try_passes)
-    ret, exec_time = test_pipeline(logf, config)
-    nFlags = len(try_passes) 
+    ret, exec_time = test_pipeline(logf, config) 
     if ret:
-        try:
             exec_time = float(exec_time)  # Convert exec_time to a float
-            # Return True for successful programs and execution time as a negative value
-            print(f"\033[92m returned {ret} and execution time {exec_time}\033[0m")
-            return  [nFlags, exec_time]
-        except ValueError:
-            print(f"Error converting exec_time to float: {exec_time}")
-            return [0, float('inf')]
+            return  exec_time
     else:
         # Return False for programs that crash, and execution time as a large positive value
-        return [0, float('inf')]
+        return float('inf')
 
 def crossover(parent1, parent2):
     # Implement crossover logic (e.g., one-point crossover)
@@ -283,7 +278,7 @@ def genetic_algorithm(logf, is_prelink, population_size, mutation_rate, generati
         # Evaluate fitness for each entity in the population
         fitness_scores = [evaluate_fitness(logf, is_prelink, entity, passes) for entity in population]
         # TODO: consider execution time for hyperparameter tuning
-        wt = [t[0] for t in fitness_scores] # Choosing weight on basis of OK passes len's 
+        
         print(f"\033[38;5;128m {fitness_scores}\033[0m")
         # Check if we have reached the target fitness
         if target_fitness in fitness_scores:
@@ -293,8 +288,8 @@ def genetic_algorithm(logf, is_prelink, population_size, mutation_rate, generati
         # Select parents for reproduction (roulette wheel selection)
         parents = []
         for _ in range(population_size // 2):
-            parent1 = random.choices(population, weights=wt, k=1)[0]
-            parent2 = random.choices(population, weights=wt, k=1)[0]
+            parent1 = random.choices(population, weights=fitness_scores, k=1)[0]
+            parent2 = random.choices(population, weights=fitness_scores, k=1)[0]
             parents.append((parent1, parent2))
 
         # Perform crossover and mutation to create a new generation
@@ -309,8 +304,8 @@ def genetic_algorithm(logf, is_prelink, population_size, mutation_rate, generati
         population = new_population
 
     # Return the best entity in the final population
-    wt = [t[0] for t in fitness_scores] 
-    best_entity = population[wt.index(max(wt))]
+ 
+    best_entity = population[fitness_scores.index(min(fitness_scores))]
     print(f"\033[35;5;128; m{best_entity}\033[0m")
     return best_entity  
 
@@ -319,12 +314,12 @@ def main(logf, is_prelink):
     # assert(test_pipeline(logf, PipelineConfig([], [])))
 
     passes = get_all_passes(is_prelink)
-    target_fitness = len(passes)
+    target_fitness = 8 #random time
     best_entity = genetic_algorithm(logf,
         is_prelink,
-        population_size = 10, #len(passes) * 2,
+        population_size = 100, #len(passes) * 2,
         mutation_rate = 0.1,
-        generations = 1,
+        generations = 10,
         target_fitness = target_fitness,
         passes = passes,
     )
