@@ -85,6 +85,11 @@ pub struct MT {
     /// How many worker threads are currently running. Note that this may temporarily be `>`
     /// [`max_worker_threads`].
     active_worker_threads: AtomicUsize,
+    #[cfg(yk_llvm_sync_hack)]
+    /// A temporary hack which keeps track of how many compile (etc.) jobs are active, because LLVM
+    /// dies horribly if the main thread exits before those jobs are finished. This then marries up
+    /// with Self::.llvm_sync_hack().
+    active_worker_jobs: AtomicUsize,
     /// The [Tracer] that should be used for creating future traces. Note that this might not be
     /// the same as the tracer(s) used to create past traces.
     tracer: Mutex<Arc<dyn Tracer>>,
@@ -116,6 +121,8 @@ impl MT {
             job_queue: Arc::new((Condvar::new(), Mutex::new(VecDeque::new()))),
             max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
             active_worker_threads: AtomicUsize::new(0),
+            #[cfg(yk_llvm_sync_hack)]
+            active_worker_jobs: AtomicUsize::new(0),
             tracer: Mutex::new(default_tracer()?),
             compiler: Mutex::new(default_compiler()?),
             stats: YkStats::new(),
@@ -176,6 +183,9 @@ impl MT {
         // new worker thread iff we aren't already running the maximum number of worker threads.
         // Once started, a worker thread never dies, waiting endlessly for work.
 
+        #[cfg(yk_llvm_sync_hack)]
+        self.active_worker_jobs.fetch_add(1, Ordering::Relaxed);
+
         let (cv, mtx) = &*self.job_queue;
         mtx.lock().push_back(job);
         cv.notify_one();
@@ -201,7 +211,11 @@ impl MT {
                 let mut lock = mtx.lock();
                 loop {
                     match lock.pop_front() {
-                        Some(x) => MutexGuard::unlocked(&mut lock, x),
+                        Some(x) => {
+                            MutexGuard::unlocked(&mut lock, x);
+                            #[cfg(yk_llvm_sync_hack)]
+                            mt.active_worker_jobs.fetch_sub(1, Ordering::Relaxed);
+                        }
                         None => cv.wait(&mut lock),
                     }
                 }
@@ -555,6 +569,14 @@ impl MT {
                     Err(e) => todo!("{e:?}"),
                 }
             }
+        }
+    }
+
+    #[cfg(yk_llvm_sync_hack)]
+    pub fn llvm_sync_hack(&self) {
+        while self.active_worker_jobs.load(Ordering::Relaxed) != 0 {
+            // Spin, but not too much.
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
     }
 }
