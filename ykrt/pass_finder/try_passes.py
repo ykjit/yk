@@ -230,12 +230,12 @@ def binary_split(logf, passes, is_prelink):
         print(72 * "=")
         print(list_of_passes_to_str(ok_passes))
 
-def evaluate_fitness(logf, is_prelink, entity, passes):
+def evaluate_fitness(glogf, is_prelink, entity, passes):
     try_passes = []
     for i, bit in enumerate(entity):
         if bit == 1:
             try_passes.append(passes[i])
-
+    log(glogf, f"\ncurrently evaluating {try_passes}\n")
     config = get_pipeline_config(is_prelink, try_passes)
     ret, exec_time = test_pipeline(logf, config) 
     if ret:
@@ -262,7 +262,7 @@ def mutate(entity, mutation_rate):
             mutated_entity.append(bit)
     return mutated_entity
 
-def genetic_algorithm(logf, is_prelink, population_size, mutation_rate, generations, target_fitness, passes):
+def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate, generations, target_fitness, passes):
     #config = get_pipeline_config(is_prelink, ok_passes, try_passes)
     population = []
     fitness_scores = []
@@ -274,22 +274,29 @@ def genetic_algorithm(logf, is_prelink, population_size, mutation_rate, generati
     # fitness_scores = [evaluate_fitness(logf, is_prelink, entity, passes) for entity in population]
     # print(f"\033[38;5;128m {fitness_scores}\033[0m")
     for generation in range(generations):
+        log(glogf, "=========================================================")
+        log(glogf, f"\ngeneration: {generation}\n") 
         fitness_scores.clear()
         # Evaluate fitness for each entity in the population
-        fitness_scores = [evaluate_fitness(logf, is_prelink, entity, passes) for entity in population]
+        fitness_scores = [evaluate_fitness(glogf, is_prelink, entity, passes) for entity in population]
+        log(glogf, f"\nfitness score: {fitness_scores}\n")
+        log(glogf, "=========================================================")
         # TODO: consider execution time for hyperparameter tuning
-        
+        wt = [(1/t) for t in fitness_scores] # less execution time, better weight 
         print(f"\033[38;5;128m {fitness_scores}\033[0m")
         # Check if we have reached the target fitness
         if target_fitness in fitness_scores:
             print(f"Target fitness reached in generation {generation + 1}!")
             break
+        # to randomly pick entities when the complete population fails
+        if fitness_scores.count(float('inf')) == len(fitness_scores):
+            wt = [1 for _ in fitness_scores]
 
         # Select parents for reproduction (roulette wheel selection)
         parents = []
         for _ in range(population_size // 2):
-            parent1 = random.choices(population, weights=fitness_scores, k=1)[0]
-            parent2 = random.choices(population, weights=fitness_scores, k=1)[0]
+            parent1 = random.choices(population, weights=wt, k=1)[0]
+            parent2 = random.choices(population, weights=wt, k=1)[0]
             parents.append((parent1, parent2))
 
         # Perform crossover and mutation to create a new generation
@@ -299,7 +306,7 @@ def genetic_algorithm(logf, is_prelink, population_size, mutation_rate, generati
             child1 = mutate(child1, mutation_rate)
             child2 = mutate(child2, mutation_rate)
             new_population.extend([child1, child2])
-
+        
         # Replace the old population with the new generation
         population = new_population
 
@@ -309,17 +316,17 @@ def genetic_algorithm(logf, is_prelink, population_size, mutation_rate, generati
     print(f"\033[35;5;128; m{best_entity}\033[0m")
     return best_entity  
 
-def main(logf, is_prelink):
+def main(logf, glogf, is_prelink):
     #sanity check, test script should work with no extra passes.
     # assert(test_pipeline(logf, PipelineConfig([], [])))
 
     passes = get_all_passes(is_prelink)
     target_fitness = 8 #random time
-    best_entity = genetic_algorithm(logf,
+    best_entity = genetic_algorithm(glogf,
         is_prelink,
-        population_size = 100, #len(passes) * 2,
+        population_size = len(passes) * 10,
         mutation_rate = 0.1,
-        generations = 10,
+        generations = 100,
         target_fitness = target_fitness,
         passes = passes,
     )
@@ -327,6 +334,7 @@ def main(logf, is_prelink):
     for i, bit in enumerate(best_entity):
         if bit == 1:
             final_passes.append(passes[i])
+    log(glogf, f"\nFinal passes: {final_passes}\n")
     print(f"\033[38;5;128m {final_passes}\033[0m")
 
 if __name__ == "__main__":
@@ -361,5 +369,6 @@ if __name__ == "__main__":
     CWD = args.path
     print(f"PATH to interpreter: {CWD}")
 
-    with open("passes.log", "w") as logf:
-        main(logf, is_prelink)
+    with open("genetic.log", "w+") as glogf:
+        with open("passes.log", "w") as logf:
+            main(logf, glogf, is_prelink)
