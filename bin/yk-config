@@ -90,7 +90,7 @@ handle_arg() {
             # Use lld.
             OUTPUT="${OUTPUT} -fuse-ld=lld"
             # Embed LLVM bitcode as late as possible.
-            OUTPUT="${OUTPUT} -Wl,--mllvm=--embed-bitcode-final"
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--embed-bitcode-final -Wl,--mllvm=--emulated-tls"
             # Add pthread_create wrapper function (__wrap_pthread_create)
             OUTPUT="${OUTPUT} -Wl,--wrap=pthread_create"
             # Embed Yk's IR.
