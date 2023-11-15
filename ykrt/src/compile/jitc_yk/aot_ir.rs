@@ -450,7 +450,10 @@ impl Type {
         match self {
             Self::Void => "void".to_owned(),
             Self::Integer(it) => it.const_to_str(c),
-            Self::Ptr => "const_ptr".to_owned(),
+            Self::Ptr => {
+                // FIXME: write a stringifier for constant pointers.
+                "const_ptr".to_owned()
+            }
             Self::Func(_) => unreachable!(), // No such thing as a constant function in our IR.
             Self::Struct(_) => {
                 // FIXME: write a stringifier for constant structs.
