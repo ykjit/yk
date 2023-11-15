@@ -54,6 +54,7 @@ Constant {
 
 `Type` is encoded as one of the following:
 
+```
 VoidType {
     type_kind: u8 = 0
 }
@@ -74,6 +75,15 @@ FunctionType {
     ret_ty: Type
     is_vararg: u8
 }
+
+StructType {
+    type_kind: u8 = 4
+    num_fields: usize
+    field_tys: usize[num_fields]       // array of type indices
+    field_bit_offs: usize[num_fields]
+
+}
+```
 
 ### Operand encoding.
 
