@@ -33,12 +33,12 @@ fn deserialise_string(v: Vec<u8>) -> Result<String, DekuError> {
 /// as the human-readable format is only provided as a debugging aid.
 pub(crate) trait IRDisplay {
     /// Return a human-readable string.
-    fn to_str(&self, m: &AOTModule) -> String;
+    fn to_str(&self, m: &Module) -> String;
 
     /// Print myself to stderr in human-readable form.
     ///
     /// This is provided as a debugging convenience.
-    fn dump(&self, m: &AOTModule) {
+    fn dump(&self, m: &Module) {
         eprintln!("{}", self.to_str(m));
     }
 }
@@ -64,7 +64,7 @@ pub(crate) enum Opcode {
 }
 
 impl IRDisplay for Opcode {
-    fn to_str(&self, _m: &AOTModule) -> String {
+    fn to_str(&self, _m: &Module) -> String {
         format!("{:?}", self).to_lowercase()
     }
 }
@@ -76,7 +76,7 @@ pub(crate) struct ConstantOperand {
 }
 
 impl IRDisplay for ConstantOperand {
-    fn to_str(&self, m: &AOTModule) -> String {
+    fn to_str(&self, m: &Module) -> String {
         m.consts[self.constant_idx].to_str(m)
     }
 }
@@ -91,7 +91,7 @@ pub(crate) struct LocalVariableOperand {
 }
 
 impl IRDisplay for LocalVariableOperand {
-    fn to_str(&self, _m: &AOTModule) -> String {
+    fn to_str(&self, _m: &Module) -> String {
         format!("${}_{}", self.bb_idx, self.inst_idx,)
     }
 }
@@ -109,7 +109,7 @@ pub(crate) struct BlockOperand {
 }
 
 impl IRDisplay for BlockOperand {
-    fn to_str(&self, _m: &AOTModule) -> String {
+    fn to_str(&self, _m: &Module) -> String {
         format!("bb{}", self.bb_idx)
     }
 }
@@ -128,7 +128,7 @@ pub(crate) struct ArgOperand {
 }
 
 impl IRDisplay for ArgOperand {
-    fn to_str(&self, _m: &AOTModule) -> String {
+    fn to_str(&self, _m: &Module) -> String {
         format!("$arg{}", self.arg_idx)
     }
 }
@@ -162,7 +162,7 @@ pub(crate) enum Operand {
 }
 
 impl IRDisplay for Operand {
-    fn to_str(&self, m: &AOTModule) -> String {
+    fn to_str(&self, m: &Module) -> String {
         match self {
             Self::Constant(c) => c.to_str(m),
             Self::LocalVariable(l) => l.to_str(m),
@@ -191,7 +191,7 @@ pub(crate) struct Instruction {
 }
 
 impl IRDisplay for Instruction {
-    fn to_str(&self, m: &AOTModule) -> String {
+    fn to_str(&self, m: &Module) -> String {
         if self.opcode == Opcode::Unimplemented {
             debug_assert!(self.operands.len() == 1);
             if let Operand::Unimplemented(s) = &self.operands[0] {
@@ -254,7 +254,7 @@ pub(crate) struct Block {
 }
 
 impl IRDisplay for Block {
-    fn to_str(&self, m: &AOTModule) -> String {
+    fn to_str(&self, m: &Module) -> String {
         let mut ret = String::new();
         for i in &self.instrs {
             ret.push_str(&format!("    {}\n", i.to_str(m)));
@@ -288,7 +288,7 @@ impl Function {
 }
 
 impl IRDisplay for Function {
-    fn to_str(&self, m: &AOTModule) -> String {
+    fn to_str(&self, m: &Module) -> String {
         let ty = &m.types[self.type_index];
         if let Type::Func(fty) = ty {
             let mut ret = format!(
@@ -360,7 +360,7 @@ impl IntegerType {
 }
 
 impl IRDisplay for IntegerType {
-    fn to_str(&self, _m: &AOTModule) -> String {
+    fn to_str(&self, _m: &Module) -> String {
         format!("i{}", self.num_bits)
     }
 }
@@ -395,7 +395,7 @@ pub(crate) struct StructType {
 }
 
 impl IRDisplay for StructType {
-    fn to_str(&self, m: &AOTModule) -> String {
+    fn to_str(&self, m: &Module) -> String {
         let mut s = String::from("{");
         s.push_str(
             &self
@@ -412,7 +412,7 @@ impl IRDisplay for StructType {
 }
 
 impl IRDisplay for FuncType {
-    fn to_str(&self, m: &AOTModule) -> String {
+    fn to_str(&self, m: &Module) -> String {
         format!(
             "func({})",
             self.arg_tys
@@ -470,7 +470,7 @@ impl Type {
 }
 
 impl IRDisplay for Type {
-    fn to_str(&self, m: &AOTModule) -> String {
+    fn to_str(&self, m: &Module) -> String {
         match self {
             Self::Void => "void".to_owned(),
             Self::Integer(i) => i.to_str(m),
@@ -494,7 +494,7 @@ pub(crate) struct Constant {
 }
 
 impl IRDisplay for Constant {
-    fn to_str(&self, m: &AOTModule) -> String {
+    fn to_str(&self, m: &Module) -> String {
         m.types[self.type_index].const_to_str(self)
     }
 }
@@ -504,7 +504,7 @@ impl IRDisplay for Constant {
 /// This is the top-level container for the bytecode.
 #[deku_derive(DekuRead)]
 #[derive(Debug, Default)]
-pub(crate) struct AOTModule {
+pub(crate) struct Module {
     #[deku(assert = "*magic == MAGIC", temp)]
     magic: u32,
     #[deku(assert = "*version == FORMAT_VERSION")]
@@ -528,7 +528,7 @@ pub(crate) struct AOTModule {
     var_names_computed: RefCell<bool>,
 }
 
-impl AOTModule {
+impl Module {
     /// Compute variable names for all instructions that generate a value.
     fn compute_variable_names(&self) {
         debug_assert!(!*self.var_names_computed.borrow());
@@ -566,7 +566,7 @@ impl AOTModule {
 
     /// Get the type of the instruction.
     ///
-    /// It is UB to pass an `instr` that is not from the `AOTModule` referenced by `self`.
+    /// It is UB to pass an `instr` that is not from the `Module` referenced by `self`.
     fn instr_type(&self, instr: &Instruction) -> &Type {
         &self.types[instr.type_index]
     }
@@ -601,8 +601,8 @@ impl AOTModule {
 }
 
 /// Deserialise an AOT module from the slice `data`.
-pub(crate) fn deserialise_module(data: &[u8]) -> Result<AOTModule, Box<dyn Error>> {
-    match AOTModule::from_bytes((data, 0)) {
+pub(crate) fn deserialise_module(data: &[u8]) -> Result<Module, Box<dyn Error>> {
+    match Module::from_bytes((data, 0)) {
         Ok(((_, _), mut modu)) => {
             modu.compute_local_operand_func_indices();
             Ok(modu)
