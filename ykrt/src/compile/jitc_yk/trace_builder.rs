@@ -34,8 +34,7 @@ impl<'a> TraceBuilder<'a> {
     }
 
     fn build(self) -> Result<AOTModule, Box<dyn Error>> {
-        // FIXME: Kill direct access to the blocks field.
-        for tblk in &self.mtrace.blocks {
+        for tblk in self.mtrace.blocks() {
             match self.lookup_aot_block(tblk) {
                 Some(_blk) => {
                     // Mapped block

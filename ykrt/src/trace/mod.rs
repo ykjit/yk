@@ -56,9 +56,9 @@ pub(crate) trait RawTrace: Send {
 /// A mapped trace of AOT LLVM IR blocks.
 pub struct MappedTrace {
     /// The blocks of the trace.
-    pub(crate) blocks: Vec<TracedAOTBlock>,
+    blocks: Vec<TracedAOTBlock>,
     /// Function addresses discovered dynamically via the trace. symbol-name -> address.
-    pub(crate) faddrs: HashMap<CString, *const c_void>,
+    faddrs: HashMap<CString, *const c_void>,
 }
 
 impl MappedTrace {
@@ -69,6 +69,14 @@ impl MappedTrace {
 
     pub fn len(&self) -> usize {
         self.blocks.len()
+    }
+
+    pub fn blocks(&self) -> &Vec<TracedAOTBlock> {
+        &self.blocks
+    }
+
+    pub fn faddrs(&self) -> &HashMap<CString, *const c_void> {
+        &self.faddrs
     }
 }
 
