@@ -280,6 +280,11 @@ impl Function {
     fn is_declaration(&self) -> bool {
         self.blocks.is_empty()
     }
+
+    /// Return the block at the specified index, or `None` if the index is out of range.
+    pub(crate) fn block(&self, bb_idx: usize) -> Option<&Block> {
+        self.blocks.get(bb_idx)
+    }
 }
 
 impl IRDisplay for Function {
@@ -498,7 +503,7 @@ impl IRDisplay for Constant {
 ///
 /// This is the top-level container for the bytecode.
 #[deku_derive(DekuRead)]
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct AOTModule {
     #[deku(assert = "*magic == MAGIC", temp)]
     magic: u32,
@@ -568,6 +573,12 @@ impl AOTModule {
 
     fn instr_generates_value(&self, i: &Instruction) -> bool {
         self.instr_type(i) != &Type::Void
+    }
+
+    /// Retrieve the named function from the AOT module.
+    pub(crate) fn func_by_name(&self, name: &str) -> Option<&Function> {
+        // OPT: Cache function indices somewhere for faster lookup.
+        self.funcs.iter().find(|f| f.name == name)
     }
 
     pub(crate) fn to_str(&self) -> String {

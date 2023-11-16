@@ -49,6 +49,7 @@ static PHASES_TO_PRINT: LazyLock<HashSet<IRPhase>> = LazyLock::new(|| {
 });
 
 pub mod aot_ir;
+mod trace_builder;
 
 pub(crate) struct JITCYk;
 
@@ -56,7 +57,7 @@ impl Compiler for JITCYk {
     fn compile(
         &self,
         _mt: Arc<MT>,
-        _irtrace: MappedTrace,
+        mtrace: MappedTrace,
         sti: Option<SideTraceInfo>,
         _hl: Arc<Mutex<HotLocation>>,
     ) -> Result<CompiledTrace, Box<dyn Error>> {
@@ -65,12 +66,20 @@ impl Compiler for JITCYk {
         }
         let ir_slice = yk_ir_section();
         // FIXME: Cache deserialisation, so we don't load it afresh each time.
-        let aot_mod = aot_ir::deserialise_module(ir_slice).unwrap();
+        let aot_mod = aot_ir::deserialise_module(ir_slice)?;
 
         if PHASES_TO_PRINT.contains(&IRPhase::AOT) {
             eprintln!("--- Begin aot ---");
             aot_mod.dump();
             eprintln!("--- End aot ---");
+        }
+
+        let jit_mod = trace_builder::build(&aot_mod, &mtrace)?;
+
+        if PHASES_TO_PRINT.contains(&IRPhase::PreOpt) {
+            eprintln!("--- Begin pre-opt ---");
+            jit_mod.dump();
+            eprintln!("--- End pre-opt ---");
         }
 
         todo!("new codegen doesn't work yet");
