@@ -93,9 +93,19 @@ impl CompletionWrapper {
 
             // We assume (and assert) that the source file is the last argument.
             let ccfile = buf.split(' ').last().unwrap();
-            assert!(["c", "cpp", "cxx", "cc"]
-                .iter()
-                .any(|e| e == &Path::new(ccfile).extension().unwrap().to_str().unwrap()));
+            let ext = Path::new(ccfile).extension();
+            // FIXME: This section of code has had extra panic messages added in an attempt to
+            // diagnose an allusive crash: https://github.com/ykjit/yk/issues/903
+            match ext {
+                None => panic!("source file has no extension: '{}', buf='{}'", ccfile, buf),
+                Some(ext) => {
+                    let ext = ext.to_str().unwrap();
+                    if !["c", "cpp", "cxx", "cc"].iter().any(|e| e == &ext) {
+                        panic!("unkonwn source file extension: '{}', buf='{}'", ext, buf);
+                    }
+                }
+            }
+
             let mut entry = String::new();
             entry.push_str("  {\n");
             entry.push_str(&format!(
