@@ -34,7 +34,7 @@ impl Compiler for JITCLLVM {
 
         let mut faddr_keys = Vec::new();
         let mut faddr_vals = Vec::new();
-        for k in irtrace.faddrs.iter() {
+        for k in irtrace.faddrs().iter() {
             faddr_keys.push(k.0.as_ptr());
             faddr_vals.push(*k.1);
         }
@@ -111,7 +111,7 @@ impl JITCLLVM {
         let trace_len = irtrace.len();
         let mut func_names = Vec::with_capacity(trace_len);
         let mut bbs = Vec::with_capacity(trace_len);
-        for blk in &irtrace.blocks {
+        for blk in irtrace.blocks() {
             if blk.is_unmappable() {
                 // The block was unmappable. Indicate this with a null function name and the block
                 // index encodes the stack adjustment value.
