@@ -129,6 +129,9 @@ handle_arg() {
             # Ensure we can unambiguously map back to LLVM IR blocks.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-block-disambiguate"
 
+            # Ensure calls never appear in the entry block of a function.
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-no-calls-in-entryblocks"
+
             # Use the yk extensions to the blockmap section.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-extended-llvmbbaddrmap-section"
             # Enable fix for spill reloads before stackmaps.

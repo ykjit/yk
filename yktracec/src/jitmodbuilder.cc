@@ -1426,73 +1426,42 @@ public:
       TraceLoc Loc = InpTrace[Idx];
 
       if (UnmappableRegion *UR = Loc.getUnmappableRegion()) {
-        // The trace entered a region of unmappable foreign code.
-        //
-        // As noted in the mapper and asserted in the JITModBuilder constructor,
-        // there are never two unmappable regions in a row, so the next block
-        // (if there is one) is guaranteed to be mappable. The question is: will
-        // the foreign code be *returning* into mappable code, or will it be
-        // *calling back* deeper into mappable code? The trace decoder keeps
-        // track of the stack effects of foreign code (assuming its control flow
-        // isn't bonkers), so we are able to use that information to decide.
-
-        if (InpTrace.Length() == Idx + 1) {
-          // This unmappable region is the end of the trace, so there's no
-          // need to maintain the stack any more.
-          continue;
-        }
-
-        assert(!CallStack.curMappableFrame());
-
-        // FIXME: think about what do do in the face of setjmp/longjmp. How
-        // would we find the stack adjustment value for such code?
-        if (UR->StackAdjust < 0) {
-          // The stack got smaller as a result of executing the foreign code,
-          // so we must be returning to mappable code.
-          while (UR->StackAdjust < 0) {
-            // We don't allow foreign code to pop non-foreign frames. That
-            // seems like a sure indiciator of bonkers control flow.
-            assert(!CallStack.curMappableFrame());
-            CallStack.popFrame();
-            UR->StackAdjust++;
-          }
-          assert(CallStack.curMappableFrame());
-          tryStopOutlining();
-        } else {
-          // If the stack size hasn't changed, either we've got something wrong,
-          // or the unmappable code has transitioned back to mappable code in a
-          // way we don't currently support.
-          assert(UR->StackAdjust > 0);
-
-          // The stack got bigger as a result of executing the foreign code. It
-          // must have called deeper and eventually into mappable code.
-          //
-          // If the stack adjustment value is N, then there must be N-1 foreign
-          // frames and the last remaining frame is the new mappable frame.
-          while (UR->StackAdjust > 1) {
-            CallStack.pushFrame(StackFrame::CreateForeignFrame());
-            UR->StackAdjust--;
-          }
-          IRBlock *NextIB = InpTrace[Idx + 1].getMappedBlock();
-          assert(NextIB);
-          assert(NextIB->BBIdx == 0);
-          auto [NextFunc, BB] = getLLVMAOTFuncAndBlock(NextIB);
-          CallStack.pushFrame(
-              StackFrame::CreateMappableFrame(NextFunc, nullptr));
-        }
         continue;
       }
-
-      // If we get here then we must have a mappable block and the most-recent
-      // frame should also be mappable.
-      MappableFrame *MPF = CallStack.curMappableFrame();
-      assert(MPF);
 
       IRBlock *IB = Loc.getMappedBlock();
       assert(IB);
       CurBBIdx = IB->BBIdx;
 
       auto [F, BB] = getLLVMAOTFuncAndBlock(IB);
+
+      if (CallStack.curMappableFrame() == nullptr) {
+        if (!BB->isEntryBlock()) {
+          // The current block is not an entry block and we have just seen an
+          // unmappable block. This means we have returned from an external
+          // function and so need to remove all unmappable frames from the top
+          // of the stack and stop outlining. Note: This relies on the
+          // NoCallsInEntryBlocks pass that ensures that that no call can
+          // appear in the entry block.
+          while (CallStack.curMappableFrame() == nullptr) {
+            CallStack.popFrame();
+          }
+          if (Outlining) {
+            tryStopOutlining();
+          }
+        } else {
+          // The current block is an entry block and we have just seen an
+          // unmappable block. This means an external function has called back
+          // into mappable code, so we need to add a mappable frame to the
+          // callstack.
+          CallStack.pushFrame(StackFrame::CreateMappableFrame(F, nullptr));
+        }
+      }
+
+      // If we get here then we must have a mappable block and the most-recent
+      // frame should also be mappable.
+      MappableFrame *MPF = CallStack.curMappableFrame();
+      assert(MPF);
       assert(MPF->Func == F);
 
 #ifndef NDEBUG
