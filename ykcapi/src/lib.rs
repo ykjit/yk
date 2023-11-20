@@ -39,7 +39,9 @@ pub unsafe extern "C" fn yk_mt_new(err_msg: *mut *const c_char) -> *const MT {
 #[no_mangle]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn yk_mt_drop(mt: *const MT) {
-    drop(unsafe { Arc::from_raw(mt) });
+    let mt = unsafe { Arc::from_raw(mt) };
+    #[cfg(yk_llvm_sync_hack)]
+    mt.llvm_sync_hack();
 }
 
 // The "dummy control point" that is replaced in an LLVM pass.

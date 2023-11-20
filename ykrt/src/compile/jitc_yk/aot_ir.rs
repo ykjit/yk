@@ -59,6 +59,7 @@ pub(crate) enum Opcode {
     Icmp,
     BinaryOperator,
     Ret,
+    InsertValue,
     Unimplemented = 255,
 }
 
@@ -374,6 +375,37 @@ pub(crate) struct FuncType {
     is_vararg: bool,
 }
 
+#[deku_derive(DekuRead)]
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct StructType {
+    /// The number of fields the struct has.
+    #[deku(temp)]
+    num_fields: usize,
+    /// The types of the fields.
+    #[deku(count = "num_fields")]
+    field_tys: Vec<usize>,
+    /// The bit offsets of the fields (taking into account any required padding for alignment).
+    #[deku(count = "num_fields")]
+    field_bit_offs: Vec<usize>,
+}
+
+impl IRDisplay for StructType {
+    fn to_str(&self, m: &AOTModule) -> String {
+        let mut s = String::from("{");
+        s.push_str(
+            &self
+                .field_tys
+                .iter()
+                .enumerate()
+                .map(|(i, ti)| format!("{}: {}", self.field_bit_offs[i], m.types[*ti].to_str(m)))
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        s.push('}');
+        s
+    }
+}
+
 impl IRDisplay for FuncType {
     fn to_str(&self, m: &AOTModule) -> String {
         format!(
@@ -391,6 +423,7 @@ const TYKIND_VOID: u8 = 0;
 const TYKIND_INTEGER: u8 = 1;
 const TYKIND_PTR: u8 = 2;
 const TYKIND_FUNC: u8 = 3;
+const TYKIND_STRUCT: u8 = 4;
 const TYKIND_UNIMPLEMENTED: u8 = 255;
 
 /// A type.
@@ -406,6 +439,8 @@ pub(crate) enum Type {
     Ptr,
     #[deku(id = "TYKIND_FUNC")]
     Func(FuncType),
+    #[deku(id = "TYKIND_STRUCT")]
+    Struct(StructType),
     #[deku(id = "TYKIND_UNIMPLEMENTED")]
     Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")] String),
 }
@@ -415,8 +450,15 @@ impl Type {
         match self {
             Self::Void => "void".to_owned(),
             Self::Integer(it) => it.const_to_str(c),
-            Self::Ptr => "const_ptr".to_owned(),
+            Self::Ptr => {
+                // FIXME: write a stringifier for constant pointers.
+                "const_ptr".to_owned()
+            }
             Self::Func(_) => unreachable!(), // No such thing as a constant function in our IR.
+            Self::Struct(_) => {
+                // FIXME: write a stringifier for constant structs.
+                "const_struct".to_owned()
+            }
             Self::Unimplemented(s) => format!("?cst<{}>", s),
         }
     }
@@ -429,6 +471,7 @@ impl IRDisplay for Type {
             Self::Integer(i) => i.to_str(m),
             Self::Ptr => "ptr".to_owned(),
             Self::Func(ft) => ft.to_str(m),
+            Self::Struct(st) => st.to_str(m),
             Self::Unimplemented(s) => format!("?ty<{}>", s),
         }
     }
@@ -572,8 +615,8 @@ mod tests {
     use super::{
         deserialise_module, deserialise_string, Constant, IntegerType, Opcode, FORMAT_VERSION,
         MAGIC, OPKIND_BLOCK, OPKIND_CONST, OPKIND_FUNCTION, OPKIND_LOCAL_VARIABLE, OPKIND_TYPE,
-        OPKIND_UNIMPLEMENTED, TYKIND_FUNC, TYKIND_INTEGER, TYKIND_PTR, TYKIND_UNIMPLEMENTED,
-        TYKIND_VOID,
+        OPKIND_UNIMPLEMENTED, TYKIND_FUNC, TYKIND_INTEGER, TYKIND_PTR, TYKIND_STRUCT,
+        TYKIND_UNIMPLEMENTED, TYKIND_VOID,
     };
     use byteorder::{NativeEndian, WriteBytesExt};
     use std::ffi::CString;
@@ -666,7 +709,7 @@ mod tests {
 
         // BLOCK 1
         // num_instrs:
-        write_native_usize(&mut data, 5);
+        write_native_usize(&mut data, 6);
 
         // INSTRUCTION 0
         // type_index:
@@ -743,6 +786,14 @@ mod tests {
         // num_operands:
         data.write_u32::<NativeEndian>(0).unwrap();
 
+        // INSTRUCTION 5
+        // type_index:
+        write_native_usize(&mut data, 6);
+        // opcode:
+        data.write_u8(Opcode::Nop as u8).unwrap();
+        // num_operands:
+        data.write_u32::<NativeEndian>(0).unwrap();
+
         // FUNCTION 1
         // name:
         write_str(&mut data, "bar");
@@ -779,7 +830,7 @@ mod tests {
 
         // TYPES
         // num_types:
-        write_native_usize(&mut data, 6);
+        write_native_usize(&mut data, 7);
 
         // TYPE 0
         // type_kind:
@@ -824,6 +875,20 @@ mod tests {
         // is_vararg:
         data.write_u8(0).unwrap();
 
+        // TYPE 6
+        // type_kind:
+        data.write_u8(TYKIND_STRUCT).unwrap();
+        // num_fields:
+        write_native_usize(&mut data, 2);
+        // field_tys[0]:
+        write_native_usize(&mut data, 2);
+        // field_tys[1]:
+        write_native_usize(&mut data, 3);
+        // field_bit_offs[0]:
+        write_native_usize(&mut data, 0);
+        // field_bit_offs[0]:
+        write_native_usize(&mut data, 24);
+
         let test_mod = deserialise_module(data.as_slice()).unwrap();
         let string_mod = test_mod.to_str();
 
@@ -832,7 +897,7 @@ mod tests {
 # IR format version: 0
 # Num funcs: 2
 # Num consts: 3
-# Num types: 6
+# Num types: 7
 
 func foo($arg0: ptr, $arg1: i32) -> i32 {
   bb0:
@@ -845,6 +910,7 @@ func foo($arg0: ptr, $arg1: i32) -> i32 {
     $1_2: ptr = alloca i32, 50i32
     $1_3: ptr = call bar(50i32, 50i32)
     br
+    $1_5: {0: ptr, 24: i32} = nop
 }
 
 func bar();

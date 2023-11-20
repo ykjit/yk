@@ -7,4 +7,7 @@ pub fn main() {
     println!("cargo:rustc-cfg=jitc_yk");
     // Always compile in the HWT tracer.
     println!("cargo:rustc-cfg=tracer_hwt");
+    // FIXME: This is a temporary hack because LLVM has problems if the main thread exits before
+    // compilation threads have finished.
+    println!("cargo:rustc-cfg=yk_llvm_sync_hack");
 }
