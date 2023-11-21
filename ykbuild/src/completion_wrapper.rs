@@ -83,30 +83,39 @@ impl CompletionWrapper {
 
     /// Call when the build is done to generate the `compile_commands.json` file.
     pub fn generate(self) {
-        let entries = Vec::<String>::new();
+        let mut entries = Vec::new();
 
         for path in glob(&format!("{}/*", self.tmpdir.path().to_str().unwrap())).unwrap() {
             let mut infile = File::open(path.unwrap()).unwrap();
             let mut buf = String::new();
             infile.read_to_string(&mut buf).unwrap();
-            let _buf = buf.trim();
+            let buf = buf.trim();
 
-            // FIXME: This assert sometimes fails.
-            // // We assume (and assert) that the source file is the last argument.
-            // let ccfile = buf.split(' ').last().unwrap();
-            // assert!(["c", "cpp", "cxx", "cc"]
-            //     .iter()
-            //     .any(|e| e == &Path::new(ccfile).extension().unwrap().to_str().unwrap()));
-            // let mut entry = String::new();
-            // entry.push_str("  {\n");
-            // entry.push_str(&format!(
-            //     "    \"directory\": \"{}\",\n",
-            //     env::var("CARGO_MANIFEST_DIR").unwrap()
-            // ));
-            // entry.push_str(&format!("    \"command\": \"{buf}\",\n"));
-            // entry.push_str(&format!("    \"file\": \"{ccfile}\",\n"));
-            // entry.push_str("  }");
-            // entries.push(entry);
+            // We assume (and assert) that the source file is the last argument.
+            let ccfile = buf.split(' ').last().unwrap();
+            let ext = Path::new(ccfile).extension();
+            // FIXME: This section of code has had extra panic messages added in an attempt to
+            // diagnose an allusive crash: https://github.com/ykjit/yk/issues/903
+            match ext {
+                None => panic!("source file has no extension: '{}', buf='{}'", ccfile, buf),
+                Some(ext) => {
+                    let ext = ext.to_str().unwrap();
+                    if !["c", "cpp", "cxx", "cc"].iter().any(|e| e == &ext) {
+                        panic!("unkonwn source file extension: '{}', buf='{}'", ext, buf);
+                    }
+                }
+            }
+
+            let mut entry = String::new();
+            entry.push_str("  {\n");
+            entry.push_str(&format!(
+                "    \"directory\": \"{}\",\n",
+                env::var("CARGO_MANIFEST_DIR").unwrap()
+            ));
+            entry.push_str(&format!("    \"command\": \"{buf}\",\n"));
+            entry.push_str(&format!("    \"file\": \"{ccfile}\",\n"));
+            entry.push_str("  }");
+            entries.push(entry);
         }
 
         // Write JSON to compile_commands.json.
