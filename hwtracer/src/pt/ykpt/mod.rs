@@ -524,6 +524,21 @@ impl<'t> YkPTBlockIterator<'t> {
                 reposition = false;
             }
 
+            // We can't (yet) handle longjmp in unmapped code. Crash if we spot it.
+            //
+            // We do this here, as opposed to at the callsite, because the symbols cannot be
+            // reliable detected in the face of PLT trampolines (the symbols are lazily
+            // resolved upon first use).
+            let vaddr = u64::try_from(vaddr).unwrap();
+            if (longjmp_vaddr != 0 && vaddr == longjmp_vaddr)
+                || (us_longjmp_vaddr != 0 && vaddr == us_longjmp_vaddr)
+                || (siglongjmp_vaddr == 0 && vaddr == siglongjmp_vaddr)
+            {
+                return Err(IteratorError::HWTracerError(HWTracerError::Unrecoverable(
+                    "longjmp within traces currently unsupported".to_string(),
+                )));
+            }
+
             let inst = dis.decode();
             match inst.flow_control() {
                 iced_x86::FlowControl::Next => (),
@@ -603,14 +618,6 @@ impl<'t> YkPTBlockIterator<'t> {
                         // the decoder elsewhere.
                     } else {
                         let target_vaddr = self.branch_target_vaddr(&inst);
-
-                        // We can't (yet) handle longjmp in unmapped code. Crash if we spot it.
-                        if (longjmp_vaddr != 0 && target_vaddr == longjmp_vaddr)
-                            || (us_longjmp_vaddr != 0 && target_vaddr == us_longjmp_vaddr)
-                            || (siglongjmp_vaddr == 0 && target_vaddr == siglongjmp_vaddr)
-                        {
-                            panic!("encountered call to longjmp in unmapped code");
-                        }
 
                         // Intel PT doesn't compress a direct call to the next instruction.
                         //
@@ -845,6 +852,9 @@ impl<'t> Iterator for YkPTBlockIterator<'t> {
             Err(IteratorError::NoMorePackets) => {
                 // If the iterator is exhausted, it remains exhausted.
                 return None;
+            }
+            Err(IteratorError::HWTracerError(HWTracerError::Unrecoverable(s))) => {
+                return Some(Err(HWTracerError::Unrecoverable(s.clone())));
             }
             Err(_) => {
                 // In the case where the iterator yields an error for the first time, subsequent
