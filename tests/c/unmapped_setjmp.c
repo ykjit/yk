@@ -1,6 +1,4 @@
-// ignore: currently broken
 // Run-time:
-//   status: error
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_PRINT_JITSTATE=1
 //   stderr:
@@ -8,6 +6,7 @@
 //     set jump point
 //     jumped!
 //     jit-state: stop-tracing
+//     jit-state: trace-compilation-aborted
 //     ...
 
 // Check that we bork on a call to setjmp in unmapped code.
