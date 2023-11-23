@@ -113,13 +113,10 @@ impl JITCLLVM {
         let mut bbs = Vec::with_capacity(trace_len);
         for blk in irtrace.blocks() {
             if blk.is_unmappable() {
-                // The block was unmappable. Indicate this with a null function name and the block
-                // index encodes the stack adjustment value.
+                // The block was unmappable. Indicate this with a null function name.
                 func_names.push(ptr::null());
-                // Subtle cast from `isize` to `usize`. `as` is used deliberately here to preserve
-                // the exact bit pattern. The consumer on the other side of the FFI knows to
-                // reverse this.
-                bbs.push(blk.stack_adjust() as usize);
+                // Block indices for unmappable blocks are irrelevant so we may pass anything here.
+                bbs.push(0);
             } else {
                 func_names.push(blk.func_name().as_ptr());
                 bbs.push(blk.bb());

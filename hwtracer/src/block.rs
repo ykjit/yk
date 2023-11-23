@@ -20,10 +20,7 @@ pub enum Block {
     ///
     /// This is required because decoders don't have perfect knowledge about every block
     /// in the virtual address space.
-    Unknown {
-        /// The stack adjustment required as a consequence of executing this unknown code.
-        stack_adjust: isize,
-    },
+    Unknown,
 }
 
 impl fmt::Debug for Block {
@@ -36,8 +33,8 @@ impl fmt::Debug for Block {
             } => {
                 write!(f, "Block({:x}..={:x})", first_instr, last_instr)
             }
-            Self::Unknown { stack_adjust } => {
-                write!(f, "UnknownBlock(stack_adjust={stack_adjust})")
+            Self::Unknown => {
+                write!(f, "UnknownBlock")
             }
         }
     }
@@ -54,11 +51,6 @@ impl Block {
         }
     }
 
-    /// Create an unknown block.
-    pub fn from_stack_adjust(stack_adjust: isize) -> Self {
-        Self::Unknown { stack_adjust }
-    }
-
     /// Returns `true` if `self` represents an unknown virtual address range.
     pub fn is_unknown(&self) -> bool {
         matches!(self, Self::Unknown { .. })
@@ -72,15 +64,6 @@ impl Block {
         } = self
         {
             Some((*first_instr, *last_instr))
-        } else {
-            None
-        }
-    }
-
-    /// Return the stack adjustment value, if applicable.
-    pub fn stack_adjust(&self) -> Option<isize> {
-        if let Self::Unknown { stack_adjust } = self {
-            Some(*stack_adjust)
         } else {
             None
         }

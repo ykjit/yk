@@ -97,10 +97,7 @@ pub enum TracedAOTBlock {
     /// One or more machine blocks that could not be mapped.
     ///
     /// This usually means that the blocks were compiled outside of ykllvm.
-    Unmappable {
-        /// The change to the stack depth as a result of executing the unmappable region.
-        stack_adjust: isize,
-    },
+    Unmappable,
 }
 
 impl TracedAOTBlock {
@@ -108,8 +105,8 @@ impl TracedAOTBlock {
         Self::Mapped { func_name, bb }
     }
 
-    pub fn new_unmappable(stack_adjust: isize) -> Self {
-        Self::Unmappable { stack_adjust }
+    pub fn new_unmappable() -> Self {
+        Self::Unmappable
     }
 
     /// If `self` is a mapped block, return the function name, otherwise panic.
@@ -132,23 +129,6 @@ impl TracedAOTBlock {
 
     /// Determines whether `self` represents unmappable code.
     pub fn is_unmappable(&self) -> bool {
-        matches!(self, Self::Unmappable { .. })
-    }
-
-    /// If `self` is an unmappable region, return the stack adjustment value, otherwise panic.
-    pub fn stack_adjust(&self) -> isize {
-        if let Self::Unmappable { stack_adjust } = self {
-            *stack_adjust
-        } else {
-            panic!();
-        }
-    }
-
-    pub fn stack_adjust_mut(&mut self) -> &mut isize {
-        if let Self::Unmappable { stack_adjust } = self {
-            stack_adjust
-        } else {
-            panic!();
-        }
+        matches!(self, Self::Unmappable)
     }
 }
