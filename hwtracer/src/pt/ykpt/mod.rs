@@ -860,7 +860,9 @@ fn is_ret_near(inst: &iced_x86::Instruction) -> bool {
 mod tests {
     use crate::{perf::PerfCollectorConfig, trace_closure, work_loop, TracerBuilder, TracerKind};
 
-    #[ignore] // FIXME
+    // FIXME: This test won't work until we teach rustc to embed bitcode and emit a basic block
+    // section etc.
+    #[ignore]
     #[test]
     /// Trace two loops, one 10x larger than the other, then check the proportions match the number
     /// of block the trace passes through.
