@@ -207,8 +207,7 @@ impl CompressedReturns {
 
 /// Iterate over the blocks of an Intel PT trace using the fast Yk PT decoder.
 pub(crate) struct YkPTBlockIterator<'t> {
-    /// The next block that the iterator will hand out. We lookahead like this so that we can
-    /// retrospectively add the stack adjustment value of the block (if neccessary).
+    /// The next block that the iterator will hand out.
     next: Cell<Result<Block, IteratorError>>,
     /// The packet iterator used to drive the decoding process.
     parser: PacketParser<'t>,
@@ -226,7 +225,7 @@ pub(crate) struct YkPTBlockIterator<'t> {
 impl<'t> YkPTBlockIterator<'t> {
     pub(crate) fn new(trace: &'t [u8]) -> Self {
         let mut this = YkPTBlockIterator {
-            next: Cell::new(Ok(Block::from_stack_adjust(0))),
+            next: Cell::new(Ok(Block::Unknown)),
             parser: PacketParser::new(trace),
             cur_loc: ObjLoc::OtherObjOrUnknown(None),
             tnts: VecDeque::new(),
@@ -273,7 +272,7 @@ impl<'t> YkPTBlockIterator<'t> {
                 u64::try_from(self.off_to_vaddr(&PHDR_MAIN_OBJ, ent.range.end)?).unwrap(),
             ))
         } else {
-            Ok(Block::from_stack_adjust(0))
+            Ok(Block::Unknown)
         }
     }
 
@@ -311,7 +310,7 @@ impl<'t> YkPTBlockIterator<'t> {
                 self.seek_tip()?;
                 return match self.cur_loc {
                     ObjLoc::MainObj(off) => Ok(Some(self.lookup_block_from_main_bin_offset(off)?)),
-                    ObjLoc::OtherObjOrUnknown(_) => Ok(Some(Block::from_stack_adjust(0))),
+                    ObjLoc::OtherObjOrUnknown(_) => Ok(Some(Block::Unknown)),
                 };
             }
         }
@@ -373,7 +372,7 @@ impl<'t> YkPTBlockIterator<'t> {
                     if let ObjLoc::MainObj(off) = self.cur_loc {
                         self.lookup_block_from_main_bin_offset(off + 1)
                     } else {
-                        Ok(Block::from_stack_adjust(0))
+                        Ok(Block::Unknown)
                     }
                 } else {
                     // A regular uncompressed return that relies on a TIP update.
@@ -382,7 +381,7 @@ impl<'t> YkPTBlockIterator<'t> {
                     // `self.cur_loc()`.
                     match self.cur_loc {
                         ObjLoc::MainObj(off) => Ok(self.lookup_block_from_main_bin_offset(off)?),
-                        _ => Ok(Block::from_stack_adjust(0)),
+                        _ => Ok(Block::Unknown),
                     }
                 }
             }
@@ -391,7 +390,7 @@ impl<'t> YkPTBlockIterator<'t> {
                 self.seek_tip()?;
                 match self.cur_loc {
                     ObjLoc::MainObj(off) => Ok(self.lookup_block_from_main_bin_offset(off)?),
-                    _ => Ok(Block::from_stack_adjust(0)),
+                    _ => Ok(Block::Unknown),
                 }
             }
         }
@@ -417,7 +416,7 @@ impl<'t> YkPTBlockIterator<'t> {
                 } else {
                     self.cur_loc =
                         ObjLoc::OtherObjOrUnknown(Some(self.off_to_vaddr(&PHDR_MAIN_OBJ, b_off)?));
-                    Ok(Block::from_stack_adjust(0))
+                    Ok(Block::Unknown)
                 }
             }
             ObjLoc::OtherObjOrUnknown(vaddr) => self.skip_foreign(vaddr),
@@ -464,14 +463,6 @@ impl<'t> YkPTBlockIterator<'t> {
         }
 
         Ok(compressed)
-    }
-
-    fn update_stack_adjust(&mut self, by: isize) {
-        // We only get here during disassembly, so `slot` is `Some(Block::StackAdjust)` and both
-        // unwraps in this function cannot fail.
-        let slot = self.next.get_mut().as_mut().unwrap();
-        let new = Block::from_stack_adjust(slot.stack_adjust().unwrap() + by);
-        *slot = new;
     }
 
     fn disassemble(&mut self, start_vaddr: usize) -> Result<Block, IteratorError> {
@@ -566,7 +557,6 @@ impl<'t> YkPTBlockIterator<'t> {
                     };
                     dis.set_ip(u64::try_from(ret_vaddr).unwrap());
                     reposition = true;
-                    self.update_stack_adjust(-1);
                 }
                 iced_x86::FlowControl::IndirectBranch | iced_x86::FlowControl::IndirectCall => {
                     self.seek_tip()?;
@@ -588,7 +578,6 @@ impl<'t> YkPTBlockIterator<'t> {
                         // IP)
                         self.comprets
                             .push(CompRetAddr::VAddr(usize::try_from(inst.next_ip()).unwrap()));
-                        self.update_stack_adjust(1);
                     }
 
                     dis.set_ip(u64::try_from(vaddr).unwrap());
@@ -634,7 +623,6 @@ impl<'t> YkPTBlockIterator<'t> {
                         debug_assert!(!inst.is_call_far());
                         dis.set_ip(target_vaddr);
                         reposition = true;
-                        self.update_stack_adjust(1);
                     }
                 }
                 iced_x86::FlowControl::Interrupt => {
@@ -844,9 +832,8 @@ impl<'t> Iterator for YkPTBlockIterator<'t> {
         // Compute the value the iterator will give out on a subsequent call to `next()`.
         //
         // It may be tempting to immediately extract `self.next` from its `Cell` and match on that,
-        // but we can't because the call to `self.do_next()` mutates the *current* `self.next()` in the case where
-        // disassembly of foreign code is required (`Block::Unknown::stack_adjust` will be
-        // updated).
+        // but we can't because the call to `self.do_next()` mutates the *current* `self.next()` in
+        // the case where disassembly of foreign code is required.
         let new_next = match self.next.get_mut() {
             Ok(_) => self.do_next(),
             Err(IteratorError::NoMorePackets) => {

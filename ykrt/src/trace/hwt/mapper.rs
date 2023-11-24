@@ -159,14 +159,7 @@ impl HWTMapper {
                 // also take care to collapse consecutive unmappable blocks into one.
                 if let Some(last) = ret.last_mut() {
                     if !last.is_unmappable() {
-                        ret.push(TracedAOTBlock::new_unmappable(
-                            block.stack_adjust().unwrap(),
-                        ));
-                    } else {
-                        // The previous entry in the trace is already and unmappable region. Don't
-                        // push, thus collapsing repeated unmappable blocks into one. We do have to
-                        // sum together the stack adjust values though!
-                        *last.stack_adjust_mut() += block.stack_adjust().unwrap();
+                        ret.push(TracedAOTBlock::new_unmappable());
                     }
                 }
             } else {
