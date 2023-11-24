@@ -47,7 +47,6 @@ use crate::{
 };
 use intervaltree::IntervalTree;
 use std::{
-    cell::Cell,
     collections::VecDeque,
     convert::TryFrom,
     ffi::CString,
@@ -207,8 +206,6 @@ impl CompressedReturns {
 
 /// Iterate over the blocks of an Intel PT trace using the fast Yk PT decoder.
 pub(crate) struct YkPTBlockIterator<'t> {
-    /// The next block that the iterator will hand out.
-    next: Cell<Result<Block, IteratorError>>,
     /// The packet iterator used to drive the decoding process.
     parser: PacketParser<'t>,
     /// Keeps track of where we are in the traced binary.
@@ -224,19 +221,13 @@ pub(crate) struct YkPTBlockIterator<'t> {
 
 impl<'t> YkPTBlockIterator<'t> {
     pub(crate) fn new(trace: &'t [u8]) -> Self {
-        let mut this = YkPTBlockIterator {
-            next: Cell::new(Ok(Block::Unknown)),
+        Self {
             parser: PacketParser::new(trace),
             cur_loc: ObjLoc::OtherObjOrUnknown(None),
             tnts: VecDeque::new(),
             comprets: CompressedReturns::new(),
             unbound_modes: false,
-        };
-
-        // Prime the cached next element.
-        *this.next.get_mut() = this.do_next();
-
-        this
+        }
     }
 
     /// Convert a file offset to a virtual address.
@@ -829,30 +820,7 @@ impl<'t> Iterator for YkPTBlockIterator<'t> {
     type Item = Result<Block, HWTracerError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // Compute the value the iterator will give out on a subsequent call to `next()`.
-        //
-        // It may be tempting to immediately extract `self.next` from its `Cell` and match on that,
-        // but we can't because the call to `self.do_next()` mutates the *current* `self.next()` in
-        // the case where disassembly of foreign code is required.
-        let new_next = match self.next.get_mut() {
-            Ok(_) => self.do_next(),
-            Err(IteratorError::NoMorePackets) => {
-                // If the iterator is exhausted, it remains exhausted.
-                return None;
-            }
-            Err(IteratorError::HWTracerError(HWTracerError::Unrecoverable(s))) => {
-                return Some(Err(HWTracerError::Unrecoverable(s.clone())));
-            }
-            Err(_) => {
-                // In the case where the iterator yields an error for the first time, subsequent
-                // iterator pumps will yield `NoMorePackets`. It would have been nice to "pin" the
-                // initial error, giving that out for each subsequent call to `next()`, but that
-                // would require us to clone the error. That is hard for `HWTracerError`, because
-                // one variant contains a `dyn Error` which isn't `Clone`.
-                return None;
-            }
-        };
-        match self.next.replace(new_next) {
+        match self.do_next() {
             Ok(b) => Some(Ok(b)),
             Err(IteratorError::NoMorePackets) => None,
             Err(IteratorError::HWTracerError(e)) => Some(Err(e)),
