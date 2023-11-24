@@ -43,6 +43,8 @@ pub struct CallInfo {
     return_off: u64,
     /// Offset of the target of the call (if known statically).
     target_off: Option<u64>,
+    /// Indicates if the call is direct (true) or indirect (false).
+    direct: bool,
 }
 
 impl CallInfo {
@@ -56,6 +58,10 @@ impl CallInfo {
 
     pub fn target_off(&self) -> Option<u64> {
         self.target_off
+    }
+
+    pub fn is_direct(&self) -> bool {
+        self.direct
     }
 }
 
@@ -161,10 +167,12 @@ impl BlockMap {
                     debug_assert!(callsite_off < return_off);
                     let target = crsr.read_u64::<NativeEndian>().unwrap();
                     let target_off = if target != 0 { Some(target) } else { None };
+                    let direct = crsr.read_u8().unwrap() == 1;
                     call_offs.push(CallInfo {
                         callsite_off,
                         return_off,
                         target_off,
+                        direct,
                     })
                 }
 
