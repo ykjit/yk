@@ -35,13 +35,24 @@ pub extern "C" fn __hwykpt_stop_collector(tc: *mut Box<dyn ThreadTracer>) -> *mu
     Box::into_raw(Box::new(trace)) as *mut c_void
 }
 
+use hwtracer::errors::HWTracerError;
+
 /// Decode the specified trace and iterate over the resulting blocks.
+///
+/// Returns `true` on success, or `false` if there was a temporary error.
+///
+/// Panics on fatal errors.
 ///
 /// Used for benchmarks.
 #[no_mangle]
-pub extern "C" fn __hwykpt_decode_trace(trace: *mut Box<dyn Trace>) {
+pub extern "C" fn __hwykpt_decode_trace(trace: *mut Box<dyn Trace>) -> bool {
     let trace: Box<Box<dyn Trace>> = unsafe { Box::from_raw(trace) };
     for b in trace.iter_blocks() {
-        b.unwrap();
+        match b {
+            Ok(_) => (),
+            Err(HWTracerError::Temporary(_)) => return false,
+            Err(_) => panic!(),
+        }
     }
+    true
 }

@@ -5,6 +5,7 @@
 #define _GNU_SOURCE
 
 #include <err.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,6 +15,9 @@
 
 #define BM_NATIVE 0
 #define BM_DISASM 1
+
+// The number of temporary failures we will tolerate before failing.
+#define MAX_TRIES 3
 
 __attribute__((noinline)) uint64_t native(uint64_t iters) {
   uint64_t sum = 0;
@@ -43,7 +47,8 @@ __attribute__((noinline)) uint64_t disasm(uint64_t iters) {
   return res;
 }
 
-void collect_and_decode(int benchmark, size_t param) {
+// Returns `true` on success, or `false` if the benchmark needs to be re-tried.
+bool collect_and_decode(int benchmark, size_t param) {
   uint64_t res;
 
   void *tc = __hwykpt_start_collector();
@@ -57,7 +62,7 @@ void collect_and_decode(int benchmark, size_t param) {
   void *trace = __hwykpt_stop_collector(tc);
   NOOPT_VAL(res);
 
-  __hwykpt_decode_trace(trace);
+  return __hwykpt_decode_trace(trace);
 }
 
 void usage(void) {
@@ -69,5 +74,12 @@ int main(int argc, char **argv) {
   if (argc != 3)
     usage();
 
-  collect_and_decode(atoi(argv[1]), atoi(argv[2]));
+  for (int i = MAX_TRIES; i > 0; i--) {
+    if (collect_and_decode(atoi(argv[1]), atoi(argv[2]))) {
+      return EXIT_SUCCESS;
+    }
+  }
+
+  fprintf(stderr, "fatal: exceeded max re-tries\n");
+  return EXIT_FAILURE;
 }
