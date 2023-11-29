@@ -1,5 +1,6 @@
 // Functions exported only for testing.
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -39,4 +40,4 @@ void __yktrace_hwt_mapper_blockmap_free(void *mapper);
 void *__hwykpt_start_collector(void);
 void *__hwykpt_stop_collector(void *tc);
 void __hwykpt_libipt_vs_ykpt(void *trace);
-void __hwykpt_decode_trace(void *trace);
+bool __hwykpt_decode_trace(void *trace);
