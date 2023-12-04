@@ -98,7 +98,8 @@ impl Compiler for JITCLLVM {
             di_fd,
             di_tmpname_c,
         );
-        assert_ne!(ret, ptr::null());
+        // This test suite does no actual code-generation.
+        assert_eq!(ret, ptr::null());
     }
 }
 

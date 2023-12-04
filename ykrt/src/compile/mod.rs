@@ -154,11 +154,9 @@ impl CompiledTrace {
         let aotvals = slice[3] as *mut c_void;
         let guardcount = slice[4];
 
-        // Parse the stackmap of this trace and cache it. The original data allocated by memman.cc
-        // is now no longer needed and can be freed.
+        // Parse the stackmap of this trace and cache it.
         let smslice = unsafe { slice::from_raw_parts(smptr as *mut u8, smsize) };
         let smap = StackMapParser::parse(smslice).unwrap();
-        unsafe { libc::munmap(smptr as *mut c_void, smsize) };
 
         // We heap allocated this array in yktracec to pass the data here. Now that we've
         // extracted it we no longer need to keep the array around.
@@ -218,6 +216,7 @@ impl Drop for CompiledTrace {
         // The memory holding the AOT live values needs to live as long as the trace. Now that we
         // no longer need the trace, this can be freed too.
         unsafe { libc::free(self.aotvals.0 as *mut c_void) };
+        // FIXME: This should drop the JITted code.
     }
 }
 

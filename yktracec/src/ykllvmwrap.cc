@@ -6,7 +6,7 @@
 
 #include "llvm-c/Orc.h"
 #include "llvm/ExecutionEngine/ExecutionEngine.h"
-#include "llvm/ExecutionEngine/MCJIT.h"
+#include "llvm/ExecutionEngine/Orc/LLJIT.h"
 #include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
 #include "llvm/IR/AssemblyAnnotationWriter.h"
 #include "llvm/IR/DIBuilder.h"
@@ -34,7 +34,7 @@
 #include <unistd.h>
 
 #include "jitmodbuilder.h"
-#include "memman.h"
+#include "stackmap_oll_plugin.h"
 
 // When we create a compilation unit for our JIT debug info, LLVM forces us to
 // choose a language from one of those "recognised" by the DWARF spec (see
@@ -234,50 +234,70 @@ __yktracec_get_aot_module(struct BitcodeSection *Bitcode) {
       const_cast<ThreadSafeModule *>(ThreadAOTMod));
 }
 
-// Compile a module in-memory and return a pointer to its function.
+// JIT compile an LLVM module containing a trace.
+//
+// FIXME: note that `GlobalMappings` is unused since the introduction of the
+// ORC code generator. Kill it?
 extern "C" void *compileModule(string TraceName, Module *M,
                                map<GlobalValue *, void *> GlobalMappings,
-                               void *LiveAOTVals, size_t GuardCount) {
+                               void *LiveAOTVals, size_t GuardCount,
+                               ThreadSafeModule *AOTMod) {
   std::call_once(LLVMInitialised, initLLVM, nullptr);
 
-  // Use our own memory manager to keep track of stackmap address.
-  AllocMem SMR;
-  MemMan *memman = new MemMan();
-  memman->setStackMapStore(&SMR);
+  // Create and configure the JIT.
+  auto LLB = LLJITBuilder();
 
-  auto MPtr = std::unique_ptr<Module>(M);
-  string ErrStr;
-  ExecutionEngine *EE =
-      EngineBuilder(std::move(MPtr))
-          .setEngineKind(EngineKind::JIT)
-          .setMemoryManager(std::unique_ptr<MCJITMemoryManager>(memman))
-          .setErrorStr(&ErrStr)
-          .create();
+  // Add our plugin which helps us to find the stackmaps section.
+  std::optional<SectionExtent> SMExtent;
+  LLB.setObjectLinkingLayerCreator([&](ExecutionSession &ES, const Triple &TT) {
+    auto ObjLinkingLayer = std::make_unique<ObjectLinkingLayer>(ES);
+    ObjLinkingLayer->addPlugin(std::make_unique<StackmapOLLPlugin>(SMExtent));
+    return ObjLinkingLayer;
+  });
 
-  if (EE == nullptr)
-    errx(EXIT_FAILURE, "Couldn't compile trace: %s", ErrStr.c_str());
-
-  for (auto GM : GlobalMappings) {
-    // If a value now has no parent, then it was optimised out and LLVM will be
-    // unhappy if we try to regster a global mapping for it.
-    if (GM.first->getParent() != nullptr)
-      EE->addGlobalMapping(GM.first, GM.second);
+  Expected<std::unique_ptr<orc::LLJIT>> JIT = LLB.create();
+  if (Error E = JIT.takeError()) {
+    llvm::consumeError(std::move(E));
+    return nullptr;
   }
 
-  EE->finalizeObject();
-  if (EE->hasError())
-    errx(EXIT_FAILURE, "Couldn't compile trace: %s",
-         EE->getErrorMessage().c_str());
+  // Add the module we want to compile to the JIT.
+  auto MPtr = std::unique_ptr<Module>(M);
+  auto TSM = ThreadSafeModule(std::move(MPtr), AOTMod->getContext());
+  if (Error E = (*JIT)->addIRModule(std::move(TSM))) {
+    llvm::consumeError(std::move(E));
+    return nullptr;
+  }
+
+  // Find the JITted function of the trace. This triggers code-generation.
+  auto MaybeEntrySym = (*JIT)->lookup(TraceName);
+  if (Error E = MaybeEntrySym.takeError()) {
+    llvm::consumeError(std::move(E));
+    return nullptr;
+  }
+
+  // Obtain a pointer to the JITted function.
+  auto Entry = MaybeEntrySym.get();
+
+  // If there was a stackmap section present, find the start and length.
+  uintptr_t SMStart = 0;
+  uintptr_t SMSize = 0;
+  if (SMExtent.has_value()) {
+    SMStart = SMExtent.value().Begin;
+    SMSize = SMExtent.value().End - SMStart;
+  }
 
   // Allocate space for compiled trace address, stackmap address, and stackmap
   // size.
   // FIXME This is a temporary hack until the redesigned hot location is up.
   uintptr_t *ptr = (uintptr_t *)malloc(sizeof(uintptr_t) * 5);
-  ptr[0] = EE->getFunctionAddress(TraceName);
-  ptr[1] = reinterpret_cast<uintptr_t>(SMR.Ptr);
-  ptr[2] = SMR.Size;
+  ptr[0] = Entry.getValue();
+  ptr[1] = SMStart;
+  ptr[2] = SMSize;
   ptr[3] = reinterpret_cast<uintptr_t>(LiveAOTVals);
   ptr[4] = GuardCount;
+
+  (void)(*JIT).release(); // FIXME: Leaking the JITted code here!
 
   return ptr;
 }
@@ -449,9 +469,16 @@ void *compileIRTrace(FN Func, char *FuncNames[], size_t BBs[], size_t TraceLen,
     rewriteDebugInfo(JITMod, TraceName, DebugInfoFD,
                      filesystem::path(DebugInfoPath));
 
+#ifdef YK_TESTING
+  if (Func == createModuleForTraceCompilerTests) {
+    // The "trace_compiler" suite doesn't require any code generation.
+    return nullptr;
+  }
+#endif
+
   // Compile IR trace and return a pointer to its function.
   return compileModule(TraceName, JITMod, GlobalMappings, AOTMappingVec,
-                       GuardCount);
+                       GuardCount, ThreadAOTMod);
 }
 
 extern "C" void *__yktracec_irtrace_compile(
