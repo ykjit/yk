@@ -20,10 +20,9 @@ two halves independently (in parallel). The search continues recursively until
 the search space is exhausted. Upon termination the final accept list is
 printed.
 """
-import argparse, io, os, random, shutil, subprocess, sys, time, queue 
+import argparse, os, random, shutil, subprocess, sys, time, queue 
 from dataclasses import dataclass
 from multiprocessing import Manager, Process, Queue, Value
-from subprocess import PIPE, Popen
 import cargo_run
 
 # Stages in an LTO pipeline where optimisation passes can happen.
@@ -72,7 +71,26 @@ def split_passes(passes_string):
     temp_part = []      
     paren_stack = []     
     angle_stack = []    
-    
+   
+    for c in passes_string:
+        if c == '(':
+            paren_stack.append(c) 
+        elif c == ')':
+            paren_stack.pop() 
+        
+        if c == '<':
+            angle_stack.append(c) 
+        elif c == '>':
+            angle_stack.pop() 
+
+        if c == '.' and not paren_stack and not angle_stack:
+            part = ''.join(temp_part).strip()
+            if part: 
+                parts.append(part)
+            temp_part = []
+        else:
+            temp_part.append(c)
+
     i = 0  
     while i < len(passes_string): # change the while loop to for loop
         char = passes_string[i]
@@ -105,8 +123,7 @@ def split_passes(passes_string):
     return parts
 
 def get_all_passes(is_prelink):
-    #cmd = get_opt_cmd(is_prelink)
-    cmd = "opt -passes='lto-pre-link<O2>' -print-pipeline-passes < /dev/null 2>/dev/null"
+    cmd = get_opt_cmd(is_prelink)
     sout = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     sout = sout.stdout.decode('utf-8')
     pass_descrs = split_passes(sout)
@@ -141,15 +158,11 @@ def test_pipeline(logf, pl):
 
     print(f"\033[91m!!!!!!\033[0m")
     
-    # p = subprocess.Popen("sh run_tests.sh 2>&1", cwd=CWD, shell=True,
-    #           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    # sout, serr =  p.communicate()
-    ret, time = cargo_run.run_test("/home/research/yk_pv", env=env)
+    ret, time = cargo_run.run_test("/home/shreei/research/yk_pv", env=env)
     
     print(f"\033[91m@@@@@@@@@@\033[0m")
     print(f"\033[92m return code': {ret} \033[0m")
     if ret == 0:
-        # val = sout.strip().split('\n')[-1]
         print(" [OK]")
         print(f"\033[92m time: {time}\033[0m")
         log(logf, str(pl) + ": OK\n")
@@ -237,7 +250,7 @@ def evaluate_fitness(glogf, is_prelink, entity, passes):
             try_passes.append(passes[i])
     log(glogf, f"\ncurrently evaluating {try_passes}\n")
     config = get_pipeline_config(is_prelink, try_passes)
-    ret, exec_time = test_pipeline(logf, config) 
+    ret, exec_time = test_pipeline(glogf, config) 
     if ret:
             exec_time = float(exec_time)  # Convert exec_time to a float
             return  exec_time
@@ -263,16 +276,13 @@ def mutate(entity, mutation_rate):
     return mutated_entity
 
 def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate, generations, target_fitness, passes):
-    #config = get_pipeline_config(is_prelink, ok_passes, try_passes)
     population = []
     fitness_scores = []
 
     for _ in range(population_size):
         entity = [random.randint(0,1) for _ in range(len(passes))]
         population.append(entity)
-    
-    # fitness_scores = [evaluate_fitness(logf, is_prelink, entity, passes) for entity in population]
-    # print(f"\033[38;5;128m {fitness_scores}\033[0m")
+
     for generation in range(generations):
         log(glogf, "=========================================================")
         log(glogf, f"\ngeneration: {generation}\n") 
@@ -307,11 +317,8 @@ def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate, generat
             child2 = mutate(child2, mutation_rate)
             new_population.extend([child1, child2])
         
-        # Replace the old population with the new generation
         population = new_population
 
-    # Return the best entity in the final population
- 
     best_entity = population[fitness_scores.index(min(fitness_scores))]
     print(f"\033[35;5;128; m{best_entity}\033[0m")
     return best_entity  
@@ -324,7 +331,7 @@ def main(logf, glogf, is_prelink):
     target_fitness = 8 #random time
     best_entity = genetic_algorithm(glogf,
         is_prelink,
-        population_size = len(passes) * 10,
+        population_size = len(passes) * 2,
         mutation_rate = 0.1,
         generations = 100,
         target_fitness = target_fitness,
@@ -369,6 +376,6 @@ if __name__ == "__main__":
     CWD = args.path
     print(f"PATH to interpreter: {CWD}")
 
-    with open("genetic.log", "w+") as glogf:
-        with open("passes.log", "w") as logf:
+    with open("/home/shreei/research/yk_pv/ykrt/pass_finder/genetic.log", "w+") as glogf:
+        with open("passes.log", "w+") as logf:
             main(logf, glogf, is_prelink)
