@@ -32,13 +32,6 @@ impl Compiler for JITCLLVM {
     ) -> Result<CompiledTrace, Box<dyn Error>> {
         let (func_names, bbs, trace_len) = self.encode_trace(&irtrace);
 
-        let mut faddr_keys = Vec::new();
-        let mut faddr_vals = Vec::new();
-        for k in irtrace.faddrs().iter() {
-            faddr_keys.push(k.0.as_ptr());
-            faddr_vals.push(*k.1);
-        }
-
         let (llvmbc_data, llvmbc_len) = llvmbc_section();
         let (di_tmp, di_fd, di_tmpname_c) = Self::create_debuginfo_temp_file();
 
@@ -52,9 +45,6 @@ impl Compiler for JITCLLVM {
                 func_names.as_ptr(),
                 bbs.as_ptr(),
                 trace_len,
-                faddr_keys.as_ptr(),
-                faddr_vals.as_ptr(),
-                faddr_keys.len(),
                 llvmbc_data,
                 llvmbc_len,
                 di_fd,
@@ -81,18 +71,10 @@ impl Compiler for JITCLLVM {
         let (func_names, bbs, trace_len) = self.encode_trace(&irtrace);
         let (_di_tmp, di_fd, di_tmpname_c) = Self::create_debuginfo_temp_file();
 
-        // These would only need to be populated if we were to load the resulting compiled code
-        // into the address space, which for trace compiler tests, we don't.
-        let faddr_keys = Vec::new();
-        let faddr_vals = Vec::new();
-
         let ret = yktracec::__yktracec_irtrace_compile_for_tc_tests(
             func_names.as_ptr(),
             bbs.as_ptr(),
             trace_len,
-            faddr_keys.as_ptr(),
-            faddr_vals.as_ptr(),
-            faddr_keys.len(),
             llvmbc_data,
             llvmbc_len,
             di_fd,

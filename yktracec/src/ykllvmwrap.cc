@@ -482,24 +482,22 @@ void *compileIRTrace(FN Func, char *FuncNames[], size_t BBs[], size_t TraceLen,
 }
 
 extern "C" void *__yktracec_irtrace_compile(
-    char *FuncNames[], size_t BBs[], size_t TraceLen, char *FAddrKeys[],
-    void *FAddrVals[], size_t FAddrLen, void *BitcodeData, uint64_t BitcodeLen,
-    int DebugInfoFD, char *DebugInfoPath, void *CallStack, void *AOTValsPtr,
-    size_t AOTValsLen) {
-  return compileIRTrace(createModule, FuncNames, BBs, TraceLen, FAddrKeys,
-                        FAddrVals, FAddrLen, BitcodeData, BitcodeLen,
-                        DebugInfoFD, DebugInfoPath, CallStack, AOTValsPtr,
-                        AOTValsLen);
+    char *FuncNames[], size_t BBs[], size_t TraceLen, void *BitcodeData,
+    uint64_t BitcodeLen, int DebugInfoFD, char *DebugInfoPath, void *CallStack,
+    void *AOTValsPtr, size_t AOTValsLen) {
+  return compileIRTrace(
+      createModule, FuncNames, BBs, TraceLen, std::vector<char *>().data(),
+      std::vector<void *>().data(), 0, BitcodeData, BitcodeLen, DebugInfoFD,
+      DebugInfoPath, CallStack, AOTValsPtr, AOTValsLen);
 }
 
 #ifdef YK_TESTING
 extern "C" void *__yktracec_irtrace_compile_for_tc_tests(
-    char *FuncNames[], size_t BBs[], size_t TraceLen, char *FAddrKeys[],
-    void *FAddrVals[], size_t FAddrLen, void *BitcodeData, uint64_t BitcodeLen,
-    int DebugInfoFD, char *DebugInfoPath) {
-  return compileIRTrace(createModuleForTraceCompilerTests, FuncNames, BBs,
-                        TraceLen, FAddrKeys, FAddrVals, FAddrLen, BitcodeData,
-                        BitcodeLen, DebugInfoFD, DebugInfoPath, nullptr,
-                        nullptr, 0);
+    char *FuncNames[], size_t BBs[], size_t TraceLen, void *BitcodeData,
+    uint64_t BitcodeLen, int DebugInfoFD, char *DebugInfoPath) {
+  return compileIRTrace(
+      createModuleForTraceCompilerTests, FuncNames, BBs, TraceLen,
+      std::vector<char *>().data(), std::vector<void *>().data(), 0,
+      BitcodeData, BitcodeLen, DebugInfoFD, DebugInfoPath, nullptr, nullptr, 0);
 }
 #endif
