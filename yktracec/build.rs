@@ -30,7 +30,7 @@ fn main() {
     comp.flag("-std=c++20");
     comp.file("src/ykllvmwrap.cc")
         .file("src/jitmodbuilder.cc")
-        .file("src/memman.cc")
+        .file("src/stackmap_oll_plugin.cc")
         // Lots of unused parameters in the LLVM headers.
         .flag("-Wno-unused-parameter")
         .cpp(true);

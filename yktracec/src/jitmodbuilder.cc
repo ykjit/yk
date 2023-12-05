@@ -1792,39 +1792,7 @@ createModuleForTraceCompilerTests(Module *AOTMod, char *FuncNames[],
                                   void *AOTValsPtr, size_t AOTValsLen) {
   JITModBuilder JB = JITModBuilder::CreateMocked(
       AOTMod, FuncNames, BBs, TraceLen, FAddrKeys, FAddrVals, FAddrLen);
-
   auto JITMod = JB.createModule();
-
-  // When the trace compiler encounters a non-const global in a trace, it
-  // inserts an LLVM `global external` variable referencing the variable in the
-  // interpreter's address space. In the trace compiler tests, such global
-  // variables don't actually exist so we will get symbol resolution errors
-  // when generating code for a trace.
-  //
-  // To avoid this, we insert a dummy address for all global variables in the
-  // JITMod which are external references (have no initialiser), and which
-  // don't already have a known address in the `GlobalMappings` map. Since we
-  // don't actually plan to execute the trace, their address is
-  // inconsequential. We just need it to compile.
-  for (GlobalVariable &G : JITMod->globals()) {
-    if ((!G.hasInitializer()) &&
-        (JB.GlobalMappings.find(&G) == JB.GlobalMappings.end())) {
-      JB.GlobalMappings.insert({&G, (void *)YK_INVALID_ALIGNED_VADDR});
-    }
-  }
-
-  // Provide a dummy implementation of `__llvm_optimize()`.
-  //
-  // Without this, traces will sometimes fail to compile.
-  LLVMContext &Context = JITMod->getContext();
-  llvm::FunctionType *DOFuncType =
-      llvm::FunctionType::get(Type::getVoidTy(Context), {}, false);
-  llvm::Function *DOFunc = llvm::Function::Create(
-      DOFuncType, Function::ExternalLinkage, "__llvm_deoptimize", JITMod);
-  BasicBlock *DOBB = BasicBlock::Create(Context, "", DOFunc);
-  IRBuilder<> DOBuilder(DOBB);
-  DOBuilder.CreateUnreachable();
-
   return make_tuple(JITMod, std::move(JB.TraceName),
                     std::move(JB.GlobalMappings), nullptr, 0);
 }
