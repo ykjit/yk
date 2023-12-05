@@ -1295,8 +1295,6 @@ class JITModBuilder {
   }
 
 public:
-  // Store virtual addresses for called functions.
-  std::map<GlobalValue *, void *> GlobalMappings;
   // The function name of this trace.
   string TraceName;
   // Mapping from AOT instructions to JIT instructions.
@@ -1738,27 +1736,23 @@ public:
   }
 };
 
-tuple<Module *, string, std::map<GlobalValue *, void *>, void *, size_t>
+tuple<Module *, string, void *, size_t>
 createModule(Module *AOTMod, char *FuncNames[], size_t BBs[], size_t TraceLen,
              void *CallStack, void *AOTValsPtr, size_t AOTValsLen) {
   JITModBuilder JB = JITModBuilder::Create(AOTMod, FuncNames, BBs, TraceLen,
                                            CallStack, AOTValsPtr, AOTValsLen);
   auto JITMod = JB.createModule();
-  return make_tuple(JITMod, std::move(JB.TraceName),
-                    std::move(JB.GlobalMappings), JB.LiveAOTArray,
+  return make_tuple(JITMod, std::move(JB.TraceName), JB.LiveAOTArray,
                     JB.GuardCount);
 }
 
 #ifdef YK_TESTING
-tuple<Module *, string, std::map<GlobalValue *, void *>, void *, size_t>
-createModuleForTraceCompilerTests(Module *AOTMod, char *FuncNames[],
-                                  size_t BBs[], size_t TraceLen,
-                                  void *CallStack, void *AOTValsPtr,
-                                  size_t AOTValsLen) {
+tuple<Module *, string, void *, size_t> createModuleForTraceCompilerTests(
+    Module *AOTMod, char *FuncNames[], size_t BBs[], size_t TraceLen,
+    void *CallStack, void *AOTValsPtr, size_t AOTValsLen) {
   JITModBuilder JB =
       JITModBuilder::CreateMocked(AOTMod, FuncNames, BBs, TraceLen);
   auto JITMod = JB.createModule();
-  return make_tuple(JITMod, std::move(JB.TraceName),
-                    std::move(JB.GlobalMappings), nullptr, 0);
+  return make_tuple(JITMod, std::move(JB.TraceName), nullptr, 0);
 }
 #endif
