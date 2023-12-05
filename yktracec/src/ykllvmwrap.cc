@@ -408,7 +408,6 @@ void rewriteDebugInfo(Module *M, string TraceName, int FD,
 // Returns a pointer to the compiled function.
 template <typename FN>
 void *compileIRTrace(FN Func, char *FuncNames[], size_t BBs[], size_t TraceLen,
-                     char *FAddrKeys[], void *FAddrVals[], size_t FAddrLen,
                      void *BitcodeData, size_t BitcodeLen, int DebugInfoFD,
                      char *DebugInfoPath, void *CallStack, void *AOTValsPtr,
                      size_t AOTValsLen) {
@@ -430,8 +429,8 @@ void *compileIRTrace(FN Func, char *FuncNames[], size_t BBs[], size_t TraceLen,
   ThreadAOTMod->withModuleDo([&](Module &AOTMod) {
     DIP.print(DebugIR::AOT, &AOTMod);
     std::tie(JITMod, TraceName, GlobalMappings, AOTMappingVec, GuardCount) =
-        Func(&AOTMod, FuncNames, BBs, TraceLen, FAddrKeys, FAddrVals, FAddrLen,
-             CallStack, AOTValsPtr, AOTValsLen);
+        Func(&AOTMod, FuncNames, BBs, TraceLen, CallStack, AOTValsPtr,
+             AOTValsLen);
   });
 
   // If we failed to build the trace, return null.
@@ -485,19 +484,17 @@ extern "C" void *__yktracec_irtrace_compile(
     char *FuncNames[], size_t BBs[], size_t TraceLen, void *BitcodeData,
     uint64_t BitcodeLen, int DebugInfoFD, char *DebugInfoPath, void *CallStack,
     void *AOTValsPtr, size_t AOTValsLen) {
-  return compileIRTrace(
-      createModule, FuncNames, BBs, TraceLen, std::vector<char *>().data(),
-      std::vector<void *>().data(), 0, BitcodeData, BitcodeLen, DebugInfoFD,
-      DebugInfoPath, CallStack, AOTValsPtr, AOTValsLen);
+  return compileIRTrace(createModule, FuncNames, BBs, TraceLen, BitcodeData,
+                        BitcodeLen, DebugInfoFD, DebugInfoPath, CallStack,
+                        AOTValsPtr, AOTValsLen);
 }
 
 #ifdef YK_TESTING
 extern "C" void *__yktracec_irtrace_compile_for_tc_tests(
     char *FuncNames[], size_t BBs[], size_t TraceLen, void *BitcodeData,
     uint64_t BitcodeLen, int DebugInfoFD, char *DebugInfoPath) {
-  return compileIRTrace(
-      createModuleForTraceCompilerTests, FuncNames, BBs, TraceLen,
-      std::vector<char *>().data(), std::vector<void *>().data(), 0,
-      BitcodeData, BitcodeLen, DebugInfoFD, DebugInfoPath, nullptr, nullptr, 0);
+  return compileIRTrace(createModuleForTraceCompilerTests, FuncNames, BBs,
+                        TraceLen, BitcodeData, BitcodeLen, DebugInfoFD,
+                        DebugInfoPath, nullptr, nullptr, 0);
 }
 #endif

@@ -428,8 +428,6 @@ class JITModBuilder {
 
   // Information about the trace we are compiling.
   InputTrace InpTrace;
-  // Function virtual addresses discovered from the input trace.
-  FuncAddrs FAddrs;
 
   // The LLVM type for a C `int` on the current machine.
   Type *IntTy;
@@ -1225,14 +1223,12 @@ class JITModBuilder {
 
   // OPT: https://github.com/ykjit/yk/issues/419
   JITModBuilder(Module *AOTMod, char *FuncNames[], size_t BBs[],
-                size_t TraceLen, char *FAddrKeys[], void *FAddrVals[],
-                size_t FAddrLen, CallInst *CPCI,
+                size_t TraceLen, CallInst *CPCI,
                 std::optional<std::tuple<size_t, CallInst *>> InitialResume,
                 Value *TraceInputs, void *CallStackPtr, void *AOTValsPtr,
                 size_t AOTValsLen)
       : AOTMod(AOTMod), Builder(AOTMod->getContext()),
-        InpTrace(FuncNames, BBs, TraceLen),
-        FAddrs(FAddrKeys, FAddrVals, FAddrLen), TraceInputs(TraceInputs),
+        InpTrace(FuncNames, BBs, TraceLen), TraceInputs(TraceInputs),
         ControlPointCallInst(CPCI) {
     LLVMContext &Context = AOTMod->getContext();
     JITMod = new Module("", Context);
@@ -1314,24 +1310,20 @@ public:
   JITModBuilder(JITModBuilder &&);
 
   static JITModBuilder Create(Module *AOTMod, char *FuncNames[], size_t BBs[],
-                              size_t TraceLen, char *FAddrKeys[],
-                              void *FAddrVals[], size_t FAddrLen,
-                              void *CallStack, void *AOTValsPtr,
-                              size_t AOTValsLen) {
+                              size_t TraceLen, void *CallStack,
+                              void *AOTValsPtr, size_t AOTValsLen) {
     CallInst *CPCI;
     Value *TI;
     size_t CPCIIdx;
     std::tie(CPCI, CPCIIdx, TI) = GetControlPointInfo(AOTMod);
-    return JITModBuilder(AOTMod, FuncNames, BBs, TraceLen, FAddrKeys, FAddrVals,
-                         FAddrLen, CPCI, make_tuple(CPCIIdx, CPCI), TI,
-                         CallStack, AOTValsPtr, AOTValsLen);
+    return JITModBuilder(AOTMod, FuncNames, BBs, TraceLen, CPCI,
+                         make_tuple(CPCIIdx, CPCI), TI, CallStack, AOTValsPtr,
+                         AOTValsLen);
   }
 
 #ifdef YK_TESTING
   static JITModBuilder CreateMocked(Module *AOTMod, char *FuncNames[],
-                                    size_t BBs[], size_t TraceLen,
-                                    char *FAddrKeys[], void *FAddrVals[],
-                                    size_t FAddrLen) {
+                                    size_t BBs[], size_t TraceLen) {
     LLVMContext &Context = AOTMod->getContext();
 
     // The trace compiler expects to be given a) a call to a control point, and
@@ -1363,28 +1355,14 @@ public:
     CallInst *CPCI = Builder.CreateCall(Func, {});
     Builder.CreateUnreachable();
 
-    // Populate the function address map with dummy entries for all of the
-    // functions in the AOT module, so that the trace compiler can outline
-    // calls to them if neccessary.
-    //
-    // The actual addresses inserted don't matter, as the trace compiler suite
-    // only compiles traces (without executing them).
-    std::vector<char *> NewFAddrKeys;
-    std::vector<void *> NewFAddrVals;
-    for (Function &F : AOTMod->functions()) {
-      NewFAddrKeys.push_back(const_cast<char *>(F.getName().data()));
-      NewFAddrVals.push_back((void *)YK_INVALID_ALIGNED_VADDR);
-    }
-
     // Actually make the trace compiler now.
     //
     // Note the use of the empty optional `{}` for the initial value of the
     // first frame's `BlockResumePoint`. This means that the compiler will
     // start copying instructions from the beginning of the first block in the
     // trace, instead of after the return from the control point.
-    JITModBuilder JB(AOTMod, FuncNames, BBs, TraceLen, &NewFAddrKeys[0],
-                     &NewFAddrVals[0], NewFAddrKeys.size(), CPCI, {},
-                     TraceInputs, nullptr, nullptr, 0);
+    JITModBuilder JB(AOTMod, FuncNames, BBs, TraceLen, CPCI, {}, TraceInputs,
+                     nullptr, nullptr, 0);
 
     return JB;
   }
@@ -1762,10 +1740,8 @@ public:
 
 tuple<Module *, string, std::map<GlobalValue *, void *>, void *, size_t>
 createModule(Module *AOTMod, char *FuncNames[], size_t BBs[], size_t TraceLen,
-             char *FAddrKeys[], void *FAddrVals[], size_t FAddrLen,
              void *CallStack, void *AOTValsPtr, size_t AOTValsLen) {
   JITModBuilder JB = JITModBuilder::Create(AOTMod, FuncNames, BBs, TraceLen,
-                                           FAddrKeys, FAddrVals, FAddrLen,
                                            CallStack, AOTValsPtr, AOTValsLen);
   auto JITMod = JB.createModule();
   return make_tuple(JITMod, std::move(JB.TraceName),
@@ -1777,11 +1753,10 @@ createModule(Module *AOTMod, char *FuncNames[], size_t BBs[], size_t TraceLen,
 tuple<Module *, string, std::map<GlobalValue *, void *>, void *, size_t>
 createModuleForTraceCompilerTests(Module *AOTMod, char *FuncNames[],
                                   size_t BBs[], size_t TraceLen,
-                                  char *FAddrKeys[], void *FAddrVals[],
-                                  size_t FAddrLen, void *CallStack,
-                                  void *AOTValsPtr, size_t AOTValsLen) {
-  JITModBuilder JB = JITModBuilder::CreateMocked(
-      AOTMod, FuncNames, BBs, TraceLen, FAddrKeys, FAddrVals, FAddrLen);
+                                  void *CallStack, void *AOTValsPtr,
+                                  size_t AOTValsLen) {
+  JITModBuilder JB =
+      JITModBuilder::CreateMocked(AOTMod, FuncNames, BBs, TraceLen);
   auto JITMod = JB.createModule();
   return make_tuple(JITMod, std::move(JB.TraceName),
                     std::move(JB.GlobalMappings), nullptr, 0);
