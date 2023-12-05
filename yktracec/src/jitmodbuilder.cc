@@ -498,15 +498,6 @@ class JITModBuilder {
     VMap[F] = DeclFunc;
   }
 
-  // Find the machine code corresponding to the given AOT IR function and
-  // ensure there's a mapping from its name to that machine code.
-  void addGlobalMappingForFunction(Function *CF) {
-    StringRef CFName = CF->getName();
-    void *FAddr = FAddrs[CFName.data()];
-    assert(FAddr != nullptr);
-    GlobalMappings.insert({CF, FAddr});
-  }
-
   // Generate LLVM IR to create a struct and store the given values.
   AllocaInst *createAndFillStruct(IRBuilder<> &Builder,
                                   std::vector<Value *> Vec) {
@@ -561,7 +552,6 @@ class JITModBuilder {
           // it into a normal (outlined) call.
           if (VMap.find(CF) == VMap.end()) {
             declareFunction(CF);
-            addGlobalMappingForFunction(CF);
           }
           copyInstruction(&Builder, CI, CurBBIdx, CurInstrIdx);
           startOutlining();
