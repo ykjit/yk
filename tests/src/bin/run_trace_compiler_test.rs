@@ -38,7 +38,7 @@ fn main() -> Result<(), String> {
             BBS_ENV
         ));
     }
-    let irtrace = MappedTrace::new(bbs, HashMap::new());
+    let irtrace = MappedTrace::new(bbs);
 
     // Map the `.ll` file into the address space so that we can give a pointer to it to the trace
     // compiler. Normally (i.e. outside of testing), the trace compiler wouldn't deal with textual
