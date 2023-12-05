@@ -235,13 +235,8 @@ __yktracec_get_aot_module(struct BitcodeSection *Bitcode) {
 }
 
 // JIT compile an LLVM module containing a trace.
-//
-// FIXME: note that `GlobalMappings` is unused since the introduction of the
-// ORC code generator. Kill it?
-extern "C" void *compileModule(string TraceName, Module *M,
-                               map<GlobalValue *, void *> GlobalMappings,
-                               void *LiveAOTVals, size_t GuardCount,
-                               ThreadSafeModule *AOTMod) {
+extern "C" void *compileModule(string TraceName, Module *M, void *LiveAOTVals,
+                               size_t GuardCount, ThreadSafeModule *AOTMod) {
   std::call_once(LLVMInitialised, initLLVM, nullptr);
 
   // Create and configure the JIT.
@@ -408,7 +403,6 @@ void rewriteDebugInfo(Module *M, string TraceName, int FD,
 // Returns a pointer to the compiled function.
 template <typename FN>
 void *compileIRTrace(FN Func, char *FuncNames[], size_t BBs[], size_t TraceLen,
-                     char *FAddrKeys[], void *FAddrVals[], size_t FAddrLen,
                      void *BitcodeData, size_t BitcodeLen, int DebugInfoFD,
                      char *DebugInfoPath, void *CallStack, void *AOTValsPtr,
                      size_t AOTValsLen) {
@@ -419,7 +413,6 @@ void *compileIRTrace(FN Func, char *FuncNames[], size_t BBs[], size_t TraceLen,
 
   Module *JITMod;
   std::string TraceName;
-  std::map<GlobalValue *, void *> GlobalMappings;
   void *AOTMappingVec;
   size_t GuardCount;
 
@@ -429,9 +422,8 @@ void *compileIRTrace(FN Func, char *FuncNames[], size_t BBs[], size_t TraceLen,
   // it isn't needed for compilation.
   ThreadAOTMod->withModuleDo([&](Module &AOTMod) {
     DIP.print(DebugIR::AOT, &AOTMod);
-    std::tie(JITMod, TraceName, GlobalMappings, AOTMappingVec, GuardCount) =
-        Func(&AOTMod, FuncNames, BBs, TraceLen, FAddrKeys, FAddrVals, FAddrLen,
-             CallStack, AOTValsPtr, AOTValsLen);
+    std::tie(JITMod, TraceName, AOTMappingVec, GuardCount) = Func(
+        &AOTMod, FuncNames, BBs, TraceLen, CallStack, AOTValsPtr, AOTValsLen);
   });
 
   // If we failed to build the trace, return null.
@@ -477,29 +469,25 @@ void *compileIRTrace(FN Func, char *FuncNames[], size_t BBs[], size_t TraceLen,
 #endif
 
   // Compile IR trace and return a pointer to its function.
-  return compileModule(TraceName, JITMod, GlobalMappings, AOTMappingVec,
-                       GuardCount, ThreadAOTMod);
+  return compileModule(TraceName, JITMod, AOTMappingVec, GuardCount,
+                       ThreadAOTMod);
 }
 
 extern "C" void *__yktracec_irtrace_compile(
-    char *FuncNames[], size_t BBs[], size_t TraceLen, char *FAddrKeys[],
-    void *FAddrVals[], size_t FAddrLen, void *BitcodeData, uint64_t BitcodeLen,
-    int DebugInfoFD, char *DebugInfoPath, void *CallStack, void *AOTValsPtr,
-    size_t AOTValsLen) {
-  return compileIRTrace(createModule, FuncNames, BBs, TraceLen, FAddrKeys,
-                        FAddrVals, FAddrLen, BitcodeData, BitcodeLen,
-                        DebugInfoFD, DebugInfoPath, CallStack, AOTValsPtr,
-                        AOTValsLen);
+    char *FuncNames[], size_t BBs[], size_t TraceLen, void *BitcodeData,
+    uint64_t BitcodeLen, int DebugInfoFD, char *DebugInfoPath, void *CallStack,
+    void *AOTValsPtr, size_t AOTValsLen) {
+  return compileIRTrace(createModule, FuncNames, BBs, TraceLen, BitcodeData,
+                        BitcodeLen, DebugInfoFD, DebugInfoPath, CallStack,
+                        AOTValsPtr, AOTValsLen);
 }
 
 #ifdef YK_TESTING
 extern "C" void *__yktracec_irtrace_compile_for_tc_tests(
-    char *FuncNames[], size_t BBs[], size_t TraceLen, char *FAddrKeys[],
-    void *FAddrVals[], size_t FAddrLen, void *BitcodeData, uint64_t BitcodeLen,
-    int DebugInfoFD, char *DebugInfoPath) {
+    char *FuncNames[], size_t BBs[], size_t TraceLen, void *BitcodeData,
+    uint64_t BitcodeLen, int DebugInfoFD, char *DebugInfoPath) {
   return compileIRTrace(createModuleForTraceCompilerTests, FuncNames, BBs,
-                        TraceLen, FAddrKeys, FAddrVals, FAddrLen, BitcodeData,
-                        BitcodeLen, DebugInfoFD, DebugInfoPath, nullptr,
-                        nullptr, 0);
+                        TraceLen, BitcodeData, BitcodeLen, DebugInfoFD,
+                        DebugInfoPath, nullptr, nullptr, 0);
 }
 #endif

@@ -57,14 +57,12 @@ pub(crate) trait RawTrace: Send {
 pub struct MappedTrace {
     /// The blocks of the trace.
     blocks: Vec<TracedAOTBlock>,
-    /// Function addresses discovered dynamically via the trace. symbol-name -> address.
-    faddrs: HashMap<CString, *const c_void>,
 }
 
 impl MappedTrace {
-    pub fn new(blocks: Vec<TracedAOTBlock>, faddrs: HashMap<CString, *const c_void>) -> Self {
+    pub fn new(blocks: Vec<TracedAOTBlock>) -> Self {
         debug_assert!(blocks.len() < usize::MAX);
-        Self { blocks, faddrs }
+        Self { blocks }
     }
 
     pub fn len(&self) -> usize {
@@ -73,10 +71,6 @@ impl MappedTrace {
 
     pub fn blocks(&self) -> &Vec<TracedAOTBlock> {
         &self.blocks
-    }
-
-    pub fn faddrs(&self) -> &HashMap<CString, *const c_void> {
-        &self.faddrs
     }
 }
 

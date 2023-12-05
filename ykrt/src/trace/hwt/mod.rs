@@ -54,6 +54,6 @@ impl RawTrace for HWTTrace {
             return Err(InvalidTraceError::EmptyTrace);
         }
 
-        Ok(MappedTrace::new(mapped, mt.faddrs()))
+        Ok(MappedTrace::new(mapped))
     }
 }

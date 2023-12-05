@@ -11,19 +11,11 @@ use ykaddr::{
 };
 
 /// Maps each entry of a hardware trace back to the IR block from which it was compiled.
-pub(crate) struct HWTMapper {
-    faddrs: HashMap<CString, *const c_void>,
-}
+pub(crate) struct HWTMapper;
 
 impl HWTMapper {
     pub fn new() -> Self {
-        Self {
-            faddrs: HashMap::new(),
-        }
-    }
-
-    pub fn faddrs(self) -> HashMap<CString, *const c_void> {
-        self.faddrs
+        Self {}
     }
 
     /// Maps one hwtracer block to one or more AOT LLVM IR blocks.
@@ -111,10 +103,6 @@ impl HWTMapper {
                     sio.dli_fname().unwrap().to_str().unwrap()
                 );
                 if let Some(sym_name) = sio.dli_sname() {
-                    if !self.faddrs.contains_key(sym_name) {
-                        self.faddrs
-                            .insert(sym_name.to_owned(), sio.dli_saddr() as *const c_void);
-                    }
                     for bb in ent.value.corr_bbs() {
                         ret.push(Some(TracedAOTBlock::new_mapped(
                             sym_name.to_owned(),
