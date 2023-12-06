@@ -303,7 +303,7 @@ impl FrameReconstructor {
                         if *extra != 0 {
                             // The stackmap has recorded an additional register we need to write
                             // this value to.
-                            registers[usize::try_from(*extra - 1).unwrap()] = val;
+                            registers[usize::from(*extra - 1)] = val;
                         }
                         if i == 0 {
                             // skip first frame
