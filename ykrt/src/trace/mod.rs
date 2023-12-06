@@ -5,9 +5,7 @@
 #![allow(clippy::missing_safety_doc)]
 
 mod errors;
-use libc::c_void;
 use std::{
-    collections::HashMap,
     error::Error,
     ffi::{CStr, CString},
     sync::Arc,

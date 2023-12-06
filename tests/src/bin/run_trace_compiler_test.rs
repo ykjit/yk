@@ -3,7 +3,7 @@
 //! Each invocation of this program runs one of the trace compiler tests found in the
 //! `trace_compiler` directory of this crate.
 
-use std::{collections::HashMap, convert::TryInto, env, error::Error, ffi::CString, fs::File};
+use std::{convert::TryInto, env, error::Error, ffi::CString, fs::File};
 use ykrt::{
     compile::compile_for_tc_tests,
     trace::{MappedTrace, TracedAOTBlock},

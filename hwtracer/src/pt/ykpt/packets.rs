@@ -68,7 +68,7 @@ impl TargetIP {
             0b001 => {
                 // The result is bytes 63..=16 from `prev_tip` and bytes 15..=0 from `ip`.
                 if let Self::Ip16(v) = self {
-                    prev_tip.unwrap() & 0xffffffffffff0000 | usize::try_from(*v).unwrap()
+                    prev_tip.unwrap() & 0xffffffffffff0000 | usize::from(*v)
                 } else {
                     unreachable!();
                 }

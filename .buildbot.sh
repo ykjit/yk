@@ -65,7 +65,7 @@ PATH=${YKB_YKLLVM_BIN_DIR}:${PATH} cargo xtask cfmt
 git diff --exit-code --ignore-submodules
 
 # Check for annoying compiler warnings in each package.
-WARNING_DEFINES="-D unused-variables -D dead-code"
+WARNING_DEFINES="-D unused-variables -D dead-code -D unused-imports"
 for p in $(sed -n -e '/^members =/,/^\]$/{/^members =/d;/^\]$/d;p;}' \
   Cargo.toml \
   | \
