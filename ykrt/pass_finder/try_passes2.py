@@ -20,9 +20,10 @@ two halves independently (in parallel). The search continues recursively until
 the search space is exhausted. Upon termination the final accept list is
 printed.
 """
-import argparse, os, random, shutil, subprocess, sys, time, queue 
+import argparse, io, os, random, shutil, subprocess, sys, time, queue 
 from dataclasses import dataclass
 from multiprocessing import Manager, Process, Queue, Value
+from subprocess import PIPE, Popen
 import cargo_run
 
 # Stages in an LTO pipeline where optimisation passes can happen.
@@ -71,26 +72,32 @@ def split_passes(passes_string):
     temp_part = []      
     paren_stack = []     
     angle_stack = []    
+    
+    i = 0  
+    while i < len(passes_string): # change the while loop to for loop
+        char = passes_string[i]
 
-    for c in passes_string:
-        if c == '(':
-            paren_stack.append(c) 
-        elif c == ')':
-            paren_stack.pop() 
-        
-        if c == '<':
-            angle_stack.append(c) 
-        elif c == '>':
-            angle_stack.pop() 
+        if char == '(':
+            paren_stack.append(char)
+        elif char == ')':
+                paren_stack.pop()
 
-        if c == ',' and not paren_stack and not angle_stack:
+        if char == '<':
+            angle_stack.append(char)
+        elif char == '>':
+            if angle_stack:
+                angle_stack.pop()
+
+        if char == ',' and not paren_stack and not angle_stack:
             part = ''.join(temp_part).strip()
-            if part: 
+            if part:  
                 parts.append(part)
-            temp_part = []
-        else:
-            temp_part.append(c)
- 
+            temp_part = []  
+        else: 
+            temp_part.append(char)
+
+        i += 1  
+    
     part = ''.join(temp_part).strip()
     if part:  
         parts.append(part)
@@ -98,7 +105,8 @@ def split_passes(passes_string):
     return parts
 
 def get_all_passes(is_prelink):
-    cmd = get_opt_cmd(is_prelink)
+    #cmd = get_opt_cmd(is_prelink)
+    cmd = "opt -passes='lto-pre-link<O2>' -print-pipeline-passes < /dev/null 2>/dev/null"
     sout = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     sout = sout.stdout.decode('utf-8')
     pass_descrs = split_passes(sout)
@@ -118,7 +126,7 @@ def get_all_passes(is_prelink):
     print(f"Found {len(passes)} passes")    
     return passes
 
-def test_pipeline(logf, pl, cwd):
+def test_pipeline(logf, pl):
     sys.stdout.write(str(pl) + "...")
     sys.stdout.flush()
 
@@ -133,11 +141,15 @@ def test_pipeline(logf, pl, cwd):
 
     print(f"\033[91m!!!!!!\033[0m")
     
-    ret, time = cargo_run.run_test(cwd, env=env)
+    # p = subprocess.Popen("sh run_tests.sh 2>&1", cwd=CWD, shell=True,
+    #           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    # sout, serr =  p.communicate()
+    ret, time = cargo_run.run_test("/home/research/yk_pv", env=env)
     
     print(f"\033[91m@@@@@@@@@@\033[0m")
     print(f"\033[92m return code': {ret} \033[0m")
     if ret == 0:
+        # val = sout.strip().split('\n')[-1]
         print(" [OK]")
         print(f"\033[92m time: {time}\033[0m")
         log(logf, str(pl) + ": OK\n")
@@ -218,14 +230,14 @@ def binary_split(logf, passes, is_prelink):
         print(72 * "=")
         print(list_of_passes_to_str(ok_passes))
 
-def evaluate_fitness(glogf, is_prelink, entity, passes, cwd):
+def evaluate_fitness(glogf, is_prelink, entity, passes):
     try_passes = []
     for i, bit in enumerate(entity):
         if bit == 1:
             try_passes.append(passes[i])
     log(glogf, f"\ncurrently evaluating {try_passes}\n")
     config = get_pipeline_config(is_prelink, try_passes)
-    ret, exec_time = test_pipeline(glogf, config, cwd) 
+    ret, exec_time = test_pipeline(logf, config) 
     if ret:
             exec_time = float(exec_time)  # Convert exec_time to a float
             return  exec_time
@@ -250,20 +262,23 @@ def mutate(entity, mutation_rate):
             mutated_entity.append(bit)
     return mutated_entity
 
-def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate, generations, target_fitness, passes, cwd):
+def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate, generations, target_fitness, passes):
+    #config = get_pipeline_config(is_prelink, ok_passes, try_passes)
     population = []
     fitness_scores = []
 
     for _ in range(population_size):
         entity = [random.randint(0,1) for _ in range(len(passes))]
         population.append(entity)
-
+    
+    # fitness_scores = [evaluate_fitness(logf, is_prelink, entity, passes) for entity in population]
+    # print(f"\033[38;5;128m {fitness_scores}\033[0m")
     for generation in range(generations):
         log(glogf, "=========================================================")
         log(glogf, f"\ngeneration: {generation}\n") 
         fitness_scores.clear()
         # Evaluate fitness for each entity in the population
-        fitness_scores = [evaluate_fitness(glogf, is_prelink, entity, passes, cwd) for entity in population]
+        fitness_scores = [evaluate_fitness(glogf, is_prelink, entity, passes) for entity in population]
         log(glogf, f"\nfitness score: {fitness_scores}\n")
         log(glogf, "=========================================================")
         # TODO: consider execution time for hyperparameter tuning
@@ -292,13 +307,16 @@ def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate, generat
             child2 = mutate(child2, mutation_rate)
             new_population.extend([child1, child2])
         
+        # Replace the old population with the new generation
         population = new_population
 
+    # Return the best entity in the final population
+ 
     best_entity = population[fitness_scores.index(min(fitness_scores))]
     print(f"\033[35;5;128; m{best_entity}\033[0m")
     return best_entity  
 
-def main(logf, glogf, is_prelink, cwd):
+def main(logf, glogf, is_prelink):
     #sanity check, test script should work with no extra passes.
     # assert(test_pipeline(logf, PipelineConfig([], [])))
 
@@ -306,12 +324,11 @@ def main(logf, glogf, is_prelink, cwd):
     target_fitness = 8 #random time
     best_entity = genetic_algorithm(glogf,
         is_prelink,
-        population_size = len(passes) * 2,
+        population_size = len(passes) * 10,
         mutation_rate = 0.1,
-        generations = 1,
+        generations = 100,
         target_fitness = target_fitness,
         passes = passes,
-        cwd = cwd,
     )
     final_passes = []
     for i, bit in enumerate(best_entity):
@@ -350,9 +367,8 @@ if __name__ == "__main__":
 
     # Set the global variable with the parsed path
     CWD = args.path
-    genetic_log_path = os.path.join(CWD, "ykrt/pass_finder/genetic.log")
     print(f"PATH to interpreter: {CWD}")
 
-    with open(genetic_log_path, "w+") as glogf:
-        with open("passes.log", "w+") as logf:
-            main(logf, glogf, is_prelink, CWD)
+    with open("genetic.log", "w+") as glogf:
+        with open("passes.log", "w") as logf:
+            main(logf, glogf, is_prelink)

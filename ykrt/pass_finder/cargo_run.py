@@ -8,18 +8,18 @@ def run_test(yk_path,env=None, n=1) :
     prelink_passes = (env or os.environ).get('PRELINK_PASSES', 'Not Set')
     print(f"\033[93mPRELINK_PASSES: {prelink_passes}\033[0m")
     os.chdir(yk_path)
-    r = subprocess.run(["timeout 50 cargo test"], shell=True, env=env or os.environ)
+    r = subprocess.run(["timeout 20 cargo test"], shell=True, env=env or os.environ)
     # assert r.returncode == 0
     if r.returncode == 0:
         os.chdir("/home/shreei/research/yklua")
         times = []
         for _ in range(n):
             subprocess.run(["make clean"], shell=True, env=env)
-            c = subprocess.run(["make && sh test.sh"], shell=True, env=env or os.environ)
+            c = subprocess.run(["make && timeout 2 sh test.sh"], shell=True, env=env or os.environ)
             # assert c.returncode == 0
             if c.returncode == 0:
                 before = time.time()
-                c_test = subprocess.run(["sh run.sh"], shell=True, env=env or os.environ)
+                c_test = subprocess.run(["timeout 2 sh run.sh"], shell=True, env=env or os.environ)
                 elapsed = time.time() - before
                 times.append(elapsed)
         # assert c_test.returncode == 0
