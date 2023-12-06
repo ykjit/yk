@@ -5,11 +5,14 @@ use llvm_sys::{core::*, prelude::LLVMValueRef};
 use object::{Object, ObjectSection};
 use std::{
     convert::TryFrom,
-    env,
     ffi::{c_void, CStr},
     fs, ptr, slice,
     sync::LazyLock,
     thread,
+};
+use ykaddr::{
+    addr::off_to_vaddr,
+    obj::{PHDR_MAIN_OBJ, SELF_BIN_PATH},
 };
 use yksmp::{Location as SMLocation, PrologueInfo, Record, StackMapParser};
 
@@ -31,20 +34,19 @@ impl AOTStackmapInfo {
 }
 
 static AOT_STACKMAPS: LazyLock<AOTStackmapInfo> = LazyLock::new(|| {
-    // Load the stackmap from the binary to parse in the stackmaps.
-    // FIXME: Don't use current_exe.
-    let pathb = env::current_exe().unwrap();
-    let file = fs::File::open(pathb.as_path()).unwrap();
+    // Load the stackmap from the binary to parse in tthe stackmaps.
+    //
+    // OPT: Don't look at the ELF binary to do this. Get ykllvm to insert start/end symbols for the
+    // section and look those up instead.
+    let file = fs::File::open(&SELF_BIN_PATH.as_path()).unwrap();
     let exemmap = unsafe { memmap2::Mmap::map(&file).unwrap() };
     let object = object::File::parse(&*exemmap).unwrap();
     let sec = object.section_by_name(".llvm_stackmaps").unwrap();
+    let sec_vaddr = off_to_vaddr(&PHDR_MAIN_OBJ, sec.address()).unwrap();
 
     // Parse the stackmap.
     let slice = unsafe {
-        slice::from_raw_parts(
-            sec.address() as *mut u8,
-            usize::try_from(sec.size()).unwrap(),
-        )
+        slice::from_raw_parts(sec_vaddr as *const _, usize::try_from(sec.size()).unwrap())
     };
     let (entries, numrecs) = StackMapParser::get_entries(slice);
     let mut pinfos = Vec::new();
