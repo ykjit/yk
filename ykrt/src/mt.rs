@@ -27,7 +27,7 @@ use crate::print_jit_state;
 use crate::{
     compile::{default_compiler, CompiledTrace, Compiler, GuardId},
     location::{HotLocation, HotLocationKind, Location, TraceFailed},
-    trace::{default_tracer, RawTrace, TraceCollector, Tracer},
+    trace::{default_tracer, TraceCollector, TraceIterator, Tracer},
     ykstats::{TimingState, YkStats},
 };
 use yktracec::promote;
@@ -278,7 +278,10 @@ impl MT {
                         print_jit_state("stop-tracing");
                         self.queue_compile_job(utrace, hl_arc, None);
                     }
-                    Err(_) => todo!(),
+                    Err(_e) => {
+                        #[cfg(feature = "yk_jitstate_debug")]
+                        print_jit_state("stop-tracing-aborted");
+                    }
                 }
             }
             TransitionControlPoint::StopSideTracing(hl_arc, sti, parent) => {
@@ -470,7 +473,7 @@ impl MT {
     ///     in the `hl_arc`.
     fn queue_compile_job(
         self: &Arc<Self>,
-        utrace: Box<dyn RawTrace>,
+        trace_iter: Box<dyn TraceIterator>,
         hl_arc: Arc<Mutex<HotLocation>>,
         sidetrace: Option<(SideTraceInfo, Arc<CompiledTrace>)>,
     ) {
@@ -478,55 +481,45 @@ impl MT {
         let mt = Arc::clone(self);
         let do_compile = move || {
             mt.stats.timing_state(TimingState::TraceMapping);
-            match utrace.map() {
-                Ok(irtrace) => {
-                    debug_assert!(
-                        sidetrace.is_none()
-                            || matches!(hl_arc.lock().kind, HotLocationKind::Compiled(_))
-                    );
-                    mt.stats.timing_state(TimingState::None);
-                    let compiler = {
-                        let lk = mt.compiler.lock();
-                        Arc::clone(&*lk)
-                    };
-                    mt.stats.timing_state(TimingState::Compiling);
-                    let guardid = sidetrace.as_ref().map(|x| x.0.guardid);
-                    match compiler.compile(
-                        Arc::clone(&mt),
-                        irtrace,
-                        sidetrace.as_ref().map(|x| x.0),
-                        Arc::clone(&hl_arc),
-                    ) {
-                        Ok(ct) => {
-                            let mut hl = hl_arc.lock();
-                            match &hl.kind {
-                                HotLocationKind::Compiled(_) => {
-                                    // The `unwrap`s cannot fail because of the condition contained
-                                    // in the `debug_assert` above: if `sidetrace` is not-`None`
-                                    // then `hl_arc.kind` is `Compiled`.
-                                    let ctr = sidetrace.map(|x| x.1).unwrap();
-                                    let guard = ctr.guard(guardid.unwrap());
-                                    guard.setct(Arc::new(ct));
-                                }
-                                _ => {
-                                    hl.kind = HotLocationKind::Compiled(Arc::new(ct));
-                                }
-                            }
-                            mt.stats.trace_compiled_ok();
+            let irtrace = trace_iter.collect::<Vec<_>>();
+            debug_assert!(
+                sidetrace.is_none() || matches!(hl_arc.lock().kind, HotLocationKind::Compiled(_))
+            );
+            mt.stats.timing_state(TimingState::None);
+            let compiler = {
+                let lk = mt.compiler.lock();
+                Arc::clone(&*lk)
+            };
+            mt.stats.timing_state(TimingState::Compiling);
+            let guardid = sidetrace.as_ref().map(|x| x.0.guardid);
+            match compiler.compile(
+                Arc::clone(&mt),
+                irtrace,
+                sidetrace.as_ref().map(|x| x.0),
+                Arc::clone(&hl_arc),
+            ) {
+                Ok(ct) => {
+                    let mut hl = hl_arc.lock();
+                    match &hl.kind {
+                        HotLocationKind::Compiled(_) => {
+                            // The `unwrap`s cannot fail because of the condition contained
+                            // in the `debug_assert` above: if `sidetrace` is not-`None`
+                            // then `hl_arc.kind` is `Compiled`.
+                            let ctr = sidetrace.map(|x| x.1).unwrap();
+                            let guard = ctr.guard(guardid.unwrap());
+                            guard.setct(Arc::new(ct));
                         }
-                        Err(_) => {
-                            mt.stats.trace_compiled_err();
-                            hl_arc.lock().trace_failed(&mt);
-                            // FIXME: Improve jit-state message.
-                            // See: https://github.com/ykjit/yk/issues/611
-                            #[cfg(feature = "yk_jitstate_debug")]
-                            print_jit_state("trace-compilation-aborted");
+                        _ => {
+                            hl.kind = HotLocationKind::Compiled(Arc::new(ct));
                         }
-                    };
+                    }
+                    mt.stats.trace_compiled_ok();
                 }
                 Err(_) => {
                     mt.stats.trace_compiled_err();
                     hl_arc.lock().trace_failed(&mt);
+                    // FIXME: Improve jit-state message.
+                    // See: https://github.com/ykjit/yk/issues/611
                     #[cfg(feature = "yk_jitstate_debug")]
                     print_jit_state("trace-compilation-aborted");
                 }

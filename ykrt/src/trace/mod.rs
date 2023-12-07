@@ -39,38 +39,13 @@ pub(crate) fn default_tracer() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
 
 /// Represents a thread which is currently tracing.
 pub(crate) trait TraceCollector {
-    /// Stop collecting a trace of the current thread.
-    fn stop_collector(self: Box<Self>) -> Result<Box<dyn RawTrace>, InvalidTraceError>;
+    /// Stop collecting a trace of the current thread and return an iterator which successively
+    /// produces the traced blocks.
+    fn stop_collector(self: Box<Self>) -> Result<Box<dyn TraceIterator>, InvalidTraceError>;
 }
 
-/// A raw trace resulting from a tracer.
-///
-/// Depending on the backend: the raw trace may need considerable processing to convert into basic
-/// block addresses; or it may contain those basic block addresses in an easily digestible fashion.
-pub(crate) trait RawTrace: Send {
-    fn map(self: Box<Self>) -> Result<MappedTrace, InvalidTraceError>;
-}
-
-/// A mapped trace of AOT LLVM IR blocks.
-pub struct MappedTrace {
-    /// The blocks of the trace.
-    blocks: Vec<TracedAOTBlock>,
-}
-
-impl MappedTrace {
-    pub fn new(blocks: Vec<TracedAOTBlock>) -> Self {
-        debug_assert!(blocks.len() < usize::MAX);
-        Self { blocks }
-    }
-
-    pub fn len(&self) -> usize {
-        self.blocks.len()
-    }
-
-    pub fn blocks(&self) -> &Vec<TracedAOTBlock> {
-        &self.blocks
-    }
-}
+/// An iterator which takes an underlying raw trace and successively produces [TracedAOTBlock]s.
+pub(crate) trait TraceIterator: Iterator<Item = TracedAOTBlock> + Send {}
 
 /// An AOT LLVM IR block that has been traced at JIT time.
 #[derive(Debug, Eq, PartialEq)]

@@ -4,7 +4,7 @@ use crate::{
     compile::{CompiledTrace, Compiler},
     location::HotLocation,
     mt::{SideTraceInfo, MT},
-    trace::MappedTrace,
+    trace::TracedAOTBlock,
 };
 use parking_lot::Mutex;
 use std::{
@@ -57,7 +57,7 @@ impl Compiler for JITCYk {
     fn compile(
         &self,
         _mt: Arc<MT>,
-        mtrace: MappedTrace,
+        mtrace: Vec<TracedAOTBlock>,
         sti: Option<SideTraceInfo>,
         _hl: Arc<Mutex<HotLocation>>,
     ) -> Result<CompiledTrace, Box<dyn Error>> {
@@ -88,7 +88,7 @@ impl Compiler for JITCYk {
     #[cfg(feature = "yk_testing")]
     unsafe fn compile_for_tc_tests(
         &self,
-        _irtrace: MappedTrace,
+        _irtrace: Vec<TracedAOTBlock>,
         _llvmbc_data: *const u8,
         _llvmbc_len: u64,
     ) {

@@ -1,7 +1,7 @@
 use crate::{
     location::HotLocation,
     mt::{SideTraceInfo, MT},
-    trace::MappedTrace,
+    trace::TracedAOTBlock,
 };
 use libc::c_void;
 use parking_lot::Mutex;
@@ -30,11 +30,11 @@ pub mod jitc_yk;
 
 /// The trait that every JIT compiler backend must implement.
 pub(crate) trait Compiler: Send + Sync {
-    /// Compile an [MappedTrace] into machine code.
+    /// Compile a mapped trace into machine code.
     fn compile(
         &self,
         mt: Arc<MT>,
-        irtrace: MappedTrace,
+        irtrace: Vec<TracedAOTBlock>,
         sti: Option<SideTraceInfo>,
         hl: Arc<Mutex<HotLocation>>,
     ) -> Result<CompiledTrace, Box<dyn Error>>;
@@ -42,7 +42,7 @@ pub(crate) trait Compiler: Send + Sync {
     #[cfg(feature = "yk_testing")]
     unsafe fn compile_for_tc_tests(
         &self,
-        irtrace: MappedTrace,
+        irtrace: Vec<TracedAOTBlock>,
         llvmbc_data: *const u8,
         llvmbc_len: u64,
     );
@@ -68,7 +68,11 @@ pub(crate) fn default_compiler() -> Result<Arc<dyn Compiler>, Box<dyn Error>> {
 }
 
 #[cfg(feature = "yk_testing")]
-pub unsafe fn compile_for_tc_tests(irtrace: MappedTrace, llvmbc_data: *const u8, llvmbc_len: u64) {
+pub unsafe fn compile_for_tc_tests(
+    irtrace: Vec<TracedAOTBlock>,
+    llvmbc_data: *const u8,
+    llvmbc_len: u64,
+) {
     default_compiler()
         .unwrap()
         .compile_for_tc_tests(irtrace, llvmbc_data, llvmbc_len);
