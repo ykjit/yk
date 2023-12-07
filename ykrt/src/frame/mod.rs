@@ -34,7 +34,7 @@ impl AOTStackmapInfo {
 }
 
 static AOT_STACKMAPS: LazyLock<AOTStackmapInfo> = LazyLock::new(|| {
-    // Load the stackmap from the binary to parse in tthe stackmaps.
+    // Load the stackmap from the binary to parse in the stackmaps.
     //
     // OPT: Don't look at the ELF binary to do this. Get ykllvm to insert start/end symbols for the
     // section and look those up instead.
