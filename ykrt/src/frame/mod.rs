@@ -38,7 +38,7 @@ static AOT_STACKMAPS: LazyLock<AOTStackmapInfo> = LazyLock::new(|| {
     //
     // OPT: Don't look at the ELF binary to do this. Get ykllvm to insert start/end symbols for the
     // section and look those up instead.
-    let file = fs::File::open(&SELF_BIN_PATH.as_path()).unwrap();
+    let file = fs::File::open(&*SELF_BIN_PATH).unwrap();
     let exemmap = unsafe { memmap2::Mmap::map(&file).unwrap() };
     let object = object::File::parse(&*exemmap).unwrap();
     let sec = object.section_by_name(".llvm_stackmaps").unwrap();
