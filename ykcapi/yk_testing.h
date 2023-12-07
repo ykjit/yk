@@ -7,9 +7,7 @@
 #define SW_TRACING 0
 #define HW_TRACING 1
 
-void *__yktrace_hwt_mapper_blockmap_new(void);
-size_t __yktrace_hwt_mapper_blockmap_len(void *mapper);
-void __yktrace_hwt_mapper_blockmap_free(void *mapper);
+size_t __yktrace_hwt_mapper_blockmap_len();
 
 // Blocks the compiler from optimising the specified value or expression.
 //

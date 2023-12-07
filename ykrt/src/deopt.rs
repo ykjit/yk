@@ -387,8 +387,11 @@ unsafe extern "C" fn __ykrt_deopt(
 
     let infoptr = Box::into_raw(Box::new(&mut info));
 
-    let (data, len) = crate::compile::jitc_llvm::llvmbc_section();
-    let moduleref = __yktracec_get_aot_module(&BitcodeSection { data, len });
+    let bc = crate::compile::jitc_llvm::llvmbc_section();
+    let moduleref = __yktracec_get_aot_module(&BitcodeSection {
+        data: bc.as_ptr(),
+        len: u64::try_from(bc.len()).unwrap(),
+    });
 
     // The LLVM CAPI doesn't allow us to manually lock/unlock a ThreadSafeModule, and uses a
     // call-back function instead which it runs after locking the module. This means we need to

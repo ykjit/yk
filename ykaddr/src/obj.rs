@@ -6,9 +6,11 @@ use libc::c_void;
 use libc::{
     Elf64_Addr as Elf_Addr, Elf64_Off as Elf_Off, Elf64_Word as Elf_Word, Elf64_Xword as Elf_Xword,
 };
+use memmap2;
 use phdrs;
 use std::{
     ffi::{CStr, CString},
+    fs,
     path::PathBuf,
     sync::LazyLock,
 };
@@ -130,4 +132,10 @@ pub static SELF_BIN_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
     // If this fails, there's little we can do but crash.
     let info = dladdr(addr as usize).unwrap(); // ptr to usize cast always safe.
     PathBuf::from(info.dli_fname().unwrap().to_str().unwrap())
+});
+
+// The main binary's ELF executable mapped into the address space.
+pub static SELF_BIN_MMAP: LazyLock<memmap2::Mmap> = LazyLock::new(|| {
+    let file = fs::File::open(&SELF_BIN_PATH.as_path()).unwrap();
+    unsafe { memmap2::Mmap::map(&file).unwrap() }
 });

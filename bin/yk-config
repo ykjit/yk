@@ -151,11 +151,6 @@ handle_arg() {
 
             OUTPUT="${OUTPUT} -Xlinker --lto-newpm-passes=${POSTLINK_PASSES_STR}"
 
-            # Have the `.llvmbc` and `.llvm_bb_addr_map` sections loaded into
-            # memory by the loader.
-            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-alloc-llvmbc-section"
-            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-alloc-llvmbbaddrmap-section"
-
             # Emit a basic block map section. Used for block mapping.
             OUTPUT="${OUTPUT} -Wl,--lto-basic-block-sections=labels"
 

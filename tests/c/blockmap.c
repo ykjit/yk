@@ -10,9 +10,7 @@
 #include <yk_testing.h>
 
 int main(int argc, char **argv) {
-  void *bm = __yktrace_hwt_mapper_blockmap_new();
-  assert(__yktrace_hwt_mapper_blockmap_len(bm) > 0);
-  __yktrace_hwt_mapper_blockmap_free(bm);
+  assert(__yktrace_hwt_mapper_blockmap_len() > 0);
   return (EXIT_SUCCESS);
 }
 
