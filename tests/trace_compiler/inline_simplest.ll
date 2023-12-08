@@ -1,6 +1,6 @@
 ; Run-time:
 ;   env-var: YKD_PRINT_IR=jit-pre-opt
-;   env-var: YKT_TRACE_BBS=main:0,f:0,main:0
+;   env-var: YKT_TRACE_BBS=main:0,main:1,f:0,main:1,main:2
 ;   stderr:
 ;      --- Begin jit-pre-opt ---
 ;      ...
@@ -22,9 +22,15 @@ define void @f() {
 
 define void @main() {
 entry:
+    br label %bb1
+
+bb1:
     %0 = add i32 1, 1
     call void @f()
     call void (i64, i32, ...) @llvm.experimental.stackmap(i64 1, i32 0, i32 %0)
+    br label %bb2
+
+bb2:
     %1 = add i32 %0, 2
     unreachable
 }

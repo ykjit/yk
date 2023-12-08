@@ -1,6 +1,6 @@
 ; Run-time:
 ;   env-var: YKD_PRINT_IR=jit-pre-opt
-;   env-var: YKT_TRACE_BBS=main:0,main:1
+;   env-var: YKT_TRACE_BBS=main:0,main:1,main:2
 ;   stderr:
 ;      --- Begin jit-pre-opt ---
 ;      ...
@@ -16,6 +16,9 @@
 
 define void @main() {
 entry:
+    br label %bb1
+
+bb1:
     %0 = add i32 1, 1
     br label %bb2
 
