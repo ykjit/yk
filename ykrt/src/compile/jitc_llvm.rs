@@ -5,7 +5,7 @@ use crate::{
     compile::{CompiledTrace, Compiler},
     location::HotLocation,
     mt::{SideTraceInfo, MT},
-    trace::MappedTrace,
+    trace::TracedAOTBlock,
 };
 use libc::dlsym;
 use parking_lot::Mutex;
@@ -26,7 +26,7 @@ impl Compiler for JITCLLVM {
     fn compile(
         &self,
         mt: Arc<MT>,
-        irtrace: MappedTrace,
+        irtrace: Vec<TracedAOTBlock>,
         sti: Option<SideTraceInfo>,
         hl: Arc<Mutex<HotLocation>>,
     ) -> Result<CompiledTrace, Box<dyn Error>> {
@@ -64,7 +64,7 @@ impl Compiler for JITCLLVM {
     #[cfg(feature = "yk_testing")]
     unsafe fn compile_for_tc_tests(
         &self,
-        irtrace: MappedTrace,
+        irtrace: Vec<TracedAOTBlock>,
         llvmbc_data: *const u8,
         llvmbc_len: u64,
     ) {
@@ -90,11 +90,11 @@ impl JITCLLVM {
         Ok(Arc::new(JITCLLVM))
     }
 
-    fn encode_trace(&self, irtrace: &MappedTrace) -> (Vec<*const i8>, Vec<usize>, usize) {
+    fn encode_trace(&self, irtrace: &Vec<TracedAOTBlock>) -> (Vec<*const i8>, Vec<usize>, usize) {
         let trace_len = irtrace.len();
         let mut func_names = Vec::with_capacity(trace_len);
         let mut bbs = Vec::with_capacity(trace_len);
-        for blk in irtrace.blocks() {
+        for blk in irtrace {
             if blk.is_unmappable() {
                 // The block was unmappable. Indicate this with a null function name.
                 func_names.push(ptr::null());

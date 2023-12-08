@@ -4,10 +4,7 @@
 //! `trace_compiler` directory of this crate.
 
 use std::{convert::TryInto, env, error::Error, ffi::CString, fs::File};
-use ykrt::{
-    compile::compile_for_tc_tests,
-    trace::{MappedTrace, TracedAOTBlock},
-};
+use ykrt::{compile::compile_for_tc_tests, trace::TracedAOTBlock};
 
 const BBS_ENV: &str = "YKT_TRACE_BBS";
 
@@ -38,7 +35,6 @@ fn main() -> Result<(), String> {
             BBS_ENV
         ));
     }
-    let irtrace = MappedTrace::new(bbs);
 
     // Map the `.ll` file into the address space so that we can give a pointer to it to the trace
     // compiler. Normally (i.e. outside of testing), the trace compiler wouldn't deal with textual
@@ -47,7 +43,7 @@ fn main() -> Result<(), String> {
     let ll_file = File::open(ll_path).unwrap();
     let mmap = unsafe { memmap2::Mmap::map(&ll_file).unwrap() };
 
-    unsafe { compile_for_tc_tests(irtrace, mmap.as_ptr(), mmap.len().try_into().unwrap()) };
+    unsafe { compile_for_tc_tests(bbs, mmap.as_ptr(), mmap.len().try_into().unwrap()) };
 
     Ok(())
 }

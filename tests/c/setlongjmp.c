@@ -4,8 +4,7 @@
 //   env-var: YKD_PRINT_JITSTATE=1
 //   stderr:
 //     ...
-//     jit-state: stop-tracing
-//     jit-state: trace-compilation-aborted
+//     jit-state: stop-tracing-aborted
 //     ...
 
 // Tests that we can deal with setjmp/longjmp.
