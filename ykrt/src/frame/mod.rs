@@ -3,13 +3,7 @@
 
 use llvm_sys::{core::*, prelude::LLVMValueRef};
 use object::{Object, ObjectSection};
-use std::{
-    convert::TryFrom,
-    ffi::{c_void, CStr},
-    fs, ptr, slice,
-    sync::LazyLock,
-    thread,
-};
+use std::{convert::TryFrom, ffi::c_void, fs, ptr, slice, sync::LazyLock, thread};
 use ykaddr::{
     addr::off_to_vaddr,
     obj::{PHDR_MAIN_OBJ, SELF_BIN_PATH},
@@ -108,28 +102,6 @@ impl Frame {
     }
 }
 
-fn get_stackmap_call(pc: Value) -> Value {
-    debug_assert!(pc.is_instruction());
-    // Stackmap instructions are inserted after calls, but before branch instructions. So we need
-    // slightly different logic to find them.
-    let sm = if pc.is_call() {
-        unsafe { Value::new(LLVMGetNextInstruction(pc.get())) }
-    } else {
-        unsafe { Value::new(LLVMGetPreviousInstruction(pc.get())) }
-    };
-    if cfg!(debug_assertions) {
-        // If we are in debug mode, make sure this is indeed always the stackmap call.
-        debug_assert!(sm.is_call());
-        debug_assert!(sm.is_intrinsic());
-        let id = unsafe { LLVMGetIntrinsicID(LLVMGetCalledValue(sm.get())) };
-        let mut len = 0;
-        let ptr = unsafe { LLVMIntrinsicGetName(id, &mut len) };
-        let name = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap();
-        debug_assert_eq!(name, "llvm.experimental.stackmap");
-    }
-    sm
-}
-
 /// The struct responsible for reconstructing the new frames after a guard failure.
 pub(crate) struct FrameReconstructor {
     /// Current frames.
@@ -168,7 +140,9 @@ impl FrameReconstructor {
         // store the reconstructed stack.
         for (i, frame) in self.frames.iter().enumerate() {
             // Get stackmap ID for the current frame's pc.
-            let smcall = get_stackmap_call(frame.pc);
+            let smcall = frame.pc;
+            debug_assert!(smcall.is_call());
+            debug_assert!(smcall.is_intrinsic());
             let smid = unsafe { LLVMConstIntGetZExtValue(smcall.get_operand(0).get()) };
             // Find prologue info and stackmap record for this frame.
             let (rec, pinfo) = AOT_STACKMAPS.get(usize::try_from(smid).unwrap());
@@ -277,7 +251,8 @@ impl FrameReconstructor {
                     // to). So the easiest approach for now is to simply omit this live variable
                     // during deoptimisation. In the future we will patch side traces into the
                     // parent trace, so this hack will no longer be needed then.
-                    debug_assert!(get_stackmap_call(frame.pc)
+                    debug_assert!(frame
+                        .pc
                         .get_operand(u32::try_from(j + 2).unwrap())
                         .is_frameaddr_call());
                     continue;

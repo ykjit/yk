@@ -1,6 +1,6 @@
 ; Run-time:
 ;   env-var: YKD_PRINT_IR=jit-pre-opt
-;   env-var: YKT_TRACE_BBS=main:0
+;   env-var: YKT_TRACE_BBS=main:0,main:1
 ;   stderr:
 ;      --- Begin jit-pre-opt ---
 ;      ...
@@ -21,6 +21,9 @@ declare dso_local i32 @getuid()
 
 define void @main() {
 entry:
+    br label %bb1
+
+bb1:
     %0 = call i32 @getuid()
     unreachable
 }

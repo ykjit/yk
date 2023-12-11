@@ -43,10 +43,6 @@ impl Value {
         self.0
     }
 
-    pub fn is_instruction(&self) -> bool {
-        unsafe { !LLVMIsAInstruction(self.0).is_null() }
-    }
-
     pub fn is_call(&self) -> bool {
         unsafe { !LLVMIsACallInst(self.0).is_null() }
     }

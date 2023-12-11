@@ -1,6 +1,6 @@
 ; Run-time:
 ;   env-var: YKD_PRINT_IR=jit-pre-opt
-;   env-var: YKT_TRACE_BBS=main:0
+;   env-var: YKT_TRACE_BBS=main:0,main:1
 ;   stderr:
 ;      --- Begin jit-pre-opt ---
 ;      ...
@@ -20,6 +20,9 @@
 
 define void @main() {
 entry:
+    br label %bb1
+
+bb1:
     %0 = load i32, ptr @g
     %1 = add i32 %0, 1
     unreachable

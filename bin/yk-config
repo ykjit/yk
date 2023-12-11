@@ -126,6 +126,9 @@ handle_arg() {
             # Emit stackmaps used for JIT deoptimisation.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-insert-stackmaps"
 
+            # Split blocks after function calls.
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-split-blocks-after-calls"
+
             # Ensure we can unambiguously map back to LLVM IR blocks.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-block-disambiguate"
 

@@ -58,254 +58,27 @@ const std::array<Intrinsic::ID, 5> AlwaysInlinedIntrinsics = {
     Intrinsic::ctpop, Intrinsic::smax, Intrinsic::usub_with_overflow,
     Intrinsic::vaend, Intrinsic::vastart};
 
-// Describes a "resume point" in an LLVM IR basic block.
-//
-// The trace compiler has to keep track of its progress through the AOT control
-// flow of the program. Since the LLVM `call` instruction doesn't terminate a
-// block, it isn't enough to keep track of progress at the basic block level.
-//
-// This data structure is used when a call is encountered to allow the
-// compiler to resume from the middle of a block, after a call.
-struct BlockResumePoint {
-  // The index of the basic block (in the parent function) containing the
-  // instruction at which to resume.
-  size_t ResumeBBIdx;
-  // The instruction *after* which to resume.
-  //
-  // To be clear, if we have two instructions:
-  // ```
-  //   call @f()
-  //   %x = load(...)
-  // ```
-  //
-  // If we want to resume at the `load`, then we store the `call`.
-  Instruction *ResumeAfterInstr;
-  // The index of the last call instruction. This is the instruction immediately
-  // *before* the instruction we want to resume from after returning from a
-  // call.
-  //
-  // This could be computed by looping over `ResumeInstr`'s parent block, but
-  // since it's needed fairly frequently, we cache it.
-  size_t ResumeAfterInstrIdx;
-
-  // Dump the resume point to stderr for debugging.
-  void dump() {
-    errs() << "  BlockResumePoint {\n";
-    errs() << "    ResumeBBIdx: " << ResumeBBIdx << "\n";
-    errs() << "    ResumeAfterInstr: ";
-    ResumeAfterInstr->dump();
-    errs() << "    ResumeAfterInstrIdx: " << ResumeAfterInstrIdx << "\n";
-    errs() << "  }\n";
-  }
-};
-
-// A frame for an IR function for which we have LLVM IR.
-struct MappableFrame {
-public:
-  // The function for this frame.
-  Function *Func;
-  // The basic block that the trace compiler previously processed (or null if
-  // this is the first block being handled for this frame).
-  BasicBlock *PrevBB;
-  // The stackmap call describing the stack as-per the trace compiler's
-  // progress through the frame's function (or null if no stackmap call has
-  // been encountered in this frame yet).
-  CallInst *LastSMCall;
-  // The resume point for this frame (if any).
-  std::optional<BlockResumePoint> Resume;
-  // When true, this frame initiated outlining. When this frame is the
-  // most-recent frame again, outlining will cease.
-  bool OutlineBase = false;
-
-  // Dump the frame to stderr for debugging.
-  void dump() {
-    errs() << "MappableFrame {\n";
-    errs() << "  Function: " << Func->getName() << "\n";
-    if (PrevBB) {
-      size_t FoundIdx = 0;
-      for (BasicBlock &BB : *PrevBB->getParent()) {
-        if (&BB == PrevBB) {
-          break;
-        }
-        FoundIdx++;
-      }
-      errs() << "  PrevBB: " << PrevBB << " (BBIdx=" << FoundIdx << ")\n";
-    } else {
-      errs() << "  PrevBB: null\n";
-    }
-    if (!Resume.has_value()) {
-      errs() << "  Resume: N/A\n";
-    } else {
-      Resume.value().dump();
-    }
-    errs() << "  LastSMCall: ";
-    if (LastSMCall) {
-      LastSMCall->dump();
-    } else {
-      errs() << "null\n";
-    }
-    errs() << "  OutlineBase: " << OutlineBase << "\n";
-    errs() << "}\n";
-  }
-
-  // Set the frame's resume point.
-  void setResume(size_t BBIdx, Instruction *Instr, size_t InstrIdx) {
-    assert(!Resume.has_value());
-#ifndef NDEBUG
-    // Check `BBIdx` agrees with `Instr`.
-    size_t FoundIdx = 0;
-    bool Found;
-    BasicBlock *BB = Instr->getParent();
-    for (BasicBlock &TBB : *BB->getParent()) {
-      if (&TBB == BB) {
-        Found = true;
-        break;
-      }
-      FoundIdx++;
-    }
-#endif
-    assert(Found);
-    assert(FoundIdx == BBIdx);
-    Resume = {BBIdx, Instr, InstrIdx};
-  }
-
-  // Delete the frame's resume point.
-  void clearResume() {
-    assert(Resume.has_value());
-    Resume.reset();
-  }
-
-  // Get the index of the instruction to resume at (if a resume point is set).
-  optional<size_t> getResumeInstrIdx() {
-    if (Resume.has_value()) {
-      return Resume.value().ResumeAfterInstrIdx + 1;
-    } else {
-      return std::nullopt;
-    }
-  }
-
-  // Return the last encountered call in the current basic block. This is the
-  // call instructions from where we need to resume after processing the
-  // callee.
-  //
-  // Throws if no call has yet been encountered.
-  Instruction *getLastCallInstruction() {
-    return Resume.value().ResumeAfterInstr;
-  }
-};
-
-// An entry in the callstack that represents one foreign frame.
-struct ForeignFrame {
-  void dump() { errs() << "ForeignFrame {}\n"; }
-};
-
-// An entry in the call stack.
-class StackFrame {
-  // Either a frame we have IR for, or foreign frames that we don't.
-  std::variant<MappableFrame, ForeignFrame> Inner;
-
-  StackFrame(std::variant<MappableFrame, ForeignFrame> Inner) : Inner(Inner){};
-
-public:
-  // Create a frame entry for which we have IR.
-  static StackFrame CreateMappableFrame(
-      Function *F, CallInst *LastSMCall,
-      std::optional<BlockResumePoint> ResumePoint = std::nullopt) {
-    return StackFrame(std::variant<MappableFrame, ForeignFrame>(
-        MappableFrame{F, nullptr, LastSMCall, ResumePoint}));
-  }
-
-  // Create a frame entry for foreign code for which we have no IR.
-  static StackFrame CreateForeignFrame() {
-    return StackFrame(
-        std::variant<MappableFrame, ForeignFrame>(ForeignFrame{}));
-  }
-
-  // If this frame is mappable, return a pointer to the mappable frame,
-  // otherwise return null.
-  MappableFrame *getMappableFrame() {
-    return std::get_if<MappableFrame>(&Inner);
-  }
-
-  // Dump the frame to stderr for debugging.
-  void dump() {
-    if (MappableFrame *MF = std::get_if<MappableFrame>(&Inner)) {
-      MF->dump();
-    } else {
-      std::get<ForeignFrame>(Inner).dump();
-    }
-  }
-};
-
-// A dtaa structure tracking the AOT LLVM IR stack during trace compilation.
-class CallStack {
-  // Stack frames, older frames at lower indices.
-  std::vector<StackFrame> Stack;
-
-public:
-  // Add a new frame to the stack.
-  void pushFrame(StackFrame F) { Stack.push_back(F); }
-
-  CallStack *clone() {
-    // Create a heap allocated copy of the CallStack and return its pointer.
-    CallStack NewCS = *this;
-    void *mem = malloc(sizeof(CallStack));
-    CallStack *C = new (mem) CallStack(std::move(NewCS));
-    return C;
-  }
-
-  // Pop and return the most-recent frame from the stack.
-  StackFrame popFrame() {
-    assert(!Stack.empty());
-    StackFrame F = Stack.back();
-    Stack.pop_back();
-    return F;
-  }
-
-  // Peek at the most-current frame.
-  StackFrame &curFrame() {
-    assert(!Stack.empty());
-    return Stack.back();
-  }
-
-  // Peek at the most recent frame, returning a pointer to a mappable frame if
-  // it is mappable, otherwise null.
-  MappableFrame *curMappableFrame() { return curFrame().getMappableFrame(); }
-
-  // Peek at the frame at index `Idx`. Index zero is the oldest frame.
-  StackFrame &getFrame(size_t Idx) { return Stack.at(Idx); }
-
-  // Return the depth of the stack.
-  size_t size() { return Stack.size(); }
-
-  // Returns true if the stack contains a frame for the specified function.
-  //
-  // Used to know if a (mappable) call is recursive.
-  bool hasFrameForFunction(Function *F) {
-    for (StackFrame &SF : Stack) {
-      MappableFrame *MF = SF.getMappableFrame();
-      if (MF && (MF->Func == F)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  // Dump the entire call stack to stderr for debugging.
-  void dump() {
-    errs() << "<CallStack (size=" << Stack.size() << ")>\n";
-    for (StackFrame &F : Stack) {
-      F.dump();
-    }
-    errs() << "</CallStack>\n";
-  }
-};
-
 // Dump an error message and an LLVM value to stderr and exit with failure.
 void dumpValueAndExit(const char *Msg, Value *V) {
   errs() << Msg << ": ";
   V->print(errs());
   exit(EXIT_FAILURE);
+}
+
+// Searches the call stack for a specific function in order to detect recursion
+// inside the trace.
+bool callStackContainsFunction(std::vector<CallInst *> &CS, CallInst *CI) {
+  Function *F = CI->getCalledFunction();
+  if (CI->getFunction() == F) {
+    // The called function and the caller are the same.
+    return true;
+  }
+  for (Instruction *I : CS) {
+    if (I->getFunction() == F) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // A function name and basic block index pair that identifies a mappable block
@@ -418,6 +191,18 @@ class JITModBuilder {
   Module *JITMod;
   // When true, the compiler is outlining.
   bool Outlining = false;
+  // The call depth at which we started outlining. Once we reached the same
+  // depth after returning from a call, we can stop outlining.
+  size_t OutlineBase = 0;
+  // Determines whether the last block in the trace was mappable or not.
+  // Required to make assumptions about the control flow of the trace.
+  bool LastBlockMappable = true;
+  // The last basic block that was processed. Required to handle PHI nodes, and
+  // for sanity checking control flow.
+  BasicBlock *LastBB = nullptr;
+  // The last instruction that was processed. Required to determine the control
+  // flow of the trace, i.e. whether we are returning from call or not.
+  Instruction *LastInst = nullptr;
   // The JITMod's builder.
   llvm::IRBuilder<> Builder;
   // Dead values to recursively delete upon finalisation of the JITMod. This is
@@ -447,9 +232,9 @@ class JITModBuilder {
   // The function inside which we build the IR for the trace.
   Function *JITFunc;
 
-  // The trace-compiler's view of the AOT IR call stack during trace
-  // compilation.
-  CallStack CallStack;
+  // Tracks stackmap call instructions of currently active frames (excluding
+  // the current frame).
+  std::vector<CallInst *> CallStack;
 
   // Set to true for a side-trace or false for a normal trace.
   bool IsSideTrace = false;
@@ -460,31 +245,6 @@ class JITModBuilder {
     }
     assert(isa<Constant>(V));
     return V;
-  }
-
-  // Start outlining.
-  //
-  // This flips the "are we outlining" flag and marks the most-recent frame as
-  // the "outline base" (the frame where outlining started).
-  void startOutlining() {
-    assert(!Outlining);
-    MappableFrame *MPF = CallStack.curMappableFrame();
-    assert(MPF);
-    MPF->OutlineBase = true;
-    Outlining = true;
-  }
-
-  // Try to stop outlining.
-  //
-  // Outlining is stopped if the most-recent frame is the "outline base".
-  void tryStopOutlining() {
-    assert(Outlining);
-    MappableFrame *MPF = CallStack.curMappableFrame();
-    if (MPF && MPF->OutlineBase) {
-      // We got back to the frame where outlining started. Stop outlining.
-      MPF->OutlineBase = false;
-      Outlining = false;
-    }
   }
 
   // Add an external declaration for the given function to JITMod.
@@ -519,12 +279,6 @@ class JITModBuilder {
 
   void handleCallInst(CallInst *CI, Function *CF, size_t &CurBBIdx,
                       size_t &CurInstrIdx) {
-    // Update the most-recent frame's progress so that we return to the right
-    // place when we return from this call.
-    MappableFrame *CurFrame = CallStack.curFrame().getMappableFrame();
-    assert(CurFrame);
-    CurFrame->setResume(CurBBIdx, CI, CurInstrIdx);
-
     if (CF == nullptr || CF->isDeclaration()) {
       // The definition of the callee is external to AOTMod. It will be
       // outlined, but we still need to declare it locally if we have not
@@ -534,15 +288,15 @@ class JITModBuilder {
       }
       if (!Outlining) {
         copyInstruction(&Builder, (Instruction *)&*CI, CurBBIdx, CurInstrIdx);
-        startOutlining();
+        OutlineBase = CallStack.size();
+        Outlining = true;
       }
-      CallStack.pushFrame(StackFrame::CreateForeignFrame());
     } else {
       // Calling to a non-foreign function.
       if (!Outlining) {
         // We are not outlining, but should this call start us outlining?
         if (CF->hasFnAttribute(YK_OUTLINE_FNATTR) || CF->isVarArg() ||
-            CallStack.hasFrameForFunction(CF)) {
+            callStackContainsFunction(CallStack, CI)) {
           // We will outline this call.
           //
           // If this is a recursive call that has been inlined, or if the callee
@@ -552,7 +306,8 @@ class JITModBuilder {
             declareFunction(CF);
           }
           copyInstruction(&Builder, CI, CurBBIdx, CurInstrIdx);
-          startOutlining();
+          OutlineBase = CallStack.size();
+          Outlining = true;
         } else {
           // Otherwise keep the call inlined.
           // Remap function arguments to the variables passed in by the caller.
@@ -567,10 +322,6 @@ class JITModBuilder {
           }
         }
       }
-      CallInst *LastSMCall = cast<CallInst>(CI->getNextNonDebugInstruction());
-      CurFrame->LastSMCall = LastSMCall;
-      CallStack.pushFrame(
-          StackFrame::CreateMappableFrame(CF, nullptr, std::nullopt));
     }
   }
 
@@ -596,8 +347,8 @@ class JITModBuilder {
     //
     // Note that we don't have to worry about the block names being unique, as
     // LLVM will make it so by appending a number to the block's name.
-    BasicBlock *FailBB = getGuardFailureBlock(BI->getParent(), CurBBIdx, I,
-                                              CurInstrIdx, GuardCount);
+    BasicBlock *FailBB = getGuardFailureBlock(
+        BI->getParent(), CurBBIdx, I->getPrevNode(), CurInstrIdx, GuardCount);
     BasicBlock *SuccBB =
         BasicBlock::Create(Context, GUARD_SUCCESS_BLOCK_NAME, JITFunc);
 
@@ -626,8 +377,9 @@ class JITModBuilder {
 
     // Get/create the guard failure and success blocks.
     LLVMContext &Context = JITMod->getContext();
-    BasicBlock *FailBB = getGuardFailureBlock(SI->getParent(), CurBBIdx, I,
-                                              CurInstrIdx, GuardCount, 1);
+    BasicBlock *FailBB =
+        getGuardFailureBlock(SI->getParent(), CurBBIdx, I->getPrevNode(),
+                             CurInstrIdx, GuardCount, 1);
     BasicBlock *SuccBB =
         BasicBlock::Create(Context, GUARD_SUCCESS_BLOCK_NAME, JITFunc);
 
@@ -650,11 +402,8 @@ class JITModBuilder {
   }
 
   void handleReturnInst(Instruction *I, size_t CurBBIdx, size_t CurInstrIdx) {
-    CallStack.popFrame();
-
     // Check if we have arrived back at the frame where outlining started.
     if (Outlining) {
-      tryStopOutlining();
       return;
     }
 
@@ -663,12 +412,10 @@ class JITModBuilder {
     // JITModule, make sure we look up the copy.
     auto OldRetVal = ((ReturnInst *)&*I)->getReturnValue();
     if (OldRetVal != nullptr) {
-      MappableFrame *MPF = CallStack.curMappableFrame();
-      assert(MPF);
-      Instruction *AOT = MPF->getLastCallInstruction();
-      assert(isa<CallInst>(AOT));
+      Instruction *PrevCall = CallStack.back()->getPrevNode();
+      assert(isa<CallInst>(PrevCall));
       Value *JIT = getMappedValue(OldRetVal);
-      VMap[AOT] = JIT;
+      VMap[PrevCall] = JIT;
     }
   }
 
@@ -778,7 +525,7 @@ class JITModBuilder {
 
   // Returns a pointer to the guard failure block, creating it if necessary.
   BasicBlock *getGuardFailureBlock(BasicBlock *CurBB, size_t CurBBIdx,
-                                   Instruction *Instr, size_t CurInstrIdx,
+                                   Instruction *SMCall, size_t CurInstrIdx,
                                    size_t GuardId, size_t IsSwitch = 0) {
     // If `JITFunc` contains no blocks already, then the guard failure block
     // becomes the entry block. This would lead to a trace that
@@ -798,39 +545,30 @@ class JITModBuilder {
     BasicBlock *GuardFailBB = BasicBlock::Create(Context, "guardfail", JITFunc);
     IRBuilder<> FailBuilder(GuardFailBB);
 
+    // Clone the CallStack, store it on the heap, and hardcode its pointer into
+    // the deoptimize call. We'll need this call stack for side-tracing to
+    // initialise JITModBuilder in a way that allows us to start tracing from
+    // locations not immediately after the control point.
+    std::vector<CallInst *> *NewCallStack = new std::vector(CallStack);
+    // Add the stackmap belonging to the branch we are guarding here.
+    NewCallStack->push_back(cast<CallInst>(SMCall));
+
     // Create a vector of active stackframes (i.e. basic block index,
     // instruction index, function name). This will be needed later for
     // reconstructing the stack after deoptimisation.
-    // FIXME: Use function index instead of string name.
     AllocaInst *ActiveFrameVec = FailBuilder.CreateAlloca(
         PointerSizedIntTy,
-        ConstantInt::get(PointerSizedIntTy, CallStack.size()));
-
-    // To describe the callstack at a guard failure, the following code uses
-    // the basic block resume points for all of the frames on the stack. The
-    // most-recent frame won't have a resume point set (it's usually only set
-    // by calls), so we will add one temporarily.
-    MappableFrame *CurFrame = CallStack.curMappableFrame();
-    assert(CurFrame);
-    CurFrame->setResume(CurBBIdx, Instr, CurInstrIdx);
-
-    // Clone the CallStack, store it on the heap, and hardcode its pointer into
-    // the deoptimize call. We'll need this call stack for side-tracing to
-    // initialise JITModBuilder in a way that allows us start tracing from
-    // locations not immediately after the control point.
-    auto NewCallStack = CallStack.clone();
+        ConstantInt::get(PointerSizedIntTy, NewCallStack->size()));
 
     std::vector<std::tuple<Value *, Value *, size_t>> LiveValues;
-    for (size_t I = 0; I < CallStack.size(); I++) {
-      StackFrame &SF = CallStack.getFrame(I);
-      MappableFrame *MF = SF.getMappableFrame();
-      assert(MF); // No unmappable frame can occur here.
-
+    for (size_t I = 0; I < NewCallStack->size(); I++) {
       // Read live AOTMod values from stackmap calls and find their
       // corresponding values in JITMod. These are exactly the values that are
       // live at each guard failure and need to be deoptimised.
-      CallInst *SMC = MF->LastSMCall;
-      assert(SMC);
+      CallInst *SMC = (*NewCallStack)[I];
+      assert(SMC && isa<CallInst>(SMC));
+      assert(cast<CallBase>(SMC)->getIntrinsicID() ==
+             Intrinsic::experimental_stackmap);
       for (size_t Idx = YK_STACKMAP_SKIP_ARGS; Idx < SMC->arg_size(); Idx++) {
         Value *Arg = SMC->getArgOperand(Idx);
         if (Arg == ControlPointCallInst) {
@@ -852,10 +590,7 @@ class JITModBuilder {
                                 {
                                     ConstantInt::get(PointerSizedIntTy, I),
                                 });
-      assert(MF->Resume.has_value());
-      BlockResumePoint &RP = MF->Resume.value();
-      uintptr_t InstrPtr =
-          reinterpret_cast<uintptr_t>(llvm::wrap(RP.ResumeAfterInstr));
+      uintptr_t InstrPtr = reinterpret_cast<uintptr_t>(llvm::wrap(SMC));
       FailBuilder.CreateStore(ConstantInt::get(PointerSizedIntTy, InstrPtr),
                               GEP);
     }
@@ -863,8 +598,8 @@ class JITModBuilder {
     // Store the active frames vector and its length in a separate struct to
     // save arguments.
     AllocaInst *ActiveFramesStruct = createAndFillStruct(
-        FailBuilder, {ActiveFrameVec,
-                      ConstantInt::get(PointerSizedIntTy, CallStack.size())});
+        FailBuilder, {ActiveFrameVec, ConstantInt::get(PointerSizedIntTy,
+                                                       NewCallStack->size())});
 
     // Make more space to store the locations of the corresponding live AOT
     // values for this guard failure.
@@ -908,10 +643,6 @@ class JITModBuilder {
 
     // We always need to return after the deoptimisation call.
     ReturnInst::Create(Context, Ret, GuardFailBB);
-
-    // Delete the temporary resume point for the most-recent frame.
-    CurFrame->clearResume();
-
     return GuardFailBB;
   }
 
@@ -1251,21 +982,13 @@ class JITModBuilder {
     // pointer to heap allocated CallStack and clone it into this
     // JITModBuilder's CallStack.
     if (CallStackPtr) {
-      CallStack = *reinterpret_cast<class CallStack *>(CallStackPtr);
-    } else {
-      // Push the initial frame.
-      IRBlock *StartIRB = InpTrace[0].getMappedBlock();
-      assert(StartIRB);
-      Function *StartFunc = AOTMod->getFunction(StartIRB->FuncName);
-      std::optional<BlockResumePoint> RP;
-      if (InitialResume.has_value()) {
-        auto [StartInstrIdx, StartCPCall] = *InitialResume;
-        assert(StartCPCall->getFunction() == StartFunc);
-        RP = BlockResumePoint{StartIRB->BBIdx, StartCPCall, StartInstrIdx};
-      }
-      StackFrame InitFrame =
-          StackFrame::CreateMappableFrame(StartFunc, nullptr, RP);
-      CallStack.pushFrame(InitFrame);
+      CallStack = *reinterpret_cast<std::vector<CallInst *> *>(CallStackPtr);
+      // The call stack we passed into deopt contains the current frame, as we
+      // require that frame's stackmap for deoptimisation. However, when
+      // building a side trace, that frame is equal to the frame we start
+      // collection in, and is thus not needed on the stack, and can be
+      // removed.
+      CallStack.pop_back();
     }
 
     // If aotvalsptr is not null then read the values out and generate loads for
@@ -1371,13 +1094,17 @@ public:
   Module *createModule() {
     size_t CurBBIdx;
     size_t CurInstrIdx;
-    // Iterate over the blocks of the trace.
-    for (size_t Idx = 0; Idx < InpTrace.Length(); Idx++) {
+    // Iterate over the blocks of the trace. The first block contains the
+    // control point so we want to start copying instructions just after that.
+    for (size_t Idx = 1; Idx < InpTrace.Length(); Idx++) {
       // Update the previously executed BB in the most-recent frame (if it's
       // mappable).
       TraceLoc Loc = InpTrace[Idx];
 
       if (UnmappableRegion *UR = Loc.getUnmappableRegion()) {
+        LastBlockMappable = false;
+        LastInst = nullptr;
+        LastBB = nullptr;
         continue;
       }
 
@@ -1387,41 +1114,60 @@ public:
 
       auto [F, BB] = getLLVMAOTFuncAndBlock(IB);
 
-      if (CallStack.curMappableFrame() == nullptr) {
-        if (!BB->isEntryBlock()) {
-          // The current block is not an entry block and we have just seen an
-          // unmappable block. This means we have returned from an external
-          // function and so need to remove all unmappable frames from the top
-          // of the stack and stop outlining. Note: This relies on the
-          // NoCallsInEntryBlocks pass that ensures that that no call can
-          // appear in the entry block.
-          while (CallStack.curMappableFrame() == nullptr) {
-            CallStack.popFrame();
-          }
-          if (Outlining) {
-            tryStopOutlining();
-          }
+      // For outlining to function, we need to reliably detect recursive calls
+      // and callbacks from unmappable blocks (i.e. external functions). Thanks
+      // to two extra LLVM passes (one ensuring no calls can appear in entry
+      // blocks, and another splitting blocks after calls) we can infer the
+      // control flow from the type of block we see and the last instruction
+      // that was processed. For example, if the last block was unmappable and
+      // the current block is mappable and an entry block, we know that this
+      // must be a callback from an external function. While the CallStack
+      // isn't strictly needed to implement this, it is required for
+      // deoptimisation as it collects the stackmap calls of inlined functions.
+      // We thus use it here as a simple counter to keep track of the call
+      // depths.
+      if (BB->isEntryBlock()) {
+        LastBB = nullptr;
+        if (!LastBlockMappable) {
+          // Unmappable code called back into mappable code.
+          LastBlockMappable = true;
         } else {
-          // The current block is an entry block and we have just seen an
-          // unmappable block. This means an external function has called back
-          // into mappable code, so we need to add a mappable frame to the
+          // A normal call from a mappable block into another mappable block.
+          // Find the stackmap of the previous frame and add it to the
           // callstack.
-          CallStack.pushFrame(StackFrame::CreateMappableFrame(F, nullptr));
+          assert(LastInst && isa<CallInst>(LastInst));
+          CallInst *SMC = cast<CallInst>(LastInst->getNextNode());
+          CallStack.push_back(SMC);
+        }
+      } else {
+        // If the last block was unmappable or the last instruction was a
+        // return, then we are returning from a call. Since we've already
+        // processed all instructions in this block, we can just skip it.
+        if (!LastBlockMappable) {
+          LastBlockMappable = true;
+          LastBB = BB;
+          if (CallStack.size() == OutlineBase) {
+            Outlining = false;
+          }
+          continue;
+        } else if (LastInst && isa<ReturnInst>(LastInst)) {
+          LastInst = nullptr;
+          assert(CallStack.back()->getParent() == BB);
+          LastBB = BB;
+          CallStack.pop_back();
+          if (CallStack.size() == OutlineBase) {
+            Outlining = false;
+          }
+          continue;
         }
       }
 
-      // If we get here then we must have a mappable block and the most-recent
-      // frame should also be mappable.
-      MappableFrame *MPF = CallStack.curMappableFrame();
-      assert(MPF);
-      assert(MPF->Func == F);
-
 #ifndef NDEBUG
       // `BB` should be a successor of the last block executed in this frame.
-      if (MPF->PrevBB) {
+      if (LastBB) {
         bool PredFound = false;
         for (BasicBlock *PBB : predecessors(BB)) {
-          if (PBB == MPF->PrevBB) {
+          if (PBB == LastBB) {
             PredFound = true;
             break;
           }
@@ -1430,20 +1176,8 @@ public:
       }
 #endif
 
-      // Used to decide if we should update `PrevBB` of the most-recent frame
-      // after this block finishes.
-      size_t StackDepthBefore = CallStack.size();
-
       // The index of the instruction in `BB` that we are currently processing.
       CurInstrIdx = 0;
-
-      // If we've returned from a call, skip ahead to the instruction where
-      // we left off.
-      std::optional<size_t> ResumeIdx = MPF->getResumeInstrIdx();
-      if (ResumeIdx.has_value()) {
-        CurInstrIdx = *ResumeIdx;
-        MPF->clearResume();
-      }
 
       // Iterate over all instructions within this block and copy them over
       // to our new module.
@@ -1463,6 +1197,8 @@ public:
         // to be prematurely terminated.
         if (isa<DbgInfoIntrinsic>(I))
           continue;
+
+        LastInst = &*I;
 
         if (isa<CallInst>(I)) {
           if (isa<IntrinsicInst>(I)) {
@@ -1493,7 +1229,6 @@ public:
             // Calls to `llvm.experimental.stackmap` are not really calls and
             // they generate no code anyway. We can skip them.
             if (IID == Intrinsic::experimental_stackmap) {
-              MPF->LastSMCall = cast<CallInst>(I);
               continue;
             }
 
@@ -1552,7 +1287,7 @@ public:
             }
           } else if (CF->getName() == PromoteRecFnName) {
             // A value is being promoted to a constant.
-            handlePromote(CI, MPF, BB, CurBBIdx, CurInstrIdx);
+            handlePromote(CI, BB, CurBBIdx, CurInstrIdx);
             break;
           } else {
             StringRef S = CF->getName();
@@ -1584,8 +1319,7 @@ public:
         }
 
         if (isa<PHINode>(I)) {
-          assert(MPF->PrevBB);
-          handlePHINode(&*I, MPF->PrevBB, CurBBIdx, CurInstrIdx);
+          handlePHINode(&*I, LastBB, CurBBIdx, CurInstrIdx);
           continue;
         }
 
@@ -1621,18 +1355,17 @@ public:
                 // block.
                 I++;
                 CurInstrIdx++;
-                Instruction *CPInstr = &*I;
+                assert(isa<CallInst>(I)); // control point call
                 I++;
                 CurInstrIdx++;
                 assert(isa<CallInst>(I)); // stackmap call
-                MPF->LastSMCall = cast<CallInst>(I);
                 if (IsSideTrace) {
                   // We can't currently loop back to the parent trace when the
                   // side trace reaches its end (this requires patching the
                   // parent trace). Instead we simply guard fail back to the
                   // main interpreter.
                   BasicBlock *FailBB = getGuardFailureBlock(
-                      BB, CurBBIdx, CPInstr, CurInstrIdx, GuardCount);
+                      BB, CurBBIdx, &*I, CurInstrIdx, GuardCount);
                   Builder.CreateBr(FailBB);
                 }
                 break;
@@ -1646,18 +1379,15 @@ public:
               I++;
               CurInstrIdx++;
               assert(isa<CallInst>(I)); // stackmap call
-              MPF->LastSMCall = cast<CallInst>(I);
               I++;
               CurInstrIdx++;
 
               // We've seen the control point so the next block will be
               // unmappable. Set a resume point so we can continue collecting
               // instructions afterwards.
-              MPF->setResume(CurBBIdx, &*I, CurInstrIdx);
               if (!Outlining) {
-                startOutlining();
+                Outlining = true;
               }
-              CallStack.pushFrame(StackFrame::CreateForeignFrame());
               break;
             }
           }
@@ -1667,12 +1397,7 @@ public:
         // into JITMod.
         copyInstruction(&Builder, (Instruction *)&*I, CurBBIdx, CurInstrIdx);
       }
-
-      // Block complete. If we are still in the same frame, then update the
-      // previous basic block.
-      if (CallStack.size() == StackDepthBefore) {
-        MPF->PrevBB = BB;
-      }
+      LastBB = BB;
     }
 
     // If the trace succeeded, loop back to the top. The only way to leave the
@@ -1690,8 +1415,8 @@ public:
   }
 
   /// Handle promotions.
-  void handlePromote(CallInst *CI, MappableFrame *MPF, BasicBlock *BB,
-                     size_t CurBBIdx, size_t CurInstrIdx) {
+  void handlePromote(CallInst *CI, BasicBlock *BB, size_t CurBBIdx,
+                     size_t CurInstrIdx) {
     // First lookup the constant value the trace is going to use.
     uint64_t PConst = __yk_lookup_promote_usize();
     Value *PConstLL =
@@ -1702,10 +1427,9 @@ public:
     // By promoting a value to a constant, we specialised the remainder of the
     // trace to that constant value. We must emit a guard that ensures that we
     // doptimise if the promoted value deviates from the "baked-in" constant.
-    MPF->LastSMCall = cast<CallInst>(CI->getNextNonDebugInstruction());
 
-    BasicBlock *FailBB =
-        getGuardFailureBlock(BB, CurBBIdx, CI, CurInstrIdx, GuardCount);
+    BasicBlock *FailBB = getGuardFailureBlock(BB, CurBBIdx, CI->getNextNode(),
+                                              CurInstrIdx, GuardCount);
     BasicBlock *SuccBB = BasicBlock::Create(JITMod->getContext(),
                                             GUARD_SUCCESS_BLOCK_NAME, JITFunc);
     Value *Deopt = Builder.CreateICmp(CmpInst::Predicate::ICMP_NE,
@@ -1730,9 +1454,8 @@ public:
     // We will have traced the constant recorder. We don't want that in
     // the trace so a) we don't copy the call, and b) we enter
     // outlining mode.
-    MPF->setResume(CurBBIdx, &*CI, CurInstrIdx);
-    startOutlining();
-    CallStack.pushFrame(StackFrame::CreateForeignFrame());
+    Outlining = true;
+    OutlineBase = CallStack.size();
   }
 };
 
