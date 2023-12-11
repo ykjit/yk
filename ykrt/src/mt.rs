@@ -295,7 +295,10 @@ impl MT {
                         print_jit_state("stop-side-tracing");
                         self.queue_compile_job(utrace, hl_arc, Some((sti, parent)));
                     }
-                    Err(_) => todo!(),
+                    Err(_e) => {
+                        #[cfg(feature = "yk_jitstate_debug")]
+                        print_jit_state("stop-side-tracing-aborted");
+                    }
                 }
             }
         }
