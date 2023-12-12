@@ -15,6 +15,12 @@ intervaltree = "0.2.7"
 byteorder = "1.4.3"
 leb128 = "0.2.5"
 thiserror = "1"
+memmap2 = "0.7"
+
+[dependencies.object]
+version = "0.32"
+default-features = false
+features = ["read_core", "elf"]
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 iced-x86 = { version = "1.18.0", features = ["decoder"]}

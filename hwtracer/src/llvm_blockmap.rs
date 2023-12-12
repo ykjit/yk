@@ -2,16 +2,18 @@
 
 use byteorder::{NativeEndian, ReadBytesExt};
 use intervaltree::IntervalTree;
-use libc::{dlsym, RTLD_DEFAULT};
+use object::{self, Object, ObjectSection};
 use std::{
-    convert::TryFrom,
-    ffi::CString,
     io::{prelude::*, Cursor, SeekFrom},
-    slice,
     sync::LazyLock,
 };
+use ykaddr::obj::SELF_BIN_MMAP;
 
-pub static LLVM_BLOCK_MAP: LazyLock<BlockMap> = LazyLock::new(BlockMap::new);
+pub static LLVM_BLOCK_MAP: LazyLock<BlockMap> = LazyLock::new(|| {
+    let object = object::File::parse(&**SELF_BIN_MMAP).unwrap();
+    let sec = object.section_by_name(".llvm_bb_addr_map").unwrap();
+    BlockMap::new(sec.data().unwrap())
+});
 
 /// Describes the successors (if any) of an LLVM `MachineBlock`.
 #[derive(Debug)]
@@ -90,39 +92,6 @@ impl BlockMapEntry {
     }
 }
 
-// ykllvm inserts a symbol pair marking the extent of the `.llvm_bb_addr_map` section.
-// This function returns a byte slice of the memory between these two marker symbols.
-//
-// Note that in the "common use case" this lookup could be done statically (without `dlsym`) using:
-//
-// ```
-// extern "C" {
-//   #[link(name = "ykllvm.bbaddrmaps.start")]
-//   BBMAPS_START_BYTE: u8;
-//   #[link(name = "ykllvm.bbaddrmaps.stop")]
-//   BBMAPS_STOP_BYTE: u8;
-// }
-// ```
-//
-// however, this would force every binary that uses this crate to provide the symbols. This is not
-// desirable, e.g. Rust test binaries.
-fn find_blockmap_section() -> &'static [u8] {
-    let start_sym = CString::new("ykllvm.bbaddrmaps.start").unwrap();
-    let start_addr = unsafe { dlsym(RTLD_DEFAULT, start_sym.as_ptr()) } as *const u8;
-    if start_addr.is_null() {
-        panic!("can't find ykllvm.bbaddrmaps.start");
-    }
-
-    let stop_sym = CString::new("ykllvm.bbaddrmaps.stop").unwrap();
-    let stop_addr = unsafe { dlsym(RTLD_DEFAULT, stop_sym.as_ptr()) } as *const u8;
-    if stop_addr.is_null() {
-        panic!("can't find ykllvm.bbaddrmaps.stop");
-    }
-
-    debug_assert!(stop_addr > start_addr);
-    unsafe { slice::from_raw_parts(start_addr, stop_addr.sub_ptr(start_addr)) }
-}
-
 /// Maps (unrelocated) block offsets to their corresponding block map entry.
 pub struct BlockMap {
     tree: IntervalTree<u64, BlockMapEntry>,
@@ -131,13 +100,11 @@ pub struct BlockMap {
 impl BlockMap {
     /// Parse the LLVM blockmap section of the current executable and return a struct holding the
     /// mappings.
-    pub fn new() -> Self {
-        let bbaddrmap_data = find_blockmap_section();
-
+    pub fn new(data: &'static [u8]) -> Self {
         // Keep reading blockmap records until we fall outside of the section's bounds.
         let mut elems = Vec::new();
-        let mut crsr = Cursor::new(bbaddrmap_data);
-        while crsr.position() < u64::try_from(bbaddrmap_data.len()).unwrap() {
+        let mut crsr = Cursor::new(data);
+        while crsr.position() < u64::try_from(data.len()).unwrap() {
             let version = crsr.read_u8().unwrap();
             let _feature = crsr.read_u8().unwrap();
             let mut last_off = crsr.read_u64::<NativeEndian>().unwrap();

@@ -7,18 +7,25 @@ use crate::{
     mt::{SideTraceInfo, MT},
     trace::TracedAOTBlock,
 };
-use libc::dlsym;
+use object::{Object, ObjectSection};
 use parking_lot::Mutex;
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
 use std::{
     env,
     error::Error,
-    ffi::{c_char, c_int, CString},
+    ffi::{c_char, c_int},
     ptr,
-    sync::Arc,
+    sync::{Arc, LazyLock},
 };
 use tempfile::NamedTempFile;
+use ykaddr::obj::SELF_BIN_MMAP;
+
+pub static LLVM_BITCODE: LazyLock<&[u8]> = LazyLock::new(|| {
+    let object = object::File::parse(&**SELF_BIN_MMAP).unwrap();
+    let sec = object.section_by_name(".llvmbc").unwrap();
+    sec.data().unwrap()
+});
 
 pub(crate) struct JITCLLVM;
 
@@ -32,7 +39,7 @@ impl Compiler for JITCLLVM {
     ) -> Result<CompiledTrace, Box<dyn Error>> {
         let (func_names, bbs, trace_len) = self.encode_trace(&irtrace);
 
-        let (llvmbc_data, llvmbc_len) = llvmbc_section();
+        let llvmbc = llvmbc_section();
         let (di_tmp, di_fd, di_tmpname_c) = Self::create_debuginfo_temp_file();
 
         let (callstack, aotvalsptr, aotvalslen) = match sti {
@@ -45,8 +52,8 @@ impl Compiler for JITCLLVM {
                 func_names.as_ptr(),
                 bbs.as_ptr(),
                 trace_len,
-                llvmbc_data,
-                llvmbc_len,
+                llvmbc.as_ptr(),
+                u64::try_from(llvmbc.len()).unwrap(),
                 di_fd,
                 di_tmpname_c,
                 callstack,
@@ -134,27 +141,7 @@ impl JITCLLVM {
     }
 }
 
-/// The `llvm.embedded.module` symbol in the `.llvmbc` section.
-#[repr(C)]
-struct EmbeddedModule {
-    /// The length of the bitcode.
-    len: u64,
-    /// The start of the bitcode itself.
-    first_byte_of_bitcode: u8,
-}
-
 /// Returns a pointer to (and the size of) the raw LLVM bitcode in the current address space.
-pub(crate) fn llvmbc_section() -> (*const u8, u64) {
-    // ykllvm adds the `SHF_ALLOC` flag to the `.llvmbc` section so that the loader puts it into
-    // our address space at load time.
-    let bc = unsafe {
-        &*(dlsym(
-            std::ptr::null_mut(),
-            CString::new("llvm.embedded.module")
-                .unwrap()
-                .as_c_str()
-                .as_ptr(),
-        ) as *const EmbeddedModule)
-    };
-    (&bc.first_byte_of_bitcode as *const u8, bc.len)
+pub(crate) fn llvmbc_section() -> &'static [u8] {
+    &**LLVM_BITCODE
 }
