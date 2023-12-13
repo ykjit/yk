@@ -988,6 +988,7 @@ class JITModBuilder {
       // building a side trace, that frame is equal to the frame we start
       // collection in, and is thus not needed on the stack, and can be
       // removed.
+      LastBB = CallStack.back()->getParent();
       CallStack.pop_back();
     }
 
