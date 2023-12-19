@@ -1244,28 +1244,26 @@ public:
               continue;
             }
 
-            // Any intrinsic call which may generate machine code must have
-            // metadata attached that specifies whether it has been inlined or
-            // not.
-            MDNode *IMD = I->getMetadata("yk.intrinsic.inlined");
-            if (IMD == nullptr) {
-              dumpValueAndExit(
-                  "instrinsic is missing `yk.intrinsic.inlined` metadata", &*I);
-            }
-            ConstantAsMetadata *CAM =
-                cast<ConstantAsMetadata>(IMD->getOperand(0));
-            if (CAM->getValue()->isOneValue()) {
-              // The intrinsic was inlined so we don't need to expect an
-              // unmappable block and thus can just copy the call instruction
-              // and continue processing the current block.
-              if (!Outlining) {
-                copyInstruction(&Builder, cast<CallInst>(I), CurBBIdx,
-                                CurInstrIdx);
+            // Since blocks can only contains a single call, we can tell
+            // whether this intrinsic was inlined at compile time by peeking at
+            // the next block in the trace. If it is unmappable, this intrinsic
+            // wasn't inlined and we need to copy the call into the JIT module.
+            // FIXME: What to do about intrinsics that call back to mappable
+            // code. As far as I can tell, there's only one intrinsics that
+            // allows this: llvm.init.trampoline. Investigate if this is a
+            // problem.
+            if (Idx < InpTrace.Length()) {
+              if (UnmappableRegion *UR =
+                      InpTrace[Idx + 1].getUnmappableRegion()) {
+                // The next block is unmappable, which means this intrinsic
+                // wasn't inlined and we need to copy the call instruction.
+                if (!Outlining) {
+                  copyInstruction(&Builder, cast<CallInst>(I), CurBBIdx,
+                                  CurInstrIdx);
+                }
+                break;
               }
-              continue;
             }
-            // The intrinsic wasn't inlined so we let the following code handle
-            // it which already knows how to deal with such cases.
           }
 
           CallInst *CI = cast<CallInst>(I);
