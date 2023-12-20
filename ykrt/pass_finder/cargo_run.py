@@ -15,23 +15,26 @@ def run_test(yk_path,env=None, n=1) :
         times = []
         c_test = None
         for _ in range(n):
-            subprocess.run(["make clean"], shell=True, env=env)
-            c = subprocess.run(["make && timeout 2 sh test.sh"], shell=True, env=env or os.environ)
+            c = subprocess.run(["timeout 30 sh test.sh"], shell=True, env=env or os.environ)
+            print(f"\033[95m returncode for c is {c.returncode} \033[0m\n")
             # assert c.returncode == 0
             if c.returncode == 0:
                 before = time.time()
-                c_test = subprocess.run(["timeout 2 sh run.sh"], shell=True, env=env or os.environ)
+                c_test = subprocess.run(["timeout 15 sh run.sh"], shell=True, env=env or os.environ)
                 elapsed = time.time() - before
                 times.append(elapsed)
 
         # assert c_test.returncode == 0
-        assert len(times) == 0
         if len(times) != 0:
             mean_time = sum(times) / len(times)
         else: 
             mean_time = 0
+        print(f"\033[95m mean time: {mean_time} \033[0m\n")
         os.chdir(yk_path)
-        return c_test.returncode if (not c_test == None) else c.returncode, mean_time
+        if (c_test == None):
+            return 130, 0 
+        else:
+            return c.returncode, mean_time
     os.chdir(yk_path)
     return r.returncode, 0 
     # print(mean_time)

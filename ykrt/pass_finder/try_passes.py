@@ -129,7 +129,7 @@ def test_pipeline(logf, pl, cwd):
 
     env = os.environ.copy()  # Create a copy of the environment
     env["PRELINK_PASSES"] = ",".join([p.name for p in pl.pre_link])
-    env["LINKTIME_PASSES"] = ",".join([p.name for p in pl.link_time])
+    env["POSTLINK_PASSES"] = ",".join([p.name for p in pl.link_time])
 
     print(f"\033[91m!!!!!!\033[0m")
     
@@ -308,7 +308,7 @@ def main(logf, glogf, is_prelink, cwd):
         is_prelink,
         population_size = len(passes) * 2,
         mutation_rate = 0.1,
-        generations = 1,
+        generations = 100,
         target_fitness = target_fitness,
         passes = passes,
         cwd = cwd,
