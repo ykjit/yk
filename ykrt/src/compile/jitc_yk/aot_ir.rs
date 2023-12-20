@@ -267,7 +267,7 @@ pub(crate) struct Instruction {
 
 impl Instruction {
     /// Returns the operand at the specified index. Panics if the index is out of bounds.
-    pub(crate) fn get_operand(&self, index: usize) -> &Operand {
+    pub(crate) fn operand(&self, index: usize) -> &Operand {
         &self.operands[index]
     }
 

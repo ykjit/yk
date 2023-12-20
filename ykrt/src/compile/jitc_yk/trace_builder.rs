@@ -58,13 +58,13 @@ impl<'a> TraceBuilder<'a> {
         let mut input = Vec::new();
         for inst in blk.instrs.iter().rev() {
             if inst.is_control_point(self.aot_mod) {
-                trace_input = Some(inst.get_operand(CTRL_POINT_ARGIDX_INPUTS));
+                trace_input = Some(inst.operand(CTRL_POINT_ARGIDX_INPUTS));
             }
             if inst.is_store() {
                 last_store = Some(inst);
             }
             if inst.is_gep() {
-                let op = inst.get_operand(0);
+                let op = inst.operand(0);
                 // unwrap safe: we know the AOT code was produced by ykllvm.
                 if trace_input
                     .unwrap()
@@ -73,7 +73,7 @@ impl<'a> TraceBuilder<'a> {
                 {
                     // Found a trace input.
                     // unwrap safe: we know the AOT code was produced by ykllvm.
-                    let inp = last_store.unwrap().get_operand(0);
+                    let inp = last_store.unwrap().operand(0);
                     input.insert(0, inp.to_instr(self.aot_mod));
                     let load_arg = jit_ir::Instruction::create_loadarg();
                     self.local_map
@@ -113,7 +113,7 @@ impl<'a> TraceBuilder<'a> {
 
     // Translate a `Load` instruction.
     fn handle_load(&self, inst: &aot_ir::Instruction) -> jit_ir::Instruction {
-        let aot_op = inst.get_operand(0);
+        let aot_op = inst.operand(0);
         let jit_op = match aot_op {
             aot_ir::Operand::LocalVariable(aot_iid) => self.local_map[aot_iid],
             _ => todo!("{}", aot_op.to_str(self.aot_mod)),
