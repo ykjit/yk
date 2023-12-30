@@ -133,7 +133,7 @@ def test_pipeline(logf, pl, cwd):
 
     print(f"\033[91m!!!!!!\033[0m")
     
-    ret, time = cargo_run.run_test(cwd, env=env)
+    ret, time, ir_change = cargo_run.run_test(cwd, env=env)
     
     print(f"\033[91m@@@@@@@@@@\033[0m")
     print(f"\033[92m return code': {ret} \033[0m")
@@ -141,11 +141,11 @@ def test_pipeline(logf, pl, cwd):
         print(" [OK]")
         print(f"\033[92m time: {time}\033[0m")
         log(logf, str(pl) + ": OK\n")
-        return True, time
+        return True, time, ir_change
     else:
         log(logf, str(pl) + " : FAILED\n")
         print(" [FAIL]") 
-        return False, None  
+        return False, None, false 
 
 def list_of_passes_to_str(passes):
     return ",".join([str(p) for p in passes])
@@ -218,17 +218,32 @@ def binary_split(logf, passes, is_prelink):
         print(72 * "=")
         print(list_of_passes_to_str(ok_passes))
 
-def evaluate_fitness(glogf, is_prelink, entity, passes, cwd):
+# def evaluate_fitness(glogf, is_prelink, entity, passes, cwd):
+#     try_passes = []
+#     for i, bit in enumerate(entity):
+#         if bit == 1:
+#             try_passes.append(passes[i])
+#     log(glogf, f"\ncurrently evaluating {try_passes}\n")
+#     config = get_pipeline_config(is_prelink, try_passes)
+#     ret, exec_time = test_pipeline(glogf, config, cwd) 
+#     if ret:
+#             exec_time = float(exec_time)  # Convert exec_time to a float
+#             return  exec_time
+#     else:
+#         # Return False for programs that crash, and execution time as a large positive value
+#         return float('inf')
+
+def evaluate_irfitness(glogf, is_prelink, entity, passes, cwd):
     try_passes = []
     for i, bit in enumerate(entity):
         if bit == 1:
             try_passes.append(passes[i])
     log(glogf, f"\ncurrently evaluating {try_passes}\n")
     config = get_pipeline_config(is_prelink, try_passes)
-    ret, exec_time = test_pipeline(glogf, config, cwd) 
-    if ret:
-            exec_time = float(exec_time)  # Convert exec_time to a float
-            return  exec_time
+    ret, exec_time, ir_change = test_pipeline(glogf, config, cwd)
+    if ret and ir_change:
+        exec_time = float(exec_time)  # Convert exec_time to a float
+        return exec_time
     else:
         # Return False for programs that crash, and execution time as a large positive value
         return float('inf')
