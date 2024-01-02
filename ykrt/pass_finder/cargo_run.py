@@ -17,7 +17,7 @@ def run_test(yk_path, env=None, n=1):
     env['IR_CHANGE'] = "false"
     for _ in range(n):
         # if IR changes returncode will be 0
-        c = subprocess.run(["timeout 30 sh test.sh"], shell=True,
+        c = subprocess.run(["timeout 40 sh test_ir.sh"], shell=True,
                            env=env or os.environ)
         print(f"\033[95m returncode for c is {c.returncode} \033[0m\n")
         # assert c.returncode == 0
@@ -32,6 +32,7 @@ def run_test(yk_path, env=None, n=1):
             elapsed = time.time() - before
             times.append(elapsed)
 
+    #FIXME: return boolean variable IR CHANGE
     # assert c_test.returncode == 0
     if len(times) != 0:
         mean_time = sum(times) / len(times)
