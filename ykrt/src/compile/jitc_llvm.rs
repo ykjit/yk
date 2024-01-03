@@ -143,5 +143,5 @@ impl JITCLLVM {
 
 /// Returns a pointer to (and the size of) the raw LLVM bitcode in the current address space.
 pub(crate) fn llvmbc_section() -> &'static [u8] {
-    &**LLVM_BITCODE
+    &LLVM_BITCODE
 }
