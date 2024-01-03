@@ -136,6 +136,6 @@ pub static SELF_BIN_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
 
 // The main binary's ELF executable mapped into the address space.
 pub static SELF_BIN_MMAP: LazyLock<memmap2::Mmap> = LazyLock::new(|| {
-    let file = fs::File::open(&SELF_BIN_PATH.as_path()).unwrap();
+    let file = fs::File::open(SELF_BIN_PATH.as_path()).unwrap();
     unsafe { memmap2::Mmap::map(&file).unwrap() }
 });
