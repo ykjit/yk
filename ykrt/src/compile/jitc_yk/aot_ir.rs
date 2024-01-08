@@ -5,12 +5,23 @@
 
 use byteorder::{NativeEndian, ReadBytesExt};
 use deku::prelude::*;
-use std::{cell::RefCell, error::Error, ffi::CStr, fs, io::Cursor, path::PathBuf};
+use std::{
+    cell::RefCell,
+    error::Error,
+    ffi::CStr,
+    fs,
+    io::Cursor,
+    ops::{Deref, DerefMut},
+    path::PathBuf,
+};
 
 /// A magic number that all bytecode payloads begin with.
 const MAGIC: u32 = 0xedd5f00d;
 /// The version of the bytecode format.
 const FORMAT_VERSION: u32 = 0;
+
+/// The symbol name of the control point function (after ykllvm has transformed it).
+const CONTROL_POINT_NAME: &str = "__ykrt_control_point";
 
 fn deserialise_string(v: Vec<u8>) -> Result<String, DekuError> {
     let err = Err(DekuError::Parse("failed to parse string".to_owned()));
@@ -45,7 +56,7 @@ pub(crate) trait IRDisplay {
 
 /// An instruction opcode.
 #[deku_derive(DekuRead)]
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[deku(type = "u8")]
 pub(crate) enum Opcode {
     Nop = 0,
@@ -82,12 +93,51 @@ impl IRDisplay for ConstantOperand {
 }
 
 #[deku_derive(DekuRead)]
-#[derive(Debug)]
-pub(crate) struct LocalVariableOperand {
+#[derive(Debug, Hash, Eq, PartialEq)]
+pub(crate) struct InstructionID {
     #[deku(skip)] // computed after deserialisation.
     func_idx: usize,
     bb_idx: usize,
     inst_idx: usize,
+}
+
+impl InstructionID {
+    pub(crate) fn new(func_idx: usize, bb_idx: usize, inst_idx: usize) -> Self {
+        Self {
+            func_idx,
+            bb_idx,
+            inst_idx,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct BlockID {
+    pub(crate) func_idx: usize,
+    pub(crate) bb_idx: usize,
+}
+
+impl BlockID {
+    pub(crate) fn new(func_idx: usize, bb_idx: usize) -> Self {
+        Self { func_idx, bb_idx }
+    }
+}
+
+#[deku_derive(DekuRead)]
+#[derive(Debug, Hash, Eq, PartialEq)]
+pub(crate) struct LocalVariableOperand(InstructionID);
+
+impl Deref for LocalVariableOperand {
+    type Target = InstructionID;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for LocalVariableOperand {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
 }
 
 impl IRDisplay for LocalVariableOperand {
@@ -161,6 +211,31 @@ pub(crate) enum Operand {
     Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")] String),
 }
 
+impl Operand {
+    /// For a [Self::LocalVariable] operand return the instruction that defines the variable.
+    ///
+    /// Panics for other kinds of operand.
+    ///
+    /// OPT: This is expensive.
+    pub(crate) fn to_instr<'a>(&self, aotmod: &'a Module) -> &'a Instruction {
+        match self {
+            Self::LocalVariable(lvo) => {
+                &aotmod.funcs[lvo.func_idx].blocks[lvo.bb_idx].instrs[lvo.inst_idx]
+            }
+            _ => panic!(),
+        }
+    }
+
+    /// Return the `InstructionID` of a local variable operand. Panics if called on other kinds of
+    /// operands.
+    pub(crate) fn to_instr_id(&self) -> InstructionID {
+        match self {
+            Self::LocalVariable(lvo) => InstructionID::new(lvo.func_idx, lvo.bb_idx, lvo.inst_idx),
+            _ => panic!(),
+        }
+    }
+}
+
 impl IRDisplay for Operand {
     fn to_str(&self, m: &Module) -> String {
         match self {
@@ -188,6 +263,45 @@ pub(crate) struct Instruction {
     /// A variable name, only computed if the instruction is ever printed.
     #[deku(skip)]
     name: RefCell<Option<String>>,
+}
+
+impl Instruction {
+    /// Returns the operand at the specified index. Panics if the index is out of bounds.
+    pub(crate) fn operand(&self, index: usize) -> &Operand {
+        &self.operands[index]
+    }
+
+    pub(crate) fn opcode(&self) -> Opcode {
+        self.opcode
+    }
+
+    pub(crate) fn is_store(&self) -> bool {
+        self.opcode == Opcode::Store
+    }
+
+    pub(crate) fn is_gep(&self) -> bool {
+        self.opcode == Opcode::GetElementPtr
+    }
+
+    pub(crate) fn is_control_point(&self, aot_mod: &Module) -> bool {
+        if self.opcode == Opcode::Call {
+            // Call instructions always have at least one operand (the callee), so this is safe.
+            let op = &self.operands[0];
+            match op {
+                Operand::Function(fop) => {
+                    return aot_mod.funcs[fop.func_idx].name == CONTROL_POINT_NAME;
+                }
+                _ => todo!(),
+            }
+        }
+        false
+    }
+
+    /// Determine if two instructions in the (immutable) AOT IR are the same based on pointer
+    /// identity.
+    pub(crate) fn ptr_eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self, other)
+    }
 }
 
 impl IRDisplay for Instruction {
@@ -249,8 +363,9 @@ impl IRDisplay for Instruction {
 pub(crate) struct Block {
     #[deku(temp)]
     num_instrs: usize,
+    // FIXME: unpub
     #[deku(count = "num_instrs")]
-    instrs: Vec<Instruction>,
+    pub instrs: Vec<Instruction>,
 }
 
 impl IRDisplay for Block {
@@ -546,7 +661,20 @@ impl Module {
         *self.var_names_computed.borrow_mut() = true;
     }
 
-    /// Fill in the function index of local variable operands of instructions.o
+    pub(crate) fn func_index(&self, find_func: &str) -> Option<usize> {
+        // OPT: create a cache in the Module.
+        self.funcs
+            .iter()
+            .enumerate()
+            .find(|(_, f)| f.name == find_func)
+            .map(|(f_idx, _)| f_idx)
+    }
+
+    pub(crate) fn block(&self, bid: &BlockID) -> Option<&Block> {
+        self.funcs.get(bid.func_idx)?.block(bid.bb_idx)
+    }
+
+    /// Fill in the function index of local variable operands of instructions.
     ///
     /// FIXME: It may be possible to do this as we deserialise, instead of after the fact:
     /// https://github.com/sharksforarms/deku/issues/363
@@ -571,14 +699,10 @@ impl Module {
         &self.types[instr.type_index]
     }
 
+    // FIXME: rename this to `is_def()`, which we've decided is a beter name.
+    // FIXME: also move this to the `Instruction` type.
     fn instr_generates_value(&self, i: &Instruction) -> bool {
         self.instr_type(i) != &Type::Void
-    }
-
-    /// Retrieve the named function from the AOT module.
-    pub(crate) fn func_by_name(&self, name: &str) -> Option<&Function> {
-        // OPT: Cache function indices somewhere for faster lookup.
-        self.funcs.iter().find(|f| f.name == name)
     }
 
     pub(crate) fn to_str(&self) -> String {
