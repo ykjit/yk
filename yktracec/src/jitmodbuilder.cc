@@ -1149,6 +1149,7 @@ public:
           LastBB = BB;
           if (CallStack.size() == OutlineBase) {
             Outlining = false;
+            OutlineBase = 0;
           }
           continue;
         } else if (LastInst && isa<ReturnInst>(LastInst)) {
@@ -1158,6 +1159,7 @@ public:
           CallStack.pop_back();
           if (CallStack.size() == OutlineBase) {
             Outlining = false;
+            OutlineBase = 0;
           }
           continue;
         }
@@ -1378,13 +1380,14 @@ public:
               I++;
               CurInstrIdx++;
               assert(isa<CallInst>(I)); // stackmap call
+              LastInst = &*I;
               I++;
               CurInstrIdx++;
 
               // We've seen the control point so the next block will be
-              // unmappable. Set a resume point so we can continue collecting
-              // instructions afterwards.
+              // unmappable.
               if (!Outlining) {
+                assert(OutlineBase == 0);
                 Outlining = true;
               }
               break;
