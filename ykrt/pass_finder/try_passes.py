@@ -102,12 +102,8 @@ def get_all_passes(is_prelink):
     sout = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     sout = sout.stdout.decode('utf-8')
     pass_descrs = split_passes(sout)
-    print(f"\033[91m{pass_descrs}\033[0m")
     passes = []
     seen = set()
-
-    for part in pass_descrs:
-        print(f"\033[92m{part}\033[0m")
 
     for descr in pass_descrs:
         if descr not in seen:
@@ -130,22 +126,19 @@ def test_pipeline(logf, pl, cwd):
     env = os.environ.copy()  # Create a copy of the environment
     env["PRELINK_PASSES"] = ",".join([p.name for p in pl.pre_link])
     env["POSTLINK_PASSES"] = ",".join([p.name for p in pl.link_time])
+    
+    ret, time = cargo_run.run_test(cwd, env=env)
 
-    print(f"\033[91m!!!!!!\033[0m")
-    
-    ret, time, ir_change = cargo_run.run_test(cwd, env=env)
-    
-    print(f"\033[91m@@@@@@@@@@\033[0m")
-    print(f"\033[92m return code': {ret} \033[0m")
+    print(f"\033[92m return code for cargo_run: {ret} \033[0m")
     if ret == 0:
         print(" [OK]")
         print(f"\033[92m time: {time}\033[0m")
         log(logf, str(pl) + ": OK\n")
-        return True, time, ir_change
+        return True, time
     else:
         log(logf, str(pl) + " : FAILED\n")
         print(" [FAIL]") 
-        return False, None, false 
+        return False, None
 
 def list_of_passes_to_str(passes):
     return ",".join([str(p) for p in passes])
@@ -218,45 +211,28 @@ def binary_split(logf, passes, is_prelink):
         print(72 * "=")
         print(list_of_passes_to_str(ok_passes))
 
-# def evaluate_fitness(glogf, is_prelink, entity, passes, cwd):
-#     try_passes = []
-#     for i, bit in enumerate(entity):
-#         if bit == 1:
-#             try_passes.append(passes[i])
-#     log(glogf, f"\ncurrently evaluating {try_passes}\n")
-#     config = get_pipeline_config(is_prelink, try_passes)
-#     ret, exec_time = test_pipeline(glogf, config, cwd) 
-#     if ret:
-#             exec_time = float(exec_time)  # Convert exec_time to a float
-#             return  exec_time
-#     else:
-#         # Return False for programs that crash, and execution time as a large positive value
-#         return float('inf')
-
-def evaluate_irfitness(glogf, is_prelink, entity, passes, cwd):
+def evaluate_fitness(glogf, is_prelink, entity, passes, cwd):
     try_passes = []
     for i, bit in enumerate(entity):
         if bit == 1:
             try_passes.append(passes[i])
     log(glogf, f"\ncurrently evaluating {try_passes}\n")
     config = get_pipeline_config(is_prelink, try_passes)
-    ret, exec_time, ir_change = test_pipeline(glogf, config, cwd)
-    if ret and ir_change:
-        exec_time = float(exec_time)  # Convert exec_time to a float
-        return exec_time
+    ret, exec_time = test_pipeline(glogf, config, cwd) 
+    if ret:
+            exec_time = float(exec_time)  # Convert exec_time to a float
+            return  exec_time
     else:
         # Return False for programs that crash, and execution time as a large positive value
         return float('inf')
 
-def crossover(parent1, parent2):
-    # Implement crossover logic (e.g., one-point crossover)
+def crossover(parent1, parent2): 
     crossover_point = random.randint(1, len(parent1) - 1)
     child1 = parent1[:crossover_point] + parent2[crossover_point:]
     child2 = parent2[:crossover_point] + parent1[crossover_point:]
     return child1, child2
 
 def mutate(entity, mutation_rate):
-    # Implement mutation logic (bit flip mutation)
     mutated_entity = []
     for bit in entity:
         if random.random() < mutation_rate:
@@ -281,13 +257,16 @@ def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate, generat
         fitness_scores = [evaluate_fitness(glogf, is_prelink, entity, passes, cwd) for entity in population]
         log(glogf, f"\nfitness score: {fitness_scores}\n")
         log(glogf, "=========================================================")
-        # TODO: consider execution time for hyperparameter tuning
-        wt = [(1/t) for t in fitness_scores] # less execution time, better weight 
+
+        # less the execution time is better
+        wt = [(1/t) for t in fitness_scores] 
         print(f"\033[38;5;128m {fitness_scores}\033[0m")
+        
         # Check if we have reached the target fitness
         if target_fitness in fitness_scores:
             print(f"Target fitness reached in generation {generation + 1}!")
             break
+        
         # to randomly pick entities when the complete population fails
         if fitness_scores.count(float('inf')) == len(fitness_scores):
             wt = [1 for _ in fitness_scores]
@@ -323,7 +302,7 @@ def main(logf, glogf, is_prelink, cwd):
         is_prelink,
         population_size = len(passes) * 2,
         mutation_rate = 0.1,
-        generations = 100,
+        generations = 1,
         target_fitness = target_fitness,
         passes = passes,
         cwd = cwd,
@@ -339,7 +318,7 @@ if __name__ == "__main__":
     if not os.environ.get('YK_PATH') or not os.environ.get('YKLUA_PATH'):
         print("Please set both YK_PATH and YKLUA_PATH environment variables before running the script.")
         exit(1)
-        
+    
     if '--help' in sys.argv:
         print(__doc__)
         exit(0)
@@ -349,7 +328,6 @@ if __name__ == "__main__":
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('-lto', action='store_true', help='Set flag for LTO.')
     group.add_argument('-prelink', action='store_true', help='Set flag for Prelink.')
-    parser.add_argument('--path', required=True, help='The path to set as cwd.')
 
     args = parser.parse_args()
 
@@ -357,14 +335,19 @@ if __name__ == "__main__":
 
     if not is_prelink and not args.lto:
         print("Flag invalid! Please provide a valid flag: -lto or -prelink")
-        exit(1)
-
-    if not os.path.isdir(args.path):
-        print(f"Invalid path: {args.path}. Please provide a valid directory for yklua.")
-        exit(1)
+        exit(1) 
 
     # Set the global variable with the parsed path
-    CWD = args.path
+    yk_path = os.environ.get('YK_PATH')
+    if yk_path is None:
+        raise ValueError("YK_PATH environment variable is not set")
+
+    yklua_path = os.environ.get('YKLUA_PATH')
+    if yklua_path is None:
+        raise ValueError("YKLUA_PATH environment variable is not set")
+
+
+    CWD = yk_path
     genetic_log_path = os.path.join(CWD, "ykrt/pass_finder/genetic.log")
     print(f"PATH to interpreter: {CWD}")
 
