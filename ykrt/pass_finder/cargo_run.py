@@ -2,7 +2,17 @@ import os
 import subprocess
 import time
 
+YELLOW = '\033[93m'
+RESET = '\033[0m'
+
 def run_test(yk_path, env=None, n=1):
+    """
+    The function loads the environment variables and
+    runs YK's test and YKLUA build plus tests. If both succeeds
+    the function then runs the benchmark script to get
+    the execution time which is used by the genetic algorithm
+    for fitness function.
+    """
     # Set path and environment variables
     yk_path = os.environ.get('YK_PATH')
     if yk_path is None:
@@ -20,9 +30,9 @@ def run_test(yk_path, env=None, n=1):
      
     # Check if pre and post-link flags are set
     prelink_passes = env.get('PRELINK_PASSES', 'Not Set')
-    print(f"\n\033[93mPRELINK_PASSES: {prelink_passes}\033[0m")
+    print(f"\n{YELLOW}PRELINK_PASSES: {prelink_passes}{RESET}")
     postlink_passes = env.get('POSTLINK_PASSES', 'Not Set')
-    print(f"\n\033[93mPOSTLINK_PASSES: {postlink_passes}\033[0m")
+    print(f"\n{YELLOW}POSTLINK_PASSES: {postlink_passes}i{RESET}")
  
     curdir = os.getcwd()
     os.chdir(yklua_path)

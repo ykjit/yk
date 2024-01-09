@@ -25,6 +25,11 @@ from dataclasses import dataclass
 from multiprocessing import Manager, Process, Queue, Value
 import cargo_run
 
+RED = '\033[91m'
+GREEN = '\033[92m'
+PURPLE = '\033[38;5;128m'
+RESET = '\033[0m'
+
 # Stages in an LTO pipeline where optimisation passes can happen.
 STAGES = "pre_link", "link_time"
 @dataclass
@@ -142,7 +147,6 @@ def test_pipeline(logf, pl, cwd):
 
     if ret == 0:
         print(" [OK]")
-        print(f"\033[92m time: {time}\033[0m")
         log(logf, str(pl) + ": OK\n")
         return True, time
     else:
@@ -160,11 +164,11 @@ def binary_split_worker(logf, ok_passes, passes_tasks, is_prelink, processing):
             try_passes = passes_tasks.get(block=True)
             processing.value += 1
         except queue.Empty:
-            print(f"\033[91mClosing Worker\033[0m")
+            print(f"{RED}Closing Worker{RESET}")
             break
         else:
             if try_passes == "CLOSE":
-                print(f"\033[33mClosing Worker\033[0m")
+                print(f"{RED}Closing Worker{RESET}")
                 break
             log(logf, f">>> Trying to add:\n{list_of_passes_to_str(try_passes)}\n\n")
             
@@ -286,7 +290,7 @@ def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate, generat
 
         # A lower execution time is better
         wt = [(1/t) for t in fitness_scores] 
-        print(f"\033[38;5;128m {fitness_scores}\033[0m")
+        print(f"{PURPLE}{fitness_scores}{RESET}")
         
         # Check if we have reached the target fitness
         if target_fitness >= fitness_scores:
@@ -315,7 +319,7 @@ def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate, generat
         population = new_population
 
     best_entity = population[fitness_scores.index(min(fitness_scores))]
-    print(f"\033[35;5;128; m{best_entity}\033[0m")
+    print(f"{PURPLE}{best_entity}{RESET}")
     return best_entity  
 
 def main(logf, glogf, is_prelink, cwd):
@@ -338,7 +342,7 @@ def main(logf, glogf, is_prelink, cwd):
 
     final_passes = [passes[i] for (i, bit) in enumerate(best_entity) if bit]  
     log(glogf, f"\nFinal passes: {final_passes}\n")
-    print(f"\033[38;5;128m {final_passes}\033[0m")
+    print(f"{PURPLE}{final_passes}{RESET}")
 
 if __name__ == "__main__":
     if not os.environ.get('YK_PATH') or not os.environ.get('YKLUA_PATH'):
