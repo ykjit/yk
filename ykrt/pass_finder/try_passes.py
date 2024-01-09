@@ -214,15 +214,15 @@ def binary_split(logf, passes, is_prelink):
         print(list_of_passes_to_str(ok_passes))
 
 def evaluate_fitness(glogf, is_prelink, entity, passes, cwd):
-    try_passes = [passes[i] for (i, x) in enumerate(entity) if x]
+    try_passes = [passes[i] for (i, bit) in enumerate(entity) if bit]
     log(glogf, f"\ncurrently evaluating {try_passes}\n")
     config = get_pipeline_config(is_prelink, try_passes)
     ret, exec_time = test_pipeline(glogf, config, cwd) 
     if ret:
-            exec_time = float(exec_time)  # Convert exec_time to a float
+            exec_time = float(exec_time) 
             return  exec_time
     else:
-        # Return False for programs that crash, and execution time as a large positive value
+        # Return execution time as a large positive value
         return float('inf')
 
 def crossover(parent1, parent2): 
@@ -257,7 +257,7 @@ def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate, generat
         log(glogf, f"\nfitness score: {fitness_scores}\n")
         log(glogf, "=========================================================")
 
-        # less the execution time is better
+        # A lower execution time is better
         wt = [(1/t) for t in fitness_scores] 
         print(f"\033[38;5;128m {fitness_scores}\033[0m")
         
@@ -266,7 +266,7 @@ def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate, generat
             print(f"Target fitness reached in generation {generation + 1}!")
             break
         
-        # to randomly pick entities when the complete population fails
+        # To randomly pick entities when the complete population fails
         if fitness_scores.count(float('inf')) == len(fitness_scores):
             wt = [1] * len(fitness_scores)
 
@@ -292,24 +292,24 @@ def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate, generat
     return best_entity  
 
 def main(logf, glogf, is_prelink, cwd):
-    #sanity check, test script should work with no extra passes.
+    # Sanity check, test script should work with no extra passes.
     # assert(test_pipeline(logf, PipelineConfig([], [])))
 
     passes = get_all_passes(is_prelink)
-    target_fitness = 8 #random time
+    #FIXME: choose a better value for target fitness
+    # currently choosing 0 secs, so the benchmark converges
+    target_fitness = 0.0 
     best_entity = genetic_algorithm(glogf,
         is_prelink,
         population_size = len(passes) * 2,
         mutation_rate = 0.1,
-        generations = 1,
+        generations = 100,
         target_fitness = target_fitness,
         passes = passes,
         cwd = cwd,
     )
-    final_passes = []
-    for i, bit in enumerate(best_entity):
-        if bit == 1:
-            final_passes.append(passes[i])
+
+    final_passes = [passes[i] for (i, bit) in enumerate(best_entity) if bit]  
     log(glogf, f"\nFinal passes: {final_passes}\n")
     print(f"\033[38;5;128m {final_passes}\033[0m")
 
