@@ -23,18 +23,24 @@ const SHORT_INSTR_MAX_OPERANDS: u64 = 3;
 /// In the constants below:
 ///  - `*_SIZE`: the size of a field in bits.
 ///  - `*_MASK`: a mask with one bits occupying the field in question.
+///  - `*_SHIFT`: the number of bits required to left shift a field's value into position (from the
+///  LSB).
 ///
 /// Bit fiddling for a short operands:
 const SHORT_OPERAND_SIZE: u64 = 18;
 const SHORT_OPERAND_KIND_SIZE: u64 = 3;
 const SHORT_OPERAND_KIND_MASK: u64 = 7;
 const SHORT_OPERAND_VALUE_SIZE: u64 = 15;
+const SHORT_OPERAND_VALUE_SHIFT: u64 = SHORT_OPERAND_KIND_SIZE;
 const SHORT_OPERAND_MAX_VALUE: u64 = !(u64::MAX << SHORT_OPERAND_VALUE_SIZE);
 const SHORT_OPERAND_MASK: u64 = 0x3ffff;
 /// Bit fiddling for instructions.
 const INSTR_ISSHORT_SIZE: u64 = 1;
 const INSTR_ISSHORT_MASK: u64 = 1;
 const INSTR_OPCODE_MASK: u64 = 0xe;
+/// Bit fiddling for short instructions.
+const SHORT_INSTR_OPCODE_SHIFT: u64 = INSTR_ISSHORT_SIZE;
+const SHORT_INSTR_FIRST_OPERAND_SHIFT: u64 = INSTR_ISSHORT_SIZE + OPCODE_SIZE;
 
 /// An instruction is identified by its index in the instruction vector.
 #[derive(Copy, Clone)]
@@ -147,7 +153,7 @@ pub struct ShortOperand(u64);
 
 impl ShortOperand {
     fn new(kind: OpKind, val: u64) -> ShortOperand {
-        ShortOperand((kind as u64) | (val << SHORT_OPERAND_KIND_SIZE))
+        ShortOperand((kind as u64) | (val << SHORT_OPERAND_VALUE_SHIFT))
     }
 
     fn kind(&self) -> OpKind {
@@ -155,7 +161,7 @@ impl ShortOperand {
     }
 
     fn val(&self) -> u64 {
-        self.0 >> SHORT_OPERAND_KIND_SIZE
+        self.0 >> SHORT_OPERAND_VALUE_SHIFT
     }
 }
 
@@ -200,7 +206,7 @@ pub(crate) struct Instruction(u64);
 
 impl Instruction {
     fn new_short(opcode: OpCode) -> Self {
-        Self(((opcode as u64) << INSTR_ISSHORT_SIZE) | INSTR_ISSHORT_MASK)
+        Self(((opcode as u64) << SHORT_INSTR_OPCODE_SHIFT) | INSTR_ISSHORT_MASK)
     }
 
     /// Returns true if the instruction is short.
@@ -211,14 +217,14 @@ impl Instruction {
     /// Returns the opcode.
     fn opcode(&self) -> OpCode {
         debug_assert!(self.is_short());
-        OpCode::from((self.0 & INSTR_OPCODE_MASK) >> INSTR_ISSHORT_SIZE)
+        OpCode::from((self.0 & INSTR_OPCODE_MASK) >> SHORT_INSTR_OPCODE_SHIFT)
     }
 
     /// Returns the specified operand.
     fn operand(&self, index: u64) -> Operand {
         if self.is_short() {
             // Shift operand down the the LSB.
-            let op = self.0 >> (INSTR_ISSHORT_SIZE + OPCODE_SIZE + SHORT_OPERAND_SIZE * index);
+            let op = self.0 >> (SHORT_INSTR_FIRST_OPERAND_SHIFT + SHORT_OPERAND_SIZE * index);
             // Then mask it out.
             Operand::Short(ShortOperand(op & SHORT_OPERAND_MASK))
         } else {
@@ -262,7 +268,7 @@ impl Instruction {
     fn set_short_operand(&mut self, op: Operand, idx: u64) {
         debug_assert!(self.is_short());
         debug_assert!(idx < SHORT_INSTR_MAX_OPERANDS);
-        self.0 |= op.raw() << (INSTR_ISSHORT_SIZE + OPCODE_SIZE + SHORT_OPERAND_SIZE * idx);
+        self.0 |= op.raw() << (SHORT_INSTR_FIRST_OPERAND_SHIFT + SHORT_OPERAND_SIZE * idx);
     }
 
     /// Returns `true` if the instruction defines a local variable.
@@ -381,14 +387,12 @@ mod tests {
     fn short_operand_getters() {
         let mut word = 1; // short instruction.
 
-        let skip_lsbits = INSTR_ISSHORT_SIZE + OPCODE_SIZE;
-
         // operand0:
-        word |= 0x0aaa8 << skip_lsbits;
+        word |= 0x0aaa8 << SHORT_INSTR_FIRST_OPERAND_SHIFT;
         // operand1:
-        word |= 0x1bbb1 << skip_lsbits + SHORT_OPERAND_SIZE;
+        word |= 0x1bbb1 << SHORT_INSTR_FIRST_OPERAND_SHIFT + SHORT_OPERAND_SIZE;
         // operand2:
-        word |= 0x2ccc8 << skip_lsbits + SHORT_OPERAND_SIZE * 2;
+        word |= 0x2ccc8 << SHORT_INSTR_FIRST_OPERAND_SHIFT + SHORT_OPERAND_SIZE * 2;
 
         let inst = Instruction(word);
 
