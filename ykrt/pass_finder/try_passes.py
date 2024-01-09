@@ -69,32 +69,32 @@ def executable_exists(cmd):
     return shutil.which(cmd) is not None
 
 def split_passes(passes_string):
-    parts = []           
-    temp_part = []      
-    paren_stack = []     
-    angle_stack = []    
+    parts = []
+    temp_part = []
+    nesting_paren = 0
+    nesting_angle = 0
 
     for c in passes_string:
         if c == '(':
-            paren_stack.append(c) 
+            nesting_paren += 1
         elif c == ')':
-            paren_stack.pop() 
+            nesting_paren -= 1
         
         if c == '<':
-            angle_stack.append(c) 
+            nesting_angle += 1
         elif c == '>':
-            angle_stack.pop() 
+            nesting_angle -= 1
 
-        if c == ',' and not paren_stack and not angle_stack:
+        if c == ',' and nesting_paren == 0 and nesting_angle == 0:
             part = ''.join(temp_part).strip()
-            if part: 
+            if part:
                 parts.append(part)
             temp_part = []
         else:
             temp_part.append(c)
  
     part = ''.join(temp_part).strip()
-    if part:  
+    if part:
         parts.append(part)
 
     return parts
