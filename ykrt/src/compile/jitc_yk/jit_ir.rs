@@ -220,11 +220,18 @@ impl Instruction {
         OpCode::from((self.0 & SHORT_INSTR_OPCODE_MASK) >> SHORT_INSTR_OPCODE_SHIFT)
     }
 
+    /// For short instrucitons, return the bit offset of the specified short operand.
+    fn short_operand_bit_off(&self, index: u64) -> u64 {
+        debug_assert!(self.is_short());
+        debug_assert!(index < SHORT_INSTR_MAX_OPERANDS);
+        SHORT_INSTR_FIRST_OPERAND_SHIFT + SHORT_OPERAND_SIZE * index
+    }
+
     /// Returns the specified operand.
     fn operand(&self, index: u64) -> Operand {
         if self.is_short() {
             // Shift operand down the the LSB.
-            let op = self.0 >> (SHORT_INSTR_FIRST_OPERAND_SHIFT + SHORT_OPERAND_SIZE * index);
+            let op = self.0 >> self.short_operand_bit_off(index);
             // Then mask it out.
             Operand::Short(ShortOperand(op & SHORT_OPERAND_MASK))
         } else {
@@ -268,7 +275,7 @@ impl Instruction {
     fn set_short_operand(&mut self, op: Operand, idx: u64) {
         debug_assert!(self.is_short());
         debug_assert!(idx < SHORT_INSTR_MAX_OPERANDS);
-        self.0 |= op.raw() << (SHORT_INSTR_FIRST_OPERAND_SHIFT + SHORT_OPERAND_SIZE * idx);
+        self.0 |= op.raw() << self.short_operand_bit_off(idx);
     }
 
     /// Returns `true` if the instruction defines a local variable.
