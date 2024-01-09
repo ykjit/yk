@@ -428,13 +428,16 @@ mod tests {
     #[test]
     fn does_fit_short_operand() {
         for i in 0..SHORT_OPERAND_VALUE_SIZE {
-            Operand::new(OpKind::Local, 1 << i);
+            matches!(Operand::new(OpKind::Local, 1 << i), Operand::Short(_));
         }
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic] // Once long operands are implemented, remove.
     fn doesnt_fit_short_operand() {
-        Operand::new(OpKind::Local, 1 << SHORT_OPERAND_VALUE_SIZE);
+        matches!(
+            Operand::new(OpKind::Local, 1 << SHORT_OPERAND_VALUE_SIZE),
+            Operand::Long(_)
+        );
     }
 }
