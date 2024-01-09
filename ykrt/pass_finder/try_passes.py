@@ -69,6 +69,10 @@ def executable_exists(cmd):
     return shutil.which(cmd) is not None
 
 def split_passes(passes_string):
+    """
+    Split comma seperated passes list to individual passes.
+    Currently doesn't seperate function parameters.
+    """
     parts = []
     temp_part = []
     nesting_paren = 0
@@ -100,6 +104,10 @@ def split_passes(passes_string):
     return parts
 
 def get_all_passes(is_prelink):
+    """
+    This function uses llvm's opt command to get list of prelink
+    and postlink passes.
+    """
     cmd = get_opt_cmd(is_prelink)
     sout = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     assert (sout.returncode != 0), "Opt command failed."
@@ -214,6 +222,10 @@ def binary_split(logf, passes, is_prelink):
         print(list_of_passes_to_str(ok_passes))
 
 def evaluate_fitness(glogf, is_prelink, entity, passes, cwd):
+    """
+    Returns fitness score based on whether the passes list 
+    successfully builds the pipeline and runs all the tests.
+    """
     try_passes = [passes[i] for (i, bit) in enumerate(entity) if bit]
     log(glogf, f"\ncurrently evaluating {try_passes}\n")
     config = get_pipeline_config(is_prelink, try_passes)
@@ -225,13 +237,23 @@ def evaluate_fitness(glogf, is_prelink, entity, passes, cwd):
         # Return execution time as a large positive value
         return float('inf')
 
-def crossover(parent1, parent2): 
+def crossover(parent1, parent2):
+    """
+    Performs crossover between two parents using a single crossover point.
+    The crossover point is randomly chosen, and two children are created
+    by combining segments of the parents. Parent selection is based on the
+    roulette method.
+    """
     crossover_point = random.randint(1, len(parent1) - 1)
     child1 = parent1[:crossover_point] + parent2[crossover_point:]
     child2 = parent2[:crossover_point] + parent1[crossover_point:]
     return child1, child2
 
 def mutate(entity, mutation_rate):
+    """
+    Applies mutation to an entity by flipping each bit with a probability 
+    defined by the mutation rate. This function supports binary-encoded entities.
+    """
     mutated_entity = []
     for bit in entity:
         if random.random() < mutation_rate:
@@ -241,6 +263,11 @@ def mutate(entity, mutation_rate):
     return mutated_entity
 
 def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate, generations, target_fitness, passes, cwd):
+    """
+    Executes a genetic algorithm for finding optimization passes. It randomly generates 
+    a population, evolves it through crossover and mutation, and selects entities based on 
+    the fitness scores (which depends on the benchmark's execution time).
+    """
     population = []
     fitness_scores = []
 
