@@ -37,8 +37,8 @@ const SHORT_OPERAND_MASK: u64 = 0x3ffff;
 /// Bit fiddling for instructions.
 const INSTR_ISSHORT_SIZE: u64 = 1;
 const INSTR_ISSHORT_MASK: u64 = 1;
-const INSTR_OPCODE_MASK: u64 = 0xe;
 /// Bit fiddling for short instructions.
+const SHORT_INSTR_OPCODE_MASK: u64 = 0xe;
 const SHORT_INSTR_OPCODE_SHIFT: u64 = INSTR_ISSHORT_SIZE;
 const SHORT_INSTR_FIRST_OPERAND_SHIFT: u64 = INSTR_ISSHORT_SIZE + OPCODE_SIZE;
 
@@ -217,7 +217,7 @@ impl Instruction {
     /// Returns the opcode.
     fn opcode(&self) -> OpCode {
         debug_assert!(self.is_short());
-        OpCode::from((self.0 & INSTR_OPCODE_MASK) >> SHORT_INSTR_OPCODE_SHIFT)
+        OpCode::from((self.0 & SHORT_INSTR_OPCODE_MASK) >> SHORT_INSTR_OPCODE_SHIFT)
     }
 
     /// Returns the specified operand.
