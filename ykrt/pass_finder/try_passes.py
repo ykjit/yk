@@ -43,9 +43,11 @@ class PipelineConfig:
         link_time = ",".join([ str(p) for p in self.link_time ])
         return f"PipelineConfig(pre_link=[{pre_link}], link_time=[{link_time}])"
 
-def get_pipeline_config(is_prelink, try_passes, ok_passes=[]):
+def get_pipeline_config(is_prelink, try_passes, ok_passes=None):
     """Returns pipeline configuration based on the flag type."""
     
+    if ok_passes is None:
+        ok_passes = [] 
     if not is_prelink:
         return PipelineConfig([], ok_passes + try_passes)
     else:
@@ -100,6 +102,7 @@ def split_passes(passes_string):
 def get_all_passes(is_prelink):
     cmd = get_opt_cmd(is_prelink)
     sout = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    assert (sout.returncode != 0), "Opt command failed."
     sout = sout.stdout.decode('utf-8')
     pass_descrs = split_passes(sout)
     passes = []
@@ -129,7 +132,6 @@ def test_pipeline(logf, pl, cwd):
     
     ret, time = cargo_run.run_test(cwd, env=env)
 
-    print(f"\033[92m return code for cargo_run: {ret} \033[0m")
     if ret == 0:
         print(" [OK]")
         print(f"\033[92m time: {time}\033[0m")
@@ -212,10 +214,7 @@ def binary_split(logf, passes, is_prelink):
         print(list_of_passes_to_str(ok_passes))
 
 def evaluate_fitness(glogf, is_prelink, entity, passes, cwd):
-    try_passes = []
-    for i, bit in enumerate(entity):
-        if bit == 1:
-            try_passes.append(passes[i])
+    try_passes = [passes[i] for (i, x) in enumerate(entity) if x]
     log(glogf, f"\ncurrently evaluating {try_passes}\n")
     config = get_pipeline_config(is_prelink, try_passes)
     ret, exec_time = test_pipeline(glogf, config, cwd) 
@@ -263,13 +262,13 @@ def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate, generat
         print(f"\033[38;5;128m {fitness_scores}\033[0m")
         
         # Check if we have reached the target fitness
-        if target_fitness in fitness_scores:
+        if target_fitness >= fitness_scores:
             print(f"Target fitness reached in generation {generation + 1}!")
             break
         
         # to randomly pick entities when the complete population fails
         if fitness_scores.count(float('inf')) == len(fitness_scores):
-            wt = [1 for _ in fitness_scores]
+            wt = [1] * len(fitness_scores)
 
         # Select parents for reproduction (roulette wheel selection)
         parents = []
@@ -345,7 +344,6 @@ if __name__ == "__main__":
     yklua_path = os.environ.get('YKLUA_PATH')
     if yklua_path is None:
         raise ValueError("YKLUA_PATH environment variable is not set")
-
 
     CWD = yk_path
     genetic_log_path = os.path.join(CWD, "ykrt/pass_finder/genetic.log")
