@@ -29,6 +29,7 @@ const SHORT_OPERAND_SIZE: u64 = 18;
 const SHORT_OPERAND_KIND_SIZE: u64 = 3;
 const SHORT_OPERAND_KIND_MASK: u64 = 7;
 const SHORT_OPERAND_VALUE_SIZE: u64 = 15;
+const SHORT_OPERAND_MAX_VALUE: u64 = !(u64::MAX << SHORT_OPERAND_VALUE_SIZE);
 const SHORT_OPERAND_MASK: u64 = 0x3ffff;
 /// Bit fiddling for instructions.
 const INSTR_ISSHORT_SIZE: u64 = 1;
@@ -95,7 +96,7 @@ pub enum Operand {
 impl Operand {
     pub(crate) fn new(kind: OpKind, val: u64) -> Self {
         // check if the operand's value can fit in a short operand.
-        if val & (u64::MAX << SHORT_OPERAND_VALUE_SIZE) == 0 {
+        if val <= SHORT_OPERAND_MAX_VALUE {
             Self::Short(ShortOperand::new(kind, val))
         } else {
             todo!()
