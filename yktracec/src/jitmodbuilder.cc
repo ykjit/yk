@@ -4,6 +4,7 @@
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
@@ -1284,6 +1285,25 @@ public:
               }
               // FIXME Don't inline indirect calls unless promoted.
               handleCallInst(CI, CF, CurBBIdx, CurInstrIdx);
+              break;
+            } else {
+              // This is an inlineasm instruction so just copy it. We don't
+              // currently support any inline asm that isn't the empty string,
+              // since calls within the asm messes up the blockmap.
+              // FIXME: To fix this, we could parse the asm and count the
+              // calls. However, parsing asm is complicated and even LLVM's
+              // parser can bail. Alternatively, we could annotate blocks when
+              // they contain inline asm and change the PT decoder so that it
+              // disassembles those blocks to figure out how many calls the asm
+              // contains.
+              if (!cast<InlineAsm>(CI->getCalledOperand())
+                       ->getAsmString()
+                       .empty()) {
+                errs() << "InlineAsm is currently not supported.";
+                exit(EXIT_FAILURE);
+              }
+              copyInstruction(&Builder, (Instruction *)&*CI, CurBBIdx,
+                              CurInstrIdx);
               break;
             }
           } else if (CF->getName() == PromoteRecFnName) {
