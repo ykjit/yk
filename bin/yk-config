@@ -144,6 +144,8 @@ handle_arg() {
             # Encode additional locations in stackmaps.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-stackmap-add-locs"
 
+            # TODO: if [ "${YKB_TRACER}" == "sw" ]; then ...
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-basicblock-tracer"
             # Add known yk-friendly optimisations.
             #
             # This pairs with `-Xclang -disable-O0-optnone`. See above.

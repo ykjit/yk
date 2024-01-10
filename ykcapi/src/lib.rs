@@ -95,3 +95,8 @@ pub extern "C" fn yk_location_new() -> Location {
 pub extern "C" fn yk_location_drop(loc: Location) {
     drop(loc)
 }
+
+#[no_mangle]
+pub extern "C" fn yk_trace_basicblock(function_index: u32, block_index: u32) {
+    // println!("[YK] function_index {} - {}", function_index, block_index);
+}
