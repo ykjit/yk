@@ -1,16 +1,21 @@
 // Run-time:
-//   env-var: YKD_PRINT_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_PRINT_JITSTATE=1
 //   status: error
+//   stderr:
+//     ...
+//     InlineAsm is currently not supported.
 
-// Check that we can handle inline asm properly (currently expectely fails
-// until we can deal with calls inside inline asm).
+// Check that we bail when we see non-empty inline asm.
 
 #include <assert.h>
 #include <stdlib.h>
 #include <yk.h>
 #include <yk_testing.h>
+
+int foo() {
+  fprintf(stderr, "foo\n");
+  return 11;
+}
 
 int main(int argc, char **argv) {
 
@@ -26,7 +31,7 @@ int main(int argc, char **argv) {
     yk_mt_control_point(mt, &loc);
 #ifdef __x86_64__
     // Stores the constant 5 into `res`.
-    asm("mov $5, %0"
+    asm("call foo"
         : "=r"(res) // outputs.
         :           // inputs.
         :           // clobbers.
