@@ -75,26 +75,20 @@ def executable_exists(cmd):
 
 def split_passes(passes_string):
     """
-    Split comma seperated passes list to individual passes.
-    Currently doesn't seperate function parameters.
+    Split comma-separated passes list into individual passes.
+    Uses a single counter for both parentheses and angle brackets.
     """
     parts = []
     temp_part = []
-    nesting_paren = 0
-    nesting_angle = 0
+    nesting_level = 0
 
     for c in passes_string:
-        if c == '(':
-            nesting_paren += 1
-        elif c == ')':
-            nesting_paren -= 1
-        
-        if c == '<':
-            nesting_angle += 1
-        elif c == '>':
-            nesting_angle -= 1
+        if c == '(' or c == '<':
+            nesting_level += 1
+        elif c == ')' or c == '>':
+            nesting_level -= 1
 
-        if c == ',' and nesting_paren == 0 and nesting_angle == 0:
+        if c == ',' and nesting_level == 0:
             part = ''.join(temp_part).strip()
             if part:
                 parts.append(part)
@@ -102,10 +96,12 @@ def split_passes(passes_string):
         else:
             temp_part.append(c)
  
+    # Add the last part if it's not empty
     part = ''.join(temp_part).strip()
     if part:
         parts.append(part)
-
+    print(f"{RED}length: {len(parts)}{RESET}")    
+    print(f"{GREEN}passes{parts}{RESET}\n")
     return parts
 
 def get_all_passes(is_prelink):
@@ -292,8 +288,7 @@ def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate, generat
         wt = [(1/t) for t in fitness_scores] 
         print(f"{PURPLE}{fitness_scores}{RESET}")
         
-        # Check if we have reached the target fitness
-        if target_fitness >= fitness_scores:
+        if any(y <= target_fitness for y in fitness_scores):
             print(f"Target fitness reached in generation {generation + 1}!")
             break
         

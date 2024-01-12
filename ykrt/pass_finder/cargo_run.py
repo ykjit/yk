@@ -60,12 +60,12 @@ def run_test(yk_path, env=None, n=1):
     if len(times) != 0:
         mean_time = sum(times) / len(times)
     else:
-        mean_time = 0
+        mean_time = None
 
     if c_test is None:
-        return 130, 0
+        return 130, None
     elif c_test != 0:
-        return c_test, 0
+        return c_test, None
 
     os.chdir(curdir)
     return 0, mean_time
