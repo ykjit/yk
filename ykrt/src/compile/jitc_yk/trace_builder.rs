@@ -19,7 +19,7 @@ struct TraceBuilder<'a> {
     /// The mapped trace.
     mtrace: &'a Vec<TracedAOTBlock>,
     // Maps an AOT instruction to a jit instruction via their index-based IDs.
-    local_map: HashMap<aot_ir::InstructionID, jit_ir::InstructionID>,
+    local_map: HashMap<aot_ir::InstructionID, jit_ir::InstrIndex>,
 }
 
 impl<'a> TraceBuilder<'a> {
@@ -75,7 +75,7 @@ impl<'a> TraceBuilder<'a> {
                     // unwrap safe: we know the AOT code was produced by ykllvm.
                     let inp = last_store.unwrap().operand(0);
                     input.insert(0, inp.to_instr(self.aot_mod));
-                    let load_arg = jit_ir::Instruction::create_loadarg();
+                    let load_arg = jit_ir::LoadArgInstruction::new().into();
                     self.local_map
                         .insert(inp.to_instr_id(), self.next_instr_id());
                     self.jit_mod.push(load_arg);
@@ -93,13 +93,14 @@ impl<'a> TraceBuilder<'a> {
         for (inst_idx, inst) in blk.instrs.iter().enumerate() {
             let jit_inst = match inst.opcode() {
                 aot_ir::Opcode::Load => self.handle_load(inst),
+                aot_ir::Opcode::Call => self.handle_call(inst),
                 _ => todo!("{:?}", inst),
             };
 
             // If the AOT instruction defines a new value, then add it to the local map.
             if jit_inst.is_def() {
                 let aot_iid = aot_ir::InstructionID::new(bid.func_idx, bid.bb_idx, inst_idx);
-                *self.local_map.get_mut(&aot_iid).unwrap() = self.next_instr_id();
+                self.local_map.insert(aot_iid, self.next_instr_id());
             }
 
             // Insert the newly-translated instruction into the JIT module.
@@ -107,21 +108,40 @@ impl<'a> TraceBuilder<'a> {
         }
     }
 
-    fn next_instr_id(&self) -> jit_ir::InstructionID {
-        jit_ir::InstructionID::new(self.jit_mod.len())
+    fn next_instr_id(&self) -> jit_ir::InstrIndex {
+        jit_ir::InstrIndex::new(self.jit_mod.len())
     }
 
-    // Translate a `Load` instruction.
-    fn handle_load(&self, inst: &aot_ir::Instruction) -> jit_ir::Instruction {
-        let aot_op = inst.operand(0);
-        let jit_op = match aot_op {
-            aot_ir::Operand::LocalVariable(aot_iid) => self.local_map[aot_iid],
-            _ => todo!("{}", aot_op.to_str(self.aot_mod)),
-        };
-        jit_ir::Instruction::create_load(jit_ir::Operand::new(
-            jit_ir::OpKind::Local,
-            u64::try_from(jit_op.get()).unwrap(),
-        ))
+    /// Translate an operand.
+    fn handle_operand(&mut self, op: &aot_ir::Operand) -> jit_ir::Operand {
+        match op {
+            aot_ir::Operand::LocalVariable(aot_iid) => {
+                let instridx = self.local_map[aot_iid];
+                jit_ir::Operand::Local(instridx)
+            }
+            aot_ir::Operand::Unimplemented(_) => {
+                // FIXME: for now we push an arbitrary constant.
+                let constidx = self
+                    .jit_mod
+                    .const_index(&jit_ir::Constant::Usize(0xdeadbeef));
+                jit_ir::Operand::Const(constidx)
+            }
+            _ => todo!("{}", op.to_str(self.aot_mod)),
+        }
+    }
+
+    /// Translate a `Load` instruction.
+    fn handle_load(&mut self, inst: &aot_ir::Instruction) -> jit_ir::Instruction {
+        let jit_op = self.handle_operand(inst.operand(0));
+        jit_ir::LoadInstruction::new(jit_op, jit_ir::TypeIndex::from_aot(inst.type_index())).into()
+    }
+
+    fn handle_call(&mut self, inst: &aot_ir::Instruction) -> jit_ir::Instruction {
+        let mut args = Vec::new();
+        for arg in inst.remaining_operands(1) {
+            args.push(self.handle_operand(arg));
+        }
+        jit_ir::CallInstruction::new(&mut self.jit_mod, inst.callee(), &args).into()
     }
 
     /// Entry point for building an IR trace.
