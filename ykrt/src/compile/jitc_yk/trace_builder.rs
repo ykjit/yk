@@ -75,7 +75,7 @@ impl<'a> TraceBuilder<'a> {
                     // unwrap safe: we know the AOT code was produced by ykllvm.
                     let inp = last_store.unwrap().operand(0);
                     input.insert(0, inp.to_instr(self.aot_mod));
-                    let load_arg = jit_ir::Instruction::create_loadarg();
+                    let load_arg = jit_ir::LoadArgInstruction::new();
                     self.local_map
                         .insert(inp.to_instr_id(), self.next_instr_id());
                     self.jit_mod.push(load_arg);
@@ -104,6 +104,8 @@ impl<'a> TraceBuilder<'a> {
 
             // Insert the newly-translated instruction into the JIT module.
             self.jit_mod.push(jit_inst);
+
+            eprintln!("{}", self.jit_mod);
         }
     }
 
@@ -118,10 +120,7 @@ impl<'a> TraceBuilder<'a> {
             aot_ir::Operand::LocalVariable(aot_iid) => self.local_map[aot_iid],
             _ => todo!("{}", aot_op.to_str(self.aot_mod)),
         };
-        jit_ir::Instruction::create_load(jit_ir::Operand::new(
-            jit_ir::OpKind::Local,
-            u64::try_from(jit_op.get()).unwrap(),
-        ))
+        jit_ir::LoadInstruction::new(jit_ir::Operand::Local(u64::try_from(jit_op.get()).unwrap()))
     }
 
     /// Entry point for building an IR trace.
@@ -144,6 +143,7 @@ impl<'a> TraceBuilder<'a> {
                 }
             }
         }
+        eprintln!("{}", self.jit_mod);
         Ok(self.jit_mod)
     }
 }
