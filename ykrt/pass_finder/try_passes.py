@@ -301,6 +301,8 @@ def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate, generat
         for _ in range(population_size // 2):
             parent1 = random.choices(population, weights=wt, k=1)[0]
             parent2 = random.choices(population, weights=wt, k=1)[0]
+            while parent2 == parent1:
+                parent2 = random.choices(population, weights=wt, k=1)[0]
             parents.append((parent1, parent2))
 
         # Perform crossover and mutation to create a new generation
