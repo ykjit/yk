@@ -24,6 +24,8 @@ import argparse, os, random, shutil, subprocess, sys, time, queue
 from dataclasses import dataclass
 from multiprocessing import Manager, Process, Queue, Value
 import cargo_run
+import tempfile
+import multiprocessing
 
 RED = '\033[91m'
 GREEN = '\033[92m'
@@ -126,7 +128,7 @@ def get_all_passes(is_prelink):
     print(f"Found {len(passes)} passes")    
     return passes
 
-def test_pipeline(logf, pl, cwd):
+def test_pipeline(logf, pl, id, yk_path, yklua_path, cwd):
     sys.stdout.write(str(pl) + "...")
     sys.stdout.flush()
 
@@ -136,11 +138,14 @@ def test_pipeline(logf, pl, cwd):
     assert (len(pl.pre_link) != 0 or len(pl.link_time) != 0), "Both prelink and postlink passes cannot be empty!!!"
 
     env = os.environ.copy()  # Create a copy of the environment
-    env["PRELINK_PASSES"] = ",".join([p.name for p in pl.pre_link])
-    env["POSTLINK_PASSES"] = ",".join([p.name for p in pl.link_time])
-    
-    ret, time = cargo_run.run_test(cwd, env=env)
+    env[f"PRELINK_PASSES_{id}"] = ",".join([p.name for p in pl.pre_link]) 
 
+    # prelink_passes = env.get(f'PRELINK_PASSES_{id}', 'Not Set')
+    # env[f"POSTLINK_PASSES_{id}"] = ",".join([p.name for p in pl.link_time])
+   
+    # print(f"{PURPLE}id: {id} prelink: {env[f'PRELINK_PASSES_{id}']}{RESET}")
+    ret, time = cargo_run.run_test(cwd, id, yk_path, yklua_path, env=env)
+    print(f"{PURPLE}ret code for cargo run is {ret}{RESET}")
     if ret == 0:
         print(" [OK]")
         log(logf, str(pl) + ": OK\n")
@@ -153,89 +158,46 @@ def test_pipeline(logf, pl, cwd):
 def list_of_passes_to_str(passes):
     return ",".join([str(p) for p in passes])
 
-def binary_split_worker(logf, ok_passes, passes_tasks, is_prelink, processing):
-    while True:
-        try:
-            # Wait for a task in the queue for worker_timeout seconds
-            try_passes = passes_tasks.get(block=True)
-            processing.value += 1
-        except queue.Empty:
-            print(f"{RED}Closing Worker{RESET}")
-            break
-        else:
-            if try_passes == "CLOSE":
-                print(f"{RED}Closing Worker{RESET}")
-                break
-            log(logf, f">>> Trying to add:\n{list_of_passes_to_str(try_passes)}\n\n")
-            
-            # Choose pipeline based on flag type.
-            config = get_pipeline_config(is_prelink, ok_passes, try_passes)
 
-            if test_pipeline(logf, config):
-                ok_passes.extend(try_passes)
-            elif len(try_passes) == 1:
-                return
-            else:
-                subset_len = len(try_passes)
-                subset1 = try_passes[:subset_len // 2] 
-                subset2 = try_passes[subset_len // 2:]
-
-                # Put the 2 halves of the split in the worker queue to be processed concurrently
-                passes_tasks.put(subset1)
-                passes_tasks.put(subset2)
-            processing.value -= 1
-    return True
-
-def binary_split(logf, passes, is_prelink):
-    # [config] number of worker processes
-    # Increasing this number might increase the processing time due to locks on ok_passes
-    # and the worker queue (passes_tasks).
-    # The worker-queue pattern solves the thread bomb problem. 
-    n_processes = 10
-    with Manager() as manager:
-        # Shared state list for OK passes
-        ok_passes = manager.list()
-        # Worker queue for passes to be processed
-        passes_tasks = Queue()
-        processes = []
-        processing = Value("i", 0)
-
-        passes_tasks.put(passes)  # put set of all passes in worker queue
-
-        # Start `n_processes` workers
-        for w in range(n_processes):
-            p  = Process(target=binary_split_worker, args=(logf, ok_passes, passes_tasks, is_prelink, processing))
-            processes.append(p)
-            p.start()
-
-        while processing.value > 0:
-            time.sleep(5)
-
-        for w in range(n_processes):
-            passes_tasks.put("CLOSE")
-        
-        for p in processes:
-            p.join()
-
-        print("\n\nFinal OK passes")
-        print(72 * "=")
-        print(list_of_passes_to_str(ok_passes))
-
-def evaluate_fitness(glogf, is_prelink, entity, passes, cwd):
+def evaluate_fitness(glogf, is_prelink, tasks, passes, tmpdir, id, cwd, fitness_scores, processing, run):
     """
     Returns fitness score based on whether the passes list 
     successfully builds the pipeline and runs all the tests.
-    """
-    try_passes = [passes[i] for (i, bit) in enumerate(entity) if bit]
-    log(glogf, f"\ncurrently evaluating {try_passes}\n")
-    config = get_pipeline_config(is_prelink, try_passes)
-    ret, exec_time = test_pipeline(glogf, config, cwd) 
-    if ret:
-            exec_time = float(exec_time) 
-            return  exec_time
-    else:
-        # Return execution time as a large positive value
-        return float('inf')
+    """ 
+    yklua_path = os.path.join(tmpdir, 'yklua')
+    yk_path = os.path.join(tmpdir, 'yk')
+
+    curdir = os.getcwd()
+    os.chdir(tmpdir) 
+
+    while run.value == 1:
+        print(f"{PURPLE}in while{RESET}")
+        try:
+            print(f"{PURPLE}in try{RESET}")
+            entity = tasks.get(block=False) 
+        except queue.Empty:
+            print(f"{PURPLE}in except{RESET}")
+            print(f"{RED}Closing Worker : Queue Empty{RESET}")
+            break
+        else:
+            processing.value += 1
+            print(f"{PURPLE}in else{RESET}")
+            try_passes = [passes[i] for (i, bit) in enumerate(entity[1]) if bit]
+            log(glogf, f"\ncurrently evaluating {try_passes}\n")
+            config = get_pipeline_config(is_prelink, try_passes)
+            ret, exec_time = test_pipeline(glogf, config, id, yk_path, yklua_path, cwd) 
+            if ret:
+                    exec_time = float(exec_time)
+                    print(f"{PURPLE}exec time: {exec_time}{RESET}")
+                    fitness_scores.append([entity[0], exec_time])
+            else:
+                # Return execution time as a large positive value
+                print(f"{PURPLE}exec time: INF {RESET}")
+                fitness_scores.append([entity[0], float('inf')])
+            processing.value -= 1
+    print(f"{RED}Closing Worker : Run False{RESET}")
+    os.chdir(curdir)
+    return True
 
 def crossover(parent1, parent2):
     """
@@ -257,73 +219,180 @@ def mutate(entity, mutation_rate):
     mutated_entity = []
     for bit in entity:
         if random.random() < mutation_rate:
-            mutated_entity.append(1 - bit)  # Flip the bit
+            mutated_entity.append(1)
         else:
             mutated_entity.append(bit)
     return mutated_entity
 
-def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate, generations, target_fitness, passes, cwd):
+def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate,
+                      generations, target_fitness, passes, tmpdirs, ncpu, cwd):
     """
     Executes a genetic algorithm for finding optimization passes. It randomly generates 
     a population, evolves it through crossover and mutation, and selects entities based on 
     the fitness scores (which depends on the benchmark's execution time).
     """
     population = []
-    fitness_scores = []
-
+    fitness = []
+    
+    initial_passes = ["annotation2metadata", "forceattrs", "inferattrs", "coro-early", "openmp-opt", "ipsccp", "called-value-propagation", "globalopt", "require<globals-aa>", "function(invalidate<aa>)", "require<profile-summary>", "deadargelim", "coro-cleanup", "globaldce", "rpo-function-attrs", "recompute-globalsaa", "constmerge", "function(annotation-remarks)", "canonicalize-aliases", "name-anon-globals", "verify"]
+    
     for _ in range(population_size):
-        entity = [random.randint(0,1) for _ in range(len(passes))]
+        entity = []
+        for pass_name in passes:
+            if pass_name in initial_passes:
+                entity.append(1)  # Include initial pass
+            else:
+                entity.append(random.randint(0, 1))  # Randomly decide for other passes
         population.append(entity)
+
+    # for _ in range(population_size):
+    #     entity = [random.randint(0,1) for _ in range(len(passes))]
+    #     population.append(entity)
 
     for generation in range(generations):
         log(glogf, "=========================================================")
-        log(glogf, f"\ngeneration: {generation}\n") 
-        fitness_scores.clear()
-        # Evaluate fitness for each entity in the population
-        fitness_scores = [evaluate_fitness(glogf, is_prelink, entity, passes, cwd) for entity in population]
-        log(glogf, f"\nfitness score: {fitness_scores}\n")
-        log(glogf, "=========================================================")
+        log(glogf, f"\ngeneration: {generation}\n")
 
-        # A lower execution time is better
-        wt = [(1/t) for t in fitness_scores] 
-        print(f"{PURPLE}{fitness_scores}{RESET}")
-        
-        if any(y <= target_fitness for y in fitness_scores):
-            print(f"Target fitness reached in generation {generation + 1}!")
-            break
-        
-        # To randomly pick entities when the complete population fails
-        if fitness_scores.count(float('inf')) == len(fitness_scores):
-            wt = [1] * len(fitness_scores)
+        with Manager() as manager:
+            fitness_scores = manager.list()
+            tasks = Queue()
+            processes = []
+            processing = Value("i", 0)
+            run = Value("i", 1) # control worker termination 
+            # Prepare tasks out of population. Task = [entity_id, entity].
+            for i in range(len(population)):
+                tasks.put([i, population[i]])
+ 
+            # Start workers
+            for w in range(ncpu):
+                # TODO: make tmpdir = tmpdirs[w/2] to assign 2 threads to every core (for bencher9)
+                print(f"{PURPLE}w is {w}{RESET}")
+                tmpdir = tmpdirs[w]
+                # def evaluate_fitness(glogf, is_prelink, tasks, passes, tmpdir, id, cwd, fitness_scores, processing, run):
+                id = w
+                p = Process(target=evaluate_fitness, args=(glogf, is_prelink,
+                                                           tasks, passes,
+                                                           tmpdir, id, cwd, fitness_scores, processing, run))
+                print(f"{RED}process: {p}{RESET}")
+                processes.append(p)
+                # This command make sures single process runs on 1 core
+                os.system(f"taskset -p -c {w} {p.pid}")   # TODO: change w to w/2 to pin 2 processes to 1 core on bencher9
+                p.start()
+            
+            print(f"{GREEN}processes list: {processes}{RESET}")
+            # Time to let at least one thread to start processing
+            time.sleep(5)
+            while processing.value > 0:
+                time.sleep(5)
+                print(f"{GREEN}processing.value: {processing.value}{RESET}")
+            # close workers
+            run.value = 0
+            fitness_scores.sort() # sort by entity id
+            print(f"{PURPLE}fitness_scores: {fitness_scores}{RESET}")
+            fitness = [score[1] for score in fitness_scores]
 
-        # Select parents for reproduction (roulette wheel selection)
-        parents = []
-        for _ in range(population_size // 2):
-            parent1 = random.choices(population, weights=wt, k=1)[0]
-            parent2 = random.choices(population, weights=wt, k=1)[0]
-            while parent2 == parent1:
-                parent2 = random.choices(population, weights=wt, k=1)[0]
-            parents.append((parent1, parent2))
+            log(glogf, f"\nfitness score: {fitness}\n")
+            log(glogf, "=========================================================")
 
-        # Perform crossover and mutation to create a new generation
-        new_population = []
-        for parent1, parent2 in parents:
-            child1, child2 = crossover(parent1, parent2)
-            child1 = mutate(child1, mutation_rate)
-            child2 = mutate(child2, mutation_rate)
-            new_population.extend([child1, child2])
-        
-        population = new_population
+            # A lower execution time is better
+            wt = [(1/t) for t in fitness] 
+            print(f"{PURPLE}{fitness}{RESET}")
+            
+            if any(y <= target_fitness for y in fitness):
+                print(f"Target fitness reached in generation {generation + 1}!")
+                break
+            
+            # To randomly pick entities when the complete population fails
+            if fitness.count(float('inf')) == len(fitness):
+                wt = [1] * len(fitness)
 
-    best_entity = population[fitness_scores.index(min(fitness_scores))]
+            # Select parents for reproduction (roulette wheel selection)
+            # parents = []
+            # for _ in range(population_size // 2):
+            #     parent1 = random.choices(population, weights=wt, k=1)[0]
+            #     parent2 = random.choices(population, weights=wt, k=1)[0]
+            #     while parent2 == parent1:
+            #         parent2 = random.choices(population, weights=wt, k=1)[0]
+            #     parents.append((parent1, parent2))
+            
+            ranked_population = [x for _, x in sorted(zip(fitness, population))]
+            s = 1.5  # Selection pressure, can be adjusted 
+            selection_probabilities = [((2 - s) / len(population)) + (2 * i * (s - 1)) / (len(population) * (len(population) - 1)) for i in range(len(population))] 
+            
+            parents = []
+            for _ in range(population_size // 2):
+                parent1 = random.choices(ranked_population, weights=selection_probabilities, k=1)[0]
+                parent2 = random.choices(ranked_population, weights=selection_probabilities, k=1)[0]
+                while parent2 == parent1:
+                    parent2 = random.choices(ranked_population, weights=selection_probabilities, k=1)[0]
+                parents.append((parent1, parent2))
+
+            # Perform crossover and mutation to create a new generation
+            new_population = []
+            for parent1, parent2 in parents:
+                child1, child2 = crossover(parent1, parent2)
+                child1 = mutate(child1, mutation_rate)
+                child2 = mutate(child2, mutation_rate)
+                new_population.extend([child1, child2])
+            
+            population = new_population
+    
+    best_entity = population[fitness.index(min(fitness))]
     print(f"{PURPLE}{best_entity}{RESET}")
     return best_entity  
 
-def main(logf, glogf, is_prelink, cwd):
+def main(logf, glogf, is_prelink, yklua, cwd):
     # Sanity check, test script should work with no extra passes.
     # assert(test_pipeline(logf, PipelineConfig([], [])))
 
-    passes = get_all_passes(is_prelink)
+    # cargo_manifest_path = os.path.join(cwd, "Cargo.toml")
+    # subprocess.run(f"cargo test --manifest-path {cargo_manifest_path}", shell=True, env=os.environ)
+    
+    # TODO: Make this remove -1 and double this for bencher9 
+    num_cores = multiprocessing.cpu_count() - 1
+    temp_directories = [] 
+
+    base_temp_dir = "/home/shreei/tmp"  # Set base directory to /tmp
+    curr_dir = os.getcwd()
+
+    for i in range(num_cores):
+        # Create a directory with the custom name
+        temp_dir_name = f"tmp_{i}"
+        temp_dir = os.path.join(base_temp_dir, temp_dir_name)
+        git_repo_path = os.path.join(temp_dir, "yk")
+        yklua_dest_path = os.path.join(temp_dir, "yklua")
+        yk_test_src = os.path.join(git_repo_path, "tests", "src", "lib.rs")
+        os.makedirs(temp_dir, exist_ok=True)
+
+        if not os.path.exists(git_repo_path):
+            subprocess.run(f"git clone https://github.com/ykjit/yk {git_repo_path}", shell=True)
+            os.chdir(git_repo_path)
+            
+            if os.path.exists(yk_test_src):
+                subprocess.run(f"sed -i -e 's/PRELINK_PASSES/PRELINK_PASSES_{i}/g' {yk_test_src}", shell=True)
+            
+            subprocess.run("cargo build", shell=True, env=os.environ)
+            subprocess.run("cargo test", shell=True, env=os.environ)
+        elif os.path.exists(git_repo_path):
+            # os.chdir(git_repo_path) 
+            # subprocess.run("cargo test", shell=True, env=os.environ)
+            print(f"...")
+        else:
+            print(f"Directory {git_repo_path} does not exist.")
+            sys.exit()
+
+
+        # Only copy yklua if it doesn't exist in the temp directory
+        if not os.path.exists(yklua_dest_path):
+            shutil.copytree(yklua, yklua_dest_path)   
+            yklua_src = os.path.join(yklua_dest_path, "src")
+            os.chdir(yklua_src)
+            subprocess.run(f"sed -i -e 's/PRELINK_PASSES/PRELINK_PASSES_{i}/g' Makefile", shell=True)  
+
+        temp_directories.append(temp_dir)
+        os.chdir(curr_dir)
+   
+    passes = get_all_passes(is_prelink) 
     #FIXME: choose a better value for target fitness
     # currently choosing 0 secs, so the benchmark converges
     target_fitness = 0.0 
@@ -331,13 +400,15 @@ def main(logf, glogf, is_prelink, cwd):
         is_prelink,
         population_size = len(passes) * 2,
         mutation_rate = 0.1,
-        generations = 100,
+        generations = 2,
         target_fitness = target_fitness,
         passes = passes,
+        tmpdirs = temp_directories,
+        ncpu = num_cores,
         cwd = cwd,
     )
 
-    final_passes = [passes[i] for (i, bit) in enumerate(best_entity) if bit]  
+    final_passes = [passes[i].name for (i, bit) in enumerate(best_entity) if bit]  
     log(glogf, f"\nFinal passes: {final_passes}\n")
     print(f"{PURPLE}{final_passes}{RESET}")
 
@@ -379,4 +450,4 @@ if __name__ == "__main__":
 
     with open(genetic_log_path, "w+") as glogf:
         with open("passes.log", "w+") as logf:
-            main(logf, glogf, is_prelink, CWD)
+            main(logf, glogf, is_prelink, yklua_path, CWD)
