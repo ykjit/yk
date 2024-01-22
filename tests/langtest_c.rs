@@ -94,7 +94,7 @@ fn run_suite(opt: &'static str) {
 
     LangTester::new()
         .test_dir("c")
-        .test_file_filter(filter)
+        .test_path_filter(filter)
         .test_extract(move |p| {
             let altp = p.with_extension(format!("c.{}", opt.strip_prefix('-').unwrap()));
             let p = if altp.exists() { altp.as_path() } else { p };
