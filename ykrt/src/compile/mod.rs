@@ -78,8 +78,11 @@ pub unsafe fn compile_for_tc_tests(
         .compile_for_tc_tests(irtrace, llvmbc_data, llvmbc_len);
 }
 
+#[cfg(not(test))]
 struct SendSyncConstPtr<T>(*const T);
+#[cfg(not(test))]
 unsafe impl<T> Send for SendSyncConstPtr<T> {}
+#[cfg(not(test))]
 unsafe impl<T> Sync for SendSyncConstPtr<T> {}
 
 /// Responsible for tracking how often a guard in a `CompiledTrace` fails. A hotness counter is
@@ -280,6 +283,7 @@ impl CompiledTrace {
 }
 
 #[derive(Clone, Copy, Debug)]
+#[allow(dead_code)]
 pub(crate) struct GuardId(pub(crate) usize);
 
 impl GuardId {
