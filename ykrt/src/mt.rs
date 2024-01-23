@@ -49,7 +49,7 @@ pub type AtomicTraceFailureThreshold = AtomicU16;
 /// reasonable performance.
 /// FIXME: needs to be configurable.
 pub(crate) const DEFAULT_TRACE_TOO_LONG: usize = 5000;
-const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
+const DEFAULT_HOT_THRESHOLD: HotThreshold = 0xffffffff;
 const DEFAULT_SIDETRACE_THRESHOLD: HotThreshold = 5;
 const DEFAULT_TRACE_FAILURE_THRESHOLD: TraceFailureThreshold = 5;
 
