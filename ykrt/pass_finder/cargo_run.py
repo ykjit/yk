@@ -1,4 +1,4 @@
-import os, sys
+import os
 import subprocess
 import time
 
@@ -8,7 +8,7 @@ PURPLE = '\033[38;5;128m'
 YELLOW = '\033[93m'
 RESET = '\033[0m'
 
-def run_test(cwd, id, yk_path, yklua_path, env, n=1):
+def run_test(id, yk_path, yklua_path, env, n=1):
     """
     The function loads the environment variables and
     runs YK's test and YKLUA build plus tests. If both succeeds
@@ -25,20 +25,19 @@ def run_test(cwd, id, yk_path, yklua_path, env, n=1):
 
     prelink_passes = env.get(f'PRELINK_PASSES_{id}', 'Not Set') 
     print(f"\n{YELLOW}PRELINK_PASSES: {prelink_passes}{RESET}")
-    # postlink_passes = env.get(f'POSTLINK_PASSES_{id}', 'Not Set')
-    # print(f"\n{YELLOW}POSTLINK_PASSES: {postlink_passes}{RESET}")
+    postlink_passes = env.get(f'POSTLINK_PASSES_{id}', 'Not Set')
+    print(f"\n{YELLOW}POSTLINK_PASSES: {postlink_passes}{RESET}")
   
     curdir = os.getcwd()
     os.chdir(yklua_path)
     times = []
     c_test = None 
-
     for _ in range(n):
         subprocess.run(["make clean"], shell=True, env=env)
         c = subprocess.run(["make && timeout 30 sh test.sh"], shell=True, env=env or os.environ)
         os.chdir(yk_path)
         if c.returncode == 0:
-            r = subprocess.run(["timeout 60 cargo test"], shell=True, env=env or os.environ)
+            r =  subprocess.run(f"timeout 60 cargo test", shell=True, env=env or os.environ)
         else:
             break
         os.chdir(yklua_path)
@@ -63,6 +62,3 @@ def run_test(cwd, id, yk_path, yklua_path, env, n=1):
 
     os.chdir(curdir)
     return 0, mean_time
-
-# ret, time = run_test("/home/research/" , 0, "/home/shreei/tmp/tmp_0/yk", "/home/shreei/tmp/tmp_0/yklua", os.environ)
-# print(time)

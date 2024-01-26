@@ -24,7 +24,6 @@ import argparse, os, random, shutil, subprocess, sys, time, queue
 from dataclasses import dataclass
 from multiprocessing import Manager, Process, Queue, Value
 import cargo_run
-import tempfile
 import multiprocessing
 
 RED = '\033[91m'
@@ -128,11 +127,11 @@ def get_all_passes(is_prelink):
     print(f"Found {len(passes)} passes")    
     return passes
 
-def test_pipeline(logf, pl, id, yk_path, yklua_path, cwd):
+def test_pipeline(logf, pl, id, yk_path, yklua_path):
     sys.stdout.write(str(pl) + "...")
     sys.stdout.flush()
 
-    log(logf, "\n\n" + str(pl) + "\n")
+    # log(logf, "\n\n" + str(pl) + "\n")
 
     # Make sure we don't run empty strings in pipeline.
     assert (len(pl.pre_link) != 0 or len(pl.link_time) != 0), "Both prelink and postlink passes cannot be empty!!!"
@@ -144,14 +143,14 @@ def test_pipeline(logf, pl, id, yk_path, yklua_path, cwd):
     # env[f"POSTLINK_PASSES_{id}"] = ",".join([p.name for p in pl.link_time])
    
     # print(f"{PURPLE}id: {id} prelink: {env[f'PRELINK_PASSES_{id}']}{RESET}")
-    ret, time = cargo_run.run_test(cwd, id, yk_path, yklua_path, env=env)
+    ret, time = cargo_run.run_test(id, yk_path, yklua_path, env=env)
     print(f"{PURPLE}ret code for cargo run is {ret}{RESET}")
     if ret == 0:
         print(" [OK]")
         log(logf, str(pl) + ": OK\n")
         return True, time
     else:
-        log(logf, str(pl) + " : FAILED\n")
+        # log(logf, str(pl) + " : FAILED\n")
         print(" [FAIL]") 
         return False, None
 
@@ -183,9 +182,9 @@ def evaluate_fitness(glogf, is_prelink, tasks, passes, tmpdir, id, cwd, fitness_
             processing.value += 1
             print(f"{PURPLE}in else{RESET}")
             try_passes = [passes[i] for (i, bit) in enumerate(entity[1]) if bit]
-            log(glogf, f"\ncurrently evaluating {try_passes}\n")
+            # log(glogf, f"\ncurrently evaluating {try_passes}\n")
             config = get_pipeline_config(is_prelink, try_passes)
-            ret, exec_time = test_pipeline(glogf, config, id, yk_path, yklua_path, cwd) 
+            ret, exec_time = test_pipeline(glogf, config, id, yk_path, yklua_path) 
             if ret:
                     exec_time = float(exec_time)
                     print(f"{PURPLE}exec time: {exec_time}{RESET}")
@@ -198,6 +197,24 @@ def evaluate_fitness(glogf, is_prelink, tasks, passes, tmpdir, id, cwd, fitness_
     print(f"{RED}Closing Worker : Run False{RESET}")
     os.chdir(curdir)
     return True
+
+def tournament(population, fitness, sp):
+    population_ = [(i, population[i]) for i in range(len(population))]
+    parent1 = random.choices(population_, weights=[1]*len(population), k=1)[0]
+    parent2 = random.choices(population_, weights=[1]*len(population), k=1)[0]
+    while parent1 == parent2:
+        parent2 = random.choices(population_, weights=[1]*len(population), k=1)[0]
+    # while fitness[parent2[0]] == float('inf'):
+    #     parent2 = random.choices(population_, weights=[1]*len(population), k=1)[0]
+    # while fitness[parent1[0]] == float('inf'):
+    #     parent1 = random.choices(population_, weights=[1]*len(population), k=1)[0]
+
+    if random.random() > sp:
+        parent = parent1[1] if fitness[parent1[0]] < fitness[parent2[0]] else parent2[1]
+    else:
+        parent = parent2[1] if fitness[parent1[0]] < fitness[parent2[0]] else parent1[1]
+
+    return parent
 
 def crossover(parent1, parent2):
     """
@@ -233,21 +250,10 @@ def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate,
     """
     population = []
     fitness = []
-    
-    initial_passes = ["annotation2metadata", "forceattrs", "inferattrs", "coro-early", "openmp-opt", "ipsccp", "called-value-propagation", "globalopt", "require<globals-aa>", "function(invalidate<aa>)", "require<profile-summary>", "deadargelim", "coro-cleanup", "globaldce", "rpo-function-attrs", "recompute-globalsaa", "constmerge", "function(annotation-remarks)", "canonicalize-aliases", "name-anon-globals", "verify"]
-    
-    for _ in range(population_size):
-        entity = []
-        for pass_name in passes:
-            if pass_name in initial_passes:
-                entity.append(1)  # Include initial pass
-            else:
-                entity.append(random.randint(0, 1))  # Randomly decide for other passes
-        population.append(entity)
 
-    # for _ in range(population_size):
-    #     entity = [random.randint(0,1) for _ in range(len(passes))]
-    #     population.append(entity)
+    for _ in range(population_size):
+        entity = [random.randint(0,1) for _ in range(len(passes))]
+        population.append(entity)
 
     for generation in range(generations):
         log(glogf, "=========================================================")
@@ -295,19 +301,20 @@ def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate,
             log(glogf, "=========================================================")
 
             # A lower execution time is better
-            wt = [(1/t) for t in fitness] 
+            # wt = [(1/t) for t in fitness] 
             print(f"{PURPLE}{fitness}{RESET}")
             
             if any(y <= target_fitness for y in fitness):
                 print(f"Target fitness reached in generation {generation + 1}!")
                 break
-            
-            # To randomly pick entities when the complete population fails
-            if fitness.count(float('inf')) == len(fitness):
-                wt = [1] * len(fitness)
+
+            elites = []
+            for i in range(len(population)):
+                if fitness[i] < float('inf'):
+                    elites.append(population[i])
 
             # Select parents for reproduction (roulette wheel selection)
-            # parents = []
+            parents = []
             # for _ in range(population_size // 2):
             #     parent1 = random.choices(population, weights=wt, k=1)[0]
             #     parent2 = random.choices(population, weights=wt, k=1)[0]
@@ -315,33 +322,35 @@ def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate,
             #         parent2 = random.choices(population, weights=wt, k=1)[0]
             #     parents.append((parent1, parent2))
             
-            ranked_population = [x for _, x in sorted(zip(fitness, population))]
-            s = 1.5  # Selection pressure, can be adjusted 
-            selection_probabilities = [((2 - s) / len(population)) + (2 * i * (s - 1)) / (len(population) * (len(population) - 1)) for i in range(len(population))] 
+            # ranked_population = [x for _, x in sorted(zip(fitness, population))]
+            sp = 0.1 # selection probability
             
-            parents = []
-            for _ in range(population_size // 2):
-                parent1 = random.choices(ranked_population, weights=selection_probabilities, k=1)[0]
-                parent2 = random.choices(ranked_population, weights=selection_probabilities, k=1)[0]
-                while parent2 == parent1:
-                    parent2 = random.choices(ranked_population, weights=selection_probabilities, k=1)[0]
+            for i in range((len(population) - len(elites)) // 2):
+                parent1 = tournament(population, fitness, sp)
+                parent2 = tournament(population, fitness, sp)
                 parents.append((parent1, parent2))
-
+             
             # Perform crossover and mutation to create a new generation
             new_population = []
+            new_population.extend(elites)
             for parent1, parent2 in parents:
                 child1, child2 = crossover(parent1, parent2)
                 child1 = mutate(child1, mutation_rate)
                 child2 = mutate(child2, mutation_rate)
                 new_population.extend([child1, child2])
             
+            padding = len(population) - len(new_population)
+            for i in range(padding):
+                entity = [random.randint(0,1) for _ in range(len(passes))]
+                new_population.append(entity)
+
             population = new_population
     
     best_entity = population[fitness.index(min(fitness))]
     print(f"{PURPLE}{best_entity}{RESET}")
     return best_entity  
 
-def main(logf, glogf, is_prelink, yklua, cwd):
+def main(glogf, is_prelink, yk_path, yklua, cwd):
     # Sanity check, test script should work with no extra passes.
     # assert(test_pipeline(logf, PipelineConfig([], [])))
 
@@ -365,14 +374,14 @@ def main(logf, glogf, is_prelink, yklua, cwd):
         os.makedirs(temp_dir, exist_ok=True)
 
         if not os.path.exists(git_repo_path):
-            subprocess.run(f"git clone https://github.com/ykjit/yk {git_repo_path}", shell=True)
+            shutil.copytree(yk_path, git_repo_path)
             os.chdir(git_repo_path)
             
             if os.path.exists(yk_test_src):
                 subprocess.run(f"sed -i -e 's/PRELINK_PASSES/PRELINK_PASSES_{i}/g' {yk_test_src}", shell=True)
             
-            subprocess.run("cargo build", shell=True, env=os.environ)
-            subprocess.run("cargo test", shell=True, env=os.environ)
+            # subprocess.run("cargo build", shell=True, env=os.environ)
+            # subprocess.run("cargo test", shell=True, env=os.environ)
         elif os.path.exists(git_repo_path):
             # os.chdir(git_repo_path) 
             # subprocess.run("cargo test", shell=True, env=os.environ)
@@ -400,7 +409,7 @@ def main(logf, glogf, is_prelink, yklua, cwd):
         is_prelink,
         population_size = len(passes) * 2,
         mutation_rate = 0.1,
-        generations = 2,
+        generations = 1,
         target_fitness = target_fitness,
         passes = passes,
         tmpdirs = temp_directories,
@@ -449,5 +458,4 @@ if __name__ == "__main__":
     print(f"PATH to interpreter: {CWD}")
 
     with open(genetic_log_path, "w+") as glogf:
-        with open("passes.log", "w+") as logf:
-            main(logf, glogf, is_prelink, yklua_path, CWD)
+            main(glogf, is_prelink, yk_path, yklua_path, CWD)
