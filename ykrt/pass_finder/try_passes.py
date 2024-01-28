@@ -24,6 +24,7 @@ import argparse, os, random, shutil, subprocess, sys, time, queue
 from dataclasses import dataclass
 from multiprocessing import Manager, Process, Queue, Value
 import cargo_run
+import setup_genetic
 import multiprocessing
 
 RED = '\033[91m'
@@ -128,21 +129,22 @@ def get_all_passes(is_prelink):
     return passes
 
 def test_pipeline(logf, pl, id, yk_path, yklua_path):
+    """
+    The function sets PRELINK and POSTLINK env variable
+    and then run test oracle.
+    """
     sys.stdout.write(str(pl) + "...")
     sys.stdout.flush()
 
-    # log(logf, "\n\n" + str(pl) + "\n")
+    log(logf, "\n\n" + str(pl) + "\n")
 
     # Make sure we don't run empty strings in pipeline.
     assert (len(pl.pre_link) != 0 or len(pl.link_time) != 0), "Both prelink and postlink passes cannot be empty!!!"
 
     env = os.environ.copy()  # Create a copy of the environment
     env[f"PRELINK_PASSES_{id}"] = ",".join([p.name for p in pl.pre_link]) 
+    env[f"POSTLINK_PASSES_{id}"] = ",".join([p.name for p in pl.link_time])
 
-    # prelink_passes = env.get(f'PRELINK_PASSES_{id}', 'Not Set')
-    # env[f"POSTLINK_PASSES_{id}"] = ",".join([p.name for p in pl.link_time])
-   
-    # print(f"{PURPLE}id: {id} prelink: {env[f'PRELINK_PASSES_{id}']}{RESET}")
     ret, time = cargo_run.run_test(id, yk_path, yklua_path, env=env)
     print(f"{PURPLE}ret code for cargo run is {ret}{RESET}")
     if ret == 0:
@@ -150,15 +152,14 @@ def test_pipeline(logf, pl, id, yk_path, yklua_path):
         log(logf, str(pl) + ": OK\n")
         return True, time
     else:
-        # log(logf, str(pl) + " : FAILED\n")
+        log(logf, str(pl) + " : FAILED\n")
         print(" [FAIL]") 
         return False, None
 
 def list_of_passes_to_str(passes):
     return ",".join([str(p) for p in passes])
 
-
-def evaluate_fitness(glogf, is_prelink, tasks, passes, tmpdir, id, cwd, fitness_scores, processing, run):
+def evaluate_fitness(glogf, is_prelink, tasks, passes, tmpdir, id, fitness_scores, processing, run):
     """
     Returns fitness score based on whether the passes list 
     successfully builds the pipeline and runs all the tests.
@@ -182,7 +183,6 @@ def evaluate_fitness(glogf, is_prelink, tasks, passes, tmpdir, id, cwd, fitness_
             processing.value += 1
             print(f"{PURPLE}in else{RESET}")
             try_passes = [passes[i] for (i, bit) in enumerate(entity[1]) if bit]
-            # log(glogf, f"\ncurrently evaluating {try_passes}\n")
             config = get_pipeline_config(is_prelink, try_passes)
             ret, exec_time = test_pipeline(glogf, config, id, yk_path, yklua_path) 
             if ret:
@@ -199,16 +199,21 @@ def evaluate_fitness(glogf, is_prelink, tasks, passes, tmpdir, id, cwd, fitness_
     return True
 
 def tournament(population, fitness, sp):
+    """
+    Selects a parent from the given population using the tournament selection method.
+
+    This function implements tournament selection for genetic algorithms.
+    Two individuals are randomly selected from the population. The one with the better fitness 
+    (lower fitness value) is chosen as the parent with a probability of `sp` (selection probability).
+    If not chosen based on `sp`, the other individual is selected as the parent.
+    """
     population_ = [(i, population[i]) for i in range(len(population))]
     parent1 = random.choices(population_, weights=[1]*len(population), k=1)[0]
     parent2 = random.choices(population_, weights=[1]*len(population), k=1)[0]
+   
     while parent1 == parent2:
         parent2 = random.choices(population_, weights=[1]*len(population), k=1)[0]
-    # while fitness[parent2[0]] == float('inf'):
-    #     parent2 = random.choices(population_, weights=[1]*len(population), k=1)[0]
-    # while fitness[parent1[0]] == float('inf'):
-    #     parent1 = random.choices(population_, weights=[1]*len(population), k=1)[0]
-
+   
     if random.random() > sp:
         parent = parent1[1] if fitness[parent1[0]] < fitness[parent2[0]] else parent2[1]
     else:
@@ -242,7 +247,7 @@ def mutate(entity, mutation_rate):
     return mutated_entity
 
 def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate,
-                      generations, target_fitness, passes, tmpdirs, ncpu, cwd):
+                      generations, target_fitness, passes, tmpdirs, ncpu):
     """
     Executes a genetic algorithm for finding optimization passes. It randomly generates 
     a population, evolves it through crossover and mutation, and selects entities based on 
@@ -274,11 +279,10 @@ def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate,
                 # TODO: make tmpdir = tmpdirs[w/2] to assign 2 threads to every core (for bencher9)
                 print(f"{PURPLE}w is {w}{RESET}")
                 tmpdir = tmpdirs[w]
-                # def evaluate_fitness(glogf, is_prelink, tasks, passes, tmpdir, id, cwd, fitness_scores, processing, run):
                 id = w
                 p = Process(target=evaluate_fitness, args=(glogf, is_prelink,
                                                            tasks, passes,
-                                                           tmpdir, id, cwd, fitness_scores, processing, run))
+                                                           tmpdir, id, fitness_scores, processing, run))
                 print(f"{RED}process: {p}{RESET}")
                 processes.append(p)
                 # This command make sures single process runs on 1 core
@@ -286,23 +290,22 @@ def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate,
                 p.start()
             
             print(f"{GREEN}processes list: {processes}{RESET}")
+            
             # Time to let at least one thread to start processing
             time.sleep(5)
             while processing.value > 0:
                 time.sleep(5)
                 print(f"{GREEN}processing.value: {processing.value}{RESET}")
+            
             # close workers
             run.value = 0
+            
             fitness_scores.sort() # sort by entity id
             print(f"{PURPLE}fitness_scores: {fitness_scores}{RESET}")
             fitness = [score[1] for score in fitness_scores]
 
             log(glogf, f"\nfitness score: {fitness}\n")
             log(glogf, "=========================================================")
-
-            # A lower execution time is better
-            # wt = [(1/t) for t in fitness] 
-            print(f"{PURPLE}{fitness}{RESET}")
             
             if any(y <= target_fitness for y in fitness):
                 print(f"Target fitness reached in generation {generation + 1}!")
@@ -313,17 +316,8 @@ def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate,
                 if fitness[i] < float('inf'):
                     elites.append(population[i])
 
-            # Select parents for reproduction (roulette wheel selection)
             parents = []
-            # for _ in range(population_size // 2):
-            #     parent1 = random.choices(population, weights=wt, k=1)[0]
-            #     parent2 = random.choices(population, weights=wt, k=1)[0]
-            #     while parent2 == parent1:
-            #         parent2 = random.choices(population, weights=wt, k=1)[0]
-            #     parents.append((parent1, parent2))
-            
-            # ranked_population = [x for _, x in sorted(zip(fitness, population))]
-            sp = 0.1 # selection probability
+            sp = 0.1 
             
             for i in range((len(population) - len(elites)) // 2):
                 parent1 = tournament(population, fitness, sp)
@@ -350,58 +344,18 @@ def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate,
     print(f"{PURPLE}{best_entity}{RESET}")
     return best_entity  
 
-def main(glogf, is_prelink, yk_path, yklua, cwd):
+def main(glogf, is_prelink, yk_path, yklua, cwd, base_temp_dir):
     # Sanity check, test script should work with no extra passes.
     # assert(test_pipeline(logf, PipelineConfig([], [])))
-
-    # cargo_manifest_path = os.path.join(cwd, "Cargo.toml")
-    # subprocess.run(f"cargo test --manifest-path {cargo_manifest_path}", shell=True, env=os.environ)
     
     # TODO: Make this remove -1 and double this for bencher9 
     num_cores = multiprocessing.cpu_count() - 1
     temp_directories = [] 
 
-    base_temp_dir = "/home/shreei/tmp"  # Set base directory to /tmp
     curr_dir = os.getcwd()
+    temp_directories = setup_genetic.setup(curr_dir, base_temp_dir, yk_path, yklua)
+    passes = get_all_passes(is_prelink)
 
-    for i in range(num_cores):
-        # Create a directory with the custom name
-        temp_dir_name = f"tmp_{i}"
-        temp_dir = os.path.join(base_temp_dir, temp_dir_name)
-        git_repo_path = os.path.join(temp_dir, "yk")
-        yklua_dest_path = os.path.join(temp_dir, "yklua")
-        yk_test_src = os.path.join(git_repo_path, "tests", "src", "lib.rs")
-        os.makedirs(temp_dir, exist_ok=True)
-
-        if not os.path.exists(git_repo_path):
-            shutil.copytree(yk_path, git_repo_path)
-            os.chdir(git_repo_path)
-            
-            if os.path.exists(yk_test_src):
-                subprocess.run(f"sed -i -e 's/PRELINK_PASSES/PRELINK_PASSES_{i}/g' {yk_test_src}", shell=True)
-            
-            # subprocess.run("cargo build", shell=True, env=os.environ)
-            # subprocess.run("cargo test", shell=True, env=os.environ)
-        elif os.path.exists(git_repo_path):
-            # os.chdir(git_repo_path) 
-            # subprocess.run("cargo test", shell=True, env=os.environ)
-            print(f"...")
-        else:
-            print(f"Directory {git_repo_path} does not exist.")
-            sys.exit()
-
-
-        # Only copy yklua if it doesn't exist in the temp directory
-        if not os.path.exists(yklua_dest_path):
-            shutil.copytree(yklua, yklua_dest_path)   
-            yklua_src = os.path.join(yklua_dest_path, "src")
-            os.chdir(yklua_src)
-            subprocess.run(f"sed -i -e 's/PRELINK_PASSES/PRELINK_PASSES_{i}/g' Makefile", shell=True)  
-
-        temp_directories.append(temp_dir)
-        os.chdir(curr_dir)
-   
-    passes = get_all_passes(is_prelink) 
     #FIXME: choose a better value for target fitness
     # currently choosing 0 secs, so the benchmark converges
     target_fitness = 0.0 
@@ -414,7 +368,6 @@ def main(glogf, is_prelink, yk_path, yklua, cwd):
         passes = passes,
         tmpdirs = temp_directories,
         ncpu = num_cores,
-        cwd = cwd,
     )
 
     final_passes = [passes[i].name for (i, bit) in enumerate(best_entity) if bit]  
@@ -435,10 +388,11 @@ if __name__ == "__main__":
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('-lto', action='store_true', help='Set flag for LTO.')
     group.add_argument('-prelink', action='store_true', help='Set flag for Prelink.')
-
+    parser.add_argument("base_dir", type=str)
     args = parser.parse_args()
 
     is_prelink = args.prelink
+    base_dir = args.base_dir
 
     if not is_prelink and not args.lto:
         print("Flag invalid! Please provide a valid flag: -lto or -prelink")
@@ -458,4 +412,4 @@ if __name__ == "__main__":
     print(f"PATH to interpreter: {CWD}")
 
     with open(genetic_log_path, "w+") as glogf:
-            main(glogf, is_prelink, yk_path, yklua_path, CWD)
+            main(glogf, is_prelink, yk_path, yklua_path, CWD, base_dir)
