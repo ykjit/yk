@@ -20,10 +20,15 @@ two halves independently (in parallel). The search continues recursively until
 the search space is exhausted. Upon termination the final accept list is
 printed.
 """
-import argparse, os, shutil, sys, time, queue 
+import argparse, os, random, shutil, subprocess, sys, time, queue 
 from dataclasses import dataclass
 from multiprocessing import Manager, Process, Queue, Value
-from subprocess import PIPE, Popen
+import cargo_run
+
+RED = '\033[91m'
+GREEN = '\033[92m'
+PURPLE = '\033[38;5;128m'
+RESET = '\033[0m'
 
 # Stages in an LTO pipeline where optimisation passes can happen.
 STAGES = "pre_link", "link_time"
@@ -43,9 +48,11 @@ class PipelineConfig:
         link_time = ",".join([ str(p) for p in self.link_time ])
         return f"PipelineConfig(pre_link=[{pre_link}], link_time=[{link_time}])"
 
-def get_pipeline_config(is_prelink, ok_passes, try_passes):
+def get_pipeline_config(is_prelink, try_passes, ok_passes=None):
     """Returns pipeline configuration based on the flag type."""
     
+    if ok_passes is None:
+        ok_passes = [] 
     if not is_prelink:
         return PipelineConfig([], ok_passes + try_passes)
     else:
@@ -55,9 +62,9 @@ def get_opt_cmd(is_prelink):
     """Returns command based on the flag type."""
     
     if not is_prelink:
-        return "opt -passes='lto<O2>' -print-pipeline-passes < /dev/null 2>/dev/null | tr ',' '\n'"
+        return "opt -passes='lto<O2>' -print-pipeline-passes < /dev/null 2>/dev/null"
     else:
-        return "opt -passes='lto-pre-link<O2>' -print-pipeline-passes < /dev/null 2>/dev/null | tr ',' '\n'"
+        return "opt -passes='lto-pre-link<O2>' -print-pipeline-passes < /dev/null 2>/dev/null" 
 
 def log(logf, s):
     logf.write(s)
@@ -66,53 +73,82 @@ def log(logf, s):
 def executable_exists(cmd):
     return shutil.which(cmd) is not None
 
+def split_passes(passes_string):
+    """
+    Split comma-separated passes list into individual passes.
+    Uses a single counter for both parentheses and angle brackets.
+    """
+    parts = []
+    temp_part = []
+    nesting_level = 0
+
+    for c in passes_string:
+        if c == '(' or c == '<':
+            nesting_level += 1
+        elif c == ')' or c == '>':
+            nesting_level -= 1
+
+        if c == ',' and nesting_level == 0:
+            part = ''.join(temp_part).strip()
+            if part:
+                parts.append(part)
+            temp_part = []
+        else:
+            temp_part.append(c)
+ 
+    # Add the last part if it's not empty
+    part = ''.join(temp_part).strip()
+    if part:
+        parts.append(part)
+    print(f"{RED}length: {len(parts)}{RESET}")    
+    print(f"{GREEN}passes{parts}{RESET}\n")
+    return parts
+
 def get_all_passes(is_prelink):
-    cmd = get_opt_cmd(is_prelink) 
-    p = Popen(cmd, shell=True, stdout=PIPE, close_fds=True)
-    sout, serr = p.communicate() 
-    assert(p.returncode == 0)
-
-    sout = sout.decode()
-    pass_descrs = [x.strip() for x in sout.strip().split("\n")]
-
+    """
+    This function uses llvm's opt command to get list of prelink
+    and postlink passes.
+    """
+    cmd = get_opt_cmd(is_prelink)
+    sout = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    assert (sout.returncode != 0), "Opt command failed."
+    sout = sout.stdout.decode('utf-8')
+    pass_descrs = split_passes(sout)
     passes = []
     seen = set()
-     
+
     for descr in pass_descrs:
         if descr not in seen:
             seen.add(descr)
-            passes.append(Pass(descr))
-    
-
+            if descr != "BitcodeWriterPass":
+                passes.append(Pass(descr))
+      
     print(f"Found {len(passes)} passes")    
     return passes
 
-def test_pipeline(logf, pl):
+def test_pipeline(logf, pl, cwd):
     sys.stdout.write(str(pl) + "...")
     sys.stdout.flush()
 
-    log(logf, "\n\n" + str(pl) + "\n")  
+    log(logf, "\n\n" + str(pl) + "\n")
 
     # Make sure we don't run empty strings in pipeline.
     assert (len(pl.pre_link) != 0 or len(pl.link_time) != 0), "Both prelink and postlink passes cannot be empty!!!"
 
-    env = os.environ
+    env = os.environ.copy()  # Create a copy of the environment
     env["PRELINK_PASSES"] = ",".join([p.name for p in pl.pre_link])
-    env["LINKTIME_PASSES"] = ",".join([p.name for p in pl.link_time])
-
-    p = Popen("try_repeat 10 sh run_tests.sh 2>&1", cwd=CWD, shell=True,
-              stdout=PIPE, close_fds=True, env=env)
+    env["POSTLINK_PASSES"] = ",".join([p.name for p in pl.link_time])
     
-    sout, _ =  p.communicate()
-    log(logf, sout.decode())
+    ret, time = cargo_run.run_test(cwd, env=env)
 
-    if p.returncode == 0:
+    if ret == 0:
         print(" [OK]")
         log(logf, str(pl) + ": OK\n")
+        return True, time
     else:
         log(logf, str(pl) + " : FAILED\n")
-        print(" [FAIL]")
-    return p.returncode == 0
+        print(" [FAIL]") 
+        return False, None
 
 def list_of_passes_to_str(passes):
     return ",".join([str(p) for p in passes])
@@ -124,11 +160,11 @@ def binary_split_worker(logf, ok_passes, passes_tasks, is_prelink, processing):
             try_passes = passes_tasks.get(block=True)
             processing.value += 1
         except queue.Empty:
-            print(f"\033[91mClosing Worker\033[0m")
+            print(f"{RED}Closing Worker{RESET}")
             break
         else:
             if try_passes == "CLOSE":
-                print(f"\033[33mClosing Worker\033[0m")
+                print(f"{RED}Closing Worker{RESET}")
                 break
             log(logf, f">>> Trying to add:\n{list_of_passes_to_str(try_passes)}\n\n")
             
@@ -185,18 +221,131 @@ def binary_split(logf, passes, is_prelink):
         print(72 * "=")
         print(list_of_passes_to_str(ok_passes))
 
-def main(logf, is_prelink):
-    #sanity check, test script should work with no extra passes.
+def evaluate_fitness(glogf, is_prelink, entity, passes, cwd):
+    """
+    Returns fitness score based on whether the passes list 
+    successfully builds the pipeline and runs all the tests.
+    """
+    try_passes = [passes[i] for (i, bit) in enumerate(entity) if bit]
+    log(glogf, f"\ncurrently evaluating {try_passes}\n")
+    config = get_pipeline_config(is_prelink, try_passes)
+    ret, exec_time = test_pipeline(glogf, config, cwd) 
+    if ret:
+            exec_time = float(exec_time) 
+            return  exec_time
+    else:
+        # Return execution time as a large positive value
+        return float('inf')
+
+def crossover(parent1, parent2):
+    """
+    Performs crossover between two parents using a single crossover point.
+    The crossover point is randomly chosen, and two children are created
+    by combining segments of the parents. Parent selection is based on the
+    roulette method.
+    """
+    crossover_point = random.randint(1, len(parent1) - 1)
+    child1 = parent1[:crossover_point] + parent2[crossover_point:]
+    child2 = parent2[:crossover_point] + parent1[crossover_point:]
+    return child1, child2
+
+def mutate(entity, mutation_rate):
+    """
+    Applies mutation to an entity by flipping each bit with a probability 
+    defined by the mutation rate. This function supports binary-encoded entities.
+    """
+    mutated_entity = []
+    for bit in entity:
+        if random.random() < mutation_rate:
+            mutated_entity.append(1 - bit)  # Flip the bit
+        else:
+            mutated_entity.append(bit)
+    return mutated_entity
+
+def genetic_algorithm(glogf, is_prelink, population_size, mutation_rate, generations, target_fitness, passes, cwd):
+    """
+    Executes a genetic algorithm for finding optimization passes. It randomly generates 
+    a population, evolves it through crossover and mutation, and selects entities based on 
+    the fitness scores (which depends on the benchmark's execution time).
+    """
+    population = []
+    fitness_scores = []
+
+    for _ in range(population_size):
+        entity = [random.randint(0,1) for _ in range(len(passes))]
+        population.append(entity)
+
+    for generation in range(generations):
+        log(glogf, "=========================================================")
+        log(glogf, f"\ngeneration: {generation}\n") 
+        fitness_scores.clear()
+        # Evaluate fitness for each entity in the population
+        fitness_scores = [evaluate_fitness(glogf, is_prelink, entity, passes, cwd) for entity in population]
+        log(glogf, f"\nfitness score: {fitness_scores}\n")
+        log(glogf, "=========================================================")
+
+        # A lower execution time is better
+        wt = [(1/t) for t in fitness_scores] 
+        print(f"{PURPLE}{fitness_scores}{RESET}")
+        
+        if any(y <= target_fitness for y in fitness_scores):
+            print(f"Target fitness reached in generation {generation + 1}!")
+            break
+        
+        # To randomly pick entities when the complete population fails
+        if fitness_scores.count(float('inf')) == len(fitness_scores):
+            wt = [1] * len(fitness_scores)
+
+        # Select parents for reproduction (roulette wheel selection)
+        parents = []
+        for _ in range(population_size // 2):
+            parent1 = random.choices(population, weights=wt, k=1)[0]
+            parent2 = random.choices(population, weights=wt, k=1)[0]
+            while parent2 == parent1:
+                parent2 = random.choices(population, weights=wt, k=1)[0]
+            parents.append((parent1, parent2))
+
+        # Perform crossover and mutation to create a new generation
+        new_population = []
+        for parent1, parent2 in parents:
+            child1, child2 = crossover(parent1, parent2)
+            child1 = mutate(child1, mutation_rate)
+            child2 = mutate(child2, mutation_rate)
+            new_population.extend([child1, child2])
+        
+        population = new_population
+
+    best_entity = population[fitness_scores.index(min(fitness_scores))]
+    print(f"{PURPLE}{best_entity}{RESET}")
+    return best_entity  
+
+def main(logf, glogf, is_prelink, cwd):
+    # Sanity check, test script should work with no extra passes.
     # assert(test_pipeline(logf, PipelineConfig([], [])))
 
     passes = get_all_passes(is_prelink)
-    binary_split(logf, passes, is_prelink)
+    #FIXME: choose a better value for target fitness
+    # currently choosing 0 secs, so the benchmark converges
+    target_fitness = 0.0 
+    best_entity = genetic_algorithm(glogf,
+        is_prelink,
+        population_size = len(passes) * 2,
+        mutation_rate = 0.1,
+        generations = 100,
+        target_fitness = target_fitness,
+        passes = passes,
+        cwd = cwd,
+    )
+
+    final_passes = [passes[i] for (i, bit) in enumerate(best_entity) if bit]  
+    log(glogf, f"\nFinal passes: {final_passes}\n")
+    print(f"{PURPLE}{final_passes}{RESET}")
 
 if __name__ == "__main__":
     if not os.environ.get('YK_PATH') or not os.environ.get('YKLUA_PATH'):
         print("Please set both YK_PATH and YKLUA_PATH environment variables before running the script.")
         exit(1)
-        
+    
     if '--help' in sys.argv:
         print(__doc__)
         exit(0)
@@ -206,7 +355,6 @@ if __name__ == "__main__":
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('-lto', action='store_true', help='Set flag for LTO.')
     group.add_argument('-prelink', action='store_true', help='Set flag for Prelink.')
-    parser.add_argument('--path', required=True, help='The path to set as cwd.')
 
     args = parser.parse_args()
 
@@ -214,15 +362,21 @@ if __name__ == "__main__":
 
     if not is_prelink and not args.lto:
         print("Flag invalid! Please provide a valid flag: -lto or -prelink")
-        exit(1)
-
-    if not os.path.isdir(args.path):
-        print(f"Invalid path: {args.path}. Please provide a valid directory for yklua.")
-        exit(1)
+        exit(1) 
 
     # Set the global variable with the parsed path
-    CWD = args.path
+    yk_path = os.environ.get('YK_PATH')
+    if yk_path is None:
+        raise ValueError("YK_PATH environment variable is not set")
+
+    yklua_path = os.environ.get('YKLUA_PATH')
+    if yklua_path is None:
+        raise ValueError("YKLUA_PATH environment variable is not set")
+
+    CWD = yk_path
+    genetic_log_path = os.path.join(CWD, "ykrt/pass_finder/genetic.log")
     print(f"PATH to interpreter: {CWD}")
 
-    with open("passes.log", "w") as logf:
-        main(logf, is_prelink)
+    with open(genetic_log_path, "w+") as glogf:
+        with open("passes.log", "w+") as logf:
+            main(logf, glogf, is_prelink, CWD)
