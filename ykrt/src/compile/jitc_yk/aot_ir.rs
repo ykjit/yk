@@ -23,6 +23,31 @@ const FORMAT_VERSION: u32 = 0;
 /// The symbol name of the control point function (after ykllvm has transformed it).
 const CONTROL_POINT_NAME: &str = "__ykrt_control_point";
 
+// Generate common methods for index types.
+macro_rules! index {
+    ($struct:ident) => {
+        impl $struct {
+            pub(crate) fn new(v: usize) -> Self {
+                Self(v)
+            }
+
+            pub(crate) fn to_usize(&self) -> usize {
+                self.0
+            }
+        }
+    };
+}
+
+#[deku_derive(DekuRead)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub(crate) struct FuncIndex(usize);
+index!(FuncIndex);
+
+#[deku_derive(DekuRead)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TypeIndex(usize);
+index!(TypeIndex);
+
 fn deserialise_string(v: Vec<u8>) -> Result<String, DekuError> {
     let err = Err(DekuError::Parse("failed to parse string".to_owned()));
     match CStr::from_bytes_until_nul(v.as_slice()) {
@@ -96,13 +121,13 @@ impl IRDisplay for ConstantOperand {
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub(crate) struct InstructionID {
     #[deku(skip)] // computed after deserialisation.
-    func_idx: usize,
+    func_idx: FuncIndex,
     bb_idx: usize,
     inst_idx: usize,
 }
 
 impl InstructionID {
-    pub(crate) fn new(func_idx: usize, bb_idx: usize, inst_idx: usize) -> Self {
+    pub(crate) fn new(func_idx: FuncIndex, bb_idx: usize, inst_idx: usize) -> Self {
         Self {
             func_idx,
             bb_idx,
@@ -113,12 +138,12 @@ impl InstructionID {
 
 #[derive(Debug)]
 pub(crate) struct BlockID {
-    pub(crate) func_idx: usize,
+    pub(crate) func_idx: FuncIndex,
     pub(crate) bb_idx: usize,
 }
 
 impl BlockID {
-    pub(crate) fn new(func_idx: usize, bb_idx: usize) -> Self {
+    pub(crate) fn new(func_idx: FuncIndex, bb_idx: usize) -> Self {
         Self { func_idx, bb_idx }
     }
 }
@@ -149,7 +174,7 @@ impl IRDisplay for LocalVariableOperand {
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct TypeOperand {
-    type_idx: usize,
+    type_idx: TypeIndex,
 }
 
 #[deku_derive(DekuRead)]
@@ -167,7 +192,7 @@ impl IRDisplay for BlockOperand {
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct FunctionOperand {
-    func_idx: usize,
+    func_idx: FuncIndex,
 }
 
 /// An operand that is an argument to the parent function.
@@ -220,7 +245,7 @@ impl Operand {
     pub(crate) fn to_instr<'a>(&self, aotmod: &'a Module) -> &'a Instruction {
         match self {
             Self::LocalVariable(lvo) => {
-                &aotmod.funcs[lvo.func_idx].blocks[lvo.bb_idx].instrs[lvo.inst_idx]
+                &aotmod.funcs[lvo.func_idx.to_usize()].blocks[lvo.bb_idx].instrs[lvo.inst_idx]
             }
             _ => panic!(),
         }
@@ -241,8 +266,8 @@ impl IRDisplay for Operand {
         match self {
             Self::Constant(c) => c.to_str(m),
             Self::LocalVariable(l) => l.to_str(m),
-            Self::Type(t) => m.types[t.type_idx].to_str(m),
-            Self::Function(f) => m.funcs[f.func_idx].name.to_owned(),
+            Self::Type(t) => m.types[t.type_idx.to_usize()].to_str(m),
+            Self::Function(f) => m.funcs[f.func_idx.0].name.to_owned(),
             Self::Block(bb) => bb.to_str(m),
             Self::Arg(a) => a.to_str(m),
             Self::Unimplemented(s) => format!("?op<{}>", s),
@@ -254,7 +279,7 @@ impl IRDisplay for Operand {
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct Instruction {
-    type_index: usize,
+    type_index: TypeIndex,
     opcode: Opcode,
     #[deku(temp)]
     num_operands: u32,
@@ -271,8 +296,31 @@ impl Instruction {
         &self.operands[index]
     }
 
+    /// Return a slice of the remaining operands, starting from the index `from` (inclusive).
+    pub(crate) fn remaining_operands(&self, from: usize) -> &[Operand] {
+        &self.operands[from..]
+    }
+
     pub(crate) fn opcode(&self) -> Opcode {
         self.opcode
+    }
+
+    /// For a call instruction, return the callee.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the instruction isn't a call instruction.
+    pub(crate) fn callee<'a>(&self) -> FuncIndex {
+        debug_assert!(matches!(self.opcode, Opcode::Call));
+        let op = self.operand(0);
+        match op {
+            Operand::Function(fo) => fo.func_idx,
+            _ => panic!(),
+        }
+    }
+
+    pub(crate) fn type_index(&self) -> TypeIndex {
+        self.type_index
     }
 
     pub(crate) fn is_store(&self) -> bool {
@@ -289,7 +337,7 @@ impl Instruction {
             let op = &self.operands[0];
             match op {
                 Operand::Function(fop) => {
-                    return aot_mod.funcs[fop.func_idx].name == CONTROL_POINT_NAME;
+                    return aot_mod.funcs[fop.func_idx.0].name == CONTROL_POINT_NAME;
                 }
                 _ => todo!(),
             }
@@ -363,9 +411,8 @@ impl IRDisplay for Instruction {
 pub(crate) struct Block {
     #[deku(temp)]
     num_instrs: usize,
-    // FIXME: unpub
     #[deku(count = "num_instrs")]
-    pub instrs: Vec<Instruction>,
+    pub(crate) instrs: Vec<Instruction>,
 }
 
 impl IRDisplay for Block {
@@ -384,14 +431,14 @@ impl IRDisplay for Block {
 pub(crate) struct Function {
     #[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")]
     name: String,
-    type_index: usize,
+    type_index: TypeIndex,
     #[deku(temp)]
     num_blocks: usize,
     #[deku(count = "num_blocks")]
     blocks: Vec<Block>,
 }
 
-impl Function {
+impl<'a> Function {
     fn is_declaration(&self) -> bool {
         self.blocks.is_empty()
     }
@@ -400,11 +447,20 @@ impl Function {
     pub(crate) fn block(&self, bb_idx: usize) -> Option<&Block> {
         self.blocks.get(bb_idx)
     }
+
+    #[cfg(test)]
+    pub(crate) fn new(name: &str, type_index: TypeIndex) -> Self {
+        Self {
+            name: name.to_string(),
+            type_index,
+            blocks: Vec::new(),
+        }
+    }
 }
 
 impl IRDisplay for Function {
     fn to_str(&self, m: &Module) -> String {
-        let ty = &m.types[self.type_index];
+        let ty = &m.types[self.type_index.to_usize()];
         if let Type::Func(fty) = ty {
             let mut ret = format!(
                 "func {}({}",
@@ -420,7 +476,7 @@ impl IRDisplay for Function {
                 ret.push_str(", ...");
             }
             ret.push(')');
-            let ret_ty = &m.types[fty.ret_ty];
+            let ret_ty = &m.types[fty.ret_ty.to_usize()];
             if ret_ty != &Type::Void {
                 ret.push_str(&format!(" -> {}", ret_ty.to_str(m)));
             }
@@ -445,7 +501,7 @@ impl IRDisplay for Function {
 //
 // Signedness is not specified.
 #[deku_derive(DekuRead)]
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct IntegerType {
     num_bits: u32,
 }
@@ -481,7 +537,7 @@ impl IRDisplay for IntegerType {
 }
 
 #[deku_derive(DekuRead)]
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct FuncType {
     /// The number of formal arguments the function takes.
     #[deku(temp)]
@@ -490,13 +546,28 @@ pub(crate) struct FuncType {
     #[deku(count = "num_args")]
     arg_tys: Vec<usize>,
     /// Type index of the function's return type.
-    ret_ty: usize,
+    ret_ty: TypeIndex,
     /// Is the function vararg?
     is_vararg: bool,
 }
 
+impl FuncType {
+    pub(crate) fn num_args(&self) -> usize {
+        self.arg_tys.len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new(arg_tys: Vec<usize>, ret_ty: TypeIndex, is_vararg: bool) -> Self {
+        Self {
+            arg_tys,
+            ret_ty,
+            is_vararg,
+        }
+    }
+}
+
 #[deku_derive(DekuRead)]
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct StructType {
     /// The number of fields the struct has.
     #[deku(temp)]
@@ -548,7 +619,7 @@ const TYKIND_UNIMPLEMENTED: u8 = 255;
 
 /// A type.
 #[deku_derive(DekuRead)]
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[deku(type = "u8")]
 pub(crate) enum Type {
     #[deku(id = "TYKIND_VOID")]
@@ -601,7 +672,7 @@ impl IRDisplay for Type {
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct Constant {
-    type_index: usize,
+    type_index: TypeIndex,
     #[deku(temp)]
     num_bytes: usize,
     #[deku(count = "num_bytes")]
@@ -610,7 +681,7 @@ pub(crate) struct Constant {
 
 impl IRDisplay for Constant {
     fn to_str(&self, m: &Module) -> String {
-        m.types[self.type_index].const_to_str(self)
+        m.types[self.type_index.to_usize()].const_to_str(self)
     }
 }
 
@@ -661,17 +732,30 @@ impl Module {
         *self.var_names_computed.borrow_mut() = true;
     }
 
-    pub(crate) fn func_index(&self, find_func: &str) -> Option<usize> {
+    pub(crate) fn func_index(&self, find_func: &str) -> Option<FuncIndex> {
         // OPT: create a cache in the Module.
         self.funcs
             .iter()
             .enumerate()
             .find(|(_, f)| f.name == find_func)
-            .map(|(f_idx, _)| f_idx)
+            .map(|(f_idx, _)| FuncIndex(f_idx))
+    }
+
+    /// Look up a `FuncType` by its index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the type index is either out of bounds, or the corresponding type is not a
+    /// function type.
+    pub(crate) fn func_ty(&self, func_idx: FuncIndex) -> &FuncType {
+        match self.types[self.funcs[func_idx.to_usize()].type_index.to_usize()] {
+            Type::Func(ref ft) => &ft,
+            _ => panic!(),
+        }
     }
 
     pub(crate) fn block(&self, bid: &BlockID) -> Option<&Block> {
-        self.funcs.get(bid.func_idx)?.block(bid.bb_idx)
+        self.funcs.get(bid.func_idx.to_usize())?.block(bid.bb_idx)
     }
 
     /// Fill in the function index of local variable operands of instructions.
@@ -684,7 +768,7 @@ impl Module {
                 for inst in &mut bb.instrs {
                     for op in &mut inst.operands {
                         if let Operand::LocalVariable(ref mut lv) = op {
-                            lv.func_idx = f_idx;
+                            lv.func_idx = FuncIndex(f_idx);
                         }
                     }
                 }
@@ -695,8 +779,8 @@ impl Module {
     /// Get the type of the instruction.
     ///
     /// It is UB to pass an `instr` that is not from the `Module` referenced by `self`.
-    fn instr_type(&self, instr: &Instruction) -> &Type {
-        &self.types[instr.type_index]
+    pub(crate) fn instr_type(&self, instr: &Instruction) -> &Type {
+        &self.types[instr.type_index.to_usize()]
     }
 
     // FIXME: rename this to `is_def()`, which we've decided is a beter name.
@@ -724,6 +808,21 @@ impl Module {
     }
 }
 
+#[cfg(test)]
+impl Module {
+    pub(crate) fn push_func(&mut self, func: Function) -> FuncIndex {
+        let idx = self.funcs.len();
+        self.funcs.push(func);
+        FuncIndex(idx)
+    }
+
+    pub(crate) fn push_type(&mut self, ty: Type) -> TypeIndex {
+        let idx = self.types.len();
+        self.types.push(ty);
+        TypeIndex(idx)
+    }
+}
+
 /// Deserialise an AOT module from the slice `data`.
 pub(crate) fn deserialise_module(data: &[u8]) -> Result<Module, Box<dyn Error>> {
     match Module::from_bytes((data, 0)) {
@@ -748,9 +847,9 @@ pub fn print_from_file(path: &PathBuf) -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        deserialise_module, deserialise_string, Constant, IntegerType, Opcode, FORMAT_VERSION,
-        MAGIC, OPKIND_BLOCK, OPKIND_CONST, OPKIND_FUNCTION, OPKIND_LOCAL_VARIABLE, OPKIND_TYPE,
-        OPKIND_UNIMPLEMENTED, TYKIND_FUNC, TYKIND_INTEGER, TYKIND_PTR, TYKIND_STRUCT,
+        deserialise_module, deserialise_string, Constant, IntegerType, Opcode, TypeIndex,
+        FORMAT_VERSION, MAGIC, OPKIND_BLOCK, OPKIND_CONST, OPKIND_FUNCTION, OPKIND_LOCAL_VARIABLE,
+        OPKIND_TYPE, OPKIND_UNIMPLEMENTED, TYKIND_FUNC, TYKIND_INTEGER, TYKIND_PTR, TYKIND_STRUCT,
         TYKIND_UNIMPLEMENTED, TYKIND_VOID,
     };
     use byteorder::{NativeEndian, WriteBytesExt};
@@ -1101,7 +1200,7 @@ func bar();
             // Construct an IR constant and check it stringifies ok.
             let it = IntegerType { num_bits };
             let c = Constant {
-                type_index: 0,
+                type_index: TypeIndex::new(0),
                 bytes,
             };
             assert_eq!(it.const_to_str(&c), expect);
