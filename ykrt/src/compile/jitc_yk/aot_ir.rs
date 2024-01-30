@@ -508,7 +508,7 @@ impl IRDisplay for Function {
             let mut ret = format!(
                 "func {}({}",
                 self.name,
-                fty.arg_tys
+                fty.arg_ty_idxs
                     .iter()
                     .enumerate()
                     .map(|(i, t)| format!("$arg{}: {}", i, m.types[t.to_usize()].to_str(m)))
@@ -587,7 +587,7 @@ pub(crate) struct FuncType {
     num_args: usize,
     /// Type indices for the function's formal arguments.
     #[deku(count = "num_args")]
-    arg_tys: Vec<TypeIdx>,
+    arg_ty_idxs: Vec<TypeIdx>,
     /// Type index of the function's return type.
     ret_ty: TypeIdx,
     /// Is the function vararg?
@@ -596,13 +596,13 @@ pub(crate) struct FuncType {
 
 impl FuncType {
     pub(crate) fn num_args(&self) -> usize {
-        self.arg_tys.len()
+        self.arg_ty_idxs.len()
     }
 
     #[cfg(test)]
-    pub(crate) fn new(arg_tys: Vec<TypeIdx>, ret_ty: TypeIdx, is_vararg: bool) -> Self {
+    pub(crate) fn new(arg_ty_idxs: Vec<TypeIdx>, ret_ty: TypeIdx, is_vararg: bool) -> Self {
         Self {
-            arg_tys,
+            arg_ty_idxs,
             ret_ty,
             is_vararg,
         }
@@ -617,7 +617,7 @@ pub(crate) struct StructType {
     num_fields: usize,
     /// The types of the fields.
     #[deku(count = "num_fields")]
-    field_tys: Vec<TypeIdx>,
+    field_ty_idxs: Vec<TypeIdx>,
     /// The bit offsets of the fields (taking into account any required padding for alignment).
     #[deku(count = "num_fields")]
     field_bit_offs: Vec<usize>,
@@ -628,7 +628,7 @@ impl IRDisplay for StructType {
         let mut s = String::from("{");
         s.push_str(
             &self
-                .field_tys
+                .field_ty_idxs
                 .iter()
                 .enumerate()
                 .map(|(i, ti)| {
@@ -650,7 +650,7 @@ impl IRDisplay for FuncType {
     fn to_str(&self, m: &Module) -> String {
         format!(
             "func({})",
-            self.arg_tys
+            self.arg_ty_idxs
                 .iter()
                 .map(|t| m.types[t.to_usize()].to_str(m))
                 .collect::<Vec<_>>()
@@ -1142,7 +1142,7 @@ mod tests {
         data.write_u8(TYKIND_FUNC).unwrap();
         // num_args:
         write_native_usize(&mut data, 2);
-        // arg_tys:
+        // arg_ty_idxs:
         write_native_usize(&mut data, 2);
         write_native_usize(&mut data, 3);
         // ret_ty:
@@ -1165,9 +1165,9 @@ mod tests {
         data.write_u8(TYKIND_STRUCT).unwrap();
         // num_fields:
         write_native_usize(&mut data, 2);
-        // field_tys[0]:
+        // field_ty_idxs[0]:
         write_native_usize(&mut data, 2);
-        // field_tys[1]:
+        // field_ty_idxs[1]:
         write_native_usize(&mut data, 3);
         // field_bit_offs[0]:
         write_native_usize(&mut data, 0);
