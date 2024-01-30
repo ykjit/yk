@@ -517,7 +517,7 @@ mod tests {
     #[test]
     fn extra_call_args() {
         let mut aot_mod = aot_ir::Module::default();
-        let arg_ty_idxs = vec![0, 0, 0];
+        let arg_ty_idxs = vec![aot_ir::TypeIndex::new(0); 3];
         let func_ty = aot_ir::Type::Func(aot_ir::FuncType::new(
             arg_ty_idxs,
             aot_ir::TypeIndex::new(0),
@@ -556,7 +556,7 @@ mod tests {
     #[should_panic]
     fn call_args_out_of_bounds() {
         let mut aot_mod = aot_ir::Module::default();
-        let arg_ty_idxs = vec![0, 0, 0];
+        let arg_ty_idxs = vec![aot_ir::TypeIndex::new(0); 3];
         let func_ty = aot_ir::Type::Func(aot_ir::FuncType::new(
             arg_ty_idxs,
             aot_ir::TypeIndex::new(0),

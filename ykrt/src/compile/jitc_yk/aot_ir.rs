@@ -27,6 +27,7 @@ const CONTROL_POINT_NAME: &str = "__ykrt_control_point";
 macro_rules! index {
     ($struct:ident) => {
         impl $struct {
+            #[allow(dead_code)] // FIXME: remove when constants and func args are implemented.
             pub(crate) fn new(v: usize) -> Self {
                 Self(v)
             }
@@ -47,6 +48,36 @@ index!(FuncIndex);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct TypeIndex(usize);
 index!(TypeIndex);
+
+/// A basic block index.
+///
+/// One of these is an index into [Function::blocks].
+#[deku_derive(DekuRead)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct BlockIndex(usize);
+index!(BlockIndex);
+
+/// An instruction index.
+///
+/// One of these is an index into [Block::instrs].
+#[deku_derive(DekuRead)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct InstrIndex(usize);
+index!(InstrIndex);
+
+/// A constant index.
+///
+/// One of these is an index into [Module::consts].
+#[deku_derive(DekuRead)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct ConstIndex(usize);
+index!(ConstIndex);
+
+/// A function argument index.
+#[deku_derive(DekuRead)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct ArgIndex(usize);
+index!(ArgIndex);
 
 fn deserialise_string(v: Vec<u8>) -> Result<String, DekuError> {
     let err = Err(DekuError::Parse("failed to parse string".to_owned()));
@@ -108,12 +139,12 @@ impl IRDisplay for Opcode {
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct ConstantOperand {
-    constant_idx: usize,
+    const_idx: ConstIndex,
 }
 
 impl IRDisplay for ConstantOperand {
     fn to_str(&self, m: &Module) -> String {
-        m.consts[self.constant_idx].to_str(m)
+        m.consts[self.const_idx.to_usize()].to_str(m)
     }
 }
 
@@ -122,12 +153,12 @@ impl IRDisplay for ConstantOperand {
 pub(crate) struct InstructionID {
     #[deku(skip)] // computed after deserialisation.
     func_idx: FuncIndex,
-    bb_idx: usize,
-    inst_idx: usize,
+    bb_idx: BlockIndex,
+    inst_idx: InstrIndex,
 }
 
 impl InstructionID {
-    pub(crate) fn new(func_idx: FuncIndex, bb_idx: usize, inst_idx: usize) -> Self {
+    pub(crate) fn new(func_idx: FuncIndex, bb_idx: BlockIndex, inst_idx: InstrIndex) -> Self {
         Self {
             func_idx,
             bb_idx,
@@ -138,13 +169,24 @@ impl InstructionID {
 
 #[derive(Debug)]
 pub(crate) struct BlockID {
-    pub(crate) func_idx: FuncIndex,
-    pub(crate) bb_idx: usize,
+    func_idx: FuncIndex,
+    block_idx: BlockIndex,
 }
 
 impl BlockID {
-    pub(crate) fn new(func_idx: FuncIndex, bb_idx: usize) -> Self {
-        Self { func_idx, bb_idx }
+    pub(crate) fn new(func_idx: FuncIndex, block_idx: BlockIndex) -> Self {
+        Self {
+            func_idx,
+            block_idx,
+        }
+    }
+
+    pub(crate) fn func_idx(&self) -> FuncIndex {
+        self.func_idx
+    }
+
+    pub(crate) fn block_idx(&self) -> BlockIndex {
+        self.block_idx
     }
 }
 
@@ -167,7 +209,7 @@ impl DerefMut for LocalVariableOperand {
 
 impl IRDisplay for LocalVariableOperand {
     fn to_str(&self, _m: &Module) -> String {
-        format!("${}_{}", self.bb_idx, self.inst_idx,)
+        format!("${}_{}", self.bb_idx.to_usize(), self.inst_idx.to_usize())
     }
 }
 
@@ -180,12 +222,12 @@ pub(crate) struct TypeOperand {
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct BlockOperand {
-    bb_idx: usize,
+    bb_idx: BlockIndex,
 }
 
 impl IRDisplay for BlockOperand {
     fn to_str(&self, _m: &Module) -> String {
-        format!("bb{}", self.bb_idx)
+        format!("bb{}", self.bb_idx.to_usize())
     }
 }
 
@@ -199,12 +241,12 @@ pub(crate) struct FunctionOperand {
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct ArgOperand {
-    arg_idx: usize,
+    arg_idx: ArgIndex,
 }
 
 impl IRDisplay for ArgOperand {
     fn to_str(&self, _m: &Module) -> String {
-        format!("$arg{}", self.arg_idx)
+        format!("$arg{}", self.arg_idx.to_usize())
     }
 }
 
@@ -245,7 +287,8 @@ impl Operand {
     pub(crate) fn to_instr<'a>(&self, aotmod: &'a Module) -> &'a Instruction {
         match self {
             Self::LocalVariable(lvo) => {
-                &aotmod.funcs[lvo.func_idx.to_usize()].blocks[lvo.bb_idx].instrs[lvo.inst_idx]
+                &aotmod.funcs[lvo.func_idx.to_usize()].blocks[lvo.bb_idx.to_usize()].instrs
+                    [lvo.inst_idx.to_usize()]
             }
             _ => panic!(),
         }
@@ -444,8 +487,8 @@ impl<'a> Function {
     }
 
     /// Return the block at the specified index, or `None` if the index is out of range.
-    pub(crate) fn block(&self, bb_idx: usize) -> Option<&Block> {
-        self.blocks.get(bb_idx)
+    pub(crate) fn block(&self, bb_idx: BlockIndex) -> Option<&Block> {
+        self.blocks.get(bb_idx.to_usize())
     }
 
     #[cfg(test)]
@@ -468,7 +511,7 @@ impl IRDisplay for Function {
                 fty.arg_tys
                     .iter()
                     .enumerate()
-                    .map(|(i, t)| format!("$arg{}: {}", i, m.types[*t].to_str(m)))
+                    .map(|(i, t)| format!("$arg{}: {}", i, m.types[t.to_usize()].to_str(m)))
                     .collect::<Vec<_>>()
                     .join(", ")
             );
@@ -544,7 +587,7 @@ pub(crate) struct FuncType {
     num_args: usize,
     /// Type indices for the function's formal arguments.
     #[deku(count = "num_args")]
-    arg_tys: Vec<usize>,
+    arg_tys: Vec<TypeIndex>,
     /// Type index of the function's return type.
     ret_ty: TypeIndex,
     /// Is the function vararg?
@@ -557,7 +600,7 @@ impl FuncType {
     }
 
     #[cfg(test)]
-    pub(crate) fn new(arg_tys: Vec<usize>, ret_ty: TypeIndex, is_vararg: bool) -> Self {
+    pub(crate) fn new(arg_tys: Vec<TypeIndex>, ret_ty: TypeIndex, is_vararg: bool) -> Self {
         Self {
             arg_tys,
             ret_ty,
@@ -574,7 +617,7 @@ pub(crate) struct StructType {
     num_fields: usize,
     /// The types of the fields.
     #[deku(count = "num_fields")]
-    field_tys: Vec<usize>,
+    field_tys: Vec<TypeIndex>,
     /// The bit offsets of the fields (taking into account any required padding for alignment).
     #[deku(count = "num_fields")]
     field_bit_offs: Vec<usize>,
@@ -588,7 +631,13 @@ impl IRDisplay for StructType {
                 .field_tys
                 .iter()
                 .enumerate()
-                .map(|(i, ti)| format!("{}: {}", self.field_bit_offs[i], m.types[*ti].to_str(m)))
+                .map(|(i, ti)| {
+                    format!(
+                        "{}: {}",
+                        self.field_bit_offs[i],
+                        m.types[ti.to_usize()].to_str(m)
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join(", "),
         );
@@ -603,7 +652,7 @@ impl IRDisplay for FuncType {
             "func({})",
             self.arg_tys
                 .iter()
-                .map(|t| m.types[*t].to_str(m))
+                .map(|t| m.types[t.to_usize()].to_str(m))
                 .collect::<Vec<_>>()
                 .join(", ")
         )
@@ -755,7 +804,9 @@ impl Module {
     }
 
     pub(crate) fn block(&self, bid: &BlockID) -> Option<&Block> {
-        self.funcs.get(bid.func_idx.to_usize())?.block(bid.bb_idx)
+        self.funcs
+            .get(bid.func_idx.to_usize())?
+            .block(bid.block_idx)
     }
 
     /// Fill in the function index of local variable operands of instructions.

@@ -44,7 +44,7 @@ impl<'a> TraceBuilder<'a> {
             TracedAOTBlock::Mapped { func_name, bb } => {
                 let func_name = func_name.to_str().unwrap(); // safe: func names are valid UTF-8.
                 let func = self.aot_mod.func_index(func_name)?;
-                Some(aot_ir::BlockID::new(func, *bb))
+                Some(aot_ir::BlockID::new(func, aot_ir::BlockIndex::new(*bb)))
             }
             TracedAOTBlock::Unmappable { .. } => None,
         }
@@ -99,7 +99,11 @@ impl<'a> TraceBuilder<'a> {
 
             // If the AOT instruction defines a new value, then add it to the local map.
             if jit_inst.is_def() {
-                let aot_iid = aot_ir::InstructionID::new(bid.func_idx, bid.bb_idx, inst_idx);
+                let aot_iid = aot_ir::InstructionID::new(
+                    bid.func_idx(),
+                    bid.block_idx(),
+                    aot_ir::InstrIndex::new(inst_idx),
+                );
                 self.local_map.insert(aot_iid, self.next_instr_id());
             }
 
