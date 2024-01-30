@@ -19,7 +19,7 @@ struct TraceBuilder<'a> {
     /// The mapped trace.
     mtrace: &'a Vec<TracedAOTBlock>,
     // Maps an AOT instruction to a jit instruction via their index-based IDs.
-    local_map: HashMap<aot_ir::InstructionID, jit_ir::InstrIndex>,
+    local_map: HashMap<aot_ir::InstructionID, jit_ir::InstrIdx>,
 }
 
 impl<'a> TraceBuilder<'a> {
@@ -43,8 +43,8 @@ impl<'a> TraceBuilder<'a> {
         match tb {
             TracedAOTBlock::Mapped { func_name, bb } => {
                 let func_name = func_name.to_str().unwrap(); // safe: func names are valid UTF-8.
-                let func = self.aot_mod.func_index(func_name)?;
-                Some(aot_ir::BlockID::new(func, aot_ir::BlockIndex::new(*bb)))
+                let func = self.aot_mod.func_idx(func_name)?;
+                Some(aot_ir::BlockID::new(func, aot_ir::BlockIdx::new(*bb)))
             }
             TracedAOTBlock::Unmappable { .. } => None,
         }
@@ -102,7 +102,7 @@ impl<'a> TraceBuilder<'a> {
                 let aot_iid = aot_ir::InstructionID::new(
                     bid.func_idx(),
                     bid.block_idx(),
-                    aot_ir::InstrIndex::new(inst_idx),
+                    aot_ir::InstrIdx::new(inst_idx),
                 );
                 self.local_map.insert(aot_iid, self.next_instr_id());
             }
@@ -112,8 +112,8 @@ impl<'a> TraceBuilder<'a> {
         }
     }
 
-    fn next_instr_id(&self) -> jit_ir::InstrIndex {
-        jit_ir::InstrIndex::new(self.jit_mod.len())
+    fn next_instr_id(&self) -> jit_ir::InstrIdx {
+        jit_ir::InstrIdx::new(self.jit_mod.len())
     }
 
     /// Translate an operand.
@@ -125,9 +125,7 @@ impl<'a> TraceBuilder<'a> {
             }
             aot_ir::Operand::Unimplemented(_) => {
                 // FIXME: for now we push an arbitrary constant.
-                let constidx = self
-                    .jit_mod
-                    .const_index(&jit_ir::Constant::Usize(0xdeadbeef));
+                let constidx = self.jit_mod.const_idx(&jit_ir::Constant::Usize(0xdeadbeef));
                 jit_ir::Operand::Const(constidx)
             }
             _ => todo!("{}", op.to_str(self.aot_mod)),
@@ -137,7 +135,7 @@ impl<'a> TraceBuilder<'a> {
     /// Translate a `Load` instruction.
     fn handle_load(&mut self, inst: &aot_ir::Instruction) -> jit_ir::Instruction {
         let jit_op = self.handle_operand(inst.operand(0));
-        jit_ir::LoadInstruction::new(jit_op, jit_ir::TypeIndex::from_aot(inst.type_index())).into()
+        jit_ir::LoadInstruction::new(jit_op, jit_ir::TypeIdx::from_aot(inst.type_idx())).into()
     }
 
     fn handle_call(&mut self, inst: &aot_ir::Instruction) -> jit_ir::Instruction {

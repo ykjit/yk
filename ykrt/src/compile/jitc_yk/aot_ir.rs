@@ -41,43 +41,43 @@ macro_rules! index {
 
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
-pub(crate) struct FuncIndex(usize);
-index!(FuncIndex);
+pub(crate) struct FuncIdx(usize);
+index!(FuncIdx);
 
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct TypeIndex(usize);
-index!(TypeIndex);
+pub(crate) struct TypeIdx(usize);
+index!(TypeIdx);
 
 /// A basic block index.
 ///
 /// One of these is an index into [Function::blocks].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct BlockIndex(usize);
-index!(BlockIndex);
+pub(crate) struct BlockIdx(usize);
+index!(BlockIdx);
 
 /// An instruction index.
 ///
 /// One of these is an index into [Block::instrs].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct InstrIndex(usize);
-index!(InstrIndex);
+pub(crate) struct InstrIdx(usize);
+index!(InstrIdx);
 
 /// A constant index.
 ///
 /// One of these is an index into [Module::consts].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct ConstIndex(usize);
-index!(ConstIndex);
+pub(crate) struct ConstIdx(usize);
+index!(ConstIdx);
 
 /// A function argument index.
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct ArgIndex(usize);
-index!(ArgIndex);
+pub(crate) struct ArgIdx(usize);
+index!(ArgIdx);
 
 fn deserialise_string(v: Vec<u8>) -> Result<String, DekuError> {
     let err = Err(DekuError::Parse("failed to parse string".to_owned()));
@@ -139,7 +139,7 @@ impl IRDisplay for Opcode {
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct ConstantOperand {
-    const_idx: ConstIndex,
+    const_idx: ConstIdx,
 }
 
 impl IRDisplay for ConstantOperand {
@@ -152,13 +152,13 @@ impl IRDisplay for ConstantOperand {
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub(crate) struct InstructionID {
     #[deku(skip)] // computed after deserialisation.
-    func_idx: FuncIndex,
-    bb_idx: BlockIndex,
-    inst_idx: InstrIndex,
+    func_idx: FuncIdx,
+    bb_idx: BlockIdx,
+    inst_idx: InstrIdx,
 }
 
 impl InstructionID {
-    pub(crate) fn new(func_idx: FuncIndex, bb_idx: BlockIndex, inst_idx: InstrIndex) -> Self {
+    pub(crate) fn new(func_idx: FuncIdx, bb_idx: BlockIdx, inst_idx: InstrIdx) -> Self {
         Self {
             func_idx,
             bb_idx,
@@ -169,23 +169,23 @@ impl InstructionID {
 
 #[derive(Debug)]
 pub(crate) struct BlockID {
-    func_idx: FuncIndex,
-    block_idx: BlockIndex,
+    func_idx: FuncIdx,
+    block_idx: BlockIdx,
 }
 
 impl BlockID {
-    pub(crate) fn new(func_idx: FuncIndex, block_idx: BlockIndex) -> Self {
+    pub(crate) fn new(func_idx: FuncIdx, block_idx: BlockIdx) -> Self {
         Self {
             func_idx,
             block_idx,
         }
     }
 
-    pub(crate) fn func_idx(&self) -> FuncIndex {
+    pub(crate) fn func_idx(&self) -> FuncIdx {
         self.func_idx
     }
 
-    pub(crate) fn block_idx(&self) -> BlockIndex {
+    pub(crate) fn block_idx(&self) -> BlockIdx {
         self.block_idx
     }
 }
@@ -216,13 +216,13 @@ impl IRDisplay for LocalVariableOperand {
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct TypeOperand {
-    type_idx: TypeIndex,
+    type_idx: TypeIdx,
 }
 
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct BlockOperand {
-    bb_idx: BlockIndex,
+    bb_idx: BlockIdx,
 }
 
 impl IRDisplay for BlockOperand {
@@ -234,14 +234,14 @@ impl IRDisplay for BlockOperand {
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct FunctionOperand {
-    func_idx: FuncIndex,
+    func_idx: FuncIdx,
 }
 
 /// An operand that is an argument to the parent function.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct ArgOperand {
-    arg_idx: ArgIndex,
+    arg_idx: ArgIdx,
 }
 
 impl IRDisplay for ArgOperand {
@@ -322,7 +322,7 @@ impl IRDisplay for Operand {
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct Instruction {
-    type_index: TypeIndex,
+    type_idx: TypeIdx,
     opcode: Opcode,
     #[deku(temp)]
     num_operands: u32,
@@ -335,8 +335,8 @@ pub(crate) struct Instruction {
 
 impl Instruction {
     /// Returns the operand at the specified index. Panics if the index is out of bounds.
-    pub(crate) fn operand(&self, index: usize) -> &Operand {
-        &self.operands[index]
+    pub(crate) fn operand(&self, idx: usize) -> &Operand {
+        &self.operands[idx]
     }
 
     /// Return a slice of the remaining operands, starting from the index `from` (inclusive).
@@ -353,7 +353,7 @@ impl Instruction {
     /// # Panics
     ///
     /// Panics if the instruction isn't a call instruction.
-    pub(crate) fn callee<'a>(&self) -> FuncIndex {
+    pub(crate) fn callee<'a>(&self) -> FuncIdx {
         debug_assert!(matches!(self.opcode, Opcode::Call));
         let op = self.operand(0);
         match op {
@@ -362,8 +362,8 @@ impl Instruction {
         }
     }
 
-    pub(crate) fn type_index(&self) -> TypeIndex {
-        self.type_index
+    pub(crate) fn type_idx(&self) -> TypeIdx {
+        self.type_idx
     }
 
     pub(crate) fn is_store(&self) -> bool {
@@ -474,7 +474,7 @@ impl IRDisplay for Block {
 pub(crate) struct Function {
     #[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")]
     name: String,
-    type_index: TypeIndex,
+    type_idx: TypeIdx,
     #[deku(temp)]
     num_blocks: usize,
     #[deku(count = "num_blocks")]
@@ -487,15 +487,15 @@ impl<'a> Function {
     }
 
     /// Return the block at the specified index, or `None` if the index is out of range.
-    pub(crate) fn block(&self, bb_idx: BlockIndex) -> Option<&Block> {
+    pub(crate) fn block(&self, bb_idx: BlockIdx) -> Option<&Block> {
         self.blocks.get(bb_idx.to_usize())
     }
 
     #[cfg(test)]
-    pub(crate) fn new(name: &str, type_index: TypeIndex) -> Self {
+    pub(crate) fn new(name: &str, type_idx: TypeIdx) -> Self {
         Self {
             name: name.to_string(),
-            type_index,
+            type_idx,
             blocks: Vec::new(),
         }
     }
@@ -503,7 +503,7 @@ impl<'a> Function {
 
 impl IRDisplay for Function {
     fn to_str(&self, m: &Module) -> String {
-        let ty = &m.types[self.type_index.to_usize()];
+        let ty = &m.types[self.type_idx.to_usize()];
         if let Type::Func(fty) = ty {
             let mut ret = format!(
                 "func {}({}",
@@ -587,9 +587,9 @@ pub(crate) struct FuncType {
     num_args: usize,
     /// Type indices for the function's formal arguments.
     #[deku(count = "num_args")]
-    arg_tys: Vec<TypeIndex>,
+    arg_tys: Vec<TypeIdx>,
     /// Type index of the function's return type.
-    ret_ty: TypeIndex,
+    ret_ty: TypeIdx,
     /// Is the function vararg?
     is_vararg: bool,
 }
@@ -600,7 +600,7 @@ impl FuncType {
     }
 
     #[cfg(test)]
-    pub(crate) fn new(arg_tys: Vec<TypeIndex>, ret_ty: TypeIndex, is_vararg: bool) -> Self {
+    pub(crate) fn new(arg_tys: Vec<TypeIdx>, ret_ty: TypeIdx, is_vararg: bool) -> Self {
         Self {
             arg_tys,
             ret_ty,
@@ -617,7 +617,7 @@ pub(crate) struct StructType {
     num_fields: usize,
     /// The types of the fields.
     #[deku(count = "num_fields")]
-    field_tys: Vec<TypeIndex>,
+    field_tys: Vec<TypeIdx>,
     /// The bit offsets of the fields (taking into account any required padding for alignment).
     #[deku(count = "num_fields")]
     field_bit_offs: Vec<usize>,
@@ -721,7 +721,7 @@ impl IRDisplay for Type {
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct Constant {
-    type_index: TypeIndex,
+    type_idx: TypeIdx,
     #[deku(temp)]
     num_bytes: usize,
     #[deku(count = "num_bytes")]
@@ -730,7 +730,7 @@ pub(crate) struct Constant {
 
 impl IRDisplay for Constant {
     fn to_str(&self, m: &Module) -> String {
-        m.types[self.type_index.to_usize()].const_to_str(self)
+        m.types[self.type_idx.to_usize()].const_to_str(self)
     }
 }
 
@@ -781,13 +781,13 @@ impl Module {
         *self.var_names_computed.borrow_mut() = true;
     }
 
-    pub(crate) fn func_index(&self, find_func: &str) -> Option<FuncIndex> {
+    pub(crate) fn func_idx(&self, find_func: &str) -> Option<FuncIdx> {
         // OPT: create a cache in the Module.
         self.funcs
             .iter()
             .enumerate()
             .find(|(_, f)| f.name == find_func)
-            .map(|(f_idx, _)| FuncIndex(f_idx))
+            .map(|(f_idx, _)| FuncIdx(f_idx))
     }
 
     /// Look up a `FuncType` by its index.
@@ -796,8 +796,8 @@ impl Module {
     ///
     /// Panics if the type index is either out of bounds, or the corresponding type is not a
     /// function type.
-    pub(crate) fn func_ty(&self, func_idx: FuncIndex) -> &FuncType {
-        match self.types[self.funcs[func_idx.to_usize()].type_index.to_usize()] {
+    pub(crate) fn func_ty(&self, func_idx: FuncIdx) -> &FuncType {
+        match self.types[self.funcs[func_idx.to_usize()].type_idx.to_usize()] {
             Type::Func(ref ft) => &ft,
             _ => panic!(),
         }
@@ -819,7 +819,7 @@ impl Module {
                 for inst in &mut bb.instrs {
                     for op in &mut inst.operands {
                         if let Operand::LocalVariable(ref mut lv) = op {
-                            lv.func_idx = FuncIndex(f_idx);
+                            lv.func_idx = FuncIdx(f_idx);
                         }
                     }
                 }
@@ -831,7 +831,7 @@ impl Module {
     ///
     /// It is UB to pass an `instr` that is not from the `Module` referenced by `self`.
     pub(crate) fn instr_type(&self, instr: &Instruction) -> &Type {
-        &self.types[instr.type_index.to_usize()]
+        &self.types[instr.type_idx.to_usize()]
     }
 
     // FIXME: rename this to `is_def()`, which we've decided is a beter name.
@@ -861,16 +861,16 @@ impl Module {
 
 #[cfg(test)]
 impl Module {
-    pub(crate) fn push_func(&mut self, func: Function) -> FuncIndex {
+    pub(crate) fn push_func(&mut self, func: Function) -> FuncIdx {
         let idx = self.funcs.len();
         self.funcs.push(func);
-        FuncIndex(idx)
+        FuncIdx(idx)
     }
 
-    pub(crate) fn push_type(&mut self, ty: Type) -> TypeIndex {
+    pub(crate) fn push_type(&mut self, ty: Type) -> TypeIdx {
         let idx = self.types.len();
         self.types.push(ty);
-        TypeIndex(idx)
+        TypeIdx(idx)
     }
 }
 
@@ -898,7 +898,7 @@ pub fn print_from_file(path: &PathBuf) -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        deserialise_module, deserialise_string, Constant, IntegerType, Opcode, TypeIndex,
+        deserialise_module, deserialise_string, Constant, IntegerType, Opcode, TypeIdx,
         FORMAT_VERSION, MAGIC, OPKIND_BLOCK, OPKIND_CONST, OPKIND_FUNCTION, OPKIND_LOCAL_VARIABLE,
         OPKIND_TYPE, OPKIND_UNIMPLEMENTED, TYKIND_FUNC, TYKIND_INTEGER, TYKIND_PTR, TYKIND_STRUCT,
         TYKIND_UNIMPLEMENTED, TYKIND_VOID,
@@ -937,7 +937,7 @@ mod tests {
         // FUNCTION 0
         // name:
         write_str(&mut data, "foo");
-        // type_index:
+        // type_idx:
         write_native_usize(&mut data, 4);
         // num_blocks:
         write_native_usize(&mut data, 2);
@@ -947,7 +947,7 @@ mod tests {
         write_native_usize(&mut data, 3);
 
         // INSTRUCTION 0
-        // type_index:
+        // type_idx:
         write_native_usize(&mut data, 2);
         // opcode:
         data.write_u8(Opcode::Alloca as u8).unwrap();
@@ -960,7 +960,7 @@ mod tests {
         write_native_usize(&mut data, 0);
 
         // INSTRUCTION 1
-        // type_index:
+        // type_idx:
         write_native_usize(&mut data, 0);
         // opcode:
         data.write_u8(Opcode::Nop as u8).unwrap();
@@ -968,7 +968,7 @@ mod tests {
         data.write_u32::<NativeEndian>(0).unwrap();
 
         // INSTRUCTION 2
-        // type_index:
+        // type_idx:
         write_native_usize(&mut data, 0);
         // opcode:
         data.write_u8(Opcode::CondBr as u8).unwrap();
@@ -997,7 +997,7 @@ mod tests {
         write_native_usize(&mut data, 6);
 
         // INSTRUCTION 0
-        // type_index:
+        // type_idx:
         write_native_usize(&mut data, 0);
         // opcode:
         data.write_u8(Opcode::Unimplemented as u8).unwrap();
@@ -1010,7 +1010,7 @@ mod tests {
         write_str(&mut data, "%3 = some_llvm_instruction ...");
 
         // INSTRUCTION 1
-        // type_index:
+        // type_idx:
         write_native_usize(&mut data, 2);
         // opcode:
         data.write_u8(Opcode::GetElementPtr as u8).unwrap();
@@ -1023,7 +1023,7 @@ mod tests {
         write_native_usize(&mut data, 1);
 
         // INSTRUCTION 2
-        // type_index:
+        // type_idx:
         write_native_usize(&mut data, 2);
         // opcode:
         data.write_u8(Opcode::Alloca as u8).unwrap();
@@ -1032,7 +1032,7 @@ mod tests {
         // OPERAND 0
         // operand_kind:
         data.write_u8(OPKIND_TYPE).unwrap();
-        // type_index:
+        // type_idx:
         write_native_usize(&mut data, 3);
         // OPERAND 1
         // operand_kind:
@@ -1041,7 +1041,7 @@ mod tests {
         write_native_usize(&mut data, 2);
 
         // INSTRUCTION 3
-        // type_index:
+        // type_idx:
         write_native_usize(&mut data, 2);
         // opcode:
         data.write_u8(Opcode::Call as u8).unwrap();
@@ -1064,7 +1064,7 @@ mod tests {
         write_native_usize(&mut data, 2);
 
         // INSTRUCTION 4
-        // type_index:
+        // type_idx:
         write_native_usize(&mut data, 0);
         // opcode:
         data.write_u8(Opcode::Br as u8).unwrap();
@@ -1072,7 +1072,7 @@ mod tests {
         data.write_u32::<NativeEndian>(0).unwrap();
 
         // INSTRUCTION 5
-        // type_index:
+        // type_idx:
         write_native_usize(&mut data, 6);
         // opcode:
         data.write_u8(Opcode::Nop as u8).unwrap();
@@ -1082,7 +1082,7 @@ mod tests {
         // FUNCTION 1
         // name:
         write_str(&mut data, "bar");
-        // type_index:
+        // type_idx:
         write_native_usize(&mut data, 5);
         // num_blocks:
         write_native_usize(&mut data, 0);
@@ -1092,13 +1092,13 @@ mod tests {
         write_native_usize(&mut data, 3);
 
         // CONSTANT 0
-        // type_index:
+        // type_idx:
         write_native_usize(&mut data, 1);
         // num_bytes:
         write_native_usize(&mut data, 0);
 
         // CONSTANT 1
-        // type_index:
+        // type_idx:
         write_native_usize(&mut data, 3);
         // num_bytes:
         write_native_usize(&mut data, 4);
@@ -1106,7 +1106,7 @@ mod tests {
         data.write_u32::<NativeEndian>(u32::MAX).unwrap();
 
         // CONSTANT 2
-        // type_index:
+        // type_idx:
         write_native_usize(&mut data, 3);
         // num_bytes:
         write_native_usize(&mut data, 4);
@@ -1251,7 +1251,7 @@ func bar();
             // Construct an IR constant and check it stringifies ok.
             let it = IntegerType { num_bits };
             let c = Constant {
-                type_index: TypeIndex::new(0),
+                type_idx: TypeIdx::new(0),
                 bytes,
             };
             assert_eq!(it.const_to_str(&c), expect);

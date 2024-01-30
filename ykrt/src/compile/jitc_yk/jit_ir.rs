@@ -17,7 +17,7 @@ use std::{fmt, mem, ptr};
 ///  - `*_SHIFT`: the number of bits required to left shift a field's value into position (from the
 ///  LSB).
 ///
-const OPERAND_INDEX_MASK: u16 = 0x7fff;
+const OPERAND_IDX_MASK: u16 = 0x7fff;
 
 // The largest operand index we can express in 15 bits.
 const MAX_OPERAND_IDX: u16 = (1 << 15) - 1;
@@ -92,39 +92,39 @@ macro_rules! index_16bit {
 /// if a trace refers to that many functions, then it is likely to be a long trace that we probably
 /// don't want to compile anyway.
 #[derive(Copy, Clone, Debug)]
-pub(crate) struct FuncIndex(U24);
-index_24bit!(FuncIndex);
+pub(crate) struct FuncIdx(U24);
+index_24bit!(FuncIdx);
 
 /// A type index that refers to a type in the AOT module's type table.
 ///
-/// This works similarly to [FuncIndex], i.e. a reduced-size index type is used for compactness at
+/// This works similarly to [FuncIdx], i.e. a reduced-size index type is used for compactness at
 /// the cost of not being able to index every possible AOT type index.
 ///
-/// See the [FuncIndex] docs for a full justification of this design.
+/// See the [FuncIdx] docs for a full justification of this design.
 #[derive(Copy, Clone, Debug)]
-pub(crate) struct TypeIndex(U24);
-index_24bit!(TypeIndex);
+pub(crate) struct TypeIdx(U24);
+index_24bit!(TypeIdx);
 
 /// An extra argument index.
 ///
 /// One of these is an index into the [Module::extra_args].
 #[derive(Copy, Clone, Debug, Default)]
-pub(crate) struct ExtraArgsIndex(u16);
-index_16bit!(ExtraArgsIndex);
+pub(crate) struct ExtraArgsIdx(u16);
+index_16bit!(ExtraArgsIdx);
 
 /// A constant index.
 ///
 /// One of these is an index into the [Module::consts].
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
-pub(crate) struct ConstIndex(u16);
-index_16bit!(ConstIndex);
+pub(crate) struct ConstIdx(u16);
+index_16bit!(ConstIdx);
 
 /// An instruction index.
 ///
 /// One of these is an index into the [Module::instrs].
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
-pub(crate) struct InstrIndex(u16);
-index_16bit!(InstrIndex);
+pub(crate) struct InstrIdx(u16);
+index_16bit!(InstrIdx);
 
 /// The packed representation of an instruction operand.
 ///
@@ -153,17 +153,17 @@ impl PackedOperand {
             }
             Operand::Const(constidx) => {
                 debug_assert!(constidx.to_u16() <= MAX_OPERAND_IDX);
-                PackedOperand(constidx.to_u16() | !OPERAND_INDEX_MASK)
+                PackedOperand(constidx.to_u16() | !OPERAND_IDX_MASK)
             }
         }
     }
 
     /// Unpacks a [PackedOperand] into a [Operand].
     pub fn get(&self) -> Operand {
-        if (self.0 & !OPERAND_INDEX_MASK) == 0 {
-            Operand::Local(InstrIndex(self.0))
+        if (self.0 & !OPERAND_IDX_MASK) == 0 {
+            Operand::Local(InstrIdx(self.0))
         } else {
-            Operand::Const(ConstIndex(self.0 & OPERAND_INDEX_MASK))
+            Operand::Const(ConstIdx(self.0 & OPERAND_IDX_MASK))
         }
     }
 }
@@ -174,8 +174,8 @@ impl PackedOperand {
 /// to add type safety when using operands.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Operand {
-    Local(InstrIndex),
-    Const(ConstIndex),
+    Local(InstrIdx),
+    Const(ConstIdx),
 }
 
 impl fmt::Display for Operand {
@@ -249,11 +249,11 @@ pub struct LoadInstruction {
     /// The pointer to load from.
     op: PackedOperand,
     /// The type of the pointee.
-    ty_idx: TypeIndex,
+    ty_idx: TypeIdx,
 }
 
 impl LoadInstruction {
-    pub(crate) fn new(op: Operand, ty_idx: TypeIndex) -> LoadInstruction {
+    pub(crate) fn new(op: Operand, ty_idx: TypeIdx) -> LoadInstruction {
         LoadInstruction {
             op: PackedOperand::new(&op),
             ty_idx,
@@ -307,11 +307,11 @@ impl LoadArgInstruction {
 #[repr(packed)]
 pub struct CallInstruction {
     /// The callee.
-    target: FuncIndex,
+    target: FuncIdx,
     /// The first argument to the call, if present. Undefined if not present.
     arg1: PackedOperand,
     /// Extra arguments, if the call requires more than a single argument.
-    extra: ExtraArgsIndex,
+    extra: ExtraArgsIdx,
 }
 
 impl fmt::Display for CallInstruction {
@@ -323,11 +323,11 @@ impl fmt::Display for CallInstruction {
 impl CallInstruction {
     pub(crate) fn new(
         m: &mut Module,
-        target: aot_ir::FuncIndex,
+        target: aot_ir::FuncIdx,
         args: &[Operand],
     ) -> CallInstruction {
         let mut arg1 = PackedOperand::default();
-        let mut extra = ExtraArgsIndex::default();
+        let mut extra = ExtraArgsIdx::default();
 
         if args.len() >= 1 {
             arg1 = PackedOperand::new(&args[0]);
@@ -336,7 +336,7 @@ impl CallInstruction {
             extra = m.push_extra_args(&args[1..]);
         }
         Self {
-            target: FuncIndex::from_aot(target),
+            target: FuncIdx::from_aot(target),
             arg1,
             extra,
         }
@@ -388,11 +388,11 @@ pub(crate) struct Module {
     ///
     /// Used when a [CallInstruction]'s arguments don't fit inline.
     ///
-    /// An [ExtraArgsIndex] describes an index into this.
+    /// An [ExtraArgsIdx] describes an index into this.
     extra_args: Vec<Operand>,
     /// The constant table.
     ///
-    /// A [ConstIndex] describes an index into this.
+    /// A [ConstIdx] describes an index into this.
     consts: Vec<Constant>,
 }
 
@@ -423,26 +423,26 @@ impl Module {
     }
 
     /// Push a slice of extra arguments into the extra arg table.
-    fn push_extra_args(&mut self, ops: &[Operand]) -> ExtraArgsIndex {
+    fn push_extra_args(&mut self, ops: &[Operand]) -> ExtraArgsIdx {
         let idx = self.extra_args.len();
         self.extra_args.extend_from_slice(ops); // FIXME: this clones.
-        ExtraArgsIndex(u16::try_from(idx).unwrap()) // FIXME: propagate error
+        ExtraArgsIdx(u16::try_from(idx).unwrap()) // FIXME: propagate error
     }
 
     /// Push a new constant into the constant table and return its index.
-    pub(crate) fn push_const(&mut self, constant: Constant) -> ConstIndex {
+    pub(crate) fn push_const(&mut self, constant: Constant) -> ConstIdx {
         let idx = self.consts.len();
         self.consts.push(constant);
-        ConstIndex(u16::try_from(idx).unwrap()) // FIXME: propagate error
+        ConstIdx(u16::try_from(idx).unwrap()) // FIXME: propagate error
     }
 
     /// Get the index of a type, inserting it in the type table if necessary.
-    pub fn const_index(&mut self, c: &Constant) -> ConstIndex {
+    pub fn const_idx(&mut self, c: &Constant) -> ConstIdx {
         // FIXME: can we optimise this?
         for (idx, tc) in self.consts.iter().enumerate() {
             if tc == c {
                 // const table hit.
-                return ConstIndex(u16::try_from(idx).unwrap()); // FIXME: propagate error
+                return ConstIdx(u16::try_from(idx).unwrap()); // FIXME: propagate error
             }
         }
         // type table miss, we need to insert it.
@@ -470,23 +470,23 @@ mod tests {
 
     #[test]
     fn operand() {
-        let op = PackedOperand::new(&Operand::Local(InstrIndex(192)));
-        assert_eq!(op.get(), Operand::Local(InstrIndex(192)));
+        let op = PackedOperand::new(&Operand::Local(InstrIdx(192)));
+        assert_eq!(op.get(), Operand::Local(InstrIdx(192)));
 
-        let op = PackedOperand::new(&Operand::Local(InstrIndex(0x7fff)));
-        assert_eq!(op.get(), Operand::Local(InstrIndex(0x7fff)));
+        let op = PackedOperand::new(&Operand::Local(InstrIdx(0x7fff)));
+        assert_eq!(op.get(), Operand::Local(InstrIdx(0x7fff)));
 
-        let op = PackedOperand::new(&Operand::Local(InstrIndex(0)));
-        assert_eq!(op.get(), Operand::Local(InstrIndex(0)));
+        let op = PackedOperand::new(&Operand::Local(InstrIdx(0)));
+        assert_eq!(op.get(), Operand::Local(InstrIdx(0)));
 
-        let op = PackedOperand::new(&Operand::Const(ConstIndex(192)));
-        assert_eq!(op.get(), Operand::Const(ConstIndex(192)));
+        let op = PackedOperand::new(&Operand::Const(ConstIdx(192)));
+        assert_eq!(op.get(), Operand::Const(ConstIdx(192)));
 
-        let op = PackedOperand::new(&Operand::Const(ConstIndex(0x7fff)));
-        assert_eq!(op.get(), Operand::Const(ConstIndex(0x7fff)));
+        let op = PackedOperand::new(&Operand::Const(ConstIdx(0x7fff)));
+        assert_eq!(op.get(), Operand::Const(ConstIdx(0x7fff)));
 
-        let op = PackedOperand::new(&Operand::Const(ConstIndex(0)));
-        assert_eq!(op.get(), Operand::Const(ConstIndex(0)));
+        let op = PackedOperand::new(&Operand::Const(ConstIdx(0)));
+        assert_eq!(op.get(), Operand::Const(ConstIdx(0)));
     }
 
     #[test]
@@ -495,14 +495,14 @@ mod tests {
             LoadArgInstruction::new().into(),
             LoadArgInstruction::new().into(),
             LoadInstruction::new(
-                Operand::Local(InstrIndex(0)),
-                TypeIndex(U24::from_usize(0).unwrap()),
+                Operand::Local(InstrIdx(0)),
+                TypeIdx(U24::from_usize(0).unwrap()),
             )
             .into(),
         ];
         prog[2] = LoadInstruction::new(
-            Operand::Local(InstrIndex(1)),
-            TypeIndex(U24::from_usize(0).unwrap()),
+            Operand::Local(InstrIdx(1)),
+            TypeIdx(U24::from_usize(0).unwrap()),
         )
         .into();
     }
@@ -517,10 +517,10 @@ mod tests {
     #[test]
     fn extra_call_args() {
         let mut aot_mod = aot_ir::Module::default();
-        let arg_ty_idxs = vec![aot_ir::TypeIndex::new(0); 3];
+        let arg_ty_idxs = vec![aot_ir::TypeIdx::new(0); 3];
         let func_ty = aot_ir::Type::Func(aot_ir::FuncType::new(
             arg_ty_idxs,
-            aot_ir::TypeIndex::new(0),
+            aot_ir::TypeIdx::new(0),
             false,
         ));
         let func_ty_idx = aot_mod.push_type(func_ty);
@@ -528,27 +528,27 @@ mod tests {
 
         let mut jit_mod = Module::new("test".into());
         let args = vec![
-            Operand::Local(InstrIndex(0)), // inline arg
-            Operand::Local(InstrIndex(1)), // first extra arg
-            Operand::Local(InstrIndex(2)),
+            Operand::Local(InstrIdx(0)), // inline arg
+            Operand::Local(InstrIdx(1)), // first extra arg
+            Operand::Local(InstrIdx(2)),
         ];
         let ci = CallInstruction::new(&mut jit_mod, aot_func_idx, &args);
 
         assert_eq!(
             ci.operand(&aot_mod, &jit_mod, 0),
-            Some(Operand::Local(InstrIndex(0)))
+            Some(Operand::Local(InstrIdx(0)))
         );
         assert_eq!(
             ci.operand(&aot_mod, &jit_mod, 1),
-            Some(Operand::Local(InstrIndex(1)))
+            Some(Operand::Local(InstrIdx(1)))
         );
         assert_eq!(
             ci.operand(&aot_mod, &jit_mod, 2),
-            Some(Operand::Local(InstrIndex(2)))
+            Some(Operand::Local(InstrIdx(2)))
         );
         assert_eq!(
             jit_mod.extra_args,
-            vec![Operand::Local(InstrIndex(1)), Operand::Local(InstrIndex(2))]
+            vec![Operand::Local(InstrIdx(1)), Operand::Local(InstrIdx(2))]
         );
     }
 
@@ -556,10 +556,10 @@ mod tests {
     #[should_panic]
     fn call_args_out_of_bounds() {
         let mut aot_mod = aot_ir::Module::default();
-        let arg_ty_idxs = vec![aot_ir::TypeIndex::new(0); 3];
+        let arg_ty_idxs = vec![aot_ir::TypeIdx::new(0); 3];
         let func_ty = aot_ir::Type::Func(aot_ir::FuncType::new(
             arg_ty_idxs,
-            aot_ir::TypeIndex::new(0),
+            aot_ir::TypeIdx::new(0),
             false,
         ));
         let func_ty_idx = aot_mod.push_type(func_ty);
@@ -567,9 +567,9 @@ mod tests {
 
         let mut jit_mod = Module::new("test".into());
         let args = vec![
-            Operand::Local(InstrIndex(0)), // inline arg
-            Operand::Local(InstrIndex(1)), // first extra arg
-            Operand::Local(InstrIndex(2)),
+            Operand::Local(InstrIdx(0)), // inline arg
+            Operand::Local(InstrIdx(1)), // first extra arg
+            Operand::Local(InstrIdx(2)),
         ];
         let ci = CallInstruction::new(&mut jit_mod, aot_func_idx, &args);
 
