@@ -6,6 +6,7 @@
 use byteorder::{NativeEndian, ReadBytesExt};
 use deku::prelude::*;
 use std::{cell::RefCell, error::Error, ffi::CStr, fs, io::Cursor, path::PathBuf};
+use typed_index_collections::TiVec;
 
 /// A magic number that all bytecode payloads begin with.
 const MAGIC: u32 = 0xedd5f00d;
@@ -23,9 +24,17 @@ macro_rules! index {
             pub(crate) fn new(v: usize) -> Self {
                 Self(v)
             }
+        }
 
-            pub(crate) fn to_usize(&self) -> usize {
-                self.0
+        impl From<usize> for $struct {
+            fn from(idx: usize) -> Self {
+                Self(idx)
+            }
+        }
+
+        impl From<$struct> for usize {
+            fn from(s: $struct) -> usize {
+                s.0
             }
         }
     };
@@ -82,6 +91,11 @@ fn deserialise_string(v: Vec<u8>) -> Result<String, DekuError> {
     }
 }
 
+/// Helper function to convert a vector into a `TiVec` during deku parsing.
+fn deserialise_into_ti_vec<I, T>(v: Vec<T>) -> Result<TiVec<I, T>, DekuError> {
+    Ok(TiVec::from(v))
+}
+
 /// A trait for converting in-memory data-structures into a human-readable textual format.
 ///
 /// This is modelled on [`std::fmt::Display`], but a reference to the module is always passed down
@@ -136,7 +150,7 @@ pub(crate) struct ConstantOperand {
 
 impl IRDisplay for ConstantOperand {
     fn to_str(&self, m: &Module) -> String {
-        m.consts[self.const_idx.to_usize()].to_str(m)
+        m.consts[self.const_idx].to_str(m)
     }
 }
 
@@ -200,8 +214,8 @@ impl IRDisplay for LocalVariableOperand {
     fn to_str(&self, _m: &Module) -> String {
         format!(
             "${}_{}",
-            self.0.bb_idx.to_usize(),
-            self.0.inst_idx.to_usize()
+            usize::from(self.0.bb_idx),
+            usize::from(self.0.inst_idx)
         )
     }
 }
@@ -220,7 +234,7 @@ pub(crate) struct BlockOperand {
 
 impl IRDisplay for BlockOperand {
     fn to_str(&self, _m: &Module) -> String {
-        format!("bb{}", self.bb_idx.to_usize())
+        format!("bb{}", usize::from(self.bb_idx))
     }
 }
 
@@ -239,7 +253,7 @@ pub(crate) struct ArgOperand {
 
 impl IRDisplay for ArgOperand {
     fn to_str(&self, _m: &Module) -> String {
-        format!("$arg{}", self.arg_idx.to_usize())
+        format!("$arg{}", usize::from(self.arg_idx))
     }
 }
 
@@ -281,8 +295,7 @@ impl Operand {
         match self {
             Self::LocalVariable(lvo) => {
                 let iid = lvo.instr_id();
-                &aotmod.funcs[iid.func_idx.to_usize()].blocks[iid.bb_idx.to_usize()].instrs
-                    [lvo.instr_id().inst_idx.to_usize()]
+                &aotmod.funcs[iid.func_idx].blocks[iid.bb_idx].instrs[lvo.instr_id().inst_idx]
             }
             _ => panic!(),
         }
@@ -306,8 +319,8 @@ impl IRDisplay for Operand {
         match self {
             Self::Constant(c) => c.to_str(m),
             Self::LocalVariable(l) => l.to_str(m),
-            Self::Type(t) => m.types[t.type_idx.to_usize()].to_str(m),
-            Self::Function(f) => m.funcs[f.func_idx.0].name.to_owned(),
+            Self::Type(t) => m.types[t.type_idx].to_str(m),
+            Self::Function(f) => m.funcs[f.func_idx].name.to_owned(),
             Self::Block(bb) => bb.to_str(m),
             Self::Arg(a) => a.to_str(m),
             Self::Unimplemented(s) => format!("?op<{}>", s),
@@ -377,7 +390,7 @@ impl Instruction {
             let op = &self.operands[0];
             match op {
                 Operand::Function(fop) => {
-                    return aot_mod.funcs[fop.func_idx.0].name == CONTROL_POINT_NAME;
+                    return aot_mod.funcs[fop.func_idx].name == CONTROL_POINT_NAME;
                 }
                 _ => todo!(),
             }
@@ -451,8 +464,8 @@ impl IRDisplay for Instruction {
 pub(crate) struct Block {
     #[deku(temp)]
     num_instrs: usize,
-    #[deku(count = "num_instrs")]
-    pub(crate) instrs: Vec<Instruction>,
+    #[deku(count = "num_instrs", map = "deserialise_into_ti_vec")]
+    pub(crate) instrs: TiVec<InstrIdx, Instruction>,
 }
 
 impl IRDisplay for Block {
@@ -474,8 +487,8 @@ pub(crate) struct Function {
     type_idx: TypeIdx,
     #[deku(temp)]
     num_blocks: usize,
-    #[deku(count = "num_blocks")]
-    blocks: Vec<Block>,
+    #[deku(count = "num_blocks", map = "deserialise_into_ti_vec")]
+    blocks: TiVec<BlockIdx, Block>,
 }
 
 impl<'a> Function {
@@ -483,9 +496,13 @@ impl<'a> Function {
         self.blocks.is_empty()
     }
 
-    /// Return the block at the specified index, or `None` if the index is out of range.
-    pub(crate) fn block(&self, bb_idx: BlockIdx) -> Option<&Block> {
-        self.blocks.get(bb_idx.to_usize())
+    /// Return the [Block] at the specified index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is out of range.
+    pub(crate) fn block(&self, bb_idx: BlockIdx) -> &Block {
+        &self.blocks[bb_idx]
     }
 
     #[cfg(test)]
@@ -493,14 +510,14 @@ impl<'a> Function {
         Self {
             name: name.to_string(),
             type_idx,
-            blocks: Vec::new(),
+            blocks: TiVec::new(),
         }
     }
 }
 
 impl IRDisplay for Function {
     fn to_str(&self, m: &Module) -> String {
-        let ty = &m.types[self.type_idx.to_usize()];
+        let ty = &m.types[self.type_idx];
         if let Type::Func(fty) = ty {
             let mut ret = format!(
                 "func {}({}",
@@ -508,7 +525,7 @@ impl IRDisplay for Function {
                 fty.arg_ty_idxs
                     .iter()
                     .enumerate()
-                    .map(|(i, t)| format!("$arg{}: {}", i, m.types[t.to_usize()].to_str(m)))
+                    .map(|(i, t)| format!("$arg{}: {}", i, m.types[*t].to_str(m)))
                     .collect::<Vec<_>>()
                     .join(", ")
             );
@@ -516,7 +533,7 @@ impl IRDisplay for Function {
                 ret.push_str(", ...");
             }
             ret.push(')');
-            let ret_ty = &m.types[fty.ret_ty.to_usize()];
+            let ret_ty = &m.types[fty.ret_ty];
             if ret_ty != &Type::Void {
                 ret.push_str(&format!(" -> {}", ret_ty.to_str(m)));
             }
@@ -628,13 +645,7 @@ impl IRDisplay for StructType {
                 .field_ty_idxs
                 .iter()
                 .enumerate()
-                .map(|(i, ti)| {
-                    format!(
-                        "{}: {}",
-                        self.field_bit_offs[i],
-                        m.types[ti.to_usize()].to_str(m)
-                    )
-                })
+                .map(|(i, ti)| format!("{}: {}", self.field_bit_offs[i], m.types[*ti].to_str(m)))
                 .collect::<Vec<_>>()
                 .join(", "),
         );
@@ -649,7 +660,7 @@ impl IRDisplay for FuncType {
             "func({})",
             self.arg_ty_idxs
                 .iter()
-                .map(|t| m.types[t.to_usize()].to_str(m))
+                .map(|t| m.types[*t].to_str(m))
                 .collect::<Vec<_>>()
                 .join(", ")
         )
@@ -727,7 +738,7 @@ pub(crate) struct Constant {
 
 impl IRDisplay for Constant {
     fn to_str(&self, m: &Module) -> String {
-        m.types[self.type_idx.to_usize()].const_to_str(self)
+        m.types[self.type_idx].const_to_str(self)
     }
 }
 
@@ -743,16 +754,16 @@ pub(crate) struct Module {
     version: u32,
     #[deku(temp)]
     num_funcs: usize,
-    #[deku(count = "num_funcs")]
-    funcs: Vec<Function>,
+    #[deku(count = "num_funcs", map = "deserialise_into_ti_vec")]
+    funcs: TiVec<FuncIdx, Function>,
     #[deku(temp)]
     num_consts: usize,
-    #[deku(count = "num_consts")]
-    consts: Vec<Constant>,
+    #[deku(count = "num_consts", map = "deserialise_into_ti_vec")]
+    consts: TiVec<ConstIdx, Constant>,
     #[deku(temp)]
     num_types: usize,
-    #[deku(count = "num_types")]
-    types: Vec<Type>,
+    #[deku(count = "num_types", map = "deserialise_into_ti_vec")]
+    types: TiVec<TypeIdx, Type>,
     /// Have local variable names been computed?
     ///
     /// Names are computed on-demand when an instruction is printed for the first time.
@@ -794,16 +805,15 @@ impl Module {
     /// Panics if the type index is either out of bounds, or the corresponding type is not a
     /// function type.
     pub(crate) fn func_ty(&self, func_idx: FuncIdx) -> &FuncType {
-        match self.types[self.funcs[func_idx.to_usize()].type_idx.to_usize()] {
+        match self.types[self.funcs[func_idx].type_idx] {
             Type::Func(ref ft) => &ft,
             _ => panic!(),
         }
     }
 
-    pub(crate) fn block(&self, bid: &BlockID) -> Option<&Block> {
-        self.funcs
-            .get(bid.func_idx.to_usize())?
-            .block(bid.block_idx)
+    /// Return the block uniquely identified (in this module) by the specified [BlockID].
+    pub(crate) fn block(&self, bid: &BlockID) -> &Block {
+        self.funcs[bid.func_idx].block(bid.block_idx)
     }
 
     /// Fill in the function index of local variable operands of instructions.
@@ -828,7 +838,7 @@ impl Module {
     ///
     /// It is UB to pass an `instr` that is not from the `Module` referenced by `self`.
     pub(crate) fn instr_type(&self, instr: &Instruction) -> &Type {
-        &self.types[instr.type_idx.to_usize()]
+        &self.types[instr.type_idx]
     }
 
     // FIXME: rename this to `is_def()`, which we've decided is a beter name.

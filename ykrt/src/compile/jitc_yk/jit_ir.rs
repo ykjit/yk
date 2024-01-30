@@ -58,7 +58,7 @@ macro_rules! index_24bit {
         impl $struct {
             /// Convert an AOT index to a reduced-size JIT index (if possible).
             pub(crate) fn from_aot(aot_idx: aot_ir::$struct) -> $struct {
-                Self(U24::from_usize(aot_idx.to_usize()).unwrap()) // FIXME: propagate error
+                Self(U24::from_usize(usize::from(aot_idx)).unwrap()) // FIXME: propagate error
             }
 
             /// Convert a JIT index to an AOT index.

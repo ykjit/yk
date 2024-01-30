@@ -87,7 +87,7 @@ impl<'a> TraceBuilder<'a> {
     /// Walk over a traced AOT block, translating the constituent instructions into the JIT module.
     fn process_block(&mut self, bid: aot_ir::BlockID) {
         // unwrap safe: can't trace a block not in the AOT module.
-        let blk = self.aot_mod.block(&bid).unwrap();
+        let blk = self.aot_mod.block(&bid);
 
         // Decide how to translate each AOT instruction based upon its opcode.
         for (inst_idx, inst) in blk.instrs.iter().enumerate() {
@@ -152,7 +152,7 @@ impl<'a> TraceBuilder<'a> {
     fn build(mut self) -> Result<jit_ir::Module, Box<dyn Error>> {
         let firstblk = self.lookup_aot_block(&self.mtrace[0]);
         debug_assert!(firstblk.is_some());
-        self.create_trace_header(self.aot_mod.block(&firstblk.unwrap()).unwrap());
+        self.create_trace_header(self.aot_mod.block(&firstblk.unwrap()));
 
         for tblk in self.mtrace {
             match self.lookup_aot_block(tblk) {
