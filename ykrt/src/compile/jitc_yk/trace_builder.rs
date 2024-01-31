@@ -119,8 +119,8 @@ impl<'a> TraceBuilder<'a> {
     /// Translate an operand.
     fn handle_operand(&mut self, op: &aot_ir::Operand) -> jit_ir::Operand {
         match op {
-            aot_ir::Operand::LocalVariable(aot_iid) => {
-                let instridx = self.local_map[aot_iid];
+            aot_ir::Operand::LocalVariable(lvo) => {
+                let instridx = self.local_map[lvo.instr_id()];
                 jit_ir::Operand::Local(instridx)
             }
             aot_ir::Operand::Unimplemented(_) => {

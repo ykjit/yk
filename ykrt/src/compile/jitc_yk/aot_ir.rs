@@ -5,15 +5,7 @@
 
 use byteorder::{NativeEndian, ReadBytesExt};
 use deku::prelude::*;
-use std::{
-    cell::RefCell,
-    error::Error,
-    ffi::CStr,
-    fs,
-    io::Cursor,
-    ops::{Deref, DerefMut},
-    path::PathBuf,
-};
+use std::{cell::RefCell, error::Error, ffi::CStr, fs, io::Cursor, path::PathBuf};
 
 /// A magic number that all bytecode payloads begin with.
 const MAGIC: u32 = 0xedd5f00d;
@@ -194,22 +186,23 @@ impl BlockID {
 #[derive(Debug, Hash, Eq, PartialEq)]
 pub(crate) struct LocalVariableOperand(InstructionID);
 
-impl Deref for LocalVariableOperand {
-    type Target = InstructionID;
-    fn deref(&self) -> &Self::Target {
+impl LocalVariableOperand {
+    pub(crate) fn instr_id(&self) -> &InstructionID {
         &self.0
     }
-}
 
-impl DerefMut for LocalVariableOperand {
-    fn deref_mut(&mut self) -> &mut Self::Target {
+    pub(crate) fn instr_id_mut(&mut self) -> &mut InstructionID {
         &mut self.0
     }
 }
 
 impl IRDisplay for LocalVariableOperand {
     fn to_str(&self, _m: &Module) -> String {
-        format!("${}_{}", self.bb_idx.to_usize(), self.inst_idx.to_usize())
+        format!(
+            "${}_{}",
+            self.0.bb_idx.to_usize(),
+            self.0.inst_idx.to_usize()
+        )
     }
 }
 
@@ -287,8 +280,9 @@ impl Operand {
     pub(crate) fn to_instr<'a>(&self, aotmod: &'a Module) -> &'a Instruction {
         match self {
             Self::LocalVariable(lvo) => {
-                &aotmod.funcs[lvo.func_idx.to_usize()].blocks[lvo.bb_idx.to_usize()].instrs
-                    [lvo.inst_idx.to_usize()]
+                let iid = lvo.instr_id();
+                &aotmod.funcs[iid.func_idx.to_usize()].blocks[iid.bb_idx.to_usize()].instrs
+                    [lvo.instr_id().inst_idx.to_usize()]
             }
             _ => panic!(),
         }
@@ -298,7 +292,10 @@ impl Operand {
     /// operands.
     pub(crate) fn to_instr_id(&self) -> InstructionID {
         match self {
-            Self::LocalVariable(lvo) => InstructionID::new(lvo.func_idx, lvo.bb_idx, lvo.inst_idx),
+            Self::LocalVariable(lvo) => {
+                let iid = lvo.instr_id();
+                InstructionID::new(iid.func_idx, iid.bb_idx, iid.inst_idx)
+            }
             _ => panic!(),
         }
     }
@@ -819,7 +816,7 @@ impl Module {
                 for inst in &mut bb.instrs {
                     for op in &mut inst.operands {
                         if let Operand::LocalVariable(ref mut lv) = op {
-                            lv.func_idx = FuncIdx(f_idx);
+                            lv.instr_id_mut().func_idx = FuncIdx(f_idx);
                         }
                     }
                 }
