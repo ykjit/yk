@@ -24,8 +24,6 @@ static NEW_CODEGEN: LazyLock<bool> = LazyLock::new(|| {
     false
 });
 
-static SUPPORTED_CPU_ARCHES: [&str; 1] = ["x86_64"];
-
 /// Transitionary hack to allow the LLVM and new codegen to co-exist.
 ///
 /// Once the new codegen is complete we can kill this.
@@ -36,28 +34,6 @@ fn correct_codegen_for_test(p: &Path) -> bool {
     } else {
         !fname.contains(".newcg.")
     }
-}
-
-/// Get string name for the current CPU architecture.
-fn arch() -> &'static str {
-    if cfg!(target_arch = "x86_64") {
-        "x86_64"
-    } else {
-        panic!("unknown CPU architecture");
-    }
-}
-
-/// Check if we are on the right CPU for a test.
-fn correct_cpu_arch(p: &Path) -> bool {
-    let my_arch = arch();
-    let other_arches = SUPPORTED_CPU_ARCHES.iter().filter(|a| *a != &my_arch);
-    let p = p.to_str().unwrap();
-    for oa in other_arches {
-        if p.contains(oa) {
-            return false;
-        }
-    }
-    return true;
 }
 
 fn run_suite(opt: &'static str) {
@@ -72,17 +48,22 @@ fn run_suite(opt: &'static str) {
     }
     let wrapper_path = ccg.wrapper_path();
 
+    // Set variables for tests `ignore-if`s.
     #[cfg(cargo_profile = "debug")]
     env::set_var("YK_CARGO_PROFILE", "debug");
     #[cfg(cargo_profile = "release")]
     env::set_var("YK_CARGO_PROFILE", "release");
+
+    #[cfg(target_arch = "x86_64")]
+    env::set_var("YK_ARCH", "x86_64");
+    #[cfg(not(target_arch = "x86_64"))]
+    panic!("Unknown target_arch");
 
     LangTester::new()
         .comment_prefix("#")
         .test_dir("c")
         .test_path_filter(|p: &Path| {
             p.extension().as_ref().and_then(|p| p.to_str()) == Some("c")
-                && correct_cpu_arch(p)
                 && correct_codegen_for_test(p)
         })
         .test_extract(move |p| {
