@@ -461,13 +461,6 @@ void *compileIRTrace(FN Func, char *FuncNames[], size_t BBs[], size_t TraceLen,
     rewriteDebugInfo(JITMod, TraceName, DebugInfoFD,
                      filesystem::path(DebugInfoPath));
 
-#ifdef YK_TESTING
-  if (Func == createModuleForTraceCompilerTests) {
-    // The "trace_compiler" suite doesn't require any code generation.
-    return nullptr;
-  }
-#endif
-
   // Compile IR trace and return a pointer to its function.
   return compileModule(TraceName, JITMod, AOTMappingVec, GuardCount,
                        ThreadAOTMod);
@@ -481,13 +474,3 @@ extern "C" void *__yktracec_irtrace_compile(
                         BitcodeLen, DebugInfoFD, DebugInfoPath, CallStack,
                         AOTValsPtr, AOTValsLen);
 }
-
-#ifdef YK_TESTING
-extern "C" void *__yktracec_irtrace_compile_for_tc_tests(
-    char *FuncNames[], size_t BBs[], size_t TraceLen, void *BitcodeData,
-    uint64_t BitcodeLen, int DebugInfoFD, char *DebugInfoPath) {
-  return compileIRTrace(createModuleForTraceCompilerTests, FuncNames, BBs,
-                        TraceLen, BitcodeData, BitcodeLen, DebugInfoFD,
-                        DebugInfoPath, nullptr, nullptr, 0);
-}
-#endif

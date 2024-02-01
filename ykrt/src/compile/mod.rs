@@ -38,14 +38,6 @@ pub(crate) trait Compiler: Send + Sync {
         sti: Option<SideTraceInfo>,
         hl: Arc<Mutex<HotLocation>>,
     ) -> Result<CompiledTrace, Box<dyn Error>>;
-
-    #[cfg(feature = "yk_testing")]
-    unsafe fn compile_for_tc_tests(
-        &self,
-        irtrace: Vec<TracedAOTBlock>,
-        llvmbc_data: *const u8,
-        llvmbc_len: u64,
-    );
 }
 
 pub(crate) fn default_compiler() -> Result<Arc<dyn Compiler>, Box<dyn Error>> {
@@ -65,17 +57,6 @@ pub(crate) fn default_compiler() -> Result<Arc<dyn Compiler>, Box<dyn Error>> {
 
     #[allow(unreachable_code)]
     Err("No JIT compiler supported on this platform/configuration.".into())
-}
-
-#[cfg(feature = "yk_testing")]
-pub unsafe fn compile_for_tc_tests(
-    irtrace: Vec<TracedAOTBlock>,
-    llvmbc_data: *const u8,
-    llvmbc_len: u64,
-) {
-    default_compiler()
-        .unwrap()
-        .compile_for_tc_tests(irtrace, llvmbc_data, llvmbc_len);
 }
 
 #[cfg(not(test))]

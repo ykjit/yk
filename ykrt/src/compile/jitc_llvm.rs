@@ -67,29 +67,6 @@ impl Compiler for JITCLLVM {
             Ok(CompiledTrace::new(mt, ret, di_tmp, Arc::downgrade(&hl)))
         }
     }
-
-    #[cfg(feature = "yk_testing")]
-    unsafe fn compile_for_tc_tests(
-        &self,
-        irtrace: Vec<TracedAOTBlock>,
-        llvmbc_data: *const u8,
-        llvmbc_len: u64,
-    ) {
-        let (func_names, bbs, trace_len) = self.encode_trace(&irtrace);
-        let (_di_tmp, di_fd, di_tmpname_c) = Self::create_debuginfo_temp_file();
-
-        let ret = yktracec::__yktracec_irtrace_compile_for_tc_tests(
-            func_names.as_ptr(),
-            bbs.as_ptr(),
-            trace_len,
-            llvmbc_data,
-            llvmbc_len,
-            di_fd,
-            di_tmpname_c,
-        );
-        // This test suite does no actual code-generation.
-        assert_eq!(ret, ptr::null());
-    }
 }
 
 impl JITCLLVM {

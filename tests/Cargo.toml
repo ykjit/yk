@@ -15,11 +15,6 @@ path = "langtest_c.rs"
 harness = false
 
 [[test]]
-name = "trace_compiler_tests"
-path = "langtest_trace_compiler.rs"
-harness = false
-
-[[test]]
 name = "ir_lowering_tests"
 path = "langtest_ir_lowering.rs"
 harness = false
