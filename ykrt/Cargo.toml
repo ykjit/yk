@@ -21,6 +21,7 @@ strum = { version = "0.25", features = ["derive"] }
 yktracec = { path = "../yktracec" }
 strum_macros = "0.25.3"
 static_assertions = "1.1.0"
+typed-index-collections = "3.1.0"
 
 [dependencies.llvm-sys]
 # note: using a git version to get llvm linkage features in llvm-sys (not in a
