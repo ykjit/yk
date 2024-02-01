@@ -1,1 +1,2 @@
-// ignore: -O0 doesn't make a constant expression.
+// # -O0 doesn't make a constant expression.
+// ignore-if: true

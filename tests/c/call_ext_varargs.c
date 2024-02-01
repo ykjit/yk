@@ -1,4 +1,5 @@
-// ignore: static strings: https://github.com/ykjit/yk/issues/382
+// # static strings: https://github.com/ykjit/yk/issues/382
+// ignore-if: true
 // Compiler:
 // Run-time:
 //   env-var: YKD_PRINT_IR=jit-pre-opt
