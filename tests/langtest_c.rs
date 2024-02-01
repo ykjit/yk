@@ -63,26 +63,6 @@ fn correct_cpu_arch(p: &Path) -> bool {
 fn run_suite(opt: &'static str) {
     println!("Running C tests with opt level {}...", opt);
 
-    fn is_c(p: &Path) -> bool {
-        p.extension().as_ref().and_then(|p| p.to_str()) == Some("c")
-    }
-
-    // Tests with the filename prefix `debug_` are only run in debug builds.
-    #[cfg(cargo_profile = "release")]
-    let filter = |p: &Path| {
-        is_c(p)
-            && correct_cpu_arch(p)
-            && correct_codegen_for_test(p)
-            && !p
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .starts_with("debug_")
-    };
-    #[cfg(cargo_profile = "debug")]
-    let filter = |p: &Path| is_c(p) && correct_cpu_arch(p) && correct_codegen_for_test(p);
-
     let tempdir = TempDir::new().unwrap();
 
     // Generate a `compile_commands.json` database for clangd.
@@ -92,10 +72,19 @@ fn run_suite(opt: &'static str) {
     }
     let wrapper_path = ccg.wrapper_path();
 
+    #[cfg(cargo_profile = "debug")]
+    env::set_var("YK_CARGO_PROFILE", "debug");
+    #[cfg(cargo_profile = "release")]
+    env::set_var("YK_CARGO_PROFILE", "release");
+
     LangTester::new()
         .comment_prefix("#")
         .test_dir("c")
-        .test_path_filter(filter)
+        .test_path_filter(|p: &Path| {
+            p.extension().as_ref().and_then(|p| p.to_str()) == Some("c")
+                && correct_cpu_arch(p)
+                && correct_codegen_for_test(p)
+        })
         .test_extract(move |p| {
             let altp = p.with_extension(format!("c.{}", opt.strip_prefix('-').unwrap()));
             let p = if altp.exists() { altp.as_path() } else { p };
