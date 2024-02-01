@@ -1,1 +1,2 @@
-// ignore: no lifetime annotations at -O0.
+// # no lifetime annotations at -O0.
+// ignore-if: true

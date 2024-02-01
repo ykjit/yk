@@ -1,4 +1,5 @@
-// ignore: Fails with: Assertion `!CallStack.curMappableFrame()' failed
+// # Fails with: Assertion `!CallStack.curMappableFrame()' failed
+// ignore-if: true
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   status: success

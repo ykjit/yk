@@ -93,6 +93,7 @@ fn run_suite(opt: &'static str) {
     let wrapper_path = ccg.wrapper_path();
 
     LangTester::new()
+        .comment_prefix("#")
         .test_dir("c")
         .test_path_filter(filter)
         .test_extract(move |p| {

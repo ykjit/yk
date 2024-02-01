@@ -1,4 +1,5 @@
-// ignore: Shadow stack doesn't currently support dynamically sized stack.
+// # Shadow stack doesn't currently support dynamically sized stack.
+// ignore-if: true
 // Run-time:
 //   env-var: YKD_PRINT_IR=aot
 //   env-var: YKD_SERIALISE_COMPILATION=1
