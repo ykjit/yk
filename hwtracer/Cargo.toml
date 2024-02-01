@@ -7,15 +7,15 @@ license = "Apache-2.0 OR MIT"
 
 [dependencies]
 libc = "0.2.148"
-strum = { version = "0.25", features = ["derive"] }
-strum_macros = "0.25"
+strum = { version = "0.26.1", features = ["derive"] }
+strum_macros = "0.26.1"
 deku = "0.16.0"
 ykaddr = { path = "../ykaddr" }
 intervaltree = "0.2.7"
 byteorder = "1.4.3"
 leb128 = "0.2.5"
 thiserror = "1"
-memmap2 = "0.7"
+memmap2 = "0.9.4"
 
 [dependencies.object]
 version = "0.32"
