@@ -654,6 +654,7 @@ class JITModBuilder {
     // so that we can insert an appropriate guard into the trace. A block must
     // exist at `InpTrace[TraceIdx + 1]` because the branch instruction must
     // transfer to a successor block, and branching cannot turn off tracing.
+    assert(TraceIdx + 1 < InpTrace.Length());
     IRBlock *NextIB = InpTrace[TraceIdx + 1].getMappedBlock();
     assert(NextIB);
     BasicBlock *NextBB;
@@ -940,6 +941,7 @@ class JITModBuilder {
 
     // Get the instruction index of CPCI in its parent block.
     size_t CPCIIdx = 0;
+    assert(CPCI->getParent() != NULL);
     for (Instruction &I : *CPCI->getParent()) {
       if (&I == cast<Instruction>(CPCI)) {
         break;
@@ -1014,6 +1016,7 @@ class JITModBuilder {
     // There should never be two unmappable blocks in a row in the trace
     // (because the mapper collapses them to save memory).
     for (size_t I = 0; I < IL - 1; I++) {
+      assert(I + 1 < InpTrace.Length());
       assert(InpTrace[I].getMappedBlock() || InpTrace[I + 1].getMappedBlock());
     }
 #endif
@@ -1255,7 +1258,7 @@ public:
             // code. As far as I can tell, there's only one intrinsics that
             // allows this: llvm.init.trampoline. Investigate if this is a
             // problem.
-            if (Idx < InpTrace.Length()) {
+            if (Idx + 1 < InpTrace.Length()) {
               if (UnmappableRegion *UR =
                       InpTrace[Idx + 1].getUnmappableRegion()) {
                 // The next block is unmappable, which means this intrinsic
@@ -1277,6 +1280,7 @@ public:
             if (!isa<InlineAsm>(CI->getCalledOperand())) {
               // Look ahead in the trace to find the callee so we can
               // map the arguments if we are inlining the call.
+              assert(Idx + 1 < InpTrace.Length());
               TraceLoc MaybeNextIB = InpTrace[Idx + 1];
               if (const IRBlock *NextIB = MaybeNextIB.getMappedBlock()) {
                 CF = AOTMod->getFunction(NextIB->FuncName);
@@ -1365,6 +1369,7 @@ public:
                 I++;
                 CurInstrIdx++;
               }
+              assert(InpTrace.Length() > 2);
               if (Idx == InpTrace.Length() - 2) {
                 // Once we reached the YkCtrlPointVars stores at the end of the
                 // trace, we're done. We don't need to copy those instructions
