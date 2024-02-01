@@ -609,6 +609,7 @@ pub(crate) struct FuncType {
 }
 
 impl FuncType {
+    #[cfg(debug_assertions)]
     pub(crate) fn num_args(&self) -> usize {
         self.arg_ty_idxs.len()
     }
@@ -804,6 +805,7 @@ impl Module {
     ///
     /// Panics if the type index is either out of bounds, or the corresponding type is not a
     /// function type.
+    #[cfg(debug_assertions)]
     pub(crate) fn func_ty(&self, func_idx: FuncIdx) -> &FuncType {
         match self.types[self.funcs[func_idx].type_idx] {
             Type::Func(ref ft) => &ft,

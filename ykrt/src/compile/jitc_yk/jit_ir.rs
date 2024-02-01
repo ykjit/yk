@@ -352,13 +352,13 @@ impl CallInstruction {
     /// It is undefined behaviour to provide an out-of-bounds index.
     pub(crate) fn operand(
         &self,
-        aot_mod: &aot_ir::Module,
+        _aot_mod: &aot_ir::Module,
         jit_mod: &Module,
         idx: usize,
     ) -> Option<Operand> {
         #[cfg(debug_assertions)]
         {
-            let ft = aot_mod.func_ty(self.target.into_aot());
+            let ft = _aot_mod.func_ty(self.target.into_aot());
             debug_assert!(ft.num_args() > idx);
         }
         if idx == 0 {
