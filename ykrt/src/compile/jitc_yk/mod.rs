@@ -85,16 +85,6 @@ impl Compiler for JITCYk {
 
         todo!("new codegen doesn't work yet");
     }
-
-    #[cfg(feature = "yk_testing")]
-    unsafe fn compile_for_tc_tests(
-        &self,
-        _irtrace: Vec<TracedAOTBlock>,
-        _llvmbc_data: *const u8,
-        _llvmbc_len: u64,
-    ) {
-        todo!()
-    }
 }
 
 impl JITCYk {
