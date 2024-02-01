@@ -10,16 +10,16 @@ byteorder = "1.4.3"
 deku = { version = "0.16.0", features = ["std"] }
 hwtracer = { path = "../hwtracer" }
 libc = "0.2.148"
-memmap2 = "0.7"
+memmap2 = "0.9"
 num_cpus = "1.13.1"
 parking_lot = "0.12.0"
 parking_lot_core = "0.9.1"
 tempfile = "3.8"
 ykaddr = { path = "../ykaddr" }
 yksmp = { path = "../yksmp" }
-strum = { version = "0.25", features = ["derive"] }
+strum = { version = "0.26.1", features = ["derive"] }
+strum_macros = "0.26.1"
 yktracec = { path = "../yktracec" }
-strum_macros = "0.25.3"
 static_assertions = "1.1.0"
 typed-index-collections = "3.1.0"
 
