@@ -7,34 +7,12 @@ use std::{
     fs::read_to_string,
     path::{Path, PathBuf},
     process::Command,
-    sync::LazyLock,
 };
 use tempfile::TempDir;
 use tests::{mk_compiler, EXTRA_LINK};
 use ykbuild::{completion_wrapper::CompletionWrapper, ykllvm_bin};
 
 const COMMENT: &str = "//";
-
-static NEW_CODEGEN: LazyLock<bool> = LazyLock::new(|| {
-    if let Ok(val) = env::var("YKD_NEW_CODEGEN") {
-        if val == "1" {
-            return true;
-        }
-    }
-    false
-});
-
-/// Transitionary hack to allow the LLVM and new codegen to co-exist.
-///
-/// Once the new codegen is complete we can kill this.
-fn correct_codegen_for_test(p: &Path) -> bool {
-    let fname = p.file_name().unwrap().to_str().unwrap();
-    if *NEW_CODEGEN {
-        fname.contains(".newcg.")
-    } else {
-        !fname.contains(".newcg.")
-    }
-}
 
 fn run_suite(opt: &'static str) {
     println!("Running C tests with opt level {}...", opt);
@@ -59,13 +37,26 @@ fn run_suite(opt: &'static str) {
     #[cfg(not(target_arch = "x86_64"))]
     panic!("Unknown target_arch");
 
+    let filter = match env::var("YKD_NEW_CODEGEN") {
+        Ok(x) if x == "1" => {
+            env::set_var("YK_JIT_COMPILER", "yk");
+            |p: &Path| {
+                // A temporary hack because at the moment virtually no tests run on the new JIT
+                // compiler.
+                p.extension().as_ref().and_then(|p| p.to_str()) == Some("c")
+                    && p.file_name().unwrap().to_str().unwrap().contains(".newcg")
+            }
+        }
+        _ => {
+            env::set_var("YK_JIT_COMPILER", "llvm");
+            |p: &Path| p.extension().as_ref().and_then(|p| p.to_str()) == Some("c")
+        }
+    };
+
     LangTester::new()
         .comment_prefix("#")
         .test_dir("c")
-        .test_path_filter(|p: &Path| {
-            p.extension().as_ref().and_then(|p| p.to_str()) == Some("c")
-                && correct_codegen_for_test(p)
-        })
+        .test_path_filter(filter)
         .test_extract(move |p| {
             let altp = p.with_extension(format!("c.{}", opt.strip_prefix('-').unwrap()));
             let p = if altp.exists() { altp.as_path() } else { p };
