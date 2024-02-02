@@ -182,6 +182,8 @@ impl HWTMapper {
                 }
             }
         }
+        // The first block contains the control point so we need to remove that.
+        ret.remove(0);
         Ok(ret)
     }
 }

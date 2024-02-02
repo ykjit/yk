@@ -1052,9 +1052,7 @@ public:
   Module *createModule() {
     size_t CurBBIdx;
     size_t CurInstrIdx;
-    // Iterate over the blocks of the trace. The first block contains the
-    // control point so we want to start copying instructions just after that.
-    for (size_t Idx = 1; Idx < InpTrace.Length(); Idx++) {
+    for (size_t Idx = 0; Idx < InpTrace.Length(); Idx++) {
       // Update the previously executed BB in the most-recent frame (if it's
       // mappable).
       TraceLoc Loc = InpTrace[Idx];
