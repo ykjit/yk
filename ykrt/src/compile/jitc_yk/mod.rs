@@ -51,6 +51,7 @@ static PHASES_TO_PRINT: LazyLock<HashSet<IRPhase>> = LazyLock::new(|| {
 pub mod aot_ir;
 pub mod jit_ir;
 mod trace_builder;
+pub mod tracevec;
 
 pub(crate) struct JITCYk;
 

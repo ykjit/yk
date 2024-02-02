@@ -7,6 +7,7 @@
 #![allow(dead_code)]
 
 use super::aot_ir;
+use super::tracevec::TraceVec;
 use std::{fmt, mem, ptr};
 
 /// Bit fiddling.
@@ -383,7 +384,7 @@ pub(crate) struct Module {
     /// The name of the module and the eventual symbol name for the JITted code.
     name: String,
     /// The IR trace as a linear sequence of instructions.
-    instrs: Vec<Instruction>,
+    instrs: TraceVec,
     /// The extra argument table.
     ///
     /// Used when a [CallInstruction]'s arguments don't fit inline.
@@ -401,7 +402,7 @@ impl Module {
     pub fn new(name: String) -> Self {
         Self {
             name,
-            instrs: Vec::new(),
+            instrs: TraceVec::new(),
             extra_args: Vec::new(),
             consts: Vec::new(),
         }
