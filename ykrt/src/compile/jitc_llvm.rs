@@ -2,7 +2,7 @@
 //! to be compiled with LLVM.
 
 use crate::{
-    compile::{CompiledTrace, Compiler},
+    compile::{CompilationError, CompiledTrace, Compiler},
     location::HotLocation,
     mt::{SideTraceInfo, MT},
     trace::TracedAOTBlock,
@@ -13,7 +13,6 @@ use parking_lot::Mutex;
 use std::os::unix::io::AsRawFd;
 use std::{
     env,
-    error::Error,
     ffi::{c_char, c_int},
     ptr,
     sync::{Arc, LazyLock},
@@ -36,7 +35,7 @@ impl Compiler for JITCLLVM {
         irtrace: Vec<TracedAOTBlock>,
         sti: Option<SideTraceInfo>,
         hl: Arc<Mutex<HotLocation>>,
-    ) -> Result<CompiledTrace, Box<dyn Error>> {
+    ) -> Result<CompiledTrace, CompilationError> {
         let (func_names, bbs, trace_len) = self.encode_trace(&irtrace);
 
         let llvmbc = llvmbc_section();
@@ -62,7 +61,10 @@ impl Compiler for JITCLLVM {
             )
         };
         if ret.is_null() {
-            Err("Could not compile trace.".into())
+            // The LLVM backend is now legacy code and is pending deletion, so it's not worth us
+            // spending time auditing all of the failure modes and categorising them into
+            // recoverable/temporary. So for now we say any error is temporary.
+            Err(CompilationError::Temporary("llvm backend error".into()))
         } else {
             Ok(CompiledTrace::new(mt, ret, di_tmp, Arc::downgrade(&hl)))
         }
@@ -70,8 +72,8 @@ impl Compiler for JITCLLVM {
 }
 
 impl JITCLLVM {
-    pub(crate) fn new() -> Result<Arc<Self>, Box<dyn Error>> {
-        Ok(Arc::new(JITCLLVM))
+    pub(crate) fn new() -> Arc<Self> {
+        Arc::new(JITCLLVM)
     }
 
     fn encode_trace(&self, irtrace: &Vec<TracedAOTBlock>) -> (Vec<*const i8>, Vec<usize>, usize) {

@@ -3,9 +3,10 @@
 //! This is a parser for the on-disk (in the ELF binary) IR format used to express the
 //! (immutable) ahead-of-time compiled interpreter.
 
+use super::CompilationError;
 use byteorder::{NativeEndian, ReadBytesExt};
 use deku::prelude::*;
-use std::{cell::RefCell, error::Error, ffi::CStr, fs, io::Cursor, path::PathBuf};
+use std::{cell::RefCell, ffi::CStr, fs, io::Cursor, path::PathBuf};
 use typed_index_collections::TiVec;
 
 /// A magic number that all bytecode payloads begin with.
@@ -790,13 +791,19 @@ impl Module {
         *self.var_names_computed.borrow_mut() = true;
     }
 
-    pub(crate) fn func_idx(&self, find_func: &str) -> Option<FuncIdx> {
+    /// Find a function by its name.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no function exists with that name.
+    pub(crate) fn func_idx(&self, find_func: &str) -> FuncIdx {
         // OPT: create a cache in the Module.
         self.funcs
             .iter()
             .enumerate()
             .find(|(_, f)| f.name == find_func)
             .map(|(f_idx, _)| FuncIdx(f_idx))
+            .unwrap()
     }
 
     /// Look up a `FuncType` by its index.
@@ -884,21 +891,21 @@ impl Module {
 }
 
 /// Deserialise an AOT module from the slice `data`.
-pub(crate) fn deserialise_module(data: &[u8]) -> Result<Module, Box<dyn Error>> {
+pub(crate) fn deserialise_module(data: &[u8]) -> Result<Module, CompilationError> {
     match Module::from_bytes((data, 0)) {
         Ok(((_, _), mut modu)) => {
             modu.compute_local_operand_func_indices();
             Ok(modu)
         }
-        Err(e) => Err(e.to_string().into()),
+        Err(e) => Err(CompilationError::Unrecoverable(e.to_string())),
     }
 }
 
 /// Deserialise and print IR from an on-disk file.
 ///
 /// Used for support tooling (in turn used by tests too).
-pub fn print_from_file(path: &PathBuf) -> Result<(), Box<dyn Error>> {
-    let data = fs::read(path)?;
+pub fn print_from_file(path: &PathBuf) -> Result<(), CompilationError> {
+    let data = fs::read(path).map_err(|e| CompilationError::Unrecoverable(e.to_string()))?;
     let ir = deserialise_module(&data)?;
     println!("{}", ir.to_str());
     Ok(())

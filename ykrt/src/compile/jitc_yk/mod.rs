@@ -1,5 +1,6 @@
 //! Yk's built-in trace compiler.
 
+use super::CompilationError;
 use crate::{
     compile::{CompiledTrace, Compiler},
     location::HotLocation,
@@ -10,7 +11,6 @@ use parking_lot::Mutex;
 use std::{
     collections::HashSet,
     env,
-    error::Error,
     ffi::CString,
     slice,
     sync::{Arc, LazyLock},
@@ -25,14 +25,16 @@ enum IRPhase {
 }
 
 impl IRPhase {
-    fn from_str(s: &str) -> Result<Self, String> {
-        let ret = match s {
-            "aot" => Self::AOT,
-            "jit-pre-opt" => Self::PreOpt,
-            "jit-post-opt" => Self::PostOpt,
-            _ => return Err(format!("Invalid YKD_PRINT_IR value: {}", s)),
-        };
-        Ok(ret)
+    fn from_str(s: &str) -> Result<Self, CompilationError> {
+        match s {
+            "aot" => Ok(Self::AOT),
+            "jit-pre-opt" => Ok(Self::PreOpt),
+            "jit-post-opt" => Ok(Self::PostOpt),
+            _ => Err(CompilationError::Unrecoverable(format!(
+                "Invalid YKD_PRINT_IR value: {}",
+                s
+            ))),
+        }
     }
 }
 
@@ -61,11 +63,11 @@ impl Compiler for JITCYk {
         mtrace: Vec<TracedAOTBlock>,
         sti: Option<SideTraceInfo>,
         _hl: Arc<Mutex<HotLocation>>,
-    ) -> Result<CompiledTrace, Box<dyn Error>> {
+    ) -> Result<CompiledTrace, CompilationError> {
         if sti.is_some() {
             todo!();
         }
-        let ir_slice = yk_ir_section();
+        let ir_slice = yk_ir_section()?;
         // FIXME: Cache deserialisation, so we don't load it afresh each time.
         let aot_mod = aot_ir::deserialise_module(ir_slice)?;
 
@@ -88,13 +90,17 @@ impl Compiler for JITCYk {
 }
 
 impl JITCYk {
-    pub(crate) fn new() -> Result<Arc<Self>, Box<dyn Error>> {
+    pub(crate) fn new() -> Result<Arc<Self>, CompilationError> {
         Ok(Arc::new(Self {}))
     }
 }
 
-pub(crate) fn yk_ir_section() -> &'static [u8] {
-    let start = symbol_vaddr(&CString::new("ykllvm.yk_ir.start").unwrap()).unwrap();
-    let stop = symbol_vaddr(&CString::new("ykllvm.yk_ir.stop").unwrap()).unwrap();
-    unsafe { slice::from_raw_parts(start as *const u8, stop - start) }
+pub(crate) fn yk_ir_section() -> Result<&'static [u8], CompilationError> {
+    let start = symbol_vaddr(&CString::new("ykllvm.yk_ir.start").unwrap()).ok_or(
+        CompilationError::Unrecoverable("couldn't find ykllvm.yk_ir.start".into()),
+    )?;
+    let stop = symbol_vaddr(&CString::new("ykllvm.yk_ir.stop").unwrap()).ok_or(
+        CompilationError::Unrecoverable("couldn't find ykllvm.yk_ir.stop".into()),
+    )?;
+    Ok(unsafe { slice::from_raw_parts(start as *const u8, stop - start) })
 }

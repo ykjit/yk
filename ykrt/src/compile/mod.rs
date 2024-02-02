@@ -9,9 +9,7 @@ use parking_lot::Mutex;
 use std::slice;
 use std::{
     collections::HashMap,
-    env,
-    error::Error,
-    fmt,
+    env, fmt,
     sync::{
         atomic::{AtomicU32, Ordering},
         Arc, Weak,
@@ -28,6 +26,15 @@ pub(crate) mod jitc_llvm;
 #[cfg(jitc_yk)]
 pub mod jitc_yk;
 
+/// A failure to compile a trace.
+#[derive(Debug, thiserror::Error)]
+pub enum CompilationError {
+    #[error("Unrecoverable error: {0}")]
+    Unrecoverable(String),
+    #[error("Temporary error: {0}")]
+    Temporary(String),
+}
+
 /// The trait that every JIT compiler backend must implement.
 pub(crate) trait Compiler: Send + Sync {
     /// Compile a mapped trace into machine code.
@@ -37,10 +44,10 @@ pub(crate) trait Compiler: Send + Sync {
         irtrace: Vec<TracedAOTBlock>,
         sti: Option<SideTraceInfo>,
         hl: Arc<Mutex<HotLocation>>,
-    ) -> Result<CompiledTrace, Box<dyn Error>>;
+    ) -> Result<CompiledTrace, CompilationError>;
 }
 
-pub(crate) fn default_compiler() -> Result<Arc<dyn Compiler>, Box<dyn Error>> {
+pub(crate) fn default_compiler() -> Result<Arc<dyn Compiler>, CompilationError> {
     #[cfg(jitc_yk)]
     // Transitionary env var to turn on the new code generator.
     //
@@ -52,11 +59,15 @@ pub(crate) fn default_compiler() -> Result<Arc<dyn Compiler>, Box<dyn Error>> {
     }
     #[cfg(jitc_llvm)]
     {
-        return Ok(jitc_llvm::JITCLLVM::new()?);
+        return Ok(jitc_llvm::JITCLLVM::new());
     }
 
     #[allow(unreachable_code)]
-    Err("No JIT compiler supported on this platform/configuration.".into())
+    {
+        Err(CompilationError::Unrecoverable(
+            "No JIT compiler supported on this platform/configuration".into(),
+        ))
+    }
 }
 
 #[cfg(not(test))]

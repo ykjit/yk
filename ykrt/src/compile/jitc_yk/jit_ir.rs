@@ -6,6 +6,8 @@
 // FIXME: eventually delete.
 #![allow(dead_code)]
 
+use crate::compile::CompilationError;
+
 use super::aot_ir;
 use std::{fmt, mem, ptr};
 
@@ -52,13 +54,20 @@ impl U24 {
     }
 }
 
+/// Helper to create index overflow errors.
+fn index_overflow(typ: &str) -> CompilationError {
+    CompilationError::Temporary(format!("index overflow: {}", typ))
+}
+
 // Generate common methods for 24-bit index types.
 macro_rules! index_24bit {
     ($struct:ident) => {
         impl $struct {
             /// Convert an AOT index to a reduced-size JIT index (if possible).
-            pub(crate) fn from_aot(aot_idx: aot_ir::$struct) -> $struct {
-                Self(U24::from_usize(usize::from(aot_idx)).unwrap()) // FIXME: propagate error
+            pub(crate) fn from_aot(aot_idx: aot_ir::$struct) -> Result<$struct, CompilationError> {
+                U24::from_usize(usize::from(aot_idx))
+                    .ok_or(index_overflow(stringify!($struct)))
+                    .map(|u| Self(u))
             }
 
             /// Convert a JIT index to an AOT index.
@@ -73,8 +82,10 @@ macro_rules! index_24bit {
 macro_rules! index_16bit {
     ($struct:ident) => {
         impl $struct {
-            pub(crate) fn new(v: usize) -> Self {
-                Self(u16::try_from(v).unwrap()) // FIXME: propagate error
+            pub(crate) fn new(v: usize) -> Result<Self, CompilationError> {
+                u16::try_from(v)
+                    .map_err(|_| index_overflow(stringify!($struct)))
+                    .map(|u| Self(u))
             }
 
             pub(crate) fn to_u16(&self) -> u16 {
@@ -325,7 +336,7 @@ impl CallInstruction {
         m: &mut Module,
         target: aot_ir::FuncIdx,
         args: &[Operand],
-    ) -> CallInstruction {
+    ) -> Result<CallInstruction, CompilationError> {
         let mut arg1 = PackedOperand::default();
         let mut extra = ExtraArgsIdx::default();
 
@@ -333,13 +344,13 @@ impl CallInstruction {
             arg1 = PackedOperand::new(&args[0]);
         }
         if args.len() >= 2 {
-            extra = m.push_extra_args(&args[1..]);
+            extra = m.push_extra_args(&args[1..])?;
         }
-        Self {
-            target: FuncIdx::from_aot(target),
+        Ok(Self {
+            target: FuncIdx::from_aot(target)?,
             arg1,
             extra,
-        }
+        })
     }
 
     fn arg1(&self) -> PackedOperand {
@@ -364,7 +375,7 @@ impl CallInstruction {
         if idx == 0 {
             Some(self.arg1().get())
         } else {
-            Some(jit_mod.extra_args[usize::try_from(self.extra.0).unwrap() + idx - 1].clone())
+            Some(jit_mod.extra_args[usize::from(self.extra.0) + idx - 1].clone())
         }
     }
 }
@@ -423,26 +434,26 @@ impl Module {
     }
 
     /// Push a slice of extra arguments into the extra arg table.
-    fn push_extra_args(&mut self, ops: &[Operand]) -> ExtraArgsIdx {
+    fn push_extra_args(&mut self, ops: &[Operand]) -> Result<ExtraArgsIdx, CompilationError> {
         let idx = self.extra_args.len();
         self.extra_args.extend_from_slice(ops); // FIXME: this clones.
-        ExtraArgsIdx(u16::try_from(idx).unwrap()) // FIXME: propagate error
+        ExtraArgsIdx::new(idx)
     }
 
     /// Push a new constant into the constant table and return its index.
-    pub(crate) fn push_const(&mut self, constant: Constant) -> ConstIdx {
+    pub(crate) fn push_const(&mut self, constant: Constant) -> Result<ConstIdx, CompilationError> {
         let idx = self.consts.len();
         self.consts.push(constant);
-        ConstIdx(u16::try_from(idx).unwrap()) // FIXME: propagate error
+        ConstIdx::new(idx)
     }
 
     /// Get the index of a type, inserting it in the type table if necessary.
-    pub fn const_idx(&mut self, c: &Constant) -> ConstIdx {
+    pub fn const_idx(&mut self, c: &Constant) -> Result<ConstIdx, CompilationError> {
         // FIXME: can we optimise this?
         for (idx, tc) in self.consts.iter().enumerate() {
             if tc == c {
                 // const table hit.
-                return ConstIdx(u16::try_from(idx).unwrap()); // FIXME: propagate error
+                return ConstIdx::new(idx);
             }
         }
         // type table miss, we need to insert it.
@@ -532,7 +543,7 @@ mod tests {
             Operand::Local(InstrIdx(1)), // first extra arg
             Operand::Local(InstrIdx(2)),
         ];
-        let ci = CallInstruction::new(&mut jit_mod, aot_func_idx, &args);
+        let ci = CallInstruction::new(&mut jit_mod, aot_func_idx, &args).unwrap();
 
         assert_eq!(
             ci.operand(&aot_mod, &jit_mod, 0),
@@ -571,9 +582,9 @@ mod tests {
             Operand::Local(InstrIdx(1)), // first extra arg
             Operand::Local(InstrIdx(2)),
         ];
-        let ci = CallInstruction::new(&mut jit_mod, aot_func_idx, &args);
+        let ci = CallInstruction::new(&mut jit_mod, aot_func_idx, &args).unwrap();
 
-        ci.operand(&aot_mod, &jit_mod, 3);
+        ci.operand(&aot_mod, &jit_mod, 3).unwrap();
     }
 
     #[test]
@@ -598,5 +609,38 @@ mod tests {
         assert_eq!(U24::from_usize(0x000000).unwrap().to_usize(), 0x000000);
         assert_eq!(U24::from_usize(0x123456).unwrap().to_usize(), 0x123456);
         assert_eq!(U24::from_usize(0xffffff).unwrap().to_usize(), 0xffffff);
+    }
+
+    #[test]
+    fn index24_fits() {
+        assert!(TypeIdx::from_aot(aot_ir::TypeIdx::new(0)).is_ok());
+        assert!(TypeIdx::from_aot(aot_ir::TypeIdx::new(1)).is_ok());
+        assert!(TypeIdx::from_aot(aot_ir::TypeIdx::new(0x1234)).is_ok());
+        assert!(TypeIdx::from_aot(aot_ir::TypeIdx::new(0x123456)).is_ok());
+        assert!(TypeIdx::from_aot(aot_ir::TypeIdx::new(0xffffff)).is_ok());
+    }
+
+    #[test]
+    fn index24_doesnt_fit() {
+        assert!(TypeIdx::from_aot(aot_ir::TypeIdx::new(0x1000000)).is_err());
+        assert!(TypeIdx::from_aot(aot_ir::TypeIdx::new(0x1234567)).is_err());
+        assert!(TypeIdx::from_aot(aot_ir::TypeIdx::new(0xeddedde)).is_err());
+        assert!(TypeIdx::from_aot(aot_ir::TypeIdx::new(usize::MAX)).is_err());
+    }
+
+    #[test]
+    fn index16_fits() {
+        assert!(ExtraArgsIdx::new(0).is_ok());
+        assert!(ExtraArgsIdx::new(1).is_ok());
+        assert!(ExtraArgsIdx::new(0x1234).is_ok());
+        assert!(ExtraArgsIdx::new(0xffff).is_ok());
+    }
+
+    #[test]
+    fn index16_doesnt_fit() {
+        assert!(ExtraArgsIdx::new(0x10000).is_err());
+        assert!(ExtraArgsIdx::new(0x12345).is_err());
+        assert!(ExtraArgsIdx::new(0xffffff).is_err());
+        assert!(ExtraArgsIdx::new(usize::MAX).is_err());
     }
 }
