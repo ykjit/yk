@@ -1,3 +1,4 @@
+// ignore-if: test $YK_CARGO_PROFILE != "debug"
 // Run-time:
 //   env-var: YKD_PRINT_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
@@ -5,7 +6,7 @@
 //     ...
 //     define ptr @__yk_compiled_trace_0(...
 //     entry:
-//       ; main() c/debug_debuginfo.c:27:5
+//       ; main() c/debuginfo.c:28:5
 //       ...
 
 // Check that debug information is included in module prints.

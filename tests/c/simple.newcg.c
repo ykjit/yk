@@ -1,3 +1,4 @@
+// ignore-if: test YK_JIT_COMPILER != "yk"
 // Run-time:
 //   env-var: YKD_PRINT_IR=aot
 //   env-var: YKD_SERIALISE_COMPILATION=1

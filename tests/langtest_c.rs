@@ -7,7 +7,6 @@ use std::{
     fs::read_to_string,
     path::{Path, PathBuf},
     process::Command,
-    sync::LazyLock,
 };
 use tempfile::TempDir;
 use tests::{mk_compiler, EXTRA_LINK};
@@ -15,73 +14,8 @@ use ykbuild::{completion_wrapper::CompletionWrapper, ykllvm_bin};
 
 const COMMENT: &str = "//";
 
-static NEW_CODEGEN: LazyLock<bool> = LazyLock::new(|| {
-    if let Ok(val) = env::var("YKD_NEW_CODEGEN") {
-        if val == "1" {
-            return true;
-        }
-    }
-    false
-});
-
-static SUPPORTED_CPU_ARCHES: [&str; 1] = ["x86_64"];
-
-/// Transitionary hack to allow the LLVM and new codegen to co-exist.
-///
-/// Once the new codegen is complete we can kill this.
-fn correct_codegen_for_test(p: &Path) -> bool {
-    let fname = p.file_name().unwrap().to_str().unwrap();
-    if *NEW_CODEGEN {
-        fname.contains(".newcg.")
-    } else {
-        !fname.contains(".newcg.")
-    }
-}
-
-/// Get string name for the current CPU architecture.
-fn arch() -> &'static str {
-    if cfg!(target_arch = "x86_64") {
-        "x86_64"
-    } else {
-        panic!("unknown CPU architecture");
-    }
-}
-
-/// Check if we are on the right CPU for a test.
-fn correct_cpu_arch(p: &Path) -> bool {
-    let my_arch = arch();
-    let other_arches = SUPPORTED_CPU_ARCHES.iter().filter(|a| *a != &my_arch);
-    let p = p.to_str().unwrap();
-    for oa in other_arches {
-        if p.contains(oa) {
-            return false;
-        }
-    }
-    return true;
-}
-
 fn run_suite(opt: &'static str) {
     println!("Running C tests with opt level {}...", opt);
-
-    fn is_c(p: &Path) -> bool {
-        p.extension().as_ref().and_then(|p| p.to_str()) == Some("c")
-    }
-
-    // Tests with the filename prefix `debug_` are only run in debug builds.
-    #[cfg(cargo_profile = "release")]
-    let filter = |p: &Path| {
-        is_c(p)
-            && correct_cpu_arch(p)
-            && correct_codegen_for_test(p)
-            && !p
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .starts_with("debug_")
-    };
-    #[cfg(cargo_profile = "debug")]
-    let filter = |p: &Path| is_c(p) && correct_cpu_arch(p) && correct_codegen_for_test(p);
 
     let tempdir = TempDir::new().unwrap();
 
@@ -91,6 +25,33 @@ fn run_suite(opt: &'static str) {
         env::set_var(k, v);
     }
     let wrapper_path = ccg.wrapper_path();
+
+    // Set variables for tests `ignore-if`s.
+    #[cfg(cargo_profile = "debug")]
+    env::set_var("YK_CARGO_PROFILE", "debug");
+    #[cfg(cargo_profile = "release")]
+    env::set_var("YK_CARGO_PROFILE", "release");
+
+    #[cfg(target_arch = "x86_64")]
+    env::set_var("YK_ARCH", "x86_64");
+    #[cfg(not(target_arch = "x86_64"))]
+    panic!("Unknown target_arch");
+
+    let filter = match env::var("YKD_NEW_CODEGEN") {
+        Ok(x) if x == "1" => {
+            env::set_var("YK_JIT_COMPILER", "yk");
+            |p: &Path| {
+                // A temporary hack because at the moment virtually no tests run on the new JIT
+                // compiler.
+                p.extension().as_ref().and_then(|p| p.to_str()) == Some("c")
+                    && p.file_name().unwrap().to_str().unwrap().contains(".newcg")
+            }
+        }
+        _ => {
+            env::set_var("YK_JIT_COMPILER", "llvm");
+            |p: &Path| p.extension().as_ref().and_then(|p| p.to_str()) == Some("c")
+        }
+    };
 
     LangTester::new()
         .comment_prefix("#")
