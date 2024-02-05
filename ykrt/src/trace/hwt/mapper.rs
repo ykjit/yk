@@ -134,7 +134,21 @@ impl HWTMapper {
     ) -> Result<Vec<TracedAOTBlock>, Box<dyn Error>> {
         let mut ret: Vec<TracedAOTBlock> = Vec::new();
 
-        for (i, block) in trace.iter_blocks().enumerate() {
+        let mut trace_iter = trace.iter_blocks();
+        // The first block contains the control point so we need to remove that.
+        match trace_iter.next() {
+            Some(Ok(x)) => {
+                // As a rough proxy for "check that we removed only the thing we want to remove",
+                // we know that the control point will be contained in a single mappable block.
+                assert!(matches!(
+                    self.map_block(&x).as_slice(),
+                    &[Some(TracedAOTBlock::Mapped { .. })]
+                ));
+            }
+            _ => unreachable!(),
+        }
+
+        for (i, block) in trace_iter.enumerate() {
             if i > crate::mt::DEFAULT_TRACE_TOO_LONG {
                 return Err("Trace too long".into());
             }
