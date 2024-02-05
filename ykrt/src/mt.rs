@@ -25,7 +25,7 @@ use std::sync::LazyLock;
 #[cfg(feature = "yk_jitstate_debug")]
 use crate::print_jit_state;
 use crate::{
-    compile::{default_compiler, CompiledTrace, Compiler, GuardId},
+    compile::{default_compiler, CompilationError, CompiledTrace, Compiler, GuardId},
     location::{HotLocation, HotLocationKind, Location, TraceFailed},
     trace::{default_tracer, TraceCollector, TraceIterator, Tracer},
     ykstats::{TimingState, YkStats},
@@ -518,14 +518,13 @@ impl MT {
                     }
                     mt.stats.trace_compiled_ok();
                 }
-                Err(_) => {
+                Err(CompilationError::Temporary(_e)) => {
                     mt.stats.trace_compiled_err();
                     hl_arc.lock().trace_failed(&mt);
-                    // FIXME: Improve jit-state message.
-                    // See: https://github.com/ykjit/yk/issues/611
                     #[cfg(feature = "yk_jitstate_debug")]
-                    print_jit_state("trace-compilation-aborted");
+                    print_jit_state(&format!("trace-compilation-aborted<reason=\"{}\">", _e));
                 }
+                Err(CompilationError::Unrecoverable(e)) => panic!("{}", e),
             }
 
             mt.stats.timing_state(TimingState::None);
