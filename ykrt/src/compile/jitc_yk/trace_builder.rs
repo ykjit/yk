@@ -63,7 +63,7 @@ impl<'a> TraceBuilder<'a> {
             if inst.is_store() {
                 last_store = Some(inst);
             }
-            if inst.is_gep() {
+            if inst.is_ptr_add() {
                 let op = inst.operand(0);
                 // unwrap safe: we know the AOT code was produced by ykllvm.
                 if trace_input

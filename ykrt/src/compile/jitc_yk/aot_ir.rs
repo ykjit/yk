@@ -127,13 +127,13 @@ pub(crate) enum Opcode {
     Store,
     Alloca,
     Call,
-    GetElementPtr,
     Br,
     CondBr,
     Icmp,
     BinaryOperator,
     Ret,
     InsertValue,
+    PtrAdd,
     Unimplemented = 255,
 }
 
@@ -381,8 +381,8 @@ impl Instruction {
         self.opcode == Opcode::Store
     }
 
-    pub(crate) fn is_gep(&self) -> bool {
-        self.opcode == Opcode::GetElementPtr
+    pub(crate) fn is_ptr_add(&self) -> bool {
+        self.opcode == Opcode::PtrAdd
     }
 
     pub(crate) fn is_control_point(&self, aot_mod: &Module) -> bool {
@@ -1029,7 +1029,7 @@ mod tests {
         // type_idx:
         write_native_usize(&mut data, 2);
         // opcode:
-        data.write_u8(Opcode::GetElementPtr as u8).unwrap();
+        data.write_u8(Opcode::PtrAdd as u8).unwrap();
         // num_operands:
         data.write_u32::<NativeEndian>(1).unwrap();
         // OPERAND 0
@@ -1207,7 +1207,7 @@ func foo($arg0: ptr, $arg1: i32) -> i32 {
     condbr $0_0, bb0, bb1
   bb1:
     ?inst<%3 = some_llvm_instruction ...>
-    $1_1: ptr = getelementptr -1i32
+    $1_1: ptr = ptradd -1i32
     $1_2: ptr = alloca i32, 50i32
     $1_3: ptr = call bar(50i32, 50i32)
     br

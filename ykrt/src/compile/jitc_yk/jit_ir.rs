@@ -212,6 +212,7 @@ pub enum Instruction {
     Load(LoadInstruction),
     LoadArg(LoadArgInstruction),
     Call(CallInstruction),
+    PtrAdd(PtrAddInstruction),
 }
 
 impl Instruction {
@@ -221,6 +222,7 @@ impl Instruction {
             Self::Load(..) => true,
             Self::LoadArg(..) => true,
             Self::Call(..) => true, // FIXME: May or may not define. Ask func sig.
+            Self::PtrAdd(..) => true,
         }
     }
 }
@@ -231,6 +233,7 @@ impl fmt::Display for Instruction {
             Self::Load(i) => write!(f, "{}", i),
             Self::LoadArg(i) => write!(f, "{}", i),
             Self::Call(i) => write!(f, "{}", i),
+            Self::PtrAdd(i) => write!(f, "{}", i),
         }
     }
 }
@@ -248,6 +251,7 @@ macro_rules! instr {
 instr!(Load, LoadInstruction);
 instr!(LoadArg, LoadArgInstruction);
 instr!(Call, CallInstruction);
+instr!(PtrAdd, PtrAddInstruction);
 
 /// The operands for a [Instruction::Load]
 ///
@@ -377,6 +381,37 @@ impl CallInstruction {
         } else {
             Some(jit_mod.extra_args[usize::from(self.extra.0) + idx - 1].clone())
         }
+    }
+}
+
+/// A pointer offsetting instruction.
+///
+/// # Semantics
+///
+/// Returns a pointer value that is the result of adding the specified (byte) offset to the input
+/// pointer operand.
+#[derive(Debug)]
+#[repr(packed)]
+pub struct PtrAddInstruction {
+    /// The pointer to offset
+    ptr: PackedOperand,
+    /// The offset.
+    off: u32,
+}
+
+impl PtrAddInstruction {
+    fn ptr(&self) -> Operand {
+        let ptr = self.ptr;
+        ptr.get()
+    }
+    fn offset(&self) -> u32 {
+        self.off
+    }
+}
+
+impl fmt::Display for PtrAddInstruction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "PtrAdd {}, {}", self.ptr(), self.offset())
     }
 }
 
