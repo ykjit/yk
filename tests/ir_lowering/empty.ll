@@ -3,6 +3,7 @@
 ;     # IR format version: 0
 ;     # Num funcs: 1
 ;     # Num consts: 0
+;     # Num globals: 0
 ;     # Num types: 2
 ;
 ;     func main() {

@@ -75,6 +75,12 @@ index!(InstrIdx);
 pub(crate) struct ConstIdx(usize);
 index!(ConstIdx);
 
+/// A global variable index.
+#[deku_derive(DekuRead)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct GlobalIdx(usize);
+index!(GlobalIdx);
+
 /// A function argument index.
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -258,12 +264,32 @@ impl IRDisplay for ArgOperand {
     }
 }
 
+/// An operand that describes a global variable.
+#[deku_derive(DekuRead)]
+#[derive(Debug)]
+pub(crate) struct GlobalOperand {
+    global_idx: GlobalIdx,
+}
+
+impl GlobalOperand {
+    pub(crate) fn index(&self) -> GlobalIdx {
+        self.global_idx
+    }
+}
+
+impl IRDisplay for GlobalOperand {
+    fn to_str(&self, m: &Module) -> String {
+        m.globals[self.global_idx].to_str(m)
+    }
+}
+
 const OPKIND_CONST: u8 = 0;
 const OPKIND_LOCAL_VARIABLE: u8 = 1;
 const OPKIND_TYPE: u8 = 2;
 const OPKIND_FUNCTION: u8 = 3;
 const OPKIND_BLOCK: u8 = 4;
 const OPKIND_ARG: u8 = 5;
+const OPKIND_GLOBAL: u8 = 6;
 const OPKIND_UNIMPLEMENTED: u8 = 255;
 
 #[deku_derive(DekuRead)]
@@ -282,6 +308,8 @@ pub(crate) enum Operand {
     Block(BlockOperand),
     #[deku(id = "OPKIND_ARG")]
     Arg(ArgOperand),
+    #[deku(id = "OPKIND_GLOBAL")]
+    Global(GlobalOperand),
     #[deku(id = "OPKIND_UNIMPLEMENTED")]
     Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")] String),
 }
@@ -323,6 +351,7 @@ impl IRDisplay for Operand {
             Self::Type(t) => m.types[t.type_idx].to_str(m),
             Self::Function(f) => m.funcs[f.func_idx].name.to_owned(),
             Self::Block(bb) => bb.to_str(m),
+            Self::Global(g) => g.to_str(m),
             Self::Arg(a) => a.to_str(m),
             Self::Unimplemented(s) => format!("?op<{}>", s),
         }
@@ -744,6 +773,21 @@ impl IRDisplay for Constant {
     }
 }
 
+/// A constant.
+#[deku_derive(DekuRead)]
+#[derive(Debug)]
+pub(crate) struct Global {
+    is_threadlocal: bool,
+    #[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")]
+    name: String,
+}
+
+impl IRDisplay for Global {
+    fn to_str(&self, _m: &Module) -> String {
+        format!("Global({}, tls={})", self.name, self.is_threadlocal)
+    }
+}
+
 /// A bytecode module.
 ///
 /// This is the top-level container for the bytecode.
@@ -762,6 +806,10 @@ pub(crate) struct Module {
     num_consts: usize,
     #[deku(count = "num_consts", map = "deserialise_into_ti_vec")]
     consts: TiVec<ConstIdx, Constant>,
+    #[deku(temp)]
+    num_globals: usize,
+    #[deku(count = "num_globals", map = "deserialise_into_ti_vec")]
+    globals: TiVec<GlobalIdx, Global>,
     #[deku(temp)]
     num_types: usize,
     #[deku(count = "num_types", map = "deserialise_into_ti_vec")]
@@ -861,6 +909,7 @@ impl Module {
         ret.push_str(&format!("# IR format version: {}\n", self.version));
         ret.push_str(&format!("# Num funcs: {}\n", self.funcs.len()));
         ret.push_str(&format!("# Num consts: {}\n", self.consts.len()));
+        ret.push_str(&format!("# Num globals: {}\n", self.globals.len()));
         ret.push_str(&format!("# Num types: {}\n", self.types.len()));
 
         for func in &self.funcs {
@@ -1129,6 +1178,16 @@ mod tests {
         // bytes:
         data.write_u32::<NativeEndian>(50).unwrap();
 
+        // GLOBALS
+        // num_globals:
+        write_native_usize(&mut data, 1);
+
+        // GLOBAL 1
+        // is_threadlocal:
+        let _ = data.write_u8(0);
+        // name:
+        write_str(&mut data, "aaa");
+
         // TYPES
         // num_types:
         write_native_usize(&mut data, 7);
@@ -1198,6 +1257,7 @@ mod tests {
 # IR format version: 0
 # Num funcs: 2
 # Num consts: 3
+# Num globals: 1
 # Num types: 7
 
 func foo($arg0: ptr, $arg1: i32) -> i32 {
