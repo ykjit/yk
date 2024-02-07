@@ -95,6 +95,7 @@ impl<'a> TraceBuilder<'a> {
             let jit_inst = match inst.opcode() {
                 aot_ir::Opcode::Load => self.handle_load(inst),
                 aot_ir::Opcode::Call => self.handle_call(inst),
+                aot_ir::Opcode::Store => self.handle_store(inst),
                 _ => todo!("{:?}", inst),
             }?;
 
@@ -161,6 +162,15 @@ impl<'a> TraceBuilder<'a> {
             args.push(self.handle_operand(arg)?);
         }
         Ok(jit_ir::CallInstruction::new(&mut self.jit_mod, inst.callee(), &args)?.into())
+    }
+
+    fn handle_store(
+        &mut self,
+        inst: &aot_ir::Instruction,
+    ) -> Result<jit_ir::Instruction, CompilationError> {
+        let val = self.handle_operand(inst.operand(0))?;
+        let ptr = self.handle_operand(inst.operand(1))?;
+        Ok(jit_ir::StoreInstruction::new(val, ptr).into())
     }
 
     /// Entry point for building an IR trace.

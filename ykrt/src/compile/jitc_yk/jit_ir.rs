@@ -213,6 +213,7 @@ pub enum Instruction {
     LoadArg(LoadArgInstruction),
     Call(CallInstruction),
     PtrAdd(PtrAddInstruction),
+    Store(StoreInstruction),
 }
 
 impl Instruction {
@@ -223,6 +224,7 @@ impl Instruction {
             Self::LoadArg(..) => true,
             Self::Call(..) => true, // FIXME: May or may not define. Ask func sig.
             Self::PtrAdd(..) => true,
+            Self::Store(..) => false,
         }
     }
 }
@@ -234,6 +236,7 @@ impl fmt::Display for Instruction {
             Self::LoadArg(i) => write!(f, "{}", i),
             Self::Call(i) => write!(f, "{}", i),
             Self::PtrAdd(i) => write!(f, "{}", i),
+            Self::Store(i) => write!(f, "{}", i),
         }
     }
 }
@@ -249,6 +252,7 @@ macro_rules! instr {
 }
 
 instr!(Load, LoadInstruction);
+instr!(Store, StoreInstruction);
 instr!(LoadArg, LoadArgInstruction);
 instr!(Call, CallInstruction);
 instr!(PtrAdd, PtrAddInstruction);
@@ -381,6 +385,36 @@ impl CallInstruction {
         } else {
             Some(jit_mod.extra_args[usize::from(self.extra.0) + idx - 1].clone())
         }
+    }
+}
+
+/// The operands for a [Instruction::Store]
+///
+/// # Semantics
+///
+/// Stores a value into a pointer.
+///
+#[derive(Debug)]
+pub struct StoreInstruction {
+    /// The value to store.
+    val: PackedOperand,
+    /// The pointer to store into.
+    ptr: PackedOperand,
+}
+
+impl StoreInstruction {
+    pub(crate) fn new(val: Operand, ptr: Operand) -> Self {
+        // FIXME: assert type of pointer
+        Self {
+            val: PackedOperand::new(&val),
+            ptr: PackedOperand::new(&ptr),
+        }
+    }
+}
+
+impl fmt::Display for StoreInstruction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Store {}, {}", self.val.get(), self.ptr.get())
     }
 }
 
