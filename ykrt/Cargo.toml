@@ -23,6 +23,8 @@ yktracec = { path = "../yktracec" }
 static_assertions = "1.1.0"
 typed-index-collections = "3.1.0"
 thiserror = "1.0.56"
+dynasmrt = "2.0.0"
+iced-x86 = { version = "1.21.0", features = ["decoder", "std"] }
 
 [dependencies.llvm-sys]
 # note: using a git version to get llvm linkage features in llvm-sys (not in a
@@ -46,4 +48,5 @@ yk_jitstate_debug = []
 yk_testing = []
 
 [dev-dependencies]
+fm = "0.2.2"
 num-traits = "0.2.16"

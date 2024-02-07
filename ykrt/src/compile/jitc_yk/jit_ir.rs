@@ -63,6 +63,13 @@ fn index_overflow(typ: &str) -> CompilationError {
 macro_rules! index_24bit {
     ($struct:ident) => {
         impl $struct {
+            #[cfg(test)]
+            pub(crate) fn new(v: usize) -> Result<Self, CompilationError> {
+                U24::from_usize(v)
+                    .ok_or(index_overflow(stringify!($struct)))
+                    .map(|u| Self(u))
+            }
+
             /// Convert an AOT index to a reduced-size JIT index (if possible).
             pub(crate) fn from_aot(aot_idx: aot_ir::$struct) -> Result<$struct, CompilationError> {
                 U24::from_usize(usize::from(aot_idx))
@@ -90,6 +97,12 @@ macro_rules! index_16bit {
 
             pub(crate) fn to_u16(&self) -> u16 {
                 self.0.into()
+            }
+        }
+
+        impl From<$struct> for usize {
+            fn from(s: $struct) -> usize {
+                s.0.into()
             }
         }
     };
@@ -141,6 +154,13 @@ index_24bit!(GlobalIdx);
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 pub(crate) struct InstrIdx(u16);
 index_16bit!(InstrIdx);
+
+impl InstrIdx {
+    /// Return a reference to the instruction indentified by `self` in `jit_mod`.
+    pub(crate) fn instr<'a>(&'a self, jit_mod: &'a Module) -> &Instruction {
+        jit_mod.instr(*self)
+    }
+}
 
 /// The packed representation of an instruction operand.
 ///
@@ -236,6 +256,12 @@ impl Instruction {
             Self::StoreGlobal(..) => false,
         }
     }
+
+    /// Returns the size (in bytes) of the value that this instruction generates.
+    pub(crate) fn def_abi_size(&self) -> usize {
+        debug_assert!(self.is_def());
+        8 // FIXME
+    }
 }
 
 impl fmt::Display for Instruction {
@@ -285,6 +311,7 @@ pub struct LoadInstruction {
 }
 
 impl LoadInstruction {
+    // FIXME: why do we need to provide a type index? Can't we get that from the operand?
     pub(crate) fn new(op: Operand, ty_idx: TypeIdx) -> LoadInstruction {
         LoadInstruction {
             op: PackedOperand::new(&op),
@@ -547,7 +574,7 @@ pub(crate) struct Module {
     /// The name of the module and the eventual symbol name for the JITted code.
     name: String,
     /// The IR trace as a linear sequence of instructions.
-    instrs: Vec<Instruction>,
+    instrs: Vec<Instruction>, // FIXME: this should be a TiVec.
     /// The extra argument table.
     ///
     /// Used when a [CallInstruction]'s arguments don't fit inline.
@@ -571,6 +598,11 @@ impl Module {
         }
     }
 
+    /// Return the instruction at the specified index.
+    pub(crate) fn instr(&self, idx: InstrIdx) -> &Instruction {
+        &self.instrs[usize::try_from(idx).unwrap()]
+    }
+
     /// Push an instruction to the end of the [Module].
     pub(crate) fn push(&mut self, instr: Instruction) {
         self.instrs.push(instr);
@@ -584,6 +616,11 @@ impl Module {
     /// Print the [Module] to `stderr`.
     pub(crate) fn dump(&self) {
         eprintln!("{}", self);
+    }
+
+    /// Returns a reference to the instruction stream.
+    pub(crate) fn instrs(&self) -> &Vec<Instruction> {
+        &self.instrs
     }
 
     /// Push a slice of extra arguments into the extra arg table.
