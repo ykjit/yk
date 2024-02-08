@@ -40,7 +40,8 @@ uint64_t getNewTraceIdx() {
 #define JITFUNC_ARG_COMPILEDTRACE_IDX 1
 #define JITFUNC_ARG_FRAMEADDR_IDX 2
 
-const char *PromoteRecFnName = "__yk_promote";
+/// Any function with this prefix will be considered as a promotion function.
+const char *PromoteRecFnPrefix = "__yk_promote_";
 
 #define YK_OUTLINE_FNATTR "yk_outline"
 
@@ -1255,7 +1256,7 @@ public:
                               CurInstrIdx);
               break;
             }
-          } else if (CF->getName() == PromoteRecFnName) {
+          } else if (CF->getName().starts_with(PromoteRecFnPrefix)) {
             // A value is being promoted to a constant.
             handlePromote(CI, BB, CurBBIdx, CurInstrIdx);
             break;
