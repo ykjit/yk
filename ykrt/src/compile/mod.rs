@@ -1,7 +1,7 @@
 use crate::{
     location::HotLocation,
     mt::{SideTraceInfo, MT},
-    trace::TracedAOTBlock,
+    trace::TraceIterator,
 };
 use libc::c_void;
 use parking_lot::Mutex;
@@ -41,7 +41,7 @@ pub(crate) trait Compiler: Send + Sync {
     fn compile(
         &self,
         mt: Arc<MT>,
-        irtrace: Vec<TracedAOTBlock>,
+        aottrace_iter: Box<dyn TraceIterator>,
         sti: Option<SideTraceInfo>,
         hl: Arc<Mutex<HotLocation>>,
     ) -> Result<CompiledTrace, CompilationError>;

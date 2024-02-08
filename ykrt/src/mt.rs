@@ -484,7 +484,6 @@ impl MT {
         let mt = Arc::clone(self);
         let do_compile = move || {
             mt.stats.timing_state(TimingState::TraceMapping);
-            let irtrace = trace_iter.collect::<Vec<_>>();
             debug_assert!(
                 sidetrace.is_none() || matches!(hl_arc.lock().kind, HotLocationKind::Compiled(_))
             );
@@ -497,7 +496,7 @@ impl MT {
             let guardid = sidetrace.as_ref().map(|x| x.0.guardid);
             match compiler.compile(
                 Arc::clone(&mt),
-                irtrace,
+                trace_iter,
                 sidetrace.as_ref().map(|x| x.0),
                 Arc::clone(&hl_arc),
             ) {

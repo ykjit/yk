@@ -5,7 +5,7 @@ use crate::{
     compile::{CompilationError, CompiledTrace, Compiler},
     location::HotLocation,
     mt::{SideTraceInfo, MT},
-    trace::TracedAOTBlock,
+    trace::{TraceIterator, TracedAOTBlock},
 };
 use object::{Object, ObjectSection};
 use parking_lot::Mutex;
@@ -32,10 +32,11 @@ impl Compiler for JITCLLVM {
     fn compile(
         &self,
         mt: Arc<MT>,
-        irtrace: Vec<TracedAOTBlock>,
+        aottrace_iter: Box<dyn TraceIterator>,
         sti: Option<SideTraceInfo>,
         hl: Arc<Mutex<HotLocation>>,
     ) -> Result<CompiledTrace, CompilationError> {
+        let irtrace = aottrace_iter.collect::<Vec<_>>();
         let (func_names, bbs, trace_len) = self.encode_trace(&irtrace);
 
         let llvmbc = llvmbc_section();

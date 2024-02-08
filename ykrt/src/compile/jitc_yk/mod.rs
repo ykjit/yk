@@ -5,7 +5,7 @@ use crate::{
     compile::{CompiledTrace, Compiler},
     location::HotLocation,
     mt::{SideTraceInfo, MT},
-    trace::TracedAOTBlock,
+    trace::TraceIterator,
 };
 use parking_lot::Mutex;
 use std::{
@@ -60,7 +60,7 @@ impl Compiler for JITCYk {
     fn compile(
         &self,
         _mt: Arc<MT>,
-        mtrace: Vec<TracedAOTBlock>,
+        aottrace_iter: Box<dyn TraceIterator>,
         sti: Option<SideTraceInfo>,
         _hl: Arc<Mutex<HotLocation>>,
     ) -> Result<CompiledTrace, CompilationError> {
@@ -77,6 +77,7 @@ impl Compiler for JITCYk {
             eprintln!("--- End aot ---");
         }
 
+        let mtrace = aottrace_iter.collect::<Vec<_>>();
         let jit_mod = trace_builder::build(&aot_mod, &mtrace)?;
 
         if PHASES_TO_PRINT.contains(&IRPhase::PreOpt) {
