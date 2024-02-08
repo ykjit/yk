@@ -196,6 +196,16 @@ impl HWTMapper {
                 }
             }
         }
+
+        // The last block contains pointless unmappable code (the stop tracing call).
+        match ret.pop() {
+            Some(x) => {
+                // This is a rough proxy for "check that we removed only the thing we want to
+                // remove".
+                assert!(matches!(x, TracedAOTBlock::Unmappable));
+            }
+            _ => unreachable!(),
+        }
         Ok(ret)
     }
 }

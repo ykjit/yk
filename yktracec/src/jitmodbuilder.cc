@@ -1293,7 +1293,7 @@ public:
           continue;
         }
 
-        if (Idx > 0 && Idx < InpTrace.Length() - 1) {
+        if (Idx < InpTrace.Length()) {
           // Stores into YkCtrlPointVars only need to be copied if they appear
           // at the beginning or end of the trace. Any YkCtrlPointVars stores
           // inbetween come from tracing over the control point and aren't
@@ -1314,8 +1314,7 @@ public:
                 I++;
                 CurInstrIdx++;
               }
-              assert(InpTrace.Length() > 2);
-              if (Idx == InpTrace.Length() - 2) {
+              if (Idx == InpTrace.Length() - 1) {
                 // Once we reached the YkCtrlPointVars stores at the end of the
                 // trace, we're done. We don't need to copy those instructions
                 // over, since all YkCtrlPointVars are stored on the shadow
