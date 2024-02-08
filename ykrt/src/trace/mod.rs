@@ -41,11 +41,11 @@ pub(crate) fn default_tracer() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
 pub(crate) trait TraceCollector {
     /// Stop collecting a trace of the current thread and return an iterator which successively
     /// produces the traced blocks.
-    fn stop_collector(self: Box<Self>) -> Result<Box<dyn TraceIterator>, InvalidTraceError>;
+    fn stop_collector(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, InvalidTraceError>;
 }
 
 /// An iterator which takes an underlying raw trace and successively produces [TracedAOTBlock]s.
-pub(crate) trait TraceIterator: Iterator<Item = TracedAOTBlock> + Send {}
+pub(crate) trait AOTTraceIterator: Iterator<Item = TracedAOTBlock> + Send {}
 
 /// An AOT LLVM IR block that has been traced at JIT time.
 #[derive(Debug, Eq, PartialEq)]
