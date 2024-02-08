@@ -108,13 +108,6 @@ fn deserialise_into_ti_vec<I, T>(v: Vec<T>) -> Result<TiVec<I, T>, DekuError> {
 pub(crate) trait IRDisplay {
     /// Return a human-readable string.
     fn to_str(&self, m: &Module) -> String;
-
-    /// Print myself to stderr in human-readable form.
-    ///
-    /// This is provided as a debugging convenience.
-    fn dump(&self, m: &Module) {
-        eprintln!("{}", self.to_str(m));
-    }
 }
 
 /// An instruction opcode.
