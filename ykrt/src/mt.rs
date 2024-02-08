@@ -27,7 +27,7 @@ use crate::print_jit_state;
 use crate::{
     compile::{default_compiler, CompilationError, CompiledTrace, Compiler, GuardId},
     location::{HotLocation, HotLocationKind, Location, TraceFailed},
-    trace::{default_tracer, TraceCollector, TraceIterator, Tracer},
+    trace::{default_tracer, AOTTraceIterator, TraceCollector, Tracer},
     ykstats::{TimingState, YkStats},
 };
 use yktracec::promote;
@@ -476,7 +476,7 @@ impl MT {
     ///     in the `hl_arc`.
     fn queue_compile_job(
         self: &Arc<Self>,
-        trace_iter: Box<dyn TraceIterator>,
+        trace_iter: Box<dyn AOTTraceIterator>,
         hl_arc: Arc<Mutex<HotLocation>>,
         sidetrace: Option<(SideTraceInfo, Arc<CompiledTrace>)>,
     ) {

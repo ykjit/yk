@@ -1,6 +1,6 @@
 //! Hardware tracing via hwtracer.
 
-use super::{errors::InvalidTraceError, TraceCollector, TraceIterator, TracedAOTBlock};
+use super::{errors::InvalidTraceError, AOTTraceIterator, TraceCollector, TracedAOTBlock};
 use std::{error::Error, sync::Arc};
 
 pub(crate) mod mapper;
@@ -33,7 +33,7 @@ struct HWTTraceCollector {
 }
 
 impl TraceCollector for HWTTraceCollector {
-    fn stop_collector(self: Box<Self>) -> Result<Box<dyn TraceIterator>, InvalidTraceError> {
+    fn stop_collector(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, InvalidTraceError> {
         let tr = self.thread_tracer.stop_collector().unwrap();
         let mut mt = HWTMapper::new();
         let mapped = mt
@@ -53,7 +53,7 @@ struct HWTTraceIterator {
     trace: std::vec::IntoIter<TracedAOTBlock>,
 }
 
-impl TraceIterator for HWTTraceIterator {}
+impl AOTTraceIterator for HWTTraceIterator {}
 
 impl Iterator for HWTTraceIterator {
     type Item = TracedAOTBlock;

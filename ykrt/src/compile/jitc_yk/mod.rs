@@ -5,7 +5,7 @@ use crate::{
     compile::{CompiledTrace, Compiler},
     location::HotLocation,
     mt::{SideTraceInfo, MT},
-    trace::TraceIterator,
+    trace::AOTTraceIterator,
 };
 use parking_lot::Mutex;
 use std::{
@@ -60,7 +60,7 @@ impl Compiler for JITCYk {
     fn compile(
         &self,
         _mt: Arc<MT>,
-        aottrace_iter: Box<dyn TraceIterator>,
+        aottrace_iter: Box<dyn AOTTraceIterator>,
         sti: Option<SideTraceInfo>,
         _hl: Arc<Mutex<HotLocation>>,
     ) -> Result<CompiledTrace, CompilationError> {
