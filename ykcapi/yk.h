@@ -67,11 +67,9 @@ YkLocation yk_location_new(void);
 // will occur.
 void yk_location_drop(YkLocation);
 
-// Promote a value to a constant.
-//
-// Yk will attempt to promote the argument to a constant when the call is
-// traced and compiled. The call to `yk_promote()` itself is also omitted from
-// compiled traces.
+// Promote a value to a constant. This is a generic macro that will
+// automatically select the right `yk_promote` function to call based on the
+// type of the value passed.
 #define yk_promote(X) _Generic((X), size_t: __yk_promote_size_t)(X)
 void __yk_promote_size_t(size_t);
 
