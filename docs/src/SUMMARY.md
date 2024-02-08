@@ -4,8 +4,6 @@
 - [Using Yk](./user/index.md)
   - [Installation](./user/install.md)
   - [Available Interpreters](./user/interps.md)
-- [Internals]()
-  - [Intermediate Representation](./internals/ir.md)
 - [Development](./dev/index.md)
   - [Configuring the build](./dev/build_config.md)
   - [Run-time configuration](./dev/runtime_config.md)
