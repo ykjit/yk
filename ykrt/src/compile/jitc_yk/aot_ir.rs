@@ -111,7 +111,8 @@ pub(crate) trait IRDisplay {
 
     /// Print myself to stderr in human-readable form.
     ///
-    /// This is provided as a debugging convenience.
+    /// This isn't used during normal operation of the system: it is provided as a debugging aid.
+    #[allow(dead_code)]
     fn dump(&self, m: &Module) {
         eprintln!("{}", self.to_str(m));
     }
