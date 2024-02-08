@@ -40,7 +40,7 @@ uint64_t getNewTraceIdx() {
 #define JITFUNC_ARG_COMPILEDTRACE_IDX 1
 #define JITFUNC_ARG_FRAMEADDR_IDX 2
 
-const char *PromoteRecFnName = "__yk_promote";
+const char *PromoteRecFnName = "__yk_promote_size_t";
 
 #define YK_OUTLINE_FNATTR "yk_outline"
 

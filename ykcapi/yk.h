@@ -72,7 +72,7 @@ void yk_location_drop(YkLocation);
 // Yk will attempt to promote the argument to a constant when the call is
 // traced and compiled. The call to `yk_promote()` itself is also omitted from
 // compiled traces.
-#define yk_promote(X) __yk_promote(X)
-void __yk_promote(size_t);
+#define yk_promote(X) _Generic((X), size_t: __yk_promote_size_t)(X)
+void __yk_promote_size_t(size_t);
 
 #endif
