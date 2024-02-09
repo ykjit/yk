@@ -27,10 +27,10 @@ use crate::print_jit_state;
 use crate::{
     compile::{default_compiler, CompilationError, CompiledTrace, Compiler, GuardId},
     location::{HotLocation, HotLocationKind, Location, TraceFailed},
+    promote,
     trace::{default_tracer, AOTTraceIterator, TraceCollector, Tracer},
     ykstats::{TimingState, YkStats},
 };
-use yktracec::promote;
 
 // The HotThreshold must be less than a machine word wide for [`Location::Location`] to do its
 // pointer tagging thing. We therefore choose a type which makes this statically clear to
