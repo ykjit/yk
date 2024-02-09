@@ -27,13 +27,11 @@ regex = "1.9"
 tempfile = "3.9.0"
 ykbuild = { path = "../ykbuild" }
 ykrt = { path = "../ykrt", features = ["yk_testing", "yk_jitstate_debug"] }
-yktracec = { path = "../yktracec", features = ["yk_testing"] }
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }
 lang_tester = "0.8"
 ykcapi = { path = "../ykcapi", features = ["yk_testing"] }
-yktracec = { path = "../yktracec", features = ["yk_testing"] }
 ykrt = { path = "../ykrt", features = ["yk_testing", "yk_jitstate_debug"] }
 
 [build-dependencies]

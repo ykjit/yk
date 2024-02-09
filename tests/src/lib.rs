@@ -12,8 +12,6 @@ use std::{
 };
 use ykbuild::ykllvm_bin;
 
-pub use yktracec::promote::__yk_lookup_promote_usize;
-
 const TEMPDIR_SUBST: &str = "%%TEMPDIR%%";
 pub static EXTRA_LINK: LazyLock<HashMap<&'static str, Vec<ExtraLinkage>>> = LazyLock::new(|| {
     let mut map = HashMap::new();
