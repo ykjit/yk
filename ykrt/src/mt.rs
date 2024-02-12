@@ -27,7 +27,6 @@ use crate::print_jit_state;
 use crate::{
     compile::{default_compiler, CompilationError, CompiledTrace, Compiler, GuardId},
     location::{HotLocation, HotLocationKind, Location, TraceFailed},
-    promote,
     trace::{default_tracer, AOTTraceIterator, TraceCollector, Tracer},
     ykstats::{TimingState, YkStats},
 };
@@ -53,7 +52,9 @@ const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
 const DEFAULT_SIDETRACE_THRESHOLD: HotThreshold = 5;
 const DEFAULT_TRACE_FAILURE_THRESHOLD: TraceFailureThreshold = 5;
 
-thread_local! {static THREAD_MTTHREAD: MTThread = MTThread::new();}
+thread_local! {
+    pub(crate) static THREAD_MTTHREAD: MTThread = MTThread::new();
+}
 
 #[cfg(feature = "yk_testing")]
 static SERIALISE_COMPILATION: LazyLock<bool> = LazyLock::new(|| {
@@ -261,14 +262,12 @@ impl MT {
                 };
                 match Arc::clone(&tracer).start_collector() {
                     Ok(tt) => THREAD_MTTHREAD.with(|mtt| {
-                        promote::thread_record_enable(true);
                         *mtt.thread_tracer.borrow_mut() = Some(tt);
                     }),
                     Err(e) => todo!("{e:?}"),
                 }
             }
             TransitionControlPoint::StopTracing(hl_arc) => {
-                promote::thread_record_enable(false);
                 // Assuming no bugs elsewhere, the `unwrap` cannot fail, because `StartTracing`
                 // will have put a `Some` in the `Rc`.
                 let thrdtrcr = THREAD_MTTHREAD.with(|mtt| mtt.thread_tracer.take().unwrap());
@@ -285,7 +284,6 @@ impl MT {
                 }
             }
             TransitionControlPoint::StopSideTracing(hl_arc, sti, parent) => {
-                promote::thread_record_enable(false);
                 // Assuming no bugs elsewhere, the `unwrap` cannot fail, because `StartTracing`
                 // will have put a `Some` in the `Rc`.
                 let thrdtrcr = THREAD_MTTHREAD.with(|mtt| mtt.thread_tracer.take().unwrap());
@@ -476,7 +474,7 @@ impl MT {
     ///     in the `hl_arc`.
     fn queue_compile_job(
         self: &Arc<Self>,
-        trace_iter: Box<dyn AOTTraceIterator>,
+        trace_iter: (Box<dyn AOTTraceIterator>, Box<[usize]>),
         hl_arc: Arc<Mutex<HotLocation>>,
         sidetrace: Option<(SideTraceInfo, Arc<CompiledTrace>)>,
     ) {
@@ -557,7 +555,6 @@ impl MT {
                 };
                 match Arc::clone(&tracer).start_collector() {
                     Ok(tt) => THREAD_MTTHREAD.with(|mtt| {
-                        promote::thread_record_enable(true);
                         *mtt.thread_tracer.borrow_mut() = Some(tt);
                     }),
                     Err(e) => todo!("{e:?}"),
@@ -597,7 +594,7 @@ pub(crate) struct MTThread {
     /// When tracing is active, this will be `RefCell<Some(...)>`; when tracing is inactive
     /// `RefCell<None>`. We need to keep track of the [Tracer] used to start the [ThreadTracer], as
     /// trace mapping requires a reference to the [Tracer].
-    thread_tracer: RefCell<Option<Box<dyn TraceCollector>>>,
+    pub(crate) thread_tracer: RefCell<Option<Box<dyn TraceCollector>>>,
     // Raw pointers are neither send nor sync.
     _dont_send_or_sync_me: PhantomData<*mut ()>,
 }

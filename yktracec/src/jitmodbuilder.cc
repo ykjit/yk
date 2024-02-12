@@ -20,8 +20,6 @@
 using namespace llvm;
 using namespace std;
 
-extern "C" size_t __yk_lookup_promote_usize();
-
 // An atomic counter used to issue compiled traces with unique names.
 atomic<uint64_t> NextTraceIdx(0);
 uint64_t getNewTraceIdx() {
@@ -136,8 +134,13 @@ private:
   size_t Len;
 
 public:
-  InputTrace(char **FuncNames, size_t *BBs, size_t Len)
-      : FuncNames(FuncNames), BBs(BBs), Len(Len) {}
+  uintptr_t *Promotions;
+  size_t PromotionsLen;
+
+  InputTrace(char **FuncNames, size_t *BBs, size_t Len, uintptr_t *Promotions,
+             size_t PromotionsLen)
+      : FuncNames(FuncNames), BBs(BBs), Len(Len), Promotions(Promotions),
+        PromotionsLen(PromotionsLen) {}
   size_t Length() { return Len; }
 
   // Returns the optional IRBlock at index `Idx` in the trace. No value is
@@ -961,10 +964,10 @@ class JITModBuilder {
                 size_t TraceLen, CallInst *CPCI,
                 std::optional<std::tuple<size_t, CallInst *>> InitialResume,
                 Value *TraceInputs, void *CallStackPtr, void *AOTValsPtr,
-                size_t AOTValsLen)
+                size_t AOTValsLen, uintptr_t *Promotions, size_t PromotionsLen)
       : AOTMod(AOTMod), Builder(AOTMod->getContext()),
-        InpTrace(FuncNames, BBs, TraceLen), TraceInputs(TraceInputs),
-        ControlPointCallInst(CPCI) {
+        InpTrace(FuncNames, BBs, TraceLen, Promotions, PromotionsLen),
+        TraceInputs(TraceInputs), ControlPointCallInst(CPCI) {
     LLVMContext &Context = AOTMod->getContext();
     JITMod = new Module("", Context);
 
@@ -1033,19 +1036,22 @@ public:
   AOTInfo *LiveAOTArray = nullptr;
   size_t LiveAOTNum = 0;
   size_t GuardCount = 0;
+  // What position in the Promotions buffer are we currently at?
+  size_t PromotionsOff = 0;
 
   JITModBuilder(JITModBuilder &&);
 
   static JITModBuilder Create(Module *AOTMod, char *FuncNames[], size_t BBs[],
                               size_t TraceLen, void *CallStack,
-                              void *AOTValsPtr, size_t AOTValsLen) {
+                              void *AOTValsPtr, size_t AOTValsLen,
+                              uintptr_t *Promotions, size_t PromotionsLen) {
     CallInst *CPCI;
     Value *TI;
     size_t CPCIIdx;
     std::tie(CPCI, CPCIIdx, TI) = GetControlPointInfo(AOTMod);
     return JITModBuilder(AOTMod, FuncNames, BBs, TraceLen, CPCI,
                          make_tuple(CPCIIdx, CPCI), TI, CallStack, AOTValsPtr,
-                         AOTValsLen);
+                         AOTValsLen, Promotions, PromotionsLen);
   }
 
   // Generate the JIT module by "glueing together" blocks that the trace
@@ -1385,7 +1391,8 @@ public:
   void handlePromote(CallInst *CI, BasicBlock *BB, size_t CurBBIdx,
                      size_t CurInstrIdx) {
     // First lookup the constant value the trace is going to use.
-    uint64_t PConst = __yk_lookup_promote_usize();
+    assert(PromotionsOff < InpTrace.PromotionsLen);
+    uint64_t PConst = InpTrace.Promotions[PromotionsOff++];
     Value *PConstLL =
         Builder.getIntN(PointerSizedIntTy->getIntegerBitWidth(), PConst);
     Value *PromoteVar = CI->getArgOperand(0);
@@ -1428,9 +1435,11 @@ public:
 
 tuple<Module *, string, void *, size_t>
 createModule(Module *AOTMod, char *FuncNames[], size_t BBs[], size_t TraceLen,
-             void *CallStack, void *AOTValsPtr, size_t AOTValsLen) {
-  JITModBuilder JB = JITModBuilder::Create(AOTMod, FuncNames, BBs, TraceLen,
-                                           CallStack, AOTValsPtr, AOTValsLen);
+             void *CallStack, void *AOTValsPtr, size_t AOTValsLen,
+             uintptr_t *Promotions, size_t PromotionsLen) {
+  JITModBuilder JB =
+      JITModBuilder::Create(AOTMod, FuncNames, BBs, TraceLen, CallStack,
+                            AOTValsPtr, AOTValsLen, Promotions, PromotionsLen);
   auto JITMod = JB.createModule();
   return make_tuple(JITMod, std::move(JB.TraceName), JB.LiveAOTArray,
                     JB.GuardCount);
