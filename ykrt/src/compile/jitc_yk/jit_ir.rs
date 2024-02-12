@@ -340,18 +340,12 @@ impl LoadArgInstruction {
 pub struct LoadGlobalInstruction {
     /// The pointer to load from.
     global_idx: GlobalIdx,
-    /// The type of the pointee.
-    ty_idx: TypeIdx,
 }
 
 impl LoadGlobalInstruction {
-    pub(crate) fn new(
-        global_idx: aot_ir::GlobalIdx,
-        ty_idx: TypeIdx,
-    ) -> Result<Self, CompilationError> {
+    pub(crate) fn new(global_idx: aot_ir::GlobalIdx) -> Result<Self, CompilationError> {
         Ok(Self {
             global_idx: GlobalIdx::from_aot(global_idx)?,
-            ty_idx,
         })
     }
 }
@@ -380,7 +374,7 @@ pub struct CallInstruction {
 
 impl fmt::Display for CallInstruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "LoadArg")
+        write!(f, "Call")
     }
 }
 
@@ -520,8 +514,16 @@ impl PtrAddInstruction {
         let ptr = self.ptr;
         ptr.get()
     }
+
     fn offset(&self) -> u32 {
         self.off
+    }
+
+    pub(crate) fn new(ptr: Operand, off: u32) -> Self {
+        Self {
+            ptr: PackedOperand::new(&ptr),
+            off,
+        }
     }
 }
 

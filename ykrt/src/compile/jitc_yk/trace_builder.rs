@@ -96,6 +96,7 @@ impl<'a> TraceBuilder<'a> {
                 aot_ir::Opcode::Load => self.handle_load(inst),
                 aot_ir::Opcode::Call => self.handle_call(inst),
                 aot_ir::Opcode::Store => self.handle_store(inst),
+                aot_ir::Opcode::PtrAdd => self.handle_ptradd(inst),
                 _ => todo!("{:?}", inst),
             }?;
 
@@ -129,6 +130,15 @@ impl<'a> TraceBuilder<'a> {
                 let instridx = self.local_map[lvo.instr_id()];
                 jit_ir::Operand::Local(instridx)
             }
+            aot_ir::Operand::Constant(_co) => {
+                todo!()
+            }
+            aot_ir::Operand::Global(go) => {
+                let load = jit_ir::LoadGlobalInstruction::new(go.index())?;
+                let idx = self.next_instr_id()?;
+                self.jit_mod.push(load.into());
+                jit_ir::Operand::Local(idx)
+            }
             aot_ir::Operand::Unimplemented(_) => {
                 // FIXME: for now we push an arbitrary constant.
                 let constidx = self
@@ -149,7 +159,7 @@ impl<'a> TraceBuilder<'a> {
         let ty_idx = jit_ir::TypeIdx::from_aot(inst.type_idx())?;
         if let aot_ir::Operand::Global(go) = inst.operand(0) {
             // Generate a special load instruction for globals.
-            Ok(jit_ir::LoadGlobalInstruction::new(go.index(), ty_idx)?.into())
+            Ok(jit_ir::LoadGlobalInstruction::new(go.index())?.into())
         } else {
             let jit_op = self.handle_operand(inst.operand(0))?;
             Ok(jit_ir::LoadInstruction::new(jit_op, ty_idx).into())
@@ -179,6 +189,30 @@ impl<'a> TraceBuilder<'a> {
             let ptr = self.handle_operand(inst.operand(1))?;
             Ok(jit_ir::StoreInstruction::new(val, ptr).into())
         }
+    }
+
+    fn handle_ptradd(
+        &mut self,
+        inst: &aot_ir::Instruction,
+    ) -> Result<jit_ir::Instruction, CompilationError> {
+        let target = self.handle_operand(inst.operand(0))?;
+        if let aot_ir::Operand::Constant(co) = inst.operand(1) {
+            let c = self.aot_mod.constant(co);
+            if let aot_ir::Type::Integer(it) = self.aot_mod.const_type(c) {
+                // Convert the offset into a 32 bit value, as that is the maximum we can fit into
+                // the jit_ir::PtrAddInstruction.
+                let offset: u32 = match it.num_bits() {
+                    64 => u64::from_ne_bytes(c.bytes()[0..8].try_into().unwrap())
+                        .try_into()
+                        .map_err(|_| {
+                            CompilationError::Unrecoverable("ptradd offset too big".into())
+                        }),
+                    _ => panic!(),
+                }?;
+                return Ok(jit_ir::PtrAddInstruction::new(target, offset).into());
+            };
+        }
+        panic!()
     }
 
     /// Entry point for building an IR trace.
