@@ -130,6 +130,11 @@ index_16bit!(ExtraArgsIdx);
 pub(crate) struct ConstIdx(u16);
 index_16bit!(ConstIdx);
 
+/// A global index.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub(crate) struct GlobalIdx(U24);
+index_24bit!(GlobalIdx);
+
 /// An instruction index.
 ///
 /// One of these is an index into the [Module::instrs].
@@ -210,8 +215,12 @@ pub(crate) enum Constant {
 #[derive(Debug)]
 pub enum Instruction {
     Load(LoadInstruction),
+    LoadGlobal(LoadGlobalInstruction),
     LoadArg(LoadArgInstruction),
     Call(CallInstruction),
+    PtrAdd(PtrAddInstruction),
+    Store(StoreInstruction),
+    StoreGlobal(StoreGlobalInstruction),
 }
 
 impl Instruction {
@@ -219,8 +228,12 @@ impl Instruction {
     pub(crate) fn is_def(&self) -> bool {
         match self {
             Self::Load(..) => true,
+            Self::LoadGlobal(..) => true,
             Self::LoadArg(..) => true,
             Self::Call(..) => true, // FIXME: May or may not define. Ask func sig.
+            Self::PtrAdd(..) => true,
+            Self::Store(..) => false,
+            Self::StoreGlobal(..) => false,
         }
     }
 }
@@ -229,8 +242,12 @@ impl fmt::Display for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Load(i) => write!(f, "{}", i),
+            Self::LoadGlobal(i) => write!(f, "{}", i),
             Self::LoadArg(i) => write!(f, "{}", i),
             Self::Call(i) => write!(f, "{}", i),
+            Self::PtrAdd(i) => write!(f, "{}", i),
+            Self::Store(i) => write!(f, "{}", i),
+            Self::StoreGlobal(i) => write!(f, "{}", i),
         }
     }
 }
@@ -246,8 +263,12 @@ macro_rules! instr {
 }
 
 instr!(Load, LoadInstruction);
+instr!(LoadGlobal, LoadGlobalInstruction);
+instr!(Store, StoreInstruction);
+instr!(StoreGlobal, StoreGlobalInstruction);
 instr!(LoadArg, LoadArgInstruction);
 instr!(Call, CallInstruction);
+instr!(PtrAdd, PtrAddInstruction);
 
 /// The operands for a [Instruction::Load]
 ///
@@ -306,6 +327,38 @@ impl fmt::Display for LoadArgInstruction {
 impl LoadArgInstruction {
     pub(crate) fn new() -> LoadArgInstruction {
         Self {}
+    }
+}
+
+/// The operands for a [Instruction::LoadGlobal]
+///
+/// # Semantics
+///
+/// Loads a value from a given global variable.
+///
+#[derive(Debug)]
+pub struct LoadGlobalInstruction {
+    /// The pointer to load from.
+    global_idx: GlobalIdx,
+    /// The type of the pointee.
+    ty_idx: TypeIdx,
+}
+
+impl LoadGlobalInstruction {
+    pub(crate) fn new(
+        global_idx: aot_ir::GlobalIdx,
+        ty_idx: TypeIdx,
+    ) -> Result<Self, CompilationError> {
+        Ok(Self {
+            global_idx: GlobalIdx::from_aot(global_idx)?,
+            ty_idx,
+        })
+    }
+}
+
+impl fmt::Display for LoadGlobalInstruction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "LoadGlobal {}", self.global_idx.0.to_usize())
     }
 }
 
@@ -377,6 +430,104 @@ impl CallInstruction {
         } else {
             Some(jit_mod.extra_args[usize::from(self.extra.0) + idx - 1].clone())
         }
+    }
+}
+
+/// The operands for a [Instruction::Store]
+///
+/// # Semantics
+///
+/// Stores a value into a pointer.
+///
+#[derive(Debug)]
+pub struct StoreInstruction {
+    /// The value to store.
+    val: PackedOperand,
+    /// The pointer to store into.
+    ptr: PackedOperand,
+}
+
+impl StoreInstruction {
+    pub(crate) fn new(val: Operand, ptr: Operand) -> Self {
+        // FIXME: assert type of pointer
+        Self {
+            val: PackedOperand::new(&val),
+            ptr: PackedOperand::new(&ptr),
+        }
+    }
+}
+
+impl fmt::Display for StoreInstruction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Store {}, {}", self.val.get(), self.ptr.get())
+    }
+}
+
+/// The operands for a [Instruction::StoreGlobal]
+///
+/// # Semantics
+///
+/// Stores a value into a global.
+///
+#[derive(Debug)]
+pub struct StoreGlobalInstruction {
+    /// The value to store.
+    val: PackedOperand,
+    /// The pointer to store into.
+    global_idx: GlobalIdx,
+}
+
+impl StoreGlobalInstruction {
+    pub(crate) fn new(
+        val: Operand,
+        global_idx: aot_ir::GlobalIdx,
+    ) -> Result<Self, CompilationError> {
+        Ok(Self {
+            val: PackedOperand::new(&val),
+            global_idx: GlobalIdx::from_aot(global_idx)?,
+        })
+    }
+}
+
+impl fmt::Display for StoreGlobalInstruction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "StoreGlobal {}, {}",
+            self.val.get(),
+            self.global_idx.0.to_usize()
+        )
+    }
+}
+
+/// A pointer offsetting instruction.
+///
+/// # Semantics
+///
+/// Returns a pointer value that is the result of adding the specified (byte) offset to the input
+/// pointer operand.
+#[derive(Debug)]
+#[repr(packed)]
+pub struct PtrAddInstruction {
+    /// The pointer to offset
+    ptr: PackedOperand,
+    /// The offset.
+    off: u32,
+}
+
+impl PtrAddInstruction {
+    fn ptr(&self) -> Operand {
+        let ptr = self.ptr;
+        ptr.get()
+    }
+    fn offset(&self) -> u32 {
+        self.off
+    }
+}
+
+impl fmt::Display for PtrAddInstruction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "PtrAdd {}, {}", self.ptr(), self.offset())
     }
 }
 
@@ -522,6 +673,11 @@ mod tests {
     #[test]
     fn instr_size() {
         assert_eq!(mem::size_of::<CallInstruction>(), 7);
+        assert_eq!(mem::size_of::<StoreInstruction>(), 4);
+        assert_eq!(mem::size_of::<LoadInstruction>(), 6);
+        assert_eq!(mem::size_of::<LoadGlobalInstruction>(), 6);
+        assert_eq!(mem::size_of::<StoreGlobalInstruction>(), 6);
+        assert_eq!(mem::size_of::<PtrAddInstruction>(), 6);
         assert!(mem::size_of::<Instruction>() <= mem::size_of::<u64>());
     }
 

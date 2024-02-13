@@ -63,7 +63,7 @@ impl<'a> TraceBuilder<'a> {
             if inst.is_store() {
                 last_store = Some(inst);
             }
-            if inst.is_gep() {
+            if inst.is_ptr_add() {
                 let op = inst.operand(0);
                 // unwrap safe: we know the AOT code was produced by ykllvm.
                 if trace_input
@@ -95,6 +95,7 @@ impl<'a> TraceBuilder<'a> {
             let jit_inst = match inst.opcode() {
                 aot_ir::Opcode::Load => self.handle_load(inst),
                 aot_ir::Opcode::Call => self.handle_call(inst),
+                aot_ir::Opcode::Store => self.handle_store(inst),
                 _ => todo!("{:?}", inst),
             }?;
 
@@ -145,11 +146,14 @@ impl<'a> TraceBuilder<'a> {
         &mut self,
         inst: &aot_ir::Instruction,
     ) -> Result<jit_ir::Instruction, CompilationError> {
-        let jit_op = self.handle_operand(inst.operand(0))?;
-        Ok(
-            jit_ir::LoadInstruction::new(jit_op, jit_ir::TypeIdx::from_aot(inst.type_idx())?)
-                .into(),
-        )
+        let ty_idx = jit_ir::TypeIdx::from_aot(inst.type_idx())?;
+        if let aot_ir::Operand::Global(go) = inst.operand(0) {
+            // Generate a special load instruction for globals.
+            Ok(jit_ir::LoadGlobalInstruction::new(go.index(), ty_idx)?.into())
+        } else {
+            let jit_op = self.handle_operand(inst.operand(0))?;
+            Ok(jit_ir::LoadInstruction::new(jit_op, ty_idx).into())
+        }
     }
 
     fn handle_call(
@@ -161,6 +165,20 @@ impl<'a> TraceBuilder<'a> {
             args.push(self.handle_operand(arg)?);
         }
         Ok(jit_ir::CallInstruction::new(&mut self.jit_mod, inst.callee(), &args)?.into())
+    }
+
+    fn handle_store(
+        &mut self,
+        inst: &aot_ir::Instruction,
+    ) -> Result<jit_ir::Instruction, CompilationError> {
+        let val = self.handle_operand(inst.operand(0))?;
+        if let aot_ir::Operand::Global(go) = inst.operand(1) {
+            // Generate a special store instruction for globals.
+            Ok(jit_ir::StoreGlobalInstruction::new(val, go.index())?.into())
+        } else {
+            let ptr = self.handle_operand(inst.operand(1))?;
+            Ok(jit_ir::StoreInstruction::new(val, ptr).into())
+        }
     }
 
     /// Entry point for building an IR trace.
@@ -187,9 +205,6 @@ impl<'a> TraceBuilder<'a> {
         };
 
         let firstblk = self.lookup_aot_block(&prev);
-        // FIXME: This unwrap assumes the first block is mappable, but Laurie just merged a change
-        // that strips the initial block (the block we return to from the control point), so I
-        // don't think this assumption necessarily holds any more. Investigate.
         self.create_trace_header(self.aot_mod.block(&firstblk.unwrap()))?;
 
         for tblk in self.mtrace {
