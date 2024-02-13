@@ -401,10 +401,12 @@ void rewriteDebugInfo(Module *M, string TraceName, int FD,
 // trace.
 //
 // Returns a pointer to the compiled function.
-extern "C" void *__yktracec_irtrace_compile(
-    char *FuncNames[], size_t BBs[], size_t TraceLen, void *BitcodeData,
-    uint64_t BitcodeLen, int DebugInfoFD, char *DebugInfoPath, void *CallStack,
-    void *AOTValsPtr, size_t AOTValsLen) {
+extern "C" void *
+__yktracec_irtrace_compile(char *FuncNames[], size_t BBs[], size_t TraceLen,
+                           void *BitcodeData, uint64_t BitcodeLen,
+                           int DebugInfoFD, char *DebugInfoPath,
+                           void *CallStack, void *AOTValsPtr, size_t AOTValsLen,
+                           void *Promotions, size_t PromotionsLen) {
   DebugIRPrinter DIP;
 
   struct BitcodeSection Bitcode = {BitcodeData, BitcodeLen};
@@ -421,8 +423,9 @@ extern "C" void *__yktracec_irtrace_compile(
   // it isn't needed for compilation.
   ThreadAOTMod->withModuleDo([&](Module &AOTMod) {
     DIP.print(DebugIR::AOT, &AOTMod);
-    std::tie(JITMod, TraceName, AOTMappingVec, GuardCount) = createModule(
-        &AOTMod, FuncNames, BBs, TraceLen, CallStack, AOTValsPtr, AOTValsLen);
+    std::tie(JITMod, TraceName, AOTMappingVec, GuardCount) =
+        createModule(&AOTMod, FuncNames, BBs, TraceLen, CallStack, AOTValsPtr,
+                     AOTValsLen, (uintptr_t *)Promotions, PromotionsLen);
   });
 
   // If we failed to build the trace, return null.

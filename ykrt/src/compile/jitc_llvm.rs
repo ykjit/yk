@@ -32,11 +32,11 @@ impl Compiler for JITCLLVM {
     fn compile(
         &self,
         mt: Arc<MT>,
-        aottrace_iter: Box<dyn AOTTraceIterator>,
+        aottrace_iter: (Box<dyn AOTTraceIterator>, Box<[usize]>),
         sti: Option<SideTraceInfo>,
         hl: Arc<Mutex<HotLocation>>,
     ) -> Result<CompiledTrace, CompilationError> {
-        let irtrace = aottrace_iter.collect::<Vec<_>>();
+        let irtrace = aottrace_iter.0.collect::<Vec<_>>();
         let (func_names, bbs, trace_len) = self.encode_trace(&irtrace);
 
         let llvmbc = llvmbc_section();
@@ -59,6 +59,8 @@ impl Compiler for JITCLLVM {
                 callstack,
                 aotvalsptr,
                 aotvalslen,
+                aottrace_iter.1.as_ptr(),
+                aottrace_iter.1.len(),
             )
         };
         if ret.is_null() {

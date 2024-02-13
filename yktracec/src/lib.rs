@@ -21,5 +21,7 @@ extern "C" {
         jitcallstack: *const c_void,
         aotvalsptr: *const c_void,
         aotvalslen: usize,
+        promotions: *const usize,
+        promotionslen: usize,
     ) -> *const c_void;
 }

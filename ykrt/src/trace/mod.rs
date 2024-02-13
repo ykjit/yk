@@ -41,7 +41,14 @@ pub(crate) fn default_tracer() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
 pub(crate) trait TraceCollector {
     /// Stop collecting a trace of the current thread and return an iterator which successively
     /// produces the traced blocks.
-    fn stop_collector(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, InvalidTraceError>;
+    fn stop_collector(
+        self: Box<Self>,
+    ) -> Result<(Box<dyn AOTTraceIterator>, Box<[usize]>), InvalidTraceError>;
+    /// Records `val` as a value to be promoted at this point in the trace. Returns `true` if
+    /// recording succeeded or `false` otherwise. If `false` is returned, this `TraceCollector` is
+    /// no longer able to trace successfully and further calls are probably pointless, though they
+    /// must not cause the tracer to enter undefined behaviour territory.
+    fn promote_usize(&self, val: usize) -> bool;
 }
 
 /// An iterator which takes an underlying raw trace and successively produces [TracedAOTBlock]s.

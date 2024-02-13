@@ -60,7 +60,7 @@ impl Compiler for JITCYk {
     fn compile(
         &self,
         _mt: Arc<MT>,
-        aottrace_iter: Box<dyn AOTTraceIterator>,
+        aottrace_iter: (Box<dyn AOTTraceIterator>, Box<[usize]>),
         sti: Option<SideTraceInfo>,
         _hl: Arc<Mutex<HotLocation>>,
     ) -> Result<CompiledTrace, CompilationError> {
@@ -77,7 +77,7 @@ impl Compiler for JITCYk {
             eprintln!("--- End aot ---");
         }
 
-        let mtrace = aottrace_iter.collect::<Vec<_>>();
+        let mtrace = aottrace_iter.0.collect::<Vec<_>>();
         let jit_mod = trace_builder::build(&aot_mod, &mtrace)?;
 
         if PHASES_TO_PRINT.contains(&IRPhase::PreOpt) {

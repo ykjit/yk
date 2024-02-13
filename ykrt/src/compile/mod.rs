@@ -41,7 +41,7 @@ pub(crate) trait Compiler: Send + Sync {
     fn compile(
         &self,
         mt: Arc<MT>,
-        aottrace_iter: Box<dyn AOTTraceIterator>,
+        aottrace_iter: (Box<dyn AOTTraceIterator>, Box<[usize]>),
         sti: Option<SideTraceInfo>,
         hl: Arc<Mutex<HotLocation>>,
     ) -> Result<CompiledTrace, CompilationError>;
