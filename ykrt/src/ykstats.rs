@@ -28,10 +28,10 @@ pub(crate) struct YkStats {
 struct YkStatsInner {
     /// The path to write output. If exactly equal to `-`, output will be written to stderr.
     output_path: String,
-    /// How many traces were collected successfully?
-    traces_collected_ok: u64,
-    /// How many traces were collected unsuccessfully?
-    traces_collected_err: u64,
+    /// How many traces were recorded successfully?
+    traces_recorded_ok: u64,
+    /// How many traces were recorded unsuccessfully?
+    traces_recorded_err: u64,
     /// How many traces were compiled successfully?
     traces_compiled_ok: u64,
     /// How many traces were compiled unsuccessfully?
@@ -71,14 +71,14 @@ impl YkStats {
             .map(|x| f(x.lock().unwrap().deref_mut()))
     }
 
-    /// Increment the "a trace has been collected successfully" count.
-    pub fn trace_collected_ok(&self) {
-        self.lock(|inner| inner.traces_collected_ok += 1);
+    /// Increment the "a trace has been recorded successfully" count.
+    pub fn trace_recorded_ok(&self) {
+        self.lock(|inner| inner.traces_recorded_ok += 1);
     }
 
-    /// Increment the "a trace has been collected unsuccessfully" count.
-    pub fn trace_collected_err(&self) {
-        self.lock(|inner| inner.traces_collected_err += 1);
+    /// Increment the "a trace has been recorded unsuccessfully" count.
+    pub fn trace_recorded_err(&self) {
+        self.lock(|inner| inner.traces_recorded_err += 1);
     }
 
     /// Increment the "a trace has been compiled successfully" count.
@@ -112,8 +112,8 @@ impl YkStatsInner {
     fn new(output_path: String) -> Self {
         Self {
             output_path,
-            traces_collected_ok: 0,
-            traces_collected_err: 0,
+            traces_recorded_ok: 0,
+            traces_recorded_err: 0,
             traces_compiled_ok: 0,
             traces_compiled_err: 0,
             trace_executions: 0,
@@ -130,12 +130,12 @@ impl YkStatsInner {
 
         let mut fields = vec![
             (
-                "traces_collected_ok".to_owned(),
-                self.traces_collected_ok.to_string(),
+                "traces_recorded_ok".to_owned(),
+                self.traces_recorded_ok.to_string(),
             ),
             (
-                "traces_collected_err".to_owned(),
-                self.traces_collected_err.to_string(),
+                "traces_recorded_err".to_owned(),
+                self.traces_recorded_err.to_string(),
             ),
             (
                 "traces_compiled_ok".to_owned(),

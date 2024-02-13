@@ -1,6 +1,6 @@
 //! Hardware tracing via hwtracer.
 
-use super::{errors::InvalidTraceError, AOTTraceIterator, TraceCollector, TracedAOTBlock};
+use super::{errors::InvalidTraceError, AOTTraceIterator, TraceRecorder, TracedAOTBlock};
 use std::{cell::RefCell, error::Error, sync::Arc};
 
 pub(crate) mod mapper;
@@ -20,8 +20,8 @@ impl HWTracer {
 }
 
 impl super::Tracer for HWTracer {
-    fn start_collector(self: Arc<Self>) -> Result<Box<dyn TraceCollector>, Box<dyn Error>> {
-        Ok(Box::new(HWTTraceCollector {
+    fn start_recorder(self: Arc<Self>) -> Result<Box<dyn TraceRecorder>, Box<dyn Error>> {
+        Ok(Box::new(HWTTraceRecorder {
             thread_tracer: Arc::clone(&self.backend).start_collector()?,
             promotions: RefCell::new(Vec::new()),
         }))
@@ -29,13 +29,13 @@ impl super::Tracer for HWTracer {
 }
 
 /// Hardware thread tracer.
-struct HWTTraceCollector {
+struct HWTTraceRecorder {
     thread_tracer: Box<dyn hwtracer::ThreadTracer>,
     promotions: RefCell<Vec<usize>>,
 }
 
-impl TraceCollector for HWTTraceCollector {
-    fn stop_collector(
+impl TraceRecorder for HWTTraceRecorder {
+    fn stop(
         self: Box<Self>,
     ) -> Result<(Box<dyn AOTTraceIterator>, Box<[usize]>), InvalidTraceError> {
         let tr = self.thread_tracer.stop_collector().unwrap();
