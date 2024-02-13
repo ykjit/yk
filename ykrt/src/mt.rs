@@ -27,7 +27,7 @@ use crate::print_jit_state;
 use crate::{
     compile::{default_compiler, CompilationError, CompiledTrace, Compiler, GuardId},
     location::{HotLocation, HotLocationKind, Location, TraceFailed},
-    trace::{default_tracer, AOTTraceIterator, TraceCollector, Tracer},
+    trace::{default_tracer, AOTTraceIterator, TraceRecorder, Tracer},
     ykstats::{TimingState, YkStats},
 };
 
@@ -260,7 +260,7 @@ impl MT {
                     let lk = self.tracer.lock();
                     Arc::clone(&*lk)
                 };
-                match Arc::clone(&tracer).start_collector() {
+                match Arc::clone(&tracer).start_recorder() {
                     Ok(tt) => THREAD_MTTHREAD.with(|mtt| {
                         *mtt.thread_tracer.borrow_mut() = Some(tt);
                     }),
@@ -271,7 +271,7 @@ impl MT {
                 // Assuming no bugs elsewhere, the `unwrap` cannot fail, because `StartTracing`
                 // will have put a `Some` in the `Rc`.
                 let thrdtrcr = THREAD_MTTHREAD.with(|mtt| mtt.thread_tracer.take().unwrap());
-                match thrdtrcr.stop_collector() {
+                match thrdtrcr.stop() {
                     Ok(utrace) => {
                         #[cfg(feature = "yk_jitstate_debug")]
                         print_jit_state("stop-tracing");
@@ -287,7 +287,7 @@ impl MT {
                 // Assuming no bugs elsewhere, the `unwrap` cannot fail, because `StartTracing`
                 // will have put a `Some` in the `Rc`.
                 let thrdtrcr = THREAD_MTTHREAD.with(|mtt| mtt.thread_tracer.take().unwrap());
-                match thrdtrcr.stop_collector() {
+                match thrdtrcr.stop() {
                     Ok(utrace) => {
                         #[cfg(feature = "yk_jitstate_debug")]
                         print_jit_state("stop-side-tracing");
@@ -369,7 +369,7 @@ impl MT {
                                 // that's no longer being used by that thread will be 2.
                                 if Arc::strong_count(&hl) == 2 {
                                     // Another thread was tracing this location but it's terminated.
-                                    self.stats.trace_collected_err();
+                                    self.stats.trace_recorded_err();
                                     match lk.trace_failed(self) {
                                         TraceFailed::KeepTrying => {
                                             *thread_hl_out = Some(hl);
@@ -478,7 +478,7 @@ impl MT {
         hl_arc: Arc<Mutex<HotLocation>>,
         sidetrace: Option<(SideTraceInfo, Arc<CompiledTrace>)>,
     ) {
-        self.stats.trace_collected_ok();
+        self.stats.trace_recorded_ok();
         let mt = Arc::clone(self);
         let do_compile = move || {
             mt.stats.timing_state(TimingState::TraceMapping);
@@ -553,7 +553,7 @@ impl MT {
                     let lk = self.tracer.lock();
                     Arc::clone(&*lk)
                 };
-                match Arc::clone(&tracer).start_collector() {
+                match Arc::clone(&tracer).start_recorder() {
                     Ok(tt) => THREAD_MTTHREAD.with(|mtt| {
                         *mtt.thread_tracer.borrow_mut() = Some(tt);
                     }),
@@ -594,7 +594,7 @@ pub(crate) struct MTThread {
     /// When tracing is active, this will be `RefCell<Some(...)>`; when tracing is inactive
     /// `RefCell<None>`. We need to keep track of the [Tracer] used to start the [ThreadTracer], as
     /// trace mapping requires a reference to the [Tracer].
-    pub(crate) thread_tracer: RefCell<Option<Box<dyn TraceCollector>>>,
+    pub(crate) thread_tracer: RefCell<Option<Box<dyn TraceRecorder>>>,
     // Raw pointers are neither send nor sync.
     _dont_send_or_sync_me: PhantomData<*mut ()>,
 }

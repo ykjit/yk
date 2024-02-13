@@ -1,4 +1,4 @@
-//! Utilities for collecting and decoding traces.
+//! Record and process traces.
 
 #![allow(clippy::len_without_is_empty)]
 #![allow(clippy::new_without_default)]
@@ -20,8 +20,8 @@ pub(crate) use errors::InvalidTraceError;
 /// backend may have its own configuration options, which is why `Tracer` does not have a `new`
 /// method.
 pub(crate) trait Tracer: Send + Sync {
-    /// Start collecting a trace of the current thread.
-    fn start_collector(self: Arc<Self>) -> Result<Box<dyn TraceCollector>, Box<dyn Error>>;
+    /// Start recording a trace of the current thread.
+    fn start_recorder(self: Arc<Self>) -> Result<Box<dyn TraceRecorder>, Box<dyn Error>>;
 }
 
 /// Return a [Tracer] instance or `Err` if none can be found. The [Tracer] returned will be
@@ -38,14 +38,14 @@ pub(crate) fn default_tracer() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
 }
 
 /// Represents a thread which is currently tracing.
-pub(crate) trait TraceCollector {
-    /// Stop collecting a trace of the current thread and return an iterator which successively
+pub(crate) trait TraceRecorder {
+    /// Stop recording a trace of the current thread and return an iterator which successively
     /// produces the traced blocks.
-    fn stop_collector(
+    fn stop(
         self: Box<Self>,
     ) -> Result<(Box<dyn AOTTraceIterator>, Box<[usize]>), InvalidTraceError>;
     /// Records `val` as a value to be promoted at this point in the trace. Returns `true` if
-    /// recording succeeded or `false` otherwise. If `false` is returned, this `TraceCollector` is
+    /// recording succeeded or `false` otherwise. If `false` is returned, this `TraceRecorder` is
     /// no longer able to trace successfully and further calls are probably pointless, though they
     /// must not cause the tracer to enter undefined behaviour territory.
     fn promote_usize(&self, val: usize) -> bool;

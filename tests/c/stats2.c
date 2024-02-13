@@ -7,10 +7,10 @@
 //     {
 //       ...
 //       "trace_executions": 1,
-//       "traces_collected_err": 1,
-//       "traces_collected_ok": 1,
 //       "traces_compiled_err": 0,
-//       "traces_compiled_ok": 1
+//       "traces_compiled_ok": 1,
+//       "traces_recorded_err": 1,
+//       "traces_recorded_ok": 1
 //       ...
 //     }
 

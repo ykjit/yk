@@ -4,7 +4,7 @@ use crate::mt::THREAD_MTTHREAD;
 
 /// Promote a value.
 ///
-/// When encountered during trace collection, the returned value will be considered constant in the
+/// When encountered during trace recording, the returned value will be considered constant in the
 /// resulting compiled trace.
 ///
 /// The user sees this as `yk_promote` via a macro.
