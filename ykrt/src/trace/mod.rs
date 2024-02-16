@@ -37,7 +37,7 @@ pub(crate) fn default_tracer() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
     Err("No tracing backend for this platform/configuration.".into())
 }
 
-/// Represents a thread which is currently tracing.
+/// A thread which is currently recording a trace.
 pub(crate) trait TraceRecorder {
     /// Stop recording a trace of the current thread and return an iterator which successively
     /// produces the traced blocks.
