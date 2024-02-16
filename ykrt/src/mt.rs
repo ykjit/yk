@@ -263,19 +263,29 @@ impl MT {
                 match Arc::clone(&tracer).start_recorder() {
                     Ok(tt) => THREAD_MTTHREAD.with(|mtt| {
                         *mtt.thread_tracer.borrow_mut() = Some(tt);
+                        *mtt.promotions.borrow_mut() = Some(Vec::new());
                     }),
                     Err(e) => todo!("{e:?}"),
                 }
             }
             TransitionControlPoint::StopTracing(hl_arc) => {
-                // Assuming no bugs elsewhere, the `unwrap` cannot fail, because `StartTracing`
+                // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because `StartTracing`
                 // will have put a `Some` in the `Rc`.
-                let thrdtrcr = THREAD_MTTHREAD.with(|mtt| mtt.thread_tracer.take().unwrap());
+                let (thrdtrcr, promotions) = THREAD_MTTHREAD.with(|mtt| {
+                    (
+                        mtt.thread_tracer.take().unwrap(),
+                        mtt.promotions.take().unwrap(),
+                    )
+                });
                 match thrdtrcr.stop() {
                     Ok(utrace) => {
                         #[cfg(feature = "yk_jitstate_debug")]
                         print_jit_state("stop-tracing");
-                        self.queue_compile_job(utrace, hl_arc, None);
+                        self.queue_compile_job(
+                            (utrace, promotions.into_boxed_slice()),
+                            hl_arc,
+                            None,
+                        );
                     }
                     Err(_e) => {
                         #[cfg(feature = "yk_jitstate_debug")]
@@ -284,14 +294,23 @@ impl MT {
                 }
             }
             TransitionControlPoint::StopSideTracing(hl_arc, sti, parent) => {
-                // Assuming no bugs elsewhere, the `unwrap` cannot fail, because `StartTracing`
-                // will have put a `Some` in the `Rc`.
-                let thrdtrcr = THREAD_MTTHREAD.with(|mtt| mtt.thread_tracer.take().unwrap());
+                // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because
+                // `StartSideTracing` will have put a `Some` in the `Rc`.
+                let (thrdtrcr, promotions) = THREAD_MTTHREAD.with(|mtt| {
+                    (
+                        mtt.thread_tracer.take().unwrap(),
+                        mtt.promotions.take().unwrap(),
+                    )
+                });
                 match thrdtrcr.stop() {
                     Ok(utrace) => {
                         #[cfg(feature = "yk_jitstate_debug")]
                         print_jit_state("stop-side-tracing");
-                        self.queue_compile_job(utrace, hl_arc, Some((sti, parent)));
+                        self.queue_compile_job(
+                            (utrace, promotions.into_boxed_slice()),
+                            hl_arc,
+                            Some((sti, parent)),
+                        );
                     }
                     Err(_e) => {
                         #[cfg(feature = "yk_jitstate_debug")]
@@ -556,6 +575,7 @@ impl MT {
                 match Arc::clone(&tracer).start_recorder() {
                     Ok(tt) => THREAD_MTTHREAD.with(|mtt| {
                         *mtt.thread_tracer.borrow_mut() = Some(tt);
+                        *mtt.promotions.borrow_mut() = Some(Vec::new());
                     }),
                     Err(e) => todo!("{e:?}"),
                 }
@@ -594,7 +614,10 @@ pub(crate) struct MTThread {
     /// When tracing is active, this will be `RefCell<Some(...)>`; when tracing is inactive
     /// `RefCell<None>`. We need to keep track of the [Tracer] used to start the [ThreadTracer], as
     /// trace mapping requires a reference to the [Tracer].
-    pub(crate) thread_tracer: RefCell<Option<Box<dyn TraceRecorder>>>,
+    thread_tracer: RefCell<Option<Box<dyn TraceRecorder>>>,
+    /// Records calls to `yk_promote`. When tracing is active, this will be `RefCell<Some(...)>`;
+    /// when tracing is inactive `RecCell<None>`.
+    promotions: RefCell<Option<Vec<usize>>>,
     // Raw pointers are neither send nor sync.
     _dont_send_or_sync_me: PhantomData<*mut ()>,
 }
@@ -604,8 +627,22 @@ impl MTThread {
         MTThread {
             tracing: RefCell::new(None),
             thread_tracer: RefCell::new(None),
+            promotions: RefCell::new(None),
             _dont_send_or_sync_me: PhantomData,
         }
+    }
+
+    /// Records `val` as a value to be promoted. Returns `true` if either: no trace is being
+    /// recorded; or recording the promotion succeeded.
+    ///
+    /// If `false` is returned, the current trace is unable to record the promotion successfully
+    /// and further calls are probably pointless, though they will not cause the tracer to enter
+    /// undefined behaviour territory.
+    pub(crate) fn promote_usize(&self, val: usize) -> bool {
+        if let Some(promotions) = &mut *self.promotions.borrow_mut() {
+            promotions.push(val);
+        }
+        true
     }
 }
 
