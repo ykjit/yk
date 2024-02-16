@@ -11,10 +11,8 @@ use crate::mt::THREAD_MTTHREAD;
 #[no_mangle]
 pub extern "C" fn __yk_promote_usize(val: usize) {
     THREAD_MTTHREAD.with(|mtt| {
-        if let Some(tt) = mtt.thread_tracer.borrow().as_ref() {
-            // We ignore the return value for `promote_usize` as we can't really cancel tracing from
-            // this function.
-            tt.promote_usize(val);
-        }
+        // We ignore the return value for `promote_usize` as we can't really cancel tracing from
+        // this function.
+        mtt.promote_usize(val);
     });
 }
