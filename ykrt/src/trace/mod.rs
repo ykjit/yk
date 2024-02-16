@@ -34,7 +34,7 @@ pub(crate) fn default_tracer() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
     }
 
     #[allow(unreachable_code)]
-    Err("No tracing backend this platform/configuration.".into())
+    Err("No tracing backend for this platform/configuration.".into())
 }
 
 /// Represents a thread which is currently tracing.
