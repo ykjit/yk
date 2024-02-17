@@ -5,7 +5,7 @@ use crate::{
     compile::{CompilationError, CompiledTrace, Compiler},
     location::HotLocation,
     mt::{SideTraceInfo, MT},
-    trace::{AOTTraceIterator, TracedAOTBlock},
+    trace::{AOTTraceIterator, ProcessedItem},
 };
 use object::{Object, ObjectSection};
 use parking_lot::Mutex;
@@ -79,7 +79,7 @@ impl JITCLLVM {
         Arc::new(JITCLLVM)
     }
 
-    fn encode_trace(&self, irtrace: &Vec<TracedAOTBlock>) -> (Vec<*const i8>, Vec<usize>, usize) {
+    fn encode_trace(&self, irtrace: &Vec<ProcessedItem>) -> (Vec<*const i8>, Vec<usize>, usize) {
         let trace_len = irtrace.len();
         let mut func_names = Vec::with_capacity(trace_len);
         let mut bbs = Vec::with_capacity(trace_len);

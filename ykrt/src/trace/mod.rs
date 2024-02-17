@@ -44,12 +44,12 @@ pub(crate) trait TraceRecorder {
     fn stop(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, InvalidTraceError>;
 }
 
-/// An iterator which takes an underlying raw trace and successively produces [TracedAOTBlock]s.
-pub(crate) trait AOTTraceIterator: Iterator<Item = TracedAOTBlock> + Send {}
+/// An iterator which takes an underlying raw trace and successively produces [ProcessedItem]s.
+pub(crate) trait AOTTraceIterator: Iterator<Item = ProcessedItem> + Send {}
 
 /// An AOT LLVM IR block that has been traced at JIT time.
 #[derive(Debug, Eq, PartialEq)]
-pub enum TracedAOTBlock {
+pub enum ProcessedItem {
     /// A sucessfully mapped block.
     Mapped {
         /// The name of the function containing the block.
@@ -65,7 +65,7 @@ pub enum TracedAOTBlock {
     Unmappable,
 }
 
-impl TracedAOTBlock {
+impl ProcessedItem {
     pub fn new_mapped(func_name: CString, bb: usize) -> Self {
         // At one point, `bb = usize::MAX` was a special value, but it no longer is. We believe
         // that no part of the code sets/checks for this value, but just in case there is a

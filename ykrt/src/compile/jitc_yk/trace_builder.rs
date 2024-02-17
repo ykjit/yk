@@ -3,7 +3,7 @@
 use super::aot_ir::{self, IRDisplay, Module};
 use super::jit_ir;
 use crate::compile::CompilationError;
-use crate::trace::TracedAOTBlock;
+use crate::trace::ProcessedItem;
 use std::collections::HashMap;
 
 /// The argument index of the trace inputs struct in the control point call.
@@ -17,7 +17,7 @@ struct TraceBuilder<'a> {
     /// The JIT IR this struct builds.
     jit_mod: jit_ir::Module,
     /// The mapped trace.
-    mtrace: &'a Vec<TracedAOTBlock>,
+    mtrace: &'a Vec<ProcessedItem>,
     // Maps an AOT instruction to a jit instruction via their index-based IDs.
     local_map: HashMap<aot_ir::InstructionID, jit_ir::InstrIdx>,
 }
@@ -29,7 +29,7 @@ impl<'a> TraceBuilder<'a> {
     ///  - `trace_name`: The eventual symbol name for the JITted code.
     ///  - `aot_mod`: The AOT IR module that the trace flows through.
     ///  - `mtrace`: The mapped trace.
-    fn new(trace_name: String, aot_mod: &'a Module, mtrace: &'a Vec<TracedAOTBlock>) -> Self {
+    fn new(trace_name: String, aot_mod: &'a Module, mtrace: &'a Vec<ProcessedItem>) -> Self {
         Self {
             aot_mod,
             mtrace,
@@ -39,14 +39,14 @@ impl<'a> TraceBuilder<'a> {
     }
 
     // Given a mapped block, find the AOT block ID, or return `None` if it is unmapped.
-    fn lookup_aot_block(&self, tb: &TracedAOTBlock) -> Option<aot_ir::BlockID> {
+    fn lookup_aot_block(&self, tb: &ProcessedItem) -> Option<aot_ir::BlockID> {
         match tb {
-            TracedAOTBlock::Mapped { func_name, bb } => {
+            ProcessedItem::Mapped { func_name, bb } => {
                 let func_name = func_name.to_str().unwrap(); // safe: func names are valid UTF-8.
                 let func = self.aot_mod.func_idx(func_name);
                 Some(aot_ir::BlockID::new(func, aot_ir::BlockIdx::new(*bb)))
             }
-            TracedAOTBlock::Unmappable { .. } => None,
+            ProcessedItem::Unmappable { .. } => None,
         }
     }
 
@@ -193,15 +193,15 @@ impl<'a> TraceBuilder<'a> {
         // Find the block containing the control point call. This is the (sole) predecessor of the
         // first (guaranteed mappable) block in the trace.
         let prev = match first_blk {
-            TracedAOTBlock::Mapped { func_name, bb } => {
+            ProcessedItem::Mapped { func_name, bb } => {
                 debug_assert!(*bb > 0);
                 // It's `- 1` due to the way the ykllvm block splitting pass works.
-                TracedAOTBlock::Mapped {
+                ProcessedItem::Mapped {
                     func_name: func_name.clone(),
                     bb: bb - 1,
                 }
             }
-            TracedAOTBlock::Unmappable => panic!(),
+            ProcessedItem::Unmappable => panic!(),
         };
 
         let firstblk = self.lookup_aot_block(&prev);
@@ -226,7 +226,7 @@ impl<'a> TraceBuilder<'a> {
 /// Given a mapped trace (through `aot_mod`), assemble and return a Yk IR trace.
 pub(super) fn build(
     aot_mod: &Module,
-    mtrace: &Vec<TracedAOTBlock>,
+    mtrace: &Vec<ProcessedItem>,
 ) -> Result<jit_ir::Module, CompilationError> {
     // FIXME: the XXX below should be a thread-safe monotonically incrementing integer.
     TraceBuilder::new("__yk_compiled_trace_XXX".into(), aot_mod, mtrace).build()
