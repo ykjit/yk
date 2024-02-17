@@ -202,7 +202,7 @@ impl HWTMapper {
             Some(x) => {
                 // This is a rough proxy for "check that we removed only the thing we want to
                 // remove".
-                assert!(matches!(x, ProcessedItem::Unmappable));
+                assert!(matches!(x, ProcessedItem::UnmappableBlock));
             }
             _ => unreachable!(),
         }

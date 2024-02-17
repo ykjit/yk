@@ -62,7 +62,7 @@ pub enum ProcessedItem {
     /// One or more machine blocks that could not be mapped.
     ///
     /// This usually means that the blocks were compiled outside of ykllvm.
-    Unmappable,
+    UnmappableBlock,
 }
 
 impl ProcessedItem {
@@ -75,7 +75,7 @@ impl ProcessedItem {
     }
 
     pub fn new_unmappable() -> Self {
-        Self::Unmappable
+        Self::UnmappableBlock
     }
 
     /// If `self` is a mapped block, return the function name, otherwise panic.
@@ -98,6 +98,6 @@ impl ProcessedItem {
 
     /// Determines whether `self` represents unmappable code.
     pub fn is_unmappable(&self) -> bool {
-        matches!(self, Self::Unmappable)
+        matches!(self, Self::UnmappableBlock)
     }
 }

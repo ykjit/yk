@@ -46,7 +46,7 @@ impl<'a> TraceBuilder<'a> {
                 let func = self.aot_mod.func_idx(func_name);
                 Some(aot_ir::BlockID::new(func, aot_ir::BlockIdx::new(*bb)))
             }
-            ProcessedItem::Unmappable { .. } => None,
+            ProcessedItem::UnmappableBlock { .. } => None,
         }
     }
 
@@ -201,7 +201,7 @@ impl<'a> TraceBuilder<'a> {
                     bb: bb - 1,
                 }
             }
-            ProcessedItem::Unmappable => panic!(),
+            ProcessedItem::UnmappableBlock => panic!(),
         };
 
         let firstblk = self.lookup_aot_block(&prev);
@@ -214,7 +214,7 @@ impl<'a> TraceBuilder<'a> {
                     self.process_block(bid)?;
                 }
                 None => {
-                    // Unmappable block
+                    // UnmappableBlock block
                     todo!();
                 }
             }
