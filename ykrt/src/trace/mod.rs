@@ -1,4 +1,16 @@
 //! Record and process traces.
+//!
+//! "Tracing" is split into the following stages:
+//!
+//! 1. *Record* the trace with a [Tracer], which abstracts over a specific *tracer backend*. The
+//!    tracer backend may use one of several low-level tracing methods (e.g. a hardware tracer like
+//!    PT or a software tracer). The tracer backend stores the recorded low-level trace in an
+//!    internal format of its choosing.
+//! 2. *Process* the recorded trace. The tracer backend returns an iterator which produces
+//!    [ProcessedItem]s.
+//! 3. *Compile* the processed trace. That happens in [compile](crate::compile) module.
+//!
+//! This module thus contains tracing backends which can record and process traces.
 
 #![allow(clippy::len_without_is_empty)]
 #![allow(clippy::new_without_default)]
@@ -37,17 +49,17 @@ pub(crate) fn default_tracer() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
     Err("No tracing backend for this platform/configuration.".into())
 }
 
-/// A thread which is currently recording a trace.
+/// An instance of a [Tracer] which is currently recording a trace of the current thread.
 pub(crate) trait TraceRecorder {
     /// Stop recording a trace of the current thread and return an iterator which successively
-    /// produces the traced blocks.
+    /// produces [ProcessedItem]s.
     fn stop(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, InvalidTraceError>;
 }
 
-/// An iterator which takes an underlying raw trace and successively produces [ProcessedItem]s.
+/// An iterator which [TraceRecord]s use to process a trace into [ProcessedItem]s.
 pub(crate) trait AOTTraceIterator: Iterator<Item = ProcessedItem> + Send {}
 
-/// An AOT LLVM IR block that has been traced at JIT time.
+/// A processed item from a trace.
 #[derive(Debug, Eq, PartialEq)]
 pub enum ProcessedItem {
     /// A sucessfully mapped block.
