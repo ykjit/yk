@@ -75,6 +75,13 @@ pub enum ProcessedItem {
     ///
     /// This usually means that the blocks were compiled outside of ykllvm.
     UnmappableBlock,
+    /// A value promoted and recorded within the low-level trace (e.g. `PTWRITE`). In essence these
+    /// are calls to `yk_promote` that have been inlined so that the tracer backend can handle them
+    /// rather than being handled by yk's generic run-time support for `yk_promote`.
+    ///
+    /// While no tracer backend currently uses this variant, it's present to remind us that this a
+    /// useful possibility.
+    Promotion,
 }
 
 impl ProcessedItem {

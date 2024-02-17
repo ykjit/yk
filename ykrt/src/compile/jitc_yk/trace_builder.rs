@@ -47,6 +47,7 @@ impl<'a> TraceBuilder<'a> {
                 Some(aot_ir::BlockID::new(func, aot_ir::BlockIdx::new(*bb)))
             }
             ProcessedItem::UnmappableBlock { .. } => None,
+            ProcessedItem::Promotion => todo!(),
         }
     }
 
@@ -202,6 +203,7 @@ impl<'a> TraceBuilder<'a> {
                 }
             }
             ProcessedItem::UnmappableBlock => panic!(),
+            ProcessedItem::Promotion => todo!(),
         };
 
         let firstblk = self.lookup_aot_block(&prev);
