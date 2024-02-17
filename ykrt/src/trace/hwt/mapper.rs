@@ -160,7 +160,7 @@ impl HWTMapper {
                 // also take care to collapse consecutive unmappable blocks into one.
                 if let Some(last) = ret.last_mut() {
                     if !last.is_unmappable() {
-                        ret.push(ProcessedItem::new_unmappable());
+                        ret.push(ProcessedItem::new_unmappable_block());
                     }
                 }
             } else {

@@ -74,7 +74,7 @@ impl ProcessedItem {
         Self::Mapped { func_name, bb }
     }
 
-    pub fn new_unmappable() -> Self {
+    pub fn new_unmappable_block() -> Self {
         Self::UnmappableBlock
     }
 
