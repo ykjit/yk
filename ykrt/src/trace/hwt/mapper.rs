@@ -103,7 +103,7 @@ impl HWTMapper {
                 );
                 if let Some(sym_name) = sio.dli_sname() {
                     for bb in ent.value.corr_bbs() {
-                        ret.push(Some(ProcessedItem::new_mapped(
+                        ret.push(Some(ProcessedItem::new_mapped_aot_block(
                             sym_name.to_owned(),
                             usize::try_from(*bb).unwrap(),
                         )));

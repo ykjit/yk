@@ -66,7 +66,7 @@ pub enum ProcessedItem {
 }
 
 impl ProcessedItem {
-    pub fn new_mapped(func_name: CString, bb: usize) -> Self {
+    pub fn new_mapped_aot_block(func_name: CString, bb: usize) -> Self {
         // At one point, `bb = usize::MAX` was a special value, but it no longer is. We believe
         // that no part of the code sets/checks for this value, but just in case there is a
         // laggardly part of the code which does so, we've left this `assert` behind to catch it.
