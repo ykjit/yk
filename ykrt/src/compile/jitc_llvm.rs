@@ -84,14 +84,18 @@ impl JITCLLVM {
         let mut func_names = Vec::with_capacity(trace_len);
         let mut bbs = Vec::with_capacity(trace_len);
         for blk in irtrace {
-            if blk.is_unmappable() {
-                // The block was unmappable. Indicate this with a null function name.
-                func_names.push(ptr::null());
-                // Block indices for unmappable blocks are irrelevant so we may pass anything here.
-                bbs.push(0);
-            } else {
-                func_names.push(blk.func_name().as_ptr());
-                bbs.push(blk.bb());
+            match blk {
+                ProcessedItem::MappedAOTBlock { func_name, bb } => {
+                    func_names.push(func_name.as_ptr());
+                    bbs.push(*bb);
+                }
+                ProcessedItem::UnmappableBlock => {
+                    // The block was unmappable. Indicate this with a null function name.
+                    func_names.push(ptr::null());
+                    // Block indices for unmappable blocks are irrelevant so we may pass anything here.
+                    bbs.push(0);
+                }
+                ProcessedItem::Promotion => todo!(),
             }
         }
         (func_names, bbs, trace_len)

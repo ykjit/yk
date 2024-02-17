@@ -159,8 +159,12 @@ impl HWTMapper {
                 // trace isn't empty (we never report the leading unmappable code in a trace). We
                 // also take care to collapse consecutive unmappable blocks into one.
                 if let Some(last) = ret.last_mut() {
-                    if !last.is_unmappable() {
-                        ret.push(ProcessedItem::new_unmappable_block());
+                    match last {
+                        ProcessedItem::MappedAOTBlock { .. } => {
+                            ret.push(ProcessedItem::new_unmappable_block());
+                        }
+                        ProcessedItem::UnmappableBlock => (),
+                        ProcessedItem::Promotion => todo!(),
                     }
                 }
             } else {

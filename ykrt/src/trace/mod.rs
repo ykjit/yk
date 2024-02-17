@@ -17,11 +17,7 @@
 #![allow(clippy::missing_safety_doc)]
 
 mod errors;
-use std::{
-    error::Error,
-    ffi::{CStr, CString},
-    sync::Arc,
-};
+use std::{error::Error, ffi::CString, sync::Arc};
 
 #[cfg(tracer_hwt)]
 pub(crate) mod hwt;
@@ -95,28 +91,5 @@ impl ProcessedItem {
 
     pub fn new_unmappable_block() -> Self {
         Self::UnmappableBlock
-    }
-
-    /// If `self` is a mapped block, return the function name, otherwise panic.
-    pub fn func_name(&self) -> &CStr {
-        if let Self::MappedAOTBlock { func_name, .. } = self {
-            func_name.as_c_str()
-        } else {
-            panic!();
-        }
-    }
-
-    /// If `self` is a mapped block, return the basic block index, otherwise panic.
-    pub fn bb(&self) -> usize {
-        if let Self::MappedAOTBlock { bb, .. } = self {
-            *bb
-        } else {
-            panic!();
-        }
-    }
-
-    /// Determines whether `self` represents unmappable code.
-    pub fn is_unmappable(&self) -> bool {
-        matches!(self, Self::UnmappableBlock)
     }
 }
