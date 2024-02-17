@@ -51,7 +51,7 @@ pub(crate) trait AOTTraceIterator: Iterator<Item = ProcessedItem> + Send {}
 #[derive(Debug, Eq, PartialEq)]
 pub enum ProcessedItem {
     /// A sucessfully mapped block.
-    Mapped {
+    MappedAOTBlock {
         /// The name of the function containing the block.
         ///
         /// PERF: Use a string pool to avoid duplicated function names in traces.
@@ -71,7 +71,7 @@ impl ProcessedItem {
         // that no part of the code sets/checks for this value, but just in case there is a
         // laggardly part of the code which does so, we've left this `assert` behind to catch it.
         debug_assert_ne!(bb, usize::MAX);
-        Self::Mapped { func_name, bb }
+        Self::MappedAOTBlock { func_name, bb }
     }
 
     pub fn new_unmappable_block() -> Self {
@@ -80,7 +80,7 @@ impl ProcessedItem {
 
     /// If `self` is a mapped block, return the function name, otherwise panic.
     pub fn func_name(&self) -> &CStr {
-        if let Self::Mapped { func_name, .. } = self {
+        if let Self::MappedAOTBlock { func_name, .. } = self {
             func_name.as_c_str()
         } else {
             panic!();
@@ -89,7 +89,7 @@ impl ProcessedItem {
 
     /// If `self` is a mapped block, return the basic block index, otherwise panic.
     pub fn bb(&self) -> usize {
-        if let Self::Mapped { bb, .. } = self {
+        if let Self::MappedAOTBlock { bb, .. } = self {
             *bb
         } else {
             panic!();

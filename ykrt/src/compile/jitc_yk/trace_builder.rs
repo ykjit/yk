@@ -41,7 +41,7 @@ impl<'a> TraceBuilder<'a> {
     // Given a mapped block, find the AOT block ID, or return `None` if it is unmapped.
     fn lookup_aot_block(&self, tb: &ProcessedItem) -> Option<aot_ir::BlockID> {
         match tb {
-            ProcessedItem::Mapped { func_name, bb } => {
+            ProcessedItem::MappedAOTBlock { func_name, bb } => {
                 let func_name = func_name.to_str().unwrap(); // safe: func names are valid UTF-8.
                 let func = self.aot_mod.func_idx(func_name);
                 Some(aot_ir::BlockID::new(func, aot_ir::BlockIdx::new(*bb)))
@@ -193,10 +193,10 @@ impl<'a> TraceBuilder<'a> {
         // Find the block containing the control point call. This is the (sole) predecessor of the
         // first (guaranteed mappable) block in the trace.
         let prev = match first_blk {
-            ProcessedItem::Mapped { func_name, bb } => {
+            ProcessedItem::MappedAOTBlock { func_name, bb } => {
                 debug_assert!(*bb > 0);
                 // It's `- 1` due to the way the ykllvm block splitting pass works.
-                ProcessedItem::Mapped {
+                ProcessedItem::MappedAOTBlock {
                     func_name: func_name.clone(),
                     bb: bb - 1,
                 }
@@ -210,7 +210,7 @@ impl<'a> TraceBuilder<'a> {
         for tblk in self.mtrace {
             match self.lookup_aot_block(tblk) {
                 Some(bid) => {
-                    // Mapped block
+                    // MappedAOTBlock block
                     self.process_block(bid)?;
                 }
                 None => {

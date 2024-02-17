@@ -1,4 +1,4 @@
-//! An LLVM JIT backend. Currently a minimal wrapper around the fact that [MappedTrace]s are hardcoded
+//! An LLVM JIT backend. Currently a minimal wrapper around the fact that [MappedAOTBlockTrace]s are hardcoded
 //! to be compiled with LLVM.
 
 use crate::{

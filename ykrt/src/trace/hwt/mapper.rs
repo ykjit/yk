@@ -142,7 +142,7 @@ impl HWTMapper {
                 // we know that the control point will be contained in a single mappable block.
                 assert!(matches!(
                     self.map_block(&x).as_slice(),
-                    &[Some(ProcessedItem::Mapped { .. })]
+                    &[Some(ProcessedItem::MappedAOTBlock { .. })]
                 ));
             }
             _ => unreachable!(),
