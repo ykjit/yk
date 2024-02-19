@@ -1,7 +1,7 @@
 //! Hardware tracing via hwtracer.
 
-use super::{errors::InvalidTraceError, AOTTraceIterator, TraceCollector, TracedAOTBlock};
-use std::{cell::RefCell, error::Error, sync::Arc};
+use super::{errors::InvalidTraceError, AOTTraceIterator, TraceRecorder, TracedAOTBlock};
+use std::{error::Error, sync::Arc};
 
 pub(crate) mod mapper;
 pub(crate) use mapper::HWTMapper;
@@ -20,24 +20,20 @@ impl HWTracer {
 }
 
 impl super::Tracer for HWTracer {
-    fn start_collector(self: Arc<Self>) -> Result<Box<dyn TraceCollector>, Box<dyn Error>> {
-        Ok(Box::new(HWTTraceCollector {
+    fn start_recorder(self: Arc<Self>) -> Result<Box<dyn TraceRecorder>, Box<dyn Error>> {
+        Ok(Box::new(HWTTraceRecorder {
             thread_tracer: Arc::clone(&self.backend).start_collector()?,
-            promotions: RefCell::new(Vec::new()),
         }))
     }
 }
 
 /// Hardware thread tracer.
-struct HWTTraceCollector {
+struct HWTTraceRecorder {
     thread_tracer: Box<dyn hwtracer::ThreadTracer>,
-    promotions: RefCell<Vec<usize>>,
 }
 
-impl TraceCollector for HWTTraceCollector {
-    fn stop_collector(
-        self: Box<Self>,
-    ) -> Result<(Box<dyn AOTTraceIterator>, Box<[usize]>), InvalidTraceError> {
+impl TraceRecorder for HWTTraceRecorder {
+    fn stop(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, InvalidTraceError> {
         let tr = self.thread_tracer.stop_collector().unwrap();
         let mut mt = HWTMapper::new();
         let mapped = mt
@@ -46,18 +42,10 @@ impl TraceCollector for HWTTraceCollector {
         if mapped.is_empty() {
             Err(InvalidTraceError::EmptyTrace)
         } else {
-            Ok((
-                Box::new(HWTTraceIterator {
-                    trace: mapped.into_iter(),
-                }),
-                self.promotions.into_inner().into_boxed_slice(),
-            ))
+            Ok(Box::new(HWTTraceIterator {
+                trace: mapped.into_iter(),
+            }))
         }
-    }
-
-    fn promote_usize(&self, val: usize) -> bool {
-        self.promotions.borrow_mut().push(val);
-        true
     }
 }
 

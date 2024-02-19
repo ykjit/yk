@@ -27,7 +27,7 @@ use crate::print_jit_state;
 use crate::{
     compile::{default_compiler, CompilationError, CompiledTrace, Compiler, GuardId},
     location::{HotLocation, HotLocationKind, Location, TraceFailed},
-    trace::{default_tracer, AOTTraceIterator, TraceCollector, Tracer},
+    trace::{default_tracer, AOTTraceIterator, TraceRecorder, Tracer},
     ykstats::{TimingState, YkStats},
 };
 
@@ -260,22 +260,32 @@ impl MT {
                     let lk = self.tracer.lock();
                     Arc::clone(&*lk)
                 };
-                match Arc::clone(&tracer).start_collector() {
+                match Arc::clone(&tracer).start_recorder() {
                     Ok(tt) => THREAD_MTTHREAD.with(|mtt| {
                         *mtt.thread_tracer.borrow_mut() = Some(tt);
+                        *mtt.promotions.borrow_mut() = Some(Vec::new());
                     }),
                     Err(e) => todo!("{e:?}"),
                 }
             }
             TransitionControlPoint::StopTracing(hl_arc) => {
-                // Assuming no bugs elsewhere, the `unwrap` cannot fail, because `StartTracing`
+                // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because `StartTracing`
                 // will have put a `Some` in the `Rc`.
-                let thrdtrcr = THREAD_MTTHREAD.with(|mtt| mtt.thread_tracer.take().unwrap());
-                match thrdtrcr.stop_collector() {
+                let (thrdtrcr, promotions) = THREAD_MTTHREAD.with(|mtt| {
+                    (
+                        mtt.thread_tracer.take().unwrap(),
+                        mtt.promotions.take().unwrap(),
+                    )
+                });
+                match thrdtrcr.stop() {
                     Ok(utrace) => {
                         #[cfg(feature = "yk_jitstate_debug")]
                         print_jit_state("stop-tracing");
-                        self.queue_compile_job(utrace, hl_arc, None);
+                        self.queue_compile_job(
+                            (utrace, promotions.into_boxed_slice()),
+                            hl_arc,
+                            None,
+                        );
                     }
                     Err(_e) => {
                         #[cfg(feature = "yk_jitstate_debug")]
@@ -284,14 +294,23 @@ impl MT {
                 }
             }
             TransitionControlPoint::StopSideTracing(hl_arc, sti, parent) => {
-                // Assuming no bugs elsewhere, the `unwrap` cannot fail, because `StartTracing`
-                // will have put a `Some` in the `Rc`.
-                let thrdtrcr = THREAD_MTTHREAD.with(|mtt| mtt.thread_tracer.take().unwrap());
-                match thrdtrcr.stop_collector() {
+                // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because
+                // `StartSideTracing` will have put a `Some` in the `Rc`.
+                let (thrdtrcr, promotions) = THREAD_MTTHREAD.with(|mtt| {
+                    (
+                        mtt.thread_tracer.take().unwrap(),
+                        mtt.promotions.take().unwrap(),
+                    )
+                });
+                match thrdtrcr.stop() {
                     Ok(utrace) => {
                         #[cfg(feature = "yk_jitstate_debug")]
                         print_jit_state("stop-side-tracing");
-                        self.queue_compile_job(utrace, hl_arc, Some((sti, parent)));
+                        self.queue_compile_job(
+                            (utrace, promotions.into_boxed_slice()),
+                            hl_arc,
+                            Some((sti, parent)),
+                        );
                     }
                     Err(_e) => {
                         #[cfg(feature = "yk_jitstate_debug")]
@@ -369,7 +388,7 @@ impl MT {
                                 // that's no longer being used by that thread will be 2.
                                 if Arc::strong_count(&hl) == 2 {
                                     // Another thread was tracing this location but it's terminated.
-                                    self.stats.trace_collected_err();
+                                    self.stats.trace_recorded_err();
                                     match lk.trace_failed(self) {
                                         TraceFailed::KeepTrying => {
                                             *thread_hl_out = Some(hl);
@@ -478,7 +497,7 @@ impl MT {
         hl_arc: Arc<Mutex<HotLocation>>,
         sidetrace: Option<(SideTraceInfo, Arc<CompiledTrace>)>,
     ) {
-        self.stats.trace_collected_ok();
+        self.stats.trace_recorded_ok();
         let mt = Arc::clone(self);
         let do_compile = move || {
             mt.stats.timing_state(TimingState::TraceMapping);
@@ -553,9 +572,10 @@ impl MT {
                     let lk = self.tracer.lock();
                     Arc::clone(&*lk)
                 };
-                match Arc::clone(&tracer).start_collector() {
+                match Arc::clone(&tracer).start_recorder() {
                     Ok(tt) => THREAD_MTTHREAD.with(|mtt| {
                         *mtt.thread_tracer.borrow_mut() = Some(tt);
+                        *mtt.promotions.borrow_mut() = Some(Vec::new());
                     }),
                     Err(e) => todo!("{e:?}"),
                 }
@@ -594,7 +614,10 @@ pub(crate) struct MTThread {
     /// When tracing is active, this will be `RefCell<Some(...)>`; when tracing is inactive
     /// `RefCell<None>`. We need to keep track of the [Tracer] used to start the [ThreadTracer], as
     /// trace mapping requires a reference to the [Tracer].
-    pub(crate) thread_tracer: RefCell<Option<Box<dyn TraceCollector>>>,
+    thread_tracer: RefCell<Option<Box<dyn TraceRecorder>>>,
+    /// Records calls to `yk_promote`. When tracing is active, this will be `RefCell<Some(...)>`;
+    /// when tracing is inactive `RecCell<None>`.
+    promotions: RefCell<Option<Vec<usize>>>,
     // Raw pointers are neither send nor sync.
     _dont_send_or_sync_me: PhantomData<*mut ()>,
 }
@@ -604,8 +627,22 @@ impl MTThread {
         MTThread {
             tracing: RefCell::new(None),
             thread_tracer: RefCell::new(None),
+            promotions: RefCell::new(None),
             _dont_send_or_sync_me: PhantomData,
         }
+    }
+
+    /// Records `val` as a value to be promoted. Returns `true` if either: no trace is being
+    /// recorded; or recording the promotion succeeded.
+    ///
+    /// If `false` is returned, the current trace is unable to record the promotion successfully
+    /// and further calls are probably pointless, though they will not cause the tracer to enter
+    /// undefined behaviour territory.
+    pub(crate) fn promote_usize(&self, val: usize) -> bool {
+        if let Some(promotions) = &mut *self.promotions.borrow_mut() {
+            promotions.push(val);
+        }
+        true
     }
 }
 
