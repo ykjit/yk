@@ -7,7 +7,7 @@
 //!    PT or a software tracer). The tracer backend stores the recorded low-level trace in an
 //!    internal format of its choosing.
 //! 2. *Process* the recorded trace. The tracer backend returns an iterator which produces
-//!    [ProcessedItem]s.
+//!    [TraceAction]s.
 //! 3. *Compile* the processed trace. That happens in [compile](crate::compile) module.
 //!
 //! This module thus contains tracing backends which can record and process traces.
@@ -48,16 +48,16 @@ pub(crate) fn default_tracer() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
 /// An instance of a [Tracer] which is currently recording a trace of the current thread.
 pub(crate) trait TraceRecorder {
     /// Stop recording a trace of the current thread and return an iterator which successively
-    /// produces [ProcessedItem]s.
+    /// produces [TraceAction]s.
     fn stop(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, InvalidTraceError>;
 }
 
-/// An iterator which [TraceRecord]s use to process a trace into [ProcessedItem]s.
-pub(crate) trait AOTTraceIterator: Iterator<Item = ProcessedItem> + Send {}
+/// An iterator which [TraceRecord]s use to process a trace into [TraceAction]s.
+pub(crate) trait AOTTraceIterator: Iterator<Item = TraceAction> + Send {}
 
 /// A processed item from a trace.
 #[derive(Debug, Eq, PartialEq)]
-pub enum ProcessedItem {
+pub enum TraceAction {
     /// A sucessfully mapped block.
     MappedAOTBlock {
         /// The name of the function containing the block.
@@ -80,7 +80,7 @@ pub enum ProcessedItem {
     Promotion,
 }
 
-impl ProcessedItem {
+impl TraceAction {
     pub fn new_mapped_aot_block(func_name: CString, bb: usize) -> Self {
         // At one point, `bb = usize::MAX` was a special value, but it no longer is. We believe
         // that no part of the code sets/checks for this value, but just in case there is a

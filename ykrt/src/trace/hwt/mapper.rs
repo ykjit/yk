@@ -1,6 +1,6 @@
 //! The mapper translates a hwtracer trace into an IR trace.
 
-use crate::trace::ProcessedItem;
+use crate::trace::TraceAction;
 use hwtracer::llvm_blockmap::LLVM_BLOCK_MAP;
 use hwtracer::Trace;
 use std::{convert::TryFrom, error::Error};
@@ -53,7 +53,7 @@ impl HWTMapper {
     /// During codegen LLVM may remove the unconditional jump and simply place bb1 and bb2
     /// consecutively, allowing bb1 to fall-thru to bb2. In the eyes of hwtracer, a fall-thru does
     /// not terminate a block, so whereas LLVM sees two blocks, hwtracer sees only one.
-    fn map_block(&mut self, block: &hwtracer::Block) -> Vec<Option<ProcessedItem>> {
+    fn map_block(&mut self, block: &hwtracer::Block) -> Vec<Option<TraceAction>> {
         let b_rng = block.vaddr_range();
         if b_rng.is_none() {
             // If the address range of the block isn't known, then it follows that we can't map
@@ -103,7 +103,7 @@ impl HWTMapper {
                 );
                 if let Some(sym_name) = sio.dli_sname() {
                     for bb in ent.value.corr_bbs() {
-                        ret.push(Some(ProcessedItem::new_mapped_aot_block(
+                        ret.push(Some(TraceAction::new_mapped_aot_block(
                             sym_name.to_owned(),
                             usize::try_from(*bb).unwrap(),
                         )));
@@ -128,11 +128,8 @@ impl HWTMapper {
     ///
     /// The returned trace will always start with a mapped block (the unmappable prefix of the
     /// foreign "turn on tracing" routine is omitted).
-    pub fn map_trace(
-        &mut self,
-        trace: Box<dyn Trace>,
-    ) -> Result<Vec<ProcessedItem>, Box<dyn Error>> {
-        let mut ret: Vec<ProcessedItem> = Vec::new();
+    pub fn map_trace(&mut self, trace: Box<dyn Trace>) -> Result<Vec<TraceAction>, Box<dyn Error>> {
+        let mut ret: Vec<TraceAction> = Vec::new();
 
         let mut trace_iter = trace.iter_blocks();
         // The first block contains the control point so we need to remove that.
@@ -142,7 +139,7 @@ impl HWTMapper {
                 // we know that the control point will be contained in a single mappable block.
                 assert!(matches!(
                     self.map_block(&x).as_slice(),
-                    &[Some(ProcessedItem::MappedAOTBlock { .. })]
+                    &[Some(TraceAction::MappedAOTBlock { .. })]
                 ));
             }
             _ => unreachable!(),
@@ -160,11 +157,11 @@ impl HWTMapper {
                 // also take care to collapse consecutive unmappable blocks into one.
                 if let Some(last) = ret.last_mut() {
                     match last {
-                        ProcessedItem::MappedAOTBlock { .. } => {
-                            ret.push(ProcessedItem::new_unmappable_block());
+                        TraceAction::MappedAOTBlock { .. } => {
+                            ret.push(TraceAction::new_unmappable_block());
                         }
-                        ProcessedItem::UnmappableBlock => (),
-                        ProcessedItem::Promotion => todo!(),
+                        TraceAction::UnmappableBlock => (),
+                        TraceAction::Promotion => todo!(),
                     }
                 }
             } else {
@@ -206,7 +203,7 @@ impl HWTMapper {
             Some(x) => {
                 // This is a rough proxy for "check that we removed only the thing we want to
                 // remove".
-                assert!(matches!(x, ProcessedItem::UnmappableBlock));
+                assert!(matches!(x, TraceAction::UnmappableBlock));
             }
             _ => unreachable!(),
         }

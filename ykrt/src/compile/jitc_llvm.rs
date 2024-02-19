@@ -5,7 +5,7 @@ use crate::{
     compile::{CompilationError, CompiledTrace, Compiler},
     location::HotLocation,
     mt::{SideTraceInfo, MT},
-    trace::{AOTTraceIterator, ProcessedItem},
+    trace::{AOTTraceIterator, TraceAction},
 };
 use object::{Object, ObjectSection};
 use parking_lot::Mutex;
@@ -79,23 +79,23 @@ impl JITCLLVM {
         Arc::new(JITCLLVM)
     }
 
-    fn encode_trace(&self, irtrace: &Vec<ProcessedItem>) -> (Vec<*const i8>, Vec<usize>, usize) {
+    fn encode_trace(&self, irtrace: &Vec<TraceAction>) -> (Vec<*const i8>, Vec<usize>, usize) {
         let trace_len = irtrace.len();
         let mut func_names = Vec::with_capacity(trace_len);
         let mut bbs = Vec::with_capacity(trace_len);
         for blk in irtrace {
             match blk {
-                ProcessedItem::MappedAOTBlock { func_name, bb } => {
+                TraceAction::MappedAOTBlock { func_name, bb } => {
                     func_names.push(func_name.as_ptr());
                     bbs.push(*bb);
                 }
-                ProcessedItem::UnmappableBlock => {
+                TraceAction::UnmappableBlock => {
                     // The block was unmappable. Indicate this with a null function name.
                     func_names.push(ptr::null());
                     // Block indices for unmappable blocks are irrelevant so we may pass anything here.
                     bbs.push(0);
                 }
-                ProcessedItem::Promotion => todo!(),
+                TraceAction::Promotion => todo!(),
             }
         }
         (func_names, bbs, trace_len)
