@@ -677,7 +677,7 @@ mod tests {
         assert_eq!(mem::size_of::<CallInstruction>(), 7);
         assert_eq!(mem::size_of::<StoreInstruction>(), 4);
         assert_eq!(mem::size_of::<LoadInstruction>(), 6);
-        assert_eq!(mem::size_of::<LoadGlobalInstruction>(), 6);
+        assert_eq!(mem::size_of::<LoadGlobalInstruction>(), 3);
         assert_eq!(mem::size_of::<StoreGlobalInstruction>(), 6);
         assert_eq!(mem::size_of::<PtrAddInstruction>(), 6);
         assert!(mem::size_of::<Instruction>() <= mem::size_of::<u64>());
