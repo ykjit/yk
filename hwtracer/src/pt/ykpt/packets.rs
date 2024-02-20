@@ -1,7 +1,6 @@
 //! Intel PT packets and their constituents.
 
 use deku::prelude::*;
-use std::convert::TryFrom;
 
 /// The `IPBytes` field common to all IP packets.
 ///

@@ -2,7 +2,7 @@
 
 use byteorder::{NativeEndian, ReadBytesExt};
 use intervaltree::IntervalTree;
-use object::{self, Object, ObjectSection};
+use object::{Object, ObjectSection};
 use std::{
     io::{prelude::*, Cursor, SeekFrom},
     sync::LazyLock,

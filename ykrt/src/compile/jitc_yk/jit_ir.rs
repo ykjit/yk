@@ -628,7 +628,6 @@ impl fmt::Display for Module {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::mem;
 
     #[test]
     fn operand() {

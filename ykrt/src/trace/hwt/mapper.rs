@@ -3,7 +3,7 @@
 use crate::trace::TracedAOTBlock;
 use hwtracer::llvm_blockmap::LLVM_BLOCK_MAP;
 use hwtracer::Trace;
-use std::{convert::TryFrom, error::Error};
+use std::error::Error;
 use ykaddr::{
     addr::{vaddr_to_obj_and_off, vaddr_to_sym_and_obj},
     obj::SELF_BIN_PATH,

@@ -10,7 +10,7 @@ use crate::{
     Block, ThreadTracer, Trace, Tracer,
 };
 use libc::{c_void, free, geteuid, malloc, size_t};
-use std::{convert::TryFrom, fs::read_to_string, slice, sync::Arc};
+use std::{fs::read_to_string, slice, sync::Arc};
 
 #[cfg(pt)]
 extern "C" {
@@ -213,7 +213,7 @@ impl Drop for PerfTrace {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{errors::HWTracerError, perf::collect::PerfTracer, work_loop, Tracer};
+    use crate::work_loop;
 
     /// Check that a long trace causes the trace buffer to reallocate.
     #[test]

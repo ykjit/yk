@@ -5,7 +5,7 @@ use deku::{
     bitvec::{BitSlice, Msb0},
     DekuRead,
 };
-use std::{cmp::min, iter::Iterator};
+use std::cmp::min;
 
 use super::packets::*;
 

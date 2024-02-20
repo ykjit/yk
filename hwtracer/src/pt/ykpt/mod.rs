@@ -48,7 +48,6 @@ use crate::{
 use intervaltree::IntervalTree;
 use std::{
     collections::VecDeque,
-    convert::TryFrom,
     ffi::CString,
     fmt::{self, Debug},
     ops::Range,
@@ -57,10 +56,7 @@ use std::{
     sync::LazyLock,
 };
 use thiserror::Error;
-use ykaddr::{
-    self,
-    obj::{PHDR_MAIN_OBJ, PHDR_OBJECT_CACHE, SELF_BIN_PATH},
-};
+use ykaddr::obj::{PHDR_MAIN_OBJ, PHDR_OBJECT_CACHE, SELF_BIN_PATH};
 
 use packets::{Bitness, Packet, PacketKind};
 use parser::PacketParser;

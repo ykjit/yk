@@ -8,8 +8,6 @@
 compile_error!("The stackmap parser currently only supports x86_64.");
 
 use std::collections::HashMap;
-use std::convert::TryFrom;
-use std::convert::TryInto;
 use std::error;
 
 struct Function {
