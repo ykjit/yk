@@ -7,9 +7,13 @@
 #![allow(dead_code)]
 
 use crate::compile::CompilationError;
-
-use super::aot_ir;
 use std::{fmt, mem, ptr};
+use typed_index_collections::TiVec;
+
+// Since the AOT versions of these data structures contain no AOT/JIT-IR-specific indices we can
+// share them. Note though, that their corresponding index types are not shared.
+pub(crate) use super::aot_ir::Global;
+pub(crate) use super::aot_ir::IntegerType;
 
 /// Bit fiddling.
 ///
@@ -26,7 +30,7 @@ const MAX_OPERAND_IDX: u16 = (1 << 15) - 1;
 
 /// A packed 24-bit unsigned integer.
 #[repr(packed)]
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct U24([u8; 3]);
 
 impl U24 {
@@ -63,23 +67,27 @@ fn index_overflow(typ: &str) -> CompilationError {
 macro_rules! index_24bit {
     ($struct:ident) => {
         impl $struct {
-            #[cfg(test)]
             pub(crate) fn new(v: usize) -> Result<Self, CompilationError> {
                 U24::from_usize(v)
                     .ok_or(index_overflow(stringify!($struct)))
                     .map(|u| Self(u))
             }
+        }
 
-            /// Convert an AOT index to a reduced-size JIT index (if possible).
-            pub(crate) fn from_aot(aot_idx: aot_ir::$struct) -> Result<$struct, CompilationError> {
-                U24::from_usize(usize::from(aot_idx))
-                    .ok_or(index_overflow(stringify!($struct)))
-                    .map(|u| Self(u))
+        impl From<usize> for $struct {
+            // Required for TiVec.
+            //
+            // Prefer use of [Self::new], which is fallable. Certainly never use this in the trace
+            // builder, where we expect to be able to recover from index overflows.
+            fn from(v: usize) -> Self {
+                Self::new(v).unwrap()
             }
+        }
 
-            /// Convert a JIT index to an AOT index.
-            pub(crate) fn into_aot(&self) -> aot_ir::$struct {
-                aot_ir::$struct::new(self.0.to_usize())
+        impl From<$struct> for usize {
+            // Required for TiVec.
+            fn from(v: $struct) -> Self {
+                v.0.to_usize()
             }
         }
     };
@@ -108,24 +116,17 @@ macro_rules! index_16bit {
     };
 }
 
-/// A function index that refers to a function in the AOT module's function table.
+/// A function declaration index.
 ///
-/// The JIT module shares its functions with the AOT module, but note that we use only a 24-bit
-/// index in order to pack instructions down into 64-bits. The ramifications of are that the JIT IR
-/// can only address a subset of the functions that the AOT module could possibly store. Arguably,
-/// if a trace refers to that many functions, then it is likely to be a long trace that we probably
-/// don't want to compile anyway.
+/// One of these is an index into the [Module::func_decls].
 #[derive(Copy, Clone, Debug)]
-pub(crate) struct FuncIdx(U24);
-index_24bit!(FuncIdx);
+pub(crate) struct FuncDeclIdx(U24);
+index_24bit!(FuncDeclIdx);
 
-/// A type index that refers to a type in the AOT module's type table.
+/// A type index.
 ///
-/// This works similarly to [FuncIdx], i.e. a reduced-size index type is used for compactness at
-/// the cost of not being able to index every possible AOT type index.
-///
-/// See the [FuncIdx] docs for a full justification of this design.
-#[derive(Copy, Clone, Debug)]
+/// One of these is an index into the [Module::types].
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TypeIdx(U24);
 index_24bit!(TypeIdx);
 
@@ -159,6 +160,66 @@ impl InstrIdx {
     /// Return a reference to the instruction indentified by `self` in `jit_mod`.
     pub(crate) fn instr<'a>(&'a self, jit_mod: &'a Module) -> &Instruction {
         jit_mod.instr(*self)
+    }
+}
+
+/// A function's type.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct FuncType {
+    /// Type indices for the function's formal arguments.
+    arg_ty_idxs: Vec<TypeIdx>,
+    /// Type index of the function's return type.
+    ret_ty: TypeIdx,
+    /// Is the function vararg?
+    is_vararg: bool,
+}
+
+impl FuncType {
+    #[cfg(test)]
+    pub(crate) fn new(arg_ty_idxs: Vec<TypeIdx>, ret_ty: TypeIdx, is_vararg: bool) -> Self {
+        Self {
+            arg_ty_idxs,
+            ret_ty,
+            is_vararg,
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    fn num_args(&self) -> usize {
+        self.arg_ty_idxs.len()
+    }
+}
+
+/// A structure's type.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct StructType {
+    /// The types of the fields.
+    field_ty_idxs: Vec<TypeIdx>,
+    /// The bit offsets of the fields (taking into account any required padding for alignment).
+    field_bit_offs: Vec<usize>,
+}
+
+/// A type.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum Type {
+    Void,
+    Integer(IntegerType),
+    Ptr,
+    Func(FuncType),
+    Struct(StructType),
+    Unimplemented(String),
+}
+
+/// An (externally defined, in the AOT code) function declaration.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct FuncDecl {
+    name: String,
+    type_idx: TypeIdx,
+}
+
+impl FuncDecl {
+    pub(crate) fn new(name: String, type_idx: TypeIdx) -> Self {
+        Self { name, type_idx }
     }
 }
 
@@ -370,10 +431,8 @@ pub struct LoadGlobalInstruction {
 }
 
 impl LoadGlobalInstruction {
-    pub(crate) fn new(global_idx: aot_ir::GlobalIdx) -> Result<Self, CompilationError> {
-        Ok(Self {
-            global_idx: GlobalIdx::from_aot(global_idx)?,
-        })
+    pub(crate) fn new(global_idx: GlobalIdx) -> Result<Self, CompilationError> {
+        Ok(Self { global_idx })
     }
 }
 
@@ -392,7 +451,7 @@ impl fmt::Display for LoadGlobalInstruction {
 #[repr(packed)]
 pub struct CallInstruction {
     /// The callee.
-    target: FuncIdx,
+    target: FuncDeclIdx,
     /// The first argument to the call, if present. Undefined if not present.
     arg1: PackedOperand,
     /// Extra arguments, if the call requires more than a single argument.
@@ -408,7 +467,7 @@ impl fmt::Display for CallInstruction {
 impl CallInstruction {
     pub(crate) fn new(
         m: &mut Module,
-        target: aot_ir::FuncIdx,
+        target: FuncDeclIdx,
         args: &[Operand],
     ) -> Result<CallInstruction, CompilationError> {
         let mut arg1 = PackedOperand::default();
@@ -421,7 +480,7 @@ impl CallInstruction {
             extra = m.push_extra_args(&args[1..])?;
         }
         Ok(Self {
-            target: FuncIdx::from_aot(target)?,
+            target,
             arg1,
             extra,
         })
@@ -435,15 +494,10 @@ impl CallInstruction {
     /// Fetch the operand at the specified index.
     ///
     /// It is undefined behaviour to provide an out-of-bounds index.
-    pub(crate) fn operand(
-        &self,
-        _aot_mod: &aot_ir::Module,
-        jit_mod: &Module,
-        idx: usize,
-    ) -> Option<Operand> {
+    pub(crate) fn operand(&self, jit_mod: &Module, idx: usize) -> Option<Operand> {
         #[cfg(debug_assertions)]
         {
-            let ft = _aot_mod.func_ty(self.target.into_aot());
+            let ft = jit_mod.func_decl_ty(self.target);
             debug_assert!(ft.num_args() > idx);
         }
         if idx == 0 {
@@ -499,13 +553,10 @@ pub struct StoreGlobalInstruction {
 }
 
 impl StoreGlobalInstruction {
-    pub(crate) fn new(
-        val: Operand,
-        global_idx: aot_ir::GlobalIdx,
-    ) -> Result<Self, CompilationError> {
+    pub(crate) fn new(val: Operand, global_idx: GlobalIdx) -> Result<Self, CompilationError> {
         Ok(Self {
             val: PackedOperand::new(&val),
-            global_idx: GlobalIdx::from_aot(global_idx)?,
+            global_idx,
         })
     }
 }
@@ -585,6 +636,22 @@ pub(crate) struct Module {
     ///
     /// A [ConstIdx] describes an index into this.
     consts: Vec<Constant>,
+    /// The type table.
+    ///
+    /// A [TypeIdx] describes an index into this.
+    types: TiVec<TypeIdx, Type>,
+    /// The function declaration table.
+    ///
+    /// These are declarations of externally compiled functions that the JITted trace might need to
+    /// call.
+    ///
+    /// A [FuncDeclIdx] is an index into this.
+    func_decls: TiVec<FuncDeclIdx, FuncDecl>,
+    /// The global variable table.
+    ///
+    /// This is a collectiion of externally defined global variables that the trace may need to
+    /// reference.
+    globals: TiVec<GlobalIdx, Global>,
 }
 
 impl Module {
@@ -595,6 +662,9 @@ impl Module {
             instrs: Vec::new(),
             extra_args: Vec::new(),
             consts: Vec::new(),
+            types: TiVec::new(),
+            func_decls: TiVec::new(),
+            globals: TiVec::new(),
         }
     }
 
@@ -630,14 +700,36 @@ impl Module {
         ExtraArgsIdx::new(idx)
     }
 
+    /// Push a new type into the type table and return its index.
+    fn push_type(&mut self, ty: Type) -> Result<TypeIdx, CompilationError> {
+        let idx = self.types.len();
+        self.types.push(ty);
+        Ok(TypeIdx::new(idx)?)
+    }
+
+    /// Push a new function declaration into the function declaration table and return its index.
+    fn push_func_decl(&mut self, func_decl: FuncDecl) -> Result<FuncDeclIdx, CompilationError> {
+        let idx = self.func_decls.len();
+        self.func_decls.push(func_decl);
+        Ok(FuncDeclIdx::new(idx)?)
+    }
+
     /// Push a new constant into the constant table and return its index.
-    pub(crate) fn push_const(&mut self, constant: Constant) -> Result<ConstIdx, CompilationError> {
+    pub fn push_const(&mut self, constant: Constant) -> Result<ConstIdx, CompilationError> {
         let idx = self.consts.len();
         self.consts.push(constant);
         ConstIdx::new(idx)
     }
 
-    /// Get the index of a type, inserting it in the type table if necessary.
+    /// Push a new global variable declaration into the global declaration table and return its
+    /// index.
+    pub fn push_global(&mut self, global: Global) -> Result<GlobalIdx, CompilationError> {
+        let idx = self.consts.len();
+        self.globals.push(global);
+        GlobalIdx::new(idx)
+    }
+
+    /// Get the index of a constant, inserting it in the constant table if necessary.
     pub fn const_idx(&mut self, c: &Constant) -> Result<ConstIdx, CompilationError> {
         // FIXME: can we optimise this?
         for (idx, tc) in self.consts.iter().enumerate() {
@@ -646,8 +738,59 @@ impl Module {
                 return ConstIdx::new(idx);
             }
         }
-        // type table miss, we need to insert it.
+        // const table miss, we need to insert it.
         self.push_const(c.clone())
+    }
+
+    /// Get the index of a type, inserting it into the type table if necessary.
+    pub(crate) fn type_idx(&mut self, t: &Type) -> Result<TypeIdx, CompilationError> {
+        // FIXME: can we optimise this?
+        if let Some(idx) = self.types.position(|tt| tt == t) {
+            Ok(idx)
+        } else {
+            // type table miss, we need to insert it.
+            self.push_type(t.clone())
+        }
+    }
+
+    /// Get the index of a function declaration, inserting it into the func decl table if necessary.
+    pub(crate) fn func_decl_idx(&mut self, d: &FuncDecl) -> Result<FuncDeclIdx, CompilationError> {
+        // FIXME: can we optimise this?
+        if let Some(idx) = self.func_decls.position(|td| td == d) {
+            Ok(idx)
+        } else {
+            // type table miss, we need to insert it.
+            self.push_func_decl(d.clone())
+        }
+    }
+
+    /// Get the index of a global, inserting it into the global declaration table if necessary.
+    pub(crate) fn global_idx(&mut self, g: &Global) -> Result<GlobalIdx, CompilationError> {
+        // FIXME: can we optimise this?
+        if let Some(idx) = self.globals.position(|tg| tg == g) {
+            Ok(idx)
+        } else {
+            // global decl table miss, we need to insert it.
+            self.push_global(g.clone())
+        }
+    }
+
+    /// Return the [FuncType] of the specified function declaration.
+    ///
+    /// # Panics
+    ///
+    /// Panics if:
+    ///  - `idx` is out of bounds
+    ///  - the type index inside the [FuncDecl] is out of bounds
+    ///  - the type found is not a function type
+    ///
+    ///  If the [Module] is well-formed, then the latter two cases cannot happen.
+    pub(crate) fn func_decl_ty(&self, idx: FuncDeclIdx) -> &FuncType {
+        if let Type::Func(ft) = &self.types[self.func_decls[idx].type_idx] {
+            &ft
+        } else {
+            panic!();
+        }
     }
 }
 
@@ -721,36 +864,28 @@ mod tests {
 
     #[test]
     fn extra_call_args() {
-        let mut aot_mod = aot_ir::Module::default();
-        let arg_ty_idxs = vec![aot_ir::TypeIdx::new(0); 3];
-        let func_ty = aot_ir::Type::Func(aot_ir::FuncType::new(
-            arg_ty_idxs,
-            aot_ir::TypeIdx::new(0),
-            false,
-        ));
-        let func_ty_idx = aot_mod.push_type(func_ty);
-        let aot_func_idx = aot_mod.push_func(aot_ir::Function::new("", func_ty_idx));
-
+        // Set up a function to call.
         let mut jit_mod = Module::new("test".into());
+        let i32_tyidx = jit_mod
+            .push_type(Type::Integer(IntegerType::new(32)))
+            .unwrap();
+        let func_ty = Type::Func(FuncType::new(vec![i32_tyidx; 3], i32_tyidx, false));
+        let func_ty_idx = jit_mod.push_type(func_ty).unwrap();
+        let func_decl = FuncDecl::new("foo".to_owned(), func_ty_idx);
+        let func_decl_idx = jit_mod.push_func_decl(func_decl).unwrap();
+
+        // Build a call to the function.
         let args = vec![
             Operand::Local(InstrIdx(0)), // inline arg
             Operand::Local(InstrIdx(1)), // first extra arg
             Operand::Local(InstrIdx(2)),
         ];
-        let ci = CallInstruction::new(&mut jit_mod, aot_func_idx, &args).unwrap();
+        let ci = CallInstruction::new(&mut jit_mod, func_decl_idx, &args).unwrap();
 
-        assert_eq!(
-            ci.operand(&aot_mod, &jit_mod, 0),
-            Some(Operand::Local(InstrIdx(0)))
-        );
-        assert_eq!(
-            ci.operand(&aot_mod, &jit_mod, 1),
-            Some(Operand::Local(InstrIdx(1)))
-        );
-        assert_eq!(
-            ci.operand(&aot_mod, &jit_mod, 2),
-            Some(Operand::Local(InstrIdx(2)))
-        );
+        // Now request the operands and check they all look as they should.
+        assert_eq!(ci.operand(&jit_mod, 0), Some(Operand::Local(InstrIdx(0))));
+        assert_eq!(ci.operand(&jit_mod, 1), Some(Operand::Local(InstrIdx(1))));
+        assert_eq!(ci.operand(&jit_mod, 2), Some(Operand::Local(InstrIdx(2))));
         assert_eq!(
             jit_mod.extra_args,
             vec![Operand::Local(InstrIdx(1)), Operand::Local(InstrIdx(2))]
@@ -760,25 +895,26 @@ mod tests {
     #[test]
     #[should_panic]
     fn call_args_out_of_bounds() {
-        let mut aot_mod = aot_ir::Module::default();
-        let arg_ty_idxs = vec![aot_ir::TypeIdx::new(0); 3];
-        let func_ty = aot_ir::Type::Func(aot_ir::FuncType::new(
-            arg_ty_idxs,
-            aot_ir::TypeIdx::new(0),
-            false,
-        ));
-        let func_ty_idx = aot_mod.push_type(func_ty);
-        let aot_func_idx = aot_mod.push_func(aot_ir::Function::new("", func_ty_idx));
-
+        // Set up a function to call.
         let mut jit_mod = Module::new("test".into());
+        let arg_ty_idxs = vec![jit_mod.type_idx(&Type::Ptr).unwrap(); 3];
+        let ret_ty_idx = jit_mod.type_idx(&Type::Void).unwrap();
+        let func_ty = FuncType::new(arg_ty_idxs, ret_ty_idx, false);
+        let func_ty_idx = jit_mod.type_idx(&Type::Func(func_ty)).unwrap();
+        let func_decl_idx = jit_mod
+            .func_decl_idx(&FuncDecl::new("blah".into(), func_ty_idx))
+            .unwrap();
+
+        // Now build a call to the function.
         let args = vec![
             Operand::Local(InstrIdx(0)), // inline arg
             Operand::Local(InstrIdx(1)), // first extra arg
             Operand::Local(InstrIdx(2)),
         ];
-        let ci = CallInstruction::new(&mut jit_mod, aot_func_idx, &args).unwrap();
+        let ci = CallInstruction::new(&mut jit_mod, func_decl_idx, &args).unwrap();
 
-        ci.operand(&aot_mod, &jit_mod, 3).unwrap();
+        // Request an operand with an out-of-bounds index.
+        ci.operand(&jit_mod, 3).unwrap();
     }
 
     #[test]
@@ -807,19 +943,19 @@ mod tests {
 
     #[test]
     fn index24_fits() {
-        assert!(TypeIdx::from_aot(aot_ir::TypeIdx::new(0)).is_ok());
-        assert!(TypeIdx::from_aot(aot_ir::TypeIdx::new(1)).is_ok());
-        assert!(TypeIdx::from_aot(aot_ir::TypeIdx::new(0x1234)).is_ok());
-        assert!(TypeIdx::from_aot(aot_ir::TypeIdx::new(0x123456)).is_ok());
-        assert!(TypeIdx::from_aot(aot_ir::TypeIdx::new(0xffffff)).is_ok());
+        assert!(TypeIdx::new(0).is_ok());
+        assert!(TypeIdx::new(1).is_ok());
+        assert!(TypeIdx::new(0x1234).is_ok());
+        assert!(TypeIdx::new(0x123456).is_ok());
+        assert!(TypeIdx::new(0xffffff).is_ok());
     }
 
     #[test]
     fn index24_doesnt_fit() {
-        assert!(TypeIdx::from_aot(aot_ir::TypeIdx::new(0x1000000)).is_err());
-        assert!(TypeIdx::from_aot(aot_ir::TypeIdx::new(0x1234567)).is_err());
-        assert!(TypeIdx::from_aot(aot_ir::TypeIdx::new(0xeddedde)).is_err());
-        assert!(TypeIdx::from_aot(aot_ir::TypeIdx::new(usize::MAX)).is_err());
+        assert!(TypeIdx::new(0x1000000).is_err());
+        assert!(TypeIdx::new(0x1234567).is_err());
+        assert!(TypeIdx::new(0xeddedde).is_err());
+        assert!(TypeIdx::new(usize::MAX).is_err());
     }
 
     #[test]

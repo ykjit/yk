@@ -121,6 +121,15 @@ impl<'a> TraceBuilder<'a> {
         jit_ir::InstrIdx::new(self.jit_mod.len())
     }
 
+    /// Translate a global variable.
+    fn handle_global(
+        &mut self,
+        idx: aot_ir::GlobalIdx,
+    ) -> Result<jit_ir::GlobalIdx, CompilationError> {
+        let aot_global = self.aot_mod.global(idx);
+        Ok(self.jit_mod.global_idx(aot_global)?)
+    }
+
     /// Translate an operand.
     fn handle_operand(
         &mut self,
@@ -135,7 +144,7 @@ impl<'a> TraceBuilder<'a> {
                 todo!()
             }
             aot_ir::Operand::Global(go) => {
-                let load = jit_ir::LoadGlobalInstruction::new(go.index())?;
+                let load = jit_ir::LoadGlobalInstruction::new(self.handle_global(go.index())?)?;
                 let idx = self.next_instr_id()?;
                 self.jit_mod.push(load.into());
                 jit_ir::Operand::Local(idx)
@@ -152,18 +161,49 @@ impl<'a> TraceBuilder<'a> {
         Ok(ret)
     }
 
+    /// Translate a type.
+    fn handle_type(
+        &mut self,
+        aot_idx: aot_ir::TypeIdx,
+    ) -> Result<jit_ir::TypeIdx, CompilationError> {
+        let jit_ty = match self.aot_mod.type_(aot_idx) {
+            aot_ir::Type::Void => jit_ir::Type::Void,
+            aot_ir::Type::Integer(_it) => todo!(),
+            aot_ir::Type::Ptr => jit_ir::Type::Ptr,
+            aot_ir::Type::Func(_ft) => todo!(),
+            aot_ir::Type::Struct(_st) => todo!(),
+            aot_ir::Type::Unimplemented(s) => jit_ir::Type::Unimplemented(s.to_owned()),
+        };
+        self.jit_mod.type_idx(&jit_ty)
+    }
+
+    /// Translate a function.
+    fn handle_func(
+        &mut self,
+        aot_idx: aot_ir::FuncIdx,
+    ) -> Result<jit_ir::FuncDeclIdx, CompilationError> {
+        let aot_func = self.aot_mod.func(aot_idx);
+        let jit_func = jit_ir::FuncDecl::new(
+            aot_func.name().to_owned(),
+            self.handle_type(aot_func.type_idx())?,
+        );
+        self.jit_mod.func_decl_idx(&jit_func)
+    }
+
     /// Translate a `Load` instruction.
     fn handle_load(
         &mut self,
         inst: &aot_ir::Instruction,
     ) -> Result<jit_ir::Instruction, CompilationError> {
-        let ty_idx = jit_ir::TypeIdx::from_aot(inst.type_idx())?;
-        if let aot_ir::Operand::Global(go) = inst.operand(0) {
+        let aot_op = inst.operand(0);
+        let aot_ty = inst.type_idx();
+        if let aot_ir::Operand::Global(go) = aot_op {
             // Generate a special load instruction for globals.
-            Ok(jit_ir::LoadGlobalInstruction::new(go.index())?.into())
+            Ok(jit_ir::LoadGlobalInstruction::new(self.handle_global(go.index())?)?.into())
         } else {
-            let jit_op = self.handle_operand(inst.operand(0))?;
-            Ok(jit_ir::LoadInstruction::new(jit_op, ty_idx).into())
+            let jit_op = self.handle_operand(aot_op)?;
+            let jit_ty = self.handle_type(aot_ty)?;
+            Ok(jit_ir::LoadInstruction::new(jit_op, jit_ty).into())
         }
     }
 
@@ -175,7 +215,8 @@ impl<'a> TraceBuilder<'a> {
         for arg in inst.remaining_operands(1) {
             args.push(self.handle_operand(arg)?);
         }
-        Ok(jit_ir::CallInstruction::new(&mut self.jit_mod, inst.callee(), &args)?.into())
+        let jit_func_decl_idx = self.handle_func(inst.callee())?;
+        Ok(jit_ir::CallInstruction::new(&mut self.jit_mod, jit_func_decl_idx, &args)?.into())
     }
 
     fn handle_store(
@@ -185,7 +226,7 @@ impl<'a> TraceBuilder<'a> {
         let val = self.handle_operand(inst.operand(0))?;
         if let aot_ir::Operand::Global(go) = inst.operand(1) {
             // Generate a special store instruction for globals.
-            Ok(jit_ir::StoreGlobalInstruction::new(val, go.index())?.into())
+            Ok(jit_ir::StoreGlobalInstruction::new(val, self.handle_global(go.index())?)?.into())
         } else {
             let ptr = self.handle_operand(inst.operand(1))?;
             Ok(jit_ir::StoreInstruction::new(val, ptr).into())
