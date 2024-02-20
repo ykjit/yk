@@ -6,8 +6,6 @@ use libc::c_void;
 use libc::{
     Elf64_Addr as Elf_Addr, Elf64_Off as Elf_Off, Elf64_Word as Elf_Word, Elf64_Xword as Elf_Xword,
 };
-use memmap2;
-use phdrs;
 use std::{
     ffi::{CStr, CString},
     fs,

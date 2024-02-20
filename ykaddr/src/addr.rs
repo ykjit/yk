@@ -2,9 +2,8 @@
 
 use crate::obj::{PHDR_OBJECT_CACHE, SELF_BIN_PATH};
 use cached::proc_macro::cached;
-use libc::{self, c_void, dlsym, Dl_info, RTLD_DEFAULT};
+use libc::{c_void, dlsym, Dl_info, RTLD_DEFAULT};
 use std::{
-    convert::{From, TryFrom},
     ffi::CStr,
     mem::MaybeUninit,
     path::{Path, PathBuf},
@@ -143,7 +142,7 @@ pub fn vaddr_to_sym_and_obj(vaddr: usize) -> Option<DLInfo> {
 mod tests {
     use super::{off_to_vaddr, vaddr_to_obj_and_off, vaddr_to_sym_and_obj, MaybeUninit};
     use crate::obj::PHDR_MAIN_OBJ;
-    use libc::{self, dlsym, Dl_info};
+    use libc::{dlsym, Dl_info};
     use std::{ffi::CString, ptr};
 
     #[test]

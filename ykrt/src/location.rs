@@ -1,7 +1,6 @@
 //! Trace location: track the state of a program location (counting, tracing, compiled, etc).
 
 use std::{
-    convert::TryFrom,
     mem,
     sync::{
         atomic::{AtomicUsize, Ordering},

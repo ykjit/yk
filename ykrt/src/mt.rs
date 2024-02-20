@@ -682,8 +682,7 @@ impl PartialEq for TransitionControlPoint {
 mod tests {
     extern crate test;
     use super::*;
-    use crate::location::HotLocationKind;
-    use std::{convert::TryFrom, hint::black_box, sync::atomic::AtomicU64, thread};
+    use std::{hint::black_box, sync::atomic::AtomicU64};
     use test::bench::Bencher;
 
     #[test]
