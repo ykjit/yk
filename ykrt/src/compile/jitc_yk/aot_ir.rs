@@ -595,6 +595,10 @@ pub(crate) struct IntegerType {
 }
 
 impl IntegerType {
+    pub(crate) fn num_bits(&self) -> u32 {
+        self.num_bits
+    }
+
     fn const_to_str(&self, c: &Constant) -> String {
         // FIXME: For now we just handle common integer types, but eventually we will need to
         // implement printing of aribitrarily-sized (in bits) integers. Consider using a bigint
@@ -768,6 +772,12 @@ pub(crate) struct Constant {
     bytes: Vec<u8>,
 }
 
+impl Constant {
+    pub(crate) fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
 impl IRDisplay for Constant {
     fn to_str(&self, m: &Module) -> String {
         m.types[self.type_idx].const_to_str(self)
@@ -897,6 +907,14 @@ impl Module {
     /// It is UB to pass an `instr` that is not from the `Module` referenced by `self`.
     pub(crate) fn instr_type(&self, instr: &Instruction) -> &Type {
         &self.types[instr.type_idx]
+    }
+
+    pub(crate) fn constant(&self, co: &ConstantOperand) -> &Constant {
+        &self.consts[co.const_idx]
+    }
+
+    pub(crate) fn const_type(&self, c: &Constant) -> &Type {
+        &self.types[c.type_idx]
     }
 
     // FIXME: rename this to `is_def()`, which we've decided is a beter name.
