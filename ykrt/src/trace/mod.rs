@@ -1,15 +1,23 @@
 //! Record and process traces.
+//!
+//! "Tracing" is split into the following stages:
+//!
+//! 1. *Record* the trace with a [Tracer], which abstracts over a specific *tracer backend*. The
+//!    tracer backend may use one of several low-level tracing methods (e.g. a hardware tracer like
+//!    PT or a software tracer). The tracer backend stores the recorded low-level trace in an
+//!    internal format of its choosing.
+//! 2. *Process* the recorded trace. The tracer backend returns an iterator which produces
+//!    [TraceAction]s.
+//! 3. *Compile* the processed trace. That happens in [compile](crate::compile) module.
+//!
+//! This module thus contains tracing backends which can record and process traces.
 
 #![allow(clippy::len_without_is_empty)]
 #![allow(clippy::new_without_default)]
 #![allow(clippy::missing_safety_doc)]
 
 mod errors;
-use std::{
-    error::Error,
-    ffi::{CStr, CString},
-    sync::Arc,
-};
+use std::{error::Error, ffi::CString, sync::Arc};
 
 #[cfg(tracer_hwt)]
 pub(crate) mod hwt;
@@ -37,21 +45,21 @@ pub(crate) fn default_tracer() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
     Err("No tracing backend for this platform/configuration.".into())
 }
 
-/// A thread which is currently recording a trace.
+/// An instance of a [Tracer] which is currently recording a trace of the current thread.
 pub(crate) trait TraceRecorder {
     /// Stop recording a trace of the current thread and return an iterator which successively
-    /// produces the traced blocks.
+    /// produces [TraceAction]s.
     fn stop(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, InvalidTraceError>;
 }
 
-/// An iterator which takes an underlying raw trace and successively produces [TracedAOTBlock]s.
-pub(crate) trait AOTTraceIterator: Iterator<Item = TracedAOTBlock> + Send {}
+/// An iterator which [TraceRecord]s use to process a trace into [TraceAction]s.
+pub(crate) trait AOTTraceIterator: Iterator<Item = TraceAction> + Send {}
 
-/// An AOT LLVM IR block that has been traced at JIT time.
+/// A processed item from a trace.
 #[derive(Debug, Eq, PartialEq)]
-pub enum TracedAOTBlock {
+pub enum TraceAction {
     /// A sucessfully mapped block.
-    Mapped {
+    MappedAOTBlock {
         /// The name of the function containing the block.
         ///
         /// PERF: Use a string pool to avoid duplicated function names in traces.
@@ -62,42 +70,26 @@ pub enum TracedAOTBlock {
     /// One or more machine blocks that could not be mapped.
     ///
     /// This usually means that the blocks were compiled outside of ykllvm.
-    Unmappable,
+    UnmappableBlock,
+    /// A value promoted and recorded within the low-level trace (e.g. `PTWRITE`). In essence these
+    /// are calls to `yk_promote` that have been inlined so that the tracer backend can handle them
+    /// rather than being handled by yk's generic run-time support for `yk_promote`.
+    ///
+    /// While no tracer backend currently uses this variant, it's present to remind us that this a
+    /// useful possibility.
+    Promotion,
 }
 
-impl TracedAOTBlock {
-    pub fn new_mapped(func_name: CString, bb: usize) -> Self {
+impl TraceAction {
+    pub fn new_mapped_aot_block(func_name: CString, bb: usize) -> Self {
         // At one point, `bb = usize::MAX` was a special value, but it no longer is. We believe
         // that no part of the code sets/checks for this value, but just in case there is a
         // laggardly part of the code which does so, we've left this `assert` behind to catch it.
         debug_assert_ne!(bb, usize::MAX);
-        Self::Mapped { func_name, bb }
+        Self::MappedAOTBlock { func_name, bb }
     }
 
-    pub fn new_unmappable() -> Self {
-        Self::Unmappable
-    }
-
-    /// If `self` is a mapped block, return the function name, otherwise panic.
-    pub fn func_name(&self) -> &CStr {
-        if let Self::Mapped { func_name, .. } = self {
-            func_name.as_c_str()
-        } else {
-            panic!();
-        }
-    }
-
-    /// If `self` is a mapped block, return the basic block index, otherwise panic.
-    pub fn bb(&self) -> usize {
-        if let Self::Mapped { bb, .. } = self {
-            *bb
-        } else {
-            panic!();
-        }
-    }
-
-    /// Determines whether `self` represents unmappable code.
-    pub fn is_unmappable(&self) -> bool {
-        matches!(self, Self::Unmappable)
+    pub fn new_unmappable_block() -> Self {
+        Self::UnmappableBlock
     }
 }
