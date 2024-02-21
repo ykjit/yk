@@ -53,7 +53,7 @@ index!(TypeIdx);
 
 /// A basic block index.
 ///
-/// One of these is an index into [Function::blocks].
+/// One of these is an index into [Func::blocks].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct BlockIdx(usize);
@@ -248,7 +248,7 @@ impl IRDisplay for BlockOperand {
 
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
-pub(crate) struct FunctionOperand {
+pub(crate) struct FuncOperand {
     func_idx: FuncIdx,
 }
 
@@ -287,7 +287,7 @@ impl IRDisplay for GlobalOperand {
 const OPKIND_CONST: u8 = 0;
 const OPKIND_LOCAL_VARIABLE: u8 = 1;
 const OPKIND_TYPE: u8 = 2;
-const OPKIND_FUNCTION: u8 = 3;
+const OPKIND_FUNC: u8 = 3;
 const OPKIND_BLOCK: u8 = 4;
 const OPKIND_ARG: u8 = 5;
 const OPKIND_GLOBAL: u8 = 6;
@@ -303,8 +303,8 @@ pub(crate) enum Operand {
     LocalVariable(LocalVariableOperand),
     #[deku(id = "OPKIND_TYPE")]
     Type(TypeOperand),
-    #[deku(id = "OPKIND_FUNCTION")]
-    Function(FunctionOperand),
+    #[deku(id = "OPKIND_FUNC")]
+    Func(FuncOperand),
     #[deku(id = "OPKIND_BLOCK")]
     Block(BlockOperand),
     #[deku(id = "OPKIND_ARG")]
@@ -350,7 +350,7 @@ impl IRDisplay for Operand {
             Self::Constant(c) => c.to_str(m),
             Self::LocalVariable(l) => l.to_str(m),
             Self::Type(t) => m.types[t.type_idx].to_str(m),
-            Self::Function(f) => m.funcs[f.func_idx].name.to_owned(),
+            Self::Func(f) => m.funcs[f.func_idx].name.to_owned(),
             Self::Block(bb) => bb.to_str(m),
             Self::Global(g) => g.to_str(m),
             Self::Arg(a) => a.to_str(m),
@@ -398,7 +398,7 @@ impl Instruction {
         debug_assert!(matches!(self.opcode, Opcode::Call));
         let op = self.operand(0);
         match op {
-            Operand::Function(fo) => fo.func_idx,
+            Operand::Func(fo) => fo.func_idx,
             _ => panic!(),
         }
     }
@@ -420,7 +420,7 @@ impl Instruction {
             // Call instructions always have at least one operand (the callee), so this is safe.
             let op = &self.operands[0];
             match op {
-                Operand::Function(fop) => {
+                Operand::Func(fop) => {
                     return aot_mod.funcs[fop.func_idx].name == CONTROL_POINT_NAME;
                 }
                 _ => todo!(),
@@ -512,7 +512,7 @@ impl IRDisplay for Block {
 /// A function.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
-pub(crate) struct Function {
+pub(crate) struct Func {
     #[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")]
     name: String,
     type_idx: TypeIdx,
@@ -522,7 +522,7 @@ pub(crate) struct Function {
     blocks: TiVec<BlockIdx, Block>,
 }
 
-impl<'a> Function {
+impl<'a> Func {
     fn is_declaration(&self) -> bool {
         self.blocks.is_empty()
     }
@@ -547,7 +547,7 @@ impl<'a> Function {
     }
 }
 
-impl IRDisplay for Function {
+impl IRDisplay for Func {
     fn to_str(&self, m: &Module) -> String {
         let ty = &m.types[self.type_idx];
         if let Type::Func(fty) = ty {
@@ -803,7 +803,7 @@ pub(crate) struct Module {
     #[deku(temp)]
     num_funcs: usize,
     #[deku(count = "num_funcs", map = "deserialise_into_ti_vec")]
-    funcs: TiVec<FuncIdx, Function>,
+    funcs: TiVec<FuncIdx, Func>,
     #[deku(temp)]
     num_consts: usize,
     #[deku(count = "num_consts", map = "deserialise_into_ti_vec")]
@@ -908,7 +908,7 @@ impl Module {
     /// # Panics
     ///
     /// Panics if the index is out of bounds.
-    pub(crate) fn func(&self, idx: FuncIdx) -> &Function {
+    pub(crate) fn func(&self, idx: FuncIdx) -> &Func {
         &self.funcs[idx]
     }
 
@@ -972,7 +972,7 @@ pub fn print_from_file(path: &PathBuf) -> Result<(), CompilationError> {
 mod tests {
     use super::{
         deserialise_module, deserialise_string, Constant, IntegerType, Opcode, TypeIdx,
-        FORMAT_VERSION, MAGIC, OPKIND_BLOCK, OPKIND_CONST, OPKIND_FUNCTION, OPKIND_LOCAL_VARIABLE,
+        FORMAT_VERSION, MAGIC, OPKIND_BLOCK, OPKIND_CONST, OPKIND_FUNC, OPKIND_LOCAL_VARIABLE,
         OPKIND_TYPE, OPKIND_UNIMPLEMENTED, TYKIND_FUNC, TYKIND_INTEGER, TYKIND_PTR, TYKIND_STRUCT,
         TYKIND_UNIMPLEMENTED, TYKIND_VOID,
     };
@@ -1004,7 +1004,7 @@ mod tests {
         // version:
         data.write_u32::<NativeEndian>(FORMAT_VERSION).unwrap();
 
-        // num_functions:
+        // num_funcs:
         write_native_usize(&mut data, 2);
 
         // FUNCTION 0
@@ -1122,7 +1122,7 @@ mod tests {
         data.write_u32::<NativeEndian>(3).unwrap();
         // OPERAND 0
         // operand_kind:
-        data.write_u8(OPKIND_FUNCTION).unwrap();
+        data.write_u8(OPKIND_FUNC).unwrap();
         // func_idx:
         write_native_usize(&mut data, 1);
         // OPERAND 1
