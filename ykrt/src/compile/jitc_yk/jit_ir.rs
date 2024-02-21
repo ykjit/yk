@@ -732,14 +732,12 @@ impl Module {
     /// Get the index of a constant, inserting it in the constant table if necessary.
     pub fn const_idx(&mut self, c: &Constant) -> Result<ConstIdx, CompilationError> {
         // FIXME: can we optimise this?
-        for (idx, tc) in self.consts.iter().enumerate() {
-            if tc == c {
-                // const table hit.
-                return ConstIdx::new(idx);
-            }
+        if let Some(idx) = self.consts.iter().position(|tc| tc == c) {
+            Ok(ConstIdx::new(idx)?)
+        } else {
+            // const table miss, we need to insert it.
+            self.push_const(c.clone())
         }
-        // const table miss, we need to insert it.
-        self.push_const(c.clone())
     }
 
     /// Get the index of a type, inserting it into the type table if necessary.
