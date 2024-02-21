@@ -536,13 +536,14 @@ impl<'a> Function {
         &self.blocks[bb_idx]
     }
 
-    #[cfg(test)]
-    pub(crate) fn new(name: &str, type_idx: TypeIdx) -> Self {
-        Self {
-            name: name.to_string(),
-            type_idx,
-            blocks: TiVec::new(),
-        }
+    /// Return the name of the function.
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Return the type index of the function.
+    pub(crate) fn type_idx(&self) -> TypeIdx {
+        self.type_idx
     }
 }
 
@@ -599,6 +600,12 @@ impl IntegerType {
         self.num_bits
     }
 
+    /// Create a new integer type with the specified number of bits.
+    #[cfg(test)]
+    pub(crate) fn new(num_bits: u32) -> Self {
+        Self { num_bits }
+    }
+
     fn const_to_str(&self, c: &Constant) -> String {
         // FIXME: For now we just handle common integer types, but eventually we will need to
         // implement printing of aribitrarily-sized (in bits) integers. Consider using a bigint
@@ -641,22 +648,6 @@ pub(crate) struct FuncType {
     ret_ty: TypeIdx,
     /// Is the function vararg?
     is_vararg: bool,
-}
-
-impl FuncType {
-    #[cfg(debug_assertions)]
-    pub(crate) fn num_args(&self) -> usize {
-        self.arg_ty_idxs.len()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn new(arg_ty_idxs: Vec<TypeIdx>, ret_ty: TypeIdx, is_vararg: bool) -> Self {
-        Self {
-            arg_ty_idxs,
-            ret_ty,
-            is_vararg,
-        }
-    }
 }
 
 #[deku_derive(DekuRead)]
@@ -784,9 +775,9 @@ impl IRDisplay for Constant {
     }
 }
 
-/// A constant.
+/// A global variable, identified by its symbol name.
 #[deku_derive(DekuRead)]
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Global {
     is_threadlocal: bool,
     #[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")]
@@ -865,20 +856,6 @@ impl Module {
             .unwrap()
     }
 
-    /// Look up a `FuncType` by its index.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the type index is either out of bounds, or the corresponding type is not a
-    /// function type.
-    #[cfg(debug_assertions)]
-    pub(crate) fn func_ty(&self, func_idx: FuncIdx) -> &FuncType {
-        match self.types[self.funcs[func_idx].type_idx] {
-            Type::Func(ref ft) => &ft,
-            _ => panic!(),
-        }
-    }
-
     /// Return the block uniquely identified (in this module) by the specified [BlockID].
     pub(crate) fn block(&self, bid: &BlockID) -> &Block {
         self.funcs[bid.func_idx].block(bid.block_idx)
@@ -917,6 +894,33 @@ impl Module {
         &self.types[c.type_idx]
     }
 
+    /// Lookup a type by its index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is out of bounds.
+    pub(crate) fn type_(&self, idx: TypeIdx) -> &Type {
+        &self.types[idx]
+    }
+
+    /// Lookup a function by its index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is out of bounds.
+    pub(crate) fn func(&self, idx: FuncIdx) -> &Function {
+        &self.funcs[idx]
+    }
+
+    /// Lookup a global by its index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is out of bounds.
+    pub(crate) fn global(&self, idx: GlobalIdx) -> &Global {
+        &self.globals[idx]
+    }
+
     // FIXME: rename this to `is_def()`, which we've decided is a beter name.
     // FIXME: also move this to the `Instruction` type.
     fn instr_generates_value(&self, i: &Instruction) -> bool {
@@ -940,21 +944,6 @@ impl Module {
     #[allow(dead_code)]
     pub(crate) fn dump(&self) {
         eprintln!("{}", self.to_str());
-    }
-}
-
-#[cfg(test)]
-impl Module {
-    pub(crate) fn push_func(&mut self, func: Function) -> FuncIdx {
-        let idx = self.funcs.len();
-        self.funcs.push(func);
-        FuncIdx(idx)
-    }
-
-    pub(crate) fn push_type(&mut self, ty: Type) -> TypeIdx {
-        let idx = self.types.len();
-        self.types.push(ty);
-        TypeIdx(idx)
     }
 }
 

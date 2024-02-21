@@ -326,7 +326,6 @@ impl<'a> AsmPrinter<'a> {
 mod tests {
     use super::{CodeGen, X64CodeGen, STACK_DIRECTION};
     use crate::compile::jitc_yk::{
-        aot_ir,
         codegen::{
             reg_alloc::{RegisterAllocator, SpillAllocator},
             tests::match_asm,
@@ -336,15 +335,13 @@ mod tests {
 
     #[test]
     fn simple_codegen() {
-        let mut aot_mod = aot_ir::Module::default();
-        aot_mod.push_type(aot_ir::Type::Ptr);
-
         let mut jit_mod = jit_ir::Module::new("test".into());
+        let ptr_ty_idx = jit_mod.type_idx(&jit_ir::Type::Ptr).unwrap();
         jit_mod.push(jit_ir::LoadArgInstruction::new().into());
         jit_mod.push(
             jit_ir::LoadInstruction::new(
                 jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap()),
-                jit_ir::TypeIdx::new(0).unwrap(),
+                ptr_ty_idx,
             )
             .into(),
         );
