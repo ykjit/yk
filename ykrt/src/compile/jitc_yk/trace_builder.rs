@@ -224,6 +224,9 @@ impl<'a> TraceBuilder<'a> {
         bid: &aot_ir::BlockID,
         aot_inst_idx: usize,
     ) -> Result<(), CompilationError> {
+        if inst.is_stackmap_call(self.aot_mod) {
+            return Ok(());
+        }
         let mut args = Vec::new();
         for arg in inst.remaining_operands(1) {
             args.push(self.handle_operand(arg)?);

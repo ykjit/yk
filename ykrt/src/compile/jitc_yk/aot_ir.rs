@@ -16,6 +16,7 @@ const FORMAT_VERSION: u32 = 0;
 
 /// The symbol name of the control point function (after ykllvm has transformed it).
 const CONTROL_POINT_NAME: &str = "__ykrt_control_point";
+const STACKMAP_CALL_NAME: &str = "llvm.experimental.stackmap";
 
 // Generate common methods for index types.
 macro_rules! index {
@@ -430,6 +431,20 @@ impl Instruction {
             match op {
                 Operand::Func(fop) => {
                     return aot_mod.funcs[fop.func_idx].name == CONTROL_POINT_NAME;
+                }
+                _ => todo!(),
+            }
+        }
+        false
+    }
+
+    pub(crate) fn is_stackmap_call(&self, aot_mod: &Module) -> bool {
+        if self.opcode == Opcode::Call {
+            // Call instructions always have at least one operand (the callee), so this is safe.
+            let op = &self.operands[0];
+            match op {
+                Operand::Func(fop) => {
+                    return aot_mod.funcs[fop.func_idx].name == STACKMAP_CALL_NAME;
                 }
                 _ => todo!(),
             }
