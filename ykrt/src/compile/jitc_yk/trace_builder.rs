@@ -328,7 +328,9 @@ impl<'a> TraceBuilder<'a> {
                 }
                 None => {
                     // UnmappableBlock block
-                    todo!();
+                    // Ignore for now. May be later used to make sense of the control flow. Though
+                    // ideally we remove unmappable blocks from the trace so we can handle software
+                    // and hardware traces the same.
                 }
             }
         }
