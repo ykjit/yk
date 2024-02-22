@@ -36,7 +36,13 @@ impl Compiler for JITCLLVM {
         sti: Option<SideTraceInfo>,
         hl: Arc<Mutex<HotLocation>>,
     ) -> Result<CompiledTrace, CompilationError> {
-        let irtrace = aottrace_iter.0.collect::<Vec<_>>();
+        let mut irtrace = Vec::new();
+        for ta in aottrace_iter.0 {
+            match ta {
+                Ok(x) => irtrace.push(x),
+                Err(_) => todo!(),
+            }
+        }
         let (func_names, bbs, trace_len) = self.encode_trace(&irtrace);
 
         let llvmbc = llvmbc_section();
