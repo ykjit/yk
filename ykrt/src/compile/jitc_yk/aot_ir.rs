@@ -456,7 +456,7 @@ impl IRDisplay for Instruction {
         }
 
         let mut ret = String::new();
-        if m.instr_generates_value(self) {
+        if m.is_def(self) {
             let name = self.name.borrow();
             // The unwrap cannot fail, as we forced computation of variable names above.
             ret.push_str(&format!(
@@ -835,7 +835,7 @@ impl Module {
         for f in &self.funcs {
             for (bb_idx, bb) in f.blocks.iter().enumerate() {
                 for (inst_idx, inst) in bb.instrs.iter().enumerate() {
-                    if self.instr_generates_value(inst) {
+                    if self.is_def(inst) {
                         *inst.name.borrow_mut() = Some(format!("{}_{}", bb_idx, inst_idx));
                     }
                 }
@@ -924,9 +924,8 @@ impl Module {
         &self.global_decls[idx]
     }
 
-    // FIXME: rename this to `is_def()`, which we've decided is a beter name.
-    // FIXME: also move this to the `Instruction` type.
-    fn instr_generates_value(&self, i: &Instruction) -> bool {
+    // FIXME: move this to the `Instruction` type.
+    fn is_def(&self, i: &Instruction) -> bool {
         self.instr_type(i) != &Type::Void
     }
 
