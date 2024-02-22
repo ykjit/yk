@@ -1,5 +1,9 @@
 #define _GNU_SOURCE
 
+// FIXME: This collector deals with overflow in the AUX but not the DATA
+// buffer. It would probably be better to either never handle it (for
+// simplicity) or fully handle it.
+
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -87,13 +91,12 @@ struct hwt_perf_ctx {
 
 /*
  * Passed from Rust to C to configure tracing.
- * Must stay in sync with the Rust-side.
+ * Must stay in sync with the Rust struct `PerfCollectorConfig`.
  */
 struct hwt_perf_collector_config {
-  size_t data_bufsize;          // Data buf size (in pages).
-  size_t aux_bufsize;           // AUX buf size (in pages).
-  size_t initial_trace_bufsize; // Initial capacity (in bytes) of a
-                                // trace storage buffer.
+  size_t data_bufsize;      // Data buf size (in pages).
+  size_t aux_bufsize;       // AUX buf size (in pages).
+  size_t trace_result_size; // Size of the `malloc`ed return block (in bytes).
 };
 
 /*

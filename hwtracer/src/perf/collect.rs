@@ -125,7 +125,7 @@ impl PerfThreadTracer {
         // `stop_collector` needs to return a Box<Tracer> anyway, so it's no big deal.
         //
         // Note that the C code will mutate the trace's members directly.
-        let mut trace = Box::new(PerfTrace::new(tracer.config.initial_trace_bufsize)?);
+        let mut trace = Box::new(PerfTrace::new(tracer.config.trace_result_size)?);
         let mut cerr = PerfPTCError::new();
         if !unsafe { hwt_perf_start_collector(ctx, &mut *trace, &mut cerr) } {
             return Err(cerr.into());
@@ -220,9 +220,9 @@ mod tests {
     // FIXME: Reallocating the trace buffer causes synchronisation problems.
     #[ignore]
     fn relloc_trace_buf() {
-        let start_bufsize = 512;
+        let start_bufsize = 2;
         let config = PerfCollectorConfig {
-            initial_trace_bufsize: start_bufsize,
+            data_bufsize: start_bufsize,
             ..Default::default()
         };
         let tracer = PerfTracer::new(config).unwrap();
