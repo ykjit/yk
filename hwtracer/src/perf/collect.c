@@ -290,7 +290,7 @@ bool read_aux(void *aux_buf, struct perf_event_mmap_page *hdr,
     // FIXME: Reallocate the trace storage buffer if more space is required.
     // Note that this requires careful synchronisation between the collection
     // thread, the main thread, and Rust code.
-    hwt_set_cerr(err, hwt_cerror_errno, ENOMEM);
+    hwt_set_cerr(err, hwt_cerror_pt, hwt_pt_overflow);
     return false;
   }
 
