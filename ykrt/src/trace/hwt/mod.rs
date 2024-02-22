@@ -1,10 +1,10 @@
 //! Hardware tracing via hwtracer.
 
-use super::{errors::InvalidTraceError, AOTTraceIterator, TraceAction, TraceRecorder};
+use super::{errors::InvalidTraceError, AOTTraceIterator, TraceRecorder};
 use std::{error::Error, sync::Arc};
 
 pub(crate) mod mapper;
-pub(crate) use mapper::HWTMapper;
+pub(crate) use mapper::HWTTraceIterator;
 mod testing;
 
 pub(crate) struct HWTracer {
@@ -34,30 +34,8 @@ struct HWTTraceRecorder {
 
 impl TraceRecorder for HWTTraceRecorder {
     fn stop(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, InvalidTraceError> {
+        // FIXME: is this `unwrap` safe?
         let tr = self.thread_tracer.stop_collector().unwrap();
-        let mut mt = HWTMapper::new();
-        let mapped = mt
-            .map_trace(tr)
-            .map_err(|_| InvalidTraceError::InternalError)?;
-        if mapped.is_empty() {
-            Err(InvalidTraceError::EmptyTrace)
-        } else {
-            Ok(Box::new(HWTTraceIterator {
-                trace: mapped.into_iter(),
-            }))
-        }
-    }
-}
-
-struct HWTTraceIterator {
-    trace: std::vec::IntoIter<TraceAction>,
-}
-
-impl AOTTraceIterator for HWTTraceIterator {}
-
-impl Iterator for HWTTraceIterator {
-    type Item = TraceAction;
-    fn next(&mut self) -> Option<Self::Item> {
-        self.trace.next()
+        Ok(Box::new(HWTTraceIterator::new(tr)?))
     }
 }

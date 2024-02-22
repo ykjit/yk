@@ -1,6 +1,6 @@
 //! The mapper translates a hwtracer trace into an IR trace.
 
-use crate::trace::TraceAction;
+use crate::trace::{AOTTraceIterator, InvalidTraceError, TraceAction};
 use hwtracer::llvm_blockmap::LLVM_BLOCK_MAP;
 use hwtracer::Trace;
 use std::error::Error;
@@ -9,14 +9,39 @@ use ykaddr::{
     obj::SELF_BIN_PATH,
 };
 
+pub(crate) struct HWTTraceIterator {
+    trace: std::vec::IntoIter<TraceAction>,
+}
+
+impl AOTTraceIterator for HWTTraceIterator {}
+
+impl Iterator for HWTTraceIterator {
+    type Item = TraceAction;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.trace.next()
+    }
+}
+
+impl HWTTraceIterator {
+    pub fn new(trace: Box<dyn Trace>) -> Result<Self, InvalidTraceError> {
+        let mut mapper = HWTMapper;
+        let mapped = mapper
+            .map_trace(trace)
+            .map_err(|_| InvalidTraceError::InternalError)?;
+        if mapped.is_empty() {
+            Err(InvalidTraceError::EmptyTrace)
+        } else {
+            Ok(HWTTraceIterator {
+                trace: mapped.into_iter(),
+            })
+        }
+    }
+}
+
 /// Maps each entry of a hardware trace back to the IR block from which it was compiled.
-pub(crate) struct HWTMapper;
+struct HWTMapper;
 
 impl HWTMapper {
-    pub fn new() -> Self {
-        Self {}
-    }
-
     /// Maps one hwtracer block to one or more AOT LLVM IR blocks.
     ///
     /// Mapping an hwtracer block to AOT LLVM IR blocks occurs in two phases. First the mapper
