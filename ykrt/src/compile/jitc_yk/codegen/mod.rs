@@ -14,7 +14,7 @@ mod x86_64;
 pub(crate) trait CodeGenOutput {
     /// Disassemble the code-genned trace into a string.
     #[cfg(any(debug_assertions, test))]
-    fn disassemble(&self) -> String;
+    fn disassemble(&self) -> Result<String, CompilationError>;
 }
 
 /// All code generators conform to this contract.
@@ -38,7 +38,7 @@ mod tests {
 
     /// Test helper to use `fm` to match a disassembled trace.
     pub(crate) fn match_asm(cgo: Box<dyn CodeGenOutput>, pattern: &str) {
-        let dis = cgo.disassemble();
+        let dis = cgo.disassemble().unwrap();
         match FMatcher::new(pattern).unwrap().matches(&dis) {
             Ok(()) => (),
             Err(e) => panic!(

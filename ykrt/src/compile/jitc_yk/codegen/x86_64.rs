@@ -277,7 +277,7 @@ pub(super) struct X64CodeGenOutput {
 
 impl CodeGenOutput for X64CodeGenOutput {
     #[cfg(any(debug_assertions, test))]
-    fn disassemble(&self) -> String {
+    fn disassemble(&self) -> Result<String, CompilationError> {
         AsmPrinter::new(&self.buf, &self.comments).to_string()
     }
 }
@@ -296,29 +296,38 @@ impl<'a> AsmPrinter<'a> {
     }
 
     /// Returns the disassembled trace.
-    fn to_string(&self) -> String {
+    fn to_string(&self) -> Result<String, CompilationError> {
         let mut out = Vec::new();
         out.push("--- Begin jit-asm ---".to_string());
         let len = self.buf.len();
         let bptr = self.buf.ptr(AssemblyOffset(0));
         let code = unsafe { slice::from_raw_parts(bptr, len) };
-        // `as` is safe as it casts from a raw pointer to a pointer-sized integer.
-        let mut dis =
-            iced_x86::Decoder::with_ip(64, code, u64::try_from(bptr as usize).unwrap(), 0);
-        let mut remain = len;
-        while remain != 0 {
-            let off = len - remain;
-            if let Some(lines) = self.comments.get(&off) {
+        let fmt = zydis::Formatter::intel();
+        let dec = zydis::Decoder::new64();
+        for insn_info in dec.decode_all::<zydis::VisibleOperands>(code, 0) {
+            let (off, _raw_bytes, insn) = insn_info
+                .map_err(|e| CompilationError::Unrecoverable(format!("zydis: {:?}", e)))?;
+            if let Some(lines) = self.comments.get(
+                // This could fail if we test on an arch where usize is less than 64-bit.
+                &usize::try_from(off)
+                    .map_err(|e| CompilationError::Unrecoverable(e.to_string()))?,
+            ) {
                 for line in lines {
                     out.push(format!("; {line}"));
                 }
             }
-            let inst = dis.decode();
-            out.push(format!("{:08x} {:08x}: {}", inst.ip(), off, inst));
-            remain -= inst.len();
+            let istr = fmt
+                .format(Some(off), &insn)
+                .map_err(|e| CompilationError::Unrecoverable(format!("zydis: {:?}", e)))?;
+            out.push(format!(
+                "{:016x} {:08x}: {}",
+                (bptr as u64) + off,
+                off,
+                istr
+            ));
         }
         out.push("--- End jit-asm ---".into());
-        out.join("\n")
+        Ok(out.join("\n"))
     }
 }
 
@@ -348,9 +357,9 @@ mod tests {
         let patt_lines = [
             "...",
             "; Load %0",
-            "... 00000019: mov r12,[rbp-8]",
-            "... 00000020: mov r12,[r12]",
-            "... 00000025: mov [rbp-10h],r12",
+            "... 00000019: mov r12, [rbp-0x08]",
+            "... 00000020: mov r12, [r12]",
+            "... 00000025: mov [rbp-0x10], r12",
             "--- End jit-asm ---",
         ];
         let mut ra = SpillAllocator::new(STACK_DIRECTION);
