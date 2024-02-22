@@ -78,7 +78,13 @@ impl Compiler for JITCYk {
             eprintln!("--- End aot ---");
         }
 
-        let mtrace = aottrace_iter.0.collect::<Vec<_>>();
+        let mut mtrace = Vec::new();
+        for ta in aottrace_iter.0 {
+            match ta {
+                Ok(x) => mtrace.push(x),
+                Err(_) => todo!(),
+            }
+        }
         let jit_mod = trace_builder::build(&aot_mod, &mtrace)?;
 
         if PHASES_TO_PRINT.contains(&IRPhase::PreOpt) {

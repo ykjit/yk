@@ -1,6 +1,6 @@
 //! The mapper translates a hwtracer trace into an IR trace.
 
-use crate::trace::{AOTTraceIterator, InvalidTraceError, TraceAction};
+use crate::trace::{AOTTraceIterator, AOTTraceIteratorError, InvalidTraceError, TraceAction};
 use hwtracer::llvm_blockmap::LLVM_BLOCK_MAP;
 use hwtracer::Trace;
 use std::error::Error;
@@ -16,9 +16,9 @@ pub(crate) struct HWTTraceIterator {
 impl AOTTraceIterator for HWTTraceIterator {}
 
 impl Iterator for HWTTraceIterator {
-    type Item = TraceAction;
+    type Item = Result<TraceAction, AOTTraceIteratorError>;
     fn next(&mut self) -> Option<Self::Item> {
-        self.trace.next()
+        self.trace.next().map(|x| Ok(x))
     }
 }
 

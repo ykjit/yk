@@ -53,7 +53,12 @@ pub(crate) trait TraceRecorder {
 }
 
 /// An iterator which [TraceRecord]s use to process a trace into [TraceAction]s.
-pub(crate) trait AOTTraceIterator: Iterator<Item = TraceAction> + Send {}
+pub(crate) trait AOTTraceIterator:
+    Iterator<Item = Result<TraceAction, AOTTraceIteratorError>> + Send
+{
+}
+
+pub(crate) enum AOTTraceIteratorError {}
 
 /// A processed item from a trace.
 #[derive(Debug, Eq, PartialEq)]
