@@ -121,13 +121,13 @@ impl<'a> TraceBuilder<'a> {
         jit_ir::InstrIdx::new(self.jit_mod.len())
     }
 
-    /// Translate a global variable.
+    /// Translate a global variable use.
     fn handle_global(
         &mut self,
-        idx: aot_ir::GlobalIdx,
-    ) -> Result<jit_ir::GlobalIdx, CompilationError> {
-        let aot_global = self.aot_mod.global(idx);
-        Ok(self.jit_mod.global_idx(aot_global)?)
+        idx: aot_ir::GlobalDeclIdx,
+    ) -> Result<jit_ir::GlobalDeclIdx, CompilationError> {
+        let aot_global = self.aot_mod.global_decl(idx);
+        Ok(self.jit_mod.global_decl_idx(aot_global)?)
     }
 
     /// Translate an operand.

@@ -75,11 +75,14 @@ index!(InstrIdx);
 pub(crate) struct ConstIdx(usize);
 index!(ConstIdx);
 
-/// A global variable index.
+/// A global variable declaration index.
+///
+/// These are "declarations" and not "definitions" because they all been AOT code-generated
+/// already, and thus come "pre-initialised".
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct GlobalIdx(usize);
-index!(GlobalIdx);
+pub(crate) struct GlobalDeclIdx(usize);
+index!(GlobalDeclIdx);
 
 /// A function argument index.
 #[deku_derive(DekuRead)]
@@ -265,22 +268,22 @@ impl IRDisplay for ArgOperand {
     }
 }
 
-/// An operand that describes a global variable.
+/// A global variable operand.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct GlobalOperand {
-    global_idx: GlobalIdx,
+    global_decl_idx: GlobalDeclIdx,
 }
 
 impl GlobalOperand {
-    pub(crate) fn index(&self) -> GlobalIdx {
-        self.global_idx
+    pub(crate) fn index(&self) -> GlobalDeclIdx {
+        self.global_decl_idx
     }
 }
 
 impl IRDisplay for GlobalOperand {
     fn to_str(&self, m: &Module) -> String {
-        m.globals[self.global_idx].to_str(m)
+        m.global_decls[self.global_decl_idx].to_str(m)
     }
 }
 
@@ -775,18 +778,18 @@ impl IRDisplay for Constant {
     }
 }
 
-/// A global variable, identified by its symbol name.
+/// A global variable declaration, identified by its symbol name.
 #[deku_derive(DekuRead)]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct Global {
+pub(crate) struct GlobalDecl {
     is_threadlocal: bool,
     #[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")]
     name: String,
 }
 
-impl IRDisplay for Global {
+impl IRDisplay for GlobalDecl {
     fn to_str(&self, _m: &Module) -> String {
-        format!("Global({}, tls={})", self.name, self.is_threadlocal)
+        format!("GlobalDecl({}, tls={})", self.name, self.is_threadlocal)
     }
 }
 
@@ -809,9 +812,9 @@ pub(crate) struct Module {
     #[deku(count = "num_consts", map = "deserialise_into_ti_vec")]
     consts: TiVec<ConstIdx, Constant>,
     #[deku(temp)]
-    num_globals: usize,
-    #[deku(count = "num_globals", map = "deserialise_into_ti_vec")]
-    globals: TiVec<GlobalIdx, Global>,
+    num_global_decls: usize,
+    #[deku(count = "num_global_decls", map = "deserialise_into_ti_vec")]
+    global_decls: TiVec<GlobalDeclIdx, GlobalDecl>,
     #[deku(temp)]
     num_types: usize,
     #[deku(count = "num_types", map = "deserialise_into_ti_vec")]
@@ -912,13 +915,13 @@ impl Module {
         &self.funcs[idx]
     }
 
-    /// Lookup a global by its index.
+    /// Lookup a global variable declaration by its index.
     ///
     /// # Panics
     ///
     /// Panics if the index is out of bounds.
-    pub(crate) fn global(&self, idx: GlobalIdx) -> &Global {
-        &self.globals[idx]
+    pub(crate) fn global_decl(&self, idx: GlobalDeclIdx) -> &GlobalDecl {
+        &self.global_decls[idx]
     }
 
     // FIXME: rename this to `is_def()`, which we've decided is a beter name.
@@ -932,7 +935,10 @@ impl Module {
         ret.push_str(&format!("# IR format version: {}\n", self.version));
         ret.push_str(&format!("# Num funcs: {}\n", self.funcs.len()));
         ret.push_str(&format!("# Num consts: {}\n", self.consts.len()));
-        ret.push_str(&format!("# Num globals: {}\n", self.globals.len()));
+        ret.push_str(&format!(
+            "# Num global decls: {}\n",
+            self.global_decls.len()
+        ));
         ret.push_str(&format!("# Num types: {}\n", self.types.len()));
 
         for func in &self.funcs {
@@ -1186,11 +1192,11 @@ mod tests {
         // bytes:
         data.write_u32::<NativeEndian>(50).unwrap();
 
-        // GLOBALS
-        // num_globals:
+        // GLOBAL DECLS
+        // num_global_decls:
         write_native_usize(&mut data, 1);
 
-        // GLOBAL 1
+        // GLOBAL DECL 1
         // is_threadlocal:
         let _ = data.write_u8(0);
         // name:
@@ -1265,7 +1271,7 @@ mod tests {
 # IR format version: 0
 # Num funcs: 2
 # Num consts: 3
-# Num globals: 1
+# Num global decls: 1
 # Num types: 7
 
 func foo($arg0: ptr, $arg1: i32) -> i32 {
