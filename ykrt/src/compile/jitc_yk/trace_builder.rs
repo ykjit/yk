@@ -93,27 +93,35 @@ impl<'a> TraceBuilder<'a> {
 
         // Decide how to translate each AOT instruction based upon its opcode.
         for (inst_idx, inst) in blk.instrs.iter().enumerate() {
-            let jit_inst = match inst.opcode() {
-                aot_ir::Opcode::Load => self.handle_load(inst),
-                aot_ir::Opcode::Call => self.handle_call(inst),
-                aot_ir::Opcode::Store => self.handle_store(inst),
-                aot_ir::Opcode::PtrAdd => self.handle_ptradd(inst),
+            match inst.opcode() {
+                aot_ir::Opcode::Load => self.handle_load(inst, &bid, inst_idx),
+                aot_ir::Opcode::Call => self.handle_call(inst, &bid, inst_idx),
+                aot_ir::Opcode::Store => self.handle_store(inst, &bid, inst_idx),
+                aot_ir::Opcode::PtrAdd => self.handle_ptradd(inst, &bid, inst_idx),
                 _ => todo!("{:?}", inst),
             }?;
-
-            // If the AOT instruction defines a new value, then add it to the local map.
-            if jit_inst.is_def() {
-                let aot_iid = aot_ir::InstructionID::new(
-                    bid.func_idx(),
-                    bid.block_idx(),
-                    aot_ir::InstrIdx::new(inst_idx),
-                );
-                self.local_map.insert(aot_iid, self.next_instr_id()?);
-            }
-
-            // Insert the newly-translated instruction into the JIT module.
-            self.jit_mod.push(jit_inst);
         }
+        Ok(())
+    }
+
+    fn copy_instruction(
+        &mut self,
+        jit_inst: jit_ir::Instruction,
+        bid: &aot_ir::BlockID,
+        aot_inst_idx: usize,
+    ) -> Result<(), CompilationError> {
+        // If the AOT instruction defines a new value, then add it to the local map.
+        if jit_inst.is_def() {
+            let aot_iid = aot_ir::InstructionID::new(
+                bid.func_idx(),
+                bid.block_idx(),
+                aot_ir::InstrIdx::new(aot_inst_idx),
+            );
+            self.local_map.insert(aot_iid, self.next_instr_id()?);
+        }
+
+        // Insert the newly-translated instruction into the JIT module.
+        self.jit_mod.push(jit_inst);
         Ok(())
     }
 
@@ -194,49 +202,61 @@ impl<'a> TraceBuilder<'a> {
     fn handle_load(
         &mut self,
         inst: &aot_ir::Instruction,
-    ) -> Result<jit_ir::Instruction, CompilationError> {
+        bid: &aot_ir::BlockID,
+        aot_inst_idx: usize,
+    ) -> Result<(), CompilationError> {
         let aot_op = inst.operand(0);
         let aot_ty = inst.type_idx();
-        if let aot_ir::Operand::Global(go) = aot_op {
+        let instr = if let aot_ir::Operand::Global(go) = aot_op {
             // Generate a special load instruction for globals.
-            Ok(jit_ir::LoadGlobalInstruction::new(self.handle_global(go.index())?)?.into())
+            jit_ir::LoadGlobalInstruction::new(self.handle_global(go.index())?)?.into()
         } else {
             let jit_op = self.handle_operand(aot_op)?;
             let jit_ty = self.handle_type(aot_ty)?;
-            Ok(jit_ir::LoadInstruction::new(jit_op, jit_ty).into())
-        }
+            jit_ir::LoadInstruction::new(jit_op, jit_ty).into()
+        };
+        self.copy_instruction(instr, bid, aot_inst_idx)
     }
 
     fn handle_call(
         &mut self,
         inst: &aot_ir::Instruction,
-    ) -> Result<jit_ir::Instruction, CompilationError> {
+        bid: &aot_ir::BlockID,
+        aot_inst_idx: usize,
+    ) -> Result<(), CompilationError> {
         let mut args = Vec::new();
         for arg in inst.remaining_operands(1) {
             args.push(self.handle_operand(arg)?);
         }
         let jit_func_decl_idx = self.handle_func(inst.callee())?;
-        Ok(jit_ir::CallInstruction::new(&mut self.jit_mod, jit_func_decl_idx, &args)?.into())
+        let instr =
+            jit_ir::CallInstruction::new(&mut self.jit_mod, jit_func_decl_idx, &args)?.into();
+        self.copy_instruction(instr, bid, aot_inst_idx)
     }
 
     fn handle_store(
         &mut self,
         inst: &aot_ir::Instruction,
-    ) -> Result<jit_ir::Instruction, CompilationError> {
+        bid: &aot_ir::BlockID,
+        aot_inst_idx: usize,
+    ) -> Result<(), CompilationError> {
         let val = self.handle_operand(inst.operand(0))?;
-        if let aot_ir::Operand::Global(go) = inst.operand(1) {
+        let instr = if let aot_ir::Operand::Global(go) = inst.operand(1) {
             // Generate a special store instruction for globals.
-            Ok(jit_ir::StoreGlobalInstruction::new(val, self.handle_global(go.index())?)?.into())
+            jit_ir::StoreGlobalInstruction::new(val, self.handle_global(go.index())?)?.into()
         } else {
             let ptr = self.handle_operand(inst.operand(1))?;
-            Ok(jit_ir::StoreInstruction::new(val, ptr).into())
-        }
+            jit_ir::StoreInstruction::new(val, ptr).into()
+        };
+        self.copy_instruction(instr, bid, aot_inst_idx)
     }
 
     fn handle_ptradd(
         &mut self,
         inst: &aot_ir::Instruction,
-    ) -> Result<jit_ir::Instruction, CompilationError> {
+        bid: &aot_ir::BlockID,
+        aot_inst_idx: usize,
+    ) -> Result<(), CompilationError> {
         let target = self.handle_operand(inst.operand(0))?;
         if let aot_ir::Operand::Constant(co) = inst.operand(1) {
             let c = self.aot_mod.constant(co);
@@ -251,7 +271,8 @@ impl<'a> TraceBuilder<'a> {
                         }),
                     _ => panic!(),
                 }?;
-                return Ok(jit_ir::PtrAddInstruction::new(target, offset).into());
+                let instr = jit_ir::PtrAddInstruction::new(target, offset).into();
+                return self.copy_instruction(instr, bid, aot_inst_idx);
             };
         }
         panic!()
