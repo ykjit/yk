@@ -406,6 +406,11 @@ impl Instruction {
         }
     }
 
+    /// Returns true if this instruction defines a new local variable.
+    fn is_def(&self, m: &Module) -> bool {
+        m.instr_type(self) != &Type::Void
+    }
+
     pub(crate) fn type_idx(&self) -> TypeIdx {
         self.type_idx
     }
@@ -456,7 +461,7 @@ impl IRDisplay for Instruction {
         }
 
         let mut ret = String::new();
-        if m.is_def(self) {
+        if self.is_def(m) {
             let name = self.name.borrow();
             // The unwrap cannot fail, as we forced computation of variable names above.
             ret.push_str(&format!(
@@ -835,7 +840,7 @@ impl Module {
         for f in &self.funcs {
             for (bb_idx, bb) in f.blocks.iter().enumerate() {
                 for (inst_idx, inst) in bb.instrs.iter().enumerate() {
-                    if self.is_def(inst) {
+                    if inst.is_def(self) {
                         *inst.name.borrow_mut() = Some(format!("{}_{}", bb_idx, inst_idx));
                     }
                 }
@@ -922,11 +927,6 @@ impl Module {
     /// Panics if the index is out of bounds.
     pub(crate) fn global_decl(&self, idx: GlobalDeclIdx) -> &GlobalDecl {
         &self.global_decls[idx]
-    }
-
-    // FIXME: move this to the `Instruction` type.
-    fn is_def(&self, i: &Instruction) -> bool {
-        self.instr_type(i) != &Type::Void
     }
 
     pub(crate) fn to_str(&self) -> String {
