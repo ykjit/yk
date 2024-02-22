@@ -291,6 +291,7 @@ impl MT {
                     }
                     Err(_e) => {
                         self.stats.timing_state(TimingState::None);
+                        self.stats.trace_recorded_err();
                         #[cfg(feature = "yk_jitstate_debug")]
                         print_jit_state("stop-tracing-aborted");
                     }
@@ -319,6 +320,7 @@ impl MT {
                     }
                     Err(_e) => {
                         self.stats.timing_state(TimingState::None);
+                        self.stats.trace_recorded_err();
                         #[cfg(feature = "yk_jitstate_debug")]
                         print_jit_state("stop-side-tracing-aborted");
                     }
