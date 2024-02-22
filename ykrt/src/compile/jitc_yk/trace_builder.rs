@@ -94,6 +94,7 @@ impl<'a> TraceBuilder<'a> {
         // Decide how to translate each AOT instruction based upon its opcode.
         for (inst_idx, inst) in blk.instrs.iter().enumerate() {
             match inst.opcode() {
+                aot_ir::Opcode::Br => self.handle_br(inst),
                 aot_ir::Opcode::Load => self.handle_load(inst, &bid, inst_idx),
                 aot_ir::Opcode::Call => self.handle_call(inst, &bid, inst_idx),
                 aot_ir::Opcode::Store => self.handle_store(inst, &bid, inst_idx),
@@ -196,6 +197,17 @@ impl<'a> TraceBuilder<'a> {
             self.handle_type(aot_func.type_idx())?,
         );
         self.jit_mod.func_decl_idx(&jit_func)
+    }
+
+    /// Translate a `Br` instruction.
+    fn handle_br(&mut self, inst: &aot_ir::Instruction) -> Result<(), CompilationError> {
+        if inst.operands_len() == 0 {
+            // Unconditional branch.
+            Ok(())
+        } else {
+            // Conditional branches require guards.
+            todo!()
+        }
     }
 
     /// Translate a `Load` instruction.

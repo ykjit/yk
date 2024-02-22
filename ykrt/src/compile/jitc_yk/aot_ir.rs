@@ -379,6 +379,11 @@ pub(crate) struct Instruction {
 }
 
 impl Instruction {
+    /// Return the number of operands in this instruction.
+    pub(crate) fn operands_len(&self) -> usize {
+        self.operands.len()
+    }
+
     /// Returns the operand at the specified index. Panics if the index is out of bounds.
     pub(crate) fn operand(&self, idx: usize) -> &Operand {
         &self.operands[idx]
