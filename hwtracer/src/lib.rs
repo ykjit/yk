@@ -91,7 +91,7 @@ pub trait ThreadTracer {
 /// Each trace decoder has its own concrete implementation.
 pub trait Trace: Debug + Send {
     /// Iterate over the blocks of the trace.
-    fn iter_blocks(&self) -> Box<dyn Iterator<Item = Result<Block, HWTracerError>>>;
+    fn iter_blocks(&self) -> Box<dyn Iterator<Item = Result<Block, HWTracerError>> + Send>;
 
     #[cfg(test)]
     fn bytes(&self) -> &[u8];

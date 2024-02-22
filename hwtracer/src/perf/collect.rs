@@ -180,7 +180,7 @@ impl PerfTrace {
 
 impl Trace for PerfTrace {
     #[cfg(ykpt)]
-    fn iter_blocks(&self) -> Box<dyn Iterator<Item = Result<Block, HWTracerError>>> {
+    fn iter_blocks(&self) -> Box<dyn Iterator<Item = Result<Block, HWTracerError>> + Send> {
         let bytes =
             unsafe { slice::from_raw_parts(self.buf.0, usize::try_from(self.len).unwrap()) };
         Box::new(YkPTBlockIterator::new(bytes))
