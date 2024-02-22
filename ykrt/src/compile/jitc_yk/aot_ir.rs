@@ -17,6 +17,7 @@ const FORMAT_VERSION: u32 = 0;
 /// The symbol name of the control point function (after ykllvm has transformed it).
 const CONTROL_POINT_NAME: &str = "__ykrt_control_point";
 const STACKMAP_CALL_NAME: &str = "llvm.experimental.stackmap";
+const LLVM_DEBUG_CALL_NAME: &str = "llvm.dbg.value";
 
 // Generate common methods for index types.
 macro_rules! index {
@@ -457,6 +458,20 @@ impl Instruction {
         false
     }
 
+    pub(crate) fn is_debug_call(&self, aot_mod: &Module) -> bool {
+        if self.opcode == Opcode::Call {
+            // Call instructions always have at least one operand (the callee), so this is safe.
+            let op = &self.operands[0];
+            match op {
+                Operand::Func(fop) => {
+                    return aot_mod.funcs[fop.func_idx].name == LLVM_DEBUG_CALL_NAME;
+                }
+                _ => todo!(),
+            }
+        }
+        false
+    }
+
     /// Determine if two instructions in the (immutable) AOT IR are the same based on pointer
     /// identity.
     pub(crate) fn ptr_eq(&self, other: &Self) -> bool {
@@ -676,6 +691,20 @@ pub(crate) struct FuncType {
     ret_ty: TypeIdx,
     /// Is the function vararg?
     is_vararg: bool,
+}
+
+impl FuncType {
+    pub(crate) fn arg_ty_idxs(&self) -> &Vec<TypeIdx> {
+        &self.arg_ty_idxs
+    }
+
+    pub(crate) fn ret_ty(&self) -> TypeIdx {
+        self.ret_ty
+    }
+
+    pub(crate) fn is_vararg(&self) -> bool {
+        self.is_vararg
+    }
 }
 
 #[deku_derive(DekuRead)]

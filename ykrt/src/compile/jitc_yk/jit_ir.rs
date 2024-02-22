@@ -175,7 +175,6 @@ pub(crate) struct FuncType {
 }
 
 impl FuncType {
-    #[cfg(test)]
     pub(crate) fn new(arg_ty_idxs: Vec<TypeIdx>, ret_ty: TypeIdx, is_vararg: bool) -> Self {
         Self {
             arg_ty_idxs,

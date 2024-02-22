@@ -177,9 +177,17 @@ impl<'a> TraceBuilder<'a> {
     ) -> Result<jit_ir::TypeIdx, CompilationError> {
         let jit_ty = match self.aot_mod.type_(aot_idx) {
             aot_ir::Type::Void => jit_ir::Type::Void,
-            aot_ir::Type::Integer(_it) => todo!(),
+            aot_ir::Type::Integer(it) => jit_ir::Type::Integer(it.clone()),
             aot_ir::Type::Ptr => jit_ir::Type::Ptr,
-            aot_ir::Type::Func(_ft) => todo!(),
+            aot_ir::Type::Func(ft) => {
+                let mut jit_args = Vec::new();
+                for aot_arg_ty_idx in ft.arg_ty_idxs() {
+                    let jit_ty = self.handle_type(*aot_arg_ty_idx)?;
+                    jit_args.push(jit_ty);
+                }
+                let jit_retty = self.handle_type(ft.ret_ty())?;
+                jit_ir::Type::Func(jit_ir::FuncType::new(jit_args, jit_retty, ft.is_vararg()))
+            }
             aot_ir::Type::Struct(_st) => todo!(),
             aot_ir::Type::Unimplemented(s) => jit_ir::Type::Unimplemented(s.to_owned()),
         };
@@ -236,7 +244,7 @@ impl<'a> TraceBuilder<'a> {
         bid: &aot_ir::BlockID,
         aot_inst_idx: usize,
     ) -> Result<(), CompilationError> {
-        if inst.is_stackmap_call(self.aot_mod) {
+        if inst.is_stackmap_call(self.aot_mod) || inst.is_debug_call(self.aot_mod) {
             return Ok(());
         }
         let mut args = Vec::new();
