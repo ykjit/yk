@@ -17,6 +17,11 @@ use std::{
 };
 use ykaddr::addr::symbol_vaddr;
 
+pub mod aot_ir;
+mod codegen;
+pub mod jit_ir;
+mod trace_builder;
+
 #[derive(Eq, Hash, PartialEq)]
 enum IRPhase {
     AOT,
@@ -49,11 +54,6 @@ static PHASES_TO_PRINT: LazyLock<HashSet<IRPhase>> = LazyLock::new(|| {
         HashSet::new()
     }
 });
-
-pub mod aot_ir;
-mod codegen;
-pub mod jit_ir;
-mod trace_builder;
 
 pub(crate) struct JITCYk;
 
