@@ -311,6 +311,7 @@ impl fmt::Display for Operand {
 // It should be a bag of bytes and a type.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Constant {
+    U32(u32),
     Usize(usize),
 }
 
@@ -325,6 +326,7 @@ pub enum Instruction {
     PtrAdd(PtrAddInstruction),
     Store(StoreInstruction),
     StoreGlobal(StoreGlobalInstruction),
+    Add(AddInstruction),
 }
 
 impl Instruction {
@@ -342,6 +344,7 @@ impl Instruction {
             Self::PtrAdd(..) => true,
             Self::Store(..) => false,
             Self::StoreGlobal(..) => false,
+            Self::Add(..) => true,
         }
     }
 
@@ -392,6 +395,7 @@ impl fmt::Display for Instruction {
             Self::PtrAdd(i) => write!(f, "{}", i),
             Self::Store(i) => write!(f, "{}", i),
             Self::StoreGlobal(i) => write!(f, "{}", i),
+            Self::Add(i) => write!(f, "{}", i),
         }
     }
 }
@@ -413,6 +417,8 @@ instr!(StoreGlobal, StoreGlobalInstruction);
 instr!(LoadArg, LoadArgInstruction);
 instr!(Call, CallInstruction);
 instr!(PtrAdd, PtrAddInstruction);
+// FIXME: Use a macro for all binary operations?
+instr!(Add, AddInstruction);
 
 /// The operands for a [Instruction::Load]
 ///
@@ -673,6 +679,41 @@ impl PtrAddInstruction {
 impl fmt::Display for PtrAddInstruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "PtrAdd {}, {}", self.ptr(), self.offset())
+    }
+}
+
+/// The operands for a [Instruction::Add]
+///
+/// # Semantics
+///
+/// Adds two operands together.
+///
+#[derive(Debug)]
+pub struct AddInstruction {
+    op1: PackedOperand,
+    op2: PackedOperand,
+}
+
+impl AddInstruction {
+    pub(crate) fn new(op1: Operand, op2: Operand) -> Self {
+        Self {
+            op1: PackedOperand::new(&op1),
+            op2: PackedOperand::new(&op2),
+        }
+    }
+
+    fn op1(&self) -> Operand {
+        self.op1.get()
+    }
+
+    fn op2(&self) -> Operand {
+        self.op2.get()
+    }
+}
+
+impl fmt::Display for AddInstruction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Add {}, {}", self.op1(), self.op2())
     }
 }
 

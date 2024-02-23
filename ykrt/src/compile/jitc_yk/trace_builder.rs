@@ -96,6 +96,7 @@ impl<'a> TraceBuilder<'a> {
                 aot_ir::Opcode::Call => self.handle_call(inst, &bid, inst_idx),
                 aot_ir::Opcode::Store => self.handle_store(inst, &bid, inst_idx),
                 aot_ir::Opcode::PtrAdd => self.handle_ptradd(inst, &bid, inst_idx),
+                aot_ir::Opcode::Add => self.handle_binop(inst, &bid, inst_idx),
                 _ => todo!("{:?}", inst),
             }?;
         }
@@ -146,8 +147,23 @@ impl<'a> TraceBuilder<'a> {
                 let instridx = self.local_map[lvo.instr_id()];
                 jit_ir::Operand::Local(instridx)
             }
-            aot_ir::Operand::Constant(_co) => {
-                todo!()
+            aot_ir::Operand::Constant(co) => {
+                let c = self.aot_mod.constant(co);
+                let cidx = match self.aot_mod.const_type(c) {
+                    aot_ir::Type::Integer(it) => match it.num_bits() {
+                        32 => {
+                            // These unwraps can't fail unless we did something wrong during
+                            // lowering.
+                            let val = u32::from_ne_bytes(c.bytes()[0..4].try_into().unwrap())
+                                .try_into()
+                                .unwrap();
+                            self.jit_mod.const_idx(&jit_ir::Constant::U32(val))?
+                        }
+                        _ => todo!(),
+                    },
+                    _ => todo!(),
+                };
+                jit_ir::Operand::Const(cidx)
             }
             aot_ir::Operand::Global(go) => {
                 let load = jit_ir::LoadGlobalInstruction::new(self.handle_global(go.index())?)?;
@@ -202,6 +218,22 @@ impl<'a> TraceBuilder<'a> {
             self.handle_type(aot_func.type_idx())?,
         );
         self.jit_mod.func_decl_idx(&jit_func)
+    }
+
+    /// Translate binary operations such as add, sub, mul, etc.
+    fn handle_binop(
+        &mut self,
+        inst: &aot_ir::Instruction,
+        bid: &aot_ir::BlockID,
+        aot_inst_idx: usize,
+    ) -> Result<(), CompilationError> {
+        let op1 = self.handle_operand(inst.operand(0))?;
+        let op2 = self.handle_operand(inst.operand(1))?;
+        let instr = match inst.opcode() {
+            aot_ir::Opcode::Add => jit_ir::AddInstruction::new(op1, op2),
+            _ => todo!(),
+        };
+        self.copy_instruction(instr.into(), bid, aot_inst_idx)
     }
 
     /// Translate a `Br` instruction.
@@ -284,6 +316,7 @@ impl<'a> TraceBuilder<'a> {
                 // Convert the offset into a 32 bit value, as that is the maximum we can fit into
                 // the jit_ir::PtrAddInstruction.
                 let offset: u32 = match it.num_bits() {
+                    // This unwrap can't fail unless we did something wrong during lowering.
                     64 => u64::from_ne_bytes(c.bytes()[0..8].try_into().unwrap())
                         .try_into()
                         .map_err(|_| {
