@@ -8,6 +8,9 @@ use reg_alloc::RegisterAllocator;
 
 mod abs_stack;
 mod reg_alloc;
+
+// Note that we make no attempt to cross-arch-test code generators.
+#[cfg(target_arch = "x86_64")]
 mod x86_64;
 
 /// A trait that defines access to JIT compiled code.

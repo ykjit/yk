@@ -181,8 +181,9 @@ impl<'a> X64CodeGen<'a> {
             LocalAlloc::Stack { frame_off } => {
                 match i32::try_from(*frame_off) {
                     Ok(foff) => {
+                        let size = local.instr(self.jit_mod).def_byte_size(self.jit_mod);
                         // We use `movzx` where possible to avoid partial register stalls.
-                        match local.instr(self.jit_mod).def_abi_size() {
+                        match size {
                             1 => dynasm!(self.asm; movzx Rq(reg.code()), BYTE [rbp - foff]),
                             2 => dynasm!(self.asm; movzx Rq(reg.code()), WORD [rbp - foff]),
                             4 => dynasm!(self.asm; mov Rd(reg.code()), [rbp - foff]),
@@ -213,13 +214,11 @@ impl<'a> X64CodeGen<'a> {
         }
     }
 
+    /// Store a value held in a register into a new local variable.
     fn reg_into_new_local(&mut self, local: InstrIdx, reg: Rq) {
-        let l = self.ra.allocate(
-            local,
-            local.instr(self.jit_mod).def_abi_size(),
-            &mut self.stack,
-        );
-        self.store_local(&l, reg, local.instr(self.jit_mod).def_abi_size())
+        let size = local.instr(self.jit_mod).def_byte_size(self.jit_mod);
+        let l = self.ra.allocate(local, size, &mut self.stack);
+        self.store_local(&l, reg, size);
     }
 
     fn codegen_loadarg_instr(
@@ -235,7 +234,7 @@ impl<'a> X64CodeGen<'a> {
 
     fn codegen_load_instr(&mut self, inst_idx: jit_ir::InstrIdx, inst: &jit_ir::LoadInstruction) {
         self.operand_into_reg(WR0, &inst.operand());
-        let size = inst_idx.instr(self.jit_mod).def_abi_size();
+        let size = inst_idx.instr(self.jit_mod).def_byte_size(self.jit_mod);
         debug_assert!(size <= REG64_SIZE);
         match size {
             8 => dynasm!(self.asm ; mov Rq(WR0.code()), [Rq(WR0.code())]),
@@ -339,12 +338,16 @@ mod tests {
             reg_alloc::{RegisterAllocator, SpillAllocator},
             tests::match_asm,
         },
-        jit_ir,
+        jit_ir::{self, IntegerType},
     };
 
+    fn test_module() -> jit_ir::Module {
+        jit_ir::Module::new("test".into())
+    }
+
     #[test]
-    fn simple_codegen() {
-        let mut jit_mod = jit_ir::Module::new("test".into());
+    fn codegen_load_ptr_spillalloc() {
+        let mut jit_mod = test_module();
         let ptr_ty_idx = jit_mod.type_idx(&jit_ir::Type::Ptr).unwrap();
         jit_mod.push(jit_ir::LoadArgInstruction::new().into());
         jit_mod.push(
@@ -360,6 +363,70 @@ mod tests {
             "... 00000019: mov r12, [rbp-0x08]",
             "... 00000020: mov r12, [r12]",
             "... 00000025: mov [rbp-0x10], r12",
+            "--- End jit-asm ---",
+        ];
+        let mut ra = SpillAllocator::new(STACK_DIRECTION);
+        match_asm(
+            X64CodeGen::new(&jit_mod, &mut ra)
+                .unwrap()
+                .codegen()
+                .unwrap(),
+            &patt_lines.join("\n"),
+        );
+    }
+
+    #[test]
+    fn codegen_load_i8_spillalloc() {
+        let mut jit_mod = test_module();
+        let i8_ty_idx = jit_mod
+            .type_idx(&jit_ir::Type::Integer(IntegerType::new(8)))
+            .unwrap();
+        jit_mod.push(jit_ir::LoadArgInstruction::new().into());
+        jit_mod.push(
+            jit_ir::LoadInstruction::new(
+                jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap()),
+                i8_ty_idx,
+            )
+            .into(),
+        );
+        let patt_lines = [
+            "...",
+            "; Load %0",
+            "... 00000019: mov r12, [rbp-0x08]",
+            "... 00000020: movzx r12, byte ptr [r12]",
+            "... 00000026: mov [rbp-0x09], r12b",
+            "--- End jit-asm ---",
+        ];
+        let mut ra = SpillAllocator::new(STACK_DIRECTION);
+        match_asm(
+            X64CodeGen::new(&jit_mod, &mut ra)
+                .unwrap()
+                .codegen()
+                .unwrap(),
+            &patt_lines.join("\n"),
+        );
+    }
+
+    #[test]
+    fn codegen_load_i32_spillalloc() {
+        let mut jit_mod = test_module();
+        let i32_ty_idx = jit_mod
+            .type_idx(&jit_ir::Type::Integer(IntegerType::new(32)))
+            .unwrap();
+        jit_mod.push(jit_ir::LoadArgInstruction::new().into());
+        jit_mod.push(
+            jit_ir::LoadInstruction::new(
+                jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap()),
+                i32_ty_idx,
+            )
+            .into(),
+        );
+        let patt_lines = [
+            "...",
+            "; Load %0",
+            "... 00000019: mov r12, [rbp-0x08]",
+            "... 00000020: mov r12d, [r12]",
+            "... 00000025: mov [rbp-0x0C], r12d",
             "--- End jit-asm ---",
         ];
         let mut ra = SpillAllocator::new(STACK_DIRECTION);

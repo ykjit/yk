@@ -7,7 +7,7 @@
 #![allow(dead_code)]
 
 use crate::compile::CompilationError;
-use std::{fmt, mem, ptr};
+use std::{ffi::c_void, fmt, mem, ptr};
 use typed_index_collections::TiVec;
 
 // Since the AOT versions of these data structures contain no AOT/JIT-IR-specific indices we can
@@ -209,6 +209,30 @@ pub(crate) enum Type {
     Unimplemented(String),
 }
 
+impl Type {
+    /// Returns the size of the type in bits, or `None` if asking the size makes no sense.
+    pub(crate) fn byte_size(&self) -> Option<usize> {
+        // u16/u32 -> usize conversions could theoretically fail on some arches (which we probably
+        // won't ever support).
+        match self {
+            Self::Void => Some(0),
+            Self::Integer(it) => Some(usize::try_from(it.byte_size()).unwrap()),
+            Self::Ptr => {
+                // FIXME: In theory pointers to different types could be of different sizes. We
+                // should really ask LLVM how big the pointer was when it codegenned the
+                // interpreter, and on a per-pointer basis.
+                //
+                // For now we assume (and ykllvm assserts this) that all pointers are void
+                // pointer-sized.
+                Some(mem::size_of::<*const c_void>())
+            }
+            Self::Func(_) => None,
+            Self::Struct(_) => todo!(),
+            Self::Unimplemented(_) => None,
+        }
+    }
+}
+
 /// An (externally defined, in the AOT code) function declaration.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct FuncDecl {
@@ -305,6 +329,10 @@ pub enum Instruction {
 
 impl Instruction {
     /// Returns `true` if the instruction defines a local variable.
+    ///
+    /// FIXME: Because self.def_type() isn't complete, we have to handle various possibilities here
+    /// in order that anything works. Once self.get_type() is complete (i.e. no todo!()s left) this
+    /// function can become simply `self.def_type() != Type::Void`.
     pub(crate) fn is_def(&self) -> bool {
         match self {
             Self::Load(..) => true,
@@ -317,10 +345,40 @@ impl Instruction {
         }
     }
 
-    /// Returns the size (in bytes) of the value that this instruction generates.
-    pub(crate) fn def_abi_size(&self) -> usize {
-        debug_assert!(self.is_def());
-        8 // FIXME
+    /// Returns the type of the local variable that the instruction defines (if any).
+    pub(crate) fn def_type<'a>(&self, m: &'a Module) -> Option<&'a Type> {
+        match self {
+            Self::Load(li) => Some(li.type_(m)),
+            Self::LoadGlobal(..) => todo!(),
+            Self::LoadArg(..) => {
+                // FIXME: This is nonsense, but we can't todo!() right now or we can't test
+                // anything.
+                Some(&Type::Ptr)
+            }
+            Self::Call(..) => todo!(),
+            Self::PtrAdd(..) => Some(&Type::Ptr),
+            Self::Store(..) => None,
+            Self::StoreGlobal(..) => None,
+        }
+    }
+
+    /// Returns the size of the local variable that this instruction defines (if any).
+    ///
+    /// # Panics
+    ///
+    /// Panics if:
+    ///  - The instruction defines no local variable.
+    ///  - The instruction defines an unsized local variable.
+    pub(crate) fn def_byte_size(&self, m: &Module) -> usize {
+        if let Some(ty) = self.def_type(m) {
+            if let Some(size) = ty.byte_size() {
+                size
+            } else {
+                panic!()
+            }
+        } else {
+            panic!()
+        }
     }
 }
 
@@ -382,6 +440,11 @@ impl LoadInstruction {
     /// Return the pointer operand.
     pub(crate) fn operand(&self) -> Operand {
         self.op.get()
+    }
+
+    /// Returns the type of the value to be loaded.
+    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
+        m.type_(self.ty_idx)
     }
 }
 
@@ -797,6 +860,11 @@ impl Module {
             panic!();
         }
     }
+
+    /// Return the type for the given type index.
+    pub(crate) fn type_(&self, idx: TypeIdx) -> &Type {
+        &self.types[idx]
+    }
 }
 
 impl fmt::Display for Module {
@@ -977,5 +1045,24 @@ mod tests {
         assert!(ExtraArgsIdx::new(0x12345).is_err());
         assert!(ExtraArgsIdx::new(0xffffff).is_err());
         assert!(ExtraArgsIdx::new(usize::MAX).is_err());
+    }
+
+    #[test]
+    fn void_type_size() {
+        assert_eq!(Type::Void.byte_size(), Some(0));
+    }
+
+    #[test]
+    fn int_type_size() {
+        assert_eq!(Type::Integer(IntegerType::new(0)).byte_size(), Some(0));
+        for i in 1..8 {
+            assert_eq!(Type::Integer(IntegerType::new(i)).byte_size(), Some(1));
+        }
+        for i in 9..16 {
+            assert_eq!(Type::Integer(IntegerType::new(i)).byte_size(), Some(2));
+        }
+        assert_eq!(Type::Integer(IntegerType::new(127)).byte_size(), Some(16));
+        assert_eq!(Type::Integer(IntegerType::new(128)).byte_size(), Some(16));
+        assert_eq!(Type::Integer(IntegerType::new(129)).byte_size(), Some(17));
     }
 }

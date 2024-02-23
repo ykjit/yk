@@ -13,6 +13,10 @@ impl AbstractStack {
     /// Aligns the abstract stack pointer to the specified number of bytes.
     ///
     /// Returns the newly aligned stack pointer.
+    ///
+    /// # Panics
+    ///
+    /// Panics if you try to align to zero.
     pub(crate) fn align(&mut self, to: usize) -> usize {
         let rem = self.0 % to;
         if rem != 0 {
@@ -68,6 +72,13 @@ mod tests {
         }
         assert_eq!(s.align(12345678), 12345678);
         assert_eq!(s.align(12345678), 12345678);
+    }
+
+    #[test]
+    #[should_panic]
+    fn align_zero() {
+        let mut s = AbstractStack::default();
+        s.align(0); // boom
     }
 
     #[test]
