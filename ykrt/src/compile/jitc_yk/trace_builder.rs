@@ -3,7 +3,7 @@
 use super::aot_ir::{self, IRDisplay, Module};
 use super::jit_ir;
 use crate::compile::CompilationError;
-use crate::trace::TraceAction;
+use crate::trace::{AOTTraceIterator, TraceAction};
 use std::collections::HashMap;
 
 /// The argument index of the trace inputs struct in the control point call.
@@ -16,8 +16,6 @@ struct TraceBuilder<'a> {
     aot_mod: &'a Module,
     /// The JIT IR this struct builds.
     jit_mod: jit_ir::Module,
-    /// The mapped trace.
-    mtrace: &'a Vec<TraceAction>,
     // Maps an AOT instruction to a jit instruction via their index-based IDs.
     local_map: HashMap<aot_ir::InstructionID, jit_ir::InstrIdx>,
 }
@@ -29,10 +27,9 @@ impl<'a> TraceBuilder<'a> {
     ///  - `trace_name`: The eventual symbol name for the JITted code.
     ///  - `aot_mod`: The AOT IR module that the trace flows through.
     ///  - `mtrace`: The mapped trace.
-    fn new(trace_name: String, aot_mod: &'a Module, mtrace: &'a Vec<TraceAction>) -> Self {
+    fn new(trace_name: String, aot_mod: &'a Module) -> Self {
         Self {
             aot_mod,
-            mtrace,
             jit_mod: jit_ir::Module::new(trace_name),
             local_map: HashMap::new(),
         }
@@ -304,17 +301,21 @@ impl<'a> TraceBuilder<'a> {
     /// Entry point for building an IR trace.
     ///
     /// Consumes the trace builder, returning a JIT module.
-    fn build(mut self) -> Result<jit_ir::Module, CompilationError> {
-        let first_blk = match self.mtrace.get(0) {
-            Some(b) => Ok(b),
-            None => Err(CompilationError::Unrecoverable("empty trace".into())),
-        }?;
+    fn build(
+        mut self,
+        mut ta_iter: Box<dyn AOTTraceIterator>,
+    ) -> Result<jit_ir::Module, CompilationError> {
+        let first_blk = match ta_iter.next() {
+            Some(Ok(b)) => b,
+            Some(Err(_)) => todo!(),
+            None => return Err(CompilationError::Unrecoverable("empty trace".into())),
+        };
 
         // Find the block containing the control point call. This is the (sole) predecessor of the
         // first (guaranteed mappable) block in the trace.
         let prev = match first_blk {
             TraceAction::MappedAOTBlock { func_name, bb } => {
-                debug_assert!(*bb > 0);
+                debug_assert!(bb > 0);
                 // It's `- 1` due to the way the ykllvm block splitting pass works.
                 TraceAction::MappedAOTBlock {
                     func_name: func_name.clone(),
@@ -325,21 +326,26 @@ impl<'a> TraceBuilder<'a> {
             TraceAction::Promotion => todo!(),
         };
 
-        let firstblk = self.lookup_aot_block(&prev);
-        self.create_trace_header(self.aot_mod.block(&firstblk.unwrap()))?;
+        let first_blk = self.lookup_aot_block(&prev);
+        self.create_trace_header(self.aot_mod.block(&first_blk.unwrap()))?;
 
-        for tblk in self.mtrace {
-            match self.lookup_aot_block(tblk) {
-                Some(bid) => {
-                    // MappedAOTBlock block
-                    self.process_block(bid)?;
+        for tblk in ta_iter {
+            match tblk {
+                Ok(b) => {
+                    match self.lookup_aot_block(&b) {
+                        Some(bid) => {
+                            // MappedAOTBlock block
+                            self.process_block(bid)?;
+                        }
+                        None => {
+                            // UnmappableBlock block
+                            // Ignore for now. May be later used to make sense of the control flow. Though
+                            // ideally we remove unmappable blocks from the trace so we can handle software
+                            // and hardware traces the same.
+                        }
+                    }
                 }
-                None => {
-                    // UnmappableBlock block
-                    // Ignore for now. May be later used to make sense of the control flow. Though
-                    // ideally we remove unmappable blocks from the trace so we can handle software
-                    // and hardware traces the same.
-                }
+                Err(_) => todo!(),
             }
         }
         Ok(self.jit_mod)
@@ -349,8 +355,8 @@ impl<'a> TraceBuilder<'a> {
 /// Given a mapped trace (through `aot_mod`), assemble and return a Yk IR trace.
 pub(super) fn build(
     aot_mod: &Module,
-    mtrace: &Vec<TraceAction>,
+    ta_iter: Box<dyn AOTTraceIterator>,
 ) -> Result<jit_ir::Module, CompilationError> {
     // FIXME: the XXX below should be a thread-safe monotonically incrementing integer.
-    TraceBuilder::new("__yk_compiled_trace_XXX".into(), aot_mod, mtrace).build()
+    TraceBuilder::new("__yk_compiled_trace_XXX".into(), aot_mod).build(ta_iter)
 }
