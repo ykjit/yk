@@ -643,6 +643,19 @@ impl IntegerType {
         self.num_bits
     }
 
+    /// Return the number of bytes required to store this integer type.
+    ///
+    /// Padding for alignment is not included.
+    pub(crate) fn byte_size(&self) -> usize {
+        let bits = self.num_bits();
+        let mut ret = bits / 8;
+        // If it wasn't an exactly byte-sized thing, round up to the next byte.
+        if bits % 8 != 0 {
+            ret += 1;
+        }
+        usize::try_from(ret).unwrap()
+    }
+
     /// Create a new integer type with the specified number of bits.
     #[cfg(test)]
     pub(crate) fn new(num_bits: u32) -> Self {
@@ -849,7 +862,9 @@ impl IRDisplay for GlobalDecl {
 
 /// A bytecode module.
 ///
-/// This is the top-level container for the bytecode.
+/// This is the top-level container for the AOT IR.
+///
+/// A module is platform dependent, as type sizes and alignment are baked-in.
 #[deku_derive(DekuRead)]
 #[derive(Debug, Default)]
 pub(crate) struct Module {
@@ -1420,5 +1435,19 @@ func bar();
         check(64, u64::MAX, "-1i64");
         check(64, 12345678u64, "12345678i64");
         check(64, i64::MIN as u64, &format!("{}i64", i64::MIN));
+    }
+
+    #[test]
+    fn integer_type_sizes() {
+        assert_eq!(IntegerType::new(0).byte_size(), 0);
+        for i in 1..8 {
+            assert_eq!(IntegerType::new(i).byte_size(), 1);
+        }
+        for i in 9..16 {
+            assert_eq!(IntegerType::new(i).byte_size(), 2);
+        }
+        assert_eq!(IntegerType::new(127).byte_size(), 16);
+        assert_eq!(IntegerType::new(128).byte_size(), 16);
+        assert_eq!(IntegerType::new(129).byte_size(), 17);
     }
 }
