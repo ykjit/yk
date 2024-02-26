@@ -277,8 +277,10 @@ impl MT {
                         mtt.promotions.take().unwrap(),
                     )
                 });
+                self.stats.timing_state(TimingState::TraceMapping);
                 match thrdtrcr.stop() {
                     Ok(utrace) => {
+                        self.stats.timing_state(TimingState::None);
                         #[cfg(feature = "yk_jitstate_debug")]
                         print_jit_state("stop-tracing");
                         self.queue_compile_job(
@@ -288,6 +290,7 @@ impl MT {
                         );
                     }
                     Err(_e) => {
+                        self.stats.timing_state(TimingState::None);
                         #[cfg(feature = "yk_jitstate_debug")]
                         print_jit_state("stop-tracing-aborted");
                     }
@@ -302,8 +305,10 @@ impl MT {
                         mtt.promotions.take().unwrap(),
                     )
                 });
+                self.stats.timing_state(TimingState::TraceMapping);
                 match thrdtrcr.stop() {
                     Ok(utrace) => {
+                        self.stats.timing_state(TimingState::None);
                         #[cfg(feature = "yk_jitstate_debug")]
                         print_jit_state("stop-side-tracing");
                         self.queue_compile_job(
@@ -313,6 +318,7 @@ impl MT {
                         );
                     }
                     Err(_e) => {
+                        self.stats.timing_state(TimingState::None);
                         #[cfg(feature = "yk_jitstate_debug")]
                         print_jit_state("stop-side-tracing-aborted");
                     }
@@ -500,11 +506,9 @@ impl MT {
         self.stats.trace_recorded_ok();
         let mt = Arc::clone(self);
         let do_compile = move || {
-            mt.stats.timing_state(TimingState::TraceMapping);
             debug_assert!(
                 sidetrace.is_none() || matches!(hl_arc.lock().kind, HotLocationKind::Compiled(_))
             );
-            mt.stats.timing_state(TimingState::None);
             let compiler = {
                 let lk = mt.compiler.lock();
                 Arc::clone(&*lk)

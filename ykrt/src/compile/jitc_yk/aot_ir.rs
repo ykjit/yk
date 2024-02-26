@@ -16,6 +16,8 @@ const FORMAT_VERSION: u32 = 0;
 
 /// The symbol name of the control point function (after ykllvm has transformed it).
 const CONTROL_POINT_NAME: &str = "__ykrt_control_point";
+const STACKMAP_CALL_NAME: &str = "llvm.experimental.stackmap";
+const LLVM_DEBUG_CALL_NAME: &str = "llvm.dbg.value";
 
 // Generate common methods for index types.
 macro_rules! index {
@@ -53,7 +55,7 @@ index!(TypeIdx);
 
 /// A basic block index.
 ///
-/// One of these is an index into [Function::blocks].
+/// One of these is an index into [Func::blocks].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct BlockIdx(usize);
@@ -75,11 +77,14 @@ index!(InstrIdx);
 pub(crate) struct ConstIdx(usize);
 index!(ConstIdx);
 
-/// A global variable index.
+/// A global variable declaration index.
+///
+/// These are "declarations" and not "definitions" because they all been AOT code-generated
+/// already, and thus come "pre-initialised".
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct GlobalIdx(usize);
-index!(GlobalIdx);
+pub(crate) struct GlobalDeclIdx(usize);
+index!(GlobalDeclIdx);
 
 /// A function argument index.
 #[deku_derive(DekuRead)]
@@ -248,7 +253,7 @@ impl IRDisplay for BlockOperand {
 
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
-pub(crate) struct FunctionOperand {
+pub(crate) struct FuncOperand {
     func_idx: FuncIdx,
 }
 
@@ -265,29 +270,29 @@ impl IRDisplay for ArgOperand {
     }
 }
 
-/// An operand that describes a global variable.
+/// A global variable operand.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct GlobalOperand {
-    global_idx: GlobalIdx,
+    global_decl_idx: GlobalDeclIdx,
 }
 
 impl GlobalOperand {
-    pub(crate) fn index(&self) -> GlobalIdx {
-        self.global_idx
+    pub(crate) fn index(&self) -> GlobalDeclIdx {
+        self.global_decl_idx
     }
 }
 
 impl IRDisplay for GlobalOperand {
     fn to_str(&self, m: &Module) -> String {
-        m.globals[self.global_idx].to_str(m)
+        m.global_decls[self.global_decl_idx].to_str(m)
     }
 }
 
 const OPKIND_CONST: u8 = 0;
 const OPKIND_LOCAL_VARIABLE: u8 = 1;
 const OPKIND_TYPE: u8 = 2;
-const OPKIND_FUNCTION: u8 = 3;
+const OPKIND_FUNC: u8 = 3;
 const OPKIND_BLOCK: u8 = 4;
 const OPKIND_ARG: u8 = 5;
 const OPKIND_GLOBAL: u8 = 6;
@@ -303,8 +308,8 @@ pub(crate) enum Operand {
     LocalVariable(LocalVariableOperand),
     #[deku(id = "OPKIND_TYPE")]
     Type(TypeOperand),
-    #[deku(id = "OPKIND_FUNCTION")]
-    Function(FunctionOperand),
+    #[deku(id = "OPKIND_FUNC")]
+    Func(FuncOperand),
     #[deku(id = "OPKIND_BLOCK")]
     Block(BlockOperand),
     #[deku(id = "OPKIND_ARG")]
@@ -350,7 +355,7 @@ impl IRDisplay for Operand {
             Self::Constant(c) => c.to_str(m),
             Self::LocalVariable(l) => l.to_str(m),
             Self::Type(t) => m.types[t.type_idx].to_str(m),
-            Self::Function(f) => m.funcs[f.func_idx].name.to_owned(),
+            Self::Func(f) => m.funcs[f.func_idx].name.to_owned(),
             Self::Block(bb) => bb.to_str(m),
             Self::Global(g) => g.to_str(m),
             Self::Arg(a) => a.to_str(m),
@@ -375,6 +380,11 @@ pub(crate) struct Instruction {
 }
 
 impl Instruction {
+    /// Return the number of operands in this instruction.
+    pub(crate) fn operands_len(&self) -> usize {
+        self.operands.len()
+    }
+
     /// Returns the operand at the specified index. Panics if the index is out of bounds.
     pub(crate) fn operand(&self, idx: usize) -> &Operand {
         &self.operands[idx]
@@ -398,9 +408,14 @@ impl Instruction {
         debug_assert!(matches!(self.opcode, Opcode::Call));
         let op = self.operand(0);
         match op {
-            Operand::Function(fo) => fo.func_idx,
+            Operand::Func(fo) => fo.func_idx,
             _ => panic!(),
         }
+    }
+
+    /// Returns true if this instruction defines a new local variable.
+    fn is_def(&self, m: &Module) -> bool {
+        m.instr_type(self) != &Type::Void
     }
 
     pub(crate) fn type_idx(&self) -> TypeIdx {
@@ -420,8 +435,36 @@ impl Instruction {
             // Call instructions always have at least one operand (the callee), so this is safe.
             let op = &self.operands[0];
             match op {
-                Operand::Function(fop) => {
+                Operand::Func(fop) => {
                     return aot_mod.funcs[fop.func_idx].name == CONTROL_POINT_NAME;
+                }
+                _ => todo!(),
+            }
+        }
+        false
+    }
+
+    pub(crate) fn is_stackmap_call(&self, aot_mod: &Module) -> bool {
+        if self.opcode == Opcode::Call {
+            // Call instructions always have at least one operand (the callee), so this is safe.
+            let op = &self.operands[0];
+            match op {
+                Operand::Func(fop) => {
+                    return aot_mod.funcs[fop.func_idx].name == STACKMAP_CALL_NAME;
+                }
+                _ => todo!(),
+            }
+        }
+        false
+    }
+
+    pub(crate) fn is_debug_call(&self, aot_mod: &Module) -> bool {
+        if self.opcode == Opcode::Call {
+            // Call instructions always have at least one operand (the callee), so this is safe.
+            let op = &self.operands[0];
+            match op {
+                Operand::Func(fop) => {
+                    return aot_mod.funcs[fop.func_idx].name == LLVM_DEBUG_CALL_NAME;
                 }
                 _ => todo!(),
             }
@@ -453,7 +496,7 @@ impl IRDisplay for Instruction {
         }
 
         let mut ret = String::new();
-        if m.instr_generates_value(self) {
+        if self.is_def(m) {
             let name = self.name.borrow();
             // The unwrap cannot fail, as we forced computation of variable names above.
             ret.push_str(&format!(
@@ -512,7 +555,7 @@ impl IRDisplay for Block {
 /// A function.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
-pub(crate) struct Function {
+pub(crate) struct Func {
     #[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")]
     name: String,
     type_idx: TypeIdx,
@@ -522,7 +565,7 @@ pub(crate) struct Function {
     blocks: TiVec<BlockIdx, Block>,
 }
 
-impl<'a> Function {
+impl<'a> Func {
     fn is_declaration(&self) -> bool {
         self.blocks.is_empty()
     }
@@ -547,7 +590,7 @@ impl<'a> Function {
     }
 }
 
-impl IRDisplay for Function {
+impl IRDisplay for Func {
     fn to_str(&self, m: &Module) -> String {
         let ty = &m.types[self.type_idx];
         if let Type::Func(fty) = ty {
@@ -648,6 +691,20 @@ pub(crate) struct FuncType {
     ret_ty: TypeIdx,
     /// Is the function vararg?
     is_vararg: bool,
+}
+
+impl FuncType {
+    pub(crate) fn arg_ty_idxs(&self) -> &Vec<TypeIdx> {
+        &self.arg_ty_idxs
+    }
+
+    pub(crate) fn ret_ty(&self) -> TypeIdx {
+        self.ret_ty
+    }
+
+    pub(crate) fn is_vararg(&self) -> bool {
+        self.is_vararg
+    }
 }
 
 #[deku_derive(DekuRead)]
@@ -775,18 +832,18 @@ impl IRDisplay for Constant {
     }
 }
 
-/// A global variable, identified by its symbol name.
+/// A global variable declaration, identified by its symbol name.
 #[deku_derive(DekuRead)]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct Global {
+pub(crate) struct GlobalDecl {
     is_threadlocal: bool,
     #[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")]
     name: String,
 }
 
-impl IRDisplay for Global {
+impl IRDisplay for GlobalDecl {
     fn to_str(&self, _m: &Module) -> String {
-        format!("Global({}, tls={})", self.name, self.is_threadlocal)
+        format!("GlobalDecl({}, tls={})", self.name, self.is_threadlocal)
     }
 }
 
@@ -803,15 +860,15 @@ pub(crate) struct Module {
     #[deku(temp)]
     num_funcs: usize,
     #[deku(count = "num_funcs", map = "deserialise_into_ti_vec")]
-    funcs: TiVec<FuncIdx, Function>,
+    funcs: TiVec<FuncIdx, Func>,
     #[deku(temp)]
     num_consts: usize,
     #[deku(count = "num_consts", map = "deserialise_into_ti_vec")]
     consts: TiVec<ConstIdx, Constant>,
     #[deku(temp)]
-    num_globals: usize,
-    #[deku(count = "num_globals", map = "deserialise_into_ti_vec")]
-    globals: TiVec<GlobalIdx, Global>,
+    num_global_decls: usize,
+    #[deku(count = "num_global_decls", map = "deserialise_into_ti_vec")]
+    global_decls: TiVec<GlobalDeclIdx, GlobalDecl>,
     #[deku(temp)]
     num_types: usize,
     #[deku(count = "num_types", map = "deserialise_into_ti_vec")]
@@ -832,7 +889,7 @@ impl Module {
         for f in &self.funcs {
             for (bb_idx, bb) in f.blocks.iter().enumerate() {
                 for (inst_idx, inst) in bb.instrs.iter().enumerate() {
-                    if self.instr_generates_value(inst) {
+                    if inst.is_def(self) {
                         *inst.name.borrow_mut() = Some(format!("{}_{}", bb_idx, inst_idx));
                     }
                 }
@@ -908,23 +965,17 @@ impl Module {
     /// # Panics
     ///
     /// Panics if the index is out of bounds.
-    pub(crate) fn func(&self, idx: FuncIdx) -> &Function {
+    pub(crate) fn func(&self, idx: FuncIdx) -> &Func {
         &self.funcs[idx]
     }
 
-    /// Lookup a global by its index.
+    /// Lookup a global variable declaration by its index.
     ///
     /// # Panics
     ///
     /// Panics if the index is out of bounds.
-    pub(crate) fn global(&self, idx: GlobalIdx) -> &Global {
-        &self.globals[idx]
-    }
-
-    // FIXME: rename this to `is_def()`, which we've decided is a beter name.
-    // FIXME: also move this to the `Instruction` type.
-    fn instr_generates_value(&self, i: &Instruction) -> bool {
-        self.instr_type(i) != &Type::Void
+    pub(crate) fn global_decl(&self, idx: GlobalDeclIdx) -> &GlobalDecl {
+        &self.global_decls[idx]
     }
 
     pub(crate) fn to_str(&self) -> String {
@@ -932,7 +983,10 @@ impl Module {
         ret.push_str(&format!("# IR format version: {}\n", self.version));
         ret.push_str(&format!("# Num funcs: {}\n", self.funcs.len()));
         ret.push_str(&format!("# Num consts: {}\n", self.consts.len()));
-        ret.push_str(&format!("# Num globals: {}\n", self.globals.len()));
+        ret.push_str(&format!(
+            "# Num global decls: {}\n",
+            self.global_decls.len()
+        ));
         ret.push_str(&format!("# Num types: {}\n", self.types.len()));
 
         for func in &self.funcs {
@@ -972,7 +1026,7 @@ pub fn print_from_file(path: &PathBuf) -> Result<(), CompilationError> {
 mod tests {
     use super::{
         deserialise_module, deserialise_string, Constant, IntegerType, Opcode, TypeIdx,
-        FORMAT_VERSION, MAGIC, OPKIND_BLOCK, OPKIND_CONST, OPKIND_FUNCTION, OPKIND_LOCAL_VARIABLE,
+        FORMAT_VERSION, MAGIC, OPKIND_BLOCK, OPKIND_CONST, OPKIND_FUNC, OPKIND_LOCAL_VARIABLE,
         OPKIND_TYPE, OPKIND_UNIMPLEMENTED, TYKIND_FUNC, TYKIND_INTEGER, TYKIND_PTR, TYKIND_STRUCT,
         TYKIND_UNIMPLEMENTED, TYKIND_VOID,
     };
@@ -1004,7 +1058,7 @@ mod tests {
         // version:
         data.write_u32::<NativeEndian>(FORMAT_VERSION).unwrap();
 
-        // num_functions:
+        // num_funcs:
         write_native_usize(&mut data, 2);
 
         // FUNCTION 0
@@ -1122,7 +1176,7 @@ mod tests {
         data.write_u32::<NativeEndian>(3).unwrap();
         // OPERAND 0
         // operand_kind:
-        data.write_u8(OPKIND_FUNCTION).unwrap();
+        data.write_u8(OPKIND_FUNC).unwrap();
         // func_idx:
         write_native_usize(&mut data, 1);
         // OPERAND 1
@@ -1186,11 +1240,11 @@ mod tests {
         // bytes:
         data.write_u32::<NativeEndian>(50).unwrap();
 
-        // GLOBALS
-        // num_globals:
+        // GLOBAL DECLS
+        // num_global_decls:
         write_native_usize(&mut data, 1);
 
-        // GLOBAL 1
+        // GLOBAL DECL 1
         // is_threadlocal:
         let _ = data.write_u8(0);
         // name:
@@ -1265,7 +1319,7 @@ mod tests {
 # IR format version: 0
 # Num funcs: 2
 # Num consts: 3
-# Num globals: 1
+# Num global decls: 1
 # Num types: 7
 
 func foo($arg0: ptr, $arg1: i32) -> i32 {

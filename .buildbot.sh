@@ -52,7 +52,8 @@ cmake -DCMAKE_INSTALL_PREFIX=`pwd`/../inst \
     ../llvm
 cmake --build .
 cmake --install .
-export YKB_YKLLVM_BIN_DIR=`pwd`/../inst/bin
+YKLLVM_BIN_DIR=$(pwd)/../inst/bin
+export YKB_YKLLVM_BIN_DIR=${YKLLVM_BIN_DIR}
 cd ../../
 
 # Check that clang-format is installed.
@@ -96,10 +97,10 @@ done
 
 # Test with LLVM sanitisers
 rustup component add rust-src
-# FIXME: asan disabled for now: https://github.com/ykjit/yk/issues/981
-#RUSTFLAGS="-Z sanitizer=address" cargo test \
-#    -Z build-std \
-#    --target x86_64-unknown-linux-gnu
+ASAN_SYMBOLIZER_PATH=${YKLLVM_BIN_DIR}/llvm-symbolizer \
+    RUSTFLAGS="-Z sanitizer=address" cargo test \
+    -Z build-std \
+    --target x86_64-unknown-linux-gnu
 # The thread sanitiser does have false positives (albeit much reduced by `-Z
 # build-std`), so we have to add a suppression file to avoid those stopping
 # this script from succeeding. This does mean that we might suppress some true

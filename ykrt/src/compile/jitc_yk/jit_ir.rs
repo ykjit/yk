@@ -12,7 +12,7 @@ use typed_index_collections::TiVec;
 
 // Since the AOT versions of these data structures contain no AOT/JIT-IR-specific indices we can
 // share them. Note though, that their corresponding index types are not shared.
-pub(crate) use super::aot_ir::Global;
+pub(crate) use super::aot_ir::GlobalDecl;
 pub(crate) use super::aot_ir::IntegerType;
 
 /// Bit fiddling.
@@ -144,10 +144,10 @@ index_16bit!(ExtraArgsIdx);
 pub(crate) struct ConstIdx(u16);
 index_16bit!(ConstIdx);
 
-/// A global index.
+/// A global variable declaration index.
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub(crate) struct GlobalIdx(U24);
-index_24bit!(GlobalIdx);
+pub(crate) struct GlobalDeclIdx(U24);
+index_24bit!(GlobalDeclIdx);
 
 /// An instruction index.
 ///
@@ -175,7 +175,6 @@ pub(crate) struct FuncType {
 }
 
 impl FuncType {
-    #[cfg(test)]
     pub(crate) fn new(arg_ty_idxs: Vec<TypeIdx>, ret_ty: TypeIdx, is_vararg: bool) -> Self {
         Self {
             arg_ty_idxs,
@@ -427,18 +426,18 @@ impl LoadArgInstruction {
 #[derive(Debug)]
 pub struct LoadGlobalInstruction {
     /// The pointer to load from.
-    global_idx: GlobalIdx,
+    global_decl_idx: GlobalDeclIdx,
 }
 
 impl LoadGlobalInstruction {
-    pub(crate) fn new(global_idx: GlobalIdx) -> Result<Self, CompilationError> {
-        Ok(Self { global_idx })
+    pub(crate) fn new(global_decl_idx: GlobalDeclIdx) -> Result<Self, CompilationError> {
+        Ok(Self { global_decl_idx })
     }
 }
 
 impl fmt::Display for LoadGlobalInstruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "LoadGlobal {}", self.global_idx.0.to_usize())
+        write!(f, "LoadGlobal {}", usize::from(self.global_decl_idx))
     }
 }
 
@@ -549,14 +548,17 @@ pub struct StoreGlobalInstruction {
     /// The value to store.
     val: PackedOperand,
     /// The pointer to store into.
-    global_idx: GlobalIdx,
+    global_decl_idx: GlobalDeclIdx,
 }
 
 impl StoreGlobalInstruction {
-    pub(crate) fn new(val: Operand, global_idx: GlobalIdx) -> Result<Self, CompilationError> {
+    pub(crate) fn new(
+        val: Operand,
+        global_decl_idx: GlobalDeclIdx,
+    ) -> Result<Self, CompilationError> {
         Ok(Self {
             val: PackedOperand::new(&val),
-            global_idx,
+            global_decl_idx,
         })
     }
 }
@@ -567,7 +569,7 @@ impl fmt::Display for StoreGlobalInstruction {
             f,
             "StoreGlobal {}, {}",
             self.val.get(),
-            self.global_idx.0.to_usize()
+            usize::from(self.global_decl_idx)
         )
     }
 }
@@ -647,11 +649,11 @@ pub(crate) struct Module {
     ///
     /// A [FuncDeclIdx] is an index into this.
     func_decls: TiVec<FuncDeclIdx, FuncDecl>,
-    /// The global variable table.
+    /// The global variable declaration table.
     ///
-    /// This is a collectiion of externally defined global variables that the trace may need to
-    /// reference.
-    globals: TiVec<GlobalIdx, Global>,
+    /// This is a collection of externally defined global variables that the trace may need to
+    /// reference. Because they are externally initialised, these are *declarations*.
+    global_decls: TiVec<GlobalDeclIdx, GlobalDecl>,
 }
 
 impl Module {
@@ -664,7 +666,7 @@ impl Module {
             consts: Vec::new(),
             types: TiVec::new(),
             func_decls: TiVec::new(),
-            globals: TiVec::new(),
+            global_decls: TiVec::new(),
         }
     }
 
@@ -721,12 +723,14 @@ impl Module {
         ConstIdx::new(idx)
     }
 
-    /// Push a new global variable declaration into the global declaration table and return its
-    /// index.
-    pub fn push_global(&mut self, global: Global) -> Result<GlobalIdx, CompilationError> {
+    /// Push a new declaration into the global variable declaration table and return its index.
+    pub fn push_global_decl(
+        &mut self,
+        decl: GlobalDecl,
+    ) -> Result<GlobalDeclIdx, CompilationError> {
         let idx = self.consts.len();
-        self.globals.push(global);
-        GlobalIdx::new(idx)
+        self.global_decls.push(decl);
+        GlobalDeclIdx::new(idx)
     }
 
     /// Get the index of a constant, inserting it in the constant table if necessary.
@@ -763,13 +767,16 @@ impl Module {
     }
 
     /// Get the index of a global, inserting it into the global declaration table if necessary.
-    pub(crate) fn global_idx(&mut self, g: &Global) -> Result<GlobalIdx, CompilationError> {
+    pub(crate) fn global_decl_idx(
+        &mut self,
+        g: &GlobalDecl,
+    ) -> Result<GlobalDeclIdx, CompilationError> {
         // FIXME: can we optimise this?
-        if let Some(idx) = self.globals.position(|tg| tg == g) {
+        if let Some(idx) = self.global_decls.position(|tg| tg == g) {
             Ok(idx)
         } else {
             // global decl table miss, we need to insert it.
-            self.push_global(g.clone())
+            self.push_global_decl(g.clone())
         }
     }
 

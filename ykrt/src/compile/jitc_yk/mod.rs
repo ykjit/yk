@@ -17,6 +17,11 @@ use std::{
 };
 use ykaddr::addr::symbol_vaddr;
 
+pub mod aot_ir;
+mod codegen;
+pub mod jit_ir;
+mod trace_builder;
+
 #[derive(Eq, Hash, PartialEq)]
 enum IRPhase {
     AOT,
@@ -50,11 +55,6 @@ static PHASES_TO_PRINT: LazyLock<HashSet<IRPhase>> = LazyLock::new(|| {
     }
 });
 
-pub mod aot_ir;
-mod codegen;
-pub mod jit_ir;
-mod trace_builder;
-
 pub(crate) struct JITCYk;
 
 impl Compiler for JITCYk {
@@ -78,8 +78,7 @@ impl Compiler for JITCYk {
             eprintln!("--- End aot ---");
         }
 
-        let mtrace = aottrace_iter.0.collect::<Vec<_>>();
-        let jit_mod = trace_builder::build(&aot_mod, &mtrace)?;
+        let jit_mod = trace_builder::build(&aot_mod, aottrace_iter.0)?;
 
         if PHASES_TO_PRINT.contains(&IRPhase::PreOpt) {
             eprintln!("--- Begin pre-opt ---");
