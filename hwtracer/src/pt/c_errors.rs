@@ -52,7 +52,7 @@ impl From<PerfPTCError> for HWTracerError {
                 HWTracerError::Unrecoverable("PerfPTCErrorKind::Unknown".into())
             }
             PerfPTCErrorKind::Errno => {
-                HWTracerError::Unrecoverable(format!("c set errnor {}", err.code))
+                HWTracerError::Unrecoverable(format!("c set errno {}", err.code))
             }
             #[cfg(pt)]
             PerfPTCErrorKind::PT => {

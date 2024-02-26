@@ -1,6 +1,7 @@
 //! Hardware tracing via hwtracer.
 
 use super::{errors::InvalidTraceError, AOTTraceIterator, TraceRecorder};
+use hwtracer::{HWTracerError, TemporaryErrorKind};
 use std::{error::Error, sync::Arc};
 
 pub(crate) mod mapper;
@@ -35,7 +36,12 @@ struct HWTTraceRecorder {
 impl TraceRecorder for HWTTraceRecorder {
     fn stop(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, InvalidTraceError> {
         // FIXME: is this `unwrap` safe?
-        let tr = self.thread_tracer.stop_collector().unwrap();
-        Ok(Box::new(HWTTraceIterator::new(tr)?))
+        match self.thread_tracer.stop_collector() {
+            Ok(x) => Ok(Box::new(HWTTraceIterator::new(x)?)),
+            Err(HWTracerError::Temporary(TemporaryErrorKind::TraceBufferOverflow)) => {
+                Err(InvalidTraceError::TraceTooLong)
+            }
+            _ => todo!(),
+        }
     }
 }
