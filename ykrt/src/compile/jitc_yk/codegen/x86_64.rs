@@ -111,6 +111,7 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Instruction::LoadArg(i) => self.codegen_loadarg_instr(instr_idx, &i),
             jit_ir::Instruction::Load(i) => self.codegen_load_instr(instr_idx, &i),
             jit_ir::Instruction::PtrAdd(i) => self.codegen_ptradd_instr(instr_idx, &i),
+            jit_ir::Instruction::Store(i) => self.codegen_store_instr(&i),
             _ => todo!(),
         }
     }
@@ -234,7 +235,7 @@ impl<'a> X64CodeGen<'a> {
     }
 
     fn codegen_load_instr(&mut self, inst_idx: jit_ir::InstrIdx, inst: &jit_ir::LoadInstruction) {
-        self.operand_into_reg(WR0, &inst.operand());
+        self.operand_into_reg(WR0, &inst.operand()); // FIXME: assumes value will fit in a reg.
         let size = inst_idx.instr(self.jit_mod).def_byte_size(self.jit_mod);
         debug_assert!(size <= REG64_SIZE);
         match size {
@@ -262,6 +263,19 @@ impl<'a> X64CodeGen<'a> {
             todo!();
         }
         self.reg_into_new_local(inst_idx, WR0);
+    }
+
+    fn codegen_store_instr(&mut self, inst: &jit_ir::StoreInstruction) {
+        self.operand_into_reg(WR0, &inst.ptr());
+        let val = inst.val();
+        self.operand_into_reg(WR1, &val); // FIXME: assumes the value fits in a reg
+        match val.byte_size(self.jit_mod) {
+            8 => dynasm!(self.asm ; mov [Rq(WR0.code())], Rq(WR1.code())),
+            4 => dynasm!(self.asm ; mov [Rq(WR0.code())], Rd(WR1.code())),
+            2 => dynasm!(self.asm ; mov [Rq(WR0.code())], Rw(WR1.code())),
+            1 => dynasm!(self.asm ; mov [Rq(WR0.code())], Rb(WR1.code())),
+            _ => todo!(),
+        }
     }
 
     fn const_u64_into_reg(&mut self, reg: Rq, cv: u64) {
@@ -464,6 +478,29 @@ mod tests {
             "... 00000019: mov r12, [rbp-0x08]",
             "... 00000020: add r12, 0x40",
             "... 00000027: mov [rbp-0x10], r12",
+            "--- End jit-asm ---",
+        ];
+        test_with_spillalloc(&jit_mod, &patt_lines);
+    }
+
+    #[test]
+    fn codegen_store_ptr_spillalloc() {
+        let mut jit_mod = test_module();
+        jit_mod.push(jit_ir::LoadArgInstruction::new().into());
+        jit_mod.push(jit_ir::LoadArgInstruction::new().into());
+        jit_mod.push(
+            jit_ir::StoreInstruction::new(
+                jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap()),
+                jit_ir::Operand::Local(jit_ir::InstrIdx::new(1).unwrap()),
+            )
+            .into(),
+        );
+        let patt_lines = [
+            "...",
+            "; Store %0, %1",
+            "... 00000027: mov r12, [rbp-0x10]",
+            "... 0000002e: mov r13, [rbp-0x08]",
+            "... 00000035: mov [r12], r13",
             "--- End jit-asm ---",
         ];
         test_with_spillalloc(&jit_mod, &patt_lines);
