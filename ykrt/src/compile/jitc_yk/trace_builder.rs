@@ -18,6 +18,10 @@ struct TraceBuilder<'a> {
     jit_mod: jit_ir::Module,
     // Maps an AOT instruction to a jit instruction via their index-based IDs.
     local_map: HashMap<aot_ir::InstructionID, jit_ir::InstrIdx>,
+    // Block containing the current control point (i.e. the control point that started this trace).
+    cp_block: Option<aot_ir::BlockID>,
+    // Index of the first traceinput instruction.
+    first_ti_idx: usize,
 }
 
 impl<'a> TraceBuilder<'a> {
@@ -32,6 +36,8 @@ impl<'a> TraceBuilder<'a> {
             aot_mod,
             jit_mod: jit_ir::Module::new(trace_name),
             local_map: HashMap::new(),
+            cp_block: None,
+            first_ti_idx: 0,
         }
     }
 
@@ -54,7 +60,7 @@ impl<'a> TraceBuilder<'a> {
         let mut last_store = None;
         let mut trace_input = None;
         let mut input = Vec::new();
-        for inst in blk.instrs.iter().rev() {
+        for (inst_idx, inst) in blk.instrs.iter().enumerate().rev() {
             if inst.is_control_point(self.aot_mod) {
                 trace_input = Some(inst.operand(CTRL_POINT_ARGIDX_INPUTS));
             }
@@ -77,6 +83,7 @@ impl<'a> TraceBuilder<'a> {
                     self.local_map
                         .insert(inp.to_instr_id(), self.next_instr_id()?);
                     self.jit_mod.push(load_arg);
+                    self.first_ti_idx = inst_idx;
                 }
             }
         }
@@ -99,7 +106,15 @@ impl<'a> TraceBuilder<'a> {
                 aot_ir::Opcode::Load => self.handle_load(inst, &bid, inst_idx),
                 aot_ir::Opcode::Call => self.handle_call(inst, &bid, inst_idx),
                 aot_ir::Opcode::Store => self.handle_store(inst, &bid, inst_idx),
-                aot_ir::Opcode::PtrAdd => self.handle_ptradd(inst, &bid, inst_idx),
+                aot_ir::Opcode::PtrAdd => {
+                    if self.cp_block.as_ref() == Some(&bid) && inst_idx == self.first_ti_idx {
+                        // We've reached the trace inputs part of the control point block. There's
+                        // no point in copying these instructions over and we can just skip to the
+                        // next block.
+                        return Ok(());
+                    }
+                    self.handle_ptradd(inst, &bid, inst_idx)
+                }
                 aot_ir::Opcode::Add => self.handle_binop(inst, &bid, inst_idx),
                 aot_ir::Opcode::Icmp => self.handle_icmp(inst, &bid, inst_idx),
                 aot_ir::Opcode::CondBr => self.handle_condbr(inst, nextbb.as_ref().unwrap()),
@@ -388,8 +403,10 @@ impl<'a> TraceBuilder<'a> {
             TraceAction::Promotion => todo!(),
         };
 
-        let first_blk = self.lookup_aot_block(&prev);
-        self.create_trace_header(self.aot_mod.block(&first_blk.unwrap()))?;
+        self.cp_block = self.lookup_aot_block(&prev);
+        // This unwrap can't fail. If it does that means the tracer has given us a mappable block
+        // that doesn't exist in the AOT module.
+        self.create_trace_header(self.aot_mod.block(self.cp_block.as_ref().unwrap()))?;
         let mut trace_iter = ta_iter.peekable();
         while let Some(tblk) = trace_iter.next() {
             match tblk {
