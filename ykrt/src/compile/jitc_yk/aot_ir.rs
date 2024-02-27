@@ -204,7 +204,7 @@ impl InstructionID {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) struct BlockID {
     func_idx: FuncIdx,
     block_idx: BlockIdx,
