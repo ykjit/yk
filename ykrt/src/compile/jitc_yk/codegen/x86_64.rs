@@ -110,6 +110,7 @@ impl<'a> X64CodeGen<'a> {
         match inst {
             jit_ir::Instruction::LoadArg(i) => self.codegen_loadarg_instr(instr_idx, &i),
             jit_ir::Instruction::Load(i) => self.codegen_load_instr(instr_idx, &i),
+            jit_ir::Instruction::PtrAdd(i) => self.codegen_ptradd_instr(instr_idx, &i),
             _ => todo!(),
         }
     }
@@ -243,6 +244,23 @@ impl<'a> X64CodeGen<'a> {
             1 => dynasm!(self.asm ; movzx Rq(WR0.code()), BYTE [Rq(WR0.code())]),
             _ => todo!("{}", size),
         };
+        self.reg_into_new_local(inst_idx, WR0);
+    }
+
+    fn codegen_ptradd_instr(
+        &mut self,
+        inst_idx: jit_ir::InstrIdx,
+        inst: &jit_ir::PtrAddInstruction,
+    ) {
+        self.operand_into_reg(WR0, &inst.ptr());
+        let off = inst.offset();
+        // unwrap cannot fail
+        if off <= u32::try_from(i32::MAX).unwrap() {
+            // `as` safe due to above guard.
+            dynasm!(self.asm ; add Rq(WR0.code()), off as i32);
+        } else {
+            todo!();
+        }
         self.reg_into_new_local(inst_idx, WR0);
     }
 
@@ -427,6 +445,35 @@ mod tests {
             "... 00000019: mov r12, [rbp-0x08]",
             "... 00000020: mov r12d, [r12]",
             "... 00000025: mov [rbp-0x0C], r12d",
+            "--- End jit-asm ---",
+        ];
+        let mut ra = SpillAllocator::new(STACK_DIRECTION);
+        match_asm(
+            X64CodeGen::new(&jit_mod, &mut ra)
+                .unwrap()
+                .codegen()
+                .unwrap(),
+            &patt_lines.join("\n"),
+        );
+    }
+
+    #[test]
+    fn codegen_ptradd_spillalloc() {
+        let mut jit_mod = test_module();
+        jit_mod.push(jit_ir::LoadArgInstruction::new().into());
+        jit_mod.push(
+            jit_ir::PtrAddInstruction::new(
+                jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap()),
+                64,
+            )
+            .into(),
+        );
+        let patt_lines = [
+            "...",
+            "; PtrAdd %0, 64",
+            "... 00000019: mov r12, [rbp-0x08]",
+            "... 00000020: add r12, 0x40",
+            "... 00000027: mov [rbp-0x10], r12",
             "--- End jit-asm ---",
         ];
         let mut ra = SpillAllocator::new(STACK_DIRECTION);

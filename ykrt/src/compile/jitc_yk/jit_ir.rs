@@ -653,12 +653,12 @@ pub struct PtrAddInstruction {
 }
 
 impl PtrAddInstruction {
-    fn ptr(&self) -> Operand {
+    pub(crate) fn ptr(&self) -> Operand {
         let ptr = self.ptr;
         ptr.get()
     }
 
-    fn offset(&self) -> u32 {
+    pub(crate) fn offset(&self) -> u32 {
         self.off
     }
 
