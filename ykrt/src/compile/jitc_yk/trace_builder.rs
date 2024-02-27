@@ -84,7 +84,11 @@ impl<'a> TraceBuilder<'a> {
     }
 
     /// Walk over a traced AOT block, translating the constituent instructions into the JIT module.
-    fn process_block(&mut self, bid: aot_ir::BlockID) -> Result<(), CompilationError> {
+    fn process_block(
+        &mut self,
+        bid: aot_ir::BlockID,
+        nextbb: Option<aot_ir::BlockID>,
+    ) -> Result<(), CompilationError> {
         // unwrap safe: can't trace a block not in the AOT module.
         let blk = self.aot_mod.block(&bid);
 
@@ -97,6 +101,8 @@ impl<'a> TraceBuilder<'a> {
                 aot_ir::Opcode::Store => self.handle_store(inst, &bid, inst_idx),
                 aot_ir::Opcode::PtrAdd => self.handle_ptradd(inst, &bid, inst_idx),
                 aot_ir::Opcode::Add => self.handle_binop(inst, &bid, inst_idx),
+                aot_ir::Opcode::Icmp => self.handle_icmp(inst, &bid, inst_idx),
+                aot_ir::Opcode::CondBr => self.handle_condbr(inst, nextbb.as_ref().unwrap()),
                 _ => todo!("{:?}", inst),
             }?;
         }
@@ -247,6 +253,40 @@ impl<'a> TraceBuilder<'a> {
         }
     }
 
+    /// Translate a conditional `Br` instruction.
+    fn handle_condbr(
+        &mut self,
+        inst: &aot_ir::Instruction,
+        nextbb: &aot_ir::BlockID,
+    ) -> Result<(), CompilationError> {
+        let cond = match &inst.operand(0) {
+            aot_ir::Operand::LocalVariable(aot_ir::LocalVariableOperand(iid)) => {
+                self.local_map[iid]
+            }
+            _ => panic!(),
+        };
+        let succ_bb = match inst.operand(1) {
+            aot_ir::Operand::Block(aot_ir::BlockOperand { bb_idx }) => bb_idx,
+            _ => panic!(),
+        };
+        let expect = *succ_bb == nextbb.block_idx();
+        let guard = jit_ir::GuardInstruction::new(jit_ir::Operand::Local(cond), expect);
+        Ok(self.jit_mod.push(guard.into()))
+    }
+
+    /// Translate a `Icmp` instruction.
+    fn handle_icmp(
+        &mut self,
+        inst: &aot_ir::Instruction,
+        bid: &aot_ir::BlockID,
+        aot_inst_idx: usize,
+    ) -> Result<(), CompilationError> {
+        let op1 = self.handle_operand(inst.operand(0))?;
+        let op2 = self.handle_operand(inst.operand(1))?;
+        let instr = jit_ir::IcmpInstruction::new(op1, op2).into();
+        self.copy_instruction(instr, bid, aot_inst_idx)
+    }
+
     /// Translate a `Load` instruction.
     fn handle_load(
         &mut self,
@@ -361,14 +401,24 @@ impl<'a> TraceBuilder<'a> {
 
         let first_blk = self.lookup_aot_block(&prev);
         self.create_trace_header(self.aot_mod.block(&first_blk.unwrap()))?;
-
-        for tblk in ta_iter {
+        let mut trace_iter = ta_iter.peekable();
+        while let Some(tblk) = trace_iter.next() {
             match tblk {
                 Ok(b) => {
                     match self.lookup_aot_block(&b) {
                         Some(bid) => {
                             // MappedAOTBlock block
-                            self.process_block(bid)?;
+                            // In order to emit guards for conditional branches we need to peek at the next
+                            // block.
+                            let nextbb = if let Some(tpeek) = trace_iter.peek() {
+                                match tpeek {
+                                    Ok(tp) => self.lookup_aot_block(tp),
+                                    Err(_) => todo!(),
+                                }
+                            } else {
+                                None
+                            };
+                            self.process_block(bid, nextbb)?;
                         }
                         None => {
                             // UnmappableBlock block
