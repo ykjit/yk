@@ -298,6 +298,18 @@ pub(crate) enum Operand {
     Const(ConstIdx),
 }
 
+impl Operand {
+    /// Returns the size of the operand in bytes.
+    ///
+    /// Assumes no padding is required for alignment.
+    pub(crate) fn byte_size(&self, m: &Module) -> usize {
+        match self {
+            Self::Local(l) => l.instr(m).def_byte_size(m),
+            _ => todo!(),
+        }
+    }
+}
+
 impl fmt::Display for Operand {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -599,6 +611,16 @@ impl StoreInstruction {
             ptr: PackedOperand::new(&ptr),
         }
     }
+
+    /// Returns the value operand: i.e. the thing that is going to be stored.
+    pub(crate) fn val(&self) -> Operand {
+        self.val.get()
+    }
+
+    /// Returns the pointer operand: i.e. where to store the thing.
+    pub(crate) fn ptr(&self) -> Operand {
+        self.ptr.get()
+    }
 }
 
 impl fmt::Display for StoreInstruction {
@@ -660,12 +682,12 @@ pub struct PtrAddInstruction {
 }
 
 impl PtrAddInstruction {
-    fn ptr(&self) -> Operand {
+    pub(crate) fn ptr(&self) -> Operand {
         let ptr = self.ptr;
         ptr.get()
     }
 
-    fn offset(&self) -> u32 {
+    pub(crate) fn offset(&self) -> u32 {
         self.off
     }
 
