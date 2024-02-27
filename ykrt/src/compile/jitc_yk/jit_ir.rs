@@ -72,6 +72,10 @@ macro_rules! index_24bit {
                     .ok_or(index_overflow(stringify!($struct)))
                     .map(|u| Self(u))
             }
+
+            pub(crate) fn to_usize(&self) -> usize {
+                self.0.to_usize()
+            }
         }
 
         impl From<usize> for $struct {
@@ -87,7 +91,7 @@ macro_rules! index_24bit {
         impl From<$struct> for usize {
             // Required for TiVec.
             fn from(v: $struct) -> Self {
-                v.0.to_usize()
+                v.to_usize()
             }
         }
     };
@@ -369,11 +373,7 @@ impl Instruction {
         match self {
             Self::Load(li) => Some(li.type_(m)),
             Self::LoadGlobal(..) => todo!(),
-            Self::LoadArg(..) => {
-                // FIXME: This is nonsense, but we can't todo!() right now or we can't test
-                // anything.
-                Some(&Type::Ptr)
-            }
+            Self::LoadArg(li) => Some(m.type_(li.ty_idx())),
             Self::Call(..) => todo!(),
             Self::PtrAdd(..) => Some(&Type::Ptr),
             Self::Store(..) => None,
@@ -487,25 +487,38 @@ impl fmt::Display for LoadInstruction {
 ///
 /// ## Semantics
 ///
-/// Loads a live variable from the trace input struct.
+/// Loads a live variable from the trace input struct. The variable is loaded from the specified
+/// offset (`off`) and the reslting local variable is of the type indicated by the `ty_idx`.
 ///
-/// ## Operands
-///
-/// FIXME: unimplemented as yet.
 #[derive(Debug)]
+#[repr(packed)]
 pub struct LoadArgInstruction {
-    // FIXME: todo
+    /// The byte offset to load from in the trace input struct.
+    off: u32,
+    /// The type of the resulting local variable.
+    ty_idx: TypeIdx,
 }
 
 impl fmt::Display for LoadArgInstruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "LoadArg")
+        // FIXME: printing the type (rather than its index) would be better, but that'd require an
+        // overhaul of `Display` to make it more like `aot_or::IRDisplay` (passing the module in,
+        // so we can lookup types).
+        write!(f, "LoadArg {}, {}", self.off(), self.ty_idx.to_usize())
     }
 }
 
 impl LoadArgInstruction {
-    pub(crate) fn new() -> LoadArgInstruction {
-        Self {}
+    pub(crate) fn new(off: u32, ty_idx: TypeIdx) -> LoadArgInstruction {
+        Self { off, ty_idx }
+    }
+
+    pub(crate) fn ty_idx(&self) -> TypeIdx {
+        self.ty_idx
+    }
+
+    pub(crate) fn off(&self) -> u32 {
+        self.off
     }
 }
 
@@ -1052,8 +1065,8 @@ mod tests {
     #[test]
     fn use_case_update_instr() {
         let mut prog: Vec<Instruction> = vec![
-            LoadArgInstruction::new().into(),
-            LoadArgInstruction::new().into(),
+            LoadArgInstruction::new(0, TypeIdx::new(0).unwrap()).into(),
+            LoadArgInstruction::new(8, TypeIdx::new(0).unwrap()).into(),
             LoadInstruction::new(
                 Operand::Local(InstrIdx(0)),
                 TypeIdx(U24::from_usize(0).unwrap()),
