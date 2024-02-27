@@ -363,6 +363,17 @@ mod tests {
         jit_ir::Module::new("test".into())
     }
 
+    fn test_with_spillalloc(jit_mod: &jit_ir::Module, patt_lines: &[&str]) {
+        let mut ra = SpillAllocator::new(STACK_DIRECTION);
+        match_asm(
+            X64CodeGen::new(&jit_mod, &mut ra)
+                .unwrap()
+                .codegen()
+                .unwrap(),
+            &patt_lines.join("\n"),
+        );
+    }
+
     #[test]
     fn codegen_load_ptr_spillalloc() {
         let mut jit_mod = test_module();
@@ -383,14 +394,7 @@ mod tests {
             "... 00000025: mov [rbp-0x10], r12",
             "--- End jit-asm ---",
         ];
-        let mut ra = SpillAllocator::new(STACK_DIRECTION);
-        match_asm(
-            X64CodeGen::new(&jit_mod, &mut ra)
-                .unwrap()
-                .codegen()
-                .unwrap(),
-            &patt_lines.join("\n"),
-        );
+        test_with_spillalloc(&jit_mod, &patt_lines);
     }
 
     #[test]
@@ -415,14 +419,7 @@ mod tests {
             "... 00000026: mov [rbp-0x09], r12b",
             "--- End jit-asm ---",
         ];
-        let mut ra = SpillAllocator::new(STACK_DIRECTION);
-        match_asm(
-            X64CodeGen::new(&jit_mod, &mut ra)
-                .unwrap()
-                .codegen()
-                .unwrap(),
-            &patt_lines.join("\n"),
-        );
+        test_with_spillalloc(&jit_mod, &patt_lines);
     }
 
     #[test]
@@ -447,14 +444,7 @@ mod tests {
             "... 00000025: mov [rbp-0x0C], r12d",
             "--- End jit-asm ---",
         ];
-        let mut ra = SpillAllocator::new(STACK_DIRECTION);
-        match_asm(
-            X64CodeGen::new(&jit_mod, &mut ra)
-                .unwrap()
-                .codegen()
-                .unwrap(),
-            &patt_lines.join("\n"),
-        );
+        test_with_spillalloc(&jit_mod, &patt_lines);
     }
 
     #[test]
@@ -476,13 +466,6 @@ mod tests {
             "... 00000027: mov [rbp-0x10], r12",
             "--- End jit-asm ---",
         ];
-        let mut ra = SpillAllocator::new(STACK_DIRECTION);
-        match_asm(
-            X64CodeGen::new(&jit_mod, &mut ra)
-                .unwrap()
-                .codegen()
-                .unwrap(),
-            &patt_lines.join("\n"),
-        );
+        test_with_spillalloc(&jit_mod, &patt_lines);
     }
 }
