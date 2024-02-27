@@ -18,7 +18,7 @@ struct TraceBuilder<'a> {
     jit_mod: jit_ir::Module,
     // Maps an AOT instruction to a jit instruction via their index-based IDs.
     local_map: HashMap<aot_ir::InstructionID, jit_ir::InstrIdx>,
-    // Block containing the curent control point.
+    // Block containing the current control point (i.e. the control point that started this trace).
     cp_block: Option<aot_ir::BlockID>,
     // Index of the first traceinput instruction.
     first_ti_idx: usize,
