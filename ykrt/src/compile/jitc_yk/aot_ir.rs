@@ -229,7 +229,7 @@ impl BlockID {
 
 #[deku_derive(DekuRead)]
 #[derive(Debug, Hash, Eq, PartialEq)]
-pub(crate) struct LocalVariableOperand(InstructionID);
+pub(crate) struct LocalVariableOperand(pub(crate) InstructionID);
 
 impl LocalVariableOperand {
     pub(crate) fn instr_id(&self) -> &InstructionID {
@@ -260,7 +260,7 @@ pub(crate) struct TypeOperand {
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct BlockOperand {
-    bb_idx: BlockIdx,
+    pub(crate) bb_idx: BlockIdx,
 }
 
 impl IRDisplay for BlockOperand {
