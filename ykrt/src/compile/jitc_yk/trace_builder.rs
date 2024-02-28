@@ -18,6 +18,10 @@ struct TraceBuilder<'a> {
     jit_mod: jit_ir::Module,
     // Maps an AOT instruction to a jit instruction via their index-based IDs.
     local_map: HashMap<aot_ir::InstructionID, jit_ir::InstrIdx>,
+    // Block containing the current control point (i.e. the control point that started this trace).
+    cp_block: Option<aot_ir::BlockID>,
+    // Index of the first traceinput instruction.
+    first_ti_idx: usize,
 }
 
 impl<'a> TraceBuilder<'a> {
@@ -32,6 +36,8 @@ impl<'a> TraceBuilder<'a> {
             aot_mod,
             jit_mod: jit_ir::Module::new(trace_name),
             local_map: HashMap::new(),
+            cp_block: None,
+            first_ti_idx: 0,
         }
     }
 
@@ -54,7 +60,7 @@ impl<'a> TraceBuilder<'a> {
         let mut last_store = None;
         let mut trace_input = None;
         let mut input = Vec::new();
-        for inst in blk.instrs.iter().rev() {
+        for (inst_idx, inst) in blk.instrs.iter().enumerate().rev() {
             if inst.is_control_point(self.aot_mod) {
                 trace_input = Some(inst.operand(CTRL_POINT_ARGIDX_INPUTS));
             }
@@ -77,6 +83,7 @@ impl<'a> TraceBuilder<'a> {
                     self.local_map
                         .insert(inp.to_instr_id(), self.next_instr_id()?);
                     self.jit_mod.push(load_arg);
+                    self.first_ti_idx = inst_idx;
                 }
             }
         }
@@ -84,19 +91,33 @@ impl<'a> TraceBuilder<'a> {
     }
 
     /// Walk over a traced AOT block, translating the constituent instructions into the JIT module.
-    fn process_block(&mut self, bid: aot_ir::BlockID) -> Result<(), CompilationError> {
+    fn process_block(
+        &mut self,
+        bid: aot_ir::BlockID,
+        nextbb: Option<aot_ir::BlockID>,
+    ) -> Result<(), CompilationError> {
         // unwrap safe: can't trace a block not in the AOT module.
         let blk = self.aot_mod.block(&bid);
 
         // Decide how to translate each AOT instruction based upon its opcode.
         for (inst_idx, inst) in blk.instrs.iter().enumerate() {
             match inst.opcode() {
-                aot_ir::Opcode::Br => self.handle_br(inst),
+                aot_ir::Opcode::Br => Ok(()),
                 aot_ir::Opcode::Load => self.handle_load(inst, &bid, inst_idx),
                 aot_ir::Opcode::Call => self.handle_call(inst, &bid, inst_idx),
                 aot_ir::Opcode::Store => self.handle_store(inst, &bid, inst_idx),
-                aot_ir::Opcode::PtrAdd => self.handle_ptradd(inst, &bid, inst_idx),
+                aot_ir::Opcode::PtrAdd => {
+                    if self.cp_block.as_ref() == Some(&bid) && inst_idx == self.first_ti_idx {
+                        // We've reached the trace inputs part of the control point block. There's
+                        // no point in copying these instructions over and we can just skip to the
+                        // next block.
+                        return Ok(());
+                    }
+                    self.handle_ptradd(inst, &bid, inst_idx)
+                }
                 aot_ir::Opcode::Add => self.handle_binop(inst, &bid, inst_idx),
+                aot_ir::Opcode::Icmp => self.handle_icmp(inst, &bid, inst_idx),
+                aot_ir::Opcode::CondBr => self.handle_condbr(inst, nextbb.as_ref().unwrap()),
                 _ => todo!("{:?}", inst),
             }?;
         }
@@ -236,15 +257,38 @@ impl<'a> TraceBuilder<'a> {
         self.copy_instruction(instr.into(), bid, aot_inst_idx)
     }
 
-    /// Translate a `Br` instruction.
-    fn handle_br(&mut self, inst: &aot_ir::Instruction) -> Result<(), CompilationError> {
-        if inst.operands_len() == 0 {
-            // Unconditional branch.
-            Ok(())
-        } else {
-            // Conditional branches require guards.
-            todo!()
-        }
+    /// Translate a conditional `Br` instruction.
+    fn handle_condbr(
+        &mut self,
+        inst: &aot_ir::Instruction,
+        nextbb: &aot_ir::BlockID,
+    ) -> Result<(), CompilationError> {
+        let cond = match &inst.operand(0) {
+            aot_ir::Operand::LocalVariable(aot_ir::LocalVariableOperand(iid)) => {
+                self.local_map[iid]
+            }
+            _ => panic!(),
+        };
+        let succ_bb = match inst.operand(1) {
+            aot_ir::Operand::Block(aot_ir::BlockOperand { bb_idx }) => bb_idx,
+            _ => panic!(),
+        };
+        let expect = *succ_bb == nextbb.block_idx();
+        let guard = jit_ir::GuardInstruction::new(jit_ir::Operand::Local(cond), expect);
+        Ok(self.jit_mod.push(guard.into()))
+    }
+
+    /// Translate a `Icmp` instruction.
+    fn handle_icmp(
+        &mut self,
+        inst: &aot_ir::Instruction,
+        bid: &aot_ir::BlockID,
+        aot_inst_idx: usize,
+    ) -> Result<(), CompilationError> {
+        let op1 = self.handle_operand(inst.operand(0))?;
+        let op2 = self.handle_operand(inst.operand(1))?;
+        let instr = jit_ir::IcmpInstruction::new(op1, op2).into();
+        self.copy_instruction(instr, bid, aot_inst_idx)
     }
 
     /// Translate a `Load` instruction.
@@ -359,16 +403,28 @@ impl<'a> TraceBuilder<'a> {
             TraceAction::Promotion => todo!(),
         };
 
-        let first_blk = self.lookup_aot_block(&prev);
-        self.create_trace_header(self.aot_mod.block(&first_blk.unwrap()))?;
-
-        for tblk in ta_iter {
+        self.cp_block = self.lookup_aot_block(&prev);
+        // This unwrap can't fail. If it does that means the tracer has given us a mappable block
+        // that doesn't exist in the AOT module.
+        self.create_trace_header(self.aot_mod.block(self.cp_block.as_ref().unwrap()))?;
+        let mut trace_iter = ta_iter.peekable();
+        while let Some(tblk) = trace_iter.next() {
             match tblk {
                 Ok(b) => {
                     match self.lookup_aot_block(&b) {
                         Some(bid) => {
                             // MappedAOTBlock block
-                            self.process_block(bid)?;
+                            // In order to emit guards for conditional branches we need to peek at the next
+                            // block.
+                            let nextbb = if let Some(tpeek) = trace_iter.peek() {
+                                match tpeek {
+                                    Ok(tp) => self.lookup_aot_block(tp),
+                                    Err(_) => todo!(),
+                                }
+                            } else {
+                                None
+                            };
+                            self.process_block(bid, nextbb)?;
                         }
                         None => {
                             // UnmappableBlock block

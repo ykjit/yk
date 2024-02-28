@@ -339,6 +339,8 @@ pub enum Instruction {
     Store(StoreInstruction),
     StoreGlobal(StoreGlobalInstruction),
     Add(AddInstruction),
+    Icmp(IcmpInstruction),
+    Guard(GuardInstruction),
 }
 
 impl Instruction {
@@ -357,6 +359,8 @@ impl Instruction {
             Self::Store(..) => false,
             Self::StoreGlobal(..) => false,
             Self::Add(..) => true,
+            Self::Icmp(..) => true,
+            Self::Guard(..) => false,
         }
     }
 
@@ -375,6 +379,8 @@ impl Instruction {
             Self::Store(..) => None,
             Self::StoreGlobal(..) => None,
             Self::Add(..) => todo!(),
+            Self::Icmp(..) => todo!(),
+            Self::Guard(..) => None,
         }
     }
 
@@ -409,6 +415,8 @@ impl fmt::Display for Instruction {
             Self::Store(i) => write!(f, "{}", i),
             Self::StoreGlobal(i) => write!(f, "{}", i),
             Self::Add(i) => write!(f, "{}", i),
+            Self::Icmp(i) => write!(f, "{}", i),
+            Self::Guard(i) => write!(f, "{}", i),
         }
     }
 }
@@ -432,6 +440,8 @@ instr!(Call, CallInstruction);
 instr!(PtrAdd, PtrAddInstruction);
 // FIXME: Use a macro for all binary operations?
 instr!(Add, AddInstruction);
+instr!(Icmp, IcmpInstruction);
+instr!(Guard, GuardInstruction);
 
 /// The operands for a [Instruction::Load]
 ///
@@ -737,6 +747,76 @@ impl AddInstruction {
 impl fmt::Display for AddInstruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Add {}, {}", self.op1(), self.op2())
+    }
+}
+
+/// The operand for a [Instruction::Icmp]
+///
+/// # Semantics
+///
+/// Compares two operands.
+///
+#[derive(Debug)]
+pub struct IcmpInstruction {
+    op1: PackedOperand,
+    op2: PackedOperand,
+}
+
+impl IcmpInstruction {
+    pub(crate) fn new(op1: Operand, op2: Operand) -> Self {
+        Self {
+            op1: PackedOperand::new(&op1),
+            op2: PackedOperand::new(&op2),
+        }
+    }
+
+    fn op1(&self) -> Operand {
+        self.op1.get()
+    }
+
+    fn op2(&self) -> Operand {
+        self.op2.get()
+    }
+}
+
+impl fmt::Display for IcmpInstruction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Icmp {}, {}", self.op1(), self.op2())
+    }
+}
+
+/// The operand for a [Instruction::Guard]
+///
+/// # Semantics
+///
+/// Guards a trace against diverging execution. The remainder of the trace will be compiled under
+/// the assumption that (at runtime) the guard condition is true. If the guard condition is false,
+/// then execution may not continue, and deoptimisation must occur.
+///
+#[derive(Debug)]
+pub struct GuardInstruction {
+    /// The condition to guard against.
+    cond: PackedOperand,
+    /// The expected outcome of the condition.
+    expect: bool,
+}
+
+impl GuardInstruction {
+    pub(crate) fn new(cond: Operand, expect: bool) -> Self {
+        GuardInstruction {
+            cond: PackedOperand::new(&cond),
+            expect,
+        }
+    }
+
+    fn cond(&self) -> Operand {
+        self.cond.get()
+    }
+}
+
+impl fmt::Display for GuardInstruction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Guard {}, {}", self.cond(), self.expect)
     }
 }
 
