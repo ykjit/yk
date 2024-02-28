@@ -111,7 +111,9 @@ impl<'a> X64CodeGen<'a> {
         #[cfg(any(debug_assertions, test))]
         self.comment(self.asm.offset(), inst.to_string());
         match inst {
-            jit_ir::Instruction::LoadArg(i) => self.codegen_loadarg_instr(instr_idx, &i),
+            jit_ir::Instruction::LoadTraceInput(i) => {
+                self.codegen_loadtraceinput_instr(instr_idx, &i)
+            }
             jit_ir::Instruction::Load(i) => self.codegen_load_instr(instr_idx, &i),
             jit_ir::Instruction::PtrAdd(i) => self.codegen_ptradd_instr(instr_idx, &i),
             jit_ir::Instruction::Store(i) => self.codegen_store_instr(&i),
@@ -226,10 +228,10 @@ impl<'a> X64CodeGen<'a> {
         self.store_local(&l, reg, size);
     }
 
-    fn codegen_loadarg_instr(
+    fn codegen_loadtraceinput_instr(
         &mut self,
         inst_idx: jit_ir::InstrIdx,
-        inst: &jit_ir::LoadArgInstruction,
+        inst: &jit_ir::LoadTraceInputInstruction,
     ) {
         // Find the argument register containing the pointer to the live variables struct.
         let base_reg = ARG_REGS[JITFUNC_LIVEVARS_ARGIDX].code();
@@ -410,7 +412,7 @@ mod tests {
     fn codegen_load_ptr_spillalloc() {
         let mut jit_mod = test_module();
         let ptr_ty_idx = jit_mod.type_idx(&jit_ir::Type::Ptr).unwrap();
-        jit_mod.push(jit_ir::LoadArgInstruction::new(0, ptr_ty_idx).into());
+        jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, ptr_ty_idx).into());
         jit_mod.push(
             jit_ir::LoadInstruction::new(
                 jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap()),
@@ -435,7 +437,7 @@ mod tests {
         let i8_ty_idx = jit_mod
             .type_idx(&jit_ir::Type::Integer(IntegerType::new(8)))
             .unwrap();
-        jit_mod.push(jit_ir::LoadArgInstruction::new(0, i8_ty_idx).into());
+        jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into());
         jit_mod.push(
             jit_ir::LoadInstruction::new(
                 jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap()),
@@ -460,7 +462,7 @@ mod tests {
         let i32_ty_idx = jit_mod
             .type_idx(&jit_ir::Type::Integer(IntegerType::new(32)))
             .unwrap();
-        jit_mod.push(jit_ir::LoadArgInstruction::new(0, i32_ty_idx).into());
+        jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i32_ty_idx).into());
         jit_mod.push(
             jit_ir::LoadInstruction::new(
                 jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap()),
@@ -483,7 +485,7 @@ mod tests {
     fn codegen_ptradd_spillalloc() {
         let mut jit_mod = test_module();
         let ptr_ty_idx = jit_mod.type_idx(&jit_ir::Type::Ptr).unwrap();
-        jit_mod.push(jit_ir::LoadArgInstruction::new(0, ptr_ty_idx).into());
+        jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, ptr_ty_idx).into());
         jit_mod.push(
             jit_ir::PtrAddInstruction::new(
                 jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap()),
@@ -506,8 +508,8 @@ mod tests {
     fn codegen_store_ptr_spillalloc() {
         let mut jit_mod = test_module();
         let ptr_ty_idx = jit_mod.type_idx(&jit_ir::Type::Ptr).unwrap();
-        jit_mod.push(jit_ir::LoadArgInstruction::new(0, ptr_ty_idx).into());
-        jit_mod.push(jit_ir::LoadArgInstruction::new(8, ptr_ty_idx).into());
+        jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, ptr_ty_idx).into());
+        jit_mod.push(jit_ir::LoadTraceInputInstruction::new(8, ptr_ty_idx).into());
         jit_mod.push(
             jit_ir::StoreInstruction::new(
                 jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap()),
@@ -527,15 +529,15 @@ mod tests {
     }
 
     #[test]
-    fn codegen_loadarg_u8_spillalloc() {
+    fn codegen_loadtraceinput_u8_spillalloc() {
         let mut jit_mod = test_module();
         let u8_ty_idx = jit_mod
             .type_idx(&jit_ir::Type::Integer(IntegerType::new(8)))
             .unwrap();
-        jit_mod.push(jit_ir::LoadArgInstruction::new(0, u8_ty_idx).into());
+        jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, u8_ty_idx).into());
         let patt_lines = [
             "...",
-            "; LoadArg 0, 0",
+            "; LoadTraceInput 0, 0",
             "... 0000000b: movzx r12, byte ptr [rdi]",
             "... 00000014: mov [rbp-0x01], r12b",
             "--- End jit-asm ---",
@@ -544,15 +546,15 @@ mod tests {
     }
 
     #[test]
-    fn codegen_loadarg_u16_with_offset_spillalloc() {
+    fn codegen_loadtraceinput_u16_with_offset_spillalloc() {
         let mut jit_mod = test_module();
         let u16_ty_idx = jit_mod
             .type_idx(&jit_ir::Type::Integer(IntegerType::new(16)))
             .unwrap();
-        jit_mod.push(jit_ir::LoadArgInstruction::new(32, u16_ty_idx).into());
+        jit_mod.push(jit_ir::LoadTraceInputInstruction::new(32, u16_ty_idx).into());
         let patt_lines = [
             "...",
-            "; LoadArg 32, 0",
+            "; LoadTraceInput 32, 0",
             "... 0000000b: movzx r12d, word ptr [rdi+0x20]",
             "... 00000014: mov [rbp-0x02], r12w",
             "--- End jit-asm ---",
@@ -561,32 +563,32 @@ mod tests {
     }
 
     #[test]
-    fn codegen_loadarg_many_offset_spillalloc() {
+    fn codegen_loadtraceinput_many_offset_spillalloc() {
         let mut jit_mod = test_module();
         let u8_ty_idx = jit_mod
             .type_idx(&jit_ir::Type::Integer(IntegerType::new(8)))
             .unwrap();
         let ptr_ty_idx = jit_mod.type_idx(&jit_ir::Type::Ptr).unwrap();
-        jit_mod.push(jit_ir::LoadArgInstruction::new(0, u8_ty_idx).into());
-        jit_mod.push(jit_ir::LoadArgInstruction::new(1, u8_ty_idx).into());
-        jit_mod.push(jit_ir::LoadArgInstruction::new(2, u8_ty_idx).into());
-        jit_mod.push(jit_ir::LoadArgInstruction::new(3, u8_ty_idx).into());
-        jit_mod.push(jit_ir::LoadArgInstruction::new(8, ptr_ty_idx).into());
+        jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, u8_ty_idx).into());
+        jit_mod.push(jit_ir::LoadTraceInputInstruction::new(1, u8_ty_idx).into());
+        jit_mod.push(jit_ir::LoadTraceInputInstruction::new(2, u8_ty_idx).into());
+        jit_mod.push(jit_ir::LoadTraceInputInstruction::new(3, u8_ty_idx).into());
+        jit_mod.push(jit_ir::LoadTraceInputInstruction::new(8, ptr_ty_idx).into());
         let patt_lines = [
             "...",
-            "; LoadArg 0, 0",
+            "; LoadTraceInput 0, 0",
             "... 0000000b: movzx r12, byte ptr [rdi]",
             "... 00000014: mov [rbp-0x01], r12b",
-            "; LoadArg 1, 0",
+            "; LoadTraceInput 1, 0",
             "... 0000001b: movzx r12, byte ptr [rdi+0x01]",
             "... 00000024: mov [rbp-0x02], r12b",
-            "; LoadArg 2, 0",
+            "; LoadTraceInput 2, 0",
             "... 0000002b: movzx r12, byte ptr [rdi+0x02]",
             "... 00000034: mov [rbp-0x03], r12b",
-            "; LoadArg 3, 0",
+            "; LoadTraceInput 3, 0",
             "... 0000003b: movzx r12, byte ptr [rdi+0x03]",
             "... 00000044: mov [rbp-0x04], r12b",
-            "; LoadArg 8, 1",
+            "; LoadTraceInput 8, 1",
             "... 0000004b: mov r12, [rdi+0x08]",
             "... 00000053: mov [rbp-0x10], r12",
             "--- End jit-asm ---",

@@ -56,7 +56,7 @@ impl<'a> TraceBuilder<'a> {
 
     /// Create the prolog of the trace.
     fn create_trace_header(&mut self, blk: &aot_ir::Block) -> Result<(), CompilationError> {
-        // Find trace input variables and emit `LoadArg` instructions for them.
+        // Find trace input variables and emit `LoadTraceInput` instructions for them.
         let mut last_store = None;
         let mut trace_inputs = None;
         let mut trace_input_idx = 0;
@@ -73,9 +73,9 @@ impl<'a> TraceBuilder<'a> {
                 let trace_inputs = trace_inputs.unwrap();
                 // Is the pointer operand of this PtrAdd targeting the trace inputs?
                 if trace_inputs.ptr_eq(inst.operand(0).to_instr(self.aot_mod)) {
-                    // We found a trace input. Now we emit a `LoadArg` instruction into the trace.
-                    // This assigns the input to a local variable that other instructions can then
-                    // use.
+                    // We found a trace input. Now we emit a `LoadTraceInput` instruction into the
+                    // trace. This assigns the input to a local variable that other instructions
+                    // can then use.
                     //
                     // Note: This code assumes that the `PtrAdd` instructions in the AOT IR were
                     // emitted sequentially.
@@ -92,7 +92,7 @@ impl<'a> TraceBuilder<'a> {
                         Ok(u32_off) => {
                             let input_ty_idx = self.handle_type(aot_field_ty)?;
                             let load_arg =
-                                jit_ir::LoadArgInstruction::new(u32_off, input_ty_idx)
+                                jit_ir::LoadTraceInputInstruction::new(u32_off, input_ty_idx)
                                     .into();
                             self.local_map
                                 .insert(trace_input_val.to_instr_id(), self.next_instr_id()?);
