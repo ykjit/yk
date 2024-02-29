@@ -72,6 +72,10 @@ macro_rules! index_24bit {
                     .ok_or(index_overflow(stringify!($struct)))
                     .map(|u| Self(u))
             }
+
+            pub(crate) fn to_usize(&self) -> usize {
+                self.0.to_usize()
+            }
         }
 
         impl From<usize> for $struct {
@@ -87,7 +91,7 @@ macro_rules! index_24bit {
         impl From<$struct> for usize {
             // Required for TiVec.
             fn from(v: $struct) -> Self {
-                v.0.to_usize()
+                v.to_usize()
             }
         }
     };
@@ -333,7 +337,7 @@ pub(crate) enum Constant {
 pub enum Instruction {
     Load(LoadInstruction),
     LoadGlobal(LoadGlobalInstruction),
-    LoadArg(LoadArgInstruction),
+    LoadTraceInput(LoadTraceInputInstruction),
     Call(CallInstruction),
     PtrAdd(PtrAddInstruction),
     Store(StoreInstruction),
@@ -353,7 +357,7 @@ impl Instruction {
         match self {
             Self::Load(..) => true,
             Self::LoadGlobal(..) => true,
-            Self::LoadArg(..) => true,
+            Self::LoadTraceInput(..) => true,
             Self::Call(..) => true, // FIXME: May or may not define. Ask func sig.
             Self::PtrAdd(..) => true,
             Self::Store(..) => false,
@@ -369,11 +373,7 @@ impl Instruction {
         match self {
             Self::Load(li) => Some(li.type_(m)),
             Self::LoadGlobal(..) => todo!(),
-            Self::LoadArg(..) => {
-                // FIXME: This is nonsense, but we can't todo!() right now or we can't test
-                // anything.
-                Some(&Type::Ptr)
-            }
+            Self::LoadTraceInput(li) => Some(m.type_(li.ty_idx())),
             Self::Call(..) => todo!(),
             Self::PtrAdd(..) => Some(&Type::Ptr),
             Self::Store(..) => None,
@@ -409,7 +409,7 @@ impl fmt::Display for Instruction {
         match self {
             Self::Load(i) => write!(f, "{}", i),
             Self::LoadGlobal(i) => write!(f, "{}", i),
-            Self::LoadArg(i) => write!(f, "{}", i),
+            Self::LoadTraceInput(i) => write!(f, "{}", i),
             Self::Call(i) => write!(f, "{}", i),
             Self::PtrAdd(i) => write!(f, "{}", i),
             Self::Store(i) => write!(f, "{}", i),
@@ -435,7 +435,7 @@ instr!(Load, LoadInstruction);
 instr!(LoadGlobal, LoadGlobalInstruction);
 instr!(Store, StoreInstruction);
 instr!(StoreGlobal, StoreGlobalInstruction);
-instr!(LoadArg, LoadArgInstruction);
+instr!(LoadTraceInput, LoadTraceInputInstruction);
 instr!(Call, CallInstruction);
 instr!(PtrAdd, PtrAddInstruction);
 // FIXME: Use a macro for all binary operations?
@@ -483,29 +483,49 @@ impl fmt::Display for LoadInstruction {
     }
 }
 
-/// The `LoadArg` instruction.
+/// The `LoadTraceInput` instruction.
 ///
 /// ## Semantics
 ///
-/// Loads a live variable from the trace input struct.
+/// Loads a trace input out of the trace input struct. The variable is loaded from the specified
+/// offset (`off`) and the resulting local variable is of the type indicated by the `ty_idx`.
 ///
-/// ## Operands
-///
-/// FIXME: unimplemented as yet.
+/// FIXME (maybe): If we added a third `TraceInput` storage class to the register allocator, could
+/// we kill this instruction kind entirely?
 #[derive(Debug)]
-pub struct LoadArgInstruction {
-    // FIXME: todo
+#[repr(packed)]
+pub struct LoadTraceInputInstruction {
+    /// The byte offset to load from in the trace input struct.
+    off: u32,
+    /// The type of the resulting local variable.
+    ty_idx: TypeIdx,
 }
 
-impl fmt::Display for LoadArgInstruction {
+impl fmt::Display for LoadTraceInputInstruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "LoadArg")
+        // FIXME: printing the type (rather than its index) would be better, but that'd require an
+        // overhaul of `Display` to make it more like `aot_or::IRDisplay` (passing the module in,
+        // so we can lookup types).
+        write!(
+            f,
+            "LoadTraceInput {}, {}",
+            self.off(),
+            self.ty_idx.to_usize()
+        )
     }
 }
 
-impl LoadArgInstruction {
-    pub(crate) fn new() -> LoadArgInstruction {
-        Self {}
+impl LoadTraceInputInstruction {
+    pub(crate) fn new(off: u32, ty_idx: TypeIdx) -> LoadTraceInputInstruction {
+        Self { off, ty_idx }
+    }
+
+    pub(crate) fn ty_idx(&self) -> TypeIdx {
+        self.ty_idx
+    }
+
+    pub(crate) fn off(&self) -> u32 {
+        self.off
     }
 }
 
@@ -1052,8 +1072,8 @@ mod tests {
     #[test]
     fn use_case_update_instr() {
         let mut prog: Vec<Instruction> = vec![
-            LoadArgInstruction::new().into(),
-            LoadArgInstruction::new().into(),
+            LoadTraceInputInstruction::new(0, TypeIdx::new(0).unwrap()).into(),
+            LoadTraceInputInstruction::new(8, TypeIdx::new(0).unwrap()).into(),
             LoadInstruction::new(
                 Operand::Local(InstrIdx(0)),
                 TypeIdx(U24::from_usize(0).unwrap()),

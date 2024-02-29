@@ -354,6 +354,15 @@ impl Operand {
         }
     }
 
+    /// Returns the [Type] of the operand.
+    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
+        match self {
+            Self::LocalVariable(_) => self.to_instr(m).type_(m),
+            Self::Type(t) => m.type_(t.type_idx),
+            _ => todo!(),
+        }
+    }
+
     /// Return the `InstructionID` of a local variable operand. Panics if called on other kinds of
     /// operands.
     pub(crate) fn to_instr_id(&self) -> InstructionID {
@@ -433,6 +442,11 @@ impl Instruction {
 
     pub(crate) fn type_idx(&self) -> TypeIdx {
         self.type_idx
+    }
+
+    /// Returns the [Type] of the local variable defined by this instruction (if any).
+    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
+        m.type_(self.type_idx)
     }
 
     pub(crate) fn is_store(&self) -> bool {
@@ -747,6 +761,30 @@ pub(crate) struct StructType {
     field_bit_offs: Vec<usize>,
 }
 
+impl StructType {
+    /// Returns the type index of the specified field index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is out of bounds.
+    pub(crate) fn field_type_idx(&self, idx: usize) -> TypeIdx {
+        self.field_ty_idxs[idx]
+    }
+
+    /// Returns the byte offset of the specified field index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the field is not byte-aligned or the index is out of bounds.
+    pub(crate) fn field_byte_off(&self, idx: usize) -> usize {
+        let bit_off = self.field_bit_offs[idx];
+        if bit_off % 8 != 0 {
+            todo!();
+        }
+        bit_off / 8
+    }
+}
+
 impl IRDisplay for StructType {
     fn to_str(&self, m: &Module) -> String {
         let mut s = String::from("{");
@@ -818,6 +856,19 @@ impl Type {
                 "const_struct".to_owned()
             }
             Self::Unimplemented(s) => format!("?cst<{}>", s),
+        }
+    }
+
+    /// Returns a reference to the inner [StructType] if this is a `Self::Struct`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self` isn't a `Self::Struct`.
+    pub(crate) fn as_struct(&self) -> &StructType {
+        if let Self::Struct(st) = self {
+            st
+        } else {
+            panic!();
         }
     }
 }

@@ -56,34 +56,54 @@ impl<'a> TraceBuilder<'a> {
 
     /// Create the prolog of the trace.
     fn create_trace_header(&mut self, blk: &aot_ir::Block) -> Result<(), CompilationError> {
-        // Find trace input variables and emit `LoadArg` instructions for them.
+        // Find trace input variables and emit `LoadTraceInput` instructions for them.
         let mut last_store = None;
-        let mut trace_input = None;
-        let mut input = Vec::new();
+        let mut trace_inputs = None;
+        let mut trace_input_idx = 0;
         for (inst_idx, inst) in blk.instrs.iter().enumerate().rev() {
             if inst.is_control_point(self.aot_mod) {
-                trace_input = Some(inst.operand(CTRL_POINT_ARGIDX_INPUTS));
+                let op = inst.operand(CTRL_POINT_ARGIDX_INPUTS);
+                trace_inputs = Some(op.to_instr(self.aot_mod));
             }
             if inst.is_store() {
                 last_store = Some(inst);
             }
             if inst.is_ptr_add() {
-                let op = inst.operand(0);
                 // unwrap safe: we know the AOT code was produced by ykllvm.
-                if trace_input
-                    .unwrap()
-                    .to_instr(self.aot_mod)
-                    .ptr_eq(op.to_instr(self.aot_mod))
-                {
-                    // Found a trace input.
+                let trace_inputs = trace_inputs.unwrap();
+                // Is the pointer operand of this PtrAdd targeting the trace inputs?
+                if trace_inputs.ptr_eq(inst.operand(0).to_instr(self.aot_mod)) {
+                    // We found a trace input. Now we emit a `LoadTraceInput` instruction into the
+                    // trace. This assigns the input to a local variable that other instructions
+                    // can then use.
+                    //
+                    // Note: This code assumes that the `PtrAdd` instructions in the AOT IR were
+                    // emitted sequentially.
+                    //
                     // unwrap safe: we know the AOT code was produced by ykllvm.
-                    let inp = last_store.unwrap().operand(0);
-                    input.insert(0, inp.to_instr(self.aot_mod));
-                    let load_arg = jit_ir::LoadArgInstruction::new().into();
-                    self.local_map
-                        .insert(inp.to_instr_id(), self.next_instr_id()?);
-                    self.jit_mod.push(load_arg);
-                    self.first_ti_idx = inst_idx;
+                    let trace_input_val = last_store.unwrap().operand(0);
+                    let trace_input_struct_ty =
+                        trace_inputs.operand(0).type_(self.aot_mod).as_struct();
+                    // FIXME: assumes the field is byte-aligned. If it isn't, field_byte_off() will
+                    // crash.
+                    let aot_field_off = trace_input_struct_ty.field_byte_off(trace_input_idx);
+                    let aot_field_ty = trace_input_struct_ty.field_type_idx(trace_input_idx);
+                    match u32::try_from(aot_field_off) {
+                        Ok(u32_off) => {
+                            let input_ty_idx = self.handle_type(aot_field_ty)?;
+                            let load_arg =
+                                jit_ir::LoadTraceInputInstruction::new(u32_off, input_ty_idx)
+                                    .into();
+                            self.local_map
+                                .insert(trace_input_val.to_instr_id(), self.next_instr_id()?);
+                            self.jit_mod.push(load_arg);
+                            self.first_ti_idx = inst_idx;
+                            trace_input_idx += 1;
+                        }
+                        _ => {
+                            return Err(CompilationError::Temporary("offset doesn't fit".into()));
+                        }
+                    }
                 }
             }
         }
