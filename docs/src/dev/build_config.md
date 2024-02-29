@@ -28,6 +28,15 @@ within a repository using `yk` (including the `yk` repository itself). If you
 want to set/unset `YKB_YKLLVM_BIN_DIR` then `cargo clean` any repositories
 using `yk` before rebuilding them.
 
+## `YKB_TRACER`
+
+The `YKB_TRACER` environment variable allows building yk with either `hwt` 
+(Hardware Tracer) or `swt` (Software Software Tracer).
+
+`hwt` - Relies on Intel PT, suitable only for x86 CPUs supporting it.
+
+`swt` - CPU architecture-independent, but with fewer features compared to 
+`hwt`.
 
 ## `yk_testing`
 
