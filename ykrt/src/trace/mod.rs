@@ -21,6 +21,8 @@ use std::{error::Error, ffi::CString, sync::Arc};
 
 #[cfg(tracer_hwt)]
 pub(crate) mod hwt;
+#[cfg(tracer_swt)]
+pub(crate) mod swt;
 
 pub(crate) use errors::InvalidTraceError;
 
@@ -40,7 +42,10 @@ pub(crate) fn default_tracer() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
     {
         return Ok(Arc::new(hwt::HWTracer::new()?));
     }
-
+    #[cfg(tracer_swt)]
+    {
+        return Ok(Arc::new(swt::SWTracer::new()?));
+    }
     #[allow(unreachable_code)]
     Err("No tracing backend for this platform/configuration.".into())
 }
@@ -97,4 +102,9 @@ impl TraceAction {
     pub fn new_unmappable_block() -> Self {
         Self::UnmappableBlock
     }
+}
+
+#[cfg(tracer_swt)]
+pub(crate) fn trace_basicblock(function_index: usize, block_index: usize) {
+    swt::trace_basicblock(function_index, block_index)
 }

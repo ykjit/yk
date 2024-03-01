@@ -1,3 +1,4 @@
+// ignore-if: test "$YKB_TRACER" != "hwt"
 // Run-time:
 //   env-var: YKD_PRINT_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1

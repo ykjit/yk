@@ -56,6 +56,11 @@ thread_local! {
     pub(crate) static THREAD_MTTHREAD: MTThread = MTThread::new();
 }
 
+#[cfg(tracer_swt)]
+pub fn is_tracing() -> bool {
+    return THREAD_MTTHREAD.with(|mtt| mtt.tracing.borrow().is_some());
+}
+
 #[cfg(feature = "yk_testing")]
 static SERIALISE_COMPILATION: LazyLock<bool> = LazyLock::new(|| {
     &env::var("YKD_SERIALISE_COMPILATION").unwrap_or_else(|_| "0".to_owned()) == "1"
