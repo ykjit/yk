@@ -43,6 +43,7 @@ mod parser;
 use crate::{
     errors::{HWTracerError, TemporaryErrorKind},
     llvm_blockmap::{BlockMapEntry, SuccessorKind, LLVM_BLOCK_MAP},
+    perf::collect::PerfTraceBuf,
     Block,
 };
 use intervaltree::IntervalTree;
@@ -202,6 +203,7 @@ impl CompressedReturns {
 
 /// Iterate over the blocks of an Intel PT trace using the fast Yk PT decoder.
 pub(crate) struct YkPTBlockIterator<'t> {
+    trace: PerfTraceBuf,
     /// The packet iterator used to drive the decoding process.
     parser: PacketParser<'t>,
     /// Keeps track of where we are in the traced binary.
@@ -216,9 +218,12 @@ pub(crate) struct YkPTBlockIterator<'t> {
 }
 
 impl<'t> YkPTBlockIterator<'t> {
-    pub(crate) fn new(trace: &'t [u8]) -> Self {
+    pub(crate) fn new(trace: PerfTraceBuf, trace_len: usize) -> Self {
+        // We must keep `self.trace` alive at least as long as `self.parser`
+        let bytes = unsafe { slice::from_raw_parts(trace.0, trace_len) };
         Self {
-            parser: PacketParser::new(trace),
+            trace,
+            parser: PacketParser::new(bytes),
             cur_loc: ObjLoc::OtherObjOrUnknown(None),
             tnts: VecDeque::new(),
             comprets: CompressedReturns::new(),
@@ -821,6 +826,15 @@ impl<'t> Iterator for YkPTBlockIterator<'t> {
             Err(IteratorError::NoMorePackets) => None,
             Err(IteratorError::HWTracerError(e)) => Some(Err(e)),
         }
+    }
+}
+
+impl<'t> Drop for YkPTBlockIterator<'t> {
+    fn drop(&mut self) {
+        // FIXME: `self.parser` is technically active at this point, and it still has a `&`
+        // reference to `self.trace`. For example, `self.parser.drop` method could be called and do
+        // something which relies on the memory which we're freeing here.
+        unsafe { libc::free(self.trace.0 as *mut std::ffi::c_void) };
     }
 }
 
