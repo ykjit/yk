@@ -467,3 +467,37 @@ __yktracec_irtrace_compile(char *FuncNames[], size_t BBs[], size_t TraceLen,
   return compileModule(TraceName, JITMod, AOTMappingVec, GuardCount,
                        ThreadAOTMod);
 }
+
+/// Represents an index and name of an LLVM IR function.
+extern "C" struct IRFunctionNameIndex {
+  size_t index;
+  const char *name;
+};
+
+/// Retrieves information about functions from LLVM module stored in binary.
+/// # Parameters
+/// - `Bitcode`: A pointer to a `BitcodeSection` structure representing the LLVM
+/// module.
+/// - `result`: A pointer to a pointer where the function will store the array
+/// of `IRFunctionNameIndex` structures.
+/// - `result_len`: A pointer to a size_t variable where the function will store
+/// the length of the result array.
+extern "C" void get_function_names(struct BitcodeSection *Bitcode,
+                                   IRFunctionNameIndex **result,
+                                   size_t *result_len) {
+  std::vector<IRFunctionNameIndex> functions;
+  ThreadSafeModule *ThreadAOTMod = getThreadAOTMod(Bitcode);
+  ThreadAOTMod->withModuleDo([&](Module &AOTMod) {
+    size_t i = 0;
+    for (Function &func : AOTMod) {
+      IRFunctionNameIndex function;
+      function.index = i;
+      function.name = func.getName().data();
+      functions.push_back(function);
+      i++;
+    }
+  });
+  *result = new IRFunctionNameIndex[functions.size()];
+  *result_len = functions.size();
+  std::copy(functions.begin(), functions.end(), *result);
+}

@@ -90,17 +90,25 @@ cargo -Z unstable-options build --build-plan -p ykcapi | \
 cargo -Z unstable-options build --build-plan -p ykrt | \
     awk '/yk_testing/ { ec=1 } /yk_jitstate_debug/ { ec=1 } END {exit ec}'
 
-for i in $(seq 10); do
-    RUST_TEST_SHUFFLE=1 cargo test
-    YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test
+TRACERS="hwt swt"
+
+for tracer in $TRACERS; do 
+    echo "Running ${tracer} tests"
+    for i in $(seq 10); do
+        YKB_TRACER="${tracer}" RUST_TEST_SHUFFLE=1 cargo test
+        YKB_TRACER="${tracer}" YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test
+    done
 done
 
 # Test with LLVM sanitisers
 rustup component add rust-src
-ASAN_SYMBOLIZER_PATH=${YKLLVM_BIN_DIR}/llvm-symbolizer \
-    RUSTFLAGS="-Z sanitizer=address" cargo test \
-    -Z build-std \
-    --target x86_64-unknown-linux-gnu
+for tracer in $TRACERS; do 
+    YKB_TRACER="${tracer}" cargo build
+    YKB_TRACER="${tracer}" ASAN_SYMBOLIZER_PATH=${YKLLVM_BIN_DIR}/llvm-symbolizer \
+        RUSTFLAGS="-Z sanitizer=address" cargo test \
+        -Z build-std \
+        --target x86_64-unknown-linux-gnu
+done
 # The thread sanitiser does have false positives (albeit much reduced by `-Z
 # build-std`), so we have to add a suppression file to avoid those stopping
 # this script from succeeding. This does mean that we might suppress some true
@@ -114,13 +122,15 @@ race:core::sync::atomic::atomic_
 # the two.
 race:ykrt::location::Location::count_to_hot_location
 EOF
-RUST_TEST_THREADS=1 \
-    RUSTFLAGS="-Z sanitizer=thread" \
-    TSAN_OPTIONS="suppressions=$suppressions_path" \
-    cargo test \
-    -Z build-std \
-    --target x86_64-unknown-linux-gnu
-
+for tracer in $TRACERS; do 
+    YKB_TRACER="${tracer}" cargo build
+    YKB_TRACER="${tracer}" RUST_TEST_THREADS=1 \
+        RUSTFLAGS="-Z sanitizer=thread" \
+        TSAN_OPTIONS="suppressions=$suppressions_path" \
+        cargo test \
+        -Z build-std \
+        --target x86_64-unknown-linux-gnu
+done
 # We now want to test building with `--release`, which we also take as an
 # opportunity to check that yk can build ykllvm, which requires unsetting
 # YKB_YKLLVM_BIN_DIR. In essence, we now repeat much of what we did above but
@@ -131,11 +141,13 @@ export YKB_YKLLVM_BUILD_ARGS="define:CMAKE_C_COMPILER=/usr/bin/clang,define:CMAK
 cargo -Z unstable-options build --release --build-plan -p ykcapi | \
     awk '/yk_testing/ { ec=1 } /yk_jitstate_debug/ { ec=1 } END {exit ec}'
 
-cargo build --release -p ykcapi
-
-for i in $(seq 10); do
-    RUST_TEST_SHUFFLE=1 cargo test --release
-    YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test --release
+for tracer in $TRACERS; do 
+    YKB_TRACER="${tracer}" cargo build --release -p ykcapi
+    echo "Running ${tracer} tests"
+    for i in $(seq 10); do
+        YKB_TRACER="${tracer}" RUST_TEST_SHUFFLE=1 cargo test --release
+        YKB_TRACER="${tracer}" YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test --release
+    done
 done
 
 # We want to check that the benchmarks build and run correctly, but want to

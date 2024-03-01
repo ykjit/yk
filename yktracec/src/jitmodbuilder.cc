@@ -243,6 +243,8 @@ class JITModBuilder {
 
   // Set to true for a side-trace or false for a normal trace.
   bool IsSideTrace = false;
+  // Set to true if SoftwareTracer is used.
+  bool IsSWTrace = false;
 
   Value *getMappedValue(Value *V) {
     if (VMap.find(V) != VMap.end()) {
@@ -1059,6 +1061,10 @@ public:
   Module *createModule() {
     size_t CurBBIdx;
     size_t CurInstrIdx;
+    auto tracer = std::getenv("YKB_TRACER");
+    if (tracer) {
+      IsSWTrace = strcmp(tracer, "swt") == 0;
+    }
     for (size_t Idx = 0; Idx < InpTrace.Length(); Idx++) {
       // Update the previously executed BB in the most-recent frame (if it's
       // mappable).
@@ -1116,14 +1122,27 @@ public:
           continue;
         } else if (LastInst && isa<ReturnInst>(LastInst)) {
           LastInst = nullptr;
-          assert(CallStack.back()->getParent() == BB);
-          LastBB = BB;
+          if (!IsSWTrace) {
+            assert(CallStack.back()->getParent() == BB);
+          }
+          LastBB = CallStack.back()->getParent();
           CallStack.pop_back();
           if (CallStack.size() == OutlineBase) {
             Outlining = false;
             OutlineBase = 0;
           }
-          continue;
+          if (!IsSWTrace)
+            continue;
+        }
+        if (IsSWTrace) {
+          // In the software tracer external calls are invisible. So when an
+          // external call has started outlining we don't necessarily see a
+          // return, so we need to check for every block if we've reached the
+          // same callstack in order to stop outlining.
+          if (CallStack.size() == OutlineBase) {
+            Outlining = false;
+            OutlineBase = 0;
+          }
         }
       }
 
@@ -1156,7 +1175,6 @@ public:
         // to be prematurely terminated.
         if (isa<DbgInfoIntrinsic>(I))
           continue;
-
         LastInst = &*I;
 
         if (isa<CallInst>(I)) {
@@ -1235,7 +1253,15 @@ public:
               assert(Idx + 1 < InpTrace.Length());
               TraceLoc MaybeNextIB = InpTrace[Idx + 1];
               if (const IRBlock *NextIB = MaybeNextIB.getMappedBlock()) {
-                CF = AOTMod->getFunction(NextIB->FuncName);
+                if (IsSWTrace) {
+                  // YKFIXME: outline indirect calls in swt.
+                  // Peeking ahead in swt might give us a mappable entry block,
+                  // however we don't know if there was an umappable call in
+                  // between.
+                  CF = nullptr;
+                } else {
+                  CF = AOTMod->getFunction(NextIB->FuncName);
+                }
               } else {
                 CF = nullptr;
               }
@@ -1258,8 +1284,10 @@ public:
                 errs() << "InlineAsm is currently not supported.";
                 exit(EXIT_FAILURE);
               }
-              copyInstruction(&Builder, (Instruction *)&*CI, CurBBIdx,
-                              CurInstrIdx);
+              if (!Outlining) {
+                copyInstruction(&Builder, (Instruction *)&*CI, CurBBIdx,
+                                CurInstrIdx);
+              }
               break;
             }
           } else if (CF->getName().starts_with(PromoteRecFnPrefix)) {
@@ -1273,6 +1301,10 @@ public:
               // setjmp/longjmp, so for now simply abort this trace.
               // See: https://github.com/ykjit/yk/issues/610
               return nullptr;
+            } else if (IsSWTrace && S == "yk_trace_basicblock") {
+              // YKFIXME: Skip tracing calls handling. This logic should move to
+              // SWT tracer.
+              continue;
             }
             handleCallInst(CI, CF, CurBBIdx, CurInstrIdx);
             break;
