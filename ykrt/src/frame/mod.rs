@@ -3,7 +3,9 @@
 
 use llvm_sys::{core::*, prelude::LLVMValueRef};
 use object::{Object, ObjectSection};
-use std::{ffi::c_void, ptr, sync::LazyLock, thread};
+#[cfg(not(test))]
+use std::thread;
+use std::{ffi::c_void, ptr, sync::LazyLock};
 use ykaddr::obj::SELF_BIN_MMAP;
 use yksmp::{Location as SMLocation, PrologueInfo, Record, StackMapParser};
 
@@ -58,6 +60,8 @@ static AOT_STACKMAPS: LazyLock<Result<AOTStackmapInfo, String>> = LazyLock::new(
 });
 
 pub(crate) fn load_aot_stackmaps() {
+    // Rust unit test binaries will not contain stackmaps, so don't try to load them.
+    #[cfg(not(test))]
     thread::spawn(|| LazyLock::force(&AOT_STACKMAPS));
 }
 
