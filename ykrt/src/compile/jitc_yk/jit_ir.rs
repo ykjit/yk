@@ -127,12 +127,25 @@ macro_rules! index_16bit {
 pub(crate) struct FuncDeclIdx(U24);
 index_24bit!(FuncDeclIdx);
 
+impl FuncDeclIdx {
+    /// Return the type of the function declaration.
+    pub(crate) fn func_type<'a>(&self, m: &'a Module) -> &'a FuncType {
+        m.func_decl(*self).func_type(m)
+    }
+}
+
 /// A type index.
 ///
 /// One of these is an index into the [Module::types].
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TypeIdx(U24);
 index_24bit!(TypeIdx);
+
+impl TypeIdx {
+    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
+        m.type_(*self)
+    }
+}
 
 /// An extra argument index.
 ///
@@ -187,9 +200,19 @@ impl FuncType {
         }
     }
 
-    #[cfg(debug_assertions)]
-    fn num_args(&self) -> usize {
+    /// Return the number of arguments the function accepts (not including varargs arguments).
+    pub(crate) fn num_args(&self) -> usize {
         self.arg_ty_idxs.len()
+    }
+
+    /// Returns whether the function type has vararg arguments.
+    pub(crate) fn is_vararg(&self) -> bool {
+        self.is_vararg
+    }
+
+    /// Returns the return type of the function type.
+    pub(crate) fn ret_type<'a>(&self, m: &'a Module) -> &'a Type {
+        self.ret_ty.type_(m)
     }
 }
 
@@ -247,6 +270,23 @@ pub(crate) struct FuncDecl {
 impl FuncDecl {
     pub(crate) fn new(name: String, type_idx: TypeIdx) -> Self {
         Self { name, type_idx }
+    }
+
+    /// Returns the [FuncType] for `self.type_idx`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self.type_idx` isn't a type index for a [FuncType].
+    pub(crate) fn func_type<'a>(&self, m: &'a Module) -> &'a FuncType {
+        match m.type_(self.type_idx) {
+            Type::Func(ft) => &ft,
+            _ => panic!(),
+        }
+    }
+
+    /// Return the name of this function declaration.
+    pub(crate) fn name(&self) -> &str {
+        &self.name
     }
 }
 
@@ -392,7 +432,7 @@ impl Instruction {
             Self::Load(li) => Some(li.type_(m)),
             Self::LoadGlobal(..) => todo!(),
             Self::LoadTraceInput(li) => Some(m.type_(li.ty_idx())),
-            Self::Call(..) => todo!(),
+            Self::Call(ci) => Some(ci.target().func_type(m).ret_type(m)),
             Self::PtrAdd(..) => Some(&Type::Ptr),
             Self::Store(..) => None,
             Self::StoreGlobal(..) => None,
@@ -620,19 +660,32 @@ impl CallInstruction {
         unsafe { ptr::read_unaligned(unaligned) }
     }
 
+    /// Return the [FuncDeclIdx] of the callee.
+    pub(crate) fn target(&self) -> FuncDeclIdx {
+        self.target
+    }
+
     /// Fetch the operand at the specified index.
     ///
-    /// It is undefined behaviour to provide an out-of-bounds index.
-    pub(crate) fn operand(&self, jit_mod: &Module, idx: usize) -> Option<Operand> {
+    /// # Panics
+    ///
+    /// Panics if the operand index is out of bounds.
+    pub(crate) fn operand(&self, jit_mod: &Module, idx: usize) -> Operand {
         #[cfg(debug_assertions)]
         {
-            let ft = jit_mod.func_decl_ty(self.target);
+            let ft = self.target.func_type(jit_mod);
             debug_assert!(ft.num_args() > idx);
         }
         if idx == 0 {
-            Some(self.arg1().get())
+            if self.target().func_type(jit_mod).num_args() > 0 {
+                self.arg1().get()
+            } else {
+                // Avoid returning an undefined operand. Storage always exists for one argument,
+                // even if the function accepts no arguments.
+                panic!();
+            }
         } else {
-            Some(jit_mod.extra_args[usize::from(self.extra.0) + idx - 1].clone())
+            jit_mod.extra_args[usize::from(self.extra.0) + idx - 1].clone()
         }
     }
 }
@@ -924,6 +977,15 @@ impl Module {
         &self.instrs[usize::try_from(idx).unwrap()]
     }
 
+    /// Return the [Type] for the specified index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is out of bounds.
+    pub(crate) fn type_(&self, idx: TypeIdx) -> &Type {
+        &self.types[idx]
+    }
+
     /// Push an instruction to the end of the [Module].
     pub(crate) fn push(&mut self, instr: Instruction) {
         self.instrs.push(instr);
@@ -1029,27 +1091,13 @@ impl Module {
         }
     }
 
-    /// Return the [FuncType] of the specified function declaration.
+    /// Return the [FuncDecl] for the specified index.
     ///
     /// # Panics
     ///
-    /// Panics if:
-    ///  - `idx` is out of bounds
-    ///  - the type index inside the [FuncDecl] is out of bounds
-    ///  - the type found is not a function type
-    ///
-    ///  If the [Module] is well-formed, then the latter two cases cannot happen.
-    pub(crate) fn func_decl_ty(&self, idx: FuncDeclIdx) -> &FuncType {
-        if let Type::Func(ft) = &self.types[self.func_decls[idx].type_idx] {
-            &ft
-        } else {
-            panic!();
-        }
-    }
-
-    /// Return the type for the given type index.
-    pub(crate) fn type_(&self, idx: TypeIdx) -> &Type {
-        &self.types[idx]
+    /// Panics if the index is out of bounds
+    pub(crate) fn func_decl(&self, idx: FuncDeclIdx) -> &FuncDecl {
+        &self.func_decls[idx]
     }
 }
 
@@ -1142,9 +1190,9 @@ mod tests {
         let ci = CallInstruction::new(&mut jit_mod, func_decl_idx, &args).unwrap();
 
         // Now request the operands and check they all look as they should.
-        assert_eq!(ci.operand(&jit_mod, 0), Some(Operand::Local(InstrIdx(0))));
-        assert_eq!(ci.operand(&jit_mod, 1), Some(Operand::Local(InstrIdx(1))));
-        assert_eq!(ci.operand(&jit_mod, 2), Some(Operand::Local(InstrIdx(2))));
+        assert_eq!(ci.operand(&jit_mod, 0), Operand::Local(InstrIdx(0)));
+        assert_eq!(ci.operand(&jit_mod, 1), Operand::Local(InstrIdx(1)));
+        assert_eq!(ci.operand(&jit_mod, 2), Operand::Local(InstrIdx(2)));
         assert_eq!(
             jit_mod.extra_args,
             vec![Operand::Local(InstrIdx(1)), Operand::Local(InstrIdx(2))]
@@ -1173,7 +1221,7 @@ mod tests {
         let ci = CallInstruction::new(&mut jit_mod, func_decl_idx, &args).unwrap();
 
         // Request an operand with an out-of-bounds index.
-        ci.operand(&jit_mod, 3).unwrap();
+        ci.operand(&jit_mod, 3);
     }
 
     #[test]
