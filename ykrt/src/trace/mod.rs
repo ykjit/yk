@@ -63,7 +63,10 @@ pub(crate) trait AOTTraceIterator:
 {
 }
 
-pub(crate) enum AOTTraceIteratorError {}
+pub(crate) enum AOTTraceIteratorError {
+    TraceTooLong,
+    LongJmpEncountered,
+}
 
 /// A processed item from a trace.
 #[derive(Debug, Eq, PartialEq)]

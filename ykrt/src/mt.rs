@@ -282,7 +282,6 @@ impl MT {
                         mtt.promotions.take().unwrap(),
                     )
                 });
-                self.stats.timing_state(TimingState::TraceMapping);
                 match thrdtrcr.stop() {
                     Ok(utrace) => {
                         self.stats.timing_state(TimingState::None);
@@ -298,7 +297,7 @@ impl MT {
                         self.stats.timing_state(TimingState::None);
                         self.stats.trace_recorded_err();
                         #[cfg(feature = "yk_jitstate_debug")]
-                        print_jit_state("stop-tracing-aborted");
+                        print_jit_state(&format!("stop-tracing-aborted: {_e}"));
                     }
                 }
             }
@@ -549,9 +548,14 @@ impl MT {
                     mt.stats.trace_compiled_err();
                     hl_arc.lock().trace_failed(&mt);
                     #[cfg(feature = "yk_jitstate_debug")]
-                    print_jit_state(&format!("trace-compilation-aborted<reason=\"{}\">", _e));
+                    print_jit_state(&format!("trace-compilation-aborted: {_e}"));
                 }
-                Err(CompilationError::Unrecoverable(e)) => panic!("{}", e),
+                Err(CompilationError::Unrecoverable(_e)) => {
+                    mt.stats.trace_compiled_err();
+                    hl_arc.lock().trace_failed(&mt);
+                    #[cfg(feature = "yk_jitstate_debug")]
+                    print_jit_state(&format!("trace-compilation-aborted: {_e}"));
+                }
             }
 
             mt.stats.timing_state(TimingState::None);

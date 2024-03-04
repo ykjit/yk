@@ -115,11 +115,7 @@ impl TraceRecorder for SWTTraceRecorder {
                     .collect();
             })
         });
-        if aot_blocks.is_empty() {
-            Err(InvalidTraceError::EmptyTrace)
-        } else {
-            Ok(Box::new(SWTraceIterator::new(aot_blocks)))
-        }
+        Ok(Box::new(SWTraceIterator::new(aot_blocks)))
     }
 }
 

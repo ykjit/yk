@@ -5,7 +5,8 @@ use crate::{
     compile::{CompilationError, CompiledTrace, Compiler},
     location::HotLocation,
     mt::{SideTraceInfo, MT},
-    trace::{AOTTraceIterator, TraceAction},
+    trace::{AOTTraceIterator, AOTTraceIteratorError, TraceAction},
+    ykstats::TimingState,
 };
 use object::{Object, ObjectSection};
 use parking_lot::Mutex;
@@ -37,12 +38,21 @@ impl Compiler for JITCLLVM {
         hl: Arc<Mutex<HotLocation>>,
     ) -> Result<CompiledTrace, CompilationError> {
         let mut irtrace = Vec::new();
+        mt.stats.timing_state(TimingState::TraceMapping);
         for ta in aottrace_iter.0 {
             match ta {
                 Ok(x) => irtrace.push(x),
-                Err(_) => todo!(),
+                Err(AOTTraceIteratorError::LongJmpEncountered) => {
+                    return Err(CompilationError::Unrecoverable(
+                        "Encountered longjmp".to_owned(),
+                    ));
+                }
+                Err(AOTTraceIteratorError::TraceTooLong) => {
+                    return Err(CompilationError::Unrecoverable("Trace too long".to_owned()))
+                }
             }
         }
+        mt.stats.timing_state(TimingState::Compiling);
         let (func_names, bbs, trace_len) = self.encode_trace(&irtrace);
 
         let llvmbc = llvmbc_section();

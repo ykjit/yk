@@ -1,16 +1,28 @@
 //! The mapper translates a hwtracer trace into an IR trace.
 
 use crate::trace::{AOTTraceIterator, AOTTraceIteratorError, InvalidTraceError, TraceAction};
-use hwtracer::llvm_blockmap::LLVM_BLOCK_MAP;
-use hwtracer::Trace;
-use std::error::Error;
+use hwtracer::{llvm_blockmap::LLVM_BLOCK_MAP, Block, HWTracerError, Trace};
 use ykaddr::{
     addr::{vaddr_to_obj_and_off, vaddr_to_sym_and_obj},
     obj::SELF_BIN_PATH,
 };
 
+/// Map the *machine* blocks of the specified trace into LLVM IR blocks.
+///
+/// Each entry in the returned trace is either a "mapped block" identifying a successfully
+/// mapped LLVM IR block, or an unsuccessfully mapped "unmappable block" (an unknown region of
+/// code spanning at least one machine block).
 pub(crate) struct HWTTraceIterator {
-    trace: std::vec::IntoIter<TraceAction>,
+    hwt_iter: Box<dyn Iterator<Item = Result<Block, HWTracerError>> + Send>,
+    /// The next [TraceAction]`s we will produce when `next` is called. We need this intermediary
+    /// to allow us to deduplicate mapped/unmapped blocks. This will be empty on the first
+    /// iteration and from then on will always have at least one [TraceAction] in it at all times,
+    /// since we only need to check if the next [TraceAction] is a duplicate of the last element in
+    /// this `Vec`.
+    upcoming: Vec<TraceAction>,
+    /// How many [TraceAction]s have been generated so far? We use this to know if the underlying
+    /// trace is too long.
+    tas_generated: usize,
 }
 
 impl AOTTraceIterator for HWTTraceIterator {}
@@ -18,20 +30,95 @@ impl AOTTraceIterator for HWTTraceIterator {}
 impl Iterator for HWTTraceIterator {
     type Item = Result<TraceAction, AOTTraceIteratorError>;
     fn next(&mut self) -> Option<Self::Item> {
-        self.trace.next().map(|x| Ok(x))
+        // Unless we've exhausted `self.hwt_iter`, we need to have at least 1 element in
+        // `self.upcoming` in order to deduplicate, but there's no use in having more than 1
+        // element.
+        while self.upcoming.len() < 2 {
+            match self.hwt_iter.next() {
+                Some(Ok(x)) => {
+                    let mapped = map_block(&x);
+                    if mapped.is_empty() {
+                        // The block is unmappable. Note that we collapse consecutive unmappable
+                        // blocks.
+                        if self.upcoming.last() != Some(&TraceAction::new_unmappable_block()) {
+                            self.upcoming.push(TraceAction::new_unmappable_block());
+                            self.tas_generated += 1;
+                        }
+                    } else {
+                        for b in map_block(&x) {
+                            match b {
+                                Some(b) => {
+                                    if self.upcoming.last() != Some(&b) {
+                                        self.upcoming.push(b);
+                                        self.tas_generated += 1;
+                                    }
+                                }
+                                None => {
+                                    // Part of an hwtracer block mapped to a machine block in the
+                                    // LLVM block address map, but the machine block has no
+                                    // corresponding AOT LLVM IR blocks.
+                                    //
+                                    // FIXME: https://github.com/ykjit/yk/issues/388
+                                    // We *think* this happens because LLVM can introduce extra
+                                    // `MachineBasicBlock`s to help with laying out machine code.
+                                    // If that's the case, then for our purposes these extra blocks
+                                    // can be ignored. However, we should really investigate to be
+                                    // sure.
+                                }
+                            }
+                        }
+                    }
+                }
+                Some(Err(HWTracerError::Unrecoverable(x)))
+                    if x == "longjmp within traces currently unsupported" =>
+                {
+                    return Some(Err(AOTTraceIteratorError::LongJmpEncountered));
+                }
+                Some(Err(_)) => todo!(),
+                None => {
+                    // The last block contains pointless unmappable code (the stop tracing call).
+                    match self.upcoming.pop() {
+                        Some(x) => {
+                            // This is a rough proxy for "check that we removed only the thing we want to
+                            // remove".
+                            assert!(matches!(x, TraceAction::UnmappableBlock));
+                        }
+                        _ => unreachable!(),
+                    }
+                    return None;
+                }
+            }
+        }
+
+        if self.tas_generated > crate::mt::DEFAULT_TRACE_TOO_LONG {
+            return Some(Err(AOTTraceIteratorError::TraceTooLong));
+        }
+
+        // The `remove` cannot panic because upcoming.len > 1 is guaranteed by the `while` loop
+        // above.
+        Some(Ok(self.upcoming.remove(0)))
     }
 }
 
 impl HWTTraceIterator {
     pub fn new(trace: Box<dyn Trace>) -> Result<Self, InvalidTraceError> {
-        let mapped = map_trace(trace).map_err(|_| InvalidTraceError::InternalError)?;
-        if mapped.is_empty() {
-            Err(InvalidTraceError::EmptyTrace)
-        } else {
-            Ok(HWTTraceIterator {
-                trace: mapped.into_iter(),
-            })
+        let mut hwt_iter = trace.iter_blocks();
+
+        // The first block contains the control point, which we need to remove.
+        // As a rough proxy for "check that we removed only the thing we want to remove", we know
+        // that the control point will be contained in a single mappable block. The `unwrap` can
+        // only fail if our assumption about the block is incorrect (i.e. some part of the system
+        // doesn't work as expected).
+        let first = hwt_iter.next().map(|x| map_block(&x.unwrap())).unwrap();
+        match first.as_slice() {
+            &[Some(TraceAction::MappedAOTBlock { .. })] => (),
+            _ => panic!(),
         }
+        Ok(HWTTraceIterator {
+            hwt_iter,
+            upcoming: Vec::new(),
+            tas_generated: 0,
+        })
     }
 }
 
@@ -134,96 +221,4 @@ fn map_block(block: &hwtracer::Block) -> Vec<Option<TraceAction>> {
         }
     }
     ret
-}
-
-/// Map the *machine* blocks of the specified trace into LLVM IR blocks.
-///
-/// Each entry in the returned trace is either a "mapped block" identifying a successfully
-/// mapped LLVM IR block, or an unsuccessfully mapped "unmappable block" (an unknown region of
-/// code spanning at least one machine block).
-///
-/// In the returned trace, unmappable blocks never appear consecutively.
-///
-/// The returned trace will always start with a mapped block (the unmappable prefix of the
-/// foreign "turn on tracing" routine is omitted).
-pub fn map_trace(trace: Box<dyn Trace>) -> Result<Vec<TraceAction>, Box<dyn Error>> {
-    let mut ret: Vec<TraceAction> = Vec::new();
-
-    let mut trace_iter = trace.iter_blocks();
-    // The first block contains the control point so we need to remove that.
-    match trace_iter.next() {
-        Some(Ok(x)) => {
-            // As a rough proxy for "check that we removed only the thing we want to remove",
-            // we know that the control point will be contained in a single mappable block.
-            assert!(matches!(
-                map_block(&x).as_slice(),
-                &[Some(TraceAction::MappedAOTBlock { .. })]
-            ));
-        }
-        _ => unreachable!(),
-    }
-
-    for (i, block) in trace_iter.enumerate() {
-        if i > crate::mt::DEFAULT_TRACE_TOO_LONG {
-            return Err("Trace too long".into());
-        }
-        let block = block?;
-        let irblocks = map_block(&block);
-        if irblocks.is_empty() {
-            // The block is unmappable. Insert a IRBlock that indicates this, but only if the
-            // trace isn't empty (we never report the leading unmappable code in a trace). We
-            // also take care to collapse consecutive unmappable blocks into one.
-            if let Some(last) = ret.last_mut() {
-                match last {
-                    TraceAction::MappedAOTBlock { .. } => {
-                        ret.push(TraceAction::new_unmappable_block());
-                    }
-                    TraceAction::UnmappableBlock => (),
-                    TraceAction::Promotion => todo!(),
-                }
-            }
-        } else {
-            for irblock in irblocks.into_iter() {
-                if let Some(irb) = irblock {
-                    match ret.last() {
-                        Some(last) if &irb != last => ret.push(irb),
-                        Some(_) => {
-                            // The `BlockDisambiguate` pass in ykllvm ensures that no
-                            // high-level LLVM IR block ever branches straight back to itself,
-                            // so if we see the same high-level block more than once
-                            // consecutively in a trace, then we know that the IR block has
-                            // been lowered to multiple machine blocks during code-gen, and
-                            // that we should only push the IR block once.
-                        }
-                        None => {
-                            // The returned trace is empty thus far and `irb` is mappable, so
-                            // we always want to push that.
-                            ret.push(irb);
-                        }
-                    }
-                } else {
-                    // Part of an hwtracer block mapped to a machine block in the LLVM block
-                    // address map, but the machine block has no corresponding AOT LLVM IR
-                    // blocks.
-                    //
-                    // FIXME: https://github.com/ykjit/yk/issues/388
-                    // We *think* this happens because LLVM can introduce extra
-                    // `MachineBasicBlock`s to help with laying out machine code. If that's
-                    // the case, then for our purposes these extra blocks can be ignored.
-                    // However, we should really investigate to be sure.
-                }
-            }
-        }
-    }
-
-    // The last block contains pointless unmappable code (the stop tracing call).
-    match ret.pop() {
-        Some(x) => {
-            // This is a rough proxy for "check that we removed only the thing we want to
-            // remove".
-            assert!(matches!(x, TraceAction::UnmappableBlock));
-        }
-        _ => unreachable!(),
-    }
-    Ok(ret)
 }
