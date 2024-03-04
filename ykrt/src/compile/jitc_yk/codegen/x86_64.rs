@@ -111,6 +111,7 @@ impl<'a> X64CodeGen<'a> {
         #[cfg(any(debug_assertions, test))]
         self.comment(self.asm.offset(), inst.to_string());
         match inst {
+            jit_ir::Instruction::Add(i) => self.codegen_add_instr(instr_idx, &i),
             jit_ir::Instruction::LoadTraceInput(i) => {
                 self.codegen_loadtraceinput_instr(instr_idx, &i)
             }
@@ -226,6 +227,27 @@ impl<'a> X64CodeGen<'a> {
         let size = local.instr(self.jit_mod).def_byte_size(self.jit_mod);
         let l = self.ra.allocate(local, size, &mut self.stack);
         self.store_local(&l, reg, size);
+    }
+
+    fn codegen_add_instr(&mut self, inst_idx: jit_ir::InstrIdx, inst: &jit_ir::AddInstruction) {
+        let op1 = inst.op1();
+        let op2 = inst.op2();
+
+        // The types must match. If the IR is well-formed, this is guaranteed.
+        debug_assert_eq!(op1.type_(self.jit_mod), op2.type_(self.jit_mod));
+
+        self.operand_into_reg(WR0, &inst.op1()); // FIXME: assumes value will fit in a reg.
+        self.operand_into_reg(WR1, &inst.op2()); // ^^^ same
+
+        match op1.byte_size(self.jit_mod) {
+            8 => dynasm!(self.asm; add Rq(WR0.code()), Rq(WR1.code())),
+            4 => dynasm!(self.asm; add Rd(WR0.code()), Rd(WR1.code())),
+            2 => dynasm!(self.asm; add Rw(WR0.code()), Rw(WR1.code())),
+            1 => dynasm!(self.asm; add Rb(WR0.code()), Rb(WR1.code())),
+            _ => todo!(),
+        }
+
+        self.reg_into_new_local(inst_idx, WR0);
     }
 
     fn codegen_loadtraceinput_instr(
@@ -591,6 +613,52 @@ mod tests {
             "; LoadTraceInput 8, 1",
             "... 0000004b: mov r12, [rdi+0x08]",
             "... 00000053: mov [rbp-0x10], r12",
+            "--- End jit-asm ---",
+        ];
+        test_with_spillalloc(&jit_mod, &patt_lines);
+    }
+
+    #[test]
+    fn codegen_add_i16_spillalloc() {
+        let mut jit_mod = test_module();
+        let i16_ty_idx = jit_mod
+            .type_idx(&jit_ir::Type::Integer(IntegerType::new(16)))
+            .unwrap();
+        jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i16_ty_idx).into());
+        jit_mod.push(jit_ir::LoadTraceInputInstruction::new(16, i16_ty_idx).into());
+        let op1 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap());
+        let op2 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(1).unwrap());
+        jit_mod.push(jit_ir::AddInstruction::new(op1, op2).into());
+        let patt_lines = [
+            "...",
+            "; Add %0, %1",
+            "... 0000002d: movzx r12, word ptr [rbp-0x02]",
+            "... 00000035: movzx r13, word ptr [rbp-0x04]",
+            "... 0000003d: add r12w, r13w",
+            "... 00000041: mov [rbp-0x06], r12w",
+            "--- End jit-asm ---",
+        ];
+        test_with_spillalloc(&jit_mod, &patt_lines);
+    }
+
+    #[test]
+    fn codegen_add_i64_spillalloc() {
+        let mut jit_mod = test_module();
+        let i64_ty_idx = jit_mod
+            .type_idx(&jit_ir::Type::Integer(IntegerType::new(64)))
+            .unwrap();
+        jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i64_ty_idx).into());
+        jit_mod.push(jit_ir::LoadTraceInputInstruction::new(64, i64_ty_idx).into());
+        let op1 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap());
+        let op2 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(1).unwrap());
+        jit_mod.push(jit_ir::AddInstruction::new(op1, op2).into());
+        let patt_lines = [
+            "...",
+            "; Add %0, %1",
+            "... 00000029: mov r12, [rbp-0x08]",
+            "... 00000030: mov r13, [rbp-0x10]",
+            "... 00000037: add r12, r13",
+            "... 0000003a: mov [rbp-0x18], r12",
             "--- End jit-asm ---",
         ];
         test_with_spillalloc(&jit_mod, &patt_lines);

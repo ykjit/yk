@@ -312,6 +312,24 @@ impl Operand {
             _ => todo!(),
         }
     }
+
+    /// Returns the type of the operand.
+    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
+        match self {
+            Self::Local(l) => {
+                match l.instr(m).def_type(m) {
+                    Some(t) => t,
+                    None => {
+                        // When an operand is a local variable, the local can only come from an
+                        // instruction that defines a local variable, and thus has a type. So this
+                        // can't happen if the IR is well-formed.
+                        unreachable!();
+                    }
+                }
+            }
+            _ => todo!(),
+        }
+    }
 }
 
 impl fmt::Display for Operand {
@@ -378,7 +396,7 @@ impl Instruction {
             Self::PtrAdd(..) => Some(&Type::Ptr),
             Self::Store(..) => None,
             Self::StoreGlobal(..) => None,
-            Self::Add(..) => todo!(),
+            Self::Add(ai) => Some(ai.type_(m)),
             Self::Icmp(..) => todo!(),
             Self::Guard(..) => None,
         }
@@ -755,12 +773,16 @@ impl AddInstruction {
         }
     }
 
-    fn op1(&self) -> Operand {
+    pub(crate) fn op1(&self) -> Operand {
         self.op1.get()
     }
 
-    fn op2(&self) -> Operand {
+    pub(crate) fn op2(&self) -> Operand {
         self.op2.get()
+    }
+
+    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
+        self.op1.get().type_(m)
     }
 }
 
