@@ -10,7 +10,7 @@ use crate::{
     Block, ThreadTracer, Trace, Tracer,
 };
 use libc::{c_void, free, geteuid, malloc, size_t};
-use std::{fs::read_to_string, slice, sync::Arc};
+use std::{fs::read_to_string, sync::Arc};
 
 #[cfg(pt)]
 extern "C" {
@@ -137,16 +137,18 @@ impl PerfThreadTracer {
 
 /// A wrapper around a manually malloc/free'd buffer for holding an Intel PT trace. We've split
 /// this out from PerfTrace so that we can mark just this raw pointer as `unsafe Send`.
+///
+/// FIXME: Marking a pointer `Send` is necessary but not sufficient: we also need some sort of
+/// memory barrier to guarantee that all writes from thread A are seen by thread B. That said, x86
+/// (and currently this code can only sensibly run on x86) has a strong memory model makes it
+/// relatively unlikely that this will be a problem in practise. There is, though, a tiny chance
+/// that a super-smart compiler could try and optimise things across threads.
 #[repr(C)]
 #[derive(Debug)]
-struct PerfTraceBuf(*mut u8);
+#[cfg(target_arch = "x86_64")]
+pub(crate) struct PerfTraceBuf(pub(crate) *mut u8);
 
-/// We need to be able to transfer `PerfTraceBuf`s between threads to allow background
-/// compilation. However, `PerfTraceBuf` wraps a raw pointer, which is not `Send`, so nor is
-/// `PerfTraceBuf`. As long as we take great care to never: a) give out copies of the pointer to
-/// the wider world, or b) dereference the pointer when we shouldn't, then we can manually (and
-/// unsafely) mark the struct as being Send.
-unsafe impl Send for PerfTrace {}
+unsafe impl Send for PerfTraceBuf {}
 
 /// An Intel PT trace, obtained via Linux perf.
 #[repr(C)]
@@ -180,15 +182,21 @@ impl PerfTrace {
 
 impl Trace for PerfTrace {
     #[cfg(ykpt)]
-    fn iter_blocks(&self) -> Box<dyn Iterator<Item = Result<Block, HWTracerError>> + Send> {
-        let bytes =
-            unsafe { slice::from_raw_parts(self.buf.0, usize::try_from(self.len).unwrap()) };
-        Box::new(YkPTBlockIterator::new(bytes))
+    fn iter_blocks(
+        mut self: Box<Self>,
+    ) -> Box<dyn Iterator<Item = Result<Block, HWTracerError>> + Send> {
+        // We hand ownership for self.buf over to `YkPTBlockIterator` so we need to make sure that
+        // we don't try and free it.
+        let buf = std::mem::replace(&mut self.buf, PerfTraceBuf(std::ptr::null_mut()));
+        Box::new(YkPTBlockIterator::new(
+            buf,
+            usize::try_from(self.len).unwrap(),
+        ))
     }
 
     #[cfg(test)]
     fn bytes(&self) -> &[u8] {
-        unsafe { slice::from_raw_parts(self.buf.0, usize::try_from(self.len).unwrap()) }
+        unsafe { std::slice::from_raw_parts(self.buf.0, usize::try_from(self.len).unwrap()) }
     }
 
     #[cfg(test)]
