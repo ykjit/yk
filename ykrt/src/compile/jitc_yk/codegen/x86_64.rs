@@ -22,7 +22,7 @@ static JITFUNC_LIVEVARS_ARGIDX: usize = 0;
 /// The size of a 64-bit register in bytes.
 static REG64_SIZE: usize = 8;
 
-/// Work registers, i.e. the registers we use temproarily (where possible) for operands to, and
+/// Work registers, i.e. the registers we use temporarily (where possible) for operands to, and
 /// results of, intermediate computations.
 ///
 /// We choose callee-save registers so that we don't have to worry about storing/restoring them
