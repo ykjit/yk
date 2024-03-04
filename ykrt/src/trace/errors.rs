@@ -3,6 +3,7 @@
 use std::fmt::{self, Display, Formatter};
 
 #[derive(Debug)]
+#[allow(dead_code)]
 /// Reasons that a trace can be invalidated.
 pub enum InvalidTraceError {
     /// Nothing was recorded.

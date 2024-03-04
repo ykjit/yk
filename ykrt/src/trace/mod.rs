@@ -72,8 +72,11 @@ pub(crate) trait AOTTraceIterator:
 {
 }
 
+// Not all backends will generate all of these possibilities.
 pub(crate) enum AOTTraceIteratorError {
+    #[allow(dead_code)]
     TraceTooLong,
+    #[allow(dead_code)]
     LongJmpEncountered,
 }
 
