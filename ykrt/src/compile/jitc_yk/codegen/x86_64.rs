@@ -1,4 +1,8 @@
 //! The X86_64 JIT Code Generator.
+//!
+//! FIXME: the code generator clobbers registers willy-nilly because at the time of writing we have
+//! a register allocator that doesn't actually use any registers. Later we will have to audit the
+//! backend and insert register save/restore for clobbered registers.
 
 use super::{
     super::{
