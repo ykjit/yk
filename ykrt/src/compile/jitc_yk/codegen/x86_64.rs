@@ -1,8 +1,12 @@
 //! The X86_64 JIT Code Generator.
+//!
+//! FIXME: the code generator clobbers registers willy-nilly because at the time of writing we have
+//! a register allocator that doesn't actually use any registers. Later we will have to audit the
+//! backend and insert register save/restore for clobbered registers.
 
 use super::{
     super::{
-        jit_ir::{self, InstrIdx, Operand},
+        jit_ir::{self, InstrIdx, Operand, Type},
         CompilationError,
     },
     abs_stack::AbstractStack,
@@ -10,8 +14,10 @@ use super::{
     CodeGen, CodeGenOutput,
 };
 use dynasmrt::{dynasm, x64::Rq, AssemblyOffset, DynasmApi, ExecutableBuffer, Register};
+use std::ffi::CString;
 #[cfg(any(debug_assertions, test))]
 use std::{cell::Cell, collections::HashMap, slice};
+use ykaddr::addr::symbol_vaddr;
 
 /// Argument registers as defined by the X86_64 SysV ABI.
 static ARG_REGS: [Rq; 6] = [Rq::RDI, Rq::RSI, Rq::RDX, Rq::RCX, Rq::R8, Rq::R9];
@@ -22,7 +28,7 @@ static JITFUNC_LIVEVARS_ARGIDX: usize = 0;
 /// The size of a 64-bit register in bytes.
 static REG64_SIZE: usize = 8;
 
-/// Work registers, i.e. the registers we use temproarily (where possible) for operands to, and
+/// Work registers, i.e. the registers we use temporarily (where possible) for operands to, and
 /// results of, intermediate computations.
 ///
 /// We choose callee-save registers so that we don't have to worry about storing/restoring them
@@ -79,7 +85,7 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
         // doesn't support this, but it's on their roadmap:
         // https://github.com/CensoredUsername/dynasm-rs/issues/48
         for (idx, inst) in self.jit_mod.instrs().iter().enumerate() {
-            self.codegen_inst(jit_ir::InstrIdx::new(idx)?, inst);
+            self.codegen_inst(jit_ir::InstrIdx::new(idx)?, inst)?;
         }
 
         // Now we know the size of the stack frame (i.e. self.asp), patch the allocation with the
@@ -107,7 +113,11 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
 
 impl<'a> X64CodeGen<'a> {
     /// Codegen an instruction.
-    fn codegen_inst(&mut self, instr_idx: jit_ir::InstrIdx, inst: &jit_ir::Instruction) {
+    fn codegen_inst(
+        &mut self,
+        instr_idx: jit_ir::InstrIdx,
+        inst: &jit_ir::Instruction,
+    ) -> Result<(), CompilationError> {
         #[cfg(any(debug_assertions, test))]
         self.comment(self.asm.offset(), inst.to_string());
         match inst {
@@ -120,10 +130,11 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Instruction::Store(i) => self.codegen_store_instr(&i),
             jit_ir::Instruction::LoadGlobal(_) => todo!(),
             jit_ir::Instruction::StoreGlobal(_) => todo!(),
-            jit_ir::Instruction::Call(_) => todo!(),
+            jit_ir::Instruction::Call(i) => self.codegen_call_instr(instr_idx, &i)?,
             jit_ir::Instruction::Icmp(_) => todo!(),
             jit_ir::Instruction::Guard(_) => todo!(),
         }
+        Ok(())
     }
 
     /// Add a comment to the trace, for use when disassembling its native code.
@@ -324,6 +335,54 @@ impl<'a> X64CodeGen<'a> {
         }
     }
 
+    pub(super) fn codegen_call_instr(
+        &mut self,
+        inst_idx: InstrIdx,
+        inst: &jit_ir::CallInstruction,
+    ) -> Result<(), CompilationError> {
+        // FIXME: floating point args
+        // FIXME: non-SysV ABIs
+        let fdecl = self.jit_mod.func_decl(inst.target());
+        let fty = fdecl.func_type(self.jit_mod);
+        let num_args = fty.num_args();
+
+        if num_args > ARG_REGS.len() {
+            todo!(); // needs spill
+        }
+
+        if fty.is_vararg() {
+            // When implementing, note the SysV X86_64 ABI says "rax is used to indicate the number
+            // of vector arguments passed to a function requiring a variable number of arguments".
+            todo!();
+        }
+
+        for i in 0..num_args {
+            let reg = ARG_REGS[i];
+            self.operand_into_reg(reg, &inst.operand(self.jit_mod, i));
+        }
+
+        // unwrap safe on account of linker symbol names not containing internal NULL bytes.
+        let va = symbol_vaddr(&CString::new(fdecl.name()).unwrap()).ok_or_else(|| {
+            CompilationError::Unrecoverable(format!("couldn't find AOT symbol: {}", fdecl.name()))
+        })?;
+
+        // The SysV x86_64 ABI requires the stack to be 16-byte aligned prior to a call.
+        self.stack.align(SYSV_CALL_STACK_ALIGN);
+
+        // Actually perform the call.
+        dynasm!(self.asm
+            ; mov Rq(WR0.code()), QWORD va as i64
+            ; call Rq(WR0.code())
+        );
+
+        // If the function we called has a return value, then store it into a local variable.
+        if fty.ret_type(self.jit_mod) != &Type::Void {
+            self.reg_into_new_local(inst_idx, Rq::RAX);
+        }
+
+        Ok(())
+    }
+
     fn const_u64_into_reg(&mut self, reg: Rq, cv: u64) {
         dynasm!(self.asm
             ; mov Rq(reg.code()), QWORD cv as i64 // `as` intentional.
@@ -413,14 +472,18 @@ mod tests {
     use super::{CodeGen, X64CodeGen, STACK_DIRECTION};
     use crate::compile::jitc_yk::{
         codegen::{reg_alloc::RegisterAllocator, tests::match_asm},
-        jit_ir::{self, IntegerType},
+        jit_ir::{self, IntegerType, Type},
     };
+    use std::ffi::CString;
+    use ykaddr::addr::symbol_vaddr;
 
     fn test_module() -> jit_ir::Module {
         jit_ir::Module::new("test".into())
     }
 
     mod with_spillalloc {
+        use self::jit_ir::FuncType;
+
         use super::*;
         use crate::compile::jitc_yk::codegen::reg_alloc::SpillAllocator;
 
@@ -665,6 +728,239 @@ mod tests {
                 "... add r12, r13",
                 "... mov [rbp-0x18], r12",
                 "--- End jit-asm ---",
+            ];
+            test_with_spillalloc(&jit_mod, &patt_lines);
+        }
+
+        /// A function whose symbol is present in the current address space.
+        ///
+        /// Used for testing code generation for calls.
+        ///
+        /// This function is never called, we just need something that dlsym(3) will find an
+        /// address for. As such, you can generate calls to this with any old signature for the
+        /// purpose of testing codegen.
+        #[cfg(unix)]
+        const CALL_TESTS_CALLEE: &str = "puts";
+
+        #[test]
+        fn codegen_call_simple() {
+            let mut jit_mod = test_module();
+            let void_ty_idx = jit_mod.type_idx(&Type::Void).unwrap();
+            let func_ty_idx = jit_mod
+                .type_idx(&jit_ir::Type::Func(FuncType::new(
+                    vec![],
+                    void_ty_idx,
+                    false,
+                )))
+                .unwrap();
+
+            let func_decl_idx = jit_mod
+                .func_decl_idx(&jit_ir::FuncDecl::new(
+                    CALL_TESTS_CALLEE.into(),
+                    func_ty_idx,
+                ))
+                .unwrap();
+            let call_inst = jit_ir::CallInstruction::new(&mut jit_mod, func_decl_idx, &[]).unwrap();
+            jit_mod.push(call_inst.into());
+
+            let sym_addr = symbol_vaddr(&CString::new(CALL_TESTS_CALLEE).unwrap()).unwrap();
+            let patt_lines = [
+                "...",
+                &format!("... mov r12, 0x{:X}", sym_addr),
+                "... call r12",
+                "...",
+            ];
+            test_with_spillalloc(&jit_mod, &patt_lines);
+        }
+
+        #[test]
+        fn codegen_call_with_args() {
+            let mut jit_mod = test_module();
+            let void_ty_idx = jit_mod.type_idx(&Type::Void).unwrap();
+            let i32_ty_idx = jit_mod
+                .type_idx(&Type::Integer(IntegerType::new(32)))
+                .unwrap();
+            let func_ty_idx = jit_mod
+                .type_idx(&jit_ir::Type::Func(FuncType::new(
+                    vec![i32_ty_idx; 3],
+                    void_ty_idx,
+                    false,
+                )))
+                .unwrap();
+
+            let func_decl_idx = jit_mod
+                .func_decl_idx(&jit_ir::FuncDecl::new(
+                    CALL_TESTS_CALLEE.into(),
+                    func_ty_idx,
+                ))
+                .unwrap();
+
+            let arg1 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(jit_mod.len()).unwrap());
+            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i32_ty_idx).into());
+            let arg2 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(jit_mod.len()).unwrap());
+            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(4, i32_ty_idx).into());
+            let arg3 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(jit_mod.len()).unwrap());
+            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(8, i32_ty_idx).into());
+
+            let call_inst =
+                jit_ir::CallInstruction::new(&mut jit_mod, func_decl_idx, &[arg1, arg2, arg3])
+                    .unwrap();
+            jit_mod.push(call_inst.into());
+
+            let sym_addr = symbol_vaddr(&CString::new(CALL_TESTS_CALLEE).unwrap()).unwrap();
+            let patt_lines = [
+                "...",
+                "; Call",
+                "... mov edi, [rbp-0x04]",
+                "... mov esi, [rbp-0x08]",
+                "... mov edx, [rbp-0x0C]",
+                &format!("... mov r12, 0x{:X}", sym_addr),
+                "... call r12",
+                "...",
+            ];
+            test_with_spillalloc(&jit_mod, &patt_lines);
+        }
+
+        #[test]
+        fn codegen_call_with_different_args() {
+            let mut jit_mod = test_module();
+            let void_ty_idx = jit_mod.type_idx(&Type::Void).unwrap();
+            let i8_ty_idx = jit_mod
+                .type_idx(&Type::Integer(IntegerType::new(8)))
+                .unwrap();
+            let i16_ty_idx = jit_mod
+                .type_idx(&Type::Integer(IntegerType::new(16)))
+                .unwrap();
+            let i32_ty_idx = jit_mod
+                .type_idx(&Type::Integer(IntegerType::new(32)))
+                .unwrap();
+            let i64_ty_idx = jit_mod
+                .type_idx(&Type::Integer(IntegerType::new(64)))
+                .unwrap();
+            let ptr_ty_idx = jit_mod.type_idx(&Type::Ptr).unwrap();
+            let func_ty_idx = jit_mod
+                .type_idx(&jit_ir::Type::Func(FuncType::new(
+                    vec![
+                        i8_ty_idx, i16_ty_idx, i32_ty_idx, i64_ty_idx, ptr_ty_idx, i8_ty_idx,
+                    ],
+                    void_ty_idx,
+                    false,
+                )))
+                .unwrap();
+
+            let func_decl_idx = jit_mod
+                .func_decl_idx(&jit_ir::FuncDecl::new(
+                    CALL_TESTS_CALLEE.into(),
+                    func_ty_idx,
+                ))
+                .unwrap();
+
+            let arg1 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(jit_mod.len()).unwrap());
+            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into());
+            let arg2 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(jit_mod.len()).unwrap());
+            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(8, i16_ty_idx).into());
+            let arg3 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(jit_mod.len()).unwrap());
+            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(16, i32_ty_idx).into());
+            let arg4 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(jit_mod.len()).unwrap());
+            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(24, i64_ty_idx).into());
+            let arg5 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(jit_mod.len()).unwrap());
+            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(32, ptr_ty_idx).into());
+            let arg6 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(jit_mod.len()).unwrap());
+            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(40, i8_ty_idx).into());
+
+            let call_inst = jit_ir::CallInstruction::new(
+                &mut jit_mod,
+                func_decl_idx,
+                &[arg1, arg2, arg3, arg4, arg5, arg6],
+            )
+            .unwrap();
+            jit_mod.push(call_inst.into());
+
+            let sym_addr = symbol_vaddr(&CString::new(CALL_TESTS_CALLEE).unwrap()).unwrap();
+            let patt_lines = [
+                "...",
+                "; Call",
+                "... movzx rdi, byte ptr [rbp-0x01]",
+                "... movzx rsi, word ptr [rbp-0x04]",
+                "... mov edx, [rbp-0x08]",
+                "... mov rcx, [rbp-0x10]",
+                "... mov r8, [rbp-0x18]",
+                "... movzx r9, byte ptr [rbp-0x19]",
+                &format!("... mov r12, 0x{:X}", sym_addr),
+                "... call r12",
+                "...",
+            ];
+            test_with_spillalloc(&jit_mod, &patt_lines);
+        }
+
+        #[should_panic] // until we implement spill args
+        #[test]
+        fn codegen_call_spill_args() {
+            let mut jit_mod = test_module();
+            let void_ty_idx = jit_mod.type_idx(&Type::Void).unwrap();
+            let i32_ty_idx = jit_mod
+                .type_idx(&Type::Integer(IntegerType::new(32)))
+                .unwrap();
+            let func_ty_idx = jit_mod
+                .type_idx(&jit_ir::Type::Func(FuncType::new(
+                    vec![i32_ty_idx; 7],
+                    void_ty_idx,
+                    false,
+                )))
+                .unwrap();
+
+            let func_decl_idx = jit_mod
+                .func_decl_idx(&jit_ir::FuncDecl::new(
+                    CALL_TESTS_CALLEE.into(),
+                    func_ty_idx,
+                ))
+                .unwrap();
+
+            let arg1 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(jit_mod.len()).unwrap());
+            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i32_ty_idx).into());
+
+            let args = (0..7).map(|_| arg1.clone()).collect::<Vec<_>>();
+            let call_inst =
+                jit_ir::CallInstruction::new(&mut jit_mod, func_decl_idx, &args).unwrap();
+            jit_mod.push(call_inst.into());
+
+            let mut ra = SpillAllocator::new(STACK_DIRECTION);
+            X64CodeGen::new(&jit_mod, &mut ra)
+                .unwrap()
+                .codegen()
+                .unwrap();
+        }
+
+        #[test]
+        fn codegen_call_ret() {
+            let mut jit_mod = test_module();
+            let i32_ty_idx = jit_mod
+                .type_idx(&Type::Integer(IntegerType::new(32)))
+                .unwrap();
+            let func_ty_idx = jit_mod
+                .type_idx(&jit_ir::Type::Func(FuncType::new(
+                    vec![],
+                    i32_ty_idx,
+                    false,
+                )))
+                .unwrap();
+
+            let func_decl_idx = jit_mod
+                .func_decl_idx(&jit_ir::FuncDecl::new(
+                    CALL_TESTS_CALLEE.into(),
+                    func_ty_idx,
+                ))
+                .unwrap();
+            let call_inst = jit_ir::CallInstruction::new(&mut jit_mod, func_decl_idx, &[]).unwrap();
+            jit_mod.push(call_inst.into());
+
+            let sym_addr = symbol_vaddr(&CString::new(CALL_TESTS_CALLEE).unwrap()).unwrap();
+            let patt_lines = [
+                "...",
+                &format!("... mov r12, 0x{:X}", sym_addr),
+                "... call r12",
+                "... mov [rbp-0x04], eax",
+                "...",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
