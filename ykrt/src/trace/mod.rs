@@ -57,13 +57,25 @@ pub(crate) trait TraceRecorder {
     fn stop(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, InvalidTraceError>;
 }
 
-/// An iterator which [TraceRecord]s use to process a trace into [TraceAction]s.
+/// An iterator which [TraceRecord]s use to process a trace into [TraceAction]s. The iterator must
+/// respect the following:
+///
+/// 1. The first [TraceAction] returned by the iterator should be the mapped block immediately
+///    after the call to the control point. Note that the (almost certainly unmappable, though that
+///    depends on the backend) block representing the control point's body must not be returned by
+///    the iterator.
+/// 2. Consecutive `TraceAction`s must not compare equal (i.e. the iterator must have deduplicated
+///    consecutive `TraceAction`s).
+/// 3. The call to the "stop tracing" function must not appear at the tail of the trace.
 pub(crate) trait AOTTraceIterator:
     Iterator<Item = Result<TraceAction, AOTTraceIteratorError>> + Send
 {
 }
 
-pub(crate) enum AOTTraceIteratorError {}
+pub(crate) enum AOTTraceIteratorError {
+    TraceTooLong,
+    LongJmpEncountered,
+}
 
 /// A processed item from a trace.
 #[derive(Debug, Eq, PartialEq)]

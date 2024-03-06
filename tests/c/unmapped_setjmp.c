@@ -6,7 +6,8 @@
 //     jit-state: start-tracing
 //     set jump point
 //     jumped!
-//     jit-state: stop-tracing-aborted
+//     jit-state: stop-tracing
+//     jit-state: trace-compilation-aborted: Encountered longjmp
 //     ...
 
 // Check that we bork on a call to setjmp in unmapped code.
