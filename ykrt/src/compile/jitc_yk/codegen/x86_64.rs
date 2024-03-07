@@ -46,7 +46,7 @@ const SYSV_CALL_STACK_ALIGN: usize = 16;
 const STACK_DIRECTION: StackDirection = StackDirection::GrowsDown;
 
 /// The X86_64 code generator.
-pub(super) struct X64CodeGen<'a> {
+pub(crate) struct X64CodeGen<'a> {
     jit_mod: &'a jit_ir::Module,
     asm: dynasmrt::x64::Assembler,
     /// Abstract stack pointer, as a relative offset from `RBP`. The higher this number, the larger
@@ -483,6 +483,7 @@ impl<'a> X64CodeGen<'a> {
     }
 }
 
+#[derive(Debug)]
 pub(super) struct X64CodeGenOutput {
     /// The executable code itself.
     buf: ExecutableBuffer,
@@ -500,6 +501,9 @@ impl CodeGenOutput for X64CodeGenOutput {
     #[cfg(any(debug_assertions, test))]
     fn disassemble(&self) -> Result<String, CompilationError> {
         AsmPrinter::new(&self.buf, &self.comments).to_string()
+    }
+    fn ptr(&self) -> *const libc::c_void {
+        self.buf.ptr(AssemblyOffset(0)) as *const libc::c_void
     }
 }
 

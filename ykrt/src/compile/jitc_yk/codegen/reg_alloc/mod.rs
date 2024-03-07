@@ -6,7 +6,7 @@
 
 use super::{super::jit_ir, abs_stack::AbstractStack};
 
-mod spill_alloc;
+pub(crate) mod spill_alloc;
 #[cfg(test)]
 pub(crate) use spill_alloc::SpillAllocator;
 

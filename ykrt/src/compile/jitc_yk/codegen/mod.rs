@@ -4,24 +4,27 @@
 #![allow(dead_code)]
 
 use super::{jit_ir, CompilationError};
+use dynasmrt::{ExecutableBuffer, Executor};
 use reg_alloc::RegisterAllocator;
+use std::fmt;
 
 mod abs_stack;
-mod reg_alloc;
+pub(crate) mod reg_alloc;
 
 // Note that we make no attempt to cross-arch-test code generators.
 #[cfg(target_arch = "x86_64")]
-mod x86_64;
+pub(crate) mod x86_64;
 
 /// A trait that defines access to JIT compiled code.
-pub(crate) trait CodeGenOutput {
+pub(crate) trait CodeGenOutput: fmt::Debug + Send + Sync {
     /// Disassemble the code-genned trace into a string.
     #[cfg(any(debug_assertions, test))]
     fn disassemble(&self) -> Result<String, CompilationError>;
+    fn ptr(&self) -> *const libc::c_void;
 }
 
 /// All code generators conform to this contract.
-trait CodeGen<'a> {
+pub(crate) trait CodeGen<'a> {
     /// Instantiate a code generator for the specified JIT module.
     fn new(
         jit_mod: &'a jit_ir::Module,
