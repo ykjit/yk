@@ -721,7 +721,7 @@ impl PartialEq for TransitionControlPoint {
 mod tests {
     extern crate test;
     use super::*;
-    use crate::compile::LLVMCompiledTrace;
+    use crate::compile::jitc_llvm::LLVMCompiledTrace;
     use std::{hint::black_box, sync::atomic::AtomicU64};
     use test::bench::Bencher;
 
