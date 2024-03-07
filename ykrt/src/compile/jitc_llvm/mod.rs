@@ -27,6 +27,8 @@ use yksmp::LiveVar;
 #[cfg(not(test))]
 use yksmp::StackMapParser;
 
+mod deopt;
+
 pub static LLVM_BITCODE: LazyLock<&[u8]> = LazyLock::new(|| {
     let object = object::File::parse(&**SELF_BIN_MMAP).unwrap();
     let sec = object.section_by_name(".llvmbc").unwrap();
