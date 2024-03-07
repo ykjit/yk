@@ -109,7 +109,6 @@ compile_error!("__llvm_deoptimize() not yet implemented for this platform");
 #[naked]
 #[no_mangle]
 extern "C" fn __llvm_deoptimize(
-    ctr: *const CompiledTrace,
     frameaddr: *mut c_void,
     aotvals: *const c_void,
     actframes: *const c_void,
@@ -126,6 +125,8 @@ extern "C" fn __llvm_deoptimize(
 
     unsafe {
         asm!(
+            // Copy the return address.
+            "mov r12, [rsp]",
             // Save registers that may be referenced by the stackmap to the stack before they get
             // overwritten, so that we can read their values later during deoptimisation.
             // FIXME: Add other registers that may be referenced by the stackmap.
@@ -142,14 +143,10 @@ extern "C" fn __llvm_deoptimize(
             // call.
 
             // Additional arguments are passed via the stack in reverse order **after** alignment.
-            "mov r12, [rsp+72]", // Copy isswitchguard argument.
-            "mov r13, rsp",      // Copy original RSP value.
-            "push r12",          // Add isswitchguard argument to this call.
-            "push r13",          // Current stack pointer.
-            "push r9",           // JITModBuilder CallStack
-            // The return address was at [RSP] before the above pushes, so to find it we need to
-            // offset 8 bytes per push.
-            "mov r9, [rsp+88]",
+            "mov r13, rsp",                   // Copy stack pointer.
+            "sub rsp, 8",                     // Align the stack.
+            "push r13",                       // Pass current stack pointer.
+            "push r12",                       // Pass return address.
             "call __ykrt_deopt",              // Returns NewFramesInfo
             "mov rdi, rax",                   // Pass NewFramesInfo.src as 1st argument.
             "mov rsi, rdx",                   // Pass NewFramesInfo.dst as 2nd argument.
@@ -285,22 +282,21 @@ extern "C" fn ts_reconstruct(ctx: *mut c_void, _module: LLVMModuleRef) -> LLVMEr
 #[cfg(target_arch = "x86_64")]
 #[no_mangle]
 unsafe extern "C" fn __ykrt_deopt(
-    ctr: *const CompiledTrace,
     frameaddr: *mut c_void,
     aotvals: &LiveAOTVals,
     actframes: &CVec,
     guardid: usize,
-    retaddr: usize,
     jitcallstack: *const c_void,
-    rsp: *const c_void,
     isswitchguard: usize,
+    retaddr: usize,
+    rsp: *const c_void,
 ) -> NewFramesInfo {
     // The `ctr` argument is a `Arc<CompiledTrace>` that is being cloned prior to each trace
     // execution. Traces can only return via this deopt, so we can (and must) turn this back into
     // an `Arc` so it will be dropped at the end of this function. Unless, we are going to execute
     // a side-trace. In that case this function will not return and we need to drop `ctr` manually.
-    let ctr = Arc::from_raw(ctr);
-    (*ctr).mt().stats.timing_state(TimingState::Deopting);
+    let ctr = crate::mt::THREAD_MTTHREAD.with(|mtt| mtt.running_trace().unwrap());
+    ctr.mt().stats.timing_state(TimingState::Deopting);
 
     let guardid = GuardId(guardid);
 
@@ -349,30 +345,30 @@ unsafe extern "C" fn __ykrt_deopt(
                 }
             }
             // Execute the side trace.
-            let f = mem::transmute::<
-                _,
-                unsafe extern "C" fn(*mut c_void, *const CompiledTrace, *const c_void) -> !,
-            >(st.entry());
-            (*ctr).mt().stats.timing_state(TimingState::JitExecuting);
-
-            // This `Arc<CompiledTrace>` was cloned before executing this trace. Since the
-            // side-trace will not return, we need to drop `ctr` manually here to avoid leaks.
+            let f = mem::transmute::<_, unsafe extern "C" fn(*mut c_void, *const c_void) -> !>(
+                st.entry(),
+            );
+            ctr.mt().stats.timing_state(TimingState::JitExecuting);
             drop(ctr);
+
+            crate::mt::THREAD_MTTHREAD.with(|mtt| {
+                mtt.set_running_trace(Some(st));
+            });
 
             #[cfg(feature = "yk_jitstate_debug")]
             print_jit_state("execute-side-trace");
             // FIXME: Calling this function overwrites the current (Rust) function frame,
             // rather than unwinding it. https://github.com/ykjit/yk/issues/778
-            f(
-                ykctrlpvars.as_ptr() as *mut c_void,
-                Arc::into_raw(st),
-                frameaddr,
-            );
+            f(ykctrlpvars.as_ptr() as *mut c_void, frameaddr);
         }
     }
 
     #[cfg(feature = "yk_jitstate_debug")]
     print_jit_state("deoptimise");
+
+    crate::mt::THREAD_MTTHREAD.with(|mtt| {
+        mtt.set_running_trace(None);
+    });
 
     // Copy arguments into a struct we can pass into the ThreadSafeModuleWithModuleDo function.
     let mut info = ReconstructInfo {
