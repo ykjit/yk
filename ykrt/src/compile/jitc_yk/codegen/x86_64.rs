@@ -249,7 +249,11 @@ impl<'a> X64CodeGen<'a> {
         let op2 = inst.op2();
 
         // The types must match. If the IR is well-formed, this is guaranteed.
-        debug_assert_eq!(op1.type_(self.jit_mod), op2.type_(self.jit_mod));
+        debug_assert_eq!(
+            op1.type_(self.jit_mod),
+            op2.type_(self.jit_mod),
+            "attempt to add different types"
+        );
 
         self.operand_into_reg(WR0, &inst.op1()); // FIXME: assumes value will fit in a reg.
         self.operand_into_reg(WR1, &inst.op2()); // ^^^ same
@@ -358,7 +362,12 @@ impl<'a> X64CodeGen<'a> {
 
         for i in 0..num_args {
             let reg = ARG_REGS[i];
-            self.operand_into_reg(reg, &inst.operand(self.jit_mod, i));
+            let op = inst.operand(self.jit_mod, i);
+            debug_assert!(
+                op.type_(self.jit_mod) == fty.arg_type(self.jit_mod, i),
+                "argument type mismatch in call"
+            );
+            self.operand_into_reg(reg, &op);
         }
 
         // unwrap safe on account of linker symbol names not containing internal NULL bytes.
@@ -732,6 +741,30 @@ mod tests {
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
 
+        #[cfg(debug_assertions)]
+        #[should_panic]
+        #[test]
+        fn codegen_add_wrong_types() {
+            let mut jit_mod = test_module();
+            let i64_ty_idx = jit_mod
+                .type_idx(&jit_ir::Type::Integer(IntegerType::new(64)))
+                .unwrap();
+            let i32_ty_idx = jit_mod
+                .type_idx(&jit_ir::Type::Integer(IntegerType::new(32)))
+                .unwrap();
+            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i64_ty_idx).into());
+            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(64, i32_ty_idx).into());
+            let op1 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap());
+            let op2 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(1).unwrap());
+            jit_mod.push(jit_ir::AddInstruction::new(op1, op2).into());
+
+            let mut ra = SpillAllocator::new(STACK_DIRECTION);
+            X64CodeGen::new(&jit_mod, &mut ra)
+                .unwrap()
+                .codegen()
+                .unwrap();
+        }
+
         /// A function whose symbol is present in the current address space.
         ///
         /// Used for testing code generation for calls.
@@ -963,6 +996,47 @@ mod tests {
                 "...",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
+        }
+
+        #[cfg(debug_assertions)]
+        #[should_panic(expected = "argument type mismatch in call")]
+        #[test]
+        fn codegen_call_bad_arg_type() {
+            let mut jit_mod = test_module();
+            let void_ty_idx = jit_mod.type_idx(&Type::Void).unwrap();
+            let i32_ty_idx = jit_mod
+                .type_idx(&Type::Integer(IntegerType::new(32)))
+                .unwrap();
+            let func_ty_idx = jit_mod
+                .type_idx(&jit_ir::Type::Func(FuncType::new(
+                    vec![i32_ty_idx],
+                    void_ty_idx,
+                    false,
+                )))
+                .unwrap();
+
+            let func_decl_idx = jit_mod
+                .func_decl_idx(&jit_ir::FuncDecl::new(
+                    CALL_TESTS_CALLEE.into(),
+                    func_ty_idx,
+                ))
+                .unwrap();
+
+            // Make a call that passes a i8 argument, instead of an i32 as in the func sig.
+            let i8_ty_idx = jit_mod
+                .type_idx(&Type::Integer(IntegerType::new(8)))
+                .unwrap();
+            let arg1 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(jit_mod.len()).unwrap());
+            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into());
+            let call_inst =
+                jit_ir::CallInstruction::new(&mut jit_mod, func_decl_idx, &[arg1]).unwrap();
+            jit_mod.push(call_inst.into());
+
+            let mut ra = SpillAllocator::new(STACK_DIRECTION);
+            X64CodeGen::new(&jit_mod, &mut ra)
+                .unwrap()
+                .codegen()
+                .unwrap();
         }
     }
 }
