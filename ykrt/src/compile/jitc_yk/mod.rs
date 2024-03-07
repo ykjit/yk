@@ -64,7 +64,7 @@ impl Compiler for JITCYk {
         aottrace_iter: (Box<dyn AOTTraceIterator>, Box<[usize]>),
         sti: Option<SideTraceInfo>,
         _hl: Arc<Mutex<HotLocation>>,
-    ) -> Result<CompiledTrace, CompilationError> {
+    ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         if sti.is_some() {
             todo!();
         }
