@@ -44,7 +44,7 @@ pub(crate) trait Compiler: Send + Sync {
         aottrace_iter: (Box<dyn AOTTraceIterator>, Box<[usize]>),
         sti: Option<SideTraceInfo>,
         hl: Arc<Mutex<HotLocation>>,
-    ) -> Result<LLVMCompiledTrace, CompilationError>;
+    ) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
 }
 
 pub(crate) fn default_compiler() -> Result<Arc<dyn Compiler>, CompilationError> {

@@ -538,10 +538,10 @@ impl MT {
                             // then `hl_arc.kind` is `Compiled`.
                             let ctr = sidetrace.map(|x| x.1).unwrap();
                             let guard = ctr.guard(guardid.unwrap());
-                            guard.setct(Arc::new(ct));
+                            guard.setct(ct);
                         }
                         _ => {
-                            hl.kind = HotLocationKind::Compiled(Arc::new(ct));
+                            hl.kind = HotLocationKind::Compiled(ct);
                         }
                     }
                     mt.stats.trace_compiled_ok();

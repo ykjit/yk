@@ -2,7 +2,7 @@
 //! to be compiled with LLVM.
 
 use crate::{
-    compile::{CompilationError, Compiler, LLVMCompiledTrace},
+    compile::{CompilationError, CompiledTrace, Compiler, LLVMCompiledTrace},
     location::HotLocation,
     mt::{SideTraceInfo, MT},
     trace::{AOTTraceIterator, AOTTraceIteratorError, TraceAction},
@@ -36,7 +36,7 @@ impl Compiler for JITCLLVM {
         aottrace_iter: (Box<dyn AOTTraceIterator>, Box<[usize]>),
         sti: Option<SideTraceInfo>,
         hl: Arc<Mutex<HotLocation>>,
-    ) -> Result<LLVMCompiledTrace, CompilationError> {
+    ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         let mut irtrace = Vec::new();
         mt.stats.timing_state(TimingState::TraceMapping);
         for ta in aottrace_iter.0 {
@@ -85,7 +85,12 @@ impl Compiler for JITCLLVM {
             // recoverable/temporary. So for now we say any error is temporary.
             Err(CompilationError::Temporary("llvm backend error".into()))
         } else {
-            Ok(LLVMCompiledTrace::new(mt, ret, di_tmp, Arc::downgrade(&hl)))
+            Ok(Arc::new(LLVMCompiledTrace::new(
+                mt,
+                ret,
+                di_tmp,
+                Arc::downgrade(&hl),
+            )))
         }
     }
 }
