@@ -93,6 +93,10 @@ impl Guard {
 }
 
 pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
+    /// Upcast this [CompiledTrace] to `Any`. This method is a hack that's only needed since trait
+    /// upcasting in Rust is incomplete.
+    fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static>;
+
     fn mt(&self) -> &Arc<MT>;
 
     fn smap(&self) -> &HashMap<u64, Vec<LiveVar>>;

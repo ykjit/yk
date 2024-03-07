@@ -119,6 +119,10 @@ impl LLVMCompiledTrace {
 
 #[cfg(not(test))]
 impl CompiledTrace for LLVMCompiledTrace {
+    fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static> {
+        self
+    }
+
     fn mt(&self) -> &Arc<MT> {
         &self.mt
     }
@@ -189,6 +193,10 @@ impl LLVMCompiledTrace {
 
 #[cfg(test)]
 impl CompiledTrace for LLVMCompiledTrace {
+    fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static> {
+        todo!();
+    }
+
     fn mt(&self) -> &Arc<MT> {
         todo!();
     }

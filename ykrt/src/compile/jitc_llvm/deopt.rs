@@ -1,6 +1,7 @@
 //! Run-time deoptimisation support: when a guard fails, this module restores the state necessary
 //! to resume interpreter execution.
 
+use super::LLVMCompiledTrace;
 use crate::frame::{BitcodeSection, FrameReconstructor, __yktracec_get_aot_module};
 #[cfg(feature = "yk_jitstate_debug")]
 use crate::print_jit_state;
@@ -288,7 +289,11 @@ unsafe extern "C" fn __ykrt_deopt(
     retaddr: usize,
     rsp: *const c_void,
 ) -> NewFramesInfo {
-    let ctr = crate::mt::THREAD_MTTHREAD.with(|mtt| mtt.running_trace().unwrap());
+    let ctr = crate::mt::THREAD_MTTHREAD
+        .with(|mtt| mtt.running_trace().unwrap())
+        .as_any()
+        .downcast::<LLVMCompiledTrace>()
+        .unwrap();
     ctr.mt().stats.timing_state(TimingState::Deopting);
 
     let guardid = GuardId(guardid);
@@ -363,9 +368,10 @@ unsafe extern "C" fn __ykrt_deopt(
         mtt.set_running_trace(None);
     });
 
+    let ctrn: Arc<dyn CompiledTrace> = ctr.clone();
     // Copy arguments into a struct we can pass into the ThreadSafeModuleWithModuleDo function.
     let mut info = ReconstructInfo {
-        ctr: Arc::clone(&ctr),
+        ctr: Arc::clone(&ctrn),
         frameaddr,
         aotvals,
         actframes,
@@ -405,7 +411,7 @@ unsafe extern "C" fn __ykrt_deopt(
                     aotvalslen: aotvals.length,
                     guardid,
                 };
-                ctr.mt().side_trace(hl, sti, Arc::clone(&ctr));
+                ctr.mt().side_trace(hl, sti, ctrn);
             }
         }
     }
