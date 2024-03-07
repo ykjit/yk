@@ -12,8 +12,8 @@ use typed_index_collections::TiVec;
 
 // Since the AOT versions of these data structures contain no AOT/JIT-IR-specific indices we can
 // share them. Note though, that their corresponding index types are not shared.
-pub(crate) use super::aot_ir::GlobalDecl;
 pub(crate) use super::aot_ir::IntegerType;
+pub(crate) use super::aot_ir::{GlobalDecl, Predicate};
 
 /// Bit fiddling.
 ///
@@ -222,9 +222,14 @@ impl FuncType {
         self.is_vararg
     }
 
-    /// Returns the return type of the function type.
+    /// Returns the type of the return value.
     pub(crate) fn ret_type<'a>(&self, m: &'a Module) -> &'a Type {
         self.ret_ty.type_(m)
+    }
+
+    /// Returns the type index of the return value.
+    pub(crate) fn ret_type_idx(&self) -> TypeIdx {
+        self.ret_ty
     }
 }
 
@@ -382,6 +387,14 @@ impl Operand {
             _ => todo!(),
         }
     }
+
+    /// Returns the type index of the operand.
+    pub(crate) fn type_idx(&self, m: &Module) -> TypeIdx {
+        match self {
+            Self::Local(l) => l.instr(m).def_type_idx(m),
+            Self::Const(_) => todo!(),
+        }
+    }
 }
 
 impl fmt::Display for Operand {
@@ -420,9 +433,9 @@ pub enum Instruction {
 impl Instruction {
     /// Returns `true` if the instruction defines a local variable.
     ///
-    /// FIXME: Because self.def_type() isn't complete, we have to handle various possibilities here
-    /// in order that anything works. Once self.get_type() is complete (i.e. no todo!()s left) this
-    /// function can become simply `self.def_type() != Type::Void`.
+    /// FIXME: Because self.def_type_idx() isn't complete, we have to handle various possibilities
+    /// here in order that anything works. Once self.get_type_idx() is complete (i.e. no todo!()s
+    /// left) this function can become simply `self.def_type_idx() != jit_mod.void_type_idx()`.
     pub(crate) fn is_def(&self) -> bool {
         match self {
             Self::Load(..) => true,
@@ -440,17 +453,29 @@ impl Instruction {
 
     /// Returns the type of the local variable that the instruction defines (if any).
     pub(crate) fn def_type<'a>(&self, m: &'a Module) -> Option<&'a Type> {
+        let idx = self.def_type_idx(m);
+        if idx != m.void_type_idx() {
+            Some(m.type_(idx))
+        } else {
+            None
+        }
+    }
+
+    /// Returns the type index of the local variable defined by the instruction.
+    ///
+    /// If the instruction doesn't define a type then the type index for [Type::Void] is returned.
+    pub(crate) fn def_type_idx(&self, m: &Module) -> TypeIdx {
         match self {
-            Self::Load(li) => Some(li.type_(m)),
+            Self::Load(li) => li.type_idx(),
             Self::LoadGlobal(..) => todo!(),
-            Self::LoadTraceInput(li) => Some(m.type_(li.ty_idx())),
-            Self::Call(ci) => Some(ci.target().func_type(m).ret_type(m)),
-            Self::PtrAdd(..) => Some(&Type::Ptr),
-            Self::Store(..) => None,
-            Self::StoreGlobal(..) => None,
-            Self::Add(ai) => Some(ai.type_(m)),
-            Self::Icmp(..) => todo!(),
-            Self::Guard(..) => None,
+            Self::LoadTraceInput(li) => li.ty_idx(),
+            Self::Call(ci) => ci.target().func_type(m).ret_type_idx(),
+            Self::PtrAdd(..) => m.ptr_type_idx(),
+            Self::Store(..) => m.void_type_idx(),
+            Self::StoreGlobal(..) => m.void_type_idx(),
+            Self::Add(ai) => ai.type_idx(m),
+            Self::Icmp(_) => m.int8_type_idx(), // always returns a 0/1 valued byte.
+            Self::Guard(..) => m.void_type_idx(),
         }
     }
 
@@ -544,6 +569,11 @@ impl LoadInstruction {
     /// Returns the type of the value to be loaded.
     pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
         m.type_(self.ty_idx)
+    }
+
+    /// Returns the type index of the loaded value.
+    pub(crate) fn type_idx(&self) -> TypeIdx {
+        self.ty_idx
     }
 }
 
@@ -849,6 +879,11 @@ impl AddInstruction {
     pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
         self.op1.get().type_(m)
     }
+
+    /// Returns the type index of the operands being added.
+    pub(crate) fn type_idx(&self, m: &Module) -> TypeIdx {
+        self.op1.get().type_idx(m)
+    }
 }
 
 impl fmt::Display for AddInstruction {
@@ -861,34 +896,50 @@ impl fmt::Display for AddInstruction {
 ///
 /// # Semantics
 ///
-/// Compares two operands.
+/// Compares two integer operands according to a predicate (e.g. greater-than). Defines a local
+/// variable that dictates the truth of the comparison.
 ///
 #[derive(Debug)]
 pub struct IcmpInstruction {
-    op1: PackedOperand,
-    op2: PackedOperand,
+    left: PackedOperand,
+    pred: Predicate,
+    right: PackedOperand,
 }
 
 impl IcmpInstruction {
-    pub(crate) fn new(op1: Operand, op2: Operand) -> Self {
+    pub(crate) fn new(op1: Operand, pred: Predicate, op2: Operand) -> Self {
         Self {
-            op1: PackedOperand::new(&op1),
-            op2: PackedOperand::new(&op2),
+            left: PackedOperand::new(&op1),
+            pred,
+            right: PackedOperand::new(&op2),
         }
     }
 
-    fn op1(&self) -> Operand {
-        self.op1.get()
+    /// Returns the left-hand-side of the comparison.
+    ///
+    /// E.g. in `x <= y`, it's `x`.
+    pub(crate) fn left(&self) -> Operand {
+        self.left.get()
     }
 
-    fn op2(&self) -> Operand {
-        self.op2.get()
+    /// Returns the right-hand-side of the comparison.
+    ///
+    /// E.g. in `x <= y`, it's `y`.
+    pub(crate) fn right(&self) -> Operand {
+        self.right.get()
+    }
+
+    /// Returns the predicate of the comparison.
+    ///
+    /// E.g. in `x <= y`, it's `<=`.
+    pub(crate) fn predicate(&self) -> Predicate {
+        self.pred
     }
 }
 
 impl fmt::Display for IcmpInstruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Icmp {}, {}", self.op1(), self.op2())
+        write!(f, "Icmp {}, {}", self.left(), self.right())
     }
 }
 
@@ -956,6 +1007,12 @@ pub(crate) struct Module {
     ///
     /// A [TypeIdx] describes an index into this.
     types: TiVec<TypeIdx, Type>,
+    /// The type index of the void type. Cached for convinience.
+    void_type_idx: TypeIdx,
+    /// The type index of a pointer type. Cached for convinience.
+    ptr_type_idx: TypeIdx,
+    /// The type index of an 8-bit integer. Cached for convinience.
+    int8_type_idx: TypeIdx,
     /// The function declaration table.
     ///
     /// These are declarations of externally compiled functions that the JITted trace might need to
@@ -973,15 +1030,44 @@ pub(crate) struct Module {
 impl Module {
     /// Create a new [Module] with the specified name.
     pub fn new(name: String) -> Self {
+        // Create some commonly used types ahead of time. Aside from being convenient, this allows
+        // us to find their (now statically known) indices in scenarios where Rust forbids us from
+        // holding a mutable reference to the Module (and thus we cannot use [Module::type_idx]).
+        let mut types = TiVec::new();
+        let void_type_idx = types.len().into();
+        types.push(Type::Void);
+        let ptr_type_idx = types.len().into();
+        types.push(Type::Ptr);
+        let int8_type_idx = types.len().into();
+        types.push(Type::Integer(IntegerType::new(8)));
+
         Self {
             name,
             instrs: Vec::new(),
             extra_args: Vec::new(),
             consts: Vec::new(),
-            types: TiVec::new(),
+            types,
+            void_type_idx,
+            ptr_type_idx,
+            int8_type_idx,
             func_decls: TiVec::new(),
             global_decls: TiVec::new(),
         }
+    }
+
+    /// Returns the type index of [Type::Void].
+    pub(crate) fn void_type_idx(&self) -> TypeIdx {
+        self.void_type_idx
+    }
+
+    /// Returns the type index of [Type::Ptr].
+    pub(crate) fn ptr_type_idx(&self) -> TypeIdx {
+        self.ptr_type_idx
+    }
+
+    /// Returns the type index of an 8-bit integer.
+    pub(crate) fn int8_type_idx(&self) -> TypeIdx {
+        self.int8_type_idx
     }
 
     /// Return the instruction at the specified index.
@@ -1224,7 +1310,7 @@ mod tests {
     fn call_args_out_of_bounds() {
         // Set up a function to call.
         let mut jit_mod = Module::new("test".into());
-        let arg_ty_idxs = vec![jit_mod.type_idx(&Type::Ptr).unwrap(); 3];
+        let arg_ty_idxs = vec![jit_mod.ptr_type_idx(); 3];
         let ret_ty_idx = jit_mod.type_idx(&Type::Void).unwrap();
         let func_ty = FuncType::new(arg_ty_idxs, ret_ty_idx, false);
         let func_ty_idx = jit_mod.type_idx(&Type::Func(func_ty)).unwrap();

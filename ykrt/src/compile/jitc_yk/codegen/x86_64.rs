@@ -131,7 +131,7 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Instruction::LoadGlobal(_) => todo!(),
             jit_ir::Instruction::StoreGlobal(_) => todo!(),
             jit_ir::Instruction::Call(i) => self.codegen_call_instr(instr_idx, &i)?,
-            jit_ir::Instruction::Icmp(_) => todo!(),
+            jit_ir::Instruction::Icmp(i) => self.codegen_icmp_instr(instr_idx, &i),
             jit_ir::Instruction::Guard(_) => todo!(),
         }
         Ok(())
@@ -392,6 +392,62 @@ impl<'a> X64CodeGen<'a> {
         Ok(())
     }
 
+    pub(super) fn codegen_icmp_instr(
+        &mut self,
+        inst_idx: InstrIdx,
+        inst: &jit_ir::IcmpInstruction,
+    ) {
+        let (left, pred, right) = (inst.left(), inst.predicate(), inst.right());
+
+        // The operands must have the same type, and they must be integers.
+        debug_assert_eq!(
+            left.type_idx(self.jit_mod),
+            right.type_idx(self.jit_mod),
+            "icmp of differing types"
+        );
+        debug_assert!(
+            matches!(left.type_(self.jit_mod), jit_ir::Type::Integer(_)),
+            "icmp of non-integer types"
+        );
+
+        // FIXME: assumes values fit in a registers
+        self.operand_into_reg(WR0, &left);
+        self.operand_into_reg(WR1, &right);
+
+        // Perform the comparison.
+        match left.byte_size(self.jit_mod) {
+            8 => dynasm!(self.asm; cmp Rq(WR0.code()), Rq(WR1.code())),
+            4 => dynasm!(self.asm; cmp Rd(WR0.code()), Rd(WR1.code())),
+            2 => dynasm!(self.asm; cmp Rw(WR0.code()), Rw(WR1.code())),
+            1 => dynasm!(self.asm; cmp Rb(WR0.code()), Rb(WR1.code())),
+            _ => todo!(),
+        }
+
+        // Interpret the flags assignment WRT the predicate.
+        //
+        // We use a SETcc instruction to do so.
+        //
+        // Remember, in Intel's tongue:
+        //  - "above"/"below" -- unsigned predicate. e.g. `seta`.
+        //  - "greater"/"less" -- signed predicate. e.g. `setle`.
+        //
+        //  Note that the equal/not-equal predicates are signedness agnostic.
+        match pred {
+            jit_ir::Predicate::Equal => dynasm!(self.asm; sete Rb(WR0.code())),
+            jit_ir::Predicate::NotEqual => dynasm!(self.asm; setne Rb(WR0.code())),
+            jit_ir::Predicate::UnsignedGreater => dynasm!(self.asm; seta Rb(WR0.code())),
+            jit_ir::Predicate::UnsignedGreaterEqual => dynasm!(self.asm; setae Rb(WR0.code())),
+            jit_ir::Predicate::UnsignedLess => dynasm!(self.asm; setb Rb(WR0.code())),
+            jit_ir::Predicate::UnsignedLessEqual => dynasm!(self.asm; setb Rb(WR0.code())),
+            jit_ir::Predicate::SignedGreater => dynasm!(self.asm; setg Rb(WR0.code())),
+            jit_ir::Predicate::SignedGreaterEqual => dynasm!(self.asm; setge Rb(WR0.code())),
+            jit_ir::Predicate::SignedLess => dynasm!(self.asm; setl Rb(WR0.code())),
+            jit_ir::Predicate::SignedLessEqual => dynasm!(self.asm; setle Rb(WR0.code())),
+            // Note: when float predicates added: `_ => panic!()`
+        }
+        self.reg_into_new_local(inst_idx, WR0);
+    }
+
     fn const_u64_into_reg(&mut self, reg: Rq, cv: u64) {
         dynasm!(self.asm
             ; mov Rq(reg.code()), QWORD cv as i64 // `as` intentional.
@@ -510,7 +566,7 @@ mod tests {
         #[test]
         fn codegen_load_ptr() {
             let mut jit_mod = test_module();
-            let ptr_ty_idx = jit_mod.type_idx(&jit_ir::Type::Ptr).unwrap();
+            let ptr_ty_idx = jit_mod.ptr_type_idx();
             jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, ptr_ty_idx).into());
             jit_mod.push(
                 jit_ir::LoadInstruction::new(
@@ -583,7 +639,7 @@ mod tests {
         #[test]
         fn codegen_ptradd() {
             let mut jit_mod = test_module();
-            let ptr_ty_idx = jit_mod.type_idx(&jit_ir::Type::Ptr).unwrap();
+            let ptr_ty_idx = jit_mod.ptr_type_idx();
             jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, ptr_ty_idx).into());
             jit_mod.push(
                 jit_ir::PtrAddInstruction::new(
@@ -606,7 +662,7 @@ mod tests {
         #[test]
         fn codegen_store_ptr() {
             let mut jit_mod = test_module();
-            let ptr_ty_idx = jit_mod.type_idx(&jit_ir::Type::Ptr).unwrap();
+            let ptr_ty_idx = jit_mod.ptr_type_idx();
             jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, ptr_ty_idx).into());
             jit_mod.push(jit_ir::LoadTraceInputInstruction::new(8, ptr_ty_idx).into());
             jit_mod.push(
@@ -636,7 +692,7 @@ mod tests {
             jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, u8_ty_idx).into());
             let patt_lines = [
                 "...",
-                "; LoadTraceInput 0, 0",
+                &format!("; LoadTraceInput 0, {}", u8_ty_idx.to_usize()),
                 "... movzx r12, byte ptr [rdi]",
                 "... mov [rbp-0x01], r12b",
                 "--- End jit-asm ---",
@@ -653,7 +709,7 @@ mod tests {
             jit_mod.push(jit_ir::LoadTraceInputInstruction::new(32, u16_ty_idx).into());
             let patt_lines = [
                 "...",
-                "; LoadTraceInput 32, 0",
+                &format!("; LoadTraceInput 32, {}", u16_ty_idx.to_usize()),
                 "... movzx r12d, word ptr [rdi+0x20]",
                 "... mov [rbp-0x02], r12w",
                 "--- End jit-asm ---",
@@ -667,7 +723,7 @@ mod tests {
             let u8_ty_idx = jit_mod
                 .type_idx(&jit_ir::Type::Integer(IntegerType::new(8)))
                 .unwrap();
-            let ptr_ty_idx = jit_mod.type_idx(&jit_ir::Type::Ptr).unwrap();
+            let ptr_ty_idx = jit_mod.ptr_type_idx();
             jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, u8_ty_idx).into());
             jit_mod.push(jit_ir::LoadTraceInputInstruction::new(1, u8_ty_idx).into());
             jit_mod.push(jit_ir::LoadTraceInputInstruction::new(2, u8_ty_idx).into());
@@ -675,19 +731,19 @@ mod tests {
             jit_mod.push(jit_ir::LoadTraceInputInstruction::new(8, ptr_ty_idx).into());
             let patt_lines = [
                 "...",
-                "; LoadTraceInput 0, 0",
+                &format!("; LoadTraceInput 0, {}", u8_ty_idx.to_usize()),
                 "... movzx r12, byte ptr [rdi]",
                 "... mov [rbp-0x01], r12b",
-                "; LoadTraceInput 1, 0",
+                &format!("; LoadTraceInput 1, {}", u8_ty_idx.to_usize()),
                 "... movzx r12, byte ptr [rdi+0x01]",
                 "... mov [rbp-0x02], r12b",
-                "; LoadTraceInput 2, 0",
+                &format!("; LoadTraceInput 2, {}", u8_ty_idx.to_usize()),
                 "... movzx r12, byte ptr [rdi+0x02]",
                 "... mov [rbp-0x03], r12b",
-                "; LoadTraceInput 3, 0",
+                &format!("; LoadTraceInput 3, {}", u8_ty_idx.to_usize()),
                 "... movzx r12, byte ptr [rdi+0x03]",
                 "... mov [rbp-0x04], r12b",
-                "; LoadTraceInput 8, 1",
+                &format!("; LoadTraceInput 8, {}", ptr_ty_idx.to_usize()),
                 "... mov r12, [rdi+0x08]",
                 "... mov [rbp-0x10], r12",
                 "--- End jit-asm ---",
@@ -778,7 +834,7 @@ mod tests {
         #[test]
         fn codegen_call_simple() {
             let mut jit_mod = test_module();
-            let void_ty_idx = jit_mod.type_idx(&Type::Void).unwrap();
+            let void_ty_idx = jit_mod.void_type_idx();
             let func_ty_idx = jit_mod
                 .type_idx(&jit_ir::Type::Func(FuncType::new(
                     vec![],
@@ -809,7 +865,7 @@ mod tests {
         #[test]
         fn codegen_call_with_args() {
             let mut jit_mod = test_module();
-            let void_ty_idx = jit_mod.type_idx(&Type::Void).unwrap();
+            let void_ty_idx = jit_mod.void_type_idx();
             let i32_ty_idx = jit_mod
                 .type_idx(&Type::Integer(IntegerType::new(32)))
                 .unwrap();
@@ -857,7 +913,7 @@ mod tests {
         #[test]
         fn codegen_call_with_different_args() {
             let mut jit_mod = test_module();
-            let void_ty_idx = jit_mod.type_idx(&Type::Void).unwrap();
+            let void_ty_idx = jit_mod.void_type_idx();
             let i8_ty_idx = jit_mod
                 .type_idx(&Type::Integer(IntegerType::new(8)))
                 .unwrap();
@@ -870,7 +926,7 @@ mod tests {
             let i64_ty_idx = jit_mod
                 .type_idx(&Type::Integer(IntegerType::new(64)))
                 .unwrap();
-            let ptr_ty_idx = jit_mod.type_idx(&Type::Ptr).unwrap();
+            let ptr_ty_idx = jit_mod.ptr_type_idx();
             let func_ty_idx = jit_mod
                 .type_idx(&jit_ir::Type::Func(FuncType::new(
                     vec![
@@ -930,7 +986,7 @@ mod tests {
         #[test]
         fn codegen_call_spill_args() {
             let mut jit_mod = test_module();
-            let void_ty_idx = jit_mod.type_idx(&Type::Void).unwrap();
+            let void_ty_idx = jit_mod.void_type_idx();
             let i32_ty_idx = jit_mod
                 .type_idx(&Type::Integer(IntegerType::new(32)))
                 .unwrap();
@@ -1003,7 +1059,7 @@ mod tests {
         #[test]
         fn codegen_call_bad_arg_type() {
             let mut jit_mod = test_module();
-            let void_ty_idx = jit_mod.type_idx(&Type::Void).unwrap();
+            let void_ty_idx = jit_mod.void_type_idx();
             let i32_ty_idx = jit_mod
                 .type_idx(&Type::Integer(IntegerType::new(32)))
                 .unwrap();
@@ -1032,6 +1088,95 @@ mod tests {
                 jit_ir::CallInstruction::new(&mut jit_mod, func_decl_idx, &[arg1]).unwrap();
             jit_mod.push(call_inst.into());
 
+            let mut ra = SpillAllocator::new(STACK_DIRECTION);
+            X64CodeGen::new(&jit_mod, &mut ra)
+                .unwrap()
+                .codegen()
+                .unwrap();
+        }
+
+        #[test]
+        fn codegen_icmp_i64() {
+            let mut jit_mod = test_module();
+            let i64_ty_idx = jit_mod
+                .type_idx(&jit_ir::Type::Integer(IntegerType::new(64)))
+                .unwrap();
+            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i64_ty_idx).into());
+            let op = jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap());
+            jit_mod.push(
+                jit_ir::IcmpInstruction::new(op.clone(), jit_ir::Predicate::Equal, op).into(),
+            );
+            let patt_lines = [
+                "...",
+                "; Icmp %0, %0",
+                "... mov r12, [rbp-0x08]",
+                "... mov r13, [rbp-0x08]",
+                "... cmp r12, r13",
+                "... setz r12b",
+                "... mov [rbp-0x09], r12b",
+                "--- End jit-asm ---",
+            ];
+            test_with_spillalloc(&jit_mod, &patt_lines);
+        }
+
+        #[test]
+        fn codegen_icmp_i8() {
+            let mut jit_mod = test_module();
+            let i8_ty_idx = jit_mod
+                .type_idx(&jit_ir::Type::Integer(IntegerType::new(8)))
+                .unwrap();
+            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into());
+            let op = jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap());
+            jit_mod.push(
+                jit_ir::IcmpInstruction::new(op.clone(), jit_ir::Predicate::Equal, op).into(),
+            );
+            let patt_lines = [
+                "...",
+                "; Icmp %0, %0",
+                "... movzx r12, byte ptr [rbp-0x01]",
+                "... movzx r13, byte ptr [rbp-0x01]",
+                "... cmp r12b, r13b",
+                "... setz r12b",
+                "... mov [rbp-0x02], r12b",
+                "--- End jit-asm ---",
+            ];
+            test_with_spillalloc(&jit_mod, &patt_lines);
+        }
+
+        #[cfg(debug_assertions)]
+        #[test]
+        #[should_panic(expected = "icmp of non-integer types")]
+        fn codegen_icmp_non_ints() {
+            let mut jit_mod = test_module();
+            let ptr_ty_idx = jit_mod.ptr_type_idx();
+            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, ptr_ty_idx).into());
+            let op = jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap());
+            jit_mod.push(
+                jit_ir::IcmpInstruction::new(op.clone(), jit_ir::Predicate::Equal, op).into(),
+            );
+            let mut ra = SpillAllocator::new(STACK_DIRECTION);
+            X64CodeGen::new(&jit_mod, &mut ra)
+                .unwrap()
+                .codegen()
+                .unwrap();
+        }
+
+        #[cfg(debug_assertions)]
+        #[test]
+        #[should_panic(expected = "icmp of differing types")]
+        fn codegen_icmp_diff_types() {
+            let mut jit_mod = test_module();
+            let i8_ty_idx = jit_mod
+                .type_idx(&jit_ir::Type::Integer(IntegerType::new(8)))
+                .unwrap();
+            let i64_ty_idx = jit_mod
+                .type_idx(&jit_ir::Type::Integer(IntegerType::new(64)))
+                .unwrap();
+            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into());
+            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(8, i64_ty_idx).into());
+            let op1 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap());
+            let op2 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(1).unwrap());
+            jit_mod.push(jit_ir::IcmpInstruction::new(op1, jit_ir::Predicate::Equal, op2).into());
             let mut ra = SpillAllocator::new(STACK_DIRECTION);
             X64CodeGen::new(&jit_mod, &mut ra)
                 .unwrap()

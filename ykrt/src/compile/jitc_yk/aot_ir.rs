@@ -288,6 +288,30 @@ impl IRDisplay for ArgOperand {
     }
 }
 
+/// Predictaes for use in numeric comparisons.
+#[deku_derive(DekuRead)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+#[deku(type = "u8")]
+pub(crate) enum Predicate {
+    Equal = 0,
+    NotEqual,
+    UnsignedGreater,
+    UnsignedGreaterEqual,
+    UnsignedLess,
+    UnsignedLessEqual,
+    SignedGreater,
+    SignedGreaterEqual,
+    SignedLess,
+    SignedLessEqual,
+    // FIXME: add floating-point-specific predicates.
+}
+
+impl IRDisplay for Predicate {
+    fn to_str(&self, _m: &Module) -> String {
+        format!("{:?}", self)
+    }
+}
+
 /// A global variable operand.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
@@ -314,6 +338,7 @@ const OPKIND_FUNC: u8 = 3;
 const OPKIND_BLOCK: u8 = 4;
 const OPKIND_ARG: u8 = 5;
 const OPKIND_GLOBAL: u8 = 6;
+const OPKIND_PREDICATE: u8 = 7;
 const OPKIND_UNIMPLEMENTED: u8 = 255;
 
 #[deku_derive(DekuRead)]
@@ -334,6 +359,8 @@ pub(crate) enum Operand {
     Arg(ArgOperand),
     #[deku(id = "OPKIND_GLOBAL")]
     Global(GlobalOperand),
+    #[deku(id = "OPKIND_PREDICATE")]
+    Predicate(Predicate),
     #[deku(id = "OPKIND_UNIMPLEMENTED")]
     Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")] String),
 }
@@ -386,6 +413,7 @@ impl IRDisplay for Operand {
             Self::Block(bb) => bb.to_str(m),
             Self::Global(g) => g.to_str(m),
             Self::Arg(a) => a.to_str(m),
+            Self::Predicate(p) => p.to_str(m),
             Self::Unimplemented(s) => format!("?op<{}>", s),
         }
     }
@@ -684,7 +712,6 @@ impl IntegerType {
     }
 
     /// Create a new integer type with the specified number of bits.
-    #[cfg(test)]
     pub(crate) fn new(num_bits: u32) -> Self {
         Self { num_bits }
     }
