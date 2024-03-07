@@ -175,7 +175,10 @@ struct ReconstructInfo<'a> {
 /// overwritten.
 extern "C" fn ts_reconstruct(ctx: *mut c_void, _module: LLVMModuleRef) -> LLVMErrorRef {
     let info = unsafe { Box::<&mut ReconstructInfo>::from_raw(ctx as *mut &mut ReconstructInfo) };
-    let ctr = &info.ctr;
+    let ctr = Arc::clone(&info.ctr)
+        .as_any()
+        .downcast::<LLVMCompiledTrace>()
+        .unwrap();
     let frameaddr = info.frameaddr;
     let aotvals = info.aotvals;
     let actframes = info.actframes;

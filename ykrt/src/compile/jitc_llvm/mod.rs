@@ -115,6 +115,10 @@ impl LLVMCompiledTrace {
             hl,
         }
     }
+
+    fn smap(&self) -> &HashMap<u64, Vec<LiveVar>> {
+        &self.smap
+    }
 }
 
 #[cfg(not(test))]
@@ -125,10 +129,6 @@ impl CompiledTrace for LLVMCompiledTrace {
 
     fn mt(&self) -> &Arc<MT> {
         &self.mt
-    }
-
-    fn smap(&self) -> &HashMap<u64, Vec<LiveVar>> {
-        &self.smap
     }
 
     /// Return a reference to the guard `id`.
@@ -189,6 +189,10 @@ impl LLVMCompiledTrace {
     pub(crate) fn new_testing() -> Self {
         Self
     }
+
+    fn smap(&self) -> &HashMap<u64, Vec<LiveVar>> {
+        todo!();
+    }
 }
 
 #[cfg(test)]
@@ -198,10 +202,6 @@ impl CompiledTrace for LLVMCompiledTrace {
     }
 
     fn mt(&self) -> &Arc<MT> {
-        todo!();
-    }
-
-    fn smap(&self) -> &HashMap<u64, Vec<LiveVar>> {
         todo!();
     }
 

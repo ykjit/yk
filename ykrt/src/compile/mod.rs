@@ -6,14 +6,12 @@ use crate::{
 use libc::c_void;
 use parking_lot::Mutex;
 use std::{
-    collections::HashMap,
     env, fmt,
     sync::{
         atomic::{AtomicU32, Ordering},
         Arc, Weak,
     },
 };
-use yksmp::LiveVar;
 
 #[cfg(jitc_llvm)]
 pub(crate) mod jitc_llvm;
@@ -98,8 +96,6 @@ pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
     fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static>;
 
     fn mt(&self) -> &Arc<MT>;
-
-    fn smap(&self) -> &HashMap<u64, Vec<LiveVar>>;
 
     /// Return a reference to the guard `id`.
     fn guard(&self, id: GuardId) -> &Guard;
