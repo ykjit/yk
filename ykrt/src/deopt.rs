@@ -291,10 +291,6 @@ unsafe extern "C" fn __ykrt_deopt(
     retaddr: usize,
     rsp: *const c_void,
 ) -> NewFramesInfo {
-    // The `ctr` argument is a `Arc<CompiledTrace>` that is being cloned prior to each trace
-    // execution. Traces can only return via this deopt, so we can (and must) turn this back into
-    // an `Arc` so it will be dropped at the end of this function. Unless, we are going to execute
-    // a side-trace. In that case this function will not return and we need to drop `ctr` manually.
     let ctr = crate::mt::THREAD_MTTHREAD.with(|mtt| mtt.running_trace().unwrap());
     ctr.mt().stats.timing_state(TimingState::Deopting);
 

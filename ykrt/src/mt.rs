@@ -257,8 +257,6 @@ impl MT {
                 unsafe {
                     // FIXME: Calling this function overwrites the current (Rust) function frame,
                     // rather than unwinding it. https://github.com/ykjit/yk/issues/778.
-                    // The `Arc<CompiledTrace>` passed into the trace here will be safely dropped
-                    // upon deoptimisation, which is the only way to exit a trace.
                     f(ctrlp_vars, frameaddr);
                 }
             }
