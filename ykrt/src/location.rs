@@ -223,7 +223,7 @@ impl HotLocation {
 pub(crate) enum HotLocationKind {
     /// Points to executable machine code that can be executed instead of the interpreter for this
     /// HotLocation.
-    Compiled(Arc<CompiledTrace>),
+    Compiled(Arc<dyn CompiledTrace>),
     /// A trace for this HotLocation is being compiled in another trace. When compilation is
     /// complete, the compiling thread will update the state of this HotLocation.
     Compiling,
@@ -234,7 +234,11 @@ pub(crate) enum HotLocationKind {
     Tracing,
     /// While executing JIT compiled code, a guard failed often enough for us to want to generate a
     /// side trace for this HotLocation.
-    SideTracing(Arc<CompiledTrace>, SideTraceInfo, Arc<CompiledTrace>),
+    SideTracing(
+        Arc<dyn CompiledTrace>,
+        SideTraceInfo,
+        Arc<dyn CompiledTrace>,
+    ),
 }
 
 /// When a [HotLocation] has failed to compile a valid trace, should the [HotLocation] be tried

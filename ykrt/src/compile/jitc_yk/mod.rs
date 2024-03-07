@@ -2,7 +2,7 @@
 
 use super::CompilationError;
 use crate::{
-    compile::{CompiledTrace, Compiler},
+    compile::{Compiler, LLVMCompiledTrace},
     location::HotLocation,
     mt::{SideTraceInfo, MT},
     trace::AOTTraceIterator,
@@ -64,7 +64,7 @@ impl Compiler for JITCYk {
         aottrace_iter: (Box<dyn AOTTraceIterator>, Box<[usize]>),
         sti: Option<SideTraceInfo>,
         _hl: Arc<Mutex<HotLocation>>,
-    ) -> Result<CompiledTrace, CompilationError> {
+    ) -> Result<LLVMCompiledTrace, CompilationError> {
         if sti.is_some() {
             todo!();
         }

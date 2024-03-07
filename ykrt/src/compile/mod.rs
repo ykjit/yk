@@ -44,7 +44,7 @@ pub(crate) trait Compiler: Send + Sync {
         aottrace_iter: (Box<dyn AOTTraceIterator>, Box<[usize]>),
         sti: Option<SideTraceInfo>,
         hl: Arc<Mutex<HotLocation>>,
-    ) -> Result<CompiledTrace, CompilationError>;
+    ) -> Result<LLVMCompiledTrace, CompilationError>;
 }
 
 pub(crate) fn default_compiler() -> Result<Arc<dyn Compiler>, CompilationError> {
@@ -83,7 +83,7 @@ unsafe impl<T> Sync for SendSyncConstPtr<T> {}
 pub(crate) struct Guard {
     /// How often has this guard failed?
     failed: AtomicU32,
-    ct: Mutex<Option<Arc<CompiledTrace>>>,
+    ct: Mutex<Option<Arc<dyn CompiledTrace>>>,
 }
 
 impl Guard {
@@ -94,21 +94,39 @@ impl Guard {
     }
 
     /// Stores a compiled side-trace inside this guard.
-    pub fn setct(&self, ct: Arc<CompiledTrace>) {
+    pub fn setct(&self, ct: Arc<dyn CompiledTrace>) {
         let _ = self.ct.lock().insert(ct);
     }
 
     /// Retrieves the stored side-trace or None, if no side-trace has been compiled yet.
-    pub fn getct(&self) -> Option<Arc<CompiledTrace>> {
+    pub fn getct(&self) -> Option<Arc<dyn CompiledTrace>> {
         self.ct.lock().as_ref().map(Arc::clone)
     }
+}
+
+pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
+    fn mt(&self) -> &Arc<MT>;
+
+    fn smap(&self) -> &HashMap<u64, Vec<LiveVar>>;
+
+    /// Return a reference to the guard `id`.
+    fn guard(&self, id: GuardId) -> &Guard;
+
+    /// Is the guard `id` the last guard in this `CompiledTrace`?
+    fn is_last_guard(&self, id: GuardId) -> bool;
+
+    fn aotvals(&self) -> *const c_void;
+
+    fn entry(&self) -> *const c_void;
+
+    fn hl(&self) -> &Weak<Mutex<HotLocation>>;
 }
 
 /// A trace compiled into machine code. Note that these are passed around as raw pointers and
 /// potentially referenced by multiple threads so, once created, instances of this struct can only
 /// be updated if a lock is held or a field is atomic.
 #[cfg(not(test))]
-pub(crate) struct CompiledTrace {
+pub(crate) struct LLVMCompiledTrace {
     // Reference to the meta-tracer required for side tracing.
     mt: Arc<MT>,
     /// A function which when called, executes the compiled trace.
@@ -136,7 +154,7 @@ pub(crate) struct CompiledTrace {
 }
 
 #[cfg(not(test))]
-impl CompiledTrace {
+impl LLVMCompiledTrace {
     /// Create a `CompiledTrace` from a pointer to an array containing: the pointer to the compiled
     /// trace, the pointer to the stackmap and the size of the stackmap, and the pointer to the
     /// live AOT values. The arguments `mt` and `hl` are required for side-tracing.
@@ -177,40 +195,43 @@ impl CompiledTrace {
             hl,
         }
     }
+}
 
-    pub(crate) fn mt(&self) -> &Arc<MT> {
+#[cfg(not(test))]
+impl CompiledTrace for LLVMCompiledTrace {
+    fn mt(&self) -> &Arc<MT> {
         &self.mt
     }
 
-    pub(crate) fn smap(&self) -> &HashMap<u64, Vec<LiveVar>> {
+    fn smap(&self) -> &HashMap<u64, Vec<LiveVar>> {
         &self.smap
     }
 
     /// Return a reference to the guard `id`.
-    pub(crate) fn guard(&self, id: GuardId) -> &Guard {
+    fn guard(&self, id: GuardId) -> &Guard {
         &self.guards[id.0]
     }
 
     /// Is the guard `id` the last guard in this `CompiledTrace`?
-    pub(crate) fn is_last_guard(&self, id: GuardId) -> bool {
+    fn is_last_guard(&self, id: GuardId) -> bool {
         id.0 + 1 == self.guards.len()
     }
 
-    pub(crate) fn aotvals(&self) -> *const c_void {
+    fn aotvals(&self) -> *const c_void {
         self.aotvals.0
     }
 
-    pub(crate) fn entry(&self) -> *const c_void {
+    fn entry(&self) -> *const c_void {
         self.entry.0
     }
 
-    pub(crate) fn hl(&self) -> &Weak<Mutex<HotLocation>> {
+    fn hl(&self) -> &Weak<Mutex<HotLocation>> {
         &self.hl
     }
 }
 
 #[cfg(not(test))]
-impl Drop for CompiledTrace {
+impl Drop for LLVMCompiledTrace {
     fn drop(&mut self) {
         // The memory holding the AOT live values needs to live as long as the trace. Now that we
         // no longer need the trace, this can be freed too.
@@ -219,17 +240,17 @@ impl Drop for CompiledTrace {
     }
 }
 
-impl fmt::Debug for CompiledTrace {
+impl fmt::Debug for LLVMCompiledTrace {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "CompiledTrace {{ ... }}")
+        write!(f, "LLVMCompiledTrace {{ ... }}")
     }
 }
 
 #[cfg(test)]
-pub(crate) struct CompiledTrace;
+pub(crate) struct LLVMCompiledTrace;
 
 #[cfg(test)]
-impl CompiledTrace {
+impl LLVMCompiledTrace {
     pub(crate) fn new(
         _mt: Arc<MT>,
         _data: *const c_void,
@@ -244,32 +265,35 @@ impl CompiledTrace {
     pub(crate) fn new_testing() -> Self {
         Self
     }
+}
 
-    pub(crate) fn mt(&self) -> &Arc<MT> {
+#[cfg(test)]
+impl CompiledTrace for LLVMCompiledTrace {
+    fn mt(&self) -> &Arc<MT> {
         todo!();
     }
 
-    pub(crate) fn smap(&self) -> &HashMap<u64, Vec<LiveVar>> {
+    fn smap(&self) -> &HashMap<u64, Vec<LiveVar>> {
         todo!();
     }
 
-    pub(crate) fn guard(&self, _id: GuardId) -> &Guard {
+    fn guard(&self, _id: GuardId) -> &Guard {
         todo!();
     }
 
-    pub(crate) fn is_last_guard(&self, _id: GuardId) -> bool {
+    fn is_last_guard(&self, _id: GuardId) -> bool {
         todo!();
     }
 
-    pub(crate) fn aotvals(&self) -> *const c_void {
+    fn aotvals(&self) -> *const c_void {
         todo!();
     }
 
-    pub(crate) fn entry(&self) -> *const c_void {
+    fn entry(&self) -> *const c_void {
         todo!();
     }
 
-    pub(crate) fn hl(&self) -> &Weak<Mutex<HotLocation>> {
+    fn hl(&self) -> &Weak<Mutex<HotLocation>> {
         todo!();
     }
 }

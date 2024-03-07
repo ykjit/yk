@@ -482,7 +482,7 @@ impl MT {
         self: &Arc<Self>,
         hl: Arc<Mutex<HotLocation>>,
         sti: SideTraceInfo,
-        parent: Arc<CompiledTrace>,
+        parent: Arc<dyn CompiledTrace>,
     ) -> TransitionGuardFailure {
         THREAD_MTTHREAD.with(|mtt| {
             // This thread should not be tracing anything.
@@ -502,14 +502,14 @@ impl MT {
     ///   * `utrace` is the trace to be compiled.
     ///   * `hl_arc` is the [HotLocation] this compilation job is related to.
     ///   * `sidetrace`, if not `None`, specifies that this is a side-trace compilation job.
-    ///     The `Arc<CompiledTrace>` is the parent [CompiledTrace] for the side-trace. Because
+    ///     The `Arc<dyn CompiledTrace>` is the parent [CompiledTrace] for the side-trace. Because
     ///     side-traces can nest, this may or may not be the same [CompiledTrace] as contained
     ///     in the `hl_arc`.
     fn queue_compile_job(
         self: &Arc<Self>,
         trace_iter: (Box<dyn AOTTraceIterator>, Box<[usize]>),
         hl_arc: Arc<Mutex<HotLocation>>,
-        sidetrace: Option<(SideTraceInfo, Arc<CompiledTrace>)>,
+        sidetrace: Option<(SideTraceInfo, Arc<dyn CompiledTrace>)>,
     ) {
         self.stats.trace_recorded_ok();
         let mt = Arc::clone(self);
@@ -582,7 +582,7 @@ impl MT {
         self: &Arc<Self>,
         hl: Arc<Mutex<HotLocation>>,
         sti: SideTraceInfo,
-        parent: Arc<CompiledTrace>,
+        parent: Arc<dyn CompiledTrace>,
     ) {
         match self.transition_guard_failure(hl, sti, parent) {
             TransitionGuardFailure::NoAction => todo!(),
@@ -624,7 +624,7 @@ impl Drop for MT {
 pub(crate) struct MTThread {
     /// If this thread is executing a trace this will be set to `Some(...)` such that deopt can
     /// know what the parent trace of a side-trace is.
-    running_trace: RefCell<Option<Arc<CompiledTrace>>>,
+    running_trace: RefCell<Option<Arc<dyn CompiledTrace>>>,
     /// Is this thread currently tracing something? If so, this will be a `Some<...>`. This allows
     /// another thread to tell whether the thread that started tracing a [Location] is still alive
     /// or not by inspecting its strong count (if the strong count is equal to 1 then the thread
@@ -658,12 +658,12 @@ impl MTThread {
     }
 
     /// If a trace is currently running, return a reference to its `CompiledTrace`.
-    pub(crate) fn running_trace(&self) -> Option<Arc<CompiledTrace>> {
+    pub(crate) fn running_trace(&self) -> Option<Arc<dyn CompiledTrace>> {
         self.running_trace.borrow().as_ref().map(|x| Arc::clone(&x))
     }
 
     /// Update the currently running trace: `None` means that no trace is running.
-    pub(crate) fn set_running_trace(&self, ct: Option<Arc<CompiledTrace>>) {
+    pub(crate) fn set_running_trace(&self, ct: Option<Arc<dyn CompiledTrace>>) {
         *self.running_trace.borrow_mut() = ct;
     }
 
@@ -685,10 +685,14 @@ impl MTThread {
 #[derive(Debug)]
 enum TransitionControlPoint {
     NoAction,
-    Execute(Arc<CompiledTrace>),
+    Execute(Arc<dyn CompiledTrace>),
     StartTracing,
     StopTracing(Arc<Mutex<HotLocation>>),
-    StopSideTracing(Arc<Mutex<HotLocation>>, SideTraceInfo, Arc<CompiledTrace>),
+    StopSideTracing(
+        Arc<Mutex<HotLocation>>,
+        SideTraceInfo,
+        Arc<dyn CompiledTrace>,
+    ),
 }
 
 /// What action should a caller of [MT::transition_guard_failure] take?
@@ -717,6 +721,7 @@ impl PartialEq for TransitionControlPoint {
 mod tests {
     extern crate test;
     use super::*;
+    use crate::compile::LLVMCompiledTrace;
     use std::{hint::black_box, sync::atomic::AtomicU64};
     use test::bench::Bencher;
 
@@ -748,7 +753,7 @@ mod tests {
                     HotLocationKind::Compiling
                 ));
                 loc.hot_location().unwrap().lock().kind =
-                    HotLocationKind::Compiled(Arc::new(CompiledTrace::new_testing()));
+                    HotLocationKind::Compiled(Arc::new(LLVMCompiledTrace::new_testing()));
             }
             _ => unreachable!(),
         }
@@ -766,7 +771,7 @@ mod tests {
             mt.transition_guard_failure(
                 loc.hot_location_arc_clone().unwrap(),
                 sti,
-                Arc::new(CompiledTrace::new_testing()),
+                Arc::new(LLVMCompiledTrace::new_testing()),
             ),
             TransitionGuardFailure::StartSideTracing
         ));
@@ -1072,7 +1077,7 @@ mod tests {
                                     ));
                                     loc.hot_location().unwrap().lock().kind =
                                         HotLocationKind::Compiled(Arc::new(
-                                            CompiledTrace::new_testing(),
+                                            LLVMCompiledTrace::new_testing(),
                                         ));
                                 }
                                 x => unreachable!("Reached incorrect state {:?}", x),
@@ -1185,7 +1190,7 @@ mod tests {
                         HotLocationKind::Compiling
                     ));
                     loc.hot_location().unwrap().lock().kind =
-                        HotLocationKind::Compiled(Arc::new(CompiledTrace::new_testing()));
+                        HotLocationKind::Compiled(Arc::new(LLVMCompiledTrace::new_testing()));
                 }
                 _ => unreachable!(),
             }
@@ -1208,7 +1213,7 @@ mod tests {
                     mt.transition_guard_failure(
                         loc1.hot_location_arc_clone().unwrap(),
                         sti,
-                        Arc::new(CompiledTrace::new_testing()),
+                        Arc::new(LLVMCompiledTrace::new_testing()),
                     ),
                     TransitionGuardFailure::StartSideTracing
                 ));
@@ -1227,7 +1232,7 @@ mod tests {
             mt.transition_guard_failure(
                 loc2.hot_location_arc_clone().unwrap(),
                 sti,
-                Arc::new(CompiledTrace::new_testing()),
+                Arc::new(LLVMCompiledTrace::new_testing()),
             ),
             TransitionGuardFailure::StartSideTracing
         ));
@@ -1287,7 +1292,7 @@ mod tests {
         ));
         if let TransitionControlPoint::StopTracing(_) = mt.transition_control_point(&loc1) {
             loc1.hot_location().unwrap().lock().kind =
-                HotLocationKind::Compiled(Arc::new(CompiledTrace::new_testing()));
+                HotLocationKind::Compiled(Arc::new(LLVMCompiledTrace::new_testing()));
         } else {
             panic!();
         }

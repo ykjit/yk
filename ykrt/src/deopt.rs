@@ -160,7 +160,7 @@ extern "C" fn __llvm_deoptimize(
 /// Struct storing information we need to pass via the `LLVMOrcThreadSafeModuleWithModuleDo`
 /// function.
 struct ReconstructInfo<'a> {
-    ctr: Arc<CompiledTrace>,
+    ctr: Arc<dyn CompiledTrace>,
     frameaddr: *mut c_void,
     aotvals: &'a LiveAOTVals,
     actframes: &'a CVec,
@@ -266,9 +266,6 @@ extern "C" fn ts_reconstruct(ctx: *mut c_void, _module: LLVMModuleRef) -> LLVMEr
 ///
 /// The arguments are as follows:
 ///
-///   * `ctr`: An `Arc<CompiledTrace>` that has been cast to a `*const CompiledTrace`. Will be cast
-///      back into an `Arc` by this function and then dropped before deoptimisation or execution of
-///      a side-trace.
 ///   * `frameaddr`: Address of the control point's frame.
 ///   * `aotvals`: Struct describing the location of the AOT live variables.
 ///   * `actframes`: Address and size of vector holding active AOT frame information needed to
