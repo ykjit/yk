@@ -249,7 +249,11 @@ impl<'a> X64CodeGen<'a> {
         let op2 = inst.op2();
 
         // The types must match. If the IR is well-formed, this is guaranteed.
-        debug_assert_eq!(op1.type_(self.jit_mod), op2.type_(self.jit_mod));
+        debug_assert_eq!(
+            op1.type_(self.jit_mod),
+            op2.type_(self.jit_mod),
+            "attempt to add different types"
+        );
 
         self.operand_into_reg(WR0, &inst.op1()); // FIXME: assumes value will fit in a reg.
         self.operand_into_reg(WR1, &inst.op2()); // ^^^ same
@@ -735,6 +739,30 @@ mod tests {
                 "--- End jit-asm ---",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
+        }
+
+        #[cfg(debug_assertions)]
+        #[should_panic]
+        #[test]
+        fn codegen_add_wrong_types() {
+            let mut jit_mod = test_module();
+            let i64_ty_idx = jit_mod
+                .type_idx(&jit_ir::Type::Integer(IntegerType::new(64)))
+                .unwrap();
+            let i32_ty_idx = jit_mod
+                .type_idx(&jit_ir::Type::Integer(IntegerType::new(32)))
+                .unwrap();
+            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i64_ty_idx).into());
+            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(64, i32_ty_idx).into());
+            let op1 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap());
+            let op2 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(1).unwrap());
+            jit_mod.push(jit_ir::AddInstruction::new(op1, op2).into());
+
+            let mut ra = SpillAllocator::new(STACK_DIRECTION);
+            X64CodeGen::new(&jit_mod, &mut ra)
+                .unwrap()
+                .codegen()
+                .unwrap();
         }
 
         /// A function whose symbol is present in the current address space.
