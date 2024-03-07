@@ -242,20 +242,24 @@ impl MT {
                 #[cfg(feature = "yk_jitstate_debug")]
                 print_jit_state("enter-jit-code");
                 self.stats.trace_executed();
+                let f = unsafe {
+                    #[cfg(feature = "yk_testing")]
+                    assert_ne!(ctr.entry() as *const (), std::ptr::null());
+                    mem::transmute::<_, unsafe extern "C" fn(*mut c_void, *const c_void) -> !>(
+                        ctr.entry(),
+                    )
+                };
+                THREAD_MTTHREAD.with(|mtt| {
+                    mtt.set_running_trace(Some(ctr));
+                });
                 self.stats.timing_state(TimingState::JitExecuting);
 
                 unsafe {
-                    #[cfg(feature = "yk_testing")]
-                    assert_ne!(ctr.entry() as *const (), std::ptr::null());
-                    let f = mem::transmute::<
-                        _,
-                        unsafe extern "C" fn(*mut c_void, *const CompiledTrace, *const c_void) -> !,
-                    >(ctr.entry());
                     // FIXME: Calling this function overwrites the current (Rust) function frame,
                     // rather than unwinding it. https://github.com/ykjit/yk/issues/778.
                     // The `Arc<CompiledTrace>` passed into the trace here will be safely dropped
                     // upon deoptimisation, which is the only way to exit a trace.
-                    f(ctrlp_vars, Arc::into_raw(ctr), frameaddr);
+                    f(ctrlp_vars, frameaddr);
                 }
             }
             TransitionControlPoint::StartTracing => {
@@ -620,6 +624,9 @@ impl Drop for MT {
 /// Meta-tracer per-thread state. Note that this struct is neither `Send` nor `Sync`: it can only
 /// be accessed from within a single thread.
 pub(crate) struct MTThread {
+    /// If this thread is executing a trace this will be set to `Some(...)` such that deopt can
+    /// know what the parent trace of a side-trace is.
+    running_trace: RefCell<Option<Arc<CompiledTrace>>>,
     /// Is this thread currently tracing something? If so, this will be a `Some<...>`. This allows
     /// another thread to tell whether the thread that started tracing a [Location] is still alive
     /// or not by inspecting its strong count (if the strong count is equal to 1 then the thread
@@ -644,11 +651,22 @@ pub(crate) struct MTThread {
 impl MTThread {
     fn new() -> Self {
         MTThread {
+            running_trace: RefCell::new(None),
             tracing: RefCell::new(None),
             thread_tracer: RefCell::new(None),
             promotions: RefCell::new(None),
             _dont_send_or_sync_me: PhantomData,
         }
+    }
+
+    /// If a trace is currently running, return a reference to its `CompiledTrace`.
+    pub(crate) fn running_trace(&self) -> Option<Arc<CompiledTrace>> {
+        self.running_trace.borrow().as_ref().map(|x| Arc::clone(&x))
+    }
+
+    /// Update the currently running trace: `None` means that no trace is running.
+    pub(crate) fn set_running_trace(&self, ct: Option<Arc<CompiledTrace>>) {
+        *self.running_trace.borrow_mut() = ct;
     }
 
     /// Records `val` as a value to be promoted. Returns `true` if either: no trace is being

@@ -35,8 +35,7 @@ uint64_t getNewTraceIdx() {
 #define YK_CONTROL_POINT_NUM_ARGS 4
 
 #define JITFUNC_ARG_INPUTS_STRUCT_IDX 0
-#define JITFUNC_ARG_COMPILEDTRACE_IDX 1
-#define JITFUNC_ARG_FRAMEADDR_IDX 2
+#define JITFUNC_ARG_FRAMEADDR_IDX 1
 
 /// Any function with this prefix will be considered as a promotion function.
 const char *PromoteRecFnPrefix = "__yk_promote_";
@@ -461,9 +460,6 @@ class JITModBuilder {
     // Add YkCtrlPointVars argument.
     InputTypes.push_back(TraceInputs->getType());
 
-    // Add *CompiledTrace argument.
-    InputTypes.push_back(PointerSizedIntTy->getPointerTo());
-
     // Add argument for pointer to the frame containing the control point.
     InputTypes.push_back(FrameAddr);
 
@@ -641,8 +637,7 @@ class JITModBuilder {
     // function so pass them on to the __llvm_deoptimize call.
     CallInst *Ret = CallInst::Create(
         DeoptInt,
-        {JITFunc->getArg(JITFUNC_ARG_COMPILEDTRACE_IDX),
-         JITFunc->getArg(JITFUNC_ARG_FRAMEADDR_IDX), AOTLocs,
+        {JITFunc->getArg(JITFUNC_ARG_FRAMEADDR_IDX), AOTLocs,
          ActiveFramesStruct, ConstantInt::get(PointerSizedIntTy, GuardId),
          ConstantInt::get(PointerSizedIntTy, (size_t)NewCallStack),
          ConstantInt::get(PointerSizedIntTy, IsSwitch)},
