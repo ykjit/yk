@@ -205,6 +205,15 @@ impl FuncType {
         self.arg_ty_idxs.len()
     }
 
+    /// Returns the type index of the argument at the specified index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is out of bounds.
+    pub(crate) fn arg_type<'a>(&self, m: &'a Module, idx: usize) -> &'a Type {
+        self.arg_ty_idxs[idx].type_(m)
+    }
+
     /// Returns whether the function type has vararg arguments.
     pub(crate) fn is_vararg(&self) -> bool {
         self.is_vararg
