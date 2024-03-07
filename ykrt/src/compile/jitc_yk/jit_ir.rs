@@ -137,6 +137,9 @@ impl FuncDeclIdx {
 /// A type index.
 ///
 /// One of these is an index into the [Module::types].
+///
+/// A type index uniquely identifies a [Type] in a [Module]. You can rely on this uniquness
+/// property for type checking: you can compare type indices instead of the corresponding [Type]s.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TypeIdx(U24);
 index_24bit!(TypeIdx);
@@ -1023,7 +1026,15 @@ impl Module {
     }
 
     /// Push a new type into the type table and return its index.
+    ///
+    /// The type must not already exist in the module's type table.
     fn push_type(&mut self, ty: Type) -> Result<TypeIdx, CompilationError> {
+        #[cfg(debug_assertions)]
+        {
+            for et in &self.types {
+                debug_assert_ne!(et, &ty, "type already exists");
+            }
+        }
         let idx = self.types.len();
         self.types.push(ty);
         Ok(TypeIdx::new(idx)?)
@@ -1307,5 +1318,14 @@ mod tests {
         assert_eq!(Type::Integer(IntegerType::new(127)).byte_size(), Some(16));
         assert_eq!(Type::Integer(IntegerType::new(128)).byte_size(), Some(16));
         assert_eq!(Type::Integer(IntegerType::new(129)).byte_size(), Some(17));
+    }
+
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "type already exists")]
+    #[test]
+    fn push_duplicate_type() {
+        let mut jit_mod = Module::new("test".into());
+        let _ = jit_mod.push_type(Type::Void);
+        let _ = jit_mod.push_type(Type::Void);
     }
 }
