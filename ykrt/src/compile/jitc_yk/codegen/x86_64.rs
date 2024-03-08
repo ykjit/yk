@@ -106,11 +106,11 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
             .map_err(|_| CompilationError::Unrecoverable("failed to finalize assembler".into()))?;
 
         #[cfg(not(any(debug_assertions, test)))]
-        return Ok(Arc::new(X64CodeGenOutput { buf }));
+        return Ok(Arc::new(X64CompiledTrace { buf }));
         #[cfg(any(debug_assertions, test))]
         {
             let comments = self.comments.take();
-            return Ok(Arc::new(X64CodeGenOutput { buf, comments }));
+            return Ok(Arc::new(X64CompiledTrace { buf, comments }));
         }
     }
 }
@@ -486,7 +486,7 @@ impl<'a> X64CodeGen<'a> {
 }
 
 #[derive(Debug)]
-pub(super) struct X64CodeGenOutput {
+pub(super) struct X64CompiledTrace {
     /// The executable code itself.
     buf: ExecutableBuffer,
     /// Comments to be shown when printing the compiled trace using `AsmPrinter`.
@@ -499,7 +499,7 @@ pub(super) struct X64CodeGenOutput {
     comments: HashMap<usize, Vec<String>>,
 }
 
-impl CompiledTrace for X64CodeGenOutput {
+impl CompiledTrace for X64CompiledTrace {
     fn entry(&self) -> *const libc::c_void {
         self.buf.ptr(AssemblyOffset(0)) as *const libc::c_void
     }
@@ -527,7 +527,7 @@ impl CompiledTrace for X64CodeGenOutput {
     }
 }
 
-impl X64CodeGenOutput {
+impl X64CompiledTrace {
     #[cfg(any(debug_assertions, test))]
     fn disassemble(&self) -> Result<String, CompilationError> {
         AsmPrinter::new(&self.buf, &self.comments).to_string()
@@ -585,7 +585,7 @@ impl<'a> AsmPrinter<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CodeGen, X64CodeGen, X64CodeGenOutput, STACK_DIRECTION};
+    use super::{CodeGen, X64CodeGen, X64CompiledTrace, STACK_DIRECTION};
     use crate::compile::jitc_yk::{
         codegen::reg_alloc::RegisterAllocator,
         jit_ir::{self, IntegerType, Type},
@@ -600,7 +600,7 @@ mod tests {
     }
 
     /// Test helper to use `fm` to match a disassembled trace.
-    pub(crate) fn match_asm(cgo: Arc<X64CodeGenOutput>, pattern: &str) {
+    pub(crate) fn match_asm(cgo: Arc<X64CompiledTrace>, pattern: &str) {
         let dis = cgo.disassemble().unwrap();
         match FMatcher::new(pattern).unwrap().matches(&dis) {
             Ok(()) => (),
@@ -625,7 +625,7 @@ mod tests {
                     .codegen()
                     .unwrap()
                     .as_any()
-                    .downcast::<X64CodeGenOutput>()
+                    .downcast::<X64CompiledTrace>()
                     .unwrap(),
                 &patt_lines.join("\n"),
             );
