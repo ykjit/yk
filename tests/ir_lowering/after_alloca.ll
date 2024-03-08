@@ -5,7 +5,7 @@
 ;       bb0:
 ;         $0_0: ptr = alloca i32, 1i32
 ;         store 1i32, $0_0
-;         $0_2: i1 = icmp $arg0, 1i32
+;         $0_2: i1 = icmp $arg0, Equal, 1i32
 ;         condbr $0_2, bb2, bb1
 ;     ...
 

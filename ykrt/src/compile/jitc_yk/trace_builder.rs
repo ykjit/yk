@@ -306,8 +306,12 @@ impl<'a> TraceBuilder<'a> {
         aot_inst_idx: usize,
     ) -> Result<(), CompilationError> {
         let op1 = self.handle_operand(inst.operand(0))?;
-        let op2 = self.handle_operand(inst.operand(1))?;
-        let instr = jit_ir::IcmpInstruction::new(op1, op2).into();
+        let pred = match inst.operand(1) {
+            aot_ir::Operand::Predicate(p) => p,
+            _ => panic!(), // second operand must be a predicate.
+        };
+        let op2 = self.handle_operand(inst.operand(2))?;
+        let instr = jit_ir::IcmpInstruction::new(op1, *pred, op2).into();
         self.copy_instruction(instr, bid, aot_inst_idx)
     }
 
