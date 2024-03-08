@@ -424,7 +424,6 @@ pub enum Instruction {
     Call(CallInstruction),
     PtrAdd(PtrAddInstruction),
     Store(StoreInstruction),
-    StoreGlobal(StoreGlobalInstruction),
     Add(AddInstruction),
     Icmp(IcmpInstruction),
     Guard(GuardInstruction),
@@ -444,7 +443,6 @@ impl Instruction {
             Self::Call(..) => true, // FIXME: May or may not define. Ask func sig.
             Self::PtrAdd(..) => true,
             Self::Store(..) => false,
-            Self::StoreGlobal(..) => false,
             Self::Add(..) => true,
             Self::Icmp(..) => true,
             Self::Guard(..) => false,
@@ -472,7 +470,6 @@ impl Instruction {
             Self::Call(ci) => ci.target().func_type(m).ret_type_idx(),
             Self::PtrAdd(..) => m.ptr_type_idx(),
             Self::Store(..) => m.void_type_idx(),
-            Self::StoreGlobal(..) => m.void_type_idx(),
             Self::Add(ai) => ai.type_idx(m),
             Self::Icmp(_) => m.int8_type_idx(), // always returns a 0/1 valued byte.
             Self::Guard(..) => m.void_type_idx(),
@@ -508,7 +505,6 @@ impl fmt::Display for Instruction {
             Self::Call(i) => write!(f, "{}", i),
             Self::PtrAdd(i) => write!(f, "{}", i),
             Self::Store(i) => write!(f, "{}", i),
-            Self::StoreGlobal(i) => write!(f, "{}", i),
             Self::Add(i) => write!(f, "{}", i),
             Self::Icmp(i) => write!(f, "{}", i),
             Self::Guard(i) => write!(f, "{}", i),
@@ -529,7 +525,6 @@ macro_rules! instr {
 instr!(Load, LoadInstruction);
 instr!(LoadGlobal, LoadGlobalInstruction);
 instr!(Store, StoreInstruction);
-instr!(StoreGlobal, StoreGlobalInstruction);
 instr!(LoadTraceInput, LoadTraceInputInstruction);
 instr!(Call, CallInstruction);
 instr!(PtrAdd, PtrAddInstruction);
@@ -769,43 +764,6 @@ impl StoreInstruction {
 impl fmt::Display for StoreInstruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Store {}, {}", self.val.unpack(), self.ptr.unpack())
-    }
-}
-
-/// The operands for a [Instruction::StoreGlobal]
-///
-/// # Semantics
-///
-/// Stores a value into a global.
-///
-#[derive(Debug)]
-pub struct StoreGlobalInstruction {
-    /// The value to store.
-    val: PackedOperand,
-    /// The pointer to store into.
-    global_decl_idx: GlobalDeclIdx,
-}
-
-impl StoreGlobalInstruction {
-    pub(crate) fn new(
-        val: Operand,
-        global_decl_idx: GlobalDeclIdx,
-    ) -> Result<Self, CompilationError> {
-        Ok(Self {
-            val: PackedOperand::new(&val),
-            global_decl_idx,
-        })
-    }
-}
-
-impl fmt::Display for StoreGlobalInstruction {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "StoreGlobal {}, {}",
-            self.val.unpack(),
-            usize::from(self.global_decl_idx)
-        )
     }
 }
 
@@ -1300,7 +1258,6 @@ mod tests {
         assert_eq!(mem::size_of::<StoreInstruction>(), 4);
         assert_eq!(mem::size_of::<LoadInstruction>(), 6);
         assert_eq!(mem::size_of::<LoadGlobalInstruction>(), 3);
-        assert_eq!(mem::size_of::<StoreGlobalInstruction>(), 6);
         assert_eq!(mem::size_of::<PtrAddInstruction>(), 6);
         assert!(mem::size_of::<Instruction>() <= mem::size_of::<u64>());
     }
