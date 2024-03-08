@@ -47,9 +47,8 @@ fn main() {
     println!("cargo:rerun-if-changed={YKLLVM_SRC_DEPEND_PATH}");
     rerun_except(&[]).unwrap();
 
-    // Build ykllvm in "target/[debug|release]". Note that the directory used here *must*
-    // be exactly the same as that produced by `ykbuild/src/lib.rs:llvm_bin_dir` and
-    // yk-config.
+    // Build ykllvm in "target/<cargo-profile>". Note that the directory used here *must* be
+    // exactly the same as that produced by `ykbuild/src/lib.rs:llvm_bin_dir` and yk-config.
     let mut ykllvm_dir = Path::new(&env::var("OUT_DIR").unwrap())
         .parent()
         .unwrap()
@@ -58,10 +57,6 @@ fn main() {
         .parent()
         .unwrap()
         .to_owned();
-    {
-        let leaf = ykllvm_dir.file_name().unwrap().to_str().unwrap();
-        assert!(leaf == "debug" || leaf == "release");
-    }
     ykllvm_dir.push("ykllvm");
     create_dir_all(&ykllvm_dir).unwrap();
 
