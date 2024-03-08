@@ -60,47 +60,80 @@ Fields and their meaning are as follows:
 
 ## Perf
 
-Note that `yk-config --cflags` includes `-Wl,--no-rosegment`, which [gives
-better profiling
-information](https://github.com/flamegraph-rs/flamegraph#cargo-flamegraph) for
-binaries linked with `lld` (as all yk C interpreters are). 
+On Linux, `perf` can be used to profile yk. You first need to record an
+execution of an interpreter and then separately view the profiling data that
+was generated.
 
-One way to view profile data is with perf.
+
+### Recording a Profile
+
+To record a profile we first recommend compiling yk with debugging info
+embedded. cargo's `debug` profile does this automatically, but because no code
+optimisation is performed, the profiles are unrepresentative. We recommend
+using yk's provided `profile-with-debug` profile, which turns on
+`--release`-style code optimisation *and* embeds debugging information:
+
+```
+$ cargo build --profile=release-with-debug
+```
+
+Ensure that the interpreter you are profiling links to the appropriate version
+of yk and then call `perf record`:
 
 ```
 $ perf record --call-graph dwarf -g ./interpreter ...args...
-$ perf report -G --no-inline
 ```
 
-`--call-graph=dwarf` makes perf use DWARF debugging information, which gives
-better quality profiling data than the default, but requires that you compile
-with debugging info.
+This uses `--call-graph dwarf` to force perf use DWARF debugging information:
+this will only be useful if you have compiled yk with embedded debugging
+information, as recommended above.
 
-We recommend passing `--no-inline` since, for all but the smallest runs,
-omitting it will lead to really long waits while `addr2line` is run (newer
-versions of `perf` [may fix
-this](https://eighty-twenty.org/2021/09/09/perf-addr2line-speed-improvement),
-but at the time of writing, the `perf` included in Debian is slow).
 
-### Flame graphs
+### Viewing a profile
 
-The most convenient way to make a flame graph is to use the Rust
-[`flamegraph`](https://github.com/flamegraph-rs/flamegraph) tool.
+perf profiles can be visualised in a number of ways. When using `perf report`
+or `perf script` we currently recommend passing `--no-inline` to avoid the huge
+processing time incurred by indirectly running `addr2line` (note that this
+[might change in the
+future](https://eighty-twenty.org/2021/09/09/perf-addr2line-speed-improvement)).
 
-On Linux, this tool uses `perf` under the hood and already passes
-`--call-graph=dwarf` to `perf record`  by default (pass `-v` to see the exact
-perf invocation used).
 
-To install:
+#### Terminal
+
+To quickly view a profile in the terminal:
 
 ```
-$ cargo install flamegraph
+$ perf report -g --no-inline
 ```
 
-Then run the binary you want to profile:
+
+#### Firefox profiler
+
+After processing perf's output, you can use [Firefox's
+Profiler](https://profiler.firefox.com/) to view the data locally. Note that
+this does not upload the data --- all processing happens in your browser! First
+process the data:
 
 ```
-$ ~/.cargo/bin/flamegraph --no-inline -- ./interpreter ...args...
+$ perf script -F +pid --no-inline > out.perf
 ```
 
-This will spit out an `svg` file which you can then view in (e.g.) a web browser.
+Then go to the [Firefox Profiler page](https://profiler.firefox.com/), press
+"Load a profile from file" and upload `out.perf`.
+
+
+#### Flame graphs
+
+You can make a flame graph using the Rust
+[`flamegraph`](https://github.com/flamegraph-rs/flamegraph) tool. Install with
+`cargo install flamegraph` and then use `flamegraph` to profile and produce a
+flamegraph in one go with:
+
+```
+$ /path/to/cargo/bin/flamegraph --no-inline -- ./interpreter ...args...
+```
+
+Note that `flamegraph` passes `--call-graph=dwarf` to `perf record` by default
+(pass `-v` to see the exact perf invocation used).
+
+This will produce an `svg` file which you can then view.
