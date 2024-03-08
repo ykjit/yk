@@ -5,7 +5,7 @@ use crate::{
     compile::{
         jitc_yk::codegen::{
             reg_alloc::{spill_alloc::SpillAllocator, RegisterAllocator, StackDirection},
-            CodeGen, CodeGenOutput,
+            CodeGen,
         },
         CompiledTrace, Compiler,
     },
@@ -62,35 +62,6 @@ static PHASES_TO_PRINT: LazyLock<HashSet<IRPhase>> = LazyLock::new(|| {
     }
 });
 
-#[derive(Debug)]
-struct YkCompiledTrace {
-    cgo: Box<dyn CodeGenOutput>,
-}
-
-impl CompiledTrace for YkCompiledTrace {
-    fn is_last_guard(&self, _id: super::GuardId) -> bool {
-        todo!()
-    }
-    fn smap(&self) -> &std::collections::HashMap<u64, Vec<yksmp::LiveVar>> {
-        todo!()
-    }
-    fn hl(&self) -> &std::sync::Weak<Mutex<HotLocation>> {
-        todo!()
-    }
-    fn mt(&self) -> &Arc<MT> {
-        todo!()
-    }
-    fn guard(&self, _id: super::GuardId) -> &super::Guard {
-        todo!()
-    }
-    fn aotvals(&self) -> *const libc::c_void {
-        todo!()
-    }
-    fn entry(&self) -> *const libc::c_void {
-        self.cgo.ptr()
-    }
-}
-
 pub(crate) struct JITCYk;
 
 impl Compiler for JITCYk {
@@ -124,8 +95,8 @@ impl Compiler for JITCYk {
 
         let mut ra = SpillAllocator::new(StackDirection::GrowsDown);
         let cg = codegen::x86_64::X64CodeGen::new(&jit_mod, &mut ra).unwrap();
-        let cgo = cg.codegen()?;
-        Ok(Arc::new(YkCompiledTrace { cgo }))
+        let ct = cg.codegen()?;
+        Ok(ct)
     }
 }
 
