@@ -132,7 +132,7 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Instruction::Load(i) => self.codegen_load_instr(instr_idx, &i),
             jit_ir::Instruction::PtrAdd(i) => self.codegen_ptradd_instr(instr_idx, &i),
             jit_ir::Instruction::Store(i) => self.codegen_store_instr(&i),
-            jit_ir::Instruction::LoadGlobal(_) => todo!(),
+            jit_ir::Instruction::LookupGlobal(_) => todo!(),
             jit_ir::Instruction::Call(i) => self.codegen_call_instr(instr_idx, &i)?,
             jit_ir::Instruction::Icmp(i) => self.codegen_icmp_instr(instr_idx, &i),
             jit_ir::Instruction::Guard(i) => self.codegen_guard_instr(&i),
