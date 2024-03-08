@@ -27,6 +27,8 @@ use yksmp::LiveVar;
 #[cfg(not(test))]
 use yksmp::StackMapParser;
 
+mod deopt;
+
 pub static LLVM_BITCODE: LazyLock<&[u8]> = LazyLock::new(|| {
     let object = object::File::parse(&**SELF_BIN_MMAP).unwrap();
     let sec = object.section_by_name(".llvmbc").unwrap();
@@ -113,16 +115,20 @@ impl LLVMCompiledTrace {
             hl,
         }
     }
+
+    fn smap(&self) -> &HashMap<u64, Vec<LiveVar>> {
+        &self.smap
+    }
 }
 
 #[cfg(not(test))]
 impl CompiledTrace for LLVMCompiledTrace {
-    fn mt(&self) -> &Arc<MT> {
-        &self.mt
+    fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static> {
+        self
     }
 
-    fn smap(&self) -> &HashMap<u64, Vec<LiveVar>> {
-        &self.smap
+    fn mt(&self) -> &Arc<MT> {
+        &self.mt
     }
 
     /// Return a reference to the guard `id`.
@@ -183,15 +189,19 @@ impl LLVMCompiledTrace {
     pub(crate) fn new_testing() -> Self {
         Self
     }
+
+    fn smap(&self) -> &HashMap<u64, Vec<LiveVar>> {
+        todo!();
+    }
 }
 
 #[cfg(test)]
 impl CompiledTrace for LLVMCompiledTrace {
-    fn mt(&self) -> &Arc<MT> {
+    fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static> {
         todo!();
     }
 
-    fn smap(&self) -> &HashMap<u64, Vec<LiveVar>> {
+    fn mt(&self) -> &Arc<MT> {
         todo!();
     }
 

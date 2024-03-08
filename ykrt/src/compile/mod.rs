@@ -6,14 +6,12 @@ use crate::{
 use libc::c_void;
 use parking_lot::Mutex;
 use std::{
-    collections::HashMap,
     env, fmt,
     sync::{
         atomic::{AtomicU32, Ordering},
         Arc, Weak,
     },
 };
-use yksmp::LiveVar;
 
 #[cfg(jitc_llvm)]
 pub(crate) mod jitc_llvm;
@@ -93,9 +91,11 @@ impl Guard {
 }
 
 pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
-    fn mt(&self) -> &Arc<MT>;
+    /// Upcast this [CompiledTrace] to `Any`. This method is a hack that's only needed since trait
+    /// upcasting in Rust is incomplete.
+    fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static>;
 
-    fn smap(&self) -> &HashMap<u64, Vec<LiveVar>>;
+    fn mt(&self) -> &Arc<MT>;
 
     /// Return a reference to the guard `id`.
     fn guard(&self, id: GuardId) -> &Guard;
