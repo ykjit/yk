@@ -83,6 +83,7 @@ pub fn dladdr(vaddr: usize) -> Option<DLInfo> {
 
 /// Given a virtual address, returns a pair indicating the object in which the address originated
 /// and the byte offset.
+#[cached]
 pub fn vaddr_to_obj_and_off(vaddr: usize) -> Option<(PathBuf, u64)> {
     // Find the object file from which the virtual address was loaded.
     let info = dladdr(vaddr).unwrap();
