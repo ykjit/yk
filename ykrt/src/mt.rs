@@ -209,18 +209,23 @@ impl MT {
                 return;
             }
 
-            let mt = Arc::clone(self);
+            self.stats.timing_state(TimingState::None);
+            // We only keep a weak reference alive to `self`, as otherwise an active compiler job
+            // causes `self` to never be dropped.
+            let mt = Arc::downgrade(&self);
             let jq = Arc::clone(&self.job_queue);
             thread::spawn(move || {
-                mt.stats.timing_state(TimingState::None);
                 let (cv, mtx) = &*jq;
                 let mut lock = mtx.lock();
-                loop {
+                // If the strong count for `mt` is 0 then it has been dropped and there is no
+                // point trying to do further work, even if there is work in the queue.
+                while mt.upgrade().is_some() {
                     match lock.pop_front() {
                         Some(x) => {
                             MutexGuard::unlocked(&mut lock, x);
                             #[cfg(yk_llvm_sync_hack)]
-                            mt.active_worker_jobs.fetch_sub(1, Ordering::Relaxed);
+                            mt.upgrade()
+                                .map(|mt| mt.active_worker_jobs.fetch_sub(1, Ordering::Relaxed));
                         }
                         None => cv.wait(&mut lock),
                     }
