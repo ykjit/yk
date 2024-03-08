@@ -24,20 +24,20 @@ OUTPUT=""
 usage() {
     echo "Generate C compiler flags for building against the yk JIT.\n"
     echo "Usage:"
-    echo "    yk-config <mode> [--prelink-pipeline <passes>] [--postlink-pipeline <passes>] <--cc|--cxx|--ar|--ranlib|--cppflags|--cflags|--ldflags>\n"
-    echo "    Where <mode> is either 'debug' or 'release'."
+    echo "    yk-config <profile> [--prelink-pipeline <passes>] [--postlink-pipeline <passes>] <--cc|--cxx|--ar|--ranlib|--cppflags|--cflags|--ldflags>\n"
+    echo "    Where <profile> is a Rust cargo profile starting with either 'debug' or 'release'."
 }
 
 
 handle_arg() {
-    mode=$1
+    profile=$1
     shift
 
     if [ "x${YKB_YKLLVM_BIN_DIR}" != "x" ]; then
         ykllvm_bin_dir=`realpath ${YKB_YKLLVM_BIN_DIR}`
     else
         # The way this path is calculated must match that in ykbuild/build.rs.
-        ykllvm_bin_dir=`realpath ${DIR}/../target/${mode}/ykllvm/bin/`
+        ykllvm_bin_dir=`realpath ${DIR}/../target/${profile}/ykllvm/bin/`
     fi
 
     case $1 in
@@ -78,8 +78,8 @@ handle_arg() {
             if [ ! -z "${PRELINK_PASSES_STR}" ]; then
                 OUTPUT="${OUTPUT} -mllvm --newpm-passes=${PRELINK_PASSES_STR}"
             fi
-            case $mode in
-                debug) OUTPUT="$OUTPUT -g" ;;
+            case $profile in
+                debug*) OUTPUT="$OUTPUT -g" ;;
             esac
             ;;
         --cppflags)
@@ -164,14 +164,14 @@ handle_arg() {
             OUTPUT="${OUTPUT} -Wl,--mllvm=--yk-linkage"
 
             # Linkage to yk as a library.
-            OUTPUT="${OUTPUT} -L${DIR}/../target/${mode}/deps"
+            OUTPUT="${OUTPUT} -L${DIR}/../target/${profile}/deps"
 
             # Encode an rpath so that we don't have to set LD_LIBRARY_PATH.
             #
             # FIXME: Adding rpaths should probably be behind a flag. It's kind
             # of rude to add local rpaths to interpreter binaries that
             # downstreams may want to distribute.
-            OUTPUT="${OUTPUT} -Wl,-rpath=${DIR}/../target/${mode}/deps"
+            OUTPUT="${OUTPUT} -Wl,-rpath=${DIR}/../target/${profile}/deps"
             OUTPUT="${OUTPUT} -Wl,-rpath=$(${ykllvm_bin_dir}/llvm-config --link-shared --libdir)"
             # Add a proper RPATH, not a RUNPATH:
             # https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/1737608
@@ -197,21 +197,21 @@ if [ $# -eq 0 ]; then
 fi
 
 case $1 in
-    debug|release);;
-    *) 1>&2 echo "unknown mode: $1\n"
+    debug*|release*);;
+    *) 1>&2 echo "Profile '$1' does not start with 'debug' or 'release'.\n"
        usage
        exit 1
        ;;
 esac
-mode=$1
+profile=$1
 shift
 
 while [ $# -ne 0 ]; do
     if [ -z "$2" ] || [ "$(echo $2 | cut -b 1,2)" = "--" ]; then
-        handle_arg $mode $1
+        handle_arg $profile $1
         shift
     else
-        handle_arg $mode $1 $2
+        handle_arg $profile $1 $2
         shift
         shift
     fi

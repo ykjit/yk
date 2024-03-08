@@ -10,22 +10,16 @@ pub mod completion_wrapper;
 
 /// Return the subdirectory of Cargo's `target` directory where we should be building things.
 ///
-/// There are no guarantees about where this will be. However, in practise this will probably point
-/// to a directory whose leaf is `debug` or `release`.
+/// There are no guarantees about where this directory will be or what its name is.
 fn target_dir() -> PathBuf {
-    let target_dir = Path::new(env!("OUT_DIR"))
+    Path::new(env!("OUT_DIR"))
         .parent()
         .unwrap()
         .parent()
         .unwrap()
         .parent()
         .unwrap()
-        .to_owned();
-    {
-        let leaf = target_dir.file_name().unwrap().to_str().unwrap();
-        assert!(leaf == "debug" || leaf == "release");
-    }
-    target_dir
+        .to_owned()
 }
 
 /// Return a [Path] to the directory containing a ykllvm installation.
