@@ -116,13 +116,12 @@ pub(crate) struct FrameReconstructor {
 impl FrameReconstructor {
     /// Create a new instance and initialise the frames we need to reconstruct.
     pub unsafe fn new(activeframes: &[LLVMValueRef]) -> FrameReconstructor {
-        // Initialise frames.
-        let mut frames = Vec::with_capacity(activeframes.len());
-        for pc in activeframes {
-            let val = Value::new(*pc);
-            frames.push(Frame::new(val));
+        FrameReconstructor {
+            frames: activeframes
+                .into_iter()
+                .map(|x| Frame::new(Value::new(*x)))
+                .collect::<Vec<_>>(),
         }
-        FrameReconstructor { frames }
     }
 
     /// Generate frames from stackmap information after a guard failure. The new frames are stored
