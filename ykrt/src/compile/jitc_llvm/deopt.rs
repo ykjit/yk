@@ -2,7 +2,7 @@
 //! to resume interpreter execution.
 
 use super::LLVMCompiledTrace;
-use crate::frame::{BitcodeSection, FrameReconstructor, __yktracec_get_aot_module};
+use crate::frame::{BitcodeSection, FrameReconstructor, Value, __yktracec_get_aot_module};
 #[cfg(feature = "yk_jitstate_debug")]
 use crate::print_jit_state;
 use crate::{
@@ -237,11 +237,15 @@ extern "C" fn ts_reconstruct(ctx: *mut c_void, _module: LLVMModuleRef) -> LLVMEr
                     _ => unreachable!(),
                 };
                 let aot = &aotvals[i];
-                framerec.var_init(aot.val, aot.sfidx, v);
+                framerec.var_init(unsafe { Value::new(aot.val as LLVMValueRef) }, aot.sfidx, v);
             }
             SMLocation::Constant(v) => {
                 let aot = &aotvals[i];
-                framerec.var_init(aot.val, aot.sfidx, *v as u64);
+                framerec.var_init(
+                    unsafe { Value::new(aot.val as LLVMValueRef) },
+                    aot.sfidx,
+                    *v as u64,
+                );
             }
             SMLocation::LargeConstant(_v) => {
                 todo!();

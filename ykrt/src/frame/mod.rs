@@ -10,8 +10,8 @@ use ykaddr::obj::SELF_BIN_MMAP;
 use yksmp::{Location as SMLocation, PrologueInfo, Record, StackMapParser};
 
 mod llvmbridge;
-pub(crate) use llvmbridge::{BitcodeSection, __yktracec_get_aot_module};
-use llvmbridge::{Type, Value};
+use llvmbridge::Type;
+pub(crate) use llvmbridge::{BitcodeSection, Value, __yktracec_get_aot_module};
 
 struct AOTStackmapInfo {
     pinfos: Vec<PrologueInfo>,
@@ -385,8 +385,7 @@ impl FrameReconstructor {
     }
 
     /// Add a live variable and its value to the current frame.
-    pub fn var_init(&mut self, aotval: *const c_void, sfidx: usize, mut val: u64) {
-        let aotval = unsafe { Value::new(aotval as LLVMValueRef) };
+    pub fn var_init(&mut self, aotval: Value, sfidx: usize, mut val: u64) {
         let ty = aotval.get_type();
         if aotval.get_type().is_integer() {
             // Stackmap "small constants" get their value sign-extended to fill the reserved 32-bit
