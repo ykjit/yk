@@ -25,6 +25,7 @@ use std::sync::LazyLock;
 #[cfg(feature = "yk_jitstate_debug")]
 use crate::print_jit_state;
 use crate::{
+    aotsmp::load_aot_stackmaps,
     compile::{default_compiler, CompilationError, CompiledTrace, Compiler, GuardId},
     location::{HotLocation, HotLocationKind, Location, TraceFailed},
     trace::{default_tracer, AOTTraceIterator, TraceRecorder, Tracer},
@@ -110,8 +111,6 @@ impl std::fmt::Debug for MT {
         write!(f, "MT")
     }
 }
-
-use crate::compile::jitc_llvm::load_aot_stackmaps;
 
 impl MT {
     // Create a new meta-tracer instance. Arbitrarily many of these can be created, though there

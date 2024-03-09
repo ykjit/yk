@@ -8,6 +8,7 @@
 #![allow(clippy::missing_safety_doc)]
 #![allow(clippy::upper_case_acronyms)]
 
+pub(crate) mod aotsmp;
 pub mod compile;
 mod location;
 pub(crate) mod mt;
