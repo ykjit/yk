@@ -80,14 +80,11 @@ impl TraceRecorder for SWTTraceRecorder {
                     let mut functions: *mut IRFunctionNameIndex = std::ptr::null_mut();
                     let bc_section = crate::compile::jitc_llvm::llvmbc_section();
                     let mut functions_len: usize = 0;
-                    get_function_names(
-                        &BitcodeSection {
-                            data: bc_section.as_ptr(),
-                            len: u64::try_from(bc_section.len()).unwrap(),
-                        },
-                        &mut functions,
-                        &mut functions_len,
-                    );
+                    let bs = &BitcodeSection {
+                        data: bc_section.as_ptr(),
+                        len: u64::try_from(bc_section.len()).unwrap(),
+                    };
+                    unsafe { get_function_names(bs, &mut functions, &mut functions_len) };
                     for entry in unsafe { std::slice::from_raw_parts(functions, functions_len) } {
                         fnames.borrow_mut().insert(
                             entry.index,
