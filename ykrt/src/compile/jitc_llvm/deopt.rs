@@ -66,7 +66,7 @@ impl Registers {
 #[derive(Debug)]
 #[repr(C)]
 struct AOTVar {
-    val: *const c_void,
+    val: LLVMValueRef,
     sfidx: usize,
 }
 
@@ -237,15 +237,11 @@ extern "C" fn ts_reconstruct(ctx: *mut c_void, _module: LLVMModuleRef) -> LLVMEr
                     _ => unreachable!(),
                 };
                 let aot = &aotvals[i];
-                framerec.var_init(unsafe { Value::new(aot.val as LLVMValueRef) }, aot.sfidx, v);
+                framerec.var_init(unsafe { Value::new(aot.val) }, aot.sfidx, v);
             }
             SMLocation::Constant(v) => {
                 let aot = &aotvals[i];
-                framerec.var_init(
-                    unsafe { Value::new(aot.val as LLVMValueRef) },
-                    aot.sfidx,
-                    *v as u64,
-                );
+                framerec.var_init(unsafe { Value::new(aot.val) }, aot.sfidx, *v as u64);
             }
             SMLocation::LargeConstant(_v) => {
                 todo!();
