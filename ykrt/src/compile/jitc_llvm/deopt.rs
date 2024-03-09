@@ -1,8 +1,10 @@
 //! Run-time deoptimisation support: when a guard fails, this module restores the state necessary
 //! to resume interpreter execution.
 
-use super::LLVMCompiledTrace;
-use crate::frame::{BitcodeSection, FrameReconstructor, Value, __yktracec_get_aot_module};
+use super::{
+    frame::{BitcodeSection, FrameReconstructor, Value, __yktracec_get_aot_module},
+    LLVMCompiledTrace,
+};
 #[cfg(feature = "yk_jitstate_debug")]
 use crate::print_jit_state;
 use crate::{

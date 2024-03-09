@@ -28,6 +28,9 @@ use yksmp::LiveVar;
 use yksmp::StackMapParser;
 
 mod deopt;
+mod frame;
+pub(crate) use frame::load_aot_stackmaps;
+mod llvmbridge;
 
 pub static LLVM_BITCODE: LazyLock<&[u8]> = LazyLock::new(|| {
     let object = object::File::parse(&**SELF_BIN_MMAP).unwrap();

@@ -9,9 +9,8 @@ use std::{ffi::c_void, ptr, sync::LazyLock};
 use ykaddr::obj::SELF_BIN_MMAP;
 use yksmp::{Location as SMLocation, PrologueInfo, Record, StackMapParser};
 
-mod llvmbridge;
-use llvmbridge::Type;
-pub(crate) use llvmbridge::{BitcodeSection, Value, __yktracec_get_aot_module};
+use super::llvmbridge::Type;
+pub(crate) use super::llvmbridge::{BitcodeSection, Value, __yktracec_get_aot_module};
 
 struct AOTStackmapInfo {
     pinfos: Vec<PrologueInfo>,

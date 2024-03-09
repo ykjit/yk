@@ -9,7 +9,6 @@
 #![allow(clippy::upper_case_acronyms)]
 
 pub mod compile;
-mod frame;
 mod location;
 pub(crate) mod mt;
 pub mod promote;

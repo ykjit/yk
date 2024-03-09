@@ -111,7 +111,7 @@ impl std::fmt::Debug for MT {
     }
 }
 
-use crate::frame::load_aot_stackmaps;
+use crate::compile::jitc_llvm::load_aot_stackmaps;
 
 impl MT {
     // Create a new meta-tracer instance. Arbitrarily many of these can be created, though there
