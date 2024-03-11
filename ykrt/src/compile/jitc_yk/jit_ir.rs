@@ -172,7 +172,7 @@ index_24bit!(GlobalDeclIdx);
 /// An instruction index.
 ///
 /// One of these is an index into the [Module::instrs].
-#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Copy, Clone, Eq, Hash, PartialEq, PartialOrd)]
 pub(crate) struct InstrIdx(u16);
 index_16bit!(InstrIdx);
 
