@@ -11,12 +11,14 @@ use super::{
     },
     abs_stack::AbstractStack,
     reg_alloc::{LocalAlloc, RegisterAllocator, StackDirection},
-    CodeGen, CodeGenOutput,
+    CodeGen,
 };
+use crate::compile::CompiledTrace;
 use dynasmrt::{
     dynasm, x64::Rq, AssemblyOffset, DynasmApi, DynasmLabelApi, ExecutableBuffer, Register,
 };
 use std::ffi::CString;
+use std::sync::Arc;
 #[cfg(any(debug_assertions, test))]
 use std::{cell::Cell, collections::HashMap, slice};
 use ykaddr::addr::symbol_vaddr;
@@ -46,7 +48,7 @@ const SYSV_CALL_STACK_ALIGN: usize = 16;
 const STACK_DIRECTION: StackDirection = StackDirection::GrowsDown;
 
 /// The X86_64 code generator.
-pub(super) struct X64CodeGen<'a> {
+pub(crate) struct X64CodeGen<'a> {
     jit_mod: &'a jit_ir::Module,
     asm: dynasmrt::x64::Assembler,
     /// Abstract stack pointer, as a relative offset from `RBP`. The higher this number, the larger
@@ -79,7 +81,7 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
         })
     }
 
-    fn codegen(mut self) -> Result<Box<dyn CodeGenOutput>, CompilationError> {
+    fn codegen(mut self) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         let alloc_off = self.emit_prologue();
 
         // FIXME: we'd like to be able to assemble code backwards as this would simplify register
@@ -104,11 +106,11 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
             .map_err(|_| CompilationError::Unrecoverable("failed to finalize assembler".into()))?;
 
         #[cfg(not(any(debug_assertions, test)))]
-        return Ok(Box::new(X64CodeGenOutput { buf }));
+        return Ok(Arc::new(X64CompiledTrace { buf }));
         #[cfg(any(debug_assertions, test))]
         {
             let comments = self.comments.take();
-            return Ok(Box::new(X64CodeGenOutput { buf, comments }));
+            return Ok(Arc::new(X64CompiledTrace { buf, comments }));
         }
     }
 }
@@ -483,7 +485,8 @@ impl<'a> X64CodeGen<'a> {
     }
 }
 
-pub(super) struct X64CodeGenOutput {
+#[derive(Debug)]
+pub(super) struct X64CompiledTrace {
     /// The executable code itself.
     buf: ExecutableBuffer,
     /// Comments to be shown when printing the compiled trace using `AsmPrinter`.
@@ -496,7 +499,35 @@ pub(super) struct X64CodeGenOutput {
     comments: HashMap<usize, Vec<String>>,
 }
 
-impl CodeGenOutput for X64CodeGenOutput {
+impl CompiledTrace for X64CompiledTrace {
+    fn entry(&self) -> *const libc::c_void {
+        self.buf.ptr(AssemblyOffset(0)) as *const libc::c_void
+    }
+
+    fn aotvals(&self) -> *const libc::c_void {
+        todo!()
+    }
+
+    fn guard(&self, _id: crate::compile::GuardId) -> &crate::compile::Guard {
+        todo!()
+    }
+
+    fn mt(&self) -> &std::sync::Arc<crate::MT> {
+        todo!()
+    }
+
+    fn hl(&self) -> &std::sync::Weak<parking_lot::Mutex<crate::location::HotLocation>> {
+        todo!()
+    }
+    fn is_last_guard(&self, _id: crate::compile::GuardId) -> bool {
+        todo!()
+    }
+    fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static> {
+        self
+    }
+}
+
+impl X64CompiledTrace {
     #[cfg(any(debug_assertions, test))]
     fn disassemble(&self) -> Result<String, CompilationError> {
         AsmPrinter::new(&self.buf, &self.comments).to_string()
@@ -554,16 +585,30 @@ impl<'a> AsmPrinter<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CodeGen, X64CodeGen, STACK_DIRECTION};
+    use super::{CodeGen, X64CodeGen, X64CompiledTrace, STACK_DIRECTION};
     use crate::compile::jitc_yk::{
-        codegen::{reg_alloc::RegisterAllocator, tests::match_asm},
+        codegen::reg_alloc::RegisterAllocator,
         jit_ir::{self, IntegerType, Type},
     };
+    use fm::FMatcher;
     use std::ffi::CString;
+    use std::sync::Arc;
     use ykaddr::addr::symbol_vaddr;
 
     fn test_module() -> jit_ir::Module {
         jit_ir::Module::new("test".into())
+    }
+
+    /// Test helper to use `fm` to match a disassembled trace.
+    pub(crate) fn match_asm(cgo: Arc<X64CompiledTrace>, pattern: &str) {
+        let dis = cgo.disassemble().unwrap();
+        match FMatcher::new(pattern).unwrap().matches(&dis) {
+            Ok(()) => (),
+            Err(e) => panic!(
+                "\n!!! Emitted code didn't match !!!\n\n{}\nFull asm:\n{}\n",
+                e, dis
+            ),
+        }
     }
 
     mod with_spillalloc {
@@ -578,6 +623,9 @@ mod tests {
                 X64CodeGen::new(&jit_mod, &mut ra)
                     .unwrap()
                     .codegen()
+                    .unwrap()
+                    .as_any()
+                    .downcast::<X64CompiledTrace>()
                     .unwrap(),
                 &patt_lines.join("\n"),
             );

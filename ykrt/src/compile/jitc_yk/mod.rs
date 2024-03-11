@@ -2,11 +2,18 @@
 
 use super::CompilationError;
 use crate::{
-    compile::{CompiledTrace, Compiler},
+    compile::{
+        jitc_yk::codegen::{
+            reg_alloc::{spill_alloc::SpillAllocator, RegisterAllocator, StackDirection},
+            CodeGen,
+        },
+        CompiledTrace, Compiler,
+    },
     location::HotLocation,
     mt::{SideTraceInfo, MT},
     trace::AOTTraceIterator,
 };
+
 use parking_lot::Mutex;
 use std::{
     collections::HashSet,
@@ -86,7 +93,10 @@ impl Compiler for JITCYk {
             eprintln!("--- End pre-opt ---");
         }
 
-        todo!("new codegen doesn't work yet");
+        let mut ra = SpillAllocator::new(StackDirection::GrowsDown);
+        let cg = codegen::x86_64::X64CodeGen::new(&jit_mod, &mut ra).unwrap();
+        let ct = cg.codegen()?;
+        Ok(ct)
     }
 }
 
