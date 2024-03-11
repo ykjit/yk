@@ -132,7 +132,7 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Instruction::Load(i) => self.codegen_load_instr(instr_idx, &i),
             jit_ir::Instruction::PtrAdd(i) => self.codegen_ptradd_instr(instr_idx, &i),
             jit_ir::Instruction::Store(i) => self.codegen_store_instr(&i),
-            jit_ir::Instruction::LookupGlobal(_) => todo!(),
+            jit_ir::Instruction::LookupGlobal(i) => self.codegen_lookupglobal_instr(instr_idx, &i),
             jit_ir::Instruction::Call(i) => self.codegen_call_instr(instr_idx, &i)?,
             jit_ir::Instruction::Icmp(i) => self.codegen_icmp_instr(instr_idx, &i),
             jit_ir::Instruction::Guard(i) => self.codegen_guard_instr(&i),
@@ -340,6 +340,21 @@ impl<'a> X64CodeGen<'a> {
             1 => dynasm!(self.asm ; mov [Rq(WR0.code())], Rb(WR1.code())),
             _ => todo!(),
         }
+    }
+
+    fn codegen_lookupglobal_instr(
+        &mut self,
+        inst_idx: jit_ir::InstrIdx,
+        inst: &jit_ir::LookupGlobalInstruction,
+    ) {
+        let decl = inst.decl(self.jit_mod);
+        if decl.is_threadlocal() {
+            todo!();
+        }
+        // Unwrap is safe as the JIT can't contain globals that don't exist in AOT.
+        let sym_addr = symbol_vaddr(&CString::new(decl.name()).unwrap()).unwrap();
+        dynasm!(self.asm ; mov Rq(WR0.code()), QWORD i64::try_from(sym_addr).unwrap());
+        self.reg_into_new_local(inst_idx, WR0);
     }
 
     pub(super) fn codegen_call_instr(

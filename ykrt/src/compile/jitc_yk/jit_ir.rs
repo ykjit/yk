@@ -465,7 +465,7 @@ impl Instruction {
     pub(crate) fn def_type_idx(&self, m: &Module) -> TypeIdx {
         match self {
             Self::Load(li) => li.type_idx(),
-            Self::LookupGlobal(..) => todo!(),
+            Self::LookupGlobal(..) => m.ptr_type_idx(),
             Self::LoadTraceInput(li) => li.ty_idx(),
             Self::Call(ci) => ci.target().func_type(m).ret_type_idx(),
             Self::PtrAdd(..) => m.ptr_type_idx(),
@@ -654,6 +654,9 @@ pub struct LookupGlobalInstruction {
 impl LookupGlobalInstruction {
     pub(crate) fn new(global_decl_idx: GlobalDeclIdx) -> Result<Self, CompilationError> {
         Ok(Self { global_decl_idx })
+    }
+    pub(crate) fn decl<'a>(&self, m: &'a Module) -> &'a GlobalDecl {
+        m.globaldecl(self.global_decl_idx)
     }
 }
 
@@ -1059,6 +1062,10 @@ impl Module {
     /// Panics if the index is out of bounds.
     pub(crate) fn type_(&self, idx: TypeIdx) -> &Type {
         &self.types[idx]
+    }
+
+    pub(crate) fn globaldecl(&self, idx: GlobalDeclIdx) -> &GlobalDecl {
+        &self.global_decls[idx]
     }
 
     /// Push an instruction to the end of the [Module].
