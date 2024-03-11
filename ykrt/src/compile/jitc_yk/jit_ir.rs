@@ -967,8 +967,12 @@ impl GuardInstruction {
         }
     }
 
-    fn cond(&self) -> Operand {
+    pub(crate) fn cond(&self) -> Operand {
         self.cond.get()
+    }
+
+    pub(crate) fn expect(&self) -> bool {
+        self.expect
     }
 }
 
