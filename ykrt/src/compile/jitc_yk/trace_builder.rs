@@ -208,9 +208,7 @@ impl<'a> TraceBuilder<'a> {
             }
             aot_ir::Operand::Global(go) => {
                 let load = jit_ir::LoadGlobalInstruction::new(self.handle_global(go.index())?)?;
-                let idx = self.next_instr_id()?;
-                self.jit_mod.push(load.into());
-                jit_ir::Operand::Local(idx)
+                self.jit_mod.push_and_make_operand(load.into())?
             }
             aot_ir::Operand::Unimplemented(_) => {
                 // FIXME: for now we push an arbitrary constant.

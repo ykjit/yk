@@ -1093,6 +1093,32 @@ impl Module {
         self.instrs.push(instr);
     }
 
+    /// Push an instruction to the end of the [Module] and create a local variable [Operand] out of
+    /// the value that the instruction defines.
+    ///
+    /// This is useful for forwarding the local variable a instruction defines as operand of a
+    /// subsequent instruction: an idiom used a lot (but not exclusively) in testing.
+    ///
+    /// This must only be used for instructions that define a local variable. If you want to push
+    /// an instruction that doesn't define a value, or it does, but you don't want it as an
+    /// [Operand], use [Module::push()] instead.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the instruction doesn't define a local variable that we could use to build an
+    /// [Operand].
+    pub(crate) fn push_and_make_operand(
+        &mut self,
+        instr: Instruction,
+    ) -> Result<Operand, CompilationError> {
+        if !instr.is_def() {
+            panic!();
+        }
+        let ret = Operand::Local(InstrIdx::new(self.len())?);
+        self.instrs.push(instr);
+        Ok(ret)
+    }
+
     /// Returns the number of [Instruction]s in the [Module].
     pub(crate) fn len(&self) -> usize {
         self.instrs.len()

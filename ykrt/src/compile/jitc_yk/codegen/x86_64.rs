@@ -587,14 +587,10 @@ mod tests {
         fn codegen_load_ptr() {
             let mut jit_mod = test_module();
             let ptr_ty_idx = jit_mod.ptr_type_idx();
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, ptr_ty_idx).into());
-            jit_mod.push(
-                jit_ir::LoadInstruction::new(
-                    jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap()),
-                    ptr_ty_idx,
-                )
-                .into(),
-            );
+            let load_op = jit_mod
+                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, ptr_ty_idx).into())
+                .unwrap();
+            jit_mod.push(jit_ir::LoadInstruction::new(load_op, ptr_ty_idx).into());
             let patt_lines = [
                 "...",
                 "; Load %0",
@@ -612,14 +608,10 @@ mod tests {
             let i8_ty_idx = jit_mod
                 .type_idx(&jit_ir::Type::Integer(IntegerType::new(8)))
                 .unwrap();
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into());
-            jit_mod.push(
-                jit_ir::LoadInstruction::new(
-                    jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap()),
-                    i8_ty_idx,
-                )
-                .into(),
-            );
+            let load_op = jit_mod
+                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into())
+                .unwrap();
+            jit_mod.push(jit_ir::LoadInstruction::new(load_op, i8_ty_idx).into());
             let patt_lines = [
                 "...",
                 "; Load %0",
@@ -637,14 +629,10 @@ mod tests {
             let i32_ty_idx = jit_mod
                 .type_idx(&jit_ir::Type::Integer(IntegerType::new(32)))
                 .unwrap();
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i32_ty_idx).into());
-            jit_mod.push(
-                jit_ir::LoadInstruction::new(
-                    jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap()),
-                    i32_ty_idx,
-                )
-                .into(),
-            );
+            let ti_op = jit_mod
+                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i32_ty_idx).into())
+                .unwrap();
+            jit_mod.push(jit_ir::LoadInstruction::new(ti_op, i32_ty_idx).into());
             let patt_lines = [
                 "...",
                 "; Load %0",
@@ -660,14 +648,10 @@ mod tests {
         fn codegen_ptradd() {
             let mut jit_mod = test_module();
             let ptr_ty_idx = jit_mod.ptr_type_idx();
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, ptr_ty_idx).into());
-            jit_mod.push(
-                jit_ir::PtrAddInstruction::new(
-                    jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap()),
-                    64,
-                )
-                .into(),
-            );
+            let ti_op = jit_mod
+                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, ptr_ty_idx).into())
+                .unwrap();
+            jit_mod.push(jit_ir::PtrAddInstruction::new(ti_op, 64).into());
             let patt_lines = [
                 "...",
                 "; PtrAdd %0, 64",
@@ -683,15 +667,13 @@ mod tests {
         fn codegen_store_ptr() {
             let mut jit_mod = test_module();
             let ptr_ty_idx = jit_mod.ptr_type_idx();
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, ptr_ty_idx).into());
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(8, ptr_ty_idx).into());
-            jit_mod.push(
-                jit_ir::StoreInstruction::new(
-                    jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap()),
-                    jit_ir::Operand::Local(jit_ir::InstrIdx::new(1).unwrap()),
-                )
-                .into(),
-            );
+            let ti1_op = jit_mod
+                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, ptr_ty_idx).into())
+                .unwrap();
+            let ti2_op = jit_mod
+                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(8, ptr_ty_idx).into())
+                .unwrap();
+            jit_mod.push(jit_ir::StoreInstruction::new(ti1_op, ti2_op).into());
             let patt_lines = [
                 "...",
                 "; Store %0, %1",
@@ -777,10 +759,14 @@ mod tests {
             let i16_ty_idx = jit_mod
                 .type_idx(&jit_ir::Type::Integer(IntegerType::new(16)))
                 .unwrap();
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i16_ty_idx).into());
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(16, i16_ty_idx).into());
-            let op1 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap());
-            let op2 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(1).unwrap());
+            let op1 = jit_mod
+                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i16_ty_idx).into())
+                .unwrap();
+            let op2 = jit_mod
+                .push_and_make_operand(
+                    jit_ir::LoadTraceInputInstruction::new(16, i16_ty_idx).into(),
+                )
+                .unwrap();
             jit_mod.push(jit_ir::AddInstruction::new(op1, op2).into());
             let patt_lines = [
                 "...",
@@ -800,10 +786,14 @@ mod tests {
             let i64_ty_idx = jit_mod
                 .type_idx(&jit_ir::Type::Integer(IntegerType::new(64)))
                 .unwrap();
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i64_ty_idx).into());
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(64, i64_ty_idx).into());
-            let op1 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap());
-            let op2 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(1).unwrap());
+            let op1 = jit_mod
+                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i64_ty_idx).into())
+                .unwrap();
+            let op2 = jit_mod
+                .push_and_make_operand(
+                    jit_ir::LoadTraceInputInstruction::new(64, i64_ty_idx).into(),
+                )
+                .unwrap();
             jit_mod.push(jit_ir::AddInstruction::new(op1, op2).into());
             let patt_lines = [
                 "...",
@@ -828,10 +818,14 @@ mod tests {
             let i32_ty_idx = jit_mod
                 .type_idx(&jit_ir::Type::Integer(IntegerType::new(32)))
                 .unwrap();
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i64_ty_idx).into());
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(64, i32_ty_idx).into());
-            let op1 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap());
-            let op2 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(1).unwrap());
+            let op1 = jit_mod
+                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i64_ty_idx).into())
+                .unwrap();
+            let op2 = jit_mod
+                .push_and_make_operand(
+                    jit_ir::LoadTraceInputInstruction::new(64, i32_ty_idx).into(),
+                )
+                .unwrap();
             jit_mod.push(jit_ir::AddInstruction::new(op1, op2).into());
 
             let mut ra = SpillAllocator::new(STACK_DIRECTION);
@@ -904,12 +898,15 @@ mod tests {
                 ))
                 .unwrap();
 
-            let arg1 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(jit_mod.len()).unwrap());
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i32_ty_idx).into());
-            let arg2 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(jit_mod.len()).unwrap());
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(4, i32_ty_idx).into());
-            let arg3 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(jit_mod.len()).unwrap());
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(8, i32_ty_idx).into());
+            let arg1 = jit_mod
+                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i32_ty_idx).into())
+                .unwrap();
+            let arg2 = jit_mod
+                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(4, i32_ty_idx).into())
+                .unwrap();
+            let arg3 = jit_mod
+                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(8, i32_ty_idx).into())
+                .unwrap();
 
             let call_inst =
                 jit_ir::CallInstruction::new(&mut jit_mod, func_decl_idx, &[arg1, arg2, arg3])
@@ -964,18 +961,30 @@ mod tests {
                 ))
                 .unwrap();
 
-            let arg1 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(jit_mod.len()).unwrap());
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into());
-            let arg2 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(jit_mod.len()).unwrap());
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(8, i16_ty_idx).into());
-            let arg3 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(jit_mod.len()).unwrap());
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(16, i32_ty_idx).into());
-            let arg4 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(jit_mod.len()).unwrap());
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(24, i64_ty_idx).into());
-            let arg5 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(jit_mod.len()).unwrap());
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(32, ptr_ty_idx).into());
-            let arg6 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(jit_mod.len()).unwrap());
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(40, i8_ty_idx).into());
+            let arg1 = jit_mod
+                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into())
+                .unwrap();
+            let arg2 = jit_mod
+                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(8, i16_ty_idx).into())
+                .unwrap();
+            let arg3 = jit_mod
+                .push_and_make_operand(
+                    jit_ir::LoadTraceInputInstruction::new(16, i32_ty_idx).into(),
+                )
+                .unwrap();
+            let arg4 = jit_mod
+                .push_and_make_operand(
+                    jit_ir::LoadTraceInputInstruction::new(24, i64_ty_idx).into(),
+                )
+                .unwrap();
+            let arg5 = jit_mod
+                .push_and_make_operand(
+                    jit_ir::LoadTraceInputInstruction::new(32, ptr_ty_idx).into(),
+                )
+                .unwrap();
+            let arg6 = jit_mod
+                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(40, i8_ty_idx).into())
+                .unwrap();
 
             let call_inst = jit_ir::CallInstruction::new(
                 &mut jit_mod,
@@ -1025,8 +1034,9 @@ mod tests {
                 ))
                 .unwrap();
 
-            let arg1 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(jit_mod.len()).unwrap());
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i32_ty_idx).into());
+            let arg1 = jit_mod
+                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i32_ty_idx).into())
+                .unwrap();
 
             let args = (0..7).map(|_| arg1.clone()).collect::<Vec<_>>();
             let call_inst =
@@ -1102,8 +1112,9 @@ mod tests {
             let i8_ty_idx = jit_mod
                 .type_idx(&Type::Integer(IntegerType::new(8)))
                 .unwrap();
-            let arg1 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(jit_mod.len()).unwrap());
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into());
+            let arg1 = jit_mod
+                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into())
+                .unwrap();
             let call_inst =
                 jit_ir::CallInstruction::new(&mut jit_mod, func_decl_idx, &[arg1]).unwrap();
             jit_mod.push(call_inst.into());
@@ -1121,8 +1132,9 @@ mod tests {
             let i64_ty_idx = jit_mod
                 .type_idx(&jit_ir::Type::Integer(IntegerType::new(64)))
                 .unwrap();
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i64_ty_idx).into());
-            let op = jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap());
+            let op = jit_mod
+                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i64_ty_idx).into())
+                .unwrap();
             jit_mod.push(
                 jit_ir::IcmpInstruction::new(op.clone(), jit_ir::Predicate::Equal, op).into(),
             );
@@ -1145,8 +1157,9 @@ mod tests {
             let i8_ty_idx = jit_mod
                 .type_idx(&jit_ir::Type::Integer(IntegerType::new(8)))
                 .unwrap();
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into());
-            let op = jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap());
+            let op = jit_mod
+                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into())
+                .unwrap();
             jit_mod.push(
                 jit_ir::IcmpInstruction::new(op.clone(), jit_ir::Predicate::Equal, op).into(),
             );
@@ -1169,8 +1182,9 @@ mod tests {
         fn codegen_icmp_non_ints() {
             let mut jit_mod = test_module();
             let ptr_ty_idx = jit_mod.ptr_type_idx();
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, ptr_ty_idx).into());
-            let op = jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap());
+            let op = jit_mod
+                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, ptr_ty_idx).into())
+                .unwrap();
             jit_mod.push(
                 jit_ir::IcmpInstruction::new(op.clone(), jit_ir::Predicate::Equal, op).into(),
             );
@@ -1192,10 +1206,12 @@ mod tests {
             let i64_ty_idx = jit_mod
                 .type_idx(&jit_ir::Type::Integer(IntegerType::new(64)))
                 .unwrap();
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into());
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(8, i64_ty_idx).into());
-            let op1 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(0).unwrap());
-            let op2 = jit_ir::Operand::Local(jit_ir::InstrIdx::new(1).unwrap());
+            let op1 = jit_mod
+                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into())
+                .unwrap();
+            let op2 = jit_mod
+                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(8, i64_ty_idx).into())
+                .unwrap();
             jit_mod.push(jit_ir::IcmpInstruction::new(op1, jit_ir::Predicate::Equal, op2).into());
             let mut ra = SpillAllocator::new(STACK_DIRECTION);
             X64CodeGen::new(&jit_mod, &mut ra)
@@ -1207,9 +1223,12 @@ mod tests {
         #[test]
         fn codegen_guard_true() {
             let mut jit_mod = test_module();
-            let cond = jit_ir::Operand::Local(jit_ir::InstrIdx::new(jit_mod.len()).unwrap());
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, jit_mod.int8_type_idx()).into());
-            jit_mod.push(jit_ir::GuardInstruction::new(cond, true).into());
+            let cond_op = jit_mod
+                .push_and_make_operand(
+                    jit_ir::LoadTraceInputInstruction::new(0, jit_mod.int8_type_idx()).into(),
+                )
+                .unwrap();
+            jit_mod.push(jit_ir::GuardInstruction::new(cond_op, true).into());
             let patt_lines = [
                 "...",
                 "; Guard %0, true",
@@ -1225,9 +1244,12 @@ mod tests {
         #[test]
         fn codegen_guard_false() {
             let mut jit_mod = test_module();
-            let cond = jit_ir::Operand::Local(jit_ir::InstrIdx::new(jit_mod.len()).unwrap());
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, jit_mod.int8_type_idx()).into());
-            jit_mod.push(jit_ir::GuardInstruction::new(cond, false).into());
+            let cond_op = jit_mod
+                .push_and_make_operand(
+                    jit_ir::LoadTraceInputInstruction::new(0, jit_mod.int8_type_idx()).into(),
+                )
+                .unwrap();
+            jit_mod.push(jit_ir::GuardInstruction::new(cond_op, false).into());
             let patt_lines = [
                 "...",
                 "; Guard %0, false",
