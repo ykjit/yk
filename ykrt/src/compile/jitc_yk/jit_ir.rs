@@ -340,7 +340,7 @@ impl PackedOperand {
     }
 
     /// Unpacks a [PackedOperand] into a [Operand].
-    pub fn get(&self) -> Operand {
+    pub fn unpack(&self) -> Operand {
         if (self.0 & !OPERAND_IDX_MASK) == 0 {
             Operand::Local(InstrIdx(self.0))
         } else {
@@ -563,7 +563,7 @@ impl LoadInstruction {
 
     /// Return the pointer operand.
     pub(crate) fn operand(&self) -> Operand {
-        self.op.get()
+        self.op.unpack()
     }
 
     /// Returns the type of the value to be loaded.
@@ -720,7 +720,7 @@ impl CallInstruction {
         }
         if idx == 0 {
             if self.target().func_type(jit_mod).num_args() > 0 {
-                self.arg1().get()
+                self.arg1().unpack()
             } else {
                 // Avoid returning an undefined operand. Storage always exists for one argument,
                 // even if the function accepts no arguments.
@@ -757,18 +757,18 @@ impl StoreInstruction {
 
     /// Returns the value operand: i.e. the thing that is going to be stored.
     pub(crate) fn val(&self) -> Operand {
-        self.val.get()
+        self.val.unpack()
     }
 
     /// Returns the pointer operand: i.e. where to store the thing.
     pub(crate) fn ptr(&self) -> Operand {
-        self.ptr.get()
+        self.ptr.unpack()
     }
 }
 
 impl fmt::Display for StoreInstruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Store {}, {}", self.val.get(), self.ptr.get())
+        write!(f, "Store {}, {}", self.val.unpack(), self.ptr.unpack())
     }
 }
 
@@ -803,7 +803,7 @@ impl fmt::Display for StoreGlobalInstruction {
         write!(
             f,
             "StoreGlobal {}, {}",
-            self.val.get(),
+            self.val.unpack(),
             usize::from(self.global_decl_idx)
         )
     }
@@ -827,7 +827,7 @@ pub struct PtrAddInstruction {
 impl PtrAddInstruction {
     pub(crate) fn ptr(&self) -> Operand {
         let ptr = self.ptr;
-        ptr.get()
+        ptr.unpack()
     }
 
     pub(crate) fn offset(&self) -> u32 {
@@ -869,20 +869,20 @@ impl AddInstruction {
     }
 
     pub(crate) fn op1(&self) -> Operand {
-        self.op1.get()
+        self.op1.unpack()
     }
 
     pub(crate) fn op2(&self) -> Operand {
-        self.op2.get()
+        self.op2.unpack()
     }
 
     pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
-        self.op1.get().type_(m)
+        self.op1.unpack().type_(m)
     }
 
     /// Returns the type index of the operands being added.
     pub(crate) fn type_idx(&self, m: &Module) -> TypeIdx {
-        self.op1.get().type_idx(m)
+        self.op1.unpack().type_idx(m)
     }
 }
 
@@ -919,14 +919,14 @@ impl IcmpInstruction {
     ///
     /// E.g. in `x <= y`, it's `x`.
     pub(crate) fn left(&self) -> Operand {
-        self.left.get()
+        self.left.unpack()
     }
 
     /// Returns the right-hand-side of the comparison.
     ///
     /// E.g. in `x <= y`, it's `y`.
     pub(crate) fn right(&self) -> Operand {
-        self.right.get()
+        self.right.unpack()
     }
 
     /// Returns the predicate of the comparison.
@@ -968,7 +968,7 @@ impl GuardInstruction {
     }
 
     pub(crate) fn cond(&self) -> Operand {
-        self.cond.get()
+        self.cond.unpack()
     }
 
     pub(crate) fn expect(&self) -> bool {
@@ -1231,22 +1231,22 @@ mod tests {
     #[test]
     fn operand() {
         let op = PackedOperand::new(&Operand::Local(InstrIdx(192)));
-        assert_eq!(op.get(), Operand::Local(InstrIdx(192)));
+        assert_eq!(op.unpack(), Operand::Local(InstrIdx(192)));
 
         let op = PackedOperand::new(&Operand::Local(InstrIdx(0x7fff)));
-        assert_eq!(op.get(), Operand::Local(InstrIdx(0x7fff)));
+        assert_eq!(op.unpack(), Operand::Local(InstrIdx(0x7fff)));
 
         let op = PackedOperand::new(&Operand::Local(InstrIdx(0)));
-        assert_eq!(op.get(), Operand::Local(InstrIdx(0)));
+        assert_eq!(op.unpack(), Operand::Local(InstrIdx(0)));
 
         let op = PackedOperand::new(&Operand::Const(ConstIdx(192)));
-        assert_eq!(op.get(), Operand::Const(ConstIdx(192)));
+        assert_eq!(op.unpack(), Operand::Const(ConstIdx(192)));
 
         let op = PackedOperand::new(&Operand::Const(ConstIdx(0x7fff)));
-        assert_eq!(op.get(), Operand::Const(ConstIdx(0x7fff)));
+        assert_eq!(op.unpack(), Operand::Const(ConstIdx(0x7fff)));
 
         let op = PackedOperand::new(&Operand::Const(ConstIdx(0)));
-        assert_eq!(op.get(), Operand::Const(ConstIdx(0)));
+        assert_eq!(op.unpack(), Operand::Const(ConstIdx(0)));
     }
 
     #[test]
