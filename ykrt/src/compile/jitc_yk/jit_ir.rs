@@ -189,16 +189,16 @@ pub(crate) struct FuncType {
     /// Type indices for the function's formal arguments.
     arg_ty_idxs: Vec<TypeIdx>,
     /// Type index of the function's return type.
-    ret_ty: TypeIdx,
+    ret_ty_idx: TypeIdx,
     /// Is the function vararg?
     is_vararg: bool,
 }
 
 impl FuncType {
-    pub(crate) fn new(arg_ty_idxs: Vec<TypeIdx>, ret_ty: TypeIdx, is_vararg: bool) -> Self {
+    pub(crate) fn new(arg_ty_idxs: Vec<TypeIdx>, ret_ty_idx: TypeIdx, is_vararg: bool) -> Self {
         Self {
             arg_ty_idxs,
-            ret_ty,
+            ret_ty_idx,
             is_vararg,
         }
     }
@@ -224,12 +224,12 @@ impl FuncType {
 
     /// Returns the type of the return value.
     pub(crate) fn ret_type<'a>(&self, m: &'a Module) -> &'a Type {
-        self.ret_ty.type_(m)
+        self.ret_ty_idx.type_(m)
     }
 
     /// Returns the type index of the return value.
     pub(crate) fn ret_type_idx(&self) -> TypeIdx {
-        self.ret_ty
+        self.ret_ty_idx
     }
 }
 
