@@ -13,7 +13,9 @@ use super::{
     reg_alloc::{LocalAlloc, RegisterAllocator, StackDirection},
     CodeGen, CodeGenOutput,
 };
-use dynasmrt::{dynasm, x64::Rq, AssemblyOffset, DynasmApi, ExecutableBuffer, Register};
+use dynasmrt::{
+    dynasm, x64::Rq, AssemblyOffset, DynasmApi, DynasmLabelApi, ExecutableBuffer, Register,
+};
 use std::ffi::CString;
 #[cfg(any(debug_assertions, test))]
 use std::{cell::Cell, collections::HashMap, slice};
@@ -132,7 +134,7 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Instruction::StoreGlobal(_) => todo!(),
             jit_ir::Instruction::Call(i) => self.codegen_call_instr(instr_idx, &i)?,
             jit_ir::Instruction::Icmp(i) => self.codegen_icmp_instr(instr_idx, &i),
-            jit_ir::Instruction::Guard(_) => todo!(),
+            jit_ir::Instruction::Guard(i) => self.codegen_guard_instr(&i),
         }
         Ok(())
     }
@@ -446,6 +448,24 @@ impl<'a> X64CodeGen<'a> {
             // Note: when float predicates added: `_ => panic!()`
         }
         self.reg_into_new_local(inst_idx, WR0);
+    }
+
+    fn codegen_guard_instr(&mut self, inst: &jit_ir::GuardInstruction) {
+        let cond = inst.cond();
+
+        // ICmp instructions evaluate to a one-byte zero/one value.
+        debug_assert_eq!(cond.byte_size(self.jit_mod), 1);
+
+        // The simplest thing we can do to crash the program when the guard fails.
+        // FIXME: deoptimise!
+        dynasm!(self.asm
+            ; jmp >check_cond
+            ; guard_fail:
+            ; ud2 // undefined instruction, crashes the program.
+            ; check_cond:
+            ; cmp Rb(WR0.code()), inst.expect() as i8 // `as` intentional.
+            ; jne <guard_fail
+        );
     }
 
     fn const_u64_into_reg(&mut self, reg: Rq, cv: u64) {
@@ -1182,6 +1202,42 @@ mod tests {
                 .unwrap()
                 .codegen()
                 .unwrap();
+        }
+
+        #[test]
+        fn codegen_guard_true() {
+            let mut jit_mod = test_module();
+            let cond = jit_ir::Operand::Local(jit_ir::InstrIdx::new(jit_mod.len()).unwrap());
+            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, jit_mod.int8_type_idx()).into());
+            jit_mod.push(jit_ir::GuardInstruction::new(cond, true).into());
+            let patt_lines = [
+                "...",
+                "; Guard %0, true",
+                "... 0000001b: jmp 0x0000000000000022",
+                "... 00000020: ud2",
+                "... 00000022: cmp r12b, 0x01",
+                "... 00000026: jnz 0x0000000000000020",
+                "--- End jit-asm ---",
+            ];
+            test_with_spillalloc(&jit_mod, &patt_lines);
+        }
+
+        #[test]
+        fn codegen_guard_false() {
+            let mut jit_mod = test_module();
+            let cond = jit_ir::Operand::Local(jit_ir::InstrIdx::new(jit_mod.len()).unwrap());
+            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, jit_mod.int8_type_idx()).into());
+            jit_mod.push(jit_ir::GuardInstruction::new(cond, false).into());
+            let patt_lines = [
+                "...",
+                "; Guard %0, false",
+                "... 0000001b: jmp 0x0000000000000022",
+                "... 00000020: ud2",
+                "... 00000022: cmp r12b, 0x00",
+                "... 00000026: jnz 0x0000000000000020",
+                "--- End jit-asm ---",
+            ];
+            test_with_spillalloc(&jit_mod, &patt_lines);
         }
     }
 }
