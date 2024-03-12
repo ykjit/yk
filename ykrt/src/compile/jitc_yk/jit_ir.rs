@@ -189,16 +189,16 @@ pub(crate) struct FuncType {
     /// Type indices for the function's formal arguments.
     arg_ty_idxs: Vec<TypeIdx>,
     /// Type index of the function's return type.
-    ret_ty: TypeIdx,
+    ret_ty_idx: TypeIdx,
     /// Is the function vararg?
     is_vararg: bool,
 }
 
 impl FuncType {
-    pub(crate) fn new(arg_ty_idxs: Vec<TypeIdx>, ret_ty: TypeIdx, is_vararg: bool) -> Self {
+    pub(crate) fn new(arg_ty_idxs: Vec<TypeIdx>, ret_ty_idx: TypeIdx, is_vararg: bool) -> Self {
         Self {
             arg_ty_idxs,
-            ret_ty,
+            ret_ty_idx,
             is_vararg,
         }
     }
@@ -224,12 +224,12 @@ impl FuncType {
 
     /// Returns the type of the return value.
     pub(crate) fn ret_type<'a>(&self, m: &'a Module) -> &'a Type {
-        self.ret_ty.type_(m)
+        self.ret_ty_idx.type_(m)
     }
 
     /// Returns the type index of the return value.
     pub(crate) fn ret_type_idx(&self) -> TypeIdx {
-        self.ret_ty
+        self.ret_ty_idx
     }
 }
 
@@ -340,7 +340,7 @@ impl PackedOperand {
     }
 
     /// Unpacks a [PackedOperand] into a [Operand].
-    pub fn get(&self) -> Operand {
+    pub fn unpack(&self) -> Operand {
         if (self.0 & !OPERAND_IDX_MASK) == 0 {
             Operand::Local(InstrIdx(self.0))
         } else {
@@ -563,7 +563,7 @@ impl LoadInstruction {
 
     /// Return the pointer operand.
     pub(crate) fn operand(&self) -> Operand {
-        self.op.get()
+        self.op.unpack()
     }
 
     /// Returns the type of the value to be loaded.
@@ -720,7 +720,7 @@ impl CallInstruction {
         }
         if idx == 0 {
             if self.target().func_type(jit_mod).num_args() > 0 {
-                self.arg1().get()
+                self.arg1().unpack()
             } else {
                 // Avoid returning an undefined operand. Storage always exists for one argument,
                 // even if the function accepts no arguments.
@@ -757,18 +757,18 @@ impl StoreInstruction {
 
     /// Returns the value operand: i.e. the thing that is going to be stored.
     pub(crate) fn val(&self) -> Operand {
-        self.val.get()
+        self.val.unpack()
     }
 
     /// Returns the pointer operand: i.e. where to store the thing.
     pub(crate) fn ptr(&self) -> Operand {
-        self.ptr.get()
+        self.ptr.unpack()
     }
 }
 
 impl fmt::Display for StoreInstruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Store {}, {}", self.val.get(), self.ptr.get())
+        write!(f, "Store {}, {}", self.val.unpack(), self.ptr.unpack())
     }
 }
 
@@ -803,7 +803,7 @@ impl fmt::Display for StoreGlobalInstruction {
         write!(
             f,
             "StoreGlobal {}, {}",
-            self.val.get(),
+            self.val.unpack(),
             usize::from(self.global_decl_idx)
         )
     }
@@ -827,7 +827,7 @@ pub struct PtrAddInstruction {
 impl PtrAddInstruction {
     pub(crate) fn ptr(&self) -> Operand {
         let ptr = self.ptr;
-        ptr.get()
+        ptr.unpack()
     }
 
     pub(crate) fn offset(&self) -> u32 {
@@ -869,20 +869,20 @@ impl AddInstruction {
     }
 
     pub(crate) fn op1(&self) -> Operand {
-        self.op1.get()
+        self.op1.unpack()
     }
 
     pub(crate) fn op2(&self) -> Operand {
-        self.op2.get()
+        self.op2.unpack()
     }
 
     pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
-        self.op1.get().type_(m)
+        self.op1.unpack().type_(m)
     }
 
     /// Returns the type index of the operands being added.
     pub(crate) fn type_idx(&self, m: &Module) -> TypeIdx {
-        self.op1.get().type_idx(m)
+        self.op1.unpack().type_idx(m)
     }
 }
 
@@ -919,14 +919,14 @@ impl IcmpInstruction {
     ///
     /// E.g. in `x <= y`, it's `x`.
     pub(crate) fn left(&self) -> Operand {
-        self.left.get()
+        self.left.unpack()
     }
 
     /// Returns the right-hand-side of the comparison.
     ///
     /// E.g. in `x <= y`, it's `y`.
     pub(crate) fn right(&self) -> Operand {
-        self.right.get()
+        self.right.unpack()
     }
 
     /// Returns the predicate of the comparison.
@@ -968,7 +968,7 @@ impl GuardInstruction {
     }
 
     pub(crate) fn cond(&self) -> Operand {
-        self.cond.get()
+        self.cond.unpack()
     }
 
     pub(crate) fn expect(&self) -> bool {
@@ -1091,6 +1091,32 @@ impl Module {
     /// Push an instruction to the end of the [Module].
     pub(crate) fn push(&mut self, instr: Instruction) {
         self.instrs.push(instr);
+    }
+
+    /// Push an instruction to the end of the [Module] and create a local variable [Operand] out of
+    /// the value that the instruction defines.
+    ///
+    /// This is useful for forwarding the local variable a instruction defines as operand of a
+    /// subsequent instruction: an idiom used a lot (but not exclusively) in testing.
+    ///
+    /// This must only be used for instructions that define a local variable. If you want to push
+    /// an instruction that doesn't define a value, or it does, but you don't want it as an
+    /// [Operand], use [Module::push()] instead.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the instruction doesn't define a local variable that we could use to build an
+    /// [Operand].
+    pub(crate) fn push_and_make_operand(
+        &mut self,
+        instr: Instruction,
+    ) -> Result<Operand, CompilationError> {
+        if !instr.is_def() {
+            panic!();
+        }
+        let ret = Operand::Local(InstrIdx::new(self.len())?);
+        self.instrs.push(instr);
+        Ok(ret)
     }
 
     /// Returns the number of [Instruction]s in the [Module].
@@ -1231,22 +1257,22 @@ mod tests {
     #[test]
     fn operand() {
         let op = PackedOperand::new(&Operand::Local(InstrIdx(192)));
-        assert_eq!(op.get(), Operand::Local(InstrIdx(192)));
+        assert_eq!(op.unpack(), Operand::Local(InstrIdx(192)));
 
         let op = PackedOperand::new(&Operand::Local(InstrIdx(0x7fff)));
-        assert_eq!(op.get(), Operand::Local(InstrIdx(0x7fff)));
+        assert_eq!(op.unpack(), Operand::Local(InstrIdx(0x7fff)));
 
         let op = PackedOperand::new(&Operand::Local(InstrIdx(0)));
-        assert_eq!(op.get(), Operand::Local(InstrIdx(0)));
+        assert_eq!(op.unpack(), Operand::Local(InstrIdx(0)));
 
         let op = PackedOperand::new(&Operand::Const(ConstIdx(192)));
-        assert_eq!(op.get(), Operand::Const(ConstIdx(192)));
+        assert_eq!(op.unpack(), Operand::Const(ConstIdx(192)));
 
         let op = PackedOperand::new(&Operand::Const(ConstIdx(0x7fff)));
-        assert_eq!(op.get(), Operand::Const(ConstIdx(0x7fff)));
+        assert_eq!(op.unpack(), Operand::Const(ConstIdx(0x7fff)));
 
         let op = PackedOperand::new(&Operand::Const(ConstIdx(0)));
-        assert_eq!(op.get(), Operand::Const(ConstIdx(0)));
+        assert_eq!(op.unpack(), Operand::Const(ConstIdx(0)));
     }
 
     #[test]
