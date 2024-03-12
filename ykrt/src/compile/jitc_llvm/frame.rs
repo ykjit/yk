@@ -1,69 +1,13 @@
 #![allow(clippy::comparison_chain)]
 #![allow(clippy::missing_safety_doc)]
 
+use crate::aotsmp::AOT_STACKMAPS;
 use llvm_sys::{core::*, prelude::LLVMValueRef};
-use object::{Object, ObjectSection};
-#[cfg(not(test))]
-use std::thread;
-use std::{ffi::c_void, ptr, sync::LazyLock};
-use ykaddr::obj::SELF_BIN_MMAP;
-use yksmp::{Location as SMLocation, PrologueInfo, Record, StackMapParser};
+use std::{ffi::c_void, ptr};
+use yksmp::Location as SMLocation;
 
-mod llvmbridge;
-pub(crate) use llvmbridge::{BitcodeSection, __yktracec_get_aot_module};
-use llvmbridge::{Type, Value};
-
-struct AOTStackmapInfo {
-    pinfos: Vec<PrologueInfo>,
-    records: Vec<(Record, usize)>,
-}
-
-impl AOTStackmapInfo {
-    fn get(&self, stackmapid: usize) -> (&Record, &PrologueInfo) {
-        let (rec, pid) = &self.records[stackmapid];
-        let pinfo = &self.pinfos[*pid];
-        (rec, pinfo)
-    }
-}
-
-static AOT_STACKMAPS: LazyLock<Result<AOTStackmapInfo, String>> = LazyLock::new(|| {
-    fn errstr(msg: &str) -> String {
-        format!("failed to load stackmaps: {}", msg)
-    }
-
-    // We use an inner function so that we can use the `?` operator for errors.
-    fn load_stackmaps() -> Result<AOTStackmapInfo, String> {
-        // Load the stackmap from the binary to parse in tthe stackmaps.
-        let object = object::File::parse(&**SELF_BIN_MMAP).map_err(|e| errstr(&e.to_string()))?;
-        let sec = object
-            .section_by_name(".llvm_stackmaps")
-            .ok_or_else(|| errstr("can't find section"))?;
-
-        // Parse the stackmap.
-        let data = sec.data().map_err(|e| errstr(&e.to_string()))?;
-        let (entries, numrecs) = StackMapParser::get_entries(data);
-        let mut pinfos = Vec::new();
-        let mut records = Vec::new();
-        let numrecs_usize = usize::try_from(numrecs).map_err(|e| errstr(&e.to_string()))?;
-        records.resize_with(numrecs_usize, || (Record::empty(), 0));
-        for entry in entries {
-            pinfos.push(entry.pinfo);
-            for r in entry.records {
-                let idx = usize::try_from(r.id).map_err(|e| errstr(&e.to_string()))?;
-                records[idx] = (r, pinfos.len() - 1);
-            }
-        }
-        Ok(AOTStackmapInfo { pinfos, records })
-    }
-
-    load_stackmaps()
-});
-
-pub(crate) fn load_aot_stackmaps() {
-    // Rust unit test binaries will not contain stackmaps, so don't try to load them.
-    #[cfg(not(test))]
-    thread::spawn(|| LazyLock::force(&AOT_STACKMAPS));
-}
+use super::llvmbridge::Type;
+pub(crate) use super::llvmbridge::{BitcodeSection, Value, __yktracec_get_aot_module};
 
 static USIZEOF_POINTER: usize = std::mem::size_of::<*const ()>();
 static ISIZEOF_POINTER: isize = std::mem::size_of::<*const ()>() as isize;
@@ -116,13 +60,12 @@ pub(crate) struct FrameReconstructor {
 impl FrameReconstructor {
     /// Create a new instance and initialise the frames we need to reconstruct.
     pub unsafe fn new(activeframes: &[LLVMValueRef]) -> FrameReconstructor {
-        // Initialise frames.
-        let mut frames = Vec::with_capacity(activeframes.len());
-        for pc in activeframes {
-            let val = Value::new(*pc);
-            frames.push(Frame::new(val));
+        FrameReconstructor {
+            frames: activeframes
+                .into_iter()
+                .map(|x| Frame::new(Value::new(*x)))
+                .collect::<Vec<_>>(),
         }
-        FrameReconstructor { frames }
     }
 
     /// Generate frames from stackmap information after a guard failure. The new frames are stored
@@ -148,7 +91,7 @@ impl FrameReconstructor {
             let smcall = frame.pc;
             debug_assert!(smcall.is_call());
             debug_assert!(smcall.is_intrinsic());
-            let smid = unsafe { LLVMConstIntGetZExtValue(smcall.get_operand(0).get()) };
+            let smid = LLVMConstIntGetZExtValue(smcall.get_operand(0).get());
             // Find prologue info and stackmap record for this frame.
             let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
             let (rec, pinfo) = aot_smaps.get(usize::try_from(smid).unwrap());
@@ -178,7 +121,7 @@ impl FrameReconstructor {
         memsize += USIZEOF_POINTER;
 
         // Now that we've calculated the stack's size, allocate memory for it.
-        let newstack = unsafe { libc::malloc(memsize) };
+        let newstack = libc::malloc(memsize);
 
         // Generate and write frames to the new stack. Since the stack grows downwards and we need
         // to keep track of spilled register values we write to `newstack` from back to front. To
@@ -188,7 +131,7 @@ impl FrameReconstructor {
         // we still need to get the register values from its stackmap in case those registers are
         // spilled by the next frame.
 
-        let mut rbp = unsafe { newstack.offset(isize::try_from(memsize).unwrap()) };
+        let mut rbp = newstack.offset(isize::try_from(memsize).unwrap());
         let mut rsp = rbp;
         // Keep track of the addresses of the current and previous frame so we can update the RBP
         // register as needed.
@@ -202,9 +145,9 @@ impl FrameReconstructor {
             // If the current frame has pushed RBP we need to do the same (unless we are processing
             // the bottom-most frame).
             if pinfo.hasfp && i > 0 {
-                rsp = unsafe { rsp.sub(USIZEOF_POINTER) };
+                rsp = rsp.sub(USIZEOF_POINTER);
                 rbp = rsp;
-                unsafe { ptr::write(rsp as *mut u64, currframe as u64) };
+                ptr::write(rsp as *mut u64, currframe as u64);
             }
 
             // Now that we've (potentially) written the last frame's address, update currframe to
@@ -218,8 +161,7 @@ impl FrameReconstructor {
 
             // Calculate the next frame's address by substracting its size (plus return address)
             // from the current frame's address.
-            nextframe =
-                unsafe { currframe.sub(usize::try_from(rec.size).unwrap() + USIZEOF_POINTER) };
+            nextframe = currframe.sub(usize::try_from(rec.size).unwrap() + USIZEOF_POINTER);
 
             // WRITE CALLEE-SAVED REGISTERS
             // Now we write any callee-saved registers onto the new stack. Note, that if we have
@@ -232,13 +174,12 @@ impl FrameReconstructor {
             //   push r14     # this has index -3
             if i > 0 {
                 for (reg, idx) in &pinfo.csrs {
-                    let mut tmp =
-                        unsafe { rbp.offset(isize::try_from(*idx).unwrap() * ISIZEOF_POINTER) };
+                    let mut tmp = rbp.offset(isize::try_from(*idx).unwrap() * ISIZEOF_POINTER);
                     if pinfo.hasfp {
-                        tmp = unsafe { tmp.offset(ISIZEOF_POINTER) };
+                        tmp = tmp.offset(ISIZEOF_POINTER);
                     }
                     let val = registers[usize::from(*reg)];
-                    unsafe { ptr::write(tmp as *mut u64, val) };
+                    ptr::write(tmp as *mut u64, val);
                 }
             }
 
@@ -298,9 +239,9 @@ impl FrameReconstructor {
                         // that in order to encode register locations (where RAX = 0), all register
                         // values have been offset by 1.
                         if *off < 0 {
-                            let temp = unsafe { rbp.offset(isize::try_from(*off).unwrap()) };
+                            let temp = rbp.offset(isize::try_from(*off).unwrap());
                             debug_assert!(*off < i32::try_from(rec.size).unwrap());
-                            unsafe { ptr::write::<u64>(temp as *mut u64, val) };
+                            ptr::write::<u64>(temp as *mut u64, val);
                         } else if *off > 0 {
                             registers[usize::try_from(*off - 1).unwrap()] = val;
                         }
@@ -325,9 +266,9 @@ impl FrameReconstructor {
                             // be recreated, we still need to copy over new values from the JIT.
                             // Luckily, we know the address of the bottom frame, so we can write
                             // any changes directly to it from here.
-                            unsafe { btmframeaddr.offset(isize::try_from(*off).unwrap()) }
+                            btmframeaddr.offset(isize::try_from(*off).unwrap())
                         } else {
-                            unsafe { rbp.offset(isize::try_from(*off).unwrap()) }
+                            rbp.offset(isize::try_from(*off).unwrap())
                         };
                         debug_assert!(*off < i32::try_from(rec.size).unwrap());
                         // FIXME: The minimum size reported by the stackmap is 1 which represents 1
@@ -335,9 +276,9 @@ impl FrameReconstructor {
                         // bit. It is currently unclear how that affects this code, so I'm leaving
                         // this comment here so we don't forget.
                         match size {
-                            1 => unsafe { ptr::write::<u8>(temp as *mut u8, val as u8) },
-                            4 => unsafe { ptr::write::<u32>(temp as *mut u32, val as u32) },
-                            8 => unsafe { ptr::write::<u64>(temp as *mut u64, val) },
+                            1 => ptr::write::<u8>(temp as *mut u8, val as u8),
+                            4 => ptr::write::<u32>(temp as *mut u32, val as u32),
+                            8 => ptr::write::<u64>(temp as *mut u64, val),
                             _ => todo!(),
                         }
                     }
@@ -351,21 +292,19 @@ impl FrameReconstructor {
             }
             if i > 0 {
                 // Advance the "virtual RSP" to the next frame.
-                rsp = unsafe { rbp.sub(usize::try_from(rec.size).unwrap()) };
+                rsp = rbp.sub(usize::try_from(rec.size).unwrap());
                 if pinfo.hasfp {
                     // The stack size recorded by the stackmap includes a pushed RBP. However, we
                     // will have already adjusted the "virtual RSP" at the beginning if `hasfp` is
                     // true. If that's the case, re-adjust the "virtual RSP" again to account for
                     // this.
-                    rsp = unsafe { rsp.offset(ISIZEOF_POINTER) };
+                    rsp = rsp.offset(ISIZEOF_POINTER);
                 }
             }
             // WRITE RETURN ADDRESS.
             // Write the return address for the previous frame into the current frame.
-            rsp = unsafe { rsp.sub(USIZEOF_POINTER) };
-            unsafe {
-                ptr::write(rsp as *mut u64, rec.offset);
-            }
+            rsp = rsp.sub(USIZEOF_POINTER);
+            ptr::write(rsp as *mut u64, rec.offset);
         }
 
         // WRITE REGISTERS
@@ -375,27 +314,22 @@ impl FrameReconstructor {
         // Note that this will inevitably set some registers to a different value than than if we
         // had not run a trace. But since those registers aren't live this will be fine.
         for reg in [0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15] {
-            rsp = unsafe { rsp.sub(USIZEOF_POINTER) };
-            unsafe {
-                ptr::write(rsp as *mut u64, registers[reg]);
-            }
+            rsp = rsp.sub(USIZEOF_POINTER);
+            ptr::write(rsp as *mut u64, registers[reg]);
         }
 
         // PUSH STACK SIZE
         // Finally we push the size of the allocated memory which we use later to memcpy the
         // correct amount.
-        unsafe {
-            rsp = rsp.sub(USIZEOF_POINTER);
-            ptr::write(rsp as *mut usize, memsize);
-        }
+        rsp = rsp.sub(USIZEOF_POINTER);
+        ptr::write(rsp as *mut usize, memsize);
 
         // Return the pointer to the new stack.
         (newstack, btmframesize)
     }
 
     /// Add a live variable and its value to the current frame.
-    pub fn var_init(&mut self, aotval: *const c_void, sfidx: usize, mut val: u64) {
-        let aotval = unsafe { Value::new(aotval as LLVMValueRef) };
+    pub fn var_init(&mut self, aotval: Value, sfidx: usize, mut val: u64) {
         let ty = aotval.get_type();
         if aotval.get_type().is_integer() {
             // Stackmap "small constants" get their value sign-extended to fill the reserved 32-bit

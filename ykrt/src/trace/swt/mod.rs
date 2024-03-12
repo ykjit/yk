@@ -1,7 +1,7 @@
 //! Software tracer.
 
 use super::{errors::InvalidTraceError, AOTTraceIterator, TraceAction, TraceRecorder};
-use crate::{frame::BitcodeSection, mt::DEFAULT_TRACE_TOO_LONG};
+use crate::{compile::jitc_llvm::frame::BitcodeSection, mt::DEFAULT_TRACE_TOO_LONG};
 use std::sync::Once;
 use std::{cell::RefCell, collections::HashMap, error::Error, ffi::CString, sync::Arc};
 
