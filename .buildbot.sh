@@ -2,6 +2,8 @@
 
 set -e
 
+TRACERS="hwt swt"
+
 # Install rustup.
 export CARGO_HOME="`pwd`/.cargo"
 export RUSTUP_HOME="`pwd`/.rustup"
@@ -65,50 +67,45 @@ PATH=${YKB_YKLLVM_BIN_DIR}:${PATH} cargo xtask cfmt
 # FIXME: Add build/ to .gitignore in ykllvm
 git diff --exit-code --ignore-submodules
 
-# Check for annoying compiler warnings in each package.
-WARNING_DEFINES="-D unused-variables -D dead-code -D unused-imports"
-for p in $(sed -n -e '/^members =/,/^\]$/{/^members =/d;/^\]$/d;p;}' \
-  Cargo.toml \
-  | \
-  tr -d ' \t\",' | grep -v xtask); do
-    cargo rustc -p $p --profile check --lib -- ${WARNING_DEFINES}
-    # For some reason, we can't do these checks on crates with binary targets.
-    if [ "$p" != "ykrt" ] && [ "$p" != "tests" ]; then
-        cargo rustc -p $p --profile check --tests -- ${WARNING_DEFINES}
-        cargo rustc -p $p --profile check --benches -- ${WARNING_DEFINES}
-    fi
+for tracer in ${TRACERS}; do
+    export YKB_TRACER=${tracer}
+    # Check for annoying compiler warnings in each package.
+    WARNING_DEFINES="-D unused-variables -D dead-code -D unused-imports"
+    for p in $(sed -n -e '/^members =/,/^\]$/{/^members =/d;/^\]$/d;p;}' \
+      Cargo.toml \
+      | \
+      tr -d ' \t\",' | grep -v xtask); do
+        cargo rustc -p $p --profile check --lib -- ${WARNING_DEFINES}
+        # For some reason, we can't do these checks on crates with binary targets.
+        if [ "$p" != "ykrt" ] && [ "$p" != "tests" ]; then
+            cargo rustc -p $p --profile check --tests -- ${WARNING_DEFINES}
+            cargo rustc -p $p --profile check --benches -- ${WARNING_DEFINES}
+        fi
+    done
+    cargo rustc -p tests --profile check --bin dump_ir -- ${WARNING_DEFINES}
+    cargo rustc -p tests --profile check --bin gdb_c_test -- ${WARNING_DEFINES}
+    cargo rustc -p xtask --profile check --bin xtask -- ${WARNING_DEFINES}
+
+    # There are some feature-gated testing/debugging switches which slow the JIT
+    # down a bit. Check that if we build the system without tests, those features
+    # are not enabled.
+    cargo -Z unstable-options build --build-plan -p ykcapi | \
+        awk '/yk_testing/ { ec=1 } END {exit ec}'
+    cargo -Z unstable-options build --build-plan -p ykrt | \
+        awk '/yk_testing/ { ec=1 } /yk_jitstate_debug/ { ec=1 } END {exit ec}'
 done
-cargo rustc -p tests --profile check --bin dump_ir -- ${WARNING_DEFINES}
-cargo rustc -p tests --profile check --bin gdb_c_test -- ${WARNING_DEFINES}
-cargo rustc -p xtask --profile check --bin xtask -- ${WARNING_DEFINES}
 
-# There are some feature-gated testing/debugging switches which slow the JIT
-# down a bit. Check that if we build the system without tests, those features
-# are not enabled.
-cargo -Z unstable-options build --build-plan -p ykcapi | \
-    awk '/yk_testing/ { ec=1 } END {exit ec}'
-cargo -Z unstable-options build --build-plan -p ykrt | \
-    awk '/yk_testing/ { ec=1 } /yk_jitstate_debug/ { ec=1 } END {exit ec}'
-
-TRACERS="hwt swt"
-
-for tracer in $TRACERS; do 
-    echo "Running ${tracer} tests"
+for tracer in ${TRACERS}; do
+    export YKB_TRACER=${tracer}
+    echo "===> Running ${tracer} tests"
     for i in $(seq 10); do
-        YKB_TRACER="${tracer}" RUST_TEST_SHUFFLE=1 cargo test
-        YKB_TRACER="${tracer}" YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test
+        RUST_TEST_SHUFFLE=1 cargo test
+        YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test
     done
 done
 
 # Test with LLVM sanitisers
 rustup component add rust-src
-for tracer in $TRACERS; do 
-    YKB_TRACER="${tracer}" cargo build
-    YKB_TRACER="${tracer}" ASAN_SYMBOLIZER_PATH=${YKLLVM_BIN_DIR}/llvm-symbolizer \
-        RUSTFLAGS="-Z sanitizer=address" cargo test \
-        -Z build-std \
-        --target x86_64-unknown-linux-gnu
-done
 # The thread sanitiser does have false positives (albeit much reduced by `-Z
 # build-std`), so we have to add a suppression file to avoid those stopping
 # this script from succeeding. This does mean that we might suppress some true
@@ -122,9 +119,16 @@ race:core::sync::atomic::atomic_
 # the two.
 race:ykrt::location::Location::count_to_hot_location
 EOF
-for tracer in $TRACERS; do 
-    YKB_TRACER="${tracer}" cargo build
-    YKB_TRACER="${tracer}" RUST_TEST_THREADS=1 \
+
+for tracer in $TRACERS; do
+    export YKB_TRACER=${tracer}
+    cargo build
+    ASAN_SYMBOLIZER_PATH=${YKLLVM_BIN_DIR}/llvm-symbolizer \
+        RUSTFLAGS="-Z sanitizer=address" cargo test \
+        -Z build-std \
+        --target x86_64-unknown-linux-gnu
+
+    RUST_TEST_THREADS=1 \
         RUSTFLAGS="-Z sanitizer=thread" \
         TSAN_OPTIONS="suppressions=$suppressions_path" \
         cargo test \
@@ -138,12 +142,14 @@ done
 unset YKB_YKLLVM_BIN_DIR
 export YKB_YKLLVM_BUILD_ARGS="define:CMAKE_C_COMPILER=/usr/bin/clang,define:CMAKE_CXX_COMPILER=/usr/bin/clang++"
 
-cargo -Z unstable-options build --release --build-plan -p ykcapi | \
+
+for tracer in $TRACERS; do
+    export YKB_TRACER=${tracer}
+    cargo -Z unstable-options build --release --build-plan -p ykcapi | \
     awk '/yk_testing/ { ec=1 } /yk_jitstate_debug/ { ec=1 } END {exit ec}'
 
-for tracer in $TRACERS; do 
-    YKB_TRACER="${tracer}" cargo build --release -p ykcapi
-    echo "Running ${tracer} tests"
+    cargo build --release -p ykcapi
+    echo "===> Running ${tracer} tests"
     for i in $(seq 10); do
         YKB_TRACER="${tracer}" RUST_TEST_SHUFFLE=1 cargo test --release
         YKB_TRACER="${tracer}" YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test --release
@@ -156,5 +162,5 @@ done
 # Note that --profile-time doesn't work without --bench, so we have to run each
 # benchmark individually.
 for b in collect_and_decode promote; do
-    cargo bench --bench ${b} -- --profile-time 1
+    YKB_TRACER=hwt cargo bench --bench ${b} -- --profile-time 1
 done

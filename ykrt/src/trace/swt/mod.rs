@@ -1,8 +1,7 @@
 //! Software tracer.
 
-use crate::frame::BitcodeSection;
-
 use super::{errors::InvalidTraceError, AOTTraceIterator, TraceAction, TraceRecorder};
+use crate::{frame::BitcodeSection, mt::DEFAULT_TRACE_TOO_LONG};
 use std::sync::Once;
 use std::{cell::RefCell, collections::HashMap, error::Error, ffi::CString, sync::Arc};
 
@@ -99,10 +98,8 @@ impl TraceRecorder for SWTTraceRecorder {
                     }
                 });
 
-                aot_blocks = tb
-                    .borrow()
-                    .iter()
-                    .map(|tb| match fnames.borrow_mut().get(&tb.function_index) {
+                aot_blocks.extend(tb.borrow().iter().map(|tb| {
+                    match fnames.borrow_mut().get(&tb.function_index) {
                         Some(name) => TraceAction::MappedAOTBlock {
                             func_name: name.to_owned(),
                             bb: tb.block_index,
@@ -111,20 +108,24 @@ impl TraceRecorder for SWTTraceRecorder {
                             "Failed to get function name by index {:?}",
                             tb.function_index
                         ),
-                    })
-                    .collect();
+                    }
+                }));
             })
         });
-        Ok(Box::new(SWTraceIterator::new(aot_blocks)))
+        if aot_blocks.len() > DEFAULT_TRACE_TOO_LONG {
+            Err(InvalidTraceError::TraceTooLong)
+        } else if aot_blocks.is_empty() {
+            // FIXME: who should handle an empty trace?
+            panic!();
+        } else {
+            Ok(Box::new(SWTraceIterator::new(aot_blocks)))
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trace::Tracer;
-    use crate::trace::{AOTTraceIterator, AOTTraceIteratorError, TraceAction};
-    use std::sync::Arc;
 
     #[test]
     fn test_basic_blocks_content() {
