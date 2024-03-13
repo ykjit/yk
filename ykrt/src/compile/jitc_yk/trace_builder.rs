@@ -207,7 +207,7 @@ impl<'a> TraceBuilder<'a> {
                 jit_ir::Operand::Const(cidx)
             }
             aot_ir::Operand::Global(go) => {
-                let load = jit_ir::LoadGlobalInstruction::new(self.handle_global(go.index())?)?;
+                let load = jit_ir::LookupGlobalInstruction::new(self.handle_global(go.index())?)?;
                 self.jit_mod.push_and_make_operand(load.into())?
             }
             aot_ir::Operand::Unimplemented(_) => {
@@ -322,14 +322,9 @@ impl<'a> TraceBuilder<'a> {
     ) -> Result<(), CompilationError> {
         let aot_op = inst.operand(0);
         let aot_ty = inst.type_idx();
-        let instr = if let aot_ir::Operand::Global(go) = aot_op {
-            // Generate a special load instruction for globals.
-            jit_ir::LoadGlobalInstruction::new(self.handle_global(go.index())?)?.into()
-        } else {
-            let jit_op = self.handle_operand(aot_op)?;
-            let jit_ty = self.handle_type(aot_ty)?;
-            jit_ir::LoadInstruction::new(jit_op, jit_ty).into()
-        };
+        let jit_op = self.handle_operand(aot_op)?;
+        let jit_ty = self.handle_type(aot_ty)?;
+        let instr = jit_ir::LoadInstruction::new(jit_op, jit_ty).into();
         self.copy_instruction(instr, bid, aot_inst_idx)
     }
 
@@ -359,13 +354,8 @@ impl<'a> TraceBuilder<'a> {
         aot_inst_idx: usize,
     ) -> Result<(), CompilationError> {
         let val = self.handle_operand(inst.operand(0))?;
-        let instr = if let aot_ir::Operand::Global(go) = inst.operand(1) {
-            // Generate a special store instruction for globals.
-            jit_ir::StoreGlobalInstruction::new(val, self.handle_global(go.index())?)?.into()
-        } else {
-            let ptr = self.handle_operand(inst.operand(1))?;
-            jit_ir::StoreInstruction::new(val, ptr).into()
-        };
+        let ptr = self.handle_operand(inst.operand(1))?;
+        let instr = jit_ir::StoreInstruction::new(val, ptr).into();
         self.copy_instruction(instr, bid, aot_inst_idx)
     }
 

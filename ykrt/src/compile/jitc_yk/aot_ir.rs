@@ -951,6 +951,15 @@ impl IRDisplay for GlobalDecl {
     }
 }
 
+impl GlobalDecl {
+    pub(crate) fn is_threadlocal(&self) -> bool {
+        self.is_threadlocal
+    }
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+}
+
 /// A bytecode module.
 ///
 /// This is the top-level container for the AOT IR.

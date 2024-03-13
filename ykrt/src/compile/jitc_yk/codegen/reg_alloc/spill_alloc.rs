@@ -7,10 +7,11 @@ use super::{
     super::{abs_stack::AbstractStack, jit_ir},
     LocalAlloc, RegisterAllocator, StackDirection,
 };
-use typed_index_collections::TiVec;
+use std::collections::HashMap;
 
 pub(crate) struct SpillAllocator {
-    allocs: TiVec<jit_ir::InstrIdx, LocalAlloc>,
+    /// Maps a local variable (the instruction that defines it) to its allocation.
+    allocs: HashMap<jit_ir::InstrIdx, LocalAlloc>,
     stack_dir: StackDirection,
 }
 
@@ -28,11 +29,6 @@ impl RegisterAllocator for SpillAllocator {
         size: usize,
         stack: &mut AbstractStack,
     ) -> LocalAlloc {
-        // Under the current design, there can't be gaps in [self.allocs] and local variable
-        // allocations happen sequentially. So the local we are currently allocating should be the
-        // next unallocated index.
-        debug_assert!(jit_ir::InstrIdx::new(self.allocs.len()).unwrap() == local);
-
         // Align the stack to the size of the allocation.
         //
         // FIXME: perhaps we should align to the largest alignment of the constituent fields?
@@ -50,12 +46,18 @@ impl RegisterAllocator for SpillAllocator {
         };
 
         let alloc = LocalAlloc::new_stack(alloc_off);
-        self.allocs.push(alloc);
+        self.allocs.insert(local, alloc);
         alloc
     }
 
+    /// Returns the allocation for a local variable (by the index of the instruction that defines
+    /// the variable).
+    ///
+    /// # Panics
+    ///
+    /// Panics if there is no allocation for the specified index.
     fn allocation<'a>(&'a self, idx: jit_ir::InstrIdx) -> &'a LocalAlloc {
-        &self.allocs[idx]
+        &self.allocs[&idx]
     }
 }
 
@@ -99,17 +101,6 @@ mod tests {
         sa.allocate(idx, 1, &mut stack);
         debug_assert_eq!(stack.size(), 9);
         debug_assert_eq!(sa.allocation(idx), &LocalAlloc::Stack { frame_off: 8 });
-    }
-
-    #[cfg(debug_assertions)]
-    #[should_panic]
-    #[test]
-    fn allocate_out_of_order() {
-        let mut stack = AbstractStack::default();
-        let mut sa = SpillAllocator::new(StackDirection::GrowsUp);
-        // panics because the backing store for local allocations are a "unsparse vector" and Local
-        // 0 hasn't been allocated yet.
-        sa.allocate(InstrIdx::new(1).unwrap(), 1, &mut stack);
     }
 
     #[test]

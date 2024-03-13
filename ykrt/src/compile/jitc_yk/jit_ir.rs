@@ -172,7 +172,7 @@ index_24bit!(GlobalDeclIdx);
 /// An instruction index.
 ///
 /// One of these is an index into the [Module::instrs].
-#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Copy, Clone, Eq, Hash, PartialEq, PartialOrd)]
 pub(crate) struct InstrIdx(u16);
 index_16bit!(InstrIdx);
 
@@ -419,12 +419,11 @@ pub(crate) enum Constant {
 #[derive(Debug)]
 pub enum Instruction {
     Load(LoadInstruction),
-    LoadGlobal(LoadGlobalInstruction),
+    LookupGlobal(LookupGlobalInstruction),
     LoadTraceInput(LoadTraceInputInstruction),
     Call(CallInstruction),
     PtrAdd(PtrAddInstruction),
     Store(StoreInstruction),
-    StoreGlobal(StoreGlobalInstruction),
     Add(AddInstruction),
     Icmp(IcmpInstruction),
     Guard(GuardInstruction),
@@ -439,12 +438,11 @@ impl Instruction {
     pub(crate) fn is_def(&self) -> bool {
         match self {
             Self::Load(..) => true,
-            Self::LoadGlobal(..) => true,
+            Self::LookupGlobal(..) => true,
             Self::LoadTraceInput(..) => true,
             Self::Call(..) => true, // FIXME: May or may not define. Ask func sig.
             Self::PtrAdd(..) => true,
             Self::Store(..) => false,
-            Self::StoreGlobal(..) => false,
             Self::Add(..) => true,
             Self::Icmp(..) => true,
             Self::Guard(..) => false,
@@ -467,12 +465,11 @@ impl Instruction {
     pub(crate) fn def_type_idx(&self, m: &Module) -> TypeIdx {
         match self {
             Self::Load(li) => li.type_idx(),
-            Self::LoadGlobal(..) => todo!(),
+            Self::LookupGlobal(..) => m.ptr_type_idx(),
             Self::LoadTraceInput(li) => li.ty_idx(),
             Self::Call(ci) => ci.target().func_type(m).ret_type_idx(),
             Self::PtrAdd(..) => m.ptr_type_idx(),
             Self::Store(..) => m.void_type_idx(),
-            Self::StoreGlobal(..) => m.void_type_idx(),
             Self::Add(ai) => ai.type_idx(m),
             Self::Icmp(_) => m.int8_type_idx(), // always returns a 0/1 valued byte.
             Self::Guard(..) => m.void_type_idx(),
@@ -503,12 +500,11 @@ impl fmt::Display for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Load(i) => write!(f, "{}", i),
-            Self::LoadGlobal(i) => write!(f, "{}", i),
+            Self::LookupGlobal(i) => write!(f, "{}", i),
             Self::LoadTraceInput(i) => write!(f, "{}", i),
             Self::Call(i) => write!(f, "{}", i),
             Self::PtrAdd(i) => write!(f, "{}", i),
             Self::Store(i) => write!(f, "{}", i),
-            Self::StoreGlobal(i) => write!(f, "{}", i),
             Self::Add(i) => write!(f, "{}", i),
             Self::Icmp(i) => write!(f, "{}", i),
             Self::Guard(i) => write!(f, "{}", i),
@@ -527,9 +523,8 @@ macro_rules! instr {
 }
 
 instr!(Load, LoadInstruction);
-instr!(LoadGlobal, LoadGlobalInstruction);
+instr!(LookupGlobal, LookupGlobalInstruction);
 instr!(Store, StoreInstruction);
-instr!(StoreGlobal, StoreGlobalInstruction);
 instr!(LoadTraceInput, LoadTraceInputInstruction);
 instr!(Call, CallInstruction);
 instr!(PtrAdd, PtrAddInstruction);
@@ -635,21 +630,39 @@ impl LoadTraceInputInstruction {
 ///
 /// Loads a value from a given global variable.
 ///
+/// FIXME: Codegenning this instruction leads to unoptimial code, since all this does is write a
+/// constant pointer into a register only to immediately use that register in the following
+/// instruction. We'd rather want to inline the constant into the next instruction. So instead of:
+/// ```ignore
+/// mov rax, 0x123abc
+/// mov [rax], 0x1
+/// ```
+/// we would get
+/// ```ignore
+/// mov [0x123abc], 0x1
+/// ```
+/// However, this requires us to change the JIT IR to allow globals inside operands (we don't want
+/// to implement a special global version for each instruction, e.g. LoadGlobal/StoreGlobal/etc).
+/// The easiest way to do this is to make globals a subclass of constants, similarly to what LLVM
+/// does.
 #[derive(Debug)]
-pub struct LoadGlobalInstruction {
+pub struct LookupGlobalInstruction {
     /// The pointer to load from.
     global_decl_idx: GlobalDeclIdx,
 }
 
-impl LoadGlobalInstruction {
+impl LookupGlobalInstruction {
     pub(crate) fn new(global_decl_idx: GlobalDeclIdx) -> Result<Self, CompilationError> {
         Ok(Self { global_decl_idx })
     }
+    pub(crate) fn decl<'a>(&self, m: &'a Module) -> &'a GlobalDecl {
+        m.globaldecl(self.global_decl_idx)
+    }
 }
 
-impl fmt::Display for LoadGlobalInstruction {
+impl fmt::Display for LookupGlobalInstruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "LoadGlobal {}", usize::from(self.global_decl_idx))
+        write!(f, "LookupGlobal {}", usize::from(self.global_decl_idx))
     }
 }
 
@@ -769,43 +782,6 @@ impl StoreInstruction {
 impl fmt::Display for StoreInstruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Store {}, {}", self.val.unpack(), self.ptr.unpack())
-    }
-}
-
-/// The operands for a [Instruction::StoreGlobal]
-///
-/// # Semantics
-///
-/// Stores a value into a global.
-///
-#[derive(Debug)]
-pub struct StoreGlobalInstruction {
-    /// The value to store.
-    val: PackedOperand,
-    /// The pointer to store into.
-    global_decl_idx: GlobalDeclIdx,
-}
-
-impl StoreGlobalInstruction {
-    pub(crate) fn new(
-        val: Operand,
-        global_decl_idx: GlobalDeclIdx,
-    ) -> Result<Self, CompilationError> {
-        Ok(Self {
-            val: PackedOperand::new(&val),
-            global_decl_idx,
-        })
-    }
-}
-
-impl fmt::Display for StoreGlobalInstruction {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "StoreGlobal {}, {}",
-            self.val.unpack(),
-            usize::from(self.global_decl_idx)
-        )
     }
 }
 
@@ -1088,6 +1064,10 @@ impl Module {
         &self.types[idx]
     }
 
+    pub(crate) fn globaldecl(&self, idx: GlobalDeclIdx) -> &GlobalDecl {
+        &self.global_decls[idx]
+    }
+
     /// Push an instruction to the end of the [Module].
     pub(crate) fn push(&mut self, instr: Instruction) {
         self.instrs.push(instr);
@@ -1299,8 +1279,7 @@ mod tests {
         assert_eq!(mem::size_of::<CallInstruction>(), 7);
         assert_eq!(mem::size_of::<StoreInstruction>(), 4);
         assert_eq!(mem::size_of::<LoadInstruction>(), 6);
-        assert_eq!(mem::size_of::<LoadGlobalInstruction>(), 3);
-        assert_eq!(mem::size_of::<StoreGlobalInstruction>(), 6);
+        assert_eq!(mem::size_of::<LookupGlobalInstruction>(), 3);
         assert_eq!(mem::size_of::<PtrAddInstruction>(), 6);
         assert!(mem::size_of::<Instruction>() <= mem::size_of::<u64>());
     }
