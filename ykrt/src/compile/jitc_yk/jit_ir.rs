@@ -112,6 +112,16 @@ macro_rules! index_16bit {
             }
         }
 
+        impl From<usize> for $struct {
+            // Required for TiVec.
+            //
+            // Prefer use of [Self::new], which is fallable. Certainly never use this in the trace
+            // builder, where we expect to be able to recover from index overflows.
+            fn from(v: usize) -> Self {
+                Self::new(v).unwrap()
+            }
+        }
+
         impl From<$struct> for usize {
             fn from(s: $struct) -> usize {
                 s.0.into()
@@ -366,7 +376,10 @@ impl Operand {
     pub(crate) fn byte_size(&self, m: &Module) -> usize {
         match self {
             Self::Local(l) => l.instr(m).def_byte_size(m),
-            _ => todo!(),
+            Self::Const(c) => match m.consts[*c] {
+                Constant::U32(_) => std::mem::size_of::<u32>(),
+                Constant::Usize(_) => std::mem::size_of::<usize>(),
+            },
         }
     }
 
@@ -982,7 +995,7 @@ pub(crate) struct Module {
     /// The constant table.
     ///
     /// A [ConstIdx] describes an index into this.
-    consts: Vec<Constant>,
+    consts: TiVec<ConstIdx, Constant>,
     /// The type table.
     ///
     /// A [TypeIdx] describes an index into this.
@@ -1025,7 +1038,7 @@ impl Module {
             name,
             instrs: Vec::new(),
             extra_args: Vec::new(),
-            consts: Vec::new(),
+            consts: TiVec::new(),
             types,
             void_type_idx,
             ptr_type_idx,
@@ -1053,6 +1066,11 @@ impl Module {
     /// Return the instruction at the specified index.
     pub(crate) fn instr(&self, idx: InstrIdx) -> &Instruction {
         &self.instrs[usize::try_from(idx).unwrap()]
+    }
+
+    /// Return the instruction at the specified index.
+    pub(crate) fn constant(&self, idx: ConstIdx) -> &Constant {
+        &self.consts[idx]
     }
 
     /// Return the [Type] for the specified index.

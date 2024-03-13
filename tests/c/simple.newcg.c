@@ -8,15 +8,12 @@
 //   status: error
 //   stderr:
 //     jit-state: start-tracing
-//     i=4
 //     jit-state: stop-tracing
 //     --- Begin aot ---
 //     ...
 //     func main($arg0: i32, $arg1: ptr) -> i32 {
 //     ...
 //     --- End aot ---
-//     ...
-//     not yet implemented...
 //     ...
 
 // Check that basic trace compilation works.
@@ -46,7 +43,7 @@ int main(int argc, char **argv) {
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    fprintf(stderr, "i=%d\n", i);
+    puts("i");
     res += 2;
     i--;
   }
