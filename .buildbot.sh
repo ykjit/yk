@@ -72,8 +72,7 @@ for tracer in ${TRACERS}; do
     # Check for annoying compiler warnings in each package.
     WARNING_DEFINES="-D unused-variables -D dead-code -D unused-imports"
     for p in $(sed -n -e '/^members =/,/^\]$/{/^members =/d;/^\]$/d;p;}' \
-      Cargo.toml \
-      | \
+      Cargo.toml | \
       tr -d ' \t\",' | grep -v xtask); do
         cargo rustc -p $p --profile check --lib -- ${WARNING_DEFINES}
         # For some reason, we can't do these checks on crates with binary targets.
@@ -90,18 +89,27 @@ for tracer in ${TRACERS}; do
     # down a bit. Check that if we build the system without tests, those features
     # are not enabled.
     cargo -Z unstable-options build --build-plan -p ykcapi | \
-        awk '/yk_testing/ { ec=1 } END {exit ec}'
+      awk '/yk_testing/ { ec=1 } END {exit ec}'
     cargo -Z unstable-options build --build-plan -p ykrt | \
-        awk '/yk_testing/ { ec=1 } /yk_jitstate_debug/ { ec=1 } END {exit ec}'
+      awk '/yk_testing/ { ec=1 } /yk_jitstate_debug/ { ec=1 } END {exit ec}'
 done
 
+# Run the tests multiple times on hwt to try and catch non-deterministic
+# failures. But running everything so often is expensive, so run other tracers'
+# tests just once.
+export YKB_TRACER=hwt
+echo "===> Running hwt tests"
+for i in $(seq 10); do
+    RUST_TEST_SHUFFLE=1 cargo test
+    YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test
+done
 for tracer in ${TRACERS}; do
-    export YKB_TRACER=${tracer}
-    echo "===> Running ${tracer} tests"
-    for i in $(seq 10); do
-        RUST_TEST_SHUFFLE=1 cargo test
-        YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test
-    done
+    if [ "$tracer" == "hwt" ]; then
+        continue
+    fi
+    echo "===> Running hwt tests"
+    RUST_TEST_SHUFFLE=1 cargo test
+    YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test
 done
 
 # Test with LLVM sanitisers
@@ -124,17 +132,18 @@ for tracer in $TRACERS; do
     export YKB_TRACER=${tracer}
     cargo build
     ASAN_SYMBOLIZER_PATH=${YKLLVM_BIN_DIR}/llvm-symbolizer \
-        RUSTFLAGS="-Z sanitizer=address" cargo test \
-        -Z build-std \
-        --target x86_64-unknown-linux-gnu
+      RUSTFLAGS="-Z sanitizer=address" cargo test \
+      -Z build-std \
+      --target x86_64-unknown-linux-gnu
 
     RUST_TEST_THREADS=1 \
-        RUSTFLAGS="-Z sanitizer=thread" \
-        TSAN_OPTIONS="suppressions=$suppressions_path" \
-        cargo test \
-        -Z build-std \
-        --target x86_64-unknown-linux-gnu
+      RUSTFLAGS="-Z sanitizer=thread" \
+      TSAN_OPTIONS="suppressions=$suppressions_path" \
+      cargo test \
+      -Z build-std \
+      --target x86_64-unknown-linux-gnu
 done
+
 # We now want to test building with `--release`, which we also take as an
 # opportunity to check that yk can build ykllvm, which requires unsetting
 # YKB_YKLLVM_BIN_DIR. In essence, we now repeat much of what we did above but
@@ -142,18 +151,15 @@ done
 unset YKB_YKLLVM_BIN_DIR
 export YKB_YKLLVM_BUILD_ARGS="define:CMAKE_C_COMPILER=/usr/bin/clang,define:CMAKE_CXX_COMPILER=/usr/bin/clang++"
 
-
 for tracer in $TRACERS; do
     export YKB_TRACER=${tracer}
     cargo -Z unstable-options build --release --build-plan -p ykcapi | \
-    awk '/yk_testing/ { ec=1 } /yk_jitstate_debug/ { ec=1 } END {exit ec}'
+      awk '/yk_testing/ { ec=1 } /yk_jitstate_debug/ { ec=1 } END {exit ec}'
 
     cargo build --release -p ykcapi
     echo "===> Running ${tracer} tests"
-    for i in $(seq 10); do
-        YKB_TRACER="${tracer}" RUST_TEST_SHUFFLE=1 cargo test --release
-        YKB_TRACER="${tracer}" YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test --release
-    done
+    RUST_TEST_SHUFFLE=1 cargo test --release
+    YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test --release
 done
 
 # We want to check that the benchmarks build and run correctly, but want to
