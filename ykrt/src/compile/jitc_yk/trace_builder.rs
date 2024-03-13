@@ -1,6 +1,6 @@
 //! The trace builder.
 
-use super::aot_ir::{self, IRDisplay, Module};
+use super::aot_ir::{self, AotIRDisplay, Module};
 use super::jit_ir;
 use crate::compile::CompilationError;
 use crate::trace::{AOTTraceIterator, TraceAction};
@@ -217,7 +217,7 @@ impl<'a> TraceBuilder<'a> {
                     .const_idx(&jit_ir::Constant::Usize(0xdeadbeef))?;
                 jit_ir::Operand::Const(constidx)
             }
-            _ => todo!("{}", op.to_str(self.aot_mod)),
+            _ => todo!("{}", op.to_string(self.aot_mod)),
         };
         Ok(ret)
     }
