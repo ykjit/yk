@@ -6,7 +6,7 @@
 
 use super::{
     super::{
-        jit_ir::{self, InstrIdx, Operand, Type},
+        jit_ir::{self, InstrIdx, JitIRDisplay, Operand, Type},
         CompilationError,
     },
     abs_stack::AbstractStack,
@@ -123,7 +123,7 @@ impl<'a> X64CodeGen<'a> {
         inst: &jit_ir::Instruction,
     ) -> Result<(), CompilationError> {
         #[cfg(any(debug_assertions, test))]
-        self.comment(self.asm.offset(), inst.to_string());
+        self.comment(self.asm.offset(), inst.to_string(self.jit_mod)?);
         match inst {
             jit_ir::Instruction::Add(i) => self.codegen_add_instr(instr_idx, &i),
             jit_ir::Instruction::LoadTraceInput(i) => {
@@ -226,7 +226,7 @@ impl<'a> X64CodeGen<'a> {
 
     /// Load a constant into the specified register.
     fn load_const(&mut self, reg: Rq, cidx: jit_ir::ConstIdx) {
-        match self.jit_mod.constant(cidx) {
+        match self.jit_mod.const_(cidx) {
             jit_ir::Constant::U32(v) => {
                 dynasm!(self.asm; mov Rq(reg.code()), DWORD *v as i32)
             }
@@ -671,7 +671,7 @@ mod tests {
             jit_mod.push(jit_ir::LoadInstruction::new(load_op, ptr_ty_idx).into());
             let patt_lines = [
                 "...",
-                "; Load %0",
+                "; %1: ptr = Load %0",
                 "... mov r12, [rbp-0x08]",
                 "... mov r12, [r12]",
                 "... mov [rbp-0x10], r12",
@@ -692,7 +692,7 @@ mod tests {
             jit_mod.push(jit_ir::LoadInstruction::new(load_op, i8_ty_idx).into());
             let patt_lines = [
                 "...",
-                "; Load %0",
+                "; %1: i8 = Load %0",
                 "... movzx r12, byte ptr [rbp-0x01]",
                 "... movzx r12, byte ptr [r12]",
                 "... mov [rbp-0x02], r12b",
@@ -713,7 +713,7 @@ mod tests {
             jit_mod.push(jit_ir::LoadInstruction::new(ti_op, i32_ty_idx).into());
             let patt_lines = [
                 "...",
-                "; Load %0",
+                "; %1: i32 = Load %0",
                 "... mov r12d, [rbp-0x04]",
                 "... mov r12d, [r12]",
                 "... mov [rbp-0x08], r12d",
@@ -732,7 +732,7 @@ mod tests {
             jit_mod.push(jit_ir::PtrAddInstruction::new(ti_op, 64).into());
             let patt_lines = [
                 "...",
-                "; PtrAdd %0, 64",
+                "; %1: ptr = PtrAdd %0, 64",
                 "... mov r12, [rbp-0x08]",
                 "... add r12, 0x40",
                 "... mov [rbp-0x10], r12",
@@ -764,7 +764,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_loadtraceinput_u8() {
+        fn codegen_loadtraceinput_i8() {
             let mut jit_mod = test_module();
             let u8_ty_idx = jit_mod
                 .type_idx(&jit_ir::Type::Integer(IntegerType::new(8)))
@@ -772,7 +772,7 @@ mod tests {
             jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, u8_ty_idx).into());
             let patt_lines = [
                 "...",
-                &format!("; LoadTraceInput 0, {}", u8_ty_idx.to_usize()),
+                &format!("; %0: i8 = LoadTraceInput 0, i8"),
                 "... movzx r12, byte ptr [rdi]",
                 "... mov [rbp-0x01], r12b",
                 "--- End jit-asm ---",
@@ -781,7 +781,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_loadtraceinput_u16_with_offset() {
+        fn codegen_loadtraceinput_i16_with_offset() {
             let mut jit_mod = test_module();
             let u16_ty_idx = jit_mod
                 .type_idx(&jit_ir::Type::Integer(IntegerType::new(16)))
@@ -789,7 +789,7 @@ mod tests {
             jit_mod.push(jit_ir::LoadTraceInputInstruction::new(32, u16_ty_idx).into());
             let patt_lines = [
                 "...",
-                &format!("; LoadTraceInput 32, {}", u16_ty_idx.to_usize()),
+                &format!("; %0: i16 = LoadTraceInput 32, i16"),
                 "... movzx r12d, word ptr [rdi+0x20]",
                 "... mov [rbp-0x02], r12w",
                 "--- End jit-asm ---",
@@ -800,30 +800,30 @@ mod tests {
         #[test]
         fn codegen_loadtraceinput_many_offset() {
             let mut jit_mod = test_module();
-            let u8_ty_idx = jit_mod
+            let i8_ty_idx = jit_mod
                 .type_idx(&jit_ir::Type::Integer(IntegerType::new(8)))
                 .unwrap();
             let ptr_ty_idx = jit_mod.ptr_type_idx();
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, u8_ty_idx).into());
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(1, u8_ty_idx).into());
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(2, u8_ty_idx).into());
-            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(3, u8_ty_idx).into());
+            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into());
+            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(1, i8_ty_idx).into());
+            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(2, i8_ty_idx).into());
+            jit_mod.push(jit_ir::LoadTraceInputInstruction::new(3, i8_ty_idx).into());
             jit_mod.push(jit_ir::LoadTraceInputInstruction::new(8, ptr_ty_idx).into());
             let patt_lines = [
                 "...",
-                &format!("; LoadTraceInput 0, {}", u8_ty_idx.to_usize()),
+                &format!("; %0: i8 = LoadTraceInput 0, i8"),
                 "... movzx r12, byte ptr [rdi]",
                 "... mov [rbp-0x01], r12b",
-                &format!("; LoadTraceInput 1, {}", u8_ty_idx.to_usize()),
+                &format!("; %1: i8 = LoadTraceInput 1, i8"),
                 "... movzx r12, byte ptr [rdi+0x01]",
                 "... mov [rbp-0x02], r12b",
-                &format!("; LoadTraceInput 2, {}", u8_ty_idx.to_usize()),
+                &format!("; %2: i8 = LoadTraceInput 2, i8"),
                 "... movzx r12, byte ptr [rdi+0x02]",
                 "... mov [rbp-0x03], r12b",
-                &format!("; LoadTraceInput 3, {}", u8_ty_idx.to_usize()),
+                &format!("; %3: i8 = LoadTraceInput 3, i8"),
                 "... movzx r12, byte ptr [rdi+0x03]",
                 "... mov [rbp-0x04], r12b",
-                &format!("; LoadTraceInput 8, {}", ptr_ty_idx.to_usize()),
+                &format!("; %4: ptr = LoadTraceInput 8, ptr"),
                 "... mov r12, [rdi+0x08]",
                 "... mov [rbp-0x10], r12",
                 "--- End jit-asm ---",
@@ -848,7 +848,7 @@ mod tests {
             jit_mod.push(jit_ir::AddInstruction::new(op1, op2).into());
             let patt_lines = [
                 "...",
-                "; Add %0, %1",
+                "; %2: i16 = Add %0, %1",
                 "... movzx r12, word ptr [rbp-0x02]",
                 "... movzx r13, word ptr [rbp-0x04]",
                 "... add r12w, r13w",
@@ -875,7 +875,7 @@ mod tests {
             jit_mod.push(jit_ir::AddInstruction::new(op1, op2).into());
             let patt_lines = [
                 "...",
-                "; Add %0, %1",
+                "; %2: i64 = Add %0, %1",
                 "... mov r12, [rbp-0x08]",
                 "... mov r13, [rbp-0x10]",
                 "... add r12, r13",
@@ -994,7 +994,7 @@ mod tests {
             let sym_addr = symbol_vaddr(&CString::new(CALL_TESTS_CALLEE).unwrap()).unwrap();
             let patt_lines = [
                 "...",
-                "; Call",
+                "; Call @puts(%0, %1, %2)",
                 "... mov edi, [rbp-0x04]",
                 "... mov esi, [rbp-0x08]",
                 "... mov edx, [rbp-0x0C]",
@@ -1075,7 +1075,7 @@ mod tests {
             let sym_addr = symbol_vaddr(&CString::new(CALL_TESTS_CALLEE).unwrap()).unwrap();
             let patt_lines = [
                 "...",
-                "; Call",
+                "; Call @puts(%0, %1, %2, %3, %4, %5)",
                 "... movzx rdi, byte ptr [rbp-0x01]",
                 "... movzx rsi, word ptr [rbp-0x04]",
                 "... mov edx, [rbp-0x08]",
@@ -1218,7 +1218,7 @@ mod tests {
             );
             let patt_lines = [
                 "...",
-                "; Icmp %0, %0",
+                "; %1: i8 = Icmp %0, %0",
                 "... mov r12, [rbp-0x08]",
                 "... mov r13, [rbp-0x08]",
                 "... cmp r12, r13",
@@ -1243,7 +1243,7 @@ mod tests {
             );
             let patt_lines = [
                 "...",
-                "; Icmp %0, %0",
+                "; %1: i8 = Icmp %0, %0",
                 "... movzx r12, byte ptr [rbp-0x01]",
                 "... movzx r13, byte ptr [rbp-0x01]",
                 "... cmp r12b, r13b",

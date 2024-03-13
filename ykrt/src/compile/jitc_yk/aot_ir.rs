@@ -116,16 +116,20 @@ fn deserialise_into_ti_vec<I, T>(v: Vec<T>) -> Result<TiVec<I, T>, DekuError> {
 ///
 /// The way we implement this (returning a `String`) is inefficient, but it doesn't hugely matter,
 /// as the human-readable format is only provided as a debugging aid.
-pub(crate) trait IRDisplay {
+pub(crate) trait AotIRDisplay {
     /// Return a human-readable string.
-    fn to_str(&self, m: &Module) -> String;
+    ///
+    /// FIXME: this isn't as efficient as it could be. We could pass down a mutable string
+    /// reference like `JitIRDisplay` does to avoid all the string allocations when stringifiying
+    /// each constituent IR element.
+    fn to_string(&self, m: &Module) -> String;
 
     /// Print myself to stderr in human-readable form.
     ///
     /// This isn't used during normal operation of the system: it is provided as a debugging aid.
     #[allow(dead_code)]
     fn dump(&self, m: &Module) {
-        eprintln!("{}", self.to_str(m));
+        eprintln!("{}", self.to_string(m));
     }
 }
 
@@ -167,8 +171,8 @@ pub(crate) enum Opcode {
     Unimplemented = 255,
 }
 
-impl IRDisplay for Opcode {
-    fn to_str(&self, _m: &Module) -> String {
+impl AotIRDisplay for Opcode {
+    fn to_string(&self, _m: &Module) -> String {
         format!("{:?}", self).to_lowercase()
     }
 }
@@ -179,9 +183,9 @@ pub(crate) struct ConstantOperand {
     const_idx: ConstIdx,
 }
 
-impl IRDisplay for ConstantOperand {
-    fn to_str(&self, m: &Module) -> String {
-        m.consts[self.const_idx].to_str(m)
+impl AotIRDisplay for ConstantOperand {
+    fn to_string(&self, m: &Module) -> String {
+        m.consts[self.const_idx].to_string(m)
     }
 }
 
@@ -241,8 +245,8 @@ impl LocalVariableOperand {
     }
 }
 
-impl IRDisplay for LocalVariableOperand {
-    fn to_str(&self, _m: &Module) -> String {
+impl AotIRDisplay for LocalVariableOperand {
+    fn to_string(&self, _m: &Module) -> String {
         format!(
             "${}_{}",
             usize::from(self.0.bb_idx),
@@ -263,8 +267,8 @@ pub(crate) struct BlockOperand {
     pub(crate) bb_idx: BlockIdx,
 }
 
-impl IRDisplay for BlockOperand {
-    fn to_str(&self, _m: &Module) -> String {
+impl AotIRDisplay for BlockOperand {
+    fn to_string(&self, _m: &Module) -> String {
         format!("bb{}", usize::from(self.bb_idx))
     }
 }
@@ -282,8 +286,8 @@ pub(crate) struct ArgOperand {
     arg_idx: ArgIdx,
 }
 
-impl IRDisplay for ArgOperand {
-    fn to_str(&self, _m: &Module) -> String {
+impl AotIRDisplay for ArgOperand {
+    fn to_string(&self, _m: &Module) -> String {
         format!("$arg{}", usize::from(self.arg_idx))
     }
 }
@@ -306,8 +310,8 @@ pub(crate) enum Predicate {
     // FIXME: add floating-point-specific predicates.
 }
 
-impl IRDisplay for Predicate {
-    fn to_str(&self, _m: &Module) -> String {
+impl AotIRDisplay for Predicate {
+    fn to_string(&self, _m: &Module) -> String {
         format!("{:?}", self)
     }
 }
@@ -325,9 +329,9 @@ impl GlobalOperand {
     }
 }
 
-impl IRDisplay for GlobalOperand {
-    fn to_str(&self, m: &Module) -> String {
-        m.global_decls[self.global_decl_idx].to_str(m)
+impl AotIRDisplay for GlobalOperand {
+    fn to_string(&self, m: &Module) -> String {
+        m.global_decls[self.global_decl_idx].to_string(m)
     }
 }
 
@@ -403,17 +407,17 @@ impl Operand {
     }
 }
 
-impl IRDisplay for Operand {
-    fn to_str(&self, m: &Module) -> String {
+impl AotIRDisplay for Operand {
+    fn to_string(&self, m: &Module) -> String {
         match self {
-            Self::Constant(c) => c.to_str(m),
-            Self::LocalVariable(l) => l.to_str(m),
-            Self::Type(t) => m.types[t.type_idx].to_str(m),
+            Self::Constant(c) => c.to_string(m),
+            Self::LocalVariable(l) => l.to_string(m),
+            Self::Type(t) => m.types[t.type_idx].to_string(m),
             Self::Func(f) => m.funcs[f.func_idx].name.to_owned(),
-            Self::Block(bb) => bb.to_str(m),
-            Self::Global(g) => g.to_str(m),
-            Self::Arg(a) => a.to_str(m),
-            Self::Predicate(p) => p.to_str(m),
+            Self::Block(bb) => bb.to_string(m),
+            Self::Global(g) => g.to_string(m),
+            Self::Arg(a) => a.to_string(m),
+            Self::Predicate(p) => p.to_string(m),
             Self::Unimplemented(s) => format!("?op<{}>", s),
         }
     }
@@ -534,8 +538,8 @@ impl Instruction {
     }
 }
 
-impl IRDisplay for Instruction {
-    fn to_str(&self, m: &Module) -> String {
+impl AotIRDisplay for Instruction {
+    fn to_string(&self, m: &Module) -> String {
         if self.opcode == Opcode::Unimplemented {
             debug_assert!(self.operands.len() == 1);
             if let Operand::Unimplemented(s) = &self.operands[0] {
@@ -557,17 +561,17 @@ impl IRDisplay for Instruction {
             ret.push_str(&format!(
                 "${}: {} = ",
                 name.as_ref().unwrap(),
-                m.instr_type(self).to_str(m)
+                m.instr_type(self).to_string(m)
             ));
         }
-        ret.push_str(&self.opcode.to_str(m));
+        ret.push_str(&self.opcode.to_string(m));
         if !self.operands.is_empty() {
             ret.push(' ');
         }
         let op_strs = self
             .operands
             .iter()
-            .map(|o| o.to_str(m))
+            .map(|o| o.to_string(m))
             .collect::<Vec<_>>();
 
         if self.opcode != Opcode::Call {
@@ -597,11 +601,11 @@ pub(crate) struct Block {
     pub(crate) instrs: TiVec<InstrIdx, Instruction>,
 }
 
-impl IRDisplay for Block {
-    fn to_str(&self, m: &Module) -> String {
+impl AotIRDisplay for Block {
+    fn to_string(&self, m: &Module) -> String {
         let mut ret = String::new();
         for i in &self.instrs {
-            ret.push_str(&format!("    {}\n", i.to_str(m)));
+            ret.push_str(&format!("    {}\n", i.to_string(m)));
         }
         ret
     }
@@ -645,8 +649,8 @@ impl<'a> Func {
     }
 }
 
-impl IRDisplay for Func {
-    fn to_str(&self, m: &Module) -> String {
+impl AotIRDisplay for Func {
+    fn to_string(&self, m: &Module) -> String {
         let ty = &m.types[self.type_idx];
         if let Type::Func(fty) = ty {
             let mut ret = format!(
@@ -655,7 +659,7 @@ impl IRDisplay for Func {
                 fty.arg_ty_idxs
                     .iter()
                     .enumerate()
-                    .map(|(i, t)| format!("$arg{}: {}", i, m.types[*t].to_str(m)))
+                    .map(|(i, t)| format!("$arg{}: {}", i, m.types[*t].to_string(m)))
                     .collect::<Vec<_>>()
                     .join(", ")
             );
@@ -665,7 +669,7 @@ impl IRDisplay for Func {
             ret.push(')');
             let ret_ty = &m.types[fty.ret_ty];
             if ret_ty != &Type::Void {
-                ret.push_str(&format!(" -> {}", ret_ty.to_str(m)));
+                ret.push_str(&format!(" -> {}", ret_ty.to_string(m)));
             }
             if self.is_declaration() {
                 // declarations have no body, so print it as such.
@@ -673,13 +677,13 @@ impl IRDisplay for Func {
             } else {
                 ret.push_str(" {\n");
                 for (i, b) in self.blocks.iter().enumerate() {
-                    ret.push_str(&format!("  bb{}:\n{}", i, b.to_str(m)));
+                    ret.push_str(&format!("  bb{}:\n{}", i, b.to_string(m)));
                 }
                 ret.push_str("}\n");
             }
             ret
         } else {
-            unreachable!("{}", ty.to_str(m)); // Impossible for a function to not be of type `Func`.
+            unreachable!("{}", ty.to_string(m)); // Impossible for a function to not be of type `Func`.
         }
     }
 }
@@ -739,8 +743,8 @@ impl IntegerType {
     }
 }
 
-impl IRDisplay for IntegerType {
-    fn to_str(&self, _m: &Module) -> String {
+impl AotIRDisplay for IntegerType {
+    fn to_string(&self, _m: &Module) -> String {
         format!("i{}", self.num_bits)
     }
 }
@@ -812,15 +816,15 @@ impl StructType {
     }
 }
 
-impl IRDisplay for StructType {
-    fn to_str(&self, m: &Module) -> String {
+impl AotIRDisplay for StructType {
+    fn to_string(&self, m: &Module) -> String {
         let mut s = String::from("{");
         s.push_str(
             &self
                 .field_ty_idxs
                 .iter()
                 .enumerate()
-                .map(|(i, ti)| format!("{}: {}", self.field_bit_offs[i], m.types[*ti].to_str(m)))
+                .map(|(i, ti)| format!("{}: {}", self.field_bit_offs[i], m.types[*ti].to_string(m)))
                 .collect::<Vec<_>>()
                 .join(", "),
         );
@@ -829,13 +833,13 @@ impl IRDisplay for StructType {
     }
 }
 
-impl IRDisplay for FuncType {
-    fn to_str(&self, m: &Module) -> String {
+impl AotIRDisplay for FuncType {
+    fn to_string(&self, m: &Module) -> String {
         format!(
             "func({})",
             self.arg_ty_idxs
                 .iter()
-                .map(|t| m.types[*t].to_str(m))
+                .map(|t| m.types[*t].to_string(m))
                 .collect::<Vec<_>>()
                 .join(", ")
         )
@@ -900,14 +904,14 @@ impl Type {
     }
 }
 
-impl IRDisplay for Type {
-    fn to_str(&self, m: &Module) -> String {
+impl AotIRDisplay for Type {
+    fn to_string(&self, m: &Module) -> String {
         match self {
             Self::Void => "void".to_owned(),
-            Self::Integer(i) => i.to_str(m),
+            Self::Integer(i) => i.to_string(m),
             Self::Ptr => "ptr".to_owned(),
-            Self::Func(ft) => ft.to_str(m),
-            Self::Struct(st) => st.to_str(m),
+            Self::Func(ft) => ft.to_string(m),
+            Self::Struct(st) => st.to_string(m),
             Self::Unimplemented(s) => format!("?ty<{}>", s),
         }
     }
@@ -930,8 +934,8 @@ impl Constant {
     }
 }
 
-impl IRDisplay for Constant {
-    fn to_str(&self, m: &Module) -> String {
+impl AotIRDisplay for Constant {
+    fn to_string(&self, m: &Module) -> String {
         m.types[self.type_idx].const_to_str(self)
     }
 }
@@ -945,16 +949,25 @@ pub(crate) struct GlobalDecl {
     name: String,
 }
 
-impl IRDisplay for GlobalDecl {
-    fn to_str(&self, _m: &Module) -> String {
+impl AotIRDisplay for GlobalDecl {
+    fn to_string(&self, _m: &Module) -> String {
         format!("GlobalDecl({}, tls={})", self.name, self.is_threadlocal)
     }
 }
 
 impl GlobalDecl {
+    #[cfg(test)]
+    pub(crate) fn new(name: String, is_threadlocal: bool) -> Self {
+        Self {
+            name,
+            is_threadlocal,
+        }
+    }
+
     pub(crate) fn is_threadlocal(&self) -> bool {
         self.is_threadlocal
     }
+
     pub(crate) fn name(&self) -> &str {
         &self.name
     }
@@ -1105,7 +1118,7 @@ impl Module {
         ret.push_str(&format!("# Num types: {}\n", self.types.len()));
 
         for func in &self.funcs {
-            ret.push_str(&format!("\n{}", func.to_str(self)));
+            ret.push_str(&format!("\n{}", func.to_string(self)));
         }
         ret
     }
