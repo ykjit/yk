@@ -7,13 +7,38 @@
 #![allow(dead_code)]
 
 use crate::compile::CompilationError;
-use std::{ffi::c_void, fmt, mem, ptr};
+use std::{ffi::c_void, mem, ptr};
 use typed_index_collections::TiVec;
 
 // Since the AOT versions of these data structures contain no AOT/JIT-IR-specific indices we can
 // share them. Note though, that their corresponding index types are not shared.
 pub(crate) use super::aot_ir::IntegerType;
 pub(crate) use super::aot_ir::{GlobalDecl, Predicate};
+
+impl JitIRDisplay for IntegerType {
+    fn to_string_impl<'a>(
+        &self,
+        _m: &Module,
+        s: &mut String,
+        _nums: &LocalNumbers<'a>,
+    ) -> Result<(), CompilationError> {
+        s.push_str(&format!("i{}", self.num_bits()));
+        Ok(())
+    }
+}
+
+impl JitIRDisplay for GlobalDecl {
+    fn to_string_impl<'a>(
+        &self,
+        _m: &Module,
+        s: &mut String,
+        _nums: &LocalNumbers<'a>,
+    ) -> Result<(), CompilationError> {
+        s.push_str("@");
+        s.push_str(&self.name());
+        Ok(())
+    }
+}
 
 /// Bit fiddling.
 ///
@@ -27,6 +52,75 @@ const OPERAND_IDX_MASK: u16 = 0x7fff;
 
 // The largest operand index we can express in 15 bits.
 const MAX_OPERAND_IDX: u16 = (1 << 15) - 1;
+
+/// [Instruction] to [InstrIdx] mapping used for stringifying instructions.
+///
+/// See [JitIRDisplay] for why this is required.
+pub(crate) struct LocalNumbers<'a> {
+    m: &'a Module,
+}
+
+impl<'a> LocalNumbers<'a> {
+    fn new(m: &'a Module) -> Result<LocalNumbers<'a>, CompilationError> {
+        Ok(Self { m })
+    }
+
+    /// Returns the [InstrIdx] of the specified [Instruction] in the [Module].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the instruction isn't present in the module.
+    fn idx(&self, instr: &Instruction) -> Result<InstrIdx, CompilationError> {
+        // FIXME: This is inefficient.
+        for (idx, candidate) in self.m.instrs().iter().enumerate() {
+            if ptr::addr_eq(instr, candidate) {
+                return Ok(InstrIdx::new(idx)?);
+            }
+        }
+        panic!(); // Not found!
+    }
+}
+
+/// A trait for stringifying JIT IR.
+///
+/// We use this instead of [std::fmt::Display] because many IR constructs can't print something
+/// human-readable without querying the [Module] for more information. For example to convert type
+/// indices into a human-readable type description. Hence we need the ability to pass down a
+/// reference to a module.
+///
+/// Stringification also requires a [LocalNumbers] mapping. This is because when you want to print
+/// an [Instruction], we want to print something like `%4: i32 = Add %1, %2`. But an instruction on
+/// its own doesn't know its instruction index in order to print `%4`. [LocalNumbers] lets an
+/// instruction find its index in the module.
+pub(crate) trait JitIRDisplay {
+    /// Return a human-readable string.
+    ///
+    /// This is the outward-facing API for stringification. Don't call this from other
+    /// `JitIRDisplay` implementations. Use [JitIRDisplay::to_string_impl()] instead and pass down
+    /// the existing output string and [LocalNumbers] struct.
+    fn to_string(&self, m: &Module) -> Result<String, CompilationError> {
+        let mut s = String::new();
+        self.to_string_impl(m, &mut s, &LocalNumbers::new(m)?)?;
+        Ok(s)
+    }
+
+    /// This method does the actual stringification of an IR element.
+    fn to_string_impl<'a>(
+        &self,
+        m: &Module,
+        s: &mut String,
+        nums: &LocalNumbers<'a>,
+    ) -> Result<(), CompilationError>;
+
+    /// Print `self` to stderr in human-readable form.
+    ///
+    /// This isn't used during normal operation of the system: it is provided as a debugging aid.
+    #[allow(dead_code)]
+    fn dump(&self, m: &Module) -> Result<(), CompilationError> {
+        eprintln!("{}", self.to_string(m).map_err(|e| e)?);
+        Ok(())
+    }
+}
 
 /// A packed 24-bit unsigned integer.
 #[repr(packed)]
@@ -193,6 +287,19 @@ impl InstrIdx {
     }
 }
 
+impl JitIRDisplay for InstrIdx {
+    fn to_string_impl<'a>(
+        &self,
+        _m: &Module,
+        s: &mut String,
+        _nums: &LocalNumbers<'a>,
+    ) -> Result<(), CompilationError> {
+        s.push_str("%");
+        s.push_str(&self.to_u16().to_string());
+        Ok(())
+    }
+}
+
 /// A function's type.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct FuncType {
@@ -261,6 +368,25 @@ pub(crate) enum Type {
     Func(FuncType),
     Struct(StructType),
     Unimplemented(String),
+}
+
+impl JitIRDisplay for Type {
+    fn to_string_impl<'a>(
+        &self,
+        m: &Module,
+        s: &mut String,
+        nums: &LocalNumbers<'a>,
+    ) -> Result<(), CompilationError> {
+        match self {
+            Self::Void => s.push_str("void"),
+            Self::Integer(it) => it.to_string_impl(m, s, nums)?,
+            Self::Ptr => s.push_str("ptr"),
+            Self::Func(_) => todo!(),
+            Self::Struct(_) => todo!(),
+            Self::Unimplemented(_) => s.push_str("?type"),
+        }
+        Ok(())
+    }
 }
 
 impl Type {
@@ -410,21 +536,45 @@ impl Operand {
     }
 }
 
-impl fmt::Display for Operand {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl JitIRDisplay for Operand {
+    fn to_string_impl<'a>(
+        &self,
+        m: &Module,
+        s: &mut String,
+        nums: &LocalNumbers<'a>,
+    ) -> Result<(), CompilationError> {
         match self {
-            Self::Local(idx) => write!(f, "%{}", idx.to_u16()),
-            Self::Const(idx) => write!(f, "Const({})", idx.to_u16()), // FIXME print constant properly.
+            Self::Local(idx) => s.push_str(&format!("%{}", idx.to_u16())),
+            Self::Const(idx) => m.const_(*idx).to_string_impl(m, s, nums)?,
         }
+        Ok(())
     }
 }
 
 // FIXME: this isn't the correct representation of a constant.
 // It should be a bag of bytes and a type.
+//
+// FIXME: Why are the variants `U*` not `I*` like everywhere else? Our integer IR types has no
+// notion of signedness -- it's all up to interpretation of the bits by an operation.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Constant {
     U32(u32),
     Usize(usize),
+}
+
+impl JitIRDisplay for Constant {
+    fn to_string_impl<'a>(
+        &self,
+        _m: &Module,
+        s: &mut String,
+        _nums: &LocalNumbers<'a>,
+    ) -> Result<(), CompilationError> {
+        match self {
+            Self::U32(v) => s.push_str(&v.to_string()),
+            Self::Usize(v) => s.push_str(&v.to_string()),
+        }
+        Ok(())
+    }
 }
 
 /// An IR instruction.
@@ -509,19 +659,33 @@ impl Instruction {
     }
 }
 
-impl fmt::Display for Instruction {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Load(i) => write!(f, "{}", i),
-            Self::LookupGlobal(i) => write!(f, "{}", i),
-            Self::LoadTraceInput(i) => write!(f, "{}", i),
-            Self::Call(i) => write!(f, "{}", i),
-            Self::PtrAdd(i) => write!(f, "{}", i),
-            Self::Store(i) => write!(f, "{}", i),
-            Self::Add(i) => write!(f, "{}", i),
-            Self::Icmp(i) => write!(f, "{}", i),
-            Self::Guard(i) => write!(f, "{}", i),
+impl JitIRDisplay for Instruction {
+    fn to_string_impl<'a>(
+        &self,
+        m: &Module,
+        s: &mut String,
+        nums: &LocalNumbers<'a>,
+    ) -> Result<(), CompilationError> {
+        // If the instruction defines a value print it like an assignment.
+        if let Some(dt) = self.def_type(m) {
+            nums.idx(self)?.to_string_impl(m, s, nums)?;
+            s.push_str(": ");
+            dt.to_string_impl(m, s, nums)?;
+            s.push_str(" = ");
         }
+        // Then print the instruction itself along with its parameters.
+        match self {
+            Self::Load(i) => i.to_string_impl(m, s, nums)?,
+            Self::LookupGlobal(i) => i.to_string_impl(m, s, nums)?,
+            Self::LoadTraceInput(i) => i.to_string_impl(m, s, nums)?,
+            Self::Call(i) => i.to_string_impl(m, s, nums)?,
+            Self::PtrAdd(i) => i.to_string_impl(m, s, nums)?,
+            Self::Store(i) => i.to_string_impl(m, s, nums)?,
+            Self::Add(i) => i.to_string_impl(m, s, nums)?,
+            Self::Icmp(i) => i.to_string_impl(m, s, nums)?,
+            Self::Guard(i) => i.to_string_impl(m, s, nums)?,
+        }
+        Ok(())
     }
 }
 
@@ -585,9 +749,15 @@ impl LoadInstruction {
     }
 }
 
-impl fmt::Display for LoadInstruction {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Load {}", self.operand())
+impl JitIRDisplay for LoadInstruction {
+    fn to_string_impl<'a>(
+        &self,
+        m: &Module,
+        s: &mut String,
+        nums: &LocalNumbers<'a>,
+    ) -> Result<(), CompilationError> {
+        s.push_str("Load ");
+        self.operand().to_string_impl(m, s, nums)
     }
 }
 
@@ -609,17 +779,16 @@ pub struct LoadTraceInputInstruction {
     ty_idx: TypeIdx,
 }
 
-impl fmt::Display for LoadTraceInputInstruction {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // FIXME: printing the type (rather than its index) would be better, but that'd require an
-        // overhaul of `Display` to make it more like `aot_or::IRDisplay` (passing the module in,
-        // so we can lookup types).
-        write!(
-            f,
-            "LoadTraceInput {}, {}",
-            self.off(),
-            self.ty_idx.to_usize()
-        )
+impl JitIRDisplay for LoadTraceInputInstruction {
+    fn to_string_impl<'a>(
+        &self,
+        m: &Module,
+        s: &mut String,
+        nums: &LocalNumbers<'a>,
+    ) -> Result<(), CompilationError> {
+        s.push_str(&format!("LoadTraceInput {}, ", self.off()));
+        m.type_(self.ty_idx).to_string_impl(m, s, nums)?;
+        Ok(())
     }
 }
 
@@ -668,14 +837,22 @@ impl LookupGlobalInstruction {
     pub(crate) fn new(global_decl_idx: GlobalDeclIdx) -> Result<Self, CompilationError> {
         Ok(Self { global_decl_idx })
     }
+
     pub(crate) fn decl<'a>(&self, m: &'a Module) -> &'a GlobalDecl {
-        m.globaldecl(self.global_decl_idx)
+        m.global_decl(self.global_decl_idx)
     }
 }
 
-impl fmt::Display for LookupGlobalInstruction {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "LookupGlobal {}", usize::from(self.global_decl_idx))
+impl JitIRDisplay for LookupGlobalInstruction {
+    fn to_string_impl<'a>(
+        &self,
+        m: &Module,
+        s: &mut String,
+        nums: &LocalNumbers<'a>,
+    ) -> Result<(), CompilationError> {
+        s.push_str("LookupGlobal ");
+        m.global_decl(self.global_decl_idx)
+            .to_string_impl(m, s, nums)
     }
 }
 
@@ -695,9 +872,28 @@ pub struct CallInstruction {
     extra: ExtraArgsIdx,
 }
 
-impl fmt::Display for CallInstruction {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Call")
+impl JitIRDisplay for CallInstruction {
+    fn to_string_impl<'a>(
+        &self,
+        m: &Module,
+        s: &mut String,
+        nums: &LocalNumbers<'a>,
+    ) -> Result<(), CompilationError> {
+        let decl = m.func_decl(self.target);
+        s.push_str("Call @");
+        s.push_str(decl.name());
+
+        s.push_str("(");
+        let num_args = decl.func_type(m).num_args();
+        for ai in 0..num_args {
+            self.operand(m, ai).to_string_impl(m, s, nums)?;
+            if ai != num_args - 1 {
+                s.push_str(", ");
+            }
+        }
+        s.push_str(")");
+
+        Ok(())
     }
 }
 
@@ -792,9 +988,18 @@ impl StoreInstruction {
     }
 }
 
-impl fmt::Display for StoreInstruction {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Store {}, {}", self.val.unpack(), self.ptr.unpack())
+impl JitIRDisplay for StoreInstruction {
+    fn to_string_impl<'a>(
+        &self,
+        m: &Module,
+        s: &mut String,
+        nums: &LocalNumbers<'a>,
+    ) -> Result<(), CompilationError> {
+        s.push_str("Store ");
+        self.val.unpack().to_string_impl(m, s, nums)?;
+        s.push_str(", ");
+        self.ptr.unpack().to_string_impl(m, s, nums)?;
+        Ok(())
     }
 }
 
@@ -831,9 +1036,18 @@ impl PtrAddInstruction {
     }
 }
 
-impl fmt::Display for PtrAddInstruction {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "PtrAdd {}, {}", self.ptr(), self.offset())
+impl JitIRDisplay for PtrAddInstruction {
+    fn to_string_impl<'a>(
+        &self,
+        m: &Module,
+        s: &mut String,
+        nums: &LocalNumbers<'a>,
+    ) -> Result<(), CompilationError> {
+        s.push_str("PtrAdd ");
+        self.ptr().to_string_impl(m, s, nums)?;
+        s.push_str(", ");
+        s.push_str(&self.offset().to_string());
+        Ok(())
     }
 }
 
@@ -875,9 +1089,18 @@ impl AddInstruction {
     }
 }
 
-impl fmt::Display for AddInstruction {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Add {}, {}", self.op1(), self.op2())
+impl JitIRDisplay for AddInstruction {
+    fn to_string_impl<'a>(
+        &self,
+        m: &Module,
+        s: &mut String,
+        nums: &LocalNumbers<'a>,
+    ) -> Result<(), CompilationError> {
+        s.push_str("Add ");
+        self.op1().to_string_impl(m, s, nums)?;
+        s.push_str(", ");
+        self.op2().to_string_impl(m, s, nums)?;
+        Ok(())
     }
 }
 
@@ -926,9 +1149,18 @@ impl IcmpInstruction {
     }
 }
 
-impl fmt::Display for IcmpInstruction {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Icmp {}, {}", self.left(), self.right())
+impl JitIRDisplay for IcmpInstruction {
+    fn to_string_impl<'a>(
+        &self,
+        m: &Module,
+        s: &mut String,
+        nums: &LocalNumbers<'a>,
+    ) -> Result<(), CompilationError> {
+        s.push_str("Icmp ");
+        self.left().to_string_impl(m, s, nums)?;
+        s.push_str(", ");
+        self.right().to_string_impl(m, s, nums)?;
+        Ok(())
     }
 }
 
@@ -965,9 +1197,22 @@ impl GuardInstruction {
     }
 }
 
-impl fmt::Display for GuardInstruction {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Guard {}, {}", self.cond(), self.expect)
+impl JitIRDisplay for GuardInstruction {
+    fn to_string_impl<'a>(
+        &self,
+        m: &Module,
+        s: &mut String,
+        nums: &LocalNumbers<'a>,
+    ) -> Result<(), CompilationError> {
+        s.push_str("Guard ");
+        self.cond().to_string_impl(m, s, nums)?;
+        s.push_str(", ");
+        if self.expect {
+            s.push_str("true");
+        } else {
+            s.push_str("false");
+        }
+        Ok(())
     }
 }
 
@@ -1068,11 +1313,6 @@ impl Module {
         &self.instrs[usize::try_from(idx).unwrap()]
     }
 
-    /// Return the instruction at the specified index.
-    pub(crate) fn constant(&self, idx: ConstIdx) -> &Constant {
-        &self.consts[idx]
-    }
-
     /// Return the [Type] for the specified index.
     ///
     /// # Panics
@@ -1082,7 +1322,12 @@ impl Module {
         &self.types[idx]
     }
 
-    pub(crate) fn globaldecl(&self, idx: GlobalDeclIdx) -> &GlobalDecl {
+    /// Return the global declaration for the specified index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is out of bounds.
+    pub(crate) fn global_decl<'a>(&'a self, idx: GlobalDeclIdx) -> &'a GlobalDecl {
         &self.global_decls[idx]
     }
 
@@ -1122,9 +1367,15 @@ impl Module {
         self.instrs.len()
     }
 
+    /// Stringify the module.
+    pub(crate) fn to_string(&self) -> Result<String, CompilationError> {
+        (self as &dyn JitIRDisplay).to_string(self)
+    }
+
     /// Print the [Module] to `stderr`.
-    pub(crate) fn dump(&self) {
-        eprintln!("{}", self);
+    pub(crate) fn dump(&self) -> Result<(), CompilationError> {
+        eprintln!("{}", self.to_string()?);
+        Ok(())
     }
 
     /// Returns a reference to the instruction stream.
@@ -1189,6 +1440,15 @@ impl Module {
         }
     }
 
+    /// Return the const for the specified index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is out of bounds.
+    pub(crate) fn const_<'a>(&'a self, idx: ConstIdx) -> &'a Constant {
+        &self.consts[idx]
+    }
+
     /// Get the index of a type, inserting it into the type table if necessary.
     pub(crate) fn type_idx(&mut self, t: &Type) -> Result<TypeIdx, CompilationError> {
         // FIXME: can we optimise this?
@@ -1235,15 +1495,34 @@ impl Module {
     }
 }
 
-impl fmt::Display for Module {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "; {}", self.name)?;
-        for (i, instr) in self.instrs.iter().enumerate() {
-            if instr.is_def() {
-                write!(f, "%{} = ", i)?;
+impl JitIRDisplay for Module {
+    fn to_string_impl<'a>(
+        &self,
+        m: &Module,
+        s: &mut String,
+        nums: &LocalNumbers<'a>,
+    ) -> Result<(), CompilationError> {
+        s.push_str("; ");
+        s.push_str(&self.name);
+
+        s.push_str("\n\n; globals\n");
+        for g in &self.global_decls {
+            g.to_string_impl(m, s, nums)?;
+            if g.is_threadlocal() {
+                s.push_str("    ; thread local");
             }
-            writeln!(f, "{}", instr)?;
+            s.push('\n');
         }
+
+        s.push_str("\nentry:\n");
+        for (idx, instr) in self.instrs().iter().enumerate() {
+            s.push_str("    ");
+            instr.to_string_impl(m, s, nums)?;
+            if idx != m.len() - 1 {
+                s.push('\n');
+            }
+        }
+
         Ok(())
     }
 }
@@ -1440,5 +1719,39 @@ mod tests {
         let mut jit_mod = Module::new("test".into());
         let _ = jit_mod.push_type(Type::Void);
         let _ = jit_mod.push_type(Type::Void);
+    }
+
+    #[test]
+    fn stringify_consts() {
+        let m = Module::new("test".into());
+        assert_eq!(Constant::U32(123).to_string(&m).unwrap(), "123");
+        assert_eq!(Constant::Usize(123).to_string(&m).unwrap(), "123");
+    }
+
+    #[test]
+    fn print_module() {
+        let mut m = Module::new("test".into());
+        m.push(LoadTraceInputInstruction::new(0, m.int8_type_idx()).into());
+        m.push(LoadTraceInputInstruction::new(8, m.int8_type_idx()).into());
+        m.push(LoadTraceInputInstruction::new(16, m.int8_type_idx()).into());
+        m.push_global_decl(GlobalDecl::new("some_global".into(), false))
+            .unwrap();
+        m.push_global_decl(GlobalDecl::new("some_thread_local".into(), true))
+            .unwrap();
+        let got = m.to_string().unwrap();
+        let expect = [
+            "; test",
+            "",
+            "; globals",
+            "@some_global",
+            "@some_thread_local    ; thread local",
+            "",
+            "entry:",
+            "    %0: i8 = LoadTraceInput 0, i8",
+            "    %1: i8 = LoadTraceInput 8, i8",
+            "    %2: i8 = LoadTraceInput 16, i8",
+        ]
+        .join("\n");
+        assert_eq!(got, expect);
     }
 }

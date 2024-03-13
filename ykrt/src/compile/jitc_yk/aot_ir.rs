@@ -952,9 +952,18 @@ impl IRDisplay for GlobalDecl {
 }
 
 impl GlobalDecl {
+    #[cfg(test)]
+    pub(crate) fn new(name: String, is_threadlocal: bool) -> Self {
+        Self {
+            name,
+            is_threadlocal,
+        }
+    }
+
     pub(crate) fn is_threadlocal(&self) -> bool {
         self.is_threadlocal
     }
+
     pub(crate) fn name(&self) -> &str {
         &self.name
     }

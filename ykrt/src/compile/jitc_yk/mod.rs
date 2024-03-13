@@ -89,7 +89,7 @@ impl Compiler for JITCYk {
 
         if PHASES_TO_PRINT.contains(&IRPhase::PreOpt) {
             eprintln!("--- Begin pre-opt ---");
-            jit_mod.dump();
+            jit_mod.dump()?;
             eprintln!("--- End pre-opt ---");
         }
 
