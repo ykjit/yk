@@ -94,13 +94,22 @@ for tracer in ${TRACERS}; do
       awk '/yk_testing/ { ec=1 } /yk_jitstate_debug/ { ec=1 } END {exit ec}'
 done
 
+# Run the tests multiple times on hwt to try and catch non-deterministic
+# failures. But running everything so often is expensive, so run other tracers'
+# tests just once.
+export YKB_TRACER=hwt
+echo "===> Running hwt tests"
+for i in $(seq 10); do
+    RUST_TEST_SHUFFLE=1 cargo test
+    YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test
+done
 for tracer in ${TRACERS}; do
-    export YKB_TRACER=${tracer}
-    echo "===> Running ${tracer} tests"
-    for i in $(seq 10); do
-        RUST_TEST_SHUFFLE=1 cargo test
-        YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test
-    done
+    if [ "$tracer" == "hwt" ]; then
+        continue
+    fi
+    echo "===> Running hwt tests"
+    RUST_TEST_SHUFFLE=1 cargo test
+    YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test
 done
 
 # Test with LLVM sanitisers
@@ -149,10 +158,8 @@ for tracer in $TRACERS; do
 
     cargo build --release -p ykcapi
     echo "===> Running ${tracer} tests"
-    for i in $(seq 10); do
-        YKB_TRACER="${tracer}" RUST_TEST_SHUFFLE=1 cargo test --release
-        YKB_TRACER="${tracer}" YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test --release
-    done
+    RUST_TEST_SHUFFLE=1 cargo test --release
+    YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test --release
 done
 
 # We want to check that the benchmarks build and run correctly, but want to
