@@ -224,6 +224,18 @@ impl<'a> X64CodeGen<'a> {
         }
     }
 
+    /// Load a constant into the specified register.
+    fn load_const(&mut self, reg: Rq, cidx: jit_ir::ConstIdx) {
+        match self.jit_mod.constant(cidx) {
+            jit_ir::Constant::U32(v) => {
+                dynasm!(self.asm; mov Rq(reg.code()), DWORD *v as i32)
+            }
+            jit_ir::Constant::Usize(_) => {
+                todo!()
+            }
+        };
+    }
+
     fn store_local(&mut self, l: &LocalAlloc, reg: Rq, size: usize) {
         match l {
             LocalAlloc::Stack { frame_off } => match i32::try_from(*frame_off) {
@@ -251,11 +263,13 @@ impl<'a> X64CodeGen<'a> {
         let op1 = inst.op1();
         let op2 = inst.op2();
 
-        // The types must match. If the IR is well-formed, this is guaranteed.
+        // FIXME: We should be checking type equality here, but since constants currently don't
+        // have a type, checking their size is close enough. This won't be correct for struct
+        // types, but this function can't deal with those anyway at the moment.
         debug_assert_eq!(
-            op1.type_(self.jit_mod),
-            op2.type_(self.jit_mod),
-            "attempt to add different types"
+            op1.byte_size(self.jit_mod),
+            op2.byte_size(self.jit_mod),
+            "attempt to add different byte-sized types"
         );
 
         self.operand_into_reg(WR0, &inst.op1()); // FIXME: assumes value will fit in a reg.
@@ -417,10 +431,12 @@ impl<'a> X64CodeGen<'a> {
     ) {
         let (left, pred, right) = (inst.left(), inst.predicate(), inst.right());
 
-        // The operands must have the same type, and they must be integers.
+        // FIXME: We should be checking type equality here, but since constants currently don't
+        // have a type, checking their size is close enough. This won't be correct for struct
+        // types, but this function can't deal with those anyway at the moment.
         debug_assert_eq!(
-            left.type_idx(self.jit_mod),
-            right.type_idx(self.jit_mod),
+            left.byte_size(self.jit_mod),
+            right.byte_size(self.jit_mod),
             "icmp of differing types"
         );
         debug_assert!(
@@ -494,7 +510,7 @@ impl<'a> X64CodeGen<'a> {
     fn operand_into_reg(&mut self, reg: Rq, op: &Operand) {
         match op {
             Operand::Local(li) => self.load_local(reg, *li),
-            _ => todo!("{}", op),
+            Operand::Const(c) => self.load_const(reg, *c),
         }
     }
 }
