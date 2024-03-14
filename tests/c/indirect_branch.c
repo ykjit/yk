@@ -16,14 +16,15 @@
 #include <yk_testing.h>
 
 int main(int argc, char **argv) {
-  int loc = 0;
+  YkMT *mt = yk_mt_new(NULL);
+  YkLocation loc = yk_location_new();
   int i = 5;
   int idx = 1;
   void *dispatch[] = {&&label1, &&label3, &&label2};
   NOOPT_VAL(i);
   NOOPT_VAL(idx);
   while (i > 0) {
-    yk_mt_control_point(loc);
+    yk_mt_control_point(mt, &loc);
     fprintf(stderr, "i=%d\n", i);
     goto *dispatch[idx];
   label1:
