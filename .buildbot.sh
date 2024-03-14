@@ -31,29 +31,46 @@ mdbook build
 test -d book
 cd ..
 
-# We could let yk build two copies of LLVM, but we also want to: check that
-# YKB_YKLLVM_BIN_DIR works; and we want access to clang-format from a build
-# of LLVM. So we first build our own LLVM-with-assertions, use the
-# YKB_YKLLVM_BIN_DIR variable to have yk use that, and use its
-# clang-format.
-mkdir -p ykllvm/build
-cd ykllvm/build
-# Due to an LLVM bug, PIE breaks our mapper, and it's not enough to pass
-# `-fno-pie` to clang for some reason:
-# https://github.com/llvm/llvm-project/issues/57085
-cmake -DCMAKE_INSTALL_PREFIX=`pwd`/../inst \
-    -DLLVM_INSTALL_UTILS=On \
-    -DCMAKE_BUILD_TYPE=release \
-    -DLLVM_ENABLE_ASSERTIONS=On \
-    -DLLVM_ENABLE_PROJECTS="lld;clang" \
-    -DCLANG_DEFAULT_PIE_ON_LINUX=OFF \
-    -DBUILD_SHARED_LIBS=ON \
-    -DCMAKE_C_COMPILER=/usr/bin/clang \
-    -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
-    -GNinja \
-    ../llvm
-cmake --build .
-cmake --install .
+# We now need a copy of ykllvm. Building this is quite slow so if there's a
+# cached version in `ykllvm_cache/` we use that. Whether we build our own or
+# use a cached copy, the installed version ends up in ykllvm/inst. Notice that
+# we use the release version because some of the checks we run below (e.g.
+# unused warnings) otherwise run slowly.
+
+cd ykllvm
+ykllvm_hash=$(git rev-parse HEAD)
+if [ -f /opt/ykllvm_cache/ykllvm-release-with-assertions-${ykllvm_hash}.tgz ]; then
+    cached_ykllvm=1
+    mkdir inst
+    cd inst
+    tar xfz /opt/ykllvm_cache/ykllvm-release-with-assertions-${ykllvm_hash}.tgz
+else
+    cached_ykllvm=0
+    # We could let yk build two copies of LLVM, but we also want to: check that
+    # YKB_YKLLVM_BIN_DIR works; and we want access to clang-format from a build
+    # of LLVM. So we first build (or use a prebuilt version) of our
+    # ykllvm-with-assertions, use the YKB_YKLLVM_BIN_DIR variable to have yk use
+    # that, and use its clang-format.
+
+    mkdir -p build
+    cd build
+    # Due to an LLVM bug, PIE breaks our mapper, and it's not enough to pass
+    # `-fno-pie` to clang for some reason:
+    # https://github.com/llvm/llvm-project/issues/57085
+    cmake -DCMAKE_INSTALL_PREFIX=`pwd`/../inst \
+        -DLLVM_INSTALL_UTILS=On \
+        -DCMAKE_BUILD_TYPE=release \
+        -DLLVM_ENABLE_ASSERTIONS=On \
+        -DLLVM_ENABLE_PROJECTS="lld;clang" \
+        -DCLANG_DEFAULT_PIE_ON_LINUX=OFF \
+        -DBUILD_SHARED_LIBS=ON \
+        -DCMAKE_C_COMPILER=/usr/bin/clang \
+        -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
+        -GNinja \
+        ../llvm
+    cmake --build .
+    cmake --install .
+fi
 YKLLVM_BIN_DIR=$(pwd)/../inst/bin
 export YKB_YKLLVM_BIN_DIR=${YKLLVM_BIN_DIR}
 cd ../../
@@ -104,10 +121,10 @@ for i in $(seq 10); do
     YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test
 done
 for tracer in ${TRACERS}; do
-    if [ "$tracer" == "hwt" ]; then
+    if [ "$tracer" = "hwt" ]; then
         continue
     fi
-    echo "===> Running hwt tests"
+    echo "===> Running ${tracer} tests"
     RUST_TEST_SHUFFLE=1 cargo test
     YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test
 done
@@ -144,12 +161,16 @@ for tracer in $TRACERS; do
       --target x86_64-unknown-linux-gnu
 done
 
-# We now want to test building with `--release`, which we also take as an
-# opportunity to check that yk can build ykllvm, which requires unsetting
-# YKB_YKLLVM_BIN_DIR. In essence, we now repeat much of what we did above but
-# with `--release`.
-unset YKB_YKLLVM_BIN_DIR
-export YKB_YKLLVM_BUILD_ARGS="define:CMAKE_C_COMPILER=/usr/bin/clang,define:CMAKE_CXX_COMPILER=/usr/bin/clang++"
+# We now want to test building with `--release`.
+
+if [ $cached_ykllvm -eq 0 ]; then
+    # If we don't have a cached copy of ykllvm, we also take this as an
+    # opportunity to check that yk can build ykllvm, which requires unsetting
+    # YKB_YKLLVM_BIN_DIR. In essence, we now repeat much of what we did above
+    # but with `--release`.
+    unset YKB_YKLLVM_BIN_DIR
+    export YKB_YKLLVM_BUILD_ARGS="define:CMAKE_C_COMPILER=/usr/bin/clang,define:CMAKE_CXX_COMPILER=/usr/bin/clang++"
+fi
 
 for tracer in $TRACERS; do
     export YKB_TRACER=${tracer}
