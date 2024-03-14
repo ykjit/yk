@@ -23,6 +23,7 @@ pub static EXTRA_LINK: LazyLock<HashMap<&'static str, Vec<ExtraLinkage>>> = Lazy
         "loopy_funcs_not_inlined_by_default.c",
         "not_loopy_funcs_inlined_by_default.c",
         "reentrant.c",
+        "indirect_external_function_call.c",
         "unroll_safe_implies_noinline.c",
         "unroll_safe_inlines.c",
         "yk_unroll_safe_vs_yk_outline.c",
