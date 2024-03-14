@@ -1,7 +1,7 @@
 //! The mapper translates a hwtracer trace into an IR trace.
 
 use crate::trace::{AOTTraceIterator, AOTTraceIteratorError, InvalidTraceError, TraceAction};
-use hwtracer::{llvm_blockmap::LLVM_BLOCK_MAP, Block, HWTracerError, Trace};
+use hwtracer::{llvm_blockmap::LLVM_BLOCK_MAP, Block, HWTracerError, TemporaryErrorKind, Trace};
 use ykaddr::{
     addr::{vaddr_to_obj_and_off, vaddr_to_sym_and_obj},
     obj::SELF_BIN_PATH,
@@ -42,6 +42,9 @@ impl Iterator for HWTTraceIterator {
                     if x == "longjmp within traces currently unsupported" =>
                 {
                     return Some(Err(AOTTraceIteratorError::LongJmpEncountered));
+                }
+                Some(Err(HWTracerError::Temporary(TemporaryErrorKind::TraceBufferOverflow))) => {
+                    return Some(Err(AOTTraceIteratorError::TraceTooLong));
                 }
                 Some(Err(_)) => todo!(),
                 None => {
