@@ -17,6 +17,7 @@
 #![allow(clippy::missing_safety_doc)]
 
 use std::{error::Error, ffi::CString, sync::Arc};
+use thiserror::Error;
 
 #[cfg(tracer_hwt)]
 pub(crate) mod hwt;
@@ -54,23 +55,16 @@ pub(crate) trait TraceRecorder {
     fn stop(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, InvalidTraceError>;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 #[allow(dead_code)]
 /// Reasons that a trace can be invalidated.
 pub enum InvalidTraceError {
     /// Nothing was recorded.
+    #[error("Trace empty")]
     TraceEmpty,
     /// The trace being recorded was too long and tracing was aborted.
+    #[error("Trace too long")]
     TraceTooLong,
-}
-
-impl Display for InvalidTraceError {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        match self {
-            InvalidTraceError::TraceEmpty => write!(f, "Trace empty"),
-            InvalidTraceError::TraceTooLong => write!(f, "Trace too long"),
-        }
-    }
 }
 
 /// An iterator which [TraceRecord]s use to process a trace into [TraceAction]s. The iterator must
