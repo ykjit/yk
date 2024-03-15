@@ -35,6 +35,7 @@ enum IRPhase {
     AOT,
     PreOpt,
     PostOpt,
+    Asm,
 }
 
 impl IRPhase {
@@ -43,6 +44,7 @@ impl IRPhase {
             "aot" => Ok(Self::AOT),
             "jit-pre-opt" => Ok(Self::PreOpt),
             "jit-post-opt" => Ok(Self::PostOpt),
+            "jit-asm" => Ok(Self::Asm),
             _ => Err(format!("Invalid YKD_PRINT_IR value: {s}").into()),
         }
     }
@@ -96,6 +98,15 @@ impl Compiler for JITCYk {
         let mut ra = SpillAllocator::new(StackDirection::GrowsDown);
         let cg = codegen::x86_64::X64CodeGen::new(&jit_mod, &mut ra).unwrap();
         let ct = cg.codegen()?;
+
+        #[cfg(any(debug_assertions, test))]
+        if PHASES_TO_PRINT.contains(&IRPhase::Asm) {
+            eprintln!("--- Begin jit-asm ---");
+            // If this unwrap fails, something went wrong in codegen.
+            eprintln!("{}", ct.disassemble().unwrap());
+            eprintln!("--- End jit-asm ---");
+        }
+
         Ok(ct)
     }
 }

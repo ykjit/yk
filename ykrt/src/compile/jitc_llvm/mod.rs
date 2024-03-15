@@ -10,6 +10,8 @@ use crate::{
 };
 use object::{Object, ObjectSection};
 use parking_lot::Mutex;
+#[cfg(any(debug_assertions, test))]
+use std::error::Error;
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
 #[cfg(not(test))]
@@ -154,6 +156,11 @@ impl CompiledTrace for LLVMCompiledTrace {
     fn hl(&self) -> &Weak<Mutex<HotLocation>> {
         &self.hl
     }
+
+    #[cfg(any(debug_assertions, test))]
+    fn disassemble(&self) -> Result<String, Box<dyn Error>> {
+        todo!()
+    }
 }
 
 #[cfg(not(test))]
@@ -224,6 +231,10 @@ impl CompiledTrace for LLVMCompiledTrace {
     }
 
     fn hl(&self) -> &Weak<Mutex<HotLocation>> {
+        todo!();
+    }
+
+    fn disassemble(&self) -> Result<String, Box<dyn Error>> {
         todo!();
     }
 }
