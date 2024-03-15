@@ -8,7 +8,7 @@
 //!    internal format of its choosing.
 //! 2. *Process* the recorded trace. The tracer backend returns an iterator which produces
 //!    [TraceAction]s.
-//! 3. *Compile* the processed trace. That happens in [compile](crate::compile) module.
+//! 3. *Compile* the processed trace. That happens in the [compile](crate::compile) module.
 //!
 //! This module thus contains tracing backends which can record and process traces.
 
