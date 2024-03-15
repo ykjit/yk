@@ -52,12 +52,12 @@ pub(crate) fn default_tracer() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
 pub(crate) trait TraceRecorder {
     /// Stop recording a trace of the current thread and return an iterator which successively
     /// produces [TraceAction]s.
-    fn stop(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, InvalidTraceError>;
+    fn stop(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, TraceRecorderError>;
 }
 
 #[derive(Debug, Error)]
 /// Reasons that a trace can be invalidated.
-pub enum InvalidTraceError {
+pub enum TraceRecorderError {
     /// Nothing was recorded.
     #[error("Trace empty")]
     #[allow(dead_code)]

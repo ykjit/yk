@@ -1,6 +1,6 @@
 //! Software tracer.
 
-use super::{AOTTraceIterator, InvalidTraceError, TraceAction, TraceRecorder};
+use super::{AOTTraceIterator, TraceAction, TraceRecorder, TraceRecorderError};
 use crate::{compile::jitc_llvm::frame::BitcodeSection, mt::DEFAULT_TRACE_TOO_LONG};
 use std::sync::Once;
 use std::{cell::RefCell, collections::HashMap, error::Error, ffi::CString, sync::Arc};
@@ -72,7 +72,7 @@ impl super::Tracer for SWTracer {
 struct SWTTraceRecorder {}
 
 impl TraceRecorder for SWTTraceRecorder {
-    fn stop(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, InvalidTraceError> {
+    fn stop(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, TraceRecorderError> {
         let mut aot_blocks: Vec<TraceAction> = vec![];
         BASIC_BLOCKS.with(|tb| {
             FUNC_NAMES.with(|fnames| {
@@ -108,7 +108,7 @@ impl TraceRecorder for SWTTraceRecorder {
             })
         });
         if aot_blocks.len() > DEFAULT_TRACE_TOO_LONG {
-            Err(InvalidTraceError::TraceTooLong)
+            Err(TraceRecorderError::TraceTooLong)
         } else if aot_blocks.is_empty() {
             // FIXME: who should handle an empty trace?
             panic!();

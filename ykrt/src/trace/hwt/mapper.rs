@@ -1,6 +1,6 @@
 //! The mapper translates a hwtracer trace into an IR trace.
 
-use crate::trace::{AOTTraceIterator, AOTTraceIteratorError, InvalidTraceError, TraceAction};
+use crate::trace::{AOTTraceIterator, AOTTraceIteratorError, TraceAction, TraceRecorderError};
 use hwtracer::{llvm_blockmap::LLVM_BLOCK_MAP, Block, HWTracerError, TemporaryErrorKind, Trace};
 use ykaddr::{
     addr::{vaddr_to_obj_and_off, vaddr_to_sym_and_obj},
@@ -73,7 +73,7 @@ impl Iterator for HWTTraceIterator {
 }
 
 impl HWTTraceIterator {
-    pub fn new(trace: Box<dyn Trace>) -> Result<Self, InvalidTraceError> {
+    pub fn new(trace: Box<dyn Trace>) -> Result<Self, TraceRecorderError> {
         let mut hwti = HWTTraceIterator {
             hwt_iter: trace.iter_blocks(),
             upcoming: Vec::new(),
@@ -96,10 +96,10 @@ impl HWTTraceIterator {
                 }
             }
             Some(Err(HWTracerError::Temporary(TemporaryErrorKind::TraceBufferOverflow))) => {
-                Err(InvalidTraceError::TraceTooLong)
+                Err(TraceRecorderError::TraceTooLong)
             }
             Some(Err(e)) => todo!("{e:?}"),
-            None => Err(InvalidTraceError::TraceEmpty),
+            None => Err(TraceRecorderError::TraceEmpty),
         }
     }
 
