@@ -1457,7 +1457,7 @@ impl Module {
         decl: GlobalDecl,
     ) -> Result<GlobalDeclIdx, CompilationError> {
         assert!(GlobalDeclIdx::new(self.global_decls.len()).is_ok());
-        let idx = self.consts.len();
+        let idx = self.global_decls.len();
         self.global_decls.push(decl);
         GlobalDeclIdx::new(idx)
     }
