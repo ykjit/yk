@@ -56,14 +56,15 @@ pub(crate) trait TraceRecorder {
 }
 
 #[derive(Debug, Error)]
-#[allow(dead_code)]
 /// Reasons that a trace can be invalidated.
 pub enum InvalidTraceError {
     /// Nothing was recorded.
     #[error("Trace empty")]
+    #[allow(dead_code)]
     TraceEmpty,
     /// The trace being recorded was too long and tracing was aborted.
     #[error("Trace too long")]
+    #[allow(dead_code)]
     TraceTooLong,
 }
 
