@@ -1,6 +1,6 @@
 //! Hardware tracing via hwtracer.
 
-use super::{errors::InvalidTraceError, AOTTraceIterator, TraceRecorder};
+use super::{AOTTraceIterator, InvalidTraceError, TraceRecorder};
 use hwtracer::{HWTracerError, TemporaryErrorKind};
 use std::{error::Error, sync::Arc};
 
