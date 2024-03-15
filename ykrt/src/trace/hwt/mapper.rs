@@ -46,7 +46,7 @@ impl Iterator for HWTTraceIterator {
                 Some(Err(HWTracerError::Temporary(TemporaryErrorKind::TraceBufferOverflow))) => {
                     return Some(Err(AOTTraceIteratorError::TraceTooLong));
                 }
-                Some(Err(_)) => todo!(),
+                Some(Err(e)) => todo!("{e:?}"),
                 None => {
                     // The last block contains pointless unmappable code (the stop tracing call).
                     match self.upcoming.pop() {
@@ -95,7 +95,10 @@ impl HWTTraceIterator {
                     _ => panic!(),
                 }
             }
-            Some(Err(_)) => todo!(),
+            Some(Err(HWTracerError::Temporary(TemporaryErrorKind::TraceBufferOverflow))) => {
+                Err(InvalidTraceError::TraceTooLong)
+            }
+            Some(Err(e)) => todo!("{e:?}"),
             None => Err(InvalidTraceError::TraceEmpty),
         }
     }
