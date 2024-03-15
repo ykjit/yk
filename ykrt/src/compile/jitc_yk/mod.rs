@@ -88,11 +88,11 @@ impl Compiler for JITCYk {
         let jit_mod = trace_builder::build(&aot_mod, aottrace_iter.0)?;
 
         if PHASES_TO_PRINT.contains(&IRPhase::PreOpt) {
-            eprintln!("--- Begin pre-opt ---");
+            eprintln!("--- Begin jit-pre-opt ---");
             // FIXME: If the `unwrap` fails, something rather bad has happened: does recovery even
             // make sense?
             jit_mod.dump().unwrap();
-            eprintln!("--- End pre-opt ---");
+            eprintln!("--- End jit-pre-opt ---");
         }
 
         let mut ra = SpillAllocator::new(StackDirection::GrowsDown);
