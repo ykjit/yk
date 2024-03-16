@@ -35,7 +35,6 @@ struct HWTTraceRecorder {
 
 impl TraceRecorder for HWTTraceRecorder {
     fn stop(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, TraceRecorderError> {
-        // FIXME: is this `unwrap` safe?
         match self.thread_tracer.stop_collector() {
             Ok(x) => Ok(Box::new(HWTTraceIterator::new(x)?)),
             Err(HWTracerError::Temporary(TemporaryErrorKind::TraceBufferOverflow)) => {
