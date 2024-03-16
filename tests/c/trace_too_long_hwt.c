@@ -33,7 +33,7 @@ int main(int argc, char **argv) {
       loc = &loc2;
     else if (i == 2)
       loc = &loc1;
-    fprintf(stdout, "i=%d\n", i);
+    NOOPT_VAL(i);
     i--;
   }
   printf("exit");
