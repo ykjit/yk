@@ -55,8 +55,12 @@ pub(crate) trait TraceRecorder {
     fn stop(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, TraceRecorderError>;
 }
 
+/// When a trace recorder stops, it may immediately realise that a problem occurred and return an
+/// instance of this enum. Some of these problems may be "fixed" by simply retrying tracing.
+///
+/// Note that the trace processor may later realise that there is a problem in the trace (see
+/// [AOTTraceIterator] and [AOTTraceIteratorError]).
 #[derive(Debug, Error)]
-/// Reasons that a trace can be invalidated.
 pub enum TraceRecorderError {
     /// Nothing was recorded.
     #[error("Trace empty")]
@@ -83,7 +87,8 @@ pub(crate) trait AOTTraceIterator:
 {
 }
 
-// Not all backends will generate all of these possibilities.
+/// When a trace is being processed, a problem might be noticed at any point. It is possible that
+/// tracing the original [crate::location::Location] again may "fix" the problem.
 pub(crate) enum AOTTraceIteratorError {
     #[allow(dead_code)]
     TraceTooLong,
