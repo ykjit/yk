@@ -550,7 +550,7 @@ impl MT {
                     }
                     mt.stats.trace_compiled_ok();
                 }
-                Err(CompilationError::Temporary(_e) | CompilationError::Unrecoverable(_e)) => {
+                Err(CompilationError(_e)) => {
                     mt.stats.trace_compiled_err();
                     hl_arc.lock().trace_failed(&mt);
                     #[cfg(feature = "yk_jitstate_debug")]

@@ -68,8 +68,7 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
         jit_mod: &'a jit_ir::Module,
         ra: &'a mut dyn RegisterAllocator,
     ) -> Result<X64CodeGen<'a>, CompilationError> {
-        let asm = dynasmrt::x64::Assembler::new()
-            .map_err(|e| CompilationError::Unrecoverable(e.to_string()))?;
+        let asm = dynasmrt::x64::Assembler::new().map_err(|e| CompilationError(e.to_string()))?;
         Ok(Self {
             jit_mod,
             asm,
@@ -97,12 +96,12 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
 
         self.asm
             .commit()
-            .map_err(|e| CompilationError::Unrecoverable(e.to_string()))?;
+            .map_err(|e| CompilationError(e.to_string()))?;
 
         let buf = self
             .asm
             .finalize()
-            .map_err(|_| CompilationError::Unrecoverable("failed to finalize assembler".into()))?;
+            .map_err(|e| CompilationError(format!("failed to finalize assembler: {e:?}").into()))?;
 
         #[cfg(not(any(debug_assertions, test)))]
         return Ok(Arc::new(X64CompiledTrace { buf }));
@@ -404,7 +403,7 @@ impl<'a> X64CodeGen<'a> {
 
         // unwrap safe on account of linker symbol names not containing internal NULL bytes.
         let va = symbol_vaddr(&CString::new(fdecl.name()).unwrap()).ok_or_else(|| {
-            CompilationError::Unrecoverable(format!("couldn't find AOT symbol: {}", fdecl.name()))
+            CompilationError(format!("couldn't find AOT symbol: {}", fdecl.name()))
         })?;
 
         // The SysV x86_64 ABI requires the stack to be 16-byte aligned prior to a call.

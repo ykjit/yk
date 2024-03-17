@@ -22,13 +22,8 @@ pub(crate) mod jitc_llvm;
 pub mod jitc_yk;
 
 /// A failure to compile a trace.
-#[derive(Debug, thiserror::Error)]
-pub enum CompilationError {
-    #[error("Unrecoverable error: {0}")]
-    Unrecoverable(String),
-    #[error("Temporary error: {0}")]
-    Temporary(String),
-}
+#[derive(Debug)]
+pub(crate) struct CompilationError(pub(crate) String);
 
 /// The trait that every JIT compiler backend must implement.
 pub(crate) trait Compiler: Send + Sync {

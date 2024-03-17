@@ -156,7 +156,7 @@ impl U24 {
 
 /// Helper to create index overflow errors.
 fn index_overflow(typ: &str) -> CompilationError {
-    CompilationError::Temporary(format!("index overflow: {}", typ))
+    CompilationError(format!("index overflow: {}", typ))
 }
 
 // Generate common methods for 24-bit index types.

@@ -101,7 +101,7 @@ impl<'a> TraceBuilder<'a> {
                             trace_input_idx += 1;
                         }
                         _ => {
-                            return Err(CompilationError::Temporary("offset doesn't fit".into()));
+                            return Err(CompilationError("offset doesn't fit".into()));
                         }
                     }
                 }
@@ -375,9 +375,7 @@ impl<'a> TraceBuilder<'a> {
                     // This unwrap can't fail unless we did something wrong during lowering.
                     64 => u64::from_ne_bytes(c.bytes()[0..8].try_into().unwrap())
                         .try_into()
-                        .map_err(|_| {
-                            CompilationError::Unrecoverable("ptradd offset too big".into())
-                        }),
+                        .map_err(|_| CompilationError("ptradd offset too big".into())),
                     _ => panic!(),
                 }?;
                 let instr = jit_ir::PtrAddInstruction::new(target, offset).into();
@@ -397,7 +395,7 @@ impl<'a> TraceBuilder<'a> {
         let first_blk = match ta_iter.next() {
             Some(Ok(b)) => b,
             Some(Err(_)) => todo!(),
-            None => return Err(CompilationError::Unrecoverable("empty trace".into())),
+            None => return Err(CompilationError("empty trace".into())),
         };
 
         // Find the block containing the control point call. This is the (sole) predecessor of the
