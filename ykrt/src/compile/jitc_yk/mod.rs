@@ -73,7 +73,8 @@ impl Compiler for JITCYk {
         if sti.is_some() {
             todo!();
         }
-        let ir_slice = yk_ir_section()?;
+        // If the `unwrap` fails, there is no chance of the system working correctly.
+        let ir_slice = yk_ir_section().unwrap();
         // FIXME: Cache deserialisation, so we don't load it afresh each time.
         let aot_mod = aot_ir::deserialise_module(ir_slice)?;
 
@@ -106,12 +107,10 @@ impl JITCYk {
     }
 }
 
-pub(crate) fn yk_ir_section() -> Result<&'static [u8], CompilationError> {
-    let start = symbol_vaddr(&CString::new("ykllvm.yk_ir.start").unwrap()).ok_or(
-        CompilationError::Unrecoverable("couldn't find ykllvm.yk_ir.start".into()),
-    )?;
-    let stop = symbol_vaddr(&CString::new("ykllvm.yk_ir.stop").unwrap()).ok_or(
-        CompilationError::Unrecoverable("couldn't find ykllvm.yk_ir.stop".into()),
-    )?;
+pub(crate) fn yk_ir_section() -> Result<&'static [u8], Box<dyn Error>> {
+    let start = symbol_vaddr(&CString::new("ykllvm.yk_ir.start").unwrap())
+        .ok_or("couldn't find ykllvm.yk_ir.start")?;
+    let stop = symbol_vaddr(&CString::new("ykllvm.yk_ir.stop").unwrap())
+        .ok_or("couldn't find ykllvm.yk_ir.stop")?;
     Ok(unsafe { slice::from_raw_parts(start as *const u8, stop - start) })
 }
