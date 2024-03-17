@@ -61,8 +61,8 @@ pub(crate) struct LocalNumbers<'a> {
 }
 
 impl<'a> LocalNumbers<'a> {
-    fn new(m: &'a Module) -> Result<LocalNumbers<'a>, CompilationError> {
-        Ok(Self { m })
+    fn new(m: &'a Module) -> LocalNumbers<'a> {
+        Self { m }
     }
 
     /// Returns the [InstrIdx] of the specified [Instruction] in the [Module].
@@ -102,7 +102,7 @@ pub(crate) trait JitIRDisplay {
     /// the existing output string and [LocalNumbers] struct.
     fn to_string(&self, m: &Module) -> Result<String, Box<dyn Error>> {
         let mut s = String::new();
-        self.to_string_impl(m, &mut s, &LocalNumbers::new(m)?)?;
+        self.to_string_impl(m, &mut s, &LocalNumbers::new(m))?;
         Ok(s)
     }
 
