@@ -73,10 +73,9 @@ impl Compiler for JITCYk {
         if sti.is_some() {
             todo!();
         }
-        // If the `unwrap` fails, there is no chance of the system working correctly.
+        // If either `unwrap` fails, there is no chance of the system working correctly.
         let ir_slice = yk_ir_section().unwrap();
-        // FIXME: Cache deserialisation, so we don't load it afresh each time.
-        let aot_mod = aot_ir::deserialise_module(ir_slice)?;
+        let aot_mod = aot_ir::deserialise_module(ir_slice).unwrap();
 
         if PHASES_TO_PRINT.contains(&IRPhase::AOT) {
             eprintln!("--- Begin aot ---");
