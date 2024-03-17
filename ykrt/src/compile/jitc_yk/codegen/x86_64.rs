@@ -17,10 +17,9 @@ use crate::compile::CompiledTrace;
 use dynasmrt::{
     dynasm, x64::Rq, AssemblyOffset, DynasmApi, DynasmLabelApi, ExecutableBuffer, Register,
 };
-use std::ffi::CString;
-use std::sync::Arc;
 #[cfg(any(debug_assertions, test))]
 use std::{cell::Cell, collections::HashMap, slice};
+use std::{error::Error, ffi::CString, sync::Arc};
 use ykaddr::addr::symbol_vaddr;
 
 /// Argument registers as defined by the X86_64 SysV ABI.
@@ -560,7 +559,7 @@ impl CompiledTrace for X64CompiledTrace {
 
 impl X64CompiledTrace {
     #[cfg(any(debug_assertions, test))]
-    fn disassemble(&self) -> Result<String, CompilationError> {
+    fn disassemble(&self) -> Result<String, Box<dyn Error>> {
         AsmPrinter::new(&self.buf, &self.comments).to_string()
     }
 }
@@ -579,7 +578,7 @@ impl<'a> AsmPrinter<'a> {
     }
 
     /// Returns the disassembled trace.
-    fn to_string(&self) -> Result<String, CompilationError> {
+    fn to_string(&self) -> Result<String, Box<dyn Error>> {
         let mut out = Vec::new();
         out.push("--- Begin jit-asm ---".to_string());
         let len = self.buf.len();
@@ -588,20 +587,16 @@ impl<'a> AsmPrinter<'a> {
         let fmt = zydis::Formatter::intel();
         let dec = zydis::Decoder::new64();
         for insn_info in dec.decode_all::<zydis::VisibleOperands>(code, 0) {
-            let (off, _raw_bytes, insn) = insn_info
-                .map_err(|e| CompilationError::Unrecoverable(format!("zydis: {:?}", e)))?;
+            let (off, _raw_bytes, insn) = insn_info.unwrap();
             if let Some(lines) = self.comments.get(
-                // This could fail if we test on an arch where usize is less than 64-bit.
-                &usize::try_from(off)
-                    .map_err(|e| CompilationError::Unrecoverable(e.to_string()))?,
+                // FIXME: This could fail if we test on an arch where usize is less than 64-bit.
+                &usize::try_from(off).unwrap(),
             ) {
                 for line in lines {
                     out.push(format!("; {line}"));
                 }
             }
-            let istr = fmt
-                .format(Some(off), &insn)
-                .map_err(|e| CompilationError::Unrecoverable(format!("zydis: {:?}", e)))?;
+            let istr = fmt.format(Some(off), &insn).unwrap();
             out.push(format!(
                 "{:016x} {:08x}: {}",
                 (bptr as u64) + off,
