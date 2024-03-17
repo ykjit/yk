@@ -38,15 +38,12 @@ enum IRPhase {
 }
 
 impl IRPhase {
-    fn from_str(s: &str) -> Result<Self, CompilationError> {
+    fn from_str(s: &str) -> Result<Self, Box<dyn Error>> {
         match s {
             "aot" => Ok(Self::AOT),
             "jit-pre-opt" => Ok(Self::PreOpt),
             "jit-post-opt" => Ok(Self::PostOpt),
-            _ => Err(CompilationError::Unrecoverable(format!(
-                "Invalid YKD_PRINT_IR value: {}",
-                s
-            ))),
+            _ => Err(format!("Invalid YKD_PRINT_IR value: {s}").into()),
         }
     }
 }
