@@ -90,7 +90,9 @@ impl Compiler for JITCYk {
 
         if PHASES_TO_PRINT.contains(&IRPhase::PreOpt) {
             eprintln!("--- Begin pre-opt ---");
-            jit_mod.dump()?;
+            // FIXME: If the `unwrap` fails, something rather bad has happened: does recovery even
+            // make sense?
+            jit_mod.dump().unwrap();
             eprintln!("--- End pre-opt ---");
         }
 

@@ -7,7 +7,7 @@
 #![allow(dead_code)]
 
 use crate::compile::CompilationError;
-use std::{ffi::c_void, mem, ptr};
+use std::{error::Error, ffi::c_void, mem, ptr};
 use typed_index_collections::TiVec;
 
 // Since the AOT versions of these data structures contain no AOT/JIT-IR-specific indices we can
@@ -21,7 +21,7 @@ impl JitIRDisplay for IntegerType {
         _m: &Module,
         s: &mut String,
         _nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         s.push_str(&format!("i{}", self.num_bits()));
         Ok(())
     }
@@ -33,7 +33,7 @@ impl JitIRDisplay for GlobalDecl {
         _m: &Module,
         s: &mut String,
         _nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         s.push_str("@");
         s.push_str(&self.name());
         Ok(())
@@ -98,7 +98,7 @@ pub(crate) trait JitIRDisplay {
     /// This is the outward-facing API for stringification. Don't call this from other
     /// `JitIRDisplay` implementations. Use [JitIRDisplay::to_string_impl()] instead and pass down
     /// the existing output string and [LocalNumbers] struct.
-    fn to_string(&self, m: &Module) -> Result<String, CompilationError> {
+    fn to_string(&self, m: &Module) -> Result<String, Box<dyn Error>> {
         let mut s = String::new();
         self.to_string_impl(m, &mut s, &LocalNumbers::new(m)?)?;
         Ok(s)
@@ -110,13 +110,13 @@ pub(crate) trait JitIRDisplay {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError>;
+    ) -> Result<(), Box<dyn Error>>;
 
     /// Print `self` to stderr in human-readable form.
     ///
     /// This isn't used during normal operation of the system: it is provided as a debugging aid.
     #[allow(dead_code)]
-    fn dump(&self, m: &Module) -> Result<(), CompilationError> {
+    fn dump(&self, m: &Module) -> Result<(), Box<dyn Error>> {
         eprintln!("{}", self.to_string(m).map_err(|e| e)?);
         Ok(())
     }
@@ -293,7 +293,7 @@ impl JitIRDisplay for InstrIdx {
         _m: &Module,
         s: &mut String,
         _nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         s.push_str("%");
         s.push_str(&self.to_u16().to_string());
         Ok(())
@@ -376,7 +376,7 @@ impl JitIRDisplay for Type {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         match self {
             Self::Void => s.push_str("void"),
             Self::Integer(it) => it.to_string_impl(m, s, nums)?,
@@ -542,7 +542,7 @@ impl JitIRDisplay for Operand {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         match self {
             Self::Local(idx) => s.push_str(&format!("%{}", idx.to_u16())),
             Self::Const(idx) => m.const_(*idx).to_string_impl(m, s, nums)?,
@@ -568,7 +568,7 @@ impl JitIRDisplay for Constant {
         _m: &Module,
         s: &mut String,
         _nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         match self {
             Self::U32(v) => s.push_str(&v.to_string()),
             Self::Usize(v) => s.push_str(&v.to_string()),
@@ -665,7 +665,7 @@ impl JitIRDisplay for Instruction {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         // If the instruction defines a value print it like an assignment.
         if let Some(dt) = self.def_type(m) {
             nums.idx(self)?.to_string_impl(m, s, nums)?;
@@ -755,7 +755,7 @@ impl JitIRDisplay for LoadInstruction {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         s.push_str("Load ");
         self.operand().to_string_impl(m, s, nums)
     }
@@ -785,7 +785,7 @@ impl JitIRDisplay for LoadTraceInputInstruction {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         s.push_str(&format!("LoadTraceInput {}, ", self.off()));
         m.type_(self.ty_idx).to_string_impl(m, s, nums)?;
         Ok(())
@@ -849,7 +849,7 @@ impl JitIRDisplay for LookupGlobalInstruction {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         s.push_str("LookupGlobal ");
         m.global_decl(self.global_decl_idx)
             .to_string_impl(m, s, nums)
@@ -878,7 +878,7 @@ impl JitIRDisplay for CallInstruction {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         let decl = m.func_decl(self.target);
         s.push_str("Call @");
         s.push_str(decl.name());
@@ -994,7 +994,7 @@ impl JitIRDisplay for StoreInstruction {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         s.push_str("Store ");
         self.val.unpack().to_string_impl(m, s, nums)?;
         s.push_str(", ");
@@ -1042,7 +1042,7 @@ impl JitIRDisplay for PtrAddInstruction {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         s.push_str("PtrAdd ");
         self.ptr().to_string_impl(m, s, nums)?;
         s.push_str(", ");
@@ -1095,7 +1095,7 @@ impl JitIRDisplay for AddInstruction {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         s.push_str("Add ");
         self.op1().to_string_impl(m, s, nums)?;
         s.push_str(", ");
@@ -1155,7 +1155,7 @@ impl JitIRDisplay for IcmpInstruction {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         s.push_str("Icmp ");
         self.left().to_string_impl(m, s, nums)?;
         s.push_str(", ");
@@ -1203,7 +1203,7 @@ impl JitIRDisplay for GuardInstruction {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         s.push_str("Guard ");
         self.cond().to_string_impl(m, s, nums)?;
         s.push_str(", ");
@@ -1368,12 +1368,12 @@ impl Module {
     }
 
     /// Stringify the module.
-    pub(crate) fn to_string(&self) -> Result<String, CompilationError> {
+    pub(crate) fn to_string(&self) -> Result<String, Box<dyn Error>> {
         (self as &dyn JitIRDisplay).to_string(self)
     }
 
     /// Print the [Module] to `stderr`.
-    pub(crate) fn dump(&self) -> Result<(), CompilationError> {
+    pub(crate) fn dump(&self) -> Result<(), Box<dyn Error>> {
         eprintln!("{}", self.to_string()?);
         Ok(())
     }
@@ -1501,7 +1501,7 @@ impl JitIRDisplay for Module {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         s.push_str("; ");
         s.push_str(&self.name);
 

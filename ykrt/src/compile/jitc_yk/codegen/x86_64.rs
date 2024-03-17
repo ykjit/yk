@@ -123,7 +123,8 @@ impl<'a> X64CodeGen<'a> {
         inst: &jit_ir::Instruction,
     ) -> Result<(), CompilationError> {
         #[cfg(any(debug_assertions, test))]
-        self.comment(self.asm.offset(), inst.to_string(self.jit_mod)?);
+        self.comment(self.asm.offset(), inst.to_string(self.jit_mod).unwrap());
+
         match inst {
             jit_ir::Instruction::Add(i) => self.codegen_add_instr(instr_idx, &i),
             jit_ir::Instruction::LoadTraceInput(i) => {
