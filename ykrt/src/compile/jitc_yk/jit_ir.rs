@@ -70,11 +70,13 @@ impl<'a> LocalNumbers<'a> {
     /// # Panics
     ///
     /// Panics if the instruction isn't present in the module.
-    fn idx(&self, instr: &Instruction) -> Result<InstrIdx, CompilationError> {
+    fn idx(&self, instr: &Instruction) -> InstrIdx {
         // FIXME: This is inefficient.
         for (idx, candidate) in self.m.instrs().iter().enumerate() {
             if ptr::addr_eq(instr, candidate) {
-                return Ok(InstrIdx::new(idx)?);
+                // The `unwrap` cannot fail because we won't have expanded `m.instrs()` beyond the
+                // ability of `InstrIdx` to represent an index.
+                return InstrIdx::new(idx).unwrap();
             }
         }
         panic!(); // Not found!
@@ -668,7 +670,7 @@ impl JitIRDisplay for Instruction {
     ) -> Result<(), Box<dyn Error>> {
         // If the instruction defines a value print it like an assignment.
         if let Some(dt) = self.def_type(m) {
-            nums.idx(self)?.to_string_impl(m, s, nums)?;
+            nums.idx(self).to_string_impl(m, s, nums)?;
             s.push_str(": ");
             dt.to_string_impl(m, s, nums)?;
             s.push_str(" = ");
