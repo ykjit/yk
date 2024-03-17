@@ -18,6 +18,7 @@ use parking_lot::Mutex;
 use std::{
     collections::HashSet,
     env,
+    error::Error,
     ffi::CString,
     slice,
     sync::{Arc, LazyLock},
@@ -101,7 +102,7 @@ impl Compiler for JITCYk {
 }
 
 impl JITCYk {
-    pub(crate) fn new() -> Result<Arc<Self>, CompilationError> {
+    pub(crate) fn new() -> Result<Arc<Self>, Box<dyn Error>> {
         Ok(Arc::new(Self {}))
     }
 }

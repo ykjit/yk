@@ -6,7 +6,9 @@ use crate::{
 use libc::c_void;
 use parking_lot::Mutex;
 use std::{
-    env, fmt,
+    env,
+    error::Error,
+    fmt,
     sync::{
         atomic::{AtomicU32, Ordering},
         Arc, Weak,
@@ -40,7 +42,7 @@ pub(crate) trait Compiler: Send + Sync {
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
 }
 
-pub(crate) fn default_compiler() -> Result<Arc<dyn Compiler>, CompilationError> {
+pub(crate) fn default_compiler() -> Result<Arc<dyn Compiler>, Box<dyn Error>> {
     #[cfg(jitc_yk)]
     // Transitionary env var to turn on the new code generator.
     //
@@ -57,9 +59,7 @@ pub(crate) fn default_compiler() -> Result<Arc<dyn Compiler>, CompilationError> 
 
     #[allow(unreachable_code)]
     {
-        Err(CompilationError::Unrecoverable(
-            "No JIT compiler supported on this platform/configuration".into(),
-        ))
+        Err("No JIT compiler supported on this platform/configuration".into())
     }
 }
 
