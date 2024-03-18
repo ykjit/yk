@@ -1334,7 +1334,12 @@ impl Module {
     }
 
     /// Push an instruction to the end of the [Module].
+    ///
+    /// # Panics
+    ///
+    /// If `instr` would overflow the index type.
     pub(crate) fn push(&mut self, instr: Instruction) {
+        assert!(InstrIdx::new(self.instrs.len()).is_ok());
         self.instrs.push(instr);
     }
 
@@ -1351,11 +1356,12 @@ impl Module {
     /// # Panics
     ///
     /// Panics if the instruction doesn't define a local variable that we could use to build an
-    /// [Operand].
+    /// [Operand] or if `instr` would overflow the index type.
     pub(crate) fn push_and_make_operand(
         &mut self,
         instr: Instruction,
     ) -> Result<Operand, CompilationError> {
+        assert!(InstrIdx::new(self.instrs.len()).is_ok());
         if !instr.is_def() {
             panic!();
         }
@@ -1386,7 +1392,12 @@ impl Module {
     }
 
     /// Push a slice of extra arguments into the extra arg table.
+    ///
+    /// # Panics
+    ///
+    /// If `ops` would overflow the index type.
     fn push_extra_args(&mut self, ops: &[Operand]) -> Result<ExtraArgsIdx, CompilationError> {
+        assert!(ExtraArgsIdx::new(self.types.len()).is_ok());
         let idx = self.extra_args.len();
         self.extra_args.extend_from_slice(ops); // FIXME: this clones.
         ExtraArgsIdx::new(idx)
@@ -1395,6 +1406,10 @@ impl Module {
     /// Push a new type into the type table and return its index.
     ///
     /// The type must not already exist in the module's type table.
+    ///
+    /// # Panics
+    ///
+    /// If `ty` would overflow the index type.
     fn push_type(&mut self, ty: Type) -> Result<TypeIdx, CompilationError> {
         #[cfg(debug_assertions)]
         {
@@ -1402,30 +1417,46 @@ impl Module {
                 debug_assert_ne!(et, &ty, "type already exists");
             }
         }
+        assert!(TypeIdx::new(self.types.len()).is_ok());
         let idx = self.types.len();
         self.types.push(ty);
         Ok(TypeIdx::new(idx)?)
     }
 
     /// Push a new function declaration into the function declaration table and return its index.
+    ///
+    /// # Panics
+    ///
+    /// If `func_decl` would overflow the index type.
     fn push_func_decl(&mut self, func_decl: FuncDecl) -> Result<FuncDeclIdx, CompilationError> {
+        assert!(FuncDeclIdx::new(self.func_decls.len()).is_ok());
         let idx = self.func_decls.len();
         self.func_decls.push(func_decl);
         Ok(FuncDeclIdx::new(idx)?)
     }
 
     /// Push a new constant into the constant table and return its index.
+    ///
+    /// # Panics
+    ///
+    /// If `constant` would overflow the index type.
     pub fn push_const(&mut self, constant: Constant) -> Result<ConstIdx, CompilationError> {
+        assert!(ConstIdx::new(self.consts.len()).is_ok());
         let idx = self.consts.len();
         self.consts.push(constant);
         ConstIdx::new(idx)
     }
 
     /// Push a new declaration into the global variable declaration table and return its index.
+    ///
+    /// # Panics
+    ///
+    /// If `decl` would overflow the index type.
     pub fn push_global_decl(
         &mut self,
         decl: GlobalDecl,
     ) -> Result<GlobalDeclIdx, CompilationError> {
+        assert!(GlobalDeclIdx::new(self.global_decls.len()).is_ok());
         let idx = self.consts.len();
         self.global_decls.push(decl);
         GlobalDeclIdx::new(idx)
