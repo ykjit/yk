@@ -584,10 +584,7 @@ impl<'a> AsmPrinter<'a> {
         let dec = zydis::Decoder::new64();
         for insn_info in dec.decode_all::<zydis::VisibleOperands>(code, 0) {
             let (off, _raw_bytes, insn) = insn_info.unwrap();
-            if let Some(lines) = self.comments.get(
-                // FIXME: This could fail if we test on an arch where usize is less than 64-bit.
-                &usize::try_from(off).unwrap(),
-            ) {
+            if let Some(lines) = self.comments.get(&usize::try_from(off).unwrap()) {
                 for line in lines {
                     out.push(format!("; {line}"));
                 }
