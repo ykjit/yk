@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
+// This function will only exist if the `hwt` tracer is compiled in to ykrt.
 size_t __yktrace_hwt_mapper_blockmap_len();
 
 // Blocks the compiler from optimising the specified value or expression.
