@@ -8,7 +8,7 @@
 //!    internal format of its choosing.
 //! 2. *Process* the recorded trace. The tracer backend returns an iterator which produces
 //!    [TraceAction]s.
-//! 3. *Compile* the processed trace. That happens in [compile](crate::compile) module.
+//! 3. *Compile* the processed trace. That happens in the [compile](crate::compile) module.
 //!
 //! This module thus contains tracing backends which can record and process traces.
 
@@ -16,15 +16,13 @@
 #![allow(clippy::new_without_default)]
 #![allow(clippy::missing_safety_doc)]
 
-mod errors;
 use std::{error::Error, ffi::CString, sync::Arc};
+use thiserror::Error;
 
 #[cfg(tracer_hwt)]
 pub(crate) mod hwt;
 #[cfg(tracer_swt)]
 pub(crate) mod swt;
-
-pub(crate) use errors::InvalidTraceError;
 
 /// A `Tracer` is a front-end to a tracer backend (e.g. hardware or software tracing). The tracer
 /// backend may have its own configuration options, which is why `Tracer` does not have a `new`
@@ -54,7 +52,24 @@ pub(crate) fn default_tracer() -> Result<Arc<dyn Tracer>, Box<dyn Error>> {
 pub(crate) trait TraceRecorder {
     /// Stop recording a trace of the current thread and return an iterator which successively
     /// produces [TraceAction]s.
-    fn stop(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, InvalidTraceError>;
+    fn stop(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, TraceRecorderError>;
+}
+
+/// When a trace recorder stops, it may immediately realise that a problem occurred and return an
+/// instance of this enum. Some of these problems may be "fixed" by simply retrying tracing.
+///
+/// Note that the trace processor may later realise that there is a problem in the trace (see
+/// [AOTTraceIterator] and [AOTTraceIteratorError]).
+#[derive(Debug, Error)]
+pub enum TraceRecorderError {
+    /// Nothing was recorded.
+    #[error("Trace empty")]
+    #[allow(dead_code)]
+    TraceEmpty,
+    /// The trace being recorded was too long and tracing was aborted.
+    #[error("Trace too long")]
+    #[allow(dead_code)]
+    TraceTooLong,
 }
 
 /// An iterator which [TraceRecord]s use to process a trace into [TraceAction]s. The iterator must
@@ -72,7 +87,8 @@ pub(crate) trait AOTTraceIterator:
 {
 }
 
-// Not all backends will generate all of these possibilities.
+/// When a trace is being processed, a problem might be noticed at any point. It is possible that
+/// tracing the original [crate::location::Location] again may "fix" the problem.
 pub(crate) enum AOTTraceIteratorError {
     #[allow(dead_code)]
     TraceTooLong,
