@@ -6,7 +6,9 @@ use crate::{
 use libc::c_void;
 use parking_lot::Mutex;
 use std::{
-    env, fmt,
+    env,
+    error::Error,
+    fmt,
     sync::{
         atomic::{AtomicU32, Ordering},
         Arc, Weak,
@@ -20,13 +22,8 @@ pub(crate) mod jitc_llvm;
 pub mod jitc_yk;
 
 /// A failure to compile a trace.
-#[derive(Debug, thiserror::Error)]
-pub enum CompilationError {
-    #[error("Unrecoverable error: {0}")]
-    Unrecoverable(String),
-    #[error("Temporary error: {0}")]
-    Temporary(String),
-}
+#[derive(Debug)]
+pub(crate) struct CompilationError(pub(crate) String);
 
 /// The trait that every JIT compiler backend must implement.
 pub(crate) trait Compiler: Send + Sync {
@@ -40,7 +37,7 @@ pub(crate) trait Compiler: Send + Sync {
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
 }
 
-pub(crate) fn default_compiler() -> Result<Arc<dyn Compiler>, CompilationError> {
+pub(crate) fn default_compiler() -> Result<Arc<dyn Compiler>, Box<dyn Error>> {
     #[cfg(jitc_yk)]
     // Transitionary env var to turn on the new code generator.
     //
@@ -57,9 +54,7 @@ pub(crate) fn default_compiler() -> Result<Arc<dyn Compiler>, CompilationError> 
 
     #[allow(unreachable_code)]
     {
-        Err(CompilationError::Unrecoverable(
-            "No JIT compiler supported on this platform/configuration".into(),
-        ))
+        Err("No JIT compiler supported on this platform/configuration".into())
     }
 }
 

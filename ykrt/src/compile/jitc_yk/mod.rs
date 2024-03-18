@@ -18,6 +18,7 @@ use parking_lot::Mutex;
 use std::{
     collections::HashSet,
     env,
+    error::Error,
     ffi::CString,
     slice,
     sync::{Arc, LazyLock},
@@ -37,15 +38,12 @@ enum IRPhase {
 }
 
 impl IRPhase {
-    fn from_str(s: &str) -> Result<Self, CompilationError> {
+    fn from_str(s: &str) -> Result<Self, Box<dyn Error>> {
         match s {
             "aot" => Ok(Self::AOT),
             "jit-pre-opt" => Ok(Self::PreOpt),
             "jit-post-opt" => Ok(Self::PostOpt),
-            _ => Err(CompilationError::Unrecoverable(format!(
-                "Invalid YKD_PRINT_IR value: {}",
-                s
-            ))),
+            _ => Err(format!("Invalid YKD_PRINT_IR value: {s}").into()),
         }
     }
 }
@@ -75,9 +73,9 @@ impl Compiler for JITCYk {
         if sti.is_some() {
             todo!();
         }
-        let ir_slice = yk_ir_section()?;
-        // FIXME: Cache deserialisation, so we don't load it afresh each time.
-        let aot_mod = aot_ir::deserialise_module(ir_slice)?;
+        // If either `unwrap` fails, there is no chance of the system working correctly.
+        let ir_slice = yk_ir_section().unwrap();
+        let aot_mod = aot_ir::deserialise_module(ir_slice).unwrap();
 
         if PHASES_TO_PRINT.contains(&IRPhase::AOT) {
             eprintln!("--- Begin aot ---");
@@ -89,7 +87,9 @@ impl Compiler for JITCYk {
 
         if PHASES_TO_PRINT.contains(&IRPhase::PreOpt) {
             eprintln!("--- Begin pre-opt ---");
-            jit_mod.dump()?;
+            // FIXME: If the `unwrap` fails, something rather bad has happened: does recovery even
+            // make sense?
+            jit_mod.dump().unwrap();
             eprintln!("--- End pre-opt ---");
         }
 
@@ -101,17 +101,15 @@ impl Compiler for JITCYk {
 }
 
 impl JITCYk {
-    pub(crate) fn new() -> Result<Arc<Self>, CompilationError> {
+    pub(crate) fn new() -> Result<Arc<Self>, Box<dyn Error>> {
         Ok(Arc::new(Self {}))
     }
 }
 
-pub(crate) fn yk_ir_section() -> Result<&'static [u8], CompilationError> {
-    let start = symbol_vaddr(&CString::new("ykllvm.yk_ir.start").unwrap()).ok_or(
-        CompilationError::Unrecoverable("couldn't find ykllvm.yk_ir.start".into()),
-    )?;
-    let stop = symbol_vaddr(&CString::new("ykllvm.yk_ir.stop").unwrap()).ok_or(
-        CompilationError::Unrecoverable("couldn't find ykllvm.yk_ir.stop".into()),
-    )?;
+pub(crate) fn yk_ir_section() -> Result<&'static [u8], Box<dyn Error>> {
+    let start = symbol_vaddr(&CString::new("ykllvm.yk_ir.start").unwrap())
+        .ok_or("couldn't find ykllvm.yk_ir.start")?;
+    let stop = symbol_vaddr(&CString::new("ykllvm.yk_ir.stop").unwrap())
+        .ok_or("couldn't find ykllvm.yk_ir.stop")?;
     Ok(unsafe { slice::from_raw_parts(start as *const u8, stop - start) })
 }

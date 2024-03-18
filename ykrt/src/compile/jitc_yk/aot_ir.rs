@@ -3,10 +3,9 @@
 //! This is a parser for the on-disk (in the ELF binary) IR format used to express the
 //! (immutable) ahead-of-time compiled interpreter.
 
-use super::CompilationError;
 use byteorder::{NativeEndian, ReadBytesExt};
 use deku::prelude::*;
-use std::{cell::RefCell, ffi::CStr, fs, io::Cursor, path::PathBuf};
+use std::{cell::RefCell, error::Error, ffi::CStr, fs, io::Cursor, path::PathBuf};
 use typed_index_collections::TiVec;
 
 /// A magic number that all bytecode payloads begin with.
@@ -1130,21 +1129,17 @@ impl Module {
 }
 
 /// Deserialise an AOT module from the slice `data`.
-pub(crate) fn deserialise_module(data: &[u8]) -> Result<Module, CompilationError> {
-    match Module::from_bytes((data, 0)) {
-        Ok(((_, _), mut modu)) => {
-            modu.compute_local_operand_func_indices();
-            Ok(modu)
-        }
-        Err(e) => Err(CompilationError::Unrecoverable(e.to_string())),
-    }
+pub(crate) fn deserialise_module(data: &[u8]) -> Result<Module, Box<dyn Error>> {
+    let ((_, _), mut modu) = Module::from_bytes((data, 0))?;
+    modu.compute_local_operand_func_indices();
+    Ok(modu)
 }
 
 /// Deserialise and print IR from an on-disk file.
 ///
 /// Used for support tooling (in turn used by tests too).
-pub fn print_from_file(path: &PathBuf) -> Result<(), CompilationError> {
-    let data = fs::read(path).map_err(|e| CompilationError::Unrecoverable(e.to_string()))?;
+pub fn print_from_file(path: &PathBuf) -> Result<(), Box<dyn Error>> {
+    let data = fs::read(path)?;
     let ir = deserialise_module(&data)?;
     println!("{}", ir.to_str());
     Ok(())

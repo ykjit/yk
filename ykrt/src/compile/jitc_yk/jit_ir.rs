@@ -7,7 +7,7 @@
 #![allow(dead_code)]
 
 use crate::compile::CompilationError;
-use std::{ffi::c_void, mem, ptr};
+use std::{error::Error, ffi::c_void, mem, ptr};
 use typed_index_collections::TiVec;
 
 // Since the AOT versions of these data structures contain no AOT/JIT-IR-specific indices we can
@@ -21,7 +21,7 @@ impl JitIRDisplay for IntegerType {
         _m: &Module,
         s: &mut String,
         _nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         s.push_str(&format!("i{}", self.num_bits()));
         Ok(())
     }
@@ -33,7 +33,7 @@ impl JitIRDisplay for GlobalDecl {
         _m: &Module,
         s: &mut String,
         _nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         s.push_str("@");
         s.push_str(&self.name());
         Ok(())
@@ -61,8 +61,8 @@ pub(crate) struct LocalNumbers<'a> {
 }
 
 impl<'a> LocalNumbers<'a> {
-    fn new(m: &'a Module) -> Result<LocalNumbers<'a>, CompilationError> {
-        Ok(Self { m })
+    fn new(m: &'a Module) -> LocalNumbers<'a> {
+        Self { m }
     }
 
     /// Returns the [InstrIdx] of the specified [Instruction] in the [Module].
@@ -70,11 +70,13 @@ impl<'a> LocalNumbers<'a> {
     /// # Panics
     ///
     /// Panics if the instruction isn't present in the module.
-    fn idx(&self, instr: &Instruction) -> Result<InstrIdx, CompilationError> {
+    fn idx(&self, instr: &Instruction) -> InstrIdx {
         // FIXME: This is inefficient.
         for (idx, candidate) in self.m.instrs().iter().enumerate() {
             if ptr::addr_eq(instr, candidate) {
-                return Ok(InstrIdx::new(idx)?);
+                // The `unwrap` cannot fail because we won't have expanded `m.instrs()` beyond the
+                // ability of `InstrIdx` to represent an index.
+                return InstrIdx::new(idx).unwrap();
             }
         }
         panic!(); // Not found!
@@ -98,9 +100,9 @@ pub(crate) trait JitIRDisplay {
     /// This is the outward-facing API for stringification. Don't call this from other
     /// `JitIRDisplay` implementations. Use [JitIRDisplay::to_string_impl()] instead and pass down
     /// the existing output string and [LocalNumbers] struct.
-    fn to_string(&self, m: &Module) -> Result<String, CompilationError> {
+    fn to_string(&self, m: &Module) -> Result<String, Box<dyn Error>> {
         let mut s = String::new();
-        self.to_string_impl(m, &mut s, &LocalNumbers::new(m)?)?;
+        self.to_string_impl(m, &mut s, &LocalNumbers::new(m))?;
         Ok(s)
     }
 
@@ -110,13 +112,13 @@ pub(crate) trait JitIRDisplay {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError>;
+    ) -> Result<(), Box<dyn Error>>;
 
     /// Print `self` to stderr in human-readable form.
     ///
     /// This isn't used during normal operation of the system: it is provided as a debugging aid.
     #[allow(dead_code)]
-    fn dump(&self, m: &Module) -> Result<(), CompilationError> {
+    fn dump(&self, m: &Module) -> Result<(), Box<dyn Error>> {
         eprintln!("{}", self.to_string(m).map_err(|e| e)?);
         Ok(())
     }
@@ -154,7 +156,7 @@ impl U24 {
 
 /// Helper to create index overflow errors.
 fn index_overflow(typ: &str) -> CompilationError {
-    CompilationError::Temporary(format!("index overflow: {}", typ))
+    CompilationError(format!("index overflow: {}", typ))
 }
 
 // Generate common methods for 24-bit index types.
@@ -293,7 +295,7 @@ impl JitIRDisplay for InstrIdx {
         _m: &Module,
         s: &mut String,
         _nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         s.push_str("%");
         s.push_str(&self.to_u16().to_string());
         Ok(())
@@ -376,7 +378,7 @@ impl JitIRDisplay for Type {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         match self {
             Self::Void => s.push_str("void"),
             Self::Integer(it) => it.to_string_impl(m, s, nums)?,
@@ -542,7 +544,7 @@ impl JitIRDisplay for Operand {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         match self {
             Self::Local(idx) => s.push_str(&format!("%{}", idx.to_u16())),
             Self::Const(idx) => m.const_(*idx).to_string_impl(m, s, nums)?,
@@ -568,7 +570,7 @@ impl JitIRDisplay for Constant {
         _m: &Module,
         s: &mut String,
         _nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         match self {
             Self::U32(v) => s.push_str(&v.to_string()),
             Self::Usize(v) => s.push_str(&v.to_string()),
@@ -665,10 +667,10 @@ impl JitIRDisplay for Instruction {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         // If the instruction defines a value print it like an assignment.
         if let Some(dt) = self.def_type(m) {
-            nums.idx(self)?.to_string_impl(m, s, nums)?;
+            nums.idx(self).to_string_impl(m, s, nums)?;
             s.push_str(": ");
             dt.to_string_impl(m, s, nums)?;
             s.push_str(" = ");
@@ -755,7 +757,7 @@ impl JitIRDisplay for LoadInstruction {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         s.push_str("Load ");
         self.operand().to_string_impl(m, s, nums)
     }
@@ -785,7 +787,7 @@ impl JitIRDisplay for LoadTraceInputInstruction {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         s.push_str(&format!("LoadTraceInput {}, ", self.off()));
         m.type_(self.ty_idx).to_string_impl(m, s, nums)?;
         Ok(())
@@ -849,7 +851,7 @@ impl JitIRDisplay for LookupGlobalInstruction {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         s.push_str("LookupGlobal ");
         m.global_decl(self.global_decl_idx)
             .to_string_impl(m, s, nums)
@@ -878,7 +880,7 @@ impl JitIRDisplay for CallInstruction {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         let decl = m.func_decl(self.target);
         s.push_str("Call @");
         s.push_str(decl.name());
@@ -994,7 +996,7 @@ impl JitIRDisplay for StoreInstruction {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         s.push_str("Store ");
         self.val.unpack().to_string_impl(m, s, nums)?;
         s.push_str(", ");
@@ -1042,7 +1044,7 @@ impl JitIRDisplay for PtrAddInstruction {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         s.push_str("PtrAdd ");
         self.ptr().to_string_impl(m, s, nums)?;
         s.push_str(", ");
@@ -1095,7 +1097,7 @@ impl JitIRDisplay for AddInstruction {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         s.push_str("Add ");
         self.op1().to_string_impl(m, s, nums)?;
         s.push_str(", ");
@@ -1155,7 +1157,7 @@ impl JitIRDisplay for IcmpInstruction {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         s.push_str("Icmp ");
         self.left().to_string_impl(m, s, nums)?;
         s.push_str(", ");
@@ -1203,7 +1205,7 @@ impl JitIRDisplay for GuardInstruction {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         s.push_str("Guard ");
         self.cond().to_string_impl(m, s, nums)?;
         s.push_str(", ");
@@ -1332,7 +1334,12 @@ impl Module {
     }
 
     /// Push an instruction to the end of the [Module].
+    ///
+    /// # Panics
+    ///
+    /// If `instr` would overflow the index type.
     pub(crate) fn push(&mut self, instr: Instruction) {
+        assert!(InstrIdx::new(self.instrs.len()).is_ok());
         self.instrs.push(instr);
     }
 
@@ -1349,11 +1356,12 @@ impl Module {
     /// # Panics
     ///
     /// Panics if the instruction doesn't define a local variable that we could use to build an
-    /// [Operand].
+    /// [Operand] or if `instr` would overflow the index type.
     pub(crate) fn push_and_make_operand(
         &mut self,
         instr: Instruction,
     ) -> Result<Operand, CompilationError> {
+        assert!(InstrIdx::new(self.instrs.len()).is_ok());
         if !instr.is_def() {
             panic!();
         }
@@ -1368,12 +1376,12 @@ impl Module {
     }
 
     /// Stringify the module.
-    pub(crate) fn to_string(&self) -> Result<String, CompilationError> {
+    pub(crate) fn to_string(&self) -> Result<String, Box<dyn Error>> {
         (self as &dyn JitIRDisplay).to_string(self)
     }
 
     /// Print the [Module] to `stderr`.
-    pub(crate) fn dump(&self) -> Result<(), CompilationError> {
+    pub(crate) fn dump(&self) -> Result<(), Box<dyn Error>> {
         eprintln!("{}", self.to_string()?);
         Ok(())
     }
@@ -1384,7 +1392,12 @@ impl Module {
     }
 
     /// Push a slice of extra arguments into the extra arg table.
+    ///
+    /// # Panics
+    ///
+    /// If `ops` would overflow the index type.
     fn push_extra_args(&mut self, ops: &[Operand]) -> Result<ExtraArgsIdx, CompilationError> {
+        assert!(ExtraArgsIdx::new(self.types.len()).is_ok());
         let idx = self.extra_args.len();
         self.extra_args.extend_from_slice(ops); // FIXME: this clones.
         ExtraArgsIdx::new(idx)
@@ -1393,6 +1406,10 @@ impl Module {
     /// Push a new type into the type table and return its index.
     ///
     /// The type must not already exist in the module's type table.
+    ///
+    /// # Panics
+    ///
+    /// If `ty` would overflow the index type.
     fn push_type(&mut self, ty: Type) -> Result<TypeIdx, CompilationError> {
         #[cfg(debug_assertions)]
         {
@@ -1400,30 +1417,46 @@ impl Module {
                 debug_assert_ne!(et, &ty, "type already exists");
             }
         }
+        assert!(TypeIdx::new(self.types.len()).is_ok());
         let idx = self.types.len();
         self.types.push(ty);
         Ok(TypeIdx::new(idx)?)
     }
 
     /// Push a new function declaration into the function declaration table and return its index.
+    ///
+    /// # Panics
+    ///
+    /// If `func_decl` would overflow the index type.
     fn push_func_decl(&mut self, func_decl: FuncDecl) -> Result<FuncDeclIdx, CompilationError> {
+        assert!(FuncDeclIdx::new(self.func_decls.len()).is_ok());
         let idx = self.func_decls.len();
         self.func_decls.push(func_decl);
         Ok(FuncDeclIdx::new(idx)?)
     }
 
     /// Push a new constant into the constant table and return its index.
+    ///
+    /// # Panics
+    ///
+    /// If `constant` would overflow the index type.
     pub fn push_const(&mut self, constant: Constant) -> Result<ConstIdx, CompilationError> {
+        assert!(ConstIdx::new(self.consts.len()).is_ok());
         let idx = self.consts.len();
         self.consts.push(constant);
         ConstIdx::new(idx)
     }
 
     /// Push a new declaration into the global variable declaration table and return its index.
+    ///
+    /// # Panics
+    ///
+    /// If `decl` would overflow the index type.
     pub fn push_global_decl(
         &mut self,
         decl: GlobalDecl,
     ) -> Result<GlobalDeclIdx, CompilationError> {
+        assert!(GlobalDeclIdx::new(self.global_decls.len()).is_ok());
         let idx = self.consts.len();
         self.global_decls.push(decl);
         GlobalDeclIdx::new(idx)
@@ -1501,7 +1534,7 @@ impl JitIRDisplay for Module {
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'a>,
-    ) -> Result<(), CompilationError> {
+    ) -> Result<(), Box<dyn Error>> {
         s.push_str("; ");
         s.push_str(&self.name);
 
