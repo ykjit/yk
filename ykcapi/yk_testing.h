@@ -4,9 +4,6 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#define SW_TRACING 0
-#define HW_TRACING 1
-
 size_t __yktrace_hwt_mapper_blockmap_len();
 
 // Blocks the compiler from optimising the specified value or expression.
