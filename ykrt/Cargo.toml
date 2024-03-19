@@ -44,8 +44,8 @@ regex = "1.9"
 ykbuild = { path = "../ykbuild" }
 
 [features]
-yk_jitstate_debug = []
-yk_testing = []
+yk_jitstate_debug = ["yktracec/yk_testing"]
+yk_testing = ["yktracec/yk_testing"]
 
 [dev-dependencies]
 fm = "0.2.2"
