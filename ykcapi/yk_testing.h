@@ -3,7 +3,40 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <yk.h>
 
+/// The statistics passed to the `test` function in `ykstats_wait_until`.
+// Note: this struct *must* stay in sync with `YkCStats` in `ykstats.rs`.
+typedef struct {
+  /// How many traces were recorded successfully?
+  uint64_t traces_recorded_ok;
+  /// How many traces were recorded unsuccessfully?
+  uint64_t traces_recorded_err;
+  /// How many traces were compiled successfully?
+  uint64_t traces_compiled_ok;
+  /// How many traces were compiled unsuccessfully?
+  uint64_t traces_compiled_err;
+  /// How many times have traces been executed? Note that the same trace can
+  /// count arbitrarily many times to this.
+  uint64_t trace_executions;
+} YkCStats;
+
+/// Iff `YKD_STATS` is set, suspend this thread's execution until
+/// `test(YkCStats)` returns true. The `test` function will be called one or
+/// more times: as soon as `test` returns `true`, `__ykstats_wait_until` itself
+/// returns. This allows a test to wait for e.g. a certain number of traces to
+/// be recorded/compiled, even if that happens in another thread.
+///
+/// Note that a lock is held on yk's statistics while `test` is called, so
+/// `test` should not perform lengthy calculations (if it does, it may block
+/// other threads). Note also that the `YkCStats` struct it is passed only has
+/// valid values for the duration of `test`'s execution: those stats may become
+/// invalid immediately after `test` returns.
+///
+/// This function will panic if `YKD_STATS` is not set.
+void __ykstats_wait_until(YkMT *mt, bool test(YkCStats));
+
+// This function will only exist if the `hwt` tracer is compiled in to ykrt.
 size_t __yktrace_hwt_mapper_blockmap_len();
 
 // Blocks the compiler from optimising the specified value or expression.

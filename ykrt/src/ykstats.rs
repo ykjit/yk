@@ -2,9 +2,10 @@
 /// statistics varies: for example, "durations" are wall-clock time, which inevitably fail to
 /// account for context switches and the like. Thus the statistics are very much in "best effort"
 /// territory -- but it's better than nothing!
-
 #[cfg(not(test))]
 use std::env;
+#[cfg(feature = "yk_testing")]
+use std::sync::Condvar;
 use std::{
     cell::Cell,
     fs,
@@ -23,6 +24,10 @@ pub(crate) struct YkStats {
     // recorded?" The outer `Option` means thus becomes a simple `if (NULL) { return}` check: only
     // if stats are to be recorded do we have to go to the expense of locking a `Mutex`.
     inner: Option<Mutex<YkStatsInner>>,
+    // In `yk_testing`, this [CondVar] allows threads to wait until a certain set of events have
+    // happened with the [Self::wait_until] function.
+    #[cfg(feature = "yk_testing")]
+    wait_until_condvar: Option<Condvar>,
 }
 
 struct YkStatsInner {
@@ -49,9 +54,15 @@ impl YkStats {
         if let Ok(p) = env::var("YKD_STATS") {
             Self {
                 inner: Some(Mutex::new(YkStatsInner::new(p))),
+                #[cfg(feature = "yk_testing")]
+                wait_until_condvar: Some(Condvar::new()),
             }
         } else {
-            Self { inner: None }
+            Self {
+                inner: None,
+                #[cfg(feature = "yk_testing")]
+                wait_until_condvar: None,
+            }
         }
     }
 
@@ -59,46 +70,83 @@ impl YkStats {
     pub fn new() -> Self {
         Self {
             inner: Some(Mutex::new(YkStatsInner::new("-".to_string()))),
+            wait_until_condvar: None,
         }
     }
 
-    fn lock<F, T>(&self, f: F) -> Option<T>
+    /// If `YKD_STATS` was specified, update `inner` by running the function `f`, otherwise return
+    /// immediately without calling `f`.
+    fn update_with<F>(&self, f: F)
     where
-        F: FnOnce(&mut YkStatsInner) -> T,
+        F: FnOnce(&mut YkStatsInner),
     {
-        self.inner
-            .as_ref()
-            .map(|x| f(x.lock().unwrap().deref_mut()))
+        if let Some(mtx) = &self.inner {
+            let mut lk = mtx.lock().unwrap();
+            f(lk.deref_mut());
+            #[cfg(feature = "yk_testing")]
+            {
+                drop(lk);
+                self.wait_until_condvar.as_ref().map(|x| x.notify_all());
+            }
+        }
+    }
+
+    /// Iff `YKD_STATS` is set, suspend this thread's execution until `test(YkStatsInner)` returns
+    /// true. Note that a lock is held on yk's statistics while `test` is called, so `test` should
+    /// not perform lengthy calculations (if it does, it may block other threads).
+    ///
+    /// # Panics
+    ///
+    /// If `YKD_STATS` is not set.
+    #[cfg(feature = "yk_testing")]
+    fn wait_until<F>(&self, test: F)
+    where
+        F: Fn(&mut YkStatsInner) -> bool,
+    {
+        match &self.inner {
+            Some(mtx) => {
+                let mut lk = mtx.lock().unwrap();
+                while !test(lk.deref_mut()) {
+                    lk = self
+                        .wait_until_condvar
+                        .as_ref()
+                        .expect("Can't call wait_until unless YKD_STATS is set")
+                        .wait(lk)
+                        .unwrap();
+                }
+            }
+            None => panic!("Can't call wait_until unless YKD_STATS is set"),
+        }
     }
 
     /// Increment the "a trace has been recorded successfully" count.
     pub fn trace_recorded_ok(&self) {
-        self.lock(|inner| inner.traces_recorded_ok += 1);
+        self.update_with(|inner| inner.traces_recorded_ok += 1);
     }
 
     /// Increment the "a trace has been recorded unsuccessfully" count.
     pub fn trace_recorded_err(&self) {
-        self.lock(|inner| inner.traces_recorded_err += 1);
+        self.update_with(|inner| inner.traces_recorded_err += 1);
     }
 
     /// Increment the "a trace has been compiled successfully" count.
     pub fn trace_compiled_ok(&self) {
-        self.lock(|inner| inner.traces_compiled_ok += 1);
+        self.update_with(|inner| inner.traces_compiled_ok += 1);
     }
 
     /// Increment the "a trace has been compiled unsuccessfully" count.
     pub fn trace_compiled_err(&self) {
-        self.lock(|inner| inner.traces_compiled_err += 1);
+        self.update_with(|inner| inner.traces_compiled_err += 1);
     }
 
     /// Increment the "a compiled trace has started execution" count.
     pub fn trace_executed(&self) {
-        self.lock(|inner| inner.trace_executions += 1);
+        self.update_with(|inner| inner.trace_executions += 1);
     }
 
     /// Change the [TimingState] the current thread is in.
     pub fn timing_state(&self, new_state: TimingState) {
-        self.lock(|inner| {
+        self.update_with(|inner| {
             let now = Instant::now();
             let (prev_state, then) = VM_STATE.replace((new_state, now));
             let d = now.saturating_duration_since(then);
@@ -217,4 +265,41 @@ pub(crate) enum TimingState {
 
 thread_local! {
     static VM_STATE: Cell<(TimingState, Instant)> = Cell::new((TimingState::OutsideYk, Instant::now()));
+}
+
+/// Various functions for the C testing suite.
+#[cfg(feature = "yk_testing")]
+mod yk_testing {
+    use crate::mt::MT;
+
+    /// This struct *must* stay in sync with `YkCStats` in `yk_testing.h`.
+    #[repr(C)]
+    pub struct YkCStats {
+        traces_recorded_ok: u64,
+        traces_recorded_err: u64,
+        traces_compiled_ok: u64,
+        traces_compiled_err: u64,
+        trace_executions: u64,
+    }
+
+    #[no_mangle]
+    pub extern "C" fn __ykstats_wait_until(
+        mt: *const MT,
+        test: unsafe extern "C" fn(YkCStats) -> bool,
+    ) {
+        let mt = unsafe { &*mt };
+        if mt.stats.inner.is_none() {
+            panic!("Statistics collection not enabled");
+        }
+        mt.stats.wait_until(|inner| {
+            let cstats = YkCStats {
+                traces_recorded_ok: inner.traces_recorded_ok,
+                traces_recorded_err: inner.traces_recorded_err,
+                traces_compiled_ok: inner.traces_compiled_ok,
+                traces_compiled_err: inner.traces_compiled_err,
+                trace_executions: inner.trace_executions,
+            };
+            unsafe { test(cstats) }
+        });
+    }
 }
