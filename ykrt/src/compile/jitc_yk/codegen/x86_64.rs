@@ -6,20 +6,22 @@
 
 use super::{
     super::{
-        jit_ir::{self, InstrIdx, JitIRDisplay, Operand, Type},
+        jit_ir::{self, InstrIdx, Operand, Type},
         CompilationError,
     },
     abs_stack::AbstractStack,
     reg_alloc::{LocalAlloc, RegisterAllocator, StackDirection},
     CodeGen,
 };
+#[cfg(any(debug_assertions, test))]
+use crate::compile::jitc_yk::jit_ir::JitIRDisplay;
 use crate::compile::CompiledTrace;
 use dynasmrt::{
     dynasm, x64::Rq, AssemblyOffset, DynasmApi, DynasmLabelApi, ExecutableBuffer, Register,
 };
 #[cfg(any(debug_assertions, test))]
-use std::{cell::Cell, collections::HashMap, slice};
-use std::{error::Error, ffi::CString, sync::Arc};
+use std::{cell::Cell, collections::HashMap, error::Error, slice};
+use std::{ffi::CString, sync::Arc};
 use ykaddr::addr::symbol_vaddr;
 
 /// Argument registers as defined by the X86_64 SysV ABI.
