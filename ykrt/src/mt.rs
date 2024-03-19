@@ -18,6 +18,7 @@ use std::{
 };
 
 use parking_lot::{Condvar, Mutex, MutexGuard};
+#[cfg(not(feature = "yk_jitstate_debug"))]
 use parking_lot_core::SpinWait;
 #[cfg(feature = "yk_jitstate_debug")]
 use std::sync::LazyLock;
@@ -347,34 +348,49 @@ impl MT {
             match loc.hot_location() {
                 Some(hl) => {
                     // If this thread is tracing something, we *must* grab the [HotLocation] lock,
-                    // because we need to know for sure if `loc` is the point at which we should stop
-                    // tracing. If this thread is not tracing anything, however, it's not worth
-                    // contending too much with other threads: we try moderately hard to grab the lock,
-                    // but we don't want to park this thread.
-                    let mut lk = if !am_tracing {
-                        // This thread isn't tracing anything, so we try for a little while to grab the
-                        // lock, before giving up and falling back to the interpreter. In general, we
-                        // expect that we'll grab the lock rather quickly. However, there is one nasty
-                        // use-case, which is when an army of threads all start executing the same
-                        // piece of tiny code and end up thrashing away at a single Location,
-                        // particularly when it's in a non-Compiled state: we can end up contending
-                        // horribly for a single lock, and not making much progress. In that case, it's
-                        // probably better to let some threads fall back to the interpreter for another
-                        // iteration, and hopefully allow them to get sufficiently out-of-sync that
-                        // they no longer contend on this one lock as much.
-                        let mut sw = SpinWait::new();
-                        loop {
-                            if let Some(lk) = hl.try_lock() {
-                                break lk;
+                    // because we need to know for sure if `loc` is the point at which we should
+                    // stop tracing. In most compilation modes, we are willing to give up trying to
+                    // lock and return if it looks like it will take too long. When `yk_testing` is
+                    // enabled, however, this introduces non-determinism, so in that compilation
+                    // mode only we guarantee to grab the lock.
+                    let mut lk;
+
+                    #[cfg(not(feature = "yk_testing"))]
+                    {
+                        // If this thread is not tracing anything, however, it's not worth
+                        // contending too much with other threads: we try moderately hard to grab
+                        // the lock, but we don't want to park this thread.
+                        if !am_tracing {
+                            // This thread isn't tracing anything, so we try for a little while to grab the
+                            // lock, before giving up and falling back to the interpreter. In general, we
+                            // expect that we'll grab the lock rather quickly. However, there is one nasty
+                            // use-case, which is when an army of threads all start executing the same
+                            // piece of tiny code and end up thrashing away at a single Location,
+                            // particularly when it's in a non-Compiled state: we can end up contending
+                            // horribly for a single lock, and not making much progress. In that case, it's
+                            // probably better to let some threads fall back to the interpreter for another
+                            // iteration, and hopefully allow them to get sufficiently out-of-sync that
+                            // they no longer contend on this one lock as much.
+                            let mut sw = SpinWait::new();
+                            loop {
+                                if let Some(x) = hl.try_lock() {
+                                    lk = x;
+                                    break;
+                                }
+                                if !sw.spin() {
+                                    return TransitionControlPoint::NoAction;
+                                }
                             }
-                            if !sw.spin() {
-                                return TransitionControlPoint::NoAction;
-                            }
-                        }
-                    } else {
-                        // This thread is tracing something, so we must grab the lock.
-                        hl.lock()
-                    };
+                        } else {
+                            // This thread is tracing something, so we must grab the lock.
+                            lk = hl.lock();
+                        };
+                    }
+
+                    #[cfg(feature = "yk_testing")]
+                    {
+                        lk = hl.lock();
+                    }
 
                     match lk.kind {
                         HotLocationKind::Compiled(ref ctr) => {
