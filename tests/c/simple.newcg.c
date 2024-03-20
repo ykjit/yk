@@ -16,9 +16,9 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{var1}}: i32 = Call @puts(%{{var2}})
-//     ...
 //     --- End jit-pre-opt ---
+//     ...
+//     deopt...
 //     ...
 
 // Check that basic trace compilation works.
@@ -48,7 +48,6 @@ int main(int argc, char **argv) {
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    puts("i");
     res += 2;
     i--;
   }

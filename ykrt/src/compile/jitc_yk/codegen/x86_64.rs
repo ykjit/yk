@@ -19,6 +19,7 @@ use crate::compile::CompiledTrace;
 use dynasmrt::{
     dynasm, x64::Rq, AssemblyOffset, DynasmApi, DynasmLabelApi, ExecutableBuffer, Register,
 };
+use libc::c_void;
 #[cfg(any(debug_assertions, test))]
 use std::{cell::Cell, collections::HashMap, error::Error, slice};
 use std::{ffi::CString, sync::Arc};
@@ -47,6 +48,10 @@ const SYSV_CALL_STACK_ALIGN: usize = 16;
 
 /// On X86_64 the stack grows down.
 const STACK_DIRECTION: StackDirection = StackDirection::GrowsDown;
+
+extern "C" fn __yk_deopt(_ctrlpvars: *const c_void, _frameaddr: *const c_void) {
+    panic!("deopt");
+}
 
 /// The X86_64 code generator.
 pub(crate) struct X64CodeGen<'a> {
@@ -166,6 +171,12 @@ impl<'a> X64CodeGen<'a> {
         // Start a frame for the JITted code.
         dynasm!(self.asm
             ; push rbp
+            ; mov rbp, rsp
+            // Save pointers to ctrlp_vars and frameaddr for later use.
+            ; push rdi
+            ; push rsi
+            // Reset the basepointer so the spill allocator doesn't overwrite the two values we
+            // just pushed.
             ; mov rbp, rsp
         );
 
@@ -497,7 +508,10 @@ impl<'a> X64CodeGen<'a> {
         dynasm!(self.asm
             ; jmp >check_cond
             ; guard_fail:
-            ; ud2 // undefined instruction, crashes the program.
+            ; mov rdi, [rbp+8]
+            ; mov rsi, [rbp]
+            ; mov rax, QWORD __yk_deopt as _
+            ; call rax
             ; check_cond:
             ; cmp Rb(WR0.code()), inst.expect() as i8 // `as` intentional.
             ; jne <guard_fail
@@ -1306,10 +1320,13 @@ mod tests {
             let patt_lines = [
                 "...",
                 "; Guard %0, true",
-                "... 0000001b: jmp 0x0000000000000022",
-                "... 00000020: ud2",
-                "... 00000022: cmp r12b, 0x01",
-                "... 00000026: jnz 0x0000000000000020",
+                "... 00000020: jmp 0x0000000000000039",
+                "... 00000025: mov rdi, [rbp+0x08]",
+                "... 00000029: mov rsi, [rbp]",
+                "... 0000002d: mov rax, ...",
+                "... 00000037: call rax",
+                "... 00000039: cmp r12b, 0x01",
+                "... 0000003d: jnz 0x0000000000000025",
                 "... ud2",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
@@ -1327,10 +1344,13 @@ mod tests {
             let patt_lines = [
                 "...",
                 "; Guard %0, false",
-                "... 0000001b: jmp 0x0000000000000022",
-                "... 00000020: ud2",
-                "... 00000022: cmp r12b, 0x00",
-                "... 00000026: jnz 0x0000000000000020",
+                "... 00000020: jmp 0x0000000000000039",
+                "... 00000025: mov rdi, [rbp+0x08]",
+                "... 00000029: mov rsi, [rbp]",
+                "... 0000002d: mov rax, ...",
+                "... 00000037: call rax",
+                "... 00000039: cmp r12b, 0x00",
+                "... 0000003d: jnz 0x0000000000000025",
                 "... ud2",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
