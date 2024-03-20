@@ -92,6 +92,9 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
             self.codegen_inst(jit_ir::InstrIdx::new(idx)?, inst)?;
         }
 
+        // FIXME: until we implement trace looping, just crash.
+        dynasm!(self.asm; ud2);
+
         // Now we know the size of the stack frame (i.e. self.asp), patch the allocation with the
         // correct amount.
         self.patch_frame_allocation(alloc_off);
@@ -668,6 +671,7 @@ mod tests {
                 "... mov r12, [rbp-0x08]",
                 "... mov r12, [r12]",
                 "... mov [rbp-0x10], r12",
+                "... ud2",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
@@ -688,6 +692,7 @@ mod tests {
                 "... movzx r12, byte ptr [rbp-0x01]",
                 "... movzx r12, byte ptr [r12]",
                 "... mov [rbp-0x02], r12b",
+                "... ud2",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
@@ -708,6 +713,7 @@ mod tests {
                 "... mov r12d, [rbp-0x04]",
                 "... mov r12d, [r12]",
                 "... mov [rbp-0x08], r12d",
+                "... ud2",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
@@ -726,6 +732,7 @@ mod tests {
                 "... mov r12, [rbp-0x08]",
                 "... add r12, 0x40",
                 "... mov [rbp-0x10], r12",
+                "... ud2",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
@@ -747,6 +754,7 @@ mod tests {
                 "... mov r12, [rbp-0x10]",
                 "... mov r13, [rbp-0x08]",
                 "... mov [r12], r13",
+                "... ud2",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
@@ -763,6 +771,7 @@ mod tests {
                 &format!("; %0: i8 = LoadTraceInput 0, i8"),
                 "... movzx r12, byte ptr [rdi]",
                 "... mov [rbp-0x01], r12b",
+                "... ud2",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
@@ -779,6 +788,7 @@ mod tests {
                 &format!("; %0: i16 = LoadTraceInput 32, i16"),
                 "... movzx r12d, word ptr [rdi+0x20]",
                 "... mov [rbp-0x02], r12w",
+                "... ud2",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
@@ -812,6 +822,7 @@ mod tests {
                 &format!("; %4: ptr = LoadTraceInput 8, ptr"),
                 "... mov r12, [rdi+0x08]",
                 "... mov [rbp-0x10], r12",
+                "... ud2",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
@@ -838,6 +849,7 @@ mod tests {
                 "... movzx r13, word ptr [rbp-0x04]",
                 "... add r12w, r13w",
                 "... mov [rbp-0x06], r12w",
+                "... ud2",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
@@ -864,6 +876,7 @@ mod tests {
                 "... mov r13, [rbp-0x10]",
                 "... add r12, r13",
                 "... mov [rbp-0x18], r12",
+                "... ud2",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
@@ -1207,6 +1220,7 @@ mod tests {
                 "... cmp r12, r13",
                 "... setz r12b",
                 "... mov [rbp-0x09], r12b",
+                "... ud2",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
@@ -1231,6 +1245,7 @@ mod tests {
                 "... cmp r12b, r13b",
                 "... setz r12b",
                 "... mov [rbp-0x02], r12b",
+                "... ud2",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
@@ -1295,6 +1310,7 @@ mod tests {
                 "... 00000020: ud2",
                 "... 00000022: cmp r12b, 0x01",
                 "... 00000026: jnz 0x0000000000000020",
+                "... ud2",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
@@ -1315,6 +1331,7 @@ mod tests {
                 "... 00000020: ud2",
                 "... 00000022: cmp r12b, 0x00",
                 "... 00000026: jnz 0x0000000000000020",
+                "... ud2",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
