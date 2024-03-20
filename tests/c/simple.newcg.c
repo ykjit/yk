@@ -1,8 +1,8 @@
 // # Currently this test breaks CI entirely, so we temporarily ignore it
 // # completely.
-// ignore-if: test $YK_JIT_COMPILER != "yk"
+// ignore-if: test $YK_JIT_COMPILER != "yk" -o "$YKB_TRACER" = "swt"
 // Run-time:
-//   env-var: YKD_PRINT_IR=aot
+//   env-var: YKD_PRINT_IR=aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_PRINT_JITSTATE=1
 //   status: error
@@ -14,6 +14,11 @@
 //     func main($arg0: i32, $arg1: ptr) -> i32 {
 //     ...
 //     --- End aot ---
+//     --- Begin jit-pre-opt ---
+//     ...
+//     %{{var1}}: i32 = Call @puts(%{{var2}})
+//     ...
+//     --- End jit-pre-opt ---
 //     ...
 
 // Check that basic trace compilation works.

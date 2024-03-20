@@ -35,6 +35,7 @@ enum IRPhase {
     AOT,
     PreOpt,
     PostOpt,
+    Asm,
 }
 
 impl IRPhase {
@@ -43,6 +44,7 @@ impl IRPhase {
             "aot" => Ok(Self::AOT),
             "jit-pre-opt" => Ok(Self::PreOpt),
             "jit-post-opt" => Ok(Self::PostOpt),
+            "jit-asm" => Ok(Self::Asm),
             _ => Err(format!("Invalid YKD_PRINT_IR value: {s}").into()),
         }
     }
@@ -86,16 +88,25 @@ impl Compiler for JITCYk {
         let jit_mod = trace_builder::build(&aot_mod, aottrace_iter.0)?;
 
         if PHASES_TO_PRINT.contains(&IRPhase::PreOpt) {
-            eprintln!("--- Begin pre-opt ---");
+            eprintln!("--- Begin jit-pre-opt ---");
             // FIXME: If the `unwrap` fails, something rather bad has happened: does recovery even
             // make sense?
             jit_mod.dump().unwrap();
-            eprintln!("--- End pre-opt ---");
+            eprintln!("--- End jit-pre-opt ---");
         }
 
         let mut ra = SpillAllocator::new(StackDirection::GrowsDown);
         let cg = codegen::x86_64::X64CodeGen::new(&jit_mod, &mut ra).unwrap();
         let ct = cg.codegen()?;
+
+        #[cfg(any(debug_assertions, test))]
+        if PHASES_TO_PRINT.contains(&IRPhase::Asm) {
+            eprintln!("--- Begin jit-asm ---");
+            // If this unwrap fails, something went wrong in codegen.
+            eprintln!("{}", ct.disassemble().unwrap());
+            eprintln!("--- End jit-asm ---");
+        }
+
         Ok(ct)
     }
 }
