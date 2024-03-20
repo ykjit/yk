@@ -50,7 +50,7 @@ impl JitIRDisplay for GlobalDecl {
 ///
 const OPERAND_IDX_MASK: u16 = 0x7fff;
 
-// The largest operand index we can express in 15 bits.
+/// The largest operand index we can express in 15 bits.
 const MAX_OPERAND_IDX: u16 = (1 << 15) - 1;
 
 /// [Instruction] to [InstrIdx] mapping used for stringifying instructions.
