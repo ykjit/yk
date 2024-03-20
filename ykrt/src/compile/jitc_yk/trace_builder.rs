@@ -8,6 +8,8 @@ use std::collections::HashMap;
 
 /// The argument index of the trace inputs struct in the control point call.
 const CTRL_POINT_ARGIDX_INPUTS: usize = 3;
+/// The argument index of the trace inputs struct in the trace function.
+const TRACE_FUNC_CTRLP_ARGIDX: u16 = 0;
 
 /// Given a mapped trace and an AOT module, assembles an in-memory Yk IR trace by copying blocks
 /// from the AOT IR. The output of this process will be the input to the code generator.
@@ -64,6 +66,12 @@ impl<'a> TraceBuilder<'a> {
             if inst.is_control_point(self.aot_mod) {
                 let op = inst.operand(CTRL_POINT_ARGIDX_INPUTS);
                 trace_inputs = Some(op.to_instr(self.aot_mod));
+                // Add the trace input argument to the local map so it can be tracked and
+                // deoptimised.
+                self.local_map
+                    .insert(op.to_instr_id(), self.next_instr_id()?);
+                let arg = jit_ir::Instruction::Arg(TRACE_FUNC_CTRLP_ARGIDX);
+                self.jit_mod.push(arg);
             }
             if inst.is_store() {
                 last_store = Some(inst);

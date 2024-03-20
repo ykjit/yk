@@ -145,6 +145,11 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Instruction::Call(i) => self.codegen_call_instr(instr_idx, &i)?,
             jit_ir::Instruction::Icmp(i) => self.codegen_icmp_instr(instr_idx, &i),
             jit_ir::Instruction::Guard(i) => self.codegen_guard_instr(&i),
+            jit_ir::Instruction::Arg(_i) => {
+                // FIXME: Reserve argument in the register allocator. E.g. the argument with index
+                // 0 is passed via RDI so we need to tell the register allocator that this register
+                // is taken.
+            }
         }
         Ok(())
     }

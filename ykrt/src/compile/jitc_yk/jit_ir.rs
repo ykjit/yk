@@ -592,6 +592,10 @@ pub enum Instruction {
     Add(AddInstruction),
     Icmp(IcmpInstruction),
     Guard(GuardInstruction),
+    /// Describes an argument into the trace function. Its main use is to allow us to track trace
+    /// function arguments in case we need to deoptimise them. At this moment the only trace
+    /// function argument requiring tracking is the trace inputs.
+    Arg(u16),
 }
 
 impl Instruction {
@@ -611,6 +615,7 @@ impl Instruction {
             Self::Add(..) => true,
             Self::Icmp(..) => true,
             Self::Guard(..) => false,
+            Self::Arg(..) => true,
         }
     }
 
@@ -638,6 +643,7 @@ impl Instruction {
             Self::Add(ai) => ai.type_idx(m),
             Self::Icmp(_) => m.int8_type_idx(), // always returns a 0/1 valued byte.
             Self::Guard(..) => m.void_type_idx(),
+            Self::Arg(..) => m.void_type_idx(),
         }
     }
 
@@ -686,6 +692,7 @@ impl JitIRDisplay for Instruction {
             Self::Add(i) => i.to_string_impl(m, s, nums)?,
             Self::Icmp(i) => i.to_string_impl(m, s, nums)?,
             Self::Guard(i) => i.to_string_impl(m, s, nums)?,
+            Self::Arg(i) => s.push_str(&format!("Arg({})", i)),
         }
         Ok(())
     }
