@@ -91,6 +91,8 @@ handle_arg() {
             OUTPUT="${OUTPUT} -fuse-ld=lld"
             # Embed LLVM bitcode as late as possible.
             OUTPUT="${OUTPUT} -Wl,--mllvm=--embed-bitcode-final"
+            # Force the use of emulated TLS since YKJIT does not support native TLS.
+            OUTPUT="${OUTPUT} -Wl,--mllvm=--emulated-tls"
             # Add pthread_create wrapper function (__wrap_pthread_create)
             OUTPUT="${OUTPUT} -Wl,--wrap=pthread_create"
             # Embed Yk's IR.
