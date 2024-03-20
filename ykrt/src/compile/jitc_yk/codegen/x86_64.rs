@@ -385,8 +385,7 @@ impl<'a> X64CodeGen<'a> {
         if decl.is_threadlocal() {
             todo!();
         }
-        // Unwrap is safe as the JIT can't contain globals that don't exist in AOT.
-        let sym_addr = symbol_vaddr(&CString::new(decl.name()).unwrap()).unwrap();
+        let sym_addr = self.jit_mod.globalvar_vaddr(inst.global_decl_idx());
         dynasm!(self.asm ; mov Rq(WR0.code()), QWORD i64::try_from(sym_addr).unwrap());
         self.reg_into_new_local(inst_idx, WR0);
     }

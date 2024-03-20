@@ -18,7 +18,7 @@
 //     ...
 //     --- End jit-pre-opt ---
 //     ...
-//     deopt...
+//     jit-state: enter-jit-code
 //     ...
 
 // Check that basic trace compilation works.
@@ -48,6 +48,10 @@ int main(int argc, char **argv) {
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
+    // FIXME: ideally we'd print to stderr so as to have the output interleaved
+    // with jit-state prints, but we can't yet handle the `stderr` constant in
+    // `fputs("i", stderr)`.
+    puts("i");
     res += 2;
     i--;
   }
