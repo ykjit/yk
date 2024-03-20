@@ -1,6 +1,6 @@
 //! The trace builder.
 
-use super::aot_ir::{self, AotIRDisplay, Module};
+use super::aot_ir::{self, AotIRDisplay, InstrIdx, Module};
 use super::jit_ir;
 use crate::compile::CompilationError;
 use crate::trace::{AOTTraceIterator, TraceAction};
@@ -145,7 +145,11 @@ impl<'a> TraceBuilder<'a> {
                 }
                 aot_ir::Opcode::Add => self.handle_binop(inst, &bid, inst_idx),
                 aot_ir::Opcode::Icmp => self.handle_icmp(inst, &bid, inst_idx),
-                aot_ir::Opcode::CondBr => self.handle_condbr(inst, nextbb.as_ref().unwrap()),
+                aot_ir::Opcode::CondBr => {
+                    let sm = &blk.instrs[InstrIdx::new(inst_idx - 1)];
+                    debug_assert!(sm.is_stackmap_call(self.aot_mod));
+                    self.handle_condbr(inst, sm, nextbb.as_ref().unwrap())
+                }
                 _ => todo!("{:?}", inst),
             }?;
         }
@@ -287,6 +291,7 @@ impl<'a> TraceBuilder<'a> {
     fn handle_condbr(
         &mut self,
         inst: &aot_ir::Instruction,
+        sm: &aot_ir::Instruction,
         nextbb: &aot_ir::BlockID,
     ) -> Result<(), CompilationError> {
         let cond = match &inst.operand(0) {
@@ -299,8 +304,43 @@ impl<'a> TraceBuilder<'a> {
             aot_ir::Operand::Block(aot_ir::BlockOperand { bb_idx }) => bb_idx,
             _ => panic!(),
         };
+
+        // Find live variables in the current stack frame and add them into the guard.
+        // FIXME: Once we handle mappable calls we need to push the live variables of other stack
+        // frames too.
+        let mut smids = Vec::new(); // List of stackmap ids of the current call stack.
+        let mut lives = Vec::new(); // List of live JIT variables.
+
+        match sm.operand(1) {
+            aot_ir::Operand::Constant(co) => {
+                let c = self.aot_mod.constant(co);
+                match self.aot_mod.const_type(c) {
+                    aot_ir::Type::Integer(it) => {
+                        let id: u64 = match it.num_bits() {
+                            // This unwrap can't fail unless we did something wrong during lowering.
+                            64 => u64::from_ne_bytes(c.bytes()[0..8].try_into().unwrap()),
+                            _ => panic!(),
+                        };
+                        smids.push(id);
+                    }
+                    _ => panic!(),
+                }
+            }
+            _ => panic!(),
+        }
+        for op in sm.remaining_operands(3) {
+            match op {
+                aot_ir::Operand::LocalVariable(lvo) => {
+                    lives.push(self.local_map[&lvo.0]);
+                }
+                _ => panic!(),
+            }
+        }
+
+        let gi = jit_ir::GuardInfo::new(smids, lives);
+        let gi_idx = self.jit_mod.push_guardinfo(gi)?;
         let expect = *succ_bb == nextbb.block_idx();
-        let guard = jit_ir::GuardInstruction::new(jit_ir::Operand::Local(cond), expect);
+        let guard = jit_ir::GuardInstruction::new(jit_ir::Operand::Local(cond), expect, gi_idx);
         Ok(self.jit_mod.push(guard.into()))
     }
 
@@ -343,6 +383,8 @@ impl<'a> TraceBuilder<'a> {
         aot_inst_idx: usize,
     ) -> Result<(), CompilationError> {
         if inst.is_stackmap_call(self.aot_mod) || inst.is_debug_call(self.aot_mod) {
+            // FIXME: If this is a mappable call that we are going to inline, push its stackmap
+            // onto the callstack.
             return Ok(());
         }
         let mut args = Vec::new();

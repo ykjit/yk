@@ -270,6 +270,11 @@ index_16bit!(ExtraArgsIdx);
 pub(crate) struct ConstIdx(u16);
 index_16bit!(ConstIdx);
 
+/// A guard info index.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub(crate) struct GuardInfoIdx(pub(crate) u16);
+index_16bit!(GuardInfoIdx);
+
 /// A global variable declaration index.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub(crate) struct GlobalDeclIdx(U24);
@@ -576,6 +581,21 @@ impl JitIRDisplay for Constant {
             Self::Usize(v) => s.push_str(&v.to_string()),
         }
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+/// Stores additional guard information.
+pub(crate) struct GuardInfo {
+    /// Stackmap IDs for the active call frames.
+    frames: Vec<u64>,
+    /// Indices of live JIT variables.
+    lives: Vec<InstrIdx>,
+}
+
+impl GuardInfo {
+    pub(crate) fn new(frames: Vec<u64>, lives: Vec<InstrIdx>) -> Self {
+        Self { frames, lives }
     }
 }
 
@@ -1187,13 +1207,16 @@ pub struct GuardInstruction {
     cond: PackedOperand,
     /// The expected outcome of the condition.
     expect: bool,
+    /// Additional information about this guard.
+    gidx: GuardInfoIdx,
 }
 
 impl GuardInstruction {
-    pub(crate) fn new(cond: Operand, expect: bool) -> Self {
+    pub(crate) fn new(cond: Operand, expect: bool, gidx: GuardInfoIdx) -> Self {
         GuardInstruction {
             cond: PackedOperand::new(&cond),
             expect,
+            gidx,
         }
     }
 
@@ -1272,6 +1295,8 @@ pub(crate) struct Module {
     /// This is a collection of externally defined global variables that the trace may need to
     /// reference. Because they are externally initialised, these are *declarations*.
     global_decls: TiVec<GlobalDeclIdx, GlobalDecl>,
+    /// Additional information for guards.
+    guard_info: TiVec<GuardInfoIdx, GuardInfo>,
 }
 
 impl Module {
@@ -1299,6 +1324,7 @@ impl Module {
             int8_type_idx,
             func_decls: TiVec::new(),
             global_decls: TiVec::new(),
+            guard_info: TiVec::new(),
         }
     }
 
@@ -1532,6 +1558,16 @@ impl Module {
     /// Panics if the index is out of bounds
     pub(crate) fn func_decl(&self, idx: FuncDeclIdx) -> &FuncDecl {
         &self.func_decls[idx]
+    }
+
+    pub(crate) fn push_guardinfo(
+        &mut self,
+        info: GuardInfo,
+    ) -> Result<GuardInfoIdx, CompilationError> {
+        assert!(GuardInfoIdx::new(self.global_decls.len()).is_ok());
+        let idx = self.guard_info.len();
+        self.guard_info.push(info);
+        GuardInfoIdx::new(idx)
     }
 }
 

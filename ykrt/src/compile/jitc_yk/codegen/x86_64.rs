@@ -631,7 +631,7 @@ mod tests {
     use crate::compile::{
         jitc_yk::{
             codegen::reg_alloc::RegisterAllocator,
-            jit_ir::{self, IntegerType, Type},
+            jit_ir::{self, GuardInfoIdx, IntegerType, Type},
         },
         CompiledTrace,
     };
@@ -1321,7 +1321,7 @@ mod tests {
                     jit_ir::LoadTraceInputInstruction::new(0, jit_mod.int8_type_idx()).into(),
                 )
                 .unwrap();
-            jit_mod.push(jit_ir::GuardInstruction::new(cond_op, true).into());
+            jit_mod.push(jit_ir::GuardInstruction::new(cond_op, true, GuardInfoIdx(0)).into());
             let patt_lines = [
                 "...",
                 "; Guard %0, true",
@@ -1345,7 +1345,7 @@ mod tests {
                     jit_ir::LoadTraceInputInstruction::new(0, jit_mod.int8_type_idx()).into(),
                 )
                 .unwrap();
-            jit_mod.push(jit_ir::GuardInstruction::new(cond_op, false).into());
+            jit_mod.push(jit_ir::GuardInstruction::new(cond_op, false, GuardInfoIdx(0)).into());
             let patt_lines = [
                 "...",
                 "; Guard %0, false",
