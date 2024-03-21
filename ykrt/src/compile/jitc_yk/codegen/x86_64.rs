@@ -53,6 +53,13 @@ extern "C" fn __yk_deopt(_ctrlpvars: *const c_void, _frameaddr: *const c_void) {
     panic!("deopt");
 }
 
+/// A function that we can put a debugger breakpoint on.
+/// FIXME: gross hack.
+#[cfg(debug_assertions)]
+#[no_mangle]
+#[inline(never)]
+pub extern "C" fn __yk_break() {}
+
 /// The X86_64 code generator.
 pub(crate) struct X64CodeGen<'a> {
     jit_mod: &'a jit_ir::Module,
@@ -193,6 +200,16 @@ impl<'a> X64CodeGen<'a> {
         );
 
         // FIXME: load/allocate trace inputs here.
+
+        #[cfg(debug_assertions)]
+        {
+            self.comment(self.asm.offset(), "Breakpoint hack".into());
+            self.stack.align(SYSV_CALL_STACK_ALIGN);
+            dynasm!(self.asm
+                ; mov r11, QWORD __yk_break as _
+                ; call r11
+            );
+        }
 
         alloc_off
     }
@@ -634,7 +651,8 @@ mod tests {
         },
         CompiledTrace,
     };
-    use fm::FMatcher;
+    use fm::FMBuilder;
+    use regex::Regex;
     use std::ffi::CString;
     use std::sync::Arc;
     use ykaddr::addr::symbol_vaddr;
@@ -646,7 +664,17 @@ mod tests {
     /// Test helper to use `fm` to match a disassembled trace.
     pub(crate) fn match_asm(cgo: Arc<X64CompiledTrace>, pattern: &str) {
         let dis = cgo.disassemble().unwrap();
-        match FMatcher::new(pattern).unwrap().matches(&dis) {
+
+        // Use `{{name}}` to match non-literal strings in tests.
+        let ptn_re = Regex::new(r"\{\{.+?\}\}").unwrap();
+        let text_re = Regex::new(r"[a-zA-Z0-9\._]+").unwrap();
+        let fmm = FMBuilder::new(pattern)
+            .unwrap()
+            .name_matcher(ptn_re, text_re)
+            .build()
+            .unwrap();
+
+        match fmm.matches(&dis) {
             Ok(()) => (),
             Err(e) => panic!(
                 "\n!!! Emitted code didn't match !!!\n\n{}\nFull asm:\n{}\n",
@@ -1324,13 +1352,13 @@ mod tests {
             let patt_lines = [
                 "...",
                 "; Guard %0, true",
-                "... 00000020: jmp 0x0000000000000039",
-                "... 00000025: mov rdi, [rbp+0x08]",
-                "... 00000029: mov rsi, [rbp]",
-                "... 0000002d: mov rax, ...",
-                "... 00000037: call rax",
-                "... 00000039: cmp r12b, 0x01",
-                "... 0000003d: jnz 0x0000000000000025",
+                "{{vaddr1}} {{off1}}: jmp 0x00000000{{cmpoff}}",
+                "{{vaddr2}} {{failoff}}: mov rdi, [rbp+0x08]",
+                "... mov rsi, [rbp]",
+                "... mov rax, ...",
+                "... call rax",
+                "{{vaddr3}} {{cmpoff}}: cmp r12b, 0x01",
+                "{{vaddr4}} {{off4}}: jnz 0x00000000{{failoff}}",
                 "... ud2",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
@@ -1348,13 +1376,13 @@ mod tests {
             let patt_lines = [
                 "...",
                 "; Guard %0, false",
-                "... 00000020: jmp 0x0000000000000039",
-                "... 00000025: mov rdi, [rbp+0x08]",
-                "... 00000029: mov rsi, [rbp]",
-                "... 0000002d: mov rax, ...",
-                "... 00000037: call rax",
-                "... 00000039: cmp r12b, 0x00",
-                "... 0000003d: jnz 0x0000000000000025",
+                "{{vaddr1}} {{off1}}: jmp 0x00000000{{cmpoff}}",
+                "{{vaddr2}} {{failoff}}: mov rdi, [rbp+0x08]",
+                "... mov rsi, [rbp]",
+                "... mov rax, ...",
+                "... call rax",
+                "{{vaddr3}} {{cmpoff}}: cmp r12b, 0x00",
+                "{{vaddr4}} {{off4}}: jnz 0x00000000{{failoff}}",
                 "... ud2",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
