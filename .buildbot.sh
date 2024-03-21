@@ -21,12 +21,11 @@ rustup toolchain install nightly --allow-downgrade --component rustfmt
 cargo fmt --all -- --check
 
 # Check licenses.
-# FIXME: This is currently broken upstream due to a dependency.
-# which cargo-deny | cargo install cargo-deny
-# cargo-deny check license
+which cargo-deny | cargo install --locked cargo-deny
+cargo-deny check license
 
 # Build the docs
-cargo install mdbook
+cargo install --locked mdbook
 cd docs
 mdbook build
 test -d book
