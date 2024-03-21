@@ -20,18 +20,6 @@ rustup toolchain install nightly --allow-downgrade --component rustfmt
 
 cargo fmt --all -- --check
 
-# Check licenses.
-# FIXME: This is currently broken upstream due to a dependency.
-# which cargo-deny | cargo install cargo-deny
-# cargo-deny check license
-
-# Build the docs
-cargo install mdbook
-cd docs
-mdbook build
-test -d book
-cd ..
-
 # We now need a copy of ykllvm. Building this is quite slow so if there's a
 # cached version in `ykllvm_cache/` we use that. Whether we build our own or
 # use a cached copy, the installed version ends up in ykllvm/inst. Notice that
@@ -192,3 +180,14 @@ done
 for b in collect_and_decode promote; do
     YKB_TRACER=hwt cargo bench --bench ${b} -- --profile-time 1
 done
+
+# Check licenses.
+which cargo-deny | cargo install --locked cargo-deny
+cargo-deny check license
+
+# Build the docs
+cargo install --locked mdbook
+cd docs
+mdbook build
+test -d book
+cd ..
