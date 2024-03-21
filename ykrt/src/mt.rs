@@ -60,7 +60,7 @@ thread_local! {
 
 #[cfg(tracer_swt)]
 pub fn is_tracing() -> bool {
-    return THREAD_MTTHREAD.with(|mtt| mtt.tracing.borrow().is_some());
+    THREAD_MTTHREAD.with(|mtt| mtt.is_tracing())
 }
 
 #[cfg(feature = "yk_testing")]
@@ -344,7 +344,7 @@ impl MT {
     /// `loc` moves to the Compiled state, return a pointer to a [CompiledTrace] object.
     fn transition_control_point(self: &Arc<Self>, loc: &Location) -> TransitionControlPoint {
         THREAD_MTTHREAD.with(|mtt| {
-            let am_tracing = mtt.tracing.borrow().is_some();
+            let is_tracing = mtt.is_tracing();
             match loc.hot_location() {
                 Some(hl) => {
                     // If this thread is tracing something, we *must* grab the [HotLocation] lock,
@@ -360,7 +360,7 @@ impl MT {
                         // If this thread is not tracing anything, however, it's not worth
                         // contending too much with other threads: we try moderately hard to grab
                         // the lock, but we don't want to park this thread.
-                        if !am_tracing {
+                        if !is_tracing {
                             // This thread isn't tracing anything, so we try for a little while to grab the
                             // lock, before giving up and falling back to the interpreter. In general, we
                             // expect that we'll grab the lock rather quickly. However, there is one nasty
@@ -394,7 +394,7 @@ impl MT {
 
                     match lk.kind {
                         HotLocationKind::Compiled(ref ctr) => {
-                            if am_tracing {
+                            if is_tracing {
                                 // This thread is tracing something, so bail out as quickly as possible
                                 TransitionControlPoint::NoAction
                             } else {
@@ -460,7 +460,7 @@ impl MT {
                     }
                 }
                 None => {
-                    if am_tracing {
+                    if is_tracing {
                         // This thread is tracing something, so bail out as quickly as possible
                         return TransitionControlPoint::NoAction;
                     }
@@ -475,7 +475,7 @@ impl MT {
                                     trace_failure: 0,
                                 };
                                 if let Some(hl) = loc.count_to_hot_location(x, hl) {
-                                    debug_assert!(mtt.tracing.borrow().is_none());
+                                    debug_assert!(!is_tracing);
                                     *mtt.tracing.borrow_mut() = Some(hl);
                                     TransitionControlPoint::StartTracing
                                 } else {
@@ -506,7 +506,7 @@ impl MT {
     ) -> TransitionGuardFailure {
         THREAD_MTTHREAD.with(|mtt| {
             // This thread should not be tracing anything.
-            debug_assert!(!mtt.tracing.borrow().is_some());
+            debug_assert!(!mtt.is_tracing());
             let mut lk = hl.lock();
             if let HotLocationKind::Compiled(ref ctr) = lk.kind {
                 *mtt.tracing.borrow_mut() = Some(Arc::clone(&hl));
@@ -669,6 +669,11 @@ impl MTThread {
             promotions: RefCell::new(None),
             _dont_send_or_sync_me: PhantomData,
         }
+    }
+
+    /// Is this thread currently tracing something?
+    fn is_tracing(&self) -> bool {
+        self.tracing.borrow().is_some()
     }
 
     /// If a trace is currently running, return a reference to its `CompiledTrace`.
