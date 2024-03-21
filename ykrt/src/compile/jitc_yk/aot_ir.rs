@@ -189,7 +189,7 @@ impl AotIRDisplay for ConstantOperand {
 }
 
 #[deku_derive(DekuRead)]
-#[derive(Debug, Hash, Eq, PartialEq)]
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub(crate) struct InstructionID {
     #[deku(skip)] // computed after deserialisation.
     func_idx: FuncIdx,

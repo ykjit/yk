@@ -145,6 +145,11 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Instruction::Call(i) => self.codegen_call_instr(instr_idx, &i)?,
             jit_ir::Instruction::Icmp(i) => self.codegen_icmp_instr(instr_idx, &i),
             jit_ir::Instruction::Guard(i) => self.codegen_guard_instr(&i),
+            jit_ir::Instruction::Arg(_i) => {
+                // FIXME: Reserve argument in the register allocator. E.g. the argument with index
+                // 0 is passed via RDI so we need to tell the register allocator that this register
+                // is taken.
+            }
         }
         Ok(())
     }
@@ -626,7 +631,7 @@ mod tests {
     use crate::compile::{
         jitc_yk::{
             codegen::reg_alloc::RegisterAllocator,
-            jit_ir::{self, IntegerType, Type},
+            jit_ir::{self, GuardInfoIdx, IntegerType, Type},
         },
         CompiledTrace,
     };
@@ -1316,7 +1321,7 @@ mod tests {
                     jit_ir::LoadTraceInputInstruction::new(0, jit_mod.int8_type_idx()).into(),
                 )
                 .unwrap();
-            jit_mod.push(jit_ir::GuardInstruction::new(cond_op, true).into());
+            jit_mod.push(jit_ir::GuardInstruction::new(cond_op, true, GuardInfoIdx(0)).into());
             let patt_lines = [
                 "...",
                 "; Guard %0, true",
@@ -1340,7 +1345,7 @@ mod tests {
                     jit_ir::LoadTraceInputInstruction::new(0, jit_mod.int8_type_idx()).into(),
                 )
                 .unwrap();
-            jit_mod.push(jit_ir::GuardInstruction::new(cond_op, false).into());
+            jit_mod.push(jit_ir::GuardInstruction::new(cond_op, false, GuardInfoIdx(0)).into());
             let patt_lines = [
                 "...",
                 "; Guard %0, false",
