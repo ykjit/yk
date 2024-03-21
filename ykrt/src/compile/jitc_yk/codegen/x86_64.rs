@@ -199,8 +199,6 @@ impl<'a> X64CodeGen<'a> {
             ; sub rsp, DWORD 0
         );
 
-        // FIXME: load/allocate trace inputs here.
-
         #[cfg(debug_assertions)]
         {
             self.comment(self.asm.offset(), "Breakpoint hack".into());
