@@ -18,7 +18,7 @@ use std::{
 };
 
 use parking_lot::{Condvar, Mutex, MutexGuard};
-#[cfg(not(feature = "yk_jitstate_debug"))]
+#[cfg(not(all(feature = "yk_testing", not(test))))]
 use parking_lot_core::SpinWait;
 #[cfg(feature = "yk_jitstate_debug")]
 use std::sync::LazyLock;
@@ -355,7 +355,7 @@ impl MT {
                     // mode only we guarantee to grab the lock.
                     let mut lk;
 
-                    #[cfg(not(feature = "yk_testing"))]
+                    #[cfg(not(all(feature = "yk_testing", not(test))))]
                     {
                         // If this thread is not tracing anything, however, it's not worth
                         // contending too much with other threads: we try moderately hard to grab
@@ -387,7 +387,7 @@ impl MT {
                         };
                     }
 
-                    #[cfg(feature = "yk_testing")]
+                    #[cfg(all(feature = "yk_testing", not(test)))]
                     {
                         lk = hl.lock();
                     }
