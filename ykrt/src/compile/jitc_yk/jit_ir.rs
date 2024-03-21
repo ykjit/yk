@@ -6,14 +6,20 @@
 // FIXME: eventually delete.
 #![allow(dead_code)]
 
+use super::aot_ir;
 use crate::compile::CompilationError;
-use std::{error::Error, ffi::c_void, mem, ptr};
+use std::{
+    error::Error,
+    ffi::{c_void, CStr, CString},
+    mem, ptr,
+};
 use typed_index_collections::TiVec;
+use ykaddr::addr::symbol_vaddr;
 
 // Since the AOT versions of these data structures contain no AOT/JIT-IR-specific indices we can
 // share them. Note though, that their corresponding index types are not shared.
 pub(crate) use super::aot_ir::IntegerType;
-pub(crate) use super::aot_ir::{GlobalDecl, Predicate};
+pub(crate) use super::aot_ir::Predicate;
 
 impl JitIRDisplay for IntegerType {
     fn to_string_impl<'a>(
@@ -27,6 +33,52 @@ impl JitIRDisplay for IntegerType {
     }
 }
 
+/// The declaration of a global variable.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct GlobalDecl {
+    /// The name of the delcaration.
+    name: CString,
+    /// Whether the declaration is thread-local.
+    is_threadlocal: bool,
+    /// The declaration's index in the global variable pointer array.
+    global_ptr_idx: aot_ir::GlobalDeclIdx,
+}
+
+impl GlobalDecl {
+    pub(crate) fn new(
+        name: CString,
+        is_threadlocal: bool,
+        global_ptr_idx: aot_ir::GlobalDeclIdx,
+    ) -> Self {
+        Self {
+            name,
+            is_threadlocal,
+            global_ptr_idx,
+        }
+    }
+
+    /// Return the name of the declaration (as a `&CStr`).
+    pub(crate) fn name(&self) -> &CStr {
+        &self.name
+    }
+
+    /// Return the name of the declaration (as a `&str`).
+    pub(crate) fn name_as_str(&self) -> &str {
+        // unwrap safe: we only anticipate valid UTF-8 symbol names.
+        self.name.to_str().unwrap()
+    }
+
+    /// Return whether the declaration is a thread local.
+    pub(crate) fn is_threadlocal(&self) -> bool {
+        self.is_threadlocal
+    }
+
+    /// Return the declaration's index in the global variable pointer array.
+    pub(crate) fn global_ptr_idx(&self) -> aot_ir::GlobalDeclIdx {
+        self.global_ptr_idx
+    }
+}
+
 impl JitIRDisplay for GlobalDecl {
     fn to_string_impl<'a>(
         &self,
@@ -35,7 +87,7 @@ impl JitIRDisplay for GlobalDecl {
         _nums: &LocalNumbers<'a>,
     ) -> Result<(), Box<dyn Error>> {
         s.push_str("@");
-        s.push_str(&self.name());
+        s.push_str(self.name_as_str());
         Ok(())
     }
 }
@@ -50,8 +102,11 @@ impl JitIRDisplay for GlobalDecl {
 ///
 const OPERAND_IDX_MASK: u16 = 0x7fff;
 
-// The largest operand index we can express in 15 bits.
+/// The largest operand index we can express in 15 bits.
 const MAX_OPERAND_IDX: u16 = (1 << 15) - 1;
+
+/// The symbol name of the global variable pointers array.
+const GLOBAL_PTR_ARRAY_SYM: &str = "__yk_globalvar_ptrs";
 
 /// [Instruction] to [InstrIdx] mapping used for stringifying instructions.
 ///
@@ -279,6 +334,13 @@ index_16bit!(GuardInfoIdx);
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub(crate) struct GlobalDeclIdx(U24);
 index_24bit!(GlobalDeclIdx);
+
+impl GlobalDeclIdx {
+    /// Returns the [GlobalDecl] for the index in the [Module] `m`.
+    pub(crate) fn global_decl<'a>(&self, m: &'a Module) -> &'a GlobalDecl {
+        m.global_decl(*self)
+    }
+}
 
 /// An instruction index.
 ///
@@ -870,6 +932,11 @@ impl LookupGlobalInstruction {
     pub(crate) fn decl<'a>(&self, m: &'a Module) -> &'a GlobalDecl {
         m.global_decl(self.global_decl_idx)
     }
+
+    /// Returns the index of the global to lookup.
+    pub(crate) fn global_decl_idx(&self) -> GlobalDeclIdx {
+        self.global_decl_idx
+    }
 }
 
 impl JitIRDisplay for LookupGlobalInstruction {
@@ -1297,6 +1364,18 @@ pub(crate) struct Module {
     global_decls: TiVec<GlobalDeclIdx, GlobalDecl>,
     /// Additional information for guards.
     guard_info: TiVec<GuardInfoIdx, GuardInfo>,
+    /// The virtual address of the global variable pointer array.
+    ///
+    /// This is an array (added to the LLVM AOT module and AOT codegenned by ykllvm) containing a
+    /// pointer to each global variable in the AOT module. The indices of the elements correspond
+    /// with [aot_ir::GlobalDeclIdx]s.
+    ///
+    /// The array is eternal, so we have no qualms about storing a raw pointer to it.
+    ///
+    /// This is marked `cfg(not(test))` because unit tests are not built with ykllvm, and thus the
+    /// array will be absent.
+    #[cfg(not(test))]
+    globalvar_ptrs: *const usize,
 }
 
 impl Module {
@@ -1313,6 +1392,13 @@ impl Module {
         let int8_type_idx = types.len().into();
         types.push(Type::Integer(IntegerType::new(8)));
 
+        // Find the global variable pointer array in the address space.
+        //
+        // FIXME: consider passing this in to the control point to avoid a dlsym().
+        #[cfg(not(test))]
+        let globalvar_ptrs =
+            symbol_vaddr(&CString::new(GLOBAL_PTR_ARRAY_SYM).unwrap()).unwrap() as *const usize;
+
         Self {
             name,
             instrs: Vec::new(),
@@ -1325,6 +1411,29 @@ impl Module {
             func_decls: TiVec::new(),
             global_decls: TiVec::new(),
             guard_info: TiVec::new(),
+            #[cfg(not(test))]
+            globalvar_ptrs,
+        }
+    }
+
+    /// Get a pointer to an AOT-compiled global variable by a JIT [GlobalDeclIdx].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the address cannot be located.
+    pub(crate) fn globalvar_vaddr(&self, idx: GlobalDeclIdx) -> usize {
+        let decl = idx.global_decl(self);
+        #[cfg(not(test))]
+        {
+            // If the unwrap fails, then the AOT array was absent and something has gone wrong
+            // during AOT codegen.
+            (unsafe { *self.globalvar_ptrs.add(decl.global_ptr_idx().into()) }) as usize
+        }
+        #[cfg(test)]
+        {
+            // In unit tests the global variable pointer array isn't present, as the
+            // unit test binary wasn't compiled with ykllvm. Fall back on dlsym().
+            symbol_vaddr(decl.name()).unwrap()
         }
     }
 
@@ -1538,9 +1647,13 @@ impl Module {
     }
 
     /// Get the index of a global, inserting it into the global declaration table if necessary.
+    ///
+    /// `aot_idx` is the [aot_ir::GlobalDeclIdx] index of the global in the AOT module. This is
+    /// needed to find the global variable's address in the global variable pointers array.
     pub(crate) fn global_decl_idx(
         &mut self,
         g: &GlobalDecl,
+        _aot_idx: aot_ir::GlobalDeclIdx,
     ) -> Result<GlobalDeclIdx, CompilationError> {
         // FIXME: can we optimise this?
         if let Some(idx) = self.global_decls.position(|tg| tg == g) {
@@ -1810,10 +1923,18 @@ mod tests {
         m.push(LoadTraceInputInstruction::new(0, m.int8_type_idx()).into());
         m.push(LoadTraceInputInstruction::new(8, m.int8_type_idx()).into());
         m.push(LoadTraceInputInstruction::new(16, m.int8_type_idx()).into());
-        m.push_global_decl(GlobalDecl::new("some_global".into(), false))
-            .unwrap();
-        m.push_global_decl(GlobalDecl::new("some_thread_local".into(), true))
-            .unwrap();
+        m.push_global_decl(GlobalDecl::new(
+            CString::new("some_global").unwrap(),
+            false,
+            aot_ir::GlobalDeclIdx::new(0),
+        ))
+        .unwrap();
+        m.push_global_decl(GlobalDecl::new(
+            CString::new("some_thread_local").unwrap(),
+            true,
+            aot_ir::GlobalDeclIdx::new(1),
+        ))
+        .unwrap();
         let got = m.to_string().unwrap();
         let expect = [
             "; test",

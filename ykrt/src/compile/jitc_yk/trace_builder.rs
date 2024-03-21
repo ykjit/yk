@@ -4,7 +4,7 @@ use super::aot_ir::{self, AotIRDisplay, InstrIdx, Module};
 use super::jit_ir;
 use crate::compile::CompilationError;
 use crate::trace::{AOTTraceIterator, TraceAction};
-use std::collections::HashMap;
+use std::{collections::HashMap, ffi::CString};
 
 /// The argument index of the trace inputs struct in the control point call.
 const CTRL_POINT_ARGIDX_INPUTS: usize = 3;
@@ -18,7 +18,7 @@ struct TraceBuilder<'a> {
     aot_mod: &'a Module,
     /// The JIT IR this struct builds.
     jit_mod: jit_ir::Module,
-    // Maps an AOT instruction to a jit instruction via their index-based IDs.
+    /// Maps an AOT instruction to a jit instruction via their index-based IDs.
     local_map: HashMap<aot_ir::InstructionID, jit_ir::InstrIdx>,
     // Block containing the current control point (i.e. the control point that started this trace).
     cp_block: Option<aot_ir::BlockID>,
@@ -187,7 +187,12 @@ impl<'a> TraceBuilder<'a> {
         idx: aot_ir::GlobalDeclIdx,
     ) -> Result<jit_ir::GlobalDeclIdx, CompilationError> {
         let aot_global = self.aot_mod.global_decl(idx);
-        Ok(self.jit_mod.global_decl_idx(aot_global)?)
+        let jit_global = jit_ir::GlobalDecl::new(
+            CString::new(aot_global.name()).unwrap(),
+            aot_global.is_threadlocal(),
+            idx,
+        );
+        Ok(self.jit_mod.global_decl_idx(&jit_global, idx)?)
     }
 
     /// Translate an operand.
