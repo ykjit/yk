@@ -50,3 +50,4 @@ yk_testing = ["yktracec/yk_testing"]
 [dev-dependencies]
 fm = "0.2.2"
 num-traits = "0.2.16"
+regex = { version = "1.9", features = ["std"] }
