@@ -722,27 +722,28 @@ pub(crate) enum TransitionGuardFailure {
 }
 
 #[cfg(test)]
-impl PartialEq for TransitionControlPoint {
-    fn eq(&self, other: &Self) -> bool {
-        // We only implement enough of the equality function for the tests we have.
-        match (self, other) {
-            (TransitionControlPoint::NoAction, TransitionControlPoint::NoAction) => true,
-            (TransitionControlPoint::Execute(p1), TransitionControlPoint::Execute(p2)) => {
-                std::ptr::eq(p1, p2)
-            }
-            (TransitionControlPoint::StartTracing, TransitionControlPoint::StartTracing) => true,
-            (x, y) => todo!("{:?} {:?}", x, y),
-        }
-    }
-}
-
-#[cfg(test)]
 mod tests {
     extern crate test;
     use super::*;
     use crate::compile::jitc_llvm::LLVMCompiledTrace;
     use std::{hint::black_box, sync::atomic::AtomicU64};
     use test::bench::Bencher;
+
+    impl PartialEq for TransitionControlPoint {
+        fn eq(&self, other: &Self) -> bool {
+            // We only implement enough of the equality function for the tests we have.
+            match (self, other) {
+                (TransitionControlPoint::NoAction, TransitionControlPoint::NoAction) => true,
+                (TransitionControlPoint::Execute(p1), TransitionControlPoint::Execute(p2)) => {
+                    std::ptr::eq(p1, p2)
+                }
+                (TransitionControlPoint::StartTracing, TransitionControlPoint::StartTracing) => {
+                    true
+                }
+                (x, y) => todo!("{:?} {:?}", x, y),
+            }
+        }
+    }
 
     #[test]
     fn basic_transitions() {
