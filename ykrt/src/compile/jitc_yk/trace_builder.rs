@@ -128,6 +128,10 @@ impl<'a> TraceBuilder<'a> {
                 }
             }
         }
+
+        // Mark this location as the start of the trace loop.
+        self.jit_mod.push(jit_ir::Instruction::TraceLoopStart);
+
         Ok(())
     }
 

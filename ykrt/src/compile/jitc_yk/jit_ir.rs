@@ -686,6 +686,8 @@ pub enum Instruction {
     /// function arguments in case we need to deoptimise them. At this moment the only trace
     /// function argument requiring tracking is the trace inputs.
     Arg(u16),
+    /// Marks the place to loop back to at the end of the JITted code.
+    TraceLoopStart,
 }
 
 impl Instruction {
@@ -706,6 +708,7 @@ impl Instruction {
             Self::Icmp(..) => true,
             Self::Guard(..) => false,
             Self::Arg(..) => true,
+            Self::TraceLoopStart => false,
         }
     }
 
@@ -734,6 +737,7 @@ impl Instruction {
             Self::Icmp(_) => m.int8_type_idx(), // always returns a 0/1 valued byte.
             Self::Guard(..) => m.void_type_idx(),
             Self::Arg(..) => m.ptr_type_idx(),
+            Self::TraceLoopStart => m.void_type_idx(),
         }
     }
 
@@ -783,6 +787,7 @@ impl JitIRDisplay for Instruction {
             Self::Icmp(i) => i.to_string_impl(m, s, nums)?,
             Self::Guard(i) => i.to_string_impl(m, s, nums)?,
             Self::Arg(i) => s.push_str(&format!("Arg({})", i)),
+            Self::TraceLoopStart => s.push_str("TraceLoopStart"),
         }
         Ok(())
     }
