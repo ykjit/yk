@@ -49,7 +49,13 @@ const SYSV_CALL_STACK_ALIGN: usize = 16;
 /// On X86_64 the stack grows down.
 const STACK_DIRECTION: StackDirection = StackDirection::GrowsDown;
 
-extern "C" fn __yk_deopt(_ctrlpvars: *const c_void, _frameaddr: *const c_void) {
+extern "C" fn __yk_deopt(_ctrlpvars: *const c_void, _frameaddr: *const c_void, deoptid: usize) {
+    let ctr = crate::mt::THREAD_MTTHREAD
+        .with(|mtt| mtt.running_trace().unwrap())
+        .as_any()
+        .downcast::<X64CompiledTrace>()
+        .unwrap();
+    debug_assert!(deoptid < ctr.deoptinfo.len());
     panic!("deopt");
 }
 
@@ -70,6 +76,8 @@ pub(crate) struct X64CodeGen<'a> {
     stack: AbstractStack,
     /// Register allocator.
     ra: &'a mut dyn RegisterAllocator,
+    /// Deopt info.
+    deoptinfo: Vec<DeoptInfo>,
     /// Comments used by the trace printer for debugging and testing only.
     ///
     /// Each assembly offset can have zero or more comment lines.
@@ -88,6 +96,7 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
             asm,
             stack: Default::default(),
             ra,
+            deoptinfo: Vec::new(),
             #[cfg(any(debug_assertions, test))]
             comments: Cell::new(HashMap::new()),
         })
@@ -121,11 +130,18 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
             .map_err(|e| CompilationError(format!("failed to finalize assembler: {e:?}").into()))?;
 
         #[cfg(not(any(debug_assertions, test)))]
-        return Ok(Arc::new(X64CompiledTrace { buf }));
+        return Ok(Arc::new(X64CompiledTrace {
+            buf,
+            deoptinfo: self.deoptinfo,
+        }));
         #[cfg(any(debug_assertions, test))]
         {
             let comments = self.comments.take();
-            return Ok(Arc::new(X64CompiledTrace { buf, comments }));
+            return Ok(Arc::new(X64CompiledTrace {
+                buf,
+                deoptinfo: self.deoptinfo,
+                comments,
+            }));
         }
     }
 }
@@ -152,11 +168,7 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Instruction::Call(i) => self.codegen_call_instr(instr_idx, &i)?,
             jit_ir::Instruction::Icmp(i) => self.codegen_icmp_instr(instr_idx, &i),
             jit_ir::Instruction::Guard(i) => self.codegen_guard_instr(&i),
-            jit_ir::Instruction::Arg(_i) => {
-                // FIXME: Reserve argument in the register allocator. E.g. the argument with index
-                // 0 is passed via RDI so we need to tell the register allocator that this register
-                // is taken.
-            }
+            jit_ir::Instruction::Arg(i) => self.codegen_arg(instr_idx, *i),
         }
         Ok(())
     }
@@ -516,11 +528,33 @@ impl<'a> X64CodeGen<'a> {
         self.reg_into_new_local(inst_idx, WR0);
     }
 
+    fn codegen_arg(&mut self, inst_idx: InstrIdx, idx: u16) {
+        // For arguments passed into the trace function we simply inform the register allocator
+        // where they are stored and let the allocator take things from there.
+        self.reg_into_new_local(inst_idx, ARG_REGS[usize::from(idx)]);
+    }
+
     fn codegen_guard_instr(&mut self, inst: &jit_ir::GuardInstruction) {
         let cond = inst.cond();
 
         // ICmp instructions evaluate to a one-byte zero/one value.
         debug_assert_eq!(cond.byte_size(self.jit_mod), 1);
+
+        // Convert the guard info into deopt info and store it on the heap.
+        let mut locs: Vec<LocalAlloc> = Vec::new();
+        let gi = inst.guard_info(self.jit_mod);
+        for lidx in gi.lives() {
+            locs.push(*self.ra.allocation(*lidx));
+        }
+
+        // FIXME: Move `frames` instead of copying them (requires JIT module to be consumable).
+        let deoptinfo = DeoptInfo {
+            frames: gi.frames().clone(),
+            lives: locs,
+        };
+        // Unwrap is safe since in this architecture usize and i64 have the same size.
+        let deoptid = self.deoptinfo.len().try_into().unwrap();
+        self.deoptinfo.push(deoptinfo);
 
         // The simplest thing we can do to crash the program when the guard fails.
         // FIXME: deoptimise!
@@ -529,6 +563,7 @@ impl<'a> X64CodeGen<'a> {
             ; guard_fail:
             ; mov rdi, [rbp+8]
             ; mov rsi, [rbp]
+            ; mov rdx, QWORD deoptid
             ; mov rax, QWORD __yk_deopt as _
             ; call rax
             ; check_cond:
@@ -552,10 +587,22 @@ impl<'a> X64CodeGen<'a> {
     }
 }
 
+/// Information required by deoptimisation.
+#[derive(Debug)]
+struct DeoptInfo {
+    /// Vector of AOT stackmap IDs.
+    frames: Vec<u64>,
+    // Vector of live JIT variable locations.
+    lives: Vec<LocalAlloc>,
+}
+
 #[derive(Debug)]
 pub(super) struct X64CompiledTrace {
     /// The executable code itself.
     buf: ExecutableBuffer,
+    /// Vector of deopt info, tracked here so they can be freed when the compiled trace is
+    /// dropped.
+    deoptinfo: Vec<DeoptInfo>,
     /// Comments to be shown when printing the compiled trace using `AsmPrinter`.
     ///
     /// Maps a byte offset in the native JITted code to a collection of line comments to show when
@@ -645,7 +692,7 @@ mod tests {
     use crate::compile::{
         jitc_yk::{
             codegen::reg_alloc::RegisterAllocator,
-            jit_ir::{self, GuardInfoIdx, IntegerType, Type},
+            jit_ir::{self, IntegerType, Type},
         },
         CompiledTrace,
     };
@@ -1341,18 +1388,21 @@ mod tests {
         #[test]
         fn codegen_guard_true() {
             let mut jit_mod = test_module();
+            let gi = jit_ir::GuardInfo::new(vec![0], Vec::new());
+            let gi_idx = jit_mod.push_guardinfo(gi).unwrap();
             let cond_op = jit_mod
                 .push_and_make_operand(
                     jit_ir::LoadTraceInputInstruction::new(0, jit_mod.int8_type_idx()).into(),
                 )
                 .unwrap();
-            jit_mod.push(jit_ir::GuardInstruction::new(cond_op, true, GuardInfoIdx(0)).into());
+            jit_mod.push(jit_ir::GuardInstruction::new(cond_op, true, gi_idx).into());
             let patt_lines = [
                 "...",
                 "; Guard %0, true",
                 "{{vaddr1}} {{off1}}: jmp 0x00000000{{cmpoff}}",
                 "{{vaddr2}} {{failoff}}: mov rdi, [rbp+0x08]",
                 "... mov rsi, [rbp]",
+                "... mov rdx, 0x00",
                 "... mov rax, ...",
                 "... call rax",
                 "{{vaddr3}} {{cmpoff}}: cmp r12b, 0x01",
@@ -1365,18 +1415,21 @@ mod tests {
         #[test]
         fn codegen_guard_false() {
             let mut jit_mod = test_module();
+            let gi = jit_ir::GuardInfo::new(vec![0], Vec::new());
+            let gi_idx = jit_mod.push_guardinfo(gi).unwrap();
             let cond_op = jit_mod
                 .push_and_make_operand(
                     jit_ir::LoadTraceInputInstruction::new(0, jit_mod.int8_type_idx()).into(),
                 )
                 .unwrap();
-            jit_mod.push(jit_ir::GuardInstruction::new(cond_op, false, GuardInfoIdx(0)).into());
+            jit_mod.push(jit_ir::GuardInstruction::new(cond_op, false, gi_idx).into());
             let patt_lines = [
                 "...",
                 "; Guard %0, false",
                 "{{vaddr1}} {{off1}}: jmp 0x00000000{{cmpoff}}",
                 "{{vaddr2}} {{failoff}}: mov rdi, [rbp+0x08]",
                 "... mov rsi, [rbp]",
+                "... mov rdx, 0x00",
                 "... mov rax, ...",
                 "... call rax",
                 "{{vaddr3}} {{cmpoff}}: cmp r12b, 0x00",

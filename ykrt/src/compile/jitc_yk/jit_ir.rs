@@ -659,6 +659,14 @@ impl GuardInfo {
     pub(crate) fn new(frames: Vec<u64>, lives: Vec<InstrIdx>) -> Self {
         Self { frames, lives }
     }
+
+    pub(crate) fn frames(&self) -> &Vec<u64> {
+        &self.frames
+    }
+
+    pub(crate) fn lives(&self) -> &Vec<InstrIdx> {
+        &self.lives
+    }
 }
 
 /// An IR instruction.
@@ -725,7 +733,7 @@ impl Instruction {
             Self::Add(ai) => ai.type_idx(m),
             Self::Icmp(_) => m.int8_type_idx(), // always returns a 0/1 valued byte.
             Self::Guard(..) => m.void_type_idx(),
-            Self::Arg(..) => m.void_type_idx(),
+            Self::Arg(..) => m.ptr_type_idx(),
         }
     }
 
@@ -1293,6 +1301,10 @@ impl GuardInstruction {
 
     pub(crate) fn expect(&self) -> bool {
         self.expect
+    }
+
+    pub(crate) fn guard_info<'a>(&self, m: &'a Module) -> &'a GuardInfo {
+        &m.guard_info[self.gidx]
     }
 }
 
