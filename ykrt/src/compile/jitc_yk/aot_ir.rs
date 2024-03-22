@@ -813,6 +813,11 @@ impl StructType {
         }
         bit_off / 8
     }
+
+    /// Returns the number of fields in the struct.
+    pub(crate) fn num_fields(&self) -> usize {
+        self.field_ty_idxs.len()
+    }
 }
 
 impl AotIRDisplay for StructType {

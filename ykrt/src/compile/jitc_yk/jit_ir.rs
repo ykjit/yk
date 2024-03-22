@@ -1263,6 +1263,8 @@ impl JitIRDisplay for IcmpInstruction {
         s.push_str("Icmp ");
         self.left().to_string_impl(m, s, nums)?;
         s.push_str(", ");
+        s.push_str(&format!("{:?}", self.pred));
+        s.push_str(", ");
         self.right().to_string_impl(m, s, nums)?;
         Ok(())
     }

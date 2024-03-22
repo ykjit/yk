@@ -59,10 +59,12 @@ impl<'a> TraceBuilder<'a> {
     /// Create the prolog of the trace.
     fn create_trace_header(&mut self, blk: &aot_ir::Block) -> Result<(), CompilationError> {
         // Find trace input variables and emit `LoadTraceInput` instructions for them.
-        let mut last_store = None;
         let mut trace_inputs = None;
-        let mut trace_input_idx = 0;
-        for (inst_idx, inst) in blk.instrs.iter().enumerate().rev() {
+
+        // PHASE 1:
+        // Find the control point call and extract the trace inputs struct from its operands.
+        let mut inst_iter = blk.instrs.iter().enumerate().rev();
+        for (_, inst) in &mut inst_iter {
             if inst.is_control_point(self.aot_mod) {
                 let op = inst.operand(CTRL_POINT_ARGIDX_INPUTS);
                 trace_inputs = Some(op.to_instr(self.aot_mod));
@@ -72,13 +74,26 @@ impl<'a> TraceBuilder<'a> {
                     .insert(op.to_instr_id(), self.next_instr_id()?);
                 let arg = jit_ir::Instruction::Arg(TRACE_FUNC_CTRLP_ARGIDX);
                 self.jit_mod.push(arg);
+                break;
             }
+        }
+
+        // If this unwrap fails, we didn't find the call to the control point and something is
+        // profoundly wrong with the AOT IR.
+        let trace_inputs = trace_inputs.unwrap();
+        let trace_input_struct_ty = trace_inputs.operand(0).type_(self.aot_mod).as_struct();
+        // We visit the trace inputs in reverse order, so we start with high indices first. This
+        // value then decrements in the below loop.
+        let mut trace_input_idx = trace_input_struct_ty.num_fields();
+
+        // PHASE 2:
+        // Keep walking backwards over the ptradd/store pairs emitting LoadTraceInput instructions.
+        let mut last_store = None;
+        for (inst_idx, inst) in inst_iter {
             if inst.is_store() {
                 last_store = Some(inst);
             }
             if inst.is_ptr_add() {
-                // unwrap safe: we know the AOT code was produced by ykllvm.
-                let trace_inputs = trace_inputs.unwrap();
                 // Is the pointer operand of this PtrAdd targeting the trace inputs?
                 if trace_inputs.ptr_eq(inst.operand(0).to_instr(self.aot_mod)) {
                     // We found a trace input. Now we emit a `LoadTraceInput` instruction into the
@@ -90,8 +105,7 @@ impl<'a> TraceBuilder<'a> {
                     //
                     // unwrap safe: we know the AOT code was produced by ykllvm.
                     let trace_input_val = last_store.unwrap().operand(0);
-                    let trace_input_struct_ty =
-                        trace_inputs.operand(0).type_(self.aot_mod).as_struct();
+                    trace_input_idx -= 1;
                     // FIXME: assumes the field is byte-aligned. If it isn't, field_byte_off() will
                     // crash.
                     let aot_field_off = trace_input_struct_ty.field_byte_off(trace_input_idx);
@@ -106,7 +120,6 @@ impl<'a> TraceBuilder<'a> {
                                 .insert(trace_input_val.to_instr_id(), self.next_instr_id()?);
                             self.jit_mod.push(load_arg);
                             self.first_ti_idx = inst_idx;
-                            trace_input_idx += 1;
                         }
                         _ => {
                             return Err(CompilationError("offset doesn't fit".into()));
