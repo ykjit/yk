@@ -58,11 +58,6 @@ thread_local! {
     pub(crate) static THREAD_MTTHREAD: MTThread = MTThread::new();
 }
 
-#[cfg(tracer_swt)]
-pub fn is_tracing() -> bool {
-    THREAD_MTTHREAD.with(|mtt| mtt.is_tracing())
-}
-
 #[cfg(feature = "yk_testing")]
 static SERIALISE_COMPILATION: LazyLock<bool> = LazyLock::new(|| {
     &env::var("YKD_SERIALISE_COMPILATION").unwrap_or_else(|_| "0".to_owned()) == "1"
@@ -699,6 +694,11 @@ impl MTThread {
         }
         true
     }
+}
+
+#[cfg(tracer_swt)]
+pub fn is_tracing() -> bool {
+    THREAD_MTTHREAD.with(|mtt| mtt.is_tracing())
 }
 
 /// What action should a caller of [MT::transition_control_point] take?
