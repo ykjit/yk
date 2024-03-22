@@ -66,6 +66,14 @@ impl<'a> TraceBuilder<'a> {
             if inst.is_control_point(self.aot_mod) {
                 let op = inst.operand(CTRL_POINT_ARGIDX_INPUTS);
                 trace_inputs = Some(op.to_instr(self.aot_mod));
+
+                let trace_input_struct_ty = trace_inputs
+                    .unwrap()
+                    .operand(0)
+                    .type_(self.aot_mod)
+                    .as_struct();
+                trace_input_idx = trace_input_struct_ty.num_fields();
+
                 // Add the trace input argument to the local map so it can be tracked and
                 // deoptimised.
                 self.local_map
@@ -94,8 +102,8 @@ impl<'a> TraceBuilder<'a> {
                         trace_inputs.operand(0).type_(self.aot_mod).as_struct();
                     // FIXME: assumes the field is byte-aligned. If it isn't, field_byte_off() will
                     // crash.
-                    let aot_field_off = trace_input_struct_ty.field_byte_off(trace_input_idx);
-                    let aot_field_ty = trace_input_struct_ty.field_type_idx(trace_input_idx);
+                    let aot_field_off = trace_input_struct_ty.field_byte_off(trace_input_idx - 1);
+                    let aot_field_ty = trace_input_struct_ty.field_type_idx(trace_input_idx - 1);
                     match u32::try_from(aot_field_off) {
                         Ok(u32_off) => {
                             let input_ty_idx = self.handle_type(aot_field_ty)?;
@@ -106,7 +114,7 @@ impl<'a> TraceBuilder<'a> {
                                 .insert(trace_input_val.to_instr_id(), self.next_instr_id()?);
                             self.jit_mod.push(load_arg);
                             self.first_ti_idx = inst_idx;
-                            trace_input_idx += 1;
+                            trace_input_idx -= 1;
                         }
                         _ => {
                             return Err(CompilationError("offset doesn't fit".into()));
