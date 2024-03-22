@@ -518,6 +518,34 @@ impl MT {
         })
     }
 
+    /// Start recording a side trace for a guard that failed while executing JIT compiled code in
+    /// `hl`.
+    pub(crate) fn side_trace(
+        self: &Arc<Self>,
+        hl: Arc<Mutex<HotLocation>>,
+        sti: SideTraceInfo,
+        parent: Arc<dyn CompiledTrace>,
+    ) {
+        match self.transition_guard_failure(hl, sti, parent) {
+            TransitionGuardFailure::NoAction => todo!(),
+            TransitionGuardFailure::StartSideTracing => {
+                #[cfg(feature = "yk_jitstate_debug")]
+                print_jit_state("start-side-tracing");
+                let tracer = {
+                    let lk = self.tracer.lock();
+                    Arc::clone(&*lk)
+                };
+                match Arc::clone(&tracer).start_recorder() {
+                    Ok(tt) => THREAD_MTTHREAD.with(|mtt| {
+                        *mtt.thread_tracer.borrow_mut() = Some(tt);
+                        *mtt.promotions.borrow_mut() = Some(Vec::new());
+                    }),
+                    Err(e) => todo!("{e:?}"),
+                }
+            }
+        }
+    }
+
     /// Add a compilation job for to the global work queue:
     ///   * `utrace` is the trace to be compiled.
     ///   * `hl_arc` is the [HotLocation] this compilation job is related to.
@@ -588,34 +616,6 @@ impl MT {
         }
 
         self.queue_job(Box::new(do_compile));
-    }
-
-    /// Start recording a side trace for a guard that failed while executing JIT compiled code in
-    /// `hl`.
-    pub(crate) fn side_trace(
-        self: &Arc<Self>,
-        hl: Arc<Mutex<HotLocation>>,
-        sti: SideTraceInfo,
-        parent: Arc<dyn CompiledTrace>,
-    ) {
-        match self.transition_guard_failure(hl, sti, parent) {
-            TransitionGuardFailure::NoAction => todo!(),
-            TransitionGuardFailure::StartSideTracing => {
-                #[cfg(feature = "yk_jitstate_debug")]
-                print_jit_state("start-side-tracing");
-                let tracer = {
-                    let lk = self.tracer.lock();
-                    Arc::clone(&*lk)
-                };
-                match Arc::clone(&tracer).start_recorder() {
-                    Ok(tt) => THREAD_MTTHREAD.with(|mtt| {
-                        *mtt.thread_tracer.borrow_mut() = Some(tt);
-                        *mtt.promotions.borrow_mut() = Some(Vec::new());
-                    }),
-                    Err(e) => todo!("{e:?}"),
-                }
-            }
-        }
     }
 
     #[cfg(yk_llvm_sync_hack)]
