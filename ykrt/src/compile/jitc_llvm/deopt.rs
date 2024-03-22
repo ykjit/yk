@@ -406,18 +406,16 @@ unsafe extern "C" fn __ykrt_deopt(
         let guard = ctr.guard(guardid);
         if guard.inc_failed(ctr.mt()) {
             // This guard is hot, so compile a new side-trace.
-            if let Some(hl) = ctr.hl().upgrade() {
-                let aotvalsptr = unsafe {
-                    (ctr.aotvals() as *const u8).offset(isize::try_from(aotvals.offset).unwrap())
-                } as *const c_void;
-                let sti = SideTraceInfo {
-                    callstack: jitcallstack,
-                    aotvalsptr,
-                    aotvalslen: aotvals.length,
-                    guardid,
-                };
-                ctr.mt().side_trace(hl, sti, ctrn);
-            }
+            let aotvalsptr = unsafe {
+                (ctr.aotvals() as *const u8).offset(isize::try_from(aotvals.offset).unwrap())
+            } as *const c_void;
+            let sti = SideTraceInfo {
+                callstack: jitcallstack,
+                aotvalsptr,
+                aotvalslen: aotvals.length,
+                guardid,
+            };
+            ctr.mt().side_trace(sti, ctrn);
         }
     }
 

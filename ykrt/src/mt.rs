@@ -58,11 +58,6 @@ thread_local! {
     pub(crate) static THREAD_MTTHREAD: MTThread = MTThread::new();
 }
 
-#[cfg(tracer_swt)]
-pub fn is_tracing() -> bool {
-    return THREAD_MTTHREAD.with(|mtt| mtt.tracing.borrow().is_some());
-}
-
 #[cfg(feature = "yk_testing")]
 static SERIALISE_COMPILATION: LazyLock<bool> = LazyLock::new(|| {
     &env::var("YKD_SERIALISE_COMPILATION").unwrap_or_else(|_| "0".to_owned()) == "1"
@@ -344,7 +339,7 @@ impl MT {
     /// `loc` moves to the Compiled state, return a pointer to a [CompiledTrace] object.
     fn transition_control_point(self: &Arc<Self>, loc: &Location) -> TransitionControlPoint {
         THREAD_MTTHREAD.with(|mtt| {
-            let am_tracing = mtt.tracing.borrow().is_some();
+            let is_tracing = mtt.is_tracing();
             match loc.hot_location() {
                 Some(hl) => {
                     // If this thread is tracing something, we *must* grab the [HotLocation] lock,
@@ -360,7 +355,7 @@ impl MT {
                         // If this thread is not tracing anything, however, it's not worth
                         // contending too much with other threads: we try moderately hard to grab
                         // the lock, but we don't want to park this thread.
-                        if !am_tracing {
+                        if !is_tracing {
                             // This thread isn't tracing anything, so we try for a little while to grab the
                             // lock, before giving up and falling back to the interpreter. In general, we
                             // expect that we'll grab the lock rather quickly. However, there is one nasty
@@ -394,7 +389,7 @@ impl MT {
 
                     match lk.kind {
                         HotLocationKind::Compiled(ref ctr) => {
-                            if am_tracing {
+                            if is_tracing {
                                 // This thread is tracing something, so bail out as quickly as possible
                                 TransitionControlPoint::NoAction
                             } else {
@@ -460,14 +455,14 @@ impl MT {
                     }
                 }
                 None => {
-                    if am_tracing {
+                    if is_tracing {
                         // This thread is tracing something, so bail out as quickly as possible
                         return TransitionControlPoint::NoAction;
                     }
-                    match loc.count() {
+                    match loc.inc_count() {
                         Some(x) => {
-                            if x < self.hot_threshold() {
-                                loc.count_set(x, x + 1);
+                            debug_assert!(self.hot_threshold() < HotThreshold::MAX);
+                            if x < self.hot_threshold() + 1 {
                                 TransitionControlPoint::NoAction
                             } else {
                                 let hl = HotLocation {
@@ -475,7 +470,7 @@ impl MT {
                                     trace_failure: 0,
                                 };
                                 if let Some(hl) = loc.count_to_hot_location(x, hl) {
-                                    debug_assert!(mtt.tracing.borrow().is_none());
+                                    debug_assert!(!is_tracing);
                                     *mtt.tracing.borrow_mut() = Some(hl);
                                     TransitionControlPoint::StartTracing
                                 } else {
@@ -500,22 +495,51 @@ impl MT {
     /// Perform the next step to `loc` in the `Location` state-machine for a guard failure.
     pub(crate) fn transition_guard_failure(
         self: &Arc<Self>,
-        hl: Arc<Mutex<HotLocation>>,
         sti: SideTraceInfo,
         parent: Arc<dyn CompiledTrace>,
     ) -> TransitionGuardFailure {
-        THREAD_MTTHREAD.with(|mtt| {
-            // This thread should not be tracing anything.
-            debug_assert!(!mtt.tracing.borrow().is_some());
-            let mut lk = hl.lock();
-            if let HotLocationKind::Compiled(ref ctr) = lk.kind {
-                *mtt.tracing.borrow_mut() = Some(Arc::clone(&hl));
-                lk.kind = HotLocationKind::SideTracing(Arc::clone(ctr), sti, parent);
-                TransitionGuardFailure::StartSideTracing
-            } else {
-                TransitionGuardFailure::NoAction
+        if let Some(hl) = parent.hl().upgrade() {
+            THREAD_MTTHREAD.with(|mtt| {
+                // This thread should not be tracing anything.
+                debug_assert!(!mtt.is_tracing());
+                let mut lk = hl.lock();
+                if let HotLocationKind::Compiled(ref ctr) = lk.kind {
+                    *mtt.tracing.borrow_mut() = Some(Arc::clone(&hl));
+                    lk.kind = HotLocationKind::SideTracing(Arc::clone(ctr), sti, parent);
+                    return TransitionGuardFailure::StartSideTracing;
+                } else {
+                    // The top-level trace's [HotLocation] might have changed to another state while
+                    // the associated trace was executing; or we raced with another thread (which is
+                    // most likely to have started side tracing itself).
+                    TransitionGuardFailure::NoAction
+                }
+            })
+        } else {
+            // The parent [HotLocation] has been garbage collected.
+            TransitionGuardFailure::NoAction
+        }
+    }
+
+    /// Start recording a side trace for a guard that failed in `ctr`.
+    pub(crate) fn side_trace(self: &Arc<Self>, sti: SideTraceInfo, parent: Arc<dyn CompiledTrace>) {
+        match self.transition_guard_failure(sti, parent) {
+            TransitionGuardFailure::NoAction => todo!(),
+            TransitionGuardFailure::StartSideTracing => {
+                #[cfg(feature = "yk_jitstate_debug")]
+                print_jit_state("start-side-tracing");
+                let tracer = {
+                    let lk = self.tracer.lock();
+                    Arc::clone(&*lk)
+                };
+                match Arc::clone(&tracer).start_recorder() {
+                    Ok(tt) => THREAD_MTTHREAD.with(|mtt| {
+                        *mtt.thread_tracer.borrow_mut() = Some(tt);
+                        *mtt.promotions.borrow_mut() = Some(Vec::new());
+                    }),
+                    Err(e) => todo!("{e:?}"),
+                }
             }
-        })
+        }
     }
 
     /// Add a compilation job for to the global work queue:
@@ -590,34 +614,6 @@ impl MT {
         self.queue_job(Box::new(do_compile));
     }
 
-    /// Start recording a side trace for a guard that failed while executing JIT compiled code in
-    /// `hl`.
-    pub(crate) fn side_trace(
-        self: &Arc<Self>,
-        hl: Arc<Mutex<HotLocation>>,
-        sti: SideTraceInfo,
-        parent: Arc<dyn CompiledTrace>,
-    ) {
-        match self.transition_guard_failure(hl, sti, parent) {
-            TransitionGuardFailure::NoAction => todo!(),
-            TransitionGuardFailure::StartSideTracing => {
-                #[cfg(feature = "yk_jitstate_debug")]
-                print_jit_state("start-side-tracing");
-                let tracer = {
-                    let lk = self.tracer.lock();
-                    Arc::clone(&*lk)
-                };
-                match Arc::clone(&tracer).start_recorder() {
-                    Ok(tt) => THREAD_MTTHREAD.with(|mtt| {
-                        *mtt.thread_tracer.borrow_mut() = Some(tt);
-                        *mtt.promotions.borrow_mut() = Some(Vec::new());
-                    }),
-                    Err(e) => todo!("{e:?}"),
-                }
-            }
-        }
-    }
-
     #[cfg(yk_llvm_sync_hack)]
     pub fn llvm_sync_hack(&self) {
         while self.active_worker_jobs.load(Ordering::Relaxed) != 0 {
@@ -671,6 +667,11 @@ impl MTThread {
         }
     }
 
+    /// Is this thread currently tracing something?
+    fn is_tracing(&self) -> bool {
+        self.tracing.borrow().is_some()
+    }
+
     /// If a trace is currently running, return a reference to its `CompiledTrace`.
     pub(crate) fn running_trace(&self) -> Option<Arc<dyn CompiledTrace>> {
         self.running_trace.borrow().as_ref().map(|x| Arc::clone(&x))
@@ -695,6 +696,11 @@ impl MTThread {
     }
 }
 
+#[cfg(tracer_swt)]
+pub fn is_tracing() -> bool {
+    THREAD_MTTHREAD.with(|mtt| mtt.is_tracing())
+}
+
 /// What action should a caller of [MT::transition_control_point] take?
 #[derive(Debug)]
 enum TransitionControlPoint {
@@ -717,27 +723,28 @@ pub(crate) enum TransitionGuardFailure {
 }
 
 #[cfg(test)]
-impl PartialEq for TransitionControlPoint {
-    fn eq(&self, other: &Self) -> bool {
-        // We only implement enough of the equality function for the tests we have.
-        match (self, other) {
-            (TransitionControlPoint::NoAction, TransitionControlPoint::NoAction) => true,
-            (TransitionControlPoint::Execute(p1), TransitionControlPoint::Execute(p2)) => {
-                std::ptr::eq(p1, p2)
-            }
-            (TransitionControlPoint::StartTracing, TransitionControlPoint::StartTracing) => true,
-            (x, y) => todo!("{:?} {:?}", x, y),
-        }
-    }
-}
-
-#[cfg(test)]
 mod tests {
     extern crate test;
     use super::*;
     use crate::compile::jitc_llvm::LLVMCompiledTrace;
     use std::{hint::black_box, sync::atomic::AtomicU64};
     use test::bench::Bencher;
+
+    impl PartialEq for TransitionControlPoint {
+        fn eq(&self, other: &Self) -> bool {
+            // We only implement enough of the equality function for the tests we have.
+            match (self, other) {
+                (TransitionControlPoint::NoAction, TransitionControlPoint::NoAction) => true,
+                (TransitionControlPoint::Execute(p1), TransitionControlPoint::Execute(p2)) => {
+                    std::ptr::eq(p1, p2)
+                }
+                (TransitionControlPoint::StartTracing, TransitionControlPoint::StartTracing) => {
+                    true
+                }
+                (x, y) => todo!("{:?} {:?}", x, y),
+            }
+        }
+    }
 
     #[test]
     fn basic_transitions() {
@@ -783,9 +790,10 @@ mod tests {
         };
         assert!(matches!(
             mt.transition_guard_failure(
-                loc.hot_location_arc_clone().unwrap(),
                 sti,
-                Arc::new(LLVMCompiledTrace::new_testing()),
+                Arc::new(LLVMCompiledTrace::new_testing_with_hl(Arc::downgrade(
+                    &loc.hot_location_arc_clone().unwrap()
+                ))),
             ),
             TransitionGuardFailure::StartSideTracing
         ));
@@ -1225,9 +1233,10 @@ mod tests {
                 };
                 assert!(matches!(
                     mt.transition_guard_failure(
-                        loc1.hot_location_arc_clone().unwrap(),
                         sti,
-                        Arc::new(LLVMCompiledTrace::new_testing()),
+                        Arc::new(LLVMCompiledTrace::new_testing_with_hl(Arc::downgrade(
+                            &loc1.hot_location_arc_clone().unwrap()
+                        )))
                     ),
                     TransitionGuardFailure::StartSideTracing
                 ));
@@ -1244,9 +1253,10 @@ mod tests {
         };
         assert!(matches!(
             mt.transition_guard_failure(
-                loc2.hot_location_arc_clone().unwrap(),
                 sti,
-                Arc::new(LLVMCompiledTrace::new_testing()),
+                Arc::new(LLVMCompiledTrace::new_testing_with_hl(Arc::downgrade(
+                    &loc2.hot_location_arc_clone().unwrap()
+                )))
             ),
             TransitionGuardFailure::StartSideTracing
         ));
