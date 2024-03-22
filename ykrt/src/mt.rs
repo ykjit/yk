@@ -497,7 +497,9 @@ impl MT {
         })
     }
 
-    /// Perform the next step to `loc` in the `Location` state-machine for a guard failure.
+    /// Perform the next step to `loc` in the `Location` state-machine for a guard failure. `hl` is
+    /// the [HotLocation] for the beginning of the top-level trace and where side tracing, if
+    /// started, should finish.
     pub(crate) fn transition_guard_failure(
         self: &Arc<Self>,
         hl: Arc<Mutex<HotLocation>>,
@@ -513,6 +515,9 @@ impl MT {
                 lk.kind = HotLocationKind::SideTracing(Arc::clone(ctr), sti, parent);
                 TransitionGuardFailure::StartSideTracing
             } else {
+                // The top-level trace's [HotLocation] might have changed to another state while
+                // the associated trace was executing; or we raced with another thread (which is
+                // most likely to have started side tracing itself).
                 TransitionGuardFailure::NoAction
             }
         })
