@@ -1305,7 +1305,7 @@ mod tests {
             );
             let patt_lines = [
                 "...",
-                "; %1: i8 = Icmp %0, %0",
+                "; %1: i8 = Icmp %0, Equal, %0",
                 "... mov r12, [rbp-0x08]",
                 "... mov r13, [rbp-0x08]",
                 "... cmp r12, r13",
@@ -1330,7 +1330,7 @@ mod tests {
             );
             let patt_lines = [
                 "...",
-                "; %1: i8 = Icmp %0, %0",
+                "; %1: i8 = Icmp %0, Equal, %0",
                 "... movzx r12, byte ptr [rbp-0x01]",
                 "... movzx r13, byte ptr [rbp-0x01]",
                 "... cmp r12b, r13b",
