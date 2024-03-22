@@ -102,6 +102,9 @@ pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
 
     fn entry(&self) -> *const c_void;
 
+    /// Return a weak reference to the [HotLocation] that started the top-level trace. Note that a
+    /// given `CompiledTrace` may be a side (i.e. a "sub") trace of that top-level trace: the same
+    /// [HotLocation] is passed down to each of the child `CompiledTrace`s.
     fn hl(&self) -> &Weak<Mutex<HotLocation>>;
 
     /// Disassemble the JITted code into a string, for testing and deubgging.

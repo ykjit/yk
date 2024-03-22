@@ -497,41 +497,37 @@ impl MT {
         })
     }
 
-    /// Perform the next step to `loc` in the `Location` state-machine for a guard failure. `hl` is
-    /// the [HotLocation] for the beginning of the top-level trace and where side tracing, if
-    /// started, should finish.
+    /// Perform the next step to `loc` in the `Location` state-machine for a guard failure.
     pub(crate) fn transition_guard_failure(
         self: &Arc<Self>,
-        hl: Arc<Mutex<HotLocation>>,
         sti: SideTraceInfo,
         parent: Arc<dyn CompiledTrace>,
     ) -> TransitionGuardFailure {
-        THREAD_MTTHREAD.with(|mtt| {
-            // This thread should not be tracing anything.
-            debug_assert!(!mtt.is_tracing());
-            let mut lk = hl.lock();
-            if let HotLocationKind::Compiled(ref ctr) = lk.kind {
-                *mtt.tracing.borrow_mut() = Some(Arc::clone(&hl));
-                lk.kind = HotLocationKind::SideTracing(Arc::clone(ctr), sti, parent);
-                TransitionGuardFailure::StartSideTracing
-            } else {
-                // The top-level trace's [HotLocation] might have changed to another state while
-                // the associated trace was executing; or we raced with another thread (which is
-                // most likely to have started side tracing itself).
-                TransitionGuardFailure::NoAction
-            }
-        })
+        if let Some(hl) = parent.hl().upgrade() {
+            THREAD_MTTHREAD.with(|mtt| {
+                // This thread should not be tracing anything.
+                debug_assert!(!mtt.is_tracing());
+                let mut lk = hl.lock();
+                if let HotLocationKind::Compiled(ref ctr) = lk.kind {
+                    *mtt.tracing.borrow_mut() = Some(Arc::clone(&hl));
+                    lk.kind = HotLocationKind::SideTracing(Arc::clone(ctr), sti, parent);
+                    return TransitionGuardFailure::StartSideTracing;
+                } else {
+                    // The top-level trace's [HotLocation] might have changed to another state while
+                    // the associated trace was executing; or we raced with another thread (which is
+                    // most likely to have started side tracing itself).
+                    TransitionGuardFailure::NoAction
+                }
+            })
+        } else {
+            // The parent [HotLocation] has been garbage collected.
+            TransitionGuardFailure::NoAction
+        }
     }
 
-    /// Start recording a side trace for a guard that failed while executing JIT compiled code in
-    /// `hl`.
-    pub(crate) fn side_trace(
-        self: &Arc<Self>,
-        hl: Arc<Mutex<HotLocation>>,
-        sti: SideTraceInfo,
-        parent: Arc<dyn CompiledTrace>,
-    ) {
-        match self.transition_guard_failure(hl, sti, parent) {
+    /// Start recording a side trace for a guard that failed in `ctr`.
+    pub(crate) fn side_trace(self: &Arc<Self>, sti: SideTraceInfo, parent: Arc<dyn CompiledTrace>) {
+        match self.transition_guard_failure(sti, parent) {
             TransitionGuardFailure::NoAction => todo!(),
             TransitionGuardFailure::StartSideTracing => {
                 #[cfg(feature = "yk_jitstate_debug")]
@@ -794,9 +790,10 @@ mod tests {
         };
         assert!(matches!(
             mt.transition_guard_failure(
-                loc.hot_location_arc_clone().unwrap(),
                 sti,
-                Arc::new(LLVMCompiledTrace::new_testing()),
+                Arc::new(LLVMCompiledTrace::new_testing_with_hl(Arc::downgrade(
+                    &loc.hot_location_arc_clone().unwrap()
+                ))),
             ),
             TransitionGuardFailure::StartSideTracing
         ));
@@ -1236,9 +1233,10 @@ mod tests {
                 };
                 assert!(matches!(
                     mt.transition_guard_failure(
-                        loc1.hot_location_arc_clone().unwrap(),
                         sti,
-                        Arc::new(LLVMCompiledTrace::new_testing()),
+                        Arc::new(LLVMCompiledTrace::new_testing_with_hl(Arc::downgrade(
+                            &loc1.hot_location_arc_clone().unwrap()
+                        )))
                     ),
                     TransitionGuardFailure::StartSideTracing
                 ));
@@ -1255,9 +1253,10 @@ mod tests {
         };
         assert!(matches!(
             mt.transition_guard_failure(
-                loc2.hot_location_arc_clone().unwrap(),
                 sti,
-                Arc::new(LLVMCompiledTrace::new_testing()),
+                Arc::new(LLVMCompiledTrace::new_testing_with_hl(Arc::downgrade(
+                    &loc2.hot_location_arc_clone().unwrap()
+                )))
             ),
             TransitionGuardFailure::StartSideTracing
         ));

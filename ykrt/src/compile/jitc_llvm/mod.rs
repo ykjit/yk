@@ -180,7 +180,9 @@ impl fmt::Debug for LLVMCompiledTrace {
 }
 
 #[cfg(test)]
-pub(crate) struct LLVMCompiledTrace;
+pub(crate) struct LLVMCompiledTrace {
+    hl: Option<Weak<Mutex<HotLocation>>>,
+}
 
 #[cfg(test)]
 impl LLVMCompiledTrace {
@@ -194,9 +196,16 @@ impl LLVMCompiledTrace {
     }
 
     /// Create a `CompiledTrace` suitable for testing purposes. The resulting instance is not
-    /// useful other than as a placeholder: calling any of its methods will cause a panic.
+    /// useful other than as a placeholder.
     pub(crate) fn new_testing() -> Self {
-        Self
+        Self { hl: None }
+    }
+
+    /// Create a `CompiledTrace` suitable for testing purposes. The resulting instance is not
+    /// useful other than as a placeholder: calling any of its methods other than `hl` will cause a
+    /// panic.
+    pub(crate) fn new_testing_with_hl(hl: Weak<Mutex<HotLocation>>) -> Self {
+        Self { hl: Some(hl) }
     }
 
     fn smap(&self) -> &HashMap<u64, Vec<LiveVar>> {
@@ -231,7 +240,7 @@ impl CompiledTrace for LLVMCompiledTrace {
     }
 
     fn hl(&self) -> &Weak<Mutex<HotLocation>> {
-        todo!();
+        self.hl.as_ref().unwrap()
     }
 
     fn disassemble(&self) -> Result<String, Box<dyn Error>> {
