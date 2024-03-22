@@ -98,38 +98,46 @@ impl Location {
         }
     }
 
-    /// If `self` is in the `Counting` state, return its count, or `None` otherwise.
-    pub(crate) fn count(&self) -> Option<HotThreshold> {
+    /// If `self` is in the `Counting` state, increment and return its count, or `None` otherwise.
+    pub(crate) fn inc_count(&self) -> Option<HotThreshold> {
         let x = self.inner.load(Ordering::Relaxed);
         if x & STATE_NOT_HOT != 0 {
+            // `HotThreshold` must be unsigned
+            debug_assert_eq!(HotThreshold::MIN, 0);
             // For the `as` to be safe, `HotThreshold` can't be bigger than `usize`
             debug_assert!(mem::size_of::<HotThreshold>() <= mem::size_of::<usize>());
-            Some((x >> STATE_NUM_BITS) as HotThreshold)
+            let old = (x >> STATE_NUM_BITS) as HotThreshold;
+            // The particular value of `new` must fit in the bits we have available.
+            let new = old + 1;
+            debug_assert!((new as usize)
+                .checked_shl(u32::try_from(STATE_NUM_BITS).unwrap())
+                .is_some());
+
+            self.inner
+                .compare_exchange_weak(
+                    ((old as usize) << STATE_NUM_BITS) | STATE_NOT_HOT,
+                    ((new as usize) << STATE_NUM_BITS) | STATE_NOT_HOT,
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                )
+                .ok()
+                .map(|_| new)
         } else {
             None
         }
     }
 
-    /// Change `self`s count to `new` if: `self` is in the `Counting` state; and the current count
-    /// is `old`. If the transition is successful, return `true`.
-    pub(crate) fn count_set(&self, old: HotThreshold, new: HotThreshold) -> bool {
-        // `HotThreshold` must be unsigned
-        debug_assert_eq!(HotThreshold::MIN, 0);
-        // `HotThreshold` can't be bigger than `usize`
-        debug_assert!(mem::size_of::<HotThreshold>() <= mem::size_of::<usize>());
-        // The particular value of `new` must fit in the bits we have available.
-        debug_assert!((new as usize)
-            .checked_shl(u32::try_from(STATE_NUM_BITS).unwrap())
-            .is_some());
-
-        self.inner
-            .compare_exchange_weak(
-                ((old as usize) << STATE_NUM_BITS) | STATE_NOT_HOT,
-                ((new as usize) << STATE_NUM_BITS) | STATE_NOT_HOT,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            )
-            .is_ok()
+    /// If `self` is in the `Counting` state, return its count, or `None` otherwise.
+    #[cfg(test)]
+    pub(crate) fn count(&self) -> Option<HotThreshold> {
+        let x = self.inner.load(Ordering::Relaxed);
+        if x & STATE_NOT_HOT != 0 {
+            // `HotThreshold` must be unsigned
+            debug_assert_eq!(HotThreshold::MIN, 0);
+            Some((x >> STATE_NUM_BITS) as HotThreshold)
+        } else {
+            None
+        }
     }
 
     /// Change `self` to be a [HotLocation] `hl` if: `self` is in the `Counting` state; and the

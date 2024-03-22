@@ -464,10 +464,10 @@ impl MT {
                         // This thread is tracing something, so bail out as quickly as possible
                         return TransitionControlPoint::NoAction;
                     }
-                    match loc.count() {
+                    match loc.inc_count() {
                         Some(x) => {
-                            if x < self.hot_threshold() {
-                                loc.count_set(x, x + 1);
+                            debug_assert!(self.hot_threshold() < HotThreshold::MAX);
+                            if x < self.hot_threshold() + 1 {
                                 TransitionControlPoint::NoAction
                             } else {
                                 let hl = HotLocation {
