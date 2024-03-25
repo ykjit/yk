@@ -57,7 +57,8 @@ extern "C" fn __yk_deopt(_ctrlpvars: *const c_void, _frameaddr: *const c_void, d
         .downcast::<X64CompiledTrace>()
         .unwrap();
     debug_assert!(deoptid < ctr.deoptinfo.len());
-    panic!("deopt");
+    eprintln!("deopt");
+    std::process::exit(1);
 }
 
 /// A function that we can put a debugger breakpoint on.
