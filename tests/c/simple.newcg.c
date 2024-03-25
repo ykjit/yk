@@ -6,6 +6,11 @@
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_PRINT_JITSTATE=1
 //   status: error
+//   stdout:
+//     i
+//     i
+//     i
+//     i
 //   stderr:
 //     jit-state: start-tracing
 //     jit-state: stop-tracing
@@ -19,6 +24,8 @@
 //     --- End jit-pre-opt ---
 //     ...
 //     jit-state: enter-jit-code
+//     ...
+//     deopt
 //     ...
 
 // Check that basic trace compilation works.

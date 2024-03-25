@@ -17,7 +17,8 @@ use super::{
 use crate::compile::jitc_yk::jit_ir::JitIRDisplay;
 use crate::compile::CompiledTrace;
 use dynasmrt::{
-    dynasm, x64::Rq, AssemblyOffset, DynasmApi, DynasmLabelApi, ExecutableBuffer, Register,
+    components::StaticLabel, dynasm, x64::Rq, AssemblyOffset, DynasmApi, DynasmError,
+    DynasmLabelApi, ExecutableBuffer, Register,
 };
 use libc::c_void;
 #[cfg(any(debug_assertions, test))]
@@ -56,7 +57,8 @@ extern "C" fn __yk_deopt(_ctrlpvars: *const c_void, _frameaddr: *const c_void, d
         .downcast::<X64CompiledTrace>()
         .unwrap();
     debug_assert!(deoptid < ctr.deoptinfo.len());
-    panic!("deopt");
+    eprintln!("deopt");
+    std::process::exit(1);
 }
 
 /// A function that we can put a debugger breakpoint on.
@@ -113,8 +115,32 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
             self.codegen_inst(jit_ir::InstrIdx::new(idx)?, inst)?;
         }
 
-        // FIXME: until we implement trace looping, just crash.
-        dynasm!(self.asm; ud2);
+        // Loop the JITted code if the backedge target label is present.
+        let label = StaticLabel::global("trace_loop_start");
+        match self.asm.labels().resolve_static(&label) {
+            Ok(_) => {
+                // Found the label, emit a jump to it.
+                #[cfg(any(debug_assertions, test))]
+                self.comment(self.asm.offset(), "Trace loop backedge".to_owned());
+                dynasm!(self.asm; jmp ->trace_loop_start);
+            }
+            Err(DynasmError::UnknownLabel(_)) => {
+                // Label not found. This is OK for unit testing, where we sometimes construct
+                // traces that don't loop.
+                #[cfg(test)]
+                {
+                    #[cfg(any(debug_assertions, test))]
+                    self.comment(self.asm.offset(), "Unterminated trace".to_owned());
+                    dynasm!(self.asm; ud2);
+                }
+                #[cfg(not(test))]
+                panic!("unterminated trace in non-unit-test");
+            }
+            Err(e) => {
+                // Any other error suggests something has gone quite wrong. Just crash.
+                panic!("{}", e.to_string())
+            }
+        }
 
         // Now we know the size of the stack frame (i.e. self.asp), patch the allocation with the
         // correct amount.
@@ -169,6 +195,7 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Instruction::Icmp(i) => self.codegen_icmp_instr(instr_idx, &i),
             jit_ir::Instruction::Guard(i) => self.codegen_guard_instr(&i),
             jit_ir::Instruction::Arg(i) => self.codegen_arg(instr_idx, *i),
+            jit_ir::Instruction::TraceLoopStart => self.codegen_traceloopstart_instr(),
         }
         Ok(())
     }
@@ -534,6 +561,11 @@ impl<'a> X64CodeGen<'a> {
         self.reg_into_new_local(inst_idx, ARG_REGS[usize::from(idx)]);
     }
 
+    fn codegen_traceloopstart_instr(&mut self) {
+        // FIXME: peel the initial iteration of the loop to allow us to hoist loop invariants.
+        dynasm!(self.asm; ->trace_loop_start:);
+    }
+
     fn codegen_guard_instr(&mut self, inst: &jit_ir::GuardInstruction) {
         let cond = inst.cond();
 
@@ -762,7 +794,7 @@ mod tests {
                 "... mov r12, [rbp-0x08]",
                 "... mov r12, [r12]",
                 "... mov [rbp-0x10], r12",
-                "... ud2",
+                "...",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
@@ -783,7 +815,7 @@ mod tests {
                 "... movzx r12, byte ptr [rbp-0x01]",
                 "... movzx r12, byte ptr [r12]",
                 "... mov [rbp-0x02], r12b",
-                "... ud2",
+                "...",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
@@ -804,7 +836,7 @@ mod tests {
                 "... mov r12d, [rbp-0x04]",
                 "... mov r12d, [r12]",
                 "... mov [rbp-0x08], r12d",
-                "... ud2",
+                "...",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
@@ -823,7 +855,7 @@ mod tests {
                 "... mov r12, [rbp-0x08]",
                 "... add r12, 0x40",
                 "... mov [rbp-0x10], r12",
-                "... ud2",
+                "...",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
@@ -845,7 +877,7 @@ mod tests {
                 "... mov r12, [rbp-0x10]",
                 "... mov r13, [rbp-0x08]",
                 "... mov [r12], r13",
-                "... ud2",
+                "...",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
@@ -862,7 +894,7 @@ mod tests {
                 &format!("; %0: i8 = LoadTraceInput 0, i8"),
                 "... movzx r12, byte ptr [rdi]",
                 "... mov [rbp-0x01], r12b",
-                "... ud2",
+                "...",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
@@ -879,7 +911,7 @@ mod tests {
                 &format!("; %0: i16 = LoadTraceInput 32, i16"),
                 "... movzx r12d, word ptr [rdi+0x20]",
                 "... mov [rbp-0x02], r12w",
-                "... ud2",
+                "...",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
@@ -913,7 +945,7 @@ mod tests {
                 &format!("; %4: ptr = LoadTraceInput 8, ptr"),
                 "... mov r12, [rdi+0x08]",
                 "... mov [rbp-0x10], r12",
-                "... ud2",
+                "...",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
@@ -940,7 +972,7 @@ mod tests {
                 "... movzx r13, word ptr [rbp-0x04]",
                 "... add r12w, r13w",
                 "... mov [rbp-0x06], r12w",
-                "... ud2",
+                "...",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
@@ -967,7 +999,7 @@ mod tests {
                 "... mov r13, [rbp-0x10]",
                 "... add r12, r13",
                 "... mov [rbp-0x18], r12",
-                "... ud2",
+                "...",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
@@ -1311,7 +1343,7 @@ mod tests {
                 "... cmp r12, r13",
                 "... setz r12b",
                 "... mov [rbp-0x09], r12b",
-                "... ud2",
+                "...",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
@@ -1336,7 +1368,7 @@ mod tests {
                 "... cmp r12b, r13b",
                 "... setz r12b",
                 "... mov [rbp-0x02], r12b",
-                "... ud2",
+                "...",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
@@ -1407,7 +1439,7 @@ mod tests {
                 "... call rax",
                 "{{vaddr3}} {{cmpoff}}: cmp r12b, 0x01",
                 "{{vaddr4}} {{off4}}: jnz 0x00000000{{failoff}}",
-                "... ud2",
+                "...",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
@@ -1434,7 +1466,53 @@ mod tests {
                 "... call rax",
                 "{{vaddr3}} {{cmpoff}}: cmp r12b, 0x00",
                 "{{vaddr4}} {{off4}}: jnz 0x00000000{{failoff}}",
-                "... ud2",
+                "...",
+            ];
+            test_with_spillalloc(&jit_mod, &patt_lines);
+        }
+
+        #[test]
+        fn unterminated_trace() {
+            let jit_mod = test_module();
+            let patt_lines = ["...", "; Unterminated trace", "{{vaddr}} {{off}}: ud2"];
+            test_with_spillalloc(&jit_mod, &patt_lines);
+        }
+
+        #[test]
+        fn looped_trace_smallest() {
+            let mut jit_mod = test_module();
+            jit_mod.push(jit_ir::Instruction::TraceLoopStart);
+            let patt_lines = [
+                "...",
+                "; TraceLoopStart",
+                "; Trace loop backedge",
+                // FIXME: make the offset and disassembler format hex the same so we can match
+                // easier (capitalisation of hex differs).
+                "{{vaddr}} {{off}}: jmp {{target}}",
+            ];
+            test_with_spillalloc(&jit_mod, &patt_lines);
+        }
+
+        #[test]
+        fn looped_trace_bigger() {
+            let mut jit_mod = test_module();
+            let int8_ty_idx = jit_mod.int8_type_idx();
+            let ti_op = jit_mod
+                .push_and_make_operand(
+                    jit_ir::LoadTraceInputInstruction::new(0, int8_ty_idx).into(),
+                )
+                .unwrap();
+            jit_mod.push(jit_ir::Instruction::TraceLoopStart);
+            jit_mod.push(jit_ir::AddInstruction::new(ti_op.clone(), ti_op).into());
+            let patt_lines = [
+                "...",
+                "; %0: i8 = LoadTraceInput 0, i8",
+                "...",
+                "; TraceLoopStart",
+                "; %2: i8 = Add %0, %0",
+                "...",
+                "; Trace loop backedge",
+                "...: jmp ...",
             ];
             test_with_spillalloc(&jit_mod, &patt_lines);
         }
