@@ -5,7 +5,7 @@
 
 use byteorder::{NativeEndian, ReadBytesExt};
 use deku::prelude::*;
-use std::{cell::RefCell, error::Error, ffi::CStr, fs, io::Cursor, path::PathBuf};
+use std::{cell::RefCell, error::Error, ffi::CStr, fs, path::PathBuf};
 use typed_index_collections::TiVec;
 
 /// A magic number that all bytecode payloads begin with.
@@ -687,9 +687,34 @@ impl AotIRDisplay for Func {
     }
 }
 
-// A fixed-width two's compliment integer.
-//
-// Signedness is not specified.
+/// Return the stringified constant integer obtained by interpreting `bytes` as `num-bits`-wide
+/// constant integer.
+///
+/// FIXME: For now we just handle common integer types, but eventually we will need to
+/// implement printing of aribitrarily-sized (in bits) integers. Consider using a bigint
+/// library so we don't have to do it ourself?
+///
+/// This discussion may help:
+/// https://rust-lang.zulipchat.com/#narrow/stream/122651-general/topic/.E2.9C.94.20Big.20Integer.20library.20with.20bit.20granularity/near/393733327
+pub(crate) fn const_int_bytes_to_str(num_bits: u32, bytes: &[u8]) -> String {
+    // All of the unwraps below are safe due to:
+    debug_assert!(bytes.len() * 8 >= usize::try_from(num_bits).unwrap());
+
+    let mut bytes = bytes;
+    match num_bits {
+        1 => format!("{}i1", bytes.read_i8().unwrap() & 1),
+        8 => format!("{}i8", bytes.read_i8().unwrap()),
+        16 => format!("{}i16", bytes.read_i16::<NativeEndian>().unwrap()),
+        32 => format!("{}i32", bytes.read_i32::<NativeEndian>().unwrap()),
+        64 => format!("{}i64", bytes.read_i64::<NativeEndian>().unwrap()),
+        _ => todo!("{}", num_bits),
+    }
+}
+
+/// A fixed-width integer type.
+///
+/// Signedness is not specified. Interpretation of the bit pattern is delegated to operations upon
+/// the integer.
 #[deku_derive(DekuRead)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct IntegerType {
@@ -704,6 +729,7 @@ impl IntegerType {
     /// Return the number of bytes required to store this integer type.
     ///
     /// Padding for alignment is not included.
+    #[cfg(test)]
     pub(crate) fn byte_size(&self) -> usize {
         let bits = self.num_bits();
         let mut ret = bits / 8;
@@ -715,30 +741,14 @@ impl IntegerType {
     }
 
     /// Create a new integer type with the specified number of bits.
+    #[cfg(test)]
     pub(crate) fn new(num_bits: u32) -> Self {
         Self { num_bits }
     }
 
+    /// Format a constant integer value that is of the type described by `self`.
     fn const_to_str(&self, c: &Constant) -> String {
-        // FIXME: For now we just handle common integer types, but eventually we will need to
-        // implement printing of aribitrarily-sized (in bits) integers. Consider using a bigint
-        // library so we don't have to do it ourself?
-        //
-        // This discussion may help:
-        // https://rust-lang.zulipchat.com/#narrow/stream/122651-general/topic/.E2.9C.94.20Big.20Integer.20library.20with.20bit.20granularity/near/393733327
-
-        // All of the unwraps below are safe due to:
-        debug_assert!(c.bytes.len() * 8 >= usize::try_from(self.num_bits).unwrap());
-
-        let mut c = Cursor::new(&c.bytes);
-        match self.num_bits {
-            1 => format!("{}i1", c.read_i8().unwrap() & 1),
-            8 => format!("{}i8", c.read_i8().unwrap()),
-            16 => format!("{}i16", c.read_i16::<NativeEndian>().unwrap()),
-            32 => format!("{}i32", c.read_i32::<NativeEndian>().unwrap()),
-            64 => format!("{}i64", c.read_i64::<NativeEndian>().unwrap()),
-            _ => todo!("{}", self.num_bits),
-        }
+        const_int_bytes_to_str(self.num_bits, c.bytes())
     }
 }
 
@@ -933,8 +943,14 @@ pub(crate) struct Constant {
 }
 
 impl Constant {
+    /// Return a byte slice of the constant's value.
     pub(crate) fn bytes(&self) -> &[u8] {
         &self.bytes
+    }
+
+    /// Return the type index of the constant.
+    pub(crate) fn type_idx(&self) -> TypeIdx {
+        self.type_idx
     }
 }
 

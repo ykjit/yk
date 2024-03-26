@@ -12,6 +12,7 @@ hwtracer = { path = "../hwtracer" }
 libc = "0.2.148"
 memmap2 = "0.9"
 num_cpus = "1.13.1"
+num-traits = "0.2.16"
 parking_lot = "0.12.0"
 parking_lot_core = "0.9.1"
 tempfile = "3.8"
@@ -49,5 +50,4 @@ yk_testing = ["yktracec/yk_testing"]
 
 [dev-dependencies]
 fm = "0.2.2"
-num-traits = "0.2.16"
 regex = { version = "1.9", features = ["std"] }
