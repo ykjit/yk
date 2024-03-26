@@ -24,6 +24,8 @@ pub(crate) enum LocalAlloc {
         /// OPT: consider addressing relative to the stack pointer, thus freeing up the base
         /// pointer for general purpose use.
         frame_off: usize,
+        /// Size in bytes of the allocation.
+        size: usize,
     },
     /// The local variable is in a register.
     ///
@@ -33,8 +35,8 @@ pub(crate) enum LocalAlloc {
 
 impl LocalAlloc {
     /// Create a [Self::Stack] allocation.
-    pub(crate) fn new_stack(frame_off: usize) -> Self {
-        Self::Stack { frame_off }
+    pub(crate) fn new_stack(frame_off: usize, size: usize) -> Self {
+        Self::Stack { frame_off, size }
     }
 }
 
