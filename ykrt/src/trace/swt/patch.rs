@@ -127,11 +127,7 @@ mod patch_tests {
             );
             patch_function(test_function as usize, PATCH_INSTRUCTIONS.as_ptr(), 1);
             assert_eq!(test_function(), 0);
-            patch_function(
-                test_function as usize,
-                ORIGINAL_INSTRUCTIONS.as_ptr(),
-                1,
-            );
+            patch_function(test_function as usize, ORIGINAL_INSTRUCTIONS.as_ptr(), 1);
             assert_eq!(test_function(), 42);
         }
     }
