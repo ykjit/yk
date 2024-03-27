@@ -338,6 +338,10 @@ impl MT {
                         self.stats.timing_state(TimingState::None);
                         #[cfg(feature = "yk_jitstate_debug")]
                         print_jit_state("stop-side-tracing");
+                        #[cfg(tracer_swt)]
+                        unsafe {
+                            patch_trace_function();
+                        }
                         self.queue_compile_job(
                             (utrace, promotions.into_boxed_slice()),
                             hl,
@@ -557,6 +561,10 @@ impl MT {
             TransitionGuardFailure::StartSideTracing(hl) => {
                 #[cfg(feature = "yk_jitstate_debug")]
                 print_jit_state("start-side-tracing");
+                #[cfg(tracer_swt)]
+                unsafe {
+                    restore_trace_function();
+                }
                 let tracer = {
                     let lk = self.tracer.lock();
                     Arc::clone(&*lk)
