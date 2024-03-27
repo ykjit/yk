@@ -12,6 +12,14 @@ static mut ORIGINAL_INSTRUCTIONS: [u8; 1] = [0; 1];
 #[cfg(tracer_swt)]
 static mut PATCH_INSTRUCTIONS: [u8; 1] = [0xC3];
 
+/// This function is used to save the original instructions of a function to .
+///
+/// # Arguments
+///
+/// * `function_ptr` - A usize representing the memory address of the function.
+/// * `instructions` - A mutable pointer to a u8 where the original instructions will be saved.
+/// * `num_of_instructions` - A usize indicating the number of instructions to save.
+///
 #[cfg(tracer_swt)]
 unsafe fn save_original_instructions(
     function_ptr: usize,
@@ -22,6 +30,14 @@ unsafe fn save_original_instructions(
     std::ptr::copy_nonoverlapping(func_ptr as *const u8, instructions, num_of_instructions);
 }
 
+/// This function is used to patch a function instructions at runtime.
+///
+/// # Arguments
+///
+/// * `function_ptr` - A usize representing the memory address of the function to be patched.
+/// * `code` - A constant pointer to a u8 vector where the new instructions are located.
+/// * `size` - A size_t indicating the number of bytes to copy from `code`.
+///
 #[cfg(tracer_swt)]
 unsafe fn patch_function(function_ptr: usize, code: *const u8, size: size_t) {
     let page_size = sysconf(libc::_SC_PAGESIZE) as usize;
