@@ -6,6 +6,7 @@ use std::sync::Once;
 use std::{cell::RefCell, collections::HashMap, error::Error, ffi::CString, sync::Arc};
 
 mod iterator;
+pub(crate) mod patch;
 use iterator::SWTraceIterator;
 
 static FUNC_NAMES_INIT: Once = Once::new();

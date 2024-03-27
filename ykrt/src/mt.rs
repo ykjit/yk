@@ -17,6 +17,9 @@ use std::{
     thread,
 };
 
+#[cfg(tracer_swt)]
+use crate::trace::swt::patch::{patch_trace_function, restore_trace_function};
+
 use parking_lot::{Condvar, Mutex, MutexGuard};
 #[cfg(not(all(feature = "yk_testing", not(test))))]
 use parking_lot_core::SpinWait;
@@ -263,6 +266,11 @@ impl MT {
             TransitionControlPoint::StartTracing(hl) => {
                 #[cfg(feature = "yk_jitstate_debug")]
                 print_jit_state("start-tracing");
+                #[cfg(tracer_swt)]
+                unsafe {
+                    restore_trace_function();
+                }
+
                 let tracer = {
                     let lk = self.tracer.lock();
                     Arc::clone(&*lk)
@@ -279,6 +287,11 @@ impl MT {
                 }
             }
             TransitionControlPoint::StopTracing => {
+                #[cfg(tracer_swt)]
+                unsafe {
+                    patch_trace_function();
+                }
+
                 // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because `StartTracing`
                 // will have put a `Some` in the `Rc`.
                 let (hl, thread_tracer, promotions) = THREAD_MTTHREAD.with(|mtt| {
