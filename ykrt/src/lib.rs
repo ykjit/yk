@@ -35,7 +35,8 @@ pub fn print_jit_state(state: &str) {
 }
 
 #[cfg(tracer_swt)]
-pub fn trace_basicblock(function_index: usize, block_index: usize) {
+#[no_mangle]
+pub extern "C" fn yk_trace_basicblock(function_index: usize, block_index: usize) {
     if mt::is_tracing() {
         trace::trace_basicblock(function_index, block_index)
     }
