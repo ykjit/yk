@@ -107,3 +107,21 @@ pub(crate) unsafe fn restore_trace_function() {
         1,
     );
 }
+
+#[cfg(test)]
+mod patch_tests {
+    use super::*;
+
+    fn test_function() -> i32 {
+        return 42;
+    }
+
+    #[test]
+    fn test_runtime_patch() {
+        unsafe {
+            assert_eq!(test_function(), 42);
+            patch_function(test_function as usize, PATCH_INSTRUCTIONS.as_ptr(), 1);
+            assert_eq!(test_function(), 0);
+        }
+    }
+}
