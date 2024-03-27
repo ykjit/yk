@@ -1167,7 +1167,9 @@ mod tests {
         TYKIND_UNIMPLEMENTED, TYKIND_VOID,
     };
     use byteorder::{NativeEndian, WriteBytesExt};
+    use num_traits::{PrimInt, ToBytes};
     use std::ffi::CString;
+    use std::mem;
 
     #[cfg(target_pointer_width = "64")]
     fn write_native_usize(d: &mut Vec<u8>, v: usize) {
@@ -1493,34 +1495,16 @@ func bar();
 
     #[test]
     fn const_int_strings() {
-        use num_traits::cast::NumCast;
-        use std::mem;
-
         // Check (in an endian neutral manner) that a `num-bits`-sized integer of value `num`, when
         // converted to a constant IR integer, then stringified, results in the string `expect`.
         //
         // When `num` has a bit size greater than `num_bits` the most significant bits of `num` are
         // treated as undefined: they can be any value as IR stringification will ignore them.
-        fn check<T: NumCast + Sized>(num_bits: u32, num: T, expect: &str) {
+        fn check<T: ToBytes + PrimInt>(num_bits: u32, num: T, expect: &str) {
             assert!(mem::size_of::<T>() * 8 >= usize::try_from(num_bits).unwrap());
 
             // Get a byte-vector for `num`.
-            let mut bytes: Vec<u8> = Vec::new();
-            match mem::size_of::<T>() {
-                1 => bytes
-                    .write_u8(<u8 as NumCast>::from::<T>(num).unwrap())
-                    .unwrap(),
-                2 => bytes
-                    .write_u16::<NativeEndian>(<u16 as NumCast>::from(num).unwrap())
-                    .unwrap(),
-                4 => bytes
-                    .write_u32::<NativeEndian>(<u32 as NumCast>::from(num).unwrap())
-                    .unwrap(),
-                8 => bytes
-                    .write_u64::<NativeEndian>(<u64 as NumCast>::from(num).unwrap())
-                    .unwrap(),
-                _ => todo!("{}", mem::size_of::<T>()),
-            }
+            let bytes = ToBytes::to_ne_bytes(&num).as_ref().to_vec();
 
             // Construct an IR constant and check it stringifies ok.
             let it = IntegerType { num_bits };
