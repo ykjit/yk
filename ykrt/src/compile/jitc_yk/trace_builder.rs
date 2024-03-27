@@ -212,6 +212,18 @@ impl<'a> TraceBuilder<'a> {
         Ok(self.jit_mod.global_decl_idx(&jit_global, idx)?)
     }
 
+    /// Translate a constant value.
+    fn handle_const(
+        &mut self,
+        aot_const: &aot_ir::Constant,
+    ) -> Result<jit_ir::Constant, CompilationError> {
+        let jit_type_idx = self.handle_type(aot_const.type_idx())?;
+        Ok(jit_ir::Constant::new(
+            jit_type_idx,
+            Vec::from(aot_const.bytes()),
+        ))
+    }
+
     /// Translate an operand.
     fn handle_operand(
         &mut self,
@@ -222,23 +234,9 @@ impl<'a> TraceBuilder<'a> {
                 let instridx = self.local_map[lvo.instr_id()];
                 jit_ir::Operand::Local(instridx)
             }
-            aot_ir::Operand::Constant(co) => {
-                let c = self.aot_mod.constant(co);
-                let cidx = match self.aot_mod.const_type(c) {
-                    aot_ir::Type::Integer(it) => match it.num_bits() {
-                        32 => {
-                            // These unwraps can't fail unless we did something wrong during
-                            // lowering.
-                            let val = u32::from_ne_bytes(c.bytes()[0..4].try_into().unwrap())
-                                .try_into()
-                                .unwrap();
-                            self.jit_mod.const_idx(&jit_ir::Constant::U32(val))?
-                        }
-                        _ => todo!(),
-                    },
-                    _ => todo!(),
-                };
-                jit_ir::Operand::Const(cidx)
+            aot_ir::Operand::Constant(cidx) => {
+                let jit_const = self.handle_const(self.aot_mod.constant(cidx))?;
+                jit_ir::Operand::Const(self.jit_mod.const_idx(&jit_const)?)
             }
             aot_ir::Operand::Global(go) => {
                 let load = jit_ir::LookupGlobalInstruction::new(self.handle_global(go.index())?)?;
@@ -246,10 +244,12 @@ impl<'a> TraceBuilder<'a> {
             }
             aot_ir::Operand::Unimplemented(_) => {
                 // FIXME: for now we push an arbitrary constant.
-                let constidx = self
-                    .jit_mod
-                    .const_idx(&jit_ir::Constant::Usize(0xdeadbeef))?;
-                jit_ir::Operand::Const(constidx)
+                use std::mem;
+                let jit_const =
+                    jit_ir::IntegerType::new(u32::try_from(mem::size_of::<isize>()).unwrap())
+                        .make_constant(&mut self.jit_mod, 0xdeadbeef as isize)?;
+                let const_idx = self.jit_mod.const_idx(&jit_const)?;
+                jit_ir::Operand::Const(const_idx)
             }
             _ => todo!("{}", op.to_string(self.aot_mod)),
         };
@@ -263,7 +263,9 @@ impl<'a> TraceBuilder<'a> {
     ) -> Result<jit_ir::TypeIdx, CompilationError> {
         let jit_ty = match self.aot_mod.type_(aot_idx) {
             aot_ir::Type::Void => jit_ir::Type::Void,
-            aot_ir::Type::Integer(it) => jit_ir::Type::Integer(it.clone()),
+            aot_ir::Type::Integer(it) => {
+                jit_ir::Type::Integer(jit_ir::IntegerType::new(it.num_bits()))
+            }
             aot_ir::Type::Ptr => jit_ir::Type::Ptr,
             aot_ir::Type::Func(ft) => {
                 let mut jit_args = Vec::new();
