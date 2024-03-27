@@ -112,7 +112,7 @@ impl TraceRecorder for SWTTraceRecorder {
             Err(TraceRecorderError::TraceTooLong)
         } else if aot_blocks.is_empty() {
             // FIXME: who should handle an empty trace?
-            panic!();
+            panic!("swt encountered an empty trace!");
         } else {
             Ok(Box::new(SWTraceIterator::new(aot_blocks)))
         }
