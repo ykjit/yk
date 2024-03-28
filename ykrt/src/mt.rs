@@ -20,8 +20,6 @@ use std::{
 use parking_lot::{Condvar, Mutex, MutexGuard};
 #[cfg(not(all(feature = "yk_testing", not(test))))]
 use parking_lot_core::SpinWait;
-#[cfg(feature = "yk_jitstate_debug")]
-use std::sync::LazyLock;
 
 #[cfg(feature = "yk_jitstate_debug")]
 use crate::print_jit_state;
@@ -57,11 +55,6 @@ const DEFAULT_TRACE_FAILURE_THRESHOLD: TraceFailureThreshold = 5;
 thread_local! {
     pub(crate) static THREAD_MTTHREAD: MTThread = MTThread::new();
 }
-
-#[cfg(feature = "yk_testing")]
-static SERIALISE_COMPILATION: LazyLock<bool> = LazyLock::new(|| {
-    &env::var("YKD_SERIALISE_COMPILATION").unwrap_or_else(|_| "0".to_owned()) == "1"
-});
 
 /// Stores information required for compiling a side-trace. Passed down from a (parent) trace
 /// during deoptimisation.
@@ -622,7 +615,7 @@ impl MT {
         };
 
         #[cfg(feature = "yk_testing")]
-        if *SERIALISE_COMPILATION {
+        if let Ok(true) = env::var("YKD_SERIALISE_COMPILATION").map(|x| x.as_str() == "1") {
             // To ensure that we properly test that compilation can occur in another thread, we
             // spin up a new thread for each compilation. This is only acceptable because a)
             // `SERIALISE_COMPILATION` is an internal yk testing feature b) when we use it we're
