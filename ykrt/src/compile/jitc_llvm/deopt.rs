@@ -9,7 +9,7 @@ use super::{
 use crate::print_jit_state;
 use crate::{
     compile::{CompiledTrace, GuardId},
-    mt::SideTraceInfo,
+    mt::{MTThread, SideTraceInfo},
     ykstats::TimingState,
 };
 use llvm_sys::orc2::LLVMOrcThreadSafeModuleWithModuleDo;
@@ -294,8 +294,7 @@ unsafe extern "C" fn __ykrt_deopt(
     retaddr: usize,
     rsp: *const c_void,
 ) -> NewFramesInfo {
-    let ctr = crate::mt::THREAD_MTTHREAD
-        .with(|mtt| mtt.running_trace().unwrap())
+    let ctr = MTThread::with(|mtt| mtt.running_trace().unwrap())
         .as_any()
         .downcast::<LLVMCompiledTrace>()
         .unwrap();
@@ -354,7 +353,7 @@ unsafe extern "C" fn __ykrt_deopt(
             ctr.mt().stats.timing_state(TimingState::JitExecuting);
             drop(ctr);
 
-            crate::mt::THREAD_MTTHREAD.with(|mtt| {
+            MTThread::with(|mtt| {
                 mtt.set_running_trace(Some(st));
             });
 
@@ -369,7 +368,7 @@ unsafe extern "C" fn __ykrt_deopt(
     #[cfg(feature = "yk_jitstate_debug")]
     print_jit_state("deoptimise");
 
-    crate::mt::THREAD_MTTHREAD.with(|mtt| {
+    MTThread::with(|mtt| {
         mtt.set_running_trace(None);
     });
 
