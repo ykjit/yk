@@ -34,9 +34,12 @@ pub fn print_jit_state(state: &str) {
     }
 }
 
+/// This is effectively a forwarding function for ykcapi's `yk_trace_basicblock`.
 #[cfg(tracer_swt)]
-pub fn trace_basicblock(function_index: usize, block_index: usize) {
-    if mt::is_tracing() {
-        trace::trace_basicblock(function_index, block_index)
-    }
+pub fn swt_trace_basicblock(function_index: usize, block_index: usize) {
+    mt::MTThread::with(|mtt| {
+        if mtt.is_tracing() {
+            trace::swt::trace_basicblock(function_index, block_index)
+        }
+    });
 }

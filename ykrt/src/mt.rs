@@ -705,7 +705,7 @@ impl MTThread {
     }
 
     /// Is this thread currently tracing something?
-    fn is_tracing(&self) -> bool {
+    pub(crate) fn is_tracing(&self) -> bool {
         matches!(&*self.tstate.borrow(), &MTThreadState::Tracing { .. })
     }
 
@@ -740,11 +740,6 @@ impl MTThread {
         }
         true
     }
-}
-
-#[cfg(tracer_swt)]
-pub fn is_tracing() -> bool {
-    MTT.with(|mtt| mtt.is_tracing())
 }
 
 /// What action should a caller of [MT::transition_control_point] take?

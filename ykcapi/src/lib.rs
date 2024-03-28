@@ -14,8 +14,6 @@ use std::{
     ptr,
     sync::Arc,
 };
-#[cfg(tracer_swt)]
-use ykrt::trace_basicblock;
 use ykrt::{HotThreshold, Location, MT};
 
 #[no_mangle]
@@ -101,5 +99,5 @@ pub extern "C" fn yk_location_drop(loc: Location) {
 #[cfg(tracer_swt)]
 #[no_mangle]
 pub extern "C" fn yk_trace_basicblock(function_index: usize, block_index: usize) {
-    trace_basicblock(function_index, block_index);
+    ykrt::swt_trace_basicblock(function_index, block_index);
 }
