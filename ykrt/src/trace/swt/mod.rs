@@ -1,6 +1,8 @@
 //! Software tracer.
 
-use super::{AOTTraceIterator, TraceAction, TraceRecorder, TraceRecorderError, Tracer};
+use super::{
+    AOTTraceIterator, AOTTraceIteratorError, TraceAction, TraceRecorder, TraceRecorderError, Tracer,
+};
 use crate::{
     compile::jitc_llvm::frame::BitcodeSection,
     mt::{MTThread, DEFAULT_TRACE_TOO_LONG},
@@ -12,9 +14,6 @@ use std::{
     ffi::CString,
     sync::{Arc, LazyLock},
 };
-
-mod iterator;
-use iterator::SWTraceIterator;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 struct TracingBlock {
@@ -127,3 +126,24 @@ impl TraceRecorder for SWTTraceRecorder {
         }
     }
 }
+
+pub(crate) struct SWTraceIterator {
+    trace: std::vec::IntoIter<TraceAction>,
+}
+
+impl SWTraceIterator {
+    pub(crate) fn new(trace: Vec<TraceAction>) -> SWTraceIterator {
+        return SWTraceIterator {
+            trace: trace.into_iter(),
+        };
+    }
+}
+
+impl Iterator for SWTraceIterator {
+    type Item = Result<TraceAction, AOTTraceIteratorError>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.trace.next().map(|x| Ok(x))
+    }
+}
+
+impl AOTTraceIterator for SWTraceIterator {}
