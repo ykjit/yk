@@ -130,8 +130,3 @@ impl TraceAction {
         Self::UnmappableBlock
     }
 }
-
-#[cfg(tracer_swt)]
-pub(crate) fn trace_basicblock(function_index: usize, block_index: usize) {
-    swt::trace_basicblock(function_index, block_index)
-}
