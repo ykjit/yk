@@ -1,4 +1,4 @@
-use libc::{mprotect, size_t, sysconf, PROT_READ, PROT_WRITE};
+use libc::{mprotect, size_t, sysconf, PROT_EXEC, PROT_READ, PROT_WRITE};
 use std::mem;
 use std::{ffi::c_void, sync::Once};
 
@@ -50,7 +50,7 @@ unsafe fn patch_function(function_ptr: usize, code: *const u8, size: size_t) {
     let result = mprotect(
         func_address,
         page_size_aligned,
-        PROT_READ | PROT_WRITE,
+        PROT_READ | PROT_WRITE | PROT_EXEC,
     );
     if result != 0 {
         panic!("Failed to change memory protection to be writable");
