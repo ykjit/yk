@@ -1,6 +1,6 @@
 //! Software tracer.
 
-use super::{AOTTraceIterator, TraceAction, TraceRecorder, TraceRecorderError};
+use super::{AOTTraceIterator, TraceAction, TraceRecorder, TraceRecorderError, Tracer};
 use crate::{
     compile::jitc_llvm::frame::BitcodeSection,
     mt::{MTThread, DEFAULT_TRACE_TOO_LONG},
@@ -69,7 +69,7 @@ impl SWTracer {
     }
 }
 
-impl super::Tracer for SWTracer {
+impl Tracer for SWTracer {
     fn start_recorder(self: Arc<Self>) -> Result<Box<dyn TraceRecorder>, Box<dyn Error>> {
         BASIC_BLOCKS.with(|bbs| {
             bbs.borrow_mut().clear();
