@@ -95,9 +95,3 @@ pub extern "C" fn yk_location_new() -> Location {
 pub extern "C" fn yk_location_drop(loc: Location) {
     drop(loc)
 }
-
-#[cfg(tracer_swt)]
-#[no_mangle]
-pub extern "C" fn yk_trace_basicblock(function_index: usize, block_index: usize) {
-    ykrt::swt_trace_basicblock(function_index, block_index);
-}

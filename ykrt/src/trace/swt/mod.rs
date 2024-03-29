@@ -1,7 +1,10 @@
 //! Software tracer.
 
 use super::{AOTTraceIterator, TraceAction, TraceRecorder, TraceRecorderError};
-use crate::{compile::jitc_llvm::frame::BitcodeSection, mt::DEFAULT_TRACE_TOO_LONG};
+use crate::{
+    compile::jitc_llvm::frame::BitcodeSection,
+    mt::{MTThread, DEFAULT_TRACE_TOO_LONG},
+};
 use std::sync::Once;
 use std::{cell::RefCell, collections::HashMap, error::Error, ffi::CString, sync::Arc};
 
@@ -21,6 +24,16 @@ thread_local! {
     static BASIC_BLOCKS: RefCell<Vec<TracingBlock>> = RefCell::new(vec![]);
     // Mapping of function indexes to function names.
     static FUNC_NAMES: RefCell<HashMap<usize, CString>> = RefCell::new(HashMap::new());
+}
+
+#[cfg(tracer_swt)]
+#[no_mangle]
+pub extern "C" fn yk_trace_basicblock(function_index: usize, block_index: usize) {
+    MTThread::with(|mtt| {
+        if mtt.is_tracing() {
+            trace_basicblock(function_index, block_index)
+        }
+    });
 }
 
 extern "C" {
