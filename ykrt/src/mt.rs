@@ -261,7 +261,6 @@ impl MT {
                 #[cfg(feature = "yk_jitstate_debug")]
                 print_jit_state("start-tracing");
                 #[cfg(tracer_swt)]
-                #[cfg(target_arch = "x86_64")]
                 unsafe {
                     restore_trace_function();
                 }
@@ -559,7 +558,6 @@ impl MT {
                 #[cfg(feature = "yk_jitstate_debug")]
                 print_jit_state("start-side-tracing");
                 #[cfg(tracer_swt)]
-                #[cfg(target_arch = "x86_64")]
                 unsafe {
                     restore_trace_function();
                 }

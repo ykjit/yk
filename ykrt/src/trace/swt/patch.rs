@@ -31,11 +31,11 @@ use crate::trace::swt::yk_trace_basicblock;
 // This is used to ensure that the original instructions are only saved once.
 static ORIGINAL_INSTRUCTIONS_INIT: Once = Once::new();
 #[cfg(tracer_swt)]
-// Original instructions of the function that is patched with `PATCH_INSTRUCTIONS`.
+// Original instructions of the function that is patched with `PATCH_X86_INSTRUCTIONS`.
 static mut ORIGINAL_INSTRUCTIONS: [u8; 1] = [0; 1];
 #[cfg(tracer_swt)]
 // 0xC3 is a `ret` instruction on x86_64.
-static mut PATCH_INSTRUCTIONS: [u8; 1] = [0xC3];
+static mut PATCH_X86_INSTRUCTIONS: [u8; 1] = [0xC3];
 
 /// This function is used to save the original instructions of a function to .
 ///
@@ -93,7 +93,6 @@ unsafe fn patch_function(function_ptr: usize, code: *const u8, size: size_t) {
 /// This function is used to patch the `yk_trace_basicblock`
 /// function with a single `ret` (0xC3) instruction.
 #[cfg(tracer_swt)]
-#[cfg(target_arch = "x86_64")]
 pub(crate) unsafe fn patch_trace_function() {
     ORIGINAL_INSTRUCTIONS_INIT.call_once(|| {
         save_original_instructions(
@@ -102,14 +101,17 @@ pub(crate) unsafe fn patch_trace_function() {
             1,
         );
     });
-
-    patch_function(yk_trace_basicblock as usize, PATCH_INSTRUCTIONS.as_ptr(), 1);
+    #[cfg(target_arch = "x86_64")]
+    patch_function(
+        yk_trace_basicblock as usize,
+        PATCH_X86_INSTRUCTIONS.as_ptr(),
+        1,
+    );
 }
 
 /// This function is used to restore the original behavior of a
 /// previously patched `yk_trace_basicblock` function.
 #[cfg(tracer_swt)]
-#[cfg(target_arch = "x86_64")]
 pub(crate) unsafe fn restore_trace_function() {
     ORIGINAL_INSTRUCTIONS_INIT.call_once(|| {
         save_original_instructions(
@@ -142,7 +144,7 @@ mod patch_tests {
                 ORIGINAL_INSTRUCTIONS.as_mut_ptr(),
                 1,
             );
-            patch_function(test_function as usize, PATCH_INSTRUCTIONS.as_ptr(), 1);
+            patch_function(test_function as usize, PATCH_X86_INSTRUCTIONS.as_ptr(), 1);
             assert_eq!(test_function(), 0);
             patch_function(test_function as usize, ORIGINAL_INSTRUCTIONS.as_ptr(), 1);
             assert_eq!(test_function(), 42);
