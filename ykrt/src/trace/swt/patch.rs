@@ -65,17 +65,11 @@ unsafe fn patch_function(function_ptr: usize, code: *const u8, size: size_t) {
     }
 }
 
-fn is_x86() -> bool {
-    std::env::consts::ARCH == "x86" || std::env::consts::ARCH == "x86_64"
-}
-
 /// This function is used to patch the `yk_trace_basicblock`
 /// function with a single `ret` (0xC3) instruction.
 #[cfg(tracer_swt)]
+#[cfg(target_arch = "x86_64")]
 pub(crate) unsafe fn patch_trace_function() {
-    if !is_x86() {
-        panic!("Only x86_64 architecture is supported for runtime patching!");
-    }
     ORIGINAL_INSTRUCTIONS_INIT.call_once(|| {
         save_original_instructions(
             yk_trace_basicblock as usize,
@@ -90,10 +84,8 @@ pub(crate) unsafe fn patch_trace_function() {
 /// This function is used to restore the original behavior of a
 /// previously patched `yk_trace_basicblock` function.
 #[cfg(tracer_swt)]
+#[cfg(target_arch = "x86_64")]
 pub(crate) unsafe fn restore_trace_function() {
-    if !is_x86() {
-        panic!("Only x86_64 architecture is supported for runtime patching!");
-    }
     ORIGINAL_INSTRUCTIONS_INIT.call_once(|| {
         save_original_instructions(
             yk_trace_basicblock as usize,
