@@ -5,13 +5,16 @@ use crate::{
     compile::jitc_llvm::frame::BitcodeSection,
     mt::{MTThread, DEFAULT_TRACE_TOO_LONG},
 };
-use std::sync::Once;
-use std::{cell::RefCell, collections::HashMap, error::Error, ffi::CString, sync::Arc};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    error::Error,
+    ffi::CString,
+    sync::{Arc, LazyLock},
+};
 
 mod iterator;
 use iterator::SWTraceIterator;
-
-static FUNC_NAMES_INIT: Once = Once::new();
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 struct TracingBlock {
@@ -19,11 +22,29 @@ struct TracingBlock {
     block_index: usize,
 }
 
+// Mapping of function indexes to function names.
+static FUNC_NAMES: LazyLock<HashMap<usize, CString>> = LazyLock::new(|| {
+    let mut fnames = HashMap::new();
+    let mut functions: *mut IRFunctionNameIndex = std::ptr::null_mut();
+    let bc_section = crate::compile::jitc_llvm::llvmbc_section();
+    let mut functions_len: usize = 0;
+    let bs = &BitcodeSection {
+        data: bc_section.as_ptr(),
+        len: u64::try_from(bc_section.len()).unwrap(),
+    };
+    unsafe { get_function_names(bs, &mut functions, &mut functions_len) };
+    for entry in unsafe { std::slice::from_raw_parts(functions, functions_len) } {
+        fnames.insert(
+            entry.index,
+            unsafe { std::ffi::CStr::from_ptr(entry.name) }.to_owned(),
+        );
+    }
+    fnames
+});
+
 thread_local! {
     // Collection of traced basicblocks.
     static BASIC_BLOCKS: RefCell<Vec<TracingBlock>> = RefCell::new(vec![]);
-    // Mapping of function indexes to function names.
-    static FUNC_NAMES: RefCell<HashMap<usize, CString>> = RefCell::new(HashMap::new());
 }
 
 /// Inserts LLVM IR basicblock metadata into a thread-local BASIC_BLOCKS vector.
@@ -84,37 +105,18 @@ impl TraceRecorder for SWTTraceRecorder {
     fn stop(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, TraceRecorderError> {
         let mut aot_blocks: Vec<TraceAction> = vec![];
         BASIC_BLOCKS.with(|tb| {
-            FUNC_NAMES.with(|fnames| {
-                FUNC_NAMES_INIT.call_once(|| {
-                    let mut functions: *mut IRFunctionNameIndex = std::ptr::null_mut();
-                    let bc_section = crate::compile::jitc_llvm::llvmbc_section();
-                    let mut functions_len: usize = 0;
-                    let bs = &BitcodeSection {
-                        data: bc_section.as_ptr(),
-                        len: u64::try_from(bc_section.len()).unwrap(),
-                    };
-                    unsafe { get_function_names(bs, &mut functions, &mut functions_len) };
-                    for entry in unsafe { std::slice::from_raw_parts(functions, functions_len) } {
-                        fnames.borrow_mut().insert(
-                            entry.index,
-                            unsafe { std::ffi::CStr::from_ptr(entry.name) }.to_owned(),
-                        );
-                    }
-                });
-
-                aot_blocks.extend(tb.borrow().iter().map(|tb| {
-                    match fnames.borrow_mut().get(&tb.function_index) {
-                        Some(name) => TraceAction::MappedAOTBlock {
-                            func_name: name.to_owned(),
-                            bb: tb.block_index,
-                        },
-                        _ => panic!(
-                            "Failed to get function name by index {:?}",
-                            tb.function_index
-                        ),
-                    }
-                }));
-            })
+            aot_blocks.extend(tb.borrow().iter().map(
+                |tb| match FUNC_NAMES.get(&tb.function_index) {
+                    Some(name) => TraceAction::MappedAOTBlock {
+                        func_name: name.to_owned(),
+                        bb: tb.block_index,
+                    },
+                    _ => panic!(
+                        "Failed to get function name by index {:?}",
+                        tb.function_index
+                    ),
+                },
+            ));
         });
         if aot_blocks.len() > DEFAULT_TRACE_TOO_LONG {
             Err(TraceRecorderError::TraceTooLong)
