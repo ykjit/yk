@@ -109,40 +109,39 @@ impl TraceRecorder for SWTTraceRecorder {
             // FIXME: who should handle an empty trace?
             panic!();
         } else {
-            let mut aot_blocks: Vec<TraceAction> = vec![];
-            for tb in bbs {
-                match FUNC_NAMES.get(&tb.function_index) {
-                    Some(name) => aot_blocks.push(TraceAction::MappedAOTBlock {
-                        func_name: name.to_owned(),
-                        bb: tb.block_index,
-                    }),
-                    _ => panic!(
-                        "Failed to get function name by index {:?}",
-                        tb.function_index
-                    ),
-                }
-            }
-            Ok(Box::new(SWTraceIterator::new(aot_blocks)))
+            Ok(Box::new(SWTraceIterator::new(bbs)))
         }
     }
 }
 
-pub(crate) struct SWTraceIterator {
-    trace: std::vec::IntoIter<TraceAction>,
+struct SWTraceIterator {
+    bbs: std::vec::IntoIter<TracingBlock>,
 }
 
 impl SWTraceIterator {
-    pub(crate) fn new(trace: Vec<TraceAction>) -> SWTraceIterator {
+    fn new(bbs: Vec<TracingBlock>) -> SWTraceIterator {
         return SWTraceIterator {
-            trace: trace.into_iter(),
+            bbs: bbs.into_iter(),
         };
     }
 }
 
 impl Iterator for SWTraceIterator {
     type Item = Result<TraceAction, AOTTraceIteratorError>;
+
     fn next(&mut self) -> Option<Self::Item> {
-        self.trace.next().map(|x| Ok(x))
+        self.bbs
+            .next()
+            .map(|tb| match FUNC_NAMES.get(&tb.function_index) {
+                Some(name) => Ok(TraceAction::MappedAOTBlock {
+                    func_name: name.to_owned(),
+                    bb: tb.block_index,
+                }),
+                _ => panic!(
+                    "Failed to get function name by index {:?}",
+                    tb.function_index
+                ),
+            })
     }
 }
 
