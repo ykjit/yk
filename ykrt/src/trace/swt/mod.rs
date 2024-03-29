@@ -91,9 +91,7 @@ impl SWTracer {
 
 impl Tracer for SWTracer {
     fn start_recorder(self: Arc<Self>) -> Result<Box<dyn TraceRecorder>, Box<dyn Error>> {
-        BASIC_BLOCKS.with(|bbs| {
-            bbs.borrow_mut().clear();
-        });
+        debug_assert!(BASIC_BLOCKS.with(|bbs| bbs.borrow().is_empty()));
         Ok(Box::new(SWTTraceRecorder {}))
     }
 }
