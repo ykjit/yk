@@ -6,10 +6,13 @@ use std::{ffi::c_void, sync::Once};
 use crate::yk_trace_basicblock;
 
 #[cfg(tracer_swt)]
+// This is used to ensure that the original instructions are only saved once.
 static ORIGINAL_INSTRUCTIONS_INIT: Once = Once::new();
 #[cfg(tracer_swt)]
+// Original instructions of the function that is patched with `PATCH_INSTRUCTIONS`.
 static mut ORIGINAL_INSTRUCTIONS: [u8; 1] = [0; 1];
 #[cfg(tracer_swt)]
+// 0xC3 is a `ret` instruction on x86_64.
 static mut PATCH_INSTRUCTIONS: [u8; 1] = [0xC3];
 
 /// This function is used to save the original instructions of a function to .
