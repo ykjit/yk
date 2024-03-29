@@ -1,3 +1,25 @@
+//! This module provides functionality for dynamically patching and
+//! restoring `yk_trace_basicblock` function at runtime. It includes
+//! mechanisms to save the original instructions of a target function,
+//! patch the target function with new instructions, and restore the
+//! original instructions.
+//!
+//! This is particularly useful in scenarios such as software tracing,
+//! where the tracing function may be dynamically modified to have
+//! single return instruction and later restored to their original state
+//! for performance gain.
+//!
+//! The module relies on low-level operations like memory protection
+//! changes to manipulate function code safely. It is designed to be
+//! used with `tracer_swt` configurations, enabling conditional
+//! compilation for tracing functionalities.
+//!
+//! # Warning
+//!
+//! This module performs low-level memory operations and modifies the
+//! execution flow of functions at runtime. Improper use can lead to
+//! undefined behaviour, memory corruption, or crashes.
+
 use libc::{mprotect, size_t, sysconf, PROT_EXEC, PROT_READ, PROT_WRITE};
 use std::mem;
 use std::{ffi::c_void, sync::Once};
