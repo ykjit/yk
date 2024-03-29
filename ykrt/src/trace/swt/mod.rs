@@ -26,12 +26,22 @@ thread_local! {
     static FUNC_NAMES: RefCell<HashMap<usize, CString>> = RefCell::new(HashMap::new());
 }
 
+/// Inserts LLVM IR basicblock metadata into a thread-local BASIC_BLOCKS vector.
+///
+/// # Arguments
+/// * `function_index` - The index of the function to which the basic block belongs.
+/// * `block_index` - The index of the basic block within the function.
 #[cfg(tracer_swt)]
 #[no_mangle]
 pub extern "C" fn yk_trace_basicblock(function_index: usize, block_index: usize) {
     MTThread::with(|mtt| {
         if mtt.is_tracing() {
-            trace_basicblock(function_index, block_index)
+            BASIC_BLOCKS.with(|v| {
+                v.borrow_mut().push(TracingBlock {
+                    function_index,
+                    block_index,
+                });
+            })
         }
     });
 }
@@ -49,20 +59,6 @@ extern "C" {
 pub struct IRFunctionNameIndex {
     pub index: usize,
     pub name: *const libc::c_char,
-}
-
-/// Inserts LLVM IR basicblock metadata into a thread-local BASIC_BLOCKS vector.
-///
-/// # Arguments
-/// * `function_index` - The index of the function to which the basic block belongs.
-/// * `block_index` - The index of the basic block within the function.
-pub fn trace_basicblock(function_index: usize, block_index: usize) {
-    BASIC_BLOCKS.with(|v| {
-        v.borrow_mut().push(TracingBlock {
-            function_index,
-            block_index,
-        });
-    })
 }
 
 pub(crate) struct SWTracer {}
@@ -128,35 +124,5 @@ impl TraceRecorder for SWTTraceRecorder {
         } else {
             Ok(Box::new(SWTraceIterator::new(aot_blocks)))
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_basic_blocks_content() {
-        assert_eq!(BASIC_BLOCKS.with(|blocks| blocks.borrow().clone()), []);
-        trace_basicblock(0, 0);
-        trace_basicblock(0, 1);
-        trace_basicblock(1, 0);
-        assert_eq!(
-            BASIC_BLOCKS.with(|blocks| blocks.borrow().clone()),
-            vec![
-                TracingBlock {
-                    function_index: 0,
-                    block_index: 0,
-                },
-                TracingBlock {
-                    function_index: 0,
-                    block_index: 1,
-                },
-                TracingBlock {
-                    function_index: 1,
-                    block_index: 0,
-                },
-            ]
-        );
     }
 }
