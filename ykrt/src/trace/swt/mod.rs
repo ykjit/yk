@@ -103,26 +103,26 @@ struct SWTTraceRecorder {}
 
 impl TraceRecorder for SWTTraceRecorder {
     fn stop(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, TraceRecorderError> {
-        let mut aot_blocks: Vec<TraceAction> = vec![];
         let bbs = BASIC_BLOCKS.with(|tb| tb.replace(Vec::new()));
-        for tb in bbs {
-            match FUNC_NAMES.get(&tb.function_index) {
-                Some(name) => aot_blocks.push(TraceAction::MappedAOTBlock {
-                    func_name: name.to_owned(),
-                    bb: tb.block_index,
-                }),
-                _ => panic!(
-                    "Failed to get function name by index {:?}",
-                    tb.function_index
-                ),
-            }
-        }
-        if aot_blocks.len() > DEFAULT_TRACE_TOO_LONG {
+        if bbs.len() > DEFAULT_TRACE_TOO_LONG {
             Err(TraceRecorderError::TraceTooLong)
-        } else if aot_blocks.is_empty() {
+        } else if bbs.is_empty() {
             // FIXME: who should handle an empty trace?
             panic!();
         } else {
+            let mut aot_blocks: Vec<TraceAction> = vec![];
+            for tb in bbs {
+                match FUNC_NAMES.get(&tb.function_index) {
+                    Some(name) => aot_blocks.push(TraceAction::MappedAOTBlock {
+                        func_name: name.to_owned(),
+                        bb: tb.block_index,
+                    }),
+                    _ => panic!(
+                        "Failed to get function name by index {:?}",
+                        tb.function_index
+                    ),
+                }
+            }
             Ok(Box::new(SWTraceIterator::new(aot_blocks)))
         }
     }
