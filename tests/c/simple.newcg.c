@@ -1,18 +1,12 @@
-// # Currently this test breaks CI entirely, so we temporarily ignore it
-// # completely.
 // ignore-if: test $YK_JIT_COMPILER != "yk" -o "$YKB_TRACER" = "swt"
 // Run-time:
 //   env-var: YKD_PRINT_IR=aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_PRINT_JITSTATE=1
 //   status: error
-//   stdout:
-//     i
-//     i
-//     i
-//     i
 //   stderr:
 //     jit-state: start-tracing
+//     foo
 //     jit-state: stop-tracing
 //     --- Begin aot ---
 //     ...
@@ -22,17 +16,17 @@
 //     --- Begin jit-pre-opt ---
 //     ...
 //     --- End jit-pre-opt ---
-//     ...
+//     foo
 //     jit-state: enter-jit-code
-//     ...
+//     foo
+//     foo
 //     deopt
-//     ...
 
 // Check that basic trace compilation works.
 
 // FIXME: Get this test all the way through the new codegen pipeline!
 //
-// Currently it succeeds even though it crashes out on a todo!(). This is so
+// Currently it succeeds even though it crashes on deopt. This is so
 // that we can incrementally implement the new codegen and have CI merge our
 // incomplete work.
 
@@ -55,10 +49,7 @@ int main(int argc, char **argv) {
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    // FIXME: ideally we'd print to stderr so as to have the output interleaved
-    // with jit-state prints, but we can't yet handle the `stderr` constant in
-    // `fputs("i", stderr)`.
-    puts("i");
+    fputs("foo\n", stderr);
     res += 2;
     i--;
   }

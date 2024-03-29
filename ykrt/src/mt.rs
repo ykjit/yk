@@ -24,8 +24,6 @@ use crate::trace::swt::patch::{patch_trace_function, restore_trace_function};
 use parking_lot::{Condvar, Mutex, MutexGuard};
 #[cfg(not(all(feature = "yk_testing", not(test))))]
 use parking_lot_core::SpinWait;
-#[cfg(feature = "yk_jitstate_debug")]
-use std::sync::LazyLock;
 
 #[cfg(feature = "yk_jitstate_debug")]
 use crate::print_jit_state;
@@ -59,13 +57,8 @@ const DEFAULT_SIDETRACE_THRESHOLD: HotThreshold = 5;
 const DEFAULT_TRACE_FAILURE_THRESHOLD: TraceFailureThreshold = 5;
 
 thread_local! {
-    pub(crate) static THREAD_MTTHREAD: MTThread = MTThread::new();
+    static THREAD_MTTHREAD: MTThread = MTThread::new();
 }
-
-#[cfg(feature = "yk_testing")]
-static SERIALISE_COMPILATION: LazyLock<bool> = LazyLock::new(|| {
-    &env::var("YKD_SERIALISE_COMPILATION").unwrap_or_else(|_| "0".to_owned()) == "1"
-});
 
 /// Stores information required for compiling a side-trace. Passed down from a (parent) trace
 /// during deoptimisation.
@@ -253,7 +246,7 @@ impl MT {
                         ctr.entry(),
                     )
                 };
-                THREAD_MTTHREAD.with(|mtt| {
+                MTThread::with(|mtt| {
                     mtt.set_running_trace(Some(ctr));
                 });
                 self.stats.timing_state(TimingState::JitExecuting);
@@ -278,7 +271,7 @@ impl MT {
                     Arc::clone(&*lk)
                 };
                 match Arc::clone(&tracer).start_recorder() {
-                    Ok(tt) => THREAD_MTTHREAD.with(|mtt| {
+                    Ok(tt) => MTThread::with(|mtt| {
                         *mtt.tstate.borrow_mut() = MTThreadState::Tracing {
                             hl,
                             thread_tracer: tt,
@@ -296,16 +289,17 @@ impl MT {
 
                 // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because `StartTracing`
                 // will have put a `Some` in the `Rc`.
-                let (hl, thread_tracer, promotions) = THREAD_MTTHREAD.with(|mtt| {
-                    match mtt.tstate.replace(MTThreadState::Interpreting) {
-                        MTThreadState::Tracing {
-                            hl,
-                            thread_tracer,
-                            promotions,
-                        } => (hl, thread_tracer, promotions),
-                        _ => unreachable!(),
-                    }
-                });
+                let (hl, thread_tracer, promotions) =
+                    MTThread::with(
+                        |mtt| match mtt.tstate.replace(MTThreadState::Interpreting) {
+                            MTThreadState::Tracing {
+                                hl,
+                                thread_tracer,
+                                promotions,
+                            } => (hl, thread_tracer, promotions),
+                            _ => unreachable!(),
+                        },
+                    );
                 match thread_tracer.stop() {
                     Ok(utrace) => {
                         self.stats.timing_state(TimingState::None);
@@ -324,16 +318,17 @@ impl MT {
             TransitionControlPoint::StopSideTracing(sti, parent) => {
                 // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because
                 // `StartSideTracing` will have put a `Some` in the `Rc`.
-                let (hl, thread_tracer, promotions) = THREAD_MTTHREAD.with(|mtt| {
-                    match mtt.tstate.replace(MTThreadState::Interpreting) {
-                        MTThreadState::Tracing {
-                            hl,
-                            thread_tracer,
-                            promotions,
-                        } => (hl, thread_tracer, promotions),
-                        _ => unreachable!(),
-                    }
-                });
+                let (hl, thread_tracer, promotions) =
+                    MTThread::with(
+                        |mtt| match mtt.tstate.replace(MTThreadState::Interpreting) {
+                            MTThreadState::Tracing {
+                                hl,
+                                thread_tracer,
+                                promotions,
+                            } => (hl, thread_tracer, promotions),
+                            _ => unreachable!(),
+                        },
+                    );
                 self.stats.timing_state(TimingState::TraceMapping);
                 match thread_tracer.stop() {
                     Ok(utrace) => {
@@ -364,7 +359,7 @@ impl MT {
     /// Perform the next step to `loc` in the `Location` state-machine for a control point. If
     /// `loc` moves to the Compiled state, return a pointer to a [CompiledTrace] object.
     fn transition_control_point(self: &Arc<Self>, loc: &Location) -> TransitionControlPoint {
-        THREAD_MTTHREAD.with(|mtt| {
+        MTThread::with(|mtt| {
             let is_tracing = mtt.is_tracing();
             match loc.hot_location() {
                 Some(hl) => {
@@ -535,7 +530,7 @@ impl MT {
         parent: Arc<dyn CompiledTrace>,
     ) -> TransitionGuardFailure {
         if let Some(hl) = parent.hl().upgrade() {
-            THREAD_MTTHREAD.with(|mtt| {
+            MTThread::with(|mtt| {
                 // This thread should not be tracing anything.
                 debug_assert!(!mtt.is_tracing());
                 let mut lk = hl.lock();
@@ -573,7 +568,7 @@ impl MT {
                     Arc::clone(&*lk)
                 };
                 match Arc::clone(&tracer).start_recorder() {
-                    Ok(tt) => THREAD_MTTHREAD.with(|mtt| {
+                    Ok(tt) => MTThread::with(|mtt| {
                         *mtt.tstate.borrow_mut() = MTThreadState::Tracing {
                             hl,
                             thread_tracer: tt,
@@ -646,7 +641,7 @@ impl MT {
         };
 
         #[cfg(feature = "yk_testing")]
-        if *SERIALISE_COMPILATION {
+        if let Ok(true) = env::var("YKD_SERIALISE_COMPILATION").map(|x| x.as_str() == "1") {
             // To ensure that we properly test that compilation can occur in another thread, we
             // spin up a new thread for each compilation. This is only acceptable because a)
             // `SERIALISE_COMPILATION` is an internal yk testing feature b) when we use it we're
@@ -721,8 +716,20 @@ impl MTThread {
         }
     }
 
+    /// Call `f` with a reference to this thread's [MTThread] instance.
+    ///
+    /// # Panics
+    ///
+    /// For the same reasons as [thread::local::LocalKey::with].
+    pub fn with<F, R>(f: F) -> R
+    where
+        F: FnOnce(&MTThread) -> R,
+    {
+        THREAD_MTTHREAD.with(|mtt| f(mtt))
+    }
+
     /// Is this thread currently tracing something?
-    fn is_tracing(&self) -> bool {
+    pub(crate) fn is_tracing(&self) -> bool {
         matches!(&*self.tstate.borrow(), &MTThreadState::Tracing { .. })
     }
 
@@ -757,11 +764,6 @@ impl MTThread {
         }
         true
     }
-}
-
-#[cfg(tracer_swt)]
-pub fn is_tracing() -> bool {
-    THREAD_MTTHREAD.with(|mtt| mtt.is_tracing())
 }
 
 /// What action should a caller of [MT::transition_control_point] take?
@@ -817,7 +819,7 @@ mod tests {
     fn expect_start_tracing(mt: &Arc<MT>, loc: &Location) {
         match mt.transition_control_point(&loc) {
             TransitionControlPoint::StartTracing(hl) => {
-                THREAD_MTTHREAD.with(|mtt| {
+                MTThread::with(|mtt| {
                     *mtt.tstate.borrow_mut() = MTThreadState::Tracing {
                         hl,
                         thread_tracer: Box::new(DummyTraceRecorder),
@@ -832,7 +834,7 @@ mod tests {
     fn expect_stop_tracing(mt: &Arc<MT>, loc: &Location) {
         match mt.transition_control_point(&loc) {
             TransitionControlPoint::StopTracing => {
-                THREAD_MTTHREAD.with(|mtt| {
+                MTThread::with(|mtt| {
                     *mtt.tstate.borrow_mut() = MTThreadState::Interpreting;
                 });
             }
@@ -854,7 +856,7 @@ mod tests {
             ))),
         ) {
             TransitionGuardFailure::StartSideTracing(hl) => {
-                THREAD_MTTHREAD.with(|mtt| {
+                MTThread::with(|mtt| {
                     *mtt.tstate.borrow_mut() = MTThreadState::Tracing {
                         hl,
                         thread_tracer: Box::new(DummyTraceRecorder),
@@ -899,7 +901,7 @@ mod tests {
 
         match mt.transition_control_point(&loc) {
             TransitionControlPoint::StopSideTracing(_, _) => {
-                THREAD_MTTHREAD.with(|mtt| {
+                MTThread::with(|mtt| {
                     *mtt.tstate.borrow_mut() = MTThreadState::Interpreting;
                 });
                 assert!(matches!(
@@ -975,7 +977,7 @@ mod tests {
             match mt.transition_control_point(&loc) {
                 TransitionControlPoint::NoAction => (),
                 TransitionControlPoint::StartTracing(hl) => {
-                    THREAD_MTTHREAD.with(|mtt| {
+                    MTThread::with(|mtt| {
                         *mtt.tstate.borrow_mut() = MTThreadState::Tracing {
                             hl,
                             thread_tracer: Box::new(DummyTraceRecorder),
@@ -1161,7 +1163,7 @@ mod tests {
                         TransitionControlPoint::Execute(_) => (),
                         TransitionControlPoint::StartTracing(hl) => {
                             num_starts.fetch_add(1, Ordering::Relaxed);
-                            THREAD_MTTHREAD.with(|mtt| {
+                            MTThread::with(|mtt| {
                                 *mtt.tstate.borrow_mut() = MTThreadState::Tracing {
                                     hl,
                                     thread_tracer: Box::new(DummyTraceRecorder),

@@ -25,7 +25,7 @@ use std::mem;
 use std::{ffi::c_void, sync::Once};
 
 #[cfg(tracer_swt)]
-use crate::yk_trace_basicblock;
+use crate::trace::swt::yk_trace_basicblock;
 
 #[cfg(tracer_swt)]
 // This is used to ensure that the original instructions are only saved once.

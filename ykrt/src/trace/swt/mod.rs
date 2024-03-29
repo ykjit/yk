@@ -1,15 +1,21 @@
 //! Software tracer.
 
-use super::{AOTTraceIterator, TraceAction, TraceRecorder, TraceRecorderError};
-use crate::{compile::jitc_llvm::frame::BitcodeSection, mt::DEFAULT_TRACE_TOO_LONG};
-use std::sync::Once;
-use std::{cell::RefCell, collections::HashMap, error::Error, ffi::CString, sync::Arc};
+use super::{
+    AOTTraceIterator, AOTTraceIteratorError, TraceAction, TraceRecorder, TraceRecorderError, Tracer,
+};
+use crate::{
+    compile::jitc_llvm::frame::BitcodeSection,
+    mt::{MTThread, DEFAULT_TRACE_TOO_LONG},
+};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    error::Error,
+    ffi::CString,
+    sync::{Arc, LazyLock},
+};
 
-mod iterator;
 pub(crate) mod patch;
-use iterator::SWTraceIterator;
-
-static FUNC_NAMES_INIT: Once = Once::new();
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 struct TracingBlock {
@@ -17,11 +23,49 @@ struct TracingBlock {
     block_index: usize,
 }
 
+// Mapping of function indexes to function names.
+static FUNC_NAMES: LazyLock<HashMap<usize, CString>> = LazyLock::new(|| {
+    let mut fnames = HashMap::new();
+    let mut functions: *mut IRFunctionNameIndex = std::ptr::null_mut();
+    let bc_section = crate::compile::jitc_llvm::llvmbc_section();
+    let mut functions_len: usize = 0;
+    let bs = &BitcodeSection {
+        data: bc_section.as_ptr(),
+        len: u64::try_from(bc_section.len()).unwrap(),
+    };
+    unsafe { get_function_names(bs, &mut functions, &mut functions_len) };
+    for entry in unsafe { std::slice::from_raw_parts(functions, functions_len) } {
+        fnames.insert(
+            entry.index,
+            unsafe { std::ffi::CStr::from_ptr(entry.name) }.to_owned(),
+        );
+    }
+    fnames
+});
+
 thread_local! {
     // Collection of traced basicblocks.
     static BASIC_BLOCKS: RefCell<Vec<TracingBlock>> = RefCell::new(vec![]);
-    // Mapping of function indexes to function names.
-    static FUNC_NAMES: RefCell<HashMap<usize, CString>> = RefCell::new(HashMap::new());
+}
+
+/// Inserts LLVM IR basicblock metadata into a thread-local BASIC_BLOCKS vector.
+///
+/// # Arguments
+/// * `function_index` - The index of the function to which the basic block belongs.
+/// * `block_index` - The index of the basic block within the function.
+#[cfg(tracer_swt)]
+#[no_mangle]
+pub extern "C" fn yk_trace_basicblock(function_index: usize, block_index: usize) {
+    MTThread::with(|mtt| {
+        if mtt.is_tracing() {
+            BASIC_BLOCKS.with(|v| {
+                v.borrow_mut().push(TracingBlock {
+                    function_index,
+                    block_index,
+                });
+            })
+        }
+    });
 }
 
 extern "C" {
@@ -39,20 +83,6 @@ pub struct IRFunctionNameIndex {
     pub name: *const libc::c_char,
 }
 
-/// Inserts LLVM IR basicblock metadata into a thread-local BASIC_BLOCKS vector.
-///
-/// # Arguments
-/// * `function_index` - The index of the function to which the basic block belongs.
-/// * `block_index` - The index of the basic block within the function.
-pub fn trace_basicblock(function_index: usize, block_index: usize) {
-    BASIC_BLOCKS.with(|v| {
-        v.borrow_mut().push(TracingBlock {
-            function_index,
-            block_index,
-        });
-    })
-}
-
 pub(crate) struct SWTracer {}
 
 impl SWTracer {
@@ -61,11 +91,9 @@ impl SWTracer {
     }
 }
 
-impl super::Tracer for SWTracer {
+impl Tracer for SWTracer {
     fn start_recorder(self: Arc<Self>) -> Result<Box<dyn TraceRecorder>, Box<dyn Error>> {
-        BASIC_BLOCKS.with(|bbs| {
-            bbs.borrow_mut().clear();
-        });
+        debug_assert!(BASIC_BLOCKS.with(|bbs| bbs.borrow().is_empty()));
         Ok(Box::new(SWTTraceRecorder {}))
     }
 }
@@ -74,77 +102,47 @@ struct SWTTraceRecorder {}
 
 impl TraceRecorder for SWTTraceRecorder {
     fn stop(self: Box<Self>) -> Result<Box<dyn AOTTraceIterator>, TraceRecorderError> {
-        let mut aot_blocks: Vec<TraceAction> = vec![];
-        BASIC_BLOCKS.with(|tb| {
-            FUNC_NAMES.with(|fnames| {
-                FUNC_NAMES_INIT.call_once(|| {
-                    let mut functions: *mut IRFunctionNameIndex = std::ptr::null_mut();
-                    let bc_section = crate::compile::jitc_llvm::llvmbc_section();
-                    let mut functions_len: usize = 0;
-                    let bs = &BitcodeSection {
-                        data: bc_section.as_ptr(),
-                        len: u64::try_from(bc_section.len()).unwrap(),
-                    };
-                    unsafe { get_function_names(bs, &mut functions, &mut functions_len) };
-                    for entry in unsafe { std::slice::from_raw_parts(functions, functions_len) } {
-                        fnames.borrow_mut().insert(
-                            entry.index,
-                            unsafe { std::ffi::CStr::from_ptr(entry.name) }.to_owned(),
-                        );
-                    }
-                });
-
-                aot_blocks.extend(tb.borrow().iter().map(|tb| {
-                    match fnames.borrow_mut().get(&tb.function_index) {
-                        Some(name) => TraceAction::MappedAOTBlock {
-                            func_name: name.to_owned(),
-                            bb: tb.block_index,
-                        },
-                        _ => panic!(
-                            "Failed to get function name by index {:?}",
-                            tb.function_index
-                        ),
-                    }
-                }));
-            })
-        });
-        if aot_blocks.len() > DEFAULT_TRACE_TOO_LONG {
+        let bbs = BASIC_BLOCKS.with(|tb| tb.replace(Vec::new()));
+        if bbs.len() > DEFAULT_TRACE_TOO_LONG {
             Err(TraceRecorderError::TraceTooLong)
-        } else if aot_blocks.is_empty() {
+        } else if bbs.is_empty() {
             // FIXME: who should handle an empty trace?
             panic!("swt encountered an empty trace!");
         } else {
-            Ok(Box::new(SWTraceIterator::new(aot_blocks)))
+            Ok(Box::new(SWTraceIterator::new(bbs)))
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+struct SWTraceIterator {
+    bbs: std::vec::IntoIter<TracingBlock>,
+}
 
-    #[test]
-    fn test_basic_blocks_content() {
-        assert_eq!(BASIC_BLOCKS.with(|blocks| blocks.borrow().clone()), []);
-        trace_basicblock(0, 0);
-        trace_basicblock(0, 1);
-        trace_basicblock(1, 0);
-        assert_eq!(
-            BASIC_BLOCKS.with(|blocks| blocks.borrow().clone()),
-            vec![
-                TracingBlock {
-                    function_index: 0,
-                    block_index: 0,
-                },
-                TracingBlock {
-                    function_index: 0,
-                    block_index: 1,
-                },
-                TracingBlock {
-                    function_index: 1,
-                    block_index: 0,
-                },
-            ]
-        );
+impl SWTraceIterator {
+    fn new(bbs: Vec<TracingBlock>) -> SWTraceIterator {
+        return SWTraceIterator {
+            bbs: bbs.into_iter(),
+        };
     }
 }
+
+impl Iterator for SWTraceIterator {
+    type Item = Result<TraceAction, AOTTraceIteratorError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.bbs
+            .next()
+            .map(|tb| match FUNC_NAMES.get(&tb.function_index) {
+                Some(name) => Ok(TraceAction::MappedAOTBlock {
+                    func_name: name.to_owned(),
+                    bb: tb.block_index,
+                }),
+                _ => panic!(
+                    "Failed to get function name by index {:?}",
+                    tb.function_index
+                ),
+            })
+    }
+}
+
+impl AOTTraceIterator for SWTraceIterator {}

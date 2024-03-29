@@ -15,7 +15,8 @@ use super::{
 };
 #[cfg(any(debug_assertions, test))]
 use crate::compile::jitc_yk::jit_ir::JitIRDisplay;
-use crate::compile::CompiledTrace;
+use crate::{compile::CompiledTrace, mt::MTThread};
+use byteorder::{NativeEndian, ReadBytesExt};
 use dynasmrt::{
     components::StaticLabel, dynasm, x64::Rq, AssemblyOffset, DynasmApi, DynasmError,
     DynasmLabelApi, ExecutableBuffer, Register,
@@ -51,8 +52,7 @@ const SYSV_CALL_STACK_ALIGN: usize = 16;
 const STACK_DIRECTION: StackDirection = StackDirection::GrowsDown;
 
 extern "C" fn __yk_deopt(_ctrlpvars: *const c_void, _frameaddr: *const c_void, deoptid: usize) {
-    let ctr = crate::mt::THREAD_MTTHREAD
-        .with(|mtt| mtt.running_trace().unwrap())
+    let ctr = MTThread::with(|mtt| mtt.running_trace().unwrap())
         .as_any()
         .downcast::<X64CompiledTrace>()
         .unwrap();
@@ -300,13 +300,20 @@ impl<'a> X64CodeGen<'a> {
 
     /// Load a constant into the specified register.
     fn load_const(&mut self, reg: Rq, cidx: jit_ir::ConstIdx) {
-        match self.jit_mod.const_(cidx) {
-            jit_ir::Constant::U32(v) => {
-                dynasm!(self.asm; mov Rq(reg.code()), DWORD *v as i32)
+        let cst = self.jit_mod.const_(cidx);
+        let mut bytes = cst.bytes().as_slice();
+        let size = cst.type_idx().type_(self.jit_mod).byte_size().unwrap();
+        debug_assert_eq!(bytes.len(), size);
+        match size {
+            8 => {
+                let val = bytes.read_i64::<NativeEndian>().unwrap();
+                dynasm!(self.asm; mov Rq(reg.code()), QWORD val);
             }
-            jit_ir::Constant::Usize(_) => {
-                todo!()
+            4 => {
+                let val = bytes.read_i32::<NativeEndian>().unwrap();
+                dynasm!(self.asm; mov Rq(reg.code()), DWORD val);
             }
+            _ => todo!("{}", size),
         };
     }
 
