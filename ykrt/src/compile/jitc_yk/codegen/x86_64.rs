@@ -225,7 +225,8 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
         jit_mod: &'a jit_ir::Module,
         ra: &'a mut dyn RegisterAllocator,
     ) -> Result<X64CodeGen<'a>, CompilationError> {
-        let asm = dynasmrt::x64::Assembler::new().map_err(|e| CompilationError(e.to_string()))?;
+        let asm = dynasmrt::x64::Assembler::new()
+            .map_err(|e| CompilationError::ResourceExhausted(Box::new(e)))?;
         Ok(Self {
             jit_mod,
             asm,
@@ -279,14 +280,13 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
         // correct amount.
         self.patch_frame_allocation(alloc_off);
 
+        // If an error happens here, we've made a mistake in the assembly we generate.
         self.asm
             .commit()
-            .map_err(|e| CompilationError(e.to_string()))?;
+            .map_err(|e| CompilationError::InternalError(format!("When committing: {e}")))?;
 
-        let buf = self
-            .asm
-            .finalize()
-            .map_err(|e| CompilationError(format!("failed to finalize assembler: {e:?}").into()))?;
+        // This unwrap cannot fail if `commit` (above) succeeded.
+        let buf = self.asm.finalize().unwrap();
 
         #[cfg(not(any(debug_assertions, test)))]
         return Ok(Arc::new(X64CompiledTrace {
@@ -617,7 +617,7 @@ impl<'a> X64CodeGen<'a> {
 
         // unwrap safe on account of linker symbol names not containing internal NULL bytes.
         let va = symbol_vaddr(&CString::new(fdecl.name()).unwrap()).ok_or_else(|| {
-            CompilationError(format!("couldn't find AOT symbol: {}", fdecl.name()))
+            CompilationError::General(format!("Couldn't find AOT symbol: {}", fdecl.name()))
         })?;
 
         // The SysV x86_64 ABI requires the stack to be 16-byte aligned prior to a call.

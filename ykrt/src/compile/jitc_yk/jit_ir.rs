@@ -261,8 +261,10 @@ impl U24 {
 }
 
 /// Helper to create index overflow errors.
+///
+/// FIXME: all of these should be checked at compile time.
 fn index_overflow(typ: &str) -> CompilationError {
-    CompilationError(format!("index overflow: {}", typ))
+    CompilationError::LimitExceeded(format!("index overflow: {}", typ))
 }
 
 // Generate common methods for 24-bit index types.

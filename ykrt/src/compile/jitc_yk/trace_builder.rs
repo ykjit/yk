@@ -110,6 +110,7 @@ impl<'a> TraceBuilder<'a> {
                     // crash.
                     let aot_field_off = trace_input_struct_ty.field_byte_off(trace_input_idx);
                     let aot_field_ty = trace_input_struct_ty.field_type_idx(trace_input_idx);
+                    // FIXME: we should check at compile-time that this will fit.
                     match u32::try_from(aot_field_off) {
                         Ok(u32_off) => {
                             let input_ty_idx = self.handle_type(aot_field_ty)?;
@@ -122,7 +123,9 @@ impl<'a> TraceBuilder<'a> {
                             self.first_ti_idx = inst_idx;
                         }
                         _ => {
-                            return Err(CompilationError("offset doesn't fit".into()));
+                            return Err(CompilationError::InternalError(
+                                "Offset {aot_field_off} doesn't fit".into(),
+                            ));
                         }
                     }
                 }
@@ -449,9 +452,11 @@ impl<'a> TraceBuilder<'a> {
                     // This unwrap can't fail unless we did something wrong during lowering.
                     64 => u64::from_ne_bytes(c.bytes()[0..8].try_into().unwrap())
                         .try_into()
-                        .map_err(|_| CompilationError("ptradd offset too big".into())),
+                        .map_err(|_| {
+                            CompilationError::LimitExceeded("ptradd offset too big".into())
+                        })?,
                     _ => panic!(),
-                }?;
+                };
                 let instr = jit_ir::PtrAddInstruction::new(target, offset).into();
                 return self.copy_instruction(instr, bid, aot_inst_idx);
             };
@@ -462,6 +467,10 @@ impl<'a> TraceBuilder<'a> {
     /// Entry point for building an IR trace.
     ///
     /// Consumes the trace builder, returning a JIT module.
+    ///
+    /// # Panics
+    ///
+    /// If `ta_iter` produces no elements.
     fn build(
         mut self,
         mut ta_iter: Box<dyn AOTTraceIterator>,
@@ -469,7 +478,10 @@ impl<'a> TraceBuilder<'a> {
         let first_blk = match ta_iter.next() {
             Some(Ok(b)) => b,
             Some(Err(_)) => todo!(),
-            None => return Err(CompilationError("empty trace".into())),
+            None => {
+                // Empty traces are handled in the tracing phase.
+                panic!();
+            }
         };
 
         // Find the block containing the control point call. This is the (sole) predecessor of the

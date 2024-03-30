@@ -23,7 +23,20 @@ pub mod jitc_yk;
 
 /// A failure to compile a trace.
 #[derive(Debug)]
-pub(crate) struct CompilationError(pub(crate) String);
+pub(crate) enum CompilationError {
+    /// Compilation failed for reasons that might be of interest to a programmer augmenting an
+    /// interpreter with yk but not to the end user running a program on the interpreter.
+    General(String),
+    /// Something went wrong when compiling that is probably the result of a bug in yk.
+    InternalError(String),
+    /// A limit was exceeded (e.g. a pointer add that went beyond a struct). We try and check for
+    /// as many of these as possible at compile time, but some can only be detected at JIT time.
+    /// Most, perhaps all, of these suggest bugs in the interpreter.
+    LimitExceeded(String),
+    /// Compilation failed because an external resource was exhausted: the end user running the
+    /// interpreter probably wants to be informed of this.
+    ResourceExhausted(Box<dyn Error>),
+}
 
 /// The trait that every JIT compiler backend must implement.
 pub(crate) trait Compiler: Send + Sync {

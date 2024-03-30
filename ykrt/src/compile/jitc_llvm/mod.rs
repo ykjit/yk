@@ -264,10 +264,10 @@ impl Compiler for JITCLLVM {
             match ta {
                 Ok(x) => irtrace.push(x),
                 Err(AOTTraceIteratorError::LongJmpEncountered) => {
-                    return Err(CompilationError("Encountered longjmp".to_owned()));
+                    return Err(CompilationError::General("Encountered longjmp".to_owned()));
                 }
                 Err(AOTTraceIteratorError::TraceTooLong) => {
-                    return Err(CompilationError("Trace too long".to_owned()))
+                    return Err(CompilationError::General("Trace too long".to_owned()))
                 }
             }
         }
@@ -302,7 +302,7 @@ impl Compiler for JITCLLVM {
             // The LLVM backend is now legacy code and is pending deletion, so it's not worth us
             // spending time auditing all of the failure modes and categorising them into
             // recoverable/temporary. So for now we say any error is temporary.
-            Err(CompilationError("llvm backend error".into()))
+            Err(CompilationError::General("LLVM backend error".into()))
         } else {
             Ok(Arc::new(LLVMCompiledTrace::new(
                 mt,
