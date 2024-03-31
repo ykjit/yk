@@ -75,7 +75,7 @@ impl JITCYk {
         #[cfg(target_arch = "x86_64")]
         {
             let ra = Box::new(SpillAllocator::new(StackDirection::GrowsDown));
-            return Ok(Box::new(codegen::x86_64::X64CodeGen::new(&jit_mod, ra)?));
+            return Ok(codegen::x86_64::X64CodeGen::new(&jit_mod, ra)?);
         }
         #[cfg(not(target_arch = "x86_64"))]
         panic!("No code generator available for this platform");

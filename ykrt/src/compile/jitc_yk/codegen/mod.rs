@@ -21,7 +21,7 @@ pub(crate) trait CodeGen<'a> {
     fn new(
         jit_mod: &'a jit_ir::Module,
         ra: Box<dyn RegisterAllocator>,
-    ) -> Result<Self, CompilationError>
+    ) -> Result<Box<Self>, CompilationError>
     where
         Self: Sized;
 

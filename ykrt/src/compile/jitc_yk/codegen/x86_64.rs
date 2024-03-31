@@ -224,10 +224,10 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
     fn new(
         jit_mod: &'a jit_ir::Module,
         ra: Box<dyn RegisterAllocator>,
-    ) -> Result<X64CodeGen<'a>, CompilationError> {
+    ) -> Result<Box<X64CodeGen<'a>>, CompilationError> {
         let asm = dynasmrt::x64::Assembler::new()
             .map_err(|e| CompilationError::ResourceExhausted(Box::new(e)))?;
-        Ok(Self {
+        Ok(Box::new(Self {
             jit_mod,
             asm,
             stack: Default::default(),
@@ -235,7 +235,7 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
             deoptinfo: Vec::new(),
             #[cfg(any(debug_assertions, test))]
             comments: Cell::new(HashMap::new()),
-        })
+        }))
     }
 
     fn codegen(mut self: Box<Self>) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
@@ -911,15 +911,13 @@ mod tests {
 
         fn test_with_spillalloc(jit_mod: &jit_ir::Module, patt_lines: &[&str]) {
             match_asm(
-                Box::new(
-                    X64CodeGen::new(&jit_mod, Box::new(SpillAllocator::new(STACK_DIRECTION)))
-                        .unwrap(),
-                )
-                .codegen()
-                .unwrap()
-                .as_any()
-                .downcast::<X64CompiledTrace>()
-                .unwrap(),
+                X64CodeGen::new(&jit_mod, Box::new(SpillAllocator::new(STACK_DIRECTION)))
+                    .unwrap()
+                    .codegen()
+                    .unwrap()
+                    .as_any()
+                    .downcast::<X64CompiledTrace>()
+                    .unwrap(),
                 &patt_lines.join("\n"),
             );
         }
@@ -1169,11 +1167,10 @@ mod tests {
                 .unwrap();
             jit_mod.push(jit_ir::AddInstruction::new(op1, op2).into());
 
-            Box::new(
-                X64CodeGen::new(&jit_mod, Box::new(SpillAllocator::new(STACK_DIRECTION))).unwrap(),
-            )
-            .codegen()
-            .unwrap();
+            X64CodeGen::new(&jit_mod, Box::new(SpillAllocator::new(STACK_DIRECTION)))
+                .unwrap()
+                .codegen()
+                .unwrap();
         }
 
         /// A function whose symbol is present in the current address space.
@@ -1384,11 +1381,10 @@ mod tests {
                 jit_ir::CallInstruction::new(&mut jit_mod, func_decl_idx, &args).unwrap();
             jit_mod.push(call_inst.into());
 
-            Box::new(
-                X64CodeGen::new(&jit_mod, Box::new(SpillAllocator::new(STACK_DIRECTION))).unwrap(),
-            )
-            .codegen()
-            .unwrap();
+            X64CodeGen::new(&jit_mod, Box::new(SpillAllocator::new(STACK_DIRECTION)))
+                .unwrap()
+                .codegen()
+                .unwrap();
         }
 
         #[test]
@@ -1460,11 +1456,10 @@ mod tests {
                 jit_ir::CallInstruction::new(&mut jit_mod, func_decl_idx, &[arg1]).unwrap();
             jit_mod.push(call_inst.into());
 
-            Box::new(
-                X64CodeGen::new(&jit_mod, Box::new(SpillAllocator::new(STACK_DIRECTION))).unwrap(),
-            )
-            .codegen()
-            .unwrap();
+            X64CodeGen::new(&jit_mod, Box::new(SpillAllocator::new(STACK_DIRECTION)))
+                .unwrap()
+                .codegen()
+                .unwrap();
         }
 
         #[test]
@@ -1529,11 +1524,10 @@ mod tests {
             jit_mod.push(
                 jit_ir::IcmpInstruction::new(op.clone(), jit_ir::Predicate::Equal, op).into(),
             );
-            Box::new(
-                X64CodeGen::new(&jit_mod, Box::new(SpillAllocator::new(STACK_DIRECTION))).unwrap(),
-            )
-            .codegen()
-            .unwrap();
+            X64CodeGen::new(&jit_mod, Box::new(SpillAllocator::new(STACK_DIRECTION)))
+                .unwrap()
+                .codegen()
+                .unwrap();
         }
 
         #[cfg(debug_assertions)]
@@ -1554,11 +1548,10 @@ mod tests {
                 .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(8, i64_ty_idx).into())
                 .unwrap();
             jit_mod.push(jit_ir::IcmpInstruction::new(op1, jit_ir::Predicate::Equal, op2).into());
-            Box::new(
-                X64CodeGen::new(&jit_mod, Box::new(SpillAllocator::new(STACK_DIRECTION))).unwrap(),
-            )
-            .codegen()
-            .unwrap();
+            X64CodeGen::new(&jit_mod, Box::new(SpillAllocator::new(STACK_DIRECTION)))
+                .unwrap()
+                .codegen()
+                .unwrap();
         }
 
         #[test]
