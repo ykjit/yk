@@ -20,11 +20,11 @@ pub(crate) trait CodeGen<'a> {
     /// Instantiate a code generator for the specified JIT module.
     fn new(
         jit_mod: &'a jit_ir::Module,
-        ra: &'a mut dyn RegisterAllocator,
+        ra: Box<dyn RegisterAllocator>,
     ) -> Result<Self, CompilationError>
     where
         Self: Sized;
 
     /// Perform code generation.
-    fn codegen(self) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
+    fn codegen(self: Box<Self>) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
 }

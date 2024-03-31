@@ -68,6 +68,18 @@ impl JITCYk {
     pub(crate) fn new() -> Result<Arc<Self>, Box<dyn Error>> {
         Ok(Arc::new(Self {}))
     }
+
+    fn default_codegen<'a>(
+        jit_mod: &'a jit_ir::Module,
+    ) -> Result<Box<dyn CodeGen<'a> + 'a>, CompilationError> {
+        #[cfg(target_arch = "x86_64")]
+        {
+            let ra = Box::new(SpillAllocator::new(StackDirection::GrowsDown));
+            return Ok(Box::new(codegen::x86_64::X64CodeGen::new(&jit_mod, ra)?));
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        panic!("No code generator available for this platform");
+    }
 }
 
 impl Compiler for JITCYk {
@@ -101,8 +113,7 @@ impl Compiler for JITCYk {
             eprintln!("--- End jit-pre-opt ---");
         }
 
-        let mut ra = SpillAllocator::new(StackDirection::GrowsDown);
-        let cg = codegen::x86_64::X64CodeGen::new(&jit_mod, &mut ra).unwrap();
+        let cg = Box::new(Self::default_codegen(&jit_mod)?);
         let ct = cg.codegen()?;
 
         #[cfg(any(debug_assertions, test))]
