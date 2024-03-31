@@ -64,6 +64,12 @@ static PHASES_TO_PRINT: LazyLock<HashSet<IRPhase>> = LazyLock::new(|| {
 
 pub(crate) struct JITCYk;
 
+impl JITCYk {
+    pub(crate) fn new() -> Result<Arc<Self>, Box<dyn Error>> {
+        Ok(Arc::new(Self {}))
+    }
+}
+
 impl Compiler for JITCYk {
     fn compile(
         &self,
@@ -108,12 +114,6 @@ impl Compiler for JITCYk {
         }
 
         Ok(ct)
-    }
-}
-
-impl JITCYk {
-    pub(crate) fn new() -> Result<Arc<Self>, Box<dyn Error>> {
-        Ok(Arc::new(Self {}))
     }
 }
 
