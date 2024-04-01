@@ -55,7 +55,7 @@ const SYSV_CALL_STACK_ALIGN: usize = 16;
 /// On X86_64 the stack grows down.
 const STACK_DIRECTION: StackDirection = StackDirection::GrowsDown;
 
-unsafe extern "C" fn __yk_deopt(frameaddr: *const c_void, deoptid: usize, jitrbp: *const c_void) {
+extern "C" fn __yk_deopt(frameaddr: *const c_void, deoptid: usize, jitrbp: *const c_void) {
     #[cfg(feature = "yk_jitstate_debug")]
     print_jit_state("deoptimise");
 
@@ -76,8 +76,8 @@ unsafe extern "C" fn __yk_deopt(frameaddr: *const c_void, deoptid: usize, jitrbp
     // old stack just after the frame containing the control point. Since the stack grows downwards
     // we need to assemble it in the same way. For convenience we will be keeping a pointer into
     // the newstack which we call `rsp`.
-    let newstack = libc::malloc(memsize);
-    let mut rsp = newstack.byte_add(memsize);
+    let newstack = unsafe { libc::malloc(memsize) };
+    let mut rsp = unsafe { newstack.byte_add(memsize) };
 
     // Live register values that we need to write back into AOT registers.
     let mut registers = [0; 16];
@@ -136,8 +136,10 @@ unsafe extern "C" fn __yk_deopt(frameaddr: *const c_void, deoptid: usize, jitrbp
         }
 
         // Write the return address for the previous frame into the current frame.
-        rsp = rsp.sub(REG64_SIZE);
-        ptr::write(rsp as *mut u64, rec.offset);
+        unsafe {
+            rsp = rsp.sub(REG64_SIZE);
+            ptr::write(rsp as *mut u64, rec.offset);
+        }
     }
 
     // Update RBP register. FIXME: We will have to do this for every frame, inside the loop above,
@@ -147,51 +149,51 @@ unsafe extern "C" fn __yk_deopt(frameaddr: *const c_void, deoptid: usize, jitrbp
     // Write the live registers into the new stack. We put these at the very end of the new stack
     // so that they can be immediately popped after we memcpy'd the new stack over.
     for reg in [0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15] {
-        rsp = rsp.byte_sub(REG64_SIZE);
-        ptr::write(rsp as *mut u64, registers[reg]);
+        unsafe {
+            rsp = rsp.byte_sub(REG64_SIZE);
+            ptr::write(rsp as *mut u64, registers[reg]);
+        }
     }
     // Now overwrite the existing stack with our newly recreated one.
-    __replace_stack(newframedst as *mut c_void, newstack, memsize);
+    unsafe { __replace_stack(newframedst as *mut c_void, newstack, memsize) };
 }
 
 #[cfg(target_arch = "x86_64")]
 #[naked]
 #[no_mangle]
-extern "C" fn __replace_stack(dst: *mut c_void, src: *const c_void, size: usize) -> ! {
-    unsafe {
-        std::arch::asm!(
-            // Reset RSP to the end of the control point frame (this doesn't include the
-            // return address which will thus be overwritten in the process)
-            "mov rsp, rdi",
-            // Move rsp to the end of the new stack.
-            "sub rsp, rdx",
-            // Copy the new stack at onto the old stack. The arguments are the same as those of
-            // this function.
-            "mov rdi, rsp",
-            "call memcpy",
-            // Free the source which is no longer needed.
-            "mov rdi, rsi",
-            "call free",
-            // Recover live registers.
-            "pop r15",
-            "pop r14",
-            "pop r13",
-            "pop r12",
-            "pop r11",
-            "pop r10",
-            "pop r9",
-            "pop r8",
-            "pop rbp",
-            "pop rdi",
-            "pop rsi",
-            "pop rbx",
-            "pop rcx",
-            "pop rdx",
-            "pop rax",
-            "ret",
-            options(noreturn)
-        )
-    }
+unsafe extern "C" fn __replace_stack(dst: *mut c_void, src: *const c_void, size: usize) -> ! {
+    std::arch::asm!(
+        // Reset RSP to the end of the control point frame (this doesn't include the
+        // return address which will thus be overwritten in the process)
+        "mov rsp, rdi",
+        // Move rsp to the end of the new stack.
+        "sub rsp, rdx",
+        // Copy the new stack at onto the old stack. The arguments are the same as those of
+        // this function.
+        "mov rdi, rsp",
+        "call memcpy",
+        // Free the source which is no longer needed.
+        "mov rdi, rsi",
+        "call free",
+        // Recover live registers.
+        "pop r15",
+        "pop r14",
+        "pop r13",
+        "pop r12",
+        "pop r11",
+        "pop r10",
+        "pop r9",
+        "pop r8",
+        "pop rbp",
+        "pop rdi",
+        "pop rsi",
+        "pop rbx",
+        "pop rcx",
+        "pop rdx",
+        "pop rax",
+        "ret",
+        options(noreturn)
+    )
 }
 
 /// A function that we can put a debugger breakpoint on.
