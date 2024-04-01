@@ -1522,7 +1522,7 @@ impl Module {
         {
             // If the unwrap fails, then the AOT array was absent and something has gone wrong
             // during AOT codegen.
-            (unsafe { *self.globalvar_ptrs.add(decl.global_ptr_idx().into()) }) as usize
+            unsafe { *self.globalvar_ptrs.add(decl.global_ptr_idx().into()) }
         }
         #[cfg(test)]
         {
