@@ -3,7 +3,6 @@
 //   env-var: YKD_PRINT_IR=aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_PRINT_JITSTATE=1
-//   status: error
 //   stderr:
 //     jit-state: start-tracing
 //     foo
@@ -20,7 +19,10 @@
 //     jit-state: enter-jit-code
 //     foo
 //     foo
-//     deopt
+//     ...
+//     jit-state: deoptimise
+//     ...
+//     exit
 
 // Check that basic trace compilation works.
 
@@ -53,7 +55,7 @@ int main(int argc, char **argv) {
     res += 2;
     i--;
   }
-  printf("exit");
+  fprintf(stderr, "exit\n");
   NOOPT_VAL(res);
   yk_location_drop(loc);
   yk_mt_drop(mt);

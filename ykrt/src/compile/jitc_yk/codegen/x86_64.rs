@@ -15,7 +15,9 @@ use super::{
 };
 #[cfg(any(debug_assertions, test))]
 use crate::compile::jitc_yk::jit_ir::JitIRDisplay;
-use crate::{compile::CompiledTrace, mt::MTThread};
+#[cfg(feature = "yk_jitstate_debug")]
+use crate::print_jit_state;
+use crate::{aotsmp::AOT_STACKMAPS, compile::CompiledTrace, mt::MTThread};
 use byteorder::{NativeEndian, ReadBytesExt};
 use dynasmrt::{
     components::StaticLabel, dynasm, x64::Rq, AssemblyOffset, DynasmApi, DynasmError,
@@ -24,8 +26,9 @@ use dynasmrt::{
 use libc::c_void;
 #[cfg(any(debug_assertions, test))]
 use std::{cell::Cell, collections::HashMap, error::Error, slice};
-use std::{ffi::CString, sync::Arc};
+use std::{ffi::CString, ptr, sync::Arc};
 use ykaddr::addr::symbol_vaddr;
+use yksmp::Location as SMLocation;
 
 /// Argument registers as defined by the X86_64 SysV ABI.
 static ARG_REGS: [Rq; 6] = [Rq::RDI, Rq::RSI, Rq::RDX, Rq::RCX, Rq::R8, Rq::R9];
@@ -35,6 +38,7 @@ static JITFUNC_LIVEVARS_ARGIDX: usize = 0;
 
 /// The size of a 64-bit register in bytes.
 static REG64_SIZE: usize = 8;
+static RBP_DWARF_NUM: u16 = 6;
 
 /// Work registers, i.e. the registers we use temporarily (where possible) for operands to, and
 /// results of, intermediate computations.
@@ -51,14 +55,143 @@ const SYSV_CALL_STACK_ALIGN: usize = 16;
 /// On X86_64 the stack grows down.
 const STACK_DIRECTION: StackDirection = StackDirection::GrowsDown;
 
-extern "C" fn __yk_deopt(_ctrlpvars: *const c_void, _frameaddr: *const c_void, deoptid: usize) {
+unsafe extern "C" fn __yk_deopt(frameaddr: *const c_void, deoptid: usize, jitrbp: *const c_void) {
+    #[cfg(feature = "yk_jitstate_debug")]
+    print_jit_state("deoptimise");
+
     let ctr = MTThread::with(|mtt| mtt.running_trace().unwrap())
         .as_any()
         .downcast::<X64CompiledTrace>()
         .unwrap();
     debug_assert!(deoptid < ctr.deoptinfo.len());
-    eprintln!("deopt");
-    std::process::exit(1);
+    let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
+    let info = &ctr.deoptinfo[deoptid];
+
+    // Amount of space we need to allocate for the new stack.
+    // FIXME: For now we don't need to recreate frames, so we only need space for live registers.
+    let mut memsize = 15 * REG64_SIZE;
+    // Make space for the return address of the controlpoint frame.
+    memsize += REG64_SIZE;
+    // Allocate space on the heap for the new stack. We will later memcpy this new stack over the
+    // old stack just after the frame containing the control point. Since the stack grows downwards
+    // we need to assemble it in the same way. For convenience we will be keeping a pointer into
+    // the newstack which we call `rsp`.
+    let newstack = libc::malloc(memsize);
+    let mut rsp = newstack.byte_add(memsize);
+
+    // Live register values that we need to write back into AOT registers.
+    let mut registers = [0; 16];
+    let mut newframedst = frameaddr;
+    let mut varidx = 0;
+    for (frameid, smid) in info.frames.iter().enumerate() {
+        let (rec, pinfo) = aot_smaps.get(usize::try_from(*smid).unwrap());
+
+        if frameid == 0 {
+            // Compute the address to which we want to write the new stack. This is immediately
+            // after the frame containing the control point.
+            newframedst = unsafe { newframedst.byte_sub(usize::try_from(rec.size).unwrap()) };
+            if pinfo.hasfp {
+                newframedst = unsafe { newframedst.byte_add(usize::try_from(REG64_SIZE).unwrap()) };
+            }
+        }
+
+        for aotvar in rec.live_vars.iter() {
+            // Read live JIT values from the trace's stack frame.
+            let jitval = match info.lives[varidx] {
+                LocalAlloc::Stack { frame_off, size } => {
+                    let p = unsafe { jitrbp.byte_sub(frame_off) };
+                    match size {
+                        1 => unsafe { u64::from(std::ptr::read::<u8>(p as *const u8)) },
+                        2 => unsafe { u64::from(std::ptr::read::<u16>(p as *const u16)) },
+                        4 => unsafe { u64::from(std::ptr::read::<u32>(p as *const u32)) },
+                        8 => unsafe { std::ptr::read::<u64>(p as *const u64) },
+                        _ => todo!(),
+                    }
+                }
+                LocalAlloc::Register => todo!(),
+            };
+
+            let aotloc = if aotvar.len() == 1 {
+                aotvar.get(0).unwrap()
+            } else {
+                todo!("Deal with multi register locations");
+            };
+            match aotloc {
+                SMLocation::Register(reg, _size, __off, __extra) => {
+                    registers[usize::from(*reg)] = jitval;
+                }
+                SMLocation::Direct(..) => {
+                    // Due to the shadow stack we only expect direct locations for the control
+                    // point frame.
+                    debug_assert_eq!(frameid, 0);
+                    continue;
+                }
+                SMLocation::Indirect(_reg, _off, _size) => {
+                    todo!()
+                }
+                SMLocation::Constant(_v) => todo!(),
+                SMLocation::LargeConstant(_v) => todo!(),
+            }
+            varidx += 1;
+        }
+
+        // Write the return address for the previous frame into the current frame.
+        rsp = rsp.sub(REG64_SIZE);
+        ptr::write(rsp as *mut u64, rec.offset);
+    }
+
+    // Update RBP register. FIXME: We will have to do this for every frame, inside the loop above,
+    // once we can deal with multiple frames.
+    registers[usize::from(RBP_DWARF_NUM)] = frameaddr as u64;
+
+    // Write the live registers into the new stack. We put these at the very end of the new stack
+    // so that they can be immediately popped after we memcpy'd the new stack over.
+    for reg in [0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15] {
+        rsp = rsp.byte_sub(REG64_SIZE);
+        ptr::write(rsp as *mut u64, registers[reg]);
+    }
+    // Now overwrite the existing stack with our newly recreated one.
+    __replace_stack(newframedst as *mut c_void, newstack, memsize);
+}
+
+#[cfg(target_arch = "x86_64")]
+#[naked]
+#[no_mangle]
+extern "C" fn __replace_stack(dst: *mut c_void, src: *const c_void, size: usize) -> ! {
+    unsafe {
+        std::arch::asm!(
+            // Reset RSP to the end of the control point frame (this doesn't include the
+            // return address which will thus be overwritten in the process)
+            "mov rsp, rdi",
+            // Move rsp to the end of the new stack.
+            "sub rsp, rdx",
+            // Copy the new stack at onto the old stack. The arguments are the same as those of
+            // this function.
+            "mov rdi, rsp",
+            "call memcpy",
+            // Free the source which is no longer needed.
+            "mov rdi, rsi",
+            "call free",
+            // Recover live registers.
+            "pop r15",
+            "pop r14",
+            "pop r13",
+            "pop r12",
+            "pop r11",
+            "pop r10",
+            "pop r9",
+            "pop r8",
+            "pop rbp",
+            "pop rdi",
+            "pop rsi",
+            "pop rbx",
+            "pop rcx",
+            "pop rdx",
+            "pop rax",
+            "ret",
+            options(noreturn)
+        )
+    }
 }
 
 /// A function that we can put a debugger breakpoint on.
@@ -278,7 +411,7 @@ impl<'a> X64CodeGen<'a> {
     /// Load a local variable out of its stack slot into the specified register.
     fn load_local(&mut self, reg: Rq, local: InstrIdx) {
         match self.ra.allocation(local) {
-            LocalAlloc::Stack { frame_off } => {
+            LocalAlloc::Stack { frame_off, size: _ } => {
                 match i32::try_from(*frame_off) {
                     Ok(foff) => {
                         let size = local.instr(self.jit_mod).def_byte_size(self.jit_mod);
@@ -319,7 +452,7 @@ impl<'a> X64CodeGen<'a> {
 
     fn store_local(&mut self, l: &LocalAlloc, reg: Rq, size: usize) {
         match l {
-            LocalAlloc::Stack { frame_off } => match i32::try_from(*frame_off) {
+            LocalAlloc::Stack { frame_off, size: _ } => match i32::try_from(*frame_off) {
                 Ok(off) => match size {
                     8 => dynasm!(self.asm ; mov [rbp - off], Rq(reg.code())),
                     4 => dynasm!(self.asm ; mov [rbp - off], Rd(reg.code())),
@@ -596,13 +729,12 @@ impl<'a> X64CodeGen<'a> {
         self.deoptinfo.push(deoptinfo);
 
         // The simplest thing we can do to crash the program when the guard fails.
-        // FIXME: deoptimise!
         dynasm!(self.asm
             ; jmp >check_cond
             ; guard_fail:
-            ; mov rdi, [rbp+8]
-            ; mov rsi, [rbp]
-            ; mov rdx, QWORD deoptid
+            ; mov rdi, [rbp]
+            ; mov rsi, QWORD deoptid
+            ; mov rdx, rbp
             ; mov rax, QWORD __yk_deopt as _
             ; call rax
             ; check_cond:
@@ -752,13 +884,17 @@ mod tests {
         // Use `{{name}}` to match non-literal strings in tests.
         let ptn_re = Regex::new(r"\{\{.+?\}\}").unwrap();
         let text_re = Regex::new(r"[a-zA-Z0-9\._]+").unwrap();
-        let fmm = FMBuilder::new(pattern)
+        // The dissamebler alternates between upper- and lowercase hex, making matching addresses
+        // difficult. So just lowercase both pattern and text to avoid tests randomly breaking when
+        // addresses change.
+        let lowerpattern = pattern.to_lowercase();
+        let fmm = FMBuilder::new(&lowerpattern)
             .unwrap()
             .name_matcher(ptn_re, text_re)
             .build()
             .unwrap();
 
-        match fmm.matches(&dis) {
+        match fmm.matches(&dis.to_lowercase()) {
             Ok(()) => (),
             Err(e) => panic!(
                 "\n!!! Emitted code didn't match !!!\n\n{}\nFull asm:\n{}\n",
@@ -1439,9 +1575,9 @@ mod tests {
                 "...",
                 "; Guard %0, true",
                 "{{vaddr1}} {{off1}}: jmp 0x00000000{{cmpoff}}",
-                "{{vaddr2}} {{failoff}}: mov rdi, [rbp+0x08]",
-                "... mov rsi, [rbp]",
-                "... mov rdx, 0x00",
+                "{{vaddr2}} {{failoff}}: mov rdi, [rbp]",
+                "... mov rsi, 0x00",
+                "... mov rdx, rbp",
                 "... mov rax, ...",
                 "... call rax",
                 "{{vaddr3}} {{cmpoff}}: cmp r12b, 0x01",
@@ -1466,9 +1602,9 @@ mod tests {
                 "...",
                 "; Guard %0, false",
                 "{{vaddr1}} {{off1}}: jmp 0x00000000{{cmpoff}}",
-                "{{vaddr2}} {{failoff}}: mov rdi, [rbp+0x08]",
-                "... mov rsi, [rbp]",
-                "... mov rdx, 0x00",
+                "{{vaddr2}} {{failoff}}: mov rdi, [rbp]",
+                "... mov rsi, 0x00",
+                "... mov rdx, rbp",
                 "... mov rax, ...",
                 "... call rax",
                 "{{vaddr3}} {{cmpoff}}: cmp r12b, 0x00",

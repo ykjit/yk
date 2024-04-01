@@ -45,7 +45,7 @@ impl RegisterAllocator for SpillAllocator {
             StackDirection::GrowsDown => post_grow_off,
         };
 
-        let alloc = LocalAlloc::new_stack(alloc_off);
+        let alloc = LocalAlloc::new_stack(alloc_off, size);
         self.allocs.insert(local, alloc);
         alloc
     }
@@ -79,12 +79,24 @@ mod tests {
         let idx = InstrIdx::new(0).unwrap();
         sa.allocate(idx, 8, &mut stack);
         debug_assert_eq!(stack.size(), 8);
-        debug_assert_eq!(sa.allocation(idx), &LocalAlloc::Stack { frame_off: 8 });
+        debug_assert_eq!(
+            sa.allocation(idx),
+            &LocalAlloc::Stack {
+                frame_off: 8,
+                size: 8
+            }
+        );
 
         let idx = InstrIdx::new(1).unwrap();
         sa.allocate(idx, 1, &mut stack);
         debug_assert_eq!(stack.size(), 9);
-        debug_assert_eq!(sa.allocation(idx), &LocalAlloc::Stack { frame_off: 9 });
+        debug_assert_eq!(
+            sa.allocation(idx),
+            &LocalAlloc::Stack {
+                frame_off: 9,
+                size: 1
+            }
+        );
     }
 
     #[test]
@@ -95,12 +107,24 @@ mod tests {
         let idx = InstrIdx::new(0).unwrap();
         sa.allocate(idx, 8, &mut stack);
         debug_assert_eq!(stack.size(), 8);
-        debug_assert_eq!(sa.allocation(idx), &LocalAlloc::Stack { frame_off: 0 });
+        debug_assert_eq!(
+            sa.allocation(idx),
+            &LocalAlloc::Stack {
+                frame_off: 0,
+                size: 8
+            }
+        );
 
         let idx = InstrIdx::new(1).unwrap();
         sa.allocate(idx, 1, &mut stack);
         debug_assert_eq!(stack.size(), 9);
-        debug_assert_eq!(sa.allocation(idx), &LocalAlloc::Stack { frame_off: 8 });
+        debug_assert_eq!(
+            sa.allocation(idx),
+            &LocalAlloc::Stack {
+                frame_off: 8,
+                size: 1
+            }
+        );
     }
 
     #[test]
@@ -114,7 +138,13 @@ mod tests {
         let idx = InstrIdx::new(1).unwrap();
         sa.allocate(idx, 1, &mut stack);
         debug_assert_eq!(stack.size(), 33);
-        debug_assert_eq!(sa.allocation(idx), &LocalAlloc::Stack { frame_off: 33 });
+        debug_assert_eq!(
+            sa.allocation(idx),
+            &LocalAlloc::Stack {
+                frame_off: 33,
+                size: 1
+            }
+        );
     }
 
     #[test]
@@ -128,6 +158,12 @@ mod tests {
         let idx = InstrIdx::new(1).unwrap();
         sa.allocate(idx, 1, &mut stack);
         debug_assert_eq!(stack.size(), 33);
-        debug_assert_eq!(sa.allocation(idx), &LocalAlloc::Stack { frame_off: 32 });
+        debug_assert_eq!(
+            sa.allocation(idx),
+            &LocalAlloc::Stack {
+                frame_off: 32,
+                size: 1
+            }
+        );
     }
 }
