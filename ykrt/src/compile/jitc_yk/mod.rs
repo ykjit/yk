@@ -49,14 +49,11 @@ pub(crate) struct JITCYk {
 
 impl JITCYk {
     pub(crate) fn new() -> Result<Arc<Self>, Box<dyn Error>> {
-        let phases_to_print = if let Ok(stages) = env::var("YKD_PRINT_IR") {
-            stages
-                .split(',')
-                .map(IRPhase::from_str)
-                .map(|res| res.unwrap())
-                .collect::<HashSet<IRPhase>>()
-        } else {
-            HashSet::new()
+        let mut phases_to_print = HashSet::new();
+        if let Ok(stages) = env::var("YKD_PRINT_IR") {
+            for x in stages.split(',') {
+                phases_to_print.insert(IRPhase::from_str(x)?);
+            }
         };
         Ok(Arc::new(Self { phases_to_print }))
     }
