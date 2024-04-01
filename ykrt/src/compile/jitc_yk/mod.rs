@@ -15,14 +15,7 @@ use crate::{
 };
 
 use parking_lot::Mutex;
-use std::{
-    collections::HashSet,
-    env,
-    error::Error,
-    ffi::CString,
-    slice,
-    sync::{Arc, LazyLock},
-};
+use std::{collections::HashSet, env, error::Error, ffi::CString, slice, sync::Arc};
 use ykaddr::addr::symbol_vaddr;
 
 pub mod aot_ir;
@@ -50,23 +43,22 @@ impl IRPhase {
     }
 }
 
-static PHASES_TO_PRINT: LazyLock<HashSet<IRPhase>> = LazyLock::new(|| {
-    if let Ok(stages) = env::var("YKD_PRINT_IR") {
-        stages
-            .split(',')
-            .map(IRPhase::from_str)
-            .map(|res| res.unwrap())
-            .collect::<HashSet<IRPhase>>()
-    } else {
-        HashSet::new()
-    }
-});
-
-pub(crate) struct JITCYk;
+pub(crate) struct JITCYk {
+    phases_to_print: HashSet<IRPhase>,
+}
 
 impl JITCYk {
     pub(crate) fn new() -> Result<Arc<Self>, Box<dyn Error>> {
-        Ok(Arc::new(Self {}))
+        let phases_to_print = if let Ok(stages) = env::var("YKD_PRINT_IR") {
+            stages
+                .split(',')
+                .map(IRPhase::from_str)
+                .map(|res| res.unwrap())
+                .collect::<HashSet<IRPhase>>()
+        } else {
+            HashSet::new()
+        };
+        Ok(Arc::new(Self { phases_to_print }))
     }
 
     fn default_codegen<'a>(
@@ -97,7 +89,7 @@ impl Compiler for JITCYk {
         let ir_slice = yk_ir_section().unwrap();
         let aot_mod = aot_ir::deserialise_module(ir_slice).unwrap();
 
-        if PHASES_TO_PRINT.contains(&IRPhase::AOT) {
+        if self.phases_to_print.contains(&IRPhase::AOT) {
             eprintln!("--- Begin aot ---");
             aot_mod.dump();
             eprintln!("--- End aot ---");
@@ -105,7 +97,7 @@ impl Compiler for JITCYk {
 
         let jit_mod = trace_builder::build(&aot_mod, aottrace_iter.0)?;
 
-        if PHASES_TO_PRINT.contains(&IRPhase::PreOpt) {
+        if self.phases_to_print.contains(&IRPhase::PreOpt) {
             eprintln!("--- Begin jit-pre-opt ---");
             // FIXME: If the `unwrap` fails, something rather bad has happened: does recovery even
             // make sense?
@@ -117,7 +109,7 @@ impl Compiler for JITCYk {
         let ct = cg.codegen()?;
 
         #[cfg(any(debug_assertions, test))]
-        if PHASES_TO_PRINT.contains(&IRPhase::Asm) {
+        if self.phases_to_print.contains(&IRPhase::Asm) {
             eprintln!("--- Begin jit-asm ---");
             // If this unwrap fails, something went wrong in codegen.
             eprintln!("{}", ct.disassemble().unwrap());
