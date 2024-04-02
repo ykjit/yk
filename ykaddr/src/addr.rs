@@ -139,6 +139,19 @@ pub fn vaddr_to_sym_and_obj(vaddr: usize) -> Option<DLInfo> {
     }
 }
 
+/// A thin wrapper around `dlsym()` for mapping symbol names to virtual addresses.
+///
+/// FIXME: Look for raw uses of `dlsym()` throughout our code base and replace them with a call to
+/// this wrapper. Related: https://github.com/ykjit/yk/issues/835
+pub fn symbol_vaddr(sym: &CStr) -> Option<usize> {
+    let va = unsafe { dlsym(RTLD_DEFAULT, sym.as_ptr()) };
+    if !va.is_null() {
+        Some(va as usize)
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{off_to_vaddr, vaddr_to_obj_and_off, vaddr_to_sym_and_obj, MaybeUninit};
@@ -213,18 +226,5 @@ mod tests {
         // Address valid, but symbol not exported (test bin not built with `-Wl,--export-dynamic`).
         let func_vaddr = vaddr_to_sym_and_obj_cant_find_sym as *const fn();
         assert!(vaddr_to_sym_and_obj(func_vaddr as usize).is_none());
-    }
-}
-
-/// A thin wrapper around `dlsym()` for mapping symbol names to virtual addresses.
-///
-/// FIXME: Look for raw uses of `dlsym()` throughout our code base and replace them with a call to
-/// this wrapper. Related: https://github.com/ykjit/yk/issues/835
-pub fn symbol_vaddr(sym: &CStr) -> Option<usize> {
-    let va = unsafe { dlsym(RTLD_DEFAULT, sym.as_ptr()) };
-    if !va.is_null() {
-        Some(va as usize)
-    } else {
-        None
     }
 }
