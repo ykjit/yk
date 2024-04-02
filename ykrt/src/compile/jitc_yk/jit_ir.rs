@@ -158,6 +158,7 @@ const MAX_OPERAND_IDX: u16 = (1 << 15) - 1;
 
 /// The symbol name of the global variable pointers array.
 const GLOBAL_PTR_ARRAY_SYM: &str = "__yk_globalvar_ptrs";
+const GLOBAL_PTR_LEN_SYM: &str = "__yk_globalvar_len";
 
 /// [Instruction] to [InstrIdx] mapping used for stringifying instructions.
 ///
@@ -1463,12 +1464,10 @@ pub(crate) struct Module {
     /// pointer to each global variable in the AOT module. The indices of the elements correspond
     /// with [aot_ir::GlobalDeclIdx]s.
     ///
-    /// The array is eternal, so we have no qualms about storing a raw pointer to it.
-    ///
     /// This is marked `cfg(not(test))` because unit tests are not built with ykllvm, and thus the
     /// array will be absent.
     #[cfg(not(test))]
-    globalvar_ptrs: *const usize,
+    globalvars: &'static [usize],
 }
 
 impl Module {
@@ -1486,11 +1485,14 @@ impl Module {
         types.push(Type::Integer(IntegerType::new(8)));
 
         // Find the global variable pointer array in the address space.
-        //
-        // FIXME: consider passing this in to the control point to avoid a dlsym().
         #[cfg(not(test))]
-        let globalvar_ptrs =
-            symbol_vaddr(&CString::new(GLOBAL_PTR_ARRAY_SYM).unwrap()).unwrap() as *const usize;
+        let globalvars = {
+            let ptr =
+                symbol_vaddr(&CString::new(GLOBAL_PTR_ARRAY_SYM).unwrap()).unwrap() as *const usize;
+            let len_ptr =
+                symbol_vaddr(&CString::new(GLOBAL_PTR_LEN_SYM).unwrap()).unwrap() as *const usize;
+            unsafe { std::slice::from_raw_parts(ptr, *len_ptr) }
+        };
 
         Self {
             name,
@@ -1505,7 +1507,7 @@ impl Module {
             global_decls: TiVec::new(),
             guard_info: TiVec::new(),
             #[cfg(not(test))]
-            globalvar_ptrs,
+            globalvars,
         }
     }
 
@@ -1518,9 +1520,7 @@ impl Module {
         let decl = idx.global_decl(self);
         #[cfg(not(test))]
         {
-            // If the unwrap fails, then the AOT array was absent and something has gone wrong
-            // during AOT codegen.
-            (unsafe { *self.globalvar_ptrs.add(decl.global_ptr_idx().into()) }) as usize
+            self.globalvars[usize::from(decl.global_ptr_idx())]
         }
         #[cfg(test)]
         {
