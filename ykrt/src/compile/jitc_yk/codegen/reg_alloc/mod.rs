@@ -46,7 +46,7 @@ pub(crate) enum StackDirection {
     GrowsDown,
 }
 
-/// The API to regsiter allocators.
+/// The API to register allocators.
 ///
 /// Register allocators are responsible for assigning storage for local variables.
 pub(crate) trait RegisterAllocator {

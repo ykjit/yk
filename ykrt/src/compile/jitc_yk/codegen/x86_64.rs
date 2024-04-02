@@ -55,7 +55,7 @@ const SYSV_CALL_STACK_ALIGN: usize = 16;
 /// On X86_64 the stack grows down.
 const STACK_DIRECTION: StackDirection = StackDirection::GrowsDown;
 
-unsafe extern "C" fn __yk_deopt(frameaddr: *const c_void, deoptid: usize, jitrbp: *const c_void) {
+extern "C" fn __yk_deopt(frameaddr: *const c_void, deoptid: usize, jitrbp: *const c_void) {
     #[cfg(feature = "yk_jitstate_debug")]
     print_jit_state("deoptimise");
 
@@ -76,8 +76,8 @@ unsafe extern "C" fn __yk_deopt(frameaddr: *const c_void, deoptid: usize, jitrbp
     // old stack just after the frame containing the control point. Since the stack grows downwards
     // we need to assemble it in the same way. For convenience we will be keeping a pointer into
     // the newstack which we call `rsp`.
-    let newstack = libc::malloc(memsize);
-    let mut rsp = newstack.byte_add(memsize);
+    let newstack = unsafe { libc::malloc(memsize) };
+    let mut rsp = unsafe { newstack.byte_add(memsize) };
 
     // Live register values that we need to write back into AOT registers.
     let mut registers = [0; 16];
@@ -136,8 +136,10 @@ unsafe extern "C" fn __yk_deopt(frameaddr: *const c_void, deoptid: usize, jitrbp
         }
 
         // Write the return address for the previous frame into the current frame.
-        rsp = rsp.sub(REG64_SIZE);
-        ptr::write(rsp as *mut u64, rec.offset);
+        unsafe {
+            rsp = rsp.sub(REG64_SIZE);
+            ptr::write(rsp as *mut u64, rec.offset);
+        }
     }
 
     // Update RBP register. FIXME: We will have to do this for every frame, inside the loop above,
@@ -147,51 +149,51 @@ unsafe extern "C" fn __yk_deopt(frameaddr: *const c_void, deoptid: usize, jitrbp
     // Write the live registers into the new stack. We put these at the very end of the new stack
     // so that they can be immediately popped after we memcpy'd the new stack over.
     for reg in [0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15] {
-        rsp = rsp.byte_sub(REG64_SIZE);
-        ptr::write(rsp as *mut u64, registers[reg]);
+        unsafe {
+            rsp = rsp.byte_sub(REG64_SIZE);
+            ptr::write(rsp as *mut u64, registers[reg]);
+        }
     }
     // Now overwrite the existing stack with our newly recreated one.
-    __replace_stack(newframedst as *mut c_void, newstack, memsize);
+    unsafe { __replace_stack(newframedst as *mut c_void, newstack, memsize) };
 }
 
 #[cfg(target_arch = "x86_64")]
 #[naked]
 #[no_mangle]
-extern "C" fn __replace_stack(dst: *mut c_void, src: *const c_void, size: usize) -> ! {
-    unsafe {
-        std::arch::asm!(
-            // Reset RSP to the end of the control point frame (this doesn't include the
-            // return address which will thus be overwritten in the process)
-            "mov rsp, rdi",
-            // Move rsp to the end of the new stack.
-            "sub rsp, rdx",
-            // Copy the new stack at onto the old stack. The arguments are the same as those of
-            // this function.
-            "mov rdi, rsp",
-            "call memcpy",
-            // Free the source which is no longer needed.
-            "mov rdi, rsi",
-            "call free",
-            // Recover live registers.
-            "pop r15",
-            "pop r14",
-            "pop r13",
-            "pop r12",
-            "pop r11",
-            "pop r10",
-            "pop r9",
-            "pop r8",
-            "pop rbp",
-            "pop rdi",
-            "pop rsi",
-            "pop rbx",
-            "pop rcx",
-            "pop rdx",
-            "pop rax",
-            "ret",
-            options(noreturn)
-        )
-    }
+unsafe extern "C" fn __replace_stack(dst: *mut c_void, src: *const c_void, size: usize) -> ! {
+    std::arch::asm!(
+        // Reset RSP to the end of the control point frame (this doesn't include the
+        // return address which will thus be overwritten in the process)
+        "mov rsp, rdi",
+        // Move rsp to the end of the new stack.
+        "sub rsp, rdx",
+        // Copy the new stack at onto the old stack. The arguments are the same as those of
+        // this function.
+        "mov rdi, rsp",
+        "call memcpy",
+        // Free the source which is no longer needed.
+        "mov rdi, rsi",
+        "call free",
+        // Recover live registers.
+        "pop r15",
+        "pop r14",
+        "pop r13",
+        "pop r12",
+        "pop r11",
+        "pop r10",
+        "pop r9",
+        "pop r8",
+        "pop rbp",
+        "pop rdi",
+        "pop rsi",
+        "pop rbx",
+        "pop rcx",
+        "pop rdx",
+        "pop rax",
+        "ret",
+        options(noreturn)
+    )
 }
 
 /// A function that we can put a debugger breakpoint on.
@@ -210,7 +212,7 @@ pub(crate) struct X64CodeGen<'a> {
     /// value grows up.
     stack: AbstractStack,
     /// Register allocator.
-    ra: &'a mut dyn RegisterAllocator,
+    ra: Box<dyn RegisterAllocator>,
     /// Deopt info.
     deoptinfo: Vec<DeoptInfo>,
     /// Comments used by the trace printer for debugging and testing only.
@@ -223,11 +225,11 @@ pub(crate) struct X64CodeGen<'a> {
 impl<'a> CodeGen<'a> for X64CodeGen<'a> {
     fn new(
         jit_mod: &'a jit_ir::Module,
-        ra: &'a mut dyn RegisterAllocator,
-    ) -> Result<X64CodeGen<'a>, CompilationError> {
+        ra: Box<dyn RegisterAllocator>,
+    ) -> Result<Box<X64CodeGen<'a>>, CompilationError> {
         let asm = dynasmrt::x64::Assembler::new()
             .map_err(|e| CompilationError::ResourceExhausted(Box::new(e)))?;
-        Ok(Self {
+        Ok(Box::new(Self {
             jit_mod,
             asm,
             stack: Default::default(),
@@ -235,10 +237,10 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
             deoptinfo: Vec::new(),
             #[cfg(any(debug_assertions, test))]
             comments: Cell::new(HashMap::new()),
-        })
+        }))
     }
 
-    fn codegen(mut self) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
+    fn codegen(mut self: Box<Self>) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         let alloc_off = self.emit_prologue();
 
         // FIXME: we'd like to be able to assemble code backwards as this would simplify register
@@ -910,9 +912,8 @@ mod tests {
         use crate::compile::jitc_yk::codegen::reg_alloc::SpillAllocator;
 
         fn test_with_spillalloc(jit_mod: &jit_ir::Module, patt_lines: &[&str]) {
-            let mut ra = SpillAllocator::new(STACK_DIRECTION);
             match_asm(
-                X64CodeGen::new(&jit_mod, &mut ra)
+                X64CodeGen::new(&jit_mod, Box::new(SpillAllocator::new(STACK_DIRECTION)))
                     .unwrap()
                     .codegen()
                     .unwrap()
@@ -1168,8 +1169,7 @@ mod tests {
                 .unwrap();
             jit_mod.push(jit_ir::AddInstruction::new(op1, op2).into());
 
-            let mut ra = SpillAllocator::new(STACK_DIRECTION);
-            X64CodeGen::new(&jit_mod, &mut ra)
+            X64CodeGen::new(&jit_mod, Box::new(SpillAllocator::new(STACK_DIRECTION)))
                 .unwrap()
                 .codegen()
                 .unwrap();
@@ -1383,8 +1383,7 @@ mod tests {
                 jit_ir::CallInstruction::new(&mut jit_mod, func_decl_idx, &args).unwrap();
             jit_mod.push(call_inst.into());
 
-            let mut ra = SpillAllocator::new(STACK_DIRECTION);
-            X64CodeGen::new(&jit_mod, &mut ra)
+            X64CodeGen::new(&jit_mod, Box::new(SpillAllocator::new(STACK_DIRECTION)))
                 .unwrap()
                 .codegen()
                 .unwrap();
@@ -1459,8 +1458,7 @@ mod tests {
                 jit_ir::CallInstruction::new(&mut jit_mod, func_decl_idx, &[arg1]).unwrap();
             jit_mod.push(call_inst.into());
 
-            let mut ra = SpillAllocator::new(STACK_DIRECTION);
-            X64CodeGen::new(&jit_mod, &mut ra)
+            X64CodeGen::new(&jit_mod, Box::new(SpillAllocator::new(STACK_DIRECTION)))
                 .unwrap()
                 .codegen()
                 .unwrap();
@@ -1528,8 +1526,7 @@ mod tests {
             jit_mod.push(
                 jit_ir::IcmpInstruction::new(op.clone(), jit_ir::Predicate::Equal, op).into(),
             );
-            let mut ra = SpillAllocator::new(STACK_DIRECTION);
-            X64CodeGen::new(&jit_mod, &mut ra)
+            X64CodeGen::new(&jit_mod, Box::new(SpillAllocator::new(STACK_DIRECTION)))
                 .unwrap()
                 .codegen()
                 .unwrap();
@@ -1553,8 +1550,7 @@ mod tests {
                 .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(8, i64_ty_idx).into())
                 .unwrap();
             jit_mod.push(jit_ir::IcmpInstruction::new(op1, jit_ir::Predicate::Equal, op2).into());
-            let mut ra = SpillAllocator::new(STACK_DIRECTION);
-            X64CodeGen::new(&jit_mod, &mut ra)
+            X64CodeGen::new(&jit_mod, Box::new(SpillAllocator::new(STACK_DIRECTION)))
                 .unwrap()
                 .codegen()
                 .unwrap();
