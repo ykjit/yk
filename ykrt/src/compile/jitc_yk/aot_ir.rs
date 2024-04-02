@@ -457,7 +457,7 @@ impl Instruction {
     /// # Panics
     ///
     /// Panics if the instruction isn't a call instruction.
-    pub(crate) fn callee<'a>(&self) -> FuncIdx {
+    pub(crate) fn callee(&self) -> FuncIdx {
         debug_assert!(matches!(self.opcode, Opcode::Call));
         let op = self.operand(0);
         match op {
@@ -623,7 +623,7 @@ pub(crate) struct Func {
     blocks: TiVec<BlockIdx, Block>,
 }
 
-impl<'a> Func {
+impl Func {
     fn is_declaration(&self) -> bool {
         self.blocks.is_empty()
     }

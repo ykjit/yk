@@ -91,7 +91,7 @@ extern "C" fn __yk_deopt(frameaddr: *const c_void, deoptid: usize, jitrbp: *cons
             // after the frame containing the control point.
             newframedst = unsafe { newframedst.byte_sub(usize::try_from(rec.size).unwrap()) };
             if pinfo.hasfp {
-                newframedst = unsafe { newframedst.byte_add(usize::try_from(REG64_SIZE).unwrap()) };
+                newframedst = unsafe { newframedst.byte_add(REG64_SIZE) };
             }
         }
 
@@ -298,11 +298,11 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
         #[cfg(any(debug_assertions, test))]
         {
             let comments = self.comments.take();
-            return Ok(Arc::new(X64CompiledTrace {
+            Ok(Arc::new(X64CompiledTrace {
                 buf,
                 deoptinfo: self.deoptinfo,
                 comments,
-            }));
+            }))
         }
     }
 }
@@ -318,17 +318,17 @@ impl<'a> X64CodeGen<'a> {
         self.comment(self.asm.offset(), inst.to_string(self.jit_mod).unwrap());
 
         match inst {
-            jit_ir::Instruction::Add(i) => self.codegen_add_instr(instr_idx, &i),
+            jit_ir::Instruction::Add(i) => self.codegen_add_instr(instr_idx, i),
             jit_ir::Instruction::LoadTraceInput(i) => {
-                self.codegen_loadtraceinput_instr(instr_idx, &i)
+                self.codegen_loadtraceinput_instr(instr_idx, i)
             }
-            jit_ir::Instruction::Load(i) => self.codegen_load_instr(instr_idx, &i),
-            jit_ir::Instruction::PtrAdd(i) => self.codegen_ptradd_instr(instr_idx, &i),
-            jit_ir::Instruction::Store(i) => self.codegen_store_instr(&i),
-            jit_ir::Instruction::LookupGlobal(i) => self.codegen_lookupglobal_instr(instr_idx, &i),
-            jit_ir::Instruction::Call(i) => self.codegen_call_instr(instr_idx, &i)?,
-            jit_ir::Instruction::Icmp(i) => self.codegen_icmp_instr(instr_idx, &i),
-            jit_ir::Instruction::Guard(i) => self.codegen_guard_instr(&i),
+            jit_ir::Instruction::Load(i) => self.codegen_load_instr(instr_idx, i),
+            jit_ir::Instruction::PtrAdd(i) => self.codegen_ptradd_instr(instr_idx, i),
+            jit_ir::Instruction::Store(i) => self.codegen_store_instr(i),
+            jit_ir::Instruction::LookupGlobal(i) => self.codegen_lookupglobal_instr(instr_idx, i),
+            jit_ir::Instruction::Call(i) => self.codegen_call_instr(instr_idx, i)?,
+            jit_ir::Instruction::Icmp(i) => self.codegen_icmp_instr(instr_idx, i),
+            jit_ir::Instruction::Guard(i) => self.codegen_guard_instr(i),
             jit_ir::Instruction::Arg(i) => self.codegen_arg(instr_idx, *i),
             jit_ir::Instruction::TraceLoopStart => self.codegen_traceloopstart_instr(),
         }
@@ -378,7 +378,7 @@ impl<'a> X64CodeGen<'a> {
             self.comment(self.asm.offset(), "Breakpoint hack".into());
             self.stack.align(SYSV_CALL_STACK_ALIGN);
             dynasm!(self.asm
-                ; mov r11, QWORD __yk_break as _
+                ; mov r11, QWORD __yk_break as i64
                 ; call r11
             );
         }
@@ -607,8 +607,7 @@ impl<'a> X64CodeGen<'a> {
             todo!();
         }
 
-        for i in 0..num_args {
-            let reg = ARG_REGS[i];
+        for (i, reg) in ARG_REGS.into_iter().take(num_args).enumerate() {
             let op = inst.operand(self.jit_mod, i);
             debug_assert!(
                 op.type_(self.jit_mod) == fty.arg_type(self.jit_mod, i),
@@ -737,7 +736,7 @@ impl<'a> X64CodeGen<'a> {
             ; mov rdi, [rbp]
             ; mov rsi, QWORD deoptid
             ; mov rdx, rbp
-            ; mov rax, QWORD __yk_deopt as _
+            ; mov rax, QWORD __yk_deopt as i64
             ; call rax
             ; check_cond:
             ; cmp Rb(WR0.code()), inst.expect() as i8 // `as` intentional.
