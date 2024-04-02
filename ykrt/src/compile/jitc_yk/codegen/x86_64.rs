@@ -350,6 +350,7 @@ impl<'a> X64CodeGen<'a> {
     /// JITted code is via deoptimisation, which will rewrite the whole stack anyway.
     ///
     /// Returns the offset at which to patch up the stack allocation later.
+    #[allow(clippy::fn_to_numeric_cast)]
     fn emit_prologue(&mut self) -> AssemblyOffset {
         #[cfg(any(debug_assertions, test))]
         self.comment(self.asm.offset(), "prologue".to_owned());
@@ -707,6 +708,7 @@ impl<'a> X64CodeGen<'a> {
         dynasm!(self.asm; ->trace_loop_start:);
     }
 
+    #[allow(clippy::fn_to_numeric_cast)]
     fn codegen_guard_instr(&mut self, inst: &jit_ir::GuardInstruction) {
         let cond = inst.cond();
 
