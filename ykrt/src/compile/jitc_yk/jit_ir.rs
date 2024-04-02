@@ -251,7 +251,7 @@ impl U24 {
     }
 
     /// Converts 3-bytes conceptually representing a `u24` to a usize.
-    fn to_usize(&self) -> usize {
+    fn to_usize(self) -> usize {
         static_assertions::const_assert!(mem::size_of::<usize>() >= 3);
         let b0 = self.0[0] as usize; // most-significant byte.
         let b1 = self.0[1] as usize;
@@ -277,7 +277,7 @@ macro_rules! index_24bit {
                     .map(|u| Self(u))
             }
 
-            pub(crate) fn to_usize(&self) -> usize {
+            pub(crate) fn to_usize(self) -> usize {
                 self.0.to_usize()
             }
         }
@@ -311,7 +311,7 @@ macro_rules! index_16bit {
                     .map(|u| Self(u))
             }
 
-            pub(crate) fn to_u16(&self) -> u16 {
+            pub(crate) fn to_u16(self) -> u16 {
                 self.0.into()
             }
         }
