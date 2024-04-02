@@ -20,6 +20,27 @@ use ykaddr::addr::symbol_vaddr;
 // This is simple and can be shared across both IRs.
 pub(crate) use super::aot_ir::Predicate;
 
+/// The symbol name of the global variable pointers array.
+///
+/// FIXME: At the moment we have to use `dlsym` to look this variable up, because it will only be
+/// present if `YKD_NEW_CODEGEN=1`. When the new codegen becomes the only codegen, we can move from
+/// `dlsym` to:
+///
+/// ```rust
+/// extern "C" {
+///     /// The address of this variable (note: not the contents of the variable!) points to the
+///     /// beginning of an array of `usize`s.
+///     static __yk_globalvar_ptrs: usize;
+///     /// How many elements are there in `__yk_globalvar_ptrs`?
+///     static __yk_globalvar_len: i64;
+/// }
+/// ```
+///
+/// which will allow the loader to deal with things rather than us using `dlsym`.
+const GLOBAL_PTR_ARRAY_SYM: &str = "__yk_globalvar_ptrs";
+/// How many elements are present in `__yk_globalvar_ptrs`?
+const GLOBAL_PTR_LEN_SYM: &str = "__yk_globalvar_len";
+
 /// A fixed-width integer type.
 ///
 /// Signedness is not specified. Interpretation of the bit pattern is delegated to operations upon
@@ -155,10 +176,6 @@ const OPERAND_IDX_MASK: u16 = 0x7fff;
 
 /// The largest operand index we can express in 15 bits.
 const MAX_OPERAND_IDX: u16 = (1 << 15) - 1;
-
-/// The symbol name of the global variable pointers array.
-const GLOBAL_PTR_ARRAY_SYM: &str = "__yk_globalvar_ptrs";
-const GLOBAL_PTR_LEN_SYM: &str = "__yk_globalvar_len";
 
 /// [Instruction] to [InstrIdx] mapping used for stringifying instructions.
 ///
