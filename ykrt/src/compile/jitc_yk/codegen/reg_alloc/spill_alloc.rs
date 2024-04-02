@@ -56,7 +56,7 @@ impl RegisterAllocator for SpillAllocator {
     /// # Panics
     ///
     /// Panics if there is no allocation for the specified index.
-    fn allocation<'a>(&'a self, idx: jit_ir::InstrIdx) -> &'a LocalAlloc {
+    fn allocation(&self, idx: jit_ir::InstrIdx) -> &LocalAlloc {
         &self.allocs[&idx]
     }
 }

@@ -212,7 +212,7 @@ impl<'a> TraceBuilder<'a> {
             aot_global.is_threadlocal(),
             idx,
         );
-        Ok(self.jit_mod.global_decl_idx(&jit_global, idx)?)
+        self.jit_mod.global_decl_idx(&jit_global, idx)
     }
 
     /// Translate a constant value.
@@ -250,7 +250,7 @@ impl<'a> TraceBuilder<'a> {
                 use std::mem;
                 let jit_const =
                     jit_ir::IntegerType::new(u32::try_from(mem::size_of::<isize>()).unwrap())
-                        .make_constant(&mut self.jit_mod, 0xdeadbeef as isize)?;
+                        .make_constant(&mut self.jit_mod, 0xdeadbeef_isize)?;
                 let const_idx = self.jit_mod.const_idx(&jit_const)?;
                 jit_ir::Operand::Const(const_idx)
             }
@@ -368,7 +368,8 @@ impl<'a> TraceBuilder<'a> {
         let gi_idx = self.jit_mod.push_guardinfo(gi)?;
         let expect = *succ_bb == nextbb.block_idx();
         let guard = jit_ir::GuardInstruction::new(jit_ir::Operand::Local(cond), expect, gi_idx);
-        Ok(self.jit_mod.push(guard.into()))
+        self.jit_mod.push(guard.into());
+        Ok(())
     }
 
     /// Translate a `Icmp` instruction.

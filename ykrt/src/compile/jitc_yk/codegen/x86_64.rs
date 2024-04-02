@@ -298,11 +298,11 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
         #[cfg(any(debug_assertions, test))]
         {
             let comments = self.comments.take();
-            return Ok(Arc::new(X64CompiledTrace {
+            Ok(Arc::new(X64CompiledTrace {
                 buf,
                 deoptinfo: self.deoptinfo,
                 comments,
-            }));
+            }))
         }
     }
 }
@@ -318,17 +318,17 @@ impl<'a> X64CodeGen<'a> {
         self.comment(self.asm.offset(), inst.to_string(self.jit_mod).unwrap());
 
         match inst {
-            jit_ir::Instruction::Add(i) => self.codegen_add_instr(instr_idx, &i),
+            jit_ir::Instruction::Add(i) => self.codegen_add_instr(instr_idx, i),
             jit_ir::Instruction::LoadTraceInput(i) => {
-                self.codegen_loadtraceinput_instr(instr_idx, &i)
+                self.codegen_loadtraceinput_instr(instr_idx, i)
             }
-            jit_ir::Instruction::Load(i) => self.codegen_load_instr(instr_idx, &i),
-            jit_ir::Instruction::PtrAdd(i) => self.codegen_ptradd_instr(instr_idx, &i),
-            jit_ir::Instruction::Store(i) => self.codegen_store_instr(&i),
-            jit_ir::Instruction::LookupGlobal(i) => self.codegen_lookupglobal_instr(instr_idx, &i),
-            jit_ir::Instruction::Call(i) => self.codegen_call_instr(instr_idx, &i)?,
-            jit_ir::Instruction::Icmp(i) => self.codegen_icmp_instr(instr_idx, &i),
-            jit_ir::Instruction::Guard(i) => self.codegen_guard_instr(&i),
+            jit_ir::Instruction::Load(i) => self.codegen_load_instr(instr_idx, i),
+            jit_ir::Instruction::PtrAdd(i) => self.codegen_ptradd_instr(instr_idx, i),
+            jit_ir::Instruction::Store(i) => self.codegen_store_instr(i),
+            jit_ir::Instruction::LookupGlobal(i) => self.codegen_lookupglobal_instr(instr_idx, i),
+            jit_ir::Instruction::Call(i) => self.codegen_call_instr(instr_idx, i)?,
+            jit_ir::Instruction::Icmp(i) => self.codegen_icmp_instr(instr_idx, i),
+            jit_ir::Instruction::Guard(i) => self.codegen_guard_instr(i),
             jit_ir::Instruction::Arg(i) => self.codegen_arg(instr_idx, *i),
             jit_ir::Instruction::TraceLoopStart => self.codegen_traceloopstart_instr(),
         }

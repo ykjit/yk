@@ -200,7 +200,7 @@ impl MT {
             self.stats.timing_state(TimingState::None);
             // We only keep a weak reference alive to `self`, as otherwise an active compiler job
             // causes `self` to never be dropped.
-            let mt = Arc::downgrade(&self);
+            let mt = Arc::downgrade(self);
             let jq = Arc::clone(&self.job_queue);
             thread::spawn(move || {
                 let (cv, mtx) = &*jq;
@@ -730,7 +730,7 @@ impl MTThread {
     /// If a trace is currently running, return a reference to its `CompiledTrace`.
     pub(crate) fn running_trace(&self) -> Option<Arc<dyn CompiledTrace>> {
         match &*self.tstate.borrow() {
-            MTThreadState::Executing(ctr_arc) => Some(Arc::clone(&ctr_arc)),
+            MTThreadState::Executing(ctr_arc) => Some(Arc::clone(ctr_arc)),
             _ => None,
         }
     }

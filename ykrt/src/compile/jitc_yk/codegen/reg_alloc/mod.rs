@@ -66,5 +66,5 @@ pub(crate) trait RegisterAllocator {
 
     /// Return the allocation for the value computed by the instruction at the specified
     /// instruction index.
-    fn allocation<'a>(&'a self, idx: jit_ir::InstrIdx) -> &'a LocalAlloc;
+    fn allocation(&self, idx: jit_ir::InstrIdx) -> &LocalAlloc;
 }
