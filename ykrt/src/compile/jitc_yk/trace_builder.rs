@@ -36,7 +36,7 @@ impl<'a> TraceBuilder<'a> {
     fn new(trace_name: String, aot_mod: &'a Module) -> Self {
         Self {
             aot_mod,
-            jit_mod: jit_ir::Module::new(trace_name),
+            jit_mod: jit_ir::Module::new(trace_name, aot_mod.global_decls_len()),
             local_map: HashMap::new(),
             cp_block: None,
             first_ti_idx: 0,

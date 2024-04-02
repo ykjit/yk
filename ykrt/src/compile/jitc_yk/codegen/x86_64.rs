@@ -581,8 +581,8 @@ impl<'a> X64CodeGen<'a> {
         if decl.is_threadlocal() {
             todo!();
         }
-        let sym_addr = self.jit_mod.globalvar_vaddr(inst.global_decl_idx());
-        dynasm!(self.asm ; mov Rq(WR0.code()), QWORD i64::try_from(sym_addr).unwrap());
+        let sym_addr = self.jit_mod.globalvar_ptr(inst.global_decl_idx());
+        dynasm!(self.asm ; mov Rq(WR0.code()), QWORD i64::try_from(sym_addr as usize).unwrap());
         self.reg_into_new_local(inst_idx, WR0);
     }
 
@@ -875,7 +875,7 @@ mod tests {
     use ykaddr::addr::symbol_vaddr;
 
     fn test_module() -> jit_ir::Module {
-        jit_ir::Module::new("test".into())
+        jit_ir::Module::new_testing("test".into())
     }
 
     /// Test helper to use `fm` to match a disassembled trace.
