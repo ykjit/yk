@@ -1468,7 +1468,7 @@ pub(crate) struct Module {
     /// This is marked `cfg(not(test))` because unit tests are not built with ykllvm, and thus the
     /// array will be absent.
     #[cfg(not(test))]
-    globalvar_ptrs: &'static [usize],
+    globalvar_ptrs: &'static [*const ()],
 }
 
 impl Module {
@@ -1498,8 +1498,8 @@ impl Module {
         // FIXME: consider passing this in to the control point to avoid a dlsym().
         #[cfg(not(test))]
         let globalvar_ptrs = {
-            let ptr =
-                symbol_vaddr(&CString::new(GLOBAL_PTR_ARRAY_SYM).unwrap()).unwrap() as *const usize;
+            let ptr = symbol_vaddr(&CString::new(GLOBAL_PTR_ARRAY_SYM).unwrap()).unwrap()
+                as *const *const ();
             unsafe { std::slice::from_raw_parts(ptr, global_decls_len) }
         };
         #[cfg(test)]
@@ -1527,7 +1527,7 @@ impl Module {
     /// # Panics
     ///
     /// Panics if the address cannot be located.
-    pub(crate) fn globalvar_vaddr(&self, idx: GlobalDeclIdx) -> usize {
+    pub(crate) fn globalvar_ptr(&self, idx: GlobalDeclIdx) -> *const () {
         let decl = idx.global_decl(self);
         #[cfg(not(test))]
         {
@@ -1539,7 +1539,7 @@ impl Module {
         {
             // In unit tests the global variable pointer array isn't present, as the
             // unit test binary wasn't compiled with ykllvm. Fall back on dlsym().
-            symbol_vaddr(decl.name()).unwrap()
+            symbol_vaddr(decl.name()).unwrap() as *const _
         }
     }
 
