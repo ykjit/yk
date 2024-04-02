@@ -605,11 +605,29 @@ impl MT {
                     }
                     mt.stats.trace_compiled_ok();
                 }
-                Err(CompilationError(_e)) => {
+                Err(e) => {
                     mt.stats.trace_compiled_err();
                     hl_arc.lock().trace_failed(&mt);
-                    #[cfg(feature = "yk_jitstate_debug")]
-                    print_jit_state(&format!("trace-compilation-aborted: {_e}"));
+                    match e {
+                        CompilationError::General(_reason)
+                        | CompilationError::LimitExceeded(_reason) => {
+                            #[cfg(feature = "yk_jitstate_debug")]
+                            print_jit_state(&format!("trace-compilation-aborted: {_reason}"));
+                        }
+                        CompilationError::InternalError(reason) => {
+                            #[cfg(feature = "yk_jitstate_debug")]
+                            panic!("{reason}");
+                            #[cfg(not(feature = "yk_jitstate_debug"))]
+                            {
+                                eprintln!("yk error (trying to continue): {reason}");
+                            }
+                        }
+                        CompilationError::ResourceExhausted(e) => {
+                            eprintln!("yk warning: {e}");
+                            #[cfg(feature = "yk_jitstate_debug")]
+                            print_jit_state(&format!("trace-compilation-aborted: {e}"));
+                        }
+                    }
                 }
             }
 
