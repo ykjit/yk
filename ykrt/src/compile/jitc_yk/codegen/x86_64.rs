@@ -875,7 +875,7 @@ mod tests {
     use ykaddr::addr::symbol_vaddr;
 
     fn test_module() -> jit_ir::Module {
-        jit_ir::Module::new("test".into())
+        jit_ir::Module::new_testing("test".into())
     }
 
     /// Test helper to use `fm` to match a disassembled trace.

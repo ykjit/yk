@@ -1465,17 +1465,23 @@ pub(crate) struct Module {
     /// pointer to each global variable in the AOT module. The indices of the elements correspond
     /// with [aot_ir::GlobalDeclIdx]s.
     ///
-    /// The array is eternal, so we have no qualms about storing a raw pointer to it.
-    ///
     /// This is marked `cfg(not(test))` because unit tests are not built with ykllvm, and thus the
     /// array will be absent.
     #[cfg(not(test))]
-    globalvar_ptrs: *const usize,
+    globalvar_ptrs: &'static [usize],
 }
 
 impl Module {
     /// Create a new [Module] with the specified name.
-    pub fn new(name: String) -> Self {
+    pub(crate) fn new(name: String, global_decls_len: usize) -> Self {
+        Self::new_internal(name, global_decls_len)
+    }
+
+    pub(crate) fn new_testing(name: String) -> Self {
+        Self::new_internal(name, 0)
+    }
+
+    pub(crate) fn new_internal(name: String, global_decls_len: usize) -> Self {
         // Create some commonly used types ahead of time. Aside from being convenient, this allows
         // us to find their (now statically known) indices in scenarios where Rust forbids us from
         // holding a mutable reference to the Module (and thus we cannot use [Module::type_idx]).
@@ -1491,8 +1497,13 @@ impl Module {
         //
         // FIXME: consider passing this in to the control point to avoid a dlsym().
         #[cfg(not(test))]
-        let globalvar_ptrs =
-            symbol_vaddr(&CString::new(GLOBAL_PTR_ARRAY_SYM).unwrap()).unwrap() as *const usize;
+        let globalvar_ptrs = {
+            let ptr =
+                symbol_vaddr(&CString::new(GLOBAL_PTR_ARRAY_SYM).unwrap()).unwrap() as *const usize;
+            unsafe { std::slice::from_raw_parts(ptr, global_decls_len) }
+        };
+        #[cfg(test)]
+        assert_eq!(global_decls_len, 0);
 
         Self {
             name,
@@ -1522,7 +1533,7 @@ impl Module {
         {
             // If the unwrap fails, then the AOT array was absent and something has gone wrong
             // during AOT codegen.
-            unsafe { *self.globalvar_ptrs.add(decl.global_ptr_idx().into()) }
+            self.globalvar_ptrs[usize::from(decl.global_ptr_idx())]
         }
         #[cfg(test)]
         {
@@ -1868,7 +1879,7 @@ mod tests {
     #[test]
     fn extra_call_args() {
         // Set up a function to call.
-        let mut jit_mod = Module::new("test".into());
+        let mut jit_mod = Module::new_testing("test".into());
         let i32_tyidx = jit_mod
             .push_type(Type::Integer(IntegerType::new(32)))
             .unwrap();
@@ -1899,7 +1910,7 @@ mod tests {
     #[should_panic]
     fn call_args_out_of_bounds() {
         // Set up a function to call.
-        let mut jit_mod = Module::new("test".into());
+        let mut jit_mod = Module::new_testing("test".into());
         let arg_ty_idxs = vec![jit_mod.ptr_type_idx(); 3];
         let ret_ty_idx = jit_mod.type_idx(&Type::Void).unwrap();
         let func_ty = FuncType::new(arg_ty_idxs, ret_ty_idx, false);
@@ -2000,7 +2011,7 @@ mod tests {
     #[should_panic(expected = "type already exists")]
     #[test]
     fn push_duplicate_type() {
-        let mut jit_mod = Module::new("test".into());
+        let mut jit_mod = Module::new_testing("test".into());
         let _ = jit_mod.push_type(Type::Void);
         let _ = jit_mod.push_type(Type::Void);
     }
@@ -2013,7 +2024,7 @@ mod tests {
             assert_eq!(c.to_string(&m).unwrap(), expect);
         }
 
-        let mut m = Module::new("test".into());
+        let mut m = Module::new_testing("test".into());
 
         check(&mut m, 8, 0i8, "0i8");
         check(&mut m, 8, 111i8, "111i8");
@@ -2029,7 +2040,7 @@ mod tests {
 
     #[test]
     fn print_module() {
-        let mut m = Module::new("test".into());
+        let mut m = Module::new_testing("test".into());
         m.push(LoadTraceInputInstruction::new(0, m.int8_type_idx()).into());
         m.push(LoadTraceInputInstruction::new(8, m.int8_type_idx()).into());
         m.push(LoadTraceInputInstruction::new(16, m.int8_type_idx()).into());

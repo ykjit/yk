@@ -1118,6 +1118,11 @@ impl Module {
         &self.global_decls[idx]
     }
 
+    /// Return the number of global variable declarations.
+    pub(crate) fn global_decls_len(&self) -> usize {
+        self.global_decls.len()
+    }
+
     pub(crate) fn to_str(&self) -> String {
         let mut ret = String::new();
         ret.push_str(&format!("# IR format version: {}\n", self.version));
