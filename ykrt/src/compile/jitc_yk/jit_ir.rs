@@ -525,7 +525,7 @@ impl Type {
         // won't ever support).
         match self {
             Self::Void => Some(0),
-            Self::Integer(it) => Some(usize::try_from(it.byte_size()).unwrap()),
+            Self::Integer(it) => Some(it.byte_size()),
             Self::Ptr => {
                 // FIXME: In theory pointers to different types could be of different sizes. We
                 // should really ask LLVM how big the pointer was when it codegenned the

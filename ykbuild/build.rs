@@ -161,7 +161,7 @@ fn main() {
                     build_cmd.arg(x);
                 }
                 ["generator", x] => {
-                    generator = x.to_owned();
+                    x.clone_into(&mut generator);
                 }
                 [k, _] => panic!("Unknown kind {k}"),
                 _ => panic!("Incorrectly formatted option {arg}"),

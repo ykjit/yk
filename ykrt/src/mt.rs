@@ -640,7 +640,7 @@ impl MT {
             // spin up a new thread for each compilation. This is only acceptable because a)
             // `SERIALISE_COMPILATION` is an internal yk testing feature b) when we use it we're
             // checking correctness, not performance.
-            thread::spawn(|| do_compile()).join().unwrap();
+            thread::spawn(do_compile).join().unwrap();
             return;
         }
 

@@ -86,7 +86,9 @@ impl YkStats {
             #[cfg(feature = "yk_testing")]
             {
                 drop(lk);
-                self.wait_until_condvar.as_ref().map(|x| x.notify_all());
+                if let Some(x) = self.wait_until_condvar.as_ref() {
+                    x.notify_all()
+                }
             }
         }
     }
