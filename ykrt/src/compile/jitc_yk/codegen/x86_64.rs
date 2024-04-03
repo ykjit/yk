@@ -6,7 +6,7 @@
 
 use super::{
     super::{
-        jit_ir::{self, InstrIdx, Operand, Type},
+        jit_ir::{self, FuncDecl, InstrIdx, Operand, Type},
         CompilationError,
     },
     abs_stack::AbstractStack,
@@ -327,6 +327,7 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Instruction::Store(i) => self.codegen_store_instr(i),
             jit_ir::Instruction::LookupGlobal(i) => self.codegen_lookupglobal_instr(instr_idx, i),
             jit_ir::Instruction::Call(i) => self.codegen_call_instr(instr_idx, i)?,
+            jit_ir::Instruction::VACall(i) => self.codegen_vacall_instr(instr_idx, i)?,
             jit_ir::Instruction::Icmp(i) => self.codegen_icmp_instr(instr_idx, i),
             jit_ir::Instruction::Guard(i) => self.codegen_guard_instr(i),
             jit_ir::Instruction::Arg(i) => self.codegen_arg(instr_idx, *i),
@@ -587,39 +588,42 @@ impl<'a> X64CodeGen<'a> {
         self.reg_into_new_local(inst_idx, WR0);
     }
 
-    pub(super) fn codegen_call_instr(
+    pub(super) fn emit_call(
         &mut self,
         inst_idx: InstrIdx,
-        inst: &jit_ir::CallInstruction,
+        func_decl: &FuncDecl,
+        args: &[Operand],
     ) -> Result<(), CompilationError> {
         // FIXME: floating point args
         // FIXME: non-SysV ABIs
-        let fdecl = self.jit_mod.func_decl(inst.target());
-        let fty = fdecl.func_type(self.jit_mod);
-        let num_args = fty.num_args();
+        let fty = func_decl.func_type(self.jit_mod);
+        let num_args = args.len();
 
         if num_args > ARG_REGS.len() {
             todo!(); // needs spill
         }
 
         if fty.is_vararg() {
-            // When implementing, note the SysV X86_64 ABI says "rax is used to indicate the number
-            // of vector arguments passed to a function requiring a variable number of arguments".
-            todo!();
+            // SysV X86_64 ABI says "rax is used to indicate the number of vector arguments passed
+            // to a function requiring a variable number of arguments".
+            //
+            // We don't yet support vectors, so for now rax=0.
+            dynasm!(self.asm; mov rax, 0);
         }
 
         for (i, reg) in ARG_REGS.into_iter().take(num_args).enumerate() {
-            let op = inst.operand(self.jit_mod, i);
+            let op = &args[i];
+            // We can type check the static args (but not varargs).
             debug_assert!(
-                op.type_(self.jit_mod) == fty.arg_type(self.jit_mod, i),
+                i >= fty.num_args() || op.type_(self.jit_mod) == fty.arg_type(self.jit_mod, i),
                 "argument type mismatch in call"
             );
-            self.operand_into_reg(reg, &op);
+            self.operand_into_reg(reg, op);
         }
 
         // unwrap safe on account of linker symbol names not containing internal NULL bytes.
-        let va =
-            symbol_to_ptr(fdecl.name()).map_err(|e| CompilationError::General(e.to_string()))?;
+        let va = symbol_to_ptr(func_decl.name())
+            .map_err(|e| CompilationError::General(e.to_string()))?;
 
         // The SysV x86_64 ABI requires the stack to be 16-byte aligned prior to a call.
         self.stack.align(SYSV_CALL_STACK_ALIGN);
@@ -636,6 +640,33 @@ impl<'a> X64CodeGen<'a> {
         }
 
         Ok(())
+    }
+
+    /// Codegen a (non-varargs) call.
+    pub(super) fn codegen_call_instr(
+        &mut self,
+        inst_idx: InstrIdx,
+        inst: &jit_ir::CallInstruction,
+    ) -> Result<(), CompilationError> {
+        let func_decl_idx = inst.target();
+        let func_type = func_decl_idx.func_type(self.jit_mod);
+        let args = (0..(func_type.num_args()))
+            .map(|i| inst.operand(self.jit_mod, i))
+            .collect::<Vec<_>>();
+        self.emit_call(inst_idx, self.jit_mod.func_decl(func_decl_idx), &args)
+    }
+
+    /// Codegen a varargs call.
+    pub(super) fn codegen_vacall_instr(
+        &mut self,
+        inst_idx: InstrIdx,
+        inst: &jit_ir::VACallInstruction,
+    ) -> Result<(), CompilationError> {
+        let func_decl_idx = inst.target();
+        let args = (0..(inst.num_args()))
+            .map(|i| inst.operand(self.jit_mod, i))
+            .collect::<Vec<_>>();
+        self.emit_call(inst_idx, self.jit_mod.func_decl(func_decl_idx), &args)
     }
 
     pub(super) fn codegen_icmp_instr(
