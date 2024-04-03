@@ -70,16 +70,16 @@ index!(InstrIdx);
 pub(crate) struct ConstIdx(usize);
 index!(ConstIdx);
 
-/// A global variable declaration index.
+/// An index into [Module::global_decls].
 ///
-/// These are "declarations" and not "definitions" because they all been AOT code-generated
+/// Note: these are "declarations" and not "definitions" because they all been AOT code-generated
 /// already, and thus come "pre-initialised".
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct GlobalDeclIdx(usize);
 index!(GlobalDeclIdx);
 
-/// A function argument index.
+/// An index into [FuncType::arg_ty_idxs].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct ArgIdx(usize);
