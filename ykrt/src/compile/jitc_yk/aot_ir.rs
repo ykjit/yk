@@ -103,18 +103,12 @@ fn deserialise_into_ti_vec<I, T>(v: Vec<T>) -> Result<TiVec<I, T>, DekuError> {
 
 /// A trait for converting in-memory data-structures into a human-readable textual format.
 ///
-/// This is modelled on [`std::fmt::Display`], but a reference to the module is always passed down
-/// so that constructs that require lookups into the module's tables from stringification have
-/// access to them.
-///
-/// The way we implement this (returning a `String`) is inefficient, but it doesn't hugely matter,
-/// as the human-readable format is only provided as a debugging aid.
+/// This is analogous to [std::fmt::Display], but:
+///   1. Takes a reference to a [Module] so that constructs that require lookups into the module's
+///      tables from stringification have access to them.
+///   2. Returns a [String], for ease of use.
 pub(crate) trait AotIRDisplay {
     /// Return a human-readable string.
-    ///
-    /// FIXME: this isn't as efficient as it could be. We could pass down a mutable string
-    /// reference like `JitIRDisplay` does to avoid all the string allocations when stringifiying
-    /// each constituent IR element.
     fn to_string(&self, m: &Module) -> String;
 
     /// Print myself to stderr in human-readable form.
