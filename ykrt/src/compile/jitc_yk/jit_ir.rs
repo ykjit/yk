@@ -22,15 +22,18 @@ pub(crate) use super::aot_ir::Predicate;
 
 /// A fixed-width integer type.
 ///
-/// Signedness is not specified. Interpretation of the bit pattern is delegated to operations upon
-/// the integer.
+/// Note:
+///   1. These integers range in size from 1..2^23 (inc.) bits. This is inherited [from LLVM's
+///      integer type](https://llvm.org/docs/LangRef.html#integer-type).
+///   2. Signedness is not specified. Interpretation of the bit pattern is delegated to operations
+///      upon the integer.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct IntegerType {
     num_bits: u32,
 }
 
 impl IntegerType {
-    /// Return the size of the integer type in bits.
+    /// Return the number of bits (1..2^23 (inc.)) this integer spans.
     pub(crate) fn num_bits(&self) -> u32 {
         self.num_bits
     }
@@ -50,6 +53,7 @@ impl IntegerType {
 
     /// Create a new integer type with the specified number of bits.
     pub(crate) fn new(num_bits: u32) -> Self {
+        debug_assert!(num_bits > 0 && num_bits <= 0x800000);
         Self { num_bits }
     }
 
@@ -1995,7 +1999,6 @@ mod tests {
 
     #[test]
     fn int_type_size() {
-        assert_eq!(Type::Integer(IntegerType::new(0)).byte_size(), Some(0));
         for i in 1..8 {
             assert_eq!(Type::Integer(IntegerType::new(i)).byte_size(), Some(1));
         }
@@ -2075,7 +2078,6 @@ mod tests {
 
     #[test]
     fn integer_type_sizes() {
-        assert_eq!(IntegerType::new(0).byte_size(), 0);
         for i in 1..8 {
             assert_eq!(IntegerType::new(i).byte_size(), 1);
         }
