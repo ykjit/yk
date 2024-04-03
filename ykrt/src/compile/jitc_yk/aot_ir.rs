@@ -812,6 +812,26 @@ impl FuncType {
     }
 }
 
+impl AotIRDisplay for FuncType {
+    fn to_string(&self, m: &Module) -> String {
+        let mut args = self
+            .arg_ty_idxs
+            .iter()
+            .map(|t| m.types[*t].to_string(m))
+            .collect::<Vec<_>>();
+        if self.is_vararg() {
+            args.push("...".to_owned());
+        }
+        let rty = m.type_(self.ret_ty);
+        let args_s = args.join(", ");
+        if rty != &Type::Void {
+            format!("func({}) -> {}", args_s, rty.to_string(m))
+        } else {
+            format!("func({})", args_s)
+        }
+    }
+}
+
 #[deku_derive(DekuRead)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct StructType {
@@ -869,26 +889,6 @@ impl AotIRDisplay for StructType {
         );
         s.push('}');
         s
-    }
-}
-
-impl AotIRDisplay for FuncType {
-    fn to_string(&self, m: &Module) -> String {
-        let mut args = self
-            .arg_ty_idxs
-            .iter()
-            .map(|t| m.types[*t].to_string(m))
-            .collect::<Vec<_>>();
-        if self.is_vararg() {
-            args.push("...".to_owned());
-        }
-        let rty = m.type_(self.ret_ty);
-        let args_s = args.join(", ");
-        if rty != &Type::Void {
-            format!("func({}) -> {}", args_s, rty.to_string(m))
-        } else {
-            format!("func({})", args_s)
-        }
     }
 }
 
