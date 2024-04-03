@@ -483,6 +483,34 @@ impl FuncType {
     }
 }
 
+impl JitIRDisplay for FuncType {
+    fn to_string_impl<'a>(
+        &self,
+        m: &Module,
+        s: &mut String,
+        nums: &LocalNumbers<'a>,
+    ) -> Result<(), Box<dyn Error>> {
+        s.push_str("func(");
+        let num_args = self.num_args();
+        for (ai, t) in self.arg_ty_idxs.iter().enumerate() {
+            t.type_(m).to_string_impl(m, s, nums)?;
+            if ai != num_args - 1 || self.is_vararg() {
+                s.push_str(", ");
+            }
+        }
+        if self.is_vararg() {
+            s.push_str("...");
+        }
+        s.push(')');
+
+        if self.ret_ty_idx != m.void_type_idx {
+            s.push_str(" -> ");
+            self.ret_ty_idx.type_(m).to_string_impl(m, s, nums)?;
+        }
+        Ok(())
+    }
+}
+
 /// A structure's type.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct StructType {
@@ -514,7 +542,7 @@ impl JitIRDisplay for Type {
             Self::Void => s.push_str("void"),
             Self::Integer(it) => it.to_string_impl(m, s, nums)?,
             Self::Ptr => s.push_str("ptr"),
-            Self::Func(_) => todo!(),
+            Self::Func(ft) => ft.to_string_impl(m, s, nums)?,
             Self::Struct(_) => todo!(),
             Self::Unimplemented(_) => s.push_str("?type"),
         }
@@ -757,6 +785,7 @@ pub enum Instruction {
     LookupGlobal(LookupGlobalInstruction),
     LoadTraceInput(LoadTraceInputInstruction),
     Call(CallInstruction),
+    VACall(VACallInstruction),
     PtrAdd(PtrAddInstruction),
     Store(StoreInstruction),
     Add(AddInstruction),
@@ -782,6 +811,7 @@ impl Instruction {
             Self::LookupGlobal(..) => true,
             Self::LoadTraceInput(..) => true,
             Self::Call(..) => true, // FIXME: May or may not define. Ask func sig.
+            Self::VACall(..) => true, // FIXME: May or may not define. Ask func sig.
             Self::PtrAdd(..) => true,
             Self::Store(..) => false,
             Self::Add(..) => true,
@@ -811,6 +841,7 @@ impl Instruction {
             Self::LookupGlobal(..) => m.ptr_type_idx(),
             Self::LoadTraceInput(li) => li.ty_idx(),
             Self::Call(ci) => ci.target().func_type(m).ret_type_idx(),
+            Self::VACall(ci) => ci.target().func_type(m).ret_type_idx(),
             Self::PtrAdd(..) => m.ptr_type_idx(),
             Self::Store(..) => m.void_type_idx(),
             Self::Add(ai) => ai.type_idx(m),
@@ -861,6 +892,7 @@ impl JitIRDisplay for Instruction {
             Self::LookupGlobal(i) => i.to_string_impl(m, s, nums)?,
             Self::LoadTraceInput(i) => i.to_string_impl(m, s, nums)?,
             Self::Call(i) => i.to_string_impl(m, s, nums)?,
+            Self::VACall(i) => i.to_string_impl(m, s, nums)?,
             Self::PtrAdd(i) => i.to_string_impl(m, s, nums)?,
             Self::Store(i) => i.to_string_impl(m, s, nums)?,
             Self::Add(i) => i.to_string_impl(m, s, nums)?,
@@ -888,6 +920,7 @@ instr!(LookupGlobal, LookupGlobalInstruction);
 instr!(Store, StoreInstruction);
 instr!(LoadTraceInput, LoadTraceInputInstruction);
 instr!(Call, CallInstruction);
+instr!(VACall, VACallInstruction);
 instr!(PtrAdd, PtrAddInstruction);
 // FIXME: Use a macro for all binary operations?
 instr!(Add, AddInstruction);
@@ -1140,6 +1173,86 @@ impl CallInstruction {
         } else {
             jit_mod.extra_args[<usize as From<u16>>::from(self.extra.0) + idx - 1].clone()
         }
+    }
+}
+
+/// The operands for a [Instruction::VACall]
+///
+/// # Semantics
+///
+/// Perform a vararg call to an external or AOT function.
+#[derive(Debug)]
+#[repr(packed)]
+pub struct VACallInstruction {
+    /// The callee.
+    target: FuncDeclIdx,
+    /// The number of arguments to pass.
+    num_args: u16,
+    /// The index of the call's first argument in the [Module]'s extra argument table.
+    first_arg_idx: ExtraArgsIdx,
+}
+
+impl JitIRDisplay for VACallInstruction {
+    fn to_string_impl<'a>(
+        &self,
+        m: &Module,
+        s: &mut String,
+        nums: &LocalNumbers<'a>,
+    ) -> Result<(), Box<dyn Error>> {
+        let decl = m.func_decl(self.target);
+        s.push_str("VACall @");
+        s.push_str(decl.name());
+
+        s.push_str("(");
+        let num_args = self.num_args();
+        for ai in 0..num_args {
+            self.operand(m, ai).to_string_impl(m, s, nums)?;
+            if ai != num_args - 1 {
+                s.push_str(", ");
+            }
+        }
+        s.push_str(")");
+
+        Ok(())
+    }
+}
+
+impl VACallInstruction {
+    pub(crate) fn new(
+        m: &mut Module,
+        target: FuncDeclIdx,
+        args: &[Operand],
+    ) -> Result<VACallInstruction, CompilationError> {
+        let num_args = args.len();
+
+        // Varargs calls require at least one static argument.
+        debug_assert!(num_args > 0);
+
+        Ok(Self {
+            target,
+            num_args: u16::try_from(num_args).unwrap(), // XXX
+            first_arg_idx: m.push_extra_args(&args[..])?,
+        })
+    }
+
+    /// Returns the number of arguments to the call.
+    pub(crate) fn num_args(&self) -> u16 {
+        self.num_args
+    }
+
+    /// Return the [FuncDeclIdx] of the callee.
+    pub(crate) fn target(&self) -> FuncDeclIdx {
+        self.target
+    }
+
+    /// Fetch the operand at the specified index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the operand index is out of bounds.
+    pub(crate) fn operand(&self, jit_mod: &Module, idx: u16) -> Operand {
+        debug_assert!(self.num_args() > idx);
+        jit_mod.extra_args[<usize as From<u16>>::from(self.first_arg_idx.0 + idx)].clone()
     }
 }
 
@@ -1910,6 +2023,40 @@ mod tests {
     }
 
     #[test]
+    fn vararg_call_args() {
+        // Set up a function to call.
+        let mut jit_mod = Module::new_testing("test".into());
+        let i32_tyidx = jit_mod
+            .push_type(Type::Integer(IntegerType::new(32)))
+            .unwrap();
+        let func_ty = Type::Func(FuncType::new(vec![i32_tyidx; 3], i32_tyidx, true));
+        let func_ty_idx = jit_mod.push_type(func_ty).unwrap();
+        let func_decl = FuncDecl::new("foo".to_owned(), func_ty_idx);
+        let func_decl_idx = jit_mod.push_func_decl(func_decl).unwrap();
+
+        // Build a call to the function.
+        let args = vec![
+            Operand::Local(InstrIdx(0)),
+            Operand::Local(InstrIdx(1)),
+            Operand::Local(InstrIdx(2)),
+        ];
+        let ci = VACallInstruction::new(&mut jit_mod, func_decl_idx, &args).unwrap();
+
+        // Now request the operands and check they all look as they should.
+        assert_eq!(ci.operand(&jit_mod, 0), Operand::Local(InstrIdx(0)));
+        assert_eq!(ci.operand(&jit_mod, 1), Operand::Local(InstrIdx(1)));
+        assert_eq!(ci.operand(&jit_mod, 2), Operand::Local(InstrIdx(2)));
+        assert_eq!(
+            jit_mod.extra_args,
+            vec![
+                Operand::Local(InstrIdx(0)),
+                Operand::Local(InstrIdx(1)),
+                Operand::Local(InstrIdx(2))
+            ]
+        );
+    }
+
+    #[test]
     #[should_panic]
     fn call_args_out_of_bounds() {
         // Set up a function to call.
@@ -2025,6 +2172,25 @@ mod tests {
         check(&mut m, 64, 456i64, "456i64");
         check(&mut m, 64, u64::MAX as i64, "-1i64");
         check(&mut m, 64, i64::MAX, "9223372036854775807i64");
+    }
+
+    #[test]
+    fn stringify_func_types() {
+        let m = Module::new_testing("test".into());
+        let i8_tyidx = m.int8_type_idx();
+        let void_tyidx = m.void_type_idx();
+
+        let ft = FuncType::new(vec![i8_tyidx], i8_tyidx, false);
+        assert_eq!(ft.to_string(&m).unwrap(), "func(i8) -> i8");
+
+        let ft = FuncType::new(vec![i8_tyidx], void_tyidx, false);
+        assert_eq!(ft.to_string(&m).unwrap(), "func(i8)");
+
+        let ft = FuncType::new(vec![], void_tyidx, false);
+        assert_eq!(ft.to_string(&m).unwrap(), "func()");
+
+        let ft = FuncType::new(vec![i8_tyidx], i8_tyidx, true);
+        assert_eq!(ft.to_string(&m).unwrap(), "func(i8, ...) -> i8");
     }
 
     #[test]

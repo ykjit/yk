@@ -47,6 +47,13 @@ macro_rules! index {
 pub(crate) struct FuncIdx(usize);
 index!(FuncIdx);
 
+impl FuncIdx {
+    /// Return the [FuncType] for this [FuncIdx] in `m`.
+    pub(crate) fn func_type<'a>(&self, m: &'a Module) -> &'a FuncType {
+        m.func(*self).func_type(m)
+    }
+}
+
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct TypeIdx(usize);
@@ -637,6 +644,19 @@ impl Func {
     pub(crate) fn type_idx(&self) -> TypeIdx {
         self.type_idx
     }
+
+    /// Return the [FuncType] for the function.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the function's type isn't a [FuncType]. This cannot happen in well-formed IR.
+    pub(crate) fn func_type<'a>(&self, m: &'a Module) -> &'a FuncType {
+        if let Type::Func(ft) = m.type_(self.type_idx) {
+            ft
+        } else {
+            panic!(); // IR is malformed.
+        }
+    }
 }
 
 impl AotIRDisplay for Func {
@@ -771,6 +791,14 @@ pub(crate) struct FuncType {
 }
 
 impl FuncType {
+    #[cfg(test)]
+    fn new(arg_ty_idxs: Vec<TypeIdx>, ret_ty_idx: TypeIdx, is_vararg: bool) -> Self {
+        Self {
+            arg_ty_idxs,
+            ret_ty: ret_ty_idx,
+            is_vararg,
+        }
+    }
     pub(crate) fn arg_ty_idxs(&self) -> &Vec<TypeIdx> {
         &self.arg_ty_idxs
     }
@@ -846,14 +874,21 @@ impl AotIRDisplay for StructType {
 
 impl AotIRDisplay for FuncType {
     fn to_string(&self, m: &Module) -> String {
-        format!(
-            "func({})",
-            self.arg_ty_idxs
-                .iter()
-                .map(|t| m.types[*t].to_string(m))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
+        let mut args = self
+            .arg_ty_idxs
+            .iter()
+            .map(|t| m.types[*t].to_string(m))
+            .collect::<Vec<_>>();
+        if self.is_vararg() {
+            args.push("...".to_owned());
+        }
+        let rty = m.type_(self.ret_ty);
+        let args_s = args.join(", ");
+        if rty != &Type::Void {
+            format!("func({}) -> {}", args_s, rty.to_string(m))
+        } else {
+            format!("func({})", args_s)
+        }
     }
 }
 
@@ -1162,13 +1197,8 @@ pub fn print_from_file(path: &PathBuf) -> Result<(), Box<dyn Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        deserialise_module, deserialise_string, Constant, IntegerType, Opcode, TypeIdx,
-        FORMAT_VERSION, MAGIC, OPKIND_BLOCK, OPKIND_CONST, OPKIND_FUNC, OPKIND_LOCAL_VARIABLE,
-        OPKIND_TYPE, OPKIND_UNIMPLEMENTED, TYKIND_FUNC, TYKIND_INTEGER, TYKIND_PTR, TYKIND_STRUCT,
-        TYKIND_UNIMPLEMENTED, TYKIND_VOID,
-    };
-    use byteorder::{NativeEndian, WriteBytesExt};
+    use super::*;
+    use byteorder::WriteBytesExt;
     use num_traits::{PrimInt, ToBytes};
     use std::ffi::CString;
     use std::mem;
@@ -1555,5 +1585,27 @@ func bar();
         assert_eq!(IntegerType::new(127).byte_size(), 16);
         assert_eq!(IntegerType::new(128).byte_size(), 16);
         assert_eq!(IntegerType::new(129).byte_size(), 17);
+    }
+
+    #[test]
+    fn stringify_func_types() {
+        let mut m = Module::default();
+
+        let i8_tyidx = TypeIdx::new(m.types.len());
+        m.types.push(Type::Integer(IntegerType { num_bits: 8 }));
+        let void_tyidx = TypeIdx::new(m.types.len());
+        m.types.push(Type::Void);
+
+        let fty = Type::Func(FuncType::new(vec![i8_tyidx], i8_tyidx, false));
+        assert_eq!(&fty.to_string(&m), "func(i8) -> i8");
+
+        let fty = Type::Func(FuncType::new(vec![i8_tyidx], i8_tyidx, true));
+        assert_eq!(&fty.to_string(&m), "func(i8, ...) -> i8");
+
+        let fty = Type::Func(FuncType::new(vec![], i8_tyidx, false));
+        assert_eq!(&fty.to_string(&m), "func() -> i8");
+
+        let fty = Type::Func(FuncType::new(vec![], void_tyidx, false));
+        assert_eq!(&fty.to_string(&m), "func()");
     }
 }

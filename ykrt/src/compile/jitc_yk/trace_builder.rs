@@ -420,8 +420,12 @@ impl<'a> TraceBuilder<'a> {
             args.push(self.handle_operand(arg)?);
         }
         let jit_func_decl_idx = self.handle_func(inst.callee())?;
-        let instr =
-            jit_ir::CallInstruction::new(&mut self.jit_mod, jit_func_decl_idx, &args)?.into();
+
+        let instr = if !inst.callee().func_type(self.aot_mod).is_vararg() {
+            jit_ir::CallInstruction::new(&mut self.jit_mod, jit_func_decl_idx, &args)?.into()
+        } else {
+            jit_ir::VACallInstruction::new(&mut self.jit_mod, jit_func_decl_idx, &args)?.into()
+        };
         self.copy_instruction(instr, bid, aot_inst_idx)
     }
 
