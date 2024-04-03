@@ -375,7 +375,10 @@ impl Operand {
     /// Returns the [Type] of the operand.
     pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
         match self {
-            Self::LocalVariable(_) => self.to_instr(m).type_(m),
+            Self::LocalVariable(_) => {
+                // The `unwrap` can't fail for a `LocalVariable`.
+                self.to_instr(m).type_(m).unwrap()
+            }
             Self::Type(t) => m.type_(t.type_idx),
             _ => todo!(),
         }
@@ -454,18 +457,18 @@ impl Instruction {
         }
     }
 
-    /// Returns true if this instruction defines a new local variable.
-    fn is_def(&self, m: &Module) -> bool {
-        m.instr_type(self) != &Type::Void
-    }
-
     pub(crate) fn type_idx(&self) -> TypeIdx {
         self.type_idx
     }
 
-    /// Returns the [Type] of the local variable defined by this instruction (if any).
-    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
-        m.type_(self.type_idx)
+    /// Returns the [Type] of the local variable defined by this instruction or `None` if this
+    /// instruction does not define a new local variable.
+    pub(crate) fn type_<'a>(&self, m: &'a Module) -> Option<&'a Type> {
+        if m.instr_type(self) != &Type::Void {
+            Some(m.type_(self.type_idx))
+        } else {
+            None
+        }
     }
 
     pub(crate) fn is_store(&self) -> bool {
@@ -542,7 +545,7 @@ impl AotIRDisplay for Instruction {
         }
 
         let mut ret = String::new();
-        if self.is_def(m) {
+        if let Some(_) = self.type_(m) {
             let name = self.name.borrow();
             // The unwrap cannot fail, as we forced computation of variable names above.
             ret.push_str(&format!(
@@ -1017,7 +1020,7 @@ impl Module {
         for f in &self.funcs {
             for (bb_idx, bb) in f.blocks.iter().enumerate() {
                 for (inst_idx, inst) in bb.instrs.iter().enumerate() {
-                    if inst.is_def(self) {
+                    if let Some(_) = inst.type_(self) {
                         *inst.name.borrow_mut() = Some(format!("{}_{}", bb_idx, inst_idx));
                     }
                 }
