@@ -142,12 +142,12 @@ for tracer in $TRACERS; do
       -Z build-std \
       --target x86_64-unknown-linux-gnu
 
-    # RUST_TEST_THREADS=1 \
-    #   RUSTFLAGS="-Z sanitizer=thread" \
-    #   TSAN_OPTIONS="suppressions=$suppressions_path" \
-    #   cargo test \
-    #   -Z build-std \
-    #   --target x86_64-unknown-linux-gnu
+    RUST_TEST_THREADS=1 \
+      RUSTFLAGS="-Z sanitizer=thread" \
+      TSAN_OPTIONS="suppressions=$suppressions_path" \
+      cargo test \
+      -Z build-std \
+      --target x86_64-unknown-linux-gnu
 done
 
 # We now want to test building with `--release`.
