@@ -15,7 +15,7 @@ use std::{
     mem, ptr,
 };
 use typed_index_collections::TiVec;
-use ykaddr::addr::symbol_vaddr;
+use ykaddr::addr::symbol_to_ptr;
 
 // This is simple and can be shared across both IRs.
 pub(crate) use super::aot_ir::Predicate;
@@ -1498,8 +1498,7 @@ impl Module {
         // FIXME: consider passing this in to the control point to avoid a dlsym().
         #[cfg(not(test))]
         let globalvar_ptrs = {
-            let ptr = symbol_vaddr(&CString::new(GLOBAL_PTR_ARRAY_SYM).unwrap()).unwrap()
-                as *const *const ();
+            let ptr = symbol_to_ptr(GLOBAL_PTR_ARRAY_SYM).unwrap() as *const *const ();
             unsafe { std::slice::from_raw_parts(ptr, global_decls_len) }
         };
         #[cfg(test)]
@@ -1539,7 +1538,7 @@ impl Module {
         {
             // In unit tests the global variable pointer array isn't present, as the
             // unit test binary wasn't compiled with ykllvm. Fall back on dlsym().
-            symbol_vaddr(decl.name()).unwrap() as *const _
+            symbol_to_ptr(decl.name().to_str().unwrap()).unwrap()
         }
     }
 

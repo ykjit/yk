@@ -15,8 +15,8 @@ use crate::{
 };
 
 use parking_lot::Mutex;
-use std::{collections::HashSet, env, error::Error, ffi::CString, slice, sync::Arc};
-use ykaddr::addr::symbol_vaddr;
+use std::{collections::HashSet, env, error::Error, slice, sync::Arc};
+use ykaddr::addr::symbol_to_ptr;
 
 pub mod aot_ir;
 mod codegen;
@@ -118,9 +118,8 @@ impl Compiler for JITCYk {
 }
 
 pub(crate) fn yk_ir_section() -> Result<&'static [u8], Box<dyn Error>> {
-    let start = symbol_vaddr(&CString::new("ykllvm.yk_ir.start").unwrap())
-        .ok_or("couldn't find ykllvm.yk_ir.start")?;
-    let stop = symbol_vaddr(&CString::new("ykllvm.yk_ir.stop").unwrap())
-        .ok_or("couldn't find ykllvm.yk_ir.stop")?;
-    Ok(unsafe { slice::from_raw_parts(start as *const u8, stop - start) })
+    let start = symbol_to_ptr("ykllvm.yk_ir.start")? as *const u8;
+    let stop = symbol_to_ptr("ykllvm.yk_ir.stop")? as *const u8;
+    debug_assert!(start < stop);
+    Ok(unsafe { slice::from_raw_parts(start as *const u8, stop.sub_ptr(start)) })
 }

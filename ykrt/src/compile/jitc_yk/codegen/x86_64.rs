@@ -26,8 +26,8 @@ use dynasmrt::{
 use libc::c_void;
 #[cfg(any(debug_assertions, test))]
 use std::{cell::Cell, collections::HashMap, error::Error, slice};
-use std::{ffi::CString, ptr, sync::Arc};
-use ykaddr::addr::symbol_vaddr;
+use std::{ptr, sync::Arc};
+use ykaddr::addr::symbol_to_ptr;
 use yksmp::Location as SMLocation;
 
 /// Argument registers as defined by the X86_64 SysV ABI.
@@ -582,8 +582,8 @@ impl<'a> X64CodeGen<'a> {
         if decl.is_threadlocal() {
             todo!();
         }
-        let sym_addr = self.jit_mod.globalvar_ptr(inst.global_decl_idx());
-        dynasm!(self.asm ; mov Rq(WR0.code()), QWORD i64::try_from(sym_addr as usize).unwrap());
+        let sym_addr = self.jit_mod.globalvar_ptr(inst.global_decl_idx()).addr();
+        dynasm!(self.asm ; mov Rq(WR0.code()), QWORD i64::try_from(sym_addr).unwrap());
         self.reg_into_new_local(inst_idx, WR0);
     }
 
@@ -618,9 +618,8 @@ impl<'a> X64CodeGen<'a> {
         }
 
         // unwrap safe on account of linker symbol names not containing internal NULL bytes.
-        let va = symbol_vaddr(&CString::new(fdecl.name()).unwrap()).ok_or_else(|| {
-            CompilationError::General(format!("Couldn't find AOT symbol: {}", fdecl.name()))
-        })?;
+        let va =
+            symbol_to_ptr(fdecl.name()).map_err(|e| CompilationError::General(e.to_string()))?;
 
         // The SysV x86_64 ABI requires the stack to be 16-byte aligned prior to a call.
         self.stack.align(SYSV_CALL_STACK_ALIGN);
@@ -872,9 +871,8 @@ mod tests {
     };
     use fm::FMBuilder;
     use regex::Regex;
-    use std::ffi::CString;
     use std::sync::Arc;
-    use ykaddr::addr::symbol_vaddr;
+    use ykaddr::addr::symbol_to_ptr;
 
     fn test_module() -> jit_ir::Module {
         jit_ir::Module::new_testing("test".into())
@@ -1207,7 +1205,7 @@ mod tests {
             let call_inst = jit_ir::CallInstruction::new(&mut jit_mod, func_decl_idx, &[]).unwrap();
             jit_mod.push(call_inst.into());
 
-            let sym_addr = symbol_vaddr(&CString::new(CALL_TESTS_CALLEE).unwrap()).unwrap();
+            let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
             let patt_lines = [
                 "...",
                 &format!("... mov r12, 0x{:X}", sym_addr),
@@ -1254,7 +1252,7 @@ mod tests {
                     .unwrap();
             jit_mod.push(call_inst.into());
 
-            let sym_addr = symbol_vaddr(&CString::new(CALL_TESTS_CALLEE).unwrap()).unwrap();
+            let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
             let patt_lines = [
                 "...",
                 "; Call @puts(%0, %1, %2)",
@@ -1335,7 +1333,7 @@ mod tests {
             .unwrap();
             jit_mod.push(call_inst.into());
 
-            let sym_addr = symbol_vaddr(&CString::new(CALL_TESTS_CALLEE).unwrap()).unwrap();
+            let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
             let patt_lines = [
                 "...",
                 "; Call @puts(%0, %1, %2, %3, %4, %5)",
@@ -1413,7 +1411,7 @@ mod tests {
             let call_inst = jit_ir::CallInstruction::new(&mut jit_mod, func_decl_idx, &[]).unwrap();
             jit_mod.push(call_inst.into());
 
-            let sym_addr = symbol_vaddr(&CString::new(CALL_TESTS_CALLEE).unwrap()).unwrap();
+            let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
             let patt_lines = [
                 "...",
                 &format!("... mov r12, 0x{:X}", sym_addr),
