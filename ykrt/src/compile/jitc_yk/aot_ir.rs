@@ -216,6 +216,10 @@ impl BlockID {
     pub(crate) fn block_idx(&self) -> BlockIdx {
         self.block_idx
     }
+
+    pub(crate) fn is_entry(&self) -> bool {
+        self.block_idx == BlockIdx(0)
+    }
 }
 
 #[deku_derive(DekuRead)]

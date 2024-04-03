@@ -24,6 +24,10 @@ struct TraceBuilder<'a> {
     cp_block: Option<aot_ir::BlockID>,
     // Index of the first traceinput instruction.
     first_ti_idx: usize,
+    // Was the last instruction we've processed a return?
+    last_instr_return: bool,
+    // Was the last block we processed mappable or not?
+    last_block_mappable: bool,
 }
 
 impl<'a> TraceBuilder<'a> {
@@ -40,6 +44,8 @@ impl<'a> TraceBuilder<'a> {
             local_map: HashMap::new(),
             cp_block: None,
             first_ti_idx: 0,
+            last_instr_return: false,
+            last_block_mappable: true,
         }
     }
 
@@ -145,6 +151,7 @@ impl<'a> TraceBuilder<'a> {
         nextbb: Option<aot_ir::BlockID>,
     ) -> Result<(), CompilationError> {
         // unwrap safe: can't trace a block not in the AOT module.
+        self.last_instr_return = false;
         let blk = self.aot_mod.block(&bid);
 
         // Decide how to translate each AOT instruction based upon its opcode.
@@ -474,9 +481,10 @@ impl<'a> TraceBuilder<'a> {
     /// If `ta_iter` produces no elements.
     fn build(
         mut self,
-        mut ta_iter: Box<dyn AOTTraceIterator>,
+        ta_iter: Box<dyn AOTTraceIterator>,
     ) -> Result<jit_ir::Module, CompilationError> {
-        let first_blk = match ta_iter.next() {
+        let mut trace_iter = ta_iter.peekable();
+        let first_blk = match trace_iter.peek() {
             Some(Ok(b)) => b,
             Some(Err(_)) => todo!(),
             None => {
@@ -489,7 +497,7 @@ impl<'a> TraceBuilder<'a> {
         // first (guaranteed mappable) block in the trace.
         let prev = match first_blk {
             TraceAction::MappedAOTBlock { func_name, bb } => {
-                debug_assert!(bb > 0);
+                debug_assert!(*bb > 0);
                 // It's `- 1` due to the way the ykllvm block splitting pass works.
                 TraceAction::MappedAOTBlock {
                     func_name: func_name.clone(),
@@ -504,13 +512,40 @@ impl<'a> TraceBuilder<'a> {
         // This unwrap can't fail. If it does that means the tracer has given us a mappable block
         // that doesn't exist in the AOT module.
         self.create_trace_header(self.aot_mod.block(self.cp_block.as_ref().unwrap()))?;
-        let mut trace_iter = ta_iter.peekable();
+
         while let Some(tblk) = trace_iter.next() {
             match tblk {
                 Ok(b) => {
                     match self.lookup_aot_block(&b) {
                         Some(bid) => {
                             // MappedAOTBlock block
+
+                            if bid.is_entry() {
+                                // This is an entry block.
+                                if self.last_block_mappable {
+                                    // This is a normal call.
+                                    // FIXME: increment callstack
+                                } else {
+                                    // This is a callback from foreign code.
+                                }
+                                // FIXME: increment callstack
+                            } else {
+                                // This is a normal block.
+                                if !self.last_block_mappable {
+                                    // We've returned from a foreign call.
+                                    self.last_block_mappable = true;
+                                    continue;
+                                } else if self.last_instr_return {
+                                    // We've just returned from a normal call. This means we've
+                                    // already seen and processed this block and can skip it.
+                                    // FIXME: decrement callstack
+                                    self.last_block_mappable = true;
+                                    continue;
+                                }
+                                // Process the block normally.
+                            }
+                            self.last_block_mappable = true;
+
                             // In order to emit guards for conditional branches we need to peek at the next
                             // block.
                             let nextbb = if let Some(tpeek) = trace_iter.peek() {
@@ -524,6 +559,7 @@ impl<'a> TraceBuilder<'a> {
                             self.process_block(bid, nextbb)?;
                         }
                         None => {
+                            self.last_block_mappable = false;
                             // UnmappableBlock block
                             // Ignore for now. May be later used to make sense of the control flow. Though
                             // ideally we remove unmappable blocks from the trace so we can handle software

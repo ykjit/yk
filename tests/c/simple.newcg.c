@@ -19,9 +19,7 @@
 //     jit-state: enter-jit-code
 //     foo
 //     foo
-//     ...
 //     jit-state: deoptimise
-//     ...
 //     exit
 
 // Check that basic trace compilation works.
