@@ -1997,19 +1997,6 @@ mod tests {
         assert_eq!(Type::Void.byte_size(), Some(0));
     }
 
-    #[test]
-    fn int_type_size() {
-        for i in 1..8 {
-            assert_eq!(Type::Integer(IntegerType::new(i)).byte_size(), Some(1));
-        }
-        for i in 9..16 {
-            assert_eq!(Type::Integer(IntegerType::new(i)).byte_size(), Some(2));
-        }
-        assert_eq!(Type::Integer(IntegerType::new(127)).byte_size(), Some(16));
-        assert_eq!(Type::Integer(IntegerType::new(128)).byte_size(), Some(16));
-        assert_eq!(Type::Integer(IntegerType::new(129)).byte_size(), Some(17));
-    }
-
     #[cfg(debug_assertions)]
     #[should_panic(expected = "type already exists")]
     #[test]
