@@ -377,7 +377,7 @@ impl Operand {
         match self {
             Self::LocalVariable(_) => {
                 // The `unwrap` can't fail for a `LocalVariable`.
-                self.to_instr(m).type_(m).unwrap()
+                self.to_instr(m).def_type(m).unwrap()
             }
             Self::Type(t) => m.type_(t.type_idx),
             _ => todo!(),
@@ -463,7 +463,7 @@ impl Instruction {
 
     /// Returns the [Type] of the local variable defined by this instruction or `None` if this
     /// instruction does not define a new local variable.
-    pub(crate) fn type_<'a>(&self, m: &'a Module) -> Option<&'a Type> {
+    pub(crate) fn def_type<'a>(&self, m: &'a Module) -> Option<&'a Type> {
         if m.instr_type(self) != &Type::Void {
             Some(m.type_(self.type_idx))
         } else {
@@ -545,7 +545,7 @@ impl AotIRDisplay for Instruction {
         }
 
         let mut ret = String::new();
-        if let Some(_) = self.type_(m) {
+        if let Some(_) = self.def_type(m) {
             let name = self.name.borrow();
             // The unwrap cannot fail, as we forced computation of variable names above.
             ret.push_str(&format!(
@@ -1020,7 +1020,7 @@ impl Module {
         for f in &self.funcs {
             for (bb_idx, bb) in f.blocks.iter().enumerate() {
                 for (inst_idx, inst) in bb.instrs.iter().enumerate() {
-                    if let Some(_) = inst.type_(self) {
+                    if let Some(_) = inst.def_type(self) {
                         *inst.name.borrow_mut() = Some(format!("{}_{}", bb_idx, inst_idx));
                     }
                 }
