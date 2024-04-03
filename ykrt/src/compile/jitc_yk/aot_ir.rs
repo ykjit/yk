@@ -52,40 +52,34 @@ index!(FuncIdx);
 pub(crate) struct TypeIdx(usize);
 index!(TypeIdx);
 
-/// A basic block index.
-///
-/// One of these is an index into [Func::blocks].
+/// An index into [Func::blocks].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct BlockIdx(usize);
 index!(BlockIdx);
 
-/// An instruction index.
-///
-/// One of these is an index into [Block::instrs].
+/// An index into [Block::instrs].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct InstrIdx(usize);
 index!(InstrIdx);
 
-/// A constant index.
-///
-/// One of these is an index into [Module::consts].
+/// An index into [Module::consts].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct ConstIdx(usize);
 index!(ConstIdx);
 
-/// A global variable declaration index.
+/// An index into [Module::global_decls].
 ///
-/// These are "declarations" and not "definitions" because they all been AOT code-generated
+/// Note: these are "declarations" and not "definitions" because they all been AOT code-generated
 /// already, and thus come "pre-initialised".
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct GlobalDeclIdx(usize);
 index!(GlobalDeclIdx);
 
-/// A function argument index.
+/// An index into [FuncType::arg_ty_idxs].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct ArgIdx(usize);
@@ -109,18 +103,12 @@ fn deserialise_into_ti_vec<I, T>(v: Vec<T>) -> Result<TiVec<I, T>, DekuError> {
 
 /// A trait for converting in-memory data-structures into a human-readable textual format.
 ///
-/// This is modelled on [`std::fmt::Display`], but a reference to the module is always passed down
-/// so that constructs that require lookups into the module's tables from stringification have
-/// access to them.
-///
-/// The way we implement this (returning a `String`) is inefficient, but it doesn't hugely matter,
-/// as the human-readable format is only provided as a debugging aid.
+/// This is analogous to [std::fmt::Display], but:
+///   1. Takes a reference to a [Module] so that constructs that require lookups into the module's
+///      tables from stringification have access to them.
+///   2. Returns a [String], for ease of use.
 pub(crate) trait AotIRDisplay {
     /// Return a human-readable string.
-    ///
-    /// FIXME: this isn't as efficient as it could be. We could pass down a mutable string
-    /// reference like `JitIRDisplay` does to avoid all the string allocations when stringifiying
-    /// each constituent IR element.
     fn to_string(&self, m: &Module) -> String;
 
     /// Print myself to stderr in human-readable form.
@@ -387,7 +375,10 @@ impl Operand {
     /// Returns the [Type] of the operand.
     pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
         match self {
-            Self::LocalVariable(_) => self.to_instr(m).type_(m),
+            Self::LocalVariable(_) => {
+                // The `unwrap` can't fail for a `LocalVariable`.
+                self.to_instr(m).def_type(m).unwrap()
+            }
             Self::Type(t) => m.type_(t.type_idx),
             _ => todo!(),
         }
@@ -466,18 +457,18 @@ impl Instruction {
         }
     }
 
-    /// Returns true if this instruction defines a new local variable.
-    fn is_def(&self, m: &Module) -> bool {
-        m.instr_type(self) != &Type::Void
-    }
-
     pub(crate) fn type_idx(&self) -> TypeIdx {
         self.type_idx
     }
 
-    /// Returns the [Type] of the local variable defined by this instruction (if any).
-    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
-        m.type_(self.type_idx)
+    /// Returns the [Type] of the local variable defined by this instruction or `None` if this
+    /// instruction does not define a new local variable.
+    pub(crate) fn def_type<'a>(&self, m: &'a Module) -> Option<&'a Type> {
+        if m.instr_type(self) != &Type::Void {
+            Some(m.type_(self.type_idx))
+        } else {
+            None
+        }
     }
 
     pub(crate) fn is_store(&self) -> bool {
@@ -554,7 +545,7 @@ impl AotIRDisplay for Instruction {
         }
 
         let mut ret = String::new();
-        if self.is_def(m) {
+        if let Some(_) = self.def_type(m) {
             let name = self.name.borrow();
             // The unwrap cannot fail, as we forced computation of variable names above.
             ret.push_str(&format!(
@@ -1035,7 +1026,7 @@ impl Module {
         for f in &self.funcs {
             for (bb_idx, bb) in f.blocks.iter().enumerate() {
                 for (inst_idx, inst) in bb.instrs.iter().enumerate() {
-                    if inst.is_def(self) {
+                    if let Some(_) = inst.def_type(self) {
                         *inst.name.borrow_mut() = Some(format!("{}_{}", bb_idx, inst_idx));
                     }
                 }
