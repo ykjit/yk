@@ -713,8 +713,11 @@ pub(crate) fn const_int_bytes_to_str(num_bits: u32, bytes: &[u8]) -> String {
 
 /// A fixed-width integer type.
 ///
-/// Signedness is not specified. Interpretation of the bit pattern is delegated to operations upon
-/// the integer.
+/// Note:
+///   1. These integers range in size from 1..2^23 (inc.) bits. This is inherited [from LLVM's
+///      integer type](https://llvm.org/docs/LangRef.html#integer-type).
+///   2. Signedness is not specified. Interpretation of the bit pattern is delegated to operations
+///      upon the integer.
 #[deku_derive(DekuRead)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct IntegerType {
@@ -722,7 +725,9 @@ pub(crate) struct IntegerType {
 }
 
 impl IntegerType {
+    /// Return the number of bits (1..2^23 (inc.)) this integer spans.
     pub(crate) fn num_bits(&self) -> u32 {
+        debug_assert!(self.num_bits > 0 && self.num_bits <= 0x800000);
         self.num_bits
     }
 
@@ -743,6 +748,7 @@ impl IntegerType {
     /// Create a new integer type with the specified number of bits.
     #[cfg(test)]
     pub(crate) fn new(num_bits: u32) -> Self {
+        debug_assert!(num_bits > 0 && num_bits <= 0x800000);
         Self { num_bits }
     }
 
@@ -1549,7 +1555,6 @@ func bar();
 
     #[test]
     fn integer_type_sizes() {
-        assert_eq!(IntegerType::new(0).byte_size(), 0);
         for i in 1..8 {
             assert_eq!(IntegerType::new(i).byte_size(), 1);
         }
