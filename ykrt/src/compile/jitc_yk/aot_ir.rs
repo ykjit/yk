@@ -52,25 +52,19 @@ index!(FuncIdx);
 pub(crate) struct TypeIdx(usize);
 index!(TypeIdx);
 
-/// A basic block index.
-///
-/// One of these is an index into [Func::blocks].
+/// An index into [Func::blocks].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct BlockIdx(usize);
 index!(BlockIdx);
 
-/// An instruction index.
-///
-/// One of these is an index into [Block::instrs].
+/// An index into [Block::instrs].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct InstrIdx(usize);
 index!(InstrIdx);
 
-/// A constant index.
-///
-/// One of these is an index into [Module::consts].
+/// An index into [Module::consts].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct ConstIdx(usize);
