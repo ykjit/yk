@@ -100,7 +100,7 @@ pub(crate) enum AOTTraceIteratorError {
 #[derive(Debug, Eq, PartialEq)]
 pub enum TraceAction {
     /// A sucessfully mapped block.
-    MappedAOTBlock {
+    MappedAOTBBlock {
         /// The name of the function containing the block.
         ///
         /// PERF: Use a string pool to avoid duplicated function names in traces.
@@ -111,7 +111,7 @@ pub enum TraceAction {
     /// One or more machine blocks that could not be mapped.
     ///
     /// This usually means that the blocks were compiled outside of ykllvm.
-    UnmappableBlock,
+    UnmappableBBlock,
     /// A value promoted and recorded within the low-level trace (e.g. `PTWRITE`). In essence these
     /// are calls to `yk_promote` that have been inlined so that the tracer backend can handle them
     /// rather than being handled by yk's generic run-time support for `yk_promote`.
@@ -123,10 +123,10 @@ pub enum TraceAction {
 
 impl TraceAction {
     pub fn new_mapped_aot_block(func_name: CString, bb: usize) -> Self {
-        Self::MappedAOTBlock { func_name, bb }
+        Self::MappedAOTBBlock { func_name, bb }
     }
 
     pub fn new_unmappable_block() -> Self {
-        Self::UnmappableBlock
+        Self::UnmappableBBlock
     }
 }

@@ -53,7 +53,7 @@ impl Iterator for HWTTraceIterator {
                         Some(x) => {
                             // This is a rough proxy for "check that we removed only the thing we want to
                             // remove".
-                            assert!(matches!(x, TraceAction::UnmappableBlock));
+                            assert!(matches!(x, TraceAction::UnmappableBBlock));
                         }
                         _ => unreachable!(),
                     }
@@ -88,7 +88,7 @@ impl HWTTraceIterator {
             Some(Ok(x)) => {
                 hwti.map_block(&x);
                 match hwti.upcoming.as_slice() {
-                    &[TraceAction::MappedAOTBlock { .. }] => {
+                    &[TraceAction::MappedAOTBBlock { .. }] => {
                         hwti.upcoming.pop();
                         Ok(hwti)
                     }
@@ -117,7 +117,7 @@ impl HWTTraceIterator {
     /// A `None` element in the returned vector means that the mapper found a machine block that
     /// corresponds with part of the hwtracer block but that the machine block could *not* be
     /// directly mapped to an AOT LLVM IR block. This happens when
-    /// `MachineBasicBlock::getBasicBlock()` returns `nullptr`.
+    /// `MachineBasicBlock::getBasicBBlock()` returns `nullptr`.
     ///
     /// This function returns an empty vector if the hwtracer block was unmappable (no matching
     /// machine blocks could be found).
@@ -143,7 +143,7 @@ impl HWTTraceIterator {
         let b_rng = block.vaddr_range();
         if b_rng.is_none() {
             // If the address range of the block isn't known, then it follows that we can't map
-            // back to an IRBlock. We return the empty vector to flag this.
+            // back to an IRBBlock. We return the empty vector to flag this.
             self.push_upcoming(TraceAction::new_unmappable_block());
             return;
         }

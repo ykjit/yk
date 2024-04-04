@@ -30,7 +30,7 @@ struct TraceBuilder<'a> {
     jit_mod: jit_ir::Module,
     /// Maps an AOT instruction to a jit instruction via their index-based IDs.
     local_map: HashMap<aot_ir::InstructionID, jit_ir::InstrIdx>,
-    // Block containing the current control point (i.e. the control point that started this trace).
+    // BBlock containing the current control point (i.e. the control point that started this trace).
     cp_block: Option<aot_ir::BBlockId>,
     // Index of the first traceinput instruction.
     first_ti_idx: usize,
@@ -65,18 +65,18 @@ impl<'a> TraceBuilder<'a> {
     // Given a mapped block, find the AOT block ID, or return `None` if it is unmapped.
     fn lookup_aot_block(&self, tb: &TraceAction) -> Option<aot_ir::BBlockId> {
         match tb {
-            TraceAction::MappedAOTBlock { func_name, bb } => {
+            TraceAction::MappedAOTBBlock { func_name, bb } => {
                 let func_name = func_name.to_str().unwrap(); // safe: func names are valid UTF-8.
                 let func = self.aot_mod.func_idx(func_name);
                 Some(aot_ir::BBlockId::new(func, aot_ir::BBIdx::new(*bb)))
             }
-            TraceAction::UnmappableBlock { .. } => None,
+            TraceAction::UnmappableBBlock { .. } => None,
             TraceAction::Promotion => todo!(),
         }
     }
 
     /// Create the prolog of the trace.
-    fn create_trace_header(&mut self, blk: &aot_ir::Block) -> Result<(), CompilationError> {
+    fn create_trace_header(&mut self, blk: &aot_ir::BBlock) -> Result<(), CompilationError> {
         // Find trace input variables and emit `LoadTraceInput` instructions for them.
         let mut trace_inputs = None;
 
@@ -358,7 +358,7 @@ impl<'a> TraceBuilder<'a> {
             _ => panic!(),
         };
         let succ_bb = match inst.operand(1) {
-            aot_ir::Operand::Block(bb_idx) => *bb_idx,
+            aot_ir::Operand::BBlock(bb_idx) => *bb_idx,
             _ => panic!(),
         };
 
@@ -540,15 +540,15 @@ impl<'a> TraceBuilder<'a> {
         // Find the block containing the control point call. This is the (sole) predecessor of the
         // first (guaranteed mappable) block in the trace.
         let prev = match first_blk {
-            TraceAction::MappedAOTBlock { func_name, bb } => {
+            TraceAction::MappedAOTBBlock { func_name, bb } => {
                 debug_assert!(*bb > 0);
                 // It's `- 1` due to the way the ykllvm block splitting pass works.
-                TraceAction::MappedAOTBlock {
+                TraceAction::MappedAOTBBlock {
                     func_name: func_name.clone(),
                     bb: bb - 1,
                 }
             }
-            TraceAction::UnmappableBlock => panic!(),
+            TraceAction::UnmappableBBlock => panic!(),
             TraceAction::Promotion => todo!(),
         };
 
@@ -562,7 +562,7 @@ impl<'a> TraceBuilder<'a> {
                 Ok(b) => {
                     match self.lookup_aot_block(&b) {
                         Some(bid) => {
-                            // MappedAOTBlock block
+                            // MappedAOTBBlock block
 
                             if bid.is_entry() {
                                 // This is an entry block.
@@ -604,7 +604,7 @@ impl<'a> TraceBuilder<'a> {
                         }
                         None => {
                             self.last_block_mappable = false;
-                            // UnmappableBlock block
+                            // UnmappableBBlock block
                             // Ignore for now. May be later used to make sense of the control flow. Though
                             // ideally we remove unmappable blocks from the trace so we can handle software
                             // and hardware traces the same.

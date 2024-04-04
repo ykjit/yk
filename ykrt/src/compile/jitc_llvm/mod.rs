@@ -1,4 +1,4 @@
-//! An LLVM JIT backend. Currently a minimal wrapper around the fact that [MappedAOTBlockTrace]s are hardcoded
+//! An LLVM JIT backend. Currently a minimal wrapper around the fact that [MappedAOTBBlockTrace]s are hardcoded
 //! to be compiled with LLVM.
 
 use crate::{
@@ -325,14 +325,14 @@ impl JITCLLVM {
         let mut bbs = Vec::with_capacity(trace_len);
         for blk in irtrace {
             match blk {
-                TraceAction::MappedAOTBlock { func_name, bb } => {
+                TraceAction::MappedAOTBBlock { func_name, bb } => {
                     func_names.push(func_name.as_ptr());
                     bbs.push(*bb);
                 }
-                TraceAction::UnmappableBlock => {
+                TraceAction::UnmappableBBlock => {
                     // The block was unmappable. Indicate this with a null function name.
                     func_names.push(ptr::null());
-                    // Block indices for unmappable blocks are irrelevant so we may pass anything here.
+                    // BBlock indices for unmappable blocks are irrelevant so we may pass anything here.
                     bbs.push(0);
                 }
                 TraceAction::Promotion => todo!(),

@@ -65,7 +65,7 @@ index!(TypeIdx);
 pub(crate) struct BBIdx(usize);
 index!(BBIdx);
 
-/// An index into [Block::instrs].
+/// An index into [BBlock::instrs].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct InstrIdx(usize);
@@ -261,7 +261,7 @@ pub(crate) enum Operand {
     #[deku(id = "OPKIND_FUNC")]
     Func(FuncIdx),
     #[deku(id = "OPKIND_BLOCK")]
-    Block(BBIdx),
+    BBlock(BBIdx),
     #[deku(id = "OPKIND_ARG")]
     Arg(ArgIdx),
     #[deku(id = "OPKIND_GLOBAL")]
@@ -318,7 +318,7 @@ impl AotIRDisplay for Operand {
             }
             Self::Type(type_idx) => m.types[*type_idx].to_string(m),
             Self::Func(func_idx) => m.funcs[*func_idx].name.to_owned(),
-            Self::Block(bb_idx) => format!("bb{}", usize::from(*bb_idx)),
+            Self::BBlock(bb_idx) => format!("bb{}", usize::from(*bb_idx)),
             Self::Arg(arg_idx) => format!("$arg{}", usize::from(*arg_idx)),
             Self::Global(gd_idx) => m.global_decls[*gd_idx].to_string(m),
             Self::Predicate(p) => p.to_string(m),
@@ -510,14 +510,14 @@ impl AotIRDisplay for Instruction {
 /// A basic block containing bytecode instructions.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
-pub(crate) struct Block {
+pub(crate) struct BBlock {
     #[deku(temp)]
     num_instrs: usize,
     #[deku(count = "num_instrs", map = "deserialise_into_ti_vec")]
     pub(crate) instrs: TiVec<InstrIdx, Instruction>,
 }
 
-impl AotIRDisplay for Block {
+impl AotIRDisplay for BBlock {
     fn to_string(&self, m: &Module) -> String {
         let mut ret = String::new();
         for i in &self.instrs {
@@ -537,7 +537,7 @@ pub(crate) struct Func {
     #[deku(temp)]
     num_blocks: usize,
     #[deku(count = "num_blocks", map = "deserialise_into_ti_vec")]
-    blocks: TiVec<BBIdx, Block>,
+    blocks: TiVec<BBIdx, BBlock>,
 }
 
 impl Func {
@@ -545,12 +545,12 @@ impl Func {
         self.blocks.is_empty()
     }
 
-    /// Return the [Block] at the specified index.
+    /// Return the [BBlock] at the specified index.
     ///
     /// # Panics
     ///
     /// Panics if the index is out of range.
-    pub(crate) fn block(&self, bb_idx: BBIdx) -> &Block {
+    pub(crate) fn block(&self, bb_idx: BBIdx) -> &BBlock {
         &self.blocks[bb_idx]
     }
 
@@ -1005,7 +1005,7 @@ impl Module {
     }
 
     /// Return the block uniquely identified (in this module) by the specified [BBlockId].
-    pub(crate) fn block(&self, bid: &BBlockId) -> &Block {
+    pub(crate) fn block(&self, bid: &BBlockId) -> &BBlock {
         self.funcs[bid.func_idx].block(bid.bb_idx)
     }
 
