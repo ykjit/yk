@@ -92,7 +92,10 @@ index!(GlobalDeclIdx);
 pub(crate) struct ArgIdx(usize);
 index!(ArgIdx);
 
-fn deserialise_string(v: Vec<u8>) -> Result<String, DekuError> {
+/// Helper function for deku `map` attribute. It is necessary to write all the types out in full to
+/// avoid type inference errors, so it's easier to have a single helper function rather than inline
+/// this into each `map` attribute.
+fn map_to_string(v: Vec<u8>) -> Result<String, DekuError> {
     let err = Err(DekuError::Parse("failed to parse string".to_owned()));
     match CStr::from_bytes_until_nul(v.as_slice()) {
         Ok(c) => match c.to_str() {
@@ -271,7 +274,7 @@ pub(crate) enum Operand {
     #[deku(id = "OPKIND_PREDICATE")]
     Predicate(Predicate),
     #[deku(id = "OPKIND_UNIMPLEMENTED")]
-    Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")] String),
+    Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "map_to_string")] String),
 }
 
 impl Operand {
@@ -533,7 +536,7 @@ impl AotIRDisplay for BBlock {
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct Func {
-    #[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")]
+    #[deku(until = "|v: &u8| *v == 0", map = "map_to_string")]
     name: String,
     type_idx: TypeIdx,
     #[deku(temp)]
@@ -836,7 +839,7 @@ pub(crate) enum Type {
     #[deku(id = "TYKIND_STRUCT")]
     Struct(StructType),
     #[deku(id = "TYKIND_UNIMPLEMENTED")]
-    Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")] String),
+    Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "map_to_string")] String),
 }
 
 impl Type {
@@ -918,7 +921,7 @@ impl AotIRDisplay for Constant {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct GlobalDecl {
     is_threadlocal: bool,
-    #[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")]
+    #[deku(until = "|v: &u8| *v == 0", map = "map_to_string")]
     name: String,
 }
 
@@ -1436,7 +1439,7 @@ func bar();
     fn string_deser() {
         let check = |s: &str| {
             assert_eq!(
-                &deserialise_string(CString::new(s).unwrap().into_bytes_with_nul()).unwrap(),
+                &map_to_string(CString::new(s).unwrap().into_bytes_with_nul()).unwrap(),
                 s
             );
         };
