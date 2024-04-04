@@ -172,18 +172,6 @@ impl AotIRDisplay for Opcode {
 }
 
 #[deku_derive(DekuRead)]
-#[derive(Debug)]
-pub(crate) struct ConstantOperand {
-    const_idx: ConstIdx,
-}
-
-impl AotIRDisplay for ConstantOperand {
-    fn to_string(&self, m: &Module) -> String {
-        m.consts[self.const_idx].to_string(m)
-    }
-}
-
-#[deku_derive(DekuRead)]
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub(crate) struct InstructionID {
     #[deku(skip)] // computed after deserialisation.
@@ -324,7 +312,7 @@ const OPKIND_UNIMPLEMENTED: u8 = 255;
 #[deku(type = "u8")]
 pub(crate) enum Operand {
     #[deku(id = "OPKIND_CONST")]
-    Constant(ConstantOperand),
+    Constant(ConstIdx),
     #[deku(id = "OPKIND_LOCAL_VARIABLE")]
     LocalVariable(InstructionID),
     #[deku(id = "OPKIND_TYPE")]
@@ -383,7 +371,7 @@ impl Operand {
 impl AotIRDisplay for Operand {
     fn to_string(&self, m: &Module) -> String {
         match self {
-            Self::Constant(c) => c.to_string(m),
+            Self::Constant(const_idx) => m.consts[*const_idx].to_string(m),
             Self::LocalVariable(iid) => {
                 format!("${}_{}", usize::from(iid.bb_idx), usize::from(iid.inst_idx))
             }
@@ -1093,8 +1081,8 @@ impl Module {
         &self.types[instr.type_idx]
     }
 
-    pub(crate) fn constant(&self, co: &ConstantOperand) -> &Constant {
-        &self.consts[co.const_idx]
+    pub(crate) fn constant(&self, co: &ConstIdx) -> &Constant {
+        &self.consts[*co]
     }
 
     pub(crate) fn const_type(&self, c: &Constant) -> &Type {
