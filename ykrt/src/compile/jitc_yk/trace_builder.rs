@@ -208,7 +208,7 @@ impl<'a> TraceBuilder<'a> {
         if jit_inst.def_type(&self.jit_mod).is_some() {
             let aot_iid = aot_ir::InstructionID::new(
                 bid.func_idx(),
-                bid.block_idx(),
+                bid.bb_idx(),
                 aot_ir::InstrIdx::new(aot_inst_idx),
             );
             self.local_map.insert(aot_iid, self.next_instr_id()?);
@@ -396,7 +396,7 @@ impl<'a> TraceBuilder<'a> {
 
         let gi = jit_ir::GuardInfo::new(smids, lives);
         let gi_idx = self.jit_mod.push_guardinfo(gi)?;
-        let expect = succ_bb == nextbb.block_idx();
+        let expect = succ_bb == nextbb.bb_idx();
         let guard = jit_ir::GuardInstruction::new(jit_ir::Operand::Local(cond), expect, gi_idx);
         self.jit_mod.push(guard.into());
         Ok(())

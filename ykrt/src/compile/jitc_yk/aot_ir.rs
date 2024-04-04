@@ -193,27 +193,24 @@ impl InstructionID {
 #[derive(Debug, PartialEq)]
 pub(crate) struct BlockID {
     func_idx: FuncIdx,
-    block_idx: BBIdx,
+    bb_idx: BBIdx,
 }
 
 impl BlockID {
-    pub(crate) fn new(func_idx: FuncIdx, block_idx: BBIdx) -> Self {
-        Self {
-            func_idx,
-            block_idx,
-        }
+    pub(crate) fn new(func_idx: FuncIdx, bb_idx: BBIdx) -> Self {
+        Self { func_idx, bb_idx }
     }
 
     pub(crate) fn func_idx(&self) -> FuncIdx {
         self.func_idx
     }
 
-    pub(crate) fn block_idx(&self) -> BBIdx {
-        self.block_idx
+    pub(crate) fn bb_idx(&self) -> BBIdx {
+        self.bb_idx
     }
 
     pub(crate) fn is_entry(&self) -> bool {
-        self.block_idx == BBIdx(0)
+        self.bb_idx == BBIdx(0)
     }
 }
 
@@ -1009,7 +1006,7 @@ impl Module {
 
     /// Return the block uniquely identified (in this module) by the specified [BlockID].
     pub(crate) fn block(&self, bid: &BlockID) -> &Block {
-        self.funcs[bid.func_idx].block(bid.block_idx)
+        self.funcs[bid.func_idx].block(bid.bb_idx)
     }
 
     /// Fill in the function index of local variable operands of instructions.
