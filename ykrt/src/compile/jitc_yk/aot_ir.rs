@@ -396,6 +396,18 @@ impl Instruction {
         self.opcode == Opcode::PtrAdd
     }
 
+    pub(crate) fn is_mappable_call(&self, aot_mod: &Module) -> bool {
+        if self.opcode == Opcode::Call {
+            let op = &self.operands[0];
+            match op {
+                Operand::Func(func_idx) => !aot_mod.funcs[*func_idx].is_declaration(),
+                _ => false,
+            }
+        } else {
+            false
+        }
+    }
+
     pub(crate) fn is_control_point(&self, aot_mod: &Module) -> bool {
         if self.opcode == Opcode::Call {
             // Call instructions always have at least one operand (the callee), so this is safe.

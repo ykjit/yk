@@ -11,6 +11,16 @@ const CTRL_POINT_ARGIDX_INPUTS: usize = 3;
 /// The argument index of the trace inputs struct in the trace function.
 const TRACE_FUNC_CTRLP_ARGIDX: u16 = 0;
 
+struct Frame<'a> {
+    callinst: &'a aot_ir::Instruction,
+}
+
+impl Frame<'_> {
+    fn new(callinst: &aot_ir::Instruction) -> Frame {
+        Frame { callinst }
+    }
+}
+
 /// Given a mapped trace and an AOT module, assembles an in-memory Yk IR trace by copying blocks
 /// from the AOT IR. The output of this process will be the input to the code generator.
 struct TraceBuilder<'a> {
@@ -28,6 +38,8 @@ struct TraceBuilder<'a> {
     last_instr_return: bool,
     // Was the last block we processed mappable or not?
     last_block_mappable: bool,
+    // JIT arguments passed into an inlined AOT call.
+    frames: Vec<Frame<'a>>,
 }
 
 impl<'a> TraceBuilder<'a> {
@@ -46,6 +58,7 @@ impl<'a> TraceBuilder<'a> {
             first_ti_idx: 0,
             last_instr_return: false,
             last_block_mappable: true,
+            frames: Vec::new(),
         }
     }
 
@@ -159,6 +172,7 @@ impl<'a> TraceBuilder<'a> {
             match inst.opcode() {
                 aot_ir::Opcode::Br => Ok(()),
                 aot_ir::Opcode::Load => self.handle_load(inst, &bid, inst_idx),
+                // FIXME: ignore remaining instructions after a call.
                 aot_ir::Opcode::Call => self.handle_call(inst, &bid, inst_idx),
                 aot_ir::Opcode::Store => self.handle_store(inst, &bid, inst_idx),
                 aot_ir::Opcode::PtrAdd => {
@@ -177,6 +191,7 @@ impl<'a> TraceBuilder<'a> {
                     debug_assert!(sm.is_stackmap_call(self.aot_mod));
                     self.handle_condbr(inst, sm, nextbb.as_ref().unwrap())
                 }
+                aot_ir::Opcode::Ret => self.handle_ret(inst, &bid, inst_idx),
                 _ => todo!("{:?}", inst),
             }?;
         }
@@ -260,6 +275,16 @@ impl<'a> TraceBuilder<'a> {
                         .make_constant(&mut self.jit_mod, 0xdeadbeef_isize)?;
                 let const_idx = self.jit_mod.const_idx(&jit_const)?;
                 jit_ir::Operand::Const(const_idx)
+            }
+            aot_ir::Operand::Arg(arg_idx) => {
+                // The `Arg` operand is an index for the argument of this function. We can use it
+                // to lookup the AOT argument being passed into this function from the call
+                // instruction. We then lookup what JIT instruction the AOT argument maps to and
+                // return this.
+                // Unwrap is safe since an `Arg` means we are currently inlining a function.
+                // FIXME: Is the above correct? What about args in the control point frame?
+                let callinst = &self.frames.last().unwrap().callinst;
+                self.handle_operand(callinst.operand(usize::from(*arg_idx) + 1))?
             }
             _ => todo!("{}", op.to_string(self.aot_mod)),
         };
@@ -377,6 +402,17 @@ impl<'a> TraceBuilder<'a> {
         Ok(())
     }
 
+    fn handle_ret(
+        &mut self,
+        _inst: &aot_ir::Instruction,
+        _bid: &aot_ir::BlockID,
+        _aot_inst_idx: usize,
+    ) -> Result<(), CompilationError> {
+        // FIXME: Map return value to AOT call instruction.
+        self.frames.pop();
+        Ok(())
+    }
+
     /// Translate a `Icmp` instruction.
     fn handle_icmp(
         &mut self,
@@ -411,27 +447,33 @@ impl<'a> TraceBuilder<'a> {
 
     fn handle_call(
         &mut self,
-        inst: &aot_ir::Instruction,
+        inst: &'a aot_ir::Instruction,
         bid: &aot_ir::BlockID,
         aot_inst_idx: usize,
     ) -> Result<(), CompilationError> {
+        // Ignore special functions that we neither want to inline nor copy.
         if inst.is_stackmap_call(self.aot_mod) || inst.is_debug_call(self.aot_mod) {
-            // FIXME: If this is a mappable call that we are going to inline, push its stackmap
-            // onto the callstack.
             return Ok(());
         }
-        let mut args = Vec::new();
-        for arg in inst.remaining_operands(1) {
-            args.push(self.handle_operand(arg)?);
-        }
-        let jit_func_decl_idx = self.handle_func(inst.callee())?;
 
-        let instr = if !inst.callee().func_type(self.aot_mod).is_vararg() {
-            jit_ir::CallInstruction::new(&mut self.jit_mod, jit_func_decl_idx, &args)?.into()
+        if inst.is_mappable_call(self.aot_mod) {
+            // This is a mappable call that we want to inline.
+            self.frames.push(Frame::new(inst));
+            Ok(())
         } else {
-            jit_ir::VACallInstruction::new(&mut self.jit_mod, jit_func_decl_idx, &args)?.into()
-        };
-        self.copy_instruction(instr, bid, aot_inst_idx)
+            // This call is either a declaration or an indirect call and thus not mappable.
+            let mut args = Vec::new();
+            for arg in inst.remaining_operands(1) {
+                args.push(self.handle_operand(arg)?);
+            }
+            let jit_func_decl_idx = self.handle_func(inst.callee())?;
+            let instr = if !inst.callee().func_type(self.aot_mod).is_vararg() {
+                jit_ir::CallInstruction::new(&mut self.jit_mod, jit_func_decl_idx, &args)?.into()
+            } else {
+                jit_ir::VACallInstruction::new(&mut self.jit_mod, jit_func_decl_idx, &args)?.into()
+            };
+            self.copy_instruction(instr, bid, aot_inst_idx)
+        }
     }
 
     fn handle_store(
