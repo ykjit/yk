@@ -59,13 +59,13 @@ impl FuncIdx {
 pub(crate) struct TypeIdx(usize);
 index!(TypeIdx);
 
-/// An index into [Func::blocks].
+/// An index into [Func::bblocks].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct BlockIdx(usize);
-index!(BlockIdx);
+pub(crate) struct BBlockIdx(usize);
+index!(BBlockIdx);
 
-/// An index into [Block::instrs].
+/// An index into [BBlock::instrs].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct InstrIdx(usize);
@@ -176,12 +176,12 @@ impl AotIRDisplay for Opcode {
 pub(crate) struct InstructionID {
     #[deku(skip)] // computed after deserialisation.
     func_idx: FuncIdx,
-    bb_idx: BlockIdx,
+    bb_idx: BBlockIdx,
     inst_idx: InstrIdx,
 }
 
 impl InstructionID {
-    pub(crate) fn new(func_idx: FuncIdx, bb_idx: BlockIdx, inst_idx: InstrIdx) -> Self {
+    pub(crate) fn new(func_idx: FuncIdx, bb_idx: BBlockIdx, inst_idx: InstrIdx) -> Self {
         Self {
             func_idx,
             bb_idx,
@@ -191,29 +191,26 @@ impl InstructionID {
 }
 
 #[derive(Debug, PartialEq)]
-pub(crate) struct BlockID {
+pub(crate) struct BBlockId {
     func_idx: FuncIdx,
-    block_idx: BlockIdx,
+    bb_idx: BBlockIdx,
 }
 
-impl BlockID {
-    pub(crate) fn new(func_idx: FuncIdx, block_idx: BlockIdx) -> Self {
-        Self {
-            func_idx,
-            block_idx,
-        }
+impl BBlockId {
+    pub(crate) fn new(func_idx: FuncIdx, bb_idx: BBlockIdx) -> Self {
+        Self { func_idx, bb_idx }
     }
 
     pub(crate) fn func_idx(&self) -> FuncIdx {
         self.func_idx
     }
 
-    pub(crate) fn block_idx(&self) -> BlockIdx {
-        self.block_idx
+    pub(crate) fn bb_idx(&self) -> BBlockIdx {
+        self.bb_idx
     }
 
     pub(crate) fn is_entry(&self) -> bool {
-        self.block_idx == BlockIdx(0)
+        self.bb_idx == BBlockIdx(0)
     }
 }
 
@@ -264,7 +261,7 @@ pub(crate) enum Operand {
     #[deku(id = "OPKIND_FUNC")]
     Func(FuncIdx),
     #[deku(id = "OPKIND_BLOCK")]
-    Block(BlockIdx),
+    BBlock(BBlockIdx),
     #[deku(id = "OPKIND_ARG")]
     Arg(ArgIdx),
     #[deku(id = "OPKIND_GLOBAL")]
@@ -284,7 +281,7 @@ impl Operand {
     pub(crate) fn to_instr<'a>(&self, aotmod: &'a Module) -> &'a Instruction {
         match self {
             Self::LocalVariable(iid) => {
-                &aotmod.funcs[iid.func_idx].blocks[iid.bb_idx].instrs[iid.inst_idx]
+                &aotmod.funcs[iid.func_idx].bblocks[iid.bb_idx].instrs[iid.inst_idx]
             }
             _ => panic!(),
         }
@@ -321,7 +318,7 @@ impl AotIRDisplay for Operand {
             }
             Self::Type(type_idx) => m.types[*type_idx].to_string(m),
             Self::Func(func_idx) => m.funcs[*func_idx].name.to_owned(),
-            Self::Block(bb_idx) => format!("bb{}", usize::from(*bb_idx)),
+            Self::BBlock(bb_idx) => format!("bb{}", usize::from(*bb_idx)),
             Self::Arg(arg_idx) => format!("$arg{}", usize::from(*arg_idx)),
             Self::Global(gd_idx) => m.global_decls[*gd_idx].to_string(m),
             Self::Predicate(p) => p.to_string(m),
@@ -513,14 +510,14 @@ impl AotIRDisplay for Instruction {
 /// A basic block containing bytecode instructions.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
-pub(crate) struct Block {
+pub(crate) struct BBlock {
     #[deku(temp)]
     num_instrs: usize,
     #[deku(count = "num_instrs", map = "deserialise_into_ti_vec")]
     pub(crate) instrs: TiVec<InstrIdx, Instruction>,
 }
 
-impl AotIRDisplay for Block {
+impl AotIRDisplay for BBlock {
     fn to_string(&self, m: &Module) -> String {
         let mut ret = String::new();
         for i in &self.instrs {
@@ -538,23 +535,23 @@ pub(crate) struct Func {
     name: String,
     type_idx: TypeIdx,
     #[deku(temp)]
-    num_blocks: usize,
-    #[deku(count = "num_blocks", map = "deserialise_into_ti_vec")]
-    blocks: TiVec<BlockIdx, Block>,
+    num_bblocks: usize,
+    #[deku(count = "num_bblocks", map = "deserialise_into_ti_vec")]
+    bblocks: TiVec<BBlockIdx, BBlock>,
 }
 
 impl Func {
     fn is_declaration(&self) -> bool {
-        self.blocks.is_empty()
+        self.bblocks.is_empty()
     }
 
-    /// Return the [Block] at the specified index.
+    /// Return the [BBlock] at the specified index.
     ///
     /// # Panics
     ///
     /// Panics if the index is out of range.
-    pub(crate) fn block(&self, bb_idx: BlockIdx) -> &Block {
-        &self.blocks[bb_idx]
+    pub(crate) fn bblock(&self, bb_idx: BBlockIdx) -> &BBlock {
+        &self.bblocks[bb_idx]
     }
 
     /// Return the name of the function.
@@ -608,7 +605,7 @@ impl AotIRDisplay for Func {
                 ret.push_str(";\n");
             } else {
                 ret.push_str(" {\n");
-                for (i, b) in self.blocks.iter().enumerate() {
+                for (i, b) in self.bblocks.iter().enumerate() {
                     ret.push_str(&format!("  bb{}:\n{}", i, b.to_string(m)));
                 }
                 ret.push_str("}\n");
@@ -981,7 +978,7 @@ impl Module {
         // Note that because the on-disk IR is conceptually immutable, so we don't have to worry
         // about keeping the names up to date.
         for f in &self.funcs {
-            for (bb_idx, bb) in f.blocks.iter().enumerate() {
+            for (bb_idx, bb) in f.bblocks.iter().enumerate() {
                 for (inst_idx, inst) in bb.instrs.iter().enumerate() {
                     if let Some(_) = inst.def_type(self) {
                         *inst.name.borrow_mut() = Some(format!("{}_{}", bb_idx, inst_idx));
@@ -1007,9 +1004,9 @@ impl Module {
             .unwrap()
     }
 
-    /// Return the block uniquely identified (in this module) by the specified [BlockID].
-    pub(crate) fn block(&self, bid: &BlockID) -> &Block {
-        self.funcs[bid.func_idx].block(bid.block_idx)
+    /// Return the block uniquely identified (in this module) by the specified [BBlockId].
+    pub(crate) fn bblock(&self, bid: &BBlockId) -> &BBlock {
+        self.funcs[bid.func_idx].bblock(bid.bb_idx)
     }
 
     /// Fill in the function index of local variable operands of instructions.
@@ -1018,7 +1015,7 @@ impl Module {
     /// https://github.com/sharksforarms/deku/issues/363
     fn compute_local_operand_func_indices(&mut self) {
         for (f_idx, f) in self.funcs.iter_mut().enumerate() {
-            for bb in &mut f.blocks {
+            for bb in &mut f.bblocks {
                 for inst in &mut bb.instrs {
                     for op in &mut inst.operands {
                         if let Operand::LocalVariable(ref mut iid) = op {
@@ -1158,7 +1155,7 @@ mod tests {
         write_str(&mut data, "foo");
         // type_idx:
         write_native_usize(&mut data, 4);
-        // num_blocks:
+        // num_bblocks:
         write_native_usize(&mut data, 2);
 
         // BLOCK 0
@@ -1303,7 +1300,7 @@ mod tests {
         write_str(&mut data, "bar");
         // type_idx:
         write_native_usize(&mut data, 5);
-        // num_blocks:
+        // num_bblocks:
         write_native_usize(&mut data, 0);
 
         // CONSTANTS

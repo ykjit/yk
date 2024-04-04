@@ -21,8 +21,8 @@ impl Frame<'_> {
     }
 }
 
-/// Given a mapped trace and an AOT module, assembles an in-memory Yk IR trace by copying blocks
-/// from the AOT IR. The output of this process will be the input to the code generator.
+/// Given a mapped trace and an AOT module, assembles an in-memory Yk IR trace by copying basic
+/// blocks from the AOT IR. The output of this process will be the input to the code generator.
 struct TraceBuilder<'a> {
     /// The AOR IR.
     aot_mod: &'a Module,
@@ -30,8 +30,8 @@ struct TraceBuilder<'a> {
     jit_mod: jit_ir::Module,
     /// Maps an AOT instruction to a jit instruction via their index-based IDs.
     local_map: HashMap<aot_ir::InstructionID, jit_ir::InstrIdx>,
-    // Block containing the current control point (i.e. the control point that started this trace).
-    cp_block: Option<aot_ir::BlockID>,
+    // BBlock containing the current control point (i.e. the control point that started this trace).
+    cp_block: Option<aot_ir::BBlockId>,
     // Index of the first traceinput instruction.
     first_ti_idx: usize,
     // Was the last instruction we've processed a return?
@@ -63,20 +63,20 @@ impl<'a> TraceBuilder<'a> {
     }
 
     // Given a mapped block, find the AOT block ID, or return `None` if it is unmapped.
-    fn lookup_aot_block(&self, tb: &TraceAction) -> Option<aot_ir::BlockID> {
+    fn lookup_aot_block(&self, tb: &TraceAction) -> Option<aot_ir::BBlockId> {
         match tb {
-            TraceAction::MappedAOTBlock { func_name, bb } => {
+            TraceAction::MappedAOTBBlock { func_name, bb } => {
                 let func_name = func_name.to_str().unwrap(); // safe: func names are valid UTF-8.
                 let func = self.aot_mod.func_idx(func_name);
-                Some(aot_ir::BlockID::new(func, aot_ir::BlockIdx::new(*bb)))
+                Some(aot_ir::BBlockId::new(func, aot_ir::BBlockIdx::new(*bb)))
             }
-            TraceAction::UnmappableBlock { .. } => None,
+            TraceAction::UnmappableBBlock { .. } => None,
             TraceAction::Promotion => todo!(),
         }
     }
 
     /// Create the prolog of the trace.
-    fn create_trace_header(&mut self, blk: &aot_ir::Block) -> Result<(), CompilationError> {
+    fn create_trace_header(&mut self, blk: &aot_ir::BBlock) -> Result<(), CompilationError> {
         // Find trace input variables and emit `LoadTraceInput` instructions for them.
         let mut trace_inputs = None;
 
@@ -160,12 +160,12 @@ impl<'a> TraceBuilder<'a> {
     /// Walk over a traced AOT block, translating the constituent instructions into the JIT module.
     fn process_block(
         &mut self,
-        bid: aot_ir::BlockID,
-        nextbb: Option<aot_ir::BlockID>,
+        bid: aot_ir::BBlockId,
+        nextbb: Option<aot_ir::BBlockId>,
     ) -> Result<(), CompilationError> {
         // unwrap safe: can't trace a block not in the AOT module.
         self.last_instr_return = false;
-        let blk = self.aot_mod.block(&bid);
+        let blk = self.aot_mod.bblock(&bid);
 
         // Decide how to translate each AOT instruction based upon its opcode.
         for (inst_idx, inst) in blk.instrs.iter().enumerate() {
@@ -201,14 +201,14 @@ impl<'a> TraceBuilder<'a> {
     fn copy_instruction(
         &mut self,
         jit_inst: jit_ir::Instruction,
-        bid: &aot_ir::BlockID,
+        bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
     ) -> Result<(), CompilationError> {
         // If the AOT instruction defines a new value, then add it to the local map.
         if jit_inst.def_type(&self.jit_mod).is_some() {
             let aot_iid = aot_ir::InstructionID::new(
                 bid.func_idx(),
-                bid.block_idx(),
+                bid.bb_idx(),
                 aot_ir::InstrIdx::new(aot_inst_idx),
             );
             self.local_map.insert(aot_iid, self.next_instr_id()?);
@@ -334,7 +334,7 @@ impl<'a> TraceBuilder<'a> {
     fn handle_binop(
         &mut self,
         inst: &aot_ir::Instruction,
-        bid: &aot_ir::BlockID,
+        bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
     ) -> Result<(), CompilationError> {
         let op1 = self.handle_operand(inst.operand(0))?;
@@ -351,14 +351,14 @@ impl<'a> TraceBuilder<'a> {
         &mut self,
         inst: &aot_ir::Instruction,
         sm: &aot_ir::Instruction,
-        nextbb: &aot_ir::BlockID,
+        nextbb: &aot_ir::BBlockId,
     ) -> Result<(), CompilationError> {
         let cond = match &inst.operand(0) {
             aot_ir::Operand::LocalVariable(iid) => self.local_map[iid],
             _ => panic!(),
         };
         let succ_bb = match inst.operand(1) {
-            aot_ir::Operand::Block(bb_idx) => *bb_idx,
+            aot_ir::Operand::BBlock(bb_idx) => *bb_idx,
             _ => panic!(),
         };
 
@@ -396,7 +396,7 @@ impl<'a> TraceBuilder<'a> {
 
         let gi = jit_ir::GuardInfo::new(smids, lives);
         let gi_idx = self.jit_mod.push_guardinfo(gi)?;
-        let expect = succ_bb == nextbb.block_idx();
+        let expect = succ_bb == nextbb.bb_idx();
         let guard = jit_ir::GuardInstruction::new(jit_ir::Operand::Local(cond), expect, gi_idx);
         self.jit_mod.push(guard.into());
         Ok(())
@@ -405,7 +405,7 @@ impl<'a> TraceBuilder<'a> {
     fn handle_ret(
         &mut self,
         _inst: &aot_ir::Instruction,
-        _bid: &aot_ir::BlockID,
+        _bid: &aot_ir::BBlockId,
         _aot_inst_idx: usize,
     ) -> Result<(), CompilationError> {
         // FIXME: Map return value to AOT call instruction.
@@ -417,7 +417,7 @@ impl<'a> TraceBuilder<'a> {
     fn handle_icmp(
         &mut self,
         inst: &aot_ir::Instruction,
-        bid: &aot_ir::BlockID,
+        bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
     ) -> Result<(), CompilationError> {
         let op1 = self.handle_operand(inst.operand(0))?;
@@ -434,7 +434,7 @@ impl<'a> TraceBuilder<'a> {
     fn handle_load(
         &mut self,
         inst: &aot_ir::Instruction,
-        bid: &aot_ir::BlockID,
+        bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
     ) -> Result<(), CompilationError> {
         let aot_op = inst.operand(0);
@@ -448,7 +448,7 @@ impl<'a> TraceBuilder<'a> {
     fn handle_call(
         &mut self,
         inst: &'a aot_ir::Instruction,
-        bid: &aot_ir::BlockID,
+        bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
     ) -> Result<(), CompilationError> {
         // Ignore special functions that we neither want to inline nor copy.
@@ -479,7 +479,7 @@ impl<'a> TraceBuilder<'a> {
     fn handle_store(
         &mut self,
         inst: &aot_ir::Instruction,
-        bid: &aot_ir::BlockID,
+        bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
     ) -> Result<(), CompilationError> {
         let val = self.handle_operand(inst.operand(0))?;
@@ -491,7 +491,7 @@ impl<'a> TraceBuilder<'a> {
     fn handle_ptradd(
         &mut self,
         inst: &aot_ir::Instruction,
-        bid: &aot_ir::BlockID,
+        bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
     ) -> Result<(), CompilationError> {
         let target = self.handle_operand(inst.operand(0))?;
@@ -540,29 +540,29 @@ impl<'a> TraceBuilder<'a> {
         // Find the block containing the control point call. This is the (sole) predecessor of the
         // first (guaranteed mappable) block in the trace.
         let prev = match first_blk {
-            TraceAction::MappedAOTBlock { func_name, bb } => {
+            TraceAction::MappedAOTBBlock { func_name, bb } => {
                 debug_assert!(*bb > 0);
                 // It's `- 1` due to the way the ykllvm block splitting pass works.
-                TraceAction::MappedAOTBlock {
+                TraceAction::MappedAOTBBlock {
                     func_name: func_name.clone(),
                     bb: bb - 1,
                 }
             }
-            TraceAction::UnmappableBlock => panic!(),
+            TraceAction::UnmappableBBlock => panic!(),
             TraceAction::Promotion => todo!(),
         };
 
         self.cp_block = self.lookup_aot_block(&prev);
         // This unwrap can't fail. If it does that means the tracer has given us a mappable block
         // that doesn't exist in the AOT module.
-        self.create_trace_header(self.aot_mod.block(self.cp_block.as_ref().unwrap()))?;
+        self.create_trace_header(self.aot_mod.bblock(self.cp_block.as_ref().unwrap()))?;
 
         while let Some(tblk) = trace_iter.next() {
             match tblk {
                 Ok(b) => {
                     match self.lookup_aot_block(&b) {
                         Some(bid) => {
-                            // MappedAOTBlock block
+                            // MappedAOTBBlock block
 
                             if bid.is_entry() {
                                 // This is an entry block.
@@ -604,10 +604,10 @@ impl<'a> TraceBuilder<'a> {
                         }
                         None => {
                             self.last_block_mappable = false;
-                            // UnmappableBlock block
+                            // UnmappableBBlock block
                             // Ignore for now. May be later used to make sense of the control flow. Though
-                            // ideally we remove unmappable blocks from the trace so we can handle software
-                            // and hardware traces the same.
+                            // ideally we remove unmappable basic blocks from the trace so we can
+                            // handle software and hardware traces the same.
                         }
                     }
                 }

@@ -43,7 +43,7 @@ type AtomicHotThreshold = AtomicU32;
 pub type TraceFailureThreshold = u16;
 pub type AtomicTraceFailureThreshold = AtomicU16;
 
-/// How many blocks long can a trace be before we give up trying to compile it? Note that the
+/// How many basic blocks long can a trace be before we give up trying to compile it? Note that the
 /// slower our compiler, the lower this will have to be in order to give the perception of
 /// reasonable performance.
 /// FIXME: needs to be configurable.
