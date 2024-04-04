@@ -191,12 +191,12 @@ impl InstructionID {
 }
 
 #[derive(Debug, PartialEq)]
-pub(crate) struct BlockID {
+pub(crate) struct BBlockId {
     func_idx: FuncIdx,
     bb_idx: BBIdx,
 }
 
-impl BlockID {
+impl BBlockId {
     pub(crate) fn new(func_idx: FuncIdx, bb_idx: BBIdx) -> Self {
         Self { func_idx, bb_idx }
     }
@@ -1004,8 +1004,8 @@ impl Module {
             .unwrap()
     }
 
-    /// Return the block uniquely identified (in this module) by the specified [BlockID].
-    pub(crate) fn block(&self, bid: &BlockID) -> &Block {
+    /// Return the block uniquely identified (in this module) by the specified [BBlockId].
+    pub(crate) fn block(&self, bid: &BBlockId) -> &Block {
         self.funcs[bid.func_idx].block(bid.bb_idx)
     }
 

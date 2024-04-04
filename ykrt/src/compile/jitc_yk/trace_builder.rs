@@ -31,7 +31,7 @@ struct TraceBuilder<'a> {
     /// Maps an AOT instruction to a jit instruction via their index-based IDs.
     local_map: HashMap<aot_ir::InstructionID, jit_ir::InstrIdx>,
     // Block containing the current control point (i.e. the control point that started this trace).
-    cp_block: Option<aot_ir::BlockID>,
+    cp_block: Option<aot_ir::BBlockId>,
     // Index of the first traceinput instruction.
     first_ti_idx: usize,
     // Was the last instruction we've processed a return?
@@ -63,12 +63,12 @@ impl<'a> TraceBuilder<'a> {
     }
 
     // Given a mapped block, find the AOT block ID, or return `None` if it is unmapped.
-    fn lookup_aot_block(&self, tb: &TraceAction) -> Option<aot_ir::BlockID> {
+    fn lookup_aot_block(&self, tb: &TraceAction) -> Option<aot_ir::BBlockId> {
         match tb {
             TraceAction::MappedAOTBlock { func_name, bb } => {
                 let func_name = func_name.to_str().unwrap(); // safe: func names are valid UTF-8.
                 let func = self.aot_mod.func_idx(func_name);
-                Some(aot_ir::BlockID::new(func, aot_ir::BBIdx::new(*bb)))
+                Some(aot_ir::BBlockId::new(func, aot_ir::BBIdx::new(*bb)))
             }
             TraceAction::UnmappableBlock { .. } => None,
             TraceAction::Promotion => todo!(),
@@ -160,8 +160,8 @@ impl<'a> TraceBuilder<'a> {
     /// Walk over a traced AOT block, translating the constituent instructions into the JIT module.
     fn process_block(
         &mut self,
-        bid: aot_ir::BlockID,
-        nextbb: Option<aot_ir::BlockID>,
+        bid: aot_ir::BBlockId,
+        nextbb: Option<aot_ir::BBlockId>,
     ) -> Result<(), CompilationError> {
         // unwrap safe: can't trace a block not in the AOT module.
         self.last_instr_return = false;
@@ -201,7 +201,7 @@ impl<'a> TraceBuilder<'a> {
     fn copy_instruction(
         &mut self,
         jit_inst: jit_ir::Instruction,
-        bid: &aot_ir::BlockID,
+        bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
     ) -> Result<(), CompilationError> {
         // If the AOT instruction defines a new value, then add it to the local map.
@@ -334,7 +334,7 @@ impl<'a> TraceBuilder<'a> {
     fn handle_binop(
         &mut self,
         inst: &aot_ir::Instruction,
-        bid: &aot_ir::BlockID,
+        bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
     ) -> Result<(), CompilationError> {
         let op1 = self.handle_operand(inst.operand(0))?;
@@ -351,7 +351,7 @@ impl<'a> TraceBuilder<'a> {
         &mut self,
         inst: &aot_ir::Instruction,
         sm: &aot_ir::Instruction,
-        nextbb: &aot_ir::BlockID,
+        nextbb: &aot_ir::BBlockId,
     ) -> Result<(), CompilationError> {
         let cond = match &inst.operand(0) {
             aot_ir::Operand::LocalVariable(iid) => self.local_map[iid],
@@ -405,7 +405,7 @@ impl<'a> TraceBuilder<'a> {
     fn handle_ret(
         &mut self,
         _inst: &aot_ir::Instruction,
-        _bid: &aot_ir::BlockID,
+        _bid: &aot_ir::BBlockId,
         _aot_inst_idx: usize,
     ) -> Result<(), CompilationError> {
         // FIXME: Map return value to AOT call instruction.
@@ -417,7 +417,7 @@ impl<'a> TraceBuilder<'a> {
     fn handle_icmp(
         &mut self,
         inst: &aot_ir::Instruction,
-        bid: &aot_ir::BlockID,
+        bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
     ) -> Result<(), CompilationError> {
         let op1 = self.handle_operand(inst.operand(0))?;
@@ -434,7 +434,7 @@ impl<'a> TraceBuilder<'a> {
     fn handle_load(
         &mut self,
         inst: &aot_ir::Instruction,
-        bid: &aot_ir::BlockID,
+        bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
     ) -> Result<(), CompilationError> {
         let aot_op = inst.operand(0);
@@ -448,7 +448,7 @@ impl<'a> TraceBuilder<'a> {
     fn handle_call(
         &mut self,
         inst: &'a aot_ir::Instruction,
-        bid: &aot_ir::BlockID,
+        bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
     ) -> Result<(), CompilationError> {
         // Ignore special functions that we neither want to inline nor copy.
@@ -479,7 +479,7 @@ impl<'a> TraceBuilder<'a> {
     fn handle_store(
         &mut self,
         inst: &aot_ir::Instruction,
-        bid: &aot_ir::BlockID,
+        bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
     ) -> Result<(), CompilationError> {
         let val = self.handle_operand(inst.operand(0))?;
@@ -491,7 +491,7 @@ impl<'a> TraceBuilder<'a> {
     fn handle_ptradd(
         &mut self,
         inst: &aot_ir::Instruction,
-        bid: &aot_ir::BlockID,
+        bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
     ) -> Result<(), CompilationError> {
         let target = self.handle_operand(inst.operand(0))?;
