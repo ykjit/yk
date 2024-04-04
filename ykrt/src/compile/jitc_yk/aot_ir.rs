@@ -172,18 +172,6 @@ impl AotIRDisplay for Opcode {
 }
 
 #[deku_derive(DekuRead)]
-#[derive(Debug)]
-pub(crate) struct ConstantOperand {
-    const_idx: ConstIdx,
-}
-
-impl AotIRDisplay for ConstantOperand {
-    fn to_string(&self, m: &Module) -> String {
-        m.consts[self.const_idx].to_string(m)
-    }
-}
-
-#[deku_derive(DekuRead)]
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub(crate) struct InstructionID {
     #[deku(skip)] // computed after deserialisation.
@@ -229,68 +217,7 @@ impl BlockID {
     }
 }
 
-#[deku_derive(DekuRead)]
-#[derive(Debug, Hash, Eq, PartialEq)]
-pub(crate) struct LocalVariableOperand(pub(crate) InstructionID);
-
-impl LocalVariableOperand {
-    pub(crate) fn instr_id(&self) -> &InstructionID {
-        &self.0
-    }
-
-    pub(crate) fn instr_id_mut(&mut self) -> &mut InstructionID {
-        &mut self.0
-    }
-}
-
-impl AotIRDisplay for LocalVariableOperand {
-    fn to_string(&self, _m: &Module) -> String {
-        format!(
-            "${}_{}",
-            usize::from(self.0.bb_idx),
-            usize::from(self.0.inst_idx)
-        )
-    }
-}
-
-#[deku_derive(DekuRead)]
-#[derive(Debug)]
-pub(crate) struct TypeOperand {
-    type_idx: TypeIdx,
-}
-
-#[deku_derive(DekuRead)]
-#[derive(Debug)]
-pub(crate) struct BlockOperand {
-    pub(crate) bb_idx: BlockIdx,
-}
-
-impl AotIRDisplay for BlockOperand {
-    fn to_string(&self, _m: &Module) -> String {
-        format!("bb{}", usize::from(self.bb_idx))
-    }
-}
-
-#[deku_derive(DekuRead)]
-#[derive(Debug)]
-pub(crate) struct FuncOperand {
-    func_idx: FuncIdx,
-}
-
-/// An operand that is an argument to the parent function.
-#[deku_derive(DekuRead)]
-#[derive(Debug)]
-pub(crate) struct ArgOperand {
-    arg_idx: ArgIdx,
-}
-
-impl AotIRDisplay for ArgOperand {
-    fn to_string(&self, _m: &Module) -> String {
-        format!("$arg{}", usize::from(self.arg_idx))
-    }
-}
-
-/// Predictaes for use in numeric comparisons.
+/// Predicates for use in numeric comparisons.
 #[deku_derive(DekuRead)]
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 #[deku(type = "u8")]
@@ -314,25 +241,6 @@ impl AotIRDisplay for Predicate {
     }
 }
 
-/// A global variable operand.
-#[deku_derive(DekuRead)]
-#[derive(Debug)]
-pub(crate) struct GlobalOperand {
-    global_decl_idx: GlobalDeclIdx,
-}
-
-impl GlobalOperand {
-    pub(crate) fn index(&self) -> GlobalDeclIdx {
-        self.global_decl_idx
-    }
-}
-
-impl AotIRDisplay for GlobalOperand {
-    fn to_string(&self, m: &Module) -> String {
-        m.global_decls[self.global_decl_idx].to_string(m)
-    }
-}
-
 const OPKIND_CONST: u8 = 0;
 const OPKIND_LOCAL_VARIABLE: u8 = 1;
 const OPKIND_TYPE: u8 = 2;
@@ -348,19 +256,19 @@ const OPKIND_UNIMPLEMENTED: u8 = 255;
 #[deku(type = "u8")]
 pub(crate) enum Operand {
     #[deku(id = "OPKIND_CONST")]
-    Constant(ConstantOperand),
+    Constant(ConstIdx),
     #[deku(id = "OPKIND_LOCAL_VARIABLE")]
-    LocalVariable(LocalVariableOperand),
+    LocalVariable(InstructionID),
     #[deku(id = "OPKIND_TYPE")]
-    Type(TypeOperand),
+    Type(TypeIdx),
     #[deku(id = "OPKIND_FUNC")]
-    Func(FuncOperand),
+    Func(FuncIdx),
     #[deku(id = "OPKIND_BLOCK")]
-    Block(BlockOperand),
+    Block(BlockIdx),
     #[deku(id = "OPKIND_ARG")]
-    Arg(ArgOperand),
+    Arg(ArgIdx),
     #[deku(id = "OPKIND_GLOBAL")]
-    Global(GlobalOperand),
+    Global(GlobalDeclIdx),
     #[deku(id = "OPKIND_PREDICATE")]
     Predicate(Predicate),
     #[deku(id = "OPKIND_UNIMPLEMENTED")]
@@ -375,9 +283,8 @@ impl Operand {
     /// OPT: This is expensive.
     pub(crate) fn to_instr<'a>(&self, aotmod: &'a Module) -> &'a Instruction {
         match self {
-            Self::LocalVariable(lvo) => {
-                let iid = lvo.instr_id();
-                &aotmod.funcs[iid.func_idx].blocks[iid.bb_idx].instrs[lvo.instr_id().inst_idx]
+            Self::LocalVariable(iid) => {
+                &aotmod.funcs[iid.func_idx].blocks[iid.bb_idx].instrs[iid.inst_idx]
             }
             _ => panic!(),
         }
@@ -390,7 +297,7 @@ impl Operand {
                 // The `unwrap` can't fail for a `LocalVariable`.
                 self.to_instr(m).def_type(m).unwrap()
             }
-            Self::Type(t) => m.type_(t.type_idx),
+            Self::Type(type_idx) => m.type_(*type_idx),
             _ => todo!(),
         }
     }
@@ -399,10 +306,7 @@ impl Operand {
     /// operands.
     pub(crate) fn to_instr_id(&self) -> InstructionID {
         match self {
-            Self::LocalVariable(lvo) => {
-                let iid = lvo.instr_id();
-                InstructionID::new(iid.func_idx, iid.bb_idx, iid.inst_idx)
-            }
+            Self::LocalVariable(iid) => InstructionID::new(iid.func_idx, iid.bb_idx, iid.inst_idx),
             _ => panic!(),
         }
     }
@@ -411,13 +315,15 @@ impl Operand {
 impl AotIRDisplay for Operand {
     fn to_string(&self, m: &Module) -> String {
         match self {
-            Self::Constant(c) => c.to_string(m),
-            Self::LocalVariable(l) => l.to_string(m),
-            Self::Type(t) => m.types[t.type_idx].to_string(m),
-            Self::Func(f) => m.funcs[f.func_idx].name.to_owned(),
-            Self::Block(bb) => bb.to_string(m),
-            Self::Global(g) => g.to_string(m),
-            Self::Arg(a) => a.to_string(m),
+            Self::Constant(const_idx) => m.consts[*const_idx].to_string(m),
+            Self::LocalVariable(iid) => {
+                format!("${}_{}", usize::from(iid.bb_idx), usize::from(iid.inst_idx))
+            }
+            Self::Type(type_idx) => m.types[*type_idx].to_string(m),
+            Self::Func(func_idx) => m.funcs[*func_idx].name.to_owned(),
+            Self::Block(bb_idx) => format!("bb{}", usize::from(*bb_idx)),
+            Self::Arg(arg_idx) => format!("$arg{}", usize::from(*arg_idx)),
+            Self::Global(gd_idx) => m.global_decls[*gd_idx].to_string(m),
             Self::Predicate(p) => p.to_string(m),
             Self::Unimplemented(s) => format!("?op<{}>", s),
         }
@@ -463,7 +369,7 @@ impl Instruction {
         debug_assert!(matches!(self.opcode, Opcode::Call));
         let op = self.operand(0);
         match op {
-            Operand::Func(fo) => fo.func_idx,
+            Operand::Func(func_idx) => *func_idx,
             _ => panic!(),
         }
     }
@@ -495,8 +401,8 @@ impl Instruction {
             // Call instructions always have at least one operand (the callee), so this is safe.
             let op = &self.operands[0];
             match op {
-                Operand::Func(fop) => {
-                    return aot_mod.funcs[fop.func_idx].name == CONTROL_POINT_NAME;
+                Operand::Func(func_idx) => {
+                    return aot_mod.funcs[*func_idx].name == CONTROL_POINT_NAME;
                 }
                 _ => todo!(),
             }
@@ -509,8 +415,8 @@ impl Instruction {
             // Call instructions always have at least one operand (the callee), so this is safe.
             let op = &self.operands[0];
             match op {
-                Operand::Func(fop) => {
-                    return aot_mod.funcs[fop.func_idx].name == STACKMAP_CALL_NAME;
+                Operand::Func(func_idx) => {
+                    return aot_mod.funcs[*func_idx].name == STACKMAP_CALL_NAME;
                 }
                 _ => todo!(),
             }
@@ -523,8 +429,8 @@ impl Instruction {
             // Call instructions always have at least one operand (the callee), so this is safe.
             let op = &self.operands[0];
             match op {
-                Operand::Func(fop) => {
-                    return aot_mod.funcs[fop.func_idx].name == LLVM_DEBUG_CALL_NAME;
+                Operand::Func(func_idx) => {
+                    return aot_mod.funcs[*func_idx].name == LLVM_DEBUG_CALL_NAME;
                 }
                 _ => todo!(),
             }
@@ -1103,8 +1009,8 @@ impl Module {
             for bb in &mut f.blocks {
                 for inst in &mut bb.instrs {
                     for op in &mut inst.operands {
-                        if let Operand::LocalVariable(ref mut lv) = op {
-                            lv.instr_id_mut().func_idx = FuncIdx(f_idx);
+                        if let Operand::LocalVariable(ref mut iid) = op {
+                            iid.func_idx = FuncIdx(f_idx);
                         }
                     }
                 }
@@ -1119,8 +1025,8 @@ impl Module {
         &self.types[instr.type_idx]
     }
 
-    pub(crate) fn constant(&self, co: &ConstantOperand) -> &Constant {
-        &self.consts[co.const_idx]
+    pub(crate) fn constant(&self, co: &ConstIdx) -> &Constant {
+        &self.consts[*co]
     }
 
     pub(crate) fn const_type(&self, c: &Constant) -> &Type {

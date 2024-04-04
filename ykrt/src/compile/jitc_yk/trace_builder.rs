@@ -240,16 +240,16 @@ impl<'a> TraceBuilder<'a> {
         op: &aot_ir::Operand,
     ) -> Result<jit_ir::Operand, CompilationError> {
         let ret = match op {
-            aot_ir::Operand::LocalVariable(lvo) => {
-                let instridx = self.local_map[lvo.instr_id()];
+            aot_ir::Operand::LocalVariable(iid) => {
+                let instridx = self.local_map[iid];
                 jit_ir::Operand::Local(instridx)
             }
             aot_ir::Operand::Constant(cidx) => {
                 let jit_const = self.handle_const(self.aot_mod.constant(cidx))?;
                 jit_ir::Operand::Const(self.jit_mod.const_idx(&jit_const)?)
             }
-            aot_ir::Operand::Global(go) => {
-                let load = jit_ir::LookupGlobalInstruction::new(self.handle_global(go.index())?)?;
+            aot_ir::Operand::Global(gd_idx) => {
+                let load = jit_ir::LookupGlobalInstruction::new(self.handle_global(*gd_idx)?)?;
                 self.jit_mod.push_and_make_operand(load.into())?
             }
             aot_ir::Operand::Unimplemented(_) => {
@@ -329,13 +329,11 @@ impl<'a> TraceBuilder<'a> {
         nextbb: &aot_ir::BlockID,
     ) -> Result<(), CompilationError> {
         let cond = match &inst.operand(0) {
-            aot_ir::Operand::LocalVariable(aot_ir::LocalVariableOperand(iid)) => {
-                self.local_map[iid]
-            }
+            aot_ir::Operand::LocalVariable(iid) => self.local_map[iid],
             _ => panic!(),
         };
         let succ_bb = match inst.operand(1) {
-            aot_ir::Operand::Block(aot_ir::BlockOperand { bb_idx }) => bb_idx,
+            aot_ir::Operand::Block(bb_idx) => *bb_idx,
             _ => panic!(),
         };
 
@@ -364,8 +362,8 @@ impl<'a> TraceBuilder<'a> {
         }
         for op in sm.remaining_operands(3) {
             match op {
-                aot_ir::Operand::LocalVariable(lvo) => {
-                    lives.push(self.local_map[&lvo.0]);
+                aot_ir::Operand::LocalVariable(iid) => {
+                    lives.push(self.local_map[iid]);
                 }
                 _ => panic!(),
             }
@@ -373,7 +371,7 @@ impl<'a> TraceBuilder<'a> {
 
         let gi = jit_ir::GuardInfo::new(smids, lives);
         let gi_idx = self.jit_mod.push_guardinfo(gi)?;
-        let expect = *succ_bb == nextbb.block_idx();
+        let expect = succ_bb == nextbb.block_idx();
         let guard = jit_ir::GuardInstruction::new(jit_ir::Operand::Local(cond), expect, gi_idx);
         self.jit_mod.push(guard.into());
         Ok(())
