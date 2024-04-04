@@ -332,7 +332,8 @@ impl JITCLLVM {
                 TraceAction::UnmappableBBlock => {
                     // The block was unmappable. Indicate this with a null function name.
                     func_names.push(ptr::null());
-                    // BBlock indices for unmappable blocks are irrelevant so we may pass anything here.
+                    // BBlock indices for unmappable basic blocks are irrelevant so we may pass
+                    // anything here.
                     bbs.push(0);
                 }
                 TraceAction::Promotion => todo!(),

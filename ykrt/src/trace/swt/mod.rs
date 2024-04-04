@@ -42,7 +42,7 @@ static FUNC_NAMES: LazyLock<HashMap<usize, CString>> = LazyLock::new(|| {
 });
 
 thread_local! {
-    // Collection of traced basicblocks.
+    // Collection of traced basic blocks.
     static BASIC_BLOCKS: RefCell<Vec<TracingBBlock>> = RefCell::new(vec![]);
 }
 

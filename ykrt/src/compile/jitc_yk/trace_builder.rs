@@ -21,8 +21,8 @@ impl Frame<'_> {
     }
 }
 
-/// Given a mapped trace and an AOT module, assembles an in-memory Yk IR trace by copying blocks
-/// from the AOT IR. The output of this process will be the input to the code generator.
+/// Given a mapped trace and an AOT module, assembles an in-memory Yk IR trace by copying basic
+/// blocks from the AOT IR. The output of this process will be the input to the code generator.
 struct TraceBuilder<'a> {
     /// The AOR IR.
     aot_mod: &'a Module,
@@ -606,8 +606,8 @@ impl<'a> TraceBuilder<'a> {
                             self.last_block_mappable = false;
                             // UnmappableBBlock block
                             // Ignore for now. May be later used to make sense of the control flow. Though
-                            // ideally we remove unmappable blocks from the trace so we can handle software
-                            // and hardware traces the same.
+                            // ideally we remove unmappable basic blocks from the trace so we can
+                            // handle software and hardware traces the same.
                         }
                     }
                 }

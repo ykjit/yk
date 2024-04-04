@@ -59,7 +59,7 @@ impl FuncIdx {
 pub(crate) struct TypeIdx(usize);
 index!(TypeIdx);
 
-/// An index into [Func::blocks].
+/// An index into [Func::bblocks].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct BBIdx(usize);
@@ -281,7 +281,7 @@ impl Operand {
     pub(crate) fn to_instr<'a>(&self, aotmod: &'a Module) -> &'a Instruction {
         match self {
             Self::LocalVariable(iid) => {
-                &aotmod.funcs[iid.func_idx].blocks[iid.bb_idx].instrs[iid.inst_idx]
+                &aotmod.funcs[iid.func_idx].bblocks[iid.bb_idx].instrs[iid.inst_idx]
             }
             _ => panic!(),
         }
@@ -535,14 +535,14 @@ pub(crate) struct Func {
     name: String,
     type_idx: TypeIdx,
     #[deku(temp)]
-    num_blocks: usize,
-    #[deku(count = "num_blocks", map = "deserialise_into_ti_vec")]
-    blocks: TiVec<BBIdx, BBlock>,
+    num_bblocks: usize,
+    #[deku(count = "num_bblocks", map = "deserialise_into_ti_vec")]
+    bblocks: TiVec<BBIdx, BBlock>,
 }
 
 impl Func {
     fn is_declaration(&self) -> bool {
-        self.blocks.is_empty()
+        self.bblocks.is_empty()
     }
 
     /// Return the [BBlock] at the specified index.
@@ -551,7 +551,7 @@ impl Func {
     ///
     /// Panics if the index is out of range.
     pub(crate) fn block(&self, bb_idx: BBIdx) -> &BBlock {
-        &self.blocks[bb_idx]
+        &self.bblocks[bb_idx]
     }
 
     /// Return the name of the function.
@@ -605,7 +605,7 @@ impl AotIRDisplay for Func {
                 ret.push_str(";\n");
             } else {
                 ret.push_str(" {\n");
-                for (i, b) in self.blocks.iter().enumerate() {
+                for (i, b) in self.bblocks.iter().enumerate() {
                     ret.push_str(&format!("  bb{}:\n{}", i, b.to_string(m)));
                 }
                 ret.push_str("}\n");
@@ -978,7 +978,7 @@ impl Module {
         // Note that because the on-disk IR is conceptually immutable, so we don't have to worry
         // about keeping the names up to date.
         for f in &self.funcs {
-            for (bb_idx, bb) in f.blocks.iter().enumerate() {
+            for (bb_idx, bb) in f.bblocks.iter().enumerate() {
                 for (inst_idx, inst) in bb.instrs.iter().enumerate() {
                     if let Some(_) = inst.def_type(self) {
                         *inst.name.borrow_mut() = Some(format!("{}_{}", bb_idx, inst_idx));
@@ -1015,7 +1015,7 @@ impl Module {
     /// https://github.com/sharksforarms/deku/issues/363
     fn compute_local_operand_func_indices(&mut self) {
         for (f_idx, f) in self.funcs.iter_mut().enumerate() {
-            for bb in &mut f.blocks {
+            for bb in &mut f.bblocks {
                 for inst in &mut bb.instrs {
                     for op in &mut inst.operands {
                         if let Operand::LocalVariable(ref mut iid) = op {
@@ -1155,7 +1155,7 @@ mod tests {
         write_str(&mut data, "foo");
         // type_idx:
         write_native_usize(&mut data, 4);
-        // num_blocks:
+        // num_bblocks:
         write_native_usize(&mut data, 2);
 
         // BLOCK 0
@@ -1300,7 +1300,7 @@ mod tests {
         write_str(&mut data, "bar");
         // type_idx:
         write_native_usize(&mut data, 5);
-        // num_blocks:
+        // num_bblocks:
         write_native_usize(&mut data, 0);
 
         // CONSTANTS

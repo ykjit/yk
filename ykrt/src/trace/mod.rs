@@ -108,9 +108,9 @@ pub enum TraceAction {
         /// The index of the block within the function.
         bb: usize,
     },
-    /// One or more machine blocks that could not be mapped.
+    /// One or more machine basic blocks that could not be mapped.
     ///
-    /// This usually means that the blocks were compiled outside of ykllvm.
+    /// This usually means that the basic blocks were compiled outside of ykllvm.
     UnmappableBBlock,
     /// A value promoted and recorded within the low-level trace (e.g. `PTWRITE`). In essence these
     /// are calls to `yk_promote` that have been inlined so that the tracer backend can handle them
