@@ -5,7 +5,7 @@
 
 use byteorder::{NativeEndian, ReadBytesExt};
 use deku::prelude::*;
-use std::{cell::RefCell, error::Error, ffi::CStr, fs, path::PathBuf};
+use std::{cell::RefCell, error::Error, ffi::CString, fs, path::PathBuf};
 use typed_index_collections::TiVec;
 
 /// A magic number that all bytecode payloads begin with.
@@ -92,19 +92,22 @@ index!(GlobalDeclIdx);
 pub(crate) struct ArgIdx(usize);
 index!(ArgIdx);
 
-fn deserialise_string(v: Vec<u8>) -> Result<String, DekuError> {
-    let err = Err(DekuError::Parse("failed to parse string".to_owned()));
-    match CStr::from_bytes_until_nul(v.as_slice()) {
-        Ok(c) => match c.to_str() {
-            Ok(s) => Ok(s.to_owned()),
-            Err(_) => err,
-        },
-        _ => err,
+/// Helper function for deku `map` attribute. It is necessary to write all the types out in full to
+/// avoid type inference errors, so it's easier to have a single helper function rather than inline
+/// this into each `map` attribute.
+fn map_to_string(v: Vec<u8>) -> Result<String, DekuError> {
+    if let Ok(x) = CString::from_vec_with_nul(v) {
+        if let Ok(x) = x.into_string() {
+            return Ok(x);
+        }
     }
+    Err(DekuError::Parse("Couldn't map string".to_owned()))
 }
 
-/// Helper function to convert a vector into a `TiVec` during deku parsing.
-fn deserialise_into_ti_vec<I, T>(v: Vec<T>) -> Result<TiVec<I, T>, DekuError> {
+/// Helper function for deku `map` attribute. It is necessary to write all the types out in full to
+/// avoid type inference errors, so it's easier to have a single helper function rather than inline
+/// this into each `map` attribute.
+fn map_to_tivec<I, T>(v: Vec<T>) -> Result<TiVec<I, T>, DekuError> {
     Ok(TiVec::from(v))
 }
 
@@ -269,7 +272,7 @@ pub(crate) enum Operand {
     #[deku(id = "OPKIND_PREDICATE")]
     Predicate(Predicate),
     #[deku(id = "OPKIND_UNIMPLEMENTED")]
-    Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")] String),
+    Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "map_to_string")] String),
 }
 
 impl Operand {
@@ -513,7 +516,7 @@ impl AotIRDisplay for Instruction {
 pub(crate) struct BBlock {
     #[deku(temp)]
     num_instrs: usize,
-    #[deku(count = "num_instrs", map = "deserialise_into_ti_vec")]
+    #[deku(count = "num_instrs", map = "map_to_tivec")]
     pub(crate) instrs: TiVec<InstrIdx, Instruction>,
 }
 
@@ -531,12 +534,12 @@ impl AotIRDisplay for BBlock {
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct Func {
-    #[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")]
+    #[deku(until = "|v: &u8| *v == 0", map = "map_to_string")]
     name: String,
     type_idx: TypeIdx,
     #[deku(temp)]
     num_bblocks: usize,
-    #[deku(count = "num_bblocks", map = "deserialise_into_ti_vec")]
+    #[deku(count = "num_bblocks", map = "map_to_tivec")]
     bblocks: TiVec<BBlockIdx, BBlock>,
 }
 
@@ -834,7 +837,7 @@ pub(crate) enum Type {
     #[deku(id = "TYKIND_STRUCT")]
     Struct(StructType),
     #[deku(id = "TYKIND_UNIMPLEMENTED")]
-    Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")] String),
+    Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "map_to_string")] String),
 }
 
 impl Type {
@@ -916,7 +919,7 @@ impl AotIRDisplay for Constant {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct GlobalDecl {
     is_threadlocal: bool,
-    #[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")]
+    #[deku(until = "|v: &u8| *v == 0", map = "map_to_string")]
     name: String,
 }
 
@@ -950,19 +953,19 @@ pub(crate) struct Module {
     version: u32,
     #[deku(temp)]
     num_funcs: usize,
-    #[deku(count = "num_funcs", map = "deserialise_into_ti_vec")]
+    #[deku(count = "num_funcs", map = "map_to_tivec")]
     funcs: TiVec<FuncIdx, Func>,
     #[deku(temp)]
     num_consts: usize,
-    #[deku(count = "num_consts", map = "deserialise_into_ti_vec")]
+    #[deku(count = "num_consts", map = "map_to_tivec")]
     consts: TiVec<ConstIdx, Constant>,
     #[deku(temp)]
     num_global_decls: usize,
-    #[deku(count = "num_global_decls", map = "deserialise_into_ti_vec")]
+    #[deku(count = "num_global_decls", map = "map_to_tivec")]
     global_decls: TiVec<GlobalDeclIdx, GlobalDecl>,
     #[deku(temp)]
     num_types: usize,
-    #[deku(count = "num_types", map = "deserialise_into_ti_vec")]
+    #[deku(count = "num_types", map = "map_to_tivec")]
     types: TiVec<TypeIdx, Type>,
     /// Have local variable names been computed?
     ///
@@ -1119,7 +1122,6 @@ mod tests {
     use super::*;
     use byteorder::WriteBytesExt;
     use num_traits::{PrimInt, ToBytes};
-    use std::ffi::CString;
     use std::mem;
 
     #[cfg(target_pointer_width = "64")]
@@ -1434,7 +1436,7 @@ func bar();
     fn string_deser() {
         let check = |s: &str| {
             assert_eq!(
-                &deserialise_string(CString::new(s).unwrap().into_bytes_with_nul()).unwrap(),
+                &map_to_string(CString::new(s).unwrap().into_bytes_with_nul()).unwrap(),
                 s
             );
         };
