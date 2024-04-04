@@ -219,12 +219,6 @@ impl BlockID {
 
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
-pub(crate) struct TypeOperand {
-    type_idx: TypeIdx,
-}
-
-#[deku_derive(DekuRead)]
-#[derive(Debug)]
 pub(crate) struct BlockOperand {
     pub(crate) bb_idx: BlockIdx,
 }
@@ -316,7 +310,7 @@ pub(crate) enum Operand {
     #[deku(id = "OPKIND_LOCAL_VARIABLE")]
     LocalVariable(InstructionID),
     #[deku(id = "OPKIND_TYPE")]
-    Type(TypeOperand),
+    Type(TypeIdx),
     #[deku(id = "OPKIND_FUNC")]
     Func(FuncOperand),
     #[deku(id = "OPKIND_BLOCK")]
@@ -353,7 +347,7 @@ impl Operand {
                 // The `unwrap` can't fail for a `LocalVariable`.
                 self.to_instr(m).def_type(m).unwrap()
             }
-            Self::Type(t) => m.type_(t.type_idx),
+            Self::Type(type_idx) => m.type_(*type_idx),
             _ => todo!(),
         }
     }
@@ -375,7 +369,7 @@ impl AotIRDisplay for Operand {
             Self::LocalVariable(iid) => {
                 format!("${}_{}", usize::from(iid.bb_idx), usize::from(iid.inst_idx))
             }
-            Self::Type(t) => m.types[t.type_idx].to_string(m),
+            Self::Type(type_idx) => m.types[*type_idx].to_string(m),
             Self::Func(f) => m.funcs[f.func_idx].name.to_owned(),
             Self::Block(bb) => bb.to_string(m),
             Self::Global(g) => g.to_string(m),
