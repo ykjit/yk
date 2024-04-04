@@ -240,8 +240,8 @@ impl<'a> TraceBuilder<'a> {
         op: &aot_ir::Operand,
     ) -> Result<jit_ir::Operand, CompilationError> {
         let ret = match op {
-            aot_ir::Operand::LocalVariable(lvo) => {
-                let instridx = self.local_map[lvo.instr_id()];
+            aot_ir::Operand::LocalVariable(iid) => {
+                let instridx = self.local_map[iid];
                 jit_ir::Operand::Local(instridx)
             }
             aot_ir::Operand::Constant(cidx) => {
@@ -329,9 +329,7 @@ impl<'a> TraceBuilder<'a> {
         nextbb: &aot_ir::BlockID,
     ) -> Result<(), CompilationError> {
         let cond = match &inst.operand(0) {
-            aot_ir::Operand::LocalVariable(aot_ir::LocalVariableOperand(iid)) => {
-                self.local_map[iid]
-            }
+            aot_ir::Operand::LocalVariable(iid) => self.local_map[iid],
             _ => panic!(),
         };
         let succ_bb = match inst.operand(1) {
@@ -364,8 +362,8 @@ impl<'a> TraceBuilder<'a> {
         }
         for op in sm.remaining_operands(3) {
             match op {
-                aot_ir::Operand::LocalVariable(lvo) => {
-                    lives.push(self.local_map[&lvo.0]);
+                aot_ir::Operand::LocalVariable(iid) => {
+                    lives.push(self.local_map[iid]);
                 }
                 _ => panic!(),
             }

@@ -230,30 +230,6 @@ impl BlockID {
 }
 
 #[deku_derive(DekuRead)]
-#[derive(Debug, Hash, Eq, PartialEq)]
-pub(crate) struct LocalVariableOperand(pub(crate) InstructionID);
-
-impl LocalVariableOperand {
-    pub(crate) fn instr_id(&self) -> &InstructionID {
-        &self.0
-    }
-
-    pub(crate) fn instr_id_mut(&mut self) -> &mut InstructionID {
-        &mut self.0
-    }
-}
-
-impl AotIRDisplay for LocalVariableOperand {
-    fn to_string(&self, _m: &Module) -> String {
-        format!(
-            "${}_{}",
-            usize::from(self.0.bb_idx),
-            usize::from(self.0.inst_idx)
-        )
-    }
-}
-
-#[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct TypeOperand {
     type_idx: TypeIdx,
@@ -350,7 +326,7 @@ pub(crate) enum Operand {
     #[deku(id = "OPKIND_CONST")]
     Constant(ConstantOperand),
     #[deku(id = "OPKIND_LOCAL_VARIABLE")]
-    LocalVariable(LocalVariableOperand),
+    LocalVariable(InstructionID),
     #[deku(id = "OPKIND_TYPE")]
     Type(TypeOperand),
     #[deku(id = "OPKIND_FUNC")]
@@ -375,9 +351,8 @@ impl Operand {
     /// OPT: This is expensive.
     pub(crate) fn to_instr<'a>(&self, aotmod: &'a Module) -> &'a Instruction {
         match self {
-            Self::LocalVariable(lvo) => {
-                let iid = lvo.instr_id();
-                &aotmod.funcs[iid.func_idx].blocks[iid.bb_idx].instrs[lvo.instr_id().inst_idx]
+            Self::LocalVariable(iid) => {
+                &aotmod.funcs[iid.func_idx].blocks[iid.bb_idx].instrs[iid.inst_idx]
             }
             _ => panic!(),
         }
@@ -399,10 +374,7 @@ impl Operand {
     /// operands.
     pub(crate) fn to_instr_id(&self) -> InstructionID {
         match self {
-            Self::LocalVariable(lvo) => {
-                let iid = lvo.instr_id();
-                InstructionID::new(iid.func_idx, iid.bb_idx, iid.inst_idx)
-            }
+            Self::LocalVariable(iid) => InstructionID::new(iid.func_idx, iid.bb_idx, iid.inst_idx),
             _ => panic!(),
         }
     }
@@ -412,7 +384,9 @@ impl AotIRDisplay for Operand {
     fn to_string(&self, m: &Module) -> String {
         match self {
             Self::Constant(c) => c.to_string(m),
-            Self::LocalVariable(l) => l.to_string(m),
+            Self::LocalVariable(iid) => {
+                format!("${}_{}", usize::from(iid.bb_idx), usize::from(iid.inst_idx))
+            }
             Self::Type(t) => m.types[t.type_idx].to_string(m),
             Self::Func(f) => m.funcs[f.func_idx].name.to_owned(),
             Self::Block(bb) => bb.to_string(m),
@@ -1103,8 +1077,8 @@ impl Module {
             for bb in &mut f.blocks {
                 for inst in &mut bb.instrs {
                     for op in &mut inst.operands {
-                        if let Operand::LocalVariable(ref mut lv) = op {
-                            lv.instr_id_mut().func_idx = FuncIdx(f_idx);
+                        if let Operand::LocalVariable(ref mut iid) = op {
+                            iid.func_idx = FuncIdx(f_idx);
                         }
                     }
                 }
