@@ -217,20 +217,7 @@ impl BlockID {
     }
 }
 
-/// An operand that is an argument to the parent function.
-#[deku_derive(DekuRead)]
-#[derive(Debug)]
-pub(crate) struct ArgOperand {
-    arg_idx: ArgIdx,
-}
-
-impl AotIRDisplay for ArgOperand {
-    fn to_string(&self, _m: &Module) -> String {
-        format!("$arg{}", usize::from(self.arg_idx))
-    }
-}
-
-/// Predictaes for use in numeric comparisons.
+/// Predicates for use in numeric comparisons.
 #[deku_derive(DekuRead)]
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 #[deku(type = "u8")]
@@ -298,7 +285,7 @@ pub(crate) enum Operand {
     #[deku(id = "OPKIND_BLOCK")]
     Block(BlockIdx),
     #[deku(id = "OPKIND_ARG")]
-    Arg(ArgOperand),
+    Arg(ArgIdx),
     #[deku(id = "OPKIND_GLOBAL")]
     Global(GlobalOperand),
     #[deku(id = "OPKIND_PREDICATE")]
@@ -354,8 +341,8 @@ impl AotIRDisplay for Operand {
             Self::Type(type_idx) => m.types[*type_idx].to_string(m),
             Self::Func(func_idx) => m.funcs[*func_idx].name.to_owned(),
             Self::Block(bb_idx) => format!("bb{}", usize::from(*bb_idx)),
+            Self::Arg(arg_idx) => format!("$arg{}", usize::from(*arg_idx)),
             Self::Global(g) => g.to_string(m),
-            Self::Arg(a) => a.to_string(m),
             Self::Predicate(p) => p.to_string(m),
             Self::Unimplemented(s) => format!("?op<{}>", s),
         }
