@@ -150,6 +150,15 @@ for tracer in $TRACERS; do
       --target x86_64-unknown-linux-gnu
 done
 
+# Later on we are going to need to install cargo-deny and mdbook. We kick the
+# install jobs off now so that at least some work (e.g. downloading crates) can
+# happen in parallel, speeding up the overall process.
+
+cargo_deny_mdbook_tmp=$(mktemp)
+( cargo install --locked cargo-deny ; cargo install --locked mdbook ) \
+  >"${cargo_deny_mdbook_tmp}" 2>&1 &
+cargo_deny_mdbook_pid=$!
+
 # We now want to test building with `--release`.
 
 if [ $cached_ykllvm -eq 0 ]; then
@@ -182,11 +191,10 @@ for b in collect_and_decode promote; do
 done
 
 # Check licenses.
-which cargo-deny | cargo install --locked cargo-deny
+wait "${cargo_deny_mdbook_pid}" || ( cat "${cargo_deny_mdbook_tmp}" && exit 1 )
 cargo-deny check license
 
 # Build the docs
-cargo install --locked mdbook
 cd docs
 mdbook build
 test -d book
