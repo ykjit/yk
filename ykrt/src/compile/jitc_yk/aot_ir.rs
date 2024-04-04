@@ -229,12 +229,6 @@ impl AotIRDisplay for BlockOperand {
     }
 }
 
-#[deku_derive(DekuRead)]
-#[derive(Debug)]
-pub(crate) struct FuncOperand {
-    func_idx: FuncIdx,
-}
-
 /// An operand that is an argument to the parent function.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
@@ -312,7 +306,7 @@ pub(crate) enum Operand {
     #[deku(id = "OPKIND_TYPE")]
     Type(TypeIdx),
     #[deku(id = "OPKIND_FUNC")]
-    Func(FuncOperand),
+    Func(FuncIdx),
     #[deku(id = "OPKIND_BLOCK")]
     Block(BlockOperand),
     #[deku(id = "OPKIND_ARG")]
@@ -370,7 +364,7 @@ impl AotIRDisplay for Operand {
                 format!("${}_{}", usize::from(iid.bb_idx), usize::from(iid.inst_idx))
             }
             Self::Type(type_idx) => m.types[*type_idx].to_string(m),
-            Self::Func(f) => m.funcs[f.func_idx].name.to_owned(),
+            Self::Func(func_idx) => m.funcs[*func_idx].name.to_owned(),
             Self::Block(bb) => bb.to_string(m),
             Self::Global(g) => g.to_string(m),
             Self::Arg(a) => a.to_string(m),
@@ -419,7 +413,7 @@ impl Instruction {
         debug_assert!(matches!(self.opcode, Opcode::Call));
         let op = self.operand(0);
         match op {
-            Operand::Func(fo) => fo.func_idx,
+            Operand::Func(func_idx) => *func_idx,
             _ => panic!(),
         }
     }
@@ -451,8 +445,8 @@ impl Instruction {
             // Call instructions always have at least one operand (the callee), so this is safe.
             let op = &self.operands[0];
             match op {
-                Operand::Func(fop) => {
-                    return aot_mod.funcs[fop.func_idx].name == CONTROL_POINT_NAME;
+                Operand::Func(func_idx) => {
+                    return aot_mod.funcs[*func_idx].name == CONTROL_POINT_NAME;
                 }
                 _ => todo!(),
             }
@@ -465,8 +459,8 @@ impl Instruction {
             // Call instructions always have at least one operand (the callee), so this is safe.
             let op = &self.operands[0];
             match op {
-                Operand::Func(fop) => {
-                    return aot_mod.funcs[fop.func_idx].name == STACKMAP_CALL_NAME;
+                Operand::Func(func_idx) => {
+                    return aot_mod.funcs[*func_idx].name == STACKMAP_CALL_NAME;
                 }
                 _ => todo!(),
             }
@@ -479,8 +473,8 @@ impl Instruction {
             // Call instructions always have at least one operand (the callee), so this is safe.
             let op = &self.operands[0];
             match op {
-                Operand::Func(fop) => {
-                    return aot_mod.funcs[fop.func_idx].name == LLVM_DEBUG_CALL_NAME;
+                Operand::Func(func_idx) => {
+                    return aot_mod.funcs[*func_idx].name == LLVM_DEBUG_CALL_NAME;
                 }
                 _ => todo!(),
             }
