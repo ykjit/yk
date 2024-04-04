@@ -333,7 +333,7 @@ impl<'a> TraceBuilder<'a> {
             _ => panic!(),
         };
         let succ_bb = match inst.operand(1) {
-            aot_ir::Operand::Block(aot_ir::BlockOperand { bb_idx }) => bb_idx,
+            aot_ir::Operand::Block(bb_idx) => *bb_idx,
             _ => panic!(),
         };
 
@@ -371,7 +371,7 @@ impl<'a> TraceBuilder<'a> {
 
         let gi = jit_ir::GuardInfo::new(smids, lives);
         let gi_idx = self.jit_mod.push_guardinfo(gi)?;
-        let expect = *succ_bb == nextbb.block_idx();
+        let expect = succ_bb == nextbb.block_idx();
         let guard = jit_ir::GuardInstruction::new(jit_ir::Operand::Local(cond), expect, gi_idx);
         self.jit_mod.push(guard.into());
         Ok(())

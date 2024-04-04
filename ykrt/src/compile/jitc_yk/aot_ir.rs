@@ -217,18 +217,6 @@ impl BlockID {
     }
 }
 
-#[deku_derive(DekuRead)]
-#[derive(Debug)]
-pub(crate) struct BlockOperand {
-    pub(crate) bb_idx: BlockIdx,
-}
-
-impl AotIRDisplay for BlockOperand {
-    fn to_string(&self, _m: &Module) -> String {
-        format!("bb{}", usize::from(self.bb_idx))
-    }
-}
-
 /// An operand that is an argument to the parent function.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
@@ -308,7 +296,7 @@ pub(crate) enum Operand {
     #[deku(id = "OPKIND_FUNC")]
     Func(FuncIdx),
     #[deku(id = "OPKIND_BLOCK")]
-    Block(BlockOperand),
+    Block(BlockIdx),
     #[deku(id = "OPKIND_ARG")]
     Arg(ArgOperand),
     #[deku(id = "OPKIND_GLOBAL")]
@@ -365,7 +353,7 @@ impl AotIRDisplay for Operand {
             }
             Self::Type(type_idx) => m.types[*type_idx].to_string(m),
             Self::Func(func_idx) => m.funcs[*func_idx].name.to_owned(),
-            Self::Block(bb) => bb.to_string(m),
+            Self::Block(bb_idx) => format!("bb{}", usize::from(*bb_idx)),
             Self::Global(g) => g.to_string(m),
             Self::Arg(a) => a.to_string(m),
             Self::Predicate(p) => p.to_string(m),
