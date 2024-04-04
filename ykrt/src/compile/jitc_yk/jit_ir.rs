@@ -800,28 +800,6 @@ pub enum Instruction {
 }
 
 impl Instruction {
-    /// Returns `true` if the instruction defines a local variable.
-    ///
-    /// FIXME: Because self.def_type_idx() isn't complete, we have to handle various possibilities
-    /// here in order that anything works. Once self.get_type_idx() is complete (i.e. no todo!()s
-    /// left) this function can become simply `self.def_type_idx() != jit_mod.void_type_idx()`.
-    pub(crate) fn is_def(&self) -> bool {
-        match self {
-            Self::Load(..) => true,
-            Self::LookupGlobal(..) => true,
-            Self::LoadTraceInput(..) => true,
-            Self::Call(..) => true, // FIXME: May or may not define. Ask func sig.
-            Self::VACall(..) => true, // FIXME: May or may not define. Ask func sig.
-            Self::PtrAdd(..) => true,
-            Self::Store(..) => false,
-            Self::Add(..) => true,
-            Self::Icmp(..) => true,
-            Self::Guard(..) => false,
-            Self::Arg(..) => true,
-            Self::TraceLoopStart => false,
-        }
-    }
-
     /// Returns the type of the local variable that the instruction defines (if any).
     pub(crate) fn def_type<'a>(&self, m: &'a Module) -> Option<&'a Type> {
         let idx = self.def_type_idx(m);
@@ -1726,8 +1704,8 @@ impl Module {
         instr: Instruction,
     ) -> Result<Operand, CompilationError> {
         assert!(InstrIdx::new(self.instrs.len()).is_ok());
-        if !instr.is_def() {
-            panic!();
+        if instr.def_type(self).is_none() {
+            panic!(); // instruction doesn't define a local var.
         }
         let ret = Operand::Local(InstrIdx::new(self.len())?);
         self.instrs.push(instr);

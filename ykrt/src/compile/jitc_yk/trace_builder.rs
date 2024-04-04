@@ -190,7 +190,7 @@ impl<'a> TraceBuilder<'a> {
         aot_inst_idx: usize,
     ) -> Result<(), CompilationError> {
         // If the AOT instruction defines a new value, then add it to the local map.
-        if jit_inst.is_def() {
+        if jit_inst.def_type(&self.jit_mod).is_some() {
             let aot_iid = aot_ir::InstructionID::new(
                 bid.func_idx(),
                 bid.block_idx(),
