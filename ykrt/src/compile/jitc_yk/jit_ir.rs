@@ -33,6 +33,12 @@ pub(crate) struct IntegerType {
 }
 
 impl IntegerType {
+    /// Create a new integer type with the specified number of bits.
+    pub(crate) fn new(num_bits: u32) -> Self {
+        debug_assert!(num_bits > 0 && num_bits <= 0x800000);
+        Self { num_bits }
+    }
+
     /// Return the number of bits (1..2^23 (inc.)) this integer spans.
     pub(crate) fn num_bits(&self) -> u32 {
         self.num_bits
@@ -49,12 +55,6 @@ impl IntegerType {
             ret += 1;
         }
         usize::try_from(ret).unwrap()
-    }
-
-    /// Create a new integer type with the specified number of bits.
-    pub(crate) fn new(num_bits: u32) -> Self {
-        debug_assert!(num_bits > 0 && num_bits <= 0x800000);
-        Self { num_bits }
     }
 
     /// Instantiate a constant of value `val` and of the type described by `self`.
