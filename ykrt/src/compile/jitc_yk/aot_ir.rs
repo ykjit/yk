@@ -103,8 +103,10 @@ fn deserialise_string(v: Vec<u8>) -> Result<String, DekuError> {
     }
 }
 
-/// Helper function to convert a vector into a `TiVec` during deku parsing.
-fn deserialise_into_ti_vec<I, T>(v: Vec<T>) -> Result<TiVec<I, T>, DekuError> {
+/// Helper function for deku `map` attribute. It is necessary to write all the types out in full to
+/// avoid type inference errors, so it's easier to have a single helper function rather than inline
+/// this into each `map` attribute.
+fn map_to_tivec<I, T>(v: Vec<T>) -> Result<TiVec<I, T>, DekuError> {
     Ok(TiVec::from(v))
 }
 
@@ -513,7 +515,7 @@ impl AotIRDisplay for Instruction {
 pub(crate) struct BBlock {
     #[deku(temp)]
     num_instrs: usize,
-    #[deku(count = "num_instrs", map = "deserialise_into_ti_vec")]
+    #[deku(count = "num_instrs", map = "map_to_tivec")]
     pub(crate) instrs: TiVec<InstrIdx, Instruction>,
 }
 
@@ -536,7 +538,7 @@ pub(crate) struct Func {
     type_idx: TypeIdx,
     #[deku(temp)]
     num_bblocks: usize,
-    #[deku(count = "num_bblocks", map = "deserialise_into_ti_vec")]
+    #[deku(count = "num_bblocks", map = "map_to_tivec")]
     bblocks: TiVec<BBlockIdx, BBlock>,
 }
 
@@ -950,19 +952,19 @@ pub(crate) struct Module {
     version: u32,
     #[deku(temp)]
     num_funcs: usize,
-    #[deku(count = "num_funcs", map = "deserialise_into_ti_vec")]
+    #[deku(count = "num_funcs", map = "map_to_tivec")]
     funcs: TiVec<FuncIdx, Func>,
     #[deku(temp)]
     num_consts: usize,
-    #[deku(count = "num_consts", map = "deserialise_into_ti_vec")]
+    #[deku(count = "num_consts", map = "map_to_tivec")]
     consts: TiVec<ConstIdx, Constant>,
     #[deku(temp)]
     num_global_decls: usize,
-    #[deku(count = "num_global_decls", map = "deserialise_into_ti_vec")]
+    #[deku(count = "num_global_decls", map = "map_to_tivec")]
     global_decls: TiVec<GlobalDeclIdx, GlobalDecl>,
     #[deku(temp)]
     num_types: usize,
-    #[deku(count = "num_types", map = "deserialise_into_ti_vec")]
+    #[deku(count = "num_types", map = "map_to_tivec")]
     types: TiVec<TypeIdx, Type>,
     /// Have local variable names been computed?
     ///
