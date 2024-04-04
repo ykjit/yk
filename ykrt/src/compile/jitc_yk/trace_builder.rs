@@ -68,7 +68,7 @@ impl<'a> TraceBuilder<'a> {
             TraceAction::MappedAOTBlock { func_name, bb } => {
                 let func_name = func_name.to_str().unwrap(); // safe: func names are valid UTF-8.
                 let func = self.aot_mod.func_idx(func_name);
-                Some(aot_ir::BlockID::new(func, aot_ir::BlockIdx::new(*bb)))
+                Some(aot_ir::BlockID::new(func, aot_ir::BBIdx::new(*bb)))
             }
             TraceAction::UnmappableBlock { .. } => None,
             TraceAction::Promotion => todo!(),

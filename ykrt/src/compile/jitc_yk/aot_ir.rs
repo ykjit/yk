@@ -62,8 +62,8 @@ index!(TypeIdx);
 /// An index into [Func::blocks].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct BlockIdx(usize);
-index!(BlockIdx);
+pub(crate) struct BBIdx(usize);
+index!(BBIdx);
 
 /// An index into [Block::instrs].
 #[deku_derive(DekuRead)]
@@ -176,12 +176,12 @@ impl AotIRDisplay for Opcode {
 pub(crate) struct InstructionID {
     #[deku(skip)] // computed after deserialisation.
     func_idx: FuncIdx,
-    bb_idx: BlockIdx,
+    bb_idx: BBIdx,
     inst_idx: InstrIdx,
 }
 
 impl InstructionID {
-    pub(crate) fn new(func_idx: FuncIdx, bb_idx: BlockIdx, inst_idx: InstrIdx) -> Self {
+    pub(crate) fn new(func_idx: FuncIdx, bb_idx: BBIdx, inst_idx: InstrIdx) -> Self {
         Self {
             func_idx,
             bb_idx,
@@ -193,11 +193,11 @@ impl InstructionID {
 #[derive(Debug, PartialEq)]
 pub(crate) struct BlockID {
     func_idx: FuncIdx,
-    block_idx: BlockIdx,
+    block_idx: BBIdx,
 }
 
 impl BlockID {
-    pub(crate) fn new(func_idx: FuncIdx, block_idx: BlockIdx) -> Self {
+    pub(crate) fn new(func_idx: FuncIdx, block_idx: BBIdx) -> Self {
         Self {
             func_idx,
             block_idx,
@@ -208,12 +208,12 @@ impl BlockID {
         self.func_idx
     }
 
-    pub(crate) fn block_idx(&self) -> BlockIdx {
+    pub(crate) fn block_idx(&self) -> BBIdx {
         self.block_idx
     }
 
     pub(crate) fn is_entry(&self) -> bool {
-        self.block_idx == BlockIdx(0)
+        self.block_idx == BBIdx(0)
     }
 }
 
@@ -264,7 +264,7 @@ pub(crate) enum Operand {
     #[deku(id = "OPKIND_FUNC")]
     Func(FuncIdx),
     #[deku(id = "OPKIND_BLOCK")]
-    Block(BlockIdx),
+    Block(BBIdx),
     #[deku(id = "OPKIND_ARG")]
     Arg(ArgIdx),
     #[deku(id = "OPKIND_GLOBAL")]
@@ -540,7 +540,7 @@ pub(crate) struct Func {
     #[deku(temp)]
     num_blocks: usize,
     #[deku(count = "num_blocks", map = "deserialise_into_ti_vec")]
-    blocks: TiVec<BlockIdx, Block>,
+    blocks: TiVec<BBIdx, Block>,
 }
 
 impl Func {
@@ -553,7 +553,7 @@ impl Func {
     /// # Panics
     ///
     /// Panics if the index is out of range.
-    pub(crate) fn block(&self, bb_idx: BlockIdx) -> &Block {
+    pub(crate) fn block(&self, bb_idx: BBIdx) -> &Block {
         &self.blocks[bb_idx]
     }
 
