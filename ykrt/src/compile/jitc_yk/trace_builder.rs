@@ -165,7 +165,7 @@ impl<'a> TraceBuilder<'a> {
     ) -> Result<(), CompilationError> {
         // unwrap safe: can't trace a block not in the AOT module.
         self.last_instr_return = false;
-        let blk = self.aot_mod.block(&bid);
+        let blk = self.aot_mod.bblock(&bid);
 
         // Decide how to translate each AOT instruction based upon its opcode.
         for (inst_idx, inst) in blk.instrs.iter().enumerate() {
@@ -555,7 +555,7 @@ impl<'a> TraceBuilder<'a> {
         self.cp_block = self.lookup_aot_block(&prev);
         // This unwrap can't fail. If it does that means the tracer has given us a mappable block
         // that doesn't exist in the AOT module.
-        self.create_trace_header(self.aot_mod.block(self.cp_block.as_ref().unwrap()))?;
+        self.create_trace_header(self.aot_mod.bblock(self.cp_block.as_ref().unwrap()))?;
 
         while let Some(tblk) = trace_iter.next() {
             match tblk {

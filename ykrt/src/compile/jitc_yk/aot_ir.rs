@@ -550,7 +550,7 @@ impl Func {
     /// # Panics
     ///
     /// Panics if the index is out of range.
-    pub(crate) fn block(&self, bb_idx: BBIdx) -> &BBlock {
+    pub(crate) fn bblock(&self, bb_idx: BBIdx) -> &BBlock {
         &self.bblocks[bb_idx]
     }
 
@@ -1005,8 +1005,8 @@ impl Module {
     }
 
     /// Return the block uniquely identified (in this module) by the specified [BBlockId].
-    pub(crate) fn block(&self, bid: &BBlockId) -> &BBlock {
-        self.funcs[bid.func_idx].block(bid.bb_idx)
+    pub(crate) fn bblock(&self, bid: &BBlockId) -> &BBlock {
+        self.funcs[bid.func_idx].bblock(bid.bb_idx)
     }
 
     /// Fill in the function index of local variable operands of instructions.
