@@ -241,25 +241,6 @@ impl AotIRDisplay for Predicate {
     }
 }
 
-/// A global variable operand.
-#[deku_derive(DekuRead)]
-#[derive(Debug)]
-pub(crate) struct GlobalOperand {
-    global_decl_idx: GlobalDeclIdx,
-}
-
-impl GlobalOperand {
-    pub(crate) fn index(&self) -> GlobalDeclIdx {
-        self.global_decl_idx
-    }
-}
-
-impl AotIRDisplay for GlobalOperand {
-    fn to_string(&self, m: &Module) -> String {
-        m.global_decls[self.global_decl_idx].to_string(m)
-    }
-}
-
 const OPKIND_CONST: u8 = 0;
 const OPKIND_LOCAL_VARIABLE: u8 = 1;
 const OPKIND_TYPE: u8 = 2;
@@ -287,7 +268,7 @@ pub(crate) enum Operand {
     #[deku(id = "OPKIND_ARG")]
     Arg(ArgIdx),
     #[deku(id = "OPKIND_GLOBAL")]
-    Global(GlobalOperand),
+    Global(GlobalDeclIdx),
     #[deku(id = "OPKIND_PREDICATE")]
     Predicate(Predicate),
     #[deku(id = "OPKIND_UNIMPLEMENTED")]
@@ -342,7 +323,7 @@ impl AotIRDisplay for Operand {
             Self::Func(func_idx) => m.funcs[*func_idx].name.to_owned(),
             Self::Block(bb_idx) => format!("bb{}", usize::from(*bb_idx)),
             Self::Arg(arg_idx) => format!("$arg{}", usize::from(*arg_idx)),
-            Self::Global(g) => g.to_string(m),
+            Self::Global(gd_idx) => m.global_decls[*gd_idx].to_string(m),
             Self::Predicate(p) => p.to_string(m),
             Self::Unimplemented(s) => format!("?op<{}>", s),
         }
