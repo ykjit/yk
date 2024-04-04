@@ -5,7 +5,7 @@
 
 use byteorder::{NativeEndian, ReadBytesExt};
 use deku::prelude::*;
-use std::{cell::RefCell, error::Error, ffi::CStr, fs, path::PathBuf};
+use std::{cell::RefCell, error::Error, ffi::CString, fs, path::PathBuf};
 use typed_index_collections::TiVec;
 
 /// A magic number that all bytecode payloads begin with.
@@ -96,14 +96,12 @@ index!(ArgIdx);
 /// avoid type inference errors, so it's easier to have a single helper function rather than inline
 /// this into each `map` attribute.
 fn map_to_string(v: Vec<u8>) -> Result<String, DekuError> {
-    let err = Err(DekuError::Parse("failed to parse string".to_owned()));
-    match CStr::from_bytes_until_nul(v.as_slice()) {
-        Ok(c) => match c.to_str() {
-            Ok(s) => Ok(s.to_owned()),
-            Err(_) => err,
-        },
-        _ => err,
+    if let Ok(x) = CString::from_vec_with_nul(v) {
+        if let Ok(x) = x.into_string() {
+            return Ok(x);
+        }
     }
+    Err(DekuError::Parse("Couldn't map string".to_owned()))
 }
 
 /// Helper function for deku `map` attribute. It is necessary to write all the types out in full to
@@ -1124,7 +1122,6 @@ mod tests {
     use super::*;
     use byteorder::WriteBytesExt;
     use num_traits::{PrimInt, ToBytes};
-    use std::ffi::CString;
     use std::mem;
 
     #[cfg(target_pointer_width = "64")]
