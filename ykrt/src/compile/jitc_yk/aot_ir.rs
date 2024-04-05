@@ -721,7 +721,8 @@ impl FuncType {
             is_vararg,
         }
     }
-    pub(crate) fn arg_ty_idxs(&self) -> &Vec<TypeIdx> {
+
+    pub(crate) fn arg_ty_idxs(&self) -> &[TypeIdx] {
         &self.arg_ty_idxs
     }
 
