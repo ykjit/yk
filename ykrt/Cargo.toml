@@ -8,23 +8,23 @@ license = "Apache-2.0 OR MIT"
 [dependencies]
 byteorder = "1.4.3"
 deku = { version = "0.16.0", features = ["std"] }
+dynasmrt = "2.0.0"
 hwtracer = { path = "../hwtracer" }
 libc = "0.2.148"
 memmap2 = "0.9"
-num_cpus = "1.13.1"
 num-traits = "0.2.16"
+num_cpus = "1.13.1"
 parking_lot = "0.12.0"
 parking_lot_core = "0.9.1"
-tempfile = "3.8"
-ykaddr = { path = "../ykaddr" }
-yksmp = { path = "../yksmp" }
+static_assertions = "1.1.0"
 strum = { version = "0.26.1", features = ["derive"] }
 strum_macros = "0.26.1"
-yktracec = { path = "../yktracec" }
-static_assertions = "1.1.0"
-typed-index-collections = "3.1.0"
+tempfile = "3.8"
 thiserror = "1.0.56"
-dynasmrt = "2.0.0"
+typed-index-collections = "3.1.0"
+ykaddr = { path = "../ykaddr" }
+yksmp = { path = "../yksmp" }
+yktracec = { path = "../yktracec" }
 zydis = "4.1.0"
 
 [dependencies.llvm-sys]

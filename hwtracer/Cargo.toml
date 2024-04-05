@@ -6,16 +6,16 @@ edition = "2021"
 license = "Apache-2.0 OR MIT"
 
 [dependencies]
+byteorder = "1.4.3"
+deku = "0.16.0"
+intervaltree = "0.2.7"
+leb128 = "0.2.5"
 libc = "0.2.148"
+memmap2 = "0.9.4"
 strum = { version = "0.26.1", features = ["derive"] }
 strum_macros = "0.26.1"
-deku = "0.16.0"
-ykaddr = { path = "../ykaddr" }
-intervaltree = "0.2.7"
-byteorder = "1.4.3"
-leb128 = "0.2.5"
 thiserror = "1"
-memmap2 = "0.9.4"
+ykaddr = { path = "../ykaddr" }
 
 [dependencies.object]
 version = "0.34.0"
