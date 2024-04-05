@@ -100,7 +100,10 @@ impl<'a> TraceBuilder<'a> {
         // If this unwrap fails, we didn't find the call to the control point and something is
         // profoundly wrong with the AOT IR.
         let trace_inputs = trace_inputs.unwrap();
-        let trace_input_struct_ty = trace_inputs.operand(0).type_(self.aot_mod).as_struct();
+        let trace_input_struct_ty = match trace_inputs.operand(0).type_(self.aot_mod) {
+            aot_ir::Type::Struct(x) => x,
+            _ => panic!(),
+        };
         // We visit the trace inputs in reverse order, so we start with high indices first. This
         // value then decrements in the below loop.
         let mut trace_input_idx = trace_input_struct_ty.num_fields();

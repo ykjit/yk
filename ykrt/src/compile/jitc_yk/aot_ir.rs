@@ -858,19 +858,6 @@ impl Type {
             Self::Unimplemented(s) => format!("?cst<{}>", s),
         }
     }
-
-    /// Returns a reference to the inner [StructType] if this is a `Self::Struct`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `self` isn't a `Self::Struct`.
-    pub(crate) fn as_struct(&self) -> &StructType {
-        if let Self::Struct(st) = self {
-            st
-        } else {
-            panic!();
-        }
-    }
 }
 
 impl AotIRDisplay for Type {
