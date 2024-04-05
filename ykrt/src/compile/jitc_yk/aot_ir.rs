@@ -42,17 +42,11 @@ macro_rules! index {
     };
 }
 
+/// An index into [Module::funcs].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub(crate) struct FuncIdx(usize);
 index!(FuncIdx);
-
-impl FuncIdx {
-    /// Return the [FuncType] for this [FuncIdx] in `m`.
-    pub(crate) fn func_type<'a>(&self, m: &'a Module) -> &'a FuncType {
-        m.func(*self).func_type(m)
-    }
-}
 
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
