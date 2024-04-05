@@ -306,7 +306,7 @@ impl Operand {
     /// operands.
     pub(crate) fn to_instr_id(&self) -> InstructionID {
         match self {
-            Self::LocalVariable(iid) => InstructionID::new(iid.func_idx, iid.bb_idx, iid.inst_idx),
+            Self::LocalVariable(iid) => iid.clone(),
             _ => panic!(),
         }
     }
