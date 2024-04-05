@@ -36,7 +36,7 @@ rev = "678b3da2b2239ae12766c964e6e613c0d82b5f37"
 features = ["no-llvm-linking"]
 
 [dependencies.object]
-version = "0.32"
+version = "0.34.0"
 default-features = false
 features = ["read_core", "elf"]
 
@@ -49,5 +49,5 @@ yk_jitstate_debug = ["yktracec/yk_testing"]
 yk_testing = ["yktracec/yk_testing"]
 
 [dev-dependencies]
-fm = "0.2.2"
+fm = "0.3.0"
 regex = { version = "1.9", features = ["std"] }
