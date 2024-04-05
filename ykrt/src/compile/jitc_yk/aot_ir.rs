@@ -1,7 +1,33 @@
 //! Yk's AOT IR deserialiser.
 //!
-//! This is a parser for the on-disk (in the ELF binary) IR format used to express the
-//! (immutable) ahead-of-time compiled interpreter.
+//! This module contains the data structures for the AOT IR and a parser to read it from its
+//! serialised format.
+//!
+//! The AOT IR accurately reflects the structure and semantics of the AOT binary. As such, it must
+//! not be mutated after the fact.
+//!
+//! The IR is index-centric, meaning that when one data structure refers to another, it is by a
+//! numeric index into a backing vector (and not via a Rust reference). We chose to do it like this
+//! because a) references can't easily be serialised and deserialised; and b) we didn't want to do
+//! another pass over the IR to convert to another version of the data structures that uses
+//! references.
+//!
+//! Each kind of index has a distinct Rust type so that it cannot be accidentally used in place of
+//! an unrelated index. This is enforced by `TiVec`.
+//!
+//! At a high level, the AOT IR contains:
+//!  - Functions (which contain basic blocks, which contain individual instructions).
+//!  - Global variable declarations.
+//!  - Function definitions/declarations.
+//!  - Constant values.
+//!  - Types, for use by all of the above.
+//!
+//! Throughout we use the term "definition" to mean something for which we have total IR knowledge
+//! of, whereas a "declaration" is something compiled externally that we typically only know the
+//! symbol name, address and type of.
+//!
+//! Elements of the IR can be converted to human-readable forms by calling `to_string()` on them.
+//! This is used for testing, but can also be used for debugging.
 
 use byteorder::{NativeEndian, ReadBytesExt};
 use deku::prelude::*;
@@ -48,6 +74,7 @@ macro_rules! index {
 pub(crate) struct FuncIdx(usize);
 index!(FuncIdx);
 
+/// An index into [Module::types].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct TypeIdx(usize);
@@ -168,6 +195,7 @@ impl AotIRDisplay for Opcode {
     }
 }
 
+/// Uniquely identifies an instruction within a [Module].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub(crate) struct InstructionID {
@@ -187,6 +215,7 @@ impl InstructionID {
     }
 }
 
+/// Uniquely identifies a basic block within a [Func].
 #[derive(Debug, PartialEq)]
 pub(crate) struct BBlockId {
     func_idx: FuncIdx,
@@ -324,7 +353,20 @@ impl AotIRDisplay for Operand {
     }
 }
 
-/// A bytecode instruction.
+/// An instruction.
+///
+/// An instruction is conceptually an [Opcode] and a list of [Operand]s. The semantics of the
+/// instruction, and the meaning of the operands, are determined by the opcode.
+///
+/// Instructions that compute a value define a new local variable in the parent [Func]. In such a
+/// case the newly defined variable can be referenced in the operands of later instructions by the
+/// [InstructionID] of the [Instruction] that defined the variable.
+///
+/// In other words, an instruction and the variable it defines are both identified by the same
+/// [InstructionID].
+///
+/// The type of the variable defined by an instruction (if any) can be determined by
+/// [Instruction::def_type()].
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct Instruction {
@@ -504,7 +546,7 @@ impl AotIRDisplay for Instruction {
     }
 }
 
-/// A basic block containing bytecode instructions.
+/// A basic block containing IR [Instruction]s.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct BBlock {
@@ -524,7 +566,17 @@ impl AotIRDisplay for BBlock {
     }
 }
 
-/// A function.
+/// A function definition or declaration.
+///
+/// If the function was compiled by ykllvm as part of the interpreter binary, then we have IR for
+/// the function body, and the function is said to be a *function definition*.
+///
+/// Conversely, if the function was *not* compiled by ykllvm as part of the interpreter binary (as
+/// is the case for shared library functions), then we have no IR for the function body, and the
+/// function is said to be a *function declaration*.
+///
+/// [Func::is_declaration()] can be used to determine if the [Func] is a definition or a
+/// declaration.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct Func {
@@ -897,6 +949,9 @@ impl AotIRDisplay for Constant {
 }
 
 /// A global variable declaration, identified by its symbol name.
+///
+/// Since the AOT IR doesn't capture the initialisers of global variables (externally compiled or
+/// otherwise), all global variables are considered *declarations*.
 #[deku_derive(DekuRead)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct GlobalDecl {
@@ -921,7 +976,7 @@ impl GlobalDecl {
     }
 }
 
-/// A bytecode module.
+/// An AOT IR module.
 ///
 /// This is the top-level container for the AOT IR.
 ///
@@ -957,7 +1012,7 @@ pub(crate) struct Module {
 }
 
 impl Module {
-    /// Compute variable names for all instructions that generate a value.
+    /// Compute the names of all local variables, for use when stringifying.
     fn compute_variable_names(&self) {
         debug_assert!(!*self.var_names_computed.borrow());
         // Note that because the on-disk IR is conceptually immutable, so we don't have to worry
