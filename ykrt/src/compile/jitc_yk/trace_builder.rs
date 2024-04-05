@@ -83,7 +83,7 @@ impl<'a> TraceBuilder<'a> {
         // PHASE 1:
         // Find the control point call and extract the trace inputs struct from its operands.
         let mut inst_iter = blk.instrs.iter().enumerate().rev();
-        for (_, inst) in &mut inst_iter {
+        while let Some((_, inst)) = inst_iter.next() {
             if inst.is_control_point(self.aot_mod) {
                 let op = inst.operand(CTRL_POINT_ARGIDX_INPUTS);
                 trace_inputs = Some(op.to_instr(self.aot_mod));
@@ -111,7 +111,7 @@ impl<'a> TraceBuilder<'a> {
         // PHASE 2:
         // Keep walking backwards over the ptradd/store pairs emitting LoadTraceInput instructions.
         let mut last_store = None;
-        for (inst_idx, inst) in inst_iter {
+        while let Some((inst_idx, inst)) = inst_iter.next() {
             if inst.is_store() {
                 last_store = Some(inst);
             }
