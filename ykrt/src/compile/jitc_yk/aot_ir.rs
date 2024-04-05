@@ -42,17 +42,11 @@ macro_rules! index {
     };
 }
 
+/// An index into [Module::funcs].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub(crate) struct FuncIdx(usize);
 index!(FuncIdx);
-
-impl FuncIdx {
-    /// Return the [FuncType] for this [FuncIdx] in `m`.
-    pub(crate) fn func_type<'a>(&self, m: &'a Module) -> &'a FuncType {
-        m.func(*self).func_type(m)
-    }
-}
 
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -306,7 +300,7 @@ impl Operand {
     /// operands.
     pub(crate) fn to_instr_id(&self) -> InstructionID {
         match self {
-            Self::LocalVariable(iid) => InstructionID::new(iid.func_idx, iid.bb_idx, iid.inst_idx),
+            Self::LocalVariable(iid) => iid.clone(),
             _ => panic!(),
         }
     }
@@ -721,7 +715,8 @@ impl FuncType {
             is_vararg,
         }
     }
-    pub(crate) fn arg_ty_idxs(&self) -> &Vec<TypeIdx> {
+
+    pub(crate) fn arg_ty_idxs(&self) -> &[TypeIdx] {
         &self.arg_ty_idxs
     }
 
@@ -855,19 +850,6 @@ impl Type {
                 "const_struct".to_owned()
             }
             Self::Unimplemented(s) => format!("?cst<{}>", s),
-        }
-    }
-
-    /// Returns a reference to the inner [StructType] if this is a `Self::Struct`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `self` isn't a `Self::Struct`.
-    pub(crate) fn as_struct(&self) -> &StructType {
-        if let Self::Struct(st) = self {
-            st
-        } else {
-            panic!();
         }
     }
 }

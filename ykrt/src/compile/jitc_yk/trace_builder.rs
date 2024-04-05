@@ -83,7 +83,7 @@ impl<'a> TraceBuilder<'a> {
         // PHASE 1:
         // Find the control point call and extract the trace inputs struct from its operands.
         let mut inst_iter = blk.instrs.iter().enumerate().rev();
-        for (_, inst) in &mut inst_iter {
+        while let Some((_, inst)) = inst_iter.next() {
             if inst.is_control_point(self.aot_mod) {
                 let op = inst.operand(CTRL_POINT_ARGIDX_INPUTS);
                 trace_inputs = Some(op.to_instr(self.aot_mod));
@@ -100,7 +100,10 @@ impl<'a> TraceBuilder<'a> {
         // If this unwrap fails, we didn't find the call to the control point and something is
         // profoundly wrong with the AOT IR.
         let trace_inputs = trace_inputs.unwrap();
-        let trace_input_struct_ty = trace_inputs.operand(0).type_(self.aot_mod).as_struct();
+        let trace_input_struct_ty = match trace_inputs.operand(0).type_(self.aot_mod) {
+            aot_ir::Type::Struct(x) => x,
+            _ => panic!(),
+        };
         // We visit the trace inputs in reverse order, so we start with high indices first. This
         // value then decrements in the below loop.
         let mut trace_input_idx = trace_input_struct_ty.num_fields();
@@ -108,7 +111,7 @@ impl<'a> TraceBuilder<'a> {
         // PHASE 2:
         // Keep walking backwards over the ptradd/store pairs emitting LoadTraceInput instructions.
         let mut last_store = None;
-        for (inst_idx, inst) in inst_iter {
+        while let Some((inst_idx, inst)) = inst_iter.next() {
             if inst.is_store() {
                 last_store = Some(inst);
             }
@@ -467,7 +470,12 @@ impl<'a> TraceBuilder<'a> {
                 args.push(self.handle_operand(arg)?);
             }
             let jit_func_decl_idx = self.handle_func(inst.callee())?;
-            let instr = if !inst.callee().func_type(self.aot_mod).is_vararg() {
+            let instr = if !self
+                .aot_mod
+                .func(inst.callee())
+                .func_type(self.aot_mod)
+                .is_vararg()
+            {
                 jit_ir::CallInstruction::new(&mut self.jit_mod, jit_func_decl_idx, &args)?.into()
             } else {
                 jit_ir::VACallInstruction::new(&mut self.jit_mod, jit_func_decl_idx, &args)?.into()
