@@ -62,7 +62,7 @@ impl FrameReconstructor {
     pub unsafe fn new(activeframes: &[LLVMValueRef]) -> FrameReconstructor {
         FrameReconstructor {
             frames: activeframes
-                .into_iter()
+                .iter()
                 .map(|x| Frame::new(Value::new(*x)))
                 .collect::<Vec<_>>(),
         }

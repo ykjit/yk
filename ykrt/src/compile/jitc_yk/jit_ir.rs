@@ -15,22 +15,31 @@ use std::{
     mem, ptr,
 };
 use typed_index_collections::TiVec;
-use ykaddr::addr::symbol_vaddr;
+use ykaddr::addr::symbol_to_ptr;
 
 // This is simple and can be shared across both IRs.
 pub(crate) use super::aot_ir::Predicate;
 
 /// A fixed-width integer type.
 ///
-/// Signedness is not specified. Interpretation of the bit pattern is delegated to operations upon
-/// the integer.
+/// Note:
+///   1. These integers range in size from 1..2^23 (inc.) bits. This is inherited [from LLVM's
+///      integer type](https://llvm.org/docs/LangRef.html#integer-type).
+///   2. Signedness is not specified. Interpretation of the bit pattern is delegated to operations
+///      upon the integer.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct IntegerType {
     num_bits: u32,
 }
 
 impl IntegerType {
-    /// Return the size of the integer type in bits.
+    /// Create a new integer type with the specified number of bits.
+    pub(crate) fn new(num_bits: u32) -> Self {
+        debug_assert!(num_bits > 0 && num_bits <= 0x800000);
+        Self { num_bits }
+    }
+
+    /// Return the number of bits (1..2^23 (inc.)) this integer spans.
     pub(crate) fn num_bits(&self) -> u32 {
         self.num_bits
     }
@@ -46,11 +55,6 @@ impl IntegerType {
             ret += 1;
         }
         usize::try_from(ret).unwrap()
-    }
-
-    /// Create a new integer type with the specified number of bits.
-    pub(crate) fn new(num_bits: u32) -> Self {
-        Self { num_bits }
     }
 
     /// Instantiate a constant of value `val` and of the type described by `self`.
@@ -73,11 +77,11 @@ impl IntegerType {
 }
 
 impl JitIRDisplay for IntegerType {
-    fn to_string_impl<'a>(
+    fn to_string_impl(
         &self,
         _m: &Module,
         s: &mut String,
-        _nums: &LocalNumbers<'a>,
+        _nums: &LocalNumbers<'_>,
     ) -> Result<(), Box<dyn Error>> {
         s.push_str(&format!("i{}", self.num_bits()));
         Ok(())
@@ -131,13 +135,13 @@ impl GlobalDecl {
 }
 
 impl JitIRDisplay for GlobalDecl {
-    fn to_string_impl<'a>(
+    fn to_string_impl(
         &self,
         _m: &Module,
         s: &mut String,
-        _nums: &LocalNumbers<'a>,
+        _nums: &LocalNumbers<'_>,
     ) -> Result<(), Box<dyn Error>> {
-        s.push_str("@");
+        s.push('@');
         s.push_str(self.name_as_str());
         Ok(())
     }
@@ -213,11 +217,11 @@ pub(crate) trait JitIRDisplay {
     }
 
     /// This method does the actual stringification of an IR element.
-    fn to_string_impl<'a>(
+    fn to_string_impl(
         &self,
         m: &Module,
         s: &mut String,
-        nums: &LocalNumbers<'a>,
+        nums: &LocalNumbers<'_>,
     ) -> Result<(), Box<dyn Error>>;
 
     /// Print `self` to stderr in human-readable form.
@@ -225,7 +229,7 @@ pub(crate) trait JitIRDisplay {
     /// This isn't used during normal operation of the system: it is provided as a debugging aid.
     #[allow(dead_code)]
     fn dump(&self, m: &Module) -> Result<(), Box<dyn Error>> {
-        eprintln!("{}", self.to_string(m).map_err(|e| e)?);
+        eprintln!("{}", self.to_string(m)?);
         Ok(())
     }
 }
@@ -251,7 +255,7 @@ impl U24 {
     }
 
     /// Converts 3-bytes conceptually representing a `u24` to a usize.
-    fn to_usize(&self) -> usize {
+    fn to_usize(self) -> usize {
         static_assertions::const_assert!(mem::size_of::<usize>() >= 3);
         let b0 = self.0[0] as usize; // most-significant byte.
         let b1 = self.0[1] as usize;
@@ -261,8 +265,10 @@ impl U24 {
 }
 
 /// Helper to create index overflow errors.
+///
+/// FIXME: all of these should be checked at compile time.
 fn index_overflow(typ: &str) -> CompilationError {
-    CompilationError(format!("index overflow: {}", typ))
+    CompilationError::LimitExceeded(format!("index overflow: {}", typ))
 }
 
 // Generate common methods for 24-bit index types.
@@ -275,7 +281,7 @@ macro_rules! index_24bit {
                     .map(|u| Self(u))
             }
 
-            pub(crate) fn to_usize(&self) -> usize {
+            pub(crate) fn to_usize(self) -> usize {
                 self.0.to_usize()
             }
         }
@@ -309,7 +315,7 @@ macro_rules! index_16bit {
                     .map(|u| Self(u))
             }
 
-            pub(crate) fn to_u16(&self) -> u16 {
+            pub(crate) fn to_u16(self) -> u16 {
                 self.0.into()
             }
         }
@@ -415,13 +421,13 @@ impl InstrIdx {
 }
 
 impl JitIRDisplay for InstrIdx {
-    fn to_string_impl<'a>(
+    fn to_string_impl(
         &self,
         _m: &Module,
         s: &mut String,
-        _nums: &LocalNumbers<'a>,
+        _nums: &LocalNumbers<'_>,
     ) -> Result<(), Box<dyn Error>> {
-        s.push_str("%");
+        s.push('%');
         s.push_str(&self.to_u16().to_string());
         Ok(())
     }
@@ -477,6 +483,34 @@ impl FuncType {
     }
 }
 
+impl JitIRDisplay for FuncType {
+    fn to_string_impl<'a>(
+        &self,
+        m: &Module,
+        s: &mut String,
+        nums: &LocalNumbers<'a>,
+    ) -> Result<(), Box<dyn Error>> {
+        s.push_str("func(");
+        let num_args = self.num_args();
+        for (ai, t) in self.arg_ty_idxs.iter().enumerate() {
+            t.type_(m).to_string_impl(m, s, nums)?;
+            if ai != num_args - 1 || self.is_vararg() {
+                s.push_str(", ");
+            }
+        }
+        if self.is_vararg() {
+            s.push_str("...");
+        }
+        s.push(')');
+
+        if self.ret_ty_idx != m.void_type_idx {
+            s.push_str(" -> ");
+            self.ret_ty_idx.type_(m).to_string_impl(m, s, nums)?;
+        }
+        Ok(())
+    }
+}
+
 /// A structure's type.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct StructType {
@@ -498,17 +532,17 @@ pub(crate) enum Type {
 }
 
 impl JitIRDisplay for Type {
-    fn to_string_impl<'a>(
+    fn to_string_impl(
         &self,
         m: &Module,
         s: &mut String,
-        nums: &LocalNumbers<'a>,
+        nums: &LocalNumbers<'_>,
     ) -> Result<(), Box<dyn Error>> {
         match self {
             Self::Void => s.push_str("void"),
             Self::Integer(it) => it.to_string_impl(m, s, nums)?,
             Self::Ptr => s.push_str("ptr"),
-            Self::Func(_) => todo!(),
+            Self::Func(ft) => ft.to_string_impl(m, s, nums)?,
             Self::Struct(_) => todo!(),
             Self::Unimplemented(_) => s.push_str("?type"),
         }
@@ -523,7 +557,7 @@ impl Type {
         // won't ever support).
         match self {
             Self::Void => Some(0),
-            Self::Integer(it) => Some(usize::try_from(it.byte_size()).unwrap()),
+            Self::Integer(it) => Some(it.byte_size()),
             Self::Ptr => {
                 // FIXME: In theory pointers to different types could be of different sizes. We
                 // should really ask LLVM how big the pointer was when it codegenned the
@@ -559,7 +593,7 @@ impl FuncDecl {
     /// Panics if `self.type_idx` isn't a type index for a [FuncType].
     pub(crate) fn func_type<'a>(&self, m: &'a Module) -> &'a FuncType {
         match m.type_(self.type_idx) {
-            Type::Func(ft) => &ft,
+            Type::Func(ft) => ft,
             _ => panic!(),
         }
     }
@@ -665,11 +699,11 @@ impl Operand {
 }
 
 impl JitIRDisplay for Operand {
-    fn to_string_impl<'a>(
+    fn to_string_impl(
         &self,
         m: &Module,
         s: &mut String,
-        nums: &LocalNumbers<'a>,
+        nums: &LocalNumbers<'_>,
     ) -> Result<(), Box<dyn Error>> {
         match self {
             Self::Local(idx) => s.push_str(&format!("%{}", idx.to_u16())),
@@ -706,11 +740,11 @@ impl Constant {
 }
 
 impl JitIRDisplay for Constant {
-    fn to_string_impl<'a>(
+    fn to_string_impl(
         &self,
         m: &Module,
         s: &mut String,
-        _nums: &LocalNumbers<'a>,
+        _nums: &LocalNumbers<'_>,
     ) -> Result<(), Box<dyn Error>> {
         match self.type_idx().type_(m) {
             Type::Integer(it) => s.push_str(&it.const_to_str(self)),
@@ -751,6 +785,7 @@ pub enum Instruction {
     LookupGlobal(LookupGlobalInstruction),
     LoadTraceInput(LoadTraceInputInstruction),
     Call(CallInstruction),
+    VACall(VACallInstruction),
     PtrAdd(PtrAddInstruction),
     Store(StoreInstruction),
     Add(AddInstruction),
@@ -765,27 +800,6 @@ pub enum Instruction {
 }
 
 impl Instruction {
-    /// Returns `true` if the instruction defines a local variable.
-    ///
-    /// FIXME: Because self.def_type_idx() isn't complete, we have to handle various possibilities
-    /// here in order that anything works. Once self.get_type_idx() is complete (i.e. no todo!()s
-    /// left) this function can become simply `self.def_type_idx() != jit_mod.void_type_idx()`.
-    pub(crate) fn is_def(&self) -> bool {
-        match self {
-            Self::Load(..) => true,
-            Self::LookupGlobal(..) => true,
-            Self::LoadTraceInput(..) => true,
-            Self::Call(..) => true, // FIXME: May or may not define. Ask func sig.
-            Self::PtrAdd(..) => true,
-            Self::Store(..) => false,
-            Self::Add(..) => true,
-            Self::Icmp(..) => true,
-            Self::Guard(..) => false,
-            Self::Arg(..) => true,
-            Self::TraceLoopStart => false,
-        }
-    }
-
     /// Returns the type of the local variable that the instruction defines (if any).
     pub(crate) fn def_type<'a>(&self, m: &'a Module) -> Option<&'a Type> {
         let idx = self.def_type_idx(m);
@@ -805,6 +819,7 @@ impl Instruction {
             Self::LookupGlobal(..) => m.ptr_type_idx(),
             Self::LoadTraceInput(li) => li.ty_idx(),
             Self::Call(ci) => ci.target().func_type(m).ret_type_idx(),
+            Self::VACall(ci) => ci.target().func_type(m).ret_type_idx(),
             Self::PtrAdd(..) => m.ptr_type_idx(),
             Self::Store(..) => m.void_type_idx(),
             Self::Add(ai) => ai.type_idx(m),
@@ -836,11 +851,11 @@ impl Instruction {
 }
 
 impl JitIRDisplay for Instruction {
-    fn to_string_impl<'a>(
+    fn to_string_impl(
         &self,
         m: &Module,
         s: &mut String,
-        nums: &LocalNumbers<'a>,
+        nums: &LocalNumbers<'_>,
     ) -> Result<(), Box<dyn Error>> {
         // If the instruction defines a value print it like an assignment.
         if let Some(dt) = self.def_type(m) {
@@ -855,6 +870,7 @@ impl JitIRDisplay for Instruction {
             Self::LookupGlobal(i) => i.to_string_impl(m, s, nums)?,
             Self::LoadTraceInput(i) => i.to_string_impl(m, s, nums)?,
             Self::Call(i) => i.to_string_impl(m, s, nums)?,
+            Self::VACall(i) => i.to_string_impl(m, s, nums)?,
             Self::PtrAdd(i) => i.to_string_impl(m, s, nums)?,
             Self::Store(i) => i.to_string_impl(m, s, nums)?,
             Self::Add(i) => i.to_string_impl(m, s, nums)?,
@@ -882,6 +898,7 @@ instr!(LookupGlobal, LookupGlobalInstruction);
 instr!(Store, StoreInstruction);
 instr!(LoadTraceInput, LoadTraceInputInstruction);
 instr!(Call, CallInstruction);
+instr!(VACall, VACallInstruction);
 instr!(PtrAdd, PtrAddInstruction);
 // FIXME: Use a macro for all binary operations?
 instr!(Add, AddInstruction);
@@ -928,11 +945,11 @@ impl LoadInstruction {
 }
 
 impl JitIRDisplay for LoadInstruction {
-    fn to_string_impl<'a>(
+    fn to_string_impl(
         &self,
         m: &Module,
         s: &mut String,
-        nums: &LocalNumbers<'a>,
+        nums: &LocalNumbers<'_>,
     ) -> Result<(), Box<dyn Error>> {
         s.push_str("Load ");
         self.operand().to_string_impl(m, s, nums)
@@ -958,11 +975,11 @@ pub struct LoadTraceInputInstruction {
 }
 
 impl JitIRDisplay for LoadTraceInputInstruction {
-    fn to_string_impl<'a>(
+    fn to_string_impl(
         &self,
         m: &Module,
         s: &mut String,
-        nums: &LocalNumbers<'a>,
+        nums: &LocalNumbers<'_>,
     ) -> Result<(), Box<dyn Error>> {
         s.push_str(&format!("LoadTraceInput {}, ", self.off()));
         m.type_(self.ty_idx).to_string_impl(m, s, nums)?;
@@ -1027,11 +1044,11 @@ impl LookupGlobalInstruction {
 }
 
 impl JitIRDisplay for LookupGlobalInstruction {
-    fn to_string_impl<'a>(
+    fn to_string_impl(
         &self,
         m: &Module,
         s: &mut String,
-        nums: &LocalNumbers<'a>,
+        nums: &LocalNumbers<'_>,
     ) -> Result<(), Box<dyn Error>> {
         s.push_str("LookupGlobal ");
         m.global_decl(self.global_decl_idx)
@@ -1056,17 +1073,17 @@ pub struct CallInstruction {
 }
 
 impl JitIRDisplay for CallInstruction {
-    fn to_string_impl<'a>(
+    fn to_string_impl(
         &self,
         m: &Module,
         s: &mut String,
-        nums: &LocalNumbers<'a>,
+        nums: &LocalNumbers<'_>,
     ) -> Result<(), Box<dyn Error>> {
         let decl = m.func_decl(self.target);
         s.push_str("Call @");
         s.push_str(decl.name());
 
-        s.push_str("(");
+        s.push('(');
         let num_args = decl.func_type(m).num_args();
         for ai in 0..num_args {
             self.operand(m, ai).to_string_impl(m, s, nums)?;
@@ -1074,7 +1091,7 @@ impl JitIRDisplay for CallInstruction {
                 s.push_str(", ");
             }
         }
-        s.push_str(")");
+        s.push(')');
 
         Ok(())
     }
@@ -1089,7 +1106,7 @@ impl CallInstruction {
         let mut arg1 = PackedOperand::default();
         let mut extra = ExtraArgsIdx::default();
 
-        if args.len() >= 1 {
+        if !args.is_empty() {
             arg1 = PackedOperand::new(&args[0]);
         }
         if args.len() >= 2 {
@@ -1137,6 +1154,86 @@ impl CallInstruction {
     }
 }
 
+/// The operands for a [Instruction::VACall]
+///
+/// # Semantics
+///
+/// Perform a vararg call to an external or AOT function.
+#[derive(Debug)]
+#[repr(packed)]
+pub struct VACallInstruction {
+    /// The callee.
+    target: FuncDeclIdx,
+    /// The number of arguments to pass.
+    num_args: u16,
+    /// The index of the call's first argument in the [Module]'s extra argument table.
+    first_arg_idx: ExtraArgsIdx,
+}
+
+impl JitIRDisplay for VACallInstruction {
+    fn to_string_impl<'a>(
+        &self,
+        m: &Module,
+        s: &mut String,
+        nums: &LocalNumbers<'a>,
+    ) -> Result<(), Box<dyn Error>> {
+        let decl = m.func_decl(self.target);
+        s.push_str("VACall @");
+        s.push_str(decl.name());
+
+        s.push_str("(");
+        let num_args = self.num_args();
+        for ai in 0..num_args {
+            self.operand(m, ai).to_string_impl(m, s, nums)?;
+            if ai != num_args - 1 {
+                s.push_str(", ");
+            }
+        }
+        s.push_str(")");
+
+        Ok(())
+    }
+}
+
+impl VACallInstruction {
+    pub(crate) fn new(
+        m: &mut Module,
+        target: FuncDeclIdx,
+        args: &[Operand],
+    ) -> Result<VACallInstruction, CompilationError> {
+        let num_args = args.len();
+
+        // Varargs calls require at least one static argument.
+        debug_assert!(num_args > 0);
+
+        Ok(Self {
+            target,
+            num_args: u16::try_from(num_args).unwrap(), // XXX
+            first_arg_idx: m.push_extra_args(&args[..])?,
+        })
+    }
+
+    /// Returns the number of arguments to the call.
+    pub(crate) fn num_args(&self) -> u16 {
+        self.num_args
+    }
+
+    /// Return the [FuncDeclIdx] of the callee.
+    pub(crate) fn target(&self) -> FuncDeclIdx {
+        self.target
+    }
+
+    /// Fetch the operand at the specified index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the operand index is out of bounds.
+    pub(crate) fn operand(&self, jit_mod: &Module, idx: u16) -> Operand {
+        debug_assert!(self.num_args() > idx);
+        jit_mod.extra_args[<usize as From<u16>>::from(self.first_arg_idx.0 + idx)].clone()
+    }
+}
+
 /// The operands for a [Instruction::Store]
 ///
 /// # Semantics
@@ -1172,11 +1269,11 @@ impl StoreInstruction {
 }
 
 impl JitIRDisplay for StoreInstruction {
-    fn to_string_impl<'a>(
+    fn to_string_impl(
         &self,
         m: &Module,
         s: &mut String,
-        nums: &LocalNumbers<'a>,
+        nums: &LocalNumbers<'_>,
     ) -> Result<(), Box<dyn Error>> {
         s.push_str("Store ");
         self.val.unpack().to_string_impl(m, s, nums)?;
@@ -1220,11 +1317,11 @@ impl PtrAddInstruction {
 }
 
 impl JitIRDisplay for PtrAddInstruction {
-    fn to_string_impl<'a>(
+    fn to_string_impl(
         &self,
         m: &Module,
         s: &mut String,
-        nums: &LocalNumbers<'a>,
+        nums: &LocalNumbers<'_>,
     ) -> Result<(), Box<dyn Error>> {
         s.push_str("PtrAdd ");
         self.ptr().to_string_impl(m, s, nums)?;
@@ -1273,11 +1370,11 @@ impl AddInstruction {
 }
 
 impl JitIRDisplay for AddInstruction {
-    fn to_string_impl<'a>(
+    fn to_string_impl(
         &self,
         m: &Module,
         s: &mut String,
-        nums: &LocalNumbers<'a>,
+        nums: &LocalNumbers<'_>,
     ) -> Result<(), Box<dyn Error>> {
         s.push_str("Add ");
         self.op1().to_string_impl(m, s, nums)?;
@@ -1333,11 +1430,11 @@ impl IcmpInstruction {
 }
 
 impl JitIRDisplay for IcmpInstruction {
-    fn to_string_impl<'a>(
+    fn to_string_impl(
         &self,
         m: &Module,
         s: &mut String,
-        nums: &LocalNumbers<'a>,
+        nums: &LocalNumbers<'_>,
     ) -> Result<(), Box<dyn Error>> {
         s.push_str("Icmp ");
         self.left().to_string_impl(m, s, nums)?;
@@ -1390,11 +1487,11 @@ impl GuardInstruction {
 }
 
 impl JitIRDisplay for GuardInstruction {
-    fn to_string_impl<'a>(
+    fn to_string_impl(
         &self,
         m: &Module,
         s: &mut String,
-        nums: &LocalNumbers<'a>,
+        nums: &LocalNumbers<'_>,
     ) -> Result<(), Box<dyn Error>> {
         s.push_str("Guard ");
         self.cond().to_string_impl(m, s, nums)?;
@@ -1463,17 +1560,23 @@ pub(crate) struct Module {
     /// pointer to each global variable in the AOT module. The indices of the elements correspond
     /// with [aot_ir::GlobalDeclIdx]s.
     ///
-    /// The array is eternal, so we have no qualms about storing a raw pointer to it.
-    ///
     /// This is marked `cfg(not(test))` because unit tests are not built with ykllvm, and thus the
     /// array will be absent.
     #[cfg(not(test))]
-    globalvar_ptrs: *const usize,
+    globalvar_ptrs: &'static [*const ()],
 }
 
 impl Module {
     /// Create a new [Module] with the specified name.
-    pub fn new(name: String) -> Self {
+    pub(crate) fn new(name: String, global_decls_len: usize) -> Self {
+        Self::new_internal(name, global_decls_len)
+    }
+
+    pub(crate) fn new_testing(name: String) -> Self {
+        Self::new_internal(name, 0)
+    }
+
+    pub(crate) fn new_internal(name: String, global_decls_len: usize) -> Self {
         // Create some commonly used types ahead of time. Aside from being convenient, this allows
         // us to find their (now statically known) indices in scenarios where Rust forbids us from
         // holding a mutable reference to the Module (and thus we cannot use [Module::type_idx]).
@@ -1489,8 +1592,12 @@ impl Module {
         //
         // FIXME: consider passing this in to the control point to avoid a dlsym().
         #[cfg(not(test))]
-        let globalvar_ptrs =
-            symbol_vaddr(&CString::new(GLOBAL_PTR_ARRAY_SYM).unwrap()).unwrap() as *const usize;
+        let globalvar_ptrs = {
+            let ptr = symbol_to_ptr(GLOBAL_PTR_ARRAY_SYM).unwrap() as *const *const ();
+            unsafe { std::slice::from_raw_parts(ptr, global_decls_len) }
+        };
+        #[cfg(test)]
+        assert_eq!(global_decls_len, 0);
 
         Self {
             name,
@@ -1514,19 +1621,19 @@ impl Module {
     /// # Panics
     ///
     /// Panics if the address cannot be located.
-    pub(crate) fn globalvar_vaddr(&self, idx: GlobalDeclIdx) -> usize {
+    pub(crate) fn globalvar_ptr(&self, idx: GlobalDeclIdx) -> *const () {
         let decl = idx.global_decl(self);
         #[cfg(not(test))]
         {
             // If the unwrap fails, then the AOT array was absent and something has gone wrong
             // during AOT codegen.
-            (unsafe { *self.globalvar_ptrs.add(decl.global_ptr_idx().into()) }) as usize
+            self.globalvar_ptrs[usize::from(decl.global_ptr_idx())]
         }
         #[cfg(test)]
         {
             // In unit tests the global variable pointer array isn't present, as the
             // unit test binary wasn't compiled with ykllvm. Fall back on dlsym().
-            symbol_vaddr(decl.name()).unwrap()
+            symbol_to_ptr(decl.name().to_str().unwrap()).unwrap()
         }
     }
 
@@ -1547,7 +1654,7 @@ impl Module {
 
     /// Return the instruction at the specified index.
     pub(crate) fn instr(&self, idx: InstrIdx) -> &Instruction {
-        &self.instrs[usize::try_from(idx).unwrap()]
+        &self.instrs[usize::from(idx)]
     }
 
     /// Return the [Type] for the specified index.
@@ -1564,7 +1671,7 @@ impl Module {
     /// # Panics
     ///
     /// Panics if the index is out of bounds.
-    pub(crate) fn global_decl<'a>(&'a self, idx: GlobalDeclIdx) -> &'a GlobalDecl {
+    pub(crate) fn global_decl(&self, idx: GlobalDeclIdx) -> &GlobalDecl {
         &self.global_decls[idx]
     }
 
@@ -1597,8 +1704,8 @@ impl Module {
         instr: Instruction,
     ) -> Result<Operand, CompilationError> {
         assert!(InstrIdx::new(self.instrs.len()).is_ok());
-        if !instr.is_def() {
-            panic!();
+        if instr.def_type(self).is_none() {
+            panic!(); // instruction doesn't define a local var.
         }
         let ret = Operand::Local(InstrIdx::new(self.len())?);
         self.instrs.push(instr);
@@ -1655,7 +1762,7 @@ impl Module {
         assert!(TypeIdx::new(self.types.len()).is_ok());
         let idx = self.types.len();
         self.types.push(ty);
-        Ok(TypeIdx::new(idx)?)
+        TypeIdx::new(idx)
     }
 
     /// Push a new function declaration into the function declaration table and return its index.
@@ -1667,7 +1774,7 @@ impl Module {
         assert!(FuncDeclIdx::new(self.func_decls.len()).is_ok());
         let idx = self.func_decls.len();
         self.func_decls.push(func_decl);
-        Ok(FuncDeclIdx::new(idx)?)
+        FuncDeclIdx::new(idx)
     }
 
     /// Push a new constant into the constant table and return its index.
@@ -1713,7 +1820,7 @@ impl Module {
     /// # Panics
     ///
     /// Panics if the index is out of bounds.
-    pub(crate) fn const_<'a>(&'a self, idx: ConstIdx) -> &'a Constant {
+    pub(crate) fn const_(&self, idx: ConstIdx) -> &Constant {
         &self.consts[idx]
     }
 
@@ -1778,11 +1885,11 @@ impl Module {
 }
 
 impl JitIRDisplay for Module {
-    fn to_string_impl<'a>(
+    fn to_string_impl(
         &self,
         m: &Module,
         s: &mut String,
-        nums: &LocalNumbers<'a>,
+        nums: &LocalNumbers<'_>,
     ) -> Result<(), Box<dyn Error>> {
         s.push_str("; ");
         s.push_str(&self.name);
@@ -1866,7 +1973,7 @@ mod tests {
     #[test]
     fn extra_call_args() {
         // Set up a function to call.
-        let mut jit_mod = Module::new("test".into());
+        let mut jit_mod = Module::new_testing("test".into());
         let i32_tyidx = jit_mod
             .push_type(Type::Integer(IntegerType::new(32)))
             .unwrap();
@@ -1894,10 +2001,44 @@ mod tests {
     }
 
     #[test]
+    fn vararg_call_args() {
+        // Set up a function to call.
+        let mut jit_mod = Module::new_testing("test".into());
+        let i32_tyidx = jit_mod
+            .push_type(Type::Integer(IntegerType::new(32)))
+            .unwrap();
+        let func_ty = Type::Func(FuncType::new(vec![i32_tyidx; 3], i32_tyidx, true));
+        let func_ty_idx = jit_mod.push_type(func_ty).unwrap();
+        let func_decl = FuncDecl::new("foo".to_owned(), func_ty_idx);
+        let func_decl_idx = jit_mod.push_func_decl(func_decl).unwrap();
+
+        // Build a call to the function.
+        let args = vec![
+            Operand::Local(InstrIdx(0)),
+            Operand::Local(InstrIdx(1)),
+            Operand::Local(InstrIdx(2)),
+        ];
+        let ci = VACallInstruction::new(&mut jit_mod, func_decl_idx, &args).unwrap();
+
+        // Now request the operands and check they all look as they should.
+        assert_eq!(ci.operand(&jit_mod, 0), Operand::Local(InstrIdx(0)));
+        assert_eq!(ci.operand(&jit_mod, 1), Operand::Local(InstrIdx(1)));
+        assert_eq!(ci.operand(&jit_mod, 2), Operand::Local(InstrIdx(2)));
+        assert_eq!(
+            jit_mod.extra_args,
+            vec![
+                Operand::Local(InstrIdx(0)),
+                Operand::Local(InstrIdx(1)),
+                Operand::Local(InstrIdx(2))
+            ]
+        );
+    }
+
+    #[test]
     #[should_panic]
     fn call_args_out_of_bounds() {
         // Set up a function to call.
-        let mut jit_mod = Module::new("test".into());
+        let mut jit_mod = Module::new_testing("test".into());
         let arg_ty_idxs = vec![jit_mod.ptr_type_idx(); 3];
         let ret_ty_idx = jit_mod.type_idx(&Type::Void).unwrap();
         let func_ty = FuncType::new(arg_ty_idxs, ret_ty_idx, false);
@@ -1980,25 +2121,11 @@ mod tests {
         assert_eq!(Type::Void.byte_size(), Some(0));
     }
 
-    #[test]
-    fn int_type_size() {
-        assert_eq!(Type::Integer(IntegerType::new(0)).byte_size(), Some(0));
-        for i in 1..8 {
-            assert_eq!(Type::Integer(IntegerType::new(i)).byte_size(), Some(1));
-        }
-        for i in 9..16 {
-            assert_eq!(Type::Integer(IntegerType::new(i)).byte_size(), Some(2));
-        }
-        assert_eq!(Type::Integer(IntegerType::new(127)).byte_size(), Some(16));
-        assert_eq!(Type::Integer(IntegerType::new(128)).byte_size(), Some(16));
-        assert_eq!(Type::Integer(IntegerType::new(129)).byte_size(), Some(17));
-    }
-
     #[cfg(debug_assertions)]
     #[should_panic(expected = "type already exists")]
     #[test]
     fn push_duplicate_type() {
-        let mut jit_mod = Module::new("test".into());
+        let mut jit_mod = Module::new_testing("test".into());
         let _ = jit_mod.push_type(Type::Void);
         let _ = jit_mod.push_type(Type::Void);
     }
@@ -2011,7 +2138,7 @@ mod tests {
             assert_eq!(c.to_string(&m).unwrap(), expect);
         }
 
-        let mut m = Module::new("test".into());
+        let mut m = Module::new_testing("test".into());
 
         check(&mut m, 8, 0i8, "0i8");
         check(&mut m, 8, 111i8, "111i8");
@@ -2026,8 +2153,27 @@ mod tests {
     }
 
     #[test]
+    fn stringify_func_types() {
+        let m = Module::new_testing("test".into());
+        let i8_tyidx = m.int8_type_idx();
+        let void_tyidx = m.void_type_idx();
+
+        let ft = FuncType::new(vec![i8_tyidx], i8_tyidx, false);
+        assert_eq!(ft.to_string(&m).unwrap(), "func(i8) -> i8");
+
+        let ft = FuncType::new(vec![i8_tyidx], void_tyidx, false);
+        assert_eq!(ft.to_string(&m).unwrap(), "func(i8)");
+
+        let ft = FuncType::new(vec![], void_tyidx, false);
+        assert_eq!(ft.to_string(&m).unwrap(), "func()");
+
+        let ft = FuncType::new(vec![i8_tyidx], i8_tyidx, true);
+        assert_eq!(ft.to_string(&m).unwrap(), "func(i8, ...) -> i8");
+    }
+
+    #[test]
     fn print_module() {
-        let mut m = Module::new("test".into());
+        let mut m = Module::new_testing("test".into());
         m.push(LoadTraceInputInstruction::new(0, m.int8_type_idx()).into());
         m.push(LoadTraceInputInstruction::new(8, m.int8_type_idx()).into());
         m.push(LoadTraceInputInstruction::new(16, m.int8_type_idx()).into());
@@ -2062,7 +2208,6 @@ mod tests {
 
     #[test]
     fn integer_type_sizes() {
-        assert_eq!(IntegerType::new(0).byte_size(), 0);
         for i in 1..8 {
             assert_eq!(IntegerType::new(i).byte_size(), 1);
         }

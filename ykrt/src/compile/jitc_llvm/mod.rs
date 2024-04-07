@@ -1,4 +1,4 @@
-//! An LLVM JIT backend. Currently a minimal wrapper around the fact that [MappedAOTBlockTrace]s are hardcoded
+//! An LLVM JIT backend. Currently a minimal wrapper around the fact that [MappedAOTBBlockTrace]s are hardcoded
 //! to be compiled with LLVM.
 
 use crate::{
@@ -264,10 +264,10 @@ impl Compiler for JITCLLVM {
             match ta {
                 Ok(x) => irtrace.push(x),
                 Err(AOTTraceIteratorError::LongJmpEncountered) => {
-                    return Err(CompilationError("Encountered longjmp".to_owned()));
+                    return Err(CompilationError::General("Encountered longjmp".to_owned()));
                 }
                 Err(AOTTraceIteratorError::TraceTooLong) => {
-                    return Err(CompilationError("Trace too long".to_owned()))
+                    return Err(CompilationError::General("Trace too long".to_owned()))
                 }
             }
         }
@@ -302,7 +302,7 @@ impl Compiler for JITCLLVM {
             // The LLVM backend is now legacy code and is pending deletion, so it's not worth us
             // spending time auditing all of the failure modes and categorising them into
             // recoverable/temporary. So for now we say any error is temporary.
-            Err(CompilationError("llvm backend error".into()))
+            Err(CompilationError::General("LLVM backend error".into()))
         } else {
             Ok(Arc::new(LLVMCompiledTrace::new(
                 mt,
@@ -325,14 +325,15 @@ impl JITCLLVM {
         let mut bbs = Vec::with_capacity(trace_len);
         for blk in irtrace {
             match blk {
-                TraceAction::MappedAOTBlock { func_name, bb } => {
+                TraceAction::MappedAOTBBlock { func_name, bb } => {
                     func_names.push(func_name.as_ptr());
                     bbs.push(*bb);
                 }
-                TraceAction::UnmappableBlock => {
+                TraceAction::UnmappableBBlock => {
                     // The block was unmappable. Indicate this with a null function name.
                     func_names.push(ptr::null());
-                    // Block indices for unmappable blocks are irrelevant so we may pass anything here.
+                    // BBlock indices for unmappable basic blocks are irrelevant so we may pass
+                    // anything here.
                     bbs.push(0);
                 }
                 TraceAction::Promotion => todo!(),

@@ -3,6 +3,7 @@
 //   env-var: YKD_PRINT_IR=aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_PRINT_JITSTATE=1
+//   status: error
 //   stderr:
 //     jit-state: start-tracing
 //     foo
@@ -14,21 +15,18 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
+//     %{{1}}: i8 = Icmp %{{2}}, SignedGreater, 1i32
+//     ...
+//     %{{3}}: i64 = Call @fwrite(%{{4}}, 4i64, 1i64, %{{5}})
+//     ...
 //     --- End jit-pre-opt ---
 //     foo
 //     jit-state: enter-jit-code
 //     foo
-//     foo
 //     jit-state: deoptimise
-//     exit
+//     bar
 
-// Check that basic trace compilation works.
-
-// FIXME: Get this test all the way through the new codegen pipeline!
-//
-// Currently it succeeds even though it crashes on deopt. This is so
-// that we can incrementally implement the new codegen and have CI merge our
-// incomplete work.
+// Check that call inlining works.
 
 #include <assert.h>
 #include <stdio.h>
@@ -36,6 +34,14 @@
 #include <string.h>
 #include <yk.h>
 #include <yk_testing.h>
+
+void foo(int i) {
+  if (i > 1) {
+    fputs("foo\n", stderr);
+  } else {
+    fputs("bar\n", stderr);
+  }
+}
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
@@ -49,7 +55,7 @@ int main(int argc, char **argv) {
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    fputs("foo\n", stderr);
+    foo(i);
     res += 2;
     i--;
   }

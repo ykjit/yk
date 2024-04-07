@@ -5,7 +5,7 @@
 //   env-var: YKD_PRINT_JITSTATE=1
 //   stderr:
 //     jit-state: start-tracing
-//     foo
+//     i=4
 //     jit-state: stop-tracing
 //     --- Begin aot ---
 //     ...
@@ -14,21 +14,19 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
+//     %{{17}}: i32 = VACall @fprintf(%{{11}}, %{{16}}, %{{12}})
+//     ...
 //     --- End jit-pre-opt ---
-//     foo
+//     i=3
 //     jit-state: enter-jit-code
-//     foo
-//     foo
+//     i=2
+//     i=1
+//     ...
 //     jit-state: deoptimise
+//     ...
 //     exit
 
-// Check that basic trace compilation works.
-
-// FIXME: Get this test all the way through the new codegen pipeline!
-//
-// Currently it succeeds even though it crashes on deopt. This is so
-// that we can incrementally implement the new codegen and have CI merge our
-// incomplete work.
+// Check that a call to fprintf works.
 
 #include <assert.h>
 #include <stdio.h>
@@ -49,7 +47,7 @@ int main(int argc, char **argv) {
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    fputs("foo\n", stderr);
+    fprintf(stderr, "i=%d\n", i);
     res += 2;
     i--;
   }

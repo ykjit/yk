@@ -24,6 +24,8 @@ pub(crate) enum LocalAlloc {
         /// OPT: consider addressing relative to the stack pointer, thus freeing up the base
         /// pointer for general purpose use.
         frame_off: usize,
+        /// Size in bytes of the allocation.
+        size: usize,
     },
     /// The local variable is in a register.
     ///
@@ -33,8 +35,8 @@ pub(crate) enum LocalAlloc {
 
 impl LocalAlloc {
     /// Create a [Self::Stack] allocation.
-    pub(crate) fn new_stack(frame_off: usize) -> Self {
-        Self::Stack { frame_off }
+    pub(crate) fn new_stack(frame_off: usize, size: usize) -> Self {
+        Self::Stack { frame_off, size }
     }
 }
 
@@ -44,7 +46,7 @@ pub(crate) enum StackDirection {
     GrowsDown,
 }
 
-/// The API to regsiter allocators.
+/// The API to register allocators.
 ///
 /// Register allocators are responsible for assigning storage for local variables.
 pub(crate) trait RegisterAllocator {
@@ -64,5 +66,5 @@ pub(crate) trait RegisterAllocator {
 
     /// Return the allocation for the value computed by the instruction at the specified
     /// instruction index.
-    fn allocation<'a>(&'a self, idx: jit_ir::InstrIdx) -> &'a LocalAlloc;
+    fn allocation(&self, idx: jit_ir::InstrIdx) -> &LocalAlloc;
 }

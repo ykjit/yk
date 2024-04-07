@@ -1,11 +1,37 @@
 //! Yk's AOT IR deserialiser.
 //!
-//! This is a parser for the on-disk (in the ELF binary) IR format used to express the
-//! (immutable) ahead-of-time compiled interpreter.
+//! This module contains the data structures for the AOT IR and a parser to read it from its
+//! serialised format.
+//!
+//! The AOT IR accurately reflects the structure and semantics of the AOT binary. As such, it must
+//! not be mutated after the fact.
+//!
+//! The IR is index-centric, meaning that when one data structure refers to another, it is by a
+//! numeric index into a backing vector (and not via a Rust reference). We chose to do it like this
+//! because a) references can't easily be serialised and deserialised; and b) we didn't want to do
+//! another pass over the IR to convert to another version of the data structures that uses
+//! references.
+//!
+//! Each kind of index has a distinct Rust type so that it cannot be accidentally used in place of
+//! an unrelated index. This is enforced by `TiVec`.
+//!
+//! At a high level, the AOT IR contains:
+//!  - Functions (which contain basic blocks, which contain individual instructions).
+//!  - Global variable declarations.
+//!  - Function definitions/declarations.
+//!  - Constant values.
+//!  - Types, for use by all of the above.
+//!
+//! Throughout we use the term "definition" to mean something for which we have total IR knowledge
+//! of, whereas a "declaration" is something compiled externally that we typically only know the
+//! symbol name, address and type of.
+//!
+//! Elements of the IR can be converted to human-readable forms by calling `to_string()` on them.
+//! This is used for testing, but can also be used for debugging.
 
 use byteorder::{NativeEndian, ReadBytesExt};
 use deku::prelude::*;
-use std::{cell::RefCell, error::Error, ffi::CStr, fs, path::PathBuf};
+use std::{cell::RefCell, error::Error, ffi::CString, fs, path::PathBuf};
 use typed_index_collections::TiVec;
 
 /// A magic number that all bytecode payloads begin with.
@@ -42,85 +68,78 @@ macro_rules! index {
     };
 }
 
+/// An index into [Module::funcs].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub(crate) struct FuncIdx(usize);
 index!(FuncIdx);
 
+/// An index into [Module::types].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct TypeIdx(usize);
 index!(TypeIdx);
 
-/// A basic block index.
-///
-/// One of these is an index into [Func::blocks].
+/// An index into [Func::bblocks].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct BlockIdx(usize);
-index!(BlockIdx);
+pub(crate) struct BBlockIdx(usize);
+index!(BBlockIdx);
 
-/// An instruction index.
-///
-/// One of these is an index into [Block::instrs].
+/// An index into [BBlock::instrs].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct InstrIdx(usize);
 index!(InstrIdx);
 
-/// A constant index.
-///
-/// One of these is an index into [Module::consts].
+/// An index into [Module::consts].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct ConstIdx(usize);
 index!(ConstIdx);
 
-/// A global variable declaration index.
+/// An index into [Module::global_decls].
 ///
-/// These are "declarations" and not "definitions" because they all been AOT code-generated
+/// Note: these are "declarations" and not "definitions" because they all been AOT code-generated
 /// already, and thus come "pre-initialised".
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct GlobalDeclIdx(usize);
 index!(GlobalDeclIdx);
 
-/// A function argument index.
+/// An index into [FuncType::arg_ty_idxs].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct ArgIdx(usize);
 index!(ArgIdx);
 
-fn deserialise_string(v: Vec<u8>) -> Result<String, DekuError> {
-    let err = Err(DekuError::Parse("failed to parse string".to_owned()));
-    match CStr::from_bytes_until_nul(v.as_slice()) {
-        Ok(c) => match c.to_str() {
-            Ok(s) => Ok(s.to_owned()),
-            Err(_) => err,
-        },
-        _ => err,
+/// Helper function for deku `map` attribute. It is necessary to write all the types out in full to
+/// avoid type inference errors, so it's easier to have a single helper function rather than inline
+/// this into each `map` attribute.
+fn map_to_string(v: Vec<u8>) -> Result<String, DekuError> {
+    if let Ok(x) = CString::from_vec_with_nul(v) {
+        if let Ok(x) = x.into_string() {
+            return Ok(x);
+        }
     }
+    Err(DekuError::Parse("Couldn't map string".to_owned()))
 }
 
-/// Helper function to convert a vector into a `TiVec` during deku parsing.
-fn deserialise_into_ti_vec<I, T>(v: Vec<T>) -> Result<TiVec<I, T>, DekuError> {
+/// Helper function for deku `map` attribute. It is necessary to write all the types out in full to
+/// avoid type inference errors, so it's easier to have a single helper function rather than inline
+/// this into each `map` attribute.
+fn map_to_tivec<I, T>(v: Vec<T>) -> Result<TiVec<I, T>, DekuError> {
     Ok(TiVec::from(v))
 }
 
 /// A trait for converting in-memory data-structures into a human-readable textual format.
 ///
-/// This is modelled on [`std::fmt::Display`], but a reference to the module is always passed down
-/// so that constructs that require lookups into the module's tables from stringification have
-/// access to them.
-///
-/// The way we implement this (returning a `String`) is inefficient, but it doesn't hugely matter,
-/// as the human-readable format is only provided as a debugging aid.
+/// This is analogous to [std::fmt::Display], but:
+///   1. Takes a reference to a [Module] so that constructs that require lookups into the module's
+///      tables from stringification have access to them.
+///   2. Returns a [String], for ease of use.
 pub(crate) trait AotIRDisplay {
     /// Return a human-readable string.
-    ///
-    /// FIXME: this isn't as efficient as it could be. We could pass down a mutable string
-    /// reference like `JitIRDisplay` does to avoid all the string allocations when stringifiying
-    /// each constituent IR element.
     fn to_string(&self, m: &Module) -> String;
 
     /// Print myself to stderr in human-readable form.
@@ -176,29 +195,18 @@ impl AotIRDisplay for Opcode {
     }
 }
 
-#[deku_derive(DekuRead)]
-#[derive(Debug)]
-pub(crate) struct ConstantOperand {
-    const_idx: ConstIdx,
-}
-
-impl AotIRDisplay for ConstantOperand {
-    fn to_string(&self, m: &Module) -> String {
-        m.consts[self.const_idx].to_string(m)
-    }
-}
-
+/// Uniquely identifies an instruction within a [Module].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub(crate) struct InstructionID {
     #[deku(skip)] // computed after deserialisation.
     func_idx: FuncIdx,
-    bb_idx: BlockIdx,
+    bb_idx: BBlockIdx,
     inst_idx: InstrIdx,
 }
 
 impl InstructionID {
-    pub(crate) fn new(func_idx: FuncIdx, bb_idx: BlockIdx, inst_idx: InstrIdx) -> Self {
+    pub(crate) fn new(func_idx: FuncIdx, bb_idx: BBlockIdx, inst_idx: InstrIdx) -> Self {
         Self {
             func_idx,
             bb_idx,
@@ -207,91 +215,32 @@ impl InstructionID {
     }
 }
 
+/// Uniquely identifies a basic block within a [Func].
 #[derive(Debug, PartialEq)]
-pub(crate) struct BlockID {
+pub(crate) struct BBlockId {
     func_idx: FuncIdx,
-    block_idx: BlockIdx,
+    bb_idx: BBlockIdx,
 }
 
-impl BlockID {
-    pub(crate) fn new(func_idx: FuncIdx, block_idx: BlockIdx) -> Self {
-        Self {
-            func_idx,
-            block_idx,
-        }
+impl BBlockId {
+    pub(crate) fn new(func_idx: FuncIdx, bb_idx: BBlockIdx) -> Self {
+        Self { func_idx, bb_idx }
     }
 
     pub(crate) fn func_idx(&self) -> FuncIdx {
         self.func_idx
     }
 
-    pub(crate) fn block_idx(&self) -> BlockIdx {
-        self.block_idx
+    pub(crate) fn bb_idx(&self) -> BBlockIdx {
+        self.bb_idx
+    }
+
+    pub(crate) fn is_entry(&self) -> bool {
+        self.bb_idx == BBlockIdx(0)
     }
 }
 
-#[deku_derive(DekuRead)]
-#[derive(Debug, Hash, Eq, PartialEq)]
-pub(crate) struct LocalVariableOperand(pub(crate) InstructionID);
-
-impl LocalVariableOperand {
-    pub(crate) fn instr_id(&self) -> &InstructionID {
-        &self.0
-    }
-
-    pub(crate) fn instr_id_mut(&mut self) -> &mut InstructionID {
-        &mut self.0
-    }
-}
-
-impl AotIRDisplay for LocalVariableOperand {
-    fn to_string(&self, _m: &Module) -> String {
-        format!(
-            "${}_{}",
-            usize::from(self.0.bb_idx),
-            usize::from(self.0.inst_idx)
-        )
-    }
-}
-
-#[deku_derive(DekuRead)]
-#[derive(Debug)]
-pub(crate) struct TypeOperand {
-    type_idx: TypeIdx,
-}
-
-#[deku_derive(DekuRead)]
-#[derive(Debug)]
-pub(crate) struct BlockOperand {
-    pub(crate) bb_idx: BlockIdx,
-}
-
-impl AotIRDisplay for BlockOperand {
-    fn to_string(&self, _m: &Module) -> String {
-        format!("bb{}", usize::from(self.bb_idx))
-    }
-}
-
-#[deku_derive(DekuRead)]
-#[derive(Debug)]
-pub(crate) struct FuncOperand {
-    func_idx: FuncIdx,
-}
-
-/// An operand that is an argument to the parent function.
-#[deku_derive(DekuRead)]
-#[derive(Debug)]
-pub(crate) struct ArgOperand {
-    arg_idx: ArgIdx,
-}
-
-impl AotIRDisplay for ArgOperand {
-    fn to_string(&self, _m: &Module) -> String {
-        format!("$arg{}", usize::from(self.arg_idx))
-    }
-}
-
-/// Predictaes for use in numeric comparisons.
+/// Predicates for use in numeric comparisons.
 #[deku_derive(DekuRead)]
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 #[deku(type = "u8")]
@@ -315,25 +264,6 @@ impl AotIRDisplay for Predicate {
     }
 }
 
-/// A global variable operand.
-#[deku_derive(DekuRead)]
-#[derive(Debug)]
-pub(crate) struct GlobalOperand {
-    global_decl_idx: GlobalDeclIdx,
-}
-
-impl GlobalOperand {
-    pub(crate) fn index(&self) -> GlobalDeclIdx {
-        self.global_decl_idx
-    }
-}
-
-impl AotIRDisplay for GlobalOperand {
-    fn to_string(&self, m: &Module) -> String {
-        m.global_decls[self.global_decl_idx].to_string(m)
-    }
-}
-
 const OPKIND_CONST: u8 = 0;
 const OPKIND_LOCAL_VARIABLE: u8 = 1;
 const OPKIND_TYPE: u8 = 2;
@@ -349,23 +279,23 @@ const OPKIND_UNIMPLEMENTED: u8 = 255;
 #[deku(type = "u8")]
 pub(crate) enum Operand {
     #[deku(id = "OPKIND_CONST")]
-    Constant(ConstantOperand),
+    Constant(ConstIdx),
     #[deku(id = "OPKIND_LOCAL_VARIABLE")]
-    LocalVariable(LocalVariableOperand),
+    LocalVariable(InstructionID),
     #[deku(id = "OPKIND_TYPE")]
-    Type(TypeOperand),
+    Type(TypeIdx),
     #[deku(id = "OPKIND_FUNC")]
-    Func(FuncOperand),
+    Func(FuncIdx),
     #[deku(id = "OPKIND_BLOCK")]
-    Block(BlockOperand),
+    BBlock(BBlockIdx),
     #[deku(id = "OPKIND_ARG")]
-    Arg(ArgOperand),
+    Arg(ArgIdx),
     #[deku(id = "OPKIND_GLOBAL")]
-    Global(GlobalOperand),
+    Global(GlobalDeclIdx),
     #[deku(id = "OPKIND_PREDICATE")]
     Predicate(Predicate),
     #[deku(id = "OPKIND_UNIMPLEMENTED")]
-    Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")] String),
+    Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "map_to_string")] String),
 }
 
 impl Operand {
@@ -376,9 +306,8 @@ impl Operand {
     /// OPT: This is expensive.
     pub(crate) fn to_instr<'a>(&self, aotmod: &'a Module) -> &'a Instruction {
         match self {
-            Self::LocalVariable(lvo) => {
-                let iid = lvo.instr_id();
-                &aotmod.funcs[iid.func_idx].blocks[iid.bb_idx].instrs[lvo.instr_id().inst_idx]
+            Self::LocalVariable(iid) => {
+                &aotmod.funcs[iid.func_idx].bblocks[iid.bb_idx].instrs[iid.inst_idx]
             }
             _ => panic!(),
         }
@@ -387,8 +316,11 @@ impl Operand {
     /// Returns the [Type] of the operand.
     pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
         match self {
-            Self::LocalVariable(_) => self.to_instr(m).type_(m),
-            Self::Type(t) => m.type_(t.type_idx),
+            Self::LocalVariable(_) => {
+                // The `unwrap` can't fail for a `LocalVariable`.
+                self.to_instr(m).def_type(m).unwrap()
+            }
+            Self::Type(type_idx) => m.type_(*type_idx),
             _ => todo!(),
         }
     }
@@ -397,10 +329,7 @@ impl Operand {
     /// operands.
     pub(crate) fn to_instr_id(&self) -> InstructionID {
         match self {
-            Self::LocalVariable(lvo) => {
-                let iid = lvo.instr_id();
-                InstructionID::new(iid.func_idx, iid.bb_idx, iid.inst_idx)
-            }
+            Self::LocalVariable(iid) => iid.clone(),
             _ => panic!(),
         }
     }
@@ -409,20 +338,35 @@ impl Operand {
 impl AotIRDisplay for Operand {
     fn to_string(&self, m: &Module) -> String {
         match self {
-            Self::Constant(c) => c.to_string(m),
-            Self::LocalVariable(l) => l.to_string(m),
-            Self::Type(t) => m.types[t.type_idx].to_string(m),
-            Self::Func(f) => m.funcs[f.func_idx].name.to_owned(),
-            Self::Block(bb) => bb.to_string(m),
-            Self::Global(g) => g.to_string(m),
-            Self::Arg(a) => a.to_string(m),
+            Self::Constant(const_idx) => m.consts[*const_idx].to_string(m),
+            Self::LocalVariable(iid) => {
+                format!("${}_{}", usize::from(iid.bb_idx), usize::from(iid.inst_idx))
+            }
+            Self::Type(type_idx) => m.types[*type_idx].to_string(m),
+            Self::Func(func_idx) => m.funcs[*func_idx].name.to_owned(),
+            Self::BBlock(bb_idx) => format!("bb{}", usize::from(*bb_idx)),
+            Self::Arg(arg_idx) => format!("$arg{}", usize::from(*arg_idx)),
+            Self::Global(gd_idx) => m.global_decls[*gd_idx].to_string(m),
             Self::Predicate(p) => p.to_string(m),
             Self::Unimplemented(s) => format!("?op<{}>", s),
         }
     }
 }
 
-/// A bytecode instruction.
+/// An instruction.
+///
+/// An instruction is conceptually an [Opcode] and a list of [Operand]s. The semantics of the
+/// instruction, and the meaning of the operands, are determined by the opcode.
+///
+/// Instructions that compute a value define a new local variable in the parent [Func]. In such a
+/// case the newly defined variable can be referenced in the operands of later instructions by the
+/// [InstructionID] of the [Instruction] that defined the variable.
+///
+/// In other words, an instruction and the variable it defines are both identified by the same
+/// [InstructionID].
+///
+/// The type of the variable defined by an instruction (if any) can be determined by
+/// [Instruction::def_type()].
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct Instruction {
@@ -457,27 +401,27 @@ impl Instruction {
     /// # Panics
     ///
     /// Panics if the instruction isn't a call instruction.
-    pub(crate) fn callee<'a>(&self) -> FuncIdx {
+    pub(crate) fn callee(&self) -> FuncIdx {
         debug_assert!(matches!(self.opcode, Opcode::Call));
         let op = self.operand(0);
         match op {
-            Operand::Func(fo) => fo.func_idx,
+            Operand::Func(func_idx) => *func_idx,
             _ => panic!(),
         }
-    }
-
-    /// Returns true if this instruction defines a new local variable.
-    fn is_def(&self, m: &Module) -> bool {
-        m.instr_type(self) != &Type::Void
     }
 
     pub(crate) fn type_idx(&self) -> TypeIdx {
         self.type_idx
     }
 
-    /// Returns the [Type] of the local variable defined by this instruction (if any).
-    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
-        m.type_(self.type_idx)
+    /// Returns the [Type] of the local variable defined by this instruction or `None` if this
+    /// instruction does not define a new local variable.
+    pub(crate) fn def_type<'a>(&self, m: &'a Module) -> Option<&'a Type> {
+        if m.instr_type(self) != &Type::Void {
+            Some(m.type_(self.type_idx))
+        } else {
+            None
+        }
     }
 
     pub(crate) fn is_store(&self) -> bool {
@@ -488,13 +432,25 @@ impl Instruction {
         self.opcode == Opcode::PtrAdd
     }
 
+    pub(crate) fn is_mappable_call(&self, aot_mod: &Module) -> bool {
+        if self.opcode == Opcode::Call {
+            let op = &self.operands[0];
+            match op {
+                Operand::Func(func_idx) => !aot_mod.funcs[*func_idx].is_declaration(),
+                _ => false,
+            }
+        } else {
+            false
+        }
+    }
+
     pub(crate) fn is_control_point(&self, aot_mod: &Module) -> bool {
         if self.opcode == Opcode::Call {
             // Call instructions always have at least one operand (the callee), so this is safe.
             let op = &self.operands[0];
             match op {
-                Operand::Func(fop) => {
-                    return aot_mod.funcs[fop.func_idx].name == CONTROL_POINT_NAME;
+                Operand::Func(func_idx) => {
+                    return aot_mod.funcs[*func_idx].name == CONTROL_POINT_NAME;
                 }
                 _ => todo!(),
             }
@@ -507,8 +463,8 @@ impl Instruction {
             // Call instructions always have at least one operand (the callee), so this is safe.
             let op = &self.operands[0];
             match op {
-                Operand::Func(fop) => {
-                    return aot_mod.funcs[fop.func_idx].name == STACKMAP_CALL_NAME;
+                Operand::Func(func_idx) => {
+                    return aot_mod.funcs[*func_idx].name == STACKMAP_CALL_NAME;
                 }
                 _ => todo!(),
             }
@@ -521,8 +477,8 @@ impl Instruction {
             // Call instructions always have at least one operand (the callee), so this is safe.
             let op = &self.operands[0];
             match op {
-                Operand::Func(fop) => {
-                    return aot_mod.funcs[fop.func_idx].name == LLVM_DEBUG_CALL_NAME;
+                Operand::Func(func_idx) => {
+                    return aot_mod.funcs[*func_idx].name == LLVM_DEBUG_CALL_NAME;
                 }
                 _ => todo!(),
             }
@@ -554,7 +510,7 @@ impl AotIRDisplay for Instruction {
         }
 
         let mut ret = String::new();
-        if self.is_def(m) {
+        if let Some(_) = self.def_type(m) {
             let name = self.name.borrow();
             // The unwrap cannot fail, as we forced computation of variable names above.
             ret.push_str(&format!(
@@ -590,17 +546,17 @@ impl AotIRDisplay for Instruction {
     }
 }
 
-/// A basic block containing bytecode instructions.
+/// A basic block containing IR [Instruction]s.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
-pub(crate) struct Block {
+pub(crate) struct BBlock {
     #[deku(temp)]
     num_instrs: usize,
-    #[deku(count = "num_instrs", map = "deserialise_into_ti_vec")]
+    #[deku(count = "num_instrs", map = "map_to_tivec")]
     pub(crate) instrs: TiVec<InstrIdx, Instruction>,
 }
 
-impl AotIRDisplay for Block {
+impl AotIRDisplay for BBlock {
     fn to_string(&self, m: &Module) -> String {
         let mut ret = String::new();
         for i in &self.instrs {
@@ -610,31 +566,41 @@ impl AotIRDisplay for Block {
     }
 }
 
-/// A function.
+/// A function definition or declaration.
+///
+/// If the function was compiled by ykllvm as part of the interpreter binary, then we have IR for
+/// the function body, and the function is said to be a *function definition*.
+///
+/// Conversely, if the function was *not* compiled by ykllvm as part of the interpreter binary (as
+/// is the case for shared library functions), then we have no IR for the function body, and the
+/// function is said to be a *function declaration*.
+///
+/// [Func::is_declaration()] can be used to determine if the [Func] is a definition or a
+/// declaration.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct Func {
-    #[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")]
+    #[deku(until = "|v: &u8| *v == 0", map = "map_to_string")]
     name: String,
     type_idx: TypeIdx,
     #[deku(temp)]
-    num_blocks: usize,
-    #[deku(count = "num_blocks", map = "deserialise_into_ti_vec")]
-    blocks: TiVec<BlockIdx, Block>,
+    num_bblocks: usize,
+    #[deku(count = "num_bblocks", map = "map_to_tivec")]
+    bblocks: TiVec<BBlockIdx, BBlock>,
 }
 
-impl<'a> Func {
+impl Func {
     fn is_declaration(&self) -> bool {
-        self.blocks.is_empty()
+        self.bblocks.is_empty()
     }
 
-    /// Return the [Block] at the specified index.
+    /// Return the [BBlock] at the specified index.
     ///
     /// # Panics
     ///
     /// Panics if the index is out of range.
-    pub(crate) fn block(&self, bb_idx: BlockIdx) -> &Block {
-        &self.blocks[bb_idx]
+    pub(crate) fn bblock(&self, bb_idx: BBlockIdx) -> &BBlock {
+        &self.bblocks[bb_idx]
     }
 
     /// Return the name of the function.
@@ -645,6 +611,19 @@ impl<'a> Func {
     /// Return the type index of the function.
     pub(crate) fn type_idx(&self) -> TypeIdx {
         self.type_idx
+    }
+
+    /// Return the [FuncType] for the function.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the function's type isn't a [FuncType]. This cannot happen in well-formed IR.
+    pub(crate) fn func_type<'a>(&self, m: &'a Module) -> &'a FuncType {
+        if let Type::Func(ft) = m.type_(self.type_idx) {
+            ft
+        } else {
+            panic!(); // IR is malformed.
+        }
     }
 }
 
@@ -675,7 +654,7 @@ impl AotIRDisplay for Func {
                 ret.push_str(";\n");
             } else {
                 ret.push_str(" {\n");
-                for (i, b) in self.blocks.iter().enumerate() {
+                for (i, b) in self.bblocks.iter().enumerate() {
                     ret.push_str(&format!("  bb{}:\n{}", i, b.to_string(m)));
                 }
                 ret.push_str("}\n");
@@ -713,8 +692,11 @@ pub(crate) fn const_int_bytes_to_str(num_bits: u32, bytes: &[u8]) -> String {
 
 /// A fixed-width integer type.
 ///
-/// Signedness is not specified. Interpretation of the bit pattern is delegated to operations upon
-/// the integer.
+/// Note:
+///   1. These integers range in size from 1..2^23 (inc.) bits. This is inherited [from LLVM's
+///      integer type](https://llvm.org/docs/LangRef.html#integer-type).
+///   2. Signedness is not specified. Interpretation of the bit pattern is delegated to operations
+///      upon the integer.
 #[deku_derive(DekuRead)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct IntegerType {
@@ -722,7 +704,16 @@ pub(crate) struct IntegerType {
 }
 
 impl IntegerType {
+    /// Create a new integer type with the specified number of bits.
+    #[cfg(test)]
+    pub(crate) fn new(num_bits: u32) -> Self {
+        debug_assert!(num_bits > 0 && num_bits <= 0x800000);
+        Self { num_bits }
+    }
+
+    /// Return the number of bits (1..2^23 (inc.)) this integer spans.
     pub(crate) fn num_bits(&self) -> u32 {
+        debug_assert!(self.num_bits > 0 && self.num_bits <= 0x800000);
         self.num_bits
     }
 
@@ -738,12 +729,6 @@ impl IntegerType {
             ret += 1;
         }
         usize::try_from(ret).unwrap()
-    }
-
-    /// Create a new integer type with the specified number of bits.
-    #[cfg(test)]
-    pub(crate) fn new(num_bits: u32) -> Self {
-        Self { num_bits }
     }
 
     /// Format a constant integer value that is of the type described by `self`.
@@ -774,7 +759,16 @@ pub(crate) struct FuncType {
 }
 
 impl FuncType {
-    pub(crate) fn arg_ty_idxs(&self) -> &Vec<TypeIdx> {
+    #[cfg(test)]
+    fn new(arg_ty_idxs: Vec<TypeIdx>, ret_ty_idx: TypeIdx, is_vararg: bool) -> Self {
+        Self {
+            arg_ty_idxs,
+            ret_ty: ret_ty_idx,
+            is_vararg,
+        }
+    }
+
+    pub(crate) fn arg_ty_idxs(&self) -> &[TypeIdx] {
         &self.arg_ty_idxs
     }
 
@@ -784,6 +778,26 @@ impl FuncType {
 
     pub(crate) fn is_vararg(&self) -> bool {
         self.is_vararg
+    }
+}
+
+impl AotIRDisplay for FuncType {
+    fn to_string(&self, m: &Module) -> String {
+        let mut args = self
+            .arg_ty_idxs
+            .iter()
+            .map(|t| m.types[*t].to_string(m))
+            .collect::<Vec<_>>();
+        if self.is_vararg() {
+            args.push("...".to_owned());
+        }
+        let rty = m.type_(self.ret_ty);
+        let args_s = args.join(", ");
+        if rty != &Type::Void {
+            format!("func({}) -> {}", args_s, rty.to_string(m))
+        } else {
+            format!("func({})", args_s)
+        }
     }
 }
 
@@ -847,19 +861,6 @@ impl AotIRDisplay for StructType {
     }
 }
 
-impl AotIRDisplay for FuncType {
-    fn to_string(&self, m: &Module) -> String {
-        format!(
-            "func({})",
-            self.arg_ty_idxs
-                .iter()
-                .map(|t| m.types[*t].to_string(m))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    }
-}
-
 const TYKIND_VOID: u8 = 0;
 const TYKIND_INTEGER: u8 = 1;
 const TYKIND_PTR: u8 = 2;
@@ -883,7 +884,7 @@ pub(crate) enum Type {
     #[deku(id = "TYKIND_STRUCT")]
     Struct(StructType),
     #[deku(id = "TYKIND_UNIMPLEMENTED")]
-    Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")] String),
+    Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "map_to_string")] String),
 }
 
 impl Type {
@@ -901,19 +902,6 @@ impl Type {
                 "const_struct".to_owned()
             }
             Self::Unimplemented(s) => format!("?cst<{}>", s),
-        }
-    }
-
-    /// Returns a reference to the inner [StructType] if this is a `Self::Struct`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `self` isn't a `Self::Struct`.
-    pub(crate) fn as_struct(&self) -> &StructType {
-        if let Self::Struct(st) = self {
-            st
-        } else {
-            panic!();
         }
     }
 }
@@ -961,11 +949,14 @@ impl AotIRDisplay for Constant {
 }
 
 /// A global variable declaration, identified by its symbol name.
+///
+/// Since the AOT IR doesn't capture the initialisers of global variables (externally compiled or
+/// otherwise), all global variables are considered *declarations*.
 #[deku_derive(DekuRead)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct GlobalDecl {
     is_threadlocal: bool,
-    #[deku(until = "|v: &u8| *v == 0", map = "deserialise_string")]
+    #[deku(until = "|v: &u8| *v == 0", map = "map_to_string")]
     name: String,
 }
 
@@ -985,7 +976,7 @@ impl GlobalDecl {
     }
 }
 
-/// A bytecode module.
+/// An AOT IR module.
 ///
 /// This is the top-level container for the AOT IR.
 ///
@@ -999,19 +990,19 @@ pub(crate) struct Module {
     version: u32,
     #[deku(temp)]
     num_funcs: usize,
-    #[deku(count = "num_funcs", map = "deserialise_into_ti_vec")]
+    #[deku(count = "num_funcs", map = "map_to_tivec")]
     funcs: TiVec<FuncIdx, Func>,
     #[deku(temp)]
     num_consts: usize,
-    #[deku(count = "num_consts", map = "deserialise_into_ti_vec")]
+    #[deku(count = "num_consts", map = "map_to_tivec")]
     consts: TiVec<ConstIdx, Constant>,
     #[deku(temp)]
     num_global_decls: usize,
-    #[deku(count = "num_global_decls", map = "deserialise_into_ti_vec")]
+    #[deku(count = "num_global_decls", map = "map_to_tivec")]
     global_decls: TiVec<GlobalDeclIdx, GlobalDecl>,
     #[deku(temp)]
     num_types: usize,
-    #[deku(count = "num_types", map = "deserialise_into_ti_vec")]
+    #[deku(count = "num_types", map = "map_to_tivec")]
     types: TiVec<TypeIdx, Type>,
     /// Have local variable names been computed?
     ///
@@ -1021,15 +1012,15 @@ pub(crate) struct Module {
 }
 
 impl Module {
-    /// Compute variable names for all instructions that generate a value.
+    /// Compute the names of all local variables, for use when stringifying.
     fn compute_variable_names(&self) {
         debug_assert!(!*self.var_names_computed.borrow());
         // Note that because the on-disk IR is conceptually immutable, so we don't have to worry
         // about keeping the names up to date.
         for f in &self.funcs {
-            for (bb_idx, bb) in f.blocks.iter().enumerate() {
+            for (bb_idx, bb) in f.bblocks.iter().enumerate() {
                 for (inst_idx, inst) in bb.instrs.iter().enumerate() {
-                    if inst.is_def(self) {
+                    if let Some(_) = inst.def_type(self) {
                         *inst.name.borrow_mut() = Some(format!("{}_{}", bb_idx, inst_idx));
                     }
                 }
@@ -1053,9 +1044,9 @@ impl Module {
             .unwrap()
     }
 
-    /// Return the block uniquely identified (in this module) by the specified [BlockID].
-    pub(crate) fn block(&self, bid: &BlockID) -> &Block {
-        self.funcs[bid.func_idx].block(bid.block_idx)
+    /// Return the block uniquely identified (in this module) by the specified [BBlockId].
+    pub(crate) fn bblock(&self, bid: &BBlockId) -> &BBlock {
+        self.funcs[bid.func_idx].bblock(bid.bb_idx)
     }
 
     /// Fill in the function index of local variable operands of instructions.
@@ -1064,11 +1055,11 @@ impl Module {
     /// https://github.com/sharksforarms/deku/issues/363
     fn compute_local_operand_func_indices(&mut self) {
         for (f_idx, f) in self.funcs.iter_mut().enumerate() {
-            for bb in &mut f.blocks {
+            for bb in &mut f.bblocks {
                 for inst in &mut bb.instrs {
                     for op in &mut inst.operands {
-                        if let Operand::LocalVariable(ref mut lv) = op {
-                            lv.instr_id_mut().func_idx = FuncIdx(f_idx);
+                        if let Operand::LocalVariable(ref mut iid) = op {
+                            iid.func_idx = FuncIdx(f_idx);
                         }
                     }
                 }
@@ -1083,8 +1074,8 @@ impl Module {
         &self.types[instr.type_idx]
     }
 
-    pub(crate) fn constant(&self, co: &ConstantOperand) -> &Constant {
-        &self.consts[co.const_idx]
+    pub(crate) fn constant(&self, co: &ConstIdx) -> &Constant {
+        &self.consts[*co]
     }
 
     pub(crate) fn const_type(&self, c: &Constant) -> &Type {
@@ -1116,6 +1107,11 @@ impl Module {
     /// Panics if the index is out of bounds.
     pub(crate) fn global_decl(&self, idx: GlobalDeclIdx) -> &GlobalDecl {
         &self.global_decls[idx]
+    }
+
+    /// Return the number of global variable declarations.
+    pub(crate) fn global_decls_len(&self) -> usize {
+        self.global_decls.len()
     }
 
     pub(crate) fn to_str(&self) -> String {
@@ -1160,15 +1156,9 @@ pub fn print_from_file(path: &PathBuf) -> Result<(), Box<dyn Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        deserialise_module, deserialise_string, Constant, IntegerType, Opcode, TypeIdx,
-        FORMAT_VERSION, MAGIC, OPKIND_BLOCK, OPKIND_CONST, OPKIND_FUNC, OPKIND_LOCAL_VARIABLE,
-        OPKIND_TYPE, OPKIND_UNIMPLEMENTED, TYKIND_FUNC, TYKIND_INTEGER, TYKIND_PTR, TYKIND_STRUCT,
-        TYKIND_UNIMPLEMENTED, TYKIND_VOID,
-    };
-    use byteorder::{NativeEndian, WriteBytesExt};
+    use super::*;
+    use byteorder::WriteBytesExt;
     use num_traits::{PrimInt, ToBytes};
-    use std::ffi::CString;
     use std::mem;
 
     #[cfg(target_pointer_width = "64")]
@@ -1204,7 +1194,7 @@ mod tests {
         write_str(&mut data, "foo");
         // type_idx:
         write_native_usize(&mut data, 4);
-        // num_blocks:
+        // num_bblocks:
         write_native_usize(&mut data, 2);
 
         // BLOCK 0
@@ -1349,7 +1339,7 @@ mod tests {
         write_str(&mut data, "bar");
         // type_idx:
         write_native_usize(&mut data, 5);
-        // num_blocks:
+        // num_bblocks:
         write_native_usize(&mut data, 0);
 
         // CONSTANTS
@@ -1483,7 +1473,7 @@ func bar();
     fn string_deser() {
         let check = |s: &str| {
             assert_eq!(
-                &deserialise_string(CString::new(s).unwrap().into_bytes_with_nul()).unwrap(),
+                &map_to_string(CString::new(s).unwrap().into_bytes_with_nul()).unwrap(),
                 s
             );
         };
@@ -1544,7 +1534,6 @@ func bar();
 
     #[test]
     fn integer_type_sizes() {
-        assert_eq!(IntegerType::new(0).byte_size(), 0);
         for i in 1..8 {
             assert_eq!(IntegerType::new(i).byte_size(), 1);
         }
@@ -1554,5 +1543,27 @@ func bar();
         assert_eq!(IntegerType::new(127).byte_size(), 16);
         assert_eq!(IntegerType::new(128).byte_size(), 16);
         assert_eq!(IntegerType::new(129).byte_size(), 17);
+    }
+
+    #[test]
+    fn stringify_func_types() {
+        let mut m = Module::default();
+
+        let i8_tyidx = TypeIdx::new(m.types.len());
+        m.types.push(Type::Integer(IntegerType { num_bits: 8 }));
+        let void_tyidx = TypeIdx::new(m.types.len());
+        m.types.push(Type::Void);
+
+        let fty = Type::Func(FuncType::new(vec![i8_tyidx], i8_tyidx, false));
+        assert_eq!(&fty.to_string(&m), "func(i8) -> i8");
+
+        let fty = Type::Func(FuncType::new(vec![i8_tyidx], i8_tyidx, true));
+        assert_eq!(&fty.to_string(&m), "func(i8, ...) -> i8");
+
+        let fty = Type::Func(FuncType::new(vec![], i8_tyidx, false));
+        assert_eq!(&fty.to_string(&m), "func() -> i8");
+
+        let fty = Type::Func(FuncType::new(vec![], void_tyidx, false));
+        assert_eq!(&fty.to_string(&m), "func()");
     }
 }

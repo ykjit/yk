@@ -3,6 +3,8 @@
 #![cfg_attr(test, feature(test))]
 #![feature(lazy_cell)]
 #![feature(naked_functions)]
+#![feature(ptr_sub_ptr)]
+#![feature(strict_provenance)]
 #![allow(clippy::type_complexity)]
 #![allow(clippy::new_without_default)]
 #![allow(clippy::missing_safety_doc)]

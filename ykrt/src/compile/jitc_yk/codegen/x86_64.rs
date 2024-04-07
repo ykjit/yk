@@ -6,7 +6,7 @@
 
 use super::{
     super::{
-        jit_ir::{self, InstrIdx, Operand, Type},
+        jit_ir::{self, FuncDecl, InstrIdx, Operand, Type},
         CompilationError,
     },
     abs_stack::AbstractStack,
@@ -15,7 +15,9 @@ use super::{
 };
 #[cfg(any(debug_assertions, test))]
 use crate::compile::jitc_yk::jit_ir::JitIRDisplay;
-use crate::{compile::CompiledTrace, mt::MTThread};
+#[cfg(feature = "yk_jitstate_debug")]
+use crate::print_jit_state;
+use crate::{aotsmp::AOT_STACKMAPS, compile::CompiledTrace, mt::MTThread};
 use byteorder::{NativeEndian, ReadBytesExt};
 use dynasmrt::{
     components::StaticLabel, dynasm, x64::Rq, AssemblyOffset, DynasmApi, DynasmError,
@@ -24,8 +26,9 @@ use dynasmrt::{
 use libc::c_void;
 #[cfg(any(debug_assertions, test))]
 use std::{cell::Cell, collections::HashMap, error::Error, slice};
-use std::{ffi::CString, sync::Arc};
-use ykaddr::addr::symbol_vaddr;
+use std::{ptr, sync::Arc};
+use ykaddr::addr::symbol_to_ptr;
+use yksmp::Location as SMLocation;
 
 /// Argument registers as defined by the X86_64 SysV ABI.
 static ARG_REGS: [Rq; 6] = [Rq::RDI, Rq::RSI, Rq::RDX, Rq::RCX, Rq::R8, Rq::R9];
@@ -35,6 +38,7 @@ static JITFUNC_LIVEVARS_ARGIDX: usize = 0;
 
 /// The size of a 64-bit register in bytes.
 static REG64_SIZE: usize = 8;
+static RBP_DWARF_NUM: u16 = 6;
 
 /// Work registers, i.e. the registers we use temporarily (where possible) for operands to, and
 /// results of, intermediate computations.
@@ -51,14 +55,145 @@ const SYSV_CALL_STACK_ALIGN: usize = 16;
 /// On X86_64 the stack grows down.
 const STACK_DIRECTION: StackDirection = StackDirection::GrowsDown;
 
-extern "C" fn __yk_deopt(_ctrlpvars: *const c_void, _frameaddr: *const c_void, deoptid: usize) {
+extern "C" fn __yk_deopt(frameaddr: *const c_void, deoptid: usize, jitrbp: *const c_void) {
+    #[cfg(feature = "yk_jitstate_debug")]
+    print_jit_state("deoptimise");
+
     let ctr = MTThread::with(|mtt| mtt.running_trace().unwrap())
         .as_any()
         .downcast::<X64CompiledTrace>()
         .unwrap();
     debug_assert!(deoptid < ctr.deoptinfo.len());
-    eprintln!("deopt");
-    std::process::exit(1);
+    let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
+    let info = &ctr.deoptinfo[deoptid];
+
+    // Amount of space we need to allocate for the new stack.
+    // FIXME: For now we don't need to recreate frames, so we only need space for live registers.
+    let mut memsize = 15 * REG64_SIZE;
+    // Make space for the return address of the controlpoint frame.
+    memsize += REG64_SIZE;
+    // Allocate space on the heap for the new stack. We will later memcpy this new stack over the
+    // old stack just after the frame containing the control point. Since the stack grows downwards
+    // we need to assemble it in the same way. For convenience we will be keeping a pointer into
+    // the newstack which we call `rsp`.
+    let newstack = unsafe { libc::malloc(memsize) };
+    let mut rsp = unsafe { newstack.byte_add(memsize) };
+
+    // Live register values that we need to write back into AOT registers.
+    let mut registers = [0; 16];
+    let mut newframedst = frameaddr;
+    let mut varidx = 0;
+    for (frameid, smid) in info.frames.iter().enumerate() {
+        let (rec, pinfo) = aot_smaps.get(usize::try_from(*smid).unwrap());
+
+        if frameid == 0 {
+            // Compute the address to which we want to write the new stack. This is immediately
+            // after the frame containing the control point.
+            newframedst = unsafe { newframedst.byte_sub(usize::try_from(rec.size).unwrap()) };
+            if pinfo.hasfp {
+                newframedst = unsafe { newframedst.byte_add(REG64_SIZE) };
+            }
+        }
+
+        for aotvar in rec.live_vars.iter() {
+            // Read live JIT values from the trace's stack frame.
+            let jitval = match info.lives[varidx] {
+                LocalAlloc::Stack { frame_off, size } => {
+                    let p = unsafe { jitrbp.byte_sub(frame_off) };
+                    match size {
+                        1 => unsafe { u64::from(std::ptr::read::<u8>(p as *const u8)) },
+                        2 => unsafe { u64::from(std::ptr::read::<u16>(p as *const u16)) },
+                        4 => unsafe { u64::from(std::ptr::read::<u32>(p as *const u32)) },
+                        8 => unsafe { std::ptr::read::<u64>(p as *const u64) },
+                        _ => todo!(),
+                    }
+                }
+                LocalAlloc::Register => todo!(),
+            };
+
+            let aotloc = if aotvar.len() == 1 {
+                aotvar.get(0).unwrap()
+            } else {
+                todo!("Deal with multi register locations");
+            };
+            match aotloc {
+                SMLocation::Register(reg, _size, __off, __extra) => {
+                    registers[usize::from(*reg)] = jitval;
+                }
+                SMLocation::Direct(..) => {
+                    // Due to the shadow stack we only expect direct locations for the control
+                    // point frame.
+                    debug_assert_eq!(frameid, 0);
+                    continue;
+                }
+                SMLocation::Indirect(_reg, _off, _size) => {
+                    todo!()
+                }
+                SMLocation::Constant(_v) => todo!(),
+                SMLocation::LargeConstant(_v) => todo!(),
+            }
+            varidx += 1;
+        }
+
+        // Write the return address for the previous frame into the current frame.
+        unsafe {
+            rsp = rsp.sub(REG64_SIZE);
+            ptr::write(rsp as *mut u64, rec.offset);
+        }
+    }
+
+    // Update RBP register. FIXME: We will have to do this for every frame, inside the loop above,
+    // once we can deal with multiple frames.
+    registers[usize::from(RBP_DWARF_NUM)] = frameaddr as u64;
+
+    // Write the live registers into the new stack. We put these at the very end of the new stack
+    // so that they can be immediately popped after we memcpy'd the new stack over.
+    for reg in [0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15] {
+        unsafe {
+            rsp = rsp.byte_sub(REG64_SIZE);
+            ptr::write(rsp as *mut u64, registers[reg]);
+        }
+    }
+    // Now overwrite the existing stack with our newly recreated one.
+    unsafe { __replace_stack(newframedst as *mut c_void, newstack, memsize) };
+}
+
+#[cfg(target_arch = "x86_64")]
+#[naked]
+#[no_mangle]
+unsafe extern "C" fn __replace_stack(dst: *mut c_void, src: *const c_void, size: usize) -> ! {
+    std::arch::asm!(
+        // Reset RSP to the end of the control point frame (this doesn't include the
+        // return address which will thus be overwritten in the process)
+        "mov rsp, rdi",
+        // Move rsp to the end of the new stack.
+        "sub rsp, rdx",
+        // Copy the new stack at onto the old stack. The arguments are the same as those of
+        // this function.
+        "mov rdi, rsp",
+        "call memcpy",
+        // Free the source which is no longer needed.
+        "mov rdi, rsi",
+        "call free",
+        // Recover live registers.
+        "pop r15",
+        "pop r14",
+        "pop r13",
+        "pop r12",
+        "pop r11",
+        "pop r10",
+        "pop r9",
+        "pop r8",
+        "pop rbp",
+        "pop rdi",
+        "pop rsi",
+        "pop rbx",
+        "pop rcx",
+        "pop rdx",
+        "pop rax",
+        "ret",
+        options(noreturn)
+    )
 }
 
 /// A function that we can put a debugger breakpoint on.
@@ -77,7 +212,7 @@ pub(crate) struct X64CodeGen<'a> {
     /// value grows up.
     stack: AbstractStack,
     /// Register allocator.
-    ra: &'a mut dyn RegisterAllocator,
+    ra: Box<dyn RegisterAllocator>,
     /// Deopt info.
     deoptinfo: Vec<DeoptInfo>,
     /// Comments used by the trace printer for debugging and testing only.
@@ -90,10 +225,11 @@ pub(crate) struct X64CodeGen<'a> {
 impl<'a> CodeGen<'a> for X64CodeGen<'a> {
     fn new(
         jit_mod: &'a jit_ir::Module,
-        ra: &'a mut dyn RegisterAllocator,
-    ) -> Result<X64CodeGen<'a>, CompilationError> {
-        let asm = dynasmrt::x64::Assembler::new().map_err(|e| CompilationError(e.to_string()))?;
-        Ok(Self {
+        ra: Box<dyn RegisterAllocator>,
+    ) -> Result<Box<X64CodeGen<'a>>, CompilationError> {
+        let asm = dynasmrt::x64::Assembler::new()
+            .map_err(|e| CompilationError::ResourceExhausted(Box::new(e)))?;
+        Ok(Box::new(Self {
             jit_mod,
             asm,
             stack: Default::default(),
@@ -101,10 +237,10 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
             deoptinfo: Vec::new(),
             #[cfg(any(debug_assertions, test))]
             comments: Cell::new(HashMap::new()),
-        })
+        }))
     }
 
-    fn codegen(mut self) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
+    fn codegen(mut self: Box<Self>) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         let alloc_off = self.emit_prologue();
 
         // FIXME: we'd like to be able to assemble code backwards as this would simplify register
@@ -146,14 +282,13 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
         // correct amount.
         self.patch_frame_allocation(alloc_off);
 
+        // If an error happens here, we've made a mistake in the assembly we generate.
         self.asm
             .commit()
-            .map_err(|e| CompilationError(e.to_string()))?;
+            .map_err(|e| CompilationError::InternalError(format!("When committing: {e}")))?;
 
-        let buf = self
-            .asm
-            .finalize()
-            .map_err(|e| CompilationError(format!("failed to finalize assembler: {e:?}").into()))?;
+        // This unwrap cannot fail if `commit` (above) succeeded.
+        let buf = self.asm.finalize().unwrap();
 
         #[cfg(not(any(debug_assertions, test)))]
         return Ok(Arc::new(X64CompiledTrace {
@@ -163,11 +298,11 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
         #[cfg(any(debug_assertions, test))]
         {
             let comments = self.comments.take();
-            return Ok(Arc::new(X64CompiledTrace {
+            Ok(Arc::new(X64CompiledTrace {
                 buf,
                 deoptinfo: self.deoptinfo,
                 comments,
-            }));
+            }))
         }
     }
 }
@@ -183,17 +318,18 @@ impl<'a> X64CodeGen<'a> {
         self.comment(self.asm.offset(), inst.to_string(self.jit_mod).unwrap());
 
         match inst {
-            jit_ir::Instruction::Add(i) => self.codegen_add_instr(instr_idx, &i),
+            jit_ir::Instruction::Add(i) => self.codegen_add_instr(instr_idx, i),
             jit_ir::Instruction::LoadTraceInput(i) => {
-                self.codegen_loadtraceinput_instr(instr_idx, &i)
+                self.codegen_loadtraceinput_instr(instr_idx, i)
             }
-            jit_ir::Instruction::Load(i) => self.codegen_load_instr(instr_idx, &i),
-            jit_ir::Instruction::PtrAdd(i) => self.codegen_ptradd_instr(instr_idx, &i),
-            jit_ir::Instruction::Store(i) => self.codegen_store_instr(&i),
-            jit_ir::Instruction::LookupGlobal(i) => self.codegen_lookupglobal_instr(instr_idx, &i),
-            jit_ir::Instruction::Call(i) => self.codegen_call_instr(instr_idx, &i)?,
-            jit_ir::Instruction::Icmp(i) => self.codegen_icmp_instr(instr_idx, &i),
-            jit_ir::Instruction::Guard(i) => self.codegen_guard_instr(&i),
+            jit_ir::Instruction::Load(i) => self.codegen_load_instr(instr_idx, i),
+            jit_ir::Instruction::PtrAdd(i) => self.codegen_ptradd_instr(instr_idx, i),
+            jit_ir::Instruction::Store(i) => self.codegen_store_instr(i),
+            jit_ir::Instruction::LookupGlobal(i) => self.codegen_lookupglobal_instr(instr_idx, i),
+            jit_ir::Instruction::Call(i) => self.codegen_call_instr(instr_idx, i)?,
+            jit_ir::Instruction::VACall(i) => self.codegen_vacall_instr(instr_idx, i)?,
+            jit_ir::Instruction::Icmp(i) => self.codegen_icmp_instr(instr_idx, i),
+            jit_ir::Instruction::Guard(i) => self.codegen_guard_instr(i),
             jit_ir::Instruction::Arg(i) => self.codegen_arg(instr_idx, *i),
             jit_ir::Instruction::TraceLoopStart => self.codegen_traceloopstart_instr(),
         }
@@ -215,6 +351,7 @@ impl<'a> X64CodeGen<'a> {
     /// JITted code is via deoptimisation, which will rewrite the whole stack anyway.
     ///
     /// Returns the offset at which to patch up the stack allocation later.
+    #[allow(clippy::fn_to_numeric_cast)]
     fn emit_prologue(&mut self) -> AssemblyOffset {
         #[cfg(any(debug_assertions, test))]
         self.comment(self.asm.offset(), "prologue".to_owned());
@@ -243,7 +380,7 @@ impl<'a> X64CodeGen<'a> {
             self.comment(self.asm.offset(), "Breakpoint hack".into());
             self.stack.align(SYSV_CALL_STACK_ALIGN);
             dynasm!(self.asm
-                ; mov r11, QWORD __yk_break as _
+                ; mov r11, QWORD __yk_break as i64
                 ; call r11
             );
         }
@@ -278,7 +415,7 @@ impl<'a> X64CodeGen<'a> {
     /// Load a local variable out of its stack slot into the specified register.
     fn load_local(&mut self, reg: Rq, local: InstrIdx) {
         match self.ra.allocation(local) {
-            LocalAlloc::Stack { frame_off } => {
+            LocalAlloc::Stack { frame_off, size: _ } => {
                 match i32::try_from(*frame_off) {
                     Ok(foff) => {
                         let size = local.instr(self.jit_mod).def_byte_size(self.jit_mod);
@@ -319,7 +456,7 @@ impl<'a> X64CodeGen<'a> {
 
     fn store_local(&mut self, l: &LocalAlloc, reg: Rq, size: usize) {
         match l {
-            LocalAlloc::Stack { frame_off } => match i32::try_from(*frame_off) {
+            LocalAlloc::Stack { frame_off, size: _ } => match i32::try_from(*frame_off) {
                 Ok(off) => match size {
                     8 => dynasm!(self.asm ; mov [rbp - off], Rq(reg.code())),
                     4 => dynasm!(self.asm ; mov [rbp - off], Rd(reg.code())),
@@ -446,46 +583,47 @@ impl<'a> X64CodeGen<'a> {
         if decl.is_threadlocal() {
             todo!();
         }
-        let sym_addr = self.jit_mod.globalvar_vaddr(inst.global_decl_idx());
+        let sym_addr = self.jit_mod.globalvar_ptr(inst.global_decl_idx()).addr();
         dynasm!(self.asm ; mov Rq(WR0.code()), QWORD i64::try_from(sym_addr).unwrap());
         self.reg_into_new_local(inst_idx, WR0);
     }
 
-    pub(super) fn codegen_call_instr(
+    pub(super) fn emit_call(
         &mut self,
         inst_idx: InstrIdx,
-        inst: &jit_ir::CallInstruction,
+        func_decl: &FuncDecl,
+        args: &[Operand],
     ) -> Result<(), CompilationError> {
         // FIXME: floating point args
         // FIXME: non-SysV ABIs
-        let fdecl = self.jit_mod.func_decl(inst.target());
-        let fty = fdecl.func_type(self.jit_mod);
-        let num_args = fty.num_args();
+        let fty = func_decl.func_type(self.jit_mod);
+        let num_args = args.len();
 
         if num_args > ARG_REGS.len() {
             todo!(); // needs spill
         }
 
         if fty.is_vararg() {
-            // When implementing, note the SysV X86_64 ABI says "rax is used to indicate the number
-            // of vector arguments passed to a function requiring a variable number of arguments".
-            todo!();
+            // SysV X86_64 ABI says "rax is used to indicate the number of vector arguments passed
+            // to a function requiring a variable number of arguments".
+            //
+            // We don't yet support vectors, so for now rax=0.
+            dynasm!(self.asm; mov rax, 0);
         }
 
-        for i in 0..num_args {
-            let reg = ARG_REGS[i];
-            let op = inst.operand(self.jit_mod, i);
+        for (i, reg) in ARG_REGS.into_iter().take(num_args).enumerate() {
+            let op = &args[i];
+            // We can type check the static args (but not varargs).
             debug_assert!(
-                op.type_(self.jit_mod) == fty.arg_type(self.jit_mod, i),
+                i >= fty.num_args() || op.type_(self.jit_mod) == fty.arg_type(self.jit_mod, i),
                 "argument type mismatch in call"
             );
-            self.operand_into_reg(reg, &op);
+            self.operand_into_reg(reg, op);
         }
 
         // unwrap safe on account of linker symbol names not containing internal NULL bytes.
-        let va = symbol_vaddr(&CString::new(fdecl.name()).unwrap()).ok_or_else(|| {
-            CompilationError(format!("couldn't find AOT symbol: {}", fdecl.name()))
-        })?;
+        let va = symbol_to_ptr(func_decl.name())
+            .map_err(|e| CompilationError::General(e.to_string()))?;
 
         // The SysV x86_64 ABI requires the stack to be 16-byte aligned prior to a call.
         self.stack.align(SYSV_CALL_STACK_ALIGN);
@@ -502,6 +640,33 @@ impl<'a> X64CodeGen<'a> {
         }
 
         Ok(())
+    }
+
+    /// Codegen a (non-varargs) call.
+    pub(super) fn codegen_call_instr(
+        &mut self,
+        inst_idx: InstrIdx,
+        inst: &jit_ir::CallInstruction,
+    ) -> Result<(), CompilationError> {
+        let func_decl_idx = inst.target();
+        let func_type = func_decl_idx.func_type(self.jit_mod);
+        let args = (0..(func_type.num_args()))
+            .map(|i| inst.operand(self.jit_mod, i))
+            .collect::<Vec<_>>();
+        self.emit_call(inst_idx, self.jit_mod.func_decl(func_decl_idx), &args)
+    }
+
+    /// Codegen a varargs call.
+    pub(super) fn codegen_vacall_instr(
+        &mut self,
+        inst_idx: InstrIdx,
+        inst: &jit_ir::VACallInstruction,
+    ) -> Result<(), CompilationError> {
+        let func_decl_idx = inst.target();
+        let args = (0..(inst.num_args()))
+            .map(|i| inst.operand(self.jit_mod, i))
+            .collect::<Vec<_>>();
+        self.emit_call(inst_idx, self.jit_mod.func_decl(func_decl_idx), &args)
     }
 
     pub(super) fn codegen_icmp_instr(
@@ -573,6 +738,7 @@ impl<'a> X64CodeGen<'a> {
         dynasm!(self.asm; ->trace_loop_start:);
     }
 
+    #[allow(clippy::fn_to_numeric_cast)]
     fn codegen_guard_instr(&mut self, inst: &jit_ir::GuardInstruction) {
         let cond = inst.cond();
 
@@ -596,14 +762,13 @@ impl<'a> X64CodeGen<'a> {
         self.deoptinfo.push(deoptinfo);
 
         // The simplest thing we can do to crash the program when the guard fails.
-        // FIXME: deoptimise!
         dynasm!(self.asm
             ; jmp >check_cond
             ; guard_fail:
-            ; mov rdi, [rbp+8]
-            ; mov rsi, [rbp]
-            ; mov rdx, QWORD deoptid
-            ; mov rax, QWORD __yk_deopt as _
+            ; mov rdi, [rbp]
+            ; mov rsi, QWORD deoptid
+            ; mov rdx, rbp
+            ; mov rax, QWORD __yk_deopt as i64
             ; call rax
             ; check_cond:
             ; cmp Rb(WR0.code()), inst.expect() as i8 // `as` intentional.
@@ -737,12 +902,11 @@ mod tests {
     };
     use fm::FMBuilder;
     use regex::Regex;
-    use std::ffi::CString;
     use std::sync::Arc;
-    use ykaddr::addr::symbol_vaddr;
+    use ykaddr::addr::symbol_to_ptr;
 
     fn test_module() -> jit_ir::Module {
-        jit_ir::Module::new("test".into())
+        jit_ir::Module::new_testing("test".into())
     }
 
     /// Test helper to use `fm` to match a disassembled trace.
@@ -752,13 +916,17 @@ mod tests {
         // Use `{{name}}` to match non-literal strings in tests.
         let ptn_re = Regex::new(r"\{\{.+?\}\}").unwrap();
         let text_re = Regex::new(r"[a-zA-Z0-9\._]+").unwrap();
-        let fmm = FMBuilder::new(pattern)
+        // The dissamebler alternates between upper- and lowercase hex, making matching addresses
+        // difficult. So just lowercase both pattern and text to avoid tests randomly breaking when
+        // addresses change.
+        let lowerpattern = pattern.to_lowercase();
+        let fmm = FMBuilder::new(&lowerpattern)
             .unwrap()
             .name_matcher(ptn_re, text_re)
             .build()
             .unwrap();
 
-        match fmm.matches(&dis) {
+        match fmm.matches(&dis.to_lowercase()) {
             Ok(()) => (),
             Err(e) => panic!(
                 "\n!!! Emitted code didn't match !!!\n\n{}\nFull asm:\n{}\n",
@@ -774,9 +942,8 @@ mod tests {
         use crate::compile::jitc_yk::codegen::reg_alloc::SpillAllocator;
 
         fn test_with_spillalloc(jit_mod: &jit_ir::Module, patt_lines: &[&str]) {
-            let mut ra = SpillAllocator::new(STACK_DIRECTION);
             match_asm(
-                X64CodeGen::new(&jit_mod, &mut ra)
+                X64CodeGen::new(&jit_mod, Box::new(SpillAllocator::new(STACK_DIRECTION)))
                     .unwrap()
                     .codegen()
                     .unwrap()
@@ -1032,8 +1199,7 @@ mod tests {
                 .unwrap();
             jit_mod.push(jit_ir::AddInstruction::new(op1, op2).into());
 
-            let mut ra = SpillAllocator::new(STACK_DIRECTION);
-            X64CodeGen::new(&jit_mod, &mut ra)
+            X64CodeGen::new(&jit_mod, Box::new(SpillAllocator::new(STACK_DIRECTION)))
                 .unwrap()
                 .codegen()
                 .unwrap();
@@ -1070,7 +1236,7 @@ mod tests {
             let call_inst = jit_ir::CallInstruction::new(&mut jit_mod, func_decl_idx, &[]).unwrap();
             jit_mod.push(call_inst.into());
 
-            let sym_addr = symbol_vaddr(&CString::new(CALL_TESTS_CALLEE).unwrap()).unwrap();
+            let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
             let patt_lines = [
                 "...",
                 &format!("... mov r12, 0x{:X}", sym_addr),
@@ -1117,7 +1283,7 @@ mod tests {
                     .unwrap();
             jit_mod.push(call_inst.into());
 
-            let sym_addr = symbol_vaddr(&CString::new(CALL_TESTS_CALLEE).unwrap()).unwrap();
+            let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
             let patt_lines = [
                 "...",
                 "; Call @puts(%0, %1, %2)",
@@ -1198,7 +1364,7 @@ mod tests {
             .unwrap();
             jit_mod.push(call_inst.into());
 
-            let sym_addr = symbol_vaddr(&CString::new(CALL_TESTS_CALLEE).unwrap()).unwrap();
+            let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
             let patt_lines = [
                 "...",
                 "; Call @puts(%0, %1, %2, %3, %4, %5)",
@@ -1247,8 +1413,7 @@ mod tests {
                 jit_ir::CallInstruction::new(&mut jit_mod, func_decl_idx, &args).unwrap();
             jit_mod.push(call_inst.into());
 
-            let mut ra = SpillAllocator::new(STACK_DIRECTION);
-            X64CodeGen::new(&jit_mod, &mut ra)
+            X64CodeGen::new(&jit_mod, Box::new(SpillAllocator::new(STACK_DIRECTION)))
                 .unwrap()
                 .codegen()
                 .unwrap();
@@ -1277,7 +1442,7 @@ mod tests {
             let call_inst = jit_ir::CallInstruction::new(&mut jit_mod, func_decl_idx, &[]).unwrap();
             jit_mod.push(call_inst.into());
 
-            let sym_addr = symbol_vaddr(&CString::new(CALL_TESTS_CALLEE).unwrap()).unwrap();
+            let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
             let patt_lines = [
                 "...",
                 &format!("... mov r12, 0x{:X}", sym_addr),
@@ -1323,8 +1488,7 @@ mod tests {
                 jit_ir::CallInstruction::new(&mut jit_mod, func_decl_idx, &[arg1]).unwrap();
             jit_mod.push(call_inst.into());
 
-            let mut ra = SpillAllocator::new(STACK_DIRECTION);
-            X64CodeGen::new(&jit_mod, &mut ra)
+            X64CodeGen::new(&jit_mod, Box::new(SpillAllocator::new(STACK_DIRECTION)))
                 .unwrap()
                 .codegen()
                 .unwrap();
@@ -1392,8 +1556,7 @@ mod tests {
             jit_mod.push(
                 jit_ir::IcmpInstruction::new(op.clone(), jit_ir::Predicate::Equal, op).into(),
             );
-            let mut ra = SpillAllocator::new(STACK_DIRECTION);
-            X64CodeGen::new(&jit_mod, &mut ra)
+            X64CodeGen::new(&jit_mod, Box::new(SpillAllocator::new(STACK_DIRECTION)))
                 .unwrap()
                 .codegen()
                 .unwrap();
@@ -1417,8 +1580,7 @@ mod tests {
                 .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(8, i64_ty_idx).into())
                 .unwrap();
             jit_mod.push(jit_ir::IcmpInstruction::new(op1, jit_ir::Predicate::Equal, op2).into());
-            let mut ra = SpillAllocator::new(STACK_DIRECTION);
-            X64CodeGen::new(&jit_mod, &mut ra)
+            X64CodeGen::new(&jit_mod, Box::new(SpillAllocator::new(STACK_DIRECTION)))
                 .unwrap()
                 .codegen()
                 .unwrap();
@@ -1439,9 +1601,9 @@ mod tests {
                 "...",
                 "; Guard %0, true",
                 "{{vaddr1}} {{off1}}: jmp 0x00000000{{cmpoff}}",
-                "{{vaddr2}} {{failoff}}: mov rdi, [rbp+0x08]",
-                "... mov rsi, [rbp]",
-                "... mov rdx, 0x00",
+                "{{vaddr2}} {{failoff}}: mov rdi, [rbp]",
+                "... mov rsi, 0x00",
+                "... mov rdx, rbp",
                 "... mov rax, ...",
                 "... call rax",
                 "{{vaddr3}} {{cmpoff}}: cmp r12b, 0x01",
@@ -1466,9 +1628,9 @@ mod tests {
                 "...",
                 "; Guard %0, false",
                 "{{vaddr1}} {{off1}}: jmp 0x00000000{{cmpoff}}",
-                "{{vaddr2}} {{failoff}}: mov rdi, [rbp+0x08]",
-                "... mov rsi, [rbp]",
-                "... mov rdx, 0x00",
+                "{{vaddr2}} {{failoff}}: mov rdi, [rbp]",
+                "... mov rsi, 0x00",
+                "... mov rdx, rbp",
                 "... mov rax, ...",
                 "... call rax",
                 "{{vaddr3}} {{cmpoff}}: cmp r12b, 0x00",

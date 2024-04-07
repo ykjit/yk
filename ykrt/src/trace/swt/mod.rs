@@ -18,7 +18,7 @@ use std::{
 pub(crate) mod patch;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
-struct TracingBlock {
+struct TracingBBlock {
     function_index: usize,
     block_index: usize,
 }
@@ -44,8 +44,8 @@ static FUNC_NAMES: LazyLock<HashMap<usize, CString>> = LazyLock::new(|| {
 });
 
 thread_local! {
-    // Collection of traced basicblocks.
-    static BASIC_BLOCKS: RefCell<Vec<TracingBlock>> = RefCell::new(vec![]);
+    // Collection of traced basic blocks.
+    static BASIC_BLOCKS: RefCell<Vec<TracingBBlock>> = RefCell::new(vec![]);
 }
 
 /// Inserts LLVM IR basicblock metadata into a thread-local BASIC_BLOCKS vector.
@@ -59,7 +59,7 @@ pub extern "C" fn yk_trace_basicblock(function_index: usize, block_index: usize)
     MTThread::with(|mtt| {
         if mtt.is_tracing() {
             BASIC_BLOCKS.with(|v| {
-                v.borrow_mut().push(TracingBlock {
+                v.borrow_mut().push(TracingBBlock {
                     function_index,
                     block_index,
                 });
@@ -115,11 +115,11 @@ impl TraceRecorder for SWTTraceRecorder {
 }
 
 struct SWTraceIterator {
-    bbs: std::vec::IntoIter<TracingBlock>,
+    bbs: std::vec::IntoIter<TracingBBlock>,
 }
 
 impl SWTraceIterator {
-    fn new(bbs: Vec<TracingBlock>) -> SWTraceIterator {
+    fn new(bbs: Vec<TracingBBlock>) -> SWTraceIterator {
         return SWTraceIterator {
             bbs: bbs.into_iter(),
         };
@@ -133,7 +133,7 @@ impl Iterator for SWTraceIterator {
         self.bbs
             .next()
             .map(|tb| match FUNC_NAMES.get(&tb.function_index) {
-                Some(name) => Ok(TraceAction::MappedAOTBlock {
+                Some(name) => Ok(TraceAction::MappedAOTBBlock {
                     func_name: name.to_owned(),
                     bb: tb.block_index,
                 }),

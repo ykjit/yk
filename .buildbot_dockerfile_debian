@@ -1,4 +1,4 @@
-FROM debian:bookworm
+FROM debian:latest
 ARG CI_UID
 RUN useradd -m -u ${CI_UID} ci
 RUN apt-get update && \

@@ -47,7 +47,7 @@ type AtomicHotThreshold = AtomicU32;
 pub type TraceFailureThreshold = u16;
 pub type AtomicTraceFailureThreshold = AtomicU16;
 
-/// How many blocks long can a trace be before we give up trying to compile it? Note that the
+/// How many basic blocks long can a trace be before we give up trying to compile it? Note that the
 /// slower our compiler, the lower this will have to be in order to give the perception of
 /// reasonable performance.
 /// FIXME: needs to be configurable.
@@ -204,7 +204,7 @@ impl MT {
             self.stats.timing_state(TimingState::None);
             // We only keep a weak reference alive to `self`, as otherwise an active compiler job
             // causes `self` to never be dropped.
-            let mt = Arc::downgrade(&self);
+            let mt = Arc::downgrade(self);
             let jq = Arc::clone(&self.job_queue);
             thread::spawn(move || {
                 let (cv, mtx) = &*jq;
@@ -627,11 +627,29 @@ impl MT {
                     }
                     mt.stats.trace_compiled_ok();
                 }
-                Err(CompilationError(_e)) => {
+                Err(e) => {
                     mt.stats.trace_compiled_err();
                     hl_arc.lock().trace_failed(&mt);
-                    #[cfg(feature = "yk_jitstate_debug")]
-                    print_jit_state(&format!("trace-compilation-aborted: {_e}"));
+                    match e {
+                        CompilationError::General(_reason)
+                        | CompilationError::LimitExceeded(_reason) => {
+                            #[cfg(feature = "yk_jitstate_debug")]
+                            print_jit_state(&format!("trace-compilation-aborted: {_reason}"));
+                        }
+                        CompilationError::InternalError(reason) => {
+                            #[cfg(feature = "yk_jitstate_debug")]
+                            panic!("{reason}");
+                            #[cfg(not(feature = "yk_jitstate_debug"))]
+                            {
+                                eprintln!("yk error (trying to continue): {reason}");
+                            }
+                        }
+                        CompilationError::ResourceExhausted(e) => {
+                            eprintln!("yk warning: {e}");
+                            #[cfg(feature = "yk_jitstate_debug")]
+                            print_jit_state(&format!("trace-compilation-aborted: {e}"));
+                        }
+                    }
                 }
             }
 
@@ -644,7 +662,7 @@ impl MT {
             // spin up a new thread for each compilation. This is only acceptable because a)
             // `SERIALISE_COMPILATION` is an internal yk testing feature b) when we use it we're
             // checking correctness, not performance.
-            thread::spawn(|| do_compile()).join().unwrap();
+            thread::spawn(do_compile).join().unwrap();
             return;
         }
 
@@ -734,7 +752,7 @@ impl MTThread {
     /// If a trace is currently running, return a reference to its `CompiledTrace`.
     pub(crate) fn running_trace(&self) -> Option<Arc<dyn CompiledTrace>> {
         match &*self.tstate.borrow() {
-            MTThreadState::Executing(ctr_arc) => Some(Arc::clone(&ctr_arc)),
+            MTThreadState::Executing(ctr_arc) => Some(Arc::clone(ctr_arc)),
             _ => None,
         }
     }

@@ -4,7 +4,8 @@ use crate::obj::{PHDR_OBJECT_CACHE, SELF_BIN_PATH};
 use cached::proc_macro::cached;
 use libc::{c_void, dlsym, Dl_info, RTLD_DEFAULT};
 use std::{
-    ffi::CStr,
+    error::Error,
+    ffi::{CStr, CString},
     mem::MaybeUninit,
     path::{Path, PathBuf},
 };
@@ -139,6 +140,20 @@ pub fn vaddr_to_sym_and_obj(vaddr: usize) -> Option<DLInfo> {
     }
 }
 
+/// A thin wrapper around `dlsym()` for mapping symbol names to virtual addresses.
+///
+/// FIXME: Look for raw uses of `dlsym()` throughout our code base and replace them with a call to
+/// this wrapper. Related: https://github.com/ykjit/yk/issues/835
+pub fn symbol_to_ptr(name: &str) -> Result<*const (), Box<dyn Error>> {
+    let s = CString::new(name).unwrap();
+    let p = unsafe { dlsym(RTLD_DEFAULT, s.as_ptr()) };
+    if !p.is_null() {
+        Ok(p as *const _)
+    } else {
+        Err(format!("dlsym(\"{name}\") returned NULL").into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{off_to_vaddr, vaddr_to_obj_and_off, vaddr_to_sym_and_obj, MaybeUninit};
@@ -213,18 +228,5 @@ mod tests {
         // Address valid, but symbol not exported (test bin not built with `-Wl,--export-dynamic`).
         let func_vaddr = vaddr_to_sym_and_obj_cant_find_sym as *const fn();
         assert!(vaddr_to_sym_and_obj(func_vaddr as usize).is_none());
-    }
-}
-
-/// A thin wrapper around `dlsym()` for mapping symbol names to virtual addresses.
-///
-/// FIXME: Look for raw uses of `dlsym()` throughout our code base and replace them with a call to
-/// this wrapper. Related: https://github.com/ykjit/yk/issues/835
-pub fn symbol_vaddr(sym: &CStr) -> Option<usize> {
-    let va = unsafe { dlsym(RTLD_DEFAULT, sym.as_ptr()) };
-    if !va.is_null() {
-        Some(va as usize)
-    } else {
-        None
     }
 }
