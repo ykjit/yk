@@ -11,6 +11,6 @@ define i32 @f(i32 %0, ...) {
 }
 
 define i32 @main() {
-    %1 = call i32 @f(i32 1, i32 2, i32 3);
+    %1 = call i32 (i32, ...) @f(i32 1, i32 2, i32 3);
     ret i32 %1
 }

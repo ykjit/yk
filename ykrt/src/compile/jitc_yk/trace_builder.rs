@@ -6,8 +6,6 @@ use crate::compile::CompilationError;
 use crate::trace::{AOTTraceIterator, TraceAction};
 use std::{collections::HashMap, ffi::CString};
 
-/// The argument index of the trace inputs struct in the control point call.
-const CTRL_POINT_ARGIDX_INPUTS: usize = 3;
 /// The argument index of the trace inputs struct in the trace function.
 const TRACE_FUNC_CTRLP_ARGIDX: u16 = 0;
 
@@ -86,15 +84,17 @@ impl<'a> TraceBuilder<'a> {
 
         // PHASE 1:
         // Find the control point call and extract the trace inputs struct from its operands.
+        //
+        // FIXME: Stash the location at IR lowering time, instead of searching at runtime.
         let mut inst_iter = blk.instrs.iter().enumerate().rev();
         while let Some((_, inst)) = inst_iter.next() {
-            if inst.is_control_point(self.aot_mod) {
-                let op = inst.operand(CTRL_POINT_ARGIDX_INPUTS);
-                trace_inputs = Some(op.to_instr(self.aot_mod));
+            // Is it a call to the control point? If so, extract the live vars struct.
+            if let Some(tis) = inst.control_point_call_trace_inputs(self.aot_mod) {
+                trace_inputs = Some(tis.to_instr(self.aot_mod));
                 // Add the trace input argument to the local map so it can be tracked and
                 // deoptimised.
                 self.local_map
-                    .insert(op.to_instr_id(), self.next_instr_id()?);
+                    .insert(tis.to_instr_id(), self.next_instr_id()?);
                 let arg = jit_ir::Instruction::Arg(TRACE_FUNC_CTRLP_ARGIDX);
                 self.jit_mod.push(arg);
                 break;
@@ -104,57 +104,67 @@ impl<'a> TraceBuilder<'a> {
         // If this unwrap fails, we didn't find the call to the control point and something is
         // profoundly wrong with the AOT IR.
         let trace_inputs = trace_inputs.unwrap();
-        let trace_input_struct_ty = match trace_inputs.operand(0).type_(self.aot_mod) {
-            aot_ir::Type::Struct(x) => x,
-            _ => panic!(),
+        let trace_input_struct_ty = match trace_inputs {
+            aot_ir::Instruction::Alloca { type_idx, .. } => {
+                match self.aot_mod.type_(*type_idx) {
+                    aot_ir::Type::Struct(x) => x,
+                    _ => panic!(), // IR malformed.
+                }
+            }
+            _ => panic!(), // IR malformed.
         };
+
         // We visit the trace inputs in reverse order, so we start with high indices first. This
         // value then decrements in the below loop.
         let mut trace_input_idx = trace_input_struct_ty.num_fields();
 
         // PHASE 2:
         // Keep walking backwards over the ptradd/store pairs emitting LoadTraceInput instructions.
-        let mut last_store = None;
+        //
+        // FIXME: Can we do something at IR lowering time to make this easier?
+        let mut last_store_ptr = None;
         while let Some((inst_idx, inst)) = inst_iter.next() {
-            if inst.is_store() {
-                last_store = Some(inst);
-            }
-            if inst.is_ptr_add() {
-                // Is the pointer operand of this PtrAdd targeting the trace inputs?
-                if trace_inputs.ptr_eq(inst.operand(0).to_instr(self.aot_mod)) {
-                    // We found a trace input. Now we emit a `LoadTraceInput` instruction into the
-                    // trace. This assigns the input to a local variable that other instructions
-                    // can then use.
-                    //
-                    // Note: This code assumes that the `PtrAdd` instructions in the AOT IR were
-                    // emitted sequentially.
-                    //
-                    // unwrap safe: we know the AOT code was produced by ykllvm.
-                    let trace_input_val = last_store.unwrap().operand(0);
-                    trace_input_idx -= 1;
-                    // FIXME: assumes the field is byte-aligned. If it isn't, field_byte_off() will
-                    // crash.
-                    let aot_field_off = trace_input_struct_ty.field_byte_off(trace_input_idx);
-                    let aot_field_ty = trace_input_struct_ty.field_type_idx(trace_input_idx);
-                    // FIXME: we should check at compile-time that this will fit.
-                    match u32::try_from(aot_field_off) {
-                        Ok(u32_off) => {
-                            let input_ty_idx = self.handle_type(aot_field_ty)?;
-                            let load_arg =
-                                jit_ir::LoadTraceInputInstruction::new(u32_off, input_ty_idx)
-                                    .into();
-                            self.local_map
-                                .insert(trace_input_val.to_instr_id(), self.next_instr_id()?);
-                            self.jit_mod.push(load_arg);
-                            self.first_ti_idx = inst_idx;
-                        }
-                        _ => {
-                            return Err(CompilationError::InternalError(
-                                "Offset {aot_field_off} doesn't fit".into(),
-                            ));
+            match inst {
+                aot_ir::Instruction::Store { val, .. } => last_store_ptr = Some(val),
+                aot_ir::Instruction::PtrAdd { ptr, .. } => {
+                    // Is the pointer operand of this PtrAdd targeting the trace inputs?
+                    if trace_inputs.ptr_eq(ptr.to_instr(self.aot_mod)) {
+                        // We found a trace input. Now we emit a `LoadTraceInput` instruction into the
+                        // trace. This assigns the input to a local variable that other instructions
+                        // can then use.
+                        //
+                        // Note: This code assumes that the `PtrAdd` instructions in the AOT IR were
+                        // emitted sequentially.
+                        trace_input_idx -= 1;
+                        // FIXME: assumes the field is byte-aligned. If it isn't, field_byte_off() will
+                        // crash.
+                        let aot_field_off = trace_input_struct_ty.field_byte_off(trace_input_idx);
+                        let aot_field_ty = trace_input_struct_ty.field_type_idx(trace_input_idx);
+                        // FIXME: we should check at compile-time that this will fit.
+                        match u32::try_from(aot_field_off) {
+                            Ok(u32_off) => {
+                                let input_ty_idx = self.handle_type(aot_field_ty)?;
+                                let load_ti_instr =
+                                    jit_ir::LoadTraceInputInstruction::new(u32_off, input_ty_idx)
+                                        .into();
+                                // If this take fails, we didn't see a corresponding store and the
+                                // IR is malformed.
+                                self.local_map.insert(
+                                    last_store_ptr.take().unwrap().to_instr_id(),
+                                    self.next_instr_id()?,
+                                );
+                                self.jit_mod.push(load_ti_instr);
+                                self.first_ti_idx = inst_idx;
+                            }
+                            _ => {
+                                return Err(CompilationError::InternalError(
+                                    "Offset {aot_field_off} doesn't fit".into(),
+                                ));
+                            }
                         }
                     }
                 }
+                _ => (),
             }
         }
 
@@ -174,31 +184,41 @@ impl<'a> TraceBuilder<'a> {
         self.last_instr_return = false;
         let blk = self.aot_mod.bblock(&bid);
 
-        // Decide how to translate each AOT instruction based upon its opcode.
+        // Decide how to translate each AOT instruction.
         for (inst_idx, inst) in blk.instrs.iter().enumerate() {
-            match inst.opcode() {
-                aot_ir::Opcode::Br => Ok(()),
-                aot_ir::Opcode::Load => self.handle_load(inst, &bid, inst_idx),
+            match inst {
+                aot_ir::Instruction::Br => Ok(()),
+                aot_ir::Instruction::Load { ptr, type_idx } => {
+                    self.handle_load(&bid, inst_idx, ptr, type_idx)
+                }
                 // FIXME: ignore remaining instructions after a call.
-                aot_ir::Opcode::Call => self.handle_call(inst, &bid, inst_idx),
-                aot_ir::Opcode::Store => self.handle_store(inst, &bid, inst_idx),
-                aot_ir::Opcode::PtrAdd => {
+                aot_ir::Instruction::Call { callee, args } => {
+                    self.handle_call(inst, &bid, inst_idx, callee, args)
+                }
+                aot_ir::Instruction::Store { val, ptr } => {
+                    self.handle_store(&bid, inst_idx, val, ptr)
+                }
+                aot_ir::Instruction::PtrAdd { ptr, off, .. } => {
                     if self.cp_block.as_ref() == Some(&bid) && inst_idx == self.first_ti_idx {
                         // We've reached the trace inputs part of the control point block. There's
                         // no point in copying these instructions over and we can just skip to the
                         // next block.
                         return Ok(());
                     }
-                    self.handle_ptradd(inst, &bid, inst_idx)
+                    self.handle_ptradd(&bid, inst_idx, ptr, off)
                 }
-                aot_ir::Opcode::BinOp => self.handle_binop(inst, &bid, inst_idx),
-                aot_ir::Opcode::Icmp => self.handle_icmp(inst, &bid, inst_idx),
-                aot_ir::Opcode::CondBr => {
+                aot_ir::Instruction::BinaryOp { lhs, binop, rhs } => {
+                    self.handle_binop(&bid, inst_idx, lhs, binop, rhs)
+                }
+                aot_ir::Instruction::ICmp { lhs, pred, rhs, .. } => {
+                    self.handle_icmp(&bid, inst_idx, lhs, pred, rhs)
+                }
+                aot_ir::Instruction::CondBr { cond, true_bb, .. } => {
                     let sm = &blk.instrs[InstrIdx::new(inst_idx - 1)];
                     debug_assert!(sm.is_stackmap_call(self.aot_mod));
-                    self.handle_condbr(inst, sm, nextbb.as_ref().unwrap())
+                    self.handle_condbr(sm, nextbb.as_ref().unwrap(), cond, true_bb)
                 }
-                aot_ir::Opcode::Ret => self.handle_ret(inst, &bid, inst_idx),
+                aot_ir::Instruction::Ret { val } => self.handle_ret(&bid, inst_idx, val),
                 _ => todo!("{:?}", inst),
             }?;
         }
@@ -274,16 +294,7 @@ impl<'a> TraceBuilder<'a> {
                 let load = jit_ir::LookupGlobalInstruction::new(self.handle_global(*gd_idx)?)?;
                 self.jit_mod.push_and_make_operand(load.into())?
             }
-            aot_ir::Operand::Unimplemented(_) => {
-                // FIXME: for now we push an arbitrary constant.
-                use std::mem;
-                let jit_const =
-                    jit_ir::IntegerType::new(u32::try_from(mem::size_of::<isize>()).unwrap())
-                        .make_constant(&mut self.jit_mod, 0xdeadbeef_isize)?;
-                let const_idx = self.jit_mod.const_idx(&jit_const)?;
-                jit_ir::Operand::Const(const_idx)
-            }
-            aot_ir::Operand::Arg(arg_idx) => {
+            aot_ir::Operand::Arg { arg_idx, .. } => {
                 // Lookup the JIT instruction that was passed into this function as an argument.
                 // Unwrap is safe since an `Arg` means we are currently inlining a function.
                 // FIXME: Is the above correct? What about args in the control point frame?
@@ -336,36 +347,28 @@ impl<'a> TraceBuilder<'a> {
     /// Translate binary operations such as add, sub, mul, etc.
     fn handle_binop(
         &mut self,
-        inst: &aot_ir::Instruction,
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
+        lhs: &aot_ir::Operand,
+        binop: &aot_ir::BinOp,
+        rhs: &aot_ir::Operand,
     ) -> Result<(), CompilationError> {
-        let lhs = self.handle_operand(inst.operand(0))?;
-        let bop = inst.operand(1);
-        let rhs = self.handle_operand(inst.operand(2))?;
-        let instr = match bop {
-            aot_ir::Operand::BinOp(bo) => jit_ir::BinOpInstruction::new(lhs, *bo, rhs),
-            _ => panic!(), // IR malformed.
-        };
+        let instr = jit_ir::BinOpInstruction::new(
+            self.handle_operand(lhs)?,
+            *binop,
+            self.handle_operand(rhs)?,
+        );
         self.copy_instruction(instr.into(), bid, aot_inst_idx)
     }
 
     /// Translate a conditional `Br` instruction.
     fn handle_condbr(
         &mut self,
-        inst: &aot_ir::Instruction,
         sm: &'a aot_ir::Instruction,
         nextbb: &aot_ir::BBlockId,
+        cond: &aot_ir::Operand,
+        true_bb: &aot_ir::BBlockIdx,
     ) -> Result<(), CompilationError> {
-        let cond = match &inst.operand(0) {
-            aot_ir::Operand::LocalVariable(iid) => self.local_map[iid],
-            _ => panic!(),
-        };
-        let succ_bb = match inst.operand(1) {
-            aot_ir::Operand::BBlock(bb_idx) => *bb_idx,
-            _ => panic!(),
-        };
-
         // Temporarily push a frame with the conditions stackmap.
         // Find live variables in the current stack frame and add them into the guard.
         let mut smids = Vec::new(); // List of stackmap ids of the current call stack.
@@ -378,59 +381,75 @@ impl<'a> TraceBuilder<'a> {
         // conditional branch and collect stackmap IDs and live variables into vectors to store
         // inside the guard.
         // Unwrap safe as each frame at this point must have a stackmap associated with it.
-        for (sm, args) in self.frames.iter().map(|f| (f.sm.unwrap(), &f.args)) {
+        for (sm, sm_args) in self.frames.iter().map(|f| (f.sm.unwrap(), &f.args)) {
             // Extract stackmap ID.
-            match sm.operand(1) {
-                aot_ir::Operand::Constant(co) => {
-                    let c = self.aot_mod.constant(co);
-                    match self.aot_mod.const_type(c) {
-                        aot_ir::Type::Integer(it) => {
-                            let id: u64 = match it.num_bits() {
-                                // This unwrap can't fail unless we did something wrong during lowering.
-                                64 => u64::from_ne_bytes(c.bytes()[0..8].try_into().unwrap()),
+            //
+            // FIXME: make stackmap have its own opcode and specialised operands so as to simplify
+            // the code below.
+            match sm {
+                aot_ir::Instruction::Call { args, .. } => {
+                    match args[0] {
+                        aot_ir::Operand::Constant(co) => {
+                            let c = self.aot_mod.constant(&co);
+                            match self.aot_mod.const_type(c) {
+                                aot_ir::Type::Integer(it) => {
+                                    let id: u64 = match it.num_bits() {
+                                        // This unwrap can't fail unless we did something wrong during lowering.
+                                        64 => {
+                                            u64::from_ne_bytes(c.bytes()[0..8].try_into().unwrap())
+                                        }
+                                        _ => panic!(),
+                                    };
+                                    smids.push(id);
+                                }
                                 _ => panic!(),
-                            };
-                            smids.push(id);
-                        }
-                        _ => panic!(),
-                    }
-                }
-                _ => panic!(),
-            }
-            // Collect live variables.
-            for op in sm.remaining_operands(3) {
-                match op {
-                    aot_ir::Operand::LocalVariable(iid) => {
-                        lives.push(self.local_map[iid]);
-                    }
-                    aot_ir::Operand::Arg(arg_idx) => {
-                        // Lookup the JIT value of the argument from the caller (stored in the
-                        // previous frame's `args` field).
-                        match args[usize::from(*arg_idx)] {
-                            jit_ir::Operand::Local(idx) => {
-                                lives.push(idx);
                             }
-                            _ => panic!(),
-                        };
+                        }
+                        _ => panic!(), // IR malformed
                     }
-                    _ => panic!(),
+                    // Collect live variables.
+                    for op in args[2..].iter() {
+                        match op {
+                            aot_ir::Operand::LocalVariable(iid) => {
+                                lives.push(self.local_map[&iid]);
+                            }
+                            aot_ir::Operand::Arg { arg_idx, .. } => {
+                                // Lookup the JIT value of the argument from the caller (stored in
+                                // the previous frame's `args` field).
+                                match sm_args[usize::from(*arg_idx)] {
+                                    jit_ir::Operand::Local(idx) => {
+                                        lives.push(idx);
+                                    }
+                                    _ => panic!(),
+                                };
+                            }
+                            _ => panic!(), // IR malformed.
+                        }
+                    }
                 }
+                _ => panic!(), // IR malformed.
             }
         }
 
         let gi = jit_ir::GuardInfo::new(smids, lives);
         let gi_idx = self.jit_mod.push_guardinfo(gi)?;
-        let expect = succ_bb == nextbb.bb_idx();
-        let guard = jit_ir::GuardInstruction::new(jit_ir::Operand::Local(cond), expect, gi_idx);
+        let expect = *true_bb == nextbb.bb_idx();
+
+        let jit_cond = match cond {
+            aot_ir::Operand::LocalVariable(iid) => self.local_map[iid],
+            _ => panic!(),
+        };
+
+        let guard = jit_ir::GuardInstruction::new(jit_ir::Operand::Local(jit_cond), expect, gi_idx);
         self.jit_mod.push(guard.into());
         Ok(())
     }
 
     fn handle_ret(
         &mut self,
-        _inst: &aot_ir::Instruction,
         _bid: &aot_ir::BBlockId,
         _aot_inst_idx: usize,
+        _val: &Option<aot_ir::Operand>,
     ) -> Result<(), CompilationError> {
         // FIXME: Map return value to AOT call instruction.
         self.frames.pop();
@@ -440,32 +459,32 @@ impl<'a> TraceBuilder<'a> {
     /// Translate a `Icmp` instruction.
     fn handle_icmp(
         &mut self,
-        inst: &aot_ir::Instruction,
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
+        lhs: &aot_ir::Operand,
+        pred: &aot_ir::Predicate,
+        rhs: &aot_ir::Operand,
     ) -> Result<(), CompilationError> {
-        let op1 = self.handle_operand(inst.operand(0))?;
-        let pred = match inst.operand(1) {
-            aot_ir::Operand::Predicate(p) => p,
-            _ => panic!(), // second operand must be a predicate.
-        };
-        let op2 = self.handle_operand(inst.operand(2))?;
-        let instr = jit_ir::IcmpInstruction::new(op1, *pred, op2).into();
+        let instr = jit_ir::IcmpInstruction::new(
+            self.handle_operand(lhs)?,
+            *pred,
+            self.handle_operand(rhs)?,
+        )
+        .into();
         self.copy_instruction(instr, bid, aot_inst_idx)
     }
 
     /// Translate a `Load` instruction.
     fn handle_load(
         &mut self,
-        inst: &aot_ir::Instruction,
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
+        ptr: &aot_ir::Operand,
+        type_idx: &aot_ir::TypeIdx,
     ) -> Result<(), CompilationError> {
-        let aot_op = inst.operand(0);
-        let aot_ty = inst.type_idx();
-        let jit_op = self.handle_operand(aot_op)?;
-        let jit_ty = self.handle_type(aot_ty)?;
-        let instr = jit_ir::LoadInstruction::new(jit_op, jit_ty).into();
+        let instr =
+            jit_ir::LoadInstruction::new(self.handle_operand(ptr)?, self.handle_type(*type_idx)?)
+                .into();
         self.copy_instruction(instr, bid, aot_inst_idx)
     }
 
@@ -474,16 +493,20 @@ impl<'a> TraceBuilder<'a> {
         inst: &'a aot_ir::Instruction,
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
+        callee: &aot_ir::FuncIdx,
+        args: &[aot_ir::Operand],
     ) -> Result<(), CompilationError> {
         // Ignore special functions that we neither want to inline nor copy.
         if inst.is_stackmap_call(self.aot_mod) || inst.is_debug_call(self.aot_mod) {
             return Ok(());
         }
 
-        let mut args = Vec::new();
-        for arg in inst.remaining_operands(1) {
-            args.push(self.handle_operand(arg)?);
+        // Convert AOT args to JIT args.
+        let mut jit_args = Vec::new();
+        for arg in args {
+            jit_args.push(self.handle_operand(&arg)?);
         }
+
         if inst.is_mappable_call(self.aot_mod) {
             // This is a mappable call that we want to inline.
             // Retrieve the stackmap that follows every mappable call.
@@ -494,20 +517,22 @@ impl<'a> TraceBuilder<'a> {
             // Unwrap is safe as there's always at least one frame.
             self.frames.last_mut().unwrap().sm = Some(sm);
             // Create a new frame for the inlined call and pass in the arguments of the caller.
-            self.frames.push(Frame::new(None, args));
+            self.frames.push(Frame::new(None, jit_args));
             Ok(())
         } else {
             // This call is either a declaration or an indirect call and thus not mappable.
-            let jit_func_decl_idx = self.handle_func(inst.callee())?;
+            let jit_func_decl_idx = self.handle_func(*callee)?;
             let instr = if !self
                 .aot_mod
-                .func(inst.callee())
+                .func(*callee)
                 .func_type(self.aot_mod)
                 .is_vararg()
             {
-                jit_ir::CallInstruction::new(&mut self.jit_mod, jit_func_decl_idx, &args)?.into()
+                jit_ir::CallInstruction::new(&mut self.jit_mod, jit_func_decl_idx, &jit_args)?
+                    .into()
             } else {
-                jit_ir::VACallInstruction::new(&mut self.jit_mod, jit_func_decl_idx, &args)?.into()
+                jit_ir::VACallInstruction::new(&mut self.jit_mod, jit_func_decl_idx, &jit_args)?
+                    .into()
             };
             self.copy_instruction(instr, bid, aot_inst_idx)
         }
@@ -515,42 +540,48 @@ impl<'a> TraceBuilder<'a> {
 
     fn handle_store(
         &mut self,
-        inst: &aot_ir::Instruction,
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
+        val: &aot_ir::Operand,
+        ptr: &aot_ir::Operand,
     ) -> Result<(), CompilationError> {
-        let val = self.handle_operand(inst.operand(0))?;
-        let ptr = self.handle_operand(inst.operand(1))?;
-        let instr = jit_ir::StoreInstruction::new(val, ptr).into();
+        let instr =
+            jit_ir::StoreInstruction::new(self.handle_operand(val)?, self.handle_operand(ptr)?)
+                .into();
         self.copy_instruction(instr, bid, aot_inst_idx)
     }
 
     fn handle_ptradd(
         &mut self,
-        inst: &aot_ir::Instruction,
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
+        ptr: &aot_ir::Operand,
+        off: &aot_ir::Operand,
     ) -> Result<(), CompilationError> {
-        let target = self.handle_operand(inst.operand(0))?;
-        if let aot_ir::Operand::Constant(co) = inst.operand(1) {
-            let c = self.aot_mod.constant(co);
-            if let aot_ir::Type::Integer(it) = self.aot_mod.const_type(c) {
-                // Convert the offset into a 32 bit value, as that is the maximum we can fit into
-                // the jit_ir::PtrAddInstruction.
-                let offset: u32 = match it.num_bits() {
-                    // This unwrap can't fail unless we did something wrong during lowering.
-                    64 => u64::from_ne_bytes(c.bytes()[0..8].try_into().unwrap())
-                        .try_into()
-                        .map_err(|_| {
-                            CompilationError::LimitExceeded("ptradd offset too big".into())
-                        })?,
-                    _ => panic!(),
-                };
-                let instr = jit_ir::PtrAddInstruction::new(target, offset).into();
-                return self.copy_instruction(instr, bid, aot_inst_idx);
-            };
+        let jit_ptr = self.handle_operand(ptr)?;
+        match off {
+            aot_ir::Operand::Constant(co) => {
+                let c = self.aot_mod.constant(co);
+                if let aot_ir::Type::Integer(it) = self.aot_mod.const_type(c) {
+                    // Convert the offset into a 32 bit value, as that is the maximum we can fit into
+                    // the jit_ir::PtrAddInstruction.
+                    let offset: u32 = match it.num_bits() {
+                        // This unwrap can't fail unless we did something wrong during lowering.
+                        64 => u64::from_ne_bytes(c.bytes()[0..8].try_into().unwrap())
+                            .try_into()
+                            .map_err(|_| {
+                                CompilationError::LimitExceeded("ptradd offset too big".into())
+                            })?,
+                        _ => panic!(),
+                    };
+                    let instr = jit_ir::PtrAddInstruction::new(jit_ptr, offset).into();
+                    self.copy_instruction(instr, bid, aot_inst_idx)
+                } else {
+                    panic!(); // Non-integer offset. Malformed IR.
+                }
+            }
+            _ => todo!(),
         }
-        panic!()
     }
 
     /// Entry point for building an IR trace.
