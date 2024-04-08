@@ -10,7 +10,7 @@ mod jitstate {
 
 #[cfg(feature = "ykd")]
 mod jitstate {
-    use std::{env, fs, sync::LazyLock};
+    use std::{env, fs::File, io::Write, sync::LazyLock};
 
     static JITSTATE_DEBUG: LazyLock<Option<String>> =
         LazyLock::new(|| env::var("YKD_LOG_JITSTATE").ok());
@@ -20,7 +20,11 @@ mod jitstate {
         match JITSTATE_DEBUG.as_ref().map(|x| x.as_str()) {
             Some("-") => eprintln!("jit-state: {}", state),
             Some(x) => {
-                fs::write(x, state).ok();
+                File::options()
+                    .append(true)
+                    .open(x)
+                    .map(|mut x| x.write(state.as_bytes()))
+                    .ok();
             }
             None => (),
         }

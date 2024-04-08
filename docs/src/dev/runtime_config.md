@@ -35,8 +35,11 @@ enabled.
 
 ### `YKD_LOG_JITSTATE`
 
-When defined, `YKD_LOG_JITSTATE` causes the system to emit extra information
-(to stderr) about JIT transition events:
+If the `YKD_LOG_JITSTATE=<path>` environment variable is defined, then changes
+in the "JIT state" will be appended to the file at `<path>` as they occur. The
+special value `-` (i.e. a single dash) can be used for `<path>` to indicate stderr.
+
+The JIT states written are:
 
  * `jit-state: start-tracing` is printed when the system starts tracing.
  * `jit-state: stop-tracing` is printed when the system stops tracing.
@@ -49,8 +52,8 @@ Note that there are no `start-interpreting` and `stop-interpreting`
 notifications: if the system is not currently tracing or executing JITted code,
 then it is implicitly interpreting.
 
-This variable is only available when building `ykrt` with the
-`ykd` Cargo feature enabled.
+This variable is only available when building `ykrt` with the `ykd` Cargo
+feature enabled.
 
 
 ### `YKD_SERIALISE_COMPILATION`
