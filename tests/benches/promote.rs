@@ -57,7 +57,7 @@ fn run_bench(bench_bin: &Path, param: usize) {
     let out = Command::new(bench_bin)
         .arg(format!("{}", param))
         .env("YKD_SERIALISE_COMPILATION", "1")
-        .env("YKD_PRINT_JITSTATE", "1")
+        .env("YKD_LOG_JITSTATE", "1")
         .output()
         .unwrap();
     check_output(&out);

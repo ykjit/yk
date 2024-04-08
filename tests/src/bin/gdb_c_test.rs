@@ -17,7 +17,7 @@ struct Args {
     #[arg(short, long)]
     print_ir: Option<String>,
 
-    /// Run the test with `YKD_PRINT_JITSTATE=1`
+    /// Run the test with `YKD_LOG_JITSTATE=1`
     #[arg(short = 'j', long)]
     print_jitstate: bool,
 
@@ -77,7 +77,7 @@ fn main() {
     }
 
     if args.print_jitstate {
-        gdb.env("YKD_PRINT_JITSTATE", "1");
+        gdb.env("YKD_LOG_JITSTATE", "1");
     }
 
     if let Some(irs) = args.print_ir {

@@ -33,9 +33,9 @@ This variable is always available, and does not require any Cargo feature to be
 enabled.
 
 
-### `YKD_PRINT_JITSTATE`
+### `YKD_LOG_JITSTATE`
 
-When defined, `YKD_PRINT_JITSTATE` causes the system to emit extra information
+When defined, `YKD_LOG_JITSTATE` causes the system to emit extra information
 (to stderr) about JIT transition events:
 
  * `jit-state: start-tracing` is printed when the system starts tracing.

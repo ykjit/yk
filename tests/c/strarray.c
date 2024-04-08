@@ -1,7 +1,7 @@
 // Run-time:
 //   env-var: YKD_PRINT_IR=aot
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_PRINT_JITSTATE=1
+//   env-var: YKD_LOG_JITSTATE=1
 //   stderr:
 //     jit-state: start-tracing
 //     pepper

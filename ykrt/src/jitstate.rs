@@ -1,4 +1,4 @@
-//! The implementation of the `YKD_PRINT_JITSTATE` environment variable.
+//! The implementation of the `YKD_LOG_JITSTATE` environment variable.
 //!
 //! Note: the `print_jit_state` function exposed here is always defined but is guaranteed to be a
 //! no-op unless the `ykd` feature is enabled.
@@ -13,7 +13,7 @@ mod jitstate {
     use std::{env, sync::LazyLock};
 
     static JITSTATE_DEBUG: LazyLock<bool> =
-        LazyLock::new(|| env::var("YKD_PRINT_JITSTATE").is_ok());
+        LazyLock::new(|| env::var("YKD_LOG_JITSTATE").is_ok());
 
     /// Print select JIT events to stderr for testing/debugging purposes.
     pub fn print_jit_state(state: &str) {
