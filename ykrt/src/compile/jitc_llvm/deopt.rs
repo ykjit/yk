@@ -5,10 +5,9 @@ use super::{
     frame::{BitcodeSection, FrameReconstructor, Value, __yktracec_get_aot_module},
     LLVMCompiledTrace,
 };
-#[cfg(feature = "ykd")]
-use crate::print_jit_state;
 use crate::{
     compile::{CompiledTrace, GuardId},
+    jitstate::print_jit_state,
     mt::{MTThread, SideTraceInfo},
     ykstats::TimingState,
 };
@@ -357,7 +356,6 @@ unsafe extern "C" fn __ykrt_deopt(
                 mtt.set_running_trace(Some(st));
             });
 
-            #[cfg(feature = "ykd")]
             print_jit_state("execute-side-trace");
             // FIXME: Calling this function overwrites the current (Rust) function frame,
             // rather than unwinding it. https://github.com/ykjit/yk/issues/778
@@ -365,7 +363,6 @@ unsafe extern "C" fn __ykrt_deopt(
         }
     }
 
-    #[cfg(feature = "ykd")]
     print_jit_state("deoptimise");
 
     MTThread::with(|mtt| {

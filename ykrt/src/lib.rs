@@ -22,5 +22,3 @@ mod ykstats;
 
 pub use self::location::Location;
 pub use self::mt::{HotThreshold, MT};
-
-pub(crate) use jitstate::print_jit_state;
