@@ -8,11 +8,57 @@ to make them a bit easier to understand.
 
 ## Producing a trace
 
-The `YKD_PRINT_IR` environment variable determines whether yk prints traces to
-`stderr` or not. If `jit-pre-opt` is specified, the traces will be printed before
-optimisation; if `jit-post-opt` is specified, the traces will be printed after
-optimisation. `jit-pre-opt` and `jit-post-opt` can give you different insights,
-so it is often worth checking both.
+### `YKD_PRINT_IR`
+
+`YKD_PRINT_IR` accepts a comma-separated list of JIT pipeline stages at which
+to print LLVM IR (to stderr).
+
+The following stages are supported:
+
+ - `aot`: the IR embedded in the ahead-of-time compiled binary.
+ - `jit-pre-opt`: the IR for the trace before it is optimised by LLVM.
+ - `jit-post-opt`: the IR for the trace after LLVM has optimised it. This is
+   the IR that will be submitted to the LLVM code generator.
+
+If `jit-pre-opt` is specified, the traces will be printed before optimisation;
+if `jit-post-opt` is specified, the traces will be printed after optimisation.
+`jit-pre-opt` and `jit-post-opt` can give you different insights, so it is
+often worth checking both.
+
+
+#### `YKD_TRACE_DEBUGINFO`
+
+When `YKD_TRACE_DEBUGINFO=1`, the JIT will add debugging information to JITted
+traces, allowing debuggers conforming to the [gdb JIT
+interface](https://sourceware.org/gdb/current/onlinedocs/gdb/JIT-Interface.html)
+to show higher-level representations of the code in the source view.
+
+This feature relies on the use of temporary files, which (in addition to being
+slow to create) are not guaranteed to be cleaned up.
+
+
+### `YKD_LOG_JITSTATE`
+
+If the `YKD_LOG_JITSTATE=<path>` environment variable is defined, then changes
+in the "JIT state" will be appended, as they occur, to the file at `<path>` as
+they occur. The special value `-` (i.e. a single dash) can be used for `<path>`
+to indicate stderr.
+
+The JIT states written are:
+
+ * `jitstate: start-tracing` is printed when the system starts tracing.
+ * `jitstate: stop-tracing` is printed when the system stops tracing.
+ * `jitstate: enter-jit-code` is printed when the system starts executing
+   JITted code.
+ * `jitstate: exit-jit-code` is printed when the system stops executing
+   JITted code.
+
+Note that there are no `start-interpreting` and `stop-interpreting`
+notifications: if the system is not currently tracing or executing JITted code,
+then it is implicitly interpreting.
+
+This variable is only available when building `ykrt` with the `ykd` Cargo
+feature enabled.
 
 
 ## trace_chewer
