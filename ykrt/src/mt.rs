@@ -26,8 +26,8 @@ use crate::{
     compile::{default_compiler, CompilationError, CompiledTrace, Compiler, GuardId},
     location::{HotLocation, HotLocationKind, Location, TraceFailed},
     log::log_jit_state,
+    stats::{Stats, TimingState},
     trace::{default_tracer, AOTTraceIterator, TraceRecorder, Tracer},
-    ykstats::{TimingState, YkStats},
 };
 
 // The HotThreshold must be less than a machine word wide for [`Location::Location`] to do its
@@ -91,7 +91,7 @@ pub struct MT {
     /// The [Compiler] that will be used for compiling future `IRTrace`s. Note that this might not
     /// be the same as the compiler(s) used to compile past `IRTrace`s.
     compiler: Mutex<Arc<dyn Compiler>>,
-    pub(crate) stats: YkStats,
+    pub(crate) stats: Stats,
 }
 
 impl std::fmt::Debug for MT {
@@ -118,7 +118,7 @@ impl MT {
             active_worker_jobs: AtomicUsize::new(0),
             tracer: Mutex::new(default_tracer()?),
             compiler: Mutex::new(default_compiler()?),
-            stats: YkStats::new(),
+            stats: Stats::new(),
         }))
     }
 

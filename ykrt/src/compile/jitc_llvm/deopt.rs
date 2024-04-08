@@ -9,7 +9,7 @@ use crate::{
     compile::{CompiledTrace, GuardId},
     log::log_jit_state,
     mt::{MTThread, SideTraceInfo},
-    ykstats::TimingState,
+    stats::TimingState,
 };
 use llvm_sys::orc2::LLVMOrcThreadSafeModuleWithModuleDo;
 use llvm_sys::{

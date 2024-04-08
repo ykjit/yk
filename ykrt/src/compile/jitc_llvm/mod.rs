@@ -5,8 +5,8 @@ use crate::{
     compile::{CompilationError, CompiledTrace, Compiler, Guard, GuardId},
     location::HotLocation,
     mt::{SideTraceInfo, MT},
+    stats::TimingState,
     trace::{AOTTraceIterator, AOTTraceIteratorError, TraceAction},
-    ykstats::TimingState,
 };
 use object::{Object, ObjectSection};
 use parking_lot::Mutex;

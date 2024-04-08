@@ -16,9 +16,9 @@ mod location;
 mod log;
 pub(crate) mod mt;
 pub mod promote;
+mod stats;
 pub(crate) mod thread_intercept;
 pub mod trace;
-mod ykstats;
 
 pub use self::location::Location;
 pub use self::mt::{HotThreshold, MT};
