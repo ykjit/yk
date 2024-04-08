@@ -50,7 +50,7 @@ notifications: if the system is not currently tracing or executing JITted code,
 then it is implicitly interpreting.
 
 This variable is only available when building `ykrt` with the
-`yk_jitstate_debug` Cargo feature enabled.
+`ykd` Cargo feature enabled.
 
 
 ### `YKD_SERIALISE_COMPILATION`

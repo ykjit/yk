@@ -26,13 +26,13 @@ memmap2 = "0.9.4"
 regex = "1.9"
 tempfile = "3.9.0"
 ykbuild = { path = "../ykbuild" }
-ykrt = { path = "../ykrt", features = ["yk_testing", "yk_jitstate_debug"] }
+ykrt = { path = "../ykrt", features = ["yk_testing", "ykd"] }
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }
 lang_tester = "0.8"
 ykcapi = { path = "../ykcapi", features = ["yk_testing"] }
-ykrt = { path = "../ykrt", features = ["yk_testing", "yk_jitstate_debug"] }
+ykrt = { path = "../ykrt", features = ["yk_testing", "ykd"] }
 
 [build-dependencies]
 rerun_except = "1.0.0"

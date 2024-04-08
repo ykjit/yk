@@ -45,7 +45,12 @@ regex = "1.9"
 ykbuild = { path = "../ykbuild" }
 
 [features]
-yk_jitstate_debug = ["yktracec/yk_testing"]
+# When set, the `ykd` feature enables a number of features that are helpful for
+# debugging the correctness and performance of an interpreter, most controlled
+# by `YKD_*` environment variables.
+ykd = ["yktracec/yk_testing"]
+# The `yk_testing` feature is purely for yk's internal use: do not use it
+# externally.
 yk_testing = ["yktracec/yk_testing"]
 
 [dev-dependencies]

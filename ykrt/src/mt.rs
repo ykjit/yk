@@ -21,7 +21,7 @@ use parking_lot::{Condvar, Mutex, MutexGuard};
 #[cfg(not(all(feature = "yk_testing", not(test))))]
 use parking_lot_core::SpinWait;
 
-#[cfg(feature = "yk_jitstate_debug")]
+#[cfg(feature = "ykd")]
 use crate::print_jit_state;
 use crate::{
     aotsmp::load_aot_stackmaps,
@@ -232,7 +232,7 @@ impl MT {
         match self.transition_control_point(loc) {
             TransitionControlPoint::NoAction => (),
             TransitionControlPoint::Execute(ctr) => {
-                #[cfg(feature = "yk_jitstate_debug")]
+                #[cfg(feature = "ykd")]
                 print_jit_state("enter-jit-code");
                 self.stats.trace_executed();
                 let f = unsafe {
@@ -254,7 +254,7 @@ impl MT {
                 }
             }
             TransitionControlPoint::StartTracing(hl) => {
-                #[cfg(feature = "yk_jitstate_debug")]
+                #[cfg(feature = "ykd")]
                 print_jit_state("start-tracing");
                 let tracer = {
                     let lk = self.tracer.lock();
@@ -288,14 +288,14 @@ impl MT {
                 match thread_tracer.stop() {
                     Ok(utrace) => {
                         self.stats.timing_state(TimingState::None);
-                        #[cfg(feature = "yk_jitstate_debug")]
+                        #[cfg(feature = "ykd")]
                         print_jit_state("stop-tracing");
                         self.queue_compile_job((utrace, promotions.into_boxed_slice()), hl, None);
                     }
                     Err(_e) => {
                         self.stats.timing_state(TimingState::None);
                         self.stats.trace_recorded_err();
-                        #[cfg(feature = "yk_jitstate_debug")]
+                        #[cfg(feature = "ykd")]
                         print_jit_state(&format!("stop-tracing-aborted: {_e}"));
                     }
                 }
@@ -318,7 +318,7 @@ impl MT {
                 match thread_tracer.stop() {
                     Ok(utrace) => {
                         self.stats.timing_state(TimingState::None);
-                        #[cfg(feature = "yk_jitstate_debug")]
+                        #[cfg(feature = "ykd")]
                         print_jit_state("stop-side-tracing");
                         self.queue_compile_job(
                             (utrace, promotions.into_boxed_slice()),
@@ -329,7 +329,7 @@ impl MT {
                     Err(_e) => {
                         self.stats.timing_state(TimingState::None);
                         self.stats.trace_recorded_err();
-                        #[cfg(feature = "yk_jitstate_debug")]
+                        #[cfg(feature = "ykd")]
                         print_jit_state(&format!("stop-side-tracing-aborted: {_e}"));
                     }
                 }
@@ -537,7 +537,7 @@ impl MT {
         match self.transition_guard_failure(sti, parent) {
             TransitionGuardFailure::NoAction => todo!(),
             TransitionGuardFailure::StartSideTracing(hl) => {
-                #[cfg(feature = "yk_jitstate_debug")]
+                #[cfg(feature = "ykd")]
                 print_jit_state("start-side-tracing");
                 let tracer = {
                     let lk = self.tracer.lock();
@@ -611,20 +611,20 @@ impl MT {
                     match e {
                         CompilationError::General(_reason)
                         | CompilationError::LimitExceeded(_reason) => {
-                            #[cfg(feature = "yk_jitstate_debug")]
+                            #[cfg(feature = "ykd")]
                             print_jit_state(&format!("trace-compilation-aborted: {_reason}"));
                         }
                         CompilationError::InternalError(reason) => {
-                            #[cfg(feature = "yk_jitstate_debug")]
+                            #[cfg(feature = "ykd")]
                             panic!("{reason}");
-                            #[cfg(not(feature = "yk_jitstate_debug"))]
+                            #[cfg(not(feature = "ykd"))]
                             {
                                 eprintln!("yk error (trying to continue): {reason}");
                             }
                         }
                         CompilationError::ResourceExhausted(e) => {
                             eprintln!("yk warning: {e}");
-                            #[cfg(feature = "yk_jitstate_debug")]
+                            #[cfg(feature = "ykd")]
                             print_jit_state(&format!("trace-compilation-aborted: {e}"));
                         }
                     }
