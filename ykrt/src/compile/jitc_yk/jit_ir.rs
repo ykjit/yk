@@ -72,7 +72,7 @@ impl IntegerType {
 
     /// Format a constant integer value that is of the type described by `self`.
     fn const_to_str(&self, c: &Constant) -> String {
-        aot_ir::const_int_bytes_to_str(self.num_bits, c.bytes())
+        aot_ir::const_int_bytes_to_string(self.num_bits, c.bytes())
     }
 }
 
