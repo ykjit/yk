@@ -10,15 +10,19 @@ mod jitstate {
 
 #[cfg(feature = "ykd")]
 mod jitstate {
-    use std::{env, sync::LazyLock};
+    use std::{env, fs, sync::LazyLock};
 
-    static JITSTATE_DEBUG: LazyLock<bool> =
-        LazyLock::new(|| env::var("YKD_LOG_JITSTATE").is_ok());
+    static JITSTATE_DEBUG: LazyLock<Option<String>> =
+        LazyLock::new(|| env::var("YKD_LOG_JITSTATE").ok());
 
     /// Print select JIT events to stderr for testing/debugging purposes.
     pub fn print_jit_state(state: &str) {
-        if *JITSTATE_DEBUG {
-            eprintln!("jit-state: {}", state);
+        match JITSTATE_DEBUG.as_ref().map(|x| x.as_str()) {
+            Some("-") => eprintln!("jit-state: {}", state),
+            Some(x) => {
+                fs::write(x, state).ok();
+            }
+            None => (),
         }
     }
 }

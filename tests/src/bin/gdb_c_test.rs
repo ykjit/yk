@@ -17,7 +17,7 @@ struct Args {
     #[arg(short, long)]
     print_ir: Option<String>,
 
-    /// Run the test with `YKD_LOG_JITSTATE=1`
+    /// Run the test with `YKD_LOG_JITSTATE=-`
     #[arg(short = 'j', long)]
     print_jitstate: bool,
 

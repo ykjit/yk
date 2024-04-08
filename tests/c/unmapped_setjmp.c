@@ -1,7 +1,7 @@
 // ignore-if: test "$YKB_TRACER" != "hwt"
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=1
+//   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
 //     jit-state: start-tracing
 //     set jump point

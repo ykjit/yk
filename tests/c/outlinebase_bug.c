@@ -1,7 +1,7 @@
 // Run-time:
 //   env-var: YKD_PRINT_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=1
+//   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
 //     ...
 //     --- Begin jit-pre-opt ---
