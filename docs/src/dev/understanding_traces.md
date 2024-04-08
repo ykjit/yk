@@ -8,9 +8,9 @@ to make them a bit easier to understand.
 
 ## Producing a trace
 
-### `YKD_PRINT_IR`
+### `YKD_LOG_IR`
 
-`YKD_PRINT_IR` accepts a comma-separated list of JIT pipeline stages at which
+`YKD_LOG_IR` accepts a comma-separated list of JIT pipeline stages at which
 to print LLVM IR (to stderr).
 
 The following stages are supported:
@@ -64,7 +64,7 @@ feature enabled.
 ## trace_chewer
 
 `trace_chewer` is a small program included with yk which can help you
-understand `YKD_PRINT_IR`s output. The general format of `trace_chewer` is:
+understand `YKD_LOG_IR`s output. The general format of `trace_chewer` is:
 
 ```
 trace_chewer <command> <args>
@@ -85,7 +85,7 @@ If you specify `-` as the filename, `trace_chewer simplify` will read from
 stdin. This means that you can simplify traces without saving them to disk:
 
 ```
-YKD_PRINT_IR=jit-post-opt lua f.lua 2>&1 | trace_chewer simplify -
+YKD_LOG_IR=jit-post-opt lua f.lua 2>&1 | trace_chewer simplify -
 ```
 
 You can specify a plugin with `trace_chewer simplify -p <plugin.py>`:

@@ -169,7 +169,7 @@ private:
 
 public:
   DebugIRPrinter() {
-    char *Env = std::getenv("YKD_PRINT_IR");
+    char *Env = std::getenv("YKD_LOG_IR");
     char *Val;
     while ((Val = strsep(&Env, ",")) != nullptr) {
       if (strcmp(Val, "aot") == 0)
@@ -179,7 +179,7 @@ public:
       else if (strcmp(Val, "jit-post-opt") == 0)
         toPrint.set(DebugIR::JITPostOpt);
       else
-        errx(EXIT_FAILURE, "invalid parameter for YKD_PRINT_IR: '%s'", Val);
+        errx(EXIT_FAILURE, "invalid parameter for YKD_LOG_IR: '%s'", Val);
     }
   }
 

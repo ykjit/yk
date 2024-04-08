@@ -1,7 +1,7 @@
 // Compiler:
 // Run-time:
 //   env-var: YKD_LOG_JITSTATE=-
-//   env-var: YKD_PRINT_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
 //     ...

@@ -1,7 +1,7 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_JITSTATE=-
-//   env-var: YKD_PRINT_IR=jit-post-opt
+//   env-var: YKD_LOG_IR=jit-post-opt
 //   stderr:
 //     jitstate: start-tracing
 //     z=2

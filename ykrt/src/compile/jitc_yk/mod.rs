@@ -38,7 +38,7 @@ impl IRPhase {
             "jit-pre-opt" => Ok(Self::PreOpt),
             "jit-post-opt" => Ok(Self::PostOpt),
             "jit-asm" => Ok(Self::Asm),
-            _ => Err(format!("Invalid YKD_PRINT_IR value: {s}").into()),
+            _ => Err(format!("Invalid YKD_LOG_IR value: {s}").into()),
         }
     }
 }
@@ -50,7 +50,7 @@ pub(crate) struct JITCYk {
 impl JITCYk {
     pub(crate) fn new() -> Result<Arc<Self>, Box<dyn Error>> {
         let mut phases_to_print = HashSet::new();
-        if let Ok(stages) = env::var("YKD_PRINT_IR") {
+        if let Ok(stages) = env::var("YKD_LOG_IR") {
             for x in stages.split(',') {
                 phases_to_print.insert(IRPhase::from_str(x)?);
             }

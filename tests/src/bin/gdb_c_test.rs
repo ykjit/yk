@@ -13,13 +13,13 @@ struct Args {
     /// The test to attach gdb to.
     test_file: PathBuf,
 
-    /// Run the test with `YKD_PRINT_IR` set to the specified value.
+    /// Run the test with `YKD_LOG_IR` set to the specified value.
     #[arg(short, long)]
-    print_ir: Option<String>,
+    log_ir: Option<String>,
 
     /// Run the test with `YKD_LOG_JITSTATE=-`
     #[arg(short = 'j', long)]
-    print_jitstate: bool,
+    log_jitstate: bool,
 
     /// Run the test with `YKD_SERIALISE_COMPILATION=1`
     #[arg(short, long)]
@@ -76,12 +76,12 @@ fn main() {
         gdb.env("YKD_SERIALISE_COMPILATION", "1");
     }
 
-    if args.print_jitstate {
+    if args.log_jitstate {
         gdb.env("YKD_LOG_JITSTATE", "1");
     }
 
-    if let Some(irs) = args.print_ir {
-        gdb.env("YKD_PRINT_IR", irs);
+    if let Some(irs) = args.log_ir {
+        gdb.env("YKD_LOG_IR", irs);
     }
 
     if let Some(num_breaks) = args.num_breaks {

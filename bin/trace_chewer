@@ -1,9 +1,9 @@
 #! /usr/bin/env python3
 
-# trace_chewer processes output from YKD_PRINT_IR in various ways:
+# trace_chewer processes output from YKD_LOG_IR in various ways:
 #   * `simplify` turns the output into a straight-line trace with guards
 #
-# Note that trace_chewer makes many, many assumptions about YKD_PRINT_IR's
+# Note that trace_chewer makes many, many assumptions about YKD_LOG_IR's
 # output. Any changes in that are likely to lead to this script producing
 # incorrect output.
 
