@@ -12,8 +12,8 @@
 
 pub(crate) mod aotsmp;
 pub mod compile;
-mod jitstate;
 mod location;
+mod log;
 pub(crate) mod mt;
 pub mod promote;
 pub(crate) mod thread_intercept;

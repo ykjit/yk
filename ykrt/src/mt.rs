@@ -24,8 +24,8 @@ use parking_lot_core::SpinWait;
 use crate::{
     aotsmp::load_aot_stackmaps,
     compile::{default_compiler, CompilationError, CompiledTrace, Compiler, GuardId},
-    jitstate::print_jit_state,
     location::{HotLocation, HotLocationKind, Location, TraceFailed},
+    log::log_jit_state,
     trace::{default_tracer, AOTTraceIterator, TraceRecorder, Tracer},
     ykstats::{TimingState, YkStats},
 };
@@ -231,7 +231,7 @@ impl MT {
         match self.transition_control_point(loc) {
             TransitionControlPoint::NoAction => (),
             TransitionControlPoint::Execute(ctr) => {
-                print_jit_state("enter-jit-code");
+                log_jit_state("enter-jit-code");
                 self.stats.trace_executed();
                 let f = unsafe {
                     #[cfg(feature = "yk_testing")]
@@ -252,7 +252,7 @@ impl MT {
                 }
             }
             TransitionControlPoint::StartTracing(hl) => {
-                print_jit_state("start-tracing");
+                log_jit_state("start-tracing");
                 let tracer = {
                     let lk = self.tracer.lock();
                     Arc::clone(&*lk)
@@ -285,13 +285,13 @@ impl MT {
                 match thread_tracer.stop() {
                     Ok(utrace) => {
                         self.stats.timing_state(TimingState::None);
-                        print_jit_state("stop-tracing");
+                        log_jit_state("stop-tracing");
                         self.queue_compile_job((utrace, promotions.into_boxed_slice()), hl, None);
                     }
                     Err(_e) => {
                         self.stats.timing_state(TimingState::None);
                         self.stats.trace_recorded_err();
-                        print_jit_state(&format!("stop-tracing-aborted: {_e}"));
+                        log_jit_state(&format!("stop-tracing-aborted: {_e}"));
                     }
                 }
             }
@@ -313,7 +313,7 @@ impl MT {
                 match thread_tracer.stop() {
                     Ok(utrace) => {
                         self.stats.timing_state(TimingState::None);
-                        print_jit_state("stop-side-tracing");
+                        log_jit_state("stop-side-tracing");
                         self.queue_compile_job(
                             (utrace, promotions.into_boxed_slice()),
                             hl,
@@ -323,7 +323,7 @@ impl MT {
                     Err(_e) => {
                         self.stats.timing_state(TimingState::None);
                         self.stats.trace_recorded_err();
-                        print_jit_state(&format!("stop-side-tracing-aborted: {_e}"));
+                        log_jit_state(&format!("stop-side-tracing-aborted: {_e}"));
                     }
                 }
             }
@@ -530,7 +530,7 @@ impl MT {
         match self.transition_guard_failure(sti, parent) {
             TransitionGuardFailure::NoAction => todo!(),
             TransitionGuardFailure::StartSideTracing(hl) => {
-                print_jit_state("start-side-tracing");
+                log_jit_state("start-side-tracing");
                 let tracer = {
                     let lk = self.tracer.lock();
                     Arc::clone(&*lk)
@@ -603,7 +603,7 @@ impl MT {
                     match e {
                         CompilationError::General(_reason)
                         | CompilationError::LimitExceeded(_reason) => {
-                            print_jit_state(&format!("trace-compilation-aborted: {_reason}"));
+                            log_jit_state(&format!("trace-compilation-aborted: {_reason}"));
                         }
                         CompilationError::InternalError(reason) => {
                             #[cfg(feature = "ykd")]
@@ -615,7 +615,7 @@ impl MT {
                         }
                         CompilationError::ResourceExhausted(e) => {
                             eprintln!("yk warning: {e}");
-                            print_jit_state(&format!("trace-compilation-aborted: {e}"));
+                            log_jit_state(&format!("trace-compilation-aborted: {e}"));
                         }
                     }
                 }

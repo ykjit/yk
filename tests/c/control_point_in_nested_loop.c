@@ -1,5 +1,5 @@
 // Compiler:
-//   env-var: YKD_LOG_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=-:jit-pre-opt
 
 // Check that the system is OK with the control point being in a nested loop.
 

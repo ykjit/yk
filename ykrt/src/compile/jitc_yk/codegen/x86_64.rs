@@ -15,9 +15,7 @@ use super::{
 };
 #[cfg(any(debug_assertions, test))]
 use crate::compile::jitc_yk::jit_ir::JitIRDisplay;
-use crate::{
-    aotsmp::AOT_STACKMAPS, compile::CompiledTrace, jitstate::print_jit_state, mt::MTThread,
-};
+use crate::{aotsmp::AOT_STACKMAPS, compile::CompiledTrace, log::log_jit_state, mt::MTThread};
 use byteorder::{NativeEndian, ReadBytesExt};
 use dynasmrt::{
     components::StaticLabel, dynasm, x64::Rq, AssemblyOffset, DynasmApi, DynasmError,
@@ -56,7 +54,7 @@ const SYSV_CALL_STACK_ALIGN: usize = 16;
 const STACK_DIRECTION: StackDirection = StackDirection::GrowsDown;
 
 extern "C" fn __yk_deopt(frameaddr: *const c_void, deoptid: usize, jitrbp: *const c_void) {
-    print_jit_state("deoptimise");
+    log_jit_state("deoptimise");
 
     let ctr = MTThread::with(|mtt| mtt.running_trace().unwrap())
         .as_any()

@@ -169,7 +169,14 @@ private:
 
 public:
   DebugIRPrinter() {
-    char *Env = std::getenv("YKD_LOG_IR");
+    char *OrigEnv = std::getenv("YKD_LOG_IR");
+    if (OrigEnv == nullptr)
+      return;
+    char *Env = (char *)malloc(strlen(OrigEnv) + 1);
+    strcpy(Env, OrigEnv);
+    char *Path = strsep(&Env, ":");
+    if (Path == nullptr || strcmp(Path, "-") != 0)
+      errx(EXIT_FAILURE, "invalid path for YKD_LOG_IR: '%s'", Path);
     char *Val;
     while ((Val = strsep(&Env, ",")) != nullptr) {
       if (strcmp(Val, "aot") == 0)
@@ -179,8 +186,9 @@ public:
       else if (strcmp(Val, "jit-post-opt") == 0)
         toPrint.set(DebugIR::JITPostOpt);
       else
-        errx(EXIT_FAILURE, "invalid parameter for YKD_LOG_IR: '%s'", Val);
+        errx(EXIT_FAILURE, "invalid phase for YKD_LOG_IR: '%s'", Val);
     }
+    free(Env);
   }
 
   void print(enum DebugIR IR, Module *M) {

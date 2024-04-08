@@ -7,7 +7,7 @@ use super::{
 };
 use crate::{
     compile::{CompiledTrace, GuardId},
-    jitstate::print_jit_state,
+    log::log_jit_state,
     mt::{MTThread, SideTraceInfo},
     ykstats::TimingState,
 };
@@ -356,14 +356,14 @@ unsafe extern "C" fn __ykrt_deopt(
                 mtt.set_running_trace(Some(st));
             });
 
-            print_jit_state("execute-side-trace");
+            log_jit_state("execute-side-trace");
             // FIXME: Calling this function overwrites the current (Rust) function frame,
             // rather than unwinding it. https://github.com/ykjit/yk/issues/778
             f(ykctrlpvars.as_ptr() as *mut c_void, frameaddr);
         }
     }
 
-    print_jit_state("deoptimise");
+    log_jit_state("deoptimise");
 
     MTThread::with(|mtt| {
         mtt.set_running_trace(None);
