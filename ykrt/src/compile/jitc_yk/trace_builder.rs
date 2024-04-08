@@ -187,7 +187,7 @@ impl<'a> TraceBuilder<'a> {
                     }
                     self.handle_ptradd(inst, &bid, inst_idx)
                 }
-                aot_ir::Opcode::Add => self.handle_binop(inst, &bid, inst_idx),
+                aot_ir::Opcode::BinOp => self.handle_binop(inst, &bid, inst_idx),
                 aot_ir::Opcode::Icmp => self.handle_icmp(inst, &bid, inst_idx),
                 aot_ir::Opcode::CondBr => {
                     let sm = &blk.instrs[InstrIdx::new(inst_idx - 1)];
@@ -340,11 +340,12 @@ impl<'a> TraceBuilder<'a> {
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
     ) -> Result<(), CompilationError> {
-        let op1 = self.handle_operand(inst.operand(0))?;
-        let op2 = self.handle_operand(inst.operand(1))?;
-        let instr = match inst.opcode() {
-            aot_ir::Opcode::Add => jit_ir::AddInstruction::new(op1, op2),
-            _ => todo!(),
+        let lhs = self.handle_operand(inst.operand(0))?;
+        let bop = inst.operand(1);
+        let rhs = self.handle_operand(inst.operand(2))?;
+        let instr = match bop {
+            aot_ir::Operand::BinOp(bo) => jit_ir::BinOpInstruction::new(lhs, *bo, rhs),
+            _ => panic!(), // IR malformed.
         };
         self.copy_instruction(instr.into(), bid, aot_inst_idx)
     }
