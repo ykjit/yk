@@ -12,6 +12,7 @@
 
 pub(crate) mod aotsmp;
 pub mod compile;
+mod jitstate;
 mod location;
 pub(crate) mod mt;
 pub mod promote;
@@ -22,16 +23,4 @@ mod ykstats;
 pub use self::location::Location;
 pub use self::mt::{HotThreshold, MT};
 
-#[cfg(feature = "ykd")]
-use std::{env, sync::LazyLock};
-
-#[cfg(feature = "ykd")]
-static JITSTATE_DEBUG: LazyLock<bool> = LazyLock::new(|| env::var("YKD_PRINT_JITSTATE").is_ok());
-
-/// Print select JIT events to stderr for testing/debugging purposes.
-#[cfg(feature = "ykd")]
-pub fn print_jit_state(state: &str) {
-    if *JITSTATE_DEBUG {
-        eprintln!("jit-state: {}", state);
-    }
-}
+pub(crate) use jitstate::print_jit_state;
