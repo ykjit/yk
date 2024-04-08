@@ -481,14 +481,8 @@ impl<'a> X64CodeGen<'a> {
         let lhs = inst.lhs();
         let rhs = inst.rhs();
 
-        // FIXME: We should be checking type equality here, but since constants currently don't
-        // have a type, checking their size is close enough. This won't be correct for struct
-        // types, but this function can't deal with those anyway at the moment.
-        debug_assert_eq!(
-            lhs.byte_size(self.jit_mod),
-            rhs.byte_size(self.jit_mod),
-            "attempt to add different byte-sized types"
-        );
+        // Operand types must be the same.
+        debug_assert_eq!(lhs.type_(self.jit_mod), rhs.type_(self.jit_mod));
 
         self.operand_into_reg(WR0, &lhs); // FIXME: assumes value will fit in a reg.
         self.operand_into_reg(WR1, &rhs); // ^^^ same
