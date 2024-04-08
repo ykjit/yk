@@ -344,8 +344,7 @@ impl<'a> TraceBuilder<'a> {
         let bop = inst.operand(1);
         let rhs = self.handle_operand(inst.operand(2))?;
         let instr = match bop {
-            aot_ir::Operand::BinOp(aot_ir::BinOp::Add) => jit_ir::AddInstruction::new(lhs, rhs),
-            aot_ir::Operand::BinOp(_) => todo!(),
+            aot_ir::Operand::BinOp(bo) => jit_ir::BinOpInstruction::new(lhs, *bo, rhs),
             _ => panic!(), // IR malformed.
         };
         self.copy_instruction(instr.into(), bid, aot_inst_idx)

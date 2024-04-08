@@ -318,7 +318,7 @@ impl<'a> X64CodeGen<'a> {
         self.comment(self.asm.offset(), inst.to_string(self.jit_mod).unwrap());
 
         match inst {
-            jit_ir::Instruction::Add(i) => self.codegen_add_instr(instr_idx, i),
+            jit_ir::Instruction::BinOp(i) => self.codegen_binop_instr(instr_idx, i),
             jit_ir::Instruction::LoadTraceInput(i) => {
                 self.codegen_loadtraceinput_instr(instr_idx, i)
             }
@@ -477,27 +477,30 @@ impl<'a> X64CodeGen<'a> {
         self.store_local(&l, reg, size);
     }
 
-    fn codegen_add_instr(&mut self, inst_idx: jit_ir::InstrIdx, inst: &jit_ir::AddInstruction) {
-        let op1 = inst.op1();
-        let op2 = inst.op2();
+    fn codegen_binop_instr(&mut self, inst_idx: jit_ir::InstrIdx, inst: &jit_ir::BinOpInstruction) {
+        let lhs = inst.lhs();
+        let rhs = inst.rhs();
 
         // FIXME: We should be checking type equality here, but since constants currently don't
         // have a type, checking their size is close enough. This won't be correct for struct
         // types, but this function can't deal with those anyway at the moment.
         debug_assert_eq!(
-            op1.byte_size(self.jit_mod),
-            op2.byte_size(self.jit_mod),
+            lhs.byte_size(self.jit_mod),
+            rhs.byte_size(self.jit_mod),
             "attempt to add different byte-sized types"
         );
 
-        self.operand_into_reg(WR0, &inst.op1()); // FIXME: assumes value will fit in a reg.
-        self.operand_into_reg(WR1, &inst.op2()); // ^^^ same
+        self.operand_into_reg(WR0, &lhs); // FIXME: assumes value will fit in a reg.
+        self.operand_into_reg(WR1, &rhs); // ^^^ same
 
-        match op1.byte_size(self.jit_mod) {
-            8 => dynasm!(self.asm; add Rq(WR0.code()), Rq(WR1.code())),
-            4 => dynasm!(self.asm; add Rd(WR0.code()), Rd(WR1.code())),
-            2 => dynasm!(self.asm; add Rw(WR0.code()), Rw(WR1.code())),
-            1 => dynasm!(self.asm; add Rb(WR0.code()), Rb(WR1.code())),
+        match inst.binop() {
+            jit_ir::BinOp::Add => match lhs.byte_size(self.jit_mod) {
+                8 => dynasm!(self.asm; add Rq(WR0.code()), Rq(WR1.code())),
+                4 => dynasm!(self.asm; add Rd(WR0.code()), Rd(WR1.code())),
+                2 => dynasm!(self.asm; add Rw(WR0.code()), Rw(WR1.code())),
+                1 => dynasm!(self.asm; add Rb(WR0.code()), Rb(WR1.code())),
+                _ => todo!(),
+            },
             _ => todo!(),
         }
 
@@ -1138,10 +1141,10 @@ mod tests {
                     jit_ir::LoadTraceInputInstruction::new(16, i16_ty_idx).into(),
                 )
                 .unwrap();
-            jit_mod.push(jit_ir::AddInstruction::new(op1, op2).into());
+            jit_mod.push(jit_ir::BinOpInstruction::new(op1, jit_ir::BinOp::Add, op2).into());
             let patt_lines = [
                 "...",
-                "; %2: i16 = Add %0, %1",
+                "; %2: i16 = BinOp %0, add, %1",
                 "... movzx r12, word ptr [rbp-0x02]",
                 "... movzx r13, word ptr [rbp-0x04]",
                 "... add r12w, r13w",
@@ -1165,10 +1168,10 @@ mod tests {
                     jit_ir::LoadTraceInputInstruction::new(64, i64_ty_idx).into(),
                 )
                 .unwrap();
-            jit_mod.push(jit_ir::AddInstruction::new(op1, op2).into());
+            jit_mod.push(jit_ir::BinOpInstruction::new(op1, jit_ir::BinOp::Add, op2).into());
             let patt_lines = [
                 "...",
-                "; %2: i64 = Add %0, %1",
+                "; %2: i64 = BinOp %0, add, %1",
                 "... mov r12, [rbp-0x08]",
                 "... mov r13, [rbp-0x10]",
                 "... add r12, r13",
@@ -1197,7 +1200,7 @@ mod tests {
                     jit_ir::LoadTraceInputInstruction::new(64, i32_ty_idx).into(),
                 )
                 .unwrap();
-            jit_mod.push(jit_ir::AddInstruction::new(op1, op2).into());
+            jit_mod.push(jit_ir::BinOpInstruction::new(op1, jit_ir::BinOp::Add, op2).into());
 
             X64CodeGen::new(&jit_mod, Box::new(SpillAllocator::new(STACK_DIRECTION)))
                 .unwrap()
@@ -1672,13 +1675,15 @@ mod tests {
                 )
                 .unwrap();
             jit_mod.push(jit_ir::Instruction::TraceLoopStart);
-            jit_mod.push(jit_ir::AddInstruction::new(ti_op.clone(), ti_op).into());
+            jit_mod.push(
+                jit_ir::BinOpInstruction::new(ti_op.clone(), jit_ir::BinOp::Add, ti_op).into(),
+            );
             let patt_lines = [
                 "...",
                 "; %0: i8 = LoadTraceInput 0, i8",
                 "...",
                 "; TraceLoopStart",
-                "; %2: i8 = Add %0, %0",
+                "; %2: i8 = BinOp %0, add, %0",
                 "...",
                 "; Trace loop backedge",
                 "...: jmp ...",

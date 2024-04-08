@@ -17,8 +17,8 @@ use std::{
 use typed_index_collections::TiVec;
 use ykaddr::addr::symbol_to_ptr;
 
-// This is simple and can be shared across both IRs.
-pub(crate) use super::aot_ir::Predicate;
+// This are simple and can be shared across both IRs.
+pub(crate) use super::aot_ir::{BinOp, Predicate};
 
 /// A fixed-width integer type.
 ///
@@ -788,7 +788,7 @@ pub enum Instruction {
     VACall(VACallInstruction),
     PtrAdd(PtrAddInstruction),
     Store(StoreInstruction),
-    Add(AddInstruction),
+    BinOp(BinOpInstruction),
     Icmp(IcmpInstruction),
     Guard(GuardInstruction),
     /// Describes an argument into the trace function. Its main use is to allow us to track trace
@@ -822,7 +822,7 @@ impl Instruction {
             Self::VACall(ci) => ci.target().func_type(m).ret_type_idx(),
             Self::PtrAdd(..) => m.ptr_type_idx(),
             Self::Store(..) => m.void_type_idx(),
-            Self::Add(ai) => ai.type_idx(m),
+            Self::BinOp(bi) => bi.type_idx(m),
             Self::Icmp(_) => m.int8_type_idx(), // always returns a 0/1 valued byte.
             Self::Guard(..) => m.void_type_idx(),
             Self::Arg(..) => m.ptr_type_idx(),
@@ -873,7 +873,7 @@ impl JitIRDisplay for Instruction {
             Self::VACall(i) => i.to_string_impl(m, s, nums)?,
             Self::PtrAdd(i) => i.to_string_impl(m, s, nums)?,
             Self::Store(i) => i.to_string_impl(m, s, nums)?,
-            Self::Add(i) => i.to_string_impl(m, s, nums)?,
+            Self::BinOp(i) => i.to_string_impl(m, s, nums)?,
             Self::Icmp(i) => i.to_string_impl(m, s, nums)?,
             Self::Guard(i) => i.to_string_impl(m, s, nums)?,
             Self::Arg(i) => s.push_str(&format!("Arg({})", i)),
@@ -901,7 +901,7 @@ instr!(Call, CallInstruction);
 instr!(VACall, VACallInstruction);
 instr!(PtrAdd, PtrAddInstruction);
 // FIXME: Use a macro for all binary operations?
-instr!(Add, AddInstruction);
+instr!(BinOp, BinOpInstruction);
 instr!(Icmp, IcmpInstruction);
 instr!(Guard, GuardInstruction);
 
@@ -1331,55 +1331,80 @@ impl JitIRDisplay for PtrAddInstruction {
     }
 }
 
-/// The operands for a [Instruction::Add]
+impl JitIRDisplay for BinOp {
+    fn to_string_impl(
+        &self,
+        _m: &Module,
+        s: &mut String,
+        _nums: &LocalNumbers<'_>,
+    ) -> Result<(), Box<dyn Error>> {
+        s.push_str(&format!("{:?}", self).to_lowercase());
+        Ok(())
+    }
+}
+
+/// The operands for a [Instruction::BinOp]
 ///
 /// # Semantics
 ///
-/// Adds two operands together.
+/// Performs a binary operation.
 ///
+/// The naming convention used is based on infix notation, e.g. in `2 + 3`, "2" is the left-hand
+/// side (`lhs`), "+" is the binary operator (`binop`), and "3" is the right-hand side (`rhs`).
 #[derive(Debug)]
-pub struct AddInstruction {
-    op1: PackedOperand,
-    op2: PackedOperand,
+pub struct BinOpInstruction {
+    /// The left-hand side of the operation.
+    lhs: PackedOperand,
+    /// The operation to perform.
+    binop: BinOp,
+    /// The right-hand side of the operation.
+    rhs: PackedOperand,
 }
 
-impl AddInstruction {
-    pub(crate) fn new(op1: Operand, op2: Operand) -> Self {
+impl BinOpInstruction {
+    pub(crate) fn new(lhs: Operand, binop: BinOp, rhs: Operand) -> Self {
         Self {
-            op1: PackedOperand::new(&op1),
-            op2: PackedOperand::new(&op2),
+            lhs: PackedOperand::new(&lhs),
+            binop,
+            rhs: PackedOperand::new(&rhs),
         }
     }
 
-    pub(crate) fn op1(&self) -> Operand {
-        self.op1.unpack()
+    pub(crate) fn lhs(&self) -> Operand {
+        self.lhs.unpack()
     }
 
-    pub(crate) fn op2(&self) -> Operand {
-        self.op2.unpack()
+    pub(crate) fn binop(&self) -> BinOp {
+        self.binop
+    }
+
+    pub(crate) fn rhs(&self) -> Operand {
+        self.rhs.unpack()
     }
 
     pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
-        self.op1.unpack().type_(m)
+        self.lhs.unpack().type_(m)
     }
 
     /// Returns the type index of the operands being added.
     pub(crate) fn type_idx(&self, m: &Module) -> TypeIdx {
-        self.op1.unpack().type_idx(m)
+        self.lhs.unpack().type_idx(m)
     }
 }
 
-impl JitIRDisplay for AddInstruction {
+impl JitIRDisplay for BinOpInstruction {
     fn to_string_impl(
         &self,
         m: &Module,
         s: &mut String,
         nums: &LocalNumbers<'_>,
     ) -> Result<(), Box<dyn Error>> {
-        s.push_str("Add ");
-        self.op1().to_string_impl(m, s, nums)?;
+        s.push_str("BinOp ");
+        self.lhs().to_string_impl(m, s, nums)?;
         s.push_str(", ");
-        self.op2().to_string_impl(m, s, nums)?;
+        self.binop().to_string_impl(m, s, nums)?;
+        s.push_str(", ");
+        self.rhs().to_string_impl(m, s, nums)?;
         Ok(())
     }
 }
