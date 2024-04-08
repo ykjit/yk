@@ -17,7 +17,7 @@
 //     ...
 //     --- End jit-pre-opt ---
 //     ...
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     f: 3
 //     g: 3
 //     f: 2

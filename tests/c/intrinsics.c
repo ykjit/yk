@@ -3,8 +3,8 @@
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
-//     jit-state: start-tracing
-//     jit-state: stop-tracing
+//     jitstate: start-tracing
+//     jitstate: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     define ptr @__yk_compiled_trace_0(ptr %0, ptr %1...
@@ -12,9 +12,9 @@
 //     }
 //     ...
 //     --- End jit-pre-opt ---
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     ...
-//     jit-state: deoptimise
+//     jitstate: deoptimise
 //     ...
 //   stdout:
 //     998

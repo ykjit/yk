@@ -3,7 +3,7 @@
 //   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
 //     ...
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     ...
 
 // Check that we can call a static function with internal linkage from the same

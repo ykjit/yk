@@ -3,17 +3,17 @@
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
-//     jit-state: start-tracing
+//     jitstate: start-tracing
 //     4:21
-//     jit-state: stop-tracing
+//     jitstate: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     --- End jit-pre-opt ---
 //     3:21
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     2:21
 //     1:21
-//     jit-state: deoptimise
+//     jitstate: deoptimise
 //     ...
 
 // Check that recursive function calls are not unrolled.

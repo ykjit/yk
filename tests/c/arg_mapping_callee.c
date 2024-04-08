@@ -3,16 +3,16 @@
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
-//     jit-state: start-tracing
+//     jitstate: start-tracing
 //     3:5
-//     jit-state: stop-tracing
+//     jitstate: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     --- End jit-pre-opt ---
 //     2:5
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     1:5
-//     jit-state: deoptimise
+//     jitstate: deoptimise
 //     ...
 
 // Check that using an argument (of a non-main() function) in a trace works.

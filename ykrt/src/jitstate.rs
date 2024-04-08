@@ -18,7 +18,7 @@ mod jitstate {
     /// Print select JIT events to stderr for testing/debugging purposes.
     pub fn print_jit_state(state: &str) {
         match JITSTATE_DEBUG.as_ref().map(|x| x.as_str()) {
-            Some("-") => eprintln!("jit-state: {}", state),
+            Some("-") => eprintln!("jitstate: {}", state),
             Some(x) => {
                 File::options()
                     .append(true)

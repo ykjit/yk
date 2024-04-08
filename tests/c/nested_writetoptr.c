@@ -3,8 +3,8 @@
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
-//     jit-state: start-tracing
-//     jit-state: stop-tracing
+//     jitstate: start-tracing
+//     jitstate: stop-tracing
 //     --- Begin aot ---
 //     ...
 //     define dso_local void @foo(...

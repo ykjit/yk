@@ -3,9 +3,9 @@
 //   env-var: YKD_LOG_JITSTATE=-
 //   env-var: YKD_PRINT_IR=jit-post-opt
 //   stderr:
-//     jit-state: start-tracing
+//     jitstate: start-tracing
 //     y=100
-//     jit-state: stop-tracing
+//     jitstate: stop-tracing
 //     --- Begin jit-post-opt ---
 //     ...
 //     define ptr @__yk_compiled_trace_0(...
@@ -28,11 +28,11 @@
 //     ...
 //     --- End jit-post-opt ---
 //     y=200
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     y=300
 //     y=400
 //     y=500
-//     jit-state: deoptimise
+//     jitstate: deoptimise
 
 // Check that promotion works in traces.
 

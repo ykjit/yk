@@ -5,8 +5,8 @@
 //   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
 //     ...
-//     jit-state: stop-tracing
-//     jit-state: trace-compilation-aborted: Encountered longjmp
+//     jitstate: stop-tracing
+//     jitstate: trace-compilation-aborted: Encountered longjmp
 //     ...
 
 // Tests that we can deal with setjmp/longjmp.

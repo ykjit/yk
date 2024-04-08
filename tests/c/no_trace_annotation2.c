@@ -24,14 +24,14 @@
 //     ...
 //     --- End jit-post-opt ---
 //     ...
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     Can't JIT this!
 //     Or this!
 //     Can't JIT this!
 //     Or this!
 //     Can't JIT this!
 //     Or this!
-//     jit-state: deoptimise
+//     jitstate: deoptimise
 //     ...
 
 // Check that the `yk_outline` annotation works when a `yk_outline` annotated

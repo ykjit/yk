@@ -4,14 +4,14 @@
 //   env-var: YKD_LOG_JITSTATE=-
 //   env-var: YKD_STATS=-
 //   stderr:
-//     jit-state: start-tracing
+//     jitstate: start-tracing
 //     1
-//     jit-state: stop-tracing
+//     jitstate: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     --- End jit-pre-opt ---
 //     2
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     3
 //     4
 //     5
@@ -20,35 +20,35 @@
 //     8
 //     9
 //     10
-//     jit-state: deoptimise
+//     jitstate: deoptimise
 //     12
-//     jit-state: enter-jit-code
-//     jit-state: deoptimise
+//     jitstate: enter-jit-code
+//     jitstate: deoptimise
 //     14
-//     jit-state: enter-jit-code
-//     jit-state: deoptimise
+//     jitstate: enter-jit-code
+//     jitstate: deoptimise
 //     16
-//     jit-state: enter-jit-code
-//     jit-state: deoptimise
+//     jitstate: enter-jit-code
+//     jitstate: deoptimise
 //     18
-//     jit-state: enter-jit-code
-//     jit-state: deoptimise
-//     jit-state: start-side-tracing
+//     jitstate: enter-jit-code
+//     jitstate: deoptimise
+//     jitstate: start-side-tracing
 //     20
-//     jit-state: stop-side-tracing
+//     jitstate: stop-side-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     --- End jit-pre-opt ---
 //     22
-//     jit-state: enter-jit-code
-//     jit-state: execute-side-trace
+//     jitstate: enter-jit-code
+//     jitstate: execute-side-trace
 //     24
-//     jit-state: deoptimise
+//     jitstate: deoptimise
 //     26
-//     jit-state: enter-jit-code
-//     jit-state: execute-side-trace
+//     jitstate: enter-jit-code
+//     jitstate: execute-side-trace
 //     28
-//     jit-state: deoptimise
+//     jitstate: deoptimise
 //     30
 //     {
 //         ...

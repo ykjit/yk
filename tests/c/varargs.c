@@ -3,9 +3,9 @@
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
-//     jit-state: start-tracing
+//     jitstate: start-tracing
 //     i=6
-//     jit-state: stop-tracing
+//     jitstate: stop-tracing
 //     --- Begin aot ---
 //     ...
 //     call void @llvm.va_start...
@@ -14,10 +14,10 @@
 //     ...
 //     --- End aot ---
 //     i=6
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     i=6
 //     i=6
-//     jit-state: deoptimise
+//     jitstate: deoptimise
 
 // Check that basic trace compilation works.
 

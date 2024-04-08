@@ -41,11 +41,11 @@ special value `-` (i.e. a single dash) can be used for `<path>` to indicate stde
 
 The JIT states written are:
 
- * `jit-state: start-tracing` is printed when the system starts tracing.
- * `jit-state: stop-tracing` is printed when the system stops tracing.
- * `jit-state: enter-jit-code` is printed when the system starts executing
+ * `jitstate: start-tracing` is printed when the system starts tracing.
+ * `jitstate: stop-tracing` is printed when the system stops tracing.
+ * `jitstate: enter-jit-code` is printed when the system starts executing
    JITted code.
- * `jit-state: exit-jit-code` is printed when the system stops executing
+ * `jitstate: exit-jit-code` is printed when the system stops executing
    JITted code.
 
 Note that there are no `start-interpreting` and `stop-interpreting`

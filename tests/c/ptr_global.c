@@ -5,7 +5,7 @@
 //   stderr:
 //     ...
 //     i=25
-//     jit-state: deoptimise
+//     jitstate: deoptimise
 //     ...
 
 // Check that tracing mutation of a global pointer works.

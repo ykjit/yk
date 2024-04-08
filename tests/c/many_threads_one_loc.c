@@ -15,7 +15,7 @@
 //     }
 //     ...
 //     --- End aot ---
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     ...
 
 // Check that compiling and running traces in parallel works.

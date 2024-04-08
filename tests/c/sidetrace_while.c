@@ -4,7 +4,7 @@
 //   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
 //     ...
-//     jit-state: execute-side-trace
+//     jitstate: execute-side-trace
 //     ...
 //     500
 //   stdout:

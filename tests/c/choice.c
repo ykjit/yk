@@ -5,16 +5,16 @@
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
 //     ...
-//     jit-state: start-tracing
+//     jitstate: start-tracing
 //     3: 47
-//     jit-state: stop-tracing
+//     jitstate: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     --- End jit-pre-opt ---
 //     2: 47
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     1: 47
-//     jit-state: deoptimise
+//     jitstate: deoptimise
 //     ...
 
 // Check that tracing a cascading "if...else if...else" works.

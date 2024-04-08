@@ -3,16 +3,16 @@
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
-//     jit-state: start-tracing
+//     jitstate: start-tracing
 //     4
-//     jit-state: stop-tracing
+//     jitstate: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     --- End jit-pre-opt ---
 //     3
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     2
-//     jit-state: deoptimise
+//     jitstate: deoptimise
 //     ...
 
 // Check that we can call a function without IR from another object (.o) file.

@@ -10,18 +10,18 @@
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
-//     jit-state: start-tracing
+//     jitstate: start-tracing
 //     i=2
 //     4 6 1 3 2 5 end
-//     jit-state: stop-tracing
+//     jitstate: stop-tracing
 //     i=3
 //     1 4 6 3 2 5 end
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     i=4
 //     1 3 4 6 2 5 end
 //     i=5
 //     1 2 3 4 6 5 end
-//     jit-state: deoptimise
+//     jitstate: deoptimise
 
 // Check that foreign code calling back to "native" code works.
 

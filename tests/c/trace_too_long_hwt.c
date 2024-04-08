@@ -7,7 +7,7 @@
 //   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
 //     ...
-//     jit-state: stop-tracing-aborted: Trace too long
+//     jitstate: stop-tracing-aborted: Trace too long
 
 #include <assert.h>
 #include <stdio.h>

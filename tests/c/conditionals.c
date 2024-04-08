@@ -3,7 +3,7 @@
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   stderr:
 //     ...
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     res=2
 //     ...
 

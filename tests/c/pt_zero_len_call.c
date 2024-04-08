@@ -4,7 +4,7 @@
 //   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
 //     ...
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     ...
 //  stdout:
 //     exit

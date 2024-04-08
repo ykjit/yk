@@ -5,12 +5,12 @@
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
-//     jit-state: start-tracing
+//     jitstate: start-tracing
 //     pc=0, mem=12
 //     pc=1, mem=11
 //     pc=2, mem=10
 //     pc=3, mem=9
-//     jit-state: stop-tracing
+//     jitstate: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     define void @__yk_compiled_trace_0(%YkCtrlPointVars* %0, i64* %1, i64 %2) {
@@ -39,18 +39,18 @@
 //     pc=1, mem=8
 //     pc=2, mem=7
 //     pc=3, mem=6
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     pc=0, mem=6
 //     pc=1, mem=5
 //     pc=2, mem=4
 //     pc=3, mem=3
-//     jit-state: exit-jit-code
-//     jit-state: enter-jit-code
+//     jitstate: exit-jit-code
+//     jitstate: enter-jit-code
 //     pc=0, mem=3
 //     pc=1, mem=2
 //     pc=2, mem=1
 //     pc=3, mem=0
-//     jit-state: stopgap
+//     jitstate: stopgap
 //     ...
 //     Indirect: 3 ...
 //     ...

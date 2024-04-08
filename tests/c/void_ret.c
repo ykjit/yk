@@ -4,10 +4,10 @@
 //   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
 //     ...
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     inside f
 //     inside f
-//     jit-state: deoptimise
+//     jitstate: deoptimise
 //     ...
 
 // Check that inlining a function with a void return type works.

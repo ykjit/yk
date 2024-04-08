@@ -5,9 +5,9 @@
 //   env-var: YKD_LOG_JITSTATE=-
 //   status: error
 //   stderr:
-//     jit-state: start-tracing
+//     jitstate: start-tracing
 //     foo
-//     jit-state: stop-tracing
+//     jitstate: stop-tracing
 //     --- Begin aot ---
 //     ...
 //     func main($arg0: i32, $arg1: ptr) -> i32 {
@@ -21,9 +21,9 @@
 //     ...
 //     --- End jit-pre-opt ---
 //     foo
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     foo
-//     jit-state: deoptimise
+//     jitstate: deoptimise
 //     bar
 
 // Check that call inlining works.
