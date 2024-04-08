@@ -151,24 +151,12 @@ pub(crate) trait AotIRDisplay {
     }
 }
 
-/// An instruction opcode.
+/// A binary operator.
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[deku(type = "u8")]
-pub(crate) enum Opcode {
-    Nop = 0,
-    Load,
-    Store,
-    Alloca,
-    Call,
-    Br,
-    CondBr,
-    Icmp,
-    BinaryOperator,
-    Ret,
-    InsertValue,
-    PtrAdd,
-    Add,
+pub(crate) enum BinOp {
+    Add = 0,
     Sub,
     Mul,
     Or,
@@ -186,6 +174,32 @@ pub(crate) enum Opcode {
     SRem,
     UDiv,
     URem,
+}
+
+impl AotIRDisplay for BinOp {
+    fn to_string(&self, _m: &Module) -> String {
+        format!("{:?}", self).to_lowercase()
+    }
+}
+
+/// An instruction opcode.
+#[deku_derive(DekuRead)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[deku(type = "u8")]
+pub(crate) enum Opcode {
+    Nop = 0,
+    Load,
+    Store,
+    Alloca,
+    Call,
+    Br,
+    CondBr,
+    Icmp,
+    BinaryOperator,
+    Ret,
+    InsertValue,
+    PtrAdd,
+    BinOp,
     Unimplemented = 255,
 }
 
@@ -272,6 +286,7 @@ const OPKIND_BLOCK: u8 = 4;
 const OPKIND_ARG: u8 = 5;
 const OPKIND_GLOBAL: u8 = 6;
 const OPKIND_PREDICATE: u8 = 7;
+const OPKIND_BINOP: u8 = 8;
 const OPKIND_UNIMPLEMENTED: u8 = 255;
 
 #[deku_derive(DekuRead)]
@@ -294,6 +309,8 @@ pub(crate) enum Operand {
     Global(GlobalDeclIdx),
     #[deku(id = "OPKIND_PREDICATE")]
     Predicate(Predicate),
+    #[deku(id = "OPKIND_BINOP")]
+    BinOp(BinOp),
     #[deku(id = "OPKIND_UNIMPLEMENTED")]
     Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "map_to_string")] String),
 }
@@ -348,6 +365,7 @@ impl AotIRDisplay for Operand {
             Self::Arg(arg_idx) => format!("$arg{}", usize::from(*arg_idx)),
             Self::Global(gd_idx) => m.global_decls[*gd_idx].to_string(m),
             Self::Predicate(p) => p.to_string(m),
+            Self::BinOp(b) => b.to_string(m),
             Self::Unimplemented(s) => format!("?op<{}>", s),
         }
     }
