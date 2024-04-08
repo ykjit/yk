@@ -1,6 +1,6 @@
 // Run-time:
 //   env-var: YKD_LOG_JITSTATE=-
-//   env-var: YKD_STATS=/dev/null
+//   env-var: YKD_LOG_STATS=/dev/null
 //   stderr:
 //     jitstate: start-tracing
 //     i=4

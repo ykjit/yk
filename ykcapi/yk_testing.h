@@ -21,7 +21,7 @@ typedef struct {
   uint64_t trace_executions;
 } YkCStats;
 
-/// Iff `YKD_STATS` is set, suspend this thread's execution until
+/// Iff `YKD_LOG_STATS` is set, suspend this thread's execution until
 /// `test(YkCStats)` returns true. The `test` function will be called one or
 /// more times: as soon as `test` returns `true`, `__ykstats_wait_until` itself
 /// returns. This allows a test to wait for e.g. a certain number of traces to
@@ -33,7 +33,7 @@ typedef struct {
 /// valid values for the duration of `test`'s execution: those stats may become
 /// invalid immediately after `test` returns.
 ///
-/// This function will panic if `YKD_STATS` is not set.
+/// This function will panic if `YKD_LOG_STATS` is not set.
 void __ykstats_wait_until(YkMT *mt, bool test(YkCStats));
 
 // This function will only exist if the `hwt` tracer is compiled in to ykrt.

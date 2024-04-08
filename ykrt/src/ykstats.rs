@@ -16,7 +16,7 @@ use std::{
 use strum::{Display, EnumCount, EnumIter, IntoEnumIterator};
 
 /// Record yk statistics if enabled. In non-testing mode, this is only enabled if the end user
-/// defines the environment variable `YKD_STATS`. In testing mode, this is always enabled, with
+/// defines the environment variable `YKD_LOG_STATS`. In testing mode, this is always enabled, with
 /// output being sent to `stderr`.
 pub(crate) struct YkStats {
     // On most runs of yk we anticipate that the end user won't want to be recording JIT
@@ -51,7 +51,7 @@ struct YkStatsInner {
 impl YkStats {
     #[cfg(not(test))]
     pub fn new() -> Self {
-        if let Ok(p) = env::var("YKD_STATS") {
+        if let Ok(p) = env::var("YKD_LOG_STATS") {
             Self {
                 inner: Some(Mutex::new(YkStatsInner::new(p))),
                 #[cfg(feature = "yk_testing")]
@@ -74,7 +74,7 @@ impl YkStats {
         }
     }
 
-    /// If `YKD_STATS` was specified, update `inner` by running the function `f`, otherwise return
+    /// If `YKD_LOG_STATS` was specified, update `inner` by running the function `f`, otherwise return
     /// immediately without calling `f`.
     fn update_with<F>(&self, f: F)
     where
@@ -93,13 +93,13 @@ impl YkStats {
         }
     }
 
-    /// Iff `YKD_STATS` is set, suspend this thread's execution until `test(YkStatsInner)` returns
+    /// Iff `YKD_LOG_STATS` is set, suspend this thread's execution until `test(YkStatsInner)` returns
     /// true. Note that a lock is held on yk's statistics while `test` is called, so `test` should
     /// not perform lengthy calculations (if it does, it may block other threads).
     ///
     /// # Panics
     ///
-    /// If `YKD_STATS` is not set.
+    /// If `YKD_LOG_STATS` is not set.
     #[cfg(feature = "yk_testing")]
     fn wait_until<F>(&self, test: F)
     where
@@ -112,12 +112,12 @@ impl YkStats {
                     lk = self
                         .wait_until_condvar
                         .as_ref()
-                        .expect("Can't call wait_until unless YKD_STATS is set")
+                        .expect("Can't call wait_until unless YKD_LOG_STATS is set")
                         .wait(lk)
                         .unwrap();
                 }
             }
-            None => panic!("Can't call wait_until unless YKD_STATS is set"),
+            None => panic!("Can't call wait_until unless YKD_LOG_STATS is set"),
         }
     }
 

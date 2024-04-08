@@ -12,4 +12,4 @@ The following environment variables are available (some only in certain configur
 * [`YKD_LOG_IR`](/dev/understanding_traces.html#ykd_log_ir)
 * [`YKD_TRACE_DEBUGINFO`](/dev/understanding_traces.html#ykd_trace_debuginfo)
 * [`YKD_LOG_JITSTATE`](/dev/understanding_traces.html#ykd_log_jitstate)
-* [`YKD_STATS`](/dev/profiling.html#jit-statistics)
+* [`YKD_LOG_STATS`](/dev/profiling.html#jit-statistics)
