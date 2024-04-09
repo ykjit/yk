@@ -1,6 +1,7 @@
 //! The implementation of the `YKD_LOG_*` environment variables.
 //!
-//! When the `ykd` feature is not enabled, this module exposes no-op functions.
+//! Note that some of these features are only meaningfully available when the `ykd` feature is
+//! available: otherwise we expose no-op functions.
 
 pub(crate) mod stats;
 
