@@ -2,6 +2,8 @@
 //!
 //! When the `ykd` feature is not enabled, this module exposes no-op functions.
 
+pub(crate) mod stats;
+
 #[derive(Eq, Hash, PartialEq)]
 #[allow(dead_code)]
 pub(crate) enum IRPhase {

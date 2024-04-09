@@ -16,7 +16,6 @@ mod location;
 mod log;
 pub(crate) mod mt;
 pub mod promote;
-mod stats;
 pub(crate) mod thread_intercept;
 pub mod trace;
 

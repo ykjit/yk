@@ -25,8 +25,10 @@ use crate::{
     aotsmp::load_aot_stackmaps,
     compile::{default_compiler, CompilationError, CompiledTrace, Compiler, GuardId},
     location::{HotLocation, HotLocationKind, Location, TraceFailed},
-    log::log_jit_state,
-    stats::{Stats, TimingState},
+    log::{
+        log_jit_state,
+        stats::{Stats, TimingState},
+    },
     trace::{default_tracer, AOTTraceIterator, TraceRecorder, Tracer},
 };
 

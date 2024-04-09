@@ -4,8 +4,8 @@
 use crate::{
     compile::{CompilationError, CompiledTrace, Compiler, Guard, GuardId},
     location::HotLocation,
+    log::stats::TimingState,
     mt::{SideTraceInfo, MT},
-    stats::TimingState,
     trace::{AOTTraceIterator, AOTTraceIteratorError, TraceAction},
 };
 use object::{Object, ObjectSection};
