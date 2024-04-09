@@ -1,7 +1,8 @@
-/// This module records statistics about yk and the VM it is part of. The accuracy of the
-/// statistics varies: for example, "durations" are wall-clock time, which inevitably fail to
-/// account for context switches and the like. Thus the statistics are very much in "best effort"
-/// territory -- but it's better than nothing!
+//! This module records statistics about yk and the VM it is part of. The accuracy of the
+//! statistics varies: for example, "durations" are wall-clock time, which inevitably fail to
+//! account for context switches and the like. Thus the statistics are very much in "best effort"
+//! territory -- but it's better than nothing!
+
 #[cfg(not(test))]
 use std::env;
 #[cfg(feature = "yk_testing")]
