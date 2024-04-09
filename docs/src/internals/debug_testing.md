@@ -1,6 +1,16 @@
 # Debugging / Testing
 
-## Run-time Debugging / Testing features
+## Compile-time features
+
+### `yk_testing`
+
+The `yk_testing` Cargo feature is enabled whenever the `tests` crate is being
+compiled, so a regular `cargo build` in the root of the workspace will enable
+the feature (to build *without* the feature enabled, do `cargo build -p
+ykcapi`).
+
+
+## Run-time debugging / testing features
 
 ### `YKD_NEW_CODEGEN`
 
