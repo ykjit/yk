@@ -75,7 +75,7 @@ unsafe fn patch_function(function_ptr: usize, code: *const u8, size: size_t) {
     let result = mprotect(
         func_address,
         page_size_aligned,
-        PROT_READ | PROT_WRITE | PROT_EXEC,
+        PROT_READ | PROT_WRITE,
     );
     if result != 0 {
         panic!("Failed to change memory protection to be writable");
