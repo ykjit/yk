@@ -151,24 +151,12 @@ pub(crate) trait AotIRDisplay {
     }
 }
 
-/// An instruction opcode.
+/// A binary operator.
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[deku(type = "u8")]
-pub(crate) enum Opcode {
-    Nop = 0,
-    Load,
-    Store,
-    Alloca,
-    Call,
-    Br,
-    CondBr,
-    Icmp,
-    BinaryOperator,
-    Ret,
-    InsertValue,
-    PtrAdd,
-    Add,
+pub(crate) enum BinOp {
+    Add = 0,
     Sub,
     Mul,
     Or,
@@ -186,6 +174,31 @@ pub(crate) enum Opcode {
     SRem,
     UDiv,
     URem,
+}
+
+impl AotIRDisplay for BinOp {
+    fn to_string(&self, _m: &Module) -> String {
+        format!("{:?}", self).to_lowercase()
+    }
+}
+
+/// An instruction opcode.
+#[deku_derive(DekuRead)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[deku(type = "u8")]
+pub(crate) enum Opcode {
+    Nop = 0,
+    Load,
+    Store,
+    Alloca,
+    Call,
+    Br,
+    CondBr,
+    Icmp,
+    Ret,
+    InsertValue,
+    PtrAdd,
+    BinOp,
     Unimplemented = 255,
 }
 
@@ -272,6 +285,7 @@ const OPKIND_BLOCK: u8 = 4;
 const OPKIND_ARG: u8 = 5;
 const OPKIND_GLOBAL: u8 = 6;
 const OPKIND_PREDICATE: u8 = 7;
+const OPKIND_BINOP: u8 = 8;
 const OPKIND_UNIMPLEMENTED: u8 = 255;
 
 #[deku_derive(DekuRead)]
@@ -294,6 +308,8 @@ pub(crate) enum Operand {
     Global(GlobalDeclIdx),
     #[deku(id = "OPKIND_PREDICATE")]
     Predicate(Predicate),
+    #[deku(id = "OPKIND_BINOP")]
+    BinOp(BinOp),
     #[deku(id = "OPKIND_UNIMPLEMENTED")]
     Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "map_to_string")] String),
 }
@@ -348,6 +364,7 @@ impl AotIRDisplay for Operand {
             Self::Arg(arg_idx) => format!("$arg{}", usize::from(*arg_idx)),
             Self::Global(gd_idx) => m.global_decls[*gd_idx].to_string(m),
             Self::Predicate(p) => p.to_string(m),
+            Self::BinOp(b) => b.to_string(m),
             Self::Unimplemented(s) => format!("?op<{}>", s),
         }
     }
@@ -675,7 +692,7 @@ impl AotIRDisplay for Func {
 ///
 /// This discussion may help:
 /// https://rust-lang.zulipchat.com/#narrow/stream/122651-general/topic/.E2.9C.94.20Big.20Integer.20library.20with.20bit.20granularity/near/393733327
-pub(crate) fn const_int_bytes_to_str(num_bits: u32, bytes: &[u8]) -> String {
+pub(crate) fn const_int_bytes_to_string(num_bits: u32, bytes: &[u8]) -> String {
     // All of the unwraps below are safe due to:
     debug_assert!(bytes.len() * 8 >= usize::try_from(num_bits).unwrap());
 
@@ -732,8 +749,8 @@ impl IntegerType {
     }
 
     /// Format a constant integer value that is of the type described by `self`.
-    fn const_to_str(&self, c: &Constant) -> String {
-        const_int_bytes_to_str(self.num_bits, c.bytes())
+    fn const_to_string(&self, c: &Constant) -> String {
+        const_int_bytes_to_string(self.num_bits, c.bytes())
     }
 }
 
@@ -888,10 +905,10 @@ pub(crate) enum Type {
 }
 
 impl Type {
-    fn const_to_str(&self, c: &Constant) -> String {
+    fn const_to_string(&self, c: &Constant) -> String {
         match self {
             Self::Void => "void".to_owned(),
-            Self::Integer(it) => it.const_to_str(c),
+            Self::Integer(it) => it.const_to_string(c),
             Self::Ptr => {
                 // FIXME: write a stringifier for constant pointers.
                 "const_ptr".to_owned()
@@ -944,7 +961,7 @@ impl Constant {
 
 impl AotIRDisplay for Constant {
     fn to_string(&self, m: &Module) -> String {
-        m.types[self.type_idx].const_to_str(self)
+        m.types[self.type_idx].const_to_string(self)
     }
 }
 
@@ -1114,7 +1131,7 @@ impl Module {
         self.global_decls.len()
     }
 
-    pub(crate) fn to_str(&self) -> String {
+    pub(crate) fn to_string(&self) -> String {
         let mut ret = String::new();
         ret.push_str(&format!("# IR format version: {}\n", self.version));
         ret.push_str(&format!("# Num funcs: {}\n", self.funcs.len()));
@@ -1133,7 +1150,7 @@ impl Module {
 
     #[allow(dead_code)]
     pub(crate) fn dump(&self) {
-        eprintln!("{}", self.to_str());
+        eprintln!("{}", self.to_string());
     }
 }
 
@@ -1150,7 +1167,7 @@ pub(crate) fn deserialise_module(data: &[u8]) -> Result<Module, Box<dyn Error>> 
 pub fn print_from_file(path: &PathBuf) -> Result<(), Box<dyn Error>> {
     let data = fs::read(path)?;
     let ir = deserialise_module(&data)?;
-    println!("{}", ir.to_str());
+    println!("{}", ir.to_string());
     Ok(())
 }
 
@@ -1440,7 +1457,7 @@ mod tests {
         write_native_usize(&mut data, 24);
 
         let test_mod = deserialise_module(data.as_slice()).unwrap();
-        let string_mod = test_mod.to_str();
+        let string_mod = test_mod.to_string();
 
         println!("{}", string_mod);
         let expect = "\
@@ -1502,7 +1519,7 @@ func bar();
                 type_idx: TypeIdx::new(0),
                 bytes,
             };
-            assert_eq!(it.const_to_str(&c), expect);
+            assert_eq!(it.const_to_string(&c), expect);
         }
 
         check(1, 1u8, "1i1");
