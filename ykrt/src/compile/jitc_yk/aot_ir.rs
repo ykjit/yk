@@ -195,7 +195,6 @@ pub(crate) enum Opcode {
     Br,
     CondBr,
     Icmp,
-    BinaryOperator,
     Ret,
     InsertValue,
     PtrAdd,
