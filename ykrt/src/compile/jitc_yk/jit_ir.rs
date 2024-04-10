@@ -20,6 +20,417 @@ use ykaddr::addr::symbol_to_ptr;
 // This are simple and can be shared across both IRs.
 pub(crate) use super::aot_ir::{BinOp, Predicate};
 
+/// The `Module` is the top-level container for JIT IR.
+///
+/// The IR is conceptually a list of word-sized instructions containing indices into auxiliary
+/// vectors.
+///
+/// The instruction stream of a [Module] is partially mutable:
+/// - you may append new instructions to the end.
+/// - you may replace and instruction with another.
+/// - you may NOT remove an instruction.
+#[derive(Debug)]
+pub(crate) struct Module {
+    /// The name of the module and the eventual symbol name for the JITted code.
+    name: String,
+    /// The IR trace as a linear sequence of instructions.
+    instrs: Vec<Instruction>, // FIXME: this should be a TiVec.
+    /// The extra argument table.
+    ///
+    /// Used when a [CallInstruction]'s arguments don't fit inline.
+    ///
+    /// An [ExtraArgsIdx] describes an index into this.
+    extra_args: Vec<Operand>,
+    /// The constant table.
+    ///
+    /// A [ConstIdx] describes an index into this.
+    consts: TiVec<ConstIdx, Constant>,
+    /// The type table.
+    ///
+    /// A [TypeIdx] describes an index into this.
+    types: TiVec<TypeIdx, Type>,
+    /// The type index of the void type. Cached for convinience.
+    void_type_idx: TypeIdx,
+    /// The type index of a pointer type. Cached for convinience.
+    ptr_type_idx: TypeIdx,
+    /// The type index of an 8-bit integer. Cached for convinience.
+    int8_type_idx: TypeIdx,
+    /// The function declaration table.
+    ///
+    /// These are declarations of externally compiled functions that the JITted trace might need to
+    /// call.
+    ///
+    /// A [FuncDeclIdx] is an index into this.
+    func_decls: TiVec<FuncDeclIdx, FuncDecl>,
+    /// The global variable declaration table.
+    ///
+    /// This is a collection of externally defined global variables that the trace may need to
+    /// reference. Because they are externally initialised, these are *declarations*.
+    global_decls: TiVec<GlobalDeclIdx, GlobalDecl>,
+    /// Additional information for guards.
+    guard_info: TiVec<GuardInfoIdx, GuardInfo>,
+    /// The virtual address of the global variable pointer array.
+    ///
+    /// This is an array (added to the LLVM AOT module and AOT codegenned by ykllvm) containing a
+    /// pointer to each global variable in the AOT module. The indices of the elements correspond
+    /// with [aot_ir::GlobalDeclIdx]s.
+    ///
+    /// This is marked `cfg(not(test))` because unit tests are not built with ykllvm, and thus the
+    /// array will be absent.
+    #[cfg(not(test))]
+    globalvar_ptrs: &'static [*const ()],
+}
+
+impl Module {
+    /// Create a new [Module] with the specified name.
+    pub(crate) fn new(name: String, global_decls_len: usize) -> Self {
+        Self::new_internal(name, global_decls_len)
+    }
+
+    pub(crate) fn new_testing(name: String) -> Self {
+        Self::new_internal(name, 0)
+    }
+
+    pub(crate) fn new_internal(name: String, global_decls_len: usize) -> Self {
+        // Create some commonly used types ahead of time. Aside from being convenient, this allows
+        // us to find their (now statically known) indices in scenarios where Rust forbids us from
+        // holding a mutable reference to the Module (and thus we cannot use [Module::type_idx]).
+        let mut types = TiVec::new();
+        let void_type_idx = types.len().into();
+        types.push(Type::Void);
+        let ptr_type_idx = types.len().into();
+        types.push(Type::Ptr);
+        let int8_type_idx = types.len().into();
+        types.push(Type::Integer(IntegerType::new(8)));
+
+        // Find the global variable pointer array in the address space.
+        //
+        // FIXME: consider passing this in to the control point to avoid a dlsym().
+        #[cfg(not(test))]
+        let globalvar_ptrs = {
+            let ptr = symbol_to_ptr(GLOBAL_PTR_ARRAY_SYM).unwrap() as *const *const ();
+            unsafe { std::slice::from_raw_parts(ptr, global_decls_len) }
+        };
+        #[cfg(test)]
+        assert_eq!(global_decls_len, 0);
+
+        Self {
+            name,
+            instrs: Vec::new(),
+            extra_args: Vec::new(),
+            consts: TiVec::new(),
+            types,
+            void_type_idx,
+            ptr_type_idx,
+            int8_type_idx,
+            func_decls: TiVec::new(),
+            global_decls: TiVec::new(),
+            guard_info: TiVec::new(),
+            #[cfg(not(test))]
+            globalvar_ptrs,
+        }
+    }
+
+    /// Get a pointer to an AOT-compiled global variable by a JIT [GlobalDeclIdx].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the address cannot be located.
+    pub(crate) fn globalvar_ptr(&self, idx: GlobalDeclIdx) -> *const () {
+        let decl = idx.global_decl(self);
+        #[cfg(not(test))]
+        {
+            // If the unwrap fails, then the AOT array was absent and something has gone wrong
+            // during AOT codegen.
+            self.globalvar_ptrs[usize::from(decl.global_ptr_idx())]
+        }
+        #[cfg(test)]
+        {
+            // In unit tests the global variable pointer array isn't present, as the
+            // unit test binary wasn't compiled with ykllvm. Fall back on dlsym().
+            symbol_to_ptr(decl.name().to_str().unwrap()).unwrap()
+        }
+    }
+
+    /// Returns the type index of [Type::Void].
+    pub(crate) fn void_type_idx(&self) -> TypeIdx {
+        self.void_type_idx
+    }
+
+    /// Returns the type index of [Type::Ptr].
+    pub(crate) fn ptr_type_idx(&self) -> TypeIdx {
+        self.ptr_type_idx
+    }
+
+    /// Returns the type index of an 8-bit integer.
+    pub(crate) fn int8_type_idx(&self) -> TypeIdx {
+        self.int8_type_idx
+    }
+
+    /// Return the instruction at the specified index.
+    pub(crate) fn instr(&self, idx: InstrIdx) -> &Instruction {
+        &self.instrs[usize::from(idx)]
+    }
+
+    /// Return the [Type] for the specified index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is out of bounds.
+    pub(crate) fn type_(&self, idx: TypeIdx) -> &Type {
+        &self.types[idx]
+    }
+
+    /// Return the global declaration for the specified index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is out of bounds.
+    pub(crate) fn global_decl(&self, idx: GlobalDeclIdx) -> &GlobalDecl {
+        &self.global_decls[idx]
+    }
+
+    /// Push an instruction to the end of the [Module].
+    ///
+    /// # Panics
+    ///
+    /// If `instr` would overflow the index type.
+    pub(crate) fn push(&mut self, instr: Instruction) {
+        assert!(InstrIdx::new(self.instrs.len()).is_ok());
+        self.instrs.push(instr);
+    }
+
+    /// Push an instruction to the end of the [Module] and create a local variable [Operand] out of
+    /// the value that the instruction defines.
+    ///
+    /// This is useful for forwarding the local variable a instruction defines as operand of a
+    /// subsequent instruction: an idiom used a lot (but not exclusively) in testing.
+    ///
+    /// This must only be used for instructions that define a local variable. If you want to push
+    /// an instruction that doesn't define a value, or it does, but you don't want it as an
+    /// [Operand], use [Module::push()] instead.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the instruction doesn't define a local variable that we could use to build an
+    /// [Operand] or if `instr` would overflow the index type.
+    pub(crate) fn push_and_make_operand(
+        &mut self,
+        instr: Instruction,
+    ) -> Result<Operand, CompilationError> {
+        assert!(InstrIdx::new(self.instrs.len()).is_ok());
+        if instr.def_type(self).is_none() {
+            panic!(); // instruction doesn't define a local var.
+        }
+        let ret = Operand::Local(InstrIdx::new(self.len())?);
+        self.instrs.push(instr);
+        Ok(ret)
+    }
+
+    /// Returns the number of [Instruction]s in the [Module].
+    pub(crate) fn len(&self) -> usize {
+        self.instrs.len()
+    }
+
+    /// Stringify the module.
+    pub(crate) fn to_string(&self) -> Result<String, Box<dyn Error>> {
+        (self as &dyn JitIRDisplay).to_string(self)
+    }
+
+    /// Print the [Module] to `stderr`.
+    pub(crate) fn dump(&self) -> Result<(), Box<dyn Error>> {
+        eprintln!("{}", self.to_string()?);
+        Ok(())
+    }
+
+    /// Returns a reference to the instruction stream.
+    pub(crate) fn instrs(&self) -> &Vec<Instruction> {
+        &self.instrs
+    }
+
+    /// Push a slice of extra arguments into the extra arg table.
+    ///
+    /// # Panics
+    ///
+    /// If `ops` would overflow the index type.
+    fn push_extra_args(&mut self, ops: &[Operand]) -> Result<ExtraArgsIdx, CompilationError> {
+        assert!(ExtraArgsIdx::new(self.types.len()).is_ok());
+        let idx = self.extra_args.len();
+        self.extra_args.extend_from_slice(ops); // FIXME: this clones.
+        ExtraArgsIdx::new(idx)
+    }
+
+    /// Push a new type into the type table and return its index.
+    ///
+    /// The type must not already exist in the module's type table.
+    ///
+    /// # Panics
+    ///
+    /// If `ty` would overflow the index type.
+    fn push_type(&mut self, ty: Type) -> Result<TypeIdx, CompilationError> {
+        #[cfg(debug_assertions)]
+        {
+            for et in &self.types {
+                debug_assert_ne!(et, &ty, "type already exists");
+            }
+        }
+        assert!(TypeIdx::new(self.types.len()).is_ok());
+        let idx = self.types.len();
+        self.types.push(ty);
+        TypeIdx::new(idx)
+    }
+
+    /// Push a new function declaration into the function declaration table and return its index.
+    ///
+    /// # Panics
+    ///
+    /// If `func_decl` would overflow the index type.
+    fn push_func_decl(&mut self, func_decl: FuncDecl) -> Result<FuncDeclIdx, CompilationError> {
+        assert!(FuncDeclIdx::new(self.func_decls.len()).is_ok());
+        let idx = self.func_decls.len();
+        self.func_decls.push(func_decl);
+        FuncDeclIdx::new(idx)
+    }
+
+    /// Push a new constant into the constant table and return its index.
+    ///
+    /// # Panics
+    ///
+    /// If `constant` would overflow the index type.
+    pub fn push_const(&mut self, constant: Constant) -> Result<ConstIdx, CompilationError> {
+        assert!(ConstIdx::new(self.consts.len()).is_ok());
+        let idx = self.consts.len();
+        self.consts.push(constant);
+        ConstIdx::new(idx)
+    }
+
+    /// Push a new declaration into the global variable declaration table and return its index.
+    ///
+    /// # Panics
+    ///
+    /// If `decl` would overflow the index type.
+    pub fn push_global_decl(
+        &mut self,
+        decl: GlobalDecl,
+    ) -> Result<GlobalDeclIdx, CompilationError> {
+        assert!(GlobalDeclIdx::new(self.global_decls.len()).is_ok());
+        let idx = self.global_decls.len();
+        self.global_decls.push(decl);
+        GlobalDeclIdx::new(idx)
+    }
+
+    /// Get the index of a constant, inserting it in the constant table if necessary.
+    pub fn const_idx(&mut self, c: &Constant) -> Result<ConstIdx, CompilationError> {
+        // FIXME: can we optimise this?
+        if let Some(idx) = self.consts.iter().position(|tc| tc == c) {
+            Ok(ConstIdx::new(idx)?)
+        } else {
+            // const table miss, we need to insert it.
+            self.push_const(c.clone())
+        }
+    }
+
+    /// Return the const for the specified index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is out of bounds.
+    pub(crate) fn const_(&self, idx: ConstIdx) -> &Constant {
+        &self.consts[idx]
+    }
+
+    /// Get the index of a type, inserting it into the type table if necessary.
+    pub(crate) fn type_idx(&mut self, t: &Type) -> Result<TypeIdx, CompilationError> {
+        // FIXME: can we optimise this?
+        if let Some(idx) = self.types.position(|tt| tt == t) {
+            Ok(idx)
+        } else {
+            // type table miss, we need to insert it.
+            self.push_type(t.clone())
+        }
+    }
+
+    /// Get the index of a function declaration, inserting it into the func decl table if necessary.
+    pub(crate) fn func_decl_idx(&mut self, d: &FuncDecl) -> Result<FuncDeclIdx, CompilationError> {
+        // FIXME: can we optimise this?
+        if let Some(idx) = self.func_decls.position(|td| td == d) {
+            Ok(idx)
+        } else {
+            // type table miss, we need to insert it.
+            self.push_func_decl(d.clone())
+        }
+    }
+
+    /// Get the index of a global, inserting it into the global declaration table if necessary.
+    ///
+    /// `aot_idx` is the [aot_ir::GlobalDeclIdx] index of the global in the AOT module. This is
+    /// needed to find the global variable's address in the global variable pointers array.
+    pub(crate) fn global_decl_idx(
+        &mut self,
+        g: &GlobalDecl,
+        _aot_idx: aot_ir::GlobalDeclIdx,
+    ) -> Result<GlobalDeclIdx, CompilationError> {
+        // FIXME: can we optimise this?
+        if let Some(idx) = self.global_decls.position(|tg| tg == g) {
+            Ok(idx)
+        } else {
+            // global decl table miss, we need to insert it.
+            self.push_global_decl(g.clone())
+        }
+    }
+
+    /// Return the [FuncDecl] for the specified index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is out of bounds
+    pub(crate) fn func_decl(&self, idx: FuncDeclIdx) -> &FuncDecl {
+        &self.func_decls[idx]
+    }
+
+    pub(crate) fn push_guardinfo(
+        &mut self,
+        info: GuardInfo,
+    ) -> Result<GuardInfoIdx, CompilationError> {
+        assert!(GuardInfoIdx::new(self.global_decls.len()).is_ok());
+        let idx = self.guard_info.len();
+        self.guard_info.push(info);
+        GuardInfoIdx::new(idx)
+    }
+}
+
+impl JitIRDisplay for Module {
+    fn to_string_impl(
+        &self,
+        m: &Module,
+        s: &mut String,
+        nums: &LocalNumbers<'_>,
+    ) -> Result<(), Box<dyn Error>> {
+        s.push_str("; ");
+        s.push_str(&self.name);
+
+        s.push_str("\n\n; globals\n");
+        for g in &self.global_decls {
+            g.to_string_impl(m, s, nums)?;
+            if g.is_threadlocal() {
+                s.push_str("    ; thread local");
+            }
+            s.push('\n');
+        }
+
+        s.push_str("\nentry:\n");
+        for (idx, instr) in self.instrs().iter().enumerate() {
+            s.push_str("    ");
+            instr.to_string_impl(m, s, nums)?;
+            if idx != m.len() - 1 {
+                s.push('\n');
+            }
+        }
+
+        Ok(())
+    }
+}
+
 /// A fixed-width integer type.
 ///
 /// Note:
@@ -1526,417 +1937,6 @@ impl JitIRDisplay for GuardInstruction {
         } else {
             s.push_str("false");
         }
-        Ok(())
-    }
-}
-
-/// The `Module` is the top-level container for JIT IR.
-///
-/// The IR is conceptually a list of word-sized instructions containing indices into auxiliary
-/// vectors.
-///
-/// The instruction stream of a [Module] is partially mutable:
-/// - you may append new instructions to the end.
-/// - you may replace and instruction with another.
-/// - you may NOT remove an instruction.
-#[derive(Debug)]
-pub(crate) struct Module {
-    /// The name of the module and the eventual symbol name for the JITted code.
-    name: String,
-    /// The IR trace as a linear sequence of instructions.
-    instrs: Vec<Instruction>, // FIXME: this should be a TiVec.
-    /// The extra argument table.
-    ///
-    /// Used when a [CallInstruction]'s arguments don't fit inline.
-    ///
-    /// An [ExtraArgsIdx] describes an index into this.
-    extra_args: Vec<Operand>,
-    /// The constant table.
-    ///
-    /// A [ConstIdx] describes an index into this.
-    consts: TiVec<ConstIdx, Constant>,
-    /// The type table.
-    ///
-    /// A [TypeIdx] describes an index into this.
-    types: TiVec<TypeIdx, Type>,
-    /// The type index of the void type. Cached for convinience.
-    void_type_idx: TypeIdx,
-    /// The type index of a pointer type. Cached for convinience.
-    ptr_type_idx: TypeIdx,
-    /// The type index of an 8-bit integer. Cached for convinience.
-    int8_type_idx: TypeIdx,
-    /// The function declaration table.
-    ///
-    /// These are declarations of externally compiled functions that the JITted trace might need to
-    /// call.
-    ///
-    /// A [FuncDeclIdx] is an index into this.
-    func_decls: TiVec<FuncDeclIdx, FuncDecl>,
-    /// The global variable declaration table.
-    ///
-    /// This is a collection of externally defined global variables that the trace may need to
-    /// reference. Because they are externally initialised, these are *declarations*.
-    global_decls: TiVec<GlobalDeclIdx, GlobalDecl>,
-    /// Additional information for guards.
-    guard_info: TiVec<GuardInfoIdx, GuardInfo>,
-    /// The virtual address of the global variable pointer array.
-    ///
-    /// This is an array (added to the LLVM AOT module and AOT codegenned by ykllvm) containing a
-    /// pointer to each global variable in the AOT module. The indices of the elements correspond
-    /// with [aot_ir::GlobalDeclIdx]s.
-    ///
-    /// This is marked `cfg(not(test))` because unit tests are not built with ykllvm, and thus the
-    /// array will be absent.
-    #[cfg(not(test))]
-    globalvar_ptrs: &'static [*const ()],
-}
-
-impl Module {
-    /// Create a new [Module] with the specified name.
-    pub(crate) fn new(name: String, global_decls_len: usize) -> Self {
-        Self::new_internal(name, global_decls_len)
-    }
-
-    pub(crate) fn new_testing(name: String) -> Self {
-        Self::new_internal(name, 0)
-    }
-
-    pub(crate) fn new_internal(name: String, global_decls_len: usize) -> Self {
-        // Create some commonly used types ahead of time. Aside from being convenient, this allows
-        // us to find their (now statically known) indices in scenarios where Rust forbids us from
-        // holding a mutable reference to the Module (and thus we cannot use [Module::type_idx]).
-        let mut types = TiVec::new();
-        let void_type_idx = types.len().into();
-        types.push(Type::Void);
-        let ptr_type_idx = types.len().into();
-        types.push(Type::Ptr);
-        let int8_type_idx = types.len().into();
-        types.push(Type::Integer(IntegerType::new(8)));
-
-        // Find the global variable pointer array in the address space.
-        //
-        // FIXME: consider passing this in to the control point to avoid a dlsym().
-        #[cfg(not(test))]
-        let globalvar_ptrs = {
-            let ptr = symbol_to_ptr(GLOBAL_PTR_ARRAY_SYM).unwrap() as *const *const ();
-            unsafe { std::slice::from_raw_parts(ptr, global_decls_len) }
-        };
-        #[cfg(test)]
-        assert_eq!(global_decls_len, 0);
-
-        Self {
-            name,
-            instrs: Vec::new(),
-            extra_args: Vec::new(),
-            consts: TiVec::new(),
-            types,
-            void_type_idx,
-            ptr_type_idx,
-            int8_type_idx,
-            func_decls: TiVec::new(),
-            global_decls: TiVec::new(),
-            guard_info: TiVec::new(),
-            #[cfg(not(test))]
-            globalvar_ptrs,
-        }
-    }
-
-    /// Get a pointer to an AOT-compiled global variable by a JIT [GlobalDeclIdx].
-    ///
-    /// # Panics
-    ///
-    /// Panics if the address cannot be located.
-    pub(crate) fn globalvar_ptr(&self, idx: GlobalDeclIdx) -> *const () {
-        let decl = idx.global_decl(self);
-        #[cfg(not(test))]
-        {
-            // If the unwrap fails, then the AOT array was absent and something has gone wrong
-            // during AOT codegen.
-            self.globalvar_ptrs[usize::from(decl.global_ptr_idx())]
-        }
-        #[cfg(test)]
-        {
-            // In unit tests the global variable pointer array isn't present, as the
-            // unit test binary wasn't compiled with ykllvm. Fall back on dlsym().
-            symbol_to_ptr(decl.name().to_str().unwrap()).unwrap()
-        }
-    }
-
-    /// Returns the type index of [Type::Void].
-    pub(crate) fn void_type_idx(&self) -> TypeIdx {
-        self.void_type_idx
-    }
-
-    /// Returns the type index of [Type::Ptr].
-    pub(crate) fn ptr_type_idx(&self) -> TypeIdx {
-        self.ptr_type_idx
-    }
-
-    /// Returns the type index of an 8-bit integer.
-    pub(crate) fn int8_type_idx(&self) -> TypeIdx {
-        self.int8_type_idx
-    }
-
-    /// Return the instruction at the specified index.
-    pub(crate) fn instr(&self, idx: InstrIdx) -> &Instruction {
-        &self.instrs[usize::from(idx)]
-    }
-
-    /// Return the [Type] for the specified index.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the index is out of bounds.
-    pub(crate) fn type_(&self, idx: TypeIdx) -> &Type {
-        &self.types[idx]
-    }
-
-    /// Return the global declaration for the specified index.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the index is out of bounds.
-    pub(crate) fn global_decl(&self, idx: GlobalDeclIdx) -> &GlobalDecl {
-        &self.global_decls[idx]
-    }
-
-    /// Push an instruction to the end of the [Module].
-    ///
-    /// # Panics
-    ///
-    /// If `instr` would overflow the index type.
-    pub(crate) fn push(&mut self, instr: Instruction) {
-        assert!(InstrIdx::new(self.instrs.len()).is_ok());
-        self.instrs.push(instr);
-    }
-
-    /// Push an instruction to the end of the [Module] and create a local variable [Operand] out of
-    /// the value that the instruction defines.
-    ///
-    /// This is useful for forwarding the local variable a instruction defines as operand of a
-    /// subsequent instruction: an idiom used a lot (but not exclusively) in testing.
-    ///
-    /// This must only be used for instructions that define a local variable. If you want to push
-    /// an instruction that doesn't define a value, or it does, but you don't want it as an
-    /// [Operand], use [Module::push()] instead.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the instruction doesn't define a local variable that we could use to build an
-    /// [Operand] or if `instr` would overflow the index type.
-    pub(crate) fn push_and_make_operand(
-        &mut self,
-        instr: Instruction,
-    ) -> Result<Operand, CompilationError> {
-        assert!(InstrIdx::new(self.instrs.len()).is_ok());
-        if instr.def_type(self).is_none() {
-            panic!(); // instruction doesn't define a local var.
-        }
-        let ret = Operand::Local(InstrIdx::new(self.len())?);
-        self.instrs.push(instr);
-        Ok(ret)
-    }
-
-    /// Returns the number of [Instruction]s in the [Module].
-    pub(crate) fn len(&self) -> usize {
-        self.instrs.len()
-    }
-
-    /// Stringify the module.
-    pub(crate) fn to_string(&self) -> Result<String, Box<dyn Error>> {
-        (self as &dyn JitIRDisplay).to_string(self)
-    }
-
-    /// Print the [Module] to `stderr`.
-    pub(crate) fn dump(&self) -> Result<(), Box<dyn Error>> {
-        eprintln!("{}", self.to_string()?);
-        Ok(())
-    }
-
-    /// Returns a reference to the instruction stream.
-    pub(crate) fn instrs(&self) -> &Vec<Instruction> {
-        &self.instrs
-    }
-
-    /// Push a slice of extra arguments into the extra arg table.
-    ///
-    /// # Panics
-    ///
-    /// If `ops` would overflow the index type.
-    fn push_extra_args(&mut self, ops: &[Operand]) -> Result<ExtraArgsIdx, CompilationError> {
-        assert!(ExtraArgsIdx::new(self.types.len()).is_ok());
-        let idx = self.extra_args.len();
-        self.extra_args.extend_from_slice(ops); // FIXME: this clones.
-        ExtraArgsIdx::new(idx)
-    }
-
-    /// Push a new type into the type table and return its index.
-    ///
-    /// The type must not already exist in the module's type table.
-    ///
-    /// # Panics
-    ///
-    /// If `ty` would overflow the index type.
-    fn push_type(&mut self, ty: Type) -> Result<TypeIdx, CompilationError> {
-        #[cfg(debug_assertions)]
-        {
-            for et in &self.types {
-                debug_assert_ne!(et, &ty, "type already exists");
-            }
-        }
-        assert!(TypeIdx::new(self.types.len()).is_ok());
-        let idx = self.types.len();
-        self.types.push(ty);
-        TypeIdx::new(idx)
-    }
-
-    /// Push a new function declaration into the function declaration table and return its index.
-    ///
-    /// # Panics
-    ///
-    /// If `func_decl` would overflow the index type.
-    fn push_func_decl(&mut self, func_decl: FuncDecl) -> Result<FuncDeclIdx, CompilationError> {
-        assert!(FuncDeclIdx::new(self.func_decls.len()).is_ok());
-        let idx = self.func_decls.len();
-        self.func_decls.push(func_decl);
-        FuncDeclIdx::new(idx)
-    }
-
-    /// Push a new constant into the constant table and return its index.
-    ///
-    /// # Panics
-    ///
-    /// If `constant` would overflow the index type.
-    pub fn push_const(&mut self, constant: Constant) -> Result<ConstIdx, CompilationError> {
-        assert!(ConstIdx::new(self.consts.len()).is_ok());
-        let idx = self.consts.len();
-        self.consts.push(constant);
-        ConstIdx::new(idx)
-    }
-
-    /// Push a new declaration into the global variable declaration table and return its index.
-    ///
-    /// # Panics
-    ///
-    /// If `decl` would overflow the index type.
-    pub fn push_global_decl(
-        &mut self,
-        decl: GlobalDecl,
-    ) -> Result<GlobalDeclIdx, CompilationError> {
-        assert!(GlobalDeclIdx::new(self.global_decls.len()).is_ok());
-        let idx = self.global_decls.len();
-        self.global_decls.push(decl);
-        GlobalDeclIdx::new(idx)
-    }
-
-    /// Get the index of a constant, inserting it in the constant table if necessary.
-    pub fn const_idx(&mut self, c: &Constant) -> Result<ConstIdx, CompilationError> {
-        // FIXME: can we optimise this?
-        if let Some(idx) = self.consts.iter().position(|tc| tc == c) {
-            Ok(ConstIdx::new(idx)?)
-        } else {
-            // const table miss, we need to insert it.
-            self.push_const(c.clone())
-        }
-    }
-
-    /// Return the const for the specified index.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the index is out of bounds.
-    pub(crate) fn const_(&self, idx: ConstIdx) -> &Constant {
-        &self.consts[idx]
-    }
-
-    /// Get the index of a type, inserting it into the type table if necessary.
-    pub(crate) fn type_idx(&mut self, t: &Type) -> Result<TypeIdx, CompilationError> {
-        // FIXME: can we optimise this?
-        if let Some(idx) = self.types.position(|tt| tt == t) {
-            Ok(idx)
-        } else {
-            // type table miss, we need to insert it.
-            self.push_type(t.clone())
-        }
-    }
-
-    /// Get the index of a function declaration, inserting it into the func decl table if necessary.
-    pub(crate) fn func_decl_idx(&mut self, d: &FuncDecl) -> Result<FuncDeclIdx, CompilationError> {
-        // FIXME: can we optimise this?
-        if let Some(idx) = self.func_decls.position(|td| td == d) {
-            Ok(idx)
-        } else {
-            // type table miss, we need to insert it.
-            self.push_func_decl(d.clone())
-        }
-    }
-
-    /// Get the index of a global, inserting it into the global declaration table if necessary.
-    ///
-    /// `aot_idx` is the [aot_ir::GlobalDeclIdx] index of the global in the AOT module. This is
-    /// needed to find the global variable's address in the global variable pointers array.
-    pub(crate) fn global_decl_idx(
-        &mut self,
-        g: &GlobalDecl,
-        _aot_idx: aot_ir::GlobalDeclIdx,
-    ) -> Result<GlobalDeclIdx, CompilationError> {
-        // FIXME: can we optimise this?
-        if let Some(idx) = self.global_decls.position(|tg| tg == g) {
-            Ok(idx)
-        } else {
-            // global decl table miss, we need to insert it.
-            self.push_global_decl(g.clone())
-        }
-    }
-
-    /// Return the [FuncDecl] for the specified index.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the index is out of bounds
-    pub(crate) fn func_decl(&self, idx: FuncDeclIdx) -> &FuncDecl {
-        &self.func_decls[idx]
-    }
-
-    pub(crate) fn push_guardinfo(
-        &mut self,
-        info: GuardInfo,
-    ) -> Result<GuardInfoIdx, CompilationError> {
-        assert!(GuardInfoIdx::new(self.global_decls.len()).is_ok());
-        let idx = self.guard_info.len();
-        self.guard_info.push(info);
-        GuardInfoIdx::new(idx)
-    }
-}
-
-impl JitIRDisplay for Module {
-    fn to_string_impl(
-        &self,
-        m: &Module,
-        s: &mut String,
-        nums: &LocalNumbers<'_>,
-    ) -> Result<(), Box<dyn Error>> {
-        s.push_str("; ");
-        s.push_str(&self.name);
-
-        s.push_str("\n\n; globals\n");
-        for g in &self.global_decls {
-            g.to_string_impl(m, s, nums)?;
-            if g.is_threadlocal() {
-                s.push_str("    ; thread local");
-            }
-            s.push('\n');
-        }
-
-        s.push_str("\nentry:\n");
-        for (idx, instr) in self.instrs().iter().enumerate() {
-            s.push_str("    ");
-            instr.to_string_impl(m, s, nums)?;
-            if idx != m.len() - 1 {
-                s.push('\n');
-            }
-        }
-
         Ok(())
     }
 }
