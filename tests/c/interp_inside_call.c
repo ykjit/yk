@@ -1,15 +1,15 @@
 // Run-time:
-//   env-var: YKD_PRINT_IR=aot,jit-pre-opt
+//   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_PRINT_JITSTATE=1
+//   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
-//     jit-state: start-tracing
+//     jitstate: start-tracing
 //     ...
-//     jit-state: stop-tracing
+//     jitstate: stop-tracing
 //     ...
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     ...
-//     jit-state: deoptimise
+//     jitstate: deoptimise
 //  stdout:
 //     ...
 //     i: 5 ret: 9

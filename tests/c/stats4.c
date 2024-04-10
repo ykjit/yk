@@ -1,5 +1,5 @@
 // Run-time:
-//   env-var: YKD_STATS=-
+//   env-var: YKD_LOG_STATS=-
 //   stderr:
 //     {
 //       ...

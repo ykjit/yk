@@ -1,11 +1,11 @@
 // Run-time:
-//   env-var: YKD_PRINT_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=-:jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_PRINT_JITSTATE=1
+//   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
 //     ...
 //     i=25
-//     jit-state: deoptimise
+//     jitstate: deoptimise
 //     ...
 
 // Check that tracing mutation of a global pointer works.

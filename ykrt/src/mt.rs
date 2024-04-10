@@ -21,14 +21,15 @@ use parking_lot::{Condvar, Mutex, MutexGuard};
 #[cfg(not(all(feature = "yk_testing", not(test))))]
 use parking_lot_core::SpinWait;
 
-#[cfg(feature = "yk_jitstate_debug")]
-use crate::print_jit_state;
 use crate::{
     aotsmp::load_aot_stackmaps,
     compile::{default_compiler, CompilationError, CompiledTrace, Compiler, GuardId},
     location::{HotLocation, HotLocationKind, Location, TraceFailed},
+    log::{
+        log_jit_state,
+        stats::{Stats, TimingState},
+    },
     trace::{default_tracer, AOTTraceIterator, TraceRecorder, Tracer},
-    ykstats::{TimingState, YkStats},
 };
 
 // The HotThreshold must be less than a machine word wide for [`Location::Location`] to do its
@@ -92,7 +93,7 @@ pub struct MT {
     /// The [Compiler] that will be used for compiling future `IRTrace`s. Note that this might not
     /// be the same as the compiler(s) used to compile past `IRTrace`s.
     compiler: Mutex<Arc<dyn Compiler>>,
-    pub(crate) stats: YkStats,
+    pub(crate) stats: Stats,
 }
 
 impl std::fmt::Debug for MT {
@@ -119,7 +120,7 @@ impl MT {
             active_worker_jobs: AtomicUsize::new(0),
             tracer: Mutex::new(default_tracer()?),
             compiler: Mutex::new(default_compiler()?),
-            stats: YkStats::new(),
+            stats: Stats::new(),
         }))
     }
 
@@ -232,8 +233,7 @@ impl MT {
         match self.transition_control_point(loc) {
             TransitionControlPoint::NoAction => (),
             TransitionControlPoint::Execute(ctr) => {
-                #[cfg(feature = "yk_jitstate_debug")]
-                print_jit_state("enter-jit-code");
+                log_jit_state("enter-jit-code");
                 self.stats.trace_executed();
                 let f = unsafe {
                     #[cfg(feature = "yk_testing")]
@@ -254,8 +254,7 @@ impl MT {
                 }
             }
             TransitionControlPoint::StartTracing(hl) => {
-                #[cfg(feature = "yk_jitstate_debug")]
-                print_jit_state("start-tracing");
+                log_jit_state("start-tracing");
                 let tracer = {
                     let lk = self.tracer.lock();
                     Arc::clone(&*lk)
@@ -288,15 +287,13 @@ impl MT {
                 match thread_tracer.stop() {
                     Ok(utrace) => {
                         self.stats.timing_state(TimingState::None);
-                        #[cfg(feature = "yk_jitstate_debug")]
-                        print_jit_state("stop-tracing");
+                        log_jit_state("stop-tracing");
                         self.queue_compile_job((utrace, promotions.into_boxed_slice()), hl, None);
                     }
                     Err(_e) => {
                         self.stats.timing_state(TimingState::None);
                         self.stats.trace_recorded_err();
-                        #[cfg(feature = "yk_jitstate_debug")]
-                        print_jit_state(&format!("stop-tracing-aborted: {_e}"));
+                        log_jit_state(&format!("stop-tracing-aborted: {_e}"));
                     }
                 }
             }
@@ -318,8 +315,7 @@ impl MT {
                 match thread_tracer.stop() {
                     Ok(utrace) => {
                         self.stats.timing_state(TimingState::None);
-                        #[cfg(feature = "yk_jitstate_debug")]
-                        print_jit_state("stop-side-tracing");
+                        log_jit_state("stop-side-tracing");
                         self.queue_compile_job(
                             (utrace, promotions.into_boxed_slice()),
                             hl,
@@ -329,8 +325,7 @@ impl MT {
                     Err(_e) => {
                         self.stats.timing_state(TimingState::None);
                         self.stats.trace_recorded_err();
-                        #[cfg(feature = "yk_jitstate_debug")]
-                        print_jit_state(&format!("stop-side-tracing-aborted: {_e}"));
+                        log_jit_state(&format!("stop-side-tracing-aborted: {_e}"));
                     }
                 }
             }
@@ -537,8 +532,7 @@ impl MT {
         match self.transition_guard_failure(sti, parent) {
             TransitionGuardFailure::NoAction => todo!(),
             TransitionGuardFailure::StartSideTracing(hl) => {
-                #[cfg(feature = "yk_jitstate_debug")]
-                print_jit_state("start-side-tracing");
+                log_jit_state("start-side-tracing");
                 let tracer = {
                     let lk = self.tracer.lock();
                     Arc::clone(&*lk)
@@ -611,21 +605,19 @@ impl MT {
                     match e {
                         CompilationError::General(_reason)
                         | CompilationError::LimitExceeded(_reason) => {
-                            #[cfg(feature = "yk_jitstate_debug")]
-                            print_jit_state(&format!("trace-compilation-aborted: {_reason}"));
+                            log_jit_state(&format!("trace-compilation-aborted: {_reason}"));
                         }
                         CompilationError::InternalError(reason) => {
-                            #[cfg(feature = "yk_jitstate_debug")]
+                            #[cfg(feature = "ykd")]
                             panic!("{reason}");
-                            #[cfg(not(feature = "yk_jitstate_debug"))]
+                            #[cfg(not(feature = "ykd"))]
                             {
                                 eprintln!("yk error (trying to continue): {reason}");
                             }
                         }
                         CompilationError::ResourceExhausted(e) => {
                             eprintln!("yk warning: {e}");
-                            #[cfg(feature = "yk_jitstate_debug")]
-                            print_jit_state(&format!("trace-compilation-aborted: {e}"));
+                            log_jit_state(&format!("trace-compilation-aborted: {e}"));
                         }
                     }
                 }

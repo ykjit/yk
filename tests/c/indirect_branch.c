@@ -1,8 +1,8 @@
 // # guards for indirect branches not implemented.
 // ignore-if: true
 // Run-time:
-//   env-var: YKD_PRINT_IR=jit-pre-opt
-//   env-var: YKD_PRINT_JITSTATE=1
+//   env-var: YKD_LOG_IR=-:jit-pre-opt
+//   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
 //     ...
 

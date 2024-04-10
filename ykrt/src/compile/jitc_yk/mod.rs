@@ -10,12 +10,13 @@ use crate::{
         CompiledTrace, Compiler,
     },
     location::HotLocation,
+    log::{log_ir, should_log_ir, IRPhase},
     mt::{SideTraceInfo, MT},
     trace::AOTTraceIterator,
 };
 
 use parking_lot::Mutex;
-use std::{collections::HashSet, env, error::Error, slice, sync::Arc};
+use std::{error::Error, slice, sync::Arc};
 use ykaddr::addr::symbol_to_ptr;
 
 pub mod aot_ir;
@@ -23,39 +24,11 @@ mod codegen;
 pub mod jit_ir;
 mod trace_builder;
 
-#[derive(Eq, Hash, PartialEq)]
-enum IRPhase {
-    AOT,
-    PreOpt,
-    PostOpt,
-    Asm,
-}
-
-impl IRPhase {
-    fn from_str(s: &str) -> Result<Self, Box<dyn Error>> {
-        match s {
-            "aot" => Ok(Self::AOT),
-            "jit-pre-opt" => Ok(Self::PreOpt),
-            "jit-post-opt" => Ok(Self::PostOpt),
-            "jit-asm" => Ok(Self::Asm),
-            _ => Err(format!("Invalid YKD_PRINT_IR value: {s}").into()),
-        }
-    }
-}
-
-pub(crate) struct JITCYk {
-    phases_to_print: HashSet<IRPhase>,
-}
+pub(crate) struct JITCYk;
 
 impl JITCYk {
     pub(crate) fn new() -> Result<Arc<Self>, Box<dyn Error>> {
-        let mut phases_to_print = HashSet::new();
-        if let Ok(stages) = env::var("YKD_PRINT_IR") {
-            for x in stages.split(',') {
-                phases_to_print.insert(IRPhase::from_str(x)?);
-            }
-        };
-        Ok(Arc::new(Self { phases_to_print }))
+        Ok(Arc::new(Self))
     }
 
     fn default_codegen<'a>(
@@ -86,31 +59,33 @@ impl Compiler for JITCYk {
         let ir_slice = yk_ir_section().unwrap();
         let aot_mod = aot_ir::deserialise_module(ir_slice).unwrap();
 
-        if self.phases_to_print.contains(&IRPhase::AOT) {
-            eprintln!("--- Begin aot ---");
-            aot_mod.dump();
-            eprintln!("--- End aot ---");
+        if should_log_ir(IRPhase::AOT) {
+            log_ir(&format!(
+                "--- Begin aot ---\n{}\n--- End aot ---",
+                aot_mod.to_string()
+            ));
         }
 
         let jit_mod = trace_builder::build(&aot_mod, aottrace_iter.0)?;
 
-        if self.phases_to_print.contains(&IRPhase::PreOpt) {
-            eprintln!("--- Begin jit-pre-opt ---");
+        if should_log_ir(IRPhase::PreOpt) {
             // FIXME: If the `unwrap` fails, something rather bad has happened: does recovery even
             // make sense?
-            jit_mod.dump().unwrap();
-            eprintln!("--- End jit-pre-opt ---");
+            log_ir(&format!(
+                "--- Begin jit-pre-opt ---\n{}\n--- End jit-pre-opt ---",
+                jit_mod.to_string().unwrap()
+            ));
         }
 
         let cg = Box::new(Self::default_codegen(&jit_mod)?);
         let ct = cg.codegen()?;
 
         #[cfg(any(debug_assertions, test))]
-        if self.phases_to_print.contains(&IRPhase::Asm) {
-            eprintln!("--- Begin jit-asm ---");
-            // If this unwrap fails, something went wrong in codegen.
-            eprintln!("{}", ct.disassemble().unwrap());
-            eprintln!("--- End jit-asm ---");
+        if should_log_ir(IRPhase::Asm) {
+            log_ir(&format!(
+                "--- Begin jit-asm ---\n{}\n--- End jit-asm",
+                ct.disassemble().unwrap()
+            ));
         }
 
         Ok(ct)

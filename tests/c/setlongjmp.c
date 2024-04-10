@@ -1,12 +1,12 @@
 // ignore-if: test "$YKB_TRACER" != "hwt"
 // Run-time:
-//   env-var: YKD_PRINT_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=-:jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_PRINT_JITSTATE=1
+//   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
 //     ...
-//     jit-state: stop-tracing
-//     jit-state: trace-compilation-aborted: Encountered longjmp
+//     jitstate: stop-tracing
+//     jitstate: trace-compilation-aborted: Encountered longjmp
 //     ...
 
 // Tests that we can deal with setjmp/longjmp.

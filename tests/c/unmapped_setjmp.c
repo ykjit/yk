@@ -1,13 +1,13 @@
 // ignore-if: test "$YKB_TRACER" != "hwt"
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_PRINT_JITSTATE=1
+//   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
-//     jit-state: start-tracing
+//     jitstate: start-tracing
 //     set jump point
 //     jumped!
-//     jit-state: stop-tracing
-//     jit-state: trace-compilation-aborted: Encountered longjmp
+//     jitstate: stop-tracing
+//     jitstate: trace-compilation-aborted: Encountered longjmp
 //     ...
 
 // Check that we bork on a call to setjmp in unmapped code.

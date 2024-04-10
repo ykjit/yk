@@ -1,15 +1,15 @@
 // Run-time:
-//   env-var: YKD_PRINT_JITSTATE=1
-//   env-var: YKD_STATS=/dev/null
+//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YKD_LOG_STATS=/dev/null
 //   stderr:
-//     jit-state: start-tracing
+//     jitstate: start-tracing
 //     i=4
-//     jit-state: stop-tracing
+//     jitstate: stop-tracing
 //     i=3
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     i=2
 //     i=1
-//     jit-state: deoptimise
+//     jitstate: deoptimise
 //   stdout:
 //     exit
 

@@ -1,11 +1,11 @@
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_PRINT_JITSTATE=1
-//   env-var: YKD_PRINT_IR=jit-post-opt
+//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YKD_LOG_IR=-:jit-post-opt
 //   stderr:
-//     jit-state: start-tracing
+//     jitstate: start-tracing
 //     z=2
-//     jit-state: stop-tracing
+//     jitstate: stop-tracing
 //     --- Begin jit-post-opt ---
 //     ...
 //     define ptr @__yk_compiled_trace_0(...
@@ -18,11 +18,11 @@
 //     ...
 //     --- End jit-post-opt ---
 //     z=4
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     z=6
 //     z=8
 //     z=10
-//     jit-state: deoptimise
+//     jitstate: deoptimise
 
 // Demonstrate where yk_promote() needs improvement.
 

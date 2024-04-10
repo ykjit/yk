@@ -1,12 +1,12 @@
 // ignore-if: true
 // Run-time:
-//   env-var: YKD_PRINT_IR=jit-pre-opt
+//   env-var: YKD_LOG_IR=-:jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_PRINT_JITSTATE=1
+//   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
-//     jit-state: start-tracing
+//     jitstate: start-tracing
 //     i=5
-//     jit-state: stop-tracing
+//     jitstate: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     define {{rtnty}} @__yk_compiled_trace_0(ptr %0, ptr %1, i64 %2, i64 %3) {
@@ -33,14 +33,14 @@
 //     ...
 //     --- End jit-pre-opt ---
 //     i=4
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     i=3
-//     jit-state: exit-jit-code
-//     jit-state: enter-jit-code
+//     jitstate: exit-jit-code
+//     jitstate: enter-jit-code
 //     i=2
-//     jit-state: deoptimise
+//     jitstate: deoptimise
 //     ...
-//     jit-state: exit-jit-code
+//     jitstate: exit-jit-code
 //   stdout:
 //     exit
 
