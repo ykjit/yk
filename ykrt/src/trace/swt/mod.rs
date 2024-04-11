@@ -15,6 +15,7 @@ use std::{
     sync::{Arc, LazyLock},
 };
 
+#[cfg(target_arch = "x86_64")]
 pub(crate) mod patch;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
