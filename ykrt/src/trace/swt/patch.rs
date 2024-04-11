@@ -24,16 +24,14 @@ use libc::{mprotect, size_t, sysconf, PROT_EXEC, PROT_READ, PROT_WRITE};
 use std::mem;
 use std::{ffi::c_void, sync::Once};
 
-#[cfg(tracer_swt)]
 use crate::trace::swt::yk_trace_basicblock;
 
-#[cfg(tracer_swt)]
 // This is used to ensure that the original instructions are only saved once.
 static ORIGINAL_INSTRUCTIONS_INIT: Once = Once::new();
-#[cfg(tracer_swt)]
+
 // Original instructions of the function that is patched with `PATCH_X86_INSTRUCTIONS`.
 static mut ORIGINAL_INSTRUCTIONS: [u8; 1] = [0; 1];
-#[cfg(tracer_swt)]
+
 // 0xC3 is a `ret` instruction on x86_64.
 static mut PATCH_X86_INSTRUCTIONS: [u8; 1] = [0xC3];
 
@@ -45,7 +43,6 @@ static mut PATCH_X86_INSTRUCTIONS: [u8; 1] = [0xC3];
 /// * `instructions` - A mutable pointer to a u8 where the original instructions will be saved.
 /// * `num_of_instructions` - A usize indicating the number of instructions to save.
 ///
-#[cfg(tracer_swt)]
 unsafe fn save_original_instructions(
     function_ptr: usize,
     instructions: *mut u8,
@@ -63,7 +60,6 @@ unsafe fn save_original_instructions(
 /// * `code` - A constant pointer to a u8 vector where the new instructions are located.
 /// * `size` - A size_t indicating the number of bytes to copy from `code`.
 ///
-#[cfg(tracer_swt)]
 unsafe fn patch_function(function_ptr: usize, code: *const u8, size: size_t) {
     let page_size = sysconf(libc::_SC_PAGESIZE) as usize;
 
@@ -88,7 +84,6 @@ unsafe fn patch_function(function_ptr: usize, code: *const u8, size: size_t) {
 
 /// This function is used to patch the `yk_trace_basicblock`
 /// function with a single `ret` (0xC3) instruction.
-#[cfg(tracer_swt)]
 pub(crate) unsafe fn patch_trace_function() {
     ORIGINAL_INSTRUCTIONS_INIT.call_once(|| {
         save_original_instructions(
@@ -107,7 +102,6 @@ pub(crate) unsafe fn patch_trace_function() {
 
 /// This function is used to restore the original behavior of a
 /// previously patched `yk_trace_basicblock` function.
-#[cfg(tracer_swt)]
 pub(crate) unsafe fn restore_trace_function() {
     ORIGINAL_INSTRUCTIONS_INIT.call_once(|| {
         save_original_instructions(
