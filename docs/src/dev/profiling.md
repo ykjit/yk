@@ -6,16 +6,17 @@ This section describes how best to profile yk and interpreters.
 ## JIT statistics
 
 At the end of an interpreter run, yk can print out some simple statistics about
-what happened during execution. If the `YKD_STATS=<path>` environment
+what happened during execution. If the `YKD_LOG_STATS=<path>` environment
 variable is defined, then JSON statistics will be written to the file at
-`<path>` once the interpreter "drops" the `YkMt` instance. `-` (i.e. a single
-dash) can be used in place of path, in which case the statistics will be
-written to `stderr`. Note that if the interpreter starts multiple yk instances,
-then the contents of `<file>` are undefined (at best the file will be
-nondeterministically overwritten as instances are "dropped", but output may
-be interleaved, or otherwise bizarre).
+`<path>` once the interpreter "drops" the `YkMt` instance. The
+special value `-` (i.e. a single dash) can be used for `<path>` to indicate stderr.
 
-Output from `YKD_STATS` looks as follows:
+Note that if the interpreter starts multiple yk instances, then the contents of
+`<file>` are undefined (at best the file will be nondeterministically
+overwritten as instances are "dropped", but output may be interleaved, or
+otherwise bizarre).
+
+Output from `YKD_LOG_STATS` looks as follows:
 
 ```
 {                                       

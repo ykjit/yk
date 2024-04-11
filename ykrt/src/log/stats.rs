@@ -1,7 +1,8 @@
-/// This module records statistics about yk and the VM it is part of. The accuracy of the
-/// statistics varies: for example, "durations" are wall-clock time, which inevitably fail to
-/// account for context switches and the like. Thus the statistics are very much in "best effort"
-/// territory -- but it's better than nothing!
+//! This module records statistics about yk and the VM it is part of. The accuracy of the
+//! statistics varies: for example, "durations" are wall-clock time, which inevitably fail to
+//! account for context switches and the like. Thus the statistics are very much in "best effort"
+//! territory -- but it's better than nothing!
+
 #[cfg(not(test))]
 use std::env;
 #[cfg(feature = "yk_testing")]
@@ -16,21 +17,21 @@ use std::{
 use strum::{Display, EnumCount, EnumIter, IntoEnumIterator};
 
 /// Record yk statistics if enabled. In non-testing mode, this is only enabled if the end user
-/// defines the environment variable `YKD_STATS`. In testing mode, this is always enabled, with
+/// defines the environment variable `YKD_LOG_STATS`. In testing mode, this is always enabled, with
 /// output being sent to `stderr`.
-pub(crate) struct YkStats {
+pub(crate) struct Stats {
     // On most runs of yk we anticipate that the end user won't want to be recording JIT
     // statistics, so we want to able to do the quickest possible check for "are any stats to be
     // recorded?" The outer `Option` means thus becomes a simple `if (NULL) { return}` check: only
     // if stats are to be recorded do we have to go to the expense of locking a `Mutex`.
-    inner: Option<Mutex<YkStatsInner>>,
+    inner: Option<Mutex<StatsInner>>,
     // In `yk_testing`, this [CondVar] allows threads to wait until a certain set of events have
     // happened with the [Self::wait_until] function.
     #[cfg(feature = "yk_testing")]
     wait_until_condvar: Option<Condvar>,
 }
 
-struct YkStatsInner {
+struct StatsInner {
     /// The path to write output. If exactly equal to `-`, output will be written to stderr.
     output_path: String,
     /// How many traces were recorded successfully?
@@ -48,12 +49,12 @@ struct YkStatsInner {
     durations: [Duration; TimingState::COUNT],
 }
 
-impl YkStats {
+impl Stats {
     #[cfg(not(test))]
     pub fn new() -> Self {
-        if let Ok(p) = env::var("YKD_STATS") {
+        if let Ok(p) = env::var("YKD_LOG_STATS") {
             Self {
-                inner: Some(Mutex::new(YkStatsInner::new(p))),
+                inner: Some(Mutex::new(StatsInner::new(p))),
                 #[cfg(feature = "yk_testing")]
                 wait_until_condvar: Some(Condvar::new()),
             }
@@ -69,16 +70,16 @@ impl YkStats {
     #[cfg(test)]
     pub fn new() -> Self {
         Self {
-            inner: Some(Mutex::new(YkStatsInner::new("-".to_string()))),
+            inner: Some(Mutex::new(StatsInner::new("-".to_string()))),
             wait_until_condvar: None,
         }
     }
 
-    /// If `YKD_STATS` was specified, update `inner` by running the function `f`, otherwise return
+    /// If `YKD_LOG_STATS` was specified, update `inner` by running the function `f`, otherwise return
     /// immediately without calling `f`.
     fn update_with<F>(&self, f: F)
     where
-        F: FnOnce(&mut YkStatsInner),
+        F: FnOnce(&mut StatsInner),
     {
         if let Some(mtx) = &self.inner {
             let mut lk = mtx.lock().unwrap();
@@ -93,17 +94,17 @@ impl YkStats {
         }
     }
 
-    /// Iff `YKD_STATS` is set, suspend this thread's execution until `test(YkStatsInner)` returns
+    /// Iff `YKD_LOG_STATS` is set, suspend this thread's execution until `test(StatsInner)` returns
     /// true. Note that a lock is held on yk's statistics while `test` is called, so `test` should
     /// not perform lengthy calculations (if it does, it may block other threads).
     ///
     /// # Panics
     ///
-    /// If `YKD_STATS` is not set.
+    /// If `YKD_LOG_STATS` is not set.
     #[cfg(feature = "yk_testing")]
     fn wait_until<F>(&self, test: F)
     where
-        F: Fn(&mut YkStatsInner) -> bool,
+        F: Fn(&mut StatsInner) -> bool,
     {
         match &self.inner {
             Some(mtx) => {
@@ -112,12 +113,12 @@ impl YkStats {
                     lk = self
                         .wait_until_condvar
                         .as_ref()
-                        .expect("Can't call wait_until unless YKD_STATS is set")
+                        .expect("Can't call wait_until unless YKD_LOG_STATS is set")
                         .wait(lk)
                         .unwrap();
                 }
             }
-            None => panic!("Can't call wait_until unless YKD_STATS is set"),
+            None => panic!("Can't call wait_until unless YKD_LOG_STATS is set"),
         }
     }
 
@@ -158,7 +159,7 @@ impl YkStats {
     }
 }
 
-impl YkStatsInner {
+impl StatsInner {
     fn new(output_path: String) -> Self {
         Self {
             output_path,
@@ -221,7 +222,7 @@ impl YkStatsInner {
     }
 }
 
-impl Drop for YkStatsInner {
+impl Drop for StatsInner {
     fn drop(&mut self) {
         let json = self.to_json();
         if self.output_path == "-" {

@@ -1,13 +1,13 @@
 // ignore-if: test $YK_JIT_COMPILER != "yk" -o "$YKB_TRACER" = "swt"
 // Run-time:
-//   env-var: YKD_PRINT_IR=aot,jit-pre-opt
+//   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_PRINT_JITSTATE=1
+//   env-var: YKD_LOG_JITSTATE=-
 //   status: error
 //   stderr:
-//     jit-state: start-tracing
+//     jitstate: start-tracing
 //     foo
-//     jit-state: stop-tracing
+//     jitstate: stop-tracing
 //     --- Begin aot ---
 //     ...
 //     func main($arg0: i32, $arg1: ptr) -> i32 {
@@ -21,9 +21,9 @@
 //     ...
 //     --- End jit-pre-opt ---
 //     foo
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     foo
-//     jit-state: deoptimise
+//     jitstate: deoptimise
 //     bar
 
 // Check that call inlining works.

@@ -1,11 +1,11 @@
 // Run-time:
-//   env-var: YKD_PRINT_IR=aot
+//   env-var: YKD_LOG_IR=-:aot
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_PRINT_JITSTATE=1
+//   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
-//     jit-state: start-tracing
+//     jitstate: start-tracing
 //     pepper
-//     jit-state: stop-tracing
+//     jitstate: stop-tracing
 //     --- Begin aot ---
 //     ...
 //     @.str.2 = private unnamed_addr constant [6 x i8] c"apple\00", align 1...
@@ -14,10 +14,10 @@
 //     ...
 //     --- End aot ---
 //     cucumber
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     tomato
 //     banana
-//     jit-state: deoptimise
+//     jitstate: deoptimise
 //   stdout:
 //     exit
 

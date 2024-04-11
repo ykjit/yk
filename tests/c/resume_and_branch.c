@@ -1,10 +1,10 @@
 // Run-time:
-//   env-var: YKD_PRINT_IR=aot
+//   env-var: YKD_LOG_IR=-:aot
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_PRINT_JITSTATE=1
+//   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
 //     ...
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     x=2
 //     ...
 

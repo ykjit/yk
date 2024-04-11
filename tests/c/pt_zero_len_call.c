@@ -1,10 +1,10 @@
 // ignore-if: test ${YK_ARCH} != "x86_64"
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_PRINT_JITSTATE=1
+//   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
 //     ...
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     ...
 //  stdout:
 //     exit

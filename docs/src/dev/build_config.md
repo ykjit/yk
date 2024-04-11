@@ -37,18 +37,3 @@ The `YKB_TRACER` environment variable allows building yk with either `hwt`
 
 `swt` - CPU architecture-independent, but with fewer features compared to 
 `hwt`.
-
-## `yk_testing`
-
-yk has an internal Rust feature called `yk_testing`. It is enabled whenever the
-`tests` crate is being compiled, so a regular `cargo build` in the root of the
-workspace will enable the feature (to build *without* the feature enabled, do
-`cargo build -p ykcapi`).
-
-## clangd
-
-The `yk` build system generates compilation command databases for use with
-clangd. If you want diagnostics and/or completion in your editor (via an LSP),
-you will have to configure the LSP to use `clangd` (the automated build system
-puts a `clangd` binary into `target/<debug|release>/ykllvm/bin` that you could
-use).

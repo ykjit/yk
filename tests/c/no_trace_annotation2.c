@@ -1,7 +1,7 @@
 // Run-time:
-//   env-var: YKD_PRINT_IR=aot,jit-pre-opt,jit-post-opt
+//   env-var: YKD_LOG_IR=-:aot,jit-pre-opt,jit-post-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_PRINT_JITSTATE=1
+//   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
 //     ...
 //     --- Begin aot ---
@@ -24,14 +24,14 @@
 //     ...
 //     --- End jit-post-opt ---
 //     ...
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     Can't JIT this!
 //     Or this!
 //     Can't JIT this!
 //     Or this!
 //     Can't JIT this!
 //     Or this!
-//     jit-state: deoptimise
+//     jitstate: deoptimise
 //     ...
 
 // Check that the `yk_outline` annotation works when a `yk_outline` annotated

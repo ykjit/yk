@@ -11,5 +11,8 @@
   - [Profiling](./dev/profiling.md)
   - [Understanding Traces](./dev/understanding_traces.md)
   - [Gotchas](./dev/gotchas.md)
+- [Internals](./internals/index.md)
+  - [Debugging / testing](./internals/debug_testing.md)
+  - [Working on yk](./internals/working_on_yk.md)
 - [Contributing]()
   - [Pull Requests](./contributing/prs.md)

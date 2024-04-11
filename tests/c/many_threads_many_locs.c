@@ -1,10 +1,10 @@
 // # Shadow stack doesn't currently support dynamically sized stack.
 // ignore-if: true
 // Run-time:
-//   env-var: YKD_PRINT_JITSTATE=1
+//   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
 //     ...
-//     jit-state: enter-jit-code
+//     jitstate: enter-jit-code
 //     ...
 
 // Check that compiling and running traces in parallel works.
