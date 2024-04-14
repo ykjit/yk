@@ -20,11 +20,10 @@
 //! execution flow of functions at runtime. Improper use can lead to
 //! undefined behaviour, memory corruption, or crashes.
 
-use libc::{mprotect, size_t, sysconf, PROT_EXEC, PROT_READ, PROT_WRITE};
-use std::mem;
-use std::{ffi::c_void, sync::Once};
-
 use crate::trace::swt::yk_trace_basicblock;
+use libc::{mprotect, size_t, sysconf, PROT_EXEC, PROT_READ, PROT_WRITE, _SC_PAGESIZE};
+use std::alloc::Layout;
+use std::{ffi::c_void, sync::Once};
 
 // This is used to ensure that the original instructions are only saved once.
 static ORIGINAL_INSTRUCTIONS_INIT: Once = Once::new();
@@ -61,24 +60,32 @@ unsafe fn save_original_instructions(
 /// * `size` - A size_t indicating the number of bytes to copy from `code`.
 ///
 unsafe fn patch_function(function_ptr: usize, code: *const u8, size: size_t) {
-    let page_size = sysconf(libc::_SC_PAGESIZE) as usize;
+    let page_size = sysconf(_SC_PAGESIZE) as usize;
 
-    let func_address = ((function_ptr as usize) & !(page_size - 1)) as *mut c_void;
-    let page_size_aligned = (((function_ptr as usize) + mem::size_of_val(&function_ptr))
-        - (func_address as usize)) as usize;
+    let page_address = (function_ptr & !(page_size - 1)) as *mut c_void;
+    let start_offset = function_ptr - (page_address as usize) + size;
 
-    // Set function memory region to be writable
-    let result = mprotect(func_address, page_size_aligned, PROT_READ | PROT_WRITE);
-    if result != 0 {
-        panic!("Failed to change memory protection to be writable");
-    }
-
-    // Set function memory region back to be non-writable
-    std::ptr::copy_nonoverlapping(code, function_ptr as *mut u8, size);
-
-    let result = mprotect(func_address, page_size_aligned, PROT_READ | PROT_EXEC);
-    if result != 0 {
-        panic!("Failed to change memory protection to not writable");
+    match Layout::from_size_align(start_offset, page_size) {
+        Ok(layout) => {
+            // Set function memory page as writable
+            let result = mprotect(page_address, layout.size(), PROT_READ | PROT_WRITE);
+            if result != 0 {
+                panic!("Failed to change memory protection to be writable");
+            }
+            // Copy the new code over
+            std::ptr::copy_nonoverlapping(code, function_ptr as *mut u8, size);
+            // Set function memory page as readable
+            let result = mprotect(page_address, layout.size(), PROT_READ | PROT_EXEC);
+            if result != 0 {
+                panic!("Failed to change memory protection back to executable");
+            }
+        }
+        Err(e) => {
+            panic!(
+                "Failed to create layout for fuction instuction patch: {:?}",
+                e
+            );
+        }
     }
 }
 
