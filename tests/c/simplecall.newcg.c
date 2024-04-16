@@ -3,9 +3,9 @@
 //   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_JITSTATE=-
-//   status: error
 //   stderr:
 //     jitstate: start-tracing
+//     4
 //     foo
 //     jitstate: stop-tracing
 //     --- Begin aot ---
@@ -20,11 +20,16 @@
 //     %{{3}}: i64 = Call @fwrite(%{{4}}, 4i64, 1i64, %{{5}})
 //     ...
 //     --- End jit-pre-opt ---
+//     3
 //     foo
 //     jitstate: enter-jit-code
+//     2
 //     foo
+//     1
 //     jitstate: deoptimise
 //     bar
+//     0
+//     exit
 
 // Check that call inlining works.
 
@@ -55,10 +60,12 @@ int main(int argc, char **argv) {
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
+    fprintf(stderr, "%d\n", i);
     foo(i);
     res += 2;
     i--;
   }
+  fprintf(stderr, "%d\n", i);
   fprintf(stderr, "exit\n");
   NOOPT_VAL(res);
   yk_location_drop(loc);

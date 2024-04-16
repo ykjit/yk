@@ -13,11 +13,12 @@ const TRACE_FUNC_CTRLP_ARGIDX: u16 = 0;
 
 struct Frame<'a> {
     callinst: &'a aot_ir::Instruction,
+    sm: &'a aot_ir::Instruction,
 }
 
-impl Frame<'_> {
-    fn new(callinst: &aot_ir::Instruction) -> Frame {
-        Frame { callinst }
+impl<'a> Frame<'a> {
+    fn new(callinst: &'a aot_ir::Instruction, sm: &'a aot_ir::Instruction) -> Frame<'a> {
+        Frame { callinst, sm }
     }
 }
 
@@ -354,7 +355,7 @@ impl<'a> TraceBuilder<'a> {
     fn handle_condbr(
         &mut self,
         inst: &aot_ir::Instruction,
-        sm: &aot_ir::Instruction,
+        sm: &'a aot_ir::Instruction,
         nextbb: &aot_ir::BBlockId,
     ) -> Result<(), CompilationError> {
         let cond = match &inst.operand(0) {
@@ -366,35 +367,41 @@ impl<'a> TraceBuilder<'a> {
             _ => panic!(),
         };
 
+        // Temporarily push a frame with the conditions stackmap.
         // Find live variables in the current stack frame and add them into the guard.
-        // FIXME: Once we handle mappable calls we need to push the live variables of other stack
-        // frames too.
         let mut smids = Vec::new(); // List of stackmap ids of the current call stack.
         let mut lives = Vec::new(); // List of live JIT variables.
 
-        match sm.operand(1) {
-            aot_ir::Operand::Constant(co) => {
-                let c = self.aot_mod.constant(co);
-                match self.aot_mod.const_type(c) {
-                    aot_ir::Type::Integer(it) => {
-                        let id: u64 = match it.num_bits() {
-                            // This unwrap can't fail unless we did something wrong during lowering.
-                            64 => u64::from_ne_bytes(c.bytes()[0..8].try_into().unwrap()),
-                            _ => panic!(),
-                        };
-                        smids.push(id);
+        // Iterate over the stackmaps of the previous frames as well as the stackmap from this
+        // conditional branch and collect stackmap IDs and live variables into vectors to store
+        // inside the guard.
+        for sm in self.frames.iter().map(|f| f.sm).chain(std::iter::once(sm)) {
+            // Extract stackmap ID.
+            match sm.operand(1) {
+                aot_ir::Operand::Constant(co) => {
+                    let c = self.aot_mod.constant(co);
+                    match self.aot_mod.const_type(c) {
+                        aot_ir::Type::Integer(it) => {
+                            let id: u64 = match it.num_bits() {
+                                // This unwrap can't fail unless we did something wrong during lowering.
+                                64 => u64::from_ne_bytes(c.bytes()[0..8].try_into().unwrap()),
+                                _ => panic!(),
+                            };
+                            smids.push(id);
+                        }
+                        _ => panic!(),
+                    }
+                }
+                _ => panic!(),
+            }
+            // Collect live variables.
+            for op in sm.remaining_operands(3) {
+                match op {
+                    aot_ir::Operand::LocalVariable(iid) => {
+                        lives.push(self.local_map[iid]);
                     }
                     _ => panic!(),
                 }
-            }
-            _ => panic!(),
-        }
-        for op in sm.remaining_operands(3) {
-            match op {
-                aot_ir::Operand::LocalVariable(iid) => {
-                    lives.push(self.local_map[iid]);
-                }
-                _ => panic!(),
             }
         }
 
@@ -462,7 +469,11 @@ impl<'a> TraceBuilder<'a> {
 
         if inst.is_mappable_call(self.aot_mod) {
             // This is a mappable call that we want to inline.
-            self.frames.push(Frame::new(inst));
+            // Retrieve the stackmap that follows every mappable call.
+            let blk = self.aot_mod.bblock(&bid);
+            let sm = &blk.instrs[InstrIdx::new(aot_inst_idx + 1)];
+            debug_assert!(sm.is_stackmap_call(self.aot_mod));
+            self.frames.push(Frame::new(inst, sm));
             Ok(())
         } else {
             // This call is either a declaration or an indirect call and thus not mappable.

@@ -53,7 +53,7 @@ const SYSV_CALL_STACK_ALIGN: usize = 16;
 /// On X86_64 the stack grows down.
 const STACK_DIRECTION: StackDirection = StackDirection::GrowsDown;
 
-extern "C" fn __yk_deopt(frameaddr: *const c_void, deoptid: usize, jitrbp: *const c_void) {
+extern "C" fn __yk_deopt(frameaddr: *const c_void, deoptid: usize, jitrbp: *const c_void) -> ! {
     log_jit_state("deoptimise");
 
     let ctr = MTThread::with(|mtt| mtt.running_trace().unwrap())
@@ -64,34 +64,82 @@ extern "C" fn __yk_deopt(frameaddr: *const c_void, deoptid: usize, jitrbp: *cons
     let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
     let info = &ctr.deoptinfo[deoptid];
 
-    // Amount of space we need to allocate for the new stack.
-    // FIXME: For now we don't need to recreate frames, so we only need space for live registers.
+    // Calculate space required for the new stack.
+    // Add space for live register values which we'll be adding at the end.
     let mut memsize = 15 * REG64_SIZE;
-    // Make space for the return address of the controlpoint frame.
-    memsize += REG64_SIZE;
+    // Calculate amount of space we need to allocate for each stack frame.
+    for (frameid, smid) in info.frames.iter().enumerate() {
+        let (rec, _) = aot_smaps.get(usize::try_from(*smid).unwrap());
+        debug_assert!(rec.size != u64::MAX);
+        if frameid > 0 {
+            // The controlpoint frame doesn't need to be recreated.
+            // We are on x86_64 so this unwrap is safe.
+            memsize += usize::try_from(rec.size).unwrap();
+        }
+        // Reserve return address space for each frame.
+        memsize += REG64_SIZE;
+    }
+
     // Allocate space on the heap for the new stack. We will later memcpy this new stack over the
     // old stack just after the frame containing the control point. Since the stack grows downwards
-    // we need to assemble it in the same way. For convenience we will be keeping a pointer into
-    // the newstack which we call `rsp`.
+    // we need to assemble it in the same way. For convenience we will be keeping pointers into
+    // the newstack which we aptly call `rsp` and `rbp`.
     let newstack = unsafe { libc::malloc(memsize) };
     let mut rsp = unsafe { newstack.byte_add(memsize) };
+    let mut rbp = rsp;
+    // Keep track of the real address of the current frame so we can write pushed RBP values.
+    let mut lastframeaddr = frameaddr;
+    let mut lastframesize = 0;
 
     // Live register values that we need to write back into AOT registers.
     let mut registers = [0; 16];
-    let mut newframedst = frameaddr;
     let mut varidx = 0;
     for (frameid, smid) in info.frames.iter().enumerate() {
         let (rec, pinfo) = aot_smaps.get(usize::try_from(*smid).unwrap());
 
-        if frameid == 0 {
-            // Compute the address to which we want to write the new stack. This is immediately
-            // after the frame containing the control point.
-            newframedst = unsafe { newframedst.byte_sub(usize::try_from(rec.size).unwrap()) };
-            if pinfo.hasfp {
-                newframedst = unsafe { newframedst.byte_add(REG64_SIZE) };
+        // WRITE RBP
+        // If the current frame has pushed RBP we need to do the same (unless we are processing
+        // the bottom-most frame).
+        if pinfo.hasfp && frameid > 0 {
+            rsp = unsafe { rsp.sub(REG64_SIZE) };
+            rbp = rsp;
+            unsafe { ptr::write(rsp as *mut u64, lastframeaddr as u64) };
+        }
+
+        // Calculate the this frame's address by substracting the last frame's size (plus return
+        // address) from the last frame's address.
+        if frameid > 0 {
+            lastframeaddr = unsafe { lastframeaddr.byte_sub(lastframesize + REG64_SIZE) };
+        }
+        lastframesize = usize::try_from(rec.size).unwrap();
+
+        // Update RBP to represent this frame's address.
+        if pinfo.hasfp {
+            registers[usize::from(RBP_DWARF_NUM)] = lastframeaddr as u64;
+        }
+
+        // Now we write any callee-saved registers onto the new stack. Note, that if we have
+        // pushed RBP above (which includes adjusting RBP) we need to temporarily re-adjust our
+        // pointer. This is because the CSR index calculates from the bottom of the frame, not
+        // from RBP. For example, a typical prologue looks like this:
+        //   push rbp
+        //   mov rbp, rsp
+        //   push rbx     # this has index -2
+        //   push r14     # this has index -3
+        if frameid > 0 {
+            for (reg, idx) in &pinfo.csrs {
+                let mut tmp =
+                    unsafe { rbp.byte_sub(usize::try_from(idx.abs()).unwrap() * REG64_SIZE) };
+                if pinfo.hasfp {
+                    tmp = unsafe { tmp.byte_add(REG64_SIZE) };
+                }
+                let val = registers[usize::from(*reg)];
+                unsafe { ptr::write(tmp as *mut u64, val) };
             }
         }
 
+        // Now write all live variables to the new stack in the order they are listed in the AOT
+        // stackmap.
         for aotvar in rec.live_vars.iter() {
             // Read live JIT values from the trace's stack frame.
             let jitval = match info.lives[varidx] {
@@ -107,6 +155,7 @@ extern "C" fn __yk_deopt(frameaddr: *const c_void, deoptid: usize, jitrbp: *cons
                 }
                 LocalAlloc::Register => todo!(),
             };
+            varidx += 1;
 
             let aotloc = if aotvar.len() == 1 {
                 aotvar.get(0).unwrap()
@@ -114,7 +163,8 @@ extern "C" fn __yk_deopt(frameaddr: *const c_void, deoptid: usize, jitrbp: *cons
                 todo!("Deal with multi register locations");
             };
             match aotloc {
-                SMLocation::Register(reg, _size, __off, __extra) => {
+                SMLocation::Register(reg, _size, _off, _extra) => {
+                    // FIXME: Deal with additional locations stored in `off` and `extra`.
                     registers[usize::from(*reg)] = jitval;
                 }
                 SMLocation::Direct(..) => {
@@ -129,7 +179,17 @@ extern "C" fn __yk_deopt(frameaddr: *const c_void, deoptid: usize, jitrbp: *cons
                 SMLocation::Constant(_v) => todo!(),
                 SMLocation::LargeConstant(_v) => todo!(),
             }
-            varidx += 1;
+        }
+
+        if frameid > 0 {
+            // Advance the "virtual RSP" to the next frame.
+            rsp = unsafe { rbp.byte_sub(usize::try_from(rec.size).unwrap()) };
+            if pinfo.hasfp {
+                // The stack size recorded by the stackmap includes a pushed RBP. However, we will
+                // have already adjusted the "virtual RSP" earlier (when writing RBP) if `hasfp` is
+                // true. If that's the case, re-adjust the "virtual RSP" again to account for this.
+                rsp = unsafe { rsp.byte_add(REG64_SIZE) };
+            }
         }
 
         // Write the return address for the previous frame into the current frame.
@@ -139,10 +199,6 @@ extern "C" fn __yk_deopt(frameaddr: *const c_void, deoptid: usize, jitrbp: *cons
         }
     }
 
-    // Update RBP register. FIXME: We will have to do this for every frame, inside the loop above,
-    // once we can deal with multiple frames.
-    registers[usize::from(RBP_DWARF_NUM)] = frameaddr as u64;
-
     // Write the live registers into the new stack. We put these at the very end of the new stack
     // so that they can be immediately popped after we memcpy'd the new stack over.
     for reg in [0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15] {
@@ -151,6 +207,18 @@ extern "C" fn __yk_deopt(frameaddr: *const c_void, deoptid: usize, jitrbp: *cons
             ptr::write(rsp as *mut u64, registers[reg]);
         }
     }
+
+    // Compute the address to which we want to write the new stack. This is immediately after the
+    // frame containing the control point.
+    let (rec, pinfo) = aot_smaps.get(usize::try_from(info.frames[0]).unwrap());
+    let mut newframedst = unsafe { frameaddr.byte_sub(usize::try_from(rec.size).unwrap()) };
+    if pinfo.hasfp {
+        newframedst = unsafe { newframedst.byte_add(REG64_SIZE) };
+    }
+
+    // Since we won't return from this function, drop `ctr` manually.
+    drop(ctr);
+
     // Now overwrite the existing stack with our newly recreated one.
     unsafe { __replace_stack(newframedst as *mut c_void, newstack, memsize) };
 }
@@ -165,8 +233,7 @@ unsafe extern "C" fn __replace_stack(dst: *mut c_void, src: *const c_void, size:
         "mov rsp, rdi",
         // Move rsp to the end of the new stack.
         "sub rsp, rdx",
-        // Copy the new stack at onto the old stack. The arguments are the same as those of
-        // this function.
+        // Copy the new stack over the old stack.
         "mov rdi, rsp",
         "call memcpy",
         // Free the source which is no longer needed.
