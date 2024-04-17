@@ -725,7 +725,7 @@ macro_rules! index_16bit {
             }
 
             pub(crate) fn to_u16(self) -> u16 {
-                self.0.into()
+                self.0
             }
         }
 
