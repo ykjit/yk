@@ -47,7 +47,7 @@ impl JITCYk {
 impl Compiler for JITCYk {
     fn compile(
         &self,
-        _mt: Arc<MT>,
+        mt: Arc<MT>,
         aottrace_iter: (Box<dyn AOTTraceIterator>, Box<[usize]>),
         sti: Option<SideTraceInfo>,
         _hl: Arc<Mutex<HotLocation>>,
@@ -66,7 +66,7 @@ impl Compiler for JITCYk {
             ));
         }
 
-        let jit_mod = trace_builder::build(&aot_mod, aottrace_iter.0)?;
+        let jit_mod = trace_builder::build(mt.next_compiled_trace_id(), &aot_mod, aottrace_iter.0)?;
 
         if should_log_ir(IRPhase::PreOpt) {
             // FIXME: If the `unwrap` fails, something rather bad has happened: does recovery even

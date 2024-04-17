@@ -24,7 +24,7 @@ impl<'a> Frame<'a> {
 
 /// Given a mapped trace and an AOT module, assembles an in-memory Yk IR trace by copying basic
 /// blocks from the AOT IR. The output of this process will be the input to the code generator.
-struct TraceBuilder<'a> {
+pub(crate) struct TraceBuilder<'a> {
     /// The AOR IR.
     aot_mod: &'a Module,
     /// The JIT IR this struct builds.
@@ -47,13 +47,12 @@ impl<'a> TraceBuilder<'a> {
     /// Create a trace builder.
     ///
     /// Arguments:
-    ///  - `trace_name`: The eventual symbol name for the JITted code.
     ///  - `aot_mod`: The AOT IR module that the trace flows through.
     ///  - `mtrace`: The mapped trace.
-    fn new(trace_name: String, aot_mod: &'a Module) -> Self {
+    fn new(ctr_id: u64, aot_mod: &'a Module) -> Self {
         Self {
             aot_mod,
-            jit_mod: jit_ir::Module::new(trace_name, aot_mod.global_decls_len()),
+            jit_mod: jit_ir::Module::new(ctr_id, aot_mod.global_decls_len()),
             local_map: HashMap::new(),
             cp_block: None,
             first_ti_idx: 0,
@@ -638,11 +637,11 @@ impl<'a> TraceBuilder<'a> {
     }
 }
 
-/// Given a mapped trace (through `aot_mod`), assemble and return a Yk IR trace.
+/// Create JIT IR from the (`aot_mod`, `ta_iter`) tuple.
 pub(super) fn build(
+    ctr_id: u64,
     aot_mod: &Module,
     ta_iter: Box<dyn AOTTraceIterator>,
 ) -> Result<jit_ir::Module, CompilationError> {
-    // FIXME: the XXX below should be a thread-safe monotonically incrementing integer.
-    TraceBuilder::new("__yk_compiled_trace_XXX".into(), aot_mod).build(ta_iter)
+    TraceBuilder::new(ctr_id, aot_mod).build(ta_iter)
 }
