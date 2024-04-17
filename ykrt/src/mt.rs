@@ -11,7 +11,7 @@ use std::{
     marker::PhantomData,
     mem,
     sync::{
-        atomic::{AtomicU16, AtomicU32, AtomicUsize, Ordering},
+        atomic::{AtomicU16, AtomicU32, AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     thread,
@@ -93,6 +93,10 @@ pub struct MT {
     /// The [Compiler] that will be used for compiling future `IRTrace`s. Note that this might not
     /// be the same as the compiler(s) used to compile past `IRTrace`s.
     compiler: Mutex<Arc<dyn Compiler>>,
+    /// A monotonically increasing integer that semi-uniquely identifies each compiled trace. This
+    /// is only useful for general debugging purposes, and must not be relied upon for semantic
+    /// correctness, because the IDs will wrap when the underlying `u64` overflows.
+    compiled_trace_id: AtomicU64,
     pub(crate) stats: Stats,
 }
 
@@ -120,6 +124,7 @@ impl MT {
             active_worker_jobs: AtomicUsize::new(0),
             tracer: Mutex::new(default_tracer()?),
             compiler: Mutex::new(default_compiler()?),
+            compiled_trace_id: AtomicU64::new(0),
             stats: Stats::new(),
         }))
     }
@@ -170,6 +175,14 @@ impl MT {
     /// changed by other threads and is thus potentially stale as soon as it is read.
     pub fn max_worker_threads(self: &Arc<Self>) -> usize {
         self.max_worker_threads.load(Ordering::Relaxed)
+    }
+
+    /// Return the semi-unique ID for the next compiled trace. Note: this is only useful for
+    /// general debugging purposes, and must not be relied upon for semantic correctness, because
+    /// the IDs will wrap when the underlying `u64` overflows.
+    pub(crate) fn next_compiled_trace_id(self: &Arc<Self>) -> u64 {
+        // Note: fetch_add is documented to wrap on overflow.
+        self.compiled_trace_id.fetch_add(1, Ordering::Relaxed)
     }
 
     /// Queue `job` to be run on a worker thread.
@@ -774,7 +787,7 @@ mod tests {
     extern crate test;
     use super::*;
     use crate::{compile::jitc_llvm::LLVMCompiledTrace, trace::TraceRecorderError};
-    use std::{hint::black_box, sync::atomic::AtomicU64};
+    use std::hint::black_box;
     use test::bench::Bencher;
 
     // We only implement enough of the equality function for the tests we have.

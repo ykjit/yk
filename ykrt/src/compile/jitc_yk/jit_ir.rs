@@ -31,8 +31,10 @@ pub(crate) use super::aot_ir::{BinOp, Predicate};
 /// - you may NOT remove an instruction.
 #[derive(Debug)]
 pub(crate) struct Module {
-    /// The name of the module and the eventual symbol name for the JITted code.
-    name: String,
+    /// The ID of this compiled trace. In `cfg(test)` this value is meaningless: in
+    /// `cfg(not(test))` the ID is obtained from [MT::next_compiled_trace_id()] and can be used to
+    /// uniquely distinguish traces.
+    ctr_id: u64,
     /// The IR trace as a linear sequence of instructions.
     instrs: Vec<Instruction>, // FIXME: this should be a TiVec.
     /// The extra argument table.
@@ -82,16 +84,17 @@ pub(crate) struct Module {
 }
 
 impl Module {
-    /// Create a new [Module] with the specified name.
-    pub(crate) fn new(name: String, global_decls_len: usize) -> Self {
-        Self::new_internal(name, global_decls_len)
+    /// Create a new [Module].
+    pub(crate) fn new(ctr_id: u64, global_decls_len: usize) -> Self {
+        Self::new_internal(ctr_id, global_decls_len)
     }
 
-    pub(crate) fn new_testing(name: String) -> Self {
-        Self::new_internal(name, 0)
+    #[cfg(test)]
+    pub(crate) fn new_testing() -> Self {
+        Self::new_internal(0, 0)
     }
 
-    pub(crate) fn new_internal(name: String, global_decls_len: usize) -> Self {
+    pub(crate) fn new_internal(ctr_id: u64, global_decls_len: usize) -> Self {
         // Create some commonly used types ahead of time. Aside from being convenient, this allows
         // us to find their (now statically known) indices in scenarios where Rust forbids us from
         // holding a mutable reference to the Module (and thus we cannot use [Module::type_idx]).
@@ -115,7 +118,7 @@ impl Module {
         assert_eq!(global_decls_len, 0);
 
         Self {
-            name,
+            ctr_id,
             instrs: Vec::new(),
             extra_args: Vec::new(),
             consts: TiVec::new(),
@@ -406,8 +409,8 @@ impl JitIRDisplay for Module {
         s: &mut String,
         nums: &LocalNumbers<'_>,
     ) -> Result<(), Box<dyn Error>> {
-        s.push_str("; ");
-        s.push_str(&self.name);
+        s.push_str("; compiled trace ID #");
+        s.push_str(&self.ctr_id.to_string());
 
         s.push_str("\n\n; globals\n");
         for g in &self.global_decls {
@@ -1998,7 +2001,7 @@ mod tests {
     #[test]
     fn extra_call_args() {
         // Set up a function to call.
-        let mut jit_mod = Module::new_testing("test".into());
+        let mut jit_mod = Module::new_testing();
         let i32_tyidx = jit_mod
             .push_type(Type::Integer(IntegerType::new(32)))
             .unwrap();
@@ -2028,7 +2031,7 @@ mod tests {
     #[test]
     fn vararg_call_args() {
         // Set up a function to call.
-        let mut jit_mod = Module::new_testing("test".into());
+        let mut jit_mod = Module::new_testing();
         let i32_tyidx = jit_mod
             .push_type(Type::Integer(IntegerType::new(32)))
             .unwrap();
@@ -2063,7 +2066,7 @@ mod tests {
     #[should_panic]
     fn call_args_out_of_bounds() {
         // Set up a function to call.
-        let mut jit_mod = Module::new_testing("test".into());
+        let mut jit_mod = Module::new_testing();
         let arg_ty_idxs = vec![jit_mod.ptr_type_idx(); 3];
         let ret_ty_idx = jit_mod.type_idx(&Type::Void).unwrap();
         let func_ty = FuncType::new(arg_ty_idxs, ret_ty_idx, false);
@@ -2150,7 +2153,7 @@ mod tests {
     #[should_panic(expected = "type already exists")]
     #[test]
     fn push_duplicate_type() {
-        let mut jit_mod = Module::new_testing("test".into());
+        let mut jit_mod = Module::new_testing();
         let _ = jit_mod.push_type(Type::Void);
         let _ = jit_mod.push_type(Type::Void);
     }
@@ -2163,7 +2166,7 @@ mod tests {
             assert_eq!(c.to_string(&m).unwrap(), expect);
         }
 
-        let mut m = Module::new_testing("test".into());
+        let mut m = Module::new_testing();
 
         check(&mut m, 8, 0i8, "0i8");
         check(&mut m, 8, 111i8, "111i8");
@@ -2179,7 +2182,7 @@ mod tests {
 
     #[test]
     fn stringify_func_types() {
-        let m = Module::new_testing("test".into());
+        let m = Module::new_testing();
         let i8_tyidx = m.int8_type_idx();
         let void_tyidx = m.void_type_idx();
 
@@ -2198,7 +2201,7 @@ mod tests {
 
     #[test]
     fn print_module() {
-        let mut m = Module::new_testing("test".into());
+        let mut m = Module::new_testing();
         m.push(LoadTraceInputInstruction::new(0, m.int8_type_idx()).into());
         m.push(LoadTraceInputInstruction::new(8, m.int8_type_idx()).into());
         m.push(LoadTraceInputInstruction::new(16, m.int8_type_idx()).into());
@@ -2216,7 +2219,7 @@ mod tests {
         .unwrap();
         let got = m.to_string().unwrap();
         let expect = [
-            "; test",
+            "; compiled trace ID #0",
             "",
             "; globals",
             "@some_global",

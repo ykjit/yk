@@ -967,7 +967,7 @@ mod tests {
     use ykaddr::addr::symbol_to_ptr;
 
     fn test_module() -> jit_ir::Module {
-        jit_ir::Module::new_testing("test".into())
+        jit_ir::Module::new_testing()
     }
 
     /// Test helper to use `fm` to match a disassembled trace.
