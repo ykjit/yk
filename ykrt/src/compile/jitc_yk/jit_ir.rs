@@ -468,6 +468,7 @@ impl IntegerType {
         if bits % 8 != 0 {
             ret += 1;
         }
+        // On any 32-bit-or-bigger platform, this `unwrap` can't fail.
         usize::try_from(ret).unwrap()
     }
 
