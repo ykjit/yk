@@ -531,12 +531,6 @@ impl GlobalDecl {
         &self.name
     }
 
-    /// Return the name of the declaration (as a `&str`).
-    pub(crate) fn name_as_str(&self) -> &str {
-        // unwrap safe: we only anticipate valid UTF-8 symbol names.
-        self.name.to_str().unwrap()
-    }
-
     /// Return whether the declaration is a thread local.
     pub(crate) fn is_threadlocal(&self) -> bool {
         self.is_threadlocal
@@ -556,7 +550,7 @@ impl JitIRDisplay for GlobalDecl {
         _nums: &LocalNumbers<'_>,
     ) -> Result<(), Box<dyn Error>> {
         s.push('@');
-        s.push_str(self.name_as_str());
+        s.push_str(self.name.to_str().unwrap_or("<not valid UTF-8>"));
         Ok(())
     }
 }
