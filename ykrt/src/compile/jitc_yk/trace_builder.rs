@@ -49,17 +49,17 @@ impl<'a> TraceBuilder<'a> {
     /// Arguments:
     ///  - `aot_mod`: The AOT IR module that the trace flows through.
     ///  - `mtrace`: The mapped trace.
-    fn new(ctr_id: u64, aot_mod: &'a Module) -> Self {
-        Self {
+    fn new(ctr_id: u64, aot_mod: &'a Module) -> Result<Self, CompilationError> {
+        Ok(Self {
             aot_mod,
-            jit_mod: jit_ir::Module::new(ctr_id, aot_mod.global_decls_len()),
+            jit_mod: jit_ir::Module::new(ctr_id, aot_mod.global_decls_len())?,
             local_map: HashMap::new(),
             cp_block: None,
             first_ti_idx: 0,
             last_instr_return: false,
             last_block_mappable: true,
             frames: Vec::new(),
-        }
+        })
     }
 
     // Given a mapped block, find the AOT block ID, or return `None` if it is unmapped.
@@ -643,5 +643,5 @@ pub(super) fn build(
     aot_mod: &Module,
     ta_iter: Box<dyn AOTTraceIterator>,
 ) -> Result<jit_ir::Module, CompilationError> {
-    TraceBuilder::new(ctr_id, aot_mod).build(ta_iter)
+    TraceBuilder::new(ctr_id, aot_mod)?.build(ta_iter)
 }
