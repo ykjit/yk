@@ -85,25 +85,28 @@ pub(crate) struct Module {
 
 impl Module {
     /// Create a new [Module].
-    pub(crate) fn new(ctr_id: u64, global_decls_len: usize) -> Self {
+    pub(crate) fn new(ctr_id: u64, global_decls_len: usize) -> Result<Self, CompilationError> {
         Self::new_internal(ctr_id, global_decls_len)
     }
 
     #[cfg(test)]
     pub(crate) fn new_testing() -> Self {
-        Self::new_internal(0, 0)
+        Self::new_internal(0, 0).unwrap()
     }
 
-    pub(crate) fn new_internal(ctr_id: u64, global_decls_len: usize) -> Self {
+    pub(crate) fn new_internal(
+        ctr_id: u64,
+        global_decls_len: usize,
+    ) -> Result<Self, CompilationError> {
         // Create some commonly used types ahead of time. Aside from being convenient, this allows
         // us to find their (now statically known) indices in scenarios where Rust forbids us from
         // holding a mutable reference to the Module (and thus we cannot use [Module::type_idx]).
         let mut types = TiVec::new();
-        let void_type_idx = types.len().into();
+        let void_type_idx = TypeIdx::new(types.len())?;
         types.push(Type::Void);
-        let ptr_type_idx = types.len().into();
+        let ptr_type_idx = TypeIdx::new(types.len())?;
         types.push(Type::Ptr);
-        let int8_type_idx = types.len().into();
+        let int8_type_idx = TypeIdx::new(types.len())?;
         types.push(Type::Integer(IntegerType::new(8)));
 
         // Find the global variable pointer array in the address space.
@@ -117,7 +120,7 @@ impl Module {
         #[cfg(test)]
         assert_eq!(global_decls_len, 0);
 
-        Self {
+        Ok(Self {
             ctr_id,
             instrs: Vec::new(),
             extra_args: Vec::new(),
@@ -131,7 +134,7 @@ impl Module {
             guard_info: TiVec::new(),
             #[cfg(not(test))]
             globalvar_ptrs,
-        }
+        })
     }
 
     /// Get a pointer to an AOT-compiled global variable by a JIT [GlobalDeclIdx].
@@ -696,10 +699,8 @@ macro_rules! index_24bit {
         }
 
         impl From<usize> for $struct {
-            // Required for TiVec.
-            //
-            // Prefer use of [Self::new], which is fallable. Certainly never use this in the trace
-            // builder, where we expect to be able to recover from index overflows.
+            /// Required for TiVec. **DO NOT USE INTERNALLY TO yk as this can `panic`!** Instead,
+            /// use [Self::new].
             fn from(v: usize) -> Self {
                 Self::new(v).unwrap()
             }
@@ -730,10 +731,8 @@ macro_rules! index_16bit {
         }
 
         impl From<usize> for $struct {
-            // Required for TiVec.
-            //
-            // Prefer use of [Self::new], which is fallable. Certainly never use this in the trace
-            // builder, where we expect to be able to recover from index overflows.
+            /// Required for TiVec. **DO NOT USE INTERNALLY TO yk as this can `panic`!** Instead,
+            /// use [Self::new].
             fn from(v: usize) -> Self {
                 Self::new(v).unwrap()
             }
