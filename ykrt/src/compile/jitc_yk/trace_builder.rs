@@ -14,14 +14,14 @@ const TRACE_FUNC_CTRLP_ARGIDX: u16 = 0;
 /// A TraceBuilder frame. Keeps track of inlined calls and stores information about the last
 /// processed stackmap, call instruction and its arguments.
 struct Frame<'a> {
-    /// Stackmap beloning to the last processed call instruction.
-    sm: &'a aot_ir::Instruction,
-    /// Arguments of the last processed call instruction.
+    /// Stackmap for this frame.
+    sm: Option<&'a aot_ir::Instruction>,
+    /// JIT arguments of this frame's caller.
     args: Vec<jit_ir::Operand>,
 }
 
 impl<'a> Frame<'a> {
-    fn new(sm: &'a aot_ir::Instruction, args: Vec<jit_ir::Operand>) -> Frame<'a> {
+    fn new(sm: Option<&'a aot_ir::Instruction>, args: Vec<jit_ir::Operand>) -> Frame<'a> {
         Frame { sm, args }
     }
 }
@@ -62,7 +62,7 @@ impl<'a> TraceBuilder<'a> {
             first_ti_idx: 0,
             last_instr_return: false,
             last_block_mappable: true,
-            frames: Vec::new(),
+            frames: vec![Frame::new(None, vec![])],
         })
     }
 
@@ -371,16 +371,14 @@ impl<'a> TraceBuilder<'a> {
         let mut smids = Vec::new(); // List of stackmap ids of the current call stack.
         let mut lives = Vec::new(); // List of live JIT variables.
 
+        // Assign this branch's stackmap to the current frame.
+        self.frames.last_mut().unwrap().sm = Some(sm);
+
         // Iterate over the stackmaps of the previous frames as well as the stackmap from this
         // conditional branch and collect stackmap IDs and live variables into vectors to store
         // inside the guard.
-        let mut prev_args: Option<&Vec<jit_ir::Operand>> = None;
-        for (sm, args) in self
-            .frames
-            .iter()
-            .map(|f| (f.sm, Some(&f.args)))
-            .chain(std::iter::once((sm, None)))
-        {
+        // Unwrap safe as each frame at this point must have a stackmap associated with it.
+        for (sm, args) in self.frames.iter().map(|f| (f.sm.unwrap(), &f.args)) {
             // Extract stackmap ID.
             match sm.operand(1) {
                 aot_ir::Operand::Constant(co) => {
@@ -408,7 +406,7 @@ impl<'a> TraceBuilder<'a> {
                     aot_ir::Operand::Arg(arg_idx) => {
                         // Lookup the JIT value of the argument from the caller (stored in the
                         // previous frame's `args` field).
-                        match prev_args.unwrap()[usize::from(*arg_idx)] {
+                        match args[usize::from(*arg_idx)] {
                             jit_ir::Operand::Local(idx) => {
                                 lives.push(idx);
                             }
@@ -418,7 +416,6 @@ impl<'a> TraceBuilder<'a> {
                     _ => panic!(),
                 }
             }
-            prev_args = args;
         }
 
         let gi = jit_ir::GuardInfo::new(smids, lives);
@@ -493,8 +490,11 @@ impl<'a> TraceBuilder<'a> {
             let blk = self.aot_mod.bblock(&bid);
             let sm = &blk.instrs[InstrIdx::new(aot_inst_idx + 1)];
             debug_assert!(sm.is_stackmap_call(self.aot_mod));
-            // Put arg map into each frame.
-            self.frames.push(Frame::new(sm, args));
+            // Assign stackmap to the current frame.
+            // Unwrap is safe as there's always at least one frame.
+            self.frames.last_mut().unwrap().sm = Some(sm);
+            // Create a new frame for the inlined call and pass in the arguments of the caller.
+            self.frames.push(Frame::new(None, args));
             Ok(())
         } else {
             // This call is either a declaration or an indirect call and thus not mappable.
