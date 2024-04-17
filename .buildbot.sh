@@ -28,13 +28,24 @@ cargo fmt --all -- --check
 
 cd ykllvm
 ykllvm_hash=$(git rev-parse HEAD)
+cached_ykllvm=0
 if [ -f /opt/ykllvm_cache/ykllvm-release-with-assertions-${ykllvm_hash}.tgz ]; then
-    cached_ykllvm=1
     mkdir inst
     cd inst
     tar xfz /opt/ykllvm_cache/ykllvm-release-with-assertions-${ykllvm_hash}.tgz
-else
-    cached_ykllvm=0
+    # Minimally check that we can at least run `clang --version`: if we can't,
+    # we assume the cached binary is too old (e.g. linking against old shared
+    # objects) and that we should build our own version.
+    if bin/clang --version > /dev/null; then
+        cached_ykllvm=1
+    else
+        echo "Warning: cached ykllvm not runnable; building from scratch" > /dev/stderr
+        cd ..
+        rm -rf inst
+    fi
+fi
+
+if [ "$cached_ykllvm" -eq 0 ]; then
     # We could let yk build two copies of LLVM, but we also want to: check that
     # YKB_YKLLVM_BIN_DIR works; and we want access to clang-format from a build
     # of LLVM. So we first build (or use a prebuilt version) of our
