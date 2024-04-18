@@ -61,8 +61,9 @@ unsafe fn save_original_instructions(
 ///
 unsafe fn patch_function(function_ptr: usize, code: *const u8, size: size_t) {
     let page_size = sysconf(_SC_PAGESIZE) as usize;
-
+    // Align the function_ptr address down to the nearest page boundary.
     let page_address = (function_ptr & !(page_size - 1)) as *mut c_void;
+    // Calculate the offset of function_ptr from the page start.
     let start_offset = function_ptr - (page_address as usize);
 
     // This unwrap should be safe since we are using a page that is
