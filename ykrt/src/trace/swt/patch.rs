@@ -70,16 +70,13 @@ unsafe fn patch_function(function_ptr: usize, code: *const u8, size: size_t) {
     let layout = Layout::from_size_align(start_offset, page_size)
         .expect("Failed to create layout for function memory page");
 
-    // Set function memory page as writable
-    let result = mprotect(page_address, layout.size(), PROT_READ | PROT_WRITE);
-    if result != 0 {
-        panic!("Failed to change memory protection to be writable");
-    }
+    // Set function memory page as writable.
+    // Ignoring mprotect call failure.
+    mprotect(page_address, layout.size(), PROT_READ | PROT_WRITE);
     // Copy the new code over
     std::ptr::copy_nonoverlapping(code, function_ptr as *mut u8, size);
     // Set function memory page as readable
-    let result = mprotect(page_address, layout.size(), PROT_READ | PROT_EXEC);
-    if result != 0 {
+    if mprotect(page_address, layout.size(), PROT_READ | PROT_EXEC) != 0 {
         panic!("Failed to change memory protection back to executable");
     }
 }
