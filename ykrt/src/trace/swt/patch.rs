@@ -65,27 +65,22 @@ unsafe fn patch_function(function_ptr: usize, code: *const u8, size: size_t) {
     let page_address = (function_ptr & !(page_size - 1)) as *mut c_void;
     let start_offset = function_ptr - (page_address as usize) + size;
 
-    match Layout::from_size_align(start_offset, page_size) {
-        Ok(layout) => {
-            // Set function memory page as writable
-            let result = mprotect(page_address, layout.size(), PROT_READ | PROT_WRITE);
-            if result != 0 {
-                panic!("Failed to change memory protection to be writable");
-            }
-            // Copy the new code over
-            std::ptr::copy_nonoverlapping(code, function_ptr as *mut u8, size);
-            // Set function memory page as readable
-            let result = mprotect(page_address, layout.size(), PROT_READ | PROT_EXEC);
-            if result != 0 {
-                panic!("Failed to change memory protection back to executable");
-            }
-        }
-        Err(e) => {
-            panic!(
-                "Failed to create layout for fuction instuction patch: {:?}",
-                e
-            );
-        }
+    // This unwrap should be safe since we are using a page that is
+    // based on function_ptr with a known location.
+    let layout = Layout::from_size_align(start_offset, page_size)
+        .expect("Failed to create layout for function memory page");
+
+    // Set function memory page as writable
+    let result = mprotect(page_address, layout.size(), PROT_READ | PROT_WRITE);
+    if result != 0 {
+        panic!("Failed to change memory protection to be writable");
+    }
+    // Copy the new code over
+    std::ptr::copy_nonoverlapping(code, function_ptr as *mut u8, size);
+    // Set function memory page as readable
+    let result = mprotect(page_address, layout.size(), PROT_READ | PROT_EXEC);
+    if result != 0 {
+        panic!("Failed to change memory protection back to executable");
     }
 }
 
