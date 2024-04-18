@@ -63,7 +63,7 @@ unsafe fn patch_function(function_ptr: usize, code: *const u8, size: size_t) {
     let page_size = sysconf(_SC_PAGESIZE) as usize;
 
     let page_address = (function_ptr & !(page_size - 1)) as *mut c_void;
-    let start_offset = function_ptr - (page_address as usize) + size;
+    let start_offset = function_ptr - (page_address as usize);
 
     // This unwrap should be safe since we are using a page that is
     // based on function_ptr with a known location.
