@@ -11,14 +11,18 @@ const CTRL_POINT_ARGIDX_INPUTS: usize = 3;
 /// The argument index of the trace inputs struct in the trace function.
 const TRACE_FUNC_CTRLP_ARGIDX: u16 = 0;
 
+/// A TraceBuilder frame. Keeps track of inlined calls and stores information about the last
+/// processed stackmap, call instruction and its arguments.
 struct Frame<'a> {
-    callinst: &'a aot_ir::Instruction,
-    sm: &'a aot_ir::Instruction,
+    /// Stackmap for this frame.
+    sm: Option<&'a aot_ir::Instruction>,
+    /// JIT arguments of this frame's caller.
+    args: Vec<jit_ir::Operand>,
 }
 
 impl<'a> Frame<'a> {
-    fn new(callinst: &'a aot_ir::Instruction, sm: &'a aot_ir::Instruction) -> Frame<'a> {
-        Frame { callinst, sm }
+    fn new(sm: Option<&'a aot_ir::Instruction>, args: Vec<jit_ir::Operand>) -> Frame<'a> {
+        Frame { sm, args }
     }
 }
 
@@ -58,7 +62,7 @@ impl<'a> TraceBuilder<'a> {
             first_ti_idx: 0,
             last_instr_return: false,
             last_block_mappable: true,
-            frames: Vec::new(),
+            frames: vec![Frame::new(None, vec![])],
         })
     }
 
@@ -280,14 +284,10 @@ impl<'a> TraceBuilder<'a> {
                 jit_ir::Operand::Const(const_idx)
             }
             aot_ir::Operand::Arg(arg_idx) => {
-                // The `Arg` operand is an index for the argument of this function. We can use it
-                // to lookup the AOT argument being passed into this function from the call
-                // instruction. We then lookup what JIT instruction the AOT argument maps to and
-                // return this.
+                // Lookup the JIT instruction that was passed into this function as an argument.
                 // Unwrap is safe since an `Arg` means we are currently inlining a function.
                 // FIXME: Is the above correct? What about args in the control point frame?
-                let callinst = &self.frames.last().unwrap().callinst;
-                self.handle_operand(callinst.operand(usize::from(*arg_idx) + 1))?
+                self.frames.last().unwrap().args[usize::from(*arg_idx)].clone()
             }
             _ => todo!("{}", op.to_string(self.aot_mod)),
         };
@@ -371,10 +371,14 @@ impl<'a> TraceBuilder<'a> {
         let mut smids = Vec::new(); // List of stackmap ids of the current call stack.
         let mut lives = Vec::new(); // List of live JIT variables.
 
+        // Assign this branch's stackmap to the current frame.
+        self.frames.last_mut().unwrap().sm = Some(sm);
+
         // Iterate over the stackmaps of the previous frames as well as the stackmap from this
         // conditional branch and collect stackmap IDs and live variables into vectors to store
         // inside the guard.
-        for sm in self.frames.iter().map(|f| f.sm).chain(std::iter::once(sm)) {
+        // Unwrap safe as each frame at this point must have a stackmap associated with it.
+        for (sm, args) in self.frames.iter().map(|f| (f.sm.unwrap(), &f.args)) {
             // Extract stackmap ID.
             match sm.operand(1) {
                 aot_ir::Operand::Constant(co) => {
@@ -398,6 +402,16 @@ impl<'a> TraceBuilder<'a> {
                 match op {
                     aot_ir::Operand::LocalVariable(iid) => {
                         lives.push(self.local_map[iid]);
+                    }
+                    aot_ir::Operand::Arg(arg_idx) => {
+                        // Lookup the JIT value of the argument from the caller (stored in the
+                        // previous frame's `args` field).
+                        match args[usize::from(*arg_idx)] {
+                            jit_ir::Operand::Local(idx) => {
+                                lives.push(idx);
+                            }
+                            _ => panic!(),
+                        };
                     }
                     _ => panic!(),
                 }
@@ -466,20 +480,24 @@ impl<'a> TraceBuilder<'a> {
             return Ok(());
         }
 
+        let mut args = Vec::new();
+        for arg in inst.remaining_operands(1) {
+            args.push(self.handle_operand(arg)?);
+        }
         if inst.is_mappable_call(self.aot_mod) {
             // This is a mappable call that we want to inline.
             // Retrieve the stackmap that follows every mappable call.
             let blk = self.aot_mod.bblock(&bid);
             let sm = &blk.instrs[InstrIdx::new(aot_inst_idx + 1)];
             debug_assert!(sm.is_stackmap_call(self.aot_mod));
-            self.frames.push(Frame::new(inst, sm));
+            // Assign stackmap to the current frame.
+            // Unwrap is safe as there's always at least one frame.
+            self.frames.last_mut().unwrap().sm = Some(sm);
+            // Create a new frame for the inlined call and pass in the arguments of the caller.
+            self.frames.push(Frame::new(None, args));
             Ok(())
         } else {
             // This call is either a declaration or an indirect call and thus not mappable.
-            let mut args = Vec::new();
-            for arg in inst.remaining_operands(1) {
-                args.push(self.handle_operand(arg)?);
-            }
             let jit_func_decl_idx = self.handle_func(inst.callee())?;
             let instr = if !self
                 .aot_mod
