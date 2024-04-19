@@ -192,17 +192,7 @@ impl AotIRDisplay for BinOp {
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub(crate) struct InstructionID {
     /// The index of the parent function.
-    ///
-    /// This is computed after deserialisation and relies on
-    /// `Module::compute_local_operand_func_indices() to correctly identify and update all local
-    /// variable operands, setting this field to `Some`. By using `Option` we can detect the case
-    /// where an operand is missed. Without `Option`, deku would insert a default 0 FuncIdx,
-    /// leading to general chaos.
-    ///
-    /// FIXME: I think we can avoid computing this after the fact by having ykllvm include the func
-    /// index in the serialised IR for all local variable operands.
-    #[deku(skip)]
-    func_idx: Option<FuncIdx>,
+    func_idx: FuncIdx,
     bb_idx: BBlockIdx,
     inst_idx: InstrIdx,
 }
@@ -210,7 +200,7 @@ pub(crate) struct InstructionID {
 impl InstructionID {
     pub(crate) fn new(func_idx: FuncIdx, bb_idx: BBlockIdx, inst_idx: InstrIdx) -> Self {
         Self {
-            func_idx: Some(func_idx),
+            func_idx,
             bb_idx,
             inst_idx,
         }
@@ -272,6 +262,7 @@ impl AotIRDisplay for Predicate {
 pub(crate) enum Operand {
     #[deku(id = "0")]
     Constant(ConstIdx),
+    // FIXME: rename this to `Local` for consistency with ykllvm's serialiser.
     #[deku(id = "1")]
     LocalVariable(InstructionID),
     #[deku(id = "2")]
@@ -291,9 +282,7 @@ impl Operand {
     pub(crate) fn to_instr<'a>(&self, aotmod: &'a Module) -> &'a Instruction {
         match self {
             Self::LocalVariable(iid) => {
-                // If the unwrap fails, then someone missed an Operand in
-                // Module::compute_local_operand_func_indices().
-                &aotmod.funcs[iid.func_idx.unwrap()].bblocks[iid.bb_idx].instrs[iid.inst_idx]
+                &aotmod.funcs[iid.func_idx].bblocks[iid.bb_idx].instrs[iid.inst_idx]
             }
             _ => panic!(),
         }
@@ -1072,66 +1061,6 @@ impl Module {
         self.funcs[bid.func_idx].bblock(bid.bb_idx)
     }
 
-    /// Fill in the function index of local variable operands of instructions.
-    ///
-    /// FIXME: It may be possible to do this as we deserialise, instead of after the fact:
-    /// https://github.com/sharksforarms/deku/issues/363
-    fn compute_local_operand_func_indices(&mut self) {
-        let do_operand = |o: &mut Operand, f_idx: FuncIdx| {
-            if let Operand::LocalVariable(ref mut iid) = o {
-                iid.func_idx = Some(FuncIdx::new(f_idx.into()));
-            }
-        };
-
-        for (f_idx, f) in self.funcs.iter_mut_enumerated() {
-            for bb in &mut f.bblocks {
-                for inst in &mut bb.instrs {
-                    // For each local variable operand in an instruction, set the function index.
-                    //
-                    // FIXME: get ykllvm for provide this for us in the IR payload?
-                    match inst {
-                        Instruction::Nop
-                        | Instruction::Alloca { .. }
-                        | Instruction::Br
-                        | Instruction::Unimplemented(..) => (),
-                        Instruction::Load { ptr, .. } => do_operand(ptr, f_idx),
-                        Instruction::Store { val, ptr } => {
-                            do_operand(val, f_idx);
-                            do_operand(ptr, f_idx);
-                        }
-                        Instruction::Call { args, .. } => {
-                            for a in args {
-                                do_operand(a, f_idx);
-                            }
-                        }
-                        Instruction::CondBr { cond, .. } => do_operand(cond, f_idx),
-                        Instruction::ICmp { lhs, rhs, .. } => {
-                            do_operand(lhs, f_idx);
-                            do_operand(rhs, f_idx);
-                        }
-                        Instruction::Ret { val, .. } => {
-                            if let Some(val) = val {
-                                do_operand(val, f_idx);
-                            }
-                        }
-                        Instruction::InsertValue { agg, elem } => {
-                            do_operand(agg, f_idx);
-                            do_operand(elem, f_idx);
-                        }
-                        Instruction::PtrAdd { ptr, off, .. } => {
-                            do_operand(ptr, f_idx);
-                            do_operand(off, f_idx);
-                        }
-                        Instruction::BinaryOp { lhs, rhs, .. } => {
-                            do_operand(lhs, f_idx);
-                            do_operand(rhs, f_idx);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     pub(crate) fn constant(&self, co: &ConstIdx) -> &Constant {
         &self.consts[*co]
     }
@@ -1206,8 +1135,7 @@ impl Module {
 
 /// Deserialise an AOT module from the slice `data`.
 pub(crate) fn deserialise_module(data: &[u8]) -> Result<Module, Box<dyn Error>> {
-    let ((_, _), mut modu) = Module::from_bytes((data, 0))?;
-    modu.compute_local_operand_func_indices();
+    let ((_, _), modu) = Module::from_bytes((data, 0))?;
     Ok(modu)
 }
 
