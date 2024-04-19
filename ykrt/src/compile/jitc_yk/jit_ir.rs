@@ -1156,6 +1156,7 @@ impl JitIRDisplay for Constant {
     ) -> Result<(), Box<dyn Error>> {
         match self.type_idx().type_(m) {
             Type::Integer(it) => s.push_str(&it.const_to_str(self)),
+            Type::Ptr => s.push_str("const_ptr"),
             _ => todo!(),
         }
         Ok(())

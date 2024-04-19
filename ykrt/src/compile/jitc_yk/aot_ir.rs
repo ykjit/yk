@@ -31,7 +31,7 @@
 
 use byteorder::{NativeEndian, ReadBytesExt};
 use deku::prelude::*;
-use std::{cell::RefCell, error::Error, ffi::CString, fs, path::PathBuf};
+use std::{error::Error, ffi::CString, fs, path::PathBuf};
 use typed_index_collections::TiVec;
 
 /// A magic number that all bytecode payloads begin with.
@@ -44,11 +44,15 @@ const CONTROL_POINT_NAME: &str = "__ykrt_control_point";
 const STACKMAP_CALL_NAME: &str = "llvm.experimental.stackmap";
 const LLVM_DEBUG_CALL_NAME: &str = "llvm.dbg.value";
 
+/// The argument index of the trace inputs (live variables) struct at call-sites to the control
+/// point call.
+const CTRL_POINT_ARGIDX_INPUTS: usize = 2;
+
 // Generate common methods for index types.
 macro_rules! index {
     ($struct:ident) => {
         impl $struct {
-            #[allow(dead_code)] // FIXME: remove when constants and func args are implemented.
+            #[allow(dead_code)]
             pub(crate) fn new(v: usize) -> Self {
                 Self(v)
             }
@@ -108,6 +112,7 @@ pub(crate) struct GlobalDeclIdx(usize);
 index!(GlobalDeclIdx);
 
 /// An index into [FuncType::arg_ty_idxs].
+/// ^ FIXME: no it's not! But it should be!
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct ArgIdx(usize);
@@ -182,38 +187,22 @@ impl AotIRDisplay for BinOp {
     }
 }
 
-/// An instruction opcode.
-#[deku_derive(DekuRead)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[deku(type = "u8")]
-pub(crate) enum Opcode {
-    Nop = 0,
-    Load,
-    Store,
-    Alloca,
-    Call,
-    Br,
-    CondBr,
-    Icmp,
-    Ret,
-    InsertValue,
-    PtrAdd,
-    BinOp,
-    Unimplemented = 255,
-}
-
-impl AotIRDisplay for Opcode {
-    fn to_string(&self, _m: &Module) -> String {
-        format!("{:?}", self).to_lowercase()
-    }
-}
-
 /// Uniquely identifies an instruction within a [Module].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub(crate) struct InstructionID {
-    #[deku(skip)] // computed after deserialisation.
-    func_idx: FuncIdx,
+    /// The index of the parent function.
+    ///
+    /// This is computed after deserialisation and relies on
+    /// `Module::compute_local_operand_func_indices() to correctly identify and update all local
+    /// variable operands, setting this field to `Some`. By using `Option` we can detect the case
+    /// where an operand is missed. Without `Option`, deku would insert a default 0 FuncIdx,
+    /// leading to general chaos.
+    ///
+    /// FIXME: I think we can avoid computing this after the fact by having ykllvm include the func
+    /// index in the serialised IR for all local variable operands.
+    #[deku(skip)]
+    func_idx: Option<FuncIdx>,
     bb_idx: BBlockIdx,
     inst_idx: InstrIdx,
 }
@@ -221,7 +210,7 @@ pub(crate) struct InstructionID {
 impl InstructionID {
     pub(crate) fn new(func_idx: FuncIdx, bb_idx: BBlockIdx, inst_idx: InstrIdx) -> Self {
         Self {
-            func_idx,
+            func_idx: Some(func_idx),
             bb_idx,
             inst_idx,
         }
@@ -277,41 +266,20 @@ impl AotIRDisplay for Predicate {
     }
 }
 
-const OPKIND_CONST: u8 = 0;
-const OPKIND_LOCAL_VARIABLE: u8 = 1;
-const OPKIND_TYPE: u8 = 2;
-const OPKIND_FUNC: u8 = 3;
-const OPKIND_BLOCK: u8 = 4;
-const OPKIND_ARG: u8 = 5;
-const OPKIND_GLOBAL: u8 = 6;
-const OPKIND_PREDICATE: u8 = 7;
-const OPKIND_BINOP: u8 = 8;
-const OPKIND_UNIMPLEMENTED: u8 = 255;
-
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 #[deku(type = "u8")]
 pub(crate) enum Operand {
-    #[deku(id = "OPKIND_CONST")]
+    #[deku(id = "0")]
     Constant(ConstIdx),
-    #[deku(id = "OPKIND_LOCAL_VARIABLE")]
+    #[deku(id = "1")]
     LocalVariable(InstructionID),
-    #[deku(id = "OPKIND_TYPE")]
-    Type(TypeIdx),
-    #[deku(id = "OPKIND_FUNC")]
-    Func(FuncIdx),
-    #[deku(id = "OPKIND_BLOCK")]
-    BBlock(BBlockIdx),
-    #[deku(id = "OPKIND_ARG")]
-    Arg(ArgIdx),
-    #[deku(id = "OPKIND_GLOBAL")]
+    #[deku(id = "2")]
     Global(GlobalDeclIdx),
-    #[deku(id = "OPKIND_PREDICATE")]
-    Predicate(Predicate),
-    #[deku(id = "OPKIND_BINOP")]
-    BinOp(BinOp),
-    #[deku(id = "OPKIND_UNIMPLEMENTED")]
-    Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "map_to_string")] String),
+    #[deku(id = "3")]
+    Func(FuncIdx),
+    #[deku(id = "4")]
+    Arg { func_idx: FuncIdx, arg_idx: ArgIdx },
 }
 
 impl Operand {
@@ -323,7 +291,9 @@ impl Operand {
     pub(crate) fn to_instr<'a>(&self, aotmod: &'a Module) -> &'a Instruction {
         match self {
             Self::LocalVariable(iid) => {
-                &aotmod.funcs[iid.func_idx].bblocks[iid.bb_idx].instrs[iid.inst_idx]
+                // If the unwrap fails, then someone missed an Operand in
+                // Module::compute_local_operand_func_indices().
+                &aotmod.funcs[iid.func_idx.unwrap()].bblocks[iid.bb_idx].instrs[iid.inst_idx]
             }
             _ => panic!(),
         }
@@ -336,7 +306,13 @@ impl Operand {
                 // The `unwrap` can't fail for a `LocalVariable`.
                 self.to_instr(m).def_type(m).unwrap()
             }
-            Self::Type(type_idx) => m.type_(*type_idx),
+            Self::Constant(cidx) => m.type_(m.const_(*cidx).type_idx()),
+            Self::Arg { func_idx, arg_idx } => {
+                match m.type_(m.func(*func_idx).type_idx) {
+                    Type::Func(ft) => m.type_(ft.arg_ty_idxs()[usize::from(*arg_idx)]),
+                    _ => panic!(), // malformed IR.
+                }
+            }
             _ => todo!(),
         }
     }
@@ -358,14 +334,9 @@ impl AotIRDisplay for Operand {
             Self::LocalVariable(iid) => {
                 format!("${}_{}", usize::from(iid.bb_idx), usize::from(iid.inst_idx))
             }
-            Self::Type(type_idx) => m.types[*type_idx].to_string(m),
-            Self::Func(func_idx) => m.funcs[*func_idx].name.to_owned(),
-            Self::BBlock(bb_idx) => format!("bb{}", usize::from(*bb_idx)),
-            Self::Arg(arg_idx) => format!("$arg{}", usize::from(*arg_idx)),
-            Self::Global(gd_idx) => m.global_decls[*gd_idx].to_string(m),
-            Self::Predicate(p) => p.to_string(m),
-            Self::BinOp(b) => b.to_string(m),
-            Self::Unimplemented(s) => format!("?op<{}>", s),
+            Self::Global(gidx) => format!("@{}", m.global_decls[*gidx].name()),
+            Self::Func(fidx) => m.funcs[*fidx].name().to_owned(),
+            Self::Arg { arg_idx, .. } => format!("$arg{}", usize::from(*arg_idx)),
         }
     }
 }
@@ -385,122 +356,160 @@ impl AotIRDisplay for Operand {
 /// The type of the variable defined by an instruction (if any) can be determined by
 /// [Instruction::def_type()].
 #[deku_derive(DekuRead)]
-#[derive(Debug)]
-pub(crate) struct Instruction {
-    type_idx: TypeIdx,
-    opcode: Opcode,
-    #[deku(temp)]
-    num_operands: u32,
-    #[deku(count = "num_operands")]
-    operands: Vec<Operand>,
-    /// A variable name, only computed if the instruction is ever printed.
-    #[deku(skip)]
-    name: RefCell<Option<String>>,
+#[derive(Debug, strum_macros::Display)]
+#[repr(u8)]
+#[deku(type = "u8")]
+pub(crate) enum Instruction {
+    #[deku(id = "0")]
+    Nop,
+    #[deku(id = "1")]
+    Load { ptr: Operand, type_idx: TypeIdx },
+    #[deku(id = "2")]
+    Store { val: Operand, ptr: Operand },
+    #[deku(id = "3")]
+    Alloca { type_idx: TypeIdx, count: usize },
+    #[deku(id = "4")]
+    Call {
+        callee: FuncIdx,
+        #[deku(temp)]
+        num_args: u32,
+        #[deku(count = "num_args")]
+        args: Vec<Operand>,
+    },
+    #[deku(id = "5")]
+    Br,
+    #[deku(id = "6")]
+    CondBr {
+        cond: Operand,
+        true_bb: BBlockIdx,
+        false_bb: BBlockIdx,
+    },
+    #[deku(id = "7")]
+    ICmp {
+        type_idx: TypeIdx,
+        lhs: Operand,
+        pred: Predicate,
+        rhs: Operand,
+    },
+    #[deku(id = "8")]
+    Ret {
+        #[deku(temp)]
+        has_val: u8,
+        #[deku(cond = "*has_val != 0", default = "None")]
+        val: Option<Operand>,
+    },
+    #[deku(id = "9")]
+    InsertValue { agg: Operand, elem: Operand },
+    #[deku(id = "10")]
+    PtrAdd {
+        // FIXME: the type will always be `ptr`, so this field could be elided if we provide a way
+        // for us to find the pointer type index quickly.
+        type_idx: TypeIdx,
+        ptr: Operand,
+        off: Operand,
+    },
+    #[deku(id = "11")]
+    BinaryOp {
+        lhs: Operand,
+        binop: BinOp,
+        rhs: Operand,
+    },
+    #[deku(id = "255")]
+    Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "map_to_string")] String),
 }
 
 impl Instruction {
-    /// Returns the operand at the specified index. Panics if the index is out of bounds.
-    pub(crate) fn operand(&self, idx: usize) -> &Operand {
-        &self.operands[idx]
-    }
-
-    /// Return a slice of the remaining operands, starting from the index `from` (inclusive).
-    pub(crate) fn remaining_operands(&self, from: usize) -> &[Operand] {
-        &self.operands[from..]
-    }
-
-    pub(crate) fn opcode(&self) -> Opcode {
-        self.opcode
-    }
-
-    /// For a call instruction, return the callee.
+    /// Find the name of a local variable.
     ///
-    /// # Panics
+    /// This is used when stringifying the instruction.
     ///
-    /// Panics if the instruction isn't a call instruction.
-    pub(crate) fn callee(&self) -> FuncIdx {
-        debug_assert!(matches!(self.opcode, Opcode::Call));
-        let op = self.operand(0);
-        match op {
-            Operand::Func(func_idx) => *func_idx,
-            _ => panic!(),
+    /// FIXME: This is very slow and could be optimised.
+    fn local_name(&self, m: &Module) -> String {
+        for f in m.funcs.iter() {
+            for (bb_idx, bb) in f.bblocks.iter().enumerate() {
+                for (inst_idx, instr) in bb.instrs.iter().enumerate() {
+                    if std::ptr::addr_eq(instr, self) {
+                        return format!("${}_{}", bb_idx, inst_idx);
+                    }
+                }
+            }
         }
-    }
-
-    pub(crate) fn type_idx(&self) -> TypeIdx {
-        self.type_idx
+        panic!(); // malformed IR.
     }
 
     /// Returns the [Type] of the local variable defined by this instruction or `None` if this
     /// instruction does not define a new local variable.
     pub(crate) fn def_type<'a>(&self, m: &'a Module) -> Option<&'a Type> {
-        if m.instr_type(self) != &Type::Void {
-            Some(m.type_(self.type_idx))
-        } else {
-            None
+        match self {
+            Self::Alloca { .. } => Some(&Type::Ptr),
+            Self::BinaryOp { lhs, .. } => Some(lhs.type_(m)),
+            Self::Br => None,
+            Self::Call { callee, .. } => {
+                // The type of the newly-defined local is the return type of the callee.
+                if let &Type::Func(ref ft) = m.type_(m.func(*callee).type_idx) {
+                    let ty = m.type_(ft.ret_ty);
+                    if ty != &Type::Void {
+                        Some(ty)
+                    } else {
+                        None
+                    }
+                } else {
+                    panic!(); // IR malformed.
+                }
+            }
+            Self::CondBr { .. } => None,
+            Self::InsertValue { agg, .. } => Some(agg.type_(m)),
+            Self::ICmp { type_idx, .. } => Some(m.type_(*type_idx)),
+            Self::Load { type_idx, .. } => Some(m.type_(*type_idx)),
+            Self::PtrAdd { type_idx, .. } => Some(m.type_(*type_idx)),
+            Self::Ret { .. } => {
+                // Subtle: although `Ret` might make a value, that's not a local value in the
+                // parent function.
+                None
+            }
+            Self::Store { .. } => None,
+            Self::Unimplemented(_) => None,
+            _ => todo!("{:?}", self),
         }
-    }
-
-    pub(crate) fn is_store(&self) -> bool {
-        self.opcode == Opcode::Store
-    }
-
-    pub(crate) fn is_ptr_add(&self) -> bool {
-        self.opcode == Opcode::PtrAdd
     }
 
     pub(crate) fn is_mappable_call(&self, aot_mod: &Module) -> bool {
-        if self.opcode == Opcode::Call {
-            let op = &self.operands[0];
-            match op {
-                Operand::Func(func_idx) => !aot_mod.funcs[*func_idx].is_declaration(),
-                _ => false,
-            }
-        } else {
-            false
+        match self {
+            Self::Call { callee, .. } => !aot_mod.func(*callee).is_declaration(),
+            _ => false,
         }
     }
 
-    pub(crate) fn is_control_point(&self, aot_mod: &Module) -> bool {
-        if self.opcode == Opcode::Call {
-            // Call instructions always have at least one operand (the callee), so this is safe.
-            let op = &self.operands[0];
-            match op {
-                Operand::Func(func_idx) => {
-                    return aot_mod.funcs[*func_idx].name == CONTROL_POINT_NAME;
+    /// If `self` is a call to the control point, then return the live variables struct argument
+    /// being passed to it. Otherwise return None.
+    pub(crate) fn control_point_call_trace_inputs(&self, aot_mod: &Module) -> Option<&Operand> {
+        match self {
+            Self::Call { callee, args } => {
+                if aot_mod.func(*callee).name == CONTROL_POINT_NAME {
+                    let arg = &args[CTRL_POINT_ARGIDX_INPUTS];
+                    // It should be a pointer (to a struct, but we can't check that).
+                    debug_assert!(matches!(arg.type_(aot_mod), &Type::Ptr));
+                    Some(arg)
+                } else {
+                    None
                 }
-                _ => todo!(),
             }
+            _ => None,
         }
-        false
     }
 
     pub(crate) fn is_stackmap_call(&self, aot_mod: &Module) -> bool {
-        if self.opcode == Opcode::Call {
-            // Call instructions always have at least one operand (the callee), so this is safe.
-            let op = &self.operands[0];
-            match op {
-                Operand::Func(func_idx) => {
-                    return aot_mod.funcs[*func_idx].name == STACKMAP_CALL_NAME;
-                }
-                _ => todo!(),
-            }
+        match self {
+            Self::Call { callee, .. } => aot_mod.func(*callee).name == STACKMAP_CALL_NAME,
+            _ => false,
         }
-        false
     }
 
     pub(crate) fn is_debug_call(&self, aot_mod: &Module) -> bool {
-        if self.opcode == Opcode::Call {
-            // Call instructions always have at least one operand (the callee), so this is safe.
-            let op = &self.operands[0];
-            match op {
-                Operand::Func(func_idx) => {
-                    return aot_mod.funcs[*func_idx].name == LLVM_DEBUG_CALL_NAME;
-                }
-                _ => todo!(),
-            }
+        match self {
+            Self::Call { callee, .. } => aot_mod.func(*callee).name == LLVM_DEBUG_CALL_NAME,
+            _ => false,
         }
-        false
     }
 
     /// Determine if two instructions in the (immutable) AOT IR are the same based on pointer
@@ -512,53 +521,72 @@ impl Instruction {
 
 impl AotIRDisplay for Instruction {
     fn to_string(&self, m: &Module) -> String {
-        if self.opcode == Opcode::Unimplemented {
-            debug_assert!(self.operands.len() == 1);
-            if let Operand::Unimplemented(s) = &self.operands[0] {
-                return format!("?inst<{}>", s);
-            } else {
-                // This would be an invalid serialisation.
-                panic!();
-            }
-        }
-
-        if !*m.var_names_computed.borrow() {
-            m.compute_variable_names();
-        }
-
         let mut ret = String::new();
-        if let Some(_) = self.def_type(m) {
-            let name = self.name.borrow();
-            // The unwrap cannot fail, as we forced computation of variable names above.
-            ret.push_str(&format!(
-                "${}: {} = ",
-                name.as_ref().unwrap(),
-                m.instr_type(self).to_string(m)
-            ));
-        }
-        ret.push_str(&self.opcode.to_string(m));
-        if !self.operands.is_empty() {
-            ret.push(' ');
-        }
-        let op_strs = self
-            .operands
-            .iter()
-            .map(|o| o.to_string(m))
-            .collect::<Vec<_>>();
 
-        if self.opcode != Opcode::Call {
-            ret.push_str(&op_strs.join(", "));
-        } else {
-            // Put parentheses around the call arguments.
-            let mut itr = op_strs.into_iter();
-            // unwrap safe: calls must have at least a callee operand.
-            ret.push_str(&itr.next().unwrap());
-            let rest = itr.collect::<Vec<_>>();
-            ret.push('(');
-            ret.push_str(&rest.join(", "));
-            ret.push(')');
+        if let Some(t) = self.def_type(m) {
+            // If the instruction defines a local, we will format the instruction like it's an
+            // assignment. Here we print the left-hand side.
+            ret.push_str(&format!("{}: {} = ", self.local_name(m), t.to_string(m)));
         }
 
+        match self {
+            Self::Alloca { type_idx, count } => ret.push_str(&format!(
+                "alloca {}, {}",
+                m.type_(*type_idx).to_string(m),
+                count
+            )),
+            Self::BinaryOp { lhs, binop, rhs } => ret.push_str(&format!(
+                "{}, {}, {}",
+                lhs.to_string(m),
+                binop.to_string(m),
+                rhs.to_string(m)
+            )),
+            Self::Br => ret.push_str("br"),
+            Self::Call { callee, args } => {
+                let args_s = args
+                    .iter()
+                    .map(|a| a.to_string(m))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                ret.push_str(&format!("call {}({})", m.func(*callee).name(), args_s,));
+            }
+            Self::CondBr {
+                cond,
+                true_bb,
+                false_bb,
+            } => ret.push_str(&format!(
+                "condbr {}, bb{}, bb{}",
+                cond.to_string(m),
+                usize::from(*true_bb),
+                usize::from(*false_bb)
+            )),
+            Self::ICmp { lhs, pred, rhs, .. } => ret.push_str(&format!(
+                "icmp {}, {}, {}",
+                lhs.to_string(m),
+                pred.to_string(m),
+                rhs.to_string(m)
+            )),
+            Self::Load { ptr, .. } => ret.push_str(&format!("load {}", ptr.to_string(m))),
+            Self::PtrAdd { ptr, off, .. } => ret.push_str(&format!(
+                "PtrAdd {}, {}",
+                ptr.to_string(m),
+                off.to_string(m)
+            )),
+            Self::Ret { val } => match val {
+                None => ret.push_str("ret"),
+                Some(v) => ret.push_str(&format!("ret {}", v.to_string(m))),
+            },
+            Self::Store { ptr, val } => {
+                ret.push_str(&format!("store {}, {}", val.to_string(m), ptr.to_string(m)))
+            }
+            Self::InsertValue { agg, elem } => ret.push_str(&format!(
+                "insertvalue {}, {}",
+                agg.to_string(m),
+                elem.to_string(m)
+            )),
+            Self::Unimplemented(s) => ret.push_str(&format!("unimplemented <<{}>>", s)),
+            _ => todo!(),
+        }
         ret
     }
 }
@@ -577,7 +605,7 @@ impl AotIRDisplay for BBlock {
     fn to_string(&self, m: &Module) -> String {
         let mut ret = String::new();
         for i in &self.instrs {
-            ret.push_str(&format!("    {}\n", i.to_string(m)));
+            ret.push_str(&format!("    {}\n", &AotIRDisplay::to_string(i, m)));
         }
         ret
     }
@@ -1021,31 +1049,9 @@ pub(crate) struct Module {
     num_types: usize,
     #[deku(count = "num_types", map = "map_to_tivec")]
     types: TiVec<TypeIdx, Type>,
-    /// Have local variable names been computed?
-    ///
-    /// Names are computed on-demand when an instruction is printed for the first time.
-    #[deku(skip)]
-    var_names_computed: RefCell<bool>,
 }
 
 impl Module {
-    /// Compute the names of all local variables, for use when stringifying.
-    fn compute_variable_names(&self) {
-        debug_assert!(!*self.var_names_computed.borrow());
-        // Note that because the on-disk IR is conceptually immutable, so we don't have to worry
-        // about keeping the names up to date.
-        for f in &self.funcs {
-            for (bb_idx, bb) in f.bblocks.iter().enumerate() {
-                for (inst_idx, inst) in bb.instrs.iter().enumerate() {
-                    if let Some(_) = inst.def_type(self) {
-                        *inst.name.borrow_mut() = Some(format!("{}_{}", bb_idx, inst_idx));
-                    }
-                }
-            }
-        }
-        *self.var_names_computed.borrow_mut() = true;
-    }
-
     /// Find a function by its name.
     ///
     /// # Panics
@@ -1071,24 +1077,59 @@ impl Module {
     /// FIXME: It may be possible to do this as we deserialise, instead of after the fact:
     /// https://github.com/sharksforarms/deku/issues/363
     fn compute_local_operand_func_indices(&mut self) {
-        for (f_idx, f) in self.funcs.iter_mut().enumerate() {
+        let do_operand = |o: &mut Operand, f_idx: FuncIdx| {
+            if let Operand::LocalVariable(ref mut iid) = o {
+                iid.func_idx = Some(FuncIdx::new(f_idx.into()));
+            }
+        };
+
+        for (f_idx, f) in self.funcs.iter_mut_enumerated() {
             for bb in &mut f.bblocks {
                 for inst in &mut bb.instrs {
-                    for op in &mut inst.operands {
-                        if let Operand::LocalVariable(ref mut iid) = op {
-                            iid.func_idx = FuncIdx(f_idx);
+                    // For each local variable operand in an instruction, set the function index.
+                    //
+                    // FIXME: get ykllvm for provide this for us in the IR payload?
+                    match inst {
+                        Instruction::Nop
+                        | Instruction::Alloca { .. }
+                        | Instruction::Br
+                        | Instruction::Unimplemented(..) => (),
+                        Instruction::Load { ptr, .. } => do_operand(ptr, f_idx),
+                        Instruction::Store { val, ptr } => {
+                            do_operand(val, f_idx);
+                            do_operand(ptr, f_idx);
+                        }
+                        Instruction::Call { args, .. } => {
+                            for a in args {
+                                do_operand(a, f_idx);
+                            }
+                        }
+                        Instruction::CondBr { cond, .. } => do_operand(cond, f_idx),
+                        Instruction::ICmp { lhs, rhs, .. } => {
+                            do_operand(lhs, f_idx);
+                            do_operand(rhs, f_idx);
+                        }
+                        Instruction::Ret { val, .. } => {
+                            if let Some(val) = val {
+                                do_operand(val, f_idx);
+                            }
+                        }
+                        Instruction::InsertValue { agg, elem } => {
+                            do_operand(agg, f_idx);
+                            do_operand(elem, f_idx);
+                        }
+                        Instruction::PtrAdd { ptr, off, .. } => {
+                            do_operand(ptr, f_idx);
+                            do_operand(off, f_idx);
+                        }
+                        Instruction::BinaryOp { lhs, rhs, .. } => {
+                            do_operand(lhs, f_idx);
+                            do_operand(rhs, f_idx);
                         }
                     }
                 }
             }
         }
-    }
-
-    /// Get the type of the instruction.
-    ///
-    /// It is UB to pass an `instr` that is not from the `Module` referenced by `self`.
-    pub(crate) fn instr_type(&self, instr: &Instruction) -> &Type {
-        &self.types[instr.type_idx]
     }
 
     pub(crate) fn constant(&self, co: &ConstIdx) -> &Constant {
@@ -1097,6 +1138,15 @@ impl Module {
 
     pub(crate) fn const_type(&self, c: &Constant) -> &Type {
         &self.types[c.type_idx]
+    }
+
+    /// Lookup a constant by its index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is out of bounds.
+    pub(crate) fn const_(&self, ci: ConstIdx) -> &Constant {
+        &self.consts[ci]
     }
 
     /// Lookup a type by its index.
@@ -1174,317 +1224,8 @@ pub fn print_from_file(path: &PathBuf) -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use byteorder::WriteBytesExt;
     use num_traits::{PrimInt, ToBytes};
     use std::mem;
-
-    #[cfg(target_pointer_width = "64")]
-    fn write_native_usize(d: &mut Vec<u8>, v: usize) {
-        d.write_u64::<NativeEndian>(v as u64).unwrap(); // `as` is safe: u64 == usize
-    }
-
-    fn write_str(d: &mut Vec<u8>, s: &str) {
-        d.extend(s.as_bytes());
-        d.push(0); // null terminator.
-    }
-
-    /// Note that this test only checks valid IR encodings and not for valid IR semantics. For
-    /// example, nonsensical instruction arguments (incorrect arg counts, incorrect arg types etc.)
-    /// are not checked.
-    ///
-    /// FIXME: implement an IR validator for this purpose.
-    #[test]
-    fn deser_and_display() {
-        let mut data = Vec::new();
-
-        // HEADER
-        // magic:
-        data.write_u32::<NativeEndian>(MAGIC).unwrap();
-        // version:
-        data.write_u32::<NativeEndian>(FORMAT_VERSION).unwrap();
-
-        // num_funcs:
-        write_native_usize(&mut data, 2);
-
-        // FUNCTION 0
-        // name:
-        write_str(&mut data, "foo");
-        // type_idx:
-        write_native_usize(&mut data, 4);
-        // num_bblocks:
-        write_native_usize(&mut data, 2);
-
-        // BLOCK 0
-        // num_instrs:
-        write_native_usize(&mut data, 3);
-
-        // INSTRUCTION 0
-        // type_idx:
-        write_native_usize(&mut data, 2);
-        // opcode:
-        data.write_u8(Opcode::Alloca as u8).unwrap();
-        // num_operands:
-        data.write_u32::<NativeEndian>(1).unwrap();
-        // OPERAND 0
-        // operand_kind:
-        data.write_u8(OPKIND_CONST).unwrap();
-        // const_idx
-        write_native_usize(&mut data, 0);
-
-        // INSTRUCTION 1
-        // type_idx:
-        write_native_usize(&mut data, 0);
-        // opcode:
-        data.write_u8(Opcode::Nop as u8).unwrap();
-        // num_operands:
-        data.write_u32::<NativeEndian>(0).unwrap();
-
-        // INSTRUCTION 2
-        // type_idx:
-        write_native_usize(&mut data, 0);
-        // opcode:
-        data.write_u8(Opcode::CondBr as u8).unwrap();
-        // num_operands:
-        data.write_u32::<NativeEndian>(3).unwrap();
-        // OPERAND 0
-        // operand_kind:
-        data.write_u8(OPKIND_LOCAL_VARIABLE as u8).unwrap();
-        // bb_idx:
-        write_native_usize(&mut data, 0);
-        // inst_idx:
-        write_native_usize(&mut data, 0);
-        // OPERAND 1
-        // operand_kind:
-        data.write_u8(OPKIND_BLOCK as u8).unwrap();
-        // bb_idx:
-        write_native_usize(&mut data, 0);
-        // OPERAND 2
-        // operand_kind:
-        data.write_u8(OPKIND_BLOCK as u8).unwrap();
-        // bb_idx:
-        write_native_usize(&mut data, 1);
-
-        // BLOCK 1
-        // num_instrs:
-        write_native_usize(&mut data, 6);
-
-        // INSTRUCTION 0
-        // type_idx:
-        write_native_usize(&mut data, 0);
-        // opcode:
-        data.write_u8(Opcode::Unimplemented as u8).unwrap();
-        // num_operands:
-        data.write_u32::<NativeEndian>(1).unwrap();
-        // OPERAND 0
-        // operand_kind:
-        data.write_u8(OPKIND_UNIMPLEMENTED as u8).unwrap();
-        // unimplemented description:
-        write_str(&mut data, "%3 = some_llvm_instruction ...");
-
-        // INSTRUCTION 1
-        // type_idx:
-        write_native_usize(&mut data, 2);
-        // opcode:
-        data.write_u8(Opcode::PtrAdd as u8).unwrap();
-        // num_operands:
-        data.write_u32::<NativeEndian>(1).unwrap();
-        // OPERAND 0
-        // operand_kind:
-        data.write_u8(OPKIND_CONST as u8).unwrap();
-        // const_idx:
-        write_native_usize(&mut data, 1);
-
-        // INSTRUCTION 2
-        // type_idx:
-        write_native_usize(&mut data, 2);
-        // opcode:
-        data.write_u8(Opcode::Alloca as u8).unwrap();
-        // num_operands:
-        data.write_u32::<NativeEndian>(2).unwrap();
-        // OPERAND 0
-        // operand_kind:
-        data.write_u8(OPKIND_TYPE).unwrap();
-        // type_idx:
-        write_native_usize(&mut data, 3);
-        // OPERAND 1
-        // operand_kind:
-        data.write_u8(OPKIND_CONST as u8).unwrap();
-        // const_idx:
-        write_native_usize(&mut data, 2);
-
-        // INSTRUCTION 3
-        // type_idx:
-        write_native_usize(&mut data, 2);
-        // opcode:
-        data.write_u8(Opcode::Call as u8).unwrap();
-        // num_operands:
-        data.write_u32::<NativeEndian>(3).unwrap();
-        // OPERAND 0
-        // operand_kind:
-        data.write_u8(OPKIND_FUNC).unwrap();
-        // func_idx:
-        write_native_usize(&mut data, 1);
-        // OPERAND 1
-        // operand_kind:
-        data.write_u8(OPKIND_CONST).unwrap();
-        // const_idx:
-        write_native_usize(&mut data, 2);
-        // OPERAND 2
-        // operand_kind:
-        data.write_u8(OPKIND_CONST).unwrap();
-        // const_idx:
-        write_native_usize(&mut data, 2);
-
-        // INSTRUCTION 4
-        // type_idx:
-        write_native_usize(&mut data, 0);
-        // opcode:
-        data.write_u8(Opcode::Br as u8).unwrap();
-        // num_operands:
-        data.write_u32::<NativeEndian>(0).unwrap();
-
-        // INSTRUCTION 5
-        // type_idx:
-        write_native_usize(&mut data, 6);
-        // opcode:
-        data.write_u8(Opcode::Nop as u8).unwrap();
-        // num_operands:
-        data.write_u32::<NativeEndian>(0).unwrap();
-
-        // FUNCTION 1
-        // name:
-        write_str(&mut data, "bar");
-        // type_idx:
-        write_native_usize(&mut data, 5);
-        // num_bblocks:
-        write_native_usize(&mut data, 0);
-
-        // CONSTANTS
-        // num_consts:
-        write_native_usize(&mut data, 3);
-
-        // CONSTANT 0
-        // type_idx:
-        write_native_usize(&mut data, 1);
-        // num_bytes:
-        write_native_usize(&mut data, 0);
-
-        // CONSTANT 1
-        // type_idx:
-        write_native_usize(&mut data, 3);
-        // num_bytes:
-        write_native_usize(&mut data, 4);
-        // bytes:
-        data.write_u32::<NativeEndian>(u32::MAX).unwrap();
-
-        // CONSTANT 2
-        // type_idx:
-        write_native_usize(&mut data, 3);
-        // num_bytes:
-        write_native_usize(&mut data, 4);
-        // bytes:
-        data.write_u32::<NativeEndian>(50).unwrap();
-
-        // GLOBAL DECLS
-        // num_global_decls:
-        write_native_usize(&mut data, 1);
-
-        // GLOBAL DECL 1
-        // is_threadlocal:
-        let _ = data.write_u8(0);
-        // name:
-        write_str(&mut data, "aaa");
-
-        // TYPES
-        // num_types:
-        write_native_usize(&mut data, 7);
-
-        // TYPE 0
-        // type_kind:
-        data.write_u8(TYKIND_VOID).unwrap();
-
-        // TYPE 1
-        // type_kind:
-        data.write_u8(TYKIND_UNIMPLEMENTED).unwrap();
-        // unimplemented description:
-        write_str(&mut data, "a_type");
-
-        // TYPE 2
-        // type_kind:
-        data.write_u8(TYKIND_PTR).unwrap();
-
-        // TYPE 3
-        // type_kind:
-        data.write_u8(TYKIND_INTEGER).unwrap();
-        // num_bits:
-        data.write_u32::<NativeEndian>(32).unwrap();
-
-        // TYPE 4
-        // type_kind:
-        data.write_u8(TYKIND_FUNC).unwrap();
-        // num_args:
-        write_native_usize(&mut data, 2);
-        // arg_ty_idxs:
-        write_native_usize(&mut data, 2);
-        write_native_usize(&mut data, 3);
-        // ret_ty:
-        write_native_usize(&mut data, 3);
-        // is_vararg:
-        data.write_u8(0).unwrap();
-
-        // TYPE 5
-        // type_kind:
-        data.write_u8(TYKIND_FUNC).unwrap();
-        // num_args:
-        write_native_usize(&mut data, 0);
-        // ret_ty:
-        write_native_usize(&mut data, 0);
-        // is_vararg:
-        data.write_u8(0).unwrap();
-
-        // TYPE 6
-        // type_kind:
-        data.write_u8(TYKIND_STRUCT).unwrap();
-        // num_fields:
-        write_native_usize(&mut data, 2);
-        // field_ty_idxs[0]:
-        write_native_usize(&mut data, 2);
-        // field_ty_idxs[1]:
-        write_native_usize(&mut data, 3);
-        // field_bit_offs[0]:
-        write_native_usize(&mut data, 0);
-        // field_bit_offs[0]:
-        write_native_usize(&mut data, 24);
-
-        let test_mod = deserialise_module(data.as_slice()).unwrap();
-        let string_mod = test_mod.to_string();
-
-        println!("{}", string_mod);
-        let expect = "\
-# IR format version: 0
-# Num funcs: 2
-# Num consts: 3
-# Num global decls: 1
-# Num types: 7
-
-func foo($arg0: ptr, $arg1: i32) -> i32 {
-  bb0:
-    $0_0: ptr = alloca ?cst<a_type>
-    nop
-    condbr $0_0, bb0, bb1
-  bb1:
-    ?inst<%3 = some_llvm_instruction ...>
-    $1_1: ptr = ptradd -1i32
-    $1_2: ptr = alloca i32, 50i32
-    $1_3: ptr = call bar(50i32, 50i32)
-    br
-    $1_5: {0: ptr, 24: i32} = nop
-}
-
-func bar();
-";
-        assert_eq!(expect, string_mod);
-    }
 
     #[test]
     fn string_deser() {
