@@ -272,6 +272,7 @@ impl AotIRDisplay for Predicate {
 pub(crate) enum Operand {
     #[deku(id = "0")]
     Constant(ConstIdx),
+    // FIXME: rename this to `Local` for consistency with ykllvm's serialiser.
     #[deku(id = "1")]
     LocalVariable(InstructionID),
     #[deku(id = "2")]
