@@ -71,8 +71,9 @@ unsafe fn patch_function(function_ptr: usize, code: *const u8, size: size_t) {
     let layout = Layout::from_size_align(start_offset, page_size).unwrap();
 
     // Set function memory page as writable.
-    // Ignoring mprotect call failure.
-    mprotect(page_address, layout.size(), PROT_READ | PROT_WRITE);
+    if mprotect(page_address, layout.size(), PROT_READ | PROT_WRITE) != 0 {
+        return;
+    }
     // Copy the new code over
     std::ptr::copy_nonoverlapping(code, function_ptr as *mut u8, size);
     // Set function memory page as readable
