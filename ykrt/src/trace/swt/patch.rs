@@ -68,8 +68,7 @@ unsafe fn patch_function(function_ptr: usize, code: *const u8, size: size_t) {
 
     // This unwrap should be safe since we are using a page that is
     // based on function_ptr with a known location.
-    let layout = Layout::from_size_align(start_offset, page_size)
-        .expect("Failed to create layout for function memory page");
+    let layout = Layout::from_size_align(start_offset, page_size).unwrap();
 
     // Set function memory page as writable.
     // Ignoring mprotect call failure.
