@@ -1618,7 +1618,7 @@ impl VACallInstruction {
         Ok(Self {
             target,
             num_args: u16::try_from(num_args).unwrap(), // XXX
-            first_arg_idx: m.push_extra_args(&args[..])?,
+            first_arg_idx: m.push_extra_args(args)?,
         })
     }
 
