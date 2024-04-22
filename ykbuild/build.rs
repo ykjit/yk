@@ -118,6 +118,9 @@ fn main() {
                 ykllvm_dir.as_os_str().to_str().unwrap()
             ),
             "-DLLVM_INSTALL_UTILS=On",
+            #[cfg(debug_assertions)]
+            "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
+            #[cfg(not(debug_assertions))]
             "-DCMAKE_BUILD_TYPE=release",
             #[cfg(debug_assertions)]
             "-DLLVM_ENABLE_ASSERTIONS=On",
