@@ -41,8 +41,12 @@ pub(crate) struct TraceBuilder<'a> {
     last_instr_return: bool,
     // Was the last block we processed mappable or not?
     last_block_mappable: bool,
-    // JIT arguments passed into an inlined AOT call.
+    // Inlined calls.
     frames: Vec<Frame<'a>>,
+    // Are we outlining?
+    outlining: bool,
+    // Frame index at which we started outlining.
+    outline_base: usize,
 }
 
 impl<'a> TraceBuilder<'a> {
@@ -61,6 +65,8 @@ impl<'a> TraceBuilder<'a> {
             last_instr_return: false,
             last_block_mappable: true,
             frames: vec![Frame::new(None, vec![])],
+            outlining: false,
+            outline_base: 0,
         })
     }
 
@@ -186,6 +192,12 @@ impl<'a> TraceBuilder<'a> {
 
         // Decide how to translate each AOT instruction.
         for (inst_idx, inst) in blk.instrs.iter().enumerate() {
+            if self.outlining {
+                if matches!(inst, aot_ir::Instruction::Ret { .. }) {
+                    self.last_instr_return = true;
+                }
+                continue;
+            }
             match inst {
                 aot_ir::Instruction::Br => Ok(()),
                 aot_ir::Instruction::Load { ptr, type_idx } => {
@@ -507,7 +519,7 @@ impl<'a> TraceBuilder<'a> {
             jit_args.push(self.handle_operand(arg)?);
         }
 
-        if inst.is_mappable_call(self.aot_mod) {
+        if inst.is_mappable_call(self.aot_mod) && !self.aot_mod.func(*callee).is_outline() {
             // This is a mappable call that we want to inline.
             // Retrieve the stackmap that follows every mappable call.
             let blk = self.aot_mod.bblock(bid);
@@ -520,7 +532,9 @@ impl<'a> TraceBuilder<'a> {
             self.frames.push(Frame::new(None, jit_args));
             Ok(())
         } else {
-            // This call is either a declaration or an indirect call and thus not mappable.
+            // This call can't be inlined. It is either unmappable (a declaration or an indirect
+            // call) or the compiler annotated it with `yk_outline`.
+            self.outlining = true;
             let jit_func_decl_idx = self.handle_func(*callee)?;
             let instr = if !self
                 .aot_mod
@@ -637,6 +651,9 @@ impl<'a> TraceBuilder<'a> {
                                 if self.last_block_mappable {
                                     // This is a normal call.
                                     // FIXME: increment callstack
+                                    if self.outlining {
+                                        self.outline_base += 1;
+                                    }
                                 } else {
                                     // This is a callback from foreign code.
                                 }
@@ -646,12 +663,23 @@ impl<'a> TraceBuilder<'a> {
                                 if !self.last_block_mappable {
                                     // We've returned from a foreign call.
                                     self.last_block_mappable = true;
+                                    if self.outline_base == 0 {
+                                        self.outlining = false;
+                                        self.last_instr_return = false;
+                                    }
                                     continue;
                                 } else if self.last_instr_return {
                                     // We've just returned from a normal call. This means we've
                                     // already seen and processed this block and can skip it.
                                     // FIXME: decrement callstack
+                                    if self.outlining {
+                                        self.outline_base -= 1;
+                                    }
                                     self.last_block_mappable = true;
+                                    if self.outline_base == 0 {
+                                        self.outlining = false;
+                                        self.last_instr_return = false;
+                                    }
                                     continue;
                                 }
                                 // Process the block normally.
