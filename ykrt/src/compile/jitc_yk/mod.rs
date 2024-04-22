@@ -60,10 +60,7 @@ impl Compiler for JITCYk {
         let aot_mod = aot_ir::deserialise_module(ir_slice).unwrap();
 
         if should_log_ir(IRPhase::AOT) {
-            log_ir(&format!(
-                "--- Begin aot ---\n{}\n--- End aot ---",
-                aot_mod.to_string()
-            ));
+            log_ir(&format!("--- Begin aot ---\n{}\n--- End aot ---", aot_mod));
         }
 
         let jit_mod = trace_builder::build(mt.next_compiled_trace_id(), &aot_mod, aottrace_iter.0)?;
