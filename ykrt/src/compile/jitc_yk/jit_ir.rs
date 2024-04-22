@@ -892,11 +892,11 @@ impl FuncType {
 }
 
 impl JitIRDisplay for FuncType {
-    fn to_string_impl<'a>(
+    fn to_string_impl(
         &self,
         m: &Module,
         s: &mut String,
-        nums: &LocalNumbers<'a>,
+        nums: &LocalNumbers,
     ) -> Result<(), Box<dyn Error>> {
         s.push_str("func(");
         let num_args = self.num_args();
@@ -1580,17 +1580,17 @@ pub struct VACallInstruction {
 }
 
 impl JitIRDisplay for VACallInstruction {
-    fn to_string_impl<'a>(
+    fn to_string_impl(
         &self,
         m: &Module,
         s: &mut String,
-        nums: &LocalNumbers<'a>,
+        nums: &LocalNumbers,
     ) -> Result<(), Box<dyn Error>> {
         let decl = m.func_decl(self.target);
         s.push_str("VACall @");
         s.push_str(decl.name());
 
-        s.push_str("(");
+        s.push('(');
         let num_args = self.num_args();
         for ai in 0..num_args {
             self.operand(m, ai).to_string_impl(m, s, nums)?;
@@ -1598,7 +1598,7 @@ impl JitIRDisplay for VACallInstruction {
                 s.push_str(", ");
             }
         }
-        s.push_str(")");
+        s.push(')');
 
         Ok(())
     }
@@ -1618,7 +1618,7 @@ impl VACallInstruction {
         Ok(Self {
             target,
             num_args: u16::try_from(num_args).unwrap(), // XXX
-            first_arg_idx: m.push_extra_args(&args[..])?,
+            first_arg_idx: m.push_extra_args(args)?,
         })
     }
 

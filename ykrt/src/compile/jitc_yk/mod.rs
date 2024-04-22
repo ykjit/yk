@@ -60,10 +60,7 @@ impl Compiler for JITCYk {
         let aot_mod = aot_ir::deserialise_module(ir_slice).unwrap();
 
         if should_log_ir(IRPhase::AOT) {
-            log_ir(&format!(
-                "--- Begin aot ---\n{}\n--- End aot ---",
-                aot_mod.to_string()
-            ));
+            log_ir(&format!("--- Begin aot ---\n{}\n--- End aot ---", aot_mod));
         }
 
         let jit_mod = trace_builder::build(mt.next_compiled_trace_id(), &aot_mod, aottrace_iter.0)?;
@@ -96,5 +93,5 @@ pub(crate) fn yk_ir_section() -> Result<&'static [u8], Box<dyn Error>> {
     let start = symbol_to_ptr("ykllvm.yk_ir.start")? as *const u8;
     let stop = symbol_to_ptr("ykllvm.yk_ir.stop")? as *const u8;
     debug_assert!(start < stop);
-    Ok(unsafe { slice::from_raw_parts(start as *const u8, stop.sub_ptr(start)) })
+    Ok(unsafe { slice::from_raw_parts(start, stop.sub_ptr(start)) })
 }

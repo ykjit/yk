@@ -435,7 +435,7 @@ impl Instruction {
             Self::Br => None,
             Self::Call { callee, .. } => {
                 // The type of the newly-defined local is the return type of the callee.
-                if let &Type::Func(ref ft) = m.type_(m.func(*callee).type_idx) {
+                if let Type::Func(ft) = m.type_(m.func(*callee).type_idx) {
                     let ty = m.type_(ft.ret_ty);
                     if ty != &Type::Void {
                         Some(ty)
@@ -1110,26 +1110,27 @@ impl Module {
         self.global_decls.len()
     }
 
-    pub(crate) fn to_string(&self) -> String {
-        let mut ret = String::new();
-        ret.push_str(&format!("# IR format version: {}\n", self.version));
-        ret.push_str(&format!("# Num funcs: {}\n", self.funcs.len()));
-        ret.push_str(&format!("# Num consts: {}\n", self.consts.len()));
-        ret.push_str(&format!(
-            "# Num global decls: {}\n",
-            self.global_decls.len()
-        ));
-        ret.push_str(&format!("# Num types: {}\n", self.types.len()));
-
-        for func in &self.funcs {
-            ret.push_str(&format!("\n{}", func.to_string(self)));
-        }
-        ret
-    }
-
     #[allow(dead_code)]
     pub(crate) fn dump(&self) {
-        eprintln!("{}", self.to_string());
+        eprintln!("{}", self);
+    }
+}
+
+impl std::fmt::Display for Module {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("# IR format version: {}\n", self.version))?;
+        f.write_fmt(format_args!("# Num funcs: {}\n", self.funcs.len()))?;
+        f.write_fmt(format_args!("# Num consts: {}\n", self.consts.len()))?;
+        f.write_fmt(format_args!(
+            "# Num global decls: {}\n",
+            self.global_decls.len()
+        ))?;
+        f.write_fmt(format_args!("# Num types: {}\n", self.types.len()))?;
+
+        for func in &self.funcs {
+            write!(f, "\n{}", func.to_string(self))?;
+        }
+        Ok(())
     }
 }
 
@@ -1145,7 +1146,7 @@ pub(crate) fn deserialise_module(data: &[u8]) -> Result<Module, Box<dyn Error>> 
 pub fn print_from_file(path: &PathBuf) -> Result<(), Box<dyn Error>> {
     let data = fs::read(path)?;
     let ir = deserialise_module(&data)?;
-    println!("{}", ir.to_string());
+    println!("{}", ir);
     Ok(())
 }
 
