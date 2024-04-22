@@ -435,7 +435,7 @@ impl Instruction {
             Self::Br => None,
             Self::Call { callee, .. } => {
                 // The type of the newly-defined local is the return type of the callee.
-                if let &Type::Func(ref ft) = m.type_(m.func(*callee).type_idx) {
+                if let Type::Func(ft) = m.type_(m.func(*callee).type_idx) {
                     let ty = m.type_(ft.ret_ty);
                     if ty != &Type::Void {
                         Some(ty)
