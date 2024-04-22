@@ -411,7 +411,7 @@ impl<'a> TraceBuilder<'a> {
                     for op in args[2..].iter() {
                         match op {
                             aot_ir::Operand::LocalVariable(iid) => {
-                                lives.push(self.local_map[&iid]);
+                                lives.push(self.local_map[iid]);
                             }
                             aot_ir::Operand::Arg { arg_idx, .. } => {
                                 // Lookup the JIT value of the argument from the caller (stored in
@@ -504,13 +504,13 @@ impl<'a> TraceBuilder<'a> {
         // Convert AOT args to JIT args.
         let mut jit_args = Vec::new();
         for arg in args {
-            jit_args.push(self.handle_operand(&arg)?);
+            jit_args.push(self.handle_operand(arg)?);
         }
 
         if inst.is_mappable_call(self.aot_mod) {
             // This is a mappable call that we want to inline.
             // Retrieve the stackmap that follows every mappable call.
-            let blk = self.aot_mod.bblock(&bid);
+            let blk = self.aot_mod.bblock(bid);
             let sm = &blk.instrs[InstrIdx::new(aot_inst_idx + 1)];
             debug_assert!(sm.is_stackmap_call(self.aot_mod));
             // Assign stackmap to the current frame.
