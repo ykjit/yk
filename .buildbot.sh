@@ -61,7 +61,7 @@ if [ "$cached_ykllvm" -eq 0 ]; then
     # https://github.com/llvm/llvm-project/issues/57085
     cmake -DCMAKE_INSTALL_PREFIX="$(pwd)/../inst" \
         -DLLVM_INSTALL_UTILS=On \
-        -DCMAKE_BUILD_TYPE=release \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
         -DLLVM_ENABLE_ASSERTIONS=On \
         -DLLVM_ENABLE_PROJECTS="lld;clang" \
         -DCLANG_DEFAULT_PIE_ON_LINUX=OFF \
