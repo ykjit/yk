@@ -1590,7 +1590,7 @@ impl JitIRDisplay for VACallInstruction {
         s.push_str("VACall @");
         s.push_str(decl.name());
 
-        s.push_str("(");
+        s.push('(');
         let num_args = self.num_args();
         for ai in 0..num_args {
             self.operand(m, ai).to_string_impl(m, s, nums)?;
@@ -1598,7 +1598,7 @@ impl JitIRDisplay for VACallInstruction {
                 s.push_str(", ");
             }
         }
-        s.push_str(")");
+        s.push(')');
 
         Ok(())
     }

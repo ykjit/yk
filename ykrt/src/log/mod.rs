@@ -54,7 +54,7 @@ mod internals {
     static LOG_IR: LazyLock<Option<(String, HashSet<IRPhase>)>> = LazyLock::new(|| {
         let mut log_phases = HashSet::new();
         if let Ok(x) = env::var("YKD_LOG_IR") {
-            match x.split(":").collect::<Vec<_>>().as_slice() {
+            match x.split(':').collect::<Vec<_>>().as_slice() {
                 [p, phases] => {
                     for x in phases.split(',') {
                         log_phases.insert(IRPhase::from_str(x).unwrap());
