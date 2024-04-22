@@ -17,7 +17,12 @@ use llvm_sys::{
     prelude::{LLVMModuleRef, LLVMValueRef},
 };
 use std::mem;
-use std::{arch::asm, ffi::c_void, ptr, slice, sync::Arc};
+use std::{
+    arch::asm,
+    ffi::{c_void, CString},
+    ptr, slice,
+    sync::Arc,
+};
 use yksmp::Location as SMLocation;
 
 /// Reads out registers spilled to the stack of the previous frame during the deoptimisation
@@ -262,7 +267,8 @@ extern "C" fn ts_reconstruct(ctx: *mut c_void, _module: LLVMModuleRef) -> LLVMEr
     info.nfi = Some(nfi);
     Box::into_raw(info);
 
-    unsafe { LLVMCreateStringError("".as_ptr() as *const i8) }
+    let cs = CString::new("").unwrap();
+    unsafe { LLVMCreateStringError(cs.into_raw()) }
 }
 
 /// Called when a guard failure occurs. After getting access to the global AOT module, passes all
