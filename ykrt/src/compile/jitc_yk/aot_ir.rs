@@ -617,6 +617,7 @@ pub(crate) struct Func {
     #[deku(until = "|v: &u8| *v == 0", map = "map_to_string")]
     name: String,
     type_idx: TypeIdx,
+    outline: bool,
     #[deku(temp)]
     num_bblocks: usize,
     #[deku(count = "num_bblocks", map = "map_to_tivec")]
@@ -626,6 +627,10 @@ pub(crate) struct Func {
 impl Func {
     fn is_declaration(&self) -> bool {
         self.bblocks.is_empty()
+    }
+
+    pub(crate) fn is_outline(&self) -> bool {
+        self.outline
     }
 
     /// Return the [BBlock] at the specified index.
