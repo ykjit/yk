@@ -72,7 +72,7 @@ unsafe fn patch_function(function_ptr: usize, code: *const u8, size: size_t) {
 
     // Set function memory page as writable.
     if mprotect(page_address, layout.size(), PROT_READ | PROT_WRITE) != 0 {
-        return;
+        panic!("Failed to change memory protection to be writable");
     }
     // Copy the new code over
     std::ptr::copy_nonoverlapping(code, function_ptr as *mut u8, size);
