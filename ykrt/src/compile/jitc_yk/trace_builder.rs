@@ -219,8 +219,13 @@ impl<'a> TraceBuilder<'a> {
                     }
                     self.handle_ptradd(&bid, inst_idx, ptr, off)
                 }
-                aot_ir::Instruction::BinaryOp { lhs, binop, rhs } => {
-                    self.handle_binop(&bid, inst_idx, lhs, binop, rhs)
+                aot_ir::Instruction::BinaryOp {
+                    lhs,
+                    binop: aot_ir::BinOp::Add,
+                    rhs,
+                } => self.handle_add(&bid, inst_idx, lhs, rhs),
+                aot_ir::Instruction::BinaryOp { binop, .. } => {
+                    todo!("{binop:?}");
                 }
                 aot_ir::Instruction::ICmp { lhs, pred, rhs, .. } => {
                     self.handle_icmp(&bid, inst_idx, lhs, pred, rhs)
@@ -357,19 +362,15 @@ impl<'a> TraceBuilder<'a> {
     }
 
     /// Translate binary operations such as add, sub, mul, etc.
-    fn handle_binop(
+    fn handle_add(
         &mut self,
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
         lhs: &aot_ir::Operand,
-        binop: &aot_ir::BinOp,
         rhs: &aot_ir::Operand,
     ) -> Result<(), CompilationError> {
-        let instr = jit_ir::BinOpInstruction::new(
-            self.handle_operand(lhs)?,
-            *binop,
-            self.handle_operand(rhs)?,
-        );
+        let instr =
+            jit_ir::AddInstruction::new(self.handle_operand(lhs)?, self.handle_operand(rhs)?);
         self.copy_instruction(instr.into(), bid, aot_inst_idx)
     }
 

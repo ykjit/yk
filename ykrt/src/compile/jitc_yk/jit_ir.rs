@@ -18,7 +18,7 @@ use typed_index_collections::TiVec;
 use ykaddr::addr::symbol_to_ptr;
 
 // This are simple and can be shared across both IRs.
-pub(crate) use super::aot_ir::{BinOp, Predicate};
+pub(crate) use super::aot_ir::Predicate;
 
 /// The `Module` is the top-level container for JIT IR.
 ///
@@ -1197,7 +1197,6 @@ pub enum Instruction {
     VACall(VACallInstruction),
     PtrAdd(PtrAddInstruction),
     Store(StoreInstruction),
-    BinOp(BinOpInstruction),
     Icmp(IcmpInstruction),
     Guard(GuardInstruction),
     /// Describes an argument into the trace function. Its main use is to allow us to track trace
@@ -1206,6 +1205,26 @@ pub enum Instruction {
     Arg(u16),
     /// Marks the place to loop back to at the end of the JITted code.
     TraceLoopStart,
+
+    // Binary operations
+    Add(AddInstruction),
+    Sub(SubInstruction),
+    Mul(MulInstruction),
+    Or(OrInstruction),
+    And(AndInstruction),
+    Xor(XorInstruction),
+    Shl(ShlInstruction),
+    AShr(AShrInstruction),
+    FAdd(FAddInstruction),
+    FDiv(FDivInstruction),
+    FMul(FMulInstruction),
+    FRem(FRemInstruction),
+    FSub(FSubInstruction),
+    LShr(LShrInstruction),
+    SDiv(SDivInstruction),
+    SRem(SRemInstruction),
+    UDiv(UDivInstruction),
+    URem(URemInstruction),
 }
 
 impl Instruction {
@@ -1231,11 +1250,13 @@ impl Instruction {
             Self::VACall(ci) => ci.target().func_type(m).ret_type_idx(),
             Self::PtrAdd(..) => m.ptr_type_idx(),
             Self::Store(..) => m.void_type_idx(),
-            Self::BinOp(bi) => bi.type_idx(m),
             Self::Icmp(_) => m.int8_type_idx(), // always returns a 0/1 valued byte.
             Self::Guard(..) => m.void_type_idx(),
             Self::Arg(..) => m.ptr_type_idx(),
             Self::TraceLoopStart => m.void_type_idx(),
+            // Binary operations
+            Self::Add(i) => i.type_idx(m),
+            x => todo!("{x:?}"),
         }
     }
 
@@ -1282,11 +1303,12 @@ impl JitIRDisplay for Instruction {
             Self::VACall(i) => i.to_string_impl(m, s, nums)?,
             Self::PtrAdd(i) => i.to_string_impl(m, s, nums)?,
             Self::Store(i) => i.to_string_impl(m, s, nums)?,
-            Self::BinOp(i) => i.to_string_impl(m, s, nums)?,
             Self::Icmp(i) => i.to_string_impl(m, s, nums)?,
             Self::Guard(i) => i.to_string_impl(m, s, nums)?,
             Self::Arg(i) => s.push_str(&format!("Arg({})", i)),
             Self::TraceLoopStart => s.push_str("TraceLoopStart"),
+            Self::Add(i) => i.to_string_impl(m, s, nums)?,
+            x => todo!("{x:?}"),
         }
         Ok(())
     }
@@ -1309,8 +1331,6 @@ instr!(LoadTraceInput, LoadTraceInputInstruction);
 instr!(Call, CallInstruction);
 instr!(VACall, VACallInstruction);
 instr!(PtrAdd, PtrAddInstruction);
-// FIXME: Use a macro for all binary operations?
-instr!(BinOp, BinOpInstruction);
 instr!(Icmp, IcmpInstruction);
 instr!(Guard, GuardInstruction);
 
@@ -1740,83 +1760,84 @@ impl JitIRDisplay for PtrAddInstruction {
     }
 }
 
-impl JitIRDisplay for BinOp {
-    fn to_string_impl(
-        &self,
-        _m: &Module,
-        s: &mut String,
-        _nums: &LocalNumbers<'_>,
-    ) -> Result<(), Box<dyn Error>> {
-        s.push_str(&format!("{:?}", self).to_lowercase());
-        Ok(())
-    }
-}
-
-/// The operands for a [Instruction::BinOp]
-///
-/// # Semantics
-///
-/// Performs a binary operation.
-///
-/// The naming convention used is based on infix notation, e.g. in `2 + 3`, "2" is the left-hand
-/// side (`lhs`), "+" is the binary operator (`binop`), and "3" is the right-hand side (`rhs`).
-#[derive(Debug)]
-pub struct BinOpInstruction {
-    /// The left-hand side of the operation.
-    lhs: PackedOperand,
-    /// The operation to perform.
-    binop: BinOp,
-    /// The right-hand side of the operation.
-    rhs: PackedOperand,
-}
-
-impl BinOpInstruction {
-    pub(crate) fn new(lhs: Operand, binop: BinOp, rhs: Operand) -> Self {
-        Self {
-            lhs: PackedOperand::new(&lhs),
-            binop,
-            rhs: PackedOperand::new(&rhs),
+macro_rules! bin_op {
+    ($discrim :ident, $struct: ident, $disp: literal) => {
+        #[derive(Debug)]
+        pub struct $struct {
+            /// The left-hand side of the operation.
+            lhs: PackedOperand,
+            /// The right-hand side of the operation.
+            rhs: PackedOperand,
         }
-    }
 
-    pub(crate) fn lhs(&self) -> Operand {
-        self.lhs.unpack()
-    }
+        impl $struct {
+            pub(crate) fn new(lhs: Operand, rhs: Operand) -> Self {
+                Self {
+                    lhs: PackedOperand::new(&lhs),
+                    rhs: PackedOperand::new(&rhs),
+                }
+            }
 
-    pub(crate) fn binop(&self) -> BinOp {
-        self.binop
-    }
+            pub(crate) fn lhs(&self) -> Operand {
+                self.lhs.unpack()
+            }
 
-    pub(crate) fn rhs(&self) -> Operand {
-        self.rhs.unpack()
-    }
+            pub(crate) fn rhs(&self) -> Operand {
+                self.rhs.unpack()
+            }
 
-    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
-        self.lhs.unpack().type_(m)
-    }
+            pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
+                self.lhs.unpack().type_(m)
+            }
 
-    /// Returns the type index of the operands being added.
-    pub(crate) fn type_idx(&self, m: &Module) -> TypeIdx {
-        self.lhs.unpack().type_idx(m)
-    }
+            /// Returns the type index of the operands being added.
+            pub(crate) fn type_idx(&self, m: &Module) -> TypeIdx {
+                self.lhs.unpack().type_idx(m)
+            }
+        }
+
+        impl JitIRDisplay for $struct {
+            fn to_string_impl(
+                &self,
+                m: &Module,
+                s: &mut String,
+                nums: &LocalNumbers<'_>,
+            ) -> Result<(), Box<dyn Error>> {
+                s.push_str($disp);
+                s.push_str(" ");
+                self.lhs().to_string_impl(m, s, nums)?;
+                s.push_str(", ");
+                self.rhs().to_string_impl(m, s, nums)?;
+                Ok(())
+            }
+        }
+
+        impl From<$struct> for Instruction {
+            fn from(instr: $struct) -> Instruction {
+                Instruction::$discrim(instr)
+            }
+        }
+    };
 }
 
-impl JitIRDisplay for BinOpInstruction {
-    fn to_string_impl(
-        &self,
-        m: &Module,
-        s: &mut String,
-        nums: &LocalNumbers<'_>,
-    ) -> Result<(), Box<dyn Error>> {
-        s.push_str("BinOp ");
-        self.lhs().to_string_impl(m, s, nums)?;
-        s.push_str(", ");
-        self.binop().to_string_impl(m, s, nums)?;
-        s.push_str(", ");
-        self.rhs().to_string_impl(m, s, nums)?;
-        Ok(())
-    }
-}
+bin_op!(Add, AddInstruction, "Add");
+bin_op!(Sub, SubInstruction, "Sub");
+bin_op!(Mul, MulInstruction, "Mul");
+bin_op!(Or, OrInstruction, "Or");
+bin_op!(And, AndInstruction, "And");
+bin_op!(Xor, XorInstruction, "Xor");
+bin_op!(Shl, ShlInstruction, "Shl");
+bin_op!(AShr, AShrInstruction, "AShr");
+bin_op!(FAdd, FAddInstruction, "FAdd");
+bin_op!(FDiv, FDivInstruction, "FDiv");
+bin_op!(FMul, FMulInstruction, "FMul");
+bin_op!(FRem, FRemInstruction, "FRem");
+bin_op!(FSub, FSubInstruction, "FSub");
+bin_op!(LShr, LShrInstruction, "LShr");
+bin_op!(SDiv, SDivInstruction, "SDiv");
+bin_op!(SRem, SRemInstruction, "SRem");
+bin_op!(UDiv, UDivInstruction, "UDiv");
+bin_op!(URem, URemInstruction, "URem");
 
 /// The operand for a [Instruction::Icmp]
 ///
