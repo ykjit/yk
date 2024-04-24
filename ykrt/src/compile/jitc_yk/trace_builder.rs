@@ -1,6 +1,6 @@
 //! The trace builder.
 
-use super::aot_ir::{self, AotIRDisplay, InstrIdx, Module};
+use super::aot_ir::{self, AotIRDisplay, BBlockId, InstrIdx, Module};
 use super::jit_ir;
 use crate::compile::CompilationError;
 use crate::trace::{AOTTraceIterator, TraceAction};
@@ -37,16 +37,13 @@ pub(crate) struct TraceBuilder<'a> {
     cp_block: Option<aot_ir::BBlockId>,
     // Index of the first traceinput instruction.
     first_ti_idx: usize,
-    // Was the last instruction we've processed a return?
-    last_instr_return: bool,
-    // Was the last block we processed mappable or not?
-    last_block_mappable: bool,
     // Inlined calls.
     frames: Vec<Frame<'a>>,
-    // Are we outlining?
-    outlining: bool,
-    // Frame index at which we started outlining.
-    outline_base: usize,
+    // The block at which to stop outlining.
+    outline_target_blk: Option<BBlockId>,
+    // Current count of recursive calls to the function in which outlining was started. Will be 0
+    // if `outline_target_blk` is None.
+    recursion_count: usize,
 }
 
 impl<'a> TraceBuilder<'a> {
@@ -62,11 +59,9 @@ impl<'a> TraceBuilder<'a> {
             local_map: HashMap::new(),
             cp_block: None,
             first_ti_idx: 0,
-            last_instr_return: false,
-            last_block_mappable: true,
             frames: vec![Frame::new(None, vec![])],
-            outlining: false,
-            outline_base: 0,
+            outline_target_blk: None,
+            recursion_count: 0,
         })
     }
 
@@ -187,25 +182,20 @@ impl<'a> TraceBuilder<'a> {
         nextbb: Option<aot_ir::BBlockId>,
     ) -> Result<(), CompilationError> {
         // unwrap safe: can't trace a block not in the AOT module.
-        self.last_instr_return = false;
         let blk = self.aot_mod.bblock(&bid);
 
         // Decide how to translate each AOT instruction.
         for (inst_idx, inst) in blk.instrs.iter().enumerate() {
-            if self.outlining {
-                if matches!(inst, aot_ir::Instruction::Ret { .. }) {
-                    self.last_instr_return = true;
-                }
-                continue;
-            }
             match inst {
-                aot_ir::Instruction::Br => Ok(()),
+                aot_ir::Instruction::Br { .. } => Ok(()),
                 aot_ir::Instruction::Load { ptr, type_idx } => {
                     self.handle_load(&bid, inst_idx, ptr, type_idx)
                 }
                 // FIXME: ignore remaining instructions after a call.
                 aot_ir::Instruction::Call { callee, args } => {
-                    self.handle_call(inst, &bid, inst_idx, callee, args)
+                    // Get the branch instruction of this block.
+                    let nextinst = blk.instrs.last().unwrap();
+                    self.handle_call(inst, &bid, inst_idx, callee, args, nextinst)
                 }
                 aot_ir::Instruction::Store { val, ptr } => {
                     self.handle_store(&bid, inst_idx, val, ptr)
@@ -508,6 +498,7 @@ impl<'a> TraceBuilder<'a> {
         aot_inst_idx: usize,
         callee: &aot_ir::FuncIdx,
         args: &[aot_ir::Operand],
+        nextinst: &'a aot_ir::Instruction,
     ) -> Result<(), CompilationError> {
         // Ignore special functions that we neither want to inline nor copy.
         if inst.is_stackmap_call(self.aot_mod) || inst.is_debug_call(self.aot_mod) {
@@ -535,7 +526,24 @@ impl<'a> TraceBuilder<'a> {
         } else {
             // This call can't be inlined. It is either unmappable (a declaration or an indirect
             // call) or the compiler annotated it with `yk_outline`.
-            self.outlining = true;
+            match nextinst {
+                aot_ir::Instruction::Br { succ } => {
+                    // We can only stop outlining when we see the succesor block and we are not in
+                    // the middle of recursion.
+                    let succbid = BBlockId::new(bid.func_idx(), *succ);
+                    self.outline_target_blk = Some(succbid);
+                    self.recursion_count = 0;
+                }
+                aot_ir::Instruction::CondBr { .. } => {
+                    // Currently, the successor of a call is always an unconditional branch due to
+                    // the block spitting pass. However, there's a FIXME in that pass which could
+                    // lead to conditional branches showing up here. Leave a todo here so we know
+                    // when this happens.
+                    todo!()
+                }
+                _ => panic!(),
+            }
+
             let jit_func_decl_idx = self.handle_func(*callee)?;
             let instr = if !self
                 .aot_mod
@@ -646,46 +654,32 @@ impl<'a> TraceBuilder<'a> {
                     match self.lookup_aot_block(&b) {
                         Some(bid) => {
                             // MappedAOTBBlock block
-
-                            if bid.is_entry() {
-                                // This is an entry block.
-                                if self.last_block_mappable {
-                                    // This is a normal call.
-                                    // FIXME: increment callstack
-                                    if self.outlining {
-                                        self.outline_base += 1;
+                            if let Some(ref tgtbid) = self.outline_target_blk {
+                                // We are currently outlining.
+                                if bid.func_idx() == tgtbid.func_idx() {
+                                    // We are inside the same function that started outlining.
+                                    if bid.is_entry() {
+                                        // We are recursing into the function that started
+                                        // outlining.
+                                        self.recursion_count += 1;
                                     }
+                                    if self.aot_mod.bblock(&bid).is_return() {
+                                        // We are returning from the function that started
+                                        // outlining. This may be one of multiple inlined calls, so
+                                        // we may not be done outlining just yet.
+                                        self.recursion_count -= 1;
+                                    }
+                                }
+                                if self.recursion_count == 0 && bid == *tgtbid {
+                                    // We've reached the successor block of the function/block that
+                                    // started outlining. We are done and can continue processing
+                                    // blocks normally.
+                                    self.outline_target_blk = None;
                                 } else {
-                                    // This is a callback from foreign code.
-                                }
-                                // FIXME: increment callstack
-                            } else {
-                                // This is a normal block.
-                                if !self.last_block_mappable {
-                                    // We've returned from a foreign call.
-                                    self.last_block_mappable = true;
-                                    if self.outline_base == 0 {
-                                        self.outlining = false;
-                                        self.last_instr_return = false;
-                                    }
-                                    continue;
-                                } else if self.last_instr_return {
-                                    // We've just returned from a normal call. This means we've
-                                    // already seen and processed this block and can skip it.
-                                    // FIXME: decrement callstack
-                                    if self.outlining {
-                                        self.outline_base -= 1;
-                                    }
-                                    self.last_block_mappable = true;
-                                    if self.outline_base == 0 {
-                                        self.outlining = false;
-                                        self.last_instr_return = false;
-                                    }
+                                    // We are outlining so just skip this block.
                                     continue;
                                 }
-                                // Process the block normally.
                             }
-                            self.last_block_mappable = true;
 
                             // In order to emit guards for conditional branches we need to peek at the next
                             // block.
@@ -700,11 +694,7 @@ impl<'a> TraceBuilder<'a> {
                             self.process_block(bid, nextbb)?;
                         }
                         None => {
-                            self.last_block_mappable = false;
                             // UnmappableBBlock block
-                            // Ignore for now. May be later used to make sense of the control flow. Though
-                            // ideally we remove unmappable basic blocks from the trace so we can
-                            // handle software and hardware traces the same.
                         }
                     }
                 }

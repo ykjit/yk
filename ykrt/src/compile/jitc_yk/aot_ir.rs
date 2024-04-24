@@ -366,7 +366,10 @@ pub(crate) enum Instruction {
         args: Vec<Operand>,
     },
     #[deku(id = "5")]
-    Br,
+    Br {
+        /// The block this branch points to.
+        succ: BBlockIdx,
+    },
     #[deku(id = "6")]
     CondBr {
         cond: Operand,
@@ -432,7 +435,7 @@ impl Instruction {
         match self {
             Self::Alloca { .. } => Some(&Type::Ptr),
             Self::BinaryOp { lhs, .. } => Some(lhs.type_(m)),
-            Self::Br => None,
+            Self::Br { .. } => None,
             Self::Call { callee, .. } => {
                 // The type of the newly-defined local is the return type of the callee.
                 if let Type::Func(ft) = m.type_(m.func(*callee).type_idx) {
@@ -530,7 +533,7 @@ impl AotIRDisplay for Instruction {
                 binop.to_string(m),
                 rhs.to_string(m)
             )),
-            Self::Br => ret.push_str("br"),
+            Self::Br { succ } => ret.push_str(&format!("br bb{}", usize::from(*succ))),
             Self::Call { callee, args } => {
                 let args_s = args
                     .iter()
@@ -588,6 +591,13 @@ pub(crate) struct BBlock {
     num_instrs: usize,
     #[deku(count = "num_instrs", map = "map_to_tivec")]
     pub(crate) instrs: TiVec<InstrIdx, Instruction>,
+}
+
+impl BBlock {
+    // Returns true if this block is terminated by a return, false otherwise.
+    pub fn is_return(&self) -> bool {
+        matches!(self.instrs.last().unwrap(), Instruction::Ret { .. })
+    }
 }
 
 impl AotIRDisplay for BBlock {
