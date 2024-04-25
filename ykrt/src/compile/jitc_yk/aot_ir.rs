@@ -256,6 +256,23 @@ impl AotIRDisplay for Predicate {
     }
 }
 
+/// The operations that a [Instruction::Cast] can perform.
+///
+/// FIXME: There are many other operations that we can add here on-demand. See the inheritance
+/// hierarchy here: https://llvm.org/doxygen/classllvm_1_1CastInst.html
+#[deku_derive(DekuRead)]
+#[derive(Debug, Clone, Copy)]
+#[deku(type = "u8")]
+pub(crate) enum CastKind {
+    SignExtend = 0,
+}
+
+impl AotIRDisplay for CastKind {
+    fn to_string(&self, _m: &Module) -> String {
+        format!("{:?}", self)
+    }
+}
+
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 #[deku(type = "u8")]
@@ -406,6 +423,17 @@ pub(crate) enum Instruction {
         binop: BinOp,
         rhs: Operand,
     },
+    /// An opcode that is designed to cover cast-like operations. E.g. bitcasts, sign extends, zero
+    /// extends etc.
+    #[deku(id = "12")]
+    Cast {
+        /// The cast-like operation to perform.
+        cast_kind: CastKind,
+        /// The value to be operated upon.
+        val: Operand,
+        /// The resulting type of the operation.
+        dest_type_idx: TypeIdx,
+    },
     #[deku(id = "255")]
     Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "map_to_string")] String),
 }
@@ -460,6 +488,7 @@ impl Instruction {
                 None
             }
             Self::Store { .. } => None,
+            Self::Cast { dest_type_idx, .. } => Some(m.type_(*dest_type_idx)),
             Self::Unimplemented(_) => None,
             _ => todo!("{:?}", self),
         }
@@ -575,6 +604,16 @@ impl AotIRDisplay for Instruction {
                 "insertvalue {}, {}",
                 agg.to_string(m),
                 elem.to_string(m)
+            )),
+            Self::Cast {
+                cast_kind,
+                val,
+                dest_type_idx,
+            } => ret.push_str(&format!(
+                "{} {}, {}",
+                cast_kind.to_string(m),
+                val.to_string(m),
+                m.types[*dest_type_idx].to_string(m)
             )),
             Self::Unimplemented(s) => ret.push_str(&format!("unimplemented <<{}>>", s)),
             _ => todo!(),

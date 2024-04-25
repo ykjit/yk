@@ -225,6 +225,11 @@ impl<'a> TraceBuilder<'a> {
                     debug_assert!(sm.is_stackmap_call(self.aot_mod));
                     self.handle_condbr(sm, nextbb.as_ref().unwrap(), cond, true_bb)
                 }
+                aot_ir::Instruction::Cast {
+                    cast_kind,
+                    val,
+                    dest_type_idx,
+                } => self.handle_cast(&bid, inst_idx, cast_kind, val, dest_type_idx),
                 aot_ir::Instruction::Ret { val } => self.handle_ret(&bid, inst_idx, val),
                 _ => todo!("{:?}", inst),
             }?;
@@ -605,6 +610,23 @@ impl<'a> TraceBuilder<'a> {
             }
             _ => todo!(),
         }
+    }
+
+    fn handle_cast(
+        &mut self,
+        bid: &aot_ir::BBlockId,
+        aot_inst_idx: usize,
+        cast_kind: &aot_ir::CastKind,
+        val: &aot_ir::Operand,
+        dest_type_idx: &aot_ir::TypeIdx,
+    ) -> Result<(), CompilationError> {
+        let instr = match cast_kind {
+            aot_ir::CastKind::SignExtend => jit_ir::SignExtendInstruction::new(
+                &self.handle_operand(val)?,
+                self.handle_type(*dest_type_idx)?,
+            ),
+        };
+        self.copy_instruction(instr.into(), bid, aot_inst_idx)
     }
 
     /// Entry point for building an IR trace.
