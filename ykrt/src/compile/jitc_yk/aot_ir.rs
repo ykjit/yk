@@ -41,7 +41,6 @@ const FORMAT_VERSION: u32 = 0;
 
 /// The symbol name of the control point function (after ykllvm has transformed it).
 const CONTROL_POINT_NAME: &str = "__ykrt_control_point";
-const STACKMAP_CALL_NAME: &str = "llvm.experimental.stackmap";
 const LLVM_DEBUG_CALL_NAME: &str = "llvm.dbg.value";
 
 /// The argument index of the trace inputs (live variables) struct at call-sites to the control
@@ -434,6 +433,16 @@ pub(crate) enum Instruction {
         /// The resulting type of the operation.
         dest_type_idx: TypeIdx,
     },
+    #[deku(id = "13")]
+    DeoptSafepoint {
+        id: Operand,
+        // FIXME: this is never used, do we need to serialize this?
+        num_shadow_bytes: Operand,
+        #[deku(temp)]
+        num_lives: u32,
+        #[deku(count = "num_lives")]
+        lives: Vec<Operand>,
+    },
     #[deku(id = "255")]
     Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "map_to_string")] String),
 }
@@ -489,6 +498,7 @@ impl Instruction {
             }
             Self::Store { .. } => None,
             Self::Cast { dest_type_idx, .. } => Some(m.type_(*dest_type_idx)),
+            Self::DeoptSafepoint { .. } => None,
             Self::Unimplemented(_) => None,
             _ => todo!("{:?}", self),
         }
@@ -519,9 +529,9 @@ impl Instruction {
         }
     }
 
-    pub(crate) fn is_stackmap_call(&self, aot_mod: &Module) -> bool {
+    pub(crate) fn is_safepoint(&self) -> bool {
         match self {
-            Self::Call { callee, .. } => aot_mod.func(*callee).name == STACKMAP_CALL_NAME,
+            Self::DeoptSafepoint { .. } => true,
             _ => false,
         }
     }
@@ -615,6 +625,14 @@ impl AotIRDisplay for Instruction {
                 val.to_string(m),
                 m.types[*dest_type_idx].to_string(m)
             )),
+            Self::DeoptSafepoint { id, lives, .. } => {
+                let args_s = lives
+                    .iter()
+                    .map(|a| a.to_string(m))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                ret.push_str(&format!("safepoint {}, [{}]", id.to_string(m), args_s,));
+            }
             Self::Unimplemented(s) => ret.push_str(&format!("unimplemented <<{}>>", s)),
             _ => todo!(),
         }
