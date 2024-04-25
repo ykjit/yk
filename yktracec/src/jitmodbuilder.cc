@@ -197,10 +197,8 @@ class JITModBuilder {
   bool Outlining = false;
   // The call depth at which we started outlining. Once we reached the same
   // depth after returning from a call, we can stop outlining.
-  size_t OutlineBase = 0;
   // Determines whether the last block in the trace was mappable or not.
   // Required to make assumptions about the control flow of the trace.
-  bool LastBlockMappable = true;
   // The last basic block that was processed. Required to handle PHI nodes, and
   // for sanity checking control flow.
   BasicBlock *LastBB = nullptr;
@@ -245,6 +243,10 @@ class JITModBuilder {
   // Set to true if SoftwareTracer is used.
   bool IsSWTrace = false;
 
+  IRBlock *outlineTargetBlk = nullptr;
+
+  int RecursionCount = 0;
+
   Value *getMappedValue(Value *V) {
     if (VMap.find(V) != VMap.end()) {
       return VMap[V];
@@ -284,7 +286,7 @@ class JITModBuilder {
   }
 
   void handleCallInst(CallInst *CI, Function *CF, size_t &CurBBIdx,
-                      size_t &CurInstrIdx) {
+                      size_t &CurInstrIdx, Instruction *nextInst) {
     if (CF == nullptr || CF->isDeclaration()) {
       // The definition of the callee is external to AOTMod. It will be
       // outlined, but we still need to declare it locally if we have not
@@ -292,11 +294,10 @@ class JITModBuilder {
       if (CF != nullptr && VMap.find(CF) == VMap.end()) {
         declareFunction(CF);
       }
-      if (!Outlining) {
-        copyInstruction(&Builder, (Instruction *)&*CI, CurBBIdx, CurInstrIdx);
-        OutlineBase = CallStack.size();
-        Outlining = true;
-      }
+      // if (!Outlining) {
+      //   copyInstruction(&Builder, (Instruction *)&*CI, CurBBIdx,
+      //   CurInstrIdx); OutlineBase = CallStack.size(); Outlining = true;
+      // }
     } else {
       // Calling to a non-foreign function.
       if (!Outlining) {
@@ -313,8 +314,15 @@ class JITModBuilder {
           }
           copyInstruction(&Builder, CI, CurBBIdx, CurInstrIdx);
           OutlineBase = CallStack.size();
-          Outlining = true;
+          // Outlining = true;
         } else {
+
+          if (isa<BranchInst>(nextInst)) {
+            auto successorBlockId = nullptr; // TODO: get successor somehow -> BBlockId::new(bid.func_idx(), *succ);
+            outlineTargetBlk = successorBlockId;
+            RecursionCount = 0;
+          }
+
           // Otherwise keep the call inlined.
           // Remap function arguments to the variables passed in by the caller.
           for (unsigned int i = 0; i < CI->arg_size(); i++) {
@@ -1051,6 +1059,8 @@ public:
                          AOTValsLen, Promotions, PromotionsLen);
   }
 
+  int getFunctionIndex(BasicBlock *BB) { return 0; }
+
   // Generate the JIT module by "glueing together" blocks that the trace
   // executed in the AOT module.
   Module *createModule() {
@@ -1066,7 +1076,6 @@ public:
       TraceLoc Loc = InpTrace[Idx];
 
       if (UnmappableRegion *UR = Loc.getUnmappableRegion()) {
-        LastBlockMappable = false;
         LastInst = nullptr;
         LastBB = nullptr;
         continue;
@@ -1077,388 +1086,369 @@ public:
       CurBBIdx = IB->BBIdx;
 
       auto [F, BB] = getLLVMAOTFuncAndBlock(IB);
+      IRBlock *nextBB = nullptr;
 
-      // For outlining to function, we need to reliably detect recursive calls
-      // and callbacks from unmappable blocks (i.e. external functions). Thanks
-      // to two extra LLVM passes (one ensuring no calls can appear in entry
-      // blocks, and another splitting blocks after calls) we can infer the
-      // control flow from the type of block we see and the last instruction
-      // that was processed. For example, if the last block was unmappable and
-      // the current block is mappable and an entry block, we know that this
-      // must be a callback from an external function. While the CallStack
-      // isn't strictly needed to implement this, it is required for
-      // deoptimisation as it collects the stackmap calls of inlined functions.
-      // We thus use it here as a simple counter to keep track of the call
-      // depths.
-      if (BB->isEntryBlock()) {
-        LastBB = nullptr;
-        if (!LastBlockMappable) {
-          // Unmappable code called back into mappable code.
-          LastBlockMappable = true;
-        } else {
-          // A normal call from a mappable block into another mappable block.
-          // Find the stackmap of the previous frame and add it to the
-          // callstack.
-          assert(LastInst && isa<CallInst>(LastInst));
-          CallInst *SMC = cast<CallInst>(LastInst->getNextNode());
-          CallStack.push_back(SMC);
-        }
-      } else {
-        // If the last block was unmappable or the last instruction was a
-        // return, then we are returning from a call. Since we've already
-        // processed all instructions in this block, we can just skip it.
-        if (!LastBlockMappable) {
-          LastBlockMappable = true;
-          LastBB = BB;
-          if (CallStack.size() == OutlineBase) {
-            Outlining = false;
-            OutlineBase = 0;
+      // Handle outlining.
+      if (BB && outlineTargetBlk) {
+        auto [outlineF, outlineBB] = getLLVMAOTFuncAndBlock(outlineTargetBlk);
+        // We are currently outlining.
+        if (F == outlineF) {
+          // We are inside the same function that started outlining.
+          if (BB->isEntryBlock()) {
+            // We are recursing into the function that started outlining.
+            RecursionCount += 1;
           }
-          continue;
-        } else if (LastInst && isa<ReturnInst>(LastInst)) {
-          LastInst = nullptr;
-          if (!IsSWTrace) {
-            assert(CallStack.back()->getParent() == BB);
+          if (isa<ReturnInst>(BB->getTerminator())) {
+            // We are returning from the function that started outlining. This
+            // may be oneLastInst of multiple inlined calls, so we may not be
+            // done outlining just yet.
+            RecursionCount -= 1;
           }
-          LastBB = CallStack.back()->getParent();
-          CallStack.pop_back();
-          if (CallStack.size() == OutlineBase) {
-            Outlining = false;
-            OutlineBase = 0;
-          }
-          if (!IsSWTrace)
+
+          if (RecursionCount == 0 && BB == outlineBB) {
+            // We've reached the successor block of the function/block that
+            // started outlining. We are done and can continue processing
+            // blocks normally.
+            outlineTargetBlk = nullptr;
+          } else {
+            // We are outlining so just skip this block.
             continue;
-        }
-        if (IsSWTrace) {
-          // In the software tracer external calls are invisible. So when an
-          // external call has started outlining we don't necessarily see a
-          // return, so we need to check for every block if we've reached the
-          // same callstack in order to stop outlining.
-          if (CallStack.size() == OutlineBase) {
-            Outlining = false;
-            OutlineBase = 0;
           }
         }
       }
+
+      if (IsSWTrace) {
+        // In the software tracer external calls are invisible. So when an
+        // external call has started outlining we don't necessarily see a
+        // return, so we need to check for every block if we've reached the
+        // same callstack in order to stop outlining.
+        if (CallStack.size() == OutlineBase) {
+          Outlining = false;
+          OutlineBase = 0;
+        }
+      }
+    }
 
 #ifndef NDEBUG
-      // `BB` should be a successor of the last block executed in this frame.
-      if (LastBB) {
-        bool PredFound = false;
-        for (BasicBlock *PBB : predecessors(BB)) {
-          if (PBB == LastBB) {
-            PredFound = true;
-            break;
-          }
+    // `BB` should be a successor of the last block executed in this frame.
+    if (LastBB) {
+      bool PredFound = false;
+      for (BasicBlock *PBB : predecessors(BB)) {
+        if (PBB == LastBB) {
+          PredFound = true;
+          break;
         }
-        assert(PredFound);
       }
+      assert(PredFound);
+    }
 #endif
 
-      // The index of the instruction in `BB` that we are currently processing.
-      CurInstrIdx = 0;
+    // The index of the instruction in `BB` that we are currently processing.
+    CurInstrIdx = 0;
 
-      // Iterate over all instructions within this block and copy them over
-      // to our new module.
-      for (; CurInstrIdx < BB->size(); CurInstrIdx++) {
-        auto I = BB->begin();
-        std::advance(I, CurInstrIdx);
-        assert(I != BB->end());
+    // Iterate over all instructions within this block and copy them over
+    // to our new module.
+    for (; CurInstrIdx < BB->size(); CurInstrIdx++) {
+      auto I = BB->begin();
+      std::advance(I, CurInstrIdx);
+      assert(I != BB->end());
 
-        // Skip calls to debug intrinsics (e.g. @llvm.dbg.value). We don't
-        // currently handle debug info and these "pseudo-calls" cause our blocks
-        // to be prematurely terminated.
-        if (isa<DbgInfoIntrinsic>(I))
-          continue;
-        LastInst = &*I;
+      // Skip calls to debug intrinsics (e.g. @llvm.dbg.value). We don't
+      // currently handle debug info and these "pseudo-calls" cause our blocks
+      // to be prematurely terminated.
+      if (isa<DbgInfoIntrinsic>(I))
+        continue;
+      LastInst = &*I;
 
-        if (isa<CallInst>(I)) {
-          if (isa<IntrinsicInst>(I)) {
-            Intrinsic::ID IID = cast<CallBase>(I)->getIntrinsicID();
+      if (isa<CallInst>(I)) {
+        if (isa<IntrinsicInst>(I)) {
+          Intrinsic::ID IID = cast<CallBase>(I)->getIntrinsicID();
 
-            // `llvm.lifetime.start.*` and `llvm.lifetime.end.*` are
-            // annotations added by some compiler front-ends to allow backends
-            // to perform stack slot optimisations.
-            //
-            // Removing these annotations makes generated code slightly less
-            // efficient, but does not affect correctness, so we remove them to
-            // make our lives easier.
-            //
-            // OPT: Consider leaving the annotations in, or generating our own
-            // annotations, so that our compiled traces can take advantage of
-            // stack slot optimisations.
-            if ((IID == Intrinsic::lifetime_start) ||
-                (IID == Intrinsic::lifetime_end))
-              continue;
+          // `llvm.lifetime.start.*` and `llvm.lifetime.end.*` are
+          // annotations added by some compiler front-ends to allow backends
+          // to perform stack slot optimisations.
+          //
+          // Removing these annotations makes generated code slightly less
+          // efficient, but does not affect correctness, so we remove them to
+          // make our lives easier.
+          //
+          // OPT: Consider leaving the annotations in, or generating our own
+          // annotations, so that our compiled traces can take advantage of
+          // stack slot optimisations.
+          if ((IID == Intrinsic::lifetime_start) ||
+              (IID == Intrinsic::lifetime_end))
+            continue;
 
-            // This intrinsic is used in AOTMod to pass the current frame
-            // address into the control point which is required for stack
-            // reconstruction. There's no use for this inside JITMod, so just
-            // ignore it.
-            if (IID == Intrinsic::frameaddress)
-              continue;
+          // This intrinsic is used in AOTMod to pass the current frame
+          // address into the control point which is required for stack
+          // reconstruction. There's no use for this inside JITMod, so just
+          // ignore it.
+          if (IID == Intrinsic::frameaddress)
+            continue;
 
-            // Calls to `llvm.experimental.stackmap` are not really calls and
-            // they generate no code anyway. We can skip them.
-            if (IID == Intrinsic::experimental_stackmap) {
-              continue;
+          // Calls to `llvm.experimental.stackmap` are not really calls and
+          // they generate no code anyway. We can skip them.
+          if (IID == Intrinsic::experimental_stackmap) {
+            continue;
+          }
+
+          // Whitelist intrinsics that appear to be always inlined.
+          if (std::find(AlwaysInlinedIntrinsics.begin(),
+                        AlwaysInlinedIntrinsics.end(),
+                        IID) != AlwaysInlinedIntrinsics.end()) {
+            if (!Outlining) {
+              copyInstruction(&Builder, cast<CallInst>(I), CurBBIdx,
+                              CurInstrIdx);
             }
+            continue;
+          }
 
-            // Whitelist intrinsics that appear to be always inlined.
-            if (std::find(AlwaysInlinedIntrinsics.begin(),
-                          AlwaysInlinedIntrinsics.end(),
-                          IID) != AlwaysInlinedIntrinsics.end()) {
+          // Since blocks can only contains a single call, we can tell
+          // whether this intrinsic was inlined at compile time by peeking at
+          // the next block in the trace. If it is unmappable, this intrinsic
+          // wasn't inlined and we need to copy the call into the JIT module.
+          // FIXME: What to do about intrinsics that call back to mappable
+          // code. As far as I can tell, there's only one intrinsics that
+          // allows this: llvm.init.trampoline. Investigate if this is a
+          // problem.
+          if (Idx + 1 < InpTrace.Length()) {
+            if (UnmappableRegion *UR =
+                    InpTrace[Idx + 1].getUnmappableRegion()) {
+              // The next block is unmappable, which means this intrinsic
+              // wasn't inlined and we need to copy the call instruction.
               if (!Outlining) {
                 copyInstruction(&Builder, cast<CallInst>(I), CurBBIdx,
                                 CurInstrIdx);
               }
-              continue;
-            }
-
-            // Since blocks can only contains a single call, we can tell
-            // whether this intrinsic was inlined at compile time by peeking at
-            // the next block in the trace. If it is unmappable, this intrinsic
-            // wasn't inlined and we need to copy the call into the JIT module.
-            // FIXME: What to do about intrinsics that call back to mappable
-            // code. As far as I can tell, there's only one intrinsics that
-            // allows this: llvm.init.trampoline. Investigate if this is a
-            // problem.
-            if (Idx + 1 < InpTrace.Length()) {
-              if (UnmappableRegion *UR =
-                      InpTrace[Idx + 1].getUnmappableRegion()) {
-                // The next block is unmappable, which means this intrinsic
-                // wasn't inlined and we need to copy the call instruction.
-                if (!Outlining) {
-                  copyInstruction(&Builder, cast<CallInst>(I), CurBBIdx,
-                                  CurInstrIdx);
-                }
-                break;
-              }
+              break;
             }
           }
+        }
 
-          CallInst *CI = cast<CallInst>(I);
-          Function *CF = CI->getCalledFunction();
-          if (CF == nullptr) {
-            // The target isn't statically known, so we can't inline the
-            // callee.
-            if (!isa<InlineAsm>(CI->getCalledOperand())) {
-              // Look ahead in the trace to find the callee so we can
-              // map the arguments if we are inlining the call.
-              assert(Idx + 1 < InpTrace.Length());
-              TraceLoc MaybeNextIB = InpTrace[Idx + 1];
-              if (const IRBlock *NextIB = MaybeNextIB.getMappedBlock()) {
-                if (IsSWTrace) {
-                  // YKFIXME: outline indirect calls in swt.
-                  // Peeking ahead in swt might give us a mappable entry block,
-                  // however we don't know if there was an umappable call in
-                  // between.
-                  CF = nullptr;
-                } else {
-                  CF = AOTMod->getFunction(NextIB->FuncName);
-                }
-              } else {
+        CallInst *CI = cast<CallInst>(I);
+        Function *CF = CI->getCalledFunction();
+        if (CF == nullptr) {
+          // The target isn't statically known, so we can't inline the
+          // callee.
+          if (!isa<InlineAsm>(CI->getCalledOperand())) {
+            // Look ahead in the trace to find the callee so we can
+            // map the arguments if we are inlining the call.
+            assert(Idx + 1 < InpTrace.Length());
+            TraceLoc MaybeNextIB = InpTrace[Idx + 1];
+            if (const IRBlock *NextIB = MaybeNextIB.getMappedBlock()) {
+              if (IsSWTrace) {
+                // YKFIXME: outline indirect calls in swt.
+                // Peeking ahead in swt might give us a mappable entry block,
+                // however we don't know if there was an umappable call in
+                // between.
                 CF = nullptr;
+              } else {
+                CF = AOTMod->getFunction(NextIB->FuncName);
               }
-              // FIXME Don't inline indirect calls unless promoted.
-              handleCallInst(CI, CF, CurBBIdx, CurInstrIdx);
-              break;
             } else {
-              // This is an inlineasm instruction so just copy it. We don't
-              // currently support any inline asm that isn't the empty string,
-              // since calls within the asm messes up the blockmap.
-              // FIXME: To fix this, we could parse the asm and count the
-              // calls. However, parsing asm is complicated and even LLVM's
-              // parser can bail. Alternatively, we could annotate blocks when
-              // they contain inline asm and change the PT decoder so that it
-              // disassembles those blocks to figure out how many calls the asm
-              // contains.
-              if (!cast<InlineAsm>(CI->getCalledOperand())
-                       ->getAsmString()
-                       .empty()) {
-                errs() << "InlineAsm is currently not supported.";
-                exit(EXIT_FAILURE);
-              }
-              if (!Outlining) {
-                copyInstruction(&Builder, (Instruction *)&*CI, CurBBIdx,
-                                CurInstrIdx);
-              }
-              break;
+              CF = nullptr;
             }
-          } else if (CF->getName().starts_with(PromoteRecFnPrefix)) {
-            // A value is being promoted to a constant.
-            handlePromote(CI, BB, CurBBIdx, CurInstrIdx);
+            // FIXME Don't inline indirect calls unless promoted.
+            handleCallInst(CI, CF, CurBBIdx, CurInstrIdx, BB->getTerminator());
             break;
           } else {
-            StringRef S = CF->getName();
-            if (S == "_setjmp" || S == "_longjmp") {
-              // FIXME: We currently can't deal with traces containing
-              // setjmp/longjmp, so for now simply abort this trace.
-              // See: https://github.com/ykjit/yk/issues/610
-              return nullptr;
-            } else if (IsSWTrace && S == "yk_trace_basicblock") {
-              // YKFIXME: Skip tracing calls handling. This logic should move to
-              // SWT tracer.
-              continue;
+            // This is an inlineasm instruction so just copy it. We don't
+            // currently support any inline asm that isn't the empty string,
+            // since calls within the asm messes up the blockmap.
+            // FIXME: To fix this, we could parse the asm and count the
+            // calls. However, parsing asm is complicated and even LLVM's
+            // parser can bail. Alternatively, we could annotate blocks when
+            // they contain inline asm and change the PT decoder so that it
+            // disassembles those blocks to figure out how many calls the asm
+            // contains.
+            if (!cast<InlineAsm>(CI->getCalledOperand())
+                     ->getAsmString()
+                     .empty()) {
+              errs() << "InlineAsm is currently not supported.";
+              exit(EXIT_FAILURE);
             }
-            handleCallInst(CI, CF, CurBBIdx, CurInstrIdx);
+            if (!Outlining) {
+              copyInstruction(&Builder, (Instruction *)&*CI, CurBBIdx,
+                              CurInstrIdx);
+            }
             break;
           }
-        }
-
-        if (isa<ReturnInst>(I)) {
-          handleReturnInst(&*I, CurBBIdx, CurInstrIdx);
+        } else if (CF->getName().starts_with(PromoteRecFnPrefix)) {
+          // A value is being promoted to a constant.
+          handlePromote(CI, BB, CurBBIdx, CurInstrIdx);
+          break;
+        } else {
+          StringRef S = CF->getName();
+          if (S == "_setjmp" || S == "_longjmp") {
+            // FIXME: We currently can't deal with traces containing
+            // setjmp/longjmp, so for now simply abort this trace.
+            // See: https://github.com/ykjit/yk/issues/610
+            return nullptr;
+          } else if (IsSWTrace && S == "yk_trace_basicblock") {
+            // YKFIXME: Skip tracing calls handling. This logic should move to
+            // SWT tracer.
+            continue;
+          }
+          handleCallInst(CI, CF, CurBBIdx, CurInstrIdx, BB->getTerminator());
           break;
         }
+      }
 
-        if (Outlining) {
-          // We are currently ignoring an inlined function.
-          continue;
-        }
+      if (isa<ReturnInst>(I)) {
+        handleReturnInst(&*I, CurBBIdx, CurInstrIdx);
+        break;
+      }
 
-        if ((isa<BranchInst>(I)) || (isa<IndirectBrInst>(I)) ||
-            (isa<SwitchInst>(I))) {
-          handleBranchingControlFlow(&*I, Idx, JITFunc, CurBBIdx, CurInstrIdx);
-          break;
-        }
+      if (Outlining) {
+        // We are currently ignoring an inlined function.
+        continue;
+      }
 
-        if (isa<PHINode>(I)) {
-          handlePHINode(&*I, LastBB, CurBBIdx, CurInstrIdx);
-          continue;
-        }
+      if ((isa<BranchInst>(I)) || (isa<IndirectBrInst>(I)) ||
+          (isa<SwitchInst>(I))) {
+        RecursionCount = 0;
+        handleBranchingControlFlow(&*I, Idx, JITFunc, CurBBIdx, CurInstrIdx);
+        break;
+      }
 
-        if (Idx < InpTrace.Length()) {
-          // Stores into YkCtrlPointVars only need to be copied if they appear
-          // at the beginning or end of the trace. Any YkCtrlPointVars stores
-          // inbetween come from tracing over the control point and aren't
-          // needed. We remove them here to reduce the size of traces.
-          if (isa<GetElementPtrInst>(I)) {
-            GetElementPtrInst *GEP = cast<GetElementPtrInst>(I);
-            if (GEP->getPointerOperand() == TraceInputs) {
-              // Collect stores
-              std::vector<Value *> Stores;
-              while (isa<GetElementPtrInst>(I)) {
-                assert(cast<GetElementPtrInst>(I)->getPointerOperand() ==
-                       TraceInputs);
-                I++;
-                CurInstrIdx++;
-                assert(isa<StoreInst>(I));
-                Stores.insert(Stores.begin(),
-                              cast<StoreInst>(I)->getValueOperand());
-                I++;
-                CurInstrIdx++;
-              }
-              if (Idx == InpTrace.Length() - 1) {
-                // Once we reached the YkCtrlPointVars stores at the end of the
-                // trace, we're done. We don't need to copy those instructions
-                // over, since all YkCtrlPointVars are stored on the shadow
-                // stack.
-                // FIXME: Once we allow more optimisations in AOT, some of the
-                // YkCtrlPointVars won't be stored on the shadow stack anymore,
-                // and we might have to insert PHI nodes into the loop entry
-                // block.
-                I++;
-                CurInstrIdx++;
-                assert(isa<CallInst>(I)); // control point call
-                I++;
-                CurInstrIdx++;
-                assert(isa<CallInst>(I)); // stackmap call
-                if (IsSideTrace) {
-                  // We can't currently loop back to the parent trace when the
-                  // side trace reaches its end (this requires patching the
-                  // parent trace). Instead we simply guard fail back to the
-                  // main interpreter.
-                  BasicBlock *FailBB = getGuardFailureBlock(
-                      BB, CurBBIdx, &*I, CurInstrIdx, GuardCount);
-                  Builder.CreateBr(FailBB);
-                }
-                break;
-              }
-              // Skip frameaddress, control point, and stackmap call
-              // instructions.
-              assert(isa<CallInst>(I)); // frameaddr call
+      if (isa<PHINode>(I)) {
+        handlePHINode(&*I, LastBB, CurBBIdx, CurInstrIdx);
+        continue;
+      }
+
+      if (Idx < InpTrace.Length()) {
+        // Stores into YkCtrlPointVars only need to be copied if they appear
+        // at the beginning or end of the trace. Any YkCtrlPointVars stores
+        // inbetween come from tracing over the control point and aren't
+        // needed. We remove them here to reduce the size of traces.
+        if (isa<GetElementPtrInst>(I)) {
+          GetElementPtrInst *GEP = cast<GetElementPtrInst>(I);
+          if (GEP->getPointerOperand() == TraceInputs) {
+            // Collect stores
+            std::vector<Value *> Stores;
+            while (isa<GetElementPtrInst>(I)) {
+              assert(cast<GetElementPtrInst>(I)->getPointerOperand() ==
+                     TraceInputs);
+              I++;
+              CurInstrIdx++;
+              assert(isa<StoreInst>(I));
+              Stores.insert(Stores.begin(),
+                            cast<StoreInst>(I)->getValueOperand());
+              I++;
+              CurInstrIdx++;
+            }
+            if (Idx == InpTrace.Length() - 1) {
+              // Once we reached the YkCtrlPointVars stores at the end of the
+              // trace, we're done. We don't need to copy those instructions
+              // over, since all YkCtrlPointVars are stored on the shadow
+              // stack.
+              // FIXME: Once we allow more optimisations in AOT, some of the
+              // YkCtrlPointVars won't be stored on the shadow stack anymore,
+              // and we might have to insert PHI nodes into the loop entry
+              // block.
               I++;
               CurInstrIdx++;
               assert(isa<CallInst>(I)); // control point call
               I++;
               CurInstrIdx++;
               assert(isa<CallInst>(I)); // stackmap call
-              LastInst = &*I;
-              I++;
-              CurInstrIdx++;
-
-              // We've seen the control point so the next block will be
-              // unmappable.
-              if (!Outlining) {
-                assert(OutlineBase == 0);
-                Outlining = true;
+              if (IsSideTrace) {
+                // We can't currently loop back to the parent trace when the
+                // side trace reaches its end (this requires patching the
+                // parent trace). Instead we simply guard fail back to the
+                // main interpreter.
+                BasicBlock *FailBB = getGuardFailureBlock(
+                    BB, CurBBIdx, &*I, CurInstrIdx, GuardCount);
+                Builder.CreateBr(FailBB);
               }
               break;
             }
+            // Skip frameaddress, control point, and stackmap call
+            // instructions.
+            assert(isa<CallInst>(I)); // frameaddr call
+            I++;
+            CurInstrIdx++;
+            assert(isa<CallInst>(I)); // control point call
+            I++;
+            CurInstrIdx++;
+            assert(isa<CallInst>(I)); // stackmap call
+            LastInst = &*I;
+            I++;
+            CurInstrIdx++;
+
+            // We've seen the control point so the next block will be
+            // unmappable.
+            if (!Outlining) {
+              assert(OutlineBase == 0);
+              Outlining = true;
+            }
+            break;
           }
         }
-
-        // If execution reaches here, then the instruction I is to be copied
-        // into JITMod.
-        copyInstruction(&Builder, (Instruction *)&*I, CurBBIdx, CurInstrIdx);
       }
-      LastBB = BB;
-    }
 
-    // If the trace succeeded, loop back to the top. The only way to leave the
-    // trace is via a guard failure.
-    if (LoopEntryBB) {
-      Builder.CreateBr(LoopEntryBB);
+      // If execution reaches here, then the instruction I is to be copied
+      // into JITMod.
+      copyInstruction(&Builder, (Instruction *)&*I, CurBBIdx, CurInstrIdx);
     }
-    finalise(AOTMod, &Builder);
-    return JITMod;
+    LastBB = BB;
   }
+
+  // If the trace succeeded, loop back to the top. The only way to leave the
+  // trace is via a guard failure.
+  if (LoopEntryBB) {
+    Builder.CreateBr(LoopEntryBB);
+  }
+  finalise(AOTMod, &Builder);
+  return JITMod;
+}
 
   /// Handle promotions.
   void handlePromote(CallInst *CI, BasicBlock *BB, size_t CurBBIdx,
                      size_t CurInstrIdx) {
-    // First lookup the constant value the trace is going to use.
-    assert(PromotionsOff < InpTrace.PromotionsLen);
-    uint64_t PConst = InpTrace.Promotions[PromotionsOff++];
-    Value *PConstLL =
-        Builder.getIntN(PointerSizedIntTy->getIntegerBitWidth(), PConst);
-    Value *PromoteVar = CI->getArgOperand(0);
-    Value *JITPromoteVar = getMappedValue(PromoteVar);
+  // First lookup the constant value the trace is going to use.
+  assert(PromotionsOff < InpTrace.PromotionsLen);
+  uint64_t PConst = InpTrace.Promotions[PromotionsOff++];
+  Value *PConstLL =
+      Builder.getIntN(PointerSizedIntTy->getIntegerBitWidth(), PConst);
+  Value *PromoteVar = CI->getArgOperand(0);
+  Value *JITPromoteVar = getMappedValue(PromoteVar);
 
-    // By promoting a value to a constant, we specialised the remainder of the
-    // trace to that constant value. We must emit a guard that ensures that we
-    // doptimise if the promoted value deviates from the "baked-in" constant.
+  // By promoting a value to a constant, we specialised the remainder of the
+  // trace to that constant value. We must emit a guard that ensures that we
+  // doptimise if the promoted value deviates from the "baked-in" constant.
 
-    BasicBlock *FailBB = getGuardFailureBlock(BB, CurBBIdx, CI->getNextNode(),
-                                              CurInstrIdx, GuardCount);
-    BasicBlock *SuccBB = BasicBlock::Create(JITMod->getContext(),
-                                            GUARD_SUCCESS_BLOCK_NAME, JITFunc);
-    Value *Deopt = Builder.CreateICmp(CmpInst::Predicate::ICMP_NE,
-                                      JITPromoteVar, PConstLL);
-    Builder.CreateCondBr(Deopt, FailBB, SuccBB);
+  BasicBlock *FailBB = getGuardFailureBlock(BB, CurBBIdx, CI->getNextNode(),
+                                            CurInstrIdx, GuardCount);
+  BasicBlock *SuccBB = BasicBlock::Create(JITMod->getContext(),
+                                          GUARD_SUCCESS_BLOCK_NAME, JITFunc);
+  Value *Deopt =
+      Builder.CreateICmp(CmpInst::Predicate::ICMP_NE, JITPromoteVar, PConstLL);
+  Builder.CreateCondBr(Deopt, FailBB, SuccBB);
 
-    // Carry on constructing the trace module in the success block.
-    Builder.SetInsertPoint(SuccBB);
+  // Carry on constructing the trace module in the success block.
+  Builder.SetInsertPoint(SuccBB);
 
-    // You might think that we need to do: `VMap[CI] = PConstLL` so as to use
-    // the constant in place of the promoted value from here onward.
-    //
-    // As it happens, the guard we just inserted already gives LLVM everything
-    // it needs to promote the value for us.
-    //
-    // If we trace a `yk_promote(x)` when `x==5`, then the trace compiler
-    // makes a guard that says "if x!=5 then goto the guard failure block,
-    // otherwise goto the guard success block". It is then likely that LLVM
-    // will infer that `x==5` in the guard success block and propagate the
-    // constant for us automatically.
+  // You might think that we need to do: `VMap[CI] = PConstLL` so as to use
+  // the constant in place of the promoted value from here onward.
+  //
+  // As it happens, the guard we just inserted already gives LLVM everything
+  // it needs to promote the value for us.
+  //
+  // If we trace a `yk_promote(x)` when `x==5`, then the trace compiler
+  // makes a guard that says "if x!=5 then goto the guard failure block,
+  // otherwise goto the guard success block". It is then likely that LLVM
+  // will infer that `x==5` in the guard success block and propagate the
+  // constant for us automatically.
 
-    // We will have traced the constant recorder. We don't want that in
-    // the trace so a) we don't copy the call, and b) we enter
-    // outlining mode.
-    Outlining = true;
-    OutlineBase = CallStack.size();
-  }
-};
+  // We will have traced the constant recorder. We don't want that in
+  // the trace so a) we don't copy the call, and b) we enter
+  // outlining mode.
+  Outlining = true;
+  OutlineBase = CallStack.size();
+}
+}
+;
 
 tuple<Module *, string, void *, size_t>
 createModule(Module *AOTMod, char *FuncNames[], size_t BBs[], size_t TraceLen,
