@@ -16,7 +16,7 @@ use std::{
 use typed_index_collections::TiVec;
 use ykaddr::addr::symbol_to_ptr;
 
-// This are simple and can be shared across both IRs.
+// This is simple and can be shared across both IRs.
 pub(crate) use super::aot_ir::Predicate;
 
 /// The `Module` is the top-level container for JIT IR.
