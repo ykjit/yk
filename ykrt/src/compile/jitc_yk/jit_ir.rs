@@ -1,6 +1,21 @@
-//! The Yk JIT IR
+//! The JIT's Intermediate Representation (IR).
 //!
-//! This is the in-memory trace IR constructed by the trace builder and mutated by optimisations.
+//! This is the IR created by [trace_builder] and which is then optimised. The IR can feel a little
+//! odd at first because we store indexes into vectors rather than use direct references. This
+//! allows us to squeeze the amount of the memory used down (and also bypasses issues with
+//! representing graph structures in Rust, but that's slightly accidental).
+//!
+//! Because using the IR can often involve getting hold of data nested several layers deep, we also
+//! use a number of abbreviations/conventions to keep the length of source down to something
+//! manageable (in alphabetical order):
+//!
+//!  * `const_`: a "constant"
+//!  * `decl`: a "declaration" (e.g. a "function declaration" is a reference to an existing
+//!    function somewhere else in the address space)
+//!  * `m`: the name conventionally given to the shared [Module] instance (i.e. `m: Module`)
+//!  * `Idx`: "index"
+//!  * `Instr`: "instructions"
+//!  * `Ty`: "type"
 
 // For now, don't swap others working in other areas of the system.
 // FIXME: eventually delete.
