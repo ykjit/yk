@@ -188,7 +188,7 @@ impl Module {
     }
 
     /// Return the instruction at the specified index.
-    pub(crate) fn instr(&self, idx: InstrIdx) -> &Inst {
+    pub(crate) fn instr(&self, idx: InstIdx) -> &Inst {
         &self.instrs[usize::from(idx)]
     }
 
@@ -216,7 +216,7 @@ impl Module {
     ///
     /// If `instr` would overflow the index type.
     pub(crate) fn push(&mut self, instr: Inst) {
-        assert!(InstrIdx::new(self.instrs.len()).is_ok());
+        assert!(InstIdx::new(self.instrs.len()).is_ok());
         self.instrs.push(instr);
     }
 
@@ -238,11 +238,11 @@ impl Module {
         &mut self,
         instr: Inst,
     ) -> Result<Operand, CompilationError> {
-        assert!(InstrIdx::new(self.instrs.len()).is_ok());
+        assert!(InstIdx::new(self.instrs.len()).is_ok());
         if instr.def_type(self).is_none() {
             panic!(); // instruction doesn't define a local var.
         }
-        let ret = Operand::Local(InstrIdx::new(self.len())?);
+        let ret = Operand::Local(InstIdx::new(self.len())?);
         self.instrs.push(instr);
         Ok(ret)
     }
@@ -437,7 +437,7 @@ impl fmt::Display for Module {
         }
         write!(f, "\nentry:")?;
         for (i, instr) in self.instrs().iter().enumerate() {
-            write!(f, "\n    {}", instr.display(InstrIdx::from(i), self))?;
+            write!(f, "\n    {}", instr.display(InstIdx::from(i), self))?;
         }
 
         Ok(())
@@ -722,10 +722,10 @@ impl GlobalDeclIdx {
 ///
 /// One of these is an index into the [Module::instrs].
 #[derive(Debug, Copy, Clone, Eq, Hash, PartialEq, PartialOrd)]
-pub(crate) struct InstrIdx(u16);
-index_16bit!(InstrIdx);
+pub(crate) struct InstIdx(u16);
+index_16bit!(InstIdx);
 
-impl InstrIdx {
+impl InstIdx {
     /// Return a reference to the instruction indentified by `self` in `m`.
     pub(crate) fn instr<'a>(&'a self, m: &'a Module) -> &Inst {
         m.instr(*self)
@@ -896,7 +896,7 @@ impl PackedOperand {
     /// Unpacks a [PackedOperand] into a [Operand].
     pub fn unpack(&self) -> Operand {
         if (self.0 & !OPERAND_IDX_MASK) == 0 {
-            Operand::Local(InstrIdx(self.0))
+            Operand::Local(InstIdx(self.0))
         } else {
             Operand::Const(ConstIdx(self.0 & OPERAND_IDX_MASK))
         }
@@ -909,7 +909,7 @@ impl PackedOperand {
 /// to add type safety when using operands.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Operand {
-    Local(InstrIdx),
+    Local(InstIdx),
     Const(ConstIdx),
 }
 
@@ -1023,11 +1023,11 @@ pub(crate) struct GuardInfo {
     /// Stackmap IDs for the active call frames.
     frames: Vec<u64>,
     /// Indices of live JIT variables.
-    lives: Vec<InstrIdx>,
+    lives: Vec<InstIdx>,
 }
 
 impl GuardInfo {
-    pub(crate) fn new(frames: Vec<u64>, lives: Vec<InstrIdx>) -> Self {
+    pub(crate) fn new(frames: Vec<u64>, lives: Vec<InstIdx>) -> Self {
         Self { frames, lives }
     }
 
@@ -1035,7 +1035,7 @@ impl GuardInfo {
         &self.frames
     }
 
-    pub(crate) fn lives(&self) -> &Vec<InstrIdx> {
+    pub(crate) fn lives(&self) -> &Vec<InstIdx> {
         &self.lives
     }
 }
@@ -1137,7 +1137,7 @@ impl Inst {
         }
     }
 
-    pub(crate) fn display<'a>(&'a self, instr_idx: InstrIdx, m: &'a Module) -> DisplayableInst<'a> {
+    pub(crate) fn display<'a>(&'a self, instr_idx: InstIdx, m: &'a Module) -> DisplayableInst<'a> {
         DisplayableInst {
             instr: self,
             instr_idx,
@@ -1148,7 +1148,7 @@ impl Inst {
 
 pub(crate) struct DisplayableInst<'a> {
     instr: &'a Inst,
-    instr_idx: InstrIdx,
+    instr_idx: InstIdx,
     m: &'a Module,
 }
 
@@ -1749,14 +1749,14 @@ mod tests {
 
     #[test]
     fn operand() {
-        let op = PackedOperand::new(&Operand::Local(InstrIdx(192)));
-        assert_eq!(op.unpack(), Operand::Local(InstrIdx(192)));
+        let op = PackedOperand::new(&Operand::Local(InstIdx(192)));
+        assert_eq!(op.unpack(), Operand::Local(InstIdx(192)));
 
-        let op = PackedOperand::new(&Operand::Local(InstrIdx(0x7fff)));
-        assert_eq!(op.unpack(), Operand::Local(InstrIdx(0x7fff)));
+        let op = PackedOperand::new(&Operand::Local(InstIdx(0x7fff)));
+        assert_eq!(op.unpack(), Operand::Local(InstIdx(0x7fff)));
 
-        let op = PackedOperand::new(&Operand::Local(InstrIdx(0)));
-        assert_eq!(op.unpack(), Operand::Local(InstrIdx(0)));
+        let op = PackedOperand::new(&Operand::Local(InstIdx(0)));
+        assert_eq!(op.unpack(), Operand::Local(InstIdx(0)));
 
         let op = PackedOperand::new(&Operand::Const(ConstIdx(192)));
         assert_eq!(op.unpack(), Operand::Const(ConstIdx(192)));
@@ -1774,13 +1774,13 @@ mod tests {
             LoadTraceInputInst::new(0, TyIdx::new(0).unwrap()).into(),
             LoadTraceInputInst::new(8, TyIdx::new(0).unwrap()).into(),
             LoadInst::new(
-                Operand::Local(InstrIdx(0)),
+                Operand::Local(InstIdx(0)),
                 TyIdx(U24::from_usize(0).unwrap()),
             )
             .into(),
         ];
         prog[2] = LoadInst::new(
-            Operand::Local(InstrIdx(1)),
+            Operand::Local(InstIdx(1)),
             TyIdx(U24::from_usize(0).unwrap()),
         )
         .into();
@@ -1809,19 +1809,19 @@ mod tests {
 
         // Build a call to the function.
         let args = vec![
-            Operand::Local(InstrIdx(0)), // inline arg
-            Operand::Local(InstrIdx(1)), // first extra arg
-            Operand::Local(InstrIdx(2)),
+            Operand::Local(InstIdx(0)), // inline arg
+            Operand::Local(InstIdx(1)), // first extra arg
+            Operand::Local(InstIdx(2)),
         ];
         let ci = CallInst::new(&mut m, func_decl_idx, &args).unwrap();
 
         // Now request the operands and check they all look as they should.
-        assert_eq!(ci.operand(&m, 0), Operand::Local(InstrIdx(0)));
-        assert_eq!(ci.operand(&m, 1), Operand::Local(InstrIdx(1)));
-        assert_eq!(ci.operand(&m, 2), Operand::Local(InstrIdx(2)));
+        assert_eq!(ci.operand(&m, 0), Operand::Local(InstIdx(0)));
+        assert_eq!(ci.operand(&m, 1), Operand::Local(InstIdx(1)));
+        assert_eq!(ci.operand(&m, 2), Operand::Local(InstIdx(2)));
         assert_eq!(
             m.extra_args,
-            vec![Operand::Local(InstrIdx(1)), Operand::Local(InstrIdx(2))]
+            vec![Operand::Local(InstIdx(1)), Operand::Local(InstIdx(2))]
         );
     }
 
@@ -1837,22 +1837,22 @@ mod tests {
 
         // Build a call to the function.
         let args = vec![
-            Operand::Local(InstrIdx(0)),
-            Operand::Local(InstrIdx(1)),
-            Operand::Local(InstrIdx(2)),
+            Operand::Local(InstIdx(0)),
+            Operand::Local(InstIdx(1)),
+            Operand::Local(InstIdx(2)),
         ];
         let ci = VACallInst::new(&mut m, func_decl_idx, &args).unwrap();
 
         // Now request the operands and check they all look as they should.
-        assert_eq!(ci.operand(&m, 0), Operand::Local(InstrIdx(0)));
-        assert_eq!(ci.operand(&m, 1), Operand::Local(InstrIdx(1)));
-        assert_eq!(ci.operand(&m, 2), Operand::Local(InstrIdx(2)));
+        assert_eq!(ci.operand(&m, 0), Operand::Local(InstIdx(0)));
+        assert_eq!(ci.operand(&m, 1), Operand::Local(InstIdx(1)));
+        assert_eq!(ci.operand(&m, 2), Operand::Local(InstIdx(2)));
         assert_eq!(
             m.extra_args,
             vec![
-                Operand::Local(InstrIdx(0)),
-                Operand::Local(InstrIdx(1)),
-                Operand::Local(InstrIdx(2))
+                Operand::Local(InstIdx(0)),
+                Operand::Local(InstIdx(1)),
+                Operand::Local(InstIdx(2))
             ]
         );
     }
@@ -1872,9 +1872,9 @@ mod tests {
 
         // Now build a call to the function.
         let args = vec![
-            Operand::Local(InstrIdx(0)), // inline arg
-            Operand::Local(InstrIdx(1)), // first extra arg
-            Operand::Local(InstrIdx(2)),
+            Operand::Local(InstIdx(0)), // inline arg
+            Operand::Local(InstIdx(1)), // first extra arg
+            Operand::Local(InstIdx(2)),
         ];
         let ci = CallInst::new(&mut m, func_decl_idx, &args).unwrap();
 

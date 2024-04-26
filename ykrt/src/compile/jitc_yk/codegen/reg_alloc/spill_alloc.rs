@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 pub(crate) struct SpillAllocator {
     /// Maps a local variable (the instruction that defines it) to its allocation.
-    allocs: HashMap<jit_ir::InstrIdx, LocalAlloc>,
+    allocs: HashMap<jit_ir::InstIdx, LocalAlloc>,
     stack_dir: StackDirection,
 }
 
@@ -25,7 +25,7 @@ impl RegisterAllocator for SpillAllocator {
 
     fn allocate(
         &mut self,
-        local: jit_ir::InstrIdx,
+        local: jit_ir::InstIdx,
         size: usize,
         stack: &mut AbstractStack,
     ) -> LocalAlloc {
@@ -56,7 +56,7 @@ impl RegisterAllocator for SpillAllocator {
     /// # Panics
     ///
     /// Panics if there is no allocation for the specified index.
-    fn allocation(&self, idx: jit_ir::InstrIdx) -> &LocalAlloc {
+    fn allocation(&self, idx: jit_ir::InstIdx) -> &LocalAlloc {
         &self.allocs[&idx]
     }
 }
@@ -68,7 +68,7 @@ mod tests {
             abs_stack::AbstractStack,
             reg_alloc::{LocalAlloc, RegisterAllocator, SpillAllocator, StackDirection},
         },
-        jit_ir::InstrIdx,
+        jit_ir::InstIdx,
     };
 
     #[test]
@@ -76,7 +76,7 @@ mod tests {
         let mut stack = AbstractStack::default();
         let mut sa = SpillAllocator::new(StackDirection::GrowsDown);
 
-        let idx = InstrIdx::new(0).unwrap();
+        let idx = InstIdx::new(0).unwrap();
         sa.allocate(idx, 8, &mut stack);
         debug_assert_eq!(stack.size(), 8);
         debug_assert_eq!(
@@ -87,7 +87,7 @@ mod tests {
             }
         );
 
-        let idx = InstrIdx::new(1).unwrap();
+        let idx = InstIdx::new(1).unwrap();
         sa.allocate(idx, 1, &mut stack);
         debug_assert_eq!(stack.size(), 9);
         debug_assert_eq!(
@@ -104,7 +104,7 @@ mod tests {
         let mut stack = AbstractStack::default();
         let mut sa = SpillAllocator::new(StackDirection::GrowsUp);
 
-        let idx = InstrIdx::new(0).unwrap();
+        let idx = InstIdx::new(0).unwrap();
         sa.allocate(idx, 8, &mut stack);
         debug_assert_eq!(stack.size(), 8);
         debug_assert_eq!(
@@ -115,7 +115,7 @@ mod tests {
             }
         );
 
-        let idx = InstrIdx::new(1).unwrap();
+        let idx = InstIdx::new(1).unwrap();
         sa.allocate(idx, 1, &mut stack);
         debug_assert_eq!(stack.size(), 9);
         debug_assert_eq!(
@@ -132,10 +132,10 @@ mod tests {
         let mut stack = AbstractStack::default();
         let mut sa = SpillAllocator::new(StackDirection::GrowsDown);
 
-        sa.allocate(InstrIdx::new(0).unwrap(), 8, &mut stack);
+        sa.allocate(InstIdx::new(0).unwrap(), 8, &mut stack);
         stack.align(32);
 
-        let idx = InstrIdx::new(1).unwrap();
+        let idx = InstIdx::new(1).unwrap();
         sa.allocate(idx, 1, &mut stack);
         debug_assert_eq!(stack.size(), 33);
         debug_assert_eq!(
@@ -152,10 +152,10 @@ mod tests {
         let mut stack = AbstractStack::default();
         let mut sa = SpillAllocator::new(StackDirection::GrowsUp);
 
-        sa.allocate(InstrIdx::new(0).unwrap(), 8, &mut stack);
+        sa.allocate(InstIdx::new(0).unwrap(), 8, &mut stack);
         stack.align(32);
 
-        let idx = InstrIdx::new(1).unwrap();
+        let idx = InstIdx::new(1).unwrap();
         sa.allocate(idx, 1, &mut stack);
         debug_assert_eq!(stack.size(), 33);
         debug_assert_eq!(

@@ -6,7 +6,7 @@
 
 use super::{
     super::{
-        jit_ir::{self, FuncDeclIdx, InstrIdx, Operand, Ty},
+        jit_ir::{self, FuncDeclIdx, InstIdx, Operand, Ty},
         CompilationError,
     },
     abs_stack::AbstractStack,
@@ -105,7 +105,7 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
         // doesn't support this, but it's on their roadmap:
         // https://github.com/CensoredUsername/dynasm-rs/issues/48
         for (idx, inst) in self.m.instrs().iter().enumerate() {
-            self.codegen_inst(jit_ir::InstrIdx::new(idx)?, inst)?;
+            self.codegen_inst(jit_ir::InstIdx::new(idx)?, inst)?;
         }
 
         // Loop the JITted code if the backedge target label is present.
@@ -168,7 +168,7 @@ impl<'a> X64CodeGen<'a> {
     /// Codegen an instruction.
     fn codegen_inst(
         &mut self,
-        instr_idx: jit_ir::InstrIdx,
+        instr_idx: jit_ir::InstIdx,
         inst: &jit_ir::Inst,
     ) -> Result<(), CompilationError> {
         #[cfg(any(debug_assertions, test))]
@@ -274,7 +274,7 @@ impl<'a> X64CodeGen<'a> {
     }
 
     /// Load a local variable out of its stack slot into the specified register.
-    fn load_local(&mut self, reg: Rq, local: InstrIdx) {
+    fn load_local(&mut self, reg: Rq, local: InstIdx) {
         match self.ra.allocation(local) {
             LocalAlloc::Stack { frame_off, size: _ } => {
                 match i32::try_from(*frame_off) {
@@ -336,13 +336,13 @@ impl<'a> X64CodeGen<'a> {
     }
 
     /// Store a value held in a register into a new local variable.
-    fn reg_into_new_local(&mut self, local: InstrIdx, reg: Rq) {
+    fn reg_into_new_local(&mut self, local: InstIdx, reg: Rq) {
         let size = local.instr(self.m).def_byte_size(self.m);
         let l = self.ra.allocate(local, size, &mut self.stack);
         self.store_local(&l, reg, size);
     }
 
-    fn codegen_add_instr(&mut self, inst_idx: jit_ir::InstrIdx, inst: &jit_ir::AddInst) {
+    fn codegen_add_instr(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::AddInst) {
         let lhs = inst.lhs();
         let rhs = inst.rhs();
 
@@ -365,7 +365,7 @@ impl<'a> X64CodeGen<'a> {
 
     fn codegen_loadtraceinput_instr(
         &mut self,
-        inst_idx: jit_ir::InstrIdx,
+        inst_idx: jit_ir::InstIdx,
         inst: &jit_ir::LoadTraceInputInst,
     ) {
         // Find the argument register containing the pointer to the live variables struct.
@@ -389,7 +389,7 @@ impl<'a> X64CodeGen<'a> {
         }
     }
 
-    fn codegen_load_instr(&mut self, inst_idx: jit_ir::InstrIdx, inst: &jit_ir::LoadInst) {
+    fn codegen_load_instr(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::LoadInst) {
         self.operand_into_reg(WR0, &inst.operand()); // FIXME: assumes value will fit in a reg.
         let size = inst_idx.instr(self.m).def_byte_size(self.m);
         debug_assert!(size <= REG64_SIZE);
@@ -403,7 +403,7 @@ impl<'a> X64CodeGen<'a> {
         self.reg_into_new_local(inst_idx, WR0);
     }
 
-    fn codegen_ptradd_instr(&mut self, inst_idx: jit_ir::InstrIdx, inst: &jit_ir::PtrAddInst) {
+    fn codegen_ptradd_instr(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::PtrAddInst) {
         self.operand_into_reg(WR0, &inst.ptr());
         let off = inst.offset();
         // unwrap cannot fail
@@ -431,7 +431,7 @@ impl<'a> X64CodeGen<'a> {
 
     fn codegen_lookupglobal_instr(
         &mut self,
-        inst_idx: jit_ir::InstrIdx,
+        inst_idx: jit_ir::InstIdx,
         inst: &jit_ir::LookupGlobalInst,
     ) {
         let decl = inst.decl(self.m);
@@ -445,7 +445,7 @@ impl<'a> X64CodeGen<'a> {
 
     pub(super) fn emit_call(
         &mut self,
-        inst_idx: InstrIdx,
+        inst_idx: InstIdx,
         func_decl_idx: FuncDeclIdx,
         args: &[Operand],
     ) -> Result<(), CompilationError> {
@@ -500,7 +500,7 @@ impl<'a> X64CodeGen<'a> {
     /// Codegen a (non-varargs) call.
     pub(super) fn codegen_call_instr(
         &mut self,
-        inst_idx: InstrIdx,
+        inst_idx: InstIdx,
         inst: &jit_ir::CallInst,
     ) -> Result<(), CompilationError> {
         let func_decl_idx = inst.target();
@@ -514,7 +514,7 @@ impl<'a> X64CodeGen<'a> {
     /// Codegen a varargs call.
     pub(super) fn codegen_vacall_instr(
         &mut self,
-        inst_idx: InstrIdx,
+        inst_idx: InstIdx,
         inst: &jit_ir::VACallInst,
     ) -> Result<(), CompilationError> {
         let func_decl_idx = inst.target();
@@ -524,7 +524,7 @@ impl<'a> X64CodeGen<'a> {
         self.emit_call(inst_idx, func_decl_idx, &args)
     }
 
-    pub(super) fn codegen_icmp_instr(&mut self, inst_idx: InstrIdx, inst: &jit_ir::IcmpInst) {
+    pub(super) fn codegen_icmp_instr(&mut self, inst_idx: InstIdx, inst: &jit_ir::IcmpInst) {
         let (left, pred, right) = (inst.left(), inst.predicate(), inst.right());
 
         // FIXME: We should be checking type equality here, but since constants currently don't
@@ -578,7 +578,7 @@ impl<'a> X64CodeGen<'a> {
         self.reg_into_new_local(inst_idx, WR0);
     }
 
-    fn codegen_arg(&mut self, inst_idx: InstrIdx, idx: u16) {
+    fn codegen_arg(&mut self, inst_idx: InstIdx, idx: u16) {
         // For arguments passed into the trace function we simply inform the register allocator
         // where they are stored and let the allocator take things from there.
         self.reg_into_new_local(inst_idx, ARG_REGS[usize::from(idx)]);

@@ -38,7 +38,7 @@ pub(crate) struct TraceBuilder<'a> {
     /// The JIT IR this struct builds.
     jit_mod: jit_ir::Module,
     /// Maps an AOT instruction to a jit instruction via their index-based IDs.
-    local_map: HashMap<aot_ir::InstructionID, jit_ir::InstrIdx>,
+    local_map: HashMap<aot_ir::InstructionID, jit_ir::InstIdx>,
     // BBlock containing the current control point (i.e. the control point that started this trace).
     cp_block: Option<aot_ir::BBlockId>,
     // Index of the first traceinput instruction.
@@ -265,8 +265,8 @@ impl<'a> TraceBuilder<'a> {
         Ok(())
     }
 
-    fn next_instr_id(&self) -> Result<jit_ir::InstrIdx, CompilationError> {
-        jit_ir::InstrIdx::new(self.jit_mod.len())
+    fn next_instr_id(&self) -> Result<jit_ir::InstIdx, CompilationError> {
+        jit_ir::InstIdx::new(self.jit_mod.len())
     }
 
     /// Translate a global variable use.
