@@ -104,7 +104,7 @@ impl<'a> TraceBuilder<'a> {
                 // deoptimised.
                 self.local_map
                     .insert(tis.to_instr_id(), self.next_instr_id()?);
-                let arg = jit_ir::Instruction::Arg(TRACE_FUNC_CTRLP_ARGIDX);
+                let arg = jit_ir::Inst::Arg(TRACE_FUNC_CTRLP_ARGIDX);
                 self.jit_mod.push(arg);
                 break;
             }
@@ -154,8 +154,7 @@ impl<'a> TraceBuilder<'a> {
                             Ok(u32_off) => {
                                 let input_ty_idx = self.handle_type(aot_field_ty)?;
                                 let load_ti_instr =
-                                    jit_ir::LoadTraceInputInstruction::new(u32_off, input_ty_idx)
-                                        .into();
+                                    jit_ir::LoadTraceInputInst::new(u32_off, input_ty_idx).into();
                                 // If this take fails, we didn't see a corresponding store and the
                                 // IR is malformed.
                                 self.local_map.insert(
@@ -178,7 +177,7 @@ impl<'a> TraceBuilder<'a> {
         }
 
         // Mark this location as the start of the trace loop.
-        self.jit_mod.push(jit_ir::Instruction::TraceLoopStart);
+        self.jit_mod.push(jit_ir::Inst::TraceLoopStart);
 
         Ok(())
     }
@@ -247,7 +246,7 @@ impl<'a> TraceBuilder<'a> {
 
     fn copy_instruction(
         &mut self,
-        jit_inst: jit_ir::Instruction,
+        jit_inst: jit_ir::Inst,
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
     ) -> Result<(), CompilationError> {
@@ -311,7 +310,7 @@ impl<'a> TraceBuilder<'a> {
                 jit_ir::Operand::Const(self.jit_mod.const_idx(&jit_const)?)
             }
             aot_ir::Operand::Global(gd_idx) => {
-                let load = jit_ir::LookupGlobalInstruction::new(self.handle_global(*gd_idx)?)?;
+                let load = jit_ir::LookupGlobalInst::new(self.handle_global(*gd_idx)?)?;
                 self.jit_mod.push_and_make_operand(load.into())?
             }
             aot_ir::Operand::Arg { arg_idx, .. } => {
@@ -367,8 +366,7 @@ impl<'a> TraceBuilder<'a> {
         lhs: &aot_ir::Operand,
         rhs: &aot_ir::Operand,
     ) -> Result<(), CompilationError> {
-        let instr =
-            jit_ir::AddInstruction::new(self.handle_operand(lhs)?, self.handle_operand(rhs)?);
+        let instr = jit_ir::AddInst::new(self.handle_operand(lhs)?, self.handle_operand(rhs)?);
         self.copy_instruction(instr.into(), bid, aot_inst_idx)
     }
 
@@ -451,7 +449,7 @@ impl<'a> TraceBuilder<'a> {
             _ => panic!(),
         };
 
-        let guard = jit_ir::GuardInstruction::new(jit_ir::Operand::Local(jit_cond), expect, gi_idx);
+        let guard = jit_ir::GuardInst::new(jit_ir::Operand::Local(jit_cond), expect, gi_idx);
         self.jit_mod.push(guard.into());
         Ok(())
     }
@@ -476,12 +474,9 @@ impl<'a> TraceBuilder<'a> {
         pred: &aot_ir::Predicate,
         rhs: &aot_ir::Operand,
     ) -> Result<(), CompilationError> {
-        let instr = jit_ir::IcmpInstruction::new(
-            self.handle_operand(lhs)?,
-            *pred,
-            self.handle_operand(rhs)?,
-        )
-        .into();
+        let instr =
+            jit_ir::IcmpInst::new(self.handle_operand(lhs)?, *pred, self.handle_operand(rhs)?)
+                .into();
         self.copy_instruction(instr, bid, aot_inst_idx)
     }
 
@@ -494,8 +489,7 @@ impl<'a> TraceBuilder<'a> {
         type_idx: &aot_ir::TypeIdx,
     ) -> Result<(), CompilationError> {
         let instr =
-            jit_ir::LoadInstruction::new(self.handle_operand(ptr)?, self.handle_type(*type_idx)?)
-                .into();
+            jit_ir::LoadInst::new(self.handle_operand(ptr)?, self.handle_type(*type_idx)?).into();
         self.copy_instruction(instr, bid, aot_inst_idx)
     }
 
@@ -569,11 +563,9 @@ impl<'a> TraceBuilder<'a> {
                 .func_type(self.aot_mod)
                 .is_vararg()
             {
-                jit_ir::CallInstruction::new(&mut self.jit_mod, jit_func_decl_idx, &jit_args)?
-                    .into()
+                jit_ir::CallInst::new(&mut self.jit_mod, jit_func_decl_idx, &jit_args)?.into()
             } else {
-                jit_ir::VACallInstruction::new(&mut self.jit_mod, jit_func_decl_idx, &jit_args)?
-                    .into()
+                jit_ir::VACallInst::new(&mut self.jit_mod, jit_func_decl_idx, &jit_args)?.into()
             };
             self.copy_instruction(instr, bid, aot_inst_idx)
         }
@@ -587,8 +579,7 @@ impl<'a> TraceBuilder<'a> {
         ptr: &aot_ir::Operand,
     ) -> Result<(), CompilationError> {
         let instr =
-            jit_ir::StoreInstruction::new(self.handle_operand(val)?, self.handle_operand(ptr)?)
-                .into();
+            jit_ir::StoreInst::new(self.handle_operand(val)?, self.handle_operand(ptr)?).into();
         self.copy_instruction(instr, bid, aot_inst_idx)
     }
 
@@ -605,7 +596,7 @@ impl<'a> TraceBuilder<'a> {
                 let c = self.aot_mod.constant(co);
                 if let aot_ir::Type::Integer(it) = self.aot_mod.const_type(c) {
                     // Convert the offset into a 32 bit value, as that is the maximum we can fit into
-                    // the jit_ir::PtrAddInstruction.
+                    // the jit_ir::PtrAddInst.
                     let offset: u32 = match it.num_bits() {
                         // This unwrap can't fail unless we did something wrong during lowering.
                         64 => u64::from_ne_bytes(c.bytes()[0..8].try_into().unwrap())
@@ -615,7 +606,7 @@ impl<'a> TraceBuilder<'a> {
                             })?,
                         _ => panic!(),
                     };
-                    let instr = jit_ir::PtrAddInstruction::new(jit_ptr, offset).into();
+                    let instr = jit_ir::PtrAddInst::new(jit_ptr, offset).into();
                     self.copy_instruction(instr, bid, aot_inst_idx)
                 } else {
                     panic!(); // Non-integer offset. Malformed IR.
@@ -634,7 +625,7 @@ impl<'a> TraceBuilder<'a> {
         dest_type_idx: &aot_ir::TypeIdx,
     ) -> Result<(), CompilationError> {
         let instr = match cast_kind {
-            aot_ir::CastKind::SignExtend => jit_ir::SignExtendInstruction::new(
+            aot_ir::CastKind::SignExtend => jit_ir::SignExtendInst::new(
                 &self.handle_operand(val)?,
                 self.handle_type(*dest_type_idx)?,
             ),

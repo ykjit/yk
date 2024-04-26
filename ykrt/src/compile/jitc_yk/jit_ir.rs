@@ -14,7 +14,7 @@
 //!    function somewhere else in the address space)
 //!  * `m`: the name conventionally given to the shared [Module] instance (i.e. `m: Module`)
 //!  * `Idx`: "index"
-//!  * `Instr`: "instructions"
+//!  * `Inst`: "instruction"
 //!  * `Ty`: "type"
 
 // For now, don't swap others working in other areas of the system.
@@ -50,10 +50,10 @@ pub(crate) struct Module {
     /// uniquely distinguish traces.
     ctr_id: u64,
     /// The IR trace as a linear sequence of instructions.
-    instrs: Vec<Instruction>, // FIXME: this should be a TiVec.
+    instrs: Vec<Inst>, // FIXME: this should be a TiVec.
     /// The extra argument table.
     ///
-    /// Used when a [CallInstruction]'s arguments don't fit inline.
+    /// Used when a [CallInst]'s arguments don't fit inline.
     ///
     /// An [ExtraArgsIdx] describes an index into this.
     extra_args: Vec<Operand>,
@@ -188,7 +188,7 @@ impl Module {
     }
 
     /// Return the instruction at the specified index.
-    pub(crate) fn instr(&self, idx: InstrIdx) -> &Instruction {
+    pub(crate) fn instr(&self, idx: InstrIdx) -> &Inst {
         &self.instrs[usize::from(idx)]
     }
 
@@ -215,7 +215,7 @@ impl Module {
     /// # Panics
     ///
     /// If `instr` would overflow the index type.
-    pub(crate) fn push(&mut self, instr: Instruction) {
+    pub(crate) fn push(&mut self, instr: Inst) {
         assert!(InstrIdx::new(self.instrs.len()).is_ok());
         self.instrs.push(instr);
     }
@@ -236,7 +236,7 @@ impl Module {
     /// [Operand] or if `instr` would overflow the index type.
     pub(crate) fn push_and_make_operand(
         &mut self,
-        instr: Instruction,
+        instr: Inst,
     ) -> Result<Operand, CompilationError> {
         assert!(InstrIdx::new(self.instrs.len()).is_ok());
         if instr.def_type(self).is_none() {
@@ -247,13 +247,13 @@ impl Module {
         Ok(ret)
     }
 
-    /// Returns the number of [Instruction]s in the [Module].
+    /// Returns the number of [Inst]s in the [Module].
     pub(crate) fn len(&self) -> usize {
         self.instrs.len()
     }
 
     /// Returns a reference to the instruction stream.
-    pub(crate) fn instrs(&self) -> &Vec<Instruction> {
+    pub(crate) fn instrs(&self) -> &Vec<Inst> {
         &self.instrs
     }
 
@@ -727,7 +727,7 @@ index_16bit!(InstrIdx);
 
 impl InstrIdx {
     /// Return a reference to the instruction indentified by `self` in `m`.
-    pub(crate) fn instr<'a>(&'a self, m: &'a Module) -> &Instruction {
+    pub(crate) fn instr<'a>(&'a self, m: &'a Module) -> &Inst {
         m.instr(*self)
     }
 }
@@ -1043,16 +1043,16 @@ impl GuardInfo {
 /// An IR instruction.
 #[repr(u8)]
 #[derive(Debug)]
-pub enum Instruction {
-    Load(LoadInstruction),
-    LookupGlobal(LookupGlobalInstruction),
-    LoadTraceInput(LoadTraceInputInstruction),
-    Call(CallInstruction),
-    VACall(VACallInstruction),
-    PtrAdd(PtrAddInstruction),
-    Store(StoreInstruction),
-    Icmp(IcmpInstruction),
-    Guard(GuardInstruction),
+pub enum Inst {
+    Load(LoadInst),
+    LookupGlobal(LookupGlobalInst),
+    LoadTraceInput(LoadTraceInputInst),
+    Call(CallInst),
+    VACall(VACallInst),
+    PtrAdd(PtrAddInst),
+    Store(StoreInst),
+    Icmp(IcmpInst),
+    Guard(GuardInst),
     /// Describes an argument into the trace function. Its main use is to allow us to track trace
     /// function arguments in case we need to deoptimise them. At this moment the only trace
     /// function argument requiring tracking is the trace inputs.
@@ -1061,30 +1061,30 @@ pub enum Instruction {
     TraceLoopStart,
 
     // Binary operations
-    Add(AddInstruction),
-    Sub(SubInstruction),
-    Mul(MulInstruction),
-    Or(OrInstruction),
-    And(AndInstruction),
-    Xor(XorInstruction),
-    Shl(ShlInstruction),
-    AShr(AShrInstruction),
-    FAdd(FAddInstruction),
-    FDiv(FDivInstruction),
-    FMul(FMulInstruction),
-    FRem(FRemInstruction),
-    FSub(FSubInstruction),
-    LShr(LShrInstruction),
-    SDiv(SDivInstruction),
-    SRem(SRemInstruction),
-    UDiv(UDivInstruction),
-    URem(URemInstruction),
+    Add(AddInst),
+    Sub(SubInst),
+    Mul(MulInst),
+    Or(OrInst),
+    And(AndInst),
+    Xor(XorInst),
+    Shl(ShlInst),
+    AShr(AShrInst),
+    FAdd(FAddInst),
+    FDiv(FDivInst),
+    FMul(FMulInst),
+    FRem(FRemInst),
+    FSub(FSubInst),
+    LShr(LShrInst),
+    SDiv(SDivInst),
+    SRem(SRemInst),
+    UDiv(UDivInst),
+    URem(URemInst),
 
     // Cast-like instructions
-    SignExtend(SignExtendInstruction),
+    SignExtend(SignExtendInst),
 }
 
-impl Instruction {
+impl Inst {
     /// Returns the type of the local variable that the instruction defines (if any).
     pub(crate) fn def_type<'a>(&self, m: &'a Module) -> Option<&'a Ty> {
         let idx = self.def_ty_idx(m);
@@ -1137,12 +1137,8 @@ impl Instruction {
         }
     }
 
-    pub(crate) fn display<'a>(
-        &'a self,
-        instr_idx: InstrIdx,
-        m: &'a Module,
-    ) -> DisplayableInstruction<'a> {
-        DisplayableInstruction {
+    pub(crate) fn display<'a>(&'a self, instr_idx: InstrIdx, m: &'a Module) -> DisplayableInst<'a> {
+        DisplayableInst {
             instr: self,
             instr_idx,
             m,
@@ -1150,20 +1146,20 @@ impl Instruction {
     }
 }
 
-pub(crate) struct DisplayableInstruction<'a> {
-    instr: &'a Instruction,
+pub(crate) struct DisplayableInst<'a> {
+    instr: &'a Inst,
     instr_idx: InstrIdx,
     m: &'a Module,
 }
 
-impl fmt::Display for DisplayableInstruction<'_> {
+impl fmt::Display for DisplayableInst<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(dt) = self.instr.def_type(self.m) {
             write!(f, "%{}: {dt} = ", self.instr_idx.to_u16())?;
         }
         match self.instr {
-            Instruction::Load(x) => write!(f, "Load {}", x.operand().display(self.m)),
-            Instruction::LookupGlobal(x) => write!(
+            Inst::Load(x) => write!(f, "Load {}", x.operand().display(self.m)),
+            Inst::LookupGlobal(x) => write!(
                 f,
                 "LookupGlobal {}",
                 self.m
@@ -1172,7 +1168,7 @@ impl fmt::Display for DisplayableInstruction<'_> {
                     .to_str()
                     .unwrap_or("<not valid UTF-8>")
             ),
-            Instruction::Call(x) => {
+            Inst::Call(x) => {
                 write!(
                     f,
                     "Call @{}({})",
@@ -1183,7 +1179,7 @@ impl fmt::Display for DisplayableInstruction<'_> {
                         .join(", ")
                 )
             }
-            Instruction::VACall(x) => write!(
+            Inst::VACall(x) => write!(
                 f,
                 "VACall @{}({})",
                 self.m.func_decl(x.target()).name(),
@@ -1192,29 +1188,29 @@ impl fmt::Display for DisplayableInstruction<'_> {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            Instruction::PtrAdd(x) => {
+            Inst::PtrAdd(x) => {
                 write!(f, "PtrAdd {}, {}", x.ptr().display(self.m), x.offset())
             }
-            Instruction::Store(x) => write!(
+            Inst::Store(x) => write!(
                 f,
                 "Store {}, {}",
                 x.val.unpack().display(self.m),
                 x.ptr.unpack().display(self.m)
             ),
-            Instruction::Icmp(x) => write!(
+            Inst::Icmp(x) => write!(
                 f,
                 "Icmp {}, {:?}, {}",
                 x.left().display(self.m),
                 x.pred,
                 x.right().display(self.m)
             ),
-            Instruction::Guard(x) => write!(
+            Inst::Guard(x) => write!(
                 f,
                 "Guard {}, {}",
                 x.cond().display(self.m),
                 if x.expect { "true" } else { "false " }
             ),
-            Instruction::LoadTraceInput(x) => {
+            Inst::LoadTraceInput(x) => {
                 write!(
                     f,
                     "LoadTraceInput {}, {}",
@@ -1222,9 +1218,9 @@ impl fmt::Display for DisplayableInstruction<'_> {
                     self.m.type_(x.ty_idx())
                 )
             }
-            Instruction::TraceLoopStart => write!(f, "TraceLoopStart"),
-            Instruction::Arg(i) => write!(f, "Arg({i})"),
-            Instruction::Add(x) => {
+            Inst::TraceLoopStart => write!(f, "TraceLoopStart"),
+            Inst::Arg(i) => write!(f, "Arg({i})"),
+            Inst::Add(x) => {
                 write!(
                     f,
                     "Add {}, {}",
@@ -1232,7 +1228,7 @@ impl fmt::Display for DisplayableInstruction<'_> {
                     x.rhs().display(self.m)
                 )
             }
-            Instruction::SignExtend(i) => {
+            Inst::SignExtend(i) => {
                 write!(
                     f,
                     "SignExtend {}, {}",
@@ -1247,43 +1243,43 @@ impl fmt::Display for DisplayableInstruction<'_> {
 
 macro_rules! instr {
     ($discrim:ident, $instr_type:ident) => {
-        impl From<$instr_type> for Instruction {
-            fn from(instr: $instr_type) -> Instruction {
-                Instruction::$discrim(instr)
+        impl From<$instr_type> for Inst {
+            fn from(instr: $instr_type) -> Inst {
+                Inst::$discrim(instr)
             }
         }
     };
 }
 
-instr!(Load, LoadInstruction);
-instr!(LookupGlobal, LookupGlobalInstruction);
-instr!(Store, StoreInstruction);
-instr!(LoadTraceInput, LoadTraceInputInstruction);
-instr!(Call, CallInstruction);
-instr!(VACall, VACallInstruction);
-instr!(PtrAdd, PtrAddInstruction);
-instr!(Icmp, IcmpInstruction);
-instr!(Guard, GuardInstruction);
-instr!(SignExtend, SignExtendInstruction);
+instr!(Load, LoadInst);
+instr!(LookupGlobal, LookupGlobalInst);
+instr!(Store, StoreInst);
+instr!(LoadTraceInput, LoadTraceInputInst);
+instr!(Call, CallInst);
+instr!(VACall, VACallInst);
+instr!(PtrAdd, PtrAddInst);
+instr!(Icmp, IcmpInst);
+instr!(Guard, GuardInst);
+instr!(SignExtend, SignExtendInst);
 
-/// The operands for a [Instruction::Load]
+/// The operands for a [Inst::Load]
 ///
 /// # Semantics
 ///
 /// Loads a value from a given pointer operand.
 ///
 #[derive(Debug)]
-pub struct LoadInstruction {
+pub struct LoadInst {
     /// The pointer to load from.
     op: PackedOperand,
     /// The type of the pointee.
     ty_idx: TyIdx,
 }
 
-impl LoadInstruction {
+impl LoadInst {
     // FIXME: why do we need to provide a type index? Can't we get that from the operand?
-    pub(crate) fn new(op: Operand, ty_idx: TyIdx) -> LoadInstruction {
-        LoadInstruction {
+    pub(crate) fn new(op: Operand, ty_idx: TyIdx) -> LoadInst {
+        LoadInst {
             op: PackedOperand::new(&op),
             ty_idx,
         }
@@ -1316,15 +1312,15 @@ impl LoadInstruction {
 /// we kill this instruction kind entirely?
 #[derive(Debug)]
 #[repr(packed)]
-pub struct LoadTraceInputInstruction {
+pub struct LoadTraceInputInst {
     /// The byte offset to load from in the trace input struct.
     off: u32,
     /// The type of the resulting local variable.
     ty_idx: TyIdx,
 }
 
-impl LoadTraceInputInstruction {
-    pub(crate) fn new(off: u32, ty_idx: TyIdx) -> LoadTraceInputInstruction {
+impl LoadTraceInputInst {
+    pub(crate) fn new(off: u32, ty_idx: TyIdx) -> LoadTraceInputInst {
         Self { off, ty_idx }
     }
 
@@ -1337,7 +1333,7 @@ impl LoadTraceInputInstruction {
     }
 }
 
-/// The operands for a [Instruction::LoadGlobal]
+/// The operands for a [Inst::LoadGlobal]
 ///
 /// # Semantics
 ///
@@ -1359,12 +1355,12 @@ impl LoadTraceInputInstruction {
 /// The easiest way to do this is to make globals a subclass of constants, similarly to what LLVM
 /// does.
 #[derive(Debug)]
-pub struct LookupGlobalInstruction {
+pub struct LookupGlobalInst {
     /// The pointer to load from.
     global_decl_idx: GlobalDeclIdx,
 }
 
-impl LookupGlobalInstruction {
+impl LookupGlobalInst {
     pub(crate) fn new(global_decl_idx: GlobalDeclIdx) -> Result<Self, CompilationError> {
         Ok(Self { global_decl_idx })
     }
@@ -1379,14 +1375,14 @@ impl LookupGlobalInstruction {
     }
 }
 
-/// The operands for a [Instruction::Call]
+/// The operands for a [Inst::Call]
 ///
 /// # Semantics
 ///
 /// Perform a call to an external or AOT function.
 #[derive(Debug)]
 #[repr(packed)]
-pub struct CallInstruction {
+pub struct CallInst {
     /// The callee.
     target: FuncDeclIdx,
     /// The first argument to the call, if present. Undefined if not present.
@@ -1395,12 +1391,12 @@ pub struct CallInstruction {
     extra: ExtraArgsIdx,
 }
 
-impl CallInstruction {
+impl CallInst {
     pub(crate) fn new(
         m: &mut Module,
         target: FuncDeclIdx,
         args: &[Operand],
-    ) -> Result<CallInstruction, CompilationError> {
+    ) -> Result<CallInst, CompilationError> {
         let mut arg1 = PackedOperand::default();
         let mut extra = ExtraArgsIdx::default();
 
@@ -1452,14 +1448,14 @@ impl CallInstruction {
     }
 }
 
-/// The operands for a [Instruction::VACall]
+/// The operands for a [Inst::VACall]
 ///
 /// # Semantics
 ///
 /// Perform a vararg call to an external or AOT function.
 #[derive(Debug)]
 #[repr(packed)]
-pub struct VACallInstruction {
+pub struct VACallInst {
     /// The callee.
     target: FuncDeclIdx,
     /// The number of arguments to pass.
@@ -1468,12 +1464,12 @@ pub struct VACallInstruction {
     first_arg_idx: ExtraArgsIdx,
 }
 
-impl VACallInstruction {
+impl VACallInst {
     pub(crate) fn new(
         m: &mut Module,
         target: FuncDeclIdx,
         args: &[Operand],
-    ) -> Result<VACallInstruction, CompilationError> {
+    ) -> Result<VACallInst, CompilationError> {
         let num_args = args.len();
 
         // Varargs calls require at least one static argument.
@@ -1507,21 +1503,21 @@ impl VACallInstruction {
     }
 }
 
-/// The operands for a [Instruction::Store]
+/// The operands for a [Inst::Store]
 ///
 /// # Semantics
 ///
 /// Stores a value into a pointer.
 ///
 #[derive(Debug)]
-pub struct StoreInstruction {
+pub struct StoreInst {
     /// The value to store.
     val: PackedOperand,
     /// The pointer to store into.
     ptr: PackedOperand,
 }
 
-impl StoreInstruction {
+impl StoreInst {
     pub(crate) fn new(val: Operand, ptr: Operand) -> Self {
         // FIXME: assert type of pointer
         Self {
@@ -1549,14 +1545,14 @@ impl StoreInstruction {
 /// pointer operand.
 #[derive(Debug)]
 #[repr(packed)]
-pub struct PtrAddInstruction {
+pub struct PtrAddInst {
     /// The pointer to offset
     ptr: PackedOperand,
     /// The offset.
     off: u32,
 }
 
-impl PtrAddInstruction {
+impl PtrAddInst {
     pub(crate) fn ptr(&self) -> Operand {
         let ptr = self.ptr;
         ptr.unpack()
@@ -1610,34 +1606,34 @@ macro_rules! bin_op {
             }
         }
 
-        impl From<$struct> for Instruction {
-            fn from(instr: $struct) -> Instruction {
-                Instruction::$discrim(instr)
+        impl From<$struct> for Inst {
+            fn from(instr: $struct) -> Inst {
+                Inst::$discrim(instr)
             }
         }
     };
 }
 
-bin_op!(Add, AddInstruction, "Add");
-bin_op!(Sub, SubInstruction, "Sub");
-bin_op!(Mul, MulInstruction, "Mul");
-bin_op!(Or, OrInstruction, "Or");
-bin_op!(And, AndInstruction, "And");
-bin_op!(Xor, XorInstruction, "Xor");
-bin_op!(Shl, ShlInstruction, "Shl");
-bin_op!(AShr, AShrInstruction, "AShr");
-bin_op!(FAdd, FAddInstruction, "FAdd");
-bin_op!(FDiv, FDivInstruction, "FDiv");
-bin_op!(FMul, FMulInstruction, "FMul");
-bin_op!(FRem, FRemInstruction, "FRem");
-bin_op!(FSub, FSubInstruction, "FSub");
-bin_op!(LShr, LShrInstruction, "LShr");
-bin_op!(SDiv, SDivInstruction, "SDiv");
-bin_op!(SRem, SRemInstruction, "SRem");
-bin_op!(UDiv, UDivInstruction, "UDiv");
-bin_op!(URem, URemInstruction, "URem");
+bin_op!(Add, AddInst, "Add");
+bin_op!(Sub, SubInst, "Sub");
+bin_op!(Mul, MulInst, "Mul");
+bin_op!(Or, OrInst, "Or");
+bin_op!(And, AndInst, "And");
+bin_op!(Xor, XorInst, "Xor");
+bin_op!(Shl, ShlInst, "Shl");
+bin_op!(AShr, AShrInst, "AShr");
+bin_op!(FAdd, FAddInst, "FAdd");
+bin_op!(FDiv, FDivInst, "FDiv");
+bin_op!(FMul, FMulInst, "FMul");
+bin_op!(FRem, FRemInst, "FRem");
+bin_op!(FSub, FSubInst, "FSub");
+bin_op!(LShr, LShrInst, "LShr");
+bin_op!(SDiv, SDivInst, "SDiv");
+bin_op!(SRem, SRemInst, "SRem");
+bin_op!(UDiv, UDivInst, "UDiv");
+bin_op!(URem, URemInst, "URem");
 
-/// The operand for a [Instruction::Icmp]
+/// The operand for a [Inst::Icmp]
 ///
 /// # Semantics
 ///
@@ -1645,13 +1641,13 @@ bin_op!(URem, URemInstruction, "URem");
 /// variable that dictates the truth of the comparison.
 ///
 #[derive(Debug)]
-pub struct IcmpInstruction {
+pub struct IcmpInst {
     left: PackedOperand,
     pred: Predicate,
     right: PackedOperand,
 }
 
-impl IcmpInstruction {
+impl IcmpInst {
     pub(crate) fn new(op1: Operand, pred: Predicate, op2: Operand) -> Self {
         Self {
             left: PackedOperand::new(&op1),
@@ -1682,7 +1678,7 @@ impl IcmpInstruction {
     }
 }
 
-/// The operand for a [Instruction::Guard]
+/// The operand for a [Inst::Guard]
 ///
 /// # Semantics
 ///
@@ -1691,7 +1687,7 @@ impl IcmpInstruction {
 /// then execution may not continue, and deoptimisation must occur.
 ///
 #[derive(Debug)]
-pub struct GuardInstruction {
+pub struct GuardInst {
     /// The condition to guard against.
     cond: PackedOperand,
     /// The expected outcome of the condition.
@@ -1700,9 +1696,9 @@ pub struct GuardInstruction {
     gidx: GuardInfoIdx,
 }
 
-impl GuardInstruction {
+impl GuardInst {
     pub(crate) fn new(cond: Operand, expect: bool, gidx: GuardInfoIdx) -> Self {
-        GuardInstruction {
+        GuardInst {
             cond: PackedOperand::new(&cond),
             expect,
             gidx,
@@ -1723,14 +1719,14 @@ impl GuardInstruction {
 }
 
 #[derive(Debug)]
-pub struct SignExtendInstruction {
+pub struct SignExtendInst {
     /// The value to extend.
     val: PackedOperand,
     /// The type to extend to.
     dest_ty_idx: TyIdx,
 }
 
-impl SignExtendInstruction {
+impl SignExtendInst {
     pub(crate) fn new(val: &Operand, dest_ty_idx: TyIdx) -> Self {
         Self {
             val: PackedOperand::new(val),
@@ -1774,16 +1770,16 @@ mod tests {
 
     #[test]
     fn use_case_update_instr() {
-        let mut prog: Vec<Instruction> = vec![
-            LoadTraceInputInstruction::new(0, TyIdx::new(0).unwrap()).into(),
-            LoadTraceInputInstruction::new(8, TyIdx::new(0).unwrap()).into(),
-            LoadInstruction::new(
+        let mut prog: Vec<Inst> = vec![
+            LoadTraceInputInst::new(0, TyIdx::new(0).unwrap()).into(),
+            LoadTraceInputInst::new(8, TyIdx::new(0).unwrap()).into(),
+            LoadInst::new(
                 Operand::Local(InstrIdx(0)),
                 TyIdx(U24::from_usize(0).unwrap()),
             )
             .into(),
         ];
-        prog[2] = LoadInstruction::new(
+        prog[2] = LoadInst::new(
             Operand::Local(InstrIdx(1)),
             TyIdx(U24::from_usize(0).unwrap()),
         )
@@ -1793,12 +1789,12 @@ mod tests {
     /// Ensure that any given instruction fits in 64-bits.
     #[test]
     fn instr_size() {
-        assert_eq!(mem::size_of::<CallInstruction>(), 7);
-        assert_eq!(mem::size_of::<StoreInstruction>(), 4);
-        assert_eq!(mem::size_of::<LoadInstruction>(), 6);
-        assert_eq!(mem::size_of::<LookupGlobalInstruction>(), 3);
-        assert_eq!(mem::size_of::<PtrAddInstruction>(), 6);
-        assert!(mem::size_of::<Instruction>() <= mem::size_of::<u64>());
+        assert_eq!(mem::size_of::<CallInst>(), 7);
+        assert_eq!(mem::size_of::<StoreInst>(), 4);
+        assert_eq!(mem::size_of::<LoadInst>(), 6);
+        assert_eq!(mem::size_of::<LookupGlobalInst>(), 3);
+        assert_eq!(mem::size_of::<PtrAddInst>(), 6);
+        assert!(mem::size_of::<Inst>() <= mem::size_of::<u64>());
     }
 
     #[test]
@@ -1817,7 +1813,7 @@ mod tests {
             Operand::Local(InstrIdx(1)), // first extra arg
             Operand::Local(InstrIdx(2)),
         ];
-        let ci = CallInstruction::new(&mut m, func_decl_idx, &args).unwrap();
+        let ci = CallInst::new(&mut m, func_decl_idx, &args).unwrap();
 
         // Now request the operands and check they all look as they should.
         assert_eq!(ci.operand(&m, 0), Operand::Local(InstrIdx(0)));
@@ -1845,7 +1841,7 @@ mod tests {
             Operand::Local(InstrIdx(1)),
             Operand::Local(InstrIdx(2)),
         ];
-        let ci = VACallInstruction::new(&mut m, func_decl_idx, &args).unwrap();
+        let ci = VACallInst::new(&mut m, func_decl_idx, &args).unwrap();
 
         // Now request the operands and check they all look as they should.
         assert_eq!(ci.operand(&m, 0), Operand::Local(InstrIdx(0)));
@@ -1880,7 +1876,7 @@ mod tests {
             Operand::Local(InstrIdx(1)), // first extra arg
             Operand::Local(InstrIdx(2)),
         ];
-        let ci = CallInstruction::new(&mut m, func_decl_idx, &args).unwrap();
+        let ci = CallInst::new(&mut m, func_decl_idx, &args).unwrap();
 
         // Request an operand with an out-of-bounds index.
         ci.operand(&m, 3);
@@ -1982,9 +1978,9 @@ mod tests {
     #[test]
     fn print_module() {
         let mut m = Module::new_testing();
-        m.push(LoadTraceInputInstruction::new(0, m.int8_ty_idx()).into());
-        m.push(LoadTraceInputInstruction::new(8, m.int8_ty_idx()).into());
-        m.push(LoadTraceInputInstruction::new(16, m.int8_ty_idx()).into());
+        m.push(LoadTraceInputInst::new(0, m.int8_ty_idx()).into());
+        m.push(LoadTraceInputInst::new(8, m.int8_ty_idx()).into());
+        m.push(LoadTraceInputInst::new(16, m.int8_ty_idx()).into());
         m.push_global_decl(GlobalDecl::new(
             CString::new("some_global").unwrap(),
             false,

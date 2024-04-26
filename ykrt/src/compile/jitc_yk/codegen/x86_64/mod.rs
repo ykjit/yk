@@ -169,7 +169,7 @@ impl<'a> X64CodeGen<'a> {
     fn codegen_inst(
         &mut self,
         instr_idx: jit_ir::InstrIdx,
-        inst: &jit_ir::Instruction,
+        inst: &jit_ir::Inst,
     ) -> Result<(), CompilationError> {
         #[cfg(any(debug_assertions, test))]
         self.comment(
@@ -178,22 +178,20 @@ impl<'a> X64CodeGen<'a> {
         );
 
         match inst {
-            jit_ir::Instruction::LoadTraceInput(i) => {
-                self.codegen_loadtraceinput_instr(instr_idx, i)
-            }
-            jit_ir::Instruction::Load(i) => self.codegen_load_instr(instr_idx, i),
-            jit_ir::Instruction::PtrAdd(i) => self.codegen_ptradd_instr(instr_idx, i),
-            jit_ir::Instruction::Store(i) => self.codegen_store_instr(i),
-            jit_ir::Instruction::LookupGlobal(i) => self.codegen_lookupglobal_instr(instr_idx, i),
-            jit_ir::Instruction::Call(i) => self.codegen_call_instr(instr_idx, i)?,
-            jit_ir::Instruction::VACall(i) => self.codegen_vacall_instr(instr_idx, i)?,
-            jit_ir::Instruction::Icmp(i) => self.codegen_icmp_instr(instr_idx, i),
-            jit_ir::Instruction::Guard(i) => self.codegen_guard_instr(i),
-            jit_ir::Instruction::Arg(i) => self.codegen_arg(instr_idx, *i),
-            jit_ir::Instruction::TraceLoopStart => self.codegen_traceloopstart_instr(),
-            jit_ir::Instruction::SignExtend(i) => self.codegen_signextend_instr(instr_idx, i),
+            jit_ir::Inst::LoadTraceInput(i) => self.codegen_loadtraceinput_instr(instr_idx, i),
+            jit_ir::Inst::Load(i) => self.codegen_load_instr(instr_idx, i),
+            jit_ir::Inst::PtrAdd(i) => self.codegen_ptradd_instr(instr_idx, i),
+            jit_ir::Inst::Store(i) => self.codegen_store_instr(i),
+            jit_ir::Inst::LookupGlobal(i) => self.codegen_lookupglobal_instr(instr_idx, i),
+            jit_ir::Inst::Call(i) => self.codegen_call_instr(instr_idx, i)?,
+            jit_ir::Inst::VACall(i) => self.codegen_vacall_instr(instr_idx, i)?,
+            jit_ir::Inst::Icmp(i) => self.codegen_icmp_instr(instr_idx, i),
+            jit_ir::Inst::Guard(i) => self.codegen_guard_instr(i),
+            jit_ir::Inst::Arg(i) => self.codegen_arg(instr_idx, *i),
+            jit_ir::Inst::TraceLoopStart => self.codegen_traceloopstart_instr(),
+            jit_ir::Inst::SignExtend(i) => self.codegen_signextend_instr(instr_idx, i),
             // Binary operations
-            jit_ir::Instruction::Add(i) => self.codegen_add_instr(instr_idx, i),
+            jit_ir::Inst::Add(i) => self.codegen_add_instr(instr_idx, i),
             x => todo!("{x:?}"),
         }
         Ok(())
@@ -344,7 +342,7 @@ impl<'a> X64CodeGen<'a> {
         self.store_local(&l, reg, size);
     }
 
-    fn codegen_add_instr(&mut self, inst_idx: jit_ir::InstrIdx, inst: &jit_ir::AddInstruction) {
+    fn codegen_add_instr(&mut self, inst_idx: jit_ir::InstrIdx, inst: &jit_ir::AddInst) {
         let lhs = inst.lhs();
         let rhs = inst.rhs();
 
@@ -368,7 +366,7 @@ impl<'a> X64CodeGen<'a> {
     fn codegen_loadtraceinput_instr(
         &mut self,
         inst_idx: jit_ir::InstrIdx,
-        inst: &jit_ir::LoadTraceInputInstruction,
+        inst: &jit_ir::LoadTraceInputInst,
     ) {
         // Find the argument register containing the pointer to the live variables struct.
         let base_reg = ARG_REGS[JITFUNC_LIVEVARS_ARGIDX].code();
@@ -391,7 +389,7 @@ impl<'a> X64CodeGen<'a> {
         }
     }
 
-    fn codegen_load_instr(&mut self, inst_idx: jit_ir::InstrIdx, inst: &jit_ir::LoadInstruction) {
+    fn codegen_load_instr(&mut self, inst_idx: jit_ir::InstrIdx, inst: &jit_ir::LoadInst) {
         self.operand_into_reg(WR0, &inst.operand()); // FIXME: assumes value will fit in a reg.
         let size = inst_idx.instr(self.m).def_byte_size(self.m);
         debug_assert!(size <= REG64_SIZE);
@@ -405,11 +403,7 @@ impl<'a> X64CodeGen<'a> {
         self.reg_into_new_local(inst_idx, WR0);
     }
 
-    fn codegen_ptradd_instr(
-        &mut self,
-        inst_idx: jit_ir::InstrIdx,
-        inst: &jit_ir::PtrAddInstruction,
-    ) {
+    fn codegen_ptradd_instr(&mut self, inst_idx: jit_ir::InstrIdx, inst: &jit_ir::PtrAddInst) {
         self.operand_into_reg(WR0, &inst.ptr());
         let off = inst.offset();
         // unwrap cannot fail
@@ -422,7 +416,7 @@ impl<'a> X64CodeGen<'a> {
         self.reg_into_new_local(inst_idx, WR0);
     }
 
-    fn codegen_store_instr(&mut self, inst: &jit_ir::StoreInstruction) {
+    fn codegen_store_instr(&mut self, inst: &jit_ir::StoreInst) {
         self.operand_into_reg(WR0, &inst.ptr());
         let val = inst.val();
         self.operand_into_reg(WR1, &val); // FIXME: assumes the value fits in a reg
@@ -438,7 +432,7 @@ impl<'a> X64CodeGen<'a> {
     fn codegen_lookupglobal_instr(
         &mut self,
         inst_idx: jit_ir::InstrIdx,
-        inst: &jit_ir::LookupGlobalInstruction,
+        inst: &jit_ir::LookupGlobalInst,
     ) {
         let decl = inst.decl(self.m);
         if decl.is_threadlocal() {
@@ -507,7 +501,7 @@ impl<'a> X64CodeGen<'a> {
     pub(super) fn codegen_call_instr(
         &mut self,
         inst_idx: InstrIdx,
-        inst: &jit_ir::CallInstruction,
+        inst: &jit_ir::CallInst,
     ) -> Result<(), CompilationError> {
         let func_decl_idx = inst.target();
         let func_type = self.m.func_type(func_decl_idx);
@@ -521,7 +515,7 @@ impl<'a> X64CodeGen<'a> {
     pub(super) fn codegen_vacall_instr(
         &mut self,
         inst_idx: InstrIdx,
-        inst: &jit_ir::VACallInstruction,
+        inst: &jit_ir::VACallInst,
     ) -> Result<(), CompilationError> {
         let func_decl_idx = inst.target();
         let args = (0..(inst.num_args()))
@@ -530,11 +524,7 @@ impl<'a> X64CodeGen<'a> {
         self.emit_call(inst_idx, func_decl_idx, &args)
     }
 
-    pub(super) fn codegen_icmp_instr(
-        &mut self,
-        inst_idx: InstrIdx,
-        inst: &jit_ir::IcmpInstruction,
-    ) {
+    pub(super) fn codegen_icmp_instr(&mut self, inst_idx: InstrIdx, inst: &jit_ir::IcmpInst) {
         let (left, pred, right) = (inst.left(), inst.predicate(), inst.right());
 
         // FIXME: We should be checking type equality here, but since constants currently don't
@@ -599,12 +589,12 @@ impl<'a> X64CodeGen<'a> {
         dynasm!(self.asm; ->trace_loop_start:);
     }
 
-    fn codegen_signextend_instr(&mut self, inst_idx: InstrIdx, i: &jit_ir::SignExtendInstruction) {
+    fn codegen_signextend_instr(&mut self, inst_idx: InstrIdx, i: &jit_ir::SignExtendInst) {
         let from_val = i.val();
-        let from_type = from_val.type_(self.jit_mod);
+        let from_type = from_val.type_(self.m);
         let from_size = from_type.byte_size().unwrap();
 
-        let to_type = self.jit_mod.type_(i.dest_ty_idx());
+        let to_type = self.m.type_(i.dest_ty_idx());
         let to_size = to_type.byte_size().unwrap();
 
         // You can only sign-extend a smaller integer to a larger integer.
@@ -625,7 +615,7 @@ impl<'a> X64CodeGen<'a> {
     }
 
     #[allow(clippy::fn_to_numeric_cast)]
-    fn codegen_guard_instr(&mut self, inst: &jit_ir::GuardInstruction) {
+    fn codegen_guard_instr(&mut self, inst: &jit_ir::GuardInst) {
         let cond = inst.cond();
 
         // ICmp instructions evaluate to a one-byte zero/one value.
@@ -845,9 +835,9 @@ mod tests {
             let mut m = test_module();
             let ptr_ty_idx = m.ptr_ty_idx();
             let load_op = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, ptr_ty_idx).into())
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, ptr_ty_idx).into())
                 .unwrap();
-            m.push(jit_ir::LoadInstruction::new(load_op, ptr_ty_idx).into());
+            m.push(jit_ir::LoadInst::new(load_op, ptr_ty_idx).into());
             let patt_lines = [
                 "...",
                 "; %1: ptr = Load %0",
@@ -864,9 +854,9 @@ mod tests {
             let mut m = test_module();
             let i8_ty_idx = m.ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
             let load_op = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into())
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i8_ty_idx).into())
                 .unwrap();
-            m.push(jit_ir::LoadInstruction::new(load_op, i8_ty_idx).into());
+            m.push(jit_ir::LoadInst::new(load_op, i8_ty_idx).into());
             let patt_lines = [
                 "...",
                 "; %1: i8 = Load %0",
@@ -883,9 +873,9 @@ mod tests {
             let mut m = test_module();
             let i32_ty_idx = m.ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(32))).unwrap();
             let ti_op = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i32_ty_idx).into())
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i32_ty_idx).into())
                 .unwrap();
-            m.push(jit_ir::LoadInstruction::new(ti_op, i32_ty_idx).into());
+            m.push(jit_ir::LoadInst::new(ti_op, i32_ty_idx).into());
             let patt_lines = [
                 "...",
                 "; %1: i32 = Load %0",
@@ -902,9 +892,9 @@ mod tests {
             let mut m = test_module();
             let ptr_ty_idx = m.ptr_ty_idx();
             let ti_op = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, ptr_ty_idx).into())
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, ptr_ty_idx).into())
                 .unwrap();
-            m.push(jit_ir::PtrAddInstruction::new(ti_op, 64).into());
+            m.push(jit_ir::PtrAddInst::new(ti_op, 64).into());
             let patt_lines = [
                 "...",
                 "; %1: ptr = PtrAdd %0, 64",
@@ -921,12 +911,12 @@ mod tests {
             let mut m = test_module();
             let ptr_ty_idx = m.ptr_ty_idx();
             let ti1_op = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, ptr_ty_idx).into())
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, ptr_ty_idx).into())
                 .unwrap();
             let ti2_op = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(8, ptr_ty_idx).into())
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(8, ptr_ty_idx).into())
                 .unwrap();
-            m.push(jit_ir::StoreInstruction::new(ti1_op, ti2_op).into());
+            m.push(jit_ir::StoreInst::new(ti1_op, ti2_op).into());
             let patt_lines = [
                 "...",
                 "; Store %0, %1",
@@ -942,7 +932,7 @@ mod tests {
         fn codegen_loadtraceinput_i8() {
             let mut m = test_module();
             let u8_ty_idx = m.ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
-            m.push(jit_ir::LoadTraceInputInstruction::new(0, u8_ty_idx).into());
+            m.push(jit_ir::LoadTraceInputInst::new(0, u8_ty_idx).into());
             let patt_lines = [
                 "...",
                 &format!("; %0: i8 = LoadTraceInput 0, i8"),
@@ -957,7 +947,7 @@ mod tests {
         fn codegen_loadtraceinput_i16_with_offset() {
             let mut m = test_module();
             let u16_ty_idx = m.ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(16))).unwrap();
-            m.push(jit_ir::LoadTraceInputInstruction::new(32, u16_ty_idx).into());
+            m.push(jit_ir::LoadTraceInputInst::new(32, u16_ty_idx).into());
             let patt_lines = [
                 "...",
                 &format!("; %0: i16 = LoadTraceInput 32, i16"),
@@ -973,11 +963,11 @@ mod tests {
             let mut m = test_module();
             let i8_ty_idx = m.ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
             let ptr_ty_idx = m.ptr_ty_idx();
-            m.push(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into());
-            m.push(jit_ir::LoadTraceInputInstruction::new(1, i8_ty_idx).into());
-            m.push(jit_ir::LoadTraceInputInstruction::new(2, i8_ty_idx).into());
-            m.push(jit_ir::LoadTraceInputInstruction::new(3, i8_ty_idx).into());
-            m.push(jit_ir::LoadTraceInputInstruction::new(8, ptr_ty_idx).into());
+            m.push(jit_ir::LoadTraceInputInst::new(0, i8_ty_idx).into());
+            m.push(jit_ir::LoadTraceInputInst::new(1, i8_ty_idx).into());
+            m.push(jit_ir::LoadTraceInputInst::new(2, i8_ty_idx).into());
+            m.push(jit_ir::LoadTraceInputInst::new(3, i8_ty_idx).into());
+            m.push(jit_ir::LoadTraceInputInst::new(8, ptr_ty_idx).into());
             let patt_lines = [
                 "...",
                 &format!("; %0: i8 = LoadTraceInput 0, i8"),
@@ -1005,14 +995,12 @@ mod tests {
             let mut m = test_module();
             let i16_ty_idx = m.ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(16))).unwrap();
             let op1 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i16_ty_idx).into())
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i16_ty_idx).into())
                 .unwrap();
             let op2 = m
-                .push_and_make_operand(
-                    jit_ir::LoadTraceInputInstruction::new(16, i16_ty_idx).into(),
-                )
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(16, i16_ty_idx).into())
                 .unwrap();
-            m.push(jit_ir::AddInstruction::new(op1, op2).into());
+            m.push(jit_ir::AddInst::new(op1, op2).into());
             let patt_lines = [
                 "...",
                 "; %2: i16 = Add %0, %1",
@@ -1030,14 +1018,12 @@ mod tests {
             let mut m = test_module();
             let i64_ty_idx = m.ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(64))).unwrap();
             let op1 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i64_ty_idx).into())
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i64_ty_idx).into())
                 .unwrap();
             let op2 = m
-                .push_and_make_operand(
-                    jit_ir::LoadTraceInputInstruction::new(64, i64_ty_idx).into(),
-                )
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(64, i64_ty_idx).into())
                 .unwrap();
-            m.push(jit_ir::AddInstruction::new(op1, op2).into());
+            m.push(jit_ir::AddInst::new(op1, op2).into());
             let patt_lines = [
                 "...",
                 "; %2: i64 = Add %0, %1",
@@ -1058,14 +1044,12 @@ mod tests {
             let i64_ty_idx = m.ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(64))).unwrap();
             let i32_ty_idx = m.ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(32))).unwrap();
             let op1 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i64_ty_idx).into())
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i64_ty_idx).into())
                 .unwrap();
             let op2 = m
-                .push_and_make_operand(
-                    jit_ir::LoadTraceInputInstruction::new(64, i32_ty_idx).into(),
-                )
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(64, i32_ty_idx).into())
                 .unwrap();
-            m.push(jit_ir::AddInstruction::new(op1, op2).into());
+            m.push(jit_ir::AddInst::new(op1, op2).into());
 
             X64CodeGen::new(&m, Box::new(SpillAllocator::new(STACK_DIRECTION)))
                 .unwrap()
@@ -1097,7 +1081,7 @@ mod tests {
                     func_ty_idx,
                 ))
                 .unwrap();
-            let call_inst = jit_ir::CallInstruction::new(&mut m, func_decl_idx, &[]).unwrap();
+            let call_inst = jit_ir::CallInst::new(&mut m, func_decl_idx, &[]).unwrap();
             m.push(call_inst.into());
 
             let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
@@ -1131,17 +1115,17 @@ mod tests {
                 .unwrap();
 
             let arg1 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i32_ty_idx).into())
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i32_ty_idx).into())
                 .unwrap();
             let arg2 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(4, i32_ty_idx).into())
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(4, i32_ty_idx).into())
                 .unwrap();
             let arg3 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(8, i32_ty_idx).into())
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(8, i32_ty_idx).into())
                 .unwrap();
 
             let call_inst =
-                jit_ir::CallInstruction::new(&mut m, func_decl_idx, &[arg1, arg2, arg3]).unwrap();
+                jit_ir::CallInst::new(&mut m, func_decl_idx, &[arg1, arg2, arg3]).unwrap();
             m.push(call_inst.into());
 
             let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
@@ -1185,36 +1169,27 @@ mod tests {
                 .unwrap();
 
             let arg1 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into())
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i8_ty_idx).into())
                 .unwrap();
             let arg2 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(8, i16_ty_idx).into())
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(8, i16_ty_idx).into())
                 .unwrap();
             let arg3 = m
-                .push_and_make_operand(
-                    jit_ir::LoadTraceInputInstruction::new(16, i32_ty_idx).into(),
-                )
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(16, i32_ty_idx).into())
                 .unwrap();
             let arg4 = m
-                .push_and_make_operand(
-                    jit_ir::LoadTraceInputInstruction::new(24, i64_ty_idx).into(),
-                )
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(24, i64_ty_idx).into())
                 .unwrap();
             let arg5 = m
-                .push_and_make_operand(
-                    jit_ir::LoadTraceInputInstruction::new(32, ptr_ty_idx).into(),
-                )
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(32, ptr_ty_idx).into())
                 .unwrap();
             let arg6 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(40, i8_ty_idx).into())
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(40, i8_ty_idx).into())
                 .unwrap();
 
-            let call_inst = jit_ir::CallInstruction::new(
-                &mut m,
-                func_decl_idx,
-                &[arg1, arg2, arg3, arg4, arg5, arg6],
-            )
-            .unwrap();
+            let call_inst =
+                jit_ir::CallInst::new(&mut m, func_decl_idx, &[arg1, arg2, arg3, arg4, arg5, arg6])
+                    .unwrap();
             m.push(call_inst.into());
 
             let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
@@ -1256,11 +1231,11 @@ mod tests {
                 .unwrap();
 
             let arg1 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i32_ty_idx).into())
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i32_ty_idx).into())
                 .unwrap();
 
             let args = (0..7).map(|_| arg1.clone()).collect::<Vec<_>>();
-            let call_inst = jit_ir::CallInstruction::new(&mut m, func_decl_idx, &args).unwrap();
+            let call_inst = jit_ir::CallInst::new(&mut m, func_decl_idx, &args).unwrap();
             m.push(call_inst.into());
 
             X64CodeGen::new(&m, Box::new(SpillAllocator::new(STACK_DIRECTION)))
@@ -1283,7 +1258,7 @@ mod tests {
                     func_ty_idx,
                 ))
                 .unwrap();
-            let call_inst = jit_ir::CallInstruction::new(&mut m, func_decl_idx, &[]).unwrap();
+            let call_inst = jit_ir::CallInst::new(&mut m, func_decl_idx, &[]).unwrap();
             m.push(call_inst.into());
 
             let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
@@ -1322,9 +1297,9 @@ mod tests {
             // Make a call that passes a i8 argument, instead of an i32 as in the func sig.
             let i8_ty_idx = m.ty_idx(&Ty::Integer(IntegerTy::new(8))).unwrap();
             let arg1 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into())
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i8_ty_idx).into())
                 .unwrap();
-            let call_inst = jit_ir::CallInstruction::new(&mut m, func_decl_idx, &[arg1]).unwrap();
+            let call_inst = jit_ir::CallInst::new(&mut m, func_decl_idx, &[arg1]).unwrap();
             m.push(call_inst.into());
 
             X64CodeGen::new(&m, Box::new(SpillAllocator::new(STACK_DIRECTION)))
@@ -1338,9 +1313,9 @@ mod tests {
             let mut m = test_module();
             let i64_ty_idx = m.ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(64))).unwrap();
             let op = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i64_ty_idx).into())
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i64_ty_idx).into())
                 .unwrap();
-            m.push(jit_ir::IcmpInstruction::new(op.clone(), jit_ir::Predicate::Equal, op).into());
+            m.push(jit_ir::IcmpInst::new(op.clone(), jit_ir::Predicate::Equal, op).into());
             let patt_lines = [
                 "...",
                 "; %1: i8 = Icmp %0, Equal, %0",
@@ -1359,9 +1334,9 @@ mod tests {
             let mut m = test_module();
             let i8_ty_idx = m.ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
             let op = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into())
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i8_ty_idx).into())
                 .unwrap();
-            m.push(jit_ir::IcmpInstruction::new(op.clone(), jit_ir::Predicate::Equal, op).into());
+            m.push(jit_ir::IcmpInst::new(op.clone(), jit_ir::Predicate::Equal, op).into());
             let patt_lines = [
                 "...",
                 "; %1: i8 = Icmp %0, Equal, %0",
@@ -1382,9 +1357,9 @@ mod tests {
             let mut m = test_module();
             let ptr_ty_idx = m.ptr_ty_idx();
             let op = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, ptr_ty_idx).into())
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, ptr_ty_idx).into())
                 .unwrap();
-            m.push(jit_ir::IcmpInstruction::new(op.clone(), jit_ir::Predicate::Equal, op).into());
+            m.push(jit_ir::IcmpInst::new(op.clone(), jit_ir::Predicate::Equal, op).into());
             X64CodeGen::new(&m, Box::new(SpillAllocator::new(STACK_DIRECTION)))
                 .unwrap()
                 .codegen()
@@ -1399,12 +1374,12 @@ mod tests {
             let i8_ty_idx = m.ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
             let i64_ty_idx = m.ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(64))).unwrap();
             let op1 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into())
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i8_ty_idx).into())
                 .unwrap();
             let op2 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(8, i64_ty_idx).into())
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(8, i64_ty_idx).into())
                 .unwrap();
-            m.push(jit_ir::IcmpInstruction::new(op1, jit_ir::Predicate::Equal, op2).into());
+            m.push(jit_ir::IcmpInst::new(op1, jit_ir::Predicate::Equal, op2).into());
             X64CodeGen::new(&m, Box::new(SpillAllocator::new(STACK_DIRECTION)))
                 .unwrap()
                 .codegen()
@@ -1417,11 +1392,9 @@ mod tests {
             let gi = jit_ir::GuardInfo::new(vec![0], Vec::new());
             let gi_idx = m.push_guardinfo(gi).unwrap();
             let cond_op = m
-                .push_and_make_operand(
-                    jit_ir::LoadTraceInputInstruction::new(0, m.int8_ty_idx()).into(),
-                )
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, m.int8_ty_idx()).into())
                 .unwrap();
-            m.push(jit_ir::GuardInstruction::new(cond_op, true, gi_idx).into());
+            m.push(jit_ir::GuardInst::new(cond_op, true, gi_idx).into());
             let patt_lines = [
                 "...",
                 "; Guard %0, true",
@@ -1444,11 +1417,9 @@ mod tests {
             let gi = jit_ir::GuardInfo::new(vec![0], Vec::new());
             let gi_idx = m.push_guardinfo(gi).unwrap();
             let cond_op = m
-                .push_and_make_operand(
-                    jit_ir::LoadTraceInputInstruction::new(0, m.int8_ty_idx()).into(),
-                )
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, m.int8_ty_idx()).into())
                 .unwrap();
-            m.push(jit_ir::GuardInstruction::new(cond_op, false, gi_idx).into());
+            m.push(jit_ir::GuardInst::new(cond_op, false, gi_idx).into());
             let patt_lines = [
                 "...",
                 "; Guard %0, false",
@@ -1475,7 +1446,7 @@ mod tests {
         #[test]
         fn looped_trace_smallest() {
             let mut m = test_module();
-            m.push(jit_ir::Instruction::TraceLoopStart);
+            m.push(jit_ir::Inst::TraceLoopStart);
             let patt_lines = [
                 "...",
                 "; TraceLoopStart",
@@ -1492,12 +1463,10 @@ mod tests {
             let mut m = test_module();
             let int8_ty_idx = m.int8_ty_idx();
             let ti_op = m
-                .push_and_make_operand(
-                    jit_ir::LoadTraceInputInstruction::new(0, int8_ty_idx).into(),
-                )
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, int8_ty_idx).into())
                 .unwrap();
-            m.push(jit_ir::Instruction::TraceLoopStart);
-            m.push(jit_ir::AddInstruction::new(ti_op.clone(), ti_op).into());
+            m.push(jit_ir::Inst::TraceLoopStart);
+            m.push(jit_ir::AddInst::new(ti_op.clone(), ti_op).into());
             let patt_lines = [
                 "...",
                 "; %0: i8 = LoadTraceInput 0, i8",
