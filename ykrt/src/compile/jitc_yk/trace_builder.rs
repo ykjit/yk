@@ -1,6 +1,6 @@
 //! The trace builder.
 
-use super::aot_ir::{self, AotIRDisplay, BBlockId, InstrIdx, Module};
+use super::aot_ir::{self, AotIRDisplay, BBlockId, FuncIdx, InstrIdx, Module};
 use super::jit_ir;
 use crate::compile::CompilationError;
 use crate::trace::{AOTTraceIterator, TraceAction};
@@ -12,6 +12,8 @@ const TRACE_FUNC_CTRLP_ARGIDX: u16 = 0;
 /// A TraceBuilder frame. Keeps track of inlined calls and stores information about the last
 /// processed stackmap, call instruction and its arguments.
 struct Frame<'a> {
+    // Index of the function of this frame.
+    func_idx: Option<FuncIdx>,
     /// Stackmap for this frame.
     sm: Option<&'a aot_ir::Instruction>,
     /// JIT arguments of this frame's caller.
@@ -19,8 +21,12 @@ struct Frame<'a> {
 }
 
 impl<'a> Frame<'a> {
-    fn new(sm: Option<&'a aot_ir::Instruction>, args: Vec<jit_ir::Operand>) -> Frame<'a> {
-        Frame { sm, args }
+    fn new(
+        func_idx: Option<FuncIdx>,
+        sm: Option<&'a aot_ir::Instruction>,
+        args: Vec<jit_ir::Operand>,
+    ) -> Frame<'a> {
+        Frame { func_idx, sm, args }
     }
 }
 
@@ -59,7 +65,9 @@ impl<'a> TraceBuilder<'a> {
             local_map: HashMap::new(),
             cp_block: None,
             first_ti_idx: 0,
-            frames: vec![Frame::new(None, vec![])],
+            // We have to set the func_idx to None here as we don't know what it is yet. We'll
+            // update it as soon as we do.
+            frames: vec![Frame::new(None, None, vec![])],
             outline_target_blk: None,
             recursion_count: 0,
         })
@@ -516,7 +524,17 @@ impl<'a> TraceBuilder<'a> {
             jit_args.push(self.handle_operand(arg)?);
         }
 
-        if inst.is_mappable_call(self.aot_mod) && !self.aot_mod.func(*callee).is_outline() {
+        // Check if this is a recursive call by scanning the call stack for the callee.
+        let is_recursive = self
+            .frames
+            .iter()
+            .position(|f| f.func_idx == Some(*callee))
+            .is_some();
+
+        if inst.is_mappable_call(self.aot_mod)
+            && !self.aot_mod.func(*callee).is_outline()
+            && !is_recursive
+        {
             // This is a mappable call that we want to inline.
             // Retrieve the stackmap that follows every mappable call.
             let blk = self.aot_mod.bblock(bid);
@@ -526,7 +544,7 @@ impl<'a> TraceBuilder<'a> {
             // Unwrap is safe as there's always at least one frame.
             self.frames.last_mut().unwrap().sm = Some(sm);
             // Create a new frame for the inlined call and pass in the arguments of the caller.
-            self.frames.push(Frame::new(None, jit_args));
+            self.frames.push(Frame::new(Some(*callee), None, jit_args));
             Ok(())
         } else {
             // This call can't be inlined. It is either unmappable (a declaration or an indirect
@@ -666,10 +684,12 @@ impl<'a> TraceBuilder<'a> {
         };
 
         self.cp_block = self.lookup_aot_block(&prev);
+        self.frames.last_mut().unwrap().func_idx = Some(self.cp_block.as_ref().unwrap().func_idx());
         // This unwrap can't fail. If it does that means the tracer has given us a mappable block
         // that doesn't exist in the AOT module.
         self.create_trace_header(self.aot_mod.bblock(self.cp_block.as_ref().unwrap()))?;
 
+        let mut last_blk_is_return = false;
         while let Some(tblk) = trace_iter.next() {
             match tblk {
                 Ok(b) => {
@@ -700,6 +720,20 @@ impl<'a> TraceBuilder<'a> {
                                 } else {
                                     // We are outlining so just skip this block.
                                     continue;
+                                }
+                            } else {
+                                // We are not outlining. Process blocks normally.
+                                if last_blk_is_return {
+                                    // If the last block had a return terminator, we are returning
+                                    // from a call, which means the HWT will have recorded an
+                                    // additional caller block that we'll have to skip.
+                                    // FIXME: This only applies to the HWT as the SWT doesn't
+                                    // record these extra blocks.
+                                    last_blk_is_return = false;
+                                    continue;
+                                }
+                                if self.aot_mod.bblock(&bid).is_return() {
+                                    last_blk_is_return = true;
                                 }
                             }
 
