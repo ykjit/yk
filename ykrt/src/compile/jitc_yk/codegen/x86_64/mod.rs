@@ -192,6 +192,7 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Inst::SignExtend(i) => self.codegen_signextend_inst(inst_idx, i),
             // Binary operations
             jit_ir::Inst::Add(i) => self.codegen_add_inst(inst_idx, i),
+            jit_ir::Inst::Or(i) => self.codegen_or_inst(inst_idx, i),
             x => todo!("{x:?}"),
         }
         Ok(())
@@ -357,6 +358,27 @@ impl<'a> X64CodeGen<'a> {
             4 => dynasm!(self.asm; add Rd(WR0.code()), Rd(WR1.code())),
             2 => dynasm!(self.asm; add Rw(WR0.code()), Rw(WR1.code())),
             1 => dynasm!(self.asm; add Rb(WR0.code()), Rb(WR1.code())),
+            _ => todo!(),
+        }
+
+        self.reg_into_new_local(inst_idx, WR0);
+    }
+
+    fn codegen_or_inst(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::OrInst) {
+        let lhs = inst.lhs();
+        let rhs = inst.rhs();
+
+        // Operand types must be the same.
+        debug_assert_eq!(lhs.type_(self.m), rhs.type_(self.m));
+
+        self.operand_into_reg(WR0, &lhs); // FIXME: assumes value will fit in a reg.
+        self.operand_into_reg(WR1, &rhs); // ^^^ same
+
+        match lhs.byte_size(self.m) {
+            8 => dynasm!(self.asm; and Rq(WR0.code()), Rq(WR1.code())),
+            4 => dynasm!(self.asm; and Rd(WR0.code()), Rd(WR1.code())),
+            2 => dynasm!(self.asm; and Rw(WR0.code()), Rw(WR1.code())),
+            1 => dynasm!(self.asm; and Rb(WR0.code()), Rb(WR1.code())),
             _ => todo!(),
         }
 

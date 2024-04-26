@@ -492,8 +492,10 @@ impl IntegerTy {
         let typ = Ty::Integer(self.clone());
         let ty_idx = m.ty_idx(&typ)?;
         let bytes = ToBytes::to_ne_bytes(&val).as_ref().to_vec();
-        debug_assert_eq!(typ.byte_size().unwrap(), bytes.len());
-        Ok(Constant::new(ty_idx, bytes))
+        let ty_size = typ.byte_size().unwrap();
+        debug_assert!(ty_size <= bytes.len());
+        let bytes_trunc = bytes[0..ty_size].to_owned();
+        Ok(Constant::new(ty_idx, bytes_trunc))
     }
 
     /// Format a constant integer value that is of the type described by `self`.
@@ -1088,6 +1090,7 @@ impl Inst {
             Self::SignExtend(si) => si.dest_ty_idx(),
             // Binary operations
             Self::Add(i) => i.ty_idx(m),
+            Self::Or(i) => i.ty_idx(m),
             x => todo!("{x:?}"),
         }
     }
@@ -1208,6 +1211,14 @@ impl fmt::Display for DisplayableInst<'_> {
                     "SignExtend {}, {}",
                     i.val().display(self.m),
                     self.m.type_(i.dest_ty_idx())
+                )
+            }
+            Inst::Or(i) => {
+                write!(
+                    f,
+                    "Or {}, {}",
+                    i.lhs().display(self.m),
+                    i.rhs().display(self.m),
                 )
             }
             x => todo!("{x:?}"),
