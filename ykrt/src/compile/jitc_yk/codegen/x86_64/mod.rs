@@ -104,7 +104,7 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
         // allocation and side-step the need to patch up the prolog after the fact. dynasmrs
         // doesn't support this, but it's on their roadmap:
         // https://github.com/CensoredUsername/dynasm-rs/issues/48
-        for (idx, inst) in self.m.instrs().iter().enumerate() {
+        for (idx, inst) in self.m.insts().iter().enumerate() {
             self.codegen_inst(jit_ir::InstIdx::new(idx)?, inst)?;
         }
 
@@ -168,30 +168,30 @@ impl<'a> X64CodeGen<'a> {
     /// Codegen an instruction.
     fn codegen_inst(
         &mut self,
-        instr_idx: jit_ir::InstIdx,
+        inst_idx: jit_ir::InstIdx,
         inst: &jit_ir::Inst,
     ) -> Result<(), CompilationError> {
         #[cfg(any(debug_assertions, test))]
         self.comment(
             self.asm.offset(),
-            inst.display(instr_idx, self.m).to_string(),
+            inst.display(inst_idx, self.m).to_string(),
         );
 
         match inst {
-            jit_ir::Inst::LoadTraceInput(i) => self.codegen_loadtraceinput_instr(instr_idx, i),
-            jit_ir::Inst::Load(i) => self.codegen_load_instr(instr_idx, i),
-            jit_ir::Inst::PtrAdd(i) => self.codegen_ptradd_instr(instr_idx, i),
-            jit_ir::Inst::Store(i) => self.codegen_store_instr(i),
-            jit_ir::Inst::LookupGlobal(i) => self.codegen_lookupglobal_instr(instr_idx, i),
-            jit_ir::Inst::Call(i) => self.codegen_call_instr(instr_idx, i)?,
-            jit_ir::Inst::VACall(i) => self.codegen_vacall_instr(instr_idx, i)?,
-            jit_ir::Inst::Icmp(i) => self.codegen_icmp_instr(instr_idx, i),
-            jit_ir::Inst::Guard(i) => self.codegen_guard_instr(i),
-            jit_ir::Inst::Arg(i) => self.codegen_arg(instr_idx, *i),
-            jit_ir::Inst::TraceLoopStart => self.codegen_traceloopstart_instr(),
-            jit_ir::Inst::SignExtend(i) => self.codegen_signextend_instr(instr_idx, i),
+            jit_ir::Inst::LoadTraceInput(i) => self.codegen_loadtraceinput_inst(inst_idx, i),
+            jit_ir::Inst::Load(i) => self.codegen_load_inst(inst_idx, i),
+            jit_ir::Inst::PtrAdd(i) => self.codegen_ptradd_inst(inst_idx, i),
+            jit_ir::Inst::Store(i) => self.codegen_store_inst(i),
+            jit_ir::Inst::LookupGlobal(i) => self.codegen_lookupglobal_inst(inst_idx, i),
+            jit_ir::Inst::Call(i) => self.codegen_call_inst(inst_idx, i)?,
+            jit_ir::Inst::VACall(i) => self.codegen_vacall_inst(inst_idx, i)?,
+            jit_ir::Inst::Icmp(i) => self.codegen_icmp_inst(inst_idx, i),
+            jit_ir::Inst::Guard(i) => self.codegen_guard_inst(i),
+            jit_ir::Inst::Arg(i) => self.codegen_arg(inst_idx, *i),
+            jit_ir::Inst::TraceLoopStart => self.codegen_traceloopstart_inst(),
+            jit_ir::Inst::SignExtend(i) => self.codegen_signextend_inst(inst_idx, i),
             // Binary operations
-            jit_ir::Inst::Add(i) => self.codegen_add_instr(instr_idx, i),
+            jit_ir::Inst::Add(i) => self.codegen_add_inst(inst_idx, i),
             x => todo!("{x:?}"),
         }
         Ok(())
@@ -279,7 +279,7 @@ impl<'a> X64CodeGen<'a> {
             LocalAlloc::Stack { frame_off, size: _ } => {
                 match i32::try_from(*frame_off) {
                     Ok(foff) => {
-                        let size = local.instr(self.m).def_byte_size(self.m);
+                        let size = local.inst(self.m).def_byte_size(self.m);
                         // We use `movzx` where possible to avoid partial register stalls.
                         match size {
                             1 => dynasm!(self.asm; movzx Rq(reg.code()), BYTE [rbp - foff]),
@@ -337,12 +337,12 @@ impl<'a> X64CodeGen<'a> {
 
     /// Store a value held in a register into a new local variable.
     fn reg_into_new_local(&mut self, local: InstIdx, reg: Rq) {
-        let size = local.instr(self.m).def_byte_size(self.m);
+        let size = local.inst(self.m).def_byte_size(self.m);
         let l = self.ra.allocate(local, size, &mut self.stack);
         self.store_local(&l, reg, size);
     }
 
-    fn codegen_add_instr(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::AddInst) {
+    fn codegen_add_inst(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::AddInst) {
         let lhs = inst.lhs();
         let rhs = inst.rhs();
 
@@ -363,7 +363,7 @@ impl<'a> X64CodeGen<'a> {
         self.reg_into_new_local(inst_idx, WR0);
     }
 
-    fn codegen_loadtraceinput_instr(
+    fn codegen_loadtraceinput_inst(
         &mut self,
         inst_idx: jit_ir::InstIdx,
         inst: &jit_ir::LoadTraceInputInst,
@@ -374,7 +374,7 @@ impl<'a> X64CodeGen<'a> {
         // Now load the value into a new local variable from [base_reg+off].
         match i32::try_from(inst.off()) {
             Ok(off) => {
-                let size = inst_idx.instr(self.m).def_byte_size(self.m);
+                let size = inst_idx.inst(self.m).def_byte_size(self.m);
                 debug_assert!(size <= REG64_SIZE);
                 match size {
                     8 => dynasm!(self.asm ; mov Rq(WR0.code()), [Rq(base_reg) + off]),
@@ -389,9 +389,9 @@ impl<'a> X64CodeGen<'a> {
         }
     }
 
-    fn codegen_load_instr(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::LoadInst) {
+    fn codegen_load_inst(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::LoadInst) {
         self.operand_into_reg(WR0, &inst.operand()); // FIXME: assumes value will fit in a reg.
-        let size = inst_idx.instr(self.m).def_byte_size(self.m);
+        let size = inst_idx.inst(self.m).def_byte_size(self.m);
         debug_assert!(size <= REG64_SIZE);
         match size {
             8 => dynasm!(self.asm ; mov Rq(WR0.code()), [Rq(WR0.code())]),
@@ -403,7 +403,7 @@ impl<'a> X64CodeGen<'a> {
         self.reg_into_new_local(inst_idx, WR0);
     }
 
-    fn codegen_ptradd_instr(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::PtrAddInst) {
+    fn codegen_ptradd_inst(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::PtrAddInst) {
         self.operand_into_reg(WR0, &inst.ptr());
         let off = inst.offset();
         // unwrap cannot fail
@@ -416,7 +416,7 @@ impl<'a> X64CodeGen<'a> {
         self.reg_into_new_local(inst_idx, WR0);
     }
 
-    fn codegen_store_instr(&mut self, inst: &jit_ir::StoreInst) {
+    fn codegen_store_inst(&mut self, inst: &jit_ir::StoreInst) {
         self.operand_into_reg(WR0, &inst.ptr());
         let val = inst.val();
         self.operand_into_reg(WR1, &val); // FIXME: assumes the value fits in a reg
@@ -429,7 +429,7 @@ impl<'a> X64CodeGen<'a> {
         }
     }
 
-    fn codegen_lookupglobal_instr(
+    fn codegen_lookupglobal_inst(
         &mut self,
         inst_idx: jit_ir::InstIdx,
         inst: &jit_ir::LookupGlobalInst,
@@ -498,7 +498,7 @@ impl<'a> X64CodeGen<'a> {
     }
 
     /// Codegen a (non-varargs) call.
-    pub(super) fn codegen_call_instr(
+    pub(super) fn codegen_call_inst(
         &mut self,
         inst_idx: InstIdx,
         inst: &jit_ir::CallInst,
@@ -512,7 +512,7 @@ impl<'a> X64CodeGen<'a> {
     }
 
     /// Codegen a varargs call.
-    pub(super) fn codegen_vacall_instr(
+    pub(super) fn codegen_vacall_inst(
         &mut self,
         inst_idx: InstIdx,
         inst: &jit_ir::VACallInst,
@@ -524,7 +524,7 @@ impl<'a> X64CodeGen<'a> {
         self.emit_call(inst_idx, func_decl_idx, &args)
     }
 
-    pub(super) fn codegen_icmp_instr(&mut self, inst_idx: InstIdx, inst: &jit_ir::IcmpInst) {
+    pub(super) fn codegen_icmp_inst(&mut self, inst_idx: InstIdx, inst: &jit_ir::IcmpInst) {
         let (left, pred, right) = (inst.left(), inst.predicate(), inst.right());
 
         // FIXME: We should be checking type equality here, but since constants currently don't
@@ -584,12 +584,12 @@ impl<'a> X64CodeGen<'a> {
         self.reg_into_new_local(inst_idx, ARG_REGS[usize::from(idx)]);
     }
 
-    fn codegen_traceloopstart_instr(&mut self) {
+    fn codegen_traceloopstart_inst(&mut self) {
         // FIXME: peel the initial iteration of the loop to allow us to hoist loop invariants.
         dynasm!(self.asm; ->trace_loop_start:);
     }
 
-    fn codegen_signextend_instr(&mut self, inst_idx: InstrIdx, i: &jit_ir::SignExtendInst) {
+    fn codegen_signextend_inst(&mut self, inst_idx: InstIdx, i: &jit_ir::SignExtendInst) {
         let from_val = i.val();
         let from_type = from_val.type_(self.m);
         let from_size = from_type.byte_size().unwrap();
@@ -615,7 +615,7 @@ impl<'a> X64CodeGen<'a> {
     }
 
     #[allow(clippy::fn_to_numeric_cast)]
-    fn codegen_guard_instr(&mut self, inst: &jit_ir::GuardInst) {
+    fn codegen_guard_inst(&mut self, inst: &jit_ir::GuardInst) {
         let cond = inst.cond();
 
         // ICmp instructions evaluate to a one-byte zero/one value.

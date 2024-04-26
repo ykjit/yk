@@ -50,7 +50,7 @@ pub(crate) struct Module {
     /// uniquely distinguish traces.
     ctr_id: u64,
     /// The IR trace as a linear sequence of instructions.
-    instrs: Vec<Inst>, // FIXME: this should be a TiVec.
+    insts: Vec<Inst>, // FIXME: this should be a TiVec.
     /// The extra argument table.
     ///
     /// Used when a [CallInst]'s arguments don't fit inline.
@@ -136,7 +136,7 @@ impl Module {
 
         Ok(Self {
             ctr_id,
-            instrs: Vec::new(),
+            insts: Vec::new(),
             extra_args: Vec::new(),
             consts: TiVec::new(),
             types,
@@ -188,8 +188,8 @@ impl Module {
     }
 
     /// Return the instruction at the specified index.
-    pub(crate) fn instr(&self, idx: InstIdx) -> &Inst {
-        &self.instrs[usize::from(idx)]
+    pub(crate) fn inst(&self, idx: InstIdx) -> &Inst {
+        &self.insts[usize::from(idx)]
     }
 
     /// Return the [Ty] for the specified index.
@@ -215,9 +215,9 @@ impl Module {
     /// # Panics
     ///
     /// If `instr` would overflow the index type.
-    pub(crate) fn push(&mut self, instr: Inst) {
-        assert!(InstIdx::new(self.instrs.len()).is_ok());
-        self.instrs.push(instr);
+    pub(crate) fn push(&mut self, inst: Inst) {
+        assert!(InstIdx::new(self.insts.len()).is_ok());
+        self.insts.push(inst);
     }
 
     /// Push an instruction to the end of the [Module] and create a local variable [Operand] out of
@@ -236,25 +236,25 @@ impl Module {
     /// [Operand] or if `instr` would overflow the index type.
     pub(crate) fn push_and_make_operand(
         &mut self,
-        instr: Inst,
+        inst: Inst,
     ) -> Result<Operand, CompilationError> {
-        assert!(InstIdx::new(self.instrs.len()).is_ok());
-        if instr.def_type(self).is_none() {
+        assert!(InstIdx::new(self.insts.len()).is_ok());
+        if inst.def_type(self).is_none() {
             panic!(); // instruction doesn't define a local var.
         }
         let ret = Operand::Local(InstIdx::new(self.len())?);
-        self.instrs.push(instr);
+        self.insts.push(inst);
         Ok(ret)
     }
 
     /// Returns the number of [Inst]s in the [Module].
     pub(crate) fn len(&self) -> usize {
-        self.instrs.len()
+        self.insts.len()
     }
 
     /// Returns a reference to the instruction stream.
-    pub(crate) fn instrs(&self) -> &Vec<Inst> {
-        &self.instrs
+    pub(crate) fn insts(&self) -> &Vec<Inst> {
+        &self.insts
     }
 
     /// Push a slice of extra arguments into the extra arg table.
@@ -436,8 +436,8 @@ impl fmt::Display for Module {
             )?;
         }
         write!(f, "\nentry:")?;
-        for (i, instr) in self.instrs().iter().enumerate() {
-            write!(f, "\n    {}", instr.display(InstIdx::from(i), self))?;
+        for (i, inst) in self.insts().iter().enumerate() {
+            write!(f, "\n    {}", inst.display(InstIdx::from(i), self))?;
         }
 
         Ok(())
@@ -720,15 +720,15 @@ impl GlobalDeclIdx {
 
 /// An instruction index.
 ///
-/// One of these is an index into the [Module::instrs].
+/// One of these is an index into the [Module::insts].
 #[derive(Debug, Copy, Clone, Eq, Hash, PartialEq, PartialOrd)]
 pub(crate) struct InstIdx(u16);
 index_16bit!(InstIdx);
 
 impl InstIdx {
     /// Return a reference to the instruction indentified by `self` in `m`.
-    pub(crate) fn instr<'a>(&'a self, m: &'a Module) -> &Inst {
-        m.instr(*self)
+    pub(crate) fn inst<'a>(&'a self, m: &'a Module) -> &Inst {
+        m.inst(*self)
     }
 }
 
@@ -923,7 +923,7 @@ impl Operand {
     /// Panics if asking for the size make no sense for this operand.
     pub(crate) fn byte_size(&self, m: &Module) -> usize {
         match self {
-            Self::Local(l) => l.instr(m).def_byte_size(m),
+            Self::Local(l) => l.inst(m).def_byte_size(m),
             Self::Const(cidx) => cidx.const_(m).ty_idx().type_(m).byte_size().unwrap(),
         }
     }
@@ -932,7 +932,7 @@ impl Operand {
     pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Ty {
         match self {
             Self::Local(l) => {
-                match l.instr(m).def_type(m) {
+                match l.inst(m).def_type(m) {
                     Some(t) => t,
                     None => {
                         // When an operand is a local variable, the local can only come from an
@@ -949,7 +949,7 @@ impl Operand {
     /// Returns the type index of the operand.
     pub(crate) fn ty_idx(&self, m: &Module) -> TyIdx {
         match self {
-            Self::Local(l) => l.instr(m).def_ty_idx(m),
+            Self::Local(l) => l.inst(m).def_ty_idx(m),
             Self::Const(_) => todo!(),
         }
     }
@@ -1137,27 +1137,27 @@ impl Inst {
         }
     }
 
-    pub(crate) fn display<'a>(&'a self, instr_idx: InstIdx, m: &'a Module) -> DisplayableInst<'a> {
+    pub(crate) fn display<'a>(&'a self, inst_idx: InstIdx, m: &'a Module) -> DisplayableInst<'a> {
         DisplayableInst {
-            instr: self,
-            instr_idx,
+            inst: self,
+            inst_idx,
             m,
         }
     }
 }
 
 pub(crate) struct DisplayableInst<'a> {
-    instr: &'a Inst,
-    instr_idx: InstIdx,
+    inst: &'a Inst,
+    inst_idx: InstIdx,
     m: &'a Module,
 }
 
 impl fmt::Display for DisplayableInst<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(dt) = self.instr.def_type(self.m) {
-            write!(f, "%{}: {dt} = ", self.instr_idx.to_u16())?;
+        if let Some(dt) = self.inst.def_type(self.m) {
+            write!(f, "%{}: {dt} = ", self.inst_idx.to_u16())?;
         }
-        match self.instr {
+        match self.inst {
             Inst::Load(x) => write!(f, "Load {}", x.operand().display(self.m)),
             Inst::LookupGlobal(x) => write!(
                 f,
@@ -1241,26 +1241,26 @@ impl fmt::Display for DisplayableInst<'_> {
     }
 }
 
-macro_rules! instr {
-    ($discrim:ident, $instr_type:ident) => {
-        impl From<$instr_type> for Inst {
-            fn from(instr: $instr_type) -> Inst {
-                Inst::$discrim(instr)
+macro_rules! inst {
+    ($discrim:ident, $inst_type:ident) => {
+        impl From<$inst_type> for Inst {
+            fn from(inst: $inst_type) -> Inst {
+                Inst::$discrim(inst)
             }
         }
     };
 }
 
-instr!(Load, LoadInst);
-instr!(LookupGlobal, LookupGlobalInst);
-instr!(Store, StoreInst);
-instr!(LoadTraceInput, LoadTraceInputInst);
-instr!(Call, CallInst);
-instr!(VACall, VACallInst);
-instr!(PtrAdd, PtrAddInst);
-instr!(Icmp, IcmpInst);
-instr!(Guard, GuardInst);
-instr!(SignExtend, SignExtendInst);
+inst!(Load, LoadInst);
+inst!(LookupGlobal, LookupGlobalInst);
+inst!(Store, StoreInst);
+inst!(LoadTraceInput, LoadTraceInputInst);
+inst!(Call, CallInst);
+inst!(VACall, VACallInst);
+inst!(PtrAdd, PtrAddInst);
+inst!(Icmp, IcmpInst);
+inst!(Guard, GuardInst);
+inst!(SignExtend, SignExtendInst);
 
 /// The operands for a [Inst::Load]
 ///
@@ -1607,8 +1607,8 @@ macro_rules! bin_op {
         }
 
         impl From<$struct> for Inst {
-            fn from(instr: $struct) -> Inst {
-                Inst::$discrim(instr)
+            fn from(inst: $struct) -> Inst {
+                Inst::$discrim(inst)
             }
         }
     };
@@ -1769,7 +1769,7 @@ mod tests {
     }
 
     #[test]
-    fn use_case_update_instr() {
+    fn use_case_update_inst() {
         let mut prog: Vec<Inst> = vec![
             LoadTraceInputInst::new(0, TyIdx::new(0).unwrap()).into(),
             LoadTraceInputInst::new(8, TyIdx::new(0).unwrap()).into(),
@@ -1788,7 +1788,7 @@ mod tests {
 
     /// Ensure that any given instruction fits in 64-bits.
     #[test]
-    fn instr_size() {
+    fn inst_size() {
         assert_eq!(mem::size_of::<CallInst>(), 7);
         assert_eq!(mem::size_of::<StoreInst>(), 4);
         assert_eq!(mem::size_of::<LoadInst>(), 6);
