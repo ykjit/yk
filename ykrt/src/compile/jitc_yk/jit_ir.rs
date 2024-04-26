@@ -16,7 +16,7 @@ use std::{
 use typed_index_collections::TiVec;
 use ykaddr::addr::symbol_to_ptr;
 
-// This are simple and can be shared across both IRs.
+// This is simple and can be shared across both IRs.
 pub(crate) use super::aot_ir::Predicate;
 
 /// The `Module` is the top-level container for JIT IR.
@@ -1064,6 +1064,9 @@ pub enum Instruction {
     SRem(SRemInstruction),
     UDiv(UDivInstruction),
     URem(URemInstruction),
+
+    // Cast-like instructions
+    SignExtend(SignExtendInstruction),
 }
 
 impl Instruction {
@@ -1093,6 +1096,7 @@ impl Instruction {
             Self::Guard(..) => m.void_type_idx(),
             Self::Arg(..) => m.ptr_type_idx(),
             Self::TraceLoopStart => m.void_type_idx(),
+            Self::SignExtend(si) => si.dest_type_idx,
             // Binary operations
             Self::Add(i) => i.type_idx(m),
             x => todo!("{x:?}"),
@@ -1142,7 +1146,6 @@ impl fmt::Display for DisplayableInstruction<'_> {
         if let Some(dt) = self.instr.def_type(self.m) {
             write!(f, "%{}: {dt} = ", self.instr_idx.to_u16())?;
         }
-
         match self.instr {
             Instruction::Load(x) => write!(f, "Load {}", x.operand().display(self.m)),
             Instruction::LookupGlobal(x) => write!(
@@ -1214,6 +1217,14 @@ impl fmt::Display for DisplayableInstruction<'_> {
                     x.rhs().display(self.m)
                 )
             }
+            Instruction::SignExtend(i) => {
+                write!(
+                    f,
+                    "SignExtend {}, {}",
+                    i.val().display(self.m),
+                    self.m.type_(i.dest_type_idx())
+                )
+            }
             x => todo!("{x:?}"),
         }
     }
@@ -1238,6 +1249,7 @@ instr!(VACall, VACallInstruction);
 instr!(PtrAdd, PtrAddInstruction);
 instr!(Icmp, IcmpInstruction);
 instr!(Guard, GuardInstruction);
+instr!(SignExtend, SignExtendInstruction);
 
 /// The operands for a [Instruction::Load]
 ///
@@ -1692,6 +1704,31 @@ impl GuardInstruction {
 
     pub(crate) fn guard_info<'a>(&self, m: &'a Module) -> &'a GuardInfo {
         &m.guard_info[self.gidx]
+    }
+}
+
+#[derive(Debug)]
+pub struct SignExtendInstruction {
+    /// The value to extend.
+    val: PackedOperand,
+    /// The type to extend to.
+    dest_type_idx: TypeIdx,
+}
+
+impl SignExtendInstruction {
+    pub(crate) fn new(val: &Operand, dest_type_idx: TypeIdx) -> Self {
+        Self {
+            val: PackedOperand::new(val),
+            dest_type_idx,
+        }
+    }
+
+    pub(crate) fn val(&self) -> Operand {
+        self.val.unpack()
+    }
+
+    pub(crate) fn dest_type_idx(&self) -> TypeIdx {
+        self.dest_type_idx
     }
 }
 

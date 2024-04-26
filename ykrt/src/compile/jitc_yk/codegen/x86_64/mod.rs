@@ -191,6 +191,7 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Instruction::Guard(i) => self.codegen_guard_instr(i),
             jit_ir::Instruction::Arg(i) => self.codegen_arg(instr_idx, *i),
             jit_ir::Instruction::TraceLoopStart => self.codegen_traceloopstart_instr(),
+            jit_ir::Instruction::SignExtend(i) => self.codegen_signextend_instr(instr_idx, i),
             // Binary operations
             jit_ir::Instruction::Add(i) => self.codegen_add_instr(instr_idx, i),
             x => todo!("{x:?}"),
@@ -311,6 +312,10 @@ impl<'a> X64CodeGen<'a> {
             4 => {
                 let val = bytes.read_i32::<NativeEndian>().unwrap();
                 dynasm!(self.asm; mov Rq(reg.code()), DWORD val);
+            }
+            1 => {
+                let val = bytes.read_i8().unwrap();
+                dynasm!(self.asm; mov Rq(reg.code()), val as i32);
             }
             _ => todo!("{}", size),
         };
@@ -592,6 +597,31 @@ impl<'a> X64CodeGen<'a> {
     fn codegen_traceloopstart_instr(&mut self) {
         // FIXME: peel the initial iteration of the loop to allow us to hoist loop invariants.
         dynasm!(self.asm; ->trace_loop_start:);
+    }
+
+    fn codegen_signextend_instr(&mut self, inst_idx: InstrIdx, i: &jit_ir::SignExtendInstruction) {
+        let from_val = i.val();
+        let from_type = from_val.type_(self.jit_mod);
+        let from_size = from_type.byte_size().unwrap();
+
+        let to_type = self.jit_mod.type_(i.dest_type_idx());
+        let to_size = to_type.byte_size().unwrap();
+
+        // You can only sign-extend a smaller integer to a larger integer.
+        debug_assert!(matches!(to_type, jit_ir::Type::Integer(_)));
+        debug_assert!(matches!(from_type, jit_ir::Type::Integer(_)));
+        debug_assert!(from_size < to_size);
+
+        // FIXME: assumes the input and output fit in a register.
+        self.operand_into_reg(WR0, &from_val);
+
+        match (from_size, to_size) {
+            (1, 8) => dynasm!(self.asm; movsx Rq(WR0.code()), Rb(WR0.code())),
+            (4, 8) => dynasm!(self.asm; movsx Rq(WR0.code()), Rd(WR0.code())),
+            _ => todo!(),
+        }
+
+        self.reg_into_new_local(inst_idx, WR0);
     }
 
     #[allow(clippy::fn_to_numeric_cast)]

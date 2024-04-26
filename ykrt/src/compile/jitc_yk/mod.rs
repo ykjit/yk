@@ -77,7 +77,7 @@ impl Compiler for JITCYk {
         #[cfg(any(debug_assertions, test))]
         if should_log_ir(IRPhase::Asm) {
             log_ir(&format!(
-                "--- Begin jit-asm ---\n{}\n--- End jit-asm",
+                "--- Begin jit-asm ---\n{}\n--- End jit-asm ---",
                 ct.disassemble().unwrap()
             ));
         }
