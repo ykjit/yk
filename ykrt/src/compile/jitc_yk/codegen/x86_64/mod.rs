@@ -302,7 +302,7 @@ impl<'a> X64CodeGen<'a> {
     fn load_const(&mut self, reg: Rq, cidx: jit_ir::ConstIdx) {
         let cst = self.jit_mod.const_(cidx);
         let mut bytes = cst.bytes().as_slice();
-        let size = cst.type_idx().type_(self.jit_mod).byte_size().unwrap();
+        let size = cst.ty_idx().type_(self.jit_mod).byte_size().unwrap();
         debug_assert_eq!(bytes.len(), size);
         match size {
             8 => {
@@ -604,12 +604,12 @@ impl<'a> X64CodeGen<'a> {
         let from_type = from_val.type_(self.jit_mod);
         let from_size = from_type.byte_size().unwrap();
 
-        let to_type = self.jit_mod.type_(i.dest_type_idx());
+        let to_type = self.jit_mod.type_(i.dest_ty_idx());
         let to_size = to_type.byte_size().unwrap();
 
         // You can only sign-extend a smaller integer to a larger integer.
-        debug_assert!(matches!(to_type, jit_ir::Type::Integer(_)));
-        debug_assert!(matches!(from_type, jit_ir::Type::Integer(_)));
+        debug_assert!(matches!(to_type, jit_ir::Ty::Integer(_)));
+        debug_assert!(matches!(from_type, jit_ir::Ty::Integer(_)));
         debug_assert!(from_size < to_size);
 
         // FIXME: assumes the input and output fit in a register.
@@ -843,7 +843,7 @@ mod tests {
         #[test]
         fn codegen_load_ptr() {
             let mut jit_mod = test_module();
-            let ptr_ty_idx = jit_mod.ptr_type_idx();
+            let ptr_ty_idx = jit_mod.ptr_ty_idx();
             let load_op = jit_mod
                 .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, ptr_ty_idx).into())
                 .unwrap();
@@ -863,7 +863,7 @@ mod tests {
         fn codegen_load_i8() {
             let mut jit_mod = test_module();
             let i8_ty_idx = jit_mod
-                .type_idx(&jit_ir::Ty::Integer(IntegerTy::new(8)))
+                .ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(8)))
                 .unwrap();
             let load_op = jit_mod
                 .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into())
@@ -884,7 +884,7 @@ mod tests {
         fn codegen_load_i32() {
             let mut jit_mod = test_module();
             let i32_ty_idx = jit_mod
-                .type_idx(&jit_ir::Ty::Integer(IntegerTy::new(32)))
+                .ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(32)))
                 .unwrap();
             let ti_op = jit_mod
                 .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i32_ty_idx).into())
@@ -904,7 +904,7 @@ mod tests {
         #[test]
         fn codegen_ptradd() {
             let mut jit_mod = test_module();
-            let ptr_ty_idx = jit_mod.ptr_type_idx();
+            let ptr_ty_idx = jit_mod.ptr_ty_idx();
             let ti_op = jit_mod
                 .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, ptr_ty_idx).into())
                 .unwrap();
@@ -923,7 +923,7 @@ mod tests {
         #[test]
         fn codegen_store_ptr() {
             let mut jit_mod = test_module();
-            let ptr_ty_idx = jit_mod.ptr_type_idx();
+            let ptr_ty_idx = jit_mod.ptr_ty_idx();
             let ti1_op = jit_mod
                 .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, ptr_ty_idx).into())
                 .unwrap();
@@ -946,7 +946,7 @@ mod tests {
         fn codegen_loadtraceinput_i8() {
             let mut jit_mod = test_module();
             let u8_ty_idx = jit_mod
-                .type_idx(&jit_ir::Ty::Integer(IntegerTy::new(8)))
+                .ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(8)))
                 .unwrap();
             jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, u8_ty_idx).into());
             let patt_lines = [
@@ -963,7 +963,7 @@ mod tests {
         fn codegen_loadtraceinput_i16_with_offset() {
             let mut jit_mod = test_module();
             let u16_ty_idx = jit_mod
-                .type_idx(&jit_ir::Ty::Integer(IntegerTy::new(16)))
+                .ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(16)))
                 .unwrap();
             jit_mod.push(jit_ir::LoadTraceInputInstruction::new(32, u16_ty_idx).into());
             let patt_lines = [
@@ -980,9 +980,9 @@ mod tests {
         fn codegen_loadtraceinput_many_offset() {
             let mut jit_mod = test_module();
             let i8_ty_idx = jit_mod
-                .type_idx(&jit_ir::Ty::Integer(IntegerTy::new(8)))
+                .ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(8)))
                 .unwrap();
-            let ptr_ty_idx = jit_mod.ptr_type_idx();
+            let ptr_ty_idx = jit_mod.ptr_ty_idx();
             jit_mod.push(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into());
             jit_mod.push(jit_ir::LoadTraceInputInstruction::new(1, i8_ty_idx).into());
             jit_mod.push(jit_ir::LoadTraceInputInstruction::new(2, i8_ty_idx).into());
@@ -1014,7 +1014,7 @@ mod tests {
         fn codegen_add_i16() {
             let mut jit_mod = test_module();
             let i16_ty_idx = jit_mod
-                .type_idx(&jit_ir::Ty::Integer(IntegerTy::new(16)))
+                .ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(16)))
                 .unwrap();
             let op1 = jit_mod
                 .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i16_ty_idx).into())
@@ -1041,7 +1041,7 @@ mod tests {
         fn codegen_add_i64() {
             let mut jit_mod = test_module();
             let i64_ty_idx = jit_mod
-                .type_idx(&jit_ir::Ty::Integer(IntegerTy::new(64)))
+                .ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(64)))
                 .unwrap();
             let op1 = jit_mod
                 .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i64_ty_idx).into())
@@ -1070,10 +1070,10 @@ mod tests {
         fn codegen_add_wrong_types() {
             let mut jit_mod = test_module();
             let i64_ty_idx = jit_mod
-                .type_idx(&jit_ir::Ty::Integer(IntegerTy::new(64)))
+                .ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(64)))
                 .unwrap();
             let i32_ty_idx = jit_mod
-                .type_idx(&jit_ir::Ty::Integer(IntegerTy::new(32)))
+                .ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(32)))
                 .unwrap();
             let op1 = jit_mod
                 .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i64_ty_idx).into())
@@ -1104,9 +1104,9 @@ mod tests {
         #[test]
         fn codegen_call_simple() {
             let mut jit_mod = test_module();
-            let void_ty_idx = jit_mod.void_type_idx();
+            let void_ty_idx = jit_mod.void_ty_idx();
             let func_ty_idx = jit_mod
-                .type_idx(&jit_ir::Ty::Func(FuncTy::new(vec![], void_ty_idx, false)))
+                .ty_idx(&jit_ir::Ty::Func(FuncTy::new(vec![], void_ty_idx, false)))
                 .unwrap();
 
             let func_decl_idx = jit_mod
@@ -1131,10 +1131,10 @@ mod tests {
         #[test]
         fn codegen_call_with_args() {
             let mut jit_mod = test_module();
-            let void_ty_idx = jit_mod.void_type_idx();
-            let i32_ty_idx = jit_mod.type_idx(&Ty::Integer(IntegerTy::new(32))).unwrap();
+            let void_ty_idx = jit_mod.void_ty_idx();
+            let i32_ty_idx = jit_mod.ty_idx(&Ty::Integer(IntegerTy::new(32))).unwrap();
             let func_ty_idx = jit_mod
-                .type_idx(&jit_ir::Ty::Func(FuncTy::new(
+                .ty_idx(&jit_ir::Ty::Func(FuncTy::new(
                     vec![i32_ty_idx; 3],
                     void_ty_idx,
                     false,
@@ -1180,14 +1180,14 @@ mod tests {
         #[test]
         fn codegen_call_with_different_args() {
             let mut jit_mod = test_module();
-            let void_ty_idx = jit_mod.void_type_idx();
-            let i8_ty_idx = jit_mod.type_idx(&Ty::Integer(IntegerTy::new(8))).unwrap();
-            let i16_ty_idx = jit_mod.type_idx(&Ty::Integer(IntegerTy::new(16))).unwrap();
-            let i32_ty_idx = jit_mod.type_idx(&Ty::Integer(IntegerTy::new(32))).unwrap();
-            let i64_ty_idx = jit_mod.type_idx(&Ty::Integer(IntegerTy::new(64))).unwrap();
-            let ptr_ty_idx = jit_mod.ptr_type_idx();
+            let void_ty_idx = jit_mod.void_ty_idx();
+            let i8_ty_idx = jit_mod.ty_idx(&Ty::Integer(IntegerTy::new(8))).unwrap();
+            let i16_ty_idx = jit_mod.ty_idx(&Ty::Integer(IntegerTy::new(16))).unwrap();
+            let i32_ty_idx = jit_mod.ty_idx(&Ty::Integer(IntegerTy::new(32))).unwrap();
+            let i64_ty_idx = jit_mod.ty_idx(&Ty::Integer(IntegerTy::new(64))).unwrap();
+            let ptr_ty_idx = jit_mod.ptr_ty_idx();
             let func_ty_idx = jit_mod
-                .type_idx(&jit_ir::Ty::Func(FuncTy::new(
+                .ty_idx(&jit_ir::Ty::Func(FuncTy::new(
                     vec![
                         i8_ty_idx, i16_ty_idx, i32_ty_idx, i64_ty_idx, ptr_ty_idx, i8_ty_idx,
                     ],
@@ -1257,10 +1257,10 @@ mod tests {
         #[test]
         fn codegen_call_spill_args() {
             let mut jit_mod = test_module();
-            let void_ty_idx = jit_mod.void_type_idx();
-            let i32_ty_idx = jit_mod.type_idx(&Ty::Integer(IntegerTy::new(32))).unwrap();
+            let void_ty_idx = jit_mod.void_ty_idx();
+            let i32_ty_idx = jit_mod.ty_idx(&Ty::Integer(IntegerTy::new(32))).unwrap();
             let func_ty_idx = jit_mod
-                .type_idx(&jit_ir::Ty::Func(FuncTy::new(
+                .ty_idx(&jit_ir::Ty::Func(FuncTy::new(
                     vec![i32_ty_idx; 7],
                     void_ty_idx,
                     false,
@@ -1292,9 +1292,9 @@ mod tests {
         #[test]
         fn codegen_call_ret() {
             let mut jit_mod = test_module();
-            let i32_ty_idx = jit_mod.type_idx(&Ty::Integer(IntegerTy::new(32))).unwrap();
+            let i32_ty_idx = jit_mod.ty_idx(&Ty::Integer(IntegerTy::new(32))).unwrap();
             let func_ty_idx = jit_mod
-                .type_idx(&jit_ir::Ty::Func(FuncTy::new(vec![], i32_ty_idx, false)))
+                .ty_idx(&jit_ir::Ty::Func(FuncTy::new(vec![], i32_ty_idx, false)))
                 .unwrap();
 
             let func_decl_idx = jit_mod
@@ -1322,10 +1322,10 @@ mod tests {
         #[test]
         fn codegen_call_bad_arg_type() {
             let mut jit_mod = test_module();
-            let void_ty_idx = jit_mod.void_type_idx();
-            let i32_ty_idx = jit_mod.type_idx(&Ty::Integer(IntegerTy::new(32))).unwrap();
+            let void_ty_idx = jit_mod.void_ty_idx();
+            let i32_ty_idx = jit_mod.ty_idx(&Ty::Integer(IntegerTy::new(32))).unwrap();
             let func_ty_idx = jit_mod
-                .type_idx(&jit_ir::Ty::Func(FuncTy::new(
+                .ty_idx(&jit_ir::Ty::Func(FuncTy::new(
                     vec![i32_ty_idx],
                     void_ty_idx,
                     false,
@@ -1340,7 +1340,7 @@ mod tests {
                 .unwrap();
 
             // Make a call that passes a i8 argument, instead of an i32 as in the func sig.
-            let i8_ty_idx = jit_mod.type_idx(&Ty::Integer(IntegerTy::new(8))).unwrap();
+            let i8_ty_idx = jit_mod.ty_idx(&Ty::Integer(IntegerTy::new(8))).unwrap();
             let arg1 = jit_mod
                 .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into())
                 .unwrap();
@@ -1358,7 +1358,7 @@ mod tests {
         fn codegen_icmp_i64() {
             let mut jit_mod = test_module();
             let i64_ty_idx = jit_mod
-                .type_idx(&jit_ir::Ty::Integer(IntegerTy::new(64)))
+                .ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(64)))
                 .unwrap();
             let op = jit_mod
                 .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i64_ty_idx).into())
@@ -1383,7 +1383,7 @@ mod tests {
         fn codegen_icmp_i8() {
             let mut jit_mod = test_module();
             let i8_ty_idx = jit_mod
-                .type_idx(&jit_ir::Ty::Integer(IntegerTy::new(8)))
+                .ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(8)))
                 .unwrap();
             let op = jit_mod
                 .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into())
@@ -1409,7 +1409,7 @@ mod tests {
         #[should_panic(expected = "icmp of non-integer types")]
         fn codegen_icmp_non_ints() {
             let mut jit_mod = test_module();
-            let ptr_ty_idx = jit_mod.ptr_type_idx();
+            let ptr_ty_idx = jit_mod.ptr_ty_idx();
             let op = jit_mod
                 .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, ptr_ty_idx).into())
                 .unwrap();
@@ -1428,10 +1428,10 @@ mod tests {
         fn codegen_icmp_diff_types() {
             let mut jit_mod = test_module();
             let i8_ty_idx = jit_mod
-                .type_idx(&jit_ir::Ty::Integer(IntegerTy::new(8)))
+                .ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(8)))
                 .unwrap();
             let i64_ty_idx = jit_mod
-                .type_idx(&jit_ir::Ty::Integer(IntegerTy::new(64)))
+                .ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(64)))
                 .unwrap();
             let op1 = jit_mod
                 .push_and_make_operand(jit_ir::LoadTraceInputInstruction::new(0, i8_ty_idx).into())
@@ -1453,7 +1453,7 @@ mod tests {
             let gi_idx = jit_mod.push_guardinfo(gi).unwrap();
             let cond_op = jit_mod
                 .push_and_make_operand(
-                    jit_ir::LoadTraceInputInstruction::new(0, jit_mod.int8_type_idx()).into(),
+                    jit_ir::LoadTraceInputInstruction::new(0, jit_mod.int8_ty_idx()).into(),
                 )
                 .unwrap();
             jit_mod.push(jit_ir::GuardInstruction::new(cond_op, true, gi_idx).into());
@@ -1480,7 +1480,7 @@ mod tests {
             let gi_idx = jit_mod.push_guardinfo(gi).unwrap();
             let cond_op = jit_mod
                 .push_and_make_operand(
-                    jit_ir::LoadTraceInputInstruction::new(0, jit_mod.int8_type_idx()).into(),
+                    jit_ir::LoadTraceInputInstruction::new(0, jit_mod.int8_ty_idx()).into(),
                 )
                 .unwrap();
             jit_mod.push(jit_ir::GuardInstruction::new(cond_op, false, gi_idx).into());
@@ -1525,7 +1525,7 @@ mod tests {
         #[test]
         fn looped_trace_bigger() {
             let mut jit_mod = test_module();
-            let int8_ty_idx = jit_mod.int8_type_idx();
+            let int8_ty_idx = jit_mod.int8_ty_idx();
             let ti_op = jit_mod
                 .push_and_make_operand(
                     jit_ir::LoadTraceInputInstruction::new(0, int8_ty_idx).into(),

@@ -343,7 +343,7 @@ impl<'a> TraceBuilder<'a> {
             aot_ir::Type::Struct(_st) => todo!(),
             aot_ir::Type::Unimplemented(s) => jit_ir::Ty::Unimplemented(s.to_owned()),
         };
-        self.jit_mod.type_idx(&jit_ty)
+        self.jit_mod.ty_idx(&jit_ty)
     }
 
     /// Translate a function.
