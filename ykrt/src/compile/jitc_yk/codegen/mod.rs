@@ -19,7 +19,7 @@ pub(crate) mod x86_64;
 pub(crate) trait CodeGen<'a> {
     /// Instantiate a code generator for the specified JIT module.
     fn new(
-        jit_mod: &'a jit_ir::Module,
+        m: &'a jit_ir::Module,
         ra: Box<dyn RegisterAllocator>,
     ) -> Result<Box<Self>, CompilationError>
     where

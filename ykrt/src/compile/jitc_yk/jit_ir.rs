@@ -726,9 +726,9 @@ pub(crate) struct InstrIdx(u16);
 index_16bit!(InstrIdx);
 
 impl InstrIdx {
-    /// Return a reference to the instruction indentified by `self` in `jit_mod`.
-    pub(crate) fn instr<'a>(&'a self, jit_mod: &'a Module) -> &Instruction {
-        jit_mod.instr(*self)
+    /// Return a reference to the instruction indentified by `self` in `m`.
+    pub(crate) fn instr<'a>(&'a self, m: &'a Module) -> &Instruction {
+        m.instr(*self)
     }
 }
 
@@ -1432,14 +1432,14 @@ impl CallInstruction {
     /// # Panics
     ///
     /// Panics if the operand index is out of bounds.
-    pub(crate) fn operand(&self, jit_mod: &Module, idx: usize) -> Operand {
+    pub(crate) fn operand(&self, m: &Module, idx: usize) -> Operand {
         #[cfg(debug_assertions)]
         {
-            let ft = jit_mod.func_type(self.target);
+            let ft = m.func_type(self.target);
             debug_assert!(ft.num_args() > idx);
         }
         if idx == 0 {
-            if jit_mod.func_type(self.target()).num_args() > 0 {
+            if m.func_type(self.target()).num_args() > 0 {
                 self.arg1().unpack()
             } else {
                 // Avoid returning an undefined operand. Storage always exists for one argument,
@@ -1447,7 +1447,7 @@ impl CallInstruction {
                 panic!();
             }
         } else {
-            jit_mod.extra_args[<usize as From<u16>>::from(self.extra.0) + idx - 1].clone()
+            m.extra_args[<usize as From<u16>>::from(self.extra.0) + idx - 1].clone()
         }
     }
 }
@@ -1501,9 +1501,9 @@ impl VACallInstruction {
     /// # Panics
     ///
     /// Panics if the operand index is out of bounds.
-    pub(crate) fn operand(&self, jit_mod: &Module, idx: u16) -> Operand {
+    pub(crate) fn operand(&self, m: &Module, idx: u16) -> Operand {
         debug_assert!(self.num_args() > idx);
-        jit_mod.extra_args[<usize as From<u16>>::from(self.first_arg_idx.0 + idx)].clone()
+        m.extra_args[<usize as From<u16>>::from(self.first_arg_idx.0 + idx)].clone()
     }
 }
 
@@ -1804,12 +1804,12 @@ mod tests {
     #[test]
     fn extra_call_args() {
         // Set up a function to call.
-        let mut jit_mod = Module::new_testing();
-        let i32_tyidx = jit_mod.push_type(Ty::Integer(IntegerTy::new(32))).unwrap();
+        let mut m = Module::new_testing();
+        let i32_tyidx = m.push_type(Ty::Integer(IntegerTy::new(32))).unwrap();
         let func_ty = Ty::Func(FuncTy::new(vec![i32_tyidx; 3], i32_tyidx, false));
-        let func_ty_idx = jit_mod.push_type(func_ty).unwrap();
+        let func_ty_idx = m.push_type(func_ty).unwrap();
         let func_decl = FuncDecl::new("foo".to_owned(), func_ty_idx);
-        let func_decl_idx = jit_mod.push_func_decl(func_decl).unwrap();
+        let func_decl_idx = m.push_func_decl(func_decl).unwrap();
 
         // Build a call to the function.
         let args = vec![
@@ -1817,14 +1817,14 @@ mod tests {
             Operand::Local(InstrIdx(1)), // first extra arg
             Operand::Local(InstrIdx(2)),
         ];
-        let ci = CallInstruction::new(&mut jit_mod, func_decl_idx, &args).unwrap();
+        let ci = CallInstruction::new(&mut m, func_decl_idx, &args).unwrap();
 
         // Now request the operands and check they all look as they should.
-        assert_eq!(ci.operand(&jit_mod, 0), Operand::Local(InstrIdx(0)));
-        assert_eq!(ci.operand(&jit_mod, 1), Operand::Local(InstrIdx(1)));
-        assert_eq!(ci.operand(&jit_mod, 2), Operand::Local(InstrIdx(2)));
+        assert_eq!(ci.operand(&m, 0), Operand::Local(InstrIdx(0)));
+        assert_eq!(ci.operand(&m, 1), Operand::Local(InstrIdx(1)));
+        assert_eq!(ci.operand(&m, 2), Operand::Local(InstrIdx(2)));
         assert_eq!(
-            jit_mod.extra_args,
+            m.extra_args,
             vec![Operand::Local(InstrIdx(1)), Operand::Local(InstrIdx(2))]
         );
     }
@@ -1832,12 +1832,12 @@ mod tests {
     #[test]
     fn vararg_call_args() {
         // Set up a function to call.
-        let mut jit_mod = Module::new_testing();
-        let i32_tyidx = jit_mod.push_type(Ty::Integer(IntegerTy::new(32))).unwrap();
+        let mut m = Module::new_testing();
+        let i32_tyidx = m.push_type(Ty::Integer(IntegerTy::new(32))).unwrap();
         let func_ty = Ty::Func(FuncTy::new(vec![i32_tyidx; 3], i32_tyidx, true));
-        let func_ty_idx = jit_mod.push_type(func_ty).unwrap();
+        let func_ty_idx = m.push_type(func_ty).unwrap();
         let func_decl = FuncDecl::new("foo".to_owned(), func_ty_idx);
-        let func_decl_idx = jit_mod.push_func_decl(func_decl).unwrap();
+        let func_decl_idx = m.push_func_decl(func_decl).unwrap();
 
         // Build a call to the function.
         let args = vec![
@@ -1845,14 +1845,14 @@ mod tests {
             Operand::Local(InstrIdx(1)),
             Operand::Local(InstrIdx(2)),
         ];
-        let ci = VACallInstruction::new(&mut jit_mod, func_decl_idx, &args).unwrap();
+        let ci = VACallInstruction::new(&mut m, func_decl_idx, &args).unwrap();
 
         // Now request the operands and check they all look as they should.
-        assert_eq!(ci.operand(&jit_mod, 0), Operand::Local(InstrIdx(0)));
-        assert_eq!(ci.operand(&jit_mod, 1), Operand::Local(InstrIdx(1)));
-        assert_eq!(ci.operand(&jit_mod, 2), Operand::Local(InstrIdx(2)));
+        assert_eq!(ci.operand(&m, 0), Operand::Local(InstrIdx(0)));
+        assert_eq!(ci.operand(&m, 1), Operand::Local(InstrIdx(1)));
+        assert_eq!(ci.operand(&m, 2), Operand::Local(InstrIdx(2)));
         assert_eq!(
-            jit_mod.extra_args,
+            m.extra_args,
             vec![
                 Operand::Local(InstrIdx(0)),
                 Operand::Local(InstrIdx(1)),
@@ -1865,12 +1865,12 @@ mod tests {
     #[should_panic]
     fn call_args_out_of_bounds() {
         // Set up a function to call.
-        let mut jit_mod = Module::new_testing();
-        let arg_ty_idxs = vec![jit_mod.ptr_ty_idx(); 3];
-        let ret_ty_idx = jit_mod.ty_idx(&Ty::Void).unwrap();
+        let mut m = Module::new_testing();
+        let arg_ty_idxs = vec![m.ptr_ty_idx(); 3];
+        let ret_ty_idx = m.ty_idx(&Ty::Void).unwrap();
         let func_ty = FuncTy::new(arg_ty_idxs, ret_ty_idx, false);
-        let func_ty_idx = jit_mod.ty_idx(&Ty::Func(func_ty)).unwrap();
-        let func_decl_idx = jit_mod
+        let func_ty_idx = m.ty_idx(&Ty::Func(func_ty)).unwrap();
+        let func_decl_idx = m
             .func_decl_idx(&FuncDecl::new("blah".into(), func_ty_idx))
             .unwrap();
 
@@ -1880,10 +1880,10 @@ mod tests {
             Operand::Local(InstrIdx(1)), // first extra arg
             Operand::Local(InstrIdx(2)),
         ];
-        let ci = CallInstruction::new(&mut jit_mod, func_decl_idx, &args).unwrap();
+        let ci = CallInstruction::new(&mut m, func_decl_idx, &args).unwrap();
 
         // Request an operand with an out-of-bounds index.
-        ci.operand(&jit_mod, 3);
+        ci.operand(&m, 3);
     }
 
     #[test]
@@ -1952,9 +1952,9 @@ mod tests {
     #[should_panic(expected = "type already exists")]
     #[test]
     fn push_duplicate_type() {
-        let mut jit_mod = Module::new_testing();
-        let _ = jit_mod.push_type(Ty::Void);
-        let _ = jit_mod.push_type(Ty::Void);
+        let mut m = Module::new_testing();
+        let _ = m.push_type(Ty::Void);
+        let _ = m.push_type(Ty::Void);
     }
 
     #[test]
