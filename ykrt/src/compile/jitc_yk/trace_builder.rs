@@ -328,11 +328,9 @@ impl<'a> TraceBuilder<'a> {
     /// Translate a type.
     fn handle_type(&mut self, aot_idx: aot_ir::TypeIdx) -> Result<jit_ir::TyIdx, CompilationError> {
         let jit_ty = match self.aot_mod.type_(aot_idx) {
-            aot_ir::Type::Void => jit_ir::Type::Void,
-            aot_ir::Type::Integer(it) => {
-                jit_ir::Type::Integer(jit_ir::IntegerType::new(it.num_bits()))
-            }
-            aot_ir::Type::Ptr => jit_ir::Type::Ptr,
+            aot_ir::Type::Void => jit_ir::Ty::Void,
+            aot_ir::Type::Integer(it) => jit_ir::Ty::Integer(jit_ir::IntegerTy::new(it.num_bits())),
+            aot_ir::Type::Ptr => jit_ir::Ty::Ptr,
             aot_ir::Type::Func(ft) => {
                 let mut jit_args = Vec::new();
                 for aot_arg_ty_idx in ft.arg_ty_idxs() {
@@ -340,10 +338,10 @@ impl<'a> TraceBuilder<'a> {
                     jit_args.push(jit_ty);
                 }
                 let jit_retty = self.handle_type(ft.ret_ty())?;
-                jit_ir::Type::Func(jit_ir::FuncType::new(jit_args, jit_retty, ft.is_vararg()))
+                jit_ir::Ty::Func(jit_ir::FuncTy::new(jit_args, jit_retty, ft.is_vararg()))
             }
             aot_ir::Type::Struct(_st) => todo!(),
-            aot_ir::Type::Unimplemented(s) => jit_ir::Type::Unimplemented(s.to_owned()),
+            aot_ir::Type::Unimplemented(s) => jit_ir::Ty::Unimplemented(s.to_owned()),
         };
         self.jit_mod.type_idx(&jit_ty)
     }

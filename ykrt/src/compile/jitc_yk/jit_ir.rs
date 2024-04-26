@@ -64,7 +64,7 @@ pub(crate) struct Module {
     /// The type table.
     ///
     /// A [TyIdx] describes an index into this.
-    types: TiVec<TyIdx, Type>,
+    types: TiVec<TyIdx, Ty>,
     /// The type index of the void type. Cached for convinience.
     void_type_idx: TyIdx,
     /// The type index of a pointer type. Cached for convinience.
@@ -117,11 +117,11 @@ impl Module {
         // holding a mutable reference to the Module (and thus we cannot use [Module::type_idx]).
         let mut types = TiVec::new();
         let void_type_idx = TyIdx::new(types.len())?;
-        types.push(Type::Void);
+        types.push(Ty::Void);
         let ptr_type_idx = TyIdx::new(types.len())?;
-        types.push(Type::Ptr);
+        types.push(Ty::Ptr);
         let int8_type_idx = TyIdx::new(types.len())?;
-        types.push(Type::Integer(IntegerType::new(8)));
+        types.push(Ty::Integer(IntegerTy::new(8)));
 
         // Find the global variable pointer array in the address space.
         //
@@ -172,12 +172,12 @@ impl Module {
         }
     }
 
-    /// Returns the type index of [Type::Void].
+    /// Returns the type index of [Ty::Void].
     pub(crate) fn void_type_idx(&self) -> TyIdx {
         self.void_type_idx
     }
 
-    /// Returns the type index of [Type::Ptr].
+    /// Returns the type index of [Ty::Ptr].
     pub(crate) fn ptr_type_idx(&self) -> TyIdx {
         self.ptr_type_idx
     }
@@ -192,12 +192,12 @@ impl Module {
         &self.instrs[usize::from(idx)]
     }
 
-    /// Return the [Type] for the specified index.
+    /// Return the [Ty] for the specified index.
     ///
     /// # Panics
     ///
     /// Panics if the index is out of bounds.
-    pub(crate) fn type_(&self, idx: TyIdx) -> &Type {
+    pub(crate) fn type_(&self, idx: TyIdx) -> &Ty {
         &self.types[idx]
     }
 
@@ -276,7 +276,7 @@ impl Module {
     /// # Panics
     ///
     /// If `ty` would overflow the index type.
-    fn push_type(&mut self, ty: Type) -> Result<TyIdx, CompilationError> {
+    fn push_type(&mut self, ty: Ty) -> Result<TyIdx, CompilationError> {
         #[cfg(debug_assertions)]
         {
             for et in &self.types {
@@ -349,7 +349,7 @@ impl Module {
     }
 
     /// Get the index of a type, inserting it into the type table if necessary.
-    pub(crate) fn type_idx(&mut self, t: &Type) -> Result<TyIdx, CompilationError> {
+    pub(crate) fn type_idx(&mut self, t: &Ty) -> Result<TyIdx, CompilationError> {
         // FIXME: can we optimise this?
         if let Some(idx) = self.types.position(|tt| tt == t) {
             Ok(idx)
@@ -402,9 +402,9 @@ impl Module {
     /// # Panics
     ///
     /// Panics if the index is out of bounds
-    pub(crate) fn func_type(&self, idx: FuncDeclIdx) -> &FuncType {
+    pub(crate) fn func_type(&self, idx: FuncDeclIdx) -> &FuncTy {
         match self.type_(self.func_decl(idx).type_idx) {
-            Type::Func(ft) => ft,
+            Ty::Func(ft) => ft,
             _ => unreachable!(),
         }
     }
@@ -452,11 +452,11 @@ impl fmt::Display for Module {
 ///   2. Signedness is not specified. Interpretation of the bit pattern is delegated to operations
 ///      upon the integer.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct IntegerType {
+pub(crate) struct IntegerTy {
     num_bits: u32,
 }
 
-impl IntegerType {
+impl IntegerTy {
     /// Create a new integer type with the specified number of bits.
     pub(crate) fn new(num_bits: u32) -> Self {
         debug_assert!(num_bits > 0 && num_bits <= 0x800000);
@@ -488,7 +488,7 @@ impl IntegerType {
         m: &mut Module,
         val: T,
     ) -> Result<Constant, CompilationError> {
-        let typ = Type::Integer(self.clone());
+        let typ = Ty::Integer(self.clone());
         let type_idx = m.type_idx(&typ)?;
         let bytes = ToBytes::to_ne_bytes(&val).as_ref().to_vec();
         debug_assert_eq!(typ.byte_size().unwrap(), bytes.len());
@@ -668,14 +668,14 @@ index_24bit!(FuncDeclIdx);
 ///
 /// One of these is an index into the [Module::types].
 ///
-/// A type index uniquely identifies a [Type] in a [Module]. You can rely on this uniquness
-/// property for type checking: you can compare type indices instead of the corresponding [Type]s.
+/// A type index uniquely identifies a [Ty] in a [Module]. You can rely on this uniquness
+/// property for type checking: you can compare type indices instead of the corresponding [Ty]s.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TyIdx(U24);
 index_24bit!(TyIdx);
 
 impl TyIdx {
-    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
+    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Ty {
         m.type_(*self)
     }
 }
@@ -734,16 +734,16 @@ impl InstrIdx {
 
 /// A function's type.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct FuncType {
-    /// Type indices for the function's formal arguments.
+pub(crate) struct FuncTy {
+    /// Ty indices for the function's formal arguments.
     arg_ty_idxs: Vec<TyIdx>,
-    /// Type index of the function's return type.
+    /// Ty index of the function's return type.
     ret_ty_idx: TyIdx,
     /// Is the function vararg?
     is_vararg: bool,
 }
 
-impl FuncType {
+impl FuncTy {
     pub(crate) fn new(arg_ty_idxs: Vec<TyIdx>, ret_ty_idx: TyIdx, is_vararg: bool) -> Self {
         Self {
             arg_ty_idxs,
@@ -762,7 +762,7 @@ impl FuncType {
     /// # Panics
     ///
     /// Panics if the index is out of bounds.
-    pub(crate) fn arg_type<'a>(&self, m: &'a Module, idx: usize) -> &'a Type {
+    pub(crate) fn arg_type<'a>(&self, m: &'a Module, idx: usize) -> &'a Ty {
         self.arg_ty_idxs[idx].type_(m)
     }
 
@@ -772,7 +772,7 @@ impl FuncType {
     }
 
     /// Returns the type of the return value.
-    pub(crate) fn ret_type<'a>(&self, m: &'a Module) -> &'a Type {
+    pub(crate) fn ret_type<'a>(&self, m: &'a Module) -> &'a Ty {
         self.ret_ty_idx.type_(m)
     }
 
@@ -784,7 +784,7 @@ impl FuncType {
 
 /// A structure's type.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct StructType {
+pub(crate) struct StructTy {
     /// The types of the fields.
     field_ty_idxs: Vec<TyIdx>,
     /// The bit offsets of the fields (taking into account any required padding for alignment).
@@ -793,16 +793,16 @@ pub(crate) struct StructType {
 
 /// A type.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum Type {
+pub(crate) enum Ty {
     Void,
-    Integer(IntegerType),
+    Integer(IntegerTy),
     Ptr,
-    Func(FuncType),
-    Struct(StructType),
+    Func(FuncTy),
+    Struct(StructTy),
     Unimplemented(String),
 }
 
-impl fmt::Display for Type {
+impl fmt::Display for Ty {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Void => write!(f, "void"),
@@ -815,7 +815,7 @@ impl fmt::Display for Type {
     }
 }
 
-impl Type {
+impl Ty {
     /// Returns the size of the type in bits, or `None` if asking the size makes no sense.
     pub(crate) fn byte_size(&self) -> Option<usize> {
         // u16/u32 -> usize conversions could theoretically fail on some arches (which we probably
@@ -929,7 +929,7 @@ impl Operand {
     }
 
     /// Returns the type of the operand.
-    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
+    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Ty {
         match self {
             Self::Local(l) => {
                 match l.instr(m).def_type(m) {
@@ -1011,7 +1011,7 @@ pub(crate) struct DisplayableConstant<'a> {
 impl fmt::Display for DisplayableConstant<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.m.type_(self.const_.type_idx()) {
-            Type::Integer(t) => write!(f, "{}", t.const_to_str(self.const_)),
+            Ty::Integer(t) => write!(f, "{}", t.const_to_str(self.const_)),
             x => todo!("{x:?}"),
         }
     }
@@ -1086,7 +1086,7 @@ pub enum Instruction {
 
 impl Instruction {
     /// Returns the type of the local variable that the instruction defines (if any).
-    pub(crate) fn def_type<'a>(&self, m: &'a Module) -> Option<&'a Type> {
+    pub(crate) fn def_type<'a>(&self, m: &'a Module) -> Option<&'a Ty> {
         let idx = self.def_type_idx(m);
         if idx != m.void_type_idx() {
             Some(m.type_(idx))
@@ -1097,7 +1097,7 @@ impl Instruction {
 
     /// Returns the type index of the local variable defined by the instruction.
     ///
-    /// If the instruction doesn't define a type then the type index for [Type::Void] is returned.
+    /// If the instruction doesn't define a type then the type index for [Ty::Void] is returned.
     pub(crate) fn def_type_idx(&self, m: &Module) -> TyIdx {
         match self {
             Self::Load(li) => li.type_idx(),
@@ -1295,7 +1295,7 @@ impl LoadInstruction {
     }
 
     /// Returns the type of the value to be loaded.
-    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
+    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Ty {
         m.type_(self.ty_idx)
     }
 
@@ -1600,7 +1600,7 @@ macro_rules! bin_op {
                 self.rhs.unpack()
             }
 
-            pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
+            pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Ty {
                 self.lhs.unpack().type_(m)
             }
 
@@ -1805,10 +1805,8 @@ mod tests {
     fn extra_call_args() {
         // Set up a function to call.
         let mut jit_mod = Module::new_testing();
-        let i32_tyidx = jit_mod
-            .push_type(Type::Integer(IntegerType::new(32)))
-            .unwrap();
-        let func_ty = Type::Func(FuncType::new(vec![i32_tyidx; 3], i32_tyidx, false));
+        let i32_tyidx = jit_mod.push_type(Ty::Integer(IntegerTy::new(32))).unwrap();
+        let func_ty = Ty::Func(FuncTy::new(vec![i32_tyidx; 3], i32_tyidx, false));
         let func_ty_idx = jit_mod.push_type(func_ty).unwrap();
         let func_decl = FuncDecl::new("foo".to_owned(), func_ty_idx);
         let func_decl_idx = jit_mod.push_func_decl(func_decl).unwrap();
@@ -1835,10 +1833,8 @@ mod tests {
     fn vararg_call_args() {
         // Set up a function to call.
         let mut jit_mod = Module::new_testing();
-        let i32_tyidx = jit_mod
-            .push_type(Type::Integer(IntegerType::new(32)))
-            .unwrap();
-        let func_ty = Type::Func(FuncType::new(vec![i32_tyidx; 3], i32_tyidx, true));
+        let i32_tyidx = jit_mod.push_type(Ty::Integer(IntegerTy::new(32))).unwrap();
+        let func_ty = Ty::Func(FuncTy::new(vec![i32_tyidx; 3], i32_tyidx, true));
         let func_ty_idx = jit_mod.push_type(func_ty).unwrap();
         let func_decl = FuncDecl::new("foo".to_owned(), func_ty_idx);
         let func_decl_idx = jit_mod.push_func_decl(func_decl).unwrap();
@@ -1871,9 +1867,9 @@ mod tests {
         // Set up a function to call.
         let mut jit_mod = Module::new_testing();
         let arg_ty_idxs = vec![jit_mod.ptr_type_idx(); 3];
-        let ret_ty_idx = jit_mod.type_idx(&Type::Void).unwrap();
-        let func_ty = FuncType::new(arg_ty_idxs, ret_ty_idx, false);
-        let func_ty_idx = jit_mod.type_idx(&Type::Func(func_ty)).unwrap();
+        let ret_ty_idx = jit_mod.type_idx(&Ty::Void).unwrap();
+        let func_ty = FuncTy::new(arg_ty_idxs, ret_ty_idx, false);
+        let func_ty_idx = jit_mod.type_idx(&Ty::Func(func_ty)).unwrap();
         let func_decl_idx = jit_mod
             .func_decl_idx(&FuncDecl::new("blah".into(), func_ty_idx))
             .unwrap();
@@ -1949,7 +1945,7 @@ mod tests {
 
     #[test]
     fn void_type_size() {
-        assert_eq!(Type::Void.byte_size(), Some(0));
+        assert_eq!(Ty::Void.byte_size(), Some(0));
     }
 
     #[cfg(debug_assertions)]
@@ -1957,15 +1953,15 @@ mod tests {
     #[test]
     fn push_duplicate_type() {
         let mut jit_mod = Module::new_testing();
-        let _ = jit_mod.push_type(Type::Void);
-        let _ = jit_mod.push_type(Type::Void);
+        let _ = jit_mod.push_type(Ty::Void);
+        let _ = jit_mod.push_type(Ty::Void);
     }
 
     #[test]
     fn stringify_int_consts() {
         fn check<T: ToBytes + PrimInt>(m: &mut Module, num_bits: u32, val: T, expect: &str) {
             assert!(mem::size_of::<T>() * 8 >= usize::try_from(num_bits).unwrap());
-            let c = IntegerType::new(num_bits).make_constant(m, val).unwrap();
+            let c = IntegerTy::new(num_bits).make_constant(m, val).unwrap();
             assert_eq!(c.display(&m).to_string(), expect);
         }
 
@@ -2020,13 +2016,13 @@ mod tests {
     #[test]
     fn integer_type_sizes() {
         for i in 1..8 {
-            assert_eq!(IntegerType::new(i).byte_size(), 1);
+            assert_eq!(IntegerTy::new(i).byte_size(), 1);
         }
         for i in 9..16 {
-            assert_eq!(IntegerType::new(i).byte_size(), 2);
+            assert_eq!(IntegerTy::new(i).byte_size(), 2);
         }
-        assert_eq!(IntegerType::new(127).byte_size(), 16);
-        assert_eq!(IntegerType::new(128).byte_size(), 16);
-        assert_eq!(IntegerType::new(129).byte_size(), 17);
+        assert_eq!(IntegerTy::new(127).byte_size(), 16);
+        assert_eq!(IntegerTy::new(128).byte_size(), 16);
+        assert_eq!(IntegerTy::new(129).byte_size(), 17);
     }
 }
