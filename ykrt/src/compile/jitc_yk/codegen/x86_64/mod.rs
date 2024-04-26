@@ -6,7 +6,7 @@
 
 use super::{
     super::{
-        jit_ir::{self, FuncDecl, InstrIdx, Operand, Type},
+        jit_ir::{self, FuncDeclIdx, InstrIdx, Operand, Type},
         CompilationError,
     },
     abs_stack::AbstractStack,
@@ -447,12 +447,12 @@ impl<'a> X64CodeGen<'a> {
     pub(super) fn emit_call(
         &mut self,
         inst_idx: InstrIdx,
-        func_decl: &FuncDecl,
+        func_decl_idx: FuncDeclIdx,
         args: &[Operand],
     ) -> Result<(), CompilationError> {
         // FIXME: floating point args
         // FIXME: non-SysV ABIs
-        let fty = func_decl.func_type(self.jit_mod);
+        let fty = self.jit_mod.func_type(func_decl_idx);
         let num_args = args.len();
 
         if num_args > ARG_REGS.len() {
@@ -478,7 +478,7 @@ impl<'a> X64CodeGen<'a> {
         }
 
         // unwrap safe on account of linker symbol names not containing internal NULL bytes.
-        let va = symbol_to_ptr(func_decl.name())
+        let va = symbol_to_ptr(self.jit_mod.func_decl(func_decl_idx).name())
             .map_err(|e| CompilationError::General(e.to_string()))?;
 
         // The SysV x86_64 ABI requires the stack to be 16-byte aligned prior to a call.
@@ -505,11 +505,11 @@ impl<'a> X64CodeGen<'a> {
         inst: &jit_ir::CallInstruction,
     ) -> Result<(), CompilationError> {
         let func_decl_idx = inst.target();
-        let func_type = func_decl_idx.func_type(self.jit_mod);
+        let func_type = self.jit_mod.func_type(func_decl_idx);
         let args = (0..(func_type.num_args()))
             .map(|i| inst.operand(self.jit_mod, i))
             .collect::<Vec<_>>();
-        self.emit_call(inst_idx, self.jit_mod.func_decl(func_decl_idx), &args)
+        self.emit_call(inst_idx, func_decl_idx, &args)
     }
 
     /// Codegen a varargs call.
@@ -522,7 +522,7 @@ impl<'a> X64CodeGen<'a> {
         let args = (0..(inst.num_args()))
             .map(|i| inst.operand(self.jit_mod, i))
             .collect::<Vec<_>>();
-        self.emit_call(inst_idx, self.jit_mod.func_decl(func_decl_idx), &args)
+        self.emit_call(inst_idx, func_decl_idx, &args)
     }
 
     pub(super) fn codegen_icmp_instr(

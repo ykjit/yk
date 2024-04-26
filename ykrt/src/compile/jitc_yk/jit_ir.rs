@@ -382,6 +382,18 @@ impl Module {
         &self.func_decls[idx]
     }
 
+    /// Return the type of the function declaration.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is out of bounds
+    pub(crate) fn func_type(&self, idx: FuncDeclIdx) -> &FuncType {
+        match self.type_(self.func_decl(idx).type_idx) {
+            Type::Func(ft) => ft,
+            _ => unreachable!(),
+        }
+    }
+
     pub(crate) fn push_guardinfo(
         &mut self,
         info: GuardInfo,
@@ -637,13 +649,6 @@ macro_rules! index_16bit {
 pub(crate) struct FuncDeclIdx(U24);
 index_24bit!(FuncDeclIdx);
 
-impl FuncDeclIdx {
-    /// Return the type of the function declaration.
-    pub(crate) fn func_type<'a>(&self, m: &'a Module) -> &'a FuncType {
-        m.func_decl(*self).func_type(m)
-    }
-}
-
 /// A type index.
 ///
 /// One of these is an index into the [Module::types].
@@ -831,21 +836,13 @@ impl FuncDecl {
         Self { name, type_idx }
     }
 
-    /// Returns the [FuncType] for `self.type_idx`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `self.type_idx` isn't a type index for a [FuncType].
-    pub(crate) fn func_type<'a>(&self, m: &'a Module) -> &'a FuncType {
-        match m.type_(self.type_idx) {
-            Type::Func(ft) => ft,
-            _ => panic!(),
-        }
-    }
-
     /// Return the name of this function declaration.
     pub(crate) fn name(&self) -> &str {
         &self.name
+    }
+
+    pub(crate) fn type_idx(&self) -> TypeIdx {
+        self.type_idx
     }
 }
 
@@ -1088,8 +1085,8 @@ impl Instruction {
             Self::Load(li) => li.type_idx(),
             Self::LookupGlobal(..) => m.ptr_type_idx(),
             Self::LoadTraceInput(li) => li.ty_idx(),
-            Self::Call(ci) => ci.target().func_type(m).ret_type_idx(),
-            Self::VACall(ci) => ci.target().func_type(m).ret_type_idx(),
+            Self::Call(ci) => m.func_type(ci.target()).ret_type_idx(),
+            Self::VACall(ci) => m.func_type(ci.target()).ret_type_idx(),
             Self::PtrAdd(..) => m.ptr_type_idx(),
             Self::Store(..) => m.void_type_idx(),
             Self::Icmp(_) => m.int8_type_idx(), // always returns a 0/1 valued byte.
@@ -1158,12 +1155,11 @@ impl fmt::Display for DisplayableInstruction<'_> {
                     .unwrap_or("<not valid UTF-8>")
             ),
             Instruction::Call(x) => {
-                let fd = self.m.func_decl(x.target);
                 write!(
                     f,
                     "Call @{}({})",
-                    fd.name(),
-                    (0..fd.func_type(self.m).num_args())
+                    self.m.func_decl(x.target).name(),
+                    (0..self.m.func_type(x.target).num_args())
                         .map(|y| format!("{}", x.operand(self.m, y).display(self.m)))
                         .collect::<Vec<_>>()
                         .join(", ")
@@ -1412,11 +1408,11 @@ impl CallInstruction {
     pub(crate) fn operand(&self, jit_mod: &Module, idx: usize) -> Operand {
         #[cfg(debug_assertions)]
         {
-            let ft = self.target.func_type(jit_mod);
+            let ft = jit_mod.func_type(self.target);
             debug_assert!(ft.num_args() > idx);
         }
         if idx == 0 {
-            if self.target().func_type(jit_mod).num_args() > 0 {
+            if jit_mod.func_type(self.target()).num_args() > 0 {
                 self.arg1().unpack()
             } else {
                 // Avoid returning an undefined operand. Storage always exists for one argument,
