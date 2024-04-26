@@ -63,14 +63,14 @@ pub(crate) struct Module {
     consts: TiVec<ConstIdx, Constant>,
     /// The type table.
     ///
-    /// A [TypeIdx] describes an index into this.
-    types: TiVec<TypeIdx, Type>,
+    /// A [TyIdx] describes an index into this.
+    types: TiVec<TyIdx, Type>,
     /// The type index of the void type. Cached for convinience.
-    void_type_idx: TypeIdx,
+    void_type_idx: TyIdx,
     /// The type index of a pointer type. Cached for convinience.
-    ptr_type_idx: TypeIdx,
+    ptr_type_idx: TyIdx,
     /// The type index of an 8-bit integer. Cached for convinience.
-    int8_type_idx: TypeIdx,
+    int8_type_idx: TyIdx,
     /// The function declaration table.
     ///
     /// These are declarations of externally compiled functions that the JITted trace might need to
@@ -116,11 +116,11 @@ impl Module {
         // us to find their (now statically known) indices in scenarios where Rust forbids us from
         // holding a mutable reference to the Module (and thus we cannot use [Module::type_idx]).
         let mut types = TiVec::new();
-        let void_type_idx = TypeIdx::new(types.len())?;
+        let void_type_idx = TyIdx::new(types.len())?;
         types.push(Type::Void);
-        let ptr_type_idx = TypeIdx::new(types.len())?;
+        let ptr_type_idx = TyIdx::new(types.len())?;
         types.push(Type::Ptr);
-        let int8_type_idx = TypeIdx::new(types.len())?;
+        let int8_type_idx = TyIdx::new(types.len())?;
         types.push(Type::Integer(IntegerType::new(8)));
 
         // Find the global variable pointer array in the address space.
@@ -173,17 +173,17 @@ impl Module {
     }
 
     /// Returns the type index of [Type::Void].
-    pub(crate) fn void_type_idx(&self) -> TypeIdx {
+    pub(crate) fn void_type_idx(&self) -> TyIdx {
         self.void_type_idx
     }
 
     /// Returns the type index of [Type::Ptr].
-    pub(crate) fn ptr_type_idx(&self) -> TypeIdx {
+    pub(crate) fn ptr_type_idx(&self) -> TyIdx {
         self.ptr_type_idx
     }
 
     /// Returns the type index of an 8-bit integer.
-    pub(crate) fn int8_type_idx(&self) -> TypeIdx {
+    pub(crate) fn int8_type_idx(&self) -> TyIdx {
         self.int8_type_idx
     }
 
@@ -197,7 +197,7 @@ impl Module {
     /// # Panics
     ///
     /// Panics if the index is out of bounds.
-    pub(crate) fn type_(&self, idx: TypeIdx) -> &Type {
+    pub(crate) fn type_(&self, idx: TyIdx) -> &Type {
         &self.types[idx]
     }
 
@@ -276,17 +276,17 @@ impl Module {
     /// # Panics
     ///
     /// If `ty` would overflow the index type.
-    fn push_type(&mut self, ty: Type) -> Result<TypeIdx, CompilationError> {
+    fn push_type(&mut self, ty: Type) -> Result<TyIdx, CompilationError> {
         #[cfg(debug_assertions)]
         {
             for et in &self.types {
                 debug_assert_ne!(et, &ty, "type already exists");
             }
         }
-        assert!(TypeIdx::new(self.types.len()).is_ok());
+        assert!(TyIdx::new(self.types.len()).is_ok());
         let idx = self.types.len();
         self.types.push(ty);
-        TypeIdx::new(idx)
+        TyIdx::new(idx)
     }
 
     /// Push a new function declaration into the function declaration table and return its index.
@@ -349,7 +349,7 @@ impl Module {
     }
 
     /// Get the index of a type, inserting it into the type table if necessary.
-    pub(crate) fn type_idx(&mut self, t: &Type) -> Result<TypeIdx, CompilationError> {
+    pub(crate) fn type_idx(&mut self, t: &Type) -> Result<TyIdx, CompilationError> {
         // FIXME: can we optimise this?
         if let Some(idx) = self.types.position(|tt| tt == t) {
             Ok(idx)
@@ -671,10 +671,10 @@ index_24bit!(FuncDeclIdx);
 /// A type index uniquely identifies a [Type] in a [Module]. You can rely on this uniquness
 /// property for type checking: you can compare type indices instead of the corresponding [Type]s.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub(crate) struct TypeIdx(U24);
-index_24bit!(TypeIdx);
+pub(crate) struct TyIdx(U24);
+index_24bit!(TyIdx);
 
-impl TypeIdx {
+impl TyIdx {
     pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
         m.type_(*self)
     }
@@ -736,15 +736,15 @@ impl InstrIdx {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct FuncType {
     /// Type indices for the function's formal arguments.
-    arg_ty_idxs: Vec<TypeIdx>,
+    arg_ty_idxs: Vec<TyIdx>,
     /// Type index of the function's return type.
-    ret_ty_idx: TypeIdx,
+    ret_ty_idx: TyIdx,
     /// Is the function vararg?
     is_vararg: bool,
 }
 
 impl FuncType {
-    pub(crate) fn new(arg_ty_idxs: Vec<TypeIdx>, ret_ty_idx: TypeIdx, is_vararg: bool) -> Self {
+    pub(crate) fn new(arg_ty_idxs: Vec<TyIdx>, ret_ty_idx: TyIdx, is_vararg: bool) -> Self {
         Self {
             arg_ty_idxs,
             ret_ty_idx,
@@ -777,7 +777,7 @@ impl FuncType {
     }
 
     /// Returns the type index of the return value.
-    pub(crate) fn ret_type_idx(&self) -> TypeIdx {
+    pub(crate) fn ret_type_idx(&self) -> TyIdx {
         self.ret_ty_idx
     }
 }
@@ -786,7 +786,7 @@ impl FuncType {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct StructType {
     /// The types of the fields.
-    field_ty_idxs: Vec<TypeIdx>,
+    field_ty_idxs: Vec<TyIdx>,
     /// The bit offsets of the fields (taking into account any required padding for alignment).
     field_bit_offs: Vec<usize>,
 }
@@ -843,11 +843,11 @@ impl Type {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct FuncDecl {
     name: String,
-    type_idx: TypeIdx,
+    type_idx: TyIdx,
 }
 
 impl FuncDecl {
-    pub(crate) fn new(name: String, type_idx: TypeIdx) -> Self {
+    pub(crate) fn new(name: String, type_idx: TyIdx) -> Self {
         Self { name, type_idx }
     }
 
@@ -856,7 +856,7 @@ impl FuncDecl {
         &self.name
     }
 
-    pub(crate) fn type_idx(&self) -> TypeIdx {
+    pub(crate) fn type_idx(&self) -> TyIdx {
         self.type_idx
     }
 }
@@ -947,7 +947,7 @@ impl Operand {
     }
 
     /// Returns the type index of the operand.
-    pub(crate) fn type_idx(&self, m: &Module) -> TypeIdx {
+    pub(crate) fn type_idx(&self, m: &Module) -> TyIdx {
         match self {
             Self::Local(l) => l.instr(m).def_type_idx(m),
             Self::Const(_) => todo!(),
@@ -980,17 +980,17 @@ impl fmt::Display for DisplayableOperand<'_> {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Constant {
     /// The type index of the constant value.
-    type_idx: TypeIdx,
+    type_idx: TyIdx,
     /// The bytes of the constant value.
     bytes: Vec<u8>,
 }
 
 impl Constant {
-    pub(crate) fn new(type_idx: TypeIdx, bytes: Vec<u8>) -> Self {
+    pub(crate) fn new(type_idx: TyIdx, bytes: Vec<u8>) -> Self {
         Self { type_idx, bytes }
     }
 
-    pub(crate) fn type_idx(&self) -> TypeIdx {
+    pub(crate) fn type_idx(&self) -> TyIdx {
         self.type_idx
     }
 
@@ -1098,7 +1098,7 @@ impl Instruction {
     /// Returns the type index of the local variable defined by the instruction.
     ///
     /// If the instruction doesn't define a type then the type index for [Type::Void] is returned.
-    pub(crate) fn def_type_idx(&self, m: &Module) -> TypeIdx {
+    pub(crate) fn def_type_idx(&self, m: &Module) -> TyIdx {
         match self {
             Self::Load(li) => li.type_idx(),
             Self::LookupGlobal(..) => m.ptr_type_idx(),
@@ -1277,12 +1277,12 @@ pub struct LoadInstruction {
     /// The pointer to load from.
     op: PackedOperand,
     /// The type of the pointee.
-    ty_idx: TypeIdx,
+    ty_idx: TyIdx,
 }
 
 impl LoadInstruction {
     // FIXME: why do we need to provide a type index? Can't we get that from the operand?
-    pub(crate) fn new(op: Operand, ty_idx: TypeIdx) -> LoadInstruction {
+    pub(crate) fn new(op: Operand, ty_idx: TyIdx) -> LoadInstruction {
         LoadInstruction {
             op: PackedOperand::new(&op),
             ty_idx,
@@ -1300,7 +1300,7 @@ impl LoadInstruction {
     }
 
     /// Returns the type index of the loaded value.
-    pub(crate) fn type_idx(&self) -> TypeIdx {
+    pub(crate) fn type_idx(&self) -> TyIdx {
         self.ty_idx
     }
 }
@@ -1320,15 +1320,15 @@ pub struct LoadTraceInputInstruction {
     /// The byte offset to load from in the trace input struct.
     off: u32,
     /// The type of the resulting local variable.
-    ty_idx: TypeIdx,
+    ty_idx: TyIdx,
 }
 
 impl LoadTraceInputInstruction {
-    pub(crate) fn new(off: u32, ty_idx: TypeIdx) -> LoadTraceInputInstruction {
+    pub(crate) fn new(off: u32, ty_idx: TyIdx) -> LoadTraceInputInstruction {
         Self { off, ty_idx }
     }
 
-    pub(crate) fn ty_idx(&self) -> TypeIdx {
+    pub(crate) fn ty_idx(&self) -> TyIdx {
         self.ty_idx
     }
 
@@ -1605,7 +1605,7 @@ macro_rules! bin_op {
             }
 
             /// Returns the type index of the operands being added.
-            pub(crate) fn type_idx(&self, m: &Module) -> TypeIdx {
+            pub(crate) fn type_idx(&self, m: &Module) -> TyIdx {
                 self.lhs.unpack().type_idx(m)
             }
         }
@@ -1775,17 +1775,17 @@ mod tests {
     #[test]
     fn use_case_update_instr() {
         let mut prog: Vec<Instruction> = vec![
-            LoadTraceInputInstruction::new(0, TypeIdx::new(0).unwrap()).into(),
-            LoadTraceInputInstruction::new(8, TypeIdx::new(0).unwrap()).into(),
+            LoadTraceInputInstruction::new(0, TyIdx::new(0).unwrap()).into(),
+            LoadTraceInputInstruction::new(8, TyIdx::new(0).unwrap()).into(),
             LoadInstruction::new(
                 Operand::Local(InstrIdx(0)),
-                TypeIdx(U24::from_usize(0).unwrap()),
+                TyIdx(U24::from_usize(0).unwrap()),
             )
             .into(),
         ];
         prog[2] = LoadInstruction::new(
             Operand::Local(InstrIdx(1)),
-            TypeIdx(U24::from_usize(0).unwrap()),
+            TyIdx(U24::from_usize(0).unwrap()),
         )
         .into();
     }
@@ -1916,19 +1916,19 @@ mod tests {
 
     #[test]
     fn index24_fits() {
-        assert!(TypeIdx::new(0).is_ok());
-        assert!(TypeIdx::new(1).is_ok());
-        assert!(TypeIdx::new(0x1234).is_ok());
-        assert!(TypeIdx::new(0x123456).is_ok());
-        assert!(TypeIdx::new(0xffffff).is_ok());
+        assert!(TyIdx::new(0).is_ok());
+        assert!(TyIdx::new(1).is_ok());
+        assert!(TyIdx::new(0x1234).is_ok());
+        assert!(TyIdx::new(0x123456).is_ok());
+        assert!(TyIdx::new(0xffffff).is_ok());
     }
 
     #[test]
     fn index24_doesnt_fit() {
-        assert!(TypeIdx::new(0x1000000).is_err());
-        assert!(TypeIdx::new(0x1234567).is_err());
-        assert!(TypeIdx::new(0xeddedde).is_err());
-        assert!(TypeIdx::new(usize::MAX).is_err());
+        assert!(TyIdx::new(0x1000000).is_err());
+        assert!(TyIdx::new(0x1234567).is_err());
+        assert!(TyIdx::new(0xeddedde).is_err());
+        assert!(TyIdx::new(usize::MAX).is_err());
     }
 
     #[test]

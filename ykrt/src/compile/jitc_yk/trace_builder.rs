@@ -326,10 +326,7 @@ impl<'a> TraceBuilder<'a> {
     }
 
     /// Translate a type.
-    fn handle_type(
-        &mut self,
-        aot_idx: aot_ir::TypeIdx,
-    ) -> Result<jit_ir::TypeIdx, CompilationError> {
+    fn handle_type(&mut self, aot_idx: aot_ir::TypeIdx) -> Result<jit_ir::TyIdx, CompilationError> {
         let jit_ty = match self.aot_mod.type_(aot_idx) {
             aot_ir::Type::Void => jit_ir::Type::Void,
             aot_ir::Type::Integer(it) => {
