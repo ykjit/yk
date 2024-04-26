@@ -13,8 +13,6 @@ use super::{
     reg_alloc::{LocalAlloc, RegisterAllocator, StackDirection},
     CodeGen,
 };
-#[cfg(any(debug_assertions, test))]
-use crate::compile::jitc_yk::jit_ir::JitIRDisplay;
 use crate::compile::CompiledTrace;
 use byteorder::{NativeEndian, ReadBytesExt};
 use dynasmrt::{
@@ -174,7 +172,10 @@ impl<'a> X64CodeGen<'a> {
         inst: &jit_ir::Instruction,
     ) -> Result<(), CompilationError> {
         #[cfg(any(debug_assertions, test))]
-        self.comment(self.asm.offset(), inst.to_string(self.jit_mod).unwrap());
+        self.comment(
+            self.asm.offset(),
+            inst.display(instr_idx, self.jit_mod).to_string(),
+        );
 
         match inst {
             jit_ir::Instruction::LoadTraceInput(i) => {

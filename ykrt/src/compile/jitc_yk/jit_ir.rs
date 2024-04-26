@@ -10,9 +10,8 @@ use super::aot_ir;
 use crate::compile::CompilationError;
 use num_traits::{PrimInt, ToBytes};
 use std::{
-    error::Error,
     ffi::{c_void, CStr, CString},
-    mem, ptr,
+    fmt, mem, ptr,
 };
 use typed_index_collections::TiVec;
 use ykaddr::addr::symbol_to_ptr;
@@ -238,17 +237,6 @@ impl Module {
         self.instrs.len()
     }
 
-    /// Stringify the module.
-    pub(crate) fn to_string(&self) -> Result<String, Box<dyn Error>> {
-        (self as &dyn JitIRDisplay).to_string(self)
-    }
-
-    /// Print the [Module] to `stderr`.
-    pub(crate) fn dump(&self) -> Result<(), Box<dyn Error>> {
-        eprintln!("{}", self.to_string()?);
-        Ok(())
-    }
-
     /// Returns a reference to the instruction stream.
     pub(crate) fn instrs(&self) -> &Vec<Instruction> {
         &self.instrs
@@ -405,32 +393,24 @@ impl Module {
     }
 }
 
-impl JitIRDisplay for Module {
-    fn to_string_impl(
-        &self,
-        m: &Module,
-        s: &mut String,
-        nums: &LocalNumbers<'_>,
-    ) -> Result<(), Box<dyn Error>> {
-        s.push_str("; compiled trace ID #");
-        s.push_str(&self.ctr_id.to_string());
-
-        s.push_str("\n\n; globals\n");
+impl fmt::Display for Module {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "; compiled trace ID #{}\n\n; globals\n", self.ctr_id)?;
         for g in &self.global_decls {
-            g.to_string_impl(m, s, nums)?;
-            if g.is_threadlocal() {
-                s.push_str("    ; thread local");
-            }
-            s.push('\n');
+            let tl = if g.is_threadlocal() {
+                "    ; thread local"
+            } else {
+                ""
+            };
+            write!(
+                f,
+                "@{}{tl}\n",
+                g.name.to_str().unwrap_or("<not valid UTF-8>")
+            )?;
         }
-
-        s.push_str("\nentry:\n");
-        for (idx, instr) in self.instrs().iter().enumerate() {
-            s.push_str("    ");
-            instr.to_string_impl(m, s, nums)?;
-            if idx != m.len() - 1 {
-                s.push('\n');
-            }
+        write!(f, "\nentry:")?;
+        for (i, instr) in self.instrs().iter().enumerate() {
+            write!(f, "\n    {}", instr.display(InstrIdx::from(i), self))?;
         }
 
         Ok(())
@@ -494,18 +474,6 @@ impl IntegerType {
     }
 }
 
-impl JitIRDisplay for IntegerType {
-    fn to_string_impl(
-        &self,
-        _m: &Module,
-        s: &mut String,
-        _nums: &LocalNumbers<'_>,
-    ) -> Result<(), Box<dyn Error>> {
-        s.push_str(&format!("i{}", self.num_bits()));
-        Ok(())
-    }
-}
-
 /// The declaration of a global variable.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct GlobalDecl {
@@ -546,19 +514,6 @@ impl GlobalDecl {
     }
 }
 
-impl JitIRDisplay for GlobalDecl {
-    fn to_string_impl(
-        &self,
-        _m: &Module,
-        s: &mut String,
-        _nums: &LocalNumbers<'_>,
-    ) -> Result<(), Box<dyn Error>> {
-        s.push('@');
-        s.push_str(self.name.to_str().unwrap_or("<not valid UTF-8>"));
-        Ok(())
-    }
-}
-
 /// Bit fiddling.
 ///
 /// In the constants below:
@@ -574,77 +529,6 @@ const MAX_OPERAND_IDX: u16 = (1 << 15) - 1;
 
 /// The symbol name of the global variable pointers array.
 const GLOBAL_PTR_ARRAY_SYM: &str = "__yk_globalvar_ptrs";
-
-/// [Instruction] to [InstrIdx] mapping used for stringifying instructions.
-///
-/// See [JitIRDisplay] for why this is required.
-pub(crate) struct LocalNumbers<'a> {
-    m: &'a Module,
-}
-
-impl<'a> LocalNumbers<'a> {
-    fn new(m: &'a Module) -> LocalNumbers<'a> {
-        Self { m }
-    }
-
-    /// Returns the [InstrIdx] of the specified [Instruction] in the [Module].
-    ///
-    /// # Panics
-    ///
-    /// Panics if the instruction isn't present in the module.
-    fn idx(&self, instr: &Instruction) -> InstrIdx {
-        // FIXME: This is inefficient.
-        for (idx, candidate) in self.m.instrs().iter().enumerate() {
-            if ptr::addr_eq(instr, candidate) {
-                // The `unwrap` cannot fail because we won't have expanded `m.instrs()` beyond the
-                // ability of `InstrIdx` to represent an index.
-                return InstrIdx::new(idx).unwrap();
-            }
-        }
-        panic!(); // Not found!
-    }
-}
-
-/// A trait for stringifying JIT IR.
-///
-/// We use this instead of [std::fmt::Display] because many IR constructs can't print something
-/// human-readable without querying the [Module] for more information. For example to convert type
-/// indices into a human-readable type description. Hence we need the ability to pass down a
-/// reference to a module.
-///
-/// Stringification also requires a [LocalNumbers] mapping. This is because when you want to print
-/// an [Instruction], we want to print something like `%4: i32 = Add %1, %2`. But an instruction on
-/// its own doesn't know its instruction index in order to print `%4`. [LocalNumbers] lets an
-/// instruction find its index in the module.
-pub(crate) trait JitIRDisplay {
-    /// Return a human-readable string.
-    ///
-    /// This is the outward-facing API for stringification. Don't call this from other
-    /// `JitIRDisplay` implementations. Use [JitIRDisplay::to_string_impl()] instead and pass down
-    /// the existing output string and [LocalNumbers] struct.
-    fn to_string(&self, m: &Module) -> Result<String, Box<dyn Error>> {
-        let mut s = String::new();
-        self.to_string_impl(m, &mut s, &LocalNumbers::new(m))?;
-        Ok(s)
-    }
-
-    /// This method does the actual stringification of an IR element.
-    fn to_string_impl(
-        &self,
-        m: &Module,
-        s: &mut String,
-        nums: &LocalNumbers<'_>,
-    ) -> Result<(), Box<dyn Error>>;
-
-    /// Print `self` to stderr in human-readable form.
-    ///
-    /// This isn't used during normal operation of the system: it is provided as a debugging aid.
-    #[allow(dead_code)]
-    fn dump(&self, m: &Module) -> Result<(), Box<dyn Error>> {
-        eprintln!("{}", self.to_string(m)?);
-        Ok(())
-    }
-}
 
 /// A packed 24-bit unsigned integer.
 #[repr(packed)]
@@ -828,19 +712,6 @@ impl InstrIdx {
     }
 }
 
-impl JitIRDisplay for InstrIdx {
-    fn to_string_impl(
-        &self,
-        _m: &Module,
-        s: &mut String,
-        _nums: &LocalNumbers<'_>,
-    ) -> Result<(), Box<dyn Error>> {
-        s.push('%');
-        s.push_str(&self.to_u16().to_string());
-        Ok(())
-    }
-}
-
 /// A function's type.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct FuncType {
@@ -891,34 +762,6 @@ impl FuncType {
     }
 }
 
-impl JitIRDisplay for FuncType {
-    fn to_string_impl(
-        &self,
-        m: &Module,
-        s: &mut String,
-        nums: &LocalNumbers,
-    ) -> Result<(), Box<dyn Error>> {
-        s.push_str("func(");
-        let num_args = self.num_args();
-        for (ai, t) in self.arg_ty_idxs.iter().enumerate() {
-            t.type_(m).to_string_impl(m, s, nums)?;
-            if ai != num_args - 1 || self.is_vararg() {
-                s.push_str(", ");
-            }
-        }
-        if self.is_vararg() {
-            s.push_str("...");
-        }
-        s.push(')');
-
-        if self.ret_ty_idx != m.void_type_idx {
-            s.push_str(" -> ");
-            self.ret_ty_idx.type_(m).to_string_impl(m, s, nums)?;
-        }
-        Ok(())
-    }
-}
-
 /// A structure's type.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct StructType {
@@ -939,22 +782,16 @@ pub(crate) enum Type {
     Unimplemented(String),
 }
 
-impl JitIRDisplay for Type {
-    fn to_string_impl(
-        &self,
-        m: &Module,
-        s: &mut String,
-        nums: &LocalNumbers<'_>,
-    ) -> Result<(), Box<dyn Error>> {
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Void => s.push_str("void"),
-            Self::Integer(it) => it.to_string_impl(m, s, nums)?,
-            Self::Ptr => s.push_str("ptr"),
-            Self::Func(ft) => ft.to_string_impl(m, s, nums)?,
+            Self::Void => write!(f, "void"),
+            Self::Integer(it) => write!(f, "i{}", it.num_bits()),
+            Self::Ptr => write!(f, "ptr"),
+            Self::Func(_) => todo!(),
             Self::Struct(_) => todo!(),
-            Self::Unimplemented(_) => s.push_str("?type"),
+            Self::Unimplemented(_) => write!(f, "?type"),
         }
-        Ok(())
     }
 }
 
@@ -1104,20 +941,23 @@ impl Operand {
             Self::Const(_) => todo!(),
         }
     }
+
+    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableOperand<'a> {
+        DisplayableOperand { operand: self, m }
+    }
 }
 
-impl JitIRDisplay for Operand {
-    fn to_string_impl(
-        &self,
-        m: &Module,
-        s: &mut String,
-        nums: &LocalNumbers<'_>,
-    ) -> Result<(), Box<dyn Error>> {
-        match self {
-            Self::Local(idx) => s.push_str(&format!("%{}", idx.to_u16())),
-            Self::Const(idx) => m.const_(*idx).to_string_impl(m, s, nums)?,
+pub(crate) struct DisplayableOperand<'a> {
+    operand: &'a Operand,
+    m: &'a Module,
+}
+
+impl fmt::Display for DisplayableOperand<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.operand {
+            Operand::Local(idx) => write!(f, "%{}", idx.to_u16()),
+            Operand::Const(idx) => write!(f, "{}", self.m.const_(*idx).display(self.m)),
         }
-        Ok(())
     }
 }
 
@@ -1145,21 +985,23 @@ impl Constant {
     pub(crate) fn bytes(&self) -> &Vec<u8> {
         &self.bytes
     }
+
+    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableConstant<'a> {
+        DisplayableConstant { const_: self, m }
+    }
 }
 
-impl JitIRDisplay for Constant {
-    fn to_string_impl(
-        &self,
-        m: &Module,
-        s: &mut String,
-        _nums: &LocalNumbers<'_>,
-    ) -> Result<(), Box<dyn Error>> {
-        match self.type_idx().type_(m) {
-            Type::Integer(it) => s.push_str(&it.const_to_str(self)),
-            Type::Ptr => s.push_str("const_ptr"),
-            _ => todo!(),
+pub(crate) struct DisplayableConstant<'a> {
+    const_: &'a Constant,
+    m: &'a Module,
+}
+
+impl fmt::Display for DisplayableConstant<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.m.type_(self.const_.type_idx()) {
+            Type::Integer(t) => write!(f, "{}", t.const_to_str(self.const_)),
+            x => todo!("{x:?}"),
         }
-        Ok(())
     }
 }
 
@@ -1278,39 +1120,106 @@ impl Instruction {
             panic!()
         }
     }
+
+    pub(crate) fn display<'a>(
+        &'a self,
+        instr_idx: InstrIdx,
+        m: &'a Module,
+    ) -> DisplayableInstruction<'a> {
+        DisplayableInstruction {
+            instr: self,
+            instr_idx,
+            m,
+        }
+    }
 }
 
-impl JitIRDisplay for Instruction {
-    fn to_string_impl(
-        &self,
-        m: &Module,
-        s: &mut String,
-        nums: &LocalNumbers<'_>,
-    ) -> Result<(), Box<dyn Error>> {
-        // If the instruction defines a value print it like an assignment.
-        if let Some(dt) = self.def_type(m) {
-            nums.idx(self).to_string_impl(m, s, nums)?;
-            s.push_str(": ");
-            dt.to_string_impl(m, s, nums)?;
-            s.push_str(" = ");
+pub(crate) struct DisplayableInstruction<'a> {
+    instr: &'a Instruction,
+    instr_idx: InstrIdx,
+    m: &'a Module,
+}
+
+impl fmt::Display for DisplayableInstruction<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(dt) = self.instr.def_type(self.m) {
+            write!(f, "%{}: {dt} = ", self.instr_idx.to_u16())?;
         }
-        // Then print the instruction itself along with its parameters.
-        match self {
-            Self::Load(i) => i.to_string_impl(m, s, nums)?,
-            Self::LookupGlobal(i) => i.to_string_impl(m, s, nums)?,
-            Self::LoadTraceInput(i) => i.to_string_impl(m, s, nums)?,
-            Self::Call(i) => i.to_string_impl(m, s, nums)?,
-            Self::VACall(i) => i.to_string_impl(m, s, nums)?,
-            Self::PtrAdd(i) => i.to_string_impl(m, s, nums)?,
-            Self::Store(i) => i.to_string_impl(m, s, nums)?,
-            Self::Icmp(i) => i.to_string_impl(m, s, nums)?,
-            Self::Guard(i) => i.to_string_impl(m, s, nums)?,
-            Self::Arg(i) => s.push_str(&format!("Arg({})", i)),
-            Self::TraceLoopStart => s.push_str("TraceLoopStart"),
-            Self::Add(i) => i.to_string_impl(m, s, nums)?,
+
+        match self.instr {
+            Instruction::Load(x) => write!(f, "Load {}", x.operand().display(self.m)),
+            Instruction::LookupGlobal(x) => write!(
+                f,
+                "LookupGlobal {}",
+                self.m
+                    .global_decl(x.global_decl_idx)
+                    .name
+                    .to_str()
+                    .unwrap_or("<not valid UTF-8>")
+            ),
+            Instruction::Call(x) => {
+                let fd = self.m.func_decl(x.target);
+                write!(
+                    f,
+                    "Call @{}({})",
+                    fd.name(),
+                    (0..fd.func_type(self.m).num_args())
+                        .map(|y| format!("{}", x.operand(self.m, y).display(self.m)))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+            Instruction::VACall(x) => write!(
+                f,
+                "VACall @{}({})",
+                self.m.func_decl(x.target()).name(),
+                (0..x.num_args())
+                    .map(|y| format!("{}", x.operand(self.m, y).display(self.m)))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            Instruction::PtrAdd(x) => {
+                write!(f, "PtrAdd {}, {}", x.ptr().display(self.m), x.offset())
+            }
+            Instruction::Store(x) => write!(
+                f,
+                "Store {}, {}",
+                x.val.unpack().display(self.m),
+                x.ptr.unpack().display(self.m)
+            ),
+            Instruction::Icmp(x) => write!(
+                f,
+                "Icmp {}, {:?}, {}",
+                x.left().display(self.m),
+                x.pred,
+                x.right().display(self.m)
+            ),
+            Instruction::Guard(x) => write!(
+                f,
+                "Guard {}, {}",
+                x.cond().display(self.m),
+                if x.expect { "true" } else { "false " }
+            ),
+            Instruction::LoadTraceInput(x) => {
+                write!(
+                    f,
+                    "LoadTraceInput {}, {}",
+                    x.off(),
+                    self.m.type_(x.ty_idx())
+                )
+            }
+            Instruction::TraceLoopStart => write!(f, "TraceLoopStart"),
+            Instruction::Arg(i) => write!(f, "Arg({i})"),
+            Instruction::Add(x) => {
+                write!(
+                    f,
+                    "Add {}, {}",
+                    x.lhs().display(self.m),
+                    x.rhs().display(self.m)
+                )
+            }
             x => todo!("{x:?}"),
         }
-        Ok(())
     }
 }
 
@@ -1373,18 +1282,6 @@ impl LoadInstruction {
     }
 }
 
-impl JitIRDisplay for LoadInstruction {
-    fn to_string_impl(
-        &self,
-        m: &Module,
-        s: &mut String,
-        nums: &LocalNumbers<'_>,
-    ) -> Result<(), Box<dyn Error>> {
-        s.push_str("Load ");
-        self.operand().to_string_impl(m, s, nums)
-    }
-}
-
 /// The `LoadTraceInput` instruction.
 ///
 /// ## Semantics
@@ -1401,19 +1298,6 @@ pub struct LoadTraceInputInstruction {
     off: u32,
     /// The type of the resulting local variable.
     ty_idx: TypeIdx,
-}
-
-impl JitIRDisplay for LoadTraceInputInstruction {
-    fn to_string_impl(
-        &self,
-        m: &Module,
-        s: &mut String,
-        nums: &LocalNumbers<'_>,
-    ) -> Result<(), Box<dyn Error>> {
-        s.push_str(&format!("LoadTraceInput {}, ", self.off()));
-        m.type_(self.ty_idx).to_string_impl(m, s, nums)?;
-        Ok(())
-    }
 }
 
 impl LoadTraceInputInstruction {
@@ -1472,19 +1356,6 @@ impl LookupGlobalInstruction {
     }
 }
 
-impl JitIRDisplay for LookupGlobalInstruction {
-    fn to_string_impl(
-        &self,
-        m: &Module,
-        s: &mut String,
-        nums: &LocalNumbers<'_>,
-    ) -> Result<(), Box<dyn Error>> {
-        s.push_str("LookupGlobal ");
-        m.global_decl(self.global_decl_idx)
-            .to_string_impl(m, s, nums)
-    }
-}
-
 /// The operands for a [Instruction::Call]
 ///
 /// # Semantics
@@ -1499,31 +1370,6 @@ pub struct CallInstruction {
     arg1: PackedOperand,
     /// Extra arguments, if the call requires more than a single argument.
     extra: ExtraArgsIdx,
-}
-
-impl JitIRDisplay for CallInstruction {
-    fn to_string_impl(
-        &self,
-        m: &Module,
-        s: &mut String,
-        nums: &LocalNumbers<'_>,
-    ) -> Result<(), Box<dyn Error>> {
-        let decl = m.func_decl(self.target);
-        s.push_str("Call @");
-        s.push_str(decl.name());
-
-        s.push('(');
-        let num_args = decl.func_type(m).num_args();
-        for ai in 0..num_args {
-            self.operand(m, ai).to_string_impl(m, s, nums)?;
-            if ai != num_args - 1 {
-                s.push_str(", ");
-            }
-        }
-        s.push(')');
-
-        Ok(())
-    }
 }
 
 impl CallInstruction {
@@ -1599,31 +1445,6 @@ pub struct VACallInstruction {
     first_arg_idx: ExtraArgsIdx,
 }
 
-impl JitIRDisplay for VACallInstruction {
-    fn to_string_impl(
-        &self,
-        m: &Module,
-        s: &mut String,
-        nums: &LocalNumbers,
-    ) -> Result<(), Box<dyn Error>> {
-        let decl = m.func_decl(self.target);
-        s.push_str("VACall @");
-        s.push_str(decl.name());
-
-        s.push('(');
-        let num_args = self.num_args();
-        for ai in 0..num_args {
-            self.operand(m, ai).to_string_impl(m, s, nums)?;
-            if ai != num_args - 1 {
-                s.push_str(", ");
-            }
-        }
-        s.push(')');
-
-        Ok(())
-    }
-}
-
 impl VACallInstruction {
     pub(crate) fn new(
         m: &mut Module,
@@ -1697,21 +1518,6 @@ impl StoreInstruction {
     }
 }
 
-impl JitIRDisplay for StoreInstruction {
-    fn to_string_impl(
-        &self,
-        m: &Module,
-        s: &mut String,
-        nums: &LocalNumbers<'_>,
-    ) -> Result<(), Box<dyn Error>> {
-        s.push_str("Store ");
-        self.val.unpack().to_string_impl(m, s, nums)?;
-        s.push_str(", ");
-        self.ptr.unpack().to_string_impl(m, s, nums)?;
-        Ok(())
-    }
-}
-
 /// A pointer offsetting instruction.
 ///
 /// # Semantics
@@ -1742,21 +1548,6 @@ impl PtrAddInstruction {
             ptr: PackedOperand::new(&ptr),
             off,
         }
-    }
-}
-
-impl JitIRDisplay for PtrAddInstruction {
-    fn to_string_impl(
-        &self,
-        m: &Module,
-        s: &mut String,
-        nums: &LocalNumbers<'_>,
-    ) -> Result<(), Box<dyn Error>> {
-        s.push_str("PtrAdd ");
-        self.ptr().to_string_impl(m, s, nums)?;
-        s.push_str(", ");
-        s.push_str(&self.offset().to_string());
-        Ok(())
     }
 }
 
@@ -1793,22 +1584,6 @@ macro_rules! bin_op {
             /// Returns the type index of the operands being added.
             pub(crate) fn type_idx(&self, m: &Module) -> TypeIdx {
                 self.lhs.unpack().type_idx(m)
-            }
-        }
-
-        impl JitIRDisplay for $struct {
-            fn to_string_impl(
-                &self,
-                m: &Module,
-                s: &mut String,
-                nums: &LocalNumbers<'_>,
-            ) -> Result<(), Box<dyn Error>> {
-                s.push_str($disp);
-                s.push_str(" ");
-                self.lhs().to_string_impl(m, s, nums)?;
-                s.push_str(", ");
-                self.rhs().to_string_impl(m, s, nums)?;
-                Ok(())
             }
         }
 
@@ -1884,23 +1659,6 @@ impl IcmpInstruction {
     }
 }
 
-impl JitIRDisplay for IcmpInstruction {
-    fn to_string_impl(
-        &self,
-        m: &Module,
-        s: &mut String,
-        nums: &LocalNumbers<'_>,
-    ) -> Result<(), Box<dyn Error>> {
-        s.push_str("Icmp ");
-        self.left().to_string_impl(m, s, nums)?;
-        s.push_str(", ");
-        s.push_str(&format!("{:?}", self.pred));
-        s.push_str(", ");
-        self.right().to_string_impl(m, s, nums)?;
-        Ok(())
-    }
-}
-
 /// The operand for a [Instruction::Guard]
 ///
 /// # Semantics
@@ -1938,25 +1696,6 @@ impl GuardInstruction {
 
     pub(crate) fn guard_info<'a>(&self, m: &'a Module) -> &'a GuardInfo {
         &m.guard_info[self.gidx]
-    }
-}
-
-impl JitIRDisplay for GuardInstruction {
-    fn to_string_impl(
-        &self,
-        m: &Module,
-        s: &mut String,
-        nums: &LocalNumbers<'_>,
-    ) -> Result<(), Box<dyn Error>> {
-        s.push_str("Guard ");
-        self.cond().to_string_impl(m, s, nums)?;
-        s.push_str(", ");
-        if self.expect {
-            s.push_str("true");
-        } else {
-            s.push_str("false");
-        }
-        Ok(())
     }
 }
 
@@ -2179,7 +1918,7 @@ mod tests {
         fn check<T: ToBytes + PrimInt>(m: &mut Module, num_bits: u32, val: T, expect: &str) {
             assert!(mem::size_of::<T>() * 8 >= usize::try_from(num_bits).unwrap());
             let c = IntegerType::new(num_bits).make_constant(m, val).unwrap();
-            assert_eq!(c.to_string(&m).unwrap(), expect);
+            assert_eq!(c.display(&m).to_string(), expect);
         }
 
         let mut m = Module::new_testing();
@@ -2194,25 +1933,6 @@ mod tests {
         check(&mut m, 64, 456i64, "456i64");
         check(&mut m, 64, u64::MAX as i64, "-1i64");
         check(&mut m, 64, i64::MAX, "9223372036854775807i64");
-    }
-
-    #[test]
-    fn stringify_func_types() {
-        let m = Module::new_testing();
-        let i8_tyidx = m.int8_type_idx();
-        let void_tyidx = m.void_type_idx();
-
-        let ft = FuncType::new(vec![i8_tyidx], i8_tyidx, false);
-        assert_eq!(ft.to_string(&m).unwrap(), "func(i8) -> i8");
-
-        let ft = FuncType::new(vec![i8_tyidx], void_tyidx, false);
-        assert_eq!(ft.to_string(&m).unwrap(), "func(i8)");
-
-        let ft = FuncType::new(vec![], void_tyidx, false);
-        assert_eq!(ft.to_string(&m).unwrap(), "func()");
-
-        let ft = FuncType::new(vec![i8_tyidx], i8_tyidx, true);
-        assert_eq!(ft.to_string(&m).unwrap(), "func(i8, ...) -> i8");
     }
 
     #[test]
@@ -2233,7 +1953,6 @@ mod tests {
             aot_ir::GlobalDeclIdx::new(1),
         ))
         .unwrap();
-        let got = m.to_string().unwrap();
         let expect = [
             "; compiled trace ID #0",
             "",
@@ -2247,7 +1966,7 @@ mod tests {
             "    %2: i8 = LoadTraceInput 16, i8",
         ]
         .join("\n");
-        assert_eq!(got, expect);
+        assert_eq!(m.to_string(), expect);
     }
 
     #[test]
