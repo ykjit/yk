@@ -66,11 +66,8 @@ impl Compiler for JITCYk {
         let jit_mod = trace_builder::build(mt.next_compiled_trace_id(), &aot_mod, aottrace_iter.0)?;
 
         if should_log_ir(IRPhase::PreOpt) {
-            // FIXME: If the `unwrap` fails, something rather bad has happened: does recovery even
-            // make sense?
             log_ir(&format!(
-                "--- Begin jit-pre-opt ---\n{}\n--- End jit-pre-opt ---",
-                jit_mod.to_string().unwrap()
+                "--- Begin jit-pre-opt ---\n{jit_mod}\n--- End jit-pre-opt ---",
             ));
         }
 
