@@ -211,13 +211,14 @@ impl Module {
     }
 
     /// Push an instruction to the end of the [Module].
-    ///
-    /// # Panics
-    ///
-    /// If `instr` would overflow the index type.
-    pub(crate) fn push(&mut self, inst: Inst) {
-        assert!(InstIdx::new(self.insts.len()).is_ok());
-        self.insts.push(inst);
+    pub(crate) fn push(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
+        match InstIdx::new(self.insts.len()) {
+            Ok(x) => {
+                self.insts.push(inst);
+                Ok(x)
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// Push an instruction to the end of the [Module] and create a local variable [Operand] out of
@@ -1984,9 +1985,12 @@ mod tests {
     #[test]
     fn print_module() {
         let mut m = Module::new_testing();
-        m.push(LoadTraceInputInst::new(0, m.int8_ty_idx()).into());
-        m.push(LoadTraceInputInst::new(8, m.int8_ty_idx()).into());
-        m.push(LoadTraceInputInst::new(16, m.int8_ty_idx()).into());
+        m.push(LoadTraceInputInst::new(0, m.int8_ty_idx()).into())
+            .unwrap();
+        m.push(LoadTraceInputInst::new(8, m.int8_ty_idx()).into())
+            .unwrap();
+        m.push(LoadTraceInputInst::new(16, m.int8_ty_idx()).into())
+            .unwrap();
         m.push_global_decl(GlobalDecl::new(
             CString::new("some_global").unwrap(),
             false,

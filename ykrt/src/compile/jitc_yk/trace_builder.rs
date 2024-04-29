@@ -105,7 +105,7 @@ impl<'a> TraceBuilder<'a> {
                 self.local_map
                     .insert(tis.to_instr_id(), self.next_instr_id()?);
                 let arg = jit_ir::Inst::Arg(TRACE_FUNC_CTRLP_ARGIDX);
-                self.jit_mod.push(arg);
+                self.jit_mod.push(arg)?;
                 break;
             }
         }
@@ -161,7 +161,7 @@ impl<'a> TraceBuilder<'a> {
                                     last_store_ptr.take().unwrap().to_instr_id(),
                                     self.next_instr_id()?,
                                 );
-                                self.jit_mod.push(load_ti_instr);
+                                self.jit_mod.push(load_ti_instr)?;
                                 self.first_ti_idx = inst_idx;
                             }
                             _ => {
@@ -177,7 +177,7 @@ impl<'a> TraceBuilder<'a> {
         }
 
         // Mark this location as the start of the trace loop.
-        self.jit_mod.push(jit_ir::Inst::TraceLoopStart);
+        self.jit_mod.push(jit_ir::Inst::TraceLoopStart)?;
 
         Ok(())
     }
@@ -262,7 +262,7 @@ impl<'a> TraceBuilder<'a> {
         }
 
         // Insert the newly-translated instruction into the JIT module.
-        self.jit_mod.push(jit_inst);
+        self.jit_mod.push(jit_inst)?;
         Ok(())
     }
 
@@ -435,7 +435,7 @@ impl<'a> TraceBuilder<'a> {
         };
 
         let guard = jit_ir::GuardInst::new(jit_ir::Operand::Local(jit_cond), expect, gi_idx);
-        self.jit_mod.push(guard.into());
+        self.jit_mod.push(guard.into())?;
         Ok(())
     }
 
