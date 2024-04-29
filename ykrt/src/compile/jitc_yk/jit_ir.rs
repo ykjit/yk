@@ -17,7 +17,7 @@
 //!  * `Inst`: "instruction"
 //!  * `Ty`: "type"
 
-// For now, don't swap others working in other areas of the system.
+// For now, don't swamp others working in other areas of the system.
 // FIXME: eventually delete.
 #![allow(dead_code)]
 
@@ -47,7 +47,7 @@ pub(crate) use super::aot_ir::Predicate;
 pub(crate) struct Module {
     /// The ID of this compiled trace. In `cfg(test)` this value is meaningless: in
     /// `cfg(not(test))` the ID is obtained from [MT::next_compiled_trace_id()] and can be used to
-    /// uniquely distinguish traces.
+    /// semi-uniquely distinguish traces (see [MT::compiled_trace_id] for more details).
     ctr_id: u64,
     /// The IR trace as a linear sequence of instructions.
     insts: Vec<Inst>, // FIXME: this should be a TiVec.
@@ -65,11 +65,11 @@ pub(crate) struct Module {
     ///
     /// A [TyIdx] describes an index into this.
     types: TiVec<TyIdx, Ty>,
-    /// The type index of the void type. Cached for convinience.
+    /// The type index of the void type. Cached for convenience.
     void_ty_idx: TyIdx,
-    /// The type index of a pointer type. Cached for convinience.
+    /// The type index of a pointer type. Cached for convenience.
     ptr_ty_idx: TyIdx,
-    /// The type index of an 8-bit integer. Cached for convinience.
+    /// The type index of an 8-bit integer. Cached for convenience.
     int8_ty_idx: TyIdx,
     /// The function declaration table.
     ///
@@ -157,7 +157,7 @@ impl Module {
     ///
     /// Panics if the address cannot be located.
     pub(crate) fn globalvar_ptr(&self, idx: GlobalDeclIdx) -> *const () {
-        let decl = idx.global_decl(self);
+        let decl = self.global_decl(idx);
         #[cfg(not(test))]
         {
             // If the unwrap fails, then the AOT array was absent and something has gone wrong
@@ -211,13 +211,14 @@ impl Module {
     }
 
     /// Push an instruction to the end of the [Module].
-    ///
-    /// # Panics
-    ///
-    /// If `instr` would overflow the index type.
-    pub(crate) fn push(&mut self, inst: Inst) {
-        assert!(InstIdx::new(self.insts.len()).is_ok());
-        self.insts.push(inst);
+    pub(crate) fn push(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
+        match InstIdx::new(self.insts.len()) {
+            Ok(x) => {
+                self.insts.push(inst);
+                Ok(x)
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// Push an instruction to the end of the [Module] and create a local variable [Operand] out of
@@ -674,12 +675,6 @@ index_24bit!(FuncDeclIdx);
 pub(crate) struct TyIdx(U24);
 index_24bit!(TyIdx);
 
-impl TyIdx {
-    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Ty {
-        m.type_(*self)
-    }
-}
-
 /// An extra argument index.
 ///
 /// One of these is an index into the [Module::extra_args].
@@ -694,13 +689,6 @@ index_16bit!(ExtraArgsIdx);
 pub(crate) struct ConstIdx(u16);
 index_16bit!(ConstIdx);
 
-impl ConstIdx {
-    /// Return a reference to the [Constant] for this index in the [Module] `m`.
-    pub(crate) fn const_<'a>(&self, m: &'a Module) -> &'a Constant {
-        m.const_(*self)
-    }
-}
-
 /// A guard info index.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub(crate) struct GuardInfoIdx(pub(crate) u16);
@@ -711,26 +699,12 @@ index_16bit!(GuardInfoIdx);
 pub(crate) struct GlobalDeclIdx(U24);
 index_24bit!(GlobalDeclIdx);
 
-impl GlobalDeclIdx {
-    /// Returns the [GlobalDecl] for the index in the [Module] `m`.
-    pub(crate) fn global_decl<'a>(&self, m: &'a Module) -> &'a GlobalDecl {
-        m.global_decl(*self)
-    }
-}
-
 /// An instruction index.
 ///
 /// One of these is an index into the [Module::insts].
 #[derive(Debug, Copy, Clone, Eq, Hash, PartialEq, PartialOrd)]
 pub(crate) struct InstIdx(u16);
 index_16bit!(InstIdx);
-
-impl InstIdx {
-    /// Return a reference to the instruction indentified by `self` in `m`.
-    pub(crate) fn inst<'a>(&'a self, m: &'a Module) -> &Inst {
-        m.inst(*self)
-    }
-}
 
 /// A function's type.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -763,7 +737,7 @@ impl FuncTy {
     ///
     /// Panics if the index is out of bounds.
     pub(crate) fn arg_type<'a>(&self, m: &'a Module, idx: usize) -> &'a Ty {
-        self.arg_ty_idxs[idx].type_(m)
+        m.type_(self.arg_ty_idxs[idx])
     }
 
     /// Returns whether the function type has vararg arguments.
@@ -773,7 +747,7 @@ impl FuncTy {
 
     /// Returns the type of the return value.
     pub(crate) fn ret_type<'a>(&self, m: &'a Module) -> &'a Ty {
-        self.ret_ty_idx.type_(m)
+        m.type_(self.ret_ty_idx)
     }
 
     /// Returns the type index of the return value.
@@ -923,8 +897,8 @@ impl Operand {
     /// Panics if asking for the size make no sense for this operand.
     pub(crate) fn byte_size(&self, m: &Module) -> usize {
         match self {
-            Self::Local(l) => l.inst(m).def_byte_size(m),
-            Self::Const(cidx) => cidx.const_(m).ty_idx().type_(m).byte_size().unwrap(),
+            Self::Local(l) => m.inst(*l).def_byte_size(m),
+            Self::Const(cidx) => m.type_(m.const_(*cidx).ty_idx()).byte_size().unwrap(),
         }
     }
 
@@ -932,7 +906,7 @@ impl Operand {
     pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Ty {
         match self {
             Self::Local(l) => {
-                match l.inst(m).def_type(m) {
+                match m.inst(*l).def_type(m) {
                     Some(t) => t,
                     None => {
                         // When an operand is a local variable, the local can only come from an
@@ -942,14 +916,14 @@ impl Operand {
                     }
                 }
             }
-            Self::Const(cidx) => cidx.const_(m).ty_idx().type_(m),
+            Self::Const(cidx) => m.type_(m.const_(*cidx).ty_idx()),
         }
     }
 
     /// Returns the type index of the operand.
     pub(crate) fn ty_idx(&self, m: &Module) -> TyIdx {
         match self {
-            Self::Local(l) => l.inst(m).def_ty_idx(m),
+            Self::Local(l) => m.inst(*l).def_ty_idx(m),
             Self::Const(_) => todo!(),
         }
     }
@@ -1361,8 +1335,14 @@ pub struct LookupGlobalInst {
 }
 
 impl LookupGlobalInst {
+    #[cfg(not(test))]
     pub(crate) fn new(global_decl_idx: GlobalDeclIdx) -> Result<Self, CompilationError> {
         Ok(Self { global_decl_idx })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new(_global_decl_idx: GlobalDeclIdx) -> Result<Self, CompilationError> {
+        panic!("Cannot lookup globals in cfg(test) as ykllvm will not have compiled this binary");
     }
 
     pub(crate) fn decl<'a>(&self, m: &'a Module) -> &'a GlobalDecl {
@@ -1978,9 +1958,12 @@ mod tests {
     #[test]
     fn print_module() {
         let mut m = Module::new_testing();
-        m.push(LoadTraceInputInst::new(0, m.int8_ty_idx()).into());
-        m.push(LoadTraceInputInst::new(8, m.int8_ty_idx()).into());
-        m.push(LoadTraceInputInst::new(16, m.int8_ty_idx()).into());
+        m.push(LoadTraceInputInst::new(0, m.int8_ty_idx()).into())
+            .unwrap();
+        m.push(LoadTraceInputInst::new(8, m.int8_ty_idx()).into())
+            .unwrap();
+        m.push(LoadTraceInputInst::new(16, m.int8_ty_idx()).into())
+            .unwrap();
         m.push_global_decl(GlobalDecl::new(
             CString::new("some_global").unwrap(),
             false,
