@@ -17,7 +17,7 @@
 //!  * `Inst`: "instruction"
 //!  * `Ty`: "type"
 
-// For now, don't swap others working in other areas of the system.
+// For now, don't swamp others working in other areas of the system.
 // FIXME: eventually delete.
 #![allow(dead_code)]
 
@@ -65,11 +65,11 @@ pub(crate) struct Module {
     ///
     /// A [TyIdx] describes an index into this.
     types: TiVec<TyIdx, Ty>,
-    /// The type index of the void type. Cached for convinience.
+    /// The type index of the void type. Cached for convenience.
     void_ty_idx: TyIdx,
-    /// The type index of a pointer type. Cached for convinience.
+    /// The type index of a pointer type. Cached for convenience.
     ptr_ty_idx: TyIdx,
-    /// The type index of an 8-bit integer. Cached for convinience.
+    /// The type index of an 8-bit integer. Cached for convenience.
     int8_ty_idx: TyIdx,
     /// The function declaration table.
     ///
