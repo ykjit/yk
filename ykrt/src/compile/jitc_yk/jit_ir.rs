@@ -47,7 +47,7 @@ pub(crate) use super::aot_ir::Predicate;
 pub(crate) struct Module {
     /// The ID of this compiled trace. In `cfg(test)` this value is meaningless: in
     /// `cfg(not(test))` the ID is obtained from [MT::next_compiled_trace_id()] and can be used to
-    /// uniquely distinguish traces.
+    /// semi-uniquely distinguish traces (see [MT::compiled_trace_id] for more details).
     ctr_id: u64,
     /// The IR trace as a linear sequence of instructions.
     insts: Vec<Inst>, // FIXME: this should be a TiVec.

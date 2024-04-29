@@ -95,7 +95,7 @@ pub struct MT {
     compiler: Mutex<Arc<dyn Compiler>>,
     /// A monotonically increasing integer that semi-uniquely identifies each compiled trace. This
     /// is only useful for general debugging purposes, and must not be relied upon for semantic
-    /// correctness, because the IDs will wrap when the underlying `u64` overflows.
+    /// correctness, because the IDs can repeat when the underlying `u64` overflows/wraps.
     compiled_trace_id: AtomicU64,
     pub(crate) stats: Stats,
 }
