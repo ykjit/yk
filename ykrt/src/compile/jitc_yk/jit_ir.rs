@@ -157,7 +157,7 @@ impl Module {
     ///
     /// Panics if the address cannot be located.
     pub(crate) fn globalvar_ptr(&self, idx: GlobalDeclIdx) -> *const () {
-        let decl = idx.global_decl(self);
+        let decl = self.global_decl(idx);
         #[cfg(not(test))]
         {
             // If the unwrap fails, then the AOT array was absent and something has gone wrong
@@ -698,13 +698,6 @@ index_16bit!(GuardInfoIdx);
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub(crate) struct GlobalDeclIdx(U24);
 index_24bit!(GlobalDeclIdx);
-
-impl GlobalDeclIdx {
-    /// Returns the [GlobalDecl] for the index in the [Module] `m`.
-    pub(crate) fn global_decl<'a>(&self, m: &'a Module) -> &'a GlobalDecl {
-        m.global_decl(*self)
-    }
-}
 
 /// An instruction index.
 ///
