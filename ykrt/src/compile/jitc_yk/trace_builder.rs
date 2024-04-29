@@ -1,6 +1,6 @@
 //! The trace builder.
 
-use super::aot_ir::{self, AotIRDisplay, BBlockId, FuncIdx, InstrIdx, Module};
+use super::aot_ir::{self, AotIRDisplay, BBlockId, FuncIdx, Module};
 use super::jit_ir;
 use crate::compile::CompilationError;
 use crate::trace::{AOTTraceIterator, TraceAction};
@@ -10,12 +10,12 @@ use std::{collections::HashMap, ffi::CString};
 const TRACE_FUNC_CTRLP_ARGIDX: u16 = 0;
 
 /// A TraceBuilder frame. Keeps track of inlined calls and stores information about the last
-/// processed stackmap, call instruction and its arguments.
+/// processed safepoint, call instruction and its arguments.
 struct Frame<'a> {
     // Index of the function of this frame.
     func_idx: Option<FuncIdx>,
-    /// Stackmap for this frame.
-    sm: Option<&'a aot_ir::Instruction>,
+    /// Safepoint for this frame.
+    safepoint: Option<&'a aot_ir::DeoptSafepoint>,
     /// JIT arguments of this frame's caller.
     args: Vec<jit_ir::Operand>,
 }
@@ -23,10 +23,14 @@ struct Frame<'a> {
 impl<'a> Frame<'a> {
     fn new(
         func_idx: Option<FuncIdx>,
-        sm: Option<&'a aot_ir::Instruction>,
+        safepoint: Option<&'a aot_ir::DeoptSafepoint>,
         args: Vec<jit_ir::Operand>,
     ) -> Frame<'a> {
-        Frame { func_idx, sm, args }
+        Frame {
+            func_idx,
+            safepoint,
+            args,
+        }
     }
 }
 
@@ -200,7 +204,7 @@ impl<'a> TraceBuilder<'a> {
                     self.handle_load(&bid, inst_idx, ptr, type_idx)
                 }
                 // FIXME: ignore remaining instructions after a call.
-                aot_ir::Instruction::Call { callee, args } => {
+                aot_ir::Instruction::Call { callee, args, .. } => {
                     // Get the branch instruction of this block.
                     let nextinst = blk.instrs.last().unwrap();
                     self.handle_call(inst, &bid, inst_idx, callee, args, nextinst)
@@ -228,37 +232,34 @@ impl<'a> TraceBuilder<'a> {
                 aot_ir::Instruction::ICmp { lhs, pred, rhs, .. } => {
                     self.handle_icmp(&bid, inst_idx, lhs, pred, rhs)
                 }
-                aot_ir::Instruction::CondBr { cond, true_bb, .. } => {
-                    let sm = &blk.instrs[InstrIdx::new(inst_idx - 1)];
-                    debug_assert!(sm.is_safepoint());
-                    self.handle_condbr(sm, nextbb.as_ref().unwrap(), cond, true_bb)
-                }
+                aot_ir::Instruction::CondBr {
+                    cond,
+                    true_bb,
+                    safepoint,
+                    ..
+                } => self.handle_condbr(safepoint, nextbb.as_ref().unwrap(), cond, true_bb),
                 aot_ir::Instruction::Cast {
                     cast_kind,
                     val,
                     dest_type_idx,
                 } => self.handle_cast(&bid, inst_idx, cast_kind, val, dest_type_idx),
                 aot_ir::Instruction::Ret { val } => self.handle_ret(&bid, inst_idx, val),
-                aot_ir::Instruction::DeoptSafepoint { .. } => Ok(()),
                 aot_ir::Instruction::Switch {
                     test_val,
                     default_dest,
                     case_values,
                     case_dests,
-                } => {
-                    let sm = &blk.instrs[InstrIdx::new(inst_idx - 1)];
-                    debug_assert!(sm.is_safepoint());
-                    self.handle_switch(
-                        &bid,
-                        inst_idx,
-                        sm,
-                        nextbb.as_ref().unwrap(),
-                        test_val,
-                        default_dest,
-                        case_values,
-                        case_dests,
-                    )
-                }
+                    safepoint,
+                } => self.handle_switch(
+                    &bid,
+                    inst_idx,
+                    safepoint,
+                    nextbb.as_ref().unwrap(),
+                    test_val,
+                    default_dest,
+                    case_values,
+                    case_dests,
+                ),
                 _ => todo!("{:?}", inst),
             }?;
         }
@@ -398,22 +399,18 @@ impl<'a> TraceBuilder<'a> {
         &mut self,
         cond: &jit_ir::Operand,
         expect: bool,
-        sm: &'a aot_ir::Instruction,
+        safepoint: &'a aot_ir::DeoptSafepoint,
     ) -> Result<jit_ir::GuardInst, CompilationError> {
         // Assign this branch's stackmap to the current frame.
-        self.frames.last_mut().unwrap().sm = Some(sm);
+        self.frames.last_mut().unwrap().safepoint = Some(safepoint);
 
-        // Iterate over the stackmaps of the previous frames as well as the stackmap from this
-        // conditional branch and collect stackmap IDs and live variables into vectors to store
-        // inside the guard.
-        // Unwrap safe as each frame at this point must have a stackmap associated with it.
+        // Collect the safepoint IDs and live variables from this conditional branch and the
+        // previous frames to store inside the guard.
+        // Unwrap-safe as each frame at this point must have a safepoint associated with it.
         let mut smids = Vec::new(); // List of stackmap ids of the current call stack.
         let mut live_args = Vec::new(); // List of live JIT variables.
-        for (sm, sm_args) in self.frames.iter().map(|f| (f.sm.unwrap(), &f.args)) {
-            let aot_ir::Instruction::DeoptSafepoint { id, lives, .. } = sm else {
-                panic!();
-            };
-            let aot_ir::Operand::Constant(cidx) = id else {
+        for (safepoint, frame_args) in self.frames.iter().map(|f| (f.safepoint.unwrap(), &f.args)) {
+            let aot_ir::Operand::Constant(cidx) = safepoint.id else {
                 panic!();
             };
             let c = self.aot_mod.constant(&cidx);
@@ -425,7 +422,7 @@ impl<'a> TraceBuilder<'a> {
             smids.push(id);
 
             // Collect live variables.
-            for op in lives.iter() {
+            for op in safepoint.lives.iter() {
                 match op {
                     aot_ir::Operand::LocalVariable(iid) => {
                         live_args.push(self.local_map[iid]);
@@ -433,7 +430,7 @@ impl<'a> TraceBuilder<'a> {
                     aot_ir::Operand::Arg { arg_idx, .. } => {
                         // Lookup the JIT value of the argument from the caller (stored in
                         // the previous frame's `args` field).
-                        let jit_ir::Operand::Local(idx) = sm_args[usize::from(*arg_idx)] else {
+                        let jit_ir::Operand::Local(idx) = frame_args[usize::from(*arg_idx)] else {
                             panic!(); // IR malformed.
                         };
                         live_args.push(idx);
@@ -452,13 +449,13 @@ impl<'a> TraceBuilder<'a> {
     /// Translate a conditional `Br` instruction.
     fn handle_condbr(
         &mut self,
-        sm: &'a aot_ir::Instruction,
+        safepoint: &'a aot_ir::DeoptSafepoint,
         next_bb: &aot_ir::BBlockId,
         cond: &aot_ir::Operand,
         true_bb: &aot_ir::BBlockIdx,
     ) -> Result<(), CompilationError> {
         let jit_cond = self.handle_operand(cond)?;
-        let guard = self.create_guard(&jit_cond, *true_bb == next_bb.bb_idx(), sm)?;
+        let guard = self.create_guard(&jit_cond, *true_bb == next_bb.bb_idx(), safepoint)?;
         self.jit_mod.push(guard.into())?;
         Ok(())
     }
@@ -519,9 +516,6 @@ impl<'a> TraceBuilder<'a> {
             return Ok(());
         }
 
-        // Safepoint calls should always be specialised to `DeoptSafepoint` instructions.
-        debug_assert!(!inst.is_safepoint());
-
         // Convert AOT args to JIT args.
         let mut jit_args = Vec::new();
         for arg in args {
@@ -540,13 +534,10 @@ impl<'a> TraceBuilder<'a> {
             && !is_recursive
         {
             // This is a mappable call that we want to inline.
-            // Retrieve the stackmap that follows every mappable call.
-            let blk = self.aot_mod.bblock(bid);
-            let sm = &blk.instrs[InstrIdx::new(aot_inst_idx + 1)];
-            debug_assert!(sm.is_safepoint());
-            // Assign stackmap to the current frame.
+            debug_assert!(inst.safepoint().is_some());
+            // Assign safepoint to the current frame.
             // Unwrap is safe as there's always at least one frame.
-            self.frames.last_mut().unwrap().sm = Some(sm);
+            self.frames.last_mut().unwrap().safepoint = inst.safepoint();
             // Create a new frame for the inlined call and pass in the arguments of the caller.
             self.frames.push(Frame::new(Some(*callee), None, jit_args));
             Ok(())
@@ -644,7 +635,7 @@ impl<'a> TraceBuilder<'a> {
         &mut self,
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
-        sm: &'a aot_ir::Instruction,
+        safepoint: &'a aot_ir::DeoptSafepoint,
         next_bb: &aot_ir::BBlockId,
         test_val: &aot_ir::Operand,
         _default_dest: &aot_ir::BBlockIdx,
@@ -684,7 +675,7 @@ impl<'a> TraceBuilder<'a> {
                 let jit_cond = self.jit_mod.push_and_make_operand(cmp_inst.into())?;
 
                 // Guard the result of the comparison.
-                self.create_guard(&jit_cond, bb == next_bb.bb_idx(), sm)?
+                self.create_guard(&jit_cond, bb == next_bb.bb_idx(), safepoint)?
             }
             None => {
                 // The default case was traced.
@@ -737,7 +728,7 @@ impl<'a> TraceBuilder<'a> {
                 // Guard the result of ORing all the comparisons together.
                 // unwrap can't fail: we already disregarded degenerate switches with no
                 // non-default cases.
-                self.create_guard(&jit_cond.unwrap(), false, sm)?
+                self.create_guard(&jit_cond.unwrap(), false, safepoint)?
             }
         };
         self.copy_instruction(guard.into(), bid, aot_inst_idx)

@@ -6,11 +6,13 @@
 ;         $0_0: ptr = alloca i32, 1
 ;         store 1i32, $0_0
 ;         $0_2: i1 = icmp $arg0, Equal, 1i32
-;         condbr $0_2, bb1, bb2
+;         condbr $0_2, bb1, bb2 [safepoint: 1i64, ()]
 ;     ...
 
 
 ; Check that a instructions following a call are correctly lowered.
+
+declare void @llvm.experimental.stackmap(i64, i32, ...);
 
 define i32 @f(i32 %0) noinline {
   ret i32 %0
@@ -21,6 +23,7 @@ entry:
   %0 = alloca i32
   store i32 1, ptr %0
   %1 = icmp eq i32 %argc, 1
+  call void (i64, i32, ...) @llvm.experimental.stackmap(i64 1, i32 0);
   br i1 %1, label %bb1, label %bb2
 
 bb1:
