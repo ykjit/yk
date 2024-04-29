@@ -230,7 +230,7 @@ impl<'a> TraceBuilder<'a> {
                 }
                 aot_ir::Instruction::CondBr { cond, true_bb, .. } => {
                     let sm = &blk.instrs[InstrIdx::new(inst_idx - 1)];
-                    debug_assert!(sm.is_stackmap_call(self.aot_mod));
+                    debug_assert!(sm.is_safepoint());
                     self.handle_condbr(sm, nextbb.as_ref().unwrap(), cond, true_bb)
                 }
                 aot_ir::Instruction::Cast {
@@ -239,6 +239,7 @@ impl<'a> TraceBuilder<'a> {
                     dest_type_idx,
                 } => self.handle_cast(&bid, inst_idx, cast_kind, val, dest_type_idx),
                 aot_ir::Instruction::Ret { val } => self.handle_ret(&bid, inst_idx, val),
+                aot_ir::Instruction::DeoptSafepoint { .. } => Ok(()),
                 _ => todo!("{:?}", inst),
             }?;
         }
@@ -388,7 +389,7 @@ impl<'a> TraceBuilder<'a> {
         // Temporarily push a frame with the conditions stackmap.
         // Find live variables in the current stack frame and add them into the guard.
         let mut smids = Vec::new(); // List of stackmap ids of the current call stack.
-        let mut lives = Vec::new(); // List of live JIT variables.
+        let mut live_args = Vec::new(); // List of live JIT variables.
 
         // Assign this branch's stackmap to the current frame.
         self.frames.last_mut().unwrap().sm = Some(sm);
@@ -398,56 +399,40 @@ impl<'a> TraceBuilder<'a> {
         // inside the guard.
         // Unwrap safe as each frame at this point must have a stackmap associated with it.
         for (sm, sm_args) in self.frames.iter().map(|f| (f.sm.unwrap(), &f.args)) {
-            // Extract stackmap ID.
-            //
-            // FIXME: make stackmap have its own opcode and specialised operands so as to simplify
-            // the code below.
-            match sm {
-                aot_ir::Instruction::Call { args, .. } => {
-                    match args[0] {
-                        aot_ir::Operand::Constant(co) => {
-                            let c = self.aot_mod.constant(&co);
-                            match self.aot_mod.const_type(c) {
-                                aot_ir::Type::Integer(it) => {
-                                    let id: u64 = match it.num_bits() {
-                                        // This unwrap can't fail unless we did something wrong during lowering.
-                                        64 => {
-                                            u64::from_ne_bytes(c.bytes()[0..8].try_into().unwrap())
-                                        }
-                                        _ => panic!(),
-                                    };
-                                    smids.push(id);
-                                }
-                                _ => panic!(),
-                            }
-                        }
-                        _ => panic!(), // IR malformed
+            let aot_ir::Instruction::DeoptSafepoint { id, lives, .. } = sm else {
+                panic!();
+            };
+            let aot_ir::Operand::Constant(cidx) = id else {
+                panic!();
+            };
+            let c = self.aot_mod.constant(&cidx);
+            let aot_ir::Type::Integer(ity) = self.aot_mod.const_type(c) else {
+                panic!();
+            };
+            assert!(ity.num_bits() == u64::BITS);
+            let id = u64::from_ne_bytes(c.bytes()[0..8].try_into().unwrap());
+            smids.push(id);
+
+            // Collect live variables.
+            for op in lives.iter() {
+                match op {
+                    aot_ir::Operand::LocalVariable(iid) => {
+                        live_args.push(self.local_map[iid]);
                     }
-                    // Collect live variables.
-                    for op in args[2..].iter() {
-                        match op {
-                            aot_ir::Operand::LocalVariable(iid) => {
-                                lives.push(self.local_map[iid]);
-                            }
-                            aot_ir::Operand::Arg { arg_idx, .. } => {
-                                // Lookup the JIT value of the argument from the caller (stored in
-                                // the previous frame's `args` field).
-                                match sm_args[usize::from(*arg_idx)] {
-                                    jit_ir::Operand::Local(idx) => {
-                                        lives.push(idx);
-                                    }
-                                    _ => panic!(),
-                                };
-                            }
-                            _ => panic!(), // IR malformed.
-                        }
+                    aot_ir::Operand::Arg { arg_idx, .. } => {
+                        // Lookup the JIT value of the argument from the caller (stored in
+                        // the previous frame's `args` field).
+                        let jit_ir::Operand::Local(idx) = sm_args[usize::from(*arg_idx)] else {
+                            panic!(); // IR malformed.
+                        };
+                        live_args.push(idx);
                     }
+                    _ => panic!(), // IR malformed.
                 }
-                _ => panic!(), // IR malformed.
             }
         }
 
-        let gi = jit_ir::GuardInfo::new(smids, lives);
+        let gi = jit_ir::GuardInfo::new(smids, live_args);
         let gi_idx = self.jit_mod.push_guardinfo(gi)?;
         let expect = *true_bb == nextbb.bb_idx();
 
@@ -514,9 +499,12 @@ impl<'a> TraceBuilder<'a> {
         nextinst: &'a aot_ir::Instruction,
     ) -> Result<(), CompilationError> {
         // Ignore special functions that we neither want to inline nor copy.
-        if inst.is_stackmap_call(self.aot_mod) || inst.is_debug_call(self.aot_mod) {
+        if inst.is_debug_call(self.aot_mod) {
             return Ok(());
         }
+
+        // Safepoint calls should always be specialised to `DeoptSafepoint` instructions.
+        debug_assert!(!inst.is_safepoint());
 
         // Convert AOT args to JIT args.
         let mut jit_args = Vec::new();
@@ -539,7 +527,7 @@ impl<'a> TraceBuilder<'a> {
             // Retrieve the stackmap that follows every mappable call.
             let blk = self.aot_mod.bblock(bid);
             let sm = &blk.instrs[InstrIdx::new(aot_inst_idx + 1)];
-            debug_assert!(sm.is_stackmap_call(self.aot_mod));
+            debug_assert!(sm.is_safepoint());
             // Assign stackmap to the current frame.
             // Unwrap is safe as there's always at least one frame.
             self.frames.last_mut().unwrap().sm = Some(sm);
