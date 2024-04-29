@@ -429,6 +429,7 @@ impl<'a> X64CodeGen<'a> {
         }
     }
 
+    #[cfg(not(test))]
     fn codegen_lookupglobal_inst(
         &mut self,
         inst_idx: jit_ir::InstIdx,
@@ -441,6 +442,15 @@ impl<'a> X64CodeGen<'a> {
         let sym_addr = self.m.globalvar_ptr(inst.global_decl_idx()).addr();
         dynasm!(self.asm ; mov Rq(WR0.code()), QWORD i64::try_from(sym_addr).unwrap());
         self.reg_into_new_local(inst_idx, WR0);
+    }
+
+    #[cfg(test)]
+    fn codegen_lookupglobal_inst(
+        &mut self,
+        _inst_idx: jit_ir::InstIdx,
+        _inst: &jit_ir::LookupGlobalInst,
+    ) {
+        panic!("Cannot lookup globals in cfg(test) as ykllvm will not have compiled this binary");
     }
 
     pub(super) fn emit_call(

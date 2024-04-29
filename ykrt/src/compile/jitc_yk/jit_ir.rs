@@ -1361,8 +1361,14 @@ pub struct LookupGlobalInst {
 }
 
 impl LookupGlobalInst {
+    #[cfg(not(test))]
     pub(crate) fn new(global_decl_idx: GlobalDeclIdx) -> Result<Self, CompilationError> {
         Ok(Self { global_decl_idx })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new(_global_decl_idx: GlobalDeclIdx) -> Result<Self, CompilationError> {
+        panic!("Cannot lookup globals in cfg(test) as ykllvm will not have compiled this binary");
     }
 
     pub(crate) fn decl<'a>(&self, m: &'a Module) -> &'a GlobalDecl {
