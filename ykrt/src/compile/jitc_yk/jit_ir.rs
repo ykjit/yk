@@ -689,13 +689,6 @@ index_16bit!(ExtraArgsIdx);
 pub(crate) struct ConstIdx(u16);
 index_16bit!(ConstIdx);
 
-impl ConstIdx {
-    /// Return a reference to the [Constant] for this index in the [Module] `m`.
-    pub(crate) fn const_<'a>(&self, m: &'a Module) -> &'a Constant {
-        m.const_(*self)
-    }
-}
-
 /// A guard info index.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub(crate) struct GuardInfoIdx(pub(crate) u16);
@@ -919,7 +912,7 @@ impl Operand {
     pub(crate) fn byte_size(&self, m: &Module) -> usize {
         match self {
             Self::Local(l) => l.inst(m).def_byte_size(m),
-            Self::Const(cidx) => m.type_(cidx.const_(m).ty_idx()).byte_size().unwrap(),
+            Self::Const(cidx) => m.type_(m.const_(*cidx).ty_idx()).byte_size().unwrap(),
         }
     }
 
@@ -937,7 +930,7 @@ impl Operand {
                     }
                 }
             }
-            Self::Const(cidx) => m.type_(cidx.const_(m).ty_idx()),
+            Self::Const(cidx) => m.type_(m.const_(*cidx).ty_idx()),
         }
     }
 
