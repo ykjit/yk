@@ -1,6 +1,21 @@
-//! The Yk JIT IR
+//! The JIT's Intermediate Representation (IR).
 //!
-//! This is the in-memory trace IR constructed by the trace builder and mutated by optimisations.
+//! This is the IR created by [trace_builder] and which is then optimised. The IR can feel a little
+//! odd at first because we store indexes into vectors rather than use direct references. This
+//! allows us to squeeze the amount of the memory used down (and also bypasses issues with
+//! representing graph structures in Rust, but that's slightly accidental).
+//!
+//! Because using the IR can often involve getting hold of data nested several layers deep, we also
+//! use a number of abbreviations/conventions to keep the length of source down to something
+//! manageable (in alphabetical order):
+//!
+//!  * `const_`: a "constant"
+//!  * `decl`: a "declaration" (e.g. a "function declaration" is a reference to an existing
+//!    function somewhere else in the address space)
+//!  * `m`: the name conventionally given to the shared [Module] instance (i.e. `m: Module`)
+//!  * `Idx`: "index"
+//!  * `Inst`: "instruction"
+//!  * `Ty`: "type"
 
 // For now, don't swap others working in other areas of the system.
 // FIXME: eventually delete.
@@ -35,10 +50,10 @@ pub(crate) struct Module {
     /// uniquely distinguish traces.
     ctr_id: u64,
     /// The IR trace as a linear sequence of instructions.
-    instrs: Vec<Instruction>, // FIXME: this should be a TiVec.
+    insts: Vec<Inst>, // FIXME: this should be a TiVec.
     /// The extra argument table.
     ///
-    /// Used when a [CallInstruction]'s arguments don't fit inline.
+    /// Used when a [CallInst]'s arguments don't fit inline.
     ///
     /// An [ExtraArgsIdx] describes an index into this.
     extra_args: Vec<Operand>,
@@ -48,14 +63,14 @@ pub(crate) struct Module {
     consts: TiVec<ConstIdx, Constant>,
     /// The type table.
     ///
-    /// A [TypeIdx] describes an index into this.
-    types: TiVec<TypeIdx, Type>,
+    /// A [TyIdx] describes an index into this.
+    types: TiVec<TyIdx, Ty>,
     /// The type index of the void type. Cached for convinience.
-    void_type_idx: TypeIdx,
+    void_ty_idx: TyIdx,
     /// The type index of a pointer type. Cached for convinience.
-    ptr_type_idx: TypeIdx,
+    ptr_ty_idx: TyIdx,
     /// The type index of an 8-bit integer. Cached for convinience.
-    int8_type_idx: TypeIdx,
+    int8_ty_idx: TyIdx,
     /// The function declaration table.
     ///
     /// These are declarations of externally compiled functions that the JITted trace might need to
@@ -99,14 +114,14 @@ impl Module {
     ) -> Result<Self, CompilationError> {
         // Create some commonly used types ahead of time. Aside from being convenient, this allows
         // us to find their (now statically known) indices in scenarios where Rust forbids us from
-        // holding a mutable reference to the Module (and thus we cannot use [Module::type_idx]).
+        // holding a mutable reference to the Module (and thus we cannot use [Module::ty_idx]).
         let mut types = TiVec::new();
-        let void_type_idx = TypeIdx::new(types.len())?;
-        types.push(Type::Void);
-        let ptr_type_idx = TypeIdx::new(types.len())?;
-        types.push(Type::Ptr);
-        let int8_type_idx = TypeIdx::new(types.len())?;
-        types.push(Type::Integer(IntegerType::new(8)));
+        let void_ty_idx = TyIdx::new(types.len())?;
+        types.push(Ty::Void);
+        let ptr_ty_idx = TyIdx::new(types.len())?;
+        types.push(Ty::Ptr);
+        let int8_ty_idx = TyIdx::new(types.len())?;
+        types.push(Ty::Integer(IntegerTy::new(8)));
 
         // Find the global variable pointer array in the address space.
         //
@@ -121,13 +136,13 @@ impl Module {
 
         Ok(Self {
             ctr_id,
-            instrs: Vec::new(),
+            insts: Vec::new(),
             extra_args: Vec::new(),
             consts: TiVec::new(),
             types,
-            void_type_idx,
-            ptr_type_idx,
-            int8_type_idx,
+            void_ty_idx,
+            ptr_ty_idx,
+            int8_ty_idx,
             func_decls: TiVec::new(),
             global_decls: TiVec::new(),
             guard_info: TiVec::new(),
@@ -157,32 +172,32 @@ impl Module {
         }
     }
 
-    /// Returns the type index of [Type::Void].
-    pub(crate) fn void_type_idx(&self) -> TypeIdx {
-        self.void_type_idx
+    /// Returns the type index of [Ty::Void].
+    pub(crate) fn void_ty_idx(&self) -> TyIdx {
+        self.void_ty_idx
     }
 
-    /// Returns the type index of [Type::Ptr].
-    pub(crate) fn ptr_type_idx(&self) -> TypeIdx {
-        self.ptr_type_idx
+    /// Returns the type index of [Ty::Ptr].
+    pub(crate) fn ptr_ty_idx(&self) -> TyIdx {
+        self.ptr_ty_idx
     }
 
     /// Returns the type index of an 8-bit integer.
-    pub(crate) fn int8_type_idx(&self) -> TypeIdx {
-        self.int8_type_idx
+    pub(crate) fn int8_ty_idx(&self) -> TyIdx {
+        self.int8_ty_idx
     }
 
     /// Return the instruction at the specified index.
-    pub(crate) fn instr(&self, idx: InstrIdx) -> &Instruction {
-        &self.instrs[usize::from(idx)]
+    pub(crate) fn inst(&self, idx: InstIdx) -> &Inst {
+        &self.insts[usize::from(idx)]
     }
 
-    /// Return the [Type] for the specified index.
+    /// Return the [Ty] for the specified index.
     ///
     /// # Panics
     ///
     /// Panics if the index is out of bounds.
-    pub(crate) fn type_(&self, idx: TypeIdx) -> &Type {
+    pub(crate) fn type_(&self, idx: TyIdx) -> &Ty {
         &self.types[idx]
     }
 
@@ -200,9 +215,9 @@ impl Module {
     /// # Panics
     ///
     /// If `instr` would overflow the index type.
-    pub(crate) fn push(&mut self, instr: Instruction) {
-        assert!(InstrIdx::new(self.instrs.len()).is_ok());
-        self.instrs.push(instr);
+    pub(crate) fn push(&mut self, inst: Inst) {
+        assert!(InstIdx::new(self.insts.len()).is_ok());
+        self.insts.push(inst);
     }
 
     /// Push an instruction to the end of the [Module] and create a local variable [Operand] out of
@@ -221,25 +236,25 @@ impl Module {
     /// [Operand] or if `instr` would overflow the index type.
     pub(crate) fn push_and_make_operand(
         &mut self,
-        instr: Instruction,
+        inst: Inst,
     ) -> Result<Operand, CompilationError> {
-        assert!(InstrIdx::new(self.instrs.len()).is_ok());
-        if instr.def_type(self).is_none() {
+        assert!(InstIdx::new(self.insts.len()).is_ok());
+        if inst.def_type(self).is_none() {
             panic!(); // instruction doesn't define a local var.
         }
-        let ret = Operand::Local(InstrIdx::new(self.len())?);
-        self.instrs.push(instr);
+        let ret = Operand::Local(InstIdx::new(self.len())?);
+        self.insts.push(inst);
         Ok(ret)
     }
 
-    /// Returns the number of [Instruction]s in the [Module].
+    /// Returns the number of [Inst]s in the [Module].
     pub(crate) fn len(&self) -> usize {
-        self.instrs.len()
+        self.insts.len()
     }
 
     /// Returns a reference to the instruction stream.
-    pub(crate) fn instrs(&self) -> &Vec<Instruction> {
-        &self.instrs
+    pub(crate) fn insts(&self) -> &Vec<Inst> {
+        &self.insts
     }
 
     /// Push a slice of extra arguments into the extra arg table.
@@ -261,17 +276,17 @@ impl Module {
     /// # Panics
     ///
     /// If `ty` would overflow the index type.
-    fn push_type(&mut self, ty: Type) -> Result<TypeIdx, CompilationError> {
+    fn push_type(&mut self, ty: Ty) -> Result<TyIdx, CompilationError> {
         #[cfg(debug_assertions)]
         {
             for et in &self.types {
                 debug_assert_ne!(et, &ty, "type already exists");
             }
         }
-        assert!(TypeIdx::new(self.types.len()).is_ok());
+        assert!(TyIdx::new(self.types.len()).is_ok());
         let idx = self.types.len();
         self.types.push(ty);
-        TypeIdx::new(idx)
+        TyIdx::new(idx)
     }
 
     /// Push a new function declaration into the function declaration table and return its index.
@@ -334,7 +349,7 @@ impl Module {
     }
 
     /// Get the index of a type, inserting it into the type table if necessary.
-    pub(crate) fn type_idx(&mut self, t: &Type) -> Result<TypeIdx, CompilationError> {
+    pub(crate) fn ty_idx(&mut self, t: &Ty) -> Result<TyIdx, CompilationError> {
         // FIXME: can we optimise this?
         if let Some(idx) = self.types.position(|tt| tt == t) {
             Ok(idx)
@@ -387,9 +402,9 @@ impl Module {
     /// # Panics
     ///
     /// Panics if the index is out of bounds
-    pub(crate) fn func_type(&self, idx: FuncDeclIdx) -> &FuncType {
-        match self.type_(self.func_decl(idx).type_idx) {
-            Type::Func(ft) => ft,
+    pub(crate) fn func_type(&self, idx: FuncDeclIdx) -> &FuncTy {
+        match self.type_(self.func_decl(idx).ty_idx) {
+            Ty::Func(ft) => ft,
             _ => unreachable!(),
         }
     }
@@ -421,8 +436,8 @@ impl fmt::Display for Module {
             )?;
         }
         write!(f, "\nentry:")?;
-        for (i, instr) in self.instrs().iter().enumerate() {
-            write!(f, "\n    {}", instr.display(InstrIdx::from(i), self))?;
+        for (i, inst) in self.insts().iter().enumerate() {
+            write!(f, "\n    {}", inst.display(InstIdx::from(i), self))?;
         }
 
         Ok(())
@@ -437,11 +452,11 @@ impl fmt::Display for Module {
 ///   2. Signedness is not specified. Interpretation of the bit pattern is delegated to operations
 ///      upon the integer.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct IntegerType {
+pub(crate) struct IntegerTy {
     num_bits: u32,
 }
 
-impl IntegerType {
+impl IntegerTy {
     /// Create a new integer type with the specified number of bits.
     pub(crate) fn new(num_bits: u32) -> Self {
         debug_assert!(num_bits > 0 && num_bits <= 0x800000);
@@ -473,11 +488,11 @@ impl IntegerType {
         m: &mut Module,
         val: T,
     ) -> Result<Constant, CompilationError> {
-        let typ = Type::Integer(self.clone());
-        let type_idx = m.type_idx(&typ)?;
+        let typ = Ty::Integer(self.clone());
+        let ty_idx = m.ty_idx(&typ)?;
         let bytes = ToBytes::to_ne_bytes(&val).as_ref().to_vec();
         debug_assert_eq!(typ.byte_size().unwrap(), bytes.len());
-        Ok(Constant::new(type_idx, bytes))
+        Ok(Constant::new(ty_idx, bytes))
     }
 
     /// Format a constant integer value that is of the type described by `self`.
@@ -653,14 +668,14 @@ index_24bit!(FuncDeclIdx);
 ///
 /// One of these is an index into the [Module::types].
 ///
-/// A type index uniquely identifies a [Type] in a [Module]. You can rely on this uniquness
-/// property for type checking: you can compare type indices instead of the corresponding [Type]s.
+/// A type index uniquely identifies a [Ty] in a [Module]. You can rely on this uniquness
+/// property for type checking: you can compare type indices instead of the corresponding [Ty]s.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub(crate) struct TypeIdx(U24);
-index_24bit!(TypeIdx);
+pub(crate) struct TyIdx(U24);
+index_24bit!(TyIdx);
 
-impl TypeIdx {
-    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
+impl TyIdx {
+    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Ty {
         m.type_(*self)
     }
 }
@@ -705,31 +720,31 @@ impl GlobalDeclIdx {
 
 /// An instruction index.
 ///
-/// One of these is an index into the [Module::instrs].
+/// One of these is an index into the [Module::insts].
 #[derive(Debug, Copy, Clone, Eq, Hash, PartialEq, PartialOrd)]
-pub(crate) struct InstrIdx(u16);
-index_16bit!(InstrIdx);
+pub(crate) struct InstIdx(u16);
+index_16bit!(InstIdx);
 
-impl InstrIdx {
-    /// Return a reference to the instruction indentified by `self` in `jit_mod`.
-    pub(crate) fn instr<'a>(&'a self, jit_mod: &'a Module) -> &Instruction {
-        jit_mod.instr(*self)
+impl InstIdx {
+    /// Return a reference to the instruction indentified by `self` in `m`.
+    pub(crate) fn inst<'a>(&'a self, m: &'a Module) -> &Inst {
+        m.inst(*self)
     }
 }
 
 /// A function's type.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct FuncType {
-    /// Type indices for the function's formal arguments.
-    arg_ty_idxs: Vec<TypeIdx>,
-    /// Type index of the function's return type.
-    ret_ty_idx: TypeIdx,
+pub(crate) struct FuncTy {
+    /// Ty indices for the function's formal arguments.
+    arg_ty_idxs: Vec<TyIdx>,
+    /// Ty index of the function's return type.
+    ret_ty_idx: TyIdx,
     /// Is the function vararg?
     is_vararg: bool,
 }
 
-impl FuncType {
-    pub(crate) fn new(arg_ty_idxs: Vec<TypeIdx>, ret_ty_idx: TypeIdx, is_vararg: bool) -> Self {
+impl FuncTy {
+    pub(crate) fn new(arg_ty_idxs: Vec<TyIdx>, ret_ty_idx: TyIdx, is_vararg: bool) -> Self {
         Self {
             arg_ty_idxs,
             ret_ty_idx,
@@ -747,7 +762,7 @@ impl FuncType {
     /// # Panics
     ///
     /// Panics if the index is out of bounds.
-    pub(crate) fn arg_type<'a>(&self, m: &'a Module, idx: usize) -> &'a Type {
+    pub(crate) fn arg_type<'a>(&self, m: &'a Module, idx: usize) -> &'a Ty {
         self.arg_ty_idxs[idx].type_(m)
     }
 
@@ -757,37 +772,37 @@ impl FuncType {
     }
 
     /// Returns the type of the return value.
-    pub(crate) fn ret_type<'a>(&self, m: &'a Module) -> &'a Type {
+    pub(crate) fn ret_type<'a>(&self, m: &'a Module) -> &'a Ty {
         self.ret_ty_idx.type_(m)
     }
 
     /// Returns the type index of the return value.
-    pub(crate) fn ret_type_idx(&self) -> TypeIdx {
+    pub(crate) fn ret_ty_idx(&self) -> TyIdx {
         self.ret_ty_idx
     }
 }
 
 /// A structure's type.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct StructType {
+pub(crate) struct StructTy {
     /// The types of the fields.
-    field_ty_idxs: Vec<TypeIdx>,
+    field_ty_idxs: Vec<TyIdx>,
     /// The bit offsets of the fields (taking into account any required padding for alignment).
     field_bit_offs: Vec<usize>,
 }
 
 /// A type.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum Type {
+pub(crate) enum Ty {
     Void,
-    Integer(IntegerType),
+    Integer(IntegerTy),
     Ptr,
-    Func(FuncType),
-    Struct(StructType),
+    Func(FuncTy),
+    Struct(StructTy),
     Unimplemented(String),
 }
 
-impl fmt::Display for Type {
+impl fmt::Display for Ty {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Void => write!(f, "void"),
@@ -800,7 +815,7 @@ impl fmt::Display for Type {
     }
 }
 
-impl Type {
+impl Ty {
     /// Returns the size of the type in bits, or `None` if asking the size makes no sense.
     pub(crate) fn byte_size(&self) -> Option<usize> {
         // u16/u32 -> usize conversions could theoretically fail on some arches (which we probably
@@ -828,12 +843,12 @@ impl Type {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct FuncDecl {
     name: String,
-    type_idx: TypeIdx,
+    ty_idx: TyIdx,
 }
 
 impl FuncDecl {
-    pub(crate) fn new(name: String, type_idx: TypeIdx) -> Self {
-        Self { name, type_idx }
+    pub(crate) fn new(name: String, ty_idx: TyIdx) -> Self {
+        Self { name, ty_idx }
     }
 
     /// Return the name of this function declaration.
@@ -841,8 +856,8 @@ impl FuncDecl {
         &self.name
     }
 
-    pub(crate) fn type_idx(&self) -> TypeIdx {
-        self.type_idx
+    pub(crate) fn ty_idx(&self) -> TyIdx {
+        self.ty_idx
     }
 }
 
@@ -881,7 +896,7 @@ impl PackedOperand {
     /// Unpacks a [PackedOperand] into a [Operand].
     pub fn unpack(&self) -> Operand {
         if (self.0 & !OPERAND_IDX_MASK) == 0 {
-            Operand::Local(InstrIdx(self.0))
+            Operand::Local(InstIdx(self.0))
         } else {
             Operand::Const(ConstIdx(self.0 & OPERAND_IDX_MASK))
         }
@@ -894,7 +909,7 @@ impl PackedOperand {
 /// to add type safety when using operands.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Operand {
-    Local(InstrIdx),
+    Local(InstIdx),
     Const(ConstIdx),
 }
 
@@ -908,16 +923,16 @@ impl Operand {
     /// Panics if asking for the size make no sense for this operand.
     pub(crate) fn byte_size(&self, m: &Module) -> usize {
         match self {
-            Self::Local(l) => l.instr(m).def_byte_size(m),
-            Self::Const(cidx) => cidx.const_(m).type_idx().type_(m).byte_size().unwrap(),
+            Self::Local(l) => l.inst(m).def_byte_size(m),
+            Self::Const(cidx) => cidx.const_(m).ty_idx().type_(m).byte_size().unwrap(),
         }
     }
 
     /// Returns the type of the operand.
-    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
+    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Ty {
         match self {
             Self::Local(l) => {
-                match l.instr(m).def_type(m) {
+                match l.inst(m).def_type(m) {
                     Some(t) => t,
                     None => {
                         // When an operand is a local variable, the local can only come from an
@@ -927,14 +942,14 @@ impl Operand {
                     }
                 }
             }
-            Self::Const(cidx) => cidx.const_(m).type_idx().type_(m),
+            Self::Const(cidx) => cidx.const_(m).ty_idx().type_(m),
         }
     }
 
     /// Returns the type index of the operand.
-    pub(crate) fn type_idx(&self, m: &Module) -> TypeIdx {
+    pub(crate) fn ty_idx(&self, m: &Module) -> TyIdx {
         match self {
-            Self::Local(l) => l.instr(m).def_type_idx(m),
+            Self::Local(l) => l.inst(m).def_ty_idx(m),
             Self::Const(_) => todo!(),
         }
     }
@@ -965,18 +980,18 @@ impl fmt::Display for DisplayableOperand<'_> {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Constant {
     /// The type index of the constant value.
-    type_idx: TypeIdx,
+    ty_idx: TyIdx,
     /// The bytes of the constant value.
     bytes: Vec<u8>,
 }
 
 impl Constant {
-    pub(crate) fn new(type_idx: TypeIdx, bytes: Vec<u8>) -> Self {
-        Self { type_idx, bytes }
+    pub(crate) fn new(ty_idx: TyIdx, bytes: Vec<u8>) -> Self {
+        Self { ty_idx, bytes }
     }
 
-    pub(crate) fn type_idx(&self) -> TypeIdx {
-        self.type_idx
+    pub(crate) fn ty_idx(&self) -> TyIdx {
+        self.ty_idx
     }
 
     pub(crate) fn bytes(&self) -> &Vec<u8> {
@@ -995,8 +1010,8 @@ pub(crate) struct DisplayableConstant<'a> {
 
 impl fmt::Display for DisplayableConstant<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.m.type_(self.const_.type_idx()) {
-            Type::Integer(t) => write!(f, "{}", t.const_to_str(self.const_)),
+        match self.m.type_(self.const_.ty_idx()) {
+            Ty::Integer(t) => write!(f, "{}", t.const_to_str(self.const_)),
             x => todo!("{x:?}"),
         }
     }
@@ -1008,11 +1023,11 @@ pub(crate) struct GuardInfo {
     /// Stackmap IDs for the active call frames.
     frames: Vec<u64>,
     /// Indices of live JIT variables.
-    lives: Vec<InstrIdx>,
+    lives: Vec<InstIdx>,
 }
 
 impl GuardInfo {
-    pub(crate) fn new(frames: Vec<u64>, lives: Vec<InstrIdx>) -> Self {
+    pub(crate) fn new(frames: Vec<u64>, lives: Vec<InstIdx>) -> Self {
         Self { frames, lives }
     }
 
@@ -1020,7 +1035,7 @@ impl GuardInfo {
         &self.frames
     }
 
-    pub(crate) fn lives(&self) -> &Vec<InstrIdx> {
+    pub(crate) fn lives(&self) -> &Vec<InstIdx> {
         &self.lives
     }
 }
@@ -1028,16 +1043,16 @@ impl GuardInfo {
 /// An IR instruction.
 #[repr(u8)]
 #[derive(Debug)]
-pub enum Instruction {
-    Load(LoadInstruction),
-    LookupGlobal(LookupGlobalInstruction),
-    LoadTraceInput(LoadTraceInputInstruction),
-    Call(CallInstruction),
-    VACall(VACallInstruction),
-    PtrAdd(PtrAddInstruction),
-    Store(StoreInstruction),
-    Icmp(IcmpInstruction),
-    Guard(GuardInstruction),
+pub enum Inst {
+    Load(LoadInst),
+    LookupGlobal(LookupGlobalInst),
+    LoadTraceInput(LoadTraceInputInst),
+    Call(CallInst),
+    VACall(VACallInst),
+    PtrAdd(PtrAddInst),
+    Store(StoreInst),
+    Icmp(IcmpInst),
+    Guard(GuardInst),
     /// Describes an argument into the trace function. Its main use is to allow us to track trace
     /// function arguments in case we need to deoptimise them. At this moment the only trace
     /// function argument requiring tracking is the trace inputs.
@@ -1046,34 +1061,34 @@ pub enum Instruction {
     TraceLoopStart,
 
     // Binary operations
-    Add(AddInstruction),
-    Sub(SubInstruction),
-    Mul(MulInstruction),
-    Or(OrInstruction),
-    And(AndInstruction),
-    Xor(XorInstruction),
-    Shl(ShlInstruction),
-    AShr(AShrInstruction),
-    FAdd(FAddInstruction),
-    FDiv(FDivInstruction),
-    FMul(FMulInstruction),
-    FRem(FRemInstruction),
-    FSub(FSubInstruction),
-    LShr(LShrInstruction),
-    SDiv(SDivInstruction),
-    SRem(SRemInstruction),
-    UDiv(UDivInstruction),
-    URem(URemInstruction),
+    Add(AddInst),
+    Sub(SubInst),
+    Mul(MulInst),
+    Or(OrInst),
+    And(AndInst),
+    Xor(XorInst),
+    Shl(ShlInst),
+    AShr(AShrInst),
+    FAdd(FAddInst),
+    FDiv(FDivInst),
+    FMul(FMulInst),
+    FRem(FRemInst),
+    FSub(FSubInst),
+    LShr(LShrInst),
+    SDiv(SDivInst),
+    SRem(SRemInst),
+    UDiv(UDivInst),
+    URem(URemInst),
 
     // Cast-like instructions
-    SignExtend(SignExtendInstruction),
+    SignExtend(SignExtendInst),
 }
 
-impl Instruction {
+impl Inst {
     /// Returns the type of the local variable that the instruction defines (if any).
-    pub(crate) fn def_type<'a>(&self, m: &'a Module) -> Option<&'a Type> {
-        let idx = self.def_type_idx(m);
-        if idx != m.void_type_idx() {
+    pub(crate) fn def_type<'a>(&self, m: &'a Module) -> Option<&'a Ty> {
+        let idx = self.def_ty_idx(m);
+        if idx != m.void_ty_idx() {
             Some(m.type_(idx))
         } else {
             None
@@ -1082,23 +1097,23 @@ impl Instruction {
 
     /// Returns the type index of the local variable defined by the instruction.
     ///
-    /// If the instruction doesn't define a type then the type index for [Type::Void] is returned.
-    pub(crate) fn def_type_idx(&self, m: &Module) -> TypeIdx {
+    /// If the instruction doesn't define a type then the type index for [Ty::Void] is returned.
+    pub(crate) fn def_ty_idx(&self, m: &Module) -> TyIdx {
         match self {
-            Self::Load(li) => li.type_idx(),
-            Self::LookupGlobal(..) => m.ptr_type_idx(),
+            Self::Load(li) => li.ty_idx(),
+            Self::LookupGlobal(..) => m.ptr_ty_idx(),
             Self::LoadTraceInput(li) => li.ty_idx(),
-            Self::Call(ci) => m.func_type(ci.target()).ret_type_idx(),
-            Self::VACall(ci) => m.func_type(ci.target()).ret_type_idx(),
-            Self::PtrAdd(..) => m.ptr_type_idx(),
-            Self::Store(..) => m.void_type_idx(),
-            Self::Icmp(_) => m.int8_type_idx(), // always returns a 0/1 valued byte.
-            Self::Guard(..) => m.void_type_idx(),
-            Self::Arg(..) => m.ptr_type_idx(),
-            Self::TraceLoopStart => m.void_type_idx(),
-            Self::SignExtend(si) => si.dest_type_idx,
+            Self::Call(ci) => m.func_type(ci.target()).ret_ty_idx(),
+            Self::VACall(ci) => m.func_type(ci.target()).ret_ty_idx(),
+            Self::PtrAdd(..) => m.ptr_ty_idx(),
+            Self::Store(..) => m.void_ty_idx(),
+            Self::Icmp(_) => m.int8_ty_idx(), // always returns a 0/1 valued byte.
+            Self::Guard(..) => m.void_ty_idx(),
+            Self::Arg(..) => m.ptr_ty_idx(),
+            Self::TraceLoopStart => m.void_ty_idx(),
+            Self::SignExtend(si) => si.dest_ty_idx(),
             // Binary operations
-            Self::Add(i) => i.type_idx(m),
+            Self::Add(i) => i.ty_idx(m),
             x => todo!("{x:?}"),
         }
     }
@@ -1122,33 +1137,29 @@ impl Instruction {
         }
     }
 
-    pub(crate) fn display<'a>(
-        &'a self,
-        instr_idx: InstrIdx,
-        m: &'a Module,
-    ) -> DisplayableInstruction<'a> {
-        DisplayableInstruction {
-            instr: self,
-            instr_idx,
+    pub(crate) fn display<'a>(&'a self, inst_idx: InstIdx, m: &'a Module) -> DisplayableInst<'a> {
+        DisplayableInst {
+            inst: self,
+            inst_idx,
             m,
         }
     }
 }
 
-pub(crate) struct DisplayableInstruction<'a> {
-    instr: &'a Instruction,
-    instr_idx: InstrIdx,
+pub(crate) struct DisplayableInst<'a> {
+    inst: &'a Inst,
+    inst_idx: InstIdx,
     m: &'a Module,
 }
 
-impl fmt::Display for DisplayableInstruction<'_> {
+impl fmt::Display for DisplayableInst<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(dt) = self.instr.def_type(self.m) {
-            write!(f, "%{}: {dt} = ", self.instr_idx.to_u16())?;
+        if let Some(dt) = self.inst.def_type(self.m) {
+            write!(f, "%{}: {dt} = ", self.inst_idx.to_u16())?;
         }
-        match self.instr {
-            Instruction::Load(x) => write!(f, "Load {}", x.operand().display(self.m)),
-            Instruction::LookupGlobal(x) => write!(
+        match self.inst {
+            Inst::Load(x) => write!(f, "Load {}", x.operand().display(self.m)),
+            Inst::LookupGlobal(x) => write!(
                 f,
                 "LookupGlobal {}",
                 self.m
@@ -1157,7 +1168,7 @@ impl fmt::Display for DisplayableInstruction<'_> {
                     .to_str()
                     .unwrap_or("<not valid UTF-8>")
             ),
-            Instruction::Call(x) => {
+            Inst::Call(x) => {
                 write!(
                     f,
                     "Call @{}({})",
@@ -1168,7 +1179,7 @@ impl fmt::Display for DisplayableInstruction<'_> {
                         .join(", ")
                 )
             }
-            Instruction::VACall(x) => write!(
+            Inst::VACall(x) => write!(
                 f,
                 "VACall @{}({})",
                 self.m.func_decl(x.target()).name(),
@@ -1177,29 +1188,29 @@ impl fmt::Display for DisplayableInstruction<'_> {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            Instruction::PtrAdd(x) => {
+            Inst::PtrAdd(x) => {
                 write!(f, "PtrAdd {}, {}", x.ptr().display(self.m), x.offset())
             }
-            Instruction::Store(x) => write!(
+            Inst::Store(x) => write!(
                 f,
                 "Store {}, {}",
                 x.val.unpack().display(self.m),
                 x.ptr.unpack().display(self.m)
             ),
-            Instruction::Icmp(x) => write!(
+            Inst::Icmp(x) => write!(
                 f,
                 "Icmp {}, {:?}, {}",
                 x.left().display(self.m),
                 x.pred,
                 x.right().display(self.m)
             ),
-            Instruction::Guard(x) => write!(
+            Inst::Guard(x) => write!(
                 f,
                 "Guard {}, {}",
                 x.cond().display(self.m),
                 if x.expect { "true" } else { "false " }
             ),
-            Instruction::LoadTraceInput(x) => {
+            Inst::LoadTraceInput(x) => {
                 write!(
                     f,
                     "LoadTraceInput {}, {}",
@@ -1207,9 +1218,9 @@ impl fmt::Display for DisplayableInstruction<'_> {
                     self.m.type_(x.ty_idx())
                 )
             }
-            Instruction::TraceLoopStart => write!(f, "TraceLoopStart"),
-            Instruction::Arg(i) => write!(f, "Arg({i})"),
-            Instruction::Add(x) => {
+            Inst::TraceLoopStart => write!(f, "TraceLoopStart"),
+            Inst::Arg(i) => write!(f, "Arg({i})"),
+            Inst::Add(x) => {
                 write!(
                     f,
                     "Add {}, {}",
@@ -1217,12 +1228,12 @@ impl fmt::Display for DisplayableInstruction<'_> {
                     x.rhs().display(self.m)
                 )
             }
-            Instruction::SignExtend(i) => {
+            Inst::SignExtend(i) => {
                 write!(
                     f,
                     "SignExtend {}, {}",
                     i.val().display(self.m),
-                    self.m.type_(i.dest_type_idx())
+                    self.m.type_(i.dest_ty_idx())
                 )
             }
             x => todo!("{x:?}"),
@@ -1230,45 +1241,45 @@ impl fmt::Display for DisplayableInstruction<'_> {
     }
 }
 
-macro_rules! instr {
-    ($discrim:ident, $instr_type:ident) => {
-        impl From<$instr_type> for Instruction {
-            fn from(instr: $instr_type) -> Instruction {
-                Instruction::$discrim(instr)
+macro_rules! inst {
+    ($discrim:ident, $inst_type:ident) => {
+        impl From<$inst_type> for Inst {
+            fn from(inst: $inst_type) -> Inst {
+                Inst::$discrim(inst)
             }
         }
     };
 }
 
-instr!(Load, LoadInstruction);
-instr!(LookupGlobal, LookupGlobalInstruction);
-instr!(Store, StoreInstruction);
-instr!(LoadTraceInput, LoadTraceInputInstruction);
-instr!(Call, CallInstruction);
-instr!(VACall, VACallInstruction);
-instr!(PtrAdd, PtrAddInstruction);
-instr!(Icmp, IcmpInstruction);
-instr!(Guard, GuardInstruction);
-instr!(SignExtend, SignExtendInstruction);
+inst!(Load, LoadInst);
+inst!(LookupGlobal, LookupGlobalInst);
+inst!(Store, StoreInst);
+inst!(LoadTraceInput, LoadTraceInputInst);
+inst!(Call, CallInst);
+inst!(VACall, VACallInst);
+inst!(PtrAdd, PtrAddInst);
+inst!(Icmp, IcmpInst);
+inst!(Guard, GuardInst);
+inst!(SignExtend, SignExtendInst);
 
-/// The operands for a [Instruction::Load]
+/// The operands for a [Inst::Load]
 ///
 /// # Semantics
 ///
 /// Loads a value from a given pointer operand.
 ///
 #[derive(Debug)]
-pub struct LoadInstruction {
+pub struct LoadInst {
     /// The pointer to load from.
     op: PackedOperand,
     /// The type of the pointee.
-    ty_idx: TypeIdx,
+    ty_idx: TyIdx,
 }
 
-impl LoadInstruction {
+impl LoadInst {
     // FIXME: why do we need to provide a type index? Can't we get that from the operand?
-    pub(crate) fn new(op: Operand, ty_idx: TypeIdx) -> LoadInstruction {
-        LoadInstruction {
+    pub(crate) fn new(op: Operand, ty_idx: TyIdx) -> LoadInst {
+        LoadInst {
             op: PackedOperand::new(&op),
             ty_idx,
         }
@@ -1280,12 +1291,12 @@ impl LoadInstruction {
     }
 
     /// Returns the type of the value to be loaded.
-    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
+    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Ty {
         m.type_(self.ty_idx)
     }
 
     /// Returns the type index of the loaded value.
-    pub(crate) fn type_idx(&self) -> TypeIdx {
+    pub(crate) fn ty_idx(&self) -> TyIdx {
         self.ty_idx
     }
 }
@@ -1301,19 +1312,19 @@ impl LoadInstruction {
 /// we kill this instruction kind entirely?
 #[derive(Debug)]
 #[repr(packed)]
-pub struct LoadTraceInputInstruction {
+pub struct LoadTraceInputInst {
     /// The byte offset to load from in the trace input struct.
     off: u32,
     /// The type of the resulting local variable.
-    ty_idx: TypeIdx,
+    ty_idx: TyIdx,
 }
 
-impl LoadTraceInputInstruction {
-    pub(crate) fn new(off: u32, ty_idx: TypeIdx) -> LoadTraceInputInstruction {
+impl LoadTraceInputInst {
+    pub(crate) fn new(off: u32, ty_idx: TyIdx) -> LoadTraceInputInst {
         Self { off, ty_idx }
     }
 
-    pub(crate) fn ty_idx(&self) -> TypeIdx {
+    pub(crate) fn ty_idx(&self) -> TyIdx {
         self.ty_idx
     }
 
@@ -1322,7 +1333,7 @@ impl LoadTraceInputInstruction {
     }
 }
 
-/// The operands for a [Instruction::LoadGlobal]
+/// The operands for a [Inst::LoadGlobal]
 ///
 /// # Semantics
 ///
@@ -1344,12 +1355,12 @@ impl LoadTraceInputInstruction {
 /// The easiest way to do this is to make globals a subclass of constants, similarly to what LLVM
 /// does.
 #[derive(Debug)]
-pub struct LookupGlobalInstruction {
+pub struct LookupGlobalInst {
     /// The pointer to load from.
     global_decl_idx: GlobalDeclIdx,
 }
 
-impl LookupGlobalInstruction {
+impl LookupGlobalInst {
     pub(crate) fn new(global_decl_idx: GlobalDeclIdx) -> Result<Self, CompilationError> {
         Ok(Self { global_decl_idx })
     }
@@ -1364,14 +1375,14 @@ impl LookupGlobalInstruction {
     }
 }
 
-/// The operands for a [Instruction::Call]
+/// The operands for a [Inst::Call]
 ///
 /// # Semantics
 ///
 /// Perform a call to an external or AOT function.
 #[derive(Debug)]
 #[repr(packed)]
-pub struct CallInstruction {
+pub struct CallInst {
     /// The callee.
     target: FuncDeclIdx,
     /// The first argument to the call, if present. Undefined if not present.
@@ -1380,12 +1391,12 @@ pub struct CallInstruction {
     extra: ExtraArgsIdx,
 }
 
-impl CallInstruction {
+impl CallInst {
     pub(crate) fn new(
         m: &mut Module,
         target: FuncDeclIdx,
         args: &[Operand],
-    ) -> Result<CallInstruction, CompilationError> {
+    ) -> Result<CallInst, CompilationError> {
         let mut arg1 = PackedOperand::default();
         let mut extra = ExtraArgsIdx::default();
 
@@ -1417,14 +1428,14 @@ impl CallInstruction {
     /// # Panics
     ///
     /// Panics if the operand index is out of bounds.
-    pub(crate) fn operand(&self, jit_mod: &Module, idx: usize) -> Operand {
+    pub(crate) fn operand(&self, m: &Module, idx: usize) -> Operand {
         #[cfg(debug_assertions)]
         {
-            let ft = jit_mod.func_type(self.target);
+            let ft = m.func_type(self.target);
             debug_assert!(ft.num_args() > idx);
         }
         if idx == 0 {
-            if jit_mod.func_type(self.target()).num_args() > 0 {
+            if m.func_type(self.target()).num_args() > 0 {
                 self.arg1().unpack()
             } else {
                 // Avoid returning an undefined operand. Storage always exists for one argument,
@@ -1432,19 +1443,19 @@ impl CallInstruction {
                 panic!();
             }
         } else {
-            jit_mod.extra_args[<usize as From<u16>>::from(self.extra.0) + idx - 1].clone()
+            m.extra_args[<usize as From<u16>>::from(self.extra.0) + idx - 1].clone()
         }
     }
 }
 
-/// The operands for a [Instruction::VACall]
+/// The operands for a [Inst::VACall]
 ///
 /// # Semantics
 ///
 /// Perform a vararg call to an external or AOT function.
 #[derive(Debug)]
 #[repr(packed)]
-pub struct VACallInstruction {
+pub struct VACallInst {
     /// The callee.
     target: FuncDeclIdx,
     /// The number of arguments to pass.
@@ -1453,12 +1464,12 @@ pub struct VACallInstruction {
     first_arg_idx: ExtraArgsIdx,
 }
 
-impl VACallInstruction {
+impl VACallInst {
     pub(crate) fn new(
         m: &mut Module,
         target: FuncDeclIdx,
         args: &[Operand],
-    ) -> Result<VACallInstruction, CompilationError> {
+    ) -> Result<VACallInst, CompilationError> {
         let num_args = args.len();
 
         // Varargs calls require at least one static argument.
@@ -1486,27 +1497,27 @@ impl VACallInstruction {
     /// # Panics
     ///
     /// Panics if the operand index is out of bounds.
-    pub(crate) fn operand(&self, jit_mod: &Module, idx: u16) -> Operand {
+    pub(crate) fn operand(&self, m: &Module, idx: u16) -> Operand {
         debug_assert!(self.num_args() > idx);
-        jit_mod.extra_args[<usize as From<u16>>::from(self.first_arg_idx.0 + idx)].clone()
+        m.extra_args[<usize as From<u16>>::from(self.first_arg_idx.0 + idx)].clone()
     }
 }
 
-/// The operands for a [Instruction::Store]
+/// The operands for a [Inst::Store]
 ///
 /// # Semantics
 ///
 /// Stores a value into a pointer.
 ///
 #[derive(Debug)]
-pub struct StoreInstruction {
+pub struct StoreInst {
     /// The value to store.
     val: PackedOperand,
     /// The pointer to store into.
     ptr: PackedOperand,
 }
 
-impl StoreInstruction {
+impl StoreInst {
     pub(crate) fn new(val: Operand, ptr: Operand) -> Self {
         // FIXME: assert type of pointer
         Self {
@@ -1534,14 +1545,14 @@ impl StoreInstruction {
 /// pointer operand.
 #[derive(Debug)]
 #[repr(packed)]
-pub struct PtrAddInstruction {
+pub struct PtrAddInst {
     /// The pointer to offset
     ptr: PackedOperand,
     /// The offset.
     off: u32,
 }
 
-impl PtrAddInstruction {
+impl PtrAddInst {
     pub(crate) fn ptr(&self) -> Operand {
         let ptr = self.ptr;
         ptr.unpack()
@@ -1585,44 +1596,44 @@ macro_rules! bin_op {
                 self.rhs.unpack()
             }
 
-            pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
+            pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Ty {
                 self.lhs.unpack().type_(m)
             }
 
             /// Returns the type index of the operands being added.
-            pub(crate) fn type_idx(&self, m: &Module) -> TypeIdx {
-                self.lhs.unpack().type_idx(m)
+            pub(crate) fn ty_idx(&self, m: &Module) -> TyIdx {
+                self.lhs.unpack().ty_idx(m)
             }
         }
 
-        impl From<$struct> for Instruction {
-            fn from(instr: $struct) -> Instruction {
-                Instruction::$discrim(instr)
+        impl From<$struct> for Inst {
+            fn from(inst: $struct) -> Inst {
+                Inst::$discrim(inst)
             }
         }
     };
 }
 
-bin_op!(Add, AddInstruction, "Add");
-bin_op!(Sub, SubInstruction, "Sub");
-bin_op!(Mul, MulInstruction, "Mul");
-bin_op!(Or, OrInstruction, "Or");
-bin_op!(And, AndInstruction, "And");
-bin_op!(Xor, XorInstruction, "Xor");
-bin_op!(Shl, ShlInstruction, "Shl");
-bin_op!(AShr, AShrInstruction, "AShr");
-bin_op!(FAdd, FAddInstruction, "FAdd");
-bin_op!(FDiv, FDivInstruction, "FDiv");
-bin_op!(FMul, FMulInstruction, "FMul");
-bin_op!(FRem, FRemInstruction, "FRem");
-bin_op!(FSub, FSubInstruction, "FSub");
-bin_op!(LShr, LShrInstruction, "LShr");
-bin_op!(SDiv, SDivInstruction, "SDiv");
-bin_op!(SRem, SRemInstruction, "SRem");
-bin_op!(UDiv, UDivInstruction, "UDiv");
-bin_op!(URem, URemInstruction, "URem");
+bin_op!(Add, AddInst, "Add");
+bin_op!(Sub, SubInst, "Sub");
+bin_op!(Mul, MulInst, "Mul");
+bin_op!(Or, OrInst, "Or");
+bin_op!(And, AndInst, "And");
+bin_op!(Xor, XorInst, "Xor");
+bin_op!(Shl, ShlInst, "Shl");
+bin_op!(AShr, AShrInst, "AShr");
+bin_op!(FAdd, FAddInst, "FAdd");
+bin_op!(FDiv, FDivInst, "FDiv");
+bin_op!(FMul, FMulInst, "FMul");
+bin_op!(FRem, FRemInst, "FRem");
+bin_op!(FSub, FSubInst, "FSub");
+bin_op!(LShr, LShrInst, "LShr");
+bin_op!(SDiv, SDivInst, "SDiv");
+bin_op!(SRem, SRemInst, "SRem");
+bin_op!(UDiv, UDivInst, "UDiv");
+bin_op!(URem, URemInst, "URem");
 
-/// The operand for a [Instruction::Icmp]
+/// The operand for a [Inst::Icmp]
 ///
 /// # Semantics
 ///
@@ -1630,13 +1641,13 @@ bin_op!(URem, URemInstruction, "URem");
 /// variable that dictates the truth of the comparison.
 ///
 #[derive(Debug)]
-pub struct IcmpInstruction {
+pub struct IcmpInst {
     left: PackedOperand,
     pred: Predicate,
     right: PackedOperand,
 }
 
-impl IcmpInstruction {
+impl IcmpInst {
     pub(crate) fn new(op1: Operand, pred: Predicate, op2: Operand) -> Self {
         Self {
             left: PackedOperand::new(&op1),
@@ -1667,7 +1678,7 @@ impl IcmpInstruction {
     }
 }
 
-/// The operand for a [Instruction::Guard]
+/// The operand for a [Inst::Guard]
 ///
 /// # Semantics
 ///
@@ -1676,7 +1687,7 @@ impl IcmpInstruction {
 /// then execution may not continue, and deoptimisation must occur.
 ///
 #[derive(Debug)]
-pub struct GuardInstruction {
+pub struct GuardInst {
     /// The condition to guard against.
     cond: PackedOperand,
     /// The expected outcome of the condition.
@@ -1685,9 +1696,9 @@ pub struct GuardInstruction {
     gidx: GuardInfoIdx,
 }
 
-impl GuardInstruction {
+impl GuardInst {
     pub(crate) fn new(cond: Operand, expect: bool, gidx: GuardInfoIdx) -> Self {
-        GuardInstruction {
+        GuardInst {
             cond: PackedOperand::new(&cond),
             expect,
             gidx,
@@ -1708,18 +1719,18 @@ impl GuardInstruction {
 }
 
 #[derive(Debug)]
-pub struct SignExtendInstruction {
+pub struct SignExtendInst {
     /// The value to extend.
     val: PackedOperand,
     /// The type to extend to.
-    dest_type_idx: TypeIdx,
+    dest_ty_idx: TyIdx,
 }
 
-impl SignExtendInstruction {
-    pub(crate) fn new(val: &Operand, dest_type_idx: TypeIdx) -> Self {
+impl SignExtendInst {
+    pub(crate) fn new(val: &Operand, dest_ty_idx: TyIdx) -> Self {
         Self {
             val: PackedOperand::new(val),
-            dest_type_idx,
+            dest_ty_idx,
         }
     }
 
@@ -1727,8 +1738,8 @@ impl SignExtendInstruction {
         self.val.unpack()
     }
 
-    pub(crate) fn dest_type_idx(&self) -> TypeIdx {
-        self.dest_type_idx
+    pub(crate) fn dest_ty_idx(&self) -> TyIdx {
+        self.dest_ty_idx
     }
 }
 
@@ -1738,14 +1749,14 @@ mod tests {
 
     #[test]
     fn operand() {
-        let op = PackedOperand::new(&Operand::Local(InstrIdx(192)));
-        assert_eq!(op.unpack(), Operand::Local(InstrIdx(192)));
+        let op = PackedOperand::new(&Operand::Local(InstIdx(192)));
+        assert_eq!(op.unpack(), Operand::Local(InstIdx(192)));
 
-        let op = PackedOperand::new(&Operand::Local(InstrIdx(0x7fff)));
-        assert_eq!(op.unpack(), Operand::Local(InstrIdx(0x7fff)));
+        let op = PackedOperand::new(&Operand::Local(InstIdx(0x7fff)));
+        assert_eq!(op.unpack(), Operand::Local(InstIdx(0x7fff)));
 
-        let op = PackedOperand::new(&Operand::Local(InstrIdx(0)));
-        assert_eq!(op.unpack(), Operand::Local(InstrIdx(0)));
+        let op = PackedOperand::new(&Operand::Local(InstIdx(0)));
+        assert_eq!(op.unpack(), Operand::Local(InstIdx(0)));
 
         let op = PackedOperand::new(&Operand::Const(ConstIdx(192)));
         assert_eq!(op.unpack(), Operand::Const(ConstIdx(192)));
@@ -1758,94 +1769,90 @@ mod tests {
     }
 
     #[test]
-    fn use_case_update_instr() {
-        let mut prog: Vec<Instruction> = vec![
-            LoadTraceInputInstruction::new(0, TypeIdx::new(0).unwrap()).into(),
-            LoadTraceInputInstruction::new(8, TypeIdx::new(0).unwrap()).into(),
-            LoadInstruction::new(
-                Operand::Local(InstrIdx(0)),
-                TypeIdx(U24::from_usize(0).unwrap()),
+    fn use_case_update_inst() {
+        let mut prog: Vec<Inst> = vec![
+            LoadTraceInputInst::new(0, TyIdx::new(0).unwrap()).into(),
+            LoadTraceInputInst::new(8, TyIdx::new(0).unwrap()).into(),
+            LoadInst::new(
+                Operand::Local(InstIdx(0)),
+                TyIdx(U24::from_usize(0).unwrap()),
             )
             .into(),
         ];
-        prog[2] = LoadInstruction::new(
-            Operand::Local(InstrIdx(1)),
-            TypeIdx(U24::from_usize(0).unwrap()),
+        prog[2] = LoadInst::new(
+            Operand::Local(InstIdx(1)),
+            TyIdx(U24::from_usize(0).unwrap()),
         )
         .into();
     }
 
     /// Ensure that any given instruction fits in 64-bits.
     #[test]
-    fn instr_size() {
-        assert_eq!(mem::size_of::<CallInstruction>(), 7);
-        assert_eq!(mem::size_of::<StoreInstruction>(), 4);
-        assert_eq!(mem::size_of::<LoadInstruction>(), 6);
-        assert_eq!(mem::size_of::<LookupGlobalInstruction>(), 3);
-        assert_eq!(mem::size_of::<PtrAddInstruction>(), 6);
-        assert!(mem::size_of::<Instruction>() <= mem::size_of::<u64>());
+    fn inst_size() {
+        assert_eq!(mem::size_of::<CallInst>(), 7);
+        assert_eq!(mem::size_of::<StoreInst>(), 4);
+        assert_eq!(mem::size_of::<LoadInst>(), 6);
+        assert_eq!(mem::size_of::<LookupGlobalInst>(), 3);
+        assert_eq!(mem::size_of::<PtrAddInst>(), 6);
+        assert!(mem::size_of::<Inst>() <= mem::size_of::<u64>());
     }
 
     #[test]
     fn extra_call_args() {
         // Set up a function to call.
-        let mut jit_mod = Module::new_testing();
-        let i32_tyidx = jit_mod
-            .push_type(Type::Integer(IntegerType::new(32)))
-            .unwrap();
-        let func_ty = Type::Func(FuncType::new(vec![i32_tyidx; 3], i32_tyidx, false));
-        let func_ty_idx = jit_mod.push_type(func_ty).unwrap();
+        let mut m = Module::new_testing();
+        let i32_tyidx = m.push_type(Ty::Integer(IntegerTy::new(32))).unwrap();
+        let func_ty = Ty::Func(FuncTy::new(vec![i32_tyidx; 3], i32_tyidx, false));
+        let func_ty_idx = m.push_type(func_ty).unwrap();
         let func_decl = FuncDecl::new("foo".to_owned(), func_ty_idx);
-        let func_decl_idx = jit_mod.push_func_decl(func_decl).unwrap();
+        let func_decl_idx = m.push_func_decl(func_decl).unwrap();
 
         // Build a call to the function.
         let args = vec![
-            Operand::Local(InstrIdx(0)), // inline arg
-            Operand::Local(InstrIdx(1)), // first extra arg
-            Operand::Local(InstrIdx(2)),
+            Operand::Local(InstIdx(0)), // inline arg
+            Operand::Local(InstIdx(1)), // first extra arg
+            Operand::Local(InstIdx(2)),
         ];
-        let ci = CallInstruction::new(&mut jit_mod, func_decl_idx, &args).unwrap();
+        let ci = CallInst::new(&mut m, func_decl_idx, &args).unwrap();
 
         // Now request the operands and check they all look as they should.
-        assert_eq!(ci.operand(&jit_mod, 0), Operand::Local(InstrIdx(0)));
-        assert_eq!(ci.operand(&jit_mod, 1), Operand::Local(InstrIdx(1)));
-        assert_eq!(ci.operand(&jit_mod, 2), Operand::Local(InstrIdx(2)));
+        assert_eq!(ci.operand(&m, 0), Operand::Local(InstIdx(0)));
+        assert_eq!(ci.operand(&m, 1), Operand::Local(InstIdx(1)));
+        assert_eq!(ci.operand(&m, 2), Operand::Local(InstIdx(2)));
         assert_eq!(
-            jit_mod.extra_args,
-            vec![Operand::Local(InstrIdx(1)), Operand::Local(InstrIdx(2))]
+            m.extra_args,
+            vec![Operand::Local(InstIdx(1)), Operand::Local(InstIdx(2))]
         );
     }
 
     #[test]
     fn vararg_call_args() {
         // Set up a function to call.
-        let mut jit_mod = Module::new_testing();
-        let i32_tyidx = jit_mod
-            .push_type(Type::Integer(IntegerType::new(32)))
-            .unwrap();
-        let func_ty = Type::Func(FuncType::new(vec![i32_tyidx; 3], i32_tyidx, true));
-        let func_ty_idx = jit_mod.push_type(func_ty).unwrap();
+        let mut m = Module::new_testing();
+        let i32_tyidx = m.push_type(Ty::Integer(IntegerTy::new(32))).unwrap();
+        let func_ty = Ty::Func(FuncTy::new(vec![i32_tyidx; 3], i32_tyidx, true));
+        let func_ty_idx = m.push_type(func_ty).unwrap();
         let func_decl = FuncDecl::new("foo".to_owned(), func_ty_idx);
-        let func_decl_idx = jit_mod.push_func_decl(func_decl).unwrap();
+        let func_decl_idx = m.push_func_decl(func_decl).unwrap();
 
         // Build a call to the function.
         let args = vec![
-            Operand::Local(InstrIdx(0)),
-            Operand::Local(InstrIdx(1)),
-            Operand::Local(InstrIdx(2)),
+            Operand::Local(InstIdx(0)),
+            Operand::Local(InstIdx(1)),
+            Operand::Local(InstIdx(2)),
         ];
-        let ci = VACallInstruction::new(&mut jit_mod, func_decl_idx, &args).unwrap();
+        let ci = VACallInst::new(&mut m, func_decl_idx, &args).unwrap();
 
         // Now request the operands and check they all look as they should.
-        assert_eq!(ci.operand(&jit_mod, 0), Operand::Local(InstrIdx(0)));
-        assert_eq!(ci.operand(&jit_mod, 1), Operand::Local(InstrIdx(1)));
-        assert_eq!(ci.operand(&jit_mod, 2), Operand::Local(InstrIdx(2)));
+        assert_eq!(ci.operand(&m, 0), Operand::Local(InstIdx(0)));
+        assert_eq!(ci.operand(&m, 1), Operand::Local(InstIdx(1)));
+        assert_eq!(ci.operand(&m, 2), Operand::Local(InstIdx(2)));
         assert_eq!(
-            jit_mod.extra_args,
+            m.extra_args,
             vec![
-                Operand::Local(InstrIdx(0)),
-                Operand::Local(InstrIdx(1)),
-                Operand::Local(InstrIdx(2))
+                Operand::Local(InstIdx(0)),
+                Operand::Local(InstIdx(1)),
+                Operand::Local(InstIdx(2))
             ]
         );
     }
@@ -1854,25 +1861,25 @@ mod tests {
     #[should_panic]
     fn call_args_out_of_bounds() {
         // Set up a function to call.
-        let mut jit_mod = Module::new_testing();
-        let arg_ty_idxs = vec![jit_mod.ptr_type_idx(); 3];
-        let ret_ty_idx = jit_mod.type_idx(&Type::Void).unwrap();
-        let func_ty = FuncType::new(arg_ty_idxs, ret_ty_idx, false);
-        let func_ty_idx = jit_mod.type_idx(&Type::Func(func_ty)).unwrap();
-        let func_decl_idx = jit_mod
+        let mut m = Module::new_testing();
+        let arg_ty_idxs = vec![m.ptr_ty_idx(); 3];
+        let ret_ty_idx = m.ty_idx(&Ty::Void).unwrap();
+        let func_ty = FuncTy::new(arg_ty_idxs, ret_ty_idx, false);
+        let func_ty_idx = m.ty_idx(&Ty::Func(func_ty)).unwrap();
+        let func_decl_idx = m
             .func_decl_idx(&FuncDecl::new("blah".into(), func_ty_idx))
             .unwrap();
 
         // Now build a call to the function.
         let args = vec![
-            Operand::Local(InstrIdx(0)), // inline arg
-            Operand::Local(InstrIdx(1)), // first extra arg
-            Operand::Local(InstrIdx(2)),
+            Operand::Local(InstIdx(0)), // inline arg
+            Operand::Local(InstIdx(1)), // first extra arg
+            Operand::Local(InstIdx(2)),
         ];
-        let ci = CallInstruction::new(&mut jit_mod, func_decl_idx, &args).unwrap();
+        let ci = CallInst::new(&mut m, func_decl_idx, &args).unwrap();
 
         // Request an operand with an out-of-bounds index.
-        ci.operand(&jit_mod, 3);
+        ci.operand(&m, 3);
     }
 
     #[test]
@@ -1901,19 +1908,19 @@ mod tests {
 
     #[test]
     fn index24_fits() {
-        assert!(TypeIdx::new(0).is_ok());
-        assert!(TypeIdx::new(1).is_ok());
-        assert!(TypeIdx::new(0x1234).is_ok());
-        assert!(TypeIdx::new(0x123456).is_ok());
-        assert!(TypeIdx::new(0xffffff).is_ok());
+        assert!(TyIdx::new(0).is_ok());
+        assert!(TyIdx::new(1).is_ok());
+        assert!(TyIdx::new(0x1234).is_ok());
+        assert!(TyIdx::new(0x123456).is_ok());
+        assert!(TyIdx::new(0xffffff).is_ok());
     }
 
     #[test]
     fn index24_doesnt_fit() {
-        assert!(TypeIdx::new(0x1000000).is_err());
-        assert!(TypeIdx::new(0x1234567).is_err());
-        assert!(TypeIdx::new(0xeddedde).is_err());
-        assert!(TypeIdx::new(usize::MAX).is_err());
+        assert!(TyIdx::new(0x1000000).is_err());
+        assert!(TyIdx::new(0x1234567).is_err());
+        assert!(TyIdx::new(0xeddedde).is_err());
+        assert!(TyIdx::new(usize::MAX).is_err());
     }
 
     #[test]
@@ -1934,23 +1941,23 @@ mod tests {
 
     #[test]
     fn void_type_size() {
-        assert_eq!(Type::Void.byte_size(), Some(0));
+        assert_eq!(Ty::Void.byte_size(), Some(0));
     }
 
     #[cfg(debug_assertions)]
     #[should_panic(expected = "type already exists")]
     #[test]
     fn push_duplicate_type() {
-        let mut jit_mod = Module::new_testing();
-        let _ = jit_mod.push_type(Type::Void);
-        let _ = jit_mod.push_type(Type::Void);
+        let mut m = Module::new_testing();
+        let _ = m.push_type(Ty::Void);
+        let _ = m.push_type(Ty::Void);
     }
 
     #[test]
     fn stringify_int_consts() {
         fn check<T: ToBytes + PrimInt>(m: &mut Module, num_bits: u32, val: T, expect: &str) {
             assert!(mem::size_of::<T>() * 8 >= usize::try_from(num_bits).unwrap());
-            let c = IntegerType::new(num_bits).make_constant(m, val).unwrap();
+            let c = IntegerTy::new(num_bits).make_constant(m, val).unwrap();
             assert_eq!(c.display(&m).to_string(), expect);
         }
 
@@ -1971,9 +1978,9 @@ mod tests {
     #[test]
     fn print_module() {
         let mut m = Module::new_testing();
-        m.push(LoadTraceInputInstruction::new(0, m.int8_type_idx()).into());
-        m.push(LoadTraceInputInstruction::new(8, m.int8_type_idx()).into());
-        m.push(LoadTraceInputInstruction::new(16, m.int8_type_idx()).into());
+        m.push(LoadTraceInputInst::new(0, m.int8_ty_idx()).into());
+        m.push(LoadTraceInputInst::new(8, m.int8_ty_idx()).into());
+        m.push(LoadTraceInputInst::new(16, m.int8_ty_idx()).into());
         m.push_global_decl(GlobalDecl::new(
             CString::new("some_global").unwrap(),
             false,
@@ -2005,13 +2012,13 @@ mod tests {
     #[test]
     fn integer_type_sizes() {
         for i in 1..8 {
-            assert_eq!(IntegerType::new(i).byte_size(), 1);
+            assert_eq!(IntegerTy::new(i).byte_size(), 1);
         }
         for i in 9..16 {
-            assert_eq!(IntegerType::new(i).byte_size(), 2);
+            assert_eq!(IntegerTy::new(i).byte_size(), 2);
         }
-        assert_eq!(IntegerType::new(127).byte_size(), 16);
-        assert_eq!(IntegerType::new(128).byte_size(), 16);
-        assert_eq!(IntegerType::new(129).byte_size(), 17);
+        assert_eq!(IntegerTy::new(127).byte_size(), 16);
+        assert_eq!(IntegerTy::new(128).byte_size(), 16);
+        assert_eq!(IntegerTy::new(129).byte_size(), 17);
     }
 }
