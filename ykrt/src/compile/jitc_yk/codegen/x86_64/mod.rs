@@ -300,7 +300,7 @@ impl<'a> X64CodeGen<'a> {
     fn load_const(&mut self, reg: Rq, cidx: jit_ir::ConstIdx) {
         let cst = self.m.const_(cidx);
         let mut bytes = cst.bytes().as_slice();
-        let size = cst.ty_idx().type_(self.m).byte_size().unwrap();
+        let size = self.m.type_(cst.ty_idx()).byte_size().unwrap();
         debug_assert_eq!(bytes.len(), size);
         match size {
             8 => {

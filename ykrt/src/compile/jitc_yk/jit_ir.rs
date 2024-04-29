@@ -675,12 +675,6 @@ index_24bit!(FuncDeclIdx);
 pub(crate) struct TyIdx(U24);
 index_24bit!(TyIdx);
 
-impl TyIdx {
-    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Ty {
-        m.type_(*self)
-    }
-}
-
 /// An extra argument index.
 ///
 /// One of these is an index into the [Module::extra_args].
@@ -764,7 +758,7 @@ impl FuncTy {
     ///
     /// Panics if the index is out of bounds.
     pub(crate) fn arg_type<'a>(&self, m: &'a Module, idx: usize) -> &'a Ty {
-        self.arg_ty_idxs[idx].type_(m)
+        m.type_(self.arg_ty_idxs[idx])
     }
 
     /// Returns whether the function type has vararg arguments.
@@ -774,7 +768,7 @@ impl FuncTy {
 
     /// Returns the type of the return value.
     pub(crate) fn ret_type<'a>(&self, m: &'a Module) -> &'a Ty {
-        self.ret_ty_idx.type_(m)
+        m.type_(self.ret_ty_idx)
     }
 
     /// Returns the type index of the return value.
@@ -925,7 +919,7 @@ impl Operand {
     pub(crate) fn byte_size(&self, m: &Module) -> usize {
         match self {
             Self::Local(l) => l.inst(m).def_byte_size(m),
-            Self::Const(cidx) => cidx.const_(m).ty_idx().type_(m).byte_size().unwrap(),
+            Self::Const(cidx) => m.type_(cidx.const_(m).ty_idx()).byte_size().unwrap(),
         }
     }
 
@@ -943,7 +937,7 @@ impl Operand {
                     }
                 }
             }
-            Self::Const(cidx) => cidx.const_(m).ty_idx().type_(m),
+            Self::Const(cidx) => m.type_(cidx.const_(m).ty_idx()),
         }
     }
 
