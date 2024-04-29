@@ -706,13 +706,6 @@ index_24bit!(GlobalDeclIdx);
 pub(crate) struct InstIdx(u16);
 index_16bit!(InstIdx);
 
-impl InstIdx {
-    /// Return a reference to the instruction indentified by `self` in `m`.
-    pub(crate) fn inst<'a>(&'a self, m: &'a Module) -> &Inst {
-        m.inst(*self)
-    }
-}
-
 /// A function's type.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct FuncTy {
@@ -904,7 +897,7 @@ impl Operand {
     /// Panics if asking for the size make no sense for this operand.
     pub(crate) fn byte_size(&self, m: &Module) -> usize {
         match self {
-            Self::Local(l) => l.inst(m).def_byte_size(m),
+            Self::Local(l) => m.inst(*l).def_byte_size(m),
             Self::Const(cidx) => m.type_(m.const_(*cidx).ty_idx()).byte_size().unwrap(),
         }
     }
@@ -913,7 +906,7 @@ impl Operand {
     pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Ty {
         match self {
             Self::Local(l) => {
-                match l.inst(m).def_type(m) {
+                match m.inst(*l).def_type(m) {
                     Some(t) => t,
                     None => {
                         // When an operand is a local variable, the local can only come from an
@@ -930,7 +923,7 @@ impl Operand {
     /// Returns the type index of the operand.
     pub(crate) fn ty_idx(&self, m: &Module) -> TyIdx {
         match self {
-            Self::Local(l) => l.inst(m).def_ty_idx(m),
+            Self::Local(l) => m.inst(*l).def_ty_idx(m),
             Self::Const(_) => todo!(),
         }
     }

@@ -279,7 +279,7 @@ impl<'a> X64CodeGen<'a> {
             LocalAlloc::Stack { frame_off, size: _ } => {
                 match i32::try_from(*frame_off) {
                     Ok(foff) => {
-                        let size = local.inst(self.m).def_byte_size(self.m);
+                        let size = self.m.inst(local).def_byte_size(self.m);
                         // We use `movzx` where possible to avoid partial register stalls.
                         match size {
                             1 => dynasm!(self.asm; movzx Rq(reg.code()), BYTE [rbp - foff]),
@@ -337,7 +337,7 @@ impl<'a> X64CodeGen<'a> {
 
     /// Store a value held in a register into a new local variable.
     fn reg_into_new_local(&mut self, local: InstIdx, reg: Rq) {
-        let size = local.inst(self.m).def_byte_size(self.m);
+        let size = self.m.inst(local).def_byte_size(self.m);
         let l = self.ra.allocate(local, size, &mut self.stack);
         self.store_local(&l, reg, size);
     }
@@ -374,7 +374,7 @@ impl<'a> X64CodeGen<'a> {
         // Now load the value into a new local variable from [base_reg+off].
         match i32::try_from(inst.off()) {
             Ok(off) => {
-                let size = inst_idx.inst(self.m).def_byte_size(self.m);
+                let size = self.m.inst(inst_idx).def_byte_size(self.m);
                 debug_assert!(size <= REG64_SIZE);
                 match size {
                     8 => dynasm!(self.asm ; mov Rq(WR0.code()), [Rq(base_reg) + off]),
@@ -391,7 +391,7 @@ impl<'a> X64CodeGen<'a> {
 
     fn codegen_load_inst(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::LoadInst) {
         self.operand_into_reg(WR0, &inst.operand()); // FIXME: assumes value will fit in a reg.
-        let size = inst_idx.inst(self.m).def_byte_size(self.m);
+        let size = self.m.inst(inst_idx).def_byte_size(self.m);
         debug_assert!(size <= REG64_SIZE);
         match size {
             8 => dynasm!(self.asm ; mov Rq(WR0.code()), [Rq(WR0.code())]),
