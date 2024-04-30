@@ -328,7 +328,7 @@ impl<'a> TraceBuilder<'a> {
             }
             aot_ir::Operand::Constant(cidx) => {
                 let jit_const = self.handle_const(self.aot_mod.constant(cidx))?;
-                jit_ir::Operand::Const(self.jit_mod.const_idx(&jit_const)?)
+                jit_ir::Operand::Const(self.jit_mod.insert_const(jit_const)?)
             }
             aot_ir::Operand::Global(gd_idx) => {
                 let load = jit_ir::LookupGlobalInst::new(self.handle_global(*gd_idx)?)?;

@@ -23,6 +23,7 @@
 
 use super::aot_ir;
 use crate::compile::CompilationError;
+use indexmap::IndexSet;
 use num_traits::{PrimInt, ToBytes};
 use std::{
     ffi::{c_void, CStr, CString},
@@ -57,10 +58,10 @@ pub(crate) struct Module {
     ///
     /// An [ExtraArgsIdx] describes an index into this.
     extra_args: Vec<Operand>,
-    /// The constant table.
+    /// The constant pool.
     ///
     /// A [ConstIdx] describes an index into this.
-    consts: TiVec<ConstIdx, Constant>,
+    consts: IndexSet<Constant>,
     /// The type table.
     ///
     /// A [TyIdx] describes an index into this.
@@ -138,7 +139,7 @@ impl Module {
             ctr_id,
             insts: Vec::new(),
             extra_args: Vec::new(),
-            consts: TiVec::new(),
+            consts: IndexSet::new(),
             types,
             void_ty_idx,
             ptr_ty_idx,
@@ -292,16 +293,11 @@ impl Module {
         }
     }
 
-    /// Push a new constant into the constant table and return its index.
-    ///
-    /// # Panics
-    ///
-    /// If `constant` would overflow the index type.
-    pub fn push_const(&mut self, constant: Constant) -> Result<ConstIdx, CompilationError> {
-        assert!(ConstIdx::new(self.consts.len()).is_ok());
-        let idx = self.consts.len();
-        self.consts.push(constant);
-        ConstIdx::new(idx)
+    /// Add a constant to the pool and return its index. If the constant already exists, an
+    /// existing index will be returned.
+    pub fn insert_const(&mut self, c: Constant) -> Result<ConstIdx, CompilationError> {
+        let (i, _) = self.consts.insert_full(c);
+        ConstIdx::new(i)
     }
 
     /// Return the const for the specified index.
@@ -310,18 +306,7 @@ impl Module {
     ///
     /// Panics if the index is out of bounds.
     pub(crate) fn const_(&self, idx: ConstIdx) -> &Constant {
-        &self.consts[idx]
-    }
-
-    /// Get the index of a constant, inserting it in the constant table if necessary.
-    pub fn const_idx(&mut self, c: &Constant) -> Result<ConstIdx, CompilationError> {
-        // FIXME: can we optimise this?
-        if let Some(idx) = self.consts.iter().position(|tc| tc == c) {
-            Ok(ConstIdx::new(idx)?)
-        } else {
-            // const table miss, we need to insert it.
-            self.push_const(c.clone())
-        }
+        &self.consts.get_index(usize::from(idx)).unwrap()
     }
 
     /// Push a new declaration into the global variable declaration table and return its index.
@@ -562,7 +547,7 @@ const GLOBAL_PTR_ARRAY_SYM: &str = "__yk_globalvar_ptrs";
 
 /// A packed 24-bit unsigned integer.
 #[repr(packed)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 struct U24([u8; 3]);
 
 impl U24 {
@@ -673,7 +658,7 @@ index_24bit!(FuncDeclIdx);
 ///
 /// A type index uniquely identifies a [Ty] in a [Module]. You can rely on this uniquness
 /// property for type checking: you can compare type indices instead of the corresponding [Ty]s.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct TyIdx(U24);
 index_24bit!(TyIdx);
 
@@ -953,7 +938,7 @@ impl fmt::Display for DisplayableOperand<'_> {
 ///
 /// A constant value is represented as a type index and a "bag of bytes". The type index
 /// determines the interpretation of the byte bag.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct Constant {
     /// The type index of the constant value.
     ty_idx: TyIdx,
