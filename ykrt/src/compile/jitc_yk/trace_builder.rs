@@ -363,7 +363,7 @@ impl<'a> TraceBuilder<'a> {
             aot_ir::Type::Struct(_st) => todo!(),
             aot_ir::Type::Unimplemented(s) => jit_ir::Ty::Unimplemented(s.to_owned()),
         };
-        self.jit_mod.ty_idx(&jit_ty)
+        self.jit_mod.insert_ty(jit_ty)
     }
 
     /// Translate a function.
@@ -683,7 +683,7 @@ impl<'a> TraceBuilder<'a> {
                 let jit_const = jit_int_type
                     .to_owned()
                     .make_constant(&mut self.jit_mod, val)?;
-                let jit_const_opnd = jit_ir::Operand::Const(self.jit_mod.const_idx(&jit_const)?);
+                let jit_const_opnd = jit_ir::Operand::Const(self.jit_mod.insert_const(jit_const)?);
 
                 // Perform the comparison.
                 let jit_test_val = self.handle_operand(test_val)?;
@@ -717,7 +717,7 @@ impl<'a> TraceBuilder<'a> {
                         .to_owned()
                         .make_constant(&mut self.jit_mod, *cv)?;
                     let jit_const_opnd =
-                        jit_ir::Operand::Const(self.jit_mod.const_idx(&jit_const)?);
+                        jit_ir::Operand::Const(self.jit_mod.insert_const(jit_const)?);
 
                     // Do the comparison.
                     let jit_test_val = self.handle_operand(test_val)?;

@@ -885,7 +885,7 @@ mod tests {
         #[test]
         fn codegen_load_i8() {
             let mut m = test_module();
-            let i8_ty_idx = m.ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
+            let i8_ty_idx = m.insert_ty(jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
             let load_op = m
                 .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i8_ty_idx).into())
                 .unwrap();
@@ -905,7 +905,9 @@ mod tests {
         #[test]
         fn codegen_load_i32() {
             let mut m = test_module();
-            let i32_ty_idx = m.ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(32))).unwrap();
+            let i32_ty_idx = m
+                .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(32)))
+                .unwrap();
             let ti_op = m
                 .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i32_ty_idx).into())
                 .unwrap();
@@ -967,7 +969,7 @@ mod tests {
         #[test]
         fn codegen_loadtraceinput_i8() {
             let mut m = test_module();
-            let u8_ty_idx = m.ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
+            let u8_ty_idx = m.insert_ty(jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
             m.push(jit_ir::LoadTraceInputInst::new(0, u8_ty_idx).into())
                 .unwrap();
             let patt_lines = [
@@ -983,7 +985,9 @@ mod tests {
         #[test]
         fn codegen_loadtraceinput_i16_with_offset() {
             let mut m = test_module();
-            let u16_ty_idx = m.ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(16))).unwrap();
+            let u16_ty_idx = m
+                .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(16)))
+                .unwrap();
             m.push(jit_ir::LoadTraceInputInst::new(32, u16_ty_idx).into())
                 .unwrap();
             let patt_lines = [
@@ -999,7 +1003,7 @@ mod tests {
         #[test]
         fn codegen_loadtraceinput_many_offset() {
             let mut m = test_module();
-            let i8_ty_idx = m.ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
+            let i8_ty_idx = m.insert_ty(jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
             let ptr_ty_idx = m.ptr_ty_idx();
             m.push(jit_ir::LoadTraceInputInst::new(0, i8_ty_idx).into())
                 .unwrap();
@@ -1036,7 +1040,9 @@ mod tests {
         #[test]
         fn codegen_add_i16() {
             let mut m = test_module();
-            let i16_ty_idx = m.ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(16))).unwrap();
+            let i16_ty_idx = m
+                .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(16)))
+                .unwrap();
             let op1 = m
                 .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i16_ty_idx).into())
                 .unwrap();
@@ -1059,7 +1065,9 @@ mod tests {
         #[test]
         fn codegen_add_i64() {
             let mut m = test_module();
-            let i64_ty_idx = m.ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(64))).unwrap();
+            let i64_ty_idx = m
+                .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(64)))
+                .unwrap();
             let op1 = m
                 .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i64_ty_idx).into())
                 .unwrap();
@@ -1084,8 +1092,12 @@ mod tests {
         #[test]
         fn codegen_add_wrong_types() {
             let mut m = test_module();
-            let i64_ty_idx = m.ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(64))).unwrap();
-            let i32_ty_idx = m.ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(32))).unwrap();
+            let i64_ty_idx = m
+                .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(64)))
+                .unwrap();
+            let i32_ty_idx = m
+                .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(32)))
+                .unwrap();
             let op1 = m
                 .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i64_ty_idx).into())
                 .unwrap();
@@ -1115,7 +1127,7 @@ mod tests {
             let mut m = test_module();
             let void_ty_idx = m.void_ty_idx();
             let func_ty_idx = m
-                .ty_idx(&jit_ir::Ty::Func(FuncTy::new(vec![], void_ty_idx, false)))
+                .insert_ty(jit_ir::Ty::Func(FuncTy::new(vec![], void_ty_idx, false)))
                 .unwrap();
 
             let func_decl_idx = m
@@ -1141,9 +1153,9 @@ mod tests {
         fn codegen_call_with_args() {
             let mut m = test_module();
             let void_ty_idx = m.void_ty_idx();
-            let i32_ty_idx = m.ty_idx(&Ty::Integer(IntegerTy::new(32))).unwrap();
+            let i32_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
             let func_ty_idx = m
-                .ty_idx(&jit_ir::Ty::Func(FuncTy::new(
+                .insert_ty(jit_ir::Ty::Func(FuncTy::new(
                     vec![i32_ty_idx; 3],
                     void_ty_idx,
                     false,
@@ -1189,13 +1201,13 @@ mod tests {
         fn codegen_call_with_different_args() {
             let mut m = test_module();
             let void_ty_idx = m.void_ty_idx();
-            let i8_ty_idx = m.ty_idx(&Ty::Integer(IntegerTy::new(8))).unwrap();
-            let i16_ty_idx = m.ty_idx(&Ty::Integer(IntegerTy::new(16))).unwrap();
-            let i32_ty_idx = m.ty_idx(&Ty::Integer(IntegerTy::new(32))).unwrap();
-            let i64_ty_idx = m.ty_idx(&Ty::Integer(IntegerTy::new(64))).unwrap();
+            let i8_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(8))).unwrap();
+            let i16_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(16))).unwrap();
+            let i32_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
+            let i64_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(64))).unwrap();
             let ptr_ty_idx = m.ptr_ty_idx();
             let func_ty_idx = m
-                .ty_idx(&jit_ir::Ty::Func(FuncTy::new(
+                .insert_ty(jit_ir::Ty::Func(FuncTy::new(
                     vec![
                         i8_ty_idx, i16_ty_idx, i32_ty_idx, i64_ty_idx, ptr_ty_idx, i8_ty_idx,
                     ],
@@ -1257,9 +1269,9 @@ mod tests {
         fn codegen_call_spill_args() {
             let mut m = test_module();
             let void_ty_idx = m.void_ty_idx();
-            let i32_ty_idx = m.ty_idx(&Ty::Integer(IntegerTy::new(32))).unwrap();
+            let i32_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
             let func_ty_idx = m
-                .ty_idx(&jit_ir::Ty::Func(FuncTy::new(
+                .insert_ty(jit_ir::Ty::Func(FuncTy::new(
                     vec![i32_ty_idx; 7],
                     void_ty_idx,
                     false,
@@ -1290,9 +1302,9 @@ mod tests {
         #[test]
         fn codegen_call_ret() {
             let mut m = test_module();
-            let i32_ty_idx = m.ty_idx(&Ty::Integer(IntegerTy::new(32))).unwrap();
+            let i32_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
             let func_ty_idx = m
-                .ty_idx(&jit_ir::Ty::Func(FuncTy::new(vec![], i32_ty_idx, false)))
+                .insert_ty(jit_ir::Ty::Func(FuncTy::new(vec![], i32_ty_idx, false)))
                 .unwrap();
 
             let func_decl_idx = m
@@ -1321,9 +1333,9 @@ mod tests {
         fn codegen_call_bad_arg_type() {
             let mut m = test_module();
             let void_ty_idx = m.void_ty_idx();
-            let i32_ty_idx = m.ty_idx(&Ty::Integer(IntegerTy::new(32))).unwrap();
+            let i32_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
             let func_ty_idx = m
-                .ty_idx(&jit_ir::Ty::Func(FuncTy::new(
+                .insert_ty(jit_ir::Ty::Func(FuncTy::new(
                     vec![i32_ty_idx],
                     void_ty_idx,
                     false,
@@ -1338,7 +1350,7 @@ mod tests {
                 .unwrap();
 
             // Make a call that passes a i8 argument, instead of an i32 as in the func sig.
-            let i8_ty_idx = m.ty_idx(&Ty::Integer(IntegerTy::new(8))).unwrap();
+            let i8_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(8))).unwrap();
             let arg1 = m
                 .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i8_ty_idx).into())
                 .unwrap();
@@ -1354,7 +1366,9 @@ mod tests {
         #[test]
         fn codegen_icmp_i64() {
             let mut m = test_module();
-            let i64_ty_idx = m.ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(64))).unwrap();
+            let i64_ty_idx = m
+                .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(64)))
+                .unwrap();
             let op = m
                 .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i64_ty_idx).into())
                 .unwrap();
@@ -1376,7 +1390,7 @@ mod tests {
         #[test]
         fn codegen_icmp_i8() {
             let mut m = test_module();
-            let i8_ty_idx = m.ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
+            let i8_ty_idx = m.insert_ty(jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
             let op = m
                 .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i8_ty_idx).into())
                 .unwrap();
@@ -1417,8 +1431,10 @@ mod tests {
         #[should_panic(expected = "icmp of differing types")]
         fn codegen_icmp_diff_types() {
             let mut m = test_module();
-            let i8_ty_idx = m.ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
-            let i64_ty_idx = m.ty_idx(&jit_ir::Ty::Integer(IntegerTy::new(64))).unwrap();
+            let i8_ty_idx = m.insert_ty(jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
+            let i64_ty_idx = m
+                .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(64)))
+                .unwrap();
             let op1 = m
                 .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i8_ty_idx).into())
                 .unwrap();

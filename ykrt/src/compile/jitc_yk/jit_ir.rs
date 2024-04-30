@@ -62,10 +62,10 @@ pub(crate) struct Module {
     ///
     /// A [ConstIdx] describes an index into this.
     consts: IndexSet<Constant>,
-    /// The type table.
+    /// The type pool.
     ///
     /// A [TyIdx] describes an index into this.
-    types: TiVec<TyIdx, Ty>,
+    types: IndexSet<Ty>,
     /// The type index of the void type. Cached for convenience.
     void_ty_idx: TyIdx,
     /// The type index of a pointer type. Cached for convenience.
@@ -116,13 +116,10 @@ impl Module {
         // Create some commonly used types ahead of time. Aside from being convenient, this allows
         // us to find their (now statically known) indices in scenarios where Rust forbids us from
         // holding a mutable reference to the Module (and thus we cannot use [Module::ty_idx]).
-        let mut types = TiVec::new();
-        let void_ty_idx = TyIdx::new(types.len())?;
-        types.push(Ty::Void);
-        let ptr_ty_idx = TyIdx::new(types.len())?;
-        types.push(Ty::Ptr);
-        let int8_ty_idx = TyIdx::new(types.len())?;
-        types.push(Ty::Integer(IntegerTy::new(8)));
+        let mut types = IndexSet::new();
+        let void_ty_idx = TyIdx::new(types.insert_full(Ty::Void).0)?;
+        let ptr_ty_idx = TyIdx::new(types.insert_full(Ty::Ptr).0)?;
+        let int8_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(IntegerTy::new(8))).0)?;
 
         // Find the global variable pointer array in the address space.
         //
@@ -253,24 +250,11 @@ impl Module {
         ExtraArgsIdx::new(idx)
     }
 
-    /// Push a new type into the type table and return its index.
-    ///
-    /// The type must not already exist in the module's type table.
-    ///
-    /// # Panics
-    ///
-    /// If `ty` would overflow the index type.
-    fn push_type(&mut self, ty: Ty) -> Result<TyIdx, CompilationError> {
-        #[cfg(debug_assertions)]
-        {
-            for et in &self.types {
-                debug_assert_ne!(et, &ty, "type already exists");
-            }
-        }
-        assert!(TyIdx::new(self.types.len()).is_ok());
-        let idx = self.types.len();
-        self.types.push(ty);
-        TyIdx::new(idx)
+    /// Add a [Ty] to the types pool and return its index. If the [Ty] already exists, an existing
+    /// index will be returned.
+    pub(crate) fn insert_ty(&mut self, ty: Ty) -> Result<TyIdx, CompilationError> {
+        let (i, _) = self.types.insert_full(ty);
+        TyIdx::new(i)
     }
 
     /// Return the [Ty] for the specified index.
@@ -279,18 +263,7 @@ impl Module {
     ///
     /// Panics if the index is out of bounds.
     pub(crate) fn type_(&self, idx: TyIdx) -> &Ty {
-        &self.types[idx]
-    }
-
-    /// Get the index of a type, inserting it into the type table if necessary.
-    pub(crate) fn ty_idx(&mut self, t: &Ty) -> Result<TyIdx, CompilationError> {
-        // FIXME: can we optimise this?
-        if let Some(idx) = self.types.position(|tt| tt == t) {
-            Ok(idx)
-        } else {
-            // type table miss, we need to insert it.
-            self.push_type(t.clone())
-        }
+        self.types.get_index(usize::from(idx)).unwrap()
     }
 
     /// Add a constant to the pool and return its index. If the constant already exists, an
@@ -437,7 +410,7 @@ impl fmt::Display for Module {
 ///      integer type](https://llvm.org/docs/LangRef.html#integer-type).
 ///   2. Signedness is not specified. Interpretation of the bit pattern is delegated to operations
 ///      upon the integer.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct IntegerTy {
     num_bits: u32,
 }
@@ -474,12 +447,12 @@ impl IntegerTy {
         m: &mut Module,
         val: T,
     ) -> Result<Constant, CompilationError> {
-        let typ = Ty::Integer(self.clone());
-        let ty_idx = m.ty_idx(&typ)?;
+        let ty = Ty::Integer(self.clone());
         let bytes = ToBytes::to_ne_bytes(&val).as_ref().to_vec();
-        let ty_size = typ.byte_size().unwrap();
+        let ty_size = ty.byte_size().unwrap();
         debug_assert!(ty_size <= bytes.len());
         let bytes_trunc = bytes[0..ty_size].to_owned();
+        let ty_idx = m.insert_ty(ty)?;
         Ok(Constant::new(ty_idx, bytes_trunc))
     }
 
@@ -694,7 +667,7 @@ pub(crate) struct InstIdx(u16);
 index_16bit!(InstIdx);
 
 /// A function's type.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct FuncTy {
     /// Ty indices for the function's formal arguments.
     arg_ty_idxs: Vec<TyIdx>,
@@ -744,7 +717,7 @@ impl FuncTy {
 }
 
 /// A structure's type.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct StructTy {
     /// The types of the fields.
     field_ty_idxs: Vec<TyIdx>,
@@ -753,7 +726,7 @@ pub(crate) struct StructTy {
 }
 
 /// A type.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum Ty {
     Void,
     Integer(IntegerTy),
@@ -1777,9 +1750,9 @@ mod tests {
     fn extra_call_args() {
         // Set up a function to call.
         let mut m = Module::new_testing();
-        let i32_tyidx = m.push_type(Ty::Integer(IntegerTy::new(32))).unwrap();
+        let i32_tyidx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
         let func_ty = Ty::Func(FuncTy::new(vec![i32_tyidx; 3], i32_tyidx, false));
-        let func_ty_idx = m.push_type(func_ty).unwrap();
+        let func_ty_idx = m.insert_ty(func_ty).unwrap();
         let func_decl = FuncDecl::new("foo".to_owned(), func_ty_idx);
         let func_decl_idx = m.push_func_decl(func_decl).unwrap();
 
@@ -1805,9 +1778,9 @@ mod tests {
     fn vararg_call_args() {
         // Set up a function to call.
         let mut m = Module::new_testing();
-        let i32_tyidx = m.push_type(Ty::Integer(IntegerTy::new(32))).unwrap();
+        let i32_tyidx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
         let func_ty = Ty::Func(FuncTy::new(vec![i32_tyidx; 3], i32_tyidx, true));
-        let func_ty_idx = m.push_type(func_ty).unwrap();
+        let func_ty_idx = m.insert_ty(func_ty).unwrap();
         let func_decl = FuncDecl::new("foo".to_owned(), func_ty_idx);
         let func_decl_idx = m.push_func_decl(func_decl).unwrap();
 
@@ -1839,9 +1812,9 @@ mod tests {
         // Set up a function to call.
         let mut m = Module::new_testing();
         let arg_ty_idxs = vec![m.ptr_ty_idx(); 3];
-        let ret_ty_idx = m.ty_idx(&Ty::Void).unwrap();
+        let ret_ty_idx = m.insert_ty(Ty::Void).unwrap();
         let func_ty = FuncTy::new(arg_ty_idxs, ret_ty_idx, false);
-        let func_ty_idx = m.ty_idx(&Ty::Func(func_ty)).unwrap();
+        let func_ty_idx = m.insert_ty(Ty::Func(func_ty)).unwrap();
         let func_decl_idx = m
             .func_decl_idx(&FuncDecl::new("blah".into(), func_ty_idx))
             .unwrap();
@@ -1918,15 +1891,6 @@ mod tests {
     #[test]
     fn void_type_size() {
         assert_eq!(Ty::Void.byte_size(), Some(0));
-    }
-
-    #[cfg(debug_assertions)]
-    #[should_panic(expected = "type already exists")]
-    #[test]
-    fn push_duplicate_type() {
-        let mut m = Module::new_testing();
-        let _ = m.push_type(Ty::Void);
-        let _ = m.push_type(Ty::Void);
     }
 
     #[test]
