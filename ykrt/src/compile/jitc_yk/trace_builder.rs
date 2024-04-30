@@ -37,7 +37,7 @@ impl<'a> Frame<'a> {
 /// Given a mapped trace and an AOT module, assembles an in-memory Yk IR trace by copying basic
 /// blocks from the AOT IR. The output of this process will be the input to the code generator.
 pub(crate) struct TraceBuilder<'a> {
-    /// The AOR IR.
+    /// The AOT IR.
     aot_mod: &'a Module,
     /// The JIT IR this struct builds.
     jit_mod: jit_ir::Module,
@@ -209,6 +209,15 @@ impl<'a> TraceBuilder<'a> {
                     // Get the branch instruction of this block.
                     let nextinst = blk.instrs.last().unwrap();
                     self.handle_call(inst, bid, inst_idx, callee, args, nextinst)
+                }
+                aot_ir::Instruction::IndirectCall {
+                    fty_idx,
+                    callop,
+                    args,
+                } => {
+                    // Get the branch instruction of this block.
+                    let nextinst = blk.instrs.last().unwrap();
+                    self.handle_indirectcall(inst, bid, inst_idx, fty_idx, callop, args, nextinst)
                 }
                 aot_ir::Instruction::Store { val, ptr } => {
                     self.handle_store(bid, inst_idx, val, ptr)
@@ -516,6 +525,57 @@ impl<'a> TraceBuilder<'a> {
         self.copy_instruction(inst, bid, aot_inst_idx)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn handle_indirectcall(
+        &mut self,
+        inst: &'a aot_ir::Instruction,
+        bid: &aot_ir::BBlockId,
+        aot_inst_idx: usize,
+        fty_idx: &aot_ir::TypeIdx,
+        callop: &aot_ir::Operand,
+        args: &[aot_ir::Operand],
+        nextinst: &'a aot_ir::Instruction,
+    ) -> Result<(), CompilationError> {
+        debug_assert!(!inst.is_debug_call(self.aot_mod));
+
+        // Convert AOT args to JIT args.
+        let mut jit_args = Vec::new();
+        for arg in args {
+            jit_args.push(self.handle_operand(arg)?);
+        }
+
+        // While we can work out if this is a mappable call or not by loooking at the next block,
+        // this unfortunately doesn't tell us whether the call has been annotated with
+        // "yk_outline". For now we have to be conservative here and outline all indirect calls.
+        // One solution would be to stop including the AOT IR for functions annotated with
+        // "yk_outline". Any mappable, indirect call is then guaranteed to be inline safe.
+
+        match nextinst {
+            aot_ir::Instruction::Br { succ } => {
+                // We can only stop outlining when we see the succesor block and we are not in
+                // the middle of recursion.
+                let succbid = BBlockId::new(bid.func_idx(), *succ);
+                self.outline_target_blk = Some(succbid);
+                self.recursion_count = 0;
+            }
+            aot_ir::Instruction::CondBr { .. } => {
+                // Currently, the successor of a call is always an unconditional branch due to
+                // the block spitting pass. However, there's a FIXME in that pass which could
+                // lead to conditional branches showing up here. Leave a todo here so we know
+                // when this happens.
+                todo!()
+            }
+            _ => panic!(),
+        }
+
+        let jit_callop = self.handle_operand(callop)?;
+        let jit_ty_idx = self.handle_type(self.aot_mod.type_(*fty_idx))?;
+        let instr =
+            jit_ir::IndirectCallInst::new(&mut self.jit_mod, jit_ty_idx, jit_callop, jit_args)?;
+        let idx = self.jit_mod.push_indirect_call(instr)?;
+        self.copy_instruction(jit_ir::Inst::IndirectCall(idx), bid, aot_inst_idx)
+    }
+
     fn handle_call(
         &mut self,
         inst: &'a aot_ir::Instruction,
@@ -574,7 +634,7 @@ impl<'a> TraceBuilder<'a> {
 
             let jit_func_decl_idx = self.handle_func(*callee)?;
             let instr =
-                jit_ir::CallInst::new(&mut self.jit_mod, jit_func_decl_idx, jit_args)?.into();
+                jit_ir::DirectCallInst::new(&mut self.jit_mod, jit_func_decl_idx, jit_args)?.into();
             self.copy_instruction(instr, bid, aot_inst_idx)
         }
     }
