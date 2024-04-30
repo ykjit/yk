@@ -27,7 +27,7 @@ use indexmap::IndexSet;
 use num_traits::{PrimInt, ToBytes};
 use std::{
     ffi::{c_void, CStr, CString},
-    fmt, mem, ptr,
+    fmt, mem,
 };
 use typed_index_collections::TiVec;
 use ykaddr::addr::symbol_to_ptr;
@@ -1298,10 +1298,10 @@ impl LookupGlobalInst {
 pub struct CallInst {
     /// The callee.
     target: FuncDeclIdx,
-    /// The first argument to the call, if present. Undefined if not present.
-    arg1: PackedOperand,
-    /// Extra arguments, if the call requires more than a single argument.
-    extra: ExtraArgsIdx,
+    /// How many arguments in [Module::extra_args] is this call passing?
+    num_args: u16,
+    /// At what index do the contiguous operands in [Module::extra_args] start?
+    extra_idx: ExtraArgsIdx,
 }
 
 impl CallInst {
@@ -1310,25 +1310,19 @@ impl CallInst {
         target: FuncDeclIdx,
         args: &[Operand],
     ) -> Result<CallInst, CompilationError> {
-        let mut arg1 = PackedOperand::default();
-        let mut extra = ExtraArgsIdx::default();
-
-        if !args.is_empty() {
-            arg1 = PackedOperand::new(&args[0]);
-        }
-        if args.len() >= 2 {
-            extra = m.push_extra_args(&args[1..])?;
-        }
+        let extra_idx = ExtraArgsIdx::new(m.extra_args.len())?;
+        m.push_extra_args(args)?;
         Ok(Self {
             target,
-            arg1,
-            extra,
+            num_args: u16::try_from(args.len()).map_err(|_| {
+                CompilationError::LimitExceeded(format!(
+                    "{} arguments passed but at most {} can be handled",
+                    args.len(),
+                    u16::MAX
+                ))
+            })?,
+            extra_idx,
         })
-    }
-
-    fn arg1(&self) -> PackedOperand {
-        let unaligned = ptr::addr_of!(self.arg1);
-        unsafe { ptr::read_unaligned(unaligned) }
     }
 
     /// Return the [FuncDeclIdx] of the callee.
@@ -1342,22 +1336,7 @@ impl CallInst {
     ///
     /// Panics if the operand index is out of bounds.
     pub(crate) fn operand(&self, m: &Module, idx: usize) -> Operand {
-        #[cfg(debug_assertions)]
-        {
-            let ft = m.func_type(self.target);
-            debug_assert!(ft.num_args() > idx);
-        }
-        if idx == 0 {
-            if m.func_type(self.target()).num_args() > 0 {
-                self.arg1().unpack()
-            } else {
-                // Avoid returning an undefined operand. Storage always exists for one argument,
-                // even if the function accepts no arguments.
-                panic!();
-            }
-        } else {
-            m.extra_args[<usize as From<u16>>::from(self.extra.0) + idx - 1].clone()
-        }
+        m.extra_args[usize::from(self.extra_idx) + idx].clone()
     }
 }
 
@@ -1708,35 +1687,6 @@ mod tests {
         assert_eq!(mem::size_of::<LookupGlobalInst>(), 3);
         assert_eq!(mem::size_of::<PtrAddInst>(), 6);
         assert!(mem::size_of::<Inst>() <= mem::size_of::<u64>());
-    }
-
-    #[test]
-    fn extra_call_args() {
-        // Set up a function to call.
-        let mut m = Module::new_testing();
-        let i32_tyidx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
-        let func_ty = Ty::Func(FuncTy::new(vec![i32_tyidx; 3], i32_tyidx, false));
-        let func_ty_idx = m.insert_ty(func_ty).unwrap();
-        let func_decl_idx = m
-            .insert_func_decl(FuncDecl::new("foo".to_owned(), func_ty_idx))
-            .unwrap();
-
-        // Build a call to the function.
-        let args = vec![
-            Operand::Local(InstIdx(0)), // inline arg
-            Operand::Local(InstIdx(1)), // first extra arg
-            Operand::Local(InstIdx(2)),
-        ];
-        let ci = CallInst::new(&mut m, func_decl_idx, &args).unwrap();
-
-        // Now request the operands and check they all look as they should.
-        assert_eq!(ci.operand(&m, 0), Operand::Local(InstIdx(0)));
-        assert_eq!(ci.operand(&m, 1), Operand::Local(InstIdx(1)));
-        assert_eq!(ci.operand(&m, 2), Operand::Local(InstIdx(2)));
-        assert_eq!(
-            m.extra_args,
-            vec![Operand::Local(InstIdx(1)), Operand::Local(InstIdx(2))]
-        );
     }
 
     #[test]
