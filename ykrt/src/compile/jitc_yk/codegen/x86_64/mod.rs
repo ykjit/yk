@@ -184,7 +184,6 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Inst::Store(i) => self.codegen_store_inst(i),
             jit_ir::Inst::LookupGlobal(i) => self.codegen_lookupglobal_inst(inst_idx, i),
             jit_ir::Inst::Call(i) => self.codegen_call_inst(inst_idx, i)?,
-            jit_ir::Inst::VACall(i) => self.codegen_vacall_inst(inst_idx, i)?,
             jit_ir::Inst::Icmp(i) => self.codegen_icmp_inst(inst_idx, i),
             jit_ir::Inst::Guard(i) => self.codegen_guard_inst(i),
             jit_ir::Inst::Arg(i) => self.codegen_arg(inst_idx, *i),
@@ -534,20 +533,6 @@ impl<'a> X64CodeGen<'a> {
         &mut self,
         inst_idx: InstIdx,
         inst: &jit_ir::CallInst,
-    ) -> Result<(), CompilationError> {
-        let func_decl_idx = inst.target();
-        let func_type = self.m.func_type(func_decl_idx);
-        let args = (0..(func_type.num_args()))
-            .map(|i| inst.operand(self.m, i))
-            .collect::<Vec<_>>();
-        self.emit_call(inst_idx, func_decl_idx, &args)
-    }
-
-    /// Codegen a varargs call.
-    pub(super) fn codegen_vacall_inst(
-        &mut self,
-        inst_idx: InstIdx,
-        inst: &jit_ir::VACallInst,
     ) -> Result<(), CompilationError> {
         let func_decl_idx = inst.target();
         let args = (0..(inst.num_args()))

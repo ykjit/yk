@@ -946,7 +946,6 @@ pub enum Inst {
     LookupGlobal(LookupGlobalInst),
     LoadTraceInput(LoadTraceInputInst),
     Call(CallInst),
-    VACall(VACallInst),
     PtrAdd(PtrAddInst),
     Store(StoreInst),
     Icmp(IcmpInst),
@@ -1002,7 +1001,6 @@ impl Inst {
             Self::LookupGlobal(..) => m.ptr_ty_idx(),
             Self::LoadTraceInput(li) => li.ty_idx(),
             Self::Call(ci) => m.func_type(ci.target()).ret_ty_idx(),
-            Self::VACall(ci) => m.func_type(ci.target()).ret_ty_idx(),
             Self::PtrAdd(..) => m.ptr_ty_idx(),
             Self::Store(..) => m.void_ty_idx(),
             Self::Icmp(_) => m.int8_ty_idx(), // always returns a 0/1 valued byte.
@@ -1078,15 +1076,6 @@ impl fmt::Display for DisplayableInst<'_> {
                         .join(", ")
                 )
             }
-            Inst::VACall(x) => write!(
-                f,
-                "VACall @{}({})",
-                self.m.func_decl(x.target()).name(),
-                (0..x.num_args())
-                    .map(|y| format!("{}", x.operand(self.m, y).display(self.m)))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
             Inst::PtrAdd(x) => {
                 write!(f, "PtrAdd {}, {}", x.ptr().display(self.m), x.offset())
             }
@@ -1163,7 +1152,6 @@ inst!(LookupGlobal, LookupGlobalInst);
 inst!(Store, StoreInst);
 inst!(LoadTraceInput, LoadTraceInputInst);
 inst!(Call, CallInst);
-inst!(VACall, VACallInst);
 inst!(PtrAdd, PtrAddInst);
 inst!(Icmp, IcmpInst);
 inst!(Guard, GuardInst);
@@ -1330,6 +1318,11 @@ impl CallInst {
         self.target
     }
 
+    /// How many arguments is this call instruction passing?
+    pub(crate) fn num_args(&self) -> usize {
+        usize::from(self.num_args)
+    }
+
     /// Fetch the operand at the specified index.
     ///
     /// # Panics
@@ -1337,61 +1330,6 @@ impl CallInst {
     /// Panics if the operand index is out of bounds.
     pub(crate) fn operand(&self, m: &Module, idx: usize) -> Operand {
         m.extra_args[usize::from(self.extra_idx) + idx].clone()
-    }
-}
-
-/// The operands for a [Inst::VACall]
-///
-/// # Semantics
-///
-/// Perform a vararg call to an external or AOT function.
-#[derive(Debug)]
-#[repr(packed)]
-pub struct VACallInst {
-    /// The callee.
-    target: FuncDeclIdx,
-    /// The number of arguments to pass.
-    num_args: u16,
-    /// The index of the call's first argument in the [Module]'s extra argument table.
-    first_arg_idx: ExtraArgsIdx,
-}
-
-impl VACallInst {
-    pub(crate) fn new(
-        m: &mut Module,
-        target: FuncDeclIdx,
-        args: &[Operand],
-    ) -> Result<VACallInst, CompilationError> {
-        let num_args = args.len();
-
-        // Varargs calls require at least one static argument.
-        debug_assert!(num_args > 0);
-
-        Ok(Self {
-            target,
-            num_args: u16::try_from(num_args).unwrap(), // XXX
-            first_arg_idx: m.push_extra_args(args)?,
-        })
-    }
-
-    /// Returns the number of arguments to the call.
-    pub(crate) fn num_args(&self) -> u16 {
-        self.num_args
-    }
-
-    /// Return the [FuncDeclIdx] of the callee.
-    pub(crate) fn target(&self) -> FuncDeclIdx {
-        self.target
-    }
-
-    /// Fetch the operand at the specified index.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the operand index is out of bounds.
-    pub(crate) fn operand(&self, m: &Module, idx: u16) -> Operand {
-        debug_assert!(self.num_args() > idx);
-        m.extra_args[<usize as From<u16>>::from(self.first_arg_idx.0 + idx)].clone()
     }
 }
 
@@ -1706,7 +1644,7 @@ mod tests {
             Operand::Local(InstIdx(1)),
             Operand::Local(InstIdx(2)),
         ];
-        let ci = VACallInst::new(&mut m, func_decl_idx, &args).unwrap();
+        let ci = CallInst::new(&mut m, func_decl_idx, &args).unwrap();
 
         // Now request the operands and check they all look as they should.
         assert_eq!(ci.operand(&m, 0), Operand::Local(InstIdx(0)));
