@@ -192,24 +192,6 @@ impl Module {
         &self.insts[usize::from(idx)]
     }
 
-    /// Return the [Ty] for the specified index.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the index is out of bounds.
-    pub(crate) fn type_(&self, idx: TyIdx) -> &Ty {
-        &self.types[idx]
-    }
-
-    /// Return the global declaration for the specified index.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the index is out of bounds.
-    pub(crate) fn global_decl(&self, idx: GlobalDeclIdx) -> &GlobalDecl {
-        &self.global_decls[idx]
-    }
-
     /// Push an instruction to the end of the [Module].
     pub(crate) fn push(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
         match InstIdx::new(self.insts.len()) {
@@ -290,16 +272,24 @@ impl Module {
         TyIdx::new(idx)
     }
 
-    /// Push a new function declaration into the function declaration table and return its index.
+    /// Return the [Ty] for the specified index.
     ///
     /// # Panics
     ///
-    /// If `func_decl` would overflow the index type.
-    fn push_func_decl(&mut self, func_decl: FuncDecl) -> Result<FuncDeclIdx, CompilationError> {
-        assert!(FuncDeclIdx::new(self.func_decls.len()).is_ok());
-        let idx = self.func_decls.len();
-        self.func_decls.push(func_decl);
-        FuncDeclIdx::new(idx)
+    /// Panics if the index is out of bounds.
+    pub(crate) fn type_(&self, idx: TyIdx) -> &Ty {
+        &self.types[idx]
+    }
+
+    /// Get the index of a type, inserting it into the type table if necessary.
+    pub(crate) fn ty_idx(&mut self, t: &Ty) -> Result<TyIdx, CompilationError> {
+        // FIXME: can we optimise this?
+        if let Some(idx) = self.types.position(|tt| tt == t) {
+            Ok(idx)
+        } else {
+            // type table miss, we need to insert it.
+            self.push_type(t.clone())
+        }
     }
 
     /// Push a new constant into the constant table and return its index.
@@ -312,6 +302,26 @@ impl Module {
         let idx = self.consts.len();
         self.consts.push(constant);
         ConstIdx::new(idx)
+    }
+
+    /// Return the const for the specified index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is out of bounds.
+    pub(crate) fn const_(&self, idx: ConstIdx) -> &Constant {
+        &self.consts[idx]
+    }
+
+    /// Get the index of a constant, inserting it in the constant table if necessary.
+    pub fn const_idx(&mut self, c: &Constant) -> Result<ConstIdx, CompilationError> {
+        // FIXME: can we optimise this?
+        if let Some(idx) = self.consts.iter().position(|tc| tc == c) {
+            Ok(ConstIdx::new(idx)?)
+        } else {
+            // const table miss, we need to insert it.
+            self.push_const(c.clone())
+        }
     }
 
     /// Push a new declaration into the global variable declaration table and return its index.
@@ -329,46 +339,13 @@ impl Module {
         GlobalDeclIdx::new(idx)
     }
 
-    /// Get the index of a constant, inserting it in the constant table if necessary.
-    pub fn const_idx(&mut self, c: &Constant) -> Result<ConstIdx, CompilationError> {
-        // FIXME: can we optimise this?
-        if let Some(idx) = self.consts.iter().position(|tc| tc == c) {
-            Ok(ConstIdx::new(idx)?)
-        } else {
-            // const table miss, we need to insert it.
-            self.push_const(c.clone())
-        }
-    }
-
-    /// Return the const for the specified index.
+    /// Return the global declaration for the specified index.
     ///
     /// # Panics
     ///
     /// Panics if the index is out of bounds.
-    pub(crate) fn const_(&self, idx: ConstIdx) -> &Constant {
-        &self.consts[idx]
-    }
-
-    /// Get the index of a type, inserting it into the type table if necessary.
-    pub(crate) fn ty_idx(&mut self, t: &Ty) -> Result<TyIdx, CompilationError> {
-        // FIXME: can we optimise this?
-        if let Some(idx) = self.types.position(|tt| tt == t) {
-            Ok(idx)
-        } else {
-            // type table miss, we need to insert it.
-            self.push_type(t.clone())
-        }
-    }
-
-    /// Get the index of a function declaration, inserting it into the func decl table if necessary.
-    pub(crate) fn func_decl_idx(&mut self, d: &FuncDecl) -> Result<FuncDeclIdx, CompilationError> {
-        // FIXME: can we optimise this?
-        if let Some(idx) = self.func_decls.position(|td| td == d) {
-            Ok(idx)
-        } else {
-            // type table miss, we need to insert it.
-            self.push_func_decl(d.clone())
-        }
+    pub(crate) fn global_decl(&self, idx: GlobalDeclIdx) -> &GlobalDecl {
+        &self.global_decls[idx]
     }
 
     /// Get the index of a global, inserting it into the global declaration table if necessary.
@@ -389,6 +366,18 @@ impl Module {
         }
     }
 
+    /// Push a new function declaration into the function declaration table and return its index.
+    ///
+    /// # Panics
+    ///
+    /// If `func_decl` would overflow the index type.
+    fn push_func_decl(&mut self, func_decl: FuncDecl) -> Result<FuncDeclIdx, CompilationError> {
+        assert!(FuncDeclIdx::new(self.func_decls.len()).is_ok());
+        let idx = self.func_decls.len();
+        self.func_decls.push(func_decl);
+        FuncDeclIdx::new(idx)
+    }
+
     /// Return the [FuncDecl] for the specified index.
     ///
     /// # Panics
@@ -396,6 +385,17 @@ impl Module {
     /// Panics if the index is out of bounds
     pub(crate) fn func_decl(&self, idx: FuncDeclIdx) -> &FuncDecl {
         &self.func_decls[idx]
+    }
+
+    /// Get the index of a function declaration, inserting it into the func decl table if necessary.
+    pub(crate) fn func_decl_idx(&mut self, d: &FuncDecl) -> Result<FuncDeclIdx, CompilationError> {
+        // FIXME: can we optimise this?
+        if let Some(idx) = self.func_decls.position(|td| td == d) {
+            Ok(idx)
+        } else {
+            // type table miss, we need to insert it.
+            self.push_func_decl(d.clone())
+        }
     }
 
     /// Return the type of the function declaration.
