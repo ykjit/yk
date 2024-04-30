@@ -83,7 +83,7 @@ pub(crate) struct Module {
     ///
     /// This is a collection of externally defined global variables that the trace may need to
     /// reference. Because they are externally initialised, these are *declarations*.
-    global_decls: TiVec<GlobalDeclIdx, GlobalDecl>,
+    global_decls: IndexSet<GlobalDecl>,
     /// Additional information for guards.
     guard_info: TiVec<GuardInfoIdx, GuardInfo>,
     /// The virtual address of the global variable pointer array.
@@ -142,7 +142,7 @@ impl Module {
             ptr_ty_idx,
             int8_ty_idx,
             func_decls: IndexSet::new(),
-            global_decls: TiVec::new(),
+            global_decls: IndexSet::new(),
             guard_info: TiVec::new(),
             #[cfg(not(test))]
             globalvar_ptrs,
@@ -282,19 +282,14 @@ impl Module {
         &self.consts.get_index(usize::from(idx)).unwrap()
     }
 
-    /// Push a new declaration into the global variable declaration table and return its index.
-    ///
-    /// # Panics
-    ///
-    /// If `decl` would overflow the index type.
-    pub fn push_global_decl(
+    /// Add a new [GlobalDecl] to the pool and return its index. If the [GlobalDecl] already
+    /// exists, an existing index will be returned.
+    pub fn insert_global_decl(
         &mut self,
-        decl: GlobalDecl,
+        gd: GlobalDecl,
     ) -> Result<GlobalDeclIdx, CompilationError> {
-        assert!(GlobalDeclIdx::new(self.global_decls.len()).is_ok());
-        let idx = self.global_decls.len();
-        self.global_decls.push(decl);
-        GlobalDeclIdx::new(idx)
+        let (i, _) = self.global_decls.insert_full(gd);
+        GlobalDeclIdx::new(i)
     }
 
     /// Return the global declaration for the specified index.
@@ -303,25 +298,7 @@ impl Module {
     ///
     /// Panics if the index is out of bounds.
     pub(crate) fn global_decl(&self, idx: GlobalDeclIdx) -> &GlobalDecl {
-        &self.global_decls[idx]
-    }
-
-    /// Get the index of a global, inserting it into the global declaration table if necessary.
-    ///
-    /// `aot_idx` is the [aot_ir::GlobalDeclIdx] index of the global in the AOT module. This is
-    /// needed to find the global variable's address in the global variable pointers array.
-    pub(crate) fn global_decl_idx(
-        &mut self,
-        g: &GlobalDecl,
-        _aot_idx: aot_ir::GlobalDeclIdx,
-    ) -> Result<GlobalDeclIdx, CompilationError> {
-        // FIXME: can we optimise this?
-        if let Some(idx) = self.global_decls.position(|tg| tg == g) {
-            Ok(idx)
-        } else {
-            // global decl table miss, we need to insert it.
-            self.push_global_decl(g.clone())
-        }
+        self.global_decls.get_index(usize::from(idx)).unwrap()
     }
 
     /// Add a [FuncDecl] to the function declaritons pool and return its index. If the [FuncDecl]
@@ -450,7 +427,7 @@ impl IntegerTy {
 }
 
 /// The declaration of a global variable.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct GlobalDecl {
     /// The name of the delcaration.
     name: CString,
@@ -1913,13 +1890,13 @@ mod tests {
             .unwrap();
         m.push(LoadTraceInputInst::new(16, m.int8_ty_idx()).into())
             .unwrap();
-        m.push_global_decl(GlobalDecl::new(
+        m.insert_global_decl(GlobalDecl::new(
             CString::new("some_global").unwrap(),
             false,
             aot_ir::GlobalDeclIdx::new(0),
         ))
         .unwrap();
-        m.push_global_decl(GlobalDecl::new(
+        m.insert_global_decl(GlobalDecl::new(
             CString::new("some_thread_local").unwrap(),
             true,
             aot_ir::GlobalDeclIdx::new(1),

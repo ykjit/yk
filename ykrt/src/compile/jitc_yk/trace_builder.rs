@@ -301,7 +301,7 @@ impl<'a> TraceBuilder<'a> {
             aot_global.is_threadlocal(),
             idx,
         );
-        self.jit_mod.global_decl_idx(&jit_global, idx)
+        self.jit_mod.insert_global_decl(jit_global)
     }
 
     /// Translate a constant value.
