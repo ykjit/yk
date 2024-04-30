@@ -748,19 +748,6 @@ impl Func {
     pub(crate) fn type_idx(&self) -> TypeIdx {
         self.type_idx
     }
-
-    /// Return the [FuncType] for the function.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the function's type isn't a [FuncType]. This cannot happen in well-formed IR.
-    pub(crate) fn func_type<'a>(&self, m: &'a Module) -> &'a FuncType {
-        if let Type::Func(ft) = m.type_(self.type_idx) {
-            ft
-        } else {
-            panic!(); // IR is malformed.
-        }
-    }
 }
 
 impl AotIRDisplay for Func {
