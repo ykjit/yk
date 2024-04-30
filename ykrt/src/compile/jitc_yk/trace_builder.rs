@@ -376,7 +376,7 @@ impl<'a> TraceBuilder<'a> {
             aot_func.name().to_owned(),
             self.handle_type(self.aot_mod.type_(aot_func.type_idx()))?,
         );
-        self.jit_mod.func_decl_idx(&jit_func)
+        self.jit_mod.insert_func_decl(jit_func)
     }
 
     /// Translate binary operations such as add, sub, mul, etc.

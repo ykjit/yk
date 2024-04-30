@@ -1131,10 +1131,7 @@ mod tests {
                 .unwrap();
 
             let func_decl_idx = m
-                .func_decl_idx(&jit_ir::FuncDecl::new(
-                    CALL_TESTS_CALLEE.into(),
-                    func_ty_idx,
-                ))
+                .insert_func_decl(jit_ir::FuncDecl::new(CALL_TESTS_CALLEE.into(), func_ty_idx))
                 .unwrap();
             let call_inst = jit_ir::CallInst::new(&mut m, func_decl_idx, &[]).unwrap();
             m.push(call_inst.into()).unwrap();
@@ -1163,10 +1160,7 @@ mod tests {
                 .unwrap();
 
             let func_decl_idx = m
-                .func_decl_idx(&jit_ir::FuncDecl::new(
-                    CALL_TESTS_CALLEE.into(),
-                    func_ty_idx,
-                ))
+                .insert_func_decl(jit_ir::FuncDecl::new(CALL_TESTS_CALLEE.into(), func_ty_idx))
                 .unwrap();
 
             let arg1 = m
@@ -1217,10 +1211,7 @@ mod tests {
                 .unwrap();
 
             let func_decl_idx = m
-                .func_decl_idx(&jit_ir::FuncDecl::new(
-                    CALL_TESTS_CALLEE.into(),
-                    func_ty_idx,
-                ))
+                .insert_func_decl(jit_ir::FuncDecl::new(CALL_TESTS_CALLEE.into(), func_ty_idx))
                 .unwrap();
 
             let arg1 = m
@@ -1279,10 +1270,7 @@ mod tests {
                 .unwrap();
 
             let func_decl_idx = m
-                .func_decl_idx(&jit_ir::FuncDecl::new(
-                    CALL_TESTS_CALLEE.into(),
-                    func_ty_idx,
-                ))
+                .insert_func_decl(jit_ir::FuncDecl::new(CALL_TESTS_CALLEE.into(), func_ty_idx))
                 .unwrap();
 
             let arg1 = m
@@ -1308,10 +1296,7 @@ mod tests {
                 .unwrap();
 
             let func_decl_idx = m
-                .func_decl_idx(&jit_ir::FuncDecl::new(
-                    CALL_TESTS_CALLEE.into(),
-                    func_ty_idx,
-                ))
+                .insert_func_decl(jit_ir::FuncDecl::new(CALL_TESTS_CALLEE.into(), func_ty_idx))
                 .unwrap();
             let call_inst = jit_ir::CallInst::new(&mut m, func_decl_idx, &[]).unwrap();
             m.push(call_inst.into()).unwrap();
@@ -1343,10 +1328,7 @@ mod tests {
                 .unwrap();
 
             let func_decl_idx = m
-                .func_decl_idx(&jit_ir::FuncDecl::new(
-                    CALL_TESTS_CALLEE.into(),
-                    func_ty_idx,
-                ))
+                .insert_func_decl(jit_ir::FuncDecl::new(CALL_TESTS_CALLEE.into(), func_ty_idx))
                 .unwrap();
 
             // Make a call that passes a i8 argument, instead of an i32 as in the func sig.

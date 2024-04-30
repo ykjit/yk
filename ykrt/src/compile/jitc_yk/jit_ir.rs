@@ -72,13 +72,13 @@ pub(crate) struct Module {
     ptr_ty_idx: TyIdx,
     /// The type index of an 8-bit integer. Cached for convenience.
     int8_ty_idx: TyIdx,
-    /// The function declaration table.
+    /// The function declaration pool.
     ///
     /// These are declarations of externally compiled functions that the JITted trace might need to
     /// call.
     ///
     /// A [FuncDeclIdx] is an index into this.
-    func_decls: TiVec<FuncDeclIdx, FuncDecl>,
+    func_decls: IndexSet<FuncDecl>,
     /// The global variable declaration table.
     ///
     /// This is a collection of externally defined global variables that the trace may need to
@@ -141,7 +141,7 @@ impl Module {
             void_ty_idx,
             ptr_ty_idx,
             int8_ty_idx,
-            func_decls: TiVec::new(),
+            func_decls: IndexSet::new(),
             global_decls: TiVec::new(),
             guard_info: TiVec::new(),
             #[cfg(not(test))]
@@ -324,16 +324,14 @@ impl Module {
         }
     }
 
-    /// Push a new function declaration into the function declaration table and return its index.
-    ///
-    /// # Panics
-    ///
-    /// If `func_decl` would overflow the index type.
-    fn push_func_decl(&mut self, func_decl: FuncDecl) -> Result<FuncDeclIdx, CompilationError> {
-        assert!(FuncDeclIdx::new(self.func_decls.len()).is_ok());
-        let idx = self.func_decls.len();
-        self.func_decls.push(func_decl);
-        FuncDeclIdx::new(idx)
+    /// Add a [FuncDecl] to the function declaritons pool and return its index. If the [FuncDecl]
+    /// already exists, an existing index will be returned.
+    pub(crate) fn insert_func_decl(
+        &mut self,
+        fd: FuncDecl,
+    ) -> Result<FuncDeclIdx, CompilationError> {
+        let (i, _) = self.func_decls.insert_full(fd);
+        FuncDeclIdx::new(i)
     }
 
     /// Return the [FuncDecl] for the specified index.
@@ -342,18 +340,7 @@ impl Module {
     ///
     /// Panics if the index is out of bounds
     pub(crate) fn func_decl(&self, idx: FuncDeclIdx) -> &FuncDecl {
-        &self.func_decls[idx]
-    }
-
-    /// Get the index of a function declaration, inserting it into the func decl table if necessary.
-    pub(crate) fn func_decl_idx(&mut self, d: &FuncDecl) -> Result<FuncDeclIdx, CompilationError> {
-        // FIXME: can we optimise this?
-        if let Some(idx) = self.func_decls.position(|td| td == d) {
-            Ok(idx)
-        } else {
-            // type table miss, we need to insert it.
-            self.push_func_decl(d.clone())
-        }
+        self.func_decls.get_index(usize::from(idx)).unwrap()
     }
 
     /// Return the type of the function declaration.
@@ -621,7 +608,7 @@ macro_rules! index_16bit {
 /// A function declaration index.
 ///
 /// One of these is an index into the [Module::func_decls].
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct FuncDeclIdx(U24);
 index_24bit!(FuncDeclIdx);
 
@@ -774,7 +761,7 @@ impl Ty {
 }
 
 /// An (externally defined, in the AOT code) function declaration.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct FuncDecl {
     name: String,
     ty_idx: TyIdx,
@@ -1753,8 +1740,9 @@ mod tests {
         let i32_tyidx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
         let func_ty = Ty::Func(FuncTy::new(vec![i32_tyidx; 3], i32_tyidx, false));
         let func_ty_idx = m.insert_ty(func_ty).unwrap();
-        let func_decl = FuncDecl::new("foo".to_owned(), func_ty_idx);
-        let func_decl_idx = m.push_func_decl(func_decl).unwrap();
+        let func_decl_idx = m
+            .insert_func_decl(FuncDecl::new("foo".to_owned(), func_ty_idx))
+            .unwrap();
 
         // Build a call to the function.
         let args = vec![
@@ -1781,8 +1769,9 @@ mod tests {
         let i32_tyidx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
         let func_ty = Ty::Func(FuncTy::new(vec![i32_tyidx; 3], i32_tyidx, true));
         let func_ty_idx = m.insert_ty(func_ty).unwrap();
-        let func_decl = FuncDecl::new("foo".to_owned(), func_ty_idx);
-        let func_decl_idx = m.push_func_decl(func_decl).unwrap();
+        let func_decl_idx = m
+            .insert_func_decl(FuncDecl::new("foo".to_owned(), func_ty_idx))
+            .unwrap();
 
         // Build a call to the function.
         let args = vec![
@@ -1816,7 +1805,7 @@ mod tests {
         let func_ty = FuncTy::new(arg_ty_idxs, ret_ty_idx, false);
         let func_ty_idx = m.insert_ty(Ty::Func(func_ty)).unwrap();
         let func_decl_idx = m
-            .func_decl_idx(&FuncDecl::new("blah".into(), func_ty_idx))
+            .insert_func_decl(FuncDecl::new("blah".into(), func_ty_idx))
             .unwrap();
 
         // Now build a call to the function.
