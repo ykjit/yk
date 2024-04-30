@@ -443,6 +443,17 @@ pub(crate) enum Instruction {
         #[deku(count = "num_lives")]
         lives: Vec<Operand>,
     },
+    #[deku(id = "14")]
+    Switch {
+        test_val: Operand,
+        default_dest: BBlockIdx,
+        #[deku(temp)]
+        num_cases: usize,
+        #[deku(count = "num_cases")]
+        case_values: Vec<u64>,
+        #[deku(count = "num_cases")]
+        case_dests: Vec<BBlockIdx>,
+    },
     #[deku(id = "255")]
     Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "map_to_string")] String),
 }
@@ -499,6 +510,7 @@ impl Instruction {
             Self::Store { .. } => None,
             Self::Cast { dest_type_idx, .. } => Some(m.type_(*dest_type_idx)),
             Self::DeoptSafepoint { .. } => None,
+            Self::Switch { .. } => None,
             Self::Unimplemented(_) => None,
             _ => todo!("{:?}", self),
         }
@@ -632,6 +644,24 @@ impl AotIRDisplay for Instruction {
                     .collect::<Vec<_>>()
                     .join(", ");
                 ret.push_str(&format!("safepoint {}, [{}]", id.to_string(m), args_s,));
+            }
+            Self::Switch {
+                test_val,
+                default_dest,
+                case_values,
+                case_dests,
+            } => {
+                let cases = case_values
+                    .iter()
+                    .zip(case_dests)
+                    .map(|(val, dest)| format!("{} -> bb{}", val, usize::from(*dest)))
+                    .collect::<Vec<_>>();
+                ret.push_str(&format!(
+                    "switch {}, bb{}, [{}]",
+                    test_val.to_string(m),
+                    usize::from(*default_dest),
+                    cases.join(", ")
+                ));
             }
             Self::Unimplemented(s) => ret.push_str(&format!("unimplemented <<{}>>", s)),
             _ => todo!(),

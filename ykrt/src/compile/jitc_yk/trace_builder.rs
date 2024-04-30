@@ -152,7 +152,8 @@ impl<'a> TraceBuilder<'a> {
                         // FIXME: we should check at compile-time that this will fit.
                         match u32::try_from(aot_field_off) {
                             Ok(u32_off) => {
-                                let input_ty_idx = self.handle_type(aot_field_ty)?;
+                                let input_ty_idx =
+                                    self.handle_type(self.aot_mod.type_(aot_field_ty))?;
                                 let load_ti_instr =
                                     jit_ir::LoadTraceInputInst::new(u32_off, input_ty_idx).into();
                                 // If this take fails, we didn't see a corresponding store and the
@@ -239,6 +240,25 @@ impl<'a> TraceBuilder<'a> {
                 } => self.handle_cast(&bid, inst_idx, cast_kind, val, dest_type_idx),
                 aot_ir::Instruction::Ret { val } => self.handle_ret(&bid, inst_idx, val),
                 aot_ir::Instruction::DeoptSafepoint { .. } => Ok(()),
+                aot_ir::Instruction::Switch {
+                    test_val,
+                    default_dest,
+                    case_values,
+                    case_dests,
+                } => {
+                    let sm = &blk.instrs[InstrIdx::new(inst_idx - 1)];
+                    debug_assert!(sm.is_safepoint());
+                    self.handle_switch(
+                        &bid,
+                        inst_idx,
+                        sm,
+                        nextbb.as_ref().unwrap(),
+                        test_val,
+                        default_dest,
+                        case_values,
+                        case_dests,
+                    )
+                }
                 _ => todo!("{:?}", inst),
             }?;
         }
@@ -289,7 +309,7 @@ impl<'a> TraceBuilder<'a> {
         &mut self,
         aot_const: &aot_ir::Constant,
     ) -> Result<jit_ir::Constant, CompilationError> {
-        let jit_type_idx = self.handle_type(aot_const.type_idx())?;
+        let jit_type_idx = self.handle_type(self.aot_mod.type_(aot_const.type_idx()))?;
         Ok(jit_ir::Constant::new(
             jit_type_idx,
             Vec::from(aot_const.bytes()),
@@ -326,18 +346,18 @@ impl<'a> TraceBuilder<'a> {
     }
 
     /// Translate a type.
-    fn handle_type(&mut self, aot_idx: aot_ir::TypeIdx) -> Result<jit_ir::TyIdx, CompilationError> {
-        let jit_ty = match self.aot_mod.type_(aot_idx) {
+    fn handle_type(&mut self, aot_type: &aot_ir::Type) -> Result<jit_ir::TyIdx, CompilationError> {
+        let jit_ty = match aot_type {
             aot_ir::Type::Void => jit_ir::Ty::Void,
             aot_ir::Type::Integer(it) => jit_ir::Ty::Integer(jit_ir::IntegerTy::new(it.num_bits())),
             aot_ir::Type::Ptr => jit_ir::Ty::Ptr,
             aot_ir::Type::Func(ft) => {
                 let mut jit_args = Vec::new();
                 for aot_arg_ty_idx in ft.arg_ty_idxs() {
-                    let jit_ty = self.handle_type(*aot_arg_ty_idx)?;
+                    let jit_ty = self.handle_type(self.aot_mod.type_(*aot_arg_ty_idx))?;
                     jit_args.push(jit_ty);
                 }
-                let jit_retty = self.handle_type(ft.ret_ty())?;
+                let jit_retty = self.handle_type(self.aot_mod.type_(ft.ret_ty()))?;
                 jit_ir::Ty::Func(jit_ir::FuncTy::new(jit_args, jit_retty, ft.is_vararg()))
             }
             aot_ir::Type::Struct(_st) => todo!(),
@@ -354,7 +374,7 @@ impl<'a> TraceBuilder<'a> {
         let aot_func = self.aot_mod.func(aot_idx);
         let jit_func = jit_ir::FuncDecl::new(
             aot_func.name().to_owned(),
-            self.handle_type(aot_func.type_idx())?,
+            self.handle_type(self.aot_mod.type_(aot_func.type_idx()))?,
         );
         self.jit_mod.func_decl_idx(&jit_func)
     }
@@ -371,19 +391,15 @@ impl<'a> TraceBuilder<'a> {
         self.copy_instruction(instr.into(), bid, aot_inst_idx)
     }
 
-    /// Translate a conditional `Br` instruction.
-    fn handle_condbr(
+    /// Create a guard.
+    ///
+    /// The guard fails if `cond` is not `expect`.
+    fn create_guard(
         &mut self,
+        cond: &jit_ir::Operand,
+        expect: bool,
         sm: &'a aot_ir::Instruction,
-        nextbb: &aot_ir::BBlockId,
-        cond: &aot_ir::Operand,
-        true_bb: &aot_ir::BBlockIdx,
-    ) -> Result<(), CompilationError> {
-        // Temporarily push a frame with the conditions stackmap.
-        // Find live variables in the current stack frame and add them into the guard.
-        let mut smids = Vec::new(); // List of stackmap ids of the current call stack.
-        let mut live_args = Vec::new(); // List of live JIT variables.
-
+    ) -> Result<jit_ir::GuardInst, CompilationError> {
         // Assign this branch's stackmap to the current frame.
         self.frames.last_mut().unwrap().sm = Some(sm);
 
@@ -391,6 +407,8 @@ impl<'a> TraceBuilder<'a> {
         // conditional branch and collect stackmap IDs and live variables into vectors to store
         // inside the guard.
         // Unwrap safe as each frame at this point must have a stackmap associated with it.
+        let mut smids = Vec::new(); // List of stackmap ids of the current call stack.
+        let mut live_args = Vec::new(); // List of live JIT variables.
         for (sm, sm_args) in self.frames.iter().map(|f| (f.sm.unwrap(), &f.args)) {
             let aot_ir::Instruction::DeoptSafepoint { id, lives, .. } = sm else {
                 panic!();
@@ -427,14 +445,20 @@ impl<'a> TraceBuilder<'a> {
 
         let gi = jit_ir::GuardInfo::new(smids, live_args);
         let gi_idx = self.jit_mod.push_guardinfo(gi)?;
-        let expect = *true_bb == nextbb.bb_idx();
 
-        let jit_cond = match cond {
-            aot_ir::Operand::LocalVariable(iid) => self.local_map[iid],
-            _ => panic!(),
-        };
+        Ok(jit_ir::GuardInst::new(cond.clone(), expect, gi_idx))
+    }
 
-        let guard = jit_ir::GuardInst::new(jit_ir::Operand::Local(jit_cond), expect, gi_idx);
+    /// Translate a conditional `Br` instruction.
+    fn handle_condbr(
+        &mut self,
+        sm: &'a aot_ir::Instruction,
+        next_bb: &aot_ir::BBlockId,
+        cond: &aot_ir::Operand,
+        true_bb: &aot_ir::BBlockIdx,
+    ) -> Result<(), CompilationError> {
+        let jit_cond = self.handle_operand(cond)?;
+        let guard = self.create_guard(&jit_cond, *true_bb == next_bb.bb_idx(), sm)?;
         self.jit_mod.push(guard.into())?;
         Ok(())
     }
@@ -473,9 +497,12 @@ impl<'a> TraceBuilder<'a> {
         ptr: &aot_ir::Operand,
         type_idx: &aot_ir::TypeIdx,
     ) -> Result<(), CompilationError> {
-        let instr =
-            jit_ir::LoadInst::new(self.handle_operand(ptr)?, self.handle_type(*type_idx)?).into();
-        self.copy_instruction(instr, bid, aot_inst_idx)
+        let inst = jit_ir::LoadInst::new(
+            self.handle_operand(ptr)?,
+            self.handle_type(self.aot_mod.type_(*type_idx))?,
+        )
+        .into();
+        self.copy_instruction(inst, bid, aot_inst_idx)
     }
 
     fn handle_call(
@@ -615,10 +642,113 @@ impl<'a> TraceBuilder<'a> {
         let instr = match cast_kind {
             aot_ir::CastKind::SignExtend => jit_ir::SignExtendInst::new(
                 &self.handle_operand(val)?,
-                self.handle_type(*dest_type_idx)?,
+                self.handle_type(self.aot_mod.type_(*dest_type_idx))?,
             ),
         };
         self.copy_instruction(instr.into(), bid, aot_inst_idx)
+    }
+
+    fn handle_switch(
+        &mut self,
+        bid: &aot_ir::BBlockId,
+        aot_inst_idx: usize,
+        sm: &'a aot_ir::Instruction,
+        next_bb: &aot_ir::BBlockId,
+        test_val: &aot_ir::Operand,
+        _default_dest: &aot_ir::BBlockIdx,
+        case_values: &Vec<u64>,
+        case_dests: &Vec<aot_ir::BBlockIdx>,
+    ) -> Result<(), CompilationError> {
+        if case_values.len() == 0 {
+            // Degenerate switch. Not sure it can even happen.
+            panic!();
+        }
+
+        // Find the JIT type of the value being tested.
+        let jit_type_idx = self.handle_type(test_val.type_(self.aot_mod))?;
+        let jit_int_type = match self.jit_mod.type_(jit_type_idx) {
+            jit_ir::Ty::Integer(it) => it,
+            _ => unreachable!(),
+        }
+        .to_owned();
+
+        // Find out which case we traced.
+        let guard = match case_dests.iter().position(|&cd| cd == next_bb.bb_idx()) {
+            Some(cidx) => {
+                // A non-default case was traced.
+                let val = case_values[cidx];
+                let bb = case_dests[cidx];
+
+                // Build the constant value to guard.
+                let jit_const = jit_int_type
+                    .to_owned()
+                    .make_constant(&mut self.jit_mod, val)?;
+                let jit_const_opnd = jit_ir::Operand::Const(self.jit_mod.const_idx(&jit_const)?);
+
+                // Perform the comparison.
+                let jit_test_val = self.handle_operand(test_val)?;
+                let cmp_inst =
+                    jit_ir::IcmpInst::new(jit_test_val, jit_ir::Predicate::Equal, jit_const_opnd);
+                let jit_cond = self.jit_mod.push_and_make_operand(cmp_inst.into())?;
+
+                // Guard the result of the comparison.
+                self.create_guard(&jit_cond, bb == next_bb.bb_idx(), sm)?
+            }
+            None => {
+                // The default case was traced.
+                //
+                // We need a guard that expresses that `test_val` was not any of the `case_values`.
+                // We encode this in the JIT IR like:
+                //
+                //     member = test_val == case_val1 || ... || test_val == case_valN
+                //     guard member == 0
+                //
+                // OPT: This could be much more efficient if we introduced a special "none of these
+                // values" guard. It could codegen the comparisons into a bitfield and efficiently
+                // bitwise OR a whole word's worth of comparison outcomes at once.
+                //
+                // OPT: Also depending on the shape of the cases you may be able to optimise. e.g.
+                // if they are a consecutive run, you could do a range check instead of all of
+                // these comparisons.
+                let mut cmps_opnds = Vec::new();
+                for cv in case_values {
+                    // Build a constant of the case value.
+                    let jit_const = jit_int_type
+                        .to_owned()
+                        .make_constant(&mut self.jit_mod, *cv)?;
+                    let jit_const_opnd =
+                        jit_ir::Operand::Const(self.jit_mod.const_idx(&jit_const)?);
+
+                    // Do the comparison.
+                    let jit_test_val = self.handle_operand(test_val)?;
+                    let cmp = jit_ir::IcmpInst::new(
+                        jit_test_val,
+                        jit_ir::Predicate::Equal,
+                        jit_const_opnd,
+                    );
+                    cmps_opnds.push(self.jit_mod.push_and_make_operand(cmp.into())?);
+                }
+
+                // OR together all the equality tests.
+                let mut jit_cond = None;
+                for cmp in cmps_opnds {
+                    if jit_cond.is_none() {
+                        jit_cond = Some(cmp);
+                    } else {
+                        // unwrap can't fail due to the above.
+                        let lhs = jit_cond.take().unwrap();
+                        let and = jit_ir::OrInst::new(lhs, cmp);
+                        jit_cond = Some(self.jit_mod.push_and_make_operand(and.into())?);
+                    }
+                }
+
+                // Guard the result of ORing all the comparisons together.
+                // unwrap can't fail: we already disregarded degenerate switches with no
+                // non-default cases.
+                self.create_guard(&jit_cond.unwrap(), false, sm)?
+            }
+        };
+        self.copy_instruction(guard.into(), bid, aot_inst_idx)
     }
 
     /// Entry point for building an IR trace.
