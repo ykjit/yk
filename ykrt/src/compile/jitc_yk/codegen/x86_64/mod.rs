@@ -266,75 +266,6 @@ impl<'a> X64CodeGen<'a> {
         }
     }
 
-    /// Load a local variable out of its stack slot into the specified register.
-    fn load_local(&mut self, reg: Rq, local: InstIdx) {
-        match self.ra.allocation(local) {
-            LocalAlloc::Stack { frame_off, size: _ } => {
-                match i32::try_from(*frame_off) {
-                    Ok(foff) => {
-                        let size = self.m.inst(local).def_byte_size(self.m);
-                        // We use `movzx` where possible to avoid partial register stalls.
-                        match size {
-                            1 => dynasm!(self.asm; movzx Rq(reg.code()), BYTE [rbp - foff]),
-                            2 => dynasm!(self.asm; movzx Rq(reg.code()), WORD [rbp - foff]),
-                            4 => dynasm!(self.asm; mov Rd(reg.code()), [rbp - foff]),
-                            8 => dynasm!(self.asm; mov Rq(reg.code()), [rbp - foff]),
-                            _ => todo!(),
-                        }
-                    }
-                    Err(_) => todo!(),
-                }
-            }
-            LocalAlloc::Register => todo!(),
-        }
-    }
-
-    /// Load a constant into the specified register.
-    fn load_const(&mut self, reg: Rq, cidx: jit_ir::ConstIdx) {
-        let cst = self.m.const_(cidx);
-        let mut bytes = cst.bytes().as_slice();
-        let size = self.m.type_(cst.ty_idx()).byte_size().unwrap();
-        debug_assert_eq!(bytes.len(), size);
-        match size {
-            8 => {
-                let val = bytes.read_i64::<NativeEndian>().unwrap();
-                dynasm!(self.asm; mov Rq(reg.code()), QWORD val);
-            }
-            4 => {
-                let val = bytes.read_i32::<NativeEndian>().unwrap();
-                dynasm!(self.asm; mov Rq(reg.code()), DWORD val);
-            }
-            1 => {
-                let val = bytes.read_i8().unwrap();
-                dynasm!(self.asm; mov Rq(reg.code()), val as i32);
-            }
-            _ => todo!("{}", size),
-        };
-    }
-
-    fn store_local(&mut self, l: &LocalAlloc, reg: Rq, size: usize) {
-        match l {
-            LocalAlloc::Stack { frame_off, size: _ } => match i32::try_from(*frame_off) {
-                Ok(off) => match size {
-                    8 => dynasm!(self.asm ; mov [rbp - off], Rq(reg.code())),
-                    4 => dynasm!(self.asm ; mov [rbp - off], Rd(reg.code())),
-                    2 => dynasm!(self.asm ; mov [rbp - off], Rw(reg.code())),
-                    1 => dynasm!(self.asm ; mov [rbp - off], Rb(reg.code())),
-                    _ => todo!("{}", size),
-                },
-                Err(_) => todo!("{}", size),
-            },
-            LocalAlloc::Register => todo!(),
-        }
-    }
-
-    /// Store a value held in a register into a new local variable.
-    fn store_new_local(&mut self, local: InstIdx, reg: Rq) {
-        let size = self.m.inst(local).def_byte_size(self.m);
-        let l = self.ra.allocate(local, size, &mut self.stack);
-        self.store_local(&l, reg, size);
-    }
-
     fn cg_add(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::AddInst) {
         let lhs = inst.lhs();
         let rhs = inst.rhs();
@@ -662,6 +593,75 @@ impl<'a> X64CodeGen<'a> {
             Operand::Local(li) => self.load_local(reg, *li),
             Operand::Const(c) => self.load_const(reg, *c),
         }
+    }
+
+    /// Load a local variable out of its stack slot into the specified register.
+    fn load_local(&mut self, reg: Rq, local: InstIdx) {
+        match self.ra.allocation(local) {
+            LocalAlloc::Stack { frame_off, size: _ } => {
+                match i32::try_from(*frame_off) {
+                    Ok(foff) => {
+                        let size = self.m.inst(local).def_byte_size(self.m);
+                        // We use `movzx` where possible to avoid partial register stalls.
+                        match size {
+                            1 => dynasm!(self.asm; movzx Rq(reg.code()), BYTE [rbp - foff]),
+                            2 => dynasm!(self.asm; movzx Rq(reg.code()), WORD [rbp - foff]),
+                            4 => dynasm!(self.asm; mov Rd(reg.code()), [rbp - foff]),
+                            8 => dynasm!(self.asm; mov Rq(reg.code()), [rbp - foff]),
+                            _ => todo!(),
+                        }
+                    }
+                    Err(_) => todo!(),
+                }
+            }
+            LocalAlloc::Register => todo!(),
+        }
+    }
+
+    /// Load a constant into the specified register.
+    fn load_const(&mut self, reg: Rq, cidx: jit_ir::ConstIdx) {
+        let cst = self.m.const_(cidx);
+        let mut bytes = cst.bytes().as_slice();
+        let size = self.m.type_(cst.ty_idx()).byte_size().unwrap();
+        debug_assert_eq!(bytes.len(), size);
+        match size {
+            8 => {
+                let val = bytes.read_i64::<NativeEndian>().unwrap();
+                dynasm!(self.asm; mov Rq(reg.code()), QWORD val);
+            }
+            4 => {
+                let val = bytes.read_i32::<NativeEndian>().unwrap();
+                dynasm!(self.asm; mov Rq(reg.code()), DWORD val);
+            }
+            1 => {
+                let val = bytes.read_i8().unwrap();
+                dynasm!(self.asm; mov Rq(reg.code()), val as i32);
+            }
+            _ => todo!("{}", size),
+        };
+    }
+
+    fn store_local(&mut self, l: &LocalAlloc, reg: Rq, size: usize) {
+        match l {
+            LocalAlloc::Stack { frame_off, size: _ } => match i32::try_from(*frame_off) {
+                Ok(off) => match size {
+                    8 => dynasm!(self.asm ; mov [rbp - off], Rq(reg.code())),
+                    4 => dynasm!(self.asm ; mov [rbp - off], Rd(reg.code())),
+                    2 => dynasm!(self.asm ; mov [rbp - off], Rw(reg.code())),
+                    1 => dynasm!(self.asm ; mov [rbp - off], Rb(reg.code())),
+                    _ => todo!("{}", size),
+                },
+                Err(_) => todo!("{}", size),
+            },
+            LocalAlloc::Register => todo!(),
+        }
+    }
+
+    /// Store a value held in a register into a new local variable.
+    fn store_new_local(&mut self, local: InstIdx, reg: Rq) {
+        let size = self.m.inst(local).def_byte_size(self.m);
+        let l = self.ra.allocate(local, size, &mut self.stack);
+        self.store_local(&l, reg, size);
     }
 }
 
