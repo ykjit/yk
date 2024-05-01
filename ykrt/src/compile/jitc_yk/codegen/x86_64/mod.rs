@@ -341,8 +341,8 @@ impl<'a> X64CodeGen<'a> {
         // Operand types must be the same.
         debug_assert_eq!(lhs.type_(self.m), rhs.type_(self.m));
 
-        self.operand_into_reg(WR0, &lhs); // FIXME: assumes value will fit in a reg.
-        self.operand_into_reg(WR1, &rhs); // ^^^ same
+        self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
+        self.load_operand(WR1, &rhs); // ^^^ same
 
         match lhs.byte_size(self.m) {
             8 => dynasm!(self.asm; add Rq(WR0.code()), Rq(WR1.code())),
@@ -362,8 +362,8 @@ impl<'a> X64CodeGen<'a> {
         // Operand types must be the same.
         debug_assert_eq!(lhs.type_(self.m), rhs.type_(self.m));
 
-        self.operand_into_reg(WR0, &lhs); // FIXME: assumes value will fit in a reg.
-        self.operand_into_reg(WR1, &rhs); // ^^^ same
+        self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
+        self.load_operand(WR1, &rhs); // ^^^ same
 
         match lhs.byte_size(self.m) {
             8 => dynasm!(self.asm; and Rq(WR0.code()), Rq(WR1.code())),
@@ -399,7 +399,7 @@ impl<'a> X64CodeGen<'a> {
     }
 
     fn cg_load(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::LoadInst) {
-        self.operand_into_reg(WR0, &inst.operand()); // FIXME: assumes value will fit in a reg.
+        self.load_operand(WR0, &inst.operand()); // FIXME: assumes value will fit in a reg.
         let size = self.m.inst(inst_idx).def_byte_size(self.m);
         debug_assert!(size <= REG64_SIZE);
         match size {
@@ -413,7 +413,7 @@ impl<'a> X64CodeGen<'a> {
     }
 
     fn cg_ptradd(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::PtrAddInst) {
-        self.operand_into_reg(WR0, &inst.ptr());
+        self.load_operand(WR0, &inst.ptr());
         let off = inst.offset();
         // unwrap cannot fail
         if off <= u32::try_from(i32::MAX).unwrap() {
@@ -426,9 +426,9 @@ impl<'a> X64CodeGen<'a> {
     }
 
     fn cg_store(&mut self, inst: &jit_ir::StoreInst) {
-        self.operand_into_reg(WR0, &inst.ptr());
+        self.load_operand(WR0, &inst.ptr());
         let val = inst.val();
-        self.operand_into_reg(WR1, &val); // FIXME: assumes the value fits in a reg
+        self.load_operand(WR1, &val); // FIXME: assumes the value fits in a reg
         match val.byte_size(self.m) {
             8 => dynasm!(self.asm ; mov [Rq(WR0.code())], Rq(WR1.code())),
             4 => dynasm!(self.asm ; mov [Rq(WR0.code())], Rd(WR1.code())),
@@ -484,7 +484,7 @@ impl<'a> X64CodeGen<'a> {
                 i >= fty.num_args() || op.type_(self.m) == fty.arg_type(self.m, i),
                 "argument type mismatch in call"
             );
-            self.operand_into_reg(reg, op);
+            self.load_operand(reg, op);
         }
 
         // unwrap safe on account of linker symbol names not containing internal NULL bytes.
@@ -538,8 +538,8 @@ impl<'a> X64CodeGen<'a> {
         );
 
         // FIXME: assumes values fit in a registers
-        self.operand_into_reg(WR0, &left);
-        self.operand_into_reg(WR1, &right);
+        self.load_operand(WR0, &left);
+        self.load_operand(WR1, &right);
 
         // Perform the comparison.
         match left.byte_size(self.m) {
@@ -583,7 +583,7 @@ impl<'a> X64CodeGen<'a> {
 
     fn cg_assign(&mut self, inst_idx: InstIdx, i: &jit_ir::AssignInst) {
         // Naive implementation.
-        self.operand_into_reg(WR0, &i.opnd());
+        self.load_operand(WR0, &i.opnd());
         self.reg_into_new_local(inst_idx, WR0);
     }
 
@@ -606,7 +606,7 @@ impl<'a> X64CodeGen<'a> {
         debug_assert!(from_size < to_size);
 
         // FIXME: assumes the input and output fit in a register.
-        self.operand_into_reg(WR0, &from_val);
+        self.load_operand(WR0, &from_val);
 
         match (from_size, to_size) {
             (1, 8) => dynasm!(self.asm; movsx Rq(WR0.code()), Rb(WR0.code())),
@@ -656,7 +656,7 @@ impl<'a> X64CodeGen<'a> {
     }
 
     /// Load an operand into a register.
-    fn operand_into_reg(&mut self, reg: Rq, op: &Operand) {
+    fn load_operand(&mut self, reg: Rq, op: &Operand) {
         match op {
             Operand::Local(li) => self.load_local(reg, *li),
             Operand::Const(c) => self.load_const(reg, *c),
