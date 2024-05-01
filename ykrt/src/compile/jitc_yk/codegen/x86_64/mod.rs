@@ -1,7 +1,8 @@
 //! The X86_64 JIT Code Generator.
 //!
 //! Conventions used in this module:
-//!   * Functions with a `cg_` prefix take in a [jit_ir] construct.
+//!   * Functions with a `cg_X` prefix generate code for a [jit_ir] construct `X`.
+//!   * Helper functions arguments are in order `(<destination>, <source_1>, ... <source_n>)`.
 //!
 //! FIXME: the code generator clobbers registers willy-nilly because at the time of writing we have
 //! a register allocator that doesn't actually use any registers. Later we will have to audit the
@@ -328,7 +329,7 @@ impl<'a> X64CodeGen<'a> {
     }
 
     /// Store a value held in a register into a new local variable.
-    fn reg_into_new_local(&mut self, local: InstIdx, reg: Rq) {
+    fn store_new_local(&mut self, local: InstIdx, reg: Rq) {
         let size = self.m.inst(local).def_byte_size(self.m);
         let l = self.ra.allocate(local, size, &mut self.stack);
         self.store_local(&l, reg, size);
@@ -352,7 +353,7 @@ impl<'a> X64CodeGen<'a> {
             _ => todo!(),
         }
 
-        self.reg_into_new_local(inst_idx, WR0);
+        self.store_new_local(inst_idx, WR0);
     }
 
     fn cg_or(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::OrInst) {
@@ -373,7 +374,7 @@ impl<'a> X64CodeGen<'a> {
             _ => todo!(),
         }
 
-        self.reg_into_new_local(inst_idx, WR0);
+        self.store_new_local(inst_idx, WR0);
     }
 
     fn cg_loadtraceinput(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::LoadTraceInputInst) {
@@ -392,7 +393,7 @@ impl<'a> X64CodeGen<'a> {
                     1 => dynasm!(self.asm ; movzx Rq(WR0.code()), BYTE [Rq(base_reg) + off]),
                     _ => todo!("{}", size),
                 };
-                self.reg_into_new_local(inst_idx, WR0);
+                self.store_new_local(inst_idx, WR0);
             }
             _ => todo!(),
         }
@@ -409,7 +410,7 @@ impl<'a> X64CodeGen<'a> {
             1 => dynasm!(self.asm ; movzx Rq(WR0.code()), BYTE [Rq(WR0.code())]),
             _ => todo!("{}", size),
         };
-        self.reg_into_new_local(inst_idx, WR0);
+        self.store_new_local(inst_idx, WR0);
     }
 
     fn cg_ptradd(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::PtrAddInst) {
@@ -422,7 +423,7 @@ impl<'a> X64CodeGen<'a> {
         } else {
             todo!();
         }
-        self.reg_into_new_local(inst_idx, WR0);
+        self.store_new_local(inst_idx, WR0);
     }
 
     fn cg_store(&mut self, inst: &jit_ir::StoreInst) {
@@ -446,7 +447,7 @@ impl<'a> X64CodeGen<'a> {
         }
         let sym_addr = self.m.globalvar_ptr(inst.global_decl_idx()).addr();
         dynasm!(self.asm ; mov Rq(WR0.code()), QWORD i64::try_from(sym_addr).unwrap());
-        self.reg_into_new_local(inst_idx, WR0);
+        self.store_new_local(inst_idx, WR0);
     }
 
     #[cfg(test)]
@@ -502,7 +503,7 @@ impl<'a> X64CodeGen<'a> {
 
         // If the function we called has a return value, then store it into a local variable.
         if fty.ret_type(self.m) != &Ty::Void {
-            self.reg_into_new_local(inst_idx, Rq::RAX);
+            self.store_new_local(inst_idx, Rq::RAX);
         }
 
         Ok(())
@@ -572,19 +573,19 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Predicate::SignedLessEqual => dynasm!(self.asm; setle Rb(WR0.code())),
             // Note: when float predicates added: `_ => panic!()`
         }
-        self.reg_into_new_local(inst_idx, WR0);
+        self.store_new_local(inst_idx, WR0);
     }
 
     fn cg_arg(&mut self, inst_idx: InstIdx, idx: u16) {
         // For arguments passed into the trace function we simply inform the register allocator
         // where they are stored and let the allocator take things from there.
-        self.reg_into_new_local(inst_idx, ARG_REGS[usize::from(idx)]);
+        self.store_new_local(inst_idx, ARG_REGS[usize::from(idx)]);
     }
 
     fn cg_assign(&mut self, inst_idx: InstIdx, i: &jit_ir::AssignInst) {
         // Naive implementation.
         self.load_operand(WR0, &i.opnd());
-        self.reg_into_new_local(inst_idx, WR0);
+        self.store_new_local(inst_idx, WR0);
     }
 
     fn cg_traceloopstart(&mut self) {
@@ -614,7 +615,7 @@ impl<'a> X64CodeGen<'a> {
             _ => todo!(),
         }
 
-        self.reg_into_new_local(inst_idx, WR0);
+        self.store_new_local(inst_idx, WR0);
     }
 
     #[allow(clippy::fn_to_numeric_cast)]
