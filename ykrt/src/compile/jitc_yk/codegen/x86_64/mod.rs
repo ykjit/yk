@@ -1,5 +1,8 @@
 //! The X86_64 JIT Code Generator.
 //!
+//! Conventions used in this module:
+//!   * Functions with a `cg_` prefix take in a [jit_ir] construct.
+//!
 //! FIXME: the code generator clobbers registers willy-nilly because at the time of writing we have
 //! a register allocator that doesn't actually use any registers. Later we will have to audit the
 //! backend and insert register save/restore for clobbered registers.
@@ -101,7 +104,7 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
         let alloc_off = self.emit_prologue();
 
         for (idx, inst) in self.m.insts().iter().enumerate() {
-            self.codegen_inst(jit_ir::InstIdx::new(idx)?, inst)?;
+            self.cg_inst(jit_ir::InstIdx::new(idx)?, inst)?;
         }
 
         // Loop the JITted code if the backedge target label is present.
@@ -154,7 +157,7 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
 
 impl<'a> X64CodeGen<'a> {
     /// Codegen an instruction.
-    fn codegen_inst(
+    fn cg_inst(
         &mut self,
         inst_idx: jit_ir::InstIdx,
         inst: &jit_ir::Inst,
@@ -166,21 +169,21 @@ impl<'a> X64CodeGen<'a> {
         );
 
         match inst {
-            jit_ir::Inst::LoadTraceInput(i) => self.codegen_loadtraceinput_inst(inst_idx, i),
-            jit_ir::Inst::Load(i) => self.codegen_load_inst(inst_idx, i),
-            jit_ir::Inst::PtrAdd(i) => self.codegen_ptradd_inst(inst_idx, i),
-            jit_ir::Inst::Store(i) => self.codegen_store_inst(i),
-            jit_ir::Inst::LookupGlobal(i) => self.codegen_lookupglobal_inst(inst_idx, i),
-            jit_ir::Inst::Call(i) => self.codegen_call_inst(inst_idx, i)?,
-            jit_ir::Inst::Icmp(i) => self.codegen_icmp_inst(inst_idx, i),
-            jit_ir::Inst::Guard(i) => self.codegen_guard_inst(i),
-            jit_ir::Inst::Arg(i) => self.codegen_arg(inst_idx, *i),
-            jit_ir::Inst::Assign(i) => self.codegen_assign(inst_idx, i),
-            jit_ir::Inst::TraceLoopStart => self.codegen_traceloopstart_inst(),
-            jit_ir::Inst::SignExtend(i) => self.codegen_signextend_inst(inst_idx, i),
+            jit_ir::Inst::LoadTraceInput(i) => self.cg_loadtraceinput(inst_idx, i),
+            jit_ir::Inst::Load(i) => self.cg_load(inst_idx, i),
+            jit_ir::Inst::PtrAdd(i) => self.cg_ptradd(inst_idx, i),
+            jit_ir::Inst::Store(i) => self.cg_store(i),
+            jit_ir::Inst::LookupGlobal(i) => self.cg_lookupglobal(inst_idx, i),
+            jit_ir::Inst::Call(i) => self.cg_call(inst_idx, i)?,
+            jit_ir::Inst::Icmp(i) => self.cg_icmp(inst_idx, i),
+            jit_ir::Inst::Guard(i) => self.cg_guard(i),
+            jit_ir::Inst::Arg(i) => self.cg_arg(inst_idx, *i),
+            jit_ir::Inst::Assign(i) => self.cg_assign(inst_idx, i),
+            jit_ir::Inst::TraceLoopStart => self.cg_traceloopstart(),
+            jit_ir::Inst::SignExtend(i) => self.cg_signextend(inst_idx, i),
             // Binary operations
-            jit_ir::Inst::Add(i) => self.codegen_add_inst(inst_idx, i),
-            jit_ir::Inst::Or(i) => self.codegen_or_inst(inst_idx, i),
+            jit_ir::Inst::Add(i) => self.cg_add(inst_idx, i),
+            jit_ir::Inst::Or(i) => self.cg_or(inst_idx, i),
             x => todo!("{x:?}"),
         }
         Ok(())
@@ -331,7 +334,7 @@ impl<'a> X64CodeGen<'a> {
         self.store_local(&l, reg, size);
     }
 
-    fn codegen_add_inst(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::AddInst) {
+    fn cg_add(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::AddInst) {
         let lhs = inst.lhs();
         let rhs = inst.rhs();
 
@@ -352,7 +355,7 @@ impl<'a> X64CodeGen<'a> {
         self.reg_into_new_local(inst_idx, WR0);
     }
 
-    fn codegen_or_inst(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::OrInst) {
+    fn cg_or(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::OrInst) {
         let lhs = inst.lhs();
         let rhs = inst.rhs();
 
@@ -373,11 +376,7 @@ impl<'a> X64CodeGen<'a> {
         self.reg_into_new_local(inst_idx, WR0);
     }
 
-    fn codegen_loadtraceinput_inst(
-        &mut self,
-        inst_idx: jit_ir::InstIdx,
-        inst: &jit_ir::LoadTraceInputInst,
-    ) {
+    fn cg_loadtraceinput(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::LoadTraceInputInst) {
         // Find the argument register containing the pointer to the live variables struct.
         let base_reg = ARG_REGS[JITFUNC_LIVEVARS_ARGIDX].code();
 
@@ -399,7 +398,7 @@ impl<'a> X64CodeGen<'a> {
         }
     }
 
-    fn codegen_load_inst(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::LoadInst) {
+    fn cg_load(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::LoadInst) {
         self.operand_into_reg(WR0, &inst.operand()); // FIXME: assumes value will fit in a reg.
         let size = self.m.inst(inst_idx).def_byte_size(self.m);
         debug_assert!(size <= REG64_SIZE);
@@ -413,7 +412,7 @@ impl<'a> X64CodeGen<'a> {
         self.reg_into_new_local(inst_idx, WR0);
     }
 
-    fn codegen_ptradd_inst(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::PtrAddInst) {
+    fn cg_ptradd(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::PtrAddInst) {
         self.operand_into_reg(WR0, &inst.ptr());
         let off = inst.offset();
         // unwrap cannot fail
@@ -426,7 +425,7 @@ impl<'a> X64CodeGen<'a> {
         self.reg_into_new_local(inst_idx, WR0);
     }
 
-    fn codegen_store_inst(&mut self, inst: &jit_ir::StoreInst) {
+    fn cg_store(&mut self, inst: &jit_ir::StoreInst) {
         self.operand_into_reg(WR0, &inst.ptr());
         let val = inst.val();
         self.operand_into_reg(WR1, &val); // FIXME: assumes the value fits in a reg
@@ -440,11 +439,7 @@ impl<'a> X64CodeGen<'a> {
     }
 
     #[cfg(not(test))]
-    fn codegen_lookupglobal_inst(
-        &mut self,
-        inst_idx: jit_ir::InstIdx,
-        inst: &jit_ir::LookupGlobalInst,
-    ) {
+    fn cg_lookupglobal(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::LookupGlobalInst) {
         let decl = inst.decl(self.m);
         if decl.is_threadlocal() {
             todo!();
@@ -455,11 +450,7 @@ impl<'a> X64CodeGen<'a> {
     }
 
     #[cfg(test)]
-    fn codegen_lookupglobal_inst(
-        &mut self,
-        _inst_idx: jit_ir::InstIdx,
-        _inst: &jit_ir::LookupGlobalInst,
-    ) {
+    fn cg_lookupglobal(&mut self, _inst_idx: jit_ir::InstIdx, _inst: &jit_ir::LookupGlobalInst) {
         panic!("Cannot lookup globals in cfg(test) as ykllvm will not have compiled this binary");
     }
 
@@ -518,7 +509,7 @@ impl<'a> X64CodeGen<'a> {
     }
 
     /// Codegen a (non-varargs) call.
-    fn codegen_call_inst(
+    fn cg_call(
         &mut self,
         inst_idx: InstIdx,
         inst: &jit_ir::CallInst,
@@ -530,7 +521,7 @@ impl<'a> X64CodeGen<'a> {
         self.emit_call(inst_idx, func_decl_idx, &args)
     }
 
-    fn codegen_icmp_inst(&mut self, inst_idx: InstIdx, inst: &jit_ir::IcmpInst) {
+    fn cg_icmp(&mut self, inst_idx: InstIdx, inst: &jit_ir::IcmpInst) {
         let (left, pred, right) = (inst.left(), inst.predicate(), inst.right());
 
         // FIXME: We should be checking type equality here, but since constants currently don't
@@ -584,24 +575,24 @@ impl<'a> X64CodeGen<'a> {
         self.reg_into_new_local(inst_idx, WR0);
     }
 
-    fn codegen_arg(&mut self, inst_idx: InstIdx, idx: u16) {
+    fn cg_arg(&mut self, inst_idx: InstIdx, idx: u16) {
         // For arguments passed into the trace function we simply inform the register allocator
         // where they are stored and let the allocator take things from there.
         self.reg_into_new_local(inst_idx, ARG_REGS[usize::from(idx)]);
     }
 
-    fn codegen_assign(&mut self, inst_idx: InstIdx, i: &jit_ir::AssignInst) {
+    fn cg_assign(&mut self, inst_idx: InstIdx, i: &jit_ir::AssignInst) {
         // Naive implementation.
         self.operand_into_reg(WR0, &i.opnd());
         self.reg_into_new_local(inst_idx, WR0);
     }
 
-    fn codegen_traceloopstart_inst(&mut self) {
+    fn cg_traceloopstart(&mut self) {
         // FIXME: peel the initial iteration of the loop to allow us to hoist loop invariants.
         dynasm!(self.asm; ->trace_loop_start:);
     }
 
-    fn codegen_signextend_inst(&mut self, inst_idx: InstIdx, i: &jit_ir::SignExtendInst) {
+    fn cg_signextend(&mut self, inst_idx: InstIdx, i: &jit_ir::SignExtendInst) {
         let from_val = i.val();
         let from_type = from_val.type_(self.m);
         let from_size = from_type.byte_size().unwrap();
@@ -627,7 +618,7 @@ impl<'a> X64CodeGen<'a> {
     }
 
     #[allow(clippy::fn_to_numeric_cast)]
-    fn codegen_guard_inst(&mut self, inst: &jit_ir::GuardInst) {
+    fn cg_guard(&mut self, inst: &jit_ir::GuardInst) {
         let cond = inst.cond();
 
         // ICmp instructions evaluate to a one-byte zero/one value.
@@ -843,7 +834,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_load_ptr() {
+        fn cg_load_ptr() {
             let mut m = test_module();
             let ptr_ty_idx = m.ptr_ty_idx();
             let load_op = m
@@ -863,7 +854,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_load_i8() {
+        fn cg_load_i8() {
             let mut m = test_module();
             let i8_ty_idx = m.insert_ty(jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
             let load_op = m
@@ -883,7 +874,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_load_i32() {
+        fn cg_load_i32() {
             let mut m = test_module();
             let i32_ty_idx = m
                 .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(32)))
@@ -905,7 +896,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_ptradd() {
+        fn cg_ptradd() {
             let mut m = test_module();
             let ptr_ty_idx = m.ptr_ty_idx();
             let ti_op = m
@@ -924,7 +915,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_store_ptr() {
+        fn cg_store_ptr() {
             let mut m = test_module();
             let ptr_ty_idx = m.ptr_ty_idx();
             let ti1_op = m
@@ -947,7 +938,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_loadtraceinput_i8() {
+        fn cg_loadtraceinput_i8() {
             let mut m = test_module();
             let u8_ty_idx = m.insert_ty(jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
             m.push(jit_ir::LoadTraceInputInst::new(0, u8_ty_idx).into())
@@ -963,7 +954,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_loadtraceinput_i16_with_offset() {
+        fn cg_loadtraceinput_i16_with_offset() {
             let mut m = test_module();
             let u16_ty_idx = m
                 .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(16)))
@@ -981,7 +972,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_loadtraceinput_many_offset() {
+        fn cg_loadtraceinput_many_offset() {
             let mut m = test_module();
             let i8_ty_idx = m.insert_ty(jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
             let ptr_ty_idx = m.ptr_ty_idx();
@@ -1018,7 +1009,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_add_i16() {
+        fn cg_add_i16() {
             let mut m = test_module();
             let i16_ty_idx = m
                 .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(16)))
@@ -1043,7 +1034,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_add_i64() {
+        fn cg_add_i64() {
             let mut m = test_module();
             let i64_ty_idx = m
                 .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(64)))
@@ -1070,7 +1061,7 @@ mod tests {
         #[cfg(debug_assertions)]
         #[should_panic]
         #[test]
-        fn codegen_add_wrong_types() {
+        fn cg_add_wrong_types() {
             let mut m = test_module();
             let i64_ty_idx = m
                 .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(64)))
@@ -1103,7 +1094,7 @@ mod tests {
         const CALL_TESTS_CALLEE: &str = "puts";
 
         #[test]
-        fn codegen_call_simple() {
+        fn cg_call_simple() {
             let mut m = test_module();
             let void_ty_idx = m.void_ty_idx();
             let func_ty_idx = m
@@ -1127,7 +1118,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_call_with_args() {
+        fn cg_call_with_args() {
             let mut m = test_module();
             let void_ty_idx = m.void_ty_idx();
             let i32_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
@@ -1172,7 +1163,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_call_with_different_args() {
+        fn cg_call_with_different_args() {
             let mut m = test_module();
             let void_ty_idx = m.void_ty_idx();
             let i8_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(8))).unwrap();
@@ -1240,7 +1231,7 @@ mod tests {
 
         #[should_panic] // until we implement spill args
         #[test]
-        fn codegen_call_spill_args() {
+        fn cg_call_spill_args() {
             let mut m = test_module();
             let void_ty_idx = m.void_ty_idx();
             let i32_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
@@ -1271,7 +1262,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_call_ret() {
+        fn cg_call_ret() {
             let mut m = test_module();
             let i32_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
             let func_ty_idx = m
@@ -1298,7 +1289,7 @@ mod tests {
         #[cfg(debug_assertions)]
         #[should_panic(expected = "argument type mismatch in call")]
         #[test]
-        fn codegen_call_bad_arg_type() {
+        fn cg_call_bad_arg_type() {
             let mut m = test_module();
             let void_ty_idx = m.void_ty_idx();
             let i32_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
@@ -1329,7 +1320,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_icmp_i64() {
+        fn cg_icmp_i64() {
             let mut m = test_module();
             let i64_ty_idx = m
                 .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(64)))
@@ -1353,7 +1344,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_icmp_i8() {
+        fn cg_icmp_i8() {
             let mut m = test_module();
             let i8_ty_idx = m.insert_ty(jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
             let op = m
@@ -1377,7 +1368,7 @@ mod tests {
         #[cfg(debug_assertions)]
         #[test]
         #[should_panic(expected = "icmp of non-integer types")]
-        fn codegen_icmp_non_ints() {
+        fn cg_icmp_non_ints() {
             let mut m = test_module();
             let ptr_ty_idx = m.ptr_ty_idx();
             let op = m
@@ -1394,7 +1385,7 @@ mod tests {
         #[cfg(debug_assertions)]
         #[test]
         #[should_panic(expected = "icmp of differing types")]
-        fn codegen_icmp_diff_types() {
+        fn cg_icmp_diff_types() {
             let mut m = test_module();
             let i8_ty_idx = m.insert_ty(jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
             let i64_ty_idx = m
@@ -1415,7 +1406,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_guard_true() {
+        fn cg_guard_true() {
             let mut m = test_module();
             let gi = jit_ir::GuardInfo::new(vec![0], Vec::new());
             let gi_idx = m.push_guardinfo(gi).unwrap();
@@ -1441,7 +1432,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_guard_false() {
+        fn cg_guard_false() {
             let mut m = test_module();
             let gi = jit_ir::GuardInfo::new(vec![0], Vec::new());
             let gi_idx = m.push_guardinfo(gi).unwrap();
