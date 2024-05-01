@@ -206,8 +206,8 @@ impl InstructionID {
     }
 }
 
-/// Uniquely identifies a basic block within a [Func].
-#[derive(Debug, PartialEq)]
+/// Uniquely identifies a basic block within a [Module].
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct BBlockId {
     func_idx: FuncIdx,
     bb_idx: BBlockIdx,
@@ -472,6 +472,15 @@ pub(crate) enum Instruction {
         case_dests: Vec<BBlockIdx>,
         safepoint: DeoptSafepoint,
     },
+    #[deku(id = "14")]
+    Phi {
+        #[deku(temp)]
+        num_incoming: usize,
+        #[deku(count = "num_incoming")]
+        incoming_bbs: Vec<BBlockIdx>,
+        #[deku(count = "num_incoming")]
+        incoming_vals: Vec<Operand>,
+    },
     #[deku(id = "255")]
     Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "map_to_string")] String),
 }
@@ -528,6 +537,10 @@ impl Instruction {
             Self::Store { .. } => None,
             Self::Cast { dest_type_idx, .. } => Some(m.type_(*dest_type_idx)),
             Self::Switch { .. } => None,
+            Self::Phi { incoming_vals, .. } => {
+                // Indexing cannot crash: correct PHI nodes have at least one incoming value.
+                Some(incoming_vals[0].type_(m))
+            }
             Self::Unimplemented(_) => None,
             _ => todo!("{:?}", self),
         }
@@ -688,6 +701,17 @@ impl AotIRDisplay for Instruction {
                     cases.join(", "),
                     safepoint.to_string(m)
                 ));
+            }
+            Self::Phi {
+                incoming_vals,
+                incoming_bbs,
+            } => {
+                let args = incoming_bbs
+                    .iter()
+                    .zip(incoming_vals)
+                    .map(|(bb, val)| format!("bb{} -> {}", usize::from(*bb), val.to_string(m)))
+                    .collect::<Vec<_>>();
+                ret.push_str(&format!("phi {}", args.join(", ")));
             }
             Self::Unimplemented(s) => ret.push_str(&format!("unimplemented <<{}>>", s)),
             _ => todo!(),

@@ -833,7 +833,7 @@ impl Operand {
     pub(crate) fn ty_idx(&self, m: &Module) -> TyIdx {
         match self {
             Self::Local(l) => m.inst(*l).def_ty_idx(m),
-            Self::Const(_) => todo!(),
+            Self::Const(c) => m.const_(*c).ty_idx(),
         }
     }
 
@@ -941,6 +941,7 @@ pub enum Inst {
     Arg(u16),
     /// Marks the place to loop back to at the end of the JITted code.
     TraceLoopStart,
+    Assign(AssignInst),
 
     // Binary operations
     Add(AddInst),
@@ -993,6 +994,7 @@ impl Inst {
             Self::Arg(..) => m.ptr_ty_idx(),
             Self::TraceLoopStart => m.void_ty_idx(),
             Self::SignExtend(si) => si.dest_ty_idx(),
+            Self::Assign(ai) => ai.opnd().ty_idx(m),
             // Binary operations
             Self::Add(i) => i.ty_idx(m),
             Self::Or(i) => i.ty_idx(m),
@@ -1117,6 +1119,7 @@ impl fmt::Display for DisplayableInst<'_> {
                     i.rhs().display(self.m),
                 )
             }
+            Inst::Assign(i) => write!(f, "{}", i.opnd().display(self.m)),
             x => todo!("{x:?}"),
         }
     }
@@ -1141,6 +1144,7 @@ inst!(PtrAdd, PtrAddInst);
 inst!(Icmp, IcmpInst);
 inst!(Guard, GuardInst);
 inst!(SignExtend, SignExtendInst);
+inst!(Assign, AssignInst);
 
 /// The operands for a [Inst::Load]
 ///
@@ -1555,6 +1559,24 @@ impl SignExtendInst {
 
     pub(crate) fn dest_ty_idx(&self) -> TyIdx {
         self.dest_ty_idx
+    }
+}
+
+#[derive(Debug)]
+pub struct AssignInst {
+    /// The condition to guard against.
+    opnd: PackedOperand,
+}
+
+impl AssignInst {
+    pub(crate) fn new(opnd: &Operand) -> Self {
+        Self {
+            opnd: PackedOperand::new(opnd),
+        }
+    }
+
+    pub(crate) fn opnd(&self) -> Operand {
+        self.opnd.unpack()
     }
 }
 

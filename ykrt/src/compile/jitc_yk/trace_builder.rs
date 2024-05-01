@@ -191,6 +191,7 @@ impl<'a> TraceBuilder<'a> {
     fn process_block(
         &mut self,
         bid: aot_ir::BBlockId,
+        prevbb: &Option<aot_ir::BBlockId>,
         nextbb: Option<aot_ir::BBlockId>,
     ) -> Result<(), CompilationError> {
         // unwrap safe: can't trace a block not in the AOT module.
@@ -260,6 +261,19 @@ impl<'a> TraceBuilder<'a> {
                     case_values,
                     case_dests,
                 ),
+                aot_ir::Instruction::Phi {
+                    incoming_bbs,
+                    incoming_vals,
+                } => {
+                    debug_assert_eq!(prevbb.as_ref().unwrap().func_idx(), bid.func_idx());
+                    self.handle_phi(
+                        &bid,
+                        inst_idx,
+                        &prevbb.as_ref().unwrap().bb_idx(),
+                        incoming_bbs,
+                        incoming_vals,
+                    )
+                }
                 _ => todo!("{:?}", inst),
             }?;
         }
@@ -734,6 +748,20 @@ impl<'a> TraceBuilder<'a> {
         self.copy_instruction(guard.into(), bid, aot_inst_idx)
     }
 
+    fn handle_phi(
+        &mut self,
+        bid: &aot_ir::BBlockId,
+        aot_inst_idx: usize,
+        prev_bb: &aot_ir::BBlockIdx,
+        incoming_bbs: &[aot_ir::BBlockIdx],
+        incoming_vals: &[aot_ir::Operand],
+    ) -> Result<(), CompilationError> {
+        // If the IR is well-formed the indexing and unwrap() here will not fail.
+        let chosen_val = &incoming_vals[incoming_bbs.iter().position(|bb| bb == prev_bb).unwrap()];
+        let assign = jit_ir::AssignInst::new(&self.handle_operand(chosen_val)?);
+        self.copy_instruction(assign.into(), bid, aot_inst_idx)
+    }
+
     /// Entry point for building an IR trace.
     ///
     /// Consumes the trace builder, returning a JIT module.
@@ -776,7 +804,9 @@ impl<'a> TraceBuilder<'a> {
         // that doesn't exist in the AOT module.
         self.create_trace_header(self.aot_mod.bblock(self.cp_block.as_ref().unwrap()))?;
 
+        // FIXME: this section of code needs to be refactored.
         let mut last_blk_is_return = false;
+        let mut prev_bid = None;
         while let Some(tblk) = trace_iter.next() {
             match tblk {
                 Ok(b) => {
@@ -806,6 +836,7 @@ impl<'a> TraceBuilder<'a> {
                                     self.outline_target_blk = None;
                                 } else {
                                     // We are outlining so just skip this block.
+                                    prev_bid = Some(bid);
                                     continue;
                                 }
                             } else {
@@ -817,6 +848,7 @@ impl<'a> TraceBuilder<'a> {
                                     // FIXME: This only applies to the HWT as the SWT doesn't
                                     // record these extra blocks.
                                     last_blk_is_return = false;
+                                    prev_bid = Some(bid);
                                     continue;
                                 }
                                 if self.aot_mod.bblock(&bid).is_return() {
@@ -834,10 +866,12 @@ impl<'a> TraceBuilder<'a> {
                             } else {
                                 None
                             };
-                            self.process_block(bid, nextbb)?;
+                            self.process_block(bid.clone(), &prev_bid, nextbb)?;
+                            prev_bid = Some(bid);
                         }
                         None => {
                             // UnmappableBBlock block
+                            prev_bid = None;
                         }
                     }
                 }
