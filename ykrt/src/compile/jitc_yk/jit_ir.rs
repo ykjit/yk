@@ -54,13 +54,9 @@ pub(crate) struct Module {
     insts: Vec<Inst>, // FIXME: this should be a TiVec.
     /// The arguments pool for [CallInst]s. Indexed by [ArgsIdx].
     args: Vec<Operand>,
-    /// The constant pool.
-    ///
-    /// A [ConstIdx] describes an index into this.
+    /// The constant pool. Indexed by [ConstIdx].
     consts: IndexSet<Constant>,
-    /// The type pool.
-    ///
-    /// A [TyIdx] describes an index into this.
+    /// The type pool. Indexed by [TyIdx].
     types: IndexSet<Ty>,
     /// The type index of the void type. Cached for convenience.
     void_ty_idx: TyIdx,
@@ -68,12 +64,8 @@ pub(crate) struct Module {
     ptr_ty_idx: TyIdx,
     /// The type index of an 8-bit integer. Cached for convenience.
     int8_ty_idx: TyIdx,
-    /// The function declaration pool.
-    ///
-    /// These are declarations of externally compiled functions that the JITted trace might need to
-    /// call.
-    ///
-    /// A [FuncDeclIdx] is an index into this.
+    /// The function declaration pool. These are declarations of externally compiled functions that
+    /// the JITted trace might need to call. Indexed by [FuncDeclIdx].
     func_decls: IndexSet<FuncDecl>,
     /// The global variable declaration table.
     ///
