@@ -52,19 +52,11 @@ pub(crate) struct Module {
     ctr_id: u64,
     /// The IR trace as a linear sequence of instructions.
     insts: Vec<Inst>, // FIXME: this should be a TiVec.
-    /// The extra argument table.
-    ///
-    /// Used when a [CallInst]'s arguments don't fit inline.
-    ///
-    /// An [ExtraArgsIdx] describes an index into this.
-    extra_args: Vec<Operand>,
-    /// The constant pool.
-    ///
-    /// A [ConstIdx] describes an index into this.
+    /// The arguments pool for [CallInst]s. Indexed by [ArgsIdx].
+    args: Vec<Operand>,
+    /// The constant pool. Indexed by [ConstIdx].
     consts: IndexSet<Constant>,
-    /// The type pool.
-    ///
-    /// A [TyIdx] describes an index into this.
+    /// The type pool. Indexed by [TyIdx].
     types: IndexSet<Ty>,
     /// The type index of the void type. Cached for convenience.
     void_ty_idx: TyIdx,
@@ -72,12 +64,8 @@ pub(crate) struct Module {
     ptr_ty_idx: TyIdx,
     /// The type index of an 8-bit integer. Cached for convenience.
     int8_ty_idx: TyIdx,
-    /// The function declaration pool.
-    ///
-    /// These are declarations of externally compiled functions that the JITted trace might need to
-    /// call.
-    ///
-    /// A [FuncDeclIdx] is an index into this.
+    /// The function declaration pool. These are declarations of externally compiled functions that
+    /// the JITted trace might need to call. Indexed by [FuncDeclIdx].
     func_decls: IndexSet<FuncDecl>,
     /// The global variable declaration table.
     ///
@@ -135,7 +123,7 @@ impl Module {
         Ok(Self {
             ctr_id,
             insts: Vec::new(),
-            extra_args: Vec::new(),
+            args: Vec::new(),
             consts: IndexSet::new(),
             types,
             void_ty_idx,
@@ -238,16 +226,15 @@ impl Module {
         &self.insts
     }
 
-    /// Push a slice of extra arguments into the extra arg table.
+    /// Push a slice of arguments into the args pool.
     ///
     /// # Panics
     ///
-    /// If `ops` would overflow the index type.
-    fn push_extra_args(&mut self, ops: &[Operand]) -> Result<ExtraArgsIdx, CompilationError> {
-        assert!(ExtraArgsIdx::new(self.types.len()).is_ok());
-        let idx = self.extra_args.len();
-        self.extra_args.extend_from_slice(ops); // FIXME: this clones.
-        ExtraArgsIdx::new(idx)
+    /// If `args` would overflow the index type.
+    fn push_args(&mut self, args: Vec<Operand>) -> Result<ArgsIdx, CompilationError> {
+        let idx = self.args.len();
+        self.args.extend(args);
+        ArgsIdx::new(idx)
     }
 
     /// Add a [Ty] to the types pool and return its index. If the [Ty] already exists, an existing
@@ -599,12 +586,10 @@ index_24bit!(FuncDeclIdx);
 pub(crate) struct TyIdx(U24);
 index_24bit!(TyIdx);
 
-/// An extra argument index.
-///
-/// One of these is an index into the [Module::extra_args].
+/// An argument index. This denotes the start of a slice into [Module::args].
 #[derive(Copy, Clone, Debug, Default)]
-pub(crate) struct ExtraArgsIdx(u16);
-index_16bit!(ExtraArgsIdx);
+pub(crate) struct ArgsIdx(u16);
+index_16bit!(ArgsIdx);
 
 /// A constant index.
 ///
@@ -1286,30 +1271,30 @@ impl LookupGlobalInst {
 pub struct CallInst {
     /// The callee.
     target: FuncDeclIdx,
-    /// How many arguments in [Module::extra_args] is this call passing?
+    /// At what index do the contiguous operands in [Module::args] start?
+    args_idx: ArgsIdx,
+    /// How many arguments in [Module::args] is this call passing?
     num_args: u16,
-    /// At what index do the contiguous operands in [Module::extra_args] start?
-    extra_idx: ExtraArgsIdx,
 }
 
 impl CallInst {
     pub(crate) fn new(
         m: &mut Module,
         target: FuncDeclIdx,
-        args: &[Operand],
+        args: Vec<Operand>,
     ) -> Result<CallInst, CompilationError> {
-        let extra_idx = ExtraArgsIdx::new(m.extra_args.len())?;
-        m.push_extra_args(args)?;
+        let num_args = u16::try_from(args.len()).map_err(|_| {
+            CompilationError::LimitExceeded(format!(
+                "{} arguments passed but at most {} can be handled",
+                args.len(),
+                u16::MAX
+            ))
+        })?;
+        let args_idx = m.push_args(args)?;
         Ok(Self {
             target,
-            num_args: u16::try_from(args.len()).map_err(|_| {
-                CompilationError::LimitExceeded(format!(
-                    "{} arguments passed but at most {} can be handled",
-                    args.len(),
-                    u16::MAX
-                ))
-            })?,
-            extra_idx,
+            args_idx,
+            num_args,
         })
     }
 
@@ -1329,7 +1314,7 @@ impl CallInst {
     ///
     /// Panics if the operand index is out of bounds.
     pub(crate) fn operand(&self, m: &Module, idx: usize) -> Operand {
-        m.extra_args[usize::from(self.extra_idx) + idx].clone()
+        m.args[usize::from(self.args_idx) + idx].clone()
     }
 }
 
@@ -1644,14 +1629,14 @@ mod tests {
             Operand::Local(InstIdx(1)),
             Operand::Local(InstIdx(2)),
         ];
-        let ci = CallInst::new(&mut m, func_decl_idx, &args).unwrap();
+        let ci = CallInst::new(&mut m, func_decl_idx, args).unwrap();
 
         // Now request the operands and check they all look as they should.
         assert_eq!(ci.operand(&m, 0), Operand::Local(InstIdx(0)));
         assert_eq!(ci.operand(&m, 1), Operand::Local(InstIdx(1)));
         assert_eq!(ci.operand(&m, 2), Operand::Local(InstIdx(2)));
         assert_eq!(
-            m.extra_args,
+            m.args,
             vec![
                 Operand::Local(InstIdx(0)),
                 Operand::Local(InstIdx(1)),
@@ -1675,11 +1660,11 @@ mod tests {
 
         // Now build a call to the function.
         let args = vec![
-            Operand::Local(InstIdx(0)), // inline arg
-            Operand::Local(InstIdx(1)), // first extra arg
+            Operand::Local(InstIdx(0)),
+            Operand::Local(InstIdx(1)),
             Operand::Local(InstIdx(2)),
         ];
-        let ci = CallInst::new(&mut m, func_decl_idx, &args).unwrap();
+        let ci = CallInst::new(&mut m, func_decl_idx, args).unwrap();
 
         // Request an operand with an out-of-bounds index.
         ci.operand(&m, 3);
@@ -1728,18 +1713,18 @@ mod tests {
 
     #[test]
     fn index16_fits() {
-        assert!(ExtraArgsIdx::new(0).is_ok());
-        assert!(ExtraArgsIdx::new(1).is_ok());
-        assert!(ExtraArgsIdx::new(0x1234).is_ok());
-        assert!(ExtraArgsIdx::new(0xffff).is_ok());
+        assert!(ArgsIdx::new(0).is_ok());
+        assert!(ArgsIdx::new(1).is_ok());
+        assert!(ArgsIdx::new(0x1234).is_ok());
+        assert!(ArgsIdx::new(0xffff).is_ok());
     }
 
     #[test]
     fn index16_doesnt_fit() {
-        assert!(ExtraArgsIdx::new(0x10000).is_err());
-        assert!(ExtraArgsIdx::new(0x12345).is_err());
-        assert!(ExtraArgsIdx::new(0xffffff).is_err());
-        assert!(ExtraArgsIdx::new(usize::MAX).is_err());
+        assert!(ArgsIdx::new(0x10000).is_err());
+        assert!(ArgsIdx::new(0x12345).is_err());
+        assert!(ArgsIdx::new(0xffffff).is_err());
+        assert!(ArgsIdx::new(usize::MAX).is_err());
     }
 
     #[test]

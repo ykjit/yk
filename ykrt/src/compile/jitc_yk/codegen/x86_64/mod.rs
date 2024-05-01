@@ -1118,7 +1118,7 @@ mod tests {
             let func_decl_idx = m
                 .insert_func_decl(jit_ir::FuncDecl::new(CALL_TESTS_CALLEE.into(), func_ty_idx))
                 .unwrap();
-            let call_inst = jit_ir::CallInst::new(&mut m, func_decl_idx, &[]).unwrap();
+            let call_inst = jit_ir::CallInst::new(&mut m, func_decl_idx, vec![]).unwrap();
             m.push(call_inst.into()).unwrap();
 
             let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
@@ -1159,7 +1159,7 @@ mod tests {
                 .unwrap();
 
             let call_inst =
-                jit_ir::CallInst::new(&mut m, func_decl_idx, &[arg1, arg2, arg3]).unwrap();
+                jit_ir::CallInst::new(&mut m, func_decl_idx, vec![arg1, arg2, arg3]).unwrap();
             m.push(call_inst.into()).unwrap();
 
             let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
@@ -1218,9 +1218,12 @@ mod tests {
                 .push_and_make_operand(jit_ir::LoadTraceInputInst::new(40, i8_ty_idx).into())
                 .unwrap();
 
-            let call_inst =
-                jit_ir::CallInst::new(&mut m, func_decl_idx, &[arg1, arg2, arg3, arg4, arg5, arg6])
-                    .unwrap();
+            let call_inst = jit_ir::CallInst::new(
+                &mut m,
+                func_decl_idx,
+                vec![arg1, arg2, arg3, arg4, arg5, arg6],
+            )
+            .unwrap();
             m.push(call_inst.into()).unwrap();
 
             let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
@@ -1263,7 +1266,7 @@ mod tests {
                 .unwrap();
 
             let args = (0..7).map(|_| arg1.clone()).collect::<Vec<_>>();
-            let call_inst = jit_ir::CallInst::new(&mut m, func_decl_idx, &args).unwrap();
+            let call_inst = jit_ir::CallInst::new(&mut m, func_decl_idx, args).unwrap();
             m.push(call_inst.into()).unwrap();
 
             X64CodeGen::new(&m, Box::new(SpillAllocator::new(STACK_DIRECTION)))
@@ -1283,7 +1286,7 @@ mod tests {
             let func_decl_idx = m
                 .insert_func_decl(jit_ir::FuncDecl::new(CALL_TESTS_CALLEE.into(), func_ty_idx))
                 .unwrap();
-            let call_inst = jit_ir::CallInst::new(&mut m, func_decl_idx, &[]).unwrap();
+            let call_inst = jit_ir::CallInst::new(&mut m, func_decl_idx, vec![]).unwrap();
             m.push(call_inst.into()).unwrap();
 
             let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
@@ -1321,7 +1324,7 @@ mod tests {
             let arg1 = m
                 .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i8_ty_idx).into())
                 .unwrap();
-            let call_inst = jit_ir::CallInst::new(&mut m, func_decl_idx, &[arg1]).unwrap();
+            let call_inst = jit_ir::CallInst::new(&mut m, func_decl_idx, vec![arg1]).unwrap();
             m.push(call_inst.into()).unwrap();
 
             X64CodeGen::new(&m, Box::new(SpillAllocator::new(STACK_DIRECTION)))

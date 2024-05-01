@@ -573,7 +573,7 @@ impl<'a> TraceBuilder<'a> {
 
             let jit_func_decl_idx = self.handle_func(*callee)?;
             let instr =
-                jit_ir::CallInst::new(&mut self.jit_mod, jit_func_decl_idx, &jit_args)?.into();
+                jit_ir::CallInst::new(&mut self.jit_mod, jit_func_decl_idx, jit_args)?.into();
             self.copy_instruction(instr, bid, aot_inst_idx)
         }
     }
