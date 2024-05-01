@@ -1,5 +1,9 @@
 //! The X86_64 JIT Code Generator.
 //!
+//! Conventions used in this module:
+//!   * Functions with a `cg_X` prefix generate code for a [jit_ir] construct `X`.
+//!   * Helper functions arguments are in order `(<destination>, <source_1>, ... <source_n>)`.
+//!
 //! FIXME: the code generator clobbers registers willy-nilly because at the time of writing we have
 //! a register allocator that doesn't actually use any registers. Later we will have to audit the
 //! backend and insert register save/restore for clobbered registers.
@@ -100,12 +104,8 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
     fn codegen(mut self: Box<Self>) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         let alloc_off = self.emit_prologue();
 
-        // FIXME: we'd like to be able to assemble code backwards as this would simplify register
-        // allocation and side-step the need to patch up the prolog after the fact. dynasmrs
-        // doesn't support this, but it's on their roadmap:
-        // https://github.com/CensoredUsername/dynasm-rs/issues/48
         for (idx, inst) in self.m.insts().iter().enumerate() {
-            self.codegen_inst(jit_ir::InstIdx::new(idx)?, inst)?;
+            self.cg_inst(jit_ir::InstIdx::new(idx)?, inst)?;
         }
 
         // Loop the JITted code if the backedge target label is present.
@@ -147,26 +147,18 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
         // This unwrap cannot fail if `commit` (above) succeeded.
         let buf = self.asm.finalize().unwrap();
 
-        #[cfg(not(any(debug_assertions, test)))]
-        return Ok(Arc::new(X64CompiledTrace {
+        Ok(Arc::new(X64CompiledTrace {
             buf,
             deoptinfo: self.deoptinfo,
-        }));
-        #[cfg(any(debug_assertions, test))]
-        {
-            let comments = self.comments.take();
-            Ok(Arc::new(X64CompiledTrace {
-                buf,
-                deoptinfo: self.deoptinfo,
-                comments,
-            }))
-        }
+            #[cfg(any(debug_assertions, test))]
+            comments: self.comments.take(),
+        }))
     }
 }
 
 impl<'a> X64CodeGen<'a> {
     /// Codegen an instruction.
-    fn codegen_inst(
+    fn cg_inst(
         &mut self,
         inst_idx: jit_ir::InstIdx,
         inst: &jit_ir::Inst,
@@ -178,21 +170,21 @@ impl<'a> X64CodeGen<'a> {
         );
 
         match inst {
-            jit_ir::Inst::LoadTraceInput(i) => self.codegen_loadtraceinput_inst(inst_idx, i),
-            jit_ir::Inst::Load(i) => self.codegen_load_inst(inst_idx, i),
-            jit_ir::Inst::PtrAdd(i) => self.codegen_ptradd_inst(inst_idx, i),
-            jit_ir::Inst::Store(i) => self.codegen_store_inst(i),
-            jit_ir::Inst::LookupGlobal(i) => self.codegen_lookupglobal_inst(inst_idx, i),
-            jit_ir::Inst::Call(i) => self.codegen_call_inst(inst_idx, i)?,
-            jit_ir::Inst::Icmp(i) => self.codegen_icmp_inst(inst_idx, i),
-            jit_ir::Inst::Guard(i) => self.codegen_guard_inst(i),
-            jit_ir::Inst::Arg(i) => self.codegen_arg(inst_idx, *i),
-            jit_ir::Inst::Assign(i) => self.codegen_assign(inst_idx, i),
-            jit_ir::Inst::TraceLoopStart => self.codegen_traceloopstart_inst(),
-            jit_ir::Inst::SignExtend(i) => self.codegen_signextend_inst(inst_idx, i),
+            jit_ir::Inst::LoadTraceInput(i) => self.cg_loadtraceinput(inst_idx, i),
+            jit_ir::Inst::Load(i) => self.cg_load(inst_idx, i),
+            jit_ir::Inst::PtrAdd(i) => self.cg_ptradd(inst_idx, i),
+            jit_ir::Inst::Store(i) => self.cg_store(i),
+            jit_ir::Inst::LookupGlobal(i) => self.cg_lookupglobal(inst_idx, i),
+            jit_ir::Inst::Call(i) => self.cg_call(inst_idx, i)?,
+            jit_ir::Inst::Icmp(i) => self.cg_icmp(inst_idx, i),
+            jit_ir::Inst::Guard(i) => self.cg_guard(i),
+            jit_ir::Inst::Arg(i) => self.cg_arg(inst_idx, *i),
+            jit_ir::Inst::Assign(i) => self.cg_assign(inst_idx, i),
+            jit_ir::Inst::TraceLoopStart => self.cg_traceloopstart(),
+            jit_ir::Inst::SignExtend(i) => self.cg_signextend(inst_idx, i),
             // Binary operations
-            jit_ir::Inst::Add(i) => self.codegen_add_inst(inst_idx, i),
-            jit_ir::Inst::Or(i) => self.codegen_or_inst(inst_idx, i),
+            jit_ir::Inst::Add(i) => self.cg_add(inst_idx, i),
+            jit_ir::Inst::Or(i) => self.cg_or(inst_idx, i),
             x => todo!("{x:?}"),
         }
         Ok(())
@@ -274,6 +266,335 @@ impl<'a> X64CodeGen<'a> {
         }
     }
 
+    fn cg_add(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::AddInst) {
+        let lhs = inst.lhs();
+        let rhs = inst.rhs();
+
+        // Operand types must be the same.
+        debug_assert_eq!(lhs.type_(self.m), rhs.type_(self.m));
+
+        self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
+        self.load_operand(WR1, &rhs); // ^^^ same
+
+        match lhs.byte_size(self.m) {
+            8 => dynasm!(self.asm; add Rq(WR0.code()), Rq(WR1.code())),
+            4 => dynasm!(self.asm; add Rd(WR0.code()), Rd(WR1.code())),
+            2 => dynasm!(self.asm; add Rw(WR0.code()), Rw(WR1.code())),
+            1 => dynasm!(self.asm; add Rb(WR0.code()), Rb(WR1.code())),
+            _ => todo!(),
+        }
+
+        self.store_new_local(inst_idx, WR0);
+    }
+
+    fn cg_or(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::OrInst) {
+        let lhs = inst.lhs();
+        let rhs = inst.rhs();
+
+        // Operand types must be the same.
+        debug_assert_eq!(lhs.type_(self.m), rhs.type_(self.m));
+
+        self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
+        self.load_operand(WR1, &rhs); // ^^^ same
+
+        match lhs.byte_size(self.m) {
+            8 => dynasm!(self.asm; and Rq(WR0.code()), Rq(WR1.code())),
+            4 => dynasm!(self.asm; and Rd(WR0.code()), Rd(WR1.code())),
+            2 => dynasm!(self.asm; and Rw(WR0.code()), Rw(WR1.code())),
+            1 => dynasm!(self.asm; and Rb(WR0.code()), Rb(WR1.code())),
+            _ => todo!(),
+        }
+
+        self.store_new_local(inst_idx, WR0);
+    }
+
+    fn cg_loadtraceinput(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::LoadTraceInputInst) {
+        // Find the argument register containing the pointer to the live variables struct.
+        let base_reg = ARG_REGS[JITFUNC_LIVEVARS_ARGIDX].code();
+
+        // Now load the value into a new local variable from [base_reg+off].
+        match i32::try_from(inst.off()) {
+            Ok(off) => {
+                let size = self.m.inst(inst_idx).def_byte_size(self.m);
+                debug_assert!(size <= REG64_SIZE);
+                match size {
+                    8 => dynasm!(self.asm ; mov Rq(WR0.code()), [Rq(base_reg) + off]),
+                    4 => dynasm!(self.asm ; mov Rd(WR0.code()), [Rq(base_reg) + off]),
+                    2 => dynasm!(self.asm ; movzx Rd(WR0.code()), WORD [Rq(base_reg) + off]),
+                    1 => dynasm!(self.asm ; movzx Rq(WR0.code()), BYTE [Rq(base_reg) + off]),
+                    _ => todo!("{}", size),
+                };
+                self.store_new_local(inst_idx, WR0);
+            }
+            _ => todo!(),
+        }
+    }
+
+    fn cg_load(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::LoadInst) {
+        self.load_operand(WR0, &inst.operand()); // FIXME: assumes value will fit in a reg.
+        let size = self.m.inst(inst_idx).def_byte_size(self.m);
+        debug_assert!(size <= REG64_SIZE);
+        match size {
+            8 => dynasm!(self.asm ; mov Rq(WR0.code()), [Rq(WR0.code())]),
+            4 => dynasm!(self.asm ; mov Rd(WR0.code()), [Rq(WR0.code())]),
+            2 => dynasm!(self.asm ; movzx Rd(WR0.code()), WORD [Rq(WR0.code())]),
+            1 => dynasm!(self.asm ; movzx Rq(WR0.code()), BYTE [Rq(WR0.code())]),
+            _ => todo!("{}", size),
+        };
+        self.store_new_local(inst_idx, WR0);
+    }
+
+    fn cg_ptradd(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::PtrAddInst) {
+        self.load_operand(WR0, &inst.ptr());
+        let off = inst.offset();
+        // unwrap cannot fail
+        if off <= u32::try_from(i32::MAX).unwrap() {
+            // `as` safe due to above guard.
+            dynasm!(self.asm ; add Rq(WR0.code()), off as i32);
+        } else {
+            todo!();
+        }
+        self.store_new_local(inst_idx, WR0);
+    }
+
+    fn cg_store(&mut self, inst: &jit_ir::StoreInst) {
+        self.load_operand(WR0, &inst.ptr());
+        let val = inst.val();
+        self.load_operand(WR1, &val); // FIXME: assumes the value fits in a reg
+        match val.byte_size(self.m) {
+            8 => dynasm!(self.asm ; mov [Rq(WR0.code())], Rq(WR1.code())),
+            4 => dynasm!(self.asm ; mov [Rq(WR0.code())], Rd(WR1.code())),
+            2 => dynasm!(self.asm ; mov [Rq(WR0.code())], Rw(WR1.code())),
+            1 => dynasm!(self.asm ; mov [Rq(WR0.code())], Rb(WR1.code())),
+            _ => todo!(),
+        }
+    }
+
+    #[cfg(not(test))]
+    fn cg_lookupglobal(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::LookupGlobalInst) {
+        let decl = inst.decl(self.m);
+        if decl.is_threadlocal() {
+            todo!();
+        }
+        let sym_addr = self.m.globalvar_ptr(inst.global_decl_idx()).addr();
+        dynasm!(self.asm ; mov Rq(WR0.code()), QWORD i64::try_from(sym_addr).unwrap());
+        self.store_new_local(inst_idx, WR0);
+    }
+
+    #[cfg(test)]
+    fn cg_lookupglobal(&mut self, _inst_idx: jit_ir::InstIdx, _inst: &jit_ir::LookupGlobalInst) {
+        panic!("Cannot lookup globals in cfg(test) as ykllvm will not have compiled this binary");
+    }
+
+    fn emit_call(
+        &mut self,
+        inst_idx: InstIdx,
+        func_decl_idx: FuncDeclIdx,
+        args: &[Operand],
+    ) -> Result<(), CompilationError> {
+        // FIXME: floating point args
+        // FIXME: non-SysV ABIs
+        let fty = self.m.func_type(func_decl_idx);
+        let num_args = args.len();
+
+        if num_args > ARG_REGS.len() {
+            todo!(); // needs spill
+        }
+
+        if fty.is_vararg() {
+            // SysV X86_64 ABI says "rax is used to indicate the number of vector arguments passed
+            // to a function requiring a variable number of arguments".
+            //
+            // We don't yet support vectors, so for now rax=0.
+            dynasm!(self.asm; mov rax, 0);
+        }
+
+        for (i, reg) in ARG_REGS.into_iter().take(num_args).enumerate() {
+            let op = &args[i];
+            // We can type check the static args (but not varargs).
+            debug_assert!(
+                i >= fty.num_args() || op.type_(self.m) == fty.arg_type(self.m, i),
+                "argument type mismatch in call"
+            );
+            self.load_operand(reg, op);
+        }
+
+        // unwrap safe on account of linker symbol names not containing internal NULL bytes.
+        let va = symbol_to_ptr(self.m.func_decl(func_decl_idx).name())
+            .map_err(|e| CompilationError::General(e.to_string()))?;
+
+        // The SysV x86_64 ABI requires the stack to be 16-byte aligned prior to a call.
+        self.stack.align(SYSV_CALL_STACK_ALIGN);
+
+        // Actually perform the call.
+        dynasm!(self.asm
+            ; mov Rq(WR0.code()), QWORD va as i64
+            ; call Rq(WR0.code())
+        );
+
+        // If the function we called has a return value, then store it into a local variable.
+        if fty.ret_type(self.m) != &Ty::Void {
+            self.store_new_local(inst_idx, Rq::RAX);
+        }
+
+        Ok(())
+    }
+
+    /// Codegen a (non-varargs) call.
+    fn cg_call(
+        &mut self,
+        inst_idx: InstIdx,
+        inst: &jit_ir::CallInst,
+    ) -> Result<(), CompilationError> {
+        let func_decl_idx = inst.target();
+        let args = (0..(inst.num_args()))
+            .map(|i| inst.operand(self.m, i))
+            .collect::<Vec<_>>();
+        self.emit_call(inst_idx, func_decl_idx, &args)
+    }
+
+    fn cg_icmp(&mut self, inst_idx: InstIdx, inst: &jit_ir::IcmpInst) {
+        let (left, pred, right) = (inst.left(), inst.predicate(), inst.right());
+
+        // FIXME: We should be checking type equality here, but since constants currently don't
+        // have a type, checking their size is close enough. This won't be correct for struct
+        // types, but this function can't deal with those anyway at the moment.
+        debug_assert_eq!(
+            left.byte_size(self.m),
+            right.byte_size(self.m),
+            "icmp of differing types"
+        );
+        debug_assert!(
+            matches!(left.type_(self.m), jit_ir::Ty::Integer(_)),
+            "icmp of non-integer types"
+        );
+
+        // FIXME: assumes values fit in a registers
+        self.load_operand(WR0, &left);
+        self.load_operand(WR1, &right);
+
+        // Perform the comparison.
+        match left.byte_size(self.m) {
+            8 => dynasm!(self.asm; cmp Rq(WR0.code()), Rq(WR1.code())),
+            4 => dynasm!(self.asm; cmp Rd(WR0.code()), Rd(WR1.code())),
+            2 => dynasm!(self.asm; cmp Rw(WR0.code()), Rw(WR1.code())),
+            1 => dynasm!(self.asm; cmp Rb(WR0.code()), Rb(WR1.code())),
+            _ => todo!(),
+        }
+
+        // Interpret the flags assignment WRT the predicate.
+        //
+        // We use a SETcc instruction to do so.
+        //
+        // Remember, in Intel's tongue:
+        //  - "above"/"below" -- unsigned predicate. e.g. `seta`.
+        //  - "greater"/"less" -- signed predicate. e.g. `setle`.
+        //
+        //  Note that the equal/not-equal predicates are signedness agnostic.
+        match pred {
+            jit_ir::Predicate::Equal => dynasm!(self.asm; sete Rb(WR0.code())),
+            jit_ir::Predicate::NotEqual => dynasm!(self.asm; setne Rb(WR0.code())),
+            jit_ir::Predicate::UnsignedGreater => dynasm!(self.asm; seta Rb(WR0.code())),
+            jit_ir::Predicate::UnsignedGreaterEqual => dynasm!(self.asm; setae Rb(WR0.code())),
+            jit_ir::Predicate::UnsignedLess => dynasm!(self.asm; setb Rb(WR0.code())),
+            jit_ir::Predicate::UnsignedLessEqual => dynasm!(self.asm; setb Rb(WR0.code())),
+            jit_ir::Predicate::SignedGreater => dynasm!(self.asm; setg Rb(WR0.code())),
+            jit_ir::Predicate::SignedGreaterEqual => dynasm!(self.asm; setge Rb(WR0.code())),
+            jit_ir::Predicate::SignedLess => dynasm!(self.asm; setl Rb(WR0.code())),
+            jit_ir::Predicate::SignedLessEqual => dynasm!(self.asm; setle Rb(WR0.code())),
+            // Note: when float predicates added: `_ => panic!()`
+        }
+        self.store_new_local(inst_idx, WR0);
+    }
+
+    fn cg_arg(&mut self, inst_idx: InstIdx, idx: u16) {
+        // For arguments passed into the trace function we simply inform the register allocator
+        // where they are stored and let the allocator take things from there.
+        self.store_new_local(inst_idx, ARG_REGS[usize::from(idx)]);
+    }
+
+    fn cg_assign(&mut self, inst_idx: InstIdx, i: &jit_ir::AssignInst) {
+        // Naive implementation.
+        self.load_operand(WR0, &i.opnd());
+        self.store_new_local(inst_idx, WR0);
+    }
+
+    fn cg_traceloopstart(&mut self) {
+        // FIXME: peel the initial iteration of the loop to allow us to hoist loop invariants.
+        dynasm!(self.asm; ->trace_loop_start:);
+    }
+
+    fn cg_signextend(&mut self, inst_idx: InstIdx, i: &jit_ir::SignExtendInst) {
+        let from_val = i.val();
+        let from_type = from_val.type_(self.m);
+        let from_size = from_type.byte_size().unwrap();
+
+        let to_type = self.m.type_(i.dest_ty_idx());
+        let to_size = to_type.byte_size().unwrap();
+
+        // You can only sign-extend a smaller integer to a larger integer.
+        debug_assert!(matches!(to_type, jit_ir::Ty::Integer(_)));
+        debug_assert!(matches!(from_type, jit_ir::Ty::Integer(_)));
+        debug_assert!(from_size < to_size);
+
+        // FIXME: assumes the input and output fit in a register.
+        self.load_operand(WR0, &from_val);
+
+        match (from_size, to_size) {
+            (1, 8) => dynasm!(self.asm; movsx Rq(WR0.code()), Rb(WR0.code())),
+            (4, 8) => dynasm!(self.asm; movsx Rq(WR0.code()), Rd(WR0.code())),
+            _ => todo!(),
+        }
+
+        self.store_new_local(inst_idx, WR0);
+    }
+
+    #[allow(clippy::fn_to_numeric_cast)]
+    fn cg_guard(&mut self, inst: &jit_ir::GuardInst) {
+        let cond = inst.cond();
+
+        // ICmp instructions evaluate to a one-byte zero/one value.
+        debug_assert_eq!(cond.byte_size(self.m), 1);
+
+        // Convert the guard info into deopt info and store it on the heap.
+        let mut locs: Vec<LocalAlloc> = Vec::new();
+        let gi = inst.guard_info(self.m);
+        for lidx in gi.lives() {
+            locs.push(*self.ra.allocation(*lidx));
+        }
+
+        // FIXME: Move `frames` instead of copying them (requires JIT module to be consumable).
+        let deoptinfo = DeoptInfo {
+            frames: gi.frames().clone(),
+            lives: locs,
+        };
+        // Unwrap is safe since in this architecture usize and i64 have the same size.
+        let deoptid = self.deoptinfo.len().try_into().unwrap();
+        self.deoptinfo.push(deoptinfo);
+
+        // The simplest thing we can do to crash the program when the guard fails.
+        dynasm!(self.asm
+            ; jmp >check_cond
+            ; guard_fail:
+            ; mov rdi, [rbp]
+            ; mov rsi, QWORD deoptid
+            ; mov rdx, rbp
+            ; mov rax, QWORD __yk_deopt as i64
+            ; call rax
+            ; check_cond:
+            ; cmp Rb(WR0.code()), inst.expect() as i8 // `as` intentional.
+            ; jne <guard_fail
+        );
+    }
+
+    /// Load an operand into a register.
+    fn load_operand(&mut self, reg: Rq, op: &Operand) {
+        match op {
+            Operand::Local(li) => self.load_local(reg, *li),
+            Operand::Const(c) => self.load_const(reg, *c),
+        }
+    }
+
     /// Load a local variable out of its stack slot into the specified register.
     fn load_local(&mut self, reg: Rq, local: InstIdx) {
         match self.ra.allocation(local) {
@@ -337,357 +658,10 @@ impl<'a> X64CodeGen<'a> {
     }
 
     /// Store a value held in a register into a new local variable.
-    fn reg_into_new_local(&mut self, local: InstIdx, reg: Rq) {
+    fn store_new_local(&mut self, local: InstIdx, reg: Rq) {
         let size = self.m.inst(local).def_byte_size(self.m);
         let l = self.ra.allocate(local, size, &mut self.stack);
         self.store_local(&l, reg, size);
-    }
-
-    fn codegen_add_inst(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::AddInst) {
-        let lhs = inst.lhs();
-        let rhs = inst.rhs();
-
-        // Operand types must be the same.
-        debug_assert_eq!(lhs.type_(self.m), rhs.type_(self.m));
-
-        self.operand_into_reg(WR0, &lhs); // FIXME: assumes value will fit in a reg.
-        self.operand_into_reg(WR1, &rhs); // ^^^ same
-
-        match lhs.byte_size(self.m) {
-            8 => dynasm!(self.asm; add Rq(WR0.code()), Rq(WR1.code())),
-            4 => dynasm!(self.asm; add Rd(WR0.code()), Rd(WR1.code())),
-            2 => dynasm!(self.asm; add Rw(WR0.code()), Rw(WR1.code())),
-            1 => dynasm!(self.asm; add Rb(WR0.code()), Rb(WR1.code())),
-            _ => todo!(),
-        }
-
-        self.reg_into_new_local(inst_idx, WR0);
-    }
-
-    fn codegen_or_inst(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::OrInst) {
-        let lhs = inst.lhs();
-        let rhs = inst.rhs();
-
-        // Operand types must be the same.
-        debug_assert_eq!(lhs.type_(self.m), rhs.type_(self.m));
-
-        self.operand_into_reg(WR0, &lhs); // FIXME: assumes value will fit in a reg.
-        self.operand_into_reg(WR1, &rhs); // ^^^ same
-
-        match lhs.byte_size(self.m) {
-            8 => dynasm!(self.asm; and Rq(WR0.code()), Rq(WR1.code())),
-            4 => dynasm!(self.asm; and Rd(WR0.code()), Rd(WR1.code())),
-            2 => dynasm!(self.asm; and Rw(WR0.code()), Rw(WR1.code())),
-            1 => dynasm!(self.asm; and Rb(WR0.code()), Rb(WR1.code())),
-            _ => todo!(),
-        }
-
-        self.reg_into_new_local(inst_idx, WR0);
-    }
-
-    fn codegen_loadtraceinput_inst(
-        &mut self,
-        inst_idx: jit_ir::InstIdx,
-        inst: &jit_ir::LoadTraceInputInst,
-    ) {
-        // Find the argument register containing the pointer to the live variables struct.
-        let base_reg = ARG_REGS[JITFUNC_LIVEVARS_ARGIDX].code();
-
-        // Now load the value into a new local variable from [base_reg+off].
-        match i32::try_from(inst.off()) {
-            Ok(off) => {
-                let size = self.m.inst(inst_idx).def_byte_size(self.m);
-                debug_assert!(size <= REG64_SIZE);
-                match size {
-                    8 => dynasm!(self.asm ; mov Rq(WR0.code()), [Rq(base_reg) + off]),
-                    4 => dynasm!(self.asm ; mov Rd(WR0.code()), [Rq(base_reg) + off]),
-                    2 => dynasm!(self.asm ; movzx Rd(WR0.code()), WORD [Rq(base_reg) + off]),
-                    1 => dynasm!(self.asm ; movzx Rq(WR0.code()), BYTE [Rq(base_reg) + off]),
-                    _ => todo!("{}", size),
-                };
-                self.reg_into_new_local(inst_idx, WR0);
-            }
-            _ => todo!(),
-        }
-    }
-
-    fn codegen_load_inst(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::LoadInst) {
-        self.operand_into_reg(WR0, &inst.operand()); // FIXME: assumes value will fit in a reg.
-        let size = self.m.inst(inst_idx).def_byte_size(self.m);
-        debug_assert!(size <= REG64_SIZE);
-        match size {
-            8 => dynasm!(self.asm ; mov Rq(WR0.code()), [Rq(WR0.code())]),
-            4 => dynasm!(self.asm ; mov Rd(WR0.code()), [Rq(WR0.code())]),
-            2 => dynasm!(self.asm ; movzx Rd(WR0.code()), WORD [Rq(WR0.code())]),
-            1 => dynasm!(self.asm ; movzx Rq(WR0.code()), BYTE [Rq(WR0.code())]),
-            _ => todo!("{}", size),
-        };
-        self.reg_into_new_local(inst_idx, WR0);
-    }
-
-    fn codegen_ptradd_inst(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::PtrAddInst) {
-        self.operand_into_reg(WR0, &inst.ptr());
-        let off = inst.offset();
-        // unwrap cannot fail
-        if off <= u32::try_from(i32::MAX).unwrap() {
-            // `as` safe due to above guard.
-            dynasm!(self.asm ; add Rq(WR0.code()), off as i32);
-        } else {
-            todo!();
-        }
-        self.reg_into_new_local(inst_idx, WR0);
-    }
-
-    fn codegen_store_inst(&mut self, inst: &jit_ir::StoreInst) {
-        self.operand_into_reg(WR0, &inst.ptr());
-        let val = inst.val();
-        self.operand_into_reg(WR1, &val); // FIXME: assumes the value fits in a reg
-        match val.byte_size(self.m) {
-            8 => dynasm!(self.asm ; mov [Rq(WR0.code())], Rq(WR1.code())),
-            4 => dynasm!(self.asm ; mov [Rq(WR0.code())], Rd(WR1.code())),
-            2 => dynasm!(self.asm ; mov [Rq(WR0.code())], Rw(WR1.code())),
-            1 => dynasm!(self.asm ; mov [Rq(WR0.code())], Rb(WR1.code())),
-            _ => todo!(),
-        }
-    }
-
-    #[cfg(not(test))]
-    fn codegen_lookupglobal_inst(
-        &mut self,
-        inst_idx: jit_ir::InstIdx,
-        inst: &jit_ir::LookupGlobalInst,
-    ) {
-        let decl = inst.decl(self.m);
-        if decl.is_threadlocal() {
-            todo!();
-        }
-        let sym_addr = self.m.globalvar_ptr(inst.global_decl_idx()).addr();
-        dynasm!(self.asm ; mov Rq(WR0.code()), QWORD i64::try_from(sym_addr).unwrap());
-        self.reg_into_new_local(inst_idx, WR0);
-    }
-
-    #[cfg(test)]
-    fn codegen_lookupglobal_inst(
-        &mut self,
-        _inst_idx: jit_ir::InstIdx,
-        _inst: &jit_ir::LookupGlobalInst,
-    ) {
-        panic!("Cannot lookup globals in cfg(test) as ykllvm will not have compiled this binary");
-    }
-
-    pub(super) fn emit_call(
-        &mut self,
-        inst_idx: InstIdx,
-        func_decl_idx: FuncDeclIdx,
-        args: &[Operand],
-    ) -> Result<(), CompilationError> {
-        // FIXME: floating point args
-        // FIXME: non-SysV ABIs
-        let fty = self.m.func_type(func_decl_idx);
-        let num_args = args.len();
-
-        if num_args > ARG_REGS.len() {
-            todo!(); // needs spill
-        }
-
-        if fty.is_vararg() {
-            // SysV X86_64 ABI says "rax is used to indicate the number of vector arguments passed
-            // to a function requiring a variable number of arguments".
-            //
-            // We don't yet support vectors, so for now rax=0.
-            dynasm!(self.asm; mov rax, 0);
-        }
-
-        for (i, reg) in ARG_REGS.into_iter().take(num_args).enumerate() {
-            let op = &args[i];
-            // We can type check the static args (but not varargs).
-            debug_assert!(
-                i >= fty.num_args() || op.type_(self.m) == fty.arg_type(self.m, i),
-                "argument type mismatch in call"
-            );
-            self.operand_into_reg(reg, op);
-        }
-
-        // unwrap safe on account of linker symbol names not containing internal NULL bytes.
-        let va = symbol_to_ptr(self.m.func_decl(func_decl_idx).name())
-            .map_err(|e| CompilationError::General(e.to_string()))?;
-
-        // The SysV x86_64 ABI requires the stack to be 16-byte aligned prior to a call.
-        self.stack.align(SYSV_CALL_STACK_ALIGN);
-
-        // Actually perform the call.
-        dynasm!(self.asm
-            ; mov Rq(WR0.code()), QWORD va as i64
-            ; call Rq(WR0.code())
-        );
-
-        // If the function we called has a return value, then store it into a local variable.
-        if fty.ret_type(self.m) != &Ty::Void {
-            self.reg_into_new_local(inst_idx, Rq::RAX);
-        }
-
-        Ok(())
-    }
-
-    /// Codegen a (non-varargs) call.
-    pub(super) fn codegen_call_inst(
-        &mut self,
-        inst_idx: InstIdx,
-        inst: &jit_ir::CallInst,
-    ) -> Result<(), CompilationError> {
-        let func_decl_idx = inst.target();
-        let args = (0..(inst.num_args()))
-            .map(|i| inst.operand(self.m, i))
-            .collect::<Vec<_>>();
-        self.emit_call(inst_idx, func_decl_idx, &args)
-    }
-
-    pub(super) fn codegen_icmp_inst(&mut self, inst_idx: InstIdx, inst: &jit_ir::IcmpInst) {
-        let (left, pred, right) = (inst.left(), inst.predicate(), inst.right());
-
-        // FIXME: We should be checking type equality here, but since constants currently don't
-        // have a type, checking their size is close enough. This won't be correct for struct
-        // types, but this function can't deal with those anyway at the moment.
-        debug_assert_eq!(
-            left.byte_size(self.m),
-            right.byte_size(self.m),
-            "icmp of differing types"
-        );
-        debug_assert!(
-            matches!(left.type_(self.m), jit_ir::Ty::Integer(_)),
-            "icmp of non-integer types"
-        );
-
-        // FIXME: assumes values fit in a registers
-        self.operand_into_reg(WR0, &left);
-        self.operand_into_reg(WR1, &right);
-
-        // Perform the comparison.
-        match left.byte_size(self.m) {
-            8 => dynasm!(self.asm; cmp Rq(WR0.code()), Rq(WR1.code())),
-            4 => dynasm!(self.asm; cmp Rd(WR0.code()), Rd(WR1.code())),
-            2 => dynasm!(self.asm; cmp Rw(WR0.code()), Rw(WR1.code())),
-            1 => dynasm!(self.asm; cmp Rb(WR0.code()), Rb(WR1.code())),
-            _ => todo!(),
-        }
-
-        // Interpret the flags assignment WRT the predicate.
-        //
-        // We use a SETcc instruction to do so.
-        //
-        // Remember, in Intel's tongue:
-        //  - "above"/"below" -- unsigned predicate. e.g. `seta`.
-        //  - "greater"/"less" -- signed predicate. e.g. `setle`.
-        //
-        //  Note that the equal/not-equal predicates are signedness agnostic.
-        match pred {
-            jit_ir::Predicate::Equal => dynasm!(self.asm; sete Rb(WR0.code())),
-            jit_ir::Predicate::NotEqual => dynasm!(self.asm; setne Rb(WR0.code())),
-            jit_ir::Predicate::UnsignedGreater => dynasm!(self.asm; seta Rb(WR0.code())),
-            jit_ir::Predicate::UnsignedGreaterEqual => dynasm!(self.asm; setae Rb(WR0.code())),
-            jit_ir::Predicate::UnsignedLess => dynasm!(self.asm; setb Rb(WR0.code())),
-            jit_ir::Predicate::UnsignedLessEqual => dynasm!(self.asm; setb Rb(WR0.code())),
-            jit_ir::Predicate::SignedGreater => dynasm!(self.asm; setg Rb(WR0.code())),
-            jit_ir::Predicate::SignedGreaterEqual => dynasm!(self.asm; setge Rb(WR0.code())),
-            jit_ir::Predicate::SignedLess => dynasm!(self.asm; setl Rb(WR0.code())),
-            jit_ir::Predicate::SignedLessEqual => dynasm!(self.asm; setle Rb(WR0.code())),
-            // Note: when float predicates added: `_ => panic!()`
-        }
-        self.reg_into_new_local(inst_idx, WR0);
-    }
-
-    fn codegen_arg(&mut self, inst_idx: InstIdx, idx: u16) {
-        // For arguments passed into the trace function we simply inform the register allocator
-        // where they are stored and let the allocator take things from there.
-        self.reg_into_new_local(inst_idx, ARG_REGS[usize::from(idx)]);
-    }
-
-    fn codegen_assign(&mut self, inst_idx: InstIdx, i: &jit_ir::AssignInst) {
-        // Naive implementation.
-        self.operand_into_reg(WR0, &i.opnd());
-        self.reg_into_new_local(inst_idx, WR0);
-    }
-
-    fn codegen_traceloopstart_inst(&mut self) {
-        // FIXME: peel the initial iteration of the loop to allow us to hoist loop invariants.
-        dynasm!(self.asm; ->trace_loop_start:);
-    }
-
-    fn codegen_signextend_inst(&mut self, inst_idx: InstIdx, i: &jit_ir::SignExtendInst) {
-        let from_val = i.val();
-        let from_type = from_val.type_(self.m);
-        let from_size = from_type.byte_size().unwrap();
-
-        let to_type = self.m.type_(i.dest_ty_idx());
-        let to_size = to_type.byte_size().unwrap();
-
-        // You can only sign-extend a smaller integer to a larger integer.
-        debug_assert!(matches!(to_type, jit_ir::Ty::Integer(_)));
-        debug_assert!(matches!(from_type, jit_ir::Ty::Integer(_)));
-        debug_assert!(from_size < to_size);
-
-        // FIXME: assumes the input and output fit in a register.
-        self.operand_into_reg(WR0, &from_val);
-
-        match (from_size, to_size) {
-            (1, 8) => dynasm!(self.asm; movsx Rq(WR0.code()), Rb(WR0.code())),
-            (4, 8) => dynasm!(self.asm; movsx Rq(WR0.code()), Rd(WR0.code())),
-            _ => todo!(),
-        }
-
-        self.reg_into_new_local(inst_idx, WR0);
-    }
-
-    #[allow(clippy::fn_to_numeric_cast)]
-    fn codegen_guard_inst(&mut self, inst: &jit_ir::GuardInst) {
-        let cond = inst.cond();
-
-        // ICmp instructions evaluate to a one-byte zero/one value.
-        debug_assert_eq!(cond.byte_size(self.m), 1);
-
-        // Convert the guard info into deopt info and store it on the heap.
-        let mut locs: Vec<LocalAlloc> = Vec::new();
-        let gi = inst.guard_info(self.m);
-        for lidx in gi.lives() {
-            locs.push(*self.ra.allocation(*lidx));
-        }
-
-        // FIXME: Move `frames` instead of copying them (requires JIT module to be consumable).
-        let deoptinfo = DeoptInfo {
-            frames: gi.frames().clone(),
-            lives: locs,
-        };
-        // Unwrap is safe since in this architecture usize and i64 have the same size.
-        let deoptid = self.deoptinfo.len().try_into().unwrap();
-        self.deoptinfo.push(deoptinfo);
-
-        // The simplest thing we can do to crash the program when the guard fails.
-        dynasm!(self.asm
-            ; jmp >check_cond
-            ; guard_fail:
-            ; mov rdi, [rbp]
-            ; mov rsi, QWORD deoptid
-            ; mov rdx, rbp
-            ; mov rax, QWORD __yk_deopt as i64
-            ; call rax
-            ; check_cond:
-            ; cmp Rb(WR0.code()), inst.expect() as i8 // `as` intentional.
-            ; jne <guard_fail
-        );
-    }
-
-    fn const_u64_into_reg(&mut self, reg: Rq, cv: u64) {
-        dynasm!(self.asm
-            ; mov Rq(reg.code()), QWORD cv as i64 // `as` intentional.
-        )
-    }
-
-    /// Load an operand into a register.
-    fn operand_into_reg(&mut self, reg: Rq, op: &Operand) {
-        match op {
-            Operand::Local(li) => self.load_local(reg, *li),
-            Operand::Const(c) => self.load_const(reg, *c),
-        }
     }
 }
 
@@ -810,7 +784,7 @@ mod tests {
     }
 
     /// Test helper to use `fm` to match a disassembled trace.
-    pub(crate) fn match_asm(cgo: Arc<X64CompiledTrace>, pattern: &str) {
+    fn match_asm(cgo: Arc<X64CompiledTrace>, pattern: &str) {
         let dis = cgo.disassemble().unwrap();
 
         // Use `{{name}}` to match non-literal strings in tests.
@@ -855,7 +829,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_load_ptr() {
+        fn cg_load_ptr() {
             let mut m = test_module();
             let ptr_ty_idx = m.ptr_ty_idx();
             let load_op = m
@@ -875,7 +849,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_load_i8() {
+        fn cg_load_i8() {
             let mut m = test_module();
             let i8_ty_idx = m.insert_ty(jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
             let load_op = m
@@ -895,7 +869,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_load_i32() {
+        fn cg_load_i32() {
             let mut m = test_module();
             let i32_ty_idx = m
                 .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(32)))
@@ -917,7 +891,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_ptradd() {
+        fn cg_ptradd() {
             let mut m = test_module();
             let ptr_ty_idx = m.ptr_ty_idx();
             let ti_op = m
@@ -936,7 +910,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_store_ptr() {
+        fn cg_store_ptr() {
             let mut m = test_module();
             let ptr_ty_idx = m.ptr_ty_idx();
             let ti1_op = m
@@ -959,7 +933,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_loadtraceinput_i8() {
+        fn cg_loadtraceinput_i8() {
             let mut m = test_module();
             let u8_ty_idx = m.insert_ty(jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
             m.push(jit_ir::LoadTraceInputInst::new(0, u8_ty_idx).into())
@@ -975,7 +949,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_loadtraceinput_i16_with_offset() {
+        fn cg_loadtraceinput_i16_with_offset() {
             let mut m = test_module();
             let u16_ty_idx = m
                 .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(16)))
@@ -993,7 +967,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_loadtraceinput_many_offset() {
+        fn cg_loadtraceinput_many_offset() {
             let mut m = test_module();
             let i8_ty_idx = m.insert_ty(jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
             let ptr_ty_idx = m.ptr_ty_idx();
@@ -1030,7 +1004,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_add_i16() {
+        fn cg_add_i16() {
             let mut m = test_module();
             let i16_ty_idx = m
                 .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(16)))
@@ -1055,7 +1029,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_add_i64() {
+        fn cg_add_i64() {
             let mut m = test_module();
             let i64_ty_idx = m
                 .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(64)))
@@ -1082,7 +1056,7 @@ mod tests {
         #[cfg(debug_assertions)]
         #[should_panic]
         #[test]
-        fn codegen_add_wrong_types() {
+        fn cg_add_wrong_types() {
             let mut m = test_module();
             let i64_ty_idx = m
                 .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(64)))
@@ -1115,7 +1089,7 @@ mod tests {
         const CALL_TESTS_CALLEE: &str = "puts";
 
         #[test]
-        fn codegen_call_simple() {
+        fn cg_call_simple() {
             let mut m = test_module();
             let void_ty_idx = m.void_ty_idx();
             let func_ty_idx = m
@@ -1139,7 +1113,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_call_with_args() {
+        fn cg_call_with_args() {
             let mut m = test_module();
             let void_ty_idx = m.void_ty_idx();
             let i32_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
@@ -1184,7 +1158,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_call_with_different_args() {
+        fn cg_call_with_different_args() {
             let mut m = test_module();
             let void_ty_idx = m.void_ty_idx();
             let i8_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(8))).unwrap();
@@ -1252,7 +1226,7 @@ mod tests {
 
         #[should_panic] // until we implement spill args
         #[test]
-        fn codegen_call_spill_args() {
+        fn cg_call_spill_args() {
             let mut m = test_module();
             let void_ty_idx = m.void_ty_idx();
             let i32_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
@@ -1283,7 +1257,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_call_ret() {
+        fn cg_call_ret() {
             let mut m = test_module();
             let i32_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
             let func_ty_idx = m
@@ -1310,7 +1284,7 @@ mod tests {
         #[cfg(debug_assertions)]
         #[should_panic(expected = "argument type mismatch in call")]
         #[test]
-        fn codegen_call_bad_arg_type() {
+        fn cg_call_bad_arg_type() {
             let mut m = test_module();
             let void_ty_idx = m.void_ty_idx();
             let i32_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
@@ -1341,7 +1315,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_icmp_i64() {
+        fn cg_icmp_i64() {
             let mut m = test_module();
             let i64_ty_idx = m
                 .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(64)))
@@ -1365,7 +1339,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_icmp_i8() {
+        fn cg_icmp_i8() {
             let mut m = test_module();
             let i8_ty_idx = m.insert_ty(jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
             let op = m
@@ -1389,7 +1363,7 @@ mod tests {
         #[cfg(debug_assertions)]
         #[test]
         #[should_panic(expected = "icmp of non-integer types")]
-        fn codegen_icmp_non_ints() {
+        fn cg_icmp_non_ints() {
             let mut m = test_module();
             let ptr_ty_idx = m.ptr_ty_idx();
             let op = m
@@ -1406,7 +1380,7 @@ mod tests {
         #[cfg(debug_assertions)]
         #[test]
         #[should_panic(expected = "icmp of differing types")]
-        fn codegen_icmp_diff_types() {
+        fn cg_icmp_diff_types() {
             let mut m = test_module();
             let i8_ty_idx = m.insert_ty(jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
             let i64_ty_idx = m
@@ -1427,7 +1401,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_guard_true() {
+        fn cg_guard_true() {
             let mut m = test_module();
             let gi = jit_ir::GuardInfo::new(vec![0], Vec::new());
             let gi_idx = m.push_guardinfo(gi).unwrap();
@@ -1453,7 +1427,7 @@ mod tests {
         }
 
         #[test]
-        fn codegen_guard_false() {
+        fn cg_guard_false() {
             let mut m = test_module();
             let gi = jit_ir::GuardInfo::new(vec![0], Vec::new());
             let gi_idx = m.push_guardinfo(gi).unwrap();
