@@ -231,9 +231,9 @@ impl Module {
     /// # Panics
     ///
     /// If `args` would overflow the index type.
-    fn push_args(&mut self, args: &[Operand]) -> Result<ArgsIdx, CompilationError> {
+    fn push_args(&mut self, args: Vec<Operand>) -> Result<ArgsIdx, CompilationError> {
         let idx = self.args.len();
-        self.args.extend_from_slice(args); // FIXME: this clones.
+        self.args.extend(args);
         ArgsIdx::new(idx)
     }
 
@@ -1281,19 +1281,20 @@ impl CallInst {
     pub(crate) fn new(
         m: &mut Module,
         target: FuncDeclIdx,
-        args: &[Operand],
+        args: Vec<Operand>,
     ) -> Result<CallInst, CompilationError> {
+        let num_args = u16::try_from(args.len()).map_err(|_| {
+            CompilationError::LimitExceeded(format!(
+                "{} arguments passed but at most {} can be handled",
+                args.len(),
+                u16::MAX
+            ))
+        })?;
         let args_idx = m.push_args(args)?;
         Ok(Self {
             target,
             args_idx,
-            num_args: u16::try_from(args.len()).map_err(|_| {
-                CompilationError::LimitExceeded(format!(
-                    "{} arguments passed but at most {} can be handled",
-                    args.len(),
-                    u16::MAX
-                ))
-            })?,
+            num_args,
         })
     }
 
@@ -1628,7 +1629,7 @@ mod tests {
             Operand::Local(InstIdx(1)),
             Operand::Local(InstIdx(2)),
         ];
-        let ci = CallInst::new(&mut m, func_decl_idx, &args).unwrap();
+        let ci = CallInst::new(&mut m, func_decl_idx, args).unwrap();
 
         // Now request the operands and check they all look as they should.
         assert_eq!(ci.operand(&m, 0), Operand::Local(InstIdx(0)));
@@ -1663,7 +1664,7 @@ mod tests {
             Operand::Local(InstIdx(1)),
             Operand::Local(InstIdx(2)),
         ];
-        let ci = CallInst::new(&mut m, func_decl_idx, &args).unwrap();
+        let ci = CallInst::new(&mut m, func_decl_idx, args).unwrap();
 
         // Request an operand with an out-of-bounds index.
         ci.operand(&m, 3);
