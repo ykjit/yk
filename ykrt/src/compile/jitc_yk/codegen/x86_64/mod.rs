@@ -655,12 +655,6 @@ impl<'a> X64CodeGen<'a> {
         );
     }
 
-    fn const_u64_into_reg(&mut self, reg: Rq, cv: u64) {
-        dynasm!(self.asm
-            ; mov Rq(reg.code()), QWORD cv as i64 // `as` intentional.
-        )
-    }
-
     /// Load an operand into a register.
     fn operand_into_reg(&mut self, reg: Rq, op: &Operand) {
         match op {
