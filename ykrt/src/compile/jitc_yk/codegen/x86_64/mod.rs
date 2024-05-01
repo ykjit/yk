@@ -143,20 +143,12 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
         // This unwrap cannot fail if `commit` (above) succeeded.
         let buf = self.asm.finalize().unwrap();
 
-        #[cfg(not(any(debug_assertions, test)))]
-        return Ok(Arc::new(X64CompiledTrace {
+        Ok(Arc::new(X64CompiledTrace {
             buf,
             deoptinfo: self.deoptinfo,
-        }));
-        #[cfg(any(debug_assertions, test))]
-        {
-            let comments = self.comments.take();
-            Ok(Arc::new(X64CompiledTrace {
-                buf,
-                deoptinfo: self.deoptinfo,
-                comments,
-            }))
-        }
+            #[cfg(any(debug_assertions, test))]
+            comments: self.comments.take(),
+        }))
     }
 }
 
