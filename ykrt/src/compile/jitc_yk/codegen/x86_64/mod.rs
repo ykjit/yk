@@ -100,10 +100,6 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
     fn codegen(mut self: Box<Self>) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         let alloc_off = self.emit_prologue();
 
-        // FIXME: we'd like to be able to assemble code backwards as this would simplify register
-        // allocation and side-step the need to patch up the prolog after the fact. dynasmrs
-        // doesn't support this, but it's on their roadmap:
-        // https://github.com/CensoredUsername/dynasm-rs/issues/48
         for (idx, inst) in self.m.insts().iter().enumerate() {
             self.codegen_inst(jit_ir::InstIdx::new(idx)?, inst)?;
         }
