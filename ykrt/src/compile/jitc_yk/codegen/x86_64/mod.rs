@@ -475,7 +475,7 @@ impl<'a> X64CodeGen<'a> {
         panic!("Cannot lookup globals in cfg(test) as ykllvm will not have compiled this binary");
     }
 
-    pub(super) fn emit_call(
+    fn emit_call(
         &mut self,
         inst_idx: InstIdx,
         func_decl_idx: FuncDeclIdx,
@@ -530,7 +530,7 @@ impl<'a> X64CodeGen<'a> {
     }
 
     /// Codegen a (non-varargs) call.
-    pub(super) fn codegen_call_inst(
+    fn codegen_call_inst(
         &mut self,
         inst_idx: InstIdx,
         inst: &jit_ir::CallInst,
@@ -542,7 +542,7 @@ impl<'a> X64CodeGen<'a> {
         self.emit_call(inst_idx, func_decl_idx, &args)
     }
 
-    pub(super) fn codegen_icmp_inst(&mut self, inst_idx: InstIdx, inst: &jit_ir::IcmpInst) {
+    fn codegen_icmp_inst(&mut self, inst_idx: InstIdx, inst: &jit_ir::IcmpInst) {
         let (left, pred, right) = (inst.left(), inst.predicate(), inst.right());
 
         // FIXME: We should be checking type equality here, but since constants currently don't
@@ -810,7 +810,7 @@ mod tests {
     }
 
     /// Test helper to use `fm` to match a disassembled trace.
-    pub(crate) fn match_asm(cgo: Arc<X64CompiledTrace>, pattern: &str) {
+    fn match_asm(cgo: Arc<X64CompiledTrace>, pattern: &str) {
         let dis = cgo.disassemble().unwrap();
 
         // Use `{{name}}` to match non-literal strings in tests.
