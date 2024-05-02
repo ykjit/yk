@@ -190,7 +190,7 @@ impl<'a> TraceBuilder<'a> {
     /// Walk over a traced AOT block, translating the constituent instructions into the JIT module.
     fn process_block(
         &mut self,
-        bid: aot_ir::BBlockId,
+        bid: &aot_ir::BBlockId,
         prevbb: &Option<aot_ir::BBlockId>,
         nextbb: Option<aot_ir::BBlockId>,
     ) -> Result<(), CompilationError> {
@@ -866,7 +866,7 @@ impl<'a> TraceBuilder<'a> {
                             } else {
                                 None
                             };
-                            self.process_block(bid.clone(), &prev_bid, nextbb)?;
+                            self.process_block(&bid, &prev_bid, nextbb)?;
                             prev_bid = Some(bid);
                         }
                         None => {
