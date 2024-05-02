@@ -29,7 +29,7 @@ use std::{
     ffi::{c_void, CStr, CString},
     fmt, mem,
 };
-use typed_index_collections::TiVec;
+use typed_index_collections::{TiSlice, TiVec};
 use ykaddr::addr::symbol_to_ptr;
 
 // This is simple and can be shared across both IRs.
@@ -221,8 +221,8 @@ impl Module {
         self.insts.len()
     }
 
-    /// Returns a reference to the instruction stream.
-    pub(crate) fn insts(&self) -> &TiVec<InstIdx, Inst> {
+    /// Return a slice of this module's instructions.
+    pub(crate) fn insts(&self) -> &TiSlice<InstIdx, Inst> {
         &self.insts
     }
 
