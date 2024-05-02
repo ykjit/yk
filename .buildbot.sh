@@ -79,13 +79,9 @@ YKLLVM_BIN_DIR=$(pwd)/../inst/bin
 export YKB_YKLLVM_BIN_DIR="${YKLLVM_BIN_DIR}"
 cd ../../
 
-# Check that clang-format is installed.
-PATH=${YKB_YKLLVM_BIN_DIR}:${PATH} clang-format --version
-# Check C/C++ formatting using xtask.
+# Check C/C++ formatting. First we run `xtask cfmt`...
 PATH=${YKB_YKLLVM_BIN_DIR}:${PATH} cargo xtask cfmt
-# This is used to check clang-tidy output, but the dirty submodule from building
-# ykllvm is also shown.
-# FIXME: Add build/ to .gitignore in ykllvm
+# ... and then we see if it caused any changes (i.e. caused the git repo to become dirty).
 git diff --exit-code --ignore-submodules
 
 for tracer in ${TRACERS}; do
