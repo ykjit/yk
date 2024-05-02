@@ -7,7 +7,6 @@
 #![feature(strict_provenance)]
 #![allow(clippy::type_complexity)]
 #![allow(clippy::new_without_default)]
-#![allow(clippy::missing_safety_doc)]
 #![allow(clippy::upper_case_acronyms)]
 
 pub(crate) mod aotsmp;
