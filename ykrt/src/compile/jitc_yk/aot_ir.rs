@@ -542,7 +542,7 @@ impl Instruction {
                 Some(incoming_vals[0].type_(m))
             }
             Self::Unimplemented(_) => None,
-            _ => todo!("{:?}", self),
+            Self::Nop => None,
         }
     }
 
@@ -714,7 +714,7 @@ impl AotIRDisplay for Instruction {
                 ret.push_str(&format!("phi {}", args.join(", ")));
             }
             Self::Unimplemented(s) => ret.push_str(&format!("unimplemented <<{}>>", s)),
-            _ => todo!(),
+            Self::Nop => ret.push_str("nop"),
         }
         ret
     }
