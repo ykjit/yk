@@ -100,7 +100,7 @@ impl<'a> TraceBuilder<'a> {
         //
         // FIXME: Stash the location at IR lowering time, instead of searching at runtime.
         let mut inst_iter = blk.instrs.iter().enumerate().rev();
-        while let Some((_, inst)) = inst_iter.next() {
+        for (_, inst) in inst_iter.by_ref() {
             // Is it a call to the control point? If so, extract the live vars struct.
             if let Some(tis) = inst.control_point_call_trace_inputs(self.aot_mod) {
                 trace_inputs = Some(tis.to_instr(self.aot_mod));
@@ -136,7 +136,7 @@ impl<'a> TraceBuilder<'a> {
         //
         // FIXME: Can we do something at IR lowering time to make this easier?
         let mut last_store_ptr = None;
-        while let Some((inst_idx, inst)) = inst_iter.next() {
+        for (inst_idx, inst) in inst_iter {
             match inst {
                 aot_ir::Instruction::Store { val, .. } => last_store_ptr = Some(val),
                 aot_ir::Instruction::PtrAdd { ptr, .. } => {
@@ -195,43 +195,43 @@ impl<'a> TraceBuilder<'a> {
         nextbb: Option<aot_ir::BBlockId>,
     ) -> Result<(), CompilationError> {
         // unwrap safe: can't trace a block not in the AOT module.
-        let blk = self.aot_mod.bblock(&bid);
+        let blk = self.aot_mod.bblock(bid);
 
         // Decide how to translate each AOT instruction.
         for (inst_idx, inst) in blk.instrs.iter().enumerate() {
             match inst {
                 aot_ir::Instruction::Br { .. } => Ok(()),
                 aot_ir::Instruction::Load { ptr, type_idx } => {
-                    self.handle_load(&bid, inst_idx, ptr, type_idx)
+                    self.handle_load(bid, inst_idx, ptr, type_idx)
                 }
                 // FIXME: ignore remaining instructions after a call.
                 aot_ir::Instruction::Call { callee, args, .. } => {
                     // Get the branch instruction of this block.
                     let nextinst = blk.instrs.last().unwrap();
-                    self.handle_call(inst, &bid, inst_idx, callee, args, nextinst)
+                    self.handle_call(inst, bid, inst_idx, callee, args, nextinst)
                 }
                 aot_ir::Instruction::Store { val, ptr } => {
-                    self.handle_store(&bid, inst_idx, val, ptr)
+                    self.handle_store(bid, inst_idx, val, ptr)
                 }
                 aot_ir::Instruction::PtrAdd { ptr, off, .. } => {
-                    if self.cp_block.as_ref() == Some(&bid) && inst_idx == self.first_ti_idx {
+                    if self.cp_block.as_ref() == Some(bid) && inst_idx == self.first_ti_idx {
                         // We've reached the trace inputs part of the control point block. There's
                         // no point in copying these instructions over and we can just skip to the
                         // next block.
                         return Ok(());
                     }
-                    self.handle_ptradd(&bid, inst_idx, ptr, off)
+                    self.handle_ptradd(bid, inst_idx, ptr, off)
                 }
                 aot_ir::Instruction::BinaryOp {
                     lhs,
                     binop: aot_ir::BinOp::Add,
                     rhs,
-                } => self.handle_add(&bid, inst_idx, lhs, rhs),
+                } => self.handle_add(bid, inst_idx, lhs, rhs),
                 aot_ir::Instruction::BinaryOp { binop, .. } => {
                     todo!("{binop:?}");
                 }
                 aot_ir::Instruction::ICmp { lhs, pred, rhs, .. } => {
-                    self.handle_icmp(&bid, inst_idx, lhs, pred, rhs)
+                    self.handle_icmp(bid, inst_idx, lhs, pred, rhs)
                 }
                 aot_ir::Instruction::CondBr {
                     cond,
@@ -243,8 +243,8 @@ impl<'a> TraceBuilder<'a> {
                     cast_kind,
                     val,
                     dest_type_idx,
-                } => self.handle_cast(&bid, inst_idx, cast_kind, val, dest_type_idx),
-                aot_ir::Instruction::Ret { val } => self.handle_ret(&bid, inst_idx, val),
+                } => self.handle_cast(bid, inst_idx, cast_kind, val, dest_type_idx),
+                aot_ir::Instruction::Ret { val } => self.handle_ret(bid, inst_idx, val),
                 aot_ir::Instruction::Switch {
                     test_val,
                     default_dest,
@@ -252,7 +252,7 @@ impl<'a> TraceBuilder<'a> {
                     case_dests,
                     safepoint,
                 } => self.handle_switch(
-                    &bid,
+                    bid,
                     inst_idx,
                     safepoint,
                     nextbb.as_ref().unwrap(),
@@ -267,7 +267,7 @@ impl<'a> TraceBuilder<'a> {
                 } => {
                     debug_assert_eq!(prevbb.as_ref().unwrap().func_idx(), bid.func_idx());
                     self.handle_phi(
-                        &bid,
+                        bid,
                         inst_idx,
                         &prevbb.as_ref().unwrap().bb_idx(),
                         incoming_bbs,
@@ -537,11 +537,7 @@ impl<'a> TraceBuilder<'a> {
         }
 
         // Check if this is a recursive call by scanning the call stack for the callee.
-        let is_recursive = self
-            .frames
-            .iter()
-            .position(|f| f.func_idx == Some(*callee))
-            .is_some();
+        let is_recursive = self.frames.iter().any(|f| f.func_idx == Some(*callee));
 
         if inst.is_mappable_call(self.aot_mod)
             && !self.aot_mod.func(*callee).is_outline()
@@ -645,6 +641,7 @@ impl<'a> TraceBuilder<'a> {
         self.copy_instruction(instr.into(), bid, aot_inst_idx)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn handle_switch(
         &mut self,
         bid: &aot_ir::BBlockId,
@@ -653,10 +650,10 @@ impl<'a> TraceBuilder<'a> {
         next_bb: &aot_ir::BBlockId,
         test_val: &aot_ir::Operand,
         _default_dest: &aot_ir::BBlockIdx,
-        case_values: &Vec<u64>,
-        case_dests: &Vec<aot_ir::BBlockIdx>,
+        case_values: &[u64],
+        case_dests: &[aot_ir::BBlockIdx],
     ) -> Result<(), CompilationError> {
-        if case_values.len() == 0 {
+        if case_values.is_empty() {
             // Degenerate switch. Not sure it can even happen.
             panic!();
         }

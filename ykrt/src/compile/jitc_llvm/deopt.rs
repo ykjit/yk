@@ -352,9 +352,10 @@ unsafe extern "C" fn __ykrt_deopt(
                 }
             }
             // Execute the side trace.
-            let f = mem::transmute::<_, unsafe extern "C" fn(*mut c_void, *const c_void) -> !>(
-                st.entry(),
-            );
+            let f = mem::transmute::<
+                *const c_void,
+                unsafe extern "C" fn(*mut c_void, *const c_void) -> !,
+            >(st.entry());
             ctr.mt().stats.timing_state(TimingState::JitExecuting);
             drop(ctr);
 

@@ -266,7 +266,7 @@ impl Module {
     ///
     /// Panics if the index is out of bounds.
     pub(crate) fn const_(&self, idx: ConstIdx) -> &Constant {
-        &self.consts.get_index(usize::from(idx)).unwrap()
+        self.consts.get_index(usize::from(idx)).unwrap()
     }
 
     /// Add a new [GlobalDecl] to the pool and return its index. If the [GlobalDecl] already
@@ -339,11 +339,7 @@ impl fmt::Display for Module {
             } else {
                 ""
             };
-            write!(
-                f,
-                "@{}{tl}\n",
-                g.name.to_str().unwrap_or("<not valid UTF-8>")
-            )?;
+            writeln!(f, "@{}{tl}", g.name.to_str().unwrap_or("<not valid UTF-8>"))?;
         }
         write!(f, "\nentry:")?;
         for (i, inst) in self.insts().iter_enumerated() {

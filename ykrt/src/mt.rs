@@ -251,9 +251,10 @@ impl MT {
                 let f = unsafe {
                     #[cfg(feature = "yk_testing")]
                     assert_ne!(ctr.entry() as *const (), std::ptr::null());
-                    mem::transmute::<_, unsafe extern "C" fn(*mut c_void, *const c_void) -> !>(
-                        ctr.entry(),
-                    )
+                    mem::transmute::<
+                        *const c_void,
+                        unsafe extern "C" fn(*mut c_void, *const c_void) -> !,
+                    >(ctr.entry())
                 };
                 MTThread::with(|mtt| {
                     mtt.set_running_trace(Some(ctr));
