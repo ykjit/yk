@@ -271,7 +271,10 @@ impl<'a> X64CodeGen<'a> {
         let rhs = inst.rhs();
 
         // Operand types must be the same.
-        debug_assert_eq!(lhs.type_(self.m), rhs.type_(self.m));
+        debug_assert_eq!(
+            self.m.type_(lhs.ty_idx(self.m)),
+            self.m.type_(rhs.ty_idx(self.m))
+        );
 
         self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
         self.load_operand(WR1, &rhs); // ^^^ same
@@ -292,7 +295,10 @@ impl<'a> X64CodeGen<'a> {
         let rhs = inst.rhs();
 
         // Operand types must be the same.
-        debug_assert_eq!(lhs.type_(self.m), rhs.type_(self.m));
+        debug_assert_eq!(
+            self.m.type_(lhs.ty_idx(self.m)),
+            self.m.type_(rhs.ty_idx(self.m))
+        );
 
         self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
         self.load_operand(WR1, &rhs); // ^^^ same
@@ -413,7 +419,7 @@ impl<'a> X64CodeGen<'a> {
             let op = &args[i];
             // We can type check the static args (but not varargs).
             debug_assert!(
-                i >= fty.num_args() || op.type_(self.m) == fty.arg_type(self.m, i),
+                i >= fty.num_args() || self.m.type_(op.ty_idx(self.m)) == fty.arg_type(self.m, i),
                 "argument type mismatch in call"
             );
             self.load_operand(reg, op);
@@ -465,7 +471,7 @@ impl<'a> X64CodeGen<'a> {
             "icmp of differing types"
         );
         debug_assert!(
-            matches!(left.type_(self.m), jit_ir::Ty::Integer(_)),
+            matches!(self.m.type_(left.ty_idx(self.m)), jit_ir::Ty::Integer(_)),
             "icmp of non-integer types"
         );
 
@@ -526,7 +532,7 @@ impl<'a> X64CodeGen<'a> {
 
     fn cg_signextend(&mut self, inst_idx: InstIdx, i: &jit_ir::SignExtendInst) {
         let from_val = i.val();
-        let from_type = from_val.type_(self.m);
+        let from_type = self.m.type_(from_val.ty_idx(self.m));
         let from_size = from_type.byte_size().unwrap();
 
         let to_type = self.m.type_(i.dest_ty_idx());
