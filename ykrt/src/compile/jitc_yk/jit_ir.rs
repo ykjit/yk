@@ -811,24 +811,6 @@ impl Operand {
         }
     }
 
-    /// Returns the type of the operand.
-    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Ty {
-        match self {
-            Self::Local(l) => {
-                match m.inst(*l).def_type(m) {
-                    Some(t) => t,
-                    None => {
-                        // When an operand is a local variable, the local can only come from an
-                        // instruction that defines a local variable, and thus has a type. So this
-                        // can't happen if the IR is well-formed.
-                        unreachable!();
-                    }
-                }
-            }
-            Self::Const(cidx) => m.type_(m.const_(*cidx).ty_idx()),
-        }
-    }
-
     /// Returns the type index of the operand.
     pub(crate) fn ty_idx(&self, m: &Module) -> TyIdx {
         match self {
@@ -1174,11 +1156,6 @@ impl LoadInst {
         self.op.unpack()
     }
 
-    /// Returns the type of the value to be loaded.
-    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Ty {
-        m.type_(self.ty_idx)
-    }
-
     /// Returns the type index of the loaded value.
     pub(crate) fn ty_idx(&self) -> TyIdx {
         self.ty_idx
@@ -1413,10 +1390,6 @@ macro_rules! bin_op {
 
             pub(crate) fn rhs(&self) -> Operand {
                 self.rhs.unpack()
-            }
-
-            pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Ty {
-                self.lhs.unpack().type_(m)
             }
 
             /// Returns the type index of the operands being added.
