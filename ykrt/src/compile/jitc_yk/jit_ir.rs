@@ -1156,11 +1156,6 @@ impl LoadInst {
         self.op.unpack()
     }
 
-    /// Returns the type of the value to be loaded.
-    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Ty {
-        m.type_(self.ty_idx)
-    }
-
     /// Returns the type index of the loaded value.
     pub(crate) fn ty_idx(&self) -> TyIdx {
         self.ty_idx
