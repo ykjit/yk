@@ -1,9 +1,6 @@
-// # Shadow stack doesn't currently support dynamically sized stack.
-// ignore-if: true
 // Run-time:
-//   env-var: YKD_LOG_IR=-:jit-pre-opt
-//   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YKD_LOG_STATS=/dev/null
 //   stderr:
 //     jitstate: start-tracing
 //     pc=0, mem=12
@@ -11,30 +8,6 @@
 //     pc=2, mem=10
 //     pc=3, mem=9
 //     jitstate: stop-tracing
-//     --- Begin jit-pre-opt ---
-//     ...
-//     define void @__yk_compiled_trace_0(%YkCtrlPointVars* %0, i64* %1, i64 %2) {
-//       ...
-//       %{{fptr}} = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %0, i32 0, i32 0...
-//       %{{load}} = load...
-//       ...
-//       %{{cond}} = icmp...
-//       ...
-//       br...
-//
-//     {{guard-fail-bb}}:...
-//       call void (...) @llvm.experimental.deoptimize.isVoid(i64* %1, i64 %2) ...
-//       ret void
-//
-//     {{another-bb}}:...
-//       ...
-//       %{{fptr2}} = getelementptr %YkCtrlPointVars, %YkCtrlPointVars* %0, i32 0, i32 0...
-//       store...
-//       ...
-//       ret void
-//     }
-//     ...
-//     --- End jit-pre-opt ---
 //     pc=0, mem=9
 //     pc=1, mem=8
 //     pc=2, mem=7
@@ -44,16 +17,13 @@
 //     pc=1, mem=5
 //     pc=2, mem=4
 //     pc=3, mem=3
-//     jitstate: exit-jit-code
-//     jitstate: enter-jit-code
 //     pc=0, mem=3
 //     pc=1, mem=2
 //     pc=2, mem=1
 //     pc=3, mem=0
-//     jitstate: stopgap
-//     ...
-//     Indirect: 3 ...
-//     ...
+//     jitstate: deoptimise
+//     pc=4, mem=0
+//     pc=5, mem=-1
 
 // Test basic interpreter.
 
@@ -72,6 +42,10 @@ int mem = 12;
 #define DEC 1
 #define RESTART_IF_NOT_ZERO 2
 
+bool test_compiled_event(YkCStats stats) {
+  return stats.traces_compiled_ok == 1;
+}
+
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
@@ -82,7 +56,7 @@ int main(int argc, char **argv) {
 
   // Create one location for each potential PC value.
   YkLocation loop_loc = yk_location_new();
-  YkLocation *locs[prog_len];
+  YkLocation **locs = calloc(prog_len, sizeof(&prog[0]));
   for (int i = 0; i < prog_len; i++)
     if (i == 0)
       locs[i] = &loop_loc;
@@ -104,6 +78,9 @@ int main(int argc, char **argv) {
       exit(0);
     }
     yk_mt_control_point(mt, locs[pc]);
+    if ((pc == 0) && (mem == 9)) {
+      __ykstats_wait_until(mt, test_compiled_event);
+    }
     int bc = prog[pc];
     fprintf(stderr, "pc=%d, mem=%d\n", pc, mem);
     switch (bc) {
@@ -124,6 +101,7 @@ int main(int argc, char **argv) {
   abort(); // FIXME: unreachable due to aborting guard failure earlier.
   NOOPT_VAL(pc);
 
+  free(locs);
   yk_location_drop(loop_loc);
   yk_mt_drop(mt);
 

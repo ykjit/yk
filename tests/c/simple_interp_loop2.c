@@ -1,7 +1,6 @@
 // Run-time:
-//   env-var: YKD_LOG_IR=-:jit-pre-opt
-//   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YKD_LOG_STATS=/dev/null
 //   stderr:
 //     jitstate: start-tracing
 //     pc=0, mem=4
@@ -9,34 +8,6 @@
 //     pc=2, mem=4
 //     pc=3, mem=3
 //     jitstate: stop-tracing
-//     --- Begin jit-pre-opt ---
-//     ...
-//     define ptr @__yk_compiled_trace_0(ptr %0, ptr %1) {
-//       ...
-//       %{{fptr}} = getelementptr %YkCtrlPointVars, ptr %0, i32 0, i32 0...
-//       %{{load}} = load...
-//       ...
-//
-//     {{bb}}:...
-//     ...
-//
-//     {{another-bb}}:...
-//       ...
-//       %{{restart-cond}} = icmp sgt i32 %{{mem}}, 0...
-//       br i1 %{{restart-cond}}, label %{{restart-bb}}, label %{{guard-fail-bb}}
-//
-//     {{guard-fail-bb}}:...
-//       ...
-//       %{{deoptret}} = call ptr (...) @llvm.experimental.deoptimize.p0(...
-//       ret ptr %{{deoptret}}
-//     ...
-//
-//     {{restart-bb}}:...
-//       ...
-//       br label...
-//     }
-//     ...
-//     --- End jit-pre-opt ---
 //     pc=0, mem=3
 //     pc=1, mem=3
 //     pc=2, mem=3
@@ -71,6 +42,10 @@ int mem = 4;
 #define RESTART_IF_NOT_ZERO 2
 #define EXIT 3
 
+bool test_compiled_event(YkCStats stats) {
+  return stats.traces_compiled_ok == 1;
+}
+
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
@@ -80,7 +55,8 @@ int main(int argc, char **argv) {
   size_t prog_len = sizeof(prog) / sizeof(prog[0]);
 
   YkLocation loop_loc = yk_location_new();
-  YkLocation **locs = malloc(6 * 8);
+  YkLocation **locs = calloc(prog_len, sizeof(&prog[0]));
+  assert(locs != NULL);
   for (int i = 0; i < prog_len; i++)
     if (i == 0)
       locs[i] = &loop_loc;
@@ -100,6 +76,9 @@ int main(int argc, char **argv) {
   while (true) {
     assert(pc < prog_len);
     yk_mt_control_point(mt, locs[pc]);
+    if ((pc == 0) && (mem == 3)) {
+      __ykstats_wait_until(mt, test_compiled_event);
+    }
     int bc = prog[pc];
     fprintf(stderr, "pc=%d, mem=%d\n", pc, mem);
     switch (bc) {
@@ -125,6 +104,7 @@ int main(int argc, char **argv) {
 done:
   NOOPT_VAL(pc);
 
+  free(locs);
   yk_location_drop(loop_loc);
   yk_mt_drop(mt);
 
