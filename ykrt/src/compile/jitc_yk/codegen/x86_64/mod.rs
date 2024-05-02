@@ -205,7 +205,6 @@ impl<'a> X64CodeGen<'a> {
     /// JITted code is via deoptimisation, which will rewrite the whole stack anyway.
     ///
     /// Returns the offset at which to patch up the stack allocation later.
-    #[allow(clippy::fn_to_numeric_cast)]
     fn emit_prologue(&mut self) -> AssemblyOffset {
         #[cfg(any(debug_assertions, test))]
         self.comment(self.asm.offset(), "prologue".to_owned());
@@ -233,10 +232,15 @@ impl<'a> X64CodeGen<'a> {
         {
             self.comment(self.asm.offset(), "Breakpoint hack".into());
             self.stack.align(SYSV_CALL_STACK_ALIGN);
-            dynasm!(self.asm
-                ; mov r11, QWORD __yk_break as i64
-                ; call r11
-            );
+            // Clippy points out that `__yk_depot as i64` isn't portable, but since this entire
+            // module is x86 only, we don't need to worry about portability.
+            #[allow(clippy::fn_to_numeric_cast)]
+            {
+                dynasm!(self.asm
+                    ; mov r11, QWORD __yk_break as i64
+                    ; call r11
+                );
+            }
         }
 
         alloc_off
@@ -555,7 +559,6 @@ impl<'a> X64CodeGen<'a> {
         self.store_new_local(inst_idx, WR0);
     }
 
-    #[allow(clippy::fn_to_numeric_cast)]
     fn cg_guard(&mut self, inst: &jit_ir::GuardInst) {
         let cond = inst.cond();
 
@@ -578,19 +581,23 @@ impl<'a> X64CodeGen<'a> {
         let deoptid = self.deoptinfo.len().try_into().unwrap();
         self.deoptinfo.push(deoptinfo);
 
-        // The simplest thing we can do to crash the program when the guard fails.
-        dynasm!(self.asm
-            ; jmp >check_cond
-            ; guard_fail:
-            ; mov rdi, [rbp]
-            ; mov rsi, QWORD deoptid
-            ; mov rdx, rbp
-            ; mov rax, QWORD __yk_deopt as i64
-            ; call rax
-            ; check_cond:
-            ; cmp Rb(WR0.code()), inst.expect() as i8 // `as` intentional.
-            ; jne <guard_fail
-        );
+        // Clippy points out that `__yk_depot as i64` isn't portable, but since this entire module
+        // is x86 only, we don't need to worry about portability.
+        #[allow(clippy::fn_to_numeric_cast)]
+        {
+            dynasm!(self.asm
+                ; jmp >check_cond
+                ; guard_fail:
+                ; mov rdi, [rbp]
+                ; mov rsi, QWORD deoptid
+                ; mov rdx, rbp
+                ; mov rax, QWORD __yk_deopt as i64
+                ; call rax
+                ; check_cond:
+                ; cmp Rb(WR0.code()), inst.expect() as i8 // `as` intentional.
+                ; jne <guard_fail
+            );
+        }
     }
 
     /// Load an operand into a register.
