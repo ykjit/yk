@@ -1415,10 +1415,6 @@ macro_rules! bin_op {
                 self.rhs.unpack()
             }
 
-            pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Ty {
-                self.lhs.unpack().type_(m)
-            }
-
             /// Returns the type index of the operands being added.
             pub(crate) fn ty_idx(&self, m: &Module) -> TyIdx {
                 self.lhs.unpack().ty_idx(m)
