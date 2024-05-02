@@ -14,11 +14,9 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > rustup.sh
 sh rustup.sh --default-host x86_64-unknown-linux-gnu \
     --default-toolchain nightly \
     --no-modify-path \
-    --profile minimal \
+    --profile default \
     -y
 export PATH="${CARGO_HOME}"/bin/:"$PATH"
-
-rustup toolchain install nightly --allow-downgrade --component rustfmt
 
 # Formatting problems are frequent in PRs, and easy to fix, so try and catch
 # those before doing anything complicated.
@@ -84,6 +82,12 @@ PATH=${YKB_YKLLVM_BIN_DIR}:${PATH} cargo xtask cfmt
 # ... and then we see if it caused any changes (i.e. caused the git repo to become dirty).
 git diff --exit-code --ignore-submodules
 
+cargo install cargo-diff-tools
+if [ "$CI_RUNNER" = buildbot ] ; then
+    # When running under buildbot, we need to `git fetch` data from the remote if we want
+    # cargo-clippy-def to work later.
+    git fetch origin master:refs/remotes/origin/master
+fi
 for tracer in ${TRACERS}; do
     export YKB_TRACER="${tracer}"
     # Check for annoying compiler warnings in each package.
@@ -101,6 +105,9 @@ for tracer in ${TRACERS}; do
     echo "$WARNING_DEFINES" | xargs cargo rustc -p tests --profile check --bin dump_ir --
     echo "$WARNING_DEFINES" | xargs cargo rustc -p tests --profile check --bin gdb_c_test --
     echo "$WARNING_DEFINES" | xargs cargo rustc -p xtask --profile check --bin xtask --
+
+    # Error if Clippy detects any warnings introduced in lines changed in this PR.
+    cargo-clippy-diff origin/master -- --all-features -- -D warnings
 
     # There are some feature-gated testing/debugging switches which slow the JIT
     # down a bit. Check that if we build the system without tests, those features
