@@ -29,7 +29,7 @@ use std::{
     ffi::{c_void, CStr, CString},
     fmt, mem,
 };
-use typed_index_collections::TiVec;
+use typed_index_collections::{TiSlice, TiVec};
 use ykaddr::addr::symbol_to_ptr;
 
 // This is simple and can be shared across both IRs.
@@ -51,7 +51,7 @@ pub(crate) struct Module {
     /// semi-uniquely distinguish traces (see [MT::compiled_trace_id] for more details).
     ctr_id: u64,
     /// The IR trace as a linear sequence of instructions.
-    insts: Vec<Inst>, // FIXME: this should be a TiVec.
+    insts: TiVec<InstIdx, Inst>,
     /// The arguments pool for [CallInst]s. Indexed by [ArgsIdx].
     args: Vec<Operand>,
     /// The constant pool. Indexed by [ConstIdx].
@@ -122,7 +122,7 @@ impl Module {
 
         Ok(Self {
             ctr_id,
-            insts: Vec::new(),
+            insts: TiVec::new(),
             args: Vec::new(),
             consts: IndexSet::new(),
             types,
@@ -175,7 +175,7 @@ impl Module {
 
     /// Return the instruction at the specified index.
     pub(crate) fn inst(&self, idx: InstIdx) -> &Inst {
-        &self.insts[usize::from(idx)]
+        &self.insts[idx]
     }
 
     /// Push an instruction to the end of the [Module].
@@ -221,8 +221,8 @@ impl Module {
         self.insts.len()
     }
 
-    /// Returns a reference to the instruction stream.
-    pub(crate) fn insts(&self) -> &Vec<Inst> {
+    /// Return a slice of this module's instructions.
+    pub(crate) fn insts(&self) -> &TiSlice<InstIdx, Inst> {
         &self.insts
     }
 
@@ -346,8 +346,8 @@ impl fmt::Display for Module {
             )?;
         }
         write!(f, "\nentry:")?;
-        for (i, inst) in self.insts().iter().enumerate() {
-            write!(f, "\n    {}", inst.display(InstIdx::from(i), self))?;
+        for (i, inst) in self.insts().iter_enumerated() {
+            write!(f, "\n    {}", inst.display(i, self))?;
         }
 
         Ok(())

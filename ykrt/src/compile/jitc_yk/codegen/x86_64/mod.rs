@@ -104,8 +104,8 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
     fn codegen(mut self: Box<Self>) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         let alloc_off = self.emit_prologue();
 
-        for (idx, inst) in self.m.insts().iter().enumerate() {
-            self.cg_inst(jit_ir::InstIdx::new(idx)?, inst)?;
+        for (idx, inst) in self.m.insts().iter_enumerated() {
+            self.cg_inst(idx, inst)?;
         }
 
         // Loop the JITted code if the backedge target label is present.
