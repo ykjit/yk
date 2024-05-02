@@ -20,6 +20,8 @@ export PATH="${CARGO_HOME}"/bin/:"$PATH"
 
 rustup toolchain install nightly --allow-downgrade --component rustfmt
 
+# Formatting problems are frequent in PRs, and easy to fix, so try and catch
+# those before doing anything complicated.
 cargo fmt --all -- --check
 
 # We now need a copy of ykllvm. Building this is quite slow so if there's a
