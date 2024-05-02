@@ -1,5 +1,3 @@
-#![allow(clippy::len_without_is_empty)]
-
 //! Note that LLVM currently only supports stackmaps for 64 bit architectures. Once they support
 //! others we will need to either make this parser more dynamic or create a new one for each
 //! architecture.
@@ -50,6 +48,10 @@ pub struct LiveVar {
 impl LiveVar {
     pub fn len(&self) -> usize {
         self.locs.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.locs.is_empty()
     }
 
     pub fn get(&self, idx: usize) -> Option<&Location> {
