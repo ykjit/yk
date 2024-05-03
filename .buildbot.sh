@@ -77,10 +77,8 @@ YKLLVM_BIN_DIR=$(pwd)/../inst/bin
 export YKB_YKLLVM_BIN_DIR="${YKLLVM_BIN_DIR}"
 cd ../../
 
-# Check C/C++ formatting. First we run `xtask cfmt`...
-PATH=${YKB_YKLLVM_BIN_DIR}:${PATH} cargo xtask cfmt
-# ... and then we see if it caused any changes (i.e. caused the git repo to become dirty).
-git diff --exit-code --ignore-submodules
+# Check C/C++ formatting.
+PATH=${YKB_YKLLVM_BIN_DIR}:${PATH} cargo xtask cfmt --check
 
 cargo install cargo-diff-tools
 if [ "$CI_RUNNER" = buildbot ] ; then
