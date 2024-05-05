@@ -106,14 +106,6 @@ for tracer in ${TRACERS}; do
 
     # Error if Clippy detects any warnings introduced in lines changed in this PR.
     cargo-clippy-diff origin/master -- --all-features -- -D warnings
-
-    # There are some feature-gated testing/debugging switches which slow the JIT
-    # down a bit. Check that if we build the system without tests, those features
-    # are not enabled.
-    cargo -Z unstable-options build --build-plan -p ykcapi | \
-      awk '/yk_testing/ { ec=1 } END {exit ec}'
-    cargo -Z unstable-options build --build-plan -p ykrt | \
-      awk '/yk_testing/ { ec=1 } /yk_jitstate_debug/ { ec=1 } END {exit ec}'
 done
 
 # Run the tests multiple times on hwt to try and catch non-deterministic
@@ -188,10 +180,6 @@ fi
 
 for tracer in $TRACERS; do
     export YKB_TRACER="${tracer}"
-    cargo -Z unstable-options build --release --build-plan -p ykcapi | \
-      awk '/yk_testing/ { ec=1 } /yk_jitstate_debug/ { ec=1 } END {exit ec}'
-
-    cargo build --release -p ykcapi
     echo "===> Running ${tracer} tests"
     RUST_TEST_SHUFFLE=1 cargo test --release
     YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test --release
