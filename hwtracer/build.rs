@@ -34,11 +34,14 @@ fn main() {
         if feature_check("linux_perf.c", "linux_perf") {
             c_build.file("src/perf/collect.c");
             println!("cargo:rustc-cfg=linux_perf");
+            println!("cargo::rustc-check-cfg=cfg(linux_perf)");
 
             #[cfg(target_arch = "x86_64")]
             {
                 println!("cargo:rustc-cfg=ykpt");
+                println!("cargo::rustc-check-cfg=cfg(ykpt)");
                 println!("cargo:rustc-cfg=pt");
+                println!("cargo::rustc-check-cfg=cfg(pt)");
             }
         }
     }
