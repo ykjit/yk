@@ -17,7 +17,7 @@ use super::{
     reg_alloc::{LocalAlloc, RegisterAllocator, StackDirection},
     CodeGen,
 };
-use crate::compile::CompiledTrace;
+use crate::compile::{jitc_yk::jit_ir::IndirectCallIdx, CompiledTrace};
 use byteorder::{NativeEndian, ReadBytesExt};
 use dynasmrt::{
     components::StaticLabel, dynasm, x64::Rq, AssemblyOffset, DynasmApi, DynasmError,
@@ -176,6 +176,7 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Inst::Store(i) => self.cg_store(i),
             jit_ir::Inst::LookupGlobal(i) => self.cg_lookupglobal(inst_idx, i),
             jit_ir::Inst::Call(i) => self.cg_call(inst_idx, i)?,
+            jit_ir::Inst::IndirectCall(i) => self.cg_indirectcall(inst_idx, i)?,
             jit_ir::Inst::Icmp(i) => self.cg_icmp(inst_idx, i),
             jit_ir::Inst::Guard(i) => self.cg_guard(i),
             jit_ir::Inst::Arg(i) => self.cg_arg(inst_idx, *i),
@@ -454,13 +455,74 @@ impl<'a> X64CodeGen<'a> {
     fn cg_call(
         &mut self,
         inst_idx: InstIdx,
-        inst: &jit_ir::CallInst,
+        inst: &jit_ir::DirectCallInst,
     ) -> Result<(), CompilationError> {
         let func_decl_idx = inst.target();
         let args = (0..(inst.num_args()))
             .map(|i| inst.operand(self.m, i))
             .collect::<Vec<_>>();
         self.emit_call(inst_idx, func_decl_idx, &args)
+    }
+
+    /// Codegen a (non-varargs) indirect call.
+    fn cg_indirectcall(
+        &mut self,
+        inst_idx: InstIdx,
+        indirect_call_idx: &IndirectCallIdx,
+    ) -> Result<(), CompilationError> {
+        // FIXME Most of this can probably be shared with `cg_call`, though the different arguments may complicate that change.
+        let inst = self.m.indirect_call(*indirect_call_idx);
+        let args = (0..(inst.num_args()))
+            .map(|i| inst.operand(self.m, i))
+            .collect::<Vec<_>>();
+
+        // FIXME: floating point args
+        // FIXME: non-SysV ABIs
+        let fty = match self.m.type_(inst.fty_idx()) {
+            jit_ir::Ty::Func(fty) => fty,
+            _ => panic!(),
+        };
+
+        let num_args = args.len();
+
+        if num_args > ARG_REGS.len() {
+            todo!(); // needs spill
+        }
+
+        if fty.is_vararg() {
+            // SysV X86_64 ABI says "rax is used to indicate the number of vector arguments passed
+            // to a function requiring a variable number of arguments".
+            //
+            // We don't yet support vectors, so for now rax=0.
+            dynasm!(self.asm; mov rax, 0);
+        }
+
+        for (i, reg) in ARG_REGS.into_iter().take(num_args).enumerate() {
+            let op = &args[i];
+            // We can type check the static args (but not varargs).
+            debug_assert!(
+                i >= fty.num_args() || self.m.type_(op.ty_idx(self.m)) == fty.arg_type(self.m, i),
+                "argument type mismatch in call"
+            );
+            self.load_operand(reg, op);
+        }
+
+        // Load the call target into a register.
+        self.load_operand(WR0, &inst.target());
+
+        // The SysV x86_64 ABI requires the stack to be 16-byte aligned prior to a call.
+        self.stack.align(SYSV_CALL_STACK_ALIGN);
+
+        // Actually perform the call.
+        dynasm!(self.asm
+            ; call Rq(WR0.code())
+        );
+
+        // If the function we called has a return value, then store it into a local variable.
+        if fty.ret_type(self.m) != &Ty::Void {
+            self.store_new_local(inst_idx, Rq::RAX);
+        }
+        Ok(())
     }
 
     fn cg_icmp(&mut self, inst_idx: InstIdx, inst: &jit_ir::IcmpInst) {
@@ -1112,7 +1174,7 @@ mod tests {
             let func_decl_idx = m
                 .insert_func_decl(jit_ir::FuncDecl::new(CALL_TESTS_CALLEE.into(), func_ty_idx))
                 .unwrap();
-            let call_inst = jit_ir::CallInst::new(&mut m, func_decl_idx, vec![]).unwrap();
+            let call_inst = jit_ir::DirectCallInst::new(&mut m, func_decl_idx, vec![]).unwrap();
             m.push(call_inst.into()).unwrap();
 
             let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
@@ -1153,7 +1215,7 @@ mod tests {
                 .unwrap();
 
             let call_inst =
-                jit_ir::CallInst::new(&mut m, func_decl_idx, vec![arg1, arg2, arg3]).unwrap();
+                jit_ir::DirectCallInst::new(&mut m, func_decl_idx, vec![arg1, arg2, arg3]).unwrap();
             m.push(call_inst.into()).unwrap();
 
             let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
@@ -1212,7 +1274,7 @@ mod tests {
                 .push_and_make_operand(jit_ir::LoadTraceInputInst::new(40, i8_ty_idx).into())
                 .unwrap();
 
-            let call_inst = jit_ir::CallInst::new(
+            let call_inst = jit_ir::DirectCallInst::new(
                 &mut m,
                 func_decl_idx,
                 vec![arg1, arg2, arg3, arg4, arg5, arg6],
@@ -1260,7 +1322,7 @@ mod tests {
                 .unwrap();
 
             let args = (0..7).map(|_| arg1.clone()).collect::<Vec<_>>();
-            let call_inst = jit_ir::CallInst::new(&mut m, func_decl_idx, args).unwrap();
+            let call_inst = jit_ir::DirectCallInst::new(&mut m, func_decl_idx, args).unwrap();
             m.push(call_inst.into()).unwrap();
 
             X64CodeGen::new(&m, Box::new(SpillAllocator::new(STACK_DIRECTION)))
@@ -1280,7 +1342,7 @@ mod tests {
             let func_decl_idx = m
                 .insert_func_decl(jit_ir::FuncDecl::new(CALL_TESTS_CALLEE.into(), func_ty_idx))
                 .unwrap();
-            let call_inst = jit_ir::CallInst::new(&mut m, func_decl_idx, vec![]).unwrap();
+            let call_inst = jit_ir::DirectCallInst::new(&mut m, func_decl_idx, vec![]).unwrap();
             m.push(call_inst.into()).unwrap();
 
             let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
@@ -1318,7 +1380,7 @@ mod tests {
             let arg1 = m
                 .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i8_ty_idx).into())
                 .unwrap();
-            let call_inst = jit_ir::CallInst::new(&mut m, func_decl_idx, vec![arg1]).unwrap();
+            let call_inst = jit_ir::DirectCallInst::new(&mut m, func_decl_idx, vec![arg1]).unwrap();
             m.push(call_inst.into()).unwrap();
 
             X64CodeGen::new(&m, Box::new(SpillAllocator::new(STACK_DIRECTION)))

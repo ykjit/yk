@@ -74,6 +74,8 @@ pub(crate) struct Module {
     global_decls: IndexSet<GlobalDecl>,
     /// Additional information for guards.
     guard_info: TiVec<GuardInfoIdx, GuardInfo>,
+    /// Indirect calls.
+    indirect_calls: TiVec<IndirectCallIdx, IndirectCallInst>,
     /// The virtual address of the global variable pointer array.
     ///
     /// This is an array (added to the LLVM AOT module and AOT codegenned by ykllvm) containing a
@@ -132,6 +134,7 @@ impl Module {
             func_decls: IndexSet::new(),
             global_decls: IndexSet::new(),
             guard_info: TiVec::new(),
+            indirect_calls: TiVec::new(),
             #[cfg(not(test))]
             globalvar_ptrs,
         })
@@ -178,11 +181,29 @@ impl Module {
         &self.insts[idx]
     }
 
+    /// Return the indirect call at the specified index.
+    pub(crate) fn indirect_call(&self, idx: IndirectCallIdx) -> &IndirectCallInst {
+        &self.indirect_calls[idx]
+    }
+
     /// Push an instruction to the end of the [Module].
     pub(crate) fn push(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
         match InstIdx::new(self.insts.len()) {
             Ok(x) => {
                 self.insts.push(inst);
+                Ok(x)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    pub(crate) fn push_indirect_call(
+        &mut self,
+        inst: IndirectCallInst,
+    ) -> Result<IndirectCallIdx, CompilationError> {
+        match IndirectCallIdx::new(self.indirect_calls.len()) {
+            Ok(x) => {
+                self.indirect_calls.push(inst);
                 Ok(x)
             }
             Err(e) => Err(e),
@@ -604,6 +625,11 @@ index_16bit!(GuardInfoIdx);
 pub(crate) struct GlobalDeclIdx(U24);
 index_24bit!(GlobalDeclIdx);
 
+/// An indirect call index.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct IndirectCallIdx(U24);
+index_24bit!(IndirectCallIdx);
+
 /// An instruction index.
 ///
 /// One of these is an index into the [Module::insts].
@@ -908,7 +934,8 @@ pub enum Inst {
     Load(LoadInst),
     LookupGlobal(LookupGlobalInst),
     LoadTraceInput(LoadTraceInputInst),
-    Call(CallInst),
+    Call(DirectCallInst),
+    IndirectCall(IndirectCallIdx),
     PtrAdd(PtrAddInst),
     Store(StoreInst),
     Icmp(IcmpInst),
@@ -976,6 +1003,15 @@ impl Inst {
             // Binary operations
             Self::Add(i) => i.ty_idx(m),
             Self::Or(i) => i.ty_idx(m),
+            Self::IndirectCall(idx) => {
+                let inst = &m.indirect_calls[*idx];
+                let ty = m.type_(inst.fty_idx);
+                let fty = match ty {
+                    Ty::Func(ft) => ft,
+                    _ => panic!(),
+                };
+                fty.ret_ty_idx()
+            }
             x => todo!("{x:?}"),
         }
     }
@@ -1037,6 +1073,18 @@ impl fmt::Display for DisplayableInst<'_> {
                     self.m.func_decl(x.target).name(),
                     (0..self.m.func_type(x.target).num_args())
                         .map(|y| format!("{}", x.operand(self.m, y).display(self.m)))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+            Inst::IndirectCall(x) => {
+                let inst = &self.m.indirect_calls[*x];
+                write!(
+                    f,
+                    "IndirectCall {}({})",
+                    inst.target.unpack().display(self.m),
+                    (0..inst.num_args())
+                        .map(|y| format!("{}", inst.operand(self.m, y).display(self.m)))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )
@@ -1117,7 +1165,7 @@ inst!(Load, LoadInst);
 inst!(LookupGlobal, LookupGlobalInst);
 inst!(Store, StoreInst);
 inst!(LoadTraceInput, LoadTraceInputInst);
-inst!(Call, CallInst);
+inst!(Call, DirectCallInst);
 inst!(PtrAdd, PtrAddInst);
 inst!(Icmp, IcmpInst);
 inst!(Guard, GuardInst);
@@ -1237,6 +1285,71 @@ impl LookupGlobalInst {
         self.global_decl_idx
     }
 }
+///
+/// The operands for a [Inst::IndirectCall]
+///
+/// # Semantics
+///
+/// Perform an indirect call to an external or AOT function.
+#[derive(Debug)]
+pub struct IndirectCallInst {
+    /// The callee.
+    target: PackedOperand,
+    // Type of the target function.
+    fty_idx: TyIdx,
+    /// How many arguments in [Module::extra_args] is this call passing?
+    num_args: u16,
+    /// At what index do the contiguous operands in [Module::extra_args] start?
+    args_idx: ArgsIdx,
+}
+
+impl IndirectCallInst {
+    pub(crate) fn new(
+        m: &mut Module,
+        fty_idx: TyIdx,
+        target: Operand,
+        args: Vec<Operand>,
+    ) -> Result<IndirectCallInst, CompilationError> {
+        let num_args = u16::try_from(args.len()).map_err(|_| {
+            CompilationError::LimitExceeded(format!(
+                "{} arguments passed but at most {} can be handled",
+                args.len(),
+                u16::MAX
+            ))
+        })?;
+        let args_idx = m.push_args(args)?;
+        Ok(Self {
+            target: PackedOperand::new(&target),
+            fty_idx,
+            num_args,
+            args_idx,
+        })
+    }
+
+    /// Return the [TyIdx] of the callee.
+    pub(crate) fn fty_idx(&self) -> TyIdx {
+        self.fty_idx
+    }
+
+    /// Return the callee [Operand].
+    pub(crate) fn target(&self) -> Operand {
+        self.target.unpack()
+    }
+
+    /// How many arguments is this call instruction passing?
+    pub(crate) fn num_args(&self) -> usize {
+        usize::from(self.num_args)
+    }
+
+    /// Fetch the operand at the specified index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the operand index is out of bounds.
+    pub(crate) fn operand(&self, m: &Module, idx: usize) -> Operand {
+        m.args[usize::from(self.args_idx) + idx].clone()
+    }
+}
 
 /// The operands for a [Inst::Call]
 ///
@@ -1245,7 +1358,7 @@ impl LookupGlobalInst {
 /// Perform a call to an external or AOT function.
 #[derive(Debug)]
 #[repr(packed)]
-pub struct CallInst {
+pub struct DirectCallInst {
     /// The callee.
     target: FuncDeclIdx,
     /// At what index do the contiguous operands in [Module::args] start?
@@ -1254,12 +1367,12 @@ pub struct CallInst {
     num_args: u16,
 }
 
-impl CallInst {
+impl DirectCallInst {
     pub(crate) fn new(
         m: &mut Module,
         target: FuncDeclIdx,
         args: Vec<Operand>,
-    ) -> Result<CallInst, CompilationError> {
+    ) -> Result<DirectCallInst, CompilationError> {
         let num_args = u16::try_from(args.len()).map_err(|_| {
             CompilationError::LimitExceeded(format!(
                 "{} arguments passed but at most {} can be handled",
@@ -1595,7 +1708,7 @@ mod tests {
     /// Ensure that any given instruction fits in 64-bits.
     #[test]
     fn inst_size() {
-        assert_eq!(mem::size_of::<CallInst>(), 7);
+        assert_eq!(mem::size_of::<DirectCallInst>(), 7);
         assert_eq!(mem::size_of::<StoreInst>(), 4);
         assert_eq!(mem::size_of::<LoadInst>(), 6);
         assert_eq!(mem::size_of::<LookupGlobalInst>(), 3);
@@ -1620,7 +1733,7 @@ mod tests {
             Operand::Local(InstIdx(1)),
             Operand::Local(InstIdx(2)),
         ];
-        let ci = CallInst::new(&mut m, func_decl_idx, args).unwrap();
+        let ci = DirectCallInst::new(&mut m, func_decl_idx, args).unwrap();
 
         // Now request the operands and check they all look as they should.
         assert_eq!(ci.operand(&m, 0), Operand::Local(InstIdx(0)));
@@ -1655,7 +1768,7 @@ mod tests {
             Operand::Local(InstIdx(1)),
             Operand::Local(InstIdx(2)),
         ];
-        let ci = CallInst::new(&mut m, func_decl_idx, args).unwrap();
+        let ci = DirectCallInst::new(&mut m, func_decl_idx, args).unwrap();
 
         // Request an operand with an out-of-bounds index.
         ci.operand(&m, 3);

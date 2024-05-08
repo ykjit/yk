@@ -481,6 +481,15 @@ pub(crate) enum Instruction {
         #[deku(count = "num_incoming")]
         incoming_vals: Vec<Operand>,
     },
+    #[deku(id = "15")]
+    IndirectCall {
+        fty_idx: TypeIdx,
+        callop: Operand,
+        #[deku(temp)]
+        num_args: u32,
+        #[deku(count = "num_args")]
+        args: Vec<Operand>,
+    },
     #[deku(id = "255")]
     Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "map_to_string")] String),
 }
@@ -540,6 +549,19 @@ impl Instruction {
             Self::Phi { incoming_vals, .. } => {
                 // Indexing cannot crash: correct PHI nodes have at least one incoming value.
                 Some(incoming_vals[0].type_(m))
+            }
+            Self::IndirectCall { fty_idx, .. } => {
+                // The type of the newly-defined local is the return type of the callee.
+                if let Type::Func(ft) = m.type_(*fty_idx) {
+                    let ty = m.type_(ft.ret_ty);
+                    if ty != &Type::Void {
+                        Some(ty)
+                    } else {
+                        None
+                    }
+                } else {
+                    panic!(); // IR malformed.
+                }
             }
             Self::Unimplemented(_) => None,
             Self::Nop => None,
@@ -712,6 +734,18 @@ impl AotIRDisplay for Instruction {
                     .map(|(bb, val)| format!("bb{} -> {}", usize::from(*bb), val.to_string(m)))
                     .collect::<Vec<_>>();
                 ret.push_str(&format!("phi {}", args.join(", ")));
+            }
+            Self::IndirectCall {
+                fty_idx: _,
+                callop,
+                args,
+            } => {
+                let args_s = args
+                    .iter()
+                    .map(|a| a.to_string(m))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                ret.push_str(&format!("call {}({})", callop.to_string(m), args_s));
             }
             Self::Unimplemented(s) => ret.push_str(&format!("unimplemented <<{}>>", s)),
             Self::Nop => ret.push_str("nop"),
