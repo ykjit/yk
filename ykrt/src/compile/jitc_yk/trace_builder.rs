@@ -12,6 +12,8 @@ const TRACE_FUNC_CTRLP_ARGIDX: u16 = 0;
 /// A TraceBuilder frame. Keeps track of inlined calls and stores information about the last
 /// processed safepoint, call instruction and its arguments.
 struct Frame<'a> {
+    // The call instruction of this frame.
+    callinst: Option<aot_ir::InstructionID>,
     // Index of the function of this frame.
     func_idx: Option<FuncIdx>,
     /// Safepoint for this frame.
@@ -22,11 +24,13 @@ struct Frame<'a> {
 
 impl<'a> Frame<'a> {
     fn new(
+        callinst: Option<aot_ir::InstructionID>,
         func_idx: Option<FuncIdx>,
         safepoint: Option<&'a aot_ir::DeoptSafepoint>,
         args: Vec<jit_ir::Operand>,
     ) -> Frame<'a> {
         Frame {
+            callinst,
             func_idx,
             safepoint,
             args,
@@ -71,7 +75,7 @@ impl<'a> TraceBuilder<'a> {
             first_ti_idx: 0,
             // We have to set the func_idx to None here as we don't know what it is yet. We'll
             // update it as soon as we do.
-            frames: vec![Frame::new(None, None, vec![])],
+            frames: vec![Frame::new(None, None, None, vec![])],
             outline_target_blk: None,
             recursion_count: 0,
         })
@@ -487,10 +491,18 @@ impl<'a> TraceBuilder<'a> {
         &mut self,
         _bid: &aot_ir::BBlockId,
         _aot_inst_idx: usize,
-        _val: &Option<aot_ir::Operand>,
+        val: &Option<aot_ir::Operand>,
     ) -> Result<(), CompilationError> {
         // FIXME: Map return value to AOT call instruction.
-        self.frames.pop();
+        let frame = self.frames.pop().unwrap();
+        if let Some(val) = val {
+            match self.handle_operand(val)? {
+                jit_ir::Operand::Local(jitidx) => {
+                    self.local_map.insert(frame.callinst.unwrap(), jitidx);
+                }
+                _ => todo!(),
+            }
+        }
         Ok(())
     }
 
@@ -609,7 +621,13 @@ impl<'a> TraceBuilder<'a> {
             // Unwrap is safe as there's always at least one frame.
             self.frames.last_mut().unwrap().safepoint = inst.safepoint();
             // Create a new frame for the inlined call and pass in the arguments of the caller.
-            self.frames.push(Frame::new(Some(*callee), None, jit_args));
+            let aot_iid = aot_ir::InstructionID::new(
+                bid.func_idx(),
+                bid.bb_idx(),
+                aot_ir::InstrIdx::new(aot_inst_idx),
+            );
+            self.frames
+                .push(Frame::new(Some(aot_iid), Some(*callee), None, jit_args));
             Ok(())
         } else {
             // This call can't be inlined. It is either unmappable (a declaration or an indirect
