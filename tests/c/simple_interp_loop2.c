@@ -25,6 +25,8 @@
 //     pc=4, mem=0
 //     pc=5, mem=0
 
+// Test a basic interpreter.
+
 #include <assert.h>
 #include <stdbool.h>
 #include <stdio.h>
