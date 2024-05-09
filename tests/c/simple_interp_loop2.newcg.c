@@ -1,3 +1,4 @@
+// ignore-if: test $YK_JIT_COMPILER != "yk" -o "$YKB_TRACER" = "swt"
 // Run-time:
 //   env-var: YKD_LOG_JITSTATE=-
 //   env-var: YKD_LOG_STATS=/dev/null

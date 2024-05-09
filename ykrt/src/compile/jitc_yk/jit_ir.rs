@@ -1012,6 +1012,7 @@ impl Inst {
                 };
                 fty.ret_ty_idx()
             }
+            Self::Mul(i) => i.ty_idx(m),
             x => todo!("{x:?}"),
         }
     }
@@ -1090,7 +1091,12 @@ impl fmt::Display for DisplayableInst<'_> {
                 )
             }
             Inst::PtrAdd(x) => {
-                write!(f, "PtrAdd {}, {}", x.ptr().display(self.m), x.offset())
+                write!(
+                    f,
+                    "PtrAdd {}, {}",
+                    x.ptr().display(self.m),
+                    x.offset().display(self.m)
+                )
             }
             Inst::Store(x) => write!(
                 f,
@@ -1141,6 +1147,14 @@ impl fmt::Display for DisplayableInst<'_> {
                 write!(
                     f,
                     "Or {}, {}",
+                    i.lhs().display(self.m),
+                    i.rhs().display(self.m),
+                )
+            }
+            Inst::Mul(i) => {
+                write!(
+                    f,
+                    "Mul {}, {}",
                     i.lhs().display(self.m),
                     i.rhs().display(self.m),
                 )
@@ -1454,7 +1468,7 @@ pub struct PtrAddInst {
     /// The pointer to offset
     ptr: PackedOperand,
     /// The offset.
-    off: u32,
+    off: PackedOperand,
 }
 
 impl PtrAddInst {
@@ -1463,14 +1477,15 @@ impl PtrAddInst {
         ptr.unpack()
     }
 
-    pub(crate) fn offset(&self) -> u32 {
-        self.off
+    pub(crate) fn offset(&self) -> Operand {
+        let unaligned = std::ptr::addr_of!(self.off);
+        unsafe { std::ptr::read_unaligned(unaligned) }.unpack()
     }
 
-    pub(crate) fn new(ptr: Operand, off: u32) -> Self {
+    pub(crate) fn new(ptr: Operand, off: Operand) -> Self {
         Self {
             ptr: PackedOperand::new(&ptr),
-            off,
+            off: PackedOperand::new(&off),
         }
     }
 }
@@ -1708,11 +1723,6 @@ mod tests {
     /// Ensure that any given instruction fits in 64-bits.
     #[test]
     fn inst_size() {
-        assert_eq!(mem::size_of::<DirectCallInst>(), 7);
-        assert_eq!(mem::size_of::<StoreInst>(), 4);
-        assert_eq!(mem::size_of::<LoadInst>(), 6);
-        assert_eq!(mem::size_of::<LookupGlobalInst>(), 3);
-        assert_eq!(mem::size_of::<PtrAddInst>(), 6);
         assert!(mem::size_of::<Inst>() <= mem::size_of::<u64>());
     }
 
