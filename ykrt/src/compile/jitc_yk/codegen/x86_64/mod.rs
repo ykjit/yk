@@ -186,6 +186,7 @@ impl<'a> X64CodeGen<'a> {
             // Binary operations
             jit_ir::Inst::Add(i) => self.cg_add(inst_idx, i),
             jit_ir::Inst::Or(i) => self.cg_or(inst_idx, i),
+            jit_ir::Inst::Mul(i) => self.cg_mul(inst_idx, i),
             x => todo!("{x:?}"),
         }
         Ok(())
@@ -319,6 +320,33 @@ impl<'a> X64CodeGen<'a> {
         self.store_new_local(inst_idx, WR0);
     }
 
+    fn cg_mul(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::MulInst) {
+        let lhs = inst.lhs();
+        let rhs = inst.rhs();
+
+        // Operand types must be the same.
+        debug_assert_eq!(
+            self.m.type_(lhs.ty_idx(self.m)),
+            self.m.type_(rhs.ty_idx(self.m))
+        );
+
+        // Note that the first operand is hard-coded to RAX in x86_64.
+        self.load_operand(Rq::RAX, &lhs); // FIXME: assumes value will fit in a reg.
+        self.load_operand(WR1, &rhs); // ^^^ same
+
+        match lhs.byte_size(self.m) {
+            8 => dynasm!(self.asm; mul Rq(WR1.code())),
+            4 => dynasm!(self.asm; mul Rd(WR1.code())),
+            2 => dynasm!(self.asm; mul Rw(WR1.code())),
+            1 => dynasm!(self.asm; mul Rb(WR1.code())),
+            _ => todo!(),
+        }
+
+        // Note that because we are code-genning an unchecked multiply, the higher-order part of
+        // the result in RDX is entirely ignored.
+        self.store_new_local(inst_idx, Rq::RAX);
+    }
+
     fn cg_loadtraceinput(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::LoadTraceInputInst) {
         // Find the argument register containing the pointer to the live variables struct.
         let base_reg = ARG_REGS[JITFUNC_LIVEVARS_ARGIDX].code();
@@ -357,14 +385,8 @@ impl<'a> X64CodeGen<'a> {
 
     fn cg_ptradd(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::PtrAddInst) {
         self.load_operand(WR0, &inst.ptr());
-        let off = inst.offset();
-        // unwrap cannot fail
-        if off <= u32::try_from(i32::MAX).unwrap() {
-            // `as` safe due to above guard.
-            dynasm!(self.asm ; add Rq(WR0.code()), off as i32);
-        } else {
-            todo!();
-        }
+        self.load_operand(WR1, &inst.offset());
+        dynasm!(self.asm ; add Rq(WR0.code()), Rq(WR1.code()));
         self.store_new_local(inst_idx, WR0);
     }
 
@@ -972,12 +994,17 @@ mod tests {
             let ti_op = m
                 .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, ptr_ty_idx).into())
                 .unwrap();
-            m.push(jit_ir::PtrAddInst::new(ti_op, 64).into()).unwrap();
+            let co_ty = jit_ir::IntegerTy::new(32);
+            let co_const = co_ty.make_constant(&mut m, 64).unwrap();
+            let co_opnd = jit_ir::Operand::Const(m.insert_const(co_const).unwrap());
+            m.push(jit_ir::PtrAddInst::new(ti_op, co_opnd).into())
+                .unwrap();
             let patt_lines = [
                 "...",
-                "; %1: ptr = PtrAdd %0, 64",
+                "; %1: ptr = ptradd %0, 64i32",
                 "... mov r12, [rbp-0x08]",
-                "... add r12, 0x40",
+                "... mov r13, 0x40",
+                "... add r12, r13",
                 "... mov [rbp-0x10], r12",
                 "...",
             ];

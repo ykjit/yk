@@ -435,13 +435,36 @@ pub(crate) enum Instruction {
     },
     #[deku(id = "9")]
     InsertValue { agg: Operand, elem: Operand },
+    /// This opcode adds to the `ptr` operand:
+    ///  - a constant offset
+    ///  - zero or more dynamic offsets.
+    ///
+    /// where each dynamic offset is:
+    ///  - A potentially dynamic element count.
+    ///  - A constant element size.
+    ///
+    /// A dynamic offset is computed at runtime by multiplying the element count by the element
+    /// size.
     #[deku(id = "10")]
     PtrAdd {
+        // The type index of a pointer.
+        //
         // FIXME: the type will always be `ptr`, so this field could be elided if we provide a way
         // for us to find the pointer type index quickly.
         type_idx: TypeIdx,
+        /// The pointer to offset from.
         ptr: Operand,
-        off: Operand,
+        /// The constant offset (in bytes).
+        const_off: usize,
+        /// The number of dynamic offsets.
+        #[deku(temp)]
+        num_dyn_offs: usize,
+        /// The element counts for the dynamic offsets.
+        #[deku(count = "num_dyn_offs")]
+        dyn_elem_counts: Vec<Operand>,
+        /// The element sizes for the dynamic offsets (in bytes).
+        #[deku(count = "num_dyn_offs")]
+        dyn_elem_sizes: Vec<usize>,
     },
     #[deku(id = "11")]
     BinaryOp {
@@ -677,11 +700,29 @@ impl AotIRDisplay for Instruction {
                 rhs.to_string(m)
             )),
             Self::Load { ptr, .. } => ret.push_str(&format!("load {}", ptr.to_string(m))),
-            Self::PtrAdd { ptr, off, .. } => ret.push_str(&format!(
-                "PtrAdd {}, {}",
-                ptr.to_string(m),
-                off.to_string(m)
-            )),
+            Self::PtrAdd {
+                ptr,
+                const_off,
+                dyn_elem_counts,
+                dyn_elem_sizes,
+                ..
+            } => {
+                if dyn_elem_counts.is_empty() {
+                    ret.push_str(&format!("PtrAdd {}, {}", ptr.to_string(m), const_off));
+                } else {
+                    let dyns = dyn_elem_counts
+                        .iter()
+                        .zip(dyn_elem_sizes)
+                        .map(|(c, s)| format!("({} * {})", c.to_string(m), s))
+                        .collect::<Vec<_>>();
+                    ret.push_str(&format!(
+                        "PtrAdd {}, {} + {}",
+                        ptr.to_string(m),
+                        const_off,
+                        dyns.join(" + ")
+                    ));
+                }
+            }
             Self::Ret { val } => match val {
                 None => ret.push_str("ret"),
                 Some(v) => ret.push_str(&format!("ret {}", v.to_string(m))),

@@ -4,7 +4,7 @@ use super::aot_ir::{self, AotIRDisplay, BBlockId, FuncIdx, Module};
 use super::jit_ir;
 use crate::compile::CompilationError;
 use crate::trace::{AOTTraceIterator, TraceAction};
-use std::{collections::HashMap, ffi::CString};
+use std::{collections::HashMap, ffi::CString, mem};
 
 /// The argument index of the trace inputs struct in the trace function.
 const TRACE_FUNC_CTRLP_ARGIDX: u16 = 0;
@@ -226,14 +226,27 @@ impl<'a> TraceBuilder<'a> {
                 aot_ir::Instruction::Store { val, ptr } => {
                     self.handle_store(bid, inst_idx, val, ptr)
                 }
-                aot_ir::Instruction::PtrAdd { ptr, off, .. } => {
+                aot_ir::Instruction::PtrAdd {
+                    ptr,
+                    const_off,
+                    dyn_elem_counts,
+                    dyn_elem_sizes,
+                    ..
+                } => {
                     if self.cp_block.as_ref() == Some(bid) && inst_idx == self.first_ti_idx {
                         // We've reached the trace inputs part of the control point block. There's
                         // no point in copying these instructions over and we can just skip to the
                         // next block.
                         return Ok(());
                     }
-                    self.handle_ptradd(bid, inst_idx, ptr, off)
+                    self.handle_ptradd(
+                        bid,
+                        inst_idx,
+                        ptr,
+                        *const_off,
+                        dyn_elem_counts,
+                        dyn_elem_sizes,
+                    )
                 }
                 aot_ir::Instruction::BinaryOp {
                     lhs,
@@ -674,32 +687,43 @@ impl<'a> TraceBuilder<'a> {
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
         ptr: &aot_ir::Operand,
-        off: &aot_ir::Operand,
+        const_off: usize,
+        dyn_elem_counts: &[aot_ir::Operand],
+        dyn_elem_sizes: &[usize],
     ) -> Result<(), CompilationError> {
-        let jit_ptr = self.handle_operand(ptr)?;
-        match off {
-            aot_ir::Operand::Constant(co) => {
-                let c = self.aot_mod.constant(co);
-                if let aot_ir::Type::Integer(it) = self.aot_mod.const_type(c) {
-                    // Convert the offset into a 32 bit value, as that is the maximum we can fit into
-                    // the jit_ir::PtrAddInst.
-                    let offset: u32 = match it.num_bits() {
-                        // This unwrap can't fail unless we did something wrong during lowering.
-                        64 => u64::from_ne_bytes(c.bytes()[0..8].try_into().unwrap())
-                            .try_into()
-                            .map_err(|_| {
-                                CompilationError::LimitExceeded("ptradd offset too big".into())
-                            })?,
-                        _ => panic!(),
-                    };
-                    let instr = jit_ir::PtrAddInst::new(jit_ptr, offset).into();
-                    self.copy_instruction(instr, bid, aot_inst_idx)
-                } else {
-                    panic!(); // Non-integer offset. Malformed IR.
-                }
-            }
-            _ => todo!(),
+        // First apply the constant offset.
+        let mut jit_ptr = self.handle_operand(ptr)?;
+        if const_off != 0 {
+            let co_ty = jit_ir::IntegerTy::new(32);
+            let co_const = co_ty.make_constant(&mut self.jit_mod, const_off)?;
+            let co_opnd = jit_ir::Operand::Const(self.jit_mod.insert_const(co_const)?);
+            jit_ptr = self
+                .jit_mod
+                .push_and_make_operand(jit_ir::PtrAddInst::new(jit_ptr, co_opnd).into())?;
         }
+
+        // Now apply any dynamic indices.
+        //
+        // Each offset is the number of elements multiplied by the byte size of an element.
+        let usize_bitsize = u32::try_from(mem::size_of::<usize>() * 8).unwrap(); // always fits.
+        let count_ty = jit_ir::IntegerTy::new(usize_bitsize);
+        for (count, size) in dyn_elem_counts.iter().zip(dyn_elem_sizes) {
+            let count_opnd = self.handle_operand(count)?;
+            let size_const = count_ty
+                .to_owned()
+                .make_constant(&mut self.jit_mod, *size)?;
+            let size_opnd = jit_ir::Operand::Const(self.jit_mod.insert_const(size_const)?);
+            let mul = self
+                .jit_mod
+                .push_and_make_operand(jit_ir::MulInst::new(count_opnd, size_opnd).into())?;
+            jit_ptr = self
+                .jit_mod
+                .push_and_make_operand(jit_ir::PtrAddInst::new(jit_ptr, mul).into())?;
+        }
+
+        // OPT: the assignment instruction could be elided in some cases.
+        let inst = jit_ir::AssignInst::new(&jit_ptr);
+        self.copy_instruction(inst.into(), bid, aot_inst_idx)
     }
 
     fn handle_cast(
