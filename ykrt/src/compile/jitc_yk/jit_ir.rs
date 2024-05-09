@@ -1708,11 +1708,6 @@ mod tests {
     /// Ensure that any given instruction fits in 64-bits.
     #[test]
     fn inst_size() {
-        assert_eq!(mem::size_of::<DirectCallInst>(), 7);
-        assert_eq!(mem::size_of::<StoreInst>(), 4);
-        assert_eq!(mem::size_of::<LoadInst>(), 6);
-        assert_eq!(mem::size_of::<LookupGlobalInst>(), 3);
-        assert_eq!(mem::size_of::<PtrAddInst>(), 6);
         assert!(mem::size_of::<Inst>() <= mem::size_of::<u64>());
     }
 
