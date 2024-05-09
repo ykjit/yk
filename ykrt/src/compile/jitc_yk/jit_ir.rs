@@ -1071,7 +1071,7 @@ impl fmt::Display for DisplayableInst<'_> {
                     f,
                     "Call @{}({})",
                     self.m.func_decl(x.target).name(),
-                    (0..self.m.func_type(x.target).num_args())
+                    (0..x.num_args())
                         .map(|y| format!("{}", x.operand(self.m, y).display(self.m)))
                         .collect::<Vec<_>>()
                         .join(", ")

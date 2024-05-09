@@ -1,32 +1,27 @@
 // ignore-if: test $YK_JIT_COMPILER != "yk" -o "$YKB_TRACER" = "swt"
 // Run-time:
-//   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
+//   env-var: YKD_LOG_IR=-:jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
 //     jitstate: start-tracing
-//     i=4
+//     foo 7
 //     jitstate: stop-tracing
-//     --- Begin aot ---
-//     ...
-//     func main($arg0: i32, $arg1: ptr) -> i32 {
-//     ...
-//     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{17}}: i32 = Call @fprintf(%{{11}}, %{{16}}, %{{12}})
+//     %{{result}}: i32 = Add %{{1}}, 3i32
+//     ...
+//     %{{2}}: i32 = Call @fprintf(%{{3}}, %{{4}}, %{{result}})
 //     ...
 //     --- End jit-pre-opt ---
-//     i=3
+//     foo 6
 //     jitstate: enter-jit-code
-//     i=2
-//     i=1
-//     ...
+//     foo 5
+//     foo 4
 //     jitstate: deoptimise
-//     ...
 //     exit
 
-// Check that a call to fprintf works.
+// Check that return values of inlined functions are properly mapped.
 
 #include <assert.h>
 #include <stdio.h>
@@ -35,24 +30,23 @@
 #include <yk.h>
 #include <yk_testing.h>
 
+__attribute__((noinline)) int foo(int i) { return i + 3; }
+
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
-  int res = 9998;
   int i = 4;
   NOOPT_VAL(loc);
-  NOOPT_VAL(res);
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    fprintf(stderr, "i=%d\n", i);
-    res += 2;
+    int x = foo(i);
+    fprintf(stderr, "foo %d\n", x);
     i--;
   }
   fprintf(stderr, "exit\n");
-  NOOPT_VAL(res);
   yk_location_drop(loc);
   yk_mt_drop(mt);
   return (EXIT_SUCCESS);
