@@ -46,7 +46,7 @@ pub(crate) struct TraceBuilder<'a> {
     /// The JIT IR this struct builds.
     jit_mod: jit_ir::Module,
     /// Maps an AOT instruction to a jit instruction via their index-based IDs.
-    local_map: HashMap<aot_ir::InstructionID, jit_ir::InstIdx>,
+    local_map: HashMap<aot_ir::InstructionID, jit_ir::Operand>,
     // BBlock containing the current control point (i.e. the control point that started this trace).
     cp_block: Option<aot_ir::BBlockId>,
     // Index of the first traceinput instruction.
@@ -110,8 +110,10 @@ impl<'a> TraceBuilder<'a> {
                 trace_inputs = Some(tis.to_instr(self.aot_mod));
                 // Add the trace input argument to the local map so it can be tracked and
                 // deoptimised.
-                self.local_map
-                    .insert(tis.to_instr_id(), self.next_instr_id()?);
+                self.local_map.insert(
+                    tis.to_instr_id(),
+                    jit_ir::Operand::Local(self.next_instr_id()?),
+                );
                 let arg = jit_ir::Inst::Arg(TRACE_FUNC_CTRLP_ARGIDX);
                 self.jit_mod.push(arg)?;
                 break;
@@ -168,7 +170,7 @@ impl<'a> TraceBuilder<'a> {
                                 // IR is malformed.
                                 self.local_map.insert(
                                     last_store_ptr.take().unwrap().to_instr_id(),
-                                    self.next_instr_id()?,
+                                    jit_ir::Operand::Local(self.next_instr_id()?),
                                 );
                                 self.jit_mod.push(load_ti_instr)?;
                                 self.first_ti_idx = inst_idx;
@@ -319,7 +321,8 @@ impl<'a> TraceBuilder<'a> {
                 bid.bb_idx(),
                 aot_ir::InstrIdx::new(aot_inst_idx),
             );
-            self.local_map.insert(aot_iid, self.next_instr_id()?);
+            self.local_map
+                .insert(aot_iid, jit_ir::Operand::Local(self.next_instr_id()?));
         }
 
         // Insert the newly-translated instruction into the JIT module.
@@ -363,10 +366,7 @@ impl<'a> TraceBuilder<'a> {
         op: &aot_ir::Operand,
     ) -> Result<jit_ir::Operand, CompilationError> {
         let ret = match op {
-            aot_ir::Operand::LocalVariable(iid) => {
-                let instridx = self.local_map[iid];
-                jit_ir::Operand::Local(instridx)
-            }
+            aot_ir::Operand::LocalVariable(iid) => self.local_map[iid].clone(),
             aot_ir::Operand::Constant(cidx) => {
                 let jit_const = self.handle_const(self.aot_mod.constant(cidx))?;
                 jit_ir::Operand::Const(self.jit_mod.insert_const(jit_const)?)
@@ -463,19 +463,22 @@ impl<'a> TraceBuilder<'a> {
 
             // Collect live variables.
             for op in safepoint.lives.iter() {
-                match op {
-                    aot_ir::Operand::LocalVariable(iid) => {
-                        live_args.push(self.local_map[iid]);
-                    }
+                let op = match op {
+                    aot_ir::Operand::LocalVariable(iid) => &self.local_map[iid],
                     aot_ir::Operand::Arg { arg_idx, .. } => {
                         // Lookup the JIT value of the argument from the caller (stored in
                         // the previous frame's `args` field).
-                        let jit_ir::Operand::Local(idx) = frame_args[usize::from(*arg_idx)] else {
-                            panic!(); // IR malformed.
-                        };
-                        live_args.push(idx);
+                        &frame_args[usize::from(*arg_idx)]
                     }
                     _ => panic!(), // IR malformed.
+                };
+                match op {
+                    jit_ir::Operand::Local(lidx) => {
+                        live_args.push(*lidx);
+                    }
+                    jit_ir::Operand::Const(_) => {
+                        todo!()
+                    }
                 }
             }
         }
@@ -509,12 +512,8 @@ impl<'a> TraceBuilder<'a> {
         // FIXME: Map return value to AOT call instruction.
         let frame = self.frames.pop().unwrap();
         if let Some(val) = val {
-            match self.handle_operand(val)? {
-                jit_ir::Operand::Local(jitidx) => {
-                    self.local_map.insert(frame.callinst.unwrap(), jitidx);
-                }
-                _ => todo!(),
-            }
+            let op = self.handle_operand(val)?;
+            self.local_map.insert(frame.callinst.unwrap(), op);
         }
         Ok(())
     }
