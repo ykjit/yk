@@ -296,12 +296,10 @@ impl Operand {
     ///
     /// OPT: This is expensive.
     pub(crate) fn to_instr<'a>(&self, aotmod: &'a Module) -> &'a Instruction {
-        match self {
-            Self::LocalVariable(iid) => {
-                &aotmod.funcs[iid.func_idx].bblocks[iid.bb_idx].instrs[iid.inst_idx]
-            }
-            _ => panic!(),
-        }
+        let Self::LocalVariable(iid) = self else {
+            panic!()
+        };
+        &aotmod.funcs[iid.func_idx].bblocks[iid.bb_idx].instrs[iid.inst_idx]
     }
 
     /// Returns the [Type] of the operand.
@@ -313,10 +311,10 @@ impl Operand {
             }
             Self::Constant(cidx) => m.type_(m.const_(*cidx).type_idx()),
             Self::Arg { func_idx, arg_idx } => {
-                match m.type_(m.func(*func_idx).type_idx) {
-                    Type::Func(ft) => m.type_(ft.arg_ty_idxs()[usize::from(*arg_idx)]),
-                    _ => panic!(), // malformed IR.
-                }
+                let Type::Func(ft) = m.type_(m.func(*func_idx).type_idx) else {
+                    panic!()
+                };
+                m.type_(ft.arg_ty_idxs()[usize::from(*arg_idx)])
             }
             _ => todo!(),
         }
@@ -325,10 +323,10 @@ impl Operand {
     /// Return the `InstructionID` of a local variable operand. Panics if called on other kinds of
     /// operands.
     pub(crate) fn to_instr_id(&self) -> InstructionID {
-        match self {
-            Self::LocalVariable(iid) => iid.clone(),
-            _ => panic!(),
-        }
+        let Self::LocalVariable(iid) = self else {
+            panic!()
+        };
+        iid.clone()
     }
 }
 

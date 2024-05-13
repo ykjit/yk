@@ -817,29 +817,25 @@ mod tests {
     }
 
     fn expect_start_tracing(mt: &Arc<MT>, loc: &Location) {
-        match mt.transition_control_point(&loc) {
-            TransitionControlPoint::StartTracing(hl) => {
-                MTThread::with(|mtt| {
-                    *mtt.tstate.borrow_mut() = MTThreadState::Tracing {
-                        hl,
-                        thread_tracer: Box::new(DummyTraceRecorder),
-                        promotions: Vec::new(),
-                    };
-                });
-            }
-            _ => panic!(),
-        }
+        let TransitionControlPoint::StartTracing(hl) = mt.transition_control_point(&loc) else {
+            panic!()
+        };
+        MTThread::with(|mtt| {
+            *mtt.tstate.borrow_mut() = MTThreadState::Tracing {
+                hl,
+                thread_tracer: Box::new(DummyTraceRecorder),
+                promotions: Vec::new(),
+            };
+        });
     }
 
     fn expect_stop_tracing(mt: &Arc<MT>, loc: &Location) {
-        match mt.transition_control_point(&loc) {
-            TransitionControlPoint::StopTracing => {
-                MTThread::with(|mtt| {
-                    *mtt.tstate.borrow_mut() = MTThreadState::Interpreting;
-                });
-            }
-            _ => panic!(),
-        }
+        let TransitionControlPoint::StopTracing = mt.transition_control_point(&loc) else {
+            panic!()
+        };
+        MTThread::with(|mtt| {
+            *mtt.tstate.borrow_mut() = MTThreadState::Interpreting;
+        });
     }
 
     fn expect_start_side_tracing(mt: &Arc<MT>, loc: &Location) {
@@ -849,23 +845,21 @@ mod tests {
             aotvalslen: 0,
             guardid: GuardId::illegal(),
         };
-        match mt.transition_guard_failure(
+        let TransitionGuardFailure::StartSideTracing(hl) = mt.transition_guard_failure(
             sti,
             Arc::new(LLVMCompiledTrace::new_testing_with_hl(Arc::downgrade(
                 &loc.hot_location_arc_clone().unwrap(),
             ))),
-        ) {
-            TransitionGuardFailure::StartSideTracing(hl) => {
-                MTThread::with(|mtt| {
-                    *mtt.tstate.borrow_mut() = MTThreadState::Tracing {
-                        hl,
-                        thread_tracer: Box::new(DummyTraceRecorder),
-                        promotions: Vec::new(),
-                    };
-                });
-            }
-            _ => panic!(),
-        }
+        ) else {
+            panic!()
+        };
+        MTThread::with(|mtt| {
+            *mtt.tstate.borrow_mut() = MTThreadState::Tracing {
+                hl,
+                thread_tracer: Box::new(DummyTraceRecorder),
+                promotions: Vec::new(),
+            };
+        });
     }
 
     #[test]

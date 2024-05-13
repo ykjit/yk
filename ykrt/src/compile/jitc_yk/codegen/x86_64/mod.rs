@@ -500,9 +500,8 @@ impl<'a> X64CodeGen<'a> {
 
         // FIXME: floating point args
         // FIXME: non-SysV ABIs
-        let fty = match self.m.type_(inst.fty_idx()) {
-            jit_ir::Ty::Func(fty) => fty,
-            _ => panic!(),
+        let jit_ir::Ty::Func(fty) = self.m.type_(inst.fty_idx()) else {
+            panic!()
         };
 
         let num_args = args.len();

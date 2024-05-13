@@ -125,10 +125,10 @@ impl<'a> TraceBuilder<'a> {
         let trace_inputs = trace_inputs.unwrap();
         let trace_input_struct_ty = match trace_inputs {
             aot_ir::Instruction::Alloca { type_idx, .. } => {
-                match self.aot_mod.type_(*type_idx) {
-                    aot_ir::Type::Struct(x) => x,
-                    _ => panic!(), // IR malformed.
-                }
+                let aot_ir::Type::Struct(x) = self.aot_mod.type_(*type_idx) else {
+                    panic!()
+                };
+                x
             }
             _ => panic!(), // IR malformed.
         };

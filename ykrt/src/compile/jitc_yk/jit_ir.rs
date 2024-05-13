@@ -1006,10 +1006,7 @@ impl Inst {
             Self::IndirectCall(idx) => {
                 let inst = &m.indirect_calls[*idx];
                 let ty = m.type_(inst.fty_idx);
-                let fty = match ty {
-                    Ty::Func(ft) => ft,
-                    _ => panic!(),
-                };
+                let Ty::Func(fty) = ty else { panic!() };
                 fty.ret_ty_idx()
             }
             Self::Mul(i) => i.ty_idx(m),
