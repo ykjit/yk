@@ -142,25 +142,6 @@ fn map_to_tivec<I, T>(v: Vec<T>) -> Result<TiVec<I, T>, DekuError> {
     Ok(TiVec::from(v))
 }
 
-/// A trait for converting in-memory data-structures into a human-readable textual format.
-///
-/// This is analogous to [std::fmt::Display], but:
-///   1. Takes a reference to a [Module] so that constructs that require lookups into the module's
-///      tables from stringification have access to them.
-///   2. Returns a [String], for ease of use.
-pub(crate) trait AotIRDisplay {
-    /// Return a human-readable string.
-    fn to_string(&self, m: &Module) -> String;
-
-    /// Print myself to stderr in human-readable form.
-    ///
-    /// This isn't used during normal operation of the system: it is provided as a debugging aid.
-    #[allow(dead_code)]
-    fn dump(&self, m: &Module) {
-        eprintln!("{}", self.to_string(m));
-    }
-}
-
 /// A binary operator.
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
