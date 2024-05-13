@@ -365,25 +365,26 @@ impl<'a> TraceBuilder<'a> {
         &mut self,
         op: &aot_ir::Operand,
     ) -> Result<jit_ir::Operand, CompilationError> {
-        let ret = match op {
-            aot_ir::Operand::LocalVariable(iid) => self.local_map[iid].clone(),
+        match op {
+            aot_ir::Operand::LocalVariable(iid) => Ok(self.local_map[iid].clone()),
             aot_ir::Operand::Constant(cidx) => {
                 let jit_const = self.handle_const(self.aot_mod.constant(cidx))?;
-                jit_ir::Operand::Const(self.jit_mod.insert_const(jit_const)?)
+                Ok(jit_ir::Operand::Const(
+                    self.jit_mod.insert_const(jit_const)?,
+                ))
             }
             aot_ir::Operand::Global(gd_idx) => {
                 let load = jit_ir::LookupGlobalInst::new(self.handle_global(*gd_idx)?)?;
-                self.jit_mod.push_and_make_operand(load.into())?
+                self.jit_mod.push_and_make_operand(load.into())
             }
             aot_ir::Operand::Arg { arg_idx, .. } => {
                 // Lookup the JIT instruction that was passed into this function as an argument.
                 // Unwrap is safe since an `Arg` means we are currently inlining a function.
                 // FIXME: Is the above correct? What about args in the control point frame?
-                self.frames.last().unwrap().args[usize::from(*arg_idx)].clone()
+                Ok(self.frames.last().unwrap().args[usize::from(*arg_idx)].clone())
             }
             _ => todo!("{}", op.to_string(self.aot_mod)),
-        };
-        Ok(ret)
+        }
     }
 
     /// Translate a type.
