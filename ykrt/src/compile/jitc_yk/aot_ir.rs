@@ -696,7 +696,7 @@ impl fmt::Display for DisplayableInstruction<'_> {
                 f,
                 "{}: {} = ",
                 self.instruction.local_name(self.m),
-                t.to_string(self.m)
+                t.display(self.m)
             )?;
         }
 
@@ -704,7 +704,7 @@ impl fmt::Display for DisplayableInstruction<'_> {
             Instruction::Alloca { type_idx, count } => write!(
                 f,
                 "alloca {}, {}",
-                self.m.type_(*type_idx).to_string(self.m),
+                self.m.type_(*type_idx).display(self.m),
                 count
             ),
             Instruction::BinaryOp { lhs, binop, rhs } => {
@@ -802,7 +802,7 @@ impl fmt::Display for DisplayableInstruction<'_> {
                 f,
                 "{cast_kind} {}, {}",
                 val.display(self.m),
-                self.m.types[*dest_type_idx].to_string(self.m)
+                self.m.types[*dest_type_idx].display(self.m)
             ),
             Instruction::Switch {
                 test_val,
@@ -962,7 +962,7 @@ impl fmt::Display for DisplayableFunc<'_> {
                 fty.arg_ty_idxs
                     .iter()
                     .enumerate()
-                    .map(|(i, t)| format!("$arg{}: {}", i, self.m.types[*t].to_string(self.m)))
+                    .map(|(i, t)| format!("$arg{}: {}", i, self.m.types[*t].display(self.m)))
                     .collect::<Vec<_>>()
                     .join(", ")
             )?;
@@ -972,7 +972,7 @@ impl fmt::Display for DisplayableFunc<'_> {
             write!(f, ")")?;
             let ret_ty = &self.m.types[fty.ret_ty];
             if ret_ty != &Type::Void {
-                write!(f, " -> {}", ret_ty.to_string(self.m))?;
+                write!(f, " -> {}", ret_ty.display(self.m))?;
             }
             if self.func_.is_declaration() {
                 // declarations have no body, so print it as such.
@@ -1120,7 +1120,7 @@ impl fmt::Display for DisplayableFuncType<'_> {
             .func_type
             .arg_ty_idxs
             .iter()
-            .map(|t| self.m.types[*t].to_string(self.m))
+            .map(|t| self.m.types[*t].display(self.m).to_string())
             .collect::<Vec<_>>();
         if self.func_type.is_vararg() {
             args.push("...".to_owned());
@@ -1128,7 +1128,7 @@ impl fmt::Display for DisplayableFuncType<'_> {
         write!(f, "func({})", args.join(", "))?;
         let rty = self.m.type_(self.func_type.ret_ty);
         if rty != &Type::Void {
-            write!(f, " -> {}", rty.to_string(self.m))?
+            write!(f, " -> {}", rty.display(self.m))?
         }
         Ok(())
     }
@@ -1185,7 +1185,7 @@ impl AotIRDisplay for StructType {
                 .field_ty_idxs
                 .iter()
                 .enumerate()
-                .map(|(i, ti)| format!("{}: {}", self.field_bit_offs[i], m.types[*ti].to_string(m)))
+                .map(|(i, ti)| format!("{}: {}", self.field_bit_offs[i], m.types[*ti].display(m)))
                 .collect::<Vec<_>>()
                 .join(", "),
         );
@@ -1237,17 +1237,27 @@ impl Type {
             Self::Unimplemented(s) => format!("?cst<{}>", s),
         }
     }
+
+    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableType<'a> {
+        DisplayableType { type_: self, m }
+    }
 }
 
-impl AotIRDisplay for Type {
-    fn to_string(&self, m: &Module) -> String {
-        match self {
-            Self::Void => "void".to_owned(),
-            Self::Integer(i) => i.to_string(),
-            Self::Ptr => "ptr".to_owned(),
-            Self::Func(ft) => format!("{}", ft.display(m)),
-            Self::Struct(st) => st.to_string(m),
-            Self::Unimplemented(s) => format!("?ty<{}>", s),
+#[derive(Debug)]
+pub(crate) struct DisplayableType<'a> {
+    type_: &'a Type,
+    m: &'a Module,
+}
+
+impl fmt::Display for DisplayableType<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.type_ {
+            Type::Void => write!(f, "void"),
+            Type::Integer(x) => write!(f, "{}", x),
+            Type::Ptr => write!(f, "ptr"),
+            Type::Func(ft) => write!(f, "{}", ft.display(self.m)),
+            Type::Struct(st) => write!(f, "{}", st.to_string(self.m)),
+            Type::Unimplemented(s) => write!(f, "?ty<{}>", s),
         }
     }
 }
@@ -1541,15 +1551,15 @@ mod tests {
         m.types.push(Type::Void);
 
         let fty = Type::Func(FuncType::new(vec![i8_tyidx], i8_tyidx, false));
-        assert_eq!(&fty.to_string(&m), "func(i8) -> i8");
+        assert_eq!(fty.display(&m).to_string(), "func(i8) -> i8");
 
         let fty = Type::Func(FuncType::new(vec![i8_tyidx], i8_tyidx, true));
-        assert_eq!(&fty.to_string(&m), "func(i8, ...) -> i8");
+        assert_eq!(fty.display(&m).to_string(), "func(i8, ...) -> i8");
 
         let fty = Type::Func(FuncType::new(vec![], i8_tyidx, false));
-        assert_eq!(&fty.to_string(&m), "func() -> i8");
+        assert_eq!(fty.display(&m).to_string(), "func() -> i8");
 
         let fty = Type::Func(FuncType::new(vec![], void_tyidx, false));
-        assert_eq!(&fty.to_string(&m), "func()");
+        assert_eq!(fty.display(&m).to_string(), "func()");
     }
 }
