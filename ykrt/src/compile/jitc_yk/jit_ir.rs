@@ -216,7 +216,6 @@ impl Module {
         &mut self,
         inst: Inst,
     ) -> Result<Operand, CompilationError> {
-        assert!(InstIdx::new(self.insts.len()).is_ok());
         if inst.def_type(self).is_none() {
             panic!(); // instruction doesn't define a local var.
         }
