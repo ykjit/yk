@@ -940,43 +940,52 @@ impl Func {
     pub(crate) fn type_idx(&self) -> TypeIdx {
         self.type_idx
     }
+
+    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableFunc<'a> {
+        DisplayableFunc { func_: self, m }
+    }
 }
 
-impl AotIRDisplay for Func {
-    fn to_string(&self, m: &Module) -> String {
-        let ty = &m.types[self.type_idx];
+pub(crate) struct DisplayableFunc<'a> {
+    func_: &'a Func,
+    m: &'a Module,
+}
+
+impl fmt::Display for DisplayableFunc<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let ty = &self.m.types[self.func_.type_idx];
         if let Type::Func(fty) = ty {
-            let mut ret = format!(
+            write!(
+                f,
                 "func {}({}",
-                self.name,
+                self.func_.name,
                 fty.arg_ty_idxs
                     .iter()
                     .enumerate()
-                    .map(|(i, t)| format!("$arg{}: {}", i, m.types[*t].to_string(m)))
+                    .map(|(i, t)| format!("$arg{}: {}", i, self.m.types[*t].to_string(self.m)))
                     .collect::<Vec<_>>()
                     .join(", ")
-            );
+            )?;
             if fty.is_vararg {
-                ret.push_str(", ...");
+                write!(f, ", ...")?;
             }
-            ret.push(')');
-            let ret_ty = &m.types[fty.ret_ty];
+            write!(f, ")")?;
+            let ret_ty = &self.m.types[fty.ret_ty];
             if ret_ty != &Type::Void {
-                ret.push_str(&format!(" -> {}", ret_ty.to_string(m)));
+                write!(f, " -> {}", ret_ty.to_string(self.m))?;
             }
-            if self.is_declaration() {
+            if self.func_.is_declaration() {
                 // declarations have no body, so print it as such.
-                ret.push_str(";\n");
+                writeln!(f, ";")
             } else {
-                ret.push_str(" {\n");
-                for (i, b) in self.bblocks.iter().enumerate() {
-                    ret.push_str(&format!("  bb{}:\n{}", i, b.display(m)));
+                writeln!(f, " {{")?;
+                for (i, b) in self.func_.bblocks.iter().enumerate() {
+                    write!(f, "  bb{}:\n{}", i, b.display(self.m))?;
                 }
-                ret.push_str("}\n");
+                writeln!(f, "}}")
             }
-            ret
         } else {
-            unreachable!("{}", ty.to_string(m)); // Impossible for a function to not be of type `Func`.
+            unreachable!();
         }
     }
 }
@@ -1409,7 +1418,7 @@ impl std::fmt::Display for Module {
         f.write_fmt(format_args!("# Num types: {}\n", self.types.len()))?;
 
         for func in &self.funcs {
-            write!(f, "\n{}", func.to_string(self))?;
+            write!(f, "\n{}", func.display(self))?;
         }
         Ok(())
     }
