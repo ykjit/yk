@@ -869,15 +869,23 @@ impl BBlock {
     pub fn is_return(&self) -> bool {
         matches!(self.instrs.last().unwrap(), Instruction::Ret { .. })
     }
+
+    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableBBlock<'a> {
+        DisplayableBBlock { bblock: self, m }
+    }
 }
 
-impl AotIRDisplay for BBlock {
-    fn to_string(&self, m: &Module) -> String {
-        let mut ret = String::new();
-        for x in &self.instrs {
-            ret.push_str(&format!("    {}\n", x.display(m)))
+pub(crate) struct DisplayableBBlock<'a> {
+    bblock: &'a BBlock,
+    m: &'a Module,
+}
+
+impl fmt::Display for DisplayableBBlock<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for x in &self.bblock.instrs {
+            writeln!(f, "    {}", x.display(self.m))?;
         }
-        ret
+        Ok(())
     }
 }
 
@@ -962,7 +970,7 @@ impl AotIRDisplay for Func {
             } else {
                 ret.push_str(" {\n");
                 for (i, b) in self.bblocks.iter().enumerate() {
-                    ret.push_str(&format!("  bb{}:\n{}", i, b.to_string(m)));
+                    ret.push_str(&format!("  bb{}:\n{}", i, b.display(m)));
                 }
                 ret.push_str("}\n");
             }
