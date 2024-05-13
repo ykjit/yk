@@ -376,15 +376,32 @@ pub(crate) struct DeoptSafepoint {
     pub(crate) lives: Vec<Operand>,
 }
 
-impl AotIRDisplay for DeoptSafepoint {
-    fn to_string(&self, m: &Module) -> String {
+impl DeoptSafepoint {
+    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableDeoptSafepoint<'a> {
+        DisplayableDeoptSafepoint { safepoint: self, m }
+    }
+}
+
+pub(crate) struct DisplayableDeoptSafepoint<'a> {
+    safepoint: &'a DeoptSafepoint,
+    m: &'a Module,
+}
+
+impl fmt::Display for DisplayableDeoptSafepoint<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let lives_s = self
+            .safepoint
             .lives
             .iter()
-            .map(|a| a.display(m).to_string())
+            .map(|a| a.display(self.m).to_string())
             .collect::<Vec<_>>()
             .join(", ");
-        format!("[safepoint: {}, ({})]", self.id.display(m), lives_s)
+        write!(
+            f,
+            "[safepoint: {}, ({})]",
+            self.safepoint.id.display(self.m),
+            lives_s
+        )
     }
 }
 
@@ -690,7 +707,7 @@ impl AotIRDisplay for Instruction {
                     .join(", ");
                 let safepoint_s = safepoint
                     .as_ref()
-                    .map_or("".to_string(), |sp| format!(" {}", sp.to_string(m)));
+                    .map_or("".to_string(), |sp| format!(" {}", sp.display(m)));
                 ret.push_str(&format!(
                     "call {}({}){}",
                     m.func(*callee).name(),
@@ -708,7 +725,7 @@ impl AotIRDisplay for Instruction {
                 cond.display(m),
                 usize::from(*true_bb),
                 usize::from(*false_bb),
-                safepoint.to_string(m)
+                safepoint.display(m)
             )),
             Self::ICmp { lhs, pred, rhs, .. } => ret.push_str(&format!(
                 "icmp {}, {pred}, {}",
@@ -777,7 +794,7 @@ impl AotIRDisplay for Instruction {
                     test_val.display(m),
                     usize::from(*default_dest),
                     cases.join(", "),
-                    safepoint.to_string(m)
+                    safepoint.display(m)
                 ));
             }
             Self::Phi {
