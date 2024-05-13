@@ -472,7 +472,7 @@ impl<'a> X64CodeGen<'a> {
         Ok(())
     }
 
-    /// Codegen a (non-varargs) call.
+    /// Codegen a call.
     fn cg_call(
         &mut self,
         inst_idx: InstIdx,
@@ -485,7 +485,7 @@ impl<'a> X64CodeGen<'a> {
         self.emit_call(inst_idx, func_decl_idx, &args)
     }
 
-    /// Codegen a (non-varargs) indirect call.
+    /// Codegen a indirect call.
     fn cg_indirectcall(
         &mut self,
         inst_idx: InstIdx,
