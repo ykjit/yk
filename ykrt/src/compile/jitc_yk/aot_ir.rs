@@ -453,14 +453,21 @@ pub(crate) enum Instruction {
         /// The pointer to offset from.
         ptr: Operand,
         /// The constant offset (in bytes).
-        const_off: usize,
+        ///
+        /// This is signed to allow for negative array indices and negative pointer arithmetic.
+        const_off: isize,
         /// The number of dynamic offsets.
         #[deku(temp)]
         num_dyn_offs: usize,
         /// The element counts for the dynamic offsets.
+        ///
+        /// These are interpreted as signed values to allow negative indexing and negative pointer
+        /// arithmetic.
         #[deku(count = "num_dyn_offs")]
         dyn_elem_counts: Vec<Operand>,
         /// The element sizes for the dynamic offsets (in bytes).
+        ///
+        /// These are unsigned values.
         #[deku(count = "num_dyn_offs")]
         dyn_elem_sizes: Vec<usize>,
     },
@@ -1234,6 +1241,12 @@ pub(crate) struct Module {
     magic: u32,
     #[deku(assert = "*version == FORMAT_VERSION")]
     version: u32,
+    /// The bit-size of what LLVM calls "the pointer indexing type", for address space zero.
+    ///
+    /// This is the signed integer LLVM uses for computing GEP offsets in the default pointer
+    /// address space. This is needed because in certain cases we are required to sign-extend or
+    /// truncate to this width.
+    ptr_off_bitsize: u8,
     #[deku(temp)]
     num_funcs: usize,
     #[deku(count = "num_funcs", map = "map_to_tivec")]
@@ -1266,6 +1279,10 @@ impl Module {
             .find(|(_, f)| f.name == find_func)
             .map(|(f_idx, _)| FuncIdx(f_idx))
             .unwrap()
+    }
+
+    pub(crate) fn ptr_off_bitsize(&self) -> u8 {
+        self.ptr_off_bitsize
     }
 
     /// Return the block uniquely identified (in this module) by the specified [BBlockId].

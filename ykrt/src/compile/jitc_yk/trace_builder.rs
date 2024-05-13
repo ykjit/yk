@@ -686,7 +686,7 @@ impl<'a> TraceBuilder<'a> {
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
         ptr: &aot_ir::Operand,
-        const_off: usize,
+        const_off: isize,
         dyn_elem_counts: &[aot_ir::Operand],
         dyn_elem_sizes: &[usize],
     ) -> Result<(), CompilationError> {
@@ -708,6 +708,13 @@ impl<'a> TraceBuilder<'a> {
         let count_ty = jit_ir::IntegerTy::new(usize_bitsize);
         for (count, size) in dyn_elem_counts.iter().zip(dyn_elem_sizes) {
             let count_opnd = self.handle_operand(count)?;
+            // If the element count is not the same width as LLVM's GEP index type, then we have to
+            // sign extend it up (or truncate it down) to the right size. To date I've been unable
+            // to get clang to emit code that would require an extend or truncate, so for now it's
+            // a todo.
+            if count_opnd.byte_size(&self.jit_mod) * 8 != self.aot_mod.ptr_off_bitsize().into() {
+                todo!();
+            }
             let size_const = count_ty
                 .to_owned()
                 .make_constant(&mut self.jit_mod, *size)?;
