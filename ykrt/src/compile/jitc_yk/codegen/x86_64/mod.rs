@@ -428,9 +428,8 @@ impl<'a> X64CodeGen<'a> {
         // FIXME: floating point args
         // FIXME: non-SysV ABIs
         let fty = self.m.func_type(func_decl_idx);
-        let num_args = args.len();
-
-        if num_args > ARG_REGS.len() {
+        debug_assert!(fty.num_args() <= args.len());
+        if args.len() > ARG_REGS.len() {
             todo!(); // needs spill
         }
 
@@ -442,7 +441,7 @@ impl<'a> X64CodeGen<'a> {
             dynasm!(self.asm; mov rax, 0);
         }
 
-        for (i, reg) in ARG_REGS.into_iter().take(num_args).enumerate() {
+        for (i, reg) in ARG_REGS.into_iter().take(args.len()).enumerate() {
             let op = &args[i];
             // We can type check the static args (but not varargs).
             debug_assert!(
@@ -473,7 +472,7 @@ impl<'a> X64CodeGen<'a> {
         Ok(())
     }
 
-    /// Codegen a (non-varargs) call.
+    /// Codegen a call.
     fn cg_call(
         &mut self,
         inst_idx: InstIdx,
@@ -486,7 +485,7 @@ impl<'a> X64CodeGen<'a> {
         self.emit_call(inst_idx, func_decl_idx, &args)
     }
 
-    /// Codegen a (non-varargs) indirect call.
+    /// Codegen a indirect call.
     fn cg_indirectcall(
         &mut self,
         inst_idx: InstIdx,
@@ -504,9 +503,7 @@ impl<'a> X64CodeGen<'a> {
             panic!()
         };
 
-        let num_args = args.len();
-
-        if num_args > ARG_REGS.len() {
+        if args.len() > ARG_REGS.len() {
             todo!(); // needs spill
         }
 
@@ -518,7 +515,7 @@ impl<'a> X64CodeGen<'a> {
             dynasm!(self.asm; mov rax, 0);
         }
 
-        for (i, reg) in ARG_REGS.into_iter().take(num_args).enumerate() {
+        for (i, reg) in ARG_REGS.into_iter().take(args.len()).enumerate() {
             let op = &args[i];
             // We can type check the static args (but not varargs).
             debug_assert!(
