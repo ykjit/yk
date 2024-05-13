@@ -1175,22 +1175,37 @@ impl StructType {
     pub(crate) fn num_fields(&self) -> usize {
         self.field_ty_idxs.len()
     }
+
+    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableStructType<'a> {
+        DisplayableStructType {
+            struct_type: self,
+            m,
+        }
+    }
 }
 
-impl AotIRDisplay for StructType {
-    fn to_string(&self, m: &Module) -> String {
-        let mut s = String::from("{");
-        s.push_str(
-            &self
+pub(crate) struct DisplayableStructType<'a> {
+    struct_type: &'a StructType,
+    m: &'a Module,
+}
+
+impl Display for DisplayableStructType<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{{{}}}",
+            self.struct_type
                 .field_ty_idxs
                 .iter()
                 .enumerate()
-                .map(|(i, ti)| format!("{}: {}", self.field_bit_offs[i], m.types[*ti].display(m)))
+                .map(|(i, ti)| format!(
+                    "{}: {}",
+                    self.struct_type.field_bit_offs[i],
+                    self.m.types[*ti].display(self.m)
+                ))
                 .collect::<Vec<_>>()
                 .join(", "),
-        );
-        s.push('}');
-        s
+        )
     }
 }
 
@@ -1256,7 +1271,7 @@ impl fmt::Display for DisplayableType<'_> {
             Type::Integer(x) => write!(f, "{}", x),
             Type::Ptr => write!(f, "ptr"),
             Type::Func(ft) => write!(f, "{}", ft.display(self.m)),
-            Type::Struct(st) => write!(f, "{}", st.to_string(self.m)),
+            Type::Struct(st) => write!(f, "{}", st.display(self.m)),
             Type::Unimplemented(s) => write!(f, "?ty<{}>", s),
         }
     }
