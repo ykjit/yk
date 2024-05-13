@@ -204,24 +204,18 @@ impl Module {
     /// This is useful for forwarding the local variable a instruction defines as operand of a
     /// subsequent instruction: an idiom used a lot (but not exclusively) in testing.
     ///
-    /// This must only be used for instructions that define a local variable. If you want to push
-    /// an instruction that doesn't define a value, or it does, but you don't want it as an
-    /// [Operand], use [Module::push()] instead.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the instruction doesn't define a local variable that we could use to build an
-    /// [Operand] or if `instr` would overflow the index type.
+    /// Note: it is undefined behaviour to push an instruction that does not define a local
+    /// variable.
     pub(crate) fn push_and_make_operand(
         &mut self,
         inst: Inst,
     ) -> Result<Operand, CompilationError> {
-        if inst.def_type(self).is_none() {
-            panic!(); // instruction doesn't define a local var.
-        }
-        let ret = Operand::Local(InstIdx::new(self.len())?);
-        self.insts.push(inst);
-        Ok(ret)
+        // Assert that `inst` defines a local var.
+        debug_assert!(inst.def_type(self).is_some());
+        InstIdx::new(self.len()).map(|x| {
+            self.insts.push(inst);
+            Operand::Local(x)
+        })
     }
 
     /// Returns the number of [Inst]s in the [Module].
