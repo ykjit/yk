@@ -188,26 +188,14 @@ impl Module {
 
     /// Push an instruction to the end of the [Module].
     pub(crate) fn push(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
-        match InstIdx::new(self.insts.len()) {
-            Ok(x) => {
-                self.insts.push(inst);
-                Ok(x)
-            }
-            Err(e) => Err(e),
-        }
+        InstIdx::new(self.insts.len()).inspect(|_| self.insts.push(inst))
     }
 
     pub(crate) fn push_indirect_call(
         &mut self,
         inst: IndirectCallInst,
     ) -> Result<IndirectCallIdx, CompilationError> {
-        match IndirectCallIdx::new(self.indirect_calls.len()) {
-            Ok(x) => {
-                self.indirect_calls.push(inst);
-                Ok(x)
-            }
-            Err(e) => Err(e),
-        }
+        IndirectCallIdx::new(self.indirect_calls.len()).inspect(|_| self.indirect_calls.push(inst))
     }
 
     /// Push an instruction to the end of the [Module] and create a local variable [Operand] out of
@@ -253,9 +241,7 @@ impl Module {
     ///
     /// If `args` would overflow the index type.
     fn push_args(&mut self, args: Vec<Operand>) -> Result<ArgsIdx, CompilationError> {
-        let idx = self.args.len();
-        self.args.extend(args);
-        ArgsIdx::new(idx)
+        ArgsIdx::new(self.args.len()).inspect(|_| self.args.extend(args))
     }
 
     /// Add a [Ty] to the types pool and return its index. If the [Ty] already exists, an existing
@@ -344,10 +330,7 @@ impl Module {
         &mut self,
         info: GuardInfo,
     ) -> Result<GuardInfoIdx, CompilationError> {
-        assert!(GuardInfoIdx::new(self.global_decls.len()).is_ok());
-        let idx = self.guard_info.len();
-        self.guard_info.push(info);
-        GuardInfoIdx::new(idx)
+        GuardInfoIdx::new(self.guard_info.len()).inspect(|_| self.guard_info.push(info))
     }
 }
 
