@@ -673,67 +673,91 @@ impl Instruction {
     pub(crate) fn ptr_eq(&self, other: &Self) -> bool {
         std::ptr::eq(self, other)
     }
+
+    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableInstruction<'a> {
+        DisplayableInstruction {
+            instruction: self,
+            m,
+        }
+    }
 }
 
-impl AotIRDisplay for Instruction {
-    fn to_string(&self, m: &Module) -> String {
-        let mut ret = String::new();
+pub(crate) struct DisplayableInstruction<'a> {
+    instruction: &'a Instruction,
+    m: &'a Module,
+}
 
-        if let Some(t) = self.def_type(m) {
+impl fmt::Display for DisplayableInstruction<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(t) = self.instruction.def_type(self.m) {
             // If the instruction defines a local, we will format the instruction like it's an
             // assignment. Here we print the left-hand side.
-            ret.push_str(&format!("{}: {} = ", self.local_name(m), t.to_string(m)));
+            write!(
+                f,
+                "{}: {} = ",
+                self.instruction.local_name(self.m),
+                t.to_string(self.m)
+            )?;
         }
 
-        match self {
-            Self::Alloca { type_idx, count } => ret.push_str(&format!(
+        match self.instruction {
+            Instruction::Alloca { type_idx, count } => write!(
+                f,
                 "alloca {}, {}",
-                m.type_(*type_idx).to_string(m),
+                self.m.type_(*type_idx).to_string(self.m),
                 count
-            )),
-            Self::BinaryOp { lhs, binop, rhs } => {
-                ret.push_str(&format!("{}, {binop}, {}", lhs.display(m), rhs.display(m)))
+            ),
+            Instruction::BinaryOp { lhs, binop, rhs } => {
+                write!(
+                    f,
+                    "{}, {binop}, {}",
+                    lhs.display(self.m),
+                    rhs.display(self.m)
+                )
             }
-            Self::Br { succ } => ret.push_str(&format!("br bb{}", usize::from(*succ))),
-            Self::Call {
+            Instruction::Br { succ } => write!(f, "br bb{}", usize::from(*succ)),
+            Instruction::Call {
                 callee,
                 args,
                 safepoint,
             } => {
                 let args_s = args
                     .iter()
-                    .map(|a| a.display(m).to_string())
+                    .map(|a| a.display(self.m).to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
                 let safepoint_s = safepoint
                     .as_ref()
-                    .map_or("".to_string(), |sp| format!(" {}", sp.display(m)));
-                ret.push_str(&format!(
+                    .map_or("".to_string(), |sp| format!(" {}", sp.display(self.m)));
+                write!(
+                    f,
                     "call {}({}){}",
-                    m.func(*callee).name(),
+                    self.m.func(*callee).name(),
                     args_s,
                     safepoint_s
-                ));
+                )
             }
-            Self::CondBr {
+            Instruction::CondBr {
                 cond,
                 true_bb,
                 false_bb,
                 safepoint,
-            } => ret.push_str(&format!(
+            } => write!(
+                f,
                 "condbr {}, bb{}, bb{} {}",
-                cond.display(m),
+                cond.display(self.m),
                 usize::from(*true_bb),
                 usize::from(*false_bb),
-                safepoint.display(m)
-            )),
-            Self::ICmp { lhs, pred, rhs, .. } => ret.push_str(&format!(
+                safepoint.display(self.m)
+            ),
+            Instruction::ICmp { lhs, pred, rhs, .. } => write!(
+                f,
                 "icmp {}, {pred}, {}",
-                lhs.display(m),
-                rhs.display(m)
-            )),
-            Self::Load { ptr, .. } => ret.push_str(&format!("load {}", ptr.display(m))),
-            Self::PtrAdd {
+                lhs.display(self.m),
+                rhs.display(self.m)
+            ),
+            Instruction::Load { ptr, .. } => write!(f, "load {}", ptr.display(self.m)),
+            Instruction::PtrAdd {
                 ptr,
                 const_off,
                 dyn_elem_counts,
@@ -741,43 +765,46 @@ impl AotIRDisplay for Instruction {
                 ..
             } => {
                 if dyn_elem_counts.is_empty() {
-                    ret.push_str(&format!("PtrAdd {}, {}", ptr.display(m), const_off));
+                    write!(f, "PtrAdd {}, {}", ptr.display(self.m), const_off)
                 } else {
                     let dyns = dyn_elem_counts
                         .iter()
                         .zip(dyn_elem_sizes)
-                        .map(|(c, s)| format!("({} * {})", c.display(m), s))
+                        .map(|(c, s)| format!("({} * {})", c.display(self.m), s))
                         .collect::<Vec<_>>();
-                    ret.push_str(&format!(
+                    write!(
+                        f,
                         "PtrAdd {}, {} + {}",
-                        ptr.display(m),
+                        ptr.display(self.m),
                         const_off,
                         dyns.join(" + ")
-                    ));
+                    )
                 }
             }
-            Self::Ret { val } => match val {
-                None => ret.push_str("ret"),
-                Some(v) => ret.push_str(&format!("ret {}", v.display(m))),
+            Instruction::Ret { val } => match val {
+                None => write!(f, "ret"),
+                Some(v) => write!(f, "ret {}", v.display(self.m)),
             },
-            Self::Store { ptr, val } => {
-                ret.push_str(&format!("store {}, {}", val.display(m), ptr.display(m)))
+            Instruction::Store { ptr, val } => {
+                write!(f, "store {}, {}", val.display(self.m), ptr.display(self.m))
             }
-            Self::InsertValue { agg, elem } => ret.push_str(&format!(
+            Instruction::InsertValue { agg, elem } => write!(
+                f,
                 "insertvalue {}, {}",
-                agg.display(m),
-                elem.display(m)
-            )),
-            Self::Cast {
+                agg.display(self.m),
+                elem.display(self.m)
+            ),
+            Instruction::Cast {
                 cast_kind,
                 val,
                 dest_type_idx,
-            } => ret.push_str(&format!(
+            } => write!(
+                f,
                 "{cast_kind} {}, {}",
-                val.display(m),
-                m.types[*dest_type_idx].to_string(m)
-            )),
-            Self::Switch {
+                val.display(self.m),
+                self.m.types[*dest_type_idx].to_string(self.m)
+            ),
+            Instruction::Switch {
                 test_val,
                 default_dest,
                 case_values,
@@ -789,41 +816,41 @@ impl AotIRDisplay for Instruction {
                     .zip(case_dests)
                     .map(|(val, dest)| format!("{} -> bb{}", val, usize::from(*dest)))
                     .collect::<Vec<_>>();
-                ret.push_str(&format!(
+                write!(
+                    f,
                     "switch {}, bb{}, [{}] {}",
-                    test_val.display(m),
+                    test_val.display(self.m),
                     usize::from(*default_dest),
                     cases.join(", "),
-                    safepoint.display(m)
-                ));
+                    safepoint.display(self.m)
+                )
             }
-            Self::Phi {
+            Instruction::Phi {
                 incoming_vals,
                 incoming_bbs,
             } => {
                 let args = incoming_bbs
                     .iter()
                     .zip(incoming_vals)
-                    .map(|(bb, val)| format!("bb{} -> {}", usize::from(*bb), val.display(m)))
+                    .map(|(bb, val)| format!("bb{} -> {}", usize::from(*bb), val.display(self.m)))
                     .collect::<Vec<_>>();
-                ret.push_str(&format!("phi {}", args.join(", ")));
+                write!(f, "phi {}", args.join(", "))
             }
-            Self::IndirectCall {
+            Instruction::IndirectCall {
                 fty_idx: _,
                 callop,
                 args,
             } => {
                 let args_s = args
                     .iter()
-                    .map(|a| a.display(m).to_string())
+                    .map(|a| a.display(self.m).to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
-                ret.push_str(&format!("call {}({})", callop.display(m), args_s));
+                write!(f, "call {}({})", callop.display(self.m), args_s)
             }
-            Self::Unimplemented(s) => ret.push_str(&format!("unimplemented <<{}>>", s)),
-            Self::Nop => ret.push_str("nop"),
+            Instruction::Unimplemented(s) => write!(f, "unimplemented <<{}>>", s),
+            Instruction::Nop => write!(f, "nop"),
         }
-        ret
     }
 }
 
@@ -847,8 +874,8 @@ impl BBlock {
 impl AotIRDisplay for BBlock {
     fn to_string(&self, m: &Module) -> String {
         let mut ret = String::new();
-        for i in &self.instrs {
-            ret.push_str(&format!("    {}\n", &AotIRDisplay::to_string(i, m)));
+        for x in &self.instrs {
+            ret.push_str(&format!("    {}\n", x.display(m)))
         }
         ret
     }
