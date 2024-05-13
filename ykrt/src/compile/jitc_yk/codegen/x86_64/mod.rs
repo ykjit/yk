@@ -505,9 +505,7 @@ impl<'a> X64CodeGen<'a> {
             _ => panic!(),
         };
 
-        let num_args = args.len();
-
-        if num_args > ARG_REGS.len() {
+        if args.len() > ARG_REGS.len() {
             todo!(); // needs spill
         }
 
@@ -519,7 +517,7 @@ impl<'a> X64CodeGen<'a> {
             dynasm!(self.asm; mov rax, 0);
         }
 
-        for (i, reg) in ARG_REGS.into_iter().take(num_args).enumerate() {
+        for (i, reg) in ARG_REGS.into_iter().take(args.len()).enumerate() {
             let op = &args[i];
             // We can type check the static args (but not varargs).
             debug_assert!(
