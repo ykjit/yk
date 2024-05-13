@@ -1103,25 +1103,34 @@ impl FuncType {
     pub(crate) fn is_vararg(&self) -> bool {
         self.is_vararg
     }
+
+    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableFuncType<'a> {
+        DisplayableFuncType { func_type: self, m }
+    }
 }
 
-impl AotIRDisplay for FuncType {
-    fn to_string(&self, m: &Module) -> String {
+pub(crate) struct DisplayableFuncType<'a> {
+    func_type: &'a FuncType,
+    m: &'a Module,
+}
+
+impl fmt::Display for DisplayableFuncType<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut args = self
+            .func_type
             .arg_ty_idxs
             .iter()
-            .map(|t| m.types[*t].to_string(m))
+            .map(|t| self.m.types[*t].to_string(self.m))
             .collect::<Vec<_>>();
-        if self.is_vararg() {
+        if self.func_type.is_vararg() {
             args.push("...".to_owned());
         }
-        let rty = m.type_(self.ret_ty);
-        let args_s = args.join(", ");
+        write!(f, "func({})", args.join(", "))?;
+        let rty = self.m.type_(self.func_type.ret_ty);
         if rty != &Type::Void {
-            format!("func({}) -> {}", args_s, rty.to_string(m))
-        } else {
-            format!("func({})", args_s)
+            write!(f, " -> {}", rty.to_string(self.m))?
         }
+        Ok(())
     }
 }
 
@@ -1236,7 +1245,7 @@ impl AotIRDisplay for Type {
             Self::Void => "void".to_owned(),
             Self::Integer(i) => i.to_string(),
             Self::Ptr => "ptr".to_owned(),
-            Self::Func(ft) => ft.to_string(m),
+            Self::Func(ft) => format!("{}", ft.display(m)),
             Self::Struct(st) => st.to_string(m),
             Self::Unimplemented(s) => format!("?ty<{}>", s),
         }
