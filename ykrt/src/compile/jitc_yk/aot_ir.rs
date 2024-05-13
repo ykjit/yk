@@ -349,7 +349,7 @@ impl fmt::Display for DisplayableOperand<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.operand {
             Operand::Constant(const_idx) => {
-                write!(f, "{}", self.m.consts[*const_idx].to_string(self.m))
+                write!(f, "{}", self.m.consts[*const_idx].display(self.m))
             }
             Operand::LocalVariable(iid) => {
                 write!(
@@ -1283,11 +1283,24 @@ impl Constant {
     pub(crate) fn type_idx(&self) -> TypeIdx {
         self.type_idx
     }
+
+    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableConstant<'a> {
+        DisplayableConstant { constant: self, m }
+    }
 }
 
-impl AotIRDisplay for Constant {
-    fn to_string(&self, m: &Module) -> String {
-        m.types[self.type_idx].const_to_string(self)
+pub(crate) struct DisplayableConstant<'a> {
+    constant: &'a Constant,
+    m: &'a Module,
+}
+
+impl Display for DisplayableConstant<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            self.m.types[self.constant.type_idx].const_to_string(self.constant)
+        )
     }
 }
 
