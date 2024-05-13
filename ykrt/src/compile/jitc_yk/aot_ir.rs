@@ -334,18 +334,34 @@ impl Operand {
         };
         iid.clone()
     }
+
+    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableOperand<'a> {
+        DisplayableOperand { operand: self, m }
+    }
 }
 
-impl AotIRDisplay for Operand {
-    fn to_string(&self, m: &Module) -> String {
-        match self {
-            Self::Constant(const_idx) => m.consts[*const_idx].to_string(m),
-            Self::LocalVariable(iid) => {
-                format!("${}_{}", usize::from(iid.bb_idx), usize::from(iid.inst_idx))
+pub(crate) struct DisplayableOperand<'a> {
+    operand: &'a Operand,
+    m: &'a Module,
+}
+
+impl fmt::Display for DisplayableOperand<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.operand {
+            Operand::Constant(const_idx) => {
+                write!(f, "{}", self.m.consts[*const_idx].to_string(self.m))
             }
-            Self::Global(gidx) => format!("@{}", m.global_decls[*gidx].name()),
-            Self::Func(fidx) => m.funcs[*fidx].name().to_owned(),
-            Self::Arg { arg_idx, .. } => format!("$arg{}", usize::from(*arg_idx)),
+            Operand::LocalVariable(iid) => {
+                write!(
+                    f,
+                    "${}_{}",
+                    usize::from(iid.bb_idx),
+                    usize::from(iid.inst_idx)
+                )
+            }
+            Operand::Global(gidx) => write!(f, "@{}", self.m.global_decls[*gidx].name()),
+            Operand::Func(fidx) => write!(f, "{}", self.m.funcs[*fidx].name()),
+            Operand::Arg { arg_idx, .. } => write!(f, "$arg{}", usize::from(*arg_idx)),
         }
     }
 }
@@ -365,10 +381,10 @@ impl AotIRDisplay for DeoptSafepoint {
         let lives_s = self
             .lives
             .iter()
-            .map(|a| a.to_string(m))
+            .map(|a| a.display(m).to_string())
             .collect::<Vec<_>>()
             .join(", ");
-        format!("[safepoint: {}, ({})]", self.id.to_string(m), lives_s)
+        format!("[safepoint: {}, ({})]", self.id.display(m), lives_s)
     }
 }
 
@@ -658,11 +674,9 @@ impl AotIRDisplay for Instruction {
                 m.type_(*type_idx).to_string(m),
                 count
             )),
-            Self::BinaryOp { lhs, binop, rhs } => ret.push_str(&format!(
-                "{}, {binop}, {}",
-                lhs.to_string(m),
-                rhs.to_string(m)
-            )),
+            Self::BinaryOp { lhs, binop, rhs } => {
+                ret.push_str(&format!("{}, {binop}, {}", lhs.display(m), rhs.display(m)))
+            }
             Self::Br { succ } => ret.push_str(&format!("br bb{}", usize::from(*succ))),
             Self::Call {
                 callee,
@@ -671,7 +685,7 @@ impl AotIRDisplay for Instruction {
             } => {
                 let args_s = args
                     .iter()
-                    .map(|a| a.to_string(m))
+                    .map(|a| a.display(m).to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
                 let safepoint_s = safepoint
@@ -691,17 +705,17 @@ impl AotIRDisplay for Instruction {
                 safepoint,
             } => ret.push_str(&format!(
                 "condbr {}, bb{}, bb{} {}",
-                cond.to_string(m),
+                cond.display(m),
                 usize::from(*true_bb),
                 usize::from(*false_bb),
                 safepoint.to_string(m)
             )),
             Self::ICmp { lhs, pred, rhs, .. } => ret.push_str(&format!(
                 "icmp {}, {pred}, {}",
-                lhs.to_string(m),
-                rhs.to_string(m)
+                lhs.display(m),
+                rhs.display(m)
             )),
-            Self::Load { ptr, .. } => ret.push_str(&format!("load {}", ptr.to_string(m))),
+            Self::Load { ptr, .. } => ret.push_str(&format!("load {}", ptr.display(m))),
             Self::PtrAdd {
                 ptr,
                 const_off,
@@ -710,16 +724,16 @@ impl AotIRDisplay for Instruction {
                 ..
             } => {
                 if dyn_elem_counts.is_empty() {
-                    ret.push_str(&format!("PtrAdd {}, {}", ptr.to_string(m), const_off));
+                    ret.push_str(&format!("PtrAdd {}, {}", ptr.display(m), const_off));
                 } else {
                     let dyns = dyn_elem_counts
                         .iter()
                         .zip(dyn_elem_sizes)
-                        .map(|(c, s)| format!("({} * {})", c.to_string(m), s))
+                        .map(|(c, s)| format!("({} * {})", c.display(m), s))
                         .collect::<Vec<_>>();
                     ret.push_str(&format!(
                         "PtrAdd {}, {} + {}",
-                        ptr.to_string(m),
+                        ptr.display(m),
                         const_off,
                         dyns.join(" + ")
                     ));
@@ -727,15 +741,15 @@ impl AotIRDisplay for Instruction {
             }
             Self::Ret { val } => match val {
                 None => ret.push_str("ret"),
-                Some(v) => ret.push_str(&format!("ret {}", v.to_string(m))),
+                Some(v) => ret.push_str(&format!("ret {}", v.display(m))),
             },
             Self::Store { ptr, val } => {
-                ret.push_str(&format!("store {}, {}", val.to_string(m), ptr.to_string(m)))
+                ret.push_str(&format!("store {}, {}", val.display(m), ptr.display(m)))
             }
             Self::InsertValue { agg, elem } => ret.push_str(&format!(
                 "insertvalue {}, {}",
-                agg.to_string(m),
-                elem.to_string(m)
+                agg.display(m),
+                elem.display(m)
             )),
             Self::Cast {
                 cast_kind,
@@ -743,7 +757,7 @@ impl AotIRDisplay for Instruction {
                 dest_type_idx,
             } => ret.push_str(&format!(
                 "{cast_kind} {}, {}",
-                val.to_string(m),
+                val.display(m),
                 m.types[*dest_type_idx].to_string(m)
             )),
             Self::Switch {
@@ -760,7 +774,7 @@ impl AotIRDisplay for Instruction {
                     .collect::<Vec<_>>();
                 ret.push_str(&format!(
                     "switch {}, bb{}, [{}] {}",
-                    test_val.to_string(m),
+                    test_val.display(m),
                     usize::from(*default_dest),
                     cases.join(", "),
                     safepoint.to_string(m)
@@ -773,7 +787,7 @@ impl AotIRDisplay for Instruction {
                 let args = incoming_bbs
                     .iter()
                     .zip(incoming_vals)
-                    .map(|(bb, val)| format!("bb{} -> {}", usize::from(*bb), val.to_string(m)))
+                    .map(|(bb, val)| format!("bb{} -> {}", usize::from(*bb), val.display(m)))
                     .collect::<Vec<_>>();
                 ret.push_str(&format!("phi {}", args.join(", ")));
             }
@@ -784,10 +798,10 @@ impl AotIRDisplay for Instruction {
             } => {
                 let args_s = args
                     .iter()
-                    .map(|a| a.to_string(m))
+                    .map(|a| a.display(m).to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
-                ret.push_str(&format!("call {}({})", callop.to_string(m), args_s));
+                ret.push_str(&format!("call {}({})", callop.display(m), args_s));
             }
             Self::Unimplemented(s) => ret.push_str(&format!("unimplemented <<{}>>", s)),
             Self::Nop => ret.push_str("nop"),
