@@ -31,7 +31,13 @@
 
 use byteorder::{NativeEndian, ReadBytesExt};
 use deku::prelude::*;
-use std::{error::Error, ffi::CString, fs, path::PathBuf};
+use std::{
+    error::Error,
+    ffi::CString,
+    fmt::{self, Display},
+    fs,
+    path::PathBuf,
+};
 use typed_index_collections::TiVec;
 
 /// A magic number that all bytecode payloads begin with.
@@ -180,9 +186,9 @@ pub(crate) enum BinOp {
     URem,
 }
 
-impl AotIRDisplay for BinOp {
-    fn to_string(&self, _m: &Module) -> String {
-        format!("{:?}", self).to_lowercase()
+impl Display for BinOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", format!("{self:?}").to_lowercase())
     }
 }
 
@@ -249,9 +255,9 @@ pub(crate) enum Predicate {
     // FIXME: add floating-point-specific predicates.
 }
 
-impl AotIRDisplay for Predicate {
-    fn to_string(&self, _m: &Module) -> String {
-        format!("{:?}", self)
+impl Display for Predicate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 
@@ -266,9 +272,9 @@ pub(crate) enum CastKind {
     SignExtend = 0,
 }
 
-impl AotIRDisplay for CastKind {
-    fn to_string(&self, _m: &Module) -> String {
-        format!("{:?}", self)
+impl Display for CastKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{self:?}")
     }
 }
 
@@ -653,9 +659,8 @@ impl AotIRDisplay for Instruction {
                 count
             )),
             Self::BinaryOp { lhs, binop, rhs } => ret.push_str(&format!(
-                "{}, {}, {}",
+                "{}, {binop}, {}",
                 lhs.to_string(m),
-                binop.to_string(m),
                 rhs.to_string(m)
             )),
             Self::Br { succ } => ret.push_str(&format!("br bb{}", usize::from(*succ))),
@@ -692,9 +697,8 @@ impl AotIRDisplay for Instruction {
                 safepoint.to_string(m)
             )),
             Self::ICmp { lhs, pred, rhs, .. } => ret.push_str(&format!(
-                "icmp {}, {}, {}",
+                "icmp {}, {pred}, {}",
                 lhs.to_string(m),
-                pred.to_string(m),
                 rhs.to_string(m)
             )),
             Self::Load { ptr, .. } => ret.push_str(&format!("load {}", ptr.to_string(m))),
@@ -738,8 +742,7 @@ impl AotIRDisplay for Instruction {
                 val,
                 dest_type_idx,
             } => ret.push_str(&format!(
-                "{} {}, {}",
-                cast_kind.to_string(m),
+                "{cast_kind} {}, {}",
                 val.to_string(m),
                 m.types[*dest_type_idx].to_string(m)
             )),
@@ -983,9 +986,9 @@ impl IntegerType {
     }
 }
 
-impl AotIRDisplay for IntegerType {
-    fn to_string(&self, _m: &Module) -> String {
-        format!("i{}", self.num_bits)
+impl Display for IntegerType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "i{}", self.num_bits)
     }
 }
 
@@ -1156,7 +1159,7 @@ impl AotIRDisplay for Type {
     fn to_string(&self, m: &Module) -> String {
         match self {
             Self::Void => "void".to_owned(),
-            Self::Integer(i) => i.to_string(m),
+            Self::Integer(i) => i.to_string(),
             Self::Ptr => "ptr".to_owned(),
             Self::Func(ft) => ft.to_string(m),
             Self::Struct(st) => st.to_string(m),
@@ -1206,9 +1209,9 @@ pub(crate) struct GlobalDecl {
     name: String,
 }
 
-impl AotIRDisplay for GlobalDecl {
-    fn to_string(&self, _m: &Module) -> String {
-        format!("GlobalDecl({}, tls={})", self.name, self.is_threadlocal)
+impl Display for GlobalDecl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "GlobalDecl({}, tls={})", self.name, self.is_threadlocal)
     }
 }
 
