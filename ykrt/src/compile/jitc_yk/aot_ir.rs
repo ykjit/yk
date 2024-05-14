@@ -412,7 +412,11 @@ pub(crate) enum Instruction {
     #[deku(id = "2")]
     Store { val: Operand, ptr: Operand },
     #[deku(id = "3")]
-    Alloca { type_idx: TypeIdx, count: usize },
+    Alloca {
+        type_idx: TypeIdx,
+        count: usize,
+        align: u64,
+    },
     #[deku(id = "4")]
     Call {
         callee: FuncIdx,
@@ -689,11 +693,16 @@ impl fmt::Display for DisplayableInstruction<'_> {
         }
 
         match self.instruction {
-            Instruction::Alloca { type_idx, count } => write!(
+            Instruction::Alloca {
+                type_idx,
+                count,
+                align,
+            } => write!(
                 f,
-                "alloca {}, {}",
+                "alloca {}, {}, {}",
                 self.m.type_(*type_idx).display(self.m),
-                count
+                count,
+                align
             ),
             Instruction::BinaryOp { lhs, binop, rhs } => {
                 write!(

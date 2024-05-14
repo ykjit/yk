@@ -3,7 +3,7 @@
 ;     ...
 ;     func main($arg0: i32, $arg1: ptr) -> i32 {
 ;       bb0:
-;         $0_0: ptr = alloca i32, 1
+;         $0_0: ptr = alloca i32, 1, 4
 ;         store 1i32, $0_0
 ;         $0_2: i1 = icmp $arg0, Equal, 1i32
 ;         condbr $0_2, bb1, bb2 [safepoint: 1i64, ()]
