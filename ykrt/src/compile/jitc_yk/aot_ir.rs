@@ -53,6 +53,156 @@ const LLVM_DEBUG_CALL_NAME: &str = "llvm.dbg.value";
 /// point call.
 const CTRL_POINT_ARGIDX_INPUTS: usize = 2;
 
+/// An AOT IR module.
+///
+/// This is the top-level container for the AOT IR.
+///
+/// A module is platform dependent, as type sizes and alignment are baked-in.
+#[deku_derive(DekuRead)]
+#[derive(Debug, Default)]
+pub(crate) struct Module {
+    #[deku(assert = "*magic == MAGIC", temp)]
+    magic: u32,
+    #[deku(assert = "*version == FORMAT_VERSION")]
+    version: u32,
+    /// The bit-size of what LLVM calls "the pointer indexing type", for address space zero.
+    ///
+    /// This is the signed integer LLVM uses for computing GEP offsets in the default pointer
+    /// address space. This is needed because in certain cases we are required to sign-extend or
+    /// truncate to this width.
+    ptr_off_bitsize: u8,
+    #[deku(temp)]
+    num_funcs: usize,
+    #[deku(count = "num_funcs", map = "map_to_tivec")]
+    funcs: TiVec<FuncIdx, Func>,
+    #[deku(temp)]
+    num_consts: usize,
+    #[deku(count = "num_consts", map = "map_to_tivec")]
+    consts: TiVec<ConstIdx, Constant>,
+    #[deku(temp)]
+    num_global_decls: usize,
+    #[deku(count = "num_global_decls", map = "map_to_tivec")]
+    global_decls: TiVec<GlobalDeclIdx, GlobalDecl>,
+    #[deku(temp)]
+    num_types: usize,
+    #[deku(count = "num_types", map = "map_to_tivec")]
+    types: TiVec<TypeIdx, Type>,
+}
+
+impl Module {
+    /// Find a function by its name.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no function exists with that name.
+    pub(crate) fn func_idx(&self, find_func: &str) -> FuncIdx {
+        // OPT: create a cache in the Module.
+        self.funcs
+            .iter()
+            .enumerate()
+            .find(|(_, f)| f.name == find_func)
+            .map(|(f_idx, _)| FuncIdx(f_idx))
+            .unwrap()
+    }
+
+    pub(crate) fn ptr_off_bitsize(&self) -> u8 {
+        self.ptr_off_bitsize
+    }
+
+    /// Return the block uniquely identified (in this module) by the specified [BBlockId].
+    pub(crate) fn bblock(&self, bid: &BBlockId) -> &BBlock {
+        self.funcs[bid.func_idx].bblock(bid.bb_idx)
+    }
+
+    pub(crate) fn constant(&self, co: &ConstIdx) -> &Constant {
+        &self.consts[*co]
+    }
+
+    pub(crate) fn const_type(&self, c: &Constant) -> &Type {
+        &self.types[c.type_idx]
+    }
+
+    /// Lookup a constant by its index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is out of bounds.
+    pub(crate) fn const_(&self, ci: ConstIdx) -> &Constant {
+        &self.consts[ci]
+    }
+
+    /// Lookup a type by its index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is out of bounds.
+    pub(crate) fn type_(&self, idx: TypeIdx) -> &Type {
+        &self.types[idx]
+    }
+
+    /// Lookup a function by its index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is out of bounds.
+    pub(crate) fn func(&self, idx: FuncIdx) -> &Func {
+        &self.funcs[idx]
+    }
+
+    /// Lookup a global variable declaration by its index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is out of bounds.
+    pub(crate) fn global_decl(&self, idx: GlobalDeclIdx) -> &GlobalDecl {
+        &self.global_decls[idx]
+    }
+
+    /// Return the number of global variable declarations.
+    pub(crate) fn global_decls_len(&self) -> usize {
+        self.global_decls.len()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn dump(&self) {
+        eprintln!("{}", self);
+    }
+}
+
+impl std::fmt::Display for Module {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("# IR format version: {}\n", self.version))?;
+        f.write_fmt(format_args!("# Num funcs: {}\n", self.funcs.len()))?;
+        f.write_fmt(format_args!("# Num consts: {}\n", self.consts.len()))?;
+        f.write_fmt(format_args!(
+            "# Num global decls: {}\n",
+            self.global_decls.len()
+        ))?;
+        f.write_fmt(format_args!("# Num types: {}\n", self.types.len()))?;
+
+        for func in &self.funcs {
+            write!(f, "\n{}", func.display(self))?;
+        }
+        Ok(())
+    }
+}
+
+/// Deserialise an AOT module from the slice `data`.
+pub(crate) fn deserialise_module(data: &[u8]) -> Result<Module, Box<dyn Error>> {
+    let ((_, _), modu) = Module::from_bytes((data, 0))?;
+    Ok(modu)
+}
+
+/// Deserialise and print IR from an on-disk file.
+///
+/// Used for support tooling (in turn used by tests too).
+pub fn print_from_file(path: &PathBuf) -> Result<(), Box<dyn Error>> {
+    let data = fs::read(path)?;
+    let ir = deserialise_module(&data)?;
+    println!("{}", ir);
+    Ok(())
+}
+
 // Generate common methods for index types.
 macro_rules! index {
     ($struct:ident) => {
@@ -1342,156 +1492,6 @@ impl GlobalDecl {
     pub(crate) fn name(&self) -> &str {
         &self.name
     }
-}
-
-/// An AOT IR module.
-///
-/// This is the top-level container for the AOT IR.
-///
-/// A module is platform dependent, as type sizes and alignment are baked-in.
-#[deku_derive(DekuRead)]
-#[derive(Debug, Default)]
-pub(crate) struct Module {
-    #[deku(assert = "*magic == MAGIC", temp)]
-    magic: u32,
-    #[deku(assert = "*version == FORMAT_VERSION")]
-    version: u32,
-    /// The bit-size of what LLVM calls "the pointer indexing type", for address space zero.
-    ///
-    /// This is the signed integer LLVM uses for computing GEP offsets in the default pointer
-    /// address space. This is needed because in certain cases we are required to sign-extend or
-    /// truncate to this width.
-    ptr_off_bitsize: u8,
-    #[deku(temp)]
-    num_funcs: usize,
-    #[deku(count = "num_funcs", map = "map_to_tivec")]
-    funcs: TiVec<FuncIdx, Func>,
-    #[deku(temp)]
-    num_consts: usize,
-    #[deku(count = "num_consts", map = "map_to_tivec")]
-    consts: TiVec<ConstIdx, Constant>,
-    #[deku(temp)]
-    num_global_decls: usize,
-    #[deku(count = "num_global_decls", map = "map_to_tivec")]
-    global_decls: TiVec<GlobalDeclIdx, GlobalDecl>,
-    #[deku(temp)]
-    num_types: usize,
-    #[deku(count = "num_types", map = "map_to_tivec")]
-    types: TiVec<TypeIdx, Type>,
-}
-
-impl Module {
-    /// Find a function by its name.
-    ///
-    /// # Panics
-    ///
-    /// Panics if no function exists with that name.
-    pub(crate) fn func_idx(&self, find_func: &str) -> FuncIdx {
-        // OPT: create a cache in the Module.
-        self.funcs
-            .iter()
-            .enumerate()
-            .find(|(_, f)| f.name == find_func)
-            .map(|(f_idx, _)| FuncIdx(f_idx))
-            .unwrap()
-    }
-
-    pub(crate) fn ptr_off_bitsize(&self) -> u8 {
-        self.ptr_off_bitsize
-    }
-
-    /// Return the block uniquely identified (in this module) by the specified [BBlockId].
-    pub(crate) fn bblock(&self, bid: &BBlockId) -> &BBlock {
-        self.funcs[bid.func_idx].bblock(bid.bb_idx)
-    }
-
-    pub(crate) fn constant(&self, co: &ConstIdx) -> &Constant {
-        &self.consts[*co]
-    }
-
-    pub(crate) fn const_type(&self, c: &Constant) -> &Type {
-        &self.types[c.type_idx]
-    }
-
-    /// Lookup a constant by its index.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the index is out of bounds.
-    pub(crate) fn const_(&self, ci: ConstIdx) -> &Constant {
-        &self.consts[ci]
-    }
-
-    /// Lookup a type by its index.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the index is out of bounds.
-    pub(crate) fn type_(&self, idx: TypeIdx) -> &Type {
-        &self.types[idx]
-    }
-
-    /// Lookup a function by its index.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the index is out of bounds.
-    pub(crate) fn func(&self, idx: FuncIdx) -> &Func {
-        &self.funcs[idx]
-    }
-
-    /// Lookup a global variable declaration by its index.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the index is out of bounds.
-    pub(crate) fn global_decl(&self, idx: GlobalDeclIdx) -> &GlobalDecl {
-        &self.global_decls[idx]
-    }
-
-    /// Return the number of global variable declarations.
-    pub(crate) fn global_decls_len(&self) -> usize {
-        self.global_decls.len()
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn dump(&self) {
-        eprintln!("{}", self);
-    }
-}
-
-impl std::fmt::Display for Module {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("# IR format version: {}\n", self.version))?;
-        f.write_fmt(format_args!("# Num funcs: {}\n", self.funcs.len()))?;
-        f.write_fmt(format_args!("# Num consts: {}\n", self.consts.len()))?;
-        f.write_fmt(format_args!(
-            "# Num global decls: {}\n",
-            self.global_decls.len()
-        ))?;
-        f.write_fmt(format_args!("# Num types: {}\n", self.types.len()))?;
-
-        for func in &self.funcs {
-            write!(f, "\n{}", func.display(self))?;
-        }
-        Ok(())
-    }
-}
-
-/// Deserialise an AOT module from the slice `data`.
-pub(crate) fn deserialise_module(data: &[u8]) -> Result<Module, Box<dyn Error>> {
-    let ((_, _), modu) = Module::from_bytes((data, 0))?;
-    Ok(modu)
-}
-
-/// Deserialise and print IR from an on-disk file.
-///
-/// Used for support tooling (in turn used by tests too).
-pub fn print_from_file(path: &PathBuf) -> Result<(), Box<dyn Error>> {
-    let data = fs::read(path)?;
-    let ir = deserialise_module(&data)?;
-    println!("{}", ir);
-    Ok(())
 }
 
 #[cfg(test)]
