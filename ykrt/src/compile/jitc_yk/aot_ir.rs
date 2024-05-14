@@ -238,7 +238,7 @@ index!(TyIdx);
 pub(crate) struct BBlockIdx(usize);
 index!(BBlockIdx);
 
-/// An index into [BBlock::instrs].
+/// An index into [BBlock::insts].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct InstIdx(usize);
@@ -429,7 +429,7 @@ impl Operand {
         let Self::LocalVariable(iid) = self else {
             panic!()
         };
-        &aotmod.funcs[iid.func_idx].bblocks[iid.bb_idx].instrs[iid.inst_idx]
+        &aotmod.funcs[iid.func_idx].bblocks[iid.bb_idx].insts[iid.inst_idx]
     }
 
     /// Returns the [Type] of the operand.
@@ -698,7 +698,7 @@ impl Inst {
     fn local_name(&self, m: &Module) -> String {
         for f in m.funcs.iter() {
             for (bb_idx, bb) in f.bblocks.iter().enumerate() {
-                for (inst_idx, instr) in bb.instrs.iter().enumerate() {
+                for (inst_idx, instr) in bb.insts.iter().enumerate() {
                     if std::ptr::addr_eq(instr, self) {
                         return format!("${}_{}", bb_idx, inst_idx);
                     }
@@ -999,15 +999,15 @@ impl fmt::Display for DisplayableInst<'_> {
 #[derive(Debug)]
 pub(crate) struct BBlock {
     #[deku(temp)]
-    num_instrs: usize,
-    #[deku(count = "num_instrs", map = "map_to_tivec")]
-    pub(crate) instrs: TiVec<InstIdx, Inst>,
+    num_insts: usize,
+    #[deku(count = "num_insts", map = "map_to_tivec")]
+    pub(crate) insts: TiVec<InstIdx, Inst>,
 }
 
 impl BBlock {
     // Returns true if this block is terminated by a return, false otherwise.
     pub fn is_return(&self) -> bool {
-        matches!(self.instrs.last().unwrap(), Inst::Ret { .. })
+        matches!(self.insts.last().unwrap(), Inst::Ret { .. })
     }
 
     pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableBBlock<'a> {
@@ -1022,7 +1022,7 @@ pub(crate) struct DisplayableBBlock<'a> {
 
 impl fmt::Display for DisplayableBBlock<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for x in &self.bblock.instrs {
+        for x in &self.bblock.insts {
             writeln!(f, "    {}", x.display(self.m))?;
         }
         Ok(())

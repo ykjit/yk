@@ -103,7 +103,7 @@ impl<'a> TraceBuilder<'a> {
         // Find the control point call and extract the trace inputs struct from its operands.
         //
         // FIXME: Stash the location at IR lowering time, instead of searching at runtime.
-        let mut inst_iter = blk.instrs.iter().enumerate().rev();
+        let mut inst_iter = blk.insts.iter().enumerate().rev();
         for (_, inst) in inst_iter.by_ref() {
             // Is it a call to the control point? If so, extract the live vars struct.
             if let Some(tis) = inst.control_point_call_trace_inputs(self.aot_mod) {
@@ -204,14 +204,14 @@ impl<'a> TraceBuilder<'a> {
         let blk = self.aot_mod.bblock(bid);
 
         // Decide how to translate each AOT instruction.
-        for (inst_idx, inst) in blk.instrs.iter().enumerate() {
+        for (inst_idx, inst) in blk.insts.iter().enumerate() {
             match inst {
                 aot_ir::Inst::Br { .. } => Ok(()),
                 aot_ir::Inst::Load { ptr, ty_idx } => self.handle_load(bid, inst_idx, ptr, ty_idx),
                 // FIXME: ignore remaining instructions after a call.
                 aot_ir::Inst::Call { callee, args, .. } => {
                     // Get the branch instruction of this block.
-                    let nextinst = blk.instrs.last().unwrap();
+                    let nextinst = blk.insts.last().unwrap();
                     self.handle_call(inst, bid, inst_idx, callee, args, nextinst)
                 }
                 aot_ir::Inst::IndirectCall {
@@ -220,7 +220,7 @@ impl<'a> TraceBuilder<'a> {
                     args,
                 } => {
                     // Get the branch instruction of this block.
-                    let nextinst = blk.instrs.last().unwrap();
+                    let nextinst = blk.insts.last().unwrap();
                     self.handle_indirectcall(inst, bid, inst_idx, fty_idx, callop, args, nextinst)
                 }
                 aot_ir::Inst::Store { val, ptr } => self.handle_store(bid, inst_idx, val, ptr),
