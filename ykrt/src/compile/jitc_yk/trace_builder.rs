@@ -1,6 +1,6 @@
 //! The trace builder.
 
-use super::aot_ir::{self, AotIRDisplay, BBlockId, FuncIdx, Module};
+use super::aot_ir::{self, BBlockId, FuncIdx, Module};
 use super::jit_ir;
 use crate::compile::CompilationError;
 use crate::trace::{AOTTraceIterator, TraceAction};
@@ -383,7 +383,7 @@ impl<'a> TraceBuilder<'a> {
                 // FIXME: Is the above correct? What about args in the control point frame?
                 Ok(self.frames.last().unwrap().args[usize::from(*arg_idx)].clone())
             }
-            _ => todo!("{}", op.to_string(self.aot_mod)),
+            _ => todo!("{}", op.display(self.aot_mod)),
         }
     }
 
