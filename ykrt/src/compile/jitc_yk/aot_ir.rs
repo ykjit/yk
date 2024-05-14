@@ -763,22 +763,22 @@ impl Instruction {
         }
     }
 
-    pub(crate) fn is_mappable_call(&self, aot_mod: &Module) -> bool {
+    pub(crate) fn is_mappable_call(&self, m: &Module) -> bool {
         match self {
-            Self::Call { callee, .. } => !aot_mod.func(*callee).is_declaration(),
+            Self::Call { callee, .. } => !m.func(*callee).is_declaration(),
             _ => false,
         }
     }
 
     /// If `self` is a call to the control point, then return the live variables struct argument
     /// being passed to it. Otherwise return None.
-    pub(crate) fn control_point_call_trace_inputs(&self, aot_mod: &Module) -> Option<&Operand> {
+    pub(crate) fn control_point_call_trace_inputs(&self, m: &Module) -> Option<&Operand> {
         match self {
             Self::Call { callee, args, .. } => {
-                if aot_mod.func(*callee).name == CONTROL_POINT_NAME {
+                if m.func(*callee).name == CONTROL_POINT_NAME {
                     let arg = &args[CTRL_POINT_ARGIDX_INPUTS];
                     // It should be a pointer (to a struct, but we can't check that).
-                    debug_assert!(matches!(arg.type_(aot_mod), &Type::Ptr));
+                    debug_assert!(matches!(arg.type_(m), &Type::Ptr));
                     Some(arg)
                 } else {
                     None
@@ -796,9 +796,9 @@ impl Instruction {
         }
     }
 
-    pub(crate) fn is_debug_call(&self, aot_mod: &Module) -> bool {
+    pub(crate) fn is_debug_call(&self, m: &Module) -> bool {
         match self {
-            Self::Call { callee, .. } => aot_mod.func(*callee).name == LLVM_DEBUG_CALL_NAME,
+            Self::Call { callee, .. } => m.func(*callee).name == LLVM_DEBUG_CALL_NAME,
             _ => false,
         }
     }
