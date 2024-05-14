@@ -5,33 +5,25 @@
 //   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
 //     jitstate: start-tracing
-//     4
-//     foo
+//     i=9
 //     jitstate: stop-tracing
 //     --- Begin aot ---
 //     ...
-//     func main($arg0: i32, $arg1: ptr) -> i32 {
+//     ${{14_2}}: ptr = PtrAdd ${{14_1}}, -{{4}}
 //     ...
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{1}}: i8 = Icmp %{{2}}, SignedGreater, 1i32
-//     ...
-//     %{{3}}: i64 = Call @fwrite(%{{4}}, 4i64, 1i64, %{{5}})
+//     %{{14}}: ptr = PtrAdd %{{13}}, -{{4i32}}
 //     ...
 //     --- End jit-pre-opt ---
-//     3
-//     foo
+//     i=9
 //     jitstate: enter-jit-code
-//     2
-//     foo
-//     1
+//     i=9
+//     i=9
 //     jitstate: deoptimise
-//     bar
-//     0
-//     exit
 
-// Check that call inlining works.
+// Check that basic trace compilation works.
 
 #include <assert.h>
 #include <stdio.h>
@@ -40,34 +32,26 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-void foo(int i) {
-  if (i > 1) {
-    fputs("foo\n", stderr);
-  } else {
-    fputs("bar\n", stderr);
-  }
-}
-
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
-  int res = 9998;
-  int i = 4;
-  NOOPT_VAL(loc);
-  NOOPT_VAL(res);
-  NOOPT_VAL(i);
-  while (i > 0) {
-    yk_mt_control_point(mt, &loc);
-    fprintf(stderr, "%d\n", i);
-    foo(i);
-    res += 2;
-    i--;
+  int arr[300];
+  for (int x = 0; x < 300; x++) {
+    arr[x] = x;
   }
-  fprintf(stderr, "%d\n", i);
-  fprintf(stderr, "exit\n");
-  NOOPT_VAL(res);
+
+  int i = 0;
+  int *ptr = &arr[10];
+  NOOPT_VAL(loc);
+  NOOPT_VAL(i);
+  while (i < 4) {
+    yk_mt_control_point(mt, &loc);
+    NOOPT_VAL(ptr);
+    fprintf(stderr, "i=%d\n", ptr[-1]);
+    i++;
+  }
   yk_location_drop(loc);
   yk_mt_drop(mt);
   return (EXIT_SUCCESS);

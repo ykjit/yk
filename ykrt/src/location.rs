@@ -196,6 +196,12 @@ impl Location {
     }
 }
 
+impl Default for Location {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Drop for Location {
     fn drop(&mut self) {
         let x = self.inner.load(Ordering::Relaxed);

@@ -5,8 +5,7 @@
 //   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
 //     jitstate: start-tracing
-//     4
-//     foo
+//     i=4, r=10
 //     jitstate: stop-tracing
 //     --- Begin aot ---
 //     ...
@@ -15,19 +14,14 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{1}}: i8 = Icmp %{{2}}, SignedGreater, 1i32
-//     ...
-//     %{{3}}: i64 = Call @fwrite(%{{4}}, 4i64, 1i64, %{{5}})
+//     %{{3}}: i32 = Call @foo(%{{4}})
 //     ...
 //     --- End jit-pre-opt ---
-//     3
-//     foo
+//     i=3, r=6
 //     jitstate: enter-jit-code
-//     2
-//     foo
-//     1
+//     i=2, r=3
+//     i=1, r=1
 //     jitstate: deoptimise
-//     bar
 //     0
 //     exit
 
@@ -40,12 +34,14 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-void foo(int i) {
-  if (i > 1) {
-    fputs("foo\n", stderr);
-  } else {
-    fputs("bar\n", stderr);
+int foo(int i) {
+  int sum = 0;
+  // the loop ensures this function is outlined.
+  while (i > 0) {
+    sum = sum + i;
+    i--;
   }
+  return sum;
 }
 
 int main(int argc, char **argv) {
@@ -60,8 +56,8 @@ int main(int argc, char **argv) {
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    fprintf(stderr, "%d\n", i);
-    foo(i);
+    int r = foo(i);
+    fprintf(stderr, "i=%d, r=%d\n", i, r);
     res += 2;
     i--;
   }

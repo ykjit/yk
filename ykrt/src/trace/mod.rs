@@ -12,10 +12,6 @@
 //!
 //! This module thus contains tracing backends which can record and process traces.
 
-#![allow(clippy::len_without_is_empty)]
-#![allow(clippy::new_without_default)]
-#![allow(clippy::missing_safety_doc)]
-
 use std::{error::Error, ffi::CString, sync::Arc};
 use thiserror::Error;
 

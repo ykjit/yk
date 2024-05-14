@@ -1,37 +1,33 @@
 // ignore-if: test $YK_JIT_COMPILER != "yk" -o "$YKB_TRACER" = "swt"
 // Run-time:
-//   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
+//   env-var: YKD_LOG_IR=-:jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
 //     jitstate: start-tracing
-//     4
-//     foo
+//     and 0
+//     or 5
+//     lshr 2
 //     jitstate: stop-tracing
-//     --- Begin aot ---
-//     ...
-//     func main($arg0: i32, $arg1: ptr) -> i32 {
-//     ...
-//     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{1}}: i8 = Icmp %{{2}}, SignedGreater, 1i32
-//     ...
-//     %{{3}}: i64 = Call @fwrite(%{{4}}, 4i64, 1i64, %{{5}})
+//     %{{result}}: i32 = And %{{1}}, 1i32
 //     ...
 //     --- End jit-pre-opt ---
-//     3
-//     foo
+//     and 1
+//     or 3
+//     lshr 1
 //     jitstate: enter-jit-code
-//     2
-//     foo
-//     1
+//     and 0
+//     or 3
+//     lshr 1
+//     and 1
+//     or 1
+//     lshr 0
 //     jitstate: deoptimise
-//     bar
-//     0
 //     exit
 
-// Check that call inlining works.
+// Test some binary operations.
 
 #include <assert.h>
 #include <stdio.h>
@@ -40,34 +36,27 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-void foo(int i) {
-  if (i > 1) {
-    fputs("foo\n", stderr);
-  } else {
-    fputs("bar\n", stderr);
-  }
-}
+__attribute__((noinline)) int foo(int i) { return i + 3; }
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
-  int res = 9998;
   int i = 4;
   NOOPT_VAL(loc);
-  NOOPT_VAL(res);
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    fprintf(stderr, "%d\n", i);
-    foo(i);
-    res += 2;
+    int and = i & 1;
+    int or = i | 1;
+    int lshr = (uint)i >> 1;
+    fprintf(stderr, "and %d\n", and);
+    fprintf(stderr, "or %d\n", or);
+    fprintf(stderr, "lshr %d\n", lshr);
     i--;
   }
-  fprintf(stderr, "%d\n", i);
   fprintf(stderr, "exit\n");
-  NOOPT_VAL(res);
   yk_location_drop(loc);
   yk_mt_drop(mt);
   return (EXIT_SUCCESS);

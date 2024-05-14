@@ -1,31 +1,32 @@
+// ignore-if: test $YK_JIT_COMPILER != "yk" -o "$YKB_TRACER" = "swt"
 // Run-time:
 //   env-var: YKD_LOG_JITSTATE=-
 //   env-var: YKD_LOG_STATS=/dev/null
 //   stderr:
 //     jitstate: start-tracing
-//     pc=0, mem=12
-//     pc=1, mem=11
-//     pc=2, mem=10
-//     pc=3, mem=9
-//     jitstate: stop-tracing
-//     pc=0, mem=9
-//     pc=1, mem=8
-//     pc=2, mem=7
-//     pc=3, mem=6
-//     jitstate: enter-jit-code
-//     pc=0, mem=6
-//     pc=1, mem=5
+//     pc=0, mem=4
+//     pc=1, mem=4
 //     pc=2, mem=4
 //     pc=3, mem=3
+//     jitstate: stop-tracing
 //     pc=0, mem=3
+//     pc=1, mem=3
+//     pc=2, mem=3
+//     pc=3, mem=2
+//     jitstate: enter-jit-code
+//     pc=0, mem=2
 //     pc=1, mem=2
+//     pc=2, mem=2
+//     pc=3, mem=1
+//     pc=0, mem=1
+//     pc=1, mem=1
 //     pc=2, mem=1
 //     pc=3, mem=0
 //     jitstate: deoptimise
 //     pc=4, mem=0
-//     pc=5, mem=-1
+//     pc=5, mem=0
 
-// Test basic interpreter.
+// Test a basic interpreter.
 
 #include <assert.h>
 #include <stdbool.h>
@@ -36,11 +37,13 @@
 #include <yk_testing.h>
 
 // The sole mutable memory cell of the interpreter.
-int mem = 12;
+int mem = 4;
 
 // The bytecodes accepted by the interpreter.
+#define NOP 0
 #define DEC 1
 #define RESTART_IF_NOT_ZERO 2
+#define EXIT 3
 
 bool test_compiled_event(YkCStats stats) {
   return stats.traces_compiled_ok == 1;
@@ -51,12 +54,12 @@ int main(int argc, char **argv) {
   yk_mt_hot_threshold_set(mt, 0);
 
   // A hard-coded program to execute.
-  int prog[] = {DEC, DEC, DEC, RESTART_IF_NOT_ZERO, DEC, DEC};
+  int prog[] = {NOP, NOP, DEC, RESTART_IF_NOT_ZERO, NOP, EXIT};
   size_t prog_len = sizeof(prog) / sizeof(prog[0]);
 
-  // Create one location for each potential PC value.
   YkLocation loop_loc = yk_location_new();
   YkLocation **locs = calloc(prog_len, sizeof(&prog[0]));
+  assert(locs != NULL);
   for (int i = 0; i < prog_len; i++)
     if (i == 0)
       locs[i] = &loop_loc;
@@ -66,24 +69,25 @@ int main(int argc, char **argv) {
   // The program counter.
   int pc = 0;
 
+  NOOPT_VAL(pc);
   NOOPT_VAL(prog);
   NOOPT_VAL(prog_len);
-  NOOPT_VAL(pc);
   NOOPT_VAL(mem);
   NOOPT_VAL(locs);
 
   // interpreter loop.
   while (true) {
-    if (pc >= prog_len) {
-      exit(0);
-    }
+    assert(pc < prog_len);
     yk_mt_control_point(mt, locs[pc]);
-    if ((pc == 0) && (mem == 9)) {
+    if ((pc == 0) && (mem == 3)) {
       __ykstats_wait_until(mt, test_compiled_event);
     }
     int bc = prog[pc];
     fprintf(stderr, "pc=%d, mem=%d\n", pc, mem);
     switch (bc) {
+    case NOP:
+      pc++;
+      break;
     case DEC:
       mem--;
       pc++;
@@ -94,11 +98,13 @@ int main(int argc, char **argv) {
       else
         pc++;
       break;
+    case EXIT:
+      goto done;
     default:
-      abort();
+      abort(); // unreachable.
     }
   }
-  abort(); // FIXME: unreachable due to aborting guard failure earlier.
+done:
   NOOPT_VAL(pc);
 
   free(locs);

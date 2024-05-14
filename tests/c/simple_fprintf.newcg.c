@@ -14,7 +14,7 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{17}}: i32 = VACall @fprintf(%{{11}}, %{{16}}, %{{12}})
+//     %{{17}}: i32 = Call @fprintf(%{{11}}, %{{16}}, %{{12}})
 //     ...
 //     --- End jit-pre-opt ---
 //     i=3

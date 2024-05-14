@@ -47,7 +47,7 @@ impl JITCYk {
 impl Compiler for JITCYk {
     fn compile(
         &self,
-        _mt: Arc<MT>,
+        mt: Arc<MT>,
         aottrace_iter: (Box<dyn AOTTraceIterator>, Box<[usize]>),
         sti: Option<SideTraceInfo>,
         _hl: Arc<Mutex<HotLocation>>,
@@ -60,20 +60,14 @@ impl Compiler for JITCYk {
         let aot_mod = aot_ir::deserialise_module(ir_slice).unwrap();
 
         if should_log_ir(IRPhase::AOT) {
-            log_ir(&format!(
-                "--- Begin aot ---\n{}\n--- End aot ---",
-                aot_mod.to_string()
-            ));
+            log_ir(&format!("--- Begin aot ---\n{}\n--- End aot ---", aot_mod));
         }
 
-        let jit_mod = trace_builder::build(&aot_mod, aottrace_iter.0)?;
+        let jit_mod = trace_builder::build(mt.next_compiled_trace_id(), &aot_mod, aottrace_iter.0)?;
 
         if should_log_ir(IRPhase::PreOpt) {
-            // FIXME: If the `unwrap` fails, something rather bad has happened: does recovery even
-            // make sense?
             log_ir(&format!(
-                "--- Begin jit-pre-opt ---\n{}\n--- End jit-pre-opt ---",
-                jit_mod.to_string().unwrap()
+                "--- Begin jit-pre-opt ---\n{jit_mod}\n--- End jit-pre-opt ---",
             ));
         }
 
@@ -83,7 +77,7 @@ impl Compiler for JITCYk {
         #[cfg(any(debug_assertions, test))]
         if should_log_ir(IRPhase::Asm) {
             log_ir(&format!(
-                "--- Begin jit-asm ---\n{}\n--- End jit-asm",
+                "--- Begin jit-asm ---\n{}\n--- End jit-asm ---",
                 ct.disassemble().unwrap()
             ));
         }
@@ -96,5 +90,5 @@ pub(crate) fn yk_ir_section() -> Result<&'static [u8], Box<dyn Error>> {
     let start = symbol_to_ptr("ykllvm.yk_ir.start")? as *const u8;
     let stop = symbol_to_ptr("ykllvm.yk_ir.stop")? as *const u8;
     debug_assert!(start < stop);
-    Ok(unsafe { slice::from_raw_parts(start as *const u8, stop.sub_ptr(start)) })
+    Ok(unsafe { slice::from_raw_parts(start, stop.sub_ptr(start)) })
 }

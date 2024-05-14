@@ -1,51 +1,37 @@
 // ignore-if: test $YK_JIT_COMPILER != "yk" -o "$YKB_TRACER" = "swt"
 // Run-time:
 //   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
-//   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YKD_LOG_STATS=/dev/null
 //   stderr:
 //     jitstate: start-tracing
-//     4
-//     foo
+//     i=4, val=2
 //     jitstate: stop-tracing
 //     --- Begin aot ---
 //     ...
-//     func main($arg0: i32, $arg1: ptr) -> i32 {
+//     ${{14_0}}: i32 = phi bb{{bb13}} -> 2i32, bb{{bb12}} -> 1i32
 //     ...
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{1}}: i8 = Icmp %{{2}}, SignedGreater, 1i32
-//     ...
-//     %{{3}}: i64 = Call @fwrite(%{{4}}, 4i64, 1i64, %{{5}})
+//     %{{15}}: i32 = 2i32
 //     ...
 //     --- End jit-pre-opt ---
-//     3
-//     foo
+//     i=3, val=2
 //     jitstate: enter-jit-code
-//     2
-//     foo
-//     1
+//     i=2, val=2
+//     i=1, val=2
 //     jitstate: deoptimise
-//     bar
-//     0
-//     exit
 
-// Check that call inlining works.
+// Check that PHI nodes JIT properly.
 
-#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <yk.h>
 #include <yk_testing.h>
 
-void foo(int i) {
-  if (i > 1) {
-    fputs("foo\n", stderr);
-  } else {
-    fputs("bar\n", stderr);
-  }
+bool test_compiled_event(YkCStats stats) {
+  return stats.traces_compiled_ok == 1;
 }
 
 int main(int argc, char **argv) {
@@ -53,21 +39,26 @@ int main(int argc, char **argv) {
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
-  int res = 9998;
+  int val = 0;
+  int cond = -1;
   int i = 4;
   NOOPT_VAL(loc);
-  NOOPT_VAL(res);
+  NOOPT_VAL(val);
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    fprintf(stderr, "%d\n", i);
-    foo(i);
-    res += 2;
+    if (i == 3) {
+      __ykstats_wait_until(mt, test_compiled_event);
+    }
+    NOOPT_VAL(cond);
+    if (cond > 0) {
+      val = 1;
+    } else {
+      val = 2;
+    }
+    fprintf(stderr, "i=%d, val=%d\n", i, val);
     i--;
   }
-  fprintf(stderr, "%d\n", i);
-  fprintf(stderr, "exit\n");
-  NOOPT_VAL(res);
   yk_location_drop(loc);
   yk_mt_drop(mt);
   return (EXIT_SUCCESS);

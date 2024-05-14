@@ -46,7 +46,7 @@ static FUNC_NAMES: LazyLock<HashMap<usize, CString>> = LazyLock::new(|| {
 
 thread_local! {
     // Collection of traced basic blocks.
-    static BASIC_BLOCKS: RefCell<Vec<TracingBBlock>> = RefCell::new(vec![]);
+    static BASIC_BLOCKS: RefCell<Vec<TracingBBlock>> = const { RefCell::new(vec![]) };
 }
 
 /// Inserts LLVM IR basicblock metadata into a thread-local BASIC_BLOCKS vector.
@@ -121,9 +121,9 @@ struct SWTraceIterator {
 
 impl SWTraceIterator {
     fn new(bbs: Vec<TracingBBlock>) -> SWTraceIterator {
-        return SWTraceIterator {
+        SWTraceIterator {
             bbs: bbs.into_iter(),
-        };
+        }
     }
 }
 

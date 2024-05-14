@@ -5,69 +5,46 @@
 //   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
 //     jitstate: start-tracing
-//     4
-//     foo
+//     neg=-1
 //     jitstate: stop-tracing
 //     --- Begin aot ---
 //     ...
-//     func main($arg0: i32, $arg1: ptr) -> i32 {
+//     ... = SignExtend ...
 //     ...
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{1}}: i8 = Icmp %{{2}}, SignedGreater, 1i32
-//     ...
-//     %{{3}}: i64 = Call @fwrite(%{{4}}, 4i64, 1i64, %{{5}})
+//     %{{22}}: i64 = SignExtend %{{21}}, i64
 //     ...
 //     --- End jit-pre-opt ---
-//     3
-//     foo
+//     neg=-2
 //     jitstate: enter-jit-code
-//     2
-//     foo
-//     1
+//     neg=-3
+//     neg=-4
 //     jitstate: deoptimise
-//     bar
-//     0
-//     exit
 
-// Check that call inlining works.
+// Check that sign extending a negative value works.
 
-#include <assert.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <yk.h>
 #include <yk_testing.h>
-
-void foo(int i) {
-  if (i > 1) {
-    fputs("foo\n", stderr);
-  } else {
-    fputs("bar\n", stderr);
-  }
-}
 
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
-  int res = 9998;
-  int i = 4;
+  int8_t neg = -1;
   NOOPT_VAL(loc);
-  NOOPT_VAL(res);
-  NOOPT_VAL(i);
-  while (i > 0) {
+  while (neg > -5) {
+    NOOPT_VAL(neg);
     yk_mt_control_point(mt, &loc);
-    fprintf(stderr, "%d\n", i);
-    foo(i);
-    res += 2;
-    i--;
+    fprintf(stderr, "neg=%" PRIi64 "\n", (int64_t)neg);
+    neg--;
   }
-  fprintf(stderr, "%d\n", i);
-  fprintf(stderr, "exit\n");
-  NOOPT_VAL(res);
+
   yk_location_drop(loc);
   yk_mt_drop(mt);
   return (EXIT_SUCCESS);

@@ -5,8 +5,11 @@
 //   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
 //     jitstate: start-tracing
+//     0
+//     1
+//     2
+//     3
 //     4
-//     foo
 //     jitstate: stop-tracing
 //     --- Begin aot ---
 //     ...
@@ -15,23 +18,24 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{1}}: i8 = Icmp %{{2}}, SignedGreater, 1i32
-//     ...
-//     %{{3}}: i64 = Call @fwrite(%{{4}}, 4i64, 1i64, %{{5}})
+//     Call @foo(%{{4}})
 //     ...
 //     --- End jit-pre-opt ---
-//     3
-//     foo
-//     jitstate: enter-jit-code
+//     0
+//     1
 //     2
-//     foo
+//     3
+//     jitstate: enter-jit-code
+//     0
+//     1
+//     2
+//     0
 //     1
 //     jitstate: deoptimise
-//     bar
 //     0
 //     exit
 
-// Check that call inlining works.
+// Test outlining of recursive calls.
 
 #include <assert.h>
 #include <stdio.h>
@@ -40,12 +44,14 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-void foo(int i) {
-  if (i > 1) {
-    fputs("foo\n", stderr);
-  } else {
-    fputs("bar\n", stderr);
+__attribute__((noinline)) void foo(int i) {
+  if (i > 0) {
+    foo(i - 1);
+    fprintf(stderr, "%d\n", i);
+    return;
   }
+  fprintf(stderr, "%d\n", i);
+  return;
 }
 
 int main(int argc, char **argv) {
@@ -53,21 +59,16 @@ int main(int argc, char **argv) {
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
-  int res = 9998;
   int i = 4;
   NOOPT_VAL(loc);
-  NOOPT_VAL(res);
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    fprintf(stderr, "%d\n", i);
     foo(i);
-    res += 2;
     i--;
   }
   fprintf(stderr, "%d\n", i);
   fprintf(stderr, "exit\n");
-  NOOPT_VAL(res);
   yk_location_drop(loc);
   yk_mt_drop(mt);
   return (EXIT_SUCCESS);

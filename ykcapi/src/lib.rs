@@ -60,7 +60,7 @@ pub extern "C" fn __ykrt_control_point(
     ctrlp_vars: *mut c_void,
     // Frame address of caller.
     frameaddr: *mut c_void,
-) -> *const c_void {
+) {
     debug_assert!(!ctrlp_vars.is_null());
     if !loc.is_null() {
         let mt = unsafe { &*mt };
@@ -69,7 +69,6 @@ pub extern "C" fn __ykrt_control_point(
         arc.control_point(loc, ctrlp_vars, frameaddr);
         forget(arc);
     }
-    std::ptr::null()
 }
 
 #[no_mangle]

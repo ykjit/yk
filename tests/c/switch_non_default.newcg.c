@@ -5,33 +5,26 @@
 //   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
 //     jitstate: start-tracing
-//     4
-//     foo
+//     i=3
 //     jitstate: stop-tracing
 //     --- Begin aot ---
 //     ...
-//     func main($arg0: i32, $arg1: ptr) -> i32 {
+//     switch ${{10_1}}, bb{{bb14}}, [300 -> bb{{bb11}}, 299 -> bb{{bb12}}] [safepoint: {{safepoint_id}}, ($0_0, $0_1, $0_3, $0_4, $0_5, $0_6, $10_1)]
 //     ...
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{1}}: i8 = Icmp %{{2}}, SignedGreater, 1i32
-//     ...
-//     %{{3}}: i64 = Call @fwrite(%{{4}}, 4i64, 1i64, %{{5}})
+//     %{{cond}}: i8 = Icmp %{{20}}, Equal, 300i32
+//     Guard %{{cond}}, true
 //     ...
 //     --- End jit-pre-opt ---
-//     3
-//     foo
+//     i=2
 //     jitstate: enter-jit-code
-//     2
-//     foo
-//     1
+//     i=1
 //     jitstate: deoptimise
-//     bar
-//     0
-//     exit
+//     ...
 
-// Check that call inlining works.
+// Check that tracing a non-default switch arm works correctly.
 
 #include <assert.h>
 #include <stdio.h>
@@ -40,35 +33,29 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-void foo(int i) {
-  if (i > 1) {
-    fputs("foo\n", stderr);
-  } else {
-    fputs("bar\n", stderr);
-  }
-}
-
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
-
-  int res = 9998;
-  int i = 4;
-  NOOPT_VAL(loc);
-  NOOPT_VAL(res);
+  int i = 3;
+  int j = 300;
   NOOPT_VAL(i);
+  NOOPT_VAL(j);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    fprintf(stderr, "%d\n", i);
-    foo(i);
-    res += 2;
-    i--;
+    fprintf(stderr, "i=%d\n", i);
+    switch (j) {
+    case 300: // This case is traced.
+      i--;
+      break;
+    case 299:
+      exit(1);
+    default:
+      exit(1);
+    }
   }
-  fprintf(stderr, "%d\n", i);
-  fprintf(stderr, "exit\n");
-  NOOPT_VAL(res);
   yk_location_drop(loc);
   yk_mt_drop(mt);
+
   return (EXIT_SUCCESS);
 }

@@ -1,23 +1,25 @@
 #!/bin/sh
 
-set -e
+set -eu
 
 TRACERS="hwt swt"
 
 # Install rustup.
-export CARGO_HOME="`pwd`/.cargo"
-export RUSTUP_HOME="`pwd`/.rustup"
+CARGO_HOME="$(pwd)/.cargo"
+export CARGO_HOME
+RUSTUP_HOME="$(pwd)/.rustup"
+export RUSTUP_HOME
 export RUSTUP_INIT_SKIP_PATH_CHECK="yes"
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > rustup.sh
 sh rustup.sh --default-host x86_64-unknown-linux-gnu \
     --default-toolchain nightly \
     --no-modify-path \
-    --profile minimal \
+    --profile default \
     -y
-export PATH=${CARGO_HOME}/bin/:$PATH
+export PATH="${CARGO_HOME}"/bin/:"$PATH"
 
-rustup toolchain install nightly --allow-downgrade --component rustfmt
-
+# Formatting problems are frequent in PRs, and easy to fix, so try and catch
+# those before doing anything complicated.
 cargo fmt --all -- --check
 
 # We now need a copy of ykllvm. Building this is quite slow so if there's a
@@ -28,13 +30,24 @@ cargo fmt --all -- --check
 
 cd ykllvm
 ykllvm_hash=$(git rev-parse HEAD)
-if [ -f /opt/ykllvm_cache/ykllvm-release-with-assertions-${ykllvm_hash}.tgz ]; then
-    cached_ykllvm=1
+cached_ykllvm=0
+if [ -f /opt/ykllvm_cache/ykllvm-release-with-assertions-"${ykllvm_hash}".tgz ]; then
     mkdir inst
     cd inst
-    tar xfz /opt/ykllvm_cache/ykllvm-release-with-assertions-${ykllvm_hash}.tgz
-else
-    cached_ykllvm=0
+    tar xfz /opt/ykllvm_cache/ykllvm-release-with-assertions-"${ykllvm_hash}".tgz
+    # Minimally check that we can at least run `clang --version`: if we can't,
+    # we assume the cached binary is too old (e.g. linking against old shared
+    # objects) and that we should build our own version.
+    if bin/clang --version > /dev/null; then
+        cached_ykllvm=1
+    else
+        echo "Warning: cached ykllvm not runnable; building from scratch" > /dev/stderr
+        cd ..
+        rm -rf inst
+    fi
+fi
+
+if [ "$cached_ykllvm" -eq 0 ]; then
     # We could let yk build two copies of LLVM, but we also want to: check that
     # YKB_YKLLVM_BIN_DIR works; and we want access to clang-format from a build
     # of LLVM. So we first build (or use a prebuilt version) of our
@@ -46,7 +59,7 @@ else
     # Due to an LLVM bug, PIE breaks our mapper, and it's not enough to pass
     # `-fno-pie` to clang for some reason:
     # https://github.com/llvm/llvm-project/issues/57085
-    cmake -DCMAKE_INSTALL_PREFIX=`pwd`/../inst \
+    cmake -DCMAKE_INSTALL_PREFIX="$(pwd)/../inst" \
         -DLLVM_INSTALL_UTILS=On \
         -DCMAKE_BUILD_TYPE=release \
         -DLLVM_ENABLE_ASSERTIONS=On \
@@ -61,43 +74,38 @@ else
     cmake --install .
 fi
 YKLLVM_BIN_DIR=$(pwd)/../inst/bin
-export YKB_YKLLVM_BIN_DIR=${YKLLVM_BIN_DIR}
+export YKB_YKLLVM_BIN_DIR="${YKLLVM_BIN_DIR}"
 cd ../../
 
-# Check that clang-format is installed.
-PATH=${YKB_YKLLVM_BIN_DIR}:${PATH} clang-format --version
-# Check C/C++ formatting using xtask.
-PATH=${YKB_YKLLVM_BIN_DIR}:${PATH} cargo xtask cfmt
-# This is used to check clang-tidy output, but the dirty submodule from building
-# ykllvm is also shown.
-# FIXME: Add build/ to .gitignore in ykllvm
-git diff --exit-code --ignore-submodules
+# Check C/C++ formatting.
+PATH=${YKB_YKLLVM_BIN_DIR}:${PATH} cargo xtask cfmt --check
 
+cargo install cargo-diff-tools
+if [ "$CI_RUNNER" = buildbot ] ; then
+    # When running under buildbot, we need to `git fetch` data from the remote if we want
+    # cargo-clippy-def to work later.
+    git fetch origin master:refs/remotes/origin/master
+fi
 for tracer in ${TRACERS}; do
-    export YKB_TRACER=${tracer}
+    export YKB_TRACER="${tracer}"
     # Check for annoying compiler warnings in each package.
     WARNING_DEFINES="-D unused-variables -D dead-code -D unused-imports"
     for p in $(sed -n -e '/^members =/,/^\]$/{/^members =/d;/^\]$/d;p;}' \
       Cargo.toml | \
       tr -d ' \t\",' | grep -v xtask); do
-        cargo rustc -p $p --profile check --lib -- ${WARNING_DEFINES}
+        echo "$WARNING_DEFINES" | xargs cargo rustc -p "$p" --profile check --lib --
         # For some reason, we can't do these checks on crates with binary targets.
         if [ "$p" != "ykrt" ] && [ "$p" != "tests" ]; then
-            cargo rustc -p $p --profile check --tests -- ${WARNING_DEFINES}
-            cargo rustc -p $p --profile check --benches -- ${WARNING_DEFINES}
+            echo "$WARNING_DEFINES" | xargs cargo rustc -p "$p" --profile check --tests --
+            echo "$WARNING_DEFINES" | xargs cargo rustc -p "$p" --profile check --benches --
         fi
     done
-    cargo rustc -p tests --profile check --bin dump_ir -- ${WARNING_DEFINES}
-    cargo rustc -p tests --profile check --bin gdb_c_test -- ${WARNING_DEFINES}
-    cargo rustc -p xtask --profile check --bin xtask -- ${WARNING_DEFINES}
+    echo "$WARNING_DEFINES" | xargs cargo rustc -p tests --profile check --bin dump_ir --
+    echo "$WARNING_DEFINES" | xargs cargo rustc -p tests --profile check --bin gdb_c_test --
+    echo "$WARNING_DEFINES" | xargs cargo rustc -p xtask --profile check --bin xtask --
 
-    # There are some feature-gated testing/debugging switches which slow the JIT
-    # down a bit. Check that if we build the system without tests, those features
-    # are not enabled.
-    cargo -Z unstable-options build --build-plan -p ykcapi | \
-      awk '/yk_testing/ { ec=1 } END {exit ec}'
-    cargo -Z unstable-options build --build-plan -p ykrt | \
-      awk '/yk_testing/ { ec=1 } /yk_jitstate_debug/ { ec=1 } END {exit ec}'
+    # Error if Clippy detects any warnings introduced in lines changed in this PR.
+    cargo-clippy-diff origin/master -- --all-features -- -D warnings
 done
 
 # Run the tests multiple times on hwt to try and catch non-deterministic
@@ -105,7 +113,7 @@ done
 # tests just once.
 export YKB_TRACER=hwt
 echo "===> Running hwt tests"
-for i in $(seq 10); do
+for _ in $(seq 10); do
     RUST_TEST_SHUFFLE=1 cargo test
     YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test
 done
@@ -124,8 +132,8 @@ rustup component add rust-src
 # build-std`), so we have to add a suppression file to avoid those stopping
 # this script from succeeding. This does mean that we might suppress some true
 # positives, but there's little we can do about that.
-suppressions_path=`mktemp`
-cat << EOF > $suppressions_path
+suppressions_path=$(mktemp)
+cat << EOF > "$suppressions_path"
 # Thread sanitiser doesn't know about atomic operations.
 race:core::sync::atomic::atomic_
 # count_to_hot_location moves something into a mutex, at which point accesses
@@ -135,9 +143,9 @@ race:ykrt::location::Location::count_to_hot_location
 EOF
 
 for tracer in $TRACERS; do
-    export YKB_TRACER=${tracer}
+    export YKB_TRACER="${tracer}"
     cargo build
-    ASAN_SYMBOLIZER_PATH=${YKLLVM_BIN_DIR}/llvm-symbolizer \
+    ASAN_SYMBOLIZER_PATH="${YKLLVM_BIN_DIR}/llvm-symbolizer" \
       RUSTFLAGS="-Z sanitizer=address" cargo test \
       -Z build-std \
       --target x86_64-unknown-linux-gnu
@@ -161,7 +169,7 @@ cargo_deny_mdbook_pid=$!
 
 # We now want to test building with `--release`.
 
-if [ $cached_ykllvm -eq 0 ]; then
+if [ "$cached_ykllvm" -eq 0 ]; then
     # If we don't have a cached copy of ykllvm, we also take this as an
     # opportunity to check that yk can build ykllvm, which requires unsetting
     # YKB_YKLLVM_BIN_DIR. In essence, we now repeat much of what we did above
@@ -171,11 +179,7 @@ if [ $cached_ykllvm -eq 0 ]; then
 fi
 
 for tracer in $TRACERS; do
-    export YKB_TRACER=${tracer}
-    cargo -Z unstable-options build --release --build-plan -p ykcapi | \
-      awk '/yk_testing/ { ec=1 } /yk_jitstate_debug/ { ec=1 } END {exit ec}'
-
-    cargo build --release -p ykcapi
+    export YKB_TRACER="${tracer}"
     echo "===> Running ${tracer} tests"
     RUST_TEST_SHUFFLE=1 cargo test --release
     YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test --release
@@ -187,7 +191,7 @@ done
 # Note that --profile-time doesn't work without --bench, so we have to run each
 # benchmark individually.
 for b in collect_and_decode promote; do
-    YKB_TRACER=hwt cargo bench --bench ${b} -- --profile-time 1
+    YKB_TRACER=hwt cargo bench --bench "${b}" -- --profile-time 1
 done
 
 # Check licenses.

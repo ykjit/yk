@@ -6,7 +6,8 @@
 //   stderr:
 //     jitstate: start-tracing
 //     4
-//     foo
+//     foo-if
+//     bar
 //     jitstate: stop-tracing
 //     --- Begin aot ---
 //     ...
@@ -21,17 +22,20 @@
 //     ...
 //     --- End jit-pre-opt ---
 //     3
-//     foo
+//     foo-if
+//     bar
 //     jitstate: enter-jit-code
 //     2
-//     foo
+//     foo-if
+//     bar
 //     1
 //     jitstate: deoptimise
+//     foo-else
 //     bar
 //     0
 //     exit
 
-// Check that call inlining works.
+// Test deoptimisation with multiple nested calls.
 
 #include <assert.h>
 #include <stdio.h>
@@ -42,10 +46,15 @@
 
 void foo(int i) {
   if (i > 1) {
-    fputs("foo\n", stderr);
+    fputs("foo-if\n", stderr);
   } else {
-    fputs("bar\n", stderr);
+    fputs("foo-else\n", stderr);
   }
+}
+
+void bar(int i) {
+  foo(i);
+  fputs("bar\n", stderr);
 }
 
 int main(int argc, char **argv) {
@@ -61,7 +70,7 @@ int main(int argc, char **argv) {
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
     fprintf(stderr, "%d\n", i);
-    foo(i);
+    bar(i);
     res += 2;
     i--;
   }
