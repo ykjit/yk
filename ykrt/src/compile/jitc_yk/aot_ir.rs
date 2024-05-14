@@ -1,33 +1,26 @@
-//! Yk's AOT IR deserialiser.
+//! The AOT Intermediate Representation (IR).
 //!
-//! This module contains the data structures for the AOT IR and a parser to read it from its
-//! serialised format.
+//! This is the IR created by ykllvm: this module contains both the IR itself and a deserialiser
+//! from ykllvm's output into the IR itself. The IR can feel a little odd at first because we store
+//! indexes into vectors rather than use direct references.
 //!
-//! The AOT IR accurately reflects the structure and semantics of the AOT binary. As such, it must
-//! not be mutated after the fact.
+//! The IR uses two general terminological conventions:
+//!   * A "definition" is something for which the IR contains complete knowledge.
+//!   * A "declaration" is something compiled externally for which we only know the minimal
+//!   external structure (e.g. a function signature), with the body being present elsewhere in the
+//!   binary.
 //!
-//! The IR is index-centric, meaning that when one data structure refers to another, it is by a
-//! numeric index into a backing vector (and not via a Rust reference). We chose to do it like this
-//! because a) references can't easily be serialised and deserialised; and b) we didn't want to do
-//! another pass over the IR to convert to another version of the data structures that uses
-//! references.
+//! Because using the IR can often involve getting hold of data nested several layers deep, we also
+//! use a number of abbreviations/conventions to keep the length of source down to something
+//! manageable (in alphabetical order):
 //!
-//! Each kind of index has a distinct Rust type so that it cannot be accidentally used in place of
-//! an unrelated index. This is enforced by `TiVec`.
-//!
-//! At a high level, the AOT IR contains:
-//!  - Functions (which contain basic blocks, which contain individual instructions).
-//!  - Global variable declarations.
-//!  - Function definitions/declarations.
-//!  - Constant values.
-//!  - Types, for use by all of the above.
-//!
-//! Throughout we use the term "definition" to mean something for which we have total IR knowledge
-//! of, whereas a "declaration" is something compiled externally that we typically only know the
-//! symbol name, address and type of.
-//!
-//! Elements of the IR can be converted to human-readable forms by calling `to_string()` on them.
-//! This is used for testing, but can also be used for debugging.
+//!  * `const_`: a "constant"
+//!  * `decl`: a "declaration" (e.g. a "function declaration" is a reference to an existing
+//!    function somewhere else in the address space)
+//!  * `m`: the name conventionally given to the shared [Module] instance (i.e. `m: Module`)
+//!  * `Idx`: "index"
+//!  * `Inst`: "instruction"
+//!  * `Ty`: "type"
 
 use byteorder::{NativeEndian, ReadBytesExt};
 use deku::prelude::*;
