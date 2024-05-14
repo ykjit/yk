@@ -124,8 +124,8 @@ impl<'a> TraceBuilder<'a> {
         // profoundly wrong with the AOT IR.
         let trace_inputs = trace_inputs.unwrap();
         let trace_input_struct_ty = match trace_inputs {
-            aot_ir::Instruction::Alloca { type_idx, .. } => {
-                let aot_ir::Type::Struct(x) = self.aot_mod.type_(*type_idx) else {
+            aot_ir::Instruction::Alloca { ty_idx, .. } => {
+                let aot_ir::Type::Struct(x) = self.aot_mod.type_(*ty_idx) else {
                     panic!()
                 };
                 x
@@ -158,7 +158,7 @@ impl<'a> TraceBuilder<'a> {
                         // FIXME: assumes the field is byte-aligned. If it isn't, field_byte_off() will
                         // crash.
                         let aot_field_off = trace_input_struct_ty.field_byte_off(trace_input_idx);
-                        let aot_field_ty = trace_input_struct_ty.field_type_idx(trace_input_idx);
+                        let aot_field_ty = trace_input_struct_ty.field_ty_idx(trace_input_idx);
                         // FIXME: we should check at compile-time that this will fit.
                         match u32::try_from(aot_field_off) {
                             Ok(u32_off) => {
@@ -207,8 +207,8 @@ impl<'a> TraceBuilder<'a> {
         for (inst_idx, inst) in blk.instrs.iter().enumerate() {
             match inst {
                 aot_ir::Instruction::Br { .. } => Ok(()),
-                aot_ir::Instruction::Load { ptr, type_idx } => {
-                    self.handle_load(bid, inst_idx, ptr, type_idx)
+                aot_ir::Instruction::Load { ptr, ty_idx } => {
+                    self.handle_load(bid, inst_idx, ptr, ty_idx)
                 }
                 // FIXME: ignore remaining instructions after a call.
                 aot_ir::Instruction::Call { callee, args, .. } => {
@@ -270,8 +270,8 @@ impl<'a> TraceBuilder<'a> {
                 aot_ir::Instruction::Cast {
                     cast_kind,
                     val,
-                    dest_type_idx,
-                } => self.handle_cast(bid, inst_idx, cast_kind, val, dest_type_idx),
+                    dest_ty_idx,
+                } => self.handle_cast(bid, inst_idx, cast_kind, val, dest_ty_idx),
                 aot_ir::Instruction::Ret { val } => self.handle_ret(bid, inst_idx, val),
                 aot_ir::Instruction::Switch {
                     test_val,
@@ -353,9 +353,9 @@ impl<'a> TraceBuilder<'a> {
         &mut self,
         aot_const: &aot_ir::Constant,
     ) -> Result<jit_ir::Constant, CompilationError> {
-        let jit_type_idx = self.handle_type(self.aot_mod.type_(aot_const.type_idx()))?;
+        let jit_ty_idx = self.handle_type(self.aot_mod.type_(aot_const.ty_idx()))?;
         Ok(jit_ir::Constant::new(
-            jit_type_idx,
+            jit_ty_idx,
             Vec::from(aot_const.bytes()),
         ))
     }
@@ -416,7 +416,7 @@ impl<'a> TraceBuilder<'a> {
         let aot_func = self.aot_mod.func(aot_idx);
         let jit_func = jit_ir::FuncDecl::new(
             aot_func.name().to_owned(),
-            self.handle_type(self.aot_mod.type_(aot_func.type_idx()))?,
+            self.handle_type(self.aot_mod.type_(aot_func.ty_idx()))?,
         );
         self.jit_mod.insert_func_decl(jit_func)
     }
@@ -560,11 +560,11 @@ impl<'a> TraceBuilder<'a> {
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
         ptr: &aot_ir::Operand,
-        type_idx: &aot_ir::TyIdx,
+        ty_idx: &aot_ir::TyIdx,
     ) -> Result<(), CompilationError> {
         let inst = jit_ir::LoadInst::new(
             self.handle_operand(ptr)?,
-            self.handle_type(self.aot_mod.type_(*type_idx))?,
+            self.handle_type(self.aot_mod.type_(*ty_idx))?,
         )
         .into();
         self.copy_instruction(inst, bid, aot_inst_idx)
@@ -759,12 +759,12 @@ impl<'a> TraceBuilder<'a> {
         aot_inst_idx: usize,
         cast_kind: &aot_ir::CastKind,
         val: &aot_ir::Operand,
-        dest_type_idx: &aot_ir::TyIdx,
+        dest_ty_idx: &aot_ir::TyIdx,
     ) -> Result<(), CompilationError> {
         let instr = match cast_kind {
             aot_ir::CastKind::SignExtend => jit_ir::SignExtendInst::new(
                 &self.handle_operand(val)?,
-                self.handle_type(self.aot_mod.type_(*dest_type_idx))?,
+                self.handle_type(self.aot_mod.type_(*dest_ty_idx))?,
             ),
         };
         self.copy_instruction(instr.into(), bid, aot_inst_idx)
@@ -788,8 +788,8 @@ impl<'a> TraceBuilder<'a> {
         }
 
         // Find the JIT type of the value being tested.
-        let jit_type_idx = self.handle_type(test_val.type_(self.aot_mod))?;
-        let jit_int_type = match self.jit_mod.type_(jit_type_idx) {
+        let jit_ty_idx = self.handle_type(test_val.type_(self.aot_mod))?;
+        let jit_int_type = match self.jit_mod.type_(jit_ty_idx) {
             jit_ir::Ty::Integer(it) => it,
             _ => unreachable!(),
         }

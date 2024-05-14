@@ -112,7 +112,7 @@ impl Module {
     }
 
     pub(crate) fn const_type(&self, c: &Constant) -> &Type {
-        &self.types[c.type_idx]
+        &self.types[c.ty_idx]
     }
 
     /// Lookup a constant by its index.
@@ -439,9 +439,9 @@ impl Operand {
                 // The `unwrap` can't fail for a `LocalVariable`.
                 self.to_instr(m).def_type(m).unwrap()
             }
-            Self::Constant(cidx) => m.type_(m.const_(*cidx).type_idx()),
+            Self::Constant(cidx) => m.type_(m.const_(*cidx).ty_idx()),
             Self::Arg { func_idx, arg_idx } => {
-                let Type::Func(ft) = m.type_(m.func(*func_idx).type_idx) else {
+                let Type::Func(ft) = m.type_(m.func(*func_idx).ty_idx) else {
                     panic!()
                 };
                 m.type_(ft.arg_ty_idxs()[usize::from(*arg_idx)])
@@ -551,12 +551,12 @@ pub(crate) enum Instruction {
     #[deku(id = "0")]
     Nop,
     #[deku(id = "1")]
-    Load { ptr: Operand, type_idx: TyIdx },
+    Load { ptr: Operand, ty_idx: TyIdx },
     #[deku(id = "2")]
     Store { val: Operand, ptr: Operand },
     #[deku(id = "3")]
     Alloca {
-        type_idx: TyIdx,
+        ty_idx: TyIdx,
         count: usize,
         align: u64,
     },
@@ -586,7 +586,7 @@ pub(crate) enum Instruction {
     },
     #[deku(id = "7")]
     ICmp {
-        type_idx: TyIdx,
+        ty_idx: TyIdx,
         lhs: Operand,
         pred: Predicate,
         rhs: Operand,
@@ -616,7 +616,7 @@ pub(crate) enum Instruction {
         //
         // FIXME: the type will always be `ptr`, so this field could be elided if we provide a way
         // for us to find the pointer type index quickly.
-        type_idx: TyIdx,
+        ty_idx: TyIdx,
         /// The pointer to offset from.
         ptr: Operand,
         /// The constant offset (in bytes).
@@ -653,7 +653,7 @@ pub(crate) enum Instruction {
         /// The value to be operated upon.
         val: Operand,
         /// The resulting type of the operation.
-        dest_type_idx: TyIdx,
+        dest_ty_idx: TyIdx,
     },
     #[deku(id = "13")]
     Switch {
@@ -717,7 +717,7 @@ impl Instruction {
             Self::Br { .. } => None,
             Self::Call { callee, .. } => {
                 // The type of the newly-defined local is the return type of the callee.
-                if let Type::Func(ft) = m.type_(m.func(*callee).type_idx) {
+                if let Type::Func(ft) = m.type_(m.func(*callee).ty_idx) {
                     let ty = m.type_(ft.ret_ty);
                     if ty != &Type::Void {
                         Some(ty)
@@ -730,16 +730,16 @@ impl Instruction {
             }
             Self::CondBr { .. } => None,
             Self::InsertValue { agg, .. } => Some(agg.type_(m)),
-            Self::ICmp { type_idx, .. } => Some(m.type_(*type_idx)),
-            Self::Load { type_idx, .. } => Some(m.type_(*type_idx)),
-            Self::PtrAdd { type_idx, .. } => Some(m.type_(*type_idx)),
+            Self::ICmp { ty_idx, .. } => Some(m.type_(*ty_idx)),
+            Self::Load { ty_idx, .. } => Some(m.type_(*ty_idx)),
+            Self::PtrAdd { ty_idx, .. } => Some(m.type_(*ty_idx)),
             Self::Ret { .. } => {
                 // Subtle: although `Ret` might make a value, that's not a local value in the
                 // parent function.
                 None
             }
             Self::Store { .. } => None,
-            Self::Cast { dest_type_idx, .. } => Some(m.type_(*dest_type_idx)),
+            Self::Cast { dest_ty_idx, .. } => Some(m.type_(*dest_ty_idx)),
             Self::Switch { .. } => None,
             Self::Phi { incoming_vals, .. } => {
                 // Indexing cannot crash: correct PHI nodes have at least one incoming value.
@@ -837,13 +837,13 @@ impl fmt::Display for DisplayableInstruction<'_> {
 
         match self.instruction {
             Instruction::Alloca {
-                type_idx,
+                ty_idx,
                 count,
                 align,
             } => write!(
                 f,
                 "alloca {}, {}, {}",
-                self.m.type_(*type_idx).display(self.m),
+                self.m.type_(*ty_idx).display(self.m),
                 count,
                 align
             ),
@@ -937,12 +937,12 @@ impl fmt::Display for DisplayableInstruction<'_> {
             Instruction::Cast {
                 cast_kind,
                 val,
-                dest_type_idx,
+                dest_ty_idx,
             } => write!(
                 f,
                 "{cast_kind} {}, {}",
                 val.display(self.m),
-                self.m.types[*dest_type_idx].display(self.m)
+                self.m.types[*dest_ty_idx].display(self.m)
             ),
             Instruction::Switch {
                 test_val,
@@ -1045,7 +1045,7 @@ impl fmt::Display for DisplayableBBlock<'_> {
 pub(crate) struct Func {
     #[deku(until = "|v: &u8| *v == 0", map = "map_to_string")]
     name: String,
-    type_idx: TyIdx,
+    ty_idx: TyIdx,
     outline: bool,
     #[deku(temp)]
     num_bblocks: usize,
@@ -1077,8 +1077,8 @@ impl Func {
     }
 
     /// Return the type index of the function.
-    pub(crate) fn type_idx(&self) -> TyIdx {
-        self.type_idx
+    pub(crate) fn ty_idx(&self) -> TyIdx {
+        self.ty_idx
     }
 
     pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableFunc<'a> {
@@ -1093,7 +1093,7 @@ pub(crate) struct DisplayableFunc<'a> {
 
 impl fmt::Display for DisplayableFunc<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ty = &self.m.types[self.func_.type_idx];
+        let ty = &self.m.types[self.func_.ty_idx];
         if let Type::Func(fty) = ty {
             write!(
                 f,
@@ -1294,7 +1294,7 @@ impl StructType {
     /// # Panics
     ///
     /// Panics if the index is out of bounds.
-    pub(crate) fn field_type_idx(&self, idx: usize) -> TyIdx {
+    pub(crate) fn field_ty_idx(&self, idx: usize) -> TyIdx {
         self.field_ty_idxs[idx]
     }
 
@@ -1421,7 +1421,7 @@ impl fmt::Display for DisplayableType<'_> {
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct Constant {
-    type_idx: TyIdx,
+    ty_idx: TyIdx,
     #[deku(temp)]
     num_bytes: usize,
     #[deku(count = "num_bytes")]
@@ -1435,8 +1435,8 @@ impl Constant {
     }
 
     /// Return the type index of the constant.
-    pub(crate) fn type_idx(&self) -> TyIdx {
-        self.type_idx
+    pub(crate) fn ty_idx(&self) -> TyIdx {
+        self.ty_idx
     }
 
     pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableConstant<'a> {
@@ -1454,7 +1454,7 @@ impl Display for DisplayableConstant<'_> {
         write!(
             f,
             "{}",
-            self.m.types[self.constant.type_idx].const_to_string(self.constant)
+            self.m.types[self.constant.ty_idx].const_to_string(self.constant)
         )
     }
 }
@@ -1523,7 +1523,7 @@ mod tests {
             // Construct an IR constant and check it stringifies ok.
             let it = IntegerType { num_bits };
             let c = Constant {
-                type_idx: TyIdx::new(0),
+                ty_idx: TyIdx::new(0),
                 bytes,
             };
             assert_eq!(it.const_to_string(&c), expect);
