@@ -978,6 +978,7 @@ impl Inst {
             Self::Assign(ai) => ai.opnd().ty_idx(m),
             // Binary operations
             Self::Add(i) => i.ty_idx(m),
+            Self::And(i) => i.ty_idx(m),
             Self::Or(i) => i.ty_idx(m),
             Self::IndirectCall(idx) => {
                 let inst = &m.indirect_calls[*idx];
@@ -986,6 +987,7 @@ impl Inst {
                 fty.ret_ty_idx()
             }
             Self::Mul(i) => i.ty_idx(m),
+            Self::LShr(i) => i.ty_idx(m),
             x => todo!("{x:?}"),
         }
     }
@@ -1108,6 +1110,14 @@ impl fmt::Display for DisplayableInst<'_> {
                     x.rhs().display(self.m)
                 )
             }
+            Inst::And(x) => {
+                write!(
+                    f,
+                    "And {}, {}",
+                    x.lhs().display(self.m),
+                    x.rhs().display(self.m)
+                )
+            }
             Inst::SignExtend(i) => {
                 write!(
                     f,
@@ -1120,6 +1130,14 @@ impl fmt::Display for DisplayableInst<'_> {
                 write!(
                     f,
                     "Or {}, {}",
+                    i.lhs().display(self.m),
+                    i.rhs().display(self.m),
+                )
+            }
+            Inst::LShr(i) => {
+                write!(
+                    f,
+                    "LShr {}, {}",
                     i.lhs().display(self.m),
                     i.rhs().display(self.m),
                 )

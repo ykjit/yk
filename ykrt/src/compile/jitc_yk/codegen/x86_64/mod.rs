@@ -185,7 +185,9 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Inst::SignExtend(i) => self.cg_signextend(inst_idx, i),
             // Binary operations
             jit_ir::Inst::Add(i) => self.cg_add(inst_idx, i),
+            jit_ir::Inst::And(i) => self.cg_and(inst_idx, i),
             jit_ir::Inst::Or(i) => self.cg_or(inst_idx, i),
+            jit_ir::Inst::LShr(i) => self.cg_lshr(inst_idx, i),
             jit_ir::Inst::Mul(i) => self.cg_mul(inst_idx, i),
             x => todo!("{x:?}"),
         }
@@ -296,7 +298,7 @@ impl<'a> X64CodeGen<'a> {
         self.store_new_local(inst_idx, WR0);
     }
 
-    fn cg_or(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::OrInst) {
+    fn cg_and(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::AndInst) {
         let lhs = inst.lhs();
         let rhs = inst.rhs();
 
@@ -314,6 +316,55 @@ impl<'a> X64CodeGen<'a> {
             4 => dynasm!(self.asm; and Rd(WR0.code()), Rd(WR1.code())),
             2 => dynasm!(self.asm; and Rw(WR0.code()), Rw(WR1.code())),
             1 => dynasm!(self.asm; and Rb(WR0.code()), Rb(WR1.code())),
+            _ => todo!(),
+        }
+
+        self.store_new_local(inst_idx, WR0);
+    }
+
+    fn cg_or(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::OrInst) {
+        let lhs = inst.lhs();
+        let rhs = inst.rhs();
+
+        // Operand types must be the same.
+        debug_assert_eq!(
+            self.m.type_(lhs.ty_idx(self.m)),
+            self.m.type_(rhs.ty_idx(self.m))
+        );
+
+        self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
+        self.load_operand(WR1, &rhs); // ^^^ same
+
+        match lhs.byte_size(self.m) {
+            8 => dynasm!(self.asm; or Rq(WR0.code()), Rq(WR1.code())),
+            4 => dynasm!(self.asm; or Rd(WR0.code()), Rd(WR1.code())),
+            2 => dynasm!(self.asm; or Rw(WR0.code()), Rw(WR1.code())),
+            1 => dynasm!(self.asm; or Rb(WR0.code()), Rb(WR1.code())),
+            _ => todo!(),
+        }
+
+        self.store_new_local(inst_idx, WR0);
+    }
+
+    fn cg_lshr(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::LShrInst) {
+        // FIXME: Constant 8 bit shift values can be passed as immediates in `shr` instructions.
+        let lhs = inst.lhs();
+        let rhs = inst.rhs();
+
+        // Operand types must be the same.
+        debug_assert_eq!(
+            self.m.type_(lhs.ty_idx(self.m)),
+            self.m.type_(rhs.ty_idx(self.m))
+        );
+
+        self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
+        self.load_operand(Rq::RCX, &rhs); // ^^^ same
+
+        match lhs.byte_size(self.m) {
+            8 => dynasm!(self.asm; shr Rq(WR0.code()), cl),
+            4 => dynasm!(self.asm; shr Rd(WR0.code()), cl),
+            2 => dynasm!(self.asm; shr Rw(WR0.code()), cl),
+            1 => dynasm!(self.asm; shr Rb(WR0.code()), cl),
             _ => todo!(),
         }
 
