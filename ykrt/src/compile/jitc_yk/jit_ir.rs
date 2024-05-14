@@ -946,6 +946,7 @@ pub enum Inst {
 
     // Cast-like instructions
     SignExtend(SignExtendInst),
+    ZeroExtend(ZeroExtendInst),
 }
 
 impl Inst {
@@ -975,6 +976,7 @@ impl Inst {
             Self::Arg(..) => m.ptr_ty_idx(),
             Self::TraceLoopStart => m.void_ty_idx(),
             Self::SignExtend(si) => si.dest_ty_idx(),
+            Self::ZeroExtend(si) => si.dest_ty_idx(),
             Self::Assign(ai) => ai.opnd().ty_idx(m),
             // Binary operations
             Self::Add(i) => i.ty_idx(m),
@@ -1126,6 +1128,14 @@ impl fmt::Display for DisplayableInst<'_> {
                     self.m.type_(i.dest_ty_idx())
                 )
             }
+            Inst::ZeroExtend(i) => {
+                write!(
+                    f,
+                    "ZeroExtend {}, {}",
+                    i.val().display(self.m),
+                    self.m.type_(i.dest_ty_idx())
+                )
+            }
             Inst::Or(i) => {
                 write!(
                     f,
@@ -1175,6 +1185,7 @@ inst!(PtrAdd, PtrAddInst);
 inst!(Icmp, IcmpInst);
 inst!(Guard, GuardInst);
 inst!(SignExtend, SignExtendInst);
+inst!(ZeroExtend, ZeroExtendInst);
 inst!(Assign, AssignInst);
 
 /// The operands for a [Inst::Load]
@@ -1634,6 +1645,31 @@ pub struct SignExtendInst {
 }
 
 impl SignExtendInst {
+    pub(crate) fn new(val: &Operand, dest_ty_idx: TyIdx) -> Self {
+        Self {
+            val: PackedOperand::new(val),
+            dest_ty_idx,
+        }
+    }
+
+    pub(crate) fn val(&self) -> Operand {
+        self.val.unpack()
+    }
+
+    pub(crate) fn dest_ty_idx(&self) -> TyIdx {
+        self.dest_ty_idx
+    }
+}
+
+#[derive(Debug)]
+pub struct ZeroExtendInst {
+    /// The value to extend.
+    val: PackedOperand,
+    /// The type to extend to.
+    dest_ty_idx: TyIdx,
+}
+
+impl ZeroExtendInst {
     pub(crate) fn new(val: &Operand, dest_ty_idx: TyIdx) -> Self {
         Self {
             val: PackedOperand::new(val),
