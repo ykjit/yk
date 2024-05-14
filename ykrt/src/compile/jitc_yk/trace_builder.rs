@@ -13,7 +13,7 @@ const TRACE_FUNC_CTRLP_ARGIDX: u16 = 0;
 /// processed safepoint, call instruction and its arguments.
 struct Frame<'a> {
     // The call instruction of this frame.
-    callinst: Option<aot_ir::InstructionID>,
+    callinst: Option<aot_ir::InstID>,
     // Index of the function of this frame.
     func_idx: Option<FuncIdx>,
     /// Safepoint for this frame.
@@ -24,7 +24,7 @@ struct Frame<'a> {
 
 impl<'a> Frame<'a> {
     fn new(
-        callinst: Option<aot_ir::InstructionID>,
+        callinst: Option<aot_ir::InstID>,
         func_idx: Option<FuncIdx>,
         safepoint: Option<&'a aot_ir::DeoptSafepoint>,
         args: Vec<jit_ir::Operand>,
@@ -46,7 +46,7 @@ pub(crate) struct TraceBuilder<'a> {
     /// The JIT IR this struct builds.
     jit_mod: jit_ir::Module,
     /// Maps an AOT instruction to a jit instruction via their index-based IDs.
-    local_map: HashMap<aot_ir::InstructionID, jit_ir::Operand>,
+    local_map: HashMap<aot_ir::InstID, jit_ir::Operand>,
     // BBlock containing the current control point (i.e. the control point that started this trace).
     cp_block: Option<aot_ir::BBlockId>,
     // Index of the first traceinput instruction.
@@ -124,7 +124,7 @@ impl<'a> TraceBuilder<'a> {
         // profoundly wrong with the AOT IR.
         let trace_inputs = trace_inputs.unwrap();
         let trace_input_struct_ty = match trace_inputs {
-            aot_ir::Instruction::Alloca { ty_idx, .. } => {
+            aot_ir::Inst::Alloca { ty_idx, .. } => {
                 let aot_ir::Type::Struct(x) = self.aot_mod.type_(*ty_idx) else {
                     panic!()
                 };
@@ -144,8 +144,8 @@ impl<'a> TraceBuilder<'a> {
         let mut last_store_ptr = None;
         for (inst_idx, inst) in inst_iter {
             match inst {
-                aot_ir::Instruction::Store { val, .. } => last_store_ptr = Some(val),
-                aot_ir::Instruction::PtrAdd { ptr, .. } => {
+                aot_ir::Inst::Store { val, .. } => last_store_ptr = Some(val),
+                aot_ir::Inst::PtrAdd { ptr, .. } => {
                     // Is the pointer operand of this PtrAdd targeting the trace inputs?
                     if trace_inputs.ptr_eq(ptr.to_instr(self.aot_mod)) {
                         // We found a trace input. Now we emit a `LoadTraceInput` instruction into the
@@ -206,17 +206,15 @@ impl<'a> TraceBuilder<'a> {
         // Decide how to translate each AOT instruction.
         for (inst_idx, inst) in blk.instrs.iter().enumerate() {
             match inst {
-                aot_ir::Instruction::Br { .. } => Ok(()),
-                aot_ir::Instruction::Load { ptr, ty_idx } => {
-                    self.handle_load(bid, inst_idx, ptr, ty_idx)
-                }
+                aot_ir::Inst::Br { .. } => Ok(()),
+                aot_ir::Inst::Load { ptr, ty_idx } => self.handle_load(bid, inst_idx, ptr, ty_idx),
                 // FIXME: ignore remaining instructions after a call.
-                aot_ir::Instruction::Call { callee, args, .. } => {
+                aot_ir::Inst::Call { callee, args, .. } => {
                     // Get the branch instruction of this block.
                     let nextinst = blk.instrs.last().unwrap();
                     self.handle_call(inst, bid, inst_idx, callee, args, nextinst)
                 }
-                aot_ir::Instruction::IndirectCall {
+                aot_ir::Inst::IndirectCall {
                     fty_idx,
                     callop,
                     args,
@@ -225,10 +223,8 @@ impl<'a> TraceBuilder<'a> {
                     let nextinst = blk.instrs.last().unwrap();
                     self.handle_indirectcall(inst, bid, inst_idx, fty_idx, callop, args, nextinst)
                 }
-                aot_ir::Instruction::Store { val, ptr } => {
-                    self.handle_store(bid, inst_idx, val, ptr)
-                }
-                aot_ir::Instruction::PtrAdd {
+                aot_ir::Inst::Store { val, ptr } => self.handle_store(bid, inst_idx, val, ptr),
+                aot_ir::Inst::PtrAdd {
                     ptr,
                     const_off,
                     dyn_elem_counts,
@@ -250,30 +246,30 @@ impl<'a> TraceBuilder<'a> {
                         dyn_elem_sizes,
                     )
                 }
-                aot_ir::Instruction::BinaryOp {
+                aot_ir::Inst::BinaryOp {
                     lhs,
                     binop: aot_ir::BinOp::Add,
                     rhs,
                 } => self.handle_add(bid, inst_idx, lhs, rhs),
-                aot_ir::Instruction::BinaryOp { lhs, binop, rhs } => {
+                aot_ir::Inst::BinaryOp { lhs, binop, rhs } => {
                     self.handle_binop(bid, inst_idx, binop, lhs, rhs)
                 }
-                aot_ir::Instruction::ICmp { lhs, pred, rhs, .. } => {
+                aot_ir::Inst::ICmp { lhs, pred, rhs, .. } => {
                     self.handle_icmp(bid, inst_idx, lhs, pred, rhs)
                 }
-                aot_ir::Instruction::CondBr {
+                aot_ir::Inst::CondBr {
                     cond,
                     true_bb,
                     safepoint,
                     ..
                 } => self.handle_condbr(safepoint, nextbb.as_ref().unwrap(), cond, true_bb),
-                aot_ir::Instruction::Cast {
+                aot_ir::Inst::Cast {
                     cast_kind,
                     val,
                     dest_ty_idx,
                 } => self.handle_cast(bid, inst_idx, cast_kind, val, dest_ty_idx),
-                aot_ir::Instruction::Ret { val } => self.handle_ret(bid, inst_idx, val),
-                aot_ir::Instruction::Switch {
+                aot_ir::Inst::Ret { val } => self.handle_ret(bid, inst_idx, val),
+                aot_ir::Inst::Switch {
                     test_val,
                     default_dest,
                     case_values,
@@ -289,7 +285,7 @@ impl<'a> TraceBuilder<'a> {
                     case_values,
                     case_dests,
                 ),
-                aot_ir::Instruction::Phi {
+                aot_ir::Inst::Phi {
                     incoming_bbs,
                     incoming_vals,
                 } => {
@@ -316,10 +312,10 @@ impl<'a> TraceBuilder<'a> {
     ) -> Result<(), CompilationError> {
         // If the AOT instruction defines a new value, then add it to the local map.
         if jit_inst.def_type(&self.jit_mod).is_some() {
-            let aot_iid = aot_ir::InstructionID::new(
+            let aot_iid = aot_ir::InstID::new(
                 bid.func_idx(),
                 bid.bb_idx(),
-                aot_ir::InstrIdx::new(aot_inst_idx),
+                aot_ir::InstIdx::new(aot_inst_idx),
             );
             self.local_map
                 .insert(aot_iid, jit_ir::Operand::Local(self.next_instr_id()?));
@@ -573,13 +569,13 @@ impl<'a> TraceBuilder<'a> {
     #[allow(clippy::too_many_arguments)]
     fn handle_indirectcall(
         &mut self,
-        inst: &'a aot_ir::Instruction,
+        inst: &'a aot_ir::Inst,
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
         fty_idx: &aot_ir::TyIdx,
         callop: &aot_ir::Operand,
         args: &[aot_ir::Operand],
-        nextinst: &'a aot_ir::Instruction,
+        nextinst: &'a aot_ir::Inst,
     ) -> Result<(), CompilationError> {
         debug_assert!(!inst.is_debug_call(self.aot_mod));
 
@@ -596,14 +592,14 @@ impl<'a> TraceBuilder<'a> {
         // "yk_outline". Any mappable, indirect call is then guaranteed to be inline safe.
 
         match nextinst {
-            aot_ir::Instruction::Br { succ } => {
+            aot_ir::Inst::Br { succ } => {
                 // We can only stop outlining when we see the succesor block and we are not in
                 // the middle of recursion.
                 let succbid = BBlockId::new(bid.func_idx(), *succ);
                 self.outline_target_blk = Some(succbid);
                 self.recursion_count = 0;
             }
-            aot_ir::Instruction::CondBr { .. } => {
+            aot_ir::Inst::CondBr { .. } => {
                 // Currently, the successor of a call is always an unconditional branch due to
                 // the block spitting pass. However, there's a FIXME in that pass which could
                 // lead to conditional branches showing up here. Leave a todo here so we know
@@ -623,12 +619,12 @@ impl<'a> TraceBuilder<'a> {
 
     fn handle_call(
         &mut self,
-        inst: &'a aot_ir::Instruction,
+        inst: &'a aot_ir::Inst,
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
         callee: &aot_ir::FuncIdx,
         args: &[aot_ir::Operand],
-        nextinst: &'a aot_ir::Instruction,
+        nextinst: &'a aot_ir::Inst,
     ) -> Result<(), CompilationError> {
         // Ignore special functions that we neither want to inline nor copy.
         if inst.is_debug_call(self.aot_mod) {
@@ -654,10 +650,10 @@ impl<'a> TraceBuilder<'a> {
             // Unwrap is safe as there's always at least one frame.
             self.frames.last_mut().unwrap().safepoint = inst.safepoint();
             // Create a new frame for the inlined call and pass in the arguments of the caller.
-            let aot_iid = aot_ir::InstructionID::new(
+            let aot_iid = aot_ir::InstID::new(
                 bid.func_idx(),
                 bid.bb_idx(),
-                aot_ir::InstrIdx::new(aot_inst_idx),
+                aot_ir::InstIdx::new(aot_inst_idx),
             );
             self.frames
                 .push(Frame::new(Some(aot_iid), Some(*callee), None, jit_args));
@@ -666,14 +662,14 @@ impl<'a> TraceBuilder<'a> {
             // This call can't be inlined. It is either unmappable (a declaration or an indirect
             // call) or the compiler annotated it with `yk_outline`.
             match nextinst {
-                aot_ir::Instruction::Br { succ } => {
+                aot_ir::Inst::Br { succ } => {
                     // We can only stop outlining when we see the succesor block and we are not in
                     // the middle of recursion.
                     let succbid = BBlockId::new(bid.func_idx(), *succ);
                     self.outline_target_blk = Some(succbid);
                     self.recursion_count = 0;
                 }
-                aot_ir::Instruction::CondBr { .. } => {
+                aot_ir::Inst::CondBr { .. } => {
                     // Currently, the successor of a call is always an unconditional branch due to
                     // the block spitting pass. However, there's a FIXME in that pass which could
                     // lead to conditional branches showing up here. Leave a todo here so we know

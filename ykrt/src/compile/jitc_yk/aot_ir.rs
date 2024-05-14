@@ -241,8 +241,8 @@ index!(BBlockIdx);
 /// An index into [BBlock::instrs].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct InstrIdx(usize);
-index!(InstrIdx);
+pub(crate) struct InstIdx(usize);
+index!(InstIdx);
 
 /// An index into [Module::consts].
 #[deku_derive(DekuRead)]
@@ -319,15 +319,15 @@ impl Display for BinOp {
 /// Uniquely identifies an instruction within a [Module].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
-pub(crate) struct InstructionID {
+pub(crate) struct InstID {
     /// The index of the parent function.
     func_idx: FuncIdx,
     bb_idx: BBlockIdx,
-    inst_idx: InstrIdx,
+    inst_idx: InstIdx,
 }
 
-impl InstructionID {
-    pub(crate) fn new(func_idx: FuncIdx, bb_idx: BBlockIdx, inst_idx: InstrIdx) -> Self {
+impl InstID {
+    pub(crate) fn new(func_idx: FuncIdx, bb_idx: BBlockIdx, inst_idx: InstIdx) -> Self {
         Self {
             func_idx,
             bb_idx,
@@ -385,7 +385,7 @@ impl Display for Predicate {
     }
 }
 
-/// The operations that a [Instruction::Cast] can perform.
+/// The operations that a [Inst::Cast] can perform.
 ///
 /// FIXME: There are many other operations that we can add here on-demand. See the inheritance
 /// hierarchy here: https://llvm.org/doxygen/classllvm_1_1CastInst.html
@@ -410,7 +410,7 @@ pub(crate) enum Operand {
     Constant(ConstIdx),
     // FIXME: rename this to `Local` for consistency with ykllvm's serialiser.
     #[deku(id = "1")]
-    LocalVariable(InstructionID),
+    LocalVariable(InstID),
     #[deku(id = "2")]
     Global(GlobalDeclIdx),
     #[deku(id = "3")]
@@ -425,7 +425,7 @@ impl Operand {
     /// Panics for other kinds of operand.
     ///
     /// OPT: This is expensive.
-    pub(crate) fn to_instr<'a>(&self, aotmod: &'a Module) -> &'a Instruction {
+    pub(crate) fn to_instr<'a>(&self, aotmod: &'a Module) -> &'a Inst {
         let Self::LocalVariable(iid) = self else {
             panic!()
         };
@@ -450,9 +450,9 @@ impl Operand {
         }
     }
 
-    /// Return the `InstructionID` of a local variable operand. Panics if called on other kinds of
+    /// Return the `InstID` of a local variable operand. Panics if called on other kinds of
     /// operands.
-    pub(crate) fn to_instr_id(&self) -> InstructionID {
+    pub(crate) fn to_instr_id(&self) -> InstID {
         let Self::LocalVariable(iid) = self else {
             panic!()
         };
@@ -534,20 +534,20 @@ impl fmt::Display for DisplayableDeoptSafepoint<'_> {
 /// An instruction is conceptually an [Opcode] and a list of [Operand]s. The semantics of the
 /// instruction, and the meaning of the operands, are determined by the opcode.
 ///
-/// Instructions that compute a value define a new local variable in the parent [Func]. In such a
+/// Insts that compute a value define a new local variable in the parent [Func]. In such a
 /// case the newly defined variable can be referenced in the operands of later instructions by the
-/// [InstructionID] of the [Instruction] that defined the variable.
+/// [InstID] of the [Inst] that defined the variable.
 ///
 /// In other words, an instruction and the variable it defines are both identified by the same
-/// [InstructionID].
+/// [InstID].
 ///
 /// The type of the variable defined by an instruction (if any) can be determined by
-/// [Instruction::def_type()].
+/// [Inst::def_type()].
 #[deku_derive(DekuRead)]
 #[derive(Debug, strum_macros::Display)]
 #[repr(u8)]
 #[deku(type = "u8")]
-pub(crate) enum Instruction {
+pub(crate) enum Inst {
     #[deku(id = "0")]
     Nop,
     #[deku(id = "1")]
@@ -689,7 +689,7 @@ pub(crate) enum Instruction {
     Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "map_to_string")] String),
 }
 
-impl Instruction {
+impl Inst {
     /// Find the name of a local variable.
     ///
     /// This is used when stringifying the instruction.
@@ -809,20 +809,20 @@ impl Instruction {
         std::ptr::eq(self, other)
     }
 
-    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableInstruction<'a> {
-        DisplayableInstruction {
+    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableInst<'a> {
+        DisplayableInst {
             instruction: self,
             m,
         }
     }
 }
 
-pub(crate) struct DisplayableInstruction<'a> {
-    instruction: &'a Instruction,
+pub(crate) struct DisplayableInst<'a> {
+    instruction: &'a Inst,
     m: &'a Module,
 }
 
-impl fmt::Display for DisplayableInstruction<'_> {
+impl fmt::Display for DisplayableInst<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(t) = self.instruction.def_type(self.m) {
             // If the instruction defines a local, we will format the instruction like it's an
@@ -836,7 +836,7 @@ impl fmt::Display for DisplayableInstruction<'_> {
         }
 
         match self.instruction {
-            Instruction::Alloca {
+            Inst::Alloca {
                 ty_idx,
                 count,
                 align,
@@ -847,7 +847,7 @@ impl fmt::Display for DisplayableInstruction<'_> {
                 count,
                 align
             ),
-            Instruction::BinaryOp { lhs, binop, rhs } => {
+            Inst::BinaryOp { lhs, binop, rhs } => {
                 write!(
                     f,
                     "{}, {binop}, {}",
@@ -855,8 +855,8 @@ impl fmt::Display for DisplayableInstruction<'_> {
                     rhs.display(self.m)
                 )
             }
-            Instruction::Br { succ } => write!(f, "br bb{}", usize::from(*succ)),
-            Instruction::Call {
+            Inst::Br { succ } => write!(f, "br bb{}", usize::from(*succ)),
+            Inst::Call {
                 callee,
                 args,
                 safepoint,
@@ -877,7 +877,7 @@ impl fmt::Display for DisplayableInstruction<'_> {
                     safepoint_s
                 )
             }
-            Instruction::CondBr {
+            Inst::CondBr {
                 cond,
                 true_bb,
                 false_bb,
@@ -890,14 +890,14 @@ impl fmt::Display for DisplayableInstruction<'_> {
                 usize::from(*false_bb),
                 safepoint.display(self.m)
             ),
-            Instruction::ICmp { lhs, pred, rhs, .. } => write!(
+            Inst::ICmp { lhs, pred, rhs, .. } => write!(
                 f,
                 "icmp {}, {pred}, {}",
                 lhs.display(self.m),
                 rhs.display(self.m)
             ),
-            Instruction::Load { ptr, .. } => write!(f, "load {}", ptr.display(self.m)),
-            Instruction::PtrAdd {
+            Inst::Load { ptr, .. } => write!(f, "load {}", ptr.display(self.m)),
+            Inst::PtrAdd {
                 ptr,
                 const_off,
                 dyn_elem_counts,
@@ -921,20 +921,20 @@ impl fmt::Display for DisplayableInstruction<'_> {
                     )
                 }
             }
-            Instruction::Ret { val } => match val {
+            Inst::Ret { val } => match val {
                 None => write!(f, "ret"),
                 Some(v) => write!(f, "ret {}", v.display(self.m)),
             },
-            Instruction::Store { ptr, val } => {
+            Inst::Store { ptr, val } => {
                 write!(f, "store {}, {}", val.display(self.m), ptr.display(self.m))
             }
-            Instruction::InsertValue { agg, elem } => write!(
+            Inst::InsertValue { agg, elem } => write!(
                 f,
                 "insertvalue {}, {}",
                 agg.display(self.m),
                 elem.display(self.m)
             ),
-            Instruction::Cast {
+            Inst::Cast {
                 cast_kind,
                 val,
                 dest_ty_idx,
@@ -944,7 +944,7 @@ impl fmt::Display for DisplayableInstruction<'_> {
                 val.display(self.m),
                 self.m.types[*dest_ty_idx].display(self.m)
             ),
-            Instruction::Switch {
+            Inst::Switch {
                 test_val,
                 default_dest,
                 case_values,
@@ -965,7 +965,7 @@ impl fmt::Display for DisplayableInstruction<'_> {
                     safepoint.display(self.m)
                 )
             }
-            Instruction::Phi {
+            Inst::Phi {
                 incoming_vals,
                 incoming_bbs,
             } => {
@@ -976,7 +976,7 @@ impl fmt::Display for DisplayableInstruction<'_> {
                     .collect::<Vec<_>>();
                 write!(f, "phi {}", args.join(", "))
             }
-            Instruction::IndirectCall {
+            Inst::IndirectCall {
                 fty_idx: _,
                 callop,
                 args,
@@ -988,26 +988,26 @@ impl fmt::Display for DisplayableInstruction<'_> {
                     .join(", ");
                 write!(f, "call {}({})", callop.display(self.m), args_s)
             }
-            Instruction::Unimplemented(s) => write!(f, "unimplemented <<{}>>", s),
-            Instruction::Nop => write!(f, "nop"),
+            Inst::Unimplemented(s) => write!(f, "unimplemented <<{}>>", s),
+            Inst::Nop => write!(f, "nop"),
         }
     }
 }
 
-/// A basic block containing IR [Instruction]s.
+/// A basic block containing IR [Inst]s.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct BBlock {
     #[deku(temp)]
     num_instrs: usize,
     #[deku(count = "num_instrs", map = "map_to_tivec")]
-    pub(crate) instrs: TiVec<InstrIdx, Instruction>,
+    pub(crate) instrs: TiVec<InstIdx, Inst>,
 }
 
 impl BBlock {
     // Returns true if this block is terminated by a return, false otherwise.
     pub fn is_return(&self) -> bool {
-        matches!(self.instrs.last().unwrap(), Instruction::Ret { .. })
+        matches!(self.instrs.last().unwrap(), Inst::Ret { .. })
     }
 
     pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableBBlock<'a> {
