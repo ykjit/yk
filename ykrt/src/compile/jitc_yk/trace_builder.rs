@@ -560,7 +560,7 @@ impl<'a> TraceBuilder<'a> {
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
         ptr: &aot_ir::Operand,
-        type_idx: &aot_ir::TypeIdx,
+        type_idx: &aot_ir::TyIdx,
     ) -> Result<(), CompilationError> {
         let inst = jit_ir::LoadInst::new(
             self.handle_operand(ptr)?,
@@ -576,7 +576,7 @@ impl<'a> TraceBuilder<'a> {
         inst: &'a aot_ir::Instruction,
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
-        fty_idx: &aot_ir::TypeIdx,
+        fty_idx: &aot_ir::TyIdx,
         callop: &aot_ir::Operand,
         args: &[aot_ir::Operand],
         nextinst: &'a aot_ir::Instruction,
@@ -759,7 +759,7 @@ impl<'a> TraceBuilder<'a> {
         aot_inst_idx: usize,
         cast_kind: &aot_ir::CastKind,
         val: &aot_ir::Operand,
-        dest_type_idx: &aot_ir::TypeIdx,
+        dest_type_idx: &aot_ir::TyIdx,
     ) -> Result<(), CompilationError> {
         let instr = match cast_kind {
             aot_ir::CastKind::SignExtend => jit_ir::SignExtendInst::new(

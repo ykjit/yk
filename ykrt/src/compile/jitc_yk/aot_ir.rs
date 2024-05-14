@@ -79,7 +79,7 @@ pub(crate) struct Module {
     #[deku(temp)]
     num_types: usize,
     #[deku(count = "num_types", map = "map_to_tivec")]
-    types: TiVec<TypeIdx, Type>,
+    types: TiVec<TyIdx, Type>,
 }
 
 impl Module {
@@ -129,7 +129,7 @@ impl Module {
     /// # Panics
     ///
     /// Panics if the index is out of bounds.
-    pub(crate) fn type_(&self, idx: TypeIdx) -> &Type {
+    pub(crate) fn type_(&self, idx: TyIdx) -> &Type {
         &self.types[idx]
     }
 
@@ -229,8 +229,8 @@ index!(FuncIdx);
 /// An index into [Module::types].
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct TypeIdx(usize);
-index!(TypeIdx);
+pub(crate) struct TyIdx(usize);
+index!(TyIdx);
 
 /// An index into [Func::bblocks].
 #[deku_derive(DekuRead)]
@@ -551,12 +551,12 @@ pub(crate) enum Instruction {
     #[deku(id = "0")]
     Nop,
     #[deku(id = "1")]
-    Load { ptr: Operand, type_idx: TypeIdx },
+    Load { ptr: Operand, type_idx: TyIdx },
     #[deku(id = "2")]
     Store { val: Operand, ptr: Operand },
     #[deku(id = "3")]
     Alloca {
-        type_idx: TypeIdx,
+        type_idx: TyIdx,
         count: usize,
         align: u64,
     },
@@ -586,7 +586,7 @@ pub(crate) enum Instruction {
     },
     #[deku(id = "7")]
     ICmp {
-        type_idx: TypeIdx,
+        type_idx: TyIdx,
         lhs: Operand,
         pred: Predicate,
         rhs: Operand,
@@ -616,7 +616,7 @@ pub(crate) enum Instruction {
         //
         // FIXME: the type will always be `ptr`, so this field could be elided if we provide a way
         // for us to find the pointer type index quickly.
-        type_idx: TypeIdx,
+        type_idx: TyIdx,
         /// The pointer to offset from.
         ptr: Operand,
         /// The constant offset (in bytes).
@@ -653,7 +653,7 @@ pub(crate) enum Instruction {
         /// The value to be operated upon.
         val: Operand,
         /// The resulting type of the operation.
-        dest_type_idx: TypeIdx,
+        dest_type_idx: TyIdx,
     },
     #[deku(id = "13")]
     Switch {
@@ -678,7 +678,7 @@ pub(crate) enum Instruction {
     },
     #[deku(id = "15")]
     IndirectCall {
-        fty_idx: TypeIdx,
+        fty_idx: TyIdx,
         callop: Operand,
         #[deku(temp)]
         num_args: u32,
@@ -1045,7 +1045,7 @@ impl fmt::Display for DisplayableBBlock<'_> {
 pub(crate) struct Func {
     #[deku(until = "|v: &u8| *v == 0", map = "map_to_string")]
     name: String,
-    type_idx: TypeIdx,
+    type_idx: TyIdx,
     outline: bool,
     #[deku(temp)]
     num_bblocks: usize,
@@ -1077,7 +1077,7 @@ impl Func {
     }
 
     /// Return the type index of the function.
-    pub(crate) fn type_idx(&self) -> TypeIdx {
+    pub(crate) fn type_idx(&self) -> TyIdx {
         self.type_idx
     }
 
@@ -1215,16 +1215,16 @@ pub(crate) struct FuncType {
     num_args: usize,
     /// Type indices for the function's formal arguments.
     #[deku(count = "num_args")]
-    arg_ty_idxs: Vec<TypeIdx>,
+    arg_ty_idxs: Vec<TyIdx>,
     /// Type index of the function's return type.
-    ret_ty: TypeIdx,
+    ret_ty: TyIdx,
     /// Is the function vararg?
     is_vararg: bool,
 }
 
 impl FuncType {
     #[cfg(test)]
-    fn new(arg_ty_idxs: Vec<TypeIdx>, ret_ty_idx: TypeIdx, is_vararg: bool) -> Self {
+    fn new(arg_ty_idxs: Vec<TyIdx>, ret_ty_idx: TyIdx, is_vararg: bool) -> Self {
         Self {
             arg_ty_idxs,
             ret_ty: ret_ty_idx,
@@ -1232,11 +1232,11 @@ impl FuncType {
         }
     }
 
-    pub(crate) fn arg_ty_idxs(&self) -> &[TypeIdx] {
+    pub(crate) fn arg_ty_idxs(&self) -> &[TyIdx] {
         &self.arg_ty_idxs
     }
 
-    pub(crate) fn ret_ty(&self) -> TypeIdx {
+    pub(crate) fn ret_ty(&self) -> TyIdx {
         self.ret_ty
     }
 
@@ -1282,7 +1282,7 @@ pub(crate) struct StructType {
     num_fields: usize,
     /// The types of the fields.
     #[deku(count = "num_fields")]
-    field_ty_idxs: Vec<TypeIdx>,
+    field_ty_idxs: Vec<TyIdx>,
     /// The bit offsets of the fields (taking into account any required padding for alignment).
     #[deku(count = "num_fields")]
     field_bit_offs: Vec<usize>,
@@ -1294,7 +1294,7 @@ impl StructType {
     /// # Panics
     ///
     /// Panics if the index is out of bounds.
-    pub(crate) fn field_type_idx(&self, idx: usize) -> TypeIdx {
+    pub(crate) fn field_type_idx(&self, idx: usize) -> TyIdx {
         self.field_ty_idxs[idx]
     }
 
@@ -1421,7 +1421,7 @@ impl fmt::Display for DisplayableType<'_> {
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct Constant {
-    type_idx: TypeIdx,
+    type_idx: TyIdx,
     #[deku(temp)]
     num_bytes: usize,
     #[deku(count = "num_bytes")]
@@ -1435,7 +1435,7 @@ impl Constant {
     }
 
     /// Return the type index of the constant.
-    pub(crate) fn type_idx(&self) -> TypeIdx {
+    pub(crate) fn type_idx(&self) -> TyIdx {
         self.type_idx
     }
 
@@ -1523,7 +1523,7 @@ mod tests {
             // Construct an IR constant and check it stringifies ok.
             let it = IntegerType { num_bits };
             let c = Constant {
-                type_idx: TypeIdx::new(0),
+                type_idx: TyIdx::new(0),
                 bytes,
             };
             assert_eq!(it.const_to_string(&c), expect);
@@ -1573,9 +1573,9 @@ mod tests {
     fn stringify_func_types() {
         let mut m = Module::default();
 
-        let i8_tyidx = TypeIdx::new(m.types.len());
+        let i8_tyidx = TyIdx::new(m.types.len());
         m.types.push(Type::Integer(IntegerType { num_bits: 8 }));
-        let void_tyidx = TypeIdx::new(m.types.len());
+        let void_tyidx = TyIdx::new(m.types.len());
         m.types.push(Type::Void);
 
         let fty = Type::Func(FuncType::new(vec![i8_tyidx], i8_tyidx, false));
