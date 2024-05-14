@@ -1,6 +1,9 @@
 FROM debian:latest
 WORKDIR /ci
-RUN apt-get update && \
+RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
+    --mount=target=/var/cache/apt,type=cache,sharing=locked \
+  rm -f /etc/apt/apt.conf.d/docker-clean && \
+  apt-get update && \
   apt-get -y install clang-15 make curl procps file git cmake python3 \
     libtinfo-dev libzip-dev mold ninja-build && \
   update-alternatives --install /usr/bin/cc cc /usr/bin/clang-15 999 && \
