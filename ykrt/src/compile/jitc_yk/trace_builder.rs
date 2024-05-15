@@ -125,7 +125,7 @@ impl<'a> TraceBuilder<'a> {
         let trace_inputs = trace_inputs.unwrap();
         let trace_input_struct_ty = match trace_inputs {
             aot_ir::Inst::Alloca { ty_idx, .. } => {
-                let aot_ir::Type::Struct(x) = self.aot_mod.type_(*ty_idx) else {
+                let aot_ir::Ty::Struct(x) = self.aot_mod.type_(*ty_idx) else {
                     panic!()
                 };
                 x
@@ -376,12 +376,12 @@ impl<'a> TraceBuilder<'a> {
     }
 
     /// Translate a type.
-    fn handle_type(&mut self, aot_type: &aot_ir::Type) -> Result<jit_ir::TyIdx, CompilationError> {
+    fn handle_type(&mut self, aot_type: &aot_ir::Ty) -> Result<jit_ir::TyIdx, CompilationError> {
         let jit_ty = match aot_type {
-            aot_ir::Type::Void => jit_ir::Ty::Void,
-            aot_ir::Type::Integer(it) => jit_ir::Ty::Integer(jit_ir::IntegerTy::new(it.num_bits())),
-            aot_ir::Type::Ptr => jit_ir::Ty::Ptr,
-            aot_ir::Type::Func(ft) => {
+            aot_ir::Ty::Void => jit_ir::Ty::Void,
+            aot_ir::Ty::Integer(it) => jit_ir::Ty::Integer(jit_ir::IntegerTy::new(it.num_bits())),
+            aot_ir::Ty::Ptr => jit_ir::Ty::Ptr,
+            aot_ir::Ty::Func(ft) => {
                 let mut jit_args = Vec::new();
                 for aot_arg_ty_idx in ft.arg_ty_idxs() {
                     let jit_ty = self.handle_type(self.aot_mod.type_(*aot_arg_ty_idx))?;
@@ -390,8 +390,8 @@ impl<'a> TraceBuilder<'a> {
                 let jit_retty = self.handle_type(self.aot_mod.type_(ft.ret_ty()))?;
                 jit_ir::Ty::Func(jit_ir::FuncTy::new(jit_args, jit_retty, ft.is_vararg()))
             }
-            aot_ir::Type::Struct(_st) => todo!(),
-            aot_ir::Type::Unimplemented(s) => jit_ir::Ty::Unimplemented(s.to_owned()),
+            aot_ir::Ty::Struct(_st) => todo!(),
+            aot_ir::Ty::Unimplemented(s) => jit_ir::Ty::Unimplemented(s.to_owned()),
         };
         self.jit_mod.insert_ty(jit_ty)
     }
@@ -453,7 +453,7 @@ impl<'a> TraceBuilder<'a> {
                 panic!();
             };
             let c = self.aot_mod.const_(cidx);
-            let aot_ir::Type::Integer(ity) = self.aot_mod.const_type(c) else {
+            let aot_ir::Ty::Integer(ity) = self.aot_mod.const_type(c) else {
                 panic!();
             };
             assert!(ity.num_bits() == u64::BITS);

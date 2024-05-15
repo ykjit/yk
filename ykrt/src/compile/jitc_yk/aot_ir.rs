@@ -79,7 +79,7 @@ pub(crate) struct Module {
     #[deku(temp)]
     num_types: usize,
     #[deku(count = "num_types", map = "map_to_tivec")]
-    types: TiVec<TyIdx, Type>,
+    types: TiVec<TyIdx, Ty>,
 }
 
 impl Module {
@@ -107,7 +107,7 @@ impl Module {
         self.funcs[bid.func_idx].bblock(bid.bb_idx)
     }
 
-    pub(crate) fn const_type(&self, c: &Const) -> &Type {
+    pub(crate) fn const_type(&self, c: &Const) -> &Ty {
         &self.types[c.ty_idx]
     }
 
@@ -125,7 +125,7 @@ impl Module {
     /// # Panics
     ///
     /// Panics if the index is out of bounds.
-    pub(crate) fn type_(&self, idx: TyIdx) -> &Type {
+    pub(crate) fn type_(&self, idx: TyIdx) -> &Ty {
         &self.types[idx]
     }
 
@@ -255,7 +255,7 @@ index!(ConstIdx);
 pub(crate) struct GlobalDeclIdx(usize);
 index!(GlobalDeclIdx);
 
-/// An index into [FuncType::arg_ty_idxs].
+/// An index into [FuncTy::arg_ty_idxs].
 /// ^ FIXME: no it's not! But it should be!
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -429,8 +429,8 @@ impl Operand {
         &aotmod.funcs[iid.func_idx].bblocks[iid.bb_idx].insts[iid.inst_idx]
     }
 
-    /// Returns the [Type] of the operand.
-    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Type {
+    /// Returns the [Ty] of the operand.
+    pub(crate) fn type_<'a>(&self, m: &'a Module) -> &'a Ty {
         match self {
             Self::LocalVariable(_) => {
                 // The `unwrap` can't fail for a `LocalVariable`.
@@ -438,7 +438,7 @@ impl Operand {
             }
             Self::Const(cidx) => m.type_(m.const_(*cidx).ty_idx()),
             Self::Arg { func_idx, arg_idx } => {
-                let Type::Func(ft) = m.type_(m.func(*func_idx).ty_idx) else {
+                let Ty::Func(ft) = m.type_(m.func(*func_idx).ty_idx) else {
                     panic!()
                 };
                 m.type_(ft.arg_ty_idxs()[usize::from(*arg_idx)])
@@ -705,18 +705,18 @@ impl Inst {
         panic!(); // malformed IR.
     }
 
-    /// Returns the [Type] of the local variable defined by this instruction or `None` if this
+    /// Returns the [Ty] of the local variable defined by this instruction or `None` if this
     /// instruction does not define a new local variable.
-    pub(crate) fn def_type<'a>(&self, m: &'a Module) -> Option<&'a Type> {
+    pub(crate) fn def_type<'a>(&self, m: &'a Module) -> Option<&'a Ty> {
         match self {
-            Self::Alloca { .. } => Some(&Type::Ptr),
+            Self::Alloca { .. } => Some(&Ty::Ptr),
             Self::BinaryOp { lhs, .. } => Some(lhs.type_(m)),
             Self::Br { .. } => None,
             Self::Call { callee, .. } => {
                 // The type of the newly-defined local is the return type of the callee.
-                if let Type::Func(ft) = m.type_(m.func(*callee).ty_idx) {
+                if let Ty::Func(ft) = m.type_(m.func(*callee).ty_idx) {
                     let ty = m.type_(ft.ret_ty);
-                    if ty != &Type::Void {
+                    if ty != &Ty::Void {
                         Some(ty)
                     } else {
                         None
@@ -744,9 +744,9 @@ impl Inst {
             }
             Self::IndirectCall { fty_idx, .. } => {
                 // The type of the newly-defined local is the return type of the callee.
-                if let Type::Func(ft) = m.type_(*fty_idx) {
+                if let Ty::Func(ft) = m.type_(*fty_idx) {
                     let ty = m.type_(ft.ret_ty);
-                    if ty != &Type::Void {
+                    if ty != &Ty::Void {
                         Some(ty)
                     } else {
                         None
@@ -775,7 +775,7 @@ impl Inst {
                 if m.func(*callee).name == CONTROL_POINT_NAME {
                     let arg = &args[CTRL_POINT_ARGIDX_INPUTS];
                     // It should be a pointer (to a struct, but we can't check that).
-                    debug_assert!(matches!(arg.type_(m), &Type::Ptr));
+                    debug_assert!(matches!(arg.type_(m), &Ty::Ptr));
                     Some(arg)
                 } else {
                     None
@@ -1091,7 +1091,7 @@ pub(crate) struct DisplayableFunc<'a> {
 impl fmt::Display for DisplayableFunc<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ty = &self.m.types[self.func_.ty_idx];
-        if let Type::Func(fty) = ty {
+        if let Ty::Func(fty) = ty {
             write!(
                 f,
                 "func {}({}",
@@ -1108,7 +1108,7 @@ impl fmt::Display for DisplayableFunc<'_> {
             }
             write!(f, ")")?;
             let ret_ty = &self.m.types[fty.ret_ty];
-            if ret_ty != &Type::Void {
+            if ret_ty != &Ty::Void {
                 write!(f, " -> {}", ret_ty.display(self.m))?;
             }
             if self.func_.is_declaration() {
@@ -1160,11 +1160,11 @@ pub(crate) fn const_int_bytes_to_string(num_bits: u32, bytes: &[u8]) -> String {
 ///      upon the integer.
 #[deku_derive(DekuRead)]
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct IntegerType {
+pub(crate) struct IntegerTy {
     num_bits: u32,
 }
 
-impl IntegerType {
+impl IntegerTy {
     /// Create a new integer type with the specified number of bits.
     #[cfg(test)]
     pub(crate) fn new(num_bits: u32) -> Self {
@@ -1198,7 +1198,7 @@ impl IntegerType {
     }
 }
 
-impl Display for IntegerType {
+impl Display for IntegerTy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "i{}", self.num_bits)
     }
@@ -1206,20 +1206,20 @@ impl Display for IntegerType {
 
 #[deku_derive(DekuRead)]
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct FuncType {
+pub(crate) struct FuncTy {
     /// The number of formal arguments the function takes.
     #[deku(temp)]
     num_args: usize,
-    /// Type indices for the function's formal arguments.
+    /// Ty indices for the function's formal arguments.
     #[deku(count = "num_args")]
     arg_ty_idxs: Vec<TyIdx>,
-    /// Type index of the function's return type.
+    /// Ty index of the function's return type.
     ret_ty: TyIdx,
     /// Is the function vararg?
     is_vararg: bool,
 }
 
-impl FuncType {
+impl FuncTy {
     #[cfg(test)]
     fn new(arg_ty_idxs: Vec<TyIdx>, ret_ty_idx: TyIdx, is_vararg: bool) -> Self {
         Self {
@@ -1241,17 +1241,17 @@ impl FuncType {
         self.is_vararg
     }
 
-    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableFuncType<'a> {
-        DisplayableFuncType { func_type: self, m }
+    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableFuncTy<'a> {
+        DisplayableFuncTy { func_type: self, m }
     }
 }
 
-pub(crate) struct DisplayableFuncType<'a> {
-    func_type: &'a FuncType,
+pub(crate) struct DisplayableFuncTy<'a> {
+    func_type: &'a FuncTy,
     m: &'a Module,
 }
 
-impl fmt::Display for DisplayableFuncType<'_> {
+impl fmt::Display for DisplayableFuncTy<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut args = self
             .func_type
@@ -1264,7 +1264,7 @@ impl fmt::Display for DisplayableFuncType<'_> {
         }
         write!(f, "func({})", args.join(", "))?;
         let rty = self.m.type_(self.func_type.ret_ty);
-        if rty != &Type::Void {
+        if rty != &Ty::Void {
             write!(f, " -> {}", rty.display(self.m))?
         }
         Ok(())
@@ -1273,7 +1273,7 @@ impl fmt::Display for DisplayableFuncType<'_> {
 
 #[deku_derive(DekuRead)]
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct StructType {
+pub(crate) struct StructTy {
     /// The number of fields the struct has.
     #[deku(temp)]
     num_fields: usize,
@@ -1285,7 +1285,7 @@ pub(crate) struct StructType {
     field_bit_offs: Vec<usize>,
 }
 
-impl StructType {
+impl StructTy {
     /// Returns the type index of the specified field index.
     ///
     /// # Panics
@@ -1313,20 +1313,20 @@ impl StructType {
         self.field_ty_idxs.len()
     }
 
-    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableStructType<'a> {
-        DisplayableStructType {
+    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableStructTy<'a> {
+        DisplayableStructTy {
             struct_type: self,
             m,
         }
     }
 }
 
-pub(crate) struct DisplayableStructType<'a> {
-    struct_type: &'a StructType,
+pub(crate) struct DisplayableStructTy<'a> {
+    struct_type: &'a StructTy,
     m: &'a Module,
 }
 
-impl Display for DisplayableStructType<'_> {
+impl Display for DisplayableStructTy<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -1357,22 +1357,22 @@ const TYKIND_UNIMPLEMENTED: u8 = 255;
 #[deku_derive(DekuRead)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[deku(type = "u8")]
-pub(crate) enum Type {
+pub(crate) enum Ty {
     #[deku(id = "TYKIND_VOID")]
     Void,
     #[deku(id = "TYKIND_INTEGER")]
-    Integer(IntegerType),
+    Integer(IntegerTy),
     #[deku(id = "TYKIND_PTR")]
     Ptr,
     #[deku(id = "TYKIND_FUNC")]
-    Func(FuncType),
+    Func(FuncTy),
     #[deku(id = "TYKIND_STRUCT")]
-    Struct(StructType),
+    Struct(StructTy),
     #[deku(id = "TYKIND_UNIMPLEMENTED")]
     Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "map_to_string")] String),
 }
 
-impl Type {
+impl Ty {
     fn const_to_string(&self, c: &Const) -> String {
         match self {
             Self::Void => "void".to_owned(),
@@ -1390,26 +1390,26 @@ impl Type {
         }
     }
 
-    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableType<'a> {
-        DisplayableType { type_: self, m }
+    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableTy<'a> {
+        DisplayableTy { type_: self, m }
     }
 }
 
 #[derive(Debug)]
-pub(crate) struct DisplayableType<'a> {
-    type_: &'a Type,
+pub(crate) struct DisplayableTy<'a> {
+    type_: &'a Ty,
     m: &'a Module,
 }
 
-impl fmt::Display for DisplayableType<'_> {
+impl fmt::Display for DisplayableTy<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.type_ {
-            Type::Void => write!(f, "void"),
-            Type::Integer(x) => write!(f, "{}", x),
-            Type::Ptr => write!(f, "ptr"),
-            Type::Func(ft) => write!(f, "{}", ft.display(self.m)),
-            Type::Struct(st) => write!(f, "{}", st.display(self.m)),
-            Type::Unimplemented(s) => write!(f, "?ty<{}>", s),
+            Ty::Void => write!(f, "void"),
+            Ty::Integer(x) => write!(f, "{}", x),
+            Ty::Ptr => write!(f, "ptr"),
+            Ty::Func(ft) => write!(f, "{}", ft.display(self.m)),
+            Ty::Struct(st) => write!(f, "{}", st.display(self.m)),
+            Ty::Unimplemented(s) => write!(f, "?ty<{}>", s),
         }
     }
 }
@@ -1518,7 +1518,7 @@ mod tests {
             let bytes = ToBytes::to_ne_bytes(&num).as_ref().to_vec();
 
             // Construct an IR constant and check it stringifies ok.
-            let it = IntegerType { num_bits };
+            let it = IntegerTy { num_bits };
             let c = Const {
                 ty_idx: TyIdx::new(0),
                 bytes,
@@ -1556,14 +1556,14 @@ mod tests {
     #[test]
     fn integer_type_sizes() {
         for i in 1..8 {
-            assert_eq!(IntegerType::new(i).byte_size(), 1);
+            assert_eq!(IntegerTy::new(i).byte_size(), 1);
         }
         for i in 9..16 {
-            assert_eq!(IntegerType::new(i).byte_size(), 2);
+            assert_eq!(IntegerTy::new(i).byte_size(), 2);
         }
-        assert_eq!(IntegerType::new(127).byte_size(), 16);
-        assert_eq!(IntegerType::new(128).byte_size(), 16);
-        assert_eq!(IntegerType::new(129).byte_size(), 17);
+        assert_eq!(IntegerTy::new(127).byte_size(), 16);
+        assert_eq!(IntegerTy::new(128).byte_size(), 16);
+        assert_eq!(IntegerTy::new(129).byte_size(), 17);
     }
 
     #[test]
@@ -1571,20 +1571,20 @@ mod tests {
         let mut m = Module::default();
 
         let i8_tyidx = TyIdx::new(m.types.len());
-        m.types.push(Type::Integer(IntegerType { num_bits: 8 }));
+        m.types.push(Ty::Integer(IntegerTy { num_bits: 8 }));
         let void_tyidx = TyIdx::new(m.types.len());
-        m.types.push(Type::Void);
+        m.types.push(Ty::Void);
 
-        let fty = Type::Func(FuncType::new(vec![i8_tyidx], i8_tyidx, false));
+        let fty = Ty::Func(FuncTy::new(vec![i8_tyidx], i8_tyidx, false));
         assert_eq!(fty.display(&m).to_string(), "func(i8) -> i8");
 
-        let fty = Type::Func(FuncType::new(vec![i8_tyidx], i8_tyidx, true));
+        let fty = Ty::Func(FuncTy::new(vec![i8_tyidx], i8_tyidx, true));
         assert_eq!(fty.display(&m).to_string(), "func(i8, ...) -> i8");
 
-        let fty = Type::Func(FuncType::new(vec![], i8_tyidx, false));
+        let fty = Ty::Func(FuncTy::new(vec![], i8_tyidx, false));
         assert_eq!(fty.display(&m).to_string(), "func() -> i8");
 
-        let fty = Type::Func(FuncType::new(vec![], void_tyidx, false));
+        let fty = Ty::Func(FuncTy::new(vec![], void_tyidx, false));
         assert_eq!(fty.display(&m).to_string(), "func()");
     }
 }
