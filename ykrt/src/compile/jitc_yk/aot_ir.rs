@@ -14,7 +14,7 @@
 //! use a number of abbreviations/conventions to keep the length of source down to something
 //! manageable (in alphabetical order):
 //!
-//!  * `const_`: a "constant"
+//!  * `Const` and `const_`: a "constant"
 //!  * `decl`: a "declaration" (e.g. a "function declaration" is a reference to an existing
 //!    function somewhere else in the address space)
 //!  * `m`: the name conventionally given to the shared [Module] instance (i.e. `m: Module`)
@@ -71,7 +71,7 @@ pub(crate) struct Module {
     #[deku(temp)]
     num_consts: usize,
     #[deku(count = "num_consts", map = "map_to_tivec")]
-    consts: TiVec<ConstIdx, Constant>,
+    consts: TiVec<ConstIdx, Const>,
     #[deku(temp)]
     num_global_decls: usize,
     #[deku(count = "num_global_decls", map = "map_to_tivec")]
@@ -107,11 +107,11 @@ impl Module {
         self.funcs[bid.func_idx].bblock(bid.bb_idx)
     }
 
-    pub(crate) fn constant(&self, co: &ConstIdx) -> &Constant {
+    pub(crate) fn constant(&self, co: &ConstIdx) -> &Const {
         &self.consts[*co]
     }
 
-    pub(crate) fn const_type(&self, c: &Constant) -> &Type {
+    pub(crate) fn const_type(&self, c: &Const) -> &Type {
         &self.types[c.ty_idx]
     }
 
@@ -120,7 +120,7 @@ impl Module {
     /// # Panics
     ///
     /// Panics if the index is out of bounds.
-    pub(crate) fn const_(&self, ci: ConstIdx) -> &Constant {
+    pub(crate) fn const_(&self, ci: ConstIdx) -> &Const {
         &self.consts[ci]
     }
 
@@ -407,7 +407,7 @@ impl Display for CastKind {
 #[deku(type = "u8")]
 pub(crate) enum Operand {
     #[deku(id = "0")]
-    Constant(ConstIdx),
+    Const(ConstIdx),
     // FIXME: rename this to `Local` for consistency with ykllvm's serialiser.
     #[deku(id = "1")]
     LocalVariable(InstID),
@@ -439,7 +439,7 @@ impl Operand {
                 // The `unwrap` can't fail for a `LocalVariable`.
                 self.to_instr(m).def_type(m).unwrap()
             }
-            Self::Constant(cidx) => m.type_(m.const_(*cidx).ty_idx()),
+            Self::Const(cidx) => m.type_(m.const_(*cidx).ty_idx()),
             Self::Arg { func_idx, arg_idx } => {
                 let Type::Func(ft) = m.type_(m.func(*func_idx).ty_idx) else {
                     panic!()
@@ -472,7 +472,7 @@ pub(crate) struct DisplayableOperand<'a> {
 impl fmt::Display for DisplayableOperand<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.operand {
-            Operand::Constant(const_idx) => {
+            Operand::Const(const_idx) => {
                 write!(f, "{}", self.m.consts[*const_idx].display(self.m))
             }
             Operand::LocalVariable(iid) => {
@@ -1196,7 +1196,7 @@ impl IntegerType {
     }
 
     /// Format a constant integer value that is of the type described by `self`.
-    fn const_to_string(&self, c: &Constant) -> String {
+    fn const_to_string(&self, c: &Const) -> String {
         const_int_bytes_to_string(self.num_bits, c.bytes())
     }
 }
@@ -1376,7 +1376,7 @@ pub(crate) enum Type {
 }
 
 impl Type {
-    fn const_to_string(&self, c: &Constant) -> String {
+    fn const_to_string(&self, c: &Const) -> String {
         match self {
             Self::Void => "void".to_owned(),
             Self::Integer(it) => it.const_to_string(c),
@@ -1420,7 +1420,7 @@ impl fmt::Display for DisplayableType<'_> {
 /// A constant.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
-pub(crate) struct Constant {
+pub(crate) struct Const {
     ty_idx: TyIdx,
     #[deku(temp)]
     num_bytes: usize,
@@ -1428,7 +1428,7 @@ pub(crate) struct Constant {
     bytes: Vec<u8>,
 }
 
-impl Constant {
+impl Const {
     /// Return a byte slice of the constant's value.
     pub(crate) fn bytes(&self) -> &[u8] {
         &self.bytes
@@ -1439,17 +1439,17 @@ impl Constant {
         self.ty_idx
     }
 
-    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableConstant<'a> {
-        DisplayableConstant { constant: self, m }
+    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableConst<'a> {
+        DisplayableConst { constant: self, m }
     }
 }
 
-pub(crate) struct DisplayableConstant<'a> {
-    constant: &'a Constant,
+pub(crate) struct DisplayableConst<'a> {
+    constant: &'a Const,
     m: &'a Module,
 }
 
-impl Display for DisplayableConstant<'_> {
+impl Display for DisplayableConst<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -1522,7 +1522,7 @@ mod tests {
 
             // Construct an IR constant and check it stringifies ok.
             let it = IntegerType { num_bits };
-            let c = Constant {
+            let c = Const {
                 ty_idx: TyIdx::new(0),
                 bytes,
             };
