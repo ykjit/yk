@@ -183,6 +183,7 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Inst::Assign(i) => self.cg_assign(inst_idx, i),
             jit_ir::Inst::TraceLoopStart => self.cg_traceloopstart(),
             jit_ir::Inst::SignExtend(i) => self.cg_signextend(inst_idx, i),
+            jit_ir::Inst::ZeroExtend(i) => self.cg_zeroextend(inst_idx, i),
             // Binary operations
             jit_ir::Inst::Add(i) => self.cg_add(inst_idx, i),
             jit_ir::Inst::And(i) => self.cg_and(inst_idx, i),
@@ -686,6 +687,29 @@ impl<'a> X64CodeGen<'a> {
             (4, 8) => dynasm!(self.asm; movsx Rq(WR0.code()), Rd(WR0.code())),
             _ => todo!(),
         }
+
+        self.store_new_local(inst_idx, WR0);
+    }
+
+    fn cg_zeroextend(&mut self, inst_idx: InstIdx, i: &jit_ir::ZeroExtendInst) {
+        let from_val = i.val();
+        let from_type = self.m.type_(from_val.ty_idx(self.m));
+        let from_size = from_type.byte_size().unwrap();
+
+        let to_type = self.m.type_(i.dest_ty_idx());
+        let to_size = to_type.byte_size().unwrap();
+
+        // You can only zero-extend a smaller integer to a larger integer.
+        debug_assert!(matches!(to_type, jit_ir::Ty::Integer(_)));
+        debug_assert!(matches!(from_type, jit_ir::Ty::Integer(_)));
+        debug_assert!(from_size < to_size);
+
+        // FIXME: assumes the input and output fit in a register.
+        self.load_operand(WR0, &from_val);
+        debug_assert!(to_size <= REG64_SIZE);
+
+        // FIXME: Assumes we don't assign to sub-registers.
+        dynasm!(self.asm; mov Rq(WR0.code()), Rq(WR0.code()));
 
         self.store_new_local(inst_idx, WR0);
     }

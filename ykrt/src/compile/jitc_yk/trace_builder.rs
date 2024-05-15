@@ -761,9 +761,15 @@ impl<'a> TraceBuilder<'a> {
             aot_ir::CastKind::SignExtend => jit_ir::SignExtendInst::new(
                 &self.handle_operand(val)?,
                 self.handle_type(self.aot_mod.type_(*dest_ty_idx))?,
-            ),
+            )
+            .into(),
+            aot_ir::CastKind::ZeroExtend => jit_ir::ZeroExtendInst::new(
+                &self.handle_operand(val)?,
+                self.handle_type(self.aot_mod.type_(*dest_ty_idx))?,
+            )
+            .into(),
         };
-        self.copy_instruction(instr.into(), bid, aot_inst_idx)
+        self.copy_instruction(instr, bid, aot_inst_idx)
     }
 
     #[allow(clippy::too_many_arguments)]

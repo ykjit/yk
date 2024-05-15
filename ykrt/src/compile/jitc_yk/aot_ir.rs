@@ -394,6 +394,7 @@ impl Display for Predicate {
 #[deku(type = "u8")]
 pub(crate) enum CastKind {
     SignExtend = 0,
+    ZeroExtend = 1,
 }
 
 impl Display for CastKind {
