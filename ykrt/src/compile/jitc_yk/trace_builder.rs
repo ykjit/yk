@@ -426,6 +426,7 @@ impl<'a> TraceBuilder<'a> {
             aot_ir::BinOp::And => jit_ir::AndInst::new(lhs, rhs).into(),
             aot_ir::BinOp::Or => jit_ir::OrInst::new(lhs, rhs).into(),
             aot_ir::BinOp::LShr => jit_ir::LShrInst::new(lhs, rhs).into(),
+            aot_ir::BinOp::AShr => jit_ir::AShrInst::new(lhs, rhs).into(),
             _ => todo!("{binop:?}"),
         };
         self.copy_instruction(instr, bid, aot_inst_idx)
