@@ -8,6 +8,8 @@
 //     and 0
 //     or 5
 //     lshr 2
+//     ashr 2
+//     ashr2 -2
 //     jitstate: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
@@ -17,13 +19,19 @@
 //     and 1
 //     or 3
 //     lshr 1
+//     ashr 1
+//     ashr2 -2
 //     jitstate: enter-jit-code
 //     and 0
 //     or 3
 //     lshr 1
+//     ashr 1
+//     ashr2 -1
 //     and 1
 //     or 1
 //     lshr 0
+//     ashr 0
+//     ashr2 -1
 //     jitstate: deoptimise
 //     exit
 
@@ -51,9 +59,13 @@ int main(int argc, char **argv) {
     int and = i & 1;
     int or = i | 1;
     int lshr = (uint)i >> 1;
+    int ashr = i >> 1;
+    int ashr2 = -i >> 1;
     fprintf(stderr, "and %d\n", and);
     fprintf(stderr, "or %d\n", or);
     fprintf(stderr, "lshr %d\n", lshr);
+    fprintf(stderr, "ashr %d\n", ashr);
+    fprintf(stderr, "ashr2 %d\n", ashr2);
     i--;
   }
   fprintf(stderr, "exit\n");

@@ -991,6 +991,7 @@ impl Inst {
             }
             Self::Mul(i) => i.ty_idx(m),
             Self::LShr(i) => i.ty_idx(m),
+            Self::AShr(i) => i.ty_idx(m),
             x => todo!("{x:?}"),
         }
     }
@@ -1157,6 +1158,14 @@ impl fmt::Display for DisplayableInst<'_> {
                 write!(
                     f,
                     "LShr {}, {}",
+                    i.lhs().display(self.m),
+                    i.rhs().display(self.m),
+                )
+            }
+            Inst::AShr(i) => {
+                write!(
+                    f,
+                    "AShr {}, {}",
                     i.lhs().display(self.m),
                     i.rhs().display(self.m),
                 )
