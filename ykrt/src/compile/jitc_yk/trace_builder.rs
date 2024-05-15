@@ -361,7 +361,7 @@ impl<'a> TraceBuilder<'a> {
         match op {
             aot_ir::Operand::LocalVariable(iid) => Ok(self.local_map[iid].clone()),
             aot_ir::Operand::Const(cidx) => {
-                let jit_const = self.handle_const(self.aot_mod.constant(cidx))?;
+                let jit_const = self.handle_const(self.aot_mod.const_(*cidx))?;
                 Ok(jit_ir::Operand::Const(
                     self.jit_mod.insert_const(jit_const)?,
                 ))
@@ -467,7 +467,7 @@ impl<'a> TraceBuilder<'a> {
             let aot_ir::Operand::Const(cidx) = safepoint.id else {
                 panic!();
             };
-            let c = self.aot_mod.constant(&cidx);
+            let c = self.aot_mod.const_(cidx);
             let aot_ir::Type::Integer(ity) = self.aot_mod.const_type(c) else {
                 panic!();
             };

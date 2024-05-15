@@ -107,10 +107,6 @@ impl Module {
         self.funcs[bid.func_idx].bblock(bid.bb_idx)
     }
 
-    pub(crate) fn constant(&self, co: &ConstIdx) -> &Const {
-        &self.consts[*co]
-    }
-
     pub(crate) fn const_type(&self, c: &Const) -> &Type {
         &self.types[c.ty_idx]
     }
