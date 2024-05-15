@@ -9,7 +9,7 @@
 //! use a number of abbreviations/conventions to keep the length of source down to something
 //! manageable (in alphabetical order):
 //!
-//!  * `const_`: a "constant"
+//!  * `Const` and `const_`: a "constant"
 //!  * `decl`: a "declaration" (e.g. a "function declaration" is a reference to an existing
 //!    function somewhere else in the address space)
 //!  * `m`: the name conventionally given to the shared [Module] instance (i.e. `m: Module`)
@@ -55,7 +55,7 @@ pub(crate) struct Module {
     /// The arguments pool for [CallInst]s. Indexed by [ArgsIdx].
     args: Vec<Operand>,
     /// The constant pool. Indexed by [ConstIdx].
-    consts: IndexSet<Constant>,
+    consts: IndexSet<Const>,
     /// The type pool. Indexed by [TyIdx].
     types: IndexSet<Ty>,
     /// The type index of the void type. Cached for convenience.
@@ -255,7 +255,7 @@ impl Module {
 
     /// Add a constant to the pool and return its index. If the constant already exists, an
     /// existing index will be returned.
-    pub fn insert_const(&mut self, c: Constant) -> Result<ConstIdx, CompilationError> {
+    pub fn insert_const(&mut self, c: Const) -> Result<ConstIdx, CompilationError> {
         let (i, _) = self.consts.insert_full(c);
         ConstIdx::new(i)
     }
@@ -265,7 +265,7 @@ impl Module {
     /// # Panics
     ///
     /// Panics if the index is out of bounds.
-    pub(crate) fn const_(&self, idx: ConstIdx) -> &Constant {
+    pub(crate) fn const_(&self, idx: ConstIdx) -> &Const {
         self.consts.get_index(usize::from(idx)).unwrap()
     }
 
@@ -390,18 +390,18 @@ impl IntegerTy {
         &self,
         m: &mut Module,
         val: T,
-    ) -> Result<Constant, CompilationError> {
+    ) -> Result<Const, CompilationError> {
         let ty = Ty::Integer(self.clone());
         let bytes = ToBytes::to_ne_bytes(&val).as_ref().to_vec();
         let ty_size = ty.byte_size().unwrap();
         debug_assert!(ty_size <= bytes.len());
         let bytes_trunc = bytes[0..ty_size].to_owned();
         let ty_idx = m.insert_ty(ty)?;
-        Ok(Constant::new(ty_idx, bytes_trunc))
+        Ok(Const::new(ty_idx, bytes_trunc))
     }
 
     /// Format a constant integer value that is of the type described by `self`.
-    fn const_to_str(&self, c: &Constant) -> String {
+    fn const_to_str(&self, c: &Const) -> String {
         aot_ir::const_int_bytes_to_string(self.num_bits, c.bytes())
     }
 }
@@ -841,14 +841,14 @@ impl fmt::Display for DisplayableOperand<'_> {
 /// A constant value is represented as a type index and a "bag of bytes". The type index
 /// determines the interpretation of the byte bag.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct Constant {
+pub(crate) struct Const {
     /// The type index of the constant value.
     ty_idx: TyIdx,
     /// The bytes of the constant value.
     bytes: Vec<u8>,
 }
 
-impl Constant {
+impl Const {
     pub(crate) fn new(ty_idx: TyIdx, bytes: Vec<u8>) -> Self {
         Self { ty_idx, bytes }
     }
@@ -861,17 +861,17 @@ impl Constant {
         &self.bytes
     }
 
-    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableConstant<'a> {
-        DisplayableConstant { const_: self, m }
+    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableConst<'a> {
+        DisplayableConst { const_: self, m }
     }
 }
 
-pub(crate) struct DisplayableConstant<'a> {
-    const_: &'a Constant,
+pub(crate) struct DisplayableConst<'a> {
+    const_: &'a Const,
     m: &'a Module,
 }
 
-impl fmt::Display for DisplayableConstant<'_> {
+impl fmt::Display for DisplayableConst<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.m.type_(self.const_.ty_idx()) {
             Ty::Integer(t) => write!(f, "{}", t.const_to_str(self.const_)),

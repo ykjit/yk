@@ -347,13 +347,10 @@ impl<'a> TraceBuilder<'a> {
     /// Translate a constant value.
     fn handle_const(
         &mut self,
-        aot_const: &aot_ir::Constant,
-    ) -> Result<jit_ir::Constant, CompilationError> {
+        aot_const: &aot_ir::Const,
+    ) -> Result<jit_ir::Const, CompilationError> {
         let jit_ty_idx = self.handle_type(self.aot_mod.type_(aot_const.ty_idx()))?;
-        Ok(jit_ir::Constant::new(
-            jit_ty_idx,
-            Vec::from(aot_const.bytes()),
-        ))
+        Ok(jit_ir::Const::new(jit_ty_idx, Vec::from(aot_const.bytes())))
     }
 
     /// Translate an operand.
@@ -363,8 +360,8 @@ impl<'a> TraceBuilder<'a> {
     ) -> Result<jit_ir::Operand, CompilationError> {
         match op {
             aot_ir::Operand::LocalVariable(iid) => Ok(self.local_map[iid].clone()),
-            aot_ir::Operand::Constant(cidx) => {
-                let jit_const = self.handle_const(self.aot_mod.constant(cidx))?;
+            aot_ir::Operand::Const(cidx) => {
+                let jit_const = self.handle_const(self.aot_mod.const_(*cidx))?;
                 Ok(jit_ir::Operand::Const(
                     self.jit_mod.insert_const(jit_const)?,
                 ))
@@ -467,10 +464,10 @@ impl<'a> TraceBuilder<'a> {
         let mut smids = Vec::new(); // List of stackmap ids of the current call stack.
         let mut live_args = Vec::new(); // List of live JIT variables.
         for (safepoint, frame_args) in self.frames.iter().map(|f| (f.safepoint.unwrap(), &f.args)) {
-            let aot_ir::Operand::Constant(cidx) = safepoint.id else {
+            let aot_ir::Operand::Const(cidx) = safepoint.id else {
                 panic!();
             };
-            let c = self.aot_mod.constant(&cidx);
+            let c = self.aot_mod.const_(cidx);
             let aot_ir::Type::Integer(ity) = self.aot_mod.const_type(c) else {
                 panic!();
             };
