@@ -24,6 +24,10 @@
 ;         unimplemented <<  %{{21}} = call ghccc i32 @f(i32 5)>>
 ;         unimplemented <<  %{{22}} = call i32 @f(i32 5) [ "kcfi"(i32 1234) ]>>
 ;         unimplemented <<  %{{23}} = call addrspace(6) ptr @p()>>
+;         br bb4
+;      bb4:
+;         unimplemented <<  %{{25}} = ptrtoint ptr %{{ptr}} to i8>>
+;         unimplemented <<  %{{26}} = ptrtoint <8 x ptr> %{{ptrs}} to <8 x i8>>>
 ;         ret
 ;     }
 ;     ...
@@ -86,5 +90,9 @@ calls:
   %14 = call addrspace(6) ptr @p()
   ; stackmap required (but irrelevant for the test) for all of the above calls.
   call void (i64, i32, ...) @llvm.experimental.stackmap(i64 7, i32 0);
+  br label %casts
+casts:
+  %15 = ptrtoint ptr %ptr to i8
+  %16 = ptrtoint <8 x ptr> %ptrs to <8 x i8>
   ret void
 }
