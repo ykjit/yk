@@ -980,6 +980,7 @@ impl Inst {
             Self::Assign(ai) => ai.opnd().ty_idx(m),
             // Binary operations
             Self::Add(i) => i.ty_idx(m),
+            Self::Sub(i) => i.ty_idx(m),
             Self::And(i) => i.ty_idx(m),
             Self::Or(i) => i.ty_idx(m),
             Self::IndirectCall(idx) => {
@@ -1108,6 +1109,14 @@ impl fmt::Display for DisplayableInst<'_> {
                 write!(
                     f,
                     "Add {}, {}",
+                    x.lhs().display(self.m),
+                    x.rhs().display(self.m)
+                )
+            }
+            Inst::Sub(x) => {
+                write!(
+                    f,
+                    "Sub {}, {}",
                     x.lhs().display(self.m),
                     x.rhs().display(self.m)
                 )

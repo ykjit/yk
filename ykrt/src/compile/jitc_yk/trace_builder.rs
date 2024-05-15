@@ -246,11 +246,6 @@ impl<'a> TraceBuilder<'a> {
                         dyn_elem_sizes,
                     )
                 }
-                aot_ir::Inst::BinaryOp {
-                    lhs,
-                    binop: aot_ir::BinOp::Add,
-                    rhs,
-                } => self.handle_add(bid, inst_idx, lhs, rhs),
                 aot_ir::Inst::BinaryOp { lhs, binop, rhs } => {
                     self.handle_binop(bid, inst_idx, binop, lhs, rhs)
                 }
@@ -415,18 +410,6 @@ impl<'a> TraceBuilder<'a> {
     }
 
     /// Translate binary operations such as add, sub, mul, etc.
-    fn handle_add(
-        &mut self,
-        bid: &aot_ir::BBlockId,
-        aot_inst_idx: usize,
-        lhs: &aot_ir::Operand,
-        rhs: &aot_ir::Operand,
-    ) -> Result<(), CompilationError> {
-        let instr = jit_ir::AddInst::new(self.handle_operand(lhs)?, self.handle_operand(rhs)?);
-        self.copy_instruction(instr.into(), bid, aot_inst_idx)
-    }
-
-    /// Translate binary operations such as add, sub, mul, etc.
     fn handle_binop(
         &mut self,
         bid: &aot_ir::BBlockId,
@@ -438,6 +421,8 @@ impl<'a> TraceBuilder<'a> {
         let lhs = self.handle_operand(lhs)?;
         let rhs = self.handle_operand(rhs)?;
         let instr = match binop {
+            aot_ir::BinOp::Add => jit_ir::AddInst::new(lhs, rhs).into(),
+            aot_ir::BinOp::Sub => jit_ir::SubInst::new(lhs, rhs).into(),
             aot_ir::BinOp::And => jit_ir::AndInst::new(lhs, rhs).into(),
             aot_ir::BinOp::Or => jit_ir::OrInst::new(lhs, rhs).into(),
             aot_ir::BinOp::LShr => jit_ir::LShrInst::new(lhs, rhs).into(),
