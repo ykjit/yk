@@ -750,10 +750,12 @@ impl<'a> X64CodeGen<'a> {
         let to_type = self.m.type_(i.dest_ty_idx());
         let to_size = to_type.byte_size().unwrap();
 
-        // You can only zero-extend a smaller integer to a larger integer.
         debug_assert!(matches!(to_type, jit_ir::Ty::Integer(_)));
-        debug_assert!(matches!(from_type, jit_ir::Ty::Integer(_)));
-        debug_assert!(from_size < to_size);
+        debug_assert!(
+            matches!(from_type, jit_ir::Ty::Integer(_)) || matches!(from_type, jit_ir::Ty::Ptr)
+        );
+        // You can only zero-extend a smaller integer to a larger integer.
+        debug_assert!(from_size <= to_size);
 
         // FIXME: assumes the input and output fit in a register.
         self.load_operand(WR0, &from_val);
