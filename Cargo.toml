@@ -15,3 +15,6 @@ resolver = "2"
 [profile.release-with-debug]
 inherits = "release"
 debug = true
+
+[patch.crates-io]
+fm = { git = "https://github.com/softdevteam/fm/" }
