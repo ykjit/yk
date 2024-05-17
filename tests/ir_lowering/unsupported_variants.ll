@@ -12,7 +12,6 @@
 ;         br bb2
 ;      bb2:
 ;         unimplemented <<  %{{13}} = fadd nnan float %{{3}}, %{{3}}>>
-;         unimplemented <<  %{{14}} = udiv exact i32 %{{2}}, 1>>
 ;         unimplemented <<  %{{15}} = add <4 x i32> %{{44}}, %{{44}}>>
 ;         br bb3
 ;      bb3:
@@ -29,8 +28,8 @@
 ;         unimplemented <<  %{{26}} = ptrtoint <8 x ptr> %{{ptrs}} to <8 x i8>>>
 ;         br bb5
 ;     bb5:
-;         unimplemented <<  %27 = icmp ne ptr %0, null>>
-;         unimplemented <<  %28 = icmp ne <4 x i32> %4, zeroinitializer>>
+;         unimplemented <<  %{{27}} = icmp ne ptr %0, null>>
+;         unimplemented <<  %{{28}} = icmp ne <4 x i32> %4, zeroinitializer>>
 ;         ret
 ;     }
 ;     ...
@@ -72,8 +71,7 @@ allocas:
   br label %binops
 binops:
   %4 = fadd nnan float %flt, %flt
-  %5 = udiv exact i32 %num, 1
-  %6 = add <4 x i32> %vecnums, %vecnums
+  %5 = add <4 x i32> %vecnums, %vecnums
   br label %calls
 calls:
   ; FIXME: we are unable to test `musttail` because a tail call must be
@@ -81,32 +79,32 @@ calls:
   ; requires a stackmap after a call...
   ;
   ; param attrs
-  %7 = call i32 @f(i32 swiftself 5)
+  %6 = call i32 @f(i32 swiftself 5)
   ; ret attrs
-  %8 = call inreg i32 @f(i32 5)
+  %7 = call inreg i32 @f(i32 5)
   ; func attrs
-  %9 = call i32 @f(i32 5) alignstack(8)
+  %8 = call i32 @f(i32 5) alignstack(8)
   ; fast math flags
-  %10 = call nnan float @g()
+  %9 = call nnan float @g()
   ; Non-C calling conventions.
-  %11 = call ghccc i32 @f(i32 5)
+  %10 = call ghccc i32 @f(i32 5)
   ; operand bundles
-  %12 = call i32 @f(i32 5) ["kcfi"(i32 1234)]
+  %11 = call i32 @f(i32 5) ["kcfi"(i32 1234)]
   ; non-zero address spaces
-  %13 = call addrspace(6) ptr @p()
+  %12 = call addrspace(6) ptr @p()
   ; stackmap required (but irrelevant for the test) for all of the above calls.
   call void (i64, i32, ...) @llvm.experimental.stackmap(i64 7, i32 0);
   br label %casts
 casts:
-  %14 = ptrtoint ptr %ptr to i8
-  %15 = ptrtoint <8 x ptr> %ptrs to <8 x i8>
+  %13 = ptrtoint ptr %ptr to i8
+  %14 = ptrtoint <8 x ptr> %ptrs to <8 x i8>
   br label %icmps
 icmps:
   ; pointer comparison
-  %16 = icmp ne ptr %ptr, null
+  %15 = icmp ne ptr %ptr, null
   ; vector of comparisons
-  %17 = icmp ne <4 x i32> %vecnums, zeroinitializer
+  %16 = icmp ne <4 x i32> %vecnums, zeroinitializer
   ; stackmap stops icmps from being optimised out.
-  call void (i64, i32, ...) @llvm.experimental.stackmap(i64 8, i32 0, i1 %16, <4 x i1> %17);
+  call void (i64, i32, ...) @llvm.experimental.stackmap(i64 8, i32 0, i1 %15, <4 x i1> %16);
   ret void
 }
