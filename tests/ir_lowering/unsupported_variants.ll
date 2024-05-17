@@ -9,7 +9,6 @@
 ;         unimplemented <<  %{{6}} = alloca inalloca i32, align 4>>
 ;         unimplemented <<  %{{7}} = alloca i32, align 4, addrspace(4)>>
 ;         unimplemented <<  %{{8}} = alloca i32, i32 %2, align 4>>
-;         unimplemented <<  %{{9}} = alloca i32, i66 -36893488147419103232, align 4>>
 ;         br bb2
 ;      bb2:
 ;         unimplemented <<  %{{13}} = fadd nnan float %{{3}}, %{{3}}>>
@@ -28,6 +27,10 @@
 ;      bb4:
 ;         unimplemented <<  %{{25}} = ptrtoint ptr %{{ptr}} to i8>>
 ;         unimplemented <<  %{{26}} = ptrtoint <8 x ptr> %{{ptrs}} to <8 x i8>>>
+;         br bb5
+;     bb5:
+;         unimplemented <<  %27 = icmp ne ptr %0, null>>
+;         unimplemented <<  %28 = icmp ne <4 x i32> %4, zeroinitializer>>
 ;         ret
 ;     }
 ;     ...
@@ -62,12 +65,15 @@ allocas:
   %1 = alloca inalloca i32
   %2 = alloca i32, addrspace(4)
   %3 = alloca i32, i32 %num
-  %4 = alloca i32, i66 36893488147419103232 ; 2^{65}
+  ; Note that we don't test alloca's with number of elements not expressible in
+  ; a `size_t`. At the time of writing using a type wider than i64 for the
+  ; element count can crash selection dag.
+  ; e.g.: `%blah = alloca i32, i66 36893488147419103232`
   br label %binops
 binops:
-  %5 = fadd nnan float %flt, %flt
-  %6 = udiv exact i32 %num, 1
-  %7 = add <4 x i32> %vecnums, %vecnums
+  %4 = fadd nnan float %flt, %flt
+  %5 = udiv exact i32 %num, 1
+  %6 = add <4 x i32> %vecnums, %vecnums
   br label %calls
 calls:
   ; FIXME: we are unable to test `musttail` because a tail call must be
@@ -75,24 +81,32 @@ calls:
   ; requires a stackmap after a call...
   ;
   ; param attrs
-  %8 = call i32 @f(i32 swiftself 5)
+  %7 = call i32 @f(i32 swiftself 5)
   ; ret attrs
-  %9 = call inreg i32 @f(i32 5)
+  %8 = call inreg i32 @f(i32 5)
   ; func attrs
-  %10 = call i32 @f(i32 5) alignstack(8)
+  %9 = call i32 @f(i32 5) alignstack(8)
   ; fast math flags
-  %11 = call nnan float @g()
+  %10 = call nnan float @g()
   ; Non-C calling conventions.
-  %12 = call ghccc i32 @f(i32 5)
+  %11 = call ghccc i32 @f(i32 5)
   ; operand bundles
-  %13 = call i32 @f(i32 5) ["kcfi"(i32 1234)]
+  %12 = call i32 @f(i32 5) ["kcfi"(i32 1234)]
   ; non-zero address spaces
-  %14 = call addrspace(6) ptr @p()
+  %13 = call addrspace(6) ptr @p()
   ; stackmap required (but irrelevant for the test) for all of the above calls.
   call void (i64, i32, ...) @llvm.experimental.stackmap(i64 7, i32 0);
   br label %casts
 casts:
-  %15 = ptrtoint ptr %ptr to i8
-  %16 = ptrtoint <8 x ptr> %ptrs to <8 x i8>
+  %14 = ptrtoint ptr %ptr to i8
+  %15 = ptrtoint <8 x ptr> %ptrs to <8 x i8>
+  br label %icmps
+icmps:
+  ; pointer comparison
+  %16 = icmp ne ptr %ptr, null
+  ; vector of comparisons
+  %17 = icmp ne <4 x i32> %vecnums, zeroinitializer
+  ; stackmap stops icmps from being optimised out.
+  call void (i64, i32, ...) @llvm.experimental.stackmap(i64 8, i32 0, i1 %16, <4 x i1> %17);
   ret void
 }
