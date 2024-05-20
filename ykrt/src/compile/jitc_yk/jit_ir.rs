@@ -997,6 +997,7 @@ impl Inst {
                 fty.ret_ty_idx()
             }
             Self::Mul(i) => i.ty_idx(m),
+            Self::SDiv(i) => i.ty_idx(m),
             Self::LShr(i) => i.ty_idx(m),
             Self::AShr(i) => i.ty_idx(m),
             x => todo!("{x:?}"),
@@ -1181,6 +1182,14 @@ impl fmt::Display for DisplayableInst<'_> {
                 write!(
                     f,
                     "Mul {}, {}",
+                    i.lhs().display(self.m),
+                    i.rhs().display(self.m),
+                )
+            }
+            Inst::SDiv(i) => {
+                write!(
+                    f,
+                    "SDiv {}, {}",
                     i.lhs().display(self.m),
                     i.rhs().display(self.m),
                 )
