@@ -875,6 +875,13 @@ impl fmt::Display for DisplayableConst<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.m.type_(self.const_.ty_idx()) {
             Ty::Integer(t) => write!(f, "{}", t.const_to_str(self.const_)),
+            Ty::Ptr => {
+                let ptr_size = mem::size_of::<usize>();
+                debug_assert_eq!(self.const_.bytes().len(), ptr_size);
+                // unwrap is safe: constant is malformed if there are too few bytes for a chunk.
+                let pval = usize::from_ne_bytes(*self.const_.bytes().first_chunk().unwrap());
+                write!(f, "{:#x}", pval)
+            }
             x => todo!("{x:?}"),
         }
     }
@@ -1911,6 +1918,41 @@ mod tests {
         check(&mut m, 64, 456i64, "456i64");
         check(&mut m, 64, u64::MAX as i64, "-1i64");
         check(&mut m, 64, i64::MAX, "9223372036854775807i64");
+    }
+
+    #[test]
+    fn stringify_const_ptr2() {
+        let m = Module::new_testing();
+        let ptr_val = stringify_const_ptr2 as *const u8 as usize;
+        let cp = Const {
+            ty_idx: m.ptr_ty_idx(),
+            bytes: ptr_val.to_ne_bytes().to_vec(),
+        };
+        assert_eq!(format!("{}", cp.display(&m)), format!("{:#x}", ptr_val));
+    }
+
+    #[test]
+    fn stringify_const_ptr() {
+        let m = Module::new_testing();
+        // Build a constant pointer with higher valued bytes towards the most-significant byte.
+        // Careful now: big endian stores the most significant byte first!
+        let rng = 0u8..(mem::size_of::<usize>() as u8);
+        #[cfg(target_endian = "little")]
+        let bytes = rng.clone().collect::<Vec<u8>>();
+        #[cfg(target_endian = "big")]
+        let bytes = rng.clone().rev().collect::<Vec<u8>>();
+
+        let cp = Const {
+            ty_idx: m.ptr_ty_idx(),
+            bytes,
+        };
+
+        let expect_bytes = rng.rev().map(|i| format!("{:02x}", i)).collect::<String>();
+        let expect_usize = usize::from_str_radix(&expect_bytes, 16).unwrap();
+        assert_eq!(
+            format!("{}", cp.display(&m)),
+            format!("{:#x}", expect_usize)
+        );
     }
 
     #[test]
