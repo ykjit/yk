@@ -192,6 +192,7 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Inst::LShr(i) => self.cg_lshr(inst_idx, i),
             jit_ir::Inst::AShr(i) => self.cg_ashr(inst_idx, i),
             jit_ir::Inst::Mul(i) => self.cg_mul(inst_idx, i),
+            jit_ir::Inst::SDiv(i) => self.cg_sdiv(inst_idx, i),
             x => todo!("{x:?}"),
         }
         Ok(())
@@ -447,6 +448,35 @@ impl<'a> X64CodeGen<'a> {
 
         // Note that because we are code-genning an unchecked multiply, the higher-order part of
         // the result in RDX is entirely ignored.
+        self.store_new_local(inst_idx, Rq::RAX);
+    }
+
+    fn cg_sdiv(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::SDivInst) {
+        let lhs = inst.lhs();
+        let rhs = inst.rhs();
+
+        // Operand types must be the same.
+        debug_assert_eq!(
+            self.m.type_(lhs.ty_idx(self.m)),
+            self.m.type_(rhs.ty_idx(self.m))
+        );
+
+        // The dividend is hard-coded into DX:AX/EDX:EAX/RDX:RAX. However unless we have 128bit
+        // values or want to optimise register usage, we won't be needing this, and just zero out
+        // RDX.
+        dynasm!(self.asm; xor rdx, rdx);
+        self.load_operand(Rq::RAX, &lhs); // FIXME: assumes value will fit in a reg.
+        self.load_operand(WR1, &rhs); // ^^^ same
+
+        match lhs.byte_size(self.m) {
+            8 => dynasm!(self.asm; idiv Rq(WR1.code())),
+            4 => dynasm!(self.asm; idiv Rd(WR1.code())),
+            2 => dynasm!(self.asm; idiv Rw(WR1.code())),
+            1 => dynasm!(self.asm; idiv Rb(WR1.code())),
+            _ => todo!(),
+        }
+
+        // The quotient is stored in RAX. We don't care about the remainder stored in RDX.
         self.store_new_local(inst_idx, Rq::RAX);
     }
 
@@ -735,6 +765,8 @@ impl<'a> X64CodeGen<'a> {
 
         match (from_size, to_size) {
             (1, 8) => dynasm!(self.asm; movsx Rq(WR0.code()), Rb(WR0.code())),
+            (1, 4) => dynasm!(self.asm; movsx Rd(WR0.code()), Rb(WR0.code())),
+            (2, 4) => dynasm!(self.asm; movsx Rd(WR0.code()), Rw(WR0.code())),
             (4, 8) => dynasm!(self.asm; movsx Rq(WR0.code()), Rd(WR0.code())),
             _ => todo!(),
         }
@@ -853,6 +885,10 @@ impl<'a> X64CodeGen<'a> {
             4 => {
                 let val = bytes.read_i32::<NativeEndian>().unwrap();
                 dynasm!(self.asm; mov Rq(reg.code()), DWORD val);
+            }
+            2 => {
+                let val = bytes.read_i16::<NativeEndian>().unwrap();
+                dynasm!(self.asm; mov Rw(reg.code()), WORD val);
             }
             1 => {
                 let val = bytes.read_i8().unwrap();

@@ -7,6 +7,7 @@
 //     jitstate: start-tracing
 //     add 5
 //     sub 3
+//     mul 12
 //     jitstate: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
@@ -17,11 +18,14 @@
 //     --- End jit-pre-opt ---
 //     add 4
 //     sub 2
+//     mul 9
 //     jitstate: enter-jit-code
 //     add 3
 //     sub 1
+//     mul 6
 //     add 2
 //     sub 0
+//     mul 3
 //     jitstate: deoptimise
 //     exit
 
@@ -48,8 +52,10 @@ int main(int argc, char **argv) {
     yk_mt_control_point(mt, &loc);
     int add = i + argc;
     int sub = i - argc;
+    int mul = i * argc * 3;
     fprintf(stderr, "add %d\n", add);
     fprintf(stderr, "sub %d\n", sub);
+    fprintf(stderr, "mul %d\n", mul);
     i--;
   }
   fprintf(stderr, "exit\n");

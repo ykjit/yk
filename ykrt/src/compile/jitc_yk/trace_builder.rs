@@ -423,6 +423,8 @@ impl<'a> TraceBuilder<'a> {
         let instr = match binop {
             aot_ir::BinOp::Add => jit_ir::AddInst::new(lhs, rhs).into(),
             aot_ir::BinOp::Sub => jit_ir::SubInst::new(lhs, rhs).into(),
+            aot_ir::BinOp::Mul => jit_ir::MulInst::new(lhs, rhs).into(),
+            aot_ir::BinOp::SDiv => jit_ir::SDivInst::new(lhs, rhs).into(),
             aot_ir::BinOp::And => jit_ir::AndInst::new(lhs, rhs).into(),
             aot_ir::BinOp::Or => jit_ir::OrInst::new(lhs, rhs).into(),
             aot_ir::BinOp::LShr => jit_ir::LShrInst::new(lhs, rhs).into(),
