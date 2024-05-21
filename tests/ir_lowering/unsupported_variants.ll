@@ -37,8 +37,6 @@
 ; serialised as an unsupported instruction in the AOT IR. This prevents the JIT
 ; from silently miscompiling things we haven't yet thought about.
 
-@arr = global [4 x i8] zeroinitializer
-
 define i32 @f(i32 %num) {
     ret i32 5
 }
