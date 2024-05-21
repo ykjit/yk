@@ -1098,7 +1098,7 @@ mod tests {
         use super::*;
         use crate::compile::jitc_yk::codegen::reg_alloc::SpillAllocator;
 
-        fn test_with_spillalloc(m: &jit_ir::Module, patt_lines: &[&str]) {
+        fn test_with_spillalloc(m: &jit_ir::Module, patt_lines: &str) {
             match_asm(
                 X64CodeGen::new(&m, Box::new(SpillAllocator::new(STACK_DIRECTION)))
                     .unwrap()
@@ -1107,7 +1107,7 @@ mod tests {
                     .as_any()
                     .downcast::<X64CompiledTrace>()
                     .unwrap(),
-                &patt_lines.join("\n"),
+                patt_lines,
             );
         }
 
@@ -1120,14 +1120,14 @@ mod tests {
                 .unwrap();
             m.push(jit_ir::LoadInst::new(load_op, ptr_ty_idx).into())
                 .unwrap();
-            let patt_lines = [
-                "...",
-                "; %1: ptr = Load %0",
-                "... mov r12, [rbp-0x08]",
-                "... mov r12, [r12]",
-                "... mov [rbp-0x10], r12",
-                "...",
-            ];
+            let patt_lines = "
+                ...
+                ; %1: ptr = Load %0
+                ... mov r12, [rbp-0x08]
+                ... mov r12, [r12]
+                ... mov [rbp-0x10], r12
+                ...
+            ";
             test_with_spillalloc(&m, &patt_lines);
         }
 
@@ -1140,14 +1140,14 @@ mod tests {
                 .unwrap();
             m.push(jit_ir::LoadInst::new(load_op, i8_ty_idx).into())
                 .unwrap();
-            let patt_lines = [
-                "...",
-                "; %1: i8 = Load %0",
-                "... movzx r12, byte ptr [rbp-0x01]",
-                "... movzx r12, byte ptr [r12]",
-                "... mov [rbp-0x02], r12b",
-                "...",
-            ];
+            let patt_lines = "
+                ...
+                ; %1: i8 = Load %0
+                ... movzx r12, byte ptr [rbp-0x01]
+                ... movzx r12, byte ptr [r12]
+                ... mov [rbp-0x02], r12b
+                ...
+            ";
             test_with_spillalloc(&m, &patt_lines);
         }
 
@@ -1162,14 +1162,14 @@ mod tests {
                 .unwrap();
             m.push(jit_ir::LoadInst::new(ti_op, i32_ty_idx).into())
                 .unwrap();
-            let patt_lines = [
-                "...",
-                "; %1: i32 = Load %0",
-                "... mov r12d, [rbp-0x04]",
-                "... mov r12d, [r12]",
-                "... mov [rbp-0x08], r12d",
-                "...",
-            ];
+            let patt_lines = "
+                ...
+                ; %1: i32 = Load %0
+                ... mov r12d, [rbp-0x04]
+                ... mov r12d, [r12]
+                ... mov [rbp-0x08], r12d
+                ...
+            ";
             test_with_spillalloc(&m, &patt_lines);
         }
 
@@ -1185,15 +1185,15 @@ mod tests {
             let co_opnd = jit_ir::Operand::Const(m.insert_const(co_const).unwrap());
             m.push(jit_ir::PtrAddInst::new(ti_op, co_opnd).into())
                 .unwrap();
-            let patt_lines = [
-                "...",
-                "; %1: ptr = ptradd %0, 64i32",
-                "... mov r12, [rbp-0x08]",
-                "... mov r13, 0x40",
-                "... add r12, r13",
-                "... mov [rbp-0x10], r12",
-                "...",
-            ];
+            let patt_lines = "
+                ...
+                ; %1: ptr = ptradd %0, 64i32
+                ... mov r12, [rbp-0x08]
+                ... mov r13, 0x40
+                ... add r12, r13
+                ... mov [rbp-0x10], r12
+                ...
+            ";
             test_with_spillalloc(&m, &patt_lines);
         }
 
@@ -1209,14 +1209,14 @@ mod tests {
                 .unwrap();
             m.push(jit_ir::StoreInst::new(ti1_op, ti2_op).into())
                 .unwrap();
-            let patt_lines = [
-                "...",
-                "; Store %0, %1",
-                "... mov r12, [rbp-0x10]",
-                "... mov r13, [rbp-0x08]",
-                "... mov [r12], r13",
-                "...",
-            ];
+            let patt_lines = "
+                ...
+                ; Store %0, %1
+                ... mov r12, [rbp-0x10]
+                ... mov r13, [rbp-0x08]
+                ... mov [r12], r13
+                ...
+            ";
             test_with_spillalloc(&m, &patt_lines);
         }
 
@@ -1226,13 +1226,13 @@ mod tests {
             let u8_ty_idx = m.insert_ty(jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
             m.push(jit_ir::LoadTraceInputInst::new(0, u8_ty_idx).into())
                 .unwrap();
-            let patt_lines = [
-                "...",
-                &format!("; %0: i8 = LoadTraceInput 0, i8"),
-                "... movzx r12, byte ptr [rdi]",
-                "... mov [rbp-0x01], r12b",
-                "...",
-            ];
+            let patt_lines = "
+                ...
+                ; %0: i8 = LoadTraceInput 0, i8
+                ... movzx r12, byte ptr [rdi]
+                ... mov [rbp-0x01], r12b
+                ...
+            ";
             test_with_spillalloc(&m, &patt_lines);
         }
 
@@ -1244,13 +1244,13 @@ mod tests {
                 .unwrap();
             m.push(jit_ir::LoadTraceInputInst::new(32, u16_ty_idx).into())
                 .unwrap();
-            let patt_lines = [
-                "...",
-                &format!("; %0: i16 = LoadTraceInput 32, i16"),
-                "... movzx r12d, word ptr [rdi+0x20]",
-                "... mov [rbp-0x02], r12w",
-                "...",
-            ];
+            let patt_lines = "
+                ...
+                ; %0: i16 = LoadTraceInput 32, i16
+                ... movzx r12d, word ptr [rdi+0x20]
+                ... mov [rbp-0x02], r12w
+                ...
+            ";
             test_with_spillalloc(&m, &patt_lines);
         }
 
@@ -1269,25 +1269,25 @@ mod tests {
                 .unwrap();
             m.push(jit_ir::LoadTraceInputInst::new(8, ptr_ty_idx).into())
                 .unwrap();
-            let patt_lines = [
-                "...",
-                &format!("; %0: i8 = LoadTraceInput 0, i8"),
-                "... movzx r12, byte ptr [rdi]",
-                "... mov [rbp-0x01], r12b",
-                &format!("; %1: i8 = LoadTraceInput 1, i8"),
-                "... movzx r12, byte ptr [rdi+0x01]",
-                "... mov [rbp-0x02], r12b",
-                &format!("; %2: i8 = LoadTraceInput 2, i8"),
-                "... movzx r12, byte ptr [rdi+0x02]",
-                "... mov [rbp-0x03], r12b",
-                &format!("; %3: i8 = LoadTraceInput 3, i8"),
-                "... movzx r12, byte ptr [rdi+0x03]",
-                "... mov [rbp-0x04], r12b",
-                &format!("; %4: ptr = LoadTraceInput 8, ptr"),
-                "... mov r12, [rdi+0x08]",
-                "... mov [rbp-0x10], r12",
-                "...",
-            ];
+            let patt_lines = "
+                ...
+                ; %0: i8 = LoadTraceInput 0, i8
+                ... movzx r12, byte ptr [rdi]
+                ... mov [rbp-0x01], r12b
+                ; %1: i8 = LoadTraceInput 1, i8
+                ... movzx r12, byte ptr [rdi+0x01]
+                ... mov [rbp-0x02], r12b
+                ; %2: i8 = LoadTraceInput 2, i8
+                ... movzx r12, byte ptr [rdi+0x02]
+                ... mov [rbp-0x03], r12b
+                ; %3: i8 = LoadTraceInput 3, i8
+                ... movzx r12, byte ptr [rdi+0x03]
+                ... mov [rbp-0x04], r12b
+                ; %4: ptr = LoadTraceInput 8, ptr
+                ... mov r12, [rdi+0x08]
+                ... mov [rbp-0x10], r12
+                ...
+            ";
             test_with_spillalloc(&m, &patt_lines);
         }
 
@@ -1304,15 +1304,15 @@ mod tests {
                 .push_and_make_operand(jit_ir::LoadTraceInputInst::new(16, i16_ty_idx).into())
                 .unwrap();
             m.push(jit_ir::AddInst::new(op1, op2).into()).unwrap();
-            let patt_lines = [
-                "...",
-                "; %2: i16 = Add %0, %1",
-                "... movzx r12, word ptr [rbp-0x02]",
-                "... movzx r13, word ptr [rbp-0x04]",
-                "... add r12w, r13w",
-                "... mov [rbp-0x06], r12w",
-                "...",
-            ];
+            let patt_lines = "
+                ...
+                ; %2: i16 = Add %0, %1
+                ... movzx r12, word ptr [rbp-0x02]
+                ... movzx r13, word ptr [rbp-0x04]
+                ... add r12w, r13w
+                ... mov [rbp-0x06], r12w
+                ...
+            ";
             test_with_spillalloc(&m, &patt_lines);
         }
 
@@ -1329,15 +1329,15 @@ mod tests {
                 .push_and_make_operand(jit_ir::LoadTraceInputInst::new(64, i64_ty_idx).into())
                 .unwrap();
             m.push(jit_ir::AddInst::new(op1, op2).into()).unwrap();
-            let patt_lines = [
-                "...",
-                "; %2: i64 = Add %0, %1",
-                "... mov r12, [rbp-0x08]",
-                "... mov r13, [rbp-0x10]",
-                "... add r12, r13",
-                "... mov [rbp-0x18], r12",
-                "...",
-            ];
+            let patt_lines = "
+                ...
+                ; %2: i64 = Add %0, %1
+                ... mov r12, [rbp-0x08]
+                ... mov r13, [rbp-0x10]
+                ... add r12, r13
+                ... mov [rbp-0x18], r12
+                ...
+            ";
             test_with_spillalloc(&m, &patt_lines);
         }
 
@@ -1391,12 +1391,14 @@ mod tests {
             m.push(call_inst.into()).unwrap();
 
             let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
-            let patt_lines = [
-                "...",
-                &format!("... mov r12, 0x{:X}", sym_addr),
-                "... call r12",
-                "...",
-            ];
+            let patt_lines = format!(
+                "
+                ...
+                ... mov r12, 0x{sym_addr:X}
+                ... call r12
+                ...
+            "
+            );
             test_with_spillalloc(&m, &patt_lines);
         }
 
@@ -1432,16 +1434,18 @@ mod tests {
             m.push(call_inst.into()).unwrap();
 
             let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
-            let patt_lines = [
-                "...",
-                "; Call @puts(%0, %1, %2)",
-                "... mov edi, [rbp-0x04]",
-                "... mov esi, [rbp-0x08]",
-                "... mov edx, [rbp-0x0C]",
-                &format!("... mov r12, 0x{:X}", sym_addr),
-                "... call r12",
-                "...",
-            ];
+            let patt_lines = format!(
+                "
+                ...
+                ; Call @puts(%0, %1, %2)
+                ... mov edi, [rbp-0x04]
+                ... mov esi, [rbp-0x08]
+                ... mov edx, [rbp-0x0C]
+                ... mov r12, 0x{sym_addr:X}
+                ... call r12
+                ...
+            "
+            );
             test_with_spillalloc(&m, &patt_lines);
         }
 
@@ -1496,19 +1500,21 @@ mod tests {
             m.push(call_inst.into()).unwrap();
 
             let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
-            let patt_lines = [
-                "...",
-                "; Call @puts(%0, %1, %2, %3, %4, %5)",
-                "... movzx rdi, byte ptr [rbp-0x01]",
-                "... movzx rsi, word ptr [rbp-0x04]",
-                "... mov edx, [rbp-0x08]",
-                "... mov rcx, [rbp-0x10]",
-                "... mov r8, [rbp-0x18]",
-                "... movzx r9, byte ptr [rbp-0x19]",
-                &format!("... mov r12, 0x{:X}", sym_addr),
-                "... call r12",
-                "...",
-            ];
+            let patt_lines = format!(
+                "
+                ...
+                ; Call @puts(%0, %1, %2, %3, %4, %5)
+                ... movzx rdi, byte ptr [rbp-0x01]
+                ... movzx rsi, word ptr [rbp-0x04]
+                ... mov edx, [rbp-0x08]
+                ... mov rcx, [rbp-0x10]
+                ... mov r8, [rbp-0x18]
+                ... movzx r9, byte ptr [rbp-0x19]
+                ... mov r12, 0x{sym_addr:X}
+                ... call r12
+                ...
+            "
+            );
             test_with_spillalloc(&m, &patt_lines);
         }
 
@@ -1559,13 +1565,15 @@ mod tests {
             m.push(call_inst.into()).unwrap();
 
             let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
-            let patt_lines = [
-                "...",
-                &format!("... mov r12, 0x{:X}", sym_addr),
-                "... call r12",
-                "... mov [rbp-0x04], eax",
-                "...",
-            ];
+            let patt_lines = format!(
+                "
+                ...
+                ... mov r12, 0x{sym_addr:X}
+                ... call r12
+                ... mov [rbp-0x04], eax
+                ...
+            "
+            );
             test_with_spillalloc(&m, &patt_lines);
         }
 
@@ -1613,16 +1621,16 @@ mod tests {
                 .unwrap();
             m.push(jit_ir::IcmpInst::new(op.clone(), jit_ir::Predicate::Equal, op).into())
                 .unwrap();
-            let patt_lines = [
-                "...",
-                "; %1: i8 = Icmp %0, Equal, %0",
-                "... mov r12, [rbp-0x08]",
-                "... mov r13, [rbp-0x08]",
-                "... cmp r12, r13",
-                "... setz r12b",
-                "... mov [rbp-0x09], r12b",
-                "...",
-            ];
+            let patt_lines = "
+                ...
+                ; %1: i8 = Icmp %0, Equal, %0
+                ... mov r12, [rbp-0x08]
+                ... mov r13, [rbp-0x08]
+                ... cmp r12, r13
+                ... setz r12b
+                ... mov [rbp-0x09], r12b
+                ...
+            ";
             test_with_spillalloc(&m, &patt_lines);
         }
 
@@ -1635,16 +1643,16 @@ mod tests {
                 .unwrap();
             m.push(jit_ir::IcmpInst::new(op.clone(), jit_ir::Predicate::Equal, op).into())
                 .unwrap();
-            let patt_lines = [
-                "...",
-                "; %1: i8 = Icmp %0, Equal, %0",
-                "... movzx r12, byte ptr [rbp-0x01]",
-                "... movzx r13, byte ptr [rbp-0x01]",
-                "... cmp r12b, r13b",
-                "... setz r12b",
-                "... mov [rbp-0x02], r12b",
-                "...",
-            ];
+            let patt_lines = "
+                ...
+                ; %1: i8 = Icmp %0, Equal, %0
+                ... movzx r12, byte ptr [rbp-0x01]
+                ... movzx r13, byte ptr [rbp-0x01]
+                ... cmp r12b, r13b
+                ... setz r12b
+                ... mov [rbp-0x02], r12b
+                ...
+            ";
             test_with_spillalloc(&m, &patt_lines);
         }
 
@@ -1681,19 +1689,19 @@ mod tests {
                 .unwrap();
             m.push(jit_ir::GuardInst::new(cond_op, true, gi_idx).into())
                 .unwrap();
-            let patt_lines = [
-                "...",
-                "; Guard %0, true",
-                "{{vaddr1}} {{off1}}: jmp 0x00000000{{cmpoff}}",
-                "{{vaddr2}} {{failoff}}: mov rdi, [rbp]",
-                "... mov rsi, 0x00",
-                "... mov rdx, rbp",
-                "... mov rax, ...",
-                "... call rax",
-                "{{vaddr3}} {{cmpoff}}: cmp r12b, 0x01",
-                "{{vaddr4}} {{off4}}: jnz 0x00000000{{failoff}}",
-                "...",
-            ];
+            let patt_lines = "
+                ...
+                ; Guard %0, true
+                {{vaddr1}} {{off1}}: jmp 0x00000000{{cmpoff}}
+                {{vaddr2}} {{failoff}}: mov rdi, [rbp]
+                ... mov rsi, 0x00
+                ... mov rdx, rbp
+                ... mov rax, ...
+                ... call rax
+                {{vaddr3}} {{cmpoff}}: cmp r12b, 0x01
+                {{vaddr4}} {{off4}}: jnz 0x00000000{{failoff}}
+                ...
+            ";
             test_with_spillalloc(&m, &patt_lines);
         }
 
@@ -1707,26 +1715,30 @@ mod tests {
                 .unwrap();
             m.push(jit_ir::GuardInst::new(cond_op, false, gi_idx).into())
                 .unwrap();
-            let patt_lines = [
-                "...",
-                "; Guard %0, false",
-                "{{vaddr1}} {{off1}}: jmp 0x00000000{{cmpoff}}",
-                "{{vaddr2}} {{failoff}}: mov rdi, [rbp]",
-                "... mov rsi, 0x00",
-                "... mov rdx, rbp",
-                "... mov rax, ...",
-                "... call rax",
-                "{{vaddr3}} {{cmpoff}}: cmp r12b, 0x00",
-                "{{vaddr4}} {{off4}}: jnz 0x00000000{{failoff}}",
-                "...",
-            ];
+            let patt_lines = "
+                ...
+                ; Guard %0, false
+                {{vaddr1}} {{off1}}: jmp 0x00000000{{cmpoff}}
+                {{vaddr2}} {{failoff}}: mov rdi, [rbp]
+                ... mov rsi, 0x00
+                ... mov rdx, rbp
+                ... mov rax, ...
+                ... call rax
+                {{vaddr3}} {{cmpoff}}: cmp r12b, 0x00
+                {{vaddr4}} {{off4}}: jnz 0x00000000{{failoff}}
+                ...
+            ";
             test_with_spillalloc(&m, &patt_lines);
         }
 
         #[test]
         fn unterminated_trace() {
             let m = test_module();
-            let patt_lines = ["...", "; Unterminated trace", "{{vaddr}} {{off}}: ud2"];
+            let patt_lines = "
+                ...
+                ; Unterminated trace
+                {{vaddr}} {{off}}: ud2
+            ";
             test_with_spillalloc(&m, &patt_lines);
         }
 
@@ -1734,14 +1746,14 @@ mod tests {
         fn looped_trace_smallest() {
             let mut m = test_module();
             m.push(jit_ir::Inst::TraceLoopStart).unwrap();
-            let patt_lines = [
-                "...",
-                "; TraceLoopStart",
-                "; Trace loop backedge",
-                // FIXME: make the offset and disassembler format hex the same so we can match
-                // easier (capitalisation of hex differs).
-                "{{vaddr}} {{off}}: jmp {{target}}",
-            ];
+            // FIXME: make the offset and disassembler format hex the same so we can match
+            // easier (capitalisation of hex differs).
+            let patt_lines = "
+                ...
+                ; TraceLoopStart
+                ; Trace loop backedge
+                {{vaddr}} {{off}}: jmp {{target}}
+            ";
             test_with_spillalloc(&m, &patt_lines);
         }
 
@@ -1755,16 +1767,16 @@ mod tests {
             m.push(jit_ir::Inst::TraceLoopStart).unwrap();
             m.push(jit_ir::AddInst::new(ti_op.clone(), ti_op).into())
                 .unwrap();
-            let patt_lines = [
-                "...",
-                "; %0: i8 = LoadTraceInput 0, i8",
-                "...",
-                "; TraceLoopStart",
-                "; %2: i8 = add %0, %0",
-                "...",
-                "; Trace loop backedge",
-                "...: jmp ...",
-            ];
+            let patt_lines = "
+                ...
+                ; %0: i8 = LoadTraceInput 0, i8
+                ...
+                ; TraceLoopStart
+                ; %2: i8 = add %0, %0
+                ...
+                ; Trace loop backedge
+                ...: jmp ...
+            ";
             test_with_spillalloc(&m, &patt_lines);
         }
     }
