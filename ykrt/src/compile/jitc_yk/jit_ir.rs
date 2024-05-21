@@ -386,6 +386,9 @@ impl IntegerTy {
     }
 
     /// Instantiate a constant of value `val` and of the type described by `self`.
+    ///
+    /// The byte size of `T` must be at least as big as `self.byte_size()`. If the byte size of `T`
+    /// is larger, `val` will be truncated to `self.byte_size()` bytes.
     pub(crate) fn make_constant<T: ToBytes + PrimInt>(
         &self,
         m: &mut Module,
@@ -1971,6 +1974,28 @@ mod tests {
             format!("{}", cp.display(&m)),
             format!("{:#x}", expect_usize)
         );
+    }
+
+    #[test]
+    fn int_make_constant_truncate() {
+        let mut m = Module::new_testing();
+
+        let c = IntegerTy::new(8).make_constant(&mut m, 0xff05u16).unwrap();
+        assert_eq!(c.display(&m).to_string(), "5i8");
+
+        let c = IntegerTy::new(16)
+            .make_constant(&mut m, 0xffee1122u32)
+            .unwrap();
+        assert_eq!(c.display(&m).to_string(), "4386i16");
+    }
+
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "ty_size <= bytes.len()")]
+    #[test]
+    fn int_make_constant_invalid() {
+        let mut m = Module::new_testing();
+        let c = IntegerTy::new(64).make_constant(&mut m, 0xff05u16).unwrap();
+        assert_eq!(c.display(&m).to_string(), "5i8");
     }
 
     #[test]
