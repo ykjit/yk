@@ -344,6 +344,7 @@ impl<'a> TraceBuilder<'a> {
         &mut self,
         aot_const: &aot_ir::Const,
     ) -> Result<jit_ir::Const, CompilationError> {
+        let aot_const = aot_const.unwrap_val();
         let jit_ty_idx = self.handle_type(self.aot_mod.type_(aot_const.ty_idx()))?;
         Ok(jit_ir::Const::new(jit_ty_idx, Vec::from(aot_const.bytes())))
     }
@@ -461,7 +462,7 @@ impl<'a> TraceBuilder<'a> {
                 panic!();
             };
             assert!(ity.num_bits() == u64::BITS);
-            let id = u64::from_ne_bytes(c.bytes()[0..8].try_into().unwrap());
+            let id = u64::from_ne_bytes(c.unwrap_val().bytes()[0..8].try_into().unwrap());
             smids.push(id);
 
             // Collect live variables.

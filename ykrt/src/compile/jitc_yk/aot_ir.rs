@@ -108,7 +108,7 @@ impl Module {
     }
 
     pub(crate) fn const_type(&self, c: &Const) -> &Ty {
-        &self.types[c.ty_idx]
+        &self.types[c.unwrap_val().ty_idx]
     }
 
     /// Lookup a constant by its index.
@@ -436,7 +436,7 @@ impl Operand {
                 // The `unwrap` can't fail for a `LocalVariable`.
                 self.to_instr(m).def_type(m).unwrap()
             }
-            Self::Const(cidx) => m.type_(m.const_(*cidx).ty_idx()),
+            Self::Const(cidx) => m.type_(m.const_(*cidx).unwrap_val().ty_idx()),
             Self::Arg { func_idx, arg_idx } => {
                 let Ty::Func(ft) = m.type_(m.func(*func_idx).ty_idx) else {
                     panic!()
@@ -1193,7 +1193,7 @@ impl IntegerTy {
     }
 
     /// Format a constant integer value that is of the type described by `self`.
-    fn const_to_string(&self, c: &Const) -> String {
+    fn const_to_string(&self, c: &ConstVal) -> String {
         const_int_bytes_to_string(self.num_bits, c.bytes())
     }
 }
@@ -1373,7 +1373,7 @@ pub(crate) enum Ty {
 }
 
 impl Ty {
-    fn const_to_string(&self, c: &Const) -> String {
+    fn const_to_string(&self, c: &ConstVal) -> String {
         match self {
             Self::Void => "void".to_owned(),
             Self::Integer(it) => it.const_to_string(c),
@@ -1414,30 +1414,35 @@ impl fmt::Display for DisplayableTy<'_> {
     }
 }
 
-/// A constant.
+/// A (potentially implemented) constant.
+///
+/// Constants not handled by the ykllvm serialiser become `Const::Unimplemented`.
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
-pub(crate) struct Const {
-    ty_idx: TyIdx,
-    #[deku(temp)]
-    num_bytes: usize,
-    #[deku(count = "num_bytes")]
-    bytes: Vec<u8>,
+#[deku(type = "u8")]
+pub(crate) enum Const {
+    #[deku(id = "0")]
+    Val(ConstVal),
+    #[deku(id = "1")]
+    Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "map_to_string")] String),
 }
 
 impl Const {
-    /// Return a byte slice of the constant's value.
-    pub(crate) fn bytes(&self) -> &[u8] {
-        &self.bytes
-    }
-
-    /// Return the type index of the constant.
-    pub(crate) fn ty_idx(&self) -> TyIdx {
-        self.ty_idx
-    }
-
     pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableConst<'a> {
         DisplayableConst { constant: self, m }
+    }
+
+    /// Returns a `ConstVal` iff `self` is `Cosnt::Val`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self` is `Cosnt::Unimplemented`. The panic message indicates the problematic
+    /// constant that requires implementation in the ykllvm serialiser.
+    pub(crate) fn unwrap_val(&self) -> &ConstVal {
+        match self {
+            Const::Val(v) => v,
+            Const::Unimplemented(m) => panic!("unimplemented const: {}", m),
+        }
     }
 }
 
@@ -1448,10 +1453,51 @@ pub(crate) struct DisplayableConst<'a> {
 
 impl Display for DisplayableConst<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.constant {
+            Const::Val(cv) => write!(f, "{}", cv.display(self.m)),
+            Const::Unimplemented(m) => write!(f, "unimplemented <<{}>>", m),
+        }
+    }
+}
+
+/// A constant value.
+#[deku_derive(DekuRead)]
+#[derive(Debug)]
+pub(crate) struct ConstVal {
+    ty_idx: TyIdx,
+    #[deku(temp)]
+    num_bytes: usize,
+    #[deku(count = "num_bytes")]
+    bytes: Vec<u8>,
+}
+
+impl ConstVal {
+    /// Return a byte slice of the constant's value.
+    pub(crate) fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    /// Return the type index of the constant.
+    pub(crate) fn ty_idx(&self) -> TyIdx {
+        self.ty_idx
+    }
+
+    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableConstVal<'a> {
+        DisplayableConstVal { cv: self, m }
+    }
+}
+
+pub(crate) struct DisplayableConstVal<'a> {
+    m: &'a Module,
+    cv: &'a ConstVal,
+}
+
+impl Display for DisplayableConstVal<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "{}",
-            self.m.types[self.constant.ty_idx].const_to_string(self.constant)
+            self.m.types[self.cv.ty_idx].const_to_string(self.cv)
         )
     }
 }
@@ -1519,7 +1565,7 @@ mod tests {
 
             // Construct an IR constant and check it stringifies ok.
             let it = IntegerTy { num_bits };
-            let c = Const {
+            let c = ConstVal {
                 ty_idx: TyIdx::new(0),
                 bytes,
             };
@@ -1551,6 +1597,13 @@ mod tests {
         check(64, u64::MAX, "-1i64");
         check(64, 12345678u64, "12345678i64");
         check(64, i64::MIN as u64, &format!("{}i64", i64::MIN));
+    }
+
+    #[test]
+    fn stringify_unimplemented_consts() {
+        let c = Const::Unimplemented("someoperand".into());
+        let m = Module::default();
+        assert_eq!(c.display(&m).to_string(), "unimplemented <<someoperand>>");
     }
 
     #[test]
