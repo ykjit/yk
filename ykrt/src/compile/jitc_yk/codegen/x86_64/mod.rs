@@ -713,8 +713,9 @@ impl<'a> X64CodeGen<'a> {
             "icmp of differing types"
         );
         debug_assert!(
-            matches!(self.m.type_(left.ty_idx(self.m)), jit_ir::Ty::Integer(_)),
-            "icmp of non-integer types"
+            matches!(self.m.type_(left.ty_idx(self.m)), jit_ir::Ty::Integer(_))
+                || matches!(self.m.type_(left.ty_idx(self.m)), jit_ir::Ty::Ptr),
+            "icmp of nonsense types"
         );
 
         // FIXME: assumes values fit in a registers
@@ -1645,23 +1646,6 @@ mod tests {
                 "...",
             ];
             test_with_spillalloc(&m, &patt_lines);
-        }
-
-        #[cfg(debug_assertions)]
-        #[test]
-        #[should_panic(expected = "icmp of non-integer types")]
-        fn cg_icmp_non_ints() {
-            let mut m = test_module();
-            let ptr_ty_idx = m.ptr_ty_idx();
-            let op = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, ptr_ty_idx).into())
-                .unwrap();
-            m.push(jit_ir::IcmpInst::new(op.clone(), jit_ir::Predicate::Equal, op).into())
-                .unwrap();
-            X64CodeGen::new(&m, Box::new(SpillAllocator::new(STACK_DIRECTION)))
-                .unwrap()
-                .codegen()
-                .unwrap();
         }
 
         #[cfg(debug_assertions)]

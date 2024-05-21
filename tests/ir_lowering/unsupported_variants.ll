@@ -28,8 +28,7 @@
 ;         unimplemented <<  %{{26}} = ptrtoint <8 x ptr> %{{ptrs}} to <8 x i8>>>
 ;         br bb5
 ;     bb5:
-;         unimplemented <<  %{{27}} = icmp ne ptr %0, null>>
-;         unimplemented <<  %{{28}} = icmp ne <4 x i32> %4, zeroinitializer>>
+;         unimplemented <<  %{{27}} = icmp ne <4 x i32> %{{444}}, zeroinitializer>>
 ;         ret
 ;     }
 ;     ...
@@ -100,11 +99,9 @@ casts:
   %14 = ptrtoint <8 x ptr> %ptrs to <8 x i8>
   br label %icmps
 icmps:
-  ; pointer comparison
-  %15 = icmp ne ptr %ptr, null
   ; vector of comparisons
-  %16 = icmp ne <4 x i32> %vecnums, zeroinitializer
-  ; stackmap stops icmps from being optimised out.
-  call void (i64, i32, ...) @llvm.experimental.stackmap(i64 8, i32 0, i1 %15, <4 x i1> %16);
+  %15 = icmp ne <4 x i32> %vecnums, zeroinitializer
+  ; stackmap stops icmp from being optimised out.
+  call void (i64, i32, ...) @llvm.experimental.stackmap(i64 8, i32 0, <4 x i1> %15);
   ret void
 }
