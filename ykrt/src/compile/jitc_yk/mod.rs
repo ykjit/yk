@@ -22,6 +22,7 @@ use ykaddr::addr::symbol_to_ptr;
 pub mod aot_ir;
 mod codegen;
 pub mod jit_ir;
+mod opt;
 mod trace_builder;
 
 pub(crate) struct JITCYk;
@@ -70,6 +71,14 @@ impl Compiler for JITCYk {
                 "--- Begin jit-pre-opt ---\n{jit_mod}\n--- End jit-pre-opt ---",
             ));
         }
+
+        // FIXME: This should be enabled when optimisations can cope with all the inputs we see.
+        // let jit_mod = opt::opt(jit_mod)?;
+        // if should_log_ir(IRPhase::PostOpt) {
+        //     log_ir(&format!(
+        //         "--- Begin jit-post-opt ---\n{jit_mod}\n--- End jit-pre-opt ---",
+        //     ));
+        // }
 
         let cg = Box::new(Self::default_codegen(&jit_mod)?);
         let ct = cg.codegen()?;

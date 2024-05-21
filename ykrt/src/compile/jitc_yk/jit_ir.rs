@@ -191,6 +191,21 @@ impl Module {
         InstIdx::new(self.insts.len()).inspect(|_| self.insts.push(inst))
     }
 
+    /// Iterate over all the [Inst]s in this module.
+    pub(crate) fn iter_insts(&mut self) -> impl Iterator<Item = &Inst> {
+        self.insts.iter()
+    }
+
+    /// Mutably iterate over all the [Inst]s in this module.
+    pub(crate) fn iter_mut_insts(&mut self) -> std::slice::IterMut<'_, Inst> {
+        self.insts.iter_mut()
+    }
+
+    /// Replace this modules [Insts]s with `insts`.
+    pub(crate) fn replace_insts(&mut self, insts: TiVec<InstIdx, Inst>) {
+        self.insts = insts;
+    }
+
     pub(crate) fn push_indirect_call(
         &mut self,
         inst: IndirectCallInst,
@@ -583,7 +598,7 @@ pub(crate) struct TyIdx(U24);
 index_24bit!(TyIdx);
 
 /// An argument index. This denotes the start of a slice into [Module::args].
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub(crate) struct ArgsIdx(u16);
 index_16bit!(ArgsIdx);
 
@@ -915,8 +930,10 @@ impl GuardInfo {
 
 /// An IR instruction.
 #[repr(u8)]
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Inst {
+    #[cfg(test)]
+    TestUse(TestUseInst),
     Load(LoadInst),
     LookupGlobal(LookupGlobalInst),
     LoadTraceInput(LoadTraceInputInst),
@@ -1222,6 +1239,8 @@ macro_rules! inst {
     };
 }
 
+#[cfg(test)]
+inst!(TestUse, TestUseInst);
 inst!(Load, LoadInst);
 inst!(LookupGlobal, LookupGlobalInst);
 inst!(Store, StoreInst);
@@ -1234,13 +1253,35 @@ inst!(SignExtend, SignExtendInst);
 inst!(ZeroExtend, ZeroExtendInst);
 inst!(Assign, AssignInst);
 
+/// This is a test-only instruction which "consumes" an operand in the sense of "make use of the
+/// value". This is useful to make clear in a test that an operand is used at a certain point,
+/// which prevents optimisations removing some or all of the things that relate to this operand.
+#[cfg(test)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct TestUseInst {
+    op: PackedOperand,
+}
+
+#[cfg(test)]
+impl TestUseInst {
+    pub(crate) fn new(op: Operand) -> TestUseInst {
+        Self {
+            op: PackedOperand::new(&op),
+        }
+    }
+
+    pub(crate) fn operand(&self) -> Operand {
+        self.op.unpack()
+    }
+}
+
 /// The operands for a [Inst::Load]
 ///
 /// # Semantics
 ///
 /// Loads a value from a given pointer operand.
 ///
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct LoadInst {
     /// The pointer to load from.
     op: PackedOperand,
@@ -1277,7 +1318,7 @@ impl LoadInst {
 ///
 /// FIXME (maybe): If we added a third `TraceInput` storage class to the register allocator, could
 /// we kill this instruction kind entirely?
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 #[repr(packed)]
 pub struct LoadTraceInputInst {
     /// The byte offset to load from in the trace input struct.
@@ -1321,7 +1362,7 @@ impl LoadTraceInputInst {
 /// to implement a special global version for each instruction, e.g. LoadGlobal/StoreGlobal/etc).
 /// The easiest way to do this is to make globals a subclass of constants, similarly to what LLVM
 /// does.
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct LookupGlobalInst {
     /// The pointer to load from.
     global_decl_idx: GlobalDeclIdx,
@@ -1353,7 +1394,7 @@ impl LookupGlobalInst {
 /// # Semantics
 ///
 /// Perform an indirect call to an external or AOT function.
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct IndirectCallInst {
     /// The callee.
     target: PackedOperand,
@@ -1418,7 +1459,7 @@ impl IndirectCallInst {
 /// # Semantics
 ///
 /// Perform a call to an external or AOT function.
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 #[repr(packed)]
 pub struct DirectCallInst {
     /// The callee.
@@ -1476,7 +1517,7 @@ impl DirectCallInst {
 ///
 /// Stores a value into a pointer.
 ///
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct StoreInst {
     /// The value to store.
     val: PackedOperand,
@@ -1510,7 +1551,7 @@ impl StoreInst {
 ///
 /// Returns a pointer value that is the result of adding the specified (byte) offset to the input
 /// pointer operand.
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 #[repr(packed)]
 pub struct PtrAddInst {
     /// The pointer to offset
@@ -1540,7 +1581,7 @@ impl PtrAddInst {
 
 macro_rules! bin_op {
     ($discrim :ident, $struct: ident, $disp: literal) => {
-        #[derive(Debug)]
+        #[derive(Clone, Debug, PartialEq)]
         pub struct $struct {
             /// The left-hand side of the operation.
             lhs: PackedOperand,
@@ -1604,7 +1645,7 @@ bin_op!(URem, URemInst, "URem");
 /// Compares two integer operands according to a predicate (e.g. greater-than). Defines a local
 /// variable that dictates the truth of the comparison.
 ///
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct IcmpInst {
     left: PackedOperand,
     pred: Predicate,
@@ -1650,7 +1691,7 @@ impl IcmpInst {
 /// the assumption that (at runtime) the guard condition is true. If the guard condition is false,
 /// then execution may not continue, and deoptimisation must occur.
 ///
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct GuardInst {
     /// The condition to guard against.
     cond: PackedOperand,
@@ -1682,7 +1723,7 @@ impl GuardInst {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SignExtendInst {
     /// The value to extend.
     val: PackedOperand,
@@ -1707,7 +1748,7 @@ impl SignExtendInst {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ZeroExtendInst {
     /// The value to extend.
     val: PackedOperand,
@@ -1732,7 +1773,7 @@ impl ZeroExtendInst {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct AssignInst {
     /// The condition to guard against.
     opnd: PackedOperand,
