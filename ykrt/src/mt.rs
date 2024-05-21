@@ -915,7 +915,7 @@ mod tests {
     fn threaded_threshold() {
         // Aim for a situation where there's a lot of contention.
         let num_threads = u32::try_from(num_cpus::get() * 4).unwrap();
-        let hot_thrsh = num_threads.saturating_mul(100000);
+        let hot_thrsh = num_threads.saturating_mul(2500);
         let mt = Arc::new(MT::new().unwrap());
         mt.set_hot_threshold(hot_thrsh);
         let loc = Arc::new(Location::new());
