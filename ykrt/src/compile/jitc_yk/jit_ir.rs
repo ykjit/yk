@@ -990,6 +990,7 @@ impl Inst {
             Self::Sub(i) => i.ty_idx(m),
             Self::And(i) => i.ty_idx(m),
             Self::Or(i) => i.ty_idx(m),
+            Self::Xor(i) => i.ty_idx(m),
             Self::IndirectCall(idx) => {
                 let inst = &m.indirect_calls[*idx];
                 let ty = m.type_(inst.fty_idx);
@@ -1158,6 +1159,14 @@ impl fmt::Display for DisplayableInst<'_> {
                 write!(
                     f,
                     "Or {}, {}",
+                    i.lhs().display(self.m),
+                    i.rhs().display(self.m),
+                )
+            }
+            Inst::Xor(i) => {
+                write!(
+                    f,
+                    "Xor {}, {}",
                     i.lhs().display(self.m),
                     i.rhs().display(self.m),
                 )

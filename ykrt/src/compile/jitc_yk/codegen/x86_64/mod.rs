@@ -189,6 +189,7 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Inst::Sub(i) => self.cg_sub(inst_idx, i),
             jit_ir::Inst::And(i) => self.cg_and(inst_idx, i),
             jit_ir::Inst::Or(i) => self.cg_or(inst_idx, i),
+            jit_ir::Inst::Xor(i) => self.cg_xor(inst_idx, i),
             jit_ir::Inst::LShr(i) => self.cg_lshr(inst_idx, i),
             jit_ir::Inst::AShr(i) => self.cg_ashr(inst_idx, i),
             jit_ir::Inst::Mul(i) => self.cg_mul(inst_idx, i),
@@ -368,6 +369,30 @@ impl<'a> X64CodeGen<'a> {
             4 => dynasm!(self.asm; or Rd(WR0.code()), Rd(WR1.code())),
             2 => dynasm!(self.asm; or Rw(WR0.code()), Rw(WR1.code())),
             1 => dynasm!(self.asm; or Rb(WR0.code()), Rb(WR1.code())),
+            _ => todo!(),
+        }
+
+        self.store_new_local(inst_idx, WR0);
+    }
+
+    fn cg_xor(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::XorInst) {
+        let lhs = inst.lhs();
+        let rhs = inst.rhs();
+
+        // Operand types must be the same.
+        debug_assert_eq!(
+            self.m.type_(lhs.ty_idx(self.m)),
+            self.m.type_(rhs.ty_idx(self.m))
+        );
+
+        self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
+        self.load_operand(WR1, &rhs); // ^^^ same
+
+        match lhs.byte_size(self.m) {
+            8 => dynasm!(self.asm; xor Rq(WR0.code()), Rq(WR1.code())),
+            4 => dynasm!(self.asm; xor Rd(WR0.code()), Rd(WR1.code())),
+            2 => dynasm!(self.asm; xor Rw(WR0.code()), Rw(WR1.code())),
+            1 => dynasm!(self.asm; xor Rb(WR0.code()), Rb(WR1.code())),
             _ => todo!(),
         }
 
