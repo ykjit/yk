@@ -89,14 +89,16 @@ handle_arg() {
         --ldflags)
             # Use lld.
             OUTPUT="${OUTPUT} -fuse-ld=lld"
-            # Embed LLVM bitcode as late as possible.
-            OUTPUT="${OUTPUT} -Wl,--mllvm=--embed-bitcode-final"
-            # Add pthread_create wrapper function (__wrap_pthread_create)
-            OUTPUT="${OUTPUT} -Wl,--wrap=pthread_create"
-            # Embed Yk's IR.
-            if [ "${YKD_NEW_CODEGEN}" = "1" ]; then
+            # Embed IR.
+            if [ "${YKD_NEW_CODEGEN}" != "1" ]; then
+                # Embed LLVM bitcode as late as possible.
+                OUTPUT="${OUTPUT} -Wl,--mllvm=--embed-bitcode-final"
+            else
+                # Embed Yk's IR.
                 OUTPUT="${OUTPUT} -Wl,-mllvm=--yk-embed-ir"
             fi
+            # Add pthread_create wrapper function (__wrap_pthread_create)
+            OUTPUT="${OUTPUT} -Wl,--wrap=pthread_create"
 
             # Disable machine passes that would interfere with block mapping.
             #
