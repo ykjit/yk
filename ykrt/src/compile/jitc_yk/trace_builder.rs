@@ -426,6 +426,7 @@ impl<'a> TraceBuilder<'a> {
             aot_ir::BinOp::Sub => jit_ir::SubInst::new(lhs, rhs).into(),
             aot_ir::BinOp::Mul => jit_ir::MulInst::new(lhs, rhs).into(),
             aot_ir::BinOp::SDiv => jit_ir::SDivInst::new(lhs, rhs).into(),
+            aot_ir::BinOp::SRem => jit_ir::SRemInst::new(lhs, rhs).into(),
             aot_ir::BinOp::And => jit_ir::AndInst::new(lhs, rhs).into(),
             aot_ir::BinOp::Or => jit_ir::OrInst::new(lhs, rhs).into(),
             aot_ir::BinOp::Xor => jit_ir::XorInst::new(lhs, rhs).into(),
@@ -751,6 +752,11 @@ impl<'a> TraceBuilder<'a> {
             )
             .into(),
             aot_ir::CastKind::ZeroExtend => jit_ir::ZeroExtendInst::new(
+                &self.handle_operand(val)?,
+                self.handle_type(self.aot_mod.type_(*dest_ty_idx))?,
+            )
+            .into(),
+            aot_ir::CastKind::Trunc => jit_ir::TruncInst::new(
                 &self.handle_operand(val)?,
                 self.handle_type(self.aot_mod.type_(*dest_ty_idx))?,
             )

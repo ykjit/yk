@@ -982,6 +982,7 @@ pub enum Inst {
     // Cast-like instructions
     SignExtend(SignExtendInst),
     ZeroExtend(ZeroExtendInst),
+    Trunc(TruncInst),
 }
 
 impl Inst {
@@ -1014,6 +1015,7 @@ impl Inst {
             Self::TraceLoopStart => m.void_ty_idx(),
             Self::SignExtend(si) => si.dest_ty_idx(),
             Self::ZeroExtend(si) => si.dest_ty_idx(),
+            Self::Trunc(t) => t.dest_ty_idx(),
             Self::Assign(ai) => ai.opnd().ty_idx(m),
             // Binary operations
             Self::Add(i) => i.ty_idx(m),
@@ -1029,6 +1031,7 @@ impl Inst {
             }
             Self::Mul(i) => i.ty_idx(m),
             Self::SDiv(i) => i.ty_idx(m),
+            Self::SRem(i) => i.ty_idx(m),
             Self::LShr(i) => i.ty_idx(m),
             Self::AShr(i) => i.ty_idx(m),
             x => todo!("{x:?}"),
@@ -1187,6 +1190,14 @@ impl fmt::Display for DisplayableInst<'_> {
                     self.m.type_(i.dest_ty_idx())
                 )
             }
+            Inst::Trunc(i) => {
+                write!(
+                    f,
+                    "trunc {}, {}",
+                    i.val().display(self.m),
+                    self.m.type_(i.dest_ty_idx())
+                )
+            }
             Inst::Or(i) => {
                 write!(
                     f,
@@ -1235,6 +1246,14 @@ impl fmt::Display for DisplayableInst<'_> {
                     i.rhs().display(self.m),
                 )
             }
+            Inst::SRem(i) => {
+                write!(
+                    f,
+                    "srem {}, {}",
+                    i.lhs().display(self.m),
+                    i.rhs().display(self.m),
+                )
+            }
             Inst::Assign(i) => write!(f, "{}", i.opnd().display(self.m)),
             x => todo!("{x:?}"),
         }
@@ -1263,6 +1282,7 @@ inst!(Icmp, IcmpInst);
 inst!(Guard, GuardInst);
 inst!(SignExtend, SignExtendInst);
 inst!(ZeroExtend, ZeroExtendInst);
+inst!(Trunc, TruncInst);
 inst!(Assign, AssignInst);
 
 /// This is a test-only instruction which "consumes" an operand in the sense of "make use of the
@@ -1769,6 +1789,31 @@ pub struct ZeroExtendInst {
 }
 
 impl ZeroExtendInst {
+    pub(crate) fn new(val: &Operand, dest_ty_idx: TyIdx) -> Self {
+        Self {
+            val: PackedOperand::new(val),
+            dest_ty_idx,
+        }
+    }
+
+    pub(crate) fn val(&self) -> Operand {
+        self.val.unpack()
+    }
+
+    pub(crate) fn dest_ty_idx(&self) -> TyIdx {
+        self.dest_ty_idx
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TruncInst {
+    /// The value to extend.
+    val: PackedOperand,
+    /// The type to extend to.
+    dest_ty_idx: TyIdx,
+}
+
+impl TruncInst {
     pub(crate) fn new(val: &Operand, dest_ty_idx: TyIdx) -> Self {
         Self {
             val: PackedOperand::new(val),
