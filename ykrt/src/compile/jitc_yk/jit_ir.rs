@@ -1140,7 +1140,7 @@ impl fmt::Display for DisplayableInst<'_> {
                 if x.expect { "true" } else { "false " }
             ),
             Inst::LoadTraceInput(x) => {
-                write!(f, "load_ti {}, {}", x.off(), self.m.type_(x.ty_idx()))
+                write!(f, "load_ti {}", x.off())
             }
             Inst::TraceLoopStart => {
                 // Just marks a location, so we format it to look like a label.
@@ -2080,9 +2080,9 @@ mod tests {
             "@some_thread_local    ; thread local",
             "",
             "entry:",
-            "    %0: i8 = load_ti 0, i8",
-            "    %1: i8 = load_ti 8, i8",
-            "    %2: i8 = load_ti 16, i8",
+            "    %0: i8 = load_ti 0",
+            "    %1: i8 = load_ti 8",
+            "    %2: i8 = load_ti 16",
         ]
         .join("\n");
         assert_eq!(m.to_string(), expect);

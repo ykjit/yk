@@ -96,8 +96,8 @@ mod tests {
         fm_match(
             "
           entry:
-            %0: i16 = load_ti 0, i16
-            %1: i16 = load_ti 16, i16
+            %0: i16 = load_ti 0
+            %1: i16 = load_ti 16
             %2: i16 = add %0, %1
             %3: i16 = add %0, %1
             %4: i16 = add %0, %3
@@ -108,8 +108,8 @@ mod tests {
             "
           ...
           entry:
-            %0: i16 = load_ti 0, i16
-            %1: i16 = load_ti 16, i16
+            %0: i16 = load_ti 0
+            %1: i16 = load_ti 16
             %2: i16 = add %0, %1
             %3: i16 = add %0, %2
             test_use %2
