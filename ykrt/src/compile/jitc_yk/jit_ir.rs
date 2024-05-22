@@ -2040,17 +2040,6 @@ mod tests {
     }
 
     #[test]
-    fn stringify_const_ptr2() {
-        let m = Module::new_testing();
-        let ptr_val = stringify_const_ptr2 as *const u8 as usize;
-        let cp = Const {
-            ty_idx: m.ptr_ty_idx(),
-            bytes: ptr_val.to_ne_bytes().to_vec(),
-        };
-        assert_eq!(format!("{}", cp.display(&m)), format!("{:#x}", ptr_val));
-    }
-
-    #[test]
     fn stringify_const_ptr() {
         let m = Module::new_testing();
         // Build a constant pointer with higher valued bytes towards the most-significant byte.
@@ -2072,6 +2061,17 @@ mod tests {
             format!("{}", cp.display(&m)),
             format!("{:#x}", expect_usize)
         );
+    }
+
+    #[test]
+    fn stringify_const_ptr2() {
+        let m = Module::new_testing();
+        let ptr_val = stringify_const_ptr2 as *const u8 as usize;
+        let cp = Const {
+            ty_idx: m.ptr_ty_idx(),
+            bytes: ptr_val.to_ne_bytes().to_vec(),
+        };
+        assert_eq!(format!("{}", cp.display(&m)), format!("{:#x}", ptr_val));
     }
 
     #[test]
