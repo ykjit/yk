@@ -16,9 +16,9 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{1}}: i8 = Icmp %{{2}}, SignedGreater, 1i32
+//     %{{1}}: i8 = sgt %{{2}}, 1i32
 //     ...
-//     %{{3}}: i64 = Call @fwrite(%{{4}}, 4i64, 1i64, %{{5}})
+//     %{{3}}: i64 = call @fwrite(%{{4}}, 4i64, 1i64, %{{5}})
 //     ...
 //     --- End jit-pre-opt ---
 //     3

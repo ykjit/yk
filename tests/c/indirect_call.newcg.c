@@ -9,7 +9,7 @@
 //     jitstate: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{1}}: i32 = IndirectCall %{{2}}(%{{3}})
+//     %{{1}}: i32 = icall %{{2}}(%{{3}})
 //     ...
 //     --- End jit-pre-opt ---
 //     foo 6

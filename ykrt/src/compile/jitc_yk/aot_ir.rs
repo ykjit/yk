@@ -377,7 +377,19 @@ pub(crate) enum Predicate {
 
 impl Display for Predicate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
+        // Following LLVM precident, using their short predicate names for formatting.
+        match self {
+            Self::Equal => write!(f, "eq"),
+            Self::NotEqual => write!(f, "ne"),
+            Self::UnsignedGreater => write!(f, "ugt"),
+            Self::UnsignedGreaterEqual => write!(f, "uge"),
+            Self::UnsignedLess => write!(f, "ult"),
+            Self::UnsignedLessEqual => write!(f, "ule"),
+            Self::SignedGreater => write!(f, "sgt"),
+            Self::SignedGreaterEqual => write!(f, "sge"),
+            Self::SignedLess => write!(f, "slt"),
+            Self::SignedLessEqual => write!(f, "sle"),
+        }
     }
 }
 

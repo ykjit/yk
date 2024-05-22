@@ -109,13 +109,13 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
         }
 
         // Loop the JITted code if the backedge target label is present.
-        let label = StaticLabel::global("trace_loop_start");
+        let label = StaticLabel::global("tloop_start");
         match self.asm.labels().resolve_static(&label) {
             Ok(_) => {
                 // Found the label, emit a jump to it.
                 #[cfg(any(debug_assertions, test))]
-                self.comment(self.asm.offset(), "Trace loop backedge".to_owned());
-                dynasm!(self.asm; jmp ->trace_loop_start);
+                self.comment(self.asm.offset(), "tloop_backedge:".to_owned());
+                dynasm!(self.asm; jmp ->tloop_start);
             }
             Err(DynasmError::UnknownLabel(_)) => {
                 // Label not found. This is OK for unit testing, where we sometimes construct
@@ -770,7 +770,7 @@ impl<'a> X64CodeGen<'a> {
 
     fn cg_traceloopstart(&mut self) {
         // FIXME: peel the initial iteration of the loop to allow us to hoist loop invariants.
-        dynasm!(self.asm; ->trace_loop_start:);
+        dynasm!(self.asm; ->tloop_start:);
     }
 
     fn cg_signextend(&mut self, inst_idx: InstIdx, i: &jit_ir::SignExtendInst) {
@@ -1187,7 +1187,7 @@ mod tests {
                 .unwrap();
             let patt_lines = "
                 ...
-                ; %1: ptr = ptradd %0, 64i32
+                ; %1: ptr = ptr_add %0, 64i32
                 ... mov r12, [rbp-0x08]
                 ... mov r13, 0x40
                 ... add r12, r13
@@ -1211,7 +1211,7 @@ mod tests {
                 .unwrap();
             let patt_lines = "
                 ...
-                ; Store %0, %1
+                ; store %0, %1
                 ... mov r12, [rbp-0x10]
                 ... mov r13, [rbp-0x08]
                 ... mov [r12], r13
@@ -1228,7 +1228,7 @@ mod tests {
                 .unwrap();
             let patt_lines = "
                 ...
-                ; %0: i8 = LoadTraceInput 0, i8
+                ; %0: i8 = load_ti 0, i8
                 ... movzx r12, byte ptr [rdi]
                 ... mov [rbp-0x01], r12b
                 ...
@@ -1246,7 +1246,7 @@ mod tests {
                 .unwrap();
             let patt_lines = "
                 ...
-                ; %0: i16 = LoadTraceInput 32, i16
+                ; %0: i16 = load_ti 32, i16
                 ... movzx r12d, word ptr [rdi+0x20]
                 ... mov [rbp-0x02], r12w
                 ...
@@ -1271,19 +1271,19 @@ mod tests {
                 .unwrap();
             let patt_lines = "
                 ...
-                ; %0: i8 = LoadTraceInput 0, i8
+                ; %0: i8 = load_ti 0, i8
                 ... movzx r12, byte ptr [rdi]
                 ... mov [rbp-0x01], r12b
-                ; %1: i8 = LoadTraceInput 1, i8
+                ; %1: i8 = load_ti 1, i8
                 ... movzx r12, byte ptr [rdi+0x01]
                 ... mov [rbp-0x02], r12b
-                ; %2: i8 = LoadTraceInput 2, i8
+                ; %2: i8 = load_ti 2, i8
                 ... movzx r12, byte ptr [rdi+0x02]
                 ... mov [rbp-0x03], r12b
-                ; %3: i8 = LoadTraceInput 3, i8
+                ; %3: i8 = load_ti 3, i8
                 ... movzx r12, byte ptr [rdi+0x03]
                 ... mov [rbp-0x04], r12b
-                ; %4: ptr = LoadTraceInput 8, ptr
+                ; %4: ptr = load_ti 8, ptr
                 ... mov r12, [rdi+0x08]
                 ... mov [rbp-0x10], r12
                 ...
@@ -1306,7 +1306,7 @@ mod tests {
             m.push(jit_ir::AddInst::new(op1, op2).into()).unwrap();
             let patt_lines = "
                 ...
-                ; %2: i16 = Add %0, %1
+                ; %2: i16 = add %0, %1
                 ... movzx r12, word ptr [rbp-0x02]
                 ... movzx r13, word ptr [rbp-0x04]
                 ... add r12w, r13w
@@ -1331,7 +1331,7 @@ mod tests {
             m.push(jit_ir::AddInst::new(op1, op2).into()).unwrap();
             let patt_lines = "
                 ...
-                ; %2: i64 = Add %0, %1
+                ; %2: i64 = add %0, %1
                 ... mov r12, [rbp-0x08]
                 ... mov r13, [rbp-0x10]
                 ... add r12, r13
@@ -1437,7 +1437,7 @@ mod tests {
             let patt_lines = format!(
                 "
                 ...
-                ; Call @puts(%0, %1, %2)
+                ; call @puts(%0, %1, %2)
                 ... mov edi, [rbp-0x04]
                 ... mov esi, [rbp-0x08]
                 ... mov edx, [rbp-0x0C]
@@ -1503,7 +1503,7 @@ mod tests {
             let patt_lines = format!(
                 "
                 ...
-                ; Call @puts(%0, %1, %2, %3, %4, %5)
+                ; call @puts(%0, %1, %2, %3, %4, %5)
                 ... movzx rdi, byte ptr [rbp-0x01]
                 ... movzx rsi, word ptr [rbp-0x04]
                 ... mov edx, [rbp-0x08]
@@ -1623,7 +1623,7 @@ mod tests {
                 .unwrap();
             let patt_lines = "
                 ...
-                ; %1: i8 = Icmp %0, Equal, %0
+                ; %1: i8 = eq %0, %0
                 ... mov r12, [rbp-0x08]
                 ... mov r13, [rbp-0x08]
                 ... cmp r12, r13
@@ -1645,7 +1645,7 @@ mod tests {
                 .unwrap();
             let patt_lines = "
                 ...
-                ; %1: i8 = Icmp %0, Equal, %0
+                ; %1: i8 = eq %0, %0
                 ... movzx r12, byte ptr [rbp-0x01]
                 ... movzx r13, byte ptr [rbp-0x01]
                 ... cmp r12b, r13b
@@ -1691,7 +1691,7 @@ mod tests {
                 .unwrap();
             let patt_lines = "
                 ...
-                ; Guard %0, true
+                ; guard %0, true
                 {{vaddr1}} {{off1}}: jmp 0x00000000{{cmpoff}}
                 {{vaddr2}} {{failoff}}: mov rdi, [rbp]
                 ... mov rsi, 0x00
@@ -1717,7 +1717,7 @@ mod tests {
                 .unwrap();
             let patt_lines = "
                 ...
-                ; Guard %0, false
+                ; guard %0, false
                 {{vaddr1}} {{off1}}: jmp 0x00000000{{cmpoff}}
                 {{vaddr2}} {{failoff}}: mov rdi, [rbp]
                 ... mov rsi, 0x00
@@ -1750,8 +1750,8 @@ mod tests {
             // easier (capitalisation of hex differs).
             let patt_lines = "
                 ...
-                ; TraceLoopStart
-                ; Trace loop backedge
+                ; tloop_start:
+                ; tloop_backedge:
                 {{vaddr}} {{off}}: jmp {{target}}
             ";
             test_with_spillalloc(&m, &patt_lines);
@@ -1769,12 +1769,12 @@ mod tests {
                 .unwrap();
             let patt_lines = "
                 ...
-                ; %0: i8 = LoadTraceInput 0, i8
+                ; %0: i8 = load_ti 0, i8
                 ...
-                ; TraceLoopStart
+                ; tloop_start:
                 ; %2: i8 = add %0, %0
                 ...
-                ; Trace loop backedge
+                ; tloop_backedge:
                 ...: jmp ...
             ";
             test_with_spillalloc(&m, &patt_lines);

@@ -2,16 +2,16 @@
 ;   stdout:
 ;     ...
 ;       bb0:
-;         $0_0: i1 = icmp $arg0, Equal, $arg1
-;         $0_1: i1 = icmp $0_0, NotEqual, $arg1
-;         $0_2: i1 = icmp $0_0, UnsignedLess, $0_1
-;         $0_3: i1 = icmp $0_1, UnsignedLessEqual, $0_2
-;         $0_4: i1 = icmp $0_2, UnsignedGreater, $0_3
-;         $0_5: i1 = icmp $0_3, UnsignedGreaterEqual, $0_4
-;         $0_6: i1 = icmp $0_4, SignedLess, $0_5
-;         $0_7: i1 = icmp $0_5, SignedLessEqual, $0_6
-;         $0_8: i1 = icmp $0_6, SignedGreater, $0_7
-;         $0_9: i1 = icmp $0_7, SignedGreaterEqual, $0_8
+;         $0_0: i1 = icmp $arg0, eq, $arg1
+;         $0_1: i1 = icmp $0_0, ne, $arg1
+;         $0_2: i1 = icmp $0_0, ult, $0_1
+;         $0_3: i1 = icmp $0_1, ule, $0_2
+;         $0_4: i1 = icmp $0_2, ugt, $0_3
+;         $0_5: i1 = icmp $0_3, uge, $0_4
+;         $0_6: i1 = icmp $0_4, slt, $0_5
+;         $0_7: i1 = icmp $0_5, sle, $0_6
+;         $0_8: i1 = icmp $0_6, sgt, $0_7
+;         $0_9: i1 = icmp $0_7, sge, $0_8
 ;         ret $0_9
 ;     ...
 

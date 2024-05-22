@@ -18,7 +18,7 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     Call @foo(%{{4}})
+//     call @foo(%{{4}})
 //     ...
 //     --- End jit-pre-opt ---
 //     0

@@ -9,7 +9,7 @@
 //     jitstate: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{result}}: i64 = AShr %{{1}}, 2i64
+//     %{{result}}: i64 = ashr %{{1}}, 2i64
 //     ...
 //     --- End jit-pre-opt ---
 //     ashr 3
