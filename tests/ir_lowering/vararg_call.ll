@@ -1,11 +1,11 @@
 ; Dump:
 ;   stdout:
 ;     ...
-;     func f($arg0: i32, ...) -> i32 {
+;     func f(%arg0: i32, ...) -> i32 {
 ;     ...
 ;     func main(...
 ;     bb0:
-;       $0_0: i32 = call f($arg0) [safepoint: 1i64, ()]
+;       %0_0: i32 = call f(%arg0) [safepoint: 1i64, ()]
 ;     ...
 
 

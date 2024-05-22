@@ -9,7 +9,7 @@
 //     jitstate: stop-tracing
 //     --- Begin aot ---
 //     ...
-//     ${{9_4}}: ptr = PtrAdd @array, 0 + (${{9_3}} * 4)
+//     %{{9_4}}: ptr = ptr_add @array, 0 + (%{{9_3}} * 4)
 //     ...
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---

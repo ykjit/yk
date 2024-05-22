@@ -2,17 +2,17 @@
 ;   stdout:
 ;     ...
 ;       bb0:
-;         $0_0: i1 = icmp $arg0, eq, $arg1
-;         $0_1: i1 = icmp $0_0, ne, $arg1
-;         $0_2: i1 = icmp $0_0, ult, $0_1
-;         $0_3: i1 = icmp $0_1, ule, $0_2
-;         $0_4: i1 = icmp $0_2, ugt, $0_3
-;         $0_5: i1 = icmp $0_3, uge, $0_4
-;         $0_6: i1 = icmp $0_4, slt, $0_5
-;         $0_7: i1 = icmp $0_5, sle, $0_6
-;         $0_8: i1 = icmp $0_6, sgt, $0_7
-;         $0_9: i1 = icmp $0_7, sge, $0_8
-;         ret $0_9
+;         %0_0: i1 = eq %arg0, %arg1
+;         %0_1: i1 = ne %0_0, %arg1
+;         %0_2: i1 = ult %0_0, %0_1
+;         %0_3: i1 = ule %0_1, %0_2
+;         %0_4: i1 = ugt %0_2, %0_3
+;         %0_5: i1 = uge %0_3, %0_4
+;         %0_6: i1 = slt %0_4, %0_5
+;         %0_7: i1 = sle %0_5, %0_6
+;         %0_8: i1 = sgt %0_6, %0_7
+;         %0_9: i1 = sge %0_7, %0_8
+;         ret %0_9
 ;     ...
 
 ; Check that icmp predicates lower correctly.

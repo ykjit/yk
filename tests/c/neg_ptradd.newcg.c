@@ -9,7 +9,7 @@
 //     jitstate: stop-tracing
 //     --- Begin aot ---
 //     ...
-//     ${{14_2}}: ptr = PtrAdd ${{14_1}}, -{{4}}
+//     %{{14_2}}: ptr = ptr_add %{{14_1}}, -{{4}}
 //     ...
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---

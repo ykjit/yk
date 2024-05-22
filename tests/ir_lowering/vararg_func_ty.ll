@@ -1,7 +1,7 @@
 ; Dump:
 ;   stdout:
 ;     ...
-;     func f($arg0: i32, ...) -> i32 {
+;     func f(%arg0: i32, ...) -> i32 {
 ;     ...
 
 ; Check a vararg function type lowers correctly.

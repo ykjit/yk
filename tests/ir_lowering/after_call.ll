@@ -1,13 +1,12 @@
 ; Dump:
 ;   stdout:
 ;     ...
-;     func main($arg0: i32, $arg1: ptr) -> i32 {
+;     func main(%arg0: i32, %arg1: ptr) -> i32 {
 ;       bb0:
-;         $0_0: i32 = call f($arg0) [safepoint: 1i64, ()]
-;         $0_1: i1 = icmp $arg0, eq, 1i32
-;         condbr $0_1, bb1, bb2 [safepoint: 2i64, ()]
+;         %0_0: i32 = call f(%arg0) [safepoint: 1i64, ()]
+;         %0_1: i1 = eq %arg0, 1i32
+;         condbr %0_1, bb1, bb2 [safepoint: 2i64, ()]
 ;     ...
-
 
 ; Check that a instructions following a call are correctly lowered.
 
