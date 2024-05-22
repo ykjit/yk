@@ -1342,7 +1342,7 @@ impl LoadTraceInputInst {
     }
 }
 
-/// The operands for a [Inst::LoadGlobal]
+/// The operands for a [Inst::LookupGlobal]
 ///
 /// # Semantics
 ///
