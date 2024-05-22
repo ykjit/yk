@@ -16,6 +16,14 @@
 //!  * `Idx`: "index"
 //!  * `Inst`: "instruction"
 //!  * `Ty`: "type"
+//!
+//! To get human-readable representations of IR data structures, most of the IR constructs either:
+//!  * implement [std::fmt::Display] and thus can be stringified with (e.g.) `format!`, or
+//!  * if extra information is needed, have a method called `display()` which takes extra arguments
+//!    and returns something which does implement [std::fmt::Display].
+//!
+//! In the human readable IR, all names should be lowercase. Try to keep them short. Underscores
+//! can be added to taste.
 
 // For now, don't swamp others working in other areas of the system.
 // FIXME: eventually delete.
@@ -1068,11 +1076,11 @@ impl fmt::Display for DisplayableInst<'_> {
         }
         match self.inst {
             #[cfg(test)]
-            Inst::TestUse(x) => write!(f, "TestUse {}", x.operand().display(self.m)),
-            Inst::Load(x) => write!(f, "Load {}", x.operand().display(self.m)),
+            Inst::TestUse(x) => write!(f, "test_use {}", x.operand().display(self.m)),
+            Inst::Load(x) => write!(f, "load {}", x.operand().display(self.m)),
             Inst::LookupGlobal(x) => write!(
                 f,
-                "LookupGlobal {}",
+                "lookup_global {}",
                 self.m
                     .global_decl(x.global_decl_idx)
                     .name
@@ -1082,7 +1090,7 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::Call(x) => {
                 write!(
                     f,
-                    "Call @{}({})",
+                    "call @{}({})",
                     self.m.func_decl(x.target).name(),
                     (0..x.num_args())
                         .map(|y| format!("{}", x.operand(self.m, y).display(self.m)))
@@ -1094,7 +1102,7 @@ impl fmt::Display for DisplayableInst<'_> {
                 let inst = &self.m.indirect_calls[*x];
                 write!(
                     f,
-                    "IndirectCall {}({})",
+                    "icall {}({})",
                     inst.target.unpack().display(self.m),
                     (0..inst.num_args())
                         .map(|y| format!("{}", inst.operand(self.m, y).display(self.m)))
@@ -1105,44 +1113,44 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::PtrAdd(x) => {
                 write!(
                     f,
-                    "PtrAdd {}, {}",
+                    "ptr_add {}, {}",
                     x.ptr().display(self.m),
                     x.offset().display(self.m)
                 )
             }
             Inst::Store(x) => write!(
                 f,
-                "Store {}, {}",
+                "store {}, {}",
                 x.val.unpack().display(self.m),
                 x.ptr.unpack().display(self.m)
             ),
+            // FIXME: split Icmp out into separate opcodes. For now we pretty-print icmp as though
+            // we have already done that.
             Inst::Icmp(x) => write!(
                 f,
-                "Icmp {}, {:?}, {}",
-                x.left().display(self.m),
+                "{} {}, {}",
                 x.pred,
+                x.left().display(self.m),
                 x.right().display(self.m)
             ),
             Inst::Guard(x) => write!(
                 f,
-                "Guard {}, {}",
+                "guard {}, {}",
                 x.cond().display(self.m),
                 if x.expect { "true" } else { "false " }
             ),
             Inst::LoadTraceInput(x) => {
-                write!(
-                    f,
-                    "LoadTraceInput {}, {}",
-                    x.off(),
-                    self.m.type_(x.ty_idx())
-                )
+                write!(f, "load_ti {}, {}", x.off(), self.m.type_(x.ty_idx()))
             }
-            Inst::TraceLoopStart => write!(f, "TraceLoopStart"),
-            Inst::Arg(i) => write!(f, "Arg({i})"),
+            Inst::TraceLoopStart => {
+                // Just marks a location, so we format it to look like a label.
+                write!(f, "tloop_start:")
+            }
+            Inst::Arg(i) => write!(f, "arg({i})"),
             Inst::Add(x) => {
                 write!(
                     f,
-                    "Add {}, {}",
+                    "add {}, {}",
                     x.lhs().display(self.m),
                     x.rhs().display(self.m)
                 )
@@ -1150,7 +1158,7 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::Sub(x) => {
                 write!(
                     f,
-                    "Sub {}, {}",
+                    "sub {}, {}",
                     x.lhs().display(self.m),
                     x.rhs().display(self.m)
                 )
@@ -1158,7 +1166,7 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::And(x) => {
                 write!(
                     f,
-                    "And {}, {}",
+                    "and {}, {}",
                     x.lhs().display(self.m),
                     x.rhs().display(self.m)
                 )
@@ -1166,7 +1174,7 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::SignExtend(i) => {
                 write!(
                     f,
-                    "SignExtend {}, {}",
+                    "sext {}, {}",
                     i.val().display(self.m),
                     self.m.type_(i.dest_ty_idx())
                 )
@@ -1174,7 +1182,7 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::ZeroExtend(i) => {
                 write!(
                     f,
-                    "ZeroExtend {}, {}",
+                    "zext {}, {}",
                     i.val().display(self.m),
                     self.m.type_(i.dest_ty_idx())
                 )
@@ -1182,7 +1190,7 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::Or(i) => {
                 write!(
                     f,
-                    "Or {}, {}",
+                    "or {}, {}",
                     i.lhs().display(self.m),
                     i.rhs().display(self.m),
                 )
@@ -1190,7 +1198,7 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::Xor(i) => {
                 write!(
                     f,
-                    "Xor {}, {}",
+                    "xor {}, {}",
                     i.lhs().display(self.m),
                     i.rhs().display(self.m),
                 )
@@ -1198,7 +1206,7 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::LShr(i) => {
                 write!(
                     f,
-                    "LShr {}, {}",
+                    "lshr {}, {}",
                     i.lhs().display(self.m),
                     i.rhs().display(self.m),
                 )
@@ -1206,7 +1214,7 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::AShr(i) => {
                 write!(
                     f,
-                    "AShr {}, {}",
+                    "ashr {}, {}",
                     i.lhs().display(self.m),
                     i.rhs().display(self.m),
                 )
@@ -1214,7 +1222,7 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::Mul(i) => {
                 write!(
                     f,
-                    "Mul {}, {}",
+                    "mul {}, {}",
                     i.lhs().display(self.m),
                     i.rhs().display(self.m),
                 )
@@ -1222,7 +1230,7 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::SDiv(i) => {
                 write!(
                     f,
-                    "SDiv {}, {}",
+                    "sdiv {}, {}",
                     i.lhs().display(self.m),
                     i.rhs().display(self.m),
                 )
@@ -2072,9 +2080,9 @@ mod tests {
             "@some_thread_local    ; thread local",
             "",
             "entry:",
-            "    %0: i8 = LoadTraceInput 0, i8",
-            "    %1: i8 = LoadTraceInput 8, i8",
-            "    %2: i8 = LoadTraceInput 16, i8",
+            "    %0: i8 = load_ti 0, i8",
+            "    %1: i8 = load_ti 8, i8",
+            "    %2: i8 = load_ti 16, i8",
         ]
         .join("\n");
         assert_eq!(m.to_string(), expect);

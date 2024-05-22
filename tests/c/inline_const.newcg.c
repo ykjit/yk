@@ -9,7 +9,7 @@
 //     jitstate: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{2}}: i32 = Call @fprintf(%{{3}}, %{{4}}, 3i32)
+//     %{{2}}: i32 = call @fprintf(%{{3}}, %{{4}}, 3i32)
 //     ...
 //     --- End jit-pre-opt ---
 //     foo 3

@@ -14,7 +14,7 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{14}}: ptr = PtrAdd %{{13}}, -{{4i32}}
+//     %{{14}}: ptr = ptr_add %{{13}}, -{{4i32}}
 //     ...
 //     --- End jit-pre-opt ---
 //     i=9

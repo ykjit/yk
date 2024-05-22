@@ -16,7 +16,7 @@
 //     jitstate: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{result}}: i32 = And %{{1}}, 1i32
+//     %{{result}}: i32 = and %{{1}}, 1i32
 //     ...
 //     --- End jit-pre-opt ---
 //     and 1

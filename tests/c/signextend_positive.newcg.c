@@ -14,7 +14,7 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{22}}: i64 = SignExtend %{{21}}, i64
+//     %{{22}}: i64 = sext %{{21}}, i64
 //     ...
 //     --- End jit-pre-opt ---
 //     pos=2

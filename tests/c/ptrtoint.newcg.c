@@ -9,7 +9,7 @@
 //     jitstate: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{1}}: i64 = ZeroExtend %{{2}}, i64
+//     %{{1}}: i64 = zext %{{2}}, i64
 //     ...
 //     --- End jit-pre-opt ---
 //     ptr: {{ptr}}

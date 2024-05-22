@@ -11,9 +11,9 @@
 //     jitstate: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{1}}: i32 = Add %{{2}}, %{{argc}}
+//     %{{1}}: i32 = add %{{2}}, %{{argc}}
 //     ...
-//     %{{3}}: i32 = Sub %{{4}}, %{{argc}}
+//     %{{3}}: i32 = sub %{{4}}, %{{argc}}
 //     ...
 //     --- End jit-pre-opt ---
 //     add 4
