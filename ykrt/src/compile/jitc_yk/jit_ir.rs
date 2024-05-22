@@ -1965,7 +1965,7 @@ mod tests {
         fn check<T: ToBytes + PrimInt>(m: &mut Module, num_bits: u32, val: T, expect: &str) {
             assert!(mem::size_of::<T>() * 8 >= usize::try_from(num_bits).unwrap());
             let c = IntegerTy::new(num_bits).make_constant(m, val).unwrap();
-            assert_eq!(c.display(&m).to_string(), expect);
+            assert_eq!(c.display(m).to_string(), expect);
         }
 
         let mut m = Module::new_testing();

@@ -33,7 +33,7 @@ fn main() {
             // We don't use yk-config here, as we are testing one very specific functionality that
             // requires only one special flag.
             let mut compiler = Command::new(ykllvm_bin("clang"));
-            compiler.args(&[
+            compiler.args([
                 "-flto",
                 "-fuse-ld=lld",
                 "-O0",

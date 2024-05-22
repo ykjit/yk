@@ -817,7 +817,7 @@ mod tests {
     }
 
     fn expect_start_tracing(mt: &Arc<MT>, loc: &Location) {
-        let TransitionControlPoint::StartTracing(hl) = mt.transition_control_point(&loc) else {
+        let TransitionControlPoint::StartTracing(hl) = mt.transition_control_point(loc) else {
             panic!()
         };
         MTThread::with(|mtt| {
@@ -830,7 +830,7 @@ mod tests {
     }
 
     fn expect_stop_tracing(mt: &Arc<MT>, loc: &Location) {
-        let TransitionControlPoint::StopTracing = mt.transition_control_point(&loc) else {
+        let TransitionControlPoint::StopTracing = mt.transition_control_point(loc) else {
             panic!()
         };
         MTThread::with(|mtt| {
@@ -1261,17 +1261,17 @@ mod tests {
         fn to_compiled(mt: &Arc<MT>, loc: &Location) {
             for _ in 0..THRESHOLD {
                 assert_eq!(
-                    mt.transition_control_point(&loc),
+                    mt.transition_control_point(loc),
                     TransitionControlPoint::NoAction
                 );
             }
 
-            expect_start_tracing(&mt, &loc);
+            expect_start_tracing(mt, loc);
             assert!(matches!(
                 loc.hot_location().unwrap().lock().kind,
                 HotLocationKind::Tracing
             ));
-            expect_stop_tracing(&mt, &loc);
+            expect_stop_tracing(mt, loc);
             assert!(matches!(
                 loc.hot_location().unwrap().lock().kind,
                 HotLocationKind::Compiling
