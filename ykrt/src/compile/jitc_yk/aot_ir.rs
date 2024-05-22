@@ -1391,8 +1391,11 @@ impl Ty {
             Self::Void => "void".to_owned(),
             Self::Integer(it) => it.const_to_string(c),
             Self::Ptr => {
-                // FIXME: write a stringifier for constant pointers.
-                "const_ptr".to_owned()
+                let ptr_size = std::mem::size_of::<usize>();
+                debug_assert_eq!(c.bytes().len(), ptr_size);
+                // unwrap is safe: constant is malformed if there are too few bytes for a chunk.
+                let pval = usize::from_ne_bytes(*c.bytes().first_chunk().unwrap());
+                format!("{:#x}", pval)
             }
             Self::Func(_) => unreachable!(), // No such thing as a constant function in our IR.
             Self::Struct(_) => {
@@ -1610,6 +1613,45 @@ mod tests {
         check(64, u64::MAX, "-1i64");
         check(64, 12345678u64, "12345678i64");
         check(64, i64::MIN as u64, &format!("{}i64", i64::MIN));
+    }
+
+    #[test]
+    fn stringify_const_ptr() {
+        let mut m = Module::default();
+        m.types.push(Ty::Ptr);
+        let ptr_ty_idx = TyIdx(0);
+        // Build a constant pointer with higher valued bytes towards the most-significant byte.
+        // Careful now: big endian stores the most significant byte first!
+        let rng = 0u8..(mem::size_of::<usize>() as u8);
+        #[cfg(target_endian = "little")]
+        let bytes = rng.clone().collect::<Vec<u8>>();
+        #[cfg(target_endian = "big")]
+        let bytes = rng.clone().rev().collect::<Vec<u8>>();
+
+        let cp = ConstVal {
+            ty_idx: ptr_ty_idx,
+            bytes,
+        };
+
+        let expect_bytes = rng.rev().map(|i| format!("{:02x}", i)).collect::<String>();
+        let expect_usize = usize::from_str_radix(&expect_bytes, 16).unwrap();
+        assert_eq!(
+            format!("{}", cp.display(&m)),
+            format!("{:#x}", expect_usize)
+        );
+    }
+
+    #[test]
+    fn stringify_const_ptr2() {
+        let mut m = Module::default();
+        m.types.push(Ty::Ptr);
+        let ptr_ty_idx = TyIdx(0);
+        let ptr_val = stringify_const_ptr2 as *const u8 as usize;
+        let cp = ConstVal {
+            ty_idx: ptr_ty_idx,
+            bytes: ptr_val.to_ne_bytes().to_vec(),
+        };
+        assert_eq!(format!("{}", cp.display(&m)), format!("{:#x}", ptr_val));
     }
 
     #[test]
