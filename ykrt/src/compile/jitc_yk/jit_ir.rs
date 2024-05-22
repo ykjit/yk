@@ -992,6 +992,8 @@ impl Inst {
     /// If the instruction doesn't define a type then the type index for [Ty::Void] is returned.
     pub(crate) fn def_ty_idx(&self, m: &Module) -> TyIdx {
         match self {
+            #[cfg(test)]
+            Self::TestUse(_) => m.void_ty_idx(),
             Self::Load(li) => li.ty_idx(),
             Self::LookupGlobal(..) => m.ptr_ty_idx(),
             Self::LoadTraceInput(li) => li.ty_idx(),
@@ -1065,6 +1067,8 @@ impl fmt::Display for DisplayableInst<'_> {
             write!(f, "%{}: {dt} = ", self.inst_idx.to_u16())?;
         }
         match self.inst {
+            #[cfg(test)]
+            Inst::TestUse(x) => write!(f, "TestUse {}", x.operand().display(self.m)),
             Inst::Load(x) => write!(f, "Load {}", x.operand().display(self.m)),
             Inst::LookupGlobal(x) => write!(
                 f,
