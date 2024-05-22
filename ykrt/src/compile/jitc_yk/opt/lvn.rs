@@ -77,39 +77,44 @@ pub(super) fn lvn(mut m: Module) -> Result<Module, CompilationError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compile::jitc_yk::jit_ir::{
-        self, AddInst, InstIdx, IntegerTy, LoadTraceInputInst, TestUseInst,
-    };
+    use fm::FMBuilder;
+
+    fn fm_match<F>(before: &str, f: F, after: &str)
+    where
+        F: FnOnce(Module) -> Module,
+    {
+        let m = Module::from_str(before);
+        let m = f(m);
+        let fmm = FMBuilder::new(after).unwrap().build().unwrap();
+        if let Err(e) = fmm.matches(&m.to_string()) {
+            panic!("{e}");
+        }
+    }
 
     #[test]
     fn opt_add() {
-        let mut m = Module::new_testing();
-        let i16_ty_idx = m
-            .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(16)))
-            .unwrap();
-        let op1 = m
-            .push_and_make_operand(LoadTraceInputInst::new(0, i16_ty_idx).into())
-            .unwrap();
-        let op2 = m
-            .push_and_make_operand(LoadTraceInputInst::new(16, i16_ty_idx).into())
-            .unwrap();
-        let _ = m
-            .push_and_make_operand(AddInst::new(op1.clone(), op2.clone()).into())
-            .unwrap();
-        let op5 = m
-            .push_and_make_operand(AddInst::new(op1.clone(), op2.clone()).into())
-            .unwrap();
-        let op6 = m
-            .push_and_make_operand(AddInst::new(op1.clone(), op5.clone()).into())
-            .unwrap();
-        m.push(TestUseInst::new(op5).into()).unwrap();
-        m.push(TestUseInst::new(op6).into()).unwrap();
-        assert_eq!(m.len(), 7);
-        let m = lvn(m).unwrap();
-        assert_eq!(m.len(), 6);
-        assert_eq!(
-            *m.inst(InstIdx::new(3).unwrap()),
-            Into::<Inst>::into(AddInst::new(op1, Operand::Local(InstIdx::new(2).unwrap())))
+        fm_match(
+            "
+          entry:
+            %0: i16 = load_ti 0, i16
+            %1: i16 = load_ti 16, i16
+            %2: i16 = add %0, %1
+            %3: i16 = add %0, %1
+            %4: i16 = add %0, %3
+            test_use %3
+            test_use %4
+        ",
+            |m| lvn(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i16 = load_ti 0, i16
+            %1: i16 = load_ti 16, i16
+            %2: i16 = add %0, %1
+            %3: i16 = add %0, %2
+            test_use %2
+            test_use %3
+        ",
         );
     }
 }

@@ -38,6 +38,17 @@ pub(crate) enum CompilationError {
     ResourceExhausted(Box<dyn Error>),
 }
 
+impl fmt::Display for CompilationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CompilationError::General(s) => write!(f, "General error: {s}"),
+            CompilationError::InternalError(s) => write!(f, "Internal error: {s}"),
+            CompilationError::LimitExceeded(s) => write!(f, "Limit exceeded: {s}"),
+            CompilationError::ResourceExhausted(e) => write!(f, "Resource exhausted: {e:}"),
+        }
+    }
+}
+
 /// The trait that every JIT compiler backend must implement.
 pub(crate) trait Compiler: Send + Sync {
     /// Compile a mapped trace into machine code.
