@@ -28,7 +28,7 @@ Insts -> Result<Vec<ASTInst>, Box<dyn Error>>:
   ;
 
 Inst -> Result<ASTInst, Box<dyn Error>>:
-    "LOCAL_OPERAND" ":" Type "=" "LOAD_TI" "INT" "," Type  {
+    "LOCAL_OPERAND" ":" Type "=" "LOAD_TI" "INT" {
       Ok(ASTInst::LoadTraceInput{type_: $3?, off: $6?.span()})
     }
   | "LOCAL_OPERAND" ":" Type "=" "ADD" Operand "," Operand  {

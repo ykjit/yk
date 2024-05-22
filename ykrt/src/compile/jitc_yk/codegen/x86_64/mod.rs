@@ -1228,7 +1228,7 @@ mod tests {
                 .unwrap();
             let patt_lines = "
                 ...
-                ; %0: i8 = load_ti 0, i8
+                ; %0: i8 = load_ti 0
                 ... movzx r12, byte ptr [rdi]
                 ... mov [rbp-0x01], r12b
                 ...
@@ -1246,7 +1246,7 @@ mod tests {
                 .unwrap();
             let patt_lines = "
                 ...
-                ; %0: i16 = load_ti 32, i16
+                ; %0: i16 = load_ti 32
                 ... movzx r12d, word ptr [rdi+0x20]
                 ... mov [rbp-0x02], r12w
                 ...
@@ -1271,19 +1271,19 @@ mod tests {
                 .unwrap();
             let patt_lines = "
                 ...
-                ; %0: i8 = load_ti 0, i8
+                ; %0: i8 = load_ti 0
                 ... movzx r12, byte ptr [rdi]
                 ... mov [rbp-0x01], r12b
-                ; %1: i8 = load_ti 1, i8
+                ; %1: i8 = load_ti 1
                 ... movzx r12, byte ptr [rdi+0x01]
                 ... mov [rbp-0x02], r12b
-                ; %2: i8 = load_ti 2, i8
+                ; %2: i8 = load_ti 2
                 ... movzx r12, byte ptr [rdi+0x02]
                 ... mov [rbp-0x03], r12b
-                ; %3: i8 = load_ti 3, i8
+                ; %3: i8 = load_ti 3
                 ... movzx r12, byte ptr [rdi+0x03]
                 ... mov [rbp-0x04], r12b
-                ; %4: ptr = load_ti 8, ptr
+                ; %4: ptr = load_ti 8
                 ... mov r12, [rdi+0x08]
                 ... mov [rbp-0x10], r12
                 ...
@@ -1769,7 +1769,7 @@ mod tests {
                 .unwrap();
             let patt_lines = "
                 ...
-                ; %0: i8 = load_ti 0, i8
+                ; %0: i8 = load_ti 0
                 ...
                 ; tloop_start:
                 ; %2: i8 = add %0, %0
