@@ -338,14 +338,15 @@ impl Module {
 
 impl fmt::Display for Module {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "; compiled trace ID #{}\n\n; globals\n", self.ctr_id)?;
+        writeln!(f, "; compiled trace ID #{}\n", self.ctr_id)?;
         for g in &self.global_decls {
-            let tl = if g.is_threadlocal() {
-                "    ; thread local"
-            } else {
-                ""
-            };
-            writeln!(f, "@{}{tl}", g.name.to_str().unwrap_or("<not valid UTF-8>"))?;
+            let tl = if g.is_threadlocal() { " tls" } else { "" };
+            writeln!(
+                f,
+                "global_decl{} @{}",
+                tl,
+                g.name.to_str().unwrap_or("<not valid UTF-8>")
+            )?;
         }
         write!(f, "\nentry:")?;
         for (i, inst) in self.insts().iter_enumerated() {
@@ -1051,7 +1052,7 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::Load(x) => write!(f, "load {}", x.operand().display(self.m)),
             Inst::LookupGlobal(x) => write!(
                 f,
-                "lookup_global {}",
+                "lookup_global @{}",
                 self.m
                     .global_decl(x.global_decl_idx)
                     .name
@@ -2093,9 +2094,8 @@ mod tests {
         let expect = [
             "; compiled trace ID #0",
             "",
-            "; globals",
-            "@some_global",
-            "@some_thread_local    ; thread local",
+            "global_decl @some_global",
+            "global_decl tls @some_thread_local",
             "",
             "entry:",
             "    %0: i8 = load_ti 0",
