@@ -687,15 +687,6 @@ impl FuncTy {
     }
 }
 
-/// A structure's type.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct StructTy {
-    /// The types of the fields.
-    field_ty_idxs: Vec<TyIdx>,
-    /// The bit offsets of the fields (taking into account any required padding for alignment).
-    field_bit_offs: Vec<usize>,
-}
-
 /// A type.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum Ty {
@@ -703,7 +694,6 @@ pub(crate) enum Ty {
     Integer(IntegerTy),
     Ptr,
     Func(FuncTy),
-    Struct(StructTy),
     Unimplemented(String),
 }
 
@@ -714,7 +704,6 @@ impl fmt::Display for Ty {
             Self::Integer(it) => write!(f, "i{}", it.num_bits()),
             Self::Ptr => write!(f, "ptr"),
             Self::Func(_) => todo!(),
-            Self::Struct(_) => todo!(),
             Self::Unimplemented(_) => write!(f, "?type"),
         }
     }
@@ -738,7 +727,6 @@ impl Ty {
                 Some(mem::size_of::<*const c_void>())
             }
             Self::Func(_) => None,
-            Self::Struct(_) => todo!(),
             Self::Unimplemented(_) => None,
         }
     }
