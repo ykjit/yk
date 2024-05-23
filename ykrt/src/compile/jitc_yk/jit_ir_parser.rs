@@ -7,6 +7,7 @@
 use super::jit_ir::{
     AddInst, InstIdx, IntegerTy, LoadTraceInputInst, Module, Operand, TestUseInst, Ty, TyIdx,
 };
+use fm::FMBuilder;
 use lrlex::{lrlex_mod, DefaultLexerTypes, LRNonStreamingLexer};
 use lrpar::{lrpar_mod, NonStreamingLexer, Span};
 use std::error::Error;
@@ -17,6 +18,11 @@ lrpar_mod!("compile/jitc_yk/jit_ir.y");
 type StorageT = u8;
 
 impl Module {
+    /// Parse the string `s` into a [Module].
+    ///
+    /// # Panics
+    ///
+    /// If `s` is not parsable or otherwise does not lead to the creation of a valid `Module`.
     pub(crate) fn from_str(s: &str) -> Self {
         // Get the `LexerDef` for the `calc` language.
         let lexerdef = jit_ir_l::lexerdef();
@@ -32,6 +38,21 @@ impl Module {
         match res {
             Some(Ok((globals, bblocks))) => process(lexer, globals, bblocks).unwrap(),
             _ => panic!("Could not produce JIT Module."),
+        }
+    }
+
+    /// Assert that for the given IR input, as a string, `ir_input`, when transformed by
+    /// `ir_transform(Module)` it produces a [Module] that when printed corresponds to the [fm]
+    /// pattern `transformed_ptn`.
+    pub(crate) fn assert_ir_transform_eq<F>(ir_input: &str, ir_transform: F, transformed_ptn: &str)
+    where
+        F: FnOnce(Module) -> Module,
+    {
+        let m = Self::from_str(ir_input);
+        let m = ir_transform(m);
+        let fmm = FMBuilder::new(transformed_ptn).unwrap().build().unwrap();
+        if let Err(e) = fmm.matches(&m.to_string()) {
+            panic!("{e}");
         }
     }
 }

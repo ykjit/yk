@@ -77,23 +77,10 @@ pub(super) fn lvn(mut m: Module) -> Result<Module, CompilationError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fm::FMBuilder;
-
-    fn fm_match<F>(before: &str, f: F, after: &str)
-    where
-        F: FnOnce(Module) -> Module,
-    {
-        let m = Module::from_str(before);
-        let m = f(m);
-        let fmm = FMBuilder::new(after).unwrap().build().unwrap();
-        if let Err(e) = fmm.matches(&m.to_string()) {
-            panic!("{e}");
-        }
-    }
 
     #[test]
     fn opt_add() {
-        fm_match(
+        Module::assert_ir_transform_eq(
             "
           entry:
             %0: i16 = load_ti 0
