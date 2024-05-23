@@ -29,6 +29,12 @@
 ;         br bb5
 ;     bb5:
 ;         unimplemented <<  %{{27}} = icmp ne <4 x i32> %{{444}}, zeroinitializer>>
+;         br bb6
+;     bb6:
+;         unimplemented <<  %{{_}} = load volatile i32, ptr %{{_}}, align 4>>
+;         unimplemented <<  %{{_}} = load atomic i32, ptr %{{_}} acquire, align 4>>
+;         unimplemented <<  %{{_}} = load i32, ptr addrspace(10) %{{_}}, align 4>>
+;         unimplemented <<  %{{_}} = load i32, ptr %{{_}}, align 2>>
 ;         ret
 ;     }
 ;     ...
@@ -51,7 +57,7 @@ define ptr @p() addrspace(6) {
 
 declare void @llvm.experimental.stackmap(i64, i32, ...);
 
-define void @main(ptr %ptr, <8 x ptr> %ptrs, i32 %num, float %flt, <4 x i32> %vecnums) {
+define void @main(ptr %ptr, <8 x ptr> %ptrs, i32 %num, float %flt, <4 x i32> %vecnums, ptr addrspace(10) %asptr) {
 geps:
   ; note `getelementptr inrange` cannot appear as a dedicated instruction, only
   ; as an inline expression. Hence no check for that in instruction form.
@@ -108,5 +114,18 @@ icmps:
   %icmp_vec = icmp ne <4 x i32> %vecnums, zeroinitializer
   ; stackmap stops icmp from being optimised out.
   call void (i64, i32, ...) @llvm.experimental.stackmap(i64 8, i32 0, <4 x i1> %icmp_vec);
+  br label %loads
+loads:
+  ; volatile loads
+  %load_vol = load volatile i32, ptr %ptr
+  ; atomic loads
+  ; note: atomic load must have explicit non-zero alignment
+  %load_atom = load atomic i32, ptr %ptr acquire, align 4
+  ; loads from exotic address spaces
+  %load_aspace = load i32, ptr addrspace(10) %asptr
+  ; potentially misaligned loads
+  %load_misalign = load i32, ptr %ptr, align 2
+  ; stackmap stops loads from being optimised out.
+  call void (i64, i32, ...) @llvm.experimental.stackmap(i64 8, i32 0, i32 %load_vol)
   ret void
 }

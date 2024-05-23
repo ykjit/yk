@@ -59,9 +59,11 @@ fn main() {
         .fm_options(|_, _, fmb| {
             // Use `{{}}` to match non-literal strings in tests.
             // E.g. use `%{{var}}` to capture the name of a variable.
+            let ptn_re_ignore = Regex::new(r"\{\{_}\}").unwrap();
             let ptn_re = Regex::new(r"\{\{.+?\}\}").unwrap();
             let text_re = Regex::new(r"[a-zA-Z0-9\._]+").unwrap();
-            fmb.name_matcher(ptn_re, text_re)
+            fmb.name_matcher_ignore(ptn_re_ignore, text_re.clone())
+                .name_matcher(ptn_re, text_re)
         })
         .run();
 }
