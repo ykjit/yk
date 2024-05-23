@@ -748,10 +748,6 @@ impl FuncDecl {
     pub(crate) fn name(&self) -> &str {
         &self.name
     }
-
-    pub(crate) fn ty_idx(&self) -> TyIdx {
-        self.ty_idx
-    }
 }
 
 /// The packed representation of an instruction operand.
