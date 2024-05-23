@@ -31,7 +31,7 @@ use crate::compile::CompilationError;
 use indexmap::IndexSet;
 use num_traits::{PrimInt, ToBytes};
 use std::{
-    ffi::{c_void, CStr, CString},
+    ffi::{c_void, CString},
     fmt, mem,
 };
 use typed_index_collections::{TiSlice, TiVec};
@@ -453,8 +453,9 @@ impl GlobalDecl {
         }
     }
 
-    /// Return the name of the declaration (as a `&CStr`).
-    pub(crate) fn name(&self) -> &CStr {
+    /// Return the name of the declaration.
+    #[cfg(test)]
+    pub(crate) fn name(&self) -> &std::ffi::CStr {
         &self.name
     }
 
