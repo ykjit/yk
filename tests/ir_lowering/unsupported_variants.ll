@@ -26,6 +26,9 @@
 ;      bb4:
 ;         unimplemented <<  %{{25}} = ptrtoint ptr %{{ptr}} to i8>>
 ;         unimplemented <<  %{{26}} = ptrtoint <8 x ptr> %{{ptrs}} to <8 x i8>>>
+;         unimplemented <<  %{{_}} = sext <4 x i32> %{{_}} to <4 x i64>>>
+;         unimplemented <<  %{{_}} = zext <4 x i32> %{{_}} to <4 x i64>>>
+;         unimplemented <<  %{{_}} = trunc <4 x i32> %{{_}} to <4 x i8>>>
 ;         br bb5
 ;     bb5:
 ;         unimplemented <<  %{{27}} = icmp ne <4 x i32> %{{444}}, zeroinitializer>>
@@ -35,7 +38,11 @@
 ;         unimplemented <<  %{{_}} = load atomic i32, ptr %{{_}} acquire, align 4>>
 ;         unimplemented <<  %{{_}} = load i32, ptr addrspace(10) %{{_}}, align 4>>
 ;         unimplemented <<  %{{_}} = load i32, ptr %{{_}}, align 2>>
-;         ret
+;         br ...
+;         ...
+;     bb10:
+;       unimplemented <<  %{{_}} = phi nnan float...
+;       ret
 ;     }
 ;     ...
 
@@ -57,7 +64,8 @@ define ptr @p() addrspace(6) {
 
 declare void @llvm.experimental.stackmap(i64, i32, ...);
 
-define void @main(ptr %ptr, <8 x ptr> %ptrs, i32 %num, float %flt, <4 x i32> %vecnums, ptr addrspace(10) %asptr) {
+define void @main(ptr %ptr, <8 x ptr> %ptrs, i32 %num, float %flt, <4 x i32>
+%vecnums, ptr addrspace(10) %asptr, i1 %choice, <4 x i32> %nums) optnone noinline {
 geps:
   ; note `getelementptr inrange` cannot appear as a dedicated instruction, only
   ; as an inline expression. Hence no check for that in instruction form.
@@ -105,9 +113,12 @@ calls:
   br label %casts
 casts:
   ; ptrtoint to a smaller type
-  %cast_trunc = ptrtoint ptr %ptr to i8
+  %ptrtoint_trunc = ptrtoint ptr %ptr to i8
   ; vectors
-  %cast_vec = ptrtoint <8 x ptr> %ptrs to <8 x i8>
+  %ptrtoint_vec = ptrtoint <8 x ptr> %ptrs to <8 x i8>
+  %sext_vec = sext <4 x i32> %nums to <4 x i64>
+  %zext_vec = zext <4 x i32> %nums to <4 x i64>
+  %trunc_vec = trunc <4 x i32> %nums to <4 x i8>
   br label %icmps
 icmps:
   ; vector of comparisons
@@ -127,5 +138,18 @@ loads:
   %load_misalign = load i32, ptr %ptr, align 2
   ; stackmap stops loads from being optimised out.
   call void (i64, i32, ...) @llvm.experimental.stackmap(i64 8, i32 0, i32 %load_vol)
+  br label %phi_setup1
+phi_setup1:
+  ; LLVM checks for nonsense PHI nodes, so we have to have sensible control
+  ; flow to test them.
+  call void (i64, i32, ...) @llvm.experimental.stackmap(i64 9, i32 0, i32 %load_vol)
+  br i1 %choice, label %phi_true, label %phi_false
+phi_true:
+  br label %phis
+phi_false:
+  br label %phis
+phis:
+  ; fast math flags
+  %phi_fastmath = phi nnan float [0.0, %phi_true], [0.0, %phi_false]
   ret void
 }
