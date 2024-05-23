@@ -10,7 +10,8 @@ use super::jit_ir::{
 use fm::FMBuilder;
 use lrlex::{lrlex_mod, DefaultLexerTypes, LRNonStreamingLexer};
 use lrpar::{lrpar_mod, NonStreamingLexer, Span};
-use std::error::Error;
+use regex::Regex;
+use std::{error::Error, sync::OnceLock};
 
 lrlex_mod!("compile/jitc_yk/jit_ir.l");
 lrpar_mod!("compile/jitc_yk/jit_ir.y");
@@ -44,13 +45,41 @@ impl Module {
     /// Assert that for the given IR input, as a string, `ir_input`, when transformed by
     /// `ir_transform(Module)` it produces a [Module] that when printed corresponds to the [fm]
     /// pattern `transformed_ptn`.
+    ///
+    /// `transformed_ptn` allows the following [fm] patterns:
+    ///   * `{{.+?}}` matches against the text using [fm]'s name matching. If you have two patterns
+    ///     with the same name (e.g. `${{1}} xyz ${{2}}`) then both must match the same literal
+    ///     text.
+    ///   * `{{_}}` matches against the text using [fm]'s "ignore" name matching. If you have two
+    ///     patterns with `{{_}}` then they may match against different literal text.
     pub(crate) fn assert_ir_transform_eq<F>(ir_input: &str, ir_transform: F, transformed_ptn: &str)
     where
         F: FnOnce(Module) -> Module,
     {
+        // We want to share the compilation of regexes amongst threads, *but* there is some locking
+        // involved, so we want to `clone` the compiled regexes before using them for matching.
+        // Hence this odd looking "`static` then `let`" dance.
+        static PTN_RE: OnceLock<Regex> = OnceLock::new();
+        static PTN_RE_IGNORE: OnceLock<Regex> = OnceLock::new();
+        static LITERAL_RE: OnceLock<Regex> = OnceLock::new();
+        let ptn_re = PTN_RE
+            .get_or_init(|| Regex::new(r"\{\{.+?\}\}").unwrap())
+            .clone();
+        let ptn_re_ignore = PTN_RE_IGNORE
+            .get_or_init(|| Regex::new(r"\{\{_\}\}").unwrap())
+            .clone();
+        let literal_re = LITERAL_RE
+            .get_or_init(|| Regex::new(r"[a-zA-Z0-9\._]+").unwrap())
+            .clone();
+
         let m = Self::from_str(ir_input);
         let m = ir_transform(m);
-        let fmm = FMBuilder::new(transformed_ptn).unwrap().build().unwrap();
+        let fmm = FMBuilder::new(transformed_ptn)
+            .unwrap()
+            .name_matcher_ignore(ptn_re_ignore, literal_re.clone())
+            .name_matcher(ptn_re, literal_re)
+            .build()
+            .unwrap();
         if let Err(e) = fmm.matches(&m.to_string()) {
             panic!("{e}");
         }
@@ -202,5 +231,25 @@ mod tests {
         let s = m.to_string();
         let parsed_m = Module::from_str(&s);
         assert_eq!(m.to_string(), parsed_m.to_string());
+    }
+
+    #[test]
+    fn module_patterns() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i16 = load_ti 0
+            %1: i16 = load_ti 1
+            %2: i16 = add %0, %1
+        ",
+            |m| m,
+            "
+          ...
+          entry:
+            %{{0}}: i16 = load_ti 0
+            %{{1}}: i16 = load_ti 1
+            %{{_}}: i16 = add %{{0}}, %{{1}}
+        ",
+        );
     }
 }
