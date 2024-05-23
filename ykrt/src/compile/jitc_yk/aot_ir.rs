@@ -7,8 +7,8 @@
 //! The IR uses two general terminological conventions:
 //!   * A "definition" is something for which the IR contains complete knowledge.
 //!   * A "declaration" is something compiled externally for which we only know the minimal
-//!   external structure (e.g. a function signature), with the body being present elsewhere in the
-//!   binary.
+//!     external structure (e.g. a function signature), with the body being present elsewhere in
+//!     the binary.
 //!
 //! Because using the IR can often involve getting hold of data nested several layers deep, we also
 //! use a number of abbreviations/conventions to keep the length of source down to something
