@@ -42,6 +42,12 @@
 ;         ...
 ;     bb10:
 ;       unimplemented <<  %{{_}} = phi nnan float...
+;       br bb11
+;     bb11:
+;       unimplemented <<  store volatile i32 0, ptr %0, align 4>>
+;       unimplemented <<  store atomic i32 0, ptr %0 release, align 4>>
+;       unimplemented <<  store i32 0, ptr addrspace(10) %5, align 4>>
+;       unimplemented <<  store i32 0, ptr %0, align 2>>
 ;       ret
 ;     }
 ;     ...
@@ -151,5 +157,16 @@ phi_false:
 phis:
   ; fast math flags
   %phi_fastmath = phi nnan float [0.0, %phi_true], [0.0, %phi_false]
+  br label %stores
+stores:
+  ; volatile store
+  store volatile i32 0, ptr %ptr
+  ; atomic store
+  ; note: atomic store must have explicit non-zero alignment
+  store atomic i32 0, ptr %ptr release, align 4
+  ; stores into exotic address spaces
+  store i32 0, ptr addrspace(10) %asptr
+  ; potentially misaligned stores
+  store i32 0, ptr %ptr, align 2
   ret void
 }
