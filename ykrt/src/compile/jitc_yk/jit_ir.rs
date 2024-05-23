@@ -558,6 +558,7 @@ macro_rules! index_24bit {
 // Generate common methods for 16-bit index types.
 macro_rules! index_16bit {
     ($struct:ident) => {
+        #[allow(dead_code)]
         impl $struct {
             pub(crate) fn new(v: usize) -> Result<Self, CompilationError> {
                 u16::try_from(v)
@@ -1576,6 +1577,7 @@ impl PtrAddInst {
 macro_rules! bin_op {
     ($discrim :ident, $struct: ident, $disp: literal) => {
         #[derive(Clone, Debug, PartialEq)]
+        #[allow(dead_code)]
         pub struct $struct {
             /// The left-hand side of the operation.
             lhs: PackedOperand,
@@ -1583,6 +1585,7 @@ macro_rules! bin_op {
             rhs: PackedOperand,
         }
 
+        #[allow(dead_code)]
         impl $struct {
             pub(crate) fn new(lhs: Operand, rhs: Operand) -> Self {
                 Self {
