@@ -403,6 +403,7 @@ impl Display for Predicate {
 pub(crate) enum CastKind {
     SignExtend = 0,
     ZeroExtend = 1,
+    Trunc = 2,
 }
 
 impl Display for CastKind {

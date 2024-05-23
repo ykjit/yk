@@ -184,6 +184,7 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Inst::TraceLoopStart => self.cg_traceloopstart(),
             jit_ir::Inst::SignExtend(i) => self.cg_signextend(inst_idx, i),
             jit_ir::Inst::ZeroExtend(i) => self.cg_zeroextend(inst_idx, i),
+            jit_ir::Inst::Trunc(i) => self.cg_trunc(inst_idx, i),
             // Binary operations
             jit_ir::Inst::Add(i) => self.cg_add(inst_idx, i),
             jit_ir::Inst::Sub(i) => self.cg_sub(inst_idx, i),
@@ -194,6 +195,7 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Inst::AShr(i) => self.cg_ashr(inst_idx, i),
             jit_ir::Inst::Mul(i) => self.cg_mul(inst_idx, i),
             jit_ir::Inst::SDiv(i) => self.cg_sdiv(inst_idx, i),
+            jit_ir::Inst::SRem(i) => self.cg_srem(inst_idx, i),
             x => todo!("{x:?}"),
         }
         Ok(())
@@ -505,6 +507,37 @@ impl<'a> X64CodeGen<'a> {
         self.store_new_local(inst_idx, Rq::RAX);
     }
 
+    fn cg_srem(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::SRemInst) {
+        // FIXME: This is identical to `cg_sdiv` except that the result of this operation can be
+        // found in RDX instead of RAX.
+        let lhs = inst.lhs();
+        let rhs = inst.rhs();
+
+        // Operand types must be the same.
+        debug_assert_eq!(
+            self.m.type_(lhs.ty_idx(self.m)),
+            self.m.type_(rhs.ty_idx(self.m))
+        );
+
+        // The dividend is hard-coded into DX:AX/EDX:EAX/RDX:RAX. However unless we have 128bit
+        // values or want to optimise register usage, we won't be needing this, and just zero out
+        // RDX.
+        dynasm!(self.asm; xor rdx, rdx);
+        self.load_operand(Rq::RAX, &lhs); // FIXME: assumes value will fit in a reg.
+        self.load_operand(WR1, &rhs); // ^^^ same
+
+        match lhs.byte_size(self.m) {
+            8 => dynasm!(self.asm; idiv Rq(WR1.code())),
+            4 => dynasm!(self.asm; idiv Rd(WR1.code())),
+            2 => dynasm!(self.asm; idiv Rw(WR1.code())),
+            1 => dynasm!(self.asm; idiv Rb(WR1.code())),
+            _ => todo!(),
+        }
+
+        // The remainder is stored in RDX. We don't care about the quotient stored in RAX.
+        self.store_new_local(inst_idx, Rq::RDX);
+    }
+
     fn cg_loadtraceinput(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::LoadTraceInputInst) {
         // Find the argument register containing the pointer to the live variables struct.
         let base_reg = ARG_REGS[JITFUNC_LIVEVARS_ARGIDX].code();
@@ -793,8 +826,9 @@ impl<'a> X64CodeGen<'a> {
             (1, 8) => dynasm!(self.asm; movsx Rq(WR0.code()), Rb(WR0.code())),
             (1, 4) => dynasm!(self.asm; movsx Rd(WR0.code()), Rb(WR0.code())),
             (2, 4) => dynasm!(self.asm; movsx Rd(WR0.code()), Rw(WR0.code())),
+            (2, 8) => dynasm!(self.asm; movsx Rq(WR0.code()), Rw(WR0.code())),
             (4, 8) => dynasm!(self.asm; movsx Rq(WR0.code()), Rd(WR0.code())),
-            _ => todo!(),
+            _ => todo!("{} {}", from_size, to_size),
         }
 
         self.store_new_local(inst_idx, WR0);
@@ -821,6 +855,35 @@ impl<'a> X64CodeGen<'a> {
 
         // FIXME: Assumes we don't assign to sub-registers.
         dynasm!(self.asm; mov Rq(WR0.code()), Rq(WR0.code()));
+
+        self.store_new_local(inst_idx, WR0);
+    }
+
+    fn cg_trunc(&mut self, inst_idx: InstIdx, i: &jit_ir::TruncInst) {
+        let from_val = i.val();
+        let from_type = self.m.type_(from_val.ty_idx(self.m));
+        let from_size = from_type.byte_size().unwrap();
+
+        let to_type = self.m.type_(i.dest_ty_idx());
+        let to_size = to_type.byte_size().unwrap();
+
+        debug_assert!(matches!(to_type, jit_ir::Ty::Integer(_)));
+        debug_assert!(
+            matches!(from_type, jit_ir::Ty::Integer(_)) || matches!(from_type, jit_ir::Ty::Ptr)
+        );
+        // You can only truncate a bigger integer to a smaller integer.
+        debug_assert!(from_size > to_size);
+
+        // FIXME: assumes the input and output fit in a register.
+        self.load_operand(WR0, &from_val);
+        debug_assert!(to_size <= REG64_SIZE);
+
+        // FIXME: There's no instruction on x86_64 to mov from a bigger register into a smaller
+        // register. The simplest way to truncate the value is to zero out the higher order bits.
+        // At the moment this happens automatically when we load the value from the stack and then
+        // store it back. This currently works because variables can only live on the stack, but
+        // this will change once we have a proper register allocator at which point we need to
+        // revisit this implementation.
 
         self.store_new_local(inst_idx, WR0);
     }
@@ -1778,6 +1841,54 @@ mod tests {
                 ...: jmp ...
             ";
             test_with_spillalloc(&m, patt_lines);
+        }
+
+        #[test]
+        fn cg_srem() {
+            let mut m = test_module();
+            let i8_ty_idx = m.insert_ty(jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
+            let op1 = m
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i8_ty_idx).into())
+                .unwrap();
+            let op2 = m
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(1, i8_ty_idx).into())
+                .unwrap();
+            m.push(jit_ir::SRemInst::new(op1, op2).into()).unwrap();
+            let patt_lines = "
+                ...
+                ; %2: i8 = srem %0, %1
+                ... xor rdx, rdx
+                ... movzx rax, byte ptr [rbp-0x01]
+                ... movzx r13, byte ptr [rbp-0x02]
+                ... idiv r13b
+                ... mov [rbp-0x03], dl
+                ...
+            ";
+            test_with_spillalloc(&m, &patt_lines);
+        }
+
+        #[test]
+        fn cg_trunc() {
+            let mut m = test_module();
+            let i8_ty_idx = m.insert_ty(jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
+            let i32_ty_idx = m
+                .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(32)))
+                .unwrap();
+            let op = m
+                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i32_ty_idx).into())
+                .unwrap();
+            m.push(jit_ir::TruncInst::new(&op, i8_ty_idx).into())
+                .unwrap();
+            let patt_lines = "
+                ...
+                ; %0: i32 = load_ti 0
+                ...
+                ; %1: i8 = trunc %0, i8
+                ... mov r12d, [rbp-0x04]
+                ... mov [rbp-0x05], r12b
+                ...
+            ";
+            test_with_spillalloc(&m, &patt_lines);
         }
     }
 }
