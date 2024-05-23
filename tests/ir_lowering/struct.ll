@@ -1,9 +1,9 @@
 ; Dump:
 ;   stdout:
 ;     ...
-;     func main($arg0: {0: i32, 64: i64}) {
+;     func main(%arg0: {0: i32, 64: i64}) {
 ;       bb0:
-;         $0_0: {0: i32, 64: i64} = insertvalue $arg0, 100i32
+;         %0_0: {0: i32, 64: i64} = insert_val %arg0, 100i32
 ;         ret
 ;     }
 

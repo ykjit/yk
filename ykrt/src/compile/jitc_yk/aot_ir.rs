@@ -21,6 +21,10 @@
 //!  * `Idx`: "index"
 //!  * `Inst`: "instruction"
 //!  * `Ty`: "type"
+//!
+//! Textual IR can be generated in the same way as in the JIT IR (i.e. using `std::fmt::Display`
+//! and/or `display()`). The same naming conventions are used in the textual AOT IR as in the
+//! textual JIT IR. See the docstring for the [super::jit_ir] module.
 
 use byteorder::{NativeEndian, ReadBytesExt};
 use deku::prelude::*;
@@ -169,6 +173,12 @@ impl std::fmt::Display for Module {
         ))?;
         f.write_fmt(format_args!("# Num types: {}\n", self.types.len()))?;
 
+        if !self.global_decls.is_empty() {
+            for gd in &self.global_decls {
+                writeln!(f, "{}", gd)?;
+            }
+        }
+
         for func in &self.funcs {
             write!(f, "\n{}", func.display(self))?;
         }
@@ -308,7 +318,27 @@ pub(crate) enum BinOp {
 
 impl Display for BinOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", format!("{self:?}").to_lowercase())
+        let s = match self {
+            Self::Add => "add",
+            Self::Sub => "sub",
+            Self::Mul => "mul",
+            Self::Or => "or",
+            Self::And => "and",
+            Self::Xor => "xor",
+            Self::Shl => "shl",
+            Self::AShr => "ashr",
+            Self::FAdd => "fadd",
+            Self::FDiv => "fdiv",
+            Self::FMul => "fmul",
+            Self::FRem => "frem",
+            Self::FSub => "fsub",
+            Self::LShr => "lshr",
+            Self::SDiv => "sdiv",
+            Self::SRem => "srem",
+            Self::UDiv => "udiv",
+            Self::URem => "urem",
+        };
+        write!(f, "{}", s)
     }
 }
 
@@ -408,7 +438,12 @@ pub(crate) enum CastKind {
 
 impl Display for CastKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{self:?}")
+        let s = match self {
+            Self::SignExtend => "sext",
+            Self::ZeroExtend => "zext",
+            Self::Trunc => "trunc",
+        };
+        write!(f, "{}", s)
     }
 }
 
@@ -488,14 +523,14 @@ impl fmt::Display for DisplayableOperand<'_> {
             Operand::LocalVariable(iid) => {
                 write!(
                     f,
-                    "${}_{}",
+                    "%{}_{}",
                     usize::from(iid.bb_idx),
                     usize::from(iid.inst_idx)
                 )
             }
             Operand::Global(gidx) => write!(f, "@{}", self.m.global_decls[*gidx].name()),
             Operand::Func(fidx) => write!(f, "{}", self.m.funcs[*fidx].name()),
-            Operand::Arg { arg_idx, .. } => write!(f, "$arg{}", usize::from(*arg_idx)),
+            Operand::Arg { arg_idx, .. } => write!(f, "%arg{}", usize::from(*arg_idx)),
         }
     }
 }
@@ -554,7 +589,7 @@ impl fmt::Display for DisplayableDeoptSafepoint<'_> {
 /// The type of the variable defined by an instruction (if any) can be determined by
 /// [Inst::def_type()].
 #[deku_derive(DekuRead)]
-#[derive(Debug, strum_macros::Display)]
+#[derive(Debug)]
 #[repr(u8)]
 #[deku(type = "u8")]
 pub(crate) enum Inst {
@@ -710,7 +745,7 @@ impl Inst {
             for (bb_idx, bb) in f.bblocks.iter().enumerate() {
                 for (inst_idx, instr) in bb.insts.iter().enumerate() {
                     if std::ptr::addr_eq(instr, self) {
-                        return format!("${}_{}", bb_idx, inst_idx);
+                        return format!("%{}_{}", bb_idx, inst_idx);
                     }
                 }
             }
@@ -860,7 +895,7 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::BinaryOp { lhs, binop, rhs } => {
                 write!(
                     f,
-                    "{}, {binop}, {}",
+                    "{binop} {}, {}",
                     lhs.display(self.m),
                     rhs.display(self.m)
                 )
@@ -900,12 +935,9 @@ impl fmt::Display for DisplayableInst<'_> {
                 usize::from(*false_bb),
                 safepoint.display(self.m)
             ),
-            Inst::ICmp { lhs, pred, rhs, .. } => write!(
-                f,
-                "icmp {}, {pred}, {}",
-                lhs.display(self.m),
-                rhs.display(self.m)
-            ),
+            Inst::ICmp { lhs, pred, rhs, .. } => {
+                write!(f, "{pred} {}, {}", lhs.display(self.m), rhs.display(self.m))
+            }
             Inst::Load { ptr, .. } => write!(f, "load {}", ptr.display(self.m)),
             Inst::PtrAdd {
                 ptr,
@@ -915,7 +947,7 @@ impl fmt::Display for DisplayableInst<'_> {
                 ..
             } => {
                 if dyn_elem_counts.is_empty() {
-                    write!(f, "PtrAdd {}, {}", ptr.display(self.m), const_off)
+                    write!(f, "ptr_add {}, {}", ptr.display(self.m), const_off)
                 } else {
                     let dyns = dyn_elem_counts
                         .iter()
@@ -924,7 +956,7 @@ impl fmt::Display for DisplayableInst<'_> {
                         .collect::<Vec<_>>();
                     write!(
                         f,
-                        "PtrAdd {}, {} + {}",
+                        "ptr_add {}, {} + {}",
                         ptr.display(self.m),
                         const_off,
                         dyns.join(" + ")
@@ -940,7 +972,7 @@ impl fmt::Display for DisplayableInst<'_> {
             }
             Inst::InsertValue { agg, elem } => write!(
                 f,
-                "insertvalue {}, {}",
+                "insert_val {}, {}",
                 agg.display(self.m),
                 elem.display(self.m)
             ),
@@ -996,7 +1028,7 @@ impl fmt::Display for DisplayableInst<'_> {
                     .map(|a| a.display(self.m).to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
-                write!(f, "call {}({})", callop.display(self.m), args_s)
+                write!(f, "icall {}({})", callop.display(self.m), args_s)
             }
             Inst::Unimplemented(s) => write!(f, "unimplemented <<{}>>", s),
             Inst::Nop => write!(f, "nop"),
@@ -1112,7 +1144,7 @@ impl fmt::Display for DisplayableFunc<'_> {
                 fty.arg_ty_idxs
                     .iter()
                     .enumerate()
-                    .map(|(i, t)| format!("$arg{}: {}", i, self.m.types[*t].display(self.m)))
+                    .map(|(i, t)| format!("%arg{}: {}", i, self.m.types[*t].display(self.m)))
                     .collect::<Vec<_>>()
                     .join(", ")
             )?;
@@ -1532,7 +1564,8 @@ pub(crate) struct GlobalDecl {
 
 impl Display for GlobalDecl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "GlobalDecl({}, tls={})", self.name, self.is_threadlocal)
+        let tl = if self.is_threadlocal { " tls" } else { "" };
+        write!(f, "global_decl{} @{}", tl, self.name,)
     }
 }
 

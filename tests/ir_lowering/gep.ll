@@ -3,40 +3,40 @@
 ;     ...
 ;     func main(...
 ;       bb0:
-;         $0_0: ptr = PtrAdd @arr0, 3
-;         $0_1: ptr = PtrAdd @arr1, 16
-;         $0_2: ptr = PtrAdd @arr2, 32
-;         $0_3: ptr = PtrAdd @arr3, 96
-;         $0_4: ptr = PtrAdd @arr4, 12
+;         %0_0: ptr = ptr_add @arr0, 3
+;         %0_1: ptr = ptr_add @arr1, 16
+;         %0_2: ptr = ptr_add @arr2, 32
+;         %0_3: ptr = ptr_add @arr3, 96
+;         %0_4: ptr = ptr_add @arr4, 12
 ;	    ...
 ;       bb1:
-;         $1_0: ptr = PtrAdd @arr0, 1
-;         $1_1: ptr = PtrAdd @arr1, 4
-;         $1_2: ptr = PtrAdd @arr2, 8
-;         $1_3: ptr = PtrAdd @arr3, 24
-;         $1_4: ptr = PtrAdd @arr4, 3
+;         %1_0: ptr = ptr_add @arr0, 1
+;         %1_1: ptr = ptr_add @arr1, 4
+;         %1_2: ptr = ptr_add @arr2, 8
+;         %1_3: ptr = ptr_add @arr3, 24
+;         %1_4: ptr = ptr_add @arr4, 3
 ;	    ...
 ;       bb2:
-;         $2_0: ptr = PtrAdd @mdarr0, 3
-;         $2_1: ptr = PtrAdd @mdarr1, 320
+;         %2_0: ptr = ptr_add @mdarr0, 3
+;         %2_1: ptr = ptr_add @mdarr1, 320
 ;       ...
 ;       bb3:
-;         $3_0: ptr = PtrAdd @arr0, 0 + ($arg0 * 3)
-;         $3_1: ptr = PtrAdd @arr0, 0 + ($arg0 * 3) + ($arg1 * 1)
-;         $3_2: ptr = PtrAdd @mdarr0, 1 + ($arg0 * 2)
+;         %3_0: ptr = ptr_add @arr0, 0 + (%arg0 * 3)
+;         %3_1: ptr = ptr_add @arr0, 0 + (%arg0 * 3) + (%arg1 * 1)
+;         %3_2: ptr = ptr_add @mdarr0, 1 + (%arg0 * 2)
 ;       ...
 ;       bb4:
-;         $4_0: ptr = PtrAdd @struct0, 8
-;         $4_1: ptr = PtrAdd @struct0, 4
-;         $4_2: ptr = PtrAdd @struct1, 24
-;         $4_3: ptr = PtrAdd @struct1, 16
+;         %4_0: ptr = ptr_add @struct0, 8
+;         %4_1: ptr = ptr_add @struct0, 4
+;         %4_2: ptr = ptr_add @struct1, 24
+;         %4_3: ptr = ptr_add @struct1, 16
 ;       ...
 ;       bb5:
-;         $5_0: ptr = PtrAdd @mixed0, 12
-;         $5_1: ptr = PtrAdd @mixed0, 13
-;         $5_2: ptr = PtrAdd @mixed0, 5 + ($arg0 * 8)
-;         $5_3: ptr = PtrAdd @mixed1, 10
-;         $5_4: ptr = PtrAdd @mixed1, 8 + ($arg0 * 8) + ($arg1 * 1)
+;         %5_0: ptr = ptr_add @mixed0, 12
+;         %5_1: ptr = ptr_add @mixed0, 13
+;         %5_2: ptr = ptr_add @mixed0, 5 + (%arg0 * 8)
+;         %5_3: ptr = ptr_add @mixed1, 10
+;         %5_4: ptr = ptr_add @mixed1, 8 + (%arg0 * 8) + (%arg1 * 1)
 ;         ret
 ;     }
 ;     ...

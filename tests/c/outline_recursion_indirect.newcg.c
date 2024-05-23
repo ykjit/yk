@@ -13,7 +13,7 @@
 //     jitstate: stop-tracing
 //     --- Begin aot ---
 //     ...
-//     func main($arg0: i32, $arg1: ptr) -> i32 {
+//     func main(%arg0: i32, %arg1: ptr) -> i32 {
 //     ...
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---

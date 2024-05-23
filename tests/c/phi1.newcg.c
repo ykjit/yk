@@ -9,7 +9,7 @@
 //     jitstate: stop-tracing
 //     --- Begin aot ---
 //     ...
-//     ${{14_0}}: i32 = phi bb{{bb13}} -> 2i32, bb{{bb12}} -> 1i32
+//     %{{14_0}}: i32 = phi bb{{bb13}} -> 2i32, bb{{bb12}} -> 1i32
 //     ...
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---

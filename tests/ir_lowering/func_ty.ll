@@ -1,7 +1,7 @@
 ; Dump:
 ;   stdout:
 ;     ...
-;     func main($arg0: i32, $arg1: ptr) -> i32 {
+;     func main(%arg0: i32, %arg1: ptr) -> i32 {
 ;     ...
 
 ; Check function type lowering.
