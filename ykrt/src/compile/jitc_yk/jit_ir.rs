@@ -22,10 +22,6 @@
 //!  2. or, when they need extra information, they expose a `display()` method, which returns an
 //!     object which implements [std::fmt::Display].
 
-// For now, don't swamp others working in other areas of the system.
-// FIXME: eventually delete.
-#![allow(dead_code)]
-
 use super::aot_ir;
 use crate::compile::CompilationError;
 use indexmap::IndexSet;
