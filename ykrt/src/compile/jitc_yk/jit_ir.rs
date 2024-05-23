@@ -1616,6 +1616,7 @@ macro_rules! bin_op {
 
             /// Returns the type index of the operands being added.
             pub(crate) fn ty_idx(&self, m: &Module) -> TyIdx {
+                debug_assert_eq!(self.lhs.unpack().ty_idx(m), self.rhs.unpack().ty_idx(m));
                 self.lhs.unpack().ty_idx(m)
             }
         }
