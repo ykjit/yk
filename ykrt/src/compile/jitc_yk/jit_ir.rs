@@ -17,13 +17,10 @@
 //!  * `Inst`: "instruction"
 //!  * `Ty`: "type"
 //!
-//! To get human-readable representations of IR data structures, most of the IR constructs either:
-//!  * implement [std::fmt::Display] and thus can be stringified with (e.g.) `format!`, or
-//!  * if extra information is needed, have a method called `display()` which takes extra arguments
-//!    and returns something which does implement [std::fmt::Display].
-//!
-//! In the human readable IR, all names should be lowercase. Try to keep them short. Underscores
-//! can be added to taste.
+//! IR structures can be converted to human-readable strings either because:
+//!  1. they implement [std::fmt::Display] directly.
+//!  2. or, when they need extra information, they expose a `display()` method, which returns an
+//!     object which implements [std::fmt::Display].
 
 // For now, don't swamp others working in other areas of the system.
 // FIXME: eventually delete.
