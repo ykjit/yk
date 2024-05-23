@@ -29,6 +29,12 @@
 ;         br bb5
 ;     bb5:
 ;         unimplemented <<  %{{27}} = icmp ne <4 x i32> %{{444}}, zeroinitializer>>
+;         br bb6
+;     bb6:
+;         unimplemented <<  %{{_}} = load volatile i32, ptr %{{_}}, align 4>>
+;         unimplemented <<  %{{_}} = load atomic i32, ptr %{{_}} acquire, align 4>>
+;         unimplemented <<  %{{_}} = load i32, ptr addrspace(10) %{{_}}, align 4>>
+;         unimplemented <<  %{{_}} = load i32, ptr %{{_}}, align 2>>
 ;         ret
 ;     }
 ;     ...
@@ -51,24 +57,29 @@ define ptr @p() addrspace(6) {
 
 declare void @llvm.experimental.stackmap(i64, i32, ...);
 
-define void @main(ptr %ptr, <8 x ptr> %ptrs, i32 %num, float %flt, <4 x i32> %vecnums) {
+define void @main(ptr %ptr, <8 x ptr> %ptrs, i32 %num, float %flt, <4 x i32> %vecnums, ptr addrspace(10) %asptr) {
 geps:
   ; note `getelementptr inrange` cannot appear as a dedicated instruction, only
   ; as an inline expression. Hence no check for that in instruction form.
-  %0 = getelementptr i32, <8 x ptr> %ptrs, i32 1
+  %gep1 = getelementptr i32, <8 x ptr> %ptrs, i32 1
   br label %allocas
 allocas:
-  %1 = alloca inalloca i32
-  %2 = alloca i32, addrspace(4)
-  %3 = alloca i32, i32 %num
+  ; `inalloca` keyword
+  %inalloca = alloca inalloca i32
+  ; non-zero address space
+  %alloca_aspace = alloca i32, addrspace(4)
+  ; dynamic stack allocas
+  %alloca_dyn = alloca i32, i32 %num
   ; Note that we don't test alloca's with number of elements not expressible in
   ; a `size_t`. At the time of writing using a type wider than i64 for the
   ; element count can crash selection dag.
   ; e.g.: `%blah = alloca i32, i66 36893488147419103232`
   br label %binops
 binops:
-  %4 = fadd nnan float %flt, %flt
-  %5 = add <4 x i32> %vecnums, %vecnums
+  ; fast math flags
+  %binop_fmathflag = fadd nnan float %flt, %flt
+  ; vectors
+  %binop_vec = add <4 x i32> %vecnums, %vecnums
   br label %calls
 calls:
   ; FIXME: we are unable to test `musttail` because a tail call must be
@@ -76,30 +87,45 @@ calls:
   ; requires a stackmap after a call...
   ;
   ; param attrs
-  %6 = call i32 @f(i32 swiftself 5)
+  %call_paramattr = call i32 @f(i32 swiftself 5)
   ; ret attrs
-  %7 = call inreg i32 @f(i32 5)
+  %call_inreg = call inreg i32 @f(i32 5)
   ; func attrs
-  %8 = call i32 @f(i32 5) alignstack(8)
+  %call_alignstack = call i32 @f(i32 5) alignstack(8)
   ; fast math flags
-  %9 = call nnan float @g()
-  ; Non-C calling conventions.
-  %10 = call ghccc i32 @f(i32 5)
+  %call_fmathflag = call nnan float @g()
+  ; Non-C calling conventions
+  %call_cconv = call ghccc i32 @f(i32 5)
   ; operand bundles
-  %11 = call i32 @f(i32 5) ["kcfi"(i32 1234)]
+  %call_bundles = call i32 @f(i32 5) ["kcfi"(i32 1234)]
   ; non-zero address spaces
-  %12 = call addrspace(6) ptr @p()
+  %call_aspace = call addrspace(6) ptr @p()
   ; stackmap required (but irrelevant for the test) for all of the above calls.
   call void (i64, i32, ...) @llvm.experimental.stackmap(i64 7, i32 0);
   br label %casts
 casts:
-  %13 = ptrtoint ptr %ptr to i8
-  %14 = ptrtoint <8 x ptr> %ptrs to <8 x i8>
+  ; ptrtoint to a smaller type
+  %cast_trunc = ptrtoint ptr %ptr to i8
+  ; vectors
+  %cast_vec = ptrtoint <8 x ptr> %ptrs to <8 x i8>
   br label %icmps
 icmps:
   ; vector of comparisons
-  %15 = icmp ne <4 x i32> %vecnums, zeroinitializer
+  %icmp_vec = icmp ne <4 x i32> %vecnums, zeroinitializer
   ; stackmap stops icmp from being optimised out.
-  call void (i64, i32, ...) @llvm.experimental.stackmap(i64 8, i32 0, <4 x i1> %15);
+  call void (i64, i32, ...) @llvm.experimental.stackmap(i64 8, i32 0, <4 x i1> %icmp_vec);
+  br label %loads
+loads:
+  ; volatile loads
+  %load_vol = load volatile i32, ptr %ptr
+  ; atomic loads
+  ; note: atomic load must have explicit non-zero alignment
+  %load_atom = load atomic i32, ptr %ptr acquire, align 4
+  ; loads from exotic address spaces
+  %load_aspace = load i32, ptr addrspace(10) %asptr
+  ; potentially misaligned loads
+  %load_misalign = load i32, ptr %ptr, align 2
+  ; stackmap stops loads from being optimised out.
+  call void (i64, i32, ...) @llvm.experimental.stackmap(i64 8, i32 0, i32 %load_vol)
   ret void
 }
