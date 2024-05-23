@@ -1100,7 +1100,7 @@ mod tests {
 
         fn test_with_spillalloc(m: &jit_ir::Module, patt_lines: &str) {
             match_asm(
-                X64CodeGen::new(&m, Box::new(SpillAllocator::new(STACK_DIRECTION)))
+                X64CodeGen::new(m, Box::new(SpillAllocator::new(STACK_DIRECTION)))
                     .unwrap()
                     .codegen()
                     .unwrap()
@@ -1128,7 +1128,7 @@ mod tests {
                 ... mov [rbp-0x10], r12
                 ...
             ";
-            test_with_spillalloc(&m, &patt_lines);
+            test_with_spillalloc(&m, patt_lines);
         }
 
         #[test]
@@ -1148,7 +1148,7 @@ mod tests {
                 ... mov [rbp-0x02], r12b
                 ...
             ";
-            test_with_spillalloc(&m, &patt_lines);
+            test_with_spillalloc(&m, patt_lines);
         }
 
         #[test]
@@ -1170,7 +1170,7 @@ mod tests {
                 ... mov [rbp-0x08], r12d
                 ...
             ";
-            test_with_spillalloc(&m, &patt_lines);
+            test_with_spillalloc(&m, patt_lines);
         }
 
         #[test]
@@ -1194,7 +1194,7 @@ mod tests {
                 ... mov [rbp-0x10], r12
                 ...
             ";
-            test_with_spillalloc(&m, &patt_lines);
+            test_with_spillalloc(&m, patt_lines);
         }
 
         #[test]
@@ -1217,7 +1217,7 @@ mod tests {
                 ... mov [r12], r13
                 ...
             ";
-            test_with_spillalloc(&m, &patt_lines);
+            test_with_spillalloc(&m, patt_lines);
         }
 
         #[test]
@@ -1233,7 +1233,7 @@ mod tests {
                 ... mov [rbp-0x01], r12b
                 ...
             ";
-            test_with_spillalloc(&m, &patt_lines);
+            test_with_spillalloc(&m, patt_lines);
         }
 
         #[test]
@@ -1251,7 +1251,7 @@ mod tests {
                 ... mov [rbp-0x02], r12w
                 ...
             ";
-            test_with_spillalloc(&m, &patt_lines);
+            test_with_spillalloc(&m, patt_lines);
         }
 
         #[test]
@@ -1288,7 +1288,7 @@ mod tests {
                 ... mov [rbp-0x10], r12
                 ...
             ";
-            test_with_spillalloc(&m, &patt_lines);
+            test_with_spillalloc(&m, patt_lines);
         }
 
         #[test]
@@ -1313,7 +1313,7 @@ mod tests {
                 ... mov [rbp-0x06], r12w
                 ...
             ";
-            test_with_spillalloc(&m, &patt_lines);
+            test_with_spillalloc(&m, patt_lines);
         }
 
         #[test]
@@ -1338,7 +1338,7 @@ mod tests {
                 ... mov [rbp-0x18], r12
                 ...
             ";
-            test_with_spillalloc(&m, &patt_lines);
+            test_with_spillalloc(&m, patt_lines);
         }
 
         #[cfg(debug_assertions)]
@@ -1631,7 +1631,7 @@ mod tests {
                 ... mov [rbp-0x09], r12b
                 ...
             ";
-            test_with_spillalloc(&m, &patt_lines);
+            test_with_spillalloc(&m, patt_lines);
         }
 
         #[test]
@@ -1653,7 +1653,7 @@ mod tests {
                 ... mov [rbp-0x02], r12b
                 ...
             ";
-            test_with_spillalloc(&m, &patt_lines);
+            test_with_spillalloc(&m, patt_lines);
         }
 
         #[cfg(debug_assertions)]
@@ -1702,7 +1702,7 @@ mod tests {
                 {{vaddr4}} {{off4}}: jnz 0x00000000{{failoff}}
                 ...
             ";
-            test_with_spillalloc(&m, &patt_lines);
+            test_with_spillalloc(&m, patt_lines);
         }
 
         #[test]
@@ -1728,7 +1728,7 @@ mod tests {
                 {{vaddr4}} {{off4}}: jnz 0x00000000{{failoff}}
                 ...
             ";
-            test_with_spillalloc(&m, &patt_lines);
+            test_with_spillalloc(&m, patt_lines);
         }
 
         #[test]
@@ -1739,7 +1739,7 @@ mod tests {
                 ; Unterminated trace
                 {{vaddr}} {{off}}: ud2
             ";
-            test_with_spillalloc(&m, &patt_lines);
+            test_with_spillalloc(&m, patt_lines);
         }
 
         #[test]
@@ -1754,7 +1754,7 @@ mod tests {
                 ; tloop_backedge:
                 {{vaddr}} {{off}}: jmp {{target}}
             ";
-            test_with_spillalloc(&m, &patt_lines);
+            test_with_spillalloc(&m, patt_lines);
         }
 
         #[test]
@@ -1777,7 +1777,7 @@ mod tests {
                 ; tloop_backedge:
                 ...: jmp ...
             ";
-            test_with_spillalloc(&m, &patt_lines);
+            test_with_spillalloc(&m, patt_lines);
         }
     }
 }

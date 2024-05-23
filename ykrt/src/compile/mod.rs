@@ -145,6 +145,6 @@ impl GuardId {
     /// Only when testing, create a `GuardId` with an illegal value: trying to use this `GuardId`
     /// will either cause an error or lead to undefined behaviour.
     pub(crate) fn illegal() -> Self {
-        GuardId(usize::max_value())
+        GuardId(usize::MAX)
     }
 }

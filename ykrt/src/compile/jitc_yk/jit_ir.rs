@@ -475,10 +475,10 @@ impl GlobalDecl {
 /// Bit fiddling.
 ///
 /// In the constants below:
-///  - `*_SIZE`: the size of a field in bits.
-///  - `*_MASK`: a mask with one bits occupying the field in question.
-///  - `*_SHIFT`: the number of bits required to left shift a field's value into position (from the
-///  LSB).
+///  * `*_SIZE`: the size of a field in bits.
+///  * `*_MASK`: a mask with one bits occupying the field in question.
+///  * `*_SHIFT`: the number of bits required to left shift a field's value into position (from the
+///    LSB).
 ///
 const OPERAND_IDX_MASK: u16 = 0x7fff;
 

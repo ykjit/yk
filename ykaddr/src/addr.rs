@@ -164,7 +164,7 @@ mod tests {
     #[test]
     fn map_libc() {
         let func = CString::new("getuid").unwrap();
-        let vaddr = unsafe { dlsym(ptr::null_mut(), func.as_ptr() as *const i8) };
+        let vaddr = unsafe { dlsym(ptr::null_mut(), func.as_ptr()) };
         assert_ne!(vaddr, ptr::null_mut());
         assert!(vaddr_to_obj_and_off(vaddr as usize).is_some());
     }
@@ -182,7 +182,7 @@ mod tests {
     #[test]
     fn round_trip_so() {
         let func = CString::new("getuid").unwrap();
-        let func_vaddr = unsafe { dlsym(ptr::null_mut(), func.as_ptr() as *const i8) };
+        let func_vaddr = unsafe { dlsym(ptr::null_mut(), func.as_ptr()) };
         let mut dlinfo = MaybeUninit::<Dl_info>::uninit();
         assert_ne!(unsafe { libc::dladdr(func_vaddr, dlinfo.as_mut_ptr()) }, 0);
         let dlinfo = unsafe { dlinfo.assume_init() };
