@@ -35,6 +35,7 @@ use std::{
     fmt, mem,
 };
 use typed_index_collections::{TiSlice, TiVec};
+#[cfg(not(test))]
 use ykaddr::addr::symbol_to_ptr;
 
 // This is simple and can be shared across both IRs.
@@ -150,20 +151,12 @@ impl Module {
     /// # Panics
     ///
     /// Panics if the address cannot be located.
+    #[cfg(not(test))]
     pub(crate) fn globalvar_ptr(&self, idx: GlobalDeclIdx) -> *const () {
         let decl = self.global_decl(idx);
-        #[cfg(not(test))]
-        {
-            // If the unwrap fails, then the AOT array was absent and something has gone wrong
-            // during AOT codegen.
-            self.globalvar_ptrs[usize::from(decl.global_ptr_idx())]
-        }
-        #[cfg(test)]
-        {
-            // In unit tests the global variable pointer array isn't present, as the
-            // unit test binary wasn't compiled with ykllvm. Fall back on dlsym().
-            symbol_to_ptr(decl.name().to_str().unwrap()).unwrap()
-        }
+        // If the unwrap fails, then the AOT array was absent and something has gone wrong
+        // during AOT codegen.
+        self.globalvar_ptrs[usize::from(decl.global_ptr_idx())]
     }
 
     /// Returns the type index of [Ty::Void].
@@ -453,18 +446,13 @@ impl GlobalDecl {
         }
     }
 
-    /// Return the name of the declaration.
-    #[cfg(test)]
-    pub(crate) fn name(&self) -> &std::ffi::CStr {
-        &self.name
-    }
-
     /// Return whether the declaration is a thread local.
     pub(crate) fn is_threadlocal(&self) -> bool {
         self.is_threadlocal
     }
 
     /// Return the declaration's index in the global variable pointer array.
+    #[cfg(not(test))]
     pub(crate) fn global_ptr_idx(&self) -> aot_ir::GlobalDeclIdx {
         self.global_ptr_idx
     }
@@ -484,6 +472,7 @@ const OPERAND_IDX_MASK: u16 = 0x7fff;
 const MAX_OPERAND_IDX: u16 = (1 << 15) - 1;
 
 /// The symbol name of the global variable pointers array.
+#[cfg(not(test))]
 const GLOBAL_PTR_ARRAY_SYM: &str = "__yk_globalvar_ptrs";
 
 /// A packed 24-bit unsigned integer.
@@ -1374,11 +1363,13 @@ impl LookupGlobalInst {
         panic!("Cannot lookup globals in cfg(test) as ykllvm will not have compiled this binary");
     }
 
+    #[cfg(not(test))]
     pub(crate) fn decl<'a>(&self, m: &'a Module) -> &'a GlobalDecl {
         m.global_decl(self.global_decl_idx)
     }
 
     /// Returns the index of the global to lookup.
+    #[cfg(not(test))]
     pub(crate) fn global_decl_idx(&self) -> GlobalDeclIdx {
         self.global_decl_idx
     }
