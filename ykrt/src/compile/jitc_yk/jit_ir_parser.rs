@@ -154,3 +154,32 @@ enum ASTOperand {
 enum ASTType {
     Int(Span),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compile::jitc_yk::jit_ir::Ty;
+
+    #[test]
+    fn roundtrip() {
+        let mut m = Module::new_testing();
+        let i16_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(16))).unwrap();
+        let op1 = m
+            .push_and_make_operand(LoadTraceInputInst::new(0, i16_ty_idx).into())
+            .unwrap();
+        let op2 = m
+            .push_and_make_operand(LoadTraceInputInst::new(16, i16_ty_idx).into())
+            .unwrap();
+        let op3 = m
+            .push_and_make_operand(AddInst::new(op1.clone(), op2.clone()).into())
+            .unwrap();
+        let op4 = m
+            .push_and_make_operand(AddInst::new(op1.clone(), op3.clone()).into())
+            .unwrap();
+        m.push(TestUseInst::new(op3).into()).unwrap();
+        m.push(TestUseInst::new(op4).into()).unwrap();
+        let s = m.to_string();
+        let parsed_m = Module::from_str(&s);
+        assert_eq!(m.to_string(), parsed_m.to_string());
+    }
+}

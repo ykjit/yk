@@ -17,27 +17,21 @@
 //!  * `Inst`: "instruction"
 //!  * `Ty`: "type"
 //!
-//! To get human-readable representations of IR data structures, most of the IR constructs either:
-//!  * implement [std::fmt::Display] and thus can be stringified with (e.g.) `format!`, or
-//!  * if extra information is needed, have a method called `display()` which takes extra arguments
-//!    and returns something which does implement [std::fmt::Display].
-//!
-//! In the human readable IR, all names should be lowercase. Try to keep them short. Underscores
-//! can be added to taste.
-
-// For now, don't swamp others working in other areas of the system.
-// FIXME: eventually delete.
-#![allow(dead_code)]
+//! IR structures can be converted to human-readable strings either because:
+//!  1. they implement [std::fmt::Display] directly.
+//!  2. or, when they need extra information, they expose a `display()` method, which returns an
+//!     object which implements [std::fmt::Display].
 
 use super::aot_ir;
 use crate::compile::CompilationError;
 use indexmap::IndexSet;
 use num_traits::{PrimInt, ToBytes};
 use std::{
-    ffi::{c_void, CStr, CString},
+    ffi::{c_void, CString},
     fmt, mem,
 };
 use typed_index_collections::{TiSlice, TiVec};
+#[cfg(not(test))]
 use ykaddr::addr::symbol_to_ptr;
 
 // This is simple and can be shared across both IRs.
@@ -153,20 +147,12 @@ impl Module {
     /// # Panics
     ///
     /// Panics if the address cannot be located.
+    #[cfg(not(test))]
     pub(crate) fn globalvar_ptr(&self, idx: GlobalDeclIdx) -> *const () {
         let decl = self.global_decl(idx);
-        #[cfg(not(test))]
-        {
-            // If the unwrap fails, then the AOT array was absent and something has gone wrong
-            // during AOT codegen.
-            self.globalvar_ptrs[usize::from(decl.global_ptr_idx())]
-        }
-        #[cfg(test)]
-        {
-            // In unit tests the global variable pointer array isn't present, as the
-            // unit test binary wasn't compiled with ykllvm. Fall back on dlsym().
-            symbol_to_ptr(decl.name().to_str().unwrap()).unwrap()
-        }
+        // If the unwrap fails, then the AOT array was absent and something has gone wrong
+        // during AOT codegen.
+        self.globalvar_ptrs[usize::from(decl.global_ptr_idx())]
     }
 
     /// Returns the type index of [Ty::Void].
@@ -456,17 +442,13 @@ impl GlobalDecl {
         }
     }
 
-    /// Return the name of the declaration (as a `&CStr`).
-    pub(crate) fn name(&self) -> &CStr {
-        &self.name
-    }
-
     /// Return whether the declaration is a thread local.
     pub(crate) fn is_threadlocal(&self) -> bool {
         self.is_threadlocal
     }
 
     /// Return the declaration's index in the global variable pointer array.
+    #[cfg(not(test))]
     pub(crate) fn global_ptr_idx(&self) -> aot_ir::GlobalDeclIdx {
         self.global_ptr_idx
     }
@@ -486,6 +468,7 @@ const OPERAND_IDX_MASK: u16 = 0x7fff;
 const MAX_OPERAND_IDX: u16 = (1 << 15) - 1;
 
 /// The symbol name of the global variable pointers array.
+#[cfg(not(test))]
 const GLOBAL_PTR_ARRAY_SYM: &str = "__yk_globalvar_ptrs";
 
 /// A packed 24-bit unsigned integer.
@@ -560,6 +543,7 @@ macro_rules! index_24bit {
 // Generate common methods for 16-bit index types.
 macro_rules! index_16bit {
     ($struct:ident) => {
+        #[allow(dead_code)]
         impl $struct {
             pub(crate) fn new(v: usize) -> Result<Self, CompilationError> {
                 u16::try_from(v)
@@ -689,15 +673,6 @@ impl FuncTy {
     }
 }
 
-/// A structure's type.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct StructTy {
-    /// The types of the fields.
-    field_ty_idxs: Vec<TyIdx>,
-    /// The bit offsets of the fields (taking into account any required padding for alignment).
-    field_bit_offs: Vec<usize>,
-}
-
 /// A type.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum Ty {
@@ -705,7 +680,6 @@ pub(crate) enum Ty {
     Integer(IntegerTy),
     Ptr,
     Func(FuncTy),
-    Struct(StructTy),
     Unimplemented(String),
 }
 
@@ -716,7 +690,6 @@ impl fmt::Display for Ty {
             Self::Integer(it) => write!(f, "i{}", it.num_bits()),
             Self::Ptr => write!(f, "ptr"),
             Self::Func(_) => todo!(),
-            Self::Struct(_) => todo!(),
             Self::Unimplemented(_) => write!(f, "?type"),
         }
     }
@@ -740,7 +713,6 @@ impl Ty {
                 Some(mem::size_of::<*const c_void>())
             }
             Self::Func(_) => None,
-            Self::Struct(_) => todo!(),
             Self::Unimplemented(_) => None,
         }
     }
@@ -761,10 +733,6 @@ impl FuncDecl {
     /// Return the name of this function declaration.
     pub(crate) fn name(&self) -> &str {
         &self.name
-    }
-
-    pub(crate) fn ty_idx(&self) -> TyIdx {
-        self.ty_idx
     }
 }
 
@@ -1411,11 +1379,13 @@ impl LookupGlobalInst {
         panic!("Cannot lookup globals in cfg(test) as ykllvm will not have compiled this binary");
     }
 
+    #[cfg(not(test))]
     pub(crate) fn decl<'a>(&self, m: &'a Module) -> &'a GlobalDecl {
         m.global_decl(self.global_decl_idx)
     }
 
     /// Returns the index of the global to lookup.
+    #[cfg(not(test))]
     pub(crate) fn global_decl_idx(&self) -> GlobalDeclIdx {
         self.global_decl_idx
     }
@@ -1614,6 +1584,7 @@ impl PtrAddInst {
 macro_rules! bin_op {
     ($discrim :ident, $struct: ident, $disp: literal) => {
         #[derive(Clone, Debug, PartialEq)]
+        #[allow(dead_code)]
         pub struct $struct {
             /// The left-hand side of the operation.
             lhs: PackedOperand,
@@ -1621,6 +1592,7 @@ macro_rules! bin_op {
             rhs: PackedOperand,
         }
 
+        #[allow(dead_code)]
         impl $struct {
             pub(crate) fn new(lhs: Operand, rhs: Operand) -> Self {
                 Self {
@@ -1639,6 +1611,7 @@ macro_rules! bin_op {
 
             /// Returns the type index of the operands being added.
             pub(crate) fn ty_idx(&self, m: &Module) -> TyIdx {
+                debug_assert_eq!(self.lhs.unpack().ty_idx(m), self.rhs.unpack().ty_idx(m));
                 self.lhs.unpack().ty_idx(m)
             }
         }
