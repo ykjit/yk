@@ -1671,49 +1671,49 @@ mod tests {
         }
 
         #[test]
-        fn cg_icmp_i64() {
-            let mut m = test_module();
-            let i64_ty_idx = m
-                .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(64)))
-                .unwrap();
-            let op = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i64_ty_idx).into())
-                .unwrap();
-            m.push(jit_ir::IcmpInst::new(op.clone(), jit_ir::Predicate::Equal, op).into())
-                .unwrap();
-            let patt_lines = "
-                ...
-                ; %1: i8 = eq %0, %0
-                ... mov r12, [rbp-0x08]
-                ... mov r13, [rbp-0x08]
-                ... cmp r12, r13
-                ... setz r12b
-                ... mov [rbp-0x09], r12b
-                ...
-            ";
-            test_with_spillalloc(&m, patt_lines);
+        fn cg_eq_i64() {
+            test_with_spillalloc(
+                &Module::from_str(
+                    "
+                  entry:
+                    %0: i64 = load_ti 0
+                    %1: i8 = eq %0, %0
+            ",
+                ),
+                "
+                    ...
+                    ; %1: i8 = eq %0, %0
+                    ... mov r12, [rbp-0x08]
+                    ... mov r13, [rbp-0x08]
+                    ... cmp r12, r13
+                    ... setz r12b
+                    ... mov [rbp-0x09], r12b
+                    ...
+            ",
+            );
         }
 
         #[test]
-        fn cg_icmp_i8() {
-            let mut m = test_module();
-            let i8_ty_idx = m.insert_ty(jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
-            let op = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i8_ty_idx).into())
-                .unwrap();
-            m.push(jit_ir::IcmpInst::new(op.clone(), jit_ir::Predicate::Equal, op).into())
-                .unwrap();
-            let patt_lines = "
-                ...
-                ; %1: i8 = eq %0, %0
-                ... movzx r12, byte ptr [rbp-0x01]
-                ... movzx r13, byte ptr [rbp-0x01]
-                ... cmp r12b, r13b
-                ... setz r12b
-                ... mov [rbp-0x02], r12b
-                ...
-            ";
-            test_with_spillalloc(&m, patt_lines);
+        fn cg_eq_i8() {
+            test_with_spillalloc(
+                &Module::from_str(
+                    "
+                  entry:
+                    %0: i8 = load_ti 0
+                    %1: i8 = eq %0, %0
+            ",
+                ),
+                "
+                    ...
+                    ; %1: i8 = eq %0, %0
+                    ... movzx r12, byte ptr [rbp-0x01]
+                    ... movzx r13, byte ptr [rbp-0x01]
+                    ... cmp r12b, r13b
+                    ... setz r12b
+                    ... mov [rbp-0x02], r12b
+                    ...
+            ",
+            );
         }
 
         #[cfg(debug_assertions)]
@@ -1842,16 +1842,16 @@ mod tests {
 
         #[test]
         fn cg_srem() {
-            let mut m = test_module();
-            let i8_ty_idx = m.insert_ty(jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
-            let op1 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i8_ty_idx).into())
-                .unwrap();
-            let op2 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(1, i8_ty_idx).into())
-                .unwrap();
-            m.push(jit_ir::SRemInst::new(op1, op2).into()).unwrap();
-            let patt_lines = "
+            test_with_spillalloc(
+                &Module::from_str(
+                    "
+                  entry:
+                    %0: i8 = load_ti 0
+                    %1: i8 = load_ti 1
+                    %2: i8 = srem %0, %1
+            ",
+                ),
+                "
                 ...
                 ; %2: i8 = srem %0, %1
                 ... xor rdx, rdx
@@ -1860,8 +1860,8 @@ mod tests {
                 ... idiv r13b
                 ... mov [rbp-0x03], dl
                 ...
-            ";
-            test_with_spillalloc(&m, &patt_lines);
+            ",
+            );
         }
 
         #[test]
