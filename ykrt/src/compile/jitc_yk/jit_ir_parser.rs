@@ -5,7 +5,8 @@
 //! makes it possible to write JIT IR tests using JIT IR concrete syntax.
 
 use super::jit_ir::{
-    AddInst, InstIdx, IntegerTy, LoadTraceInputInst, Module, Operand, TestUseInst, Ty, TyIdx,
+    AddInst, InstIdx, IntegerTy, LoadTraceInputInst, Module, Operand, TestUseInst, TruncInst, Ty,
+    TyIdx,
 };
 use fm::FMBuilder;
 use lrlex::{lrlex_mod, DefaultLexerTypes, LRNonStreamingLexer};
@@ -136,6 +137,18 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                         let inst = TestUseInst::new(self.process_operand(op)?);
                         m.push(inst.into()).unwrap();
                     }
+                    ASTInst::Trunc {
+                        assign,
+                        type_,
+                        operand,
+                    } => {
+                        let inst = TruncInst::new(
+                            &self.process_operand(operand)?,
+                            self.process_type(&mut m, type_)?,
+                        );
+                        self.add_assign(m.len(), assign)?;
+                        m.push(inst.into()).unwrap();
+                    }
                 }
             }
         }
@@ -234,6 +247,11 @@ enum ASTInst {
         off: Span,
     },
     TestUse(ASTOperand),
+    Trunc {
+        assign: Span,
+        type_: ASTType,
+        operand: ASTOperand,
+    },
 }
 
 #[derive(Debug)]
@@ -290,6 +308,18 @@ mod tests {
             %{{0}}: i16 = load_ti 0
             %{{1}}: i16 = load_ti 1
             %{{_}}: i16 = add %{{0}}, %{{1}}
+        ",
+        );
+    }
+
+    #[test]
+    fn all_jit_ir_syntax() {
+        Module::from_str(
+            "
+          entry:
+            %0: i16 = load_ti 0
+            %1: i16 = trunc %0
+            %2: i16 = add %0, %1
         ",
         );
     }

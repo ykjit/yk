@@ -34,6 +34,9 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
   | "LOCAL_OPERAND" ":" Type "=" "ADD" Operand "," Operand  {
       Ok(ASTInst::Add{assign: $1?.span(), type_: $3?, lhs: $6?, rhs: $8?})
     }
+  | "LOCAL_OPERAND" ":" Type "=" "TRUNC" Operand {
+      Ok(ASTInst::Trunc{assign: $1?.span(), type_: $3?, operand: $6? })
+    }
   | "TEST_USE" Operand { Ok(ASTInst::TestUse($2?)) }
   ;
 

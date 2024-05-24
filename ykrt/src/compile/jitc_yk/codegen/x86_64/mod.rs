@@ -1116,7 +1116,7 @@ mod tests {
     use crate::compile::{
         jitc_yk::{
             codegen::reg_alloc::RegisterAllocator,
-            jit_ir::{self, IntegerTy, Ty},
+            jit_ir::{self, IntegerTy, Module, Ty},
         },
         CompiledTrace,
     };
@@ -1866,26 +1866,24 @@ mod tests {
 
         #[test]
         fn cg_trunc() {
-            let mut m = test_module();
-            let i8_ty_idx = m.insert_ty(jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
-            let i32_ty_idx = m
-                .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(32)))
-                .unwrap();
-            let op = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i32_ty_idx).into())
-                .unwrap();
-            m.push(jit_ir::TruncInst::new(&op, i8_ty_idx).into())
-                .unwrap();
-            let patt_lines = "
-                ...
-                ; %0: i32 = load_ti 0
-                ...
-                ; %1: i8 = trunc %0
-                ... mov r12d, [rbp-0x04]
-                ... mov [rbp-0x05], r12b
-                ...
-            ";
-            test_with_spillalloc(&m, &patt_lines);
+            test_with_spillalloc(
+                &Module::from_str(
+                    "
+                  entry:
+                    %0: i32 = load_ti 0
+                    %1: i8 = trunc %0
+            ",
+                ),
+                "
+                   ...
+                   ; %0: i32 = load_ti 0
+                   ...
+                   ; %1: i8 = trunc %0
+                   ... mov r12d, [rbp-0x04]
+                   ... mov [rbp-0x05], r12b
+                   ...
+            ",
+            );
         }
     }
 }
