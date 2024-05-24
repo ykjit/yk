@@ -1160,12 +1160,7 @@ impl fmt::Display for DisplayableInst<'_> {
                 )
             }
             Inst::Trunc(i) => {
-                write!(
-                    f,
-                    "trunc {}, {}",
-                    i.val().display(self.m),
-                    self.m.type_(i.dest_ty_idx())
-                )
+                write!(f, "trunc {}", i.val().display(self.m))
             }
             Inst::Or(i) => {
                 write!(
