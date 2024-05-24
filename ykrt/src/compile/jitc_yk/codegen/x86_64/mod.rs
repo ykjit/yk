@@ -1148,10 +1148,7 @@ mod tests {
 
         match fmm.matches(&dis.to_lowercase()) {
             Ok(()) => (),
-            Err(e) => panic!(
-                "\n!!! Emitted code didn't match !!!\n\n{}\nFull asm:\n{}\n",
-                e, dis
-            ),
+            Err(e) => panic!("{e}"),
         }
     }
 
