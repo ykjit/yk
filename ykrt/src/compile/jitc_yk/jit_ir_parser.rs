@@ -4,9 +4,12 @@
 //! method to [Module] which takes in JIT IR as a string, parses it, and produces a [Module]. This
 //! makes it possible to write JIT IR tests using JIT IR concrete syntax.
 
-use super::jit_ir::{
-    AddInst, InstIdx, IntegerTy, LoadTraceInputInst, Module, Operand, TestUseInst, TruncInst, Ty,
-    TyIdx,
+use super::{
+    aot_ir::Predicate,
+    jit_ir::{
+        AddInst, IcmpInst, InstIdx, IntegerTy, LoadTraceInputInst, Module, Operand, SRemInst,
+        TestUseInst, TruncInst, Ty, TyIdx,
+    },
 };
 use fm::FMBuilder;
 use lrlex::{lrlex_mod, DefaultLexerTypes, LRNonStreamingLexer};
@@ -123,6 +126,20 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                         self.add_assign(m.len(), assign)?;
                         m.push(inst.into()).unwrap();
                     }
+                    ASTInst::Eq {
+                        assign,
+                        type_: _,
+                        lhs,
+                        rhs,
+                    } => {
+                        let inst = IcmpInst::new(
+                            self.process_operand(lhs)?,
+                            Predicate::Equal,
+                            self.process_operand(rhs)?,
+                        );
+                        self.add_assign(m.len(), assign)?;
+                        m.push(inst.into()).unwrap();
+                    }
                     ASTInst::LoadTraceInput { assign, type_, off } => {
                         let off = self
                             .lexer
@@ -130,6 +147,17 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                             .parse::<u32>()
                             .map_err(|e| self.error_at_span(off, &e.to_string()))?;
                         let inst = LoadTraceInputInst::new(off, self.process_type(&mut m, type_)?);
+                        self.add_assign(m.len(), assign)?;
+                        m.push(inst.into()).unwrap();
+                    }
+                    ASTInst::SRem {
+                        assign,
+                        type_: _,
+                        lhs,
+                        rhs,
+                    } => {
+                        let inst =
+                            SRemInst::new(self.process_operand(lhs)?, self.process_operand(rhs)?);
                         self.add_assign(m.len(), assign)?;
                         m.push(inst.into()).unwrap();
                     }
@@ -241,10 +269,24 @@ enum ASTInst {
         lhs: ASTOperand,
         rhs: ASTOperand,
     },
+    Eq {
+        assign: Span,
+        #[allow(dead_code)]
+        type_: ASTType,
+        lhs: ASTOperand,
+        rhs: ASTOperand,
+    },
     LoadTraceInput {
         assign: Span,
         type_: ASTType,
         off: Span,
+    },
+    SRem {
+        assign: Span,
+        #[allow(dead_code)]
+        type_: ASTType,
+        lhs: ASTOperand,
+        rhs: ASTOperand,
     },
     TestUse(ASTOperand),
     Trunc {
@@ -320,6 +362,8 @@ mod tests {
             %0: i16 = load_ti 0
             %1: i16 = trunc %0
             %2: i16 = add %0, %1
+            %3: i16 = srem %1, %2
+            %4: i16 = eq %1, %2
         ",
         );
     }
