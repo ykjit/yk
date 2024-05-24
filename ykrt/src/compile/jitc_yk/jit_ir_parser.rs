@@ -7,8 +7,8 @@
 use super::{
     aot_ir::Predicate,
     jit_ir::{
-        AddInst, IcmpInst, InstIdx, IntegerTy, LoadTraceInputInst, Module, Operand, SRemInst,
-        TestUseInst, TruncInst, Ty, TyIdx,
+        AddInst, GuardInfo, GuardInst, IcmpInst, InstIdx, IntegerTy, LoadTraceInputInst, Module,
+        Operand, SRemInst, TestUseInst, TruncInst, Ty, TyIdx,
     },
 };
 use fm::FMBuilder;
@@ -138,6 +138,13 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                             self.process_operand(rhs)?,
                         );
                         self.add_assign(m.len(), assign)?;
+                        m.push(inst.into()).unwrap();
+                    }
+                    ASTInst::Guard { operand, is_true } => {
+                        let gidx = m
+                            .push_guardinfo(GuardInfo::new(Vec::new(), Vec::new()))
+                            .unwrap();
+                        let inst = GuardInst::new(self.process_operand(operand)?, is_true, gidx);
                         m.push(inst.into()).unwrap();
                     }
                     ASTInst::LoadTraceInput { assign, type_, off } => {
@@ -276,6 +283,10 @@ enum ASTInst {
         lhs: ASTOperand,
         rhs: ASTOperand,
     },
+    Guard {
+        operand: ASTOperand,
+        is_true: bool,
+    },
     LoadTraceInput {
         assign: Span,
         type_: ASTType,
@@ -364,6 +375,7 @@ mod tests {
             %2: i16 = add %0, %1
             %3: i16 = srem %1, %2
             %4: i16 = eq %1, %2
+            guard %4, true
         ",
         );
     }

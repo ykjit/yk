@@ -1735,54 +1735,54 @@ mod tests {
 
         #[test]
         fn cg_guard_true() {
-            let mut m = test_module();
-            let gi = jit_ir::GuardInfo::new(vec![0], Vec::new());
-            let gi_idx = m.push_guardinfo(gi).unwrap();
-            let cond_op = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, m.int8_ty_idx()).into())
-                .unwrap();
-            m.push(jit_ir::GuardInst::new(cond_op, true, gi_idx).into())
-                .unwrap();
-            let patt_lines = "
-                ...
-                ; guard %0, true
-                {{vaddr1}} {{off1}}: jmp 0x00000000{{cmpoff}}
-                {{vaddr2}} {{failoff}}: mov rdi, [rbp]
-                ... mov rsi, 0x00
-                ... mov rdx, rbp
-                ... mov rax, ...
-                ... call rax
-                {{vaddr3}} {{cmpoff}}: cmp r12b, 0x01
-                {{vaddr4}} {{off4}}: jnz 0x00000000{{failoff}}
-                ...
-            ";
-            test_with_spillalloc(&m, patt_lines);
+            test_with_spillalloc(
+                &Module::from_str(
+                    "
+                  entry:
+                    %0: i8 = load_ti 0
+                    guard %0, true
+            ",
+                ),
+                "
+                    ...
+                    ; guard %0, true
+                    {{vaddr1}} {{off1}}: jmp 0x00000000{{cmpoff}}
+                    {{vaddr2}} {{failoff}}: mov rdi, [rbp]
+                    ... mov rsi, 0x00
+                    ... mov rdx, rbp
+                    ... mov rax, ...
+                    ... call rax
+                    {{vaddr3}} {{cmpoff}}: cmp r12b, 0x01
+                    {{vaddr4}} {{off4}}: jnz 0x00000000{{failoff}}
+                    ...
+            ",
+            );
         }
 
         #[test]
         fn cg_guard_false() {
-            let mut m = test_module();
-            let gi = jit_ir::GuardInfo::new(vec![0], Vec::new());
-            let gi_idx = m.push_guardinfo(gi).unwrap();
-            let cond_op = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, m.int8_ty_idx()).into())
-                .unwrap();
-            m.push(jit_ir::GuardInst::new(cond_op, false, gi_idx).into())
-                .unwrap();
-            let patt_lines = "
-                ...
-                ; guard %0, false
-                {{vaddr1}} {{off1}}: jmp 0x00000000{{cmpoff}}
-                {{vaddr2}} {{failoff}}: mov rdi, [rbp]
-                ... mov rsi, 0x00
-                ... mov rdx, rbp
-                ... mov rax, ...
-                ... call rax
-                {{vaddr3}} {{cmpoff}}: cmp r12b, 0x00
-                {{vaddr4}} {{off4}}: jnz 0x00000000{{failoff}}
-                ...
-            ";
-            test_with_spillalloc(&m, patt_lines);
+            test_with_spillalloc(
+                &Module::from_str(
+                    "
+                  entry:
+                    %0: i8 = load_ti 0
+                    guard %0, false
+            ",
+                ),
+                "
+                    ...
+                    ; guard %0, false
+                    {{vaddr1}} {{off1}}: jmp 0x00000000{{cmpoff}}
+                    {{vaddr2}} {{failoff}}: mov rdi, [rbp]
+                    ... mov rsi, 0x00
+                    ... mov rdx, rbp
+                    ... mov rax, ...
+                    ... call rax
+                    {{vaddr3}} {{cmpoff}}: cmp r12b, 0x00
+                    {{vaddr4}} {{off4}}: jnz 0x00000000{{failoff}}
+                    ...
+            ",
+            );
         }
 
         #[test]

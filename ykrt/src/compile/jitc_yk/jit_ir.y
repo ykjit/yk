@@ -28,7 +28,13 @@ Insts -> Result<Vec<ASTInst>, Box<dyn Error>>:
   ;
 
 Inst -> Result<ASTInst, Box<dyn Error>>:
-    "LOCAL_OPERAND" ":" Type "=" "LOAD_TI" "INT" {
+    "GUARD" Operand "," "TRUE" {
+      Ok(ASTInst::Guard{operand: $2?, is_true: true})
+    }
+  | "GUARD" Operand "," "FALSE" {
+      Ok(ASTInst::Guard{operand: $2?, is_true: false})
+    }
+  | "LOCAL_OPERAND" ":" Type "=" "LOAD_TI" "INT" {
       Ok(ASTInst::LoadTraceInput{assign: $1?.span(), type_: $3?, off: $6?.span()})
     }
   | "LOCAL_OPERAND" ":" Type "=" "ADD" Operand "," Operand  {
