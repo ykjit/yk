@@ -25,7 +25,23 @@ impl Module {
     ///
     /// If `s` is not parsable or otherwise does not lead to the creation of a valid `Module`.
     pub(crate) fn from_str(s: &str) -> Self {
-        JITIRParser::parse(s)
+        // Get the `LexerDef` for the `calc` language.
+        let lexerdef = jit_ir_l::lexerdef();
+        let lexer = lexerdef.lexer(s);
+        // Pass the lexer to the parser and lex and parse the input.
+        let (res, errs) = jit_ir_y::parse(&lexer);
+        if !errs.is_empty() {
+            for e in errs {
+                eprintln!("{}", e.pp(&lexer, &jit_ir_y::token_epp));
+            }
+            panic!("Could not parse input");
+        }
+        match res {
+            Some(Ok((globals, bblocks))) => JITIRParser { lexer: &lexer }
+                .process(globals, bblocks)
+                .unwrap(),
+            _ => panic!("Could not produce JIT Module."),
+        }
     }
 
     /// Assert that for the given IR input, as a string, `ir_input`, when transformed by
@@ -72,30 +88,13 @@ impl Module {
     }
 }
 
-struct JITIRParser;
+struct JITIRParser<'lexer, 'input: 'lexer> {
+    lexer: &'lexer LRNonStreamingLexer<'lexer, 'input, DefaultLexerTypes<StorageT>>,
+}
 
-impl JITIRParser {
-    fn parse(s: &str) -> Module {
-        // Get the `LexerDef` for the `calc` language.
-        let lexerdef = jit_ir_l::lexerdef();
-        let lexer = lexerdef.lexer(s);
-        // Pass the lexer to the parser and lex and parse the input.
-        let (res, errs) = jit_ir_y::parse(&lexer);
-        if !errs.is_empty() {
-            for e in errs {
-                eprintln!("{}", e.pp(&lexer, &jit_ir_y::token_epp));
-            }
-            panic!("Could not parse input");
-        }
-        match res {
-            Some(Ok((globals, bblocks))) => Self.process(lexer, globals, bblocks).unwrap(),
-            _ => panic!("Could not produce JIT Module."),
-        }
-    }
-
+impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
     fn process(
         &self,
-        lexer: LRNonStreamingLexer<DefaultLexerTypes<StorageT>>,
         _globals: Vec<()>,
         bblocks: Vec<ASTBBlock>,
     ) -> Result<Module, Box<dyn Error>> {
@@ -104,23 +103,21 @@ impl JITIRParser {
             for inst in bblock.insts {
                 match inst {
                     ASTInst::Add { type_: _, lhs, rhs } => {
-                        let inst = AddInst::new(
-                            self.process_operand(&lexer, lhs)?,
-                            self.process_operand(&lexer, rhs)?,
-                        );
+                        let inst =
+                            AddInst::new(self.process_operand(lhs)?, self.process_operand(rhs)?);
                         m.push(inst.into()).unwrap();
                     }
                     ASTInst::LoadTraceInput { type_, off } => {
-                        let off = lexer
+                        let off = self
+                            .lexer
                             .span_str(off)
                             .parse::<u32>()
-                            .map_err(|e| self.error_at_span(&lexer, off, &e.to_string()))?;
-                        let inst =
-                            LoadTraceInputInst::new(off, self.process_type(&lexer, &mut m, type_)?);
+                            .map_err(|e| self.error_at_span(off, &e.to_string()))?;
+                        let inst = LoadTraceInputInst::new(off, self.process_type(&mut m, type_)?);
                         m.push(inst.into()).unwrap();
                     }
                     ASTInst::TestUse(op) => {
-                        let inst = TestUseInst::new(self.process_operand(&lexer, op)?);
+                        let inst = TestUseInst::new(self.process_operand(op)?);
                         m.push(inst.into()).unwrap();
                     }
                 }
@@ -129,50 +126,37 @@ impl JITIRParser {
         Ok(m)
     }
 
-    fn process_operand(
-        &self,
-        lexer: &LRNonStreamingLexer<DefaultLexerTypes<StorageT>>,
-        op: ASTOperand,
-    ) -> Result<Operand, Box<dyn Error>> {
+    fn process_operand(&self, op: ASTOperand) -> Result<Operand, Box<dyn Error>> {
         match op {
             ASTOperand::Local(span) => {
-                let idx = lexer.span_str(span)[1..]
+                let idx = self.lexer.span_str(span)[1..]
                     .parse::<usize>()
-                    .map_err(|e| self.error_at_span(lexer, span, &e.to_string()))?;
-                Ok(Operand::Local(InstIdx::new(idx).map_err(|e| {
-                    self.error_at_span(lexer, span, &e.to_string())
-                })?))
+                    .map_err(|e| self.error_at_span(span, &e.to_string()))?;
+                Ok(Operand::Local(
+                    InstIdx::new(idx).map_err(|e| self.error_at_span(span, &e.to_string()))?,
+                ))
             }
         }
     }
 
-    fn process_type(
-        &self,
-        lexer: &LRNonStreamingLexer<DefaultLexerTypes<StorageT>>,
-        m: &mut Module,
-        type_: ASTType,
-    ) -> Result<TyIdx, Box<dyn Error>> {
+    fn process_type(&self, m: &mut Module, type_: ASTType) -> Result<TyIdx, Box<dyn Error>> {
         match type_ {
             ASTType::Int(span) => {
-                let width = lexer.span_str(span)[1..]
+                let width = self.lexer.span_str(span)[1..]
                     .parse::<u32>()
-                    .map_err(|e| self.error_at_span(lexer, span, &e.to_string()))?;
+                    .map_err(|e| self.error_at_span(span, &e.to_string()))?;
                 let ty = IntegerTy::new(width);
                 m.insert_ty(Ty::Integer(ty))
-                    .map_err(|e| self.error_at_span(lexer, span, &e.to_string()))
+                    .map_err(|e| self.error_at_span(span, &e.to_string()))
             }
         }
     }
 
     /// Return an error message pinpointing `span` as the culprit.
-    fn error_at_span(
-        &self,
-        lexer: &LRNonStreamingLexer<DefaultLexerTypes<StorageT>>,
-        span: Span,
-        msg: &str,
-    ) -> Box<dyn Error> {
-        let ((line_off, col), _) = lexer.line_col(span);
-        let code = lexer
+    fn error_at_span(&self, span: Span, msg: &str) -> Box<dyn Error> {
+        let ((line_off, col), _) = self.lexer.line_col(span);
+        let code = self
+            .lexer
             .span_lines_str(span)
             .split('\n')
             .next()
