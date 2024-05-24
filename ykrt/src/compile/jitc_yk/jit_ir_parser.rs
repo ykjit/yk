@@ -11,7 +11,7 @@ use fm::FMBuilder;
 use lrlex::{lrlex_mod, DefaultLexerTypes, LRNonStreamingLexer};
 use lrpar::{lrpar_mod, NonStreamingLexer, Span};
 use regex::Regex;
-use std::{error::Error, sync::OnceLock};
+use std::{collections::HashMap, error::Error, sync::OnceLock};
 
 lrlex_mod!("compile/jitc_yk/jit_ir.l");
 lrpar_mod!("compile/jitc_yk/jit_ir.y");
@@ -37,9 +37,12 @@ impl Module {
             panic!("Could not parse input");
         }
         match res {
-            Some(Ok((globals, bblocks))) => JITIRParser { lexer: &lexer }
-                .process(globals, bblocks)
-                .unwrap(),
+            Some(Ok((globals, bblocks))) => JITIRParser {
+                lexer: &lexer,
+                inst_idx_map: HashMap::new(),
+            }
+            .process(globals, bblocks)
+            .unwrap(),
             _ => panic!("Could not produce JIT Module."),
         }
     }
@@ -90,30 +93,43 @@ impl Module {
 
 struct JITIRParser<'lexer, 'input: 'lexer> {
     lexer: &'lexer LRNonStreamingLexer<'lexer, 'input, DefaultLexerTypes<StorageT>>,
+    /// A mapping from local operands (e.g. `%3`) in the input text to instruction offsets. For
+    /// example if the first instruction in the input is `%3 = ...` the map will be `%3 -> %0`
+    /// indicating that whenever we see `%3` in the input we map that to `%0` in the IR we're
+    /// generating. To populate this map, each instruction that defines a new local operand needs
+    /// to call [Self::add_assign].
+    inst_idx_map: HashMap<InstIdx, InstIdx>,
 }
 
 impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
     fn process(
-        &self,
+        &mut self,
         _globals: Vec<()>,
         bblocks: Vec<ASTBBlock>,
     ) -> Result<Module, Box<dyn Error>> {
         let mut m = Module::new_testing();
-        for bblock in bblocks {
+        for bblock in bblocks.into_iter() {
             for inst in bblock.insts {
                 match inst {
-                    ASTInst::Add { type_: _, lhs, rhs } => {
+                    ASTInst::Add {
+                        assign,
+                        type_: _,
+                        lhs,
+                        rhs,
+                    } => {
                         let inst =
                             AddInst::new(self.process_operand(lhs)?, self.process_operand(rhs)?);
+                        self.add_assign(m.len(), assign)?;
                         m.push(inst.into()).unwrap();
                     }
-                    ASTInst::LoadTraceInput { type_, off } => {
+                    ASTInst::LoadTraceInput { assign, type_, off } => {
                         let off = self
                             .lexer
                             .span_str(off)
                             .parse::<u32>()
                             .map_err(|e| self.error_at_span(off, &e.to_string()))?;
                         let inst = LoadTraceInputInst::new(off, self.process_type(&mut m, type_)?);
+                        self.add_assign(m.len(), assign)?;
                         m.push(inst.into()).unwrap();
                     }
                     ASTInst::TestUse(op) => {
@@ -126,20 +142,26 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
         Ok(m)
     }
 
-    fn process_operand(&self, op: ASTOperand) -> Result<Operand, Box<dyn Error>> {
+    fn process_operand(&mut self, op: ASTOperand) -> Result<Operand, Box<dyn Error>> {
         match op {
             ASTOperand::Local(span) => {
                 let idx = self.lexer.span_str(span)[1..]
                     .parse::<usize>()
                     .map_err(|e| self.error_at_span(span, &e.to_string()))?;
-                Ok(Operand::Local(
-                    InstIdx::new(idx).map_err(|e| self.error_at_span(span, &e.to_string()))?,
-                ))
+                let idx =
+                    InstIdx::new(idx).map_err(|e| self.error_at_span(span, &e.to_string()))?;
+                let mapped_idx = self.inst_idx_map.get(&idx).ok_or_else(|| {
+                    self.error_at_span(
+                        span,
+                        &format!("Undefined local operand '%{}'", usize::from(idx)),
+                    )
+                })?;
+                Ok(Operand::Local(*mapped_idx))
             }
         }
     }
 
-    fn process_type(&self, m: &mut Module, type_: ASTType) -> Result<TyIdx, Box<dyn Error>> {
+    fn process_type(&mut self, m: &mut Module, type_: ASTType) -> Result<TyIdx, Box<dyn Error>> {
         match type_ {
             ASTType::Int(span) => {
                 let width = self.lexer.span_str(span)[1..]
@@ -149,6 +171,24 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                 m.insert_ty(Ty::Integer(ty))
                     .map_err(|e| self.error_at_span(span, &e.to_string()))
             }
+        }
+    }
+
+    /// Add an assignment of a local operand (e.g. `%3 = ...`) to the instruction to be inserted at
+    /// `instrs_len`. Note: this must be called *before* inserting the instruction, as it allowws
+    /// this function to capture cases where users try referencing the variable itself (e.g. `%0 =
+    /// %0` will be caught as an error by this function).
+    fn add_assign(&mut self, instrs_len: usize, span: Span) -> Result<(), Box<dyn Error>> {
+        let idx = self.lexer.span_str(span)[1..]
+            .parse::<usize>()
+            .map_err(|e| self.error_at_span(span, &e.to_string()))?;
+        let idx = InstIdx::new(idx).map_err(|e| self.error_at_span(span, &e.to_string()))?;
+        match self
+            .inst_idx_map
+            .insert(idx, InstIdx::new(instrs_len).unwrap())
+        {
+            None => Ok(()),
+            Some(_) => Err(format!("Local operand '%{}' redefined", usize::from(idx)).into()),
         }
     }
 
@@ -182,12 +222,14 @@ struct ASTBBlock {
 #[derive(Debug)]
 enum ASTInst {
     Add {
+        assign: Span,
         #[allow(dead_code)]
         type_: ASTType,
         lhs: ASTOperand,
         rhs: ASTOperand,
     },
     LoadTraceInput {
+        assign: Span,
         type_: ASTType,
         off: Span,
     },
@@ -248,6 +290,50 @@ mod tests {
             %{{0}}: i16 = load_ti 0
             %{{1}}: i16 = load_ti 1
             %{{_}}: i16 = add %{{0}}, %{{1}}
+        ",
+        );
+    }
+
+    #[test]
+    fn discontinuous_operand_ids() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %7: i16 = load_ti 0
+            %3: i16 = load_ti 1
+            %19: i16 = add %7, %3
+        ",
+            |m| m,
+            "
+          ...
+          entry:
+            %0: i16 = load_ti 0
+            %1: i16 = load_ti 1
+            %2: i16 = add %0, %1
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Undefined local operand '%7'")]
+    fn no_such_local_operand() {
+        Module::from_str(
+            "
+          entry:
+            %19: i16 = add %7, %3
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Local operand '%3' redefined")]
+    fn repeated_local_operand_definition() {
+        Module::from_str(
+            "
+          entry:
+            %3: i16 = load_ti 0
+            %4: i16 = load_ti 1
+            %3: i16 = load_ti 2
         ",
         );
     }
