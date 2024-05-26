@@ -339,6 +339,14 @@ impl Module {
 impl fmt::Display for Module {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "; compiled trace ID #{}\n", self.ctr_id)?;
+        for x in &self.func_decls {
+            writeln!(
+                f,
+                "func_decl {} {}",
+                x.name(),
+                self.type_(x.ty_idx()).display(self)
+            )?;
+        }
         for g in &self.global_decls {
             let tl = if g.is_threadlocal() { " tls" } else { "" };
             writeln!(
@@ -684,18 +692,6 @@ pub(crate) enum Ty {
     Unimplemented(String),
 }
 
-impl fmt::Display for Ty {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Void => write!(f, "void"),
-            Self::Integer(it) => write!(f, "i{}", it.num_bits()),
-            Self::Ptr => write!(f, "ptr"),
-            Self::Func(_) => todo!(),
-            Self::Unimplemented(_) => write!(f, "?type"),
-        }
-    }
-}
-
 impl Ty {
     /// Returns the size of the type in bits, or `None` if asking the size makes no sense.
     pub(crate) fn byte_size(&self) -> Option<usize> {
@@ -717,6 +713,46 @@ impl Ty {
             Self::Unimplemented(_) => None,
         }
     }
+
+    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableTy<'a> {
+        DisplayableTy { ty: self, m }
+    }
+}
+
+pub(crate) struct DisplayableTy<'a> {
+    ty: &'a Ty,
+    m: &'a Module,
+}
+
+impl fmt::Display for DisplayableTy<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.ty {
+            Ty::Void => write!(f, "void"),
+            Ty::Integer(it) => write!(f, "i{}", it.num_bits()),
+            Ty::Ptr => write!(f, "ptr"),
+            Ty::Func(x) => {
+                let mut args = x
+                    .arg_ty_idxs
+                    .iter()
+                    .map(|x| self.m.type_(*x).display(self.m).to_string())
+                    .collect::<Vec<_>>();
+                if x.is_vararg() {
+                    args.push("...".to_string());
+                }
+                if x.ret_ty_idx() == self.m.void_ty_idx {
+                    write!(f, "({})", args.join(", "))
+                } else {
+                    write!(
+                        f,
+                        "({}) -> {}",
+                        args.join(", "),
+                        self.m.type_(x.ret_ty_idx()).display(self.m)
+                    )
+                }
+            }
+            Ty::Unimplemented(_) => write!(f, "?type"),
+        }
+    }
 }
 
 /// An (externally defined, in the AOT code) function declaration.
@@ -734,6 +770,10 @@ impl FuncDecl {
     /// Return the name of this function declaration.
     pub(crate) fn name(&self) -> &str {
         &self.name
+    }
+
+    pub(crate) fn ty_idx(&self) -> TyIdx {
+        self.ty_idx
     }
 }
 
@@ -1044,7 +1084,7 @@ pub(crate) struct DisplayableInst<'a> {
 impl fmt::Display for DisplayableInst<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(dt) = self.inst.def_type(self.m) {
-            write!(f, "%{}: {dt} = ", self.inst_idx.to_u16())?;
+            write!(f, "%{}: {} = ", self.inst_idx.to_u16(), dt.display(self.m))?;
         }
         match self.inst {
             #[cfg(test)]
@@ -1148,7 +1188,7 @@ impl fmt::Display for DisplayableInst<'_> {
                     f,
                     "sext {}, {}",
                     i.val().display(self.m),
-                    self.m.type_(i.dest_ty_idx())
+                    self.m.type_(i.dest_ty_idx()).display(self.m)
                 )
             }
             Inst::ZeroExtend(i) => {
@@ -1156,7 +1196,7 @@ impl fmt::Display for DisplayableInst<'_> {
                     f,
                     "zext {}, {}",
                     i.val().display(self.m),
-                    self.m.type_(i.dest_ty_idx())
+                    self.m.type_(i.dest_ty_idx()).display(self.m)
                 )
             }
             Inst::Trunc(i) => {
