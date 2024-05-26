@@ -108,7 +108,7 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
             self.cg_inst(idx, inst)?;
         }
 
-        // Loop the JITted code if the backedge target label is present.
+        // Loop the JITted code if the `tloop_start` label is present.
         let label = StaticLabel::global("tloop_start");
         match self.asm.labels().resolve_static(&label) {
             Ok(_) => {
@@ -1798,40 +1798,46 @@ mod tests {
 
         #[test]
         fn looped_trace_smallest() {
-            let mut m = test_module();
-            m.push(jit_ir::Inst::TraceLoopStart).unwrap();
             // FIXME: make the offset and disassembler format hex the same so we can match
             // easier (capitalisation of hex differs).
-            let patt_lines = "
+            test_with_spillalloc(
+                &Module::from_str(
+                    "
+                  entry:
+                    tloop_start
+            ",
+                ),
+                "
                 ...
                 ; tloop_start:
                 ; tloop_backedge:
                 {{vaddr}} {{off}}: jmp {{target}}
-            ";
-            test_with_spillalloc(&m, patt_lines);
+            ",
+            );
         }
 
         #[test]
         fn looped_trace_bigger() {
-            let mut m = test_module();
-            let int8_ty_idx = m.int8_ty_idx();
-            let ti_op = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, int8_ty_idx).into())
-                .unwrap();
-            m.push(jit_ir::Inst::TraceLoopStart).unwrap();
-            m.push(jit_ir::AddInst::new(ti_op.clone(), ti_op).into())
-                .unwrap();
-            let patt_lines = "
-                ...
-                ; %0: i8 = load_ti 0
-                ...
-                ; tloop_start:
-                ; %2: i8 = add %0, %0
-                ...
-                ; tloop_backedge:
-                ...: jmp ...
-            ";
-            test_with_spillalloc(&m, patt_lines);
+            test_with_spillalloc(
+                &Module::from_str(
+                    "
+                  entry:
+                    %0: i8 = load_ti 0
+                    tloop_start
+                    %2: i8 = add %0, %0
+            ",
+                ),
+                "
+                    ...
+                    ; %0: i8 = load_ti 0
+                    ...
+                    ; tloop_start:
+                    ; %2: i8 = add %0, %0
+                    ...
+                    ; tloop_backedge:
+                    ...: jmp ...
+            ",
+            );
         }
 
         #[test]

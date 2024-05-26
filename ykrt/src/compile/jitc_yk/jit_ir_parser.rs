@@ -7,8 +7,8 @@
 use super::{
     aot_ir::Predicate,
     jit_ir::{
-        AddInst, GuardInfo, GuardInst, IcmpInst, InstIdx, IntegerTy, LoadTraceInputInst, Module,
-        Operand, SRemInst, TestUseInst, TruncInst, Ty, TyIdx,
+        AddInst, GuardInfo, GuardInst, IcmpInst, Inst, InstIdx, IntegerTy, LoadTraceInputInst,
+        Module, Operand, SRemInst, TestUseInst, TruncInst, Ty, TyIdx,
     },
 };
 use fm::FMBuilder;
@@ -172,6 +172,9 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                         let inst = TestUseInst::new(self.process_operand(op)?);
                         m.push(inst.into()).unwrap();
                     }
+                    ASTInst::TraceLoopStart => {
+                        m.push(Inst::TraceLoopStart).unwrap();
+                    }
                     ASTInst::Trunc {
                         assign,
                         type_,
@@ -300,6 +303,7 @@ enum ASTInst {
         rhs: ASTOperand,
     },
     TestUse(ASTOperand),
+    TraceLoopStart,
     Trunc {
         assign: Span,
         type_: ASTType,
@@ -375,6 +379,7 @@ mod tests {
             %2: i16 = add %0, %1
             %3: i16 = srem %1, %2
             %4: i16 = eq %1, %2
+            tloop_start
             guard %4, true
         ",
         );

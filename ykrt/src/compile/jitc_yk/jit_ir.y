@@ -50,6 +50,7 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
       Ok(ASTInst::Trunc{assign: $1?.span(), type_: $3?, operand: $6? })
     }
   | "TEST_USE" Operand { Ok(ASTInst::TestUse($2?)) }
+  | "TLOOP_START" { Ok(ASTInst::TraceLoopStart) }
   ;
 
 Operand -> Result<ASTOperand, Box<dyn Error>>:
