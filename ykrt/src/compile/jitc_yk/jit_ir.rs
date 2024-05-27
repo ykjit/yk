@@ -297,6 +297,11 @@ impl Module {
         self.global_decls.get_index(usize::from(idx)).unwrap()
     }
 
+    #[cfg(test)]
+    pub(crate) fn func_decls_len(&self) -> usize {
+        self.func_decls.len()
+    }
+
     /// Add a [FuncDecl] to the function declarations pool and return its index. If the [FuncDecl]
     /// already exists, an existing index will be returned.
     pub(crate) fn insert_func_decl(

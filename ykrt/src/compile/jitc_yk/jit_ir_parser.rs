@@ -7,8 +7,8 @@
 use super::{
     aot_ir::Predicate,
     jit_ir::{
-        AddInst, GuardInfo, GuardInst, IcmpInst, Inst, InstIdx, IntegerTy, LoadTraceInputInst,
-        Module, Operand, SRemInst, TestUseInst, TruncInst, Ty, TyIdx,
+        AddInst, FuncDecl, FuncTy, GuardInfo, GuardInst, IcmpInst, Inst, InstIdx, IntegerTy,
+        LoadTraceInputInst, Module, Operand, SRemInst, TestUseInst, TruncInst, Ty, TyIdx,
     },
 };
 use fm::FMBuilder;
@@ -41,11 +41,11 @@ impl Module {
             panic!("Could not parse input");
         }
         match res {
-            Some(Ok((globals, bblocks))) => JITIRParser {
+            Some(Ok((func_decls, globals, bblocks))) => JITIRParser {
                 lexer: &lexer,
                 inst_idx_map: HashMap::new(),
             }
-            .process(globals, bblocks)
+            .process(func_decls, globals, bblocks)
             .unwrap(),
             _ => panic!("Could not produce JIT Module."),
         }
@@ -108,10 +108,13 @@ struct JITIRParser<'lexer, 'input: 'lexer> {
 impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
     fn process(
         &mut self,
+        func_decls: Vec<ASTFuncDecl>,
         _globals: Vec<()>,
         bblocks: Vec<ASTBBlock>,
     ) -> Result<Module, Box<dyn Error>> {
         let mut m = Module::new_testing();
+        self.process_func_decls(&mut m, func_decls)?;
+
         for bblock in bblocks.into_iter() {
             for inst in bblock.insts {
                 match inst {
@@ -193,6 +196,36 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
         Ok(m)
     }
 
+    fn process_func_decls(
+        &mut self,
+        m: &mut Module,
+        func_decls: Vec<ASTFuncDecl>,
+    ) -> Result<(), Box<dyn Error>> {
+        for ASTFuncDecl {
+            name: name_span,
+            arg_tys,
+            is_varargs,
+            rtn_ty,
+        } in func_decls
+        {
+            let name = self.lexer.span_str(name_span).to_owned();
+            let arg_tys = {
+                let mut mapped = Vec::with_capacity(arg_tys.len());
+                for x in arg_tys.into_iter() {
+                    mapped.push(self.process_type(m, x)?);
+                }
+                mapped
+            };
+            let rtn_ty = self.process_type(m, rtn_ty)?;
+            let func_ty = m
+                .insert_ty(Ty::Func(FuncTy::new(arg_tys, rtn_ty, is_varargs)))
+                .map_err(|e| self.error_at_span(name_span, &e.to_string()))?;
+            m.insert_func_decl(FuncDecl::new(name, func_ty))
+                .map_err(|e| self.error_at_span(name_span, &e.to_string()))?;
+        }
+        Ok(())
+    }
+
     fn process_operand(&mut self, op: ASTOperand) -> Result<Operand, Box<dyn Error>> {
         match op {
             ASTOperand::Local(span) => {
@@ -222,6 +255,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                 m.insert_ty(Ty::Integer(ty))
                     .map_err(|e| self.error_at_span(span, &e.to_string()))
             }
+            ASTType::Void => Ok(m.void_ty_idx()),
         }
     }
 
@@ -261,6 +295,13 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
             msg
         ))
     }
+}
+
+struct ASTFuncDecl {
+    name: Span,
+    arg_tys: Vec<ASTType>,
+    is_varargs: bool,
+    rtn_ty: ASTType,
 }
 
 #[derive(Debug)]
@@ -318,13 +359,14 @@ enum ASTOperand {
 
 #[derive(Debug)]
 enum ASTType {
+    Void,
     Int(Span),
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compile::jitc_yk::jit_ir::Ty;
+    use crate::compile::jitc_yk::jit_ir::{FuncTy, Ty};
 
     #[test]
     fn roundtrip() {
@@ -383,6 +425,60 @@ mod tests {
             guard %4, true
         ",
         );
+    }
+
+    #[test]
+    fn func_decls() {
+        let mut m = Module::from_str(
+            "
+              func_decl f1()
+              func_decl f2(i8) -> i32
+              func_decl f3(i8, i32, ...) -> i64
+              func_decl f4(...)
+        ",
+        );
+        // We don't have a "lookup a function declaration" function, but we can check that if we
+        // "insert" identical IR function declarations to the module that no new function
+        // declarations are actually added.
+        assert_eq!(m.func_decls_len(), 4);
+
+        let f1_ty_idx = m
+            .insert_ty(Ty::Func(FuncTy::new(Vec::new(), m.void_ty_idx(), false)))
+            .unwrap();
+        m.insert_func_decl(FuncDecl::new("f1".to_owned(), f1_ty_idx))
+            .unwrap();
+        assert_eq!(m.func_decls_len(), 4);
+
+        let i32_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
+        let f2_ty_idx = m
+            .insert_ty(Ty::Func(FuncTy::new(
+                vec![m.int8_ty_idx()],
+                i32_ty_idx,
+                false,
+            )))
+            .unwrap();
+        m.insert_func_decl(FuncDecl::new("f2".to_owned(), f2_ty_idx))
+            .unwrap();
+        assert_eq!(m.func_decls_len(), 4);
+
+        let i64_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(64))).unwrap();
+        let f3_ty_idx = m
+            .insert_ty(Ty::Func(FuncTy::new(
+                vec![m.int8_ty_idx(), i32_ty_idx],
+                i64_ty_idx,
+                true,
+            )))
+            .unwrap();
+        m.insert_func_decl(FuncDecl::new("f3".to_owned(), f3_ty_idx))
+            .unwrap();
+        assert_eq!(m.func_decls_len(), 4);
+
+        let f4_ty_idx = m
+            .insert_ty(Ty::Func(FuncTy::new(Vec::new(), m.void_ty_idx(), true)))
+            .unwrap();
+        m.insert_func_decl(FuncDecl::new("f4".to_owned(), f4_ty_idx))
+            .unwrap();
+        assert_eq!(m.func_decls_len(), 4);
     }
 
     #[test]
