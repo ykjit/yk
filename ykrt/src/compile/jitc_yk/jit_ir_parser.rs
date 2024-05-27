@@ -42,12 +42,16 @@ impl Module {
             panic!("Could not parse input");
         }
         match res {
-            Some(Ok((func_decls, globals, bblocks))) => JITIRParser {
-                lexer: &lexer,
-                inst_idx_map: HashMap::new(),
+            Some(Ok((func_decls, globals, bblocks))) => {
+                let mut m = Module::new_testing();
+                let mut p = JITIRParser {
+                    m: &mut m,
+                    lexer: &lexer,
+                    inst_idx_map: HashMap::new(),
+                };
+                p.process(func_decls, globals, bblocks).unwrap();
+                m
             }
-            .process(func_decls, globals, bblocks)
-            .unwrap(),
             _ => panic!("Could not produce JIT Module."),
         }
     }
@@ -96,8 +100,9 @@ impl Module {
     }
 }
 
-struct JITIRParser<'lexer, 'input: 'lexer> {
+struct JITIRParser<'lexer, 'input: 'lexer, 'a> {
     lexer: &'lexer LRNonStreamingLexer<'lexer, 'input, DefaultLexerTypes<StorageT>>,
+    m: &'a mut Module,
     /// A mapping from local operands (e.g. `%3`) in the input text to instruction offsets. For
     /// example if the first instruction in the input is `%3 = ...` the map will be `%3 -> %0`
     /// indicating that whenever we see `%3` in the input we map that to `%0` in the IR we're
@@ -106,15 +111,14 @@ struct JITIRParser<'lexer, 'input: 'lexer> {
     inst_idx_map: HashMap<InstIdx, InstIdx>,
 }
 
-impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
+impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
     fn process(
         &mut self,
         func_decls: Vec<ASTFuncDecl>,
         _globals: Vec<()>,
         bblocks: Vec<ASTBBlock>,
-    ) -> Result<Module, Box<dyn Error>> {
-        let mut m = Module::new_testing();
-        self.process_func_decls(&mut m, func_decls)?;
+    ) -> Result<(), Box<dyn Error>> {
+        self.process_func_decls(func_decls)?;
 
         for bblock in bblocks.into_iter() {
             for inst in bblock.insts {
@@ -125,12 +129,10 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                         lhs,
                         rhs,
                     } => {
-                        let inst = AddInst::new(
-                            self.process_operand(&mut m, lhs)?,
-                            self.process_operand(&mut m, rhs)?,
-                        );
-                        self.add_assign(m.len(), assign)?;
-                        m.push(inst.into()).unwrap();
+                        let inst =
+                            AddInst::new(self.process_operand(lhs)?, self.process_operand(rhs)?);
+                        self.add_assign(self.m.len(), assign)?;
+                        self.m.push(inst.into()).unwrap();
                     }
                     ASTInst::Call {
                         assign,
@@ -138,14 +140,14 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                         args,
                     } => {
                         let name = &self.lexer.span_str(name_span)[1..];
-                        let fd_idx = m.find_func_decl_idx_by_name(name);
-                        let ops = self.process_operands(&mut m, args)?;
-                        let inst = DirectCallInst::new(&mut m, fd_idx, ops)
+                        let fd_idx = self.m.find_func_decl_idx_by_name(name);
+                        let ops = self.process_operands(args)?;
+                        let inst = DirectCallInst::new(self.m, fd_idx, ops)
                             .map_err(|e| self.error_at_span(name_span, &e.to_string()))?;
                         if let Some(x) = assign {
-                            self.add_assign(m.len(), x)?;
+                            self.add_assign(self.m.len(), x)?;
                         }
-                        m.push(inst.into()).unwrap();
+                        self.m.push(inst.into()).unwrap();
                     }
                     ASTInst::Eq {
                         assign,
@@ -154,28 +156,26 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                         rhs,
                     } => {
                         let inst = IcmpInst::new(
-                            self.process_operand(&mut m, lhs)?,
+                            self.process_operand(lhs)?,
                             Predicate::Equal,
-                            self.process_operand(&mut m, rhs)?,
+                            self.process_operand(rhs)?,
                         );
-                        self.add_assign(m.len(), assign)?;
-                        m.push(inst.into()).unwrap();
+                        self.add_assign(self.m.len(), assign)?;
+                        self.m.push(inst.into()).unwrap();
                     }
                     ASTInst::Guard { operand, is_true } => {
-                        let gidx = m
+                        let gidx = self
+                            .m
                             .push_guardinfo(GuardInfo::new(Vec::new(), Vec::new()))
                             .unwrap();
-                        let inst =
-                            GuardInst::new(self.process_operand(&mut m, operand)?, is_true, gidx);
-                        m.push(inst.into()).unwrap();
+                        let inst = GuardInst::new(self.process_operand(operand)?, is_true, gidx);
+                        self.m.push(inst.into()).unwrap();
                     }
                     ASTInst::Load { assign, type_, val } => {
-                        let inst = LoadInst::new(
-                            self.process_operand(&mut m, val)?,
-                            self.process_type(&mut m, type_)?,
-                        );
-                        self.add_assign(m.len(), assign)?;
-                        m.push(inst.into()).unwrap();
+                        let inst =
+                            LoadInst::new(self.process_operand(val)?, self.process_type(type_)?);
+                        self.add_assign(self.m.len(), assign)?;
+                        self.m.push(inst.into()).unwrap();
                     }
                     ASTInst::LoadTraceInput { assign, type_, off } => {
                         let off = self
@@ -183,9 +183,9 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                             .span_str(off)
                             .parse::<u32>()
                             .map_err(|e| self.error_at_span(off, &e.to_string()))?;
-                        let inst = LoadTraceInputInst::new(off, self.process_type(&mut m, type_)?);
-                        self.add_assign(m.len(), assign)?;
-                        m.push(inst.into()).unwrap();
+                        let inst = LoadTraceInputInst::new(off, self.process_type(type_)?);
+                        self.add_assign(self.m.len(), assign)?;
+                        self.m.push(inst.into()).unwrap();
                     }
                     ASTInst::PtrAdd {
                         assign,
@@ -193,12 +193,10 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                         ptr,
                         off,
                     } => {
-                        let inst = PtrAddInst::new(
-                            self.process_operand(&mut m, ptr)?,
-                            self.process_operand(&mut m, off)?,
-                        );
-                        self.add_assign(m.len(), assign)?;
-                        m.push(inst.into()).unwrap();
+                        let inst =
+                            PtrAddInst::new(self.process_operand(ptr)?, self.process_operand(off)?);
+                        self.add_assign(self.m.len(), assign)?;
+                        self.m.push(inst.into()).unwrap();
                     }
                     ASTInst::SRem {
                         assign,
@@ -206,26 +204,22 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                         lhs,
                         rhs,
                     } => {
-                        let inst = SRemInst::new(
-                            self.process_operand(&mut m, lhs)?,
-                            self.process_operand(&mut m, rhs)?,
-                        );
-                        self.add_assign(m.len(), assign)?;
-                        m.push(inst.into()).unwrap();
+                        let inst =
+                            SRemInst::new(self.process_operand(lhs)?, self.process_operand(rhs)?);
+                        self.add_assign(self.m.len(), assign)?;
+                        self.m.push(inst.into()).unwrap();
                     }
                     ASTInst::Store { val, ptr } => {
-                        let inst = StoreInst::new(
-                            self.process_operand(&mut m, val)?,
-                            self.process_operand(&mut m, ptr)?,
-                        );
-                        m.push(inst.into()).unwrap();
+                        let inst =
+                            StoreInst::new(self.process_operand(val)?, self.process_operand(ptr)?);
+                        self.m.push(inst.into()).unwrap();
                     }
                     ASTInst::TestUse(op) => {
-                        let inst = TestUseInst::new(self.process_operand(&mut m, op)?);
-                        m.push(inst.into()).unwrap();
+                        let inst = TestUseInst::new(self.process_operand(op)?);
+                        self.m.push(inst.into()).unwrap();
                     }
                     ASTInst::TraceLoopStart => {
-                        m.push(Inst::TraceLoopStart).unwrap();
+                        self.m.push(Inst::TraceLoopStart).unwrap();
                     }
                     ASTInst::Trunc {
                         assign,
@@ -233,23 +227,19 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                         operand,
                     } => {
                         let inst = TruncInst::new(
-                            &self.process_operand(&mut m, operand)?,
-                            self.process_type(&mut m, type_)?,
+                            &self.process_operand(operand)?,
+                            self.process_type(type_)?,
                         );
-                        self.add_assign(m.len(), assign)?;
-                        m.push(inst.into()).unwrap();
+                        self.add_assign(self.m.len(), assign)?;
+                        self.m.push(inst.into()).unwrap();
                     }
                 }
             }
         }
-        Ok(m)
+        Ok(())
     }
 
-    fn process_func_decls(
-        &mut self,
-        m: &mut Module,
-        func_decls: Vec<ASTFuncDecl>,
-    ) -> Result<(), Box<dyn Error>> {
+    fn process_func_decls(&mut self, func_decls: Vec<ASTFuncDecl>) -> Result<(), Box<dyn Error>> {
         for ASTFuncDecl {
             name: name_span,
             arg_tys,
@@ -261,37 +251,31 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
             let arg_tys = {
                 let mut mapped = Vec::with_capacity(arg_tys.len());
                 for x in arg_tys.into_iter() {
-                    mapped.push(self.process_type(m, x)?);
+                    mapped.push(self.process_type(x)?);
                 }
                 mapped
             };
-            let rtn_ty = self.process_type(m, rtn_ty)?;
-            let func_ty = m
+            let rtn_ty = self.process_type(rtn_ty)?;
+            let func_ty = self
+                .m
                 .insert_ty(Ty::Func(FuncTy::new(arg_tys, rtn_ty, is_varargs)))
                 .map_err(|e| self.error_at_span(name_span, &e.to_string()))?;
-            m.insert_func_decl(FuncDecl::new(name, func_ty))
+            self.m
+                .insert_func_decl(FuncDecl::new(name, func_ty))
                 .map_err(|e| self.error_at_span(name_span, &e.to_string()))?;
         }
         Ok(())
     }
 
-    fn process_operands(
-        &mut self,
-        m: &mut Module,
-        ops: Vec<ASTOperand>,
-    ) -> Result<Vec<Operand>, Box<dyn Error>> {
+    fn process_operands(&mut self, ops: Vec<ASTOperand>) -> Result<Vec<Operand>, Box<dyn Error>> {
         let mut mapped = Vec::with_capacity(ops.len());
         for x in ops {
-            mapped.push(self.process_operand(m, x)?);
+            mapped.push(self.process_operand(x)?);
         }
         Ok(mapped)
     }
 
-    fn process_operand(
-        &mut self,
-        m: &mut Module,
-        op: ASTOperand,
-    ) -> Result<Operand, Box<dyn Error>> {
+    fn process_operand(&mut self, op: ASTOperand) -> Result<Operand, Box<dyn Error>> {
         match op {
             ASTOperand::ConstInt(span) => {
                 let s = self.lexer.span_str(span);
@@ -306,13 +290,14 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                             .parse::<i32>()
                             .map_err(|e| self.error_at_span(span, &e.to_string()))?;
                         type_
-                            .make_constant(m, val)
+                            .make_constant(self.m, val)
                             .map_err(|e| self.error_at_span(span, &e.to_string()))?
                     }
                     x => todo!("{x}"),
                 };
                 Ok(Operand::Const(
-                    m.insert_const(const_)
+                    self.m
+                        .insert_const(const_)
                         .map_err(|e| self.error_at_span(span, &e.to_string()))?,
                 ))
             }
@@ -333,18 +318,19 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
         }
     }
 
-    fn process_type(&mut self, m: &mut Module, type_: ASTType) -> Result<TyIdx, Box<dyn Error>> {
+    fn process_type(&mut self, type_: ASTType) -> Result<TyIdx, Box<dyn Error>> {
         match type_ {
             ASTType::Int(span) => {
                 let width = self.lexer.span_str(span)[1..]
                     .parse::<u32>()
                     .map_err(|e| self.error_at_span(span, &e.to_string()))?;
                 let ty = IntegerTy::new(width);
-                m.insert_ty(Ty::Integer(ty))
+                self.m
+                    .insert_ty(Ty::Integer(ty))
                     .map_err(|e| self.error_at_span(span, &e.to_string()))
             }
-            ASTType::Ptr => Ok(m.ptr_ty_idx()),
-            ASTType::Void => Ok(m.void_ty_idx()),
+            ASTType::Ptr => Ok(self.m.ptr_ty_idx()),
+            ASTType::Void => Ok(self.m.void_ty_idx()),
         }
     }
 
