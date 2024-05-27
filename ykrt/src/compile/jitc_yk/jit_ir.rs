@@ -297,7 +297,7 @@ impl Module {
         self.global_decls.get_index(usize::from(idx)).unwrap()
     }
 
-    /// Add a [FuncDecl] to the function declaritons pool and return its index. If the [FuncDecl]
+    /// Add a [FuncDecl] to the function declarations pool and return its index. If the [FuncDecl]
     /// already exists, an existing index will be returned.
     pub(crate) fn insert_func_decl(
         &mut self,
