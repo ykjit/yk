@@ -1156,9 +1156,10 @@ mod tests {
         use super::*;
         use crate::compile::jitc_yk::codegen::reg_alloc::SpillAllocator;
 
-        fn test_with_spillalloc(m: &jit_ir::Module, patt_lines: &str) {
+        fn test_with_spillalloc(mod_str: &str, patt_lines: &str) {
+            let m = Module::from_str(mod_str);
             match_asm(
-                X64CodeGen::new(m, Box::new(SpillAllocator::new(STACK_DIRECTION)))
+                X64CodeGen::new(&m, Box::new(SpillAllocator::new(STACK_DIRECTION)))
                     .unwrap()
                     .codegen()
                     .unwrap()
@@ -1172,20 +1173,18 @@ mod tests {
         #[test]
         fn cg_load_ptr() {
             test_with_spillalloc(
-                &Module::from_str(
-                    "
-                  entry:
-                    %0: ptr = load_ti 0
-                    %1: ptr = load %0
-            ",
-                ),
                 "
-                    ...
-                    ; %1: ptr = load %0
-                    ... mov r12, [rbp-0x08]
-                    ... mov r12, [r12]
-                    ... mov [rbp-0x10], r12
-                    ...
+              entry:
+                %0: ptr = load_ti 0
+                %1: ptr = load %0
+            ",
+                "
+                ...
+                ; %1: ptr = load %0
+                ... mov r12, [rbp-0x08]
+                ... mov r12, [r12]
+                ... mov [rbp-0x10], r12
+                ...
                 ",
             );
         }
@@ -1193,13 +1192,11 @@ mod tests {
         #[test]
         fn cg_load_i8() {
             test_with_spillalloc(
-                &Module::from_str(
-                    "
-                  entry:
-                    %0: i8 = load_ti 0
-                    %1: i8 = load %0
+                "
+              entry:
+                %0: i8 = load_ti 0
+                %1: i8 = load %0
             ",
-                ),
                 "
                 ...
                 ; %1: i8 = load %0
@@ -1214,20 +1211,18 @@ mod tests {
         #[test]
         fn cg_load_i32() {
             test_with_spillalloc(
-                &Module::from_str(
-                    "
-                  entry:
-                    %0: i32 = load_ti 0
-                    %1: i32 = load %0
-            ",
-                ),
                 "
-                    ...
-                    ; %1: i32 = Load %0
-                    ... mov r12d, [rbp-0x04]
-                    ... mov r12d, [r12]
-                    ... mov [rbp-0x08], r12d
-                    ...
+              entry:
+                %0: i32 = load_ti 0
+                %1: i32 = load %0
+            ",
+                "
+                ...
+                ; %1: i32 = Load %0
+                ... mov r12d, [rbp-0x04]
+                ... mov r12d, [r12]
+                ... mov [rbp-0x08], r12d
+                ...
                 ",
             );
         }
@@ -1235,21 +1230,19 @@ mod tests {
         #[test]
         fn cg_ptradd() {
             test_with_spillalloc(
-                &Module::from_str(
-                    "
-                  entry:
-                    %0: ptr = load_ti 0
-                    %1: i32 = ptr_add %0, 64i32
-            ",
-                ),
                 "
-                    ...
-                    ; %1: ptr = ptr_add %0, 64i32
-                    ... mov r12, [rbp-0x08]
-                    ... mov r13, 0x40
-                    ... add r12, r13
-                    ... mov [rbp-0x10], r12
-                    ...
+              entry:
+                %0: ptr = load_ti 0
+                %1: i32 = ptr_add %0, 64i32
+            ",
+                "
+                ...
+                ; %1: ptr = ptr_add %0, 64i32
+                ... mov r12, [rbp-0x08]
+                ... mov r13, 0x40
+                ... add r12, r13
+                ... mov [rbp-0x10], r12
+                ...
                 ",
             );
         }
@@ -1257,21 +1250,19 @@ mod tests {
         #[test]
         fn cg_store_ptr() {
             test_with_spillalloc(
-                &Module::from_str(
-                    "
-                  entry:
-                    %0: ptr = load_ti 0
-                    %1: ptr = load_ti 8
-                    store %0, %1
-            ",
-                ),
                 "
-                    ...
-                    ; store %0, %1
-                    ... mov r12, [rbp-0x10]
-                    ... mov r13, [rbp-0x08]
-                    ... mov [r12], r13
-                    ...
+              entry:
+                %0: ptr = load_ti 0
+                %1: ptr = load_ti 8
+                store %0, %1
+            ",
+                "
+                ...
+                ; store %0, %1
+                ... mov r12, [rbp-0x10]
+                ... mov r13, [rbp-0x08]
+                ... mov [r12], r13
+                ...
                 ",
             );
         }
@@ -1279,12 +1270,10 @@ mod tests {
         #[test]
         fn cg_loadtraceinput_i8() {
             test_with_spillalloc(
-                &Module::from_str(
-                    "
-                  entry:
-                    %0: i8 = load_ti 0
+                "
+              entry:
+                %0: i8 = load_ti 0
             ",
-                ),
                 "
                 ...
                 ; %0: i8 = load_ti 0
@@ -1298,18 +1287,16 @@ mod tests {
         #[test]
         fn cg_loadtraceinput_i16_with_offset() {
             test_with_spillalloc(
-                &Module::from_str(
-                    "
-                  entry:
-                    %0: i16 = load_ti 32
-            ",
-                ),
                 "
-                    ...
-                    ; %0: i16 = load_ti 32
-                    ... movzx r12d, word ptr [rdi+0x20]
-                    ... mov [rbp-0x02], r12w
-                    ...
+              entry:
+                %0: i16 = load_ti 32
+            ",
+                "
+                ...
+                ; %0: i16 = load_ti 32
+                ... movzx r12d, word ptr [rdi+0x20]
+                ... mov [rbp-0x02], r12w
+                ...
                 ",
             );
         }
@@ -1317,34 +1304,32 @@ mod tests {
         #[test]
         fn cg_loadtraceinput_many_offset() {
             test_with_spillalloc(
-                &Module::from_str(
-                    "
-                  entry:
-                    %0: i8 = load_ti 0
-                    %1: i8 = load_ti 1
-                    %2: i8 = load_ti 2
-                    %3: i8 = load_ti 3
-                    %4: ptr = load_ti 8
-            ",
-                ),
                 "
-                    ...
-                    ; %0: i8 = load_ti 0
-                    ... movzx r12, byte ptr [rdi]
-                    ... mov [rbp-0x01], r12b
-                    ; %1: i8 = load_ti 1
-                    ... movzx r12, byte ptr [rdi+0x01]
-                    ... mov [rbp-0x02], r12b
-                    ; %2: i8 = load_ti 2
-                    ... movzx r12, byte ptr [rdi+0x02]
-                    ... mov [rbp-0x03], r12b
-                    ; %3: i8 = load_ti 3
-                    ... movzx r12, byte ptr [rdi+0x03]
-                    ... mov [rbp-0x04], r12b
-                    ; %4: ptr = load_ti 8
-                    ... mov r12, [rdi+0x08]
-                    ... mov [rbp-0x10], r12
-                    ...
+              entry:
+                %0: i8 = load_ti 0
+                %1: i8 = load_ti 1
+                %2: i8 = load_ti 2
+                %3: i8 = load_ti 3
+                %4: ptr = load_ti 8
+            ",
+                "
+                ...
+                ; %0: i8 = load_ti 0
+                ... movzx r12, byte ptr [rdi]
+                ... mov [rbp-0x01], r12b
+                ; %1: i8 = load_ti 1
+                ... movzx r12, byte ptr [rdi+0x01]
+                ... mov [rbp-0x02], r12b
+                ; %2: i8 = load_ti 2
+                ... movzx r12, byte ptr [rdi+0x02]
+                ... mov [rbp-0x03], r12b
+                ; %3: i8 = load_ti 3
+                ... movzx r12, byte ptr [rdi+0x03]
+                ... mov [rbp-0x04], r12b
+                ; %4: ptr = load_ti 8
+                ... mov r12, [rdi+0x08]
+                ... mov [rbp-0x10], r12
+                ...
                 ",
             );
         }
@@ -1352,22 +1337,20 @@ mod tests {
         #[test]
         fn cg_add_i16() {
             test_with_spillalloc(
-                &Module::from_str(
-                    "
-                  entry:
-                    %0: i16 = load_ti 0
-                    %1: i16 = load_ti 1
-                    %3: i16 = add %0, %1
-            ",
-                ),
                 "
-                    ...
-                    ; %2: i16 = add %0, %1
-                    ... movzx r12, word ptr [rbp-0x02]
-                    ... movzx r13, word ptr [rbp-0x04]
-                    ... add r12w, r13w
-                    ... mov [rbp-0x06], r12w
-                    ...
+              entry:
+                %0: i16 = load_ti 0
+                %1: i16 = load_ti 1
+                %3: i16 = add %0, %1
+            ",
+                "
+                ...
+                ; %2: i16 = add %0, %1
+                ... movzx r12, word ptr [rbp-0x02]
+                ... movzx r13, word ptr [rbp-0x04]
+                ... add r12w, r13w
+                ... mov [rbp-0x06], r12w
+                ...
                 ",
             );
         }
@@ -1375,22 +1358,20 @@ mod tests {
         #[test]
         fn cg_add_i64() {
             test_with_spillalloc(
-                &Module::from_str(
-                    "
-                  entry:
-                    %0: i64 = load_ti 0
-                    %1: i64 = load_ti 1
-                    %3: i64 = add %0, %1
-            ",
-                ),
                 "
-                    ...
-                    ; %2: i64 = add %0, %1
-                    ... mov r12, [rbp-0x08]
-                    ... mov r13, [rbp-0x10]
-                    ... add r12, r13
-                    ... mov [rbp-0x18], r12
-                    ...
+              entry:
+                %0: i64 = load_ti 0
+                %1: i64 = load_ti 1
+                %3: i64 = add %0, %1
+            ",
+                "
+                ...
+                ; %2: i64 = add %0, %1
+                ... mov r12, [rbp-0x08]
+                ... mov r13, [rbp-0x10]
+                ... add r12, r13
+                ... mov [rbp-0x18], r12
+                ...
                 ",
             );
         }
@@ -1404,14 +1385,12 @@ mod tests {
             // FIXME: There is no corresponding test for the well-formedness of function return
             // types.
             test_with_spillalloc(
-                &Module::from_str(
-                    "
-                  entry:
-                    %0: i64 = load_ti 0
-                    %1: i32 = load_ti 1
-                    %3: i32 = add %0, %1
+                "
+              entry:
+                %0: i64 = load_ti 0
+                %1: i32 = load_ti 1
+                %3: i32 = add %0, %1
             ",
-                ),
                 "",
             );
         }
@@ -1420,20 +1399,18 @@ mod tests {
         fn cg_call_simple() {
             let sym_addr = symbol_to_ptr("puts").unwrap().addr();
             test_with_spillalloc(
-                &Module::from_str(
-                    "
-                  func_decl puts ()
+                "
+              func_decl puts ()
 
-                  entry:
-                    call @puts()
+              entry:
+                call @puts()
             ",
-                ),
                 &format!(
                     "
-                    ...
-                    ... mov r12, 0x{sym_addr:X}
-                    ... call r12
-                    ...
+                ...
+                ... mov r12, 0x{sym_addr:X}
+                ... call r12
+                ...
             "
                 ),
             );
@@ -1443,27 +1420,25 @@ mod tests {
         fn cg_call_with_args() {
             let sym_addr = symbol_to_ptr("puts").unwrap().addr();
             test_with_spillalloc(
-                &Module::from_str(
-                    "
-                  func_decl puts (i32, i32, i32)
+                "
+              func_decl puts (i32, i32, i32)
 
-                  entry:
-                    %0: i32 = load_ti 0
-                    %1: i32 = load_ti 4
-                    %2: i32 = load_ti 8
-                    call @puts(%0, %1, %2)
+              entry:
+                %0: i32 = load_ti 0
+                %1: i32 = load_ti 4
+                %2: i32 = load_ti 8
+                call @puts(%0, %1, %2)
             ",
-                ),
                 &format!(
                     "
-                    ...
-                    ; call @puts(%0, %1, %2)
-                    ... mov edi, [rbp-0x04]
-                    ... mov esi, [rbp-0x08]
-                    ... mov edx, [rbp-0x0C]
-                    ... mov r12, 0x{sym_addr:X}
-                    ... call r12
-                    ...
+                ...
+                ; call @puts(%0, %1, %2)
+                ... mov edi, [rbp-0x04]
+                ... mov esi, [rbp-0x08]
+                ... mov edx, [rbp-0x0C]
+                ... mov r12, 0x{sym_addr:X}
+                ... call r12
+                ...
             "
                 ),
             );
@@ -1473,33 +1448,31 @@ mod tests {
         fn cg_call_with_different_args() {
             let sym_addr = symbol_to_ptr("puts").unwrap().addr();
             test_with_spillalloc(
-                &Module::from_str(
-                    "
-                  func_decl puts (i8, i16, i32, i64, ptr, i8)
+                "
+              func_decl puts (i8, i16, i32, i64, ptr, i8)
 
-                  entry:
-                      %0: i8 = load_ti 0
-                      %1: i16 = load_ti 8
-                      %2: i32 = load_ti 16
-                      %3: i64 = load_ti 24
-                      %4: ptr = load_ti 32
-                      %5: i8 = load_ti 40
-                      call @puts(%0, %1, %2, %3, %4, %5)
+              entry:
+                %0: i8 = load_ti 0
+                %1: i16 = load_ti 8
+                %2: i32 = load_ti 16
+                %3: i64 = load_ti 24
+                %4: ptr = load_ti 32
+                %5: i8 = load_ti 40
+                call @puts(%0, %1, %2, %3, %4, %5)
             ",
-                ),
                 &format!(
                     "
-                      ...
-                      ; call @puts(%0, %1, %2, %3, %4, %5)
-                      ... movzx rdi, byte ptr [rbp-0x01]
-                      ... movzx rsi, word ptr [rbp-0x04]
-                      ... mov edx, [rbp-0x08]
-                      ... mov rcx, [rbp-0x10]
-                      ... mov r8, [rbp-0x18]
-                      ... movzx r9, byte ptr [rbp-0x19]
-                      ... mov r12, 0x{sym_addr:X}
-                      ... call r12
-                      ...
+                ...
+                ; call @puts(%0, %1, %2, %3, %4, %5)
+                ... movzx rdi, byte ptr [rbp-0x01]
+                ... movzx rsi, word ptr [rbp-0x04]
+                ... mov edx, [rbp-0x08]
+                ... mov rcx, [rbp-0x10]
+                ... mov r8, [rbp-0x18]
+                ... movzx r9, byte ptr [rbp-0x19]
+                ... mov r12, 0x{sym_addr:X}
+                ... call r12
+                ...
             "
                 ),
             );
@@ -1509,13 +1482,11 @@ mod tests {
         #[test]
         fn cg_call_spill_args() {
             test_with_spillalloc(
-                &Module::from_str(
-                    "
-                  func_decl f(...)
-                  entry:
-                    %1: i32 = call @f(0, 1, 2, 3, 4, 5, 6, 7)
+                "
+              func_decl f(...)
+              entry:
+                %1: i32 = call @f(0, 1, 2, 3, 4, 5, 6, 7)
             ",
-                ),
                 "",
             );
         }
@@ -1524,20 +1495,18 @@ mod tests {
         fn cg_call_ret() {
             let sym_addr = symbol_to_ptr("puts").unwrap().addr();
             test_with_spillalloc(
-                &Module::from_str(
-                    "
-                  func_decl puts() -> i32
-                  entry:
-                    %0: i32 = call @puts()
+                "
+             func_decl puts() -> i32
+             entry:
+               %0: i32 = call @puts()
             ",
-                ),
                 &format!(
                     "
-                    ...
-                    ... mov r12, 0x{sym_addr:X}
-                    ... call r12
-                    ... mov [rbp-0x04], eax
-                    ...
+                ...
+                ... mov r12, 0x{sym_addr:X}
+                ... call r12
+                ... mov [rbp-0x04], eax
+                ...
             "
                 ),
             );
@@ -1552,14 +1521,12 @@ mod tests {
             // FIXME: There is no corresponding test for the well-formedness of function return
             // types.
             test_with_spillalloc(
-                &Module::from_str(
-                    "
-                  func_decl f(i32) -> i32
-                  entry:
-                    %0: i8 = load_ti 0
-                    %1: i32 = call @f(%0)
+                "
+              func_decl f(i32) -> i32
+              entry:
+                %0: i8 = load_ti 0
+                %1: i32 = call @f(%0)
             ",
-                ),
                 "",
             );
         }
@@ -1567,22 +1534,20 @@ mod tests {
         #[test]
         fn cg_eq_i64() {
             test_with_spillalloc(
-                &Module::from_str(
-                    "
-                  entry:
-                    %0: i64 = load_ti 0
-                    %1: i8 = eq %0, %0
-            ",
-                ),
                 "
-                    ...
-                    ; %1: i8 = eq %0, %0
-                    ... mov r12, [rbp-0x08]
-                    ... mov r13, [rbp-0x08]
-                    ... cmp r12, r13
-                    ... setz r12b
-                    ... mov [rbp-0x09], r12b
-                    ...
+              entry:
+                %0: i64 = load_ti 0
+                %1: i8 = eq %0, %0
+            ",
+                "
+                ...
+                ; %1: i8 = eq %0, %0
+                ... mov r12, [rbp-0x08]
+                ... mov r13, [rbp-0x08]
+                ... cmp r12, r13
+                ... setz r12b
+                ... mov [rbp-0x09], r12b
+                ...
             ",
             );
         }
@@ -1590,22 +1555,20 @@ mod tests {
         #[test]
         fn cg_eq_i8() {
             test_with_spillalloc(
-                &Module::from_str(
-                    "
-                  entry:
-                    %0: i8 = load_ti 0
-                    %1: i8 = eq %0, %0
-            ",
-                ),
                 "
-                    ...
-                    ; %1: i8 = eq %0, %0
-                    ... movzx r12, byte ptr [rbp-0x01]
-                    ... movzx r13, byte ptr [rbp-0x01]
-                    ... cmp r12b, r13b
-                    ... setz r12b
-                    ... mov [rbp-0x02], r12b
-                    ...
+              entry:
+                %0: i8 = load_ti 0
+                %1: i8 = eq %0, %0
+            ",
+                "
+                ...
+                ; %1: i8 = eq %0, %0
+                ... movzx r12, byte ptr [rbp-0x01]
+                ... movzx r13, byte ptr [rbp-0x01]
+                ... cmp r12b, r13b
+                ... setz r12b
+                ... mov [rbp-0x02], r12b
+                ...
             ",
             );
         }
@@ -1615,14 +1578,12 @@ mod tests {
         #[should_panic(expected = "icmp of differing types")]
         fn cg_icmp_diff_types() {
             test_with_spillalloc(
-                &Module::from_str(
-                    "
-                  entry:
-                    %0: i8 = load_ti 0
-                    %1: i64 = load_ti 0
-                    %2: i8 = eq %0, %1
+                "
+              entry:
+                %0: i8 = load_ti 0
+                %1: i64 = load_ti 0
+                %2: i8 = eq %0, %1
             ",
-                ),
                 "",
             );
         }
@@ -1630,25 +1591,23 @@ mod tests {
         #[test]
         fn cg_guard_true() {
             test_with_spillalloc(
-                &Module::from_str(
-                    "
-                  entry:
-                    %0: i8 = load_ti 0
-                    guard %0, true
-            ",
-                ),
                 "
-                    ...
-                    ; guard %0, true
-                    {{vaddr1}} {{off1}}: jmp 0x00000000{{cmpoff}}
-                    {{vaddr2}} {{failoff}}: mov rdi, [rbp]
-                    ... mov rsi, 0x00
-                    ... mov rdx, rbp
-                    ... mov rax, ...
-                    ... call rax
-                    {{vaddr3}} {{cmpoff}}: cmp r12b, 0x01
-                    {{vaddr4}} {{off4}}: jnz 0x00000000{{failoff}}
-                    ...
+              entry:
+                %0: i8 = load_ti 0
+                guard %0, true
+            ",
+                "
+                ...
+                ; guard %0, true
+                {{vaddr1}} {{off1}}: jmp 0x00000000{{cmpoff}}
+                {{vaddr2}} {{failoff}}: mov rdi, [rbp]
+                ... mov rsi, 0x00
+                ... mov rdx, rbp
+                ... mov rax, ...
+                ... call rax
+                {{vaddr3}} {{cmpoff}}: cmp r12b, 0x01
+                {{vaddr4}} {{off4}}: jnz 0x00000000{{failoff}}
+                ...
             ",
             );
         }
@@ -1656,38 +1615,39 @@ mod tests {
         #[test]
         fn cg_guard_false() {
             test_with_spillalloc(
-                &Module::from_str(
-                    "
-                  entry:
-                    %0: i8 = load_ti 0
-                    guard %0, false
-            ",
-                ),
                 "
-                    ...
-                    ; guard %0, false
-                    {{vaddr1}} {{off1}}: jmp 0x00000000{{cmpoff}}
-                    {{vaddr2}} {{failoff}}: mov rdi, [rbp]
-                    ... mov rsi, 0x00
-                    ... mov rdx, rbp
-                    ... mov rax, ...
-                    ... call rax
-                    {{vaddr3}} {{cmpoff}}: cmp r12b, 0x00
-                    {{vaddr4}} {{off4}}: jnz 0x00000000{{failoff}}
-                    ...
+              entry:
+                %0: i8 = load_ti 0
+                guard %0, false
+            ",
+                "
+                ...
+                ; guard %0, false
+                {{vaddr1}} {{off1}}: jmp 0x00000000{{cmpoff}}
+                {{vaddr2}} {{failoff}}: mov rdi, [rbp]
+                ... mov rsi, 0x00
+                ... mov rdx, rbp
+                ... mov rax, ...
+                ... call rax
+                {{vaddr3}} {{cmpoff}}: cmp r12b, 0x00
+                {{vaddr4}} {{off4}}: jnz 0x00000000{{failoff}}
+                ...
             ",
             );
         }
 
         #[test]
         fn unterminated_trace() {
-            let m = test_module();
-            let patt_lines = "
+            test_with_spillalloc(
+                "
+              entry:
+                ",
+                "
                 ...
                 ; Unterminated trace
                 {{vaddr}} {{off}}: ud2
-            ";
-            test_with_spillalloc(&m, patt_lines);
+                ",
+            );
         }
 
         #[test]
@@ -1695,12 +1655,10 @@ mod tests {
             // FIXME: make the offset and disassembler format hex the same so we can match
             // easier (capitalisation of hex differs).
             test_with_spillalloc(
-                &Module::from_str(
-                    "
-                  entry:
-                    tloop_start
+                "
+              entry:
+                tloop_start
             ",
-                ),
                 "
                 ...
                 ; tloop_start:
@@ -1713,23 +1671,21 @@ mod tests {
         #[test]
         fn looped_trace_bigger() {
             test_with_spillalloc(
-                &Module::from_str(
-                    "
-                  entry:
-                    %0: i8 = load_ti 0
-                    tloop_start
-                    %2: i8 = add %0, %0
-            ",
-                ),
                 "
-                    ...
-                    ; %0: i8 = load_ti 0
-                    ...
-                    ; tloop_start:
-                    ; %2: i8 = add %0, %0
-                    ...
-                    ; tloop_backedge:
-                    ...: jmp ...
+              entry:
+                %0: i8 = load_ti 0
+                tloop_start
+                %2: i8 = add %0, %0
+            ",
+                "
+                ...
+                ; %0: i8 = load_ti 0
+                ...
+                ; tloop_start:
+                ; %2: i8 = add %0, %0
+                ...
+                ; tloop_backedge:
+                ...: jmp ...
             ",
             );
         }
@@ -1737,14 +1693,12 @@ mod tests {
         #[test]
         fn cg_srem() {
             test_with_spillalloc(
-                &Module::from_str(
-                    "
-                  entry:
-                    %0: i8 = load_ti 0
-                    %1: i8 = load_ti 1
-                    %2: i8 = srem %0, %1
+                "
+              entry:
+                %0: i8 = load_ti 0
+                %1: i8 = load_ti 1
+                %2: i8 = srem %0, %1
             ",
-                ),
                 "
                 ...
                 ; %2: i8 = srem %0, %1
@@ -1761,21 +1715,19 @@ mod tests {
         #[test]
         fn cg_trunc() {
             test_with_spillalloc(
-                &Module::from_str(
-                    "
-                  entry:
-                    %0: i32 = load_ti 0
-                    %1: i8 = trunc %0
-            ",
-                ),
                 "
-                   ...
-                   ; %0: i32 = load_ti 0
-                   ...
-                   ; %1: i8 = trunc %0
-                   ... mov r12d, [rbp-0x04]
-                   ... mov [rbp-0x05], r12b
-                   ...
+              entry:
+                %0: i32 = load_ti 0
+                %1: i8 = trunc %0
+            ",
+                "
+                ...
+                ; %0: i32 = load_ti 0
+                ...
+                ; %1: i8 = trunc %0
+                ... mov r12d, [rbp-0x04]
+                ... mov [rbp-0x05], r12b
+                ...
             ",
             );
         }

@@ -548,7 +548,6 @@ mod tests {
               %9: ptr = load_ti 3
               store %8, %9
               %10: i32 = load %9
-              %11: i32 = ptr_add %9, 10i32
         ",
         );
     }
