@@ -1,9 +1,10 @@
 %%
-@[a-zA-Z_.]+ "GLOBAL"
+@[a-zA-Z_.][a-zA-Z_0-9]* "GLOBAL"
 %[0-9]+ "LOCAL_OPERAND"
 i[0-9]+ "INT_TYPE"
 [0-9]+ "INT"
 add "ADD"
+call "CALL"
 eq "EQ"
 false "FALSE"
 func_decl "FUNC_DECL"
@@ -24,4 +25,5 @@ trunc "TRUNC"
 \( "("
 \) ")"
 ;.*?$ ;
+@ "@"
 [\t \n\r]+ ;

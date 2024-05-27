@@ -333,6 +333,23 @@ impl Module {
         }
     }
 
+    /// Find a function declaration by name. This has linear search time and is only intended for
+    /// use when testing.
+    ///
+    /// # Panics
+    ///
+    /// If there is no function declaration `name`.
+    #[cfg(test)]
+    pub(crate) fn find_func_decl_idx_by_name(&self, name: &str) -> FuncDeclIdx {
+        FuncDeclIdx::new(
+            self.func_decls
+                .iter()
+                .position(|x| x.name() == name)
+                .unwrap(),
+        )
+        .unwrap()
+    }
+
     pub(crate) fn push_guardinfo(
         &mut self,
         info: GuardInfo,

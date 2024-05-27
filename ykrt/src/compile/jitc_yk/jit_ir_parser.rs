@@ -7,8 +7,9 @@
 use super::{
     aot_ir::Predicate,
     jit_ir::{
-        AddInst, FuncDecl, FuncTy, GuardInfo, GuardInst, IcmpInst, Inst, InstIdx, IntegerTy,
-        LoadTraceInputInst, Module, Operand, SRemInst, TestUseInst, TruncInst, Ty, TyIdx,
+        AddInst, DirectCallInst, FuncDecl, FuncTy, GuardInfo, GuardInst, IcmpInst, Inst, InstIdx,
+        IntegerTy, LoadTraceInputInst, Module, Operand, SRemInst, TestUseInst, TruncInst, Ty,
+        TyIdx,
     },
 };
 use fm::FMBuilder;
@@ -129,6 +130,21 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                         self.add_assign(m.len(), assign)?;
                         m.push(inst.into()).unwrap();
                     }
+                    ASTInst::Call {
+                        assign,
+                        name: name_span,
+                        args,
+                    } => {
+                        let name = &self.lexer.span_str(name_span)[1..];
+                        let fd_idx = m.find_func_decl_idx_by_name(name);
+                        let inst =
+                            DirectCallInst::new(&mut m, fd_idx, self.process_operands(args)?)
+                                .map_err(|e| self.error_at_span(name_span, &e.to_string()))?;
+                        if let Some(x) = assign {
+                            self.add_assign(m.len(), x)?;
+                        }
+                        m.push(inst.into()).unwrap();
+                    }
                     ASTInst::Eq {
                         assign,
                         type_: _,
@@ -226,6 +242,14 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
         Ok(())
     }
 
+    fn process_operands(&mut self, ops: Vec<ASTOperand>) -> Result<Vec<Operand>, Box<dyn Error>> {
+        let mut mapped = Vec::with_capacity(ops.len());
+        for x in ops {
+            mapped.push(self.process_operand(x)?);
+        }
+        Ok(mapped)
+    }
+
     fn process_operand(&mut self, op: ASTOperand) -> Result<Operand, Box<dyn Error>> {
         match op {
             ASTOperand::Local(span) => {
@@ -319,6 +343,11 @@ enum ASTInst {
         type_: ASTType,
         lhs: ASTOperand,
         rhs: ASTOperand,
+    },
+    Call {
+        assign: Option<Span>,
+        name: Span,
+        args: Vec<ASTOperand>,
     },
     Eq {
         assign: Span,
@@ -415,14 +444,24 @@ mod tests {
     fn all_jit_ir_syntax() {
         Module::from_str(
             "
-          entry:
-            %0: i16 = load_ti 0
-            %1: i16 = trunc %0
-            %2: i16 = add %0, %1
-            %3: i16 = srem %1, %2
-            %4: i16 = eq %1, %2
-            tloop_start
-            guard %4, true
+            func_decl f1()
+            func_decl f2(i8) -> i32
+            func_decl f3(i8, i32, ...) -> i64
+            func_decl f4(...)
+            entry:
+              %0: i16 = load_ti 0
+              %1: i16 = trunc %0
+              %2: i16 = add %0, %1
+              %3: i16 = srem %1, %2
+              %4: i16 = eq %1, %2
+              tloop_start
+              guard %4, true
+              call @f1()
+              %5: i8 = load_ti 1
+              %6: i32 = call @f2(%1)
+              %7: i32 = load_ti 2
+              %8: i64 = call @f3(%5, %7, %0)
+              call @f4(%0, %1)
         ",
         );
     }

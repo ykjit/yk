@@ -70,6 +70,12 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
   | "LOCAL_OPERAND" ":" Type "=" "ADD" Operand "," Operand  {
       Ok(ASTInst::Add{assign: $1?.span(), type_: $3?, lhs: $6?, rhs: $8?})
     }
+  | "LOCAL_OPERAND" ":" Type "=" "CALL" "GLOBAL" "(" CallArgs ")" {
+      Ok(ASTInst::Call{assign: Some($1?.span()), name: $6?.span(), args: $8?})
+    }
+  | "CALL" "GLOBAL" "(" CallArgs ")" {
+      Ok(ASTInst::Call{assign: None, name: $2?.span(), args: $4?})
+    }
   | "LOCAL_OPERAND" ":" Type "=" "EQ" Operand "," Operand  {
       Ok(ASTInst::Eq{assign: $1?.span(), type_: $3?, lhs: $6?, rhs: $8?})
     }
@@ -89,6 +95,12 @@ Operand -> Result<ASTOperand, Box<dyn Error>>:
 
 Type -> Result<ASTType, Box<dyn Error>>:
     "INT_TYPE" { Ok(ASTType::Int($1?.span())) }
+  ;
+
+CallArgs -> Result<Vec<ASTOperand>, Box<dyn Error>>:
+    CallArgs "," Operand { flattenr($1, $3) }
+  | Operand { Ok(vec![$1?]) }
+  | { Ok(Vec::new()) }
   ;
 
 %%

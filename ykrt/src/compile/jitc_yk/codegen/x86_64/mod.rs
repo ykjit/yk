@@ -1438,75 +1438,55 @@ mod tests {
 
         #[test]
         fn cg_call_simple() {
-            let mut m = test_module();
-            let void_ty_idx = m.void_ty_idx();
-            let func_ty_idx = m
-                .insert_ty(jit_ir::Ty::Func(FuncTy::new(vec![], void_ty_idx, false)))
-                .unwrap();
+            let sym_addr = symbol_to_ptr("puts").unwrap().addr();
+            test_with_spillalloc(
+                &Module::from_str(
+                    "
+                  func_decl puts ()
 
-            let func_decl_idx = m
-                .insert_func_decl(jit_ir::FuncDecl::new(CALL_TESTS_CALLEE.into(), func_ty_idx))
-                .unwrap();
-            let call_inst = jit_ir::DirectCallInst::new(&mut m, func_decl_idx, vec![]).unwrap();
-            m.push(call_inst.into()).unwrap();
-
-            let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
-            let patt_lines = format!(
-                "
-                ...
-                ... mov r12, 0x{sym_addr:X}
-                ... call r12
-                ...
+                  entry:
+                    call @puts()
+            ",
+                ),
+                &format!(
+                    "
+                    ...
+                    ... mov r12, 0x{sym_addr:X}
+                    ... call r12
+                    ...
             "
+                ),
             );
-            test_with_spillalloc(&m, &patt_lines);
         }
 
         #[test]
         fn cg_call_with_args() {
-            let mut m = test_module();
-            let void_ty_idx = m.void_ty_idx();
-            let i32_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
-            let func_ty_idx = m
-                .insert_ty(jit_ir::Ty::Func(FuncTy::new(
-                    vec![i32_ty_idx; 3],
-                    void_ty_idx,
-                    false,
-                )))
-                .unwrap();
+            let sym_addr = symbol_to_ptr("puts").unwrap().addr();
+            test_with_spillalloc(
+                &Module::from_str(
+                    "
+                  func_decl puts (i32, i32, i32)
 
-            let func_decl_idx = m
-                .insert_func_decl(jit_ir::FuncDecl::new(CALL_TESTS_CALLEE.into(), func_ty_idx))
-                .unwrap();
-
-            let arg1 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i32_ty_idx).into())
-                .unwrap();
-            let arg2 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(4, i32_ty_idx).into())
-                .unwrap();
-            let arg3 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(8, i32_ty_idx).into())
-                .unwrap();
-
-            let call_inst =
-                jit_ir::DirectCallInst::new(&mut m, func_decl_idx, vec![arg1, arg2, arg3]).unwrap();
-            m.push(call_inst.into()).unwrap();
-
-            let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
-            let patt_lines = format!(
-                "
-                ...
-                ; call @puts(%0, %1, %2)
-                ... mov edi, [rbp-0x04]
-                ... mov esi, [rbp-0x08]
-                ... mov edx, [rbp-0x0C]
-                ... mov r12, 0x{sym_addr:X}
-                ... call r12
-                ...
+                  entry:
+                    %0: i32 = load_ti 0
+                    %1: i32 = load_ti 4
+                    %2: i32 = load_ti 8
+                    call @puts(%0, %1, %2)
+            ",
+                ),
+                &format!(
+                    "
+                    ...
+                    ; call @puts(%0, %1, %2)
+                    ... mov edi, [rbp-0x04]
+                    ... mov esi, [rbp-0x08]
+                    ... mov edx, [rbp-0x0C]
+                    ... mov r12, 0x{sym_addr:X}
+                    ... call r12
+                    ...
             "
+                ),
             );
-            test_with_spillalloc(&m, &patt_lines);
         }
 
         #[test]
@@ -1581,93 +1561,60 @@ mod tests {
         #[should_panic] // until we implement spill args
         #[test]
         fn cg_call_spill_args() {
-            let mut m = test_module();
-            let void_ty_idx = m.void_ty_idx();
-            let i32_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
-            let func_ty_idx = m
-                .insert_ty(jit_ir::Ty::Func(FuncTy::new(
-                    vec![i32_ty_idx; 7],
-                    void_ty_idx,
-                    false,
-                )))
-                .unwrap();
-
-            let func_decl_idx = m
-                .insert_func_decl(jit_ir::FuncDecl::new(CALL_TESTS_CALLEE.into(), func_ty_idx))
-                .unwrap();
-
-            let arg1 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i32_ty_idx).into())
-                .unwrap();
-
-            let args = (0..7).map(|_| arg1.clone()).collect::<Vec<_>>();
-            let call_inst = jit_ir::DirectCallInst::new(&mut m, func_decl_idx, args).unwrap();
-            m.push(call_inst.into()).unwrap();
-
-            X64CodeGen::new(&m, Box::new(SpillAllocator::new(STACK_DIRECTION)))
-                .unwrap()
-                .codegen()
-                .unwrap();
+            test_with_spillalloc(
+                &Module::from_str(
+                    "
+                  func_decl f(...)
+                  entry:
+                    %1: i32 = call @f(0, 1, 2, 3, 4, 5, 6, 7)
+            ",
+                ),
+                "",
+            );
         }
 
         #[test]
         fn cg_call_ret() {
-            let mut m = test_module();
-            let i32_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
-            let func_ty_idx = m
-                .insert_ty(jit_ir::Ty::Func(FuncTy::new(vec![], i32_ty_idx, false)))
-                .unwrap();
-
-            let func_decl_idx = m
-                .insert_func_decl(jit_ir::FuncDecl::new(CALL_TESTS_CALLEE.into(), func_ty_idx))
-                .unwrap();
-            let call_inst = jit_ir::DirectCallInst::new(&mut m, func_decl_idx, vec![]).unwrap();
-            m.push(call_inst.into()).unwrap();
-
-            let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
-            let patt_lines = format!(
-                "
-                ...
-                ... mov r12, 0x{sym_addr:X}
-                ... call r12
-                ... mov [rbp-0x04], eax
-                ...
+            let sym_addr = symbol_to_ptr("puts").unwrap().addr();
+            test_with_spillalloc(
+                &Module::from_str(
+                    "
+                  func_decl puts() -> i32
+                  entry:
+                    %0: i32 = call @puts()
+            ",
+                ),
+                &format!(
+                    "
+                    ...
+                    ... mov r12, 0x{sym_addr:X}
+                    ... call r12
+                    ... mov [rbp-0x04], eax
+                    ...
             "
+                ),
             );
-            test_with_spillalloc(&m, &patt_lines);
         }
 
         #[cfg(debug_assertions)]
         #[should_panic(expected = "argument type mismatch in call")]
         #[test]
         fn cg_call_bad_arg_type() {
-            let mut m = test_module();
-            let void_ty_idx = m.void_ty_idx();
-            let i32_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
-            let func_ty_idx = m
-                .insert_ty(jit_ir::Ty::Func(FuncTy::new(
-                    vec![i32_ty_idx],
-                    void_ty_idx,
-                    false,
-                )))
-                .unwrap();
-
-            let func_decl_idx = m
-                .insert_func_decl(jit_ir::FuncDecl::new(CALL_TESTS_CALLEE.into(), func_ty_idx))
-                .unwrap();
-
-            // Make a call that passes a i8 argument, instead of an i32 as in the func sig.
-            let i8_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(8))).unwrap();
-            let arg1 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i8_ty_idx).into())
-                .unwrap();
-            let call_inst = jit_ir::DirectCallInst::new(&mut m, func_decl_idx, vec![arg1]).unwrap();
-            m.push(call_inst.into()).unwrap();
-
-            X64CodeGen::new(&m, Box::new(SpillAllocator::new(STACK_DIRECTION)))
-                .unwrap()
-                .codegen()
-                .unwrap();
+            // FIXME: This is an IR well-formedness test and shouldn't be a property of the x86
+            // backend.
+            // FIXME: There is no corresponding test for the well-formedness of function return
+            // types.
+            test_with_spillalloc(
+                &Module::from_str(
+                    "
+                  func_decl f(i32) -> i32
+                  entry:
+                    %0: i8 = load_ti 0
+                    %1: i32 = call @f(%0)
+            ",
+                ),
+                "",
+            );
         }
 
         #[test]
