@@ -1116,7 +1116,7 @@ mod tests {
     use crate::compile::{
         jitc_yk::{
             codegen::reg_alloc::RegisterAllocator,
-            jit_ir::{self, IntegerTy, Module},
+            jit_ir::{self, Module},
         },
         CompiledTrace,
     };
@@ -1234,26 +1234,24 @@ mod tests {
 
         #[test]
         fn cg_ptradd() {
-            let mut m = test_module();
-            let ptr_ty_idx = m.ptr_ty_idx();
-            let ti_op = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, ptr_ty_idx).into())
-                .unwrap();
-            let co_ty = jit_ir::IntegerTy::new(32);
-            let co_const = co_ty.make_constant(&mut m, 64).unwrap();
-            let co_opnd = jit_ir::Operand::Const(m.insert_const(co_const).unwrap());
-            m.push(jit_ir::PtrAddInst::new(ti_op, co_opnd).into())
-                .unwrap();
-            let patt_lines = "
-                ...
-                ; %1: ptr = ptr_add %0, 64i32
-                ... mov r12, [rbp-0x08]
-                ... mov r13, 0x40
-                ... add r12, r13
-                ... mov [rbp-0x10], r12
-                ...
-            ";
-            test_with_spillalloc(&m, patt_lines);
+            test_with_spillalloc(
+                &Module::from_str(
+                    "
+                  entry:
+                    %0: ptr = load_ti 0
+                    %1: i32 = ptr_add %0, 64i32
+            ",
+                ),
+                "
+                    ...
+                    ; %1: ptr = ptr_add %0, 64i32
+                    ... mov r12, [rbp-0x08]
+                    ... mov r13, 0x40
+                    ... add r12, r13
+                    ... mov [rbp-0x10], r12
+                    ...
+                ",
+            );
         }
 
         #[test]

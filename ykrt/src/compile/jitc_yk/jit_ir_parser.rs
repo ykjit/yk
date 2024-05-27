@@ -8,15 +8,15 @@ use super::{
     aot_ir::Predicate,
     jit_ir::{
         AddInst, DirectCallInst, FuncDecl, FuncTy, GuardInfo, GuardInst, IcmpInst, Inst, InstIdx,
-        IntegerTy, LoadInst, LoadTraceInputInst, Module, Operand, SRemInst, StoreInst, TestUseInst,
-        TruncInst, Ty, TyIdx,
+        IntegerTy, LoadInst, LoadTraceInputInst, Module, Operand, PtrAddInst, SRemInst, StoreInst,
+        TestUseInst, TruncInst, Ty, TyIdx,
     },
 };
 use fm::FMBuilder;
 use lrlex::{lrlex_mod, DefaultLexerTypes, LRNonStreamingLexer};
 use lrpar::{lrpar_mod, NonStreamingLexer, Span};
 use regex::Regex;
-use std::{collections::HashMap, error::Error, sync::OnceLock};
+use std::{collections::HashMap, convert::TryFrom, error::Error, sync::OnceLock};
 
 lrlex_mod!("compile/jitc_yk/jit_ir.l");
 lrpar_mod!("compile/jitc_yk/jit_ir.y");
@@ -125,8 +125,10 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                         lhs,
                         rhs,
                     } => {
-                        let inst =
-                            AddInst::new(self.process_operand(lhs)?, self.process_operand(rhs)?);
+                        let inst = AddInst::new(
+                            self.process_operand(&mut m, lhs)?,
+                            self.process_operand(&mut m, rhs)?,
+                        );
                         self.add_assign(m.len(), assign)?;
                         m.push(inst.into()).unwrap();
                     }
@@ -137,9 +139,9 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                     } => {
                         let name = &self.lexer.span_str(name_span)[1..];
                         let fd_idx = m.find_func_decl_idx_by_name(name);
-                        let inst =
-                            DirectCallInst::new(&mut m, fd_idx, self.process_operands(args)?)
-                                .map_err(|e| self.error_at_span(name_span, &e.to_string()))?;
+                        let ops = self.process_operands(&mut m, args)?;
+                        let inst = DirectCallInst::new(&mut m, fd_idx, ops)
+                            .map_err(|e| self.error_at_span(name_span, &e.to_string()))?;
                         if let Some(x) = assign {
                             self.add_assign(m.len(), x)?;
                         }
@@ -152,9 +154,9 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                         rhs,
                     } => {
                         let inst = IcmpInst::new(
-                            self.process_operand(lhs)?,
+                            self.process_operand(&mut m, lhs)?,
                             Predicate::Equal,
-                            self.process_operand(rhs)?,
+                            self.process_operand(&mut m, rhs)?,
                         );
                         self.add_assign(m.len(), assign)?;
                         m.push(inst.into()).unwrap();
@@ -163,12 +165,13 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                         let gidx = m
                             .push_guardinfo(GuardInfo::new(Vec::new(), Vec::new()))
                             .unwrap();
-                        let inst = GuardInst::new(self.process_operand(operand)?, is_true, gidx);
+                        let inst =
+                            GuardInst::new(self.process_operand(&mut m, operand)?, is_true, gidx);
                         m.push(inst.into()).unwrap();
                     }
                     ASTInst::Load { assign, type_, val } => {
                         let inst = LoadInst::new(
-                            self.process_operand(val)?,
+                            self.process_operand(&mut m, val)?,
                             self.process_type(&mut m, type_)?,
                         );
                         self.add_assign(m.len(), assign)?;
@@ -184,24 +187,41 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                         self.add_assign(m.len(), assign)?;
                         m.push(inst.into()).unwrap();
                     }
+                    ASTInst::PtrAdd {
+                        assign,
+                        type_: _,
+                        ptr,
+                        off,
+                    } => {
+                        let inst = PtrAddInst::new(
+                            self.process_operand(&mut m, ptr)?,
+                            self.process_operand(&mut m, off)?,
+                        );
+                        self.add_assign(m.len(), assign)?;
+                        m.push(inst.into()).unwrap();
+                    }
                     ASTInst::SRem {
                         assign,
                         type_: _,
                         lhs,
                         rhs,
                     } => {
-                        let inst =
-                            SRemInst::new(self.process_operand(lhs)?, self.process_operand(rhs)?);
+                        let inst = SRemInst::new(
+                            self.process_operand(&mut m, lhs)?,
+                            self.process_operand(&mut m, rhs)?,
+                        );
                         self.add_assign(m.len(), assign)?;
                         m.push(inst.into()).unwrap();
                     }
                     ASTInst::Store { val, ptr } => {
-                        let inst =
-                            StoreInst::new(self.process_operand(val)?, self.process_operand(ptr)?);
+                        let inst = StoreInst::new(
+                            self.process_operand(&mut m, val)?,
+                            self.process_operand(&mut m, ptr)?,
+                        );
                         m.push(inst.into()).unwrap();
                     }
                     ASTInst::TestUse(op) => {
-                        let inst = TestUseInst::new(self.process_operand(op)?);
+                        let inst = TestUseInst::new(self.process_operand(&mut m, op)?);
                         m.push(inst.into()).unwrap();
                     }
                     ASTInst::TraceLoopStart => {
@@ -213,7 +233,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                         operand,
                     } => {
                         let inst = TruncInst::new(
-                            &self.process_operand(operand)?,
+                            &self.process_operand(&mut m, operand)?,
                             self.process_type(&mut m, type_)?,
                         );
                         self.add_assign(m.len(), assign)?;
@@ -255,16 +275,47 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
         Ok(())
     }
 
-    fn process_operands(&mut self, ops: Vec<ASTOperand>) -> Result<Vec<Operand>, Box<dyn Error>> {
+    fn process_operands(
+        &mut self,
+        m: &mut Module,
+        ops: Vec<ASTOperand>,
+    ) -> Result<Vec<Operand>, Box<dyn Error>> {
         let mut mapped = Vec::with_capacity(ops.len());
         for x in ops {
-            mapped.push(self.process_operand(x)?);
+            mapped.push(self.process_operand(m, x)?);
         }
         Ok(mapped)
     }
 
-    fn process_operand(&mut self, op: ASTOperand) -> Result<Operand, Box<dyn Error>> {
+    fn process_operand(
+        &mut self,
+        m: &mut Module,
+        op: ASTOperand,
+    ) -> Result<Operand, Box<dyn Error>> {
         match op {
+            ASTOperand::ConstInt(span) => {
+                let s = self.lexer.span_str(span);
+                let [val, type_] = <[&str; 2]>::try_from(s.split('i').collect::<Vec<_>>()).unwrap();
+                let width = type_
+                    .parse::<u32>()
+                    .map_err(|e| self.error_at_span(span, &e.to_string()))?;
+                let type_ = IntegerTy::new(width);
+                let const_ = match width {
+                    32 => {
+                        let val = val
+                            .parse::<i32>()
+                            .map_err(|e| self.error_at_span(span, &e.to_string()))?;
+                        type_
+                            .make_constant(m, val)
+                            .map_err(|e| self.error_at_span(span, &e.to_string()))?
+                    }
+                    x => todo!("{x}"),
+                };
+                Ok(Operand::Const(
+                    m.insert_const(const_)
+                        .map_err(|e| self.error_at_span(span, &e.to_string()))?,
+                ))
+            }
             ASTOperand::Local(span) => {
                 let idx = self.lexer.span_str(span)[1..]
                     .parse::<usize>()
@@ -384,6 +435,13 @@ enum ASTInst {
         type_: ASTType,
         off: Span,
     },
+    PtrAdd {
+        assign: Span,
+        #[allow(dead_code)]
+        type_: ASTType,
+        ptr: ASTOperand,
+        off: ASTOperand,
+    },
     SRem {
         assign: Span,
         #[allow(dead_code)]
@@ -407,6 +465,7 @@ enum ASTInst {
 #[derive(Debug)]
 enum ASTOperand {
     Local(Span),
+    ConstInt(Span),
 }
 
 #[derive(Debug)]
@@ -489,6 +548,7 @@ mod tests {
               %9: ptr = load_ti 3
               store %8, %9
               %10: i32 = load %9
+              %11: i32 = ptr_add %9, 10i32
         ",
         );
     }

@@ -82,6 +82,9 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
   | "LOCAL_OPERAND" ":" Type "=" "LOAD" Operand {
       Ok(ASTInst::Load{assign: $1?.span(), type_: $3?, val: $6?})
     }
+  | "LOCAL_OPERAND" ":" Type "=" "PTR_ADD" Operand "," Operand {
+      Ok(ASTInst::PtrAdd{assign: $1?.span(), type_: $3?, ptr: $6?, off: $8?})
+    }
   | "LOCAL_OPERAND" ":" Type "=" "SREM" Operand "," Operand {
       Ok(ASTInst::SRem{assign: $1?.span(), type_: $3?, lhs: $6?, rhs: $8?})
     }
@@ -95,6 +98,7 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
 
 Operand -> Result<ASTOperand, Box<dyn Error>>:
     "LOCAL_OPERAND" { Ok(ASTOperand::Local($1?.span())) }
+  | "CONST_INT" { Ok(ASTOperand::ConstInt($1?.span())) }
   ;
 
 Type -> Result<ASTType, Box<dyn Error>>:

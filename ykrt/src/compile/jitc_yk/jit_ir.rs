@@ -1621,6 +1621,13 @@ pub struct PtrAddInst {
 }
 
 impl PtrAddInst {
+    pub(crate) fn new(ptr: Operand, off: Operand) -> Self {
+        Self {
+            ptr: PackedOperand::new(&ptr),
+            off: PackedOperand::new(&off),
+        }
+    }
+
     pub(crate) fn ptr(&self) -> Operand {
         let ptr = self.ptr;
         ptr.unpack()
@@ -1629,13 +1636,6 @@ impl PtrAddInst {
     pub(crate) fn offset(&self) -> Operand {
         let unaligned = std::ptr::addr_of!(self.off);
         unsafe { std::ptr::read_unaligned(unaligned) }.unpack()
-    }
-
-    pub(crate) fn new(ptr: Operand, off: Operand) -> Self {
-        Self {
-            ptr: PackedOperand::new(&ptr),
-            off: PackedOperand::new(&off),
-        }
     }
 }
 
