@@ -8,7 +8,7 @@ use super::{
     aot_ir::Predicate,
     jit_ir::{
         AddInst, DirectCallInst, FuncDecl, FuncTy, GuardInfo, GuardInst, IcmpInst, Inst, InstIdx,
-        IntegerTy, LoadTraceInputInst, Module, Operand, SRemInst, StoreInst, TestUseInst,
+        IntegerTy, LoadInst, LoadTraceInputInst, Module, Operand, SRemInst, StoreInst, TestUseInst,
         TruncInst, Ty, TyIdx,
     },
 };
@@ -164,6 +164,14 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                             .push_guardinfo(GuardInfo::new(Vec::new(), Vec::new()))
                             .unwrap();
                         let inst = GuardInst::new(self.process_operand(operand)?, is_true, gidx);
+                        m.push(inst.into()).unwrap();
+                    }
+                    ASTInst::Load { assign, type_, val } => {
+                        let inst = LoadInst::new(
+                            self.process_operand(val)?,
+                            self.process_type(&mut m, type_)?,
+                        );
+                        self.add_assign(m.len(), assign)?;
                         m.push(inst.into()).unwrap();
                     }
                     ASTInst::LoadTraceInput { assign, type_, off } => {
@@ -366,6 +374,11 @@ enum ASTInst {
         operand: ASTOperand,
         is_true: bool,
     },
+    Load {
+        assign: Span,
+        type_: ASTType,
+        val: ASTOperand,
+    },
     LoadTraceInput {
         assign: Span,
         type_: ASTType,
@@ -475,6 +488,7 @@ mod tests {
               call @f4(%0, %1)
               %9: ptr = load_ti 3
               store %8, %9
+              %10: i32 = load %9
         ",
         );
     }

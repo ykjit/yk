@@ -79,6 +79,9 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
   | "LOCAL_OPERAND" ":" Type "=" "EQ" Operand "," Operand  {
       Ok(ASTInst::Eq{assign: $1?.span(), type_: $3?, lhs: $6?, rhs: $8?})
     }
+  | "LOCAL_OPERAND" ":" Type "=" "LOAD" Operand {
+      Ok(ASTInst::Load{assign: $1?.span(), type_: $3?, val: $6?})
+    }
   | "LOCAL_OPERAND" ":" Type "=" "SREM" Operand "," Operand {
       Ok(ASTInst::SRem{assign: $1?.span(), type_: $3?, lhs: $6?, rhs: $8?})
     }
