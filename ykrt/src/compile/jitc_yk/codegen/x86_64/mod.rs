@@ -1280,148 +1280,142 @@ mod tests {
 
         #[test]
         fn cg_loadtraceinput_i8() {
-            let mut m = test_module();
-            let u8_ty_idx = m.insert_ty(jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
-            m.push(jit_ir::LoadTraceInputInst::new(0, u8_ty_idx).into())
-                .unwrap();
-            let patt_lines = "
+            test_with_spillalloc(
+                &Module::from_str(
+                    "
+                  entry:
+                    %0: i8 = load_ti 0
+            ",
+                ),
+                "
                 ...
                 ; %0: i8 = load_ti 0
                 ... movzx r12, byte ptr [rdi]
                 ... mov [rbp-0x01], r12b
                 ...
-            ";
-            test_with_spillalloc(&m, patt_lines);
+                ",
+            );
         }
 
         #[test]
         fn cg_loadtraceinput_i16_with_offset() {
-            let mut m = test_module();
-            let u16_ty_idx = m
-                .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(16)))
-                .unwrap();
-            m.push(jit_ir::LoadTraceInputInst::new(32, u16_ty_idx).into())
-                .unwrap();
-            let patt_lines = "
-                ...
-                ; %0: i16 = load_ti 32
-                ... movzx r12d, word ptr [rdi+0x20]
-                ... mov [rbp-0x02], r12w
-                ...
-            ";
-            test_with_spillalloc(&m, patt_lines);
+            test_with_spillalloc(
+                &Module::from_str(
+                    "
+                  entry:
+                    %0: i16 = load_ti 32
+            ",
+                ),
+                "
+                    ...
+                    ; %0: i16 = load_ti 32
+                    ... movzx r12d, word ptr [rdi+0x20]
+                    ... mov [rbp-0x02], r12w
+                    ...
+                ",
+            );
         }
 
         #[test]
         fn cg_loadtraceinput_many_offset() {
-            let mut m = test_module();
-            let i8_ty_idx = m.insert_ty(jit_ir::Ty::Integer(IntegerTy::new(8))).unwrap();
-            let ptr_ty_idx = m.ptr_ty_idx();
-            m.push(jit_ir::LoadTraceInputInst::new(0, i8_ty_idx).into())
-                .unwrap();
-            m.push(jit_ir::LoadTraceInputInst::new(1, i8_ty_idx).into())
-                .unwrap();
-            m.push(jit_ir::LoadTraceInputInst::new(2, i8_ty_idx).into())
-                .unwrap();
-            m.push(jit_ir::LoadTraceInputInst::new(3, i8_ty_idx).into())
-                .unwrap();
-            m.push(jit_ir::LoadTraceInputInst::new(8, ptr_ty_idx).into())
-                .unwrap();
-            let patt_lines = "
-                ...
-                ; %0: i8 = load_ti 0
-                ... movzx r12, byte ptr [rdi]
-                ... mov [rbp-0x01], r12b
-                ; %1: i8 = load_ti 1
-                ... movzx r12, byte ptr [rdi+0x01]
-                ... mov [rbp-0x02], r12b
-                ; %2: i8 = load_ti 2
-                ... movzx r12, byte ptr [rdi+0x02]
-                ... mov [rbp-0x03], r12b
-                ; %3: i8 = load_ti 3
-                ... movzx r12, byte ptr [rdi+0x03]
-                ... mov [rbp-0x04], r12b
-                ; %4: ptr = load_ti 8
-                ... mov r12, [rdi+0x08]
-                ... mov [rbp-0x10], r12
-                ...
-            ";
-            test_with_spillalloc(&m, patt_lines);
+            test_with_spillalloc(
+                &Module::from_str(
+                    "
+                  entry:
+                    %0: i8 = load_ti 0
+                    %1: i8 = load_ti 1
+                    %2: i8 = load_ti 2
+                    %3: i8 = load_ti 3
+                    %4: ptr = load_ti 8
+            ",
+                ),
+                "
+                    ...
+                    ; %0: i8 = load_ti 0
+                    ... movzx r12, byte ptr [rdi]
+                    ... mov [rbp-0x01], r12b
+                    ; %1: i8 = load_ti 1
+                    ... movzx r12, byte ptr [rdi+0x01]
+                    ... mov [rbp-0x02], r12b
+                    ; %2: i8 = load_ti 2
+                    ... movzx r12, byte ptr [rdi+0x02]
+                    ... mov [rbp-0x03], r12b
+                    ; %3: i8 = load_ti 3
+                    ... movzx r12, byte ptr [rdi+0x03]
+                    ... mov [rbp-0x04], r12b
+                    ; %4: ptr = load_ti 8
+                    ... mov r12, [rdi+0x08]
+                    ... mov [rbp-0x10], r12
+                    ...
+                ",
+            );
         }
 
         #[test]
         fn cg_add_i16() {
-            let mut m = test_module();
-            let i16_ty_idx = m
-                .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(16)))
-                .unwrap();
-            let op1 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i16_ty_idx).into())
-                .unwrap();
-            let op2 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(16, i16_ty_idx).into())
-                .unwrap();
-            m.push(jit_ir::AddInst::new(op1, op2).into()).unwrap();
-            let patt_lines = "
-                ...
-                ; %2: i16 = add %0, %1
-                ... movzx r12, word ptr [rbp-0x02]
-                ... movzx r13, word ptr [rbp-0x04]
-                ... add r12w, r13w
-                ... mov [rbp-0x06], r12w
-                ...
-            ";
-            test_with_spillalloc(&m, patt_lines);
+            test_with_spillalloc(
+                &Module::from_str(
+                    "
+                  entry:
+                    %0: i16 = load_ti 0
+                    %1: i16 = load_ti 1
+                    %3: i16 = add %0, %1
+            ",
+                ),
+                "
+                    ...
+                    ; %2: i16 = add %0, %1
+                    ... movzx r12, word ptr [rbp-0x02]
+                    ... movzx r13, word ptr [rbp-0x04]
+                    ... add r12w, r13w
+                    ... mov [rbp-0x06], r12w
+                    ...
+                ",
+            );
         }
 
         #[test]
         fn cg_add_i64() {
-            let mut m = test_module();
-            let i64_ty_idx = m
-                .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(64)))
-                .unwrap();
-            let op1 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i64_ty_idx).into())
-                .unwrap();
-            let op2 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(64, i64_ty_idx).into())
-                .unwrap();
-            m.push(jit_ir::AddInst::new(op1, op2).into()).unwrap();
-            let patt_lines = "
-                ...
-                ; %2: i64 = add %0, %1
-                ... mov r12, [rbp-0x08]
-                ... mov r13, [rbp-0x10]
-                ... add r12, r13
-                ... mov [rbp-0x18], r12
-                ...
-            ";
-            test_with_spillalloc(&m, patt_lines);
+            test_with_spillalloc(
+                &Module::from_str(
+                    "
+                  entry:
+                    %0: i64 = load_ti 0
+                    %1: i64 = load_ti 1
+                    %3: i64 = add %0, %1
+            ",
+                ),
+                "
+                    ...
+                    ; %2: i64 = add %0, %1
+                    ... mov r12, [rbp-0x08]
+                    ... mov r13, [rbp-0x10]
+                    ... add r12, r13
+                    ... mov [rbp-0x18], r12
+                    ...
+                ",
+            );
         }
 
         #[cfg(debug_assertions)]
         #[should_panic]
         #[test]
         fn cg_add_wrong_types() {
-            let mut m = test_module();
-            let i64_ty_idx = m
-                .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(64)))
-                .unwrap();
-            let i32_ty_idx = m
-                .insert_ty(jit_ir::Ty::Integer(IntegerTy::new(32)))
-                .unwrap();
-            let op1 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i64_ty_idx).into())
-                .unwrap();
-            let op2 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(64, i32_ty_idx).into())
-                .unwrap();
-            m.push(jit_ir::AddInst::new(op1, op2).into()).unwrap();
-
-            X64CodeGen::new(&m, Box::new(SpillAllocator::new(STACK_DIRECTION)))
-                .unwrap()
-                .codegen()
-                .unwrap();
+            // FIXME: This is an IR well-formedness test and shouldn't be a property of the x86
+            // backend.
+            // FIXME: There is no corresponding test for the well-formedness of function return
+            // types.
+            test_with_spillalloc(
+                &Module::from_str(
+                    "
+                  entry:
+                    %0: i64 = load_ti 0
+                    %1: i32 = load_ti 1
+                    %3: i32 = add %0, %1
+            ",
+                ),
+                "",
+            );
         }
 
         #[test]
