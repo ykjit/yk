@@ -1,7 +1,6 @@
 //! Interpreter-facing API to the Yk meta-tracer.
 
 #![cfg_attr(test, feature(test))]
-#![feature(lazy_cell)]
 #![feature(naked_functions)]
 #![feature(ptr_sub_ptr)]
 #![feature(strict_provenance)]
