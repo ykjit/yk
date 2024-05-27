@@ -1257,25 +1257,24 @@ mod tests {
 
         #[test]
         fn cg_store_ptr() {
-            let mut m = test_module();
-            let ptr_ty_idx = m.ptr_ty_idx();
-            let ti1_op = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, ptr_ty_idx).into())
-                .unwrap();
-            let ti2_op = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(8, ptr_ty_idx).into())
-                .unwrap();
-            m.push(jit_ir::StoreInst::new(ti1_op, ti2_op).into())
-                .unwrap();
-            let patt_lines = "
-                ...
-                ; store %0, %1
-                ... mov r12, [rbp-0x10]
-                ... mov r13, [rbp-0x08]
-                ... mov [r12], r13
-                ...
-            ";
-            test_with_spillalloc(&m, patt_lines);
+            test_with_spillalloc(
+                &Module::from_str(
+                    "
+                  entry:
+                    %0: ptr = load_ti 0
+                    %1: ptr = load_ti 8
+                    store %0, %1
+            ",
+                ),
+                "
+                    ...
+                    ; store %0, %1
+                    ... mov r12, [rbp-0x10]
+                    ... mov r13, [rbp-0x08]
+                    ... mov [r12], r13
+                    ...
+                ",
+            );
         }
 
         #[test]

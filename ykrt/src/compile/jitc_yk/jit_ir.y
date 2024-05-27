@@ -85,6 +85,7 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
   | "LOCAL_OPERAND" ":" Type "=" "TRUNC" Operand {
       Ok(ASTInst::Trunc{assign: $1?.span(), type_: $3?, operand: $6? })
     }
+  | "STORE" Operand "," Operand { Ok(ASTInst::Store{val: $2?, ptr: $4?}) }
   | "TEST_USE" Operand { Ok(ASTInst::TestUse($2?)) }
   | "TLOOP_START" { Ok(ASTInst::TraceLoopStart) }
   ;

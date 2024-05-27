@@ -8,8 +8,8 @@ use super::{
     aot_ir::Predicate,
     jit_ir::{
         AddInst, DirectCallInst, FuncDecl, FuncTy, GuardInfo, GuardInst, IcmpInst, Inst, InstIdx,
-        IntegerTy, LoadTraceInputInst, Module, Operand, SRemInst, TestUseInst, TruncInst, Ty,
-        TyIdx,
+        IntegerTy, LoadTraceInputInst, Module, Operand, SRemInst, StoreInst, TestUseInst,
+        TruncInst, Ty, TyIdx,
     },
 };
 use fm::FMBuilder;
@@ -185,6 +185,11 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                         let inst =
                             SRemInst::new(self.process_operand(lhs)?, self.process_operand(rhs)?);
                         self.add_assign(m.len(), assign)?;
+                        m.push(inst.into()).unwrap();
+                    }
+                    ASTInst::Store { val, ptr } => {
+                        let inst =
+                            StoreInst::new(self.process_operand(val)?, self.process_operand(ptr)?);
                         m.push(inst.into()).unwrap();
                     }
                     ASTInst::TestUse(op) => {
@@ -373,6 +378,10 @@ enum ASTInst {
         lhs: ASTOperand,
         rhs: ASTOperand,
     },
+    Store {
+        val: ASTOperand,
+        ptr: ASTOperand,
+    },
     TestUse(ASTOperand),
     TraceLoopStart,
     Trunc {
@@ -465,6 +474,7 @@ mod tests {
               %8: i64 = call @f3(%5, %7, %0)
               call @f4(%0, %1)
               %9: ptr = load_ti 3
+              store %8, %9
         ",
         );
     }
