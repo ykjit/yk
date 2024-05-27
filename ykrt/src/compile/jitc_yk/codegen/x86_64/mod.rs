@@ -1116,7 +1116,7 @@ mod tests {
     use crate::compile::{
         jitc_yk::{
             codegen::reg_alloc::RegisterAllocator,
-            jit_ir::{self, IntegerTy, Module, Ty},
+            jit_ir::{self, IntegerTy, Module},
         },
         CompiledTrace,
     };
@@ -1153,8 +1153,6 @@ mod tests {
     }
 
     mod with_spillalloc {
-        use self::jit_ir::FuncTy;
-
         use super::*;
         use crate::compile::jitc_yk::codegen::reg_alloc::SpillAllocator;
 
@@ -1426,16 +1424,6 @@ mod tests {
                 .unwrap();
         }
 
-        /// A function whose symbol is present in the current address space.
-        ///
-        /// Used for testing code generation for calls.
-        ///
-        /// This function is never called, we just need something that dlsym(3) will find an
-        /// address for. As such, you can generate calls to this with any old signature for the
-        /// purpose of testing codegen.
-        #[cfg(unix)]
-        const CALL_TESTS_CALLEE: &str = "puts";
-
         #[test]
         fn cg_call_simple() {
             let sym_addr = symbol_to_ptr("puts").unwrap().addr();
@@ -1491,71 +1479,38 @@ mod tests {
 
         #[test]
         fn cg_call_with_different_args() {
-            let mut m = test_module();
-            let void_ty_idx = m.void_ty_idx();
-            let i8_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(8))).unwrap();
-            let i16_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(16))).unwrap();
-            let i32_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
-            let i64_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(64))).unwrap();
-            let ptr_ty_idx = m.ptr_ty_idx();
-            let func_ty_idx = m
-                .insert_ty(jit_ir::Ty::Func(FuncTy::new(
-                    vec![
-                        i8_ty_idx, i16_ty_idx, i32_ty_idx, i64_ty_idx, ptr_ty_idx, i8_ty_idx,
-                    ],
-                    void_ty_idx,
-                    false,
-                )))
-                .unwrap();
+            let sym_addr = symbol_to_ptr("puts").unwrap().addr();
+            test_with_spillalloc(
+                &Module::from_str(
+                    "
+                  func_decl puts (i8, i16, i32, i64, ptr, i8)
 
-            let func_decl_idx = m
-                .insert_func_decl(jit_ir::FuncDecl::new(CALL_TESTS_CALLEE.into(), func_ty_idx))
-                .unwrap();
-
-            let arg1 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(0, i8_ty_idx).into())
-                .unwrap();
-            let arg2 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(8, i16_ty_idx).into())
-                .unwrap();
-            let arg3 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(16, i32_ty_idx).into())
-                .unwrap();
-            let arg4 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(24, i64_ty_idx).into())
-                .unwrap();
-            let arg5 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(32, ptr_ty_idx).into())
-                .unwrap();
-            let arg6 = m
-                .push_and_make_operand(jit_ir::LoadTraceInputInst::new(40, i8_ty_idx).into())
-                .unwrap();
-
-            let call_inst = jit_ir::DirectCallInst::new(
-                &mut m,
-                func_decl_idx,
-                vec![arg1, arg2, arg3, arg4, arg5, arg6],
-            )
-            .unwrap();
-            m.push(call_inst.into()).unwrap();
-
-            let sym_addr = symbol_to_ptr(CALL_TESTS_CALLEE).unwrap().addr();
-            let patt_lines = format!(
-                "
-                ...
-                ; call @puts(%0, %1, %2, %3, %4, %5)
-                ... movzx rdi, byte ptr [rbp-0x01]
-                ... movzx rsi, word ptr [rbp-0x04]
-                ... mov edx, [rbp-0x08]
-                ... mov rcx, [rbp-0x10]
-                ... mov r8, [rbp-0x18]
-                ... movzx r9, byte ptr [rbp-0x19]
-                ... mov r12, 0x{sym_addr:X}
-                ... call r12
-                ...
+                  entry:
+                      %0: i8 = load_ti 0
+                      %1: i16 = load_ti 8
+                      %2: i32 = load_ti 16
+                      %3: i64 = load_ti 24
+                      %4: ptr = load_ti 32
+                      %5: i8 = load_ti 40
+                      call @puts(%0, %1, %2, %3, %4, %5)
+            ",
+                ),
+                &format!(
+                    "
+                      ...
+                      ; call @puts(%0, %1, %2, %3, %4, %5)
+                      ... movzx rdi, byte ptr [rbp-0x01]
+                      ... movzx rsi, word ptr [rbp-0x04]
+                      ... mov edx, [rbp-0x08]
+                      ... mov rcx, [rbp-0x10]
+                      ... mov r8, [rbp-0x18]
+                      ... movzx r9, byte ptr [rbp-0x19]
+                      ... mov r12, 0x{sym_addr:X}
+                      ... call r12
+                      ...
             "
+                ),
             );
-            test_with_spillalloc(&m, &patt_lines);
         }
 
         #[should_panic] // until we implement spill args

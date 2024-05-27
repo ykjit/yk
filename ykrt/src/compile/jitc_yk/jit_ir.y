@@ -95,6 +95,7 @@ Operand -> Result<ASTOperand, Box<dyn Error>>:
 
 Type -> Result<ASTType, Box<dyn Error>>:
     "INT_TYPE" { Ok(ASTType::Int($1?.span())) }
+  | "PTR" { Ok(ASTType::Ptr) }
   ;
 
 CallArgs -> Result<Vec<ASTOperand>, Box<dyn Error>>:

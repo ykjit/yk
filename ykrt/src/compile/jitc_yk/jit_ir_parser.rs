@@ -279,6 +279,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                 m.insert_ty(Ty::Integer(ty))
                     .map_err(|e| self.error_at_span(span, &e.to_string()))
             }
+            ASTType::Ptr => Ok(m.ptr_ty_idx()),
             ASTType::Void => Ok(m.void_ty_idx()),
         }
     }
@@ -388,8 +389,9 @@ enum ASTOperand {
 
 #[derive(Debug)]
 enum ASTType {
-    Void,
     Int(Span),
+    Ptr,
+    Void,
 }
 
 #[cfg(test)]
@@ -462,6 +464,7 @@ mod tests {
               %7: i32 = load_ti 2
               %8: i64 = call @f3(%5, %7, %0)
               call @f4(%0, %1)
+              %9: ptr = load_ti 3
         ",
         );
     }
