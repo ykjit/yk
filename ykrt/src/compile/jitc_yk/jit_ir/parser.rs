@@ -4,7 +4,7 @@
 //! method to [Module] which takes in JIT IR as a string, parses it, and produces a [Module]. This
 //! makes it possible to write JIT IR tests using JIT IR concrete syntax.
 
-use super::{
+use super::super::{
     aot_ir::Predicate,
     jit_ir::{
         AddInst, BlackBoxInst, DirectCallInst, FuncDecl, FuncTy, GuardInfo, GuardInst, IcmpInst,
@@ -18,8 +18,8 @@ use lrpar::{lrpar_mod, NonStreamingLexer, Span};
 use regex::Regex;
 use std::{collections::HashMap, convert::TryFrom, error::Error, sync::OnceLock};
 
-lrlex_mod!("compile/jitc_yk/jit_ir.l");
-lrpar_mod!("compile/jitc_yk/jit_ir.y");
+lrlex_mod!("compile/jitc_yk/jit_ir/jit_ir.l");
+lrpar_mod!("compile/jitc_yk/jit_ir/jit_ir.y");
 
 type StorageT = u8;
 

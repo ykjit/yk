@@ -114,7 +114,7 @@ CallArgs -> Result<Vec<ASTOperand>, Box<dyn Error>>:
 
 %%
 
-use crate::compile::jitc_yk::jit_ir_parser::*;
+use crate::compile::jitc_yk::jit_ir::parser::*;
 use std::error::Error;
 
 fn flatten<T>(lhs: Result<T, Box<dyn Error>>, rhs: Result<Vec<T>, Box<dyn Error>>)
