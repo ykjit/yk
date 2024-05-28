@@ -20,13 +20,13 @@ impl Module {
                     let Ty::Func(fty) = self.type_(fdecl.ty_idx()) else {
                         panic!()
                     };
-                    if x.num_args() < fty.num_args() {
+                    if x.num_args() < fty.num_params() {
                         panic!(
                             "Instruction at position {i} passing too few arguments:\n  {}",
                             inst.display(InstIdx::new(i).unwrap(), self)
                         );
                     }
-                    if x.num_args() > fty.num_args() && !fty.is_vararg() {
+                    if x.num_args() > fty.num_params() && !fty.is_vararg() {
                         panic!(
                             "Instruction at position {i} passing too many arguments:\n  {}",
                             inst.display(InstIdx::new(i).unwrap(), self)

@@ -672,8 +672,8 @@ index_16bit!(InstIdx);
 /// A function's type.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct FuncTy {
-    /// Ty indices for the function's formal arguments.
-    arg_ty_idxs: Vec<TyIdx>,
+    /// Ty indices for the function's parameters.
+    param_ty_idxs: Vec<TyIdx>,
     /// Ty index of the function's return type.
     ret_ty_idx: TyIdx,
     /// Is the function vararg?
@@ -681,17 +681,18 @@ pub(crate) struct FuncTy {
 }
 
 impl FuncTy {
-    pub(crate) fn new(arg_ty_idxs: Vec<TyIdx>, ret_ty_idx: TyIdx, is_vararg: bool) -> Self {
+    pub(crate) fn new(param_ty_idxs: Vec<TyIdx>, ret_ty_idx: TyIdx, is_vararg: bool) -> Self {
         Self {
-            arg_ty_idxs,
+            param_ty_idxs,
             ret_ty_idx,
             is_vararg,
         }
     }
 
-    /// Return the number of arguments the function accepts (not including varargs arguments).
-    pub(crate) fn num_args(&self) -> usize {
-        self.arg_ty_idxs.len()
+    /// Return the number of paramaters the function accepts (not including varargs).
+    #[cfg(test)]
+    pub(crate) fn num_params(&self) -> usize {
+        self.param_ty_idxs.len()
     }
 
     /// Returns the type index of the argument at the specified index.
@@ -699,8 +700,15 @@ impl FuncTy {
     /// # Panics
     ///
     /// Panics if the index is out of bounds.
-    pub(crate) fn arg_type<'a>(&self, m: &'a Module, idx: usize) -> &'a Ty {
-        m.type_(self.arg_ty_idxs[idx])
+    #[cfg(test)]
+    pub(crate) fn param_ty<'a>(&self, m: &'a Module, idx: usize) -> &'a Ty {
+        m.type_(self.param_ty_idxs[idx])
+    }
+
+    /// Return a slice of this function's non-varargs parameters.
+    #[cfg(test)]
+    pub(crate) fn param_tys(&self) -> &[TyIdx] {
+        &self.param_ty_idxs
     }
 
     /// Returns whether the function type has vararg arguments.
@@ -716,12 +724,6 @@ impl FuncTy {
     /// Returns the type index of the return value.
     pub(crate) fn ret_ty_idx(&self) -> TyIdx {
         self.ret_ty_idx
-    }
-
-    /// Return a slice of this function's non-varargs parameters.
-    #[cfg(test)]
-    pub(crate) fn param_tys(&self) -> &[TyIdx] {
-        &self.arg_ty_idxs
     }
 }
 
@@ -775,7 +777,7 @@ impl fmt::Display for DisplayableTy<'_> {
             Ty::Ptr => write!(f, "ptr"),
             Ty::Func(x) => {
                 let mut args = x
-                    .arg_ty_idxs
+                    .param_ty_idxs
                     .iter()
                     .map(|x| self.m.type_(*x).display(self.m).to_string())
                     .collect::<Vec<_>>();
