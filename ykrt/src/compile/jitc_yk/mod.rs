@@ -22,8 +22,6 @@ use ykaddr::addr::symbol_to_ptr;
 pub mod aot_ir;
 mod codegen;
 pub mod jit_ir;
-#[cfg(test)]
-mod jit_ir_parser;
 mod opt;
 mod trace_builder;
 
