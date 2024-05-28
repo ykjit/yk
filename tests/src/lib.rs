@@ -1,5 +1,3 @@
-#![feature(lazy_cell)]
-
 mod hwtracer_ykpt;
 
 use std::{
