@@ -1,7 +1,7 @@
 #[cfg(test)]
 use crate::compile::jitc_yk::jit_ir::BlackBoxInst;
 use crate::compile::{
-    jitc_yk::jit_ir::{AddInst, Inst, InstIdx, Module, Operand},
+    jitc_yk::jit_ir::{AddInst, BinOp, Inst, InstIdx, Module, Operand},
     CompilationError,
 };
 use typed_index_collections::TiVec;

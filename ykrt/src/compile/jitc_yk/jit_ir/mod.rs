@@ -24,6 +24,8 @@
 
 #[cfg(test)]
 mod parser;
+#[cfg(test)]
+mod well_formed;
 
 use super::aot_ir;
 use crate::compile::CompilationError;
@@ -245,8 +247,17 @@ impl Module {
     /// # Panics
     ///
     /// If `args` would overflow the index type.
-    fn push_args(&mut self, args: Vec<Operand>) -> Result<ArgsIdx, CompilationError> {
+    pub(crate) fn push_args(&mut self, args: Vec<Operand>) -> Result<ArgsIdx, CompilationError> {
         ArgsIdx::new(self.args.len()).inspect(|_| self.args.extend(args))
+    }
+
+    /// Return the argument at args index `idx`.
+    ///
+    /// # Panics
+    ///
+    /// If `idx` is out of bounds.
+    pub(crate) fn arg(&self, idx: ArgsIdx) -> &Operand {
+        &self.args[usize::from(idx)]
     }
 
     /// Add a [Ty] to the types pool and return its index. If the [Ty] already exists, an existing
@@ -705,6 +716,12 @@ impl FuncTy {
     /// Returns the type index of the return value.
     pub(crate) fn ret_ty_idx(&self) -> TyIdx {
         self.ret_ty_idx
+    }
+
+    /// Return a slice of this function's non-varargs parameters.
+    #[cfg(test)]
+    pub(crate) fn param_tys(&self) -> &[TyIdx] {
+        &self.arg_ty_idxs
     }
 }
 
@@ -1514,7 +1531,8 @@ impl IndirectCallInst {
     ///
     /// Panics if the operand index is out of bounds.
     pub(crate) fn operand(&self, m: &Module, idx: usize) -> Operand {
-        m.args[usize::from(self.args_idx) + idx].clone()
+        m.arg(ArgsIdx::new(usize::from(self.args_idx) + idx).unwrap())
+            .clone()
     }
 }
 
@@ -1563,6 +1581,13 @@ impl DirectCallInst {
     /// How many arguments is this call instruction passing?
     pub(crate) fn num_args(&self) -> usize {
         usize::from(self.num_args)
+    }
+
+    /// Return an iterator for each of this direct call instruction's [ArgsIdx].
+    #[cfg(test)]
+    pub(crate) fn iter_args_idx(&self) -> impl Iterator<Item = ArgsIdx> {
+        (usize::from(self.args_idx)..usize::from(self.args_idx) + usize::from(self.num_args))
+            .map(|x| ArgsIdx::new(x).unwrap())
     }
 
     /// Fetch the operand at the specified index.

@@ -10,7 +10,7 @@
 
 use super::{
     super::{
-        jit_ir::{self, FuncDeclIdx, InstIdx, Operand, Ty},
+        jit_ir::{self, BinOp, FuncDeclIdx, InstIdx, Operand, Ty},
         CompilationError,
     },
     abs_stack::AbstractStack,
@@ -619,7 +619,6 @@ impl<'a> X64CodeGen<'a> {
         // FIXME: floating point args
         // FIXME: non-SysV ABIs
         let fty = self.m.func_type(func_decl_idx);
-        debug_assert!(fty.num_args() <= args.len());
         if args.len() > ARG_REGS.len() {
             todo!(); // needs spill
         }
@@ -634,11 +633,6 @@ impl<'a> X64CodeGen<'a> {
 
         for (i, reg) in ARG_REGS.into_iter().take(args.len()).enumerate() {
             let op = &args[i];
-            // We can type check the static args (but not varargs).
-            debug_assert!(
-                i >= fty.num_args() || self.m.type_(op.ty_idx(self.m)) == fty.arg_type(self.m, i),
-                "argument type mismatch in call"
-            );
             self.load_operand(reg, op);
         }
 
@@ -708,11 +702,6 @@ impl<'a> X64CodeGen<'a> {
 
         for (i, reg) in ARG_REGS.into_iter().take(args.len()).enumerate() {
             let op = &args[i];
-            // We can type check the static args (but not varargs).
-            debug_assert!(
-                i >= fty.num_args() || self.m.type_(op.ty_idx(self.m)) == fty.arg_type(self.m, i),
-                "argument type mismatch in call"
-            );
             self.load_operand(reg, op);
         }
 
@@ -1376,25 +1365,6 @@ mod tests {
             );
         }
 
-        #[cfg(debug_assertions)]
-        #[should_panic]
-        #[test]
-        fn cg_add_wrong_types() {
-            // FIXME: This is an IR well-formedness test and shouldn't be a property of the x86
-            // backend.
-            // FIXME: There is no corresponding test for the well-formedness of function return
-            // types.
-            test_with_spillalloc(
-                "
-              entry:
-                %0: i64 = load_ti 0
-                %1: i32 = load_ti 1
-                %3: i32 = add %0, %1
-            ",
-                "",
-            );
-        }
-
         #[test]
         fn cg_call_simple() {
             let sym_addr = symbol_to_ptr("puts").unwrap().addr();
@@ -1509,25 +1479,6 @@ mod tests {
                 ...
             "
                 ),
-            );
-        }
-
-        #[cfg(debug_assertions)]
-        #[should_panic(expected = "argument type mismatch in call")]
-        #[test]
-        fn cg_call_bad_arg_type() {
-            // FIXME: This is an IR well-formedness test and shouldn't be a property of the x86
-            // backend.
-            // FIXME: There is no corresponding test for the well-formedness of function return
-            // types.
-            test_with_spillalloc(
-                "
-              func_decl f(i32) -> i32
-              entry:
-                %0: i8 = load_ti 0
-                %1: i32 = call @f(%0)
-            ",
-                "",
             );
         }
 
