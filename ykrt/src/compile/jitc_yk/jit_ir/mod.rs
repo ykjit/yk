@@ -1643,6 +1643,12 @@ impl PtrAddInst {
     }
 }
 
+pub(crate) trait BinOp {
+    fn lhs(&self) -> Operand;
+    fn rhs(&self) -> Operand;
+    fn ty_idx(&self, m: &Module) -> TyIdx;
+}
+
 macro_rules! bin_op {
     ($discrim :ident, $struct: ident, $disp: literal) => {
         #[derive(Clone, Debug, PartialEq)]
@@ -1662,18 +1668,19 @@ macro_rules! bin_op {
                     rhs: PackedOperand::new(&rhs),
                 }
             }
+        }
 
-            pub(crate) fn lhs(&self) -> Operand {
+        impl BinOp for $struct {
+            fn lhs(&self) -> Operand {
                 self.lhs.unpack()
             }
 
-            pub(crate) fn rhs(&self) -> Operand {
+            fn rhs(&self) -> Operand {
                 self.rhs.unpack()
             }
 
             /// Returns the type index of the operands being added.
-            pub(crate) fn ty_idx(&self, m: &Module) -> TyIdx {
-                debug_assert_eq!(self.lhs.unpack().ty_idx(m), self.rhs.unpack().ty_idx(m));
+            fn ty_idx(&self, m: &Module) -> TyIdx {
                 self.lhs.unpack().ty_idx(m)
             }
         }
