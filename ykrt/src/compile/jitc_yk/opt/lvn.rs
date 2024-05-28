@@ -1,5 +1,5 @@
 #[cfg(test)]
-use crate::compile::jitc_yk::jit_ir::TestUseInst;
+use crate::compile::jitc_yk::jit_ir::BlackBoxInst;
 use crate::compile::{
     jitc_yk::jit_ir::{AddInst, Inst, InstIdx, Module, Operand},
     CompilationError,
@@ -22,7 +22,7 @@ pub(super) fn lvn(mut m: Module) -> Result<Module, CompilationError> {
                 }
             }
             #[cfg(test)]
-            Inst::TestUse(x) => {
+            Inst::BlackBox(x) => {
                 if let Operand::Local(y) = x.operand() {
                     used_ops[usize::from(y)] = true;
                 }
@@ -51,7 +51,7 @@ pub(super) fn lvn(mut m: Module) -> Result<Module, CompilationError> {
         if !used_ops[i] {
             match inst {
                 #[cfg(test)]
-                Inst::TestUse(_) => (),
+                Inst::BlackBox(_) => (),
                 Inst::Add(_) => {
                     off += 1;
                     continue;
@@ -65,7 +65,7 @@ pub(super) fn lvn(mut m: Module) -> Result<Module, CompilationError> {
                 AddInst::new(operand_off(x.lhs(), &offs), operand_off(x.rhs(), &offs)).into()
             }
             #[cfg(test)]
-            Inst::TestUse(x) => TestUseInst::new(operand_off(x.operand(), &offs)).into(),
+            Inst::BlackBox(x) => BlackBoxInst::new(operand_off(x.operand(), &offs)).into(),
             x => todo!("{x:?}"),
         };
         insts.push(inst);
@@ -88,8 +88,8 @@ mod tests {
             %2: i16 = add %0, %1
             %3: i16 = add %0, %1
             %4: i16 = add %0, %3
-            test_use %3
-            test_use %4
+            black_box %3
+            black_box %4
         ",
             |m| lvn(m).unwrap(),
             "
@@ -99,8 +99,8 @@ mod tests {
             %1: i16 = load_ti 16
             %2: i16 = add %0, %1
             %3: i16 = add %0, %2
-            test_use %2
-            test_use %3
+            black_box %2
+            black_box %3
         ",
         );
     }

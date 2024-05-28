@@ -7,9 +7,9 @@
 use super::{
     aot_ir::Predicate,
     jit_ir::{
-        AddInst, DirectCallInst, FuncDecl, FuncTy, GuardInfo, GuardInst, IcmpInst, Inst, InstIdx,
-        IntegerTy, LoadInst, LoadTraceInputInst, Module, Operand, PtrAddInst, SRemInst, StoreInst,
-        TestUseInst, TruncInst, Ty, TyIdx,
+        AddInst, BlackBoxInst, DirectCallInst, FuncDecl, FuncTy, GuardInfo, GuardInst, IcmpInst,
+        Inst, InstIdx, IntegerTy, LoadInst, LoadTraceInputInst, Module, Operand, PtrAddInst,
+        SRemInst, StoreInst, TruncInst, Ty, TyIdx,
     },
 };
 use fm::FMBuilder;
@@ -214,8 +214,8 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             StoreInst::new(self.process_operand(val)?, self.process_operand(ptr)?);
                         self.m.push(inst.into()).unwrap();
                     }
-                    ASTInst::TestUse(op) => {
-                        let inst = TestUseInst::new(self.process_operand(op)?);
+                    ASTInst::BlackBox(op) => {
+                        let inst = BlackBoxInst::new(self.process_operand(op)?);
                         self.m.push(inst.into()).unwrap();
                     }
                     ASTInst::TraceLoopStart => {
@@ -439,7 +439,7 @@ enum ASTInst {
         val: ASTOperand,
         ptr: ASTOperand,
     },
-    TestUse(ASTOperand),
+    BlackBox(ASTOperand),
     TraceLoopStart,
     Trunc {
         assign: Span,
@@ -482,8 +482,8 @@ mod tests {
         let op4 = m
             .push_and_make_operand(AddInst::new(op1.clone(), op3.clone()).into())
             .unwrap();
-        m.push(TestUseInst::new(op3).into()).unwrap();
-        m.push(TestUseInst::new(op4).into()).unwrap();
+        m.push(BlackBoxInst::new(op3).into()).unwrap();
+        m.push(BlackBoxInst::new(op4).into()).unwrap();
         let s = m.to_string();
         let parsed_m = Module::from_str(&s);
         assert_eq!(m.to_string(), parsed_m.to_string());
