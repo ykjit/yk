@@ -297,7 +297,12 @@ impl Module {
         self.global_decls.get_index(usize::from(idx)).unwrap()
     }
 
-    /// Add a [FuncDecl] to the function declaritons pool and return its index. If the [FuncDecl]
+    #[cfg(test)]
+    pub(crate) fn func_decls_len(&self) -> usize {
+        self.func_decls.len()
+    }
+
+    /// Add a [FuncDecl] to the function declarations pool and return its index. If the [FuncDecl]
     /// already exists, an existing index will be returned.
     pub(crate) fn insert_func_decl(
         &mut self,
@@ -328,6 +333,23 @@ impl Module {
         }
     }
 
+    /// Find a function declaration by name. This has linear search time and is only intended for
+    /// use when testing.
+    ///
+    /// # Panics
+    ///
+    /// If there is no function declaration `name`.
+    #[cfg(test)]
+    pub(crate) fn find_func_decl_idx_by_name(&self, name: &str) -> FuncDeclIdx {
+        FuncDeclIdx::new(
+            self.func_decls
+                .iter()
+                .position(|x| x.name() == name)
+                .unwrap(),
+        )
+        .unwrap()
+    }
+
     pub(crate) fn push_guardinfo(
         &mut self,
         info: GuardInfo,
@@ -339,6 +361,14 @@ impl Module {
 impl fmt::Display for Module {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "; compiled trace ID #{}\n", self.ctr_id)?;
+        for x in &self.func_decls {
+            writeln!(
+                f,
+                "func_decl {} {}",
+                x.name(),
+                self.type_(x.ty_idx()).display(self)
+            )?;
+        }
         for g in &self.global_decls {
             let tl = if g.is_threadlocal() { " tls" } else { "" };
             writeln!(
@@ -684,18 +714,6 @@ pub(crate) enum Ty {
     Unimplemented(String),
 }
 
-impl fmt::Display for Ty {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Void => write!(f, "void"),
-            Self::Integer(it) => write!(f, "i{}", it.num_bits()),
-            Self::Ptr => write!(f, "ptr"),
-            Self::Func(_) => todo!(),
-            Self::Unimplemented(_) => write!(f, "?type"),
-        }
-    }
-}
-
 impl Ty {
     /// Returns the size of the type in bits, or `None` if asking the size makes no sense.
     pub(crate) fn byte_size(&self) -> Option<usize> {
@@ -717,6 +735,46 @@ impl Ty {
             Self::Unimplemented(_) => None,
         }
     }
+
+    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableTy<'a> {
+        DisplayableTy { ty: self, m }
+    }
+}
+
+pub(crate) struct DisplayableTy<'a> {
+    ty: &'a Ty,
+    m: &'a Module,
+}
+
+impl fmt::Display for DisplayableTy<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.ty {
+            Ty::Void => write!(f, "void"),
+            Ty::Integer(it) => write!(f, "i{}", it.num_bits()),
+            Ty::Ptr => write!(f, "ptr"),
+            Ty::Func(x) => {
+                let mut args = x
+                    .arg_ty_idxs
+                    .iter()
+                    .map(|x| self.m.type_(*x).display(self.m).to_string())
+                    .collect::<Vec<_>>();
+                if x.is_vararg() {
+                    args.push("...".to_string());
+                }
+                if x.ret_ty_idx() == self.m.void_ty_idx {
+                    write!(f, "({})", args.join(", "))
+                } else {
+                    write!(
+                        f,
+                        "({}) -> {}",
+                        args.join(", "),
+                        self.m.type_(x.ret_ty_idx()).display(self.m)
+                    )
+                }
+            }
+            Ty::Unimplemented(_) => write!(f, "?type"),
+        }
+    }
 }
 
 /// An (externally defined, in the AOT code) function declaration.
@@ -734,6 +792,10 @@ impl FuncDecl {
     /// Return the name of this function declaration.
     pub(crate) fn name(&self) -> &str {
         &self.name
+    }
+
+    pub(crate) fn ty_idx(&self) -> TyIdx {
+        self.ty_idx
     }
 }
 
@@ -1044,7 +1106,7 @@ pub(crate) struct DisplayableInst<'a> {
 impl fmt::Display for DisplayableInst<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(dt) = self.inst.def_type(self.m) {
-            write!(f, "%{}: {dt} = ", self.inst_idx.to_u16())?;
+            write!(f, "%{}: {} = ", self.inst_idx.to_u16(), dt.display(self.m))?;
         }
         match self.inst {
             #[cfg(test)]
@@ -1148,7 +1210,7 @@ impl fmt::Display for DisplayableInst<'_> {
                     f,
                     "sext {}, {}",
                     i.val().display(self.m),
-                    self.m.type_(i.dest_ty_idx())
+                    self.m.type_(i.dest_ty_idx()).display(self.m)
                 )
             }
             Inst::ZeroExtend(i) => {
@@ -1156,16 +1218,11 @@ impl fmt::Display for DisplayableInst<'_> {
                     f,
                     "zext {}, {}",
                     i.val().display(self.m),
-                    self.m.type_(i.dest_ty_idx())
+                    self.m.type_(i.dest_ty_idx()).display(self.m)
                 )
             }
             Inst::Trunc(i) => {
-                write!(
-                    f,
-                    "trunc {}, {}",
-                    i.val().display(self.m),
-                    self.m.type_(i.dest_ty_idx())
-                )
+                write!(f, "trunc {}", i.val().display(self.m))
             }
             Inst::Or(i) => {
                 write!(
@@ -1564,6 +1621,13 @@ pub struct PtrAddInst {
 }
 
 impl PtrAddInst {
+    pub(crate) fn new(ptr: Operand, off: Operand) -> Self {
+        Self {
+            ptr: PackedOperand::new(&ptr),
+            off: PackedOperand::new(&off),
+        }
+    }
+
     pub(crate) fn ptr(&self) -> Operand {
         let ptr = self.ptr;
         ptr.unpack()
@@ -1572,13 +1636,6 @@ impl PtrAddInst {
     pub(crate) fn offset(&self) -> Operand {
         let unaligned = std::ptr::addr_of!(self.off);
         unsafe { std::ptr::read_unaligned(unaligned) }.unpack()
-    }
-
-    pub(crate) fn new(ptr: Operand, off: Operand) -> Self {
-        Self {
-            ptr: PackedOperand::new(&ptr),
-            off: PackedOperand::new(&off),
-        }
     }
 }
 

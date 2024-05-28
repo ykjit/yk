@@ -4,14 +4,19 @@
 //! method to [Module] which takes in JIT IR as a string, parses it, and produces a [Module]. This
 //! makes it possible to write JIT IR tests using JIT IR concrete syntax.
 
-use super::jit_ir::{
-    AddInst, InstIdx, IntegerTy, LoadTraceInputInst, Module, Operand, TestUseInst, Ty, TyIdx,
+use super::{
+    aot_ir::Predicate,
+    jit_ir::{
+        AddInst, DirectCallInst, FuncDecl, FuncTy, GuardInfo, GuardInst, IcmpInst, Inst, InstIdx,
+        IntegerTy, LoadInst, LoadTraceInputInst, Module, Operand, PtrAddInst, SRemInst, StoreInst,
+        TestUseInst, TruncInst, Ty, TyIdx,
+    },
 };
 use fm::FMBuilder;
 use lrlex::{lrlex_mod, DefaultLexerTypes, LRNonStreamingLexer};
 use lrpar::{lrpar_mod, NonStreamingLexer, Span};
 use regex::Regex;
-use std::{collections::HashMap, error::Error, sync::OnceLock};
+use std::{collections::HashMap, convert::TryFrom, error::Error, sync::OnceLock};
 
 lrlex_mod!("compile/jitc_yk/jit_ir.l");
 lrpar_mod!("compile/jitc_yk/jit_ir.y");
@@ -37,12 +42,16 @@ impl Module {
             panic!("Could not parse input");
         }
         match res {
-            Some(Ok((globals, bblocks))) => JITIRParser {
-                lexer: &lexer,
-                inst_idx_map: HashMap::new(),
+            Some(Ok((func_decls, globals, bblocks))) => {
+                let mut m = Module::new_testing();
+                let mut p = JITIRParser {
+                    m: &mut m,
+                    lexer: &lexer,
+                    inst_idx_map: HashMap::new(),
+                };
+                p.process(func_decls, globals, bblocks).unwrap();
+                m
             }
-            .process(globals, bblocks)
-            .unwrap(),
             _ => panic!("Could not produce JIT Module."),
         }
     }
@@ -91,8 +100,9 @@ impl Module {
     }
 }
 
-struct JITIRParser<'lexer, 'input: 'lexer> {
+struct JITIRParser<'lexer, 'input: 'lexer, 'a> {
     lexer: &'lexer LRNonStreamingLexer<'lexer, 'input, DefaultLexerTypes<StorageT>>,
+    m: &'a mut Module,
     /// A mapping from local operands (e.g. `%3`) in the input text to instruction offsets. For
     /// example if the first instruction in the input is `%3 = ...` the map will be `%3 -> %0`
     /// indicating that whenever we see `%3` in the input we map that to `%0` in the IR we're
@@ -101,13 +111,15 @@ struct JITIRParser<'lexer, 'input: 'lexer> {
     inst_idx_map: HashMap<InstIdx, InstIdx>,
 }
 
-impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
+impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
     fn process(
         &mut self,
+        func_decls: Vec<ASTFuncDecl>,
         _globals: Vec<()>,
         bblocks: Vec<ASTBBlock>,
-    ) -> Result<Module, Box<dyn Error>> {
-        let mut m = Module::new_testing();
+    ) -> Result<(), Box<dyn Error>> {
+        self.process_func_decls(func_decls)?;
+
         for bblock in bblocks.into_iter() {
             for inst in bblock.insts {
                 match inst {
@@ -119,8 +131,51 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                     } => {
                         let inst =
                             AddInst::new(self.process_operand(lhs)?, self.process_operand(rhs)?);
-                        self.add_assign(m.len(), assign)?;
-                        m.push(inst.into()).unwrap();
+                        self.add_assign(self.m.len(), assign)?;
+                        self.m.push(inst.into()).unwrap();
+                    }
+                    ASTInst::Call {
+                        assign,
+                        name: name_span,
+                        args,
+                    } => {
+                        let name = &self.lexer.span_str(name_span)[1..];
+                        let fd_idx = self.m.find_func_decl_idx_by_name(name);
+                        let ops = self.process_operands(args)?;
+                        let inst = DirectCallInst::new(self.m, fd_idx, ops)
+                            .map_err(|e| self.error_at_span(name_span, &e.to_string()))?;
+                        if let Some(x) = assign {
+                            self.add_assign(self.m.len(), x)?;
+                        }
+                        self.m.push(inst.into()).unwrap();
+                    }
+                    ASTInst::Eq {
+                        assign,
+                        type_: _,
+                        lhs,
+                        rhs,
+                    } => {
+                        let inst = IcmpInst::new(
+                            self.process_operand(lhs)?,
+                            Predicate::Equal,
+                            self.process_operand(rhs)?,
+                        );
+                        self.add_assign(self.m.len(), assign)?;
+                        self.m.push(inst.into()).unwrap();
+                    }
+                    ASTInst::Guard { operand, is_true } => {
+                        let gidx = self
+                            .m
+                            .push_guardinfo(GuardInfo::new(Vec::new(), Vec::new()))
+                            .unwrap();
+                        let inst = GuardInst::new(self.process_operand(operand)?, is_true, gidx);
+                        self.m.push(inst.into()).unwrap();
+                    }
+                    ASTInst::Load { assign, type_, val } => {
+                        let inst =
+                            LoadInst::new(self.process_operand(val)?, self.process_type(type_)?);
+                        self.add_assign(self.m.len(), assign)?;
+                        self.m.push(inst.into()).unwrap();
                     }
                     ASTInst::LoadTraceInput { assign, type_, off } => {
                         let off = self
@@ -128,22 +183,124 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
                             .span_str(off)
                             .parse::<u32>()
                             .map_err(|e| self.error_at_span(off, &e.to_string()))?;
-                        let inst = LoadTraceInputInst::new(off, self.process_type(&mut m, type_)?);
-                        self.add_assign(m.len(), assign)?;
-                        m.push(inst.into()).unwrap();
+                        let inst = LoadTraceInputInst::new(off, self.process_type(type_)?);
+                        self.add_assign(self.m.len(), assign)?;
+                        self.m.push(inst.into()).unwrap();
+                    }
+                    ASTInst::PtrAdd {
+                        assign,
+                        type_: _,
+                        ptr,
+                        off,
+                    } => {
+                        let inst =
+                            PtrAddInst::new(self.process_operand(ptr)?, self.process_operand(off)?);
+                        self.add_assign(self.m.len(), assign)?;
+                        self.m.push(inst.into()).unwrap();
+                    }
+                    ASTInst::SRem {
+                        assign,
+                        type_: _,
+                        lhs,
+                        rhs,
+                    } => {
+                        let inst =
+                            SRemInst::new(self.process_operand(lhs)?, self.process_operand(rhs)?);
+                        self.add_assign(self.m.len(), assign)?;
+                        self.m.push(inst.into()).unwrap();
+                    }
+                    ASTInst::Store { val, ptr } => {
+                        let inst =
+                            StoreInst::new(self.process_operand(val)?, self.process_operand(ptr)?);
+                        self.m.push(inst.into()).unwrap();
                     }
                     ASTInst::TestUse(op) => {
                         let inst = TestUseInst::new(self.process_operand(op)?);
-                        m.push(inst.into()).unwrap();
+                        self.m.push(inst.into()).unwrap();
+                    }
+                    ASTInst::TraceLoopStart => {
+                        self.m.push(Inst::TraceLoopStart).unwrap();
+                    }
+                    ASTInst::Trunc {
+                        assign,
+                        type_,
+                        operand,
+                    } => {
+                        let inst = TruncInst::new(
+                            &self.process_operand(operand)?,
+                            self.process_type(type_)?,
+                        );
+                        self.add_assign(self.m.len(), assign)?;
+                        self.m.push(inst.into()).unwrap();
                     }
                 }
             }
         }
-        Ok(m)
+        Ok(())
+    }
+
+    fn process_func_decls(&mut self, func_decls: Vec<ASTFuncDecl>) -> Result<(), Box<dyn Error>> {
+        for ASTFuncDecl {
+            name: name_span,
+            arg_tys,
+            is_varargs,
+            rtn_ty,
+        } in func_decls
+        {
+            let name = self.lexer.span_str(name_span).to_owned();
+            let arg_tys = {
+                let mut mapped = Vec::with_capacity(arg_tys.len());
+                for x in arg_tys.into_iter() {
+                    mapped.push(self.process_type(x)?);
+                }
+                mapped
+            };
+            let rtn_ty = self.process_type(rtn_ty)?;
+            let func_ty = self
+                .m
+                .insert_ty(Ty::Func(FuncTy::new(arg_tys, rtn_ty, is_varargs)))
+                .map_err(|e| self.error_at_span(name_span, &e.to_string()))?;
+            self.m
+                .insert_func_decl(FuncDecl::new(name, func_ty))
+                .map_err(|e| self.error_at_span(name_span, &e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    fn process_operands(&mut self, ops: Vec<ASTOperand>) -> Result<Vec<Operand>, Box<dyn Error>> {
+        let mut mapped = Vec::with_capacity(ops.len());
+        for x in ops {
+            mapped.push(self.process_operand(x)?);
+        }
+        Ok(mapped)
     }
 
     fn process_operand(&mut self, op: ASTOperand) -> Result<Operand, Box<dyn Error>> {
         match op {
+            ASTOperand::ConstInt(span) => {
+                let s = self.lexer.span_str(span);
+                let [val, type_] = <[&str; 2]>::try_from(s.split('i').collect::<Vec<_>>()).unwrap();
+                let width = type_
+                    .parse::<u32>()
+                    .map_err(|e| self.error_at_span(span, &e.to_string()))?;
+                let type_ = IntegerTy::new(width);
+                let const_ = match width {
+                    32 => {
+                        let val = val
+                            .parse::<i32>()
+                            .map_err(|e| self.error_at_span(span, &e.to_string()))?;
+                        type_
+                            .make_constant(self.m, val)
+                            .map_err(|e| self.error_at_span(span, &e.to_string()))?
+                    }
+                    x => todo!("{x}"),
+                };
+                Ok(Operand::Const(
+                    self.m
+                        .insert_const(const_)
+                        .map_err(|e| self.error_at_span(span, &e.to_string()))?,
+                ))
+            }
             ASTOperand::Local(span) => {
                 let idx = self.lexer.span_str(span)[1..]
                     .parse::<usize>()
@@ -161,16 +318,19 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
         }
     }
 
-    fn process_type(&mut self, m: &mut Module, type_: ASTType) -> Result<TyIdx, Box<dyn Error>> {
+    fn process_type(&mut self, type_: ASTType) -> Result<TyIdx, Box<dyn Error>> {
         match type_ {
             ASTType::Int(span) => {
                 let width = self.lexer.span_str(span)[1..]
                     .parse::<u32>()
                     .map_err(|e| self.error_at_span(span, &e.to_string()))?;
                 let ty = IntegerTy::new(width);
-                m.insert_ty(Ty::Integer(ty))
+                self.m
+                    .insert_ty(Ty::Integer(ty))
                     .map_err(|e| self.error_at_span(span, &e.to_string()))
             }
+            ASTType::Ptr => Ok(self.m.ptr_ty_idx()),
+            ASTType::Void => Ok(self.m.void_ty_idx()),
         }
     }
 
@@ -212,6 +372,13 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input> {
     }
 }
 
+struct ASTFuncDecl {
+    name: Span,
+    arg_tys: Vec<ASTType>,
+    is_varargs: bool,
+    rtn_ty: ASTType,
+}
+
 #[derive(Debug)]
 struct ASTBBlock {
     #[allow(dead_code)]
@@ -228,28 +395,76 @@ enum ASTInst {
         lhs: ASTOperand,
         rhs: ASTOperand,
     },
+    Call {
+        assign: Option<Span>,
+        name: Span,
+        args: Vec<ASTOperand>,
+    },
+    Eq {
+        assign: Span,
+        #[allow(dead_code)]
+        type_: ASTType,
+        lhs: ASTOperand,
+        rhs: ASTOperand,
+    },
+    Guard {
+        operand: ASTOperand,
+        is_true: bool,
+    },
+    Load {
+        assign: Span,
+        type_: ASTType,
+        val: ASTOperand,
+    },
     LoadTraceInput {
         assign: Span,
         type_: ASTType,
         off: Span,
     },
+    PtrAdd {
+        assign: Span,
+        #[allow(dead_code)]
+        type_: ASTType,
+        ptr: ASTOperand,
+        off: ASTOperand,
+    },
+    SRem {
+        assign: Span,
+        #[allow(dead_code)]
+        type_: ASTType,
+        lhs: ASTOperand,
+        rhs: ASTOperand,
+    },
+    Store {
+        val: ASTOperand,
+        ptr: ASTOperand,
+    },
     TestUse(ASTOperand),
+    TraceLoopStart,
+    Trunc {
+        assign: Span,
+        type_: ASTType,
+        operand: ASTOperand,
+    },
 }
 
 #[derive(Debug)]
 enum ASTOperand {
     Local(Span),
+    ConstInt(Span),
 }
 
 #[derive(Debug)]
 enum ASTType {
     Int(Span),
+    Ptr,
+    Void,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compile::jitc_yk::jit_ir::Ty;
+    use crate::compile::jitc_yk::jit_ir::{FuncTy, Ty};
 
     #[test]
     fn roundtrip() {
@@ -292,6 +507,89 @@ mod tests {
             %{{_}}: i16 = add %{{0}}, %{{1}}
         ",
         );
+    }
+
+    #[test]
+    fn all_jit_ir_syntax() {
+        Module::from_str(
+            "
+            func_decl f1()
+            func_decl f2(i8) -> i32
+            func_decl f3(i8, i32, ...) -> i64
+            func_decl f4(...)
+            entry:
+              %0: i16 = load_ti 0
+              %1: i16 = trunc %0
+              %2: i16 = add %0, %1
+              %3: i16 = srem %1, %2
+              %4: i16 = eq %1, %2
+              tloop_start
+              guard %4, true
+              call @f1()
+              %5: i8 = load_ti 1
+              %6: i32 = call @f2(%1)
+              %7: i32 = load_ti 2
+              %8: i64 = call @f3(%5, %7, %0)
+              call @f4(%0, %1)
+              %9: ptr = load_ti 3
+              store %8, %9
+              %10: i32 = load %9
+        ",
+        );
+    }
+
+    #[test]
+    fn func_decls() {
+        let mut m = Module::from_str(
+            "
+              func_decl f1()
+              func_decl f2(i8) -> i32
+              func_decl f3(i8, i32, ...) -> i64
+              func_decl f4(...)
+        ",
+        );
+        // We don't have a "lookup a function declaration" function, but we can check that if we
+        // "insert" identical IR function declarations to the module that no new function
+        // declarations are actually added.
+        assert_eq!(m.func_decls_len(), 4);
+
+        let f1_ty_idx = m
+            .insert_ty(Ty::Func(FuncTy::new(Vec::new(), m.void_ty_idx(), false)))
+            .unwrap();
+        m.insert_func_decl(FuncDecl::new("f1".to_owned(), f1_ty_idx))
+            .unwrap();
+        assert_eq!(m.func_decls_len(), 4);
+
+        let i32_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
+        let f2_ty_idx = m
+            .insert_ty(Ty::Func(FuncTy::new(
+                vec![m.int8_ty_idx()],
+                i32_ty_idx,
+                false,
+            )))
+            .unwrap();
+        m.insert_func_decl(FuncDecl::new("f2".to_owned(), f2_ty_idx))
+            .unwrap();
+        assert_eq!(m.func_decls_len(), 4);
+
+        let i64_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(64))).unwrap();
+        let f3_ty_idx = m
+            .insert_ty(Ty::Func(FuncTy::new(
+                vec![m.int8_ty_idx(), i32_ty_idx],
+                i64_ty_idx,
+                true,
+            )))
+            .unwrap();
+        m.insert_func_decl(FuncDecl::new("f3".to_owned(), f3_ty_idx))
+            .unwrap();
+        assert_eq!(m.func_decls_len(), 4);
+
+        let f4_ty_idx = m
+            .insert_ty(Ty::Func(FuncTy::new(Vec::new(), m.void_ty_idx(), true)))
+            .unwrap();
+        m.insert_func_decl(FuncDecl::new("f4".to_owned(), f4_ty_idx))
+            .unwrap();
+        assert_eq!(m.func_decls_len(), 4);
     }
 
     #[test]
