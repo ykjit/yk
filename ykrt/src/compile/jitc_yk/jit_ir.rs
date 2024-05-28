@@ -973,7 +973,7 @@ impl GuardInfo {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Inst {
     #[cfg(test)]
-    TestUse(TestUseInst),
+    BlackBox(BlackBoxInst),
     Load(LoadInst),
     LookupGlobal(LookupGlobalInst),
     LoadTraceInput(LoadTraceInputInst),
@@ -1034,7 +1034,7 @@ impl Inst {
     pub(crate) fn def_ty_idx(&self, m: &Module) -> TyIdx {
         match self {
             #[cfg(test)]
-            Self::TestUse(_) => m.void_ty_idx(),
+            Self::BlackBox(_) => m.void_ty_idx(),
             Self::Load(li) => li.ty_idx(),
             Self::LookupGlobal(..) => m.ptr_ty_idx(),
             Self::LoadTraceInput(li) => li.ty_idx(),
@@ -1111,7 +1111,7 @@ impl fmt::Display for DisplayableInst<'_> {
         }
         match self.inst {
             #[cfg(test)]
-            Inst::TestUse(x) => write!(f, "test_use {}", x.operand().display(self.m)),
+            Inst::BlackBox(x) => write!(f, "black_box {}", x.operand().display(self.m)),
             Inst::Load(x) => write!(f, "load {}", x.operand().display(self.m)),
             Inst::LookupGlobal(x) => write!(
                 f,
@@ -1298,7 +1298,7 @@ macro_rules! inst {
 }
 
 #[cfg(test)]
-inst!(TestUse, TestUseInst);
+inst!(BlackBox, BlackBoxInst);
 inst!(Load, LoadInst);
 inst!(LookupGlobal, LookupGlobalInst);
 inst!(Store, StoreInst);
@@ -1317,13 +1317,13 @@ inst!(Assign, AssignInst);
 /// which prevents optimisations removing some or all of the things that relate to this operand.
 #[cfg(test)]
 #[derive(Clone, Debug, PartialEq)]
-pub struct TestUseInst {
+pub struct BlackBoxInst {
     op: PackedOperand,
 }
 
 #[cfg(test)]
-impl TestUseInst {
-    pub(crate) fn new(op: Operand) -> TestUseInst {
+impl BlackBoxInst {
+    pub(crate) fn new(op: Operand) -> BlackBoxInst {
         Self {
             op: PackedOperand::new(&op),
         }
