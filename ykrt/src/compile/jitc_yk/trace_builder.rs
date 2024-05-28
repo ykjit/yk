@@ -699,7 +699,8 @@ impl<'a> TraceBuilder<'a> {
         let mut jit_ptr = self.handle_operand(ptr)?;
         if const_off != 0 {
             let co_ty = jit_ir::IntegerTy::new(32);
-            let co_const = co_ty.make_constant(&mut self.jit_mod, const_off)?;
+            let co_const =
+                co_ty.make_constant(&mut self.jit_mod, i32::try_from(const_off).unwrap())?;
             let co_opnd = jit_ir::Operand::Const(self.jit_mod.insert_const(co_const)?);
             jit_ptr = self
                 .jit_mod
@@ -798,9 +799,21 @@ impl<'a> TraceBuilder<'a> {
                 let bb = case_dests[cidx];
 
                 // Build the constant value to guard.
-                let jit_const = jit_int_type
-                    .to_owned()
-                    .make_constant(&mut self.jit_mod, val)?;
+                let jit_const = match jit_int_type.num_bits() {
+                    8 => jit_int_type
+                        .to_owned()
+                        .make_constant(&mut self.jit_mod, u8::try_from(val).unwrap())?,
+                    16 => jit_int_type
+                        .to_owned()
+                        .make_constant(&mut self.jit_mod, u16::try_from(val).unwrap())?,
+                    32 => jit_int_type
+                        .to_owned()
+                        .make_constant(&mut self.jit_mod, u32::try_from(val).unwrap())?,
+                    64 => jit_int_type
+                        .to_owned()
+                        .make_constant(&mut self.jit_mod, val)?,
+                    _ => unreachable!(),
+                };
                 let jit_const_opnd = jit_ir::Operand::Const(self.jit_mod.insert_const(jit_const)?);
 
                 // Perform the comparison.
@@ -831,9 +844,21 @@ impl<'a> TraceBuilder<'a> {
                 let mut cmps_opnds = Vec::new();
                 for cv in case_values {
                     // Build a constant of the case value.
-                    let jit_const = jit_int_type
-                        .to_owned()
-                        .make_constant(&mut self.jit_mod, *cv)?;
+                    let jit_const = match jit_int_type.num_bits() {
+                        8 => jit_int_type
+                            .to_owned()
+                            .make_constant(&mut self.jit_mod, u8::try_from(*cv).unwrap())?,
+                        16 => jit_int_type
+                            .to_owned()
+                            .make_constant(&mut self.jit_mod, u16::try_from(*cv).unwrap())?,
+                        32 => jit_int_type
+                            .to_owned()
+                            .make_constant(&mut self.jit_mod, u32::try_from(*cv).unwrap())?,
+                        64 => jit_int_type
+                            .to_owned()
+                            .make_constant(&mut self.jit_mod, *cv)?,
+                        _ => unreachable!(),
+                    };
                     let jit_const_opnd =
                         jit_ir::Operand::Const(self.jit_mod.insert_const(jit_const)?);
 
