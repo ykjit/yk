@@ -706,6 +706,11 @@ pub(crate) enum Inst {
         default_dest: BBlockIdx,
         #[deku(temp)]
         num_cases: usize,
+        /// The values for each switch block. FIXME: These are currently cast by ykllvm to a `u64`
+        /// no matter what the original type was: in other words, these should be interpreted as
+        /// bit patterns consuming 64-bits, not integer types of `u64`. Currently ykllvm prevents
+        /// types bigger than 64 bits being serialised, but the original integer type may require
+        /// fewer than 64-bits.
         #[deku(count = "num_cases")]
         case_values: Vec<u64>,
         #[deku(count = "num_cases")]
