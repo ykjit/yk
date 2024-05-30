@@ -89,6 +89,9 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
   | "LOCAL_OPERAND" ":" Type "=" "SREM" Operand "," Operand {
       Ok(ASTInst::SRem{assign: $1?.span(), type_: $3?, lhs: $6?, rhs: $8?})
     }
+  | "LOCAL_OPERAND" ":" Type "=" "SEXT" Operand {
+      Ok(ASTInst::SignExtend{assign: $1?.span(), type_: $3?, val: $6? })
+    }
   | "LOCAL_OPERAND" ":" Type "=" "TRUNC" Operand {
       Ok(ASTInst::Trunc{assign: $1?.span(), type_: $3?, operand: $6? })
     }

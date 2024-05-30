@@ -9,7 +9,7 @@ use super::super::{
     jit_ir::{
         BinOpInst, BlackBoxInst, DirectCallInst, FuncDecl, FuncTy, GuardInfo, GuardInst, IcmpInst,
         Inst, InstIdx, IntegerTy, LoadInst, LoadTraceInputInst, Module, Operand, PtrAddInst,
-        StoreInst, TruncInst, Ty, TyIdx,
+        SignExtendInst, StoreInst, TruncInst, Ty, TyIdx,
     },
 };
 use fm::FMBuilder;
@@ -199,6 +199,14 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                     } => {
                         let inst =
                             PtrAddInst::new(self.process_operand(ptr)?, self.process_operand(off)?);
+                        self.add_assign(self.m.len(), assign)?;
+                        self.m.push(inst.into()).unwrap();
+                    }
+                    ASTInst::SignExtend { assign, type_, val } => {
+                        let inst = SignExtendInst::new(
+                            &self.process_operand(val)?,
+                            self.process_type(type_)?,
+                        );
                         self.add_assign(self.m.len(), assign)?;
                         self.m.push(inst.into()).unwrap();
                     }
@@ -435,6 +443,12 @@ enum ASTInst {
         ptr: ASTOperand,
         off: ASTOperand,
     },
+    SignExtend {
+        assign: Span,
+        #[allow(dead_code)]
+        type_: ASTType,
+        val: ASTOperand,
+    },
     SRem {
         assign: Span,
         #[allow(dead_code)]
@@ -541,6 +555,7 @@ mod tests {
               %9: ptr = load_ti 3
               store %8, %9
               %10: i32 = load %9
+              %11: i64 = sext %10
         ",
         );
     }
