@@ -17,14 +17,18 @@ use super::{
     reg_alloc::{LocalAlloc, RegisterAllocator, StackDirection},
     CodeGen,
 };
+#[cfg(any(debug_assertions, test))]
+use crate::compile::jitc_yk::gdb::GdbCtx;
 use crate::compile::{jitc_yk::jit_ir::IndirectCallIdx, CompiledTrace};
 use dynasmrt::{
     components::StaticLabel, dynasm, x64::Rq, AssemblyOffset, DynasmApi, DynasmError,
     DynasmLabelApi, ExecutableBuffer, Register,
 };
+#[cfg(any(debug_assertions, test))]
+use indexmap::IndexMap;
 use std::sync::Arc;
 #[cfg(any(debug_assertions, test))]
-use std::{cell::Cell, collections::HashMap, error::Error, slice};
+use std::{cell::Cell, error::Error, slice};
 use ykaddr::addr::symbol_to_ptr;
 
 mod deopt;
@@ -75,11 +79,13 @@ pub(crate) struct X64CodeGen<'a> {
     ra: Box<dyn RegisterAllocator>,
     /// Deopt info.
     deoptinfo: Vec<DeoptInfo>,
+    /// Maps assembly offsets to comments.
+    ///
     /// Comments used by the trace printer for debugging and testing only.
     ///
     /// Each assembly offset can have zero or more comment lines.
     #[cfg(any(debug_assertions, test))]
-    comments: Cell<HashMap<usize, Vec<String>>>,
+    comments: Cell<IndexMap<usize, Vec<String>>>,
 }
 
 impl<'a> CodeGen<'a> for X64CodeGen<'a> {
@@ -98,7 +104,7 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
             ra,
             deoptinfo: Vec::new(),
             #[cfg(any(debug_assertions, test))]
-            comments: Cell::new(HashMap::new()),
+            comments: Cell::new(IndexMap::new()),
         }))
     }
 
@@ -148,11 +154,26 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
         // This unwrap cannot fail if `commit` (above) succeeded.
         let buf = self.asm.finalize().unwrap();
 
+        #[cfg(any(debug_assertions, test))]
+        let (comments, gdb_ctx) = {
+            use super::super::gdb;
+            let comments = self.comments.take();
+            let gdb_ctx = gdb::register_jitted_code(
+                self.m.ctr_id(),
+                buf.ptr(AssemblyOffset(0)),
+                buf.size(),
+                &comments,
+            )?;
+            (comments, gdb_ctx)
+        };
+
         Ok(Arc::new(X64CompiledTrace {
             buf,
             deoptinfo: self.deoptinfo,
             #[cfg(any(debug_assertions, test))]
-            comments: self.comments.take(),
+            comments,
+            #[cfg(any(debug_assertions, test))]
+            gdb_ctx,
         }))
     }
 }
@@ -875,7 +896,9 @@ pub(super) struct X64CompiledTrace {
     ///
     /// Used for testing and debugging.
     #[cfg(any(debug_assertions, test))]
-    comments: HashMap<usize, Vec<String>>,
+    comments: IndexMap<usize, Vec<String>>,
+    #[cfg(any(debug_assertions, test))]
+    gdb_ctx: GdbCtx,
 }
 
 impl CompiledTrace for X64CompiledTrace {
@@ -915,12 +938,12 @@ impl CompiledTrace for X64CompiledTrace {
 #[cfg(any(debug_assertions, test))]
 struct AsmPrinter<'a> {
     buf: &'a ExecutableBuffer,
-    comments: &'a HashMap<usize, Vec<String>>,
+    comments: &'a IndexMap<usize, Vec<String>>,
 }
 
 #[cfg(any(debug_assertions, test))]
 impl<'a> AsmPrinter<'a> {
-    fn new(buf: &'a ExecutableBuffer, comments: &'a HashMap<usize, Vec<String>>) -> Self {
+    fn new(buf: &'a ExecutableBuffer, comments: &'a IndexMap<usize, Vec<String>>) -> Self {
         Self { buf, comments }
     }
 

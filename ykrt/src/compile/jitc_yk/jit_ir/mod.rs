@@ -52,9 +52,9 @@ pub(crate) use super::aot_ir::{BinOp, Predicate};
 /// - you may NOT remove an instruction.
 #[derive(Debug)]
 pub(crate) struct Module {
-    /// The ID of this compiled trace. In `cfg(test)` this value is meaningless: in
-    /// `cfg(not(test))` the ID is obtained from [MT::next_compiled_trace_id()] and can be used to
-    /// semi-uniquely distinguish traces (see [MT::compiled_trace_id] for more details).
+    /// The ID of the compiled trace.
+    ///
+    /// See the [Self::ctr_id] method for details.
     ctr_id: u64,
     /// The IR trace as a linear sequence of instructions.
     insts: TiVec<InstIdx, Inst>,
@@ -104,6 +104,16 @@ impl Module {
     /// Create a new [Module].
     pub(crate) fn new(ctr_id: u64, global_decls_len: usize) -> Result<Self, CompilationError> {
         Self::new_internal(ctr_id, global_decls_len)
+    }
+
+    /// Returns the ID of the module.
+    ///
+    /// In `cfg(test)` the ID is meaningless: in `cfg(not(test))` the ID is obtained from
+    /// [crate::mt::MT::next_compiled_trace_id] and can be used to semi-uniquely distinguish traces
+    /// (see [crate::mt::MT::compiled_trace_id] for more details).
+    #[cfg(any(debug_assertions, test))]
+    pub(crate) fn ctr_id(&self) -> u64 {
+        self.ctr_id
     }
 
     #[cfg(test)]
