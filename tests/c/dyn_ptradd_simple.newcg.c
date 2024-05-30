@@ -14,8 +14,7 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{14}}: i64 = mul %{{12}}, 4i64
-//     %{{15}}: ptr = ptr_add %{{13}}, %{{14}}
+//     %{{_}}: ptr = dyn_ptr_add %{{_}}, %{{_}}, 4
 //     ...
 //     --- End jit-pre-opt ---
 //     i=3, elem=13
