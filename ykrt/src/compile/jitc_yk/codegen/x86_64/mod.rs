@@ -185,7 +185,7 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Inst::Arg(i) => self.cg_arg(inst_idx, *i),
             jit_ir::Inst::Assign(i) => self.cg_assign(inst_idx, i),
             jit_ir::Inst::TraceLoopStart => self.cg_traceloopstart(),
-            jit_ir::Inst::SignExtend(i) => self.cg_signextend(inst_idx, i),
+            jit_ir::Inst::SExt(i) => self.cg_sext(inst_idx, i),
             jit_ir::Inst::ZeroExtend(i) => self.cg_zeroextend(inst_idx, i),
             jit_ir::Inst::Trunc(i) => self.cg_trunc(inst_idx, i),
         }
@@ -670,7 +670,7 @@ impl<'a> X64CodeGen<'a> {
         dynasm!(self.asm; ->tloop_start:);
     }
 
-    fn cg_signextend(&mut self, inst_idx: InstIdx, i: &jit_ir::SignExtendInst) {
+    fn cg_sext(&mut self, inst_idx: InstIdx, i: &jit_ir::SExtInst) {
         let src_val = i.val();
         let src_type = self.m.type_(src_val.ty_idx(self.m));
         let src_size = src_type.byte_size().unwrap();

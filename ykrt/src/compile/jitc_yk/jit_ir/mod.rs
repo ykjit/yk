@@ -1005,7 +1005,7 @@ pub(crate) enum Inst {
     Assign(AssignInst),
 
     // Cast-like instructions
-    SignExtend(SignExtendInst),
+    SExt(SExtInst),
     ZeroExtend(ZeroExtendInst),
     Trunc(TruncInst),
 }
@@ -1045,7 +1045,7 @@ impl Inst {
             Self::Guard(..) => m.void_ty_idx(),
             Self::Arg(..) => m.ptr_ty_idx(),
             Self::TraceLoopStart => m.void_ty_idx(),
-            Self::SignExtend(si) => si.dest_ty_idx(),
+            Self::SExt(si) => si.dest_ty_idx(),
             Self::ZeroExtend(si) => si.dest_ty_idx(),
             Self::Trunc(t) => t.dest_ty_idx(),
             Self::Assign(ai) => ai.opnd().ty_idx(m),
@@ -1169,7 +1169,7 @@ impl fmt::Display for DisplayableInst<'_> {
                 write!(f, "tloop_start:")
             }
             Inst::Arg(i) => write!(f, "arg({i})"),
-            Inst::SignExtend(i) => {
+            Inst::SExt(i) => {
                 write!(
                     f,
                     "sext {}, {}",
@@ -1214,7 +1214,7 @@ inst!(Call, DirectCallInst);
 inst!(PtrAdd, PtrAddInst);
 inst!(Icmp, IcmpInst);
 inst!(Guard, GuardInst);
-inst!(SignExtend, SignExtendInst);
+inst!(SExt, SExtInst);
 inst!(ZeroExtend, ZeroExtendInst);
 inst!(Trunc, TruncInst);
 inst!(Assign, AssignInst);
@@ -1686,14 +1686,14 @@ impl GuardInst {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct SignExtendInst {
+pub struct SExtInst {
     /// The value to extend.
     val: PackedOperand,
     /// The type to extend to.
     dest_ty_idx: TyIdx,
 }
 
-impl SignExtendInst {
+impl SExtInst {
     pub(crate) fn new(val: &Operand, dest_ty_idx: TyIdx) -> Self {
         Self {
             val: PackedOperand::new(val),

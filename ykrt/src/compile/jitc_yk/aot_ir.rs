@@ -431,7 +431,7 @@ impl Display for Predicate {
 #[derive(Debug, Clone, Copy)]
 #[deku(type = "u8")]
 pub(crate) enum CastKind {
-    SignExtend = 0,
+    SExt = 0,
     ZeroExtend = 1,
     Trunc = 2,
 }
@@ -439,7 +439,7 @@ pub(crate) enum CastKind {
 impl Display for CastKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            Self::SignExtend => "sext",
+            Self::SExt => "sext",
             Self::ZeroExtend => "zext",
             Self::Trunc => "trunc",
         };

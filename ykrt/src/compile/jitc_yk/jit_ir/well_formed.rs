@@ -69,7 +69,7 @@ impl Module {
                         );
                     }
                 }
-                Inst::SignExtend(x) => {
+                Inst::SExt(x) => {
                     if self.type_(x.val().ty_idx(self)).byte_size()
                         >= self.type_(x.dest_ty_idx()).byte_size()
                     {
