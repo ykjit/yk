@@ -32,3 +32,4 @@ trunc "TRUNC"
 ;.*?$ ;
 @ "@"
 [\t \n\r]+ ;
+. "UNMATCHED"

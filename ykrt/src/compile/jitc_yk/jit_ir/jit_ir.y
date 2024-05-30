@@ -1,4 +1,5 @@
 %start Module
+%expect-unused Unmatched "UNMATCHED"
 
 %%
 
@@ -110,6 +111,10 @@ CallArgs -> Result<Vec<ASTOperand>, Box<dyn Error>>:
     CallArgs "," Operand { flattenr($1, $3) }
   | Operand { Ok(vec![$1?]) }
   | { Ok(Vec::new()) }
+  ;
+
+Unmatched -> ():
+    "UNMATCHED" { }
   ;
 
 %%
