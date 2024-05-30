@@ -724,28 +724,28 @@ impl<'a> X64CodeGen<'a> {
     }
 
     fn cg_icmp(&mut self, inst_idx: InstIdx, inst: &jit_ir::IcmpInst) {
-        let (left, pred, right) = (inst.left(), inst.predicate(), inst.right());
+        let (lhs, pred, rhs) = (inst.lhs(), inst.predicate(), inst.rhs());
 
         // FIXME: We should be checking type equality here, but since constants currently don't
         // have a type, checking their size is close enough. This won't be correct for struct
         // types, but this function can't deal with those anyway at the moment.
         debug_assert_eq!(
-            left.byte_size(self.m),
-            right.byte_size(self.m),
+            lhs.byte_size(self.m),
+            rhs.byte_size(self.m),
             "icmp of differing types"
         );
         debug_assert!(
-            matches!(self.m.type_(left.ty_idx(self.m)), jit_ir::Ty::Integer(_))
-                || matches!(self.m.type_(left.ty_idx(self.m)), jit_ir::Ty::Ptr),
+            matches!(self.m.type_(lhs.ty_idx(self.m)), jit_ir::Ty::Integer(_))
+                || matches!(self.m.type_(lhs.ty_idx(self.m)), jit_ir::Ty::Ptr),
             "icmp of nonsense types"
         );
 
         // FIXME: assumes values fit in a registers
-        self.load_operand(WR0, &left);
-        self.load_operand(WR1, &right);
+        self.load_operand(WR0, &lhs);
+        self.load_operand(WR1, &rhs);
 
         // Perform the comparison.
-        match left.byte_size(self.m) {
+        match rhs.byte_size(self.m) {
             8 => dynasm!(self.asm; cmp Rq(WR0.code()), Rq(WR1.code())),
             4 => dynasm!(self.asm; cmp Rd(WR0.code()), Rd(WR1.code())),
             2 => dynasm!(self.asm; cmp Rw(WR0.code()), Rw(WR1.code())),
