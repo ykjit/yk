@@ -6,7 +6,8 @@
 //!
 //!   * [super::DirectCallInst]s pass the correct number of arguments to a [super::FuncTy] and each
 //!   of those arguments has the correct [super::Ty].
-//!   * Binary operations' left and right hand side operands have the same [Ty]s.
+//!   * [super::BinOpInst]s left and right hand side operands have the same [Ty]s.
+//!   * [super::ICmpInst]s left and right hand side operands have the same [Ty]s.
 
 use super::{Inst, InstIdx, Module, Ty};
 
@@ -56,6 +57,16 @@ impl Module {
                                 self.type_(*par_ty).display(self),
                                 inst.display(InstIdx::new(i).unwrap(), self));
                         }
+                    }
+                }
+                Inst::Icmp(x) => {
+                    if x.lhs().ty_idx(self) != x.rhs().ty_idx(self) {
+                        let inst_idx = InstIdx::new(i).unwrap();
+                        panic!(
+                            "Instruction at position {} has different types on lhs and rhs\n  {}",
+                            usize::from(inst_idx),
+                            self.inst(inst_idx).display(inst_idx, self)
+                        );
                     }
                 }
                 _ => (),
@@ -117,7 +128,6 @@ mod tests {
         );
     }
 
-    #[cfg(debug_assertions)]
     #[should_panic(
         expected = "Instruction at position 1 passing argument 0 of wrong type (i8, but should be i32)"
     )]
@@ -133,7 +143,6 @@ mod tests {
         );
     }
 
-    #[cfg(debug_assertions)]
     #[should_panic(expected = "Instruction at position 2 has different types on lhs and rhs")]
     #[test]
     fn cg_add_wrong_types() {
@@ -143,6 +152,19 @@ mod tests {
                 %0: i64 = load_ti 0
                 %1: i32 = load_ti 1
                 %2: i32 = add %0, %1
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Instruction at position 2 has different types on lhs and rhs")]
+    fn cg_icmp_diff_types() {
+        Module::from_str(
+            "
+              entry:
+                %0: i8 = load_ti 0
+                %1: i64 = load_ti 0
+                %2: i8 = eq %0, %1
             ",
         );
     }

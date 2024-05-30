@@ -1399,21 +1399,6 @@ mod tests {
             );
         }
 
-        #[cfg(debug_assertions)]
-        #[test]
-        #[should_panic(expected = "icmp of differing types")]
-        fn cg_icmp_diff_types() {
-            test_with_spillalloc(
-                "
-              entry:
-                %0: i8 = load_ti 0
-                %1: i64 = load_ti 0
-                %2: i8 = eq %0, %1
-            ",
-                "",
-            );
-        }
-
         #[test]
         fn cg_guard_true() {
             test_with_spillalloc(
