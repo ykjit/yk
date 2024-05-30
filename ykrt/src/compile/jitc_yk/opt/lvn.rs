@@ -1,7 +1,10 @@
 #[cfg(test)]
 use crate::compile::jitc_yk::jit_ir::BlackBoxInst;
 use crate::compile::{
-    jitc_yk::jit_ir::{AddInst, BinOp, Inst, InstIdx, Module, Operand},
+    jitc_yk::{
+        aot_ir::BinOp,
+        jit_ir::{BinOpInst, Inst, InstIdx, Module, Operand},
+    },
     CompilationError,
 };
 use typed_index_collections::TiVec;
@@ -13,7 +16,7 @@ pub(super) fn lvn(mut m: Module) -> Result<Module, CompilationError> {
     for inst in m.iter_mut_insts() {
         match inst {
             Inst::LoadTraceInput(_) => (),
-            Inst::Add(x) => {
+            Inst::BinOp(x) if x.binop() == BinOp::Add => {
                 if let Operand::Local(y) = x.lhs() {
                     used_ops[usize::from(y)] = true;
                 }
@@ -52,7 +55,7 @@ pub(super) fn lvn(mut m: Module) -> Result<Module, CompilationError> {
             match inst {
                 #[cfg(test)]
                 Inst::BlackBox(_) => (),
-                Inst::Add(_) => {
+                Inst::BinOp(x) if x.binop() == BinOp::Add => {
                     off += 1;
                     continue;
                 }
@@ -61,9 +64,12 @@ pub(super) fn lvn(mut m: Module) -> Result<Module, CompilationError> {
         }
         let inst = match inst {
             Inst::LoadTraceInput(_) => inst.clone(),
-            Inst::Add(x) => {
-                AddInst::new(operand_off(x.lhs(), &offs), operand_off(x.rhs(), &offs)).into()
-            }
+            Inst::BinOp(x) if x.binop() == BinOp::Add => BinOpInst::new(
+                operand_off(x.lhs(), &offs),
+                BinOp::Add,
+                operand_off(x.rhs(), &offs),
+            )
+            .into(),
             #[cfg(test)]
             Inst::BlackBox(x) => BlackBoxInst::new(operand_off(x.operand(), &offs)).into(),
             x => todo!("{x:?}"),
