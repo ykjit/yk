@@ -88,6 +88,8 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
         m: &'a jit_ir::Module,
         ra: Box<dyn RegisterAllocator>,
     ) -> Result<Box<X64CodeGen<'a>>, CompilationError> {
+        #[cfg(debug_assertions)]
+        m.assert_well_formed();
         let asm = dynasmrt::x64::Assembler::new()
             .map_err(|e| CompilationError::ResourceExhausted(Box::new(e)))?;
         Ok(Box::new(Self {
@@ -600,20 +602,6 @@ impl<'a> X64CodeGen<'a> {
 
     fn cg_icmp(&mut self, inst_idx: InstIdx, inst: &jit_ir::IcmpInst) {
         let (lhs, pred, rhs) = (inst.lhs(), inst.predicate(), inst.rhs());
-
-        // FIXME: We should be checking type equality here, but since constants currently don't
-        // have a type, checking their size is close enough. This won't be correct for struct
-        // types, but this function can't deal with those anyway at the moment.
-        debug_assert_eq!(
-            lhs.byte_size(self.m),
-            rhs.byte_size(self.m),
-            "icmp of differing types"
-        );
-        debug_assert!(
-            matches!(self.m.type_(lhs.ty_idx(self.m)), jit_ir::Ty::Integer(_))
-                || matches!(self.m.type_(lhs.ty_idx(self.m)), jit_ir::Ty::Ptr),
-            "icmp of nonsense types"
-        );
 
         // FIXME: assumes values fit in a registers
         self.load_operand(WR0, &lhs);

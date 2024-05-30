@@ -24,7 +24,7 @@
 
 #[cfg(test)]
 mod parser;
-#[cfg(test)]
+#[cfg(any(debug_assertions, test))]
 mod well_formed;
 
 use super::aot_ir;
@@ -690,13 +690,13 @@ impl FuncTy {
     }
 
     /// Return the number of paramaters the function accepts (not including varargs).
-    #[cfg(test)]
+    #[cfg(any(debug_assertions, test))]
     pub(crate) fn num_params(&self) -> usize {
         self.param_ty_idxs.len()
     }
 
     /// Return a slice of this function's non-varargs parameters.
-    #[cfg(test)]
+    #[cfg(any(debug_assertions, test))]
     pub(crate) fn param_tys(&self) -> &[TyIdx] {
         &self.param_ty_idxs
     }
@@ -1516,7 +1516,7 @@ impl DirectCallInst {
     }
 
     /// Return an iterator for each of this direct call instruction's [ArgsIdx].
-    #[cfg(test)]
+    #[cfg(any(debug_assertions, test))]
     pub(crate) fn iter_args_idx(&self) -> impl Iterator<Item = ArgsIdx> {
         (usize::from(self.args_idx)..usize::from(self.args_idx) + usize::from(self.num_args))
             .map(|x| ArgsIdx::new(x).unwrap())
