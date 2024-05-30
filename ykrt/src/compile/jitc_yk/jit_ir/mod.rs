@@ -24,6 +24,8 @@
 
 #[cfg(test)]
 mod parser;
+#[cfg(test)]
+mod well_formed;
 
 use super::aot_ir;
 use crate::compile::CompilationError;
@@ -245,8 +247,17 @@ impl Module {
     /// # Panics
     ///
     /// If `args` would overflow the index type.
-    fn push_args(&mut self, args: Vec<Operand>) -> Result<ArgsIdx, CompilationError> {
+    pub(crate) fn push_args(&mut self, args: Vec<Operand>) -> Result<ArgsIdx, CompilationError> {
         ArgsIdx::new(self.args.len()).inspect(|_| self.args.extend(args))
+    }
+
+    /// Return the argument at args index `idx`.
+    ///
+    /// # Panics
+    ///
+    /// If `idx` is out of bounds.
+    pub(crate) fn arg(&self, idx: ArgsIdx) -> &Operand {
+        &self.args[usize::from(idx)]
     }
 
     /// Add a [Ty] to the types pool and return its index. If the [Ty] already exists, an existing
@@ -661,8 +672,8 @@ index_16bit!(InstIdx);
 /// A function's type.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct FuncTy {
-    /// Ty indices for the function's formal arguments.
-    arg_ty_idxs: Vec<TyIdx>,
+    /// Ty indices for the function's parameters.
+    param_ty_idxs: Vec<TyIdx>,
     /// Ty index of the function's return type.
     ret_ty_idx: TyIdx,
     /// Is the function vararg?
@@ -670,26 +681,24 @@ pub(crate) struct FuncTy {
 }
 
 impl FuncTy {
-    pub(crate) fn new(arg_ty_idxs: Vec<TyIdx>, ret_ty_idx: TyIdx, is_vararg: bool) -> Self {
+    pub(crate) fn new(param_ty_idxs: Vec<TyIdx>, ret_ty_idx: TyIdx, is_vararg: bool) -> Self {
         Self {
-            arg_ty_idxs,
+            param_ty_idxs,
             ret_ty_idx,
             is_vararg,
         }
     }
 
-    /// Return the number of arguments the function accepts (not including varargs arguments).
-    pub(crate) fn num_args(&self) -> usize {
-        self.arg_ty_idxs.len()
+    /// Return the number of paramaters the function accepts (not including varargs).
+    #[cfg(test)]
+    pub(crate) fn num_params(&self) -> usize {
+        self.param_ty_idxs.len()
     }
 
-    /// Returns the type index of the argument at the specified index.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the index is out of bounds.
-    pub(crate) fn arg_type<'a>(&self, m: &'a Module, idx: usize) -> &'a Ty {
-        m.type_(self.arg_ty_idxs[idx])
+    /// Return a slice of this function's non-varargs parameters.
+    #[cfg(test)]
+    pub(crate) fn param_tys(&self) -> &[TyIdx] {
+        &self.param_ty_idxs
     }
 
     /// Returns whether the function type has vararg arguments.
@@ -758,7 +767,7 @@ impl fmt::Display for DisplayableTy<'_> {
             Ty::Ptr => write!(f, "ptr"),
             Ty::Func(x) => {
                 let mut args = x
-                    .arg_ty_idxs
+                    .param_ty_idxs
                     .iter()
                     .map(|x| self.m.type_(*x).display(self.m).to_string())
                     .collect::<Vec<_>>();
@@ -1514,7 +1523,8 @@ impl IndirectCallInst {
     ///
     /// Panics if the operand index is out of bounds.
     pub(crate) fn operand(&self, m: &Module, idx: usize) -> Operand {
-        m.args[usize::from(self.args_idx) + idx].clone()
+        m.arg(ArgsIdx::new(usize::from(self.args_idx) + idx).unwrap())
+            .clone()
     }
 }
 
@@ -1563,6 +1573,13 @@ impl DirectCallInst {
     /// How many arguments is this call instruction passing?
     pub(crate) fn num_args(&self) -> usize {
         usize::from(self.num_args)
+    }
+
+    /// Return an iterator for each of this direct call instruction's [ArgsIdx].
+    #[cfg(test)]
+    pub(crate) fn iter_args_idx(&self) -> impl Iterator<Item = ArgsIdx> {
+        (usize::from(self.args_idx)..usize::from(self.args_idx) + usize::from(self.num_args))
+            .map(|x| ArgsIdx::new(x).unwrap())
     }
 
     /// Fetch the operand at the specified index.
@@ -1643,6 +1660,12 @@ impl PtrAddInst {
     }
 }
 
+pub(crate) trait BinOp {
+    fn lhs(&self) -> Operand;
+    fn rhs(&self) -> Operand;
+    fn ty_idx(&self, m: &Module) -> TyIdx;
+}
+
 macro_rules! bin_op {
     ($discrim :ident, $struct: ident, $disp: literal) => {
         #[derive(Clone, Debug, PartialEq)]
@@ -1662,18 +1685,19 @@ macro_rules! bin_op {
                     rhs: PackedOperand::new(&rhs),
                 }
             }
+        }
 
-            pub(crate) fn lhs(&self) -> Operand {
+        impl BinOp for $struct {
+            fn lhs(&self) -> Operand {
                 self.lhs.unpack()
             }
 
-            pub(crate) fn rhs(&self) -> Operand {
+            fn rhs(&self) -> Operand {
                 self.rhs.unpack()
             }
 
             /// Returns the type index of the operands being added.
-            pub(crate) fn ty_idx(&self, m: &Module) -> TyIdx {
-                debug_assert_eq!(self.lhs.unpack().ty_idx(m), self.rhs.unpack().ty_idx(m));
+            fn ty_idx(&self, m: &Module) -> TyIdx {
                 self.lhs.unpack().ty_idx(m)
             }
         }

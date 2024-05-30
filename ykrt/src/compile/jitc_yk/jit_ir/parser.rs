@@ -50,6 +50,7 @@ impl Module {
                     inst_idx_map: HashMap::new(),
                 };
                 p.process(func_decls, globals, bblocks).unwrap();
+                m.assert_well_formed();
                 m
             }
             _ => panic!("Could not produce JIT Module."),
@@ -527,7 +528,7 @@ mod tests {
               guard %4, true
               call @f1()
               %5: i8 = load_ti 1
-              %6: i32 = call @f2(%1)
+              %6: i32 = call @f2(%5)
               %7: i32 = load_ti 2
               %8: i64 = call @f3(%5, %7, %0)
               call @f4(%0, %1)
