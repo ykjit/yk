@@ -107,12 +107,12 @@ impl<'a> TraceBuilder<'a> {
         for (_, inst) in inst_iter.by_ref() {
             // Is it a call to the control point? If so, extract the live vars struct.
             if let Some(tis) = inst.control_point_call_trace_inputs(self.aot_mod) {
-                trace_inputs = Some(tis.to_instr(self.aot_mod));
+                trace_inputs = Some(tis.to_inst(self.aot_mod));
                 // Add the trace input argument to the local map so it can be tracked and
                 // deoptimised.
                 self.local_map.insert(
-                    tis.to_instr_id(),
-                    jit_ir::Operand::Local(self.next_instr_id()?),
+                    tis.to_inst_id(),
+                    jit_ir::Operand::Local(self.next_inst_id()?),
                 );
                 let arg = jit_ir::Inst::Arg(TRACE_FUNC_CTRLP_ARGIDX);
                 self.jit_mod.push(arg)?;
@@ -147,7 +147,7 @@ impl<'a> TraceBuilder<'a> {
                 aot_ir::Inst::Store { val, .. } => last_store_ptr = Some(val),
                 aot_ir::Inst::PtrAdd { ptr, .. } => {
                     // Is the pointer operand of this PtrAdd targeting the trace inputs?
-                    if trace_inputs.ptr_eq(ptr.to_instr(self.aot_mod)) {
+                    if trace_inputs.ptr_eq(ptr.to_inst(self.aot_mod)) {
                         // We found a trace input. Now we emit a `LoadTraceInput` instruction into the
                         // trace. This assigns the input to a local variable that other instructions
                         // can then use.
@@ -164,15 +164,15 @@ impl<'a> TraceBuilder<'a> {
                             Ok(u32_off) => {
                                 let input_ty_idx =
                                     self.handle_type(self.aot_mod.type_(aot_field_ty))?;
-                                let load_ti_instr =
+                                let load_ti_inst =
                                     jit_ir::LoadTraceInputInst::new(u32_off, input_ty_idx).into();
                                 // If this take fails, we didn't see a corresponding store and the
                                 // IR is malformed.
                                 self.local_map.insert(
-                                    last_store_ptr.take().unwrap().to_instr_id(),
-                                    jit_ir::Operand::Local(self.next_instr_id()?),
+                                    last_store_ptr.take().unwrap().to_inst_id(),
+                                    jit_ir::Operand::Local(self.next_inst_id()?),
                                 );
-                                self.jit_mod.push(load_ti_instr)?;
+                                self.jit_mod.push(load_ti_inst)?;
                                 self.first_ti_idx = inst_idx;
                             }
                             _ => {
@@ -299,7 +299,7 @@ impl<'a> TraceBuilder<'a> {
         Ok(())
     }
 
-    fn copy_instruction(
+    fn copy_inst(
         &mut self,
         jit_inst: jit_ir::Inst,
         bid: &aot_ir::BBlockId,
@@ -313,7 +313,7 @@ impl<'a> TraceBuilder<'a> {
                 aot_ir::InstIdx::new(aot_inst_idx),
             );
             self.local_map
-                .insert(aot_iid, jit_ir::Operand::Local(self.next_instr_id()?));
+                .insert(aot_iid, jit_ir::Operand::Local(self.next_inst_id()?));
         }
 
         // Insert the newly-translated instruction into the JIT module.
@@ -321,7 +321,7 @@ impl<'a> TraceBuilder<'a> {
         Ok(())
     }
 
-    fn next_instr_id(&self) -> Result<jit_ir::InstIdx, CompilationError> {
+    fn next_inst_id(&self) -> Result<jit_ir::InstIdx, CompilationError> {
         jit_ir::InstIdx::new(self.jit_mod.len())
     }
 
@@ -422,7 +422,7 @@ impl<'a> TraceBuilder<'a> {
         let lhs = self.handle_operand(lhs)?;
         let rhs = self.handle_operand(rhs)?;
         let inst = jit_ir::BinOpInst::new(lhs, binop, rhs).into();
-        self.copy_instruction(inst, bid, aot_inst_idx)
+        self.copy_inst(inst, bid, aot_inst_idx)
     }
 
     /// Create a guard.
@@ -520,10 +520,10 @@ impl<'a> TraceBuilder<'a> {
         pred: &aot_ir::Predicate,
         rhs: &aot_ir::Operand,
     ) -> Result<(), CompilationError> {
-        let instr =
+        let inst =
             jit_ir::IcmpInst::new(self.handle_operand(lhs)?, *pred, self.handle_operand(rhs)?)
                 .into();
-        self.copy_instruction(instr, bid, aot_inst_idx)
+        self.copy_inst(inst, bid, aot_inst_idx)
     }
 
     /// Translate a `Load` instruction.
@@ -539,7 +539,7 @@ impl<'a> TraceBuilder<'a> {
             self.handle_type(self.aot_mod.type_(*ty_idx))?,
         )
         .into();
-        self.copy_instruction(inst, bid, aot_inst_idx)
+        self.copy_inst(inst, bid, aot_inst_idx)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -587,10 +587,10 @@ impl<'a> TraceBuilder<'a> {
 
         let jit_callop = self.handle_operand(callop)?;
         let jit_ty_idx = self.handle_type(self.aot_mod.type_(*fty_idx))?;
-        let instr =
+        let inst =
             jit_ir::IndirectCallInst::new(&mut self.jit_mod, jit_ty_idx, jit_callop, jit_args)?;
-        let idx = self.jit_mod.push_indirect_call(instr)?;
-        self.copy_instruction(jit_ir::Inst::IndirectCall(idx), bid, aot_inst_idx)
+        let idx = self.jit_mod.push_indirect_call(inst)?;
+        self.copy_inst(jit_ir::Inst::IndirectCall(idx), bid, aot_inst_idx)
     }
 
     fn handle_call(
@@ -656,9 +656,9 @@ impl<'a> TraceBuilder<'a> {
             }
 
             let jit_func_decl_idx = self.handle_func(*callee)?;
-            let instr =
+            let inst =
                 jit_ir::DirectCallInst::new(&mut self.jit_mod, jit_func_decl_idx, jit_args)?.into();
-            self.copy_instruction(instr, bid, aot_inst_idx)
+            self.copy_inst(inst, bid, aot_inst_idx)
         }
     }
 
@@ -669,9 +669,9 @@ impl<'a> TraceBuilder<'a> {
         val: &aot_ir::Operand,
         ptr: &aot_ir::Operand,
     ) -> Result<(), CompilationError> {
-        let instr =
+        let inst =
             jit_ir::StoreInst::new(self.handle_operand(val)?, self.handle_operand(ptr)?).into();
-        self.copy_instruction(instr, bid, aot_inst_idx)
+        self.copy_inst(inst, bid, aot_inst_idx)
     }
 
     fn handle_ptradd(
@@ -723,7 +723,7 @@ impl<'a> TraceBuilder<'a> {
 
         // OPT: the assignment instruction could be elided in some cases.
         let inst = jit_ir::AssignInst::new(&jit_ptr);
-        self.copy_instruction(inst.into(), bid, aot_inst_idx)
+        self.copy_inst(inst.into(), bid, aot_inst_idx)
     }
 
     fn handle_cast(
@@ -734,7 +734,7 @@ impl<'a> TraceBuilder<'a> {
         val: &aot_ir::Operand,
         dest_ty_idx: &aot_ir::TyIdx,
     ) -> Result<(), CompilationError> {
-        let instr = match cast_kind {
+        let inst = match cast_kind {
             aot_ir::CastKind::SignExtend => jit_ir::SignExtendInst::new(
                 &self.handle_operand(val)?,
                 self.handle_type(self.aot_mod.type_(*dest_ty_idx))?,
@@ -751,7 +751,7 @@ impl<'a> TraceBuilder<'a> {
             )
             .into(),
         };
-        self.copy_instruction(instr, bid, aot_inst_idx)
+        self.copy_inst(inst, bid, aot_inst_idx)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -879,7 +879,7 @@ impl<'a> TraceBuilder<'a> {
                 self.create_guard(&jit_cond.unwrap(), false, safepoint)?
             }
         };
-        self.copy_instruction(guard.into(), bid, aot_inst_idx)
+        self.copy_inst(guard.into(), bid, aot_inst_idx)
     }
 
     fn handle_phi(
@@ -893,7 +893,7 @@ impl<'a> TraceBuilder<'a> {
         // If the IR is well-formed the indexing and unwrap() here will not fail.
         let chosen_val = &incoming_vals[incoming_bbs.iter().position(|bb| bb == prev_bb).unwrap()];
         let assign = jit_ir::AssignInst::new(&self.handle_operand(chosen_val)?);
-        self.copy_instruction(assign.into(), bid, aot_inst_idx)
+        self.copy_inst(assign.into(), bid, aot_inst_idx)
     }
 
     /// Entry point for building an IR trace.

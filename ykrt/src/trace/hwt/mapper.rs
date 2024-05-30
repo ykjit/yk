@@ -149,7 +149,7 @@ impl HWTTraceIterator {
             self.push_upcoming(TraceAction::new_unmappable_block());
             return;
         }
-        let (block_vaddr, block_last_instr) = b_rng.unwrap();
+        let (block_vaddr, block_last_inst) = b_rng.unwrap();
 
         let (obj_name, block_off) = vaddr_to_obj_and_off(block_vaddr as usize).unwrap();
 
@@ -165,7 +165,7 @@ impl HWTTraceIterator {
             return;
         }
 
-        let block_len = block_last_instr - block_vaddr;
+        let block_len = block_last_inst - block_vaddr;
         let mut ents = LLVM_BLOCK_MAP
             .query(block_off, block_off + block_len)
             .collect::<Vec<_>>();

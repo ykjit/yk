@@ -31,14 +31,14 @@
 
 int interp(char *prog, char *prog_end, char *cells, char *cells_end, YkMT *mt,
            YkLocation *yklocs) {
-  char *instr = prog;
+  char *inst = prog;
   char *cell = cells;
-  while (instr < prog_end) {
+  while (inst < prog_end) {
     YkLocation *loc = NULL;
-    if (*instr == ']')
-      loc = &yklocs[instr - prog];
+    if (*inst == ']')
+      loc = &yklocs[inst - prog];
     yk_mt_control_point(mt, loc);
-    switch (*instr) {
+    switch (*inst) {
     case '>': {
       if (cell++ == cells_end)
         errx(1, "out of memory");
@@ -71,12 +71,12 @@ int interp(char *prog, char *prog_end, char *cells, char *cells_end, YkMT *mt,
       if (*cell == 0) {
         int count = 0;
         while (true) {
-          instr++;
-          if (*instr == ']') {
+          inst++;
+          if (*inst == ']') {
             if (count == 0)
               break;
             count--;
-          } else if (*instr == '[')
+          } else if (*inst == '[')
             count++;
         }
       }
@@ -86,12 +86,12 @@ int interp(char *prog, char *prog_end, char *cells, char *cells_end, YkMT *mt,
       if (*cell != 0) {
         int count = 0;
         while (true) {
-          instr--;
-          if (*instr == '[') {
+          inst--;
+          if (*inst == '[') {
             if (count == 0)
               break;
             count--;
-          } else if (*instr == ']')
+          } else if (*inst == ']')
             count++;
         }
       }
@@ -100,7 +100,7 @@ int interp(char *prog, char *prog_end, char *cells, char *cells_end, YkMT *mt,
     default:
       break;
     }
-    instr++;
+    inst++;
   }
   return 0;
 }
