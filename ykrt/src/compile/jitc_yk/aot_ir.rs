@@ -470,7 +470,7 @@ impl Operand {
     /// Panics for other kinds of operand.
     ///
     /// OPT: This is expensive.
-    pub(crate) fn to_instr<'a>(&self, aotmod: &'a Module) -> &'a Inst {
+    pub(crate) fn to_inst<'a>(&self, aotmod: &'a Module) -> &'a Inst {
         let Self::LocalVariable(iid) = self else {
             panic!()
         };
@@ -482,7 +482,7 @@ impl Operand {
         match self {
             Self::LocalVariable(_) => {
                 // The `unwrap` can't fail for a `LocalVariable`.
-                self.to_instr(m).def_type(m).unwrap()
+                self.to_inst(m).def_type(m).unwrap()
             }
             Self::Const(cidx) => m.type_(m.const_(*cidx).unwrap_val().ty_idx()),
             Self::Arg { func_idx, arg_idx } => {
@@ -497,7 +497,7 @@ impl Operand {
 
     /// Return the `InstID` of a local variable operand. Panics if called on other kinds of
     /// operands.
-    pub(crate) fn to_instr_id(&self) -> InstID {
+    pub(crate) fn to_inst_id(&self) -> InstID {
         let Self::LocalVariable(iid) = self else {
             panic!()
         };
@@ -748,8 +748,8 @@ impl Inst {
     fn local_name(&self, m: &Module) -> String {
         for f in m.funcs.iter() {
             for (bb_idx, bb) in f.bblocks.iter().enumerate() {
-                for (inst_idx, instr) in bb.insts.iter().enumerate() {
-                    if std::ptr::addr_eq(instr, self) {
+                for (inst_idx, inst) in bb.insts.iter().enumerate() {
+                    if std::ptr::addr_eq(inst, self) {
                         return format!("%{}_{}", bb_idx, inst_idx);
                     }
                 }

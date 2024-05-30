@@ -12,9 +12,9 @@ pub enum Block {
     /// block.
     VAddrRange {
         /// Virtual address of the start of the first instruction in this block.
-        first_instr: BlockAddr,
+        first_inst: BlockAddr,
         /// Virtual address of *any* byte of the last instruction in this block.
-        last_instr: BlockAddr,
+        last_inst: BlockAddr,
     },
     /// An unknown virtual address range.
     ///
@@ -28,10 +28,10 @@ impl fmt::Debug for Block {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::VAddrRange {
-                first_instr,
-                last_instr,
+                first_inst,
+                last_inst,
             } => {
-                write!(f, "Block({:x}..={:x})", first_instr, last_instr)
+                write!(f, "Block({:x}..={:x})", first_inst, last_inst)
             }
             Self::Unknown => {
                 write!(f, "UnknownBlock")
@@ -44,10 +44,10 @@ impl Block {
     /// Creates a new basic block from the virtual addresses of:
     ///   * the start of the first instruction in the basic block.
     ///   * the start of the last instruction in the basic block.
-    pub fn from_vaddr_range(first_instr: BlockAddr, last_instr: BlockAddr) -> Self {
+    pub fn from_vaddr_range(first_inst: BlockAddr, last_inst: BlockAddr) -> Self {
         Self::VAddrRange {
-            first_instr,
-            last_instr,
+            first_inst,
+            last_inst,
         }
     }
 
@@ -59,11 +59,11 @@ impl Block {
     /// If `self` represents a known address range, returns the address range, otherwise `None`.
     pub fn vaddr_range(&self) -> Option<(BlockAddr, BlockAddr)> {
         if let Self::VAddrRange {
-            first_instr,
-            last_instr,
+            first_inst,
+            last_inst,
         } = self
         {
-            Some((*first_instr, *last_instr))
+            Some((*first_inst, *last_inst))
         } else {
             None
         }
