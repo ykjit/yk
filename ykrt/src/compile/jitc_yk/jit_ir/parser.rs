@@ -7,9 +7,9 @@
 use super::super::{
     aot_ir::{BinOp, Predicate},
     jit_ir::{
-        BinOpInst, BlackBoxInst, DirectCallInst, FuncDecl, FuncTy, GuardInfo, GuardInst, IcmpInst,
-        Inst, InstIdx, IntegerTy, LoadInst, LoadTraceInputInst, Module, Operand, PtrAddInst,
-        SExtInst, StoreInst, TruncInst, Ty, TyIdx,
+        BinOpInst, BlackBoxInst, DirectCallInst, DynPtrAddInst, FuncDecl, FuncTy, GuardInfo,
+        GuardInst, IcmpInst, Inst, InstIdx, IntegerTy, LoadInst, LoadTraceInputInst, Module,
+        Operand, PtrAddInst, SExtInst, StoreInst, TruncInst, Ty, TyIdx,
     },
 };
 use fm::FMBuilder;
@@ -197,8 +197,32 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         ptr,
                         off,
                     } => {
-                        let inst =
-                            PtrAddInst::new(self.process_operand(ptr)?, self.process_operand(off)?);
+                        let off = self
+                            .lexer
+                            .span_str(off)
+                            .parse::<i32>()
+                            .map_err(|e| self.error_at_span(off, &e.to_string()))?;
+                        let inst = PtrAddInst::new(self.process_operand(ptr)?, off);
+                        self.add_assign(self.m.len(), assign)?;
+                        self.m.push(inst.into()).unwrap();
+                    }
+                    ASTInst::DynPtrAdd {
+                        assign,
+                        type_: _,
+                        ptr,
+                        num_elems,
+                        elem_size,
+                    } => {
+                        let elem_size = self
+                            .lexer
+                            .span_str(elem_size)
+                            .parse::<u16>()
+                            .map_err(|e| self.error_at_span(elem_size, &e.to_string()))?;
+                        let inst = DynPtrAddInst::new(
+                            self.process_operand(ptr)?,
+                            self.process_operand(num_elems)?,
+                            elem_size,
+                        );
                         self.add_assign(self.m.len(), assign)?;
                         self.m.push(inst.into()).unwrap();
                     }
@@ -439,7 +463,15 @@ enum ASTInst {
         #[allow(dead_code)]
         type_: ASTType,
         ptr: ASTOperand,
-        off: ASTOperand,
+        off: Span,
+    },
+    DynPtrAdd {
+        assign: Span,
+        #[allow(dead_code)]
+        type_: ASTType,
+        ptr: ASTOperand,
+        num_elems: ASTOperand,
+        elem_size: Span,
     },
     SExt {
         assign: Span,

@@ -84,8 +84,11 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
   | "LOCAL_OPERAND" ":" Type "=" "LOAD" Operand {
       Ok(ASTInst::Load{assign: $1?.span(), type_: $3?, val: $6?})
     }
-  | "LOCAL_OPERAND" ":" Type "=" "PTR_ADD" Operand "," Operand {
-      Ok(ASTInst::PtrAdd{assign: $1?.span(), type_: $3?, ptr: $6?, off: $8?})
+  | "LOCAL_OPERAND" ":" Type "=" "PTR_ADD" Operand "," "INT" {
+      Ok(ASTInst::PtrAdd{assign: $1?.span(), type_: $3?, ptr: $6?, off: $8?.span()})
+    }
+  | "LOCAL_OPERAND" ":" Type "=" "DYN_PTR_ADD" Operand "," Operand "," "INT" {
+      Ok(ASTInst::DynPtrAdd{assign: $1?.span(), type_: $3?, ptr: $6?, num_elems: $8?, elem_size: $10?.span()})
     }
   | "LOCAL_OPERAND" ":" Type "=" "SREM" Operand "," Operand {
       Ok(ASTInst::SRem{assign: $1?.span(), type_: $3?, lhs: $6?, rhs: $8?})

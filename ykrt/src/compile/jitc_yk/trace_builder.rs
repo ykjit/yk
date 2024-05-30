@@ -4,7 +4,7 @@ use super::aot_ir::{self, BBlockId, BinOp, FuncIdx, Module};
 use super::jit_ir;
 use crate::compile::CompilationError;
 use crate::trace::{AOTTraceIterator, TraceAction};
-use std::{collections::HashMap, ffi::CString, mem};
+use std::{collections::HashMap, ffi::CString};
 
 /// The argument index of the trace inputs struct in the trace function.
 const TRACE_FUNC_CTRLP_ARGIDX: u16 = 0;
@@ -686,39 +686,32 @@ impl<'a> TraceBuilder<'a> {
         // First apply the constant offset.
         let mut jit_ptr = self.handle_operand(ptr)?;
         if const_off != 0 {
-            let co_ty = jit_ir::IntegerTy::new(32);
-            let co_const =
-                co_ty.make_constant(&mut self.jit_mod, i32::try_from(const_off).unwrap())?;
-            let co_opnd = jit_ir::Operand::Const(self.jit_mod.insert_const(co_const)?);
+            let off_i32 = i32::try_from(const_off).map_err(|_| {
+                CompilationError::LimitExceeded("ptradd constant offset doesn't fit in i32".into())
+            })?;
             jit_ptr = self
                 .jit_mod
-                .push_and_make_operand(jit_ir::PtrAddInst::new(jit_ptr, co_opnd).into())?;
+                .push_and_make_operand(jit_ir::PtrAddInst::new(jit_ptr, off_i32).into())?;
         }
 
         // Now apply any dynamic indices.
         //
         // Each offset is the number of elements multiplied by the byte size of an element.
-        let usize_bitsize = u32::try_from(mem::size_of::<usize>() * 8).unwrap(); // always fits.
-        let count_ty = jit_ir::IntegerTy::new(usize_bitsize);
-        for (count, size) in dyn_elem_counts.iter().zip(dyn_elem_sizes) {
-            let count_opnd = self.handle_operand(count)?;
+        for (num_elems, elem_size) in dyn_elem_counts.iter().zip(dyn_elem_sizes) {
+            let num_elems = self.handle_operand(num_elems)?;
             // If the element count is not the same width as LLVM's GEP index type, then we have to
             // sign extend it up (or truncate it down) to the right size. To date I've been unable
             // to get clang to emit code that would require an extend or truncate, so for now it's
             // a todo.
-            if count_opnd.byte_size(&self.jit_mod) * 8 != self.aot_mod.ptr_off_bitsize().into() {
+            if num_elems.byte_size(&self.jit_mod) * 8 != self.aot_mod.ptr_off_bitsize().into() {
                 todo!();
             }
-            let size_const = count_ty
-                .to_owned()
-                .make_constant(&mut self.jit_mod, *size)?;
-            let size_opnd = jit_ir::Operand::Const(self.jit_mod.insert_const(size_const)?);
-            let mul = self.jit_mod.push_and_make_operand(
-                jit_ir::BinOpInst::new(count_opnd, BinOp::Mul, size_opnd).into(),
+            let elem_size = u16::try_from(*elem_size).map_err(|_| {
+                CompilationError::LimitExceeded("ptradd elem size doesn't fit in u16".into())
+            })?;
+            jit_ptr = self.jit_mod.push_and_make_operand(
+                jit_ir::DynPtrAddInst::new(jit_ptr, num_elems, elem_size).into(),
             )?;
-            jit_ptr = self
-                .jit_mod
-                .push_and_make_operand(jit_ir::PtrAddInst::new(jit_ptr, mul).into())?;
         }
 
         // OPT: the assignment instruction could be elided in some cases.

@@ -178,6 +178,7 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Inst::LoadTraceInput(i) => self.cg_loadtraceinput(inst_idx, i),
             jit_ir::Inst::Load(i) => self.cg_load(inst_idx, i),
             jit_ir::Inst::PtrAdd(i) => self.cg_ptradd(inst_idx, i),
+            jit_ir::Inst::DynPtrAdd(i) => self.cg_dynptradd(inst_idx, i),
             jit_ir::Inst::Store(i) => self.cg_store(i),
             jit_ir::Inst::LookupGlobal(i) => self.cg_lookupglobal(inst_idx, i),
             jit_ir::Inst::Call(i) => self.cg_call(inst_idx, i)?,
@@ -453,8 +454,27 @@ impl<'a> X64CodeGen<'a> {
 
     fn cg_ptradd(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::PtrAddInst) {
         self.load_operand(WR0, &inst.ptr());
-        self.load_operand(WR1, &inst.offset());
-        dynasm!(self.asm ; add Rq(WR0.code()), Rq(WR1.code()));
+        // LLVM semantics dictate that the offset should be sign-extended/truncated up/down to the
+        // size of the LLVM pointer index type. For address space zero on x86, truncation can't
+        // happen, and when an immediate second operand is used for x86_64 `add`, it is implicitly
+        // sign extended.
+        dynasm!(self.asm ; add Rq(WR0.code()), inst.off());
+        self.store_new_local(inst_idx, WR0);
+    }
+
+    fn cg_dynptradd(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::DynPtrAddInst) {
+        self.load_operand(WR0, &inst.num_elems());
+        self.load_operand(WR1, &inst.ptr());
+        // LLVM semantics dictate that the element size and number of elements should be
+        // sign-extended/truncated up/down to the size of the LLVM pointer index type. For address
+        // space zero on x86_64, truncation can't happen, and when an immediate third operand is
+        // used for x86_64 `mul`, it is implicitly sign extended.
+        dynasm!(self.asm
+            // multiply the element size by the number of elements.
+            ; imul Rq(WR0.code()), Rq(WR0.code()), i32::from(inst.elem_size())
+            // add the result to the pointer.
+            ; add Rq(WR0.code()), Rq(WR1.code())
+        );
         self.store_new_local(inst_idx, WR0);
     }
 
@@ -1078,15 +1098,36 @@ mod tests {
                 "
               entry:
                 %0: ptr = load_ti 0
-                %1: i32 = ptr_add %0, 64i32
+                %1: i32 = ptr_add %0, 64
             ",
                 "
                 ...
-                ; %1: ptr = ptr_add %0, 64i32
+                ; %1: ptr = ptr_add %0, 64
                 ... mov r12, [rbp-0x08]
-                ... mov r13, 0x40
-                ... add r12, r13
+                ... add r12, 0x40
                 ... mov [rbp-0x10], r12
+                ...
+                ",
+            );
+        }
+
+        #[test]
+        fn cg_dynptradd() {
+            test_with_spillalloc(
+                "
+              entry:
+                %0: ptr = load_ti 0
+                %1: i32 = load_ti 8
+                %2: ptr = dyn_ptr_add %0, %1, 32
+            ",
+                "
+                ...
+                ; %2: ptr = dyn_ptr_add %0, %1, 32
+               ... mov r12d, [rbp-0x0c]
+               ... mov r13, [rbp-0x08]
+               ... imul r12, r12, 0x20
+               ... add r12, r13
+               ... mov [rbp-0x18], r12
                 ...
                 ",
             );

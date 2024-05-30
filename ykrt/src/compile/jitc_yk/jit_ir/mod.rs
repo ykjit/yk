@@ -993,6 +993,7 @@ pub(crate) enum Inst {
     Call(DirectCallInst),
     IndirectCall(IndirectCallIdx),
     PtrAdd(PtrAddInst),
+    DynPtrAdd(DynPtrAddInst),
     Store(StoreInst),
     Icmp(IcmpInst),
     Guard(GuardInst),
@@ -1040,6 +1041,7 @@ impl Inst {
             Self::LoadTraceInput(li) => li.ty_idx(),
             Self::Call(ci) => m.func_type(ci.target()).ret_ty_idx(),
             Self::PtrAdd(..) => m.ptr_ty_idx(),
+            Self::DynPtrAdd(..) => m.ptr_ty_idx(),
             Self::Store(..) => m.void_ty_idx(),
             Self::Icmp(_) => m.int8_ty_idx(), // always returns a 0/1 valued byte.
             Self::Guard(..) => m.void_ty_idx(),
@@ -1135,11 +1137,15 @@ impl fmt::Display for DisplayableInst<'_> {
                 )
             }
             Inst::PtrAdd(x) => {
+                write!(f, "ptr_add {}, {}", x.ptr().display(self.m), x.off())
+            }
+            Inst::DynPtrAdd(x) => {
                 write!(
                     f,
-                    "ptr_add {}, {}",
+                    "dyn_ptr_add {}, {}, {}",
                     x.ptr().display(self.m),
-                    x.offset().display(self.m)
+                    x.num_elems().display(self.m),
+                    x.elem_size()
                 )
             }
             Inst::Store(x) => write!(
@@ -1212,6 +1218,7 @@ inst!(Store, StoreInst);
 inst!(LoadTraceInput, LoadTraceInputInst);
 inst!(Call, DirectCallInst);
 inst!(PtrAdd, PtrAddInst);
+inst!(DynPtrAdd, DynPtrAddInst);
 inst!(Icmp, IcmpInst);
 inst!(Guard, GuardInst);
 inst!(SExt, SExtInst);
@@ -1566,26 +1573,33 @@ impl StoreInst {
     }
 }
 
-/// A pointer offsetting instruction.
+/// An instruction that adds a constant offset to a pointer.
 ///
 /// # Semantics
 ///
-/// Returns a pointer value that is the result of adding the specified (byte) offset to the input
-/// pointer operand.
+/// Returns a pointer value that is the result of adding the specified, signed, constant (byte)
+/// offset to the input pointer operand.
+///
+/// Following LLVM semantics, the operation is permitted to silently wrap if the result doesn't fit
+/// in the LLVM pointer indexing type.
 #[derive(Clone, Debug, PartialEq)]
 #[repr(packed)]
 pub struct PtrAddInst {
     /// The pointer to offset
     ptr: PackedOperand,
-    /// The offset.
-    off: PackedOperand,
+    /// The constant byte offset.
+    ///
+    /// Depending upon the platform, LLVM `getelementptr` may allow larger offsets than what this
+    /// field can express. Due to space constraints we only accept a reduced range of values and
+    /// traces requiring values outside of this range cannot be JIT compiled.
+    off: i32,
 }
 
 impl PtrAddInst {
-    pub(crate) fn new(ptr: Operand, off: Operand) -> Self {
+    pub(crate) fn new(ptr: Operand, off: i32) -> Self {
         Self {
             ptr: PackedOperand::new(&ptr),
-            off: PackedOperand::new(&off),
+            off,
         }
     }
 
@@ -1594,9 +1608,59 @@ impl PtrAddInst {
         ptr.unpack()
     }
 
-    pub(crate) fn offset(&self) -> Operand {
-        let unaligned = std::ptr::addr_of!(self.off);
-        unsafe { std::ptr::read_unaligned(unaligned) }.unpack()
+    pub(crate) fn off(&self) -> i32 {
+        self.off
+    }
+}
+
+/// An instruction that adds a (potentially) dynamic offset to a pointer.
+///
+/// The dynamic value is computed from an element size and a number of elements.
+///
+/// # Semantics
+///
+/// Returns a pointer value that is the result of:
+///  - multiplying the constant element size by the (potentially) dynamic number of elements, and
+///  - adding the result to the specified pointer.
+///
+/// Following LLVM semantics, the operation is permitted to silently wrap if the result doesn't fit
+/// in the LLVM pointer indexing type.
+#[derive(Clone, Debug, PartialEq)]
+#[repr(packed)]
+pub struct DynPtrAddInst {
+    /// The pointer to offset
+    ptr: PackedOperand,
+    /// The (dynamic) number of elements.
+    num_elems: PackedOperand,
+    /// The element size.
+    ///
+    /// Depending upon the platform, LLVM `getelementptr` may allow larger element sizes than what
+    /// this field can express. Due to space constraints we only accept a reduced range of values
+    /// and traces requiring values outside of this range cannot be JIT compiled.
+    elem_size: u16,
+}
+
+impl DynPtrAddInst {
+    pub(crate) fn new(ptr: Operand, num_elems: Operand, elem_size: u16) -> Self {
+        Self {
+            ptr: PackedOperand::new(&ptr),
+            elem_size,
+            num_elems: PackedOperand::new(&num_elems),
+        }
+    }
+
+    pub(crate) fn ptr(&self) -> Operand {
+        let ptr = self.ptr;
+        ptr.unpack()
+    }
+
+    pub(crate) fn elem_size(&self) -> u16 {
+        self.elem_size
+    }
+
+    pub(crate) fn num_elems(&self) -> Operand {
+        let num_elems = self.num_elems;
+        num_elems.unpack()
     }
 }
 
