@@ -671,30 +671,23 @@ impl<'a> X64CodeGen<'a> {
     }
 
     fn cg_signextend(&mut self, inst_idx: InstIdx, i: &jit_ir::SignExtendInst) {
-        let from_val = i.val();
-        let from_type = self.m.type_(from_val.ty_idx(self.m));
-        let from_size = from_type.byte_size().unwrap();
+        let src_val = i.val();
+        let src_type = self.m.type_(src_val.ty_idx(self.m));
+        let src_size = src_type.byte_size().unwrap();
 
-        let to_type = self.m.type_(i.dest_ty_idx());
-        let to_size = to_type.byte_size().unwrap();
-
-        // You can only sign-extend a smaller integer to a larger integer.
-        debug_assert!(matches!(to_type, jit_ir::Ty::Integer(_)));
-        debug_assert!(matches!(from_type, jit_ir::Ty::Integer(_)));
-        debug_assert!(from_size < to_size);
+        let dest_type = self.m.type_(i.dest_ty_idx());
+        let dest_size = dest_type.byte_size().unwrap();
 
         // FIXME: assumes the input and output fit in a register.
-        self.load_operand(WR0, &from_val);
-
-        match (from_size, to_size) {
+        self.load_operand(WR0, &src_val);
+        match (src_size, dest_size) {
             (1, 8) => dynasm!(self.asm; movsx Rq(WR0.code()), Rb(WR0.code())),
             (1, 4) => dynasm!(self.asm; movsx Rd(WR0.code()), Rb(WR0.code())),
             (2, 4) => dynasm!(self.asm; movsx Rd(WR0.code()), Rw(WR0.code())),
             (2, 8) => dynasm!(self.asm; movsx Rq(WR0.code()), Rw(WR0.code())),
             (4, 8) => dynasm!(self.asm; movsx Rq(WR0.code()), Rd(WR0.code())),
-            _ => todo!("{} {}", from_size, to_size),
+            _ => todo!("{} {}", src_size, dest_size),
         }
-
         self.store_new_local(inst_idx, WR0);
     }
 

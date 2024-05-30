@@ -69,6 +69,18 @@ impl Module {
                         );
                     }
                 }
+                Inst::SignExtend(x) => {
+                    if self.type_(x.val().ty_idx(self)).byte_size()
+                        >= self.type_(x.dest_ty_idx()).byte_size()
+                    {
+                        let inst_idx = InstIdx::new(i).unwrap();
+                        panic!(
+                            "Instruction at position {} trying to sign extend from an equal-or-larger-than integer type\n  {}",
+                            usize::from(inst_idx),
+                            self.inst(inst_idx).display(inst_idx, self)
+                        );
+                    }
+                }
                 _ => (),
             }
         }
@@ -165,6 +177,20 @@ mod tests {
                 %0: i8 = load_ti 0
                 %1: i64 = load_ti 0
                 %2: i8 = eq %0, %1
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Instruction at position 1 trying to sign extend from an equal-or-larger-than integer type"
+    )]
+    fn sign_extend_wrong_size() {
+        Module::from_str(
+            "
+              entry:
+                %0: i8 = load_ti 0
+                %1: i8 = sext %0
             ",
         );
     }
