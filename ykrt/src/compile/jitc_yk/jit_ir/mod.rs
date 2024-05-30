@@ -1152,8 +1152,8 @@ impl fmt::Display for DisplayableInst<'_> {
                 f,
                 "{} {}, {}",
                 x.pred,
-                x.left().display(self.m),
-                x.right().display(self.m)
+                x.lhs().display(self.m),
+                x.rhs().display(self.m)
             ),
             Inst::Guard(x) => write!(
                 f,
@@ -1609,32 +1609,32 @@ impl PtrAddInst {
 ///
 #[derive(Clone, Debug, PartialEq)]
 pub struct IcmpInst {
-    left: PackedOperand,
+    lhs: PackedOperand,
     pred: Predicate,
-    right: PackedOperand,
+    rhs: PackedOperand,
 }
 
 impl IcmpInst {
-    pub(crate) fn new(op1: Operand, pred: Predicate, op2: Operand) -> Self {
+    pub(crate) fn new(lhs: Operand, pred: Predicate, rhs: Operand) -> Self {
         Self {
-            left: PackedOperand::new(&op1),
+            lhs: PackedOperand::new(&lhs),
             pred,
-            right: PackedOperand::new(&op2),
+            rhs: PackedOperand::new(&rhs),
         }
     }
 
     /// Returns the left-hand-side of the comparison.
     ///
     /// E.g. in `x <= y`, it's `x`.
-    pub(crate) fn left(&self) -> Operand {
-        self.left.unpack()
+    pub(crate) fn lhs(&self) -> Operand {
+        self.lhs.unpack()
     }
 
     /// Returns the right-hand-side of the comparison.
     ///
     /// E.g. in `x <= y`, it's `y`.
-    pub(crate) fn right(&self) -> Operand {
-        self.right.unpack()
+    pub(crate) fn rhs(&self) -> Operand {
+        self.rhs.unpack()
     }
 
     /// Returns the predicate of the comparison.
