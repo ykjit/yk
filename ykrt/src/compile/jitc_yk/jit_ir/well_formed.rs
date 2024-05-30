@@ -5,7 +5,7 @@
 //! Specifically, after calling [Module::assert_well_formed] one can safely assume:
 //!
 //!   * [super::DirectCallInst]s pass the correct number of arguments to a [super::FuncTy] and each
-//!   of those arguments has the correct [super::Ty].
+//!     of those arguments has the correct [super::Ty].
 //!   * [super::BinOpInst]s left and right hand side operands have the same [Ty]s.
 //!   * [super::ICmpInst]s left and right hand side operands have the same [Ty]s.
 
