@@ -695,16 +695,6 @@ impl FuncTy {
         self.param_ty_idxs.len()
     }
 
-    /// Returns the type index of the argument at the specified index.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the index is out of bounds.
-    #[cfg(test)]
-    pub(crate) fn param_ty<'a>(&self, m: &'a Module, idx: usize) -> &'a Ty {
-        m.type_(self.param_ty_idxs[idx])
-    }
-
     /// Return a slice of this function's non-varargs parameters.
     #[cfg(test)]
     pub(crate) fn param_tys(&self) -> &[TyIdx] {
