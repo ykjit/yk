@@ -5,11 +5,11 @@
 //! makes it possible to write JIT IR tests using JIT IR concrete syntax.
 
 use super::super::{
-    aot_ir::Predicate,
+    aot_ir::{BinOp, Predicate},
     jit_ir::{
-        AddInst, BlackBoxInst, DirectCallInst, FuncDecl, FuncTy, GuardInfo, GuardInst, IcmpInst,
+        BinOpInst, BlackBoxInst, DirectCallInst, FuncDecl, FuncTy, GuardInfo, GuardInst, IcmpInst,
         Inst, InstIdx, IntegerTy, LoadInst, LoadTraceInputInst, Module, Operand, PtrAddInst,
-        SRemInst, StoreInst, TruncInst, Ty, TyIdx,
+        StoreInst, TruncInst, Ty, TyIdx,
     },
 };
 use fm::FMBuilder;
@@ -130,8 +130,11 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         lhs,
                         rhs,
                     } => {
-                        let inst =
-                            AddInst::new(self.process_operand(lhs)?, self.process_operand(rhs)?);
+                        let inst = BinOpInst::new(
+                            self.process_operand(lhs)?,
+                            BinOp::Add,
+                            self.process_operand(rhs)?,
+                        );
                         self.add_assign(self.m.len(), assign)?;
                         self.m.push(inst.into()).unwrap();
                     }
@@ -205,8 +208,11 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         lhs,
                         rhs,
                     } => {
-                        let inst =
-                            SRemInst::new(self.process_operand(lhs)?, self.process_operand(rhs)?);
+                        let inst = BinOpInst::new(
+                            self.process_operand(lhs)?,
+                            BinOp::SRem,
+                            self.process_operand(rhs)?,
+                        );
                         self.add_assign(self.m.len(), assign)?;
                         self.m.push(inst.into()).unwrap();
                     }
@@ -478,10 +484,10 @@ mod tests {
             .push_and_make_operand(LoadTraceInputInst::new(16, i16_ty_idx).into())
             .unwrap();
         let op3 = m
-            .push_and_make_operand(AddInst::new(op1.clone(), op2.clone()).into())
+            .push_and_make_operand(BinOpInst::new(op1.clone(), BinOp::Add, op2.clone()).into())
             .unwrap();
         let op4 = m
-            .push_and_make_operand(AddInst::new(op1.clone(), op3.clone()).into())
+            .push_and_make_operand(BinOpInst::new(op1.clone(), BinOp::Add, op3.clone()).into())
             .unwrap();
         m.push(BlackBoxInst::new(op3).into()).unwrap();
         m.push(BlackBoxInst::new(op4).into()).unwrap();

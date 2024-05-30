@@ -40,7 +40,7 @@ use typed_index_collections::{TiSlice, TiVec};
 use ykaddr::addr::symbol_to_ptr;
 
 // This is simple and can be shared across both IRs.
-pub(crate) use super::aot_ir::Predicate;
+pub(crate) use super::aot_ir::{BinOp, Predicate};
 
 /// The `Module` is the top-level container for JIT IR.
 ///
@@ -983,7 +983,8 @@ impl GuardInfo {
 /// An IR instruction.
 #[repr(u8)]
 #[derive(Clone, Debug, PartialEq)]
-pub enum Inst {
+pub(crate) enum Inst {
+    BinOp(BinOpInst),
     #[cfg(test)]
     BlackBox(BlackBoxInst),
     Load(LoadInst),
@@ -1002,26 +1003,6 @@ pub enum Inst {
     /// Marks the place to loop back to at the end of the JITted code.
     TraceLoopStart,
     Assign(AssignInst),
-
-    // Binary operations
-    Add(AddInst),
-    Sub(SubInst),
-    Mul(MulInst),
-    Or(OrInst),
-    And(AndInst),
-    Xor(XorInst),
-    Shl(ShlInst),
-    AShr(AShrInst),
-    FAdd(FAddInst),
-    FDiv(FDivInst),
-    FMul(FMulInst),
-    FRem(FRemInst),
-    FSub(FSubInst),
-    LShr(LShrInst),
-    SDiv(SDivInst),
-    SRem(SRemInst),
-    UDiv(UDivInst),
-    URem(URemInst),
 
     // Cast-like instructions
     SignExtend(SignExtendInst),
@@ -1045,8 +1026,15 @@ impl Inst {
     /// If the instruction doesn't define a type then the type index for [Ty::Void] is returned.
     pub(crate) fn def_ty_idx(&self, m: &Module) -> TyIdx {
         match self {
+            Self::BinOp(x) => x.ty_idx(m),
             #[cfg(test)]
             Self::BlackBox(_) => m.void_ty_idx(),
+            Self::IndirectCall(idx) => {
+                let inst = &m.indirect_calls[*idx];
+                let ty = m.type_(inst.fty_idx);
+                let Ty::Func(fty) = ty else { panic!() };
+                fty.ret_ty_idx()
+            }
             Self::Load(li) => li.ty_idx(),
             Self::LookupGlobal(..) => m.ptr_ty_idx(),
             Self::LoadTraceInput(li) => li.ty_idx(),
@@ -1061,24 +1049,6 @@ impl Inst {
             Self::ZeroExtend(si) => si.dest_ty_idx(),
             Self::Trunc(t) => t.dest_ty_idx(),
             Self::Assign(ai) => ai.opnd().ty_idx(m),
-            // Binary operations
-            Self::Add(i) => i.ty_idx(m),
-            Self::Sub(i) => i.ty_idx(m),
-            Self::And(i) => i.ty_idx(m),
-            Self::Or(i) => i.ty_idx(m),
-            Self::Xor(i) => i.ty_idx(m),
-            Self::IndirectCall(idx) => {
-                let inst = &m.indirect_calls[*idx];
-                let ty = m.type_(inst.fty_idx);
-                let Ty::Func(fty) = ty else { panic!() };
-                fty.ret_ty_idx()
-            }
-            Self::Mul(i) => i.ty_idx(m),
-            Self::SDiv(i) => i.ty_idx(m),
-            Self::SRem(i) => i.ty_idx(m),
-            Self::LShr(i) => i.ty_idx(m),
-            Self::AShr(i) => i.ty_idx(m),
-            x => todo!("{x:?}"),
         }
     }
 
@@ -1122,6 +1092,13 @@ impl fmt::Display for DisplayableInst<'_> {
             write!(f, "%{}: {} = ", self.inst_idx.to_u16(), dt.display(self.m))?;
         }
         match self.inst {
+            Inst::BinOp(x) => write!(
+                f,
+                "{} {}, {}",
+                x.binop,
+                x.lhs().display(self.m),
+                x.rhs().display(self.m)
+            ),
             #[cfg(test)]
             Inst::BlackBox(x) => write!(f, "black_box {}", x.operand().display(self.m)),
             Inst::Load(x) => write!(f, "load {}", x.operand().display(self.m)),
@@ -1171,8 +1148,6 @@ impl fmt::Display for DisplayableInst<'_> {
                 x.val.unpack().display(self.m),
                 x.ptr.unpack().display(self.m)
             ),
-            // FIXME: split Icmp out into separate opcodes. For now we pretty-print icmp as though
-            // we have already done that.
             Inst::Icmp(x) => write!(
                 f,
                 "{} {}, {}",
@@ -1194,30 +1169,6 @@ impl fmt::Display for DisplayableInst<'_> {
                 write!(f, "tloop_start:")
             }
             Inst::Arg(i) => write!(f, "arg({i})"),
-            Inst::Add(x) => {
-                write!(
-                    f,
-                    "add {}, {}",
-                    x.lhs().display(self.m),
-                    x.rhs().display(self.m)
-                )
-            }
-            Inst::Sub(x) => {
-                write!(
-                    f,
-                    "sub {}, {}",
-                    x.lhs().display(self.m),
-                    x.rhs().display(self.m)
-                )
-            }
-            Inst::And(x) => {
-                write!(
-                    f,
-                    "and {}, {}",
-                    x.lhs().display(self.m),
-                    x.rhs().display(self.m)
-                )
-            }
             Inst::SignExtend(i) => {
                 write!(
                     f,
@@ -1237,64 +1188,7 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::Trunc(i) => {
                 write!(f, "trunc {}", i.val().display(self.m))
             }
-            Inst::Or(i) => {
-                write!(
-                    f,
-                    "or {}, {}",
-                    i.lhs().display(self.m),
-                    i.rhs().display(self.m),
-                )
-            }
-            Inst::Xor(i) => {
-                write!(
-                    f,
-                    "xor {}, {}",
-                    i.lhs().display(self.m),
-                    i.rhs().display(self.m),
-                )
-            }
-            Inst::LShr(i) => {
-                write!(
-                    f,
-                    "lshr {}, {}",
-                    i.lhs().display(self.m),
-                    i.rhs().display(self.m),
-                )
-            }
-            Inst::AShr(i) => {
-                write!(
-                    f,
-                    "ashr {}, {}",
-                    i.lhs().display(self.m),
-                    i.rhs().display(self.m),
-                )
-            }
-            Inst::Mul(i) => {
-                write!(
-                    f,
-                    "mul {}, {}",
-                    i.lhs().display(self.m),
-                    i.rhs().display(self.m),
-                )
-            }
-            Inst::SDiv(i) => {
-                write!(
-                    f,
-                    "sdiv {}, {}",
-                    i.lhs().display(self.m),
-                    i.rhs().display(self.m),
-                )
-            }
-            Inst::SRem(i) => {
-                write!(
-                    f,
-                    "srem {}, {}",
-                    i.lhs().display(self.m),
-                    i.rhs().display(self.m),
-                )
-            }
             Inst::Assign(i) => write!(f, "{}", i.opnd().display(self.m)),
-            x => todo!("{x:?}"),
         }
     }
 }
@@ -1309,6 +1203,7 @@ macro_rules! inst {
     };
 }
 
+inst!(BinOp, BinOpInst);
 #[cfg(test)]
 inst!(BlackBox, BlackBoxInst);
 inst!(Load, LoadInst);
@@ -1323,6 +1218,51 @@ inst!(SignExtend, SignExtendInst);
 inst!(ZeroExtend, ZeroExtendInst);
 inst!(Trunc, TruncInst);
 inst!(Assign, AssignInst);
+
+/// The operands for a [Instruction::BinOp]
+///
+/// # Semantics
+///
+/// Performs a binary operation.
+///
+/// The naming convention used is based on infix notation, e.g. in `2 + 3`, "2" is the left-hand
+/// side (`lhs`), "+" is the binary operator (`binop`), and "3" is the right-hand side (`rhs`).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct BinOpInst {
+    /// The left-hand side of the operation.
+    lhs: PackedOperand,
+    /// The operation to perform.
+    pub(crate) binop: BinOp,
+    /// The right-hand side of the operation.
+    rhs: PackedOperand,
+}
+
+impl BinOpInst {
+    pub(crate) fn new(lhs: Operand, binop: BinOp, rhs: Operand) -> Self {
+        Self {
+            lhs: PackedOperand::new(&lhs),
+            binop,
+            rhs: PackedOperand::new(&rhs),
+        }
+    }
+
+    pub(crate) fn lhs(&self) -> Operand {
+        self.lhs.unpack()
+    }
+
+    pub(crate) fn binop(&self) -> BinOp {
+        self.binop
+    }
+
+    pub(crate) fn rhs(&self) -> Operand {
+        self.rhs.unpack()
+    }
+
+    /// Returns the type index of the operands being added.
+    pub(crate) fn ty_idx(&self, m: &Module) -> TyIdx {
+        self.lhs.unpack().ty_idx(m)
+    }
+}
 
 /// This is a test-only instruction which "consumes" an operand in the sense of "make use of the
 /// value". This is useful to make clear in a test that an operand is used at a certain point,
@@ -1659,75 +1599,6 @@ impl PtrAddInst {
         unsafe { std::ptr::read_unaligned(unaligned) }.unpack()
     }
 }
-
-pub(crate) trait BinOp {
-    fn lhs(&self) -> Operand;
-    fn rhs(&self) -> Operand;
-    fn ty_idx(&self, m: &Module) -> TyIdx;
-}
-
-macro_rules! bin_op {
-    ($discrim :ident, $struct: ident, $disp: literal) => {
-        #[derive(Clone, Debug, PartialEq)]
-        #[allow(dead_code)]
-        pub struct $struct {
-            /// The left-hand side of the operation.
-            lhs: PackedOperand,
-            /// The right-hand side of the operation.
-            rhs: PackedOperand,
-        }
-
-        #[allow(dead_code)]
-        impl $struct {
-            pub(crate) fn new(lhs: Operand, rhs: Operand) -> Self {
-                Self {
-                    lhs: PackedOperand::new(&lhs),
-                    rhs: PackedOperand::new(&rhs),
-                }
-            }
-        }
-
-        impl BinOp for $struct {
-            fn lhs(&self) -> Operand {
-                self.lhs.unpack()
-            }
-
-            fn rhs(&self) -> Operand {
-                self.rhs.unpack()
-            }
-
-            /// Returns the type index of the operands being added.
-            fn ty_idx(&self, m: &Module) -> TyIdx {
-                self.lhs.unpack().ty_idx(m)
-            }
-        }
-
-        impl From<$struct> for Inst {
-            fn from(inst: $struct) -> Inst {
-                Inst::$discrim(inst)
-            }
-        }
-    };
-}
-
-bin_op!(Add, AddInst, "Add");
-bin_op!(Sub, SubInst, "Sub");
-bin_op!(Mul, MulInst, "Mul");
-bin_op!(Or, OrInst, "Or");
-bin_op!(And, AndInst, "And");
-bin_op!(Xor, XorInst, "Xor");
-bin_op!(Shl, ShlInst, "Shl");
-bin_op!(AShr, AShrInst, "AShr");
-bin_op!(FAdd, FAddInst, "FAdd");
-bin_op!(FDiv, FDivInst, "FDiv");
-bin_op!(FMul, FMulInst, "FMul");
-bin_op!(FRem, FRemInst, "FRem");
-bin_op!(FSub, FSubInst, "FSub");
-bin_op!(LShr, LShrInst, "LShr");
-bin_op!(SDiv, SDivInst, "SDiv");
-bin_op!(SRem, SRemInst, "SRem");
-bin_op!(UDiv, UDivInst, "UDiv");
-bin_op!(URem, URemInst, "URem");
 
 /// The operand for a [Inst::Icmp]
 ///

@@ -170,6 +170,9 @@ impl<'a> X64CodeGen<'a> {
         );
 
         match inst {
+            jit_ir::Inst::BinOp(i) => self.cg_binop(inst_idx, i),
+            #[cfg(test)]
+            jit_ir::Inst::BlackBox(_) => panic!("Can't yet codegen blackbox"),
             jit_ir::Inst::LoadTraceInput(i) => self.cg_loadtraceinput(inst_idx, i),
             jit_ir::Inst::Load(i) => self.cg_load(inst_idx, i),
             jit_ir::Inst::PtrAdd(i) => self.cg_ptradd(inst_idx, i),
@@ -185,18 +188,6 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Inst::SignExtend(i) => self.cg_signextend(inst_idx, i),
             jit_ir::Inst::ZeroExtend(i) => self.cg_zeroextend(inst_idx, i),
             jit_ir::Inst::Trunc(i) => self.cg_trunc(inst_idx, i),
-            // Binary operations
-            jit_ir::Inst::Add(i) => self.cg_add(inst_idx, i),
-            jit_ir::Inst::Sub(i) => self.cg_sub(inst_idx, i),
-            jit_ir::Inst::And(i) => self.cg_and(inst_idx, i),
-            jit_ir::Inst::Or(i) => self.cg_or(inst_idx, i),
-            jit_ir::Inst::Xor(i) => self.cg_xor(inst_idx, i),
-            jit_ir::Inst::LShr(i) => self.cg_lshr(inst_idx, i),
-            jit_ir::Inst::AShr(i) => self.cg_ashr(inst_idx, i),
-            jit_ir::Inst::Mul(i) => self.cg_mul(inst_idx, i),
-            jit_ir::Inst::SDiv(i) => self.cg_sdiv(inst_idx, i),
-            jit_ir::Inst::SRem(i) => self.cg_srem(inst_idx, i),
-            x => todo!("{x:?}"),
         }
         Ok(())
     }
@@ -281,261 +272,145 @@ impl<'a> X64CodeGen<'a> {
         }
     }
 
-    fn cg_add(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::AddInst) {
+    fn cg_binop(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::BinOpInst) {
         let lhs = inst.lhs();
         let rhs = inst.rhs();
 
-        // Operand types must be the same.
-        debug_assert_eq!(
-            self.m.type_(lhs.ty_idx(self.m)),
-            self.m.type_(rhs.ty_idx(self.m))
-        );
-
-        self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
-        self.load_operand(WR1, &rhs); // ^^^ same
-
-        match lhs.byte_size(self.m) {
-            8 => dynasm!(self.asm; add Rq(WR0.code()), Rq(WR1.code())),
-            4 => dynasm!(self.asm; add Rd(WR0.code()), Rd(WR1.code())),
-            2 => dynasm!(self.asm; add Rw(WR0.code()), Rw(WR1.code())),
-            1 => dynasm!(self.asm; add Rb(WR0.code()), Rb(WR1.code())),
-            _ => todo!(),
+        match inst.binop() {
+            BinOp::Add => {
+                self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
+                self.load_operand(WR1, &rhs); // ^^^ same
+                match lhs.byte_size(self.m) {
+                    8 => dynasm!(self.asm; add Rq(WR0.code()), Rq(WR1.code())),
+                    4 => dynasm!(self.asm; add Rd(WR0.code()), Rd(WR1.code())),
+                    2 => dynasm!(self.asm; add Rw(WR0.code()), Rw(WR1.code())),
+                    1 => dynasm!(self.asm; add Rb(WR0.code()), Rb(WR1.code())),
+                    _ => todo!(),
+                }
+                self.store_new_local(inst_idx, WR0);
+            }
+            BinOp::And => {
+                self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
+                self.load_operand(WR1, &rhs); // ^^^ same
+                match lhs.byte_size(self.m) {
+                    8 => dynasm!(self.asm; and Rq(WR0.code()), Rq(WR1.code())),
+                    4 => dynasm!(self.asm; and Rd(WR0.code()), Rd(WR1.code())),
+                    2 => dynasm!(self.asm; and Rw(WR0.code()), Rw(WR1.code())),
+                    1 => dynasm!(self.asm; and Rb(WR0.code()), Rb(WR1.code())),
+                    _ => todo!(),
+                }
+                self.store_new_local(inst_idx, WR0);
+            }
+            BinOp::AShr => {
+                self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
+                self.load_operand(Rq::RCX, &rhs); // ^^^ same
+                match lhs.byte_size(self.m) {
+                    8 => dynasm!(self.asm; sar Rq(WR0.code()), cl),
+                    4 => dynasm!(self.asm; sar Rd(WR0.code()), cl),
+                    2 => dynasm!(self.asm; sar Rw(WR0.code()), cl),
+                    1 => dynasm!(self.asm; sar Rb(WR0.code()), cl),
+                    _ => todo!(),
+                }
+                self.store_new_local(inst_idx, WR0);
+            }
+            BinOp::LShr => {
+                self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
+                self.load_operand(Rq::RCX, &rhs); // ^^^ same
+                match lhs.byte_size(self.m) {
+                    8 => dynasm!(self.asm; shr Rq(WR0.code()), cl),
+                    4 => dynasm!(self.asm; shr Rd(WR0.code()), cl),
+                    2 => dynasm!(self.asm; shr Rw(WR0.code()), cl),
+                    1 => dynasm!(self.asm; shr Rb(WR0.code()), cl),
+                    _ => todo!(),
+                }
+                self.store_new_local(inst_idx, WR0);
+            }
+            BinOp::Mul => {
+                self.load_operand(Rq::RAX, &lhs); // FIXME: assumes value will fit in a reg.
+                self.load_operand(WR1, &rhs); // ^^^ same
+                match lhs.byte_size(self.m) {
+                    8 => dynasm!(self.asm; mul Rq(WR1.code())),
+                    4 => dynasm!(self.asm; mul Rd(WR1.code())),
+                    2 => dynasm!(self.asm; mul Rw(WR1.code())),
+                    1 => dynasm!(self.asm; mul Rb(WR1.code())),
+                    _ => todo!(),
+                }
+                // Note that because we are code-genning an unchecked multiply, the higher-order part of
+                // the result in RDX is entirely ignored.
+                self.store_new_local(inst_idx, Rq::RAX);
+            }
+            BinOp::Or => {
+                self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
+                self.load_operand(WR1, &rhs); // ^^^ same
+                match lhs.byte_size(self.m) {
+                    8 => dynasm!(self.asm; or Rq(WR0.code()), Rq(WR1.code())),
+                    4 => dynasm!(self.asm; or Rd(WR0.code()), Rd(WR1.code())),
+                    2 => dynasm!(self.asm; or Rw(WR0.code()), Rw(WR1.code())),
+                    1 => dynasm!(self.asm; or Rb(WR0.code()), Rb(WR1.code())),
+                    _ => todo!(),
+                }
+                self.store_new_local(inst_idx, WR0);
+            }
+            BinOp::SDiv => {
+                // The dividend is hard-coded into DX:AX/EDX:EAX/RDX:RAX. However unless we have 128bit
+                // values or want to optimise register usage, we won't be needing this, and just zero out
+                // RDX.
+                dynasm!(self.asm; xor rdx, rdx);
+                self.load_operand(Rq::RAX, &lhs); // FIXME: assumes value will fit in a reg.
+                self.load_operand(WR1, &rhs); // ^^^ same
+                match lhs.byte_size(self.m) {
+                    8 => dynasm!(self.asm; idiv Rq(WR1.code())),
+                    4 => dynasm!(self.asm; idiv Rd(WR1.code())),
+                    2 => dynasm!(self.asm; idiv Rw(WR1.code())),
+                    1 => dynasm!(self.asm; idiv Rb(WR1.code())),
+                    _ => todo!(),
+                }
+                // The quotient is stored in RAX. We don't care about the remainder stored in RDX.
+                self.store_new_local(inst_idx, Rq::RAX);
+            }
+            BinOp::SRem => {
+                // The dividend is hard-coded into DX:AX/EDX:EAX/RDX:RAX. However unless we have 128bit
+                // values or want to optimise register usage, we won't be needing this, and just zero out
+                // RDX.
+                dynasm!(self.asm; xor rdx, rdx);
+                self.load_operand(Rq::RAX, &lhs); // FIXME: assumes value will fit in a reg.
+                self.load_operand(WR1, &rhs); // ^^^ same
+                match lhs.byte_size(self.m) {
+                    8 => dynasm!(self.asm; idiv Rq(WR1.code())),
+                    4 => dynasm!(self.asm; idiv Rd(WR1.code())),
+                    2 => dynasm!(self.asm; idiv Rw(WR1.code())),
+                    1 => dynasm!(self.asm; idiv Rb(WR1.code())),
+                    _ => todo!(),
+                }
+                // The remainder is stored in RDX. We don't care about the quotient stored in RAX.
+                self.store_new_local(inst_idx, Rq::RDX);
+            }
+            BinOp::Sub => {
+                self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
+                self.load_operand(WR1, &rhs); // ^^^ same
+                match lhs.byte_size(self.m) {
+                    8 => dynasm!(self.asm; sub Rq(WR0.code()), Rq(WR1.code())),
+                    4 => dynasm!(self.asm; sub Rd(WR0.code()), Rd(WR1.code())),
+                    2 => dynasm!(self.asm; sub Rw(WR0.code()), Rw(WR1.code())),
+                    1 => dynasm!(self.asm; sub Rb(WR0.code()), Rb(WR1.code())),
+                    _ => todo!(),
+                }
+                self.store_new_local(inst_idx, WR0);
+            }
+            BinOp::Xor => {
+                self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
+                self.load_operand(WR1, &rhs); // ^^^ same
+                match lhs.byte_size(self.m) {
+                    8 => dynasm!(self.asm; xor Rq(WR0.code()), Rq(WR1.code())),
+                    4 => dynasm!(self.asm; xor Rd(WR0.code()), Rd(WR1.code())),
+                    2 => dynasm!(self.asm; xor Rw(WR0.code()), Rw(WR1.code())),
+                    1 => dynasm!(self.asm; xor Rb(WR0.code()), Rb(WR1.code())),
+                    _ => todo!(),
+                }
+                self.store_new_local(inst_idx, WR0);
+            }
+            x => todo!("{x:?}"),
         }
-
-        self.store_new_local(inst_idx, WR0);
-    }
-
-    fn cg_sub(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::SubInst) {
-        let lhs = inst.lhs();
-        let rhs = inst.rhs();
-
-        // Operand types must be the same.
-        debug_assert_eq!(
-            self.m.type_(lhs.ty_idx(self.m)),
-            self.m.type_(rhs.ty_idx(self.m))
-        );
-
-        self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
-        self.load_operand(WR1, &rhs); // ^^^ same
-
-        match lhs.byte_size(self.m) {
-            8 => dynasm!(self.asm; sub Rq(WR0.code()), Rq(WR1.code())),
-            4 => dynasm!(self.asm; sub Rd(WR0.code()), Rd(WR1.code())),
-            2 => dynasm!(self.asm; sub Rw(WR0.code()), Rw(WR1.code())),
-            1 => dynasm!(self.asm; sub Rb(WR0.code()), Rb(WR1.code())),
-            _ => todo!(),
-        }
-
-        self.store_new_local(inst_idx, WR0);
-    }
-
-    fn cg_and(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::AndInst) {
-        let lhs = inst.lhs();
-        let rhs = inst.rhs();
-
-        // Operand types must be the same.
-        debug_assert_eq!(
-            self.m.type_(lhs.ty_idx(self.m)),
-            self.m.type_(rhs.ty_idx(self.m))
-        );
-
-        self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
-        self.load_operand(WR1, &rhs); // ^^^ same
-
-        match lhs.byte_size(self.m) {
-            8 => dynasm!(self.asm; and Rq(WR0.code()), Rq(WR1.code())),
-            4 => dynasm!(self.asm; and Rd(WR0.code()), Rd(WR1.code())),
-            2 => dynasm!(self.asm; and Rw(WR0.code()), Rw(WR1.code())),
-            1 => dynasm!(self.asm; and Rb(WR0.code()), Rb(WR1.code())),
-            _ => todo!(),
-        }
-
-        self.store_new_local(inst_idx, WR0);
-    }
-
-    fn cg_or(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::OrInst) {
-        let lhs = inst.lhs();
-        let rhs = inst.rhs();
-
-        // Operand types must be the same.
-        debug_assert_eq!(
-            self.m.type_(lhs.ty_idx(self.m)),
-            self.m.type_(rhs.ty_idx(self.m))
-        );
-
-        self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
-        self.load_operand(WR1, &rhs); // ^^^ same
-
-        match lhs.byte_size(self.m) {
-            8 => dynasm!(self.asm; or Rq(WR0.code()), Rq(WR1.code())),
-            4 => dynasm!(self.asm; or Rd(WR0.code()), Rd(WR1.code())),
-            2 => dynasm!(self.asm; or Rw(WR0.code()), Rw(WR1.code())),
-            1 => dynasm!(self.asm; or Rb(WR0.code()), Rb(WR1.code())),
-            _ => todo!(),
-        }
-
-        self.store_new_local(inst_idx, WR0);
-    }
-
-    fn cg_xor(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::XorInst) {
-        let lhs = inst.lhs();
-        let rhs = inst.rhs();
-
-        // Operand types must be the same.
-        debug_assert_eq!(
-            self.m.type_(lhs.ty_idx(self.m)),
-            self.m.type_(rhs.ty_idx(self.m))
-        );
-
-        self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
-        self.load_operand(WR1, &rhs); // ^^^ same
-
-        match lhs.byte_size(self.m) {
-            8 => dynasm!(self.asm; xor Rq(WR0.code()), Rq(WR1.code())),
-            4 => dynasm!(self.asm; xor Rd(WR0.code()), Rd(WR1.code())),
-            2 => dynasm!(self.asm; xor Rw(WR0.code()), Rw(WR1.code())),
-            1 => dynasm!(self.asm; xor Rb(WR0.code()), Rb(WR1.code())),
-            _ => todo!(),
-        }
-
-        self.store_new_local(inst_idx, WR0);
-    }
-
-    fn cg_lshr(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::LShrInst) {
-        // FIXME: Constant 8 bit shift values can be passed as immediates in `shr` instructions.
-        let lhs = inst.lhs();
-        let rhs = inst.rhs();
-
-        // Operand types must be the same.
-        debug_assert_eq!(
-            self.m.type_(lhs.ty_idx(self.m)),
-            self.m.type_(rhs.ty_idx(self.m))
-        );
-
-        self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
-        self.load_operand(Rq::RCX, &rhs); // ^^^ same
-
-        match lhs.byte_size(self.m) {
-            8 => dynasm!(self.asm; shr Rq(WR0.code()), cl),
-            4 => dynasm!(self.asm; shr Rd(WR0.code()), cl),
-            2 => dynasm!(self.asm; shr Rw(WR0.code()), cl),
-            1 => dynasm!(self.asm; shr Rb(WR0.code()), cl),
-            _ => todo!(),
-        }
-
-        self.store_new_local(inst_idx, WR0);
-    }
-
-    fn cg_ashr(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::AShrInst) {
-        // FIXME: Constant 8 bit shift values can be passed as immediates in `sar` instructions.
-        let lhs = inst.lhs();
-        let rhs = inst.rhs();
-
-        // Operand types must be the same.
-        debug_assert_eq!(
-            self.m.type_(lhs.ty_idx(self.m)),
-            self.m.type_(rhs.ty_idx(self.m))
-        );
-
-        self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
-        self.load_operand(Rq::RCX, &rhs); // ^^^ same
-
-        match lhs.byte_size(self.m) {
-            8 => dynasm!(self.asm; sar Rq(WR0.code()), cl),
-            4 => dynasm!(self.asm; sar Rd(WR0.code()), cl),
-            2 => dynasm!(self.asm; sar Rw(WR0.code()), cl),
-            1 => dynasm!(self.asm; sar Rb(WR0.code()), cl),
-            _ => todo!(),
-        }
-
-        self.store_new_local(inst_idx, WR0);
-    }
-
-    fn cg_mul(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::MulInst) {
-        let lhs = inst.lhs();
-        let rhs = inst.rhs();
-
-        // Operand types must be the same.
-        debug_assert_eq!(
-            self.m.type_(lhs.ty_idx(self.m)),
-            self.m.type_(rhs.ty_idx(self.m))
-        );
-
-        // Note that the first operand is hard-coded to RAX in x86_64.
-        self.load_operand(Rq::RAX, &lhs); // FIXME: assumes value will fit in a reg.
-        self.load_operand(WR1, &rhs); // ^^^ same
-
-        match lhs.byte_size(self.m) {
-            8 => dynasm!(self.asm; mul Rq(WR1.code())),
-            4 => dynasm!(self.asm; mul Rd(WR1.code())),
-            2 => dynasm!(self.asm; mul Rw(WR1.code())),
-            1 => dynasm!(self.asm; mul Rb(WR1.code())),
-            _ => todo!(),
-        }
-
-        // Note that because we are code-genning an unchecked multiply, the higher-order part of
-        // the result in RDX is entirely ignored.
-        self.store_new_local(inst_idx, Rq::RAX);
-    }
-
-    fn cg_sdiv(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::SDivInst) {
-        let lhs = inst.lhs();
-        let rhs = inst.rhs();
-
-        // Operand types must be the same.
-        debug_assert_eq!(
-            self.m.type_(lhs.ty_idx(self.m)),
-            self.m.type_(rhs.ty_idx(self.m))
-        );
-
-        // The dividend is hard-coded into DX:AX/EDX:EAX/RDX:RAX. However unless we have 128bit
-        // values or want to optimise register usage, we won't be needing this, and just zero out
-        // RDX.
-        dynasm!(self.asm; xor rdx, rdx);
-        self.load_operand(Rq::RAX, &lhs); // FIXME: assumes value will fit in a reg.
-        self.load_operand(WR1, &rhs); // ^^^ same
-
-        match lhs.byte_size(self.m) {
-            8 => dynasm!(self.asm; idiv Rq(WR1.code())),
-            4 => dynasm!(self.asm; idiv Rd(WR1.code())),
-            2 => dynasm!(self.asm; idiv Rw(WR1.code())),
-            1 => dynasm!(self.asm; idiv Rb(WR1.code())),
-            _ => todo!(),
-        }
-
-        // The quotient is stored in RAX. We don't care about the remainder stored in RDX.
-        self.store_new_local(inst_idx, Rq::RAX);
-    }
-
-    fn cg_srem(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::SRemInst) {
-        // FIXME: This is identical to `cg_sdiv` except that the result of this operation can be
-        // found in RDX instead of RAX.
-        let lhs = inst.lhs();
-        let rhs = inst.rhs();
-
-        // Operand types must be the same.
-        debug_assert_eq!(
-            self.m.type_(lhs.ty_idx(self.m)),
-            self.m.type_(rhs.ty_idx(self.m))
-        );
-
-        // The dividend is hard-coded into DX:AX/EDX:EAX/RDX:RAX. However unless we have 128bit
-        // values or want to optimise register usage, we won't be needing this, and just zero out
-        // RDX.
-        dynasm!(self.asm; xor rdx, rdx);
-        self.load_operand(Rq::RAX, &lhs); // FIXME: assumes value will fit in a reg.
-        self.load_operand(WR1, &rhs); // ^^^ same
-
-        match lhs.byte_size(self.m) {
-            8 => dynasm!(self.asm; idiv Rq(WR1.code())),
-            4 => dynasm!(self.asm; idiv Rd(WR1.code())),
-            2 => dynasm!(self.asm; idiv Rw(WR1.code())),
-            1 => dynasm!(self.asm; idiv Rb(WR1.code())),
-            _ => todo!(),
-        }
-
-        // The remainder is stored in RDX. We don't care about the quotient stored in RAX.
-        self.store_new_local(inst_idx, Rq::RDX);
     }
 
     fn cg_loadtraceinput(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::LoadTraceInputInst) {

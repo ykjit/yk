@@ -8,12 +8,22 @@
 //!   of those arguments has the correct [super::Ty].
 //!   * Binary operations' left and right hand side operands have the same [Ty]s.
 
-use super::{BinOp, Inst, InstIdx, Module, Ty};
+use super::{Inst, InstIdx, Module, Ty};
 
 impl Module {
     pub(crate) fn assert_well_formed(&self) {
         for (i, inst) in self.insts.iter().enumerate() {
             match inst {
+                Inst::BinOp(x) => {
+                    if x.lhs().ty_idx(self) != x.rhs().ty_idx(self) {
+                        let inst_idx = InstIdx::new(i).unwrap();
+                        panic!(
+                            "Instruction at position {} has different types on lhs and rhs\n  {}",
+                            usize::from(inst_idx),
+                            self.inst(inst_idx).display(inst_idx, self)
+                        );
+                    }
+                }
                 Inst::Call(x) => {
                     // Check number of parameters/arguments.
                     let fdecl = self.func_decl(x.target());
@@ -48,37 +58,8 @@ impl Module {
                         }
                     }
                 }
-                Inst::Add(x) => self.assert_well_formed_bin_op(i, x),
-                Inst::Sub(x) => self.assert_well_formed_bin_op(i, x),
-                Inst::Mul(x) => self.assert_well_formed_bin_op(i, x),
-                Inst::Or(x) => self.assert_well_formed_bin_op(i, x),
-                Inst::And(x) => self.assert_well_formed_bin_op(i, x),
-                Inst::Xor(x) => self.assert_well_formed_bin_op(i, x),
-                Inst::Shl(x) => self.assert_well_formed_bin_op(i, x),
-                Inst::AShr(x) => self.assert_well_formed_bin_op(i, x),
-                Inst::FAdd(x) => self.assert_well_formed_bin_op(i, x),
-                Inst::FDiv(x) => self.assert_well_formed_bin_op(i, x),
-                Inst::FMul(x) => self.assert_well_formed_bin_op(i, x),
-                Inst::FRem(x) => self.assert_well_formed_bin_op(i, x),
-                Inst::FSub(x) => self.assert_well_formed_bin_op(i, x),
-                Inst::LShr(x) => self.assert_well_formed_bin_op(i, x),
-                Inst::SDiv(x) => self.assert_well_formed_bin_op(i, x),
-                Inst::SRem(x) => self.assert_well_formed_bin_op(i, x),
-                Inst::UDiv(x) => self.assert_well_formed_bin_op(i, x),
-                Inst::URem(x) => self.assert_well_formed_bin_op(i, x),
                 _ => (),
             }
-        }
-    }
-
-    fn assert_well_formed_bin_op<T: BinOp>(&self, inst_idx: usize, x: &T) {
-        if x.lhs().ty_idx(self) != x.rhs().ty_idx(self) {
-            let inst_idx = InstIdx::new(inst_idx).unwrap();
-            panic!(
-                "Instruction at position {} has different types on lhs and rhs\n  {}",
-                usize::from(inst_idx),
-                self.inst(inst_idx).display(inst_idx, self)
-            );
         }
     }
 }

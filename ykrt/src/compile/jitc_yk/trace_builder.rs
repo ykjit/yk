@@ -1,6 +1,6 @@
 //! The trace builder.
 
-use super::aot_ir::{self, BBlockId, FuncIdx, Module};
+use super::aot_ir::{self, BBlockId, BinOp, FuncIdx, Module};
 use super::jit_ir;
 use crate::compile::CompilationError;
 use crate::trace::{AOTTraceIterator, TraceAction};
@@ -247,7 +247,7 @@ impl<'a> TraceBuilder<'a> {
                     )
                 }
                 aot_ir::Inst::BinaryOp { lhs, binop, rhs } => {
-                    self.handle_binop(bid, inst_idx, binop, lhs, rhs)
+                    self.handle_binop(bid, inst_idx, *binop, lhs, rhs)
                 }
                 aot_ir::Inst::ICmp { lhs, pred, rhs, .. } => {
                     self.handle_icmp(bid, inst_idx, lhs, pred, rhs)
@@ -415,26 +415,14 @@ impl<'a> TraceBuilder<'a> {
         &mut self,
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
-        binop: &aot_ir::BinOp,
+        binop: aot_ir::BinOp,
         lhs: &aot_ir::Operand,
         rhs: &aot_ir::Operand,
     ) -> Result<(), CompilationError> {
         let lhs = self.handle_operand(lhs)?;
         let rhs = self.handle_operand(rhs)?;
-        let instr = match binop {
-            aot_ir::BinOp::Add => jit_ir::AddInst::new(lhs, rhs).into(),
-            aot_ir::BinOp::Sub => jit_ir::SubInst::new(lhs, rhs).into(),
-            aot_ir::BinOp::Mul => jit_ir::MulInst::new(lhs, rhs).into(),
-            aot_ir::BinOp::SDiv => jit_ir::SDivInst::new(lhs, rhs).into(),
-            aot_ir::BinOp::SRem => jit_ir::SRemInst::new(lhs, rhs).into(),
-            aot_ir::BinOp::And => jit_ir::AndInst::new(lhs, rhs).into(),
-            aot_ir::BinOp::Or => jit_ir::OrInst::new(lhs, rhs).into(),
-            aot_ir::BinOp::Xor => jit_ir::XorInst::new(lhs, rhs).into(),
-            aot_ir::BinOp::LShr => jit_ir::LShrInst::new(lhs, rhs).into(),
-            aot_ir::BinOp::AShr => jit_ir::AShrInst::new(lhs, rhs).into(),
-            _ => todo!("{binop:?}"),
-        };
-        self.copy_instruction(instr, bid, aot_inst_idx)
+        let inst = jit_ir::BinOpInst::new(lhs, binop, rhs).into();
+        self.copy_instruction(inst, bid, aot_inst_idx)
     }
 
     /// Create a guard.
@@ -725,9 +713,9 @@ impl<'a> TraceBuilder<'a> {
                 .to_owned()
                 .make_constant(&mut self.jit_mod, *size)?;
             let size_opnd = jit_ir::Operand::Const(self.jit_mod.insert_const(size_const)?);
-            let mul = self
-                .jit_mod
-                .push_and_make_operand(jit_ir::MulInst::new(count_opnd, size_opnd).into())?;
+            let mul = self.jit_mod.push_and_make_operand(
+                jit_ir::BinOpInst::new(count_opnd, BinOp::Mul, size_opnd).into(),
+            )?;
             jit_ptr = self
                 .jit_mod
                 .push_and_make_operand(jit_ir::PtrAddInst::new(jit_ptr, mul).into())?;
@@ -880,8 +868,8 @@ impl<'a> TraceBuilder<'a> {
                     } else {
                         // unwrap can't fail due to the above.
                         let lhs = jit_cond.take().unwrap();
-                        let and = jit_ir::OrInst::new(lhs, cmp);
-                        jit_cond = Some(self.jit_mod.push_and_make_operand(and.into())?);
+                        let or = jit_ir::BinOpInst::new(lhs, BinOp::Or, cmp);
+                        jit_cond = Some(self.jit_mod.push_and_make_operand(or.into())?);
                     }
                 }
 
