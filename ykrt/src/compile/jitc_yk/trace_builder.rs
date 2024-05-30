@@ -735,7 +735,7 @@ impl<'a> TraceBuilder<'a> {
         dest_ty_idx: &aot_ir::TyIdx,
     ) -> Result<(), CompilationError> {
         let inst = match cast_kind {
-            aot_ir::CastKind::SignExtend => jit_ir::SignExtendInst::new(
+            aot_ir::CastKind::SExt => jit_ir::SExtInst::new(
                 &self.handle_operand(val)?,
                 self.handle_type(self.aot_mod.type_(*dest_ty_idx))?,
             )
