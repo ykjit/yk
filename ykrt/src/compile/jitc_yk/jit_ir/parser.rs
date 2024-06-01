@@ -124,15 +124,16 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
         for bblock in bblocks.into_iter() {
             for inst in bblock.insts {
                 match inst {
-                    ASTInst::Add {
+                    ASTInst::BinOp {
                         assign,
                         type_: _,
+                        bin_op,
                         lhs,
                         rhs,
                     } => {
                         let inst = BinOpInst::new(
                             self.process_operand(lhs)?,
-                            BinOp::Add,
+                            bin_op,
                             self.process_operand(rhs)?,
                         );
                         self.add_assign(self.m.len(), assign)?;
@@ -229,20 +230,6 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                     ASTInst::SExt { assign, type_, val } => {
                         let inst =
                             SExtInst::new(&self.process_operand(val)?, self.process_type(type_)?);
-                        self.add_assign(self.m.len(), assign)?;
-                        self.m.push(inst.into()).unwrap();
-                    }
-                    ASTInst::SRem {
-                        assign,
-                        type_: _,
-                        lhs,
-                        rhs,
-                    } => {
-                        let inst = BinOpInst::new(
-                            self.process_operand(lhs)?,
-                            BinOp::SRem,
-                            self.process_operand(rhs)?,
-                        );
                         self.add_assign(self.m.len(), assign)?;
                         self.m.push(inst.into()).unwrap();
                     }
@@ -425,10 +412,11 @@ struct ASTBBlock {
 
 #[derive(Debug)]
 enum ASTInst {
-    Add {
+    BinOp {
         assign: Span,
         #[allow(dead_code)]
         type_: ASTType,
+        bin_op: BinOp,
         lhs: ASTOperand,
         rhs: ASTOperand,
     },
@@ -478,13 +466,6 @@ enum ASTInst {
         #[allow(dead_code)]
         type_: ASTType,
         val: ASTOperand,
-    },
-    SRem {
-        assign: Span,
-        #[allow(dead_code)]
-        type_: ASTType,
-        lhs: ASTOperand,
-        rhs: ASTOperand,
     },
     Store {
         val: ASTOperand,
@@ -572,7 +553,6 @@ mod tests {
               %0: i16 = load_ti 0
               %1: i16 = trunc %0
               %2: i16 = add %0, %1
-              %3: i16 = srem %1, %2
               %4: i16 = eq %1, %2
               tloop_start
               guard %4, true
@@ -586,6 +566,24 @@ mod tests {
               store %8, %9
               %10: i32 = load %9
               %11: i64 = sext %10
+              %12: i32 = add %0, %1
+              %13: i32 = sub %0, %1
+              %14: i32 = mul %0, %1
+              %15: i32 = or %0, %1
+              %16: i32 = and %0, %1
+              %17: i32 = xor %0, %1
+              %18: i32 = shl %0, %1
+              %19: i32 = ashr %0, %1
+              %20: i32 = fadd %0, %1
+              %21: i32 = fdiv %0, %1
+              %22: i32 = fmul %0, %1
+              %23: i32 = frem %0, %1
+              %24: i32 = fsub %0, %1
+              %25: i32 = lshr %0, %1
+              %26: i32 = sdiv %0, %1
+              %27: i32 = srem %0, %1
+              %28: i32 = udiv %0, %1
+              %29: i32 = urem %0, %1
         ",
         );
     }
