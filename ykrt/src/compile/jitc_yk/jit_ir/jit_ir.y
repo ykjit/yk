@@ -69,8 +69,8 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
   | "LOCAL_OPERAND" ":" Type "=" "LOAD_TI" "INT" {
       Ok(ASTInst::LoadTraceInput{assign: $1?.span(), type_: $3?, off: $6?.span()})
     }
-  | "LOCAL_OPERAND" ":" Type "=" "ADD" Operand "," Operand  {
-      Ok(ASTInst::Add{assign: $1?.span(), type_: $3?, lhs: $6?, rhs: $8?})
+  | "LOCAL_OPERAND" ":" Type "=" BinOp Operand "," Operand  {
+      Ok(ASTInst::BinOp{assign: $1?.span(), type_: $3?, bin_op: $5?, lhs: $6?, rhs: $8?})
     }
   | "LOCAL_OPERAND" ":" Type "=" "CALL" "GLOBAL" "(" CallArgs ")" {
       Ok(ASTInst::Call{assign: Some($1?.span()), name: $6?.span(), args: $8?})
@@ -90,9 +90,6 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
   | "LOCAL_OPERAND" ":" Type "=" "DYN_PTR_ADD" Operand "," Operand "," "INT" {
       Ok(ASTInst::DynPtrAdd{assign: $1?.span(), type_: $3?, ptr: $6?, num_elems: $8?, elem_size: $10?.span()})
     }
-  | "LOCAL_OPERAND" ":" Type "=" "SREM" Operand "," Operand {
-      Ok(ASTInst::SRem{assign: $1?.span(), type_: $3?, lhs: $6?, rhs: $8?})
-    }
   | "LOCAL_OPERAND" ":" Type "=" "SEXT" Operand {
       Ok(ASTInst::SExt{assign: $1?.span(), type_: $3?, val: $6? })
     }
@@ -111,6 +108,27 @@ Operand -> Result<ASTOperand, Box<dyn Error>>:
 Type -> Result<ASTType, Box<dyn Error>>:
     "INT_TYPE" { Ok(ASTType::Int($1?.span())) }
   | "PTR" { Ok(ASTType::Ptr) }
+  ;
+
+BinOp -> Result<BinOp, Box<dyn Error>>:
+    "ADD" { Ok(BinOp::Add) }
+  | "SUB" { Ok(BinOp::Sub) }
+  | "MUL" { Ok(BinOp::Mul) }
+  | "OR" { Ok(BinOp::Or) }
+  | "AND" { Ok(BinOp::And) }
+  | "XOR" { Ok(BinOp::Xor) }
+  | "SHL" { Ok(BinOp::Shl) }
+  | "ASHR" { Ok(BinOp::AShr) }
+  | "FADD" { Ok(BinOp::FAdd) }
+  | "FDIV" { Ok(BinOp::FDiv) }
+  | "FMUL" { Ok(BinOp::FMul) }
+  | "FREM" { Ok(BinOp::FRem) }
+  | "FSUB" { Ok(BinOp::FSub) }
+  | "LSHR" { Ok(BinOp::LShr) }
+  | "SDIV" { Ok(BinOp::SDiv) }
+  | "SREM" { Ok(BinOp::SRem) }
+  | "UDIV" { Ok(BinOp::UDiv) }
+  | "UREM" { Ok(BinOp::URem) }
   ;
 
 CallArgs -> Result<Vec<ASTOperand>, Box<dyn Error>>:
