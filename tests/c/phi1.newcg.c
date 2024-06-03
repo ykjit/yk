@@ -9,12 +9,12 @@
 //     jitstate: stop-tracing
 //     --- Begin aot ---
 //     ...
-//     %{{14_0}}: i32 = phi bb{{bb13}} -> 2i32, bb{{bb12}} -> 1i32
+//     %{{_}}: i32 = phi bb{{_}} -> 2i32, bb{{_}} -> 1i32
 //     ...
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{15}}: i32 = 1i32
+//     %{{_}}: i32 = call @fprintf(%{{_}}, %{{_}}, %{{_}}, 1i32)
 //     ...
 //     --- End jit-pre-opt ---
 //     i=3, val=1
