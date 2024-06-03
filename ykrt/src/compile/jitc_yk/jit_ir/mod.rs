@@ -211,9 +211,9 @@ impl Module {
         InstIdx::new(self.insts.len()).inspect(|_| self.insts.push(inst))
     }
 
-    /// Iterate over all the [Inst]s in this module.
-    pub(crate) fn iter_insts(&mut self) -> impl Iterator<Item = &Inst> {
-        self.insts.iter()
+    /// Iterate, in order, over the `InstIdx`s of this module.
+    pub(crate) fn iter_inst_idxs(&self) -> impl Iterator<Item = InstIdx> {
+        (0..self.insts.len()).map(|x| InstIdx::new(x).unwrap())
     }
 
     /// Mutably iterate over all the [Inst]s in this module.
@@ -221,9 +221,9 @@ impl Module {
         self.insts.iter_mut()
     }
 
-    /// Replace this modules [Insts]s with `insts`.
-    pub(crate) fn replace_insts(&mut self, insts: TiVec<InstIdx, Inst>) {
-        self.insts = insts;
+    /// Replace the instruction at `inst_idx` with `inst`.
+    pub(crate) fn replace(&mut self, inst_idx: InstIdx, inst: Inst) {
+        self.insts[inst_idx] = inst;
     }
 
     pub(crate) fn push_indirect_call(
@@ -921,6 +921,32 @@ impl Const {
             Const::I32(_) => m.int32_ty_idx,
             Const::I64(_) => m.int64_ty_idx,
             Const::Ptr(_) => m.ptr_ty_idx,
+        }
+    }
+
+    /// If this constant is an integer that can be represented in 64 bits, return it as an `i64`.
+    pub(crate) fn int_to_i64(&self) -> Option<i64> {
+        match self {
+            Const::I8(x) => Some(i64::from(*x)),
+            Const::I16(x) => Some(i64::from(*x)),
+            Const::I32(x) => Some(i64::from(*x)),
+            Const::I64(x) => Some(*x),
+            Const::Ptr(_) => None,
+        }
+    }
+
+    /// Create an integer of the same underlying type and with the value `x`.
+    ///
+    /// # Panics
+    ///
+    /// If `x` doesn't fit into the underlying integer type.
+    pub(crate) fn i64_to_int(&self, x: i64) -> Const {
+        match self {
+            Const::I8(_) => Const::I8(i8::try_from(x).unwrap()),
+            Const::I16(_) => Const::I16(i16::try_from(x).unwrap()),
+            Const::I32(_) => Const::I32(i32::try_from(x).unwrap()),
+            Const::I64(_) => Const::I64(x),
+            Const::Ptr(_) => panic!(),
         }
     }
 }
