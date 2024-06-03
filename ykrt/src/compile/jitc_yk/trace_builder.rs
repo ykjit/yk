@@ -895,8 +895,14 @@ impl<'a> TraceBuilder<'a> {
     ) -> Result<(), CompilationError> {
         // If the IR is well-formed the indexing and unwrap() here will not fail.
         let chosen_val = &incoming_vals[incoming_bbs.iter().position(|bb| bb == prev_bb).unwrap()];
-        let assign = jit_ir::AssignInst::new(&self.handle_operand(chosen_val)?);
-        self.copy_inst(assign.into(), bid, aot_inst_idx)
+        let aot_iit = aot_ir::InstID::new(
+            bid.func_idx(),
+            bid.bb_idx(),
+            aot_ir::InstIdx::new(aot_inst_idx),
+        );
+        let op = self.handle_operand(chosen_val)?;
+        self.local_map.insert(aot_iit, op);
+        Ok(())
     }
 
     fn u64_to_const(

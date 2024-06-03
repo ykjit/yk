@@ -5,22 +5,28 @@
 //   env-var: YKD_LOG_STATS=/dev/null
 //   stderr:
 //     jitstate: start-tracing
-//     i=4, val=2
+//     i=4, val=6
 //     jitstate: stop-tracing
 //     --- Begin aot ---
 //     ...
-//     %{{14_0}}: i32 = phi bb{{bb13}} -> 2i32, bb{{bb12}} -> 1i32
+//     %{{23_0}}: i32 = phi bb{{bb22}} -> 100i32, bb{{bb21}} -> 6i32
+//     ...
+//     %{{24_0}}: i32 = phi bb{{bb23}} -> %{{23_0}}, bb{{bb19}} -> 3i32
+//     ...
+//     %{{25_0}}: i32 = phi bb{{bb24}} -> %{{24_0}}, bb{{bb17}} -> 2i32
+//     ...
+//     %{{26_0}}: i32 = phi bb{{bb25}} -> %{{25_0}}, bb{{bb15}} -> 1i32
 //     ...
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{15}}: i32 = 2i32
+//     %{{_}}: i32 = call @fprintf(%{{_}}, %{{_}}, %{{_}}, 6i32)
 //     ...
 //     --- End jit-pre-opt ---
-//     i=3, val=2
+//     i=3, val=6
 //     jitstate: enter-jit-code
-//     i=2, val=2
-//     i=1, val=2
+//     i=2, val=6
+//     i=1, val=6
 //     jitstate: deoptimise
 
 // Check that PHI nodes JIT properly.
@@ -40,7 +46,7 @@ int main(int argc, char **argv) {
   YkLocation loc = yk_location_new();
 
   int val = 0;
-  int cond = -1;
+  int cond = -3;
   int i = 4;
   NOOPT_VAL(loc);
   NOOPT_VAL(val);
@@ -53,8 +59,14 @@ int main(int argc, char **argv) {
     NOOPT_VAL(cond);
     if (cond > 0) {
       val = 1;
-    } else {
+    } else if (cond == -1) {
       val = 2;
+    } else if (cond == -2) {
+      val = 3;
+    } else if (cond == -3) {
+      val = 6;
+    } else {
+      val = 100;
     }
     fprintf(stderr, "i=%d, val=%d\n", i, val);
     i--;
