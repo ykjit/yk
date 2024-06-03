@@ -7,7 +7,7 @@
 use super::super::{
     aot_ir::{BinOp, Predicate},
     jit_ir::{
-        BinOpInst, BlackBoxInst, DirectCallInst, DynPtrAddInst, FuncDecl, FuncTy, GuardInfo,
+        BinOpInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FuncDecl, FuncTy, GuardInfo,
         GuardInst, IcmpInst, Inst, InstIdx, IntegerTy, LoadInst, LoadTraceInputInst, Module,
         Operand, PtrAddInst, SExtInst, StoreInst, TruncInst, Ty, TyIdx,
     },
@@ -307,15 +307,12 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                 let width = type_
                     .parse::<u32>()
                     .map_err(|e| self.error_at_span(span, &e.to_string()))?;
-                let type_ = IntegerTy::new(width);
                 let const_ = match width {
                     32 => {
                         let val = val
                             .parse::<i32>()
                             .map_err(|e| self.error_at_span(span, &e.to_string()))?;
-                        type_
-                            .make_constant(self.m, val)
-                            .map_err(|e| self.error_at_span(span, &e.to_string()))?
+                        Const::I32(val)
                     }
                     x => todo!("{x}"),
                 };

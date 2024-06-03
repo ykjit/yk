@@ -18,7 +18,6 @@ use super::{
     CodeGen,
 };
 use crate::compile::{jitc_yk::jit_ir::IndirectCallIdx, CompiledTrace};
-use byteorder::{NativeEndian, ReadBytesExt};
 use dynasmrt::{
     components::StaticLabel, dynasm, x64::Rq, AssemblyOffset, DynasmApi, DynasmError,
     DynasmLabelApi, ExecutableBuffer, Register,
@@ -827,29 +826,13 @@ impl<'a> X64CodeGen<'a> {
 
     /// Load a constant into the specified register.
     fn load_const(&mut self, reg: Rq, cidx: jit_ir::ConstIdx) {
-        let cst = self.m.const_(cidx);
-        let mut bytes = cst.bytes().as_slice();
-        let size = self.m.type_(cst.ty_idx()).byte_size().unwrap();
-        debug_assert_eq!(bytes.len(), size);
-        match size {
-            8 => {
-                let val = bytes.read_i64::<NativeEndian>().unwrap();
-                dynasm!(self.asm; mov Rq(reg.code()), QWORD val);
-            }
-            4 => {
-                let val = bytes.read_i32::<NativeEndian>().unwrap();
-                dynasm!(self.asm; mov Rq(reg.code()), DWORD val);
-            }
-            2 => {
-                let val = bytes.read_i16::<NativeEndian>().unwrap();
-                dynasm!(self.asm; mov Rw(reg.code()), WORD val);
-            }
-            1 => {
-                let val = bytes.read_i8().unwrap();
-                dynasm!(self.asm; mov Rq(reg.code()), val as i32);
-            }
-            _ => todo!("{}", size),
-        };
+        match self.m.const_(cidx) {
+            jit_ir::Const::I8(x) => dynasm!(self.asm; mov Rq(reg.code()), i32::from(*x)),
+            jit_ir::Const::I16(x) => dynasm!(self.asm; mov Rw(reg.code()), WORD *x),
+            jit_ir::Const::I32(x) => dynasm!(self.asm; mov Rq(reg.code()), DWORD *x),
+            jit_ir::Const::I64(x) => dynasm!(self.asm; mov Rq(reg.code()), QWORD *x),
+            jit_ir::Const::Ptr(_) => todo!(),
+        }
     }
 
     fn store_local(&mut self, l: &LocalAlloc, reg: Rq, size: usize) {

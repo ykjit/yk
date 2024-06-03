@@ -30,7 +30,6 @@ mod well_formed;
 use super::aot_ir;
 use crate::compile::CompilationError;
 use indexmap::IndexSet;
-use num_traits::{PrimInt, ToBytes};
 use std::{
     ffi::{c_void, CString},
     fmt, mem,
@@ -71,6 +70,12 @@ pub(crate) struct Module {
     ptr_ty_idx: TyIdx,
     /// The type index of an 8-bit integer. Cached for convenience.
     int8_ty_idx: TyIdx,
+    /// The type index of a 16-bit integer. Cached for convenience.
+    int16_ty_idx: TyIdx,
+    /// The type index of a 32-bit integer. Cached for convenience.
+    int32_ty_idx: TyIdx,
+    /// The type index of a 64-bit integer. Cached for convenience.
+    int64_ty_idx: TyIdx,
     /// The function declaration pool. These are declarations of externally compiled functions that
     /// the JITted trace might need to call. Indexed by [FuncDeclIdx].
     func_decls: IndexSet<FuncDecl>,
@@ -117,6 +122,9 @@ impl Module {
         let void_ty_idx = TyIdx::new(types.insert_full(Ty::Void).0)?;
         let ptr_ty_idx = TyIdx::new(types.insert_full(Ty::Ptr).0)?;
         let int8_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(IntegerTy::new(8))).0)?;
+        let int16_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(IntegerTy::new(16))).0)?;
+        let int32_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(IntegerTy::new(32))).0)?;
+        let int64_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(IntegerTy::new(64))).0)?;
 
         // Find the global variable pointer array in the address space.
         //
@@ -138,6 +146,9 @@ impl Module {
             void_ty_idx,
             ptr_ty_idx,
             int8_ty_idx,
+            int16_ty_idx,
+            int32_ty_idx,
+            int64_ty_idx,
             func_decls: IndexSet::new(),
             global_decls: IndexSet::new(),
             guard_info: TiVec::new(),
@@ -437,30 +448,6 @@ impl IntegerTy {
         }
         // On any 32-bit-or-bigger platform, this `unwrap` can't fail.
         usize::try_from(ret).unwrap()
-    }
-
-    /// Make a constant of value `val` and of the type described by `self`.
-    ///
-    /// # Panics
-    ///
-    /// If the byte size of `T` is not exactly equal to `self.byte_size`.
-    pub(crate) fn make_constant<T: ToBytes + PrimInt>(
-        &self,
-        m: &mut Module,
-        val: T,
-    ) -> Result<Const, CompilationError> {
-        let ty = Ty::Integer(self.clone());
-        let bytes = ToBytes::to_ne_bytes(&val).as_ref().to_vec();
-        let ty_size = ty.byte_size().unwrap();
-        debug_assert!(ty_size == bytes.len());
-        let bytes_trunc = bytes[0..ty_size].to_owned();
-        let ty_idx = m.insert_ty(ty)?;
-        Ok(Const::new(ty_idx, bytes_trunc))
-    }
-
-    /// Format a constant integer value that is of the type described by `self`.
-    fn const_to_str(&self, c: &Const) -> String {
-        aot_ir::const_int_bytes_to_string(self.num_bits, c.bytes())
     }
 }
 
@@ -875,7 +862,7 @@ impl Operand {
     pub(crate) fn byte_size(&self, m: &Module) -> usize {
         match self {
             Self::Local(l) => m.inst(*l).def_byte_size(m),
-            Self::Const(cidx) => m.type_(m.const_(*cidx).ty_idx()).byte_size().unwrap(),
+            Self::Const(cidx) => m.type_(m.const_(*cidx).ty_idx(m)).byte_size().unwrap(),
         }
     }
 
@@ -883,7 +870,7 @@ impl Operand {
     pub(crate) fn ty_idx(&self, m: &Module) -> TyIdx {
         match self {
             Self::Local(l) => m.inst(*l).def_ty_idx(m),
-            Self::Const(c) => m.const_(*c).ty_idx(),
+            Self::Const(c) => m.const_(*c).ty_idx(m),
         }
     }
 
@@ -901,58 +888,41 @@ impl fmt::Display for DisplayableOperand<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.operand {
             Operand::Local(idx) => write!(f, "%{}", idx.to_u16()),
-            Operand::Const(idx) => write!(f, "{}", self.m.const_(*idx).display(self.m)),
+            Operand::Const(idx) => write!(f, "{}", self.m.const_(*idx)),
         }
     }
 }
 
-/// A constant value.
-///
-/// A constant value is represented as a type index and a "bag of bytes". The type index
-/// determines the interpretation of the byte bag.
+/// A constant.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct Const {
-    /// The type index of the constant value.
-    ty_idx: TyIdx,
-    /// The bytes of the constant value.
-    bytes: Vec<u8>,
+pub(crate) enum Const {
+    I8(i8),
+    I16(i16),
+    I32(i32),
+    I64(i64),
+    Ptr(*const ()),
 }
 
 impl Const {
-    pub(crate) fn new(ty_idx: TyIdx, bytes: Vec<u8>) -> Self {
-        Self { ty_idx, bytes }
-    }
-
-    pub(crate) fn ty_idx(&self) -> TyIdx {
-        self.ty_idx
-    }
-
-    pub(crate) fn bytes(&self) -> &Vec<u8> {
-        &self.bytes
-    }
-
-    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableConst<'a> {
-        DisplayableConst { const_: self, m }
+    pub(crate) fn ty_idx(&self, m: &Module) -> TyIdx {
+        match self {
+            Const::I8(_) => m.int8_ty_idx,
+            Const::I16(_) => m.int16_ty_idx,
+            Const::I32(_) => m.int32_ty_idx,
+            Const::I64(_) => m.int64_ty_idx,
+            Const::Ptr(_) => m.ptr_ty_idx,
+        }
     }
 }
 
-pub(crate) struct DisplayableConst<'a> {
-    const_: &'a Const,
-    m: &'a Module,
-}
-
-impl fmt::Display for DisplayableConst<'_> {
+impl fmt::Display for Const {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.m.type_(self.const_.ty_idx()) {
-            Ty::Integer(t) => write!(f, "{}", t.const_to_str(self.const_)),
-            Ty::Ptr => {
-                let ptr_size = mem::size_of::<usize>();
-                debug_assert_eq!(self.const_.bytes().len(), ptr_size);
-                // unwrap is safe: constant is malformed if there are too few bytes for a chunk.
-                let pval = usize::from_ne_bytes(*self.const_.bytes().first_chunk().unwrap());
-                write!(f, "{:#x}", pval)
-            }
-            x => todo!("{x:?}"),
+        match self {
+            Const::I8(x) => write!(f, "{x}i8"),
+            Const::I16(x) => write!(f, "{x}i16"),
+            Const::I32(x) => write!(f, "{x}i32"),
+            Const::I64(x) => write!(f, "{x}i64"),
+            Const::Ptr(x) => write!(f, "{:#x}", *x as usize),
         }
     }
 }
@@ -2013,68 +1983,23 @@ mod tests {
 
     #[test]
     fn stringify_int_consts() {
-        fn check<T: ToBytes + PrimInt>(m: &mut Module, num_bits: u32, val: T, expect: &str) {
-            assert!(mem::size_of::<T>() * 8 >= usize::try_from(num_bits).unwrap());
-            let c = IntegerTy::new(num_bits).make_constant(m, val).unwrap();
-            assert_eq!(c.display(m).to_string(), expect);
-        }
-
-        let mut m = Module::new_testing();
-
-        check(&mut m, 8, 0i8, "0i8");
-        check(&mut m, 8, 111i8, "111i8");
-        check(&mut m, 8, 127i8, "127i8");
-        check(&mut m, 8, -128i8, "-128i8");
-        check(&mut m, 8, -1i8, "-1i8");
-        check(&mut m, 16, 123i16, "123i16");
-        check(&mut m, 32, 123i32, "123i32");
-        check(&mut m, 64, 456i64, "456i64");
-        check(&mut m, 64, u64::MAX as i64, "-1i64");
-        check(&mut m, 64, i64::MAX, "9223372036854775807i64");
+        assert_eq!(Const::I8(0i8).to_string(), "0i8");
+        assert_eq!(Const::I8(111i8).to_string(), "111i8");
+        assert_eq!(Const::I8(127i8).to_string(), "127i8");
+        assert_eq!(Const::I8(-128i8).to_string(), "-128i8");
+        assert_eq!(Const::I8(-1i8).to_string(), "-1i8");
+        assert_eq!(Const::I16(123i16).to_string(), "123i16");
+        assert_eq!(Const::I32(123i32).to_string(), "123i32");
+        assert_eq!(Const::I64(456i64).to_string(), "456i64");
+        assert_eq!(Const::I64(u64::MAX as i64).to_string(), "-1i64");
+        assert_eq!(Const::I64(i64::MAX).to_string(), "9223372036854775807i64");
     }
 
     #[test]
     fn stringify_const_ptr() {
-        let m = Module::new_testing();
-        // Build a constant pointer with higher valued bytes towards the most-significant byte.
-        // Careful now: big endian stores the most significant byte first!
-        let rng = 0u8..(mem::size_of::<usize>() as u8);
-        #[cfg(target_endian = "little")]
-        let bytes = rng.clone().collect::<Vec<u8>>();
-        #[cfg(target_endian = "big")]
-        let bytes = rng.clone().rev().collect::<Vec<u8>>();
-
-        let cp = Const {
-            ty_idx: m.ptr_ty_idx(),
-            bytes,
-        };
-
-        let expect_bytes = rng.rev().map(|i| format!("{:02x}", i)).collect::<String>();
-        let expect_usize = usize::from_str_radix(&expect_bytes, 16).unwrap();
-        assert_eq!(
-            format!("{}", cp.display(&m)),
-            format!("{:#x}", expect_usize)
-        );
-    }
-
-    #[test]
-    fn stringify_const_ptr2() {
-        let m = Module::new_testing();
-        let ptr_val = stringify_const_ptr2 as *const u8 as usize;
-        let cp = Const {
-            ty_idx: m.ptr_ty_idx(),
-            bytes: ptr_val.to_ne_bytes().to_vec(),
-        };
-        assert_eq!(format!("{}", cp.display(&m)), format!("{:#x}", ptr_val));
-    }
-
-    #[cfg(debug_assertions)]
-    #[should_panic(expected = "ty_size == bytes.len()")]
-    #[test]
-    fn int_make_constant_invalid() {
-        let mut m = Module::new_testing();
-        let c = IntegerTy::new(64).make_constant(&mut m, 0xff05u16).unwrap();
-        assert_eq!(c.display(&m).to_string(), "5i8");
+        let ptr_val = stringify_const_ptr as *const ();
+        let cp = Const::Ptr(ptr_val);
+        assert_eq!(cp.to_string(), format!("{:#x}", ptr_val as usize));
     }
 
     #[test]
