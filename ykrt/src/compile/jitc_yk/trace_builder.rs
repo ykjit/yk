@@ -1,4 +1,6 @@
-//! The trace builder.
+//! The JIT IR trace builder.
+//!
+//! This takes in an (AOT IR, execution trace) pair and constructs a JIT IR trace from it.
 
 use super::aot_ir::{self, BBlockId, BinOp, FuncIdx, Module};
 use super::jit_ir;
@@ -38,8 +40,7 @@ impl<'a> Frame<'a> {
     }
 }
 
-/// Given a mapped trace and an AOT module, assembles an in-memory Yk IR trace by copying basic
-/// blocks from the AOT IR. The output of this process will be the input to the code generator.
+/// Given an execution trace and AOT IR, creates a JIT IR trace.
 pub(crate) struct TraceBuilder<'a> {
     /// The AOT IR.
     aot_mod: &'a Module,
