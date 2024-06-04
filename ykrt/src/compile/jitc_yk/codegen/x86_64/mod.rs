@@ -185,7 +185,6 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Inst::Icmp(i) => self.cg_icmp(inst_idx, i),
             jit_ir::Inst::Guard(i) => self.cg_guard(i),
             jit_ir::Inst::Arg(i) => self.cg_arg(inst_idx, *i),
-            jit_ir::Inst::Assign(i) => self.cg_assign(inst_idx, i),
             jit_ir::Inst::TraceLoopStart => self.cg_traceloopstart(),
             jit_ir::Inst::SExt(i) => self.cg_sext(inst_idx, i),
             jit_ir::Inst::ZeroExtend(i) => self.cg_zeroextend(inst_idx, i),
@@ -664,12 +663,6 @@ impl<'a> X64CodeGen<'a> {
         // For arguments passed into the trace function we simply inform the register allocator
         // where they are stored and let the allocator take things from there.
         self.store_new_local(inst_idx, ARG_REGS[usize::from(idx)]);
-    }
-
-    fn cg_assign(&mut self, inst_idx: InstIdx, i: &jit_ir::AssignInst) {
-        // Naive implementation.
-        self.load_operand(WR0, &i.opnd());
-        self.store_new_local(inst_idx, WR0);
     }
 
     fn cg_traceloopstart(&mut self) {

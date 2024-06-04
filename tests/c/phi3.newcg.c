@@ -5,28 +5,35 @@
 //   env-var: YKD_LOG_STATS=/dev/null
 //   stderr:
 //     jitstate: start-tracing
-//     i=4, val=6
+//     i=4, val=3
 //     jitstate: stop-tracing
 //     --- Begin aot ---
-//     ...
-//     %{{23_0}}: i32 = phi bb{{bb22}} -> 100i32, bb{{bb21}} -> 6i32
-//     ...
-//     %{{24_0}}: i32 = phi bb{{bb23}} -> %{{23_0}}, bb{{bb19}} -> 3i32
-//     ...
-//     %{{25_0}}: i32 = phi bb{{bb24}} -> %{{24_0}}, bb{{bb17}} -> 2i32
-//     ...
-//     %{{26_0}}: i32 = phi bb{{bb25}} -> %{{25_0}}, bb{{bb15}} -> 1i32
+//     ..~
+//     bb{{_}}:
+//       ...ptr_add...
+//       store...
+//       %{{13_2}}: i32 = call f() ...
+//     ..~
+//     bb{{_}}:
+//       ...ptr_add...
+//       store...
+//       %{{15_2}}: i32 = call g() ...
+//     ..~
+//     bb{{_}}:
+//       %{{_}}: i32 = phi bb{{_}} -> %{{15_2}}, bb{{_}} -> %{{13_2}}
 //     ...
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{15}}: i32 = 6i32
+//     %{{19}}: i32 = call @f()
+//     ...
+//     %{{_}}: i32 = call @fprintf(%{{_}}, %{{_}}, %{{_}}, %{{19}})
 //     ...
 //     --- End jit-pre-opt ---
-//     i=3, val=6
+//     i=3, val=3
 //     jitstate: enter-jit-code
-//     i=2, val=6
-//     i=1, val=6
+//     i=2, val=3
+//     i=1, val=3
 //     jitstate: deoptimise
 
 // Check that PHI nodes JIT properly.
@@ -40,33 +47,28 @@ bool test_compiled_event(YkCStats stats) {
   return stats.traces_compiled_ok == 1;
 }
 
+__attribute__((yk_outline)) int f() { return 3; }
+
+__attribute__((yk_outline)) int g() { return 4; }
+
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
-  int val = 0;
-  int cond = -3;
   int i = 4;
   NOOPT_VAL(loc);
-  NOOPT_VAL(val);
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
     if (i == 3) {
       __ykstats_wait_until(mt, test_compiled_event);
     }
-    NOOPT_VAL(cond);
-    if (cond > 0) {
-      val = 1;
-    } else if (cond == -1) {
-      val = 2;
-    } else if (cond == -2) {
-      val = 3;
-    } else if (cond == -3) {
-      val = 6;
+    int val;
+    if (i > 0) {
+      val = f();
     } else {
-      val = 100;
+      val = g();
     }
     fprintf(stderr, "i=%d, val=%d\n", i, val);
     i--;

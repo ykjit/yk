@@ -973,7 +973,6 @@ pub(crate) enum Inst {
     Arg(u16),
     /// Marks the place to loop back to at the end of the JITted code.
     TraceLoopStart,
-    Assign(AssignInst),
 
     // Cast-like instructions
     SExt(SExtInst),
@@ -1020,7 +1019,6 @@ impl Inst {
             Self::SExt(si) => si.dest_ty_idx(),
             Self::ZeroExtend(si) => si.dest_ty_idx(),
             Self::Trunc(t) => t.dest_ty_idx(),
-            Self::Assign(ai) => ai.opnd().ty_idx(m),
         }
     }
 
@@ -1164,7 +1162,6 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::Trunc(i) => {
                 write!(f, "trunc {}", i.val().display(self.m))
             }
-            Inst::Assign(i) => write!(f, "{}", i.opnd().display(self.m)),
         }
     }
 }
@@ -1194,7 +1191,6 @@ inst!(Guard, GuardInst);
 inst!(SExt, SExtInst);
 inst!(ZeroExtend, ZeroExtendInst);
 inst!(Trunc, TruncInst);
-inst!(Assign, AssignInst);
 
 /// The operands for a [Instruction::BinOp]
 ///
@@ -1791,24 +1787,6 @@ impl TruncInst {
 
     pub(crate) fn dest_ty_idx(&self) -> TyIdx {
         self.dest_ty_idx
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct AssignInst {
-    /// The condition to guard against.
-    opnd: PackedOperand,
-}
-
-impl AssignInst {
-    pub(crate) fn new(opnd: &Operand) -> Self {
-        Self {
-            opnd: PackedOperand::new(opnd),
-        }
-    }
-
-    pub(crate) fn opnd(&self) -> Operand {
-        self.opnd.unpack()
     }
 }
 
