@@ -340,6 +340,18 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         .map_err(|e| self.error_at_span(span, &e.to_string()))?,
                 ))
             }
+            ASTOperand::ConstPtr(span) => {
+                let s = self.lexer.span_str(span);
+                debug_assert!(matches!(&s[0..2], "0x" | "0X"));
+                let val = usize::from_str_radix(&s[2..], 16)
+                    .map_err(|e| self.error_at_span(span, &e.to_string()))?;
+                let const_ = Const::Ptr(val);
+                Ok(Operand::Const(
+                    self.m
+                        .insert_const(const_)
+                        .map_err(|e| self.error_at_span(span, &e.to_string()))?,
+                ))
+            }
             ASTOperand::Local(span) => {
                 let idx = self.lexer.span_str(span)[1..]
                     .parse::<usize>()
@@ -499,6 +511,7 @@ enum ASTInst {
 enum ASTOperand {
     Local(Span),
     ConstInt(Span),
+    ConstPtr(Span),
 }
 
 #[derive(Debug)]
@@ -611,6 +624,8 @@ mod tests {
               %39: i32 = add %32, -2147483648i32
               %40: i64 = add %33, 9223372036854775807i64
               %41: i64 = add %33, -9223372036854775808i64
+              *%9 = 0x0
+              *%9 = 0xFFFFFFFF
         ",
         );
     }
