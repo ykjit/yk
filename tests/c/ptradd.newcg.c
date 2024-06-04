@@ -1,0 +1,82 @@
+// ignore-if: test $YK_JIT_COMPILER != "yk" -o "$YKB_TRACER" = "swt"
+// Run-time:
+//   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
+//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YKD_LOG_STATS=/dev/null
+//   stderr:
+//     jitstate: start-tracing
+//     i=4, val=3, p=4
+//     jitstate: stop-tracing
+//     --- Begin aot ---
+//     ...
+//     %{{13_2}}: i32 = call f() ...
+//     ...
+//     %{{15_2}}: i32 = call g() ...
+//     ...
+//     %{{18_5}}: ptr = ptr_add %{{18_3}}, 0 + (%{{18_4}} * 1)
+//     ...
+//     --- End aot ---
+//     --- Begin jit-pre-opt ---
+//     ...
+//     %{{21}}: i32 = call @f()
+//     ...
+//     %{{25}}: i32 = add %{{21}}, 1i32
+//     ...
+//     %{{29}}: ptr = dyn_ptr_add %{{26}}, %{{27}}, 1
+//     %{{30}}: ptr = %{{29}}
+//     ...
+//     %{{_}}: i32 = call @fprintf(%{{_}}, %{{_}}, %{{_}}, %{{_}}, %{{_}})
+//     ...
+//     --- End jit-pre-opt ---
+//     i=3, val=3, p=8
+//     jitstate: enter-jit-code
+//     i=2, val=3, p=12
+//     i=1, val=3, p=16
+//     jitstate: deoptimise
+
+// Check that ptr addition in C input leads to the expected AOT and JIT IR.
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <yk.h>
+#include <yk_testing.h>
+
+bool test_compiled_event(YkCStats stats) {
+  return stats.traces_compiled_ok == 1;
+}
+
+__attribute__((yk_outline)) int f() { return 3; }
+
+__attribute__((yk_outline)) int g() { return 4; }
+
+int main(int argc, char **argv) {
+  YkMT *mt = yk_mt_new(NULL);
+  yk_mt_hot_threshold_set(mt, 0);
+  YkLocation loc = yk_location_new();
+
+  char *p_orig, *p;
+  p = p_orig = malloc(128);
+  int i = 4;
+  NOOPT_VAL(loc);
+  NOOPT_VAL(i);
+  NOOPT_VAL(p);
+  NOOPT_VAL(p_orig);
+  while (i > 0) {
+    yk_mt_control_point(mt, &loc);
+    if (i == 3) {
+      __ykstats_wait_until(mt, test_compiled_event);
+    }
+    int val;
+    if (i > 0) {
+      val = f();
+    } else {
+      val = g();
+    }
+    p += 1 + val;
+    fprintf(stderr, "i=%d, val=%d, p=%lu\n", i, val, p - p_orig);
+    i--;
+  }
+  yk_location_drop(loc);
+  yk_mt_drop(mt);
+  return (EXIT_SUCCESS);
+}
