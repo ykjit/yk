@@ -15,7 +15,7 @@ to print IR to stderr.
 
 The following stages are supported:
 
- - `aot`: the AOT IR embedded in the ahead-of-time compiled binary.
+ - `aot`: the entire AOT IR for the interpreter.
  - `jit-pre-opt`: the JIT IR trace before optimisation.
  - `jit-post-opt`: the JIT IR trace after optimisation.
 
