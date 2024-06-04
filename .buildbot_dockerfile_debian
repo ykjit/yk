@@ -5,7 +5,7 @@ RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
   rm -f /etc/apt/apt.conf.d/docker-clean && \
   apt-get update && \
   apt-get -y install clang-15 make curl procps file git cmake python3 \
-    libtinfo-dev libzip-dev mold ninja-build && \
+    libtinfo-dev libzip-dev mold ninja-build gdb && \
   update-alternatives --install /usr/bin/cc cc /usr/bin/clang-15 999 && \
   update-alternatives --set cc /usr/bin/clang-15 && \
   update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-15 999 && \

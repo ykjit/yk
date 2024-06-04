@@ -1,7 +1,11 @@
 use cfgrammar::yacc::YaccKind;
 use lrlex::{CTLexerBuilder, DefaultLexerTypes};
 
-use std::env;
+use {
+    std::env,
+    std::io::{self, Write},
+    std::process::{exit, Command},
+};
 
 pub fn main() {
     ykbuild::apply_llvm_ld_library_path();
@@ -41,4 +45,15 @@ pub fn main() {
         .unwrap()
         .build()
         .unwrap();
+
+    // Build the gdb plugin.
+    env::set_current_dir("yk_gdb_plugin").unwrap();
+    let out = Command::new("make").output().unwrap();
+    if !out.status.success() {
+        io::stderr().write_all(&out.stdout).unwrap();
+        io::stderr().write_all(&out.stderr).unwrap();
+        exit(1);
+    }
+    env::set_current_dir("..").unwrap();
+    println!("cargo::rerun-if-changed=yk_gdb_plugin/yk_gdb_plugin.c");
 }
