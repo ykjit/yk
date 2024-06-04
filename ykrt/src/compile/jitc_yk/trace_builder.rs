@@ -299,25 +299,35 @@ impl<'a> TraceBuilder<'a> {
         Ok(())
     }
 
+    /// Link the AOT IR to the last instruction pushed into the JIT IR.
+    fn link_iid_to_last_instr(&mut self, bid: &aot_ir::BBlockId, aot_inst_idx: usize) {
+        debug_assert!(self.jit_mod.len() > 0);
+        let aot_iid = aot_ir::InstID::new(
+            bid.func_idx(),
+            bid.bb_idx(),
+            aot_ir::InstIdx::new(aot_inst_idx),
+        );
+        // The unwrap is safe because we've already inserted an element at this index and proven
+        // that the index is in bounds.
+        self.local_map.insert(
+            aot_iid,
+            jit_ir::Operand::Local(jit_ir::InstIdx::new(self.jit_mod.len() - 1).unwrap()),
+        );
+    }
+
     fn copy_inst(
         &mut self,
         jit_inst: jit_ir::Inst,
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
     ) -> Result<(), CompilationError> {
-        // If the AOT instruction defines a new value, then add it to the local map.
         if jit_inst.def_type(&self.jit_mod).is_some() {
-            let aot_iid = aot_ir::InstID::new(
-                bid.func_idx(),
-                bid.bb_idx(),
-                aot_ir::InstIdx::new(aot_inst_idx),
-            );
-            self.local_map
-                .insert(aot_iid, jit_ir::Operand::Local(self.next_inst_id()?));
+            // If the AOT instruction defines a new value, then add it to the local map.
+            self.jit_mod.push(jit_inst)?;
+            self.link_iid_to_last_instr(bid, aot_inst_idx);
+        } else {
+            self.jit_mod.push(jit_inst)?;
         }
-
-        // Insert the newly-translated instruction into the JIT module.
-        self.jit_mod.push(jit_inst)?;
         Ok(())
     }
 
@@ -751,10 +761,8 @@ impl<'a> TraceBuilder<'a> {
                 jit_ir::DynPtrAddInst::new(jit_ptr, num_elems, elem_size).into(),
             )?;
         }
-
-        // OPT: the assignment instruction could be elided in some cases.
-        let inst = jit_ir::AssignInst::new(&jit_ptr);
-        self.copy_inst(inst.into(), bid, aot_inst_idx)
+        self.link_iid_to_last_instr(bid, aot_inst_idx);
+        Ok(())
     }
 
     fn handle_cast(
