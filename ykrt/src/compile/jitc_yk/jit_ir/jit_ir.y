@@ -66,7 +66,7 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
   | "GUARD" Operand "," "FALSE" {
       Ok(ASTInst::Guard{operand: $2?, is_true: false})
     }
-  | "LOCAL_OPERAND" ":" Type "=" "LOAD_TI" "INT" {
+  | "LOCAL_OPERAND" ":" Type "=" "LOAD_TI" "UINT" {
       Ok(ASTInst::LoadTraceInput{assign: $1?.span(), type_: $3?, off: $6?.span()})
     }
   | "LOCAL_OPERAND" ":" Type "=" BinOp Operand "," Operand  {
@@ -84,10 +84,10 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
   | "LOCAL_OPERAND" ":" Type "=" "LOAD" Operand {
       Ok(ASTInst::Load{assign: $1?.span(), type_: $3?, val: $6?})
     }
-  | "LOCAL_OPERAND" ":" Type "=" "PTR_ADD" Operand "," "INT" {
+  | "LOCAL_OPERAND" ":" Type "=" "PTR_ADD" Operand "," "UINT" {
       Ok(ASTInst::PtrAdd{assign: $1?.span(), type_: $3?, ptr: $6?, off: $8?.span()})
     }
-  | "LOCAL_OPERAND" ":" Type "=" "DYN_PTR_ADD" Operand "," Operand "," "INT" {
+  | "LOCAL_OPERAND" ":" Type "=" "DYN_PTR_ADD" Operand "," Operand "," "UINT" {
       Ok(ASTInst::DynPtrAdd{assign: $1?.span(), type_: $3?, ptr: $6?, num_elems: $8?, elem_size: $10?.span()})
     }
   | "LOCAL_OPERAND" ":" Type "=" "SEXT" Operand {

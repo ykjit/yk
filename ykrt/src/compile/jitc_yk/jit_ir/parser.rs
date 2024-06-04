@@ -308,13 +308,31 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                     .parse::<u32>()
                     .map_err(|e| self.error_at_span(span, &e.to_string()))?;
                 let const_ = match width {
+                    64 => {
+                        let val = val
+                            .parse::<i64>()
+                            .map_err(|e| self.error_at_span(span, &e.to_string()))?;
+                        Const::I64(val)
+                    }
                     32 => {
                         let val = val
                             .parse::<i32>()
                             .map_err(|e| self.error_at_span(span, &e.to_string()))?;
                         Const::I32(val)
                     }
-                    x => todo!("{x}"),
+                    16 => {
+                        let val = val
+                            .parse::<i16>()
+                            .map_err(|e| self.error_at_span(span, &e.to_string()))?;
+                        Const::I16(val)
+                    }
+                    8 => {
+                        let val = val
+                            .parse::<i8>()
+                            .map_err(|e| self.error_at_span(span, &e.to_string()))?;
+                        Const::I8(val)
+                    }
+                    x => todo!("{x:}"),
                 };
                 Ok(Operand::Const(
                     self.m
@@ -581,6 +599,18 @@ mod tests {
               %27: i32 = srem %0, %1
               %28: i32 = udiv %0, %1
               %29: i32 = urem %0, %1
+              %30: i8 = load_ti 4
+              %31: i16 = load_ti 5
+              %32: i32 = load_ti 5
+              %33: i64 = load_ti 6
+              %34: i8 = add %30, 127i8
+              %35: i8 = add %30, -128i8
+              %36: i16 = add %31, 32767i16
+              %37: i16 = add %31, -32768i16
+              %38: i32 = add %32, 2147483647i32
+              %39: i32 = add %32, -2147483648i32
+              %40: i64 = add %33, 9223372036854775807i64
+              %41: i64 = add %33, -9223372036854775808i64
         ",
         );
     }
