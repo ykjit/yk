@@ -973,7 +973,7 @@ impl fmt::Display for DisplayableInst<'_> {
                 Some(v) => write!(f, "ret {}", v.display(self.m)),
             },
             Inst::Store { ptr, val } => {
-                write!(f, "store {}, {}", val.display(self.m), ptr.display(self.m))
+                write!(f, "*{} = {}", ptr.display(self.m), val.display(self.m))
             }
             Inst::InsertValue { agg, elem } => write!(
                 f,

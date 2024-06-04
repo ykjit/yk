@@ -1128,7 +1128,7 @@ impl fmt::Display for DisplayableInst<'_> {
             }
             Inst::Store(x) => write!(
                 f,
-                "store {}, {}",
+                "*{} = {}",
                 x.val.unpack().display(self.m),
                 x.ptr.unpack().display(self.m)
             ),

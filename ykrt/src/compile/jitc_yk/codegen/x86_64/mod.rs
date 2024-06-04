@@ -1139,11 +1139,11 @@ mod tests {
               entry:
                 %0: ptr = load_ti 0
                 %1: ptr = load_ti 8
-                store %0, %1
+                *%1 = %0
             ",
                 "
                 ...
-                ; store %0, %1
+                ; *%1 = %0
                 ... mov r12, [rbp-0x10]
                 ... mov r13, [rbp-0x08]
                 ... mov [r12], r13
