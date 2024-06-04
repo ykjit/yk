@@ -59,7 +59,8 @@ Insts -> Result<Vec<ASTInst>, Box<dyn Error>>:
   ;
 
 Inst -> Result<ASTInst, Box<dyn Error>>:
-    "BLACK_BOX" Operand { Ok(ASTInst::BlackBox($2?)) }
+    "*" Operand "=" Operand { Ok(ASTInst::Store{tgt: $2?, val: $4?}) }
+  | "BLACK_BOX" Operand { Ok(ASTInst::BlackBox($2?)) }
   | "GUARD" Operand "," "TRUE" {
       Ok(ASTInst::Guard{operand: $2?, is_true: true})
     }
@@ -96,7 +97,6 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
   | "LOCAL_OPERAND" ":" Type "=" "TRUNC" Operand {
       Ok(ASTInst::Trunc{assign: $1?.span(), type_: $3?, operand: $6? })
     }
-  | "STORE" Operand "," Operand { Ok(ASTInst::Store{val: $2?, ptr: $4?}) }
   | "TLOOP_START" { Ok(ASTInst::TraceLoopStart) }
   ;
 

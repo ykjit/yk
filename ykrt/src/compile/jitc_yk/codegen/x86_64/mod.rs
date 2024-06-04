@@ -498,7 +498,7 @@ impl<'a> X64CodeGen<'a> {
     }
 
     fn cg_store(&mut self, inst: &jit_ir::StoreInst) {
-        self.load_operand(WR0, &inst.ptr());
+        self.load_operand(WR0, &inst.tgt());
         let val = inst.val();
         self.load_operand(WR1, &val); // FIXME: assumes the value fits in a reg
         match val.byte_size(self.m) {
@@ -1139,11 +1139,11 @@ mod tests {
               entry:
                 %0: ptr = load_ti 0
                 %1: ptr = load_ti 8
-                store %0, %1
+                *%1 = %0
             ",
                 "
                 ...
-                ; store %0, %1
+                ; *%1 = %0
                 ... mov r12, [rbp-0x10]
                 ... mov r13, [rbp-0x08]
                 ... mov [r12], r13

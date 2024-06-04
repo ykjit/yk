@@ -224,7 +224,7 @@ impl<'a> TraceBuilder<'a> {
                     let nextinst = blk.insts.last().unwrap();
                     self.handle_indirectcall(inst, bid, inst_idx, fty_idx, callop, args, nextinst)
                 }
-                aot_ir::Inst::Store { val, ptr } => self.handle_store(bid, inst_idx, val, ptr),
+                aot_ir::Inst::Store { tgt, val } => self.handle_store(bid, inst_idx, tgt, val),
                 aot_ir::Inst::PtrAdd {
                     ptr,
                     const_off,
@@ -715,11 +715,11 @@ impl<'a> TraceBuilder<'a> {
         &mut self,
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
+        tgt: &aot_ir::Operand,
         val: &aot_ir::Operand,
-        ptr: &aot_ir::Operand,
     ) -> Result<(), CompilationError> {
         let inst =
-            jit_ir::StoreInst::new(self.handle_operand(val)?, self.handle_operand(ptr)?).into();
+            jit_ir::StoreInst::new(self.handle_operand(tgt)?, self.handle_operand(val)?).into();
         self.copy_inst(inst, bid, aot_inst_idx)
     }
 
