@@ -1037,6 +1037,24 @@ impl<'a> TraceBuilder<'a> {
                                 None
                             };
                             self.process_block(&bid, &prev_bid, nextbb)?;
+                            if self.cp_block.as_ref() == Some(&bid) {
+                                // When using the hardware tracer we will see two control point
+                                // blocks here. We must only process one of them. The simplest way
+                                // to do this that is compatible with the software tracer is to
+                                // start outlining here by setting the outlining stop target to
+                                // this blocks successor.
+                                let blk = self.aot_mod.bblock(&bid);
+                                let br = blk.insts.iter().last();
+                                // Unwrap safe: block guaranteed to have instructions.
+                                match br.unwrap() {
+                                    aot_ir::Inst::Br { succ } => {
+                                        let succbid = BBlockId::new(bid.func_idx(), *succ);
+                                        self.outline_target_blk = Some(succbid);
+                                        self.recursion_count = 0;
+                                    }
+                                    _ => panic!(),
+                                }
+                            }
                             prev_bid = Some(bid);
                         }
                         None => {
