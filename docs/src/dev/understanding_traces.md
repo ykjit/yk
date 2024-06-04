@@ -11,19 +11,13 @@ to make them a bit easier to understand.
 ### `YKD_LOG_IR`
 
 `YKD_LOG_IR` accepts a comma-separated list of JIT pipeline stages at which
-to print LLVM IR (to stderr).
+to print IR to stderr.
 
 The following stages are supported:
 
- - `aot`: the IR embedded in the ahead-of-time compiled binary.
- - `jit-pre-opt`: the IR for the trace before it is optimised by LLVM.
- - `jit-post-opt`: the IR for the trace after LLVM has optimised it. This is
-   the IR that will be submitted to the LLVM code generator.
-
-If `jit-pre-opt` is specified, the traces will be printed before optimisation;
-if `jit-post-opt` is specified, the traces will be printed after optimisation.
-`jit-pre-opt` and `jit-post-opt` can give you different insights, so it is
-often worth checking both.
+ - `aot`: the AOT IR embedded in the ahead-of-time compiled binary.
+ - `jit-pre-opt`: the JIT IR trace before optimisation.
+ - `jit-post-opt`: the JIT IR trace after optimisation.
 
 
 #### `YKD_TRACE_DEBUGINFO`
