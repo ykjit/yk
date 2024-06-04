@@ -1129,8 +1129,8 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::Store(x) => write!(
                 f,
                 "*{} = {}",
-                x.val.unpack().display(self.m),
-                x.ptr.unpack().display(self.m)
+                x.tgt.unpack().display(self.m),
+                x.val.unpack().display(self.m)
             ),
             Inst::Icmp(x) => write!(
                 f,
@@ -1520,21 +1520,20 @@ impl DirectCallInst {
 /// # Semantics
 ///
 /// Stores a value into a pointer.
-///
 #[derive(Clone, Debug, PartialEq)]
 pub struct StoreInst {
+    /// The target pointer that we will store `val` into.
+    tgt: PackedOperand,
     /// The value to store.
     val: PackedOperand,
-    /// The pointer to store into.
-    ptr: PackedOperand,
 }
 
 impl StoreInst {
-    pub(crate) fn new(val: Operand, ptr: Operand) -> Self {
+    pub(crate) fn new(tgt: Operand, val: Operand) -> Self {
         // FIXME: assert type of pointer
         Self {
+            tgt: PackedOperand::new(&tgt),
             val: PackedOperand::new(&val),
-            ptr: PackedOperand::new(&ptr),
         }
     }
 
@@ -1543,9 +1542,9 @@ impl StoreInst {
         self.val.unpack()
     }
 
-    /// Returns the pointer operand: i.e. where to store the thing.
-    pub(crate) fn ptr(&self) -> Operand {
-        self.ptr.unpack()
+    /// Returns the target operand: i.e. where to store [self.val()].
+    pub(crate) fn tgt(&self) -> Operand {
+        self.tgt.unpack()
     }
 }
 

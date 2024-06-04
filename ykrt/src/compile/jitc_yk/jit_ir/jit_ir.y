@@ -59,7 +59,7 @@ Insts -> Result<Vec<ASTInst>, Box<dyn Error>>:
   ;
 
 Inst -> Result<ASTInst, Box<dyn Error>>:
-    "*" Operand "=" Operand { Ok(ASTInst::Store{ptr: $2?, val: $4?}) }
+    "*" Operand "=" Operand { Ok(ASTInst::Store{tgt: $2?, val: $4?}) }
   | "BLACK_BOX" Operand { Ok(ASTInst::BlackBox($2?)) }
   | "GUARD" Operand "," "TRUE" {
       Ok(ASTInst::Guard{operand: $2?, is_true: true})

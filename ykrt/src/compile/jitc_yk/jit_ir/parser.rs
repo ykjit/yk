@@ -233,9 +233,9 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         self.add_assign(self.m.len(), assign)?;
                         self.m.push(inst.into()).unwrap();
                     }
-                    ASTInst::Store { val, ptr } => {
+                    ASTInst::Store { tgt, val } => {
                         let inst =
-                            StoreInst::new(self.process_operand(val)?, self.process_operand(ptr)?);
+                            StoreInst::new(self.process_operand(tgt)?, self.process_operand(val)?);
                         self.m.push(inst.into()).unwrap();
                     }
                     ASTInst::BlackBox(op) => {
@@ -483,8 +483,8 @@ enum ASTInst {
         val: ASTOperand,
     },
     Store {
+        tgt: ASTOperand,
         val: ASTOperand,
-        ptr: ASTOperand,
     },
     BlackBox(ASTOperand),
     TraceLoopStart,

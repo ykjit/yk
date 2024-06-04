@@ -598,7 +598,7 @@ pub(crate) enum Inst {
     #[deku(id = "1")]
     Load { ptr: Operand, ty_idx: TyIdx },
     #[deku(id = "2")]
-    Store { val: Operand, ptr: Operand },
+    Store { val: Operand, tgt: Operand },
     #[deku(id = "3")]
     Alloca {
         ty_idx: TyIdx,
@@ -972,8 +972,8 @@ impl fmt::Display for DisplayableInst<'_> {
                 None => write!(f, "ret"),
                 Some(v) => write!(f, "ret {}", v.display(self.m)),
             },
-            Inst::Store { ptr, val } => {
-                write!(f, "*{} = {}", ptr.display(self.m), val.display(self.m))
+            Inst::Store { tgt, val } => {
+                write!(f, "*{} = {}", tgt.display(self.m), val.display(self.m))
             }
             Inst::InsertValue { agg, elem } => write!(
                 f,
