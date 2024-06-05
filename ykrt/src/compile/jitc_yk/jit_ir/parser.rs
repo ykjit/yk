@@ -176,9 +176,17 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         let inst = GuardInst::new(self.process_operand(operand)?, is_true, gidx);
                         self.m.push(inst.into()).unwrap();
                     }
-                    ASTInst::Load { assign, type_, val } => {
-                        let inst =
-                            LoadInst::new(self.process_operand(val)?, self.process_type(type_)?);
+                    ASTInst::Load {
+                        assign,
+                        type_,
+                        val,
+                        volatile,
+                    } => {
+                        let inst = LoadInst::new(
+                            self.process_operand(val)?,
+                            self.process_type(type_)?,
+                            volatile,
+                        );
                         self.add_assign(self.m.len(), assign)?;
                         self.m.push(inst.into()).unwrap();
                     }
@@ -233,9 +241,12 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         self.add_assign(self.m.len(), assign)?;
                         self.m.push(inst.into()).unwrap();
                     }
-                    ASTInst::Store { tgt, val } => {
-                        let inst =
-                            StoreInst::new(self.process_operand(tgt)?, self.process_operand(val)?);
+                    ASTInst::Store { tgt, val, volatile } => {
+                        let inst = StoreInst::new(
+                            self.process_operand(tgt)?,
+                            self.process_operand(val)?,
+                            volatile,
+                        );
                         self.m.push(inst.into()).unwrap();
                     }
                     ASTInst::BlackBox(op) => {
@@ -467,6 +478,7 @@ enum ASTInst {
         assign: Span,
         type_: ASTType,
         val: ASTOperand,
+        volatile: bool,
     },
     LoadTraceInput {
         assign: Span,
@@ -497,6 +509,7 @@ enum ASTInst {
     Store {
         tgt: ASTOperand,
         val: ASTOperand,
+        volatile: bool,
     },
     BlackBox(ASTOperand),
     TraceLoopStart,

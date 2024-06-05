@@ -59,7 +59,8 @@ Insts -> Result<Vec<ASTInst>, Box<dyn Error>>:
   ;
 
 Inst -> Result<ASTInst, Box<dyn Error>>:
-    "*" Operand "=" Operand { Ok(ASTInst::Store{tgt: $2?, val: $4?}) }
+    "*" Operand "=" Operand { Ok(ASTInst::Store{tgt: $2?, val: $4?, volatile: false}) }
+  | "*" Operand "=" Operand "," "VOLATILE" { Ok(ASTInst::Store{tgt: $2?, val: $4?, volatile: true}) }
   | "BLACK_BOX" Operand { Ok(ASTInst::BlackBox($2?)) }
   | "GUARD" Operand "," "TRUE" {
       Ok(ASTInst::Guard{operand: $2?, is_true: true})
@@ -83,7 +84,10 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
       Ok(ASTInst::Eq{assign: $1?.span(), type_: $3?, lhs: $6?, rhs: $8?})
     }
   | "LOCAL_OPERAND" ":" Type "=" "LOAD" Operand {
-      Ok(ASTInst::Load{assign: $1?.span(), type_: $3?, val: $6?})
+      Ok(ASTInst::Load{assign: $1?.span(), type_: $3?, val: $6?, volatile: false})
+    }
+  | "LOCAL_OPERAND" ":" Type "=" "LOAD" Operand "," "VOLATILE" {
+      Ok(ASTInst::Load{assign: $1?.span(), type_: $3?, val: $6?, volatile: true})
     }
   | "LOCAL_OPERAND" ":" Type "=" "PTR_ADD" Operand "," "UINT" {
       Ok(ASTInst::PtrAdd{assign: $1?.span(), type_: $3?, ptr: $6?, off: $8?.span()})

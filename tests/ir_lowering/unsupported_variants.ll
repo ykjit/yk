@@ -34,7 +34,6 @@
 ;         unimplemented <<  %{{27}} = icmp ne <4 x i32> %{{444}}, zeroinitializer>>
 ;         br bb6
 ;     bb6:
-;         unimplemented <<  %{{_}} = load volatile i32, ptr %{{_}}, align 4>>
 ;         unimplemented <<  %{{_}} = load atomic i32, ptr %{{_}} acquire, align 4>>
 ;         unimplemented <<  %{{_}} = load i32, ptr addrspace(10) %{{_}}, align 4>>
 ;         unimplemented <<  %{{_}} = load i32, ptr %{{_}}, align 2>>
@@ -44,7 +43,6 @@
 ;       unimplemented <<  %{{_}} = phi nnan float...
 ;       br bb11
 ;     bb11:
-;       unimplemented <<  store volatile i32 0, ptr %0, align 4>>
 ;       unimplemented <<  store atomic i32 0, ptr %0 release, align 4>>
 ;       unimplemented <<  store i32 0, ptr addrspace(10) %5, align 4>>
 ;       unimplemented <<  store i32 0, ptr %0, align 2>>
@@ -133,8 +131,6 @@ icmps:
   call void (i64, i32, ...) @llvm.experimental.stackmap(i64 8, i32 0, <4 x i1> %icmp_vec);
   br label %loads
 loads:
-  ; volatile loads
-  %load_vol = load volatile i32, ptr %ptr
   ; atomic loads
   ; note: atomic load must have explicit non-zero alignment
   %load_atom = load atomic i32, ptr %ptr acquire, align 4
@@ -143,12 +139,12 @@ loads:
   ; potentially misaligned loads
   %load_misalign = load i32, ptr %ptr, align 2
   ; stackmap stops loads from being optimised out.
-  call void (i64, i32, ...) @llvm.experimental.stackmap(i64 8, i32 0, i32 %load_vol)
+  call void (i64, i32, ...) @llvm.experimental.stackmap(i64 8, i32 0)
   br label %phi_setup1
 phi_setup1:
   ; LLVM checks for nonsense PHI nodes, so we have to have sensible control
   ; flow to test them.
-  call void (i64, i32, ...) @llvm.experimental.stackmap(i64 9, i32 0, i32 %load_vol)
+  call void (i64, i32, ...) @llvm.experimental.stackmap(i64 9, i32 0)
   br i1 %choice, label %phi_true, label %phi_false
 phi_true:
   br label %phis
@@ -159,8 +155,6 @@ phis:
   %phi_fastmath = phi nnan float [0.0, %phi_true], [0.0, %phi_false]
   br label %stores
 stores:
-  ; volatile store
-  store volatile i32 0, ptr %ptr
   ; atomic store
   ; note: atomic store must have explicit non-zero alignment
   store atomic i32 0, ptr %ptr release, align 4

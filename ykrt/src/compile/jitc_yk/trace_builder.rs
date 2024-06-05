@@ -208,7 +208,11 @@ impl<'a> TraceBuilder<'a> {
         for (inst_idx, inst) in blk.insts.iter().enumerate() {
             match inst {
                 aot_ir::Inst::Br { .. } => Ok(()),
-                aot_ir::Inst::Load { ptr, ty_idx } => self.handle_load(bid, inst_idx, ptr, ty_idx),
+                aot_ir::Inst::Load {
+                    ptr,
+                    ty_idx,
+                    volatile,
+                } => self.handle_load(bid, inst_idx, ptr, ty_idx, *volatile),
                 // FIXME: ignore remaining instructions after a call.
                 aot_ir::Inst::Call { callee, args, .. } => {
                     // Get the branch instruction of this block.
@@ -224,7 +228,9 @@ impl<'a> TraceBuilder<'a> {
                     let nextinst = blk.insts.last().unwrap();
                     self.handle_indirectcall(inst, bid, inst_idx, fty_idx, callop, args, nextinst)
                 }
-                aot_ir::Inst::Store { tgt, val } => self.handle_store(bid, inst_idx, tgt, val),
+                aot_ir::Inst::Store { tgt, val, volatile } => {
+                    self.handle_store(bid, inst_idx, tgt, val, *volatile)
+                }
                 aot_ir::Inst::PtrAdd {
                     ptr,
                     const_off,
@@ -582,10 +588,12 @@ impl<'a> TraceBuilder<'a> {
         aot_inst_idx: usize,
         ptr: &aot_ir::Operand,
         ty_idx: &aot_ir::TyIdx,
+        volatile: bool,
     ) -> Result<(), CompilationError> {
         let inst = jit_ir::LoadInst::new(
             self.handle_operand(ptr)?,
             self.handle_type(self.aot_mod.type_(*ty_idx))?,
+            volatile,
         )
         .into();
         self.copy_inst(inst, bid, aot_inst_idx)
@@ -717,9 +725,14 @@ impl<'a> TraceBuilder<'a> {
         aot_inst_idx: usize,
         tgt: &aot_ir::Operand,
         val: &aot_ir::Operand,
+        volatile: bool,
     ) -> Result<(), CompilationError> {
-        let inst =
-            jit_ir::StoreInst::new(self.handle_operand(tgt)?, self.handle_operand(val)?).into();
+        let inst = jit_ir::StoreInst::new(
+            self.handle_operand(tgt)?,
+            self.handle_operand(val)?,
+            volatile,
+        )
+        .into();
         self.copy_inst(inst, bid, aot_inst_idx)
     }
 

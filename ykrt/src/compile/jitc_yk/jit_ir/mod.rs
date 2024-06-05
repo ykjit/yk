@@ -1307,14 +1307,17 @@ pub struct LoadInst {
     op: PackedOperand,
     /// The type of the pointee.
     ty_idx: TyIdx,
+    /// Is this load volatile?
+    volatile: bool,
 }
 
 impl LoadInst {
     // FIXME: why do we need to provide a type index? Can't we get that from the operand?
-    pub(crate) fn new(op: Operand, ty_idx: TyIdx) -> LoadInst {
+    pub(crate) fn new(op: Operand, ty_idx: TyIdx, volatile: bool) -> LoadInst {
         LoadInst {
             op: PackedOperand::new(&op),
             ty_idx,
+            volatile,
         }
     }
 
@@ -1552,14 +1555,17 @@ pub struct StoreInst {
     tgt: PackedOperand,
     /// The value to store.
     val: PackedOperand,
+    /// Is this store volatile?
+    volatile: bool,
 }
 
 impl StoreInst {
-    pub(crate) fn new(tgt: Operand, val: Operand) -> Self {
+    pub(crate) fn new(tgt: Operand, val: Operand, volatile: bool) -> Self {
         // FIXME: assert type of pointer
         Self {
             tgt: PackedOperand::new(&tgt),
             val: PackedOperand::new(&val),
+            volatile,
         }
     }
 
@@ -1858,12 +1864,14 @@ mod tests {
             LoadInst::new(
                 Operand::Local(InstIdx(0)),
                 TyIdx(U24::from_usize(0).unwrap()),
+                false,
             )
             .into(),
         ];
         prog[2] = LoadInst::new(
             Operand::Local(InstIdx(1)),
             TyIdx(U24::from_usize(0).unwrap()),
+            false,
         )
         .into();
     }
