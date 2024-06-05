@@ -40,3 +40,28 @@ bin/gdb_c_test --help
 
 For help on using GDB, see the [GDB
 documentation](https://sourceware.org/gdb/documentation/).
+
+### GDB plugin
+
+Yk comes with a GDB plugin that allows the debugger to show higher-level
+information in the source view window.
+
+The plugin is built by default and put in `target/yk_gdb_plugin.so`.
+
+To use it, put this line in `~/.gdbinit`:
+```
+jit-reader-load /path/to/yk/target/yk_gdb_plugin.so
+```
+
+Then when you run GDB, you should see:
+```
+Yk JIT support loaded.
+```
+
+When you are inside JITted code, the source view will show higher-level
+debugging information. You can show the assembler and source views on one GDB
+screen using the "split" layout. Type:
+
+```
+la spl
+```
