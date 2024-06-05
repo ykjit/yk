@@ -845,7 +845,9 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Const::I16(x) => dynasm!(self.asm; mov Rw(reg.code()), WORD *x),
             jit_ir::Const::I32(x) => dynasm!(self.asm; mov Rq(reg.code()), DWORD *x),
             jit_ir::Const::I64(x) => dynasm!(self.asm; mov Rq(reg.code()), QWORD *x),
-            jit_ir::Const::Ptr(_) => todo!(),
+            jit_ir::Const::Ptr(x) => {
+                dynasm!(self.asm; mov Rq(reg.code()), QWORD i64::try_from(*x).unwrap())
+            }
         }
     }
 
@@ -1086,6 +1088,25 @@ mod tests {
                 ... mov r12d, [rbp-0x04]
                 ... mov r12d, [r12]
                 ... mov [rbp-0x08], r12d
+                ...
+                ",
+            );
+        }
+
+        #[test]
+        fn cg_load_const_ptr() {
+            test_with_spillalloc(
+                "
+              entry:
+                %0: ptr = load_ti 0
+                *%0 = 0x0
+            ",
+                "
+                ...
+                ; *%0 = 0x0
+                ... mov r12, [rbp-0x08]
+                ... mov r13, 0x00
+                ... mov [r12], r13
                 ...
                 ",
             );
