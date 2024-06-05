@@ -18,7 +18,10 @@ The following stages are supported:
  - `aot`: the entire AOT IR for the interpreter.
  - `jit-pre-opt`: the JIT IR trace before optimisation.
  - `jit-post-opt`: the JIT IR trace after optimisation.
+ - `jit-asm`: the assembler code of the compiled JIT IR trace.
 
+Note that `jit-asm` is currently only available for debug builds and in unit
+tests.
 
 #### `YKD_TRACE_DEBUGINFO`
 
