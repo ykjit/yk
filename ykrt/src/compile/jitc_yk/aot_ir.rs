@@ -596,9 +596,17 @@ pub(crate) enum Inst {
     #[deku(id = "0")]
     Nop,
     #[deku(id = "1")]
-    Load { ptr: Operand, ty_idx: TyIdx },
+    Load {
+        ptr: Operand,
+        ty_idx: TyIdx,
+        volatile: bool,
+    },
     #[deku(id = "2")]
-    Store { val: Operand, tgt: Operand },
+    Store {
+        val: Operand,
+        tgt: Operand,
+        volatile: bool,
+    },
     #[deku(id = "3")]
     Alloca {
         ty_idx: TyIdx,
@@ -943,7 +951,14 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::ICmp { lhs, pred, rhs, .. } => {
                 write!(f, "{pred} {}, {}", lhs.display(self.m), rhs.display(self.m))
             }
-            Inst::Load { ptr, .. } => write!(f, "load {}", ptr.display(self.m)),
+            Inst::Load {
+                ptr,
+                ty_idx: _,
+                volatile,
+            } => {
+                let vol = if *volatile { ", volatile" } else { "" };
+                write!(f, "load {}{}", ptr.display(self.m), vol)
+            }
             Inst::PtrAdd {
                 ptr,
                 const_off,
@@ -972,8 +987,15 @@ impl fmt::Display for DisplayableInst<'_> {
                 None => write!(f, "ret"),
                 Some(v) => write!(f, "ret {}", v.display(self.m)),
             },
-            Inst::Store { tgt, val } => {
-                write!(f, "*{} = {}", tgt.display(self.m), val.display(self.m))
+            Inst::Store { tgt, val, volatile } => {
+                let vol = if *volatile { ", volatile" } else { "" };
+                write!(
+                    f,
+                    "*{} = {}{}",
+                    tgt.display(self.m),
+                    val.display(self.m),
+                    vol
+                )
             }
             Inst::InsertValue { agg, elem } => write!(
                 f,
