@@ -4,6 +4,7 @@
 i[0-9]+ "INT_TYPE"
 -?[0-9]+i[0-9]+ "CONST_INT"
 [0-9]+ "UINT"
+0[xX][0-9a-fA-F]+ "CONST_PTR"
 add "ADD"
 and "AND"
 ashr "ASHR"

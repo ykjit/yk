@@ -910,7 +910,7 @@ pub(crate) enum Const {
     I16(i16),
     I32(i32),
     I64(i64),
-    Ptr(*const ()),
+    Ptr(usize),
 }
 
 impl Const {
@@ -958,7 +958,7 @@ impl fmt::Display for Const {
             Const::I16(x) => write!(f, "{x}i16"),
             Const::I32(x) => write!(f, "{x}i32"),
             Const::I64(x) => write!(f, "{x}i64"),
-            Const::Ptr(x) => write!(f, "{:#x}", *x as usize),
+            Const::Ptr(x) => write!(f, "{:#x}", *x),
         }
     }
 }
@@ -2010,7 +2010,7 @@ mod tests {
 
     #[test]
     fn stringify_const_ptr() {
-        let ptr_val = stringify_const_ptr as *const ();
+        let ptr_val = stringify_const_ptr as usize;
         let cp = Const::Ptr(ptr_val);
         assert_eq!(cp.to_string(), format!("{:#x}", ptr_val as usize));
     }

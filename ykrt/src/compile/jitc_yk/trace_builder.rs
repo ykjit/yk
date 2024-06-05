@@ -383,14 +383,14 @@ impl<'a> TraceBuilder<'a> {
                 _ => unreachable!(),
             },
             aot_ir::Ty::Ptr => {
-                let val: *const ();
+                let val: usize;
                 #[cfg(target_arch = "x86_64")]
                 {
                     debug_assert_eq!(bytes.len(), 8);
                     val = usize::from_ne_bytes([
                         bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6],
                         bytes[7],
-                    ]) as *const ();
+                    ]);
                 }
                 Ok(jit_ir::Const::Ptr(val))
             }
