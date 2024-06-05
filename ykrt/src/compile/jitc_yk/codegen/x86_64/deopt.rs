@@ -8,6 +8,7 @@ use yksmp::Location as SMLocation;
 
 use super::{X64CompiledTrace, RBP_DWARF_NUM, REG64_SIZE};
 
+#[no_mangle]
 pub(crate) extern "C" fn __yk_deopt(
     frameaddr: *const c_void,
     deoptid: usize,
@@ -122,9 +123,29 @@ pub(crate) extern "C" fn __yk_deopt(
                 todo!("Deal with multi register locations");
             };
             match aotloc {
-                SMLocation::Register(reg, _size, _off, _extra) => {
-                    // FIXME: Deal with additional locations stored in `off` and `extra`.
+                SMLocation::Register(reg, _size, off, extra) => {
                     registers[usize::from(*reg)] = jitval;
+                    if *extra != 0 {
+                        // The stackmap has recorded an additional register we need to write
+                        // this value to.
+                        registers[usize::from(*extra - 1)] = jitval;
+                    }
+                    if frameid == 0 {
+                        // skip first frame
+                        continue;
+                    }
+                    // Check if there's an additional spill location for this value. Negative
+                    // values indicate stack offsets, positive values are registers. Lastly, 0
+                    // indicates that there's no additional location. Note, that this means
+                    // that in order to encode register locations (where RAX = 0), all register
+                    // values have been offset by 1.
+                    if *off < 0 {
+                        let temp = unsafe { rbp.offset(isize::try_from(*off).unwrap()) };
+                        debug_assert!(*off < i32::try_from(rec.size).unwrap());
+                        unsafe { ptr::write::<u64>(temp as *mut u64, jitval) };
+                    } else if *off > 0 {
+                        registers[usize::try_from(*off - 1).unwrap()] = jitval;
+                    }
                 }
                 SMLocation::Direct(..) => {
                     // Due to the shadow stack we only expect direct locations for the control
@@ -132,8 +153,24 @@ pub(crate) extern "C" fn __yk_deopt(
                     debug_assert_eq!(frameid, 0);
                     continue;
                 }
-                SMLocation::Indirect(_reg, _off, _size) => {
-                    todo!()
+                SMLocation::Indirect(reg, off, size) => {
+                    debug_assert_eq!(*reg, RBP_DWARF_NUM);
+                    let temp = if frameid == 0 {
+                        // While the bottom frame is already on the stack and doesn't need to
+                        // be recreated, we still need to copy over new values from the JIT.
+                        // Luckily, we know the address of the bottom frame, so we can write
+                        // any changes directly to it from here.
+                        unsafe { frameaddr.offset(isize::try_from(*off).unwrap()) }
+                    } else {
+                        unsafe { rbp.offset(isize::try_from(*off).unwrap()) }
+                    };
+                    debug_assert!(*off < i32::try_from(rec.size).unwrap());
+                    match size {
+                        1 => unsafe { ptr::write::<u8>(temp as *mut u8, jitval as u8) },
+                        4 => unsafe { ptr::write::<u32>(temp as *mut u32, jitval as u32) },
+                        8 => unsafe { ptr::write::<u64>(temp as *mut u64, jitval) },
+                        _ => todo!(),
+                    }
                 }
                 SMLocation::Constant(_v) => todo!(),
                 SMLocation::LargeConstant(_v) => todo!(),

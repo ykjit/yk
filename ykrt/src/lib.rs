@@ -6,6 +6,7 @@
 #![feature(strict_provenance)]
 #![allow(clippy::type_complexity)]
 #![allow(clippy::upper_case_acronyms)]
+#![allow(clippy::comparison_chain)]
 
 pub(crate) mod aotsmp;
 pub mod compile;
