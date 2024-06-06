@@ -5,7 +5,7 @@
 use super::aot_ir::{self, BBlockId, BinOp, FuncIdx, Module};
 use super::jit_ir;
 use crate::compile::CompilationError;
-use crate::trace::{AOTTraceIterator, TraceAction};
+use crate::trace::{AOTTraceIterator, AOTTraceIteratorError, TraceAction};
 use std::{collections::HashMap, ffi::CString};
 
 /// The argument index of the trace inputs struct in the trace function.
@@ -1076,7 +1076,14 @@ impl<'a> TraceBuilder<'a> {
                         }
                     }
                 }
-                Err(_) => todo!(),
+                Err(e) => match e {
+                    AOTTraceIteratorError::TraceTooLong => {
+                        return Err(CompilationError::LimitExceeded("Trace too long.".into()));
+                    }
+                    AOTTraceIteratorError::LongJmpEncountered => {
+                        return Err(CompilationError::General("Long jump encountered.".into()));
+                    }
+                },
             }
         }
         Ok(self.jit_mod)
