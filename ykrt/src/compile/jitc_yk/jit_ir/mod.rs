@@ -729,7 +729,7 @@ pub(crate) enum Ty {
 }
 
 impl Ty {
-    /// Returns the size of the type in bits, or `None` if asking the size makes no sense.
+    /// Returns the size of the type in bytes, or `None` if asking the size makes no sense.
     pub(crate) fn byte_size(&self) -> Option<usize> {
         // u16/u32 -> usize conversions could theoretically fail on some arches (which we probably
         // won't ever support).
