@@ -365,6 +365,10 @@ impl<'a> TraceBuilder<'a> {
         let bytes = aot_const.bytes();
         match self.aot_mod.type_(aot_const.ty_idx()) {
             aot_ir::Ty::Integer(aot_ty) => match aot_ty.num_bits() {
+                1 => {
+                    debug_assert_eq!(bytes.len(), 1);
+                    Ok(jit_ir::Const::I1(bytes[0] != 0))
+                }
                 8 => {
                     debug_assert_eq!(bytes.len(), 1);
                     Ok(jit_ir::Const::I8(i8::from_ne_bytes([bytes[0]])))
@@ -386,7 +390,7 @@ impl<'a> TraceBuilder<'a> {
                         bytes[7],
                     ])))
                 }
-                _ => unreachable!(),
+                _ => unreachable!("{}", aot_ty.num_bits()),
             },
             aot_ir::Ty::Ptr => {
                 let val: usize;

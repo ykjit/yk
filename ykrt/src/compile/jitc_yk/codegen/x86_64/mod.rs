@@ -841,6 +841,7 @@ impl<'a> X64CodeGen<'a> {
     /// Load a constant into the specified register.
     fn load_const(&mut self, reg: Rq, cidx: jit_ir::ConstIdx) {
         match self.m.const_(cidx) {
+            jit_ir::Const::I1(x) => dynasm!(self.asm; mov Rq(reg.code()), i32::from(*x)),
             jit_ir::Const::I8(x) => dynasm!(self.asm; mov Rq(reg.code()), i32::from(*x)),
             jit_ir::Const::I16(x) => dynasm!(self.asm; mov Rw(reg.code()), WORD *x),
             jit_ir::Const::I32(x) => dynasm!(self.asm; mov Rq(reg.code()), DWORD *x),

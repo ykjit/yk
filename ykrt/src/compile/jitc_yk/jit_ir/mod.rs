@@ -68,6 +68,8 @@ pub(crate) struct Module {
     void_ty_idx: TyIdx,
     /// The type index of a pointer type. Cached for convenience.
     ptr_ty_idx: TyIdx,
+    /// The type index of a 1-bit integer. Cached for convenience.
+    int1_ty_idx: TyIdx,
     /// The type index of an 8-bit integer. Cached for convenience.
     int8_ty_idx: TyIdx,
     /// The type index of a 16-bit integer. Cached for convenience.
@@ -131,6 +133,7 @@ impl Module {
         let mut types = IndexSet::new();
         let void_ty_idx = TyIdx::new(types.insert_full(Ty::Void).0)?;
         let ptr_ty_idx = TyIdx::new(types.insert_full(Ty::Ptr).0)?;
+        let int1_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(IntegerTy::new(1))).0)?;
         let int8_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(IntegerTy::new(8))).0)?;
         let int16_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(IntegerTy::new(16))).0)?;
         let int32_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(IntegerTy::new(32))).0)?;
@@ -155,6 +158,7 @@ impl Module {
             types,
             void_ty_idx,
             ptr_ty_idx,
+            int1_ty_idx,
             int8_ty_idx,
             int16_ty_idx,
             int32_ty_idx,
@@ -906,6 +910,7 @@ impl fmt::Display for DisplayableOperand<'_> {
 /// A constant.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum Const {
+    I1(bool),
     I8(i8),
     I16(i16),
     I32(i32),
@@ -916,6 +921,7 @@ pub(crate) enum Const {
 impl Const {
     pub(crate) fn ty_idx(&self, m: &Module) -> TyIdx {
         match self {
+            Const::I1(_) => m.int1_ty_idx,
             Const::I8(_) => m.int8_ty_idx,
             Const::I16(_) => m.int16_ty_idx,
             Const::I32(_) => m.int32_ty_idx,
@@ -927,6 +933,7 @@ impl Const {
     /// If this constant is an integer that can be represented in 64 bits, return it as an `i64`.
     pub(crate) fn int_to_i64(&self) -> Option<i64> {
         match self {
+            Const::I1(x) => Some(i64::from(*x)),
             Const::I8(x) => Some(i64::from(*x)),
             Const::I16(x) => Some(i64::from(*x)),
             Const::I32(x) => Some(i64::from(*x)),
@@ -942,6 +949,7 @@ impl Const {
     /// If `x` doesn't fit into the underlying integer type.
     pub(crate) fn i64_to_int(&self, x: i64) -> Const {
         match self {
+            Const::I1(_) => Const::I1(x != 0),
             Const::I8(_) => Const::I8(i8::try_from(x).unwrap()),
             Const::I16(_) => Const::I16(i16::try_from(x).unwrap()),
             Const::I32(_) => Const::I32(i32::try_from(x).unwrap()),
@@ -954,6 +962,7 @@ impl Const {
 impl fmt::Display for Const {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Const::I1(x) => write!(f, "{}i1", *x as i8),
             Const::I8(x) => write!(f, "{x}i8"),
             Const::I16(x) => write!(f, "{x}i16"),
             Const::I32(x) => write!(f, "{x}i32"),
