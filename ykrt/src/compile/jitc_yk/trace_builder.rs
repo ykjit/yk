@@ -369,34 +369,34 @@ impl<'a> TraceBuilder<'a> {
         let aot_const = aot_const.unwrap_val();
         let bytes = aot_const.bytes();
         match self.aot_mod.type_(aot_const.ty_idx()) {
-            aot_ir::Ty::Integer(aot_ty) => match aot_ty.num_bits() {
-                1 => {
-                    debug_assert_eq!(bytes.len(), 1);
-                    Ok(jit_ir::Const::I1(bytes[0] != 0))
-                }
-                8 => {
-                    debug_assert_eq!(bytes.len(), 1);
-                    Ok(jit_ir::Const::I8(i8::from_ne_bytes([bytes[0]])))
-                }
-                16 => {
-                    debug_assert_eq!(bytes.len(), 2);
-                    Ok(jit_ir::Const::I16(i16::from_ne_bytes([bytes[0], bytes[1]])))
-                }
-                32 => {
-                    debug_assert_eq!(bytes.len(), 4);
-                    Ok(jit_ir::Const::I32(i32::from_ne_bytes([
-                        bytes[0], bytes[1], bytes[2], bytes[3],
-                    ])))
-                }
-                64 => {
-                    debug_assert_eq!(bytes.len(), 8);
-                    Ok(jit_ir::Const::I64(i64::from_ne_bytes([
-                        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6],
-                        bytes[7],
-                    ])))
-                }
-                _ => unreachable!("{}", aot_ty.num_bits()),
-            },
+            aot_ir::Ty::Integer(aot_ir::IntegerTy { num_bits }) => {
+                // FIXME: It would be better if the AOT IR had converted these integers in advance
+                // rather than doing this dance here.
+                let x = match num_bits {
+                    1 | 8 => {
+                        debug_assert_eq!(bytes.len(), 1);
+                        u64::from(bytes[0])
+                    }
+                    16 => {
+                        debug_assert_eq!(bytes.len(), 2);
+                        u64::from(u16::from_ne_bytes([bytes[0], bytes[1]]))
+                    }
+                    32 => {
+                        debug_assert_eq!(bytes.len(), 4);
+                        u64::from(u32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+                    }
+                    64 => {
+                        debug_assert_eq!(bytes.len(), 8);
+                        u64::from_ne_bytes([
+                            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6],
+                            bytes[7],
+                        ])
+                    }
+                    _ => todo!("{}", num_bits),
+                };
+                let jit_ty_idx = self.jit_mod.insert_ty(jit_ir::Ty::Integer(*num_bits))?;
+                Ok(jit_ir::Const::Int(jit_ty_idx, x))
+            }
             aot_ir::Ty::Ptr => {
                 let val: usize;
                 #[cfg(target_arch = "x86_64")]
@@ -834,10 +834,6 @@ impl<'a> TraceBuilder<'a> {
         }
 
         let jit_ty_idx = self.handle_type(test_val.type_(self.aot_mod))?;
-        let jit_ir::Ty::Integer(num_bits) = self.jit_mod.type_(jit_ty_idx) else {
-            panic!("Malformed IR")
-        };
-        let num_bits = *num_bits;
 
         // Find out which case we traced.
         let guard = match case_dests.iter().position(|&cd| cd == next_bb.bb_idx()) {
@@ -847,7 +843,7 @@ impl<'a> TraceBuilder<'a> {
                 let bb = case_dests[cidx];
 
                 // Build the constant value to guard.
-                let jit_const = self.u64_to_const(num_bits, val)?;
+                let jit_const = jit_ir::Const::Int(jit_ty_idx, val);
                 let jit_const_opnd = jit_ir::Operand::Const(self.jit_mod.insert_const(jit_const)?);
 
                 // Perform the comparison.
@@ -878,7 +874,7 @@ impl<'a> TraceBuilder<'a> {
                 let mut cmps_opnds = Vec::new();
                 for cv in case_values {
                     // Build a constant of the case value.
-                    let jit_const = self.u64_to_const(num_bits, *cv)?;
+                    let jit_const = jit_ir::Const::Int(jit_ty_idx, *cv);
                     let jit_const_opnd =
                         jit_ir::Operand::Const(self.jit_mod.insert_const(jit_const)?);
 
@@ -949,20 +945,6 @@ impl<'a> TraceBuilder<'a> {
         )
         .into();
         self.copy_inst(inst, bid, aot_inst_idx)
-    }
-
-    fn u64_to_const(&mut self, num_bits: u32, val: u64) -> Result<jit_ir::Const, CompilationError> {
-        match num_bits {
-            8 => Ok(jit_ir::Const::I8(i8::try_from(val).unwrap())),
-            16 => Ok(jit_ir::Const::I16(i16::try_from(val).unwrap())),
-            32 => Ok(jit_ir::Const::I32(i32::try_from(val).unwrap())),
-            64 => {
-                // The `as` here is safe as we simply want to view the u64's bits as if they were
-                // an i64 without truncating/extending/etc.
-                Ok(jit_ir::Const::I64(val as i64))
-            }
-            _ => unreachable!(),
-        }
     }
 
     /// Entry point for building an IR trace.

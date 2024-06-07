@@ -68,16 +68,8 @@ pub(crate) struct Module {
     void_ty_idx: TyIdx,
     /// The type index of a pointer type. Cached for convenience.
     ptr_ty_idx: TyIdx,
-    /// The type index of a 1-bit integer. Cached for convenience.
-    int1_ty_idx: TyIdx,
     /// The type index of an 8-bit integer. Cached for convenience.
     int8_ty_idx: TyIdx,
-    /// The type index of a 16-bit integer. Cached for convenience.
-    int16_ty_idx: TyIdx,
-    /// The type index of a 32-bit integer. Cached for convenience.
-    int32_ty_idx: TyIdx,
-    /// The type index of a 64-bit integer. Cached for convenience.
-    int64_ty_idx: TyIdx,
     /// The function declaration pool. These are declarations of externally compiled functions that
     /// the JITted trace might need to call. Indexed by [FuncDeclIdx].
     func_decls: IndexSet<FuncDecl>,
@@ -133,11 +125,7 @@ impl Module {
         let mut types = IndexSet::new();
         let void_ty_idx = TyIdx::new(types.insert_full(Ty::Void).0)?;
         let ptr_ty_idx = TyIdx::new(types.insert_full(Ty::Ptr).0)?;
-        let int1_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(1)).0)?;
         let int8_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(8)).0)?;
-        let int16_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(16)).0)?;
-        let int32_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(32)).0)?;
-        let int64_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(64)).0)?;
 
         // Find the global variable pointer array in the address space.
         //
@@ -158,11 +146,7 @@ impl Module {
             types,
             void_ty_idx,
             ptr_ty_idx,
-            int1_ty_idx,
             int8_ty_idx,
-            int16_ty_idx,
-            int32_ty_idx,
-            int64_ty_idx,
             func_decls: IndexSet::new(),
             global_decls: IndexSet::new(),
             guard_info: TiVec::new(),
@@ -870,7 +854,7 @@ impl fmt::Display for DisplayableOperand<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.operand {
             Operand::Local(idx) => write!(f, "%{}", idx.to_u16()),
-            Operand::Const(idx) => write!(f, "{}", self.m.const_(*idx)),
+            Operand::Const(idx) => write!(f, "{}", self.m.const_(*idx).display(self.m)),
         }
     }
 }
@@ -878,34 +862,22 @@ impl fmt::Display for DisplayableOperand<'_> {
 /// A constant.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum Const {
-    I1(bool),
-    I8(i8),
-    I16(i16),
-    I32(i32),
-    I64(i64),
+    Int(TyIdx, u64),
     Ptr(usize),
 }
 
 impl Const {
     pub(crate) fn ty_idx(&self, m: &Module) -> TyIdx {
         match self {
-            Const::I1(_) => m.int1_ty_idx,
-            Const::I8(_) => m.int8_ty_idx,
-            Const::I16(_) => m.int16_ty_idx,
-            Const::I32(_) => m.int32_ty_idx,
-            Const::I64(_) => m.int64_ty_idx,
+            Const::Int(ty_idx, _) => *ty_idx,
             Const::Ptr(_) => m.ptr_ty_idx,
         }
     }
 
     /// If this constant is an integer that can be represented in 64 bits, return it as an `i64`.
-    pub(crate) fn int_to_i64(&self) -> Option<i64> {
+    pub(crate) fn int_to_u64(&self) -> Option<u64> {
         match self {
-            Const::I1(x) => Some(i64::from(*x)),
-            Const::I8(x) => Some(i64::from(*x)),
-            Const::I16(x) => Some(i64::from(*x)),
-            Const::I32(x) => Some(i64::from(*x)),
-            Const::I64(x) => Some(*x),
+            Const::Int(_, x) => Some(*x),
             Const::Ptr(_) => None,
         }
     }
@@ -915,26 +887,32 @@ impl Const {
     /// # Panics
     ///
     /// If `x` doesn't fit into the underlying integer type.
-    pub(crate) fn i64_to_int(&self, x: i64) -> Const {
+    pub(crate) fn u64_to_int(&self, x: u64) -> Const {
         match self {
-            Const::I1(_) => Const::I1(x != 0),
-            Const::I8(_) => Const::I8(i8::try_from(x).unwrap()),
-            Const::I16(_) => Const::I16(i16::try_from(x).unwrap()),
-            Const::I32(_) => Const::I32(i32::try_from(x).unwrap()),
-            Const::I64(_) => Const::I64(x),
+            Const::Int(ty_idx, _) => Const::Int(*ty_idx, x),
             Const::Ptr(_) => panic!(),
         }
     }
+
+    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableConst<'a> {
+        DisplayableConst { const_: self, m }
+    }
 }
 
-impl fmt::Display for Const {
+pub(crate) struct DisplayableConst<'a> {
+    const_: &'a Const,
+    m: &'a Module,
+}
+
+impl fmt::Display for DisplayableConst<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Const::I1(x) => write!(f, "{}i1", *x as i8),
-            Const::I8(x) => write!(f, "{x}i8"),
-            Const::I16(x) => write!(f, "{x}i16"),
-            Const::I32(x) => write!(f, "{x}i32"),
-            Const::I64(x) => write!(f, "{x}i64"),
+        match self.const_ {
+            Const::Int(ty_idx, x) => {
+                let Ty::Integer(width) = self.m.type_(*ty_idx) else {
+                    panic!()
+                };
+                write!(f, "{x}i{width}")
+            }
             Const::Ptr(x) => write!(f, "{:#x}", *x),
         }
     }
@@ -2028,23 +2006,29 @@ mod tests {
 
     #[test]
     fn stringify_int_consts() {
-        assert_eq!(Const::I8(0i8).to_string(), "0i8");
-        assert_eq!(Const::I8(111i8).to_string(), "111i8");
-        assert_eq!(Const::I8(127i8).to_string(), "127i8");
-        assert_eq!(Const::I8(-128i8).to_string(), "-128i8");
-        assert_eq!(Const::I8(-1i8).to_string(), "-1i8");
-        assert_eq!(Const::I16(123i16).to_string(), "123i16");
-        assert_eq!(Const::I32(123i32).to_string(), "123i32");
-        assert_eq!(Const::I64(456i64).to_string(), "456i64");
-        assert_eq!(Const::I64(u64::MAX as i64).to_string(), "-1i64");
-        assert_eq!(Const::I64(i64::MAX).to_string(), "9223372036854775807i64");
+        let mut m = Module::new_testing();
+        let i8_ty_idx = m.insert_ty(Ty::Integer(8)).unwrap();
+        assert_eq!(Const::Int(i8_ty_idx, 0).display(&m).to_string(), "0i8");
+        assert_eq!(Const::Int(i8_ty_idx, 255).display(&m).to_string(), "255i8");
+        let i64_ty_idx = m.insert_ty(Ty::Integer(64)).unwrap();
+        assert_eq!(Const::Int(i64_ty_idx, 0).display(&m).to_string(), "0i64");
+        assert_eq!(
+            Const::Int(i64_ty_idx, 9223372036854775808)
+                .display(&m)
+                .to_string(),
+            "9223372036854775808i64"
+        );
     }
 
     #[test]
     fn stringify_const_ptr() {
+        let m = Module::new_testing();
         let ptr_val = stringify_const_ptr as usize;
         let cp = Const::Ptr(ptr_val);
-        assert_eq!(cp.to_string(), format!("{:#x}", ptr_val as usize));
+        assert_eq!(
+            cp.display(&m).to_string(),
+            format!("{:#x}", ptr_val as usize)
+        );
     }
 
     #[test]

@@ -328,40 +328,17 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
         match op {
             ASTOperand::ConstInt(span) => {
                 let s = self.lexer.span_str(span);
-                let [val, type_] = <[&str; 2]>::try_from(s.split('i').collect::<Vec<_>>()).unwrap();
-                let width = type_
+                let [val, width] = <[&str; 2]>::try_from(s.split('i').collect::<Vec<_>>()).unwrap();
+                let val = val
+                    .parse::<u64>()
+                    .map_err(|e| self.error_at_span(span, &e.to_string()))?;
+                let width = width
                     .parse::<u32>()
                     .map_err(|e| self.error_at_span(span, &e.to_string()))?;
-                let const_ = match width {
-                    64 => {
-                        let val = val
-                            .parse::<i64>()
-                            .map_err(|e| self.error_at_span(span, &e.to_string()))?;
-                        Const::I64(val)
-                    }
-                    32 => {
-                        let val = val
-                            .parse::<i32>()
-                            .map_err(|e| self.error_at_span(span, &e.to_string()))?;
-                        Const::I32(val)
-                    }
-                    16 => {
-                        let val = val
-                            .parse::<i16>()
-                            .map_err(|e| self.error_at_span(span, &e.to_string()))?;
-                        Const::I16(val)
-                    }
-                    8 => {
-                        let val = val
-                            .parse::<i8>()
-                            .map_err(|e| self.error_at_span(span, &e.to_string()))?;
-                        Const::I8(val)
-                    }
-                    x => todo!("{x:}"),
-                };
+                let ty_idx = self.m.insert_ty(Ty::Integer(width)).unwrap();
                 Ok(Operand::Const(
                     self.m
-                        .insert_const(const_)
+                        .insert_const(Const::Int(ty_idx, val))
                         .map_err(|e| self.error_at_span(span, &e.to_string()))?,
                 ))
             }
@@ -648,14 +625,10 @@ mod tests {
               %31: i16 = load_ti 5
               %32: i32 = load_ti 5
               %33: i64 = load_ti 6
-              %34: i8 = add %30, 127i8
-              %35: i8 = add %30, -128i8
-              %36: i16 = add %31, 32767i16
-              %37: i16 = add %31, -32768i16
-              %38: i32 = add %32, 2147483647i32
-              %39: i32 = add %32, -2147483648i32
-              %40: i64 = add %33, 9223372036854775807i64
-              %41: i64 = add %33, -9223372036854775808i64
+              %34: i8 = add %30, 255i8
+              %35: i16 = add %31, 32768i16
+              %36: i32 = add %32, 2147483648i32
+              %37: i64 = add %33, 9223372036854775808i64
               *%9 = 0x0
               *%9 = 0xFFFFFFFF
         ",

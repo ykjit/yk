@@ -853,11 +853,20 @@ impl<'a> X64CodeGen<'a> {
     /// Load a constant into the specified register.
     fn load_const(&mut self, reg: Rq, cidx: jit_ir::ConstIdx) {
         match self.m.const_(cidx) {
-            jit_ir::Const::I1(x) => dynasm!(self.asm; mov Rq(reg.code()), i32::from(*x)),
-            jit_ir::Const::I8(x) => dynasm!(self.asm; mov Rq(reg.code()), i32::from(*x)),
-            jit_ir::Const::I16(x) => dynasm!(self.asm; mov Rw(reg.code()), WORD *x),
-            jit_ir::Const::I32(x) => dynasm!(self.asm; mov Rq(reg.code()), DWORD *x),
-            jit_ir::Const::I64(x) => dynasm!(self.asm; mov Rq(reg.code()), QWORD *x),
+            jit_ir::Const::Int(ty_idx, x) => {
+                let jit_ir::Ty::Integer(width) = self.m.type_(*ty_idx) else {
+                    panic!()
+                };
+                // The `as`s are all safe because the IR guarantees that no more than `width` bits
+                // are set in the integer i.e. we are only ever truncating zeros.
+                match width {
+                    1 | 8 => dynasm!(self.asm; mov Rq(reg.code()), *x as i32),
+                    16 => dynasm!(self.asm; mov Rw(reg.code()), WORD *x as i16),
+                    32 => dynasm!(self.asm; mov Rq(reg.code()), DWORD *x as i32),
+                    64 => dynasm!(self.asm; mov Rq(reg.code()), QWORD *x as i64),
+                    _ => todo!(),
+                }
+            }
             jit_ir::Const::Ptr(x) => {
                 dynasm!(self.asm; mov Rq(reg.code()), QWORD i64::try_from(*x).unwrap())
             }
