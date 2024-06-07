@@ -1255,7 +1255,7 @@ pub(crate) fn const_int_bytes_to_string(num_bits: u32, bytes: &[u8]) -> String {
 #[deku_derive(DekuRead)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct IntegerTy {
-    num_bits: u32,
+    pub(crate) num_bits: u32,
 }
 
 impl IntegerTy {

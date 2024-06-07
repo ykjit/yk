@@ -8,8 +8,9 @@
 //!     of those arguments has the correct [super::Ty].
 //!   * [super::BinOpInst]s left and right hand side operands have the same [Ty]s.
 //!   * [super::ICmpInst]s left and right hand side operands have the same [Ty]s.
+//!   * [Const::Int]s cannot use more bits than the corresponding [Ty::Integer] type.
 
-use super::{Inst, InstIdx, Module, Ty};
+use super::{Const, Inst, InstIdx, Module, Ty};
 
 impl Module {
     pub(crate) fn assert_well_formed(&self) {
@@ -82,6 +83,17 @@ impl Module {
                     }
                 }
                 _ => (),
+            }
+        }
+
+        for x in self.consts.iter() {
+            if let Const::Int(ty_idx, val) = x {
+                let Ty::Integer(width) = self.type_(*ty_idx) else {
+                    panic!()
+                };
+                if *width < 64 && *val > (1 << *width) - 1 {
+                    panic!("Constant {val} exceeds the bit width {width} of the corresponding integer type");
+                }
             }
         }
     }
@@ -191,6 +203,20 @@ mod tests {
               entry:
                 %0: i8 = load_ti 0
                 %1: i8 = sext %0
+            ",
+        );
+    }
+
+    #[should_panic(
+        expected = "Constant 256 exceeds the bit width 8 of the corresponding integer type"
+    )]
+    #[test]
+    fn int_exceeds_width() {
+        Module::from_str(
+            "
+              entry:
+                %0: i8 = load_ti 0
+                %1: i8 = add %0, 256i8
             ",
         );
     }
