@@ -300,6 +300,11 @@ impl<'a> TraceBuilder<'a> {
                         incoming_vals,
                     )
                 }
+                aot_ir::Inst::Select {
+                    cond,
+                    trueval,
+                    falseval,
+                } => self.handle_select(bid, inst_idx, cond, trueval, falseval),
                 _ => todo!("{:?}", inst),
             }?;
         }
@@ -927,6 +932,23 @@ impl<'a> TraceBuilder<'a> {
         let op = self.handle_operand(chosen_val)?;
         self.local_map.insert(aot_iit, op);
         Ok(())
+    }
+
+    fn handle_select(
+        &mut self,
+        bid: &aot_ir::BBlockId,
+        aot_inst_idx: usize,
+        cond: &aot_ir::Operand,
+        trueval: &aot_ir::Operand,
+        falseval: &aot_ir::Operand,
+    ) -> Result<(), CompilationError> {
+        let inst = jit_ir::SelectInst::new(
+            self.handle_operand(cond)?,
+            self.handle_operand(trueval)?,
+            self.handle_operand(falseval)?,
+        )
+        .into();
+        self.copy_inst(inst, bid, aot_inst_idx)
     }
 
     fn u64_to_const(&mut self, num_bits: u32, val: u64) -> Result<jit_ir::Const, CompilationError> {
