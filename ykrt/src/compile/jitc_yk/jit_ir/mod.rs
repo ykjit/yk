@@ -133,11 +133,11 @@ impl Module {
         let mut types = IndexSet::new();
         let void_ty_idx = TyIdx::new(types.insert_full(Ty::Void).0)?;
         let ptr_ty_idx = TyIdx::new(types.insert_full(Ty::Ptr).0)?;
-        let int1_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(IntegerTy::new(1))).0)?;
-        let int8_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(IntegerTy::new(8))).0)?;
-        let int16_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(IntegerTy::new(16))).0)?;
-        let int32_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(IntegerTy::new(32))).0)?;
-        let int64_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(IntegerTy::new(64))).0)?;
+        let int1_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(1)).0)?;
+        let int8_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(8)).0)?;
+        let int16_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(16)).0)?;
+        let int32_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(32)).0)?;
+        let int64_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(64)).0)?;
 
         // Find the global variable pointer array in the address space.
         //
@@ -426,45 +426,6 @@ impl fmt::Display for Module {
     }
 }
 
-/// A fixed-width integer type.
-///
-/// Note:
-///   1. These integers range in size from 1..2^23 (inc.) bits. This is inherited [from LLVM's
-///      integer type](https://llvm.org/docs/LangRef.html#integer-type).
-///   2. Signedness is not specified. Interpretation of the bit pattern is delegated to operations
-///      upon the integer.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct IntegerTy {
-    num_bits: u32,
-}
-
-impl IntegerTy {
-    /// Create a new integer type with the specified number of bits.
-    pub(crate) fn new(num_bits: u32) -> Self {
-        debug_assert!(num_bits > 0 && num_bits <= 0x800000);
-        Self { num_bits }
-    }
-
-    /// Return the number of bits (1..2^23 (inc.)) this integer spans.
-    pub(crate) fn num_bits(&self) -> u32 {
-        self.num_bits
-    }
-
-    /// Return the number of bytes required to store this integer type.
-    ///
-    /// Padding for alignment is not included.
-    pub(crate) fn byte_size(&self) -> usize {
-        let bits = self.num_bits();
-        let mut ret = bits / 8;
-        // If it wasn't an exactly byte-sized thing, round up to the next byte.
-        if bits % 8 != 0 {
-            ret += 1;
-        }
-        // On any 32-bit-or-bigger platform, this `unwrap` can't fail.
-        usize::try_from(ret).unwrap()
-    }
-}
-
 /// The declaration of a global variable.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct GlobalDecl {
@@ -722,20 +683,27 @@ impl FuncTy {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum Ty {
     Void,
-    Integer(IntegerTy),
+    /// A fixed-width integer type.
+    ///
+    /// Note:
+    ///   1. These integers range in size from 1..2^23 (inc.) bits. This is inherited [from LLVM's
+    ///      integer type](https://llvm.org/docs/LangRef.html#integer-type).
+    ///   2. Signedness is not specified. Interpretation of the bit pattern is delegated to operations
+    ///      upon the integer.
+    Integer(u32),
     Ptr,
     Func(FuncTy),
     Unimplemented(String),
 }
 
 impl Ty {
-    /// Returns the size of the type in bits, or `None` if asking the size makes no sense.
+    /// Returns the size of the type in bytes, or `None` if asking the size makes no sense.
     pub(crate) fn byte_size(&self) -> Option<usize> {
         // u16/u32 -> usize conversions could theoretically fail on some arches (which we probably
         // won't ever support).
         match self {
             Self::Void => Some(0),
-            Self::Integer(it) => Some(it.byte_size()),
+            Self::Integer(bits) => Some(usize::try_from(bits.div_ceil(8)).unwrap()),
             Self::Ptr => {
                 // FIXME: In theory pointers to different types could be of different sizes. We
                 // should really ask LLVM how big the pointer was when it codegenned the
@@ -764,7 +732,7 @@ impl fmt::Display for DisplayableTy<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.ty {
             Ty::Void => write!(f, "void"),
-            Ty::Integer(it) => write!(f, "i{}", it.num_bits()),
+            Ty::Integer(num_bits) => write!(f, "i{}", *num_bits),
             Ty::Ptr => write!(f, "ptr"),
             Ty::Func(x) => {
                 let mut args = x
@@ -1895,7 +1863,7 @@ mod tests {
     fn vararg_call_args() {
         // Set up a function to call.
         let mut m = Module::new_testing();
-        let i32_tyidx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
+        let i32_tyidx = m.insert_ty(Ty::Integer(32)).unwrap();
         let func_ty = Ty::Func(FuncTy::new(vec![i32_tyidx; 3], i32_tyidx, true));
         let func_ty_idx = m.insert_ty(func_ty).unwrap();
         let func_decl_idx = m
@@ -2071,13 +2039,13 @@ mod tests {
     #[test]
     fn integer_type_sizes() {
         for i in 1..8 {
-            assert_eq!(IntegerTy::new(i).byte_size(), 1);
+            assert_eq!(Ty::Integer(i).byte_size().unwrap(), 1);
         }
         for i in 9..16 {
-            assert_eq!(IntegerTy::new(i).byte_size(), 2);
+            assert_eq!(Ty::Integer(i).byte_size().unwrap(), 2);
         }
-        assert_eq!(IntegerTy::new(127).byte_size(), 16);
-        assert_eq!(IntegerTy::new(128).byte_size(), 16);
-        assert_eq!(IntegerTy::new(129).byte_size(), 17);
+        assert_eq!(Ty::Integer(127).byte_size().unwrap(), 16);
+        assert_eq!(Ty::Integer(128).byte_size().unwrap(), 16);
+        assert_eq!(Ty::Integer(129).byte_size().unwrap(), 17);
     }
 }

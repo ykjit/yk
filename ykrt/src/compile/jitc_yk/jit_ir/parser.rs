@@ -8,8 +8,8 @@ use super::super::{
     aot_ir::{BinOp, Predicate},
     jit_ir::{
         BinOpInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FuncDecl, FuncTy, GuardInfo,
-        GuardInst, IcmpInst, Inst, InstIdx, IntegerTy, LoadInst, LoadTraceInputInst, Module,
-        Operand, PtrAddInst, SExtInst, StoreInst, TruncInst, Ty, TyIdx,
+        GuardInst, IcmpInst, Inst, InstIdx, LoadInst, LoadTraceInputInst, Module, Operand,
+        PtrAddInst, SExtInst, StoreInst, TruncInst, Ty, TyIdx,
     },
 };
 use fm::FMBuilder;
@@ -386,9 +386,8 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                 let width = self.lexer.span_str(span)[1..]
                     .parse::<u32>()
                     .map_err(|e| self.error_at_span(span, &e.to_string()))?;
-                let ty = IntegerTy::new(width);
                 self.m
-                    .insert_ty(Ty::Integer(ty))
+                    .insert_ty(Ty::Integer(width))
                     .map_err(|e| self.error_at_span(span, &e.to_string()))
             }
             ASTType::Ptr => Ok(self.m.ptr_ty_idx()),
@@ -542,7 +541,7 @@ mod tests {
     #[test]
     fn roundtrip() {
         let mut m = Module::new_testing();
-        let i16_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(16))).unwrap();
+        let i16_ty_idx = m.insert_ty(Ty::Integer(16)).unwrap();
         let op1 = m
             .push_and_make_operand(LoadTraceInputInst::new(0, i16_ty_idx).into())
             .unwrap();
@@ -665,7 +664,7 @@ mod tests {
             .unwrap();
         assert_eq!(m.func_decls_len(), 4);
 
-        let i32_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(32))).unwrap();
+        let i32_ty_idx = m.insert_ty(Ty::Integer(32)).unwrap();
         let f2_ty_idx = m
             .insert_ty(Ty::Func(FuncTy::new(
                 vec![m.int8_ty_idx()],
@@ -677,7 +676,7 @@ mod tests {
             .unwrap();
         assert_eq!(m.func_decls_len(), 4);
 
-        let i64_ty_idx = m.insert_ty(Ty::Integer(IntegerTy::new(64))).unwrap();
+        let i64_ty_idx = m.insert_ty(Ty::Integer(64)).unwrap();
         let f3_ty_idx = m
             .insert_ty(Ty::Func(FuncTy::new(
                 vec![m.int8_ty_idx(), i32_ty_idx],

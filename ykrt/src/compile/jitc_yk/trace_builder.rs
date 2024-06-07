@@ -439,7 +439,7 @@ impl<'a> TraceBuilder<'a> {
     fn handle_type(&mut self, aot_type: &aot_ir::Ty) -> Result<jit_ir::TyIdx, CompilationError> {
         let jit_ty = match aot_type {
             aot_ir::Ty::Void => jit_ir::Ty::Void,
-            aot_ir::Ty::Integer(it) => jit_ir::Ty::Integer(jit_ir::IntegerTy::new(it.num_bits())),
+            aot_ir::Ty::Integer(it) => jit_ir::Ty::Integer(it.num_bits()),
             aot_ir::Ty::Ptr => jit_ir::Ty::Ptr,
             aot_ir::Ty::Func(ft) => {
                 let mut jit_args = Vec::new();
@@ -828,13 +828,11 @@ impl<'a> TraceBuilder<'a> {
             panic!();
         }
 
-        // Find the JIT type of the value being tested.
         let jit_ty_idx = self.handle_type(test_val.type_(self.aot_mod))?;
-        let jit_int_ty = match self.jit_mod.type_(jit_ty_idx) {
-            jit_ir::Ty::Integer(it) => it,
-            _ => unreachable!(),
-        }
-        .to_owned();
+        let jit_ir::Ty::Integer(num_bits) = self.jit_mod.type_(jit_ty_idx) else {
+            panic!("Malformed IR")
+        };
+        let num_bits = *num_bits;
 
         // Find out which case we traced.
         let guard = match case_dests.iter().position(|&cd| cd == next_bb.bb_idx()) {
@@ -844,7 +842,7 @@ impl<'a> TraceBuilder<'a> {
                 let bb = case_dests[cidx];
 
                 // Build the constant value to guard.
-                let jit_const = self.u64_to_const(&jit_int_ty, val)?;
+                let jit_const = self.u64_to_const(num_bits, val)?;
                 let jit_const_opnd = jit_ir::Operand::Const(self.jit_mod.insert_const(jit_const)?);
 
                 // Perform the comparison.
@@ -875,7 +873,7 @@ impl<'a> TraceBuilder<'a> {
                 let mut cmps_opnds = Vec::new();
                 for cv in case_values {
                     // Build a constant of the case value.
-                    let jit_const = self.u64_to_const(&jit_int_ty, *cv)?;
+                    let jit_const = self.u64_to_const(num_bits, *cv)?;
                     let jit_const_opnd =
                         jit_ir::Operand::Const(self.jit_mod.insert_const(jit_const)?);
 
@@ -931,12 +929,8 @@ impl<'a> TraceBuilder<'a> {
         Ok(())
     }
 
-    fn u64_to_const(
-        &mut self,
-        int_ty: &jit_ir::IntegerTy,
-        val: u64,
-    ) -> Result<jit_ir::Const, CompilationError> {
-        match int_ty.num_bits() {
+    fn u64_to_const(&mut self, num_bits: u32, val: u64) -> Result<jit_ir::Const, CompilationError> {
+        match num_bits {
             8 => Ok(jit_ir::Const::I8(i8::try_from(val).unwrap())),
             16 => Ok(jit_ir::Const::I16(i16::try_from(val).unwrap())),
             32 => Ok(jit_ir::Const::I32(i32::try_from(val).unwrap())),
