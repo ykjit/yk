@@ -743,6 +743,12 @@ pub(crate) enum Inst {
         #[deku(count = "num_args")]
         args: Vec<Operand>,
     },
+    #[deku(id = "16")]
+    Select {
+        cond: Operand,
+        trueval: Operand,
+        falseval: Operand,
+    },
     #[deku(id = "255")]
     Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "map_to_string")] String),
 }
@@ -816,6 +822,9 @@ impl Inst {
                     panic!(); // IR malformed.
                 }
             }
+            Self::Select {
+                cond: _, trueval, ..
+            } => Some(trueval.type_(m)),
             Self::Unimplemented(_) => None,
             Self::Nop => None,
         }
@@ -1056,6 +1065,19 @@ impl fmt::Display for DisplayableInst<'_> {
                     .collect::<Vec<_>>()
                     .join(", ");
                 write!(f, "icall {}({})", callop.display(self.m), args_s)
+            }
+            Inst::Select {
+                cond,
+                trueval,
+                falseval,
+            } => {
+                write!(
+                    f,
+                    "select {}, {}, {}",
+                    cond.display(self.m),
+                    trueval.display(self.m),
+                    falseval.display(self.m)
+                )
             }
             Inst::Unimplemented(s) => write!(f, "unimplemented <<{}>>", s),
             Inst::Nop => write!(f, "nop"),

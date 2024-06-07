@@ -52,5 +52,6 @@ volatile "VOLATILE"
 \* "*"
 ;.*?$ ;
 @ "@"
+\? "?"
 [\t \n\r]+ ;
 . "UNMATCHED"

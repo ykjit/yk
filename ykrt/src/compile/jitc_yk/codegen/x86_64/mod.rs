@@ -210,6 +210,7 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Inst::SExt(i) => self.cg_sext(inst_idx, i),
             jit_ir::Inst::ZeroExtend(i) => self.cg_zeroextend(inst_idx, i),
             jit_ir::Inst::Trunc(i) => self.cg_trunc(inst_idx, i),
+            jit_ir::Inst::Select(i) => self.cg_select(inst_idx, i),
         }
         Ok(())
     }
@@ -763,6 +764,17 @@ impl<'a> X64CodeGen<'a> {
         // this will change once we have a proper register allocator at which point we need to
         // revisit this implementation.
 
+        self.store_new_local(inst_idx, WR0);
+    }
+
+    fn cg_select(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::SelectInst) {
+        // First load the true case. We then immediately follow this up with a conditional move,
+        // overwriting the value with the false case, if the condition was false.
+        self.load_operand(WR0, &inst.trueval());
+        self.load_operand(WR1, &inst.cond());
+        self.load_operand(WR2, &inst.falseval());
+        dynasm!(self.asm ; cmp Rb(WR1.code()), 0);
+        dynasm!(self.asm ; cmove Rq(WR0.code()), Rq(WR2.code()));
         self.store_new_local(inst_idx, WR0);
     }
 
@@ -1581,6 +1593,28 @@ mod tests {
                 ; %1: i8 = trunc %0
                 ... mov r12d, [rbp-0x04]
                 ... mov [rbp-0x05], r12b
+                ...
+            ",
+            );
+        }
+
+        #[test]
+        fn cg_select() {
+            test_with_spillalloc(
+                "
+              entry:
+                %0: i32 = load_ti 0
+                %1: i32 = %0 ? 1i32 : 2i32
+            ",
+                "
+                ...
+                ; %1: i32 = %0 ? 1i32 : 2i32
+                ... mov r12, 0x01
+                ... mov r13d, [rbp-0x04]
+                ... mov r14, 0x02
+                ... cmp r13b, 0x00
+                ... cmovz r12, r14
+                ... mov [rbp-0x08], r12d
                 ...
             ",
             );

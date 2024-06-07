@@ -991,6 +991,7 @@ pub(crate) enum Inst {
     SExt(SExtInst),
     ZeroExtend(ZeroExtendInst),
     Trunc(TruncInst),
+    Select(SelectInst),
 }
 
 impl Inst {
@@ -1032,6 +1033,7 @@ impl Inst {
             Self::SExt(si) => si.dest_ty_idx(),
             Self::ZeroExtend(si) => si.dest_ty_idx(),
             Self::Trunc(t) => t.dest_ty_idx(),
+            Self::Select(s) => s.trueval().ty_idx(m),
         }
     }
 
@@ -1175,6 +1177,13 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::Trunc(i) => {
                 write!(f, "trunc {}", i.val().display(self.m))
             }
+            Inst::Select(s) => write!(
+                f,
+                "{} ? {} : {}",
+                s.cond().display(self.m),
+                s.trueval().display(self.m),
+                s.falseval().display(self.m)
+            ),
         }
     }
 }
@@ -1204,6 +1213,7 @@ inst!(Guard, GuardInst);
 inst!(SExt, SExtInst);
 inst!(ZeroExtend, ZeroExtendInst);
 inst!(Trunc, TruncInst);
+inst!(Select, SelectInst);
 
 /// The operands for a [Instruction::BinOp]
 ///
@@ -1554,6 +1564,43 @@ impl StoreInst {
     /// Returns the target operand: i.e. where to store [self.val()].
     pub(crate) fn tgt(&self) -> Operand {
         self.tgt.unpack()
+    }
+}
+
+/// The operands for a [Inst::Select]
+///
+/// # Semantics
+///
+/// Selects from two values depending on a condition.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SelectInst {
+    cond: PackedOperand,
+    trueval: PackedOperand,
+    falseval: PackedOperand,
+}
+
+impl SelectInst {
+    pub(crate) fn new(cond: Operand, trueval: Operand, falseval: Operand) -> Self {
+        Self {
+            cond: PackedOperand::new(&cond),
+            trueval: PackedOperand::new(&trueval),
+            falseval: PackedOperand::new(&falseval),
+        }
+    }
+
+    /// Returns the condition.
+    pub(crate) fn cond(&self) -> Operand {
+        self.cond.unpack()
+    }
+
+    /// Returns the value for when the condition is true.
+    pub(crate) fn trueval(&self) -> Operand {
+        self.trueval.unpack()
+    }
+
+    /// Returns the value for when the condition is false.
+    pub(crate) fn falseval(&self) -> Operand {
+        self.falseval.unpack()
     }
 }
 

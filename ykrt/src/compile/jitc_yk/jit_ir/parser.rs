@@ -9,7 +9,7 @@ use super::super::{
     jit_ir::{
         BinOpInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FuncDecl, FuncTy, GuardInfo,
         GuardInst, IcmpInst, Inst, InstIdx, LoadInst, LoadTraceInputInst, Module, Operand,
-        PtrAddInst, SExtInst, StoreInst, TruncInst, Ty, TyIdx,
+        PtrAddInst, SExtInst, SelectInst, StoreInst, TruncInst, Ty, TyIdx,
     },
 };
 use fm::FMBuilder;
@@ -268,6 +268,20 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         self.add_assign(self.m.len(), assign)?;
                         self.m.push(inst.into()).unwrap();
                     }
+                    ASTInst::Select {
+                        assign,
+                        cond,
+                        trueval,
+                        falseval,
+                    } => {
+                        let inst = SelectInst::new(
+                            self.process_operand(cond)?,
+                            self.process_operand(trueval)?,
+                            self.process_operand(falseval)?,
+                        );
+                        self.add_assign(self.m.len(), assign)?;
+                        self.m.push(inst.into()).unwrap();
+                    }
                 }
             }
         }
@@ -516,6 +530,12 @@ enum ASTInst {
         assign: Span,
         type_: ASTType,
         operand: ASTOperand,
+    },
+    Select {
+        assign: Span,
+        cond: ASTOperand,
+        trueval: ASTOperand,
+        falseval: ASTOperand,
     },
 }
 
