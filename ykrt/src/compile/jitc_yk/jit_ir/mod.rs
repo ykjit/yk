@@ -34,7 +34,7 @@ use std::{
     ffi::{c_void, CString},
     fmt, mem,
 };
-use typed_index_collections::{TiSlice, TiVec};
+use typed_index_collections::TiVec;
 #[cfg(not(test))]
 use ykaddr::addr::symbol_to_ptr;
 
@@ -239,11 +239,6 @@ impl Module {
     /// Returns the number of [Inst]s in the [Module].
     pub(crate) fn len(&self) -> usize {
         self.insts.len()
-    }
-
-    /// Return a slice of this module's instructions.
-    pub(crate) fn insts(&self) -> &TiSlice<InstIdx, Inst> {
-        &self.insts
     }
 
     /// Push a slice of arguments into the args pool.
