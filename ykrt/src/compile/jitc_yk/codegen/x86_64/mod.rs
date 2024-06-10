@@ -192,9 +192,11 @@ impl<'a> X64CodeGen<'a> {
         );
 
         match inst {
-            jit_ir::Inst::BinOp(i) => self.cg_binop(inst_idx, i),
             #[cfg(test)]
-            jit_ir::Inst::BlackBox(_) => panic!("Can't yet codegen blackbox"),
+            jit_ir::Inst::BlackBox(_) => unreachable!(),
+            jit_ir::Inst::ProxyConst(_) | jit_ir::Inst::ProxyInst(_) => unreachable!(),
+
+            jit_ir::Inst::BinOp(i) => self.cg_binop(inst_idx, i),
             jit_ir::Inst::LoadTraceInput(i) => self.cg_loadtraceinput(inst_idx, i),
             jit_ir::Inst::Load(i) => self.cg_load(inst_idx, i),
             jit_ir::Inst::PtrAdd(i) => self.cg_ptradd(inst_idx, i),
@@ -295,11 +297,15 @@ impl<'a> X64CodeGen<'a> {
         }
     }
 
-    fn cg_binop(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::BinOpInst) {
-        let lhs = inst.lhs();
-        let rhs = inst.rhs();
+    fn cg_binop(
+        &mut self,
+        inst_idx: jit_ir::InstIdx,
+        jit_ir::BinOpInst { lhs, binop, rhs }: &jit_ir::BinOpInst,
+    ) {
+        let lhs = lhs.unpack(self.m);
+        let rhs = rhs.unpack(self.m);
 
-        match inst.binop() {
+        match binop {
             BinOp::Add => {
                 self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
                 self.load_operand(WR1, &rhs); // ^^^ same
@@ -459,7 +465,7 @@ impl<'a> X64CodeGen<'a> {
     }
 
     fn cg_load(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::LoadInst) {
-        self.load_operand(WR0, &inst.operand()); // FIXME: assumes value will fit in a reg.
+        self.load_operand(WR0, &inst.operand(self.m)); // FIXME: assumes value will fit in a reg.
         let size = self.m.inst(inst_idx).def_byte_size(self.m);
         debug_assert!(size <= REG64_SIZE);
         match size {
@@ -473,7 +479,7 @@ impl<'a> X64CodeGen<'a> {
     }
 
     fn cg_ptradd(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::PtrAddInst) {
-        self.load_operand(WR0, &inst.ptr());
+        self.load_operand(WR0, &inst.ptr(self.m));
         // LLVM semantics dictate that the offset should be sign-extended/truncated up/down to the
         // size of the LLVM pointer index type. For address space zero on x86, truncation can't
         // happen, and when an immediate second operand is used for x86_64 `add`, it is implicitly
@@ -483,8 +489,8 @@ impl<'a> X64CodeGen<'a> {
     }
 
     fn cg_dynptradd(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::DynPtrAddInst) {
-        self.load_operand(WR0, &inst.num_elems());
-        self.load_operand(WR1, &inst.ptr());
+        self.load_operand(WR0, &inst.num_elems(self.m));
+        self.load_operand(WR1, &inst.ptr(self.m));
         // LLVM semantics dictate that the element size and number of elements should be
         // sign-extended/truncated up/down to the size of the LLVM pointer index type. For address
         // space zero on x86_64, truncation can't happen, and when an immediate third operand is
@@ -499,8 +505,8 @@ impl<'a> X64CodeGen<'a> {
     }
 
     fn cg_store(&mut self, inst: &jit_ir::StoreInst) {
-        self.load_operand(WR0, &inst.tgt());
-        let val = inst.val();
+        self.load_operand(WR0, &inst.tgt(self.m));
+        let val = inst.val(self.m);
         self.load_operand(WR1, &val); // FIXME: assumes the value fits in a reg
         match val.byte_size(self.m) {
             8 => dynasm!(self.asm ; mov [Rq(WR0.code())], Rq(WR1.code())),
@@ -623,7 +629,7 @@ impl<'a> X64CodeGen<'a> {
         }
 
         // Load the call target into a register.
-        self.load_operand(WR0, &inst.target());
+        self.load_operand(WR0, &inst.target(self.m));
 
         // The SysV x86_64 ABI requires the stack to be 16-byte aligned prior to a call.
         self.stack.align(SYSV_CALL_STACK_ALIGN);
@@ -641,7 +647,7 @@ impl<'a> X64CodeGen<'a> {
     }
 
     fn cg_icmp(&mut self, inst_idx: InstIdx, inst: &jit_ir::IcmpInst) {
-        let (lhs, pred, rhs) = (inst.lhs(), inst.predicate(), inst.rhs());
+        let (lhs, pred, rhs) = (inst.lhs(self.m), inst.predicate(), inst.rhs(self.m));
 
         // FIXME: assumes values fit in a registers
         self.load_operand(WR0, &lhs);
@@ -693,7 +699,7 @@ impl<'a> X64CodeGen<'a> {
     }
 
     fn cg_sext(&mut self, inst_idx: InstIdx, i: &jit_ir::SExtInst) {
-        let src_val = i.val();
+        let src_val = i.val(self.m);
         let src_type = self.m.type_(src_val.ty_idx(self.m));
         let src_size = src_type.byte_size().unwrap();
 
@@ -714,7 +720,7 @@ impl<'a> X64CodeGen<'a> {
     }
 
     fn cg_zeroextend(&mut self, inst_idx: InstIdx, i: &jit_ir::ZeroExtendInst) {
-        let from_val = i.val();
+        let from_val = i.val(self.m);
         let from_type = self.m.type_(from_val.ty_idx(self.m));
         let from_size = from_type.byte_size().unwrap();
 
@@ -739,7 +745,7 @@ impl<'a> X64CodeGen<'a> {
     }
 
     fn cg_trunc(&mut self, inst_idx: InstIdx, i: &jit_ir::TruncInst) {
-        let from_val = i.val();
+        let from_val = i.val(self.m);
         let from_type = self.m.type_(from_val.ty_idx(self.m));
         let from_size = from_type.byte_size().unwrap();
 
@@ -770,16 +776,16 @@ impl<'a> X64CodeGen<'a> {
     fn cg_select(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::SelectInst) {
         // First load the true case. We then immediately follow this up with a conditional move,
         // overwriting the value with the false case, if the condition was false.
-        self.load_operand(WR0, &inst.trueval());
-        self.load_operand(WR1, &inst.cond());
-        self.load_operand(WR2, &inst.falseval());
+        self.load_operand(WR0, &inst.trueval(self.m));
+        self.load_operand(WR1, &inst.cond(self.m));
+        self.load_operand(WR2, &inst.falseval(self.m));
         dynasm!(self.asm ; cmp Rb(WR1.code()), 0);
         dynasm!(self.asm ; cmove Rq(WR0.code()), Rq(WR2.code()));
         self.store_new_local(inst_idx, WR0);
     }
 
     fn cg_guard(&mut self, inst: &jit_ir::GuardInst) {
-        let cond = inst.cond();
+        let cond = inst.cond(self.m);
 
         // ICmp instructions evaluate to a one-byte zero/one value.
         debug_assert_eq!(cond.byte_size(self.m), 1);
