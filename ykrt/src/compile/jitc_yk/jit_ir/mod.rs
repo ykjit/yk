@@ -204,11 +204,6 @@ impl Module {
         (0..self.insts.len()).map(|x| InstIdx::new(x).unwrap())
     }
 
-    /// Mutably iterate over all the [Inst]s in this module.
-    pub(crate) fn iter_mut_insts(&mut self) -> std::slice::IterMut<'_, Inst> {
-        self.insts.iter_mut()
-    }
-
     /// Replace the instruction at `inst_idx` with `inst`.
     pub(crate) fn replace(&mut self, inst_idx: InstIdx, inst: Inst) {
         self.insts[inst_idx] = inst;
