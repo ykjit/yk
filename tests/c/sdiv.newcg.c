@@ -5,10 +5,14 @@
 //   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
 //     jitstate: start-tracing
-//     sdiv 10922
-//     sdiv2 715827882
-//     sdiv3 1431655764
-//     sdiv4 *
+//     sdiv1 -10922
+//     sdiv2 -715827882
+//     sdiv3 -3074457345618258602
+//     sdiv4 -42
+//     sdiv5 -10922
+//     sdiv6 -715827882
+//     sdiv7 -3074457345618258602
+//     sdiv8 -42
 //     jitstate: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
@@ -21,19 +25,31 @@
 //     %{{_}}: i8 = sdiv %{{_}}, 3i8
 //     ...
 //     --- End jit-pre-opt ---
-//     sdiv 10922
-//     sdiv2 715827882
-//     sdiv3 1431655764
-//     sdiv4 *
+//     sdiv1 -10922
+//     sdiv2 -715827882
+//     sdiv3 -3074457345618258602
+//     sdiv4 -42
+//     sdiv5 -10922
+//     sdiv6 -715827882
+//     sdiv7 -3074457345618258602
+//     sdiv8 -42
 //     jitstate: enter-jit-code
-//     sdiv 10922
-//     sdiv2 715827882
-//     sdiv3 1431655764
-//     sdiv4 *
-//     sdiv 10922
-//     sdiv2 715827882
-//     sdiv3 1431655764
-//     sdiv4 *
+//     sdiv1 -10922
+//     sdiv2 -715827882
+//     sdiv3 -3074457345618258602
+//     sdiv4 -42
+//     sdiv5 -10922
+//     sdiv6 -715827882
+//     sdiv7 -3074457345618258602
+//     sdiv8 -42
+//     sdiv1 -10922
+//     sdiv2 -715827882
+//     sdiv3 -3074457345618258602
+//     sdiv4 -42
+//     sdiv5 -10922
+//     sdiv6 -715827882
+//     sdiv7 -3074457345618258602
+//     sdiv8 -42
 //     jitstate: deoptimise
 //     exit
 
@@ -52,10 +68,14 @@ int main(int argc, char **argv) {
   YkLocation loc = yk_location_new();
 
   int i = 4;
-  int16_t num1 = 32767;
-  int32_t num2 = 2147483647;
-  int64_t num3 = 4294967294;
-  int8_t num4 = 127;
+  int16_t num1 = INT16_MIN;
+  int32_t num2 = INT32_MIN;
+  int64_t num3 = INT64_MIN;
+  int8_t num4 = INT8_MIN;
+  int16_t num5 = INT16_MAX;
+  int32_t num6 = INT32_MAX;
+  int64_t num7 = INT64_MAX;
+  int8_t num8 = INT8_MAX;
   NOOPT_VAL(num1);
   NOOPT_VAL(num2);
   NOOPT_VAL(num3);
@@ -64,14 +84,22 @@ int main(int argc, char **argv) {
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    short int sdiv = num1 / 3;
-    int sdiv2 = num2 / 3;
-    long long sdiv3 = num3 / 3;
-    signed char sdiv4 = num4 / 3;
-    fprintf(stderr, "sdiv %hd\n", sdiv);
+    int16_t sdiv = num1 / 3;
+    int32_t sdiv2 = num2 / 3;
+    int64_t sdiv3 = num3 / 3;
+    int8_t sdiv4 = num4 / 3;
+    fprintf(stderr, "sdiv1 %hd\n", sdiv);
     fprintf(stderr, "sdiv2 %d\n", sdiv2);
-    fprintf(stderr, "sdiv3 %lld\n", sdiv3);
-    fprintf(stderr, "sdiv4 %c\n", sdiv4);
+    fprintf(stderr, "sdiv3 %ld\n", sdiv3);
+    fprintf(stderr, "sdiv4 %d\n", sdiv4);
+    int16_t sdiv5 = num5 / -3;
+    int32_t sdiv6 = num6 / -3;
+    int64_t sdiv7 = num7 / -3;
+    int8_t sdiv8 = num8 / -3;
+    fprintf(stderr, "sdiv5 %hd\n", sdiv5);
+    fprintf(stderr, "sdiv6 %d\n", sdiv6);
+    fprintf(stderr, "sdiv7 %ld\n", sdiv7);
+    fprintf(stderr, "sdiv8 %d\n", sdiv8);
     i--;
   }
   fprintf(stderr, "exit\n");

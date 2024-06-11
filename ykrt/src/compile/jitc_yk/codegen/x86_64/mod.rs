@@ -385,14 +385,19 @@ impl<'a> X64CodeGen<'a> {
                 // The dividend is hard-coded into DX:AX/EDX:EAX/RDX:RAX. However unless we have 128bit
                 // values or want to optimise register usage, we won't be needing this, and just zero out
                 // RDX.
-                dynasm!(self.asm; xor rdx, rdx);
                 self.load_operand(Rq::RAX, &lhs); // FIXME: assumes value will fit in a reg.
                 self.load_operand(WR1, &rhs); // ^^^ same
+
+                // Signed division (idiv) operates on the DX:AX, EDX:EAX, RDX:RAX registers, so we
+                // use `cdq`/`cqo` to double the size via sign extension and store the result in
+                // DX:AX, EDX:EAX, RDX:RAX.
                 match lhs.byte_size(self.m) {
-                    8 => dynasm!(self.asm; idiv Rq(WR1.code())),
-                    4 => dynasm!(self.asm; idiv Rd(WR1.code())),
-                    2 => dynasm!(self.asm; idiv Rw(WR1.code())),
-                    1 => dynasm!(self.asm; idiv Rb(WR1.code())),
+                    8 => dynasm!(self.asm; cqo; idiv Rq(WR1.code())),
+                    4 => dynasm!(self.asm; cdq; idiv Rd(WR1.code())),
+                    2 => dynasm!(self.asm; cwd; idiv Rw(WR1.code())),
+                    // There's no `cwd` equivalent for byte-sized values, so we use `movsx`
+                    // (sign-extend) instead.
+                    1 => dynasm!(self.asm; movsx ax, al; idiv Rb(WR1.code())),
                     _ => todo!(),
                 }
                 // The quotient is stored in RAX. We don't care about the remainder stored in RDX.
@@ -1631,6 +1636,28 @@ mod tests {
                 ... cmp r13b, 0x00
                 ... cmovz r12, r14
                 ... mov [rbp-0x08], r12d
+                ...
+            ",
+            );
+        }
+
+        #[test]
+        fn cg_sdiv() {
+            test_with_spillalloc(
+                "
+              entry:
+                %0: i8 = load_ti 0
+                %1: i8 = load_ti 1
+                %2: i8 = sdiv %0, %1
+            ",
+                "
+                ...
+                ; %2: i8 = sdiv %0, %1
+                ... movzx rax, byte ptr [rbp-0x01]
+                ... movzx r13, byte ptr [rbp-0x02]
+                ... movsx ax, al
+                ... idiv r13b
+                ... mov [rbp-0x03], al
                 ...
             ",
             );
