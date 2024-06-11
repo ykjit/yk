@@ -5,7 +5,8 @@
 
 use crate::compile::{
     jitc_yk::jit_ir::{
-        BinOp, BinOpInst, IcmpInst, Inst, InstIdx, Module, Operand, PackedOperand, Predicate,
+        BinOp, BinOpInst, GuardInst, IcmpInst, Inst, InstIdx, Module, Operand, PackedOperand,
+        Predicate,
     },
     CompilationError,
 };
@@ -20,6 +21,7 @@ pub(super) fn simple(mut m: Module) -> Result<Module, CompilationError> {
                 binop: BinOp::Mul,
                 rhs,
             }) => opt_mul(&mut m, inst_i, lhs, rhs)?,
+            Inst::Guard(x) => opt_guard(&mut m, inst_i, x)?,
             Inst::Icmp(x) => opt_icmp(&mut m, inst_i, x)?,
             _ => (),
         }
@@ -121,6 +123,22 @@ fn opt_icmp(
         }
     }
 
+    Ok(())
+}
+
+fn opt_guard(
+    m: &mut Module,
+    inst_i: InstIdx,
+    GuardInst {
+        cond,
+        expect: _,
+        gidx: _,
+    }: GuardInst,
+) -> Result<(), CompilationError> {
+    if let Operand::Const(_) = cond.unpack(m) {
+        // A guard that references a constant is, by definition, not useful.
+        m.replace(inst_i, Inst::Tombstone);
+    }
     Ok(())
 }
 
@@ -323,6 +341,45 @@ mod tests {
             black_box 1i1
             black_box 0i1
             black_box 1i1
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_const_guard() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i1 = eq 0i8, 0i8
+            guard %0, true
+            %1: i1 = eq 0i8, 1i8
+            guard %1, false
+        ",
+            |m| simple(m).unwrap(),
+            "
+          ...
+          entry:
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_const_guard_chain() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = load_ti 0
+            %1: i8 = mul %0, 0i8
+            %2: i1 = eq %1, 0i8
+            guard %2, true
+            black_box %0
+        ",
+            |m| simple(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = load_ti 0
+            black_box %0
         ",
         );
     }

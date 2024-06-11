@@ -195,7 +195,9 @@ impl<'a> X64CodeGen<'a> {
         match inst {
             #[cfg(test)]
             jit_ir::Inst::BlackBox(_) => unreachable!(),
-            jit_ir::Inst::ProxyConst(_) | jit_ir::Inst::ProxyInst(_) => unreachable!(),
+            jit_ir::Inst::ProxyConst(_) | jit_ir::Inst::ProxyInst(_) | jit_ir::Inst::Tombstone => {
+                unreachable!()
+            }
 
             jit_ir::Inst::BinOp(i) => self.cg_binop(inst_idx, i),
             jit_ir::Inst::LoadTraceInput(i) => self.cg_loadtraceinput(inst_idx, i),

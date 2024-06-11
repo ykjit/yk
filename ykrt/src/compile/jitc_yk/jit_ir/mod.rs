@@ -458,7 +458,7 @@ impl InstIdxIterator {
             let cur = self.0;
             self.0 = InstIdx::new(usize::from(self.0) + 1).unwrap();
             match x {
-                Inst::ProxyConst(_) | Inst::ProxyInst(_) => (),
+                Inst::ProxyConst(_) | Inst::ProxyInst(_) | Inst::Tombstone => (),
                 _ => return Some(cur),
             }
         }
@@ -1028,6 +1028,9 @@ pub(crate) enum Inst {
     /// `InstIdx`.
     #[allow(clippy::enum_variant_names)]
     ProxyInst(InstIdx),
+    /// This instruction has been permanently removed. Note: this must only be used if you are
+    /// entirely sure that the value this instruction once produced is no longer used.
+    Tombstone,
 
     // "Normal" IR instructions.
     BinOp(BinOpInst),
@@ -1073,6 +1076,7 @@ impl Inst {
             Self::BlackBox(_) => m.void_ty_idx(),
             Self::ProxyConst(x) => m.const_(*x).ty_idx(m),
             Self::ProxyInst(x) => m.inst(*x).ty_idx(m),
+            Self::Tombstone => panic!(),
 
             Self::BinOp(x) => x.ty_idx(m),
             Self::IndirectCall(idx) => {
@@ -1141,7 +1145,7 @@ impl fmt::Display for DisplayableInst<'_> {
         match self.inst {
             #[cfg(test)]
             Inst::BlackBox(x) => write!(f, "black_box {}", x.operand(self.m).display(self.m)),
-            Inst::ProxyConst(_) | Inst::ProxyInst(_) => unreachable!(),
+            Inst::ProxyConst(_) | Inst::ProxyInst(_) | Inst::Tombstone => unreachable!(),
 
             Inst::BinOp(BinOpInst { lhs, binop, rhs }) => write!(
                 f,
