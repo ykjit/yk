@@ -407,7 +407,7 @@ pub(crate) enum Predicate {
 
 impl Display for Predicate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Following LLVM precident, using their short predicate names for formatting.
+        // Following LLVM's precedent, use short predicate names for formatting.
         match self {
             Self::Equal => write!(f, "eq"),
             Self::NotEqual => write!(f, "ne"),

@@ -80,8 +80,8 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
   | "CALL" "GLOBAL" "(" CallArgs ")" {
       Ok(ASTInst::Call{assign: None, name: $2?.span(), args: $4?})
     }
-  | "LOCAL_OPERAND" ":" Type "=" "EQ" Operand "," Operand  {
-      Ok(ASTInst::Eq{assign: $1?.span(), type_: $3?, lhs: $6?, rhs: $8?})
+  | "LOCAL_OPERAND" ":" Type "=" Predicate Operand "," Operand  {
+      Ok(ASTInst::ICmp{assign: $1?.span(), type_: $3?, pred: $5?, lhs: $6?, rhs: $8?})
     }
   | "LOCAL_OPERAND" ":" Type "=" "LOAD" Operand {
       Ok(ASTInst::Load{assign: $1?.span(), type_: $3?, val: $6?, volatile: false})
@@ -137,6 +137,19 @@ BinOp -> Result<BinOp, Box<dyn Error>>:
   | "SREM" { Ok(BinOp::SRem) }
   | "UDIV" { Ok(BinOp::UDiv) }
   | "UREM" { Ok(BinOp::URem) }
+  ;
+
+Predicate -> Result<Predicate, Box<dyn Error>>:
+    "EQ" { Ok(Predicate::Equal) }
+  | "NE" { Ok(Predicate::NotEqual) }
+  | "UGT" { Ok(Predicate::UnsignedGreater) }
+  | "UGE" { Ok(Predicate::UnsignedGreaterEqual) }
+  | "ULT" { Ok(Predicate::UnsignedLess) }
+  | "ULE" { Ok(Predicate::UnsignedLessEqual) }
+  | "SGT" { Ok(Predicate::SignedGreater) }
+  | "SGE" { Ok(Predicate::SignedGreaterEqual) }
+  | "SLT" { Ok(Predicate::SignedLess) }
+  | "SLE" { Ok(Predicate::SignedLessEqual) }
   ;
 
 CallArgs -> Result<Vec<ASTOperand>, Box<dyn Error>>:

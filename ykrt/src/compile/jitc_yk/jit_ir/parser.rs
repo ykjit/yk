@@ -154,19 +154,6 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             self.m.push(inst.into()).unwrap();
                         }
                     }
-                    ASTInst::Eq {
-                        assign,
-                        type_: _,
-                        lhs,
-                        rhs,
-                    } => {
-                        let inst = IcmpInst::new(
-                            self.process_operand(lhs)?,
-                            Predicate::Equal,
-                            self.process_operand(rhs)?,
-                        );
-                        self.push_assign(inst.into(), assign)?;
-                    }
                     ASTInst::Guard { operand, is_true } => {
                         let gidx = self
                             .m
@@ -174,6 +161,20 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             .unwrap();
                         let inst = GuardInst::new(self.process_operand(operand)?, is_true, gidx);
                         self.m.push(inst.into()).unwrap();
+                    }
+                    ASTInst::ICmp {
+                        assign,
+                        type_: _,
+                        pred,
+                        lhs,
+                        rhs,
+                    } => {
+                        let inst = IcmpInst::new(
+                            self.process_operand(lhs)?,
+                            pred,
+                            self.process_operand(rhs)?,
+                        );
+                        self.push_assign(inst.into(), assign)?;
                     }
                     ASTInst::Load {
                         assign,
@@ -443,16 +444,17 @@ enum ASTInst {
         name: Span,
         args: Vec<ASTOperand>,
     },
-    Eq {
-        assign: Span,
-        #[allow(dead_code)]
-        type_: ASTType,
-        lhs: ASTOperand,
-        rhs: ASTOperand,
-    },
     Guard {
         operand: ASTOperand,
         is_true: bool,
+    },
+    ICmp {
+        assign: Span,
+        #[allow(dead_code)]
+        type_: ASTType,
+        pred: Predicate,
+        lhs: ASTOperand,
+        rhs: ASTOperand,
     },
     Load {
         assign: Span,
@@ -621,6 +623,15 @@ mod tests {
               %37: i64 = add %33, 9223372036854775808i64
               *%9 = 0x0
               *%9 = 0xFFFFFFFF
+              %38: i16 = ne %1, %2
+              %40: i16 = ugt %1, %2
+              %41: i16 = uge %1, %2
+              %42: i16 = ult %1, %2
+              %43: i16 = ule %1, %2
+              %44: i16 = sgt %1, %2
+              %45: i16 = sge %1, %2
+              %46: i16 = slt %1, %2
+              %47: i16 = sle %1, %2
         ",
         );
     }
