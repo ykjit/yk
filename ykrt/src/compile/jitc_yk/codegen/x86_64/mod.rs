@@ -444,6 +444,23 @@ impl<'a> X64CodeGen<'a> {
                 }
                 self.store_new_local(inst_idx, WR0);
             }
+            BinOp::UDiv => {
+                // Like SDiv the dividend goes into AX, DX:AX, EDX:EAX, RDX:RAX. But since the
+                // values aren't signed we don't need to sign-extend them and can just zero out
+                // `rdx`.
+                dynasm!(self.asm; xor rdx, rdx);
+                self.load_operand(Rq::RAX, &lhs); // FIXME: assumes value will fit in a reg.
+                self.load_operand(WR1, &rhs); // ^^^ same
+                match lhs.byte_size(self.m) {
+                    8 => dynasm!(self.asm; div Rq(WR1.code())),
+                    4 => dynasm!(self.asm; div Rd(WR1.code())),
+                    2 => dynasm!(self.asm; div Rw(WR1.code())),
+                    1 => dynasm!(self.asm; div Rb(WR1.code())),
+                    _ => todo!(),
+                }
+                // The quotient is stored in RAX. We don't care about the remainder stored in RDX.
+                self.store_new_local(inst_idx, Rq::RAX);
+            }
             x => todo!("{x:?}"),
         }
     }
@@ -1657,6 +1674,28 @@ mod tests {
                 ... movzx r13, byte ptr [rbp-0x02]
                 ... movsx ax, al
                 ... idiv r13b
+                ... mov [rbp-0x03], al
+                ...
+            ",
+            );
+        }
+
+        #[test]
+        fn cg_udiv() {
+            test_with_spillalloc(
+                "
+              entry:
+                %0: i8 = load_ti 0
+                %1: i8 = load_ti 1
+                %2: i8 = udiv %0, %1
+            ",
+                "
+                ...
+                ; %2: i8 = udiv %0, %1
+                ... xor rdx, rdx
+                ... movzx rax, byte ptr [rbp-0x01]
+                ... movzx r13, byte ptr [rbp-0x02]
+                ... div r13b
                 ... mov [rbp-0x03], al
                 ...
             ",
