@@ -482,13 +482,14 @@ impl U24 {
             Some(Self([b2 as u8, b1 as u8, b0 as u8]))
         }
     }
+}
 
-    /// Converts 3-bytes conceptually representing a `u24` to a usize.
-    fn to_usize(self) -> usize {
+impl From<U24> for usize {
+    fn from(x: U24) -> Self {
         static_assertions::const_assert!(mem::size_of::<usize>() >= 3);
-        let b0 = self.0[0] as usize; // most-significant byte.
-        let b1 = self.0[1] as usize;
-        let b2 = self.0[2] as usize;
+        let b0 = x.0[0] as usize; // most-significant byte.
+        let b1 = x.0[1] as usize;
+        let b2 = x.0[2] as usize;
         (b0 << 16) | (b1 << 8) | b2
     }
 }
@@ -509,10 +510,6 @@ macro_rules! index_24bit {
                     .ok_or(index_overflow(stringify!($struct)))
                     .map(|u| Self(u))
             }
-
-            pub(crate) fn to_usize(self) -> usize {
-                self.0.to_usize()
-            }
         }
 
         impl From<usize> for $struct {
@@ -525,8 +522,8 @@ macro_rules! index_24bit {
 
         impl From<$struct> for usize {
             // Required for TiVec.
-            fn from(v: $struct) -> Self {
-                v.to_usize()
+            fn from(x: $struct) -> Self {
+                usize::from(x.0)
             }
         }
     };
@@ -1954,16 +1951,16 @@ mod tests {
 
     #[test]
     fn u24_to_usize() {
-        assert_eq!(U24([0x00, 0x00, 0x00]).to_usize(), 0x000000);
-        assert_eq!(U24([0x12, 0x34, 0x56]).to_usize(), 0x123456);
-        assert_eq!(U24([0xff, 0xff, 0xff]).to_usize(), 0xffffff);
+        assert_eq!(usize::from(U24([0x00, 0x00, 0x00])), 0x000000);
+        assert_eq!(usize::from(U24([0x12, 0x34, 0x56])), 0x123456);
+        assert_eq!(usize::from(U24([0xff, 0xff, 0xff])), 0xffffff);
     }
 
     #[test]
     fn u24_round_trip() {
-        assert_eq!(U24::from_usize(0x000000).unwrap().to_usize(), 0x000000);
-        assert_eq!(U24::from_usize(0x123456).unwrap().to_usize(), 0x123456);
-        assert_eq!(U24::from_usize(0xffffff).unwrap().to_usize(), 0xffffff);
+        assert_eq!(usize::from(U24::from_usize(0x000000).unwrap()), 0x000000);
+        assert_eq!(usize::from(U24::from_usize(0x123456).unwrap()), 0x123456);
+        assert_eq!(usize::from(U24::from_usize(0xffffff).unwrap()), 0xffffff);
     }
 
     #[test]
