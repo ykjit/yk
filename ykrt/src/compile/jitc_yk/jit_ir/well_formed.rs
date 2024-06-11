@@ -7,11 +7,13 @@
 //!   * [super::BinOpInst]s left and right hand side operands have the same [Ty]s.
 //!   * [super::DirectCallInst]s pass the correct number of arguments to a [super::FuncTy] and each
 //!     of those arguments has the correct [super::Ty].
-//!   * [super::GuardInst]s have a `cond` whose type is [super::Ty::Integer(1)] (i.e. an `i1`).
+//!   * [super::GuardInst]s:
+//!       * Have a `cond` whose type is [super::Ty::Integer(1)] (i.e. an `i1`).
+//!       * If `cond` references a constant, that constant matches the guard's `expect` attribute.
 //!   * [super::ICmpInst]s left and right hand side operands have the same [Ty]s.
 //!   * [Const::Int]s cannot use more bits than the corresponding [Ty::Integer] type.
 
-use super::{BinOpInst, GuardInst, Inst, InstIdx, Module, Ty};
+use super::{BinOpInst, Const, GuardInst, Inst, InstIdx, Module, Operand, Ty};
 
 impl Module {
     pub(crate) fn assert_well_formed(&self) {
@@ -61,7 +63,7 @@ impl Module {
                         }
                     }
                 }
-                Inst::Guard(GuardInst { cond, .. }) => {
+                Inst::Guard(GuardInst { cond, expect, .. }) => {
                     let cond = cond.unpack(self);
                     let tyidx = cond.ty_idx(self);
                     let Ty::Integer(1) = self.type_(tyidx) else {
@@ -72,6 +74,19 @@ impl Module {
                             self.inst(inst_idx).display(inst_idx, self)
                         )
                     };
+                    if let Operand::Const(x) = cond {
+                        let Const::Int(_, v) = self.const_(x) else {
+                            unreachable!()
+                        };
+                        if (*expect && *v == 0) || (!*expect && *v == 1) {
+                            let inst_idx = InstIdx::new(i).unwrap();
+                            panic!(
+                                "Guard at position {} references a constant that is at odds with the guard itself\n  {}",
+                                usize::from(inst_idx),
+                                self.inst(inst_idx).display(inst_idx, self)
+                            );
+                        }
+                    }
                 }
                 Inst::Icmp(x) => {
                     if x.lhs(self).ty_idx(self) != x.rhs(self).ty_idx(self) {
