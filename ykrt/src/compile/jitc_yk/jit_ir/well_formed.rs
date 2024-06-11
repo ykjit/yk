@@ -4,13 +4,14 @@
 //!
 //! Specifically, after calling [Module::assert_well_formed] one can safely assume:
 //!
+//!   * [super::BinOpInst]s left and right hand side operands have the same [Ty]s.
 //!   * [super::DirectCallInst]s pass the correct number of arguments to a [super::FuncTy] and each
 //!     of those arguments has the correct [super::Ty].
-//!   * [super::BinOpInst]s left and right hand side operands have the same [Ty]s.
+//!   * [super::GuardInst]s have a `cond` whose type is [super::Ty::Integer(1)] (i.e. an `i1`).
 //!   * [super::ICmpInst]s left and right hand side operands have the same [Ty]s.
 //!   * [Const::Int]s cannot use more bits than the corresponding [Ty::Integer] type.
 
-use super::{BinOpInst, Inst, InstIdx, Module, Ty};
+use super::{BinOpInst, GuardInst, Inst, InstIdx, Module, Ty};
 
 impl Module {
     pub(crate) fn assert_well_formed(&self) {
@@ -59,6 +60,18 @@ impl Module {
                                 inst.display(InstIdx::new(i).unwrap(), self));
                         }
                     }
+                }
+                Inst::Guard(GuardInst { cond, .. }) => {
+                    let cond = cond.unpack(self);
+                    let tyidx = cond.ty_idx(self);
+                    let Ty::Integer(1) = self.type_(tyidx) else {
+                        let inst_idx = InstIdx::new(i).unwrap();
+                        panic!(
+                            "Guard at position {} does not have 'cond' of type 'i1'\n  {}",
+                            usize::from(inst_idx),
+                            self.inst(inst_idx).display(inst_idx, self)
+                        )
+                    };
                 }
                 Inst::Icmp(x) => {
                     if x.lhs(self).ty_idx(self) != x.rhs(self).ty_idx(self) {
@@ -192,6 +205,18 @@ mod tests {
               entry:
                 %0: i8 = load_ti 0
                 %1: i8 = sext %0
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Guard at position 1 does not have 'cond' of type 'i1'")]
+    fn guard_i1() {
+        Module::from_str(
+            "
+              entry:
+                %0: i8 = load_ti 0
+                guard %0, true
             ",
         );
     }

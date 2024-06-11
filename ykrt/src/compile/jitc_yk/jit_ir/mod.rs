@@ -1801,13 +1801,13 @@ impl IcmpInst {
 /// then execution may not continue, and deoptimisation must occur.
 ///
 #[derive(Clone, Debug, PartialEq)]
-pub struct GuardInst {
+pub(crate) struct GuardInst {
     /// The condition to guard against.
-    cond: PackedOperand,
+    pub(crate) cond: PackedOperand,
     /// The expected outcome of the condition.
-    expect: bool,
+    pub(crate) expect: bool,
     /// Additional information about this guard.
-    gidx: GuardInfoIdx,
+    pub(crate) gidx: GuardInfoIdx,
 }
 
 impl GuardInst {
