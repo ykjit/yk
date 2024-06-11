@@ -322,12 +322,28 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
             ASTOperand::ConstInt(span) => {
                 let s = self.lexer.span_str(span);
                 let [val, width] = <[&str; 2]>::try_from(s.split('i').collect::<Vec<_>>()).unwrap();
-                let val = val
-                    .parse::<u64>()
-                    .map_err(|e| self.error_at_span(span, &e.to_string()))?;
                 let width = width
                     .parse::<u32>()
                     .map_err(|e| self.error_at_span(span, &e.to_string()))?;
+                let val = if val.starts_with("-") {
+                    let val = val
+                        .parse::<i64>()
+                        .map_err(|e| self.error_at_span(span, &e.to_string()))?;
+                    if width < 64
+                        && (val < -((1 << width) - 1) / 2 - 1 || val >= ((1 << width) - 1) / 2)
+                    {
+                        panic!("Signed constant {val} exceeds the bit width {width} of the integer type");
+                    }
+                    val as u64
+                } else {
+                    let val = val
+                        .parse::<u64>()
+                        .map_err(|e| self.error_at_span(span, &e.to_string()))?;
+                    if width < 64 && val > (1 << width) - 1 {
+                        panic!("Unsigned constant {val} exceeds the bit width {width} of the integer type");
+                    }
+                    val
+                };
                 let ty_idx = self.m.insert_ty(Ty::Integer(width)).unwrap();
                 Ok(Operand::Const(
                     self.m
@@ -731,6 +747,32 @@ mod tests {
             %4: i16 = load_ti 1
             %3: i16 = load_ti 2
         ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Signed constant -129 exceeds the bit width 8 of the integer type")]
+    fn invalid_numbers1() {
+        Module::from_str(
+            "
+          entry:
+            %0: i8 = load_ti 0
+            %1: i8 = add %0, -128i8
+            %2: i8 = add %0, -129i8
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Unsigned constant 256 exceeds the bit width 8 of the integer type")]
+    fn invalid_numbers2() {
+        Module::from_str(
+            "
+          entry:
+            %0: i8 = load_ti 0
+            %1: i8 = add %0, 255i8
+            %2: i8 = add %0, 256i8
+            ",
         );
     }
 }

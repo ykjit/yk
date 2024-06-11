@@ -893,6 +893,9 @@ impl fmt::Display for DisplayableOperand<'_> {
 /// A constant.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum Const {
+    /// A constant integer at most 64 bits wide. This can be treated a signed or unsigned integer
+    /// depending on the operations that use this constant (the [Ty::Integer] type itself has no
+    /// concept of signedness).
     Int(TyIdx, u64),
     Ptr(usize),
 }
