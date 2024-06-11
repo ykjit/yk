@@ -312,7 +312,7 @@ impl<'a> TraceBuilder<'a> {
     }
 
     /// Link the AOT IR to the last instruction pushed into the JIT IR.
-    fn link_iid_to_last_instr(&mut self, bid: &aot_ir::BBlockId, aot_inst_idx: usize) {
+    fn link_iid_to_last_inst(&mut self, bid: &aot_ir::BBlockId, aot_inst_idx: usize) {
         let aot_iid = aot_ir::InstID::new(
             bid.func_idx(),
             bid.bb_idx(),
@@ -335,7 +335,7 @@ impl<'a> TraceBuilder<'a> {
         if jit_inst.def_type(&self.jit_mod).is_some() {
             // If the AOT instruction defines a new value, then add it to the local map.
             self.jit_mod.push(jit_inst)?;
-            self.link_iid_to_last_instr(bid, aot_inst_idx);
+            self.link_iid_to_last_inst(bid, aot_inst_idx);
         } else {
             self.jit_mod.push(jit_inst)?;
         }
@@ -779,7 +779,7 @@ impl<'a> TraceBuilder<'a> {
                 jit_ir::DynPtrAddInst::new(jit_ptr, num_elems, elem_size).into(),
             )?;
         }
-        self.link_iid_to_last_instr(bid, aot_inst_idx);
+        self.link_iid_to_last_inst(bid, aot_inst_idx);
         Ok(())
     }
 
