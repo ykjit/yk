@@ -68,7 +68,10 @@ pub(crate) struct Module {
     void_ty_idx: TyIdx,
     /// The type index of a pointer type. Cached for convenience.
     ptr_ty_idx: TyIdx,
+    /// The type index of a 1-bit integer. Cached for convenience.
+    int1_ty_idx: TyIdx,
     /// The type index of an 8-bit integer. Cached for convenience.
+    #[cfg(test)]
     int8_ty_idx: TyIdx,
     /// The [ConstIdx] of the i1 value 1 / "true".
     true_constidx: ConstIdx,
@@ -129,10 +132,11 @@ impl Module {
         let mut types = IndexSet::new();
         let void_ty_idx = TyIdx::new(types.insert_full(Ty::Void).0)?;
         let ptr_ty_idx = TyIdx::new(types.insert_full(Ty::Ptr).0)?;
+        let int1_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(1)).0).unwrap();
+        #[cfg(test)]
         let int8_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(8)).0).unwrap();
 
         let mut consts = IndexSet::new();
-        let int1_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(1)).0).unwrap();
         let true_constidx =
             ConstIdx::new(consts.insert_full(Const::Int(int1_ty_idx, 1)).0).unwrap();
         let false_constidx =
@@ -157,6 +161,8 @@ impl Module {
             types,
             void_ty_idx,
             ptr_ty_idx,
+            int1_ty_idx,
+            #[cfg(test)]
             int8_ty_idx,
             true_constidx,
             false_constidx,
@@ -192,7 +198,13 @@ impl Module {
         self.ptr_ty_idx
     }
 
+    /// Returns the type index of a 1-bit integer.
+    pub(crate) fn int1_ty_idx(&self) -> TyIdx {
+        self.int1_ty_idx
+    }
+
     /// Returns the type index of an 8-bit integer.
+    #[cfg(test)]
     pub(crate) fn int8_ty_idx(&self) -> TyIdx {
         self.int8_ty_idx
     }
@@ -1076,7 +1088,7 @@ impl Inst {
             Self::PtrAdd(..) => m.ptr_ty_idx(),
             Self::DynPtrAdd(..) => m.ptr_ty_idx(),
             Self::Store(..) => m.void_ty_idx(),
-            Self::Icmp(_) => m.int8_ty_idx(), // always returns a 0/1 valued byte.
+            Self::Icmp(_) => m.int1_ty_idx(),
             Self::Guard(..) => m.void_ty_idx(),
             Self::Arg(..) => m.ptr_ty_idx(),
             Self::TraceLoopStart => m.void_ty_idx(),
