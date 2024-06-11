@@ -10,14 +10,14 @@
 //!   * [super::ICmpInst]s left and right hand side operands have the same [Ty]s.
 //!   * [Const::Int]s cannot use more bits than the corresponding [Ty::Integer] type.
 
-use super::{Const, Inst, InstIdx, Module, Ty};
+use super::{BinOpInst, Const, Inst, InstIdx, Module, Ty};
 
 impl Module {
     pub(crate) fn assert_well_formed(&self) {
         for (i, inst) in self.insts.iter().enumerate() {
             match inst {
-                Inst::BinOp(x) => {
-                    if x.lhs().ty_idx(self) != x.rhs().ty_idx(self) {
+                Inst::BinOp(BinOpInst { lhs, binop: _, rhs }) => {
+                    if lhs.unpack(self).ty_idx(self) != rhs.unpack(self).ty_idx(self) {
                         let inst_idx = InstIdx::new(i).unwrap();
                         panic!(
                             "Instruction at position {} has different types on lhs and rhs\n  {}",
@@ -61,7 +61,7 @@ impl Module {
                     }
                 }
                 Inst::Icmp(x) => {
-                    if x.lhs().ty_idx(self) != x.rhs().ty_idx(self) {
+                    if x.lhs(self).ty_idx(self) != x.rhs(self).ty_idx(self) {
                         let inst_idx = InstIdx::new(i).unwrap();
                         panic!(
                             "Instruction at position {} has different types on lhs and rhs\n  {}",
@@ -71,7 +71,7 @@ impl Module {
                     }
                 }
                 Inst::SExt(x) => {
-                    if self.type_(x.val().ty_idx(self)).byte_size()
+                    if self.type_(x.val(self).ty_idx(self)).byte_size()
                         >= self.type_(x.dest_ty_idx()).byte_size()
                     {
                         let inst_idx = InstIdx::new(i).unwrap();
