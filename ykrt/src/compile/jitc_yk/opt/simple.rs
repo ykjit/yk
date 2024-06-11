@@ -45,7 +45,7 @@ fn opt_mul(
                 } else if y == 1 {
                     // Replace `x * 1` with `x`.
                     m.replace(inst_i, Inst::ProxyInst(mul_inst));
-                } else if y % 2 == 0 {
+                } else if y & (y - 1) == 0 {
                     // Replace `x * y` with `x << ...`.
                     let shl = u64::from(y.ilog2());
                     let new_const = Operand::Const(m.insert_const(old_const.u64_to_int(shl))?);
@@ -207,10 +207,7 @@ mod tests {
             %2: i64 = mul %0, 4i64
             %3: i64 = mul %0, 4611686018427387904i64
             %4: i64 = mul %0, 9223372036854775807i64
-            black_box %1
-            black_box %2
-            black_box %3
-            black_box %4
+            %5: i64 = mul %0, 12i64
         ",
             |m| simple(m).unwrap(),
             "
@@ -221,10 +218,7 @@ mod tests {
             %2: i64 = shl %0, 2i64
             %3: i64 = shl %0, 62i64
             %4: i64 = mul %0, 9223372036854775807i64
-            black_box %1
-            black_box %2
-            black_box %3
-            black_box %4
+            %5: i64 = mul %0, 12i64
         ",
         );
     }
