@@ -154,19 +154,6 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             self.m.push(inst.into()).unwrap();
                         }
                     }
-                    ASTInst::Eq {
-                        assign,
-                        type_: _,
-                        lhs,
-                        rhs,
-                    } => {
-                        let inst = IcmpInst::new(
-                            self.process_operand(lhs)?,
-                            Predicate::Equal,
-                            self.process_operand(rhs)?,
-                        );
-                        self.push_assign(inst.into(), assign)?;
-                    }
                     ASTInst::Guard { operand, is_true } => {
                         let gidx = self
                             .m
@@ -174,6 +161,20 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             .unwrap();
                         let inst = GuardInst::new(self.process_operand(operand)?, is_true, gidx);
                         self.m.push(inst.into()).unwrap();
+                    }
+                    ASTInst::ICmp {
+                        assign,
+                        type_: _,
+                        pred,
+                        lhs,
+                        rhs,
+                    } => {
+                        let inst = IcmpInst::new(
+                            self.process_operand(lhs)?,
+                            pred,
+                            self.process_operand(rhs)?,
+                        );
+                        self.push_assign(inst.into(), assign)?;
                     }
                     ASTInst::Load {
                         assign,
@@ -321,12 +322,28 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
             ASTOperand::ConstInt(span) => {
                 let s = self.lexer.span_str(span);
                 let [val, width] = <[&str; 2]>::try_from(s.split('i').collect::<Vec<_>>()).unwrap();
-                let val = val
-                    .parse::<u64>()
-                    .map_err(|e| self.error_at_span(span, &e.to_string()))?;
                 let width = width
                     .parse::<u32>()
                     .map_err(|e| self.error_at_span(span, &e.to_string()))?;
+                let val = if val.starts_with("-") {
+                    let val = val
+                        .parse::<i64>()
+                        .map_err(|e| self.error_at_span(span, &e.to_string()))?;
+                    if width < 64
+                        && (val < -((1 << width) - 1) / 2 - 1 || val >= ((1 << width) - 1) / 2)
+                    {
+                        panic!("Signed constant {val} exceeds the bit width {width} of the integer type");
+                    }
+                    val as u64
+                } else {
+                    let val = val
+                        .parse::<u64>()
+                        .map_err(|e| self.error_at_span(span, &e.to_string()))?;
+                    if width < 64 && val > (1 << width) - 1 {
+                        panic!("Unsigned constant {val} exceeds the bit width {width} of the integer type");
+                    }
+                    val
+                };
                 let ty_idx = self.m.insert_ty(Ty::Integer(width)).unwrap();
                 Ok(Operand::Const(
                     self.m
@@ -443,16 +460,17 @@ enum ASTInst {
         name: Span,
         args: Vec<ASTOperand>,
     },
-    Eq {
-        assign: Span,
-        #[allow(dead_code)]
-        type_: ASTType,
-        lhs: ASTOperand,
-        rhs: ASTOperand,
-    },
     Guard {
         operand: ASTOperand,
         is_true: bool,
+    },
+    ICmp {
+        assign: Span,
+        #[allow(dead_code)]
+        type_: ASTType,
+        pred: Predicate,
+        lhs: ASTOperand,
+        rhs: ASTOperand,
     },
     Load {
         assign: Span,
@@ -621,6 +639,15 @@ mod tests {
               %37: i64 = add %33, 9223372036854775808i64
               *%9 = 0x0
               *%9 = 0xFFFFFFFF
+              %38: i16 = ne %1, %2
+              %40: i16 = ugt %1, %2
+              %41: i16 = uge %1, %2
+              %42: i16 = ult %1, %2
+              %43: i16 = ule %1, %2
+              %44: i16 = sgt %1, %2
+              %45: i16 = sge %1, %2
+              %46: i16 = slt %1, %2
+              %47: i16 = sle %1, %2
         ",
         );
     }
@@ -720,6 +747,32 @@ mod tests {
             %4: i16 = load_ti 1
             %3: i16 = load_ti 2
         ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Signed constant -129 exceeds the bit width 8 of the integer type")]
+    fn invalid_numbers1() {
+        Module::from_str(
+            "
+          entry:
+            %0: i8 = load_ti 0
+            %1: i8 = add %0, -128i8
+            %2: i8 = add %0, -129i8
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Unsigned constant 256 exceeds the bit width 8 of the integer type")]
+    fn invalid_numbers2() {
+        Module::from_str(
+            "
+          entry:
+            %0: i8 = load_ti 0
+            %1: i8 = add %0, 255i8
+            %2: i8 = add %0, 256i8
+            ",
         );
     }
 }
