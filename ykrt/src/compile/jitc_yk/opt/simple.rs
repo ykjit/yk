@@ -6,7 +6,7 @@
 use crate::compile::{
     jitc_yk::{
         aot_ir::BinOp,
-        jit_ir::{BinOpInst, Inst, Module, Operand},
+        jit_ir::{BinOpInst, Inst, InstIdx, Module, Operand, PackedOperand},
     },
     CompilationError,
 };
@@ -14,51 +14,60 @@ use crate::compile::{
 pub(super) fn simple(mut m: Module) -> Result<Module, CompilationError> {
     let mut inst_iter = m.iter_inst_idxs();
     while let Some(inst_i) = inst_iter.next(&m) {
-        if let Inst::BinOp(BinOpInst {
-            lhs,
-            binop: BinOp::Mul,
-            rhs,
-        }) = m.inst(inst_i).clone()
-        {
-            match (lhs.unpack(&m), rhs.unpack(&m)) {
-                (Operand::Local(mul_inst), Operand::Const(mul_const))
-                | (Operand::Const(mul_const), Operand::Local(mul_inst)) => {
-                    let old_const = m.const_(mul_const);
-                    if let Some(y) = old_const.int_to_u64() {
-                        if y == 0 {
-                            // Replace `x * 0` with `0`.
-                            let const_idx = m.insert_const(old_const.u64_to_int(0))?;
-                            m.replace(inst_i, Inst::ProxyConst(const_idx));
-                        } else if y == 1 {
-                            // Replace `x * 1` with `x`.
-                            m.replace(inst_i, Inst::ProxyInst(mul_inst));
-                        } else if y % 2 == 0 {
-                            // Replace `x * y` with `x << ...`.
-                            let shl = u64::from(y.ilog2());
-                            let new_const =
-                                Operand::Const(m.insert_const(old_const.u64_to_int(shl))?);
-                            let new_inst =
-                                BinOpInst::new(Operand::Local(mul_inst), BinOp::Shl, new_const)
-                                    .into();
-                            m.replace(inst_i, new_inst);
-                        }
-                    }
-                }
-                (Operand::Const(x), Operand::Const(y)) => {
-                    // Constant fold the unsigned multiplication of two constants.
-                    let x = m.const_(x);
-                    let y = m.const_(y);
-                    // If `x_val * y_val` overflows, we're fine with the UB, as the interpreter
-                    // author is at fault.
-                    let new_val = x.int_to_u64().unwrap() * y.int_to_u64().unwrap();
-                    let new_const = m.insert_const(x.u64_to_int(new_val))?;
-                    m.replace(inst_i, Inst::ProxyConst(new_const));
-                }
-                (Operand::Local(_), Operand::Local(_)) => (),
-            }
+        let inst = m.inst(inst_i).clone();
+        match inst {
+            Inst::BinOp(BinOpInst {
+                lhs,
+                binop: BinOp::Mul,
+                rhs,
+            }) => opt_mul(&mut m, inst_i, lhs, rhs)?,
+            _ => (),
         }
     }
     Ok(m)
+}
+
+fn opt_mul(
+    m: &mut Module,
+    inst_i: InstIdx,
+    lhs: PackedOperand,
+    rhs: PackedOperand,
+) -> Result<(), CompilationError> {
+    match (lhs.unpack(m), rhs.unpack(m)) {
+        (Operand::Local(mul_inst), Operand::Const(mul_const))
+        | (Operand::Const(mul_const), Operand::Local(mul_inst)) => {
+            let old_const = m.const_(mul_const);
+            if let Some(y) = old_const.int_to_u64() {
+                if y == 0 {
+                    // Replace `x * 0` with `0`.
+                    let const_idx = m.insert_const(old_const.u64_to_int(0))?;
+                    m.replace(inst_i, Inst::ProxyConst(const_idx));
+                } else if y == 1 {
+                    // Replace `x * 1` with `x`.
+                    m.replace(inst_i, Inst::ProxyInst(mul_inst));
+                } else if y % 2 == 0 {
+                    // Replace `x * y` with `x << ...`.
+                    let shl = u64::from(y.ilog2());
+                    let new_const = Operand::Const(m.insert_const(old_const.u64_to_int(shl))?);
+                    let new_inst =
+                        BinOpInst::new(Operand::Local(mul_inst), BinOp::Shl, new_const).into();
+                    m.replace(inst_i, new_inst);
+                }
+            }
+        }
+        (Operand::Const(x), Operand::Const(y)) => {
+            // Constant fold the unsigned multiplication of two constants.
+            let x = m.const_(x);
+            let y = m.const_(y);
+            // If `x_val * y_val` overflows, we're fine with the UB, as the interpreter
+            // author is at fault.
+            let new_val = x.int_to_u64().unwrap() * y.int_to_u64().unwrap();
+            let new_const = m.insert_const(x.u64_to_int(new_val))?;
+            m.replace(inst_i, Inst::ProxyConst(new_const));
+        }
+        (Operand::Local(_), Operand::Local(_)) => (),
+    }
+    Ok(())
 }
 
 #[cfg(test)]
