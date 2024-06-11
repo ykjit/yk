@@ -136,8 +136,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             bin_op,
                             self.process_operand(rhs)?,
                         );
-                        self.add_assign(self.m.len(), assign)?;
-                        self.m.push(inst.into()).unwrap();
+                        self.push_assign(inst.into(), assign)?;
                     }
                     ASTInst::Call {
                         assign,
@@ -150,9 +149,10 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         let inst = DirectCallInst::new(self.m, fd_idx, ops)
                             .map_err(|e| self.error_at_span(name_span, &e.to_string()))?;
                         if let Some(x) = assign {
-                            self.add_assign(self.m.len(), x)?;
+                            self.push_assign(inst.into(), x)?;
+                        } else {
+                            self.m.push(inst.into()).unwrap();
                         }
-                        self.m.push(inst.into()).unwrap();
                     }
                     ASTInst::Eq {
                         assign,
@@ -165,8 +165,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             Predicate::Equal,
                             self.process_operand(rhs)?,
                         );
-                        self.add_assign(self.m.len(), assign)?;
-                        self.m.push(inst.into()).unwrap();
+                        self.push_assign(inst.into(), assign)?;
                     }
                     ASTInst::Guard { operand, is_true } => {
                         let gidx = self
@@ -187,8 +186,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             self.process_type(type_)?,
                             volatile,
                         );
-                        self.add_assign(self.m.len(), assign)?;
-                        self.m.push(inst.into()).unwrap();
+                        self.push_assign(inst.into(), assign)?;
                     }
                     ASTInst::LoadTraceInput { assign, type_, off } => {
                         let off = self
@@ -197,8 +195,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             .parse::<u32>()
                             .map_err(|e| self.error_at_span(off, &e.to_string()))?;
                         let inst = LoadTraceInputInst::new(off, self.process_type(type_)?);
-                        self.add_assign(self.m.len(), assign)?;
-                        self.m.push(inst.into()).unwrap();
+                        self.push_assign(inst.into(), assign)?;
                     }
                     ASTInst::PtrAdd {
                         assign,
@@ -212,8 +209,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             .parse::<i32>()
                             .map_err(|e| self.error_at_span(off, &e.to_string()))?;
                         let inst = PtrAddInst::new(self.process_operand(ptr)?, off);
-                        self.add_assign(self.m.len(), assign)?;
-                        self.m.push(inst.into()).unwrap();
+                        self.push_assign(inst.into(), assign)?;
                     }
                     ASTInst::DynPtrAdd {
                         assign,
@@ -232,14 +228,12 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             self.process_operand(num_elems)?,
                             elem_size,
                         );
-                        self.add_assign(self.m.len(), assign)?;
-                        self.m.push(inst.into()).unwrap();
+                        self.push_assign(inst.into(), assign)?;
                     }
                     ASTInst::SExt { assign, type_, val } => {
                         let inst =
                             SExtInst::new(&self.process_operand(val)?, self.process_type(type_)?);
-                        self.add_assign(self.m.len(), assign)?;
-                        self.m.push(inst.into()).unwrap();
+                        self.push_assign(inst.into(), assign)?;
                     }
                     ASTInst::Store { tgt, val, volatile } => {
                         let inst = StoreInst::new(
@@ -265,8 +259,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             &self.process_operand(operand)?,
                             self.process_type(type_)?,
                         );
-                        self.add_assign(self.m.len(), assign)?;
-                        self.m.push(inst.into()).unwrap();
+                        self.push_assign(inst.into(), assign)?;
                     }
                     ASTInst::Select {
                         assign,
@@ -279,8 +272,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             self.process_operand(trueval)?,
                             self.process_operand(falseval)?,
                         );
-                        self.add_assign(self.m.len(), assign)?;
-                        self.m.push(inst.into()).unwrap();
+                        self.push_assign(inst.into(), assign)?;
                     }
                 }
             }
@@ -386,19 +378,17 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
         }
     }
 
-    /// Add an assignment of a local operand (e.g. `%3 = ...`) to the instruction to be inserted at
-    /// `instrs_len`. Note: this must be called *before* inserting the instruction, as it allowws
-    /// this function to capture cases where users try referencing the variable itself (e.g. `%0 =
-    /// %0` will be caught as an error by this function).
-    fn add_assign(&mut self, instrs_len: usize, span: Span) -> Result<(), Box<dyn Error>> {
+    /// Push `inst` to the end of [self.m] and add an assignment of a local operand (e.g. `%3 =
+    /// ...`). Note: this must be called *before* inserting the instruction, as it allowws this
+    /// function to capture cases where users try referencing the variable itself (e.g. `%0 = %0`
+    /// will be caught as an error by this function).
+    fn push_assign(&mut self, inst: Inst, span: Span) -> Result<(), Box<dyn Error>> {
         let idx = self.lexer.span_str(span)[1..]
             .parse::<usize>()
             .map_err(|e| self.error_at_span(span, &e.to_string()))?;
         let idx = InstIdx::new(idx).map_err(|e| self.error_at_span(span, &e.to_string()))?;
-        match self
-            .inst_idx_map
-            .insert(idx, InstIdx::new(instrs_len).unwrap())
-        {
+        self.m.push(inst).unwrap();
+        match self.inst_idx_map.insert(idx, self.m.last_inst_idx()) {
             None => Ok(()),
             Some(_) => Err(format!("Local operand '%{}' redefined", usize::from(idx)).into()),
         }

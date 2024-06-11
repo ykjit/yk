@@ -230,15 +230,19 @@ impl Module {
     ) -> Result<Operand, CompilationError> {
         // Assert that `inst` defines a local var.
         debug_assert!(inst.def_type(self).is_some());
-        InstIdx::new(self.len()).map(|x| {
+        InstIdx::new(self.insts.len()).map(|x| {
             self.insts.push(inst);
             Operand::Local(x)
         })
     }
 
-    /// Returns the number of [Inst]s in the [Module].
-    pub(crate) fn len(&self) -> usize {
-        self.insts.len()
+    /// Returns the [InstIdx] of the last instruction in this module.
+    ///
+    /// # Panics
+    ///
+    /// If this module has no instructions.
+    pub(crate) fn last_inst_idx(&self) -> InstIdx {
+        InstIdx::new(self.insts.len().checked_sub(1).unwrap()).unwrap()
     }
 
     /// Push a slice of arguments into the args pool.

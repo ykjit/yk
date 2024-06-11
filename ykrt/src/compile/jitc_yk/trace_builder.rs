@@ -109,14 +109,14 @@ impl<'a> TraceBuilder<'a> {
             // Is it a call to the control point? If so, extract the live vars struct.
             if let Some(tis) = inst.control_point_call_trace_inputs(self.aot_mod) {
                 trace_inputs = Some(tis.to_inst(self.aot_mod));
+                let arg = jit_ir::Inst::Arg(TRACE_FUNC_CTRLP_ARGIDX);
+                self.jit_mod.push(arg)?;
                 // Add the trace input argument to the local map so it can be tracked and
                 // deoptimised.
                 self.local_map.insert(
                     tis.to_inst_id(),
-                    jit_ir::Operand::Local(self.next_inst_id()?),
+                    jit_ir::Operand::Local(self.jit_mod.last_inst_idx()),
                 );
-                let arg = jit_ir::Inst::Arg(TRACE_FUNC_CTRLP_ARGIDX);
-                self.jit_mod.push(arg)?;
                 break;
             }
         }
@@ -167,13 +167,13 @@ impl<'a> TraceBuilder<'a> {
                                     self.handle_type(self.aot_mod.type_(aot_field_ty))?;
                                 let load_ti_inst =
                                     jit_ir::LoadTraceInputInst::new(u32_off, input_ty_idx).into();
+                                self.jit_mod.push(load_ti_inst)?;
                                 // If this take fails, we didn't see a corresponding store and the
                                 // IR is malformed.
                                 self.local_map.insert(
                                     last_store_ptr.take().unwrap().to_inst_id(),
-                                    jit_ir::Operand::Local(self.next_inst_id()?),
+                                    jit_ir::Operand::Local(self.jit_mod.last_inst_idx()),
                                 );
-                                self.jit_mod.push(load_ti_inst)?;
                                 self.first_ti_idx = inst_idx;
                             }
                             _ => {
@@ -313,7 +313,6 @@ impl<'a> TraceBuilder<'a> {
 
     /// Link the AOT IR to the last instruction pushed into the JIT IR.
     fn link_iid_to_last_instr(&mut self, bid: &aot_ir::BBlockId, aot_inst_idx: usize) {
-        debug_assert!(self.jit_mod.len() > 0);
         let aot_iid = aot_ir::InstID::new(
             bid.func_idx(),
             bid.bb_idx(),
@@ -323,7 +322,7 @@ impl<'a> TraceBuilder<'a> {
         // that the index is in bounds.
         self.local_map.insert(
             aot_iid,
-            jit_ir::Operand::Local(jit_ir::InstIdx::new(self.jit_mod.len() - 1).unwrap()),
+            jit_ir::Operand::Local(self.jit_mod.last_inst_idx()),
         );
     }
 
@@ -341,10 +340,6 @@ impl<'a> TraceBuilder<'a> {
             self.jit_mod.push(jit_inst)?;
         }
         Ok(())
-    }
-
-    fn next_inst_id(&self) -> Result<jit_ir::InstIdx, CompilationError> {
-        jit_ir::InstIdx::new(self.jit_mod.len())
     }
 
     /// Translate a global variable use.
