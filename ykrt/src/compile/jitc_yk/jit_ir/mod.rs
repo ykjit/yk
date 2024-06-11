@@ -34,7 +34,7 @@ use std::{
     ffi::{c_void, CString},
     fmt, mem,
 };
-use typed_index_collections::{TiSlice, TiVec};
+use typed_index_collections::TiVec;
 #[cfg(not(test))]
 use ykaddr::addr::symbol_to_ptr;
 
@@ -230,20 +230,19 @@ impl Module {
     ) -> Result<Operand, CompilationError> {
         // Assert that `inst` defines a local var.
         debug_assert!(inst.def_type(self).is_some());
-        InstIdx::new(self.len()).map(|x| {
+        InstIdx::new(self.insts.len()).map(|x| {
             self.insts.push(inst);
             Operand::Local(x)
         })
     }
 
-    /// Returns the number of [Inst]s in the [Module].
-    pub(crate) fn len(&self) -> usize {
-        self.insts.len()
-    }
-
-    /// Return a slice of this module's instructions.
-    pub(crate) fn insts(&self) -> &TiSlice<InstIdx, Inst> {
-        &self.insts
+    /// Returns the [InstIdx] of the last instruction in this module.
+    ///
+    /// # Panics
+    ///
+    /// If this module has no instructions.
+    pub(crate) fn last_inst_idx(&self) -> InstIdx {
+        InstIdx::new(self.insts.len().checked_sub(1).unwrap()).unwrap()
     }
 
     /// Push a slice of arguments into the args pool.
