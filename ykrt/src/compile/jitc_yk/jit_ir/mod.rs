@@ -70,6 +70,10 @@ pub(crate) struct Module {
     ptr_ty_idx: TyIdx,
     /// The type index of an 8-bit integer. Cached for convenience.
     int8_ty_idx: TyIdx,
+    /// The [ConstIdx] of the i1 value 1 / "true".
+    true_constidx: ConstIdx,
+    /// The [ConstIdx] of the i1 value 0 / "false".
+    false_constidx: ConstIdx,
     /// The function declaration pool. These are declarations of externally compiled functions that
     /// the JITted trace might need to call. Indexed by [FuncDeclIdx].
     func_decls: IndexSet<FuncDecl>,
@@ -125,7 +129,14 @@ impl Module {
         let mut types = IndexSet::new();
         let void_ty_idx = TyIdx::new(types.insert_full(Ty::Void).0)?;
         let ptr_ty_idx = TyIdx::new(types.insert_full(Ty::Ptr).0)?;
-        let int8_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(8)).0)?;
+        let int8_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(8)).0).unwrap();
+
+        let mut consts = IndexSet::new();
+        let int1_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(1)).0).unwrap();
+        let true_constidx =
+            ConstIdx::new(consts.insert_full(Const::Int(int1_ty_idx, 1)).0).unwrap();
+        let false_constidx =
+            ConstIdx::new(consts.insert_full(Const::Int(int1_ty_idx, 0)).0).unwrap();
 
         // Find the global variable pointer array in the address space.
         //
@@ -142,11 +153,13 @@ impl Module {
             ctr_id,
             insts: TiVec::new(),
             args: Vec::new(),
-            consts: IndexSet::new(),
+            consts,
             types,
             void_ty_idx,
             ptr_ty_idx,
             int8_ty_idx,
+            true_constidx,
+            false_constidx,
             func_decls: IndexSet::new(),
             global_decls: IndexSet::new(),
             guard_info: TiVec::new(),
@@ -293,6 +306,16 @@ impl Module {
     /// Panics if the index is out of bounds.
     pub(crate) fn const_(&self, idx: ConstIdx) -> &Const {
         self.consts.get_index(usize::from(idx)).unwrap()
+    }
+
+    /// Return the [ConstIdx] of the `i1` value for 1/true.
+    pub(crate) fn true_constidx(&self) -> ConstIdx {
+        self.true_constidx
+    }
+
+    /// Return the [ConstIdx] of the `i1` value for 0/false.
+    pub(crate) fn false_constidx(&self) -> ConstIdx {
+        self.false_constidx
     }
 
     /// Add a new [GlobalDecl] to the pool and return its index. If the [GlobalDecl] already
@@ -1721,9 +1744,9 @@ impl DynPtrAddInst {
 ///
 #[derive(Clone, Debug, PartialEq)]
 pub struct IcmpInst {
-    lhs: PackedOperand,
-    pred: Predicate,
-    rhs: PackedOperand,
+    pub(crate) lhs: PackedOperand,
+    pub(crate) pred: Predicate,
+    pub(crate) rhs: PackedOperand,
 }
 
 impl IcmpInst {

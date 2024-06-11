@@ -4,9 +4,8 @@
 //! analysis.
 
 use crate::compile::{
-    jitc_yk::{
-        aot_ir::BinOp,
-        jit_ir::{BinOpInst, Inst, InstIdx, Module, Operand, PackedOperand},
+    jitc_yk::jit_ir::{
+        BinOp, BinOpInst, IcmpInst, Inst, InstIdx, Module, Operand, PackedOperand, Predicate,
     },
     CompilationError,
 };
@@ -21,6 +20,7 @@ pub(super) fn simple(mut m: Module) -> Result<Module, CompilationError> {
                 binop: BinOp::Mul,
                 rhs,
             }) => opt_mul(&mut m, inst_i, lhs, rhs)?,
+            Inst::Icmp(x) => opt_icmp(&mut m, inst_i, x)?,
             _ => (),
         }
     }
@@ -67,6 +67,60 @@ fn opt_mul(
         }
         (Operand::Local(_), Operand::Local(_)) => (),
     }
+    Ok(())
+}
+
+fn opt_icmp(
+    m: &mut Module,
+    inst_i: InstIdx,
+    IcmpInst { lhs, pred, rhs }: IcmpInst,
+) -> Result<(), CompilationError> {
+    if let (Operand::Const(x), Operand::Const(y)) = (lhs.unpack(m), rhs.unpack(m)) {
+        if let (Some(x), Some(y)) = (m.const_(x).int_to_u64(), m.const_(y).int_to_u64()) {
+            // Constant fold comparisons of simple integers. Note that we have to follow the
+            // LLVM semantics carefully. The quotes in the `match` below are from
+            // https://llvm.org/docs/LangRef.html#icmp-instruction.
+            let r = match pred {
+                // "eq: yields true if the operands are equal, false otherwise. No sign
+                // interpretation is necessary or performed."
+                Predicate::Equal => x == y,
+                // "ne: yields true if the operands are unequal, false otherwise. No sign
+                // interpretation is necessary or performed."
+                Predicate::NotEqual => x != y,
+                // "ugt: interprets the operands as unsigned values and yields true if op1 is
+                // greater than op2."
+                Predicate::UnsignedGreater => x > y,
+                // "uge: interprets the operands as unsigned values and yields true if op1 is
+                // greater than or equal to op2."
+                Predicate::UnsignedGreaterEqual => x >= y,
+                // "ult: interprets the operands as unsigned values and yields true if op1 is
+                // less than op2."
+                Predicate::UnsignedLess => x < y,
+                // "ule: interprets the operands as unsigned values and yields true if op1 is
+                // less than or equal to op2."
+                Predicate::UnsignedLessEqual => x <= y,
+                // "interprets the operands as signed values and yields true if op1 is greater
+                // than op2."
+                Predicate::SignedGreater => (x as i64) > (y as i64),
+                // "sge: interprets the operands as signed values and yields true if op1 is
+                // greater than or equal to op2."
+                Predicate::SignedGreaterEqual => (x as i64) >= (y as i64),
+                // "slt: interprets the operands as signed values and yields true if op1 is less
+                // than op2."
+                Predicate::SignedLess => (x as i64) < (y as i64),
+                // "sle: interprets the operands as signed values and yields true if op1 is less
+                // than or equal to op2."
+                Predicate::SignedLessEqual => (x as i64) <= (y as i64),
+            };
+
+            if r {
+                m.replace(inst_i, Inst::ProxyConst(m.true_constidx()));
+            } else {
+                m.replace(inst_i, Inst::ProxyConst(m.false_constidx()));
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -171,6 +225,104 @@ mod tests {
             black_box %2
             black_box %3
             black_box %4
+        ",
+        );
+    }
+
+    #[test]
+    fn opt_icmp_const() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = eq 0i8, 0i8
+            %1: i8 = eq 0i8, 1i8
+            %2: i8 = ne 0i8, 0i8
+            %3: i8 = ne 0i8, 1i8
+            %4: i8 = ugt 0i8, 0i8
+            %5: i8 = ugt 0i8, 1i8
+            %6: i8 = ugt 1i8, 0i8
+            %7: i8 = uge 0i8, 0i8
+            %8: i8 = uge 0i8, 1i8
+            %9: i8 = uge 1i8, 0i8
+            %10: i8 = ult 0i8, 0i8
+            %11: i8 = ult 0i8, 1i8
+            %12: i8 = ult 1i8, 0i8
+            %13: i8 = ule 0i8, 0i8
+            %14: i8 = ule 0i8, 1i8
+            %15: i8 = ule 1i8, 0i8
+            %16: i8 = sgt 0i8, 0i8
+            %17: i8 = sgt 0i8, -1i8
+            %18: i8 = sgt -1i8, 0i8
+            %19: i8 = sge 0i8, 0i8
+            %20: i8 = sge 0i8, -1i8
+            %21: i8 = sge -1i8, 0i8
+            %22: i8 = slt 0i8, 0i8
+            %23: i8 = slt 0i8, -1i8
+            %24: i8 = slt -1i8, 0i8
+            %25: i8 = sle 0i8, 0i8
+            %26: i8 = sle 0i8, -1i8
+            %27: i8 = sle -1i8, 0i8
+            black_box %0
+            black_box %1
+            black_box %2
+            black_box %3
+            black_box %4
+            black_box %5
+            black_box %6
+            black_box %7
+            black_box %8
+            black_box %9
+            black_box %10
+            black_box %11
+            black_box %12
+            black_box %13
+            black_box %14
+            black_box %15
+            black_box %16
+            black_box %17
+            black_box %18
+            black_box %19
+            black_box %20
+            black_box %21
+            black_box %22
+            black_box %23
+            black_box %24
+            black_box %25
+            black_box %26
+            black_box %27
+        ",
+            |m| simple(m).unwrap(),
+            "
+          ...
+          entry:
+            black_box 1i1
+            black_box 0i1
+            black_box 0i1
+            black_box 1i1
+            black_box 0i1
+            black_box 0i1
+            black_box 1i1
+            black_box 1i1
+            black_box 0i1
+            black_box 1i1
+            black_box 0i1
+            black_box 1i1
+            black_box 0i1
+            black_box 1i1
+            black_box 1i1
+            black_box 0i1
+            black_box 0i1
+            black_box 1i1
+            black_box 0i1
+            black_box 1i1
+            black_box 1i1
+            black_box 0i1
+            black_box 0i1
+            black_box 0i1
+            black_box 1i1
+            black_box 1i1
+            black_box 0i1
+            black_box 1i1
         ",
         );
     }
