@@ -468,18 +468,17 @@ const GLOBAL_PTR_ARRAY_SYM: &str = "__yk_globalvar_ptrs";
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 struct U24([u8; 3]);
 
-impl U24 {
-    /// Create a [U24] from a `usize`. Returns `None` if it won't fit.
-    ///
-    /// Returns none if the value won't fit.
-    fn from_usize(val: usize) -> Option<Self> {
-        if val >= 1 << 24 {
-            None
+impl TryFrom<usize> for U24 {
+    type Error = ();
+
+    fn try_from(x: usize) -> Result<Self, Self::Error> {
+        if x >= 1 << 24 {
+            Err(())
         } else {
-            let b0 = val & 0xff;
-            let b1 = (val & 0xff00) >> 8;
-            let b2 = (val & 0xff0000) >> 16;
-            Some(Self([b2 as u8, b1 as u8, b0 as u8]))
+            let b0 = x & 0xff;
+            let b1 = (x & 0xff00) >> 8;
+            let b2 = (x & 0xff0000) >> 16;
+            Ok(Self([b2 as u8, b1 as u8, b0 as u8]))
         }
     }
 }
@@ -505,10 +504,11 @@ fn index_overflow(typ: &str) -> CompilationError {
 macro_rules! index_24bit {
     ($struct:ident) => {
         impl $struct {
-            pub(crate) fn new(v: usize) -> Result<Self, CompilationError> {
-                U24::from_usize(v)
-                    .ok_or(index_overflow(stringify!($struct)))
-                    .map(|u| Self(u))
+            pub(crate) fn new(x: usize) -> Result<Self, CompilationError> {
+                match U24::try_from(x) {
+                    Ok(x) => Ok(Self(x)),
+                    Err(()) => Err(index_overflow(stringify!($struct))),
+                }
             }
         }
 
@@ -1862,14 +1862,14 @@ mod tests {
             LoadTraceInputInst::new(8, TyIdx::new(0).unwrap()).into(),
             LoadInst::new(
                 Operand::Local(InstIdx(0)),
-                TyIdx(U24::from_usize(0).unwrap()),
+                TyIdx(U24::try_from(0).unwrap()),
                 false,
             )
             .into(),
         ];
         prog[2] = LoadInst::new(
             Operand::Local(InstIdx(1)),
-            TyIdx(U24::from_usize(0).unwrap()),
+            TyIdx(U24::try_from(0).unwrap()),
             false,
         )
         .into();
@@ -1941,12 +1941,12 @@ mod tests {
 
     #[test]
     fn u24_from_usize() {
-        assert_eq!(U24::from_usize(0x000000), Some(U24([0x00, 0x00, 0x00])));
-        assert_eq!(U24::from_usize(0x123456), Some(U24([0x12, 0x34, 0x56])));
-        assert_eq!(U24::from_usize(0xffffff), Some(U24([0xff, 0xff, 0xff])));
-        assert_eq!(U24::from_usize(0x1000000), None);
-        assert_eq!(U24::from_usize(0x1234567), None);
-        assert_eq!(U24::from_usize(0xfffffff), None);
+        assert_eq!(U24::try_from(0x000000), Ok(U24([0x00, 0x00, 0x00])));
+        assert_eq!(U24::try_from(0x123456), Ok(U24([0x12, 0x34, 0x56])));
+        assert_eq!(U24::try_from(0xffffff), Ok(U24([0xff, 0xff, 0xff])));
+        assert!(U24::try_from(0x1000000).is_err());
+        assert!(U24::try_from(0x1234567).is_err());
+        assert!(U24::try_from(0xfffffff).is_err());
     }
 
     #[test]
@@ -1958,9 +1958,9 @@ mod tests {
 
     #[test]
     fn u24_round_trip() {
-        assert_eq!(usize::from(U24::from_usize(0x000000).unwrap()), 0x000000);
-        assert_eq!(usize::from(U24::from_usize(0x123456).unwrap()), 0x123456);
-        assert_eq!(usize::from(U24::from_usize(0xffffff).unwrap()), 0xffffff);
+        assert_eq!(usize::from(U24::try_from(0x000000).unwrap()), 0x000000);
+        assert_eq!(usize::from(U24::try_from(0x123456).unwrap()), 0x123456);
+        assert_eq!(usize::from(U24::try_from(0xffffff).unwrap()), 0xffffff);
     }
 
     #[test]
