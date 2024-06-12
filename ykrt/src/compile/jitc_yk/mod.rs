@@ -14,9 +14,13 @@ use crate::{
     mt::{SideTraceInfo, MT},
     trace::AOTTraceIterator,
 };
-
 use parking_lot::Mutex;
-use std::{error::Error, slice, sync::Arc};
+use std::{
+    env,
+    error::Error,
+    slice,
+    sync::{Arc, LazyLock},
+};
 use ykaddr::addr::symbol_to_ptr;
 
 pub mod aot_ir;
@@ -26,6 +30,15 @@ mod gdb;
 pub mod jit_ir;
 mod opt;
 mod trace_builder;
+
+/// Should we turn trace optimisations on or off? Currently defaults to "off".
+static YKD_OPT: LazyLock<bool> = LazyLock::new(|| {
+    let x = env::var("YKD_OPT");
+    match x.as_ref().map(|x| x.as_str()) {
+        Ok("1" | "2" | "3") => true,
+        Ok(_) | Err(_) => false,
+    }
+});
 
 pub(crate) struct JITCYk;
 
@@ -66,7 +79,8 @@ impl Compiler for JITCYk {
             log_ir(&format!("--- Begin aot ---\n{}\n--- End aot ---", aot_mod));
         }
 
-        let jit_mod = trace_builder::build(mt.next_compiled_trace_id(), &aot_mod, aottrace_iter.0)?;
+        let mut jit_mod =
+            trace_builder::build(mt.next_compiled_trace_id(), &aot_mod, aottrace_iter.0)?;
 
         if should_log_ir(IRPhase::PreOpt) {
             log_ir(&format!(
@@ -74,13 +88,14 @@ impl Compiler for JITCYk {
             ));
         }
 
-        // FIXME: This should be enabled when optimisations can cope with all the inputs we see.
-        // let jit_mod = opt::opt(jit_mod)?;
-        // if should_log_ir(IRPhase::PostOpt) {
-        //     log_ir(&format!(
-        //         "--- Begin jit-post-opt ---\n{jit_mod}\n--- End jit-pre-opt ---",
-        //     ));
-        // }
+        if *YKD_OPT {
+            jit_mod = opt::opt(jit_mod)?;
+            if should_log_ir(IRPhase::PostOpt) {
+                log_ir(&format!(
+                    "--- Begin jit-post-opt ---\n{jit_mod}\n--- End jit-post-opt ---",
+                ));
+            }
+        }
 
         let cg = Box::new(Self::default_codegen(&jit_mod)?);
         let ct = cg.codegen()?;
