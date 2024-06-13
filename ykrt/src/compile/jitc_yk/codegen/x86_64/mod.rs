@@ -360,6 +360,18 @@ impl<'a> X64CodeGen<'a> {
                 }
                 self.store_new_local(inst_idx, WR0);
             }
+            BinOp::Shl => {
+                self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
+                self.load_operand(Rq::RCX, &rhs); // ^^^ same
+                match lhs.byte_size(self.m) {
+                    8 => dynasm!(self.asm; shl Rq(WR0.code()), cl),
+                    4 => dynasm!(self.asm; shl Rd(WR0.code()), cl),
+                    2 => dynasm!(self.asm; shl Rw(WR0.code()), cl),
+                    1 => dynasm!(self.asm; shl Rb(WR0.code()), cl),
+                    _ => todo!(),
+                }
+                self.store_new_local(inst_idx, WR0);
+            }
             BinOp::Mul => {
                 self.load_operand(Rq::RAX, &lhs); // FIXME: assumes value will fit in a reg.
                 self.load_operand(WR1, &rhs); // ^^^ same
@@ -1749,6 +1761,27 @@ mod tests {
                 ... movzx r12, byte ptr [rbp-0x01]
                 ... mov r13, 0x01
                 ... add r12b, r13b
+                ...
+            ",
+            );
+        }
+
+        #[test]
+        fn cg_shl() {
+            test_with_spillalloc(
+                "
+              entry:
+                %0: i8 = load_ti 0
+                %1: i8 = load_ti 1
+                %2: i8 = shl %0, %1
+            ",
+                "
+                ...
+                ; %2: i8 = shl %0, %1
+                ... movzx r12, byte ptr [rbp-0x01]
+                ... movzx rcx, byte ptr [rbp-0x02]
+                ... shl r12b, cl
+                ... mov [rbp-0x03], r12b
                 ...
             ",
             );
