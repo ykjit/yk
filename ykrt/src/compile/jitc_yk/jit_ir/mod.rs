@@ -919,7 +919,15 @@ pub(crate) struct DisplayableOperand<'a> {
 impl fmt::Display for DisplayableOperand<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.operand {
-            Operand::Local(idx) => write!(f, "%{}", idx.to_u16()),
+            Operand::Local(idx) => match self.m.inst(*idx) {
+                Inst::ProxyConst(c) => {
+                    write!(f, "{}", self.m.const_(*c).display(self.m))
+                }
+                Inst::ProxyInst(idx) => {
+                    write!(f, "%{}", idx.to_u16())
+                }
+                _ => write!(f, "%{}", idx.to_u16()),
+            },
             Operand::Const(idx) => write!(f, "{}", self.m.const_(*idx).display(self.m)),
         }
     }

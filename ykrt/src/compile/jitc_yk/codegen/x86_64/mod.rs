@@ -19,7 +19,10 @@ use super::{
 };
 #[cfg(any(debug_assertions, test))]
 use crate::compile::jitc_yk::gdb::GdbCtx;
-use crate::compile::{jitc_yk::jit_ir::IndirectCallIdx, CompiledTrace};
+use crate::compile::{
+    jitc_yk::jit_ir::{Const, IndirectCallIdx},
+    CompiledTrace,
+};
 use dynasmrt::{
     components::StaticLabel, dynasm, x64::Rq, AssemblyOffset, DynasmApi, DynasmError,
     DynasmLabelApi, ExecutableBuffer, Register,
@@ -819,7 +822,20 @@ impl<'a> X64CodeGen<'a> {
         let mut locs: Vec<LocalAlloc> = Vec::new();
         let gi = inst.guard_info(self.m);
         for lidx in gi.lives() {
-            locs.push(*self.ra.allocation(*lidx));
+            match self.m.inst(*lidx) {
+                jit_ir::Inst::ProxyConst(c) => {
+                    // The live variable is a constant (e.g. this can happen during inlining), so
+                    // it doesn't have an allocation. We can just push the actual value instead
+                    // which will be written as is during deoptimisation.
+                    match self.m.const_(*c) {
+                        Const::Int(_, c) => locs.push(LocalAlloc::ConstInt(*c)),
+                        _ => todo!(),
+                    };
+                }
+                _ => {
+                    locs.push(*self.ra.allocation(*lidx));
+                }
+            }
         }
 
         // FIXME: Move `frames` instead of copying them (requires JIT module to be consumable).
@@ -860,7 +876,15 @@ impl<'a> X64CodeGen<'a> {
 
     /// Load a local variable out of its stack slot into the specified register.
     fn load_local(&mut self, reg: Rq, local: InstIdx) {
-        match self.ra.allocation(local) {
+        let alloc = match self.m.inst(local) {
+            jit_ir::Inst::ProxyConst(c) => match self.m.const_(*c) {
+                Const::Int(_, c) => &LocalAlloc::ConstInt(*c),
+                _ => todo!(),
+            },
+            jit_ir::Inst::ProxyInst(_) => todo!(),
+            _ => self.ra.allocation(local),
+        };
+        match alloc {
             LocalAlloc::Stack { frame_off, size: _ } => {
                 match i32::try_from(*frame_off) {
                     Ok(foff) => {
@@ -878,6 +902,11 @@ impl<'a> X64CodeGen<'a> {
                 }
             }
             LocalAlloc::Register => todo!(),
+            LocalAlloc::ConstInt(c) => {
+                // FIXME: Adjust for different constant sizes. Requires storing the size in the
+                // variant.
+                dynasm!(self.asm; mov Rq(reg.code()), QWORD *c as i64);
+            }
         }
     }
 
@@ -917,6 +946,7 @@ impl<'a> X64CodeGen<'a> {
                 Err(_) => todo!("{}", size),
             },
             LocalAlloc::Register => todo!(),
+            LocalAlloc::ConstInt(_) => todo!(),
         }
     }
 
@@ -1699,6 +1729,26 @@ mod tests {
                 ... movzx r13, byte ptr [rbp-0x02]
                 ... div r13b
                 ... mov [rbp-0x03], al
+                ...
+            ",
+            );
+        }
+
+        #[test]
+        fn cg_proxyconst() {
+            test_with_spillalloc(
+                "
+              entry:
+                %0: i8 = load_ti 0
+                %1: i8 = 1i8
+                %2: i8 = add %0, %1
+            ",
+                "
+                ...
+                ; %2: i8 = add %0, 1i8
+                ... movzx r12, byte ptr [rbp-0x01]
+                ... mov r13, 0x01
+                ... add r12b, r13b
                 ...
             ",
             );
