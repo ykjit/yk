@@ -36,23 +36,49 @@ fn opt_mul(
     rhs: PackedOperand,
 ) -> Result<(), CompilationError> {
     match (lhs.unpack(m), rhs.unpack(m)) {
-        (Operand::Local(mul_inst), Operand::Const(mul_const))
-        | (Operand::Const(mul_const), Operand::Local(mul_inst)) => {
+        (Operand::Local(mut mul_inst), Operand::Const(mul_const))
+        | (Operand::Const(mul_const), Operand::Local(mut mul_inst)) => {
             let old_const = m.const_(mul_const);
-            if let Some(y) = old_const.int_to_u64() {
-                if y == 0 {
+            if let Some(old_val) = old_const.int_to_u64() {
+                let mut new_val = old_val;
+                // If we've got `%2: mul %1, xi8` then see if `%1` is of the form `mul %0, yi8`: if so
+                // we've got a chain that's `%2: %0*x*y`. We can thus "skip" the intermediate `mul`
+                // when calculating the constant we're going to optimise.
+                if let Inst::BinOp(BinOpInst {
+                    lhs: chain_lhs,
+                    binop: BinOp::Mul,
+                    rhs: chain_rhs,
+                }) = m.inst(mul_inst)
+                {
+                    if let (Operand::Local(chain_mul_inst), Operand::Const(chain_mul_const))
+                    | (Operand::Const(chain_mul_const), Operand::Local(chain_mul_inst)) =
+                        (chain_lhs.unpack(m), chain_rhs.unpack(m))
+                    {
+                        if let Some(y) = m.const_(chain_mul_const).int_to_u64() {
+                            mul_inst = chain_mul_inst;
+                            new_val = old_val * y;
+                        }
+                    }
+                }
+
+                if new_val == 0 {
                     // Replace `x * 0` with `0`.
                     let const_idx = m.insert_const(old_const.u64_to_int(0))?;
                     m.replace(inst_i, Inst::ProxyConst(const_idx));
-                } else if y == 1 {
+                } else if new_val == 1 {
                     // Replace `x * 1` with `x`.
                     m.replace(inst_i, Inst::ProxyInst(mul_inst));
-                } else if y % 2 == 0 {
+                } else if new_val & (new_val - 1) == 0 {
                     // Replace `x * y` with `x << ...`.
-                    let shl = u64::from(y.ilog2());
+                    let shl = u64::from(new_val.ilog2());
                     let new_const = Operand::Const(m.insert_const(old_const.u64_to_int(shl))?);
                     let new_inst =
                         BinOpInst::new(Operand::Local(mul_inst), BinOp::Shl, new_const).into();
+                    m.replace(inst_i, new_inst);
+                } else if new_val != old_val {
+                    let new_const = Operand::Const(m.insert_const(old_const.u64_to_int(new_val))?);
+                    let new_inst =
+                        BinOpInst::new(Operand::Local(mul_inst), BinOp::Mul, new_const).into();
                     m.replace(inst_i, new_inst);
                 }
             }
@@ -216,6 +242,30 @@ mod tests {
     }
 
     #[test]
+    fn opt_mul_chain() {
+        Module::assert_ir_transform_eq(
+            "
+          entry:
+            %0: i8 = load_ti 0
+            %1: i8 = mul %0, 3i8
+            %2: i8 = mul %1, 4i8
+            %3: i8 = mul %2, 5i8
+            black_box %3
+        ",
+            |m| simple(m).unwrap(),
+            "
+          ...
+          entry:
+            %0: i8 = load_ti 0
+            %1: i8 = mul %0, 3i8
+            %2: i8 = mul %0, 12i8
+            %3: i8 = mul %0, 60i8
+            black_box %3
+        ",
+        );
+    }
+
+    #[test]
     fn opt_mul_shl() {
         Module::assert_ir_transform_eq(
             "
@@ -225,10 +275,7 @@ mod tests {
             %2: i64 = mul %0, 4i64
             %3: i64 = mul %0, 4611686018427387904i64
             %4: i64 = mul %0, 9223372036854775807i64
-            black_box %1
-            black_box %2
-            black_box %3
-            black_box %4
+            %5: i64 = mul %0, 12i64
         ",
             |m| simple(m).unwrap(),
             "
@@ -239,10 +286,7 @@ mod tests {
             %2: i64 = shl %0, 2i64
             %3: i64 = shl %0, 62i64
             %4: i64 = mul %0, 9223372036854775807i64
-            black_box %1
-            black_box %2
-            black_box %3
-            black_box %4
+            %5: i64 = mul %0, 12i64
         ",
         );
     }
