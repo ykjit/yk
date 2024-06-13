@@ -529,7 +529,9 @@ impl<'a> TraceBuilder<'a> {
                         live_args.push(*lidx);
                     }
                     jit_ir::Operand::Const(_) => {
-                        todo!()
+                        // Since we are forcing constants into `ProxyConst`s during inlining, this
+                        // case should never happen.
+                        panic!()
                     }
                 }
             }
@@ -671,7 +673,18 @@ impl<'a> TraceBuilder<'a> {
         // Convert AOT args to JIT args.
         let mut jit_args = Vec::new();
         for arg in args {
-            jit_args.push(self.handle_operand(arg)?);
+            match self.handle_operand(arg)? {
+                jit_ir::Operand::Const(c) => {
+                    // We don't want to do constant propagation here as it makes our life harder
+                    // creating guards. Instead we simply create a proxy instruction here and
+                    // reference that.
+                    let inst = jit_ir::Inst::ProxyConst(c);
+                    self.jit_mod.push(inst)?;
+                    let op = jit_ir::Operand::Local(self.jit_mod.last_inst_idx());
+                    jit_args.push(op);
+                }
+                op => jit_args.push(op),
+            }
         }
 
         // Check if this is a recursive call by scanning the call stack for the callee.

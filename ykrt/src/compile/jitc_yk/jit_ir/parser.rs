@@ -275,6 +275,14 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         );
                         self.push_assign(inst.into(), assign)?;
                     }
+                    ASTInst::Proxy { assign, val } => {
+                        let op = self.process_operand(val)?;
+                        let inst = match op {
+                            Operand::Local(_) => todo!(),
+                            Operand::Const(cidx) => Inst::ProxyConst(cidx),
+                        };
+                        self.push_assign(inst.into(), assign)?;
+                    }
                 }
             }
         }
@@ -521,6 +529,10 @@ enum ASTInst {
         cond: ASTOperand,
         trueval: ASTOperand,
         falseval: ASTOperand,
+    },
+    Proxy {
+        assign: Span,
+        val: ASTOperand,
     },
 }
 

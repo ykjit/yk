@@ -31,6 +31,7 @@ pub(crate) enum LocalAlloc {
     ///
     /// FIXME: unimplemented.
     Register,
+    ConstInt(u64),
 }
 
 impl LocalAlloc {
