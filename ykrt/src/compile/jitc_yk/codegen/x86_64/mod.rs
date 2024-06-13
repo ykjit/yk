@@ -195,7 +195,9 @@ impl<'a> X64CodeGen<'a> {
         match inst {
             #[cfg(test)]
             jit_ir::Inst::BlackBox(_) => unreachable!(),
-            jit_ir::Inst::ProxyConst(_) | jit_ir::Inst::ProxyInst(_) => unreachable!(),
+            jit_ir::Inst::ProxyConst(_) | jit_ir::Inst::ProxyInst(_) | jit_ir::Inst::Tombstone => {
+                unreachable!()
+            }
 
             jit_ir::Inst::BinOp(i) => self.cg_binop(inst_idx, i),
             jit_ir::Inst::LoadTraceInput(i) => self.cg_loadtraceinput(inst_idx, i),
@@ -1456,11 +1458,11 @@ mod tests {
                 "
               entry:
                 %0: i64 = load_ti 0
-                %1: i8 = eq %0, %0
+                %1: i1 = eq %0, %0
             ",
                 "
                 ...
-                ; %1: i8 = eq %0, %0
+                ; %1: i1 = eq %0, %0
                 ... mov r12, [rbp-0x08]
                 ... mov r13, [rbp-0x08]
                 ... cmp r12, r13
@@ -1477,11 +1479,11 @@ mod tests {
                 "
               entry:
                 %0: i8 = load_ti 0
-                %1: i8 = eq %0, %0
+                %1: i1 = eq %0, %0
             ",
                 "
                 ...
-                ; %1: i8 = eq %0, %0
+                ; %1: i1 = eq %0, %0
                 ... movzx r12, byte ptr [rbp-0x01]
                 ... movzx r13, byte ptr [rbp-0x01]
                 ... cmp r12b, r13b
@@ -1497,7 +1499,7 @@ mod tests {
             test_with_spillalloc(
                 "
               entry:
-                %0: i8 = load_ti 0
+                %0: i1 = load_ti 0
                 guard %0, true
             ",
                 "
@@ -1521,7 +1523,7 @@ mod tests {
             test_with_spillalloc(
                 "
               entry:
-                %0: i8 = load_ti 0
+                %0: i1 = load_ti 0
                 guard %0, false
             ",
                 "

@@ -14,7 +14,7 @@
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{cond}}: i8 = eq %{{20}}, 300i32
+//     %{{cond}}: i1 = eq %{{20}}, 300i32
 //     guard %{{cond}}, true
 //     ...
 //     --- End jit-pre-opt ---

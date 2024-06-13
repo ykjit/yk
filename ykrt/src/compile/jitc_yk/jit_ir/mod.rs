@@ -68,7 +68,10 @@ pub(crate) struct Module {
     void_ty_idx: TyIdx,
     /// The type index of a pointer type. Cached for convenience.
     ptr_ty_idx: TyIdx,
+    /// The type index of a 1-bit integer. Cached for convenience.
+    int1_ty_idx: TyIdx,
     /// The type index of an 8-bit integer. Cached for convenience.
+    #[cfg(test)]
     int8_ty_idx: TyIdx,
     /// The [ConstIdx] of the i1 value 1 / "true".
     true_constidx: ConstIdx,
@@ -129,10 +132,11 @@ impl Module {
         let mut types = IndexSet::new();
         let void_ty_idx = TyIdx::new(types.insert_full(Ty::Void).0)?;
         let ptr_ty_idx = TyIdx::new(types.insert_full(Ty::Ptr).0)?;
+        let int1_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(1)).0).unwrap();
+        #[cfg(test)]
         let int8_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(8)).0).unwrap();
 
         let mut consts = IndexSet::new();
-        let int1_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(1)).0).unwrap();
         let true_constidx =
             ConstIdx::new(consts.insert_full(Const::Int(int1_ty_idx, 1)).0).unwrap();
         let false_constidx =
@@ -157,6 +161,8 @@ impl Module {
             types,
             void_ty_idx,
             ptr_ty_idx,
+            int1_ty_idx,
+            #[cfg(test)]
             int8_ty_idx,
             true_constidx,
             false_constidx,
@@ -192,7 +198,13 @@ impl Module {
         self.ptr_ty_idx
     }
 
+    /// Returns the type index of a 1-bit integer.
+    pub(crate) fn int1_ty_idx(&self) -> TyIdx {
+        self.int1_ty_idx
+    }
+
     /// Returns the type index of an 8-bit integer.
+    #[cfg(test)]
     pub(crate) fn int8_ty_idx(&self) -> TyIdx {
         self.int8_ty_idx
     }
@@ -446,7 +458,7 @@ impl InstIdxIterator {
             let cur = self.0;
             self.0 = InstIdx::new(usize::from(self.0) + 1).unwrap();
             match x {
-                Inst::ProxyConst(_) | Inst::ProxyInst(_) => (),
+                Inst::ProxyConst(_) | Inst::ProxyInst(_) | Inst::Tombstone => (),
                 _ => return Some(cur),
             }
         }
@@ -1016,6 +1028,9 @@ pub(crate) enum Inst {
     /// `InstIdx`.
     #[allow(clippy::enum_variant_names)]
     ProxyInst(InstIdx),
+    /// This instruction has been permanently removed. Note: this must only be used if you are
+    /// entirely sure that the value this instruction once produced is no longer used.
+    Tombstone,
 
     // "Normal" IR instructions.
     BinOp(BinOpInst),
@@ -1061,6 +1076,7 @@ impl Inst {
             Self::BlackBox(_) => m.void_ty_idx(),
             Self::ProxyConst(x) => m.const_(*x).ty_idx(m),
             Self::ProxyInst(x) => m.inst(*x).ty_idx(m),
+            Self::Tombstone => panic!(),
 
             Self::BinOp(x) => x.ty_idx(m),
             Self::IndirectCall(idx) => {
@@ -1076,7 +1092,7 @@ impl Inst {
             Self::PtrAdd(..) => m.ptr_ty_idx(),
             Self::DynPtrAdd(..) => m.ptr_ty_idx(),
             Self::Store(..) => m.void_ty_idx(),
-            Self::Icmp(_) => m.int8_ty_idx(), // always returns a 0/1 valued byte.
+            Self::Icmp(_) => m.int1_ty_idx(),
             Self::Guard(..) => m.void_ty_idx(),
             Self::Arg(..) => m.ptr_ty_idx(),
             Self::TraceLoopStart => m.void_ty_idx(),
@@ -1129,7 +1145,7 @@ impl fmt::Display for DisplayableInst<'_> {
         match self.inst {
             #[cfg(test)]
             Inst::BlackBox(x) => write!(f, "black_box {}", x.operand(self.m).display(self.m)),
-            Inst::ProxyConst(_) | Inst::ProxyInst(_) => unreachable!(),
+            Inst::ProxyConst(_) | Inst::ProxyInst(_) | Inst::Tombstone => unreachable!(),
 
             Inst::BinOp(BinOpInst { lhs, binop, rhs }) => write!(
                 f,
@@ -1789,13 +1805,13 @@ impl IcmpInst {
 /// then execution may not continue, and deoptimisation must occur.
 ///
 #[derive(Clone, Debug, PartialEq)]
-pub struct GuardInst {
+pub(crate) struct GuardInst {
     /// The condition to guard against.
-    cond: PackedOperand,
+    pub(crate) cond: PackedOperand,
     /// The expected outcome of the condition.
-    expect: bool,
+    pub(crate) expect: bool,
     /// Additional information about this guard.
-    gidx: GuardInfoIdx,
+    pub(crate) gidx: GuardInfoIdx,
 }
 
 impl GuardInst {
