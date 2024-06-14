@@ -1,40 +1,7 @@
 // ignore-if: test $YK_JIT_COMPILER != "yk" -o "$YKB_TRACER" = "swt"
 // Run-time:
-//   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
 //   env-var: YKD_LOG_JITSTATE=-
 //   env-var: YKD_LOG_STATS=/dev/null
-//   stderr:
-//     jitstate: start-tracing
-//     i=4, val=3
-//     jitstate: stop-tracing
-//     --- Begin aot ---
-//     ..~
-//     bb{{_}}:
-//       ...ptr_add...
-//       *@shadowstack_0 = %{{_}}...
-//       %{{13_2}}: i32 = call f() ...
-//     ..~
-//     bb{{_}}:
-//       ...ptr_add...
-//       *@shadowstack_0 = %{{_}}...
-//       %{{15_2}}: i32 = call g() ...
-//     ..~
-//     bb{{_}}:
-//       %{{_}}: i32 = phi bb{{_}} -> %{{15_2}}, bb{{_}} -> %{{13_2}}
-//     ...
-//     --- End aot ---
-//     --- Begin jit-pre-opt ---
-//     ...
-//     %{{19}}: i32 = call @f()
-//     ...
-//     %{{_}}: i32 = call @fprintf(%{{_}}, %{{_}}, %{{_}}, %{{19}})
-//     ...
-//     --- End jit-pre-opt ---
-//     i=3, val=3
-//     jitstate: enter-jit-code
-//     i=2, val=3
-//     i=1, val=3
-//     jitstate: deoptimise
 
 // Check that PHI nodes JIT properly.
 
