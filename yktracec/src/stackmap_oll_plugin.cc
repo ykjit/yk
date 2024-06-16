@@ -2,7 +2,7 @@
 
 #include "stackmap_oll_plugin.h"
 
-#ifdef __linux__
+#if defined(__linux__) || defined(__OpenBSD__)
 const char *SMSectionName = ".llvm_stackmaps";
 #else
 #error unknown stackmap section name for this platform
