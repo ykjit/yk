@@ -10,18 +10,18 @@ to make them a bit easier to understand.
 
 ### `YKD_LOG_IR`
 
-`YKD_LOG_IR` accepts a comma-separated list of JIT pipeline stages at which
-to print IR to stderr.
+`YKD_LOG_IR=<path>:<irstage_1>[,...,<irstage_n>]` logs IR from different stages
+to `path`. The special value `-` (i.e. a single dash) can be used for `<path>`
+to indicate stderr.
 
-The following stages are supported:
+The following `ir_stage`s are supported:
 
  - `aot`: the entire AOT IR for the interpreter.
  - `jit-pre-opt`: the JIT IR trace before optimisation.
  - `jit-post-opt`: the JIT IR trace after optimisation.
- - `jit-asm`: the assembler code of the compiled JIT IR trace.
+ - `jit-asm`: the assembler code of the compiled JIT IR trace. Note this stage
+   is only available for debug builds and unit tests.
 
-Note that `jit-asm` is currently only available for debug builds and in unit
-tests.
 
 #### `YKD_TRACE_DEBUGINFO`
 
