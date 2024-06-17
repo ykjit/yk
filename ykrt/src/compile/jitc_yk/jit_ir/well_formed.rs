@@ -101,6 +101,39 @@ impl Module {
                         );
                     }
                 }
+                Inst::SIToFP(x) => {
+                    let from_type = self.type_(x.val(self).tyidx(self));
+                    let to_type = self.type_(x.dest_ty_idx());
+
+                    if !matches!(from_type, Ty::Integer(_)) {
+                        panic!("Instruction at position {iidx} trying to convert a non-integer type\n  {}",
+                            self.inst(iidx).display(iidx, self));
+                    }
+                    if !matches!(to_type, Ty::Float(_)) {
+                        panic!("Instruction at position {iidx} trying to convert to a non-float type\n  {}",
+                            self.inst(iidx).display(iidx, self));
+                    }
+                    if to_type.byte_size() < from_type.byte_size() {
+                        panic!("Instruction at position {iidx} trying to convert to a smaller-sized float\n  {}",
+                            self.inst(iidx).display(iidx, self));
+                    }
+                }
+                Inst::FPExt(x) => {
+                    let from_type = self.type_(x.val(self).tyidx(self));
+                    let to_type = self.type_(x.dest_ty_idx());
+                    if !matches!(from_type, Ty::Float(_)) {
+                        panic!("Instruction at position {iidx} trying to extend from a non-float type\n  {}",
+                            self.inst(iidx).display(iidx, self));
+                    }
+                    if !matches!(to_type, Ty::Float(_)) {
+                        panic!("Instruction at position {iidx} trying to extend to a non-float type\n  {}",
+                            self.inst(iidx).display(iidx, self));
+                    }
+                    if to_type.byte_size() <= from_type.byte_size() {
+                        panic!("Instruction at position {iidx} trying to extend to a smaller-sized float\n  {}",
+                            self.inst(iidx).display(iidx, self));
+                    }
+                }
                 _ => (),
             }
         }
@@ -223,6 +256,82 @@ mod tests {
               entry:
                 %0: i8 = load_ti 0
                 guard %0, true
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Instruction at position 1 trying to convert a non-integer type")]
+    fn si_to_fp_from_non_int() {
+        Module::from_str(
+            "
+              entry:
+                %0: float = load_ti 0
+                %1: float = si_to_fp %0
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Instruction at position 1 trying to convert to a non-float type")]
+    fn si_to_fp_to_non_float() {
+        Module::from_str(
+            "
+              entry:
+                %0: i32 = load_ti 0
+                %1: i64 = si_to_fp %0
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Instruction at position 1 trying to convert to a smaller-sized float"
+    )]
+    fn si_to_fp_smaller() {
+        Module::from_str(
+            "
+              entry:
+                %0: i64 = load_ti 0
+                %1: float = si_to_fp %0
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Instruction at position 1 trying to extend to a smaller-sized float"
+    )]
+    fn fp_ext_smaller() {
+        Module::from_str(
+            "
+              entry:
+                %0: double = load_ti 0
+                %1: float = fp_ext %0
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Instruction at position 1 trying to extend from a non-float type")]
+    fn fp_ext_from_non_float() {
+        Module::from_str(
+            "
+              entry:
+                %0: i32 = load_ti 0
+                %1: double = fp_ext %0
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Instruction at position 1 trying to extend to a non-float type")]
+    fn fp_ext_to_non_float() {
+        Module::from_str(
+            "
+              entry:
+                %0: float = load_ti 0
+                %1: i64 = fp_ext %0
             ",
         );
     }

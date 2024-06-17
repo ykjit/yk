@@ -42,7 +42,7 @@ use typed_index_collections::TiVec;
 use ykaddr::addr::symbol_to_ptr;
 
 // This is simple and can be shared across both IRs.
-pub(crate) use super::aot_ir::{BinOp, Predicate};
+pub(crate) use super::aot_ir::{BinOp, FloatTy, Predicate};
 
 /// The `Module` is the top-level container for JIT IR.
 ///
@@ -746,6 +746,7 @@ pub(crate) enum Ty {
     Integer(u32),
     Ptr,
     Func(FuncTy),
+    Float(FloatTy),
     Unimplemented(String),
 }
 
@@ -767,6 +768,10 @@ impl Ty {
                 Some(mem::size_of::<*const c_void>())
             }
             Self::Func(_) => None,
+            Self::Float(ft) => Some(match ft {
+                FloatTy::Float => mem::size_of::<f32>(),
+                FloatTy::Double => mem::size_of::<f64>(),
+            }),
             Self::Unimplemented(_) => None,
         }
     }
@@ -807,6 +812,7 @@ impl fmt::Display for DisplayableTy<'_> {
                     )
                 }
             }
+            Ty::Float(ft) => write!(f, "{}", ft),
             Ty::Unimplemented(_) => write!(f, "?type"),
         }
     }
@@ -1079,6 +1085,8 @@ pub(crate) enum Inst {
     ZeroExtend(ZeroExtendInst),
     Trunc(TruncInst),
     Select(SelectInst),
+    SIToFP(SIToFPInst),
+    FPExt(FPExtInst),
 }
 
 impl Inst {
@@ -1124,6 +1132,8 @@ impl Inst {
             Self::ZeroExtend(si) => si.dest_tyidx(),
             Self::Trunc(t) => t.dest_tyidx(),
             Self::Select(s) => s.trueval(m).tyidx(m),
+            Self::SIToFP(i) => i.dest_ty_idx(),
+            Self::FPExt(i) => i.dest_ty_idx(),
         }
     }
 
@@ -1276,6 +1286,8 @@ impl fmt::Display for DisplayableInst<'_> {
                 s.trueval(self.m).display(self.m),
                 s.falseval(self.m).display(self.m)
             ),
+            Inst::SIToFP(i) => write!(f, "si_to_fp {}", i.val(self.m).display(self.m)),
+            Inst::FPExt(i) => write!(f, "fp_ext {}", i.val(self.m).display(self.m)),
         }
     }
 }
@@ -1306,6 +1318,8 @@ inst!(SExt, SExtInst);
 inst!(ZeroExtend, ZeroExtendInst);
 inst!(Trunc, TruncInst);
 inst!(Select, SelectInst);
+inst!(SIToFP, SIToFPInst);
+inst!(FPExt, FPExtInst);
 
 /// The operands for a [Instruction::BinOp]
 ///
@@ -1932,6 +1946,56 @@ impl TruncInst {
 
     pub(crate) fn dest_tyidx(&self) -> TyIdx {
         self.dest_tyidx
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SIToFPInst {
+    /// The value to convert.
+    val: PackedOperand,
+    /// The type to convert to. Must be a floating point type.
+    dest_ty_idx: TyIdx,
+}
+
+impl SIToFPInst {
+    pub(crate) fn new(val: &Operand, dest_ty_idx: TyIdx) -> Self {
+        Self {
+            val: PackedOperand::new(val),
+            dest_ty_idx,
+        }
+    }
+
+    pub(crate) fn val(&self, m: &Module) -> Operand {
+        self.val.unpack(m)
+    }
+
+    pub(crate) fn dest_ty_idx(&self) -> TyIdx {
+        self.dest_ty_idx
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FPExtInst {
+    /// The value to convert.
+    val: PackedOperand,
+    /// The type to convert to. Must be a larger floating point type.
+    dest_ty_idx: TyIdx,
+}
+
+impl FPExtInst {
+    pub(crate) fn new(val: &Operand, dest_ty_idx: TyIdx) -> Self {
+        Self {
+            val: PackedOperand::new(val),
+            dest_ty_idx,
+        }
+    }
+
+    pub(crate) fn val(&self, m: &Module) -> Operand {
+        self.val.unpack(m)
+    }
+
+    pub(crate) fn dest_ty_idx(&self) -> TyIdx {
+        self.dest_ty_idx
     }
 }
 

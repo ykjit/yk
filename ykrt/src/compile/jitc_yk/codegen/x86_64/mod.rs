@@ -24,8 +24,10 @@ use crate::compile::{
     CompiledTrace,
 };
 use dynasmrt::{
-    components::StaticLabel, dynasm, x64::Rq, AssemblyOffset, DynasmApi, DynasmError,
-    DynasmLabelApi, ExecutableBuffer, Register,
+    components::StaticLabel,
+    dynasm,
+    x64::{Rq, Rx},
+    AssemblyOffset, DynasmApi, DynasmError, DynasmLabelApi, ExecutableBuffer, Register,
 };
 #[cfg(any(debug_assertions, test))]
 use indexmap::IndexMap;
@@ -38,8 +40,20 @@ mod deopt;
 
 use deopt::__yk_deopt;
 
-/// Argument registers as defined by the X86_64 SysV ABI.
+/// General purpose argument registers as defined by the X86_64 SysV ABI.
 static ARG_REGS: [Rq; 6] = [Rq::RDI, Rq::RSI, Rq::RDX, Rq::RCX, Rq::R8, Rq::R9];
+
+/// Floating point argument registers as defined by the X86_64 SysV ABI.
+static FLOAT_ARG_REGS: [Rx; 8] = [
+    Rx::XMM0,
+    Rx::XMM1,
+    Rx::XMM2,
+    Rx::XMM3,
+    Rx::XMM4,
+    Rx::XMM5,
+    Rx::XMM6,
+    Rx::XMM7,
+];
 
 /// The argument index of the live variables struct argument in the JITted code function.
 static JITFUNC_LIVEVARS_ARGIDX: usize = 0;
@@ -48,14 +62,17 @@ static JITFUNC_LIVEVARS_ARGIDX: usize = 0;
 static REG64_SIZE: usize = 8;
 static RBP_DWARF_NUM: u16 = 6;
 
-/// Work registers, i.e. the registers we use temporarily (where possible) for operands to, and
-/// results of, intermediate computations.
+/// General purpose "work registers", i.e. the registers we use temporarily (where possible) for
+/// operands to, and results of, intermediate computations.
 ///
 /// We choose callee-save registers so that we don't have to worry about storing/restoring them
 /// when we do a function call to external code.
 static WR0: Rq = Rq::R12;
 static WR1: Rq = Rq::R13;
 static WR2: Rq = Rq::R14;
+
+/// Floating point work registers.
+static WF0: Rx = Rx::XMM0;
 
 /// The X86_64 SysV ABI requires a 16-byte aligned stack prior to any call.
 const SYSV_CALL_STACK_ALIGN: usize = 16;
@@ -215,6 +232,8 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Inst::ZeroExtend(i) => self.cg_zeroextend(iidx, i),
             jit_ir::Inst::Trunc(i) => self.cg_trunc(iidx, i),
             jit_ir::Inst::Select(i) => self.cg_select(iidx, i),
+            jit_ir::Inst::SIToFP(i) => self.cg_sitofp(iidx, i),
+            jit_ir::Inst::FPExt(i) => self.cg_fpext(iidx, i),
         }
         Ok(())
     }
@@ -576,23 +595,35 @@ impl<'a> X64CodeGen<'a> {
         callee: Rq,
         args: &[Operand],
     ) -> Result<(), CompilationError> {
-        // FIXME: floating point args
         // FIXME: non-SysV ABIs
-        if args.len() > ARG_REGS.len() {
-            todo!(); // needs spill
+        //
+        // FIXME: when we have a proper register allocator, this routine will be required to
+        // adhere to caller-save conventions.
+
+        // Arrange arguments according to the ABI.
+        let mut gp_regs = ARG_REGS.iter();
+        let mut float_regs = FLOAT_ARG_REGS.iter();
+        let mut num_float_args = 0;
+        for arg in args {
+            if matches!(self.m.type_(arg.tyidx(self.m)), jit_ir::Ty::Float(_)) {
+                let Some(reg) = float_regs.next() else {
+                    todo!("ran out of floating point arg regs: requires spill");
+                };
+                self.load_operand_float(*reg, arg);
+                num_float_args += 1;
+            } else {
+                let Some(reg) = gp_regs.next() else {
+                    todo!("ran out of general purpose arg regs: requires spill");
+                };
+                self.load_operand(*reg, arg);
+            }
         }
 
         if fty.is_vararg() {
             // SysV X86_64 ABI says "rax is used to indicate the number of vector arguments passed
-            // to a function requiring a variable number of arguments".
-            //
-            // We don't yet support vectors, so for now rax=0.
-            dynasm!(self.asm; mov rax, 0);
-        }
-
-        for (i, reg) in ARG_REGS.into_iter().take(args.len()).enumerate() {
-            let op = &args[i];
-            self.load_operand(reg, op);
+            // to a function requiring a variable number of arguments". Float arguments are passed
+            // in vector registers.
+            dynasm!(self.asm; mov rax, num_float_args);
         }
 
         // The SysV x86_64 ABI requires the stack to be 16-byte aligned prior to a call.
@@ -743,6 +774,42 @@ impl<'a> X64CodeGen<'a> {
         self.store_new_local(iidx, WR0);
     }
 
+    fn cg_sitofp(&mut self, inst_idx: InstIdx, i: &jit_ir::SIToFPInst) {
+        let from_val = i.val(self.m);
+        let to_type = self.m.type_(i.dest_ty_idx());
+
+        self.load_operand(WR0, &from_val);
+        match to_type {
+            jit_ir::Ty::Float(jit_ir::FloatTy::Float) => {
+                dynasm!(self.asm; cvtsi2ss Rx(WF0.code()), Rq(WR0.code()))
+            }
+            jit_ir::Ty::Float(jit_ir::FloatTy::Double) => {
+                dynasm!(self.asm; cvtsi2sd Rx(WF0.code()), Rq(WR0.code()))
+            }
+            _ => panic!(),
+        }
+        self.store_new_local_float(inst_idx, WF0);
+    }
+
+    fn cg_fpext(&mut self, iidx: InstIdx, i: &jit_ir::FPExtInst) {
+        let from_val = i.val(self.m);
+        let from_type = self.m.type_(from_val.tyidx(self.m));
+        let to_type = self.m.type_(i.dest_ty_idx());
+
+        self.load_operand_float(WF0, &from_val);
+        if let (
+            jit_ir::Ty::Float(jit_ir::FloatTy::Float),
+            jit_ir::Ty::Float(jit_ir::FloatTy::Double),
+        ) = (from_type, to_type)
+        {
+            dynasm!(self.asm; cvtss2sd Rx(WF0.code()), Rx(WF0.code()));
+        } else {
+            // since we only support 32- and 64-bit floats, any other conversion is nonsensical.
+            panic!();
+        }
+        self.store_new_local_float(iidx, WF0);
+    }
+
     fn cg_trunc(&mut self, iidx: InstIdx, i: &jit_ir::TruncInst) {
         let from_val = i.val(self.m);
         let from_type = self.m.type_(from_val.tyidx(self.m));
@@ -837,7 +904,7 @@ impl<'a> X64CodeGen<'a> {
         }
     }
 
-    /// Load an operand into a register.
+    /// Load an operand into a general purpose register.
     fn load_operand(&mut self, reg: Rq, op: &Operand) {
         match op {
             Operand::Local(li) => self.load_local(reg, *li),
@@ -845,8 +912,20 @@ impl<'a> X64CodeGen<'a> {
         }
     }
 
-    /// Load a local variable out of its stack slot into the specified register.
+    /// Load an operand into a floating point register.
+    fn load_operand_float(&mut self, reg: Rx, op: &Operand) {
+        match op {
+            Operand::Local(li) => self.load_local_float(reg, *li),
+            Operand::Const(_) => todo!(),
+        }
+    }
+
+    /// Load a local variable into the specified general purpose register.
     fn load_local(&mut self, reg: Rq, local: InstIdx) {
+        debug_assert!(!matches!(
+            self.m.type_(self.m.inst(local).tyidx(self.m)),
+            Ty::Float(_)
+        ));
         let alloc = match self.m.inst(local) {
             jit_ir::Inst::ProxyConst(c) => match self.m.const_(*c) {
                 Const::Int(_, c) => &LocalAlloc::ConstInt(*c),
@@ -881,7 +960,32 @@ impl<'a> X64CodeGen<'a> {
         }
     }
 
-    /// Load a constant into the specified register.
+    /// Load a local variable into the specified floating point register.
+    fn load_local_float(&mut self, reg: Rx, local: InstIdx) {
+        debug_assert!(matches!(
+            self.m.type_(self.m.inst(local).tyidx(self.m)),
+            Ty::Float(_)
+        ));
+        let alloc = match self.m.inst(local) {
+            jit_ir::Inst::ProxyConst(_) => todo!(),
+            jit_ir::Inst::ProxyInst(_) => todo!(),
+            _ => self.ra.allocation(local),
+        };
+        match alloc {
+            LocalAlloc::Stack { frame_off, size: _ } => match i32::try_from(*frame_off) {
+                Ok(foff) => match self.m.inst(local).def_byte_size(self.m) {
+                    4 => dynasm!(self.asm; movss Rx(reg.code()), [rbp - foff]),
+                    8 => dynasm!(self.asm; movsd Rx(reg.code()), [rbp - foff]),
+                    _ => todo!(),
+                },
+                Err(_) => todo!(),
+            },
+            LocalAlloc::Register => todo!(),
+            LocalAlloc::ConstInt(_) => unreachable!(),
+        }
+    }
+
+    /// Load a constant into the specified general purpose register.
     fn load_const(&mut self, reg: Rq, cidx: jit_ir::ConstIdx) {
         match self.m.const_(cidx) {
             jit_ir::Const::Int(tyidx, x) => {
@@ -921,11 +1025,33 @@ impl<'a> X64CodeGen<'a> {
         }
     }
 
-    /// Store a value held in a register into a new local variable.
+    /// Store a value held in a general purpose register into a new local variable.
     fn store_new_local(&mut self, local: InstIdx, reg: Rq) {
         let size = self.m.inst(local).def_byte_size(self.m);
         let l = self.ra.allocate(local, size, &mut self.stack);
         self.store_local(&l, reg, size);
+    }
+
+    fn store_local_float(&mut self, l: &LocalAlloc, reg: Rx, size: usize) {
+        match l {
+            LocalAlloc::Stack { frame_off, size: _ } => match i32::try_from(*frame_off) {
+                Ok(off) => match size {
+                    8 => dynasm!(self.asm ; movsd [rbp - off], Rx(reg.code())),
+                    4 => dynasm!(self.asm ; movss [rbp - off], Rx(reg.code())),
+                    _ => todo!("{}", size),
+                },
+                Err(_) => todo!("{}", size),
+            },
+            LocalAlloc::Register => todo!(),
+            LocalAlloc::ConstInt(_) => todo!(),
+        }
+    }
+
+    /// Store a value held in a floating point register into a new local variable.
+    fn store_new_local_float(&mut self, local: InstIdx, reg: Rx) {
+        let size = self.m.inst(local).def_byte_size(self.m);
+        let l = self.ra.allocate(local, size, &mut self.stack);
+        self.store_local_float(&l, reg, size);
     }
 }
 
@@ -1743,6 +1869,63 @@ mod tests {
                 ... mov [rbp-0x03], r12b
                 ...
             ",
+            );
+        }
+
+        #[test]
+        fn cg_sitofp_float() {
+            test_with_spillalloc(
+                "
+              entry:
+                %0: i32 = load_ti 0
+                %1: float = si_to_fp %0
+            ",
+                "
+                ...
+                ; %1: float = si_to_fp %0
+                ... mov r12d, [rbp-0x04]
+                ... cvtsi2ss xmm0, r12
+                ... movss [rbp-0x08], xmm0
+                ...
+                ",
+            );
+        }
+
+        #[test]
+        fn cg_sitofp_double() {
+            test_with_spillalloc(
+                "
+              entry:
+                %0: i32 = load_ti 0
+                %1: double = si_to_fp %0
+            ",
+                "
+                ...
+                ; %1: double = si_to_fp %0
+                ... mov r12d, [rbp-0x04]
+                ... cvtsi2sd xmm0, r12
+                ... movsd [rbp-0x10], xmm0
+                ...
+                ",
+            );
+        }
+
+        #[test]
+        fn cg_fpext_float_double() {
+            test_with_spillalloc(
+                "
+              entry:
+                %0: float = load_ti 0
+                %1: double = fp_ext %0
+            ",
+                "
+                ...
+                ; %1: double = fp_ext %0
+                ... movss xmm0, dword ptr [rbp-0x04]
+                ... cvtss2sd xmm0, xmm0
+                ... movsd [rbp-0x10], xmm0
+                ...
+                ",
             );
         }
     }
