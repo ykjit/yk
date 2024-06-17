@@ -63,5 +63,9 @@ pub fn apply_llvm_ld_library_path() {
         .unwrap()
         .stdout;
     let lib_dir = std::str::from_utf8(&lib_dir).unwrap();
-    println!("cargo:rustc-env=LD_LIBRARY_PATH={}", lib_dir);
+    let ldp = match env::var("LD_LIBRARY_PATH") {
+        Ok(x) => format!("{lib_dir}:{x})"),
+        Err(_) => lib_dir.to_owned(),
+    };
+    println!("cargo:rustc-env=LD_LIBRARY_PATH={ldp}");
 }
