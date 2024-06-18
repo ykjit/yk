@@ -13,19 +13,18 @@
 //!   * [super::ICmpInst]s left and right hand side operands have the same [Ty]s.
 //!   * [Const::Int]s cannot use more bits than the corresponding [Ty::Integer] type.
 
-use super::{BinOpInst, Const, GuardInst, Inst, InstIdx, Module, Operand, Ty};
+use super::{BinOpInst, Const, GuardInst, Inst, Module, Operand, Ty};
 
 impl Module {
     pub(crate) fn assert_well_formed(&self) {
-        for (i, inst) in self.insts.iter().enumerate() {
+        for iidx in self.iter_skipping_inst_idxs() {
+            let inst = self.inst(iidx);
             match inst {
                 Inst::BinOp(BinOpInst { lhs, binop: _, rhs }) => {
                     if lhs.unpack(self).ty_idx(self) != rhs.unpack(self).ty_idx(self) {
-                        let inst_idx = InstIdx::new(i).unwrap();
                         panic!(
-                            "Instruction at position {} has different types on lhs and rhs\n  {}",
-                            usize::from(inst_idx),
-                            self.inst(inst_idx).display(inst_idx, self)
+                            "Instruction at position {iidx} has different types on lhs and rhs\n  {}",
+                            self.inst(iidx).display(iidx, self)
                         );
                     }
                 }
@@ -37,14 +36,14 @@ impl Module {
                     };
                     if x.num_args() < fty.num_params() {
                         panic!(
-                            "Instruction at position {i} passing too few arguments:\n  {}",
-                            inst.display(InstIdx::new(i).unwrap(), self)
+                            "Instruction at position {iidx} passing too few arguments:\n  {}",
+                            inst.display(iidx, self)
                         );
                     }
                     if x.num_args() > fty.num_params() && !fty.is_vararg() {
                         panic!(
-                            "Instruction at position {i} passing too many arguments:\n  {}",
-                            inst.display(InstIdx::new(i).unwrap(), self)
+                            "Instruction at position {iidx} passing too many arguments:\n  {}",
+                            inst.display(iidx, self)
                         );
                     }
 
@@ -56,10 +55,10 @@ impl Module {
                         .enumerate()
                     {
                         if *par_ty != arg_ty {
-                            panic!("Instruction at position {i} passing argument {j} of wrong type ({}, but should be {})\n  {}",
+                            panic!("Instruction at position {iidx} passing argument {j} of wrong type ({}, but should be {})\n  {}",
                                 self.type_(arg_ty).display(self),
                                 self.type_(*par_ty).display(self),
-                                inst.display(InstIdx::new(i).unwrap(), self));
+                                inst.display(iidx, self));
                         }
                     }
                 }
@@ -67,11 +66,9 @@ impl Module {
                     let cond = cond.unpack(self);
                     let tyidx = cond.ty_idx(self);
                     let Ty::Integer(1) = self.type_(tyidx) else {
-                        let inst_idx = InstIdx::new(i).unwrap();
                         panic!(
-                            "Guard at position {} does not have 'cond' of type 'i1'\n  {}",
-                            usize::from(inst_idx),
-                            self.inst(inst_idx).display(inst_idx, self)
+                            "Guard at position {iidx} does not have 'cond' of type 'i1'\n  {}",
+                            self.inst(iidx).display(iidx, self)
                         )
                     };
                     if let Operand::Const(x) = cond {
@@ -79,22 +76,18 @@ impl Module {
                             unreachable!()
                         };
                         if (*expect && *v == 0) || (!*expect && *v == 1) {
-                            let inst_idx = InstIdx::new(i).unwrap();
                             panic!(
-                                "Guard at position {} references a constant that is at odds with the guard itself\n  {}",
-                                usize::from(inst_idx),
-                                self.inst(inst_idx).display(inst_idx, self)
+                                "Guard at position {iidx} references a constant that is at odds with the guard itself\n  {}",
+                                self.inst(iidx).display(iidx, self)
                             );
                         }
                     }
                 }
                 Inst::Icmp(x) => {
                     if x.lhs(self).ty_idx(self) != x.rhs(self).ty_idx(self) {
-                        let inst_idx = InstIdx::new(i).unwrap();
                         panic!(
-                            "Instruction at position {} has different types on lhs and rhs\n  {}",
-                            usize::from(inst_idx),
-                            self.inst(inst_idx).display(inst_idx, self)
+                            "Instruction at position {iidx} has different types on lhs and rhs\n  {}",
+                            self.inst(iidx).display(iidx, self)
                         );
                     }
                 }
@@ -102,11 +95,9 @@ impl Module {
                     if self.type_(x.val(self).ty_idx(self)).byte_size()
                         >= self.type_(x.dest_ty_idx()).byte_size()
                     {
-                        let inst_idx = InstIdx::new(i).unwrap();
                         panic!(
-                            "Instruction at position {} trying to sign extend from an equal-or-larger-than integer type\n  {}",
-                            usize::from(inst_idx),
-                            self.inst(inst_idx).display(inst_idx, self)
+                            "Instruction at position {iidx} trying to sign extend from an equal-or-larger-than integer type\n  {}",
+                            self.inst(iidx).display(iidx, self)
                         );
                     }
                 }
