@@ -10,7 +10,7 @@
 
 use super::{
     super::{
-        jit_ir::{self, BinOp, FuncDeclIdx, InstIdx, Operand, Ty},
+        jit_ir::{self, BinOp, InstIdx, Operand, Ty},
         CompilationError,
     },
     abs_stack::AbstractStack,
@@ -575,12 +575,12 @@ impl<'a> X64CodeGen<'a> {
     fn emit_call(
         &mut self,
         inst_idx: InstIdx,
-        func_decl_idx: FuncDeclIdx,
+        fty: &jit_ir::FuncTy,
+        callee: Rq,
         args: &[Operand],
     ) -> Result<(), CompilationError> {
         // FIXME: floating point args
         // FIXME: non-SysV ABIs
-        let fty = self.m.func_type(func_decl_idx);
         if args.len() > ARG_REGS.len() {
             todo!(); // needs spill
         }
@@ -598,18 +598,11 @@ impl<'a> X64CodeGen<'a> {
             self.load_operand(reg, op);
         }
 
-        // unwrap safe on account of linker symbol names not containing internal NULL bytes.
-        let va = symbol_to_ptr(self.m.func_decl(func_decl_idx).name())
-            .map_err(|e| CompilationError::General(e.to_string()))?;
-
         // The SysV x86_64 ABI requires the stack to be 16-byte aligned prior to a call.
         self.stack.align(SYSV_CALL_STACK_ALIGN);
 
         // Actually perform the call.
-        dynasm!(self.asm
-            ; mov Rq(WR0.code()), QWORD va as i64
-            ; call Rq(WR0.code())
-        );
+        dynasm!(self.asm; call Rq(callee.code()));
 
         // If the function we called has a return value, then store it into a local variable.
         if fty.ret_type(self.m) != &Ty::Void {
@@ -626,10 +619,16 @@ impl<'a> X64CodeGen<'a> {
         inst: &jit_ir::DirectCallInst,
     ) -> Result<(), CompilationError> {
         let func_decl_idx = inst.target();
+        let fty = self.m.func_type(func_decl_idx);
         let args = (0..(inst.num_args()))
             .map(|i| inst.operand(self.m, i))
             .collect::<Vec<_>>();
-        self.emit_call(inst_idx, func_decl_idx, &args)
+
+        // unwrap safe on account of linker symbol names not containing internal NULL bytes.
+        let va = symbol_to_ptr(self.m.func_decl(func_decl_idx).name())
+            .map_err(|e| CompilationError::General(e.to_string()))?;
+        dynasm!(self.asm; mov Rq(WR0.code()), QWORD va as i64);
+        self.emit_call(inst_idx, fty, WR0, &args)
     }
 
     /// Codegen a indirect call.
@@ -638,51 +637,15 @@ impl<'a> X64CodeGen<'a> {
         inst_idx: InstIdx,
         indirect_call_idx: &IndirectCallIdx,
     ) -> Result<(), CompilationError> {
-        // FIXME Most of this can probably be shared with `cg_call`, though the different arguments may complicate that change.
         let inst = self.m.indirect_call(*indirect_call_idx);
-        let args = (0..(inst.num_args()))
-            .map(|i| inst.operand(self.m, i))
-            .collect::<Vec<_>>();
-
-        // FIXME: floating point args
-        // FIXME: non-SysV ABIs
+        self.load_operand(WR0, &inst.target(self.m));
         let jit_ir::Ty::Func(fty) = self.m.type_(inst.fty_idx()) else {
             panic!()
         };
-
-        if args.len() > ARG_REGS.len() {
-            todo!(); // needs spill
-        }
-
-        if fty.is_vararg() {
-            // SysV X86_64 ABI says "rax is used to indicate the number of vector arguments passed
-            // to a function requiring a variable number of arguments".
-            //
-            // We don't yet support vectors, so for now rax=0.
-            dynasm!(self.asm; mov rax, 0);
-        }
-
-        for (i, reg) in ARG_REGS.into_iter().take(args.len()).enumerate() {
-            let op = &args[i];
-            self.load_operand(reg, op);
-        }
-
-        // Load the call target into a register.
-        self.load_operand(WR0, &inst.target(self.m));
-
-        // The SysV x86_64 ABI requires the stack to be 16-byte aligned prior to a call.
-        self.stack.align(SYSV_CALL_STACK_ALIGN);
-
-        // Actually perform the call.
-        dynasm!(self.asm
-            ; call Rq(WR0.code())
-        );
-
-        // If the function we called has a return value, then store it into a local variable.
-        if fty.ret_type(self.m) != &Ty::Void {
-            self.store_new_local(inst_idx, Rq::RAX);
-        }
-        Ok(())
+        let args = (0..(inst.num_args()))
+            .map(|i| inst.operand(self.m, i))
+            .collect::<Vec<_>>();
+        self.emit_call(inst_idx, fty, WR0, &args)
     }
 
     fn cg_icmp(&mut self, inst_idx: InstIdx, inst: &jit_ir::IcmpInst) {
@@ -1414,10 +1377,10 @@ mod tests {
                     "
                 ...
                 ; call @puts(%0, %1, %2)
+                ... mov r12, 0x{sym_addr:X}
                 ... mov edi, [rbp-0x04]
                 ... mov esi, [rbp-0x08]
                 ... mov edx, [rbp-0x0C]
-                ... mov r12, 0x{sym_addr:X}
                 ... call r12
                 ...
             "
@@ -1445,13 +1408,13 @@ mod tests {
                     "
                 ...
                 ; call @puts(%0, %1, %2, %3, %4, %5)
+                ... mov r12, 0x{sym_addr:X}
                 ... movzx rdi, byte ptr [rbp-0x01]
                 ... movzx rsi, word ptr [rbp-0x04]
                 ... mov edx, [rbp-0x08]
                 ... mov rcx, [rbp-0x10]
                 ... mov r8, [rbp-0x18]
                 ... movzx r9, byte ptr [rbp-0x19]
-                ... mov r12, 0x{sym_addr:X}
                 ... call r12
                 ...
             "
