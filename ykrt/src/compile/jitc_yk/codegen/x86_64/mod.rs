@@ -114,8 +114,7 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
     fn codegen(mut self: Box<Self>) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         let alloc_off = self.emit_prologue();
 
-        let mut inst_iter = self.m.iter_inst_idxs();
-        while let Some(idx) = inst_iter.next(self.m) {
+        for idx in self.m.iter_skipping_inst_idxs() {
             self.cg_inst(idx, self.m.inst(idx))?;
         }
 
@@ -199,7 +198,7 @@ impl<'a> X64CodeGen<'a> {
             #[cfg(test)]
             jit_ir::Inst::BlackBox(_) => unreachable!(),
             jit_ir::Inst::ProxyConst(_) | jit_ir::Inst::ProxyInst(_) | jit_ir::Inst::Tombstone => {
-                unreachable!()
+                unreachable!();
             }
 
             jit_ir::Inst::BinOp(i) => self.cg_binop(inst_idx, i),

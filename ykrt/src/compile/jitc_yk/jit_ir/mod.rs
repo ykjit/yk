@@ -224,9 +224,20 @@ impl Module {
         InstIdx::new(self.insts.len()).inspect(|_| self.insts.push(inst))
     }
 
-    /// Iterate, in order, over the `InstIdx`s of this module.
-    pub(crate) fn iter_inst_idxs(&self) -> InstIdxIterator {
-        InstIdxIterator(InstIdx::new(0).unwrap())
+    /// Iterate, in order, over all `InstIdx`s of this module (including `Proxy*` and `Tombstone`
+    /// instructions).
+    pub(crate) fn iter_inst_idxs(&self) -> impl Iterator<Item = InstIdx> {
+        (0..self.insts.len()).map(|x| InstIdx::new(x).unwrap())
+    }
+
+    /// An iterator over instruction indices. This skips `Proxy*` and `Tombstone` instructions: in
+    /// other words, it produces monotonically increasing, but potentially non-consecutive, instruction
+    /// indices.
+    pub(crate) fn iter_skipping_inst_idxs(&self) -> SkippingInstIdxIterator<'_> {
+        SkippingInstIdxIterator {
+            m: self,
+            cur: InstIdx::new(0).unwrap(),
+        }
     }
 
     /// Replace the instruction at `inst_idx` with `inst`.
@@ -431,35 +442,32 @@ impl fmt::Display for Module {
             )?;
         }
         write!(f, "\nentry:")?;
-        let mut inst_iter = self.iter_inst_idxs();
-        while let Some(inst_i) = inst_iter.next(self) {
-            write!(f, "\n    {}", self.insts[inst_i].display(inst_i, self))?;
+        for inst_i in self.iter_skipping_inst_idxs() {
+            write!(f, "\n    {}", self.insts[inst_i].display(inst_i, self))?
         }
 
         Ok(())
     }
 }
 
-/// An iterator over instruction indices. This skips `Proxy*` instructions: in other words, it
-/// produces monotonically increasing, but potentially non-consecutive, instruction indices.
-///
-/// Note that this is not a normal [std::iter::Iterator] because the `next` function takes a
-/// reference to [Module], which is necessary to stop the borrow checker preventing instructions
-/// from being changed during index iteration. This implicitly means that, for correctness reasons,
-/// when iterating over instructions, one must not "shift" instructions in the [Module] downwards
-/// (e.g. removing elements from the underlying [TiVec] would). Currently no API on [Module] allows
-/// one to do that, a property that is well worth preserving!
-pub(crate) struct InstIdxIterator(InstIdx);
+/// An iterator over instruction indices. This skips `Proxy*` and `Tombestone` instructions: in
+/// other words, it produces monotonically increasing, but potentially non-consecutive, instruction
+/// indices.
+pub(crate) struct SkippingInstIdxIterator<'a> {
+    m: &'a Module,
+    cur: InstIdx,
+}
 
-impl InstIdxIterator {
+impl Iterator for SkippingInstIdxIterator<'_> {
+    type Item = InstIdx;
     /// Return the next instruction index or `None` if the end has been reached.
-    pub(crate) fn next(&mut self, m: &Module) -> Option<InstIdx> {
-        while let Some(x) = m.insts.get(self.0) {
-            let cur = self.0;
-            self.0 = InstIdx::new(usize::from(self.0) + 1).unwrap();
+    fn next(&mut self) -> Option<InstIdx> {
+        while let Some(x) = self.m.insts.get(self.cur) {
+            let old = self.cur;
+            self.cur = InstIdx::new(usize::from(old) + 1).unwrap();
             match x {
                 Inst::ProxyConst(_) | Inst::ProxyInst(_) | Inst::Tombstone => (),
-                _ => return Some(cur),
+                _ => return Some(old),
             }
         }
         None
