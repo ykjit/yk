@@ -622,6 +622,12 @@ macro_rules! index_16bit {
                 s.0.into()
             }
         }
+
+        impl fmt::Display for $struct {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+                write!(f, "{}", self.0)
+            }
+        }
     };
 }
 
@@ -932,9 +938,9 @@ impl fmt::Display for DisplayableOperand<'_> {
                     write!(f, "{}", self.m.const_(*c).display(self.m))
                 }
                 Inst::ProxyInst(idx) => {
-                    write!(f, "%{}", idx.to_u16())
+                    write!(f, "%{idx}")
                 }
-                _ => write!(f, "%{}", idx.to_u16()),
+                _ => write!(f, "%{idx}"),
             },
             Operand::Const(idx) => write!(f, "{}", self.m.const_(*idx).display(self.m)),
         }
@@ -1156,7 +1162,7 @@ pub(crate) struct DisplayableInst<'a> {
 impl fmt::Display for DisplayableInst<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(dt) = self.inst.def_type(self.m) {
-            write!(f, "%{}: {} = ", self.inst_idx.to_u16(), dt.display(self.m))?;
+            write!(f, "%{}: {} = ", self.inst_idx, dt.display(self.m))?;
         }
         match self.inst {
             #[cfg(test)]

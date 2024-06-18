@@ -378,10 +378,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                 let idx =
                     InstIdx::new(idx).map_err(|e| self.error_at_span(span, &e.to_string()))?;
                 let mapped_idx = self.inst_idx_map.get(&idx).ok_or_else(|| {
-                    self.error_at_span(
-                        span,
-                        &format!("Undefined local operand '%{}'", usize::from(idx)),
-                    )
+                    self.error_at_span(span, &format!("Undefined local operand '%{idx}'"))
                 })?;
                 Ok(Operand::Local(*mapped_idx))
             }
@@ -415,7 +412,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
         self.m.push(inst).unwrap();
         match self.inst_idx_map.insert(idx, self.m.last_inst_idx()) {
             None => Ok(()),
-            Some(_) => Err(format!("Local operand '%{}' redefined", usize::from(idx)).into()),
+            Some(_) => Err(format!("Local operand '%{idx}' redefined").into()),
         }
     }
 
