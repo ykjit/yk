@@ -9,13 +9,16 @@
 //! use a number of abbreviations/conventions to keep the length of source down to something
 //! manageable (in alphabetical order):
 //!
+//!  * `cidx`: a [ConstIdx].
 //!  * `Const` and `const_`: a "constant"
 //!  * `decl`: a "declaration" (e.g. a "function declaration" is a reference to an existing
 //!    function somewhere else in the address space)
+//!  * `iidx`: an [InstIdx].
 //!  * `m`: the name conventionally given to the shared [Module] instance (i.e. `m: Module`)
 //!  * `Idx`: "index"
 //!  * `Inst`: "instruction"
 //!  * `Ty`: "type"
+//!  * `tyidx`: a [TyIdx].
 //!
 //! IR structures can be converted to human-readable strings either because:
 //!  1. they implement [std::fmt::Display] directly.
@@ -65,14 +68,14 @@ pub(crate) struct Module {
     /// The type pool. Indexed by [TyIdx].
     types: IndexSet<Ty>,
     /// The type index of the void type. Cached for convenience.
-    void_ty_idx: TyIdx,
+    void_tyidx: TyIdx,
     /// The type index of a pointer type. Cached for convenience.
-    ptr_ty_idx: TyIdx,
+    ptr_tyidx: TyIdx,
     /// The type index of a 1-bit integer. Cached for convenience.
-    int1_ty_idx: TyIdx,
+    int1_tyidx: TyIdx,
     /// The type index of an 8-bit integer. Cached for convenience.
     #[cfg(test)]
-    int8_ty_idx: TyIdx,
+    int8_tyidx: TyIdx,
     /// The [ConstIdx] of the i1 value 1 / "true".
     true_constidx: ConstIdx,
     /// The [ConstIdx] of the i1 value 0 / "false".
@@ -128,19 +131,18 @@ impl Module {
     ) -> Result<Self, CompilationError> {
         // Create some commonly used types ahead of time. Aside from being convenient, this allows
         // us to find their (now statically known) indices in scenarios where Rust forbids us from
-        // holding a mutable reference to the Module (and thus we cannot use [Module::ty_idx]).
+        // holding a mutable reference to the Module (and thus we cannot use [Module::tyidx]).
         let mut types = IndexSet::new();
-        let void_ty_idx = TyIdx::new(types.insert_full(Ty::Void).0)?;
-        let ptr_ty_idx = TyIdx::new(types.insert_full(Ty::Ptr).0)?;
-        let int1_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(1)).0).unwrap();
+        let void_tyidx = TyIdx::new(types.insert_full(Ty::Void).0)?;
+        let ptr_tyidx = TyIdx::new(types.insert_full(Ty::Ptr).0)?;
+        let int1_tyidx = TyIdx::new(types.insert_full(Ty::Integer(1)).0).unwrap();
         #[cfg(test)]
-        let int8_ty_idx = TyIdx::new(types.insert_full(Ty::Integer(8)).0).unwrap();
+        let int8_tyidx = TyIdx::new(types.insert_full(Ty::Integer(8)).0).unwrap();
 
         let mut consts = IndexSet::new();
-        let true_constidx =
-            ConstIdx::new(consts.insert_full(Const::Int(int1_ty_idx, 1)).0).unwrap();
+        let true_constidx = ConstIdx::new(consts.insert_full(Const::Int(int1_tyidx, 1)).0).unwrap();
         let false_constidx =
-            ConstIdx::new(consts.insert_full(Const::Int(int1_ty_idx, 0)).0).unwrap();
+            ConstIdx::new(consts.insert_full(Const::Int(int1_tyidx, 0)).0).unwrap();
 
         // Find the global variable pointer array in the address space.
         //
@@ -159,11 +161,11 @@ impl Module {
             args: Vec::new(),
             consts,
             types,
-            void_ty_idx,
-            ptr_ty_idx,
-            int1_ty_idx,
+            void_tyidx,
+            ptr_tyidx,
+            int1_tyidx,
             #[cfg(test)]
-            int8_ty_idx,
+            int8_tyidx,
             true_constidx,
             false_constidx,
             func_decls: IndexSet::new(),
@@ -189,24 +191,24 @@ impl Module {
     }
 
     /// Returns the type index of [Ty::Void].
-    pub(crate) fn void_ty_idx(&self) -> TyIdx {
-        self.void_ty_idx
+    pub(crate) fn void_tyidx(&self) -> TyIdx {
+        self.void_tyidx
     }
 
     /// Returns the type index of [Ty::Ptr].
-    pub(crate) fn ptr_ty_idx(&self) -> TyIdx {
-        self.ptr_ty_idx
+    pub(crate) fn ptr_tyidx(&self) -> TyIdx {
+        self.ptr_tyidx
     }
 
     /// Returns the type index of a 1-bit integer.
-    pub(crate) fn int1_ty_idx(&self) -> TyIdx {
-        self.int1_ty_idx
+    pub(crate) fn int1_tyidx(&self) -> TyIdx {
+        self.int1_tyidx
     }
 
     /// Returns the type index of an 8-bit integer.
     #[cfg(test)]
-    pub(crate) fn int8_ty_idx(&self) -> TyIdx {
-        self.int8_ty_idx
+    pub(crate) fn int8_tyidx(&self) -> TyIdx {
+        self.int8_tyidx
     }
 
     /// Return the instruction at the specified index.
@@ -240,9 +242,9 @@ impl Module {
         }
     }
 
-    /// Replace the instruction at `inst_idx` with `inst`.
-    pub(crate) fn replace(&mut self, inst_idx: InstIdx, inst: Inst) {
-        self.insts[inst_idx] = inst;
+    /// Replace the instruction at `iidx` with `inst`.
+    pub(crate) fn replace(&mut self, iidx: InstIdx, inst: Inst) {
+        self.insts[iidx] = inst;
     }
 
     pub(crate) fn push_indirect_call(
@@ -390,7 +392,7 @@ impl Module {
     ///
     /// Panics if the index is out of bounds
     pub(crate) fn func_type(&self, idx: FuncDeclIdx) -> &FuncTy {
-        match self.type_(self.func_decl(idx).ty_idx) {
+        match self.type_(self.func_decl(idx).tyidx) {
             Ty::Func(ft) => ft,
             _ => unreachable!(),
         }
@@ -429,7 +431,7 @@ impl fmt::Display for Module {
                 f,
                 "func_decl {} {}",
                 x.name(),
-                self.type_(x.ty_idx()).display(self)
+                self.type_(x.tyidx()).display(self)
             )?;
         }
         for g in &self.global_decls {
@@ -442,8 +444,8 @@ impl fmt::Display for Module {
             )?;
         }
         write!(f, "\nentry:")?;
-        for inst_i in self.iter_skipping_inst_idxs() {
-            write!(f, "\n    {}", self.insts[inst_i].display(inst_i, self))?
+        for iidx in self.iter_skipping_inst_idxs() {
+            write!(f, "\n    {}", self.insts[iidx].display(iidx, self))?
         }
 
         Ok(())
@@ -686,18 +688,18 @@ index_16bit!(InstIdx);
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct FuncTy {
     /// Ty indices for the function's parameters.
-    param_ty_idxs: Vec<TyIdx>,
+    param_tyidxs: Vec<TyIdx>,
     /// Ty index of the function's return type.
-    ret_ty_idx: TyIdx,
+    ret_tyidx: TyIdx,
     /// Is the function vararg?
     is_vararg: bool,
 }
 
 impl FuncTy {
-    pub(crate) fn new(param_ty_idxs: Vec<TyIdx>, ret_ty_idx: TyIdx, is_vararg: bool) -> Self {
+    pub(crate) fn new(param_tyidxs: Vec<TyIdx>, ret_tyidx: TyIdx, is_vararg: bool) -> Self {
         Self {
-            param_ty_idxs,
-            ret_ty_idx,
+            param_tyidxs,
+            ret_tyidx,
             is_vararg,
         }
     }
@@ -705,13 +707,13 @@ impl FuncTy {
     /// Return the number of paramaters the function accepts (not including varargs).
     #[cfg(any(debug_assertions, test))]
     pub(crate) fn num_params(&self) -> usize {
-        self.param_ty_idxs.len()
+        self.param_tyidxs.len()
     }
 
     /// Return a slice of this function's non-varargs parameters.
     #[cfg(any(debug_assertions, test))]
     pub(crate) fn param_tys(&self) -> &[TyIdx] {
-        &self.param_ty_idxs
+        &self.param_tyidxs
     }
 
     /// Returns whether the function type has vararg arguments.
@@ -721,12 +723,12 @@ impl FuncTy {
 
     /// Returns the type of the return value.
     pub(crate) fn ret_type<'a>(&self, m: &'a Module) -> &'a Ty {
-        m.type_(self.ret_ty_idx)
+        m.type_(self.ret_tyidx)
     }
 
     /// Returns the type index of the return value.
-    pub(crate) fn ret_ty_idx(&self) -> TyIdx {
-        self.ret_ty_idx
+    pub(crate) fn ret_tyidx(&self) -> TyIdx {
+        self.ret_tyidx
     }
 }
 
@@ -787,21 +789,21 @@ impl fmt::Display for DisplayableTy<'_> {
             Ty::Ptr => write!(f, "ptr"),
             Ty::Func(x) => {
                 let mut args = x
-                    .param_ty_idxs
+                    .param_tyidxs
                     .iter()
                     .map(|x| self.m.type_(*x).display(self.m).to_string())
                     .collect::<Vec<_>>();
                 if x.is_vararg() {
                     args.push("...".to_string());
                 }
-                if x.ret_ty_idx() == self.m.void_ty_idx {
+                if x.ret_tyidx() == self.m.void_tyidx {
                     write!(f, "({})", args.join(", "))
                 } else {
                     write!(
                         f,
                         "({}) -> {}",
                         args.join(", "),
-                        self.m.type_(x.ret_ty_idx()).display(self.m)
+                        self.m.type_(x.ret_tyidx()).display(self.m)
                     )
                 }
             }
@@ -814,12 +816,12 @@ impl fmt::Display for DisplayableTy<'_> {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct FuncDecl {
     name: String,
-    ty_idx: TyIdx,
+    tyidx: TyIdx,
 }
 
 impl FuncDecl {
-    pub(crate) fn new(name: String, ty_idx: TyIdx) -> Self {
-        Self { name, ty_idx }
+    pub(crate) fn new(name: String, tyidx: TyIdx) -> Self {
+        Self { name, tyidx }
     }
 
     /// Return the name of this function declaration.
@@ -827,8 +829,8 @@ impl FuncDecl {
         &self.name
     }
 
-    pub(crate) fn ty_idx(&self) -> TyIdx {
-        self.ty_idx
+    pub(crate) fn tyidx(&self) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -867,17 +869,17 @@ impl PackedOperand {
     /// Unpacks a [PackedOperand] into a [Operand].
     pub fn unpack(&self, m: &Module) -> Operand {
         if (self.0 & !OPERAND_IDX_MASK) == 0 {
-            let mut inst_i = InstIdx(self.0);
+            let mut iidx = InstIdx(self.0);
             loop {
-                match m.inst(inst_i) {
+                match m.inst(iidx) {
                     Inst::ProxyConst(x) => {
                         return Operand::Const(*x);
                     }
                     Inst::ProxyInst(x) => {
-                        inst_i = *x;
+                        iidx = *x;
                     }
                     _ => {
-                        return Operand::Local(inst_i);
+                        return Operand::Local(iidx);
                     }
                 }
             }
@@ -908,15 +910,15 @@ impl Operand {
     pub(crate) fn byte_size(&self, m: &Module) -> usize {
         match self {
             Self::Local(l) => m.inst(*l).def_byte_size(m),
-            Self::Const(cidx) => m.type_(m.const_(*cidx).ty_idx(m)).byte_size().unwrap(),
+            Self::Const(cidx) => m.type_(m.const_(*cidx).tyidx(m)).byte_size().unwrap(),
         }
     }
 
     /// Returns the type index of the operand.
-    pub(crate) fn ty_idx(&self, m: &Module) -> TyIdx {
+    pub(crate) fn tyidx(&self, m: &Module) -> TyIdx {
         match self {
-            Self::Local(l) => m.inst(*l).ty_idx(m),
-            Self::Const(c) => m.const_(*c).ty_idx(m),
+            Self::Local(l) => m.inst(*l).tyidx(m),
+            Self::Const(c) => m.const_(*c).tyidx(m),
         }
     }
 
@@ -958,10 +960,10 @@ pub(crate) enum Const {
 }
 
 impl Const {
-    pub(crate) fn ty_idx(&self, m: &Module) -> TyIdx {
+    pub(crate) fn tyidx(&self, m: &Module) -> TyIdx {
         match self {
-            Const::Int(ty_idx, _) => *ty_idx,
-            Const::Ptr(_) => m.ptr_ty_idx,
+            Const::Int(tyidx, _) => *tyidx,
+            Const::Ptr(_) => m.ptr_tyidx,
         }
     }
 
@@ -980,7 +982,7 @@ impl Const {
     /// If `x` doesn't fit into the underlying integer type.
     pub(crate) fn u64_to_int(&self, x: u64) -> Const {
         match self {
-            Const::Int(ty_idx, _) => Const::Int(*ty_idx, x),
+            Const::Int(tyidx, _) => Const::Int(*tyidx, x),
             Const::Ptr(_) => panic!(),
         }
     }
@@ -998,8 +1000,8 @@ pub(crate) struct DisplayableConst<'a> {
 impl fmt::Display for DisplayableConst<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.const_ {
-            Const::Int(ty_idx, x) => {
-                let Ty::Integer(width) = self.m.type_(*ty_idx) else {
+            Const::Int(tyidx, x) => {
+                let Ty::Integer(width) = self.m.type_(*tyidx) else {
                     panic!()
                 };
                 write!(f, "{x}i{width}")
@@ -1082,8 +1084,8 @@ pub(crate) enum Inst {
 impl Inst {
     /// Returns the type of the value that the instruction produces (if any).
     pub(crate) fn def_type<'a>(&self, m: &'a Module) -> Option<&'a Ty> {
-        let idx = self.ty_idx(m);
-        if idx != m.void_ty_idx() {
+        let idx = self.tyidx(m);
+        if idx != m.void_tyidx() {
             Some(m.type_(idx))
         } else {
             None
@@ -1092,36 +1094,36 @@ impl Inst {
 
     /// Returns the type index of the value that the instruction produces, or [Ty::Void] if it does
     /// not produce a value.
-    pub(crate) fn ty_idx(&self, m: &Module) -> TyIdx {
+    pub(crate) fn tyidx(&self, m: &Module) -> TyIdx {
         match self {
             #[cfg(test)]
-            Self::BlackBox(_) => m.void_ty_idx(),
-            Self::ProxyConst(x) => m.const_(*x).ty_idx(m),
-            Self::ProxyInst(x) => m.inst(*x).ty_idx(m),
+            Self::BlackBox(_) => m.void_tyidx(),
+            Self::ProxyConst(x) => m.const_(*x).tyidx(m),
+            Self::ProxyInst(x) => m.inst(*x).tyidx(m),
             Self::Tombstone => panic!(),
 
-            Self::BinOp(x) => x.ty_idx(m),
+            Self::BinOp(x) => x.tyidx(m),
             Self::IndirectCall(idx) => {
                 let inst = &m.indirect_calls[*idx];
-                let ty = m.type_(inst.fty_idx);
+                let ty = m.type_(inst.ftyidx);
                 let Ty::Func(fty) = ty else { panic!() };
-                fty.ret_ty_idx()
+                fty.ret_tyidx()
             }
-            Self::Load(li) => li.ty_idx(),
-            Self::LookupGlobal(..) => m.ptr_ty_idx(),
-            Self::LoadTraceInput(li) => li.ty_idx(),
-            Self::Call(ci) => m.func_type(ci.target()).ret_ty_idx(),
-            Self::PtrAdd(..) => m.ptr_ty_idx(),
-            Self::DynPtrAdd(..) => m.ptr_ty_idx(),
-            Self::Store(..) => m.void_ty_idx(),
-            Self::Icmp(_) => m.int1_ty_idx(),
-            Self::Guard(..) => m.void_ty_idx(),
-            Self::Arg(..) => m.ptr_ty_idx(),
-            Self::TraceLoopStart => m.void_ty_idx(),
-            Self::SExt(si) => si.dest_ty_idx(),
-            Self::ZeroExtend(si) => si.dest_ty_idx(),
-            Self::Trunc(t) => t.dest_ty_idx(),
-            Self::Select(s) => s.trueval(m).ty_idx(m),
+            Self::Load(li) => li.tyidx(),
+            Self::LookupGlobal(..) => m.ptr_tyidx(),
+            Self::LoadTraceInput(li) => li.tyidx(),
+            Self::Call(ci) => m.func_type(ci.target()).ret_tyidx(),
+            Self::PtrAdd(..) => m.ptr_tyidx(),
+            Self::DynPtrAdd(..) => m.ptr_tyidx(),
+            Self::Store(..) => m.void_tyidx(),
+            Self::Icmp(_) => m.int1_tyidx(),
+            Self::Guard(..) => m.void_tyidx(),
+            Self::Arg(..) => m.ptr_tyidx(),
+            Self::TraceLoopStart => m.void_tyidx(),
+            Self::SExt(si) => si.dest_tyidx(),
+            Self::ZeroExtend(si) => si.dest_tyidx(),
+            Self::Trunc(t) => t.dest_tyidx(),
+            Self::Select(s) => s.trueval(m).tyidx(m),
         }
     }
 
@@ -1144,10 +1146,10 @@ impl Inst {
         }
     }
 
-    pub(crate) fn display<'a>(&'a self, inst_idx: InstIdx, m: &'a Module) -> DisplayableInst<'a> {
+    pub(crate) fn display<'a>(&'a self, iidx: InstIdx, m: &'a Module) -> DisplayableInst<'a> {
         DisplayableInst {
             inst: self,
-            inst_idx,
+            iidx,
             m,
         }
     }
@@ -1155,14 +1157,14 @@ impl Inst {
 
 pub(crate) struct DisplayableInst<'a> {
     inst: &'a Inst,
-    inst_idx: InstIdx,
+    iidx: InstIdx,
     m: &'a Module,
 }
 
 impl fmt::Display for DisplayableInst<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(dt) = self.inst.def_type(self.m) {
-            write!(f, "%{}: {} = ", self.inst_idx, dt.display(self.m))?;
+            write!(f, "%{}: {} = ", self.iidx, dt.display(self.m))?;
         }
         match self.inst {
             #[cfg(test)]
@@ -1253,7 +1255,7 @@ impl fmt::Display for DisplayableInst<'_> {
                     f,
                     "sext {}, {}",
                     i.val(self.m).display(self.m),
-                    self.m.type_(i.dest_ty_idx()).display(self.m)
+                    self.m.type_(i.dest_tyidx()).display(self.m)
                 )
             }
             Inst::ZeroExtend(i) => {
@@ -1261,7 +1263,7 @@ impl fmt::Display for DisplayableInst<'_> {
                     f,
                     "zext {}, {}",
                     i.val(self.m).display(self.m),
-                    self.m.type_(i.dest_ty_idx()).display(self.m)
+                    self.m.type_(i.dest_tyidx()).display(self.m)
                 )
             }
             Inst::Trunc(i) => {
@@ -1333,8 +1335,8 @@ impl BinOpInst {
     }
 
     /// Returns the type index of the operands being added.
-    pub(crate) fn ty_idx(&self, m: &Module) -> TyIdx {
-        self.lhs.unpack(m).ty_idx(m)
+    pub(crate) fn tyidx(&self, m: &Module) -> TyIdx {
+        self.lhs.unpack(m).tyidx(m)
     }
 }
 
@@ -1371,17 +1373,17 @@ pub struct LoadInst {
     /// The pointer to load from.
     op: PackedOperand,
     /// The type of the pointee.
-    ty_idx: TyIdx,
+    tyidx: TyIdx,
     /// Is this load volatile?
     volatile: bool,
 }
 
 impl LoadInst {
     // FIXME: why do we need to provide a type index? Can't we get that from the operand?
-    pub(crate) fn new(op: Operand, ty_idx: TyIdx, volatile: bool) -> LoadInst {
+    pub(crate) fn new(op: Operand, tyidx: TyIdx, volatile: bool) -> LoadInst {
         LoadInst {
             op: PackedOperand::new(&op),
-            ty_idx,
+            tyidx,
             volatile,
         }
     }
@@ -1392,8 +1394,8 @@ impl LoadInst {
     }
 
     /// Returns the type index of the loaded value.
-    pub(crate) fn ty_idx(&self) -> TyIdx {
-        self.ty_idx
+    pub(crate) fn tyidx(&self) -> TyIdx {
+        self.tyidx
     }
 }
 
@@ -1402,7 +1404,7 @@ impl LoadInst {
 /// ## Semantics
 ///
 /// Loads a trace input out of the trace input struct. The variable is loaded from the specified
-/// offset (`off`) and the resulting local variable is of the type indicated by the `ty_idx`.
+/// offset (`off`) and the resulting local variable is of the type indicated by the `tyidx`.
 ///
 /// FIXME (maybe): If we added a third `TraceInput` storage class to the register allocator, could
 /// we kill this instruction kind entirely?
@@ -1412,16 +1414,16 @@ pub struct LoadTraceInputInst {
     /// The byte offset to load from in the trace input struct.
     off: u32,
     /// The type of the resulting local variable.
-    ty_idx: TyIdx,
+    tyidx: TyIdx,
 }
 
 impl LoadTraceInputInst {
-    pub(crate) fn new(off: u32, ty_idx: TyIdx) -> LoadTraceInputInst {
-        Self { off, ty_idx }
+    pub(crate) fn new(off: u32, tyidx: TyIdx) -> LoadTraceInputInst {
+        Self { off, tyidx }
     }
 
-    pub(crate) fn ty_idx(&self) -> TyIdx {
-        self.ty_idx
+    pub(crate) fn tyidx(&self) -> TyIdx {
+        self.tyidx
     }
 
     pub(crate) fn off(&self) -> u32 {
@@ -1489,7 +1491,7 @@ pub struct IndirectCallInst {
     /// The callee.
     target: PackedOperand,
     // Type of the target function.
-    fty_idx: TyIdx,
+    ftyidx: TyIdx,
     /// How many arguments in [Module::extra_args] is this call passing?
     num_args: u16,
     /// At what index do the contiguous operands in [Module::extra_args] start?
@@ -1499,7 +1501,7 @@ pub struct IndirectCallInst {
 impl IndirectCallInst {
     pub(crate) fn new(
         m: &mut Module,
-        fty_idx: TyIdx,
+        ftyidx: TyIdx,
         target: Operand,
         args: Vec<Operand>,
     ) -> Result<IndirectCallInst, CompilationError> {
@@ -1513,15 +1515,15 @@ impl IndirectCallInst {
         let args_idx = m.push_args(args)?;
         Ok(Self {
             target: PackedOperand::new(&target),
-            fty_idx,
+            ftyidx,
             num_args,
             args_idx,
         })
     }
 
     /// Return the [TyIdx] of the callee.
-    pub(crate) fn fty_idx(&self) -> TyIdx {
-        self.fty_idx
+    pub(crate) fn ftyidx(&self) -> TyIdx {
+        self.ftyidx
     }
 
     /// Return the callee [Operand].
@@ -1863,14 +1865,14 @@ pub struct SExtInst {
     /// The value to extend.
     val: PackedOperand,
     /// The type to extend to.
-    dest_ty_idx: TyIdx,
+    dest_tyidx: TyIdx,
 }
 
 impl SExtInst {
-    pub(crate) fn new(val: &Operand, dest_ty_idx: TyIdx) -> Self {
+    pub(crate) fn new(val: &Operand, dest_tyidx: TyIdx) -> Self {
         Self {
             val: PackedOperand::new(val),
-            dest_ty_idx,
+            dest_tyidx,
         }
     }
 
@@ -1878,8 +1880,8 @@ impl SExtInst {
         self.val.unpack(m)
     }
 
-    pub(crate) fn dest_ty_idx(&self) -> TyIdx {
-        self.dest_ty_idx
+    pub(crate) fn dest_tyidx(&self) -> TyIdx {
+        self.dest_tyidx
     }
 }
 
@@ -1888,14 +1890,14 @@ pub struct ZeroExtendInst {
     /// The value to extend.
     val: PackedOperand,
     /// The type to extend to.
-    dest_ty_idx: TyIdx,
+    dest_tyidx: TyIdx,
 }
 
 impl ZeroExtendInst {
-    pub(crate) fn new(val: &Operand, dest_ty_idx: TyIdx) -> Self {
+    pub(crate) fn new(val: &Operand, dest_tyidx: TyIdx) -> Self {
         Self {
             val: PackedOperand::new(val),
-            dest_ty_idx,
+            dest_tyidx,
         }
     }
 
@@ -1903,8 +1905,8 @@ impl ZeroExtendInst {
         self.val.unpack(m)
     }
 
-    pub(crate) fn dest_ty_idx(&self) -> TyIdx {
-        self.dest_ty_idx
+    pub(crate) fn dest_tyidx(&self) -> TyIdx {
+        self.dest_tyidx
     }
 }
 
@@ -1913,14 +1915,14 @@ pub struct TruncInst {
     /// The value to extend.
     val: PackedOperand,
     /// The type to extend to.
-    dest_ty_idx: TyIdx,
+    dest_tyidx: TyIdx,
 }
 
 impl TruncInst {
-    pub(crate) fn new(val: &Operand, dest_ty_idx: TyIdx) -> Self {
+    pub(crate) fn new(val: &Operand, dest_tyidx: TyIdx) -> Self {
         Self {
             val: PackedOperand::new(val),
-            dest_ty_idx,
+            dest_tyidx,
         }
     }
 
@@ -1928,8 +1930,8 @@ impl TruncInst {
         self.val.unpack(m)
     }
 
-    pub(crate) fn dest_ty_idx(&self) -> TyIdx {
-        self.dest_ty_idx
+    pub(crate) fn dest_tyidx(&self) -> TyIdx {
+        self.dest_tyidx
     }
 }
 
@@ -1969,9 +1971,9 @@ mod tests {
         let mut m = Module::new_testing();
         let i32_tyidx = m.insert_ty(Ty::Integer(32)).unwrap();
         let func_ty = Ty::Func(FuncTy::new(vec![i32_tyidx; 3], i32_tyidx, true));
-        let func_ty_idx = m.insert_ty(func_ty).unwrap();
+        let func_tyidx = m.insert_ty(func_ty).unwrap();
         let func_decl_idx = m
-            .insert_func_decl(FuncDecl::new("foo".to_owned(), func_ty_idx))
+            .insert_func_decl(FuncDecl::new("foo".to_owned(), func_tyidx))
             .unwrap();
 
         // Build a call to the function.
@@ -2001,12 +2003,12 @@ mod tests {
     fn call_args_out_of_bounds() {
         // Set up a function to call.
         let mut m = Module::new_testing();
-        let arg_ty_idxs = vec![m.ptr_ty_idx(); 3];
-        let ret_ty_idx = m.insert_ty(Ty::Void).unwrap();
-        let func_ty = FuncTy::new(arg_ty_idxs, ret_ty_idx, false);
-        let func_ty_idx = m.insert_ty(Ty::Func(func_ty)).unwrap();
+        let arg_tyidxs = vec![m.ptr_tyidx(); 3];
+        let ret_tyidx = m.insert_ty(Ty::Void).unwrap();
+        let func_ty = FuncTy::new(arg_tyidxs, ret_tyidx, false);
+        let func_tyidx = m.insert_ty(Ty::Func(func_ty)).unwrap();
         let func_decl_idx = m
-            .insert_func_decl(FuncDecl::new("blah".into(), func_ty_idx))
+            .insert_func_decl(FuncDecl::new("blah".into(), func_tyidx))
             .unwrap();
 
         // Now build a call to the function.
@@ -2086,13 +2088,13 @@ mod tests {
     #[test]
     fn stringify_int_consts() {
         let mut m = Module::new_testing();
-        let i8_ty_idx = m.insert_ty(Ty::Integer(8)).unwrap();
-        assert_eq!(Const::Int(i8_ty_idx, 0).display(&m).to_string(), "0i8");
-        assert_eq!(Const::Int(i8_ty_idx, 255).display(&m).to_string(), "255i8");
-        let i64_ty_idx = m.insert_ty(Ty::Integer(64)).unwrap();
-        assert_eq!(Const::Int(i64_ty_idx, 0).display(&m).to_string(), "0i64");
+        let i8_tyidx = m.insert_ty(Ty::Integer(8)).unwrap();
+        assert_eq!(Const::Int(i8_tyidx, 0).display(&m).to_string(), "0i8");
+        assert_eq!(Const::Int(i8_tyidx, 255).display(&m).to_string(), "255i8");
+        let i64_tyidx = m.insert_ty(Ty::Integer(64)).unwrap();
+        assert_eq!(Const::Int(i64_tyidx, 0).display(&m).to_string(), "0i64");
         assert_eq!(
-            Const::Int(i64_ty_idx, 9223372036854775808)
+            Const::Int(i64_tyidx, 9223372036854775808)
                 .display(&m)
                 .to_string(),
             "9223372036854775808i64"
@@ -2113,11 +2115,11 @@ mod tests {
     #[test]
     fn print_module() {
         let mut m = Module::new_testing();
-        m.push(LoadTraceInputInst::new(0, m.int8_ty_idx()).into())
+        m.push(LoadTraceInputInst::new(0, m.int8_tyidx()).into())
             .unwrap();
-        m.push(LoadTraceInputInst::new(8, m.int8_ty_idx()).into())
+        m.push(LoadTraceInputInst::new(8, m.int8_tyidx()).into())
             .unwrap();
-        m.push(LoadTraceInputInst::new(16, m.int8_ty_idx()).into())
+        m.push(LoadTraceInputInst::new(16, m.int8_tyidx()).into())
             .unwrap();
         m.insert_global_decl(GlobalDecl::new(
             CString::new("some_global").unwrap(),

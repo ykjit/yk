@@ -185,14 +185,11 @@ impl<'a> X64CodeGen<'a> {
     /// Codegen an instruction.
     fn cg_inst(
         &mut self,
-        inst_idx: jit_ir::InstIdx,
+        iidx: jit_ir::InstIdx,
         inst: &jit_ir::Inst,
     ) -> Result<(), CompilationError> {
         #[cfg(any(debug_assertions, test))]
-        self.comment(
-            self.asm.offset(),
-            inst.display(inst_idx, self.m).to_string(),
-        );
+        self.comment(self.asm.offset(), inst.display(iidx, self.m).to_string());
 
         match inst {
             #[cfg(test)]
@@ -201,23 +198,23 @@ impl<'a> X64CodeGen<'a> {
                 unreachable!();
             }
 
-            jit_ir::Inst::BinOp(i) => self.cg_binop(inst_idx, i),
-            jit_ir::Inst::LoadTraceInput(i) => self.cg_loadtraceinput(inst_idx, i),
-            jit_ir::Inst::Load(i) => self.cg_load(inst_idx, i),
-            jit_ir::Inst::PtrAdd(i) => self.cg_ptradd(inst_idx, i),
-            jit_ir::Inst::DynPtrAdd(i) => self.cg_dynptradd(inst_idx, i),
+            jit_ir::Inst::BinOp(i) => self.cg_binop(iidx, i),
+            jit_ir::Inst::LoadTraceInput(i) => self.cg_loadtraceinput(iidx, i),
+            jit_ir::Inst::Load(i) => self.cg_load(iidx, i),
+            jit_ir::Inst::PtrAdd(i) => self.cg_ptradd(iidx, i),
+            jit_ir::Inst::DynPtrAdd(i) => self.cg_dynptradd(iidx, i),
             jit_ir::Inst::Store(i) => self.cg_store(i),
-            jit_ir::Inst::LookupGlobal(i) => self.cg_lookupglobal(inst_idx, i),
-            jit_ir::Inst::Call(i) => self.cg_call(inst_idx, i)?,
-            jit_ir::Inst::IndirectCall(i) => self.cg_indirectcall(inst_idx, i)?,
-            jit_ir::Inst::Icmp(i) => self.cg_icmp(inst_idx, i),
+            jit_ir::Inst::LookupGlobal(i) => self.cg_lookupglobal(iidx, i),
+            jit_ir::Inst::Call(i) => self.cg_call(iidx, i)?,
+            jit_ir::Inst::IndirectCall(i) => self.cg_indirectcall(iidx, i)?,
+            jit_ir::Inst::Icmp(i) => self.cg_icmp(iidx, i),
             jit_ir::Inst::Guard(i) => self.cg_guard(i),
-            jit_ir::Inst::Arg(i) => self.cg_arg(inst_idx, *i),
+            jit_ir::Inst::Arg(i) => self.cg_arg(iidx, *i),
             jit_ir::Inst::TraceLoopStart => self.cg_traceloopstart(),
-            jit_ir::Inst::SExt(i) => self.cg_sext(inst_idx, i),
-            jit_ir::Inst::ZeroExtend(i) => self.cg_zeroextend(inst_idx, i),
-            jit_ir::Inst::Trunc(i) => self.cg_trunc(inst_idx, i),
-            jit_ir::Inst::Select(i) => self.cg_select(inst_idx, i),
+            jit_ir::Inst::SExt(i) => self.cg_sext(iidx, i),
+            jit_ir::Inst::ZeroExtend(i) => self.cg_zeroextend(iidx, i),
+            jit_ir::Inst::Trunc(i) => self.cg_trunc(iidx, i),
+            jit_ir::Inst::Select(i) => self.cg_select(iidx, i),
         }
         Ok(())
     }
@@ -304,7 +301,7 @@ impl<'a> X64CodeGen<'a> {
 
     fn cg_binop(
         &mut self,
-        inst_idx: jit_ir::InstIdx,
+        iidx: jit_ir::InstIdx,
         jit_ir::BinOpInst { lhs, binop, rhs }: &jit_ir::BinOpInst,
     ) {
         let lhs = lhs.unpack(self.m);
@@ -321,7 +318,7 @@ impl<'a> X64CodeGen<'a> {
                     1 => dynasm!(self.asm; add Rb(WR0.code()), Rb(WR1.code())),
                     _ => todo!(),
                 }
-                self.store_new_local(inst_idx, WR0);
+                self.store_new_local(iidx, WR0);
             }
             BinOp::And => {
                 self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
@@ -333,7 +330,7 @@ impl<'a> X64CodeGen<'a> {
                     1 => dynasm!(self.asm; and Rb(WR0.code()), Rb(WR1.code())),
                     _ => todo!(),
                 }
-                self.store_new_local(inst_idx, WR0);
+                self.store_new_local(iidx, WR0);
             }
             BinOp::AShr => {
                 self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
@@ -345,7 +342,7 @@ impl<'a> X64CodeGen<'a> {
                     1 => dynasm!(self.asm; sar Rb(WR0.code()), cl),
                     _ => todo!(),
                 }
-                self.store_new_local(inst_idx, WR0);
+                self.store_new_local(iidx, WR0);
             }
             BinOp::LShr => {
                 self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
@@ -357,7 +354,7 @@ impl<'a> X64CodeGen<'a> {
                     1 => dynasm!(self.asm; shr Rb(WR0.code()), cl),
                     _ => todo!(),
                 }
-                self.store_new_local(inst_idx, WR0);
+                self.store_new_local(iidx, WR0);
             }
             BinOp::Shl => {
                 self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
@@ -369,7 +366,7 @@ impl<'a> X64CodeGen<'a> {
                     1 => dynasm!(self.asm; shl Rb(WR0.code()), cl),
                     _ => todo!(),
                 }
-                self.store_new_local(inst_idx, WR0);
+                self.store_new_local(iidx, WR0);
             }
             BinOp::Mul => {
                 self.load_operand(Rq::RAX, &lhs); // FIXME: assumes value will fit in a reg.
@@ -383,7 +380,7 @@ impl<'a> X64CodeGen<'a> {
                 }
                 // Note that because we are code-genning an unchecked multiply, the higher-order part of
                 // the result in RDX is entirely ignored.
-                self.store_new_local(inst_idx, Rq::RAX);
+                self.store_new_local(iidx, Rq::RAX);
             }
             BinOp::Or => {
                 self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
@@ -395,7 +392,7 @@ impl<'a> X64CodeGen<'a> {
                     1 => dynasm!(self.asm; or Rb(WR0.code()), Rb(WR1.code())),
                     _ => todo!(),
                 }
-                self.store_new_local(inst_idx, WR0);
+                self.store_new_local(iidx, WR0);
             }
             BinOp::SDiv => {
                 // The dividend is hard-coded into DX:AX/EDX:EAX/RDX:RAX. However unless we have 128bit
@@ -417,7 +414,7 @@ impl<'a> X64CodeGen<'a> {
                     _ => todo!(),
                 }
                 // The quotient is stored in RAX. We don't care about the remainder stored in RDX.
-                self.store_new_local(inst_idx, Rq::RAX);
+                self.store_new_local(iidx, Rq::RAX);
             }
             BinOp::SRem => {
                 // The dividend is hard-coded into DX:AX/EDX:EAX/RDX:RAX. However unless we have 128bit
@@ -434,7 +431,7 @@ impl<'a> X64CodeGen<'a> {
                     _ => todo!(),
                 }
                 // The remainder is stored in RDX. We don't care about the quotient stored in RAX.
-                self.store_new_local(inst_idx, Rq::RDX);
+                self.store_new_local(iidx, Rq::RDX);
             }
             BinOp::Sub => {
                 self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
@@ -446,7 +443,7 @@ impl<'a> X64CodeGen<'a> {
                     1 => dynasm!(self.asm; sub Rb(WR0.code()), Rb(WR1.code())),
                     _ => todo!(),
                 }
-                self.store_new_local(inst_idx, WR0);
+                self.store_new_local(iidx, WR0);
             }
             BinOp::Xor => {
                 self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
@@ -458,7 +455,7 @@ impl<'a> X64CodeGen<'a> {
                     1 => dynasm!(self.asm; xor Rb(WR0.code()), Rb(WR1.code())),
                     _ => todo!(),
                 }
-                self.store_new_local(inst_idx, WR0);
+                self.store_new_local(iidx, WR0);
             }
             BinOp::UDiv => {
                 // Like SDiv the dividend goes into AX, DX:AX, EDX:EAX, RDX:RAX. But since the
@@ -475,20 +472,20 @@ impl<'a> X64CodeGen<'a> {
                     _ => todo!(),
                 }
                 // The quotient is stored in RAX. We don't care about the remainder stored in RDX.
-                self.store_new_local(inst_idx, Rq::RAX);
+                self.store_new_local(iidx, Rq::RAX);
             }
             x => todo!("{x:?}"),
         }
     }
 
-    fn cg_loadtraceinput(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::LoadTraceInputInst) {
+    fn cg_loadtraceinput(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LoadTraceInputInst) {
         // Find the argument register containing the pointer to the live variables struct.
         let base_reg = ARG_REGS[JITFUNC_LIVEVARS_ARGIDX].code();
 
         // Now load the value into a new local variable from [base_reg+off].
         match i32::try_from(inst.off()) {
             Ok(off) => {
-                let size = self.m.inst(inst_idx).def_byte_size(self.m);
+                let size = self.m.inst(iidx).def_byte_size(self.m);
                 debug_assert!(size <= REG64_SIZE);
                 match size {
                     8 => dynasm!(self.asm ; mov Rq(WR0.code()), [Rq(base_reg) + off]),
@@ -497,15 +494,15 @@ impl<'a> X64CodeGen<'a> {
                     1 => dynasm!(self.asm ; movzx Rq(WR0.code()), BYTE [Rq(base_reg) + off]),
                     _ => todo!("{}", size),
                 };
-                self.store_new_local(inst_idx, WR0);
+                self.store_new_local(iidx, WR0);
             }
             _ => todo!(),
         }
     }
 
-    fn cg_load(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::LoadInst) {
+    fn cg_load(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LoadInst) {
         self.load_operand(WR0, &inst.operand(self.m)); // FIXME: assumes value will fit in a reg.
-        let size = self.m.inst(inst_idx).def_byte_size(self.m);
+        let size = self.m.inst(iidx).def_byte_size(self.m);
         debug_assert!(size <= REG64_SIZE);
         match size {
             8 => dynasm!(self.asm ; mov Rq(WR0.code()), [Rq(WR0.code())]),
@@ -514,20 +511,20 @@ impl<'a> X64CodeGen<'a> {
             1 => dynasm!(self.asm ; movzx Rq(WR0.code()), BYTE [Rq(WR0.code())]),
             _ => todo!("{}", size),
         };
-        self.store_new_local(inst_idx, WR0);
+        self.store_new_local(iidx, WR0);
     }
 
-    fn cg_ptradd(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::PtrAddInst) {
+    fn cg_ptradd(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::PtrAddInst) {
         self.load_operand(WR0, &inst.ptr(self.m));
         // LLVM semantics dictate that the offset should be sign-extended/truncated up/down to the
         // size of the LLVM pointer index type. For address space zero on x86, truncation can't
         // happen, and when an immediate second operand is used for x86_64 `add`, it is implicitly
         // sign extended.
         dynasm!(self.asm ; add Rq(WR0.code()), inst.off());
-        self.store_new_local(inst_idx, WR0);
+        self.store_new_local(iidx, WR0);
     }
 
-    fn cg_dynptradd(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::DynPtrAddInst) {
+    fn cg_dynptradd(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::DynPtrAddInst) {
         self.load_operand(WR0, &inst.num_elems(self.m));
         self.load_operand(WR1, &inst.ptr(self.m));
         // LLVM semantics dictate that the element size and number of elements should be
@@ -540,7 +537,7 @@ impl<'a> X64CodeGen<'a> {
             // add the result to the pointer.
             ; add Rq(WR0.code()), Rq(WR1.code())
         );
-        self.store_new_local(inst_idx, WR0);
+        self.store_new_local(iidx, WR0);
     }
 
     fn cg_store(&mut self, inst: &jit_ir::StoreInst) {
@@ -557,14 +554,14 @@ impl<'a> X64CodeGen<'a> {
     }
 
     #[cfg(not(test))]
-    fn cg_lookupglobal(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::LookupGlobalInst) {
+    fn cg_lookupglobal(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LookupGlobalInst) {
         let decl = inst.decl(self.m);
         if decl.is_threadlocal() {
             todo!();
         }
         let sym_addr = self.m.globalvar_ptr(inst.global_decl_idx()).addr();
         dynasm!(self.asm ; mov Rq(WR0.code()), QWORD i64::try_from(sym_addr).unwrap());
-        self.store_new_local(inst_idx, WR0);
+        self.store_new_local(iidx, WR0);
     }
 
     #[cfg(test)]
@@ -574,7 +571,7 @@ impl<'a> X64CodeGen<'a> {
 
     fn emit_call(
         &mut self,
-        inst_idx: InstIdx,
+        iidx: InstIdx,
         fty: &jit_ir::FuncTy,
         callee: Rq,
         args: &[Operand],
@@ -606,7 +603,7 @@ impl<'a> X64CodeGen<'a> {
 
         // If the function we called has a return value, then store it into a local variable.
         if fty.ret_type(self.m) != &Ty::Void {
-            self.store_new_local(inst_idx, Rq::RAX);
+            self.store_new_local(iidx, Rq::RAX);
         }
 
         Ok(())
@@ -615,7 +612,7 @@ impl<'a> X64CodeGen<'a> {
     /// Codegen a call.
     fn cg_call(
         &mut self,
-        inst_idx: InstIdx,
+        iidx: InstIdx,
         inst: &jit_ir::DirectCallInst,
     ) -> Result<(), CompilationError> {
         let func_decl_idx = inst.target();
@@ -628,27 +625,27 @@ impl<'a> X64CodeGen<'a> {
         let va = symbol_to_ptr(self.m.func_decl(func_decl_idx).name())
             .map_err(|e| CompilationError::General(e.to_string()))?;
         dynasm!(self.asm; mov Rq(WR0.code()), QWORD va as i64);
-        self.emit_call(inst_idx, fty, WR0, &args)
+        self.emit_call(iidx, fty, WR0, &args)
     }
 
     /// Codegen a indirect call.
     fn cg_indirectcall(
         &mut self,
-        inst_idx: InstIdx,
+        iidx: InstIdx,
         indirect_call_idx: &IndirectCallIdx,
     ) -> Result<(), CompilationError> {
         let inst = self.m.indirect_call(*indirect_call_idx);
         self.load_operand(WR0, &inst.target(self.m));
-        let jit_ir::Ty::Func(fty) = self.m.type_(inst.fty_idx()) else {
+        let jit_ir::Ty::Func(fty) = self.m.type_(inst.ftyidx()) else {
             panic!()
         };
         let args = (0..(inst.num_args()))
             .map(|i| inst.operand(self.m, i))
             .collect::<Vec<_>>();
-        self.emit_call(inst_idx, fty, WR0, &args)
+        self.emit_call(iidx, fty, WR0, &args)
     }
 
-    fn cg_icmp(&mut self, inst_idx: InstIdx, inst: &jit_ir::IcmpInst) {
+    fn cg_icmp(&mut self, iidx: InstIdx, inst: &jit_ir::IcmpInst) {
         let (lhs, pred, rhs) = (inst.lhs(self.m), inst.predicate(), inst.rhs(self.m));
 
         // FIXME: assumes values fit in a registers
@@ -686,13 +683,13 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Predicate::SignedLessEqual => dynasm!(self.asm; setle Rb(WR0.code())),
             // Note: when float predicates added: `_ => panic!()`
         }
-        self.store_new_local(inst_idx, WR0);
+        self.store_new_local(iidx, WR0);
     }
 
-    fn cg_arg(&mut self, inst_idx: InstIdx, idx: u16) {
+    fn cg_arg(&mut self, iidx: InstIdx, idx: u16) {
         // For arguments passed into the trace function we simply inform the register allocator
         // where they are stored and let the allocator take things from there.
-        self.store_new_local(inst_idx, ARG_REGS[usize::from(idx)]);
+        self.store_new_local(iidx, ARG_REGS[usize::from(idx)]);
     }
 
     fn cg_traceloopstart(&mut self) {
@@ -700,12 +697,12 @@ impl<'a> X64CodeGen<'a> {
         dynasm!(self.asm; ->tloop_start:);
     }
 
-    fn cg_sext(&mut self, inst_idx: InstIdx, i: &jit_ir::SExtInst) {
+    fn cg_sext(&mut self, iidx: InstIdx, i: &jit_ir::SExtInst) {
         let src_val = i.val(self.m);
-        let src_type = self.m.type_(src_val.ty_idx(self.m));
+        let src_type = self.m.type_(src_val.tyidx(self.m));
         let src_size = src_type.byte_size().unwrap();
 
-        let dest_type = self.m.type_(i.dest_ty_idx());
+        let dest_type = self.m.type_(i.dest_tyidx());
         let dest_size = dest_type.byte_size().unwrap();
 
         // FIXME: assumes the input and output fit in a register.
@@ -718,15 +715,15 @@ impl<'a> X64CodeGen<'a> {
             (4, 8) => dynasm!(self.asm; movsx Rq(WR0.code()), Rd(WR0.code())),
             _ => todo!("{} {}", src_size, dest_size),
         }
-        self.store_new_local(inst_idx, WR0);
+        self.store_new_local(iidx, WR0);
     }
 
-    fn cg_zeroextend(&mut self, inst_idx: InstIdx, i: &jit_ir::ZeroExtendInst) {
+    fn cg_zeroextend(&mut self, iidx: InstIdx, i: &jit_ir::ZeroExtendInst) {
         let from_val = i.val(self.m);
-        let from_type = self.m.type_(from_val.ty_idx(self.m));
+        let from_type = self.m.type_(from_val.tyidx(self.m));
         let from_size = from_type.byte_size().unwrap();
 
-        let to_type = self.m.type_(i.dest_ty_idx());
+        let to_type = self.m.type_(i.dest_tyidx());
         let to_size = to_type.byte_size().unwrap();
 
         debug_assert!(matches!(to_type, jit_ir::Ty::Integer(_)));
@@ -743,15 +740,15 @@ impl<'a> X64CodeGen<'a> {
         // FIXME: Assumes we don't assign to sub-registers.
         dynasm!(self.asm; mov Rq(WR0.code()), Rq(WR0.code()));
 
-        self.store_new_local(inst_idx, WR0);
+        self.store_new_local(iidx, WR0);
     }
 
-    fn cg_trunc(&mut self, inst_idx: InstIdx, i: &jit_ir::TruncInst) {
+    fn cg_trunc(&mut self, iidx: InstIdx, i: &jit_ir::TruncInst) {
         let from_val = i.val(self.m);
-        let from_type = self.m.type_(from_val.ty_idx(self.m));
+        let from_type = self.m.type_(from_val.tyidx(self.m));
         let from_size = from_type.byte_size().unwrap();
 
-        let to_type = self.m.type_(i.dest_ty_idx());
+        let to_type = self.m.type_(i.dest_tyidx());
         let to_size = to_type.byte_size().unwrap();
 
         debug_assert!(matches!(to_type, jit_ir::Ty::Integer(_)));
@@ -772,10 +769,10 @@ impl<'a> X64CodeGen<'a> {
         // this will change once we have a proper register allocator at which point we need to
         // revisit this implementation.
 
-        self.store_new_local(inst_idx, WR0);
+        self.store_new_local(iidx, WR0);
     }
 
-    fn cg_select(&mut self, inst_idx: jit_ir::InstIdx, inst: &jit_ir::SelectInst) {
+    fn cg_select(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::SelectInst) {
         // First load the true case. We then immediately follow this up with a conditional move,
         // overwriting the value with the false case, if the condition was false.
         self.load_operand(WR0, &inst.trueval(self.m));
@@ -783,7 +780,7 @@ impl<'a> X64CodeGen<'a> {
         self.load_operand(WR2, &inst.falseval(self.m));
         dynasm!(self.asm ; cmp Rb(WR1.code()), 0);
         dynasm!(self.asm ; cmove Rq(WR0.code()), Rq(WR2.code()));
-        self.store_new_local(inst_idx, WR0);
+        self.store_new_local(iidx, WR0);
     }
 
     fn cg_guard(&mut self, inst: &jit_ir::GuardInst) {
@@ -887,8 +884,8 @@ impl<'a> X64CodeGen<'a> {
     /// Load a constant into the specified register.
     fn load_const(&mut self, reg: Rq, cidx: jit_ir::ConstIdx) {
         match self.m.const_(cidx) {
-            jit_ir::Const::Int(ty_idx, x) => {
-                let jit_ir::Ty::Integer(width) = self.m.type_(*ty_idx) else {
+            jit_ir::Const::Int(tyidx, x) => {
+                let jit_ir::Ty::Integer(width) = self.m.type_(*tyidx) else {
                     panic!()
                 };
                 // The `as`s are all safe because the IR guarantees that no more than `width` bits

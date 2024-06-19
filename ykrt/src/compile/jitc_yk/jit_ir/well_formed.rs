@@ -21,7 +21,7 @@ impl Module {
             let inst = self.inst(iidx);
             match inst {
                 Inst::BinOp(BinOpInst { lhs, binop: _, rhs }) => {
-                    if lhs.unpack(self).ty_idx(self) != rhs.unpack(self).ty_idx(self) {
+                    if lhs.unpack(self).tyidx(self) != rhs.unpack(self).tyidx(self) {
                         panic!(
                             "Instruction at position {iidx} has different types on lhs and rhs\n  {}",
                             self.inst(iidx).display(iidx, self)
@@ -31,7 +31,7 @@ impl Module {
                 Inst::Call(x) => {
                     // Check number of parameters/arguments.
                     let fdecl = self.func_decl(x.target());
-                    let Ty::Func(fty) = self.type_(fdecl.ty_idx()) else {
+                    let Ty::Func(fty) = self.type_(fdecl.tyidx()) else {
                         panic!()
                     };
                     if x.num_args() < fty.num_params() {
@@ -51,7 +51,7 @@ impl Module {
                     for (j, (par_ty, arg_ty)) in fty
                         .param_tys()
                         .iter()
-                        .zip(x.iter_args_idx().map(|x| self.arg(x).ty_idx(self)))
+                        .zip(x.iter_args_idx().map(|x| self.arg(x).tyidx(self)))
                         .enumerate()
                     {
                         if *par_ty != arg_ty {
@@ -64,7 +64,7 @@ impl Module {
                 }
                 Inst::Guard(GuardInst { cond, expect, .. }) => {
                     let cond = cond.unpack(self);
-                    let tyidx = cond.ty_idx(self);
+                    let tyidx = cond.tyidx(self);
                     let Ty::Integer(1) = self.type_(tyidx) else {
                         panic!(
                             "Guard at position {iidx} does not have 'cond' of type 'i1'\n  {}",
@@ -84,7 +84,7 @@ impl Module {
                     }
                 }
                 Inst::Icmp(x) => {
-                    if x.lhs(self).ty_idx(self) != x.rhs(self).ty_idx(self) {
+                    if x.lhs(self).tyidx(self) != x.rhs(self).tyidx(self) {
                         panic!(
                             "Instruction at position {iidx} has different types on lhs and rhs\n  {}",
                             self.inst(iidx).display(iidx, self)
@@ -92,8 +92,8 @@ impl Module {
                     }
                 }
                 Inst::SExt(x) => {
-                    if self.type_(x.val(self).ty_idx(self)).byte_size()
-                        >= self.type_(x.dest_ty_idx()).byte_size()
+                    if self.type_(x.val(self).tyidx(self)).byte_size()
+                        >= self.type_(x.dest_tyidx()).byte_size()
                     {
                         panic!(
                             "Instruction at position {iidx} trying to sign extend from an equal-or-larger-than integer type\n  {}",

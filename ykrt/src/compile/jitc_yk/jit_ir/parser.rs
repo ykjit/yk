@@ -352,10 +352,10 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                     }
                     val
                 };
-                let ty_idx = self.m.insert_ty(Ty::Integer(width)).unwrap();
+                let tyidx = self.m.insert_ty(Ty::Integer(width)).unwrap();
                 Ok(Operand::Const(
                     self.m
-                        .insert_const(Const::Int(ty_idx, val))
+                        .insert_const(Const::Int(tyidx, val))
                         .map_err(|e| self.error_at_span(span, &e.to_string()))?,
                 ))
             }
@@ -395,8 +395,8 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                     .insert_ty(Ty::Integer(width))
                     .map_err(|e| self.error_at_span(span, &e.to_string()))
             }
-            ASTType::Ptr => Ok(self.m.ptr_ty_idx()),
-            ASTType::Void => Ok(self.m.void_ty_idx()),
+            ASTType::Ptr => Ok(self.m.ptr_tyidx()),
+            ASTType::Void => Ok(self.m.void_tyidx()),
         }
     }
 
@@ -555,12 +555,12 @@ mod tests {
     #[test]
     fn roundtrip() {
         let mut m = Module::new_testing();
-        let i16_ty_idx = m.insert_ty(Ty::Integer(16)).unwrap();
+        let i16_tyidx = m.insert_ty(Ty::Integer(16)).unwrap();
         let op1 = m
-            .push_and_make_operand(LoadTraceInputInst::new(0, i16_ty_idx).into())
+            .push_and_make_operand(LoadTraceInputInst::new(0, i16_tyidx).into())
             .unwrap();
         let op2 = m
-            .push_and_make_operand(LoadTraceInputInst::new(16, i16_ty_idx).into())
+            .push_and_make_operand(LoadTraceInputInst::new(16, i16_tyidx).into())
             .unwrap();
         let op3 = m
             .push_and_make_operand(BinOpInst::new(op1.clone(), BinOp::Add, op2.clone()).into())
@@ -676,41 +676,41 @@ mod tests {
         // declarations are actually added.
         assert_eq!(m.func_decls_len(), 4);
 
-        let f1_ty_idx = m
-            .insert_ty(Ty::Func(FuncTy::new(Vec::new(), m.void_ty_idx(), false)))
+        let f1_tyidx = m
+            .insert_ty(Ty::Func(FuncTy::new(Vec::new(), m.void_tyidx(), false)))
             .unwrap();
-        m.insert_func_decl(FuncDecl::new("f1".to_owned(), f1_ty_idx))
+        m.insert_func_decl(FuncDecl::new("f1".to_owned(), f1_tyidx))
             .unwrap();
         assert_eq!(m.func_decls_len(), 4);
 
-        let i32_ty_idx = m.insert_ty(Ty::Integer(32)).unwrap();
-        let f2_ty_idx = m
+        let i32_tyidx = m.insert_ty(Ty::Integer(32)).unwrap();
+        let f2_tyidx = m
             .insert_ty(Ty::Func(FuncTy::new(
-                vec![m.int8_ty_idx()],
-                i32_ty_idx,
+                vec![m.int8_tyidx()],
+                i32_tyidx,
                 false,
             )))
             .unwrap();
-        m.insert_func_decl(FuncDecl::new("f2".to_owned(), f2_ty_idx))
+        m.insert_func_decl(FuncDecl::new("f2".to_owned(), f2_tyidx))
             .unwrap();
         assert_eq!(m.func_decls_len(), 4);
 
-        let i64_ty_idx = m.insert_ty(Ty::Integer(64)).unwrap();
-        let f3_ty_idx = m
+        let i64_tyidx = m.insert_ty(Ty::Integer(64)).unwrap();
+        let f3_tyidx = m
             .insert_ty(Ty::Func(FuncTy::new(
-                vec![m.int8_ty_idx(), i32_ty_idx],
-                i64_ty_idx,
+                vec![m.int8_tyidx(), i32_tyidx],
+                i64_tyidx,
                 true,
             )))
             .unwrap();
-        m.insert_func_decl(FuncDecl::new("f3".to_owned(), f3_ty_idx))
+        m.insert_func_decl(FuncDecl::new("f3".to_owned(), f3_tyidx))
             .unwrap();
         assert_eq!(m.func_decls_len(), 4);
 
-        let f4_ty_idx = m
-            .insert_ty(Ty::Func(FuncTy::new(Vec::new(), m.void_ty_idx(), true)))
+        let f4_tyidx = m
+            .insert_ty(Ty::Func(FuncTy::new(Vec::new(), m.void_tyidx(), true)))
             .unwrap();
-        m.insert_func_decl(FuncDecl::new("f4".to_owned(), f4_ty_idx))
+        m.insert_func_decl(FuncDecl::new("f4".to_owned(), f4_tyidx))
             .unwrap();
         assert_eq!(m.func_decls_len(), 4);
     }
