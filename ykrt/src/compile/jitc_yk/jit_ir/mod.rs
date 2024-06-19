@@ -688,7 +688,7 @@ index_16bit!(InstIdx);
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct FuncTy {
     /// Ty indices for the function's parameters.
-    param_ty_idxs: Vec<TyIdx>,
+    param_tyidxs: Vec<TyIdx>,
     /// Ty index of the function's return type.
     ret_tyidx: TyIdx,
     /// Is the function vararg?
@@ -696,9 +696,9 @@ pub(crate) struct FuncTy {
 }
 
 impl FuncTy {
-    pub(crate) fn new(param_ty_idxs: Vec<TyIdx>, ret_tyidx: TyIdx, is_vararg: bool) -> Self {
+    pub(crate) fn new(param_tyidxs: Vec<TyIdx>, ret_tyidx: TyIdx, is_vararg: bool) -> Self {
         Self {
-            param_ty_idxs,
+            param_tyidxs,
             ret_tyidx,
             is_vararg,
         }
@@ -707,13 +707,13 @@ impl FuncTy {
     /// Return the number of paramaters the function accepts (not including varargs).
     #[cfg(any(debug_assertions, test))]
     pub(crate) fn num_params(&self) -> usize {
-        self.param_ty_idxs.len()
+        self.param_tyidxs.len()
     }
 
     /// Return a slice of this function's non-varargs parameters.
     #[cfg(any(debug_assertions, test))]
     pub(crate) fn param_tys(&self) -> &[TyIdx] {
-        &self.param_ty_idxs
+        &self.param_tyidxs
     }
 
     /// Returns whether the function type has vararg arguments.
@@ -789,7 +789,7 @@ impl fmt::Display for DisplayableTy<'_> {
             Ty::Ptr => write!(f, "ptr"),
             Ty::Func(x) => {
                 let mut args = x
-                    .param_ty_idxs
+                    .param_tyidxs
                     .iter()
                     .map(|x| self.m.type_(*x).display(self.m).to_string())
                     .collect::<Vec<_>>();
@@ -2003,9 +2003,9 @@ mod tests {
     fn call_args_out_of_bounds() {
         // Set up a function to call.
         let mut m = Module::new_testing();
-        let arg_ty_idxs = vec![m.ptr_tyidx(); 3];
+        let arg_tyidxs = vec![m.ptr_tyidx(); 3];
         let ret_tyidx = m.insert_ty(Ty::Void).unwrap();
-        let func_ty = FuncTy::new(arg_ty_idxs, ret_tyidx, false);
+        let func_ty = FuncTy::new(arg_tyidxs, ret_tyidx, false);
         let func_tyidx = m.insert_ty(Ty::Func(func_ty)).unwrap();
         let func_decl_idx = m
             .insert_func_decl(FuncDecl::new("blah".into(), func_tyidx))

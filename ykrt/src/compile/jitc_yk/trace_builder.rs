@@ -436,7 +436,7 @@ impl<'a> TraceBuilder<'a> {
             aot_ir::Ty::Ptr => jit_ir::Ty::Ptr,
             aot_ir::Ty::Func(ft) => {
                 let mut jit_args = Vec::new();
-                for aot_arg_tyidx in ft.arg_ty_idxs() {
+                for aot_arg_tyidx in ft.arg_tyidxs() {
                     let jit_ty = self.handle_type(self.aot_mod.type_(*aot_arg_tyidx))?;
                     jit_args.push(jit_ty);
                 }

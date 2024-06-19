@@ -265,7 +265,7 @@ index!(ConstIdx);
 pub(crate) struct GlobalDeclIdx(usize);
 index!(GlobalDeclIdx);
 
-/// An index into [FuncTy::arg_ty_idxs].
+/// An index into [FuncTy::arg_tyidxs].
 /// ^ FIXME: no it's not! But it should be!
 #[deku_derive(DekuRead)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -489,7 +489,7 @@ impl Operand {
                 let Ty::Func(ft) = m.type_(m.func(*func_idx).tyidx) else {
                     panic!()
                 };
-                m.type_(ft.arg_ty_idxs()[usize::from(*arg_idx)])
+                m.type_(ft.arg_tyidxs()[usize::from(*arg_idx)])
             }
             _ => todo!(),
         }
@@ -1185,7 +1185,7 @@ impl fmt::Display for DisplayableFunc<'_> {
                 f,
                 "func {}({}",
                 self.func_.name,
-                fty.arg_ty_idxs
+                fty.arg_tyidxs
                     .iter()
                     .enumerate()
                     .map(|(i, t)| format!("%arg{}: {}", i, self.m.types[*t].display(self.m)))
@@ -1301,7 +1301,7 @@ pub(crate) struct FuncTy {
     num_args: usize,
     /// Ty indices for the function's formal arguments.
     #[deku(count = "num_args")]
-    arg_ty_idxs: Vec<TyIdx>,
+    arg_tyidxs: Vec<TyIdx>,
     /// Ty index of the function's return type.
     ret_ty: TyIdx,
     /// Is the function vararg?
@@ -1310,16 +1310,16 @@ pub(crate) struct FuncTy {
 
 impl FuncTy {
     #[cfg(test)]
-    fn new(arg_ty_idxs: Vec<TyIdx>, ret_tyidx: TyIdx, is_vararg: bool) -> Self {
+    fn new(arg_tyidxs: Vec<TyIdx>, ret_tyidx: TyIdx, is_vararg: bool) -> Self {
         Self {
-            arg_ty_idxs,
+            arg_tyidxs,
             ret_ty: ret_tyidx,
             is_vararg,
         }
     }
 
-    pub(crate) fn arg_ty_idxs(&self) -> &[TyIdx] {
-        &self.arg_ty_idxs
+    pub(crate) fn arg_tyidxs(&self) -> &[TyIdx] {
+        &self.arg_tyidxs
     }
 
     pub(crate) fn ret_ty(&self) -> TyIdx {
@@ -1344,7 +1344,7 @@ impl fmt::Display for DisplayableFuncTy<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut args = self
             .func_type
-            .arg_ty_idxs
+            .arg_tyidxs
             .iter()
             .map(|t| self.m.types[*t].display(self.m).to_string())
             .collect::<Vec<_>>();
@@ -1368,7 +1368,7 @@ pub(crate) struct StructTy {
     num_fields: usize,
     /// The types of the fields.
     #[deku(count = "num_fields")]
-    field_ty_idxs: Vec<TyIdx>,
+    field_tyidxs: Vec<TyIdx>,
     /// The bit offsets of the fields (taking into account any required padding for alignment).
     #[deku(count = "num_fields")]
     field_bit_offs: Vec<usize>,
@@ -1381,7 +1381,7 @@ impl StructTy {
     ///
     /// Panics if the index is out of bounds.
     pub(crate) fn field_tyidx(&self, idx: usize) -> TyIdx {
-        self.field_ty_idxs[idx]
+        self.field_tyidxs[idx]
     }
 
     /// Returns the byte offset of the specified field index.
@@ -1399,7 +1399,7 @@ impl StructTy {
 
     /// Returns the number of fields in the struct.
     pub(crate) fn num_fields(&self) -> usize {
-        self.field_ty_idxs.len()
+        self.field_tyidxs.len()
     }
 
     pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableStructTy<'a> {
@@ -1421,7 +1421,7 @@ impl Display for DisplayableStructTy<'_> {
             f,
             "{{{}}}",
             self.struct_type
-                .field_ty_idxs
+                .field_tyidxs
                 .iter()
                 .enumerate()
                 .map(|(i, ti)| format!(
