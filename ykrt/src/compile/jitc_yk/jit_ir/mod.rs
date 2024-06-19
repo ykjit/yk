@@ -240,9 +240,9 @@ impl Module {
         }
     }
 
-    /// Replace the instruction at `inst_idx` with `inst`.
-    pub(crate) fn replace(&mut self, inst_idx: InstIdx, inst: Inst) {
-        self.insts[inst_idx] = inst;
+    /// Replace the instruction at `iidx` with `inst`.
+    pub(crate) fn replace(&mut self, iidx: InstIdx, inst: Inst) {
+        self.insts[iidx] = inst;
     }
 
     pub(crate) fn push_indirect_call(
@@ -1144,10 +1144,10 @@ impl Inst {
         }
     }
 
-    pub(crate) fn display<'a>(&'a self, inst_idx: InstIdx, m: &'a Module) -> DisplayableInst<'a> {
+    pub(crate) fn display<'a>(&'a self, iidx: InstIdx, m: &'a Module) -> DisplayableInst<'a> {
         DisplayableInst {
             inst: self,
-            inst_idx,
+            iidx,
             m,
         }
     }
@@ -1155,14 +1155,14 @@ impl Inst {
 
 pub(crate) struct DisplayableInst<'a> {
     inst: &'a Inst,
-    inst_idx: InstIdx,
+    iidx: InstIdx,
     m: &'a Module,
 }
 
 impl fmt::Display for DisplayableInst<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(dt) = self.inst.def_type(self.m) {
-            write!(f, "%{}: {} = ", self.inst_idx, dt.display(self.m))?;
+            write!(f, "%{}: {} = ", self.iidx, dt.display(self.m))?;
         }
         match self.inst {
             #[cfg(test)]

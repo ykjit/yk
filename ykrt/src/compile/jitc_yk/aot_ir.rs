@@ -349,15 +349,15 @@ pub(crate) struct InstID {
     /// The index of the parent function.
     func_idx: FuncIdx,
     bb_idx: BBlockIdx,
-    inst_idx: InstIdx,
+    iidx: InstIdx,
 }
 
 impl InstID {
-    pub(crate) fn new(func_idx: FuncIdx, bb_idx: BBlockIdx, inst_idx: InstIdx) -> Self {
+    pub(crate) fn new(func_idx: FuncIdx, bb_idx: BBlockIdx, iidx: InstIdx) -> Self {
         Self {
             func_idx,
             bb_idx,
-            inst_idx,
+            iidx,
         }
     }
 }
@@ -474,7 +474,7 @@ impl Operand {
         let Self::LocalVariable(iid) = self else {
             panic!()
         };
-        &aotmod.funcs[iid.func_idx].bblocks[iid.bb_idx].insts[iid.inst_idx]
+        &aotmod.funcs[iid.func_idx].bblocks[iid.bb_idx].insts[iid.iidx]
     }
 
     /// Returns the [Ty] of the operand.
@@ -521,12 +521,7 @@ impl fmt::Display for DisplayableOperand<'_> {
                 write!(f, "{}", self.m.consts[*const_idx].display(self.m))
             }
             Operand::LocalVariable(iid) => {
-                write!(
-                    f,
-                    "%{}_{}",
-                    usize::from(iid.bb_idx),
-                    usize::from(iid.inst_idx)
-                )
+                write!(f, "%{}_{}", usize::from(iid.bb_idx), usize::from(iid.iidx))
             }
             Operand::Global(gidx) => write!(f, "@{}", self.m.global_decls[*gidx].name()),
             Operand::Func(fidx) => write!(f, "{}", self.m.funcs[*fidx].name()),
@@ -762,9 +757,9 @@ impl Inst {
     fn local_name(&self, m: &Module) -> String {
         for f in m.funcs.iter() {
             for (bb_idx, bb) in f.bblocks.iter().enumerate() {
-                for (inst_idx, inst) in bb.insts.iter().enumerate() {
+                for (iidx, inst) in bb.insts.iter().enumerate() {
                     if std::ptr::addr_eq(inst, self) {
-                        return format!("%{}_{}", bb_idx, inst_idx);
+                        return format!("%{}_{}", bb_idx, iidx);
                     }
                 }
             }

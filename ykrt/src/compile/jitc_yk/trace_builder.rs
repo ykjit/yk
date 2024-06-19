@@ -143,7 +143,7 @@ impl<'a> TraceBuilder<'a> {
         //
         // FIXME: Can we do something at IR lowering time to make this easier?
         let mut last_store_ptr = None;
-        for (inst_idx, inst) in inst_iter {
+        for (iidx, inst) in inst_iter {
             match inst {
                 aot_ir::Inst::Store { val, .. } => last_store_ptr = Some(val),
                 aot_ir::Inst::PtrAdd { ptr, .. } => {
@@ -174,7 +174,7 @@ impl<'a> TraceBuilder<'a> {
                                     last_store_ptr.take().unwrap().to_inst_id(),
                                     jit_ir::Operand::Local(self.jit_mod.last_inst_idx()),
                                 );
-                                self.first_ti_idx = inst_idx;
+                                self.first_ti_idx = iidx;
                             }
                             _ => {
                                 return Err(CompilationError::InternalError(
@@ -205,19 +205,19 @@ impl<'a> TraceBuilder<'a> {
         let blk = self.aot_mod.bblock(bid);
 
         // Decide how to translate each AOT instruction.
-        for (inst_idx, inst) in blk.insts.iter().enumerate() {
+        for (iidx, inst) in blk.insts.iter().enumerate() {
             match inst {
                 aot_ir::Inst::Br { .. } => Ok(()),
                 aot_ir::Inst::Load {
                     ptr,
                     ty_idx,
                     volatile,
-                } => self.handle_load(bid, inst_idx, ptr, ty_idx, *volatile),
+                } => self.handle_load(bid, iidx, ptr, ty_idx, *volatile),
                 // FIXME: ignore remaining instructions after a call.
                 aot_ir::Inst::Call { callee, args, .. } => {
                     // Get the branch instruction of this block.
                     let nextinst = blk.insts.last().unwrap();
-                    self.handle_call(inst, bid, inst_idx, callee, args, nextinst)
+                    self.handle_call(inst, bid, iidx, callee, args, nextinst)
                 }
                 aot_ir::Inst::IndirectCall {
                     fty_idx,
@@ -226,10 +226,10 @@ impl<'a> TraceBuilder<'a> {
                 } => {
                     // Get the branch instruction of this block.
                     let nextinst = blk.insts.last().unwrap();
-                    self.handle_indirectcall(inst, bid, inst_idx, fty_idx, callop, args, nextinst)
+                    self.handle_indirectcall(inst, bid, iidx, fty_idx, callop, args, nextinst)
                 }
                 aot_ir::Inst::Store { tgt, val, volatile } => {
-                    self.handle_store(bid, inst_idx, tgt, val, *volatile)
+                    self.handle_store(bid, iidx, tgt, val, *volatile)
                 }
                 aot_ir::Inst::PtrAdd {
                     ptr,
@@ -238,26 +238,19 @@ impl<'a> TraceBuilder<'a> {
                     dyn_elem_sizes,
                     ..
                 } => {
-                    if self.cp_block.as_ref() == Some(bid) && inst_idx == self.first_ti_idx {
+                    if self.cp_block.as_ref() == Some(bid) && iidx == self.first_ti_idx {
                         // We've reached the trace inputs part of the control point block. There's
                         // no point in copying these instructions over and we can just skip to the
                         // next block.
                         return Ok(());
                     }
-                    self.handle_ptradd(
-                        bid,
-                        inst_idx,
-                        ptr,
-                        *const_off,
-                        dyn_elem_counts,
-                        dyn_elem_sizes,
-                    )
+                    self.handle_ptradd(bid, iidx, ptr, *const_off, dyn_elem_counts, dyn_elem_sizes)
                 }
                 aot_ir::Inst::BinaryOp { lhs, binop, rhs } => {
-                    self.handle_binop(bid, inst_idx, *binop, lhs, rhs)
+                    self.handle_binop(bid, iidx, *binop, lhs, rhs)
                 }
                 aot_ir::Inst::ICmp { lhs, pred, rhs, .. } => {
-                    self.handle_icmp(bid, inst_idx, lhs, pred, rhs)
+                    self.handle_icmp(bid, iidx, lhs, pred, rhs)
                 }
                 aot_ir::Inst::CondBr {
                     cond,
@@ -269,8 +262,8 @@ impl<'a> TraceBuilder<'a> {
                     cast_kind,
                     val,
                     dest_ty_idx,
-                } => self.handle_cast(bid, inst_idx, cast_kind, val, dest_ty_idx),
-                aot_ir::Inst::Ret { val } => self.handle_ret(bid, inst_idx, val),
+                } => self.handle_cast(bid, iidx, cast_kind, val, dest_ty_idx),
+                aot_ir::Inst::Ret { val } => self.handle_ret(bid, iidx, val),
                 aot_ir::Inst::Switch {
                     test_val,
                     default_dest,
@@ -279,7 +272,7 @@ impl<'a> TraceBuilder<'a> {
                     safepoint,
                 } => self.handle_switch(
                     bid,
-                    inst_idx,
+                    iidx,
                     safepoint,
                     nextbb.as_ref().unwrap(),
                     test_val,
@@ -294,7 +287,7 @@ impl<'a> TraceBuilder<'a> {
                     debug_assert_eq!(prevbb.as_ref().unwrap().func_idx(), bid.func_idx());
                     self.handle_phi(
                         bid,
-                        inst_idx,
+                        iidx,
                         &prevbb.as_ref().unwrap().bb_idx(),
                         incoming_bbs,
                         incoming_vals,
@@ -304,7 +297,7 @@ impl<'a> TraceBuilder<'a> {
                     cond,
                     trueval,
                     falseval,
-                } => self.handle_select(bid, inst_idx, cond, trueval, falseval),
+                } => self.handle_select(bid, iidx, cond, trueval, falseval),
                 _ => todo!("{:?}", inst),
             }?;
         }
