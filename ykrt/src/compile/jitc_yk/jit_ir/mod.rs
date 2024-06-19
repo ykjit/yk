@@ -9,13 +9,16 @@
 //! use a number of abbreviations/conventions to keep the length of source down to something
 //! manageable (in alphabetical order):
 //!
+//!  * `cidx`: a [ConstIdx].
 //!  * `Const` and `const_`: a "constant"
 //!  * `decl`: a "declaration" (e.g. a "function declaration" is a reference to an existing
 //!    function somewhere else in the address space)
+//!  * `iidx`: an [InstIdx].
 //!  * `m`: the name conventionally given to the shared [Module] instance (i.e. `m: Module`)
 //!  * `Idx`: "index"
 //!  * `Inst`: "instruction"
 //!  * `Ty`: "type"
+//!  * `tyidx`: a [TyIdx].
 //!
 //! IR structures can be converted to human-readable strings either because:
 //!  1. they implement [std::fmt::Display] directly.
