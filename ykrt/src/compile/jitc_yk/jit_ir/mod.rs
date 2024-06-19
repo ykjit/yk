@@ -89,7 +89,7 @@ pub(crate) struct Module {
     /// reference. Because they are externally initialised, these are *declarations*.
     global_decls: IndexSet<GlobalDecl>,
     /// Additional information for guards.
-    guard_info: TiVec<GuardInfoIdx, GuardInfo>,
+    guard_info: Vec<GuardInfo>,
     /// Indirect calls.
     indirect_calls: TiVec<IndirectCallIdx, IndirectCallInst>,
     /// The virtual address of the global variable pointer array.
@@ -170,7 +170,7 @@ impl Module {
             false_constidx,
             func_decls: IndexSet::new(),
             global_decls: IndexSet::new(),
-            guard_info: TiVec::new(),
+            guard_info: Vec::new(),
             indirect_calls: TiVec::new(),
             #[cfg(not(test))]
             globalvar_ptrs,
@@ -1857,7 +1857,7 @@ impl GuardInst {
     }
 
     pub(crate) fn guard_info<'a>(&self, m: &'a Module) -> &'a GuardInfo {
-        &m.guard_info[self.gidx]
+        &m.guard_info[usize::from(self.gidx)]
     }
 }
 
