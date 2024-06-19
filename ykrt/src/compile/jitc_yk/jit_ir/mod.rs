@@ -598,6 +598,14 @@ macro_rules! index_16bit {
                     .map_err(|_| index_overflow(stringify!($struct)))
                     .map(|u| Self(u))
             }
+
+            pub(crate) fn checked_add(&self, other: usize) -> Result<Self, CompilationError> {
+                Self::new(usize::from(self.0) + other)
+            }
+
+            pub(crate) fn checked_sub(&self, other: usize) -> Result<Self, CompilationError> {
+                Self::new(usize::from(self.0) - other)
+            }
         }
 
         impl From<$struct> for u16 {
@@ -1529,8 +1537,7 @@ impl IndirectCallInst {
     ///
     /// Panics if the operand index is out of bounds.
     pub(crate) fn operand(&self, m: &Module, idx: usize) -> Operand {
-        m.arg(ArgsIdx::new(usize::from(self.args_idx) + idx).unwrap())
-            .clone()
+        m.arg(self.args_idx.checked_add(idx).unwrap()).clone()
     }
 }
 
