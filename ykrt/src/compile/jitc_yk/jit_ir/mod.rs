@@ -598,9 +598,11 @@ macro_rules! index_16bit {
                     .map_err(|_| index_overflow(stringify!($struct)))
                     .map(|u| Self(u))
             }
+        }
 
-            pub(crate) fn to_u16(self) -> u16 {
-                self.0
+        impl From<$struct> for u16 {
+            fn from(s: $struct) -> u16 {
+                s.0
             }
         }
 
@@ -841,12 +843,12 @@ impl PackedOperand {
     pub fn new(op: &Operand) -> Self {
         match op {
             Operand::Local(lidx) => {
-                debug_assert!(lidx.to_u16() <= MAX_OPERAND_IDX);
-                PackedOperand(lidx.to_u16())
+                debug_assert!(u16::from(*lidx) <= MAX_OPERAND_IDX);
+                PackedOperand(u16::from(*lidx))
             }
             Operand::Const(constidx) => {
-                debug_assert!(constidx.to_u16() <= MAX_OPERAND_IDX);
-                PackedOperand(constidx.to_u16() | !OPERAND_IDX_MASK)
+                debug_assert!(u16::from(*constidx) <= MAX_OPERAND_IDX);
+                PackedOperand(u16::from(*constidx) | !OPERAND_IDX_MASK)
             }
         }
     }
