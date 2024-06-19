@@ -37,7 +37,6 @@ use std::{
     ffi::{c_void, CString},
     fmt, mem,
 };
-use typed_index_collections::TiVec;
 #[cfg(not(test))]
 use ykaddr::addr::symbol_to_ptr;
 
@@ -91,7 +90,7 @@ pub(crate) struct Module {
     /// Additional information for guards.
     guard_info: Vec<GuardInfo>,
     /// Indirect calls.
-    indirect_calls: TiVec<IndirectCallIdx, IndirectCallInst>,
+    indirect_calls: Vec<IndirectCallInst>,
     /// The virtual address of the global variable pointer array.
     ///
     /// This is an array (added to the LLVM AOT module and AOT codegenned by ykllvm) containing a
@@ -171,7 +170,7 @@ impl Module {
             func_decls: IndexSet::new(),
             global_decls: IndexSet::new(),
             guard_info: Vec::new(),
-            indirect_calls: TiVec::new(),
+            indirect_calls: Vec::new(),
             #[cfg(not(test))]
             globalvar_ptrs,
         })
@@ -218,7 +217,7 @@ impl Module {
 
     /// Return the indirect call at the specified index.
     pub(crate) fn indirect_call(&self, idx: IndirectCallIdx) -> &IndirectCallInst {
-        &self.indirect_calls[idx]
+        &self.indirect_calls[usize::from(idx)]
     }
 
     /// Push an instruction to the end of the [Module].
@@ -1105,7 +1104,7 @@ impl Inst {
 
             Self::BinOp(x) => x.tyidx(m),
             Self::IndirectCall(idx) => {
-                let inst = &m.indirect_calls[*idx];
+                let inst = m.indirect_call(*idx);
                 let ty = m.type_(inst.ftyidx);
                 let Ty::Func(fty) = ty else { panic!() };
                 fty.ret_tyidx()
@@ -1201,7 +1200,7 @@ impl fmt::Display for DisplayableInst<'_> {
                 )
             }
             Inst::IndirectCall(x) => {
-                let inst = &self.m.indirect_calls[*x];
+                let inst = &self.m.indirect_call(*x);
                 write!(
                     f,
                     "icall {}({})",
