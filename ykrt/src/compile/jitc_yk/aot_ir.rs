@@ -464,8 +464,6 @@ pub(crate) enum Operand {
     Global(GlobalDeclIdx),
     #[deku(id = "3")]
     Func(FuncIdx),
-    #[deku(id = "4")]
-    Arg { funcidx: FuncIdx, argidx: ArgIdx },
 }
 
 impl Operand {
@@ -489,12 +487,6 @@ impl Operand {
                 self.to_inst(m).def_type(m).unwrap()
             }
             Self::Const(cidx) => m.type_(m.const_(*cidx).unwrap_val().tyidx()),
-            Self::Arg { funcidx, argidx } => {
-                let Ty::Func(ft) = m.type_(m.func(*funcidx).tyidx) else {
-                    panic!()
-                };
-                m.type_(ft.arg_tyidxs()[usize::from(*argidx)])
-            }
             _ => todo!(),
         }
     }
@@ -529,7 +521,6 @@ impl fmt::Display for DisplayableOperand<'_> {
             }
             Operand::Global(gidx) => write!(f, "@{}", self.m.global_decls[*gidx].name()),
             Operand::Func(fidx) => write!(f, "{}", self.m.funcs[*fidx].name()),
-            Operand::Arg { argidx, .. } => write!(f, "%arg{}", usize::from(*argidx)),
         }
     }
 }
@@ -748,6 +739,8 @@ pub(crate) enum Inst {
         trueval: Operand,
         falseval: Operand,
     },
+    #[deku(id = "17")]
+    LoadArg { arg_idx: usize, ty_idx: TyIdx },
     #[deku(id = "255")]
     Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "map_to_string")] String),
 }
@@ -824,6 +817,7 @@ impl Inst {
             Self::Select {
                 cond: _, trueval, ..
             } => Some(trueval.type_(m)),
+            Self::LoadArg { arg_idx: _, ty_idx } => Some(m.type_(*ty_idx)),
             Self::Unimplemented(_) => None,
             Self::Nop => None,
         }
@@ -1078,6 +1072,7 @@ impl fmt::Display for DisplayableInst<'_> {
                     falseval.display(self.m)
                 )
             }
+            Inst::LoadArg { arg_idx, ty_idx: _ } => write!(f, "arg({})", arg_idx,),
             Inst::Unimplemented(s) => write!(f, "unimplemented <<{}>>", s),
             Inst::Nop => write!(f, "nop"),
         }
