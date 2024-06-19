@@ -92,7 +92,7 @@ impl Module {
     /// # Panics
     ///
     /// Panics if no function exists with that name.
-    pub(crate) fn func_idx(&self, find_func: &str) -> FuncIdx {
+    pub(crate) fn funcidx(&self, find_func: &str) -> FuncIdx {
         // OPT: create a cache in the Module.
         self.funcs
             .iter()
@@ -108,7 +108,7 @@ impl Module {
 
     /// Return the block uniquely identified (in this module) by the specified [BBlockId].
     pub(crate) fn bblock(&self, bid: &BBlockId) -> &BBlock {
-        self.funcs[bid.func_idx].bblock(bid.bb_idx)
+        self.funcs[bid.funcidx].bblock(bid.bb_idx)
     }
 
     pub(crate) fn const_type(&self, c: &Const) -> &Ty {
@@ -347,15 +347,15 @@ impl Display for BinOp {
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub(crate) struct InstID {
     /// The index of the parent function.
-    func_idx: FuncIdx,
+    funcidx: FuncIdx,
     bb_idx: BBlockIdx,
     iidx: InstIdx,
 }
 
 impl InstID {
-    pub(crate) fn new(func_idx: FuncIdx, bb_idx: BBlockIdx, iidx: InstIdx) -> Self {
+    pub(crate) fn new(funcidx: FuncIdx, bb_idx: BBlockIdx, iidx: InstIdx) -> Self {
         Self {
-            func_idx,
+            funcidx,
             bb_idx,
             iidx,
         }
@@ -365,17 +365,17 @@ impl InstID {
 /// Uniquely identifies a basic block within a [Module].
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct BBlockId {
-    func_idx: FuncIdx,
+    funcidx: FuncIdx,
     bb_idx: BBlockIdx,
 }
 
 impl BBlockId {
-    pub(crate) fn new(func_idx: FuncIdx, bb_idx: BBlockIdx) -> Self {
-        Self { func_idx, bb_idx }
+    pub(crate) fn new(funcidx: FuncIdx, bb_idx: BBlockIdx) -> Self {
+        Self { funcidx, bb_idx }
     }
 
-    pub(crate) fn func_idx(&self) -> FuncIdx {
-        self.func_idx
+    pub(crate) fn funcidx(&self) -> FuncIdx {
+        self.funcidx
     }
 
     pub(crate) fn bb_idx(&self) -> BBlockIdx {
@@ -461,7 +461,7 @@ pub(crate) enum Operand {
     #[deku(id = "3")]
     Func(FuncIdx),
     #[deku(id = "4")]
-    Arg { func_idx: FuncIdx, argidx: ArgIdx },
+    Arg { funcidx: FuncIdx, argidx: ArgIdx },
 }
 
 impl Operand {
@@ -474,7 +474,7 @@ impl Operand {
         let Self::LocalVariable(iid) = self else {
             panic!()
         };
-        &aotmod.funcs[iid.func_idx].bblocks[iid.bb_idx].insts[iid.iidx]
+        &aotmod.funcs[iid.funcidx].bblocks[iid.bb_idx].insts[iid.iidx]
     }
 
     /// Returns the [Ty] of the operand.
@@ -485,8 +485,8 @@ impl Operand {
                 self.to_inst(m).def_type(m).unwrap()
             }
             Self::Const(cidx) => m.type_(m.const_(*cidx).unwrap_val().tyidx()),
-            Self::Arg { func_idx, argidx } => {
-                let Ty::Func(ft) = m.type_(m.func(*func_idx).tyidx) else {
+            Self::Arg { funcidx, argidx } => {
+                let Ty::Func(ft) = m.type_(m.func(*funcidx).tyidx) else {
                     panic!()
                 };
                 m.type_(ft.arg_tyidxs()[usize::from(*argidx)])

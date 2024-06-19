@@ -17,7 +17,7 @@ struct Frame<'a> {
     // The call instruction of this frame.
     callinst: Option<aot_ir::InstID>,
     // Index of the function of this frame.
-    func_idx: Option<FuncIdx>,
+    funcidx: Option<FuncIdx>,
     /// Safepoint for this frame.
     safepoint: Option<&'a aot_ir::DeoptSafepoint>,
     /// JIT arguments of this frame's caller.
@@ -27,13 +27,13 @@ struct Frame<'a> {
 impl<'a> Frame<'a> {
     fn new(
         callinst: Option<aot_ir::InstID>,
-        func_idx: Option<FuncIdx>,
+        funcidx: Option<FuncIdx>,
         safepoint: Option<&'a aot_ir::DeoptSafepoint>,
         args: Vec<jit_ir::Operand>,
     ) -> Frame<'a> {
         Frame {
             callinst,
-            func_idx,
+            funcidx,
             safepoint,
             args,
         }
@@ -74,7 +74,7 @@ impl<'a> TraceBuilder<'a> {
             local_map: HashMap::new(),
             cp_block: None,
             first_ti_idx: 0,
-            // We have to set the func_idx to None here as we don't know what it is yet. We'll
+            // We have to set the funcidx to None here as we don't know what it is yet. We'll
             // update it as soon as we do.
             frames: vec![Frame::new(None, None, None, vec![])],
             outline_target_blk: None,
@@ -87,7 +87,7 @@ impl<'a> TraceBuilder<'a> {
         match tb {
             TraceAction::MappedAOTBBlock { func_name, bb } => {
                 let func_name = func_name.to_str().unwrap(); // safe: func names are valid UTF-8.
-                let func = self.aot_mod.func_idx(func_name);
+                let func = self.aot_mod.funcidx(func_name);
                 Some(aot_ir::BBlockId::new(func, aot_ir::BBlockIdx::new(*bb)))
             }
             TraceAction::UnmappableBBlock { .. } => None,
@@ -284,7 +284,7 @@ impl<'a> TraceBuilder<'a> {
                     incoming_bbs,
                     incoming_vals,
                 } => {
-                    debug_assert_eq!(prevbb.as_ref().unwrap().func_idx(), bid.func_idx());
+                    debug_assert_eq!(prevbb.as_ref().unwrap().funcidx(), bid.funcidx());
                     self.handle_phi(
                         bid,
                         iidx,
@@ -307,7 +307,7 @@ impl<'a> TraceBuilder<'a> {
     /// Link the AOT IR to the last instruction pushed into the JIT IR.
     fn link_iid_to_last_inst(&mut self, bid: &aot_ir::BBlockId, aot_inst_idx: usize) {
         let aot_iid = aot_ir::InstID::new(
-            bid.func_idx(),
+            bid.funcidx(),
             bid.bb_idx(),
             aot_ir::InstIdx::new(aot_inst_idx),
         );
@@ -627,7 +627,7 @@ impl<'a> TraceBuilder<'a> {
             aot_ir::Inst::Br { succ } => {
                 // We can only stop outlining when we see the succesor block and we are not in
                 // the middle of recursion.
-                let succbid = BBlockId::new(bid.func_idx(), *succ);
+                let succbid = BBlockId::new(bid.funcidx(), *succ);
                 self.outline_target_blk = Some(succbid);
                 self.recursion_count = 0;
             }
@@ -681,7 +681,7 @@ impl<'a> TraceBuilder<'a> {
         }
 
         // Check if this is a recursive call by scanning the call stack for the callee.
-        let is_recursive = self.frames.iter().any(|f| f.func_idx == Some(*callee));
+        let is_recursive = self.frames.iter().any(|f| f.funcidx == Some(*callee));
 
         if inst.is_mappable_call(self.aot_mod)
             && !self.aot_mod.func(*callee).is_outline()
@@ -694,7 +694,7 @@ impl<'a> TraceBuilder<'a> {
             self.frames.last_mut().unwrap().safepoint = inst.safepoint();
             // Create a new frame for the inlined call and pass in the arguments of the caller.
             let aot_iid = aot_ir::InstID::new(
-                bid.func_idx(),
+                bid.funcidx(),
                 bid.bb_idx(),
                 aot_ir::InstIdx::new(aot_inst_idx),
             );
@@ -708,7 +708,7 @@ impl<'a> TraceBuilder<'a> {
                 aot_ir::Inst::Br { succ } => {
                     // We can only stop outlining when we see the succesor block and we are not in
                     // the middle of recursion.
-                    let succbid = BBlockId::new(bid.func_idx(), *succ);
+                    let succbid = BBlockId::new(bid.funcidx(), *succ);
                     self.outline_target_blk = Some(succbid);
                     self.recursion_count = 0;
                 }
@@ -922,7 +922,7 @@ impl<'a> TraceBuilder<'a> {
         // If the IR is well-formed the indexing and unwrap() here will not fail.
         let chosen_val = &incoming_vals[incoming_bbs.iter().position(|bb| bb == prev_bb).unwrap()];
         let aot_iit = aot_ir::InstID::new(
-            bid.func_idx(),
+            bid.funcidx(),
             bid.bb_idx(),
             aot_ir::InstIdx::new(aot_inst_idx),
         );
@@ -985,7 +985,7 @@ impl<'a> TraceBuilder<'a> {
         };
 
         self.cp_block = self.lookup_aot_block(&prev);
-        self.frames.last_mut().unwrap().func_idx = Some(self.cp_block.as_ref().unwrap().func_idx());
+        self.frames.last_mut().unwrap().funcidx = Some(self.cp_block.as_ref().unwrap().funcidx());
         // This unwrap can't fail. If it does that means the tracer has given us a mappable block
         // that doesn't exist in the AOT module.
         self.create_trace_header(self.aot_mod.bblock(self.cp_block.as_ref().unwrap()))?;
@@ -1001,7 +1001,7 @@ impl<'a> TraceBuilder<'a> {
                             // MappedAOTBBlock block
                             if let Some(ref tgtbid) = self.outline_target_blk {
                                 // We are currently outlining.
-                                if bid.func_idx() == tgtbid.func_idx() {
+                                if bid.funcidx() == tgtbid.funcidx() {
                                     // We are inside the same function that started outlining.
                                     if bid.is_entry() {
                                         // We are recursing into the function that started
@@ -1064,7 +1064,7 @@ impl<'a> TraceBuilder<'a> {
                                 // Unwrap safe: block guaranteed to have instructions.
                                 match br.unwrap() {
                                     aot_ir::Inst::Br { succ } => {
-                                        let succbid = BBlockId::new(bid.func_idx(), *succ);
+                                        let succbid = BBlockId::new(bid.funcidx(), *succ);
                                         self.outline_target_blk = Some(succbid);
                                         self.recursion_count = 0;
                                     }
