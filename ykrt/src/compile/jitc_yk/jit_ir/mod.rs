@@ -568,6 +568,8 @@ fn index_overflow(typ: &str) -> CompilationError {
 macro_rules! index_24bit {
     ($struct:ident) => {
         impl $struct {
+            /// Construct a new $struct from a `usize`, returning `CompilationError` if the `usize`
+            /// exceeds capacity.
             pub(crate) fn new(x: usize) -> Result<Self, CompilationError> {
                 match U24::try_from(x) {
                     Ok(x) => Ok(Self(x)),
@@ -576,16 +578,7 @@ macro_rules! index_24bit {
             }
         }
 
-        impl From<usize> for $struct {
-            /// Required for TiVec. **DO NOT USE INTERNALLY TO yk as this can `panic`!** Instead,
-            /// use [Self::new].
-            fn from(v: usize) -> Self {
-                Self::new(v).unwrap()
-            }
-        }
-
         impl From<$struct> for usize {
-            // Required for TiVec.
             fn from(x: $struct) -> Self {
                 usize::from(x.0)
             }
@@ -608,14 +601,6 @@ macro_rules! index_16bit {
 
             pub(crate) fn to_u16(self) -> u16 {
                 self.0
-            }
-        }
-
-        impl From<usize> for $struct {
-            /// Required for TiVec. **DO NOT USE INTERNALLY TO yk as this can `panic`!** Instead,
-            /// use [Self::new].
-            fn from(v: usize) -> Self {
-                Self::new(v).unwrap()
             }
         }
 
