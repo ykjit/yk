@@ -62,8 +62,8 @@ fn opt_mul(
 
                 if new_val == 0 {
                     // Replace `x * 0` with `0`.
-                    let const_idx = m.insert_const(old_const.u64_to_int(0))?;
-                    m.replace(iidx, Inst::ProxyConst(const_idx));
+                    let cidx = m.insert_const(old_const.u64_to_int(0))?;
+                    m.replace(iidx, Inst::ProxyConst(cidx));
                 } else if new_val == 1 {
                     // Replace `x * 1` with `x`.
                     m.replace(iidx, Inst::ProxyInst(mul_inst));

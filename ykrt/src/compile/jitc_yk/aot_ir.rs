@@ -517,8 +517,8 @@ pub(crate) struct DisplayableOperand<'a> {
 impl fmt::Display for DisplayableOperand<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.operand {
-            Operand::Const(const_idx) => {
-                write!(f, "{}", self.m.consts[*const_idx].display(self.m))
+            Operand::Const(cidx) => {
+                write!(f, "{}", self.m.consts[*cidx].display(self.m))
             }
             Operand::LocalVariable(iid) => {
                 write!(f, "%{}_{}", usize::from(iid.bb_idx), usize::from(iid.iidx))
