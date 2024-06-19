@@ -442,8 +442,8 @@ impl fmt::Display for Module {
             )?;
         }
         write!(f, "\nentry:")?;
-        for inst_i in self.iter_skipping_inst_idxs() {
-            write!(f, "\n    {}", self.insts[inst_i].display(inst_i, self))?
+        for iidx in self.iter_skipping_inst_idxs() {
+            write!(f, "\n    {}", self.insts[iidx].display(iidx, self))?
         }
 
         Ok(())
@@ -867,17 +867,17 @@ impl PackedOperand {
     /// Unpacks a [PackedOperand] into a [Operand].
     pub fn unpack(&self, m: &Module) -> Operand {
         if (self.0 & !OPERAND_IDX_MASK) == 0 {
-            let mut inst_i = InstIdx(self.0);
+            let mut iidx = InstIdx(self.0);
             loop {
-                match m.inst(inst_i) {
+                match m.inst(iidx) {
                     Inst::ProxyConst(x) => {
                         return Operand::Const(*x);
                     }
                     Inst::ProxyInst(x) => {
-                        inst_i = *x;
+                        iidx = *x;
                     }
                     _ => {
-                        return Operand::Local(inst_i);
+                        return Operand::Local(iidx);
                     }
                 }
             }

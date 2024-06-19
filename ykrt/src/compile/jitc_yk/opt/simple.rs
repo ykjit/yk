@@ -12,16 +12,16 @@ use crate::compile::{
 };
 
 pub(super) fn simple(mut m: Module) -> Result<Module, CompilationError> {
-    for inst_i in m.iter_inst_idxs() {
-        let inst = m.inst(inst_i).clone();
+    for iidx in m.iter_inst_idxs() {
+        let inst = m.inst(iidx).clone();
         match inst {
             Inst::BinOp(BinOpInst {
                 lhs,
                 binop: BinOp::Mul,
                 rhs,
-            }) => opt_mul(&mut m, inst_i, lhs, rhs)?,
-            Inst::Guard(x) => opt_guard(&mut m, inst_i, x)?,
-            Inst::Icmp(x) => opt_icmp(&mut m, inst_i, x)?,
+            }) => opt_mul(&mut m, iidx, lhs, rhs)?,
+            Inst::Guard(x) => opt_guard(&mut m, iidx, x)?,
+            Inst::Icmp(x) => opt_icmp(&mut m, iidx, x)?,
             _ => (),
         }
     }
@@ -30,7 +30,7 @@ pub(super) fn simple(mut m: Module) -> Result<Module, CompilationError> {
 
 fn opt_mul(
     m: &mut Module,
-    inst_i: InstIdx,
+    iidx: InstIdx,
     lhs: PackedOperand,
     rhs: PackedOperand,
 ) -> Result<(), CompilationError> {
@@ -63,22 +63,22 @@ fn opt_mul(
                 if new_val == 0 {
                     // Replace `x * 0` with `0`.
                     let const_idx = m.insert_const(old_const.u64_to_int(0))?;
-                    m.replace(inst_i, Inst::ProxyConst(const_idx));
+                    m.replace(iidx, Inst::ProxyConst(const_idx));
                 } else if new_val == 1 {
                     // Replace `x * 1` with `x`.
-                    m.replace(inst_i, Inst::ProxyInst(mul_inst));
+                    m.replace(iidx, Inst::ProxyInst(mul_inst));
                 } else if new_val & (new_val - 1) == 0 {
                     // Replace `x * y` with `x << ...`.
                     let shl = u64::from(new_val.ilog2());
                     let new_const = Operand::Const(m.insert_const(old_const.u64_to_int(shl))?);
                     let new_inst =
                         BinOpInst::new(Operand::Local(mul_inst), BinOp::Shl, new_const).into();
-                    m.replace(inst_i, new_inst);
+                    m.replace(iidx, new_inst);
                 } else if new_val != old_val {
                     let new_const = Operand::Const(m.insert_const(old_const.u64_to_int(new_val))?);
                     let new_inst =
                         BinOpInst::new(Operand::Local(mul_inst), BinOp::Mul, new_const).into();
-                    m.replace(inst_i, new_inst);
+                    m.replace(iidx, new_inst);
                 }
             }
         }
@@ -90,7 +90,7 @@ fn opt_mul(
             // author is at fault.
             let new_val = x.int_to_u64().unwrap() * y.int_to_u64().unwrap();
             let new_const = m.insert_const(x.u64_to_int(new_val))?;
-            m.replace(inst_i, Inst::ProxyConst(new_const));
+            m.replace(iidx, Inst::ProxyConst(new_const));
         }
         (Operand::Local(_), Operand::Local(_)) => (),
     }
@@ -99,7 +99,7 @@ fn opt_mul(
 
 fn opt_icmp(
     m: &mut Module,
-    inst_i: InstIdx,
+    iidx: InstIdx,
     IcmpInst { lhs, pred, rhs }: IcmpInst,
 ) -> Result<(), CompilationError> {
     if let (Operand::Const(x), Operand::Const(y)) = (lhs.unpack(m), rhs.unpack(m)) {
@@ -141,9 +141,9 @@ fn opt_icmp(
             };
 
             if r {
-                m.replace(inst_i, Inst::ProxyConst(m.true_constidx()));
+                m.replace(iidx, Inst::ProxyConst(m.true_constidx()));
             } else {
-                m.replace(inst_i, Inst::ProxyConst(m.false_constidx()));
+                m.replace(iidx, Inst::ProxyConst(m.false_constidx()));
             }
         }
     }
@@ -153,7 +153,7 @@ fn opt_icmp(
 
 fn opt_guard(
     m: &mut Module,
-    inst_i: InstIdx,
+    iidx: InstIdx,
     GuardInst {
         cond,
         expect: _,
@@ -162,7 +162,7 @@ fn opt_guard(
 ) -> Result<(), CompilationError> {
     if let Operand::Const(_) = cond.unpack(m) {
         // A guard that references a constant is, by definition, not useful.
-        m.replace(inst_i, Inst::Tombstone);
+        m.replace(iidx, Inst::Tombstone);
     }
     Ok(())
 }
