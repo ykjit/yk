@@ -108,7 +108,7 @@ impl Module {
 
     /// Return the block uniquely identified (in this module) by the specified [BBlockId].
     pub(crate) fn bblock(&self, bid: &BBlockId) -> &BBlock {
-        self.funcs[bid.funcidx].bblock(bid.bb_idx)
+        self.funcs[bid.funcidx].bblock(bid.bbidx)
     }
 
     pub(crate) fn const_type(&self, c: &Const) -> &Ty {
@@ -348,15 +348,15 @@ impl Display for BinOp {
 pub(crate) struct InstID {
     /// The index of the parent function.
     funcidx: FuncIdx,
-    bb_idx: BBlockIdx,
+    bbidx: BBlockIdx,
     iidx: InstIdx,
 }
 
 impl InstID {
-    pub(crate) fn new(funcidx: FuncIdx, bb_idx: BBlockIdx, iidx: InstIdx) -> Self {
+    pub(crate) fn new(funcidx: FuncIdx, bbidx: BBlockIdx, iidx: InstIdx) -> Self {
         Self {
             funcidx,
-            bb_idx,
+            bbidx,
             iidx,
         }
     }
@@ -366,24 +366,24 @@ impl InstID {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct BBlockId {
     funcidx: FuncIdx,
-    bb_idx: BBlockIdx,
+    bbidx: BBlockIdx,
 }
 
 impl BBlockId {
-    pub(crate) fn new(funcidx: FuncIdx, bb_idx: BBlockIdx) -> Self {
-        Self { funcidx, bb_idx }
+    pub(crate) fn new(funcidx: FuncIdx, bbidx: BBlockIdx) -> Self {
+        Self { funcidx, bbidx }
     }
 
     pub(crate) fn funcidx(&self) -> FuncIdx {
         self.funcidx
     }
 
-    pub(crate) fn bb_idx(&self) -> BBlockIdx {
-        self.bb_idx
+    pub(crate) fn bbidx(&self) -> BBlockIdx {
+        self.bbidx
     }
 
     pub(crate) fn is_entry(&self) -> bool {
-        self.bb_idx == BBlockIdx(0)
+        self.bbidx == BBlockIdx(0)
     }
 }
 
@@ -474,7 +474,7 @@ impl Operand {
         let Self::LocalVariable(iid) = self else {
             panic!()
         };
-        &aotmod.funcs[iid.funcidx].bblocks[iid.bb_idx].insts[iid.iidx]
+        &aotmod.funcs[iid.funcidx].bblocks[iid.bbidx].insts[iid.iidx]
     }
 
     /// Returns the [Ty] of the operand.
@@ -521,7 +521,7 @@ impl fmt::Display for DisplayableOperand<'_> {
                 write!(f, "{}", self.m.consts[*cidx].display(self.m))
             }
             Operand::LocalVariable(iid) => {
-                write!(f, "%{}_{}", usize::from(iid.bb_idx), usize::from(iid.iidx))
+                write!(f, "%{}_{}", usize::from(iid.bbidx), usize::from(iid.iidx))
             }
             Operand::Global(gidx) => write!(f, "@{}", self.m.global_decls[*gidx].name()),
             Operand::Func(fidx) => write!(f, "{}", self.m.funcs[*fidx].name()),
@@ -756,10 +756,10 @@ impl Inst {
     /// FIXME: This is very slow and could be optimised.
     fn local_name(&self, m: &Module) -> String {
         for f in m.funcs.iter() {
-            for (bb_idx, bb) in f.bblocks.iter().enumerate() {
+            for (bbidx, bb) in f.bblocks.iter().enumerate() {
                 for (iidx, inst) in bb.insts.iter().enumerate() {
                     if std::ptr::addr_eq(inst, self) {
-                        return format!("%{}_{}", bb_idx, iidx);
+                        return format!("%{}_{}", bbidx, iidx);
                     }
                 }
             }
@@ -1153,8 +1153,8 @@ impl Func {
     /// # Panics
     ///
     /// Panics if the index is out of range.
-    pub(crate) fn bblock(&self, bb_idx: BBlockIdx) -> &BBlock {
-        &self.bblocks[bb_idx]
+    pub(crate) fn bblock(&self, bbidx: BBlockIdx) -> &BBlock {
+        &self.bblocks[bbidx]
     }
 
     /// Return the name of the function.

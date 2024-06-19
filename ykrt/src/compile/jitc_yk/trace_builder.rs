@@ -288,7 +288,7 @@ impl<'a> TraceBuilder<'a> {
                     self.handle_phi(
                         bid,
                         iidx,
-                        &prevbb.as_ref().unwrap().bb_idx(),
+                        &prevbb.as_ref().unwrap().bbidx(),
                         incoming_bbs,
                         incoming_vals,
                     )
@@ -308,7 +308,7 @@ impl<'a> TraceBuilder<'a> {
     fn link_iid_to_last_inst(&mut self, bid: &aot_ir::BBlockId, aot_inst_idx: usize) {
         let aot_iid = aot_ir::InstID::new(
             bid.funcidx(),
-            bid.bb_idx(),
+            bid.bbidx(),
             aot_ir::InstIdx::new(aot_inst_idx),
         );
         // The unwrap is safe because we've already inserted an element at this index and proven
@@ -545,7 +545,7 @@ impl<'a> TraceBuilder<'a> {
         true_bb: &aot_ir::BBlockIdx,
     ) -> Result<(), CompilationError> {
         let jit_cond = self.handle_operand(cond)?;
-        let guard = self.create_guard(&jit_cond, *true_bb == next_bb.bb_idx(), safepoint)?;
+        let guard = self.create_guard(&jit_cond, *true_bb == next_bb.bbidx(), safepoint)?;
         self.jit_mod.push(guard.into())?;
         Ok(())
     }
@@ -695,7 +695,7 @@ impl<'a> TraceBuilder<'a> {
             // Create a new frame for the inlined call and pass in the arguments of the caller.
             let aot_iid = aot_ir::InstID::new(
                 bid.funcidx(),
-                bid.bb_idx(),
+                bid.bbidx(),
                 aot_ir::InstIdx::new(aot_inst_idx),
             );
             self.frames
@@ -837,7 +837,7 @@ impl<'a> TraceBuilder<'a> {
         let jit_tyidx = self.handle_type(test_val.type_(self.aot_mod))?;
 
         // Find out which case we traced.
-        let guard = match case_dests.iter().position(|&cd| cd == next_bb.bb_idx()) {
+        let guard = match case_dests.iter().position(|&cd| cd == next_bb.bbidx()) {
             Some(cidx) => {
                 // A non-default case was traced.
                 let val = case_values[cidx];
@@ -854,7 +854,7 @@ impl<'a> TraceBuilder<'a> {
                 let jit_cond = self.jit_mod.push_and_make_operand(cmp_inst.into())?;
 
                 // Guard the result of the comparison.
-                self.create_guard(&jit_cond, bb == next_bb.bb_idx(), safepoint)?
+                self.create_guard(&jit_cond, bb == next_bb.bbidx(), safepoint)?
             }
             None => {
                 // The default case was traced.
@@ -923,7 +923,7 @@ impl<'a> TraceBuilder<'a> {
         let chosen_val = &incoming_vals[incoming_bbs.iter().position(|bb| bb == prev_bb).unwrap()];
         let aot_iit = aot_ir::InstID::new(
             bid.funcidx(),
-            bid.bb_idx(),
+            bid.bbidx(),
             aot_ir::InstIdx::new(aot_inst_idx),
         );
         let op = self.handle_operand(chosen_val)?;
