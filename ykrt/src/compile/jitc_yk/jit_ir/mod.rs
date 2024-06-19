@@ -60,7 +60,7 @@ pub(crate) struct Module {
     /// See the [Self::ctr_id] method for details.
     ctr_id: u64,
     /// The IR trace as a linear sequence of instructions.
-    insts: TiVec<InstIdx, Inst>,
+    insts: Vec<Inst>,
     /// The arguments pool for [CallInst]s. Indexed by [ArgsIdx].
     args: Vec<Operand>,
     /// The constant pool. Indexed by [ConstIdx].
@@ -157,7 +157,7 @@ impl Module {
 
         Ok(Self {
             ctr_id,
-            insts: TiVec::new(),
+            insts: Vec::new(),
             args: Vec::new(),
             consts,
             types,
@@ -213,7 +213,7 @@ impl Module {
 
     /// Return the instruction at the specified index.
     pub(crate) fn inst(&self, idx: InstIdx) -> &Inst {
-        &self.insts[idx]
+        &self.insts[usize::from(idx)]
     }
 
     /// Return the indirect call at the specified index.
@@ -236,15 +236,12 @@ impl Module {
     /// other words, it produces monotonically increasing, but potentially non-consecutive, instruction
     /// indices.
     pub(crate) fn iter_skipping_inst_idxs(&self) -> SkippingInstIdxIterator<'_> {
-        SkippingInstIdxIterator {
-            m: self,
-            cur: InstIdx::new(0).unwrap(),
-        }
+        SkippingInstIdxIterator { m: self, cur: 0 }
     }
 
     /// Replace the instruction at `iidx` with `inst`.
     pub(crate) fn replace(&mut self, iidx: InstIdx, inst: Inst) {
-        self.insts[iidx] = inst;
+        self.insts[usize::from(iidx)] = inst;
     }
 
     pub(crate) fn push_indirect_call(
@@ -445,7 +442,7 @@ impl fmt::Display for Module {
         }
         write!(f, "\nentry:")?;
         for iidx in self.iter_skipping_inst_idxs() {
-            write!(f, "\n    {}", self.insts[iidx].display(iidx, self))?
+            write!(f, "\n    {}", self.inst(iidx).display(iidx, self))?
         }
 
         Ok(())
@@ -457,7 +454,7 @@ impl fmt::Display for Module {
 /// indices.
 pub(crate) struct SkippingInstIdxIterator<'a> {
     m: &'a Module,
-    cur: InstIdx,
+    cur: usize,
 }
 
 impl Iterator for SkippingInstIdxIterator<'_> {
@@ -465,8 +462,10 @@ impl Iterator for SkippingInstIdxIterator<'_> {
     /// Return the next instruction index or `None` if the end has been reached.
     fn next(&mut self) -> Option<InstIdx> {
         while let Some(x) = self.m.insts.get(self.cur) {
-            let old = self.cur;
-            self.cur = InstIdx::new(usize::from(old) + 1).unwrap();
+            // We know that `self.cur` must fit in `InstIdx`, as otherwise `m.insts` wouldn't have
+            // had the instruction in the first place.
+            let old = InstIdx::new(self.cur).unwrap();
+            self.cur += 1;
             match x {
                 Inst::ProxyConst(_) | Inst::ProxyInst(_) | Inst::Tombstone => (),
                 _ => return Some(old),
@@ -600,6 +599,8 @@ macro_rules! index_16bit {
     ($struct:ident) => {
         #[allow(dead_code)]
         impl $struct {
+            /// Construct a new $struct from a `usize`, returning `CompilationError` if the `usize`
+            /// exceeds capacity.
             pub(crate) fn new(v: usize) -> Result<Self, CompilationError> {
                 u16::try_from(v)
                     .map_err(|_| index_overflow(stringify!($struct)))
