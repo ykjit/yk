@@ -461,7 +461,7 @@ pub(crate) enum Operand {
     #[deku(id = "3")]
     Func(FuncIdx),
     #[deku(id = "4")]
-    Arg { func_idx: FuncIdx, arg_idx: ArgIdx },
+    Arg { func_idx: FuncIdx, argidx: ArgIdx },
 }
 
 impl Operand {
@@ -485,11 +485,11 @@ impl Operand {
                 self.to_inst(m).def_type(m).unwrap()
             }
             Self::Const(cidx) => m.type_(m.const_(*cidx).unwrap_val().tyidx()),
-            Self::Arg { func_idx, arg_idx } => {
+            Self::Arg { func_idx, argidx } => {
                 let Ty::Func(ft) = m.type_(m.func(*func_idx).tyidx) else {
                     panic!()
                 };
-                m.type_(ft.arg_tyidxs()[usize::from(*arg_idx)])
+                m.type_(ft.arg_tyidxs()[usize::from(*argidx)])
             }
             _ => todo!(),
         }
@@ -525,7 +525,7 @@ impl fmt::Display for DisplayableOperand<'_> {
             }
             Operand::Global(gidx) => write!(f, "@{}", self.m.global_decls[*gidx].name()),
             Operand::Func(fidx) => write!(f, "{}", self.m.funcs[*fidx].name()),
-            Operand::Arg { arg_idx, .. } => write!(f, "%arg{}", usize::from(*arg_idx)),
+            Operand::Arg { argidx, .. } => write!(f, "%arg{}", usize::from(*argidx)),
         }
     }
 }

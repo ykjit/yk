@@ -418,11 +418,11 @@ impl<'a> TraceBuilder<'a> {
                 let load = jit_ir::LookupGlobalInst::new(self.handle_global(*gd_idx)?)?;
                 self.jit_mod.push_and_make_operand(load.into())
             }
-            aot_ir::Operand::Arg { arg_idx, .. } => {
+            aot_ir::Operand::Arg { argidx, .. } => {
                 // Lookup the JIT instruction that was passed into this function as an argument.
                 // Unwrap is safe since an `Arg` means we are currently inlining a function.
                 // FIXME: Is the above correct? What about args in the control point frame?
-                Ok(self.frames.last().unwrap().args[usize::from(*arg_idx)].clone())
+                Ok(self.frames.last().unwrap().args[usize::from(*argidx)].clone())
             }
             _ => todo!("{}", op.display(self.aot_mod)),
         }
@@ -510,10 +510,10 @@ impl<'a> TraceBuilder<'a> {
             for op in safepoint.lives.iter() {
                 let op = match op {
                     aot_ir::Operand::LocalVariable(iid) => &self.local_map[iid],
-                    aot_ir::Operand::Arg { arg_idx, .. } => {
+                    aot_ir::Operand::Arg { argidx, .. } => {
                         // Lookup the JIT value of the argument from the caller (stored in
                         // the previous frame's `args` field).
-                        &frame_args[usize::from(*arg_idx)]
+                        &frame_args[usize::from(*argidx)]
                     }
                     _ => panic!(), // IR malformed.
                 };
