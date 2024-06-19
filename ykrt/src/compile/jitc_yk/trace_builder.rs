@@ -125,8 +125,8 @@ impl<'a> TraceBuilder<'a> {
         // profoundly wrong with the AOT IR.
         let trace_inputs = trace_inputs.unwrap();
         let trace_input_struct_ty = match trace_inputs {
-            aot_ir::Inst::Alloca { ty_idx, .. } => {
-                let aot_ir::Ty::Struct(x) = self.aot_mod.type_(*ty_idx) else {
+            aot_ir::Inst::Alloca { tyidx, .. } => {
+                let aot_ir::Ty::Struct(x) = self.aot_mod.type_(*tyidx) else {
                     panic!()
                 };
                 x
@@ -159,14 +159,14 @@ impl<'a> TraceBuilder<'a> {
                         // FIXME: assumes the field is byte-aligned. If it isn't, field_byte_off() will
                         // crash.
                         let aot_field_off = trace_input_struct_ty.field_byte_off(trace_input_idx);
-                        let aot_field_ty = trace_input_struct_ty.field_ty_idx(trace_input_idx);
+                        let aot_field_ty = trace_input_struct_ty.field_tyidx(trace_input_idx);
                         // FIXME: we should check at compile-time that this will fit.
                         match u32::try_from(aot_field_off) {
                             Ok(u32_off) => {
-                                let input_ty_idx =
+                                let input_tyidx =
                                     self.handle_type(self.aot_mod.type_(aot_field_ty))?;
                                 let load_ti_inst =
-                                    jit_ir::LoadTraceInputInst::new(u32_off, input_ty_idx).into();
+                                    jit_ir::LoadTraceInputInst::new(u32_off, input_tyidx).into();
                                 self.jit_mod.push(load_ti_inst)?;
                                 // If this take fails, we didn't see a corresponding store and the
                                 // IR is malformed.
@@ -210,9 +210,9 @@ impl<'a> TraceBuilder<'a> {
                 aot_ir::Inst::Br { .. } => Ok(()),
                 aot_ir::Inst::Load {
                     ptr,
-                    ty_idx,
+                    tyidx,
                     volatile,
-                } => self.handle_load(bid, iidx, ptr, ty_idx, *volatile),
+                } => self.handle_load(bid, iidx, ptr, tyidx, *volatile),
                 // FIXME: ignore remaining instructions after a call.
                 aot_ir::Inst::Call { callee, args, .. } => {
                     // Get the branch instruction of this block.
@@ -220,13 +220,13 @@ impl<'a> TraceBuilder<'a> {
                     self.handle_call(inst, bid, iidx, callee, args, nextinst)
                 }
                 aot_ir::Inst::IndirectCall {
-                    fty_idx,
+                    ftyidx,
                     callop,
                     args,
                 } => {
                     // Get the branch instruction of this block.
                     let nextinst = blk.insts.last().unwrap();
-                    self.handle_indirectcall(inst, bid, iidx, fty_idx, callop, args, nextinst)
+                    self.handle_indirectcall(inst, bid, iidx, ftyidx, callop, args, nextinst)
                 }
                 aot_ir::Inst::Store { tgt, val, volatile } => {
                     self.handle_store(bid, iidx, tgt, val, *volatile)
@@ -261,8 +261,8 @@ impl<'a> TraceBuilder<'a> {
                 aot_ir::Inst::Cast {
                     cast_kind,
                     val,
-                    dest_ty_idx,
-                } => self.handle_cast(bid, iidx, cast_kind, val, dest_ty_idx),
+                    dest_tyidx,
+                } => self.handle_cast(bid, iidx, cast_kind, val, dest_tyidx),
                 aot_ir::Inst::Ret { val } => self.handle_ret(bid, iidx, val),
                 aot_ir::Inst::Switch {
                     test_val,
@@ -356,7 +356,7 @@ impl<'a> TraceBuilder<'a> {
     ) -> Result<jit_ir::Const, CompilationError> {
         let aot_const = aot_const.unwrap_val();
         let bytes = aot_const.bytes();
-        match self.aot_mod.type_(aot_const.ty_idx()) {
+        match self.aot_mod.type_(aot_const.tyidx()) {
             aot_ir::Ty::Integer(aot_ir::IntegerTy { num_bits }) => {
                 // FIXME: It would be better if the AOT IR had converted these integers in advance
                 // rather than doing this dance here.
@@ -382,8 +382,8 @@ impl<'a> TraceBuilder<'a> {
                     }
                     _ => todo!("{}", num_bits),
                 };
-                let jit_ty_idx = self.jit_mod.insert_ty(jit_ir::Ty::Integer(*num_bits))?;
-                Ok(jit_ir::Const::Int(jit_ty_idx, x))
+                let jit_tyidx = self.jit_mod.insert_ty(jit_ir::Ty::Integer(*num_bits))?;
+                Ok(jit_ir::Const::Int(jit_tyidx, x))
             }
             aot_ir::Ty::Ptr => {
                 let val: usize;
@@ -436,8 +436,8 @@ impl<'a> TraceBuilder<'a> {
             aot_ir::Ty::Ptr => jit_ir::Ty::Ptr,
             aot_ir::Ty::Func(ft) => {
                 let mut jit_args = Vec::new();
-                for aot_arg_ty_idx in ft.arg_ty_idxs() {
-                    let jit_ty = self.handle_type(self.aot_mod.type_(*aot_arg_ty_idx))?;
+                for aot_arg_tyidx in ft.arg_ty_idxs() {
+                    let jit_ty = self.handle_type(self.aot_mod.type_(*aot_arg_tyidx))?;
                     jit_args.push(jit_ty);
                 }
                 let jit_retty = self.handle_type(self.aot_mod.type_(ft.ret_ty()))?;
@@ -457,7 +457,7 @@ impl<'a> TraceBuilder<'a> {
         let aot_func = self.aot_mod.func(aot_idx);
         let jit_func = jit_ir::FuncDecl::new(
             aot_func.name().to_owned(),
-            self.handle_type(self.aot_mod.type_(aot_func.ty_idx()))?,
+            self.handle_type(self.aot_mod.type_(aot_func.tyidx()))?,
         );
         self.jit_mod.insert_func_decl(jit_func)
     }
@@ -586,12 +586,12 @@ impl<'a> TraceBuilder<'a> {
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
         ptr: &aot_ir::Operand,
-        ty_idx: &aot_ir::TyIdx,
+        tyidx: &aot_ir::TyIdx,
         volatile: bool,
     ) -> Result<(), CompilationError> {
         let inst = jit_ir::LoadInst::new(
             self.handle_operand(ptr)?,
-            self.handle_type(self.aot_mod.type_(*ty_idx))?,
+            self.handle_type(self.aot_mod.type_(*tyidx))?,
             volatile,
         )
         .into();
@@ -604,7 +604,7 @@ impl<'a> TraceBuilder<'a> {
         inst: &'a aot_ir::Inst,
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
-        fty_idx: &aot_ir::TyIdx,
+        ftyidx: &aot_ir::TyIdx,
         callop: &aot_ir::Operand,
         args: &[aot_ir::Operand],
         nextinst: &'a aot_ir::Inst,
@@ -642,9 +642,9 @@ impl<'a> TraceBuilder<'a> {
         }
 
         let jit_callop = self.handle_operand(callop)?;
-        let jit_ty_idx = self.handle_type(self.aot_mod.type_(*fty_idx))?;
+        let jit_tyidx = self.handle_type(self.aot_mod.type_(*ftyidx))?;
         let inst =
-            jit_ir::IndirectCallInst::new(&mut self.jit_mod, jit_ty_idx, jit_callop, jit_args)?;
+            jit_ir::IndirectCallInst::new(&mut self.jit_mod, jit_tyidx, jit_callop, jit_args)?;
         let idx = self.jit_mod.push_indirect_call(inst)?;
         self.copy_inst(jit_ir::Inst::IndirectCall(idx), bid, aot_inst_idx)
     }
@@ -795,22 +795,22 @@ impl<'a> TraceBuilder<'a> {
         aot_inst_idx: usize,
         cast_kind: &aot_ir::CastKind,
         val: &aot_ir::Operand,
-        dest_ty_idx: &aot_ir::TyIdx,
+        dest_tyidx: &aot_ir::TyIdx,
     ) -> Result<(), CompilationError> {
         let inst = match cast_kind {
             aot_ir::CastKind::SExt => jit_ir::SExtInst::new(
                 &self.handle_operand(val)?,
-                self.handle_type(self.aot_mod.type_(*dest_ty_idx))?,
+                self.handle_type(self.aot_mod.type_(*dest_tyidx))?,
             )
             .into(),
             aot_ir::CastKind::ZeroExtend => jit_ir::ZeroExtendInst::new(
                 &self.handle_operand(val)?,
-                self.handle_type(self.aot_mod.type_(*dest_ty_idx))?,
+                self.handle_type(self.aot_mod.type_(*dest_tyidx))?,
             )
             .into(),
             aot_ir::CastKind::Trunc => jit_ir::TruncInst::new(
                 &self.handle_operand(val)?,
-                self.handle_type(self.aot_mod.type_(*dest_ty_idx))?,
+                self.handle_type(self.aot_mod.type_(*dest_tyidx))?,
             )
             .into(),
         };
@@ -834,7 +834,7 @@ impl<'a> TraceBuilder<'a> {
             panic!();
         }
 
-        let jit_ty_idx = self.handle_type(test_val.type_(self.aot_mod))?;
+        let jit_tyidx = self.handle_type(test_val.type_(self.aot_mod))?;
 
         // Find out which case we traced.
         let guard = match case_dests.iter().position(|&cd| cd == next_bb.bb_idx()) {
@@ -844,7 +844,7 @@ impl<'a> TraceBuilder<'a> {
                 let bb = case_dests[cidx];
 
                 // Build the constant value to guard.
-                let jit_const = jit_ir::Const::Int(jit_ty_idx, val);
+                let jit_const = jit_ir::Const::Int(jit_tyidx, val);
                 let jit_const_opnd = jit_ir::Operand::Const(self.jit_mod.insert_const(jit_const)?);
 
                 // Perform the comparison.
@@ -875,7 +875,7 @@ impl<'a> TraceBuilder<'a> {
                 let mut cmps_opnds = Vec::new();
                 for cv in case_values {
                     // Build a constant of the case value.
-                    let jit_const = jit_ir::Const::Int(jit_ty_idx, *cv);
+                    let jit_const = jit_ir::Const::Int(jit_tyidx, *cv);
                     let jit_const_opnd =
                         jit_ir::Operand::Const(self.jit_mod.insert_const(jit_const)?);
 

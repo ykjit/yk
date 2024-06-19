@@ -636,7 +636,7 @@ impl<'a> X64CodeGen<'a> {
     ) -> Result<(), CompilationError> {
         let inst = self.m.indirect_call(*indirect_call_idx);
         self.load_operand(WR0, &inst.target(self.m));
-        let jit_ir::Ty::Func(fty) = self.m.type_(inst.fty_idx()) else {
+        let jit_ir::Ty::Func(fty) = self.m.type_(inst.ftyidx()) else {
             panic!()
         };
         let args = (0..(inst.num_args()))
@@ -699,10 +699,10 @@ impl<'a> X64CodeGen<'a> {
 
     fn cg_sext(&mut self, iidx: InstIdx, i: &jit_ir::SExtInst) {
         let src_val = i.val(self.m);
-        let src_type = self.m.type_(src_val.ty_idx(self.m));
+        let src_type = self.m.type_(src_val.tyidx(self.m));
         let src_size = src_type.byte_size().unwrap();
 
-        let dest_type = self.m.type_(i.dest_ty_idx());
+        let dest_type = self.m.type_(i.dest_tyidx());
         let dest_size = dest_type.byte_size().unwrap();
 
         // FIXME: assumes the input and output fit in a register.
@@ -720,10 +720,10 @@ impl<'a> X64CodeGen<'a> {
 
     fn cg_zeroextend(&mut self, iidx: InstIdx, i: &jit_ir::ZeroExtendInst) {
         let from_val = i.val(self.m);
-        let from_type = self.m.type_(from_val.ty_idx(self.m));
+        let from_type = self.m.type_(from_val.tyidx(self.m));
         let from_size = from_type.byte_size().unwrap();
 
-        let to_type = self.m.type_(i.dest_ty_idx());
+        let to_type = self.m.type_(i.dest_tyidx());
         let to_size = to_type.byte_size().unwrap();
 
         debug_assert!(matches!(to_type, jit_ir::Ty::Integer(_)));
@@ -745,10 +745,10 @@ impl<'a> X64CodeGen<'a> {
 
     fn cg_trunc(&mut self, iidx: InstIdx, i: &jit_ir::TruncInst) {
         let from_val = i.val(self.m);
-        let from_type = self.m.type_(from_val.ty_idx(self.m));
+        let from_type = self.m.type_(from_val.tyidx(self.m));
         let from_size = from_type.byte_size().unwrap();
 
-        let to_type = self.m.type_(i.dest_ty_idx());
+        let to_type = self.m.type_(i.dest_tyidx());
         let to_size = to_type.byte_size().unwrap();
 
         debug_assert!(matches!(to_type, jit_ir::Ty::Integer(_)));
@@ -884,8 +884,8 @@ impl<'a> X64CodeGen<'a> {
     /// Load a constant into the specified register.
     fn load_const(&mut self, reg: Rq, cidx: jit_ir::ConstIdx) {
         match self.m.const_(cidx) {
-            jit_ir::Const::Int(ty_idx, x) => {
-                let jit_ir::Ty::Integer(width) = self.m.type_(*ty_idx) else {
+            jit_ir::Const::Int(tyidx, x) => {
+                let jit_ir::Ty::Integer(width) = self.m.type_(*tyidx) else {
                     panic!()
                 };
                 // The `as`s are all safe because the IR guarantees that no more than `width` bits

@@ -112,7 +112,7 @@ impl Module {
     }
 
     pub(crate) fn const_type(&self, c: &Const) -> &Ty {
-        &self.types[c.unwrap_val().ty_idx]
+        &self.types[c.unwrap_val().tyidx]
     }
 
     /// Lookup a constant by its index.
@@ -484,9 +484,9 @@ impl Operand {
                 // The `unwrap` can't fail for a `LocalVariable`.
                 self.to_inst(m).def_type(m).unwrap()
             }
-            Self::Const(cidx) => m.type_(m.const_(*cidx).unwrap_val().ty_idx()),
+            Self::Const(cidx) => m.type_(m.const_(*cidx).unwrap_val().tyidx()),
             Self::Arg { func_idx, arg_idx } => {
-                let Ty::Func(ft) = m.type_(m.func(*func_idx).ty_idx) else {
+                let Ty::Func(ft) = m.type_(m.func(*func_idx).tyidx) else {
                     panic!()
                 };
                 m.type_(ft.arg_ty_idxs()[usize::from(*arg_idx)])
@@ -593,7 +593,7 @@ pub(crate) enum Inst {
     #[deku(id = "1")]
     Load {
         ptr: Operand,
-        ty_idx: TyIdx,
+        tyidx: TyIdx,
         volatile: bool,
     },
     #[deku(id = "2")]
@@ -604,7 +604,7 @@ pub(crate) enum Inst {
     },
     #[deku(id = "3")]
     Alloca {
-        ty_idx: TyIdx,
+        tyidx: TyIdx,
         count: usize,
         align: u64,
     },
@@ -634,7 +634,7 @@ pub(crate) enum Inst {
     },
     #[deku(id = "7")]
     ICmp {
-        ty_idx: TyIdx,
+        tyidx: TyIdx,
         lhs: Operand,
         pred: Predicate,
         rhs: Operand,
@@ -664,7 +664,7 @@ pub(crate) enum Inst {
         //
         // FIXME: the type will always be `ptr`, so this field could be elided if we provide a way
         // for us to find the pointer type index quickly.
-        ty_idx: TyIdx,
+        tyidx: TyIdx,
         /// The pointer to offset from.
         ptr: Operand,
         /// The constant offset (in bytes).
@@ -701,7 +701,7 @@ pub(crate) enum Inst {
         /// The value to be operated upon.
         val: Operand,
         /// The resulting type of the operation.
-        dest_ty_idx: TyIdx,
+        dest_tyidx: TyIdx,
     },
     #[deku(id = "13")]
     Switch {
@@ -731,7 +731,7 @@ pub(crate) enum Inst {
     },
     #[deku(id = "15")]
     IndirectCall {
-        fty_idx: TyIdx,
+        ftyidx: TyIdx,
         callop: Operand,
         #[deku(temp)]
         num_args: u32,
@@ -776,7 +776,7 @@ impl Inst {
             Self::Br { .. } => None,
             Self::Call { callee, .. } => {
                 // The type of the newly-defined local is the return type of the callee.
-                if let Ty::Func(ft) = m.type_(m.func(*callee).ty_idx) {
+                if let Ty::Func(ft) = m.type_(m.func(*callee).tyidx) {
                     let ty = m.type_(ft.ret_ty);
                     if ty != &Ty::Void {
                         Some(ty)
@@ -789,24 +789,24 @@ impl Inst {
             }
             Self::CondBr { .. } => None,
             Self::InsertValue { agg, .. } => Some(agg.type_(m)),
-            Self::ICmp { ty_idx, .. } => Some(m.type_(*ty_idx)),
-            Self::Load { ty_idx, .. } => Some(m.type_(*ty_idx)),
-            Self::PtrAdd { ty_idx, .. } => Some(m.type_(*ty_idx)),
+            Self::ICmp { tyidx, .. } => Some(m.type_(*tyidx)),
+            Self::Load { tyidx, .. } => Some(m.type_(*tyidx)),
+            Self::PtrAdd { tyidx, .. } => Some(m.type_(*tyidx)),
             Self::Ret { .. } => {
                 // Subtle: although `Ret` might make a value, that's not a local value in the
                 // parent function.
                 None
             }
             Self::Store { .. } => None,
-            Self::Cast { dest_ty_idx, .. } => Some(m.type_(*dest_ty_idx)),
+            Self::Cast { dest_tyidx, .. } => Some(m.type_(*dest_tyidx)),
             Self::Switch { .. } => None,
             Self::Phi { incoming_vals, .. } => {
                 // Indexing cannot crash: correct PHI nodes have at least one incoming value.
                 Some(incoming_vals[0].type_(m))
             }
-            Self::IndirectCall { fty_idx, .. } => {
+            Self::IndirectCall { ftyidx, .. } => {
                 // The type of the newly-defined local is the return type of the callee.
-                if let Ty::Func(ft) = m.type_(*fty_idx) {
+                if let Ty::Func(ft) = m.type_(*ftyidx) {
                     let ty = m.type_(ft.ret_ty);
                     if ty != &Ty::Void {
                         Some(ty)
@@ -899,13 +899,13 @@ impl fmt::Display for DisplayableInst<'_> {
 
         match self.instruction {
             Inst::Alloca {
-                ty_idx,
+                tyidx,
                 count,
                 align,
             } => write!(
                 f,
                 "alloca {}, {}, {}",
-                self.m.type_(*ty_idx).display(self.m),
+                self.m.type_(*tyidx).display(self.m),
                 count,
                 align
             ),
@@ -957,7 +957,7 @@ impl fmt::Display for DisplayableInst<'_> {
             }
             Inst::Load {
                 ptr,
-                ty_idx: _,
+                tyidx: _,
                 volatile,
             } => {
                 let vol = if *volatile { ", volatile" } else { "" };
@@ -1010,12 +1010,12 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::Cast {
                 cast_kind,
                 val,
-                dest_ty_idx,
+                dest_tyidx,
             } => write!(
                 f,
                 "{cast_kind} {}, {}",
                 val.display(self.m),
-                self.m.types[*dest_ty_idx].display(self.m)
+                self.m.types[*dest_tyidx].display(self.m)
             ),
             Inst::Switch {
                 test_val,
@@ -1050,7 +1050,7 @@ impl fmt::Display for DisplayableInst<'_> {
                 write!(f, "phi {}", args.join(", "))
             }
             Inst::IndirectCall {
-                fty_idx: _,
+                ftyidx: _,
                 callop,
                 args,
             } => {
@@ -1131,7 +1131,7 @@ impl fmt::Display for DisplayableBBlock<'_> {
 pub(crate) struct Func {
     #[deku(until = "|v: &u8| *v == 0", map = "map_to_string")]
     name: String,
-    ty_idx: TyIdx,
+    tyidx: TyIdx,
     outline: bool,
     #[deku(temp)]
     num_bblocks: usize,
@@ -1163,8 +1163,8 @@ impl Func {
     }
 
     /// Return the type index of the function.
-    pub(crate) fn ty_idx(&self) -> TyIdx {
-        self.ty_idx
+    pub(crate) fn tyidx(&self) -> TyIdx {
+        self.tyidx
     }
 
     pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableFunc<'a> {
@@ -1179,7 +1179,7 @@ pub(crate) struct DisplayableFunc<'a> {
 
 impl fmt::Display for DisplayableFunc<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ty = &self.m.types[self.func_.ty_idx];
+        let ty = &self.m.types[self.func_.tyidx];
         if let Ty::Func(fty) = ty {
             write!(
                 f,
@@ -1310,10 +1310,10 @@ pub(crate) struct FuncTy {
 
 impl FuncTy {
     #[cfg(test)]
-    fn new(arg_ty_idxs: Vec<TyIdx>, ret_ty_idx: TyIdx, is_vararg: bool) -> Self {
+    fn new(arg_ty_idxs: Vec<TyIdx>, ret_tyidx: TyIdx, is_vararg: bool) -> Self {
         Self {
             arg_ty_idxs,
-            ret_ty: ret_ty_idx,
+            ret_ty: ret_tyidx,
             is_vararg,
         }
     }
@@ -1380,7 +1380,7 @@ impl StructTy {
     /// # Panics
     ///
     /// Panics if the index is out of bounds.
-    pub(crate) fn field_ty_idx(&self, idx: usize) -> TyIdx {
+    pub(crate) fn field_tyidx(&self, idx: usize) -> TyIdx {
         self.field_ty_idxs[idx]
     }
 
@@ -1556,7 +1556,7 @@ impl Display for DisplayableConst<'_> {
 #[deku_derive(DekuRead)]
 #[derive(Debug)]
 pub(crate) struct ConstVal {
-    ty_idx: TyIdx,
+    tyidx: TyIdx,
     #[deku(temp)]
     num_bytes: usize,
     #[deku(count = "num_bytes")]
@@ -1570,8 +1570,8 @@ impl ConstVal {
     }
 
     /// Return the type index of the constant.
-    pub(crate) fn ty_idx(&self) -> TyIdx {
-        self.ty_idx
+    pub(crate) fn tyidx(&self) -> TyIdx {
+        self.tyidx
     }
 
     pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableConstVal<'a> {
@@ -1589,7 +1589,7 @@ impl Display for DisplayableConstVal<'_> {
         write!(
             f,
             "{}",
-            self.m.types[self.cv.ty_idx].const_to_string(self.cv)
+            self.m.types[self.cv.tyidx].const_to_string(self.cv)
         )
     }
 }
@@ -1659,7 +1659,7 @@ mod tests {
             // Construct an IR constant and check it stringifies ok.
             let it = IntegerTy { num_bits };
             let c = ConstVal {
-                ty_idx: TyIdx::new(0),
+                tyidx: TyIdx::new(0),
                 bytes,
             };
             assert_eq!(it.const_to_string(&c), expect);
@@ -1696,7 +1696,7 @@ mod tests {
     fn stringify_const_ptr() {
         let mut m = Module::default();
         m.types.push(Ty::Ptr);
-        let ptr_ty_idx = TyIdx(0);
+        let ptr_tyidx = TyIdx(0);
         // Build a constant pointer with higher valued bytes towards the most-significant byte.
         // Careful now: big endian stores the most significant byte first!
         let rng = 0u8..(mem::size_of::<usize>() as u8);
@@ -1706,7 +1706,7 @@ mod tests {
         let bytes = rng.clone().rev().collect::<Vec<u8>>();
 
         let cp = ConstVal {
-            ty_idx: ptr_ty_idx,
+            tyidx: ptr_tyidx,
             bytes,
         };
 
@@ -1722,10 +1722,10 @@ mod tests {
     fn stringify_const_ptr2() {
         let mut m = Module::default();
         m.types.push(Ty::Ptr);
-        let ptr_ty_idx = TyIdx(0);
+        let ptr_tyidx = TyIdx(0);
         let ptr_val = stringify_const_ptr2 as *const u8 as usize;
         let cp = ConstVal {
-            ty_idx: ptr_ty_idx,
+            tyidx: ptr_tyidx,
             bytes: ptr_val.to_ne_bytes().to_vec(),
         };
         assert_eq!(format!("{}", cp.display(&m)), format!("{:#x}", ptr_val));
