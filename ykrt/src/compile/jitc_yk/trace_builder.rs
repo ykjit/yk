@@ -1054,7 +1054,18 @@ impl<'a> TraceBuilder<'a> {
                             let nextbb = if let Some(tpeek) = trace_iter.peek() {
                                 match tpeek {
                                     Ok(tp) => self.lookup_aot_block(tp),
-                                    Err(_) => todo!(),
+                                    Err(e) => match e {
+                                        AOTTraceIteratorError::TraceTooLong => {
+                                            return Err(CompilationError::LimitExceeded(
+                                                "Trace too long.".into(),
+                                            ));
+                                        }
+                                        AOTTraceIteratorError::LongJmpEncountered => {
+                                            return Err(CompilationError::General(
+                                                "Long jump encountered.".into(),
+                                            ));
+                                        }
+                                    },
                                 }
                             } else {
                                 None
