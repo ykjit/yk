@@ -922,10 +922,6 @@ impl<'a> X64CodeGen<'a> {
 
     /// Load a local variable into the specified general purpose register.
     fn load_local(&mut self, reg: Rq, local: InstIdx) {
-        debug_assert!(!matches!(
-            self.m.type_(self.m.inst(local).tyidx(self.m)),
-            Ty::Float(_)
-        ));
         let alloc = match self.m.inst(local) {
             jit_ir::Inst::ProxyConst(c) => match self.m.const_(*c) {
                 Const::Int(_, c) => &LocalAlloc::ConstInt(*c),
@@ -962,10 +958,6 @@ impl<'a> X64CodeGen<'a> {
 
     /// Load a local variable into the specified floating point register.
     fn load_local_float(&mut self, reg: Rx, local: InstIdx) {
-        debug_assert!(matches!(
-            self.m.type_(self.m.inst(local).tyidx(self.m)),
-            Ty::Float(_)
-        ));
         let alloc = match self.m.inst(local) {
             jit_ir::Inst::ProxyConst(_) => todo!(),
             jit_ir::Inst::ProxyInst(_) => todo!(),
