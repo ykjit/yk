@@ -16,7 +16,7 @@
 //!   * [super::GuardInst]s:
 //!       * Have a `cond` whose type is [super::Ty::Integer(1)] (i.e. an `i1`).
 //!       * If `cond` references a constant, that constant matches the guard's `expect` attribute.
-//!   * [super::ICmpInst]s left and right hand side operands have the same [Ty]s.
+//!   * [super::IcmpInst]s left and right hand side operands have the same [Ty]s.
 //!   * [super::SIToFPInst]s:
 //!       * Have an integer-typed source operand.
 //!       * Have a float-type as the destination type operand.
