@@ -9,6 +9,10 @@
 //!     * Have left and right hand side operands compatible with the operation in question.
 //!   * [super::DirectCallInst]s pass the correct number of arguments to a [super::FuncTy] and each
 //!     of those arguments has the correct [super::Ty].
+//!   * [super::FPExtInst]s:
+//!       * Have an float-typed source operand.
+//!       * Have a float-type as the destination type operand.
+//!       * Have a destination type operand strictly larger than the type of the source operand.
 //!   * [super::GuardInst]s:
 //!       * Have a `cond` whose type is [super::Ty::Integer(1)] (i.e. an `i1`).
 //!       * If `cond` references a constant, that constant matches the guard's `expect` attribute.
