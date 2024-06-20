@@ -4,7 +4,9 @@
 //!
 //! Specifically, after calling [Module::assert_well_formed] one can safely assume:
 //!
-//!   * [super::BinOpInst]s left and right hand side operands have the same [Ty]s.
+//!   * [super::BinOpInst]s:
+//!     * Have left and right hand side operands with the same [Ty]s.
+//!     * Have left and right hand side operands compatible with the operation in question.
 //!   * [super::DirectCallInst]s pass the correct number of arguments to a [super::FuncTy] and each
 //!     of those arguments has the correct [super::Ty].
 //!   * [super::GuardInst]s:
@@ -13,19 +15,50 @@
 //!   * [super::ICmpInst]s left and right hand side operands have the same [Ty]s.
 //!   * [Const::Int]s cannot use more bits than the corresponding [Ty::Integer] type.
 
-use super::{BinOpInst, Const, GuardInst, Inst, Module, Operand, Ty};
+use super::{BinOp, BinOpInst, Const, GuardInst, Inst, Module, Operand, Ty};
 
 impl Module {
     pub(crate) fn assert_well_formed(&self) {
         for iidx in self.iter_skipping_inst_idxs() {
             let inst = self.inst(iidx);
             match inst {
-                Inst::BinOp(BinOpInst { lhs, binop: _, rhs }) => {
-                    if lhs.unpack(self).tyidx(self) != rhs.unpack(self).tyidx(self) {
+                Inst::BinOp(BinOpInst { lhs, binop, rhs }) => {
+                    let lhs_tyidx = lhs.unpack(self).tyidx(self);
+                    if lhs_tyidx != rhs.unpack(self).tyidx(self) {
                         panic!(
                             "Instruction at position {iidx} has different types on lhs and rhs\n  {}",
                             self.inst(iidx).display(iidx, self)
                         );
+                    }
+                    match binop {
+                        BinOp::Add
+                        | BinOp::Sub
+                        | BinOp::Mul
+                        | BinOp::Or
+                        | BinOp::And
+                        | BinOp::Xor
+                        | BinOp::Shl
+                        | BinOp::AShr
+                        | BinOp::LShr
+                        | BinOp::SDiv
+                        | BinOp::SRem
+                        | BinOp::UDiv
+                        | BinOp::URem => {
+                            if matches!(self.type_(lhs_tyidx), Ty::Float(_)) {
+                                panic!(
+                                    "Integer binop at position {iidx} operates on float operands\n  {}",
+                                    self.inst(iidx).display(iidx, self)
+                                );
+                            }
+                        }
+                        BinOp::FAdd | BinOp::FDiv | BinOp::FMul | BinOp::FRem | BinOp::FSub => {
+                            if !matches!(self.type_(lhs_tyidx), Ty::Float(_)) {
+                                panic!(
+                                    "Float binop at position {iidx} operates on integer operands\n  {}",
+                                    self.inst(iidx).display(iidx, self)
+                                );
+                            }
+                        }
                     }
                 }
                 Inst::Call(x) => {
@@ -332,6 +365,30 @@ mod tests {
               entry:
                 %0: float = load_ti 0
                 %1: i64 = fp_ext %0
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Integer binop at position 1 operates on float operands")]
+    fn int_binop_with_float_opnds() {
+        Module::from_str(
+            "
+              entry:
+                %0: float = load_ti 0
+                %1: i32 = add %0, %0
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Float binop at position 1 operates on integer operands")]
+    fn float_binop_with_int_opnds() {
+        Module::from_str(
+            "
+              entry:
+                %0: i32 = load_ti 0
+                %1: float = fadd %0, %0
             ",
         );
     }
