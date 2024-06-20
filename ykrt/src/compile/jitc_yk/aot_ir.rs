@@ -434,6 +434,8 @@ pub(crate) enum CastKind {
     SExt = 0,
     ZeroExtend = 1,
     Trunc = 2,
+    SIToFP = 3,
+    FPExt = 4,
 }
 
 impl Display for CastKind {
@@ -442,6 +444,8 @@ impl Display for CastKind {
             Self::SExt => "sext",
             Self::ZeroExtend => "zext",
             Self::Trunc => "trunc",
+            Self::SIToFP => "si_to_fp",
+            Self::FPExt => "fp_ext",
         };
         write!(f, "{}", s)
     }
@@ -1360,6 +1364,29 @@ impl fmt::Display for DisplayableFuncTy<'_> {
     }
 }
 
+/// Floating point types.
+#[deku_derive(DekuRead)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[deku(type = "u8")]
+pub(crate) enum FloatTy {
+    // 32-bit floating point.
+    #[deku(id = "0")]
+    Float,
+    // 64-bit floating point.
+    #[deku(id = "1")]
+    Double,
+}
+
+impl Display for FloatTy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Self::Float => "float",
+            Self::Double => "double",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 #[deku_derive(DekuRead)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct StructTy {
@@ -1440,6 +1467,7 @@ const TYKIND_INTEGER: u8 = 1;
 const TYKIND_PTR: u8 = 2;
 const TYKIND_FUNC: u8 = 3;
 const TYKIND_STRUCT: u8 = 4;
+const TYKIND_FLOAT: u8 = 5;
 const TYKIND_UNIMPLEMENTED: u8 = 255;
 
 /// A type.
@@ -1457,6 +1485,8 @@ pub(crate) enum Ty {
     Func(FuncTy),
     #[deku(id = "TYKIND_STRUCT")]
     Struct(StructTy),
+    #[deku(id = "TYKIND_FLOAT")]
+    Float(FloatTy),
     #[deku(id = "TYKIND_UNIMPLEMENTED")]
     Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "map_to_string")] String),
 }
@@ -1478,6 +1508,7 @@ impl Ty {
                 // FIXME: write a stringifier for constant structs.
                 "const_struct".to_owned()
             }
+            Self::Float(_) => todo!(),
             Self::Unimplemented(s) => format!("?cst<{}>", s),
         }
     }
@@ -1501,6 +1532,7 @@ impl fmt::Display for DisplayableTy<'_> {
             Ty::Ptr => write!(f, "ptr"),
             Ty::Func(ft) => write!(f, "{}", ft.display(self.m)),
             Ty::Struct(st) => write!(f, "{}", st.display(self.m)),
+            Ty::Float(ft) => write!(f, "{}", ft),
             Ty::Unimplemented(s) => write!(f, "?ty<{}>", s),
         }
     }

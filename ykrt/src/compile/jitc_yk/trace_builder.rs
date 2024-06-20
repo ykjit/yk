@@ -444,6 +444,13 @@ impl<'a> TraceBuilder<'a> {
                 jit_ir::Ty::Func(jit_ir::FuncTy::new(jit_args, jit_retty, ft.is_vararg()))
             }
             aot_ir::Ty::Struct(_st) => todo!(),
+            aot_ir::Ty::Float(ft) => {
+                let inner = match ft {
+                    aot_ir::FloatTy::Float => jit_ir::FloatTy::Float,
+                    aot_ir::FloatTy::Double => jit_ir::FloatTy::Double,
+                };
+                jit_ir::Ty::Float(inner)
+            }
             aot_ir::Ty::Unimplemented(s) => jit_ir::Ty::Unimplemented(s.to_owned()),
         };
         self.jit_mod.insert_ty(jit_ty)
@@ -809,6 +816,16 @@ impl<'a> TraceBuilder<'a> {
             )
             .into(),
             aot_ir::CastKind::Trunc => jit_ir::TruncInst::new(
+                &self.handle_operand(val)?,
+                self.handle_type(self.aot_mod.type_(*dest_tyidx))?,
+            )
+            .into(),
+            aot_ir::CastKind::SIToFP => jit_ir::SIToFPInst::new(
+                &self.handle_operand(val)?,
+                self.handle_type(self.aot_mod.type_(*dest_tyidx))?,
+            )
+            .into(),
+            aot_ir::CastKind::FPExt => jit_ir::FPExtInst::new(
                 &self.handle_operand(val)?,
                 self.handle_type(self.aot_mod.type_(*dest_tyidx))?,
             )

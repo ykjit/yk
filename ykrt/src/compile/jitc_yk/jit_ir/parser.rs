@@ -7,9 +7,10 @@
 use super::super::{
     aot_ir::{BinOp, Predicate},
     jit_ir::{
-        BinOpInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FuncDecl, FuncTy, GuardInfo,
-        GuardInst, IcmpInst, Inst, InstIdx, LoadInst, LoadTraceInputInst, Module, Operand,
-        PtrAddInst, SExtInst, SelectInst, StoreInst, TruncInst, Ty, TyIdx,
+        BinOpInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FPExtInst, FloatTy,
+        FuncDecl, FuncTy, GuardInfo, GuardInst, IcmpInst, Inst, InstIdx, LoadInst,
+        LoadTraceInputInst, Module, Operand, PtrAddInst, SExtInst, SIToFPInst, SelectInst,
+        StoreInst, TruncInst, Ty, TyIdx,
     },
 };
 use fm::FMBuilder;
@@ -236,6 +237,16 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             SExtInst::new(&self.process_operand(val)?, self.process_type(type_)?);
                         self.push_assign(inst.into(), assign)?;
                     }
+                    ASTInst::SIToFP { assign, type_, val } => {
+                        let inst =
+                            SIToFPInst::new(&self.process_operand(val)?, self.process_type(type_)?);
+                        self.push_assign(inst.into(), assign)?;
+                    }
+                    ASTInst::FPExt { assign, type_, val } => {
+                        let inst =
+                            FPExtInst::new(&self.process_operand(val)?, self.process_type(type_)?);
+                        self.push_assign(inst.into(), assign)?;
+                    }
                     ASTInst::Store { tgt, val, volatile } => {
                         let inst = StoreInst::new(
                             self.process_operand(tgt)?,
@@ -395,6 +406,14 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                     .insert_ty(Ty::Integer(width))
                     .map_err(|e| self.error_at_span(span, &e.to_string()))
             }
+            ASTType::Float(span) => Ok(self
+                .m
+                .insert_ty(Ty::Float(FloatTy::Float))
+                .map_err(|e| self.error_at_span(span, &e.to_string()))?),
+            ASTType::Double(span) => Ok(self
+                .m
+                .insert_ty(Ty::Float(FloatTy::Double))
+                .map_err(|e| self.error_at_span(span, &e.to_string()))?),
             ASTType::Ptr => Ok(self.m.ptr_tyidx()),
             ASTType::Void => Ok(self.m.void_tyidx()),
         }
@@ -509,6 +528,16 @@ enum ASTInst {
         type_: ASTType,
         val: ASTOperand,
     },
+    SIToFP {
+        assign: Span,
+        type_: ASTType,
+        val: ASTOperand,
+    },
+    FPExt {
+        assign: Span,
+        type_: ASTType,
+        val: ASTOperand,
+    },
     Store {
         tgt: ASTOperand,
         val: ASTOperand,
@@ -543,6 +572,8 @@ enum ASTOperand {
 #[derive(Debug)]
 enum ASTType {
     Int(Span),
+    Float(Span),
+    Double(Span),
     Ptr,
     Void,
 }
@@ -657,6 +688,9 @@ mod tests {
               %45: i16 = sge %1, %2
               %46: i16 = slt %1, %2
               %47: i16 = sle %1, %2
+              %48: i32 = load_ti 7
+              %49: float = si_to_fp %48
+              %50: double = fp_ext %49
         ",
         );
     }
