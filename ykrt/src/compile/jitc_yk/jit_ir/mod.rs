@@ -37,7 +37,6 @@ use std::{
     ffi::{c_void, CString},
     fmt, mem,
 };
-use typed_index_collections::TiVec;
 #[cfg(not(test))]
 use ykaddr::addr::symbol_to_ptr;
 
@@ -60,7 +59,7 @@ pub(crate) struct Module {
     /// See the [Self::ctr_id] method for details.
     ctr_id: u64,
     /// The IR trace as a linear sequence of instructions.
-    insts: TiVec<InstIdx, Inst>,
+    insts: Vec<Inst>,
     /// The arguments pool for [CallInst]s. Indexed by [ArgsIdx].
     args: Vec<Operand>,
     /// The constant pool. Indexed by [ConstIdx].
@@ -89,9 +88,9 @@ pub(crate) struct Module {
     /// reference. Because they are externally initialised, these are *declarations*.
     global_decls: IndexSet<GlobalDecl>,
     /// Additional information for guards.
-    guard_info: TiVec<GuardInfoIdx, GuardInfo>,
+    guard_info: Vec<GuardInfo>,
     /// Indirect calls.
-    indirect_calls: TiVec<IndirectCallIdx, IndirectCallInst>,
+    indirect_calls: Vec<IndirectCallInst>,
     /// The virtual address of the global variable pointer array.
     ///
     /// This is an array (added to the LLVM AOT module and AOT codegenned by ykllvm) containing a
@@ -157,7 +156,7 @@ impl Module {
 
         Ok(Self {
             ctr_id,
-            insts: TiVec::new(),
+            insts: Vec::new(),
             args: Vec::new(),
             consts,
             types,
@@ -170,8 +169,8 @@ impl Module {
             false_constidx,
             func_decls: IndexSet::new(),
             global_decls: IndexSet::new(),
-            guard_info: TiVec::new(),
-            indirect_calls: TiVec::new(),
+            guard_info: Vec::new(),
+            indirect_calls: Vec::new(),
             #[cfg(not(test))]
             globalvar_ptrs,
         })
@@ -213,12 +212,12 @@ impl Module {
 
     /// Return the instruction at the specified index.
     pub(crate) fn inst(&self, idx: InstIdx) -> &Inst {
-        &self.insts[idx]
+        &self.insts[usize::from(idx)]
     }
 
     /// Return the indirect call at the specified index.
     pub(crate) fn indirect_call(&self, idx: IndirectCallIdx) -> &IndirectCallInst {
-        &self.indirect_calls[idx]
+        &self.indirect_calls[usize::from(idx)]
     }
 
     /// Push an instruction to the end of the [Module].
@@ -236,15 +235,12 @@ impl Module {
     /// other words, it produces monotonically increasing, but potentially non-consecutive, instruction
     /// indices.
     pub(crate) fn iter_skipping_inst_idxs(&self) -> SkippingInstIdxIterator<'_> {
-        SkippingInstIdxIterator {
-            m: self,
-            cur: InstIdx::new(0).unwrap(),
-        }
+        SkippingInstIdxIterator { m: self, cur: 0 }
     }
 
     /// Replace the instruction at `iidx` with `inst`.
     pub(crate) fn replace(&mut self, iidx: InstIdx, inst: Inst) {
-        self.insts[iidx] = inst;
+        self.insts[usize::from(iidx)] = inst;
     }
 
     pub(crate) fn push_indirect_call(
@@ -445,7 +441,7 @@ impl fmt::Display for Module {
         }
         write!(f, "\nentry:")?;
         for iidx in self.iter_skipping_inst_idxs() {
-            write!(f, "\n    {}", self.insts[iidx].display(iidx, self))?
+            write!(f, "\n    {}", self.inst(iidx).display(iidx, self))?
         }
 
         Ok(())
@@ -457,7 +453,7 @@ impl fmt::Display for Module {
 /// indices.
 pub(crate) struct SkippingInstIdxIterator<'a> {
     m: &'a Module,
-    cur: InstIdx,
+    cur: usize,
 }
 
 impl Iterator for SkippingInstIdxIterator<'_> {
@@ -465,8 +461,10 @@ impl Iterator for SkippingInstIdxIterator<'_> {
     /// Return the next instruction index or `None` if the end has been reached.
     fn next(&mut self) -> Option<InstIdx> {
         while let Some(x) = self.m.insts.get(self.cur) {
-            let old = self.cur;
-            self.cur = InstIdx::new(usize::from(old) + 1).unwrap();
+            // We know that `self.cur` must fit in `InstIdx`, as otherwise `m.insts` wouldn't have
+            // had the instruction in the first place.
+            let old = InstIdx::new(self.cur).unwrap();
+            self.cur += 1;
             match x {
                 Inst::ProxyConst(_) | Inst::ProxyInst(_) | Inst::Tombstone => (),
                 _ => return Some(old),
@@ -570,6 +568,8 @@ fn index_overflow(typ: &str) -> CompilationError {
 macro_rules! index_24bit {
     ($struct:ident) => {
         impl $struct {
+            /// Construct a new $struct from a `usize`, returning `CompilationError` if the `usize`
+            /// exceeds capacity.
             pub(crate) fn new(x: usize) -> Result<Self, CompilationError> {
                 match U24::try_from(x) {
                     Ok(x) => Ok(Self(x)),
@@ -578,16 +578,7 @@ macro_rules! index_24bit {
             }
         }
 
-        impl From<usize> for $struct {
-            /// Required for TiVec. **DO NOT USE INTERNALLY TO yk as this can `panic`!** Instead,
-            /// use [Self::new].
-            fn from(v: usize) -> Self {
-                Self::new(v).unwrap()
-            }
-        }
-
         impl From<$struct> for usize {
-            // Required for TiVec.
             fn from(x: $struct) -> Self {
                 usize::from(x.0)
             }
@@ -600,22 +591,26 @@ macro_rules! index_16bit {
     ($struct:ident) => {
         #[allow(dead_code)]
         impl $struct {
+            /// Construct a new $struct from a `usize`, returning `CompilationError` if the `usize`
+            /// exceeds capacity.
             pub(crate) fn new(v: usize) -> Result<Self, CompilationError> {
                 u16::try_from(v)
                     .map_err(|_| index_overflow(stringify!($struct)))
                     .map(|u| Self(u))
             }
 
-            pub(crate) fn to_u16(self) -> u16 {
-                self.0
+            pub(crate) fn checked_add(&self, other: usize) -> Result<Self, CompilationError> {
+                Self::new(usize::from(self.0) + other)
+            }
+
+            pub(crate) fn checked_sub(&self, other: usize) -> Result<Self, CompilationError> {
+                Self::new(usize::from(self.0) - other)
             }
         }
 
-        impl From<usize> for $struct {
-            /// Required for TiVec. **DO NOT USE INTERNALLY TO yk as this can `panic`!** Instead,
-            /// use [Self::new].
-            fn from(v: usize) -> Self {
-                Self::new(v).unwrap()
+        impl From<$struct> for u16 {
+            fn from(s: $struct) -> u16 {
+                s.0
             }
         }
 
@@ -856,12 +851,12 @@ impl PackedOperand {
     pub fn new(op: &Operand) -> Self {
         match op {
             Operand::Local(lidx) => {
-                debug_assert!(lidx.to_u16() <= MAX_OPERAND_IDX);
-                PackedOperand(lidx.to_u16())
+                debug_assert!(u16::from(*lidx) <= MAX_OPERAND_IDX);
+                PackedOperand(u16::from(*lidx))
             }
             Operand::Const(constidx) => {
-                debug_assert!(constidx.to_u16() <= MAX_OPERAND_IDX);
-                PackedOperand(constidx.to_u16() | !OPERAND_IDX_MASK)
+                debug_assert!(u16::from(*constidx) <= MAX_OPERAND_IDX);
+                PackedOperand(u16::from(*constidx) | !OPERAND_IDX_MASK)
             }
         }
     }
@@ -1104,7 +1099,7 @@ impl Inst {
 
             Self::BinOp(x) => x.tyidx(m),
             Self::IndirectCall(idx) => {
-                let inst = &m.indirect_calls[*idx];
+                let inst = m.indirect_call(*idx);
                 let ty = m.type_(inst.ftyidx);
                 let Ty::Func(fty) = ty else { panic!() };
                 fty.ret_tyidx()
@@ -1200,7 +1195,7 @@ impl fmt::Display for DisplayableInst<'_> {
                 )
             }
             Inst::IndirectCall(x) => {
-                let inst = &self.m.indirect_calls[*x];
+                let inst = &self.m.indirect_call(*x);
                 write!(
                     f,
                     "icall {}({})",
@@ -1542,8 +1537,7 @@ impl IndirectCallInst {
     ///
     /// Panics if the operand index is out of bounds.
     pub(crate) fn operand(&self, m: &Module, idx: usize) -> Operand {
-        m.arg(ArgsIdx::new(usize::from(self.args_idx) + idx).unwrap())
-            .clone()
+        m.arg(self.args_idx.checked_add(idx).unwrap()).clone()
     }
 }
 
@@ -1856,7 +1850,7 @@ impl GuardInst {
     }
 
     pub(crate) fn guard_info<'a>(&self, m: &'a Module) -> &'a GuardInfo {
-        &m.guard_info[self.gidx]
+        &m.guard_info[usize::from(self.gidx)]
     }
 }
 
