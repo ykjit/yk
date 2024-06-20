@@ -73,6 +73,7 @@ static WR2: Rq = Rq::R14;
 
 /// Floating point work registers.
 static WF0: Rx = Rx::XMM0;
+static WF1: Rx = Rx::XMM1;
 
 /// The X86_64 SysV ABI requires a 16-byte aligned stack prior to any call.
 const SYSV_CALL_STACK_ALIGN: usize = 16;
@@ -492,6 +493,16 @@ impl<'a> X64CodeGen<'a> {
                 }
                 // The quotient is stored in RAX. We don't care about the remainder stored in RDX.
                 self.store_new_local(iidx, Rq::RAX);
+            }
+            BinOp::FDiv => {
+                self.load_operand_float(WF0, &lhs);
+                self.load_operand_float(WF1, &rhs);
+                match lhs.byte_size(self.m) {
+                    8 => dynasm!(self.asm; divsd Rx(WF0.code()), Rx(WF1.code())),
+                    4 => dynasm!(self.asm; divss Rx(WF0.code()), Rx(WF1.code())),
+                    _ => todo!(),
+                }
+                self.store_new_local_float(iidx, WF0);
             }
             x => todo!("{x:?}"),
         }
@@ -922,10 +933,6 @@ impl<'a> X64CodeGen<'a> {
 
     /// Load a local variable into the specified general purpose register.
     fn load_local(&mut self, reg: Rq, local: InstIdx) {
-        debug_assert!(!matches!(
-            self.m.type_(self.m.inst(local).tyidx(self.m)),
-            Ty::Float(_)
-        ));
         let alloc = match self.m.inst(local) {
             jit_ir::Inst::ProxyConst(c) => match self.m.const_(*c) {
                 Const::Int(_, c) => &LocalAlloc::ConstInt(*c),
@@ -962,10 +969,6 @@ impl<'a> X64CodeGen<'a> {
 
     /// Load a local variable into the specified floating point register.
     fn load_local_float(&mut self, reg: Rx, local: InstIdx) {
-        debug_assert!(matches!(
-            self.m.type_(self.m.inst(local).tyidx(self.m)),
-            Ty::Float(_)
-        ));
         let alloc = match self.m.inst(local) {
             jit_ir::Inst::ProxyConst(_) => todo!(),
             jit_ir::Inst::ProxyInst(_) => todo!(),
@@ -1924,6 +1927,46 @@ mod tests {
                 ... movss xmm0, dword ptr [rbp-0x04]
                 ... cvtss2sd xmm0, xmm0
                 ... movsd [rbp-0x10], xmm0
+                ...
+                ",
+            );
+        }
+
+        #[test]
+        fn cg_fdiv_float() {
+            test_with_spillalloc(
+                "
+              entry:
+                %0: float = load_ti 0
+                %1: float = load_ti 1
+                %2: float = fdiv %0, %1
+            ",
+                "
+                ...
+                ... movss xmm0, dword ptr [rbp-0x04]
+                ... movss xmm1, dword ptr [rbp-0x08]
+                ... divss xmm0, xmm1
+                ... movss [rbp-0x0c], xmm0
+                ...
+                ",
+            );
+        }
+
+        #[test]
+        fn cg_fdiv_double() {
+            test_with_spillalloc(
+                "
+              entry:
+                %0: double = load_ti 0
+                %1: double = load_ti 1
+                %2: double = fdiv %0, %1
+            ",
+                "
+                ...
+                ... movsd xmm0, qword ptr [rbp-0x08]
+                ... movsd xmm1, qword ptr [rbp-0x10]
+                ... divsd xmm0, xmm1
+                ... movsd [rbp-0x18], xmm0
                 ...
                 ",
             );
