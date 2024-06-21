@@ -5,14 +5,22 @@
 //! Specifically, after calling [Module::assert_well_formed] one can safely assume:
 //!
 //!   * [super::BinOpInst]s:
-//!     * Have left and right hand side operands with the same [Ty]s.
-//!     * Have left and right hand side operands compatible with the operation in question.
+//!       * Have left and right hand side operands with the same [Ty]s.
+//!       * Have left and right hand side operands compatible with the operation in question.
 //!   * [super::DirectCallInst]s pass the correct number of arguments to a [super::FuncTy] and each
 //!     of those arguments has the correct [super::Ty].
+//!   * [super::FPExtInst]s:
+//!       * Have an float-typed source operand.
+//!       * Have a float-type as the destination type operand.
+//!       * Have a destination type operand strictly larger than the type of the source operand.
 //!   * [super::GuardInst]s:
 //!       * Have a `cond` whose type is [super::Ty::Integer(1)] (i.e. an `i1`).
 //!       * If `cond` references a constant, that constant matches the guard's `expect` attribute.
-//!   * [super::ICmpInst]s left and right hand side operands have the same [Ty]s.
+//!   * [super::IcmpInst]s left and right hand side operands have the same [Ty]s.
+//!   * [super::SIToFPInst]s:
+//!       * Have an integer-typed source operand.
+//!       * Have a float-type as the destination type operand.
+//!       * Have a destination type operand at least as big as the type of the source operand.
 //!   * [Const::Int]s cannot use more bits than the corresponding [Ty::Integer] type.
 
 use super::{BinOp, BinOpInst, Const, GuardInst, Inst, Module, Operand, Ty};
