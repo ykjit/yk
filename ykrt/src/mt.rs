@@ -787,7 +787,10 @@ pub(crate) enum TransitionGuardFailure {
 mod tests {
     extern crate test;
     use super::*;
-    use crate::{compile::jitc_llvm::LLVMCompiledTrace, trace::TraceRecorderError};
+    use crate::{
+        compile::{CompiledTraceTesting, CompiledTraceTestingWithHl},
+        trace::TraceRecorderError,
+    };
     use std::hint::black_box;
     use test::bench::Bencher;
 
@@ -847,7 +850,7 @@ mod tests {
         };
         let TransitionGuardFailure::StartSideTracing(hl) = mt.transition_guard_failure(
             sti,
-            Arc::new(LLVMCompiledTrace::new_testing_with_hl(Arc::downgrade(
+            Arc::new(CompiledTraceTestingWithHl::new(Arc::downgrade(
                 &loc.hot_location_arc_clone().unwrap(),
             ))),
         ) else {
@@ -886,7 +889,7 @@ mod tests {
             HotLocationKind::Compiling
         ));
         loc.hot_location().unwrap().lock().kind =
-            HotLocationKind::Compiled(Arc::new(LLVMCompiledTrace::new_testing()));
+            HotLocationKind::Compiled(Arc::new(CompiledTraceTesting::new()));
         assert!(matches!(
             dbg!(mt.transition_control_point(&loc)),
             TransitionControlPoint::Execute(_)
@@ -1181,9 +1184,8 @@ mod tests {
                                 loc.hot_location().unwrap().lock().kind,
                                 HotLocationKind::Compiling
                             ));
-                            loc.hot_location().unwrap().lock().kind = HotLocationKind::Compiled(
-                                Arc::new(LLVMCompiledTrace::new_testing()),
-                            );
+                            loc.hot_location().unwrap().lock().kind =
+                                HotLocationKind::Compiled(Arc::new(CompiledTraceTesting::new()));
                             loop {
                                 if let TransitionControlPoint::Execute(_) =
                                     mt.transition_control_point(&loc)
@@ -1277,7 +1279,7 @@ mod tests {
                 HotLocationKind::Compiling
             ));
             loc.hot_location().unwrap().lock().kind =
-                HotLocationKind::Compiled(Arc::new(LLVMCompiledTrace::new_testing()));
+                HotLocationKind::Compiled(Arc::new(CompiledTraceTesting::new()));
         }
 
         to_compiled(&mt, &loc1);
@@ -1345,7 +1347,7 @@ mod tests {
         expect_start_tracing(&mt, &loc1);
         expect_stop_tracing(&mt, &loc1);
         loc1.hot_location().unwrap().lock().kind =
-            HotLocationKind::Compiled(Arc::new(LLVMCompiledTrace::new_testing()));
+            HotLocationKind::Compiled(Arc::new(CompiledTraceTesting::new()));
 
         // If we transition `loc2` into `StartTracing`, then (for now) we should not execute the
         // trace for `loc1`, as another location is being traced and we don't want to trace the
