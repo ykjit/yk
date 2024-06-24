@@ -298,6 +298,14 @@ impl<'a> TraceBuilder<'a> {
                     trueval,
                     falseval,
                 } => self.handle_select(bid, iidx, cond, trueval, falseval),
+                aot_ir::Inst::LoadArg { arg_idx, .. } => {
+                    // Map passed in arguments to their respective LoadArg instructions.
+                    let jitop = &self.frames.last().unwrap().args[*arg_idx];
+                    let aot_iid =
+                        aot_ir::InstID::new(bid.funcidx(), bid.bbidx(), aot_ir::InstIdx::new(iidx));
+                    self.local_map.insert(aot_iid, jitop.clone());
+                    Ok(())
+                }
                 _ => todo!("{:?}", inst),
             }?;
         }
@@ -418,12 +426,6 @@ impl<'a> TraceBuilder<'a> {
                 let load = jit_ir::LookupGlobalInst::new(self.handle_global(*gd_idx)?)?;
                 self.jit_mod.push_and_make_operand(load.into())
             }
-            aot_ir::Operand::Arg { argidx, .. } => {
-                // Lookup the JIT instruction that was passed into this function as an argument.
-                // Unwrap is safe since an `Arg` means we are currently inlining a function.
-                // FIXME: Is the above correct? What about args in the control point frame?
-                Ok(self.frames.last().unwrap().args[usize::from(*argidx)].clone())
-            }
             _ => todo!("{}", op.display(self.aot_mod)),
         }
     }
@@ -501,7 +503,7 @@ impl<'a> TraceBuilder<'a> {
         // Unwrap-safe as each frame at this point must have a safepoint associated with it.
         let mut smids = Vec::new(); // List of stackmap ids of the current call stack.
         let mut live_args = Vec::new(); // List of live JIT variables.
-        for (safepoint, frame_args) in self.frames.iter().map(|f| (f.safepoint.unwrap(), &f.args)) {
+        for safepoint in self.frames.iter().map(|f| (f.safepoint.unwrap())) {
             let aot_ir::Operand::Const(cidx) = safepoint.id else {
                 panic!();
             };
@@ -517,11 +519,6 @@ impl<'a> TraceBuilder<'a> {
             for op in safepoint.lives.iter() {
                 let op = match op {
                     aot_ir::Operand::LocalVariable(iid) => &self.local_map[iid],
-                    aot_ir::Operand::Arg { argidx, .. } => {
-                        // Lookup the JIT value of the argument from the caller (stored in
-                        // the previous frame's `args` field).
-                        &frame_args[usize::from(*argidx)]
-                    }
                     _ => panic!(), // IR malformed.
                 };
                 match op {
