@@ -165,11 +165,24 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                     }
                     ASTInst::ICmp {
                         assign,
-                        type_: _,
+                        type_,
                         pred,
                         lhs,
                         rhs,
                     } => {
+                        let ty = self.process_type(type_)?;
+                        match self.m.type_(ty) {
+                            Ty::Integer(1) => (),
+                            x => {
+                                return Err(self.error_at_span(
+                                    assign,
+                                    &format!(
+                                        "ICmp instructions must assign to an i1, not '{}'",
+                                        x.display(self.m)
+                                    ),
+                                ))
+                            }
+                        }
                         let inst = IcmpInst::new(
                             self.process_operand(lhs)?,
                             pred,
@@ -638,7 +651,7 @@ mod tests {
               %0: i16 = load_ti 0
               %1: i16 = trunc %0
               %2: i16 = add %0, %1
-              %4: i16 = eq %1, %2
+              %4: i1 = eq %1, %2
               tloop_start
               guard %4, true
               call @f1()
@@ -680,15 +693,15 @@ mod tests {
               %37: i64 = add %33, 9223372036854775808i64
               *%9 = 0x0
               *%9 = 0xFFFFFFFF
-              %38: i16 = ne %1, %2
-              %40: i16 = ugt %1, %2
-              %41: i16 = uge %1, %2
-              %42: i16 = ult %1, %2
-              %43: i16 = ule %1, %2
-              %44: i16 = sgt %1, %2
-              %45: i16 = sge %1, %2
-              %46: i16 = slt %1, %2
-              %47: i16 = sle %1, %2
+              %38: i1 = ne %1, %2
+              %40: i1 = ugt %1, %2
+              %41: i1 = uge %1, %2
+              %42: i1 = ult %1, %2
+              %43: i1 = ule %1, %2
+              %44: i1 = sgt %1, %2
+              %45: i1 = sge %1, %2
+              %46: i1 = slt %1, %2
+              %47: i1 = sle %1, %2
               %48: i32 = load_ti 7
               %49: float = si_to_fp %48
               %50: double = fp_ext %49
@@ -791,6 +804,17 @@ mod tests {
             %4: i16 = load_ti 1
             %3: i16 = load_ti 2
         ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "ICmp instructions must assign to an i1, not 'i8'")]
+    fn icmp_assign_to_non_i1() {
+        Module::from_str(
+            "
+          entry:
+            %0: i8 = ult 1i8, 2i8
+            ",
         );
     }
 

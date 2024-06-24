@@ -270,7 +270,7 @@ mod tests {
               entry:
                 %0: i8 = load_ti 0
                 %1: i64 = load_ti 0
-                %2: i8 = eq %0, %1
+                %2: i1 = eq %0, %1
             ",
         );
     }

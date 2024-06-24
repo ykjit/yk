@@ -295,34 +295,34 @@ mod tests {
         Module::assert_ir_transform_eq(
             "
           entry:
-            %0: i8 = eq 0i8, 0i8
-            %1: i8 = eq 0i8, 1i8
-            %2: i8 = ne 0i8, 0i8
-            %3: i8 = ne 0i8, 1i8
-            %4: i8 = ugt 0i8, 0i8
-            %5: i8 = ugt 0i8, 1i8
-            %6: i8 = ugt 1i8, 0i8
-            %7: i8 = uge 0i8, 0i8
-            %8: i8 = uge 0i8, 1i8
-            %9: i8 = uge 1i8, 0i8
-            %10: i8 = ult 0i8, 0i8
-            %11: i8 = ult 0i8, 1i8
-            %12: i8 = ult 1i8, 0i8
-            %13: i8 = ule 0i8, 0i8
-            %14: i8 = ule 0i8, 1i8
-            %15: i8 = ule 1i8, 0i8
-            %16: i8 = sgt 0i8, 0i8
-            %17: i8 = sgt 0i8, -1i8
-            %18: i8 = sgt -1i8, 0i8
-            %19: i8 = sge 0i8, 0i8
-            %20: i8 = sge 0i8, -1i8
-            %21: i8 = sge -1i8, 0i8
-            %22: i8 = slt 0i8, 0i8
-            %23: i8 = slt 0i8, -1i8
-            %24: i8 = slt -1i8, 0i8
-            %25: i8 = sle 0i8, 0i8
-            %26: i8 = sle 0i8, -1i8
-            %27: i8 = sle -1i8, 0i8
+            %0: i1 = eq 0i8, 0i8
+            %1: i1 = eq 0i8, 1i8
+            %2: i1 = ne 0i8, 0i8
+            %3: i1 = ne 0i8, 1i8
+            %4: i1 = ugt 0i8, 0i8
+            %5: i1 = ugt 0i8, 1i8
+            %6: i1 = ugt 1i8, 0i8
+            %7: i1 = uge 0i8, 0i8
+            %8: i1 = uge 0i8, 1i8
+            %9: i1 = uge 1i8, 0i8
+            %10: i1 = ult 0i8, 0i8
+            %11: i1 = ult 0i8, 1i8
+            %12: i1 = ult 1i8, 0i8
+            %13: i1 = ule 0i8, 0i8
+            %14: i1 = ule 0i8, 1i8
+            %15: i1 = ule 1i8, 0i8
+            %16: i1 = sgt 0i8, 0i8
+            %17: i1 = sgt 0i8, -1i8
+            %18: i1 = sgt -1i8, 0i8
+            %19: i1 = sge 0i8, 0i8
+            %20: i1 = sge 0i8, -1i8
+            %21: i1 = sge -1i8, 0i8
+            %22: i1 = slt 0i8, 0i8
+            %23: i1 = slt 0i8, -1i8
+            %24: i1 = slt -1i8, 0i8
+            %25: i1 = sle 0i8, 0i8
+            %26: i1 = sle 0i8, -1i8
+            %27: i1 = sle -1i8, 0i8
             black_box %0
             black_box %1
             black_box %2
