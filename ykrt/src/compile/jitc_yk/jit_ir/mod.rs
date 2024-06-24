@@ -26,6 +26,8 @@
 //!     object which implements [std::fmt::Display].
 
 #[cfg(test)]
+mod dead_code;
+#[cfg(test)]
 mod parser;
 #[cfg(any(debug_assertions, test))]
 mod well_formed;
@@ -227,7 +229,7 @@ impl Module {
 
     /// Iterate, in order, over all `InstIdx`s of this module (including `Proxy*` and `Tombstone`
     /// instructions).
-    pub(crate) fn iter_inst_idxs(&self) -> impl Iterator<Item = InstIdx> {
+    pub(crate) fn iter_inst_idxs(&self) -> impl DoubleEndedIterator<Item = InstIdx> {
         (0..self.insts.len()).map(|x| InstIdx::new(x).unwrap())
     }
 
@@ -1129,6 +1131,78 @@ impl Inst {
             Self::Select(s) => s.trueval(m).tyidx(m),
             Self::SIToFP(i) => i.dest_ty_idx(),
             Self::FPExt(i) => i.dest_ty_idx(),
+        }
+    }
+
+    /// Must this instruction be considered alive, irrespective of its context? For example, side
+    /// effecting instructions will always be considered alive.
+    #[cfg(test)]
+    fn always_alive(&self) -> bool {
+        match self {
+            #[cfg(test)]
+            Inst::BlackBox(_) => true,
+            Inst::ProxyConst(_) => todo!(),
+            Inst::ProxyInst(_) => todo!(),
+            Inst::Tombstone => todo!(),
+            Inst::BinOp(_) => false,
+            Inst::Load(_) => todo!(),
+            Inst::LookupGlobal(_) => todo!(),
+            Inst::LoadTraceInput(_) => false,
+            Inst::Call(_) => todo!(),
+            Inst::IndirectCall(_) => todo!(),
+            Inst::PtrAdd(_) => todo!(),
+            Inst::DynPtrAdd(_) => todo!(),
+            Inst::Store(_) => todo!(),
+            Inst::Icmp(_) => false,
+            Inst::Guard(_) => todo!(),
+            Inst::Arg(_) => todo!(),
+            Inst::TraceLoopStart => todo!(),
+            Inst::SExt(_) => todo!(),
+            Inst::ZeroExtend(_) => todo!(),
+            Inst::Trunc(_) => todo!(),
+            Inst::Select(_) => todo!(),
+            Inst::SIToFP(_) => todo!(),
+            Inst::FPExt(_) => todo!(),
+        }
+    }
+
+    // Apply the function `f` to each of this instruction's [Operand]s (in no specified order).
+    #[cfg(test)]
+    fn map_operands<F>(&self, m: &Module, mut f: F)
+    where
+        F: FnMut(Operand),
+    {
+        match self {
+            #[cfg(test)]
+            Inst::BlackBox(BlackBoxInst { op }) => f(op.unpack(m)),
+            Inst::ProxyConst(_) => todo!(),
+            Inst::ProxyInst(_) => todo!(),
+            Inst::Tombstone => todo!(),
+            Inst::BinOp(BinOpInst { lhs, binop: _, rhs }) => {
+                f(lhs.unpack(m));
+                f(rhs.unpack(m))
+            }
+            Inst::Load(_) => todo!(),
+            Inst::LookupGlobal(_) => todo!(),
+            Inst::LoadTraceInput(_) => (),
+            Inst::Call(_) => todo!(),
+            Inst::IndirectCall(_) => todo!(),
+            Inst::PtrAdd(_) => todo!(),
+            Inst::DynPtrAdd(_) => todo!(),
+            Inst::Store(_) => todo!(),
+            Inst::Icmp(IcmpInst { lhs, pred: _, rhs }) => {
+                f(lhs.unpack(m));
+                f(rhs.unpack(m))
+            }
+            Inst::Guard(_) => todo!(),
+            Inst::Arg(_) => todo!(),
+            Inst::TraceLoopStart => todo!(),
+            Inst::SExt(_) => todo!(),
+            Inst::ZeroExtend(_) => todo!(),
+            Inst::Trunc(_) => todo!(),
+            Inst::Select(_) => todo!(),
+            Inst::SIToFP(_) => todo!(),
+            Inst::FPExt(_) => todo!(),
         }
     }
 
