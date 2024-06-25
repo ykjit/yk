@@ -402,7 +402,6 @@ pub(crate) enum Predicate {
     SignedGreaterEqual,
     SignedLess,
     SignedLessEqual,
-    // FIXME: add floating-point-specific predicates.
 }
 
 impl Display for Predicate {
@@ -420,6 +419,83 @@ impl Display for Predicate {
             Self::SignedLess => write!(f, "slt"),
             Self::SignedLessEqual => write!(f, "sle"),
         }
+    }
+}
+
+/// Predicates for use in numeric comparisons.
+#[deku_derive(DekuRead)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+#[deku(type = "u8")]
+pub(crate) enum FloatPredicate {
+    // FIXME: eventually remove False/True (always false/always true) predicates. LLVM has them,
+    // but we can lower these to constants in our IR.
+    False = 0,
+    OrderedEqual,
+    OrderedGreater,
+    OrderedGreaterEqual,
+    OrderedLess,
+    OrderedLessEqual,
+    OrderedNotEqual,
+    Ordered,
+    Unordered,
+    UnorderedEqual,
+    UnorderedGreater,
+    UnorderedGreaterEqual,
+    UnorderedLess,
+    UnorderedLessEqual,
+    UnorderedNotEqual,
+    True,
+}
+
+impl FloatPredicate {
+    /// Returns whether the operation is ordered (where possible).
+    pub(crate) fn is_ordered(&self) -> Option<bool> {
+        match self {
+            Self::False => None,
+            Self::OrderedEqual => Some(true),
+            Self::OrderedGreater => Some(true),
+            Self::OrderedGreaterEqual => Some(true),
+            Self::OrderedLess => Some(true),
+            Self::OrderedLessEqual => Some(true),
+            Self::OrderedNotEqual => Some(true),
+            Self::Ordered => Some(true),
+            Self::Unordered => Some(false),
+            Self::UnorderedEqual => Some(false),
+            Self::UnorderedGreater => Some(false),
+            Self::UnorderedGreaterEqual => Some(false),
+            Self::UnorderedLess => Some(false),
+            Self::UnorderedLessEqual => Some(false),
+            Self::UnorderedNotEqual => Some(false),
+            Self::True => None,
+        }
+    }
+}
+impl Display for FloatPredicate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The `f_` prefix ensures there is no ambiguity with integer predicates.
+        //
+        // For example "ule" could mean "unsigned less or equal" (for integers) or "unordered less
+        // or equal" (for floats). Without prefixing the float version comparison instructions
+        // using those would both stringify as: `%res: ty = ule %op1, %op2`.
+        let s = match self {
+            Self::False => "f_false",
+            Self::OrderedEqual => "f_oeq",
+            Self::OrderedGreater => "f_ogt",
+            Self::OrderedGreaterEqual => "f_oge",
+            Self::OrderedLess => "f_olt",
+            Self::OrderedLessEqual => "f_ole",
+            Self::OrderedNotEqual => "f_one",
+            Self::Ordered => "f_ord",
+            Self::Unordered => "f_uno",
+            Self::UnorderedEqual => "f_ueq",
+            Self::UnorderedGreater => "f_ugt",
+            Self::UnorderedGreaterEqual => "f_uge",
+            Self::UnorderedLess => "f_ult",
+            Self::UnorderedLessEqual => "f_ule",
+            Self::UnorderedNotEqual => "f_une",
+            Self::True => "f_true",
+        };
+        write!(f, "{}", s)
     }
 }
 
@@ -741,6 +817,13 @@ pub(crate) enum Inst {
     },
     #[deku(id = "17")]
     LoadArg { arg_idx: usize, ty_idx: TyIdx },
+    #[deku(id = "18")]
+    FCmp {
+        tyidx: TyIdx,
+        lhs: Operand,
+        pred: FloatPredicate,
+        rhs: Operand,
+    },
     #[deku(id = "255")]
     Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "map_to_string")] String),
 }
@@ -820,6 +903,7 @@ impl Inst {
             Self::LoadArg { arg_idx: _, ty_idx } => Some(m.type_(*ty_idx)),
             Self::Unimplemented(_) => None,
             Self::Nop => None,
+            Self::FCmp { tyidx, .. } => Some(m.type_(*tyidx)),
         }
     }
 
@@ -1075,6 +1159,9 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::LoadArg { arg_idx, ty_idx: _ } => write!(f, "arg({})", arg_idx,),
             Inst::Unimplemented(s) => write!(f, "unimplemented <<{}>>", s),
             Inst::Nop => write!(f, "nop"),
+            Inst::FCmp { lhs, pred, rhs, .. } => {
+                write!(f, "{pred} {}, {}", lhs.display(self.m), rhs.display(self.m))
+            }
         }
     }
 }
