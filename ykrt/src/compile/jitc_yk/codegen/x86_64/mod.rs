@@ -1001,6 +1001,7 @@ impl<'a> X64CodeGen<'a> {
     /// Load a constant into the specified general purpose register.
     fn load_const(&mut self, reg: Rq, cidx: jit_ir::ConstIdx) {
         match self.m.const_(cidx) {
+            jit_ir::Const::Float(_tyidx, _x) => todo!(),
             jit_ir::Const::Int(tyidx, x) => {
                 let jit_ir::Ty::Integer(width) = self.m.type_(*tyidx) else {
                     panic!()
