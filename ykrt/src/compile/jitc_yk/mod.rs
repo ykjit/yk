@@ -40,6 +40,11 @@ static YKD_OPT: LazyLock<bool> = LazyLock::new(|| {
     }
 });
 
+static AOT_MOD: LazyLock<aot_ir::Module> = LazyLock::new(|| {
+    let ir_slice = yk_ir_section().unwrap();
+    aot_ir::deserialise_module(ir_slice).unwrap()
+});
+
 pub(crate) struct JITCYk;
 
 impl JITCYk {
@@ -72,15 +77,14 @@ impl Compiler for JITCYk {
             todo!();
         }
         // If either `unwrap` fails, there is no chance of the system working correctly.
-        let ir_slice = yk_ir_section().unwrap();
-        let aot_mod = aot_ir::deserialise_module(ir_slice).unwrap();
+        let aot_mod = &*AOT_MOD;
 
         if should_log_ir(IRPhase::AOT) {
             log_ir(&format!("--- Begin aot ---\n{}\n--- End aot ---", aot_mod));
         }
 
         let mut jit_mod =
-            trace_builder::build(mt.next_compiled_trace_id(), &aot_mod, aottrace_iter.0)?;
+            trace_builder::build(mt.next_compiled_trace_id(), aot_mod, aottrace_iter.0)?;
 
         if should_log_ir(IRPhase::PreOpt) {
             log_ir(&format!(
