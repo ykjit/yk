@@ -80,7 +80,10 @@ impl Compiler for JITCYk {
         let aot_mod = &*AOT_MOD;
 
         if should_log_ir(IRPhase::AOT) {
-            log_ir(&format!("--- Begin aot ---\n{}\n--- End aot ---", aot_mod));
+            log_ir(&format!(
+                "--- Begin aot ---\n{}\n--- End aot ---\n",
+                aot_mod
+            ));
         }
 
         let mut jit_mod =
@@ -88,7 +91,7 @@ impl Compiler for JITCYk {
 
         if should_log_ir(IRPhase::PreOpt) {
             log_ir(&format!(
-                "--- Begin jit-pre-opt ---\n{jit_mod}\n--- End jit-pre-opt ---",
+                "--- Begin jit-pre-opt ---\n{jit_mod}\n--- End jit-pre-opt ---\n",
             ));
         }
 
@@ -96,7 +99,7 @@ impl Compiler for JITCYk {
             jit_mod = opt::opt(jit_mod)?;
             if should_log_ir(IRPhase::PostOpt) {
                 log_ir(&format!(
-                    "--- Begin jit-post-opt ---\n{jit_mod}\n--- End jit-post-opt ---",
+                    "--- Begin jit-post-opt ---\n{jit_mod}\n--- End jit-post-opt ---\n",
                 ));
             }
         }
