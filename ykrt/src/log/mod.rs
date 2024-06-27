@@ -96,7 +96,7 @@ mod internals {
 
     pub(crate) fn log_ir(s: &str) {
         match LOG_IR.as_ref().map(|(p, _)| p.as_str()) {
-            Some("-") => eprintln!("{}", s),
+            Some("-") => eprint!("{}", s),
             Some(x) => {
                 File::options()
                     .append(true)
