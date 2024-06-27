@@ -88,6 +88,47 @@ const STACK_DIRECTION: StackDirection = StackDirection::GrowsDown;
 #[inline(never)]
 pub extern "C" fn __yk_break() {}
 
+/// Load an SSE register with an immediate float/double.
+///
+/// Note that if `size < mem::sizeof::<double>()`, then `val` may be rounded to the closest
+/// possible value (as per `as` cast semantics).
+///
+/// # Panics
+///
+/// This will panic if `size` isn't either 4 or 8 (bytes).
+fn imm_float_into_reg(val: f64, reg: Rx, size: usize, asm: &mut dynasmrt::x64::Assembler) {
+    // Note that there's no way to directly move an immediate value into an xmm, so we
+    // have to go via a general purpose register. Because we don't know if this
+    // register is already in use by the parent codegen routine, we have no option but
+    // the save/restore it.
+    //
+    // FIXME: when we have a proper register allocator, it can have a "with_temp_reg()" method. It
+    // would either pass the closure a free register, or if there isn't one, do the save/restore on
+    // our behalf.
+    match size {
+        4 => {
+            let val = val as f32; // NB: potential rounding!
+            let val = val.to_bits() as i32;
+            dynasm!(asm
+                ; push Rq(WR0.code())
+                ; mov Rd(WR0.code()), val
+                ; movd Rx(reg.code()), Rd(WR0.code())
+                ; pop Rq(WR0.code())
+            );
+        }
+        8 => {
+            let val = val.to_bits() as i64;
+            dynasm!(asm
+                ; push Rq(WR0.code())
+                ; mov Rq(WR0.code()), QWORD val
+                ; movq Rx(reg.code()), Rq(WR0.code())
+                ; pop Rq(WR0.code())
+            );
+        }
+        _ => panic!(),
+    }
+}
+
 /// The X86_64 code generator.
 pub(crate) struct X64CodeGen<'a> {
     m: &'a jit_ir::Module,
@@ -937,7 +978,7 @@ impl<'a> X64CodeGen<'a> {
     fn load_operand_float(&mut self, reg: Rx, op: &Operand) {
         match op {
             Operand::Local(li) => self.load_local_float(reg, *li),
-            Operand::Const(_) => todo!(),
+            Operand::Const(ci) => self.load_const_float(reg, *ci),
         }
     }
 
@@ -974,19 +1015,24 @@ impl<'a> X64CodeGen<'a> {
                 // variant.
                 dynasm!(self.asm; mov Rq(reg.code()), QWORD *c as i64);
             }
+            LocalAlloc::ConstFloat(_) => todo!(),
         }
     }
 
     /// Load a local variable into the specified floating point register.
     fn load_local_float(&mut self, reg: Rx, local: InstIdx) {
         let alloc = match self.m.inst(local) {
-            jit_ir::Inst::ProxyConst(_) => todo!(),
+            jit_ir::Inst::ProxyConst(c) => match self.m.const_(*c) {
+                Const::Float(_, c) => &LocalAlloc::ConstFloat(*c),
+                _ => todo!(),
+            },
             jit_ir::Inst::ProxyInst(_) => todo!(),
             _ => self.ra.allocation(local),
         };
+        let size = self.m.inst(local).def_byte_size(self.m);
         match alloc {
             LocalAlloc::Stack { frame_off, size: _ } => match i32::try_from(*frame_off) {
-                Ok(foff) => match self.m.inst(local).def_byte_size(self.m) {
+                Ok(foff) => match size {
                     4 => dynasm!(self.asm; movss Rx(reg.code()), [rbp - foff]),
                     8 => dynasm!(self.asm; movsd Rx(reg.code()), [rbp - foff]),
                     _ => todo!(),
@@ -994,7 +1040,8 @@ impl<'a> X64CodeGen<'a> {
                 Err(_) => todo!(),
             },
             LocalAlloc::Register => todo!(),
-            LocalAlloc::ConstInt(_) => unreachable!(),
+            LocalAlloc::ConstInt(_) => todo!(),
+            LocalAlloc::ConstFloat(fv) => imm_float_into_reg(*fv, reg, size, &mut self.asm),
         }
     }
 
@@ -1022,6 +1069,22 @@ impl<'a> X64CodeGen<'a> {
         }
     }
 
+    /// Load a constant into the specified floating point register.
+    fn load_const_float(&mut self, reg: Rx, cidx: jit_ir::ConstIdx) {
+        match self.m.const_(cidx) {
+            jit_ir::Const::Float(tyidx, v) => {
+                // Unwrap cannot fail. Constant floats are sized.
+                imm_float_into_reg(
+                    *v,
+                    reg,
+                    self.m.type_(*tyidx).byte_size().unwrap(),
+                    &mut self.asm,
+                );
+            }
+            jit_ir::Const::Int(..) | jit_ir::Const::Ptr(..) => todo!(),
+        }
+    }
+
     fn store_local(&mut self, l: &LocalAlloc, reg: Rq, size: usize) {
         match l {
             LocalAlloc::Stack { frame_off, size: _ } => match i32::try_from(*frame_off) {
@@ -1036,6 +1099,7 @@ impl<'a> X64CodeGen<'a> {
             },
             LocalAlloc::Register => todo!(),
             LocalAlloc::ConstInt(_) => todo!(),
+            LocalAlloc::ConstFloat(_) => todo!(),
         }
     }
 
@@ -1058,6 +1122,7 @@ impl<'a> X64CodeGen<'a> {
             },
             LocalAlloc::Register => todo!(),
             LocalAlloc::ConstInt(_) => todo!(),
+            LocalAlloc::ConstFloat(_) => todo!(),
         }
     }
 
@@ -2018,6 +2083,56 @@ mod tests {
                 ... movsd xmm1, qword ptr [rbp-0x10]
                 ... addsd xmm0, xmm1
                 ... movsd [rbp-0x18], xmm0
+                ...
+                ",
+            );
+        }
+
+        #[test]
+        fn cg_const_float() {
+            test_with_spillalloc(
+                "
+              entry:
+                %0: float = fadd 1.2float, 3.4float
+            ",
+                "
+                ...
+                ; %0: float = fadd 1.2float, 3.4float
+                ... push r12
+                ... mov r12d, 0x3f99999a
+                ... movd xmm0, r12d
+                ... pop r12
+                ... push r12
+                ... mov r12d, 0x4059999a
+                ... movd xmm1, r12d
+                ... pop r12
+                ... addss xmm0, xmm1
+                ... movss [rbp-0x04], xmm0
+                ...
+                ",
+            );
+        }
+
+        #[test]
+        fn cg_const_double() {
+            test_with_spillalloc(
+                "
+              entry:
+                %0: double = fadd 1.2double, 3.4double
+            ",
+                "
+                ...
+                ; %0: double = fadd 1.2double, 3.4double
+                ... push r12
+                ... mov r12, 0x3ff3333333333333
+                ... movq xmm0, r12
+                ... pop r12
+                ... push r12
+                ... mov r12, 0x400b333333333333
+                ... movq xmm1, r12
+                ... pop r12
+                ... addsd xmm0, xmm1
+                ... movsd [rbp-0x08], xmm0
                 ...
                 ",
             );

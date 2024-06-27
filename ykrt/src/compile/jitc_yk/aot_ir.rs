@@ -1503,7 +1503,15 @@ impl Ty {
                 // FIXME: write a stringifier for constant structs.
                 "const_struct".to_owned()
             }
-            Self::Float(_) => todo!(),
+            Self::Float(ft) => {
+                // Note that floats are stored at rest as a doubles for now.
+                // unwrap safe: constant malformed if there are too few bytes for a chunk.
+                let dval = f64::from_ne_bytes(*c.bytes().first_chunk().unwrap());
+                match ft {
+                    FloatTy::Float => format!("{}float", dval as f32),
+                    FloatTy::Double => format!("{}double", dval),
+                }
+            }
             Self::Unimplemented(s) => format!("?cst<{}>", s),
         }
     }

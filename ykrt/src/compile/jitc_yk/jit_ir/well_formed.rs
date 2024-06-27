@@ -183,7 +183,7 @@ impl Module {
 
 #[cfg(test)]
 mod tests {
-    use super::Module;
+    use super::{BinOp, BinOpInst, Const, Inst, Module, Operand};
 
     #[should_panic(expected = "Instruction at position 0 passing too few arguments")]
     #[test]
@@ -249,17 +249,21 @@ mod tests {
         );
     }
 
-    #[should_panic(expected = "Instruction at position 2 has different types on lhs and rhs")]
+    #[should_panic(expected = "Instruction at position 0 has different types on lhs and rhs")]
     #[test]
     fn cg_add_wrong_types() {
-        Module::from_str(
-            "
-              entry:
-                %0: i64 = load_ti 0
-                %1: i32 = load_ti 1
-                %2: i32 = add %0, %1
-            ",
-        );
+        // The parser will reject a binop with a result type different from either operand, so to
+        // get the test we want, we can't use the parser.
+        let mut m = Module::new(0, 0).unwrap();
+        let c1 = m.insert_const(Const::Int(m.int1_tyidx(), 0)).unwrap();
+        let c2 = m.insert_const(Const::Int(m.int8_tyidx(), 0)).unwrap();
+        m.push(Inst::BinOp(BinOpInst::new(
+            Operand::Const(c1),
+            BinOp::Add,
+            Operand::Const(c2),
+        )))
+        .unwrap();
+        m.assert_well_formed();
     }
 
     #[test]
@@ -384,7 +388,7 @@ mod tests {
             "
               entry:
                 %0: float = load_ti 0
-                %1: i32 = add %0, %0
+                %1: float = add %0, %0
             ",
         );
     }
@@ -396,7 +400,7 @@ mod tests {
             "
               entry:
                 %0: i32 = load_ti 0
-                %1: float = fadd %0, %0
+                %1: i32 = fadd %0, %0
             ",
         );
     }

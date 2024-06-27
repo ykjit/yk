@@ -11,7 +11,7 @@ pub(crate) mod spill_alloc;
 pub(crate) use spill_alloc::SpillAllocator;
 
 /// Describes a local variable allocation.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum LocalAlloc {
     /// The local variable is on the stack.
     Stack {
@@ -32,6 +32,7 @@ pub(crate) enum LocalAlloc {
     /// FIXME: unimplemented.
     Register,
     ConstInt(u64),
+    ConstFloat(f64),
 }
 
 impl LocalAlloc {

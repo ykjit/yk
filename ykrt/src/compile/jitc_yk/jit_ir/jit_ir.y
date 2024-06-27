@@ -120,6 +120,8 @@ Operand -> Result<ASTOperand, Box<dyn Error>>:
     "LOCAL_OPERAND" { Ok(ASTOperand::Local($1?.span())) }
   | "CONST_INT" { Ok(ASTOperand::ConstInt($1?.span())) }
   | "CONST_PTR" { Ok(ASTOperand::ConstPtr($1?.span())) }
+  | "CONST_FLOAT" { Ok(ASTOperand::ConstFloat($1?.span())) }
+  | "CONST_DOUBLE" { Ok(ASTOperand::ConstDouble($1?.span())) }
   ;
 
 Type -> Result<ASTType, Box<dyn Error>>:

@@ -974,7 +974,6 @@ pub(crate) enum Const {
     /// A constant integer at most 64 bits wide. This can be treated a signed or unsigned integer
     /// depending on the operations that use this constant (the [Ty::Integer] type itself has no
     /// concept of signedness).
-    #[allow(dead_code)]
     Float(TyIdx, f64),
     Int(TyIdx, u64),
     Ptr(usize),
@@ -1068,7 +1067,11 @@ pub(crate) struct DisplayableConst<'a> {
 impl fmt::Display for DisplayableConst<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.const_ {
-            Const::Float(_tyidx, _v) => todo!(),
+            Const::Float(tyidx, v) => match self.m.type_(*tyidx) {
+                Ty::Float(FloatTy::Float) => write!(f, "{}float", *v as f32),
+                Ty::Float(FloatTy::Double) => write!(f, "{}double", v),
+                _ => unreachable!(),
+            },
             Const::Int(tyidx, x) => {
                 let Ty::Integer(width) = self.m.type_(*tyidx) else {
                     panic!()

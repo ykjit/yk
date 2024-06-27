@@ -127,16 +127,21 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                 match inst {
                     ASTInst::BinOp {
                         assign,
-                        type_: _,
+                        type_,
                         bin_op,
                         lhs,
                         rhs,
                     } => {
-                        let inst = BinOpInst::new(
-                            self.process_operand(lhs)?,
-                            bin_op,
-                            self.process_operand(rhs)?,
-                        );
+                        let tyidx = self.process_type(type_)?;
+                        let lhs = self.process_operand(lhs)?;
+                        let rhs = self.process_operand(rhs)?;
+                        if lhs.tyidx(self.m) != tyidx || rhs.tyidx(self.m) != tyidx {
+                            return Err(self.error_at_span(
+                                assign,
+                                "Binop result type incorrect for one or more operands",
+                            ));
+                        }
+                        let inst = BinOpInst::new(lhs, bin_op, rhs);
                         self.push_assign(inst.into(), assign)?;
                     }
                     ASTInst::Call {
@@ -397,6 +402,32 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         .map_err(|e| self.error_at_span(span, &e.to_string()))?,
                 ))
             }
+            ASTOperand::ConstFloat(span) => {
+                // unwrap must succeed if the parser is correct.
+                let s = self.lexer.span_str(span).strip_suffix("float").unwrap();
+                let val = s
+                    .parse::<f32>()
+                    .map_err(|e| self.error_at_span(span, &e.to_string()))?;
+                let tyidx = self.m.insert_ty(Ty::Float(FloatTy::Float)).unwrap();
+                Ok(Operand::Const(
+                    self.m
+                        .insert_const(Const::Float(tyidx, val as f64))
+                        .map_err(|e| self.error_at_span(span, &e.to_string()))?,
+                ))
+            }
+            ASTOperand::ConstDouble(span) => {
+                // unwrap must succeed if the parser is correct.
+                let s = self.lexer.span_str(span).strip_suffix("double").unwrap();
+                let val = s
+                    .parse::<f64>()
+                    .map_err(|e| self.error_at_span(span, &e.to_string()))?;
+                let tyidx = self.m.insert_ty(Ty::Float(FloatTy::Double)).unwrap();
+                Ok(Operand::Const(
+                    self.m
+                        .insert_const(Const::Float(tyidx, val))
+                        .map_err(|e| self.error_at_span(span, &e.to_string()))?,
+                ))
+            }
             ASTOperand::Local(span) => {
                 let idx = self.lexer.span_str(span)[1..]
                     .parse::<usize>()
@@ -582,6 +613,8 @@ enum ASTOperand {
     Local(Span),
     ConstInt(Span),
     ConstPtr(Span),
+    ConstFloat(Span),
+    ConstDouble(Span),
 }
 
 #[derive(Debug)]
@@ -650,9 +683,9 @@ mod tests {
             func_decl f3(i8, i32, ...) -> i64
             func_decl f4(...)
             entry:
-              %0: i16 = load_ti 0
-              %1: i16 = trunc %0
-              %2: i16 = add %0, %1
+              %0: i32 = load_ti 0
+              %1: i32 = trunc %0
+              %2: i32 = add %0, %1
               %4: i1 = eq %1, %2
               tloop_start
               guard %4, true
@@ -675,11 +708,11 @@ mod tests {
               %18: i32 = shl %0, %1
               %19: i32 = ashr %0, %1
               %1999: float = load_ti 0
-              %20: i32 = fadd %1999, %1999
-              %21: i32 = fdiv %1999, %1999
-              %22: i32 = fmul %1999, %1999
-              %23: i32 = frem %1999, %1999
-              %24: i32 = fsub %1999, %1999
+              %20: float = fadd %1999, %1999
+              %21: float = fdiv %1999, %1999
+              %22: float = fmul %1999, %1999
+              %23: float = frem %1999, %1999
+              %24: float = fsub %1999, %1999
               %25: i32 = lshr %0, %1
               %26: i32 = sdiv %0, %1
               %27: i32 = srem %0, %1
@@ -707,6 +740,8 @@ mod tests {
               %48: i32 = load_ti 7
               %49: float = si_to_fp %48
               %50: double = fp_ext %49
+              %51: double = fadd 1double, 2.345double
+              %52: float = fadd 1float, 2.345float
         ",
         );
     }
@@ -842,6 +877,17 @@ mod tests {
             %0: i8 = load_ti 0
             %1: i8 = add %0, 255i8
             %2: i8 = add %0, 256i8
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Binop result type incorrect for one or more operands")]
+    fn invalid_binop_result_ty() {
+        Module::from_str(
+            "
+          entry:
+            %0: float = fadd 1.2double, 3.4double
             ",
         );
     }
