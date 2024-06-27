@@ -272,7 +272,8 @@ impl Module {
         })
     }
 
-    /// Returns the [InstIdx] of the last instruction in this module.
+    /// Returns the [InstIdx] of the last instruction in this module. Note that this might be a
+    /// `Tombstone` or other "internal" instruction.
     ///
     /// # Panics
     ///
