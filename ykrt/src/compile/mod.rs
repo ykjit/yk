@@ -148,3 +148,101 @@ impl GuardId {
         GuardId(usize::MAX)
     }
 }
+
+#[cfg(test)]
+mod compiled_trace_testing {
+    use super::*;
+
+    /// A [CompiledTrace] implementation suitable only for testing: when any of its methods are
+    /// called it will `panic`.
+    #[derive(Debug)]
+    pub(crate) struct CompiledTraceTesting;
+
+    impl CompiledTraceTesting {
+        pub(crate) fn new() -> Self {
+            Self
+        }
+    }
+
+    impl CompiledTrace for CompiledTraceTesting {
+        fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static> {
+            panic!();
+        }
+
+        fn mt(&self) -> &Arc<MT> {
+            panic!();
+        }
+
+        fn guard(&self, _id: GuardId) -> &Guard {
+            panic!();
+        }
+
+        fn is_last_guard(&self, _id: GuardId) -> bool {
+            panic!();
+        }
+
+        fn aotvals(&self) -> *const c_void {
+            panic!();
+        }
+
+        fn entry(&self) -> *const c_void {
+            panic!();
+        }
+
+        fn hl(&self) -> &Weak<Mutex<HotLocation>> {
+            panic!();
+        }
+
+        fn disassemble(&self) -> Result<String, Box<dyn Error>> {
+            panic!();
+        }
+    }
+
+    /// A [CompiledTrace] implementation suitable only for testing. The `hl` method will return a
+    /// [HotLocation] but all other methods will `panic` if called.
+    #[derive(Debug)]
+    pub(crate) struct CompiledTraceTestingWithHl(Weak<Mutex<HotLocation>>);
+
+    impl CompiledTraceTestingWithHl {
+        pub(crate) fn new(hl: Weak<Mutex<HotLocation>>) -> Self {
+            Self(hl)
+        }
+    }
+
+    impl CompiledTrace for CompiledTraceTestingWithHl {
+        fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static> {
+            panic!();
+        }
+
+        fn mt(&self) -> &Arc<MT> {
+            panic!();
+        }
+
+        fn guard(&self, _id: GuardId) -> &Guard {
+            panic!();
+        }
+
+        fn is_last_guard(&self, _id: GuardId) -> bool {
+            panic!();
+        }
+
+        fn aotvals(&self) -> *const c_void {
+            panic!();
+        }
+
+        fn entry(&self) -> *const c_void {
+            panic!();
+        }
+
+        fn hl(&self) -> &Weak<Mutex<HotLocation>> {
+            &self.0
+        }
+
+        fn disassemble(&self) -> Result<String, Box<dyn Error>> {
+            panic!();
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) use compiled_trace_testing::*;

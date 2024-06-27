@@ -3,11 +3,14 @@
 ;     ...
 ;     func main(...
 ;       bb0:
-;         %0_0: ptr = ptr_add @arr0, 3
-;         %0_1: ptr = ptr_add @arr1, 16
-;         %0_2: ptr = ptr_add @arr2, 32
-;         %0_3: ptr = ptr_add @arr3, 96
-;         %0_4: ptr = ptr_add @arr4, 12
+;         %0_0: i32 = arg(0)
+;         %0_1: i32 = arg(1)
+;         %0_2: ptr = arg(2)
+;         %0_3: ptr = ptr_add @arr0, 3
+;         %0_4: ptr = ptr_add @arr1, 16
+;         %0_5: ptr = ptr_add @arr2, 32
+;         %0_6: ptr = ptr_add @arr3, 96
+;         %0_7: ptr = ptr_add @arr4, 12
 ;	    ...
 ;       bb1:
 ;         %1_0: ptr = ptr_add @arr0, 1
@@ -21,9 +24,9 @@
 ;         %2_1: ptr = ptr_add @mdarr1, 320
 ;       ...
 ;       bb3:
-;         %3_0: ptr = ptr_add @arr0, 0 + (%arg0 * 3)
-;         %3_1: ptr = ptr_add @arr0, 0 + (%arg0 * 3) + (%arg1 * 1)
-;         %3_2: ptr = ptr_add @mdarr0, 1 + (%arg0 * 2)
+;         %3_0: ptr = ptr_add @arr0, 0 + (%0_0 * 3)
+;         %3_1: ptr = ptr_add @arr0, 0 + (%0_0 * 3) + (%0_1 * 1)
+;         %3_2: ptr = ptr_add @mdarr0, 1 + (%0_0 * 2)
 ;       ...
 ;       bb4:
 ;         %4_0: ptr = ptr_add @struct0, 8
@@ -34,9 +37,9 @@
 ;       bb5:
 ;         %5_0: ptr = ptr_add @mixed0, 12
 ;         %5_1: ptr = ptr_add @mixed0, 13
-;         %5_2: ptr = ptr_add @mixed0, 5 + (%arg0 * 8)
+;         %5_2: ptr = ptr_add @mixed0, 5 + (%0_0 * 8)
 ;         %5_3: ptr = ptr_add @mixed1, 10
-;         %5_4: ptr = ptr_add @mixed1, 8 + (%arg0 * 8) + (%arg1 * 1)
+;         %5_4: ptr = ptr_add @mixed1, 8 + (%0_0 * 8) + (%0_1 * 1)
 ;         ret
 ;     }
 ;     ...

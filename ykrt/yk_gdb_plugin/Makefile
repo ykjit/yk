@@ -1,4 +1,4 @@
-CPPFLAGS=-I/usr/include/gdb
+CPPFLAGS=-I/usr/include/ -I/usr/local/include/
 CFLAGS=-fPIC -g -Wextra -Wpedantic
 
 ../../target/yk_gdb_plugin.so: yk_gdb_plugin.c

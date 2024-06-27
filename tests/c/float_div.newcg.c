@@ -5,33 +5,37 @@
 //   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
 //     jitstate: start-tracing
-//     4
-//     foo
+//     4 -> 8.000000 20.000000
 //     jitstate: stop-tracing
 //     --- Begin aot ---
 //     ...
 //     func main(%arg0: i32, %arg1: ptr) -> i32 {
 //     ...
+//     %{{10_5}}: float = fdiv %{{_}}, %{{_}}
+//     %{{10_6}}: double = fp_ext %{{10_5}}, double
+//     ...
+//     %{{10_9}}: double = fdiv %{{_}}, %{{_}}
+//     ...
+//     %{{_}}: i32 = call fprintf(%{{_}}, @{{_}}, %{{_}}, %10_6, %10_9)
+//     ...
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{1}}: i1 = sgt %{{2}}, 1i32
+//     %{{16}}: float = fdiv %{{_}}, %{{_}}
+//     %{{17}}: double = fp_ext %{{16}}
 //     ...
-//     %{{3}}: i64 = call @fwrite(%{{4}}, 4i64, 1i64, %{{5}})
+//     %{{20}}: double = fdiv %{{_}}, %{{_}}
+//     ...
+//     %{{_}}: i32 = call @fprintf(%{{_}}, %{{_}}, %{{_}}, %{{17}}, %{{20}})
 //     ...
 //     --- End jit-pre-opt ---
-//     3
-//     foo
+//     3 -> 6.000000 15.000000
 //     jitstate: enter-jit-code
-//     2
-//     foo
-//     1
+//     2 -> 4.000000 10.000000
+//     1 -> 2.000000 5.000000
 //     jitstate: deoptimise
-//     bar
-//     0
-//     exit
 
-// Check that call inlining works.
+// Check floating point division works.
 
 #include <assert.h>
 #include <stdio.h>
@@ -40,34 +44,22 @@
 #include <yk.h>
 #include <yk_testing.h>
 
-void foo(int i) {
-  if (i > 1) {
-    fputs("foo\n", stderr);
-  } else {
-    fputs("bar\n", stderr);
-  }
-}
-
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
   YkLocation loc = yk_location_new();
 
-  int res = 9998;
   int i = 4;
+  float f = 0.5;
+  double d = 0.2;
   NOOPT_VAL(loc);
-  NOOPT_VAL(res);
   NOOPT_VAL(i);
+  NOOPT_VAL(f);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    fprintf(stderr, "%d\n", i);
-    foo(i);
-    res += 2;
+    fprintf(stderr, "%d -> %f %f\n", i, (float)i / f, (double)i / d);
     i--;
   }
-  fprintf(stderr, "%d\n", i);
-  fprintf(stderr, "exit\n");
-  NOOPT_VAL(res);
   yk_location_drop(loc);
   yk_mt_drop(mt);
   return (EXIT_SUCCESS);

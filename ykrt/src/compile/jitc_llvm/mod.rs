@@ -195,19 +195,6 @@ impl LLVMCompiledTrace {
         todo!();
     }
 
-    /// Create a `CompiledTrace` suitable for testing purposes. The resulting instance is not
-    /// useful other than as a placeholder.
-    pub(crate) fn new_testing() -> Self {
-        Self { hl: None }
-    }
-
-    /// Create a `CompiledTrace` suitable for testing purposes. The resulting instance is not
-    /// useful other than as a placeholder: calling any of its methods other than `hl` will cause a
-    /// panic.
-    pub(crate) fn new_testing_with_hl(hl: Weak<Mutex<HotLocation>>) -> Self {
-        Self { hl: Some(hl) }
-    }
-
     fn smap(&self) -> &HashMap<u64, Vec<LiveVar>> {
         todo!();
     }

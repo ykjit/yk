@@ -12,6 +12,7 @@
 //     ashr2 -2
 //     xor 5
 //     xor2 -5
+//     shl 8
 //     ---
 //     jitstate: stop-tracing
 //     --- Begin jit-pre-opt ---
@@ -26,6 +27,7 @@
 //     ashr2 -2
 //     xor 2
 //     xor2 -4
+//     shl 6
 //     ---
 //     jitstate: enter-jit-code
 //     and 0
@@ -35,6 +37,7 @@
 //     ashr2 -1
 //     xor 3
 //     xor2 -3
+//     shl 4
 //     ---
 //     and 1
 //     or 1
@@ -43,6 +46,7 @@
 //     ashr2 -1
 //     xor 0
 //     xor2 -2
+//     shl 2
 //     ---
 //     jitstate: deoptimise
 //     exit
@@ -75,6 +79,7 @@ int main(int argc, char **argv) {
     int ashr2 = -i >> 1;
     int xor = i ^ 1;
     int xor2 = ~i;
+    int shl = i << 1;
     fprintf(stderr, "and %d\n", and);
     fprintf(stderr, "or %d\n", or);
     fprintf(stderr, "lshr %d\n", lshr);
@@ -82,6 +87,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "ashr2 %d\n", ashr2);
     fprintf(stderr, "xor %d\n", xor);
     fprintf(stderr, "xor2 %d\n", xor2);
+    fprintf(stderr, "shl %d\n", shl);
     fprintf(stderr, "---\n");
     i--;
   }

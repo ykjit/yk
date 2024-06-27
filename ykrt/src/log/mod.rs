@@ -61,7 +61,9 @@ mod internals {
                     }
                     Some((p.to_string(), log_phases))
                 }
-                _ => panic!("YKD_LOG_IR must be of the format '<path|->:stage_1,...,stage_n'"),
+                _ => panic!(
+                    "YKD_LOG_IR must be of the format '<path>:<irstage_1>[,...,<irstage_n>]'"
+                ),
             }
         } else {
             None

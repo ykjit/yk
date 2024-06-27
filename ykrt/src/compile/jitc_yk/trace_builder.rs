@@ -17,7 +17,7 @@ struct Frame<'a> {
     // The call instruction of this frame.
     callinst: Option<aot_ir::InstID>,
     // Index of the function of this frame.
-    func_idx: Option<FuncIdx>,
+    funcidx: Option<FuncIdx>,
     /// Safepoint for this frame.
     safepoint: Option<&'a aot_ir::DeoptSafepoint>,
     /// JIT arguments of this frame's caller.
@@ -27,13 +27,13 @@ struct Frame<'a> {
 impl<'a> Frame<'a> {
     fn new(
         callinst: Option<aot_ir::InstID>,
-        func_idx: Option<FuncIdx>,
+        funcidx: Option<FuncIdx>,
         safepoint: Option<&'a aot_ir::DeoptSafepoint>,
         args: Vec<jit_ir::Operand>,
     ) -> Frame<'a> {
         Frame {
             callinst,
-            func_idx,
+            funcidx,
             safepoint,
             args,
         }
@@ -74,7 +74,7 @@ impl<'a> TraceBuilder<'a> {
             local_map: HashMap::new(),
             cp_block: None,
             first_ti_idx: 0,
-            // We have to set the func_idx to None here as we don't know what it is yet. We'll
+            // We have to set the funcidx to None here as we don't know what it is yet. We'll
             // update it as soon as we do.
             frames: vec![Frame::new(None, None, None, vec![])],
             outline_target_blk: None,
@@ -87,7 +87,7 @@ impl<'a> TraceBuilder<'a> {
         match tb {
             TraceAction::MappedAOTBBlock { func_name, bb } => {
                 let func_name = func_name.to_str().unwrap(); // safe: func names are valid UTF-8.
-                let func = self.aot_mod.func_idx(func_name);
+                let func = self.aot_mod.funcidx(func_name);
                 Some(aot_ir::BBlockId::new(func, aot_ir::BBlockIdx::new(*bb)))
             }
             TraceAction::UnmappableBBlock { .. } => None,
@@ -125,8 +125,8 @@ impl<'a> TraceBuilder<'a> {
         // profoundly wrong with the AOT IR.
         let trace_inputs = trace_inputs.unwrap();
         let trace_input_struct_ty = match trace_inputs {
-            aot_ir::Inst::Alloca { ty_idx, .. } => {
-                let aot_ir::Ty::Struct(x) = self.aot_mod.type_(*ty_idx) else {
+            aot_ir::Inst::Alloca { tyidx, .. } => {
+                let aot_ir::Ty::Struct(x) = self.aot_mod.type_(*tyidx) else {
                     panic!()
                 };
                 x
@@ -143,7 +143,7 @@ impl<'a> TraceBuilder<'a> {
         //
         // FIXME: Can we do something at IR lowering time to make this easier?
         let mut last_store_ptr = None;
-        for (inst_idx, inst) in inst_iter {
+        for (iidx, inst) in inst_iter {
             match inst {
                 aot_ir::Inst::Store { val, .. } => last_store_ptr = Some(val),
                 aot_ir::Inst::PtrAdd { ptr, .. } => {
@@ -159,14 +159,14 @@ impl<'a> TraceBuilder<'a> {
                         // FIXME: assumes the field is byte-aligned. If it isn't, field_byte_off() will
                         // crash.
                         let aot_field_off = trace_input_struct_ty.field_byte_off(trace_input_idx);
-                        let aot_field_ty = trace_input_struct_ty.field_ty_idx(trace_input_idx);
+                        let aot_field_ty = trace_input_struct_ty.field_tyidx(trace_input_idx);
                         // FIXME: we should check at compile-time that this will fit.
                         match u32::try_from(aot_field_off) {
                             Ok(u32_off) => {
-                                let input_ty_idx =
+                                let input_tyidx =
                                     self.handle_type(self.aot_mod.type_(aot_field_ty))?;
                                 let load_ti_inst =
-                                    jit_ir::LoadTraceInputInst::new(u32_off, input_ty_idx).into();
+                                    jit_ir::LoadTraceInputInst::new(u32_off, input_tyidx).into();
                                 self.jit_mod.push(load_ti_inst)?;
                                 // If this take fails, we didn't see a corresponding store and the
                                 // IR is malformed.
@@ -174,7 +174,7 @@ impl<'a> TraceBuilder<'a> {
                                     last_store_ptr.take().unwrap().to_inst_id(),
                                     jit_ir::Operand::Local(self.jit_mod.last_inst_idx()),
                                 );
-                                self.first_ti_idx = inst_idx;
+                                self.first_ti_idx = iidx;
                             }
                             _ => {
                                 return Err(CompilationError::InternalError(
@@ -205,31 +205,31 @@ impl<'a> TraceBuilder<'a> {
         let blk = self.aot_mod.bblock(bid);
 
         // Decide how to translate each AOT instruction.
-        for (inst_idx, inst) in blk.insts.iter().enumerate() {
+        for (iidx, inst) in blk.insts.iter().enumerate() {
             match inst {
                 aot_ir::Inst::Br { .. } => Ok(()),
                 aot_ir::Inst::Load {
                     ptr,
-                    ty_idx,
+                    tyidx,
                     volatile,
-                } => self.handle_load(bid, inst_idx, ptr, ty_idx, *volatile),
+                } => self.handle_load(bid, iidx, ptr, tyidx, *volatile),
                 // FIXME: ignore remaining instructions after a call.
                 aot_ir::Inst::Call { callee, args, .. } => {
                     // Get the branch instruction of this block.
                     let nextinst = blk.insts.last().unwrap();
-                    self.handle_call(inst, bid, inst_idx, callee, args, nextinst)
+                    self.handle_call(inst, bid, iidx, callee, args, nextinst)
                 }
                 aot_ir::Inst::IndirectCall {
-                    fty_idx,
+                    ftyidx,
                     callop,
                     args,
                 } => {
                     // Get the branch instruction of this block.
                     let nextinst = blk.insts.last().unwrap();
-                    self.handle_indirectcall(inst, bid, inst_idx, fty_idx, callop, args, nextinst)
+                    self.handle_indirectcall(inst, bid, iidx, ftyidx, callop, args, nextinst)
                 }
                 aot_ir::Inst::Store { tgt, val, volatile } => {
-                    self.handle_store(bid, inst_idx, tgt, val, *volatile)
+                    self.handle_store(bid, iidx, tgt, val, *volatile)
                 }
                 aot_ir::Inst::PtrAdd {
                     ptr,
@@ -238,26 +238,19 @@ impl<'a> TraceBuilder<'a> {
                     dyn_elem_sizes,
                     ..
                 } => {
-                    if self.cp_block.as_ref() == Some(bid) && inst_idx == self.first_ti_idx {
+                    if self.cp_block.as_ref() == Some(bid) && iidx == self.first_ti_idx {
                         // We've reached the trace inputs part of the control point block. There's
                         // no point in copying these instructions over and we can just skip to the
                         // next block.
                         return Ok(());
                     }
-                    self.handle_ptradd(
-                        bid,
-                        inst_idx,
-                        ptr,
-                        *const_off,
-                        dyn_elem_counts,
-                        dyn_elem_sizes,
-                    )
+                    self.handle_ptradd(bid, iidx, ptr, *const_off, dyn_elem_counts, dyn_elem_sizes)
                 }
                 aot_ir::Inst::BinaryOp { lhs, binop, rhs } => {
-                    self.handle_binop(bid, inst_idx, *binop, lhs, rhs)
+                    self.handle_binop(bid, iidx, *binop, lhs, rhs)
                 }
                 aot_ir::Inst::ICmp { lhs, pred, rhs, .. } => {
-                    self.handle_icmp(bid, inst_idx, lhs, pred, rhs)
+                    self.handle_icmp(bid, iidx, lhs, pred, rhs)
                 }
                 aot_ir::Inst::CondBr {
                     cond,
@@ -268,9 +261,9 @@ impl<'a> TraceBuilder<'a> {
                 aot_ir::Inst::Cast {
                     cast_kind,
                     val,
-                    dest_ty_idx,
-                } => self.handle_cast(bid, inst_idx, cast_kind, val, dest_ty_idx),
-                aot_ir::Inst::Ret { val } => self.handle_ret(bid, inst_idx, val),
+                    dest_tyidx,
+                } => self.handle_cast(bid, iidx, cast_kind, val, dest_tyidx),
+                aot_ir::Inst::Ret { val } => self.handle_ret(bid, iidx, val),
                 aot_ir::Inst::Switch {
                     test_val,
                     default_dest,
@@ -279,7 +272,7 @@ impl<'a> TraceBuilder<'a> {
                     safepoint,
                 } => self.handle_switch(
                     bid,
-                    inst_idx,
+                    iidx,
                     safepoint,
                     nextbb.as_ref().unwrap(),
                     test_val,
@@ -291,11 +284,11 @@ impl<'a> TraceBuilder<'a> {
                     incoming_bbs,
                     incoming_vals,
                 } => {
-                    debug_assert_eq!(prevbb.as_ref().unwrap().func_idx(), bid.func_idx());
+                    debug_assert_eq!(prevbb.as_ref().unwrap().funcidx(), bid.funcidx());
                     self.handle_phi(
                         bid,
-                        inst_idx,
-                        &prevbb.as_ref().unwrap().bb_idx(),
+                        iidx,
+                        &prevbb.as_ref().unwrap().bbidx(),
                         incoming_bbs,
                         incoming_vals,
                     )
@@ -304,7 +297,15 @@ impl<'a> TraceBuilder<'a> {
                     cond,
                     trueval,
                     falseval,
-                } => self.handle_select(bid, inst_idx, cond, trueval, falseval),
+                } => self.handle_select(bid, iidx, cond, trueval, falseval),
+                aot_ir::Inst::LoadArg { arg_idx, .. } => {
+                    // Map passed in arguments to their respective LoadArg instructions.
+                    let jitop = &self.frames.last().unwrap().args[*arg_idx];
+                    let aot_iid =
+                        aot_ir::InstID::new(bid.funcidx(), bid.bbidx(), aot_ir::InstIdx::new(iidx));
+                    self.local_map.insert(aot_iid, jitop.clone());
+                    Ok(())
+                }
                 _ => todo!("{:?}", inst),
             }?;
         }
@@ -314,8 +315,8 @@ impl<'a> TraceBuilder<'a> {
     /// Link the AOT IR to the last instruction pushed into the JIT IR.
     fn link_iid_to_last_inst(&mut self, bid: &aot_ir::BBlockId, aot_inst_idx: usize) {
         let aot_iid = aot_ir::InstID::new(
-            bid.func_idx(),
-            bid.bb_idx(),
+            bid.funcidx(),
+            bid.bbidx(),
             aot_ir::InstIdx::new(aot_inst_idx),
         );
         // The unwrap is safe because we've already inserted an element at this index and proven
@@ -363,7 +364,7 @@ impl<'a> TraceBuilder<'a> {
     ) -> Result<jit_ir::Const, CompilationError> {
         let aot_const = aot_const.unwrap_val();
         let bytes = aot_const.bytes();
-        match self.aot_mod.type_(aot_const.ty_idx()) {
+        match self.aot_mod.type_(aot_const.tyidx()) {
             aot_ir::Ty::Integer(aot_ir::IntegerTy { num_bits }) => {
                 // FIXME: It would be better if the AOT IR had converted these integers in advance
                 // rather than doing this dance here.
@@ -389,8 +390,8 @@ impl<'a> TraceBuilder<'a> {
                     }
                     _ => todo!("{}", num_bits),
                 };
-                let jit_ty_idx = self.jit_mod.insert_ty(jit_ir::Ty::Integer(*num_bits))?;
-                Ok(jit_ir::Const::Int(jit_ty_idx, x))
+                let jit_tyidx = self.jit_mod.insert_ty(jit_ir::Ty::Integer(*num_bits))?;
+                Ok(jit_ir::Const::Int(jit_tyidx, x))
             }
             aot_ir::Ty::Ptr => {
                 let val: usize;
@@ -425,12 +426,6 @@ impl<'a> TraceBuilder<'a> {
                 let load = jit_ir::LookupGlobalInst::new(self.handle_global(*gd_idx)?)?;
                 self.jit_mod.push_and_make_operand(load.into())
             }
-            aot_ir::Operand::Arg { arg_idx, .. } => {
-                // Lookup the JIT instruction that was passed into this function as an argument.
-                // Unwrap is safe since an `Arg` means we are currently inlining a function.
-                // FIXME: Is the above correct? What about args in the control point frame?
-                Ok(self.frames.last().unwrap().args[usize::from(*arg_idx)].clone())
-            }
             _ => todo!("{}", op.display(self.aot_mod)),
         }
     }
@@ -443,14 +438,21 @@ impl<'a> TraceBuilder<'a> {
             aot_ir::Ty::Ptr => jit_ir::Ty::Ptr,
             aot_ir::Ty::Func(ft) => {
                 let mut jit_args = Vec::new();
-                for aot_arg_ty_idx in ft.arg_ty_idxs() {
-                    let jit_ty = self.handle_type(self.aot_mod.type_(*aot_arg_ty_idx))?;
+                for aot_arg_tyidx in ft.arg_tyidxs() {
+                    let jit_ty = self.handle_type(self.aot_mod.type_(*aot_arg_tyidx))?;
                     jit_args.push(jit_ty);
                 }
                 let jit_retty = self.handle_type(self.aot_mod.type_(ft.ret_ty()))?;
                 jit_ir::Ty::Func(jit_ir::FuncTy::new(jit_args, jit_retty, ft.is_vararg()))
             }
             aot_ir::Ty::Struct(_st) => todo!(),
+            aot_ir::Ty::Float(ft) => {
+                let inner = match ft {
+                    aot_ir::FloatTy::Float => jit_ir::FloatTy::Float,
+                    aot_ir::FloatTy::Double => jit_ir::FloatTy::Double,
+                };
+                jit_ir::Ty::Float(inner)
+            }
             aot_ir::Ty::Unimplemented(s) => jit_ir::Ty::Unimplemented(s.to_owned()),
         };
         self.jit_mod.insert_ty(jit_ty)
@@ -464,7 +466,7 @@ impl<'a> TraceBuilder<'a> {
         let aot_func = self.aot_mod.func(aot_idx);
         let jit_func = jit_ir::FuncDecl::new(
             aot_func.name().to_owned(),
-            self.handle_type(self.aot_mod.type_(aot_func.ty_idx()))?,
+            self.handle_type(self.aot_mod.type_(aot_func.tyidx()))?,
         );
         self.jit_mod.insert_func_decl(jit_func)
     }
@@ -501,7 +503,7 @@ impl<'a> TraceBuilder<'a> {
         // Unwrap-safe as each frame at this point must have a safepoint associated with it.
         let mut smids = Vec::new(); // List of stackmap ids of the current call stack.
         let mut live_args = Vec::new(); // List of live JIT variables.
-        for (safepoint, frame_args) in self.frames.iter().map(|f| (f.safepoint.unwrap(), &f.args)) {
+        for safepoint in self.frames.iter().map(|f| (f.safepoint.unwrap())) {
             let aot_ir::Operand::Const(cidx) = safepoint.id else {
                 panic!();
             };
@@ -517,11 +519,6 @@ impl<'a> TraceBuilder<'a> {
             for op in safepoint.lives.iter() {
                 let op = match op {
                     aot_ir::Operand::LocalVariable(iid) => &self.local_map[iid],
-                    aot_ir::Operand::Arg { arg_idx, .. } => {
-                        // Lookup the JIT value of the argument from the caller (stored in
-                        // the previous frame's `args` field).
-                        &frame_args[usize::from(*arg_idx)]
-                    }
                     _ => panic!(), // IR malformed.
                 };
                 match op {
@@ -529,7 +526,9 @@ impl<'a> TraceBuilder<'a> {
                         live_args.push(*lidx);
                     }
                     jit_ir::Operand::Const(_) => {
-                        todo!()
+                        // Since we are forcing constants into `ProxyConst`s during inlining, this
+                        // case should never happen.
+                        panic!()
                     }
                 }
             }
@@ -550,7 +549,7 @@ impl<'a> TraceBuilder<'a> {
         true_bb: &aot_ir::BBlockIdx,
     ) -> Result<(), CompilationError> {
         let jit_cond = self.handle_operand(cond)?;
-        let guard = self.create_guard(&jit_cond, *true_bb == next_bb.bb_idx(), safepoint)?;
+        let guard = self.create_guard(&jit_cond, *true_bb == next_bb.bbidx(), safepoint)?;
         self.jit_mod.push(guard.into())?;
         Ok(())
     }
@@ -591,12 +590,12 @@ impl<'a> TraceBuilder<'a> {
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
         ptr: &aot_ir::Operand,
-        ty_idx: &aot_ir::TyIdx,
+        tyidx: &aot_ir::TyIdx,
         volatile: bool,
     ) -> Result<(), CompilationError> {
         let inst = jit_ir::LoadInst::new(
             self.handle_operand(ptr)?,
-            self.handle_type(self.aot_mod.type_(*ty_idx))?,
+            self.handle_type(self.aot_mod.type_(*tyidx))?,
             volatile,
         )
         .into();
@@ -609,7 +608,7 @@ impl<'a> TraceBuilder<'a> {
         inst: &'a aot_ir::Inst,
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
-        fty_idx: &aot_ir::TyIdx,
+        ftyidx: &aot_ir::TyIdx,
         callop: &aot_ir::Operand,
         args: &[aot_ir::Operand],
         nextinst: &'a aot_ir::Inst,
@@ -632,7 +631,7 @@ impl<'a> TraceBuilder<'a> {
             aot_ir::Inst::Br { succ } => {
                 // We can only stop outlining when we see the succesor block and we are not in
                 // the middle of recursion.
-                let succbid = BBlockId::new(bid.func_idx(), *succ);
+                let succbid = BBlockId::new(bid.funcidx(), *succ);
                 self.outline_target_blk = Some(succbid);
                 self.recursion_count = 0;
             }
@@ -647,9 +646,9 @@ impl<'a> TraceBuilder<'a> {
         }
 
         let jit_callop = self.handle_operand(callop)?;
-        let jit_ty_idx = self.handle_type(self.aot_mod.type_(*fty_idx))?;
+        let jit_tyidx = self.handle_type(self.aot_mod.type_(*ftyidx))?;
         let inst =
-            jit_ir::IndirectCallInst::new(&mut self.jit_mod, jit_ty_idx, jit_callop, jit_args)?;
+            jit_ir::IndirectCallInst::new(&mut self.jit_mod, jit_tyidx, jit_callop, jit_args)?;
         let idx = self.jit_mod.push_indirect_call(inst)?;
         self.copy_inst(jit_ir::Inst::IndirectCall(idx), bid, aot_inst_idx)
     }
@@ -671,11 +670,22 @@ impl<'a> TraceBuilder<'a> {
         // Convert AOT args to JIT args.
         let mut jit_args = Vec::new();
         for arg in args {
-            jit_args.push(self.handle_operand(arg)?);
+            match self.handle_operand(arg)? {
+                jit_ir::Operand::Const(c) => {
+                    // We don't want to do constant propagation here as it makes our life harder
+                    // creating guards. Instead we simply create a proxy instruction here and
+                    // reference that.
+                    let inst = jit_ir::Inst::ProxyConst(c);
+                    self.jit_mod.push(inst)?;
+                    let op = jit_ir::Operand::Local(self.jit_mod.last_inst_idx());
+                    jit_args.push(op);
+                }
+                op => jit_args.push(op),
+            }
         }
 
         // Check if this is a recursive call by scanning the call stack for the callee.
-        let is_recursive = self.frames.iter().any(|f| f.func_idx == Some(*callee));
+        let is_recursive = self.frames.iter().any(|f| f.funcidx == Some(*callee));
 
         if inst.is_mappable_call(self.aot_mod)
             && !self.aot_mod.func(*callee).is_outline()
@@ -688,8 +698,8 @@ impl<'a> TraceBuilder<'a> {
             self.frames.last_mut().unwrap().safepoint = inst.safepoint();
             // Create a new frame for the inlined call and pass in the arguments of the caller.
             let aot_iid = aot_ir::InstID::new(
-                bid.func_idx(),
-                bid.bb_idx(),
+                bid.funcidx(),
+                bid.bbidx(),
                 aot_ir::InstIdx::new(aot_inst_idx),
             );
             self.frames
@@ -702,7 +712,7 @@ impl<'a> TraceBuilder<'a> {
                 aot_ir::Inst::Br { succ } => {
                     // We can only stop outlining when we see the succesor block and we are not in
                     // the middle of recursion.
-                    let succbid = BBlockId::new(bid.func_idx(), *succ);
+                    let succbid = BBlockId::new(bid.funcidx(), *succ);
                     self.outline_target_blk = Some(succbid);
                     self.recursion_count = 0;
                 }
@@ -789,22 +799,32 @@ impl<'a> TraceBuilder<'a> {
         aot_inst_idx: usize,
         cast_kind: &aot_ir::CastKind,
         val: &aot_ir::Operand,
-        dest_ty_idx: &aot_ir::TyIdx,
+        dest_tyidx: &aot_ir::TyIdx,
     ) -> Result<(), CompilationError> {
         let inst = match cast_kind {
             aot_ir::CastKind::SExt => jit_ir::SExtInst::new(
                 &self.handle_operand(val)?,
-                self.handle_type(self.aot_mod.type_(*dest_ty_idx))?,
+                self.handle_type(self.aot_mod.type_(*dest_tyidx))?,
             )
             .into(),
             aot_ir::CastKind::ZeroExtend => jit_ir::ZeroExtendInst::new(
                 &self.handle_operand(val)?,
-                self.handle_type(self.aot_mod.type_(*dest_ty_idx))?,
+                self.handle_type(self.aot_mod.type_(*dest_tyidx))?,
             )
             .into(),
             aot_ir::CastKind::Trunc => jit_ir::TruncInst::new(
                 &self.handle_operand(val)?,
-                self.handle_type(self.aot_mod.type_(*dest_ty_idx))?,
+                self.handle_type(self.aot_mod.type_(*dest_tyidx))?,
+            )
+            .into(),
+            aot_ir::CastKind::SIToFP => jit_ir::SIToFPInst::new(
+                &self.handle_operand(val)?,
+                self.handle_type(self.aot_mod.type_(*dest_tyidx))?,
+            )
+            .into(),
+            aot_ir::CastKind::FPExt => jit_ir::FPExtInst::new(
+                &self.handle_operand(val)?,
+                self.handle_type(self.aot_mod.type_(*dest_tyidx))?,
             )
             .into(),
         };
@@ -828,17 +848,17 @@ impl<'a> TraceBuilder<'a> {
             panic!();
         }
 
-        let jit_ty_idx = self.handle_type(test_val.type_(self.aot_mod))?;
+        let jit_tyidx = self.handle_type(test_val.type_(self.aot_mod))?;
 
         // Find out which case we traced.
-        let guard = match case_dests.iter().position(|&cd| cd == next_bb.bb_idx()) {
+        let guard = match case_dests.iter().position(|&cd| cd == next_bb.bbidx()) {
             Some(cidx) => {
                 // A non-default case was traced.
                 let val = case_values[cidx];
                 let bb = case_dests[cidx];
 
                 // Build the constant value to guard.
-                let jit_const = jit_ir::Const::Int(jit_ty_idx, val);
+                let jit_const = jit_ir::Const::Int(jit_tyidx, val);
                 let jit_const_opnd = jit_ir::Operand::Const(self.jit_mod.insert_const(jit_const)?);
 
                 // Perform the comparison.
@@ -848,7 +868,7 @@ impl<'a> TraceBuilder<'a> {
                 let jit_cond = self.jit_mod.push_and_make_operand(cmp_inst.into())?;
 
                 // Guard the result of the comparison.
-                self.create_guard(&jit_cond, bb == next_bb.bb_idx(), safepoint)?
+                self.create_guard(&jit_cond, bb == next_bb.bbidx(), safepoint)?
             }
             None => {
                 // The default case was traced.
@@ -869,7 +889,7 @@ impl<'a> TraceBuilder<'a> {
                 let mut cmps_opnds = Vec::new();
                 for cv in case_values {
                     // Build a constant of the case value.
-                    let jit_const = jit_ir::Const::Int(jit_ty_idx, *cv);
+                    let jit_const = jit_ir::Const::Int(jit_tyidx, *cv);
                     let jit_const_opnd =
                         jit_ir::Operand::Const(self.jit_mod.insert_const(jit_const)?);
 
@@ -916,8 +936,8 @@ impl<'a> TraceBuilder<'a> {
         // If the IR is well-formed the indexing and unwrap() here will not fail.
         let chosen_val = &incoming_vals[incoming_bbs.iter().position(|bb| bb == prev_bb).unwrap()];
         let aot_iit = aot_ir::InstID::new(
-            bid.func_idx(),
-            bid.bb_idx(),
+            bid.funcidx(),
+            bid.bbidx(),
             aot_ir::InstIdx::new(aot_inst_idx),
         );
         let op = self.handle_operand(chosen_val)?;
@@ -979,7 +999,7 @@ impl<'a> TraceBuilder<'a> {
         };
 
         self.cp_block = self.lookup_aot_block(&prev);
-        self.frames.last_mut().unwrap().func_idx = Some(self.cp_block.as_ref().unwrap().func_idx());
+        self.frames.last_mut().unwrap().funcidx = Some(self.cp_block.as_ref().unwrap().funcidx());
         // This unwrap can't fail. If it does that means the tracer has given us a mappable block
         // that doesn't exist in the AOT module.
         self.create_trace_header(self.aot_mod.bblock(self.cp_block.as_ref().unwrap()))?;
@@ -995,7 +1015,7 @@ impl<'a> TraceBuilder<'a> {
                             // MappedAOTBBlock block
                             if let Some(ref tgtbid) = self.outline_target_blk {
                                 // We are currently outlining.
-                                if bid.func_idx() == tgtbid.func_idx() {
+                                if bid.funcidx() == tgtbid.funcidx() {
                                     // We are inside the same function that started outlining.
                                     if bid.is_entry() {
                                         // We are recursing into the function that started
@@ -1041,7 +1061,18 @@ impl<'a> TraceBuilder<'a> {
                             let nextbb = if let Some(tpeek) = trace_iter.peek() {
                                 match tpeek {
                                     Ok(tp) => self.lookup_aot_block(tp),
-                                    Err(_) => todo!(),
+                                    Err(e) => match e {
+                                        AOTTraceIteratorError::TraceTooLong => {
+                                            return Err(CompilationError::LimitExceeded(
+                                                "Trace too long.".into(),
+                                            ));
+                                        }
+                                        AOTTraceIteratorError::LongJmpEncountered => {
+                                            return Err(CompilationError::General(
+                                                "Long jump encountered.".into(),
+                                            ));
+                                        }
+                                    },
                                 }
                             } else {
                                 None
@@ -1058,7 +1089,7 @@ impl<'a> TraceBuilder<'a> {
                                 // Unwrap safe: block guaranteed to have instructions.
                                 match br.unwrap() {
                                     aot_ir::Inst::Br { succ } => {
-                                        let succbid = BBlockId::new(bid.func_idx(), *succ);
+                                        let succbid = BBlockId::new(bid.funcidx(), *succ);
                                         self.outline_target_blk = Some(succbid);
                                         self.recursion_count = 0;
                                     }

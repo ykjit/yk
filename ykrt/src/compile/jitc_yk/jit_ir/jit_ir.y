@@ -98,11 +98,20 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
   | "LOCAL_OPERAND" ":" Type "=" "SEXT" Operand {
       Ok(ASTInst::SExt{assign: $1?.span(), type_: $3?, val: $6? })
     }
+  | "LOCAL_OPERAND" ":" Type "=" "SI_TO_FP" Operand {
+      Ok(ASTInst::SIToFP{assign: $1?.span(), type_: $3?, val: $6? })
+    }
+  | "LOCAL_OPERAND" ":" Type "=" "FP_EXT" Operand {
+      Ok(ASTInst::FPExt{assign: $1?.span(), type_: $3?, val: $6? })
+    }
   | "LOCAL_OPERAND" ":" Type "=" "TRUNC" Operand {
       Ok(ASTInst::Trunc{assign: $1?.span(), type_: $3?, operand: $6? })
     }
   | "LOCAL_OPERAND" ":" Type "=" Operand "?" Operand ":" Operand {
       Ok(ASTInst::Select{assign: $1?.span(), cond: $5?, trueval: $7?, falseval: $9? })
+    }
+  | "LOCAL_OPERAND" ":" Type "=" Operand {
+      Ok(ASTInst::Proxy{assign: $1?.span(), val: $5? })
     }
   | "TLOOP_START" { Ok(ASTInst::TraceLoopStart) }
   ;
@@ -115,6 +124,8 @@ Operand -> Result<ASTOperand, Box<dyn Error>>:
 
 Type -> Result<ASTType, Box<dyn Error>>:
     "INT_TYPE" { Ok(ASTType::Int($1?.span())) }
+  | "FLOAT_TYPE" { Ok(ASTType::Float($1?.span())) }
+  | "DOUBLE_TYPE" { Ok(ASTType::Double($1?.span())) }
   | "PTR" { Ok(ASTType::Ptr) }
   ;
 

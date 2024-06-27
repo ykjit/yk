@@ -114,6 +114,7 @@ pub(crate) extern "C" fn __yk_deopt(
                     }
                 }
                 LocalAlloc::Register => todo!(),
+                LocalAlloc::ConstInt(c) => c,
             };
             varidx += 1;
 

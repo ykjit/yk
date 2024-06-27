@@ -9,10 +9,12 @@
 //     jitstate: stop-tracing
 //     --- Begin aot ---
 //     ...
+//     switch %{{10_1}}, bb{{bb14}}, [300 -> bb{{bb11}}, 299 -> bb{{bb12}}] [safepoint: {{safepoint_id}}, (%{{0_0}}, %{{0_1}}, %{{0_3}}, %{{0_4}}, %{{0_5}}, %{{0_6}}, %{{10_1}})]
+//     ...
 //     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     %{{cond}}: i8 = eq %{{20}}, 300i32
+//     %{{cond}}: i1 = eq %{{20}}, 300i32
 //     guard %{{cond}}, true
 //     ...
 //     --- End jit-pre-opt ---

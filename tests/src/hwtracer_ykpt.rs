@@ -1,3 +1,5 @@
+#![cfg(all(target_arch = "x86_64", target_os = "linux"))]
+
 //! Testing and benchmarking bits for hwtracer's ykpt decoder.
 //!
 //! Why is this so convoluted? Read on...

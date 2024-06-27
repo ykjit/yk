@@ -7,9 +7,10 @@
 use super::super::{
     aot_ir::{BinOp, Predicate},
     jit_ir::{
-        BinOpInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FuncDecl, FuncTy, GuardInfo,
-        GuardInst, IcmpInst, Inst, InstIdx, LoadInst, LoadTraceInputInst, Module, Operand,
-        PtrAddInst, SExtInst, SelectInst, StoreInst, TruncInst, Ty, TyIdx,
+        BinOpInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FPExtInst, FloatTy,
+        FuncDecl, FuncTy, GuardInfo, GuardInst, IcmpInst, Inst, InstIdx, LoadInst,
+        LoadTraceInputInst, Module, Operand, PtrAddInst, SExtInst, SIToFPInst, SelectInst,
+        StoreInst, TruncInst, Ty, TyIdx,
     },
 };
 use fm::FMBuilder;
@@ -164,11 +165,24 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                     }
                     ASTInst::ICmp {
                         assign,
-                        type_: _,
+                        type_,
                         pred,
                         lhs,
                         rhs,
                     } => {
+                        let ty = self.process_type(type_)?;
+                        match self.m.type_(ty) {
+                            Ty::Integer(1) => (),
+                            x => {
+                                return Err(self.error_at_span(
+                                    assign,
+                                    &format!(
+                                        "ICmp instructions must assign to an i1, not '{}'",
+                                        x.display(self.m)
+                                    ),
+                                ))
+                            }
+                        }
                         let inst = IcmpInst::new(
                             self.process_operand(lhs)?,
                             pred,
@@ -236,6 +250,16 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             SExtInst::new(&self.process_operand(val)?, self.process_type(type_)?);
                         self.push_assign(inst.into(), assign)?;
                     }
+                    ASTInst::SIToFP { assign, type_, val } => {
+                        let inst =
+                            SIToFPInst::new(&self.process_operand(val)?, self.process_type(type_)?);
+                        self.push_assign(inst.into(), assign)?;
+                    }
+                    ASTInst::FPExt { assign, type_, val } => {
+                        let inst =
+                            FPExtInst::new(&self.process_operand(val)?, self.process_type(type_)?);
+                        self.push_assign(inst.into(), assign)?;
+                    }
                     ASTInst::Store { tgt, val, volatile } => {
                         let inst = StoreInst::new(
                             self.process_operand(tgt)?,
@@ -273,6 +297,14 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             self.process_operand(trueval)?,
                             self.process_operand(falseval)?,
                         );
+                        self.push_assign(inst.into(), assign)?;
+                    }
+                    ASTInst::Proxy { assign, val } => {
+                        let op = self.process_operand(val)?;
+                        let inst = match op {
+                            Operand::Local(_) => todo!(),
+                            Operand::Const(cidx) => Inst::ProxyConst(cidx),
+                        };
                         self.push_assign(inst.into(), assign)?;
                     }
                 }
@@ -344,10 +376,10 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                     }
                     val
                 };
-                let ty_idx = self.m.insert_ty(Ty::Integer(width)).unwrap();
+                let tyidx = self.m.insert_ty(Ty::Integer(width)).unwrap();
                 Ok(Operand::Const(
                     self.m
-                        .insert_const(Const::Int(ty_idx, val))
+                        .insert_const(Const::Int(tyidx, val))
                         .map_err(|e| self.error_at_span(span, &e.to_string()))?,
                 ))
             }
@@ -370,10 +402,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                 let idx =
                     InstIdx::new(idx).map_err(|e| self.error_at_span(span, &e.to_string()))?;
                 let mapped_idx = self.inst_idx_map.get(&idx).ok_or_else(|| {
-                    self.error_at_span(
-                        span,
-                        &format!("Undefined local operand '%{}'", usize::from(idx)),
-                    )
+                    self.error_at_span(span, &format!("Undefined local operand '%{idx}'"))
                 })?;
                 Ok(Operand::Local(*mapped_idx))
             }
@@ -390,8 +419,16 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                     .insert_ty(Ty::Integer(width))
                     .map_err(|e| self.error_at_span(span, &e.to_string()))
             }
-            ASTType::Ptr => Ok(self.m.ptr_ty_idx()),
-            ASTType::Void => Ok(self.m.void_ty_idx()),
+            ASTType::Float(span) => Ok(self
+                .m
+                .insert_ty(Ty::Float(FloatTy::Float))
+                .map_err(|e| self.error_at_span(span, &e.to_string()))?),
+            ASTType::Double(span) => Ok(self
+                .m
+                .insert_ty(Ty::Float(FloatTy::Double))
+                .map_err(|e| self.error_at_span(span, &e.to_string()))?),
+            ASTType::Ptr => Ok(self.m.ptr_tyidx()),
+            ASTType::Void => Ok(self.m.void_tyidx()),
         }
     }
 
@@ -407,7 +444,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
         self.m.push(inst).unwrap();
         match self.inst_idx_map.insert(idx, self.m.last_inst_idx()) {
             None => Ok(()),
-            Some(_) => Err(format!("Local operand '%{}' redefined", usize::from(idx)).into()),
+            Some(_) => Err(format!("Local operand '%{idx}' redefined").into()),
         }
     }
 
@@ -504,6 +541,16 @@ enum ASTInst {
         type_: ASTType,
         val: ASTOperand,
     },
+    SIToFP {
+        assign: Span,
+        type_: ASTType,
+        val: ASTOperand,
+    },
+    FPExt {
+        assign: Span,
+        type_: ASTType,
+        val: ASTOperand,
+    },
     Store {
         tgt: ASTOperand,
         val: ASTOperand,
@@ -522,6 +569,10 @@ enum ASTInst {
         trueval: ASTOperand,
         falseval: ASTOperand,
     },
+    Proxy {
+        assign: Span,
+        val: ASTOperand,
+    },
 }
 
 #[derive(Debug)]
@@ -534,6 +585,8 @@ enum ASTOperand {
 #[derive(Debug)]
 enum ASTType {
     Int(Span),
+    Float(Span),
+    Double(Span),
     Ptr,
     Void,
 }
@@ -546,12 +599,12 @@ mod tests {
     #[test]
     fn roundtrip() {
         let mut m = Module::new_testing();
-        let i16_ty_idx = m.insert_ty(Ty::Integer(16)).unwrap();
+        let i16_tyidx = m.insert_ty(Ty::Integer(16)).unwrap();
         let op1 = m
-            .push_and_make_operand(LoadTraceInputInst::new(0, i16_ty_idx).into())
+            .push_and_make_operand(LoadTraceInputInst::new(0, i16_tyidx).into())
             .unwrap();
         let op2 = m
-            .push_and_make_operand(LoadTraceInputInst::new(16, i16_ty_idx).into())
+            .push_and_make_operand(LoadTraceInputInst::new(16, i16_tyidx).into())
             .unwrap();
         let op3 = m
             .push_and_make_operand(BinOpInst::new(op1.clone(), BinOp::Add, op2.clone()).into())
@@ -598,7 +651,7 @@ mod tests {
               %0: i16 = load_ti 0
               %1: i16 = trunc %0
               %2: i16 = add %0, %1
-              %4: i16 = eq %1, %2
+              %4: i1 = eq %1, %2
               tloop_start
               guard %4, true
               call @f1()
@@ -619,11 +672,12 @@ mod tests {
               %17: i32 = xor %0, %1
               %18: i32 = shl %0, %1
               %19: i32 = ashr %0, %1
-              %20: i32 = fadd %0, %1
-              %21: i32 = fdiv %0, %1
-              %22: i32 = fmul %0, %1
-              %23: i32 = frem %0, %1
-              %24: i32 = fsub %0, %1
+              %1999: float = load_ti 0
+              %20: i32 = fadd %1999, %1999
+              %21: i32 = fdiv %1999, %1999
+              %22: i32 = fmul %1999, %1999
+              %23: i32 = frem %1999, %1999
+              %24: i32 = fsub %1999, %1999
               %25: i32 = lshr %0, %1
               %26: i32 = sdiv %0, %1
               %27: i32 = srem %0, %1
@@ -639,15 +693,18 @@ mod tests {
               %37: i64 = add %33, 9223372036854775808i64
               *%9 = 0x0
               *%9 = 0xFFFFFFFF
-              %38: i16 = ne %1, %2
-              %40: i16 = ugt %1, %2
-              %41: i16 = uge %1, %2
-              %42: i16 = ult %1, %2
-              %43: i16 = ule %1, %2
-              %44: i16 = sgt %1, %2
-              %45: i16 = sge %1, %2
-              %46: i16 = slt %1, %2
-              %47: i16 = sle %1, %2
+              %38: i1 = ne %1, %2
+              %40: i1 = ugt %1, %2
+              %41: i1 = uge %1, %2
+              %42: i1 = ult %1, %2
+              %43: i1 = ule %1, %2
+              %44: i1 = sgt %1, %2
+              %45: i1 = sge %1, %2
+              %46: i1 = slt %1, %2
+              %47: i1 = sle %1, %2
+              %48: i32 = load_ti 7
+              %49: float = si_to_fp %48
+              %50: double = fp_ext %49
         ",
         );
     }
@@ -667,41 +724,41 @@ mod tests {
         // declarations are actually added.
         assert_eq!(m.func_decls_len(), 4);
 
-        let f1_ty_idx = m
-            .insert_ty(Ty::Func(FuncTy::new(Vec::new(), m.void_ty_idx(), false)))
+        let f1_tyidx = m
+            .insert_ty(Ty::Func(FuncTy::new(Vec::new(), m.void_tyidx(), false)))
             .unwrap();
-        m.insert_func_decl(FuncDecl::new("f1".to_owned(), f1_ty_idx))
+        m.insert_func_decl(FuncDecl::new("f1".to_owned(), f1_tyidx))
             .unwrap();
         assert_eq!(m.func_decls_len(), 4);
 
-        let i32_ty_idx = m.insert_ty(Ty::Integer(32)).unwrap();
-        let f2_ty_idx = m
+        let i32_tyidx = m.insert_ty(Ty::Integer(32)).unwrap();
+        let f2_tyidx = m
             .insert_ty(Ty::Func(FuncTy::new(
-                vec![m.int8_ty_idx()],
-                i32_ty_idx,
+                vec![m.int8_tyidx()],
+                i32_tyidx,
                 false,
             )))
             .unwrap();
-        m.insert_func_decl(FuncDecl::new("f2".to_owned(), f2_ty_idx))
+        m.insert_func_decl(FuncDecl::new("f2".to_owned(), f2_tyidx))
             .unwrap();
         assert_eq!(m.func_decls_len(), 4);
 
-        let i64_ty_idx = m.insert_ty(Ty::Integer(64)).unwrap();
-        let f3_ty_idx = m
+        let i64_tyidx = m.insert_ty(Ty::Integer(64)).unwrap();
+        let f3_tyidx = m
             .insert_ty(Ty::Func(FuncTy::new(
-                vec![m.int8_ty_idx(), i32_ty_idx],
-                i64_ty_idx,
+                vec![m.int8_tyidx(), i32_tyidx],
+                i64_tyidx,
                 true,
             )))
             .unwrap();
-        m.insert_func_decl(FuncDecl::new("f3".to_owned(), f3_ty_idx))
+        m.insert_func_decl(FuncDecl::new("f3".to_owned(), f3_tyidx))
             .unwrap();
         assert_eq!(m.func_decls_len(), 4);
 
-        let f4_ty_idx = m
-            .insert_ty(Ty::Func(FuncTy::new(Vec::new(), m.void_ty_idx(), true)))
+        let f4_tyidx = m
+            .insert_ty(Ty::Func(FuncTy::new(Vec::new(), m.void_tyidx(), true)))
             .unwrap();
-        m.insert_func_decl(FuncDecl::new("f4".to_owned(), f4_ty_idx))
+        m.insert_func_decl(FuncDecl::new("f4".to_owned(), f4_tyidx))
             .unwrap();
         assert_eq!(m.func_decls_len(), 4);
     }
@@ -747,6 +804,17 @@ mod tests {
             %4: i16 = load_ti 1
             %3: i16 = load_ti 2
         ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "ICmp instructions must assign to an i1, not 'i8'")]
+    fn icmp_assign_to_non_i1() {
+        Module::from_str(
+            "
+          entry:
+            %0: i8 = ult 1i8, 2i8
+            ",
         );
     }
 
