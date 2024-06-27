@@ -364,7 +364,8 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                     if width < 64
                         && (val < -((1 << width) - 1) / 2 - 1 || val >= ((1 << width) - 1) / 2)
                     {
-                        panic!("Signed constant {val} exceeds the bit width {width} of the integer type");
+                        return Err(self.error_at_span(span,
+                          &format!("Signed constant {val} exceeds the bit width {width} of the integer type")));
                     }
                     val as u64
                 } else {
@@ -372,7 +373,8 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         .parse::<u64>()
                         .map_err(|e| self.error_at_span(span, &e.to_string()))?;
                     if width < 64 && val > (1 << width) - 1 {
-                        panic!("Unsigned constant {val} exceeds the bit width {width} of the integer type");
+                        return Err(self.error_at_span(span,
+                          &format!("Unsigned constant {val} exceeds the bit width {width} of the integer type")));
                     }
                     val
                 };
