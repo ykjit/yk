@@ -59,6 +59,11 @@ mod internals {
                     for x in phases.split(',') {
                         log_phases.insert(IRPhase::from_str(x).unwrap());
                     }
+                    if *p != "-" {
+                        // If there's an existing log file, truncate (i.e. empty it), so that later
+                        // appends to the log aren't appending to a previous log run.
+                        File::create(p).ok();
+                    }
                     Some((p.to_string(), log_phases))
                 }
                 _ => panic!(
