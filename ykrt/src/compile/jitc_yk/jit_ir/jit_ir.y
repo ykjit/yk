@@ -62,11 +62,11 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
     "*" Operand "=" Operand { Ok(ASTInst::Store{tgt: $2?, val: $4?, volatile: false}) }
   | "*" Operand "=" Operand "," "VOLATILE" { Ok(ASTInst::Store{tgt: $2?, val: $4?, volatile: true}) }
   | "BLACK_BOX" Operand { Ok(ASTInst::BlackBox($2?)) }
-  | "GUARD" Operand "," "TRUE" {
-      Ok(ASTInst::Guard{operand: $2?, is_true: true})
+  | "GUARD" "TRUE" "," Operand {
+      Ok(ASTInst::Guard{operand: $4?, is_true: true})
     }
-  | "GUARD" Operand "," "FALSE" {
-      Ok(ASTInst::Guard{operand: $2?, is_true: false})
+  | "GUARD" "FALSE" "," Operand {
+      Ok(ASTInst::Guard{operand: $4?, is_true: false})
     }
   | "LOCAL_OPERAND" ":" Type "=" "LOAD_TI" "UINT" {
       Ok(ASTInst::LoadTraceInput{assign: $1?.span(), type_: $3?, off: $6?.span()})

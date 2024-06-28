@@ -1319,8 +1319,8 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::Guard(x) => write!(
                 f,
                 "guard {}, {}",
-                x.cond(self.m).display(self.m),
-                if x.expect { "true" } else { "false " }
+                if x.expect { "true" } else { "false" },
+                x.cond(self.m).display(self.m)
             ),
             Inst::LoadTraceInput(x) => {
                 write!(f, "load_ti {}", x.off())

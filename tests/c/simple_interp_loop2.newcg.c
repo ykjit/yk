@@ -12,7 +12,7 @@
 //     jitstate: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ..~
-//     guard %{{_}}, true
+//     guard true, %{{_}}
 //     %{{_}}: ptr = load %{{8}}
 //     %{{48}}: ptr = load %{{4}}
 //     %{{49}}: i32 = load %{{3}}
