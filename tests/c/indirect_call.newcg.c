@@ -9,6 +9,8 @@
 //     jitstate: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
+//     %{{1}}: i32 = icall %{{2}}(%{{3}})
+//     ...
 //     --- End jit-pre-opt ---
 //     foo 6
 //     jitstate: enter-jit-code
@@ -38,6 +40,7 @@ int main(int argc, char **argv) {
 
   NOOPT_VAL(loc);
   NOOPT_VAL(i);
+  NOOPT_VAL(fn);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
     int x = fn(i);
