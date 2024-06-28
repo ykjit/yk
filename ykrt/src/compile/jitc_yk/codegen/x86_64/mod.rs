@@ -1706,11 +1706,11 @@ mod tests {
                 "
               entry:
                 %0: i1 = load_ti 0
-                guard true, %0
+                guard true, %0, []
             ",
                 "
                 ...
-                ; guard true, %0
+                ; guard true, %0, []
                 {{vaddr1}} {{off1}}: jmp 0x00000000{{cmpoff}}
                 {{vaddr2}} {{failoff}}: mov rdi, [rbp]
                 ... mov rsi, 0x00
@@ -1730,11 +1730,11 @@ mod tests {
                 "
               entry:
                 %0: i1 = load_ti 0
-                guard false, %0
+                guard false, %0, []
             ",
                 "
                 ...
-                ; guard false, %0
+                ; guard false, %0, []
                 {{vaddr1}} {{off1}}: jmp 0x00000000{{cmpoff}}
                 {{vaddr2}} {{failoff}}: mov rdi, [rbp]
                 ... mov rsi, 0x00

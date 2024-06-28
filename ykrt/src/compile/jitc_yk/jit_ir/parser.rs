@@ -160,10 +160,29 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             self.m.push(inst.into()).unwrap();
                         }
                     }
-                    ASTInst::Guard { operand, is_true } => {
+                    ASTInst::Guard {
+                        operand,
+                        is_true,
+                        live_vars,
+                    } => {
+                        let mut mlive_vars = Vec::with_capacity(live_vars.len());
+                        for span in live_vars {
+                            let iidx = self.lexer.span_str(span)[1..]
+                                .parse::<usize>()
+                                .map_err(|e| self.error_at_span(span, &e.to_string()))?;
+                            let iidx = InstIdx::new(iidx)
+                                .map_err(|e| self.error_at_span(span, &e.to_string()))?;
+                            if self.inst_idx_map.get(&iidx).is_none() {
+                                return Err(self.error_at_span(
+                                    span,
+                                    &format!("No such local variable %{iidx}"),
+                                ));
+                            }
+                            mlive_vars.push(iidx);
+                        }
                         let gidx = self
                             .m
-                            .push_guardinfo(GuardInfo::new(Vec::new(), Vec::new()))
+                            .push_guardinfo(GuardInfo::new(Vec::new(), mlive_vars))
                             .unwrap();
                         let inst = GuardInst::new(self.process_operand(operand)?, is_true, gidx);
                         self.m.push(inst.into()).unwrap();
@@ -533,6 +552,7 @@ enum ASTInst {
     Guard {
         operand: ASTOperand,
         is_true: bool,
+        live_vars: Vec<Span>,
     },
     ICmp {
         assign: Span,
@@ -688,7 +708,7 @@ mod tests {
               %2: i32 = add %0, %1
               %4: i1 = eq %1, %2
               tloop_start
-              guard true, %4
+              guard true, %4, [%0, %1, %2]
               call @f1()
               %5: i8 = load_ti 1
               %6: i32 = call @f2(%5)
@@ -888,6 +908,18 @@ mod tests {
             "
           entry:
             %0: float = fadd 1.2double, 3.4double
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "No such local variable %1")]
+    fn invalid_guard_inst_ref() {
+        Module::from_str(
+            "
+          entry:
+            %0: i1 = load_ti 0
+            guard true, %0, [%1]
             ",
         );
     }

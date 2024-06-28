@@ -689,7 +689,7 @@ index_24bit!(IndirectCallIdx);
 /// An instruction index.
 ///
 /// One of these is an index into the [Module::insts].
-#[derive(Debug, Copy, Clone, Eq, Hash, PartialEq, PartialOrd)]
+#[derive(Debug, Copy, Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) struct InstIdx(u16);
 index_16bit!(InstIdx);
 
@@ -1384,12 +1384,27 @@ impl fmt::Display for DisplayableInst<'_> {
                 x.lhs(self.m).display(self.m),
                 x.rhs(self.m).display(self.m)
             ),
-            Inst::Guard(x) => write!(
-                f,
-                "guard {}, {}",
-                if x.expect { "true" } else { "false" },
-                x.cond(self.m).display(self.m)
-            ),
+            Inst::Guard(
+                x @ GuardInst {
+                    cond,
+                    expect,
+                    gidx: _,
+                },
+            ) => {
+                let live_vars = x
+                    .guard_info(self.m)
+                    .lives()
+                    .iter()
+                    .map(|y| format!("%{}", usize::from(*y)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(
+                    f,
+                    "guard {}, {}, [{live_vars}]",
+                    if *expect { "true" } else { "false" },
+                    cond.unpack(self.m).display(self.m),
+                )
+            }
             Inst::LoadTraceInput(x) => {
                 write!(f, "load_ti {}", x.off())
             }
