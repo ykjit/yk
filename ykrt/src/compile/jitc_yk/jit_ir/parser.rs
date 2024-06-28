@@ -688,7 +688,7 @@ mod tests {
               %2: i32 = add %0, %1
               %4: i1 = eq %1, %2
               tloop_start
-              guard %4, true
+              guard true, %4
               call @f1()
               %5: i8 = load_ti 1
               %6: i32 = call @f2(%5)

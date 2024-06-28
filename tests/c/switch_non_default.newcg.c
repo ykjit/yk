@@ -15,7 +15,7 @@
 //     --- Begin jit-pre-opt ---
 //     ...
 //     %{{cond}}: i1 = eq %{{20}}, 300i32
-//     guard %{{cond}}, true
+//     guard true, %{{cond}}
 //     ...
 //     --- End jit-pre-opt ---
 //     i=2

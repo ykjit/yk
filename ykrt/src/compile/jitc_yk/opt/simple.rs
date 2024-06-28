@@ -394,9 +394,9 @@ mod tests {
             "
           entry:
             %0: i1 = eq 0i8, 0i8
-            guard %0, true
+            guard true, %0
             %1: i1 = eq 0i8, 1i8
-            guard %1, false
+            guard false, %1
         ",
             |m| simple(m).unwrap(),
             "
@@ -414,7 +414,7 @@ mod tests {
             %0: i8 = load_ti 0
             %1: i8 = mul %0, 0i8
             %2: i1 = eq %1, 0i8
-            guard %2, true
+            guard true, %2
             black_box %0
         ",
             |m| simple(m).unwrap(),
