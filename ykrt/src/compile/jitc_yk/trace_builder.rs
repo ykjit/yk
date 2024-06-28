@@ -393,6 +393,12 @@ impl<'a> TraceBuilder<'a> {
                 let jit_tyidx = self.jit_mod.insert_ty(jit_ir::Ty::Integer(*num_bits))?;
                 Ok(jit_ir::Const::Int(jit_tyidx, x))
             }
+            aot_ir::Ty::Float(fty) => {
+                let jit_tyidx = self.jit_mod.insert_ty(jit_ir::Ty::Float(fty.clone()))?;
+                // unwrap cannot fail if the AOT IR is valid.
+                let val = f64::from_ne_bytes(bytes[0..8].try_into().unwrap());
+                Ok(jit_ir::Const::Float(jit_tyidx, val))
+            }
             aot_ir::Ty::Ptr => {
                 let val: usize;
                 #[cfg(target_arch = "x86_64")]

@@ -37,7 +37,9 @@ use crate::compile::CompilationError;
 use indexmap::IndexSet;
 use std::{
     ffi::{c_void, CString},
-    fmt, mem,
+    fmt,
+    hash::Hash,
+    mem,
 };
 #[cfg(not(test))]
 use ykaddr::addr::symbol_to_ptr;
@@ -65,7 +67,7 @@ pub(crate) struct Module {
     /// The arguments pool for [CallInst]s. Indexed by [ArgsIdx].
     args: Vec<Operand>,
     /// The constant pool. Indexed by [ConstIdx].
-    consts: IndexSet<Const>,
+    consts: IndexSet<ConstIndexSetWrapper>,
     /// The type pool. Indexed by [TyIdx].
     types: IndexSet<Ty>,
     /// The type index of the void type. Cached for convenience.
@@ -141,9 +143,18 @@ impl Module {
         let int8_tyidx = TyIdx::new(types.insert_full(Ty::Integer(8)).0).unwrap();
 
         let mut consts = IndexSet::new();
-        let true_constidx = ConstIdx::new(consts.insert_full(Const::Int(int1_tyidx, 1)).0).unwrap();
-        let false_constidx =
-            ConstIdx::new(consts.insert_full(Const::Int(int1_tyidx, 0)).0).unwrap();
+        let true_constidx = ConstIdx::new(
+            consts
+                .insert_full(ConstIndexSetWrapper(Const::Int(int1_tyidx, 1)))
+                .0,
+        )
+        .unwrap();
+        let false_constidx = ConstIdx::new(
+            consts
+                .insert_full(ConstIndexSetWrapper(Const::Int(int1_tyidx, 0)))
+                .0,
+        )
+        .unwrap();
 
         // Find the global variable pointer array in the address space.
         //
@@ -319,7 +330,7 @@ impl Module {
     /// Add a constant to the pool and return its index. If the constant already exists, an
     /// existing index will be returned.
     pub fn insert_const(&mut self, c: Const) -> Result<ConstIdx, CompilationError> {
-        let (i, _) = self.consts.insert_full(c);
+        let (i, _) = self.consts.insert_full(ConstIndexSetWrapper(c));
         ConstIdx::new(i)
     }
 
@@ -329,7 +340,7 @@ impl Module {
     ///
     /// Panics if the index is out of bounds.
     pub(crate) fn const_(&self, idx: ConstIdx) -> &Const {
-        self.consts.get_index(usize::from(idx)).unwrap()
+        &self.consts.get_index(usize::from(idx)).unwrap().0
     }
 
     /// Return the [ConstIdx] of the `i1` value for 1/true.
@@ -954,18 +965,68 @@ impl fmt::Display for DisplayableOperand<'_> {
 }
 
 /// A constant.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+///
+/// Note that this struct deliberately does not implement `PartialEq` (or `Eq`): two instances of
+/// `Const` may represent the same underlying constant, but (because of floats), you as the user
+/// need to determine what notion of equality you wish to use on a given const.
+#[derive(Clone, Debug)]
 pub(crate) enum Const {
     /// A constant integer at most 64 bits wide. This can be treated a signed or unsigned integer
     /// depending on the operations that use this constant (the [Ty::Integer] type itself has no
     /// concept of signedness).
+    Float(TyIdx, f64),
     Int(TyIdx, u64),
     Ptr(usize),
+}
+
+/// This wrapper is deliberately private to this module and is solely used to allow us to maintain
+/// a hashable pool of constants. Because `Const` doesn't implement `PartialEq`, we provide a
+/// manual implementation here, knowing that it allows some duplicate constants to be stored in the
+/// constant pool. There's no way around this, because of floats.
+#[derive(Clone, Debug)]
+struct ConstIndexSetWrapper(Const);
+
+impl PartialEq for ConstIndexSetWrapper {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.0, &other.0) {
+            (Const::Float(lhs_tyidx, lhs_v), Const::Float(rhs_tyidx, rhs_v)) => {
+                // We treat floats as bit patterns: because we can accept duplicates, this is
+                // acceptable.
+                lhs_tyidx == rhs_tyidx && lhs_v.to_bits() == rhs_v.to_bits()
+            }
+            (Const::Int(lhs_tyidx, lhs_v), Const::Int(rhs_tyidx, rhs_v)) => {
+                lhs_tyidx == rhs_tyidx && lhs_v == rhs_v
+            }
+            (Const::Ptr(lhs_v), Const::Ptr(rhs_v)) => lhs_v == rhs_v,
+            (_, _) => false,
+        }
+    }
+}
+
+impl Eq for ConstIndexSetWrapper {}
+
+impl Hash for ConstIndexSetWrapper {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self.0 {
+            Const::Float(tyidx, v) => {
+                tyidx.hash(state);
+                // We treat floats as bit patterns: because we can accept duplicates, this is
+                // acceptable.
+                v.to_bits().hash(state);
+            }
+            Const::Int(tyidx, v) => {
+                tyidx.hash(state);
+                v.hash(state);
+            }
+            Const::Ptr(v) => v.hash(state),
+        }
+    }
 }
 
 impl Const {
     pub(crate) fn tyidx(&self, m: &Module) -> TyIdx {
         match self {
+            Const::Float(tyidx, _) => *tyidx,
             Const::Int(tyidx, _) => *tyidx,
             Const::Ptr(_) => m.ptr_tyidx,
         }
@@ -974,6 +1035,7 @@ impl Const {
     /// If this constant is an integer that can be represented in 64 bits, return it as an `i64`.
     pub(crate) fn int_to_u64(&self) -> Option<u64> {
         match self {
+            Const::Float(_, _) => None,
             Const::Int(_, x) => Some(*x),
             Const::Ptr(_) => None,
         }
@@ -986,6 +1048,7 @@ impl Const {
     /// If `x` doesn't fit into the underlying integer type.
     pub(crate) fn u64_to_int(&self, x: u64) -> Const {
         match self {
+            Const::Float(_, _) => panic!(),
             Const::Int(tyidx, _) => Const::Int(*tyidx, x),
             Const::Ptr(_) => panic!(),
         }
@@ -1004,6 +1067,11 @@ pub(crate) struct DisplayableConst<'a> {
 impl fmt::Display for DisplayableConst<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.const_ {
+            Const::Float(tyidx, v) => match self.m.type_(*tyidx) {
+                Ty::Float(FloatTy::Float) => write!(f, "{}float", *v as f32),
+                Ty::Float(FloatTy::Double) => write!(f, "{}double", v),
+                _ => unreachable!(),
+            },
             Const::Int(tyidx, x) => {
                 let Ty::Integer(width) = self.m.type_(*tyidx) else {
                     panic!()
