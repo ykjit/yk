@@ -838,7 +838,7 @@ impl<'a> X64CodeGen<'a> {
 
     fn cg_sitofp(&mut self, inst_idx: InstIdx, i: &jit_ir::SIToFPInst) {
         let from_val = i.val(self.m);
-        let to_type = self.m.type_(i.dest_ty_idx());
+        let to_type = self.m.type_(i.dest_tyidx());
 
         self.load_operand(WR0, &from_val);
         match to_type {
@@ -856,7 +856,7 @@ impl<'a> X64CodeGen<'a> {
     fn cg_fpext(&mut self, iidx: InstIdx, i: &jit_ir::FPExtInst) {
         let from_val = i.val(self.m);
         let from_type = self.m.type_(from_val.tyidx(self.m));
-        let to_type = self.m.type_(i.dest_ty_idx());
+        let to_type = self.m.type_(i.dest_tyidx());
 
         self.load_operand_float(WF0, &from_val);
         if let (

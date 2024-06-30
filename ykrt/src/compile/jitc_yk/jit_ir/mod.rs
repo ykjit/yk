@@ -1198,8 +1198,8 @@ impl Inst {
             Self::ZeroExtend(si) => si.dest_tyidx(),
             Self::Trunc(t) => t.dest_tyidx(),
             Self::Select(s) => s.trueval(m).tyidx(m),
-            Self::SIToFP(i) => i.dest_ty_idx(),
-            Self::FPExt(i) => i.dest_ty_idx(),
+            Self::SIToFP(i) => i.dest_tyidx(),
+            Self::FPExt(i) => i.dest_tyidx(),
         }
     }
 
@@ -2091,14 +2091,14 @@ pub struct SIToFPInst {
     /// The value to convert.
     val: PackedOperand,
     /// The type to convert to. Must be a floating point type.
-    dest_ty_idx: TyIdx,
+    dest_tyidx: TyIdx,
 }
 
 impl SIToFPInst {
-    pub(crate) fn new(val: &Operand, dest_ty_idx: TyIdx) -> Self {
+    pub(crate) fn new(val: &Operand, dest_tyidx: TyIdx) -> Self {
         Self {
             val: PackedOperand::new(val),
-            dest_ty_idx,
+            dest_tyidx,
         }
     }
 
@@ -2106,8 +2106,8 @@ impl SIToFPInst {
         self.val.unpack(m)
     }
 
-    pub(crate) fn dest_ty_idx(&self) -> TyIdx {
-        self.dest_ty_idx
+    pub(crate) fn dest_tyidx(&self) -> TyIdx {
+        self.dest_tyidx
     }
 }
 
@@ -2116,14 +2116,14 @@ pub struct FPExtInst {
     /// The value to convert.
     val: PackedOperand,
     /// The type to convert to. Must be a larger floating point type.
-    dest_ty_idx: TyIdx,
+    dest_tyidx: TyIdx,
 }
 
 impl FPExtInst {
-    pub(crate) fn new(val: &Operand, dest_ty_idx: TyIdx) -> Self {
+    pub(crate) fn new(val: &Operand, dest_tyidx: TyIdx) -> Self {
         Self {
             val: PackedOperand::new(val),
-            dest_ty_idx,
+            dest_tyidx,
         }
     }
 
@@ -2131,8 +2131,8 @@ impl FPExtInst {
         self.val.unpack(m)
     }
 
-    pub(crate) fn dest_ty_idx(&self) -> TyIdx {
-        self.dest_ty_idx
+    pub(crate) fn dest_tyidx(&self) -> TyIdx {
+        self.dest_tyidx
     }
 }
 
