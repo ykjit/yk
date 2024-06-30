@@ -12,7 +12,7 @@ use crate::compile::{
 };
 
 pub(super) fn simple(mut m: Module) -> Result<Module, CompilationError> {
-    for iidx in m.iter_inst_idxs() {
+    for iidx in m.iter_all_inst_idxs() {
         let inst = m.inst(iidx).clone();
         match inst {
             Inst::BinOp(BinOpInst {

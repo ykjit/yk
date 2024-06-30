@@ -10,7 +10,7 @@ impl Module {
         // We perform a simple reverse reachability analysis, tracking what's alive with a single
         // bit.
         let mut used = Vob::from_elem(false, usize::from(self.last_inst_idx()) + 1);
-        for iidx in self.iter_inst_idxs().rev() {
+        for iidx in self.iter_all_inst_idxs().rev() {
             let inst = self.inst(iidx);
             if inst.always_alive() || used.get(usize::from(iidx)).unwrap() {
                 used.set(usize::from(iidx), true);

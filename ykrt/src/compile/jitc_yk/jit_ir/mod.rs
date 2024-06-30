@@ -247,7 +247,7 @@ impl Module {
 
     /// Iterate, in order, over all `InstIdx`s of this module (including `Proxy*` and `Tombstone`
     /// instructions).
-    pub(crate) fn iter_inst_idxs(&self) -> impl DoubleEndedIterator<Item = InstIdx> {
+    pub(crate) fn iter_all_inst_idxs(&self) -> impl DoubleEndedIterator<Item = InstIdx> {
         (0..self.insts.len()).map(|x| InstIdx::new(x).unwrap())
     }
 
