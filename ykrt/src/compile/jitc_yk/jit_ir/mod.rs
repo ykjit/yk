@@ -251,11 +251,13 @@ impl Module {
         (0..self.insts.len()).map(|x| InstIdx::new(x).unwrap())
     }
 
-    /// An iterator over instruction indices. This skips `Proxy*` and `Tombstone` instructions: in
-    /// other words, it produces monotonically increasing, but potentially non-consecutive, instruction
-    /// indices.
-    pub(crate) fn iter_skipping_inst_idxs(&self) -> SkippingInstIdxIterator<'_> {
-        SkippingInstIdxIterator { m: self, cur: 0 }
+    /// An iterator over instructions that skips `Proxy*` and `Tombstone` instructions.
+    ///
+    /// This implicitly deduplicates the callers view of instructions (since `Proxy*` instructions
+    /// are skipped), but note that the indices, while strictly monotonically increasing, may be
+    /// non-consecutive (because of skipping).
+    pub(crate) fn iter_skipping_insts(&self) -> SkippingInstsIterator<'_> {
+        SkippingInstsIterator { m: self, cur: 0 }
     }
 
     /// Replace the instruction at `iidx` with `inst`.
@@ -460,26 +462,29 @@ impl fmt::Display for Module {
             )?;
         }
         write!(f, "\nentry:")?;
-        for iidx in self.iter_skipping_inst_idxs() {
-            write!(f, "\n    {}", self.inst(iidx).display(iidx, self))?
+        for (iidx, inst) in self.iter_skipping_insts() {
+            write!(f, "\n    {}", inst.display(iidx, self))?
         }
 
         Ok(())
     }
 }
 
-/// An iterator over instruction indices. This skips `Proxy*` and `Tombestone` instructions: in
-/// other words, it produces monotonically increasing, but potentially non-consecutive, instruction
-/// indices.
-pub(crate) struct SkippingInstIdxIterator<'a> {
+/// An iterator over instructions that skips `Proxy*` and `Tombstone` instructions.
+///
+/// This implicitly deduplicates the callers view of instructions (since `Proxy*` instructions are
+/// skipped), but note that the indices, while strictly monotonically increasing, may be
+/// non-consecutive (because of skipping).
+pub(crate) struct SkippingInstsIterator<'a> {
     m: &'a Module,
     cur: usize,
 }
 
-impl Iterator for SkippingInstIdxIterator<'_> {
-    type Item = InstIdx;
-    /// Return the next instruction index or `None` if the end has been reached.
-    fn next(&mut self) -> Option<InstIdx> {
+impl<'a> Iterator for SkippingInstsIterator<'a> {
+    type Item = (InstIdx, &'a Inst);
+    /// Return the next instruction index and its associated instruction or `None` if the end has
+    /// been reached.
+    fn next(&mut self) -> Option<Self::Item> {
         while let Some(x) = self.m.insts.get(self.cur) {
             // We know that `self.cur` must fit in `InstIdx`, as otherwise `m.insts` wouldn't have
             // had the instruction in the first place.
@@ -487,7 +492,7 @@ impl Iterator for SkippingInstIdxIterator<'_> {
             self.cur += 1;
             match x {
                 Inst::ProxyConst(_) | Inst::ProxyInst(_) | Inst::Tombstone => (),
-                _ => return Some(old),
+                _ => return Some((old, &self.m.insts[usize::from(old)])),
             }
         }
         None

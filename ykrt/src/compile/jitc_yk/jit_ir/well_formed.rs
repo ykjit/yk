@@ -27,8 +27,7 @@ use super::{BinOp, BinOpInst, Const, GuardInst, Inst, Module, Operand, Ty};
 
 impl Module {
     pub(crate) fn assert_well_formed(&self) {
-        for iidx in self.iter_skipping_inst_idxs() {
-            let inst = self.inst(iidx);
+        for (iidx, inst) in self.iter_skipping_insts() {
             match inst {
                 Inst::BinOp(BinOpInst { lhs, binop, rhs }) => {
                     let lhs_tyidx = lhs.unpack(self).tyidx(self);

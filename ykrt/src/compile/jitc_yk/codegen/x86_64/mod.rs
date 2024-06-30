@@ -173,8 +173,8 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
     fn codegen(mut self: Box<Self>) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         let alloc_off = self.emit_prologue();
 
-        for idx in self.m.iter_skipping_inst_idxs() {
-            self.cg_inst(idx, self.m.inst(idx))?;
+        for (iidx, inst) in self.m.iter_skipping_insts() {
+            self.cg_inst(iidx, inst)?;
         }
 
         // Loop the JITted code if the `tloop_start` label is present.
