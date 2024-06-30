@@ -1,9 +1,45 @@
 //! The JIT's Intermediate Representation (IR).
 //!
-//! This is the IR created by [trace_builder] and which is then optimised. The IR can feel a little
-//! odd at first because we store indexes into vectors rather than use direct references. This
-//! allows us to squeeze the amount of the memory used down (and also bypasses issues with
-//! representing graph structures in Rust, but that's slightly accidental).
+//! This is the IR created by [trace_builder] and which is then analysed and optimised. The IR has
+//! the following properties:
+//!
+//!   1. We use vectors rather than direct references. This allows us to squeeze the amount of the
+//!      memory used down (and also bypasses issues with representing graph structures in Rust, but
+//!      that's slightly accidental).
+//!
+//!   2. The IR is designed to allow most manipulations to be performed without requiring
+//!      reallocation.
+//!
+//! This second property has some surprising consequences:
+//!
+//!   1. We have to introduce `Proxy*` instructions which semi-transparently "forward" an
+//!      instruction's result on. For example if we have IR in memory stored along these lines:
+//!
+//!        ```text
+//!        %0: ...
+//!        %1: 1i8
+//!        %2: add %0, %1
+//!        ```
+//!
+//!      Then instruction `%1` is a `ProxyConst`. We very rarely want to view the IR as it is
+//!      directly stored in memory. Instead, we nearly always want to pretend that the IR really
+//!      looks like:
+//!
+//!        ```text
+//!        %0: ...
+//!        %2: add %0, 1i8
+//!        ```
+//!
+//!      i.e. we want to pretend that the `%1` doesn't exist and that the reference to `%1` is
+//!      actually just a constant.
+//!
+//!   2. We never store [Operand]s directly: we only ever store [PackedOperand]s. Whenever we want
+//!      to get an [Operand] we *must* use [PackedOperand::unpack]. `unpack` does the necessary
+//!      deproxying.
+//!
+//!   3. In nearly all cases we should view the IR as deproxied: unless you explicitly intend to
+//!      handle proxies yourself, looking up an instruction should use [Module::inst_no_proxies].
+//!      Only use [Module::inst_all] if you really, really know why you're using it.
 //!
 //! Because using the IR can often involve getting hold of data nested several layers deep, we also
 //! use a number of abbreviations/conventions to keep the length of source down to something
@@ -65,7 +101,7 @@ pub(crate) struct Module {
     /// The IR trace as a linear sequence of instructions.
     insts: Vec<Inst>,
     /// The arguments pool for [CallInst]s. Indexed by [ArgsIdx].
-    args: Vec<Operand>,
+    args: Vec<PackedOperand>,
     /// The constant pool. Indexed by [ConstIdx].
     consts: IndexSet<ConstIndexSetWrapper>,
     /// The type pool. Indexed by [TyIdx].
@@ -224,8 +260,22 @@ impl Module {
     }
 
     /// Return the instruction at the specified index.
-    pub(crate) fn inst(&self, idx: InstIdx) -> &Inst {
-        &self.insts[usize::from(idx)]
+    ///
+    /// # Panics
+    ///
+    /// If `iidx` points to a `Proxy*` instruction.
+    pub(crate) fn inst_no_proxies(&self, iidx: InstIdx) -> &Inst {
+        match &self.insts[usize::from(iidx)] {
+            Inst::ProxyConst(_) | Inst::ProxyInst(_) => panic!(),
+            x => x,
+        }
+    }
+
+    /// Return the instruction at the specified index. Note: unless you are explicitly handling
+    /// `Proxy*` instructions in your code you must use [Self::inst_no_proxies] -- not handling
+    /// proxies correctly is undefined behaviour. If in doubt, use [Self::inst_no_proxies].
+    pub(crate) fn inst_all(&self, iidx: InstIdx) -> &Inst {
+        &self.insts[usize::from(iidx)]
     }
 
     pub(crate) fn push_indirect_call(
@@ -301,7 +351,8 @@ impl Module {
     ///
     /// If `args` would overflow the index type.
     pub(crate) fn push_args(&mut self, args: Vec<Operand>) -> Result<ArgsIdx, CompilationError> {
-        ArgsIdx::new(self.args.len()).inspect(|_| self.args.extend(args))
+        ArgsIdx::new(self.args.len())
+            .inspect(|_| self.args.extend(args.iter().map(PackedOperand::new)))
     }
 
     /// Return the argument at args index `idx`.
@@ -309,8 +360,8 @@ impl Module {
     /// # Panics
     ///
     /// If `idx` is out of bounds.
-    pub(crate) fn arg(&self, idx: ArgsIdx) -> &Operand {
-        &self.args[usize::from(idx)]
+    pub(crate) fn arg(&self, idx: ArgsIdx) -> Operand {
+        self.args[usize::from(idx)].unpack(self)
     }
 
     /// Add a [Ty] to the types pool and return its index. If the [Ty] already exists, an existing
@@ -897,7 +948,7 @@ impl PackedOperand {
         if (self.0 & !OPERAND_IDX_MASK) == 0 {
             let mut iidx = InstIdx(self.0);
             loop {
-                match m.inst(iidx) {
+                match m.inst_all(iidx) {
                     Inst::ProxyConst(x) => {
                         return Operand::Const(*x);
                     }
@@ -935,7 +986,7 @@ impl Operand {
     /// Panics if asking for the size make no sense for this operand.
     pub(crate) fn byte_size(&self, m: &Module) -> usize {
         match self {
-            Self::Local(l) => m.inst(*l).def_byte_size(m),
+            Self::Local(l) => m.inst_all(*l).def_byte_size(m),
             Self::Const(cidx) => m.type_(m.const_(*cidx).tyidx(m)).byte_size().unwrap(),
         }
     }
@@ -943,7 +994,7 @@ impl Operand {
     /// Returns the type index of the operand.
     pub(crate) fn tyidx(&self, m: &Module) -> TyIdx {
         match self {
-            Self::Local(l) => m.inst(*l).tyidx(m),
+            Self::Local(l) => m.inst_all(*l).tyidx(m),
             Self::Const(c) => m.const_(*c).tyidx(m),
         }
     }
@@ -961,7 +1012,7 @@ pub(crate) struct DisplayableOperand<'a> {
 impl fmt::Display for DisplayableOperand<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.operand {
-            Operand::Local(idx) => match self.m.inst(*idx) {
+            Operand::Local(idx) => match self.m.inst_all(*idx) {
                 Inst::ProxyConst(c) => {
                     write!(f, "{}", self.m.const_(*c).display(self.m))
                 }
@@ -1185,7 +1236,7 @@ impl Inst {
             #[cfg(test)]
             Self::BlackBox(_) => m.void_tyidx(),
             Self::ProxyConst(x) => m.const_(*x).tyidx(m),
-            Self::ProxyInst(x) => m.inst(*x).tyidx(m),
+            Self::ProxyInst(x) => m.inst_all(*x).tyidx(m),
             Self::Tombstone => panic!(),
 
             Self::BinOp(x) => x.tyidx(m),
@@ -1796,7 +1847,7 @@ impl DirectCallInst {
     ///
     /// Panics if the operand index is out of bounds.
     pub(crate) fn operand(&self, m: &Module, idx: usize) -> Operand {
-        m.args[usize::from(self.args_idx) + idx].clone()
+        m.arg(ArgsIdx::new(usize::from(self.args_idx) + idx).unwrap())
     }
 }
 
@@ -2265,20 +2316,18 @@ mod tests {
             Operand::Local(InstIdx(1)),
             Operand::Local(InstIdx(2)),
         ];
+        m.push(Inst::Arg(0)).unwrap();
+        m.push(Inst::Arg(1)).unwrap();
+        m.push(Inst::Arg(2)).unwrap();
         let ci = DirectCallInst::new(&mut m, func_decl_idx, args).unwrap();
 
         // Now request the operands and check they all look as they should.
         assert_eq!(ci.operand(&m, 0), Operand::Local(InstIdx(0)));
         assert_eq!(ci.operand(&m, 1), Operand::Local(InstIdx(1)));
         assert_eq!(ci.operand(&m, 2), Operand::Local(InstIdx(2)));
-        assert_eq!(
-            m.args,
-            vec![
-                Operand::Local(InstIdx(0)),
-                Operand::Local(InstIdx(1)),
-                Operand::Local(InstIdx(2))
-            ]
-        );
+        assert_eq!(m.arg(ArgsIdx(0)), Operand::Local(InstIdx(0)));
+        assert_eq!(m.arg(ArgsIdx(1)), Operand::Local(InstIdx(1)));
+        assert_eq!(m.arg(ArgsIdx(2)), Operand::Local(InstIdx(2)));
     }
 
     #[test]

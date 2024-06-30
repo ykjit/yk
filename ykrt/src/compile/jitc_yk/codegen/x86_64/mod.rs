@@ -567,7 +567,7 @@ impl<'a> X64CodeGen<'a> {
         // Now load the value into a new local variable from [base_reg+off].
         match i32::try_from(inst.off()) {
             Ok(off) => {
-                let size = self.m.inst(iidx).def_byte_size(self.m);
+                let size = self.m.inst_no_proxies(iidx).def_byte_size(self.m);
                 debug_assert!(size <= REG64_SIZE);
                 match size {
                     8 => dynasm!(self.asm ; mov Rq(WR0.code()), [Rq(base_reg) + off]),
@@ -584,7 +584,7 @@ impl<'a> X64CodeGen<'a> {
 
     fn cg_load(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LoadInst) {
         self.load_operand(WR0, &inst.operand(self.m)); // FIXME: assumes value will fit in a reg.
-        let size = self.m.inst(iidx).def_byte_size(self.m);
+        let size = self.m.inst_no_proxies(iidx).def_byte_size(self.m);
         debug_assert!(size <= REG64_SIZE);
         match size {
             8 => dynasm!(self.asm ; mov Rq(WR0.code()), [Rq(WR0.code())]),
@@ -1003,7 +1003,7 @@ impl<'a> X64CodeGen<'a> {
         let mut locs: Vec<LocalAlloc> = Vec::new();
         let gi = inst.guard_info(self.m);
         for lidx in gi.lives() {
-            match self.m.inst(*lidx) {
+            match self.m.inst_all(*lidx) {
                 jit_ir::Inst::ProxyConst(c) => {
                     // The live variable is a constant (e.g. this can happen during inlining), so
                     // it doesn't have an allocation. We can just push the actual value instead
@@ -1065,19 +1065,13 @@ impl<'a> X64CodeGen<'a> {
 
     /// Load a local variable into the specified general purpose register.
     fn load_local(&mut self, reg: Rq, local: InstIdx) {
-        let alloc = match self.m.inst(local) {
-            jit_ir::Inst::ProxyConst(c) => match self.m.const_(*c) {
-                Const::Int(_, c) => &LocalAlloc::ConstInt(*c),
-                _ => todo!(),
-            },
-            jit_ir::Inst::ProxyInst(_) => todo!(),
-            _ => self.ra.allocation(local),
-        };
+        let inst = self.m.inst_no_proxies(local);
+        let alloc = self.ra.allocation(local);
         match alloc {
             LocalAlloc::Stack { frame_off, size: _ } => {
                 match i32::try_from(*frame_off) {
                     Ok(foff) => {
-                        let size = self.m.inst(local).def_byte_size(self.m);
+                        let size = inst.def_byte_size(self.m);
                         // We use `movzx` where possible to avoid partial register stalls.
                         match size {
                             1 => dynasm!(self.asm; movzx Rq(reg.code()), BYTE [rbp - foff]),
@@ -1102,15 +1096,9 @@ impl<'a> X64CodeGen<'a> {
 
     /// Load a local variable into the specified floating point register.
     fn load_local_float(&mut self, reg: Rx, local: InstIdx) {
-        let alloc = match self.m.inst(local) {
-            jit_ir::Inst::ProxyConst(c) => match self.m.const_(*c) {
-                Const::Float(_, c) => &LocalAlloc::ConstFloat(*c),
-                _ => todo!(),
-            },
-            jit_ir::Inst::ProxyInst(_) => todo!(),
-            _ => self.ra.allocation(local),
-        };
-        let size = self.m.inst(local).def_byte_size(self.m);
+        let inst = self.m.inst_no_proxies(local);
+        let alloc = self.ra.allocation(local);
+        let size = inst.def_byte_size(self.m);
         match alloc {
             LocalAlloc::Stack { frame_off, size: _ } => match i32::try_from(*frame_off) {
                 Ok(foff) => match size {
@@ -1186,7 +1174,7 @@ impl<'a> X64CodeGen<'a> {
 
     /// Store a value held in a general purpose register into a new local variable.
     fn store_new_local(&mut self, local: InstIdx, reg: Rq) {
-        let size = self.m.inst(local).def_byte_size(self.m);
+        let size = self.m.inst_no_proxies(local).def_byte_size(self.m);
         let l = self.ra.allocate(local, size, &mut self.stack);
         self.store_local(&l, reg, size);
     }
@@ -1209,7 +1197,7 @@ impl<'a> X64CodeGen<'a> {
 
     /// Store a value held in a floating point register into a new local variable.
     fn store_new_local_float(&mut self, local: InstIdx, reg: Rx) {
-        let size = self.m.inst(local).def_byte_size(self.m);
+        let size = self.m.inst_no_proxies(local).def_byte_size(self.m);
         let l = self.ra.allocate(local, size, &mut self.stack);
         self.store_local_float(&l, reg, size);
     }

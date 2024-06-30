@@ -11,7 +11,7 @@ impl Module {
         // bit.
         let mut used = Vob::from_elem(false, usize::from(self.last_inst_idx()) + 1);
         for iidx in self.iter_all_inst_idxs().rev() {
-            let inst = self.inst(iidx);
+            let inst = self.inst_all(iidx);
             if inst.always_alive() || used.get(usize::from(iidx)).unwrap() {
                 used.set(usize::from(iidx), true);
                 inst.map_operands(self, |op| match op {
