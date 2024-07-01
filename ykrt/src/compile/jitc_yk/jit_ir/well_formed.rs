@@ -300,7 +300,7 @@ mod tests {
             "
               entry:
                 %0: i8 = load_ti 0
-                guard true, %0
+                guard true, %0, []
             ",
         );
     }

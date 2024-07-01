@@ -62,11 +62,11 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
     "*" Operand "=" Operand { Ok(ASTInst::Store{tgt: $2?, val: $4?, volatile: false}) }
   | "*" Operand "=" Operand "," "VOLATILE" { Ok(ASTInst::Store{tgt: $2?, val: $4?, volatile: true}) }
   | "BLACK_BOX" Operand { Ok(ASTInst::BlackBox($2?)) }
-  | "GUARD" "TRUE" "," Operand {
-      Ok(ASTInst::Guard{operand: $4?, is_true: true})
+  | "GUARD" "TRUE" "," Operand "," "[" LocalsList "]" {
+      Ok(ASTInst::Guard{operand: $4?, is_true: true, live_vars: $7?})
     }
-  | "GUARD" "FALSE" "," Operand {
-      Ok(ASTInst::Guard{operand: $4?, is_true: false})
+  | "GUARD" "FALSE" "," Operand "," "[" LocalsList "]" {
+      Ok(ASTInst::Guard{operand: $4?, is_true: false, live_vars: $7?})
     }
   | "LOCAL_OPERAND" ":" Type "=" "LOAD_TI" "UINT" {
       Ok(ASTInst::LoadTraceInput{assign: $1?.span(), type_: $3?, off: $6?.span()})
@@ -74,10 +74,10 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
   | "LOCAL_OPERAND" ":" Type "=" BinOp Operand "," Operand  {
       Ok(ASTInst::BinOp{assign: $1?.span(), type_: $3?, bin_op: $5?, lhs: $6?, rhs: $8?})
     }
-  | "LOCAL_OPERAND" ":" Type "=" "CALL" "GLOBAL" "(" CallArgs ")" {
+  | "LOCAL_OPERAND" ":" Type "=" "CALL" "GLOBAL" "(" OperandsList ")" {
       Ok(ASTInst::Call{assign: Some($1?.span()), name: $6?.span(), args: $8?})
     }
-  | "CALL" "GLOBAL" "(" CallArgs ")" {
+  | "CALL" "GLOBAL" "(" OperandsList ")" {
       Ok(ASTInst::Call{assign: None, name: $2?.span(), args: $4?})
     }
   | "LOCAL_OPERAND" ":" Type "=" Predicate Operand "," Operand  {
@@ -124,6 +124,18 @@ Operand -> Result<ASTOperand, Box<dyn Error>>:
   | "CONST_DOUBLE" { Ok(ASTOperand::ConstDouble($1?.span())) }
   ;
 
+OperandsList -> Result<Vec<ASTOperand>, Box<dyn Error>>:
+    OperandsList "," Operand { flattenr($1, $3) }
+  | Operand { Ok(vec![$1?]) }
+  | { Ok(Vec::new()) }
+  ;
+
+LocalsList -> Result<Vec<Span>, Box<dyn Error>>:
+    LocalsList "," "LOCAL_OPERAND" { flattenr($1, Ok($3?.span())) }
+  | "LOCAL_OPERAND" { Ok(vec![$1?.span()]) }
+  | { Ok(Vec::new()) }
+  ;
+
 Type -> Result<ASTType, Box<dyn Error>>:
     "INT_TYPE" { Ok(ASTType::Int($1?.span())) }
   | "FLOAT_TYPE" { Ok(ASTType::Float($1?.span())) }
@@ -163,12 +175,6 @@ Predicate -> Result<Predicate, Box<dyn Error>>:
   | "SGE" { Ok(Predicate::SignedGreaterEqual) }
   | "SLT" { Ok(Predicate::SignedLess) }
   | "SLE" { Ok(Predicate::SignedLessEqual) }
-  ;
-
-CallArgs -> Result<Vec<ASTOperand>, Box<dyn Error>>:
-    CallArgs "," Operand { flattenr($1, $3) }
-  | Operand { Ok(vec![$1?]) }
-  | { Ok(Vec::new()) }
   ;
 
 Unmatched -> ():
