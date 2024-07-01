@@ -61,7 +61,6 @@
 //!  2. or, when they need extra information, they expose a `display()` method, which returns an
 //!     object which implements [std::fmt::Display].
 
-#[cfg(test)]
 mod dead_code;
 #[cfg(test)]
 mod parser;
@@ -362,6 +361,16 @@ impl Module {
     /// If `idx` is out of bounds.
     pub(crate) fn arg(&self, idx: ArgsIdx) -> Operand {
         self.args[usize::from(idx)].unpack(self)
+    }
+
+    /// Return the raw [PackedOperand] at args index `idx`. Unless you have a good reason for doing
+    /// so, use [Self::arg] instead.
+    ///
+    /// # Panics
+    ///
+    /// If `idx` is out of bounds.
+    pub(crate) fn arg_packed(&self, idx: ArgsIdx) -> PackedOperand {
+        self.args[usize::from(idx)]
     }
 
     /// Add a [Ty] to the types pool and return its index. If the [Ty] already exists, an existing
@@ -944,7 +953,7 @@ impl PackedOperand {
     }
 
     /// Unpacks a [PackedOperand] into a [Operand].
-    pub fn unpack(&self, m: &Module) -> Operand {
+    pub(crate) fn unpack(&self, m: &Module) -> Operand {
         if (self.0 & !OPERAND_IDX_MASK) == 0 {
             let mut iidx = InstIdx(self.0);
             loop {
@@ -962,6 +971,17 @@ impl PackedOperand {
             }
         } else {
             Operand::Const(ConstIdx(self.0 & OPERAND_IDX_MASK))
+        }
+    }
+
+    /// If this [PackedOperand] represents a local instruction, call `f` with its `InstIdx`. Note
+    /// that this does not perform any kind of deproxification.
+    fn map_iidx<F>(&self, f: &mut F)
+    where
+        F: FnMut(InstIdx),
+    {
+        if (self.0 & !OPERAND_IDX_MASK) == 0 {
+            f(InstIdx(self.0))
         }
     }
 }
@@ -1267,77 +1287,116 @@ impl Inst {
         }
     }
 
-    /// Must this instruction be considered alive, irrespective of its context? For example, side
-    /// effecting instructions will always be considered alive.
-    #[cfg(test)]
-    fn always_alive(&self) -> bool {
+    /// Does this instruction have a "side effect" that means that removing it would change the
+    /// behaviour of later instructions even if they do not have a direct dependency on this
+    /// instruction? "Side effects" are:
+    ///   * Stores to memory locations.
+    ///   * Guards.
+    fn has_side_effect(&self, m: &Module) -> bool {
         match self {
             #[cfg(test)]
             Inst::BlackBox(_) => true,
-            Inst::ProxyConst(_) => todo!(),
-            Inst::ProxyInst(_) => todo!(),
-            Inst::Tombstone => todo!(),
+            Inst::ProxyConst(_) => false,
+            Inst::ProxyInst(x) => m.inst_all(*x).has_side_effect(m),
+            Inst::Tombstone => false,
             Inst::BinOp(_) => false,
-            Inst::Load(_) => todo!(),
-            Inst::LookupGlobal(_) => todo!(),
+            Inst::Load(_) => false,
+            Inst::LookupGlobal(_) => false,
             Inst::LoadTraceInput(_) => false,
-            Inst::Call(_) => todo!(),
-            Inst::IndirectCall(_) => todo!(),
-            Inst::PtrAdd(_) => todo!(),
-            Inst::DynPtrAdd(_) => todo!(),
-            Inst::Store(_) => todo!(),
+            Inst::Call(_) => true,
+            Inst::IndirectCall(_) => true,
+            Inst::PtrAdd(_) => false,
+            Inst::DynPtrAdd(_) => false,
+            Inst::Store(_) => true,
             Inst::Icmp(_) => false,
-            Inst::Guard(_) => todo!(),
-            Inst::Arg(_) => todo!(),
-            Inst::TraceLoopStart => todo!(),
-            Inst::SExt(_) => todo!(),
-            Inst::ZeroExtend(_) => todo!(),
-            Inst::Trunc(_) => todo!(),
-            Inst::Select(_) => todo!(),
-            Inst::SIToFP(_) => todo!(),
-            Inst::FPExt(_) => todo!(),
-            Inst::Fcmp(_) => todo!(),
+            Inst::Guard(_) => true,
+            Inst::Arg(_) => false,
+            Inst::TraceLoopStart => true, // FIXME: this shouldn't be an instruction.
+            Inst::SExt(_) => false,
+            Inst::ZeroExtend(_) => false,
+            Inst::Trunc(_) => false,
+            Inst::Select(_) => false,
+            Inst::SIToFP(_) => false,
+            Inst::FPExt(_) => false,
+            Inst::Fcmp(_) => false,
         }
     }
 
-    // Apply the function `f` to each of this instruction's [Operand]s (in no specified order).
-    #[cfg(test)]
-    fn map_operands<F>(&self, m: &Module, mut f: F)
+    /// Apply the function `f` to each of this instruction's [PackedOperand]s that references a
+    /// local instruction. When an instruction references more than one [PackedOperand], the order
+    /// of traversal is undefined.
+    ///
+    /// Note that this function does not perform deproxification, and thus must only be used when
+    /// you know that you want to know which local an instruction's operands directly refers to
+    /// (e.g. for dead code elimination).
+    fn map_packed_operand_locals<F>(&self, m: &Module, f: &mut F)
     where
-        F: FnMut(Operand),
+        F: FnMut(InstIdx),
     {
         match self {
             #[cfg(test)]
-            Inst::BlackBox(BlackBoxInst { op }) => f(op.unpack(m)),
-            Inst::ProxyConst(_) => todo!(),
-            Inst::ProxyInst(_) => todo!(),
-            Inst::Tombstone => todo!(),
+            Inst::BlackBox(BlackBoxInst { op }) => {
+                op.map_iidx(f);
+            }
+            Inst::ProxyConst(_) => (),
+            Inst::ProxyInst(_) => (),
+            Inst::Tombstone => (),
             Inst::BinOp(BinOpInst { lhs, binop: _, rhs }) => {
-                f(lhs.unpack(m));
-                f(rhs.unpack(m))
+                lhs.map_iidx(f);
+                rhs.map_iidx(f);
             }
-            Inst::Load(_) => todo!(),
-            Inst::LookupGlobal(_) => todo!(),
+            Inst::Load(LoadInst { op, .. }) => op.map_iidx(f),
+            Inst::LookupGlobal(_) => (),
             Inst::LoadTraceInput(_) => (),
-            Inst::Call(_) => todo!(),
-            Inst::IndirectCall(_) => todo!(),
-            Inst::PtrAdd(_) => todo!(),
-            Inst::DynPtrAdd(_) => todo!(),
-            Inst::Store(_) => todo!(),
-            Inst::Icmp(IcmpInst { lhs, pred: _, rhs }) => {
-                f(lhs.unpack(m));
-                f(rhs.unpack(m))
+            Inst::Call(x) => {
+                for i in x.iter_args_idx() {
+                    m.arg_packed(i).map_iidx(f);
+                }
             }
-            Inst::Guard(_) => todo!(),
-            Inst::Arg(_) => todo!(),
-            Inst::TraceLoopStart => todo!(),
-            Inst::SExt(_) => todo!(),
-            Inst::ZeroExtend(_) => todo!(),
-            Inst::Trunc(_) => todo!(),
+            Inst::IndirectCall(x) => {
+                let ici = m.indirect_call(*x);
+                let IndirectCallInst { target, .. } = ici;
+                target.map_iidx(f);
+                for i in ici.iter_args_idx() {
+                    m.arg_packed(i).map_iidx(f);
+                }
+            }
+            Inst::PtrAdd(x) => {
+                let ptr = x.ptr;
+                ptr.map_iidx(f);
+            }
+            Inst::DynPtrAdd(x) => {
+                let ptr = x.ptr;
+                ptr.map_iidx(f);
+                let num_elems = x.num_elems;
+                num_elems.map_iidx(f);
+            }
+            Inst::Store(StoreInst { tgt, val, .. }) => {
+                tgt.map_iidx(f);
+                val.map_iidx(f);
+            }
+            Inst::Icmp(IcmpInst { lhs, pred: _, rhs }) => {
+                lhs.map_iidx(f);
+                rhs.map_iidx(f);
+            }
+            Inst::Guard(x @ GuardInst { cond, .. }) => {
+                cond.map_iidx(f);
+                for y in x.guard_info(m).lives() {
+                    f(*y);
+                }
+            }
+            Inst::Arg(_) => (),
+            Inst::TraceLoopStart => (),
+            Inst::SExt(SExtInst { val, .. }) => val.map_iidx(f),
+            Inst::ZeroExtend(ZeroExtendInst { val, .. }) => val.map_iidx(f),
+            Inst::Trunc(TruncInst { val, .. }) => val.map_iidx(f),
             Inst::Select(_) => todo!(),
-            Inst::SIToFP(_) => todo!(),
-            Inst::FPExt(_) => todo!(),
-            Inst::Fcmp(_) => todo!(),
+            Inst::SIToFP(SIToFPInst { val, .. }) => val.map_iidx(f),
+            Inst::FPExt(FPExtInst { val, .. }) => val.map_iidx(f),
+            Inst::Fcmp(FcmpInst { lhs, pred: _, rhs }) => {
+                lhs.map_iidx(f);
+                rhs.map_iidx(f);
+            }
         }
     }
 
@@ -1777,6 +1836,12 @@ impl IndirectCallInst {
         usize::from(self.num_args)
     }
 
+    /// Return an iterator for each of this direct call instruction's [ArgsIdx].
+    pub(crate) fn iter_args_idx(&self) -> impl Iterator<Item = ArgsIdx> {
+        (usize::from(self.args_idx)..usize::from(self.args_idx) + usize::from(self.num_args))
+            .map(|x| ArgsIdx::new(x).unwrap())
+    }
+
     /// Fetch the operand at the specified index.
     ///
     /// # Panics
@@ -1835,7 +1900,6 @@ impl DirectCallInst {
     }
 
     /// Return an iterator for each of this direct call instruction's [ArgsIdx].
-    #[cfg(any(debug_assertions, test))]
     pub(crate) fn iter_args_idx(&self) -> impl Iterator<Item = ArgsIdx> {
         (usize::from(self.args_idx)..usize::from(self.args_idx) + usize::from(self.num_args))
             .map(|x| ArgsIdx::new(x).unwrap())
