@@ -3,9 +3,21 @@
 
 %%
 
-Module -> Result<(Vec<ASTFuncDecl>, Vec<()>, Vec<ASTBBlock>), Box<dyn Error>>:
-    FuncDecls Globals BBlocks {
-      Ok(($1?, $2?, $3?))
+Module -> Result<(Vec<ASTFuncType>, Vec<ASTFuncDecl>, Vec<()>, Vec<ASTBBlock>), Box<dyn Error>>:
+    FuncTypes FuncDecls Globals BBlocks {
+      Ok(($1?, $2?, $3?, $4?))
+    }
+  ;
+
+FuncTypes -> Result<Vec<ASTFuncType>, Box<dyn Error>>:
+    FuncType FuncTypes { flatten($1, $2) }
+  | { Ok(Vec::new()) }
+  ;
+
+FuncType -> Result<ASTFuncType, Box<dyn Error>>:
+    "FUNC_TYPE" "ID" "(" FuncArgs ")" FuncRtnType {
+      let (arg_tys, is_varargs) = $4?;
+      Ok(ASTFuncType{name: $2?.span(), arg_tys, is_varargs, rtn_ty: $6?})
     }
   ;
 
@@ -79,6 +91,12 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
     }
   | "CALL" "GLOBAL" "(" OperandsList ")" {
       Ok(ASTInst::Call{assign: None, name: $2?.span(), args: $4?})
+    }
+  | "LOCAL_OPERAND" ":" Type "=" "ICALL" "<" "ID" ">" Operand "(" OperandsList ")" {
+      Ok(ASTInst::ICall{assign: Some($1?.span()), func_type: $7?.span(), target: $9?, args: $11?})
+    }
+  | "ICALL" "<" "ID" ">" Operand "(" OperandsList ")" {
+      Ok(ASTInst::ICall{assign: None, func_type: $3?.span(), target: $5?, args: $7?})
     }
   | "LOCAL_OPERAND" ":" Type "=" Predicate Operand "," Operand  {
       Ok(ASTInst::ICmp{assign: $1?.span(), type_: $3?, pred: $5?, lhs: $6?, rhs: $8?})

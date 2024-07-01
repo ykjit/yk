@@ -8,9 +8,9 @@ use super::super::{
     aot_ir::{BinOp, Predicate},
     jit_ir::{
         BinOpInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FPExtInst, FloatTy,
-        FuncDecl, FuncTy, GuardInfo, GuardInst, IcmpInst, Inst, InstIdx, LoadInst,
-        LoadTraceInputInst, Module, Operand, PtrAddInst, SExtInst, SIToFPInst, SelectInst,
-        StoreInst, TruncInst, Ty, TyIdx,
+        FuncDecl, FuncTy, GuardInfo, GuardInst, IcmpInst, IndirectCallInst, Inst, InstIdx,
+        LoadInst, LoadTraceInputInst, Module, Operand, PtrAddInst, SExtInst, SIToFPInst,
+        SelectInst, StoreInst, TruncInst, Ty, TyIdx,
     },
 };
 use fm::FMBuilder;
@@ -43,14 +43,15 @@ impl Module {
             panic!("Could not parse input");
         }
         match res {
-            Some(Ok((func_decls, globals, bblocks))) => {
+            Some(Ok((func_types, func_decls, globals, bblocks))) => {
                 let mut m = Module::new_testing();
                 let mut p = JITIRParser {
                     m: &mut m,
                     lexer: &lexer,
                     inst_idx_map: HashMap::new(),
+                    func_types_map: HashMap::new(),
                 };
-                p.process(func_decls, globals, bblocks).unwrap();
+                p.process(func_types, func_decls, globals, bblocks).unwrap();
                 m.assert_well_formed();
                 m
             }
@@ -111,15 +112,18 @@ struct JITIRParser<'lexer, 'input: 'lexer, 'a> {
     /// generating. To populate this map, each instruction that defines a new local operand needs
     /// to call [Self::add_assign].
     inst_idx_map: HashMap<InstIdx, InstIdx>,
+    func_types_map: HashMap<String, TyIdx>,
 }
 
 impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
     fn process(
         &mut self,
+        func_types: Vec<ASTFuncType>,
         func_decls: Vec<ASTFuncDecl>,
         _globals: Vec<()>,
         bblocks: Vec<ASTBBlock>,
     ) -> Result<(), Box<dyn Error>> {
+        self.process_func_types(func_types)?;
         self.process_func_decls(func_decls)?;
 
         for bblock in bblocks.into_iter() {
@@ -186,6 +190,35 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             .unwrap();
                         let inst = GuardInst::new(self.process_operand(operand)?, is_true, gidx);
                         self.m.push(inst.into()).unwrap();
+                    }
+                    ASTInst::ICall {
+                        assign,
+                        func_type: ft_span,
+                        target,
+                        args,
+                    } => {
+                        let ft_name = &self.lexer.span_str(ft_span);
+                        let ftidx =
+                            *self.func_types_map.get(ft_name.to_owned()).ok_or_else(|| {
+                                self.error_at_span(
+                                    ft_span,
+                                    &format!("No such function type '{ft_name}'"),
+                                )
+                            })?;
+                        let tgt = self.process_operand(target)?;
+                        let ops = self.process_operands(args)?;
+                        let ic = IndirectCallInst::new(self.m, ftidx, tgt, ops)
+                            .map_err(|e| self.error_at_span(ft_span, &e.to_string()))?;
+                        let icidx = self
+                            .m
+                            .push_indirect_call(ic)
+                            .map_err(|e| self.error_at_span(ft_span, &e.to_string()))?;
+                        let inst = Inst::IndirectCall(icidx);
+                        if let Some(x) = assign {
+                            self.push_assign(inst, x)?;
+                        } else {
+                            self.m.push(inst).unwrap();
+                        }
                     }
                     ASTInst::ICmp {
                         assign,
@@ -337,6 +370,35 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
         Ok(())
     }
 
+    fn process_func_types(&mut self, func_types: Vec<ASTFuncType>) -> Result<(), Box<dyn Error>> {
+        for ASTFuncType {
+            name: name_span,
+            arg_tys,
+            is_varargs,
+            rtn_ty,
+        } in func_types
+        {
+            let name = self.lexer.span_str(name_span).to_owned();
+            if self.func_types_map.get(&name).is_some() {
+                return Err(format!("Duplicate function type '{name}'").into());
+            }
+            let arg_tys = {
+                let mut mapped = Vec::with_capacity(arg_tys.len());
+                for x in arg_tys.into_iter() {
+                    mapped.push(self.process_type(x)?);
+                }
+                mapped
+            };
+            let rtn_ty = self.process_type(rtn_ty)?;
+            let func_ty = self
+                .m
+                .insert_ty(Ty::Func(FuncTy::new(arg_tys, rtn_ty, is_varargs)))
+                .map_err(|e| self.error_at_span(name_span, &e.to_string()))?;
+            self.func_types_map.insert(name, func_ty);
+        }
+        Ok(())
+    }
+
     fn process_func_decls(&mut self, func_decls: Vec<ASTFuncDecl>) -> Result<(), Box<dyn Error>> {
         for ASTFuncDecl {
             name: name_span,
@@ -346,6 +408,9 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
         } in func_decls
         {
             let name = self.lexer.span_str(name_span).to_owned();
+            if self.func_types_map.get(&name).is_some() {
+                todo!();
+            }
             let arg_tys = {
                 let mut mapped = Vec::with_capacity(arg_tys.len());
                 for x in arg_tys.into_iter() {
@@ -520,6 +585,13 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
     }
 }
 
+struct ASTFuncType {
+    name: Span,
+    arg_tys: Vec<ASTType>,
+    is_varargs: bool,
+    rtn_ty: ASTType,
+}
+
 struct ASTFuncDecl {
     name: Span,
     arg_tys: Vec<ASTType>,
@@ -553,6 +625,12 @@ enum ASTInst {
         operand: ASTOperand,
         is_true: bool,
         live_vars: Vec<Span>,
+    },
+    ICall {
+        assign: Option<Span>,
+        func_type: Span,
+        target: ASTOperand,
+        args: Vec<ASTOperand>,
     },
     ICmp {
         assign: Span,
@@ -698,6 +776,7 @@ mod tests {
     fn all_jit_ir_syntax() {
         Module::from_str(
             "
+            func_type ft1(i8, i32, ...) -> i64
             func_decl f1()
             func_decl f2(i8) -> i32
             func_decl f3(i8, i32, ...) -> i64
@@ -762,6 +841,7 @@ mod tests {
               %50: double = fp_ext %49
               %51: double = fadd 1double, 2.345double
               %52: float = fadd 1float, 2.345float
+              %53: i64 = icall<ft1> %9(%5, %7, %0)
         ",
         );
     }
@@ -821,6 +901,49 @@ mod tests {
     }
 
     #[test]
+    fn func_types() {
+        let mut m = Module::from_str(
+            "
+              func_type f1()
+              func_type f2(i8) -> i32
+              func_type f3(i8, i32, ...) -> i64
+              func_type f4(...)
+        ",
+        );
+        // We don't have a "lookup a function type" function, but we can check that if we
+        // "insert" identical IR function declarations to the module that no new function
+        // types are actually added. We thus need to add all the non-function-types we're
+        // interested in first.
+        let i32_tyidx = m.insert_ty(Ty::Integer(32)).unwrap();
+        let i64_tyidx = m.insert_ty(Ty::Integer(64)).unwrap();
+        let types_len = m.types_len();
+
+        m.insert_ty(Ty::Func(FuncTy::new(Vec::new(), m.void_tyidx(), false)))
+            .unwrap();
+        assert_eq!(m.types_len(), types_len);
+
+        m.insert_ty(Ty::Func(FuncTy::new(
+            vec![m.int8_tyidx()],
+            i32_tyidx,
+            false,
+        )))
+        .unwrap();
+        assert_eq!(m.types_len(), types_len);
+
+        m.insert_ty(Ty::Func(FuncTy::new(
+            vec![m.int8_tyidx(), i32_tyidx],
+            i64_tyidx,
+            true,
+        )))
+        .unwrap();
+        assert_eq!(m.types_len(), types_len);
+
+        m.insert_ty(Ty::Func(FuncTy::new(Vec::new(), m.void_tyidx(), true)))
+            .unwrap();
+        assert_eq!(m.types_len(), types_len);
+    }
+
+    #[test]
     fn discontinuous_operand_ids() {
         Module::assert_ir_transform_eq(
             "
@@ -860,6 +983,32 @@ mod tests {
             %3: i16 = load_ti 0
             %4: i16 = load_ti 1
             %3: i16 = load_ti 2
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Duplicate function type 't1'")]
+    fn duplicate_func_type() {
+        Module::from_str(
+            "
+          func_type t1()
+          func_type t1()
+          entry:
+            %0: i8 = load_ti 0
+        ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "No such function type 't2'")]
+    fn no_such_func_type() {
+        Module::from_str(
+            "
+          func_type t1()
+          entry:
+            %0: ptr = load_ti 0
+            icall<t2> %0()
         ",
         );
     }
