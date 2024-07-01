@@ -228,6 +228,13 @@ impl Module {
         &self.insts[usize::from(idx)]
     }
 
+    pub(crate) fn push_indirect_call(
+        &mut self,
+        inst: IndirectCallInst,
+    ) -> Result<IndirectCallIdx, CompilationError> {
+        IndirectCallIdx::new(self.indirect_calls.len()).inspect(|_| self.indirect_calls.push(inst))
+    }
+
     /// Return the indirect call at the specified index.
     pub(crate) fn indirect_call(&self, idx: IndirectCallIdx) -> &IndirectCallInst {
         &self.indirect_calls[usize::from(idx)]
@@ -254,13 +261,6 @@ impl Module {
     /// Replace the instruction at `iidx` with `inst`.
     pub(crate) fn replace(&mut self, iidx: InstIdx, inst: Inst) {
         self.insts[usize::from(iidx)] = inst;
-    }
-
-    pub(crate) fn push_indirect_call(
-        &mut self,
-        inst: IndirectCallInst,
-    ) -> Result<IndirectCallIdx, CompilationError> {
-        IndirectCallIdx::new(self.indirect_calls.len()).inspect(|_| self.indirect_calls.push(inst))
     }
 
     /// Push an instruction to the end of the [Module] and create a local variable [Operand] out of
@@ -325,6 +325,12 @@ impl Module {
     /// Panics if the index is out of bounds.
     pub(crate) fn type_(&self, idx: TyIdx) -> &Ty {
         self.types.get_index(usize::from(idx)).unwrap()
+    }
+
+    /// How many [Ty]s does this module contain?
+    #[cfg(test)]
+    pub(crate) fn types_len(&self) -> usize {
+        self.types.len()
     }
 
     /// Add a constant to the pool and return its index. If the constant already exists, an
