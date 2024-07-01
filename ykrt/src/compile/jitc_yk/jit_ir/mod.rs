@@ -45,7 +45,7 @@ use std::{
 use ykaddr::addr::symbol_to_ptr;
 
 // This is simple and can be shared across both IRs.
-pub(crate) use super::aot_ir::{BinOp, FloatTy, Predicate};
+pub(crate) use super::aot_ir::{BinOp, FloatPredicate, FloatTy, Predicate};
 
 /// The `Module` is the top-level container for JIT IR.
 ///
@@ -1159,6 +1159,7 @@ pub(crate) enum Inst {
     Select(SelectInst),
     SIToFP(SIToFPInst),
     FPExt(FPExtInst),
+    Fcmp(FcmpInst),
 }
 
 impl Inst {
@@ -1206,6 +1207,7 @@ impl Inst {
             Self::Select(s) => s.trueval(m).tyidx(m),
             Self::SIToFP(i) => i.dest_tyidx(),
             Self::FPExt(i) => i.dest_tyidx(),
+            Self::Fcmp(_) => m.int1_tyidx(),
         }
     }
 
@@ -1238,6 +1240,7 @@ impl Inst {
             Inst::Select(_) => todo!(),
             Inst::SIToFP(_) => todo!(),
             Inst::FPExt(_) => todo!(),
+            Inst::Fcmp(_) => todo!(),
         }
     }
 
@@ -1278,6 +1281,7 @@ impl Inst {
             Inst::Select(_) => todo!(),
             Inst::SIToFP(_) => todo!(),
             Inst::FPExt(_) => todo!(),
+            Inst::Fcmp(_) => todo!(),
         }
     }
 
@@ -1447,6 +1451,13 @@ impl fmt::Display for DisplayableInst<'_> {
             ),
             Inst::SIToFP(i) => write!(f, "si_to_fp {}", i.val(self.m).display(self.m)),
             Inst::FPExt(i) => write!(f, "fp_ext {}", i.val(self.m).display(self.m)),
+            Inst::Fcmp(x) => write!(
+                f,
+                "{} {}, {}",
+                x.pred,
+                x.lhs(self.m).display(self.m),
+                x.rhs(self.m).display(self.m)
+            ),
         }
     }
 }
@@ -1479,6 +1490,7 @@ inst!(Trunc, TruncInst);
 inst!(Select, SelectInst);
 inst!(SIToFP, SIToFPInst);
 inst!(FPExt, FPExtInst);
+inst!(Fcmp, FcmpInst);
 
 /// The operands for a [Instruction::BinOp]
 ///
@@ -1988,6 +2000,50 @@ impl IcmpInst {
     ///
     /// E.g. in `x <= y`, it's `<=`.
     pub(crate) fn predicate(&self) -> Predicate {
+        self.pred
+    }
+}
+
+/// The operands for a [Inst::Fcmp]
+///
+/// # Semantics
+///
+/// Compares two floating point operands according to a predicate (e.g. greater-than). Defines a
+/// local variable that dictates the truth of the comparison.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FcmpInst {
+    pub(crate) lhs: PackedOperand,
+    pub(crate) pred: FloatPredicate,
+    pub(crate) rhs: PackedOperand,
+}
+
+impl FcmpInst {
+    pub(crate) fn new(lhs: Operand, pred: FloatPredicate, rhs: Operand) -> Self {
+        Self {
+            lhs: PackedOperand::new(&lhs),
+            pred,
+            rhs: PackedOperand::new(&rhs),
+        }
+    }
+
+    /// Returns the left-hand-side of the comparison.
+    ///
+    /// E.g. in `x <= y`, it's `x`.
+    pub(crate) fn lhs(&self, m: &Module) -> Operand {
+        self.lhs.unpack(m)
+    }
+
+    /// Returns the right-hand-side of the comparison.
+    ///
+    /// E.g. in `x <= y`, it's `y`.
+    pub(crate) fn rhs(&self, m: &Module) -> Operand {
+        self.rhs.unpack(m)
+    }
+
+    /// Returns the predicate of the comparison.
+    ///
+    /// E.g. in `x <= y`, it's `<=`.
+    pub(crate) fn predicate(&self) -> FloatPredicate {
         self.pred
     }
 }

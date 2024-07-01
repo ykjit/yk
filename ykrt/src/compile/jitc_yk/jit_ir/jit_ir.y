@@ -101,6 +101,9 @@ Inst -> Result<ASTInst, Box<dyn Error>>:
   | "LOCAL_OPERAND" ":" Type "=" Predicate Operand "," Operand  {
       Ok(ASTInst::ICmp{assign: $1?.span(), type_: $3?, pred: $5?, lhs: $6?, rhs: $8?})
     }
+  | "LOCAL_OPERAND" ":" Type "=" FloatPredicate Operand "," Operand  {
+      Ok(ASTInst::FCmp{assign: $1?.span(), type_: $3?, pred: $5?, lhs: $6?, rhs: $8?})
+    }
   | "LOCAL_OPERAND" ":" Type "=" "LOAD" Operand {
       Ok(ASTInst::Load{assign: $1?.span(), type_: $3?, val: $6?, volatile: false})
     }
@@ -193,6 +196,25 @@ Predicate -> Result<Predicate, Box<dyn Error>>:
   | "SGE" { Ok(Predicate::SignedGreaterEqual) }
   | "SLT" { Ok(Predicate::SignedLess) }
   | "SLE" { Ok(Predicate::SignedLessEqual) }
+  ;
+
+FloatPredicate -> Result<FloatPredicate, Box<dyn Error>>:
+  "F_FALSE" { Ok(FloatPredicate::False) }
+  | "F_OEQ" { Ok(FloatPredicate::OrderedEqual) }
+  | "F_OGT" { Ok(FloatPredicate::OrderedGreater) }
+  | "F_OGE" { Ok(FloatPredicate::OrderedGreaterEqual) }
+  | "F_OLT" { Ok(FloatPredicate::OrderedLess) }
+  | "F_OLE" { Ok(FloatPredicate::OrderedLessEqual) }
+  | "F_ONE" { Ok(FloatPredicate::OrderedNotEqual) }
+  | "F_ORD" { Ok(FloatPredicate::Ordered) }
+  | "F_UNO" { Ok(FloatPredicate::Unordered) }
+  | "F_UEQ" { Ok(FloatPredicate::UnorderedEqual) }
+  | "F_UGT" { Ok(FloatPredicate::UnorderedGreater) }
+  | "F_UGE" { Ok(FloatPredicate::UnorderedGreaterEqual) }
+  | "F_ULT" { Ok(FloatPredicate::UnorderedLess) }
+  | "F_ULE" { Ok(FloatPredicate::UnorderedLessEqual) }
+  | "F_UNE" { Ok(FloatPredicate::UnorderedNotEqual) }
+  | "F_TRUE" { Ok(FloatPredicate::True) }
   ;
 
 Unmatched -> ():

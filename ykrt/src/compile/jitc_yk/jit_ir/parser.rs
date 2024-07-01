@@ -5,10 +5,10 @@
 //! makes it possible to write JIT IR tests using JIT IR concrete syntax.
 
 use super::super::{
-    aot_ir::{BinOp, Predicate},
+    aot_ir::{BinOp, FloatPredicate, Predicate},
     jit_ir::{
-        BinOpInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FPExtInst, FloatTy,
-        FuncDecl, FuncTy, GuardInfo, GuardInst, IcmpInst, IndirectCallInst, Inst, InstIdx,
+        BinOpInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FPExtInst, FcmpInst,
+        FloatTy, FuncDecl, FuncTy, GuardInfo, GuardInst, IcmpInst, IndirectCallInst, Inst, InstIdx,
         LoadInst, LoadTraceInputInst, Module, Operand, PtrAddInst, SExtInst, SIToFPInst,
         SelectInst, StoreInst, TruncInst, Ty, TyIdx,
     },
@@ -241,6 +241,33 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             }
                         }
                         let inst = IcmpInst::new(
+                            self.process_operand(lhs)?,
+                            pred,
+                            self.process_operand(rhs)?,
+                        );
+                        self.push_assign(inst.into(), assign)?;
+                    }
+                    ASTInst::FCmp {
+                        assign,
+                        type_,
+                        pred,
+                        lhs,
+                        rhs,
+                    } => {
+                        let ty = self.process_type(type_)?;
+                        match self.m.type_(ty) {
+                            Ty::Integer(1) => (),
+                            x => {
+                                return Err(self.error_at_span(
+                                    assign,
+                                    &format!(
+                                        "FCmp instructions must assign to an i1, not '{}'",
+                                        x.display(self.m)
+                                    ),
+                                ))
+                            }
+                        }
+                        let inst = FcmpInst::new(
                             self.process_operand(lhs)?,
                             pred,
                             self.process_operand(rhs)?,
@@ -637,6 +664,13 @@ enum ASTInst {
         #[allow(dead_code)]
         type_: ASTType,
         pred: Predicate,
+        lhs: ASTOperand,
+        rhs: ASTOperand,
+    },
+    FCmp {
+        assign: Span,
+        type_: ASTType,
+        pred: FloatPredicate,
         lhs: ASTOperand,
         rhs: ASTOperand,
     },

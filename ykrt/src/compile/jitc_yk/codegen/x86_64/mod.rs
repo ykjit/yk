@@ -276,6 +276,7 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Inst::Select(i) => self.cg_select(iidx, i),
             jit_ir::Inst::SIToFP(i) => self.cg_sitofp(iidx, i),
             jit_ir::Inst::FPExt(i) => self.cg_fpext(iidx, i),
+            jit_ir::Inst::Fcmp(i) => self.cg_fcmp(iidx, i),
         }
         Ok(())
     }
@@ -774,7 +775,87 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Predicate::SignedGreaterEqual => dynasm!(self.asm; setge Rb(WR0.code())),
             jit_ir::Predicate::SignedLess => dynasm!(self.asm; setl Rb(WR0.code())),
             jit_ir::Predicate::SignedLessEqual => dynasm!(self.asm; setle Rb(WR0.code())),
-            // Note: when float predicates added: `_ => panic!()`
+        }
+        self.store_new_local(iidx, WR0);
+    }
+
+    fn cg_fcmp(&mut self, iidx: InstIdx, inst: &jit_ir::FcmpInst) {
+        let (lhs, pred, rhs) = (inst.lhs(self.m), inst.predicate(), inst.rhs(self.m));
+
+        self.load_operand_float(WF0, &lhs);
+        self.load_operand_float(WF1, &rhs);
+
+        // Perform the comparison.
+        let size = self
+            .m
+            .type_(inst.lhs.unpack(self.m).tyidx(self.m))
+            .byte_size()
+            .unwrap();
+
+        match pred.is_ordered() {
+            Some(true) => match size {
+                8 => dynasm!(self.asm; comisd Rx(WF0.code()), Rx(WF1.code())),
+                4 => dynasm!(self.asm; comiss Rx(WF0.code()), Rx(WF1.code())),
+                _ => panic!(),
+            },
+            Some(false) => match size {
+                8 => dynasm!(self.asm; ucomisd Rx(WF0.code()), Rx(WF1.code())),
+                4 => dynasm!(self.asm; ucomiss Rx(WF0.code()), Rx(WF1.code())),
+                _ => panic!(),
+            },
+            None => todo!(),
+        }
+
+        // Interpret the flags assignment WRT the predicate.
+        //
+        // Note that although floats are signed values, `{u,}comis{s,d}` sets CF (not SF and OF, as
+        // you might expect). So when checking the outcome you have to use the "above" and "below"
+        // variants of `setcc`, as if you were comparing unsigned integers.
+        match pred {
+            jit_ir::FloatPredicate::OrderedEqual | jit_ir::FloatPredicate::UnorderedEqual => {
+                dynasm!(self.asm; sete Rb(WR0.code()))
+            }
+            jit_ir::FloatPredicate::UnorderedNotEqual => {
+                dynasm!(self.asm; setne Rb(WR0.code()))
+            }
+            jit_ir::FloatPredicate::OrderedGreater => dynasm!(self.asm; seta Rb(WR0.code())),
+            jit_ir::FloatPredicate::OrderedGreaterEqual => {
+                dynasm!(self.asm; setae Rb(WR0.code()))
+            }
+            jit_ir::FloatPredicate::OrderedLess => dynasm!(self.asm; setb Rb(WR0.code())),
+            jit_ir::FloatPredicate::OrderedLessEqual => dynasm!(self.asm; setbe Rb(WR0.code())),
+            jit_ir::FloatPredicate::False
+            | jit_ir::FloatPredicate::OrderedNotEqual
+            | jit_ir::FloatPredicate::Ordered
+            | jit_ir::FloatPredicate::Unordered
+            | jit_ir::FloatPredicate::UnorderedGreater
+            | jit_ir::FloatPredicate::UnorderedGreaterEqual
+            | jit_ir::FloatPredicate::UnorderedLess
+            | jit_ir::FloatPredicate::UnorderedLessEqual
+            | jit_ir::FloatPredicate::True => todo!("{}", pred),
+        }
+
+        // But we have to be careful to check that the computation didn't produce "unordered". This
+        // happens when at least one of the value compared was NaN. The unordered result is flagged
+        // by PF (parity flag) being set.
+        //
+        // We follow the precedent set by clang and follow the IEE-754 spec with regards to
+        // comparisons with NaN:
+        //  - Any "not equal" comparison involving NaN is true.
+        //  - All other comparisons are false.
+        match pred {
+            jit_ir::FloatPredicate::OrderedNotEqual | jit_ir::FloatPredicate::UnorderedNotEqual => {
+                dynasm!(self.asm
+                    ; setp Rb(WR1.code())
+                    ; or Rb(WR0.code()), Rb(WR1.code())
+                );
+            }
+            _ => {
+                dynasm!(self.asm
+                    ; setnp Rb(WR1.code())
+                    ; and Rb(WR0.code()), Rb(WR1.code())
+                );
+            }
         }
         self.store_new_local(iidx, WR0);
     }
@@ -2063,6 +2144,54 @@ mod tests {
                 ... movss xmm1, dword ptr [rbp-0x08]
                 ... addss xmm0, xmm1
                 ... movss [rbp-0x0c], xmm0
+                ...
+                ",
+            );
+        }
+
+        #[test]
+        fn cg_fcmp_float() {
+            test_with_spillalloc(
+                "
+              entry:
+                %0: float = load_ti 0
+                %1: float = load_ti 1
+                %2: i1 = f_ueq %0, %1
+            ",
+                "
+                ...
+                ; %2: i1 = f_ueq %0, %1
+                ... movss xmm0, dword ptr [rbp-0x04]
+                ... movss xmm1, dword ptr [rbp-0x08]
+                ... ucomiss xmm0, xmm1
+                ... setz r12b
+                ... setnp r13b
+                ... and r12b, r13b
+                ... mov [rbp-0x09], r12b
+                ...
+                ",
+            );
+        }
+
+        #[test]
+        fn cg_fcmp_double() {
+            test_with_spillalloc(
+                "
+              entry:
+                %0: double = load_ti 0
+                %1: double = load_ti 1
+                %2: i1 = f_ueq %0, %1
+            ",
+                "
+                ...
+                ; %2: i1 = f_ueq %0, %1
+                ... movsd xmm0, qword ptr [rbp-0x08]
+                ... movsd xmm1, qword ptr [rbp-0x10]
+                ... ucomisd xmm0, xmm1
+                ... setz r12b
+                ... setnp r13b
+                ... and r12b, r13b
+                ... mov [rbp-0x11], r12b
                 ...
                 ",
             );

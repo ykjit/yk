@@ -306,6 +306,9 @@ impl<'a> TraceBuilder<'a> {
                     self.local_map.insert(aot_iid, jitop.clone());
                     Ok(())
                 }
+                aot_ir::Inst::FCmp { lhs, pred, rhs, .. } => {
+                    self.handle_fcmp(bid, iidx, lhs, pred, rhs)
+                }
                 _ => todo!("{:?}", inst),
             }?;
         }
@@ -586,6 +589,20 @@ impl<'a> TraceBuilder<'a> {
     ) -> Result<(), CompilationError> {
         let inst =
             jit_ir::IcmpInst::new(self.handle_operand(lhs)?, *pred, self.handle_operand(rhs)?)
+                .into();
+        self.copy_inst(inst, bid, aot_inst_idx)
+    }
+
+    fn handle_fcmp(
+        &mut self,
+        bid: &aot_ir::BBlockId,
+        aot_inst_idx: usize,
+        lhs: &aot_ir::Operand,
+        pred: &aot_ir::FloatPredicate,
+        rhs: &aot_ir::Operand,
+    ) -> Result<(), CompilationError> {
+        let inst =
+            jit_ir::FcmpInst::new(self.handle_operand(lhs)?, *pred, self.handle_operand(rhs)?)
                 .into();
         self.copy_inst(inst, bid, aot_inst_idx)
     }
