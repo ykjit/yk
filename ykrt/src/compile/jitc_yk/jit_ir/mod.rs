@@ -1,9 +1,45 @@
 //! The JIT's Intermediate Representation (IR).
 //!
-//! This is the IR created by [trace_builder] and which is then optimised. The IR can feel a little
-//! odd at first because we store indexes into vectors rather than use direct references. This
-//! allows us to squeeze the amount of the memory used down (and also bypasses issues with
-//! representing graph structures in Rust, but that's slightly accidental).
+//! This is the IR created by [trace_builder] and which is then analysed and optimised. The IR has
+//! the following properties:
+//!
+//!   1. We use vectors rather than direct references. This allows us to squeeze the amount of the
+//!      memory used down (and also bypasses issues with representing graph structures in Rust, but
+//!      that's slightly accidental).
+//!
+//!   2. The IR is designed to allow most manipulations to be performed without requiring
+//!      reallocation.
+//!
+//! This second property has some surprising consequences:
+//!
+//!   1. We have to introduce `Proxy*` instructions which semi-transparently "forward" an
+//!      instruction's result on. For example if we have IR in memory stored along these lines:
+//!
+//!        ```text
+//!        %0: ...
+//!        %1: 1i8
+//!        %2: add %0, %1
+//!        ```
+//!
+//!      Then instruction `%1` is a `ProxyConst`. We very rarely want to view the IR as it is
+//!      directly stored in memory. Instead, we nearly always want to pretend that the IR really
+//!      looks like:
+//!
+//!        ```text
+//!        %0: ...
+//!        %2: add %0, 1i8
+//!        ```
+//!
+//!      i.e. we want to pretend that the `%1` doesn't exist and that the reference to `%1` is
+//!      actually just a constant.
+//!
+//!   2. We never store [Operand]s directly: we only ever store [PackedOperand]s. Whenever we want
+//!      to get an [Operand] we *must* use [PackedOperand::unpack]. `unpack` does the necessary
+//!      deproxying.
+//!
+//!   3. In nearly all cases we should view the IR as deproxied: unless you explicitly intend to
+//!      handle proxies yourself, looking up an instruction should use [Module::inst_no_proxies].
+//!      Only use [Module::inst_all] if you really, really know why you're using it.
 //!
 //! Because using the IR can often involve getting hold of data nested several layers deep, we also
 //! use a number of abbreviations/conventions to keep the length of source down to something
@@ -25,7 +61,6 @@
 //!  2. or, when they need extra information, they expose a `display()` method, which returns an
 //!     object which implements [std::fmt::Display].
 
-#[cfg(test)]
 mod dead_code;
 #[cfg(test)]
 mod parser;
@@ -65,7 +100,7 @@ pub(crate) struct Module {
     /// The IR trace as a linear sequence of instructions.
     insts: Vec<Inst>,
     /// The arguments pool for [CallInst]s. Indexed by [ArgsIdx].
-    args: Vec<Operand>,
+    args: Vec<PackedOperand>,
     /// The constant pool. Indexed by [ConstIdx].
     consts: IndexSet<ConstIndexSetWrapper>,
     /// The type pool. Indexed by [TyIdx].
@@ -224,8 +259,22 @@ impl Module {
     }
 
     /// Return the instruction at the specified index.
-    pub(crate) fn inst(&self, idx: InstIdx) -> &Inst {
-        &self.insts[usize::from(idx)]
+    ///
+    /// # Panics
+    ///
+    /// If `iidx` points to a `Proxy*` instruction.
+    pub(crate) fn inst_no_proxies(&self, iidx: InstIdx) -> &Inst {
+        match &self.insts[usize::from(iidx)] {
+            Inst::ProxyConst(_) | Inst::ProxyInst(_) => panic!(),
+            x => x,
+        }
+    }
+
+    /// Return the instruction at the specified index. Note: unless you are explicitly handling
+    /// `Proxy*` instructions in your code you must use [Self::inst_no_proxies] -- not handling
+    /// proxies correctly is undefined behaviour. If in doubt, use [Self::inst_no_proxies].
+    pub(crate) fn inst_all(&self, iidx: InstIdx) -> &Inst {
+        &self.insts[usize::from(iidx)]
     }
 
     pub(crate) fn push_indirect_call(
@@ -247,15 +296,17 @@ impl Module {
 
     /// Iterate, in order, over all `InstIdx`s of this module (including `Proxy*` and `Tombstone`
     /// instructions).
-    pub(crate) fn iter_inst_idxs(&self) -> impl DoubleEndedIterator<Item = InstIdx> {
+    pub(crate) fn iter_all_inst_idxs(&self) -> impl DoubleEndedIterator<Item = InstIdx> {
         (0..self.insts.len()).map(|x| InstIdx::new(x).unwrap())
     }
 
-    /// An iterator over instruction indices. This skips `Proxy*` and `Tombstone` instructions: in
-    /// other words, it produces monotonically increasing, but potentially non-consecutive, instruction
-    /// indices.
-    pub(crate) fn iter_skipping_inst_idxs(&self) -> SkippingInstIdxIterator<'_> {
-        SkippingInstIdxIterator { m: self, cur: 0 }
+    /// An iterator over instructions that skips `Proxy*` and `Tombstone` instructions.
+    ///
+    /// This implicitly deduplicates the callers view of instructions (since `Proxy*` instructions
+    /// are skipped), but note that the indices, while strictly monotonically increasing, may be
+    /// non-consecutive (because of skipping).
+    pub(crate) fn iter_skipping_insts(&self) -> SkippingInstsIterator<'_> {
+        SkippingInstsIterator { m: self, cur: 0 }
     }
 
     /// Replace the instruction at `iidx` with `inst`.
@@ -299,7 +350,8 @@ impl Module {
     ///
     /// If `args` would overflow the index type.
     pub(crate) fn push_args(&mut self, args: Vec<Operand>) -> Result<ArgsIdx, CompilationError> {
-        ArgsIdx::new(self.args.len()).inspect(|_| self.args.extend(args))
+        ArgsIdx::new(self.args.len())
+            .inspect(|_| self.args.extend(args.iter().map(PackedOperand::new)))
     }
 
     /// Return the argument at args index `idx`.
@@ -307,8 +359,18 @@ impl Module {
     /// # Panics
     ///
     /// If `idx` is out of bounds.
-    pub(crate) fn arg(&self, idx: ArgsIdx) -> &Operand {
-        &self.args[usize::from(idx)]
+    pub(crate) fn arg(&self, idx: ArgsIdx) -> Operand {
+        self.args[usize::from(idx)].unpack(self)
+    }
+
+    /// Return the raw [PackedOperand] at args index `idx`. Unless you have a good reason for doing
+    /// so, use [Self::arg] instead.
+    ///
+    /// # Panics
+    ///
+    /// If `idx` is out of bounds.
+    pub(crate) fn arg_packed(&self, idx: ArgsIdx) -> PackedOperand {
+        self.args[usize::from(idx)]
     }
 
     /// Add a [Ty] to the types pool and return its index. If the [Ty] already exists, an existing
@@ -460,26 +522,29 @@ impl fmt::Display for Module {
             )?;
         }
         write!(f, "\nentry:")?;
-        for iidx in self.iter_skipping_inst_idxs() {
-            write!(f, "\n    {}", self.inst(iidx).display(iidx, self))?
+        for (iidx, inst) in self.iter_skipping_insts() {
+            write!(f, "\n    {}", inst.display(iidx, self))?
         }
 
         Ok(())
     }
 }
 
-/// An iterator over instruction indices. This skips `Proxy*` and `Tombestone` instructions: in
-/// other words, it produces monotonically increasing, but potentially non-consecutive, instruction
-/// indices.
-pub(crate) struct SkippingInstIdxIterator<'a> {
+/// An iterator over instructions that skips `Proxy*` and `Tombstone` instructions.
+///
+/// This implicitly deduplicates the callers view of instructions (since `Proxy*` instructions are
+/// skipped), but note that the indices, while strictly monotonically increasing, may be
+/// non-consecutive (because of skipping).
+pub(crate) struct SkippingInstsIterator<'a> {
     m: &'a Module,
     cur: usize,
 }
 
-impl Iterator for SkippingInstIdxIterator<'_> {
-    type Item = InstIdx;
-    /// Return the next instruction index or `None` if the end has been reached.
-    fn next(&mut self) -> Option<InstIdx> {
+impl<'a> Iterator for SkippingInstsIterator<'a> {
+    type Item = (InstIdx, &'a Inst);
+    /// Return the next instruction index and its associated instruction or `None` if the end has
+    /// been reached.
+    fn next(&mut self) -> Option<Self::Item> {
         while let Some(x) = self.m.insts.get(self.cur) {
             // We know that `self.cur` must fit in `InstIdx`, as otherwise `m.insts` wouldn't have
             // had the instruction in the first place.
@@ -487,7 +552,7 @@ impl Iterator for SkippingInstIdxIterator<'_> {
             self.cur += 1;
             match x {
                 Inst::ProxyConst(_) | Inst::ProxyInst(_) | Inst::Tombstone => (),
-                _ => return Some(old),
+                _ => return Some((old, &self.m.insts[usize::from(old)])),
             }
         }
         None
@@ -888,11 +953,11 @@ impl PackedOperand {
     }
 
     /// Unpacks a [PackedOperand] into a [Operand].
-    pub fn unpack(&self, m: &Module) -> Operand {
+    pub(crate) fn unpack(&self, m: &Module) -> Operand {
         if (self.0 & !OPERAND_IDX_MASK) == 0 {
             let mut iidx = InstIdx(self.0);
             loop {
-                match m.inst(iidx) {
+                match m.inst_all(iidx) {
                     Inst::ProxyConst(x) => {
                         return Operand::Const(*x);
                     }
@@ -906,6 +971,17 @@ impl PackedOperand {
             }
         } else {
             Operand::Const(ConstIdx(self.0 & OPERAND_IDX_MASK))
+        }
+    }
+
+    /// If this [PackedOperand] represents a local instruction, call `f` with its `InstIdx`. Note
+    /// that this does not perform any kind of deproxification.
+    fn map_iidx<F>(&self, f: &mut F)
+    where
+        F: FnMut(InstIdx),
+    {
+        if (self.0 & !OPERAND_IDX_MASK) == 0 {
+            f(InstIdx(self.0))
         }
     }
 }
@@ -930,7 +1006,7 @@ impl Operand {
     /// Panics if asking for the size make no sense for this operand.
     pub(crate) fn byte_size(&self, m: &Module) -> usize {
         match self {
-            Self::Local(l) => m.inst(*l).def_byte_size(m),
+            Self::Local(l) => m.inst_all(*l).def_byte_size(m),
             Self::Const(cidx) => m.type_(m.const_(*cidx).tyidx(m)).byte_size().unwrap(),
         }
     }
@@ -938,7 +1014,7 @@ impl Operand {
     /// Returns the type index of the operand.
     pub(crate) fn tyidx(&self, m: &Module) -> TyIdx {
         match self {
-            Self::Local(l) => m.inst(*l).tyidx(m),
+            Self::Local(l) => m.inst_all(*l).tyidx(m),
             Self::Const(c) => m.const_(*c).tyidx(m),
         }
     }
@@ -956,7 +1032,7 @@ pub(crate) struct DisplayableOperand<'a> {
 impl fmt::Display for DisplayableOperand<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.operand {
-            Operand::Local(idx) => match self.m.inst(*idx) {
+            Operand::Local(idx) => match self.m.inst_all(*idx) {
                 Inst::ProxyConst(c) => {
                     write!(f, "{}", self.m.const_(*c).display(self.m))
                 }
@@ -1180,7 +1256,7 @@ impl Inst {
             #[cfg(test)]
             Self::BlackBox(_) => m.void_tyidx(),
             Self::ProxyConst(x) => m.const_(*x).tyidx(m),
-            Self::ProxyInst(x) => m.inst(*x).tyidx(m),
+            Self::ProxyInst(x) => m.inst_all(*x).tyidx(m),
             Self::Tombstone => panic!(),
 
             Self::BinOp(x) => x.tyidx(m),
@@ -1211,77 +1287,116 @@ impl Inst {
         }
     }
 
-    /// Must this instruction be considered alive, irrespective of its context? For example, side
-    /// effecting instructions will always be considered alive.
-    #[cfg(test)]
-    fn always_alive(&self) -> bool {
+    /// Does this instruction have a "side effect" that means that removing it would change the
+    /// behaviour of later instructions even if they do not have a direct dependency on this
+    /// instruction? "Side effects" are:
+    ///   * Stores to memory locations.
+    ///   * Guards.
+    fn has_side_effect(&self, m: &Module) -> bool {
         match self {
             #[cfg(test)]
             Inst::BlackBox(_) => true,
-            Inst::ProxyConst(_) => todo!(),
-            Inst::ProxyInst(_) => todo!(),
-            Inst::Tombstone => todo!(),
+            Inst::ProxyConst(_) => false,
+            Inst::ProxyInst(x) => m.inst_all(*x).has_side_effect(m),
+            Inst::Tombstone => false,
             Inst::BinOp(_) => false,
-            Inst::Load(_) => todo!(),
-            Inst::LookupGlobal(_) => todo!(),
+            Inst::Load(_) => false,
+            Inst::LookupGlobal(_) => false,
             Inst::LoadTraceInput(_) => false,
-            Inst::Call(_) => todo!(),
-            Inst::IndirectCall(_) => todo!(),
-            Inst::PtrAdd(_) => todo!(),
-            Inst::DynPtrAdd(_) => todo!(),
-            Inst::Store(_) => todo!(),
+            Inst::Call(_) => true,
+            Inst::IndirectCall(_) => true,
+            Inst::PtrAdd(_) => false,
+            Inst::DynPtrAdd(_) => false,
+            Inst::Store(_) => true,
             Inst::Icmp(_) => false,
-            Inst::Guard(_) => todo!(),
-            Inst::Arg(_) => todo!(),
-            Inst::TraceLoopStart => todo!(),
-            Inst::SExt(_) => todo!(),
-            Inst::ZeroExtend(_) => todo!(),
-            Inst::Trunc(_) => todo!(),
-            Inst::Select(_) => todo!(),
-            Inst::SIToFP(_) => todo!(),
-            Inst::FPExt(_) => todo!(),
-            Inst::Fcmp(_) => todo!(),
+            Inst::Guard(_) => true,
+            Inst::Arg(_) => false,
+            Inst::TraceLoopStart => true, // FIXME: this shouldn't be an instruction.
+            Inst::SExt(_) => false,
+            Inst::ZeroExtend(_) => false,
+            Inst::Trunc(_) => false,
+            Inst::Select(_) => false,
+            Inst::SIToFP(_) => false,
+            Inst::FPExt(_) => false,
+            Inst::Fcmp(_) => false,
         }
     }
 
-    // Apply the function `f` to each of this instruction's [Operand]s (in no specified order).
-    #[cfg(test)]
-    fn map_operands<F>(&self, m: &Module, mut f: F)
+    /// Apply the function `f` to each of this instruction's [PackedOperand]s that references a
+    /// local instruction. When an instruction references more than one [PackedOperand], the order
+    /// of traversal is undefined.
+    ///
+    /// Note that this function does not perform deproxification, and thus must only be used when
+    /// you know that you want to know which local an instruction's operands directly refers to
+    /// (e.g. for dead code elimination).
+    fn map_packed_operand_locals<F>(&self, m: &Module, f: &mut F)
     where
-        F: FnMut(Operand),
+        F: FnMut(InstIdx),
     {
         match self {
             #[cfg(test)]
-            Inst::BlackBox(BlackBoxInst { op }) => f(op.unpack(m)),
-            Inst::ProxyConst(_) => todo!(),
-            Inst::ProxyInst(_) => todo!(),
-            Inst::Tombstone => todo!(),
+            Inst::BlackBox(BlackBoxInst { op }) => {
+                op.map_iidx(f);
+            }
+            Inst::ProxyConst(_) => (),
+            Inst::ProxyInst(_) => (),
+            Inst::Tombstone => (),
             Inst::BinOp(BinOpInst { lhs, binop: _, rhs }) => {
-                f(lhs.unpack(m));
-                f(rhs.unpack(m))
+                lhs.map_iidx(f);
+                rhs.map_iidx(f);
             }
-            Inst::Load(_) => todo!(),
-            Inst::LookupGlobal(_) => todo!(),
+            Inst::Load(LoadInst { op, .. }) => op.map_iidx(f),
+            Inst::LookupGlobal(_) => (),
             Inst::LoadTraceInput(_) => (),
-            Inst::Call(_) => todo!(),
-            Inst::IndirectCall(_) => todo!(),
-            Inst::PtrAdd(_) => todo!(),
-            Inst::DynPtrAdd(_) => todo!(),
-            Inst::Store(_) => todo!(),
-            Inst::Icmp(IcmpInst { lhs, pred: _, rhs }) => {
-                f(lhs.unpack(m));
-                f(rhs.unpack(m))
+            Inst::Call(x) => {
+                for i in x.iter_args_idx() {
+                    m.arg_packed(i).map_iidx(f);
+                }
             }
-            Inst::Guard(_) => todo!(),
-            Inst::Arg(_) => todo!(),
-            Inst::TraceLoopStart => todo!(),
-            Inst::SExt(_) => todo!(),
-            Inst::ZeroExtend(_) => todo!(),
-            Inst::Trunc(_) => todo!(),
+            Inst::IndirectCall(x) => {
+                let ici = m.indirect_call(*x);
+                let IndirectCallInst { target, .. } = ici;
+                target.map_iidx(f);
+                for i in ici.iter_args_idx() {
+                    m.arg_packed(i).map_iidx(f);
+                }
+            }
+            Inst::PtrAdd(x) => {
+                let ptr = x.ptr;
+                ptr.map_iidx(f);
+            }
+            Inst::DynPtrAdd(x) => {
+                let ptr = x.ptr;
+                ptr.map_iidx(f);
+                let num_elems = x.num_elems;
+                num_elems.map_iidx(f);
+            }
+            Inst::Store(StoreInst { tgt, val, .. }) => {
+                tgt.map_iidx(f);
+                val.map_iidx(f);
+            }
+            Inst::Icmp(IcmpInst { lhs, pred: _, rhs }) => {
+                lhs.map_iidx(f);
+                rhs.map_iidx(f);
+            }
+            Inst::Guard(x @ GuardInst { cond, .. }) => {
+                cond.map_iidx(f);
+                for y in x.guard_info(m).lives() {
+                    f(*y);
+                }
+            }
+            Inst::Arg(_) => (),
+            Inst::TraceLoopStart => (),
+            Inst::SExt(SExtInst { val, .. }) => val.map_iidx(f),
+            Inst::ZeroExtend(ZeroExtendInst { val, .. }) => val.map_iidx(f),
+            Inst::Trunc(TruncInst { val, .. }) => val.map_iidx(f),
             Inst::Select(_) => todo!(),
-            Inst::SIToFP(_) => todo!(),
-            Inst::FPExt(_) => todo!(),
-            Inst::Fcmp(_) => todo!(),
+            Inst::SIToFP(SIToFPInst { val, .. }) => val.map_iidx(f),
+            Inst::FPExt(FPExtInst { val, .. }) => val.map_iidx(f),
+            Inst::Fcmp(FcmpInst { lhs, pred: _, rhs }) => {
+                lhs.map_iidx(f);
+                rhs.map_iidx(f);
+            }
         }
     }
 
@@ -1721,6 +1836,12 @@ impl IndirectCallInst {
         usize::from(self.num_args)
     }
 
+    /// Return an iterator for each of this direct call instruction's [ArgsIdx].
+    pub(crate) fn iter_args_idx(&self) -> impl Iterator<Item = ArgsIdx> {
+        (usize::from(self.args_idx)..usize::from(self.args_idx) + usize::from(self.num_args))
+            .map(|x| ArgsIdx::new(x).unwrap())
+    }
+
     /// Fetch the operand at the specified index.
     ///
     /// # Panics
@@ -1779,7 +1900,6 @@ impl DirectCallInst {
     }
 
     /// Return an iterator for each of this direct call instruction's [ArgsIdx].
-    #[cfg(any(debug_assertions, test))]
     pub(crate) fn iter_args_idx(&self) -> impl Iterator<Item = ArgsIdx> {
         (usize::from(self.args_idx)..usize::from(self.args_idx) + usize::from(self.num_args))
             .map(|x| ArgsIdx::new(x).unwrap())
@@ -1791,7 +1911,7 @@ impl DirectCallInst {
     ///
     /// Panics if the operand index is out of bounds.
     pub(crate) fn operand(&self, m: &Module, idx: usize) -> Operand {
-        m.args[usize::from(self.args_idx) + idx].clone()
+        m.arg(ArgsIdx::new(usize::from(self.args_idx) + idx).unwrap())
     }
 }
 
@@ -2260,20 +2380,18 @@ mod tests {
             Operand::Local(InstIdx(1)),
             Operand::Local(InstIdx(2)),
         ];
+        m.push(Inst::Arg(0)).unwrap();
+        m.push(Inst::Arg(1)).unwrap();
+        m.push(Inst::Arg(2)).unwrap();
         let ci = DirectCallInst::new(&mut m, func_decl_idx, args).unwrap();
 
         // Now request the operands and check they all look as they should.
         assert_eq!(ci.operand(&m, 0), Operand::Local(InstIdx(0)));
         assert_eq!(ci.operand(&m, 1), Operand::Local(InstIdx(1)));
         assert_eq!(ci.operand(&m, 2), Operand::Local(InstIdx(2)));
-        assert_eq!(
-            m.args,
-            vec![
-                Operand::Local(InstIdx(0)),
-                Operand::Local(InstIdx(1)),
-                Operand::Local(InstIdx(2))
-            ]
-        );
+        assert_eq!(m.arg(ArgsIdx(0)), Operand::Local(InstIdx(0)));
+        assert_eq!(m.arg(ArgsIdx(1)), Operand::Local(InstIdx(1)));
+        assert_eq!(m.arg(ArgsIdx(2)), Operand::Local(InstIdx(2)));
     }
 
     #[test]

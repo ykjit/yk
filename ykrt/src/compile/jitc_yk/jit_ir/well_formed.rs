@@ -27,15 +27,14 @@ use super::{BinOp, BinOpInst, Const, GuardInst, Inst, Module, Operand, Ty};
 
 impl Module {
     pub(crate) fn assert_well_formed(&self) {
-        for iidx in self.iter_skipping_inst_idxs() {
-            let inst = self.inst(iidx);
+        for (iidx, inst) in self.iter_skipping_insts() {
             match inst {
                 Inst::BinOp(BinOpInst { lhs, binop, rhs }) => {
                     let lhs_tyidx = lhs.unpack(self).tyidx(self);
                     if lhs_tyidx != rhs.unpack(self).tyidx(self) {
                         panic!(
                             "Instruction at position {iidx} has different types on lhs and rhs\n  {}",
-                            self.inst(iidx).display(iidx, self)
+                            self.inst_no_proxies(iidx).display(iidx, self)
                         );
                     }
                     match binop {
@@ -55,7 +54,7 @@ impl Module {
                             if matches!(self.type_(lhs_tyidx), Ty::Float(_)) {
                                 panic!(
                                     "Integer binop at position {iidx} operates on float operands\n  {}",
-                                    self.inst(iidx).display(iidx, self)
+                                    self.inst_no_proxies(iidx).display(iidx, self)
                                 );
                             }
                         }
@@ -63,7 +62,7 @@ impl Module {
                             if !matches!(self.type_(lhs_tyidx), Ty::Float(_)) {
                                 panic!(
                                     "Float binop at position {iidx} operates on integer operands\n  {}",
-                                    self.inst(iidx).display(iidx, self)
+                                    self.inst_no_proxies(iidx).display(iidx, self)
                                 );
                             }
                         }
@@ -109,7 +108,7 @@ impl Module {
                     let Ty::Integer(1) = self.type_(tyidx) else {
                         panic!(
                             "Guard at position {iidx} does not have 'cond' of type 'i1'\n  {}",
-                            self.inst(iidx).display(iidx, self)
+                            self.inst_no_proxies(iidx).display(iidx, self)
                         )
                     };
                     if let Operand::Const(x) = cond {
@@ -119,7 +118,7 @@ impl Module {
                         if (*expect && *v == 0) || (!*expect && *v == 1) {
                             panic!(
                                 "Guard at position {iidx} references a constant that is at odds with the guard itself\n  {}",
-                                self.inst(iidx).display(iidx, self)
+                                self.inst_no_proxies(iidx).display(iidx, self)
                             );
                         }
                     }
@@ -128,7 +127,7 @@ impl Module {
                     if x.lhs(self).tyidx(self) != x.rhs(self).tyidx(self) {
                         panic!(
                             "Instruction at position {iidx} has different types on lhs and rhs\n  {}",
-                            self.inst(iidx).display(iidx, self)
+                            self.inst_no_proxies(iidx).display(iidx, self)
                         );
                     }
                 }
@@ -138,7 +137,7 @@ impl Module {
                     {
                         panic!(
                             "Instruction at position {iidx} trying to sign extend from an equal-or-larger-than integer type\n  {}",
-                            self.inst(iidx).display(iidx, self)
+                            self.inst_no_proxies(iidx).display(iidx, self)
                         );
                     }
                 }
@@ -148,15 +147,15 @@ impl Module {
 
                     if !matches!(from_type, Ty::Integer(_)) {
                         panic!("Instruction at position {iidx} trying to convert a non-integer type\n  {}",
-                            self.inst(iidx).display(iidx, self));
+                            self.inst_no_proxies(iidx).display(iidx, self));
                     }
                     if !matches!(to_type, Ty::Float(_)) {
                         panic!("Instruction at position {iidx} trying to convert to a non-float type\n  {}",
-                            self.inst(iidx).display(iidx, self));
+                            self.inst_no_proxies(iidx).display(iidx, self));
                     }
                     if to_type.byte_size() < from_type.byte_size() {
                         panic!("Instruction at position {iidx} trying to convert to a smaller-sized float\n  {}",
-                            self.inst(iidx).display(iidx, self));
+                            self.inst_no_proxies(iidx).display(iidx, self));
                     }
                 }
                 Inst::FPExt(x) => {
@@ -164,15 +163,15 @@ impl Module {
                     let to_type = self.type_(x.dest_tyidx());
                     if !matches!(from_type, Ty::Float(_)) {
                         panic!("Instruction at position {iidx} trying to extend from a non-float type\n  {}",
-                            self.inst(iidx).display(iidx, self));
+                            self.inst_no_proxies(iidx).display(iidx, self));
                     }
                     if !matches!(to_type, Ty::Float(_)) {
                         panic!("Instruction at position {iidx} trying to extend to a non-float type\n  {}",
-                            self.inst(iidx).display(iidx, self));
+                            self.inst_no_proxies(iidx).display(iidx, self));
                     }
                     if to_type.byte_size() <= from_type.byte_size() {
                         panic!("Instruction at position {iidx} trying to extend to a smaller-sized float\n  {}",
-                            self.inst(iidx).display(iidx, self));
+                            self.inst_no_proxies(iidx).display(iidx, self));
                     }
                 }
                 _ => (),
