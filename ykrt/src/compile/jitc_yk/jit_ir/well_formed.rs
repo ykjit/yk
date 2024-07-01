@@ -144,7 +144,7 @@ impl Module {
                 }
                 Inst::SIToFP(x) => {
                     let from_type = self.type_(x.val(self).tyidx(self));
-                    let to_type = self.type_(x.dest_ty_idx());
+                    let to_type = self.type_(x.dest_tyidx());
 
                     if !matches!(from_type, Ty::Integer(_)) {
                         panic!("Instruction at position {iidx} trying to convert a non-integer type\n  {}",
@@ -161,7 +161,7 @@ impl Module {
                 }
                 Inst::FPExt(x) => {
                     let from_type = self.type_(x.val(self).tyidx(self));
-                    let to_type = self.type_(x.dest_ty_idx());
+                    let to_type = self.type_(x.dest_tyidx());
                     if !matches!(from_type, Ty::Float(_)) {
                         panic!("Instruction at position {iidx} trying to extend from a non-float type\n  {}",
                             self.inst(iidx).display(iidx, self));
