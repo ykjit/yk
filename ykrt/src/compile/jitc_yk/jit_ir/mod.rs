@@ -2079,7 +2079,7 @@ impl DynPtrAddInst {
     }
 }
 
-/// The operand for a [Inst::Icmp]
+/// The operands for a [Inst::Icmp]
 ///
 /// # Semantics
 ///
@@ -2168,7 +2168,7 @@ impl FcmpInst {
     }
 }
 
-/// The operand for a [Inst::Guard]
+/// The operands for a [Inst::Guard]
 ///
 /// # Semantics
 ///
