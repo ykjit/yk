@@ -1090,11 +1090,7 @@ impl<'a> TraceBuilder<'a> {
                                                 "Trace too long.".into(),
                                             ));
                                         }
-                                        AOTTraceIteratorError::LongJmpEncountered => {
-                                            return Err(CompilationError::General(
-                                                "Long jump encountered.".into(),
-                                            ));
-                                        }
+                                        x => return Err(CompilationError::General(x.to_string())),
                                     },
                                 }
                             } else {
@@ -1131,9 +1127,7 @@ impl<'a> TraceBuilder<'a> {
                     AOTTraceIteratorError::TraceTooLong => {
                         return Err(CompilationError::LimitExceeded("Trace too long.".into()));
                     }
-                    AOTTraceIteratorError::LongJmpEncountered => {
-                        return Err(CompilationError::General("Long jump encountered.".into()));
-                    }
+                    x => return Err(CompilationError::General(x.to_string())),
                 },
             }
         }

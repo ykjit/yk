@@ -85,9 +85,15 @@ pub(crate) trait AOTTraceIterator:
 
 /// When a trace is being processed, a problem might be noticed at any point. It is possible that
 /// tracing the original [crate::location::Location] again may "fix" the problem.
+#[derive(Debug, Error)]
 pub(crate) enum AOTTraceIteratorError {
+    #[error("Trace ended prematurely")]
+    #[allow(dead_code)]
+    PrematureEnd,
+    #[error("Trace too long")]
     #[allow(dead_code)]
     TraceTooLong,
+    #[error("longjmp encountered")]
     #[allow(dead_code)]
     LongJmpEncountered,
 }

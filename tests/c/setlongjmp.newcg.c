@@ -7,7 +7,7 @@
 //     jitstate: start-tracing
 //     we jumped
 //     jitstate: stop-tracing
-//     jitstate: trace-compilation-aborted: Long jump encountered.
+//     jitstate: trace-compilation-aborted: longjmp encountered
 //     ...
 
 // Tests that we can deal with setjmp/longjmp.
