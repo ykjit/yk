@@ -250,6 +250,11 @@ impl Compiler for JITCLLVM {
         for ta in aottrace_iter.0 {
             match ta {
                 Ok(x) => irtrace.push(x),
+                Err(AOTTraceIteratorError::PrematureEnd) => {
+                    return Err(CompilationError::General(
+                        "Trace ended prematurely".to_owned(),
+                    ));
+                }
                 Err(AOTTraceIteratorError::LongJmpEncountered) => {
                     return Err(CompilationError::General("Encountered longjmp".to_owned()));
                 }

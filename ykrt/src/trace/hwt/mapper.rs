@@ -29,33 +29,11 @@ impl AOTTraceIterator for HWTTraceIterator {}
 
 impl HWTTraceIterator {
     pub fn new(trace: Box<dyn Trace>) -> Result<Self, TraceRecorderError> {
-        let mut hwti = HWTTraceIterator {
+        Ok(Self {
             hwt_iter: trace.iter_blocks(),
             upcoming: Vec::new(),
             tas_generated: 0,
-        };
-        // The first block contains the control point, which we need to remove.
-        // As a rough proxy for "check that we removed only the thing we want to remove", we know
-        // that the control point will be contained in a single mappable block. The `unwrap` can
-        // only fail if our assumption about the block is incorrect (i.e. some part of the system
-        // doesn't work as expected).
-        match hwti.hwt_iter.next() {
-            Some(Ok(x)) => {
-                hwti.map_block(&x);
-                match hwti.upcoming.as_slice() {
-                    &[TraceAction::MappedAOTBBlock { .. }] => {
-                        hwti.upcoming.pop();
-                        Ok(hwti)
-                    }
-                    _ => panic!(),
-                }
-            }
-            Some(Err(HWTracerError::Temporary(TemporaryErrorKind::TraceBufferOverflow))) => {
-                Err(TraceRecorderError::TraceTooLong)
-            }
-            Some(Err(e)) => todo!("{e:?}"),
-            None => Err(TraceRecorderError::TraceEmpty),
-        }
+        })
     }
 
     /// Maps one hwtracer block to one or more AOT LLVM IR basic blocks.
@@ -190,6 +168,31 @@ impl HWTTraceIterator {
 impl Iterator for HWTTraceIterator {
     type Item = Result<TraceAction, AOTTraceIteratorError>;
     fn next(&mut self) -> Option<Self::Item> {
+        if self.tas_generated == 0 {
+            // The first block contains the control point, which we need to remove.
+            // As a rough proxy for "check that we removed only the thing we want to remove", we know
+            // that the control point will be contained in a single mappable block. The `unwrap` can
+            // only fail if our assumption about the block is incorrect (i.e. some part of the system
+            // doesn't work as expected).
+            match self.hwt_iter.next() {
+                Some(Ok(x)) => {
+                    self.map_block(&x);
+                    match self.upcoming.as_slice() {
+                        &[TraceAction::MappedAOTBBlock { .. }] => {
+                            self.upcoming.pop();
+                        }
+                        _ => panic!(),
+                    }
+                }
+                Some(Err(HWTracerError::Temporary(TemporaryErrorKind::TraceBufferOverflow))) => {
+                    return Some(Err(AOTTraceIteratorError::TraceTooLong));
+                }
+                Some(Err(e)) => todo!("{e:?}"),
+                None => return Some(Err(AOTTraceIteratorError::PrematureEnd)),
+            }
+            debug_assert!(self.tas_generated > 0);
+        }
+
         // Unless we've exhausted `self.hwt_iter`, we need to have at least 1 element in
         // `self.upcoming` in order to deduplicate, but there's no use in having more than 1
         // element.
