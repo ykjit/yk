@@ -27,51 +27,6 @@ pub(crate) struct HWTTraceIterator {
 
 impl AOTTraceIterator for HWTTraceIterator {}
 
-impl Iterator for HWTTraceIterator {
-    type Item = Result<TraceAction, AOTTraceIteratorError>;
-    fn next(&mut self) -> Option<Self::Item> {
-        // Unless we've exhausted `self.hwt_iter`, we need to have at least 1 element in
-        // `self.upcoming` in order to deduplicate, but there's no use in having more than 1
-        // element.
-        while self.upcoming.len() < 2 {
-            match self.hwt_iter.next() {
-                Some(Ok(x)) => {
-                    self.map_block(&x);
-                }
-                Some(Err(HWTracerError::Unrecoverable(x)))
-                    if x == "longjmp within traces currently unsupported" =>
-                {
-                    return Some(Err(AOTTraceIteratorError::LongJmpEncountered));
-                }
-                Some(Err(HWTracerError::Temporary(TemporaryErrorKind::TraceBufferOverflow))) => {
-                    return Some(Err(AOTTraceIteratorError::TraceTooLong));
-                }
-                Some(Err(e)) => todo!("{e:?}"),
-                None => {
-                    // The last block contains pointless unmappable code (the stop tracing call).
-                    match self.upcoming.pop() {
-                        Some(x) => {
-                            // This is a rough proxy for "check that we removed only the thing we want to
-                            // remove".
-                            assert!(matches!(x, TraceAction::UnmappableBBlock));
-                        }
-                        _ => unreachable!(),
-                    }
-                    return None;
-                }
-            }
-        }
-
-        if self.tas_generated > crate::mt::DEFAULT_TRACE_TOO_LONG {
-            return Some(Err(AOTTraceIteratorError::TraceTooLong));
-        }
-
-        // The `remove` cannot panic because upcoming.len > 1 is guaranteed by the `while` loop
-        // above.
-        Some(Ok(self.upcoming.remove(0)))
-    }
-}
-
 impl HWTTraceIterator {
     pub fn new(trace: Box<dyn Trace>) -> Result<Self, TraceRecorderError> {
         let mut hwti = HWTTraceIterator {
@@ -229,5 +184,50 @@ impl HWTTraceIterator {
             self.upcoming.push(new);
             self.tas_generated += 1;
         }
+    }
+}
+
+impl Iterator for HWTTraceIterator {
+    type Item = Result<TraceAction, AOTTraceIteratorError>;
+    fn next(&mut self) -> Option<Self::Item> {
+        // Unless we've exhausted `self.hwt_iter`, we need to have at least 1 element in
+        // `self.upcoming` in order to deduplicate, but there's no use in having more than 1
+        // element.
+        while self.upcoming.len() < 2 {
+            match self.hwt_iter.next() {
+                Some(Ok(x)) => {
+                    self.map_block(&x);
+                }
+                Some(Err(HWTracerError::Unrecoverable(x)))
+                    if x == "longjmp within traces currently unsupported" =>
+                {
+                    return Some(Err(AOTTraceIteratorError::LongJmpEncountered));
+                }
+                Some(Err(HWTracerError::Temporary(TemporaryErrorKind::TraceBufferOverflow))) => {
+                    return Some(Err(AOTTraceIteratorError::TraceTooLong));
+                }
+                Some(Err(e)) => todo!("{e:?}"),
+                None => {
+                    // The last block contains pointless unmappable code (the stop tracing call).
+                    match self.upcoming.pop() {
+                        Some(x) => {
+                            // This is a rough proxy for "check that we removed only the thing we want to
+                            // remove".
+                            assert!(matches!(x, TraceAction::UnmappableBBlock));
+                        }
+                        _ => unreachable!(),
+                    }
+                    return None;
+                }
+            }
+        }
+
+        if self.tas_generated > crate::mt::DEFAULT_TRACE_TOO_LONG {
+            return Some(Err(AOTTraceIteratorError::TraceTooLong));
+        }
+
+        // The `remove` cannot panic because upcoming.len > 1 is guaranteed by the `while` loop
+        // above.
+        Some(Ok(self.upcoming.remove(0)))
     }
 }
