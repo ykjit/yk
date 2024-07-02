@@ -578,7 +578,7 @@ impl<'a> TraceBuilder<'a> {
         Ok(())
     }
 
-    /// Translate a `Icmp` instruction.
+    /// Translate a `ICmp` instruction.
     fn handle_icmp(
         &mut self,
         bid: &aot_ir::BBlockId,
@@ -588,7 +588,7 @@ impl<'a> TraceBuilder<'a> {
         rhs: &aot_ir::Operand,
     ) -> Result<(), CompilationError> {
         let inst =
-            jit_ir::IcmpInst::new(self.handle_operand(lhs)?, *pred, self.handle_operand(rhs)?)
+            jit_ir::ICmpInst::new(self.handle_operand(lhs)?, *pred, self.handle_operand(rhs)?)
                 .into();
         self.copy_inst(inst, bid, aot_inst_idx)
     }
@@ -887,7 +887,7 @@ impl<'a> TraceBuilder<'a> {
                 // Perform the comparison.
                 let jit_test_val = self.handle_operand(test_val)?;
                 let cmp_inst =
-                    jit_ir::IcmpInst::new(jit_test_val, jit_ir::Predicate::Equal, jit_const_opnd);
+                    jit_ir::ICmpInst::new(jit_test_val, jit_ir::Predicate::Equal, jit_const_opnd);
                 let jit_cond = self.jit_mod.push_and_make_operand(cmp_inst.into())?;
 
                 // Guard the result of the comparison.
@@ -918,7 +918,7 @@ impl<'a> TraceBuilder<'a> {
 
                     // Do the comparison.
                     let jit_test_val = self.handle_operand(test_val)?;
-                    let cmp = jit_ir::IcmpInst::new(
+                    let cmp = jit_ir::ICmpInst::new(
                         jit_test_val,
                         jit_ir::Predicate::Equal,
                         jit_const_opnd,

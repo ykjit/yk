@@ -8,7 +8,7 @@ use super::super::{
     aot_ir::{BinOp, FloatPredicate, Predicate},
     jit_ir::{
         BinOpInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FPExtInst, FcmpInst,
-        FloatTy, FuncDecl, FuncTy, GuardInfo, GuardInst, IcmpInst, IndirectCallInst, Inst, InstIdx,
+        FloatTy, FuncDecl, FuncTy, GuardInfo, GuardInst, ICmpInst, IndirectCallInst, Inst, InstIdx,
         LoadInst, LoadTraceInputInst, Module, Operand, PtrAddInst, SExtInst, SIToFPInst,
         SelectInst, StoreInst, TruncInst, Ty, TyIdx,
     },
@@ -240,7 +240,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                                 ))
                             }
                         }
-                        let inst = IcmpInst::new(
+                        let inst = ICmpInst::new(
                             self.process_operand(lhs)?,
                             pred,
                             self.process_operand(rhs)?,

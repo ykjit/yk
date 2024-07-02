@@ -266,7 +266,7 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Inst::LookupGlobal(i) => self.cg_lookupglobal(iidx, i),
             jit_ir::Inst::Call(i) => self.cg_call(iidx, i)?,
             jit_ir::Inst::IndirectCall(i) => self.cg_indirectcall(iidx, i)?,
-            jit_ir::Inst::Icmp(i) => self.cg_icmp(iidx, i),
+            jit_ir::Inst::ICmp(i) => self.cg_icmp(iidx, i),
             jit_ir::Inst::Guard(i) => self.cg_guard(i),
             jit_ir::Inst::Arg(i) => self.cg_arg(iidx, *i),
             jit_ir::Inst::TraceLoopStart => self.cg_traceloopstart(),
@@ -739,7 +739,7 @@ impl<'a> X64CodeGen<'a> {
         self.emit_call(iidx, fty, WR0, &args)
     }
 
-    fn cg_icmp(&mut self, iidx: InstIdx, inst: &jit_ir::IcmpInst) {
+    fn cg_icmp(&mut self, iidx: InstIdx, inst: &jit_ir::ICmpInst) {
         let (lhs, pred, rhs) = (inst.lhs(self.m), inst.predicate(), inst.rhs(self.m));
 
         // FIXME: assumes values fit in a registers

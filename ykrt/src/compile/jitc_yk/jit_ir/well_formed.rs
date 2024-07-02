@@ -16,7 +16,7 @@
 //!   * [super::GuardInst]s:
 //!       * Have a `cond` whose type is [super::Ty::Integer(1)] (i.e. an `i1`).
 //!       * If `cond` references a constant, that constant matches the guard's `expect` attribute.
-//!   * [super::IcmpInst]s left and right hand side operands have the same [Ty]s.
+//!   * [super::ICmpInst]s left and right hand side operands have the same [Ty]s.
 //!   * [super::SIToFPInst]s:
 //!       * Have an integer-typed source operand.
 //!       * Have a float-type as the destination type operand.
@@ -123,7 +123,7 @@ impl Module {
                         }
                     }
                 }
-                Inst::Icmp(x) => {
+                Inst::ICmp(x) => {
                     if x.lhs(self).tyidx(self) != x.rhs(self).tyidx(self) {
                         panic!(
                             "Instruction at position {iidx} has different types on lhs and rhs\n  {}",

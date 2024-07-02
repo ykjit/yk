@@ -1220,7 +1220,7 @@ pub(crate) enum Inst {
     PtrAdd(PtrAddInst),
     DynPtrAdd(DynPtrAddInst),
     Store(StoreInst),
-    Icmp(IcmpInst),
+    ICmp(ICmpInst),
     Guard(GuardInst),
     /// Describes an argument into the trace function. Its main use is to allow us to track trace
     /// function arguments in case we need to deoptimise them. At this moment the only trace
@@ -1273,7 +1273,7 @@ impl Inst {
             Self::PtrAdd(..) => m.ptr_tyidx(),
             Self::DynPtrAdd(..) => m.ptr_tyidx(),
             Self::Store(..) => m.void_tyidx(),
-            Self::Icmp(_) => m.int1_tyidx(),
+            Self::ICmp(_) => m.int1_tyidx(),
             Self::Guard(..) => m.void_tyidx(),
             Self::Arg(..) => m.ptr_tyidx(),
             Self::TraceLoopStart => m.void_tyidx(),
@@ -1308,7 +1308,7 @@ impl Inst {
             Inst::PtrAdd(_) => false,
             Inst::DynPtrAdd(_) => false,
             Inst::Store(_) => true,
-            Inst::Icmp(_) => false,
+            Inst::ICmp(_) => false,
             Inst::Guard(_) => true,
             Inst::Arg(_) => false,
             Inst::TraceLoopStart => true, // FIXME: this shouldn't be an instruction.
@@ -1375,7 +1375,7 @@ impl Inst {
                 tgt.map_iidx(f);
                 val.map_iidx(f);
             }
-            Inst::Icmp(IcmpInst { lhs, pred: _, rhs }) => {
+            Inst::ICmp(ICmpInst { lhs, pred: _, rhs }) => {
                 lhs.map_iidx(f);
                 rhs.map_iidx(f);
             }
@@ -1502,7 +1502,7 @@ impl fmt::Display for DisplayableInst<'_> {
                 x.tgt.unpack(self.m).display(self.m),
                 x.val.unpack(self.m).display(self.m)
             ),
-            Inst::Icmp(x) => write!(
+            Inst::ICmp(x) => write!(
                 f,
                 "{} {}, {}",
                 x.pred,
@@ -1597,7 +1597,7 @@ inst!(LoadTraceInput, LoadTraceInputInst);
 inst!(Call, DirectCallInst);
 inst!(PtrAdd, PtrAddInst);
 inst!(DynPtrAdd, DynPtrAddInst);
-inst!(Icmp, IcmpInst);
+inst!(ICmp, ICmpInst);
 inst!(Guard, GuardInst);
 inst!(SExt, SExtInst);
 inst!(ZeroExtend, ZeroExtendInst);
@@ -2079,7 +2079,7 @@ impl DynPtrAddInst {
     }
 }
 
-/// The operands for a [Inst::Icmp]
+/// The operands for a [Inst::ICmp]
 ///
 /// # Semantics
 ///
@@ -2087,13 +2087,13 @@ impl DynPtrAddInst {
 /// variable that dictates the truth of the comparison.
 ///
 #[derive(Clone, Debug, PartialEq)]
-pub struct IcmpInst {
+pub struct ICmpInst {
     pub(crate) lhs: PackedOperand,
     pub(crate) pred: Predicate,
     pub(crate) rhs: PackedOperand,
 }
 
-impl IcmpInst {
+impl ICmpInst {
     pub(crate) fn new(lhs: Operand, pred: Predicate, rhs: Operand) -> Self {
         Self {
             lhs: PackedOperand::new(&lhs),
