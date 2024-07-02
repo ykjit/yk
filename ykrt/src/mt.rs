@@ -1,11 +1,10 @@
 //! The main end-user interface to the meta-tracing system.
 
-#[cfg(feature = "yk_testing")]
-use std::env;
 use std::{
     cell::RefCell,
     cmp,
     collections::VecDeque,
+    env,
     error::Error,
     ffi::c_void,
     marker::PhantomData,
@@ -111,8 +110,14 @@ impl MT {
     // are no guarantees as to whether they will share resources effectively or fairly.
     pub fn new() -> Result<Arc<Self>, Box<dyn Error>> {
         load_aot_stackmaps();
+        let hot_threshold = match env::var("YK_HOT_THRESHOLD") {
+            Ok(s) => s
+                .parse::<HotThreshold>()
+                .map_err(|e| format!("Invalid hot threshold '{s}': {e}"))?,
+            Err(_) => DEFAULT_HOT_THRESHOLD,
+        };
         Ok(Arc::new(Self {
-            hot_threshold: AtomicHotThreshold::new(DEFAULT_HOT_THRESHOLD),
+            hot_threshold: AtomicHotThreshold::new(hot_threshold),
             sidetrace_threshold: AtomicHotThreshold::new(DEFAULT_SIDETRACE_THRESHOLD),
             trace_failure_threshold: AtomicTraceFailureThreshold::new(
                 DEFAULT_TRACE_FAILURE_THRESHOLD,
