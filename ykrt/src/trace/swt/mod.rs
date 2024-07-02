@@ -15,6 +15,9 @@ use std::{
     sync::{Arc, LazyLock},
 };
 
+#[cfg(target_arch = "x86_64")]
+pub(crate) mod patch;
+
 #[derive(Debug, Eq, PartialEq, Clone)]
 struct TracingBBlock {
     function_index: usize,
@@ -105,7 +108,7 @@ impl TraceRecorder for SWTTraceRecorder {
             Err(TraceRecorderError::TraceTooLong)
         } else if bbs.is_empty() {
             // FIXME: who should handle an empty trace?
-            panic!();
+            panic!("swt encountered an empty trace!");
         } else {
             Ok(Box::new(SWTraceIterator::new(bbs)))
         }
