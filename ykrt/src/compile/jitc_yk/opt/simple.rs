@@ -5,7 +5,7 @@
 
 use crate::compile::{
     jitc_yk::jit_ir::{
-        BinOp, BinOpInst, GuardInst, IcmpInst, Inst, InstIdx, Module, Operand, PackedOperand,
+        BinOp, BinOpInst, GuardInst, ICmpInst, Inst, InstIdx, Module, Operand, PackedOperand,
         Predicate,
     },
     CompilationError,
@@ -21,7 +21,7 @@ pub(super) fn simple(mut m: Module) -> Result<Module, CompilationError> {
                 rhs,
             }) => opt_mul(&mut m, iidx, lhs, rhs)?,
             Inst::Guard(x) => opt_guard(&mut m, iidx, x)?,
-            Inst::Icmp(x) => opt_icmp(&mut m, iidx, x)?,
+            Inst::ICmp(x) => opt_icmp(&mut m, iidx, x)?,
             _ => (),
         }
     }
@@ -100,7 +100,7 @@ fn opt_mul(
 fn opt_icmp(
     m: &mut Module,
     iidx: InstIdx,
-    IcmpInst { lhs, pred, rhs }: IcmpInst,
+    ICmpInst { lhs, pred, rhs }: ICmpInst,
 ) -> Result<(), CompilationError> {
     if let (Operand::Const(x), Operand::Const(y)) = (lhs.unpack(m), rhs.unpack(m)) {
         if let (Some(x), Some(y)) = (m.const_(x).int_to_u64(), m.const_(y).int_to_u64()) {

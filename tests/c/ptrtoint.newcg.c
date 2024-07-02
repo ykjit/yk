@@ -19,13 +19,7 @@
 //     jitstate: deoptimise
 //     exit
 
-// Check that basic trace compilation works.
-
-// FIXME: Get this test all the way through the new codegen pipeline!
-//
-// Currently it succeeds even though it crashes on deopt. This is so
-// that we can incrementally implement the new codegen and have CI merge our
-// incomplete work.
+// Check that pointer to integer conversion works.
 
 #include <assert.h>
 #include <stdio.h>

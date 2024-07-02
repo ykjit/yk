@@ -4,13 +4,7 @@
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_JITSTATE=-
 
-// Check that basic trace compilation works.
-
-// FIXME: Get this test all the way through the new codegen pipeline!
-//
-// Currently it succeeds even though it crashes on deopt. This is so
-// that we can incrementally implement the new codegen and have CI merge our
-// incomplete work.
+// Check deopt of constants works.
 
 #include <assert.h>
 #include <stdio.h>
