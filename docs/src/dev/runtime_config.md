@@ -24,7 +24,7 @@ performance down.
 
 The following environment variables are available (some only in certain configurations of yk):
 
-* [`YKD_LOG_IR`](/dev/understanding_traces.html#ykd_log_ir) [with the `ykd` feature]
-* [`YKD_TRACE_DEBUGINFO`](/dev/understanding_traces.html#ykd_trace_debuginfo) [with the `ykd` feature]
-* [`YKD_LOG_JITSTATE`](/dev/understanding_traces.html#ykd_log_jitstate) [with the `ykd` feature]
-* [`YKD_LOG_STATS`](/dev/profiling.html#jit-statistics)
+* [`YKD_LOG_IR`](understanding_traces.html#ykd_log_ir) [with the `ykd` feature]
+* [`YKD_TRACE_DEBUGINFO`](understanding_traces.html#ykd_trace_debuginfo) [with the `ykd` feature]
+* [`YKD_LOG_JITSTATE`](understanding_traces.html#ykd_log_jitstate) [with the `ykd` feature]
+* [`YKD_LOG_STATS`](profiling.html#jit-statistics)
