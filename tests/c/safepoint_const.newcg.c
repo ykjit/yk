@@ -4,7 +4,7 @@
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_JITSTATE=-
 
-// Check that basic trace compilation works.
+// Check deopt of constants works.
 
 #include <assert.h>
 #include <stdio.h>

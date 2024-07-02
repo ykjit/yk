@@ -19,7 +19,7 @@
 //     jitstate: deoptimise
 //     exit
 
-// Check that basic trace compilation works.
+// Check that pointer to integer conversion works.
 
 #include <assert.h>
 #include <stdio.h>
