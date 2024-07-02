@@ -276,7 +276,7 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Inst::Select(i) => self.cg_select(iidx, i),
             jit_ir::Inst::SIToFP(i) => self.cg_sitofp(iidx, i),
             jit_ir::Inst::FPExt(i) => self.cg_fpext(iidx, i),
-            jit_ir::Inst::Fcmp(i) => self.cg_fcmp(iidx, i),
+            jit_ir::Inst::FCmp(i) => self.cg_fcmp(iidx, i),
         }
         Ok(())
     }
@@ -779,7 +779,7 @@ impl<'a> X64CodeGen<'a> {
         self.store_new_local(iidx, WR0);
     }
 
-    fn cg_fcmp(&mut self, iidx: InstIdx, inst: &jit_ir::FcmpInst) {
+    fn cg_fcmp(&mut self, iidx: InstIdx, inst: &jit_ir::FCmpInst) {
         let (lhs, pred, rhs) = (inst.lhs(self.m), inst.predicate(), inst.rhs(self.m));
 
         self.load_operand_float(WF0, &lhs);

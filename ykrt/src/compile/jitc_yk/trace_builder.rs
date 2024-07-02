@@ -602,7 +602,7 @@ impl<'a> TraceBuilder<'a> {
         rhs: &aot_ir::Operand,
     ) -> Result<(), CompilationError> {
         let inst =
-            jit_ir::FcmpInst::new(self.handle_operand(lhs)?, *pred, self.handle_operand(rhs)?)
+            jit_ir::FCmpInst::new(self.handle_operand(lhs)?, *pred, self.handle_operand(rhs)?)
                 .into();
         self.copy_inst(inst, bid, aot_inst_idx)
     }
