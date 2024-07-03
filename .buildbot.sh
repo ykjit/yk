@@ -2,7 +2,8 @@
 
 set -eu
 
-TRACERS="hwt swt"
+# FIXME: Reenable swt once jitc_llvm is fully removed.
+TRACERS="hwt"
 
 # Install rustup.
 CARGO_HOME="$(pwd)/.cargo"
@@ -108,13 +109,16 @@ for tracer in ${TRACERS}; do
     cargo-clippy-diff origin/master -- --all-features -- -D warnings
 done
 
+# FIXME: Temporarily run all tests with the new codegen until we've properly
+# removed the jitc_llvm backend.
+export YKD_NEW_CODEGEN=1
+
 # Run the tests multiple times on hwt to try and catch non-deterministic
 # failures. But running everything so often is expensive, so run other tracers'
 # tests just once.
 export YKB_TRACER=hwt
 echo "===> Running hwt tests"
 for _ in $(seq 10); do
-    RUST_TEST_SHUFFLE=1 cargo test
     YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test
 done
 for tracer in ${TRACERS}; do
@@ -122,7 +126,6 @@ for tracer in ${TRACERS}; do
         continue
     fi
     echo "===> Running ${tracer} tests"
-    RUST_TEST_SHUFFLE=1 cargo test
     YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test
 done
 
@@ -181,7 +184,6 @@ fi
 for tracer in $TRACERS; do
     export YKB_TRACER="${tracer}"
     echo "===> Running ${tracer} tests"
-    RUST_TEST_SHUFFLE=1 cargo test --release
     YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test --release
 done
 

@@ -242,7 +242,7 @@ impl Compiler for JITCLLVM {
         &self,
         mt: Arc<MT>,
         aottrace_iter: (Box<dyn AOTTraceIterator>, Box<[usize]>),
-        sti: Option<SideTraceInfo>,
+        sti: Option<&dyn SideTraceInfo>,
         hl: Arc<Mutex<HotLocation>>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         let mut irtrace = Vec::new();
@@ -269,6 +269,9 @@ impl Compiler for JITCLLVM {
         let llvmbc = llvmbc_section();
         let (di_tmp, di_fd, di_tmpname_c) = Self::create_debuginfo_temp_file();
 
+        if sti.is_some() {
+            todo!();
+        }
         let (callstack, aotvalsptr, aotvalslen) = match sti {
             Some(sti) => (sti.callstack, sti.aotvalsptr, sti.aotvalslen),
             None => (std::ptr::null(), std::ptr::null(), 0),

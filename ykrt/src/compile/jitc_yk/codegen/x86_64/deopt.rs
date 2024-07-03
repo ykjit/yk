@@ -1,9 +1,11 @@
 use crate::{
-    aotsmp::AOT_STACKMAPS, compile::jitc_yk::codegen::reg_alloc::VarLocation, log::log_jit_state,
+    aotsmp::AOT_STACKMAPS,
+    compile::jitc_yk::codegen::reg_alloc::VarLocation,
+    log::{log_jit_state, stats::TimingState},
     mt::MTThread,
 };
 use libc::c_void;
-use std::ptr;
+use std::{mem, ptr};
 use yksmp::Location as SMLocation;
 
 use super::{X64CompiledTrace, RBP_DWARF_NUM, REG64_SIZE};
@@ -14,8 +16,6 @@ pub(crate) extern "C" fn __yk_deopt(
     deoptid: usize,
     jitrbp: *const c_void,
 ) -> ! {
-    log_jit_state("deoptimise");
-
     let ctr = MTThread::with(|mtt| mtt.running_trace().unwrap())
         .as_any()
         .downcast::<X64CompiledTrace>()
@@ -23,6 +23,48 @@ pub(crate) extern "C" fn __yk_deopt(
     debug_assert!(deoptid < ctr.deoptinfo.len());
     let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
     let info = &ctr.deoptinfo[deoptid];
+
+    if let Some(st) = info.guard.getct() {
+        // Prepare the traceinputs "struct" (for now this is just a vector) and pass it into the
+        // side-trace.
+        let mut ykctrlpvars = Vec::new();
+        for jitval in &info.lives {
+            let val = match jitval {
+                VarLocation::Stack { frame_off, size } => {
+                    let p = unsafe { jitrbp.byte_sub(*frame_off) };
+                    match *size {
+                        1 => unsafe { u64::from(std::ptr::read::<u8>(p as *const u8)) },
+                        2 => unsafe { u64::from(std::ptr::read::<u16>(p as *const u16)) },
+                        4 => unsafe { u64::from(std::ptr::read::<u32>(p as *const u32)) },
+                        8 => unsafe { std::ptr::read::<u64>(p as *const u64) },
+                        _ => todo!(),
+                    }
+                }
+                VarLocation::Register => todo!(),
+                VarLocation::ConstFloat(_) => todo!(),
+                VarLocation::ConstInt { bits: _, v } => *v,
+            };
+            ykctrlpvars.push(val);
+        }
+
+        let f = unsafe {
+            mem::transmute::<*const c_void, unsafe extern "C" fn(*mut c_void, *const c_void) -> !>(
+                st.entry(),
+            )
+        };
+        ctr.mt.stats.timing_state(TimingState::JitExecuting);
+        drop(ctr);
+
+        MTThread::with(|mtt| {
+            mtt.set_running_trace(Some(st));
+        });
+
+        log_jit_state("execute-side-trace");
+        // FIXME: Calling this function overwrites the current (Rust) function frame,
+        // rather than unwinding it. https://github.com/ykjit/yk/issues/778
+        unsafe { f(ykctrlpvars.as_ptr() as *mut c_void, frameaddr) };
+    }
+    log_jit_state("deoptimise");
 
     // Calculate space required for the new stack.
     // Add space for live register values which we'll be adding at the end.
@@ -212,6 +254,14 @@ pub(crate) extern "C" fn __yk_deopt(
     let mut newframedst = unsafe { frameaddr.byte_sub(usize::try_from(rec.size).unwrap()) };
     if pinfo.hasfp {
         newframedst = unsafe { newframedst.byte_add(REG64_SIZE) };
+    }
+
+    if info.guard.inc_failed(&ctr.mt) {
+        // Start side-tracing.
+        // FIXME: Don't side trace the last guard of a side-trace as this guard always fails.
+        // FIXME: Don't side-trace after switch instructions: not every guard failure is equal
+        // and a trace compiled for case A won't work for case B.
+        ctr.mt.side_trace(deoptid, ctr.clone());
     }
 
     // Since we won't return from this function, drop `ctr` manually.

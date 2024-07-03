@@ -58,15 +58,11 @@ thread_local! {
 
 /// Stores information required for compiling a side-trace. Passed down from a (parent) trace
 /// during deoptimisation.
-#[derive(Debug, Copy, Clone)]
-pub(crate) struct SideTraceInfo {
-    pub callstack: *const c_void,
-    pub aotvalsptr: *const c_void,
-    pub aotvalslen: usize,
-    pub guardid: GuardId,
+pub(crate) trait SideTraceInfo {
+    /// Upcast this [CompiledTrace] to `Any`. This method is a hack that's only needed since trait
+    /// upcasting in Rust is incomplete.
+    fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static>;
 }
-
-unsafe impl Send for SideTraceInfo {}
 
 /// A meta-tracer. Note that this is conceptually a "front-end" to the actual meta-tracer akin to
 /// an `Rc`: this struct can be freely `clone()`d without duplicating the underlying meta-tracer.
@@ -81,11 +77,6 @@ pub struct MT {
     /// How many worker threads are currently running. Note that this may temporarily be `>`
     /// [`max_worker_threads`].
     active_worker_threads: AtomicUsize,
-    #[cfg(yk_llvm_sync_hack)]
-    /// A temporary hack which keeps track of how many compile (etc.) jobs are active, because LLVM
-    /// dies horribly if the main thread exits before those jobs are finished. This then marries up
-    /// with Self::.llvm_sync_hack().
-    active_worker_jobs: AtomicUsize,
     /// The [Tracer] that should be used for creating future traces. Note that this might not be
     /// the same as the tracer(s) used to create past traces.
     tracer: Mutex<Arc<dyn Tracer>>,
@@ -125,8 +116,6 @@ impl MT {
             job_queue: Arc::new((Condvar::new(), Mutex::new(VecDeque::new()))),
             max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
             active_worker_threads: AtomicUsize::new(0),
-            #[cfg(yk_llvm_sync_hack)]
-            active_worker_jobs: AtomicUsize::new(0),
             tracer: Mutex::new(default_tracer()?),
             compiler: Mutex::new(default_compiler()?),
             compiled_trace_id: AtomicU64::new(0),
@@ -196,9 +185,6 @@ impl MT {
         // new worker thread iff we aren't already running the maximum number of worker threads.
         // Once started, a worker thread never dies, waiting endlessly for work.
 
-        #[cfg(yk_llvm_sync_hack)]
-        self.active_worker_jobs.fetch_add(1, Ordering::Relaxed);
-
         let (cv, mtx) = &*self.job_queue;
         mtx.lock().push_back(job);
         cv.notify_one();
@@ -230,9 +216,6 @@ impl MT {
                     match lock.pop_front() {
                         Some(x) => {
                             MutexGuard::unlocked(&mut lock, x);
-                            #[cfg(yk_llvm_sync_hack)]
-                            mt.upgrade()
-                                .map(|mt| mt.active_worker_jobs.fetch_sub(1, Ordering::Relaxed));
                         }
                         None => cv.wait(&mut lock),
                     }
@@ -521,7 +504,7 @@ impl MT {
     /// Perform the next step to `loc` in the `Location` state-machine for a guard failure.
     pub(crate) fn transition_guard_failure(
         self: &Arc<Self>,
-        sti: SideTraceInfo,
+        gid: usize,
         parent: Arc<dyn CompiledTrace>,
     ) -> TransitionGuardFailure {
         if let Some(hl) = parent.hl().upgrade() {
@@ -530,7 +513,7 @@ impl MT {
                 debug_assert!(!mtt.is_tracing());
                 let mut lk = hl.lock();
                 if let HotLocationKind::Compiled(ref ctr) = lk.kind {
-                    lk.kind = HotLocationKind::SideTracing(Arc::clone(ctr), sti, parent);
+                    lk.kind = HotLocationKind::SideTracing(Arc::clone(ctr), gid, parent);
                     drop(lk);
                     TransitionGuardFailure::StartSideTracing(hl)
                 } else {
@@ -547,8 +530,8 @@ impl MT {
     }
 
     /// Start recording a side trace for a guard that failed in `ctr`.
-    pub(crate) fn side_trace(self: &Arc<Self>, sti: SideTraceInfo, parent: Arc<dyn CompiledTrace>) {
-        match self.transition_guard_failure(sti, parent) {
+    pub(crate) fn side_trace(self: &Arc<Self>, gid: usize, parent: Arc<dyn CompiledTrace>) {
+        match self.transition_guard_failure(gid, parent) {
             TransitionGuardFailure::NoAction => todo!(),
             TransitionGuardFailure::StartSideTracing(hl) => {
                 log_jit_state("start-side-tracing");
@@ -581,7 +564,7 @@ impl MT {
         self: &Arc<Self>,
         trace_iter: (Box<dyn AOTTraceIterator>, Box<[usize]>),
         hl_arc: Arc<Mutex<HotLocation>>,
-        sidetrace: Option<(SideTraceInfo, Arc<dyn CompiledTrace>)>,
+        sidetrace: Option<(usize, Arc<dyn CompiledTrace>)>,
     ) {
         self.stats.trace_recorded_ok();
         let mt = Arc::clone(self);
@@ -594,13 +577,12 @@ impl MT {
                 Arc::clone(&*lk)
             };
             mt.stats.timing_state(TimingState::Compiling);
-            let guardid = sidetrace.as_ref().map(|x| x.0.guardid);
-            match compiler.compile(
-                Arc::clone(&mt),
-                trace_iter,
-                sidetrace.as_ref().map(|x| x.0),
-                Arc::clone(&hl_arc),
-            ) {
+            let (sti, guardid) = if let Some((guardid, ctr)) = &sidetrace {
+                (Some(ctr.sidetraceinfo(*guardid)), Some(*guardid))
+            } else {
+                (None, None)
+            };
+            match compiler.compile(Arc::clone(&mt), trace_iter, sti, Arc::clone(&hl_arc)) {
                 Ok(ct) => {
                     let mut hl = hl_arc.lock();
                     match &hl.kind {
@@ -609,7 +591,7 @@ impl MT {
                             // in the `debug_assert` above: if `sidetrace` is not-`None`
                             // then `hl_arc.kind` is `Compiled`.
                             let ctr = sidetrace.map(|x| x.1).unwrap();
-                            let guard = ctr.guard(guardid.unwrap());
+                            let guard = ctr.guard(GuardId(guardid.unwrap()));
                             guard.setct(ct);
                         }
                         _ => {
@@ -656,14 +638,6 @@ impl MT {
         }
 
         self.queue_job(Box::new(do_compile));
-    }
-
-    #[cfg(yk_llvm_sync_hack)]
-    pub fn llvm_sync_hack(&self) {
-        while self.active_worker_jobs.load(Ordering::Relaxed) != 0 {
-            // Spin, but not too much.
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
     }
 }
 
@@ -778,7 +752,7 @@ enum TransitionControlPoint {
     Execute(Arc<dyn CompiledTrace>),
     StartTracing(Arc<Mutex<HotLocation>>),
     StopTracing,
-    StopSideTracing(SideTraceInfo, Arc<dyn CompiledTrace>),
+    StopSideTracing(usize, Arc<dyn CompiledTrace>),
 }
 
 /// What action should a caller of [MT::transition_guard_failure] take?
@@ -847,14 +821,8 @@ mod tests {
     }
 
     fn expect_start_side_tracing(mt: &Arc<MT>, loc: &Location) {
-        let sti = SideTraceInfo {
-            callstack: std::ptr::null(),
-            aotvalsptr: std::ptr::null(),
-            aotvalslen: 0,
-            guardid: GuardId::illegal(),
-        };
         let TransitionGuardFailure::StartSideTracing(hl) = mt.transition_guard_failure(
-            sti,
+            0,
             Arc::new(CompiledTraceTestingWithHl::new(Arc::downgrade(
                 &loc.hot_location_arc_clone().unwrap(),
             ))),

@@ -19,9 +19,18 @@ use super::{
 };
 #[cfg(any(debug_assertions, test))]
 use crate::compile::jitc_yk::gdb::GdbCtx;
-use crate::compile::{
-    jitc_yk::jit_ir::{Const, IndirectCallIdx},
-    CompiledTrace,
+use crate::{
+    compile::{
+        jitc_yk::{
+            aot_ir,
+            jit_ir::{Const, IndirectCallIdx},
+            trace_builder::Frame,
+            YkSideTraceInfo,
+        },
+        CompiledTrace, Guard,
+    },
+    location::HotLocation,
+    mt::{SideTraceInfo, MT},
 };
 use dynasmrt::{
     components::StaticLabel,
@@ -32,9 +41,11 @@ use dynasmrt::{
 };
 #[cfg(any(debug_assertions, test))]
 use indexmap::IndexMap;
+use parking_lot::Mutex;
+use std::error::Error;
+use std::sync::{Arc, Weak};
 #[cfg(any(debug_assertions, test))]
 use std::{cell::Cell, slice};
-use std::{error::Error, sync::Arc};
 use ykaddr::addr::symbol_to_ptr;
 
 mod deopt;
@@ -93,9 +104,14 @@ pub extern "C" fn __yk_break() {}
 pub(crate) struct X86_64CodeGen;
 
 impl CodeGen for X86_64CodeGen {
-    fn codegen(&self, m: Module) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
+    fn codegen(
+        &self,
+        m: Module,
+        mt: Arc<MT>,
+        hl: Arc<Mutex<HotLocation>>,
+    ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         let ra = Box::new(SpillAllocator::new(StackDirection::GrowsDown));
-        Assemble::new(&m, ra)?.codegen()
+        Assemble::new(&m, ra)?.codegen(mt, hl)
     }
 }
 
@@ -146,7 +162,11 @@ impl<'a> Assemble<'a> {
         }))
     }
 
-    fn codegen(mut self: Box<Self>) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
+    fn codegen(
+        mut self: Box<Self>,
+        mt: Arc<MT>,
+        hl: Arc<Mutex<HotLocation>>,
+    ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         let alloc_off = self.emit_prologue();
 
         for (iidx, inst) in self.m.iter_skipping_insts() {
@@ -171,8 +191,11 @@ impl<'a> Assemble<'a> {
                     self.comment(self.asm.offset(), "Unterminated trace".to_owned());
                     dynasm!(self.asm; ud2);
                 }
-                #[cfg(not(test))]
-                panic!("unterminated trace in non-unit-test");
+                // FIXME: Side traces don't currently loop back to the parent trace and deopt into
+                // the main interpreter instead. Once we implement proper looping, this check can
+                // be reinstated.
+                // #[cfg(not(test))]
+                // panic!("unterminated trace in non-unit-test");
             }
             Err(e) => {
                 // Any other error suggests something has gone quite wrong. Just crash.
@@ -245,8 +268,10 @@ impl<'a> Assemble<'a> {
         };
 
         Ok(Arc::new(X64CompiledTrace {
+            mt,
             buf,
             deoptinfo: self.deoptinfo,
+            hl: Arc::downgrade(&hl),
             #[cfg(any(debug_assertions, test))]
             comments,
             #[cfg(any(debug_assertions, test))]
@@ -1078,6 +1103,12 @@ impl<'a> Assemble<'a> {
             fail_label,
             frames: gi.frames().clone(),
             lives: locs,
+            aotlives: gi.aotlives().to_vec(),
+            callframes: gi.callframes.clone(),
+            guard: Guard {
+                failed: 0.into(),
+                ct: None.into(),
+            },
         };
         self.deoptinfo.push(deoptinfo);
 
@@ -1292,15 +1323,24 @@ struct DeoptInfo {
     frames: Vec<u64>,
     // Vector of live JIT variable locations.
     lives: Vec<VarLocation>,
+    // Vector of live AOT variables.
+    aotlives: Vec<aot_ir::InstID>,
+    callframes: Vec<Frame>,
+    // Keeps track of deopt amount and compiled side-trace.
+    guard: Guard,
 }
 
 #[derive(Debug)]
 pub(super) struct X64CompiledTrace {
+    // Reference to the meta-tracer required for side tracing.
+    mt: Arc<MT>,
     /// The executable code itself.
     buf: ExecutableBuffer,
     /// Vector of deopt info, tracked here so they can be freed when the compiled trace is
     /// dropped.
     deoptinfo: Vec<DeoptInfo>,
+    /// Reference to the HotLocation, required for side tracing.
+    hl: Weak<Mutex<HotLocation>>,
     /// Comments to be shown when printing the compiled trace using `AsmPrinter`.
     ///
     /// Maps a byte offset in the native JITted code to a collection of line comments to show when
@@ -1318,24 +1358,24 @@ impl CompiledTrace for X64CompiledTrace {
         self.buf.ptr(AssemblyOffset(0)) as *const libc::c_void
     }
 
-    fn aotvals(&self) -> *const libc::c_void {
-        todo!()
+    fn sidetraceinfo(&self, guardid: usize) -> Arc<dyn SideTraceInfo> {
+        // FIXME: Can we reference these instead of copying them?
+        let aotlives = self.deoptinfo[guardid].aotlives.clone();
+        let callframes = self.deoptinfo[guardid].callframes.clone();
+        Arc::new(YkSideTraceInfo {
+            aotlives,
+            callframes,
+        })
     }
 
-    fn guard(&self, _id: crate::compile::GuardId) -> &crate::compile::Guard {
-        todo!()
-    }
-
-    fn mt(&self) -> &std::sync::Arc<crate::MT> {
-        todo!()
+    fn guard(&self, id: crate::compile::GuardId) -> &crate::compile::Guard {
+        &self.deoptinfo[id.0].guard
     }
 
     fn hl(&self) -> &std::sync::Weak<parking_lot::Mutex<crate::location::HotLocation>> {
-        todo!()
+        &self.hl
     }
-    fn is_last_guard(&self, _id: crate::compile::GuardId) -> bool {
-        todo!()
-    }
+
     fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static> {
         self
     }
@@ -1431,13 +1471,21 @@ mod tests {
     mod with_spillalloc {
         use super::{super::Assemble, *};
         use crate::compile::jitc_yk::codegen::reg_alloc::SpillAllocator;
+        use crate::location::{HotLocation, HotLocationKind};
+        use crate::mt::MT;
+        use parking_lot::Mutex;
 
         fn test_with_spillalloc(mod_str: &str, patt_lines: &str) {
             let m = Module::from_str(mod_str);
+            let mt = MT::new().unwrap();
+            let hl = HotLocation {
+                kind: HotLocationKind::Tracing,
+                trace_failure: 0,
+            };
             match_asm(
                 Assemble::new(&m, Box::new(SpillAllocator::new(STACK_DIRECTION)))
                     .unwrap()
-                    .codegen()
+                    .codegen(mt, Arc::new(Mutex::new(hl)))
                     .unwrap()
                     .as_any()
                     .downcast::<X64CompiledTrace>()

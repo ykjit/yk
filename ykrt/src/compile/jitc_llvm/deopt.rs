@@ -418,7 +418,7 @@ unsafe extern "C" fn __ykrt_deopt(
                 aotvalslen: aotvals.length,
                 guardid,
             };
-            ctr.mt().side_trace(sti, ctrn);
+            panic!()
         }
     }
 

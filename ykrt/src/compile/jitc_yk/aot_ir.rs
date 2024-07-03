@@ -106,6 +106,13 @@ impl Module {
         self.ptr_off_bitsize
     }
 
+    /// Return the AOT instruction for the given instruction id.
+    pub(crate) fn inst(&self, instid: &InstID) -> &Inst {
+        let f = self.func(instid.funcidx);
+        let b = f.bblock(instid.bbidx);
+        &b.insts[instid.iidx]
+    }
+
     /// Return the block uniquely identified (in this module) by the specified [BBlockId].
     pub(crate) fn bblock(&self, bid: &BBlockId) -> &BBlock {
         self.funcs[bid.funcidx].bblock(bid.bbidx)
@@ -530,7 +537,7 @@ impl Display for CastKind {
 }
 
 #[deku_derive(DekuRead)]
-#[derive(Debug)]
+#[derive(Debug, Clone, Hash)]
 #[deku(type = "u8")]
 pub(crate) enum Operand {
     #[deku(id = "0")]
@@ -934,7 +941,7 @@ impl Inst {
         }
     }
 
-    pub(crate) fn safepoint(&self) -> Option<&DeoptSafepoint> {
+    pub(crate) fn safepoint(&'static self) -> Option<&'static DeoptSafepoint> {
         match self {
             Self::Call { safepoint, .. } => safepoint.as_ref(),
             Self::CondBr { ref safepoint, .. } => Some(safepoint),
