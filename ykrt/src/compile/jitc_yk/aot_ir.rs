@@ -512,6 +512,7 @@ pub(crate) enum CastKind {
     Trunc = 2,
     SIToFP = 3,
     FPExt = 4,
+    FPToSI = 5,
 }
 
 impl Display for CastKind {
@@ -522,6 +523,7 @@ impl Display for CastKind {
             Self::Trunc => "trunc",
             Self::SIToFP => "si_to_fp",
             Self::FPExt => "fp_ext",
+            Self::FPToSI => "fp_to_si",
         };
         write!(f, "{}", s)
     }
