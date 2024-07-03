@@ -11,7 +11,6 @@ use std::sync::Arc;
 mod abs_stack;
 pub(crate) mod reg_alloc;
 
-// Note that we make no attempt to cross-arch-test code generators.
 #[cfg(target_arch = "x86_64")]
 pub(crate) mod x86_64;
 
