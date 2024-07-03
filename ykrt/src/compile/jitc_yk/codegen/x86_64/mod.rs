@@ -88,47 +88,6 @@ const STACK_DIRECTION: StackDirection = StackDirection::GrowsDown;
 #[inline(never)]
 pub extern "C" fn __yk_break() {}
 
-/// Load an SSE register with an immediate float/double.
-///
-/// Note that if `size < mem::sizeof::<double>()`, then `val` may be rounded to the closest
-/// possible value (as per `as` cast semantics).
-///
-/// # Panics
-///
-/// This will panic if `size` isn't either 4 or 8 (bytes).
-fn imm_float_into_reg(val: f64, reg: Rx, size: usize, asm: &mut dynasmrt::x64::Assembler) {
-    // Note that there's no way to directly move an immediate value into an xmm, so we
-    // have to go via a general purpose register. Because we don't know if this
-    // register is already in use by the parent codegen routine, we have no option but
-    // the save/restore it.
-    //
-    // FIXME: when we have a proper register allocator, it can have a "with_temp_reg()" method. It
-    // would either pass the closure a free register, or if there isn't one, do the save/restore on
-    // our behalf.
-    match size {
-        4 => {
-            let val = val as f32; // NB: potential rounding!
-            let val = val.to_bits() as i32;
-            dynasm!(asm
-                ; push Rq(WR0.code())
-                ; mov Rd(WR0.code()), val
-                ; movd Rx(reg.code()), Rd(WR0.code())
-                ; pop Rq(WR0.code())
-            );
-        }
-        8 => {
-            let val = val.to_bits() as i64;
-            dynasm!(asm
-                ; push Rq(WR0.code())
-                ; mov Rq(WR0.code()), QWORD val
-                ; movq Rx(reg.code()), Rq(WR0.code())
-                ; pop Rq(WR0.code())
-            );
-        }
-        _ => panic!(),
-    }
-}
-
 /// The X86_64 code generator.
 pub(crate) struct X64CodeGen<'a> {
     m: &'a jit_ir::Module,
@@ -651,6 +610,42 @@ impl<'a> X64CodeGen<'a> {
         panic!("Cannot lookup globals in cfg(test) as ykllvm will not have compiled this binary");
     }
 
+    /// Codegen a call.
+    fn cg_call(
+        &mut self,
+        iidx: InstIdx,
+        inst: &jit_ir::DirectCallInst,
+    ) -> Result<(), CompilationError> {
+        let func_decl_idx = inst.target();
+        let fty = self.m.func_type(func_decl_idx);
+        let args = (0..(inst.num_args()))
+            .map(|i| inst.operand(self.m, i))
+            .collect::<Vec<_>>();
+
+        // unwrap safe on account of linker symbol names not containing internal NULL bytes.
+        let va = symbol_to_ptr(self.m.func_decl(func_decl_idx).name())
+            .map_err(|e| CompilationError::General(e.to_string()))?;
+        dynasm!(self.asm; mov Rq(WR0.code()), QWORD va as i64);
+        self.emit_call(iidx, fty, WR0, &args)
+    }
+
+    /// Codegen a indirect call.
+    fn cg_indirectcall(
+        &mut self,
+        iidx: InstIdx,
+        indirect_call_idx: &IndirectCallIdx,
+    ) -> Result<(), CompilationError> {
+        let inst = self.m.indirect_call(*indirect_call_idx);
+        self.load_operand(WR0, &inst.target(self.m));
+        let jit_ir::Ty::Func(fty) = self.m.type_(inst.ftyidx()) else {
+            panic!()
+        };
+        let args = (0..(inst.num_args()))
+            .map(|i| inst.operand(self.m, i))
+            .collect::<Vec<_>>();
+        self.emit_call(iidx, fty, WR0, &args)
+    }
+
     fn emit_call(
         &mut self,
         iidx: InstIdx,
@@ -701,42 +696,6 @@ impl<'a> X64CodeGen<'a> {
         }
 
         Ok(())
-    }
-
-    /// Codegen a call.
-    fn cg_call(
-        &mut self,
-        iidx: InstIdx,
-        inst: &jit_ir::DirectCallInst,
-    ) -> Result<(), CompilationError> {
-        let func_decl_idx = inst.target();
-        let fty = self.m.func_type(func_decl_idx);
-        let args = (0..(inst.num_args()))
-            .map(|i| inst.operand(self.m, i))
-            .collect::<Vec<_>>();
-
-        // unwrap safe on account of linker symbol names not containing internal NULL bytes.
-        let va = symbol_to_ptr(self.m.func_decl(func_decl_idx).name())
-            .map_err(|e| CompilationError::General(e.to_string()))?;
-        dynasm!(self.asm; mov Rq(WR0.code()), QWORD va as i64);
-        self.emit_call(iidx, fty, WR0, &args)
-    }
-
-    /// Codegen a indirect call.
-    fn cg_indirectcall(
-        &mut self,
-        iidx: InstIdx,
-        indirect_call_idx: &IndirectCallIdx,
-    ) -> Result<(), CompilationError> {
-        let inst = self.m.indirect_call(*indirect_call_idx);
-        self.load_operand(WR0, &inst.target(self.m));
-        let jit_ir::Ty::Func(fty) = self.m.type_(inst.ftyidx()) else {
-            panic!()
-        };
-        let args = (0..(inst.num_args()))
-            .map(|i| inst.operand(self.m, i))
-            .collect::<Vec<_>>();
-        self.emit_call(iidx, fty, WR0, &args)
     }
 
     fn cg_icmp(&mut self, iidx: InstIdx, inst: &jit_ir::ICmpInst) {
@@ -1050,16 +1009,32 @@ impl<'a> X64CodeGen<'a> {
     /// Load an operand into a general purpose register.
     fn load_operand(&mut self, reg: Rq, op: &Operand) {
         match op {
-            Operand::Local(li) => self.load_local(reg, *li),
             Operand::Const(c) => self.load_const(reg, *c),
+            Operand::Local(li) => self.load_local(reg, *li),
         }
     }
 
-    /// Load an operand into a floating point register.
-    fn load_operand_float(&mut self, reg: Rx, op: &Operand) {
-        match op {
-            Operand::Local(li) => self.load_local_float(reg, *li),
-            Operand::Const(ci) => self.load_const_float(reg, *ci),
+    /// Load a constant into the specified general purpose register.
+    fn load_const(&mut self, reg: Rq, cidx: jit_ir::ConstIdx) {
+        match self.m.const_(cidx) {
+            jit_ir::Const::Float(_tyidx, _x) => todo!(),
+            jit_ir::Const::Int(tyidx, x) => {
+                let jit_ir::Ty::Integer(width) = self.m.type_(*tyidx) else {
+                    panic!()
+                };
+                // The `as`s are all safe because the IR guarantees that no more than `width` bits
+                // are set in the integer i.e. we are only ever truncating zeros.
+                match width {
+                    1 | 8 => dynasm!(self.asm; mov Rq(reg.code()), *x as i32),
+                    16 => dynasm!(self.asm; mov Rw(reg.code()), WORD *x as i16),
+                    32 => dynasm!(self.asm; mov Rq(reg.code()), DWORD *x as i32),
+                    64 => dynasm!(self.asm; mov Rq(reg.code()), QWORD *x as i64),
+                    _ => todo!(),
+                }
+            }
+            jit_ir::Const::Ptr(x) => {
+                dynasm!(self.asm; mov Rq(reg.code()), QWORD i64::try_from(*x).unwrap())
+            }
         }
     }
 
@@ -1094,6 +1069,30 @@ impl<'a> X64CodeGen<'a> {
         }
     }
 
+    /// Load an operand into a floating point register.
+    fn load_operand_float(&mut self, reg: Rx, op: &Operand) {
+        match op {
+            Operand::Const(ci) => self.load_const_float(reg, *ci),
+            Operand::Local(li) => self.load_local_float(reg, *li),
+        }
+    }
+
+    /// Load a constant into the specified floating point register.
+    fn load_const_float(&mut self, reg: Rx, cidx: jit_ir::ConstIdx) {
+        match self.m.const_(cidx) {
+            jit_ir::Const::Float(tyidx, v) => {
+                // Unwrap cannot fail. Constant floats are sized.
+                imm_float_into_reg(
+                    *v,
+                    reg,
+                    self.m.type_(*tyidx).byte_size().unwrap(),
+                    &mut self.asm,
+                );
+            }
+            jit_ir::Const::Int(..) | jit_ir::Const::Ptr(..) => todo!(),
+        }
+    }
+
     /// Load a local variable into the specified floating point register.
     fn load_local_float(&mut self, reg: Rx, local: InstIdx) {
         let inst = self.m.inst_no_proxies(local);
@@ -1111,46 +1110,6 @@ impl<'a> X64CodeGen<'a> {
             LocalAlloc::Register => todo!(),
             LocalAlloc::ConstInt(_) => todo!(),
             LocalAlloc::ConstFloat(fv) => imm_float_into_reg(*fv, reg, size, &mut self.asm),
-        }
-    }
-
-    /// Load a constant into the specified general purpose register.
-    fn load_const(&mut self, reg: Rq, cidx: jit_ir::ConstIdx) {
-        match self.m.const_(cidx) {
-            jit_ir::Const::Float(_tyidx, _x) => todo!(),
-            jit_ir::Const::Int(tyidx, x) => {
-                let jit_ir::Ty::Integer(width) = self.m.type_(*tyidx) else {
-                    panic!()
-                };
-                // The `as`s are all safe because the IR guarantees that no more than `width` bits
-                // are set in the integer i.e. we are only ever truncating zeros.
-                match width {
-                    1 | 8 => dynasm!(self.asm; mov Rq(reg.code()), *x as i32),
-                    16 => dynasm!(self.asm; mov Rw(reg.code()), WORD *x as i16),
-                    32 => dynasm!(self.asm; mov Rq(reg.code()), DWORD *x as i32),
-                    64 => dynasm!(self.asm; mov Rq(reg.code()), QWORD *x as i64),
-                    _ => todo!(),
-                }
-            }
-            jit_ir::Const::Ptr(x) => {
-                dynasm!(self.asm; mov Rq(reg.code()), QWORD i64::try_from(*x).unwrap())
-            }
-        }
-    }
-
-    /// Load a constant into the specified floating point register.
-    fn load_const_float(&mut self, reg: Rx, cidx: jit_ir::ConstIdx) {
-        match self.m.const_(cidx) {
-            jit_ir::Const::Float(tyidx, v) => {
-                // Unwrap cannot fail. Constant floats are sized.
-                imm_float_into_reg(
-                    *v,
-                    reg,
-                    self.m.type_(*tyidx).byte_size().unwrap(),
-                    &mut self.asm,
-                );
-            }
-            jit_ir::Const::Int(..) | jit_ir::Const::Ptr(..) => todo!(),
         }
     }
 
@@ -1200,6 +1159,47 @@ impl<'a> X64CodeGen<'a> {
         let size = self.m.inst_no_proxies(local).def_byte_size(self.m);
         let l = self.ra.allocate(local, size, &mut self.stack);
         self.store_local_float(&l, reg, size);
+    }
+}
+
+/// Load an SSE register with an immediate float/double.
+///
+/// Note that if `size < mem::sizeof::<double>()`, then `val` may be rounded to the closest
+/// possible value (as per `as` cast semantics).
+///
+/// # Panics
+///
+/// This will panic if `size` isn't either 4 or 8 (bytes).
+fn imm_float_into_reg(val: f64, reg: Rx, size: usize, asm: &mut dynasmrt::x64::Assembler) {
+    // Note that there's no way to directly move an immediate value into an xmm, so we
+    // have to go via a general purpose register. Because we don't know if this
+    // register is already in use by the parent codegen routine, we have no option but
+    // the save/restore it.
+    //
+    // FIXME: when we have a proper register allocator, it can have a "with_temp_reg()" method. It
+    // would either pass the closure a free register, or if there isn't one, do the save/restore on
+    // our behalf.
+    match size {
+        4 => {
+            let val = val as f32; // NB: potential rounding!
+            let val = val.to_bits() as i32;
+            dynasm!(asm
+                ; push Rq(WR0.code())
+                ; mov Rd(WR0.code()), val
+                ; movd Rx(reg.code()), Rd(WR0.code())
+                ; pop Rq(WR0.code())
+            );
+        }
+        8 => {
+            let val = val.to_bits() as i64;
+            dynasm!(asm
+                ; push Rq(WR0.code())
+                ; mov Rq(WR0.code()), QWORD val
+                ; movq Rx(reg.code()), Rq(WR0.code())
+                ; pop Rq(WR0.code())
+            );
+        }
+        _ => panic!(),
     }
 }
 
