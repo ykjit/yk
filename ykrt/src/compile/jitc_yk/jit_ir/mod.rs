@@ -1236,6 +1236,7 @@ pub(crate) enum Inst {
     SIToFP(SIToFPInst),
     FPExt(FPExtInst),
     FCmp(FCmpInst),
+    FPToSI(FPToSIInst),
 }
 
 impl Inst {
@@ -1284,6 +1285,7 @@ impl Inst {
             Self::SIToFP(i) => i.dest_tyidx(),
             Self::FPExt(i) => i.dest_tyidx(),
             Self::FCmp(_) => m.int1_tyidx(),
+            Self::FPToSI(i) => i.dest_tyidx(),
         }
     }
 
@@ -1319,6 +1321,7 @@ impl Inst {
             Inst::SIToFP(_) => false,
             Inst::FPExt(_) => false,
             Inst::FCmp(_) => false,
+            Inst::FPToSI(_) => false,
         }
     }
 
@@ -1397,6 +1400,7 @@ impl Inst {
                 lhs.map_iidx(f);
                 rhs.map_iidx(f);
             }
+            Inst::FPToSI(FPToSIInst { val, .. }) => val.map_iidx(f),
         }
     }
 
@@ -1573,6 +1577,7 @@ impl fmt::Display for DisplayableInst<'_> {
                 x.lhs(self.m).display(self.m),
                 x.rhs(self.m).display(self.m)
             ),
+            Inst::FPToSI(i) => write!(f, "fp_to_si {}", i.val(self.m).display(self.m)),
         }
     }
 }
@@ -1606,6 +1611,7 @@ inst!(Select, SelectInst);
 inst!(SIToFP, SIToFPInst);
 inst!(FPExt, FPExtInst);
 inst!(FCmp, FCmpInst);
+inst!(FPToSI, FPToSIInst);
 
 /// The operands for a [Instruction::BinOp]
 ///
@@ -2292,6 +2298,39 @@ pub struct SIToFPInst {
 }
 
 impl SIToFPInst {
+    pub(crate) fn new(val: &Operand, dest_tyidx: TyIdx) -> Self {
+        Self {
+            val: PackedOperand::new(val),
+            dest_tyidx,
+        }
+    }
+
+    pub(crate) fn val(&self, m: &Module) -> Operand {
+        self.val.unpack(m)
+    }
+
+    pub(crate) fn dest_tyidx(&self) -> TyIdx {
+        self.dest_tyidx
+    }
+}
+
+/// The operands for a [Inst::FPToSI]
+///
+/// # Semantics
+///
+/// This instruction converts a floating point value to an integer value, rounding towards zero.
+///
+/// The source float and destination integer need not be the same width, but if the resulting
+/// numeric value does not fit, the result is undefined.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FPToSIInst {
+    /// The value to convert. Must be of floating point type.
+    val: PackedOperand,
+    /// The type to convert to. Must be an integer type.
+    dest_tyidx: TyIdx,
+}
+
+impl FPToSIInst {
     pub(crate) fn new(val: &Operand, dest_tyidx: TyIdx) -> Self {
         Self {
             val: PackedOperand::new(val),

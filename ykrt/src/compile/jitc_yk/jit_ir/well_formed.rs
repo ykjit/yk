@@ -174,6 +174,19 @@ impl Module {
                             self.inst_no_proxies(iidx).display(iidx, self));
                     }
                 }
+                Inst::FPToSI(x) => {
+                    let from_type = self.type_(x.val(self).tyidx(self));
+                    let to_type = self.type_(x.dest_tyidx());
+
+                    if !matches!(from_type, Ty::Float(_)) {
+                        panic!("Instruction at position {iidx} trying to convert a non-float type\n  {}",
+                            self.inst_no_proxies(iidx).display(iidx, self));
+                    }
+                    if !matches!(to_type, Ty::Integer(_)) {
+                        panic!("Instruction at position {iidx} trying to convert to a non-integer type\n  {}",
+                            self.inst_no_proxies(iidx).display(iidx, self));
+                    }
+                }
                 _ => (),
             }
         }
@@ -376,6 +389,30 @@ mod tests {
               entry:
                 %0: float = load_ti 0
                 %1: i64 = fp_ext %0
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Instruction at position 1 trying to convert to a non-integer type")]
+    fn fp_to_si_to_non_int() {
+        Module::from_str(
+            "
+              entry:
+                %0: float = load_ti 0
+                %1: float = fp_to_si %0
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Instruction at position 1 trying to convert a non-float type")]
+    fn fp_to_si_from_non_float() {
+        Module::from_str(
+            "
+              entry:
+                %0: i32 = load_ti 0
+                %1: i32 = fp_to_si %0
             ",
         );
     }

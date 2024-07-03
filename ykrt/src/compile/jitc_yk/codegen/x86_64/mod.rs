@@ -236,6 +236,7 @@ impl<'a> X64CodeGen<'a> {
             jit_ir::Inst::SIToFP(i) => self.cg_sitofp(iidx, i),
             jit_ir::Inst::FPExt(i) => self.cg_fpext(iidx, i),
             jit_ir::Inst::FCmp(i) => self.cg_fcmp(iidx, i),
+            jit_ir::Inst::FPToSI(i) => self.cg_fptosi(iidx, i),
         }
         Ok(())
     }
@@ -891,6 +892,40 @@ impl<'a> X64CodeGen<'a> {
             _ => panic!(),
         }
         self.store_new_local_float(inst_idx, WF0);
+    }
+
+    fn cg_fptosi(&mut self, inst_idx: InstIdx, i: &jit_ir::FPToSIInst) {
+        let from_val = i.val(self.m);
+        let to_ty = self.m.type_(i.dest_tyidx());
+        // Unwrap cannot fail: floats and integers are sized.
+        let from_size = self.m.type_(from_val.tyidx(self.m)).byte_size().unwrap();
+        let to_size = to_ty.byte_size().unwrap();
+
+        self.load_operand_float(WF0, &from_val);
+
+        match from_size {
+            8 => dynasm!(self.asm; cvttsd2si Rq(WR0.code()), Rx(WF0.code())),
+            4 => dynasm!(self.asm; cvttss2si Rq(WR0.code()), Rx(WF0.code())),
+            _ => panic!(),
+        }
+
+        // Now we have a (potentially rounded) 64-bit integer in a register.
+        //
+        // If the integer type we are casting to is smaller than or of equal size to `from_size`
+        // then we don't need to do anything else because either:
+        //
+        // a) the desired value fits in `to_size` bytes and, due to two's compliment, you can
+        //    truncate away higher-order bytes and have the same numeric integer value, or
+        //
+        // b) the desired value doesn't fit in `to_size`, which is UB and we can do anything.
+        //
+        // FIXME: If however, we are casting to a larger-sized integer type, we will need to sign
+        // extend the value to keep the same numeric value.
+        if to_size > from_size {
+            todo!("fptosi requires sign extend: {} -> {}", from_size, to_size);
+        }
+
+        self.store_new_local(inst_idx, WR0);
     }
 
     fn cg_fpext(&mut self, iidx: InstIdx, i: &jit_ir::FPExtInst) {
@@ -2072,6 +2107,44 @@ mod tests {
                 ... movss xmm0, dword ptr [rbp-0x04]
                 ... cvtss2sd xmm0, xmm0
                 ... movsd [rbp-0x10], xmm0
+                ...
+                ",
+            );
+        }
+
+        #[test]
+        fn cg_fptosi_float() {
+            test_with_spillalloc(
+                "
+              entry:
+                %0: float = load_ti 0
+                %1: i32 = fp_to_si %0
+            ",
+                "
+                ...
+                ; %1: i32 = fp_to_si %0
+                ... movss xmm0, dword ptr [rbp-0x04]
+                ... cvttss2si r12, xmm0
+                ... mov [rbp-0x08], r12d
+                ...
+                ",
+            );
+        }
+
+        #[test]
+        fn cg_fptosi_double() {
+            test_with_spillalloc(
+                "
+              entry:
+                %0: double = load_ti 0
+                %1: i32 = fp_to_si %0
+            ",
+                "
+                ...
+                ; %1: i32 = fp_to_si %0
+                ... movsd xmm0, qword ptr [rbp-0x08]
+                ... cvttsd2si r12, xmm0
+                ... mov [rbp-0x0c], r12d
                 ...
                 ",
             );

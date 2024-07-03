@@ -8,9 +8,9 @@ use super::super::{
     aot_ir::{BinOp, FloatPredicate, Predicate},
     jit_ir::{
         BinOpInst, BlackBoxInst, Const, DirectCallInst, DynPtrAddInst, FCmpInst, FPExtInst,
-        FloatTy, FuncDecl, FuncTy, GuardInfo, GuardInst, ICmpInst, IndirectCallInst, Inst, InstIdx,
-        LoadInst, LoadTraceInputInst, Module, Operand, PtrAddInst, SExtInst, SIToFPInst,
-        SelectInst, StoreInst, TruncInst, Ty, TyIdx,
+        FPToSIInst, FloatTy, FuncDecl, FuncTy, GuardInfo, GuardInst, ICmpInst, IndirectCallInst,
+        Inst, InstIdx, LoadInst, LoadTraceInputInst, Module, Operand, PtrAddInst, SExtInst,
+        SIToFPInst, SelectInst, StoreInst, TruncInst, Ty, TyIdx,
     },
 };
 use fm::FMBuilder;
@@ -342,6 +342,11 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                     ASTInst::FPExt { assign, type_, val } => {
                         let inst =
                             FPExtInst::new(&self.process_operand(val)?, self.process_type(type_)?);
+                        self.push_assign(inst.into(), assign)?;
+                    }
+                    ASTInst::FPToSI { assign, type_, val } => {
+                        let inst =
+                            FPToSIInst::new(&self.process_operand(val)?, self.process_type(type_)?);
                         self.push_assign(inst.into(), assign)?;
                     }
                     ASTInst::Store { tgt, val, volatile } => {
@@ -716,6 +721,11 @@ enum ASTInst {
         type_: ASTType,
         val: ASTOperand,
     },
+    FPToSI {
+        assign: Span,
+        type_: ASTType,
+        val: ASTOperand,
+    },
     Store {
         tgt: ASTOperand,
         val: ASTOperand,
@@ -873,6 +883,7 @@ mod tests {
               %48: i32 = load_ti 7
               %49: float = si_to_fp %48
               %50: double = fp_ext %49
+              %500: i32 = fp_to_si %49
               %51: double = fadd 1double, 2.345double
               %52: float = fadd 1float, 2.345float
               %53: i64 = icall<ft1> %9(%5, %7, %0)
