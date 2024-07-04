@@ -1017,7 +1017,12 @@ impl<'a> X64CodeGen<'a> {
                     // it doesn't have an allocation. We can just push the actual value instead
                     // which will be written as is during deoptimisation.
                     match self.m.const_(*c) {
-                        Const::Int(_, c) => locs.push(LocalAlloc::ConstInt(*c)),
+                        Const::Int(tyidx, c) => {
+                            let Ty::Integer(bits) = self.m.type_(*tyidx) else {
+                                panic!()
+                            };
+                            locs.push(LocalAlloc::ConstInt { bits: *bits, v: *c })
+                        }
                         _ => todo!(),
                     };
                 }
@@ -1109,10 +1114,10 @@ impl<'a> X64CodeGen<'a> {
                 }
             }
             LocalAlloc::Register => todo!(),
-            LocalAlloc::ConstInt(c) => {
-                // FIXME: Adjust for different constant sizes. Requires storing the size in the
-                // variant.
-                dynasm!(self.asm; mov Rq(reg.code()), QWORD *c as i64);
+            LocalAlloc::ConstInt { bits, v } => {
+                // FIXME: Adjust for different constant sizes?
+                assert_eq!(*bits, 64);
+                dynasm!(self.asm; mov Rq(reg.code()), QWORD *v as i64);
             }
             LocalAlloc::ConstFloat(_) => todo!(),
         }
@@ -1157,7 +1162,7 @@ impl<'a> X64CodeGen<'a> {
                 Err(_) => todo!(),
             },
             LocalAlloc::Register => todo!(),
-            LocalAlloc::ConstInt(_) => todo!(),
+            LocalAlloc::ConstInt { .. } => todo!(),
             LocalAlloc::ConstFloat(fv) => imm_float_into_reg(*fv, reg, size, &mut self.asm),
         }
     }
@@ -1175,7 +1180,7 @@ impl<'a> X64CodeGen<'a> {
                 Err(_) => todo!("{}", size),
             },
             LocalAlloc::Register => todo!(),
-            LocalAlloc::ConstInt(_) => todo!(),
+            LocalAlloc::ConstInt { .. } => todo!(),
             LocalAlloc::ConstFloat(_) => todo!(),
         }
     }
@@ -1198,7 +1203,7 @@ impl<'a> X64CodeGen<'a> {
                 Err(_) => todo!("{}", size),
             },
             LocalAlloc::Register => todo!(),
-            LocalAlloc::ConstInt(_) => todo!(),
+            LocalAlloc::ConstInt { .. } => todo!(),
             LocalAlloc::ConstFloat(_) => todo!(),
         }
     }
