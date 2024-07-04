@@ -10,11 +10,11 @@
 
 use super::{
     super::{
-        jit_ir::{self, BinOp, InstIdx, Operand, Ty},
+        jit_ir::{self, BinOp, InstIdx, Module, Operand, Ty},
         CompilationError,
     },
     abs_stack::AbstractStack,
-    reg_alloc::{LocalAlloc, RegisterAllocator, StackDirection},
+    reg_alloc::{spill_alloc::SpillAllocator, LocalAlloc, RegisterAllocator, StackDirection},
     CodeGen,
 };
 #[cfg(any(debug_assertions, test))]
@@ -31,9 +31,9 @@ use dynasmrt::{
 };
 #[cfg(any(debug_assertions, test))]
 use indexmap::IndexMap;
-use std::sync::Arc;
 #[cfg(any(debug_assertions, test))]
-use std::{cell::Cell, error::Error, slice};
+use std::{cell::Cell, slice};
+use std::{error::Error, sync::Arc};
 use ykaddr::addr::symbol_to_ptr;
 
 mod deopt;
@@ -88,8 +88,24 @@ const STACK_DIRECTION: StackDirection = StackDirection::GrowsDown;
 #[inline(never)]
 pub extern "C" fn __yk_break() {}
 
+/// A simple front end for the X86_64 code generator.
+pub(crate) struct X64CodeGenFrontEnd;
+
+impl CodeGen for X64CodeGenFrontEnd {
+    fn codegen(&self, m: Module) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
+        let ra = Box::new(SpillAllocator::new(StackDirection::GrowsDown));
+        X64CodeGen::new(&m, ra)?.codegen()
+    }
+}
+
+impl X64CodeGenFrontEnd {
+    pub(crate) fn new() -> Result<Arc<Self>, Box<dyn Error>> {
+        Ok(Arc::new(Self))
+    }
+}
+
 /// The X86_64 code generator.
-pub(crate) struct X64CodeGen<'a> {
+struct X64CodeGen<'a> {
     m: &'a jit_ir::Module,
     asm: dynasmrt::x64::Assembler,
     /// Abstract stack pointer, as a relative offset from `RBP`. The higher this number, the larger
@@ -109,7 +125,7 @@ pub(crate) struct X64CodeGen<'a> {
     comments: Cell<IndexMap<usize, Vec<String>>>,
 }
 
-impl<'a> CodeGen<'a> for X64CodeGen<'a> {
+impl<'a> X64CodeGen<'a> {
     fn new(
         m: &'a jit_ir::Module,
         ra: Box<dyn RegisterAllocator>,
@@ -197,9 +213,7 @@ impl<'a> CodeGen<'a> for X64CodeGen<'a> {
             gdb_ctx,
         }))
     }
-}
 
-impl<'a> X64CodeGen<'a> {
     /// Codegen an instruction.
     fn cg_inst(
         &mut self,
@@ -1341,7 +1355,7 @@ impl<'a> AsmPrinter<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CodeGen, X64CodeGen, X64CompiledTrace, STACK_DIRECTION};
+    use super::{X64CompiledTrace, STACK_DIRECTION};
     use crate::compile::{
         jitc_yk::{
             codegen::reg_alloc::RegisterAllocator,
@@ -1382,7 +1396,7 @@ mod tests {
     }
 
     mod with_spillalloc {
-        use super::*;
+        use super::{super::X64CodeGen, *};
         use crate::compile::jitc_yk::codegen::reg_alloc::SpillAllocator;
 
         fn test_with_spillalloc(mod_str: &str, patt_lines: &str) {

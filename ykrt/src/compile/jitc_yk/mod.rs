@@ -2,13 +2,7 @@
 
 use super::CompilationError;
 use crate::{
-    compile::{
-        jitc_yk::codegen::{
-            reg_alloc::{spill_alloc::SpillAllocator, RegisterAllocator, StackDirection},
-            CodeGen,
-        },
-        CompiledTrace, Compiler,
-    },
+    compile::{jitc_yk::codegen::CodeGen, CompiledTrace, Compiler},
     location::HotLocation,
     log::{log_ir, should_log_ir, IRPhase},
     mt::{SideTraceInfo, MT},
@@ -45,23 +39,15 @@ static AOT_MOD: LazyLock<aot_ir::Module> = LazyLock::new(|| {
     aot_ir::deserialise_module(ir_slice).unwrap()
 });
 
-pub(crate) struct JITCYk;
+pub(crate) struct JITCYk {
+    codegen: Arc<dyn CodeGen>,
+}
 
 impl JITCYk {
     pub(crate) fn new() -> Result<Arc<Self>, Box<dyn Error>> {
-        Ok(Arc::new(Self))
-    }
-
-    fn default_codegen<'a>(
-        jit_mod: &'a jit_ir::Module,
-    ) -> Result<Box<dyn CodeGen<'a> + 'a>, CompilationError> {
-        #[cfg(target_arch = "x86_64")]
-        {
-            let ra = Box::new(SpillAllocator::new(StackDirection::GrowsDown));
-            Ok(codegen::x86_64::X64CodeGen::new(jit_mod, ra)?)
-        }
-        #[cfg(not(target_arch = "x86_64"))]
-        panic!("No code generator available for this platform");
+        Ok(Arc::new(Self {
+            codegen: codegen::default_codegen()?,
+        }))
     }
 }
 
@@ -104,8 +90,7 @@ impl Compiler for JITCYk {
             }
         }
 
-        let cg = Box::new(Self::default_codegen(&jit_mod)?);
-        let ct = cg.codegen()?;
+        let ct = self.codegen.codegen(jit_mod)?;
 
         #[cfg(any(debug_assertions, test))]
         if should_log_ir(IRPhase::Asm) {
