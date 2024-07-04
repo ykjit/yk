@@ -819,8 +819,8 @@ pub(crate) enum Ty {
     /// A fixed-width integer type.
     ///
     /// Note:
-    ///   1. These integers range in size from 1..2^23 (inc.) bits. This is inherited [from LLVM's
-    ///      integer type](https://llvm.org/docs/LangRef.html#integer-type).
+    ///   1. These integers range in size from 1..2^23 (inc.) bits (stored in the `u32`). This is
+    ///      inherited [from LLVM's integer type](https://llvm.org/docs/LangRef.html#integer-type).
     ///   2. Signedness is not specified. Interpretation of the bit pattern is delegated to operations
     ///      upon the integer.
     Integer(u32),

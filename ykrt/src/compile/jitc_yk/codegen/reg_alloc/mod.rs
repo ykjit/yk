@@ -31,7 +31,12 @@ pub(crate) enum LocalAlloc {
     ///
     /// FIXME: unimplemented.
     Register,
-    ConstInt(u64),
+    /// A constant integer `bits` wide (see [jit_ir::Const::ConstInt] for the constraints on the
+    /// bit width) and with value `v`.
+    ConstInt {
+        bits: u32,
+        v: u64,
+    },
     ConstFloat(f64),
 }
 
