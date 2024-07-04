@@ -27,7 +27,8 @@ use dynasmrt::{
     components::StaticLabel,
     dynasm,
     x64::{Rq, Rx},
-    AssemblyOffset, DynasmApi, DynasmError, DynasmLabelApi, ExecutableBuffer, Register,
+    AssemblyOffset, DynamicLabel, DynasmApi, DynasmError, DynasmLabelApi, ExecutableBuffer,
+    Register,
 };
 #[cfg(any(debug_assertions, test))]
 use indexmap::IndexMap;
@@ -114,7 +115,7 @@ struct X64CodeGen<'a> {
     stack: AbstractStack,
     /// Register allocator.
     ra: Box<dyn RegisterAllocator>,
-    /// Deopt info.
+    /// Deopt info, with one entry per guard, in the order that the guards appear in the trace.
     deoptinfo: Vec<DeoptInfo>,
     /// Maps assembly offsets to comments.
     ///
@@ -176,6 +177,45 @@ impl<'a> X64CodeGen<'a> {
             Err(e) => {
                 // Any other error suggests something has gone quite wrong. Just crash.
                 panic!("{}", e.to_string())
+            }
+        }
+
+        if !self.deoptinfo.is_empty() {
+            // We now have to construct the "full" deopt points. Inside the trace itself, are just
+            // a pair of instructions: a `cmp` followed by a `jnz` to a `fail_label` that has not
+            // yet been defined. We now have to construct a full call to `__yk_deopt` for each of
+            // those labels. Since, in general, we'll have multiple guards, we construct a simple
+            // stub which puts an ID in a register then JMPs to (shared amongst all guards) code
+            // which does the full call to __yk_deopt.
+            let fail_labels = self
+                .deoptinfo
+                .iter()
+                .map(|x| x.fail_label)
+                .collect::<Vec<_>>();
+            let deopt_label = self.asm.new_dynamic_label();
+            for (deoptid, fail_label) in fail_labels.into_iter().enumerate() {
+                #[cfg(any(debug_assertions, test))]
+                self.comment(self.asm.offset(), format!("Deopt ID for guard {deoptid}"));
+                dynasm!(self.asm
+                    ;=> fail_label
+                    ; mov rsi, QWORD deoptid as i64
+                    ; jmp =>deopt_label
+                );
+            }
+
+            #[cfg(any(debug_assertions, test))]
+            self.comment(self.asm.offset(), "Call __yk_deopt".to_string());
+            // Clippy points out that `__yk_depot as i64` isn't portable, but since this entire module
+            // is x86 only, we don't need to worry about portability.
+            #[allow(clippy::fn_to_numeric_cast)]
+            {
+                dynasm!(self.asm
+                    ;=> deopt_label
+                    ; mov rdi, [rbp]
+                    ; mov rdx, rbp
+                    ; mov rax, QWORD __yk_deopt as i64
+                    ; call rax
+                );
             }
         }
 
@@ -1032,32 +1072,19 @@ impl<'a> X64CodeGen<'a> {
             }
         }
 
+        let fail_label = self.asm.new_dynamic_label();
         // FIXME: Move `frames` instead of copying them (requires JIT module to be consumable).
         let deoptinfo = DeoptInfo {
+            fail_label,
             frames: gi.frames().clone(),
             lives: locs,
         };
-        // Unwrap is safe since in this architecture usize and i64 have the same size.
-        let deoptid = self.deoptinfo.len().try_into().unwrap();
         self.deoptinfo.push(deoptinfo);
 
-        // Clippy points out that `__yk_depot as i64` isn't portable, but since this entire module
-        // is x86 only, we don't need to worry about portability.
-        #[allow(clippy::fn_to_numeric_cast)]
-        {
-            dynasm!(self.asm
-                ; jmp >check_cond
-                ; guard_fail:
-                ; mov rdi, [rbp]
-                ; mov rsi, QWORD deoptid
-                ; mov rdx, rbp
-                ; mov rax, QWORD __yk_deopt as i64
-                ; call rax
-                ; check_cond:
-                ; cmp Rb(WR0.code()), inst.expect() as i8 // `as` intentional.
-                ; jne <guard_fail
-            );
-        }
+        dynasm!(self.asm
+            ; cmp Rb(WR0.code()), inst.expect() as i8 // `as` intentional.
+            ; jne =>fail_label
+        );
     }
 
     /// Load an operand into a general purpose register.
@@ -1260,6 +1287,7 @@ fn imm_float_into_reg(val: f64, reg: Rx, size: usize, asm: &mut dynasmrt::x64::A
 /// Information required by deoptimisation.
 #[derive(Debug)]
 struct DeoptInfo {
+    fail_label: DynamicLabel,
     /// Vector of AOT stackmap IDs.
     frames: Vec<u64>,
     // Vector of live JIT variable locations.
@@ -1834,15 +1862,17 @@ mod tests {
                 "
                 ...
                 ; guard true, %0, []
-                {{vaddr1}} {{off1}}: jmp 0x00000000{{cmpoff}}
-                {{vaddr2}} {{failoff}}: mov rdi, [rbp]
+                ... cmp r12b, 0x01
+                ... jnz 0x...
+                ...
+                ; deopt id for guard 0
                 ... mov rsi, 0x00
+                ... jmp ...
+                ; call __yk_deopt
+                ... mov rdi, [rbp]
                 ... mov rdx, rbp
                 ... mov rax, ...
                 ... call rax
-                {{vaddr3}} {{cmpoff}}: cmp r12b, 0x01
-                {{vaddr4}} {{off4}}: jnz 0x00000000{{failoff}}
-                ...
             ",
             );
         }
@@ -1858,15 +1888,17 @@ mod tests {
                 "
                 ...
                 ; guard false, %0, []
-                {{vaddr1}} {{off1}}: jmp 0x00000000{{cmpoff}}
-                {{vaddr2}} {{failoff}}: mov rdi, [rbp]
+                ... cmp r12b, 0x00
+                ... jnz 0x...
+                ...
+                ; deopt id for guard 0
                 ... mov rsi, 0x00
+                ... jmp ...
+                ; call __yk_deopt
+                ... mov rdi, [rbp]
                 ... mov rdx, rbp
                 ... mov rax, ...
                 ... call rax
-                {{vaddr3}} {{cmpoff}}: cmp r12b, 0x00
-                {{vaddr4}} {{off4}}: jnz 0x00000000{{failoff}}
-                ...
             ",
             );
         }
