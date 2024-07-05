@@ -186,7 +186,12 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         }
                         let gidx = self
                             .m
-                            .push_guardinfo(GuardInfo::new(Vec::new(), mlive_vars))
+                            .push_guardinfo(GuardInfo::new(
+                                Vec::new(),
+                                mlive_vars,
+                                Vec::new(),
+                                Vec::new(),
+                            ))
                             .unwrap();
                         let inst = GuardInst::new(self.process_operand(operand)?, is_true, gidx);
                         self.m.push(inst.into()).unwrap();

@@ -6,7 +6,6 @@ pub fn main() {
     // FIXME: This is a temporary hack because LLVM has problems if the main thread exits before
     // compilation threads have finished.
     println!("cargo:rustc-cfg=yk_llvm_sync_hack");
-    println!("cargo::rustc-check-cfg=cfg(yk_llvm_sync_hack)");
 
     println!("cargo:rerun-if-env-changed=YKB_TRACER");
     match env::var("YKB_TRACER") {

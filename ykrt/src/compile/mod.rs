@@ -56,7 +56,7 @@ pub(crate) trait Compiler: Send + Sync {
         &self,
         mt: Arc<MT>,
         aottrace_iter: (Box<dyn AOTTraceIterator>, Box<[usize]>),
-        sti: Option<SideTraceInfo>,
+        sti: Option<Arc<dyn SideTraceInfo>>,
         hl: Arc<Mutex<HotLocation>>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError>;
 }
@@ -85,6 +85,7 @@ pub(crate) fn default_compiler() -> Result<Arc<dyn Compiler>, Box<dyn Error>> {
 /// Responsible for tracking how often a guard in a `CompiledTrace` fails. A hotness counter is
 /// incremented each time the matching guard failure in a `CompiledTrace` is triggered. Also stores
 /// the side-trace once its compiled.
+#[derive(Debug)]
 pub(crate) struct Guard {
     /// How often has this guard failed?
     failed: AtomicU32,
@@ -114,15 +115,10 @@ pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
     /// upcasting in Rust is incomplete.
     fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static>;
 
-    fn mt(&self) -> &Arc<MT>;
+    fn sidetraceinfo(&self, guardid: usize) -> Arc<dyn SideTraceInfo>;
 
     /// Return a reference to the guard `id`.
     fn guard(&self, id: GuardId) -> &Guard;
-
-    /// Is the guard `id` the last guard in this `CompiledTrace`?
-    fn is_last_guard(&self, id: GuardId) -> bool;
-
-    fn aotvals(&self) -> *const c_void;
 
     fn entry(&self) -> *const c_void;
 
@@ -139,15 +135,6 @@ pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
 #[derive(Clone, Copy, Debug)]
 #[allow(dead_code)]
 pub(crate) struct GuardId(pub(crate) usize);
-
-impl GuardId {
-    #[cfg(test)]
-    /// Only when testing, create a `GuardId` with an illegal value: trying to use this `GuardId`
-    /// will either cause an error or lead to undefined behaviour.
-    pub(crate) fn illegal() -> Self {
-        GuardId(usize::MAX)
-    }
-}
 
 #[cfg(test)]
 mod compiled_trace_testing {
@@ -169,19 +156,11 @@ mod compiled_trace_testing {
             panic!();
         }
 
-        fn mt(&self) -> &Arc<MT> {
+        fn sidetraceinfo(&self, _guardid: usize) -> Arc<dyn SideTraceInfo> {
             panic!();
         }
 
         fn guard(&self, _id: GuardId) -> &Guard {
-            panic!();
-        }
-
-        fn is_last_guard(&self, _id: GuardId) -> bool {
-            panic!();
-        }
-
-        fn aotvals(&self) -> *const c_void {
             panic!();
         }
 
@@ -214,19 +193,11 @@ mod compiled_trace_testing {
             panic!();
         }
 
-        fn mt(&self) -> &Arc<MT> {
+        fn sidetraceinfo(&self, _guardid: usize) -> Arc<dyn SideTraceInfo> {
             panic!();
         }
 
         fn guard(&self, _id: GuardId) -> &Guard {
-            panic!();
-        }
-
-        fn is_last_guard(&self, _id: GuardId) -> bool {
-            panic!();
-        }
-
-        fn aotvals(&self) -> *const c_void {
             panic!();
         }
 

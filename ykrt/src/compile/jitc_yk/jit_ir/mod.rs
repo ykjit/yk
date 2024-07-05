@@ -68,6 +68,7 @@ mod parser;
 mod well_formed;
 
 use super::aot_ir;
+use crate::compile::jitc_yk::trace_builder::Frame;
 use crate::compile::CompilationError;
 use indexmap::IndexSet;
 use std::{
@@ -1172,19 +1173,41 @@ pub(crate) struct GuardInfo {
     frames: Vec<u64>,
     /// Indices of live JIT variables.
     lives: Vec<InstIdx>,
+    /// Live AOT values. Required for side-tracing.
+    aotlives: Vec<aot_ir::InstID>,
+    // Inlined frames info.
+    // FIXME With callframes, the frames and aotlives fields are redunant.
+    pub callframes: Vec<Frame>,
 }
 
 impl GuardInfo {
-    pub(crate) fn new(frames: Vec<u64>, lives: Vec<InstIdx>) -> Self {
-        Self { frames, lives }
+    pub(crate) fn new(
+        frames: Vec<u64>,
+        lives: Vec<InstIdx>,
+        aotlives: Vec<aot_ir::InstID>,
+        callframes: Vec<Frame>,
+    ) -> Self {
+        Self {
+            frames,
+            lives,
+            aotlives,
+            callframes,
+        }
     }
 
+    /// Return the stackmap ids for the currently active call frames.
     pub(crate) fn frames(&self) -> &Vec<u64> {
         &self.frames
     }
 
+    /// Return the live JIT variables for this guard. Used to read live values from during deopt.
     pub(crate) fn lives(&self) -> &Vec<InstIdx> {
         &self.lives
+    }
+
+    /// Return the live AOT variables for this guard. Used to write live values to during deopt.
+    pub(crate) fn aotlives(&self) -> &Vec<aot_ir::InstID> {
+        &self.aotlives
     }
 }
 

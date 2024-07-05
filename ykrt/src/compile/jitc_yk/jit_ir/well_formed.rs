@@ -102,7 +102,7 @@ impl Module {
                         }
                     }
                 }
-                Inst::Guard(GuardInst { cond, expect, .. }) => {
+                Inst::Guard(GuardInst { cond, .. }) => {
                     let cond = cond.unpack(self);
                     let tyidx = cond.tyidx(self);
                     let Ty::Integer(1) = self.type_(tyidx) else {
@@ -112,15 +112,18 @@ impl Module {
                         )
                     };
                     if let Operand::Const(x) = cond {
-                        let Const::Int(_, v) = self.const_(x) else {
+                        let Const::Int(_, _v) = self.const_(x) else {
                             unreachable!()
                         };
-                        if (*expect && *v == 0) || (!*expect && *v == 1) {
-                            panic!(
-                                "Guard at position {iidx} references a constant that is at odds with the guard itself\n  {}",
-                                self.inst_no_proxies(iidx).display(iidx, self)
-                            );
-                        }
+                        // FIXME: We currently need to break this check due to side-traces being
+                        // unfinished and needing to deopt back to the normal interpreter at the
+                        // end.
+                        // if (*expect && *v == 0) || (!*expect && *v == 1) {
+                        //     panic!(
+                        //         "Guard at position {iidx} references a constant that is at odds with the guard itself\n  {}",
+                        //         self.inst_no_proxies(iidx).display(iidx, self)
+                        //     );
+                        // }
                     }
                 }
                 Inst::ICmp(x) => {

@@ -11,7 +11,6 @@ pub fn main() {
     ykbuild::apply_llvm_ld_library_path();
     println!("cargo:rerun-if-env-changed=YKB_TRACER");
     // Always compile in the LLVM JIT compiler.
-    println!("cargo:rustc-cfg=jitc_llvm");
     println!("cargo::rustc-check-cfg=cfg(jitc_llvm)");
     // Always compile in our bespoke JIT compiler.
     println!("cargo:rustc-cfg=jitc_yk");
@@ -19,7 +18,6 @@ pub fn main() {
     // FIXME: This is a temporary hack because LLVM has problems if the main thread exits before
     // compilation threads have finished.
     println!("cargo:rustc-cfg=yk_llvm_sync_hack");
-    println!("cargo::rustc-check-cfg=cfg(yk_llvm_sync_hack)");
 
     println!("cargo::rustc-check-cfg=cfg(tracer_hwt)");
     println!("cargo::rustc-check-cfg=cfg(tracer_swt)");

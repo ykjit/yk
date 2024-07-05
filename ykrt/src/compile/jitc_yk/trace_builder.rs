@@ -4,33 +4,36 @@
 
 use super::aot_ir::{self, BBlockId, BinOp, FuncIdx, Module};
 use super::jit_ir;
+use super::YkSideTraceInfo;
 use crate::compile::CompilationError;
 use crate::trace::{AOTTraceIterator, AOTTraceIteratorError, TraceAction};
-use std::{collections::HashMap, ffi::CString};
+use std::{collections::HashMap, ffi::CString, sync::Arc};
 
 /// The argument index of the trace inputs struct in the trace function.
 const TRACE_FUNC_CTRLP_ARGIDX: u16 = 0;
+const U64SIZE: usize = 8;
 
 /// A TraceBuilder frame. Keeps track of inlined calls and stores information about the last
 /// processed safepoint, call instruction and its arguments.
-struct Frame<'a> {
+#[derive(Debug, Clone)]
+pub(crate) struct Frame {
     // The call instruction of this frame.
     callinst: Option<aot_ir::InstID>,
     // Index of the function of this frame.
     funcidx: Option<FuncIdx>,
     /// Safepoint for this frame.
-    safepoint: Option<&'a aot_ir::DeoptSafepoint>,
+    safepoint: Option<&'static aot_ir::DeoptSafepoint>,
     /// JIT arguments of this frame's caller.
     args: Vec<jit_ir::Operand>,
 }
 
-impl<'a> Frame<'a> {
+impl Frame {
     fn new(
         callinst: Option<aot_ir::InstID>,
         funcidx: Option<FuncIdx>,
-        safepoint: Option<&'a aot_ir::DeoptSafepoint>,
+        safepoint: Option<&'static aot_ir::DeoptSafepoint>,
         args: Vec<jit_ir::Operand>,
-    ) -> Frame<'a> {
+    ) -> Frame {
         Frame {
             callinst,
             funcidx,
@@ -41,9 +44,9 @@ impl<'a> Frame<'a> {
 }
 
 /// Given an execution trace and AOT IR, creates a JIT IR trace.
-pub(crate) struct TraceBuilder<'a> {
+pub(crate) struct TraceBuilder {
     /// The AOT IR.
-    aot_mod: &'a Module,
+    aot_mod: &'static Module,
     /// The JIT IR this struct builds.
     jit_mod: jit_ir::Module,
     /// Maps an AOT instruction to a jit instruction via their index-based IDs.
@@ -53,7 +56,7 @@ pub(crate) struct TraceBuilder<'a> {
     // Index of the first traceinput instruction.
     first_ti_idx: usize,
     // Inlined calls.
-    frames: Vec<Frame<'a>>,
+    frames: Vec<Frame>,
     // The block at which to stop outlining.
     outline_target_blk: Option<BBlockId>,
     // Current count of recursive calls to the function in which outlining was started. Will be 0
@@ -61,13 +64,13 @@ pub(crate) struct TraceBuilder<'a> {
     recursion_count: usize,
 }
 
-impl<'a> TraceBuilder<'a> {
+impl TraceBuilder {
     /// Create a trace builder.
     ///
     /// Arguments:
     ///  - `aot_mod`: The AOT IR module that the trace flows through.
     ///  - `mtrace`: The mapped trace.
-    fn new(ctr_id: u64, aot_mod: &'a Module) -> Result<Self, CompilationError> {
+    fn new(ctr_id: u64, aot_mod: &'static Module) -> Result<Self, CompilationError> {
         Ok(Self {
             aot_mod,
             jit_mod: jit_ir::Module::new(ctr_id, aot_mod.global_decls_len())?,
@@ -96,7 +99,11 @@ impl<'a> TraceBuilder<'a> {
     }
 
     /// Create the prolog of the trace.
-    fn create_trace_header(&mut self, blk: &aot_ir::BBlock) -> Result<(), CompilationError> {
+    fn create_trace_header(
+        &mut self,
+        blk: &aot_ir::BBlock,
+        is_sidetrace: bool,
+    ) -> Result<(), CompilationError> {
         // Find trace input variables and emit `LoadTraceInput` instructions for them.
         let mut trace_inputs = None;
 
@@ -167,13 +174,17 @@ impl<'a> TraceBuilder<'a> {
                                     self.handle_type(self.aot_mod.type_(aot_field_ty))?;
                                 let load_ti_inst =
                                     jit_ir::LoadTraceInputInst::new(u32_off, input_tyidx).into();
-                                self.jit_mod.push(load_ti_inst)?;
-                                // If this take fails, we didn't see a corresponding store and the
-                                // IR is malformed.
-                                self.local_map.insert(
-                                    last_store_ptr.take().unwrap().to_inst_id(),
-                                    jit_ir::Operand::Local(self.jit_mod.last_inst_idx()),
-                                );
+                                // We don't need to insert these loads when we are side-tracing,
+                                // since side-tracing handles inputs separately.
+                                if !is_sidetrace {
+                                    self.jit_mod.push(load_ti_inst)?;
+                                    // If this take fails, we didn't see a corresponding store and the
+                                    // IR is malformed.
+                                    self.local_map.insert(
+                                        last_store_ptr.take().unwrap().to_inst_id(),
+                                        jit_ir::Operand::Local(self.jit_mod.last_inst_idx()),
+                                    );
+                                }
                                 self.first_ti_idx = iidx;
                             }
                             _ => {
@@ -189,7 +200,9 @@ impl<'a> TraceBuilder<'a> {
         }
 
         // Mark this location as the start of the trace loop.
-        self.jit_mod.push(jit_ir::Inst::TraceLoopStart)?;
+        if !is_sidetrace {
+            self.jit_mod.push(jit_ir::Inst::TraceLoopStart)?;
+        }
 
         Ok(())
     }
@@ -502,7 +515,7 @@ impl<'a> TraceBuilder<'a> {
         &mut self,
         cond: &jit_ir::Operand,
         expect: bool,
-        safepoint: &'a aot_ir::DeoptSafepoint,
+        safepoint: &'static aot_ir::DeoptSafepoint,
     ) -> Result<jit_ir::GuardInst, CompilationError> {
         // Assign this branch's stackmap to the current frame.
         self.frames.last_mut().unwrap().safepoint = Some(safepoint);
@@ -512,7 +525,18 @@ impl<'a> TraceBuilder<'a> {
         // Unwrap-safe as each frame at this point must have a safepoint associated with it.
         let mut smids = Vec::new(); // List of stackmap ids of the current call stack.
         let mut live_args = Vec::new(); // List of live JIT variables.
-        for safepoint in self.frames.iter().map(|f| (f.safepoint.unwrap())) {
+        let mut live_aot = Vec::new();
+        let mut callframes = Vec::new();
+        for frame in &self.frames {
+            let safepoint = frame.safepoint.unwrap();
+            callframes.push(Frame::new(
+                frame.callinst.clone(),
+                frame.funcidx,
+                frame.safepoint,
+                // We don't need to copy the arguments since they are only required for LoadArg
+                // instructions which we won't see at the beginning of a sidetrace.
+                Vec::new(),
+            ));
             let aot_ir::Operand::Const(cidx) = safepoint.id else {
                 panic!();
             };
@@ -527,7 +551,10 @@ impl<'a> TraceBuilder<'a> {
             // Collect live variables.
             for op in safepoint.lives.iter() {
                 let op = match op {
-                    aot_ir::Operand::LocalVariable(iid) => &self.local_map[iid],
+                    aot_ir::Operand::LocalVariable(iid) => {
+                        live_aot.push(iid.clone());
+                        &self.local_map[iid]
+                    }
                     _ => panic!(), // IR malformed.
                 };
                 match op {
@@ -543,7 +570,7 @@ impl<'a> TraceBuilder<'a> {
             }
         }
 
-        let gi = jit_ir::GuardInfo::new(smids, live_args);
+        let gi = jit_ir::GuardInfo::new(smids, live_args, live_aot, callframes);
         let gi_idx = self.jit_mod.push_guardinfo(gi)?;
 
         Ok(jit_ir::GuardInst::new(cond.clone(), expect, gi_idx))
@@ -552,7 +579,7 @@ impl<'a> TraceBuilder<'a> {
     /// Translate a conditional `Br` instruction.
     fn handle_condbr(
         &mut self,
-        safepoint: &'a aot_ir::DeoptSafepoint,
+        safepoint: &'static aot_ir::DeoptSafepoint,
         next_bb: &aot_ir::BBlockId,
         cond: &aot_ir::Operand,
         true_bb: &aot_ir::BBlockIdx,
@@ -628,13 +655,13 @@ impl<'a> TraceBuilder<'a> {
     #[allow(clippy::too_many_arguments)]
     fn handle_indirectcall(
         &mut self,
-        inst: &'a aot_ir::Inst,
+        inst: &'static aot_ir::Inst,
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
         ftyidx: &aot_ir::TyIdx,
         callop: &aot_ir::Operand,
         args: &[aot_ir::Operand],
-        nextinst: &'a aot_ir::Inst,
+        nextinst: &'static aot_ir::Inst,
     ) -> Result<(), CompilationError> {
         debug_assert!(!inst.is_debug_call(self.aot_mod));
 
@@ -678,12 +705,12 @@ impl<'a> TraceBuilder<'a> {
 
     fn handle_call(
         &mut self,
-        inst: &'a aot_ir::Inst,
+        inst: &'static aot_ir::Inst,
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
         callee: &aot_ir::FuncIdx,
         args: &[aot_ir::Operand],
-        nextinst: &'a aot_ir::Inst,
+        nextinst: &'static aot_ir::Inst,
     ) -> Result<(), CompilationError> {
         // Ignore special functions that we neither want to inline nor copy.
         if inst.is_debug_call(self.aot_mod) {
@@ -864,7 +891,7 @@ impl<'a> TraceBuilder<'a> {
         &mut self,
         bid: &aot_ir::BBlockId,
         aot_inst_idx: usize,
-        safepoint: &'a aot_ir::DeoptSafepoint,
+        safepoint: &'static aot_ir::DeoptSafepoint,
         next_bb: &aot_ir::BBlockId,
         test_val: &aot_ir::Operand,
         _default_dest: &aot_ir::BBlockIdx,
@@ -1000,8 +1027,57 @@ impl<'a> TraceBuilder<'a> {
     fn build(
         mut self,
         ta_iter: Box<dyn AOTTraceIterator>,
+        sti: Option<Arc<YkSideTraceInfo>>,
     ) -> Result<jit_ir::Module, CompilationError> {
-        let mut trace_iter = ta_iter.peekable();
+        // Collect the trace first so we can peek at the last element to find the control point
+        // block during side-tracing.
+        // FIXME: This is a workaround so we can peek at the last block in a trace in order to
+        // extract information from the control point when we are side-tracing. Ideally, we extract
+        // this information at AOT compile time and serialise it into the module (or block), so we
+        // don't have to do this. Note, we also can't use `collect` here since that won't catch the
+        // `TraceTooLong` error early enough and we run out of memory.
+        let mut collect = Vec::new();
+        for ta in ta_iter.into_iter() {
+            match ta {
+                Ok(_) => collect.push(ta),
+                Err(e) => match e {
+                    AOTTraceIteratorError::TraceTooLong => {
+                        return Err(CompilationError::LimitExceeded("Trace too long.".into()));
+                    }
+                    x => return Err(CompilationError::General(x.to_string())),
+                },
+            }
+        }
+        if let Some(sti) = sti.as_ref() {
+            // Setup the trace builder for side-tracing.
+            let lastblk = match &collect.last() {
+                Some(Ok(b)) => self.lookup_aot_block(b),
+                _ => todo!(),
+            };
+            self.create_trace_header(self.aot_mod.bblock(lastblk.as_ref().unwrap()), true)?;
+            // Create loads for the live variables that will be passed into the side-trace from the
+            // parent trace.
+            let mut off = 0;
+            for aotid in sti.aotlives().iter() {
+                let aotinst = self.aot_mod.inst(aotid);
+                // Unwrap is safe as all live variables must be definitions.
+                let aotty = aotinst.def_type(self.aot_mod).unwrap();
+                let tyidx = self.handle_type(aotty)?;
+                let load_ti_inst =
+                    jit_ir::LoadTraceInputInst::new(u32::try_from(off).unwrap(), tyidx).into();
+                self.jit_mod.push(load_ti_inst)?;
+                self.local_map.insert(
+                    aotid.clone(),
+                    jit_ir::Operand::Local(self.jit_mod.last_inst_idx()),
+                );
+                // FIXME: We currently pass all live variables into the side-trace as `u64`s.
+                off += U64SIZE;
+            }
+            self.cp_block = lastblk;
+            self.frames = sti.callframes().clone();
+        }
+
+        let mut trace_iter = collect.into_iter().peekable();
         let first_blk = match trace_iter.peek() {
             Some(Ok(b)) => b,
             Some(Err(_)) => todo!(),
@@ -1026,11 +1102,14 @@ impl<'a> TraceBuilder<'a> {
             TraceAction::Promotion => todo!(),
         };
 
-        self.cp_block = self.lookup_aot_block(&prev);
-        self.frames.last_mut().unwrap().funcidx = Some(self.cp_block.as_ref().unwrap().funcidx());
-        // This unwrap can't fail. If it does that means the tracer has given us a mappable block
-        // that doesn't exist in the AOT module.
-        self.create_trace_header(self.aot_mod.bblock(self.cp_block.as_ref().unwrap()))?;
+        if sti.is_none() {
+            self.cp_block = self.lookup_aot_block(&prev);
+            self.frames.last_mut().unwrap().funcidx =
+                Some(self.cp_block.as_ref().unwrap().funcidx());
+            // This unwrap can't fail. If it does that means the tracer has given us a mappable block
+            // that doesn't exist in the AOT module.
+            self.create_trace_header(self.aot_mod.bblock(self.cp_block.as_ref().unwrap()), false)?;
+        }
 
         // FIXME: this section of code needs to be refactored.
         let mut last_blk_is_return = false;
@@ -1136,6 +1215,26 @@ impl<'a> TraceBuilder<'a> {
                 },
             }
         }
+
+        // If this is a side trace insert a guard that always fails so we can safely return to the
+        // beginning of the control point where this trace ended.
+        if sti.is_some() {
+            let blk = self.aot_mod.bblock(self.cp_block.as_ref().unwrap());
+            let cpcall = blk.insts.iter().rev().nth(1).unwrap();
+            debug_assert!(cpcall
+                .control_point_call_trace_inputs(self.aot_mod)
+                .is_some());
+
+            // Make a 0 constant.
+            let jit_tyidx = self.jit_mod.insert_ty(jit_ir::Ty::Integer(1))?;
+            let jitconst = jit_ir::Const::Int(jit_tyidx, 0);
+            let constop = jit_ir::Operand::Const(self.jit_mod.insert_const(jitconst)?);
+
+            // Create a guard that will always fail.
+            let guard = self.create_guard(&constop, true, cpcall.safepoint().unwrap())?;
+            self.jit_mod.push(guard.into())?;
+        }
+
         Ok(self.jit_mod)
     }
 }
@@ -1143,8 +1242,9 @@ impl<'a> TraceBuilder<'a> {
 /// Create JIT IR from the (`aot_mod`, `ta_iter`) tuple.
 pub(super) fn build(
     ctr_id: u64,
-    aot_mod: &Module,
+    aot_mod: &'static Module,
     ta_iter: Box<dyn AOTTraceIterator>,
+    sti: Option<Arc<YkSideTraceInfo>>,
 ) -> Result<jit_ir::Module, CompilationError> {
-    TraceBuilder::new(ctr_id, aot_mod)?.build(ta_iter)
+    TraceBuilder::new(ctr_id, aot_mod)?.build(ta_iter, sti)
 }

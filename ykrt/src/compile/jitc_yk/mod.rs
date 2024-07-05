@@ -2,7 +2,7 @@
 
 use super::CompilationError;
 use crate::{
-    compile::{jitc_yk::codegen::CodeGen, CompiledTrace, Compiler},
+    compile::{jitc_yk::codegen::CodeGen, jitc_yk::trace_builder::Frame, CompiledTrace, Compiler},
     location::HotLocation,
     log::{log_ir, should_log_ir, IRPhase},
     mt::{SideTraceInfo, MT},
@@ -39,6 +39,30 @@ static AOT_MOD: LazyLock<aot_ir::Module> = LazyLock::new(|| {
     aot_ir::deserialise_module(ir_slice).unwrap()
 });
 
+struct YkSideTraceInfo {
+    callframes: Vec<Frame>,
+    aotlives: Vec<aot_ir::InstID>,
+}
+
+impl SideTraceInfo for YkSideTraceInfo {
+    fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static> {
+        self
+    }
+}
+
+impl YkSideTraceInfo {
+    /// Return the live call frames which are requiredd to setup the trace builder during
+    /// side-tracing.
+    fn callframes(&self) -> &Vec<Frame> {
+        &self.callframes
+    }
+
+    /// Return the live AOT variables for this guard. Used to write live values to during deopt.
+    fn aotlives(&self) -> &Vec<aot_ir::InstID> {
+        &self.aotlives
+    }
+}
+
 pub(crate) struct JITCYk {
     codegen: Arc<dyn CodeGen>,
 }
@@ -56,12 +80,9 @@ impl Compiler for JITCYk {
         &self,
         mt: Arc<MT>,
         aottrace_iter: (Box<dyn AOTTraceIterator>, Box<[usize]>),
-        sti: Option<SideTraceInfo>,
-        _hl: Arc<Mutex<HotLocation>>,
+        sti: Option<Arc<dyn SideTraceInfo>>,
+        hl: Arc<Mutex<HotLocation>>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
-        if sti.is_some() {
-            todo!();
-        }
         // If either `unwrap` fails, there is no chance of the system working correctly.
         let aot_mod = &*AOT_MOD;
 
@@ -72,8 +93,10 @@ impl Compiler for JITCYk {
             ));
         }
 
+        let sti = sti.map(|s| s.as_any().downcast::<YkSideTraceInfo>().unwrap());
+
         let mut jit_mod =
-            trace_builder::build(mt.next_compiled_trace_id(), aot_mod, aottrace_iter.0)?;
+            trace_builder::build(mt.next_compiled_trace_id(), aot_mod, aottrace_iter.0, sti)?;
 
         if should_log_ir(IRPhase::PreOpt) {
             log_ir(&format!(
@@ -90,7 +113,7 @@ impl Compiler for JITCYk {
             }
         }
 
-        let ct = self.codegen.codegen(jit_mod)?;
+        let ct = self.codegen.codegen(jit_mod, mt, hl)?;
 
         #[cfg(any(debug_assertions, test))]
         if should_log_ir(IRPhase::Asm) {
