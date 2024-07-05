@@ -90,23 +90,23 @@ const STACK_DIRECTION: StackDirection = StackDirection::GrowsDown;
 pub extern "C" fn __yk_break() {}
 
 /// A simple front end for the X86_64 code generator.
-pub(crate) struct X64CodeGenFrontEnd;
+pub(crate) struct X86_64CodeGen;
 
-impl CodeGen for X64CodeGenFrontEnd {
+impl CodeGen for X86_64CodeGen {
     fn codegen(&self, m: Module) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         let ra = Box::new(SpillAllocator::new(StackDirection::GrowsDown));
-        X64CodeGen::new(&m, ra)?.codegen()
+        Assemble::new(&m, ra)?.codegen()
     }
 }
 
-impl X64CodeGenFrontEnd {
+impl X86_64CodeGen {
     pub(crate) fn new() -> Result<Arc<Self>, Box<dyn Error>> {
         Ok(Arc::new(Self))
     }
 }
 
 /// The X86_64 code generator.
-struct X64CodeGen<'a> {
+struct Assemble<'a> {
     m: &'a jit_ir::Module,
     asm: dynasmrt::x64::Assembler,
     /// Abstract stack pointer, as a relative offset from `RBP`. The higher this number, the larger
@@ -126,11 +126,11 @@ struct X64CodeGen<'a> {
     comments: Cell<IndexMap<usize, Vec<String>>>,
 }
 
-impl<'a> X64CodeGen<'a> {
+impl<'a> Assemble<'a> {
     fn new(
         m: &'a jit_ir::Module,
         ra: Box<dyn RegisterAllocator>,
-    ) -> Result<Box<X64CodeGen<'a>>, CompilationError> {
+    ) -> Result<Box<Assemble<'a>>, CompilationError> {
         #[cfg(debug_assertions)]
         m.assert_well_formed();
         let asm = dynasmrt::x64::Assembler::new()
@@ -1429,13 +1429,13 @@ mod tests {
     }
 
     mod with_spillalloc {
-        use super::{super::X64CodeGen, *};
+        use super::{super::Assemble, *};
         use crate::compile::jitc_yk::codegen::reg_alloc::SpillAllocator;
 
         fn test_with_spillalloc(mod_str: &str, patt_lines: &str) {
             let m = Module::from_str(mod_str);
             match_asm(
-                X64CodeGen::new(&m, Box::new(SpillAllocator::new(STACK_DIRECTION)))
+                Assemble::new(&m, Box::new(SpillAllocator::new(STACK_DIRECTION)))
                     .unwrap()
                     .codegen()
                     .unwrap()
