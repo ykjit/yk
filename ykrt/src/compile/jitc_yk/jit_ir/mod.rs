@@ -1053,10 +1053,10 @@ impl fmt::Display for DisplayableOperand<'_> {
 /// need to determine what notion of equality you wish to use on a given const.
 #[derive(Clone, Debug)]
 pub(crate) enum Const {
+    Float(TyIdx, f64),
     /// A constant integer at most 64 bits wide. This can be treated a signed or unsigned integer
     /// depending on the operations that use this constant (the [Ty::Integer] type itself has no
     /// concept of signedness).
-    Float(TyIdx, f64),
     Int(TyIdx, u64),
     Ptr(usize),
 }
