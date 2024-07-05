@@ -110,8 +110,7 @@ impl CodeGen for X86_64CodeGen {
         mt: Arc<MT>,
         hl: Arc<Mutex<HotLocation>>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
-        let ra = Box::new(SpillAllocator::new(StackDirection::GrowsDown));
-        Assemble::new(&m, ra)?.codegen(mt, hl)
+        Assemble::new(&m)?.codegen(mt, hl)
     }
 }
 
@@ -143,12 +142,11 @@ struct Assemble<'a> {
 }
 
 impl<'a> Assemble<'a> {
-    fn new(
-        m: &'a jit_ir::Module,
-        ra: Box<dyn RegisterAllocator>,
-    ) -> Result<Box<Assemble<'a>>, CompilationError> {
+    fn new(m: &'a jit_ir::Module) -> Result<Box<Assemble<'a>>, CompilationError> {
         #[cfg(debug_assertions)]
         m.assert_well_formed();
+
+        let ra = Box::new(SpillAllocator::new(StackDirection::GrowsDown));
         let asm = dynasmrt::x64::Assembler::new()
             .map_err(|e| CompilationError::ResourceExhausted(Box::new(e)))?;
         Ok(Box::new(Self {
@@ -1448,12 +1446,9 @@ impl<'a> AsmPrinter<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{X64CompiledTrace, STACK_DIRECTION};
+    use super::X64CompiledTrace;
     use crate::compile::{
-        jitc_yk::{
-            codegen::reg_alloc::RegisterAllocator,
-            jit_ir::{self, Module},
-        },
+        jitc_yk::jit_ir::{self, Module},
         CompiledTrace,
     };
     use fm::FMBuilder;
@@ -1490,7 +1485,6 @@ mod tests {
 
     mod with_spillalloc {
         use super::{super::Assemble, *};
-        use crate::compile::jitc_yk::codegen::reg_alloc::SpillAllocator;
         use crate::location::{HotLocation, HotLocationKind};
         use crate::mt::MT;
         use parking_lot::Mutex;
@@ -1503,7 +1497,7 @@ mod tests {
                 trace_failure: 0,
             };
             match_asm(
-                Assemble::new(&m, Box::new(SpillAllocator::new(STACK_DIRECTION)))
+                Assemble::new(&m)
                     .unwrap()
                     .codegen(mt, Arc::new(Mutex::new(hl)))
                     .unwrap()
