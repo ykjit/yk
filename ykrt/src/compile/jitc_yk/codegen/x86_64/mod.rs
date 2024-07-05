@@ -14,7 +14,7 @@ use super::{
         CompilationError,
     },
     abs_stack::AbstractStack,
-    reg_alloc::{spill_alloc::SpillAllocator, LocalAlloc, RegisterAllocator, StackDirection},
+    reg_alloc::{spill_alloc::SpillAllocator, RegisterAllocator, StackDirection, VarLocation},
     CodeGen,
 };
 #[cfg(any(debug_assertions, test))]
@@ -90,23 +90,23 @@ const STACK_DIRECTION: StackDirection = StackDirection::GrowsDown;
 pub extern "C" fn __yk_break() {}
 
 /// A simple front end for the X86_64 code generator.
-pub(crate) struct X64CodeGenFrontEnd;
+pub(crate) struct X86_64CodeGen;
 
-impl CodeGen for X64CodeGenFrontEnd {
+impl CodeGen for X86_64CodeGen {
     fn codegen(&self, m: Module) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         let ra = Box::new(SpillAllocator::new(StackDirection::GrowsDown));
-        X64CodeGen::new(&m, ra)?.codegen()
+        Assemble::new(&m, ra)?.codegen()
     }
 }
 
-impl X64CodeGenFrontEnd {
+impl X86_64CodeGen {
     pub(crate) fn new() -> Result<Arc<Self>, Box<dyn Error>> {
         Ok(Arc::new(Self))
     }
 }
 
 /// The X86_64 code generator.
-struct X64CodeGen<'a> {
+struct Assemble<'a> {
     m: &'a jit_ir::Module,
     asm: dynasmrt::x64::Assembler,
     /// Abstract stack pointer, as a relative offset from `RBP`. The higher this number, the larger
@@ -126,11 +126,11 @@ struct X64CodeGen<'a> {
     comments: Cell<IndexMap<usize, Vec<String>>>,
 }
 
-impl<'a> X64CodeGen<'a> {
+impl<'a> Assemble<'a> {
     fn new(
         m: &'a jit_ir::Module,
         ra: Box<dyn RegisterAllocator>,
-    ) -> Result<Box<X64CodeGen<'a>>, CompilationError> {
+    ) -> Result<Box<Assemble<'a>>, CompilationError> {
         #[cfg(debug_assertions)]
         m.assert_well_formed();
         let asm = dynasmrt::x64::Assembler::new()
@@ -1048,7 +1048,7 @@ impl<'a> X64CodeGen<'a> {
         debug_assert_eq!(cond.byte_size(self.m), 1);
 
         // Convert the guard info into deopt info and store it on the heap.
-        let mut locs: Vec<LocalAlloc> = Vec::new();
+        let mut locs: Vec<VarLocation> = Vec::new();
         let gi = inst.guard_info(self.m);
         for lidx in gi.lives() {
             match self.m.inst_all(*lidx) {
@@ -1061,13 +1061,13 @@ impl<'a> X64CodeGen<'a> {
                             let Ty::Integer(bits) = self.m.type_(*tyidx) else {
                                 panic!()
                             };
-                            locs.push(LocalAlloc::ConstInt { bits: *bits, v: *c })
+                            locs.push(VarLocation::ConstInt { bits: *bits, v: *c })
                         }
                         _ => todo!(),
                     };
                 }
                 _ => {
-                    locs.push(*self.ra.allocation(*lidx));
+                    locs.push(*self.ra.location(*lidx));
                 }
             }
         }
@@ -1122,9 +1122,9 @@ impl<'a> X64CodeGen<'a> {
     /// Load a local variable into the specified general purpose register.
     fn load_local(&mut self, reg: Rq, local: InstIdx) {
         let inst = self.m.inst_no_proxies(local);
-        let alloc = self.ra.allocation(local);
+        let alloc = self.ra.location(local);
         match alloc {
-            LocalAlloc::Stack { frame_off, size: _ } => {
+            VarLocation::Stack { frame_off, size: _ } => {
                 match i32::try_from(*frame_off) {
                     Ok(foff) => {
                         let size = inst.def_byte_size(self.m);
@@ -1140,13 +1140,13 @@ impl<'a> X64CodeGen<'a> {
                     Err(_) => todo!(),
                 }
             }
-            LocalAlloc::Register => todo!(),
-            LocalAlloc::ConstInt { bits, v } => {
+            VarLocation::Register => todo!(),
+            VarLocation::ConstInt { bits, v } => {
                 // FIXME: Adjust for different constant sizes?
                 assert_eq!(*bits, 64);
                 dynasm!(self.asm; mov Rq(reg.code()), QWORD *v as i64);
             }
-            LocalAlloc::ConstFloat(_) => todo!(),
+            VarLocation::ConstFloat(_) => todo!(),
         }
     }
 
@@ -1177,10 +1177,10 @@ impl<'a> X64CodeGen<'a> {
     /// Load a local variable into the specified floating point register.
     fn load_local_float(&mut self, reg: Rx, local: InstIdx) {
         let inst = self.m.inst_no_proxies(local);
-        let alloc = self.ra.allocation(local);
+        let alloc = self.ra.location(local);
         let size = inst.def_byte_size(self.m);
         match alloc {
-            LocalAlloc::Stack { frame_off, size: _ } => match i32::try_from(*frame_off) {
+            VarLocation::Stack { frame_off, size: _ } => match i32::try_from(*frame_off) {
                 Ok(foff) => match size {
                     4 => dynasm!(self.asm; movss Rx(reg.code()), [rbp - foff]),
                     8 => dynasm!(self.asm; movsd Rx(reg.code()), [rbp - foff]),
@@ -1188,15 +1188,15 @@ impl<'a> X64CodeGen<'a> {
                 },
                 Err(_) => todo!(),
             },
-            LocalAlloc::Register => todo!(),
-            LocalAlloc::ConstInt { .. } => todo!(),
-            LocalAlloc::ConstFloat(fv) => imm_float_into_reg(*fv, reg, size, &mut self.asm),
+            VarLocation::Register => todo!(),
+            VarLocation::ConstInt { .. } => todo!(),
+            VarLocation::ConstFloat(fv) => imm_float_into_reg(*fv, reg, size, &mut self.asm),
         }
     }
 
-    fn store_local(&mut self, l: &LocalAlloc, reg: Rq, size: usize) {
+    fn store_local(&mut self, l: &VarLocation, reg: Rq, size: usize) {
         match l {
-            LocalAlloc::Stack { frame_off, size: _ } => match i32::try_from(*frame_off) {
+            VarLocation::Stack { frame_off, size: _ } => match i32::try_from(*frame_off) {
                 Ok(off) => match size {
                     8 => dynasm!(self.asm ; mov [rbp - off], Rq(reg.code())),
                     4 => dynasm!(self.asm ; mov [rbp - off], Rd(reg.code())),
@@ -1206,9 +1206,9 @@ impl<'a> X64CodeGen<'a> {
                 },
                 Err(_) => todo!("{}", size),
             },
-            LocalAlloc::Register => todo!(),
-            LocalAlloc::ConstInt { .. } => todo!(),
-            LocalAlloc::ConstFloat(_) => todo!(),
+            VarLocation::Register => todo!(),
+            VarLocation::ConstInt { .. } => todo!(),
+            VarLocation::ConstFloat(_) => todo!(),
         }
     }
 
@@ -1219,9 +1219,9 @@ impl<'a> X64CodeGen<'a> {
         self.store_local(&l, reg, size);
     }
 
-    fn store_local_float(&mut self, l: &LocalAlloc, reg: Rx, size: usize) {
+    fn store_local_float(&mut self, l: &VarLocation, reg: Rx, size: usize) {
         match l {
-            LocalAlloc::Stack { frame_off, size: _ } => match i32::try_from(*frame_off) {
+            VarLocation::Stack { frame_off, size: _ } => match i32::try_from(*frame_off) {
                 Ok(off) => match size {
                     8 => dynasm!(self.asm ; movsd [rbp - off], Rx(reg.code())),
                     4 => dynasm!(self.asm ; movss [rbp - off], Rx(reg.code())),
@@ -1229,9 +1229,9 @@ impl<'a> X64CodeGen<'a> {
                 },
                 Err(_) => todo!("{}", size),
             },
-            LocalAlloc::Register => todo!(),
-            LocalAlloc::ConstInt { .. } => todo!(),
-            LocalAlloc::ConstFloat(_) => todo!(),
+            VarLocation::Register => todo!(),
+            VarLocation::ConstInt { .. } => todo!(),
+            VarLocation::ConstFloat(_) => todo!(),
         }
     }
 
@@ -1291,7 +1291,7 @@ struct DeoptInfo {
     /// Vector of AOT stackmap IDs.
     frames: Vec<u64>,
     // Vector of live JIT variable locations.
-    lives: Vec<LocalAlloc>,
+    lives: Vec<VarLocation>,
 }
 
 #[derive(Debug)]
@@ -1429,13 +1429,13 @@ mod tests {
     }
 
     mod with_spillalloc {
-        use super::{super::X64CodeGen, *};
+        use super::{super::Assemble, *};
         use crate::compile::jitc_yk::codegen::reg_alloc::SpillAllocator;
 
         fn test_with_spillalloc(mod_str: &str, patt_lines: &str) {
             let m = Module::from_str(mod_str);
             match_asm(
-                X64CodeGen::new(&m, Box::new(SpillAllocator::new(STACK_DIRECTION)))
+                Assemble::new(&m, Box::new(SpillAllocator::new(STACK_DIRECTION)))
                     .unwrap()
                     .codegen()
                     .unwrap()

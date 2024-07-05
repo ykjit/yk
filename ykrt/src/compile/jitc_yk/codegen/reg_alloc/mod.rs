@@ -10,37 +10,26 @@ pub(crate) mod spill_alloc;
 #[cfg(test)]
 pub(crate) use spill_alloc::SpillAllocator;
 
-/// Describes a local variable allocation.
+/// Where is an SSA variable stored?
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum LocalAlloc {
-    /// The local variable is on the stack.
+pub(crate) enum VarLocation {
+    /// The SSA variable is on the stack.
     Stack {
-        /// The offset (from the base pointer) of the allocation.
-        ///
-        /// This is independent of which direction the stack grows. In other words, for
-        /// architectures where the stack grows downwards, you'd subtract this from the base
-        /// pointer to find the address of the allocation.
-        ///
-        /// OPT: consider addressing relative to the stack pointer, thus freeing up the base
-        /// pointer for general purpose use.
+        /// The offset from the base of the trace's function frame.
         frame_off: usize,
         /// Size in bytes of the allocation.
         size: usize,
     },
-    /// The local variable is in a register.
-    ///
-    /// FIXME: unimplemented.
+    /// The SSA variable is in a register.
     Register,
     /// A constant integer `bits` wide (see [jit_ir::Const::ConstInt] for the constraints on the
     /// bit width) and with value `v`.
-    ConstInt {
-        bits: u32,
-        v: u64,
-    },
+    ConstInt { bits: u32, v: u64 },
+    /// A constant float.
     ConstFloat(f64),
 }
 
-impl LocalAlloc {
+impl VarLocation {
     /// Create a [Self::Stack] allocation.
     pub(crate) fn new_stack(frame_off: usize, size: usize) -> Self {
         Self::Stack { frame_off, size }
@@ -69,9 +58,12 @@ pub(crate) trait RegisterAllocator {
         local: jit_ir::InstIdx,
         size: usize,
         stack: &mut AbstractStack,
-    ) -> LocalAlloc;
+    ) -> VarLocation;
 
-    /// Return the allocation for the value computed by the instruction at the specified
-    /// instruction index.
-    fn allocation(&self, idx: jit_ir::InstIdx) -> &LocalAlloc;
+    /// Returns the location for the SSA variable defined by `iidx`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if there is no such SSA variable.
+    fn location(&self, iidx: jit_ir::InstIdx) -> &VarLocation;
 }

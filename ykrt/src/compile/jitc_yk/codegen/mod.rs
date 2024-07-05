@@ -23,7 +23,7 @@ pub(crate) trait CodeGen: Send + Sync {
 
 pub(crate) fn default_codegen() -> Result<Arc<dyn CodeGen>, Box<dyn Error>> {
     #[cfg(target_arch = "x86_64")]
-    return Ok(x86_64::X64CodeGenFrontEnd::new()?);
+    return Ok(x86_64::X86_64CodeGen::new()?);
 
     #[cfg(not(target_arch = "x86_64"))]
     return Err("No code generator available for this platform".into());

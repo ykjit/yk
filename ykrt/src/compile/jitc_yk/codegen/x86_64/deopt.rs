@@ -1,5 +1,5 @@
 use crate::{
-    aotsmp::AOT_STACKMAPS, compile::jitc_yk::codegen::reg_alloc::LocalAlloc, log::log_jit_state,
+    aotsmp::AOT_STACKMAPS, compile::jitc_yk::codegen::reg_alloc::VarLocation, log::log_jit_state,
     mt::MTThread,
 };
 use libc::c_void;
@@ -103,7 +103,7 @@ pub(crate) extern "C" fn __yk_deopt(
         for aotvar in rec.live_vars.iter() {
             // Read live JIT values from the trace's stack frame.
             let jitval = match info.lives[varidx] {
-                LocalAlloc::Stack { frame_off, size } => {
+                VarLocation::Stack { frame_off, size } => {
                     let p = unsafe { jitrbp.byte_sub(frame_off) };
                     match size {
                         1 => unsafe { u64::from(std::ptr::read::<u8>(p as *const u8)) },
@@ -113,9 +113,9 @@ pub(crate) extern "C" fn __yk_deopt(
                         _ => todo!(),
                     }
                 }
-                LocalAlloc::Register => todo!(),
-                LocalAlloc::ConstInt { bits: _, v } => v,
-                LocalAlloc::ConstFloat(f) => f.to_bits(),
+                VarLocation::Register => todo!(),
+                VarLocation::ConstInt { bits: _, v } => v,
+                VarLocation::ConstFloat(f) => f.to_bits(),
             };
             varidx += 1;
 
