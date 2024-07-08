@@ -345,6 +345,10 @@ impl Module {
         InstIdx::new(self.insts.len().checked_sub(1).unwrap()).unwrap()
     }
 
+    pub(crate) fn insts_len(&self) -> usize {
+        self.insts.len()
+    }
+
     /// Push a slice of arguments into the args pool.
     ///
     /// # Panics
@@ -1355,7 +1359,7 @@ impl Inst {
     /// Note that this function does not perform deproxification, and thus must only be used when
     /// you know that you want to know which local an instruction's operands directly refers to
     /// (e.g. for dead code elimination).
-    fn map_packed_operand_locals<F>(&self, m: &Module, f: &mut F)
+    pub(crate) fn map_packed_operand_locals<F>(&self, m: &Module, f: &mut F)
     where
         F: FnMut(InstIdx),
     {
@@ -1416,7 +1420,15 @@ impl Inst {
             Inst::SExt(SExtInst { val, .. }) => val.map_iidx(f),
             Inst::ZeroExtend(ZeroExtendInst { val, .. }) => val.map_iidx(f),
             Inst::Trunc(TruncInst { val, .. }) => val.map_iidx(f),
-            Inst::Select(_) => todo!(),
+            Inst::Select(SelectInst {
+                cond,
+                trueval,
+                falseval,
+            }) => {
+                cond.map_iidx(f);
+                trueval.map_iidx(f);
+                falseval.map_iidx(f);
+            }
             Inst::SIToFP(SIToFPInst { val, .. }) => val.map_iidx(f),
             Inst::FPExt(FPExtInst { val, .. }) => val.map_iidx(f),
             Inst::FCmp(FCmpInst { lhs, pred: _, rhs }) => {

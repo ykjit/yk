@@ -5,7 +5,7 @@
 //   env-var: YKD_LOG_JITSTATE=-
 //   stderr:
 //     jitstate: start-tracing
-//     foo
+//     4
 //     jitstate: stop-tracing
 //     --- Begin aot ---
 //     ...
@@ -15,10 +15,10 @@
 //     --- Begin jit-pre-opt ---
 //     ...
 //     --- End jit-pre-opt ---
-//     foo
+//     3
 //     jitstate: enter-jit-code
-//     foo
-//     foo
+//     2
+//     1
 //     jitstate: deoptimise
 //     exit
 
@@ -43,8 +43,7 @@ int main(int argc, char **argv) {
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    fputs("foo\n", stderr);
-    res += 2;
+    fprintf(stderr, "%d\n", i);
     i--;
   }
   fprintf(stderr, "exit\n");

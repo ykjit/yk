@@ -3,7 +3,7 @@
 // FIXME: eventually delete.
 #![allow(dead_code)]
 
-use super::{jit_ir, CompilationError};
+use super::CompilationError;
 use crate::{compile::jitc_yk::jit_ir::Module, compile::CompiledTrace, location::HotLocation, MT};
 use parking_lot::Mutex;
 use std::{error::Error, sync::Arc};

@@ -1,0 +1,1099 @@
+//! A simple linear scan register allocator.
+//!
+//! The "main" interface from the code generator to the register allocator is `get_gp_regs` (and/or
+//! `get_fp_regs`) and [RegConstraint]. For example:
+//!
+//! ```rust,ignore
+//! match binop {
+//!   BinOp::Add => {
+//!     let size = lhs.byte_size(self.m);
+//!     let [lhs_reg, rhs_reg] = self.ra.get_gp_regs(
+//!       &mut self.asm,
+//!       iidx,
+//!       [RegConstraint::InputOutput(lhs), RegConstraint::Input(rhs)],
+//!     );
+//!     match size {
+//!       1 => dynasm!(self.asm; add Rb(lhs_reg.code()), Rb(rhs_reg.code())),
+//!       ...
+//!     }
+//! ```
+//!
+//! This says "return two x64 registers: `lhs_reg` will take a value as input and later contain an
+//! output value (clobbering the input value, which will be spilled if necessary); `rhs_reg` will
+//! take a value as input (and mustn't clobber it)". Those registers can then be used with dynasmrt
+//! as one expects.
+//!
+//! The allocator keeps track of which registers have which trace instruction's values in and of
+//! where it has spilled an instruction's value: it guarantees to spill an instruction to at most
+//! one place on the stack.
+
+use crate::compile::jitc_yk::{
+    codegen::abs_stack::AbstractStack,
+    jit_ir::{Const, ConstIdx, FloatTy, InstIdx, Module, Operand, Ty},
+};
+use dynasmrt::{
+    dynasm,
+    x64::{
+        Assembler, {Rq, Rx},
+    },
+    DynasmApi, Register,
+};
+use std::marker::PhantomData;
+
+/// The complete set of general purpose x64 registers, in the order that dynasmrt defines them.
+/// Note that large portions of the code rely on these registers mapping to the integers 0..15
+/// (both inc.) in order.
+pub(crate) static GP_REGS: [Rq; 16] = [
+    Rq::RAX,
+    Rq::RCX,
+    Rq::RDX,
+    Rq::RBX,
+    Rq::RSP,
+    Rq::RBP,
+    Rq::RSI,
+    Rq::RDI,
+    Rq::R8,
+    Rq::R9,
+    Rq::R10,
+    Rq::R11,
+    Rq::R12,
+    Rq::R13,
+    Rq::R14,
+    Rq::R15,
+];
+
+/// How many general purpose registers are there? Only needed because `GP_REGS.len()` doesn't const
+/// eval yet.
+const GP_REGS_LEN: usize = 16;
+
+/// FIXME: A temporary scratch register we guarantee not to use elsewhere. Every use of this is a
+/// hack.
+static WR0: Rq = Rq::R12;
+
+/// The complete set of floating point x64 registers, in the order that dynasmrt defines them.
+/// Note that large portions of the code rely on these registers mapping to the integers 0..15
+/// (both inc.) in order.
+static FP_REGS: [Rx; 16] = [
+    Rx::XMM0,
+    Rx::XMM1,
+    Rx::XMM2,
+    Rx::XMM3,
+    Rx::XMM4,
+    Rx::XMM5,
+    Rx::XMM6,
+    Rx::XMM7,
+    Rx::XMM8,
+    Rx::XMM9,
+    Rx::XMM10,
+    Rx::XMM11,
+    Rx::XMM12,
+    Rx::XMM13,
+    Rx::XMM14,
+    Rx::XMM15,
+];
+
+/// How many floating point registers are there? Only needed because `FP_REGS.len()` doesn't const
+/// eval yet.
+const FP_REGS_LEN: usize = 16;
+
+/// The set of general registers which we will never assign value to. RSP & RBP are reserved by
+/// SysV.
+///
+/// FIXME: R12 is a temporary hack because it's the "WR0" hack.
+static RESERVED_GP_REGS: [Rq; 3] = [Rq::RSP, Rq::RBP, Rq::R12];
+
+/// The set of floating point registers which we will never assign value to.
+static RESERVED_FP_REGS: [Rx; 0] = [];
+
+/// A linear scan register allocator.
+pub(crate) struct LSRegAlloc<'a> {
+    m: &'a Module,
+    /// Which general purpose registers are active?
+    gp_regset: RegSet<Rq>,
+    /// In what state are the general purpose registers?
+    gp_reg_states: [RegState; GP_REGS_LEN],
+    /// Which floating point registers are active?
+    fp_regset: RegSet<Rx>,
+    /// In what state are the floating point registers?
+    fp_reg_states: [RegState; FP_REGS_LEN],
+    /// Record the [InstIdx] of the last instruction that the value produced by an instruction is
+    /// used. By definition this must either be unused (if an instruction does not produce a value)
+    /// or `>=` the offset in this vector.
+    inst_vals_alive_until: Vec<InstIdx>,
+    /// Where on the stack is an instruction's value spilled? Set to `usize::MAX` if that offset is
+    /// currently unknown.
+    spilled_insts: Vec<usize>,
+    /// The abstract stack: shared between general purpose and floating point registers.
+    stack: AbstractStack,
+}
+
+impl<'a> LSRegAlloc<'a> {
+    pub(crate) fn new(m: &'a Module, inst_vals_alive_until: Vec<InstIdx>) -> Self {
+        #[cfg(debug_assertions)]
+        {
+            // We rely on the registers in GP_REGS being numbered 0..15 (inc.) for correctness.
+            for (i, reg) in GP_REGS.iter().enumerate() {
+                assert_eq!(reg.code(), u8::try_from(i).unwrap());
+            }
+
+            // We rely on the registers in FP_REGS being numbered 0..15 (inc.) for correctness.
+            for (i, reg) in FP_REGS.iter().enumerate() {
+                assert_eq!(reg.code(), u8::try_from(i).unwrap());
+            }
+        }
+
+        let mut gp_reg_states = [RegState::Empty; GP_REGS_LEN];
+        for reg in RESERVED_GP_REGS {
+            gp_reg_states[usize::from(reg.code())] = RegState::Reserved;
+        }
+
+        let mut fp_reg_states = [RegState::Empty; FP_REGS_LEN];
+        for reg in RESERVED_FP_REGS {
+            fp_reg_states[usize::from(reg.code())] = RegState::Reserved;
+        }
+
+        LSRegAlloc {
+            m,
+            gp_regset: RegSet::with_gp_reserved(),
+            gp_reg_states,
+            fp_regset: RegSet::with_fp_reserved(),
+            fp_reg_states,
+            inst_vals_alive_until,
+            spilled_insts: vec![usize::MAX; m.insts_len()],
+            stack: Default::default(),
+        }
+    }
+
+    /// Before generating code for the instruction at `iidx`, see which registers are no longer
+    /// needed and mark them as [RegState::Empty]. Calling this allows the register allocator to
+    /// use the set of available registers more efficiently.
+    pub(crate) fn expire_regs(&mut self, iidx: InstIdx) {
+        for reg in GP_REGS {
+            match self.gp_reg_states[usize::from(reg.code())] {
+                RegState::Reserved => {
+                    debug_assert!(self.gp_regset.is_set(reg));
+                }
+                RegState::Empty => {
+                    debug_assert!(!self.gp_regset.is_set(reg));
+                }
+                RegState::FromConst(_) => {
+                    debug_assert!(self.gp_regset.is_set(reg));
+                    // FIXME: Don't immediately expire constants
+                    self.gp_regset.unset(reg);
+                    self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
+                }
+                RegState::FromInst(reg_iidx) => {
+                    debug_assert!(self.gp_regset.is_set(reg));
+                    if !self.is_inst_var_still_used_at(iidx, reg_iidx) {
+                        self.gp_regset.unset(reg);
+                        *self.gp_reg_states.get_mut(usize::from(reg.code())).unwrap() =
+                            RegState::Empty;
+                    }
+                }
+            }
+        }
+
+        for reg in FP_REGS {
+            match self.fp_reg_states[usize::from(reg.code())] {
+                RegState::Reserved => {
+                    debug_assert!(self.fp_regset.is_set(reg));
+                }
+                RegState::Empty => {
+                    debug_assert!(!self.fp_regset.is_set(reg));
+                }
+                RegState::FromConst(_) => {
+                    debug_assert!(self.fp_regset.is_set(reg));
+                    // FIXME: Don't immediately expire constants
+                    self.fp_regset.unset(reg);
+                    self.fp_reg_states[usize::from(reg.code())] = RegState::Empty;
+                }
+                RegState::FromInst(reg_iidx) => {
+                    debug_assert!(self.fp_regset.is_set(reg));
+                    if !self.is_inst_var_still_used_at(iidx, reg_iidx) {
+                        self.fp_regset.unset(reg);
+                        *self.fp_reg_states.get_mut(usize::from(reg.code())).unwrap() =
+                            RegState::Empty;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Align the stack to `align` bytes and return the size of the stack after alignment.
+    pub(crate) fn align_stack(&mut self, align: usize) -> usize {
+        self.stack.align(align);
+        self.stack.size()
+    }
+
+    // Is the value produced by instruction `query_iidx` used after (but not including!)
+    // instruction `cur_idx`?
+    fn is_inst_var_still_used_after(&self, cur_iidx: InstIdx, query_iidx: InstIdx) -> bool {
+        usize::from(cur_iidx) < usize::from(self.inst_vals_alive_until[usize::from(query_iidx)])
+    }
+
+    /// Is the value produced by instruction `query_iidx` used at or after instruction `cur_idx`?
+    fn is_inst_var_still_used_at(&self, cur_iidx: InstIdx, query_iidx: InstIdx) -> bool {
+        usize::from(cur_iidx) <= usize::from(self.inst_vals_alive_until[usize::from(query_iidx)])
+    }
+}
+
+/// The parts of the register allocator needed for general purpose registers.
+impl<'a> LSRegAlloc<'a> {
+    /// Forcibly assign the machine register `reg`, which must be in the [RegState::Empty] state,
+    /// to the value produced by instruction `iidx`.
+    pub(crate) fn assign_gp_reg_to_inst(&mut self, reg: Rq, iidx: InstIdx) {
+        debug_assert!(!self.gp_regset.is_set(reg));
+        self.gp_regset.set(reg);
+        self.gp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx);
+    }
+
+    /// Allocate registers for the instruction at position `iidx`.
+    pub(crate) fn get_gp_regs<const N: usize>(
+        &mut self,
+        asm: &mut Assembler,
+        iidx: InstIdx,
+        constraints: [RegConstraint<Rq>; N],
+    ) -> [Rq; N] {
+        self.get_gp_regs_avoiding(asm, iidx, constraints, RegSet::with_gp_reserved())
+    }
+
+    /// Allocate registers for the instruction at position `iidx`. Registers which should not be
+    /// allocated/touched in any way are specified in `avoid`: note that these registers are not
+    /// considered clobbered so will not be spilled.
+    pub(crate) fn get_gp_regs_avoiding<const N: usize>(
+        &mut self,
+        asm: &mut Assembler,
+        iidx: InstIdx,
+        constraints: [RegConstraint<Rq>; N],
+        mut avoid: RegSet<Rq>,
+    ) -> [Rq; N] {
+        let mut found_output = false; // Check that there aren't multiple output regs
+        let mut out = [None; N];
+
+        // Where the caller has told us they want to put things in specific registers, we need to
+        // make sure we avoid allocating those in other circumstances.
+        for cnstr in &constraints {
+            match cnstr {
+                RegConstraint::InputIntoReg(_, reg)
+                | RegConstraint::InputIntoRegAndClobber(_, reg)
+                | RegConstraint::InputOutputIntoReg(_, reg)
+                | RegConstraint::OutputFromReg(reg) => {
+                    avoid.set(*reg);
+                }
+                RegConstraint::Input(_) | RegConstraint::InputOutput(_) | RegConstraint::Output => {
+                }
+            }
+        }
+
+        // If we already have the value in a register, don't allocate a new register.
+        for (i, cnstr) in constraints.iter().enumerate() {
+            match cnstr {
+                RegConstraint::Input(op) | RegConstraint::InputOutput(op) => match op {
+                    Operand::Local(op_iidx) => {
+                        if let Some(reg_i) = self.gp_reg_states.iter().position(|x| {
+                            if let RegState::FromInst(y) = x {
+                                y == op_iidx
+                            } else {
+                                false
+                            }
+                        }) {
+                            let reg = GP_REGS[reg_i];
+                            if !avoid.is_set(reg) {
+                                assert!(self.gp_regset.is_set(reg));
+                                avoid.set(reg);
+                                out[i] = Some(reg);
+                                if let RegConstraint::InputOutput(_) = cnstr {
+                                    debug_assert!(!found_output);
+                                    found_output = true;
+                                    if self.is_inst_var_still_used_after(iidx, *op_iidx) {
+                                        self.spill_gp_if_not_already(asm, reg);
+                                    }
+                                    self.gp_reg_states[usize::from(reg.code())] =
+                                        RegState::FromInst(iidx);
+                                }
+                            }
+                        }
+                    }
+                    Operand::Const(_cidx) => (),
+                },
+                RegConstraint::InputOutputIntoReg(_op, _reg)
+                | RegConstraint::InputIntoReg(_op, _reg)
+                | RegConstraint::InputIntoRegAndClobber(_op, _reg) => {
+                    // OPT: do the same trick as Input/InputOutput
+                }
+                RegConstraint::Output | RegConstraint::OutputFromReg(_) => (),
+            }
+        }
+
+        for (i, x) in constraints.iter().enumerate() {
+            if out[i].is_some() {
+                // We've already allocated this constraint.
+                continue;
+            }
+            match x {
+                RegConstraint::Input(op)
+                | RegConstraint::InputIntoReg(op, _)
+                | RegConstraint::InputIntoRegAndClobber(op, _)
+                | RegConstraint::InputOutput(op)
+                | RegConstraint::InputOutputIntoReg(op, _) => {
+                    let reg = match x {
+                        RegConstraint::Input(_) | RegConstraint::InputOutput(_) => {
+                            self.get_empty_gp_reg(asm, iidx, avoid)
+                        }
+                        RegConstraint::InputIntoReg(_, reg)
+                        | RegConstraint::InputIntoRegAndClobber(_, reg)
+                        | RegConstraint::InputOutputIntoReg(_, reg) => {
+                            // OPT: Not everything needs spilling
+                            self.spill_gp_if_not_already(asm, *reg);
+                            *reg
+                        }
+                        RegConstraint::Output | RegConstraint::OutputFromReg(_) => {
+                            unreachable!()
+                        }
+                    };
+
+                    // At this point we know the value in `reg` has been spilled if necessary, so
+                    // we can overwrite it.
+                    match op {
+                        Operand::Local(op_iidx) => {
+                            self.force_gp_unspill(asm, *op_iidx, reg);
+                        }
+                        Operand::Const(cidx) => {
+                            // FIXME: we could reuse consts in regs
+                            self.load_const_into_gp_reg(asm, *cidx, reg);
+                        }
+                    }
+
+                    self.gp_regset.set(reg);
+                    out[i] = Some(reg);
+                    avoid.set(reg);
+                    let st = match x {
+                        RegConstraint::Input(_) | RegConstraint::InputIntoReg(_, _) => match op {
+                            Operand::Local(op_iidx) => RegState::FromInst(*op_iidx),
+                            Operand::Const(cidx) => RegState::FromConst(*cidx),
+                        },
+                        RegConstraint::InputIntoRegAndClobber(_, _) => {
+                            self.gp_regset.unset(reg);
+                            RegState::Empty
+                        }
+                        RegConstraint::InputOutput(_) | RegConstraint::InputOutputIntoReg(_, _) => {
+                            debug_assert!(!found_output);
+                            found_output = true;
+                            RegState::FromInst(iidx)
+                        }
+                        RegConstraint::Output | RegConstraint::OutputFromReg(_) => {
+                            unreachable!()
+                        }
+                    };
+                    self.gp_reg_states[usize::from(reg.code())] = st;
+                }
+                RegConstraint::Output => {
+                    let reg = self.get_empty_gp_reg(asm, iidx, avoid);
+                    self.gp_regset.set(reg);
+                    self.gp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx);
+                    avoid.set(reg);
+                    out[i] = Some(reg);
+                }
+                RegConstraint::OutputFromReg(reg) => {
+                    // OPT: Don't have to always spill.
+                    self.spill_gp_if_not_already(asm, *reg);
+                    self.gp_regset.set(*reg);
+                    self.gp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx);
+                    avoid.set(*reg);
+                    out[i] = Some(*reg);
+                }
+            }
+        }
+
+        out.map(|x| x.unwrap())
+    }
+
+    /// Return a snapshot of the general purpose registers. Intended only for use at the end of the
+    /// trace header. A temporary hack (at least in its current state).
+    pub(crate) fn snapshot_gp_reg_states_hack(&self) -> [RegState; GP_REGS_LEN] {
+        self.gp_reg_states
+    }
+
+    /// Restore the state of the general purpose registers at the point of a jump at the end of a
+    /// trace. A temporary hack (at least in its current state).
+    pub(crate) fn restore_gp_reg_states_hack(
+        &mut self,
+        asm: &mut Assembler,
+        reg_states: [RegState; GP_REGS_LEN],
+    ) {
+        for (reg_i, x) in reg_states.into_iter().enumerate() {
+            match x {
+                RegState::Reserved => (),
+                RegState::Empty => {
+                    let reg = GP_REGS[reg_i];
+                    self.gp_regset.unset(reg);
+                    self.gp_reg_states[reg_i] = RegState::Empty;
+                }
+                RegState::FromConst(_) => todo!(),
+                RegState::FromInst(iidx) => {
+                    let reg = GP_REGS[reg_i];
+                    self.force_gp_unspill(asm, iidx, reg);
+                    self.gp_regset.set(reg);
+                    self.gp_reg_states[reg_i] = RegState::FromInst(iidx);
+                }
+            }
+        }
+    }
+
+    /// If the value stored in `reg` is not already spilled to the heap, then spill it. Note that
+    /// this function neither writes to the register or changes the register's [RegState].
+    fn spill_gp_if_not_already(&mut self, asm: &mut Assembler, reg: Rq) {
+        match self.gp_reg_states[usize::from(reg.code())] {
+            RegState::Reserved | RegState::Empty | RegState::FromConst(_) => (),
+            RegState::FromInst(iidx) => {
+                if self.spilled_insts[usize::from(iidx)] == usize::MAX {
+                    let inst = self.m.inst_no_proxies(iidx);
+                    let size = inst.def_byte_size(self.m);
+                    self.stack.align(size); // FIXME
+                    let frame_off = self.stack.grow(size);
+                    let off = i32::try_from(frame_off).unwrap();
+                    match size {
+                        1 => dynasm!(asm; mov BYTE [rbp - off], Rb(reg.code())),
+                        2 => dynasm!(asm; mov WORD [rbp - off], Rw(reg.code())),
+                        4 => dynasm!(asm; mov DWORD [rbp - off], Rd(reg.code())),
+                        8 => dynasm!(asm; mov QWORD [rbp - off], Rq(reg.code())),
+                        _ => unreachable!(),
+                    }
+                    self.spilled_insts[usize::from(iidx)] = frame_off;
+                }
+            }
+        }
+    }
+
+    /// Load the value for `iidx` from the stack into `reg`.
+    ///
+    /// # Panics
+    ///
+    /// If `iidx` has not previously been spilled.
+    fn force_gp_unspill(&mut self, asm: &mut Assembler, iidx: InstIdx, reg: Rq) {
+        let inst = self.m.inst_no_proxies(iidx);
+        let size = inst.def_byte_size(self.m);
+
+        let frame_off = self.spilled_insts[usize::from(iidx)];
+        if frame_off == usize::MAX {
+            let reg_i = self
+                .gp_reg_states
+                .iter()
+                .position(|x| {
+                    if let RegState::FromInst(y) = x {
+                        *y == iidx
+                    } else {
+                        false
+                    }
+                })
+                .unwrap();
+            let cur_reg = GP_REGS[reg_i];
+            if cur_reg != reg {
+                match size {
+                    1 => dynasm!(asm ; movzx Rq(reg.code()), Rb(cur_reg.code())),
+                    2 => dynasm!(asm ; movzx Rq(reg.code()), Rw(cur_reg.code())),
+                    4 => dynasm!(asm ; mov Rd(reg.code()), Rd(cur_reg.code())),
+                    8 => dynasm!(asm ; mov Rq(reg.code()), Rq(cur_reg.code())),
+                    _ => todo!("{}", size),
+                }
+            }
+            return;
+        }
+        debug_assert_ne!(frame_off, usize::MAX);
+        let off = i32::try_from(frame_off).unwrap();
+        match size {
+            1 => dynasm!(asm ; movzx Rq(reg.code()), BYTE [rbp - off]),
+            2 => dynasm!(asm ; movzx Rq(reg.code()), WORD [rbp - off]),
+            4 => dynasm!(asm ; mov Rd(reg.code()), [rbp - off]),
+            8 => dynasm!(asm ; mov Rq(reg.code()), [rbp - off]),
+            _ => todo!("{}", size),
+        }
+        self.gp_regset.set(reg);
+    }
+
+    /// Load the constant from `cidx` into `reg`.
+    fn load_const_into_gp_reg(&mut self, asm: &mut Assembler, cidx: ConstIdx, reg: Rq) {
+        match self.m.const_(cidx) {
+            Const::Float(_tyidx, _x) => todo!(),
+            Const::Int(tyidx, x) => {
+                let Ty::Integer(width) = self.m.type_(*tyidx) else {
+                    panic!()
+                };
+                // The `as`s are all safe because the IR guarantees that no more than `width` bits
+                // are set in the integer i.e. we are only ever truncating zeros.
+                match width {
+                    1 | 8 => dynasm!(asm; mov Rb(reg.code()), BYTE *x as i8),
+                    16 => dynasm!(asm; mov Rw(reg.code()), WORD *x as i16),
+                    32 => dynasm!(asm; mov Rd(reg.code()), DWORD *x as i32),
+                    64 => dynasm!(asm; mov Rq(reg.code()), QWORD *x as i64),
+                    _ => todo!(),
+                }
+            }
+            Const::Ptr(x) => {
+                dynasm!(asm; mov Rq(reg.code()), QWORD *x as i64)
+            }
+        }
+    }
+
+    /// Get an empty general purpose register, freeing one if necessary. Will not touch any
+    /// registers set in `avoid`.
+    fn get_empty_gp_reg(&mut self, asm: &mut Assembler, iidx: InstIdx, avoid: RegSet<Rq>) -> Rq {
+        match self.gp_regset.find_empty_avoiding(avoid) {
+            Some(reg) => reg,
+            None => match avoid.find_empty() {
+                Some(reg) => match self.gp_reg_states[usize::from(reg.code())] {
+                    RegState::Reserved | RegState::Empty => unreachable!(),
+                    RegState::FromConst(_) => todo!(),
+                    RegState::FromInst(from_iidx) => {
+                        if self.is_inst_var_still_used_at(iidx, from_iidx) {
+                            self.spill_gp_if_not_already(asm, reg);
+                        }
+                        self.gp_regset.unset(reg);
+                        self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
+                        reg
+                    }
+                },
+                None => panic!("Cannot satisfy register constraints: no registers left"),
+            },
+        }
+    }
+
+    /// Clobber each register in `regs`, spilling if it is used at or after instruction `iidx`, and
+    /// (whether it is used later or not) marking the reg state as [RegState::Empty].
+    ///
+    /// FIXME: This method has one genuine use (clobbering registers before a CALL) and one hack
+    /// use (hence the function name) in x86_64/mod.rs. What we currently call `avoids` should
+    /// really be `clobbers`, but currently there is one case in x86_64/mod.rs which requires us to
+    /// avoid a register without clobbering it, so we have to break this out into its own function.
+    pub(crate) fn clobber_gp_regs_hack(&mut self, asm: &mut Assembler, iidx: InstIdx, regs: &[Rq]) {
+        for reg in regs {
+            match self.gp_reg_states[usize::from(reg.code())] {
+                RegState::Reserved => unreachable!(),
+                RegState::Empty => (),
+                RegState::FromConst(_) => {
+                    self.gp_regset.unset(*reg);
+                    self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
+                }
+                RegState::FromInst(from_iidx) => {
+                    // OPT: We can MOV some of these rather than just spilling.
+                    if self.is_inst_var_still_used_at(iidx, from_iidx) {
+                        self.spill_gp_if_not_already(asm, *reg);
+                    }
+                    self.gp_regset.unset(*reg);
+                    self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
+                }
+            }
+        }
+    }
+
+    /// Return the stack offset for `iidx`, forcing it to be spilled if it hasn't already.
+    ///
+    /// Note that it is undefined behaviour if the value for `iidx` is no longer alive.
+    ///
+    /// FIXME: This method is a temporary hack for x86_64/mod.rs, which currently requires every
+    /// instruction to be stilled to the stack before a guard.
+    pub(crate) fn stack_offset_gp_hack(&mut self, asm: &mut Assembler, iidx: InstIdx) -> usize {
+        if self.spilled_insts[usize::from(iidx)] == usize::MAX {
+            let reg_i = self
+                .gp_reg_states
+                .iter()
+                .position(|x| {
+                    if let RegState::FromInst(y) = x {
+                        *y == iidx
+                    } else {
+                        false
+                    }
+                })
+                .unwrap();
+            let reg = GP_REGS[reg_i];
+            self.spill_gp_if_not_already(asm, reg)
+        }
+        self.spilled_insts[usize::from(iidx)]
+    }
+}
+
+/// The parts of the register allocator needed for floating point registers.
+impl<'a> LSRegAlloc<'a> {
+    /// Allocate registers for the instruction at position `iidx`.
+    pub(crate) fn get_fp_regs<const N: usize>(
+        &mut self,
+        asm: &mut Assembler,
+        iidx: InstIdx,
+        constraints: [RegConstraint<Rx>; N],
+    ) -> [Rx; N] {
+        let mut avoid = RegSet::blank();
+        let mut found_output = false; // Check that there aren't multiple output regs
+        let mut out = [None; N];
+
+        for cnstr in &constraints {
+            match cnstr {
+                RegConstraint::InputIntoReg(_, reg)
+                | RegConstraint::InputIntoRegAndClobber(_, reg) => avoid.set(*reg),
+                RegConstraint::Input(_) | RegConstraint::InputOutput(_) | RegConstraint::Output => {
+                }
+                RegConstraint::InputOutputIntoReg(_, _) | RegConstraint::OutputFromReg(_) => {
+                    panic!();
+                }
+            }
+        }
+
+        // If we already have the value in a register, don't allocate a new register.
+        for (i, cnstr) in constraints.iter().enumerate() {
+            match cnstr {
+                RegConstraint::Input(op) | RegConstraint::InputOutput(op) => match op {
+                    Operand::Local(op_iidx) => {
+                        if let Some(reg_i) = self.fp_reg_states.iter().position(|x| {
+                            if let RegState::FromInst(y) = x {
+                                y == op_iidx
+                            } else {
+                                false
+                            }
+                        }) {
+                            let reg = FP_REGS[reg_i];
+                            if !avoid.is_set(reg) {
+                                assert!(self.fp_regset.is_set(reg));
+                                avoid.set(reg);
+                                out[i] = Some(reg);
+                                if let RegConstraint::InputOutput(_) = cnstr {
+                                    debug_assert!(!found_output);
+                                    found_output = true;
+                                    if self.is_inst_var_still_used_after(iidx, *op_iidx) {
+                                        self.spill_fp_if_not_already(asm, reg);
+                                    }
+                                    self.fp_reg_states[usize::from(reg.code())] =
+                                        RegState::FromInst(iidx);
+                                }
+                            }
+                        }
+                    }
+                    Operand::Const(_cidx) => (),
+                },
+                RegConstraint::InputIntoReg(_op, _reg)
+                | RegConstraint::InputIntoRegAndClobber(_op, _reg) => {
+                    // OPT: do the same trick as Input/InputOutput
+                }
+                RegConstraint::Output | RegConstraint::OutputFromReg(_) => (),
+                RegConstraint::InputOutputIntoReg(_op, _reg) => unreachable!(),
+            }
+        }
+
+        for (i, x) in constraints.iter().enumerate() {
+            if out[i].is_some() {
+                // We've already allocated this constraint.
+                continue;
+            }
+            match x {
+                RegConstraint::Input(op)
+                | RegConstraint::InputIntoReg(op, _)
+                | RegConstraint::InputIntoRegAndClobber(op, _)
+                | RegConstraint::InputOutput(op) => {
+                    let reg = match x {
+                        RegConstraint::Input(_) | RegConstraint::InputOutput(_) => {
+                            self.get_empty_fp_reg(asm, iidx, avoid)
+                        }
+                        RegConstraint::InputIntoReg(_, reg)
+                        | RegConstraint::InputIntoRegAndClobber(_, reg) => {
+                            // OPT: Not everything needs spilling
+                            self.spill_fp_if_not_already(asm, *reg);
+                            *reg
+                        }
+                        RegConstraint::InputOutputIntoReg(_, _) => {
+                            unreachable!()
+                        }
+                        RegConstraint::Output | RegConstraint::OutputFromReg(_) => {
+                            unreachable!()
+                        }
+                    };
+
+                    // At this point we know the value in `reg` has been spilled if necessary, so
+                    // we can overwrite it.
+                    match op {
+                        Operand::Local(op_iidx) => {
+                            self.force_fp_unspill(asm, *op_iidx, reg);
+                        }
+                        Operand::Const(cidx) => {
+                            // FIXME: we could reuse consts in regs
+                            self.load_const_into_fp_reg(asm, *cidx, reg);
+                        }
+                    }
+
+                    self.fp_regset.set(reg);
+                    out[i] = Some(reg);
+                    avoid.set(reg);
+                    let st = match x {
+                        RegConstraint::Input(_) | RegConstraint::InputIntoReg(_, _) => match op {
+                            Operand::Local(op_iidx) => RegState::FromInst(*op_iidx),
+                            Operand::Const(cidx) => RegState::FromConst(*cidx),
+                        },
+                        RegConstraint::InputIntoRegAndClobber(_, _) => {
+                            self.fp_regset.unset(reg);
+                            RegState::Empty
+                        }
+                        RegConstraint::InputOutput(_) => {
+                            debug_assert!(!found_output);
+                            found_output = true;
+                            RegState::FromInst(iidx)
+                        }
+                        RegConstraint::InputOutputIntoReg(_, _)
+                        | RegConstraint::Output
+                        | RegConstraint::OutputFromReg(_) => {
+                            unreachable!()
+                        }
+                    };
+                    self.fp_reg_states[usize::from(reg.code())] = st;
+                }
+                RegConstraint::Output => {
+                    let reg = self.get_empty_fp_reg(asm, iidx, avoid);
+                    self.fp_regset.set(reg);
+                    self.fp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx);
+                    avoid.set(reg);
+                    out[i] = Some(reg);
+                }
+                RegConstraint::OutputFromReg(reg) => {
+                    // OPT: Don't have to always spill.
+                    self.spill_fp_if_not_already(asm, *reg);
+                    self.fp_regset.set(*reg);
+                    self.fp_reg_states[usize::from(reg.code())] = RegState::FromInst(iidx);
+                    avoid.set(*reg);
+                    out[i] = Some(*reg);
+                }
+                RegConstraint::InputOutputIntoReg(_, _) => unreachable!(),
+            }
+        }
+
+        out.map(|x| x.unwrap())
+    }
+
+    /// Return a snapshot of the general purpose registers. Intended only for use at the end of the
+    /// trace header. A temporary hack (at least in its current state).
+    pub(crate) fn snapshot_fp_reg_states_hack(&self) -> [RegState; FP_REGS_LEN] {
+        self.fp_reg_states
+    }
+
+    /// Restore the state of the general purpose registers at the point of a jump at the end of a
+    /// trace. A temporary hack (at least in its current state).
+    pub(crate) fn restore_fp_reg_states_hack(
+        &mut self,
+        asm: &mut Assembler,
+        reg_states: [RegState; FP_REGS_LEN],
+    ) {
+        for (reg_i, x) in reg_states.into_iter().enumerate() {
+            match x {
+                RegState::Reserved => (),
+                RegState::Empty => {
+                    let reg = FP_REGS[reg_i];
+                    self.fp_regset.unset(reg);
+                    self.fp_reg_states[reg_i] = RegState::Empty;
+                }
+                RegState::FromConst(_) => todo!(),
+                RegState::FromInst(iidx) => {
+                    let reg = FP_REGS[reg_i];
+                    self.force_fp_unspill(asm, iidx, reg);
+                    self.fp_regset.set(reg);
+                    self.fp_reg_states[reg_i] = RegState::FromInst(iidx);
+                }
+            }
+        }
+    }
+
+    /// If the value stored in `reg` is not already spilled to the heap, then spill it. Note that
+    /// this function neither writes to the register or changes the register's [RegState].
+    fn spill_fp_if_not_already(&mut self, asm: &mut Assembler, reg: Rx) {
+        match self.fp_reg_states[usize::from(reg.code())] {
+            RegState::Reserved | RegState::Empty | RegState::FromConst(_) => (),
+            RegState::FromInst(iidx) => {
+                if self.spilled_insts[usize::from(iidx)] == usize::MAX {
+                    println!("woo");
+                    let inst = self.m.inst_no_proxies(iidx);
+                    let size = inst.def_byte_size(self.m);
+                    self.stack.align(size); // FIXME
+                    let frame_off = self.stack.grow(size);
+                    let off = i32::try_from(frame_off).unwrap();
+                    match size {
+                        4 => dynasm!(asm ; movss [rbp - off], Rx(reg.code())),
+                        8 => dynasm!(asm ; movsd [rbp - off], Rx(reg.code())),
+                        _ => unreachable!(),
+                    }
+                    self.spilled_insts[usize::from(iidx)] = frame_off;
+                }
+            }
+        }
+    }
+
+    /// Load the value for `iidx` from the stack into `reg`.
+    ///
+    /// # Panics
+    ///
+    /// If `iidx` has not previously been spilled.
+    fn force_fp_unspill(&mut self, asm: &mut Assembler, iidx: InstIdx, reg: Rx) {
+        let inst = self.m.inst_no_proxies(iidx);
+        let size = inst.def_byte_size(self.m);
+
+        let frame_off = self.spilled_insts[usize::from(iidx)];
+        if frame_off == usize::MAX {
+            let reg_i = self
+                .fp_reg_states
+                .iter()
+                .position(|x| {
+                    if let RegState::FromInst(y) = x {
+                        *y == iidx
+                    } else {
+                        false
+                    }
+                })
+                .unwrap();
+            let cur_reg = FP_REGS[reg_i];
+            if cur_reg != reg {
+                todo!();
+                // dynasm!(asm; mov Rq(reg.code()), Rq(cur_reg.code()));
+            }
+            return;
+        }
+        debug_assert_ne!(frame_off, usize::MAX);
+        let off = i32::try_from(frame_off).unwrap();
+        match size {
+            4 => dynasm!(asm; movss Rx(reg.code()), [rbp - off]),
+            8 => dynasm!(asm; movsd Rx(reg.code()), [rbp - off]),
+            _ => todo!("{}", size),
+        };
+        self.fp_regset.set(reg);
+    }
+
+    /// Load the constant from `cidx` into `reg`.
+    fn load_const_into_fp_reg(&mut self, asm: &mut Assembler, cidx: ConstIdx, reg: Rx) {
+        match self.m.const_(cidx) {
+            Const::Float(tyidx, val) => match self.m.type_(*tyidx) {
+                // There's no way to directly move an immediate value into an xmm, so we have to go
+                // via a general purpose register.
+                //
+                // We use WR0 here, but it might be used by parents (e.g.
+                // `x86_64/mod.rs::emit_call`) so we have to push/pop it to avoid clobbering that
+                // other use.
+                Ty::Float(fty) => match fty {
+                    FloatTy::Float => {
+                        dynasm!(asm
+                            ; push Rq(WR0.code())
+                            ; mov Rd(WR0.code()), DWORD (*val as f32).to_bits() as i64 as i32
+                            ; movd Rx(reg.code()), Rd(WR0.code())
+                            ; pop Rq(WR0.code())
+                        );
+                    }
+                    FloatTy::Double => {
+                        dynasm!(asm
+                            ; push Rq(WR0.code())
+                            ; mov Rq(WR0.code()), QWORD val.to_bits() as i64
+                            ; movq Rx(reg.code()), Rq(WR0.code())
+                            ; pop Rq(WR0.code())
+                        );
+                    }
+                },
+                _ => panic!(),
+            },
+            _ => panic!(),
+        }
+    }
+
+    /// Get an empty general purpose register, freeing one if necessary. Will not touch any
+    /// registers set in `avoid`.
+    fn get_empty_fp_reg(&mut self, asm: &mut Assembler, iidx: InstIdx, avoid: RegSet<Rx>) -> Rx {
+        match self.fp_regset.find_empty_avoiding(avoid) {
+            Some(reg) => reg,
+            None => match avoid.find_empty() {
+                Some(reg) => match self.fp_reg_states[usize::from(reg.code())] {
+                    RegState::Reserved | RegState::Empty => unreachable!(),
+                    RegState::FromConst(_) => todo!(),
+                    RegState::FromInst(from_iidx) => {
+                        if self.is_inst_var_still_used_at(iidx, from_iidx) {
+                            self.spill_fp_if_not_already(asm, reg);
+                        }
+                        self.fp_regset.unset(reg);
+                        self.fp_reg_states[usize::from(reg.code())] = RegState::Empty;
+                        reg
+                    }
+                },
+                None => panic!("Cannot satisfy register constraints: no registers left"),
+            },
+        }
+    }
+
+    /// Clobber all floating point registers. Used before a CALL.
+    pub(crate) fn clobber_fp_regs(&mut self, asm: &mut Assembler, iidx: InstIdx) {
+        for reg in FP_REGS {
+            match self.fp_reg_states[usize::from(reg.code())] {
+                RegState::Reserved => unreachable!(),
+                RegState::Empty => (),
+                RegState::FromConst(_) => {
+                    self.fp_regset.unset(reg);
+                    self.fp_reg_states[usize::from(reg.code())] = RegState::Empty;
+                }
+                RegState::FromInst(from_iidx) => {
+                    // OPT: We can MOV some of these rather than just spilling.
+                    if self.is_inst_var_still_used_at(iidx, from_iidx) {
+                        self.spill_fp_if_not_already(asm, reg);
+                    }
+                    self.fp_regset.unset(reg);
+                    self.fp_reg_states[usize::from(reg.code())] = RegState::Empty;
+                }
+            }
+        }
+    }
+}
+
+/// What constraints are there on registers for an instruction?
+#[derive(Debug)]
+pub(crate) enum RegConstraint<R: Register> {
+    // Make sure `Operand` is loaded into a register *R* on entry; its value must be unchanged
+    // after the instruction is executed.
+    Input(Operand),
+    // Make sure `Operand` is loaded into register `R` on entry; its value must be unchanged
+    // after the instruction is executed.
+    InputIntoReg(Operand, R),
+    // Make sure `Operand` is loaded into register `R` on entry and considered clobbered on exit.
+    InputIntoRegAndClobber(Operand, R),
+    // Make sure `Operand` is loaded into a register *x* on entry and considered clobbered on exit.
+    // The result of this instruction will be stored in register *x*.
+    InputOutput(Operand),
+    // Make sure `Operand` is loaded into register `R` on entry and considered clobbered on exit.
+    // The result of this instruction will be placed in `R`.
+    InputOutputIntoReg(Operand, R),
+    // The result of this instruction will be stored in register *x*.
+    Output,
+    // The result of this instruction will be stored in register `R`.
+    OutputFromReg(R),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum RegState {
+    Reserved,
+    Empty,
+    FromConst(ConstIdx),
+    FromInst(InstIdx),
+}
+
+/// Which registers in a set of 16 registers are currently used? Happily 16 bits is the right size
+/// for (separately) both x64's general purpose and floating point registers.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RegSet<R>(u16, PhantomData<R>);
+
+impl<R: Register> RegSet<R> {
+    /// Create a [RegSet] with all registers unused.
+    fn blank() -> Self {
+        Self(0, PhantomData)
+    }
+
+    fn is_set(&self, reg: R) -> bool {
+        self.0 & (1 << u16::from(reg.code())) != 0
+    }
+
+    fn set(&mut self, reg: R) {
+        self.0 |= 1 << u16::from(reg.code());
+    }
+
+    fn unset(&mut self, reg: R) {
+        self.0 &= !(1 << u16::from(reg.code()));
+    }
+}
+
+impl RegSet<Rq> {
+    /// Create a [RegSet] with the reserved general purpose registers in [RESERVED_GP_REGS] set.
+    fn with_gp_reserved() -> Self {
+        let mut new = Self::blank();
+        for reg in RESERVED_GP_REGS {
+            new.set(reg);
+        }
+        new
+    }
+
+    fn find_empty(&self) -> Option<Rq> {
+        if self.0 == u16::MAX {
+            None
+        } else {
+            // The lower registers (e.g. RAX) are those most likely to be used by x64 instructions,
+            // so we prefer to give out the highest possible registers (e.g. R15).
+            Some(GP_REGS[usize::try_from(15 - (!self.0).leading_zeros()).unwrap()])
+        }
+    }
+
+    fn find_empty_avoiding(&self, avoid: RegSet<Rq>) -> Option<Rq> {
+        let x = self.0 | avoid.0;
+        if x == u16::MAX {
+            None
+        } else {
+            // The lower registers (e.g. RAX) are those most likely to be used by x64 instructions,
+            // so we prefer to give out the highest possible registers (e.g. R15).
+            Some(GP_REGS[usize::try_from(15 - (!x).leading_zeros()).unwrap()])
+        }
+    }
+}
+
+impl From<Rq> for RegSet<Rq> {
+    fn from(reg: Rq) -> Self {
+        Self(1 << u16::from(reg.code()), PhantomData)
+    }
+}
+
+impl RegSet<Rx> {
+    /// Create a [RegSet] with the reserved floating point registers in [RESERVED_FP_REGS] set.
+    fn with_fp_reserved() -> Self {
+        let mut new = Self::blank();
+        for reg in RESERVED_FP_REGS {
+            new.set(reg);
+        }
+        new
+    }
+
+    fn find_empty(&self) -> Option<Rx> {
+        if self.0 == u16::MAX {
+            None
+        } else {
+            // Could start from 0 rather than 15.
+            Some(FP_REGS[usize::try_from(15 - (!self.0).leading_zeros()).unwrap()])
+        }
+    }
+
+    fn find_empty_avoiding(&self, avoid: RegSet<Rx>) -> Option<Rx> {
+        let x = self.0 | avoid.0;
+        if x == u16::MAX {
+            None
+        } else {
+            // Could start from 0 rather than 15.
+            Some(FP_REGS[usize::try_from(15 - (!x).leading_zeros()).unwrap()])
+        }
+    }
+}
+
+impl From<Rx> for RegSet<Rx> {
+    fn from(reg: Rx) -> Self {
+        Self(1 << u16::from(reg.code()), PhantomData)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn regset() {
+        let mut x = RegSet::blank();
+        debug_assert!(!x.is_set(Rq::R15));
+        debug_assert_eq!(x.find_empty(), Some(Rq::R15));
+        x.set(Rq::R15);
+        debug_assert!(x.is_set(Rq::R15));
+        debug_assert_eq!(x.find_empty(), Some(Rq::R14));
+        x.set(Rq::R14);
+        debug_assert_eq!(x.find_empty(), Some(Rq::R13));
+        x.unset(Rq::R14);
+        debug_assert_eq!(x.find_empty(), Some(Rq::R14));
+        for reg in GP_REGS {
+            x.set(reg);
+            debug_assert!(x.is_set(reg));
+        }
+        debug_assert_eq!(x.find_empty(), None);
+        x.unset(Rq::RAX);
+        debug_assert!(!x.is_set(Rq::RAX));
+        debug_assert_eq!(x.find_empty(), Some(Rq::RAX));
+
+        let x = RegSet::<Rq>::blank();
+        debug_assert_eq!(x.find_empty_avoiding(RegSet::from(Rq::R15)), Some(Rq::R14));
+    }
+}
