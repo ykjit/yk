@@ -5,6 +5,24 @@ set -eu
 # FIXME: Reenable swt once jitc_llvm is fully removed.
 TRACERS="hwt"
 
+# Build yklua and run the test suite.
+#
+# Before calling this:
+#  - `yk-config` must be in PATH.
+#  - YK_BUILD_TYPE must be set.
+test_yklua() {
+    if [ ! -e "yklua" ]; then
+        git clone https://github.com/ykjit/yklua
+    fi
+    cd yklua
+    make clean
+    make -j $(nproc)
+    cd tests
+    YKD_SERIALISE_COMPILATION=1 ../src/lua -e"_U=true" all.lua
+    ../src/lua -e"_U=true" all.lua
+    cd ../..
+}
+
 # Install rustup.
 CARGO_HOME="$(pwd)/.cargo"
 export CARGO_HOME
@@ -121,6 +139,11 @@ echo "===> Running hwt tests"
 for _ in $(seq 10); do
     YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test
 done
+
+# test yklua/hwt in debug mode.
+PATH=$(pwd)/bin:${PATH} YKD_NEW_CODEGEN=1 YK_BUILD_TYPE=debug YKB_TRACER=hwt \
+    test_yklua
+
 for tracer in ${TRACERS}; do
     if [ "$tracer" = "hwt" ]; then
         continue
@@ -185,6 +208,12 @@ for tracer in $TRACERS; do
     export YKB_TRACER="${tracer}"
     echo "===> Running ${tracer} tests"
     YKD_NEW_CODEGEN=1 RUST_TEST_SHUFFLE=1 cargo test --release
+
+    # test yklua/hwt in release mode.
+    if [ "${tracer}" = "hwt" ]; then
+        PATH=$(pwd)/bin:${PATH} YKD_NEW_CODEGEN=1 YK_BUILD_TYPE=release \
+            YKB_TRACER=hwt test_yklua
+    fi
 done
 
 # We want to check that the benchmarks build and run correctly, but want to
