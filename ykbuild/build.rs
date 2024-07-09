@@ -172,7 +172,7 @@ fn main() {
     if run_cfg_cmd {
         create_dir_all(&build_dir).unwrap();
 
-        cfg_cmd.arg(&format!("-G{generator}"));
+        cfg_cmd.arg(format!("-G{generator}"));
         cfg_cmd.arg(
             canonicalize(YKLLVM_SUBMODULE_PATH)
                 .unwrap()
