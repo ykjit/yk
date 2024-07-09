@@ -595,6 +595,16 @@ impl<'a> Assemble<'a> {
                 }
                 self.store_new_local_float(iidx, WF0);
             }
+            BinOp::FMul => {
+                self.load_operand_float(WF0, &lhs);
+                self.load_operand_float(WF1, &rhs);
+                match lhs.byte_size(self.m) {
+                    8 => dynasm!(self.asm; mulsd Rx(WF0.code()), Rx(WF1.code())),
+                    4 => dynasm!(self.asm; mulss Rx(WF0.code()), Rx(WF1.code())),
+                    _ => todo!(),
+                }
+                self.store_new_local_float(iidx, WF0);
+            }
             x => todo!("{x:?}"),
         }
     }
@@ -2304,6 +2314,46 @@ mod tests {
                 ... movss xmm1, dword ptr [rbp-0x08]
                 ... addss xmm0, xmm1
                 ... movss [rbp-0x0c], xmm0
+                ...
+                ",
+            );
+        }
+
+        #[test]
+        fn cg_fmul_float() {
+            test_with_spillalloc(
+                "
+              entry:
+                %0: float = load_ti 0
+                %1: float = load_ti 1
+                %2: float = fmul %0, %1
+            ",
+                "
+                ...
+                ... movss xmm0, dword ptr [rbp-0x04]
+                ... movss xmm1, dword ptr [rbp-0x08]
+                ... mulss xmm0, xmm1
+                ... movss [rbp-0x0c], xmm0
+                ...
+                ",
+            );
+        }
+
+        #[test]
+        fn cg_fmul_double() {
+            test_with_spillalloc(
+                "
+              entry:
+                %0: double = load_ti 0
+                %1: double = load_ti 1
+                %2: double = fmul %0, %1
+            ",
+                "
+                ...
+                ... movsd xmm0, qword ptr [rbp-0x08]
+                ... movsd xmm1, qword ptr [rbp-0x10]
+                ... mulsd xmm0, xmm1
+                ... movsd [rbp-0x18], xmm0
                 ...
                 ",
             );
