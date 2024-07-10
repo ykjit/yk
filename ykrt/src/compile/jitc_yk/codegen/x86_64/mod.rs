@@ -413,10 +413,10 @@ impl<'a> Assemble<'a> {
                 self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
                 self.load_operand(WR1, &rhs); // ^^^ same
                 match lhs.byte_size(self.m) {
-                    8 => dynasm!(self.asm; add Rq(WR0.code()), Rq(WR1.code())),
-                    4 => dynasm!(self.asm; add Rd(WR0.code()), Rd(WR1.code())),
-                    2 => dynasm!(self.asm; add Rw(WR0.code()), Rw(WR1.code())),
                     1 => dynasm!(self.asm; add Rb(WR0.code()), Rb(WR1.code())),
+                    2 => dynasm!(self.asm; add Rw(WR0.code()), Rw(WR1.code())),
+                    4 => dynasm!(self.asm; add Rd(WR0.code()), Rd(WR1.code())),
+                    8 => dynasm!(self.asm; add Rq(WR0.code()), Rq(WR1.code())),
                     _ => todo!(),
                 }
                 self.store_new_local(iidx, WR0);
@@ -425,10 +425,10 @@ impl<'a> Assemble<'a> {
                 self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
                 self.load_operand(WR1, &rhs); // ^^^ same
                 match lhs.byte_size(self.m) {
-                    8 => dynasm!(self.asm; and Rq(WR0.code()), Rq(WR1.code())),
-                    4 => dynasm!(self.asm; and Rd(WR0.code()), Rd(WR1.code())),
-                    2 => dynasm!(self.asm; and Rw(WR0.code()), Rw(WR1.code())),
                     1 => dynasm!(self.asm; and Rb(WR0.code()), Rb(WR1.code())),
+                    2 => dynasm!(self.asm; and Rw(WR0.code()), Rw(WR1.code())),
+                    4 => dynasm!(self.asm; and Rd(WR0.code()), Rd(WR1.code())),
+                    8 => dynasm!(self.asm; and Rq(WR0.code()), Rq(WR1.code())),
                     _ => todo!(),
                 }
                 self.store_new_local(iidx, WR0);
@@ -437,10 +437,10 @@ impl<'a> Assemble<'a> {
                 self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
                 self.load_operand(Rq::RCX, &rhs); // ^^^ same
                 match lhs.byte_size(self.m) {
-                    8 => dynasm!(self.asm; sar Rq(WR0.code()), cl),
-                    4 => dynasm!(self.asm; sar Rd(WR0.code()), cl),
-                    2 => dynasm!(self.asm; sar Rw(WR0.code()), cl),
                     1 => dynasm!(self.asm; sar Rb(WR0.code()), cl),
+                    2 => dynasm!(self.asm; sar Rw(WR0.code()), cl),
+                    4 => dynasm!(self.asm; sar Rd(WR0.code()), cl),
+                    8 => dynasm!(self.asm; sar Rq(WR0.code()), cl),
                     _ => todo!(),
                 }
                 self.store_new_local(iidx, WR0);
@@ -449,10 +449,10 @@ impl<'a> Assemble<'a> {
                 self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
                 self.load_operand(Rq::RCX, &rhs); // ^^^ same
                 match lhs.byte_size(self.m) {
-                    8 => dynasm!(self.asm; shr Rq(WR0.code()), cl),
-                    4 => dynasm!(self.asm; shr Rd(WR0.code()), cl),
-                    2 => dynasm!(self.asm; shr Rw(WR0.code()), cl),
                     1 => dynasm!(self.asm; shr Rb(WR0.code()), cl),
+                    2 => dynasm!(self.asm; shr Rw(WR0.code()), cl),
+                    4 => dynasm!(self.asm; shr Rd(WR0.code()), cl),
+                    8 => dynasm!(self.asm; shr Rq(WR0.code()), cl),
                     _ => todo!(),
                 }
                 self.store_new_local(iidx, WR0);
@@ -461,10 +461,10 @@ impl<'a> Assemble<'a> {
                 self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
                 self.load_operand(Rq::RCX, &rhs); // ^^^ same
                 match lhs.byte_size(self.m) {
-                    8 => dynasm!(self.asm; shl Rq(WR0.code()), cl),
-                    4 => dynasm!(self.asm; shl Rd(WR0.code()), cl),
-                    2 => dynasm!(self.asm; shl Rw(WR0.code()), cl),
                     1 => dynasm!(self.asm; shl Rb(WR0.code()), cl),
+                    2 => dynasm!(self.asm; shl Rw(WR0.code()), cl),
+                    4 => dynasm!(self.asm; shl Rd(WR0.code()), cl),
+                    8 => dynasm!(self.asm; shl Rq(WR0.code()), cl),
                     _ => todo!(),
                 }
                 self.store_new_local(iidx, WR0);
@@ -473,10 +473,10 @@ impl<'a> Assemble<'a> {
                 self.load_operand(Rq::RAX, &lhs); // FIXME: assumes value will fit in a reg.
                 self.load_operand(WR1, &rhs); // ^^^ same
                 match lhs.byte_size(self.m) {
-                    8 => dynasm!(self.asm; mul Rq(WR1.code())),
-                    4 => dynasm!(self.asm; mul Rd(WR1.code())),
-                    2 => dynasm!(self.asm; mul Rw(WR1.code())),
                     1 => dynasm!(self.asm; mul Rb(WR1.code())),
+                    2 => dynasm!(self.asm; mul Rw(WR1.code())),
+                    4 => dynasm!(self.asm; mul Rd(WR1.code())),
+                    8 => dynasm!(self.asm; mul Rq(WR1.code())),
                     _ => todo!(),
                 }
                 // Note that because we are code-genning an unchecked multiply, the higher-order part of
@@ -487,10 +487,10 @@ impl<'a> Assemble<'a> {
                 self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
                 self.load_operand(WR1, &rhs); // ^^^ same
                 match lhs.byte_size(self.m) {
-                    8 => dynasm!(self.asm; or Rq(WR0.code()), Rq(WR1.code())),
-                    4 => dynasm!(self.asm; or Rd(WR0.code()), Rd(WR1.code())),
-                    2 => dynasm!(self.asm; or Rw(WR0.code()), Rw(WR1.code())),
                     1 => dynasm!(self.asm; or Rb(WR0.code()), Rb(WR1.code())),
+                    2 => dynasm!(self.asm; or Rw(WR0.code()), Rw(WR1.code())),
+                    4 => dynasm!(self.asm; or Rd(WR0.code()), Rd(WR1.code())),
+                    8 => dynasm!(self.asm; or Rq(WR0.code()), Rq(WR1.code())),
                     _ => todo!(),
                 }
                 self.store_new_local(iidx, WR0);
@@ -506,12 +506,12 @@ impl<'a> Assemble<'a> {
                 // use `cdq`/`cqo` to double the size via sign extension and store the result in
                 // DX:AX, EDX:EAX, RDX:RAX.
                 match lhs.byte_size(self.m) {
-                    8 => dynasm!(self.asm; cqo; idiv Rq(WR1.code())),
-                    4 => dynasm!(self.asm; cdq; idiv Rd(WR1.code())),
-                    2 => dynasm!(self.asm; cwd; idiv Rw(WR1.code())),
                     // There's no `cwd` equivalent for byte-sized values, so we use `movsx`
                     // (sign-extend) instead.
                     1 => dynasm!(self.asm; movsx ax, al; idiv Rb(WR1.code())),
+                    2 => dynasm!(self.asm; cwd; idiv Rw(WR1.code())),
+                    4 => dynasm!(self.asm; cdq; idiv Rd(WR1.code())),
+                    8 => dynasm!(self.asm; cqo; idiv Rq(WR1.code())),
                     _ => todo!(),
                 }
                 // The quotient is stored in RAX. We don't care about the remainder stored in RDX.
@@ -525,10 +525,10 @@ impl<'a> Assemble<'a> {
                 self.load_operand(Rq::RAX, &lhs); // FIXME: assumes value will fit in a reg.
                 self.load_operand(WR1, &rhs); // ^^^ same
                 match lhs.byte_size(self.m) {
-                    8 => dynasm!(self.asm; idiv Rq(WR1.code())),
-                    4 => dynasm!(self.asm; idiv Rd(WR1.code())),
-                    2 => dynasm!(self.asm; idiv Rw(WR1.code())),
                     1 => dynasm!(self.asm; idiv Rb(WR1.code())),
+                    2 => dynasm!(self.asm; idiv Rw(WR1.code())),
+                    4 => dynasm!(self.asm; idiv Rd(WR1.code())),
+                    8 => dynasm!(self.asm; idiv Rq(WR1.code())),
                     _ => todo!(),
                 }
                 // The remainder is stored in RDX. We don't care about the quotient stored in RAX.
@@ -538,10 +538,10 @@ impl<'a> Assemble<'a> {
                 self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
                 self.load_operand(WR1, &rhs); // ^^^ same
                 match lhs.byte_size(self.m) {
-                    8 => dynasm!(self.asm; sub Rq(WR0.code()), Rq(WR1.code())),
-                    4 => dynasm!(self.asm; sub Rd(WR0.code()), Rd(WR1.code())),
-                    2 => dynasm!(self.asm; sub Rw(WR0.code()), Rw(WR1.code())),
                     1 => dynasm!(self.asm; sub Rb(WR0.code()), Rb(WR1.code())),
+                    2 => dynasm!(self.asm; sub Rw(WR0.code()), Rw(WR1.code())),
+                    4 => dynasm!(self.asm; sub Rd(WR0.code()), Rd(WR1.code())),
+                    8 => dynasm!(self.asm; sub Rq(WR0.code()), Rq(WR1.code())),
                     _ => todo!(),
                 }
                 self.store_new_local(iidx, WR0);
@@ -550,10 +550,10 @@ impl<'a> Assemble<'a> {
                 self.load_operand(WR0, &lhs); // FIXME: assumes value will fit in a reg.
                 self.load_operand(WR1, &rhs); // ^^^ same
                 match lhs.byte_size(self.m) {
-                    8 => dynasm!(self.asm; xor Rq(WR0.code()), Rq(WR1.code())),
-                    4 => dynasm!(self.asm; xor Rd(WR0.code()), Rd(WR1.code())),
-                    2 => dynasm!(self.asm; xor Rw(WR0.code()), Rw(WR1.code())),
                     1 => dynasm!(self.asm; xor Rb(WR0.code()), Rb(WR1.code())),
+                    2 => dynasm!(self.asm; xor Rw(WR0.code()), Rw(WR1.code())),
+                    4 => dynasm!(self.asm; xor Rd(WR0.code()), Rd(WR1.code())),
+                    8 => dynasm!(self.asm; xor Rq(WR0.code()), Rq(WR1.code())),
                     _ => todo!(),
                 }
                 self.store_new_local(iidx, WR0);
@@ -566,10 +566,10 @@ impl<'a> Assemble<'a> {
                 self.load_operand(Rq::RAX, &lhs); // FIXME: assumes value will fit in a reg.
                 self.load_operand(WR1, &rhs); // ^^^ same
                 match lhs.byte_size(self.m) {
-                    8 => dynasm!(self.asm; div Rq(WR1.code())),
-                    4 => dynasm!(self.asm; div Rd(WR1.code())),
-                    2 => dynasm!(self.asm; div Rw(WR1.code())),
                     1 => dynasm!(self.asm; div Rb(WR1.code())),
+                    2 => dynasm!(self.asm; div Rw(WR1.code())),
+                    4 => dynasm!(self.asm; div Rd(WR1.code())),
+                    8 => dynasm!(self.asm; div Rq(WR1.code())),
                     _ => todo!(),
                 }
                 // The quotient is stored in RAX. We don't care about the remainder stored in RDX.
@@ -579,8 +579,8 @@ impl<'a> Assemble<'a> {
                 self.load_operand_float(WF0, &lhs);
                 self.load_operand_float(WF1, &rhs);
                 match lhs.byte_size(self.m) {
-                    8 => dynasm!(self.asm; divsd Rx(WF0.code()), Rx(WF1.code())),
                     4 => dynasm!(self.asm; divss Rx(WF0.code()), Rx(WF1.code())),
+                    8 => dynasm!(self.asm; divsd Rx(WF0.code()), Rx(WF1.code())),
                     _ => todo!(),
                 }
                 self.store_new_local_float(iidx, WF0);
@@ -589,8 +589,8 @@ impl<'a> Assemble<'a> {
                 self.load_operand_float(WF0, &lhs);
                 self.load_operand_float(WF1, &rhs);
                 match lhs.byte_size(self.m) {
-                    8 => dynasm!(self.asm; addsd Rx(WF0.code()), Rx(WF1.code())),
                     4 => dynasm!(self.asm; addss Rx(WF0.code()), Rx(WF1.code())),
+                    8 => dynasm!(self.asm; addsd Rx(WF0.code()), Rx(WF1.code())),
                     _ => todo!(),
                 }
                 self.store_new_local_float(iidx, WF0);
@@ -599,8 +599,8 @@ impl<'a> Assemble<'a> {
                 self.load_operand_float(WF0, &lhs);
                 self.load_operand_float(WF1, &rhs);
                 match lhs.byte_size(self.m) {
-                    8 => dynasm!(self.asm; mulsd Rx(WF0.code()), Rx(WF1.code())),
                     4 => dynasm!(self.asm; mulss Rx(WF0.code()), Rx(WF1.code())),
+                    8 => dynasm!(self.asm; mulsd Rx(WF0.code()), Rx(WF1.code())),
                     _ => todo!(),
                 }
                 self.store_new_local_float(iidx, WF0);
@@ -619,10 +619,10 @@ impl<'a> Assemble<'a> {
                 let size = self.m.inst_no_proxies(iidx).def_byte_size(self.m);
                 debug_assert!(size <= REG64_SIZE);
                 match size {
-                    8 => dynasm!(self.asm ; mov Rq(WR0.code()), [Rq(base_reg) + off]),
-                    4 => dynasm!(self.asm ; mov Rd(WR0.code()), [Rq(base_reg) + off]),
-                    2 => dynasm!(self.asm ; movzx Rd(WR0.code()), WORD [Rq(base_reg) + off]),
                     1 => dynasm!(self.asm ; movzx Rq(WR0.code()), BYTE [Rq(base_reg) + off]),
+                    2 => dynasm!(self.asm ; movzx Rd(WR0.code()), WORD [Rq(base_reg) + off]),
+                    4 => dynasm!(self.asm ; mov Rd(WR0.code()), [Rq(base_reg) + off]),
+                    8 => dynasm!(self.asm ; mov Rq(WR0.code()), [Rq(base_reg) + off]),
                     _ => todo!("{}", size),
                 };
                 self.store_new_local(iidx, WR0);
@@ -636,10 +636,10 @@ impl<'a> Assemble<'a> {
         let size = self.m.inst_no_proxies(iidx).def_byte_size(self.m);
         debug_assert!(size <= REG64_SIZE);
         match size {
-            8 => dynasm!(self.asm ; mov Rq(WR0.code()), [Rq(WR0.code())]),
-            4 => dynasm!(self.asm ; mov Rd(WR0.code()), [Rq(WR0.code())]),
-            2 => dynasm!(self.asm ; movzx Rd(WR0.code()), WORD [Rq(WR0.code())]),
             1 => dynasm!(self.asm ; movzx Rq(WR0.code()), BYTE [Rq(WR0.code())]),
+            2 => dynasm!(self.asm ; movzx Rd(WR0.code()), WORD [Rq(WR0.code())]),
+            4 => dynasm!(self.asm ; mov Rd(WR0.code()), [Rq(WR0.code())]),
+            8 => dynasm!(self.asm ; mov Rq(WR0.code()), [Rq(WR0.code())]),
             _ => todo!("{}", size),
         };
         self.store_new_local(iidx, WR0);
@@ -676,10 +676,10 @@ impl<'a> Assemble<'a> {
         let val = inst.val(self.m);
         self.load_operand(WR1, &val); // FIXME: assumes the value fits in a reg
         match val.byte_size(self.m) {
-            8 => dynasm!(self.asm ; mov [Rq(WR0.code())], Rq(WR1.code())),
-            4 => dynasm!(self.asm ; mov [Rq(WR0.code())], Rd(WR1.code())),
-            2 => dynasm!(self.asm ; mov [Rq(WR0.code())], Rw(WR1.code())),
             1 => dynasm!(self.asm ; mov [Rq(WR0.code())], Rb(WR1.code())),
+            2 => dynasm!(self.asm ; mov [Rq(WR0.code())], Rw(WR1.code())),
+            4 => dynasm!(self.asm ; mov [Rq(WR0.code())], Rd(WR1.code())),
+            8 => dynasm!(self.asm ; mov [Rq(WR0.code())], Rq(WR1.code())),
             _ => todo!(),
         }
     }
@@ -797,10 +797,10 @@ impl<'a> Assemble<'a> {
 
         // Perform the comparison.
         match rhs.byte_size(self.m) {
-            8 => dynasm!(self.asm; cmp Rq(WR0.code()), Rq(WR1.code())),
-            4 => dynasm!(self.asm; cmp Rd(WR0.code()), Rd(WR1.code())),
-            2 => dynasm!(self.asm; cmp Rw(WR0.code()), Rw(WR1.code())),
             1 => dynasm!(self.asm; cmp Rb(WR0.code()), Rb(WR1.code())),
+            2 => dynasm!(self.asm; cmp Rw(WR0.code()), Rw(WR1.code())),
+            4 => dynasm!(self.asm; cmp Rd(WR0.code()), Rd(WR1.code())),
+            8 => dynasm!(self.asm; cmp Rq(WR0.code()), Rq(WR1.code())),
             _ => todo!(),
         }
 
@@ -843,13 +843,13 @@ impl<'a> Assemble<'a> {
 
         match pred.is_ordered() {
             Some(true) => match size {
-                8 => dynasm!(self.asm; comisd Rx(WF0.code()), Rx(WF1.code())),
                 4 => dynasm!(self.asm; comiss Rx(WF0.code()), Rx(WF1.code())),
+                8 => dynasm!(self.asm; comisd Rx(WF0.code()), Rx(WF1.code())),
                 _ => panic!(),
             },
             Some(false) => match size {
-                8 => dynasm!(self.asm; ucomisd Rx(WF0.code()), Rx(WF1.code())),
                 4 => dynasm!(self.asm; ucomiss Rx(WF0.code()), Rx(WF1.code())),
+                8 => dynasm!(self.asm; ucomisd Rx(WF0.code()), Rx(WF1.code())),
                 _ => panic!(),
             },
             None => todo!(),
@@ -993,8 +993,8 @@ impl<'a> Assemble<'a> {
         self.load_operand_float(WF0, &from_val);
 
         match from_size {
-            8 => dynasm!(self.asm; cvttsd2si Rq(WR0.code()), Rx(WF0.code())),
             4 => dynasm!(self.asm; cvttss2si Rq(WR0.code()), Rx(WF0.code())),
+            8 => dynasm!(self.asm; cvttsd2si Rq(WR0.code()), Rx(WF0.code())),
             _ => panic!(),
         }
 
@@ -1223,8 +1223,8 @@ impl<'a> Assemble<'a> {
         match alloc {
             VarLocation::Stack { frame_off, size: _ } => match i32::try_from(*frame_off) {
                 Ok(foff) => match size {
-                    4 => dynasm!(self.asm; movss Rx(reg.code()), [rbp - foff]),
                     8 => dynasm!(self.asm; movsd Rx(reg.code()), [rbp - foff]),
+                    4 => dynasm!(self.asm; movss Rx(reg.code()), [rbp - foff]),
                     _ => todo!(),
                 },
                 Err(_) => todo!(),
@@ -1239,10 +1239,10 @@ impl<'a> Assemble<'a> {
         match l {
             VarLocation::Stack { frame_off, size: _ } => match i32::try_from(*frame_off) {
                 Ok(off) => match size {
-                    8 => dynasm!(self.asm ; mov [rbp - off], Rq(reg.code())),
-                    4 => dynasm!(self.asm ; mov [rbp - off], Rd(reg.code())),
-                    2 => dynasm!(self.asm ; mov [rbp - off], Rw(reg.code())),
                     1 => dynasm!(self.asm ; mov [rbp - off], Rb(reg.code())),
+                    2 => dynasm!(self.asm ; mov [rbp - off], Rw(reg.code())),
+                    4 => dynasm!(self.asm ; mov [rbp - off], Rd(reg.code())),
+                    8 => dynasm!(self.asm ; mov [rbp - off], Rq(reg.code())),
                     _ => todo!("{}", size),
                 },
                 Err(_) => todo!("{}", size),
@@ -1264,8 +1264,8 @@ impl<'a> Assemble<'a> {
         match l {
             VarLocation::Stack { frame_off, size: _ } => match i32::try_from(*frame_off) {
                 Ok(off) => match size {
-                    8 => dynasm!(self.asm ; movsd [rbp - off], Rx(reg.code())),
                     4 => dynasm!(self.asm ; movss [rbp - off], Rx(reg.code())),
+                    8 => dynasm!(self.asm ; movsd [rbp - off], Rx(reg.code())),
                     _ => todo!("{}", size),
                 },
                 Err(_) => todo!("{}", size),
