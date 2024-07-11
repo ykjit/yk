@@ -23,6 +23,13 @@ test_yklua() {
     cd ../..
 }
 
+# Check that the ykllvm commit in the submodule is from the main branch.
+# Due to the way github works, this may not be the case!
+cd ykllvm
+git log --pretty=format:%H -n 100 --no-show-signature origin/main | \
+    grep $(git rev-parse HEAD)
+cd ..
+
 # Install rustup.
 CARGO_HOME="$(pwd)/.cargo"
 export CARGO_HOME
