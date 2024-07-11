@@ -42,9 +42,11 @@ pub(crate) extern "C" fn __yk_deopt(
                         _ => todo!(),
                     }
                 }
-                VarLocation::Register => todo!(),
+                VarLocation::Register(_) => todo!(),
                 VarLocation::ConstFloat(_) => todo!(),
                 VarLocation::ConstInt { bits: _, v } => *v,
+                VarLocation::Direct { .. } => panic!(),
+                VarLocation::Indirect { .. } => panic!(),
             };
             ykctrlpvars.push(val);
         }
@@ -158,9 +160,11 @@ pub(crate) extern "C" fn __yk_deopt(
                         _ => todo!(),
                     }
                 }
-                VarLocation::Register => todo!(),
+                VarLocation::Register(_) => todo!(),
                 VarLocation::ConstInt { bits: _, v } => v,
                 VarLocation::ConstFloat(f) => f.to_bits(),
+                VarLocation::Direct { .. } => panic!(),
+                VarLocation::Indirect { .. } => panic!(),
             };
             varidx += 1;
 
@@ -195,8 +199,14 @@ pub(crate) extern "C" fn __yk_deopt(
                     }
                 }
                 SMLocation::Direct(..) => {
-                    // Due to the shadow stack we only expect direct locations for the control
-                    // point frame.
+                    // Direct locations are pointers to the stack, stored on the stack (e.g.
+                    // `alloca` or GEP). Our shadow stack unifies the JIT and AOT stacks, replacing
+                    // them with a heap allocation. For this reason, no `Direct` stackmap entries
+                    // can exist apart from those special-cased in the shadow stack pass (e.g. the
+                    // control point struct and the result of `yk_mt_location_new()`). The
+                    // exceptions only appear (for now) at frame index 0 (where the control point
+                    // is), and since this frame will not be re-written by deopt, there's no need
+                    // to restore those direct locations anyway.
                     debug_assert_eq!(frameid, 0);
                     continue;
                 }

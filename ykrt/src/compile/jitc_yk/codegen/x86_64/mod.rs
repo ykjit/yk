@@ -13,7 +13,7 @@ use super::{
         jit_ir::{self, BinOp, FloatTy, Inst, InstIdx, Module, Operand, Ty},
         CompilationError,
     },
-    reg_alloc::{StackDirection, VarLocation},
+    reg_alloc::{self, StackDirection, VarLocation},
     CodeGen,
 };
 #[cfg(any(debug_assertions, test))]
@@ -81,6 +81,17 @@ static ARG_FP_REGS: [Rx; 8] = [
     Rx::XMM7,
 ];
 
+/// Registers used by stackmaps to store live variables.
+static STACKMAP_GP_REGS: [Rq; 7] = [
+    Rq::RBX,
+    Rq::R12,
+    Rq::R13,
+    Rq::R14,
+    Rq::R15,
+    Rq::RSI,
+    Rq::RDI,
+];
+
 /// The argument index of the live variables struct argument in the JITted code function.
 static JITFUNC_LIVEVARS_ARGIDX: usize = 0;
 
@@ -138,6 +149,7 @@ struct Assemble<'a> {
     asm: dynasmrt::x64::Assembler,
     /// Deopt info, with one entry per guard, in the order that the guards appear in the trace.
     deoptinfo: Vec<DeoptInfo>,
+    ///
     /// Maps assembly offsets to comments.
     ///
     /// Comments used by the trace printer for debugging and testing only.
@@ -332,7 +344,6 @@ impl<'a> Assemble<'a> {
             jit_ir::Inst::IndirectCall(i) => self.cg_indirectcall(iidx, i)?,
             jit_ir::Inst::ICmp(i) => self.cg_icmp(iidx, i),
             jit_ir::Inst::Guard(i) => self.cg_guard(iidx, i),
-            jit_ir::Inst::Arg(i) => self.cg_arg(iidx, *i),
             jit_ir::Inst::TraceLoopStart => self.cg_traceloopstart(),
             jit_ir::Inst::SExt(i) => self.cg_sext(iidx, i),
             jit_ir::Inst::ZeroExtend(i) => self.cg_zeroextend(iidx, i),
@@ -367,13 +378,12 @@ impl<'a> Assemble<'a> {
 
         // Start a frame for the JITted code.
         dynasm!(self.asm
-            ; push rbp
-            ; mov rbp, rsp
             // Save pointers to ctrlp_vars and frameaddr for later use.
             ; push rdi
             ; push rsi
-            // Reset the basepointer so the spill allocator doesn't overwrite the two values we
-            // just pushed.
+            // Save base pointer which we use to access the parent stack.
+            ; push rbp
+            // Reset base pointer.
             ; mov rbp, rsp
         );
 
@@ -737,44 +747,78 @@ impl<'a> Assemble<'a> {
 
     fn cg_loadtraceinput(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LoadTraceInputInst) {
         // Find the argument register containing the pointer to the live variables struct.
-        let base_reg = ARG_GP_REGS[JITFUNC_LIVEVARS_ARGIDX];
         match self.m.type_(inst.tyidx()) {
             Ty::Integer(_) | Ty::Ptr => {
                 let [tgt_reg] = self.ra.get_gp_regs_avoiding(
                     &mut self.asm,
                     iidx,
                     [RegConstraint::Output],
-                    RegSet::from(base_reg),
+                    RegSet::from_vec(&STACKMAP_GP_REGS),
                 );
-                let off = i32::try_from(inst.off()).unwrap();
                 let size = self.m.inst_no_proxies(iidx).def_byte_size(self.m);
                 debug_assert!(size <= REG64_SIZE);
-                match size {
-                    1 => {
-                        dynasm!(self.asm ; movzx Rq(tgt_reg.code()), BYTE [Rq(base_reg.code()) + off])
+
+                match self.m.tilocs()[usize::try_from(inst.locidx()).unwrap()] {
+                    VarLocation::Register(reg_alloc::Register::GP(reg)) => {
+                        // FIXME: Map this iidx to `reg` without this `mov`. Requires way to
+                        // initialise register allocator with existing values.
+                        dynasm!(self.asm; mov Rq(tgt_reg.code()), Rq(reg.code()));
                     }
-                    2 => {
-                        dynasm!(self.asm ; movzx Rq(tgt_reg.code()), WORD [Rq(base_reg.code()) + off])
+                    VarLocation::Register(reg_alloc::Register::FP(_)) => {
+                        // The value is a integer and thus can't be stored in a float register.
+                        panic!()
                     }
-                    4 => dynasm!(self.asm ; mov Rd(tgt_reg.code()), [Rq(base_reg.code()) + off]),
-                    8 => dynasm!(self.asm ; mov Rq(tgt_reg.code()), [Rq(base_reg.code()) + off]),
-                    _ => todo!("{}", size),
-                };
+                    VarLocation::Direct { frame_off, size } => {
+                        // FIXME If we prime the register allocator with the interpreter frames
+                        // stack size and don't create a new frame in the trace epilogue we can
+                        // reference values directly using the current RBP value.
+                        dynasm!(self.asm; mov Rq(tgt_reg.code()), QWORD [Rq(Rq::RBP.code())]);
+                        match size {
+                            8 => {
+                                dynasm!(self.asm; lea Rq(tgt_reg.code()), [Rq(tgt_reg.code()) + frame_off])
+                            }
+                            _ => todo!(),
+                        }
+                    }
+                    VarLocation::Indirect { frame_off, size } => {
+                        dynasm!(self.asm; mov Rq(tgt_reg.code()), QWORD [Rq(Rq::RBP.code())]);
+                        match size {
+                            8 => {
+                                dynasm!(self.asm; mov Rq(tgt_reg.code()), [Rq(tgt_reg.code()) + frame_off])
+                            }
+                            _ => todo!(),
+                        }
+                    }
+                    _ => panic!(),
+                }
             }
-            Ty::Float(fty) => {
+            Ty::Float(_fty) => {
+                // FIXME: Work out which registers are used by stackmaps and avoid them.
                 let [tgt_reg] = self
                     .ra
                     .get_fp_regs(&mut self.asm, iidx, [RegConstraint::Output]);
-                let off = i32::try_from(inst.off()).unwrap();
                 let size = self.m.inst_no_proxies(iidx).def_byte_size(self.m);
                 debug_assert!(size <= REG64_SIZE);
-                match fty {
-                    FloatTy::Float => {
-                        dynasm!(self.asm; movss Rx(tgt_reg.code()), [Rq(base_reg.code()) + off])
+
+                match self.m.tilocs()[usize::try_from(inst.locidx()).unwrap()] {
+                    VarLocation::Register(reg_alloc::Register::FP(reg)) => {
+                        // FIXME: Map this iidx to `reg` without this `mov`. Requires way to
+                        // initialise register allocator with existing values.
+                        dynasm!(self.asm; movss Rx(tgt_reg.code()), Rx(reg.code()));
                     }
-                    FloatTy::Double => {
-                        dynasm!(self.asm; movsd Rx(tgt_reg.code()), [Rq(base_reg.code()) + off])
+                    VarLocation::Register(reg_alloc::Register::GP(_)) => {
+                        // The value is a float and thus can't be stored in a normal register.
+                        panic!()
                     }
+                    VarLocation::Direct { .. } => {
+                        // The value is a pointer and thus can't be of type float.
+                        panic!()
+                    }
+                    VarLocation::Indirect { .. } => {
+                        // The value is a pointer and thus can't be of type float.
+                        panic!()
+                    }
+                    _ => panic!(),
                 }
             }
             Ty::Func(_) | Ty::Void | Ty::Unimplemented(_) => unreachable!(),
@@ -1145,13 +1189,6 @@ impl<'a> Assemble<'a> {
                 );
             }
         }
-    }
-
-    fn cg_arg(&mut self, iidx: InstIdx, idx: u16) {
-        // For arguments passed into the trace function we simply inform the register allocator
-        // where they are stored and let the allocator take things from there.
-        self.ra
-            .assign_gp_reg_to_inst(ARG_GP_REGS[usize::from(idx)], iidx);
     }
 
     fn cg_traceloopstart(&mut self) {
@@ -1830,7 +1867,7 @@ mod tests {
             "
               entry:
                 %0: ptr = load_ti 0
-                %1: i32 = load_ti 8
+                %1: i32 = load_ti 1
                 %2: ptr = dyn_ptr_add %0, %1, 32
             ",
             "
@@ -1850,14 +1887,14 @@ mod tests {
             "
               entry:
                 %0: ptr = load_ti 0
-                %1: ptr = load_ti 8
+                %1: ptr = load_ti 1
                 *%1 = %0
             ",
             "
                 ...
-                ; %0: ptr = load_ti 0
+                ; %0: ptr = load_ti ...
                 {{_}} {{_}}: mov r.64.x, ...
-                ; %1: ptr = load_ti 8
+                ; %1: ptr = load_ti ...
                 {{_}} {{_}}: mov r.64.y, ...
                 ; *%1 = %0
                 {{_}} {{_}}: mov [r.64.y], r.64.x
@@ -1875,8 +1912,8 @@ mod tests {
             ",
             "
                 ...
-                ; %0: i8 = load_ti 0
-                {{_}} {{_}}: movzx r.64.x, byte ptr ...
+                ; %0: i8 = load_ti ...
+                {{_}} {{_}}: mov r.64.x, rbx
                 ...
                 ",
         );
@@ -1887,12 +1924,12 @@ mod tests {
         codegen_and_test(
             "
               entry:
-                %0: i16 = load_ti 32
+                %0: i16 = load_ti 0
             ",
             "
                 ...
-                ; %0: i16 = load_ti 32
-                {{_}} {{_}}: movzx r.64.x, word ptr ...
+                ; %0: i16 = load_ti ...
+                {{_}} {{_}}: mov r.64.x, rbx
                 ...
                 ",
         );
@@ -1966,8 +2003,8 @@ mod tests {
 
               entry:
                 %0: i32 = load_ti 0
-                %1: i32 = load_ti 4
-                %2: i32 = load_ti 8
+                %1: i32 = load_ti 1
+                %2: i32 = load_ti 2
                 call @puts(%0, %1, %2)
             ",
             &format!(
@@ -1975,9 +2012,10 @@ mod tests {
                 ...
                 ; call @puts(%0, %1, %2)
                 {{{{_}}}} {{{{_}}}}: mov r12, 0x{sym_addr:X}
-                {{{{_}}}} {{{{_}}}}: mov edi, r.32.x
-                {{{{_}}}} {{{{_}}}}: mov esi, r.32.y
-                {{{{_}}}} {{{{_}}}}: mov edx, r.32.z
+                ...
+                {{{{_}}}} {{{{_}}}}: mov edi, [rbp-...
+                {{{{_}}}} {{{{_}}}}: mov esi, [rbp-...
+                {{{{_}}}} {{{{_}}}}: mov edx, [rbp-...
                 {{{{_}}}} {{{{_}}}}: call r12
                 ...
             "
@@ -1994,11 +2032,11 @@ mod tests {
 
               entry:
                 %0: i8 = load_ti 0
-                %1: i16 = load_ti 8
-                %2: i32 = load_ti 16
-                %3: i64 = load_ti 24
-                %4: ptr = load_ti 32
-                %5: i8 = load_ti 40
+                %1: i16 = load_ti 1
+                %2: i32 = load_ti 2
+                %3: i64 = load_ti 3
+                %4: ptr = load_ti 4
+                %5: i8 = load_ti 5
                 call @puts(%0, %1, %2, %3, %4, %5)
             ",
             &format!(
@@ -2007,9 +2045,9 @@ mod tests {
                 ; call @puts(%0, %1, %2, %3, %4, %5)
                 {{{{_}}}} {{{{_}}}}: mov r12, 0x{sym_addr:X}
                 ...
-                {{{{_}}}} {{{{_}}}}: movzx rdi, r.8.x
-                {{{{_}}}} {{{{_}}}}: movzx rsi, r.16.y
-                {{{{_}}}} {{{{_}}}}: mov edx, r.32.z
+                {{{{_}}}} {{{{_}}}}: movzx rdi, byte ptr [rbp-...
+                {{{{_}}}} {{{{_}}}}: movzx rsi, word ptr [rbp-...
+                {{{{_}}}} {{{{_}}}}: mov edx, [rbp-...
                 {{{{_}}}} {{{{_}}}}: mov rcx, [rbp-0x18]
                 {{{{_}}}} {{{{_}}}}: mov r8, [rbp-0x10]
                 {{{{_}}}} {{{{_}}}}: movzx r9, byte ptr [rbp-0x01]
@@ -2191,7 +2229,7 @@ mod tests {
             ",
             "
                 ...
-                ; %0: i8 = load_ti 0
+                ; %0: i8 = load_ti ...
                 ...
                 ; tloop_start:
                 ; %2: i8 = add %0, %0
@@ -2233,10 +2271,10 @@ mod tests {
             ",
             "
                 ...
-                ; %0: i32 = load_ti 0
+                ; %0: i32 = load_ti ...
                 ...
                 ; %1: i8 = trunc %0
-                ... mov [rbp-0x04], r15d
+                {{_}} {{_}}: mov [rbp-0x04], r.32.x
                 ...
             ",
         );
@@ -2253,10 +2291,10 @@ mod tests {
             "
                 ...
                 ; %1: i32 = %0 ? 1i32 : 2i32
-                {{_}} {{_}}: mov r14d, 0x01
-                {{_}} {{_}}: mov r13d, 0x02
-                {{_}} {{_}}: cmp r15b, 0x00
-                {{_}} {{_}}: cmovz r14, r13
+                {{_}} {{_}}: mov r.32.x, 0x01
+                {{_}} {{_}}: mov r.32.y, 0x02
+                {{_}} {{_}}: cmp r.8.z, 0x00
+                {{_}} {{_}}: cmovz r.64.x, r.64.y
                 ...
             ",
         );
@@ -2387,8 +2425,8 @@ mod tests {
             ",
             "
                 ...
-                ; %0: float = load_ti 0
-                {{_}} {{_}}: movss fp.128.x, dword ptr ...
+                ; %0: float = load_ti ...
+                {{_}} {{_}}: movss fp.128.x, xmm0
                 ; %1: double = fp_ext %0
                 {{_}} {{_}}: movss [rbp-{{0x04}}], fp.128.x
                 {{_}} {{_}}: cvtss2sd fp.128.x, fp.128.x

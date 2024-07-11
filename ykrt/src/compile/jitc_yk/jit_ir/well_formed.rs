@@ -28,6 +28,7 @@ use super::{BinOp, BinOpInst, Const, GuardInst, Inst, Module, Operand, Ty};
 
 impl Module {
     pub(crate) fn assert_well_formed(&self) {
+        let mut last_inst = None;
         for (iidx, inst) in self.iter_skipping_insts() {
             inst.map_packed_operand_locals(self, &mut |x| {
                 let i = self.inst_all(x);
@@ -200,8 +201,17 @@ impl Module {
                             self.inst_no_proxies(iidx).display(iidx, self));
                     }
                 }
+                Inst::LoadTraceInput(_) => {
+                    if let Some(i) = last_inst {
+                        if !matches!(i, Inst::LoadTraceInput(_)) {
+                            panic!("LoadTraceInput instruction may only appear at the beginning of a trace or after another LoadTraceInput instruction\n  {}",
+                                self.inst_no_proxies(iidx).display(iidx, self));
+                        }
+                    }
+                }
                 _ => (),
             }
+            last_inst = Some(inst.clone());
         }
     }
 }
@@ -298,7 +308,7 @@ mod tests {
             "
               entry:
                 %0: i8 = load_ti 0
-                %1: i64 = load_ti 0
+                %1: i64 = load_ti 1
                 %2: i1 = eq %0, %1
             ",
         );
@@ -450,6 +460,21 @@ mod tests {
               entry:
                 %0: i32 = load_ti 0
                 %1: i32 = fadd %0, %0
+            ",
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "LoadTraceInput instruction may only appear at the beginning of a trace or after another LoadTraceInput instruction"
+    )]
+    fn load_ti_invalid() {
+        Module::from_str(
+            "
+              entry:
+                %0: i32 = load_ti 0
+                %1: i32 = add %0, %0
+                %2: i32 = load_ti 1
             ",
         );
     }

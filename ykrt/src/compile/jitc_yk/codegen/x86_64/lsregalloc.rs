@@ -1077,6 +1077,14 @@ impl RegSet<Rq> {
             Some(GP_REGS[usize::try_from(15 - (!x).leading_zeros()).unwrap()])
         }
     }
+
+    pub(crate) fn from_vec(regs: &[Rq]) -> Self {
+        let mut s = Self::blank();
+        for reg in regs {
+            s.set(*reg);
+        }
+        s
+    }
 }
 
 impl From<Rq> for RegSet<Rq> {

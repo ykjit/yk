@@ -187,8 +187,8 @@ mod tests {
             "
           ...
           entry:
-            %0: i8 = load_ti 0
-            %1: i8 = load_ti 1
+            %0: i8 = load_ti Register(GP(RBX))
+            %1: i8 = load_ti Register(GP(RBX))
             %3: i8 = add %1, 0i8
             %5: i8 = add %1, 0i8
         ",
@@ -211,8 +211,8 @@ mod tests {
             "
           ...
           entry:
-            %0: i8 = load_ti 0
-            %1: i8 = load_ti 1
+            %0: i8 = load_ti Register(GP(RBX))
+            %1: i8 = load_ti Register(GP(RBX))
             %3: i8 = add %1, %0
             %5: i8 = add %1, %0
         ",
@@ -234,7 +234,7 @@ mod tests {
             "
           ...
           entry:
-            %0: i8 = load_ti 0
+            %0: i8 = load_ti Register(GP(RBX))
             black_box 0i8
         ",
         );
@@ -255,7 +255,7 @@ mod tests {
             "
           ...
           entry:
-            %0: i8 = load_ti 0
+            %0: i8 = load_ti Register(GP(RBX))
             %1: i8 = mul %0, 3i8
             %2: i8 = mul %0, 12i8
             %3: i8 = mul %0, 60i8
@@ -280,7 +280,7 @@ mod tests {
             "
           ...
           entry:
-            %0: i64 = load_ti 0
+            %0: i64 = load_ti Register(GP(RBX))
             %1: i64 = shl %0, 1i64
             %2: i64 = shl %0, 2i64
             %3: i64 = shl %0, 62i64
@@ -421,7 +421,7 @@ mod tests {
             "
           ...
           entry:
-            %0: i8 = load_ti 0
+            %0: i8 = load_ti Register(GP(RBX))
             black_box %0
         ",
         );
