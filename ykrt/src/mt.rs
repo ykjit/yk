@@ -8,7 +8,6 @@ use std::{
     error::Error,
     ffi::c_void,
     marker::PhantomData,
-    mem,
     sync::{
         atomic::{AtomicU16, AtomicU32, AtomicU64, AtomicUsize, Ordering},
         Arc,
@@ -21,7 +20,7 @@ use parking_lot::{Condvar, Mutex, MutexGuard};
 use parking_lot_core::SpinWait;
 
 use crate::{
-    aotsmp::load_aot_stackmaps,
+    aotsmp::{load_aot_stackmaps, AOT_STACKMAPS},
     compile::{default_compiler, CompilationError, CompiledTrace, Compiler, GuardId},
     location::{HotLocation, HotLocationKind, Location, TraceFailed},
     log::{
@@ -51,6 +50,7 @@ pub(crate) const DEFAULT_TRACE_TOO_LONG: usize = 5000;
 const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
 const DEFAULT_SIDETRACE_THRESHOLD: HotThreshold = 5;
 const DEFAULT_TRACE_FAILURE_THRESHOLD: TraceFailureThreshold = 5;
+static REG64_SIZE: usize = 8;
 
 thread_local! {
     static THREAD_MTTHREAD: MTThread = MTThread::new();
@@ -62,6 +62,26 @@ pub(crate) trait SideTraceInfo {
     /// Upcast this [CompiledTrace] to `Any`. This method is a hack that's only needed since trait
     /// upcasting in Rust is incomplete.
     fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static>;
+}
+
+#[cfg(target_arch = "x86_64")]
+#[naked]
+#[no_mangle]
+unsafe extern "C" fn __yk_exec_trace(
+    ctrlp_vars: *mut c_void,
+    frameaddr: *const c_void,
+    rsp: *const c_void,
+    trace: *const c_void,
+) -> ! {
+    std::arch::asm!(
+        // Reset RSP to the end of the control point frame (this doesn't include the
+        // return address)
+        "mov rsp, rdx",
+        // Call the trace function.
+        "call rcx",
+        "ret",
+        options(noreturn)
+    )
 }
 
 /// A meta-tracer. Note that this is conceptually a "front-end" to the actual meta-tracer akin to
@@ -230,30 +250,32 @@ impl MT {
         loc: &Location,
         ctrlp_vars: *mut c_void,
         frameaddr: *mut c_void,
+        smid: u64,
     ) {
         match self.transition_control_point(loc) {
             TransitionControlPoint::NoAction => (),
             TransitionControlPoint::Execute(ctr) => {
                 log_jit_state("enter-jit-code");
                 self.stats.trace_executed();
-                let f = unsafe {
-                    #[cfg(feature = "yk_testing")]
-                    assert_ne!(ctr.entry() as *const (), std::ptr::null());
-                    mem::transmute::<
-                        *const c_void,
-                        unsafe extern "C" fn(*mut c_void, *const c_void) -> !,
-                    >(ctr.entry())
-                };
+
+                // Compute the rsp of the control_point frame.
+                let (rec, pinfo) = AOT_STACKMAPS
+                    .as_ref()
+                    .unwrap()
+                    .get(usize::try_from(smid).unwrap());
+                let mut rsp = unsafe { frameaddr.byte_sub(usize::try_from(rec.size).unwrap()) };
+                if pinfo.hasfp {
+                    rsp = unsafe { rsp.byte_add(REG64_SIZE) };
+                }
+                let trace_addr = ctr.entry();
                 MTThread::with(|mtt| {
                     mtt.set_running_trace(Some(ctr));
                 });
                 self.stats.timing_state(TimingState::JitExecuting);
 
-                unsafe {
-                    // FIXME: Calling this function overwrites the current (Rust) function frame,
-                    // rather than unwinding it. https://github.com/ykjit/yk/issues/778.
-                    f(ctrlp_vars, frameaddr);
-                }
+                // FIXME: Calling this function overwrites the current (Rust) function frame,
+                // rather than unwinding it. https://github.com/ykjit/yk/issues/778.
+                unsafe { __yk_exec_trace(ctrlp_vars, frameaddr, rsp, trace_addr) };
             }
             TransitionControlPoint::StartTracing(hl) => {
                 log_jit_state("start-tracing");

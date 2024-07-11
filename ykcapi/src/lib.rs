@@ -58,13 +58,15 @@ pub extern "C" fn __ykrt_control_point(
     ctrlp_vars: *mut c_void,
     // Frame address of caller.
     frameaddr: *mut c_void,
+    // Stackmap id for the control point.
+    smid: u64,
 ) {
     debug_assert!(!ctrlp_vars.is_null());
     if !loc.is_null() {
         let mt = unsafe { &*mt };
         let loc = unsafe { &*loc };
         let arc = unsafe { Arc::from_raw(mt) };
-        arc.control_point(loc, ctrlp_vars, frameaddr);
+        arc.control_point(loc, ctrlp_vars, frameaddr, smid);
         forget(arc);
     }
 }
