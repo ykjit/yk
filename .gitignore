@@ -1,3 +1,5 @@
+__pycache__
+genetic.log
 target
 Cargo.lock
 .gdb_history
