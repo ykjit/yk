@@ -22,12 +22,22 @@
 //!       * Have a float-type as the destination type operand.
 //!       * Have a destination type operand at least as big as the type of the source operand.
 //!   * [Const::Int]s cannot use more bits than the corresponding [Ty::Integer] type.
+//!   * [super::Inst] operands refer to values which have been previously defined.
 
 use super::{BinOp, BinOpInst, Const, GuardInst, Inst, Module, Operand, Ty};
 
 impl Module {
     pub(crate) fn assert_well_formed(&self) {
         for (iidx, inst) in self.iter_skipping_insts() {
+            inst.map_packed_operand_locals(self, &mut |x| {
+                let i = self.inst_all(x);
+                if i.def_type(self).is_none() {
+                    panic!(
+                        "Instruction at position {iidx} uses undefined value (%{x})\n  {}",
+                        self.inst_no_proxies(iidx).display(iidx, self)
+                    );
+                }
+            });
             match inst {
                 Inst::BinOp(BinOpInst { lhs, binop, rhs }) => {
                     let lhs_tyidx = lhs.unpack(self).tyidx(self);
