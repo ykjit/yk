@@ -321,7 +321,7 @@ impl MT {
                     }
                 }
             }
-            TransitionControlPoint::StopSideTracing(sti, parent) => {
+            TransitionControlPoint::StopSideTracing { guardid, parent } => {
                 // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because
                 // `StartSideTracing` will have put a `Some` in the `Rc`.
                 let (hl, thread_tracer, promotions) =
@@ -343,7 +343,7 @@ impl MT {
                         self.queue_compile_job(
                             (utrace, promotions.into_boxed_slice()),
                             hl,
-                            Some((sti, parent)),
+                            Some((guardid, parent)),
                         );
                     }
                     Err(_e) => {
@@ -460,7 +460,11 @@ impl MT {
                                 }
                             }
                         }
-                        HotLocationKind::SideTracing(ref ctr, sti, ref parent) => {
+                        HotLocationKind::SideTracing {
+                            ref ctr,
+                            guardid,
+                            ref parent,
+                        } => {
                             let hl = loc.hot_location_arc_clone().unwrap();
                             match &*mtt.tstate.borrow() {
                                 MTThreadState::Tracing { hl: thread_hl, .. } => {
@@ -474,7 +478,7 @@ impl MT {
                                         let parent = Arc::clone(parent);
                                         lk.kind = HotLocationKind::Compiled(Arc::clone(ctr));
                                         drop(lk);
-                                        TransitionControlPoint::StopSideTracing(sti, parent)
+                                        TransitionControlPoint::StopSideTracing { guardid, parent }
                                     }
                                 }
                                 _ => {
@@ -526,7 +530,7 @@ impl MT {
     /// Perform the next step to `loc` in the `Location` state-machine for a guard failure.
     pub(crate) fn transition_guard_failure(
         self: &Arc<Self>,
-        gid: usize,
+        guardid: usize,
         parent: Arc<dyn CompiledTrace>,
     ) -> TransitionGuardFailure {
         if let Some(hl) = parent.hl().upgrade() {
@@ -535,7 +539,11 @@ impl MT {
                 debug_assert!(!mtt.is_tracing());
                 let mut lk = hl.lock();
                 if let HotLocationKind::Compiled(ref ctr) = lk.kind {
-                    lk.kind = HotLocationKind::SideTracing(Arc::clone(ctr), gid, parent);
+                    lk.kind = HotLocationKind::SideTracing {
+                        ctr: Arc::clone(ctr),
+                        guardid,
+                        parent,
+                    };
                     drop(lk);
                     TransitionGuardFailure::StartSideTracing(hl)
                 } else {
@@ -774,7 +782,10 @@ enum TransitionControlPoint {
     Execute(Arc<dyn CompiledTrace>),
     StartTracing(Arc<Mutex<HotLocation>>),
     StopTracing,
-    StopSideTracing(usize, Arc<dyn CompiledTrace>),
+    StopSideTracing {
+        guardid: usize,
+        parent: Arc<dyn CompiledTrace>,
+    },
 }
 
 /// What action should a caller of [MT::transition_guard_failure] take?
@@ -892,7 +903,7 @@ mod tests {
         expect_start_side_tracing(&mt, &loc);
 
         match mt.transition_control_point(&loc) {
-            TransitionControlPoint::StopSideTracing(_, _) => {
+            TransitionControlPoint::StopSideTracing { .. } => {
                 MTThread::with(|mtt| {
                     *mtt.tstate.borrow_mut() = MTThreadState::Interpreting;
                 });
@@ -1191,7 +1202,7 @@ mod tests {
                             break;
                         }
                         TransitionControlPoint::StopTracing
-                        | TransitionControlPoint::StopSideTracing(_, _) => unreachable!(),
+                        | TransitionControlPoint::StopSideTracing { .. } => unreachable!(),
                     }
                 }
             }));
@@ -1295,7 +1306,7 @@ mod tests {
         ));
         assert!(matches!(
             mt.transition_control_point(&loc2),
-            TransitionControlPoint::StopSideTracing(_, _)
+            TransitionControlPoint::StopSideTracing { .. }
         ));
     }
 

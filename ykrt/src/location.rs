@@ -248,7 +248,17 @@ pub(crate) enum HotLocationKind {
     Tracing,
     /// While executing JIT compiled code, a guard failed often enough for us to want to generate a
     /// side trace for this HotLocation.
-    SideTracing(Arc<dyn CompiledTrace>, usize, Arc<dyn CompiledTrace>),
+    SideTracing {
+        /// The top-level [CompiledTrace]: while one thread is side tracing a (possibly many levels
+        /// deep) side trace that ultimately relates to this [CompiledTrace], other threads can
+        /// execute this compiled trace.
+        ctr: Arc<dyn CompiledTrace>,
+        /// The ID of the guard that failed (inside `parent`).
+        guardid: usize,
+        /// The [CompiledTrace] that the guard failed in. This will either be equal to `ctr` or a
+        /// (possibly many levels deep) child trace of `ctr`.
+        parent: Arc<dyn CompiledTrace>,
+    },
 }
 
 /// When a [HotLocation] has failed to compile a valid trace, should the [HotLocation] be tried
