@@ -1416,7 +1416,15 @@ impl Inst {
             Inst::SExt(SExtInst { val, .. }) => val.map_iidx(f),
             Inst::ZeroExtend(ZeroExtendInst { val, .. }) => val.map_iidx(f),
             Inst::Trunc(TruncInst { val, .. }) => val.map_iidx(f),
-            Inst::Select(_) => todo!(),
+            Inst::Select(SelectInst {
+                cond,
+                trueval,
+                falseval,
+            }) => {
+                cond.map_iidx(f);
+                trueval.map_iidx(f);
+                falseval.map_iidx(f);
+            }
             Inst::SIToFP(SIToFPInst { val, .. }) => val.map_iidx(f),
             Inst::FPExt(FPExtInst { val, .. }) => val.map_iidx(f),
             Inst::FCmp(FCmpInst { lhs, pred: _, rhs }) => {
