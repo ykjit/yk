@@ -110,7 +110,7 @@ cargo install cargo-diff-tools
 if [ "$CI_RUNNER" = buildbot ] ; then
     # When running under buildbot, we need to `git fetch` data from the remote if we want
     # cargo-clippy-def to work later.
-    git fetch origin master:refs/remotes/origin/master
+    git fetch --no-recurse-submodules origin master:refs/remotes/origin/master
 fi
 for tracer in ${TRACERS}; do
     export YKB_TRACER="${tracer}"
