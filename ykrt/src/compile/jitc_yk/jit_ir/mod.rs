@@ -345,6 +345,10 @@ impl Module {
         InstIdx::new(self.insts.len().checked_sub(1).unwrap()).unwrap()
     }
 
+    pub(crate) fn insts_len(&self) -> usize {
+        self.insts.len()
+    }
+
     /// Push a slice of arguments into the args pool.
     ///
     /// # Panics
@@ -1355,7 +1359,7 @@ impl Inst {
     /// Note that this function does not perform deproxification, and thus must only be used when
     /// you know that you want to know which local an instruction's operands directly refers to
     /// (e.g. for dead code elimination).
-    fn map_packed_operand_locals<F>(&self, m: &Module, f: &mut F)
+    pub(crate) fn map_packed_operand_locals<F>(&self, m: &Module, f: &mut F)
     where
         F: FnMut(InstIdx),
     {
