@@ -24,7 +24,7 @@ pub(crate) extern "C" fn __yk_deopt(
     let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
     let info = &ctr.deoptinfo[deoptid];
 
-    if let Some(st) = info.guard.getct() {
+    if let Some(st) = info.guard.ctr() {
         // Prepare the traceinputs "struct" (for now this is just a vector) and pass it into the
         // side-trace.
         let mut ykctrlpvars = Vec::new();
