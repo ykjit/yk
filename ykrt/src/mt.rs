@@ -1,6 +1,7 @@
 //! The main end-user interface to the meta-tracing system.
 
 use std::{
+    assert_matches::debug_assert_matches,
     cell::RefCell,
     cmp,
     collections::VecDeque,
@@ -321,7 +322,10 @@ impl MT {
                     }
                 }
             }
-            TransitionControlPoint::StopSideTracing { guardid, parent } => {
+            TransitionControlPoint::StopSideTracing {
+                guardid,
+                parent_ctr,
+            } => {
                 // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because
                 // `StartSideTracing` will have put a `Some` in the `Rc`.
                 let (hl, thread_tracer, promotions) =
@@ -343,7 +347,7 @@ impl MT {
                         self.queue_compile_job(
                             (utrace, promotions.into_boxed_slice()),
                             hl,
-                            Some((guardid, parent)),
+                            Some((guardid, parent_ctr)),
                         );
                     }
                     Err(_e) => {
@@ -461,9 +465,9 @@ impl MT {
                             }
                         }
                         HotLocationKind::SideTracing {
-                            ref ctr,
+                            ref root_ctr,
                             guardid,
-                            ref parent,
+                            ref parent_ctr,
                         } => {
                             let hl = loc.hot_location_arc_clone().unwrap();
                             match &*mtt.tstate.borrow() {
@@ -471,19 +475,22 @@ impl MT {
                                     // This thread is tracing something...
                                     if !Arc::ptr_eq(thread_hl, &hl) {
                                         // ...but not this Location.
-                                        TransitionControlPoint::Execute(Arc::clone(ctr))
+                                        TransitionControlPoint::Execute(Arc::clone(root_ctr))
                                     } else {
                                         // ...and it's this location: we have therefore finished
                                         // tracing the loop.
-                                        let parent = Arc::clone(parent);
-                                        lk.kind = HotLocationKind::Compiled(Arc::clone(ctr));
+                                        let parent_ctr = Arc::clone(parent_ctr);
+                                        lk.kind = HotLocationKind::Compiled(Arc::clone(root_ctr));
                                         drop(lk);
-                                        TransitionControlPoint::StopSideTracing { guardid, parent }
+                                        TransitionControlPoint::StopSideTracing {
+                                            guardid,
+                                            parent_ctr,
+                                        }
                                     }
                                 }
                                 _ => {
                                     // This thread isn't tracing anything.
-                                    TransitionControlPoint::Execute(Arc::clone(ctr))
+                                    TransitionControlPoint::Execute(Arc::clone(root_ctr))
                                 }
                             }
                         }
@@ -531,18 +538,18 @@ impl MT {
     pub(crate) fn transition_guard_failure(
         self: &Arc<Self>,
         guardid: usize,
-        parent: Arc<dyn CompiledTrace>,
+        parent_ctr: Arc<dyn CompiledTrace>,
     ) -> TransitionGuardFailure {
-        if let Some(hl) = parent.hl().upgrade() {
+        if let Some(hl) = parent_ctr.hl().upgrade() {
             MTThread::with(|mtt| {
                 // This thread should not be tracing anything.
                 debug_assert!(!mtt.is_tracing());
                 let mut lk = hl.lock();
-                if let HotLocationKind::Compiled(ref ctr) = lk.kind {
+                if let HotLocationKind::Compiled(ref root_ctr) = lk.kind {
                     lk.kind = HotLocationKind::SideTracing {
-                        ctr: Arc::clone(ctr),
+                        root_ctr: Arc::clone(root_ctr),
                         guardid,
-                        parent,
+                        parent_ctr,
                     };
                     drop(lk);
                     TransitionGuardFailure::StartSideTracing(hl)
@@ -599,9 +606,6 @@ impl MT {
         self.stats.trace_recorded_ok();
         let mt = Arc::clone(self);
         let do_compile = move || {
-            debug_assert!(
-                sidetrace.is_none() || matches!(hl_arc.lock().kind, HotLocationKind::Compiled(_))
-            );
             let compiler = {
                 let lk = mt.compiler.lock();
                 Arc::clone(&*lk)
@@ -614,19 +618,12 @@ impl MT {
             };
             match compiler.compile(Arc::clone(&mt), trace_iter, sti, Arc::clone(&hl_arc)) {
                 Ok(ct) => {
-                    let mut hl = hl_arc.lock();
-                    match &hl.kind {
-                        HotLocationKind::Compiled(_) => {
-                            // The `unwrap`s cannot fail because of the condition contained
-                            // in the `debug_assert` above: if `sidetrace` is not-`None`
-                            // then `hl_arc.kind` is `Compiled`.
-                            let ctr = sidetrace.map(|x| x.1).unwrap();
-                            let guard = ctr.guard(GuardId(guardid.unwrap()));
-                            guard.setct(ct);
-                        }
-                        _ => {
-                            hl.kind = HotLocationKind::Compiled(ct);
-                        }
+                    if let Some((_, parent_ctr)) = sidetrace {
+                        parent_ctr.guard(GuardId(guardid.unwrap())).setct(ct);
+                    } else {
+                        let mut hl = hl_arc.lock();
+                        debug_assert_matches!(hl.kind, HotLocationKind::Compiling);
+                        hl.kind = HotLocationKind::Compiled(ct);
                     }
                     mt.stats.trace_compiled_ok();
                 }
@@ -784,7 +781,7 @@ enum TransitionControlPoint {
     StopTracing,
     StopSideTracing {
         guardid: usize,
-        parent: Arc<dyn CompiledTrace>,
+        parent_ctr: Arc<dyn CompiledTrace>,
     },
 }
 
