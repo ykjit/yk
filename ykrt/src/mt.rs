@@ -1,6 +1,7 @@
 //! The main end-user interface to the meta-tracing system.
 
 use std::{
+    assert_matches::debug_assert_matches,
     cell::RefCell,
     cmp,
     collections::VecDeque,
@@ -605,9 +606,6 @@ impl MT {
         self.stats.trace_recorded_ok();
         let mt = Arc::clone(self);
         let do_compile = move || {
-            debug_assert!(
-                sidetrace.is_none() || matches!(hl_arc.lock().kind, HotLocationKind::Compiled(_))
-            );
             let compiler = {
                 let lk = mt.compiler.lock();
                 Arc::clone(&*lk)
@@ -620,19 +618,12 @@ impl MT {
             };
             match compiler.compile(Arc::clone(&mt), trace_iter, sti, Arc::clone(&hl_arc)) {
                 Ok(ct) => {
-                    let mut hl = hl_arc.lock();
-                    match &hl.kind {
-                        HotLocationKind::Compiled(_) => {
-                            // The `unwrap`s cannot fail because of the condition contained
-                            // in the `debug_assert` above: if `sidetrace` is not-`None`
-                            // then `hl_arc.kind` is `Compiled`.
-                            let ctr = sidetrace.map(|x| x.1).unwrap();
-                            let guard = ctr.guard(GuardId(guardid.unwrap()));
-                            guard.setct(ct);
-                        }
-                        _ => {
-                            hl.kind = HotLocationKind::Compiled(ct);
-                        }
+                    if let Some((_, parent_ctr)) = sidetrace {
+                        parent_ctr.guard(GuardId(guardid.unwrap())).setct(ct);
+                    } else {
+                        let mut hl = hl_arc.lock();
+                        debug_assert_matches!(hl.kind, HotLocationKind::Compiling);
+                        hl.kind = HotLocationKind::Compiled(ct);
                     }
                     mt.stats.trace_compiled_ok();
                 }
