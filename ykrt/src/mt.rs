@@ -541,7 +541,7 @@ impl MT {
     /// Perform the next step to `loc` in the `Location` state-machine for a guard failure.
     pub(crate) fn transition_guard_failure(
         self: &Arc<Self>,
-        guardid: usize,
+        guardid: GuardId,
         parent_ctr: Arc<dyn CompiledTrace>,
     ) -> TransitionGuardFailure {
         if let Some(hl) = parent_ctr.hl().upgrade() {
@@ -571,7 +571,7 @@ impl MT {
     }
 
     /// Start recording a side trace for a guard that failed in `ctr`.
-    pub(crate) fn side_trace(self: &Arc<Self>, gid: usize, parent: Arc<dyn CompiledTrace>) {
+    pub(crate) fn side_trace(self: &Arc<Self>, gid: GuardId, parent: Arc<dyn CompiledTrace>) {
         match self.transition_guard_failure(gid, parent) {
             TransitionGuardFailure::NoAction => todo!(),
             TransitionGuardFailure::StartSideTracing(hl) => {
@@ -605,7 +605,7 @@ impl MT {
         self: &Arc<Self>,
         trace_iter: (Box<dyn AOTTraceIterator>, Box<[usize]>),
         hl_arc: Arc<Mutex<HotLocation>>,
-        sidetrace: Option<(usize, Arc<dyn CompiledTrace>)>,
+        sidetrace: Option<(GuardId, Arc<dyn CompiledTrace>)>,
     ) {
         self.stats.trace_recorded_ok();
         let mt = Arc::clone(self);
@@ -623,9 +623,7 @@ impl MT {
             match compiler.compile(Arc::clone(&mt), trace_iter, sti, Arc::clone(&hl_arc)) {
                 Ok(ct) => {
                     if let Some((_, parent_ctr)) = sidetrace {
-                        parent_ctr
-                            .guard(GuardId::from(guardid.unwrap()))
-                            .set_ctr(ct);
+                        parent_ctr.guard(guardid.unwrap()).set_ctr(ct);
                     } else {
                         let mut hl = hl_arc.lock();
                         debug_assert_matches!(hl.kind, HotLocationKind::Compiling);
@@ -786,7 +784,7 @@ enum TransitionControlPoint {
     StartTracing(Arc<Mutex<HotLocation>>),
     StopTracing,
     StopSideTracing {
-        guardid: usize,
+        guardid: GuardId,
         parent_ctr: Arc<dyn CompiledTrace>,
     },
 }
@@ -858,7 +856,7 @@ mod tests {
 
     fn expect_start_side_tracing(mt: &Arc<MT>, loc: &Location) {
         let TransitionGuardFailure::StartSideTracing(hl) = mt.transition_guard_failure(
-            0,
+            GuardId::from(0),
             Arc::new(CompiledTraceTestingWithHl::new(Arc::downgrade(
                 &loc.hot_location_arc_clone().unwrap(),
             ))),

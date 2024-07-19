@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{
-    compile::CompiledTrace,
+    compile::{CompiledTrace, GuardId},
     mt::{HotThreshold, TraceCompilationErrorThreshold, MT},
 };
 use parking_lot::Mutex;
@@ -256,7 +256,7 @@ pub(crate) enum HotLocationKind {
         /// execute this compiled trace.
         root_ctr: Arc<dyn CompiledTrace>,
         /// The ID of the guard that failed (inside `parent`).
-        guardid: usize,
+        guardid: GuardId,
         /// The [CompiledTrace] that the guard failed in. This will either be `root_ctr` or a
         /// descendent of `root_ctr`.
         parent_ctr: Arc<dyn CompiledTrace>,
