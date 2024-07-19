@@ -1,6 +1,6 @@
 use crate::{
     aotsmp::AOT_STACKMAPS,
-    compile::jitc_yk::codegen::reg_alloc::VarLocation,
+    compile::{jitc_yk::codegen::reg_alloc::VarLocation, GuardIdx},
     log::{log_jit_state, stats::TimingState},
     mt::MTThread,
 };
@@ -13,16 +13,17 @@ use super::{X64CompiledTrace, RBP_DWARF_NUM, REG64_SIZE};
 #[no_mangle]
 pub(crate) extern "C" fn __yk_deopt(
     frameaddr: *const c_void,
-    deoptid: usize,
+    gidx: u64,
     jitrbp: *const c_void,
 ) -> ! {
+    let gidx = GuardIdx::from(usize::try_from(gidx).unwrap());
     let ctr = MTThread::with(|mtt| mtt.running_trace().unwrap())
         .as_any()
         .downcast::<X64CompiledTrace>()
         .unwrap();
-    debug_assert!(deoptid < ctr.deoptinfo.len());
+    debug_assert!(usize::from(gidx) < ctr.deoptinfo.len());
     let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
-    let info = &ctr.deoptinfo[deoptid];
+    let info = &ctr.deoptinfo[usize::from(gidx)];
 
     if let Some(st) = info.guard.ctr() {
         // Prepare the traceinputs "struct" (for now this is just a vector) and pass it into the
@@ -261,7 +262,7 @@ pub(crate) extern "C" fn __yk_deopt(
         // FIXME: Don't side trace the last guard of a side-trace as this guard always fails.
         // FIXME: Don't side-trace after switch instructions: not every guard failure is equal
         // and a trace compiled for case A won't work for case B.
-        ctr.mt.side_trace(deoptid, ctr.clone());
+        ctr.mt.side_trace(gidx, ctr.clone());
     }
 
     // Since we won't return from this function, drop `ctr` manually.
