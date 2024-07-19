@@ -61,26 +61,6 @@ thread_local! {
     static THREAD_MTTHREAD: MTThread = MTThread::new();
 }
 
-#[cfg(target_arch = "x86_64")]
-#[naked]
-#[no_mangle]
-unsafe extern "C" fn __yk_exec_trace(
-    ctrlp_vars: *mut c_void,
-    frameaddr: *const c_void,
-    rsp: *const c_void,
-    trace: *const c_void,
-) -> ! {
-    std::arch::asm!(
-        // Reset RSP to the end of the control point frame (this doesn't include the
-        // return address)
-        "mov rsp, rdx",
-        // Call the trace function.
-        "call rcx",
-        "ret",
-        options(noreturn)
-    )
-}
-
 /// A meta-tracer. Note that this is conceptually a "front-end" to the actual meta-tracer akin to
 /// an `Rc`: this struct can be freely `clone()`d without duplicating the underlying meta-tracer.
 pub struct MT {
@@ -665,6 +645,27 @@ impl Drop for MT {
     fn drop(&mut self) {
         self.stats.timing_state(TimingState::None);
     }
+}
+
+/// Execute a trace. Note: this overwrites the current (Rust) function frame.
+#[cfg(target_arch = "x86_64")]
+#[naked]
+#[no_mangle]
+unsafe extern "C" fn __yk_exec_trace(
+    ctrlp_vars: *mut c_void,
+    frameaddr: *const c_void,
+    rsp: *const c_void,
+    trace: *const c_void,
+) -> ! {
+    std::arch::asm!(
+        // Reset RSP to the end of the control point frame (this doesn't include the
+        // return address)
+        "mov rsp, rdx",
+        // Call the trace function.
+        "call rcx",
+        "ret",
+        options(noreturn)
+    )
 }
 
 /// [MTThread]'s major job is to record what state in the "interpreting/tracing/executing"
