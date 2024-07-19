@@ -26,7 +26,7 @@ use crate::{
             trace_builder::Frame,
             YkSideTraceInfo,
         },
-        CompiledTrace, Guard, GuardId,
+        CompiledTrace, Guard, GuardIdx,
     },
     location::HotLocation,
     mt::{SideTraceInfo, MT},
@@ -1453,7 +1453,7 @@ impl CompiledTrace for X64CompiledTrace {
         self.buf.ptr(AssemblyOffset(0)) as *const libc::c_void
     }
 
-    fn sidetraceinfo(&self, gidx: GuardId) -> Arc<dyn SideTraceInfo> {
+    fn sidetraceinfo(&self, gidx: GuardIdx) -> Arc<dyn SideTraceInfo> {
         // FIXME: Can we reference these instead of copying them?
         let aotlives = self.deoptinfo[usize::from(gidx)].aotlives.clone();
         let callframes = self.deoptinfo[usize::from(gidx)].callframes.clone();
@@ -1463,7 +1463,7 @@ impl CompiledTrace for X64CompiledTrace {
         })
     }
 
-    fn guard(&self, id: crate::compile::GuardId) -> &crate::compile::Guard {
+    fn guard(&self, id: crate::compile::GuardIdx) -> &crate::compile::Guard {
         &self.deoptinfo[id.0].guard
     }
 
