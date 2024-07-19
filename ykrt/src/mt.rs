@@ -40,8 +40,10 @@ pub type HotThreshold = u32;
 #[cfg(target_pointer_width = "64")]
 type AtomicHotThreshold = AtomicU32;
 
-pub type TraceFailureThreshold = u16;
-pub type AtomicTraceFailureThreshold = AtomicU16;
+/// How often can a [HotLocation] or [Guard] lead to an error in tracing or compilation before we
+/// give up trying to trace (or compile...) it?
+pub type TraceCompilationErrorThreshold = u16;
+pub type AtomicTraceCompilationErrorThreshold = AtomicU16;
 
 /// How many basic blocks long can a trace be before we give up trying to compile it? Note that the
 /// slower our compiler, the lower this will have to be in order to give the perception of
@@ -50,7 +52,9 @@ pub type AtomicTraceFailureThreshold = AtomicU16;
 pub(crate) const DEFAULT_TRACE_TOO_LONG: usize = 5000;
 const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
 const DEFAULT_SIDETRACE_THRESHOLD: HotThreshold = 5;
-const DEFAULT_TRACE_FAILURE_THRESHOLD: TraceFailureThreshold = 5;
+/// How often can a [HotLocation] or [Guard] lead to an error in tracing or compilation before we
+/// give up trying to trace (or compile...) it?
+const DEFAULT_TRACECOMPILATION_ERROR_THRESHOLD: TraceCompilationErrorThreshold = 5;
 static REG64_SIZE: usize = 8;
 
 thread_local! {
@@ -90,7 +94,7 @@ unsafe extern "C" fn __yk_exec_trace(
 pub struct MT {
     hot_threshold: AtomicHotThreshold,
     sidetrace_threshold: AtomicHotThreshold,
-    trace_failure_threshold: AtomicTraceFailureThreshold,
+    trace_failure_threshold: AtomicTraceCompilationErrorThreshold,
     /// The ordered queue of compilation worker functions.
     job_queue: Arc<(Condvar, Mutex<VecDeque<Box<dyn FnOnce() + Send>>>)>,
     /// The hard cap on the number of worker threads.
@@ -131,8 +135,8 @@ impl MT {
         Ok(Arc::new(Self {
             hot_threshold: AtomicHotThreshold::new(hot_threshold),
             sidetrace_threshold: AtomicHotThreshold::new(DEFAULT_SIDETRACE_THRESHOLD),
-            trace_failure_threshold: AtomicTraceFailureThreshold::new(
-                DEFAULT_TRACE_FAILURE_THRESHOLD,
+            trace_failure_threshold: AtomicTraceCompilationErrorThreshold::new(
+                DEFAULT_TRACECOMPILATION_ERROR_THRESHOLD,
             ),
             job_queue: Arc::new((Condvar::new(), Mutex::new(VecDeque::new()))),
             max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
@@ -169,7 +173,7 @@ impl MT {
 
     /// Return this `MT` instance's current trace failure threshold. Notice that this value can be
     /// changed by other threads and is thus potentially stale as soon as it is read.
-    pub fn trace_failure_threshold(self: &Arc<Self>) -> TraceFailureThreshold {
+    pub fn trace_failure_threshold(self: &Arc<Self>) -> TraceCompilationErrorThreshold {
         self.trace_failure_threshold.load(Ordering::Relaxed)
     }
 
@@ -177,7 +181,7 @@ impl MT {
     /// marked as "do not try tracing again".
     pub fn set_trace_failure_threshold(
         self: &Arc<Self>,
-        trace_failure_threshold: TraceFailureThreshold,
+        trace_failure_threshold: TraceCompilationErrorThreshold,
     ) {
         if trace_failure_threshold < 1 {
             panic!("Trace failure threshold must be >= 1.");
@@ -449,7 +453,7 @@ impl MT {
                                     if Arc::strong_count(&hl) == 2 {
                                         // Another thread was tracing this location but it's terminated.
                                         self.stats.trace_recorded_err();
-                                        match lk.trace_failed(self) {
+                                        match lk.tracecompilation_error(self) {
                                             TraceFailed::KeepTrying => {
                                                 TransitionControlPoint::StartTracing(hl)
                                             }
@@ -510,7 +514,7 @@ impl MT {
                             } else {
                                 let hl = HotLocation {
                                     kind: HotLocationKind::Tracing,
-                                    trace_failure: 0,
+                                    tracecompilation_errors: 0,
                                 };
                                 if let Some(hl) = loc.count_to_hot_location(x, hl) {
                                     debug_assert!(!is_tracing);
@@ -619,7 +623,7 @@ impl MT {
             match compiler.compile(Arc::clone(&mt), trace_iter, sti, Arc::clone(&hl_arc)) {
                 Ok(ct) => {
                     if let Some((_, parent_ctr)) = sidetrace {
-                        parent_ctr.guard(GuardId(guardid.unwrap())).setct(ct);
+                        parent_ctr.guard(GuardId(guardid.unwrap())).set_ctr(ct);
                     } else {
                         let mut hl = hl_arc.lock();
                         debug_assert_matches!(hl.kind, HotLocationKind::Compiling);
@@ -629,7 +633,7 @@ impl MT {
                 }
                 Err(e) => {
                     mt.stats.trace_compiled_err();
-                    hl_arc.lock().trace_failed(&mt);
+                    hl_arc.lock().tracecompilation_error(&mt);
                     match e {
                         CompilationError::General(_reason)
                         | CompilationError::LimitExceeded(_reason) => {
@@ -1027,7 +1031,10 @@ mod tests {
                 loc.hot_location().unwrap().lock().kind,
                 HotLocationKind::Tracing
             ));
-            assert_eq!(loc.hot_location().unwrap().lock().trace_failure, i);
+            assert_eq!(
+                loc.hot_location().unwrap().lock().tracecompilation_errors,
+                i
+            );
         }
 
         assert!(matches!(
@@ -1075,7 +1082,10 @@ mod tests {
                 loc.hot_location().unwrap().lock().kind,
                 HotLocationKind::Tracing
             ));
-            assert_eq!(loc.hot_location().unwrap().lock().trace_failure, i);
+            assert_eq!(
+                loc.hot_location().unwrap().lock().tracecompilation_errors,
+                i
+            );
         }
 
         assert!(matches!(

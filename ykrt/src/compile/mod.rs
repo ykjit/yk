@@ -93,19 +93,19 @@ pub(crate) struct Guard {
 }
 
 impl Guard {
-    /// Increments the guard failure counter. Returns `true` if the guard has failed often enough
-    /// to be worth side-tracing.
+    /// This guard has failed (i.e. evaluated to true/false when false/true was expected). Returns
+    /// `true` if this guard has failed often enough to be worth side-tracing.
     pub fn inc_failed(&self, mt: &Arc<MT>) -> bool {
         self.failed.fetch_add(1, Ordering::Relaxed) + 1 >= mt.sidetrace_threshold()
     }
 
     /// Stores a compiled side-trace inside this guard.
-    pub fn setct(&self, ct: Arc<dyn CompiledTrace>) {
+    pub fn set_ctr(&self, ct: Arc<dyn CompiledTrace>) {
         let _ = self.ct.lock().insert(ct);
     }
 
-    /// Retrieves the stored side-trace or None, if no side-trace has been compiled yet.
-    pub fn getct(&self) -> Option<Arc<dyn CompiledTrace>> {
+    /// Return the compiled side-trace or None if no side-trace has been compiled.
+    pub fn ctr(&self) -> Option<Arc<dyn CompiledTrace>> {
         self.ct.lock().as_ref().map(Arc::clone)
     }
 }

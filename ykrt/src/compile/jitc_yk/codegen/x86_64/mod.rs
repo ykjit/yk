@@ -1573,7 +1573,7 @@ mod tests {
             let mt = MT::new().unwrap();
             let hl = HotLocation {
                 kind: HotLocationKind::Tracing,
-                trace_failure: 0,
+                tracecompilation_errors: 0,
             };
             match_asm(
                 Assemble::new(&m)
