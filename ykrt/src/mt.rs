@@ -623,7 +623,9 @@ impl MT {
             match compiler.compile(Arc::clone(&mt), trace_iter, sti, Arc::clone(&hl_arc)) {
                 Ok(ct) => {
                     if let Some((_, parent_ctr)) = sidetrace {
-                        parent_ctr.guard(GuardId(guardid.unwrap())).set_ctr(ct);
+                        parent_ctr
+                            .guard(GuardId::from(guardid.unwrap()))
+                            .set_ctr(ct);
                     } else {
                         let mut hl = hl_arc.lock();
                         debug_assert_matches!(hl.kind, HotLocationKind::Compiling);

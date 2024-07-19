@@ -132,9 +132,21 @@ pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
     fn disassemble(&self) -> Result<String, Box<dyn Error>>;
 }
 
+/// Identify a [Guard] within a trace.
 #[derive(Clone, Copy, Debug)]
-#[allow(dead_code)]
-pub(crate) struct GuardId(pub(crate) usize);
+pub(crate) struct GuardId(usize);
+
+impl From<usize> for GuardId {
+    fn from(v: usize) -> Self {
+        Self(v)
+    }
+}
+
+impl From<GuardId> for usize {
+    fn from(v: GuardId) -> Self {
+        v.0
+    }
+}
 
 #[cfg(test)]
 mod compiled_trace_testing {
