@@ -61,14 +61,6 @@ thread_local! {
     static THREAD_MTTHREAD: MTThread = MTThread::new();
 }
 
-/// Stores information required for compiling a side-trace. Passed down from a (parent) trace
-/// during deoptimisation.
-pub(crate) trait SideTraceInfo {
-    /// Upcast this [CompiledTrace] to `Any`. This method is a hack that's only needed since trait
-    /// upcasting in Rust is incomplete.
-    fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static>;
-}
-
 #[cfg(target_arch = "x86_64")]
 #[naked]
 #[no_mangle]
