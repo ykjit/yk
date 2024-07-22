@@ -52,7 +52,7 @@ fn run_suite(opt: &'static str) {
     };
 
     LangTester::new()
-        .comment_prefix("#")
+        .comment_prefix("##")
         .test_dir("c")
         .test_path_filter(filter)
         .test_extract(move |p| {
