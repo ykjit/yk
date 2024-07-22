@@ -1057,7 +1057,7 @@ impl TraceBuilder {
             // Create loads for the live variables that will be passed into the side-trace from the
             // parent trace.
             let mut off = 0;
-            for aotid in sti.aotlives().iter() {
+            for aotid in sti.aotlives() {
                 let aotinst = self.aot_mod.inst(aotid);
                 // Unwrap is safe as all live variables must be definitions.
                 let aotty = aotinst.def_type(self.aot_mod).unwrap();
@@ -1077,17 +1077,11 @@ impl TraceBuilder {
         }
 
         let mut trace_iter = tas.into_iter().peekable();
-        let first_blk = match trace_iter.peek() {
-            Some(b) => b,
-            None => {
-                // Empty traces are handled in the tracing phase.
-                panic!();
-            }
-        };
 
         // Find the block containing the control point call. This is the (sole) predecessor of the
-        // first (guaranteed mappable) block in the trace.
-        let prev = match first_blk {
+        // first (guaranteed mappable) block in the trace. Note that empty traces are handled in
+        // the tracing phase so the `unwrap` is safe.
+        let prev = match trace_iter.peek().unwrap() {
             TraceAction::MappedAOTBBlock { func_name, bb } => {
                 debug_assert!(*bb > 0);
                 // It's `- 1` due to the way the ykllvm block splitting pass works.
