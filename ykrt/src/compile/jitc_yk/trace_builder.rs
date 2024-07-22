@@ -1017,9 +1017,7 @@ impl TraceBuilder {
         self.copy_inst(inst, bid, aot_inst_idx)
     }
 
-    /// Entry point for building an IR trace.
-    ///
-    /// Consumes the trace builder, returning a JIT module.
+    /// Consume the trace builder, returning a JIT module.
     ///
     /// # Panics
     ///
