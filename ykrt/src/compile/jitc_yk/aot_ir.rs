@@ -29,11 +29,14 @@
 use byteorder::{NativeEndian, ReadBytesExt};
 use deku::prelude::*;
 use std::{
+    collections::HashMap,
     error::Error,
     ffi::CString,
     fmt::{self, Display},
     fs,
-    path::PathBuf,
+    io::{BufRead, BufReader, Seek, SeekFrom},
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
 };
 use typed_index_collections::TiVec;
 
@@ -49,6 +52,28 @@ const LLVM_DEBUG_CALL_NAME: &str = "llvm.dbg.value";
 /// The argument index of the trace inputs (live variables) struct at call-sites to the control
 /// point call.
 const CTRL_POINT_ARGIDX_INPUTS: usize = 2;
+
+/// A struct identifying a line in a source file.
+#[derive(Debug)]
+#[deku_derive(DekuRead)]
+struct LineInfoLoc {
+    /// The path to the containing source file.
+    ///
+    /// The file existed at AOT compile time and there is no guarantee that it still exists now.
+    pathidx: PathIdx,
+    /// The line number in the source file.
+    line_num: usize,
+}
+
+/// A "raw" line info record as initially seen by the deserialiser.
+#[derive(Debug)]
+#[deku_derive(DekuRead)]
+struct RawLineInfoRec {
+    /// The instruction record is for.
+    inst_id: InstID,
+    /// The location in the source file.
+    line: LineInfoLoc,
+}
 
 /// An AOT IR module.
 ///
@@ -84,6 +109,16 @@ pub(crate) struct Module {
     num_types: usize,
     #[deku(count = "num_types", map = "map_to_tivec")]
     types: TiVec<TyIdx, Ty>,
+    #[deku(temp)]
+    num_paths: usize,
+    #[deku(count = "num_paths", map = "map_to_tivec_of_pathbuf")]
+    paths: TiVec<PathIdx, PathBuf>,
+    #[deku(temp)]
+    num_lineinfos: usize,
+    #[deku(count = "num_lineinfos", map = "map_to_lineinfo")]
+    line_infos: HashMap<InstID, LineInfoLoc>,
+    #[deku(skip)]
+    source_files: Arc<Mutex<HashMap<PathBuf, Option<BufReader<fs::File>>>>>,
 }
 
 impl Module {
@@ -163,9 +198,48 @@ impl Module {
         self.global_decls.len()
     }
 
+    /// Lookup a path by its index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is out of bounds.
+    fn path(&self, pathidx: PathIdx) -> &Path {
+        &self.paths[pathidx]
+    }
+
     #[allow(dead_code)]
     pub(crate) fn dump(&self) {
         eprintln!("{}", self);
+    }
+
+    /// If possible, retrieve the source code line described by `path` and `line_num`.
+    ///
+    /// Returns the empty string on failure.
+    fn source_line(&self, path: &Path, line_num: usize) -> String {
+        if let Ok(mut files) = self.source_files.lock() {
+            // Open the source source file if it isn't already open.
+            //
+            // If we fail to open the source file, we just record `None` so that we don't try to
+            // open it again later.
+            //
+            // Not using the entry API here to avoid unnecessary clones of `path`.
+            if !files.contains_key(path) {
+                let val = fs::File::open(path).ok().map(BufReader::new);
+                files.insert(path.to_owned(), val);
+            }
+            // lookup cannot fail due to insertion above.
+            let mut f = files.get_mut(path).unwrap().as_mut();
+            if let Some(ref mut f) = f {
+                if f.seek(SeekFrom::Start(0)).is_ok() {
+                    if let Some(Ok(line)) = f.lines().nth(line_num - 1) {
+                        // success
+                        return line.trim().to_string();
+                    }
+                }
+            }
+        }
+        // failure
+        "".into()
     }
 }
 
@@ -186,8 +260,8 @@ impl std::fmt::Display for Module {
             }
         }
 
-        for func in &self.funcs {
-            write!(f, "\n{}", func.display(self))?;
+        for (funcidx, func) in self.funcs.iter_enumerated() {
+            write!(f, "\n{}", func.display(self, Some(funcidx)))?;
         }
         Ok(())
     }
@@ -272,6 +346,12 @@ index!(ConstIdx);
 pub(crate) struct GlobalDeclIdx(usize);
 index!(GlobalDeclIdx);
 
+/// An index into [Module::paths].
+#[deku_derive(DekuRead)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct PathIdx(usize);
+index!(PathIdx);
+
 /// An index into [FuncTy::arg_tyidxs].
 /// ^ FIXME: no it's not! But it should be!
 #[deku_derive(DekuRead)]
@@ -291,11 +371,38 @@ fn map_to_string(v: Vec<u8>) -> Result<String, DekuError> {
     Err(DekuError::Parse("Couldn't map string".to_owned()))
 }
 
+/// Convert the bytes of a null-terminated string into a PathBuf.
+fn map_to_pathbuf(v: Vec<u8>) -> Result<PathBuf, DekuError> {
+    Ok(PathBuf::from(map_to_string(v)?))
+}
+
 /// Helper function for deku `map` attribute. It is necessary to write all the types out in full to
 /// avoid type inference errors, so it's easier to have a single helper function rather than inline
 /// this into each `map` attribute.
 fn map_to_tivec<I, T>(v: Vec<T>) -> Result<TiVec<I, T>, DekuError> {
     Ok(TiVec::from(v))
+}
+
+#[deku_derive(DekuRead)]
+#[derive(Debug)]
+struct RawPath {
+    #[deku(until = "|v: &u8| *v == 0", map = "map_to_pathbuf")]
+    path: PathBuf,
+}
+
+fn map_to_tivec_of_pathbuf(v: Vec<RawPath>) -> Result<TiVec<PathIdx, PathBuf>, DekuError> {
+    let mut paths = TiVec::new();
+    for path in v {
+        paths.push(path.path);
+    }
+    Ok(paths)
+}
+
+/// Maps a flat vector of line-level debug info records into hashmap for easy lookups.
+fn map_to_lineinfo(v: Vec<RawLineInfoRec>) -> Result<HashMap<InstID, LineInfoLoc>, DekuError> {
+    Ok(v.into_iter()
+        .map(|r| (r.inst_id, r.line))
+        .collect::<HashMap<_, _>>())
 }
 
 /// A binary operator.
@@ -962,9 +1069,14 @@ impl Inst {
         std::ptr::eq(self, other)
     }
 
-    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableInst<'a> {
+    pub(crate) fn display<'a>(
+        &'a self,
+        m: &'a Module,
+        instid: Option<InstID>,
+    ) -> DisplayableInst<'a> {
         DisplayableInst {
             instruction: self,
+            instid,
             m,
         }
     }
@@ -972,11 +1084,33 @@ impl Inst {
 
 pub(crate) struct DisplayableInst<'a> {
     instruction: &'a Inst,
+    /// The ID of the instruction.
+    ///
+    /// Required to find line-level debugging info for the instruction.
+    instid: Option<InstID>,
     m: &'a Module,
 }
 
 impl fmt::Display for DisplayableInst<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // If we have source-level line info for the instruction, print a comment line containing
+        // the source line.
+        if let Some(instid) = &self.instid {
+            if let Some(li) = self.m.line_infos.get(instid) {
+                let path = self.m.path(li.pathidx);
+                // Absolute path: unwrap cannot fail.
+                let basename = path.file_name().unwrap();
+                // We assume the filename is expressible in UTF-8.
+                let src = self.m.source_line(path, li.line_num);
+                write!(
+                    f,
+                    "# {}:{}: {}\n    ",
+                    basename.to_str().unwrap(),
+                    li.line_num,
+                    src
+                )?;
+            }
+        }
         if let Some(t) = self.instruction.def_type(self.m) {
             // If the instruction defines a local, we will format the instruction like it's an
             // assignment. Here we print the left-hand side.
@@ -1191,20 +1325,36 @@ impl BBlock {
         matches!(self.insts.last().unwrap(), Inst::Ret { .. })
     }
 
-    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableBBlock<'a> {
-        DisplayableBBlock { bblock: self, m }
+    pub(crate) fn display<'a>(
+        &'a self,
+        m: &'a Module,
+        bbid: Option<BBlockId>,
+    ) -> DisplayableBBlock<'a> {
+        DisplayableBBlock {
+            bblock: self,
+            m,
+            bbid,
+        }
     }
 }
 
 pub(crate) struct DisplayableBBlock<'a> {
     bblock: &'a BBlock,
+    /// The ID of the basic block.
+    ///
+    /// Required to find line-level debugging info for the instructions in the block.
+    bbid: Option<BBlockId>,
     m: &'a Module,
 }
 
 impl fmt::Display for DisplayableBBlock<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for x in &self.bblock.insts {
-            writeln!(f, "    {}", x.display(self.m))?;
+        for (instidx, inst) in self.bblock.insts.iter_enumerated() {
+            let instid = self
+                .bbid
+                .as_ref()
+                .map(|bbid| InstID::new(bbid.funcidx, bbid.bbidx, instidx));
+            writeln!(f, "    {}", inst.display(self.m, instid))?;
         }
         Ok(())
     }
@@ -1262,13 +1412,25 @@ impl Func {
         self.tyidx
     }
 
-    pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableFunc<'a> {
-        DisplayableFunc { func_: self, m }
+    pub(crate) fn display<'a>(
+        &'a self,
+        m: &'a Module,
+        funcidx: Option<FuncIdx>,
+    ) -> DisplayableFunc<'a> {
+        DisplayableFunc {
+            func_: self,
+            m,
+            funcidx,
+        }
     }
 }
 
 pub(crate) struct DisplayableFunc<'a> {
     func_: &'a Func,
+    /// The index of the function in the module.
+    ///
+    /// Required to locate line-level debugging info for the instructions in the function.
+    funcidx: Option<FuncIdx>,
     m: &'a Module,
 }
 
@@ -1300,8 +1462,14 @@ impl fmt::Display for DisplayableFunc<'_> {
                 writeln!(f, ";")
             } else {
                 writeln!(f, " {{")?;
-                for (i, b) in self.func_.bblocks.iter().enumerate() {
-                    write!(f, "  bb{}:\n{}", i, b.display(self.m))?;
+                for (bbidx, b) in self.func_.bblocks.iter_enumerated() {
+                    let bbid = self.funcidx.map(|funcidx| BBlockId::new(funcidx, bbidx));
+                    write!(
+                        f,
+                        "  bb{}:\n{}",
+                        usize::from(bbidx),
+                        b.display(self.m, bbid)
+                    )?;
                 }
                 writeln!(f, "}}")
             }
