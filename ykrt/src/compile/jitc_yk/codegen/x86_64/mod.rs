@@ -26,10 +26,10 @@ use crate::{
             trace_builder::Frame,
             YkSideTraceInfo,
         },
-        CompiledTrace, Guard, GuardIdx,
+        CompiledTrace, Guard, GuardIdx, SideTraceInfo,
     },
     location::HotLocation,
-    mt::{SideTraceInfo, MT},
+    mt::MT,
 };
 use dynasmrt::{
     components::StaticLabel,

@@ -1017,9 +1017,7 @@ impl TraceBuilder {
         self.copy_inst(inst, bid, aot_inst_idx)
     }
 
-    /// Entry point for building an IR trace.
-    ///
-    /// Consumes the trace builder, returning a JIT module.
+    /// Consume the trace builder, returning a JIT module.
     ///
     /// # Panics
     ///
@@ -1036,29 +1034,28 @@ impl TraceBuilder {
         // this information at AOT compile time and serialise it into the module (or block), so we
         // don't have to do this. Note, we also can't use `collect` here since that won't catch the
         // `TraceTooLong` error early enough and we run out of memory.
-        let mut collect = Vec::new();
-        for ta in ta_iter.into_iter() {
-            match ta {
-                Ok(_) => collect.push(ta),
-                Err(e) => match e {
+        let tas = ta_iter
+            .map(|x| {
+                x.map_err(|e| match e {
                     AOTTraceIteratorError::TraceTooLong => {
-                        return Err(CompilationError::LimitExceeded("Trace too long.".into()));
+                        CompilationError::LimitExceeded("Trace too long.".into())
                     }
-                    x => return Err(CompilationError::General(x.to_string())),
-                },
-            }
-        }
+                    x => CompilationError::General(x.to_string()),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
         if let Some(sti) = sti.as_ref() {
             // Setup the trace builder for side-tracing.
-            let lastblk = match &collect.last() {
-                Some(Ok(b)) => self.lookup_aot_block(b),
+            let lastblk = match &tas.last() {
+                Some(b) => self.lookup_aot_block(b),
                 _ => todo!(),
             };
             self.create_trace_header(self.aot_mod.bblock(lastblk.as_ref().unwrap()), true)?;
             // Create loads for the live variables that will be passed into the side-trace from the
             // parent trace.
             let mut off = 0;
-            for aotid in sti.aotlives().iter() {
+            for aotid in sti.aotlives() {
                 let aotinst = self.aot_mod.inst(aotid);
                 // Unwrap is safe as all live variables must be definitions.
                 let aotty = aotinst.def_type(self.aot_mod).unwrap();
@@ -1074,22 +1071,15 @@ impl TraceBuilder {
                 off += U64SIZE;
             }
             self.cp_block = lastblk;
-            self.frames = sti.callframes().clone();
+            self.frames = sti.callframes().to_vec();
         }
 
-        let mut trace_iter = collect.into_iter().peekable();
-        let first_blk = match trace_iter.peek() {
-            Some(Ok(b)) => b,
-            Some(Err(_)) => todo!(),
-            None => {
-                // Empty traces are handled in the tracing phase.
-                panic!();
-            }
-        };
+        let mut trace_iter = tas.into_iter().peekable();
 
         // Find the block containing the control point call. This is the (sole) predecessor of the
-        // first (guaranteed mappable) block in the trace.
-        let prev = match first_blk {
+        // first (guaranteed mappable) block in the trace. Note that empty traces are handled in
+        // the tracing phase so the `unwrap` is safe.
+        let prev = match trace_iter.peek().unwrap() {
             TraceAction::MappedAOTBBlock { func_name, bb } => {
                 debug_assert!(*bb > 0);
                 // It's `- 1` due to the way the ykllvm block splitting pass works.
@@ -1114,105 +1104,81 @@ impl TraceBuilder {
         // FIXME: this section of code needs to be refactored.
         let mut last_blk_is_return = false;
         let mut prev_bid = None;
-        while let Some(tblk) = trace_iter.next() {
-            match tblk {
-                Ok(b) => {
-                    match self.lookup_aot_block(&b) {
-                        Some(bid) => {
-                            // MappedAOTBBlock block
-                            if let Some(ref tgtbid) = self.outline_target_blk {
-                                // We are currently outlining.
-                                if bid.funcidx() == tgtbid.funcidx() {
-                                    // We are inside the same function that started outlining.
-                                    if bid.is_entry() {
-                                        // We are recursing into the function that started
-                                        // outlining.
-                                        self.recursion_count += 1;
-                                    }
-                                    if self.aot_mod.bblock(&bid).is_return() {
-                                        // We are returning from the function that started
-                                        // outlining. This may be one of multiple inlined calls, so
-                                        // we may not be done outlining just yet.
-                                        self.recursion_count -= 1;
-                                    }
-                                }
-                                if self.recursion_count == 0 && bid == *tgtbid {
-                                    // We've reached the successor block of the function/block that
-                                    // started outlining. We are done and can continue processing
-                                    // blocks normally.
-                                    self.outline_target_blk = None;
-                                } else {
-                                    // We are outlining so just skip this block.
-                                    prev_bid = Some(bid);
-                                    continue;
-                                }
-                            } else {
-                                // We are not outlining. Process blocks normally.
-                                if last_blk_is_return {
-                                    // If the last block had a return terminator, we are returning
-                                    // from a call, which means the HWT will have recorded an
-                                    // additional caller block that we'll have to skip.
-                                    // FIXME: This only applies to the HWT as the SWT doesn't
-                                    // record these extra blocks.
-                                    last_blk_is_return = false;
-                                    prev_bid = Some(bid);
-                                    continue;
-                                }
-                                if self.aot_mod.bblock(&bid).is_return() {
-                                    last_blk_is_return = true;
-                                }
+        while let Some(b) = trace_iter.next() {
+            match self.lookup_aot_block(&b) {
+                Some(bid) => {
+                    // MappedAOTBBlock block
+                    if let Some(ref tgtbid) = self.outline_target_blk {
+                        // We are currently outlining.
+                        if bid.funcidx() == tgtbid.funcidx() {
+                            // We are inside the same function that started outlining.
+                            if bid.is_entry() {
+                                // We are recursing into the function that started
+                                // outlining.
+                                self.recursion_count += 1;
                             }
-
-                            // In order to emit guards for conditional branches we need to peek at the next
-                            // block.
-                            let nextbb = if let Some(tpeek) = trace_iter.peek() {
-                                match tpeek {
-                                    Ok(tp) => self.lookup_aot_block(tp),
-                                    Err(e) => match e {
-                                        AOTTraceIteratorError::TraceTooLong => {
-                                            return Err(CompilationError::LimitExceeded(
-                                                "Trace too long.".into(),
-                                            ));
-                                        }
-                                        x => return Err(CompilationError::General(x.to_string())),
-                                    },
-                                }
-                            } else {
-                                None
-                            };
-                            self.process_block(&bid, &prev_bid, nextbb)?;
-                            if self.cp_block.as_ref() == Some(&bid) {
-                                // When using the hardware tracer we will see two control point
-                                // blocks here. We must only process one of them. The simplest way
-                                // to do this that is compatible with the software tracer is to
-                                // start outlining here by setting the outlining stop target to
-                                // this blocks successor.
-                                let blk = self.aot_mod.bblock(&bid);
-                                let br = blk.insts.iter().last();
-                                // Unwrap safe: block guaranteed to have instructions.
-                                match br.unwrap() {
-                                    aot_ir::Inst::Br { succ } => {
-                                        let succbid = BBlockId::new(bid.funcidx(), *succ);
-                                        self.outline_target_blk = Some(succbid);
-                                        self.recursion_count = 0;
-                                    }
-                                    _ => panic!(),
-                                }
+                            if self.aot_mod.bblock(&bid).is_return() {
+                                // We are returning from the function that started
+                                // outlining. This may be one of multiple inlined calls, so
+                                // we may not be done outlining just yet.
+                                self.recursion_count -= 1;
                             }
+                        }
+                        if self.recursion_count == 0 && bid == *tgtbid {
+                            // We've reached the successor block of the function/block that
+                            // started outlining. We are done and can continue processing
+                            // blocks normally.
+                            self.outline_target_blk = None;
+                        } else {
+                            // We are outlining so just skip this block.
                             prev_bid = Some(bid);
+                            continue;
                         }
-                        None => {
-                            // UnmappableBBlock block
-                            prev_bid = None;
+                    } else {
+                        // We are not outlining. Process blocks normally.
+                        if last_blk_is_return {
+                            // If the last block had a return terminator, we are returning
+                            // from a call, which means the HWT will have recorded an
+                            // additional caller block that we'll have to skip.
+                            // FIXME: This only applies to the HWT as the SWT doesn't
+                            // record these extra blocks.
+                            last_blk_is_return = false;
+                            prev_bid = Some(bid);
+                            continue;
+                        }
+                        if self.aot_mod.bblock(&bid).is_return() {
+                            last_blk_is_return = true;
                         }
                     }
+
+                    // In order to emit guards for conditional branches we need to peek at the next
+                    // block.
+                    let nextbb = trace_iter.peek().and_then(|x| self.lookup_aot_block(x));
+                    self.process_block(&bid, &prev_bid, nextbb)?;
+                    if self.cp_block.as_ref() == Some(&bid) {
+                        // When using the hardware tracer we will see two control point
+                        // blocks here. We must only process one of them. The simplest way
+                        // to do this that is compatible with the software tracer is to
+                        // start outlining here by setting the outlining stop target to
+                        // this blocks successor.
+                        let blk = self.aot_mod.bblock(&bid);
+                        let br = blk.insts.iter().last();
+                        // Unwrap safe: block guaranteed to have instructions.
+                        match br.unwrap() {
+                            aot_ir::Inst::Br { succ } => {
+                                let succbid = BBlockId::new(bid.funcidx(), *succ);
+                                self.outline_target_blk = Some(succbid);
+                                self.recursion_count = 0;
+                            }
+                            _ => panic!(),
+                        }
+                    }
+                    prev_bid = Some(bid);
                 }
-                Err(e) => match e {
-                    AOTTraceIteratorError::TraceTooLong => {
-                        return Err(CompilationError::LimitExceeded("Trace too long.".into()));
-                    }
-                    x => return Err(CompilationError::General(x.to_string())),
-                },
+                None => {
+                    // UnmappableBBlock block
+                    prev_bid = None;
+                }
             }
         }
 
@@ -1226,8 +1192,7 @@ impl TraceBuilder {
                 .is_some());
 
             // Make a 0 constant.
-            let jit_tyidx = self.jit_mod.insert_ty(jit_ir::Ty::Integer(1))?;
-            let jitconst = jit_ir::Const::Int(jit_tyidx, 0);
+            let jitconst = jit_ir::Const::Int(self.jit_mod.int1_tyidx(), 0);
             let constop = jit_ir::Operand::Const(self.jit_mod.insert_const(jitconst)?);
 
             // Create a guard that will always fail.

@@ -2,10 +2,13 @@
 
 use super::CompilationError;
 use crate::{
-    compile::{jitc_yk::codegen::CodeGen, jitc_yk::trace_builder::Frame, CompiledTrace, Compiler},
+    compile::{
+        jitc_yk::codegen::CodeGen, jitc_yk::trace_builder::Frame, CompiledTrace, Compiler,
+        SideTraceInfo,
+    },
     location::HotLocation,
     log::{log_ir, should_log_ir, IRPhase},
-    mt::{SideTraceInfo, MT},
+    mt::MT,
     trace::AOTTraceIterator,
 };
 use parking_lot::Mutex;
@@ -51,14 +54,14 @@ impl SideTraceInfo for YkSideTraceInfo {
 }
 
 impl YkSideTraceInfo {
-    /// Return the live call frames which are requiredd to setup the trace builder during
+    /// Return the live call frames which are required to setup the trace builder during
     /// side-tracing.
-    fn callframes(&self) -> &Vec<Frame> {
+    fn callframes(&self) -> &[Frame] {
         &self.callframes
     }
 
     /// Return the live AOT variables for this guard. Used to write live values to during deopt.
-    fn aotlives(&self) -> &Vec<aot_ir::InstID> {
+    fn aotlives(&self) -> &[aot_ir::InstID] {
         &self.aotlives
     }
 }

@@ -1,8 +1,4 @@
-use crate::{
-    location::HotLocation,
-    mt::{SideTraceInfo, MT},
-    trace::AOTTraceIterator,
-};
+use crate::{location::HotLocation, mt::MT, trace::AOTTraceIterator};
 use libc::c_void;
 use parking_lot::Mutex;
 use std::{
@@ -130,6 +126,14 @@ pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
     /// Disassemble the JITted code into a string, for testing and deubgging.
     #[cfg(any(debug_assertions, test))]
     fn disassemble(&self) -> Result<String, Box<dyn Error>>;
+}
+
+/// Stores information required for compiling a side-trace. Passed down from a (parent) trace
+/// during deoptimisation.
+pub(crate) trait SideTraceInfo {
+    /// Upcast this [SideTraceInfo] to `Any`. This method is a hack that's only needed since trait
+    /// upcasting in Rust is incomplete.
+    fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static>;
 }
 
 /// Identify a [Guard] within a trace.

@@ -61,34 +61,6 @@ thread_local! {
     static THREAD_MTTHREAD: MTThread = MTThread::new();
 }
 
-/// Stores information required for compiling a side-trace. Passed down from a (parent) trace
-/// during deoptimisation.
-pub(crate) trait SideTraceInfo {
-    /// Upcast this [CompiledTrace] to `Any`. This method is a hack that's only needed since trait
-    /// upcasting in Rust is incomplete.
-    fn as_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Send + Sync + 'static>;
-}
-
-#[cfg(target_arch = "x86_64")]
-#[naked]
-#[no_mangle]
-unsafe extern "C" fn __yk_exec_trace(
-    ctrlp_vars: *mut c_void,
-    frameaddr: *const c_void,
-    rsp: *const c_void,
-    trace: *const c_void,
-) -> ! {
-    std::arch::asm!(
-        // Reset RSP to the end of the control point frame (this doesn't include the
-        // return address)
-        "mov rsp, rdx",
-        // Call the trace function.
-        "call rcx",
-        "ret",
-        options(noreturn)
-    )
-}
-
 /// A meta-tracer. Note that this is conceptually a "front-end" to the actual meta-tracer akin to
 /// an `Rc`: this struct can be freely `clone()`d without duplicating the underlying meta-tracer.
 pub struct MT {
@@ -280,7 +252,7 @@ impl MT {
 
                 // FIXME: Calling this function overwrites the current (Rust) function frame,
                 // rather than unwinding it. https://github.com/ykjit/yk/issues/778.
-                unsafe { __yk_exec_trace(ctrlp_vars, frameaddr, rsp, trace_addr) };
+                unsafe { exec_trace(ctrlp_vars, frameaddr, rsp, trace_addr) };
             }
             TransitionControlPoint::StartTracing(hl) => {
                 log_jit_state("start-tracing");
@@ -673,6 +645,26 @@ impl Drop for MT {
     fn drop(&mut self) {
         self.stats.timing_state(TimingState::None);
     }
+}
+
+/// Execute a trace. Note: this overwrites the current (Rust) function frame.
+#[cfg(target_arch = "x86_64")]
+#[naked]
+unsafe extern "C" fn exec_trace(
+    ctrlp_vars: *mut c_void,
+    frameaddr: *const c_void,
+    rsp: *const c_void,
+    trace: *const c_void,
+) -> ! {
+    std::arch::asm!(
+        // Reset RSP to the end of the control point frame (this doesn't include the
+        // return address)
+        "mov rsp, rdx",
+        // Call the trace function.
+        "call rcx",
+        "ret",
+        options(noreturn)
+    )
 }
 
 /// [MTThread]'s major job is to record what state in the "interpreting/tracing/executing"
