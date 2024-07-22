@@ -54,7 +54,7 @@ impl SideTraceInfo for YkSideTraceInfo {
 }
 
 impl YkSideTraceInfo {
-    /// Return the live call frames which are requiredd to setup the trace builder during
+    /// Return the live call frames which are required to setup the trace builder during
     /// side-tracing.
     fn callframes(&self) -> &Vec<Frame> {
         &self.callframes
