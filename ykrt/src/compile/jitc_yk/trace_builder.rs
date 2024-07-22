@@ -1074,7 +1074,7 @@ impl TraceBuilder {
                 off += U64SIZE;
             }
             self.cp_block = lastblk;
-            self.frames = sti.callframes().clone();
+            self.frames = sti.callframes().to_vec();
         }
 
         let mut trace_iter = collect.into_iter().peekable();

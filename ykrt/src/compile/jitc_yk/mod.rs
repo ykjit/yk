@@ -56,12 +56,12 @@ impl SideTraceInfo for YkSideTraceInfo {
 impl YkSideTraceInfo {
     /// Return the live call frames which are required to setup the trace builder during
     /// side-tracing.
-    fn callframes(&self) -> &Vec<Frame> {
+    fn callframes(&self) -> &[Frame] {
         &self.callframes
     }
 
     /// Return the live AOT variables for this guard. Used to write live values to during deopt.
-    fn aotlives(&self) -> &Vec<aot_ir::InstID> {
+    fn aotlives(&self) -> &[aot_ir::InstID] {
         &self.aotlives
     }
 }
