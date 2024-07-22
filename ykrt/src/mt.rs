@@ -252,7 +252,7 @@ impl MT {
 
                 // FIXME: Calling this function overwrites the current (Rust) function frame,
                 // rather than unwinding it. https://github.com/ykjit/yk/issues/778.
-                unsafe { __yk_exec_trace(ctrlp_vars, frameaddr, rsp, trace_addr) };
+                unsafe { exec_trace(ctrlp_vars, frameaddr, rsp, trace_addr) };
             }
             TransitionControlPoint::StartTracing(hl) => {
                 log_jit_state("start-tracing");
@@ -650,8 +650,7 @@ impl Drop for MT {
 /// Execute a trace. Note: this overwrites the current (Rust) function frame.
 #[cfg(target_arch = "x86_64")]
 #[naked]
-#[no_mangle]
-unsafe extern "C" fn __yk_exec_trace(
+unsafe extern "C" fn exec_trace(
     ctrlp_vars: *mut c_void,
     frameaddr: *const c_void,
     rsp: *const c_void,
