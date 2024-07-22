@@ -1194,8 +1194,7 @@ impl TraceBuilder {
                 .is_some());
 
             // Make a 0 constant.
-            let jit_tyidx = self.jit_mod.insert_ty(jit_ir::Ty::Integer(1))?;
-            let jitconst = jit_ir::Const::Int(jit_tyidx, 0);
+            let jitconst = jit_ir::Const::Int(self.jit_mod.int1_tyidx(), 0);
             let constop = jit_ir::Operand::Const(self.jit_mod.insert_const(jitconst)?);
 
             // Create a guard that will always fail.
