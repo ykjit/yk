@@ -679,6 +679,10 @@ impl Operand {
                 self.to_inst(m).def_type(m).unwrap()
             }
             Self::Const(cidx) => m.type_(m.const_(*cidx).unwrap_val().tyidx()),
+            Self::Global(_) => {
+                // As is the case for LLVM IR, globals are always pointer-typed in Yk AOT IR.
+                &Ty::Ptr
+            }
             _ => todo!(),
         }
     }
