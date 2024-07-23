@@ -1521,6 +1521,16 @@ impl<'a> AsmPrinter<'a> {
     }
 }
 
+/// x64 tests. These use an unusual form of pattern matching. Instead of using concrete register
+/// names, one can refer to a class of registers e.g. `r.8` is all 8-bit registers. To match a
+/// register name but ignore its value uses `r.8._`: to match a register name use `r.8.x`.
+///
+/// Suffixes: must be unique (i.e. `r.8.x` and `r.8.y` must refer to different registers); and they
+/// refer to the "underlying" register (e.g. `r.8.x` and `r.64.x` might match `al` and `RAX` which
+/// is considered the same register, but will fail to match against `al` and `RBX`).
+///
+/// Note that general purpose (`r.`) and floating point (`fp.`) registers occupy different suffix
+/// classes (i.e. `r.8.x` and `fp.128.x` do not match the same register "x").
 #[cfg(test)]
 mod tests {
     use super::X64CompiledTrace;
@@ -1528,35 +1538,175 @@ mod tests {
         jitc_yk::jit_ir::{self, Module},
         CompiledTrace,
     };
-    use fm::FMBuilder;
-    use regex::Regex;
-    use std::sync::Arc;
+    use fm::{FMBuilder, FMatcher};
+    use lazy_static::lazy_static;
+    use regex::{Regex, RegexBuilder};
+    use std::{
+        collections::{HashMap, HashSet},
+        sync::Arc,
+    };
     use ykaddr::addr::symbol_to_ptr;
+
+    /// All x64 registers sorted by class. Later we allow users to match all (e.g.) 8 bit registers with `r.8._`.
+    const X64_REGS: [(&str, &str); 4] = [
+        (
+            "8",
+            "al|bl|cl|dl|sil|dil|spl|bpl|r8b|r9b|r10b|r11b|r12b|r13b|r14b|r15b|ah|bh|ch|dh",
+        ),
+        (
+            "16",
+            "ax|bx|cx|dx|si|di|sp|bp|r8w|r9w|r10w|r11w|r12w|r13w|r14w|r15w",
+        ),
+        (
+            "32",
+            "eax|ebx|ecx|edx|esi|edi|esp|ebp|r8d|r9d|r10d|r11d|r12d|r13d|r14d|r15d",
+        ),
+        (
+            "64",
+            "rax|rbx|rcx|rdx|rsi|rdi|rsp|rbp|r8|r9|r10|r11|r12|r13|r14|r15",
+        ),
+    ];
+
+    const X64_RAW_REGS_MAP: [[&str; 5]; 16] = [
+        ["rax", "eax", "ax", "ah", "al"],
+        ["rbx", "ebx", "bx", "bh", "bl"],
+        ["rcx", "ecx", "cx", "ch", "cl"],
+        ["rdx", "edx", "dx", "dh", "dl"],
+        ["rsi", "esi", "si", "", "sil"],
+        ["rdi", "edi", "di", "", "dil"],
+        ["rsp", "esp", "sp", "", "spl"],
+        ["rbp", "ebp", "bp", "", "bpl"],
+        ["r8", "r8d", "r8w", "", "r8b"],
+        ["r9", "r9d", "r9w", "", "r9b"],
+        ["r10", "r10d", "r10w", "", "r10b"],
+        ["r11", "r11d", "r11w", "", "r11b"],
+        ["r12", "r12d", "r12w", "", "r12b"],
+        ["r13", "r13d", "r13w", "", "r13b"],
+        ["r14", "r14d", "r14w", "", "r14b"],
+        ["r15", "r15d", "r15w", "", "r15b"],
+    ];
+
+    lazy_static! {
+        static ref X64_REGS_MAP: HashMap<&'static str, usize> = {
+            let mut map = HashMap::new();
+            for (i, regs) in X64_RAW_REGS_MAP.iter().enumerate() {
+                for r in regs.iter() {
+                    if *r != "" {
+                        map.insert(*r, i);
+                    }
+                }
+            }
+            map
+        };
+
+        /// Use `{{name}}` to match non-literal strings in tests.
+        static ref PTN_RE: Regex = {
+            Regex::new(r"\{\{.+?\}\}").unwrap()
+        };
+
+        static ref PTN_RE_IGNORE: Regex = {
+            Regex::new(r"\{\{_}\}").unwrap()
+        };
+
+        static ref FP_REG_NAME_RE: Regex = {
+            Regex::new(r"fp\.128\.[0-9a-z]+").unwrap()
+        };
+
+        static ref FP_REG_TEXT_RE: Regex = {
+            Regex::new(r"xmm[0-9][0-5]?").unwrap()
+        };
+
+        static ref TEXT_RE: Regex = {
+            Regex::new(r"[a-zA-Z0-9\._]+").unwrap()
+        };
+    }
+
+    fn fmatcher<'a>(ptn: &'a str) -> FMatcher<'a> {
+        let mut fmb = FMBuilder::new(ptn)
+            .unwrap()
+            .name_matching_validator(|names| {
+                let mut gp_reg_vals = vec![None; 16];
+                let mut fp_reg_vals = HashSet::new();
+                let mut fp_reg_count = 0;
+                let mut result = true;
+                for (hl_name, reg) in names.iter() {
+                    if hl_name.starts_with("r.") {
+                        let hl_name = hl_name.split('.').nth(2).unwrap();
+                        let reg_i = X64_REGS_MAP[reg];
+                        if let Some(x) = gp_reg_vals[reg_i] {
+                            if x != hl_name {
+                                result = false;
+                                break;
+                            }
+                        } else {
+                            gp_reg_vals[reg_i] = Some(hl_name);
+                        }
+                    } else if hl_name.starts_with("fp.") {
+                        fp_reg_vals.insert(reg);
+                        fp_reg_count += 1;
+                        if fp_reg_vals.len() != fp_reg_count {
+                            result = false;
+                            break;
+                        }
+                    }
+                }
+                result
+            })
+            .name_matcher_ignore(PTN_RE_IGNORE.clone(), TEXT_RE.clone())
+            .name_matcher(PTN_RE.clone(), TEXT_RE.clone())
+            .name_matcher(FP_REG_NAME_RE.clone(), FP_REG_TEXT_RE.clone());
+
+        for (class_name, regs) in X64_REGS {
+            let class_re = RegexBuilder::new(&format!("r\\.{class_name}\\.[0-9a-z]+"))
+                .case_insensitive(true)
+                .build()
+                .unwrap();
+            let class_ignore_re = RegexBuilder::new(&format!("r\\.{class_name}\\._"))
+                .case_insensitive(true)
+                .build()
+                .unwrap();
+            let regs_re = RegexBuilder::new(regs)
+                .case_insensitive(true)
+                .build()
+                .unwrap();
+            fmb = fmb
+                .name_matcher_ignore(class_ignore_re, regs_re.clone())
+                .name_matcher(class_re, regs_re);
+        }
+
+        fmb.build().unwrap()
+    }
+
+    #[test]
+    fn check_matching() {
+        let fmm = fmatcher("r.8.x r.8.y r.64.x");
+        assert!(fmm.matches("al bl rax").is_ok());
+        assert!(fmm.matches("al al rax").is_err());
+        assert!(fmm.matches("al bl rbx").is_err());
+        assert!(fmm.matches("al bl eax").is_err());
+
+        let fmm = fmatcher("r.8.x r.8._ r.64.x");
+        assert!(fmm.matches("al bl rax").is_ok());
+        assert!(fmm.matches("al al rax").is_ok());
+
+        let fmm = fmatcher("fp.128.x fp.128.y fp.128.x");
+        assert!(fmm.matches("xmm0 xmm1 xmm0").is_ok());
+        assert!(fmm.matches("xmm0 xmm0 xmm0").is_err());
+    }
 
     fn test_module() -> jit_ir::Module {
         jit_ir::Module::new_testing()
     }
 
     /// Test helper to use `fm` to match a disassembled trace.
-    fn match_asm(cgo: Arc<X64CompiledTrace>, pattern: &str) {
+    fn match_asm(cgo: Arc<X64CompiledTrace>, ptn: &str) {
         let dis = cgo.disassemble().unwrap();
 
-        // Use `{{name}}` to match non-literal strings in tests.
-        let ptn_re = Regex::new(r"\{\{.+?\}\}").unwrap();
-        let ptn_re_ignore = Regex::new(r"\{\{_}\}").unwrap();
-        let text_re = Regex::new(r"[a-zA-Z0-9\._]+").unwrap();
-        // The dissamebler alternates between upper- and lowercase hex, making matching addresses
+        // The disassembler alternates between upper- and lowercase hex, making matching addresses
         // difficult. So just lowercase both pattern and text to avoid tests randomly breaking when
         // addresses change.
-        let lowerpattern = pattern.to_lowercase();
-        let fmm = FMBuilder::new(&lowerpattern)
-            .unwrap()
-            .name_matcher_ignore(ptn_re_ignore, text_re.clone())
-            .name_matcher(ptn_re, text_re)
-            .build()
-            .unwrap();
-
-        match fmm.matches(&dis.to_lowercase()) {
+        let ptn = ptn.to_lowercase();
+        match fmatcher(&ptn).matches(&dis.to_lowercase()) {
             Ok(()) => (),
             Err(e) => panic!("{e}"),
         }
@@ -1598,8 +1748,8 @@ mod tests {
                 "
                 ...
                 ; %1: ptr = load %0
-                {{_}} {{_}}: mov [rbp-0x08], r15
-                {{_}} {{_}}: mov r15, [r15]
+                {{_}} {{_}}: mov [rbp-0x08], r.64.x
+                {{_}} {{_}}: mov r.64.x, [r.64.x]
                 ...
                 ",
             );
@@ -1616,8 +1766,8 @@ mod tests {
                 "
                 ...
                 ; %1: i8 = load %0
-                {{_}} {{_}}: mov [rbp-0x01], r15b
-                {{_}} {{_}}: movzx r15, byte ptr [r15]
+                {{_}} {{_}}: mov [rbp-0x01], r.8.x
+                {{_}} {{_}}: movzx r.64.x, byte ptr [r.64.x]
                 ...
                 ",
             );
@@ -1634,8 +1784,8 @@ mod tests {
                 "
                 ...
                 ; %1: i32 = Load %0
-                {{_}} {{_}}: mov [rbp-0x04], r15d
-                {{_}} {{_}}: mov r15d, [r15]
+                {{_}} {{_}}: mov [rbp-0x04], r.32.x
+                {{_}} {{_}}: mov r.32.x, [r.64.x]
                 ...
                 ",
             );
@@ -1652,8 +1802,8 @@ mod tests {
                 "
                 ...
                 ; *%0 = 0x0
-                {{_}} {{_}}: mov r14, 0x00
-                {{_}} {{_}}: mov [r15], r14
+                {{_}} {{_}}: mov r.64.x, 0x00
+                {{_}} {{_}}: mov [r.64.y], r.64.x
                 ...
                 ",
             );
@@ -1671,7 +1821,7 @@ mod tests {
                 ...
                 ; %1: ptr = ptr_add %0, 64
                 {{_}} {{_}}: mov ...
-                {{_}} {{_}}: add {{r15}}, 0x40
+                {{_}} {{_}}: add r.64.x, 0x40
                 ...
                 ",
             );
@@ -1689,9 +1839,9 @@ mod tests {
                 "
                 ...
                 ; %2: ptr = dyn_ptr_add %0, %1, 32
-                {{_}} {{_}}: mov [rbp-{{_}}], r14d
-                {{_}} {{_}}: imul r14, r14, 0x20
-                {{_}} {{_}}: add r14, r15
+                {{_}} {{_}}: mov [rbp-{{_}}], r.32.x
+                {{_}} {{_}}: imul r.64.x, r.64.x, 0x20
+                {{_}} {{_}}: add r.64.x, r.64.y
                 ...
                 ",
             );
@@ -1709,11 +1859,11 @@ mod tests {
                 "
                 ...
                 ; %0: ptr = load_ti 0
-                {{_}} {{_}}: mov {{r15}}, ...
+                {{_}} {{_}}: mov r.64.x, ...
                 ; %1: ptr = load_ti 8
-                {{_}} {{_}}: mov {{r14}}, ...
+                {{_}} {{_}}: mov r.64.y, ...
                 ; *%1 = %0
-                {{_}} {{_}}: mov [{{r14}}], {{r15}}
+                {{_}} {{_}}: mov [r.64.y], r.64.x
                 ...
                 ",
             );
@@ -1729,7 +1879,7 @@ mod tests {
                 "
                 ...
                 ; %0: i8 = load_ti 0
-                {{_}} {{_}}: movzx {{r15}}, byte ptr ...
+                {{_}} {{_}}: movzx r.64.x, byte ptr ...
                 ...
                 ",
             );
@@ -1745,7 +1895,7 @@ mod tests {
                 "
                 ...
                 ; %0: i16 = load_ti 32
-                {{_}} {{_}}: movzx {{r15}}, word ptr ...
+                {{_}} {{_}}: movzx r.64.x, word ptr ...
                 ...
                 ",
             );
@@ -1764,7 +1914,7 @@ mod tests {
                 ...
                 ; %2: i16 = add %0, %1
                 ......
-                {{_}} {{_}}: add r15w, r14w
+                {{_}} {{_}}: add r.16.x, r.16.y
                 ...
                 ",
             );
@@ -1783,7 +1933,7 @@ mod tests {
                 ...
                 ; %2: i64 = add %0, %1
                 ......
-                {{_}} {{_}}: add r15, r14
+                {{_}} {{_}}: add r.64.x, r.64.y
                 ...
                 ",
             );
@@ -1827,11 +1977,11 @@ mod tests {
                     "
                 ...
                 ; call @puts(%0, %1, %2)
-                ... mov r12, 0x{sym_addr:X}
-                ... mov edi, r15d
-                ... mov esi, r14d
-                ... mov edx, r13d
-                ... call r12
+                {{{{_}}}} {{{{_}}}}: mov r12, 0x{sym_addr:X}
+                {{{{_}}}} {{{{_}}}}: mov edi, r.32.x
+                {{{{_}}}} {{{{_}}}}: mov esi, r.32.y
+                {{{{_}}}} {{{{_}}}}: mov edx, r.32.z
+                {{{{_}}}} {{{{_}}}}: call r12
                 ...
             "
                 ),
@@ -1858,15 +2008,15 @@ mod tests {
                     "
                 ...
                 ; call @puts(%0, %1, %2, %3, %4, %5)
-                ... mov r12, 0x{sym_addr:X}
+                {{{{_}}}} {{{{_}}}}: mov r12, 0x{sym_addr:X}
                 ...
-                ... movzx rdi, r15b
-                ... movzx rsi, r14w
-                ... mov edx, r13d
-                ... mov rcx, [rbp-0x18]
-                ... mov r8, [rbp-0x10]
-                ... movzx r9, byte ptr [rbp-0x01]
-                ... call r12
+                {{{{_}}}} {{{{_}}}}: movzx rdi, r.8.x
+                {{{{_}}}} {{{{_}}}}: movzx rsi, r.16.y
+                {{{{_}}}} {{{{_}}}}: mov edx, r.32.z
+                {{{{_}}}} {{{{_}}}}: mov rcx, [rbp-0x18]
+                {{{{_}}}} {{{{_}}}}: mov r8, [rbp-0x10]
+                {{{{_}}}} {{{{_}}}}: movzx r9, byte ptr [rbp-0x01]
+                {{{{_}}}} {{{{_}}}}: call r12
                 ...
             "
                 ),
@@ -1902,8 +2052,8 @@ mod tests {
                 {{_}} {{_}}: call r12
                 ; %1: i32 = add %0, %0
                 {{_}} {{_}}: mov [rbp-0x04], eax
-                {{_}} {{_}}: mov r15d, [rbp-0x04]
-                {{_}} {{_}}: add eax, r15d
+                {{_}} {{_}}: mov r.32.x, [rbp-0x04]
+                {{_}} {{_}}: add eax, r.32.x
                 ...
             ",
             );
@@ -1920,10 +2070,10 @@ mod tests {
                 "
                 ...
                 ; %1: i1 = eq %0, %0
-                {{_}} {{_}}: mov [rbp-{{0x08}}], r15
-                {{_}} {{_}}: mov r14, [rbp-{{0x08}}]
-                {{_}} {{_}}: cmp r15, r14
-                {{_}} {{_}}: setz r15b
+                {{_}} {{_}}: mov [rbp-{{0x08}}], r.64.x
+                {{_}} {{_}}: mov r.64.y, [rbp-{{0x08}}]
+                {{_}} {{_}}: cmp r.64.x, r.64.y
+                {{_}} {{_}}: setz r.8.x
                 ...
             ",
             );
@@ -1940,10 +2090,10 @@ mod tests {
                 "
                 ...
                 ; %1: i1 = eq %0, %0
-                {{_}} {{_}}: mov [rbp-{{0x01}}], r15b
-                {{_}} {{_}}: movzx r14, byte ptr [rbp-{{0x01}}]
-                {{_}} {{_}}: cmp r15b, r14b
-                {{_}} {{_}}: setz r15b
+                {{_}} {{_}}: mov [rbp-{{0x01}}], r.8.x
+                {{_}} {{_}}: movzx r.64.y, byte ptr [rbp-{{0x01}}]
+                {{_}} {{_}}: cmp r.8.x, r.8.y
+                {{_}} {{_}}: setz r.8.x
                 ...
             ",
             );
@@ -1960,8 +2110,8 @@ mod tests {
                 "
                 ...
                 ; guard true, %0, []
-                ... cmp r15b, 0x01
-                ... jnz 0x...
+                {{_}} {{_}}: cmp r.8.b, 0x01
+                {{_}} {{_}}: jnz 0x...
                 ...
                 ; deopt id for guard 0
                 ... mov rsi, 0x00
@@ -1986,8 +2136,8 @@ mod tests {
                 "
                 ...
                 ; guard false, %0, []
-                ... cmp r15b, 0x00
-                ... jnz 0x...
+                {{_}} {{_}}: cmp r.8.b, 0x00
+                {{_}} {{_}}: jnz 0x...
                 ...
                 ; deopt id for guard 0
                 ... mov rsi, 0x00
@@ -2010,7 +2160,7 @@ mod tests {
                 "
                 ...
                 ; Unterminated trace
-                {{vaddr}} {{off}}: ud2
+                {{_}} {{_}}: ud2
                 ",
             );
         }
@@ -2028,7 +2178,7 @@ mod tests {
                 ...
                 ; tloop_start:
                 ; tloop_backedge:
-                {{vaddr}} {{off}}: jmp {{target}}
+                {{_}} {{_}}: jmp {{target}}
             ",
             );
         }
@@ -2068,9 +2218,9 @@ mod tests {
                 "
                 ...
                 ; %2: i32 = srem %0, %1
-                {{_}} {{_}}: mov eax, r15d
+                {{_}} {{_}}: mov eax, r.32.y
                 {{_}} {{_}}: xor rdx, rdx
-                {{_}} {{_}}: idiv r14d
+                {{_}} {{_}}: idiv r.32.x
                 ...
             ",
             );
@@ -2127,8 +2277,9 @@ mod tests {
                 "
                 ...
                 ; %2: i8 = sdiv %0, %1
-                ...
-                {{_}} {{_}}: idiv r14b
+                {{_}} {{_}}: movzx rax, r.8.x
+                {{_}} {{_}}: movsx ax, al
+                {{_}} {{_}}: idiv r.8.y
                 ; unterminated trace
                 ...
             ",
@@ -2147,8 +2298,9 @@ mod tests {
                 "
                 ...
                 ; %2: i8 = udiv %0, %1
-                ...
-                {{_}} {{_}}: div r14b
+                {{_}} {{_}}: movzx rax, r.8.x
+                {{_}} {{_}}: xor rdx, rdx
+                {{_}} {{_}}: div r.8.y
                 ...
             ",
             );
@@ -2167,8 +2319,8 @@ mod tests {
                 ...
                 ; %2: i8 = add %0, 1i8
                 ......
-                {{_}} {{_}}: mov {{r14b}}, 0x01
-                {{_}} {{_}}: add {{r15b}}, {{r14b}}
+                {{_}} {{_}}: mov r.8.x, 0x01
+                {{_}} {{_}}: add r.8.y, r.8.x
                 ...
             ",
             );
@@ -2186,9 +2338,9 @@ mod tests {
                 "
                 ...
                 ; %2: i8 = shl %0, %1
-                {{_}} {{_}}: mov ...
-                {{_}} {{_}}: movzx rcx, ...
-                {{_}} {{_}}: shl r15b, cl
+                ...
+                {{_}} {{_}}: movzx rcx, r.8.a
+                {{_}} {{_}}: shl r.8.b, cl
                 ...
             ",
             );
@@ -2205,7 +2357,7 @@ mod tests {
                 "
                 ...
                 ; %1: float = si_to_fp %0
-                {{_}} {{_}}: cvtsi2ss xmm{{_}}, ...
+                {{_}} {{_}}: cvtsi2ss fp.128.x, r.32.x
                 ...
                 ",
             );
@@ -2222,7 +2374,7 @@ mod tests {
                 "
                 ...
                 ; %1: double = si_to_fp %0
-                {{_}} {{_}}: cvtsi2sd xmm{{_}}, ...
+                {{_}} {{_}}: cvtsi2sd fp.128.x, r.32.x
                 ...
                 ",
             );
@@ -2239,10 +2391,10 @@ mod tests {
                 "
                 ...
                 ; %0: float = load_ti 0
-                {{_}} {{_}}: movss {{xmm15}}, dword ptr ...
+                {{_}} {{_}}: movss fp.128.x, dword ptr ...
                 ; %1: double = fp_ext %0
-                {{_}} {{_}}: movss [{{rbp}}-{{0x04}}], {{xmm15}}
-                {{_}} {{_}}: cvtss2sd {{xmm15}}, {{xmm15}}
+                {{_}} {{_}}: movss [rbp-{{0x04}}], fp.128.x
+                {{_}} {{_}}: cvtss2sd fp.128.x, fp.128.x
                 ...
                 ",
             );
@@ -2259,7 +2411,7 @@ mod tests {
                 "
                 ...
                 ; %1: i32 = fp_to_si %0
-                {{_}} {{_}}: cvttss2si r{{_}}, xmm{{15}}
+                {{_}} {{_}}: cvttss2si r.64.x, fp.128.x
                 ...
                 ",
             );
@@ -2276,7 +2428,7 @@ mod tests {
                 "
                 ...
                 ; %1: i32 = fp_to_si %0
-                {{_}} {{_}}: cvttsd2si r{{_}}, xmm{{15}}
+                {{_}} {{_}}: cvttsd2si r.64.x, fp.128.x
                 ...
                 ",
             );
@@ -2295,7 +2447,7 @@ mod tests {
                 ...
                 ; %2: float = fdiv %0, %1
                 ......
-                {{_}} {{_}}: divss xmm{{15}}, xmm{{14}}
+                {{_}} {{_}}: divss fp.128.x, fp.128.y
                 ...
                 ",
             );
@@ -2314,7 +2466,7 @@ mod tests {
                 ...
                 ; %2: double = fdiv %0, %1
                 ......
-                {{_}} {{_}}: divsd xmm{{15}}, xmm{{14}}
+                {{_}} {{_}}: divsd fp.128.x, fp.128.y
                 ...
                 ",
             );
@@ -2333,7 +2485,7 @@ mod tests {
                 ...
                 ; %2: float = fadd %0, %1
                 ......
-                {{_}} {{_}}: addss xmm{{15}}, xmm{{14}}
+                {{_}} {{_}}: addss fp.128.x, fp.128.y
                 ...
                 ",
             );
@@ -2352,7 +2504,7 @@ mod tests {
                 ...
                 ; %2: double = fadd %0, %1
                 ......
-                {{_}} {{_}}: addsd xmm{{15}}, xmm{{14}}
+                {{_}} {{_}}: addsd fp.128.x, fp.128.y
                 ...
                 ",
             );
@@ -2371,7 +2523,7 @@ mod tests {
                 ...
                 ; %2: float = fsub %0, %1
                 ......
-                {{_}} {{_}}: subss xmm{{15}}, xmm{{14}}
+                {{_}} {{_}}: subss fp.128.x, fp.128.y
                 ...
                 ",
             );
@@ -2390,7 +2542,7 @@ mod tests {
                 ...
                 ; %2: double = fsub %0, %1
                 ......
-                {{_}} {{_}}: subsd xmm{{15}}, xmm{{14}}
+                {{_}} {{_}}: subsd fp.128.x, fp.128.y
                 ...
                 ",
             );
@@ -2409,7 +2561,7 @@ mod tests {
                 ...
                 ; %2: float = fmul %0, %1
                 ......
-                {{_}} {{_}}: mulss xmm{{15}}, xmm{{14}}
+                {{_}} {{_}}: mulss fp.128.x, fp.128.y
                 ...
                 ",
             );
@@ -2428,7 +2580,7 @@ mod tests {
                 ...
                 ; %2: double = fmul %0, %1
                 ......
-                {{_}} {{_}}: mulsd xmm{{15}}, xmm{{14}}
+                {{_}} {{_}}: mulsd fp.128.x, fp.128.y
                 ...
                 ",
             );
@@ -2446,10 +2598,10 @@ mod tests {
                 "
                 ...
                 ; %2: i1 = f_ueq %0, %1
-                {{_}} {{_}}: ucomiss xmm{{15}}, xmm{{14}}
-                {{_}} {{_}}: setz {{r15b}}
-                {{_}} {{_}}: setnp {{r12b}}
-                {{_}} {{_}}: and {{r15b}}, {{r12b}}
+                {{_}} {{_}}: ucomiss fp.128.x, fp.128.y
+                {{_}} {{_}}: setz r.8.x
+                {{_}} {{_}}: setnp r.8.y
+                {{_}} {{_}}: and r.8.x, r.8.y
                 ...
                 ",
             );
@@ -2467,10 +2619,10 @@ mod tests {
                 "
                 ...
                 ; %2: i1 = f_ueq %0, %1
-                {{_}} {{_}}: ucomisd xmm{{15}}, xmm{{14}}
-                {{_}} {{_}}: setz {{r15b}}
-                {{_}} {{_}}: setnp {{r12b}}
-                {{_}} {{_}}: and {{r15b}}, {{r12b}}
+                {{_}} {{_}}: ucomisd fp.128.x, fp.128.y
+                {{_}} {{_}}: setz r.8.x
+                {{_}} {{_}}: setnp r.8.y
+                {{_}} {{_}}: and r.8.x, r.8.y
                 ...
                 ",
             );
@@ -2487,13 +2639,13 @@ mod tests {
                 ...
                 ; %0: float = fadd 1.2float, 3.4float
                 ...
-                {{_}} {{_}}: mov {{r12d}}, 0x3f99999a
-                {{_}} {{_}}: movd {{xmm15}}, {{r12d}}
+                {{_}} {{_}}: mov r.32.x, 0x3f99999a
+                {{_}} {{_}}: movd fp.128.x, r.32.x
                 ...
-                {{_}} {{_}}: mov {{r12d}}, 0x4059999a
-                {{_}} {{_}}: movd {{xmm14}}, {{r12d}}
+                {{_}} {{_}}: mov r.32.x, 0x4059999a
+                {{_}} {{_}}: movd fp.128.y, r.32.x
                 ...
-                {{_}} {{_}}: addss {{xmm15}}, {{xmm14}}
+                {{_}} {{_}}: addss fp.128.x, fp.128.y
                 ...
                 ",
             );
@@ -2510,9 +2662,9 @@ mod tests {
                 ...
                 ; %0: double = fadd 1.2double, 3.4double
                 ...
-                {{_}} {{_}}: mov {{r12}}, 0x3ff3333333333333
+                {{_}} {{_}}: mov r.64.x, 0x3ff3333333333333
                 ...
-                {{_}} {{_}}: mov {{r12}}, 0x400b333333333333
+                {{_}} {{_}}: mov r.64.x, 0x400b333333333333
                 ...
                 ",
             );
