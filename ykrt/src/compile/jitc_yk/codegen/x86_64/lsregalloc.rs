@@ -545,9 +545,8 @@ impl<'a> LSRegAlloc<'a> {
                     RegState::Reserved | RegState::Empty => unreachable!(),
                     RegState::FromConst(_) => todo!(),
                     RegState::FromInst(from_iidx) => {
-                        if self.is_inst_var_still_used_at(iidx, from_iidx) {
-                            self.spill_gp_if_not_already(asm, reg);
-                        }
+                        debug_assert!(self.is_inst_var_still_used_at(iidx, from_iidx));
+                        self.spill_gp_if_not_already(asm, reg);
                         self.gp_regset.unset(reg);
                         self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
                         reg
@@ -803,7 +802,6 @@ impl<'a> LSRegAlloc<'a> {
             RegState::Reserved | RegState::Empty | RegState::FromConst(_) => (),
             RegState::FromInst(iidx) => {
                 if self.spilled_insts[usize::from(iidx)] == usize::MAX {
-                    println!("woo");
                     let inst = self.m.inst_no_proxies(iidx);
                     let size = inst.def_byte_size(self.m);
                     self.stack.align(size); // FIXME
@@ -903,9 +901,8 @@ impl<'a> LSRegAlloc<'a> {
                     RegState::Reserved | RegState::Empty => unreachable!(),
                     RegState::FromConst(_) => todo!(),
                     RegState::FromInst(from_iidx) => {
-                        if self.is_inst_var_still_used_at(iidx, from_iidx) {
-                            self.spill_fp_if_not_already(asm, reg);
-                        }
+                        debug_assert!(self.is_inst_var_still_used_at(iidx, from_iidx));
+                        self.spill_fp_if_not_already(asm, reg);
                         self.fp_regset.unset(reg);
                         self.fp_reg_states[usize::from(reg.code())] = RegState::Empty;
                         reg
