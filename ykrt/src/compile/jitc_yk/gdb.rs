@@ -104,7 +104,7 @@ impl JitDescriptorAccessor {
         F: FnMut(*mut JitDescriptor),
     {
         let lock = self.mtx.lock().unwrap();
-        unsafe { f(ptr::addr_of_mut!(__jit_debug_descriptor)) };
+        f(ptr::addr_of_mut!(__jit_debug_descriptor));
         drop(lock);
     }
 }
