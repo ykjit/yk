@@ -540,20 +540,48 @@ impl<'a> LSRegAlloc<'a> {
     fn get_empty_gp_reg(&mut self, asm: &mut Assembler, iidx: InstIdx, avoid: RegSet<Rq>) -> Rq {
         match self.gp_regset.find_empty_avoiding(avoid) {
             Some(reg) => reg,
-            None => match avoid.find_empty() {
-                Some(reg) => match self.gp_reg_states[usize::from(reg.code())] {
-                    RegState::Reserved | RegState::Empty => unreachable!(),
-                    RegState::FromConst(_) => todo!(),
-                    RegState::FromInst(from_iidx) => {
-                        debug_assert!(self.is_inst_var_still_used_at(iidx, from_iidx));
+            None => {
+                // We need to find a register to spill. Our heuristic is two-fold:
+                //   1. Spill the register whose value is used furthest away in the trace. This is
+                //      a proxy for "the value is less likely to be used soon".
+                //   2. If (1) leads to a tie, spill the "highest" register (e.g. prefer to spill
+                //      R15 over RAX) because "lower" registers are more likely to be clobbered by
+                //      CALLS, and we assume that the more recently we've put a value into a
+                //      register, the more likely it is to be used again soon.
+                let mut furthest = None;
+                for reg in GP_REGS {
+                    if avoid.is_set(reg) {
+                        continue;
+                    }
+                    match self.gp_reg_states[usize::from(reg.code())] {
+                        RegState::Reserved => (),
+                        RegState::Empty => unreachable!(),
+                        RegState::FromConst(_) => todo!(),
+                        RegState::FromInst(from_iidx) => {
+                            debug_assert!(self.is_inst_var_still_used_at(iidx, from_iidx));
+                            if furthest.is_none() {
+                                furthest = Some((reg, from_iidx));
+                            } else if let Some((_, furthest_iidx)) = furthest {
+                                if self.inst_vals_alive_until[usize::from(from_iidx)]
+                                    >= self.inst_vals_alive_until[usize::from(furthest_iidx)]
+                                {
+                                    furthest = Some((reg, from_iidx))
+                                }
+                            }
+                        }
+                    }
+                }
+
+                match furthest {
+                    Some((reg, _)) => {
                         self.spill_gp_if_not_already(asm, reg);
                         self.gp_regset.unset(reg);
                         self.gp_reg_states[usize::from(reg.code())] = RegState::Empty;
                         reg
                     }
-                },
-                None => panic!("Cannot satisfy register constraints: no registers left"),
-            },
+                    None => panic!("Cannot satisfy register constraints: no registers left"),
+                }
+            }
         }
     }
 
@@ -896,20 +924,48 @@ impl<'a> LSRegAlloc<'a> {
     fn get_empty_fp_reg(&mut self, asm: &mut Assembler, iidx: InstIdx, avoid: RegSet<Rx>) -> Rx {
         match self.fp_regset.find_empty_avoiding(avoid) {
             Some(reg) => reg,
-            None => match avoid.find_empty() {
-                Some(reg) => match self.fp_reg_states[usize::from(reg.code())] {
-                    RegState::Reserved | RegState::Empty => unreachable!(),
-                    RegState::FromConst(_) => todo!(),
-                    RegState::FromInst(from_iidx) => {
-                        debug_assert!(self.is_inst_var_still_used_at(iidx, from_iidx));
+            None => {
+                // We need to find a register to spill. Our heuristic is two-fold:
+                //   1. Spill the register whose value is used furthest away in the trace. This is
+                //      a proxy for "the value is less likely to be used soon".
+                //   2. If (1) leads to a tie, spill the "highest" register (e.g. prefer to spill
+                //      XMM15 over XMM0) because "lower" registers are more likely to be clobbered
+                //      by CALLS, and we assume that the more recently we've put a value into a
+                //      register, the more likely it is to be used again soon.
+                let mut furthest = None;
+                for reg in FP_REGS {
+                    if avoid.is_set(reg) {
+                        continue;
+                    }
+                    match self.fp_reg_states[usize::from(reg.code())] {
+                        RegState::Reserved => (),
+                        RegState::Empty => unreachable!(),
+                        RegState::FromConst(_) => todo!(),
+                        RegState::FromInst(from_iidx) => {
+                            debug_assert!(self.is_inst_var_still_used_at(iidx, from_iidx));
+                            if furthest.is_none() {
+                                furthest = Some((reg, from_iidx));
+                            } else if let Some((_, furthest_iidx)) = furthest {
+                                if self.inst_vals_alive_until[usize::from(from_iidx)]
+                                    >= self.inst_vals_alive_until[usize::from(furthest_iidx)]
+                                {
+                                    furthest = Some((reg, from_iidx))
+                                }
+                            }
+                        }
+                    }
+                }
+
+                match furthest {
+                    Some((reg, _)) => {
                         self.spill_fp_if_not_already(asm, reg);
                         self.fp_regset.unset(reg);
                         self.fp_reg_states[usize::from(reg.code())] = RegState::Empty;
                         reg
                     }
-                },
-                None => panic!("Cannot satisfy register constraints: no registers left"),
-            },
+                    None => panic!("Cannot satisfy register constraints: no registers left"),
+                }
+            }
         }
     }
 
