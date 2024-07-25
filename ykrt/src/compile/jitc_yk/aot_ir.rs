@@ -945,7 +945,11 @@ pub(crate) enum Inst {
         rhs: Operand,
     },
     #[deku(id = "255")]
-    Unimplemented(#[deku(until = "|v: &u8| *v == 0", map = "map_to_string")] String),
+    Unimplemented {
+        tyidx: TyIdx,
+        #[deku(until = "|v: &u8| *v == 0", map = "map_to_string")]
+        llvm_inst_str: String,
+    },
 }
 
 impl Inst {
@@ -1021,7 +1025,14 @@ impl Inst {
                 cond: _, trueval, ..
             } => Some(trueval.type_(m)),
             Self::LoadArg { arg_idx: _, ty_idx } => Some(m.type_(*ty_idx)),
-            Self::Unimplemented(_) => None,
+            Self::Unimplemented { tyidx, .. } => {
+                let ty = m.type_(*tyidx);
+                if ty != &Ty::Void {
+                    Some(ty)
+                } else {
+                    None
+                }
+            }
             Self::Nop => None,
             Self::FCmp { tyidx, .. } => Some(m.type_(*tyidx)),
         }
@@ -1304,7 +1315,9 @@ impl fmt::Display for DisplayableInst<'_> {
                 )
             }
             Inst::LoadArg { arg_idx, ty_idx: _ } => write!(f, "arg({})", arg_idx,),
-            Inst::Unimplemented(s) => write!(f, "unimplemented <<{}>>", s),
+            Inst::Unimplemented { llvm_inst_str, .. } => {
+                write!(f, "unimplemented <<{}>>", llvm_inst_str)
+            }
             Inst::Nop => write!(f, "nop"),
             Inst::FCmp { lhs, pred, rhs, .. } => {
                 write!(f, "{pred} {}, {}", lhs.display(self.m), rhs.display(self.m))
