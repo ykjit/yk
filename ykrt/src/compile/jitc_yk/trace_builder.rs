@@ -168,31 +168,22 @@ impl TraceBuilder {
                         let aot_field_off = trace_input_struct_ty.field_byte_off(trace_input_idx);
                         let aot_field_ty = trace_input_struct_ty.field_tyidx(trace_input_idx);
                         // FIXME: we should check at compile-time that this will fit.
-                        match u32::try_from(aot_field_off) {
-                            Ok(u32_off) => {
-                                let input_tyidx =
-                                    self.handle_type(self.aot_mod.type_(aot_field_ty))?;
-                                let load_ti_inst =
-                                    jit_ir::LoadTraceInputInst::new(u32_off, input_tyidx).into();
-                                // We don't need to insert these loads when we are side-tracing,
-                                // since side-tracing handles inputs separately.
-                                if !is_sidetrace {
-                                    self.jit_mod.push(load_ti_inst)?;
-                                    // If this take fails, we didn't see a corresponding store and the
-                                    // IR is malformed.
-                                    self.local_map.insert(
-                                        last_store_ptr.take().unwrap().to_inst_id(),
-                                        jit_ir::Operand::Local(self.jit_mod.last_inst_idx()),
-                                    );
-                                }
-                                self.first_ti_idx = iidx;
-                            }
-                            _ => {
-                                return Err(CompilationError::InternalError(
-                                    "Offset {aot_field_off} doesn't fit".into(),
-                                ));
-                            }
+                        let aot_field_off = u32::try_from(aot_field_off).unwrap();
+                        let input_tyidx = self.handle_type(self.aot_mod.type_(aot_field_ty))?;
+                        let load_ti_inst =
+                            jit_ir::LoadTraceInputInst::new(aot_field_off, input_tyidx).into();
+                        // We don't need to insert these loads when we are side-tracing,
+                        // since side-tracing handles inputs separately.
+                        if !is_sidetrace {
+                            self.jit_mod.push(load_ti_inst)?;
+                            // If this take fails, we didn't see a corresponding store and the
+                            // IR is malformed.
+                            self.local_map.insert(
+                                last_store_ptr.take().unwrap().to_inst_id(),
+                                jit_ir::Operand::Local(self.jit_mod.last_inst_idx()),
+                            );
                         }
+                        self.first_ti_idx = iidx;
                     }
                 }
                 _ => (),
