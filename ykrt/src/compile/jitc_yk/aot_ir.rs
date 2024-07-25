@@ -683,7 +683,7 @@ impl Operand {
                 // As is the case for LLVM IR, globals are always pointer-typed in Yk AOT IR.
                 &Ty::Ptr
             }
-            _ => todo!(),
+            Self::Func(funcidx) => m.type_(m.func(*funcidx).tyidx()),
         }
     }
 
