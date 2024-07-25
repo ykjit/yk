@@ -1533,13 +1533,16 @@ impl<'a> AsmPrinter<'a> {
 /// classes (i.e. `r.8.x` and `fp.128.x` do not match the same register "x").
 #[cfg(test)]
 mod tests {
-    use super::X64CompiledTrace;
+    use super::{Assemble, X64CompiledTrace};
     use crate::compile::{
         jitc_yk::jit_ir::{self, Module},
         CompiledTrace,
     };
+    use crate::location::{HotLocation, HotLocationKind};
+    use crate::mt::MT;
     use fm::{FMBuilder, FMatcher};
     use lazy_static::lazy_static;
+    use parking_lot::Mutex;
     use regex::{Regex, RegexBuilder};
     use std::{
         collections::{HashMap, HashSet},
@@ -1712,131 +1715,125 @@ mod tests {
         }
     }
 
-    mod with_spillalloc {
-        use super::{super::Assemble, *};
-        use crate::location::{HotLocation, HotLocationKind};
-        use crate::mt::MT;
-        use parking_lot::Mutex;
+    fn codegen_and_test(mod_str: &str, patt_lines: &str) {
+        let m = Module::from_str(mod_str);
+        let mt = MT::new().unwrap();
+        let hl = HotLocation {
+            kind: HotLocationKind::Tracing,
+            tracecompilation_errors: 0,
+        };
+        match_asm(
+            Assemble::new(&m)
+                .unwrap()
+                .codegen(mt, Arc::new(Mutex::new(hl)))
+                .unwrap()
+                .as_any()
+                .downcast::<X64CompiledTrace>()
+                .unwrap(),
+            patt_lines,
+        );
+    }
 
-        fn codegen_and_test(mod_str: &str, patt_lines: &str) {
-            let m = Module::from_str(mod_str);
-            let mt = MT::new().unwrap();
-            let hl = HotLocation {
-                kind: HotLocationKind::Tracing,
-                tracecompilation_errors: 0,
-            };
-            match_asm(
-                Assemble::new(&m)
-                    .unwrap()
-                    .codegen(mt, Arc::new(Mutex::new(hl)))
-                    .unwrap()
-                    .as_any()
-                    .downcast::<X64CompiledTrace>()
-                    .unwrap(),
-                patt_lines,
-            );
-        }
-
-        #[test]
-        fn cg_load_ptr() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_load_ptr() {
+        codegen_and_test(
+            "
               entry:
                 %0: ptr = load_ti 0
                 %1: ptr = load %0
             ",
-                "
+            "
                 ...
                 ; %1: ptr = load %0
                 {{_}} {{_}}: mov [rbp-0x08], r.64.x
                 {{_}} {{_}}: mov r.64.x, [r.64.x]
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_load_i8() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_load_i8() {
+        codegen_and_test(
+            "
               entry:
                 %0: i8 = load_ti 0
                 %1: i8 = load %0
             ",
-                "
+            "
                 ...
                 ; %1: i8 = load %0
                 {{_}} {{_}}: mov [rbp-0x01], r.8.x
                 {{_}} {{_}}: movzx r.64.x, byte ptr [r.64.x]
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_load_i32() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_load_i32() {
+        codegen_and_test(
+            "
               entry:
                 %0: i32 = load_ti 0
                 %1: i32 = load %0
             ",
-                "
+            "
                 ...
                 ; %1: i32 = Load %0
                 {{_}} {{_}}: mov [rbp-0x04], r.32.x
                 {{_}} {{_}}: mov r.32.x, [r.64.x]
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_load_const_ptr() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_load_const_ptr() {
+        codegen_and_test(
+            "
               entry:
                 %0: ptr = load_ti 0
                 *%0 = 0x0
             ",
-                "
+            "
                 ...
                 ; *%0 = 0x0
                 {{_}} {{_}}: mov r.64.x, 0x00
                 {{_}} {{_}}: mov [r.64.y], r.64.x
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_ptradd() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_ptradd() {
+        codegen_and_test(
+            "
               entry:
                 %0: ptr = load_ti 0
                 %1: i32 = ptr_add %0, 64
             ",
-                "
+            "
                 ...
                 ; %1: ptr = ptr_add %0, 64
                 {{_}} {{_}}: mov ...
                 {{_}} {{_}}: add r.64.x, 0x40
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_dynptradd() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_dynptradd() {
+        codegen_and_test(
+            "
               entry:
                 %0: ptr = load_ti 0
                 %1: i32 = load_ti 8
                 %2: ptr = dyn_ptr_add %0, %1, 32
             ",
-                "
+            "
                 ...
                 ; %2: ptr = dyn_ptr_add %0, %1, 32
                 {{_}} {{_}}: mov [rbp-{{_}}], r.32.x
@@ -1844,19 +1841,19 @@ mod tests {
                 {{_}} {{_}}: add r.64.x, r.64.y
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_store_ptr() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_store_ptr() {
+        codegen_and_test(
+            "
               entry:
                 %0: ptr = load_ti 0
                 %1: ptr = load_ti 8
                 *%1 = %0
             ",
-                "
+            "
                 ...
                 ; %0: ptr = load_ti 0
                 {{_}} {{_}}: mov r.64.x, ...
@@ -1866,105 +1863,105 @@ mod tests {
                 {{_}} {{_}}: mov [r.64.y], r.64.x
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_loadtraceinput_i8() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_loadtraceinput_i8() {
+        codegen_and_test(
+            "
               entry:
                 %0: i8 = load_ti 0
             ",
-                "
+            "
                 ...
                 ; %0: i8 = load_ti 0
                 {{_}} {{_}}: movzx r.64.x, byte ptr ...
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_loadtraceinput_i16_with_offset() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_loadtraceinput_i16_with_offset() {
+        codegen_and_test(
+            "
               entry:
                 %0: i16 = load_ti 32
             ",
-                "
+            "
                 ...
                 ; %0: i16 = load_ti 32
                 {{_}} {{_}}: movzx r.64.x, word ptr ...
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_add_i16() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_add_i16() {
+        codegen_and_test(
+            "
               entry:
                 %0: i16 = load_ti 0
                 %1: i16 = load_ti 1
                 %3: i16 = add %0, %1
             ",
-                "
+            "
                 ...
                 ; %2: i16 = add %0, %1
                 ......
                 {{_}} {{_}}: add r.16.x, r.16.y
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_add_i64() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_add_i64() {
+        codegen_and_test(
+            "
               entry:
                 %0: i64 = load_ti 0
                 %1: i64 = load_ti 1
                 %3: i64 = add %0, %1
             ",
-                "
+            "
                 ...
                 ; %2: i64 = add %0, %1
                 ......
                 {{_}} {{_}}: add r.64.x, r.64.y
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_call_simple() {
-            let sym_addr = symbol_to_ptr("puts").unwrap().addr();
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_call_simple() {
+        let sym_addr = symbol_to_ptr("puts").unwrap().addr();
+        codegen_and_test(
+            "
               func_decl puts ()
 
               entry:
                 call @puts()
             ",
-                &format!(
-                    "
+            &format!(
+                "
                 ...
                 ... mov r12, 0x{sym_addr:X}
                 ... call r12
                 ...
             "
-                ),
-            );
-        }
+            ),
+        );
+    }
 
-        #[test]
-        fn cg_call_with_args() {
-            let sym_addr = symbol_to_ptr("puts").unwrap().addr();
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_call_with_args() {
+        let sym_addr = symbol_to_ptr("puts").unwrap().addr();
+        codegen_and_test(
+            "
               func_decl puts (i32, i32, i32)
 
               entry:
@@ -1973,8 +1970,8 @@ mod tests {
                 %2: i32 = load_ti 8
                 call @puts(%0, %1, %2)
             ",
-                &format!(
-                    "
+            &format!(
+                "
                 ...
                 ; call @puts(%0, %1, %2)
                 {{{{_}}}} {{{{_}}}}: mov r12, 0x{sym_addr:X}
@@ -1984,15 +1981,15 @@ mod tests {
                 {{{{_}}}} {{{{_}}}}: call r12
                 ...
             "
-                ),
-            );
-        }
+            ),
+        );
+    }
 
-        #[test]
-        fn cg_call_with_different_args() {
-            let sym_addr = symbol_to_ptr("puts").unwrap().addr();
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_call_with_different_args() {
+        let sym_addr = symbol_to_ptr("puts").unwrap().addr();
+        codegen_and_test(
+            "
               func_decl puts (i8, i16, i32, i64, ptr, i8)
 
               entry:
@@ -2004,8 +2001,8 @@ mod tests {
                 %5: i8 = load_ti 40
                 call @puts(%0, %1, %2, %3, %4, %5)
             ",
-                &format!(
-                    "
+            &format!(
+                "
                 ...
                 ; call @puts(%0, %1, %2, %3, %4, %5)
                 {{{{_}}}} {{{{_}}}}: mov r12, 0x{sym_addr:X}
@@ -2019,33 +2016,33 @@ mod tests {
                 {{{{_}}}} {{{{_}}}}: call r12
                 ...
             "
-                ),
-            );
-        }
+            ),
+        );
+    }
 
-        #[should_panic] // until we implement spill args
-        #[test]
-        fn cg_call_spill_args() {
-            codegen_and_test(
-                "
+    #[should_panic] // until we implement spill args
+    #[test]
+    fn cg_call_spill_args() {
+        codegen_and_test(
+            "
               func_decl f(...)
               entry:
                 %1: i32 = call @f(0, 1, 2, 3, 4, 5, 6, 7)
             ",
-                "",
-            );
-        }
+            "",
+        );
+    }
 
-        #[test]
-        fn cg_call_ret() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_call_ret() {
+        codegen_and_test(
+            "
              func_decl puts() -> i32
              entry:
                %0: i32 = call @puts()
                %1: i32 = add %0, %0
             ",
-                "
+            "
                 ...
                 ; %0: i32 = call @puts()
                 {{_}} {{_}}: mov r12, ...
@@ -2056,18 +2053,18 @@ mod tests {
                 {{_}} {{_}}: add eax, r.32.x
                 ...
             ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_eq_i64() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_eq_i64() {
+        codegen_and_test(
+            "
               entry:
                 %0: i64 = load_ti 0
                 %1: i1 = eq %0, %0
             ",
-                "
+            "
                 ...
                 ; %1: i1 = eq %0, %0
                 {{_}} {{_}}: mov [rbp-{{0x08}}], r.64.x
@@ -2076,18 +2073,18 @@ mod tests {
                 {{_}} {{_}}: setz r.8.x
                 ...
             ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_eq_i8() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_eq_i8() {
+        codegen_and_test(
+            "
               entry:
                 %0: i8 = load_ti 0
                 %1: i1 = eq %0, %0
             ",
-                "
+            "
                 ...
                 ; %1: i1 = eq %0, %0
                 {{_}} {{_}}: mov [rbp-{{0x01}}], r.8.x
@@ -2096,18 +2093,18 @@ mod tests {
                 {{_}} {{_}}: setz r.8.x
                 ...
             ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_guard_true() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_guard_true() {
+        codegen_and_test(
+            "
               entry:
                 %0: i1 = load_ti 0
                 guard true, %0, []
             ",
-                "
+            "
                 ...
                 ; guard true, %0, []
                 {{_}} {{_}}: cmp r.8.b, 0x01
@@ -2122,18 +2119,18 @@ mod tests {
                 ... mov rax, ...
                 ... call rax
             ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_guard_false() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_guard_false() {
+        codegen_and_test(
+            "
               entry:
                 %0: i1 = load_ti 0
                 guard false, %0, []
             ",
-                "
+            "
                 ...
                 ; guard false, %0, []
                 {{_}} {{_}}: cmp r.8.b, 0x00
@@ -2148,51 +2145,51 @@ mod tests {
                 ... mov rax, ...
                 ... call rax
             ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn unterminated_trace() {
-            codegen_and_test(
-                "
+    #[test]
+    fn unterminated_trace() {
+        codegen_and_test(
+            "
               entry:
                 ",
-                "
+            "
                 ...
                 ; Unterminated trace
                 {{_}} {{_}}: ud2
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn looped_trace_smallest() {
-            // FIXME: make the offset and disassembler format hex the same so we can match
-            // easier (capitalisation of hex differs).
-            codegen_and_test(
-                "
+    #[test]
+    fn looped_trace_smallest() {
+        // FIXME: make the offset and disassembler format hex the same so we can match
+        // easier (capitalisation of hex differs).
+        codegen_and_test(
+            "
               entry:
                 tloop_start
             ",
-                "
+            "
                 ...
                 ; tloop_start:
                 ; tloop_backedge:
                 {{_}} {{_}}: jmp {{target}}
             ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn looped_trace_bigger() {
-            codegen_and_test(
-                "
+    #[test]
+    fn looped_trace_bigger() {
+        codegen_and_test(
+            "
               entry:
                 %0: i8 = load_ti 0
                 tloop_start
                 %2: i8 = add %0, %0
             ",
-                "
+            "
                 ...
                 ; %0: i8 = load_ti 0
                 ...
@@ -2203,19 +2200,19 @@ mod tests {
                 ...
                 ...: jmp ...
             ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_srem() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_srem() {
+        codegen_and_test(
+            "
               entry:
                 %0: i32 = load_ti 0
                 %1: i32 = load_ti 1
                 %2: i32 = srem %0, %1
             ",
-                "
+            "
                 ...
                 ; %2: i32 = srem %0, %1
                 {{_}} {{_}}: mov eax, r.32.y
@@ -2223,18 +2220,18 @@ mod tests {
                 {{_}} {{_}}: idiv r.32.x
                 ...
             ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_trunc() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_trunc() {
+        codegen_and_test(
+            "
               entry:
                 %0: i32 = load_ti 0
                 %1: i8 = trunc %0
             ",
-                "
+            "
                 ...
                 ; %0: i32 = load_ti 0
                 ...
@@ -2242,18 +2239,18 @@ mod tests {
                 ... mov [rbp-0x04], r15d
                 ...
             ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_select() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_select() {
+        codegen_and_test(
+            "
               entry:
                 %0: i32 = load_ti 0
                 %1: i32 = %0 ? 1i32 : 2i32
             ",
-                "
+            "
                 ...
                 ; %1: i32 = %0 ? 1i32 : 2i32
                 {{_}} {{_}}: mov r14d, 0x01
@@ -2262,19 +2259,19 @@ mod tests {
                 {{_}} {{_}}: cmovz r14, r13
                 ...
             ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_sdiv() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_sdiv() {
+        codegen_and_test(
+            "
               entry:
                 %0: i8 = load_ti 0
                 %1: i8 = load_ti 1
                 %2: i8 = sdiv %0, %1
             ",
-                "
+            "
                 ...
                 ; %2: i8 = sdiv %0, %1
                 {{_}} {{_}}: movzx rax, r.8.x
@@ -2283,19 +2280,19 @@ mod tests {
                 ; unterminated trace
                 ...
             ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_udiv() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_udiv() {
+        codegen_and_test(
+            "
               entry:
                 %0: i8 = load_ti 0
                 %1: i8 = load_ti 1
                 %2: i8 = udiv %0, %1
             ",
-                "
+            "
                 ...
                 ; %2: i8 = udiv %0, %1
                 {{_}} {{_}}: movzx rax, r.8.x
@@ -2303,19 +2300,19 @@ mod tests {
                 {{_}} {{_}}: div r.8.y
                 ...
             ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_proxyconst() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_proxyconst() {
+        codegen_and_test(
+            "
               entry:
                 %0: i8 = load_ti 0
                 %1: i8 = 1i8
                 %2: i8 = add %0, %1
             ",
-                "
+            "
                 ...
                 ; %2: i8 = add %0, 1i8
                 ......
@@ -2323,19 +2320,19 @@ mod tests {
                 {{_}} {{_}}: add r.8.y, r.8.x
                 ...
             ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_shl() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_shl() {
+        codegen_and_test(
+            "
               entry:
                 %0: i8 = load_ti 0
                 %1: i8 = load_ti 1
                 %2: i8 = shl %0, %1
             ",
-                "
+            "
                 ...
                 ; %2: i8 = shl %0, %1
                 ...
@@ -2343,52 +2340,52 @@ mod tests {
                 {{_}} {{_}}: shl r.8.b, cl
                 ...
             ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_sitofp_float() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_sitofp_float() {
+        codegen_and_test(
+            "
               entry:
                 %0: i32 = load_ti 0
                 %1: float = si_to_fp %0
             ",
-                "
+            "
                 ...
                 ; %1: float = si_to_fp %0
                 {{_}} {{_}}: cvtsi2ss fp.128.x, r.32.x
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_sitofp_double() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_sitofp_double() {
+        codegen_and_test(
+            "
               entry:
                 %0: i32 = load_ti 0
                 %1: double = si_to_fp %0
             ",
-                "
+            "
                 ...
                 ; %1: double = si_to_fp %0
                 {{_}} {{_}}: cvtsi2sd fp.128.x, r.32.x
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_fpext_float_double() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_fpext_float_double() {
+        codegen_and_test(
+            "
               entry:
                 %0: float = load_ti 0
                 %1: double = fp_ext %0
             ",
-                "
+            "
                 ...
                 ; %0: float = load_ti 0
                 {{_}} {{_}}: movss fp.128.x, dword ptr ...
@@ -2397,205 +2394,205 @@ mod tests {
                 {{_}} {{_}}: cvtss2sd fp.128.x, fp.128.x
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_fptosi_float() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_fptosi_float() {
+        codegen_and_test(
+            "
               entry:
                 %0: float = load_ti 0
                 %1: i32 = fp_to_si %0
             ",
-                "
+            "
                 ...
                 ; %1: i32 = fp_to_si %0
                 {{_}} {{_}}: cvttss2si r.64.x, fp.128.x
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_fptosi_double() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_fptosi_double() {
+        codegen_and_test(
+            "
               entry:
                 %0: double = load_ti 0
                 %1: i32 = fp_to_si %0
             ",
-                "
+            "
                 ...
                 ; %1: i32 = fp_to_si %0
                 {{_}} {{_}}: cvttsd2si r.64.x, fp.128.x
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_fdiv_float() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_fdiv_float() {
+        codegen_and_test(
+            "
               entry:
                 %0: float = load_ti 0
                 %1: float = load_ti 1
                 %2: float = fdiv %0, %1
             ",
-                "
+            "
                 ...
                 ; %2: float = fdiv %0, %1
                 ......
                 {{_}} {{_}}: divss fp.128.x, fp.128.y
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_fdiv_double() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_fdiv_double() {
+        codegen_and_test(
+            "
               entry:
                 %0: double = load_ti 0
                 %1: double = load_ti 1
                 %2: double = fdiv %0, %1
             ",
-                "
+            "
                 ...
                 ; %2: double = fdiv %0, %1
                 ......
                 {{_}} {{_}}: divsd fp.128.x, fp.128.y
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_fadd_float() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_fadd_float() {
+        codegen_and_test(
+            "
               entry:
                 %0: float = load_ti 0
                 %1: float = load_ti 1
                 %2: float = fadd %0, %1
             ",
-                "
+            "
                 ...
                 ; %2: float = fadd %0, %1
                 ......
                 {{_}} {{_}}: addss fp.128.x, fp.128.y
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_fadd_double() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_fadd_double() {
+        codegen_and_test(
+            "
               entry:
                 %0: double = load_ti 0
                 %1: double = load_ti 1
                 %2: double = fadd %0, %1
             ",
-                "
+            "
                 ...
                 ; %2: double = fadd %0, %1
                 ......
                 {{_}} {{_}}: addsd fp.128.x, fp.128.y
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_fsub_float() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_fsub_float() {
+        codegen_and_test(
+            "
               entry:
                 %0: float = load_ti 0
                 %1: float = load_ti 1
                 %2: float = fsub %0, %1
             ",
-                "
+            "
                 ...
                 ; %2: float = fsub %0, %1
                 ......
                 {{_}} {{_}}: subss fp.128.x, fp.128.y
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_fsub_double() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_fsub_double() {
+        codegen_and_test(
+            "
               entry:
                 %0: double = load_ti 0
                 %1: double = load_ti 1
                 %2: double = fsub %0, %1
             ",
-                "
+            "
                 ...
                 ; %2: double = fsub %0, %1
                 ......
                 {{_}} {{_}}: subsd fp.128.x, fp.128.y
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_fmul_float() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_fmul_float() {
+        codegen_and_test(
+            "
               entry:
                 %0: float = load_ti 0
                 %1: float = load_ti 1
                 %2: float = fmul %0, %1
             ",
-                "
+            "
                 ...
                 ; %2: float = fmul %0, %1
                 ......
                 {{_}} {{_}}: mulss fp.128.x, fp.128.y
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_fmul_double() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_fmul_double() {
+        codegen_and_test(
+            "
               entry:
                 %0: double = load_ti 0
                 %1: double = load_ti 1
                 %2: double = fmul %0, %1
             ",
-                "
+            "
                 ...
                 ; %2: double = fmul %0, %1
                 ......
                 {{_}} {{_}}: mulsd fp.128.x, fp.128.y
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_fcmp_float() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_fcmp_float() {
+        codegen_and_test(
+            "
               entry:
                 %0: float = load_ti 0
                 %1: float = load_ti 1
                 %2: i1 = f_ueq %0, %1
             ",
-                "
+            "
                 ...
                 ; %2: i1 = f_ueq %0, %1
                 {{_}} {{_}}: ucomiss fp.128.x, fp.128.y
@@ -2604,19 +2601,19 @@ mod tests {
                 {{_}} {{_}}: and r.8.x, r.8.y
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_fcmp_double() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_fcmp_double() {
+        codegen_and_test(
+            "
               entry:
                 %0: double = load_ti 0
                 %1: double = load_ti 1
                 %2: i1 = f_ueq %0, %1
             ",
-                "
+            "
                 ...
                 ; %2: i1 = f_ueq %0, %1
                 {{_}} {{_}}: ucomisd fp.128.x, fp.128.y
@@ -2625,17 +2622,17 @@ mod tests {
                 {{_}} {{_}}: and r.8.x, r.8.y
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_const_float() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_const_float() {
+        codegen_and_test(
+            "
               entry:
                 %0: float = fadd 1.2float, 3.4float
             ",
-                "
+            "
                 ...
                 ; %0: float = fadd 1.2float, 3.4float
                 ...
@@ -2648,17 +2645,17 @@ mod tests {
                 {{_}} {{_}}: addss fp.128.x, fp.128.y
                 ...
                 ",
-            );
-        }
+        );
+    }
 
-        #[test]
-        fn cg_const_double() {
-            codegen_and_test(
-                "
+    #[test]
+    fn cg_const_double() {
+        codegen_and_test(
+            "
               entry:
                 %0: double = fadd 1.2double, 3.4double
             ",
-                "
+            "
                 ...
                 ; %0: double = fadd 1.2double, 3.4double
                 ...
@@ -2667,7 +2664,6 @@ mod tests {
                 {{_}} {{_}}: mov r.64.x, 0x400b333333333333
                 ...
                 ",
-            );
-        }
+        );
     }
 }
