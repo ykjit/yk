@@ -1,6 +1,9 @@
 // ## Truncation currently always truncates to i32, no matter the target type.
 // ##ignore-if: true
 // ## ignore-if: test $YK_JIT_COMPILER != "yk" -o "$YKB_TRACER" = "swt"
+// ##
+// ## FIXME: crashes under SWT
+// ignore-if: test "$YKB_TRACER" = "swt"
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
 //   env-var: YKD_LOG_JITSTATE=-

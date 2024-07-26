@@ -37,7 +37,7 @@ static YKD_OPT: LazyLock<bool> = LazyLock::new(|| {
     }
 });
 
-static AOT_MOD: LazyLock<aot_ir::Module> = LazyLock::new(|| {
+pub(crate) static AOT_MOD: LazyLock<aot_ir::Module> = LazyLock::new(|| {
     let ir_slice = yk_ir_section().unwrap();
     aot_ir::deserialise_module(ir_slice).unwrap()
 });

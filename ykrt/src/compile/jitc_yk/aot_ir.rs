@@ -184,6 +184,11 @@ impl Module {
         &self.funcs[idx]
     }
 
+    #[cfg(tracer_swt)]
+    pub(crate) fn funcs(&self) -> &TiVec<FuncIdx, Func> {
+        &self.funcs
+    }
+
     /// Lookup a global variable declaration by its index.
     ///
     /// # Panics
