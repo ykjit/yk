@@ -16,6 +16,10 @@ use std::{
     thread,
 };
 
+#[cfg(tracer_swt)]
+#[cfg(target_arch = "x86_64")]
+use crate::trace::swt::patch::{patch_trace_function, restore_trace_function};
+
 use parking_lot::{Condvar, Mutex, MutexGuard};
 #[cfg(not(all(feature = "yk_testing", not(test))))]
 use parking_lot_core::SpinWait;
@@ -256,6 +260,10 @@ impl MT {
             }
             TransitionControlPoint::StartTracing(hl) => {
                 log_jit_state("start-tracing");
+                #[cfg(tracer_swt)]
+                unsafe {
+                    restore_trace_function();
+                }
                 let tracer = {
                     let lk = self.tracer.lock();
                     Arc::clone(&*lk)
@@ -272,6 +280,11 @@ impl MT {
                 }
             }
             TransitionControlPoint::StopTracing => {
+                #[cfg(tracer_swt)]
+                unsafe {
+                    patch_trace_function();
+                }
+
                 // Assuming no bugs elsewhere, the `unwrap`s cannot fail, because `StartTracing`
                 // will have put a `Some` in the `Rc`.
                 let (hl, thread_tracer, promotions) =
@@ -320,6 +333,10 @@ impl MT {
                     Ok(utrace) => {
                         self.stats.timing_state(TimingState::None);
                         log_jit_state("stop-side-tracing");
+                        #[cfg(tracer_swt)]
+                        unsafe {
+                            patch_trace_function();
+                        }
                         self.queue_compile_job(
                             (utrace, promotions.into_boxed_slice()),
                             hl,
@@ -545,6 +562,10 @@ impl MT {
             TransitionGuardFailure::NoAction => todo!(),
             TransitionGuardFailure::StartSideTracing(hl) => {
                 log_jit_state("start-side-tracing");
+                #[cfg(tracer_swt)]
+                unsafe {
+                    restore_trace_function();
+                }
                 let tracer = {
                     let lk = self.tracer.lock();
                     Arc::clone(&*lk)
