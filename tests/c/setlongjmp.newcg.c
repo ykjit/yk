@@ -2,12 +2,12 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=-:jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=4
 //   stderr:
-//     jitstate: start-tracing
+//     yk-jit-event: start-tracing
 //     we jumped
-//     jitstate: stop-tracing
-//     jitstate: trace-compilation-aborted: longjmp encountered
+//     yk-jit-event: stop-tracing
+//     yk-warning: trace-compilation-aborted: longjmp encountered
 //     ...
 
 // Tests that we can deal with setjmp/longjmp.

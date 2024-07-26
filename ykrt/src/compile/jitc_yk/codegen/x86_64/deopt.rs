@@ -1,11 +1,11 @@
 use crate::{
     aotsmp::AOT_STACKMAPS,
     compile::{jitc_yk::codegen::reg_alloc::VarLocation, GuardIdx},
-    log::{log_jit_state, stats::TimingState},
+    log::{stats::TimingState, Verbosity},
     mt::MTThread,
 };
 use libc::c_void;
-use std::{mem, ptr};
+use std::{mem, ptr, sync::Arc};
 use yksmp::Location as SMLocation;
 
 use super::{X64CompiledTrace, RBP_DWARF_NUM, REG64_SIZE};
@@ -24,6 +24,7 @@ pub(crate) extern "C" fn __yk_deopt(
     debug_assert!(usize::from(gidx) < ctr.deoptinfo.len());
     let aot_smaps = AOT_STACKMAPS.as_ref().unwrap();
     let info = &ctr.deoptinfo[usize::from(gidx)];
+    let mt = Arc::clone(&ctr.mt);
 
     if let Some(st) = info.guard.ctr() {
         // Prepare the traceinputs "struct" (for now this is just a vector) and pass it into the
@@ -53,19 +54,20 @@ pub(crate) extern "C" fn __yk_deopt(
                 st.entry(),
             )
         };
-        ctr.mt.stats.timing_state(TimingState::JitExecuting);
+        let mt = Arc::clone(&ctr.mt);
         drop(ctr);
+        mt.stats.timing_state(TimingState::JitExecuting);
+        mt.log(Verbosity::JITEvent, "execute-side-trace");
 
         MTThread::with(|mtt| {
             mtt.set_running_trace(Some(st));
         });
 
-        log_jit_state("execute-side-trace");
         // FIXME: Calling this function overwrites the current (Rust) function frame,
         // rather than unwinding it. https://github.com/ykjit/yk/issues/778
         unsafe { f(ykctrlpvars.as_ptr() as *mut c_void, frameaddr) };
     }
-    log_jit_state("deoptimise");
+    mt.log(Verbosity::JITEvent, "deoptimise");
 
     // Calculate space required for the new stack.
     // Add space for live register values which we'll be adding at the end.

@@ -2,11 +2,11 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=4
 //   stderr:
-//     jitstate: start-tracing
+//     yk-jit-event: start-tracing
 //     i=0, elem=000
-//     jitstate: stop-tracing
+//     yk-jit-event: stop-tracing
 //     --- Begin aot ---
 //     ...
 //     %{{10_13}}: ptr = ptr_add %{{0_5}}, 0 + (%{{10_8}} * 64) + (%{{10_10}} * 16) + (%{{%10_12}} * 4)
@@ -20,10 +20,10 @@
 //     ...
 //     --- End jit-pre-opt ---
 //     i=1, elem=111
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     i=2, elem=222
 //     i=3, elem=333
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 
 // Check dynamic ptradd instructions work.
 

@@ -2,14 +2,14 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=-:jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=4
 //   stderr:
-//     jitstate: start-tracing
+//     yk-jit-event: start-tracing
 //     udiv 21845
 //     udiv2 715827882
 //     udiv3 1431655764
 //     udiv4 42
-//     jitstate: stop-tracing
+//     yk-jit-event: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     %{{_}}: i16 = udiv %{{_}}, 3i16
@@ -25,7 +25,7 @@
 //     udiv2 715827882
 //     udiv3 1431655764
 //     udiv4 42
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     udiv 21845
 //     udiv2 715827882
 //     udiv3 1431655764
@@ -34,7 +34,7 @@
 //     udiv2 715827882
 //     udiv3 1431655764
 //     udiv4 42
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 //     exit
 
 // Test unsigned division.

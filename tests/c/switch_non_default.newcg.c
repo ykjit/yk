@@ -2,11 +2,11 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=4
 //   stderr:
-//     jitstate: start-tracing
+//     yk-jit-event: start-tracing
 //     i=3
-//     jitstate: stop-tracing
+//     yk-jit-event: stop-tracing
 //     --- Begin aot ---
 //     ...
 //     switch %{{10_1}}, bb{{bb14}}, [300 -> bb{{bb11}}, 299 -> bb{{bb12}}] [safepoint: {{safepoint_id}}, (%{{0_0}}, %{{0_1}}, %{{0_4}}, %{{0_5}}, %{{0_6}}, %{{10_1}})]
@@ -19,9 +19,9 @@
 //     ...
 //     --- End jit-pre-opt ---
 //     i=2
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     i=1
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 //     ...
 
 // Check that tracing a non-default switch arm works correctly.

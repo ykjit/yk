@@ -1,19 +1,19 @@
 // ignore-if: test $YK_JIT_COMPILER != "yk" -o "$YKB_TRACER" = "swt"
 // Run-time:
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=4
 //   env-var: YKD_LOG_STATS=/dev/null
 //   stderr:
-//     jitstate: start-tracing
+//     yk-jit-event: start-tracing
 //     pc=0, mem=12
 //     pc=1, mem=11
 //     pc=2, mem=10
 //     pc=3, mem=9
-//     jitstate: stop-tracing
+//     yk-jit-event: stop-tracing
 //     pc=0, mem=9
 //     pc=1, mem=8
 //     pc=2, mem=7
 //     pc=3, mem=6
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     pc=0, mem=6
 //     pc=1, mem=5
 //     pc=2, mem=4
@@ -22,7 +22,7 @@
 //     pc=1, mem=2
 //     pc=2, mem=1
 //     pc=3, mem=0
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 //     pc=4, mem=0
 //     pc=5, mem=-1
 

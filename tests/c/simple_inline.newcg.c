@@ -2,11 +2,11 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=-:jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=4
 //   stderr:
-//     jitstate: start-tracing
+//     yk-jit-event: start-tracing
 //     foo 7
-//     jitstate: stop-tracing
+//     yk-jit-event: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     %{{result}}: i32 = add %{{1}}, 3i32
@@ -15,10 +15,10 @@
 //     ...
 //     --- End jit-pre-opt ---
 //     foo 6
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     foo 5
 //     foo 4
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 //     exit
 
 // Check that return values of inlined functions are properly mapped.

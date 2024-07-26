@@ -1,13 +1,13 @@
 // ignore-if: test $YK_JIT_COMPILER != "yk" -o "$YKB_TRACER" = "swt"
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=4
 //   stderr:
 //     ...
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     p1==p2: 1, p2==p3: 0
 //     p1==p2: 1, p2==p3: 0
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 //     ...
 //
 

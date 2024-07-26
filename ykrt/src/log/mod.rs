@@ -3,7 +3,25 @@
 //! Note that some of these features are only meaningfully available when the `ykd` feature is
 //! available: otherwise we expose no-op functions.
 
+use strum::{EnumCount, FromRepr};
+
 pub(crate) mod stats;
+
+/// How verbose should yk's normal logging be?
+#[repr(u8)]
+#[derive(Copy, Clone, Debug, EnumCount, FromRepr, PartialEq, PartialOrd)]
+pub(crate) enum Verbosity {
+    /// Disable logging entirely.
+    Disabled,
+    /// Log errors.
+    Error,
+    /// Log warnings.
+    Warning,
+    /// Log transitions of a [Location].
+    LocationTransition,
+    /// Log JIT events (e.g. start/stop tracing).
+    JITEvent,
+}
 
 #[derive(Eq, Hash, PartialEq)]
 #[allow(dead_code)]
@@ -17,7 +35,6 @@ pub(crate) enum IRPhase {
 #[cfg(not(feature = "ykd"))]
 mod internals {
     use super::IRPhase;
-    pub(crate) fn log_jit_state(_: &str) {}
     pub(crate) fn should_log_ir(_: IRPhase) -> bool {
         false
     }
@@ -28,26 +45,6 @@ mod internals {
 mod internals {
     use super::IRPhase;
     use std::{collections::HashSet, env, error::Error, fs::File, io::Write, sync::LazyLock};
-
-    // YKD_LOG_JITSTATE
-
-    static JITSTATE_DEBUG: LazyLock<Option<String>> =
-        LazyLock::new(|| env::var("YKD_LOG_JITSTATE").ok());
-
-    /// Log select JIT events to stderr for testing/debugging purposes.
-    pub fn log_jit_state(state: &str) {
-        match JITSTATE_DEBUG.as_ref().map(|x| x.as_str()) {
-            Some("-") => eprintln!("jitstate: {}", state),
-            Some(x) => {
-                File::options()
-                    .append(true)
-                    .open(x)
-                    .map(|mut x| x.write(state.as_bytes()))
-                    .ok();
-            }
-            None => (),
-        }
-    }
 
     // YKD_LOG_IR
 
@@ -109,4 +106,4 @@ mod internals {
     }
 }
 
-pub(crate) use internals::{log_ir, log_jit_state, should_log_ir};
+pub(crate) use internals::{log_ir, should_log_ir};

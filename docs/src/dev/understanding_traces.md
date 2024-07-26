@@ -32,27 +32,3 @@ to show higher-level representations of the code in the source view.
 
 This feature relies on the use of temporary files, which (in addition to being
 slow to create) are not guaranteed to be cleaned up.
-
-
-### `YKD_LOG_JITSTATE`
-
-If the `YKD_LOG_JITSTATE=<path>` environment variable is defined, then changes
-in the "JIT state" will be appended, as they occur, to the file at `<path>` as
-they occur. The special value `-` (i.e. a single dash) can be used for `<path>`
-to indicate stderr.
-
-The JIT states written are:
-
- * `jitstate: start-tracing` is printed when the system starts tracing.
- * `jitstate: stop-tracing` is printed when the system stops tracing.
- * `jitstate: enter-jit-code` is printed when the system starts executing
-   JITted code.
- * `jitstate: exit-jit-code` is printed when the system stops executing
-   JITted code.
-
-Note that there are no `start-interpreting` and `stop-interpreting`
-notifications: if the system is not currently tracing or executing JITted code,
-then it is implicitly interpreting.
-
-This variable is only available when building `ykrt` with the `ykd` Cargo
-feature enabled.

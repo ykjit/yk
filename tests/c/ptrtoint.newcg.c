@@ -2,21 +2,21 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=-:jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=4
 //   stderr:
-//     jitstate: start-tracing
+//     yk-jit-event: start-tracing
 //     ptr: {{ptr}}
-//     jitstate: stop-tracing
+//     yk-jit-event: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     %{{1}}: i64 = zext %{{2}}, i64
 //     ...
 //     --- End jit-pre-opt ---
 //     ptr: {{ptr}}
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     ptr: {{ptr}}
 //     ptr: {{ptr}}
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 //     exit
 
 // Check that pointer to integer conversion works.

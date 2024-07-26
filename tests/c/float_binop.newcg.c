@@ -2,12 +2,12 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=4
 //   stderr:
-//     jitstate: start-tracing
+//     yk-jit-event: start-tracing
 //     4 -> 4.333300 4.840000
 //     4 -> 3.666700 3.160000
-//     jitstate: stop-tracing
+//     yk-jit-event: stop-tracing
 //     --- Begin aot ---
 //     ...
 //     func main(%arg0: i32, %arg1: ptr) -> i32 {
@@ -35,12 +35,12 @@
 //     --- End jit-pre-opt ---
 //     3 -> 3.333300 3.840000
 //     3 -> 2.666700 2.160000
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     2 -> 2.333300 2.840000
 //     2 -> 1.666700 1.160000
 //     1 -> 1.333300 1.840000
 //     1 -> 0.666700 0.160000
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 
 // Check floating point addition works.
 

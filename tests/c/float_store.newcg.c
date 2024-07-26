@@ -2,15 +2,15 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=4
 //   stderr:
-//     jitstate: start-tracing
+//     yk-jit-event: start-tracing
 //     4 -> 3.252033
 //     4 -> 3.252033
 //     4 -> 3.252033
 //     4 -> 3.252033
 //     4 -> 3.252033
-//     jitstate: stop-tracing
+//     yk-jit-event: stop-tracing
 //     --- Begin aot ---
 //     ...
 //     func main(%arg0: i32, %arg1: ptr) -> i32 {
@@ -30,7 +30,7 @@
 //     3 -> 2.439024
 //     3 -> 2.439024
 //     3 -> 2.439024
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     2 -> 1.626016
 //     2 -> 1.626016
 //     2 -> 1.626016
@@ -41,7 +41,7 @@
 //     1 -> 0.813008
 //     1 -> 0.813008
 //     1 -> 0.813008
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 
 // Check basic 32-bit float support.
 
