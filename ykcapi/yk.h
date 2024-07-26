@@ -72,6 +72,6 @@ void yk_location_drop(YkLocation);
 // type of the value passed.
 #define yk_promote(X) _Generic((X), uintptr_t: __yk_promote_usize)(X)
 // Rust defines `usize` to be layout compatible with `uintptr_t`.
-void __yk_promote_usize(uintptr_t);
+uintptr_t __yk_promote_usize(uintptr_t);
 
 #endif
