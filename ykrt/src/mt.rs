@@ -625,7 +625,13 @@ impl MT {
             } else {
                 (None, None)
             };
-            match compiler.compile(Arc::clone(&mt), trace_iter, sti, Arc::clone(&hl_arc)) {
+            match compiler.compile(
+                Arc::clone(&mt),
+                trace_iter.0,
+                sti,
+                Arc::clone(&hl_arc),
+                trace_iter.1,
+            ) {
                 Ok(ct) => {
                     if let Some((_, parent_ctr)) = sidetrace {
                         parent_ctr.guard(guardid.unwrap()).set_ctr(ct);

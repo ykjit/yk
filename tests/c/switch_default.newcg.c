@@ -42,6 +42,7 @@ int main(int argc, char **argv) {
   int i = 3;
   int j = 300;
   NOOPT_VAL(i);
+  NOOPT_VAL(j);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
     fprintf(stderr, "i=%d\n", i);

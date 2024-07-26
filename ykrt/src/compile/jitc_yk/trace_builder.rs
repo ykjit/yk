@@ -3,7 +3,7 @@
 //! This takes in an (AOT IR, execution trace) pair and constructs a JIT IR trace from it.
 
 use super::aot_ir::{self, BBlockId, BinOp, FuncIdx, Module};
-use super::jit_ir;
+use super::jit_ir::{self, Const};
 use super::YkSideTraceInfo;
 use crate::compile::CompilationError;
 use crate::trace::{AOTTraceIterator, AOTTraceIteratorError, TraceAction};
@@ -62,6 +62,11 @@ pub(crate) struct TraceBuilder {
     // Current count of recursive calls to the function in which outlining was started. Will be 0
     // if `outline_target_blk` is None.
     recursion_count: usize,
+    // Values promoted to constants during runtime. This is only needed during trace building and
+    // can be thrown away after.
+    promotions: Box<[usize]>,
+    // The trace's current position in the promotions array.
+    promote_idx: usize,
 }
 
 impl TraceBuilder {
@@ -70,7 +75,12 @@ impl TraceBuilder {
     /// Arguments:
     ///  - `aot_mod`: The AOT IR module that the trace flows through.
     ///  - `mtrace`: The mapped trace.
-    fn new(ctr_id: u64, aot_mod: &'static Module) -> Result<Self, CompilationError> {
+    ///  - `promotions`: Values promoted to constants during runtime.
+    fn new(
+        ctr_id: u64,
+        aot_mod: &'static Module,
+        promotions: Box<[usize]>,
+    ) -> Result<Self, CompilationError> {
         Ok(Self {
             aot_mod,
             jit_mod: jit_ir::Module::new(ctr_id, aot_mod.global_decls_len())?,
@@ -82,6 +92,8 @@ impl TraceBuilder {
             frames: vec![Frame::new(None, None, None, vec![])],
             outline_target_blk: None,
             recursion_count: 0,
+            promotions,
+            promote_idx: 0,
         })
     }
 
@@ -313,6 +325,15 @@ impl TraceBuilder {
                 aot_ir::Inst::FCmp { lhs, pred, rhs, .. } => {
                     self.handle_fcmp(bid, iidx, lhs, pred, rhs)
                 }
+                aot_ir::Inst::Promote {
+                    val,
+                    tyidx,
+                    safepoint,
+                } => {
+                    // Get the branch instruction of this block.
+                    let nextinst = blk.insts.last().unwrap();
+                    self.handle_promote(bid, iidx, val, safepoint, tyidx, nextinst)
+                }
                 _ => todo!("{:?}", inst),
             }?;
         }
@@ -320,6 +341,8 @@ impl TraceBuilder {
     }
 
     /// Link the AOT IR to the last instruction pushed into the JIT IR.
+    ///
+    /// This must be called after adding a JIT IR instruction which has a return value.
     fn link_iid_to_last_inst(&mut self, bid: &aot_ir::BBlockId, aot_inst_idx: usize) {
         let aot_iid = aot_ir::InstID::new(
             bid.funcidx(),
@@ -1008,7 +1031,58 @@ impl TraceBuilder {
         self.copy_inst(inst, bid, aot_inst_idx)
     }
 
-    /// Consume the trace builder, returning a JIT module.
+    fn handle_promote(
+        &mut self,
+        bid: &aot_ir::BBlockId,
+        aot_inst_idx: usize,
+        val: &aot_ir::Operand,
+        safepoint: &'static aot_ir::DeoptSafepoint,
+        tyidx: &aot_ir::TyIdx,
+        nextinst: &'static aot_ir::Inst,
+    ) -> Result<(), CompilationError> {
+        match nextinst {
+            aot_ir::Inst::Br { succ } => {
+                // We can only stop outlining when we see the succesor block and we are not in
+                // the middle of recursion.
+                let succbid = BBlockId::new(bid.funcidx(), *succ);
+                self.outline_target_blk = Some(succbid);
+                self.recursion_count = 0;
+            }
+            aot_ir::Inst::CondBr { .. } => {
+                // Currently, the successor of a call is always an unconditional branch due to
+                // the block spitting pass. However, there's a FIXME in that pass which could
+                // lead to conditional branches showing up here. Leave a todo here so we know
+                // when this happens.
+                todo!()
+            }
+            _ => panic!(),
+        }
+        // Create the constant from the runtime value.
+        let pval = self.promotions[self.promote_idx];
+        self.promote_idx += 1;
+        let c = Const::Int(
+            self.handle_type(self.aot_mod.type_(*tyidx))?,
+            u64::try_from(pval).unwrap(),
+        );
+        let cidx = self.jit_mod.insert_const(c)?;
+        self.jit_mod.push(jit_ir::Inst::ProxyConst(cidx))?;
+        self.link_iid_to_last_inst(bid, aot_inst_idx);
+
+        // Insert a guard to ensure the runtime value does not change.
+        let jit_test = self.handle_operand(val)?;
+        let cmp_instr = jit_ir::ICmpInst::new(
+            jit_test,
+            aot_ir::Predicate::Equal,
+            jit_ir::Operand::Const(cidx),
+        );
+        let jit_cond = self.jit_mod.push_and_make_operand(cmp_instr.into())?;
+        let guard = self.create_guard(&jit_cond, true, safepoint)?;
+        self.copy_inst(guard.into(), bid, aot_inst_idx)
+    }
+
+    /// Entry point for building an IR trace.
+    ///
+    /// Consumes the trace builder, returning a JIT module.
     ///
     /// # Panics
     ///
@@ -1201,6 +1275,7 @@ pub(super) fn build(
     aot_mod: &'static Module,
     ta_iter: Box<dyn AOTTraceIterator>,
     sti: Option<Arc<YkSideTraceInfo>>,
+    promotions: Box<[usize]>,
 ) -> Result<jit_ir::Module, CompilationError> {
-    TraceBuilder::new(ctr_id, aot_mod)?.build(ta_iter, sti)
+    TraceBuilder::new(ctr_id, aot_mod, promotions)?.build(ta_iter, sti)
 }
