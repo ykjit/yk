@@ -2,11 +2,11 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=4
 //   stderr:
-//     jitstate: start-tracing
+//     yk-jit-event: start-tracing
 //     pos=1
-//     jitstate: stop-tracing
+//     yk-jit-event: stop-tracing
 //     --- Begin aot ---
 //     ...
 //     ... = sext ...
@@ -18,10 +18,10 @@
 //     ...
 //     --- End jit-pre-opt ---
 //     pos=2
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     pos=3
 //     pos=4
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 
 // Check that sign extending with a positive value works.
 

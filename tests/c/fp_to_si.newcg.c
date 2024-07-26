@@ -2,13 +2,13 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=4
 //   stderr:
-//     jitstate: start-tracing
+//     yk-jit-event: start-tracing
 //     i=4
 //     f32->int: 5, 4, -1
 //     f64->int: 2, 3, -1
-//     jitstate: stop-tracing
+//     yk-jit-event: stop-tracing
 //     --- Begin aot ---
 //     ...
 //     func main(%arg0: i32, %arg1: ptr) -> i32 {
@@ -28,14 +28,14 @@
 //     i=3
 //     f32->int: 5, 4, -1
 //     f64->int: 2, 3, -1
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     i=2
 //     f32->int: 5, 4, -1
 //     f64->int: 2, 3, -1
 //     i=1
 //     f32->int: 5, 4, -1
 //     f64->int: 2, 3, -1
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 
 // Check float to signed integer conversions.
 

@@ -6,24 +6,24 @@
 // ignore-if: test "$YKB_TRACER" = "swt"
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=4
 //   stderr:
-//     jitstate: start-tracing
+//     yk-jit-event: start-tracing
 //     u64 18446744073709551615
 //     u32 4294967295
 //     u16 65535
 //     u8 255
-//     jitstate: stop-tracing
+//     yk-jit-event: stop-tracing
 //     u64 18446744073709551615
 //     u32 4294967295
 //     u16 65535
 //     u8 255
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     u64 18446744073709551615
 //     u32 4294967295
 //     u16 65535
 //     u8 255
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 //     exit
 
 // Test truncation.

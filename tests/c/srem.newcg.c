@@ -2,14 +2,14 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=-:jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=4
 //   stderr:
-//     jitstate: start-tracing
+//     yk-jit-event: start-tracing
 //     srem 3
 //     srem2 3
 //     srem3 2
 //     srem4 3
-//     jitstate: stop-tracing
+//     yk-jit-event: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     %{{_}}: i32 = srem %{{_}}, %{{_}}
@@ -25,7 +25,7 @@
 //     srem2 1
 //     srem3 2
 //     srem4 1
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     srem 1
 //     srem2 1
 //     srem3 0
@@ -34,7 +34,7 @@
 //     srem2 0
 //     srem3 0
 //     srem4 0
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 //     exit
 
 // Test signed division.

@@ -2,11 +2,11 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=4
 //   stderr:
-//     jitstate: start-tracing
+//     yk-jit-event: start-tracing
 //     4 -> 3.350000, 4.500000
-//     jitstate: stop-tracing
+//     yk-jit-event: stop-tracing
 //     --- Begin aot ---
 //     ...
 //     func main(%arg0: i32, %arg1: ptr) -> i32 {
@@ -20,10 +20,10 @@
 //     ...
 //     --- End jit-pre-opt ---
 //     3 -> 3.350000, 4.500000
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     2 -> 3.350000, 4.500000
 //     1 -> 3.350000, 4.500000
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 
 // Check 32- and 64-bit float constants work properly.
 

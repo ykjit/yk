@@ -2,15 +2,15 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=4
 //   stderr:
-//     jitstate: start-tracing
+//     yk-jit-event: start-tracing
 //     0
 //     1
 //     2
 //     3
 //     4
-//     jitstate: stop-tracing
+//     yk-jit-event: stop-tracing
 //     --- Begin aot ---
 //     ...
 //     func main(%arg0: i32, %arg1: ptr) -> i32 {
@@ -25,13 +25,13 @@
 //     1
 //     2
 //     3
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     0
 //     1
 //     2
 //     0
 //     1
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 //     0
 //     exit
 

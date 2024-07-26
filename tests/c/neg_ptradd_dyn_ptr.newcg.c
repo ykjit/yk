@@ -2,11 +2,11 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=4
 //   stderr:
-//     jitstate: start-tracing
+//     yk-jit-event: start-tracing
 //     i=0, deref=9
-//     jitstate: stop-tracing
+//     yk-jit-event: stop-tracing
 //     --- Begin aot ---
 //     ...
 //     %{{15_3}}: ptr = ptr_add %{{15_1}}, 0 + (%{{15_2}} * {{4}})
@@ -18,10 +18,10 @@
 //     ...
 //     --- End jit-pre-opt ---
 //     i=1, deref=8
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     i=2, deref=7
 //     i=3, deref=6
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 
 // Check that basic trace compilation works.
 

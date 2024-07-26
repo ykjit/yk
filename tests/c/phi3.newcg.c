@@ -1,12 +1,12 @@
 // ignore-if: test $YK_JIT_COMPILER != "yk" -o "$YKB_TRACER" = "swt"
 // Run-time:
 //   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=4
 //   env-var: YKD_LOG_STATS=/dev/null
 //   stderr:
-//     jitstate: start-tracing
+//     yk-jit-event: start-tracing
 //     i=4, val=3
-//     jitstate: stop-tracing
+//     yk-jit-event: stop-tracing
 //     --- Begin aot ---
 //     ..~
 //     bb{{_}}:
@@ -33,10 +33,10 @@
 //     ...
 //     --- End jit-pre-opt ---
 //     i=3, val=3
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     i=2, val=3
 //     i=1, val=3
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 
 // Check that PHI nodes JIT properly.
 

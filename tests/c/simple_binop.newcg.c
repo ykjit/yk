@@ -2,9 +2,9 @@
 // Run-time:
 //   env-var: YKD_LOG_IR=-:jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=4
 //   stderr:
-//     jitstate: start-tracing
+//     yk-jit-event: start-tracing
 //     and 0
 //     or 5
 //     lshr 2
@@ -14,7 +14,7 @@
 //     xor2 -5
 //     shl 8
 //     ---
-//     jitstate: stop-tracing
+//     yk-jit-event: stop-tracing
 //     --- Begin jit-pre-opt ---
 //     ...
 //     %{{result}}: i32 = and %{{1}}, 1i32
@@ -29,7 +29,7 @@
 //     xor2 -4
 //     shl 6
 //     ---
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     and 0
 //     or 3
 //     lshr 1
@@ -48,7 +48,7 @@
 //     xor2 -2
 //     shl 2
 //     ---
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 //     exit
 
 // Test some binary operations.
