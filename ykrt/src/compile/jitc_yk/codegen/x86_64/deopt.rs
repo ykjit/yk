@@ -57,7 +57,7 @@ pub(crate) extern "C" fn __yk_deopt(
         let mt = Arc::clone(&ctr.mt);
         drop(ctr);
         mt.stats.timing_state(TimingState::JitExecuting);
-        mt.log(Verbosity::JITEvent, "execute-side-trace");
+        mt.log.log(Verbosity::JITEvent, "execute-side-trace");
 
         MTThread::with(|mtt| {
             mtt.set_running_trace(Some(st));
@@ -67,7 +67,7 @@ pub(crate) extern "C" fn __yk_deopt(
         // rather than unwinding it. https://github.com/ykjit/yk/issues/778
         unsafe { f(ykctrlpvars.as_ptr() as *mut c_void, frameaddr) };
     }
-    mt.log(Verbosity::JITEvent, "deoptimise");
+    mt.log.log(Verbosity::JITEvent, "deoptimise");
 
     // Calculate space required for the new stack.
     // Add space for live register values which we'll be adding at the end.
