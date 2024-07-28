@@ -995,23 +995,23 @@ impl<'a> LSRegAlloc<'a> {
 /// What constraints are there on registers for an instruction?
 #[derive(Debug)]
 pub(crate) enum RegConstraint<R: Register> {
-    // Make sure `Operand` is loaded into a register *R* on entry; its value must be unchanged
-    // after the instruction is executed.
+    /// Make sure `Operand` is loaded into a register *R* on entry; its value must be unchanged
+    /// after the instruction is executed.
     Input(Operand),
-    // Make sure `Operand` is loaded into register `R` on entry; its value must be unchanged
-    // after the instruction is executed.
+    /// Make sure `Operand` is loaded into register `R` on entry; its value must be unchanged
+    /// after the instruction is executed.
     InputIntoReg(Operand, R),
-    // Make sure `Operand` is loaded into register `R` on entry and considered clobbered on exit.
+    /// Make sure `Operand` is loaded into register `R` on entry and considered clobbered on exit.
     InputIntoRegAndClobber(Operand, R),
-    // Make sure `Operand` is loaded into a register *x* on entry and considered clobbered on exit.
-    // The result of this instruction will be stored in register *x*.
+    /// Make sure `Operand` is loaded into a register *x* on entry and considered clobbered on exit.
+    /// The result of this instruction will be stored in register *x*.
     InputOutput(Operand),
-    // Make sure `Operand` is loaded into register `R` on entry and considered clobbered on exit.
-    // The result of this instruction will be placed in `R`.
+    /// Make sure `Operand` is loaded into register `R` on entry and considered clobbered on exit.
+    /// The result of this instruction will be placed in `R`.
     InputOutputIntoReg(Operand, R),
-    // The result of this instruction will be stored in register *x*.
+    /// The result of this instruction will be stored in register *x*.
     Output,
-    // The result of this instruction will be stored in register `R`.
+    /// The result of this instruction will be stored in register `R`.
     OutputFromReg(R),
 }
 
