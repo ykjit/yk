@@ -1059,10 +1059,11 @@ impl<'a> Assemble<'a> {
         match (callee_reg, callee_op) {
             (Some(reg), None) => dynasm!(self.asm; call Rq(reg.code())),
             (None, Some(op)) => {
-                let [reg] = self.ra.get_gp_regs(
+                let [reg] = self.ra.get_gp_regs_avoiding(
                     &mut self.asm,
                     iidx,
-                    [RegConstraint::InputIntoRegAndClobber(op, WR0)],
+                    [RegConstraint::Input(op)],
+                    RegSet::from_vec(&CALLER_CLOBBER_REGS),
                 );
                 dynasm!(self.asm; call Rq(reg.code()));
             }
