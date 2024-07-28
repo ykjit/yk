@@ -66,10 +66,6 @@ pub(crate) static GP_REGS: [Rq; 16] = [
 /// eval yet.
 const GP_REGS_LEN: usize = 16;
 
-/// FIXME: A temporary scratch register we guarantee not to use elsewhere. Every use of this is a
-/// hack.
-static WR0: Rq = Rq::R12;
-
 /// The complete set of floating point x64 registers, in the order that dynasmrt defines them.
 /// Note that large portions of the code rely on these registers mapping to the integers 0..15
 /// (both inc.) in order.
@@ -98,9 +94,7 @@ const FP_REGS_LEN: usize = 16;
 
 /// The set of general registers which we will never assign value to. RSP & RBP are reserved by
 /// SysV.
-///
-/// FIXME: R12 is a temporary hack because it's the "WR0" hack.
-static RESERVED_GP_REGS: [Rq; 3] = [Rq::RSP, Rq::RBP, Rq::R12];
+static RESERVED_GP_REGS: [Rq; 2] = [Rq::RSP, Rq::RBP];
 
 /// The set of floating point registers which we will never assign value to.
 static RESERVED_FP_REGS: [Rx; 0] = [];
@@ -910,33 +904,35 @@ impl<'a> LSRegAlloc<'a> {
     /// Load the constant from `cidx` into `reg`.
     fn load_const_into_fp_reg(&mut self, asm: &mut Assembler, cidx: ConstIdx, reg: Rx) {
         match self.m.const_(cidx) {
-            Const::Float(tyidx, val) => match self.m.type_(*tyidx) {
-                // There's no way to directly move an immediate value into an xmm, so we have to go
-                // via a general purpose register.
-                //
-                // We use WR0 here, but it might be used by parents (e.g.
-                // `x86_64/mod.rs::emit_call`) so we have to push/pop it to avoid clobbering that
-                // other use.
-                Ty::Float(fty) => match fty {
-                    FloatTy::Float => {
-                        dynasm!(asm
-                            ; push Rq(WR0.code())
-                            ; mov Rd(WR0.code()), DWORD (*val as f32).to_bits() as i64 as i32
-                            ; movd Rx(reg.code()), Rd(WR0.code())
-                            ; pop Rq(WR0.code())
-                        );
-                    }
-                    FloatTy::Double => {
-                        dynasm!(asm
-                            ; push Rq(WR0.code())
-                            ; mov Rq(WR0.code()), QWORD val.to_bits() as i64
-                            ; movq Rx(reg.code()), Rq(WR0.code())
-                            ; pop Rq(WR0.code())
-                        );
-                    }
-                },
-                _ => panic!(),
-            },
+            Const::Float(tyidx, val) => {
+                // FIXME: We need to use a temporary GP register to move immediate values into but
+                // we don't have a reliable way of expressing this to the register allocator at
+                // this point. We pick a random GP register and push/pop to avoid clobbering it.
+                // This is not just inefficient but also highlights a weakness in our general
+                // register allocator API.
+                let tmp_reg = Rq::RAX;
+                match self.m.type_(*tyidx) {
+                    Ty::Float(fty) => match fty {
+                        FloatTy::Float => {
+                            dynasm!(asm
+                                ; push Rq(tmp_reg.code())
+                                ; mov Rd(tmp_reg.code()), DWORD (*val as f32).to_bits() as i64 as i32
+                                ; movd Rx(reg.code()), Rd(tmp_reg.code())
+                                ; pop Rq(tmp_reg.code())
+                            );
+                        }
+                        FloatTy::Double => {
+                            dynasm!(asm
+                                ; push Rq(tmp_reg.code())
+                                ; mov Rq(tmp_reg.code()), QWORD val.to_bits() as i64
+                                ; movq Rx(reg.code()), Rq(tmp_reg.code())
+                                ; pop Rq(tmp_reg.code())
+                            );
+                        }
+                    },
+                    _ => panic!(),
+                }
+            }
             _ => panic!(),
         }
     }
