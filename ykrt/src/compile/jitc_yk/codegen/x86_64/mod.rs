@@ -105,7 +105,6 @@ static RBP_DWARF_NUM: u16 = 6;
 /// We choose callee-save registers so that we don't have to worry about storing/restoring them
 /// when we do a function call to external code.
 static WR0: Rq = Rq::R12;
-static WR1: Rq = Rq::R13;
 
 /// The X86_64 SysV ABI requires a 16-byte aligned stack prior to any call.
 const SYSV_CALL_STACK_ALIGN: usize = 16;
