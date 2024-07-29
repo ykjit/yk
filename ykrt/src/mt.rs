@@ -51,7 +51,7 @@ pub type AtomicTraceCompilationErrorThreshold = AtomicU16;
 /// FIXME: needs to be configurable.
 pub(crate) const DEFAULT_TRACE_TOO_LONG: usize = 5000;
 const DEFAULT_HOT_THRESHOLD: HotThreshold = 50;
-const DEFAULT_SIDETRACE_THRESHOLD: HotThreshold = 5;
+const DEFAULT_SIDETRACE_THRESHOLD: HotThreshold = 500000;
 /// How often can a [HotLocation] or [Guard] lead to an error in tracing or compilation before we
 /// give up trying to trace (or compile...) it?
 const DEFAULT_TRACECOMPILATION_ERROR_THRESHOLD: TraceCompilationErrorThreshold = 5;
@@ -664,18 +664,32 @@ impl Drop for MT {
 
 #[cfg(target_arch = "x86_64")]
 #[naked]
+#[no_mangle]
 unsafe extern "C" fn exec_trace(
+    // FIXME: We don't need ctrlp_vars and frameaddr here anymore.
     ctrlp_vars: *mut c_void,
     frameaddr: *const c_void,
     rsp: *const c_void,
     trace: *const c_void,
 ) -> ! {
     std::arch::asm!(
-        // Reset RSP to the end of the control point frame (this doesn't include the
-        // return address)
+        // Reset RBP
+        "mov rbp, rsi",
+        // Reset RSP to the end of the control point frame (this includes the registers we pushed
+        // just before the control point)
         "mov rsp, rdx",
+        "sub rsp, 8",  // Return address of control point call
+        "sub rsp, 56", // Registers pushed in naked cp call
+        //// Restore callee-saved registers which were pushed to the stack in __ykrt_control_point.
+        "pop r15",
+        "pop r14",
+        "pop r13",
+        "pop r12",
+        "pop rsi",
+        "pop rbx", // Don't overwrite `rdi` for now until we remove the first two args.
+        "pop rbx",
         // Call the trace function.
-        "call rcx",
+        "jmp rcx",
         "ret",
         options(noreturn)
     )

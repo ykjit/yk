@@ -1698,33 +1698,6 @@ pub(crate) struct StructTy {
 }
 
 impl StructTy {
-    /// Returns the type index of the specified field index.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the index is out of bounds.
-    pub(crate) fn field_tyidx(&self, idx: usize) -> TyIdx {
-        self.field_tyidxs[idx]
-    }
-
-    /// Returns the byte offset of the specified field index.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the field is not byte-aligned or the index is out of bounds.
-    pub(crate) fn field_byte_off(&self, idx: usize) -> usize {
-        let bit_off = self.field_bit_offs[idx];
-        if bit_off % 8 != 0 {
-            todo!();
-        }
-        bit_off / 8
-    }
-
-    /// Returns the number of fields in the struct.
-    pub(crate) fn num_fields(&self) -> usize {
-        self.field_tyidxs.len()
-    }
-
     pub(crate) fn display<'a>(&'a self, m: &'a Module) -> DisplayableStructTy<'a> {
         DisplayableStructTy {
             struct_type: self,

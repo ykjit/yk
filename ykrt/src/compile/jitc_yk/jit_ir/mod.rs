@@ -68,6 +68,7 @@ mod parser;
 mod well_formed;
 
 use super::aot_ir;
+use super::codegen::reg_alloc::VarLocation;
 use crate::compile::jitc_yk::trace_builder::Frame;
 use crate::compile::CompilationError;
 use indexmap::IndexSet;
@@ -106,6 +107,8 @@ pub(crate) struct Module {
     consts: IndexSet<ConstIndexSetWrapper>,
     /// The type pool. Indexed by [TyIdx].
     types: IndexSet<Ty>,
+    /// The trace-input location pool.
+    tilocs: Vec<VarLocation>,
     /// The type index of the void type. Cached for convenience.
     void_tyidx: TyIdx,
     /// The type index of a pointer type. Cached for convenience.
@@ -209,6 +212,7 @@ impl Module {
             args: Vec::new(),
             consts,
             types,
+            tilocs: Vec::new(),
             void_tyidx,
             ptr_tyidx,
             int1_tyidx,
@@ -378,6 +382,11 @@ impl Module {
         self.args[usize::from(idx)]
     }
 
+    /// Push the location of a trace input variable.
+    pub(crate) fn push_tiloc(&mut self, loc: VarLocation) {
+        self.tilocs.push(loc);
+    }
+
     /// Add a [Ty] to the types pool and return its index. If the [Ty] already exists, an existing
     /// index will be returned.
     pub(crate) fn insert_ty(&mut self, ty: Ty) -> Result<TyIdx, CompilationError> {
@@ -503,6 +512,10 @@ impl Module {
         info: GuardInfo,
     ) -> Result<GuardInfoIdx, CompilationError> {
         GuardInfoIdx::new(self.guard_info.len()).inspect(|_| self.guard_info.push(info))
+    }
+
+    pub(crate) fn tilocs(&self) -> &[VarLocation] {
+        &self.tilocs
     }
 }
 
@@ -1249,10 +1262,6 @@ pub(crate) enum Inst {
     Store(StoreInst),
     ICmp(ICmpInst),
     Guard(GuardInst),
-    /// Describes an argument into the trace function. Its main use is to allow us to track trace
-    /// function arguments in case we need to deoptimise them. At this moment the only trace
-    /// function argument requiring tracking is the trace inputs.
-    Arg(u16),
     /// Marks the place to loop back to at the end of the JITted code.
     TraceLoopStart,
 
@@ -1303,7 +1312,6 @@ impl Inst {
             Self::Store(..) => m.void_tyidx(),
             Self::ICmp(_) => m.int1_tyidx(),
             Self::Guard(..) => m.void_tyidx(),
-            Self::Arg(..) => m.ptr_tyidx(),
             Self::TraceLoopStart => m.void_tyidx(),
             Self::SExt(si) => si.dest_tyidx(),
             Self::ZeroExtend(si) => si.dest_tyidx(),
@@ -1339,7 +1347,6 @@ impl Inst {
             Inst::Store(_) => true,
             Inst::ICmp(_) => false,
             Inst::Guard(_) => true,
-            Inst::Arg(_) => false,
             Inst::TraceLoopStart => true, // FIXME: this shouldn't be an instruction.
             Inst::SExt(_) => false,
             Inst::ZeroExtend(_) => false,
@@ -1415,7 +1422,6 @@ impl Inst {
                     f(*y);
                 }
             }
-            Inst::Arg(_) => (),
             Inst::TraceLoopStart => (),
             Inst::SExt(SExtInst { val, .. }) => val.map_iidx(f),
             Inst::ZeroExtend(ZeroExtendInst { val, .. }) => val.map_iidx(f),
@@ -1570,13 +1576,16 @@ impl fmt::Display for DisplayableInst<'_> {
                 )
             }
             Inst::LoadTraceInput(x) => {
-                write!(f, "load_ti {}", x.off())
+                write!(
+                    f,
+                    "load_ti {:?}",
+                    self.m.tilocs[usize::try_from(x.locidx()).unwrap()]
+                )
             }
             Inst::TraceLoopStart => {
                 // Just marks a location, so we format it to look like a label.
                 write!(f, "tloop_start:")
             }
-            Inst::Arg(i) => write!(f, "arg({i})"),
             Inst::SExt(i) => {
                 write!(
                     f,
@@ -1752,23 +1761,23 @@ impl LoadInst {
 #[derive(Clone, Debug, PartialEq)]
 #[repr(packed)]
 pub struct LoadTraceInputInst {
-    /// The byte offset to load from in the trace input struct.
-    off: u32,
+    /// The VarLocation of this input.
+    locidx: u32,
     /// The type of the resulting local variable.
     tyidx: TyIdx,
 }
 
 impl LoadTraceInputInst {
-    pub(crate) fn new(off: u32, tyidx: TyIdx) -> LoadTraceInputInst {
-        Self { off, tyidx }
+    pub(crate) fn new(locidx: u32, tyidx: TyIdx) -> LoadTraceInputInst {
+        Self { locidx, tyidx }
     }
 
     pub(crate) fn tyidx(&self) -> TyIdx {
         self.tyidx
     }
 
-    pub(crate) fn off(&self) -> u32 {
-        self.off
+    pub(crate) fn locidx(&self) -> u32 {
+        self.locidx
     }
 }
 
@@ -2410,6 +2419,8 @@ impl FPExtInst {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compile::jitc_yk::codegen::reg_alloc;
+    use dynasmrt::x64::Rq;
 
     #[test]
     fn use_case_update_inst() {
@@ -2454,18 +2465,18 @@ mod tests {
             Operand::Local(InstIdx(1)),
             Operand::Local(InstIdx(2)),
         ];
-        m.push(Inst::Arg(0)).unwrap();
-        m.push(Inst::Arg(1)).unwrap();
-        m.push(Inst::Arg(2)).unwrap();
+        m.push(Inst::LoadTraceInput(LoadTraceInputInst::new(0, i32_tyidx)))
+            .unwrap();
+        m.push(Inst::LoadTraceInput(LoadTraceInputInst::new(1, i32_tyidx)))
+            .unwrap();
+        m.push(Inst::LoadTraceInput(LoadTraceInputInst::new(2, i32_tyidx)))
+            .unwrap();
         let ci = DirectCallInst::new(&mut m, func_decl_idx, args).unwrap();
 
         // Now request the operands and check they all look as they should.
         assert_eq!(ci.operand(&m, 0), Operand::Local(InstIdx(0)));
         assert_eq!(ci.operand(&m, 1), Operand::Local(InstIdx(1)));
         assert_eq!(ci.operand(&m, 2), Operand::Local(InstIdx(2)));
-        assert_eq!(m.arg(ArgsIdx(0)), Operand::Local(InstIdx(0)));
-        assert_eq!(m.arg(ArgsIdx(1)), Operand::Local(InstIdx(1)));
-        assert_eq!(m.arg(ArgsIdx(2)), Operand::Local(InstIdx(2)));
     }
 
     #[test]
@@ -2585,11 +2596,14 @@ mod tests {
     #[test]
     fn print_module() {
         let mut m = Module::new_testing();
+        m.push_tiloc(VarLocation::Register(reg_alloc::Register::GP(Rq::RBX)));
+        m.push_tiloc(VarLocation::Register(reg_alloc::Register::GP(Rq::RBX)));
+        m.push_tiloc(VarLocation::Register(reg_alloc::Register::GP(Rq::RBX)));
         m.push(LoadTraceInputInst::new(0, m.int8_tyidx()).into())
             .unwrap();
-        m.push(LoadTraceInputInst::new(8, m.int8_tyidx()).into())
+        m.push(LoadTraceInputInst::new(1, m.int8_tyidx()).into())
             .unwrap();
-        m.push(LoadTraceInputInst::new(16, m.int8_tyidx()).into())
+        m.push(LoadTraceInputInst::new(2, m.int8_tyidx()).into())
             .unwrap();
         m.insert_global_decl(GlobalDecl::new(
             CString::new("some_global").unwrap(),
@@ -2610,9 +2624,9 @@ mod tests {
             "global_decl tls @some_thread_local",
             "",
             "entry:",
-            "    %0: i8 = load_ti 0",
-            "    %1: i8 = load_ti 8",
-            "    %2: i8 = load_ti 16",
+            "    %0: i8 = load_ti Register(GP(RBX))",
+            "    %1: i8 = load_ti Register(GP(RBX))",
+            "    %2: i8 = load_ti Register(GP(RBX))",
         ]
         .join("\n");
         assert_eq!(m.to_string(), expect);

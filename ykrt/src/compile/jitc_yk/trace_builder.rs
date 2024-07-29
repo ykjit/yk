@@ -3,14 +3,18 @@
 //! This takes in an (AOT IR, execution trace) pair and constructs a JIT IR trace from it.
 
 use super::aot_ir::{self, BBlockId, BinOp, FuncIdx, Module};
+use super::codegen::reg_alloc::{Register, VarLocation};
 use super::jit_ir::{self, Const};
 use super::YkSideTraceInfo;
+use crate::aotsmp::AOT_STACKMAPS;
 use crate::compile::CompilationError;
 use crate::trace::{AOTTraceIterator, AOTTraceIteratorError, TraceAction};
 use std::{collections::HashMap, ffi::CString, sync::Arc};
 
+// FIXME: Can we avoid a dynasm dependency here?
+use dynasmrt::x64::Rq;
+
 /// The argument index of the trace inputs struct in the trace function.
-const TRACE_FUNC_CTRLP_ARGIDX: u16 = 0;
 const U64SIZE: usize = 8;
 
 /// A TraceBuilder frame. Keeps track of inlined calls and stores information about the last
@@ -113,7 +117,7 @@ impl TraceBuilder {
     /// Create the prolog of the trace.
     fn create_trace_header(
         &mut self,
-        blk: &aot_ir::BBlock,
+        blk: &'static aot_ir::BBlock,
         is_sidetrace: bool,
     ) -> Result<(), CompilationError> {
         // Find trace input variables and emit `LoadTraceInput` instructions for them.
@@ -127,15 +131,81 @@ impl TraceBuilder {
         for (_, inst) in inst_iter.by_ref() {
             // Is it a call to the control point? If so, extract the live vars struct.
             if let Some(tis) = inst.control_point_call_trace_inputs(self.aot_mod) {
+                // FIXME Safepoint id should be an integer not Operand.
+                let safepoint = inst.safepoint().unwrap();
+                let aot_ir::Operand::Const(cidx) = safepoint.id else {
+                    panic!();
+                };
+                let c = self.aot_mod.const_(cidx);
+                let aot_ir::Ty::Integer(ity) = self.aot_mod.const_type(c) else {
+                    panic!();
+                };
+                assert!(ity.num_bits() == u64::BITS);
+                let id = u64::from_ne_bytes(c.unwrap_val().bytes()[0..8].try_into().unwrap());
+                let (rec, _) = AOT_STACKMAPS
+                    .as_ref()
+                    .unwrap()
+                    .get(usize::try_from(id).unwrap());
+
+                debug_assert!(safepoint.lives.len() == rec.live_vars.len());
+                for idx in 0..safepoint.lives.len() {
+                    let aot_op = &safepoint.lives[idx];
+                    let input_tyidx = self.handle_type(aot_op.type_(self.aot_mod))?;
+                    let load_ti_inst =
+                        jit_ir::LoadTraceInputInst::new(u32::try_from(idx).unwrap(), input_tyidx)
+                            .into();
+                    self.jit_mod.push(load_ti_inst)?;
+
+                    // Get the location for this input variable.
+                    let var = &rec.live_vars[idx];
+                    if var.len() > 1 {
+                        todo!();
+                    }
+                    let vl = match var.get(0).unwrap() {
+                        yksmp::Location::Register(3, ..) => {
+                            VarLocation::Register(Register::GP(Rq::RBX))
+                        }
+                        yksmp::Location::Register(4, ..) => {
+                            VarLocation::Register(Register::GP(Rq::RSI))
+                        }
+                        yksmp::Location::Register(5, ..) => {
+                            VarLocation::Register(Register::GP(Rq::RDI))
+                        }
+                        yksmp::Location::Register(12, ..) => {
+                            VarLocation::Register(Register::GP(Rq::R12))
+                        }
+                        yksmp::Location::Register(13, ..) => {
+                            VarLocation::Register(Register::GP(Rq::R13))
+                        }
+                        yksmp::Location::Register(14, ..) => {
+                            VarLocation::Register(Register::GP(Rq::R14))
+                        }
+                        yksmp::Location::Register(15, ..) => {
+                            VarLocation::Register(Register::GP(Rq::R15))
+                        }
+                        yksmp::Location::Direct(6, off, size) => VarLocation::Direct {
+                            frame_off: *off,
+                            size: usize::from(*size),
+                        },
+                        yksmp::Location::Indirect(6, off, size) => VarLocation::Indirect {
+                            frame_off: *off,
+                            size: usize::from(*size),
+                        },
+                        e => {
+                            todo!("{:?}", e);
+                        }
+                    };
+                    self.jit_mod.push_tiloc(vl);
+
+                    // If this take fails, we didn't see a corresponding store and the
+                    // IR is malformed.
+                    self.local_map.insert(
+                        aot_op.to_inst_id(),
+                        jit_ir::Operand::Local(self.jit_mod.last_inst_idx()),
+                    );
+                }
+
                 trace_inputs = Some(tis.to_inst(self.aot_mod));
-                let arg = jit_ir::Inst::Arg(TRACE_FUNC_CTRLP_ARGIDX);
-                self.jit_mod.push(arg)?;
-                // Add the trace input argument to the local map so it can be tracked and
-                // deoptimised.
-                self.local_map.insert(
-                    tis.to_inst_id(),
-                    jit_ir::Operand::Local(self.jit_mod.last_inst_idx()),
-                );
                 break;
             }
         }
@@ -143,28 +213,14 @@ impl TraceBuilder {
         // If this unwrap fails, we didn't find the call to the control point and something is
         // profoundly wrong with the AOT IR.
         let trace_inputs = trace_inputs.unwrap();
-        let trace_input_struct_ty = match trace_inputs {
-            aot_ir::Inst::Alloca { tyidx, .. } => {
-                let aot_ir::Ty::Struct(x) = self.aot_mod.type_(*tyidx) else {
-                    panic!()
-                };
-                x
-            }
-            _ => panic!(), // IR malformed.
-        };
-
-        // We visit the trace inputs in reverse order, so we start with high indices first. This
-        // value then decrements in the below loop.
-        let mut trace_input_idx = trace_input_struct_ty.num_fields();
 
         // PHASE 2:
         // Keep walking backwards over the ptradd/store pairs emitting LoadTraceInput instructions.
         //
         // FIXME: Can we do something at IR lowering time to make this easier?
-        let mut last_store_ptr = None;
         for (iidx, inst) in inst_iter {
             match inst {
-                aot_ir::Inst::Store { val, .. } => last_store_ptr = Some(val),
+                aot_ir::Inst::Store { .. } => {}
                 aot_ir::Inst::PtrAdd { ptr, .. } => {
                     // Is the pointer operand of this PtrAdd targeting the trace inputs?
                     if trace_inputs.ptr_eq(ptr.to_inst(self.aot_mod)) {
@@ -174,27 +230,6 @@ impl TraceBuilder {
                         //
                         // Note: This code assumes that the `PtrAdd` instructions in the AOT IR were
                         // emitted sequentially.
-                        trace_input_idx -= 1;
-                        // FIXME: assumes the field is byte-aligned. If it isn't, field_byte_off() will
-                        // crash.
-                        let aot_field_off = trace_input_struct_ty.field_byte_off(trace_input_idx);
-                        let aot_field_ty = trace_input_struct_ty.field_tyidx(trace_input_idx);
-                        // FIXME: we should check at compile-time that this will fit.
-                        let aot_field_off = u32::try_from(aot_field_off).unwrap();
-                        let input_tyidx = self.handle_type(self.aot_mod.type_(aot_field_ty))?;
-                        let load_ti_inst =
-                            jit_ir::LoadTraceInputInst::new(aot_field_off, input_tyidx).into();
-                        // We don't need to insert these loads when we are side-tracing,
-                        // since side-tracing handles inputs separately.
-                        if !is_sidetrace {
-                            self.jit_mod.push(load_ti_inst)?;
-                            // If this take fails, we didn't see a corresponding store and the
-                            // IR is malformed.
-                            self.local_map.insert(
-                                last_store_ptr.take().unwrap().to_inst_id(),
-                                jit_ir::Operand::Local(self.jit_mod.last_inst_idx()),
-                            );
-                        }
                         self.first_ti_idx = iidx;
                     }
                 }

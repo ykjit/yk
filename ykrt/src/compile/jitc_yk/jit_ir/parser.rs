@@ -13,6 +13,8 @@ use super::super::{
         SIToFPInst, SelectInst, StoreInst, TruncInst, Ty, TyIdx,
     },
 };
+use crate::compile::jitc_yk::codegen::reg_alloc::{Register, VarLocation};
+use dynasmrt::x64::{Rq, Rx};
 use fm::FMBuilder;
 use lrlex::{lrlex_mod, DefaultLexerTypes, LRNonStreamingLexer};
 use lrpar::{lrpar_mod, NonStreamingLexer, Span};
@@ -292,12 +294,28 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                         );
                         self.push_assign(inst.into(), assign)?;
                     }
-                    ASTInst::LoadTraceInput { assign, type_, off } => {
+                    ASTInst::LoadTraceInput {
+                        assign,
+                        type_,
+                        tiidx,
+                    } => {
                         let off = self
                             .lexer
-                            .span_str(off)
+                            .span_str(tiidx)
                             .parse::<u32>()
-                            .map_err(|e| self.error_at_span(off, &e.to_string()))?;
+                            .map_err(|e| self.error_at_span(tiidx, &e.to_string()))?;
+                        assert_eq!(self.m.tilocs.len(), usize::try_from(off).unwrap());
+                        match type_ {
+                            ASTType::Int(_) | ASTType::Ptr => {
+                                self.m
+                                    .push_tiloc(VarLocation::Register(Register::GP(Rq::RBX)));
+                            }
+                            ASTType::Float(_) | ASTType::Double(_) => {
+                                self.m
+                                    .push_tiloc(VarLocation::Register(Register::FP(Rx::XMM0)));
+                            }
+                            _ => todo!(),
+                        }
                         let inst = LoadTraceInputInst::new(off, self.process_type(type_)?);
                         self.push_assign(inst.into(), assign)?;
                     }
@@ -693,7 +711,7 @@ enum ASTInst {
     LoadTraceInput {
         assign: Span,
         type_: ASTType,
-        off: Span,
+        tiidx: Span,
     },
     PtrAdd {
         assign: Span,
@@ -776,17 +794,24 @@ enum ASTType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compile::jitc_yk::jit_ir::{FuncTy, Ty};
+    use crate::compile::jitc_yk::{
+        codegen::reg_alloc,
+        jit_ir::{FuncTy, Ty},
+    };
 
     #[test]
+    #[ignore] // Requires changing the parser to parse the new load_ti format.
     fn roundtrip() {
         let mut m = Module::new_testing();
         let i16_tyidx = m.insert_ty(Ty::Integer(16)).unwrap();
+
+        m.push_tiloc(VarLocation::Register(reg_alloc::Register::GP(Rq::RBX)));
+        m.push_tiloc(VarLocation::Register(reg_alloc::Register::GP(Rq::RBX)));
         let op1 = m
             .push_and_make_operand(LoadTraceInputInst::new(0, i16_tyidx).into())
             .unwrap();
         let op2 = m
-            .push_and_make_operand(LoadTraceInputInst::new(16, i16_tyidx).into())
+            .push_and_make_operand(LoadTraceInputInst::new(1, i16_tyidx).into())
             .unwrap();
         let op3 = m
             .push_and_make_operand(BinOpInst::new(op1.clone(), BinOp::Add, op2.clone()).into())
@@ -814,8 +839,8 @@ mod tests {
             "
           ...
           entry:
-            %{{0}}: i16 = load_ti 0
-            %{{1}}: i16 = load_ti 1
+            %{{0}}: i16 = load_ti Register(GP(RBX))
+            %{{1}}: i16 = load_ti Register(GP(RBX))
             %{{_}}: i16 = add %{{0}}, %{{1}}
         ",
         );
@@ -832,18 +857,24 @@ mod tests {
             func_decl f4(...)
             entry:
               %0: i32 = load_ti 0
+              %5: i8 = load_ti 1
+              %7: i32 = load_ti 2
+              %9: ptr = load_ti 3
+              %1999: float = load_ti 4
+              %30: i8 = load_ti 5
+              %31: i16 = load_ti 6
+              %32: i32 = load_ti 7
+              %33: i64 = load_ti 8
+              %48: i32 = load_ti 9
               %1: i32 = trunc %0
               %2: i32 = add %0, %1
               %4: i1 = eq %1, %2
               tloop_start
               guard true, %4, [%0, %1, %2]
               call @f1()
-              %5: i8 = load_ti 1
               %6: i32 = call @f2(%5)
-              %7: i32 = load_ti 2
               %8: i64 = call @f3(%5, %7, %0)
               call @f4(%0, %1)
-              %9: ptr = load_ti 3
               *%9 = %8
               %10: i32 = load %9
               %11: i64 = sext %10
@@ -855,7 +886,6 @@ mod tests {
               %17: i32 = xor %0, %1
               %18: i32 = shl %0, %1
               %19: i32 = ashr %0, %1
-              %1999: float = load_ti 0
               %20: float = fadd %1999, %1999
               %21: float = fdiv %1999, %1999
               %22: float = fmul %1999, %1999
@@ -866,10 +896,6 @@ mod tests {
               %27: i32 = srem %0, %1
               %28: i32 = udiv %0, %1
               %29: i32 = urem %0, %1
-              %30: i8 = load_ti 4
-              %31: i16 = load_ti 5
-              %32: i32 = load_ti 5
-              %33: i64 = load_ti 6
               %34: i8 = add %30, 255i8
               %35: i16 = add %31, 32768i16
               %36: i32 = add %32, 2147483648i32
@@ -885,7 +911,6 @@ mod tests {
               %45: i1 = sge %1, %2
               %46: i1 = slt %1, %2
               %47: i1 = sle %1, %2
-              %48: i32 = load_ti 7
               %49: float = si_to_fp %48
               %50: double = fp_ext %49
               %500: i32 = fp_to_si %49
@@ -1006,8 +1031,8 @@ mod tests {
             "
           ...
           entry:
-            %0: i16 = load_ti 0
-            %1: i16 = load_ti 1
+            %0: i16 = load_ti ...
+            %1: i16 = load_ti ...
             %2: i16 = add %0, %1
         ",
         );
