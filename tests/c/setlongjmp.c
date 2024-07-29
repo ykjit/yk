@@ -1,12 +1,13 @@
-// ignore-if: test "$YKB_TRACER" != "hwt"
+// ignore-if: test $YK_JIT_COMPILER != "yk" -o "$YKB_TRACER" = "swt"
 // Run-time:
 //   env-var: YKD_LOG_IR=-:jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=4
 //   stderr:
-//     ...
-//     jitstate: stop-tracing
-//     jitstate: trace-compilation-aborted: Encountered longjmp
+//     yk-jit-event: start-tracing
+//     we jumped
+//     yk-jit-event: stop-tracing
+//     yk-warning: trace-compilation-aborted: longjmp encountered
 //     ...
 
 // Tests that we can deal with setjmp/longjmp.
@@ -21,6 +22,14 @@
 
 jmp_buf buf;
 
+void ljmp() {
+  int r = 0;
+  for (int i = 0; i < 10; i++) {
+    r += 1;
+  }
+  longjmp(buf, r);
+}
+
 int main(int argc, char **argv) {
   YkMT *mt = yk_mt_new(NULL);
   yk_mt_hot_threshold_set(mt, 0);
@@ -31,11 +40,14 @@ int main(int argc, char **argv) {
   NOOPT_VAL(loc);
   NOOPT_VAL(res);
   NOOPT_VAL(i);
+  int r = setjmp(buf);
+  if (r == 10) {
+    fprintf(stderr, "we jumped\n");
+  }
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    int r = setjmp(buf);
     if (r != 10) {
-      longjmp(buf, 10);
+      ljmp();
     }
     fprintf(stderr, "i=%d\n", i);
     res += 2;

@@ -35,17 +35,13 @@ fn run_suite(opt: &'static str) {
     #[cfg(not(target_arch = "x86_64"))]
     panic!("Unknown target_arch");
 
-    env::set_var("YK_JIT_COMPILER", "yk");
-    let filter = |p: &Path| {
-        // A temporary hack while we port tests from the old to the new JIT compiler.
-        p.extension().as_ref().and_then(|p| p.to_str()) == Some("c")
-            && p.file_name().unwrap().to_str().unwrap().contains(".newcg")
-    };
-
     LangTester::new()
         .comment_prefix("##")
         .test_dir("c")
-        .test_path_filter(filter)
+        .test_path_filter(|p: &Path| {
+            p.extension().as_ref().and_then(|p| p.to_str()) == Some("c")
+                && !p.file_name().unwrap().to_str().unwrap().contains(".old")
+        })
         .test_extract(move |p| {
             let altp = p.with_extension(format!("c.{}", opt.strip_prefix('-').unwrap()));
             let p = if altp.exists() { altp.as_path() } else { p };

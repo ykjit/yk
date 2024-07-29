@@ -1,45 +1,25 @@
+// ignore-if: test $YK_JIT_COMPILER != "yk" -o "$YKB_TRACER" = "swt"
 // Run-time:
-//   env-var: YKD_LOG_IR=-:jit-pre-opt
+//   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=4
 //   stderr:
-//     jitstate: start-tracing
-//     i=4
-//     jitstate: stop-tracing
+//     yk-jit-event: start-tracing
+//     4
+//     yk-jit-event: stop-tracing
+//     --- Begin aot ---
+//     ...
+//     func main(%arg0: i32, %arg1: ptr) -> i32 {
+//     ...
+//     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//     define {{rtnty}} @__yk_compiled_trace_0(ptr %0, ptr %1) {
-//        ...
-//        %{{fptr}} = getelementptr %YkCtrlPointVars, ptr %0, i32 0, i32 0...
-//        %{{load}} = load...
-//        ...
-//        br label %{{loopentry}}
-//
-//     {{loopentry}}:...
-//        ...
-//        %{{a}} = add nsw i32 %{{b}}, 2...
-//        ...
-//        %{{cond}} = icmp sgt i32 %{{val}}, ...
-//        br i1 %{{cond}}, label %{{guard-succ-bb}}, label %{{guard-fail-bb}}
-//
-//     {{guard-fail-bb}}:...
-//       %{{al}} = alloca...
-//       ...
-//       %{{cprtn}} = call {{rtnty}} (...) @llvm.experimental.deoptimize.p0(...
-//       ret {{rtnty}} %{{cprtn}}
-//
-//     {{guard-succ-bb}}:...
-//        ...
-//        br label %{{loopentry}}
-//     }
-//     ...
 //     --- End jit-pre-opt ---
-//     i=3
-//     jitstate: enter-jit-code
-//     i=2
-//     i=1
-//     jitstate: deoptimise
-//   stdout:
+//     3
+//     yk-jit-event: enter-jit-code
+//     2
+//     1
+//     yk-jit-event: deoptimise
 //     exit
 
 // Check that basic trace compilation works.
@@ -63,11 +43,10 @@ int main(int argc, char **argv) {
   NOOPT_VAL(i);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
-    fprintf(stderr, "i=%d\n", i);
-    res += 2;
+    fprintf(stderr, "%d\n", i);
     i--;
   }
-  printf("exit");
+  fprintf(stderr, "exit\n");
   NOOPT_VAL(res);
   yk_location_drop(loc);
   yk_mt_drop(mt);
