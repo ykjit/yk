@@ -25,7 +25,6 @@ typed-index-collections = "3.1.0"
 vob = "3.0.3"
 ykaddr = { path = "../ykaddr" }
 yksmp = { path = "../yksmp" }
-yktracec = { path = "../yktracec" }
 zydis = "4.1.0"
 
 [target.'cfg(all(target_arch = "x86_64", target_os = "linux"))'.dependencies]
@@ -55,10 +54,10 @@ ykbuild = { path = "../ykbuild" }
 # When set, the `ykd` feature enables a number of features that are helpful for
 # debugging the correctness and performance of an interpreter, most controlled
 # by `YKD_*` environment variables.
-ykd = ["yktracec/yk_testing"]
+ykd = []
 # The `yk_testing` feature is purely for yk's internal use: do not use it
 # externally.
-yk_testing = ["yktracec/yk_testing"]
+yk_testing = []
 
 [dev-dependencies]
 cfgrammar = "0.13"
