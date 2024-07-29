@@ -949,6 +949,12 @@ pub(crate) enum Inst {
         pred: FloatPredicate,
         rhs: Operand,
     },
+    #[deku(id = "19")]
+    Promote {
+        tyidx: TyIdx,
+        val: Operand,
+        safepoint: DeoptSafepoint,
+    },
     #[deku(id = "255")]
     Unimplemented {
         tyidx: TyIdx,
@@ -1040,6 +1046,7 @@ impl Inst {
             }
             Self::Nop => None,
             Self::FCmp { tyidx, .. } => Some(m.type_(*tyidx)),
+            Self::Promote { tyidx, .. } => Some(m.type_(*tyidx)),
         }
     }
 
@@ -1326,6 +1333,14 @@ impl fmt::Display for DisplayableInst<'_> {
             Inst::Nop => write!(f, "nop"),
             Inst::FCmp { lhs, pred, rhs, .. } => {
                 write!(f, "{pred} {}, {}", lhs.display(self.m), rhs.display(self.m))
+            }
+            Inst::Promote { val, safepoint, .. } => {
+                write!(
+                    f,
+                    "promote {} {}",
+                    val.display(self.m),
+                    safepoint.display(self.m)
+                )
             }
         }
     }

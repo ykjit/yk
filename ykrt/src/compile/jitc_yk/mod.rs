@@ -82,9 +82,10 @@ impl Compiler for JITCYk {
     fn compile(
         &self,
         mt: Arc<MT>,
-        aottrace_iter: (Box<dyn AOTTraceIterator>, Box<[usize]>),
+        aottrace_iter: Box<dyn AOTTraceIterator>,
         sti: Option<Arc<dyn SideTraceInfo>>,
         hl: Arc<Mutex<HotLocation>>,
+        promotions: Box<[usize]>,
     ) -> Result<Arc<dyn CompiledTrace>, CompilationError> {
         // If either `unwrap` fails, there is no chance of the system working correctly.
         let aot_mod = &*AOT_MOD;
@@ -98,8 +99,13 @@ impl Compiler for JITCYk {
 
         let sti = sti.map(|s| s.as_any().downcast::<YkSideTraceInfo>().unwrap());
 
-        let mut jit_mod =
-            trace_builder::build(mt.next_compiled_trace_id(), aot_mod, aottrace_iter.0, sti)?;
+        let mut jit_mod = trace_builder::build(
+            mt.next_compiled_trace_id(),
+            aot_mod,
+            aottrace_iter,
+            sti,
+            promotions,
+        )?;
 
         if should_log_ir(IRPhase::PreOpt) {
             log_ir(&format!(
