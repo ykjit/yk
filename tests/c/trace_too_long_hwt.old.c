@@ -1,6 +1,6 @@
-// # This test checks that an overflowing PT buffer is caught at the point
-// # where a trace is stopped, not after trace mapping. It therefore only works
-// # on hwt.
+// ## This test checks that an overflowing PT buffer is caught at the point
+// ## where a trace is stopped, not after trace mapping. It therefore only works
+// ## on hwt.
 // ignore-if: test "$YKB_TRACER" != hwt
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1

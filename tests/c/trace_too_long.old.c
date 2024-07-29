@@ -1,6 +1,6 @@
-// # This tests that traces that generate too many blocks cause "trace too
-// # long" warnings. This can be very slow (e.g. on swt), so ignore it except
-// # where we know it'll run # fast enough.
+// ## This tests that traces that generate too many blocks cause "trace too
+// ## long" warnings. This can be very slow (e.g. on swt), so ignore it except
+// ## where we know it'll run fast enough.
 // ignore-if: test "$YKB_TRACER" != "hwt"
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1

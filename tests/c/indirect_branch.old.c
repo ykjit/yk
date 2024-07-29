@@ -1,4 +1,4 @@
-// # guards for indirect branches not implemented.
+// ## guards for indirect branches not implemented.
 // ignore-if: true
 // Run-time:
 //   env-var: YKD_LOG_IR=-:jit-pre-opt

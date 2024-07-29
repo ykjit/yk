@@ -1,4 +1,4 @@
-// # Shadow stack doesn't currently support dynamically sized stack.
+// ## Shadow stack doesn't currently support dynamically sized stack.
 // ignore-if: true
 // Run-time:
 //   env-var: YKD_LOG_IR=-:aot

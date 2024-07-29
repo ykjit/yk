@@ -1,4 +1,4 @@
-// # The function __yktrace_hwt_mapper_blockmap_len is compile-time guarded for hwt only.
+// ## The function __yktrace_hwt_mapper_blockmap_len is compile-time guarded for hwt only.
 // ignore-if: test "$YKB_TRACER" != "hwt"
 // Compiler:
 // Run-time:
