@@ -3,6 +3,7 @@
 //! Note that some of these features are only meaningfully available when the `ykd` feature is
 //! available: otherwise we expose no-op functions.
 
+use std::{cmp, env, error::Error, fs::File, io::Write, path::PathBuf};
 use strum::{EnumCount, FromRepr};
 
 pub(crate) mod stats;
@@ -21,6 +22,80 @@ pub(crate) enum Verbosity {
     LocationTransition,
     /// Log JIT events (e.g. start/stop tracing).
     JITEvent,
+}
+
+pub(crate) struct Log {
+    /// The requested [Verbosity] level for logging.
+    level: Verbosity,
+    /// The path to write to. A value of `None` should default to the platform specific standard
+    /// for logging (e.g. stderr).
+    path: Option<PathBuf>,
+}
+
+impl Log {
+    pub(crate) fn new() -> Result<Self, Box<dyn Error>> {
+        match env::var("YK_LOG") {
+            Ok(s) => {
+                let (path, level) = match s.split(':').collect::<Vec<_>>()[..] {
+                    [path, level] => {
+                        if path == "-" {
+                            (None, level)
+                        } else {
+                            let path = PathBuf::from(path);
+                            // If there's an existing log file, truncate (i.e. empty it), so that later
+                            // appends to the log aren't appending to a previous log run.
+                            File::create(&path).ok();
+                            (Some(path), level)
+                        }
+                    }
+                    [level] => (None, level),
+                    [..] => return Err("YK_LOG must be of the format `[<path|->:]<level>".into()),
+                };
+                let level = level
+                    .parse::<u8>()
+                    .map_err(|e| format!("Invalid verbosity level '{s}': {e}"))?;
+                // These unwraps can only fail dynamically if we've got the types wrong statically
+                // (i.e. they'll fail as soon as this code is executed for the first time).
+                let max_level = u8::try_from(Verbosity::COUNT).unwrap() - 1;
+                let level = Verbosity::from_repr(cmp::min(level, max_level)).unwrap();
+                Ok(Self { path, level })
+            }
+            Err(_) => Ok(Self {
+                path: None,
+                level: Verbosity::Error,
+            }),
+        }
+    }
+
+    /// Log `msg` with the [Verbosity] level `verbosity`.
+    ///
+    /// # Panics
+    ///
+    /// If `level == Verbosity::None`.
+    pub(crate) fn log(&self, level: Verbosity, msg: &str) {
+        if level <= self.level {
+            let prefix = match level {
+                Verbosity::Disabled => panic!(),
+                Verbosity::Error => "yk-error",
+                Verbosity::Warning => "yk-warning",
+                Verbosity::JITEvent => "yk-jit-event",
+                Verbosity::LocationTransition => "yk-location-transition",
+            };
+            match &self.path {
+                Some(p) => {
+                    let s = format!("{prefix}: {msg}\n");
+                    File::options()
+                        .append(true)
+                        .open(p)
+                        .map(|mut x| x.write(s.as_bytes()))
+                        .ok();
+                }
+                None => {
+                    eprintln!("{prefix}: {msg}");
+                }
+            }
+        }
+    }
 }
 
 #[derive(Eq, Hash, PartialEq)]
