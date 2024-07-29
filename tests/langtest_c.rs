@@ -35,20 +35,11 @@ fn run_suite(opt: &'static str) {
     #[cfg(not(target_arch = "x86_64"))]
     panic!("Unknown target_arch");
 
-    let filter = match env::var("YKD_NEW_CODEGEN") {
-        Ok(x) if x == "1" => {
-            env::set_var("YK_JIT_COMPILER", "yk");
-            |p: &Path| {
-                // A temporary hack because at the moment virtually no tests run on the new JIT
-                // compiler.
-                p.extension().as_ref().and_then(|p| p.to_str()) == Some("c")
-                    && p.file_name().unwrap().to_str().unwrap().contains(".newcg")
-            }
-        }
-        _ => {
-            env::set_var("YK_JIT_COMPILER", "llvm");
-            |p: &Path| p.extension().as_ref().and_then(|p| p.to_str()) == Some("c")
-        }
+    env::set_var("YK_JIT_COMPILER", "yk");
+    let filter = |p: &Path| {
+        // A temporary hack while we port tests from the old to the new JIT compiler.
+        p.extension().as_ref().and_then(|p| p.to_str()) == Some("c")
+            && p.file_name().unwrap().to_str().unwrap().contains(".newcg")
     };
 
     LangTester::new()
