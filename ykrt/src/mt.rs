@@ -717,7 +717,6 @@ impl Drop for MT {
     }
 }
 
-/// Execute a trace. Note: this overwrites the current (Rust) function frame.
 #[cfg(target_arch = "x86_64")]
 #[naked]
 unsafe extern "C" fn exec_trace(
