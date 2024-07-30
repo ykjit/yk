@@ -1,25 +1,29 @@
+// ignore-if: test $YK_JIT_COMPILER != "yk" -o "$YKB_TRACER" = "swt"
 // Run-time:
-//   env-var: YKD_LOG_IR=-:jit-pre-opt
+//   env-var: YKD_LOG_IR=-:aot,jit-pre-opt
 //   env-var: YKD_SERIALISE_COMPILATION=1
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=4
 //   stderr:
-//     jitstate: start-tracing
+//     yk-jit-event: start-tracing
 //     i=3
-//     jitstate: stop-tracing
+//     yk-jit-event: stop-tracing
+//     --- Begin aot ---
+//     ...
+//     switch %{{9_1}}, bb{{bb14}}, [299 -> bb{{bb10}}, 298 -> bb{{bb12}}] [safepoint: 0i64, (%{{0_0}}, %{{0_1}}, %{{0_3}}, %{{0_4}}, %{{0_5}}, %{{0_6}})]
+//     ...
+//     --- End aot ---
 //     --- Begin jit-pre-opt ---
 //     ...
-//       switch i32 %{{cond}}, label %{{default-bb}} [
-//         i32 299, label %guardfail...
-//         i32 298, label %guardfail...
-//       ]
-//
-//     guardfail...
+//     %{{21}}: i1 = eq %{{20}}, 299i32
+//     %{{22}}: i1 = eq %{{20}}, 298i32
+//     %{{23}}: i1 = or %{{21}}, %{{22}}
+//     guard false, %{{23}}, ...
 //     ...
 //     --- End jit-pre-opt ---
 //     i=2
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     i=1
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 //     ...
 
 // Check that tracing the default arm of a switch works correctly.
@@ -38,6 +42,7 @@ int main(int argc, char **argv) {
   int i = 3;
   int j = 300;
   NOOPT_VAL(i);
+  NOOPT_VAL(j);
   while (i > 0) {
     yk_mt_control_point(mt, &loc);
     fprintf(stderr, "i=%d\n", i);

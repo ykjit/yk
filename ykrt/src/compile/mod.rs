@@ -2,7 +2,6 @@ use crate::{location::HotLocation, mt::MT, trace::AOTTraceIterator};
 use libc::c_void;
 use parking_lot::Mutex;
 use std::{
-    env,
     error::Error,
     fmt,
     sync::{
@@ -10,9 +9,6 @@ use std::{
         Arc, Weak,
     },
 };
-
-#[cfg(jitc_llvm)]
-pub(crate) mod jitc_llvm;
 
 #[cfg(jitc_yk)]
 pub mod jitc_yk;
@@ -60,18 +56,7 @@ pub(crate) trait Compiler: Send + Sync {
 
 pub(crate) fn default_compiler() -> Result<Arc<dyn Compiler>, Box<dyn Error>> {
     #[cfg(jitc_yk)]
-    // Transitionary env var to turn on the new code generator.
-    //
-    // This will be removed once the transition away from LLVM as a trace compiler is complete.
-    if let Ok(v) = env::var("YKD_NEW_CODEGEN") {
-        if v == "1" {
-            return Ok(jitc_yk::JITCYk::new()?);
-        }
-    }
-    #[cfg(jitc_llvm)]
-    {
-        return Ok(jitc_llvm::JITCLLVM::new());
-    }
+    return Ok(jitc_yk::JITCYk::new()?);
 
     #[allow(unreachable_code)]
     {

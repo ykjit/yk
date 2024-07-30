@@ -1,4 +1,4 @@
-// # Shadow stack not supported on non-main threads.
+// ## Shadow stack not supported on non-main threads.
 // ignore-if: true
 // Run-time:
 //   env-var: YKD_SERIALISE_COMPILATION=1

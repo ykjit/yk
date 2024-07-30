@@ -5,7 +5,6 @@ members = [
     "ykaddr",
     "ykbuild",
     "ykcapi",
-    "yktracec",
     "ykrt",
     "yksmp",
     "xtask",

@@ -1,18 +1,33 @@
+// ignore-if: test $YK_JIT_COMPILER != "yk" -o "$YKB_TRACER" = "swt"
 // Run-time:
-//   env-var: YKD_LOG_JITSTATE=-
+//   env-var: YK_LOG=4
+//   env-var: YKD_LOG_IR=-:jit-pre-opt
 //   env-var: YKD_LOG_STATS=/dev/null
 //   stderr:
-//     jitstate: start-tracing
+//     yk-jit-event: start-tracing
 //     pc=0, mem=4
 //     pc=1, mem=4
 //     pc=2, mem=4
 //     pc=3, mem=3
-//     jitstate: stop-tracing
+//     yk-jit-event: stop-tracing
+//     --- Begin jit-pre-opt ---
+//     ..~
+//     guard true, %{{43}}, [%{{0}}, %{{8}}, %{{7}}, %{{6}}, %{{5}}, %{{4}}, %{{3}}, %{{43}}]
+//     %{{_}}: ptr = load %{{8}}
+//     %{{48}}: ptr = load %{{4}}
+//     %{{49}}: i32 = load %{{3}}
+//     %{{50}}: i64 = sext %{{49}}, i64
+//     %{{51}}: ptr = dyn_ptr_add %{{48}}, %{{50}}, 8
+//     %{{_}}: ptr = load %{{51}}
+//     %{{_}}: i32 = load %{{_}}
+//     %{{_}}: i1 = eq %{{_}}, 0i32
+//     ...
+//     --- End jit-pre-opt ---
 //     pc=0, mem=3
 //     pc=1, mem=3
 //     pc=2, mem=3
 //     pc=3, mem=2
-//     jitstate: enter-jit-code
+//     yk-jit-event: enter-jit-code
 //     pc=0, mem=2
 //     pc=1, mem=2
 //     pc=2, mem=2
@@ -21,7 +36,7 @@
 //     pc=1, mem=1
 //     pc=2, mem=1
 //     pc=3, mem=0
-//     jitstate: deoptimise
+//     yk-jit-event: deoptimise
 //     pc=4, mem=0
 //     pc=5, mem=0
 
