@@ -370,9 +370,6 @@ impl<'a> Assemble<'a> {
 
         // Start a frame for the JITted code.
         dynasm!(self.asm
-            // Save pointers to ctrlp_vars and frameaddr for later use.
-            ; push rdi
-            ; push rsi
             // Save base pointer which we use to access the parent stack.
             ; push rbp
             // Reset base pointer.

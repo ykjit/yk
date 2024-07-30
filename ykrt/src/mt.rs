@@ -224,13 +224,7 @@ impl MT {
     }
 
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
-    pub fn control_point(
-        self: &Arc<Self>,
-        loc: &Location,
-        ctrlp_vars: *mut c_void,
-        frameaddr: *mut c_void,
-        smid: u64,
-    ) {
+    pub fn control_point(self: &Arc<Self>, loc: &Location, frameaddr: *mut c_void, smid: u64) {
         match self.transition_control_point(loc) {
             TransitionControlPoint::NoAction => (),
             TransitionControlPoint::Execute(ctr) => {
@@ -254,7 +248,7 @@ impl MT {
 
                 // FIXME: Calling this function overwrites the current (Rust) function frame,
                 // rather than unwinding it. https://github.com/ykjit/yk/issues/778.
-                unsafe { exec_trace(ctrlp_vars, frameaddr, rsp, trace_addr) };
+                unsafe { exec_trace(frameaddr, rsp, trace_addr) };
             }
             TransitionControlPoint::StartTracing(hl) => {
                 self.log.log(Verbosity::JITEvent, "start-tracing");
@@ -666,18 +660,16 @@ impl Drop for MT {
 #[naked]
 #[no_mangle]
 unsafe extern "C" fn exec_trace(
-    // FIXME: We don't need ctrlp_vars and frameaddr here anymore.
-    ctrlp_vars: *mut c_void,
     frameaddr: *const c_void,
     rsp: *const c_void,
     trace: *const c_void,
 ) -> ! {
     std::arch::asm!(
         // Reset RBP
-        "mov rbp, rsi",
+        "mov rbp, rdi",
         // Reset RSP to the end of the control point frame (this includes the registers we pushed
         // just before the control point)
-        "mov rsp, rdx",
+        "mov rsp, rsi",
         "sub rsp, 8",  // Return address of control point call
         "sub rsp, 56", // Registers pushed in naked cp call
         //// Restore callee-saved registers which were pushed to the stack in __ykrt_control_point.
@@ -686,10 +678,10 @@ unsafe extern "C" fn exec_trace(
         "pop r13",
         "pop r12",
         "pop rsi",
-        "pop rbx", // Don't overwrite `rdi` for now until we remove the first two args.
+        "pop rdi", // Don't overwrite `rdi` for now until we remove the first two args.
         "pop rbx",
         // Call the trace function.
-        "jmp rcx",
+        "jmp rdx",
         "ret",
         options(noreturn)
     )

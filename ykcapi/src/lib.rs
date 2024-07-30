@@ -56,9 +56,6 @@ pub extern "C" fn yk_mt_control_point(_mt: *mut MT, _loc: *mut Location) {
 pub extern "C" fn __ykrt_control_point(
     mt: *const MT,
     loc: *mut Location,
-    ctrlp_vars: *mut c_void,
-    // Frame address of caller.
-    frameaddr: *mut c_void,
     // Stackmap id for the control point.
     smid: u64,
 ) {
@@ -77,6 +74,8 @@ pub extern "C" fn __ykrt_control_point(
             "push r13",
             "push r14",
             "push r15",
+            // Pass the interpreter frame's base pointer via the 4th argument register.
+            "mov rcx, rbp",
             "call __ykrt_control_point_real",
             // Restore the previously pushed registers.
             "pop r15",
@@ -98,18 +97,16 @@ pub extern "C" fn __ykrt_control_point(
 pub extern "C" fn __ykrt_control_point_real(
     mt: *const MT,
     loc: *mut Location,
-    ctrlp_vars: *mut c_void,
-    // Frame address of caller.
-    frameaddr: *mut c_void,
     // Stackmap id for the control point.
     smid: u64,
+    // Frame address of caller.
+    frameaddr: *mut c_void,
 ) {
-    debug_assert!(!ctrlp_vars.is_null());
     if !loc.is_null() {
         let mt = unsafe { &*mt };
         let loc = unsafe { &*loc };
         let arc = unsafe { Arc::from_raw(mt) };
-        arc.control_point(loc, ctrlp_vars, frameaddr, smid);
+        arc.control_point(loc, frameaddr, smid);
         forget(arc);
     }
 }
