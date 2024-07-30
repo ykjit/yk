@@ -49,10 +49,6 @@ const FORMAT_VERSION: u32 = 0;
 const CONTROL_POINT_NAME: &str = "__ykrt_control_point";
 const LLVM_DEBUG_CALL_NAME: &str = "llvm.dbg.value";
 
-/// The argument index of the trace inputs (live variables) struct at call-sites to the control
-/// point call.
-const CTRL_POINT_ARGIDX_INPUTS: usize = 2;
-
 /// A struct identifying a line in a source file.
 #[derive(Debug)]
 #[deku_derive(DekuRead)]
@@ -1057,21 +1053,11 @@ impl Inst {
         }
     }
 
-    /// If `self` is a call to the control point, then return the live variables struct argument
-    /// being passed to it. Otherwise return None.
-    pub(crate) fn control_point_call_trace_inputs(&self, m: &Module) -> Option<&Operand> {
+    /// Returns whether `self` is a call to the control point.
+    pub(crate) fn is_control_point(&self, m: &Module) -> bool {
         match self {
-            Self::Call { callee, args, .. } => {
-                if m.func(*callee).name == CONTROL_POINT_NAME {
-                    let arg = &args[CTRL_POINT_ARGIDX_INPUTS];
-                    // It should be a pointer (to a struct, but we can't check that).
-                    debug_assert!(matches!(arg.type_(m), &Ty::Ptr));
-                    Some(arg)
-                } else {
-                    None
-                }
-            }
-            _ => None,
+            Self::Call { callee, .. } => m.func(*callee).name == CONTROL_POINT_NAME,
+            _ => false,
         }
     }
 
@@ -1088,12 +1074,6 @@ impl Inst {
             Self::Call { callee, .. } => m.func(*callee).name == LLVM_DEBUG_CALL_NAME,
             _ => false,
         }
-    }
-
-    /// Determine if two instructions in the (immutable) AOT IR are the same based on pointer
-    /// identity.
-    pub(crate) fn ptr_eq(&self, other: &Self) -> bool {
-        std::ptr::eq(self, other)
     }
 
     pub(crate) fn display<'a>(

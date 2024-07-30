@@ -120,17 +120,15 @@ impl TraceBuilder {
         blk: &'static aot_ir::BBlock,
         is_sidetrace: bool,
     ) -> Result<(), CompilationError> {
-        // Find trace input variables and emit `LoadTraceInput` instructions for them.
-        let mut trace_inputs = None;
-
-        // PHASE 1:
         // Find the control point call and extract the trace inputs struct from its operands.
         //
         // FIXME: Stash the location at IR lowering time, instead of searching at runtime.
         let mut inst_iter = blk.insts.iter().enumerate().rev();
         for (_, inst) in inst_iter.by_ref() {
-            // Is it a call to the control point? If so, extract the live vars struct.
-            if let Some(tis) = inst.control_point_call_trace_inputs(self.aot_mod) {
+            // Is it a call to the control point, then insert loads for the trace inputs. These
+            // directly reference registers or stack slots in the parent frame and thus don't
+            // necessarily result in machine code during codegen.
+            if inst.is_control_point(self.aot_mod) {
                 // FIXME Safepoint id should be an integer not Operand.
                 let safepoint = inst.safepoint().unwrap();
                 let aot_ir::Operand::Const(cidx) = safepoint.id else {
@@ -204,36 +202,7 @@ impl TraceBuilder {
                         jit_ir::Operand::Local(self.jit_mod.last_inst_idx()),
                     );
                 }
-
-                trace_inputs = Some(tis.to_inst(self.aot_mod));
                 break;
-            }
-        }
-
-        // If this unwrap fails, we didn't find the call to the control point and something is
-        // profoundly wrong with the AOT IR.
-        let trace_inputs = trace_inputs.unwrap();
-
-        // PHASE 2:
-        // Keep walking backwards over the ptradd/store pairs emitting LoadTraceInput instructions.
-        //
-        // FIXME: Can we do something at IR lowering time to make this easier?
-        for (iidx, inst) in inst_iter {
-            match inst {
-                aot_ir::Inst::Store { .. } => {}
-                aot_ir::Inst::PtrAdd { ptr, .. } => {
-                    // Is the pointer operand of this PtrAdd targeting the trace inputs?
-                    if trace_inputs.ptr_eq(ptr.to_inst(self.aot_mod)) {
-                        // We found a trace input. Now we emit a `LoadTraceInput` instruction into the
-                        // trace. This assigns the input to a local variable that other instructions
-                        // can then use.
-                        //
-                        // Note: This code assumes that the `PtrAdd` instructions in the AOT IR were
-                        // emitted sequentially.
-                        self.first_ti_idx = iidx;
-                    }
-                }
-                _ => (),
             }
         }
 
@@ -824,7 +793,9 @@ impl TraceBuilder {
                 }
                 _ => panic!(),
             }
-
+            if inst.is_control_point(self.aot_mod) {
+                return Ok(());
+            }
             let jit_func_decl_idx = self.handle_func(*callee)?;
             let inst =
                 jit_ir::DirectCallInst::new(&mut self.jit_mod, jit_func_decl_idx, jit_args)?.into();
@@ -1287,9 +1258,7 @@ impl TraceBuilder {
         if sti.is_some() {
             let blk = self.aot_mod.bblock(self.cp_block.as_ref().unwrap());
             let cpcall = blk.insts.iter().rev().nth(1).unwrap();
-            debug_assert!(cpcall
-                .control_point_call_trace_inputs(self.aot_mod)
-                .is_some());
+            debug_assert!(cpcall.is_control_point(self.aot_mod));
 
             // Make a 0 constant.
             let jitconst = jit_ir::Const::Int(self.jit_mod.int1_tyidx(), 0);
