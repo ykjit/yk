@@ -28,7 +28,10 @@
 //! one place on the stack.
 
 use crate::compile::jitc_yk::{
-    codegen::abs_stack::AbstractStack,
+    codegen::{
+        abs_stack::AbstractStack,
+        reg_alloc::{self, VarLocation},
+    },
     jit_ir::{Const, ConstIdx, FloatTy, InstIdx, Module, Operand, Ty},
 };
 use dynasmrt::{
@@ -622,29 +625,34 @@ impl<'a> LSRegAlloc<'a> {
         }
     }
 
-    /// Return the stack offset for `iidx`, forcing it to be spilled if it hasn't already.
+    /// Return the location of the value at `iidx`. If that instruction's value is available in a
+    /// register and is spilled to the stack, the former will always be preferred.
     ///
-    /// Note that it is undefined behaviour if the value for `iidx` is no longer alive.
-    ///
-    /// FIXME: This method is a temporary hack for x86_64/mod.rs, which currently requires every
-    /// instruction to be stilled to the stack before a guard.
-    pub(crate) fn stack_offset_gp_hack(&mut self, asm: &mut Assembler, iidx: InstIdx) -> usize {
-        if self.spilled_insts[usize::from(iidx)] == usize::MAX {
-            let reg_i = self
-                .gp_reg_states
-                .iter()
-                .position(|x| {
-                    if let RegState::FromInst(y) = x {
-                        *y == iidx
-                    } else {
-                        false
-                    }
-                })
-                .unwrap();
-            let reg = GP_REGS[reg_i];
-            self.spill_gp_if_not_already(asm, reg)
+    /// Note that it is undefined behaviour to ask for the location of an instruction which has not
+    /// yet produced a value.
+    pub(crate) fn var_location(&mut self, iidx: InstIdx) -> VarLocation {
+        if let Some(reg_i) = self.gp_reg_states.iter().position(|x| {
+            if let RegState::FromInst(y) = x {
+                *y == iidx
+            } else {
+                false
+            }
+        }) {
+            VarLocation::Register(reg_alloc::Register::GP(GP_REGS[reg_i]))
+        } else if let Some(reg_i) = self.fp_reg_states.iter().position(|x| {
+            if let RegState::FromInst(y) = x {
+                *y == iidx
+            } else {
+                false
+            }
+        }) {
+            VarLocation::Register(reg_alloc::Register::FP(FP_REGS[reg_i]))
+        } else {
+            let frame_off = self.spilled_insts[usize::from(iidx)];
+            debug_assert_ne!(frame_off, usize::MAX);
+            let size = self.m.inst_no_proxies(iidx).def_byte_size(self.m);
+            VarLocation::Stack { frame_off, size }
         }
-        self.spilled_insts[usize::from(iidx)]
     }
 }
 

@@ -1,20 +1,30 @@
 use crate::{
     aotsmp::AOT_STACKMAPS,
-    compile::{jitc_yk::codegen::reg_alloc::VarLocation, GuardIdx},
+    compile::{
+        jitc_yk::codegen::reg_alloc::{Register, VarLocation},
+        GuardIdx,
+    },
     log::{stats::TimingState, Verbosity},
     mt::MTThread,
 };
+use dynasmrt::Register as _;
 use libc::c_void;
 use std::{mem, ptr, sync::Arc};
 use yksmp::Location as SMLocation;
 
 use super::{X64CompiledTrace, RBP_DWARF_NUM, REG64_SIZE};
 
+/// Deoptimise back to the interpreter. This function is called from a failing guard (see
+/// `x86_64/mod.rs`). The arguments are: `frameaddr` is the RBP value for the caller of the JIT
+/// function frame; `gidx` the ID of the failing guard; `jitrbp` is the JIT function frame's RBP;
+/// and `gp_regs` is a pointer to the saved values of the 16 general purpose registers in the same
+/// order as [lsregalloc::GP_REGS].
 #[no_mangle]
 pub(crate) extern "C" fn __yk_deopt(
     frameaddr: *const c_void,
     gidx: u64,
     jitrbp: *const c_void,
+    gp_regs: &[u64; 16],
 ) -> ! {
     let gidx = GuardIdx::from(usize::try_from(gidx).unwrap());
     let ctr = MTThread::with(|mtt| mtt.running_trace().unwrap())
@@ -42,7 +52,10 @@ pub(crate) extern "C" fn __yk_deopt(
                         _ => todo!(),
                     }
                 }
-                VarLocation::Register(_) => todo!(),
+                VarLocation::Register(x) => match x {
+                    Register::GP(x) => gp_regs[usize::from(x.code())],
+                    Register::FP(_) => todo!(),
+                },
                 VarLocation::ConstFloat(_) => todo!(),
                 VarLocation::ConstInt { bits: _, v } => *v,
                 VarLocation::Direct { .. } => panic!(),
@@ -160,7 +173,10 @@ pub(crate) extern "C" fn __yk_deopt(
                         _ => todo!(),
                     }
                 }
-                VarLocation::Register(_) => todo!(),
+                VarLocation::Register(x) => match x {
+                    Register::GP(x) => gp_regs[usize::from(x.code())],
+                    Register::FP(_) => todo!(),
+                },
                 VarLocation::ConstInt { bits: _, v } => v,
                 VarLocation::ConstFloat(f) => f.to_bits(),
                 VarLocation::Direct { .. } => panic!(),
