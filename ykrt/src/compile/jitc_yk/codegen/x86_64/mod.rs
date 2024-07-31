@@ -249,10 +249,14 @@ impl<'a> Assemble<'a> {
             for (deoptid, fail_label) in fail_labels.into_iter().enumerate() {
                 #[cfg(any(debug_assertions, test))]
                 self.comment(self.asm.offset(), format!("Deopt ID for guard {deoptid}"));
+                // FIXME: Why are `deoptid`s 64 bit? We're not going to have that many guards!
+                let deoptid = i32::try_from(deoptid).unwrap();
                 dynasm!(self.asm
                     ;=> fail_label
-                    ; mov rsi, QWORD deoptid as i64
-                    ; jmp =>deopt_label
+                    ; push rsi // FIXME: We push RSI now so we can fish it back out in
+                               // `deopt_label`.
+                    ; mov rsi, deoptid
+                    ; jmp => deopt_label
                 );
             }
 
@@ -262,11 +266,25 @@ impl<'a> Assemble<'a> {
             // is x86 only, we don't need to worry about portability.
             #[allow(clippy::fn_to_numeric_cast)]
             {
+                dynasm!(self.asm; => deopt_label);
+                // Push all the general purpose registers to the stack.
+                for (i, reg) in lsregalloc::GP_REGS.iter().rev().enumerate() {
+                    if *reg == Rq::RSI {
+                        // RSI is handled differently in `fail_label`: RSI now contains the deopt
+                        // ID, so we have to fish the actual value out of the stack. See the FIXME
+                        // in `fail_label`.
+                        let off = i32::try_from(i * 8).unwrap();
+                        dynasm!(self.asm; push QWORD [rsp + off]);
+                    } else {
+                        dynasm!(self.asm; push Rq(reg.code()));
+                    }
+                }
                 dynasm!(self.asm
-                    ;=> deopt_label
                     ; mov rdi, [rbp]
                     ; mov rdx, rbp
+                    ; mov rcx, rsp
                     ; mov rax, QWORD __yk_deopt as i64
+                    ; sub rsp, 8 // Align the stack
                     ; call rax
                 );
             }
@@ -1396,29 +1414,21 @@ impl<'a> Assemble<'a> {
         let mut locs: Vec<VarLocation> = Vec::new();
         let gi = inst.guard_info(self.m);
         for lidx in gi.lives() {
-            match self.m.inst_all(*lidx) {
-                jit_ir::Inst::ProxyConst(c) => {
-                    // The live variable is a constant (e.g. this can happen during inlining), so
-                    // it doesn't have an allocation. We can just push the actual value instead
-                    // which will be written as is during deoptimisation.
-                    match self.m.const_(*c) {
-                        Const::Int(tyidx, c) => {
-                            let Ty::Integer(bits) = self.m.type_(*tyidx) else {
-                                panic!()
-                            };
-                            locs.push(VarLocation::ConstInt { bits: *bits, v: *c })
-                        }
-                        _ => todo!(),
-                    };
+            if let jit_ir::Inst::ProxyConst(c) = self.m.inst_all(*lidx) {
+                // The live variable is a constant (e.g. this can happen during inlining), so
+                // it doesn't have an allocation. We can just push the actual value instead
+                // which will be written as is during deoptimisation.
+                match self.m.const_(*c) {
+                    Const::Int(tyidx, c) => {
+                        let Ty::Integer(bits) = self.m.type_(*tyidx) else {
+                            panic!()
+                        };
+                        locs.push(VarLocation::ConstInt { bits: *bits, v: *c })
+                    }
+                    _ => todo!(),
                 }
-                _ => {
-                    // FIXME: This is a temporary hack (notice the function name!), where we force
-                    // every live instruction to be spilled. This is only needed until deopt
-                    // supports reloading from registers.
-                    let frame_off = self.ra.stack_offset_gp_hack(&mut self.asm, *lidx);
-                    let size = self.m.inst_no_proxies(*lidx).def_byte_size(self.m);
-                    locs.push(VarLocation::Stack { frame_off, size });
-                }
+            } else {
+                locs.push(self.ra.var_location(*lidx));
             }
         }
 
@@ -2153,12 +2163,16 @@ mod tests {
                 {{_}} {{_}}: jnz 0x...
                 ...
                 ; deopt id for guard 0
+                {{_}} {{_}}: push rsi
                 ... mov rsi, 0x00
                 ... jmp ...
                 ; call __yk_deopt
+                ...
                 ... mov rdi, [rbp]
                 ... mov rdx, rbp
-                ... mov rax, ...
+                ... mov rcx, rsp
+                ... mov rax, 0x...
+                ... sub rsp, 0x08
                 ... call rax
             ",
         );
@@ -2179,12 +2193,16 @@ mod tests {
                 {{_}} {{_}}: jnz 0x...
                 ...
                 ; deopt id for guard 0
+                {{_}} {{_}}: push rsi
                 ... mov rsi, 0x00
                 ... jmp ...
                 ; call __yk_deopt
+                ...
                 ... mov rdi, [rbp]
                 ... mov rdx, rbp
-                ... mov rax, ...
+                ... mov rcx, rsp
+                ... mov rax, 0x...
+                ... sub rsp, 0x08
                 ... call rax
             ",
         );
