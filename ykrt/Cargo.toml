@@ -30,14 +30,6 @@ zydis = "4.1.0"
 [target.'cfg(all(target_arch = "x86_64", target_os = "linux"))'.dependencies]
 hwtracer = { path = "../hwtracer" }
 
-[dependencies.llvm-sys]
-# note: using a git version to get llvm linkage features in llvm-sys (not in a
-# release at the time of writing)
-git = "https://gitlab.com/taricorp/llvm-sys.rs"
-rev = "678b3da2b2239ae12766c964e6e613c0d82b5f37"
-# because yk already links llvm elsewhere.
-features = ["no-llvm-linking"]
-
 [dependencies.object]
 version = "0.34.0"
 default-features = false
