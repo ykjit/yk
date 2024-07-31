@@ -176,7 +176,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             let iidx = self.lexer.span_str(span)[1..]
                                 .parse::<usize>()
                                 .map_err(|e| self.error_at_span(span, &e.to_string()))?;
-                            let iidx = InstIdx::new(iidx)
+                            let iidx = InstIdx::try_from(iidx)
                                 .map_err(|e| self.error_at_span(span, &e.to_string()))?;
                             if self.inst_idx_map.get(&iidx).is_none() {
                                 return Err(self.error_at_span(
@@ -572,7 +572,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                     .parse::<usize>()
                     .map_err(|e| self.error_at_span(span, &e.to_string()))?;
                 let idx =
-                    InstIdx::new(idx).map_err(|e| self.error_at_span(span, &e.to_string()))?;
+                    InstIdx::try_from(idx).map_err(|e| self.error_at_span(span, &e.to_string()))?;
                 let mapped_idx = self.inst_idx_map.get(&idx).ok_or_else(|| {
                     self.error_at_span(span, &format!("Undefined local operand '%{idx}'"))
                 })?;
@@ -612,7 +612,7 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
         let idx = self.lexer.span_str(span)[1..]
             .parse::<usize>()
             .map_err(|e| self.error_at_span(span, &e.to_string()))?;
-        let idx = InstIdx::new(idx).map_err(|e| self.error_at_span(span, &e.to_string()))?;
+        let idx = InstIdx::try_from(idx).map_err(|e| self.error_at_span(span, &e.to_string()))?;
         self.m.push(inst).unwrap();
         match self.inst_idx_map.insert(idx, self.m.last_inst_idx()) {
             None => Ok(()),
