@@ -10,9 +10,7 @@ use {
 pub fn main() {
     ykbuild::apply_llvm_ld_library_path();
     println!("cargo::rerun-if-env-changed=YKB_TRACER");
-    // Always compile in the LLVM JIT compiler.
-    println!("cargo::rustc-check-cfg=cfg(jitc_llvm)");
-    // Always compile in our bespoke JIT compiler.
+    // Always compile in yk's default JIT compiler.
     println!("cargo::rustc-cfg=jitc_yk");
     println!("cargo::rustc-check-cfg=cfg(jitc_yk)");
 
