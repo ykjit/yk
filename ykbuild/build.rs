@@ -32,7 +32,7 @@ const YKLLVM_SUBMODULE_PATH: &str = "../ykllvm/llvm";
 
 fn main() {
     for k in ENV_VARS_RERUN {
-        println!("cargo:rerun-if-env-changed={}", k);
+        println!("cargo::rerun-if-env-changed={}", k);
     }
 
     // If the user defines YKB_YKLLVM_BIN_DIR then we don't try to build ykllvm ourselves.
@@ -44,7 +44,7 @@ fn main() {
         panic!("YKLLVM Submodule ({}) was not found! To check submodules, run:\n $ git submodule update --init --recursive\n", YKLLVM_SUBMODULE_PATH);
     }
 
-    println!("cargo:rerun-if-changed={YKLLVM_SRC_DEPEND_PATH}");
+    println!("cargo::rerun-if-changed={YKLLVM_SRC_DEPEND_PATH}");
     rerun_except(&[]).unwrap();
 
     // Build ykllvm in "target/<cargo-profile>". Note that the directory used here *must* be

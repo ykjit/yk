@@ -3,8 +3,6 @@
 use super::{
     AOTTraceIterator, AOTTraceIteratorError, TraceAction, TraceRecorder, TraceRecorderError, Tracer,
 };
-#[cfg(jitc_llvm)]
-use crate::compile::jitc_llvm::frame::BitcodeSection;
 use crate::mt::{MTThread, DEFAULT_TRACE_TOO_LONG};
 use std::{
     cell::RefCell,
@@ -19,27 +17,6 @@ struct TracingBBlock {
     function_index: usize,
     block_index: usize,
 }
-
-/// Mapping of function indexes to function names.
-#[cfg(jitc_llvm)]
-static FUNC_NAMES: LazyLock<HashMap<usize, CString>> = LazyLock::new(|| {
-    let mut fnames = HashMap::new();
-    let mut functions: *mut IRFunctionNameIndex = std::ptr::null_mut();
-    let bc_section = crate::compile::jitc_llvm::llvmbc_section();
-    let mut functions_len: usize = 0;
-    let bs = &BitcodeSection {
-        data: bc_section.as_ptr(),
-        len: u64::try_from(bc_section.len()).unwrap(),
-    };
-    unsafe { get_function_names(bs, &mut functions, &mut functions_len) };
-    for entry in unsafe { std::slice::from_raw_parts(functions, functions_len) } {
-        fnames.insert(
-            entry.index,
-            unsafe { std::ffi::CStr::from_ptr(entry.name) }.to_owned(),
-        );
-    }
-    fnames
-});
 
 /// Mapping of function indices to function names.
 ///
@@ -85,23 +62,6 @@ pub extern "C" fn yk_trace_basicblock(function_index: usize, block_index: usize)
             })
         }
     });
-}
-
-#[cfg(jitc_llvm)]
-extern "C" {
-    fn get_function_names(
-        section: *const BitcodeSection,
-        result: *mut *mut IRFunctionNameIndex,
-        len: *mut usize,
-    );
-}
-
-#[cfg(jitc_llvm)]
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct IRFunctionNameIndex {
-    pub index: usize,
-    pub name: *const libc::c_char,
 }
 
 pub(crate) struct SWTracer {}
