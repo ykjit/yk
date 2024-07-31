@@ -175,20 +175,20 @@ impl Module {
         // us to find their (now statically known) indices in scenarios where Rust forbids us from
         // holding a mutable reference to the Module (and thus we cannot use [Module::tyidx]).
         let mut types = IndexSet::new();
-        let void_tyidx = TyIdx::new(types.insert_full(Ty::Void).0)?;
-        let ptr_tyidx = TyIdx::new(types.insert_full(Ty::Ptr).0)?;
-        let int1_tyidx = TyIdx::new(types.insert_full(Ty::Integer(1)).0).unwrap();
+        let void_tyidx = TyIdx::try_from(types.insert_full(Ty::Void).0)?;
+        let ptr_tyidx = TyIdx::try_from(types.insert_full(Ty::Ptr).0)?;
+        let int1_tyidx = TyIdx::try_from(types.insert_full(Ty::Integer(1)).0).unwrap();
         #[cfg(test)]
-        let int8_tyidx = TyIdx::new(types.insert_full(Ty::Integer(8)).0).unwrap();
+        let int8_tyidx = TyIdx::try_from(types.insert_full(Ty::Integer(8)).0).unwrap();
 
         let mut consts = IndexSet::new();
-        let true_constidx = ConstIdx::new(
+        let true_constidx = ConstIdx::try_from(
             consts
                 .insert_full(ConstIndexSetWrapper(Const::Int(int1_tyidx, 1)))
                 .0,
         )
         .unwrap();
-        let false_constidx = ConstIdx::new(
+        let false_constidx = ConstIdx::try_from(
             consts
                 .insert_full(ConstIndexSetWrapper(Const::Int(int1_tyidx, 0)))
                 .0,
@@ -286,7 +286,8 @@ impl Module {
         &mut self,
         inst: IndirectCallInst,
     ) -> Result<IndirectCallIdx, CompilationError> {
-        IndirectCallIdx::new(self.indirect_calls.len()).inspect(|_| self.indirect_calls.push(inst))
+        IndirectCallIdx::try_from(self.indirect_calls.len())
+            .inspect(|_| self.indirect_calls.push(inst))
     }
 
     /// Return the indirect call at the specified index.
@@ -296,13 +297,13 @@ impl Module {
 
     /// Push an instruction to the end of the [Module].
     pub(crate) fn push(&mut self, inst: Inst) -> Result<InstIdx, CompilationError> {
-        InstIdx::new(self.insts.len()).inspect(|_| self.insts.push(inst))
+        InstIdx::try_from(self.insts.len()).inspect(|_| self.insts.push(inst))
     }
 
     /// Iterate, in order, over all `InstIdx`s of this module (including `Proxy*` and `Tombstone`
     /// instructions).
     pub(crate) fn iter_all_inst_idxs(&self) -> impl DoubleEndedIterator<Item = InstIdx> {
-        (0..self.insts.len()).map(|x| InstIdx::new(x).unwrap())
+        (0..self.insts.len()).map(|x| InstIdx::try_from(x).unwrap())
     }
 
     /// An iterator over instructions that skips `Proxy*` and `Tombstone` instructions.
@@ -333,7 +334,7 @@ impl Module {
     ) -> Result<Operand, CompilationError> {
         // Assert that `inst` defines a local var.
         debug_assert!(inst.def_type(self).is_some());
-        InstIdx::new(self.insts.len()).map(|x| {
+        InstIdx::try_from(self.insts.len()).map(|x| {
             self.insts.push(inst);
             Operand::Local(x)
         })
@@ -346,7 +347,7 @@ impl Module {
     ///
     /// If this module has no instructions.
     pub(crate) fn last_inst_idx(&self) -> InstIdx {
-        InstIdx::new(self.insts.len().checked_sub(1).unwrap()).unwrap()
+        InstIdx::try_from(self.insts.len().checked_sub(1).unwrap()).unwrap()
     }
 
     pub(crate) fn insts_len(&self) -> usize {
@@ -359,7 +360,7 @@ impl Module {
     ///
     /// If `args` would overflow the index type.
     pub(crate) fn push_args(&mut self, args: Vec<Operand>) -> Result<ArgsIdx, CompilationError> {
-        ArgsIdx::new(self.args.len())
+        ArgsIdx::try_from(self.args.len())
             .inspect(|_| self.args.extend(args.iter().map(PackedOperand::new)))
     }
 
@@ -391,7 +392,7 @@ impl Module {
     /// index will be returned.
     pub(crate) fn insert_ty(&mut self, ty: Ty) -> Result<TyIdx, CompilationError> {
         let (i, _) = self.types.insert_full(ty);
-        TyIdx::new(i)
+        TyIdx::try_from(i)
     }
 
     /// Return the [Ty] for the specified index.
@@ -413,7 +414,7 @@ impl Module {
     /// existing index will be returned.
     pub fn insert_const(&mut self, c: Const) -> Result<ConstIdx, CompilationError> {
         let (i, _) = self.consts.insert_full(ConstIndexSetWrapper(c));
-        ConstIdx::new(i)
+        ConstIdx::try_from(i)
     }
 
     /// Return the const for the specified index.
@@ -442,7 +443,7 @@ impl Module {
         gd: GlobalDecl,
     ) -> Result<GlobalDeclIdx, CompilationError> {
         let (i, _) = self.global_decls.insert_full(gd);
-        GlobalDeclIdx::new(i)
+        GlobalDeclIdx::try_from(i)
     }
 
     /// Return the global declaration for the specified index.
@@ -466,7 +467,7 @@ impl Module {
         fd: FuncDecl,
     ) -> Result<FuncDeclIdx, CompilationError> {
         let (i, _) = self.func_decls.insert_full(fd);
-        FuncDeclIdx::new(i)
+        FuncDeclIdx::try_from(i)
     }
 
     /// Return the [FuncDecl] for the specified index.
@@ -498,7 +499,7 @@ impl Module {
     /// If there is no function declaration `name`.
     #[cfg(test)]
     pub(crate) fn find_func_decl_idx_by_name(&self, name: &str) -> FuncDeclIdx {
-        FuncDeclIdx::new(
+        FuncDeclIdx::try_from(
             self.func_decls
                 .iter()
                 .position(|x| x.name() == name)
@@ -511,7 +512,7 @@ impl Module {
         &mut self,
         info: GuardInfo,
     ) -> Result<GuardInfoIdx, CompilationError> {
-        GuardInfoIdx::new(self.guard_info.len()).inspect(|_| self.guard_info.push(info))
+        GuardInfoIdx::try_from(self.guard_info.len()).inspect(|_| self.guard_info.push(info))
     }
 
     pub(crate) fn tilocs(&self) -> &[VarLocation] {
@@ -566,7 +567,7 @@ impl<'a> Iterator for SkippingInstsIterator<'a> {
         while let Some(x) = self.m.insts.get(self.cur) {
             // We know that `self.cur` must fit in `InstIdx`, as otherwise `m.insts` wouldn't have
             // had the instruction in the first place.
-            let old = InstIdx::new(self.cur).unwrap();
+            let old = InstIdx::try_from(self.cur).unwrap();
             self.cur += 1;
             match x {
                 Inst::ProxyConst(_) | Inst::ProxyInst(_) | Inst::Tombstone => (),
@@ -670,20 +671,20 @@ fn index_overflow(typ: &str) -> CompilationError {
 // Generate common methods for 24-bit index types.
 macro_rules! index_24bit {
     ($struct:ident) => {
-        impl $struct {
-            /// Construct a new $struct from a `usize`, returning `CompilationError` if the `usize`
-            /// exceeds capacity.
-            pub(crate) fn new(x: usize) -> Result<Self, CompilationError> {
-                match U24::try_from(x) {
-                    Ok(x) => Ok(Self(x)),
-                    Err(()) => Err(index_overflow(stringify!($struct))),
-                }
-            }
-        }
-
         impl From<$struct> for usize {
             fn from(x: $struct) -> Self {
                 usize::from(x.0)
+            }
+        }
+
+        impl TryFrom<usize> for $struct {
+            type Error = CompilationError;
+
+            fn try_from(v: usize) -> Result<Self, Self::Error> {
+                match U24::try_from(v) {
+                    Ok(x) => Ok(Self(x)),
+                    Err(()) => Err(index_overflow(stringify!($struct))),
+                }
             }
         }
     };
@@ -694,20 +695,12 @@ macro_rules! index_16bit {
     ($struct:ident) => {
         #[allow(dead_code)]
         impl $struct {
-            /// Construct a new $struct from a `usize`, returning `CompilationError` if the `usize`
-            /// exceeds capacity.
-            pub(crate) fn new(v: usize) -> Result<Self, CompilationError> {
-                u16::try_from(v)
-                    .map_err(|_| index_overflow(stringify!($struct)))
-                    .map(|u| Self(u))
-            }
-
             pub(crate) fn checked_add(&self, other: usize) -> Result<Self, CompilationError> {
-                Self::new(usize::from(self.0) + other)
+                Self::try_from(usize::from(self.0) + other)
             }
 
             pub(crate) fn checked_sub(&self, other: usize) -> Result<Self, CompilationError> {
-                Self::new(usize::from(self.0) - other)
+                Self::try_from(usize::from(self.0) - other)
             }
         }
 
@@ -720,6 +713,16 @@ macro_rules! index_16bit {
         impl From<$struct> for usize {
             fn from(s: $struct) -> usize {
                 s.0.into()
+            }
+        }
+
+        impl TryFrom<usize> for $struct {
+            type Error = CompilationError;
+
+            fn try_from(v: usize) -> Result<Self, Self::Error> {
+                u16::try_from(v)
+                    .map_err(|_| index_overflow(stringify!($struct)))
+                    .map(|u| Self(u))
             }
         }
 
@@ -772,7 +775,7 @@ index_24bit!(GlobalDeclIdx);
 
 /// An indirect call index.
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct IndirectCallIdx(U24);
+pub(crate) struct IndirectCallIdx(U24);
 index_24bit!(IndirectCallIdx);
 
 /// An instruction index.
@@ -1889,7 +1892,7 @@ impl IndirectCallInst {
     /// Return an iterator for each of this direct call instruction's [ArgsIdx].
     pub(crate) fn iter_args_idx(&self) -> impl Iterator<Item = ArgsIdx> {
         (usize::from(self.args_idx)..usize::from(self.args_idx) + usize::from(self.num_args))
-            .map(|x| ArgsIdx::new(x).unwrap())
+            .map(|x| ArgsIdx::try_from(x).unwrap())
     }
 
     /// Fetch the operand at the specified index.
@@ -1952,7 +1955,7 @@ impl DirectCallInst {
     /// Return an iterator for each of this direct call instruction's [ArgsIdx].
     pub(crate) fn iter_args_idx(&self) -> impl Iterator<Item = ArgsIdx> {
         (usize::from(self.args_idx)..usize::from(self.args_idx) + usize::from(self.num_args))
-            .map(|x| ArgsIdx::new(x).unwrap())
+            .map(|x| ArgsIdx::try_from(x).unwrap())
     }
 
     /// Fetch the operand at the specified index.
@@ -1961,7 +1964,7 @@ impl DirectCallInst {
     ///
     /// Panics if the operand index is out of bounds.
     pub(crate) fn operand(&self, m: &Module, idx: usize) -> Operand {
-        m.arg(ArgsIdx::new(usize::from(self.args_idx) + idx).unwrap())
+        m.arg(ArgsIdx::try_from(usize::from(self.args_idx) + idx).unwrap())
     }
 }
 
@@ -2425,8 +2428,8 @@ mod tests {
     #[test]
     fn use_case_update_inst() {
         let mut prog: Vec<Inst> = vec![
-            LoadTraceInputInst::new(0, TyIdx::new(0).unwrap()).into(),
-            LoadTraceInputInst::new(8, TyIdx::new(0).unwrap()).into(),
+            LoadTraceInputInst::new(0, TyIdx::try_from(0).unwrap()).into(),
+            LoadTraceInputInst::new(8, TyIdx::try_from(0).unwrap()).into(),
             LoadInst::new(
                 Operand::Local(InstIdx(0)),
                 TyIdx(U24::try_from(0).unwrap()),
@@ -2530,35 +2533,35 @@ mod tests {
 
     #[test]
     fn index24_fits() {
-        assert!(TyIdx::new(0).is_ok());
-        assert!(TyIdx::new(1).is_ok());
-        assert!(TyIdx::new(0x1234).is_ok());
-        assert!(TyIdx::new(0x123456).is_ok());
-        assert!(TyIdx::new(0xffffff).is_ok());
+        assert!(TyIdx::try_from(0).is_ok());
+        assert!(TyIdx::try_from(1).is_ok());
+        assert!(TyIdx::try_from(0x1234).is_ok());
+        assert!(TyIdx::try_from(0x123456).is_ok());
+        assert!(TyIdx::try_from(0xffffff).is_ok());
     }
 
     #[test]
     fn index24_doesnt_fit() {
-        assert!(TyIdx::new(0x1000000).is_err());
-        assert!(TyIdx::new(0x1234567).is_err());
-        assert!(TyIdx::new(0xeddedde).is_err());
-        assert!(TyIdx::new(usize::MAX).is_err());
+        assert!(TyIdx::try_from(0x1000000).is_err());
+        assert!(TyIdx::try_from(0x1234567).is_err());
+        assert!(TyIdx::try_from(0xeddedde).is_err());
+        assert!(TyIdx::try_from(usize::MAX).is_err());
     }
 
     #[test]
     fn index16_fits() {
-        assert!(ArgsIdx::new(0).is_ok());
-        assert!(ArgsIdx::new(1).is_ok());
-        assert!(ArgsIdx::new(0x1234).is_ok());
-        assert!(ArgsIdx::new(0xffff).is_ok());
+        assert!(ArgsIdx::try_from(0).is_ok());
+        assert!(ArgsIdx::try_from(1).is_ok());
+        assert!(ArgsIdx::try_from(0x1234).is_ok());
+        assert!(ArgsIdx::try_from(0xffff).is_ok());
     }
 
     #[test]
     fn index16_doesnt_fit() {
-        assert!(ArgsIdx::new(0x10000).is_err());
-        assert!(ArgsIdx::new(0x12345).is_err());
-        assert!(ArgsIdx::new(0xffffff).is_err());
-        assert!(ArgsIdx::new(usize::MAX).is_err());
+        assert!(ArgsIdx::try_from(0x10000).is_err());
+        assert!(ArgsIdx::try_from(0x12345).is_err());
+        assert!(ArgsIdx::try_from(0xffffff).is_err());
+        assert!(ArgsIdx::try_from(usize::MAX).is_err());
     }
 
     #[test]

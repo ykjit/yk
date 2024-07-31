@@ -156,7 +156,7 @@ impl<'a> Assemble<'a> {
         #[cfg(debug_assertions)]
         m.assert_well_formed();
 
-        let mut inst_vals_alive_until = vec![InstIdx::new(0).unwrap(); m.insts_len()];
+        let mut inst_vals_alive_until = vec![InstIdx::try_from(0).unwrap(); m.insts_len()];
         for iidx in m.iter_all_inst_idxs() {
             let inst = m.inst_all(iidx);
             inst.map_packed_operand_locals(m, &mut |x| {
@@ -170,7 +170,7 @@ impl<'a> Assemble<'a> {
                 break;
             }
             inst_vals_alive_until[usize::from(iidx)] =
-                InstIdx::new(usize::from(m.last_inst_idx()) + 1)?;
+                InstIdx::try_from(usize::from(m.last_inst_idx()) + 1)?;
         }
 
         let asm = dynasmrt::x64::Assembler::new()
