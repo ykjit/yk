@@ -303,7 +303,9 @@ impl Module {
     /// Iterate, in order, over all `InstIdx`s of this module (including `Proxy*` and `Tombstone`
     /// instructions).
     pub(crate) fn iter_all_inst_idxs(&self) -> impl DoubleEndedIterator<Item = InstIdx> {
-        (0..self.insts.len()).map(|x| InstIdx::try_from(x).unwrap())
+        // The `unchecked_from` is safe because we know from `Self::push` that we can't have
+        // exceeded `InstIdx`'s bounds.
+        (0..self.insts.len()).map(InstIdx::unchecked_from)
     }
 
     /// An iterator over instructions that skips `Proxy*` and `Tombstone` instructions.
@@ -347,7 +349,9 @@ impl Module {
     ///
     /// If this module has no instructions.
     pub(crate) fn last_inst_idx(&self) -> InstIdx {
-        InstIdx::try_from(self.insts.len().checked_sub(1).unwrap()).unwrap()
+        // Assuming `x > 0`, then if `x` fits within `InstIdx`'s bounds, `x - 1` must also fit, so
+        // the `unchecked_from` cannot fail.
+        InstIdx::unchecked_from(self.insts.len().checked_sub(1).unwrap())
     }
 
     pub(crate) fn insts_len(&self) -> usize {
@@ -566,8 +570,8 @@ impl<'a> Iterator for SkippingInstsIterator<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(x) = self.m.insts.get(self.cur) {
             // We know that `self.cur` must fit in `InstIdx`, as otherwise `m.insts` wouldn't have
-            // had the instruction in the first place.
-            let old = InstIdx::try_from(self.cur).unwrap();
+            // had the instruction in the first place, so the `unchecked_from` is safe.
+            let old = InstIdx::unchecked_from(self.cur);
             self.cur += 1;
             match x {
                 Inst::ProxyConst(_) | Inst::ProxyInst(_) | Inst::Tombstone => (),
@@ -695,6 +699,14 @@ macro_rules! index_16bit {
     ($struct:ident) => {
         #[allow(dead_code)]
         impl $struct {
+            /// Create an instance of `$struct` without checking whether `v` exceeds the underlying
+            /// type's bounds. If it does exceed those bounds, the result will be an instance of
+            /// this struct whose values is the `MAX` value the underlying type can represent.
+            pub(crate) fn unchecked_from(v: usize) -> Self {
+                debug_assert!(v <= usize::from(u16::MAX));
+                Self(v as u16)
+            }
+
             pub(crate) fn checked_add(&self, other: usize) -> Result<Self, CompilationError> {
                 Self::try_from(usize::from(self.0) + other)
             }
