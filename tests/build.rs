@@ -12,6 +12,4 @@ pub fn main() {
             r#"cargo::rustc-check-cfg=cfg(cargo_profile, values("debug", "release", "release-with-debug"))"#
         );
     }
-
-    ykbuild::apply_llvm_ld_library_path();
 }

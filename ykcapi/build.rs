@@ -1,8 +1,6 @@
 use std::env;
 
 pub fn main() {
-    ykbuild::apply_llvm_ld_library_path();
-
     println!("cargo::rerun-if-env-changed=YKB_TRACER");
     match env::var("YKB_TRACER") {
         Ok(ref tracer) if tracer == "swt" => println!("cargo::rustc-cfg=tracer_swt"),
