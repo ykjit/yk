@@ -3,16 +3,12 @@
 //! This takes in an (AOT IR, execution trace) pair and constructs a JIT IR trace from it.
 
 use super::aot_ir::{self, BBlockId, BinOp, FuncIdx, Module};
-use super::codegen::reg_alloc::{Register, VarLocation};
 use super::jit_ir::{self, Const};
 use super::YkSideTraceInfo;
 use crate::aotsmp::AOT_STACKMAPS;
 use crate::compile::CompilationError;
 use crate::trace::{AOTTraceIterator, AOTTraceIteratorError, TraceAction};
 use std::{collections::HashMap, ffi::CString, sync::Arc};
-
-// FIXME: Can we avoid a dynasm dependency here?
-use dynasmrt::x64::Rq;
 
 /// The argument index of the trace inputs struct in the trace function.
 const U64SIZE: usize = 8;
@@ -159,42 +155,7 @@ impl TraceBuilder {
                     if var.len() > 1 {
                         todo!();
                     }
-                    let vl = match var.get(0).unwrap() {
-                        yksmp::Location::Register(3, ..) => {
-                            VarLocation::Register(Register::GP(Rq::RBX))
-                        }
-                        yksmp::Location::Register(4, ..) => {
-                            VarLocation::Register(Register::GP(Rq::RSI))
-                        }
-                        yksmp::Location::Register(5, ..) => {
-                            VarLocation::Register(Register::GP(Rq::RDI))
-                        }
-                        yksmp::Location::Register(12, ..) => {
-                            VarLocation::Register(Register::GP(Rq::R12))
-                        }
-                        yksmp::Location::Register(13, ..) => {
-                            VarLocation::Register(Register::GP(Rq::R13))
-                        }
-                        yksmp::Location::Register(14, ..) => {
-                            VarLocation::Register(Register::GP(Rq::R14))
-                        }
-                        yksmp::Location::Register(15, ..) => {
-                            VarLocation::Register(Register::GP(Rq::R15))
-                        }
-                        yksmp::Location::Direct(6, off, size) => VarLocation::Direct {
-                            frame_off: *off,
-                            size: usize::from(*size),
-                        },
-                        yksmp::Location::Indirect(6, off, size) => VarLocation::Indirect {
-                            frame_off: *off,
-                            size: usize::from(*size),
-                        },
-                        e => {
-                            todo!("{:?}", e);
-                        }
-                    };
-                    self.jit_mod.push_tiloc(vl);
-
+                    self.jit_mod.push_tiloc(var.get(0).unwrap().clone());
                     self.local_map.insert(
                         aot_op.to_inst_id(),
                         jit_ir::Operand::Local(self.jit_mod.last_inst_idx()),

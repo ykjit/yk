@@ -31,7 +31,7 @@ impl Record {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Location {
     Register(u16, u16, i32, u16),
     Direct(u16, i32, u16),
