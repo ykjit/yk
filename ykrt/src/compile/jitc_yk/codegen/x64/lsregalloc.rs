@@ -601,8 +601,8 @@ impl<'a> LSRegAlloc<'a> {
     /// (whether it is used later or not) marking the reg state as [RegState::Empty].
     ///
     /// FIXME: This method has one genuine use (clobbering registers before a CALL) and one hack
-    /// use (hence the function name) in x86_64/mod.rs. What we currently call `avoids` should
-    /// really be `clobbers`, but currently there is one case in x86_64/mod.rs which requires us to
+    /// use (hence the function name) in x64/mod.rs. What we currently call `avoids` should
+    /// really be `clobbers`, but currently there is one case in x64/mod.rs which requires us to
     /// avoid a register without clobbering it, so we have to break this out into its own function.
     pub(crate) fn clobber_gp_regs_hack(&mut self, asm: &mut Assembler, iidx: InstIdx, regs: &[Rq]) {
         for reg in regs {

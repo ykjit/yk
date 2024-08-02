@@ -1,4 +1,4 @@
-//! The X86_64 JIT Code Generator.
+//! The X64 JIT Code Generator.
 //!
 //! Conventions used in this module:
 //!   * Functions with a `cg_X` prefix generate code for a [jit_ir] construct `X`.
@@ -54,10 +54,10 @@ mod lsregalloc;
 use deopt::__yk_deopt;
 use lsregalloc::{LSRegAlloc, RegConstraint, RegSet};
 
-/// General purpose argument registers as defined by the X86_64 SysV ABI.
+/// General purpose argument registers as defined by the x64 SysV ABI.
 static ARG_GP_REGS: [Rq; 6] = [Rq::RDI, Rq::RSI, Rq::RDX, Rq::RCX, Rq::R8, Rq::R9];
 
-/// The registers clobbered by a function call in the X86_64 SysV ABI.
+/// The registers clobbered by a function call in the x64 SysV ABI.
 static CALLER_CLOBBER_REGS: [Rq; 9] = [
     Rq::RAX,
     Rq::RCX,
@@ -70,7 +70,7 @@ static CALLER_CLOBBER_REGS: [Rq; 9] = [
     Rq::R11,
 ];
 
-/// Floating point argument registers as defined by the X86_64 SysV ABI.
+/// Floating point argument registers as defined by the x64 SysV ABI.
 static ARG_FP_REGS: [Rx; 8] = [
     Rx::XMM0,
     Rx::XMM1,
@@ -100,10 +100,10 @@ static JITFUNC_LIVEVARS_ARGIDX: usize = 0;
 static REG64_SIZE: usize = 8;
 static RBP_DWARF_NUM: u16 = 6;
 
-/// The X86_64 SysV ABI requires a 16-byte aligned stack prior to any call.
+/// The x64 SysV ABI requires a 16-byte aligned stack prior to any call.
 const SYSV_CALL_STACK_ALIGN: usize = 16;
 
-/// On X86_64 the stack grows down.
+/// On x64 the stack grows down.
 const STACK_DIRECTION: StackDirection = StackDirection::GrowsDown;
 
 /// A function that we can put a debugger breakpoint on.
@@ -113,10 +113,10 @@ const STACK_DIRECTION: StackDirection = StackDirection::GrowsDown;
 #[inline(never)]
 pub extern "C" fn __yk_break() {}
 
-/// A simple front end for the X86_64 code generator.
-pub(crate) struct X86_64CodeGen;
+/// A simple front end for the X64 code generator.
+pub(crate) struct X64CodeGen;
 
-impl CodeGen for X86_64CodeGen {
+impl CodeGen for X64CodeGen {
     fn codegen(
         &self,
         m: Module,
@@ -127,13 +127,13 @@ impl CodeGen for X86_64CodeGen {
     }
 }
 
-impl X86_64CodeGen {
+impl X64CodeGen {
     pub(crate) fn new() -> Result<Arc<Self>, Box<dyn Error>> {
         Ok(Arc::new(Self))
     }
 }
 
-/// The X86_64 code generator.
+/// The x64 code generator.
 struct Assemble<'a> {
     m: &'a jit_ir::Module,
     ra: LSRegAlloc<'a>,
@@ -1092,7 +1092,7 @@ impl<'a> Assemble<'a> {
         }
 
         if fty.is_vararg() {
-            // SysV X86_64 ABI says "rax is used to indicate the number of vector arguments passed
+            // SysV x64 ABI says "rax is used to indicate the number of vector arguments passed
             // to a function requiring a variable number of arguments". Float arguments are passed
             // in vector registers.
             dynasm!(self.asm; mov rax, num_float_args);
