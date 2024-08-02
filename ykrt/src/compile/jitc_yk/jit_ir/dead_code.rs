@@ -44,7 +44,7 @@ mod test {
             "
           ...
           entry:
-            %1: i8 = load_ti Register(GP(RBX))
+            %1: i8 = load_ti ...
             black_box %1
         ",
         );
@@ -64,7 +64,7 @@ mod test {
             "
           ...
           entry:
-            %0: i8 = load_ti Register(GP(RBX))
+            %0: i8 = load_ti ...
             %2: i8 = add %0, %0
             black_box %2
         ",
@@ -86,8 +86,8 @@ mod test {
             "
           ...
           entry:
-            %0: i8 = load_ti Register(GP(RBX))
-            %1: i8 = load_ti Register(GP(RBX))
+            %0: i8 = load_ti ...
+            %1: i8 = load_ti ...
             %3: i8 = add %1, %0
             black_box %3
         ",
@@ -109,7 +109,7 @@ mod test {
             "
           ...
           entry:
-            %1: i8 = load_ti Register(GP(RBX))
+            %1: i8 = load_ti ...
             %3: i1 = ult %1, %1
             black_box %3
         ",
@@ -130,7 +130,7 @@ mod test {
             "
           ...
           entry:
-            %0: i8 = load_ti Register(GP(RBX))
+            %0: i8 = load_ti ...
             %1: i1 = ult %0, 1i8
             guard true, %1, []
             black_box %1
@@ -152,7 +152,7 @@ mod test {
             "
           ...
           entry:
-            %0: i8 = load_ti Register(GP(RBX))
+            %0: i8 = load_ti ...
             call @f(%0)
         ",
         );
@@ -173,8 +173,8 @@ mod test {
             "
           ...
           entry:
-            %0: ptr = load_ti Register(GP(RBX))
-            %1: i8 = load_ti Register(GP(RBX))
+            %0: ptr = load_ti ...
+            %1: i8 = load_ti ...
             icall %0(%1)
         ",
         );

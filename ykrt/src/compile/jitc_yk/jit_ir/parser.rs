@@ -13,13 +13,12 @@ use super::super::{
         SIToFPInst, SelectInst, StoreInst, TruncInst, Ty, TyIdx,
     },
 };
-use crate::compile::jitc_yk::codegen::reg_alloc::{Register, VarLocation};
-use dynasmrt::x64::{Rq, Rx};
 use fm::FMBuilder;
 use lrlex::{lrlex_mod, DefaultLexerTypes, LRNonStreamingLexer};
 use lrpar::{lrpar_mod, NonStreamingLexer, Span};
 use regex::Regex;
 use std::{collections::HashMap, convert::TryFrom, error::Error, sync::OnceLock};
+use yksmp;
 
 lrlex_mod!("compile/jitc_yk/jit_ir/jit_ir.l");
 lrpar_mod!("compile/jitc_yk/jit_ir/jit_ir.y");
@@ -127,6 +126,13 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
     ) -> Result<(), Box<dyn Error>> {
         self.process_func_types(func_types)?;
         self.process_func_decls(func_decls)?;
+
+        // We try and put trace inputs into registers, but place floating point values on the stack
+        // as yksmp currently doesn't seem able to differentiate general purpose from floating
+        // point.
+        #[cfg(target_arch = "x86_64")]
+        let mut reg_off: u16 = 3; // FIXME: Why do need to start from register 3? I have no idea.
+        let mut ti_off: u32 = 0;
 
         for bblock in bblocks.into_iter() {
             for inst in bblock.insts {
@@ -305,18 +311,38 @@ impl<'lexer, 'input: 'lexer> JITIRParser<'lexer, 'input, '_> {
                             .parse::<u32>()
                             .map_err(|e| self.error_at_span(tiidx, &e.to_string()))?;
                         assert_eq!(self.m.tilocs.len(), usize::try_from(off).unwrap());
-                        match type_ {
-                            ASTType::Int(_) | ASTType::Ptr => {
-                                self.m
-                                    .push_tiloc(VarLocation::Register(Register::GP(Rq::RBX)));
+                        let type_ = self.process_type(type_)?;
+                        let size = self.m.type_(type_).byte_size().ok_or_else(|| {
+                            self.error_at_span(
+                                tiidx,
+                                "Assigning a trace input to a zero-sized type is nonsensical",
+                            )
+                        })?;
+                        match self.m.type_(type_) {
+                            Ty::Void => unreachable!(),
+                            Ty::Integer(_) | Ty::Ptr | Ty::Func(_) => {
+                                self.m.push_tiloc(yksmp::Location::Register(
+                                    reg_off,
+                                    u16::try_from(size).unwrap(),
+                                    0,
+                                    0,
+                                ));
                             }
-                            ASTType::Float(_) | ASTType::Double(_) => {
-                                self.m
-                                    .push_tiloc(VarLocation::Register(Register::FP(Rx::XMM0)));
+                            Ty::Float(_) => {
+                                let size = u16::try_from(size).unwrap();
+                                ti_off = ti_off.next_multiple_of(u32::from(size));
+                                // FIXME: Why 6?!
+                                self.m.push_tiloc(yksmp::Location::Direct(
+                                    6,
+                                    i32::try_from(ti_off).unwrap(),
+                                    size,
+                                ));
+                                ti_off += u32::from(size);
                             }
-                            _ => todo!(),
+                            Ty::Unimplemented(_) => todo!(),
                         }
-                        let inst = LoadTraceInputInst::new(off, self.process_type(type_)?);
+                        reg_off += 1;
+                        let inst = LoadTraceInputInst::new(off, type_);
                         self.push_assign(inst.into(), assign)?;
                     }
                     ASTInst::PtrAdd {
@@ -794,10 +820,7 @@ enum ASTType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compile::jitc_yk::{
-        codegen::reg_alloc,
-        jit_ir::{FuncTy, Ty},
-    };
+    use crate::compile::jitc_yk::jit_ir::{FuncTy, Ty};
 
     #[test]
     #[ignore] // Requires changing the parser to parse the new load_ti format.
@@ -805,8 +828,8 @@ mod tests {
         let mut m = Module::new_testing();
         let i16_tyidx = m.insert_ty(Ty::Integer(16)).unwrap();
 
-        m.push_tiloc(VarLocation::Register(reg_alloc::Register::GP(Rq::RBX)));
-        m.push_tiloc(VarLocation::Register(reg_alloc::Register::GP(Rq::RBX)));
+        m.push_tiloc(yksmp::Location::Register(3, 1, 0, 0));
+        m.push_tiloc(yksmp::Location::Register(3, 1, 0, 0));
         let op1 = m
             .push_and_make_operand(LoadTraceInputInst::new(0, i16_tyidx).into())
             .unwrap();
@@ -839,8 +862,8 @@ mod tests {
             "
           ...
           entry:
-            %{{0}}: i16 = load_ti Register(GP(RBX))
-            %{{1}}: i16 = load_ti Register(GP(RBX))
+            %{{0}}: i16 = load_ti ...
+            %{{1}}: i16 = load_ti ...
             %{{_}}: i16 = add %{{0}}, %{{1}}
         ",
         );

@@ -68,7 +68,6 @@ mod parser;
 mod well_formed;
 
 use super::aot_ir;
-use super::codegen::reg_alloc::VarLocation;
 use crate::compile::jitc_yk::trace_builder::Frame;
 use crate::compile::CompilationError;
 use indexmap::IndexSet;
@@ -108,7 +107,7 @@ pub(crate) struct Module {
     /// The type pool. Indexed by [TyIdx].
     types: IndexSet<Ty>,
     /// The trace-input location pool.
-    tilocs: Vec<VarLocation>,
+    tilocs: Vec<yksmp::Location>,
     /// The type index of the void type. Cached for convenience.
     void_tyidx: TyIdx,
     /// The type index of a pointer type. Cached for convenience.
@@ -388,8 +387,12 @@ impl Module {
     }
 
     /// Push the location of a trace input variable.
-    pub(crate) fn push_tiloc(&mut self, loc: VarLocation) {
+    pub(crate) fn push_tiloc(&mut self, loc: yksmp::Location) {
         self.tilocs.push(loc);
+    }
+
+    pub(crate) fn tilocs(&self) -> &[yksmp::Location] {
+        &self.tilocs
     }
 
     /// Add a [Ty] to the types pool and return its index. If the [Ty] already exists, an existing
@@ -517,10 +520,6 @@ impl Module {
         info: GuardInfo,
     ) -> Result<GuardInfoIdx, CompilationError> {
         GuardInfoIdx::try_from(self.guard_info.len()).inspect(|_| self.guard_info.push(info))
-    }
-
-    pub(crate) fn tilocs(&self) -> &[VarLocation] {
-        &self.tilocs
     }
 }
 
@@ -2434,8 +2433,6 @@ impl FPExtInst {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compile::jitc_yk::codegen::reg_alloc;
-    use dynasmrt::x64::Rq;
 
     #[test]
     fn use_case_update_inst() {
@@ -2611,14 +2608,8 @@ mod tests {
     #[test]
     fn print_module() {
         let mut m = Module::new_testing();
-        m.push_tiloc(VarLocation::Register(reg_alloc::Register::GP(Rq::RBX)));
-        m.push_tiloc(VarLocation::Register(reg_alloc::Register::GP(Rq::RBX)));
-        m.push_tiloc(VarLocation::Register(reg_alloc::Register::GP(Rq::RBX)));
+        m.push_tiloc(yksmp::Location::Register(3, 1, 0, 0));
         m.push(LoadTraceInputInst::new(0, m.int8_tyidx()).into())
-            .unwrap();
-        m.push(LoadTraceInputInst::new(1, m.int8_tyidx()).into())
-            .unwrap();
-        m.push(LoadTraceInputInst::new(2, m.int8_tyidx()).into())
             .unwrap();
         m.insert_global_decl(GlobalDecl::new(
             CString::new("some_global").unwrap(),
@@ -2639,9 +2630,7 @@ mod tests {
             "global_decl tls @some_thread_local",
             "",
             "entry:",
-            "    %0: i8 = load_ti Register(GP(RBX))",
-            "    %1: i8 = load_ti Register(GP(RBX))",
-            "    %2: i8 = load_ti Register(GP(RBX))",
+            "    %0: i8 = load_ti Register(3, 1, 0, 0)",
         ]
         .join("\n");
         assert_eq!(m.to_string(), expect);

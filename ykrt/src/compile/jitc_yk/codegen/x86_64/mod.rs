@@ -46,6 +46,7 @@ use std::sync::{Arc, Weak};
 #[cfg(any(debug_assertions, test))]
 use std::{cell::Cell, slice};
 use ykaddr::addr::symbol_to_ptr;
+use yksmp;
 
 mod deopt;
 mod lsregalloc;
@@ -753,7 +754,40 @@ impl<'a> Assemble<'a> {
     }
 
     fn cg_loadtraceinput(&mut self, iidx: jit_ir::InstIdx, inst: &jit_ir::LoadTraceInputInst) {
-        // Find the argument register containing the pointer to the live variables struct.
+        let m = match &self.m.tilocs()[usize::try_from(inst.locidx()).unwrap()] {
+            yksmp::Location::Register(3, ..) => {
+                VarLocation::Register(reg_alloc::Register::GP(Rq::RBX))
+            }
+            yksmp::Location::Register(4, ..) => {
+                VarLocation::Register(reg_alloc::Register::GP(Rq::RSI))
+            }
+            yksmp::Location::Register(5, ..) => {
+                VarLocation::Register(reg_alloc::Register::GP(Rq::RDI))
+            }
+            yksmp::Location::Register(12, ..) => {
+                VarLocation::Register(reg_alloc::Register::GP(Rq::R12))
+            }
+            yksmp::Location::Register(13, ..) => {
+                VarLocation::Register(reg_alloc::Register::GP(Rq::R13))
+            }
+            yksmp::Location::Register(14, ..) => {
+                VarLocation::Register(reg_alloc::Register::GP(Rq::R14))
+            }
+            yksmp::Location::Register(15, ..) => {
+                VarLocation::Register(reg_alloc::Register::GP(Rq::R15))
+            }
+            yksmp::Location::Direct(6, off, size) => VarLocation::Direct {
+                frame_off: *off,
+                size: usize::from(*size),
+            },
+            yksmp::Location::Indirect(6, off, size) => VarLocation::Indirect {
+                frame_off: *off,
+                size: usize::from(*size),
+            },
+            e => {
+                todo!("{:?}", e);
+            }
+        };
         match self.m.type_(inst.tyidx()) {
             Ty::Integer(_) | Ty::Ptr => {
                 let [tgt_reg] = self.ra.get_gp_regs_avoiding(
@@ -765,7 +799,7 @@ impl<'a> Assemble<'a> {
                 let size = self.m.inst_no_proxies(iidx).def_byte_size(self.m);
                 debug_assert!(size <= REG64_SIZE);
 
-                match self.m.tilocs()[usize::try_from(inst.locidx()).unwrap()] {
+                match m {
                     VarLocation::Register(reg_alloc::Register::GP(reg)) => {
                         // FIXME: Map this iidx to `reg` without this `mov`. Requires way to
                         // initialise register allocator with existing values.
@@ -779,12 +813,12 @@ impl<'a> Assemble<'a> {
                         // FIXME If we prime the register allocator with the interpreter frames
                         // stack size and don't create a new frame in the trace epilogue we can
                         // reference values directly using the current RBP value.
-                        dynasm!(self.asm; mov Rq(tgt_reg.code()), QWORD [Rq(Rq::RBP.code())]);
                         match size {
-                            8 => {
-                                dynasm!(self.asm; lea Rq(tgt_reg.code()), [Rq(tgt_reg.code()) + frame_off])
-                            }
-                            _ => todo!(),
+                            8 => dynasm!(self.asm
+                                ; mov Rq(tgt_reg.code()), QWORD [Rq(Rq::RBP.code())]
+                                ; lea Rq(tgt_reg.code()), [Rq(tgt_reg.code()) + frame_off]
+                            ),
+                            _ => panic!(),
                         }
                     }
                     VarLocation::Indirect { frame_off, size } => {
@@ -800,14 +834,13 @@ impl<'a> Assemble<'a> {
                 }
             }
             Ty::Float(_fty) => {
-                // FIXME: Work out which registers are used by stackmaps and avoid them.
                 let [tgt_reg] = self
                     .ra
                     .get_fp_regs(&mut self.asm, iidx, [RegConstraint::Output]);
                 let size = self.m.inst_no_proxies(iidx).def_byte_size(self.m);
                 debug_assert!(size <= REG64_SIZE);
 
-                match self.m.tilocs()[usize::try_from(inst.locidx()).unwrap()] {
+                match m {
                     VarLocation::Register(reg_alloc::Register::FP(reg)) => {
                         // FIXME: Map this iidx to `reg` without this `mov`. Requires way to
                         // initialise register allocator with existing values.
@@ -817,15 +850,18 @@ impl<'a> Assemble<'a> {
                         // The value is a float and thus can't be stored in a normal register.
                         panic!()
                     }
-                    VarLocation::Direct { .. } => {
-                        // The value is a pointer and thus can't be of type float.
-                        panic!()
-                    }
+                    VarLocation::Direct {
+                        size, frame_off, ..
+                    } => match size {
+                        4 => dynasm!(self.asm; movss Rx(tgt_reg.code()), [rbp - frame_off]),
+                        8 => dynasm!(self.asm; movsd Rx(tgt_reg.code()), [rbp - frame_off]),
+                        _ => unreachable!(),
+                    },
                     VarLocation::Indirect { .. } => {
                         // The value is a pointer and thus can't be of type float.
                         panic!()
                     }
-                    _ => panic!(),
+                    x => todo!("{x:?}"),
                 }
             }
             Ty::Func(_) | Ty::Void | Ty::Unimplemented(_) => unreachable!(),
@@ -2042,28 +2078,22 @@ mod tests {
         let sym_addr = symbol_to_ptr("puts").unwrap().addr();
         codegen_and_test(
             "
-              func_decl puts (i8, i16, i32, i64, ptr, i8)
+              func_decl puts (i8, i16, ptr)
 
               entry:
                 %0: i8 = load_ti 0
                 %1: i16 = load_ti 1
-                %2: i32 = load_ti 2
-                %3: i64 = load_ti 3
-                %4: ptr = load_ti 4
-                %5: i8 = load_ti 5
-                call @puts(%0, %1, %2, %3, %4, %5)
+                %2: ptr = load_ti 2
+                call @puts(%0, %1, %2)
             ",
             &format!(
                 "
                 ...
-                ; call @puts(%0, %1, %2, %3, %4, %5)
+                ; call @puts(%0, %1, %2)
                 ...
                 {{{{_}}}} {{{{_}}}}: movzx rdi, byte ptr [rbp-...
                 {{{{_}}}} {{{{_}}}}: movzx rsi, word ptr [rbp-...
-                {{{{_}}}} {{{{_}}}}: mov edx, [rbp-...
-                {{{{_}}}} {{{{_}}}}: mov rcx, [rbp-0x18]
-                {{{{_}}}} {{{{_}}}}: mov r8, [rbp-0x10]
-                {{{{_}}}} {{{{_}}}}: movzx r9, byte ptr [rbp-0x01]
+                {{{{_}}}} {{{{_}}}}: mov rdx, [rbp-...
                 {{{{_}}}} {{{{_}}}}: mov r.64.tgt, 0x{sym_addr:X}
                 {{{{_}}}} {{{{_}}}}: call r.64.tgt
                 ...
@@ -2448,7 +2478,7 @@ mod tests {
             "
                 ...
                 ; %0: float = load_ti ...
-                {{_}} {{_}}: movss fp.128.x, xmm0
+                {{_}} {{_}}: movss fp.128.x, ...
                 ; %1: double = fp_ext %0
                 {{_}} {{_}}: movss [rbp-{{0x04}}], fp.128.x
                 {{_}} {{_}}: cvtss2sd fp.128.x, fp.128.x
