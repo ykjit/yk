@@ -195,8 +195,6 @@ impl TraceBuilder {
                     };
                     self.jit_mod.push_tiloc(vl);
 
-                    // If this take fails, we didn't see a corresponding store and the
-                    // IR is malformed.
                     self.local_map.insert(
                         aot_op.to_inst_id(),
                         jit_ir::Operand::Local(self.jit_mod.last_inst_idx()),
