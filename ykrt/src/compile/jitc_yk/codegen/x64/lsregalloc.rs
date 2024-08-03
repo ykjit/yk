@@ -119,7 +119,7 @@ pub(crate) struct LSRegAlloc<'a> {
     inst_vals_alive_until: Vec<InstIdx>,
     /// Where on the stack is an instruction's value spilled? Set to `usize::MAX` if that offset is
     /// currently unknown.
-    spills: Vec<usize>,
+    spills: Vec<SpillState>,
     /// The abstract stack: shared between general purpose and floating point registers.
     stack: AbstractStack,
 }
@@ -156,7 +156,7 @@ impl<'a> LSRegAlloc<'a> {
             fp_regset: RegSet::with_fp_reserved(),
             fp_reg_states,
             inst_vals_alive_until,
-            spills: vec![usize::MAX; m.insts_len()],
+            spills: vec![SpillState::Empty; m.insts_len()],
             stack: Default::default(),
         }
     }
@@ -458,7 +458,7 @@ impl<'a> LSRegAlloc<'a> {
         match self.gp_reg_states[usize::from(reg.code())] {
             RegState::Reserved | RegState::Empty | RegState::FromConst(_) => (),
             RegState::FromInst(iidx) => {
-                if self.spills[usize::from(iidx)] == usize::MAX {
+                if self.spills[usize::from(iidx)] == SpillState::Empty {
                     let inst = self.m.inst_no_proxies(iidx);
                     let size = inst.def_byte_size(self.m);
                     self.stack.align(size); // FIXME
@@ -471,7 +471,7 @@ impl<'a> LSRegAlloc<'a> {
                         8 => dynasm!(asm; mov QWORD [rbp - off], Rq(reg.code())),
                         _ => unreachable!(),
                     }
-                    self.spills[usize::from(iidx)] = frame_off;
+                    self.spills[usize::from(iidx)] = SpillState::Stack(off);
                 }
             }
         }
@@ -486,41 +486,41 @@ impl<'a> LSRegAlloc<'a> {
         let inst = self.m.inst_no_proxies(iidx);
         let size = inst.def_byte_size(self.m);
 
-        let frame_off = self.spills[usize::from(iidx)];
-        if frame_off == usize::MAX {
-            let reg_i = self
-                .gp_reg_states
-                .iter()
-                .position(|x| {
-                    if let RegState::FromInst(y) = x {
-                        *y == iidx
-                    } else {
-                        false
+        match self.spills[usize::from(iidx)] {
+            SpillState::Empty => {
+                let reg_i = self
+                    .gp_reg_states
+                    .iter()
+                    .position(|x| {
+                        if let RegState::FromInst(y) = x {
+                            *y == iidx
+                        } else {
+                            false
+                        }
+                    })
+                    .unwrap();
+                let cur_reg = GP_REGS[reg_i];
+                if cur_reg != reg {
+                    match size {
+                        1 => dynasm!(asm ; movzx Rq(reg.code()), Rb(cur_reg.code())),
+                        2 => dynasm!(asm ; movzx Rq(reg.code()), Rw(cur_reg.code())),
+                        4 => dynasm!(asm ; mov Rd(reg.code()), Rd(cur_reg.code())),
+                        8 => dynasm!(asm ; mov Rq(reg.code()), Rq(cur_reg.code())),
+                        _ => todo!("{}", size),
                     }
-                })
-                .unwrap();
-            let cur_reg = GP_REGS[reg_i];
-            if cur_reg != reg {
-                match size {
-                    1 => dynasm!(asm ; movzx Rq(reg.code()), Rb(cur_reg.code())),
-                    2 => dynasm!(asm ; movzx Rq(reg.code()), Rw(cur_reg.code())),
-                    4 => dynasm!(asm ; mov Rd(reg.code()), Rd(cur_reg.code())),
-                    8 => dynasm!(asm ; mov Rq(reg.code()), Rq(cur_reg.code())),
-                    _ => todo!("{}", size),
                 }
             }
-            return;
+            SpillState::Stack(off) => {
+                match size {
+                    1 => dynasm!(asm ; movzx Rq(reg.code()), BYTE [rbp - off]),
+                    2 => dynasm!(asm ; movzx Rq(reg.code()), WORD [rbp - off]),
+                    4 => dynasm!(asm ; mov Rd(reg.code()), [rbp - off]),
+                    8 => dynasm!(asm ; mov Rq(reg.code()), [rbp - off]),
+                    _ => todo!("{}", size),
+                }
+                self.gp_regset.set(reg);
+            }
         }
-        debug_assert_ne!(frame_off, usize::MAX);
-        let off = i32::try_from(frame_off).unwrap();
-        match size {
-            1 => dynasm!(asm ; movzx Rq(reg.code()), BYTE [rbp - off]),
-            2 => dynasm!(asm ; movzx Rq(reg.code()), WORD [rbp - off]),
-            4 => dynasm!(asm ; mov Rd(reg.code()), [rbp - off]),
-            8 => dynasm!(asm ; mov Rq(reg.code()), [rbp - off]),
-            _ => todo!("{}", size),
-        }
-        self.gp_regset.set(reg);
     }
 
     /// Load the constant from `cidx` into `reg`.
@@ -648,12 +648,15 @@ impl<'a> LSRegAlloc<'a> {
         }) {
             VarLocation::Register(reg_alloc::Register::FP(FP_REGS[reg_i]))
         } else {
-            let frame_off = self.spills[usize::from(iidx)];
-            debug_assert_ne!(frame_off, usize::MAX);
-            let size = self.m.inst_no_proxies(iidx).def_byte_size(self.m);
-            VarLocation::Stack {
-                frame_off: u32::try_from(frame_off).unwrap(),
-                size,
+            match self.spills[usize::from(iidx)] {
+                SpillState::Empty => panic!(),
+                SpillState::Stack(off) => {
+                    let size = self.m.inst_no_proxies(iidx).def_byte_size(self.m);
+                    VarLocation::Stack {
+                        frame_off: u32::try_from(off).unwrap(),
+                        size,
+                    }
+                }
             }
         }
     }
@@ -856,7 +859,7 @@ impl<'a> LSRegAlloc<'a> {
         match self.fp_reg_states[usize::from(reg.code())] {
             RegState::Reserved | RegState::Empty | RegState::FromConst(_) => (),
             RegState::FromInst(iidx) => {
-                if self.spills[usize::from(iidx)] == usize::MAX {
+                if self.spills[usize::from(iidx)] == SpillState::Empty {
                     let inst = self.m.inst_no_proxies(iidx);
                     let size = inst.def_byte_size(self.m);
                     self.stack.align(size); // FIXME
@@ -867,7 +870,7 @@ impl<'a> LSRegAlloc<'a> {
                         8 => dynasm!(asm ; movsd [rbp - off], Rx(reg.code())),
                         _ => unreachable!(),
                     }
-                    self.spills[usize::from(iidx)] = frame_off;
+                    self.spills[usize::from(iidx)] = SpillState::Stack(off);
                 }
             }
         }
@@ -882,34 +885,34 @@ impl<'a> LSRegAlloc<'a> {
         let inst = self.m.inst_no_proxies(iidx);
         let size = inst.def_byte_size(self.m);
 
-        let frame_off = self.spills[usize::from(iidx)];
-        if frame_off == usize::MAX {
-            let reg_i = self
-                .fp_reg_states
-                .iter()
-                .position(|x| {
-                    if let RegState::FromInst(y) = x {
-                        *y == iidx
-                    } else {
-                        false
-                    }
-                })
-                .unwrap();
-            let cur_reg = FP_REGS[reg_i];
-            if cur_reg != reg {
-                todo!();
-                // dynasm!(asm; mov Rq(reg.code()), Rq(cur_reg.code()));
+        match self.spills[usize::from(iidx)] {
+            SpillState::Empty => {
+                let reg_i = self
+                    .fp_reg_states
+                    .iter()
+                    .position(|x| {
+                        if let RegState::FromInst(y) = x {
+                            *y == iidx
+                        } else {
+                            false
+                        }
+                    })
+                    .unwrap();
+                let cur_reg = FP_REGS[reg_i];
+                if cur_reg != reg {
+                    todo!();
+                    // dynasm!(asm; mov Rq(reg.code()), Rq(cur_reg.code()));
+                }
             }
-            return;
+            SpillState::Stack(off) => {
+                match size {
+                    4 => dynasm!(asm; movss Rx(reg.code()), [rbp - off]),
+                    8 => dynasm!(asm; movsd Rx(reg.code()), [rbp - off]),
+                    _ => todo!("{}", size),
+                };
+                self.fp_regset.set(reg);
+            }
         }
-        debug_assert_ne!(frame_off, usize::MAX);
-        let off = i32::try_from(frame_off).unwrap();
-        match size {
-            4 => dynasm!(asm; movss Rx(reg.code()), [rbp - off]),
-            8 => dynasm!(asm; movsd Rx(reg.code()), [rbp - off]),
-            _ => todo!("{}", size),
-        };
-        self.fp_regset.set(reg);
     }
 
     /// Load the constant from `cidx` into `reg`.
@@ -1159,6 +1162,15 @@ impl From<Rx> for RegSet<Rx> {
     fn from(reg: Rx) -> Self {
         Self(1 << u16::from(reg.code()), PhantomData)
     }
+}
+
+/// The spill state of an SSA variable: is it spilled? If so, where?
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum SpillState {
+    /// This variable has not yet been spilt, or has been spilt and will not be used again.
+    Empty,
+    /// This variable is spilt to the stack with the same semantics as [VarLocation::Stack].
+    Stack(i32),
 }
 
 #[cfg(test)]
