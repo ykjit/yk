@@ -43,7 +43,7 @@ pub(crate) extern "C" fn __yk_deopt(
         for jitval in &info.lives {
             let val = match jitval {
                 VarLocation::Stack { frame_off, size } => {
-                    let p = unsafe { jitrbp.byte_sub(*frame_off) };
+                    let p = unsafe { jitrbp.byte_sub(usize::try_from(*frame_off).unwrap()) };
                     match *size {
                         1 => unsafe { u64::from(std::ptr::read::<u8>(p as *const u8)) },
                         2 => unsafe { u64::from(std::ptr::read::<u16>(p as *const u16)) },
@@ -164,7 +164,7 @@ pub(crate) extern "C" fn __yk_deopt(
             // Read live JIT values from the trace's stack frame.
             let jitval = match info.lives[varidx] {
                 VarLocation::Stack { frame_off, size } => {
-                    let p = unsafe { jitrbp.byte_sub(frame_off) };
+                    let p = unsafe { jitrbp.byte_sub(usize::try_from(frame_off).unwrap()) };
                     match size {
                         1 => unsafe { u64::from(std::ptr::read::<u8>(p as *const u8)) },
                         2 => unsafe { u64::from(std::ptr::read::<u16>(p as *const u16)) },

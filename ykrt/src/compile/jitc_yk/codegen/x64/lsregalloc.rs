@@ -651,7 +651,10 @@ impl<'a> LSRegAlloc<'a> {
             let frame_off = self.spills[usize::from(iidx)];
             debug_assert_ne!(frame_off, usize::MAX);
             let size = self.m.inst_no_proxies(iidx).def_byte_size(self.m);
-            VarLocation::Stack { frame_off, size }
+            VarLocation::Stack {
+                frame_off: u32::try_from(frame_off).unwrap(),
+                size,
+            }
         }
     }
 }
