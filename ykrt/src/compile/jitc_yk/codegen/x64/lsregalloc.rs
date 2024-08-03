@@ -119,7 +119,7 @@ pub(crate) struct LSRegAlloc<'a> {
     inst_vals_alive_until: Vec<InstIdx>,
     /// Where on the stack is an instruction's value spilled? Set to `usize::MAX` if that offset is
     /// currently unknown.
-    spilled_insts: Vec<usize>,
+    spills: Vec<usize>,
     /// The abstract stack: shared between general purpose and floating point registers.
     stack: AbstractStack,
 }
@@ -156,7 +156,7 @@ impl<'a> LSRegAlloc<'a> {
             fp_regset: RegSet::with_fp_reserved(),
             fp_reg_states,
             inst_vals_alive_until,
-            spilled_insts: vec![usize::MAX; m.insts_len()],
+            spills: vec![usize::MAX; m.insts_len()],
             stack: Default::default(),
         }
     }
@@ -458,7 +458,7 @@ impl<'a> LSRegAlloc<'a> {
         match self.gp_reg_states[usize::from(reg.code())] {
             RegState::Reserved | RegState::Empty | RegState::FromConst(_) => (),
             RegState::FromInst(iidx) => {
-                if self.spilled_insts[usize::from(iidx)] == usize::MAX {
+                if self.spills[usize::from(iidx)] == usize::MAX {
                     let inst = self.m.inst_no_proxies(iidx);
                     let size = inst.def_byte_size(self.m);
                     self.stack.align(size); // FIXME
@@ -471,7 +471,7 @@ impl<'a> LSRegAlloc<'a> {
                         8 => dynasm!(asm; mov QWORD [rbp - off], Rq(reg.code())),
                         _ => unreachable!(),
                     }
-                    self.spilled_insts[usize::from(iidx)] = frame_off;
+                    self.spills[usize::from(iidx)] = frame_off;
                 }
             }
         }
@@ -486,7 +486,7 @@ impl<'a> LSRegAlloc<'a> {
         let inst = self.m.inst_no_proxies(iidx);
         let size = inst.def_byte_size(self.m);
 
-        let frame_off = self.spilled_insts[usize::from(iidx)];
+        let frame_off = self.spills[usize::from(iidx)];
         if frame_off == usize::MAX {
             let reg_i = self
                 .gp_reg_states
@@ -648,7 +648,7 @@ impl<'a> LSRegAlloc<'a> {
         }) {
             VarLocation::Register(reg_alloc::Register::FP(FP_REGS[reg_i]))
         } else {
-            let frame_off = self.spilled_insts[usize::from(iidx)];
+            let frame_off = self.spills[usize::from(iidx)];
             debug_assert_ne!(frame_off, usize::MAX);
             let size = self.m.inst_no_proxies(iidx).def_byte_size(self.m);
             VarLocation::Stack { frame_off, size }
@@ -853,7 +853,7 @@ impl<'a> LSRegAlloc<'a> {
         match self.fp_reg_states[usize::from(reg.code())] {
             RegState::Reserved | RegState::Empty | RegState::FromConst(_) => (),
             RegState::FromInst(iidx) => {
-                if self.spilled_insts[usize::from(iidx)] == usize::MAX {
+                if self.spills[usize::from(iidx)] == usize::MAX {
                     let inst = self.m.inst_no_proxies(iidx);
                     let size = inst.def_byte_size(self.m);
                     self.stack.align(size); // FIXME
@@ -864,7 +864,7 @@ impl<'a> LSRegAlloc<'a> {
                         8 => dynasm!(asm ; movsd [rbp - off], Rx(reg.code())),
                         _ => unreachable!(),
                     }
-                    self.spilled_insts[usize::from(iidx)] = frame_off;
+                    self.spills[usize::from(iidx)] = frame_off;
                 }
             }
         }
@@ -879,7 +879,7 @@ impl<'a> LSRegAlloc<'a> {
         let inst = self.m.inst_no_proxies(iidx);
         let size = inst.def_byte_size(self.m);
 
-        let frame_off = self.spilled_insts[usize::from(iidx)];
+        let frame_off = self.spills[usize::from(iidx)];
         if frame_off == usize::MAX {
             let reg_i = self
                 .fp_reg_states
