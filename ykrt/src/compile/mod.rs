@@ -110,7 +110,6 @@ pub(crate) trait CompiledTrace: fmt::Debug + Send + Sync {
     fn hl(&self) -> &Weak<Mutex<HotLocation>>;
 
     /// Disassemble the JITted code into a string, for testing and deubgging.
-    #[cfg(any(debug_assertions, test))]
     fn disassemble(&self) -> Result<String, Box<dyn Error>>;
 }
 

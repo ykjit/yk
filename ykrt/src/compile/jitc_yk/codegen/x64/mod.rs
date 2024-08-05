@@ -17,7 +17,7 @@ use super::{
     CodeGen,
 };
 #[cfg(any(debug_assertions, test))]
-use crate::compile::jitc_yk::gdb::GdbCtx;
+use crate::compile::jitc_yk::gdb::{self, GdbCtx};
 use crate::{
     compile::{
         jitc_yk::{
@@ -38,12 +38,10 @@ use dynasmrt::{
     AssemblyOffset, DynamicLabel, DynasmApi, DynasmError, DynasmLabelApi, ExecutableBuffer,
     Register,
 };
-#[cfg(any(debug_assertions, test))]
 use indexmap::IndexMap;
 use parking_lot::Mutex;
 use std::error::Error;
 use std::sync::{Arc, Weak};
-#[cfg(any(debug_assertions, test))]
 use std::{cell::Cell, slice};
 use ykaddr::addr::symbol_to_ptr;
 use yksmp;
@@ -148,7 +146,6 @@ struct Assemble<'a> {
     /// Comments used by the trace printer for debugging and testing only.
     ///
     /// Each assembly offset can have zero or more comment lines.
-    #[cfg(any(debug_assertions, test))]
     comments: Cell<IndexMap<usize, Vec<String>>>,
 }
 
@@ -183,7 +180,6 @@ impl<'a> Assemble<'a> {
             tloop_gp_reg_states: None,
             tloop_fp_reg_states: None,
             deoptinfo: Vec::new(),
-            #[cfg(any(debug_assertions, test))]
             comments: Cell::new(IndexMap::new()),
         }))
     }
@@ -205,7 +201,6 @@ impl<'a> Assemble<'a> {
         match self.asm.labels().resolve_static(&label) {
             Ok(_) => {
                 // Found the label, emit a jump to it.
-                #[cfg(any(debug_assertions, test))]
                 self.comment(self.asm.offset(), "tloop_backedge:".to_owned());
                 self.ra
                     .restore_gp_reg_states_hack(&mut self.asm, self.tloop_gp_reg_states.unwrap());
@@ -218,7 +213,6 @@ impl<'a> Assemble<'a> {
                 // traces that don't loop.
                 #[cfg(test)]
                 {
-                    #[cfg(any(debug_assertions, test))]
                     self.comment(self.asm.offset(), "Unterminated trace".to_owned());
                     dynasm!(self.asm; ud2);
                 }
@@ -248,7 +242,6 @@ impl<'a> Assemble<'a> {
                 .collect::<Vec<_>>();
             let deopt_label = self.asm.new_dynamic_label();
             for (deoptid, fail_label) in fail_labels.into_iter().enumerate() {
-                #[cfg(any(debug_assertions, test))]
                 self.comment(self.asm.offset(), format!("Deopt ID for guard {deoptid}"));
                 // FIXME: Why are `deoptid`s 64 bit? We're not going to have that many guards!
                 let deoptid = i32::try_from(deoptid).unwrap();
@@ -261,7 +254,6 @@ impl<'a> Assemble<'a> {
                 );
             }
 
-            #[cfg(any(debug_assertions, test))]
             self.comment(self.asm.offset(), "Call __yk_deopt".to_string());
             // Clippy points out that `__yk_depot as i64` isn't portable, but since this entire module
             // is x86 only, we don't need to worry about portability.
@@ -304,25 +296,19 @@ impl<'a> Assemble<'a> {
         let buf = self.asm.finalize().unwrap();
 
         #[cfg(any(debug_assertions, test))]
-        let (comments, gdb_ctx) = {
-            use super::super::gdb;
-            let comments = self.comments.take();
-            let gdb_ctx = gdb::register_jitted_code(
-                self.m.ctr_id(),
-                buf.ptr(AssemblyOffset(0)),
-                buf.size(),
-                &comments,
-            )?;
-            (comments, gdb_ctx)
-        };
+        let gdb_ctx = gdb::register_jitted_code(
+            self.m.ctr_id(),
+            buf.ptr(AssemblyOffset(0)),
+            buf.size(),
+            self.comments.get_mut(),
+        )?;
 
         Ok(Arc::new(X64CompiledTrace {
             mt,
             buf,
             deoptinfo: self.deoptinfo,
             hl: Arc::downgrade(&hl),
-            #[cfg(any(debug_assertions, test))]
-            comments,
+            comments: self.comments.take(),
             #[cfg(any(debug_assertions, test))]
             gdb_ctx,
         }))
@@ -334,7 +320,6 @@ impl<'a> Assemble<'a> {
         iidx: jit_ir::InstIdx,
         inst: &jit_ir::Inst,
     ) -> Result<(), CompilationError> {
-        #[cfg(any(debug_assertions, test))]
         self.comment(self.asm.offset(), inst.display(iidx, self.m).to_string());
 
         match inst {
@@ -369,7 +354,6 @@ impl<'a> Assemble<'a> {
     }
 
     /// Add a comment to the trace, for use when disassembling its native code.
-    #[cfg(any(debug_assertions, test))]
     fn comment(&mut self, off: AssemblyOffset, line: String) {
         self.comments.get_mut().entry(off.0).or_default().push(line);
     }
@@ -384,7 +368,6 @@ impl<'a> Assemble<'a> {
     ///
     /// Returns the offset at which to patch up the stack allocation later.
     fn emit_prologue(&mut self) -> AssemblyOffset {
-        #[cfg(any(debug_assertions, test))]
         self.comment(self.asm.offset(), "prologue".to_owned());
 
         // Start a frame for the JITted code.
@@ -1528,7 +1511,6 @@ pub(super) struct X64CompiledTrace {
     /// disassembling the trace.
     ///
     /// Used for testing and debugging.
-    #[cfg(any(debug_assertions, test))]
     comments: IndexMap<usize, Vec<String>>,
     #[cfg(any(debug_assertions, test))]
     gdb_ctx: GdbCtx,
@@ -1561,20 +1543,17 @@ impl CompiledTrace for X64CompiledTrace {
         self
     }
 
-    #[cfg(any(debug_assertions, test))]
     fn disassemble(&self) -> Result<String, Box<dyn Error>> {
         AsmPrinter::new(&self.buf, &self.comments).to_string()
     }
 }
 
 /// Disassembles emitted code for testing and debugging purposes.
-#[cfg(any(debug_assertions, test))]
 struct AsmPrinter<'a> {
     buf: &'a ExecutableBuffer,
     comments: &'a IndexMap<usize, Vec<String>>,
 }
 
-#[cfg(any(debug_assertions, test))]
 impl<'a> AsmPrinter<'a> {
     fn new(buf: &'a ExecutableBuffer, comments: &'a IndexMap<usize, Vec<String>>) -> Self {
         Self { buf, comments }
