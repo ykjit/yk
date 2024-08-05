@@ -124,7 +124,6 @@ impl Compiler for JITCYk {
 
         let ct = self.codegen.codegen(jit_mod, mt, hl)?;
 
-        #[cfg(any(debug_assertions, test))]
         if should_log_ir(IRPhase::Asm) {
             log_ir(&format!(
                 "--- Begin jit-asm ---\n{}\n--- End jit-asm ---\n",
