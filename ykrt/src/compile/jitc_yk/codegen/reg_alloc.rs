@@ -12,7 +12,7 @@ pub(crate) enum VarLocation {
     /// The SSA variable is on the stack.
     Stack {
         /// The offset from the base of the trace's function frame.
-        frame_off: usize,
+        frame_off: u32,
         /// Size in bytes of the allocation.
         size: usize,
     },
