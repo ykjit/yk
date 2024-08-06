@@ -13,7 +13,7 @@ use std::{
         atomic::{AtomicU16, AtomicU32, AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
-    thread,
+    thread::{self, JoinHandle},
 };
 
 use parking_lot::{Condvar, Mutex, MutexGuard};
@@ -61,8 +61,7 @@ thread_local! {
     static THREAD_MTTHREAD: MTThread = MTThread::new();
 }
 
-/// A meta-tracer. Note that this is conceptually a "front-end" to the actual meta-tracer akin to
-/// an `Rc`: this struct can be freely `clone()`d without duplicating the underlying meta-tracer.
+/// A meta-tracer. This is always passed around stored in an [Arc].
 pub struct MT {
     hot_threshold: AtomicHotThreshold,
     sidetrace_threshold: AtomicHotThreshold,
@@ -71,9 +70,11 @@ pub struct MT {
     job_queue: Arc<(Condvar, Mutex<VecDeque<Box<dyn FnOnce() + Send>>>)>,
     /// The hard cap on the number of worker threads.
     max_worker_threads: AtomicUsize,
-    /// How many worker threads are currently running. Note that this may temporarily be `>`
-    /// [`max_worker_threads`].
-    active_worker_threads: AtomicUsize,
+    /// [JoinHandle]s to each worker thread so that when an [MT] value is dropped, we can try
+    /// joining each worker thread and see if it caused an error or not. If it did,  we can
+    /// percolate the error upwards, making it more likely that the main thread exits with an
+    /// error. In other words, this [Vec] makes it harder for errors to be missed.
+    active_worker_threads: Mutex<Vec<JoinHandle<()>>>,
     /// The [Tracer] that should be used for creating future traces. Note that this might not be
     /// the same as the tracer(s) used to create past traces.
     tracer: Mutex<Arc<dyn Tracer>>,
@@ -113,7 +114,7 @@ impl MT {
             ),
             job_queue: Arc::new((Condvar::new(), Mutex::new(VecDeque::new()))),
             max_worker_threads: AtomicUsize::new(cmp::max(1, num_cpus::get() - 1)),
-            active_worker_threads: AtomicUsize::new(0),
+            active_worker_threads: Mutex::new(Vec::new()),
             tracer: Mutex::new(default_tracer()?),
             compiler: Mutex::new(default_compiler()?),
             compiled_trace_id: AtomicU64::new(0),
@@ -180,33 +181,20 @@ impl MT {
 
     /// Queue `job` to be run on a worker thread.
     fn queue_job(self: &Arc<Self>, job: Box<dyn FnOnce() + Send>) {
-        // We have a very simple model of worker threads. Each time a job is queued, we spin up a
-        // new worker thread iff we aren't already running the maximum number of worker threads.
-        // Once started, a worker thread never dies, waiting endlessly for work.
-
+        // Push the job onto the queue.
         let (cv, mtx) = &*self.job_queue;
         mtx.lock().push_back(job);
         cv.notify_one();
 
-        let max_jobs = self.max_worker_threads.load(Ordering::Relaxed);
-        if self.active_worker_threads.load(Ordering::Relaxed) < max_jobs {
-            // At the point of the `load` on the previous line, we weren't running the maximum
-            // number of worker threads. There is now a possible race condition where multiple
-            // threads calling `queue_job` could try creating multiple worker threads and push us
-            // over the maximum worker thread limit.
-            if self.active_worker_threads.fetch_add(1, Ordering::Relaxed) > max_jobs {
-                // Another thread(s) is also spinning up another worker thread and they won the
-                // race.
-                self.active_worker_threads.fetch_sub(1, Ordering::Relaxed);
-                return;
-            }
+        // Do we have enough active worker threads? If not, spin another up.
 
-            self.stats.timing_state(TimingState::None);
+        let mut lk = self.active_worker_threads.lock();
+        if lk.len() < self.max_worker_threads.load(Ordering::Relaxed) {
             // We only keep a weak reference alive to `self`, as otherwise an active compiler job
             // causes `self` to never be dropped.
             let mt = Arc::downgrade(self);
             let jq = Arc::clone(&self.job_queue);
-            thread::spawn(move || {
+            let hdl = thread::spawn(move || {
                 let (cv, mtx) = &*jq;
                 let mut lock = mtx.lock();
                 // If the strong count for `mt` is 0 then it has been dropped and there is no
@@ -220,6 +208,7 @@ impl MT {
                     }
                 }
             });
+            lk.push(hdl);
         }
     }
 
@@ -653,6 +642,14 @@ impl MT {
 impl Drop for MT {
     fn drop(&mut self) {
         self.stats.timing_state(TimingState::None);
+        let mut lk = self.active_worker_threads.lock();
+        for hdl in lk.drain(..) {
+            if hdl.is_finished() {
+                if let Err(e) = hdl.join() {
+                    panic!("{e:?}");
+                }
+            }
+        }
     }
 }
 
