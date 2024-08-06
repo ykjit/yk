@@ -4,10 +4,7 @@ use parking_lot::Mutex;
 use std::{
     error::Error,
     fmt,
-    sync::{
-        atomic::{AtomicU32, Ordering},
-        Arc, Weak,
-    },
+    sync::{atomic::AtomicU32, Arc, Weak},
 };
 
 #[cfg(jitc_yk)]
@@ -70,6 +67,7 @@ pub(crate) fn default_compiler() -> Result<Arc<dyn Compiler>, Box<dyn Error>> {
 #[derive(Debug)]
 pub(crate) struct Guard {
     /// How often has this guard failed?
+    #[allow(dead_code)]
     failed: AtomicU32,
     ct: Mutex<Option<Arc<dyn CompiledTrace>>>,
 }
@@ -77,8 +75,10 @@ pub(crate) struct Guard {
 impl Guard {
     /// This guard has failed (i.e. evaluated to true/false when false/true was expected). Returns
     /// `true` if this guard has failed often enough to be worth side-tracing.
-    pub fn inc_failed(&self, mt: &Arc<MT>) -> bool {
-        self.failed.fetch_add(1, Ordering::Relaxed) + 1 >= mt.sidetrace_threshold()
+    pub fn inc_failed(&self, _mt: &Arc<MT>) -> bool {
+        // FIXME: for now we forcibly disable side-tracing, as it's broken.
+        //self.failed.fetch_add(1, Ordering::Relaxed) + 1 >= mt.sidetrace_threshold()
+        false
     }
 
     /// Stores a compiled side-trace inside this guard.
