@@ -212,6 +212,94 @@ impl MT {
         }
     }
 
+    /// Add a compilation job for to the global work queue:
+    ///   * `utrace` is the trace to be compiled.
+    ///   * `hl_arc` is the [HotLocation] this compilation job is related to.
+    ///   * `sidetrace`, if not `None`, specifies that this is a side-trace compilation job.
+    ///     The `Arc<dyn CompiledTrace>` is the parent [CompiledTrace] for the side-trace. Because
+    ///     side-traces can nest, this may or may not be the same [CompiledTrace] as contained
+    ///     in the `hl_arc`.
+    fn queue_compile_job(
+        self: &Arc<Self>,
+        trace_iter: (Box<dyn AOTTraceIterator>, Box<[usize]>),
+        hl_arc: Arc<Mutex<HotLocation>>,
+        sidetrace: Option<(GuardIdx, Arc<dyn CompiledTrace>)>,
+    ) {
+        self.stats.trace_recorded_ok();
+        let mt = Arc::clone(self);
+        let do_compile = move || {
+            let compiler = {
+                let lk = mt.compiler.lock();
+                Arc::clone(&*lk)
+            };
+            mt.stats.timing_state(TimingState::Compiling);
+            let (sti, guardid) = if let Some((guardid, ctr)) = &sidetrace {
+                (Some(ctr.sidetraceinfo(*guardid)), Some(*guardid))
+            } else {
+                (None, None)
+            };
+            match compiler.compile(
+                Arc::clone(&mt),
+                trace_iter.0,
+                sti,
+                Arc::clone(&hl_arc),
+                trace_iter.1,
+            ) {
+                Ok(ct) => {
+                    if let Some((_, parent_ctr)) = sidetrace {
+                        parent_ctr.guard(guardid.unwrap()).set_ctr(ct);
+                    } else {
+                        let mut hl = hl_arc.lock();
+                        debug_assert_matches!(hl.kind, HotLocationKind::Compiling);
+                        hl.kind = HotLocationKind::Compiled(ct);
+                    }
+                    mt.stats.trace_compiled_ok();
+                }
+                Err(e) => {
+                    mt.stats.trace_compiled_err();
+                    hl_arc.lock().tracecompilation_error(&mt);
+                    match e {
+                        CompilationError::General(e) | CompilationError::LimitExceeded(e) => {
+                            mt.log.log(
+                                Verbosity::Warning,
+                                &format!("trace-compilation-aborted: {e}"),
+                            );
+                        }
+                        CompilationError::InternalError(e) => {
+                            #[cfg(feature = "ykd")]
+                            panic!("{e}");
+                            #[cfg(not(feature = "ykd"))]
+                            {
+                                mt.log.log(
+                                    Verbosity::Error,
+                                    &format!("trace-compilation-aborted: {e}"),
+                                );
+                            }
+                        }
+                        CompilationError::ResourceExhausted(e) => {
+                            mt.log
+                                .log(Verbosity::Error, &format!("trace-compilation-aborted: {e}"));
+                        }
+                    }
+                }
+            }
+
+            mt.stats.timing_state(TimingState::None);
+        };
+
+        #[cfg(feature = "yk_testing")]
+        if let Ok(true) = env::var("YKD_SERIALISE_COMPILATION").map(|x| x.as_str() == "1") {
+            // To ensure that we properly test that compilation can occur in another thread, we
+            // spin up a new thread for each compilation. This is only acceptable because a)
+            // `SERIALISE_COMPILATION` is an internal yk testing feature b) when we use it we're
+            // checking correctness, not performance.
+            thread::spawn(do_compile).join().unwrap();
+            return;
+        }
+
+        self.queue_job(Box::new(do_compile));
+    }
+
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
     pub fn control_point(self: &Arc<Self>, loc: &Location, frameaddr: *mut c_void, smid: u64) {
         match self.transition_control_point(loc) {
@@ -548,94 +636,6 @@ impl MT {
                 }
             }
         }
-    }
-
-    /// Add a compilation job for to the global work queue:
-    ///   * `utrace` is the trace to be compiled.
-    ///   * `hl_arc` is the [HotLocation] this compilation job is related to.
-    ///   * `sidetrace`, if not `None`, specifies that this is a side-trace compilation job.
-    ///     The `Arc<dyn CompiledTrace>` is the parent [CompiledTrace] for the side-trace. Because
-    ///     side-traces can nest, this may or may not be the same [CompiledTrace] as contained
-    ///     in the `hl_arc`.
-    fn queue_compile_job(
-        self: &Arc<Self>,
-        trace_iter: (Box<dyn AOTTraceIterator>, Box<[usize]>),
-        hl_arc: Arc<Mutex<HotLocation>>,
-        sidetrace: Option<(GuardIdx, Arc<dyn CompiledTrace>)>,
-    ) {
-        self.stats.trace_recorded_ok();
-        let mt = Arc::clone(self);
-        let do_compile = move || {
-            let compiler = {
-                let lk = mt.compiler.lock();
-                Arc::clone(&*lk)
-            };
-            mt.stats.timing_state(TimingState::Compiling);
-            let (sti, guardid) = if let Some((guardid, ctr)) = &sidetrace {
-                (Some(ctr.sidetraceinfo(*guardid)), Some(*guardid))
-            } else {
-                (None, None)
-            };
-            match compiler.compile(
-                Arc::clone(&mt),
-                trace_iter.0,
-                sti,
-                Arc::clone(&hl_arc),
-                trace_iter.1,
-            ) {
-                Ok(ct) => {
-                    if let Some((_, parent_ctr)) = sidetrace {
-                        parent_ctr.guard(guardid.unwrap()).set_ctr(ct);
-                    } else {
-                        let mut hl = hl_arc.lock();
-                        debug_assert_matches!(hl.kind, HotLocationKind::Compiling);
-                        hl.kind = HotLocationKind::Compiled(ct);
-                    }
-                    mt.stats.trace_compiled_ok();
-                }
-                Err(e) => {
-                    mt.stats.trace_compiled_err();
-                    hl_arc.lock().tracecompilation_error(&mt);
-                    match e {
-                        CompilationError::General(e) | CompilationError::LimitExceeded(e) => {
-                            mt.log.log(
-                                Verbosity::Warning,
-                                &format!("trace-compilation-aborted: {e}"),
-                            );
-                        }
-                        CompilationError::InternalError(e) => {
-                            #[cfg(feature = "ykd")]
-                            panic!("{e}");
-                            #[cfg(not(feature = "ykd"))]
-                            {
-                                mt.log.log(
-                                    Verbosity::Error,
-                                    &format!("trace-compilation-aborted: {e}"),
-                                );
-                            }
-                        }
-                        CompilationError::ResourceExhausted(e) => {
-                            mt.log
-                                .log(Verbosity::Error, &format!("trace-compilation-aborted: {e}"));
-                        }
-                    }
-                }
-            }
-
-            mt.stats.timing_state(TimingState::None);
-        };
-
-        #[cfg(feature = "yk_testing")]
-        if let Ok(true) = env::var("YKD_SERIALISE_COMPILATION").map(|x| x.as_str() == "1") {
-            // To ensure that we properly test that compilation can occur in another thread, we
-            // spin up a new thread for each compilation. This is only acceptable because a)
-            // `SERIALISE_COMPILATION` is an internal yk testing feature b) when we use it we're
-            // checking correctness, not performance.
-            thread::spawn(do_compile).join().unwrap();
-            return;
-        }
-
-        self.queue_job(Box::new(do_compile));
     }
 }
 
