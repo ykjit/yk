@@ -40,6 +40,6 @@ int main(int argc, char **argv) {
   NOOPT_VAL(i);
   yk_location_drop(loc1);
   yk_location_drop(loc2);
-  yk_mt_drop(mt);
+  yk_mt_shutdown(mt);
   return (EXIT_SUCCESS);
 }

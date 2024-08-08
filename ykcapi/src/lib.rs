@@ -40,7 +40,7 @@ pub unsafe extern "C" fn yk_mt_new(err_msg: *mut *const c_char) -> *const MT {
 /// Shutdown this MT instance. Will panic if an error is detected when doing so.
 #[no_mangle]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
-pub extern "C" fn yk_mt_drop(mt: *const MT) {
+pub extern "C" fn yk_mt_shutdown(mt: *const MT) {
     unsafe { Arc::from_raw(mt) }.shutdown();
 }
 

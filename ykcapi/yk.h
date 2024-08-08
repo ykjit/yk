@@ -41,7 +41,7 @@ YkMT *yk_mt_new(char **err_msg);
 // Shutdown this MT instance. Will panic if an error is detected when doing so.
 // This function can be called more than once, but only the first call will
 // have observable behaviour.
-void yk_mt_drop(YkMT *);
+void yk_mt_shutdown(YkMT *);
 
 // Notify yk that an iteration of an interpreter loop is about to start. The
 // argument passed uniquely identifies the current location in the user's

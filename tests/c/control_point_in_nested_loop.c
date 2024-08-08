@@ -19,6 +19,6 @@ int main(int argc, char **argv) {
       yk_mt_control_point(mt, NULL); // In a nested loop!
     }
   }
-  yk_mt_drop(mt);
+  yk_mt_shutdown(mt);
   return (EXIT_SUCCESS);
 }

@@ -55,7 +55,7 @@ int main(int argc, char **argv) {
   NOOPT_VAL(res);
   printf("%d", res[0]);
   yk_location_drop(loc);
-  yk_mt_drop(mt);
+  yk_mt_shutdown(mt);
 
   return (EXIT_SUCCESS);
 }

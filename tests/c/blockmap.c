@@ -25,6 +25,6 @@ uint32_t unused() {
     yk_mt_control_point(mt, &loc);
   }
   yk_location_drop(loc);
-  yk_mt_drop(mt);
+  yk_mt_shutdown(mt);
   return 0;
 }

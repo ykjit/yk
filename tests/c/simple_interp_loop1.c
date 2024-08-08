@@ -104,7 +104,7 @@ int main(int argc, char **argv) {
 
   free(locs);
   yk_location_drop(loop_loc);
-  yk_mt_drop(mt);
+  yk_mt_shutdown(mt);
 
   return (EXIT_SUCCESS);
 }
