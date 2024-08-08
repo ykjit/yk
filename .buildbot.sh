@@ -11,17 +11,16 @@ TRACERS="hwt"
 #  - `yk-config` must be in PATH.
 #  - YK_BUILD_TYPE must be set.
 test_yklua() {
-    true
-    # if [ ! -e "yklua" ]; then
-    #     git clone https://github.com/ykjit/yklua
-    # fi
-    # cd yklua
-    # make clean
-    # make -j $(nproc)
-    # cd tests
-    # YKD_SERIALISE_COMPILATION=1 ../src/lua -e"_U=true" all.lua
-    # ../src/lua -e"_U=true" all.lua
-    # cd ../..
+    if [ ! -e "yklua" ]; then
+        git clone https://github.com/ykjit/yklua
+    fi
+    cd yklua
+    make clean
+    make -j $(nproc)
+    cd tests
+    YKD_SERIALISE_COMPILATION=1 ../src/lua -e"_U=true" all.lua
+    ../src/lua -e"_U=true" all.lua
+    cd ../..
 }
 
 # Check that the ykllvm commit in the submodule is from the main branch.
