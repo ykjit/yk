@@ -75,6 +75,6 @@ int main() {
     yk_location_drop(locs[i]);
   }
 
-  yk_mt_drop(mt);
+  yk_mt_shutdown(mt);
   return (EXIT_SUCCESS);
 }

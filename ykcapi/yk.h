@@ -38,10 +38,10 @@ typedef struct YkMT YkMT;
 //       2. `yk_mt_new` will return `NULL`.
 YkMT *yk_mt_new(char **err_msg);
 
-// Drop a `YkMT` instance. This must be called at most once per `YkMT`
-// instance: calling this function more than once on a `YkMT` instance leads to
-// undefined behaviour.
-void yk_mt_drop(YkMT *);
+// Shutdown this MT instance. Will panic if an error is detected when doing so.
+// This function can be called more than once, but only the first call will
+// have observable behaviour.
+void yk_mt_shutdown(YkMT *);
 
 // Notify yk that an iteration of an interpreter loop is about to start. The
 // argument passed uniquely identifies the current location in the user's
