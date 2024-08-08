@@ -10,7 +10,7 @@ use std::{
     ffi::c_void,
     marker::PhantomData,
     sync::{
-        atomic::{AtomicU16, AtomicU32, AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     thread::{self, JoinHandle},
@@ -62,7 +62,17 @@ thread_local! {
 }
 
 /// A meta-tracer. This is always passed around stored in an [Arc].
+///
+/// When you are finished with this meta-tracer, it is best to explicitly call [MT::shutdown] to
+/// perform shutdown tasks (though the correctness of the system is not impacted if you do not call
+/// this function).
 pub struct MT {
+    /// Have we been requested to shutdown this meta-tracer? In a sense this is merely advisory:
+    /// since [MT] is contained within an [Arc], if we're able to read this value, then the
+    /// meta-tracer is still working and it may go on doing so for an arbitrary period of time.
+    /// However, it means that some "shutdown" activities, such as printing statistics and checking
+    /// for failed compilation threads, have already occurred, and should not be repeated.
+    shutdown: AtomicBool,
     hot_threshold: AtomicHotThreshold,
     sidetrace_threshold: AtomicHotThreshold,
     trace_failure_threshold: AtomicTraceCompilationErrorThreshold,
@@ -107,6 +117,7 @@ impl MT {
             Err(_) => DEFAULT_HOT_THRESHOLD,
         };
         Ok(Arc::new(Self {
+            shutdown: AtomicBool::new(false),
             hot_threshold: AtomicHotThreshold::new(hot_threshold),
             sidetrace_threshold: AtomicHotThreshold::new(DEFAULT_SIDETRACE_THRESHOLD),
             trace_failure_threshold: AtomicTraceCompilationErrorThreshold::new(
@@ -121,6 +132,33 @@ impl MT {
             log: Log::new()?,
             stats: Stats::new(),
         }))
+    }
+
+    /// Put this meta-tracer into shutdown mode, panicking if any problems are discovered. This
+    /// will perform actions such as printing summary statistics and checking whether any worker
+    /// threads have caused an error. The best place to do this is likely to be on the main thread,
+    /// though this is not mandatory.
+    ///
+    /// Note: this method does not stop all of the meta-tracer's activities. For example, -- but
+    /// not only! -- other threads will continue compiling and executing traces.
+    ///
+    /// Only the first call of this method performs meaningful actions: any subsequent calls will
+    /// note the previous shutdown and immediately return.
+    pub fn shutdown(&self) {
+        if !self.shutdown.swap(true, Ordering::Relaxed) {
+            self.stats.timing_state(TimingState::None);
+            self.stats.output();
+            let mut lk = self.active_worker_threads.lock();
+            for hdl in lk.drain(..) {
+                if hdl.is_finished() {
+                    if let Err(e) = hdl.join() {
+                        // Despite the name `resume_unwind` will abort if the unwind strategy in
+                        // Rust is set to `abort`.
+                        std::panic::resume_unwind(e);
+                    }
+                }
+            }
+        }
     }
 
     /// Return this `MT` instance's current hot threshold. Notice that this value can be changed by
@@ -633,20 +671,6 @@ impl MT {
                         };
                     }),
                     Err(e) => todo!("{e:?}"),
-                }
-            }
-        }
-    }
-}
-
-impl Drop for MT {
-    fn drop(&mut self) {
-        self.stats.timing_state(TimingState::None);
-        let mut lk = self.active_worker_threads.lock();
-        for hdl in lk.drain(..) {
-            if hdl.is_finished() {
-                if let Err(e) = hdl.join() {
-                    panic!("{e:?}");
                 }
             }
         }

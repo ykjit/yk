@@ -157,6 +157,11 @@ impl Stats {
                 inner.durations[prev_state as usize].saturating_add(d);
         });
     }
+
+    /// Output these statistics to the appropriate output path.
+    pub(crate) fn output(&self) {
+        self.update_with(|inner| inner.output());
+    }
 }
 
 impl StatsInner {
@@ -169,6 +174,16 @@ impl StatsInner {
             traces_compiled_err: 0,
             trace_executions: 0,
             durations: [Duration::new(0, 0); TimingState::COUNT],
+        }
+    }
+
+    /// Output these statistics to the appropriate output path.
+    fn output(&self) {
+        let json = self.to_json();
+        if self.output_path == "-" {
+            eprintln!("{json}");
+        } else {
+            fs::write(&self.output_path, json).ok();
         }
     }
 
@@ -219,17 +234,6 @@ impl StatsInner {
                 .collect::<Vec<_>>()
                 .join(",\n    ")
         )
-    }
-}
-
-impl Drop for StatsInner {
-    fn drop(&mut self) {
-        let json = self.to_json();
-        if self.output_path == "-" {
-            eprintln!("{json}");
-        } else {
-            fs::write(&self.output_path, json).ok();
-        }
     }
 }
 
