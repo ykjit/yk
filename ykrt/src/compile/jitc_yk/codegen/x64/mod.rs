@@ -759,14 +759,20 @@ impl<'a> Assemble<'a> {
             yksmp::Location::Register(15, ..) => {
                 VarLocation::Register(reg_alloc::Register::GP(Rq::R15))
             }
-            yksmp::Location::Direct(6, off, size) => VarLocation::Direct {
-                frame_off: *off,
-                size: usize::from(*size),
-            },
-            yksmp::Location::Indirect(6, off, size) => VarLocation::Indirect {
-                frame_off: *off,
-                size: usize::from(*size),
-            },
+            yksmp::Location::Direct(6, off, size) => {
+                debug_assert!(*off <= 0);
+                VarLocation::Direct {
+                    frame_off: *off,
+                    size: usize::from(*size),
+                }
+            }
+            yksmp::Location::Indirect(6, off, size) => {
+                debug_assert!(*off <= 0);
+                VarLocation::Indirect {
+                    frame_off: *off,
+                    size: usize::from(*size),
+                }
+            }
             e => {
                 todo!("{:?}", e);
             }
